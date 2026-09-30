@@ -120,6 +120,9 @@ read_current_pr
 final_diff=$(python3 "$here/review-diff.py" --repo "$repo" --base "$pr_base_sha" --head "$head") ||
   refuse "complete diff unavailable at approval"
 [ "$current_diff" = "$final_diff" ] || refuse "complete diff moved during approval"
+# The compare/fetch above can block while the PR is retargeted. Revalidate the
+# producer identity after all network-dependent diff work, before any POST.
+read_current_pr
 if [ "$check_only" -eq 1 ]; then echo "WOULD APPROVE #$pr head $head policy $review_policy"; exit 0; fi
 if [ -n "$own_approval" ]; then
   echo "SKIP #$pr: $me already APPROVED head $head (review $own_approval)"

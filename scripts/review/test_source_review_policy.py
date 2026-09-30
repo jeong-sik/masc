@@ -1,6 +1,7 @@
 """Exercise admission with a fake GitHub transport, including mutation races."""
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -15,6 +16,11 @@ FAKE = r'''#!/usr/bin/env python3
 import json, os, pathlib, re, subprocess, sys
 state = json.loads(pathlib.Path(os.environ['REVIEW_FIXTURE']).read_text())
 args = sys.argv[1:]
+if args[:2] == ['auth', 'git-credential']:
+    with pathlib.Path(os.environ['REVIEW_CALLS']).open('a') as f: f.write('CREDENTIAL\n')
+    sys.stdin.read()
+    print('username=fixture\npassword=offline-unused')
+    sys.exit(0)
 endpoint = next((a for a in args if a.startswith('repos/') or a == 'user'), '')
 log = pathlib.Path(os.environ['REVIEW_CALLS'])
 with log.open('a') as f: f.write((args[args.index('-X')+1]+' ' if '-X' in args else '') + endpoint + '\n')
@@ -46,8 +52,12 @@ elif endpoint.endswith('/stacks/10'):
         data['pull_requests'].append({'number':n,'state':item.get('pr_state','open'),'head':{'sha':item['head']}})
 elif '/compare/' in endpoint:
     base, compared_head = endpoint.rsplit('/',1)[1].split('...')
-    merge_base = subprocess.check_output(['git','-C',os.environ['GUARD_REPO_ROOT'],'merge-base',base,compared_head],text=True).strip()
+    merge_base = subprocess.check_output(['git','--no-replace-objects','-C',os.environ.get('FAKE_COMPARE_REPO', os.environ['GUARD_REPO_ROOT']),'merge-base',base,compared_head],text=True).strip()
     data = {'merge_base_commit':{'sha':None if state.get('bad_compare') else merge_base}}
+    compares = sum('/compare/' in row for row in log.read_text().splitlines())
+    if compares == state.get('compare_move_after'):
+        fixture['base_sha'] = fixture['compare_moved_base']
+        pathlib.Path(os.environ['REVIEW_FIXTURE']).write_text(json.dumps(fixture))
 elif endpoint == 'user': data = {'login':'reviewer'}
 elif '/actions/runs?' in endpoint:
     reads = sum('/actions/runs?' in row for row in log.read_text().splitlines())
@@ -251,6 +261,69 @@ class SourceReviewPolicy(unittest.TestCase):
         self.git('config','diff.orderFile', str(self.root / 'order'))
         (self.root / 'order').write_text('feature-b.txt\nfeature-a.txt\n')
         self.assertEqual(self.identity(self.base), self.digest)
+
+    def test_replacement_refs_cannot_change_named_head_or_base_identity(self):
+        self.git('replace', HEAD, self.narrowed_base)
+        self.assertEqual(self.identity(self.base), self.digest)
+        self.git('replace', '-d', HEAD)
+        self.git('replace', self.base, OTHER)
+        self.assertEqual(self.identity(self.base), self.digest)
+
+    def test_producer_retarget_during_final_compare_refuses_before_post(self):
+        body = self.root / 'body'
+        body.write_text(f'verdict: PASS head: {HEAD} by: independent\nReviewed source.')
+        self.calls.write_text('')
+        self.state.update(compare_move_after=3, compare_moved_base=OTHER)
+        result = self.invoke('approve-guard.sh', '--body', str(body))
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn('identity moved during review', result.stderr)
+        self.assertEqual(sum('/compare/' in line for line in self.calls.read_text().splitlines()), 3)
+        self.assertNotIn('POST ', self.calls.read_text())
+
+    def test_missing_objects_fetch_uses_gh_credentials_without_prompting(self):
+        # Use a real empty repository and real object fetches. Only the remote
+        # transport is redirected to our local fixture; no network is contacted.
+        original = self.git_root
+        empty = self.root / 'empty'
+        subprocess.run(['git', 'init', '-q', str(empty)], check=True)
+        helper_dir = self.root / "credential helper's directory"
+        helper_dir.mkdir()
+        helper = helper_dir / 'gh'
+        helper.write_text(FAKE)
+        helper.chmod(0o755)
+        commands = self.root / 'git-commands.jsonl'
+        real_git = shutil.which('git')
+        wrapper_dir = self.root / 'bin'
+        wrapper_dir.mkdir()
+        wrapper = wrapper_dir / 'git'
+        wrapper.write_text("#!/usr/bin/env python3\n" +
+            "import json, os, subprocess, sys\n" +
+            f"real_git={real_git!r}\nremote={str(original)!r}\nrecord={str(commands)!r}\n" +
+            "args=sys.argv[1:]\n" +
+            "if 'fetch' in args:\n" +
+            "    with open(record, 'a') as f: f.write(json.dumps({'args':args,'env':{k:os.environ.get(k) for k in ['GIT_TERMINAL_PROMPT','GIT_ASKPASS','SSH_ASKPASS','GCM_INTERACTIVE']}})+'\\n')\n" +
+            "    prefix=args[:args.index('fetch')]\n" +
+            "    auth=subprocess.run([real_git,*prefix,'credential','fill'],input='protocol=https\\nhost=github.com\\n\\n',text=True,capture_output=True)\n" +
+            "    if auth.returncode or 'username=fixture' not in auth.stdout: sys.exit(7)\n" +
+            "    args=[remote if a.startswith('https://github.com/') else a for a in args]\n" +
+            "sys.exit(subprocess.run([real_git,*args]).returncode)\n")
+        wrapper.chmod(0o755)
+        self.env.update(GUARD_GH=str(helper), GUARD_REPO_ROOT=str(empty),
+                        FAKE_COMPARE_REPO=str(original),
+                        PATH=str(wrapper_dir) + os.pathsep + os.environ['PATH'])
+        self.assertEqual(self.identity(self.base), self.digest)
+        fetched = [json.loads(line) for line in commands.read_text().splitlines()]
+        self.assertEqual(len(fetched), 2)
+        for call in fetched:
+            self.assertIn('--no-replace-objects', call['args'])
+            self.assertIn('credential.helper=', call['args'])
+            self.assertEqual(call['env'], {'GIT_TERMINAL_PROMPT':'0','GIT_ASKPASS':'false',
+                                          'SSH_ASKPASS':'false','GCM_INTERACTIVE':'Never'})
+        self.assertEqual(self.calls.read_text().splitlines().count('CREDENTIAL'), 2)
+        persisted = subprocess.run([real_git, '-C', str(empty), 'config', '--local',
+                                    '--get-all', 'credential.helper'], capture_output=True)
+        self.assertEqual(persisted.returncode, 1)
+        self.assertEqual(persisted.stdout, b'')
 
     def test_bottom_stack_merges_without_actions(self):
         self.state['reviews']=[self.review()]

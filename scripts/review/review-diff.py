@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import os
 import re
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -29,9 +30,10 @@ def diff_identity(repo: str, base: str, head: str, root: Path) -> str:
     ).strip()
     if re.fullmatch(r"[0-9a-f]{40}", merge_base) is None:
         raise ValueError("GitHub did not return a complete merge base")
+    git = ["git", "--no-replace-objects", "-C", str(root)]
     for commit in (merge_base, head):
         exists = subprocess.run(
-            ["git", "-C", str(root), "cat-file", "-e", f"{commit}^{{commit}}"],
+            [*git, "cat-file", "-e", f"{commit}^{{commit}}"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             check=False,
@@ -39,14 +41,21 @@ def diff_identity(repo: str, base: str, head: str, root: Path) -> str:
         if exists.returncode:
             subprocess.run(
                 [
-                    "git",
-                    "-C",
-                    str(root),
+                    *git,
+                    "-c", "credential.helper=",
+                    "-c", "credential.helper=!" + shlex.quote(
+                        os.environ.get("GUARD_GH", "gh")
+                    ) + " auth git-credential",
                     "fetch",
                     "--no-tags",
                     f"https://github.com/{repo}.git",
                     commit,
                 ],
+                # Use the same authenticated gh installation as the API read,
+                # without persistent config changes or an interactive fallback.
+                env={**os.environ, "GIT_TERMINAL_PROMPT": "0",
+                     "GIT_ASKPASS": "false", "SSH_ASKPASS": "false",
+                     "GCM_INTERACTIVE": "Never"},
                 check=True,
             )
     # -z preserves arbitrary filenames. Disable rename guessing, external
@@ -54,9 +63,7 @@ def diff_identity(repo: str, base: str, head: str, root: Path) -> str:
     # symlink and submodule changes retain their complete object identities.
     raw = subprocess.check_output(
         [
-            "git",
-            "-C",
-            str(root),
+            *git,
             "diff",
             "--raw",
             "-z",

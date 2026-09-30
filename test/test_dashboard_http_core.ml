@@ -3396,7 +3396,16 @@ crown = %d
     (String.equal (revision purchased) (revision repriced));
   check bool "price-only edit preserves observed balance" true
     (Yojson.Safe.Util.member "candle_balance_milli" purchased
-     = Yojson.Safe.Util.member "candle_balance_milli" repriced)
+     = Yojson.Safe.Util.member "candle_balance_milli" repriced);
+  write_file policy_path "not = [\n";
+  let disabled = row () in
+  write_file policy_path "[shop]\n";
+  let differently_disabled = row () in
+  check bool "changed disabled reason changes Item account revision" false
+    (String.equal (revision disabled) (revision differently_disabled));
+  check bool "disabled readings withdraw the balance" true
+    (Yojson.Safe.Util.member "candle_balance_milli" disabled = `Null
+     && Yojson.Safe.Util.member "candle_balance_milli" differently_disabled = `Null)
 
 let test_execution_parameterized_payload_reuses_decorated_bytes () =
   with_execution_payload_env @@ fun ~env ~sw ~state ->

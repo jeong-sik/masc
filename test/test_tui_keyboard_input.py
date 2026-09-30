@@ -8525,6 +8525,17 @@ def next_request_forecast_fixture(*, with_continuity: bool) -> dict[str, object]
     }
 
 
+def scroll_context_one_line(process, master_fd, output) -> bytes:
+    # A scroll paints one frame. send_and_wait(..., FRAME_END) would consume
+    # that marker as its needle and then wait for an unnecessary second frame.
+    read_available(master_fd, output)
+    start = len(output)
+    os.write(master_fd, b"j")
+    wait_for_output(process, master_fd, output, FRAME_END, start=start, timeout=3.0)
+    frame_end = output.find(FRAME_END, start) + len(FRAME_END)
+    return bytes(output[start:frame_end])
+
+
 def open_context_and_read_history_pages(process, master_fd, output) -> bytes:
     # The loaded context can be taller than the terminal. Walk its actual
     # reported pages, preserving the bytes for the existing content checks.
@@ -8535,11 +8546,11 @@ def open_context_and_read_history_pages(process, master_fd, output) -> bytes:
         if bounds is None or int(bounds[2]) == int(bounds[3]):
             break
         first = int(bounds[1])
-        drawn += send_and_wait(process, master_fd, output, b"\x1b[6~", FRAME_END)
+        drawn += scroll_context_one_line(process, master_fd, output)
         advanced = re.search(rb"\[lines (\d+)-(\d+)/(\d+)\]",
                              screen_text(bytes(output)))
-        if advanced is not None and int(advanced[1]) <= first:
-            raise AssertionError("Context page down did not advance its reported window")
+        if advanced is None or int(advanced[1]) <= first:
+            raise AssertionError("Context j did not advance its reported window")
     if b"HOW FAR BACK" not in CSI_RE.sub(b"", drawn):
         raise AssertionError("Loaded Context pages omitted the history band")
     return drawn
@@ -8583,7 +8594,7 @@ def run_next_request_readability_regression(executable: str) -> None:
                         )
                     ):
                         break
-                    send_and_wait(process, master_fd, output, b"j", FRAME_END)
+                    scroll_context_one_line(process, master_fd, output)
                 else:
                     raise AssertionError(
                         f"Next Request meaning not visible at {cols} columns: "

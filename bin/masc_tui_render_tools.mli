@@ -17,8 +17,9 @@ val tools_pane_strip : cols:int -> state -> string
 (** The pane selector drawn in the surface header, with the active pane
     marked. *)
 
-val tools_display_lines : state -> (string * string) list
+val tools_display_lines : ?cols:int -> state -> (string * string) list
 (** Every row the surface would draw, before scrolling narrows it, each as
     the style to draw it in paired with its text. The caller measures this
     list to lay the viewport out, so it counts rows rather than entries -- a
-    tool whose evidence wraps is more than one row. *)
+    tool whose evidence wraps is more than one row. [cols] defaults to 80;
+    pass the viewport width for usage cards and matching scroll geometry. *)

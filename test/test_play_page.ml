@@ -4,6 +4,7 @@
 
 open Alcotest
 module Page = Server_routes_http_routes_play_page
+module Guide = Server_routes_http_routes_play_guide
 
 let remove_tree path =
   let rec go path =
@@ -26,7 +27,7 @@ let loopback_request_authority () =
 
 let dispatch_get ~state ~target ~token =
   Server_request_authority.with_current (loopback_request_authority ()) (fun () ->
-    let router = Page.add_routes (Masc.Http_server_eio.Router.create ()) in
+    let router = Guide.add_routes (Page.add_routes (Masc.Http_server_eio.Router.create ())) in
     Server_auth.publish_server_state state;
     let response_buf = Buffer.create 4096 in
     let conn =
@@ -144,9 +145,50 @@ let test_the_page_is_public_and_self_contained () =
       check int "one script tag" 1 (count ~sub:"<script" body);
       check bool "no script is loaded from anywhere" false (contains ~sub:" src=" body);
       check bool "no stylesheet is linked" false (contains ~sub:"<link" body);
+      check bool "an agent that reads the page finds the guide" true
+        (contains ~sub:(Printf.sprintf "href=\"%s\"" Masc.Play_invite.agent_guide_path) body);
       let second_head, _ = split_response (get ()) in
       check bool "every response has its own nonce" true
         (header "content-security-policy" second_head <> Some csp)))
+
+let public_base = "https://play.example"
+
+let test_the_guide_names_this_servers_doors () =
+  check bool "the guide is a public read path" true
+    (Server_auth.is_public_read_path Masc.Play_invite.agent_guide_path);
+  with_dir "play-guide-" (fun base_path ->
+    Auth.save_auth_config base_path
+      { Masc_domain.default_auth_config with enabled = true; require_token = true };
+    let state = Masc.Mcp_server.For_testing.create_state ~base_path in
+    Eio_main.run (fun env ->
+      Masc_test_deps.init_eio_clock env;
+      let get () = dispatch_get ~state ~target:Masc.Play_invite.agent_guide_path ~token:None in
+      Masc_test_deps.with_process_env "MASC_HTTP_BASE_URL" None (fun () ->
+        let response = get () in
+        check int "no public base URL, no address to join at" 409 (status_of response);
+        check bool "named as not ready" true
+          (member "error" (Yojson.Safe.from_string (snd (split_response response)))
+           = Some (`String "not_ready")));
+      Masc_test_deps.with_process_env "MASC_HTTP_BASE_URL" (Some public_base) (fun () ->
+        let response = get () in
+        check int "the guide needs no bearer" 200 (status_of response);
+        let head, body = split_response response in
+        check (option string) "it is markdown" (Some "text/markdown; charset=utf-8")
+          (header "content-type" head);
+        check bool "every template variable is filled" false (contains ~sub:"{{" body);
+        List.iter
+          (fun url -> check bool url true (contains ~sub:url body))
+          [ public_base ^ "/mcp/play"
+          ; public_base ^ Page.seat_path
+          ; public_base ^ Server_routes_http_routes_play_screen.screen_path
+          ];
+        List.iter
+          (fun (path, (schema : Masc_domain.tool_schema)) ->
+            check bool ("the move route " ^ path) true
+              (contains ~sub:(Printf.sprintf "`POST %s%s`" public_base path) body);
+            check bool ("the arguments of " ^ schema.name) true
+              (contains ~sub:(Yojson.Safe.pretty_to_string schema.input_schema) body))
+          Server_routes_http_routes_dos.moves)))
 
 let test_the_seat () =
   with_dir "play-seat-" (fun base_path ->
@@ -217,6 +259,7 @@ let () =
   run "play-page"
     [ ( "page"
       , [ test_case "the page is public and self-contained" `Quick test_the_page_is_public_and_self_contained
+        ; test_case "the guide names this server's doors" `Quick test_the_guide_names_this_servers_doors
         ; test_case "the seat names the bearer, the holder and the seats" `Quick test_the_seat
         ; test_case "expired invites and operators are not seats" `Quick test_expired_credentials_are_not_seats
         ] )

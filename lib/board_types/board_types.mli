@@ -141,6 +141,9 @@ type post_close_state = {
       there when it happened. *)
 }
 
+(** Replaced in [posts], never changed in place: a snapshot reuses the row
+    it rendered while the table holds the same physical post, so a field
+    that could change in place would leave that row stale. *)
 type post = {
   id : Post_id.t;
   author : Agent_id.t;
@@ -167,6 +170,7 @@ type post = {
       post is actually closed. *)
 }
 
+(** Replaced in [comments], never changed in place, as [post] is. *)
 type comment = {
   id : Comment_id.t;
   post_id : Post_id.t;
@@ -507,6 +511,13 @@ type store = {
   mutable dirty_comments : bool;
   dirty_post_ids : (string, unit) Hashtbl.t;
   dirty_comment_ids : (string, unit) Hashtbl.t;
+  post_rows : (string, post * string) Hashtbl.t;
+  (** post_id -> the post last rendered into a snapshot and its JSONL row.
+      Posts are replaced in [posts], never changed in place, so a row kept
+      with the same physical post is still that post's row. Only the
+      snapshot writers read or change it, under [mutex]. *)
+  comment_rows : (string, comment * string) Hashtbl.t;
+  (** The same for [comments]. *)
   mutable last_flush : float;
   flusher_inbox : flusher_msg Eio.Stream.t;
   sub_boards : (string, sub_board) Hashtbl.t;

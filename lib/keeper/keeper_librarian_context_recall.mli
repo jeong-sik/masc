@@ -8,8 +8,17 @@ val publish : base_path:string -> keepers_dir:string -> keeper_name:string ->
 (** Publish after a successful context commit, on the Librarian IO worker.
     The artifact is historical context: sources and execution progress must be
     revalidated before acting. Failure never changes original input authority. *)
-val render : keepers_dir:string -> keeper_name:string -> string option
-(** Reads the fixed-shape index and injects it only when its exact generation
-    and revision still match the authoritative working-context snapshot. No
+val render : ?artifact_reader_available:bool -> keepers_dir:string -> keeper_name:string -> unit -> string option
+(** Reads the fixed-shape index and injects its artifact only when its exact
+    generation and revision still match a nonempty authoritative snapshot.
+    An absent or empty authoritative snapshot emits a stable empty-state
+    notice; an unavailable snapshot/index or mismatched version emits a
+    distinct stable unavailable notice. Both retire earlier artifact references
+    as current context without granting authority or blocking original intake.
+    The option is always [Some], including status notices, so persistent client
+    sessions observe disappearance and can deduplicate an unchanged status.
+    [artifact_reader_available] defaults to true; callers pass the observed
+    availability of [keeper_artifact_read]. When false, no store is read and
+    the unavailable notice retires previous pointers until capability returns. No
     source revalidation, queue traversal, snapshot serialization, or blob
     writes occur on the first-token path. *)

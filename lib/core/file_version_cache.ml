@@ -49,9 +49,23 @@ let kept t path =
   Mutex.protect t.mutex (fun () -> Hashtbl.find_opt t.entries path, t.forgets)
 ;;
 
+(* A value a [forget] stopped from being kept still says which version this
+   decode saw. An entry kept for another version goes too, as a keep would
+   have replaced it: left in place, a file that later returned to that
+   version with other bytes, through a writer that never forgets, would be
+   answered from it. The entry may instead be newer than this decode, kept
+   by a reader that started after the [forget]; the next read then decodes
+   again. An entry for the same version stays: a decode no [forget]
+   interrupted kept it, after the last [forget] of [path]. *)
 let keep t path entry ~forgets_before =
   Mutex.protect t.mutex (fun () ->
-    if t.forgets = forgets_before then Hashtbl.replace t.entries path entry)
+    if t.forgets = forgets_before
+    then Hashtbl.replace t.entries path entry
+    else
+      match Hashtbl.find_opt t.entries path with
+      | Some kept when not (same_version kept.decoded_from entry.decoded_from) ->
+        Hashtbl.remove t.entries path
+      | Some _ | None -> ())
 ;;
 
 let forget t path =

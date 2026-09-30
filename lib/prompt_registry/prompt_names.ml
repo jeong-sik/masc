@@ -683,3 +683,9 @@ let agent_core_agent_tool_prompt_param_description =
 ;;
 let keeper_context_workspace_memory_available = "keeper.context.workspace_memory.available"
 let keeper_context_workspace_memory_unavailable = "keeper.context.workspace_memory.unavailable"
+
+let candle_appraiser_grade = "candle_appraiser_grade"
+
+let candle_appraiser_relation = "candle_appraiser_relation"
+
+let candle_appraiser_weights = "candle_appraiser_weights"

@@ -1,9 +1,5 @@
 name: DOS Lane package proof
 on:
-  pull_request:
-    paths:
-      - 'addons/dos-world/**'
-      - '.github/workflows/lane-dos-package.yml'
   workflow_dispatch: {}
 permissions:
   contents: read

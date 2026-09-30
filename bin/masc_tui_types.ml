@@ -11070,10 +11070,11 @@ let home_continue_rows (state : state) =
         [ Home_resume name,
           "Continue with " ^ Tui_decode.sanitize_terminal_text name
           ^ save_notice ]
-    | Some (name, _) when state.workspace_identity = Workspace_identity_match
+    | Some (name, save_notice) when state.workspace_identity = Workspace_identity_match
                          && Option.is_some state.keepers_error ->
         [ Home_read_last name,
           "Last conversation with " ^ Tui_decode.sanitize_terminal_text name
+          ^ save_notice
           ^ " · roster unavailable; read history" ]
     | Some _ | None -> []
   in

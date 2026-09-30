@@ -26085,7 +26085,7 @@ and is loaded on demand through keeper_skill.
                 "Chat requires a matching workspace for attachments and pasted files"
             | Keepers Keeper_list
               when Option.fold ~none:false
-                     ~some:(fun keeper -> keeper_available_for_new_message state keeper.k_name)
+                     ~some:(fun (keeper : keeper) -> keeper_available_for_new_message state keeper.k_name)
                      (selected_keeper state) ->
                 let keeper = List.nth state.keepers state.keeper_cursor in
                 open_message_for_keeper ~return_to:Keeper_chat_return_list state
@@ -26097,7 +26097,7 @@ and is loaded on demand through keeper_skill.
                 state.view <- Keepers Keeper_message
             | Keepers Keeper_detail
               when Option.fold ~none:false
-                     ~some:(fun keeper -> keeper_available_for_new_message state keeper.k_name)
+                     ~some:(fun (keeper : keeper) -> keeper_available_for_new_message state keeper.k_name)
                      (selected_keeper state) ->
                 let keeper = List.nth state.keepers state.keeper_cursor in
                 open_message_for_keeper ~return_to:Keeper_chat_return_detail

@@ -2,6 +2,7 @@
 
 open Masc_tui_types
 open Tui_decode
+open Masc.Tui_decode_fusion
 open Masc_tui_ansi
 open Masc_tui_render_prim
 open Masc_tui_press
@@ -3269,7 +3270,6 @@ let planning_detail_lines (state : state) ~armed ~confirmation ~cols (goal : pla
   let _, next_text = planning_next_step goal in
   let metadata =
     field "Title" goal.pg_title @ field "Goal" goal.pg_id
-    @ field "Owner" (match goal.pg_owner with Goal_store.Owner name -> name | Goal_store.Unknown_owner -> "unknown")
     @ field "Stage" (Masc_tui_theme.strip_sgr (planning_stage_rail goal.pg_phase ^ "  " ^ planning_proof_mark goal.pg_proof))
     @ field "Next" next_text
     @ field "Metric" (optional goal.pg_metric)
@@ -7651,7 +7651,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
       let listing runs =
         "  Fusion runs · j/k:select · Enter:open · same IDs as Fusion" ::
         (if runs = [] then ["  No retained Fusion runs for this Keeper"]
-         else List.mapi (fun index (run : Tui_decode.fusion_run) ->
+         else List.mapi (fun index (run : Masc.Tui_decode_fusion.fusion_run) ->
            (* The clock the Fusion list and the run detail already draw for
               this field, rather than a second copy of its format: three
               lists show a run's start, and a copy is one that stops
@@ -7660,7 +7660,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
              (if Option.fold ~none:false ~some:(fun (cursor, _) -> index = cursor)
                    (selected_keeper_run state) then ">" else " ")
              (fusion_run_clock run)
-             (Tui_decode.fusion_run_status_to_string run.fur_status)
+             (Masc.Tui_decode_fusion.fusion_run_status_to_string run.fur_status)
              (Terminal_text.single_line run.fur_preset)
              (Terminal_text.single_line run.fur_run_id)) runs)
       in
@@ -9438,10 +9438,10 @@ let fusion_run_summary run =
           (Terminal_text.single_line failure.frs_error) )
 
 let fusion_replay_warning = function
-  | Tui_decode.Fusion_not_replayed | Tui_decode.Fusion_log_absent -> None
-  | Tui_decode.Fusion_replayed { malformed_lines = 0; dropped_running = 0;
+  | Masc.Tui_decode_fusion.Fusion_not_replayed | Masc.Tui_decode_fusion.Fusion_log_absent -> None
+  | Masc.Tui_decode_fusion.Fusion_replayed { malformed_lines = 0; dropped_running = 0;
                                 incomplete = false } -> None
-  | Tui_decode.Fusion_replayed { malformed_lines; dropped_running; incomplete } ->
+  | Masc.Tui_decode_fusion.Fusion_replayed { malformed_lines; dropped_running; incomplete } ->
       Some (Printf.sprintf
         "Registry startup read: %d invalid rows; %d registrations omitted%s"
         malformed_lines dropped_running (if incomplete then "; read incomplete" else ""))
@@ -9491,14 +9491,14 @@ let render_fusion_list (state : state) =
     | Some _ ->
         let completed_count =
           List.fold_left
-            (fun acc (r : Tui_decode.fusion_run) ->
-               if r.fur_status = Tui_decode.Fusion_completed then acc + 1 else acc)
+            (fun acc (r : Masc.Tui_decode_fusion.fusion_run) ->
+               if r.fur_status = Masc.Tui_decode_fusion.Fusion_completed then acc + 1 else acc)
             0 runs
         in
         let failed_count =
           List.fold_left
-            (fun acc (r : Tui_decode.fusion_run) ->
-               match r.fur_status with Tui_decode.Fusion_failed _ -> acc + 1 | _ -> acc)
+            (fun acc (r : Masc.Tui_decode_fusion.fusion_run) ->
+               match r.fur_status with Masc.Tui_decode_fusion.Fusion_failed _ -> acc + 1 | _ -> acc)
             0 runs
         in
         let running_count = Stdlib.max 0 (List.length runs - completed_count - failed_count) in
@@ -9531,7 +9531,7 @@ let render_fusion_list (state : state) =
      pane below repeats. *)
   let keeper_width =
     List.fold_left
-      (fun widest (run : Tui_decode.fusion_run) ->
+      (fun widest (run : Masc.Tui_decode_fusion.fusion_run) ->
         max widest
           (Message_layout.display_width
              (Terminal_text.single_line run.fur_keeper)))
@@ -9571,12 +9571,12 @@ let render_fusion_list (state : state) =
   let summary_clauses =
     match List.nth_opt entries state.fusion_cursor with
     | None -> None
-    | Some (Tui_decode.Fusion_historical_evidence _) ->
+    | Some (Masc.Tui_decode_fusion.Fusion_historical_evidence _) ->
         Some
           ( Theme.warn ()
           , [ "Historical Board evidence; run lifecycle unavailable"
             ; "Enter:read original result" ] )
-    | Some (Tui_decode.Fusion_retained_run selected) ->
+    | Some (Masc.Tui_decode_fusion.Fusion_retained_run selected) ->
         let style, summary = fusion_run_summary selected in
         Some (style, [ fusion_run_duration ~now:now_epoch selected; summary ])
   in
@@ -9623,13 +9623,13 @@ let render_fusion_list (state : state) =
       let row_index = index + scroll in
       match Rows.at entries_window row_index with
       | None -> box_empty buf cols
-      | Some (Tui_decode.Fusion_historical_evidence evidence) ->
+      | Some (Masc.Tui_decode_fusion.Fusion_historical_evidence evidence) ->
           let line = "Board evidence · " ^ Terminal_text.single_line evidence.fhe_title
               ^ " · " ^ Link.reference Board_post evidence.fhe_post_id in
           let marker = if row_index = state.fusion_cursor then
               Ansi.reverse ^ ">" ^ Ansi.reset else " " in
           box_line buf cols (marker ^ " " ^ line)
-      | Some (Tui_decode.Fusion_retained_run run) ->
+      | Some (Masc.Tui_decode_fusion.Fusion_retained_run run) ->
           let state_text =
             fusion_run_state_text ~status:run.fur_status ~stage:run.fur_stage
           in
@@ -9795,7 +9795,7 @@ let fusion_tool_event_lines ~width = function
       ]
       @ fusion_tool_preview_lines ~width ~label:"Output" output
 
-let fusion_tool_trace_lines ~width (trace : Tui_decode.fusion_tool_trace) =
+let fusion_tool_trace_lines ~width (trace : Masc.Tui_decode_fusion.fusion_tool_trace) =
       let coverage =
         if trace.ftt_complete
         then
@@ -9838,7 +9838,7 @@ let fusion_tool_trace_lines ~width (trace : Tui_decode.fusion_tool_trace) =
       in
       (coverage :: observed) @ gaps @ events
 
-let fusion_pipeline_diagram (run : Tui_decode.fusion_run) =
+let fusion_pipeline_diagram (run : Masc.Tui_decode_fusion.fusion_run) =
   let glyph_done = (Theme.ok ()) ^ "\xe2\x97\x8f" ^ Ansi.reset in
   let glyph_active = (Theme.warn ()) ^ "\xe2\x97\x90" ^ Ansi.reset in
   let glyph_waiting = Ansi.dim ^ "\xe2\x97\x8b" ^ Ansi.reset in
@@ -10279,12 +10279,12 @@ let render_fusion_detail (state : state) run_id =
       fusion_detail_pane state ~rows ~cols run_id buf
     else begin
       let left_cols = keeper_roster_pane_cols in
-      let format_sidebar_fusion (row : Tui_decode.fusion_run) =
+      let format_sidebar_fusion (row : Masc.Tui_decode_fusion.fusion_run) =
         let status =
           match row.fur_status with
-          | Tui_decode.Fusion_running -> "run "
-          | Tui_decode.Fusion_completed -> "done"
-          | Tui_decode.Fusion_failed _ -> "fail"
+          | Masc.Tui_decode_fusion.Fusion_running -> "run "
+          | Masc.Tui_decode_fusion.Fusion_completed -> "done"
+          | Masc.Tui_decode_fusion.Fusion_failed _ -> "fail"
         in
         let time = fusion_run_clock row in
         let keeper = Terminal_text.single_line row.fur_keeper in

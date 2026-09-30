@@ -9,7 +9,6 @@ import test_tui_keyboard_input as h
 SOURCE_MODULES = ("bin/masc_tui_render.ml", "bin/masc_tui.ml", "bin/masc_tui_planning_detail.ml")
 GOAL_ID = "goal-detail-viewport"
 TITLE = "TITLEHEAD " + "한 " * 18 + "goal evidence " * 8 + "TITLEEND"
-OWNER = "owner-" + "delegated-" * 20 + "OWNEREND"
 METRIC = "metric-" + "0123456789abcdef" * 14 + "METRICEND"
 TARGET = "TARGETHEAD " + "measured target " * 12 + "TARGETEND"
 DUE = "2026-09-30T01:02:03Z source timezone " + "due-evidence-" * 10 + "DUEEND"
@@ -40,7 +39,7 @@ def window(output):
 
 def run(executable):
     goal = h.planning_goal(GOAL_ID, TITLE)
-    goal.update(owner=OWNER, metric=METRIC, target_value=TARGET, due_date=DUE,
+    goal.update(metric=METRIC, target_value=TARGET, due_date=DUE,
                 priority=2, created_at=STAMP, updated_at=STAMP, last_review_at=STAMP,
                 last_review_note=NOTE)
     fixtures = h.overview_event_http_fixtures()
@@ -77,8 +76,9 @@ def run(executable):
             h.wait_for_output(process, fd, output, b"TIMELINEEND", start=0, timeout=10)
             h.drain_until_quiet(process, fd, output)
             all_text = compact(screen(output))
-            for value in (TITLE, GOAL_ID, OWNER, METRIC, TARGET, DUE, NOTE, STAMP, APPROVAL, KEEPER, RAW_CLOCK):
+            for value in (TITLE, GOAL_ID, METRIC, TARGET, DUE, NOTE, STAMP, APPROVAL, KEEPER, RAW_CLOCK):
                 assert compact(value.encode()) in all_text, (width, value, all_text)
+            assert b"Owner:" not in screen(output), (width, screen(output))
             for index in range(12):
                 assert f"task-linked-{index:02d}".encode() in all_text, (width, index, all_text)
                 assert f"LINKEND{index:02d}".encode() in all_text, (width, index, all_text)

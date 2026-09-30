@@ -306,6 +306,62 @@ let test_copied_numbers_keep_their_value () =
     (Otoml.find_opt agy (fun v -> Otoml.get_float ~strict:true v)
        [ "providers"; "agy_2"; "timeout-s" ])
 
+let test_shared_model_set_account_copy () =
+  let source =
+    {|[providers.codex]
+protocol = "codex-app-server"
+command = "codex"
+is-non-interactive = true
+model-set = "codex_models"
+
+[models.sol]
+api-name = "gpt-6.1-sol"
+max-context = 272000
+
+[models.astra]
+api-name = "gpt-6-astra"
+max-context = 272000
+
+[model_sets.codex_models]
+models = ["sol", "astra"]
+|}
+  in
+  let check_models text =
+    Alcotest.(check (list string)) "both accounts resolve the shared models"
+      [ "astra"; "sol" ]
+      (List.sort String.compare
+         (List.map (fun (b : Runtime_schema.binding) -> b.model_id)
+            (bindings_of (config_of text) "codex_2")));
+    Alcotest.(check (option string)) "the new account keeps the set reference"
+      (Some "codex_models") (toml_string text [ "providers"; "codex_2"; "model-set" ])
+  in
+  let generated =
+    declared (parsed source) ~base:"codex" ~id:"codex_2" ~location:"/home/op/.codex-new"
+  in
+  check_models generated;
+  Alcotest.(check bool) "generated bindings stay generated" false
+    (Otoml.find_opt (toml_of generated) Fun.id [ "codex_2" ] <> None);
+  Alcotest.(check bool) "a generated binding has no wizard-default override" true
+    (List.for_all (fun (b : Runtime_schema.binding) -> not b.wizard_default)
+       (bindings_of (config_of generated) "codex_2"));
+  let overridden =
+    declared
+      (parsed (source ^ "\n[codex.sol]\nenabled = false\nmax-concurrent = 3\nwizard-default = true\n"))
+      ~base:"codex" ~id:"codex_2" ~location:"/home/op/.codex-new"
+  in
+  check_models overridden;
+  let overrides =
+    List.find (fun (b : Runtime_schema.binding) -> String.equal b.model_id "sol")
+      (bindings_of (config_of overridden) "codex_2")
+  in
+  Alcotest.(check bool) "explicit disabled state travels with the account" false overrides.enabled;
+  Alcotest.(check (option int)) "explicit concurrency travels with the account" (Some 3)
+    overrides.max_concurrent;
+  Alcotest.(check bool) "explicit wizard default travels with the account" true
+    overrides.wizard_default;
+  Alcotest.(check bool) "generated models do not become explicit overrides" false
+    (Otoml.find_opt (toml_of overridden) Fun.id [ "codex_2"; "astra" ] <> None)
+
 (* Layouts the append cannot carry. A [[table array]] under the base is
    printed after the copy's own keys, not over them; a providers table
    written inline cannot take a section after it, so that is refused rather
@@ -361,6 +417,19 @@ let test_every_seed_client_takes_a_second_account () =
     | None -> Alcotest.fail "MASC_TEST_RUNTIME_SEED is not set"
   in
   let t = parsed seed in
+  let shared_models =
+    Otoml.find (toml_of seed) (Otoml.get_array Otoml.get_string)
+      [ "model_sets"; "codex"; "models" ]
+    |> List.sort String.compare
+  in
+  let configured_codex_models =
+    bindings_of (config_of seed) "codex_subscription"
+    |> List.map (fun (binding : Runtime_schema.binding) -> binding.model_id)
+    |> List.sort String.compare
+  in
+  Alcotest.(check (list string))
+    "a new account's shared list includes every shipped Codex profile"
+    configured_codex_models shared_models;
   let bases = D.bases t in
   Alcotest.(check bool) "the seed declares official clients" true (bases <> []);
   List.iter
@@ -583,6 +652,8 @@ let () =
             test_an_oauth_file_by_any_name
         ; Alcotest.test_case "copied numbers keep their value" `Quick
             test_copied_numbers_keep_their_value
+        ; Alcotest.test_case "shared model set account copy" `Quick
+            test_shared_model_set_account_copy
         ; Alcotest.test_case "layouts the append cannot carry" `Quick
             test_layouts_the_append_cannot_carry
         ; Alcotest.test_case "every seed client takes a second account" `Quick

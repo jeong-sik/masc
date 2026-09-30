@@ -6,9 +6,9 @@ import { html } from 'htm/preact'
 import { render } from 'preact'
 import { signal } from '@preact/signals'
 import type { Keeper } from '../types'
+import { hydrateExecutionSnapshot } from '../store'
 import { KeeperItemsPanel } from '../components/keeper-items-panel'
 import { KeeperDetailSection, KeeperDetailSectionRail, activeKeeperDetailSection } from '../components/keeper-detail-shell'
-import { hydrateExecutionSnapshot } from '../store'
 
 const keeper = signal({
   name: 'rondo',
@@ -22,24 +22,27 @@ const keeper = signal({
 declare global {
   interface Window {
     updateKeeperItemsFixture: (revision: string) => void
-    updateKeeperItemsWorkspaceFixture: (workspaceRoot: string | null) => void
   }
 }
 window.updateKeeperItemsFixture = revision => {
   keeper.value = { ...keeper.value, candle_account_revision: revision }
 }
 
-// Test-only publication sequence: this isolated browser fixture has no HTTP/SSE
-// bootstrap. Workspace transitions use the real store admission path while
-// the Keeper, wallet, outfit and project label remain unchanged.
+// This isolated fixture has no production HTTP/SSE bootstrap. Admit its
+// explicitly synthetic workspace through the same store path as production.
+declare global {
+  interface Window {
+    updateKeeperItemsWorkspaceFixture: (workspaceRoot: string | null) => void
+  }
+}
 let fixturePublicationGeneration = 0
 window.updateKeeperItemsWorkspaceFixture = workspaceRoot => {
   const accepted = hydrateExecutionSnapshot({
     execution_publication_epoch: 'keeper-items-browser-fixture',
     execution_publication_generation: ++fixturePublicationGeneration,
-    status: { ...(workspaceRoot === null ? {} : { workspace_root: workspaceRoot }), project: 'keeper-items-fixture' },
+    status: { project: 'keeper-items-fixture', ...(workspaceRoot === null ? {} : { workspace_root: workspaceRoot }) },
   })
-  if (!accepted) throw new Error('Item browser fixture workspace observation refused')
+  if (!accepted) throw new Error('Item fixture workspace observation refused')
 }
 window.updateKeeperItemsWorkspaceFixture('/fixture/keeper-items')
 

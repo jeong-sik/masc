@@ -22,6 +22,9 @@ SOURCE_MODULES = (
     "bin/masc_tui.ml",
     "bin/masc_tui_render.ml",
     "bin/masc_tui_render_prim.ml",
+    "bin/masc_tui_render_schedule.ml",
+    "bin/masc_tui_types.ml",
+    "bin/masc_tui_composer.ml",
     "bin/masc_tui_candle.ml",
     "bin/masc_tui_keeper_control.ml",
     "lib/tui_decode.ml",
@@ -212,11 +215,21 @@ def short_overview_keeps_its_baseline(binary: str) -> None:
             await_screen(process, fd, output,
                 lambda text: b"attention-2" in text and b"Goals" in text,
                 "loaded baseline task and attention rows")
-            for height in (16, 14):
+            # The shared fixed-chrome floor is 14 body rows. Navigation
+            # owns one physical row; at 15 rows the composer stands down.
+            # Below that floor the truthful surface is the compact gate.
+            compact_hint = b"terminal too small -- resize to at least 15 rows; q: quit"
+            for height in (14, 13):
+                h.resize_and_wait(process, fd, output, rows=height, columns=100,
+                    needle=compact_hint, controls=(h.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
+                visible = screen(output)
+                assert compact_hint in visible, (phase, height, visible)
+                assert b"MASC Dashboard" not in visible, (phase, height, visible)
+            for height in (16, 15):
                 h.resize_and_wait(process, fd, output, rows=height, columns=100,
                     needle=b"MASC Dashboard", controls=(h.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
                 visible = screen(output)
-                for expected in (b"Goals", b"q:quit"):
+                for expected in (b"Health:", b"Goals", b"q:quit"):
                     assert expected in visible, (phase, height, expected, visible)
                 assert re.search(rb"\+\d+ rows? not shown", visible), visible
                 projected = core_rows(visible)

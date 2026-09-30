@@ -1,0 +1,71 @@
+{
+  "scope": "private label source repair; parsing and source lint only, no local typecheck/Dune/native/CI/network",
+  "checked_at": "2026-09-30T04:29:30.696399+00:00",
+  "local_parent": "b16cd5fb0bbd13d0181671098cb8441d33270c43",
+  "cause": {
+    "source": "root agent primary completed native job review",
+    "run_id": 36666974017,
+    "job_id": 109733612368,
+    "url": "https://github.com/jeong-sik/masc/actions/runs/36666974017/job/109733612368",
+    "reported_compiler_site": "lib/auth/auth_credential_token.ml:116 left.role",
+    "reported_inference": "credential_prune_retirement instead of agent_credential due to new private agent_name label",
+    "limits": "raw job log was reviewed by root; not fetched or independently executed by this agent"
+  },
+  "repair": "private retiring_agent_name label and all private constructors/readers updated; public Auth_token_prune.entry.agent_name unchanged",
+  "compiler_version": "5.5.1",
+  "commands": [
+    {
+      "command": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "lib/auth/auth_credential_base.ml"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "lib/auth/auth_token_prune.ml"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "python3",
+        "scripts/lint-ignore-without-comment.py",
+        "--include-tests",
+        "--strict",
+        "--target",
+        "lib/auth/auth_credential_base.ml",
+        "lib/auth/auth_token_prune.ml"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    }
+  ],
+  "source_sha256": {
+    "lib/auth/auth_credential_base.ml": "841edc36e7e0e7aa60120fd417f486387fb53c9da2f70ae57a381cf74a42325c",
+    "lib/auth/auth_token_prune.ml": "7765afc4b1ef878ce9adece14f4e5cf5211c2de969d53223c50e69040367fa5a"
+  },
+  "native_revalidation": "pending root finishing boundary"
+}

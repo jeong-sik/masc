@@ -642,7 +642,7 @@ let resolve_stored_credential config name = function
        | Stored_redirect _ | Unresolved_credential -> Ok None)
 ;;
 
-type credential_prune_retirement = { agent_name : string; uuid_target : string option }
+type credential_prune_retirement = { retiring_agent_name : string; uuid_target : string option }
 
 type credential_prune_snapshot =
   { credentials : (agent_credential * credential_prune_retirement) list
@@ -755,10 +755,10 @@ let credential_prune_snapshot_in_transaction ((Credential_transaction config) as
     | [] -> Ok (List.rev acc)
     | (stored, credential) :: rest ->
       let* uuid_target = credential_owned_uuid_target config credential.agent_name stored credential in
-      let authority = { agent_name = credential.agent_name; uuid_target } in
+      let authority = { retiring_agent_name = credential.agent_name; uuid_target } in
       validate ((credential, authority) :: acc) rest in
   let* credentials = validate [] snapshot.current_credentials in
-  let orphaned_redirects = List.map (fun agent_name -> { agent_name; uuid_target = None })
+  let orphaned_redirects = List.map (fun agent_name -> { retiring_agent_name = agent_name; uuid_target = None })
       snapshot.orphaned_names in
   Ok { credentials; orphaned_redirects }
 ;;
@@ -774,8 +774,8 @@ let retire_prune_credential_in_transaction (Credential_transaction config) retir
   try
     Fun.protect ~finally:(fun () -> !credential_cache_invalidator_ref config)
       (fun () ->
-        unlink_prune_path (credential_file config retirement.agent_name);
-        unlink_prune_path (raw_token_file config retirement.agent_name);
+        unlink_prune_path (credential_file config retirement.retiring_agent_name);
+        unlink_prune_path (raw_token_file config retirement.retiring_agent_name);
         Option.iter unlink_prune_path retirement.uuid_target;
         Ok ())
   with

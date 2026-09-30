@@ -19,7 +19,7 @@ let run ~base_path ~now ~mode =
           (match Auth_credential_base.retire_prune_credential_in_transaction transaction retirement with
            | Ok () -> Retired
            | Error error -> Failed error) in
-      { agent_name = retirement.agent_name; reason; outcome }
+      { agent_name = retirement.retiring_agent_name; reason; outcome }
     in
     Ok (List.map retire (expired @ orphaned)))
   |> Result.join

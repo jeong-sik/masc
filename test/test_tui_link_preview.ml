@@ -229,7 +229,10 @@ let test_modal_keeps_complete_url_and_instructions () =
    decoder rejection each reach the card with their own words. *)
 let card_says ~url sub =
   let lines = render_modal_card ~width:80 ~height:20 (synthesize_preview url) in
-  List.exists (fun l -> Option.is_some (Astring.String.find_sub ~sub l)) lines
+  check bool "wrapped refusal rows fit" true
+    (List.for_all (fun l -> Masc_tui_message_layout.display_width l <= 80) lines);
+  let visible = String.concat " " (List.map String.trim lines) in
+  Option.is_some (Astring.String.find_sub ~sub visible)
 
 let test_a_refused_image_url_is_remembered_and_said () =
   clear_cache ();

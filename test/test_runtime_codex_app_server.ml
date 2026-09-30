@@ -178,7 +178,7 @@ let warm_fresh_executable path =
     wait ()
 ;;
 
-let fixture_script ?(close_before_turn = false) ?(inject_items = false) ?(model_pages = []) ?capture_path ?initial_line_delay_s ?terminal_line_delay_s
+let fixture_script ?(close_before_turn = false) ?(inject_items = false) ?(model_pages = []) ?(model_pages_before_thread = false) ?capture_path ?initial_line_delay_s ?terminal_line_delay_s
     ?(terminal_line_delay_start_index = 0) ?(line_delays = []) ?before_final_stdin_drain_s
     ?pipe_holder_s lines =
   let path = Filename.temp_file "masc-codex-app-server-" ".sh" in
@@ -217,12 +217,15 @@ let fixture_script ?(close_before_turn = false) ?(inject_items = false) ?(model_
   read_request ();
   read_request ();
   output_string output ("printf '%s\\n' " ^ shell_quote (List.nth lines 1) ^ "\n");
+  if model_pages_before_thread then List.iter (fun page ->
+    read_request ();
+    output_string output ("printf '%s\\n' " ^ shell_quote page ^ "\n")) model_pages;
   read_request ();
   if close_before_turn then output_string output "exec 0<&-\n";
   output_string output ("printf '%s\\n' " ^ shell_quote (List.nth lines 2) ^ "\n");
   if close_before_turn then output_string output "exit 62\n";
   capture_request ();
-  List.iter (fun page ->
+  if not model_pages_before_thread then List.iter (fun page ->
     output_string output ("printf '%s\\n' " ^ shell_quote page ^ "\n");
     capture_request ()) model_pages;
   let remaining_lines =
@@ -276,13 +279,14 @@ let fixture_script ?(close_before_turn = false) ?(inject_items = false) ?(model_
   path
 ;;
 
-let with_fixture ?close_before_turn ?inject_items ?model_pages ?capture_path ?initial_line_delay_s ?terminal_line_delay_s
+let with_fixture ?close_before_turn ?inject_items ?model_pages ?model_pages_before_thread ?capture_path ?initial_line_delay_s ?terminal_line_delay_s
     ?terminal_line_delay_start_index ?line_delays ?before_final_stdin_drain_s ?pipe_holder_s lines f =
   let path =
     fixture_script
       ?close_before_turn
       ?inject_items
       ?model_pages
+      ?model_pages_before_thread
       ?capture_path
       ?initial_line_delay_s
       ?terminal_line_delay_s
@@ -330,10 +334,10 @@ let with_fixture_sequence ?capture_path first_lines second_lines f =
     (fun () -> f path)
 ;;
 
-let run_fixture ?account_home ?(worker_pool = false) ?isolated_home ?(dynamic_tools = []) ?reasoning_effort ?thread_mode ?(history = [])
+let run_fixture ?account_home ?(worker_pool = false) ?isolated_home ?(dynamic_tools = []) ?model ?reasoning_effort ?thread_mode ?(history = [])
     ?(developer_context = []) ?developer_instructions ?(cwd = "/tmp")
     ?(timeout_s = 2.0) ?admission_timeout_s ?(no_turn_deadline = false)
-    ?on_thread_ready_delay_s ?on_turn_started_delay_s ?on_stream_event
+    ?on_thread_ready ?on_thread_ready_delay_s ?on_turn_started_delay_s ?on_stream_event
     ?on_prompt_sent ?on_reasoning_effort_resolved ?(prompt = "Return the fixture marker")
     ?(images = []) ?(native = Runtime_native_tools.codex_default) path =
   Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
@@ -349,6 +353,7 @@ let run_fixture ?account_home ?(worker_pool = false) ?isolated_home ?(dynamic_to
     let config =
       { (Runtime_codex_app_server.default_config ()) with
         cli_path = path
+      ; model
       ; account_home
       ; isolated_home
       ; native
@@ -357,12 +362,9 @@ let run_fixture ?account_home ?(worker_pool = false) ?isolated_home ?(dynamic_to
       ; timeout_s = if no_turn_deadline then None else Some timeout_s
       }
     in
-    let on_thread_ready =
-      Option.map
-        (fun delay_s ~thread_id:_ ->
-           Eio.Time.sleep clock delay_s;
-           Ok ())
-        on_thread_ready_delay_s
+    let on_thread_ready ~thread_id =
+      Option.iter (Eio.Time.sleep clock) on_thread_ready_delay_s;
+      match on_thread_ready with None -> Ok () | Some callback -> callback ~thread_id
     in
     let on_turn_started =
       Option.map
@@ -380,7 +382,7 @@ let run_fixture ?account_home ?(worker_pool = false) ?isolated_home ?(dynamic_to
       ?thread_mode
       ~history
       ~developer_context
-      ?on_thread_ready
+      ~on_thread_ready
       ?on_turn_started
       ?on_stream_event
       ?on_prompt_sent
@@ -1225,7 +1227,7 @@ let test_prompt_transmission_boundary ?(worker_pool = false) () =
     let page = {|{"id":4,"result":{"data":[{"id":"fixture","model":"gpt-fixture","displayName":"Fixture","isDefault":true,"defaultReasoningEffort":"medium","supportedReasoningEfforts":[{"reasoningEffort":"medium","description":"Medium"},{"reasoningEffort":"ultra","description":"Ultra"}]}],"nextCursor":null}}|} in
     let lines = [init_result; account_chatgpt; thread_result;
       {|{"id":5,"result":{"turn":{"id":"turn-1"}}}|}; item_completed; turn_completed] in
-    with_fixture ~capture_path:captured ~model_pages:[page] lines (fun path ->
+    with_fixture ~capture_path:captured ~model_pages:[page] ~model_pages_before_thread:true lines (fun path ->
       let result = run_fixture ~prompt:transmitted_prompt ~on_prompt_sent:report
         ~reasoning_effort:Llm_provider.Reasoning_effort.Ultra path in
       check bool "complete turn succeeds" true (Result.is_ok result);
@@ -1310,7 +1312,7 @@ let test_account_reasoning_effort_admission () =
     Fun.protect ~finally:(fun () -> Sys.remove capture) (fun () ->
       let page = effort_page ~request_id:4 ~model:"gpt-fixture" ~efforts () in
       let resolved = ref None in
-      with_fixture ~capture_path:capture ~model_pages:[page]
+      with_fixture ~capture_path:capture ~model_pages:[page] ~model_pages_before_thread:true
         [init_result; account_chatgpt; thread_result;
          {|{"id":5,"result":{"turn":{"id":"turn-1"}}}|}; item_completed; turn_completed]
         (fun path ->
@@ -1324,10 +1326,12 @@ let test_account_reasoning_effort_admission () =
           let open Yojson.Safe.Util in
           let requests = captured_requests capture in
           check (list string) "metadata before prompt"
-            ["initialize";"initialized";"account/read";"thread/start";"model/list";"turn/start"]
+            ["initialize";"initialized";"account/read";"model/list";"thread/start";"turn/start"]
             (List.map (fun request -> request |> member "method" |> to_string) requests);
           check bool "hidden selected models included" true
-            (List.nth requests 4 |> member "params" |> member "includeHidden" |> to_bool);
+            (List.nth requests 3 |> member "params" |> member "includeHidden" |> to_bool);
+          check string "thread pins the admitted account default" "gpt-fixture"
+            (List.nth requests 4 |> member "params" |> member "model" |> to_string);
           check string "new model uses account ladder, without catalog" (Llm_provider.Reasoning_effort.to_string expected)
             (List.nth requests 5 |> member "params" |> member "effort" |> to_string))))
     [ ["low";"ultra";"adaptive-v2"], Llm_provider.Reasoning_effort.Ultra, Llm_provider.Reasoning_effort.Ultra
@@ -1368,12 +1372,13 @@ let test_reasoning_metadata_refusal_precedes_input () =
   List.iter (fun page ->
     let capture = Filename.temp_file "codex-refused-effort-" ".jsonl" in
     Fun.protect ~finally:(fun () -> Sys.remove capture) (fun () ->
-      let observed = ref false in
-      with_fixture ~capture_path:capture ~model_pages:[page]
+      let observed = ref false and retained_thread = ref None in
+      with_fixture ~capture_path:capture ~model_pages:[page] ~model_pages_before_thread:true
         [init_result; account_chatgpt; thread_result; turn_result; item_completed; turn_completed]
         (fun path ->
-          match run_fixture ~reasoning_effort:Llm_provider.Reasoning_effort.Ultra
+          match run_fixture ~model:"gpt-fixture" ~reasoning_effort:Llm_provider.Reasoning_effort.Ultra
             ~developer_context:["must not be injected"]
+            ~on_thread_ready:(fun ~thread_id -> retained_thread := Some thread_id; Ok ())
             ~on_reasoning_effort_resolved:(fun ~model:_ ~requested:_ ~effective:_ -> observed := true)
             ~on_prompt_sent:(fun () -> observed := true) path with
           | Error (Runtime_codex_app_server.Reasoning_effort_admission_failed _ as error) ->
@@ -1383,10 +1388,12 @@ let test_reasoning_metadata_refusal_precedes_input () =
           | Error error -> fail (Runtime_codex_app_server.error_to_string error)
           | Ok _ -> fail "unsupported effort was sent");
       check bool "no admission or prompt observation" false !observed;
+      check (option string) "refused effort creates no thread to retain"
+        None !retained_thread;
       let open Yojson.Safe.Util in
-      check bool "no turn or history transmitted" false
+      check bool "no persistent thread, turn or history created" false
         (List.exists (fun request -> List.mem (request |> member "method" |> to_string)
-          ["turn/start";"thread/inject_items"]) (captured_requests capture)))) pages;
+          ["thread/start";"turn/start";"thread/inject_items"]) (captured_requests capture)))) pages;
   (* With no explicit effort, even a model whose advertised effort vocabulary
      is unknown to MASC remains runnable at its native default. *)
   with_fixture [init_result; account_chatgpt; thread_result; turn_result; item_completed; turn_completed]

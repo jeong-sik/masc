@@ -897,6 +897,23 @@ let model_list_protocol io =
   Ok rows
 ;;
 
+let resolve_reasoning_effort row effort =
+  let accepted = List.filter_map (fun wire ->
+    match Llm_provider.Reasoning_effort.of_string wire with
+    | Some effort when String.equal wire (Llm_provider.Reasoning_effort.to_string effort) -> Some effort
+    | Some _ | None -> None) row.supported_reasoning_efforts in
+  match accepted with
+  | [] -> protocol_error "model/list" "selected model advertises no known reasoning effort"
+  | first :: rest ->
+    let compare = Llm_provider.Reasoning_effort.compare in
+    let below = List.filter (fun candidate -> compare candidate effort <= 0) accepted in
+    let minimum a b = if compare a b <= 0 then a else b in
+    let maximum a b = if compare a b >= 0 then a else b in
+    Ok (match below with
+      | [] -> List.fold_left minimum first rest
+      | first :: rest -> List.fold_left maximum first rest)
+;;
+
 let admit_reasoning_effort io ~model ~requested ~request_id =
   match requested with
   | None -> Ok (None, request_id)
@@ -905,20 +922,7 @@ let admit_reasoning_effort io ~model ~requested ~request_id =
     let* row = match List.find_opt (fun row -> String.equal row.model model) rows with
       | Some row -> Ok row
       | None -> protocol_error "model/list" "selected model has no advertised reasoning metadata" in
-    let accepted = List.filter_map (fun wire ->
-      match Llm_provider.Reasoning_effort.of_string wire with
-      | Some effort when String.equal wire (Llm_provider.Reasoning_effort.to_string effort) -> Some effort
-      | Some _ | None -> None) row.supported_reasoning_efforts in
-    let* effective = match accepted with
-      | [] -> protocol_error "model/list" "selected model advertises no known reasoning effort"
-      | first :: rest ->
-        let compare = Llm_provider.Reasoning_effort.compare in
-        let below = List.filter (fun candidate -> compare candidate effort <= 0) accepted in
-        let minimum a b = if compare a b <= 0 then a else b in
-        let maximum a b = if compare a b >= 0 then a else b in
-        Ok (match below with
-          | [] -> List.fold_left minimum first rest
-          | first :: rest -> List.fold_left maximum first rest) in
+    let* effective = resolve_reasoning_effort row effort in
     Ok (Some effective, next_request_id)
 ;;
 
@@ -1779,6 +1783,31 @@ let run_protocol io (config : config) ~protocol_cwd ~dynamic_tools ~reasoning_ef
   let* account = await_response io ~id:2 ~method_:"account/read" in
   let* subscription = parse_subscription account in
   let* permissions_profile = permissions_profile_of_posture config.native in
+  let requested = reasoning_effort in
+  let admission ~model f =
+    (try f () with Idle_timeout seconds -> Error (Timeout { seconds; turn_accepted = false }))
+    |> Result.map_error (function
+      | (Runtime_shutting_down | Turn_interrupted | Stopped_by_host _) as stop -> stop
+      | error -> Reasoning_effort_admission_failed {model;detail=error_to_string error}) in
+  (* New persistent threads are created only after explicit effort is admitted.
+     Pin the advertised default when no model was configured, so thread/start
+     and the admitted account metadata name the same model. Resume creates no
+     new thread and still admits against the model returned by thread/resume. *)
+  let* start_admission = match thread_mode, requested with
+    | Start, Some effort ->
+        admission ~model:(Option.value ~default:"<account default>" config.model) (fun () ->
+          let* rows, next_request_id = read_model_pages io ~include_hidden:true ~request_id:4 in
+          let selected = List.filter (fun row -> match config.model with
+            | Some model -> String.equal row.model model || String.equal row.id model
+            | None -> row.is_default) rows in
+          let* row = match selected with
+            | [row] -> Ok row
+            | [] | _::_ -> protocol_error "model/list" "selected model has no unique advertised reasoning metadata" in
+          let* effective = resolve_reasoning_effort row effort in
+          Ok (Some (row.model, effective, next_request_id)))
+    | Start, None | Resume _, _ -> Ok None in
+  let selected_model = match start_admission with
+    | Some (model,_,_) -> Some model | None -> config.model in
   let thread_method, thread_fields, resumed =
     match thread_mode with
     | Start ->
@@ -1788,7 +1817,7 @@ let run_protocol io (config : config) ~protocol_cwd ~dynamic_tools ~reasoning_ef
          ; "permissions", `String permissions_profile
          ; "ephemeral", `Bool thread_is_ephemeral
          ]
-         @ optional_field "model" config.model
+         @ optional_field "model" selected_model
          @ optional_field "developerInstructions" config.developer_instructions
          @
          match dynamic_tools with
@@ -1809,7 +1838,7 @@ let run_protocol io (config : config) ~protocol_cwd ~dynamic_tools ~reasoning_ef
         ; "permissions", `String permissions_profile
         ; "excludeTurns", `Bool true
         ]
-        @ optional_field "model" config.model
+        @ optional_field "model" selected_model
         @ optional_field "developerInstructions" config.developer_instructions
         @
         (match dynamic_tools with
@@ -1832,15 +1861,18 @@ let run_protocol io (config : config) ~protocol_cwd ~dynamic_tools ~reasoning_ef
            expected
            thread_id)
   in
-  let requested = reasoning_effort in
-  let* reasoning_effort, next_request_id =
-    (try admit_reasoning_effort io ~model ~requested ~request_id:4 with
-     | Idle_timeout seconds ->
-       Error (Timeout { seconds; turn_accepted = false }))
-    |> Result.map_error (function
-      | (Runtime_shutting_down | Turn_interrupted | Stopped_by_host _) as stop -> stop
-      | error -> Reasoning_effort_admission_failed
-        { model; detail = error_to_string error }) in
+  (* Record the returned thread before checking server adherence to the
+     admitted model or injecting history. Unexpected post-create failures
+     must leave a thread identity for protocol recovery. *)
+  let* () =
+    invoke_state_callback ~stage:"thread ready callback" (fun () ->
+      on_thread_ready ~thread_id)
+  in
+  let* reasoning_effort, next_request_id = match start_admission with
+    | Some (admitted_model,effective,next_request_id) when String.equal admitted_model model ->
+        Ok (Some effective,next_request_id)
+    | Some _ -> protocol_error thread_method "created thread model differs from admitted account model"
+    | None -> admission ~model (fun () -> admit_reasoning_effort io ~model ~requested ~request_id:4) in
   let* () = invoke_state_callback ~stage:"reasoning effort callback" (fun () ->
     on_reasoning_effort_resolved ~model ~requested ~effective:reasoning_effort;
     Ok ()) in
@@ -1862,10 +1894,6 @@ let run_protocol io (config : config) ~protocol_cwd ~dynamic_tools ~reasoning_ef
       Ok (next_request_id + 1)
   in
   let* turn_request_id = turn_request_id in
-  let* () =
-    invoke_state_callback ~stage:"thread ready callback" (fun () ->
-      on_thread_ready ~thread_id)
-  in
   let* () =
     invoke_state_callback ~stage:"turn starting callback" (fun () ->
       on_turn_starting ~thread_id)

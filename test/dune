@@ -1107,6 +1107,11 @@
  (libraries alcotest masc_test_deps masc.keeper_checkpoint_ref))
 
 (test
+ (name test_keeper_event_queue_codec_pool)
+ (modules test_keeper_event_queue_codec_pool)
+ (libraries alcotest masc.keeper_runtime masc.masc_core eio_main yojson unix))
+
+(test
  (name test_subsystem_health_state)
  (modules test_subsystem_health_state)
  (libraries alcotest masc_test_deps))

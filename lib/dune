@@ -194,6 +194,7 @@
   masc_random_id
   masc_workspace
   masc_goal
+  masc_candle_runtime
   masc_turn
   masc.masc_tool_dispatch
   masc.masc_tool_surface

@@ -520,19 +520,18 @@ let test_http_client_does_not_own_tui_env_contract () =
     (Ast_grep.count_value_bindings ~module_path ~name:"timeout_env")
 ;;
 
-(* The Dashboard's attention section writes three cells of indent ahead of
-   every row it draws. Its empty and unread notes stand in for rows, and they are
-   written for a body that indents them itself -- pasted in whole, a note sat
-   two cells right of the rows it replaces and of the title above them. *)
-let test_the_attention_note_starts_where_its_rows_do () =
-  check int "the note carries no indent of its own" 0
+(* Home's empty decision note replaces a section, not a selectable destination.
+   It shares the section heading's one-cell inset; another inset would make
+   the empty state look like a destination row. *)
+let test_home_empty_decision_note_has_section_indent () =
+  check int "the note adds no second indent" 0
     (Ast_grep.count_exact_string_literals_in_value_binding
        ~module_path:"bin/masc_tui_render.ml" ~binding_name:"render_overview"
-       ~needle:"  Nothing needs attention.");
-  check int "it is still the panel's word" 1
+       ~needle:"  No decision is waiting on you.");
+  check int "the section names the absence of human decisions" 1
     (Ast_grep.count_exact_string_literals_in_value_binding
        ~module_path:"bin/masc_tui_render.ml" ~binding_name:"render_overview"
-       ~needle:"Nothing needs attention.")
+       ~needle:" No decision is waiting on you.")
 ;;
 
 (* A surface whose load failed draws the lane-read message. It names
@@ -765,36 +764,37 @@ let test_recent_projection_is_prepared_inside_frame_build () =
 
 let test_user_message_background_has_one_render_snapshot () =
   let main_path = "bin/masc_tui.ml" in
+  let input_path = "bin/masc_tui_input_reader.ml" in
   (* Every binding this test still reaches for is drawn by the chat surface,
      which is its own file. *)
   let chat_path = "bin/masc_tui_render_chat.ml" in
   let ansi_path = "bin/masc_tui_ansi.ml" in
   check int "late palette publication clears its callback before use" 1
-    (Ast_grep.count_field_clears_to_none ~module_path:main_path
+    (Ast_grep.count_field_clears_to_none ~module_path:input_path
        ~binding_name:"take_late_palette_publisher"
        ~field_name:"late_palette_publisher");
   check int "late palette helper gates on its one-shot publisher" 1
     (Ast_grep.count_field_accesses_outside_calls_in_value_binding
-       ~module_path:main_path ~binding_name:"publish_late_terminal_palette"
+       ~module_path:input_path ~binding_name:"publish_late_terminal_palette"
        ~callees:[] ~fields:[ "late_palette_publisher" ]);
   check int "late palette helper reads the O(1) decoder palette" 1
-    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+    (Ast_grep.count_calls_in_value_binding ~module_path:input_path
        ~binding_name:"publish_late_terminal_palette"
        ~callee:"Masc_tui_terminal_probe.palette");
   check int "late palette helper consumes the one-shot publisher" 1
-    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+    (Ast_grep.count_calls_in_value_binding ~module_path:input_path
        ~binding_name:"publish_late_terminal_palette"
        ~callee:"take_late_palette_publisher");
   check int "input checks publication after next and before probe removal" 3
-    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+    (Ast_grep.count_calls_in_value_binding ~module_path:input_path
        ~binding_name:"take_input_byte"
        ~callee:"publish_late_terminal_palette");
   check int "late publication updates the palette authority" 1
-    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+    (Ast_grep.count_calls_in_value_binding ~module_path:input_path
        ~binding_name:"install_late_palette_publisher"
        ~callee:"Masc_tui_terminal_palette.set_current");
   check int "late publication requests one full repaint" 1
-    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+    (Ast_grep.count_calls_in_value_binding ~module_path:input_path
        ~binding_name:"install_late_palette_publisher"
        ~callee:"request_full_repaint");
   check int "startup has one conditional late publisher installation" 1
@@ -1737,24 +1737,25 @@ let test_planning_refresh_reconciles_navigation_identity () =
 
 let test_render_loop_uses_monotonic_dirty_schedule () =
   let main_path = "bin/masc_tui.ml" in
+  let input_path = "bin/masc_tui_input_reader.ml" in
   check int "the render loop queries buffered and terminal-ready input" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"main" ~callee:"input_reader_has_ready_input");
   check int "readiness includes the reader's buffered input" 1
-    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+    (Ast_grep.count_calls_in_value_binding ~module_path:input_path
        ~binding_name:"input_reader_has_ready_input"
        ~callee:"input_reader_has_pending_bytes");
   check int "readiness includes bytes waiting in the terminal" 1
-    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+    (Ast_grep.count_calls_in_value_binding ~module_path:input_path
        ~binding_name:"input_reader_has_ready_input" ~callee:"terminal_has_bytes");
   check int "queued input includes the terminal probe replay" 1
-    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+    (Ast_grep.count_calls_in_value_binding ~module_path:input_path
        ~binding_name:"input_reader_has_pending_bytes"
        ~callee:"Masc_tui_terminal_probe.has_replay");
   (* A character the decoder holds is awaiting bytes that have not arrived;
      it is not input ready to act on, so it must not postpone a frame. *)
   check int "an incomplete character does not postpone a frame" 0
-    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+    (Ast_grep.count_calls_in_value_binding ~module_path:input_path
        ~binding_name:"input_reader_has_pending_bytes"
        ~callee:"Masc_tui_input_decoder.pending");
   check bool "main loop reads a monotonic clock" true
@@ -1816,7 +1817,7 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
      input owns the deadline, and EINTR has to come back as a retry rather
      than as end of input. *)
   check bool "interrupted input uses the deadline-aware retry contract" true
-    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+    (Ast_grep.count_calls_in_value_binding ~module_path:input_path
        ~binding_name:"refill_input_reader"
        ~callee:"Render_schedule.Input_wait.await"
      = 1);
@@ -1846,10 +1847,14 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
   check int "resize polling consumes one pending signal" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"consume_resize_request" ~callee:"Atomic.exchange");
-  check int "render owns one compact viewport gate" 1
+  check int "the shared frame choice owns one compact viewport gate" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_render.ml" ~binding_name:"frame_choice"
+       ~callee:"Render_schedule.Viewport.requires_compact_frame");
+  check int "render uses the same frame choice as Home preparation" 1
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_render.ml" ~binding_name:"render"
-       ~callee:"Render_schedule.Viewport.requires_compact_frame");
+       ~callee:"frame_choice");
   check int "compact render has one fallback branch" 1
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_render.ml" ~binding_name:"render"
@@ -1878,12 +1883,11 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
        ; "surface_body_rows"
        ; "surface_chrome_budget"
        ]);
-  (* Both the attention count in the title and its empty-body note read the
-     shared page state: unread/failed must not become a zero count, and unread
-     must not become a blank body. *)
-  check int "Dashboard's attention title and body both read the shared empty page" 2
+  (* Home's typed decision projection keeps unread/failed sources visible.
+     The old attention page's emptiness says nothing about human decisions. *)
+  check int "Home reads the shared decision projection once" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path
-       ~binding_name:"render_overview" ~callee:"empty_page_of");
+       ~binding_name:"render_overview" ~callee:"home_decision_rows");
   check int "board read consumes one shared row allocation" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path
        ~binding_name:"board_read_pane"
@@ -2551,10 +2555,11 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
   check_fields "task_line" [ "id"; "title" ];
   check_identifiers ~module_path:render_path ~binding:"task_line"
     ~callees:sanitizer_calls [ "name" ];
-  check_fields "render_overview"
-    [ "overview_error"
-    ; "ai_summary"
-    ];
+  check_fields "render_overview" [ "overview_error" ];
+  check int "Home does not draw the removed attention summary" 0
+    (Ast_grep.count_field_accesses_outside_calls_in_value_binding
+       ~module_path:render_path ~binding_name:"render_overview" ~callees:[]
+       ~fields:[ "ai_summary" ]);
   check_fields "render_work_tasks" [ "tasks_error" ];
   (* The Dashboard's title row, visible from the first frame, and
      /about's colour scheme name from the operator's configuration. *)
@@ -3145,8 +3150,8 @@ let () =
         test_case "check success status" `Quick test_is_success_http_status_called;
         test_case "the spectator reads the live route" `Quick
           test_the_spectator_reads_the_live_route;
-        test_case "the attention note starts where its rows do" `Quick
-          test_the_attention_note_starts_where_its_rows_do;
+        test_case "the Home empty decision note has section indent" `Quick
+          test_home_empty_decision_note_has_section_indent;
         test_case "the lane failure row adds no second verdict" `Quick
           test_the_lane_failure_row_adds_no_second_verdict;
         test_case "missing operator token is reported" `Quick

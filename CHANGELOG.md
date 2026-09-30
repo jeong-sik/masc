@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Keep command palette selection inside the list and show its origin and explicit Code question before execution. Lane Add-ons uses `:` for the shared palette and `A` for advanced commands; Escape preserves the prior screen (#40151).
+
 ## [0.49.0] - 2026-09-29
 
 ### Fresh state required

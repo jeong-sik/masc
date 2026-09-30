@@ -7224,6 +7224,19 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
           ~content_cols:inner
       else None
     in
+    (* A long value takes the width below its label, rather than the few
+       cells a fixed label column leaves beside it. These are actual display
+       rows, counted before the detail window is sliced. Values have already
+       passed their wire-boundary sanitizer and may carry this pane's SGR. *)
+    let field_rows ~width ~label_cells ~label_style label value =
+      let prefix = "  " ^ label_style ^ fit_width label label_cells ^ Ansi.reset ^ " " in
+      if Message_layout.display_width (prefix ^ value) <= width then
+        [prefix ^ value]
+      else
+        ("  " ^ label_style ^ label ^ Ansi.reset)
+        :: (Message_layout.wrap_words ~max_cells:(max 1 (width - 4)) value
+            |> List.map (fun line -> "    " ^ line ^ Ansi.reset))
+    in
 
     (* Each tab projects only when selected. Retained data for the other
        tabs must not be walked and formatted on every scroll frame. These
@@ -7234,22 +7247,26 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
       let add_line s = lines := s :: !lines in
 
       (* Helper to add a labeled row *)
-      let row_line label value =
-        Printf.sprintf "  %s%-22s%s %s" (Masc_tui_theme.tone Masc_tui_theme.Accent) label Ansi.reset value
+      let row_lines ~width label value =
+        field_rows ~width ~label_cells:22
+          ~label_style:(Masc_tui_theme.tone Masc_tui_theme.Accent) label value
       in
-      let add_row label value = add_line (row_line label value) in
+      let add_row label value = List.iter add_line (row_lines ~width:inner label value) in
       let add_empty () = add_line "" in
       let section_line title = Printf.sprintf "  %s%s%s" Ansi.bold title Ansi.reset in
       let add_section title = add_line (section_line title) in
 
       (* Identity section, beside the portrait when the pane has room *)
       let identity =
-        [ section_line "Identity"
-        ; row_line "Name:" (Terminal_text.single_line k.k_name)
-        ; row_line "Paused:"
+        let width = match portrait with
+          | None -> inner
+          | Some band -> max 1 (inner - 2 - band.Masc_tui_keeper_portrait.box.cols)
+        in
+        [ section_line "Identity" ]
+        @ row_lines ~width "Name:" (Terminal_text.single_line k.k_name)
+        @ row_lines ~width "Paused:"
             (if k.k_paused then (Theme.warn ()) ^ "yes" ^ Ansi.reset
              else Ansi.dim ^ "no" ^ Ansi.reset)
-        ]
       in
       List.iter add_line
         (match portrait with
@@ -7293,7 +7310,8 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
              | Masc_tui_board_quarantine.Warn -> Theme.warn ()
              | Masc_tui_board_quarantine.Bad -> Theme.bad ()
            in
-           add_line (indent ^ color ^ text ^ Ansi.reset));
+           Message_layout.wrap_words ~max_cells:(max 1 (inner - 2)) text
+           |> List.iter (fun line -> add_line (indent ^ color ^ line ^ Ansi.reset)));
       add_empty ();
 
       (* Gate section. Two settings with similar names decide different things,
@@ -7709,13 +7727,14 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                 [ Ansi.dim ^ "  (no channel transports registered)" ^ Ansi.reset ]
             | None, _ :: _ -> []
             | Some connector, _ ->
+                let field label value =
+                  field_rows ~width:inner ~label_cells:18 ~label_style:"" label value
+                in
                 let optional_row label value =
                   match value with
                   | None -> []
                   | Some value ->
-                      [ Printf.sprintf "  %-18s %s" label
-                          (Terminal_text.single_line value)
-                      ]
+                      field label (Terminal_text.single_line value)
                 in
                 let optional_bool_row label value =
                   optional_row label
@@ -7775,7 +7794,8 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                 ; Ansi.bold ^ "  Selected · "
                   ^ Terminal_text.single_line connector.cn_display_name
                   ^ Ansi.reset
-                ; Printf.sprintf "  %-18s %s" "Binding target"
+                ]
+                @ field "Binding target"
                     (match selected_binding with
                      | None -> "(no binding selected)"
                      | Some binding -> binding_reference binding)
@@ -7783,15 +7803,14 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                      beside it ([decode_connector_connection] takes status,
                      available and connected), so the word never differs from
                      the badge and the row said the same thing twice. *)
-                ; Printf.sprintf "  %-18s %s" "Connection"
+                @ field "Connection"
                     (connection_label connector)
-                ; Printf.sprintf "  %-18s %s" "MASC API"
+                @ field "MASC API"
                     (Printf.sprintf "%s:%d"
                        Masc_network_defaults.masc_http_loopback_peer state.port)
-                ; Printf.sprintf "  %-18s %s" "Channel type"
+                @ field "Channel type"
                     (Terminal_text.single_line_or
                        ~default:Masc_tui_theme.Glyph.no_value connector.cn_channel)
-                ]
                 @ optional_row "Runtime state"
                     (Masc_tui_connector_state.runtime_state_to_draw connector)
                 @ optional_row "Status source" connector.cn_status_source
@@ -7828,24 +7847,24 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                 @ (match connector.cn_directory_authentication_failed with
                    | [] -> []
                    | values ->
-                     [ Printf.sprintf "  %-18s %s" "Authentication"
+                     field "Authentication"
                          (String.concat ", "
                             (List.map Terminal_text.single_line values))
-                     ])
+                     )
                 @ (match connector.cn_directory_permission_denied with
                    | [] -> []
                    | values ->
-                     [ Printf.sprintf "  %-18s %s" "Permission limits"
+                     field "Permission limits"
                          (String.concat ", "
                             (List.map Terminal_text.single_line values))
-                     ])
+                     )
                 @ (match connector.cn_directory_errors with
                    | [] -> []
                    | values ->
-                     [ Printf.sprintf "  %-18s %s" "Directory errors"
+                     field "Directory errors"
                          (String.concat "; "
                             (List.map Terminal_text.single_line values))
-                     ])
+                     )
                 @ optional_row "Directory updated"
                     connector.cn_directory_updated_at
                 @ optional_row "Workspace id" connector.cn_workspace_id
@@ -8115,7 +8134,14 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                  (stamp, identity_lines state k ~cols providers))
                state.identity_view)
             state.identity_view_error
-      | Detail_channels -> channel_lines ()
+      | Detail_channels ->
+          channel_lines ()
+          |> List.concat_map (fun line ->
+               if Message_layout.display_width line <= inner then [line]
+               else
+                 Message_layout.wrap_words ~max_cells:(max 1 (inner - 4)) line
+                 |> List.mapi (fun index row ->
+                      (if index = 0 then "  " else "    ") ^ row ^ Ansi.reset))
       | Detail_automation -> automation_lines ()
       | Detail_runs -> run_lines ()
     in

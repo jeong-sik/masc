@@ -9,9 +9,11 @@ type opening = Overview | Last of Keeper_id.Keeper_name.t option | Keeper of Kee
 
 type t = {
   opening : (opening, string) result;
+  last_chat_keeper : (Keeper_id.Keeper_name.t option, string) result;
   theme : string option;
   board_sort : string option;
   candle : string option;
+  reduce_motion : bool option;
   lift_colours : bool option;
   table_frame : bool option;
   hints_visible : bool option;
@@ -46,11 +48,23 @@ let opening_keeper_of_doc doc =
      | Error reason -> Error ("Invalid [tui].opening_keeper: " ^ reason))
   | Some _ -> Error "[tui].opening_keeper must be a Keeper name string"
 
+let last_chat_keeper_of_doc doc =
+  match List.assoc_opt (tui_table ^ ".last_chat_keeper") doc with
+  | None -> Ok None
+  | Some (Keeper_toml_loader.Toml_string name) ->
+      (match Keeper_id.Keeper_name.of_string name with
+       | Ok name -> Ok (Some name)
+       | Error reason -> Error ("Invalid [tui].last_chat_keeper: " ^ reason))
+  | Some _ -> Error "[tui].last_chat_keeper must be a Keeper name string"
+
 let opening_of_doc doc =
   match List.assoc_opt (tui_table ^ ".opening") doc with
   | None | Some (Keeper_toml_loader.Toml_string "overview") -> Ok Overview
   | Some (Keeper_toml_loader.Toml_string "last") ->
-    Result.map (fun name -> Last name) (opening_keeper_of_doc doc)
+    (match last_chat_keeper_of_doc doc with
+     | Ok (Some name) -> Ok (Last (Some name))
+     | Ok None -> Result.map (fun name -> Last name) (opening_keeper_of_doc doc)
+     | Error reason -> Error reason)
   | Some (Keeper_toml_loader.Toml_string "keeper") ->
     (match opening_keeper_of_doc doc with
      | Ok (Some name) -> Ok (Keeper name)
@@ -66,13 +80,24 @@ let text_with_opening_keeper content ~keeper =
   Toml_line_editor.edit_table_scalar content ~path:tui_table ~key:"opening_keeper"
     ~value:(Some (Keeper_id.Keeper_name.to_string keeper))
 
-let set_opening_keeper ~base_path keeper =
+let record_chat_visit ~base_path keeper =
   match
     Runtime.edit_config_text
       ~runtime_config_path:(runtime_toml_path ~base_path)
-      (fun content -> text_with_opening_keeper content ~keeper)
+      (fun content ->
+         let content =
+           Toml_line_editor.edit_table_scalar content ~path:tui_table
+             ~key:"last_chat_keeper"
+             ~value:(Some (Keeper_id.Keeper_name.to_string keeper))
+         in
+         match Keeper_toml_loader.parse_toml content with
+         | Ok doc ->
+             (match opening_of_doc doc with
+              | Ok (Last _) -> text_with_opening_keeper content ~keeper
+              | Ok (Overview | Keeper _) | Error _ -> content)
+         | Error _ -> content)
   with
-  | Ok (_ : Runtime.config_commit_receipt) -> Ok ()
+  | Ok (receipt : Runtime.config_commit_receipt) -> Ok receipt.durability
   | Error message -> Error message
 
 let text_with_theme content ~theme =
@@ -116,6 +141,9 @@ let lift_colours_of_doc doc = Keeper_toml_loader.toml_bool_opt doc (tui_table ^ 
    for out of the columns, and taking a cell of content from a reader who did
    not ask is the change that needs the stronger reason. *)
 let table_frame_of_doc doc = Keeper_toml_loader.toml_bool_opt doc (tui_table ^ ".table_frame")
+
+let reduce_motion_of_doc doc =
+  Keeper_toml_loader.toml_bool_opt doc (tui_table ^ ".reduce_motion")
 
 (* Whether footers spell their key hints, [tui].hints_visible. Absent reads
    as "yes" -- the hints predate the key, and a reader who never set it must
@@ -171,20 +199,37 @@ let load ~base_path =
      loader this file has always used, and the voice one through the parser
      that owns that section's schema. Reading the voice field by raw path
      would be a second definition of it, which is how it came to have two. *)
-  let text = try Some (Fs_compat.load_file path) with Sys_error _ -> None in
-  let doc = Option.bind text (fun text ->
-    match Keeper_toml_loader.parse_toml text with
-    | Ok doc -> Some doc
-    | Error _ -> None)
+  let text_reading =
+    match Unix.stat path with
+    | exception Unix.Unix_error ((Unix.ENOENT | Unix.ENOTDIR), _, _) -> Ok None
+    | exception Unix.Unix_error (error, _, _) -> Error (Unix.error_message error)
+    | _ ->
+        (try Ok (Some (Fs_compat.load_file path))
+         with Sys_error reason -> Error reason)
+  in
+  let doc_reading =
+    match text_reading with
+    | Ok None -> Ok None
+    | Error reason -> Error reason
+    | Ok (Some text) -> Result.map Option.some (Keeper_toml_loader.parse_toml text)
+  in
+  let text = match text_reading with Ok text -> text | Error _ -> None in
+  let doc = match doc_reading with Ok doc -> doc | Error _ -> None
   in
   let read extract = Option.bind doc extract in
   { opening =
       (match doc with
        | Some doc -> opening_of_doc doc
        | None -> Ok Overview);
+    last_chat_keeper =
+      (match doc_reading with
+       | Ok (Some doc) -> last_chat_keeper_of_doc doc
+       | Ok None -> Ok None
+       | Error reason -> Error ("Conversation history unavailable: " ^ reason));
     theme = read theme_of_doc;
     board_sort = read (fun doc -> Keeper_toml_loader.toml_string_opt doc (tui_table ^ ".board_sort"));
     candle = read (fun doc -> Keeper_toml_loader.toml_string_opt doc (tui_table ^ ".candle"));
+    reduce_motion = read reduce_motion_of_doc;
     lift_colours = read lift_colours_of_doc;
     table_frame = read table_frame_of_doc;
     hints_visible = read hints_visible_of_doc;

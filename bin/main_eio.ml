@@ -1059,24 +1059,27 @@ let token_list_cmd_exit base_path =
   Cmd.Exit.ok
 
 let token_revoke_cmd_exit base_path agent =
-  let base_path, creds = token_credentials base_path in
-  let known =
-    List.exists (fun (c : Types_auth.agent_credential) -> c.agent_name = agent) creds
-  in
-  if not known
-  then (
+  let base_path = Env_config.normalize_masc_base_path_input base_path in
+  let retired = Auth.with_credential_transaction base_path (fun transaction ->
+    let ( let* ) = Result.bind in
+    let* present = Auth.credential_exists_in_transaction transaction agent in
+    if not present then Ok false
+    else Auth.delete_credential_in_transaction transaction agent |> Result.map (fun () -> true))
+    |> Result.join in
+  match retired with
+  | Error error ->
+    Printf.eprintf "cannot retire %S: %s\n" agent (Masc_domain.masc_error_to_string error);
+    Cmd.Exit.some_error
+  | Ok false ->
     Printf.eprintf
-      "no credential named %S; `masc token list` shows what this workspace holds\n"
-      agent;
-    Cmd.Exit.some_error)
-  else (
-    Auth.delete_credential base_path agent;
+      "no credential named %S; `masc token list` shows what this workspace holds\n" agent;
+    Cmd.Exit.some_error
+  | Ok true ->
     Printf.printf
       "retired %s. Its bearer stops validating from the next request; anything \
        still exporting it needs a new one from `masc login --agent %s`.\n"
-      agent
-      agent;
-    Cmd.Exit.ok)
+      agent agent;
+    Cmd.Exit.ok
 
 (* Only expired credentials. Removing one that already authenticates nothing is
    garbage collection rather than a security decision, which is why this needs
@@ -3590,16 +3593,27 @@ let wizard_model_entries client catalog =
         entry.id_prefix
     | _ -> false)
 
-let wizard_model_context model entries =
+let wizard_model_context ?(prefer_bare = false) model entries =
+  let exact_entries = entries
+    |> List.filter (fun (entry : Llm_provider.Model_catalog.model_entry) ->
+      String.equal
+        (Llm_provider.Model_identifiers.Id_prefix.to_string entry.id_prefix)
+        model
+      || Option.fold ~none:false ~some:(List.mem model) entry.supported_models)
+  in
+  let entries =
+    if prefer_bare
+    then
+      match List.filter (fun (entry : Llm_provider.Model_catalog.model_entry) ->
+        Option.is_none entry.provider_name) exact_entries with
+      | [] -> exact_entries
+      | bare -> bare
+    else exact_entries
+  in
   let contexts = entries
     |> List.filter_map (fun (entry : Llm_provider.Model_catalog.model_entry) ->
-      let exact =
-        String.equal
-          (Llm_provider.Model_identifiers.Id_prefix.to_string entry.id_prefix)
-          model
-        || Option.fold ~none:false ~some:(List.mem model) entry.supported_models in
       match entry.max_context_tokens with
-      | Some context when exact && context > 0 -> Some context
+      | Some context when context > 0 -> Some context
       | _ -> None)
     |> List.sort_uniq Int.compare
   in
@@ -3635,7 +3649,11 @@ let runtime_model_list_cmd =
                                                        ; "release", Model_release_evidence.default_model_json
                                                            ~publisher:(match client with Wizard_claude_code -> "anthropic" | Wizard_codex -> "openai")
                                                            ~model_id:model ])
-                       (wizard_model_context model entries)))))
+                       (* Bare rows describe the native client; a direct API
+                          row can have a different context for the same ID. *)
+                       (wizard_model_context
+                          ~prefer_bare:(match client with Wizard_codex -> true | Wizard_claude_code -> false)
+                          model entries)))))
       | None, Some provider_id -> Runtime_wizard_inventory.provider_model_rows provider_id
     in
     match models_result with
@@ -3786,14 +3804,28 @@ let runtime_model_info_cmd =
         | None -> entries
         | Some provider -> (match Agent_core.Provider_runtime_binding.find provider with
           | None -> []
-          | Some binding -> List.filter (fun (entry : Llm_provider.Model_catalog.model_entry) ->
+          | Some binding ->
+            let scoped = List.filter (fun (entry : Llm_provider.Model_catalog.model_entry) ->
+              match entry.provider_name with
+              | Some name -> name = binding.id || List.mem name binding.aliases
+              | None -> false) entries in
+            let has_exact_scoped = List.exists
+              (fun (entry : Llm_provider.Model_catalog.model_entry) ->
+                String.equal (Llm_provider.Model_identifiers.Id_prefix.to_string entry.id_prefix) model
+                || Option.fold ~none:false ~some:(List.mem model) entry.supported_models)
+              scoped in
+            if has_exact_scoped then scoped else
+            List.filter (fun (entry : Llm_provider.Model_catalog.model_entry) ->
               match entry.provider_name with
               | None -> true
               | Some name -> name = binding.id || List.mem name binding.aliases) entries) in
-      (* A generic family prefix is not evidence for the context of a model
-         the installer does not know. Include provider-scoped exact rows, and
-         reject conflicting declarations rather than pick a convenient one. *)
-      match wizard_model_context model entries with
+      (* A generic family prefix is not evidence for an unknown model. The
+         explicit provider owns its scoped exact row; Codex owns its bare
+         exact row. Conflicts within that chosen source remain unknown. *)
+      let prefer_bare = match client, provider with
+        | Some Wizard_codex, None -> true
+        | Some Wizard_claude_code, _ | None, _ | Some Wizard_codex, Some _ -> false in
+      match wizard_model_context ~prefer_bare model entries with
       | Some context ->
         print_endline (Yojson.Safe.to_string (`Assoc ["model", `String model; "max_context", `Int context])); 0
       | None -> 1

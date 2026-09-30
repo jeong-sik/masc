@@ -1515,7 +1515,7 @@ let test_measuring_reads_what_the_row_draws () =
 let test_a_control_byte_is_measured_as_it_is_drawn () =
   List.iter
     (fun name ->
-      let on_screen = Masc.Tui_decode.sanitize_terminal_text name in
+      let on_screen = Masc.Tui_terminal_text.sanitize_terminal_text name in
       let columns =
         Acting.columns ~inner_width:160
           [ Acting.measured_of_event ~traces:[] (heartbeat name) ]

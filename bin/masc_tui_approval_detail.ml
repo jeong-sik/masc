@@ -1,5 +1,4 @@
 module Message_layout = Masc_tui_message_layout
-module Tui_decode = Masc.Tui_decode
 
 type line =
   { label : string option
@@ -52,8 +51,8 @@ let of_fields ~width fields =
   let fields =
     List.map
       (fun (label, value) ->
-        ( Tui_decode.sanitize_terminal_text label
-        , Tui_decode.sanitize_terminal_lines value ))
+        ( Masc.Tui_terminal_text.sanitize_terminal_text label
+        , Masc.Tui_terminal_text.sanitize_terminal_lines value ))
       fields
   in
   let label_cells =

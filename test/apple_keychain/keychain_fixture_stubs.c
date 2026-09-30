@@ -1,4 +1,7 @@
-/* Dune checks the foreign sources even when the macOS test is disabled. */
+/* Dune can compile foreign objects for @check even when this macOS-only
+ * test is disabled. Keep Security headers and the real fixture behind the
+ * same platform guard as the production stub. Unexpected calls elsewhere
+ * fail explicitly rather than inventing keychain or observation results. */
 #ifdef __APPLE__
 #include <caml/mlvalues.h>
 #include <caml/fail.h>
@@ -32,4 +35,24 @@ CAMLprim value masc_test_keychain_set_interaction(value allowed) {
     caml_failwith("cannot set fixture interaction setting");
   return Val_unit;
 }
+
+#else
+#include <caml/mlvalues.h>
+#include <caml/fail.h>
+
+CAMLprim value masc_test_keychain_add_allowed(value path) {
+  (void)path;
+  caml_failwith("macOS Keychain test fixtures require macOS");
+}
+
+CAMLprim value masc_test_keychain_interaction_allowed(value unit) {
+  (void)unit;
+  caml_failwith("macOS Keychain test fixtures require macOS");
+}
+
+CAMLprim value masc_test_keychain_set_interaction(value allowed) {
+  (void)allowed;
+  caml_failwith("macOS Keychain test fixtures require macOS");
+}
+
 #endif

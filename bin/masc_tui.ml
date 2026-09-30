@@ -25113,34 +25113,7 @@ and is loaded on demand through keeper_skill.
                         state.view <- Code;
                         launch_code_entries_load state
                           ~mailbox:async_messages))
-            | Runtime ->
-                (match state.runtime_surface, state.runtime_mode with
-                 | Some snapshot, Runtime_lanes ->
-                     (match List.nth_opt snapshot.Masc.Tui_decode.rss_candidates
-                              state.runtime_cursor with
-                      | None -> ()
-                      | Some row ->
-                          state.runtime_detail_target <-
-                            Some
-                              (Runtime_lane_candidate
-                                 { lane_id = row.rcr_lane_id
-                                 ; runtime_id = row.rcr_runtime.ro_id
-                                 });
-                          state.runtime_detail_scroll <- 0)
-                 | Some snapshot, Runtime_all ->
-                     (match
-                        List.nth_opt
-                          snapshot.Masc.Tui_decode.rss_resolved.rrs_runtimes
-                          state.runtime_cursor
-                      with
-                      | None -> ()
-                      | Some runtime ->
-                          state.runtime_detail_target <-
-                            Some
-                              (Runtime_catalog_entry
-                                 { runtime_id = runtime.ro_id });
-                          state.runtime_detail_scroll <- 0)
-                 | None, _ -> ())
+            | Runtime -> Masc_tui_types.open_runtime_row_detail state
             | System_logs -> open_selected_system_log state
             | Keepers Keeper_detail | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message

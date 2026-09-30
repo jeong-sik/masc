@@ -9,6 +9,8 @@ import test_tui_home_journey_pty as home
 import test_tui_keyboard_input as h
 
 SOURCE_MODULES = (
+    "bin/masc_tui_render_approvals.ml",
+    "bin/masc_tui_render_approvals.mli",
     "bin/masc_tui_render.ml",
     "bin/masc_tui_types.ml",
     "bin/masc_tui_render_prim.ml",

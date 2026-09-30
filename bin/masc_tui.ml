@@ -5575,7 +5575,8 @@ let diff_text_max_width text =
 
 let git_diff_body_max_width (diff : Tui_decode.git_diff) =
   List.fold_left (fun widest (row : Tui_decode.git_diff_row) ->
-    max widest (diff_text_max_width row.gdr_text)) 0 diff.gd_rows
+    max widest (Message_layout.display_width
+      (Terminal_text.single_line row.gdr_text))) 0 diff.gd_rows
 
 let refresh_recorded_diff_bounds state ~reset =
   let width = match opened_file_change state with

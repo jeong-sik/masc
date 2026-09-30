@@ -6,7 +6,7 @@ import { EQUIPMENT_IDS } from '../api/schemas/keeper-portrait'
 
 const fetchKeeperItems = vi.hoisted(() => vi.fn())
 vi.mock('../api/keeper-items', () => ({ fetchKeeperItems }))
-vi.mock('./keeper-portrait', () => ({ KeeperPortrait: () => html`<div data-testid="portrait" />` }))
+vi.mock('./keeper-portrait', () => ({ KeeperPortrait: ({ previewItem }: { previewItem?: string }) => html`<div data-testid="portrait" data-preview=${previewItem ?? ''} />` }))
 vi.mock('./keeper-badge', () => ({ KeeperBadge: () => html`<div />` }))
 vi.mock('../sse', () => ({ journal: { log: vi.fn() } }))
 
@@ -61,6 +61,35 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.resetAllMocks() })
 
 describe('Keeper Item tab', () => {
+  it('previews an unowned item and restores the observed outfit without refetching the wallet', async () => {
+    fetchKeeperItems.mockResolvedValue(account(['crown'], '200'))
+    const observed = keeper('rondo')
+    render(html`<${KeeperItemsPanel} keeper=${observed} />`)
+    await screen.findByText('보유 1 / 18개')
+    fireEvent.click(screen.getByRole('button', { name: 'beanie 미리보기' }))
+    expect(screen.getByTestId('portrait').getAttribute('data-preview')).toBe('beanie')
+    expect(screen.getByText('미리보기 · beanie')).toBeTruthy()
+    expect(screen.getByText('착용 중')).toBeTruthy()
+    expect(observed.portrait?.state === 'ready' && observed.portrait.equipment.head).toBe('crown')
+    fireEvent.click(screen.getByRole('button', { name: '현재 착용 보기' }))
+    expect(screen.getByTestId('portrait').getAttribute('data-preview')).toBe('')
+    expect(fetchKeeperItems).toHaveBeenCalledTimes(1)
+  })
+
+  it('withdraws a preview when the workspace account changes and requires an observed portrait', async () => {
+    fetchKeeperItems.mockResolvedValue(account(['crown'], '200'))
+    const view = render(html`<${KeeperItemsPanel} keeper=${keeper('rondo')} />`)
+    await screen.findByText('보유 1 / 18개')
+    fireEvent.click(screen.getByRole('button', { name: 'beanie 미리보기' }))
+    await act(async () => { observeWorkspace('/fixture/workspace-b') })
+    await screen.findByText('보유 1 / 18개')
+    expect(screen.queryByText('미리보기 · beanie')).toBeNull()
+    expect(screen.getByTestId('portrait').getAttribute('data-preview')).toBe('')
+    view.rerender(html`<${KeeperItemsPanel} keeper=${{ ...keeper('rondo'), portrait: { state: 'unavailable', reason: 'ledger unavailable' } }} />`)
+    await screen.findByText('보유 1 / 18개')
+    expect(screen.getByRole('button', { name: 'beanie 미리보기' })).toHaveProperty('disabled', true)
+  })
+
   it('withdraws accounts across same-project A/B/A and refuses the first A read after returning', async () => {
     const firstARefresh = pendingAccount()
     const returningA = pendingAccount()

@@ -1,0 +1,14 @@
+{
+  "scope": "Component fixture, not native server or installed dashboard",
+  "parent_head": "e3fe94f569fa6f51e1afef6fef272c1fe5195ed0",
+  "frontend": {
+    "tests": 24,
+    "files": 2,
+    "result": "passed",
+    "duration_seconds": 2.6
+  },
+  "typescript": "tsc --noEmit passed",
+  "ocaml": "stop-after parsing passed; native build and router test not executed",
+  "ci_dispatches": 0,
+  "screenshot": "Chromium launch refused: bootstrap_check_in KERN permission denied (1100)"
+}

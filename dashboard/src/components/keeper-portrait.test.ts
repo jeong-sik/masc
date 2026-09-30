@@ -60,6 +60,20 @@ describe('KeeperPortrait', () => {
     html`<${KeeperPortrait} name=${name} reading=${reading} sizePx=${40} fallback=${fallback} />`
   const shown = () => container.querySelector('img[data-testid="keeper-portrait"]') as HTMLImageElement | null
 
+  it('requests an authenticated accessory preview and restores the current portrait', async () => {
+    setStoredToken('portrait-preview-token')
+    const fetchMock = vi.fn(async (_path: string, _init?: RequestInit) => png())
+    vi.stubGlobal('fetch', fetchMock)
+    render(html`<${KeeperPortrait} name="wick-tester" reading=${ready} sizePx=${40} previewItem="glasses" fallback=${fallback} />`, container)
+    await waitFor(() => expect(shown()?.getAttribute('src')).toBe('blob:portrait-1'))
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/keepers/wick-tester/portrait.png?size=80&preview=glasses')
+    expect(new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get('Authorization')).toBe('Bearer portrait-preview-token')
+    render(portrait('wick-tester'), container)
+    await waitFor(() => expect(shown()?.getAttribute('src')).toBe('blob:portrait-2'))
+    expect(fetchMock.mock.calls[1]?.[0]).toBe('/api/v1/keepers/wick-tester/portrait.png?size=80')
+    expect(revoked).toEqual(['blob:portrait-1'])
+  })
+
   it('reserves its box while the portrait is on its way', () => {
     vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(() => {})))
     render(portrait('wick-tester'), container)

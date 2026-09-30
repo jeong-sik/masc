@@ -1,7 +1,7 @@
 # TUI에서 TOML Lane Add-on 설치·연결하기
 
 같은 서버를 사용하는 `masc-tui --base-path <base-path> --port <server-port>`를 연다.
-메인 `Lanes` 탭에서 `o` 또는 `A`로 Lane Add-ons를 연다. 둘은 같은 화면을 열며, Lanes 머리글과 아래 키 줄이 `o / A`로 함께 적는다.
+`Lanes` 화면에서 `o` 또는 `A`로 Lane Add-ons를 연다. 둘은 같은 화면을 열며, Lanes 머리글과 아래 키 줄이 `o / A`로 함께 적는다.
 입력창의 `/addons`나 `:` 팔레트의 `go Lane Add-ons`로도 연다.
 `Lanes`는 standalone 실행과 실행 상세를 다룬다. Add-ons는 패키지 설치·연결·여러 Lane의 관측을 다룬다.
 
@@ -26,7 +26,7 @@ Add-ons를 열면 **설치 목록**이 나온다. 설치 선언(TOML)과 실행 
 | `3` | Installation | 설치 선언 원문, desired/applied revision, 적용 오류 |
 | `4` | Records | 관측 행의 원문 필드와 근거 |
 
-Timeline에서 `j/k`는 관측 시각 순서로 사건을 선택한다. 같은 시각의 사건도 각각 선택할 수 있다.
+Activity에서 `j/k`는 관측 시각 순서로 사건을 선택한다. 같은 시각의 사건도 각각 선택할 수 있다.
 `←/→`는 이웃 Lane으로 이동한다. 선택 시각 이후의 첫 사건을 선택하고, 없으면 그 Lane의 마지막 사건을 선택한다.
 화면보다 Lane이나 사건이 많으면 선택 위치를 따라 표시 범위가 이동한다. `J/K`로 긴 상세 내용을 스크롤한다.
 `●`는 event, `◆`는 value, `↔`는 relation이다. 선택한 셀과 근거로 표시한 행은 별도 표시로 구분한다.
@@ -49,7 +49,7 @@ Links의 화살표는 선언된 binding이다. 성공한 전달이나 인과관�
 기존 서버와 같은 validator로 검사한다. 특정 패키지 이름이나 행동 이름을 추측하지 않는다.
 필수 자유 입력이 있는 스키마는 고급 `:act` 경로를 사용한다. `D`는 원문 보기이며
 원문 스키마·revision·연결·근거를 펼친다. 기본 화면에도 오류와 불완전한 입력은 표시된다.
-`Tab`은 인스턴스 → 관측 행 → 설치 선언 순으로 선택 영역을 옮긴다.
+상세의 `Tab`은 Activity → Links → Installation → Records 순으로 화면을 바꾼다.
 
 ## 패키지와 설치 선언
 

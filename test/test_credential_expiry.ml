@@ -171,10 +171,37 @@ let test_malformed_expiry_keeps_the_controller () =
       | Ok _ -> fail "an unknown expiry cannot free the controller for another caller"))
     invalid_expiries
 
+let test_persisted_invalid_invite_reaches_diagnostic_projections () =
+  List.iter (fun use_uuid ->
+    with_workspace @@ fun base_path _ ->
+    let token, credential = auth_ok (Auth.create_token_without_expiry base_path
+        ~agent_name:"visitor" ~role:Masc_domain.Player) in
+    let id = if use_uuid then Some (Masc_domain.Credential_id.generate ()) else None in
+    Auth.save_credential base_path { credential with id; expires_at = Some "not-a-timestamp" };
+    check bool "the malformed persisted bearer still fails authentication" true
+      (Result.is_error (Auth.find_static_credential_by_token base_path ~token));
+    let entries = Auth.list_credential_results base_path in
+    (match entries with
+     | [ Error (Auth.Invalid_credential_expiry { agent_name; role; timestamp }) ] ->
+       check string "diagnostic retains the owner" "visitor" agent_name;
+       check bool "diagnostic retains Player role" true (role = Masc_domain.Player);
+       check string "diagnostic retains rejected expiry" "not-a-timestamp" timestamp;
+       check string "inventory exposes persisted invalid expiry"
+         (Printf.sprintf "%-32s %-6s INVALID expiry not-a-timestamp" "visitor" "player")
+         (Inventory.error_row (Auth.Invalid_credential_expiry { agent_name; role; timestamp }))
+     | _ -> fail "named and UUID-backed corruption must each produce exactly one diagnostic");
+    (match Invite.list ~base_path ~now:(Time_compat.now ()) with
+     | Error (Auth.Invalid_credential_expiry { timestamp = "not-a-timestamp"; _ }) -> ()
+     | Error error -> fail (Auth.credential_listing_error_to_string error)
+     | Ok _ -> fail "Play must not silently omit persisted malformed invites"))
+    [ false; true ]
+
 let () =
   run "credential expiry feature"
     [ "bearer, OAuth, seats and inventory",
-      [ test_case "offsets and fractions share the whole-second boundary" `Quick
+      [ test_case "persisted malformed invites reach listings and inventory" `Quick
+          test_persisted_invalid_invite_reaches_diagnostic_projections
+      ; test_case "offsets and fractions share the whole-second boundary" `Quick
           test_representations_share_auth_and_prune_boundary
       ; test_case "malformed expiry denies a known bearer and live OAuth bootstrap" `Quick
           test_malformed_expiry_denies_a_known_bearer_and_bootstrap

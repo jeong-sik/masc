@@ -285,10 +285,61 @@ let test_absent_uuid_collision_refused () =
   check bool "the colliding UUID is never created" false
     (Sys.file_exists (Auth.credential_file base_path "absent-uuid"))
 
+let test_unique_owner_uuid_collision_refused () =
+  with_workspace @@ fun base_path ->
+  let first, _second = seed_pair base_path in
+  let outsider = auth_ok (Auth.save_file_backed_raw_token_credential base_path
+      ~agent_name:"operator" ~role:Masc_domain.Admin ~raw_token:"unique-operator-token") in
+  let id = Some (Masc_domain.Credential_id.of_string "absent-shared-uuid") in
+  List.iter (fun (name, current) -> Auth.save_private_text_file
+    (Auth.credential_file base_path name)
+    (Masc_domain.agent_credential_to_yojson { current with Masc_domain.id = id } |> Yojson.Safe.to_string))
+    [ "aaa", first; "operator", outsider ];
+  let before_operator = read (Auth.credential_file base_path "operator") in
+  check_refused_before_writes base_path (snapshot base_path);
+  check string "unique owner stays unchanged" before_operator (read (Auth.credential_file base_path "operator"));
+  check bool "UUID shared with a unique owner is not created" false
+    (Sys.file_exists (Auth.credential_file base_path "absent-shared-uuid"))
+
+let test_one_selected_owner_rotates () =
+  with_workspace @@ fun base_path ->
+  let _pair = seed_pair base_path in
+  let other = credential base_path "bbb" in
+  (match auth_ok (Auth.rotate_shared_tokens_for_agents base_path ~agent_names:[ "aaa" ]) with
+   | [ { Auth.rotated_agents = [ "aaa", Ok () ]; _ } ] -> ()
+   | _ -> fail "one selected member of a globally shared group must rotate");
+  check bool "unselected owner is unchanged" true (credential base_path "bbb" = other);
+  List.iter (check_recoverable base_path) [ "aaa"; "bbb" ]
+
+let test_keeper_before_rotation () =
+  with_workspace @@ fun base_path ->
+  let _pair = seed_pair base_path in
+  let ensured, rotated = interleave base_path
+      (fun () -> Auth.ensure_keeper_credential base_path ~agent_name:"aaa")
+      (fun () -> rotate base_path) in
+  let token, _credential = auth_ok ensured in
+  check int "keeper repair breaks the shared group" 0 (List.length (auth_ok rotated));
+  check string "returned keeper token is recoverable" token (current_raw base_path "aaa");
+  List.iter (check_recoverable base_path) [ "aaa"; "bbb" ]
+
+let test_rotation_before_keeper () =
+  with_workspace @@ fun base_path ->
+  let _pair = seed_pair base_path in
+  let rotated, ensured = interleave base_path (fun () -> rotate base_path)
+      (fun () -> Auth.ensure_keeper_credential base_path ~agent_name:"aaa") in
+  check_rotated rotated;
+  let token, _credential = auth_ok ensured in
+  check string "keeper reuses the current rotated token" token (current_raw base_path "aaa");
+  List.iter (check_recoverable base_path) [ "aaa"; "bbb" ]
+
 let () =
   run "auth_token_rotation_transaction"
     [ "rotation",
-      [ test_case "Admin renewal before rotation" `Quick test_admin_before_rotation
+      [ test_case "unique owner UUID collision refuses before writes" `Quick test_unique_owner_uuid_collision_refused
+      ; test_case "one selected owner in a global shared group rotates" `Quick test_one_selected_owner_rotates
+      ; test_case "keeper publisher before rotation" `Quick test_keeper_before_rotation
+      ; test_case "rotation before keeper publisher" `Quick test_rotation_before_keeper
+      ; test_case "Admin renewal before rotation" `Quick test_admin_before_rotation
       ; test_case "rotation before Admin renewal" `Quick test_rotation_before_admin
       ; test_case "prune before rotation cannot resurrect credentials" `Quick test_prune_before_rotation
       ; test_case "rotation before prune retains recoverable raw tokens" `Quick test_rotation_before_prune

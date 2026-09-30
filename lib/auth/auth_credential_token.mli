@@ -53,6 +53,12 @@ val find_static_credential_by_token :
     OAuth access token cannot mint a new OAuth grant recursively. General
     request authentication should use {!find_credential_by_token}. *)
 
+val find_static_credential_in_transaction :
+  Auth_credential_base.credential_transaction -> token:string ->
+  (agent_credential, masc_error) result
+(** Reads all current owners under the caller's transaction, without consulting
+    the request cache or acquiring the transaction again. *)
+
 val resolve_agent_from_token :
   string -> token:string -> (string, masc_error) result
 

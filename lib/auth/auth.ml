@@ -49,9 +49,9 @@ let ensure_keeper_credential config ~agent_name
     match current, raw with
     | Some credential, Some raw_token
       when constant_time_string_equal credential.token (sha256_hash raw_token) ->
-      (match require_live_credential ~now:(Time_compat.now ()) credential with
+      (match find_static_credential_in_transaction transaction ~token:raw_token with
        | Ok credential -> Ok (raw_token, credential)
-       | Error (Auth (Auth_error.TokenExpired _)) -> create_fresh_keeper_token transaction current
+       | Error (Auth _) -> create_fresh_keeper_token transaction current
        | Error _ as error -> error)
     | Some _, Some _ | Some _, None | None, Some _ | None, None ->
       create_fresh_keeper_token transaction current)

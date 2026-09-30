@@ -180,6 +180,19 @@ val delete_credential_in_transaction :
     {!with_credential_transaction}. No second lock is acquired. Cache
     invalidation also runs if a removal fails after a partial deletion. *)
 
+type credential_listing_error =
+  | Invalid_credential_expiry of
+      { agent_name : string; role : agent_role; timestamp : string }
+  | Unreadable_credential of { path : string; reason : string }
+
+val list_credential_results :
+  string -> (agent_credential, credential_listing_error) result list
+(** Diagnostic listing that retains malformed expiry and read/decode failures.
+    Invalid records are never returned as authentication credentials. Redirect
+    aliases are de-duplicated by the resolved record or failing target. *)
+
+val credential_listing_error_to_string : credential_listing_error -> string
+
 val list_credentials : string -> agent_credential list
 
 val audit_token_uniqueness : string -> (string * string list) list

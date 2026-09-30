@@ -1,0 +1,40 @@
+{
+  "cause": {
+    "native_run": 36669420029,
+    "published_head": "040761c68ae64cc7165ca9c3f570e086c2354d01",
+    "artifact": "/tmp/masc-rotation-040-native/ci-run-tests.log",
+    "artifact_sha256": "38451523467845c7597e263cdb6a67ba3935ed571ac81e0667cf8b38049ef537",
+    "primary_error_excerpt": [
+      "File \"test/test_auth_token_rotation_transaction.ml\", line 212, characters 18-33:",
+      "212 |   let directory = Auth.agents_dir base_path in",
+      "Error: Unbound value Auth.agents_dir"
+    ]
+  },
+  "repair": "credential directory fixture derives from Filename.dirname(Auth.credential_file base_path \"aaa\"); no new public API exposed",
+  "new_feature_test_Auth_symbols": [
+    "Not_published",
+    "Publication_unreadable",
+    "Published",
+    "auth_config_file",
+    "auth_dir",
+    "create_token",
+    "credential_file",
+    "delete_credential",
+    "ensure_keeper_credential",
+    "find_static_credential_by_token",
+    "load_credential",
+    "load_raw_token",
+    "raw_token_file",
+    "rotate_shared_tokens",
+    "rotated_agents",
+    "save_auth_config",
+    "save_credential",
+    "save_file_backed_raw_token_credential",
+    "save_private_text_file",
+    "sha256_hash",
+    "verify_token"
+  ],
+  "public_auth_mli_sha256": "c5ac5d41060abb0bc0b127077eff9059878fcff020eb863e3bbd95c89d43cc88",
+  "all_referenced_Auth_symbols_present_in_public_interface": true,
+  "limit": "textual public-interface source verification only; native revalidation is pending root"
+}

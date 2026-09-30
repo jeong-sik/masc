@@ -475,6 +475,12 @@ let test_plan_rejects_invalid_graphs_and_output_edges () =
   (match Plan.create ~descriptors:[ lane; lane ] [ duplicate_a ] with
    | Error (Plan.Duplicate_tool_name "keeper_lane_status") -> ()
    | Error _ | Ok _ -> fail "ambiguous descriptor name was not rejected");
+  (* The first name that repeats an earlier one, in the order given. *)
+  let board = descriptor "masc_board_stats" in
+  (match Plan.create ~descriptors:[ lane; board; board; lane ] [ duplicate_a ] with
+   | Error (Plan.Duplicate_tool_name name) ->
+     check string "the first repeated name is reported" "masc_board_stats" name
+   | Error _ | Ok _ -> fail "two ambiguous descriptor names were not rejected");
   (match Plan.create ~descriptors:(descriptors ()) [] with
    | Error Plan.Empty_plan -> ()
   | Error _ | Ok _ -> fail "empty plan was accepted")
@@ -722,6 +728,40 @@ let test_plan_uses_process_owned_descriptor_authority () =
         | Descriptor.Ordinary Descriptor.Concurrent, Descriptor.Json_output _ -> ()
         | _ -> fail "record-updated descriptor fields became plan authority")
      | Some _ | None -> fail "plan did not retain process-owned descriptor authority")
+;;
+
+(* A supplied copy the Keeper model could not call, or whose input schema is
+   broken, still names the registered tool: a plan takes both the descriptor
+   and its names from the registry. *)
+let test_plan_names_come_from_the_registered_descriptor () =
+  let canonical = descriptor "keeper_lane_status" in
+  let lane_node = node ~id:"lane" ~tool_name:"keeper_lane_status" literal_object in
+  List.iter
+    (fun (label, supplied) ->
+       match Plan.create ~descriptors:[ supplied ] [ lane_node ] with
+       | Ok plan ->
+         (match Plan.descriptor plan (node_id "lane") with
+          | Some registered when registered == canonical -> ()
+          | Some _ | None -> fail (label ^ ": the plan lost the registered descriptor"))
+       | Error error -> fail (label ^ ": " ^ Plan.error_to_string error))
+    [ ( "an operator-only copy"
+      , { canonical with Descriptor.keeper_model_projection = Descriptor.Operator_only } )
+    ; ( "a copy with a broken input schema"
+      , { canonical with Descriptor.input_schema = `Assoc [ "properties", `Int 3 ] } )
+    ]
+;;
+
+(* A plan resolves a descriptor by its id, and so does [Descriptor.find_id].
+   With one registered descriptor per id, neither has to choose. *)
+let test_registered_descriptor_ids_are_unique () =
+  let ids =
+    List.map (fun (registered : Descriptor.t) -> registered.id) (descriptors ())
+  in
+  let repeated =
+    List.filter (fun id -> List.length (List.filter (String.equal id) ids) > 1) ids
+    |> List.sort_uniq String.compare
+  in
+  check (list string) "no id names two descriptors" [] repeated
 ;;
 
 let test_composable_output_registry_is_closed () =
@@ -1910,6 +1950,14 @@ let () =
             "canonical descriptor authority"
             `Quick
             test_plan_uses_process_owned_descriptor_authority
+        ; test_case
+            "plan names come from the registered descriptor"
+            `Quick
+            test_plan_names_come_from_the_registered_descriptor
+        ; test_case
+            "registered descriptor ids are unique"
+            `Quick
+            test_registered_descriptor_ids_are_unique
         ] )
       ; ( "defined but never registered until task-1768",
           [ Alcotest.test_case "request composable names match registry" `Quick test_request_composable_names_match_registry

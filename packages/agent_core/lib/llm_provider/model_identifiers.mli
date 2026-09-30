@@ -13,6 +13,18 @@
    [to_string] is the boundary escape hatch (TUI rows, JSON/TOML wire, logs)
    and returns the original bytes. *)
 
+module Equality_key : sig
+  type t = private string
+  (** An identifier's bytes with ASCII case folded, as {!Id_prefix.equal}
+      and {!Model_id.equal} compare them.  Only [Id_prefix.equality_key]
+      and [Model_id.equality_key] make one, so a table keyed by it is never
+      probed with bytes that were not folded.  [(key :> string)] reads the
+      folded bytes. *)
+
+  val compare : t -> t -> int
+  val equal : t -> t -> bool
+end
+
 module Id_prefix : sig
   type t
   (** The catalog row [id_prefix] — the row's original bytes. *)
@@ -30,6 +42,10 @@ module Id_prefix : sig
   val equal : t -> t -> bool
   (** Case-insensitive equality (ASCII case folded); no trim, since
       {!of_string} rejects padded input. *)
+
+  val equality_key : t -> Equality_key.t
+  (** The key {!equal} compares: two rows are [equal] exactly when their
+      keys are.  The provider-scoped catalog lookup files rows by it. *)
 
   val starts_with : prefix:t -> t -> bool
   (** Prefix matching between catalog identifiers, e.g. wizard client gating
@@ -80,9 +96,10 @@ module Model_id : sig
   (** Case-insensitive equality (ASCII case folded); no trim, since
       {!of_string} rejects padded input. *)
 
-  val equal_id_prefix : prefix:Id_prefix.t -> t -> bool
-  (** Exact comparison with a catalog row identifier. ASCII case is folded;
-      neither side is trimmed. *)
+  val equality_key : t -> Equality_key.t
+  (** The key {!equal} compares.  The provider-scoped catalog lookup
+      ([Model_catalog.lookup_for_provider_result]) answers with the row whose
+      {!Id_prefix.equality_key} equals it. *)
 
   val starts_with : prefix:Id_prefix.t -> t -> bool
   (** Prefix matching between a catalog row and a requested model id.

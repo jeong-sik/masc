@@ -209,7 +209,7 @@ let test_credential_failure_after_raw_publication () =
   with_workspace @@ fun base_path ->
   let _pair = seed_pair base_path in
   let before = List.map (fun name -> read (Auth.credential_file base_path name)) [ "aaa"; "bbb" ] in
-  let directory = Auth.agents_dir base_path in
+  let directory = Filename.dirname (Auth.credential_file base_path "aaa") in
   (* The credential directory is readable, but publication cannot create a
      replacement file. Raw sidecars live in the writable parent Auth directory. *)
   Unix.chmod directory 0o500;

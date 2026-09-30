@@ -1,0 +1,345 @@
+{
+  "feature": "expiry",
+  "scope": "full pinned current-main source composition only; no local typecheck, Dune, native, runtime, network or CI",
+  "checked_at": "2026-09-30T05:07:13.968963+00:00",
+  "main_baseline": "c112b2030652a5a25360f5d5322f8dc6da99c598",
+  "immediate_local_parent": "c95f5df97d0614732c67144d7e5d5673c7dc6229",
+  "checked_source_commit": "7be7dcdd688337bbefec1c5672b094e60a8188ce",
+  "original_own_delta_parent": "dd52508a32",
+  "original_feature_source": "8d6c3e9063",
+  "previous_published_api_head": "63cc46e9380102e8a39e46b14bd7b9358fcfad74",
+  "extraction": "own allowed-path net feature delta; parent fixture/main overlays excluded; test/dune only actual additive native registration",
+  "parent_delta_manifest": [
+    "changelog.d/40171.md",
+    "docs/evidence/2026-09-30-credential-expiry-source-audit/README.md",
+    "docs/evidence/2026-09-30-credential-expiry-source-audit/SHA256SUMS",
+    "docs/evidence/2026-09-30-credential-expiry-source-audit/current-main-composition.json",
+    "docs/evidence/2026-09-30-credential-expiry-source-audit/main-routes-play-mli.txt",
+    "docs/evidence/2026-09-30-credential-expiry-source-audit/main-test-dune-patch.json",
+    "docs/evidence/2026-09-30-credential-expiry-source-audit/parent-fixture-parse.json",
+    "docs/evidence/2026-09-30-credential-expiry-source-audit/source-provenance.json",
+    "docs/evidence/2026-09-30-credential-expiry-source-audit/static-checks.json",
+    "lib/auth/auth_credential_token.ml",
+    "lib/auth/auth_oauth.ml",
+    "lib/auth/auth_token_inventory.ml",
+    "lib/auth/auth_token_inventory.mli",
+    "lib/keeper/keeper_dos_controller.ml",
+    "lib/play/play_invite.ml",
+    "lib/play/play_invite.mli",
+    "lib/play/play_seat.ml",
+    "lib/server/server_routes_http_routes_play.ml",
+    "lib/server/server_routes_http_routes_play.mli",
+    "lib/types/types_auth.ml",
+    "lib/types/types_auth.mli",
+    "test/dune",
+    "test/stanzas/test_credential_expiry.inc",
+    "test/test_auth_token_inventory.ml",
+    "test/test_credential_expiry.ml",
+    "test/test_play_invite.ml"
+  ],
+  "compiler_version": "5.5.1",
+  "commands": [
+    {
+      "command": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "lib/auth/auth_credential_token.ml"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "lib/auth/auth_oauth.ml"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "lib/auth/auth_token_inventory.ml"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "-intf",
+        "lib/auth/auth_token_inventory.mli"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "lib/keeper/keeper_dos_controller.ml"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "lib/play/play_invite.ml"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "-intf",
+        "lib/play/play_invite.mli"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "lib/play/play_seat.ml"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "lib/server/server_routes_http_routes_play.ml"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "-intf",
+        "lib/server/server_routes_http_routes_play.mli"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "lib/types/types_auth.ml"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "-intf",
+        "lib/types/types_auth.mli"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "test/test_auth_token_inventory.ml"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "test/test_credential_expiry.ml"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "test/test_play_invite.ml"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "git",
+        "diff",
+        "--check",
+        "c95f5df97d0614732c67144d7e5d5673c7dc6229",
+        "HEAD"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "python3",
+        "scripts/lint-ignore-without-comment.py",
+        "--strict",
+        "--target",
+        "lib/auth/auth_credential_token.ml",
+        "lib/auth/auth_oauth.ml",
+        "lib/auth/auth_token_inventory.ml",
+        "lib/auth/auth_token_inventory.mli",
+        "lib/keeper/keeper_dos_controller.ml",
+        "lib/play/play_invite.ml",
+        "lib/play/play_invite.mli",
+        "lib/play/play_seat.ml",
+        "lib/server/server_routes_http_routes_play.ml",
+        "lib/server/server_routes_http_routes_play.mli",
+        "lib/types/types_auth.ml",
+        "lib/types/types_auth.mli"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "bash",
+        "scripts/ci/check-ignore-without-comment-diff.sh",
+        "--base",
+        "c95f5df97d0614732c67144d7e5d5673c7dc6229",
+        "--head",
+        "HEAD"
+      ],
+      "exit_code": 0,
+      "stdout": "New ignore sites are justified.\n",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "bash",
+        "scripts/ci/check-determinism-contract.sh",
+        "--base",
+        "c95f5df97d0614732c67144d7e5d5673c7dc6229",
+        "--head",
+        "HEAD"
+      ],
+      "exit_code": 0,
+      "stdout": "=== Scan: new deterministic-boundary ratchet ===\nPASS: no new deterministic-boundary debt added in c95f5df97d0614732c67144d7e5d5673c7dc6229...HEAD, staged diff, or worktree diff\n=== Scan: deterministic branch on non-deterministic source ===\n=== Scan: permissive default on unknown input ===\nWARN: Option.value with default on potentially unknown input (sound partial?):\nlib/mcp_server_eio_protocol.ml-486-       let arguments =\nlib/mcp_server_eio_protocol.ml:487:         match Option.value ~default:`Null (Json_util.assoc_member_opt \"arguments\" payload) with\n--\nlib/mcp_server_eio_protocol.ml-1284-        else None)\nlib/mcp_server_eio_protocol.ml:1285:      |> Option.value ~default:0\n--\nlib/mcp_server_eio_call_tool.ml-314-    ~(execution_id : Ids.Execution_id.t) : unit =\nlib/mcp_server_eio_call_tool.ml:315:  let trace_id = Option.value ~default:\"runtime-mcp\" ctx.trace_id in\n--\nlib/mcp_server_eio_call_tool.ml-320-  in\nlib/mcp_server_eio_call_tool.ml:321:  let turn = Option.value ~default:0 ctx.turn in\n--\nlib/keeper/keeper_runtime_contract.ml-179-    first_string_field [ \"action\"; \"action_key\"; \"op\"; \"cmd\"; \"command\" ] input\nlib/keeper/keeper_runtime_contract.ml:180:    |> Option.value ~default:tool_name\n--\nlib/keeper/keeper_person_notes.ml-57-    | Some id when String.trim id <> \"\" ->\nlib/keeper/keeper_person_notes.ml:58:        Some (String.trim id, Option.value (field \"note\") ~default:\"\")\n--\nlib/keeper/keeper_tool_in_process_runtime.ml-135-      ?cycle_grant:gate_grant\nlib/keeper/keeper_tool_in_process_runtime.ml:136:      ~keeper_always_allow:(Option.value ~default:false meta.always_allow)\n=== Scan: catch-all permissive default ===\nWARN: catch-all branch returning Some (possible unsound default):\nlib/fs_compat/fs_compat.ml:3167:     | _ -> Some failure)\nlib/fs_compat/fs_compat.ml-3168-;;\n--\nlib/telemetry_unified/telemetry_unified.ml:113:  | _ -> Some candidate\nlib/telemetry_unified/telemetry_unified.ml-114-\n--\nlib/tool_call_quality_benchmark/tool_call_quality_benchmark_summary.ml:161:        , (match tool_values with [] -> None | _ -> Some (avg_float tool_values))\nlib/tool_call_quality_benchmark/tool_call_quality_benchmark_summary.ml:162:        , (match prompt_values with [] -> None | _ -> Some (avg_float prompt_values))\nlib/tool_call_quality_benchmark/tool_call_quality_benchmark_summary.ml:163:        , (match pass_values with [] -> None | _ -> Some (avg_float pass_values))\nlib/tool_call_quality_benchmark/tool_call_quality_benchmark_summary.ml-164-        , List.length values ) )\n--\nlib/server/server_dashboard_http_keeper_api.ml:1161:                  | _ -> Some entry.ts)\nlib/server/server_dashboard_http_keeper_api.ml-1162-                None entries\n--\nlib/server/server_dashboard_http_keeper_api.ml:1893:            | _ -> Some r.ts)\nlib/server/server_dashboard_http_keeper_api.ml-1894-          None records\n--\nlib/server/server_routes_http_routes_workspace.ml:590:     | _ -> Some (String.concat \" \" parts))\nlib/server/server_routes_http_routes_workspace.ml-591-  | _ when String.equal added \"-\" && String.equal deleted \"-\" -> Some \"bin\"\n--\n=== Scan: unordered iteration in deterministic context ===\n=== DET/NDT gate: PASS ===\n",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "python3",
+        "scripts/lint-ignore-without-comment.py",
+        "--include-tests",
+        "--strict",
+        "--target",
+        "lib/auth/auth_credential_token.ml",
+        "lib/auth/auth_oauth.ml",
+        "lib/auth/auth_token_inventory.ml",
+        "lib/auth/auth_token_inventory.mli",
+        "lib/keeper/keeper_dos_controller.ml",
+        "lib/play/play_invite.ml",
+        "lib/play/play_invite.mli",
+        "lib/play/play_seat.ml",
+        "lib/server/server_routes_http_routes_play.ml",
+        "lib/server/server_routes_http_routes_play.mli",
+        "lib/types/types_auth.ml",
+        "lib/types/types_auth.mli",
+        "test/test_auth_token_inventory.ml",
+        "test/test_credential_expiry.ml",
+        "test/test_play_invite.ml"
+      ],
+      "exit_code": 1,
+      "stdout": "test/test_play_invite.ml:138:    ignore (Auth.create_token base_path ~agent_name:\"minsu\" ~role:Masc_domain.Player);\n",
+      "stderr": "STRICT FAIL: 1 ignore sites lack a justification comment\n"
+    }
+  ],
+  "source_sha256": {
+    "changelog.d/40171.md": "1490bc6c233acbbdf0c47d736c81b44343b1a97135ace5228004e2e52302290a",
+    "lib/auth/auth_credential_token.ml": "80a07156f59a764632c46dbbbd3f329e9f00b8493593b65b863f01bd7c9e9f45",
+    "lib/auth/auth_oauth.ml": "7ec489b275e1a04059547334042c774faf7bbfbdd86e714688d72e1e68bb3b6d",
+    "lib/auth/auth_token_inventory.ml": "0a62fbfcfd3119813a438058b584de6765de18c809d821bdf566f5a3ef53a4cf",
+    "lib/auth/auth_token_inventory.mli": "40c1b7bad18bad4391e2e11070cb2fe8dc619de76a83fe44aa21a60025e141e4",
+    "lib/keeper/keeper_dos_controller.ml": "f976a45b9e7df32e90023cbc0984e71253e8585e9acb6e3875eefdb8e3465281",
+    "lib/play/play_invite.ml": "66a8a6492ed82b792762b211b82fd6d39f2b37ca2b8b0415d05c0106ff0ca67f",
+    "lib/play/play_invite.mli": "6dabb06c5fa1abc2210e2069ca8d3f3ae44d75da3f449e206aabca97d04774ec",
+    "lib/play/play_seat.ml": "477b5d01c4708f7f35aeffb23dd9c0401847ebc2626cc0cff1b7f48a54b83f3e",
+    "lib/server/server_routes_http_routes_play.ml": "65c109a6f9acf8b400bc6ec9763cb927b3056062e2ecea0a97ff07b8d2e39c71",
+    "lib/server/server_routes_http_routes_play.mli": "a8a11a4f27b0527598292eab878f469da6b21694113dd09e799f815d13e67b18",
+    "lib/types/types_auth.ml": "c3d8bd1e5995484f8ddd520a6b1a452556dc14ead31e3f8c7c3a5c34c9f35f7b",
+    "lib/types/types_auth.mli": "8ab7127080d82f0f6ca78f7551c53865169b543c68a2c7be4f1bf48122932493",
+    "test/dune": "d79e422fba346173082f8e2e5288d078c2e737d3107b47211366c26e50d813ef",
+    "test/stanzas/test_credential_expiry.inc": "09c30797d5a0f069b4192b9aa4e96e07fed979335914de89d7351ec15cf713c5",
+    "test/test_auth_token_inventory.ml": "1307eb68f7479c6e44a6864a9402e3d909c55e34919849803708540e929973df",
+    "test/test_credential_expiry.ml": "4b11b9ebbdabd77b6a0a69f95e835ab908a0910c659044624e47e60f1bb41a39",
+    "test/test_play_invite.ml": "9ac084ff11095f4a493072e9410a06933474d250f8b044b6915fb7cf36982c7f"
+  },
+  "critical_preserved_parent_source_sha256": {
+    "test/test_dos_tools.ml": "410c151a926a6374063b3ad80de135aff65a5960b882f0b09ee2459a5f3a32a3",
+    "test/test_dos_input_routes.ml": "d9370ac207f6e84211238d63f6fcbf60a4a6bf9b326a0e2f0aa205015aa8c865",
+    "lib/keeper/keeper_dos_controller.mli": "810ad58ba0beac49cdf26a47619c24bc6354d317002c740f1bc9088fb27743c7"
+  },
+  "retired_keeper_exact_block_sha256": {
+    "lib/keeper/keeper_dos_controller.ml": "03e60f32e42deabee0e6d234cd11cb8c49e1b661dfb4849d042512c741f8fb7b",
+    "lib/keeper/keeper_dos_controller.mli": "0fe533a36f9a4bd70101932211b193743412b418b8aab3cdcd3bb017a0f9d536"
+  },
+  "test_dune_registration_only_verified": true,
+  "native_registrations": [
+    "test_credential_expiry"
+  ],
+  "native_execution": "not_run_locally"
+}

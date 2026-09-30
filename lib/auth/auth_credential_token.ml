@@ -211,17 +211,6 @@ let fresh_matches_for_token_hash config token_hash matches =
     | None -> Ok [])
 ;;
 
-let require_live_credential ~now (credential : agent_credential) =
-  match Credential_expiry.parse credential.expires_at with
-  | Error (Credential_expiry.Invalid_timestamp stamp) ->
-    Error (Auth (Auth_error.InvalidToken
-      (Printf.sprintf "Invalid credential expiry for %s: %S" credential.agent_name stamp)))
-  | Ok expiry ->
-    if Credential_expiry.is_expired ~now expiry
-    then Error (Auth (Auth_error.TokenExpired credential.agent_name))
-    else Ok credential
-;;
-
 (** Find credential by raw token (hash lookup + expiry check).
 
     #9786 runtime complement: when N>=2 credentials share the
@@ -372,26 +361,73 @@ let save_raw_token_credential_without_expiry config ~agent_name ~role ~raw_token
     ~expires_at:None
 ;;
 
-let save_file_backed_raw_token_credential config ~agent_name ~role ~raw_token
-  : (agent_credential, masc_error) result
-  =
-  match save_raw_token_credential config ~agent_name ~role ~raw_token with
-  | Error _ as error -> error
-  | Ok cred ->
-    (try
-       persist_raw_token config ~agent_name raw_token;
-       Ok cred
-     with
-     | Eio.Cancel.Cancelled _ as e -> raise e
-     | exn ->
-       let msg =
-         Printf.sprintf
-           "Failed to save file-backed credential for %s: %s"
-           agent_name
-           (Printexc.to_string exn)
-       in
-       Log.Auth.error "%s" msg;
-       Error (System (System_error.IoError msg)))
+type file_backed_token_lifetime = Config_expiry | No_expiry | Expires_in_hours of int
+
+let file_backed_expiry config = function
+  | No_expiry -> Ok None
+  | Expires_in_hours hours -> expires_at_in_hours hours |> Result.map Option.some
+  | Config_expiry ->
+    let ( let* ) = Result.bind in
+    let* auth_cfg = credential_auth_config_result config in
+    Ok (expires_at_for_auth_config auth_cfg)
+;;
+
+let publish_requested_file_backed_token config ~agent_name ~role ~lifetime ~raw_token =
+  with_credential_transaction config (fun transaction ->
+    let ( let* ) = Result.bind in
+    let* _current = current_credential_in_transaction transaction agent_name in
+    let* _raw = raw_token_in_transaction transaction agent_name in
+    let* expires_at = file_backed_expiry config lifetime in
+    let credential = raw_token_credential ~agent_name ~role ~raw_token ~expires_at in
+    let* () = publish_file_backed_credential_in_transaction transaction credential ~raw_token
+      |> Result.map_error file_backed_publication_error in
+    Ok credential)
+  |> Result.join
+;;
+
+let save_file_backed_raw_token_credential config ~agent_name ~role ~raw_token =
+  let ( let* ) = Result.bind in
+  let* () = validate_raw_token raw_token in
+  publish_requested_file_backed_token config ~agent_name ~role ~raw_token ~lifetime:Config_expiry
+;;
+
+type login_auth_change = Auth_already_required | Auth_enabled | Require_token_enabled
+
+let prepare_login_auth config auth_cfg ~agent_name ~role =
+  if auth_cfg.enabled && auth_cfg.require_token then Ok Auth_already_required
+  else if auth_cfg.enabled then
+    credential_read_result (fun () ->
+      save_auth_config config { auth_cfg with require_token = true };
+      Require_token_enabled)
+  else
+    credential_read_result (fun () ->
+      let _secret = init_workspace_secret config in
+      let cfg = load_auth_config config in
+      save_auth_config config { cfg with enabled = true; require_token = true };
+      (match role with
+       | Admin when agent_name <> "" -> write_initial_admin config agent_name
+       | Admin | Worker | Player -> ());
+      Auth_enabled)
+;;
+
+let create_file_backed_login_token config ~agent_name ~role ~lifetime =
+  match role with
+  | Player -> Error (Auth (Auth_error.Forbidden
+      { agent = agent_name; action = "log in as a player; a player is invited" }))
+  | Admin | Worker ->
+    with_credential_transaction config (fun transaction ->
+      let ( let* ) = Result.bind in
+      let* _current = current_credential_in_transaction transaction agent_name in
+      let* _raw = raw_token_in_transaction transaction agent_name in
+      let* expires_at = file_backed_expiry config lifetime in
+      let* auth_cfg = credential_auth_config_result config in
+      let* auth_change = prepare_login_auth config auth_cfg ~agent_name ~role in
+      let raw_token = generate_token () in
+      let credential = raw_token_credential ~agent_name ~role ~raw_token ~expires_at in
+      let* () = publish_file_backed_credential_in_transaction transaction credential ~raw_token
+        |> Result.map_error file_backed_publication_error in
+      Ok (raw_token, credential, auth_change))
+    |> Result.join
 ;;
 
 (* ============================================ *)
@@ -464,12 +500,12 @@ let create_token_expiring_in_if_absent config ~agent_name ~role ~hours =
          (Printf.sprintf "Failed to create agent credential: %s" (Printexc.to_string exn))))))
 ;;
 
-type rotation_publication =
+type rotation_publication = Auth_credential_base.credential_publication =
   | Published
   | Not_published
   | Publication_unreadable of masc_error
 
-type rotation_failure =
+type rotation_failure = Auth_credential_base.credential_publication_failure =
   { error : masc_error
   ; raw_token : rotation_publication
   ; credential : rotation_publication }
@@ -478,66 +514,21 @@ type rotation_outcome =
   { token_hash_prefix : string
   ; rotated_agents : (string * (unit, rotation_failure) result) list }
 
-let rotation_failure_to_string failure =
-  let render = function
-    | Published -> "published"
-    | Not_published -> "not published"
-    | Publication_unreadable error -> "unreadable: " ^ masc_error_to_string error in
-  Printf.sprintf "%s (raw token: %s; credential: %s)"
-    (masc_error_to_string failure.error) (render failure.raw_token) (render failure.credential)
-;;
+let rotation_failure_to_string = credential_publication_failure_to_string
 
-let observe_rotation_publication config (rotated : agent_credential) =
-  let observe f = match f () with
-    | Ok true -> Published
-    | Ok false -> Not_published
-    | Error error -> Publication_unreadable error in
-  let ( let* ) = Result.bind in
-  let raw_token = observe (fun () ->
-    let path = raw_token_file config rotated.agent_name in
-    let* present = credential_path_exists path in
-    if not present then Ok false
-    else
-      let* raw = credential_read_result (fun () -> read_text_file path) in
-      Ok (String.equal (sha256_hash (String.trim raw)) rotated.token)) in
-  let credential = observe (fun () ->
-    let path = credential_file config rotated.agent_name in
-    let* present = credential_path_exists path in
-    if not present then Ok false
-    else
-      let* stored = read_stored_credential config rotated.agent_name path in
-      let* current = resolve_stored_credential config rotated.agent_name stored in
-      Ok (current = Some rotated)) in
-  raw_token, credential
-;;
-
-let save_rotated_raw_token_in_transaction
-    ((Credential_transaction config) as transaction) ~auth_cfg (cred : agent_credential) ~raw_token =
+let save_rotated_raw_token_in_transaction transaction ~auth_cfg (cred : agent_credential) ~raw_token =
   let rotated =
     { cred with token = sha256_hash raw_token
     ; created_at = now_iso ()
     ; expires_at = expires_at_for_auth_config auth_cfg } in
-  let written = Fun.protect
-      ~finally:(fun () -> !credential_cache_invalidator_ref config)
-      (fun () -> credential_read_result (fun () ->
-        persist_raw_token config ~agent_name:rotated.agent_name raw_token;
-        save_credential_in_transaction transaction rotated)) in
-  match written with
-  | Ok () -> Ok ()
-  | Error error ->
-    let raw_token, credential = observe_rotation_publication config rotated in
-    Error { error; raw_token; credential }
+  publish_file_backed_credential_in_transaction transaction rotated ~raw_token
 ;;
 
 let rotate_shared_tokens_matching config ~include_agent =
   with_credential_transaction config (fun transaction ->
     let ( let* ) = Result.bind in
     let* snapshot = credential_store_snapshot_in_transaction transaction in
-    let* auth_cfg =
-      try credential_read_result (fun () -> load_auth_config config) with
-      | Auth_config_error { file; reason } ->
-        Error (System (System_error.ValidationError
-          (Printf.sprintf "auth configuration %s: %s" file reason))) in
+    let* auth_cfg = credential_auth_config_result config in
     let groups = List.fold_left
         (fun groups (stored, (cred : agent_credential)) ->
           if not (include_agent cred.agent_name) then groups
@@ -563,11 +554,7 @@ let rotate_shared_tokens_matching config ~include_agent =
           | None -> Ok targets
           | Some id ->
             let target = credential_uuid_file config id in
-            if String.equal target (credential_file config credential.agent_name) then
-              Error (System (System_error.ValidationError
-                (Printf.sprintf "cannot rotate %s: UUID payload and named redirect would share a path"
-                  credential.agent_name)))
-            else if List.mem target targets then
+            if List.mem target targets then
               Error (System (System_error.ValidationError
                 (Printf.sprintf "cannot rotate %s: another selected owner would write the same UUID"
                   credential.agent_name)))

@@ -211,6 +211,16 @@ let save_auth_config config (auth_cfg : auth_config) =
   | Error reason -> raise_auth_config_error ~file reason
 ;;
 
+let init_workspace_secret config : string =
+  ensure_auth_dirs config;
+  let secret = generate_token () in
+  let hash = sha256_hash secret in
+  save_private_text_file (workspace_secret_file config) hash;
+  let cfg = load_auth_config config in
+  save_auth_config config { cfg with workspace_secret_hash = Some hash };
+  secret
+;;
+
 (* ============================================ *)
 (* Credential management                        *)
 (* ============================================ *)
@@ -526,7 +536,10 @@ let load_raw_token config ~agent_name =
   let file = raw_token_file config agent_name in
   if file_exists file
   then (
-    try read_text_file file |> String_util.trim_nonempty with
+    try
+      let raw = read_text_file file in
+      if String.trim raw = "" then None else Some raw
+    with
     | Sys_error _ -> None)
   else None
 ;;
@@ -657,6 +670,8 @@ let credential_owned_uuid_target config name stored (credential : agent_credenti
       (Printf.sprintf "credential storage authority for %s: %s" name detail))) in
   let uuid_path id =
     match redirect_target_file config (Credential_id.to_string id ^ ".json") with
+    | Some target when String.equal target (credential_file config name) ->
+      refused "UUID payload and named credential would share a path"
     | Some target -> Ok target
     | None -> refused "credential UUID is not a store filename" in
   match stored, credential.id with
@@ -679,6 +694,116 @@ let credential_owned_uuid_target config name stored (credential : agent_credenti
          refused "embedded UUID resolves to another credential")
   | Stored_redirect _, None -> refused "redirected credential has no UUID binding"
   | Unresolved_credential, (Some _ | None) -> refused "credential cannot be resolved"
+;;
+
+(* A file-backed publisher must distinguish true absence from an unreadable
+   name or UUID binding before it authorizes replacement or recreation. *)
+let current_credential_in_transaction (Credential_transaction config) name =
+  let ( let* ) = Result.bind in
+  let refused detail = Error (System (System_error.ValidationError
+      (Printf.sprintf "credential storage authority for %s: %s" name detail))) in
+  let* present = credential_path_exists (credential_file config name) in
+  if not present then Ok None
+  else
+    let* stored = read_stored_credential config name (credential_file config name) in
+    let* resolved = resolve_stored_credential config name stored in
+    match resolved with
+    | None -> refused "current credential cannot be resolved"
+    | Some credential when not (String.equal credential.agent_name name) ->
+      refused "current credential belongs to another name"
+    | Some credential ->
+      let* _owned_uuid = credential_owned_uuid_target config name stored credential in
+      Ok (Some credential)
+;;
+
+let raw_token_in_transaction (Credential_transaction config) name =
+  let ( let* ) = Result.bind in
+  let path = raw_token_file config name in
+  let* present = credential_path_exists path in
+  if not present then Ok None
+  else
+    let* raw = credential_read_result (fun () -> read_text_file path) in
+    (* Empty readable material can be replaced. An opaque bearer that is not
+       blank retains its exact bytes, matching the supplied-token contract. *)
+    if String.trim raw = "" then Ok None else Ok (Some raw)
+;;
+
+let credential_auth_config_result config =
+  try credential_read_result (fun () -> load_auth_config config) with
+  | Auth_config_error { file; reason } ->
+    Error (System (System_error.ValidationError
+      (Printf.sprintf "auth configuration %s: %s" file reason)))
+;;
+
+let require_live_credential ~now (credential : agent_credential) =
+  match Credential_expiry.parse credential.expires_at with
+  | Error (Credential_expiry.Invalid_timestamp stamp) ->
+    Error (Auth (Auth_error.InvalidToken
+      (Printf.sprintf "Invalid credential expiry for %s: %S" credential.agent_name stamp)))
+  | Ok expiry ->
+    if Credential_expiry.is_expired ~now expiry
+    then Error (Auth (Auth_error.TokenExpired credential.agent_name))
+    else Ok credential
+;;
+
+type credential_publication = Published | Not_published | Publication_unreadable of masc_error
+
+type credential_publication_failure =
+  { error : masc_error
+  ; raw_token : credential_publication
+  ; credential : credential_publication }
+
+let credential_publication_failure_to_string failure =
+  let render = function
+    | Published -> "published"
+    | Not_published -> "not published"
+    | Publication_unreadable error -> "unreadable: " ^ masc_error_to_string error in
+  Printf.sprintf "%s (raw token: %s; credential: %s)"
+    (masc_error_to_string failure.error) (render failure.raw_token) (render failure.credential)
+;;
+
+let observe_credential_publication config (expected : agent_credential) =
+  let observe f = match f () with
+    | Ok true -> Published
+    | Ok false -> Not_published
+    | Error error -> Publication_unreadable error in
+  let ( let* ) = Result.bind in
+  let raw_token = observe (fun () ->
+    let path = raw_token_file config expected.agent_name in
+    let* present = credential_path_exists path in
+    if not present then Ok false
+    else
+      let* raw = credential_read_result (fun () -> read_text_file path) in
+      Ok (String.equal (sha256_hash raw) expected.token)) in
+  let credential = observe (fun () ->
+    let path = credential_file config expected.agent_name in
+    let* present = credential_path_exists path in
+    if not present then Ok false
+    else
+      let* stored = read_stored_credential config expected.agent_name path in
+      let* current = resolve_stored_credential config expected.agent_name stored in
+      Ok (current = Some expected)) in
+  raw_token, credential
+;;
+
+let publish_file_backed_credential_in_transaction
+    ((Credential_transaction config) as transaction) credential ~raw_token =
+  let written = Fun.protect
+      ~finally:(fun () -> !credential_cache_invalidator_ref config)
+      (fun () -> credential_read_result (fun () ->
+        persist_raw_token config ~agent_name:credential.agent_name raw_token;
+        save_credential_in_transaction transaction credential)) in
+  match written with
+  | Ok () -> Ok ()
+  | Error error ->
+    let raw_token, credential = observe_credential_publication config credential in
+    Error { error; raw_token; credential }
+;;
+
+let file_backed_publication_error failure =
+  let detail = credential_publication_failure_to_string failure in
+  Log.Auth.error "file-backed credential publication failed: %s" detail;
+  System (System_error.IoError detail)
 ;;
 
 type credential_store_snapshot =

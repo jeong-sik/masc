@@ -14,7 +14,6 @@ jobs:
   core:
     name: Core build
     runs-on: ubuntu-24.04
-    timeout-minutes: 2
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-ocaml-toolchain

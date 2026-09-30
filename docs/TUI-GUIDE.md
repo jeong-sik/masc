@@ -758,10 +758,13 @@ The Items tab is one `]` after Info. It lists the 18 portrait accessories by
 slot. `j`/`k`, the page keys, and Home/End select an item; the portrait beside
 the list previews that item over the Keeper's current observed outfit. An
 `equipped` label describes the current picture, while the preview changes no
-equipment or Candle ledger entry. If the server cannot report equipment, the
-tab gives the reason and leaves the picture unavailable. The catalog remains
-readable without a picture. Prices, ownership, buying, and equipping are not
-part of this tab yet.
+equipment or Candle ledger entry. The Item account read shows the Keeper's
+balance, purchased items and configured prices; `Off`, `Disabled`, and an
+unreadable account each have their own message. On a narrower pane the selected
+item's price and ownership sit below the list. If the server cannot report
+equipment, the tab gives the reason and leaves the picture unavailable. The
+catalog remains readable without a picture. Buying and equipping remain
+Keeper-owned tool actions.
 
 | Key | Effect |
 |-----|--------|

@@ -379,6 +379,11 @@ let test_fusion_capture_retains_exact_state_across_terminal_change () =
         check int "denied source exposes no run or Board evidence" 0
           (member "observations" denied |> list |> List.length))
           [Sources.Keeper "another-keeper"; Sources.Unauthenticated];
+        let authorize run_id = Sources.authorize ~access:(Sources.Keeper "another-keeper")
+          (binding [`Assoc ["source_id",`String "fusion";"kind",`String "fusion_run";
+            "run_id",`String run_id]]) in
+        check (result unit string) "foreign and unknown Fusion IDs have one denial"
+          (authorize run_id) (authorize (run_id ^ "-missing"));
         let first = read () in
         let reference = member "evidence" first |> list |> List.hd |> own_reference in
         let frozen = require (Store.read_blob store reference) in

@@ -93,3 +93,10 @@ partial input, failure and generic downstream composition.
 They do not establish Docker isolation, host installation, model execution,
 current-head PR CI success or production deployment. The CI image workflow
 discovers this package through lane.toml + Dockerfile.
+
+Native Fusion bindings attached by a Keeper are private to that authenticated
+Keeper. Inspect, retained slices, evidence export and instance operations keep
+that owner boundary after restart. Shared native Fusion declarations are written
+through the operator configuration path; Keeper and HTTP declaration editors
+cannot promote a native binding into shared operator authority. A Keeper uses
+`masc_lane_attach` for its own run instead.

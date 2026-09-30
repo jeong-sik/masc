@@ -59,9 +59,9 @@ let decode_inspect_query = function
   | _ -> Error "inspect accepts one non-blank instance_id or no parameters"
 
 let get_inspect request reqd =
-  with_read_auth (fun state _request reqd ->
+  with_tool_actor_auth ~tool_name:"masc_lane_inspect" (fun state caller _request reqd ->
     let result = let* args = decode_inspect_query (query_fields request) in
-      dispatch state Runtime.Inspect args in
+      dispatch ~caller state Runtime.Inspect args in
     respond request reqd result) request reqd
 
 let get_package_preview request reqd =
@@ -105,12 +105,12 @@ let get_package_preview request reqd =
     respond request reqd result) request reqd
 
 let get_slice request reqd =
-  with_read_auth (fun state _request reqd ->
-    let result = let* args = decode_slice_query (query_fields request) in dispatch state Runtime.Slice args in
+  with_tool_actor_auth ~tool_name:"masc_lane_slice" (fun state caller _request reqd ->
+    let result = let* args = decode_slice_query (query_fields request) in dispatch ~caller state Runtime.Slice args in
     respond request reqd result) request reqd
 
 let get_action request reqd =
-  with_read_auth (fun state _request reqd ->
+  with_tool_actor_auth ~tool_name:"masc_lane_action_status" (fun state caller _request reqd ->
     let result =
       let fields = query_fields request |> List.sort (fun (a, _) (b, _) -> String.compare a b) in
       let* args = match fields with
@@ -118,7 +118,7 @@ let get_action request reqd =
             when String.trim instance_id <> "" && String.trim request_id <> "" ->
             Ok (`Assoc ["instance_id", `String instance_id; "request_id", `String request_id])
         | _ -> Error "action status requires exactly instance_id and request_id" in
-      dispatch state Runtime.Action_status args in
+      dispatch ~caller state Runtime.Action_status args in
     respond request reqd result) request reqd
 
 (* Use the source binding's kind table so a new kind must say whether it has a
@@ -290,11 +290,11 @@ let read_declaration request reqd =
     respond_declaration request reqd (Runtime.read_declaration ~config:(Mcp_server.workspace_config state) args)) request reqd
 
 let save_declaration request reqd =
-  with_tool_actor_auth ~tool_name:"masc_lane_declaration_save" (fun state _caller _request reqd ->
+  with_tool_actor_auth ~tool_name:"masc_lane_declaration_save" (fun state caller _request reqd ->
     Http.Request.read_body_async reqd (fun body ->
       let result = match decode_body body with
         | Error message -> Error {Lane_addon_declaration.code=Invalid_request;message;current=None}
-        | Ok args -> Runtime.save_declaration ~config:(Mcp_server.workspace_config state) args in
+        | Ok args -> Runtime.save_declaration ~caller ~config:(Mcp_server.workspace_config state) args in
       respond_declaration request reqd result)) request reqd
 
 let register_delivery ~sw ~clock =

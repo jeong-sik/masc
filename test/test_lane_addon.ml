@@ -497,13 +497,43 @@ let test_fusion_status_hint_wakes_only_its_bound_run () =
           "run_id",`String run_id]]]])) |> text "instance_id" in
     let one = watcher "fusion-one" and two = watcher "fusion-two" in
     let clock = Eio.Stdenv.clock env in
-    let seq id = int "observation_seq" (instance config id) in
+    let request caller operation fields = Runtime.dispatch ~caller ~config ~operation (`Assoc fields) in
+    let inspect_owned id = unwrap (request "fixture-owner" Runtime.Inspect ["instance_id",`String id])
+      |> member "instances" |> Yojson.Safe.Util.to_list |> List.hd in
+    let seq id = int "observation_seq" (inspect_owned id) in
     await clock (fun () -> seq one=1 && seq two=1);
+    let foreign = unwrap (request "another-keeper" Runtime.Inspect []) in
+    check Alcotest.int "foreign inspect enumerates no private instances" 0
+      (member "instances" foreign |> Yojson.Safe.Util.to_list |> List.length);
+    check Alcotest.int "foreign inspect exposes no private rows" 0
+      (member "rows" foreign |> Yojson.Safe.Util.to_list |> List.length);
+    let foreign_slice = unwrap (request "another-keeper" Runtime.Slice ["run_id",`String "world"]) in
+    check Alcotest.int "foreign retained slice exposes no private rows" 0
+      (member "rows" foreign_slice |> Yojson.Safe.Util.to_list |> List.length);
+    let denied operation fields =
+      match Lane_addon_runtime.dispatch ~caller:"another-keeper" ~config ~operation
+          (`Assoc (("instance_id",`String one)::fields)) with
+      | Error (Runtime.Request_rejected detail) ->
+          check string "private instance is denied before read or mutation"
+            "instance is unavailable to this caller" detail
+      | Error (Runtime_failed detail) -> failf "access denial became runtime failure: %s" detail
+      | Ok _ -> fail "another Keeper read or mutated private evidence" in
+    List.iter (fun (operation,fields) -> denied operation fields)
+      [Runtime.Evidence,["row_ids",`List []]; Runtime.Observe,[]; Runtime.Detach,[];
+       Runtime.Act,["expected_incarnation",`String one;"request_id",`String "foreign";"action",`Assoc []];
+       Runtime.Action_status,["request_id",`String "foreign"]];
     Runtime.notify_fusion_run ~run_id:"fusion-one";
     await clock (fun () -> seq one=2);
     check Alcotest.int "another Fusion binding did not run" 1 (seq two);
-    List.iter (detach config) [one;two];
-    List.iter (fun id -> await_phase clock config id "detached") [one;two])
+    List.iter (fun id -> ignore (unwrap (request "fixture-owner" Runtime.Detach ["instance_id",`String id]))) [one;two];
+    List.iter (fun id -> await clock (fun () -> phase (inspect_owned id) = "detached")) [one;two];
+    Runtime.For_testing.reset ();
+    let owner_slice = unwrap (request "fixture-owner" Runtime.Slice ["run_id",`String "world"]) in
+    check bool "owner can read durable evidence after restart" true
+      (member "rows" owner_slice |> Yojson.Safe.Util.to_list <> []);
+    let foreign_slice = unwrap (request "another-keeper" Runtime.Slice ["run_id",`String "world"]) in
+    check Alcotest.int "durable ownership still hides private rows after restart" 0
+      (member "rows" foreign_slice |> Yojson.Safe.Util.to_list |> List.length))
 
 let () = run "Lane Add-on runtime" ["optional extension", [
   test_case "Fusion state hint wakes only the exact run binding" `Quick

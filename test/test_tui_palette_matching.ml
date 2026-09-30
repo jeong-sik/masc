@@ -344,13 +344,12 @@ let test_a_label_starting_with_the_query_leads () =
   state.view <- Code;
   state.code_focus_file <- Right_pane;
   state.palette_query <- "def ";
+  check_names "reserved definition command excludes unrelated posts"
+    [ "def Hook_common" ] (List.map fst (palette_matches state));
+  (* A partial word is still an ordinary search: it finds posts without
+     pretending that Enter would ask the reserved definition question. *)
+  state.palette_query <- "de";
   let matches = palette_matches state in
-  (* This is the full operator palette, so independent commands may also
-     match "def" as a subsequence. They must not displace the exact prefix
-     candidate or reorder the two authored post matches. *)
-  (match matches with
-   | ("def Hook_common", Palette_lsp ("definition", "Hook_common")) :: _ -> ()
-   | _ -> Alcotest.fail "the definition prefix must lead the entire palette");
   let posts = List.filter_map (function
     | label, Palette_board_post id -> Some (label, id)
     | _ -> None) matches in

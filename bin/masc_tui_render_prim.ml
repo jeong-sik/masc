@@ -3452,7 +3452,7 @@ let help_lines ~width (state : state) =
      [help_sections] puts Global first where the surface has no section of its
      own, so the head of this list is the most relevant thing either way and
      nothing has to look for it by name. *)
-  match Masc_tui_keys.help_sections ~current:state.view () with
+  match Masc_tui_keys.help_sections_for_state state with
   | [] -> slash_commands
   | first :: rest ->
       section first @ slash_commands @ List.concat_map section rest

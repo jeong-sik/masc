@@ -35,7 +35,9 @@ let append_when_still_open ~base_path (waiting : Candle_payout.waiting) ~still_n
        let events = Candle_ledger.events view in
        match Candle_payout.state ~goal_id:waiting.goal_id events with
        | Candle_payout.Waiting open_payout
-         when String.equal open_payout.request_id waiting.request_id && still_needed events ->
+         when String.equal open_payout.request_id waiting.request_id
+              && String.equal open_payout.verification_run_id waiting.verification_run_id
+              && still_needed events ->
          Ok (rows, Written)
        | Candle_payout.Waiting _ | Candle_payout.No_obligation | Candle_payout.Settled ->
          Ok ([], Not_written)))
@@ -47,6 +49,7 @@ let candidates_row ~at (waiting : Candle_payout.waiting) tasks (decided : Candle
       Candle_event.Candidates
         { goal_id = waiting.goal_id
         ; request_id = waiting.request_id
+        ; verification_run_id = waiting.verification_run_id
         ; tasks
         ; candidate_task_ids = decided.candidate_task_ids
         ; candidate_keepers = decided.candidate_keepers
@@ -60,6 +63,7 @@ let unattributed_row ~at (waiting : Candle_payout.waiting) =
       Candle_event.Unattributed
         { goal_id = waiting.goal_id
         ; request_id = waiting.request_id
+        ; verification_run_id = waiting.verification_run_id
         ; reason = Candle_event.No_candidates
         }
   }

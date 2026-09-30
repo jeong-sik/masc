@@ -7,6 +7,7 @@
 type waiting =
   { goal_id : string
   ; request_id : string  (** The verification request the operator confirmed. *)
+  ; verification_run_id : string  (** The confirmed verifier run, never a timestamp-derived id. *)
   ; passed_at : Candle_time.t
   ; confirmed_at : Candle_time.t
   }
@@ -28,14 +29,15 @@ val waiting : Candle_event.t list -> waiting list
 val owed_pass :
   goal_id:string
   -> request_id:string
+  -> verification_run_id:string
   -> passed_at:string
   -> Candle_event.t list
   -> Candle_time.t option
 (** The pass a new [PayoutOwed] is written for when the operator confirms the
-    result of [request_id], made at [passed_at] (the text the verification
+    result of [verification_run_id] for [request_id], made at [passed_at] (the text the verification
     ledger holds). [Some] carries the pass time as the Goal's [Snapshot] wrote
     it. [None] when nothing is to be written:
-    - no [Snapshot] of the Goal names that request and pass time. Candle was not
+    - no [Snapshot] of the Goal names that request, verifier run and pass time. Candle was not
       on when the Goal passed, so the Goal has nothing to be paid for.
     - the Goal already owes a payout, open or settled. A payout is owed once per
       Goal, and confirming again, or confirming a later pass after a reopen,
@@ -48,7 +50,7 @@ type pass =
 (** What the payout of a [Waiting] Goal takes from its [Snapshot]. *)
 
 val pass_of : waiting -> Candle_event.t list -> pass option
-(** The [Snapshot] of the same Goal, request and pass time as the payout. *)
+(** The [Snapshot] of the same Goal, request, verifier run and pass time as the payout. *)
 
 type candidates =
   { candidate_task_ids : string list
@@ -56,7 +58,7 @@ type candidates =
   }
 
 val candidates_of : waiting -> Candle_event.t list -> candidates option
-(** What the [Candidates] row written for the payout's request decided. *)
+(** What the [Candidates] row written for the payout's request and verifier run decided. *)
 
 val decide_candidates :
   goal_created_at:Candle_time.t

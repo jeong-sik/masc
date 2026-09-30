@@ -208,7 +208,7 @@ let drawn_rows () =
   @ List.map
       (fun (name, pane) -> (name, footer_hints_code ~pane))
       [ ("Code / tree", Code_tree); ("Code / file", Code_file)
-      ; ("Code / history", Code_overlay)
+      ; ("Code / overlays", Code_overlay); ("Code / history", Code_history)
       ]
 
 let test_no_drawn_row_names_one_key_twice () =
@@ -1670,7 +1670,7 @@ let approvals_reading_is_current state =
   state.gate_error <- None;
   state.gate_queue_unavailable <- None;
   state.asks_snapshot <-
-    Some { Masc.Tui_decode.asn_keeper = None; asn_open_count = 0; asn_rows = [] };
+    Some { Masc.Tui_decode_asks.asn_keeper = None; asn_open_count = 0; asn_rows = [] };
   state.asks_error <- None
 
 let approvals_home_in_ring state =
@@ -1839,27 +1839,27 @@ let test_visible_surface_ring_declutter () =
    so a fleet holding one ask of two questions said "1 question" while the
    line three rows below it said "+2 more questions". *)
 let test_the_question_count_counts_questions () =
-  let ask id questions : Tui_decode.ask_row =
-    { Tui_decode.ar_keeper = "jazz-developer"
+  let ask id questions : Masc.Tui_decode_asks.ask_row =
+    { Masc.Tui_decode_asks.ar_keeper = "jazz-developer"
     ; ar_id = id
     ; ar_asked_at = 0.0
     ; ar_context = None
     ; ar_questions =
         List.init questions (fun index ->
-            { Tui_decode.aq_id = Printf.sprintf "%s-q%d" id index
+            { Masc.Tui_decode_asks.aq_id = Printf.sprintf "%s-q%d" id index
             ; aq_header = "header"
             ; aq_prompt = "prompt"
-            ; aq_mode = Tui_decode.Ask_single
-            ; aq_free_text = Tui_decode.Ask_choices_only
+            ; aq_mode = Masc.Tui_decode_asks.Ask_single
+            ; aq_free_text = Masc.Tui_decode_asks.Ask_choices_only
             ; aq_choices = []
             })
-    ; ar_resolution = Tui_decode.Ask_open
+    ; ar_resolution = Masc.Tui_decode_asks.Ask_open
     }
   in
   let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
   state.asks_snapshot <-
     Some
-      { Tui_decode.asn_keeper = None
+      { Masc.Tui_decode_asks.asn_keeper = None
       ; asn_open_count = 2
       ; asn_rows = [ ask "a1" 2; ask "a2" 1 ]
       };
@@ -1873,12 +1873,12 @@ let test_the_question_count_counts_questions () =
      counted either. *)
   state.asks_snapshot <-
     Some
-      { Tui_decode.asn_keeper = None
+      { Masc.Tui_decode_asks.asn_keeper = None
       ; asn_open_count = 1
       ; asn_rows =
           [ ask "a1" 2
-          ; { (ask "a2" 4) with Tui_decode.ar_resolution =
-                Tui_decode.Ask_answered
+          ; { (ask "a2" 4) with Masc.Tui_decode_asks.ar_resolution =
+                Masc.Tui_decode_asks.Ask_answered
                   { aa_answered_at = 1.0; aa_question_ids = [] }
             }
           ]
@@ -1905,7 +1905,7 @@ let test_the_questions_reading_tells_unread_from_none_open () =
     ", questions unread"
     (approval_list_note ~name:"questions" (approvals_questions_reading state));
   state.asks_snapshot <-
-    Some { Tui_decode.asn_keeper = None; asn_open_count = 0; asn_rows = [] };
+    Some { Masc.Tui_decode_asks.asn_keeper = None; asn_open_count = 0; asn_rows = [] };
   Alcotest.(check string) "rows kept from before a failed poll" "stale"
     (reading ());
   state.asks_error <- None;
@@ -1923,28 +1923,28 @@ let test_visible_surface_ring_open_ask () =
   state.view <- Overview;
   state.asks_snapshot <-
     Some
-      { Tui_decode.asn_keeper = Some "jazz-developer"
+      { Masc.Tui_decode_asks.asn_keeper = Some "jazz-developer"
       ; asn_open_count = 1
       ; asn_rows =
-          [ { Tui_decode.ar_keeper = "jazz-developer"
+          [ { Masc.Tui_decode_asks.ar_keeper = "jazz-developer"
             ; ar_id = "ask1"
             ; ar_asked_at = 0.0
             ; ar_context = Some "where to post the measured comment"
             ; ar_questions =
-                [ { Tui_decode.aq_id = "q1"
+                [ { Masc.Tui_decode_asks.aq_id = "q1"
                   ; aq_header = "post or wait"
                   ; aq_prompt = "post the comment as is?"
-                  ; aq_mode = Tui_decode.Ask_single
-                  ; aq_free_text = Tui_decode.Ask_choices_only
+                  ; aq_mode = Masc.Tui_decode_asks.Ask_single
+                  ; aq_free_text = Masc.Tui_decode_asks.Ask_choices_only
                   ; aq_choices =
-                      [ { Tui_decode.ac_id = "post_as_is"
+                      [ { Masc.Tui_decode_asks.ac_id = "post_as_is"
                         ; ac_label = "post as is"
                         ; ac_description = None
                         }
                       ]
                   }
                 ]
-            ; ar_resolution = Tui_decode.Ask_open
+            ; ar_resolution = Masc.Tui_decode_asks.Ask_open
             }
           ]
       };
@@ -2044,7 +2044,7 @@ let test_config_footer_names_child_hops () =
      meets, and [test_every_config_pane_answers_once] is what holds them to
      one answer each. *)
   check str "Config names its three off-ring children"
-    "j/k:select / scroll  p:next pane  A:activity  L:logs  PgUp/PgDn:page  v:read status  9:Runtime  s:resources  t:tools  e:edit  e / Enter:edit  E:advanced JSON  Enter:use  x:default / clear  f:filter  n:new  u:restore  i:input  a:fragments / voice / account  o:assets  Esc:back  r:reload  Tab:next  q:quit"
+    "j/k:select / scroll  p:next pane  A:activity  L:logs  PgUp/PgDn:page  Home/End:detail edges  v:read status  9:Runtime  s:resources  t:tools  e:edit  e / Enter:edit  E:advanced JSON  Enter:use  x:default / clear  f:filter  n:new  u:restore  i:input  a:fragments / voice / account  o:assets  Esc:back  r:reload  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Config);
   let hints = Masc_tui_keys.footer_hints Config in
   List.iter
@@ -3245,6 +3245,9 @@ let test_the_code_footer_names_the_keys_of_the_pane_it_draws () =
   let overlay =
     Masc_tui_keys.footer_hints_code ~pane:Masc_tui_keys.Code_overlay
   in
+  let history =
+    Masc_tui_keys.footer_hints_code ~pane:Masc_tui_keys.Code_history
+  in
   let holds needle haystack =
     let n = String.length needle and h = String.length haystack in
     let rec scan i =
@@ -3273,15 +3276,16 @@ let test_the_code_footer_names_the_keys_of_the_pane_it_draws () =
      it is up. *)
   check Alcotest.bool "an overlay drops the code keys" false
     (holds "b:blame" overlay);
-  (* The history view has commits to open; the other two panes do not, and
-     named the key anyway until it was read off a running screen. *)
-  check Alcotest.bool "an overlay opens a commit" true
-    (holds "Enter (history):open" overlay);
+  (* Only history has records to open. Diff and notes do not handle Enter. *)
+  check Alcotest.bool "history names the visible record action" true
+    (holds "Enter:open" history);
+  check Alcotest.bool "diff or notes has no Enter action" false
+    (holds "Enter" overlay);
   List.iter
     (fun (label, hints) ->
        check Alcotest.bool (label ^ " has no commit to open") false
          (holds "Enter (history)" hints))
-    [ ("the tree", tree); ("an open file", file) ]
+    [ ("the tree", tree); ("an open file", file); ("diff or notes", overlay) ]
 
 let test_code_asks_the_language_server_three_questions () =
   (* K hover, D definition, R references -- one family, one case each, and

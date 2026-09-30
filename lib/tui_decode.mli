@@ -42,79 +42,6 @@ type keeper = {
   k_updated_at : string;
 }
 
-val escape_invisible : string -> string
-(** Draw bidi controls, zero-width characters and tag characters (U+061C,
-    U+200B-U+200F, U+202A-U+202E, U+2066-U+2069, U+FEFF, U+E0000-U+E007F) as
-    their own escape text: [\uXXXX] inside the basic plane and [\UXXXXXXXX]
-    above it, since the tag block needs five digits. A terminal draws them as
-    nothing, so without this the glyphs an operator reads can differ from the
-    bytes an approval hash covers (Trojan Source, CVE-2021-42574; spelling
-    ASCII in tag characters is the same trick without the bidi). Two
-    exceptions are characters a reader can see the effect of, and each is
-    admitted by its neighbours rather than by a list: a zero-width joiner
-    between two pictographs (UAX #29 GB11), and a subdivision flag -- U+1F3F4,
-    three to seven tag characters in the lowercase-and-digit shape UTS #51
-    gives a subdivision code, then the terminator U+E007F -- which is kept
-    whole or escaped whole. Tag characters outside that shape are drawn even
-    behind a flag: the wider grammar spells sentences, and a flag is all a
-    reader would see of them. {!sanitize_terminal_text} and the Keeper chat
-    boundary both route through here, so the rule lives in one place. *)
-
-val sanitize_terminal_text : string -> string
-(** Escape C0, DEL, raw C1 bytes, UTF-8 encoded C1 code points, malformed
-    UTF-8 bytes, and the invisible code points {!escape_invisible} names, so
-    external values form one printable terminal row. Call at the terminal
-    rendering boundary; decoded records intentionally retain their raw typed
-    value for non-terminal consumers. *)
-
-val sanitize_terminal_lines : string -> string
-(** [sanitize_terminal_lines text] keeps each LF of [text] as a line break and
-    puts every line between them through {!sanitize_terminal_text}, so each
-    other control byte -- a tab, a carriage return, an ESC -- is drawn as its
-    visible escape rather than sent to the terminal or folded into a space.
-    For a text read whole, where a reader must see what the bytes are. *)
-
-val preview_line : string -> string
-(** One row of a multi-line text for a list cell: each line break (LF, CR LF,
-    or a lone CR) becomes the one-cell return mark U+23CE, a tab becomes a
-    space, and everything else goes through {!sanitize_terminal_text}. Where
-    that function is the boundary for values that must not carry control
-    bytes, this one is for text whose breaks are content: a file's edit, a
-    tool call's arguments. *)
-
-val short_timestamp_of_unix_for_terminal :
-  localtime:(float -> Unix.tm) -> float -> string
-(** [YYYY-MM-DD HH:MM:SS] of a Unix time in the zone [localtime] converts to.
-    The same shape {!short_timestamp_for_terminal} draws, for a time the wire
-    carries as a number. *)
-
-val short_timestamp_for_terminal :
-  localtime:(float -> Unix.tm) -> string -> string
-(** [YYYY-MM-DD HH:MM:SS] of an RFC 3339 timestamp in the zone [localtime]
-    converts to, then sanitized. A timestamp the codec cannot read keeps at most
-    its first 19 source bytes; slicing before the terminal boundary ensures a
-    split UTF-8 scalar cannot recreate a raw C1 byte. Empty timestamps render as
-    [(never)]. *)
-
-val clock_timestamp_of_unix_for_terminal :
-  localtime:(float -> Unix.tm) -> float -> string
-(** [HH:MM:SS] of a Unix time in the zone [localtime] converts to. The same
-    shape {!clock_timestamp_for_terminal} draws, for a time the wire carries
-    as a number rather than an RFC 3339 string -- the pairing
-    {!short_timestamp_of_unix_for_terminal} already is for
-    {!short_timestamp_for_terminal}. Always digits and colons, so unlike its
-    string-input sibling this need not sanitize its own output. *)
-
-val clock_timestamp_for_terminal :
-  localtime:(float -> Unix.tm) -> string -> string
-(** The [HH:MM:SS] clock of an RFC 3339 timestamp in the zone [localtime]
-    converts to - [Unix.localtime] on a screen, [Unix.gmtime] or a fixed
-    offset in a test - then sanitized. A timestamp the codec cannot read
-    keeps the conventional eight-byte slice, so the result is still one
-    clock-shaped row fragment; the final sanitizer makes arbitrary external
-    bytes safe even when the slice splits UTF-8. *)
-
-
 (** Where a goal stands with the completion judge.
 
     The phase says [executing] both for a goal nobody has reviewed and for one
@@ -2984,69 +2911,6 @@ type lsp_answer =
 
 val decode_lsp_answer : Yojson.Safe.t -> (lsp_answer, string) result
 
-(** {1 Questions a Keeper put to the operator}
-
-    Decoded from [GET /api/v1/keepers/asks]. The rows carry choice ids
-    alongside labels and the answer POST takes ids back, so a surface built on
-    these types never matches on label text: rewording a choice cannot orphan
-    an answer already recorded. *)
-
-type ask_choice = {
-  ac_id : string;  (** what an answer names; never the label *)
-  ac_label : string;
-  ac_description : string option;
-}
-
-type ask_mode =
-  | Ask_single
-  | Ask_multi
-
-type ask_free_text =
-  | Ask_free_text_allowed of { aft_hint : string option }
-  | Ask_choices_only
-
-type ask_question = {
-  aq_id : string;
-  aq_header : string;  (** two or three words; what a narrow row shows *)
-  aq_prompt : string;
-  aq_mode : ask_mode;
-  aq_free_text : ask_free_text;
-  aq_choices : ask_choice list;
-}
-
-type ask_resolution =
-  | Ask_open
-  | Ask_answered of {
-      aa_answered_at : float;
-      aa_question_ids : string list;
-    }
-  | Ask_withdrawn of {
-      aw_reason : string;
-      aw_withdrawn_at : float;
-    }
-
-type ask_row = {
-  ar_keeper : string;
-  ar_id : string;
-  ar_asked_at : float;
-  ar_context : string option;
-      (** why the Keeper is asking, in its own words. A row that hides this
-          reads as a decision with no stakes. *)
-  ar_questions : ask_question list;
-  ar_resolution : ask_resolution;
-}
-
-type asks_snapshot = {
-  asn_keeper : string option;
-  asn_open_count : int;  (** the server's count, not [List.length asn_rows] *)
-  asn_rows : ask_row list;
-}
-
-val decode_asks_snapshot : Yojson.Safe.t -> (asks_snapshot, string) result
-(** A row whose mode or free-text shape is unknown fails the decode rather
-    than defaulting: a surface that guessed would offer the operator a control
-    the server will refuse. *)
-
 type goal_timeline_event = {
   gt_ts : string;
   gt_kind : string;
@@ -3113,55 +2977,6 @@ type verification_evidence =
 
 val decode_verification_evidence :
   Yojson.Safe.t -> (verification_evidence, string) result
-
-(** Strict hard-cut decoder for [/api/v1/skills/evidence]. The endpoint's
-    current projection is explicitly incomplete; missing or weakened coverage
-    fields are rejected instead of becoming zeroes in the terminal. *)
-type skill_evidence_status =
-  | Skill_evidence_observed
-  | Skill_evidence_not_observed_in_retained_coverage
-
-type skill_evidence_composition_scope =
-  | Skill_evidence_exact_reference_latest_completed
-  | Skill_evidence_composition_unavailable
-
-type skill_evidence_coverage =
-  { sec_composition_scope : skill_evidence_composition_scope
-  ; sec_composition_records_read : int
-  ; sec_composition_unavailable : string list
-  ; sec_activation_scope : string
-  ; sec_activation_sessions_inspected : int
-  ; sec_activation_ledgers_loaded : int
-  ; sec_activation_gap_count : int
-  ; sec_activation_owner_gap_count : int
-  }
-
-type skill_evidence_owner_claim =
-  { seo_keeper : string
-  ; seo_source : string
-  }
-
-type skill_evidence_activation_item =
-  { sea_trace_id : string
-  ; sea_owner_status : string
-  ; sea_owner_claims : skill_evidence_owner_claim list
-  ; sea_owner_gap_count : int
-  ; sea_activation : Yojson.Safe.t
-  }
-
-type skill_evidence_activation =
-  | Skill_evidence_most_recent_observed of skill_evidence_activation_item
-  | Skill_evidence_most_recent_observed_timestamp_tie of
-      skill_evidence_activation_item list
-
-type skill_evidence =
-  { se_status : skill_evidence_status
-  ; se_activation : skill_evidence_activation option
-  ; se_composition : Yojson.Safe.t option
-  ; se_coverage : skill_evidence_coverage
-  }
-
-val decode_skill_evidence : Yojson.Safe.t -> (skill_evidence, string) result
 
 val runtime_context_source_label : runtime_context_source -> string
 val runtime_reasoning_effort_label : Llm_provider.Reasoning_effort.t -> string

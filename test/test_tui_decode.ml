@@ -419,13 +419,13 @@ let test_terminal_text_escapes_control_sequences () =
   Alcotest.(check string)
     "C0, ESC, OSC terminator, and UTF-8 C1 are rendered inert"
     "safe\\x1B]0;owned\\x07\\x0A\\x09\\u0080done"
-    (Tui_decode.sanitize_terminal_text payload)
+    (Masc.Tui_terminal_text.sanitize_terminal_text payload)
 
 let test_terminal_text_preserves_printable_utf8 () =
   Alcotest.(check string)
     "printable UTF-8 survives"
     "정상 blocker — café"
-    (Tui_decode.sanitize_terminal_text "정상 blocker — café")
+    (Masc.Tui_terminal_text.sanitize_terminal_text "정상 blocker — café")
 
 let test_terminal_text_escapes_malformed_utf8_bytes () =
   [ ( "isolated illegal bytes"
@@ -450,11 +450,11 @@ let test_terminal_text_escapes_malformed_utf8_bytes () =
   ]
   |> List.iter (fun (label, input, expected) ->
        Alcotest.(check string) label expected
-         (Tui_decode.sanitize_terminal_text input))
+         (Masc.Tui_terminal_text.sanitize_terminal_text input))
 
 let test_terminal_text_is_idempotent_and_single_line () =
   let once =
-    Tui_decode.sanitize_terminal_text
+    Masc.Tui_terminal_text.sanitize_terminal_text
       "safe\000\007\009\010\013\027\127\128\159\194\128done"
   in
   Alcotest.(check string)
@@ -464,7 +464,7 @@ let test_terminal_text_is_idempotent_and_single_line () =
   Alcotest.(check bool) "sanitized output is one logical row" false
     (String.contains once '\n');
   Alcotest.(check string) "sanitization is idempotent" once
-    (Tui_decode.sanitize_terminal_text once)
+    (Masc.Tui_terminal_text.sanitize_terminal_text once)
 
 (* Both sanitizers return an input they would copy byte for byte without
    walking it: printable ASCII for the terminal text, any ASCII for the
@@ -481,25 +481,25 @@ let test_terminal_text_ascii_is_returned_whole () =
       else Printf.sprintf "a\\x%02Xb" code
     in
     Alcotest.(check string) (label ^ " in a printable run") expected
-      (Tui_decode.sanitize_terminal_text text);
+      (Masc.Tui_terminal_text.sanitize_terminal_text text);
     Alcotest.(check string) (label ^ " after a non-ASCII scalar")
       ("\xc3\xa9" ^ expected)
-      (Tui_decode.sanitize_terminal_text ("\xc3\xa9" ^ text));
+      (Masc.Tui_terminal_text.sanitize_terminal_text ("\xc3\xa9" ^ text));
     Alcotest.(check string) (label ^ " is not invisible") text
-      (Tui_decode.escape_invisible text);
+      (Masc.Tui_terminal_text.escape_invisible text);
     (* The same byte raw after a non-ASCII scalar goes through the walk, so
        the walk and the short cut are held to one answer for it. *)
     Alcotest.(check string) (label ^ " is not invisible to the walk")
       ("\xc3\xa9" ^ text)
-      (Tui_decode.escape_invisible ("\xc3\xa9" ^ text))
+      (Masc.Tui_terminal_text.escape_invisible ("\xc3\xa9" ^ text))
   done;
   let printable = String.init 0x5F (fun index -> Char.chr (0x20 + index)) in
   Alcotest.(check bool) "printable ASCII comes back without a copy" true
-    (Tui_decode.sanitize_terminal_text printable == printable);
+    (Masc.Tui_terminal_text.sanitize_terminal_text printable == printable);
   let with_controls = "tab\there\x1b[0m" in
   Alcotest.(check bool) "ASCII escape-invisible input comes back without a copy"
     true
-    (Tui_decode.escape_invisible with_controls == with_controls)
+    (Masc.Tui_terminal_text.escape_invisible with_controls == with_controls)
 
 let test_terminal_text_escapes_invisible_codepoints () =
   (* #38445: a terminal draws bidi controls and zero-width characters as
@@ -513,17 +513,17 @@ let test_terminal_text_escapes_invisible_codepoints () =
     n = 0 || scan 0
   in
   let rlo = "\xe2\x80\xae" in
-  let escaped = Tui_decode.sanitize_terminal_text ("a" ^ rlo ^ "b") in
+  let escaped = Masc.Tui_terminal_text.sanitize_terminal_text ("a" ^ rlo ^ "b") in
   Alcotest.(check string) "the bidi override is drawn as its escape text"
     "a\\u202Eb" escaped;
   Alcotest.(check bool) "the raw RLO bytes are gone" false
     (contains_substring escaped rlo);
   Alcotest.(check string) "escape_invisible is the one rule" "a\\u202Eb"
-    (Tui_decode.escape_invisible ("a" ^ rlo ^ "b"));
+    (Masc.Tui_terminal_text.escape_invisible ("a" ^ rlo ^ "b"));
   List.iter
     (fun (label, bytes, expected) ->
        Alcotest.(check string) label expected
-         (Tui_decode.escape_invisible bytes))
+         (Masc.Tui_terminal_text.escape_invisible bytes))
     [ "ALM", "\xd8\x9c", "\\u061C"
     ; "ZWSP", "\xe2\x80\x8b", "\\u200B"
     ; "ZWNJ", "\xe2\x80\x8c", "\\u200C"
@@ -542,10 +542,10 @@ let test_terminal_text_escapes_invisible_codepoints () =
     ; "BOM", "\xef\xbb\xbf", "\\uFEFF"
     ];
   Alcotest.(check string) "an ordinary string is unchanged" "café"
-    (Tui_decode.escape_invisible "café");
+    (Masc.Tui_terminal_text.escape_invisible "café");
   Alcotest.(check string) "the escape is idempotent" "a\\u202Eb"
-    (Tui_decode.escape_invisible
-       (Tui_decode.escape_invisible ("a" ^ rlo ^ "b")))
+    (Masc.Tui_terminal_text.escape_invisible
+       (Masc.Tui_terminal_text.escape_invisible ("a" ^ rlo ^ "b")))
 
 (* #38485 review: the first cut escaped every ZWJ, and the ZWJ an operator
    types most often is the one inside an emoji. UAX #29 GB11 is the rule this
@@ -563,7 +563,7 @@ let test_terminal_text_keeps_the_joiner_inside_an_emoji () =
   let man = "\xf0\x9f\x91\xa8" and woman = "\xf0\x9f\x91\xa9" in
   let girl = "\xf0\x9f\x91\xa7" in
   let keeps label text =
-    Alcotest.(check string) label text (Tui_decode.escape_invisible text)
+    Alcotest.(check string) label text (Masc.Tui_terminal_text.escape_invisible text)
   in
   keeps "the shrugging man keeps its joiner" (shrug ^ zwj ^ male ^ vs16);
   keeps "a skin tone before the joiner does not end the emoji"
@@ -576,27 +576,27 @@ let test_terminal_text_keeps_the_joiner_inside_an_emoji () =
      rule that only looked left, or only right, or let every joiner through
      fails here. *)
   Alcotest.(check string) "a joiner between letters is still escaped"
-    ("a\\u200Db") (Tui_decode.escape_invisible ("a" ^ zwj ^ "b"));
+    ("a\\u200Db") (Masc.Tui_terminal_text.escape_invisible ("a" ^ zwj ^ "b"));
   Alcotest.(check string) "a joiner after an emoji but before a letter is escaped"
     (shrug ^ "\\u200Da")
-    (Tui_decode.escape_invisible (shrug ^ zwj ^ "a"));
+    (Masc.Tui_terminal_text.escape_invisible (shrug ^ zwj ^ "a"));
   Alcotest.(check string) "a joiner before an emoji but after a letter is escaped"
     ("a\\u200D" ^ shrug)
-    (Tui_decode.escape_invisible ("a" ^ zwj ^ shrug));
+    (Masc.Tui_terminal_text.escape_invisible ("a" ^ zwj ^ shrug));
   (* A joiner that was escaped is text now, so the next one is not inside an
      emoji either: carrying the state through an escaped joiner would let the
      second one through raw. *)
   Alcotest.(check string) "a doubled joiner does not smuggle one through"
     (shrug ^ "\\u200D\\u200D" ^ laptop)
-    (Tui_decode.escape_invisible (shrug ^ zwj ^ zwj ^ laptop));
+    (Masc.Tui_terminal_text.escape_invisible (shrug ^ zwj ^ zwj ^ laptop));
   Alcotest.(check string) "only the joiner is spared, not every zero width"
     (shrug ^ "\\u200B" ^ laptop)
-    (Tui_decode.escape_invisible (shrug ^ zwsp ^ laptop));
+    (Masc.Tui_terminal_text.escape_invisible (shrug ^ zwsp ^ laptop));
   (* The sanitizer the screens call has to agree with the rule, or the rule
      is only true of a function nothing draws through. *)
   Alcotest.(check string) "the terminal sanitizer keeps it too"
     (shrug ^ zwj ^ male ^ vs16)
-    (Tui_decode.sanitize_terminal_text (shrug ^ zwj ^ male ^ vs16))
+    (Masc.Tui_terminal_text.sanitize_terminal_text (shrug ^ zwj ^ male ^ vs16))
 
 (* #38501: the tag block copies ASCII into characters a terminal draws as
    nothing, so a sentence can be spelled twice -- once for the reader and once
@@ -627,7 +627,7 @@ let test_terminal_text_keeps_the_tags_that_spell_a_flag () =
   let scotland = flag ^ tag_g ^ tag_b ^ tag_s ^ tag_c ^ tag_t ^ cancel in
   let texas = flag ^ tag_u ^ tag_s ^ tag_t ^ tag_x ^ cancel in
   let keeps label text =
-    Alcotest.(check string) label text (Tui_decode.escape_invisible text)
+    Alcotest.(check string) label text (Masc.Tui_terminal_text.escape_invisible text)
   in
   keeps "the flag of Scotland is spelled whole" scotland;
   keeps "so is the flag of Texas" texas;
@@ -637,12 +637,12 @@ let test_terminal_text_keeps_the_tags_that_spell_a_flag () =
      the opening flag, or that never looked for the terminator, fails here. *)
   Alcotest.(check string) "a command spelled in tag characters is drawn"
     "\\U000E0072\\U000E006D\\U000E0020\\U000E002D\\U000E0072\\U000E0066\\U000E0020\\U000E002F"
-    (Tui_decode.escape_invisible
+    (Masc.Tui_terminal_text.escape_invisible
        (tag_r ^ tag_m ^ tag_space ^ tag_dash ^ tag_r ^ tag_f ^ tag_space
         ^ tag_slash));
   Alcotest.(check string) "a sequence that never closes is not a flag"
     (flag ^ "\\U000E0067\\U000E0062\\U000E0073\\U000E0063\\U000E0074")
-    (Tui_decode.escape_invisible (flag ^ tag_g ^ tag_b ^ tag_s ^ tag_c ^ tag_t));
+    (Masc.Tui_terminal_text.escape_invisible (flag ^ tag_g ^ tag_b ^ tag_s ^ tag_c ^ tag_t));
   (* #38557 review: the opening flag is not a licence for the block behind it.
      A reader sees one flag; without these the bytes under it could spell a
      sentence, which is the smuggling this whole rule exists to stop. Only the
@@ -650,34 +650,34 @@ let test_terminal_text_keeps_the_tags_that_spell_a_flag () =
   Alcotest.(check string) "a command behind a flag is still drawn"
     (flag
      ^ "\\U000E0072\\U000E006D\\U000E0020\\U000E002D\\U000E0072\\U000E0066\\U000E0020\\U000E002F\\U000E007F")
-    (Tui_decode.escape_invisible
+    (Masc.Tui_terminal_text.escape_invisible
        (flag ^ tag_r ^ tag_m ^ tag_space ^ tag_dash ^ tag_r ^ tag_f ^ tag_space
         ^ tag_slash ^ cancel));
   Alcotest.(check string) "a run too long to be a subdivision is drawn"
     (flag
      ^ "\\U000E0067\\U000E0062\\U000E0073\\U000E0063\\U000E0074\\U000E0078\\U000E0079\\U000E007A\\U000E007F")
-    (Tui_decode.escape_invisible
+    (Masc.Tui_terminal_text.escape_invisible
        (flag ^ tag_g ^ tag_b ^ tag_s ^ tag_c ^ tag_t ^ tag_x ^ tag_y ^ tag_z
         ^ cancel));
   Alcotest.(check string) "a run too short to be a subdivision is drawn"
     (flag ^ "\\U000E0067\\U000E0062\\U000E007F")
-    (Tui_decode.escape_invisible (flag ^ tag_g ^ tag_b ^ cancel));
+    (Masc.Tui_terminal_text.escape_invisible (flag ^ tag_g ^ tag_b ^ cancel));
   Alcotest.(check string) "a terminator with nothing to spell is drawn"
     (flag ^ "\\U000E007F")
-    (Tui_decode.escape_invisible (flag ^ cancel));
+    (Masc.Tui_terminal_text.escape_invisible (flag ^ cancel));
   (* The wider escape is the notation decision this defect forced: the
      tag block needs five hex digits, and in the four-digit form the
      fifth digit would read as ordinary text after the escape. *)
   Alcotest.(check string) "a tag character after a letter is drawn"
     "a\\U000E0062"
-    (Tui_decode.escape_invisible ("a" ^ tag_b));
+    (Masc.Tui_terminal_text.escape_invisible ("a" ^ tag_b));
   Alcotest.(check string) "the deprecated language tag has no flag to belong to"
     "\\U000E0001"
-    (Tui_decode.escape_invisible language_tag);
+    (Masc.Tui_terminal_text.escape_invisible language_tag);
   (* The sanitizer the screens call has to agree, or the rule is only true of
      a function nothing draws through. *)
   Alcotest.(check string) "the terminal sanitizer keeps the flag too" scotland
-    (Tui_decode.sanitize_terminal_text scotland)
+    (Masc.Tui_terminal_text.sanitize_terminal_text scotland)
 
 (* The hand-kept list stopped at the tag block. Default_Ignorable_Code_Point
    also holds the word joiner family, the Hangul fillers and the variation
@@ -695,54 +695,54 @@ let test_terminal_text_escapes_every_default_ignorable () =
   let heart = "\xe2\x9d\xa4" (* U+2764 *) in
   let ideograph = "\xe8\x91\x9b" (* U+845B *) in
   Alcotest.(check string) "the word joiner is drawn" "a\\u2060b"
-    (Tui_decode.escape_invisible ("a" ^ word_joiner ^ "b"));
+    (Masc.Tui_terminal_text.escape_invisible ("a" ^ word_joiner ^ "b"));
   Alcotest.(check string) "invisible plus is drawn" "a\\u2064b"
-    (Tui_decode.escape_invisible ("a" ^ invisible_plus ^ "b"));
+    (Masc.Tui_terminal_text.escape_invisible ("a" ^ invisible_plus ^ "b"));
   Alcotest.(check string) "the Hangul filler is drawn" "\\u3164"
-    (Tui_decode.escape_invisible hangul_filler);
+    (Masc.Tui_terminal_text.escape_invisible hangul_filler);
   Alcotest.(check string) "the soft hyphen is drawn" "a\\u00ADb"
-    (Tui_decode.escape_invisible ("a" ^ soft_hyphen ^ "b"));
+    (Masc.Tui_terminal_text.escape_invisible ("a" ^ soft_hyphen ^ "b"));
   Alcotest.(check string) "one selector keeps the emoji form" (heart ^ vs16)
-    (Tui_decode.escape_invisible (heart ^ vs16));
+    (Masc.Tui_terminal_text.escape_invisible (heart ^ vs16));
   Alcotest.(check string) "an ideographic selector is drawn even after an ideograph"
     (ideograph ^ "\\U000E0100")
-    (Tui_decode.escape_invisible (ideograph ^ vs17));
+    (Masc.Tui_terminal_text.escape_invisible (ideograph ^ vs17));
   Alcotest.(check string) "VS1 after an ideograph is drawn"
     ("\xe4\xb8\x80" ^ "\\uFE00")
-    (Tui_decode.escape_invisible ("\xe4\xb8\x80" (* U+4E00 *) ^ "\xef\xb8\x80" (* U+FE00 *)));
+    (Masc.Tui_terminal_text.escape_invisible ("\xe4\xb8\x80" (* U+4E00 *) ^ "\xef\xb8\x80" (* U+FE00 *)));
   Alcotest.(check string) "one ideographic selector after a letter is drawn"
     "a\\U000E0100"
-    (Tui_decode.escape_invisible ("a" ^ vs17));
+    (Masc.Tui_terminal_text.escape_invisible ("a" ^ vs17));
   Alcotest.(check string) "an emoji selector after a letter is drawn"
     "a\\uFE0F"
-    (Tui_decode.escape_invisible ("a" ^ vs16));
+    (Masc.Tui_terminal_text.escape_invisible ("a" ^ vs16));
   Alcotest.(check string) "a keycap keeps its emoji selector"
     ("1" ^ vs16)
-    (Tui_decode.escape_invisible ("1" ^ vs16));
+    (Masc.Tui_terminal_text.escape_invisible ("1" ^ vs16));
   Alcotest.(check string) "a run of selectors behind one letter is drawn"
     "a\\U000E0100\\U000E0101\\U000E0100"
-    (Tui_decode.escape_invisible ("a" ^ vs17 ^ vs18 ^ vs17));
+    (Masc.Tui_terminal_text.escape_invisible ("a" ^ vs17 ^ vs18 ^ vs17));
   Alcotest.(check string) "a second emoji selector is drawn"
     (heart ^ vs16 ^ "\\uFE0F")
-    (Tui_decode.escape_invisible (heart ^ vs16 ^ vs16));
+    (Masc.Tui_terminal_text.escape_invisible (heart ^ vs16 ^ vs16));
   Alcotest.(check string) "a selector with no base is drawn" "\\U000E0100"
-    (Tui_decode.escape_invisible vs17)
+    (Masc.Tui_terminal_text.escape_invisible vs17)
 
 let test_preview_line_marks_breaks_and_escapes_the_rest () =
   let mark = "\xe2\x8f\x8e" in
   Alcotest.(check string) "a break is one return mark" ("a" ^ mark ^ "b")
-    (Tui_decode.preview_line "a\nb");
+    (Masc.Tui_terminal_text.preview_line "a\nb");
   Alcotest.(check string) "CR LF is one break, not two" ("a" ^ mark ^ "b")
-    (Tui_decode.preview_line "a\r\nb");
+    (Masc.Tui_terminal_text.preview_line "a\r\nb");
   Alcotest.(check string) "a lone CR is a break" ("a" ^ mark ^ "b")
-    (Tui_decode.preview_line "a\rb");
-  Alcotest.(check string) "a tab is a space" "a b" (Tui_decode.preview_line "a\tb");
+    (Masc.Tui_terminal_text.preview_line "a\rb");
+  Alcotest.(check string) "a tab is a space" "a b" (Masc.Tui_terminal_text.preview_line "a\tb");
   Alcotest.(check string) "other controls still escape" "a\\x1Bb"
-    (Tui_decode.preview_line "a\027b");
+    (Masc.Tui_terminal_text.preview_line "a\027b");
   Alcotest.(check string) "printable UTF-8 survives" ("정상" ^ mark ^ "café")
-    (Tui_decode.preview_line "정상\ncafé");
+    (Masc.Tui_terminal_text.preview_line "정상\ncafé");
   Alcotest.(check bool) "the result is one row" false
-    (String.contains (Tui_decode.preview_line "x\ny\nz") '\n')
+    (String.contains (Masc.Tui_terminal_text.preview_line "x\ny\nz") '\n')
 
 let keeper_call_row ~keeper ~tool ?(wire_outcome = "ok") ?duration_ms ?turn
     ?execution_id ?tool_use_id ?planned_index ?batch_index ?batch_size
@@ -1056,43 +1056,43 @@ let test_keeper_calls_success_falls_back_to_wire_outcome_or_disposition () =
 let test_timestamp_slices_are_sanitized_after_selection () =
   Alcotest.(check string) "normal clock timestamp, in the zone asked for"
     "04:05:06"
-    (Tui_decode.clock_timestamp_for_terminal ~localtime:Unix.gmtime
+    (Masc.Tui_terminal_text.clock_timestamp_for_terminal ~localtime:Unix.gmtime
        "2026-08-22T04:05:06Z");
   Alcotest.(check string) "the row clock follows the terminal's zone"
     "13:05:06"
-    (Tui_decode.clock_timestamp_for_terminal
+    (Masc.Tui_terminal_text.clock_timestamp_for_terminal
        ~localtime:(fun seconds -> Unix.gmtime (seconds +. 32400.))
        "2026-08-22T04:05:06Z");
   Alcotest.(check string) "fractional seconds and offsets read the same clock"
     "04:05:06"
-    (Tui_decode.clock_timestamp_for_terminal ~localtime:Unix.gmtime
+    (Masc.Tui_terminal_text.clock_timestamp_for_terminal ~localtime:Unix.gmtime
        "2026-08-22T13:05:06.250+09:00");
   Alcotest.(check string) "empty short timestamp" "(never)"
-    (Tui_decode.short_timestamp_for_terminal ~localtime:Unix.gmtime "");
+    (Masc.Tui_terminal_text.short_timestamp_for_terminal ~localtime:Unix.gmtime "");
   Alcotest.(check string) "a short timestamp is the date and clock in the given zone"
     "2026-08-22 13:05:06"
-    (Tui_decode.short_timestamp_for_terminal
+    (Masc.Tui_terminal_text.short_timestamp_for_terminal
        ~localtime:(fun seconds -> Unix.gmtime (seconds +. 32400.))
        "2026-08-22T04:05:06Z");
   Alcotest.(check string) "and crosses midnight with the zone"
     "2026-08-23 06:00:00"
-    (Tui_decode.short_timestamp_for_terminal
+    (Masc.Tui_terminal_text.short_timestamp_for_terminal
        ~localtime:(fun seconds -> Unix.gmtime (seconds +. 32400.))
        "2026-08-22T21:00:00Z");
   Alcotest.(check string)
     "clock slice cannot expose a UTF-8 continuation as raw C1"
     "\\x9B31mOWNE"
-    (Tui_decode.clock_timestamp_for_terminal ~localtime:Unix.gmtime
+    (Masc.Tui_terminal_text.clock_timestamp_for_terminal ~localtime:Unix.gmtime
        "0123456789Û31mOWNED!!");
   Alcotest.(check string)
     "short timestamp cannot leave a split UTF-8 lead byte"
     "123456789012345678\\xE2"
-    (Tui_decode.short_timestamp_for_terminal ~localtime:Unix.gmtime
+    (Masc.Tui_terminal_text.short_timestamp_for_terminal ~localtime:Unix.gmtime
        "123456789012345678€");
   Alcotest.(check string)
     "clock slice escapes selected terminal controls"
     "0\\x1B]2;Xab"
-    (Tui_decode.clock_timestamp_for_terminal ~localtime:Unix.gmtime
+    (Masc.Tui_terminal_text.clock_timestamp_for_terminal ~localtime:Unix.gmtime
        "2026-08-22T0\027]2;Xabcd")
 
 let test_decode_keeper_rejects_retired_fields () =
@@ -11551,12 +11551,12 @@ let skill_evidence_fixture () =
 ;;
 
 let test_decode_skill_evidence_reads_exact_v5_coverage () =
-  match Tui_decode.decode_skill_evidence (skill_evidence_fixture ()) with
+  match Tui_decode_skill_evidence.decode_skill_evidence (skill_evidence_fixture ()) with
   | Error detail -> Alcotest.fail detail
   | Ok evidence ->
     (match evidence.se_status with
-     | Tui_decode.Skill_evidence_not_observed_in_retained_coverage -> ()
-     | Tui_decode.Skill_evidence_observed ->
+     | Tui_decode_skill_evidence.Skill_evidence_not_observed_in_retained_coverage -> ()
+     | Tui_decode_skill_evidence.Skill_evidence_observed ->
        Alcotest.fail "bounded absence decoded as observed");
     Alcotest.(check int)
       "activation ledgers"
@@ -11599,7 +11599,7 @@ let test_decode_skill_evidence_accepts_declared_composition_scopes () =
        match
          skill_evidence_fixture ()
          |> with_scope scope
-         |> Tui_decode.decode_skill_evidence
+         |> Tui_decode_skill_evidence.decode_skill_evidence
        with
        | Error detail -> Alcotest.fail detail
        | Ok evidence ->
@@ -11608,8 +11608,8 @@ let test_decode_skill_evidence_accepts_declared_composition_scopes () =
            true
            (evidence.se_coverage.sec_composition_scope = expected))
     [ ( "exact_reference_latest_completed"
-      , Tui_decode.Skill_evidence_exact_reference_latest_completed )
-    ; "unavailable", Tui_decode.Skill_evidence_composition_unavailable
+      , Tui_decode_skill_evidence.Skill_evidence_exact_reference_latest_completed )
+    ; "unavailable", Tui_decode_skill_evidence.Skill_evidence_composition_unavailable
     ]
 ;;
 
@@ -11624,14 +11624,14 @@ let test_decode_skill_evidence_rejects_v1_and_status_disagreement () =
     true
     (skill_evidence_fixture ()
      |> replace "schema" (`String "masc.skill-evidence/v2")
-     |> Tui_decode.decode_skill_evidence
+     |> Tui_decode_skill_evidence.decode_skill_evidence
      |> Result.is_error);
   Alcotest.(check bool)
     "observed without evidence rejected"
     true
     (skill_evidence_fixture ()
      |> replace "status" (`String "observed")
-     |> Tui_decode.decode_skill_evidence
+     |> Tui_decode_skill_evidence.decode_skill_evidence
      |> Result.is_error)
 ;;
 
@@ -11647,7 +11647,7 @@ let test_decode_skill_evidence_requires_observation_fields () =
          true
          (skill_evidence_fixture ()
           |> without
-          |> Tui_decode.decode_skill_evidence
+          |> Tui_decode_skill_evidence.decode_skill_evidence
           |> Result.is_error))
     [ "activation"; "composition" ]
 ;;
@@ -11688,7 +11688,7 @@ let test_decode_skill_evidence_requires_every_coverage_field () =
          true
          (skill_evidence_fixture ()
           |> without
-          |> Tui_decode.decode_skill_evidence
+          |> Tui_decode_skill_evidence.decode_skill_evidence
           |> Result.is_error))
     required
 ;;
@@ -11763,18 +11763,18 @@ let skill_evidence_observed_fixture () =
 ;;
 
 let test_decode_skill_evidence_reads_typed_activation_owner () =
-  match Tui_decode.decode_skill_evidence (skill_evidence_observed_fixture ()) with
+  match Tui_decode_skill_evidence.decode_skill_evidence (skill_evidence_observed_fixture ()) with
   | Error detail -> Alcotest.fail detail
   | Ok
       { se_activation =
-          Some (Tui_decode.Skill_evidence_most_recent_observed item)
+          Some (Tui_decode_skill_evidence.Skill_evidence_most_recent_observed item)
       ; _
       } ->
     Alcotest.(check string) "trace" "trace-proof" item.sea_trace_id;
     Alcotest.(check (list string))
       "owner claim"
       [ "delta" ]
-      (List.map (fun claim -> claim.Tui_decode.seo_keeper) item.sea_owner_claims)
+      (List.map (fun claim -> claim.Tui_decode_skill_evidence.seo_keeper) item.sea_owner_claims)
   | Ok _ -> Alcotest.fail "typed activation selection was not preserved"
 ;;
 
@@ -11803,7 +11803,7 @@ let test_decode_skill_evidence_rejects_open_gap_and_unbacked_activation () =
   Alcotest.(check bool)
     "known code without variant fields is rejected"
     true
-    (Tui_decode.decode_skill_evidence open_gap |> Result.is_error);
+    (Tui_decode_skill_evidence.decode_skill_evidence open_gap |> Result.is_error);
   let without_loaded_ledger =
     skill_evidence_observed_fixture ()
     |> map_skill_evidence_coverage (function
@@ -11820,7 +11820,7 @@ let test_decode_skill_evidence_rejects_open_gap_and_unbacked_activation () =
   Alcotest.(check bool)
     "activation requires a loaded ledger"
     true
-    (Tui_decode.decode_skill_evidence without_loaded_ledger |> Result.is_error)
+    (Tui_decode_skill_evidence.decode_skill_evidence without_loaded_ledger |> Result.is_error)
 ;;
 
 let test_decode_skill_evidence_tie_compares_rfc3339_instants () =
@@ -11868,7 +11868,7 @@ let test_decode_skill_evidence_tie_compares_rfc3339_instants () =
            fields)
     | _ -> Alcotest.fail "Skill evidence fixture is not an object"
   in
-  match Tui_decode.decode_skill_evidence tie with
+  match Tui_decode_skill_evidence.decode_skill_evidence tie with
   | Ok { se_activation = Some (Skill_evidence_most_recent_observed_timestamp_tie rows); _ } ->
     Alcotest.(check int) "two equal instants" 2 (List.length rows)
   | Ok _ -> Alcotest.fail "timestamp tie lost its typed selection"

@@ -25,6 +25,7 @@ type image =
   | Msx_screen
   | Mascot
   | Keeper_portrait
+  | About_keeper_1 | About_keeper_2 | About_keeper_3 | About_keeper_4
 [@@deriving enumerate]
 
 (* Fixed, so a query reply arriving late -- after the deadline, into the key
@@ -34,6 +35,10 @@ let image_id = function
   | Msx_screen -> 32
   | Mascot -> 41
   | Keeper_portrait -> 42
+  | About_keeper_1 -> 43
+  | About_keeper_2 -> 44
+  | About_keeper_3 -> 45
+  | About_keeper_4 -> 46
 
 let query_id = image_id Graphics_query
 

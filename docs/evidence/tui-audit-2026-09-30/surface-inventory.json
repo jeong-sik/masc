@@ -913,5 +913,18 @@
     "validation": "OCaml syntax/Python AST/fullbasediffcheck PASS; adapted5widthcolorfixture40rowsunexecuted",
     "execution": "not run under source-only policy",
     "remaining": "short-pane summary omissions persist visibly; wholeDashboard states/sections require releaseverification"
+  },
+  "task_detail_integration_stack": {
+    "pr": 40336,
+    "base_pr": 40333,
+    "base_head": "f808a2992eefbe519bd0ca103188656639f01480",
+    "head": "b44ef2cea9afd6890a22d7663db3991dcd67ce38",
+    "imported_pr": 40133,
+    "imported_head": "787fa7b6f22ca3393b417b5cae7f2268383b56c2",
+    "imported_base": "04256f2b1d46fe9d49f884215b2d6c0025defa3a",
+    "scope": "full literal Task metadata/status/body/history physicaldocument; splitviewport/page shared; cancelkey visibleTaskguard andGoal lifecycle detail-only",
+    "review": "system_audit and agenda_finish source PASS exacthead, no unresolved P0/P1/P2; EOF P3deferred",
+    "validation": "three ML/two MLI syntax and Python AST PASS; basediffEOFwarning7752P3deferred; importedcolorfixtureunexecuted",
+    "execution": "not run under source-only policy"
   }
 }

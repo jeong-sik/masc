@@ -306,8 +306,8 @@ let partly_checked_save () =
 (* What the renderer draws for a row: the pane's own text sanitized, the
    client's text drawn with its colours. *)
 let drawn row = match row with
-  | Login.Text text -> Masc.Tui_decode.sanitize_terminal_text text
-  | Login.Terminal line -> Sgr_text.render ~sanitize:Masc.Tui_decode.sanitize_terminal_text line
+  | Login.Text text -> Masc.Tui_terminal_text.sanitize_terminal_text text
+  | Login.Terminal line -> Sgr_text.render ~sanitize:Masc.Tui_terminal_text.sanitize_terminal_text line
 let styled code text = if String.length code = 0 then text else code ^ text ^ Sgr.reset
 (* The Codex device login as it reached the pane on 2026-09-28 (the code is
    made up). Split inside an escape, the way a stream chunk can end. *)
@@ -344,10 +344,10 @@ let foreign_escapes_never_reach_the_terminal () =
   let hostile = only "a\027[2J\027[5;5Hb\027]8;;https://evil.example/\027\\link\027]8;;\027\\c\027[?25ld\027(Be\027]0;title\007f\0277g" in
   check string "cursor moves, hyperlinks, titles and charsets are dropped, their text kept" "ablinkcdefg" (Sgr_text.text hostile);
   check bool "nothing the client wrote is sent as an escape" false
-    (String.contains (Sgr_text.render ~sanitize:Masc.Tui_decode.sanitize_terminal_text hostile) '\027');
+    (String.contains (Sgr_text.render ~sanitize:Masc.Tui_terminal_text.sanitize_terminal_text hostile) '\027');
   check string "a sequence the stream ends inside waits for the rest" "x" (Sgr_text.text (only "x\027[9"));
   check string "an ESC that starts nothing is shown, not sent" "a\\x1B\\x01b"
-    (Sgr_text.render ~sanitize:Masc.Tui_decode.sanitize_terminal_text (only "a\027\001b"));
+    (Sgr_text.render ~sanitize:Masc.Tui_terminal_text.sanitize_terminal_text (only "a\027\001b"));
   (match Sgr_text.parse "\027[31mred\nstill red\027[0m plain" with
    | [ _; [ carried; after ] ] ->
      check bool "a colour carries over the line end" true Sgr_text.(carried.pen.foreground = Some (Palette Red));

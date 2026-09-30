@@ -144,7 +144,7 @@ let approval_decision_wire = function
   | Deny -> "deny"
 
 let approval_payload_for_terminal payload =
-  Masc.Tui_decode.sanitize_terminal_text (Yojson.Safe.to_string payload)
+  Masc.Tui_terminal_text.sanitize_terminal_text (Yojson.Safe.to_string payload)
 
 let approval_gate_transition ~inflight ~pending ~token ~decision =
   if inflight then Gate_blocked_inflight
@@ -176,7 +176,7 @@ let reconcile_cursor ~current_items ~cursor ~next_items =
   | None -> fallback_cursor ~cursor next_items
 
 let decode_string_list label values =
-  Masc.Tui_decode.decode_list label
+  Masc.Tui_decode_fields.decode_list label
     (function
       | `String value when String.trim value <> "" -> Ok ()
       | `String _ -> Error "must not contain blank strings"
@@ -187,7 +187,7 @@ let decode_string_list label values =
     values
 
 let decode_object_list label values =
-  Masc.Tui_decode.decode_list label
+  Masc.Tui_decode_fields.decode_list label
     (function
       | `Assoc _ -> Ok ()
       | other ->
@@ -208,19 +208,19 @@ let duplicate_token items =
 
 let decode_snapshot json =
   let* envelope =
-    Masc.Tui_decode.required_object_field json "pending_confirm_envelope"
+    Masc.Tui_decode_fields.required_object_field json "pending_confirm_envelope"
   in
-  let* items = Masc.Tui_decode.required_list_field envelope "items" in
+  let* items = Masc.Tui_decode_fields.required_list_field envelope "items" in
   let* aps_items =
-    Masc.Tui_decode.decode_list "pending_confirm_envelope.items"
+    Masc.Tui_decode_fields.decode_list "pending_confirm_envelope.items"
       (fun item ->
         let* pending = Operator_pending_confirm.pending_confirm_of_yojson item in
         Ok (approval_of_pending_confirm pending))
       items
   in
-  let* summary = Masc.Tui_decode.required_object_field envelope "summary" in
+  let* summary = Masc.Tui_decode_fields.required_object_field envelope "summary" in
   let* aps_actor_filter =
-    Masc.Tui_decode.optional_string_field summary "actor_filter"
+    Masc.Tui_decode_fields.optional_string_field summary "actor_filter"
   in
   let* aps_filter_active =
     match member "filter_active" summary with
@@ -233,20 +233,20 @@ let decode_snapshot json =
              (Json_util.kind_name other))
   in
   let* aps_visible_count =
-    Masc.Tui_decode.required_int_field summary "visible_count"
+    Masc.Tui_decode_fields.required_int_field summary "visible_count"
   in
   let* aps_total_count =
-    Masc.Tui_decode.required_int_field summary "total_count"
+    Masc.Tui_decode_fields.required_int_field summary "total_count"
   in
   let* aps_hidden_count =
-    Masc.Tui_decode.required_int_field summary "hidden_count"
+    Masc.Tui_decode_fields.required_int_field summary "hidden_count"
   in
   let* hidden_actors =
-    Masc.Tui_decode.required_list_field summary "hidden_actors"
+    Masc.Tui_decode_fields.required_list_field summary "hidden_actors"
   in
   let* _ = decode_string_list "pending_confirm_envelope.summary.hidden_actors" hidden_actors in
   let* confirm_required_actions =
-    Masc.Tui_decode.required_list_field summary "confirm_required_actions"
+    Masc.Tui_decode_fields.required_list_field summary "confirm_required_actions"
   in
   let* _ =
     decode_object_list
@@ -304,7 +304,7 @@ let bounded_json json =
   else String.sub rendered 0 240 ^ "..."
 
 let required_nonempty_string json field =
-  let* value = Masc.Tui_decode.required_string_field json field in
+  let* value = Masc.Tui_decode_fields.required_string_field json field in
   if String.trim value = "" then
     Error (Printf.sprintf "field '%s' must not be blank" field)
   else Ok value
@@ -328,7 +328,7 @@ let decode_confirm_envelope ~expected_token ~expected_decision ~status json =
   let* decision = required_nonempty_string json "decision" in
   let* tool_name = required_nonempty_string json "tool_name" in
   let* executed_action =
-    Masc.Tui_decode.required_object_field json "executed_action"
+    Masc.Tui_decode_fields.required_object_field json "executed_action"
   in
   let* executed_action =
     Operator_pending_confirm.pending_confirm_of_yojson executed_action

@@ -80,8 +80,52 @@ def goal_summary(goals: list[dict[str, Any]]) -> dict[str, Any]:
             "median": round(statistics.median(windows), 2) if windows else None,
             "max": round(max(windows), 2) if windows else None,
         },
-        "owner_known": sum(1 for g in goals if g.get("owner") not in (None, "", "unknown")),
         "first_created": created[0].isoformat() if created else None,
+    }
+
+
+def goal_edit_summary(events: list[dict[str, Any]]) -> dict[str, Any]:
+    """Count recorded field changes, which carry their own before/after values.
+
+    goal_updated contains an after-snapshot. Its append can follow a later
+    edit's append, so adjacent snapshots cannot establish a change or actor.
+    """
+    changes: dict[str, Counter[str]] = {"due_date": Counter(), "priority": Counter()}
+    recorded_events = 0
+    for event in events:
+        if event["event_type"] != "goal_edited":
+            continue
+        payload = event["payload"]
+        if not isinstance(payload, dict):
+            raise ValueError("goal_edited payload must be an object")
+        actor = payload.get("actor")
+        if not isinstance(actor, str) or not actor.strip():
+            raise ValueError("goal_edited requires a nonempty actor")
+        fields = set(payload) - {"actor"}
+        if not fields or fields - changes.keys():
+            raise ValueError("goal_edited requires due_date or priority changes only")
+        for field in fields:
+            change = payload[field]
+            if not isinstance(change, dict) or set(change) != {"from", "to"}:
+                raise ValueError(f"goal_edited {field} requires from and to")
+            before, after = change["from"], change["to"]
+            values = (before, after)
+            if field == "due_date":
+                valid = all(value is None or isinstance(value, str) for value in values)
+            else:
+                valid = all(type(value) is int for value in values)
+            if not valid or before == after:
+                raise ValueError(f"goal_edited {field} must contain distinct typed values")
+            changes[field][actor] += 1
+        recorded_events += 1
+    return {
+        "source_event_type": "goal_edited",
+        "coverage": "recorded_changes_only" if recorded_events else "not_observed",
+        "recorded_events": recorded_events,
+        **{
+            field: {"changes": sum(by_actor.values()), "by_actor": dict(by_actor)}
+            for field, by_actor in changes.items()
+        },
     }
 
 
@@ -106,6 +150,7 @@ def goal_event_summary(events: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "by_type": dict(Counter(e["event_type"] for e in events)),
         "dropped_by_actor": dict(drops),
+        "metadata_edits": goal_edit_summary(events),
         "verify_to_confirm_hours": {
             "n": len(waits),
             "min": round(min(waits), 2) if waits else None,

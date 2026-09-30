@@ -1,101 +1,44 @@
 #!/usr/bin/env bash
-# Keeper-only merge entry. Coding-agent sessions may use --check, never merge.
-# No retries, polling, admin bypass or fallback path. GitHub pins the PR head,
-# but its merge API has no expected-main CAS: a main change after our last read
-# remains a server-side race until repository enforcement supports that check.
-set -eu
+# Keeper merge entry; external coding sessions use --check only.
+set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 GH="${GUARD_GH:-gh}"
-repo=""; pr=""; head=""; run=""; check=0; batch=""
-gitdir="${GUARD_REPO_ROOT:-}"
+repo=""; pr=""; head=""; run=""; check=0
 while [ $# -gt 0 ]; do
   case "$1" in
-    --repo|--pr|--head|--run|--git-dir|--batch)
-      if [ $# -lt 2 ] || [ -z "${2-}" ] || [[ "${2-}" == --* ]]; then
-        echo "merge-guard: $1 requires a value" >&2; exit 1
-      fi;;
+    --repo|--pr|--head|--run) [ $# -ge 2 ] && [ -n "$2" ] && [[ "$2" != --* ]] || exit 1;;
   esac
   case "$1" in
-    --repo) repo="$2"; shift 2;;
-    --pr) pr="$2"; shift 2;;
-    --head) head="$2"; shift 2;;
-    --run) run="$2"; shift 2;;
-    --git-dir) gitdir="$2"; shift 2;;
-    --batch) batch="$2"; shift 2;;
-    --check) check=1; shift;;
-    *) echo "merge-guard: unknown argument $1" >&2; exit 1;;
+    --repo) repo="$2"; shift 2;; --pr) pr="$2"; shift 2;;
+    --head) head="$2"; shift 2;; --run) run="$2"; shift 2;;
+    --check) check=1; shift;; *) echo "merge-guard: unknown argument $1" >&2; exit 1;;
   esac
 done
-# An explicit --git-dir works when the caller is outside any worktree.
-if [ -z "$gitdir" ]; then
-  gitdir="$(git rev-parse --show-toplevel 2>/dev/null || true)"
-fi
-if ! [[ "$repo" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ && "$pr" =~ ^[1-9][0-9]*$ &&
-        "$head" =~ ^[0-9a-f]{40}$ && "$run" =~ ^[1-9][0-9]*$ ]] || [ ! -d "$gitdir" ]; then
-  echo "merge-guard: require --repo owner/name --pr N --head SHA40 --run ID --git-dir DIR" >&2
-  exit 2
-fi
-batch_args=()
-if [ -n "$batch" ]; then
-  batch_copy=$(mktemp)
-  trap 'rm -f "$batch_copy"' EXIT
-  cat "$batch" > "$batch_copy"
-  batch_args=(--batch "$batch_copy")
-fi
+[[ "$repo" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ && "$pr" =~ ^[1-9][0-9]*$ && "$head" =~ ^[0-9a-f]{40}$ ]] || exit 2
+[ -z "$run" ] || [[ "$run" =~ ^[1-9][0-9]*$ ]] || exit 2
+source "$here/ci-checks.sh"
 source "$here/review-verdict.sh"
 check_verdict() {
-  local verdict state cited by
-  verdict=$(verdict_for "$pr" "$head") || return 1
-  read -r state cited by <<<"$verdict"
-  if [ "$state" != PASS ] || [ "$cited" != "$run" ]; then
-    echo "merge-guard: current structured decision is not PASS on the cited run" >&2
+  local value state cited by
+  value=$(verdict_for "$pr" "$head") || return 1
+  read -r state cited by <<<"$value"
+  if [ "$state" != PASS ] || { [ "$review_policy" = source ] && [ "$cited" != - ]; } ||
+     { [ "$review_policy" = release ] && [ "$cited" != "$release_run" ]; }; then
+    echo "REFUSED #$pr: latest decision is not PASS for this head and review policy" >&2
     return 2
   fi
 }
-# Includes current open/head/base, all workflow/checks and open CR checks.
-bash "$here/approve-guard.sh" --check --repo "$repo" --pr "$pr" --head "$head" \
-  --run "$run" --git-dir "$gitdir" ${batch_args[@]+"${batch_args[@]}"}
-# Read both comments and reviews after the expensive checks; a later HOLD/FAIL
-# or malformed decision cannot inherit an earlier approval.
-check_verdict
-# Re-read live head/main immediately before the only write below.
-python3 "$here/ci-freshness.py" --repo "$repo" --pr "$pr" --head "$head" \
-  --run "$run" --git-dir "$gitdir" ${batch_args[@]+"${batch_args[@]}"}
-# A verdict/CR can arrive while the graph is being read. Refresh these at the
-# finishing boundary too; separate reads cannot provide a server-side CAS.
-check_verdict
-check_formal_review_state() {
-  # Preserve the shared immutable verdict/footer binding and non-author rule;
-  # a mutable REST commit_id cannot authorize a later head.
-  bash "$here/approve-guard.sh" --merge-check --repo "$repo" --pr "$pr" \
-    --head "$head" --git-dir "$gitdir"
-}
-check_formal_review_state
-# A same-head reopen/rerun can register while freshness/reviews are read.
-# Repeat the shared workflow AND check gate after those reads. A comment can
-# arrive during that gate too, so read the structured decision last. GitHub
-# still offers no atomic checks/reviews/main CAS.
-source "$here/ci-checks.sh"
 check_current_ci
 check_verdict
-# Formal reviews can change while the final workflow/check API reads run.
-check_formal_review_state
-if [ -n "$batch" ]; then
-  # Only ROLL is merged. Final admission rechecks every member's fixed
-  # source review and refusal state; CI, PASS, and approval belong to ROLL.
-  python3 "$here/ci-freshness.py" --repo "$repo" --pr "$pr" --head "$head" \
-    --run "$run" --git-dir "$gitdir" ${batch_args[@]+"${batch_args[@]}"} --landing
+GUARD_GH="$GH" bash "$here/approve-guard.sh" --merge-check --repo "$repo" --pr "$pr" --head "$head"
+check_current_ci
+check_verdict
+GUARD_GH="$GH" bash "$here/approve-guard.sh" --merge-check --repo "$repo" --pr "$pr" --head "$head"
+# Pin both the current head and the base observed throughout admission.
+read_current_pr
+if [ "$pr_base" != main ]; then
+  echo "WAITING PARENT #$pr base $pr_base: land the parent and retarget to main" >&2
+  exit 2
 fi
-if [ "$check" -eq 1 ]; then
-  echo "WOULD MERGE #$pr head $head run $run"
-  exit 0
-fi
-merge_rc=0
-"$GH" api -X PUT "repos/$repo/pulls/$pr/merge-async" \
-  -f merge_method=squash -f "sha=$head" || merge_rc=$?
-# A gh authentication failure may be rc4, which batch evidence reserves for
-# a landing-tree refusal. Keep transport/write failures in the infra class.
-if [ -n "$batch" ] && [ "$merge_rc" -ne 0 ]; then
-  exit 1
-fi
-exit "$merge_rc"
+if [ "$check" -eq 1 ]; then echo "WOULD MERGE #$pr head $head policy $review_policy"; exit 0; fi
+"$GH" api -X PUT "repos/$repo/pulls/$pr/merge-async" -f merge_method=squash -f "sha=$head"

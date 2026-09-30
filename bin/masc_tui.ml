@@ -5,6 +5,7 @@ open Masc_tui_render_prim
 open Masc_tui_press
 open Masc_tui_render_chat
 open Masc_tui_loader
+open Masc_tui_input_reader
 
 (* How long the pane waits on [gh pr view --web] before reporting it. The
    call is a lookup and a browser hand-off; a network that answers slower
@@ -459,458 +460,6 @@ let move_identity_cursor (state : state) ~delta =
 let keeper_log_content_height (state : state) =
   Metrics_tail.content_height ~terminal_rows:(surface_rows state)
     ~error:state.log_error
-
-(* Bytes the terminal has delivered that the reader has not served yet.
-
-   One [Unix.read] per byte is one syscall per character, which is invisible
-   while a person types and expensive the moment they do not: a paste is
-   thousands of bytes arriving at once, and the terminal hands them over in
-   one read whether or not this asks for them one at a time.
-
-   The unserved tail is also the pushback: an invalid UTF-8 continuation has
-   to leave the byte it rejected for the next key. [last_source] steps back
-   either the terminal probe's replay or [position], with no second reader for
-   a byte to hide in. *)
-type input_source =
-  | Probe_replay
-  | Terminal_buffer
-
-(* When the paste the decoder holds last received a byte, and whether one
-   Ctrl-C already asked it to wait. Whether a paste is active at all is the
-   decoder's state; this is only the clock the Ctrl-C recovery reads. *)
-type paste_clock = {
-  mutable last_byte_ns : int64;
-  mutable cancel_armed : bool;
-}
-
-(* A paste can only be active or draining its quarantined tail. Derived from
-   the decoder on every read, never stored. *)
-type paste_phase =
-  | No_paste
-  | Pasting of paste_clock
-  | Draining_tail of paste_clock
-
-type input_reader = {
-  bytes : Bytes.t;
-  mutable filled : int;
-  mutable position : int;
-  mutable terminal_probe : Masc_tui_terminal_probe.decoder option;
-  mutable late_palette_publisher :
-    (Masc_tui_terminal_palette.t -> unit) option;
-  mutable last_source : input_source option;
-  decoder : Masc_tui_input_decoder.t;
-  queued : Masc_tui_input_decoder.event Queue.t;
-      (** Events one byte produced beyond the first; served before any read. *)
-  paste_clock : paste_clock;
-}
-
-(* One terminal read. Bigger than any escape sequence and big enough that a
-   pasted screenful arrives whole; a paste larger than this is read in as many
-   passes as it takes, which is the same loop either way. *)
-let input_buffer_bytes = 8192
-
-let create_input_reader () =
-  {
-    bytes = Bytes.create input_buffer_bytes;
-    filled = 0;
-    position = 0;
-    terminal_probe = None;
-    late_palette_publisher = None;
-    last_source = None;
-    decoder = Masc_tui_input_decoder.create ();
-    queued = Queue.create ();
-    paste_clock = { last_byte_ns = 0L; cancel_armed = false };
-  }
-
-let paste_phase reader =
-  match Masc_tui_input_decoder.pending reader.decoder with
-  | Some Masc_tui_input_decoder.Pasting -> Pasting reader.paste_clock
-  | Some Masc_tui_input_decoder.Draining -> Draining_tail reader.paste_clock
-  | Some
-      ( Masc_tui_input_decoder.Prefix | Masc_tui_input_decoder.Sequence
-      | Masc_tui_input_decoder.Character )
-  | None ->
-      No_paste
-
-(* Both sources can hold bytes already read from the terminal. A character
-   the decoder holds is awaiting more input, so it must not defer a frame. *)
-let input_reader_has_pending_bytes reader =
-  (not (Queue.is_empty reader.queued))
-  || reader.position < reader.filled
-  || match reader.terminal_probe with
-     | None -> false
-     | Some decoder -> Masc_tui_terminal_probe.has_replay decoder
-
-(* Whether the terminal has bytes for us, waited for inside Eio rather than
-   in the kernel.
-
-   [Unix.select] blocks the whole domain, not one fiber. Every fiber waiting
-   on a socket then advances only when this loop comes back round, so a reply
-   costs the number of steps it takes times what one pass of the loop costs.
-   That is how a request the server answers in milliseconds reached the
-   ten-second timeout: measured with masc-http-probe, the same 1.8 MB read
-   takes 5.5 seconds beside a loop that waits this way and 26 ms beside one
-   that waits through Eio (RFC-0429 §3.0). Waiting through Eio takes this
-   fiber out of the run queue, and those fibers run until they block in turn.
-
-   Only the readiness wait races the deadline. The read below is never
-   cancelled, so no keystroke is taken from the terminal and then dropped
-   with the losing fiber -- which is what racing the read itself would risk.
-
-   A wait with no time left has nothing to register: asking Eio for one would
-   cancel it in the same breath, and the kernel answers that question without
-   blocking anyway. *)
-let terminal_has_bytes ~remaining =
-  let kernel_wait seconds =
-    match Unix.select [ Unix.stdin ] [] [] seconds with
-    | ready, _, _ -> ready <> []
-  in
-  if remaining <= 0.0 then kernel_wait 0.0
-  else
-    match (Eio_guard.is_eio_fiber (), Eio_context.get_clock_opt ()) with
-    | true, Some clock ->
-        Eio.Fiber.first
-          (fun () ->
-            Eio_unix.await_readable Unix.stdin;
-            true)
-          (fun () ->
-            Eio.Time.sleep clock remaining;
-            false)
-    | true, None | false, _ ->
-        (* The startup terminal probe reads through this same reader from
-           inside [Eio_guard.run_in_systhread], where an Eio effect has no
-           handler. The kernel wait is the right one there for the same
-           reason the probe runs on a thread at all: blocking a system
-           thread does not stop the domain. *)
-        kernel_wait remaining
-
-(* A read buffer can end while the next chunk already waits in the kernel.
-   Include readiness without consuming input, so a long burst is coalesced
-   across buffer boundaries too. EINTR means readiness was not observed;
-   defer at most to the existing frame deadline and let the reader retry. *)
-let input_reader_has_ready_input reader =
-  input_reader_has_pending_bytes reader
-  || try terminal_has_bytes ~remaining:0.0 with
-     | Unix.Unix_error (Unix.EINTR, _, _) -> true
-
-let refill_input_reader reader ~timeout =
-  let timeout_ns =
-    Int64.of_float (max 0.0 timeout *. nanoseconds_per_second)
-  in
-  let poll remaining =
-    match terminal_has_bytes ~remaining with
-    | true -> (
-        match
-          Unix.read Unix.stdin reader.bytes 0 (Bytes.length reader.bytes)
-        with
-        | count when count > 0 -> Render_schedule.Input_wait.Ready count
-        | _ -> Render_schedule.Input_wait.Timed_out
-        | exception Unix.Unix_error (Unix.EINTR, _, _) ->
-            Render_schedule.Input_wait.Interrupted)
-    | false -> Render_schedule.Input_wait.Timed_out
-    | exception Unix.Unix_error (Unix.EINTR, _, _) ->
-        Render_schedule.Input_wait.Interrupted
-  in
-  match
-    Render_schedule.Input_wait.await ~now_ns:Mtime_clock.elapsed_ns ~timeout_ns
-      ~poll
-  with
-  | Some count ->
-      reader.filled <- count;
-      reader.position <- 0;
-      true
-  | None -> false
-
-let take_terminal_buffer_byte reader ~timeout =
-  if
-    reader.position >= reader.filled && not (refill_input_reader reader ~timeout)
-  then None
-  else begin
-    let byte = Bytes.get reader.bytes reader.position in
-    reader.position <- reader.position + 1;
-    Some byte
-  end
-
-let take_late_palette_publisher reader =
-  match reader.late_palette_publisher with
-  | None -> None
-  | Some publish ->
-    reader.late_palette_publisher <- None;
-    Some publish
-;;
-
-let publish_late_terminal_palette reader decoder =
-  (* The page the terminal reports is not the palette and does not wait on
-     it: a multiplexer answers DECSET 996 and no OSC colour query, so this is
-     the only thing that ever arrives there. Published on its own so a colour
-     that has to know which way to move can still be told. *)
-  (match Masc_tui_terminal_probe.theme_mode decoder with
-   | None -> ()
-   | Some _ as theme_mode ->
-     if
-       Masc_tui_terminal_palette.snapshot_theme_mode
-         (Masc_tui_terminal_palette.snapshot ())
-       <> theme_mode
-     then Masc_tui_terminal_palette.set_theme_mode theme_mode);
-  match reader.late_palette_publisher with
-  | None -> ()
-  | Some _ ->
-    (match Masc_tui_terminal_probe.palette decoder with
-     | None -> ()
-     | Some palette ->
-       (match take_late_palette_publisher reader with
-        | None -> ()
-        | Some publish -> publish palette))
-;;
-
-let install_late_palette_publisher reader ~request_full_repaint =
-  reader.late_palette_publisher <-
-    Some
-      (fun palette ->
-        Masc_tui_terminal_palette.set_current (Some palette);
-        request_full_repaint 0)
-;;
-
-let take_input_byte reader ~timeout =
-  let timeout_ns =
-    Int64.of_float (max 0.0 timeout *. nanoseconds_per_second)
-  in
-  let deadline_ns = Int64.add (Mtime_clock.elapsed_ns ()) timeout_ns in
-  let terminal_byte () =
-    let remaining_ns =
-      Int64.sub deadline_ns (Mtime_clock.elapsed_ns ())
-    in
-    take_terminal_buffer_byte reader
-      ~timeout:
-        (if Int64.compare remaining_ns 0L <= 0 then 0.0
-         else Int64.to_float remaining_ns /. nanoseconds_per_second)
-  in
-  match reader.terminal_probe with
-  | None ->
-    (match terminal_byte () with
-     | None ->
-       reader.last_source <- None;
-       None
-     | Some byte ->
-       reader.last_source <- Some Terminal_buffer;
-       Some byte)
-  | Some decoder
-    when (not (Masc_tui_terminal_probe.has_replay decoder))
-         && Masc_tui_terminal_probe.complete decoder ->
-    publish_late_terminal_palette reader decoder;
-    reader.terminal_probe <- None;
-    (match terminal_byte () with
-     | None ->
-       reader.last_source <- None;
-       None
-     | Some byte ->
-       reader.last_source <- Some Terminal_buffer;
-       Some byte)
-  | Some decoder ->
-    let next = Masc_tui_terminal_probe.next decoder ~next_raw:terminal_byte in
-    publish_late_terminal_palette reader decoder;
-    (match next with
-     | Some byte ->
-       reader.last_source <- Some Probe_replay;
-       Some byte
-     | None ->
-       if
-         (not (Masc_tui_terminal_probe.has_replay decoder))
-         && Masc_tui_terminal_probe.complete decoder
-       then begin
-         publish_late_terminal_palette reader decoder;
-         reader.terminal_probe <- None
-       end;
-       reader.last_source <- None;
-       None)
-
-(* Give back the byte just taken. Probe replay and the terminal buffer are two
-   sources inside this reader, not two readers. The source marker puts an
-   invalid UTF-8 continuation back where it came from. *)
-let return_input_byte reader =
-  (match reader.last_source with
-   | Some Probe_replay ->
-     Option.iter Masc_tui_terminal_probe.return_replay reader.terminal_probe
-   | Some Terminal_buffer -> reader.position <- max 0 (reader.position - 1)
-   | None -> ());
-  reader.last_source <- None
-;;
-
-(* A sequence begun but not finished, wherever this reader holds it: the
-   decoder, or the startup probe still in front of it. The probe completes only
-   once its replies arrive, so on a terminal without them it stays in front of
-   every byte and keeps an [ESC \[ 2 0 0] head in its own buffer as a possible
-   paste start. The decoder then never sees the head, and a check of the
-   decoder alone showed no notice and let Ctrl-C fall through to the quit
-   prompt. Both are asked until the probe becomes a reply consumer (RFC
-   tui-single-input-decoder, step 3). *)
-let input_holds_incomplete_sequence reader =
-  Masc_tui_input_decoder.pending reader.decoder
-  = Some Masc_tui_input_decoder.Sequence
-  || (match reader.terminal_probe with
-      | Some decoder -> Masc_tui_terminal_probe.holds_incomplete_sequence decoder
-      | None -> false)
-
-let cancel_incomplete_sequence reader =
-  Masc_tui_input_decoder.cancel_pending reader.decoder;
-  Option.iter Masc_tui_terminal_probe.discard_incomplete_sequence
-    reader.terminal_probe
-
-(* Ctrl-C recovery only snapshots a paste after this much quiet since its
-   last byte. Reading itself uses the caller's short render-loop deadline;
-   this is a recovery observation, not a blocking terminal read. *)
-let paste_quiet_seconds = 0.5
-let paste_quiet_ns =
-  Int64.of_float (paste_quiet_seconds *. nanoseconds_per_second)
-
-let paste_is_quiet last_byte_ns =
-  Int64.compare
-    (Int64.sub (Mtime_clock.elapsed_ns ()) last_byte_ns)
-    paste_quiet_ns >= 0
-
-(* Check every input source without consuming its next byte. A terminal read
-   can already be buffered, and the startup probe can still have replay; a
-   clock alone cannot prove that a paused paste has no unread tail. *)
-let input_byte_ready reader =
-  match take_input_byte reader ~timeout:0.0 with
-  | None -> false
-  | Some _ ->
-      return_input_byte reader;
-      true
-
-let paste_can_recover reader last_byte_ns =
-  paste_is_quiet last_byte_ns && not (input_byte_ready reader)
-
-(* A paste is not a key and does not become one. Encoding the payload into
-   the key channel would put a second meaning on a string every surface reads
-   as a key name, and the caller would have to tell the two apart by looking
-   at the text -- the classifier this codebase spent RFC-0042 removing. The
-   two kinds travel as two constructors instead, and only the paste path can
-   carry text. *)
-type input_event =
-  | Key of string
-  | Pasted of Masc_tui_paste.t
-  | Graphics_reply of string
-      (** The body of an APC the terminal sent back, between [ESC _ G] and
-          [ESC \\]. Only the graphics capability query asks for one -- every
-          placement says q=2 -- but a reply that is never read is not silent:
-          stdin here is the key stream, so its bytes are typed into whatever
-          the operator was writing. Reading it is what keeps that from
-          happening, whether or not anyone is waiting for it. *)
-  | Mouse_left_press of int * int
-  | Mouse_left_release of int * int
-      (** [(row, column)] of an unmodified left-button press, 1-based as the
-          terminal reported it. Only surfaces that map frame rows to their own
-          rows consume one; everywhere else it is inert, like a wheel notch on
-          a surface with nothing to scroll. *)
-  | Mouse_wheel of Masc.Tui_decode.wheel_direction * int * int
-      (** A wheel notch and the [(row, column)] it happened at. The loop
-          gives a notch over the Activity pane to the pane and turns every
-          other one into the [wheel-up] / [wheel-down] key the surfaces bind,
-          so no surface learned a new key when the pane appeared. *)
-
-(* How long a started sequence or character waits for its next byte inside
-   one read. A lone ESC is the Escape key once this passes; anything longer
-   stays held in the decoder and the next read resumes it. *)
-let sequence_byte_wait_seconds = 0.05
-
-let input_event_of_decoded = function
-  | Masc_tui_input_decoder.Key name -> Some (Key name)
-  | Masc_tui_input_decoder.Paste paste -> Some (Pasted paste)
-  | Masc_tui_input_decoder.Mouse_wheel (direction, row, column) ->
-      Some (Mouse_wheel (direction, row, column))
-  | Masc_tui_input_decoder.Mouse_left_press (row, column) ->
-      Some (Mouse_left_press (row, column))
-  | Masc_tui_input_decoder.Mouse_left_release (row, column) ->
-      Some (Mouse_left_release (row, column))
-  | Masc_tui_input_decoder.Reply (Masc_tui_input_decoder.Graphics body) ->
-      Some (Graphics_reply body)
-  (* The startup probe still reads these while it stands in front. One that
-     arrives after it finished was not asked for by anything running now;
-     reading it keeps it out of the composer, and step 3 of the RFC gives it a
-     consumer. *)
-  | Masc_tui_input_decoder.Reply
-      ( Masc_tui_input_decoder.Palette _ | Masc_tui_input_decoder.Theme_mode _
-      | Masc_tui_input_decoder.Cell_pixels _ ) ->
-      None
-
-let in_paste reader =
-  match paste_phase reader with
-  | Pasting _ | Draining_tail _ -> true
-  | No_paste -> false
-
-(** Read one key, one paste, or one thing the terminal said back. *)
-let read_input ?(timeout = 0.1) reader () : input_event option =
-  (* The reader belongs to this fiber. Keeping it here lets readiness use
-     [await_readable] and the Eio timer; moving the whole decoder to a system
-     thread also moves buffered keys and every frame-deadline poll there.
-     Only readiness races the timer: the consuming Unix.read stays after it. *)
-  Eio_guard.with_named_switch "tui-read-key" (fun () ->
-      let enqueue decoded =
-        List.iter
-          (fun event -> Queue.add event reader.queued)
-          decoded
-      in
-      (* Queued events only; an empty queue is the answer, not a reason to
-         read again. *)
-      let rec drain () =
-        match Queue.take_opt reader.queued with
-        | None -> None
-        | Some decoded -> (
-            match input_event_of_decoded decoded with
-            | Some event -> Some event
-            | None -> drain ())
-      in
-      let rec serve () =
-        match Queue.take_opt reader.queued with
-        | Some decoded -> (
-            match input_event_of_decoded decoded with
-            | Some event -> Some event
-            | None -> serve ())
-        | None -> read ()
-      and read () =
-        let wait =
-          match Masc_tui_input_decoder.pending reader.decoder with
-          (* Not bounded by [timeout]: a frame due now passes 0, and a prefix
-             given no time ends as Escape, splitting an arrow into three keys. *)
-          | Some Masc_tui_input_decoder.Prefix -> sequence_byte_wait_seconds
-          | Some (Masc_tui_input_decoder.Sequence | Masc_tui_input_decoder.Character) ->
-              Float.min timeout sequence_byte_wait_seconds
-          | Some (Masc_tui_input_decoder.Pasting | Masc_tui_input_decoder.Draining)
-          | None ->
-              timeout
-        in
-        match take_input_byte reader ~timeout:wait with
-        | None ->
-            enqueue (Masc_tui_input_decoder.idle reader.decoder);
-            drain ()
-        | Some byte ->
-            let was_in_paste = in_paste reader in
-            let was_pasting =
-              Masc_tui_input_decoder.pending reader.decoder
-              = Some Masc_tui_input_decoder.Pasting
-            in
-            enqueue (Masc_tui_input_decoder.feed reader.decoder byte);
-            (match paste_phase reader with
-             | Pasting clock when not was_pasting ->
-                 clock.last_byte_ns <- Mtime_clock.elapsed_ns ();
-                 clock.cancel_armed <- false
-             | Pasting clock | Draining_tail clock ->
-                 clock.last_byte_ns <- Mtime_clock.elapsed_ns ()
-             | No_paste -> ());
-            if not (Queue.is_empty reader.queued) then serve ()
-            else if was_in_paste && not (in_paste reader) then
-              (* The end marker of a drained tail: nothing to hand on, and the
-                 caller notices the guard lifting. *)
-              None
-            else if in_paste reader && reader.position >= reader.filled then
-              (* Return to the main loop after each terminal read buffer. A
-                 sender that never pauses must not hold Ctrl-C or other queued
-                 work behind this loop. *)
-              None
-            else read ()
-      in
-      serve ())
 
 (** Parse command line arguments *)
 let parse_args () =
@@ -4543,6 +4092,14 @@ let launch_preset_call state ~mailbox ~call ~wrap =
     ~deliver:(fun result ->
       enqueue_async mailbox (wrap result))
     (fun () -> call ~host ~port)
+
+(* A revoked invite's link opens nothing, so its card goes, whether or not it
+   is the one on screen. The card carries the name the server sent, made safe
+   to draw, so the name asked for is compared in the same form. *)
+let forget_play_invite state ~name =
+  state.play_invite <-
+    Masc_tui_types.play_invite_forget state.play_invite
+      (Tui_decode.sanitize_terminal_text name)
 
 let launch_presets_load state ~mailbox =
   state.presets_error <- None;
@@ -10220,68 +9777,45 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
         ~call:Masc_tui_http.list_play_invites
         ~wrap:(fun result ->
           Play_invites_listed (target, Result.bind result Tui_decode.decode_play_invites))
-  | Masc_tui_command.Play_link ->
+  | Masc_tui_command.Play_link requested_name ->
       Buffer.clear state.msg_input;
-      (match state.play_invite_link with
-       | None -> notice ~kind:Notice_reply "No play link has been issued in this TUI session"
-       | Some (name, link) ->
-           Terminal_write_repair.note ();
-           write_to_terminal (Link.osc52_copy link);
-           notice ~kind:Notice_reply
-             ("Last play link issued in this TUI session for " ^ name
-              ^ " (copied via OSC 52; current validity not checked): " ^ link))
-  | Masc_tui_command.Play_qr ->
-      Buffer.clear state.msg_input;
-      (match state.play_invite_link with
-       | None -> notice ~kind:Notice_reply "No play link has been issued in this TUI session"
-       | Some (name, link) ->
-           let terminal_rows, terminal_cols = get_terminal_size () in
-           let pane_cells =
-             Masc_tui_roster_pane.content_cols
-               ~hidden:state.roster_pane_hidden ~cols:terminal_cols
-           in
-           let inner_width = framed_inner_width pane_cells in
-           let available_cells =
-             Masc_tui_message_layout.local_body_cells ~pane_cells ~inner_width
-           in
-           (match Masc_tui_play_qr.render ~available_cells link with
-            | Error Masc_tui_play_qr.Too_large ->
-                notice ~kind:Notice_failure "Play link is too long to encode as a QR code"
-            | Error (Masc_tui_play_qr.Pane_too_narrow { required_cells; available_cells }) ->
-                notice ~kind:Notice_failure
-                  (Printf.sprintf "Play QR needs %d body columns; this pane has %d. Widen the terminal or hide the roster"
-                     required_cells available_cells)
-            | Ok qr ->
-                let status_rows = keeper_message_status_rows state in
-                let visible_rows =
-                  Masc_tui_message_layout.message_history_height
-                    ~terminal_rows ~status_rows
-                in
-                let qr_rows = List.length (String.split_on_char '\n' qr) in
-                if qr_rows + 4 > visible_rows then
-                  notice ~kind:Notice_failure
-                    (Printf.sprintf "Play QR needs %d chat rows; this pane has %d. Make the terminal taller"
-                       (qr_rows + 4) visible_rows)
-                else
-                  chat_notice state ~keeper_name:target ~kind:Notice_reply
-                    ("Play QR for " ^ name ^ " (current validity not checked):\n```qr\n"
-                     ^ qr ^ "\n```")))
-  | Masc_tui_command.Play_invite { name; hours } ->
-      (match target with
+      (* The cards carry names made safe to draw, so the name typed is
+         compared in the same form. *)
+      let requested_name =
+        Option.map Tui_decode.sanitize_terminal_text requested_name
+      in
+      (let card =
+         match requested_name with
+         | None -> Masc_tui_types.play_invite_latest state
+         | Some name -> Masc_tui_types.play_invite_find state name
+       in
+       match card with
        | None ->
-           notice ~kind:Notice_failure
-             "Open a Keeper chat first: the one-time play link is shown there, in this TUI only, and is not sent to the Keeper"
-       | Some _ ->
-           Buffer.clear state.msg_input;
-           launch_preset_call state ~mailbox
-             ~call:(fun ~host ~port ->
-               Ok (Masc_tui_http.issue_play_invite ~host ~port ~name ~hours))
-             ~wrap:(fun result ->
-               Play_invite_issued (target,
-                 decode_play_mutation Tui_decode.decode_play_invite_issued
-                   (match result with
-                    | Ok outcome -> outcome
-                    | Error detail -> Masc_tui_http.Post_unanswered detail))))
+           notice ~kind:Notice_reply
+             (match requested_name with
+              | None -> "No play link has been issued in this TUI session"
+              | Some name -> "No local play link for " ^ name)
+       | Some card ->
+           state.play_invite <-
+             { state.play_invite with shown_name = Some (Masc_tui_play_card.name card) };
+           state.play_invite_scroll <- 0)
+  | Masc_tui_command.Play_invite { name; hours } ->
+      if state.play_invite_inflight then
+        notice ~kind:Notice_failure
+          "An invite request is still waiting for the server; wait for its card"
+      else begin
+        Buffer.clear state.msg_input;
+        state.play_invite_inflight <- true;
+        launch_preset_call state ~mailbox
+          ~call:(fun ~host ~port ->
+            Ok (Masc_tui_http.issue_play_invite ~host ~port ~name ~hours))
+          ~wrap:(fun result ->
+            Play_invite_issued (target,
+              decode_play_mutation Tui_decode.decode_play_invite_issued
+                (match result with
+                 | Ok outcome -> outcome
+                 | Error detail -> Masc_tui_http.Post_unanswered detail)))
+      end
   | Masc_tui_command.Play_revoke name ->
       Buffer.clear state.msg_input;
       launch_preset_call state ~mailbox
@@ -10557,6 +10091,7 @@ let leave_board_detail state =
   state.board_scroll <- 0;
   state.board_comment_scroll <- 0;
   state.board_comments_focused <- false;
+  state.board_history_post_id <- None;
   state.board_detail <- Board_detail.clear state.board_detail
 
 let apply_board_hearths_load state = function
@@ -11711,12 +11246,16 @@ let apply_board_post_load state request result =
     | Error err -> fail err
 
 let start_board_post_refresh state ~host ~port ~post_id ~mailbox =
+  (match Board_detail.view_for state.board_detail ~post_id with
+   | Board_detail.Absent -> state.board_history_post_id <- None
+   | Board_detail.Loading | Board_detail.Ready _ | Board_detail.Failed _ -> ());
   match Board_detail.start state.board_detail ~post_id with
   | Board_detail.Already_loading -> ()
   | Board_detail.Started (detail, request) ->
     state.board_detail <- detail;
+    let full_history = state.board_history_post_id = Some post_id in
     let load_result () =
-      try load_board_post ~host ~port ~post_id with
+      try load_board_post ~full_history ~host ~port ~post_id () with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
     in
@@ -11736,6 +11275,7 @@ let start_board_post_refresh state ~host ~port ~post_id ~mailbox =
 
 let open_board_post state ~mailbox ~focus (post : board_post) =
   state.board_mode <- Board_read post.bp_id;
+  state.board_history_post_id <- None;
   state.board_focus <- focus;
   state.board_scroll <- 0;
   state.board_comment_scroll <- 0;
@@ -13104,8 +12644,7 @@ let handle_composer_key state ~base_path ~mailbox key =
           operator is not looking at, so the chat pane comes forward the way
           it does for a message. *)
        | Masc_tui_command.Queue _
-       | Masc_tui_command.Play_invites | Masc_tui_command.Play_link
-       | Masc_tui_command.Play_qr
+       | Masc_tui_command.Play_invites | Masc_tui_command.Play_link _
        | Masc_tui_command.Play_invite _
        | Masc_tui_command.Play_revoke _ | Masc_tui_command.Play_invalid _
        | Masc_tui_command.Preset_list | Masc_tui_command.Preset_save _
@@ -14479,15 +14018,32 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            chat_notice state ~keeper_name:target ~kind:Notice_reply
              ("Shared DOS play invites:\n" ^ String.concat "\n" (List.map row invites)))
   | Play_invite_issued (target, result) ->
+      state.play_invite_inflight <- false;
       (match result with
        | Play_answered (Ok invite) ->
-           state.play_invite_link <- Some (invite.Tui_decode.pii_name, invite.pii_link);
-           Terminal_write_repair.note ();
-           write_to_terminal (Link.osc52_copy invite.pii_link);
-           chat_notice state ~keeper_name:target ~kind:Notice_reply
-             (Printf.sprintf
-                "Play invite %s expires %s. Link copied via OSC 52 (terminal support unconfirmed): %s"
-                invite.pii_name invite.pii_expires_at invite.pii_link)
+           (* The link is a credential the server will not show again. It goes
+              to the card and, on [y], the clipboard: not to the chat row,
+              the footer or the session log. *)
+           (match
+              Masc_tui_play_card.make
+                ~project:Masc_tui_play_card.project_for_terminal
+                ~name:invite.Tui_decode.pii_name
+                ~expires_at:invite.pii_expires_at ~link:invite.pii_link
+            with
+            | Ok card ->
+                let stored = Masc_tui_types.play_invite_store state.play_invite card in
+                state.play_invite <- stored;
+                state.play_invite_scroll <- 0;
+                chat_notice state ~keeper_name:target ~kind:Notice_reply
+                  (Masc_tui_play_card.issued_notice card
+                     ~retained:(Masc_tui_types.play_invite_holds_earlier stored))
+            | Error reason ->
+                (* The link is the server's public base URL and a hex token,
+                   so a link the card refuses names the base URL. The reason is
+                   the card's own sentence and carries no part of the link. *)
+                chat_notice state ~keeper_name:target ~kind:Notice_failure
+                  ("play invite may exist, but its link cannot be shown: " ^ reason
+                   ^ "; check MASC_HTTP_BASE_URL, then list and revoke it before retrying"))
        | Play_answered (Error _) ->
            chat_notice state ~keeper_name:target ~kind:Notice_failure
              "play invite may exist, but its one-time link was unreadable; list and revoke it before retrying"
@@ -14503,17 +14059,11 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       in
       (match result with
        | Play_revoke_absent ->
-           (match state.play_invite_link with
-            | Some (held_name, _) when String.equal held_name requested_name ->
-                state.play_invite_link <- None
-            | Some _ | None -> ());
+           forget_play_invite state ~name:requested_name;
            chat_notice state ~keeper_name:target ~kind:Notice_reply
              ("Play invite " ^ requested_name ^ " is absent (no invite has that name)")
        | Play_revoke_result (Play_answered (Ok revoked)) ->
-           (match state.play_invite_link with
-            | Some (held_name, _) when String.equal held_name revoked.Tui_decode.pir_name ->
-                state.play_invite_link <- None
-            | Some _ | None -> ());
+           forget_play_invite state ~name:revoked.Tui_decode.pir_name;
            (match revoked.pir_release_error with
             | Some detail ->
                 chat_notice state ~keeper_name:target ~kind:Notice_failure
@@ -17034,46 +16584,6 @@ let toggle_mouse_tracking () =
 
    Written and cleared beside the mouse mode, for the reasons its comment
    gives about when a byte may be put on this stream. *)
-(* How long to wait for the combined palette and graphics answers. A terminal
-   replies as soon as it has parsed a supported query; an unsupported query
-   says nothing, and this is the whole cost of finding that out, paid once at
-   startup. *)
-let terminal_probe_wait_seconds = 0.2
-
-let read_terminal_probe reader ~palette_requested =
-  Eio_guard.run_in_systhread ~label:"tui-terminal-probe" (fun () ->
-      let decoder =
-        Masc_tui_terminal_probe.create ~palette_requested
-      in
-      let timeout_ns =
-        Int64.of_float
-          (terminal_probe_wait_seconds *. nanoseconds_per_second)
-      in
-      let deadline_ns = Int64.add (Mtime_clock.elapsed_ns ()) timeout_ns in
-      let bytes_read = ref 0 in
-      let finished = ref false in
-      while
-        (not !finished)
-        && !bytes_read < Masc_tui_terminal_probe.max_bytes
-        && not (Masc_tui_terminal_probe.complete decoder)
-      do
-        let remaining_ns =
-          Int64.sub deadline_ns (Mtime_clock.elapsed_ns ())
-        in
-        if Int64.compare remaining_ns 0L <= 0 then finished := true
-        else
-          match
-            take_terminal_buffer_byte reader
-              ~timeout:(Int64.to_float remaining_ns /. nanoseconds_per_second)
-          with
-          | None -> finished := true
-          | Some byte ->
-            incr bytes_read;
-            Masc_tui_terminal_probe.feed decoder byte
-      done;
-      decoder, Masc_tui_terminal_probe.snapshot decoder)
-;;
-
 let bracketed_paste_enable = "\x1b[?2004h"
 let bracketed_paste_disable = "\x1b[?2004l"
 
@@ -17620,7 +17130,7 @@ let main
   (* Do not finish the decoder at the startup deadline. A terminal may have
      split OSC 10/11 across that boundary; the same reader continues this
      exact state before serving its replay or unread terminal-buffer tail. *)
-  input_reader.terminal_probe <- Some terminal_probe_decoder;
+  install_terminal_probe input_reader terminal_probe_decoder;
   Masc_tui_terminal_palette.set_current terminal_probe.palette;
   (match palette_requested, terminal_probe.palette with
    | true, None ->
@@ -19013,7 +18523,7 @@ and is loaded on demand through keeper_skill.
            (match paste_phase input_reader,
                   input_holds_incomplete_sequence input_reader with
             | Draining_tail tail, _
-              when not (paste_can_recover input_reader tail.last_byte_ns) ->
+              when not (paste_can_recover input_reader tail) ->
                 Masc_tui_exit_signals.withdraw_interrupt exit_signals;
                 report_action state "system" "Paste tail still arriving; waiting for end marker";
                 Render_schedule.request render_schedule Render_schedule.Background;
@@ -19024,32 +18534,31 @@ and is loaded on demand through keeper_skill.
                    from the operator's Ctrl-G. This is a force unlock for a
                    stream the operator has observed stop, not an automatic
                    declaration that all paste bytes have arrived. *)
-                Masc_tui_input_decoder.abandon_draining input_reader.decoder;
+                abandon_draining input_reader;
                 Masc_tui_exit_signals.withdraw_interrupt exit_signals;
                 skip_input_after_interrupt := true;
                 report_action state "system"
                   "Paste input unlocked; confirm only after the terminal stops";
                 Render_schedule.request render_schedule Render_schedule.Background;
                 None
-            | Pasting paste, _ when not paste.cancel_armed ->
-                paste.cancel_armed <- true;
+            | Pasting paste, _ when not (cancel_armed paste) ->
+                arm_cancel paste;
                 Masc_tui_exit_signals.withdraw_interrupt exit_signals;
                 report_action state "system"
                   "Paste end awaited; press Ctrl-C again after bytes stop if the marker is missing";
                 Render_schedule.request render_schedule Render_schedule.Background;
                 None
             | Pasting paste, _
-              when not (paste_can_recover input_reader paste.last_byte_ns) ->
+              when not (paste_can_recover input_reader paste) ->
                 Masc_tui_exit_signals.withdraw_interrupt exit_signals;
                 report_action state "system"
                   "Paste still arriving; waiting for end marker";
                 Render_schedule.request render_schedule Render_schedule.Background;
                 None
-            | Pasting clock, _ ->
+            | Pasting _, _ ->
                 let recovered =
-                  Masc_tui_input_decoder.recover_paste input_reader.decoder
+                  recover_paste input_reader
                 in
-                clock.last_byte_ns <- Mtime_clock.elapsed_ns ();
                 Masc_tui_exit_signals.withdraw_interrupt exit_signals;
                 recovered
             (* Bytes already waiting may finish the held head: a split
@@ -19192,14 +18701,14 @@ and is loaded on demand through keeper_skill.
        | Pasting _ -> ()
        | No_paste | Draining_tail _ -> paste_pause_notified := false);
       (match paste_phase input_reader with
-       | Pasting paste when paste.cancel_armed
-                     && paste_can_recover input_reader paste.last_byte_ns
+       | Pasting paste when cancel_armed paste
+                     && paste_can_recover input_reader paste
                      && not !paste_quiet_notified ->
            paste_quiet_notified := true;
            report_action state "system"
              "Paste quiet; Ctrl-C again restores the draft if the end marker was lost";
            Render_schedule.request render_schedule Render_schedule.Background
-       | Pasting paste when not (paste_can_recover input_reader paste.last_byte_ns) ->
+       | Pasting paste when not (paste_can_recover input_reader paste) ->
            paste_quiet_notified := false
        | Pasting _ -> ()
        | No_paste | Draining_tail _ -> paste_quiet_notified := false);
@@ -19221,13 +18730,13 @@ and is loaded on demand through keeper_skill.
             | Some _ | None -> ());
            csi_pause_notice := None);
       (match paste_phase input_reader with
-       | Draining_tail tail when paste_can_recover input_reader tail.last_byte_ns
+       | Draining_tail tail when paste_can_recover input_reader tail
                      && not !paste_guard_idle_notified ->
            paste_guard_idle_notified := true;
            report_action state "system"
              "Paste tail quiet; Ctrl-C unlocks input if the end marker was lost";
            Render_schedule.request render_schedule Render_schedule.Background
-       | Draining_tail tail when not (paste_can_recover input_reader tail.last_byte_ns) ->
+       | Draining_tail tail when not (paste_can_recover input_reader tail) ->
            paste_guard_idle_notified := false
        | Draining_tail _ -> ()
        | No_paste | Pasting _ -> paste_guard_idle_notified := false);
@@ -19537,6 +19046,11 @@ and is loaded on demand through keeper_skill.
         | Some _ | None -> None
       in
       (match input with
+       (* The invite card owns every key, and a paste is keys. One that reached
+          the composer under the card would put the link [y] just copied into a
+          draft that goes to a Keeper on the next Enter. It is first, above the
+          overlays the card is drawn over. *)
+       | Some (Pasted _) when Option.is_some (Masc_tui_types.play_card_shown state) -> ()
        | Some (Pasted paste) when Option.is_some state.lane_addons ->
            (match state.lane_addons with
             | Some ({installer=Some installer;_} as view) ->
@@ -19948,6 +19462,32 @@ and is loaded on demand through keeper_skill.
            state.browser_lane <- Some (Browser_lane_view.yield_refresh_to_input view)
        | None, _ | Some _, None -> ());
       (match key with
+       (* The invite card holds the only copy of a link, so it takes every key and
+          closes on the operator's own: Esc or q, after which /play link brings
+          it back. Enter does not close it, so a second Enter, pressed while
+          the answer was on its way, cannot close the card it opens. [y] copies
+          the link to the terminal clipboard and says so without naming it.
+          Ctrl-T is left to its arm below: a terminal that ignores OSC 52 has
+          only the mouse to copy the link with, and this is a screen worth
+          copying from. *)
+       | Some k
+         when Option.is_some (Masc_tui_types.play_card_shown state)
+              && not (String.equal k toggle_mouse_tracking_key) ->
+           (match k, Masc_tui_types.play_card_shown state with
+            | ("esc" | "q" | "Q"), Some _ ->
+                state.play_invite <- { state.play_invite with shown_name = None }
+            | ("y" | "Y"), Some card ->
+                copy_reference_to_terminal render_schedule
+                  (Masc_tui_play_card.link card);
+                report_action state "system"
+                  "Asked the terminal to copy the invite link (OSC 52, unconfirmed)"
+            | ("j" | "down"), Some _ ->
+                state.play_invite_scroll <- Masc_tui_types.scroll_down_from state.play_invite_scroll ~by:1
+            | ("k" | "up"), Some _ ->
+                state.play_invite_scroll <- max 0 (state.play_invite_scroll - 1)
+            | "g", Some _ -> state.play_invite_scroll <- 0
+            | "G", Some _ -> state.play_invite_scroll <- Masc_tui_types.clamped_scroll_end
+            | _, _ -> ())
        | Some key when Option.is_some state.account_login ->
            (match state.account_login with
             | Some view ->
@@ -23302,6 +22842,20 @@ and is loaded on demand through keeper_skill.
                        launch_code_history_load state
                          ~mailbox:async_messages ~path)
                 end)
+       | Some "o" when state.view = Board ->
+           (match state.board_mode with
+            | Board_read post_id
+              when Board_detail.is_ready state.board_detail ~post_id ->
+                state.board_history_post_id <-
+                  (if state.board_history_post_id = Some post_id then None
+                   else Some post_id);
+                (* [o] swaps the comment list, so both windows start again
+                   from the top, as they do when a post is opened. *)
+                state.board_scroll <- 0;
+                state.board_comment_scroll <- 0;
+                start_board_post_refresh state ~host ~port ~post_id
+                  ~mailbox:async_messages
+            | Board_list | Board_compose | Board_read _ -> ());
        | Some ("z" | "Z") when state.view = Board ->
            (match state.board_mode with
             | Board_read _ -> (
@@ -26789,12 +26343,14 @@ and is loaded on demand through keeper_skill.
               again from that frame. *)
            Masc_tui_emblem_screen.begin_frame ();
            Masc_tui_portrait_view.begin_frame ();
+           Masc_tui_message_layout.begin_frame ();
            Masc_tui_portrait_view.flush ~rewritten:(fun _ -> false) ~write:write_to_terminal
        | Render_schedule.Render ->
            let frame, clamped, approval, presses =
              Masc_tui_frame_timing.time_tagged Masc_tui_frame_timing.Build
                ~tag:(fun (frame, _, _, _) -> frame.Frame_presenter.surface_key)
                (fun () ->
+                 Masc_tui_message_layout.begin_frame ();
                  (* Event folding is frame preparation, so its cost belongs
                     inside Build timing even though only the loop stores it. *)
                  let terminal_rows, terminal_cols = Masc_tui_ansi.get_terminal_size () in

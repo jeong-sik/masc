@@ -1320,7 +1320,7 @@ let cancels_two_press ~input_seen ~key ~second_press =
    [K] and [B] answer in the detail as they do on the list (masc_tui.ml
    matches them under [Fusion_detail]); the footer left them out, and a body
    row said "K Keeper · B Board" in its own notation instead. *)
-let footer_hints_board_read ~focus_posts ~focus_comments
+let footer_hints_board_read ~focus_posts ~focus_comments ~full_history
     ~(layout : board_read_layout) =
   let pane_keys =
     match layout with
@@ -1346,6 +1346,13 @@ let footer_hints_board_read ~focus_posts ~focus_comments
      ; b Navigate "PgUp/PgDn" "page"
      ]
      @ pane_keys @ width_key
+     (* [o] goes after the pane and width keys. The fitter gives up the last
+        droppable hint first, so a key placed ahead of them pushes them off:
+        at 120 cells the split footer lost Ctrl-W:switch, and at 130
+        z:wide, to "o:all comments". Placed here it is the Navigate hint
+        dropped first, and up to 134 cells the row is the one drawn before
+        [o] existed. *)
+     @ [ b Navigate "o" (if full_history then "newest 20" else "all comments") ]
      @ [ board_vote_key
        ; board_reply_key
        ; board_copy_key

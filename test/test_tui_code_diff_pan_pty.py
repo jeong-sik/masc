@@ -27,6 +27,8 @@ def run(executable, no_color):
         return h.screen_text(bytes(output)).decode("utf-8", errors="strict")
 
     def interact(process, fd, _slave, output, _base):
+        h.resize_and_wait(process, fd, output, rows=24, columns=100,
+                          needle=b"MASC Dashboard")
         h.palette_go(process, fd, output, b"go code", b"README.md")
         h.send_and_wait(process, fd, output, b"\r", b"a.ml")
         h.send_and_wait(process, fd, output, b"\r", FILE_START)
@@ -82,7 +84,7 @@ def run(executable, no_color):
 
     h.run_terminal_scenario(executable, description=f"Code diff pan NO_COLOR={no_color}",
         interact=interact, http_fixtures=fixtures, terminal_cols=100,
-        terminal_rows=24, extra_env={"NO_COLOR": "1"} if no_color else {})
+        extra_env={"NO_COLOR": "1"} if no_color else {})
 
 
 if __name__ == "__main__":

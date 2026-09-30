@@ -112,6 +112,7 @@ export interface DashboardMissionInternalSignal {
 
 export interface DashboardMissionResponse {
   generated_at?: string
+  attention_read_error: string | null
   summary: DashboardMissionSummary
   incidents: OperatorAttentionItem[]
   recommended_actions: OperatorRecommendedAction[]

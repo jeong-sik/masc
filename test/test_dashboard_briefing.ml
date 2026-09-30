@@ -131,6 +131,29 @@ let test_dashboard_briefing_projection () =
       let open Yojson.Safe.Util in
       let attention_queue = json |> member "attention_queue" |> to_list in
       let summary = json |> member "summary" in
+      let compact_summary =
+        match Briefing_compactors.compact_briefing_summary_json json with
+        | Ok value -> value
+        | Error detail -> failf "actual briefing projection rejected: %s" detail
+      in
+      let incidents = json |> member "incidents" |> to_list in
+      check bool "fixture has real attention" true (incidents <> []);
+      check int "actual incidents reach section summary" (List.length incidents)
+        (compact_summary |> member "incident_count" |> to_int);
+      check int "actual recommendations reach section summary"
+        (List.length (json |> member "recommended_actions" |> to_list))
+        (compact_summary |> member "recommended_action_count" |> to_int);
+      let _, sections =
+        Briefing_sections.build_briefing_sections
+          ~briefing_summary_json:compact_summary ~agents:[]
+          ~recent_messages:[] ~metadata_gaps:[]
+      in
+      let watch =
+        List.find (fun section -> section |> member "id" = `String "watch") sections
+      in
+      let watch_status = watch |> member "status" in
+      check bool "actual attention cannot become an all-clear briefing" true
+        (watch_status = `String "watch" || watch_status = `String "risk");
       let agent_briefs = json |> member "agent_briefs" |> to_list in
       let internal_signals = json |> member "internal_signals" |> to_list in
       let alpha_brief =

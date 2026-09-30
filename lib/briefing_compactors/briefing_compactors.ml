@@ -35,3 +35,49 @@ let compact_agent_json (agent : Masc_domain.agent) =
       ("last_seen", `String agent.last_seen);
       ("capabilities", `List (List.map (fun item -> `String item) (take 2 agent.capabilities)));
     ]
+
+let compact_briefing_summary_json briefing =
+  let ( let* ) = Result.bind in
+  let field name =
+    match briefing with
+    | `Assoc fields ->
+        (match List.assoc_opt name fields with
+        | Some value -> Ok value
+        | None -> Error ("briefing missing " ^ name))
+    | _ -> Error "briefing must be an object"
+  in
+  let* read_error = field "attention_read_error" in
+  let* () =
+    match read_error with
+    | `Null -> Ok ()
+    | `String detail -> Error ("briefing attention unavailable: " ^ detail)
+    | _ -> Error "briefing attention_read_error must be null or a string"
+  in
+  let list name =
+    let* value = field name in
+    match value with
+    | `List items -> Ok items
+    | _ -> Error ("briefing " ^ name ^ " must be a list")
+  in
+  let* incidents = list "incidents" in
+  let* actions = list "recommended_actions" in
+  let* summary = field "summary" in
+  let* health =
+    match member_assoc "workspace_health" summary with
+    | `String _ as value -> Ok value
+    | _ -> Error "briefing summary.workspace_health must be a string"
+  in
+  let* top_attention_summary =
+    match incidents with
+    | [] -> Ok `Null
+    | first :: _ ->
+        (match member_assoc "summary" first with
+        | `String value -> Ok (`String (compact_text value))
+        | _ -> Error "briefing incident.summary must be a string")
+  in
+  Ok
+    (`Assoc
+      [ "workspace_health", health;
+        "incident_count", `Int (List.length incidents);
+        "recommended_action_count", `Int (List.length actions);
+        "top_attention_summary", top_attention_summary ])

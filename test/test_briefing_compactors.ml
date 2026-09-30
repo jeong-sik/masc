@@ -238,9 +238,39 @@ let test_compact_agent_status_serialises_lowercase () =
 let _ = string_of
 let _ = int_of
 
+let test_attention_read_failure_is_not_empty () =
+  let fields =
+    [ "attention_read_error", `Null;
+      "summary", `Assoc [ "workspace_health", `String "ok" ];
+      "incidents", `List [];
+      "recommended_actions", `List [] ]
+  in
+  let read fields = C.compact_briefing_summary_json (`Assoc fields) in
+  (match read fields with
+  | Error detail -> failwith detail
+  | Ok summary ->
+      assert (Yojson.Safe.Util.member "incident_count" summary = `Int 0);
+      assert (Yojson.Safe.Util.member "recommended_action_count" summary = `Int 0));
+  let replace key value = (key, value) :: List.remove_assoc key fields in
+  List.iter
+    (fun invalid ->
+      match read invalid with
+      | Error _ -> ()
+      | Ok _ -> failwith "unavailable attention was accepted as empty")
+    [ replace "attention_read_error" (`String "digest store unreadable");
+      List.remove_assoc "attention_read_error" fields;
+      replace "attention_read_error" (`Bool false);
+      List.remove_assoc "incidents" fields;
+      replace "incidents" `Null;
+      List.remove_assoc "recommended_actions" fields;
+      replace "recommended_actions" (`Assoc []);
+      replace "summary" (`Assoc []);
+      replace "incidents" (`List [`Assoc []]) ]
+
 (* ── runner ───────────────────────────────────────────────── *)
 
 let () =
+  test_attention_read_failure_is_not_empty ();
   test_compact_keeper_strict_keys ();
   test_compact_keeper_max_len_truncation ();
   test_compact_keeper_missing_scalars_are_null ();

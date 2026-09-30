@@ -128,21 +128,9 @@ let compute_briefing_json ~actor_name ~config ~sw ~(clock : [> float Eio.Time.cl
                  ("timestamp", `String message.timestamp);
                ])
     in
-    let briefing_summary_json =
-      let summary = member_assoc "summary" briefing_json in
-      `Assoc
-        [
-          ("workspace_health", member_assoc "workspace_health" summary);
-          ("active_agents", member_assoc "active_agents" summary);
-          ("keeper_pressure", member_assoc "keeper_pressure" summary);
-          ("active_operations", member_assoc "active_operations" summary);
-          ("incident_count", member_assoc "incident_count" summary);
-          ("recommended_action_count", member_assoc "recommended_action_count" summary);
-          ( "top_attention_summary",
-            match member_assoc "top_attention" summary |> member_assoc "summary" with
-            | `String value -> `String (compact_text value)
-            | other -> other );
-        ]
+    let ( let* ) = Result.bind in
+    let* briefing_summary_json =
+      Briefing_compactors.compact_briefing_summary_json briefing_json
     in
     let metadata_gaps =
       Briefing_gaps.collect_metadata_gaps ~keepers:compact_keepers ~agents:compact_agents
@@ -285,8 +273,8 @@ let json ?actor ?(force = false) ~config ~sw ~(clock : [> float Eio.Time.clock_t
                 cache.cached_at <- Unix.gettimeofday ();
                 cache.last_error <- None);
             result_json
-        | Error _reason ->
-            (* Sync attempt failed; fall back to async + pending *)
+        | Error reason ->
+            (* Retain the failed observation on the first pending response. *)
             if not refresh_in_flight then
               start_async_refresh ~actor_name ~config ~sw ~clock ~proc_mgr ();
-            pending_json ~now:now_iso ~last_error)
+            pending_json ~now:now_iso ~last_error:(Some reason))

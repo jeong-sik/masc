@@ -419,7 +419,10 @@ let to_agent_core_typed_result
     | Tool_result.Proven_post_effect, (_ :: _), Error _ ->
       (* This is an error result for an already-applied effect. A second
          manifest projection would erase that evidence with a generic storage
-         error. Return retrieval handles in the typed failure path, never Ok. *)
+         error. Preserve the enclosing producer payload as well: a bare blob
+         handle cannot reconstruct a domain recovery descriptor (for example,
+         a peer artifact's filename and purpose). Never repeat projection or
+         turn the already-applied failure into Ok. *)
       make_tool_error ~recoverable:false
         ~error_class:(agent_core_error_class_of_tool_failure_class class_)
         (Yojson.Safe.to_string (`Assoc [
@@ -427,6 +430,7 @@ let to_agent_core_typed_result
           "masc.tool_disposition", `String "failed";
           "effect_disposition", `String (Tool_result.failure_effect_disposition_to_string effect_disposition);
           "failure_class", `String failure_class;
+          "data", data;
           "artifact_refs", `List (List.map Tool_output.normalized_artifact_ref_to_json references)]))
     | _ ->
     project_result

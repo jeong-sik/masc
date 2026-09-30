@@ -585,6 +585,50 @@ let test_externalize_with_temp_base_path () =
             "expected Decoded after externalize, got Invalid_marker: %s"
             detail)
 
+let test_post_effect_peer_artifact_remains_delegatable () =
+  with_temp_base_path (fun base_path ->
+    let bytes = "already exported peer artifact" in
+    let blob = Tool_blob_store.put_durable
+        (Tool_blob_store.create ~base_path) ~bytes ~mime:"application/octet-stream" in
+    let artifact =
+      match Masc.Keeper_peer_artifact_ref.make ~blob
+              ~filename:"analysis.bin" ~purpose:"peer handoff" with
+      | Ok value -> value
+      | Error detail -> Alcotest.fail detail
+    in
+    let data = `Assoc ["artifact", Masc.Keeper_peer_artifact_ref.to_json artifact] in
+    let failed = Tool_result.make_err
+        ~tool_name:"keeper_artifact_transfer" ~class_:Tool_result.Runtime_failure
+        ~start_time:(Tool_timing.start ()) ~data
+        ~effect_disposition:Tool_result.Proven_post_effect
+        "Export applied, result manifest unavailable" in
+    let response =
+      match B.to_agent_core_typed_result ~base_path
+              ~on_externalization_error:(fun _ ->
+                Alcotest.fail "post-effect recovery must not repeat projection") failed with
+      | Ok _ -> Alcotest.fail "post-effect failure became success"
+      | Error {message; recoverable; _} ->
+          Alcotest.(check bool) "no effect replay hint" false recoverable;
+          Yojson.Safe.from_string message
+    in
+    let open Yojson.Safe.Util in
+    Alcotest.(check string) "applied effect remains explicit" "proven_post_effect"
+      (response |> member "effect_disposition" |> to_string);
+    Alcotest.(check bool) "producer recovery payload is intact" true
+      (Yojson.Safe.equal data (response |> member "data"));
+    let recovered =
+      match Masc.Keeper_peer_artifact.reference
+              (response |> member "data" |> member "artifact") with
+      | Ok reference -> reference
+      | Error detail -> Alcotest.failf "model-visible artifact cannot be delegated: %s" detail
+    in
+    Alcotest.(check string) "filename preserved" "analysis.bin" recovered.filename;
+    Alcotest.(check string) "purpose preserved" "peer handoff" recovered.purpose;
+    match Masc.Keeper_peer_artifact.fetch
+            ~config:(Masc.Workspace.default_config base_path) recovered with
+    | Ok actual -> Alcotest.(check string) "reuse original durable bytes" bytes actual
+    | Error detail -> Alcotest.fail detail)
+
 let test_bounded_read_page_is_not_nested () =
   with_temp_base_path (fun _dir ->
     let request : Masc.Keeper_artifact_read.request =
@@ -760,6 +804,8 @@ let () =
         [
           Alcotest.test_case "with temp base_path" `Quick
             test_externalize_with_temp_base_path;
+          Alcotest.test_case "post-effect peer artifact remains delegatable" `Quick
+            test_post_effect_peer_artifact_remains_delegatable;
           Alcotest.test_case "bounded read page is not nested" `Quick
             test_bounded_read_page_is_not_nested;
           Alcotest.test_case "store failure is typed" `Quick

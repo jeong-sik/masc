@@ -27,8 +27,11 @@ def command(args):
     return result.stdout
 
 
-def api_pages(gh, endpoint):
-    raw = command([gh, "api", "--paginate", endpoint])
+def api_pages(gh, endpoint, *, paginate=True):
+    args = [gh, "api"]
+    if paginate:
+        args.append("--paginate")
+    raw = command(args + [endpoint])
     decoder, pages = json.JSONDecoder(), []
     while raw.strip():
         value, end = decoder.raw_decode(raw.lstrip())
@@ -39,8 +42,8 @@ def api_pages(gh, endpoint):
     return pages
 
 
-def api(gh, endpoint):
-    pages = api_pages(gh, endpoint)
+def api(gh, endpoint, *, paginate=True):
+    pages = api_pages(gh, endpoint, paginate=paginate)
     if len(pages) != 1 or not isinstance(pages[0], dict):
         raise Unavailable("invalid_object_response")
     return pages[0]
@@ -306,7 +309,8 @@ def evaluate(*, repo, pr, head, run, git_dir, gh):
         raise Unavailable("incomplete_pr_file_list")
     paths = {row["filename"] for row in files}
     paths.update(row["previous_filename"] for row in files if "previous_filename" in row)
-    main = sha(api(gh, f"{prefix}/commits/main")["sha"])
+    # Commit files can paginate, but the identity lives on the first page.
+    main = sha(api(gh, f"{prefix}/commits/main", paginate=False)["sha"])
     git = ["git", "-C", git_dir]
     for identity in (main, head):
         present = subprocess.run(git + ["cat-file", "-e", identity + "^{commit}"], capture_output=True)
@@ -347,7 +351,7 @@ def evaluate(*, repo, pr, head, run, git_dir, gh):
     comparison_ancestor = commit
     # Observations are pinned to one main/head pair; moving targets refuse.
     end = api(gh, f"{prefix}/pulls/{pr}")
-    end_main = sha(api(gh, f"{prefix}/commits/main")["sha"])
+    end_main = sha(api(gh, f"{prefix}/commits/main", paginate=False)["sha"])
     if (end["state"] != "open" or end["head"]["sha"] != head
             or end["base"]["ref"] != "main" or end["draft"]
             or end.get("merged") or end_main != main):

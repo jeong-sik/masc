@@ -706,40 +706,55 @@ const recovery = {
   record_errors: [],
 }
 
+// One active row as the server writes it: Server_async_request_observability
+// .entry_to_yojson (lib/server/server_async_request_observability.ml:86) puts
+// worker_ownership in front of Keeper_msg_async.entry_to_json
+// (lib/keeper/keeper_msg_async.ml:2812), which always writes request_context
+// as the submitter's object or null.
+function activeRequestRow(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    worker_ownership: 'runtime_owned',
+    request_id: 'request-owned',
+    keeper_name: 'rondo',
+    submitted_by: 'operator',
+    request_context: null,
+    status: 'running',
+    submitted_at: 1,
+    elapsed_sec: 2,
+    ...overrides,
+  }
+}
+
+function readyObservation(requests: readonly Record<string, unknown>[]): Record<string, unknown> {
+  const owned = requests.filter(row => row.worker_ownership === 'runtime_owned').length
+  return {
+    schema: 'masc.async-request-observation/v1',
+    status: 'ready',
+    summary: {
+      active: requests.length,
+      runtime_owned: owned,
+      ownership_unknown: requests.length - owned,
+      record_errors: 0,
+    },
+    requests,
+    record_errors: [],
+    startup_recovery: recovery,
+  }
+}
+
 describe('async request observation contract', () => {
   it('keeps durable row and current-process ownership distinct', () => {
-    const decoded = decodeAsyncRequestObservation({
-      schema: 'masc.async-request-observation/v1',
-      status: 'ready',
-      summary: {
-        active: 2,
-        runtime_owned: 1,
-        ownership_unknown: 1,
-        record_errors: 0,
-      },
-      requests: [
-        {
-          request_id: 'request-owned',
-          keeper_name: 'rondo',
-          submitted_by: 'operator',
-          status: 'running',
-          submitted_at: 1,
-          elapsed_sec: 2,
-          worker_ownership: 'runtime_owned',
-        },
-        {
-          request_id: 'request-disk-only',
-          keeper_name: 'sangsu',
-          submitted_by: 'operator',
-          status: 'queued',
-          submitted_at: 2,
-          elapsed_sec: 1,
-          worker_ownership: 'disk_only_ownership_unknown',
-        },
-      ],
-      record_errors: [],
-      startup_recovery: recovery,
-    })
+    const decoded = decodeAsyncRequestObservation(readyObservation([
+      activeRequestRow(),
+      activeRequestRow({
+        worker_ownership: 'disk_only_ownership_unknown',
+        request_id: 'request-disk-only',
+        keeper_name: 'sangsu',
+        status: 'queued',
+        submitted_at: 2,
+        elapsed_sec: 1,
+      }),
+    ]))
 
     expect(decoded.status).toBe('ready')
     if (decoded.status === 'ready') {
@@ -748,6 +763,32 @@ describe('async request observation contract', () => {
         'disk_only_ownership_unknown',
       ])
     }
+  })
+
+  it('keeps the request_context object the submitter gave', () => {
+    const requestContext = { source: 'board', thread: { post_id: 'p-1', depth: 2 } }
+    const decoded = decodeAsyncRequestObservation(readyObservation([
+      activeRequestRow({ request_context: requestContext }),
+    ]))
+
+    expect(decoded.status).toBe('ready')
+    if (decoded.status === 'ready') {
+      expect(decoded.requests[0]?.request_context).toEqual(requestContext)
+    }
+  })
+
+  it.each([
+    ['a row without request_context', (() => {
+      const row = activeRequestRow()
+      delete row.request_context
+      return row
+    })()],
+    ['a request_context that is not an object', activeRequestRow({ request_context: 'board' })],
+    ['a row field the server does not write', activeRequestRow({ request_ctx: null })],
+  ])('rejects %s', (_label, row) => {
+    expect(() => decodeAsyncRequestObservation(readyObservation([row]))).toThrow(
+      SkillsContractError,
+    )
   })
 
   it('rejects summary counts that invent or omit durable rows', () => {

@@ -7,27 +7,28 @@ status: runbook
 Terminal UI over a MASC runtime root. It reads `.masc/` directly and, when a
 server is reachable, adds the surfaces that only exist over HTTP. Surfaces
 rotate with `Tab` in the order `surface_ring` spells in
-`bin/masc_tui_types.ml`: Overview, Activity, Keepers, Lanes, Memory,
-Approvals, Board, Planning, Fusion, Workspace, Config. Approvals leaves the ring
-only when a current reading shows nothing waiting and it is not the current
-view; while the queue cannot be read (server unreachable, first load) it stays.
+`bin/masc_tui_types.ml`: Dashboard, Work, Keepers, Usage, Board, Workspace,
+System. Dashboard is the first screen. It shows Goal measurements, Task flow,
+usage coverage, and what needs the operator. The full Goal and Task lists are
+under Work; provider quota scopes, Keeper costs and tokens, and daily provider
+reports are under Usage. Activity and server logs are under System (`A` / `L`).
 Additional surfaces hang off parents instead of holding Tab stops:
-Planning's `v` cycles through Task Review and Task Verdicts, then back to Goals;
+Work's `t` switches Goals and Tasks, and `v` cycles through Task Review and
+Task Verdicts, then back to Goals;
 the Keepers roster reaches Changes with `f`, and Keeper detail owns Channels,
 Automation, and Runs as tabs. Runtime reaches standalone Lanes with `p` (its
 third stop) and the clients roster with `c`, Workspace reaches Code with
 `Enter` on a repository row, and
-Config reaches Runtime with `9` (Esc returns to Config), Resources with `s` and Tools with `t`, and Activity
+System reaches Runtime with `9` (Esc returns to System), Resources with `s` and Tools with `t`, and Activity
 reaches the server log with `l`. Task Review, Task Verdicts, Schedules,
 Fusion, Lanes, Clients, Runtime, Changes, Code, Resources, Tools, and Logs
-also keep `go <name>` palette entries, and each Config pane has
-`go Config / <pane>` (`runtime.toml`, `models`, `params`, `prompts`,
+also keep `go <name>` palette entries, and each System pane has
+`go System / <pane>` (`runtime.toml`, `models`, `params`, `prompts`,
 `presets`, `themes`, `voice`). Changes follows the Keeper selected on
 Keepers. Keeper operations are reached from their parent only.
 
-Every clock and date the TUI draws is the terminal's own timezone - header
-clocks, row times, and the dates in every column. One helper makes them all,
-so no row marks its own time with a zone.
+Header clocks and ordinary row times use the terminal's timezone. Usage trends
+and Task completion days are explicitly labeled UTC.
 
 ## Quick Start
 
@@ -116,10 +117,10 @@ decides whether launching one is worth it.
 | Surface | Without a server | Source |
 |---------|------------------|--------|
 | Keepers (list, detail, logs) | fully works | `.masc/keepers/`, turn records, metrics store |
-| Overview - Tasks panel | works | `.masc/tasks/backlog.json` |
-| Overview - summary, Attention | unavailable | `GET /api/v1/dashboard/briefing` |
-| Overview - transport tail | unavailable | `GET /api/v1/dashboard/transport-health` |
-| Overview - Providers | unavailable | `GET /api/v1/runtime/resolved` |
+| Work - Tasks | works | `.masc/tasks/backlog.json` |
+| Dashboard - health, Attention | unavailable | `GET /api/v1/dashboard/briefing` |
+| Dashboard - transport attention | unavailable | `GET /api/v1/dashboard/transport-health` |
+| Usage - Plan usage | unavailable | `GET /api/v1/runtime/resolved` |
 | Lanes | unavailable | `GET /api/v1/keepers/composite` |
 | Clients | unavailable | `GET /api/v1/dashboard/clients` |
 | Approvals | unavailable | `GET /api/v1/operator`, `POST /api/v1/operator/confirm` |
@@ -202,7 +203,7 @@ row it shows.
 `NO_COLOR` (non-empty) suppresses colour; borders, markers, and the
 reverse-video selection stay. `MASC_TUI_FORCE_COLOR=1` overrides.
 
-The Config surface's Themes pane picks a bundled base16 scheme (monokai,
+The System surface's Themes pane picks a bundled base16 scheme (monokai,
 solarized, and others). Moving the cursor previews a scheme, `Esc` puts back
 whatever was in force, `Enter` keeps the pick and `x` withdraws it.
 
@@ -228,13 +229,13 @@ opening = "keeper" # or "last" or "overview"
 opening_keeper = "alpha"
 ```
 
-An absent `opening` or `overview` starts on Overview. `keeper` opens the
+An absent `opening` or `overview` starts on the Dashboard. `keeper` opens the
 named Keeper's chat; it needs `opening_keeper`. `last` opens the most recent
 chat target and updates `opening_keeper` when a different Keeper's chat is
 opened. The choice and the name are separate, so a Keeper named `last` can
-be selected. If the target is unavailable, the TUI starts on Overview and
-shows the reason there. An invalid opening setting also starts on Overview
-with a reason.
+be selected. If the target is unavailable, the TUI starts on the Dashboard
+and shows the reason on its first row. An invalid opening setting also starts
+on the Dashboard with a reason.
 
 The candle on the startup splash and `/about` comes in two styles. `painted`
 is the 2D portrait, with smooth shading, a flickering flame and blinking
@@ -274,7 +275,7 @@ Reading a board post on a wide terminal keeps the post list beside it.
 then move the focused pane, while `PgUp`/`PgDn` move it by a page. The open post
 remains marked when the detail has focus.
 
-The Config surface shows `runtime.toml` as the server reads it; `e` opens
+The System surface shows `runtime.toml` as the server reads it; `e` opens
 it in `$EDITOR` and the server's preview validation gates the write. `a` on
 the same pane adds one more Claude Code, Codex or Antigravity account: pick a
 provider the file declares with `←`/`→`, keep or change the suggested id, and
@@ -288,7 +289,7 @@ while the form was open is kept. It does not sign in; the rows under the
 fields name the command that does, and after the save the same command is
 in the session log. Turns reach the new account only after a lane lists it
 as a candidate. The
-Resources surface hangs off Config under `s` and lists every MCP
+Resources surface hangs off System under `s` and lists every MCP
 resource; `Enter` reads one beside the
 list. The detail starts with the server's description, full URI, MIME type,
 and declared byte size, then the payload. JSON is pretty-printed; JSON, TOML,
@@ -319,11 +320,13 @@ reveal a hidden toggle that had no visible effect when it was pressed.
 
 ### The Activity pane
 
-`Ctrl-L` walks the pane on the right of every surface through narrow, wide
-and hidden. The pane opens only where the surface keeps, beside it, the width
-the Keepers list needs for its flag columns -- 102 columns
-(`Masc_tui_acting_pane.surface_floor_cols`): from 158 columns for the narrow
-pane and from 176 for the wide one, on every surface alike. Below that the
+`Ctrl-L` walks the pane on the right of eligible surfaces through narrow, wide
+and hidden. Activity and Logs keep this pane off, since it would repeat their
+own stream, and so does an open modal or the browser lane. On eligible surfaces
+the pane opens
+only where the surface keeps the width the Keepers list needs for its flag
+columns -- 102 columns (`Masc_tui_acting_pane.surface_floor_cols`): from 158
+columns for the narrow pane and from 176 for the wide one. Below that the
 surface has the whole terminal. Its `[Recent]` tab is what each keeper is doing now, one row
 each:
 
@@ -369,78 +372,75 @@ The `Changes` tab lists the files this keeper's calls wrote, newest first.
 
 ## Surfaces
 
-### Overview
+### Dashboard
 
-Workspace health, agent count, pending approvals, the Attention list, and
-active tasks.
+The first screen shows workspace health, the number of listed Keepers, two
+active Goals, Task flow, quota coverage, and up to two operator attention
+items. It leaves individual Keeper rows, Task rows, provider meters, and logs
+to their own destinations. The Recent activity pane stays hidden on this
+screen even in a wide terminal.
 
-The Goals block uses one row per active Goal: title, attention state, linked
-task count, and due date. The task count describes linked work, not progress
-against the Goal's metric. Goals are shared across the workspace. Open
-Planning → Goals for the metric, proof, and activity. Creation, edits, and
-phase changes name the caller in their activity events.
+Goals are shared across the workspace. Open Planning → Goals for the metric,
+proof, and activity. Creation, edits, and phase changes name the caller in
+their activity events.
 
-```
- MASC Overview  [me]  10:54:52  [connected]
-   Health: bad  Keepers: 10  MCP agents: 2  Approvals: 0
- Attention 2
- [bad ] analyst needs operator attention
- [warn] sangsu has external attention from discord
- Tasks
-   * [task-317] Apply File_lock_eio to approval queue (in_progress @keeper-...)
-   o [task-272] Add HTTP route regression coverage (todo) !
-  m:telemetry  t:tasks  2:keepers  r:refresh  Tab:next  q:quit  | Refresh: 2s | Port: 8935
-```
+For a Goal, `actual` comes only from an explicitly recorded measurement bound
+to that Goal's current criterion revision. The screen says `not recorded`,
+`not observed`, or `unavailable` when it has no valid value. The count of
+linked Tasks marked done is a separate fact; it never becomes the Goal's
+measured value.
 
-`j`/`k` move nothing until `t` selects the task list. With the list selected,
-`Enter` opens the selected task in full - description, status with its
-assignee and timestamps, handoff summary, the completion contract's evidence
-list, attached files - read from the same backlog load the list was projected
-from. `Esc` closes the detail, and a second `Esc` lets go of the list.
+Work shows current Task statuses and a 14-day UTC plot of Tasks *currently*
+done by their completion date. Its coverage line names backlog, Goal-link,
+and archive read failures. The quota line on Dashboard is only a count of
+provider scopes with a report since server start; `m` or Tab opens the full
+Usage screen.
 
-This TUI's own session log is on Metrics (`m`), first in the Engine &
-Scheduler section under `TUI session`: what the TUI did and what it was told,
-oldest first so the newest line is last. It keeps eleven lines, and a run of
-the same line folds into one row with a `×N` tail. When the frame is too
-short for all of it, the block keeps its newest rows under a `+N earlier`
-row, so the newest line stays in view. An error event wears the
-`✗` the chat pane uses for a failure, just after the clock; every other level
-keeps that cell for its text. The mark is a shape rather than a colour alone,
-so it holds under `NO_COLOR`.
+### Work
 
-The server's delivery paths and this TUI's runtime event feed are on Metrics
-(`m`), in the Transport delivery block, which reads the transport health
-itself: the path carrying the traffic, the gRPC port or `off`, SSE and
-WebSocket sessions, dropped events, queue pressure, and the feed as
-`live N`, `opening`, `closed N (reason)` or `off`. The feed is opened after
-the first refresh that reaches the server and reopened on the refresh cadence
-after it closes. Every keeper's tool calls, turn boundaries, heartbeats, and
-turn done rows arrive on it; this build keeps the last 1,000 and counts what
-falls off the end.
+`t` switches between Goals and Tasks. On Tasks, `j`/`k`, paging, Home/End,
+search, `Enter`, and `Esc` operate on the visible Task rows and detail. Goal
+details retain their criterion, measurement and linked Task references.
+`v` opens Task Review and Task Verdicts, then returns to Goals. `p` opens
+operator Approvals and Keeper questions; `Esc` returns to Work.
 
-Overview draws one Attention item for the transport, and only while the
-outbound queue's pressure is `watch` (warning) or `high` (bad). A steady queue
-adds nothing.
+### Usage
 
-Tasks show terminal states in Planning rollups but not in this list. A task
-detail that is open when its task turns terminal stays open - the detail reads
-the full backlog rows, not the active projection.
+Current provider quota windows are grouped by **quota scope**. A scope may be
+a provider row or a credential source; its short identifier distinguishes
+multiple scopes without displaying a credential path. The provider reports
+their utilization and reset time. Catalogue quota blocks are labeled
+separately. The 1/7/14 UTC-day plot uses the latest stored provider report for
+each day; `·` means no report was stored for that day, and `w` changes the
+window. A failed read is labeled unavailable rather than drawn as zero.
 
-The Providers section sits above the Team block, so the reason a Keeper there
-is stuck stays on screen with it. It reads
+Keeper rows show recorded 24-hour token and cost totals with the number of
+turns that reported each value and the number missing it. Transport delivery
+is also here. `p` opens Telemetry, retaining the engine, work outcome, and
+memory/Gate safety readings (`1`/`2`/`3` select those sections); `p` returns
+to quota and Keeper usage. Activity and the server log are reached from
+System when a detailed event timeline is needed.
+
+Plan usage on Usage reads
 `provider_usage_windows` from `GET /api/v1/runtime/resolved` and draws one
-strip per provider account, named by its providers' `display-name`: a meter
+strip per quota scope, named by its providers' `display-name` and the scope
+identifier, with the account's email under the name from
+`GET /api/v1/setup/account-emails` (Admin), read on every Usage refresh: a meter
 per usage window, the value as a whole percent (a fraction is multiplied by
 100 and floored), the reset time, and how long ago the provider said so. A
 meter takes 10 to 24 cells; when 10 do not fit beside the hearing age, the
 age is left out first.
 
 ```
- Providers  reported by the provider · since server start 22:39
- Claude Max  5h ▕██████████▋     ▏  67%  ↻ 18:10 in 4h12m        heard 3m00s ago
-             7d ▕███████         ▏  44%  ↻ 09-29 13:00 in 5d23h
- Codex Pro   no report since server start
+ Plan usage
+ Claude Max · 1a2b3c4d  5h ▕██████████▋     ▏  67%  ↻ 18:10 in 4h12m        heard 3m00s ago
+                        7d ▕███████         ▏  44%  ↻ 09-29 13:00 in 5d23h
 ```
+
+An account that has not reported since the server started draws no row,
+unless the runtime catalogue observed its quota exhausted; then it draws one
+`no usage data` row with that tag. A read with no row to draw says
+`no usage data`.
 
 A meter is drawn in the exhausted style only when the value reaches the full
 value of its own unit (`1.0` for a fraction, `100` for a percent) and the
@@ -452,7 +452,10 @@ that has passed reads `reset time passed · no newer report`; the meter keeps
 the last reported value. An account whose runtime rows carry
 `quota_exhausted` wears `exhausted (observed)` with the catalogue's own reopen
 time, and is listed first. A failed read is one line,
-`providers unavailable: <reason>`.
+`usage data unavailable: <reason>`. A failed email read adds
+`account emails unread: <reason>` after the rows, and email rows this build
+cannot read are counted in one note there.
+
 
 ### Activity
 
@@ -580,11 +583,15 @@ The [Glossary](spec/00-glossary.md#core) uses Lane for the fixed exact-output ex
 For TOML package installations, open `/addons` from the composer or choose
 `go Lane Add-ons` in the palette. The [Lane Add-on guide](guides/tui-lane-addons.md)
 covers configuration editing, connections, Skills, actions and cross-Lane evidence.
+These are three different customization surfaces: Config → Runtime edits named
+Keeper candidate orders; the six exact-output work purposes on this screen are
+fixed, although their runtime slots can be edited; Lane Add-ons load custom
+TOML packages and require a working image before a worker is active.
 
 Standalone execution lanes only. Keeper lifecycle and turn-cycle facts live on
-Keepers, so this surface no longer repeats a second Keeper table. It holds
-its own Tab stop between Keepers and Memory, and Runtime also reaches it: `p`
-on Runtime walks keeper lanes, all runtimes, and then this surface. From the lane overview, `p` or
+Keepers, so this surface no longer repeats a second Keeper table. It hangs
+off Runtime rather than holding a Tab stop: `p` on Runtime walks keeper
+lanes, all runtimes, and then this surface. From the lane overview, `p` or
 `Esc` returns to Runtime; inside the run list and run detail, `Esc` first
 backs out one drill-down level as before. The palette keeps `go Lanes`.
 
@@ -598,7 +605,7 @@ with `c`; `Esc`, `Left`, or `p` returns to Runtime, and the palette keeps
 `go Clients`. `/` jumps the cursor to a matching name.
 
 ```
- MASC Config / Runtime / Clients (12 attached)  17:02:53  [connected]
+ MASC System / Runtime / Clients (12 attached)  17:02:53  [connected]
   STATUS    NAME                 TYPE        KEEPER           TASK      LAST SEEN
  >active   codex-mcp-client      codex       -                -         17:02:41
   busy     analyst-agent         keeper      analyst          task-845  17:02:50
@@ -611,8 +618,9 @@ the reading. This is a registry view, not a socket list - a leftover
 process holding a connection is still an `lsof` question.
 
 ```
- MASC Lanes · Standalone (4 lanes)  17:02:53  [connected]
-  Standalone LLM lanes · o:Lane Add-ons · a:append slot · observed 17:02:52
+ MASC Lanes (6 lanes)  17:02:53  [connected]
+  Lanes · observed 17:02:52
+  Lane Add-ons: 2 declared · 0 active · 2 config issues
     LANE       STATUS          ACTIVE  RUNS  OK/FAIL/CANCEL  P50     SLOTS            OBSERVED
  >◒ Librarian  running 12s          1    50  47/2/1          8.0s    librarian-exact  librarian-exact×50
 ```
@@ -626,11 +634,14 @@ a long name moves every row's columns together rather than one row's. The
 counts come before the slots because they are what a reader compares down
 the column; beside the Activity pane the slot column is the one cut, and the
 block under the list prints the selected lane's slots in full. This build
-projects four fixed consumers:
+projects six fixed consumers:
 `Board Attention` judges one durable Board attention candidate, `HITL Auto
 Judge` judges one held approval, `Librarian` selects the next Memory OS
 snapshot from immutable Keeper history, and `Verifier` reviews Task completion
-and Goal proof evidence.
+and Goal proof evidence. `Workspace Curator` classifies changed Keeper facts,
+and `Browser Stagehand` handles model-driven browser operations. The Add-on
+summary counts declared TOML files separately from active workers; a saved
+file can remain unapplied when its package image is unavailable.
 
 The selected row expands underneath the matrix instead of forcing its long
 identifiers through the clipped comparison row. It names the exact
@@ -1360,7 +1371,7 @@ comment body is a complete JSON object or array, Board pretty-prints it and
 uses the same JSON syntax colours as fenced code. Ordinary Markdown remains
 authored Markdown.
 
-### Planning
+### Work / Goals
 
 Planning is one workspace holding two different subjects, which is why its
 stops are not numbered. `Goals` is the goal lifecycle, judged against the
@@ -1374,7 +1385,7 @@ Each side carries its own count on the strip: `Goals·2` is goals with the
 completion judge, `Task Review·7` is tasks waiting for an operator.
 
 ```
- MASC Planning  ▸Goals·1  Task Review·2  Task Verdicts  10:44:57  [connected]
+ MASC Work  ▸Goals·1  Task Review·2  Task Verdicts  10:44:57  [connected]
    sort:phase/P1-P5  filter:active
    Executing: 3  Paused/Blocked: 1  Verifying: 0  Done: 24  Dropped: 22
    Backlog: todo=4  claimed=0  running=6  done=109  cancelled=37
@@ -1485,7 +1496,7 @@ to the list; `j`/`k` scroll by a row and `PgUp`/`PgDn` by a page.
 
 The retained Fusion run registry is the list. Fusion is a top-level Tab stop
 and is also reachable through the `go Fusion` palette entry. After following a link, `Esc` returns directly to its origin. Otherwise
-it closes detail to the run list, then returns to Overview. While a run is active, `STATE`
+it closes detail to the run list, then returns to the Dashboard. While a run is active, `STATE`
 shows the exact process-local stage: `accepted`, `panel(N)`, `judge(A/F)`,
 `computed(A/F)`, or `recording(A/F)`. A successful terminal row also carries a
 bounded decision and resolved-answer preview when the current producer wrote
@@ -1826,7 +1837,7 @@ probe's status, transport, timestamp, latency, HTTP result, and error when
 those observations exist. `PgUp`/`PgDn` pages the detail; Left or `Esc` returns
 to the same list row.
 
-### Config
+### System
 
 Config is five views over the runtime's settings. Press `p` to move through
 `runtime.toml`, `models`, typed `params`, prompt overrides, and themes.
@@ -1909,7 +1920,7 @@ Cross-surface shortcuts. An active field or panel handles its own keys first:
 | Key | Action |
 |-----|--------|
 | `Tab` | Next surface, in the ring order the strip draws |
-| `2` | Jump to Keepers when the active field or panel does not use the number |
+| `3` | Jump to Keepers when the active field or panel does not use the number |
 | `r` | Force refresh |
 | `q` twice | Quit; any other input after the first `q` cancels |
 
@@ -1917,7 +1928,6 @@ Per surface:
 
 | Key | Surface | Action |
 |-----|---------|--------|
-| `t` | Overview | Select the task list, then `j` / `k` move its cursor |
 | `j` / `k` | Keepers, Lanes, Approvals, Board, Planning, Schedules, Fusion list | Move cursor |
 | `j` / `k` | Runtime, System Logs | Move the list cursor; scroll when detail is open |
 | `j` / `k` | Keeper detail, logs, Planning detail, Fusion detail | Scroll content |
@@ -1978,12 +1988,8 @@ Per surface:
 ```
 Tab cycles the surfaces:
 
-  Overview -> Activity -> Keepers -> Lanes -> Memory -> Approvals
-           -> Board -> Planning -> Fusion -> Workspace -> Config
-           -> Overview
-
-  (Approvals drops out once a reading says nothing waits; Runtime is
-   off the ring, under Config.)
+  Dashboard -> Work -> Keepers -> Usage -> Board -> Workspace
+            -> System -> Dashboard
 
 Within a surface:
 
@@ -1993,20 +1999,21 @@ Within a surface:
   Keeper list/detail  --c-->  Message input
 
   Board     --Right/Enter-->  Board read
-  Planning  --Right/Enter-->  Goal detail
+  Work      --t-->  Goals / Tasks  --Right/Enter-->  Detail
 Off-ring children:
 
-  Planning  --v-->  Task Review --v--> Verdicts
+  Work      --v-->  Task Review --v--> Verdicts
   Keepers   --f-->  Changes
   Keeper detail --[ / ]--> Channels / Automation / Runs
   Runtime   --p--> ... --p--> Lanes
   Workspace --Enter-->  Code (the selected repository's tree)
-  Config    --s-->  Resources        Config --t--> Tools
-  Activity  --l-->  System Logs
+  System    --A-->  Activity         System --L--> Logs
+  System    --s-->  Resources        System --t--> Tools
+  Activity  --l-->  Logs             Logs --e--> Activity
 ```
 
-`2` reaches Keepers after the active field or panel has declined it.
-`Esc` returns one level within Keepers, Board, and Planning.
+`3` reaches Keepers after the active field or panel has declined it.
+`Esc` returns one level within Keepers, Board, and Work.
 
 ## Requirements
 

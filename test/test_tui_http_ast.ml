@@ -469,15 +469,15 @@ let test_http_get_uses_auth_headers () =
    names all three -- and the Clients title walked from one to the next twice,
    spelling the first step "/" and the second the middle dot: "MASC Config /
    Runtime \xc2\xb7 Clients". Two spellings of one kind of step, in one
-   string. Every other title that walks surfaces uses "/" (Config / Runtime,
-   Config / Resources, Workspace / Code). *)
+   string. Every other title that walks surfaces uses "/" (System / Runtime,
+   System / Resources, Workspace / Code). *)
 let test_the_clients_path_spells_its_steps_alike () =
   let module_path = "bin/masc_tui_render.ml" in
   check int "no step spelled with the middle dot" 0
     (Ast_grep.count_string_literals ~module_path ~needle:"Runtime \xc2\xb7 Clients");
   check bool "the path reads with one separator" true
     (Ast_grep.count_string_literals ~module_path
-       ~needle:"Config / Runtime / Clients"
+       ~needle:"System / Runtime / Clients"
      > 0)
 ;;
 
@@ -510,8 +510,8 @@ let test_http_client_does_not_own_tui_env_contract () =
     (Ast_grep.count_value_bindings ~module_path ~name:"timeout_env")
 ;;
 
-(* The Overview's Attention panel writes two cells of indent ahead of every
-   row it draws. Its empty and unread notes stand in for rows, and they are
+(* The Dashboard's attention section writes three cells of indent ahead of
+   every row it draws. Its empty and unread notes stand in for rows, and they are
    written for a body that indents them itself -- pasted in whole, a note sat
    two cells right of the rows it replaces and of the title above them. *)
 let test_the_attention_note_starts_where_its_rows_do () =
@@ -751,49 +751,6 @@ let test_recent_projection_is_prepared_inside_frame_build () =
   iter.structure iter (Ast_grep.parse_implementation_or_fail "bin/masc_tui.ml");
   check (list (list string)) "prepare and store happen before render inside Build"
     [["prepare"; "store"; "render"]] (List.rev !build_steps)
-;;
-
-(* Render must use the cache tested by test_tui_overview_cache. Counting
-   references also catches pipes and partial applications bypassing it. *)
-let test_overview_projections_are_made_once_per_input () =
-  let open Parsetree in
-  let render = "bin/masc_tui_render.ml" in
-  let cache = "bin/masc_tui_overview_cache.ml" in
-  let references path name =
-    let count = ref 0 in
-    let iter =
-      { Ast_iterator.default_iterator with
-        expr = (fun self expression ->
-          (match expression.pexp_desc with
-           | Pexp_ident { txt; _ } when Ast_grep.longident_to_string txt = name ->
-             incr count
-           | _ -> ());
-          Ast_iterator.default_iterator.expr self expression)
-      }
-    in
-    iter.structure iter (Ast_grep.parse_implementation_or_fail path);
-    !count
-  in
-  List.iter
-    (fun (binding_name, callee) ->
-      check int ("binding exists: " ^ binding_name) 1
-        (Ast_grep.count_value_bindings ~module_path:render ~name:binding_name);
-      check int ("render uses tested cache: " ^ binding_name) 1
-        (Ast_grep.count_calls_in_value_binding ~module_path:render
-           ~binding_name ~callee))
-    [ "overview_backlog", "Masc_tui_overview_cache.backlog";
-      "overview_team", "Masc_tui_overview_cache.team" ];
-  check int "renderer keeps one cache across frames" 1
-    (Ast_grep.count_calls_in_value_binding ~module_path:render
-       ~binding_name:"overview_cache" ~callee:"Masc_tui_overview_cache.create");
-  check int "renderer never constructs another cache" 1
-    (references render "Masc_tui_overview_cache.create");
-  List.iter
-    (fun name -> check int ("no render bypass: " ^ name) 0 (references render name))
-    [ "Overview_tasks.backlog"; "Overview_team.project";
-      "Masc_tui_overview_tasks.backlog"; "Masc_tui_overview_team.project" ];
-  check int "one Todo summary computation" 1 (references cache "Tasks.backlog");
-  check int "one Team projection computation" 1 (references cache "Team.project")
 ;;
 
 let test_user_message_background_has_one_render_snapshot () =
@@ -1890,30 +1847,31 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
        ~module_path:"bin/masc_tui_render.ml" ~binding_name:"render"
        ~callee:"render_surface");
   let render_path = "bin/masc_tui_render.ml" in
-  check int "overview layout owns one shared row allocation" 1
+  (* The Dashboard is a fixed set of summary sections over one body height;
+     it holds no Team block, task panel or attention window whose rows a
+     shared allocation would split (RFC-tui-measured-operator-home). That
+     height is the shared chrome's budget, which also says how many rows a
+     short terminal could not hold. *)
+  check int "Dashboard draws through the shared chrome once" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path
-       ~binding_name:"overview_layout"
-       ~callee:"Render_schedule.allocate_overview");
-  check int "overview renderer consumes one shared layout" 1
-    (Ast_grep.count_calls_in_value_binding ~module_path:render_path
-       ~binding_name:"render_overview" ~callee:"overview_layout");
-  (* Both the Attention count in the title and its empty-body note read the
+       ~binding_name:"render_overview" ~callee:"surface_chrome");
+  check int "and reads no body height of its own" 0
+    (List.fold_left
+       (fun total callee ->
+         total
+         + Ast_grep.count_calls_in_value_binding ~module_path:render_path
+             ~binding_name:"render_overview" ~callee)
+       0
+       [ "Masc_tui_types.surface_body_rows"
+       ; "surface_body_rows"
+       ; "surface_chrome_budget"
+       ]);
+  (* Both the attention count in the title and its empty-body note read the
      shared page state: unread/failed must not become a zero count, and unread
      must not become a blank body. *)
-  check int "Attention title and body both read the shared empty page" 2
+  check int "Dashboard's attention title and body both read the shared empty page" 2
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path
        ~binding_name:"render_overview" ~callee:"empty_page_of");
-  (* The overview reads its bounds off [row_budget], the one value the layout
-     above returns. How many times it reads them is how much the surface
-     draws, not whether the allocation is shared: #29684 moved the number
-     from five to six by adding a task-panel window that reads the same
-     [task_rows]. A second source is what breaks the sharing, so that is what
-     is asked for, and none is allowed. *)
-  check int "overview bounds every variable section from that one allocation" 0
-    (Ast_grep.count_field_accesses_off_other_records_in_value_binding
-       ~module_path:render_path ~binding_name:"render_overview"
-       ~record:"row_budget"
-       ~fields:[ "attention_rows"; "task_error_rows"; "task_rows" ]);
   check int "board read consumes one shared row allocation" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path
        ~binding_name:"board_read_pane"
@@ -2585,31 +2543,15 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
     [ "overview_error"
     ; "ai_summary"
     ];
-  (* The Overview's title row, visible from the first frame, and
+  check_fields "render_work_tasks" [ "tasks_error" ];
+  (* The Dashboard's title row, visible from the first frame, and
      /about's colour scheme name from the operator's configuration. *)
   check_fields "overview_header" [ "workspace" ];
   check_fields "render_about" [ "theme_choice" ];
-  check_fields "overview_layout" [ "tasks_error" ];
   (* The TUI session block prints event text this process wrote from
      server answers and editor output. *)
   check_fields ~module_path:"bin/masc_tui_render_metrics.ml"
     "render_section_fleet" [ "content" ];
-  (* The Team block prints Keeper names and task text that producers wrote. *)
-  (* pr_tag_of_keeper and spend_tag_of_keeper look the name up, and
-     spend_tags and spend_total take the names as lookup keys; none of them
-     draws it. *)
-  check_fields
-    ~non_rendering_calls:
-      [ "pr_tag_of_keeper"; "spend_tag_of_keeper"; "spend_tags"; "spend_total" ]
-    "overview_team_lines"
-    [ "okp_name"; "id"; "title" ];
-  (* The spend line prints the transport or decode failure it was given. *)
-  check_identifiers ~module_path:"bin/masc_tui_keeper_spend.ml" ~binding:"lines"
-    ~callees:sanitizer_calls [ "err" ];
-  (* The pull request lines print repository ids and failure text the server
-     relayed from GitHub. *)
-  check_fields ~module_path:"bin/masc_tui_repository_pulls.ml" "lines"
-    [ "rp_repository" ];
   (* [ap_summary] is not in this list: the press-again line and the row
      summary both moved into [approval_detail_line], and the guard follows
      the field rather than the surface's name. *)
@@ -3219,10 +3161,6 @@ let () =
           "Recent projection is prepared inside frame Build"
           `Quick
           test_recent_projection_is_prepared_inside_frame_build;
-        test_case
-          "Overview projections are made once per input"
-          `Quick
-          test_overview_projections_are_made_once_per_input;
         test_case
           "user message background has one render snapshot"
           `Quick

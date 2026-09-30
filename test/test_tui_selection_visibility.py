@@ -25,7 +25,7 @@ def run_models(executable: str) -> None:
     )
 
     def interact(process, fd, _slave, output, _base):
-        h.tab_until(process, fd, output, b"MASC Config")
+        h.tab_until(process, fd, output, b"MASC System")
         h.wait_for_output(process, fd, output, b"temperature = ", start=0, timeout=3)
         h.send_and_wait(process, fd, output, b"p", b"MASC Models")
         for i in range(1, 12):
@@ -66,7 +66,7 @@ def run_runtime(executable: str) -> None:
     fixtures[h.RUNTIME_RESOLVED_PATH] = h.runtime_resolved_response()
 
     def interact(process, fd, _slave, output, _base):
-        h.tab_until(process, fd, output, b"MASC Config")
+        h.tab_until(process, fd, output, b"MASC System")
         h.send_and_wait(process, fd, output, b"9", b"1/2 runtime-a")
         h.send_and_wait(process, fd, output, b"p", b"All runtimes (5)")
         # Select catalog row 5: beyond the four rows of the lane listing.

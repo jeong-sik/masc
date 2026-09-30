@@ -199,15 +199,16 @@ let credential_matches_live_disk config (cred : agent_credential) =
 
 let fresh_matches_for_token_hash config token_hash matches =
   if List.for_all (credential_matches_live_disk config) matches
-  then matches
+  then Ok matches
   else (
     invalidate_credential_index_cache config;
-    let idx = credential_token_index config in
+    let open Result.Syntax in
+    let* idx = credential_token_index config in
     (* DET-OK: exact token-hash cache miss means there are no indexed
        credential candidates; this does not infer state from ambiguous input. *)
     match Hashtbl.find_opt idx token_hash with
-    | Some matches -> matches
-    | None -> [])
+    | Some matches -> Ok matches
+    | None -> Ok [])
 ;;
 
 (** Find credential by raw token (hash lookup + expiry check).
@@ -223,9 +224,10 @@ let fresh_matches_for_token_hash config token_hash matches =
     increment {!Auth_metric_store.metric_auth_credential_ambiguous_lookup}
     so the duplicate-token audit path remains observable. *)
 let find_static_credential_by_token config ~token : (agent_credential, masc_error) result =
+  let open Result.Syntax in
   let token_hash = sha256_hash token in
-  let idx = credential_token_index config in
-  let matches =
+  let* idx = credential_token_index config in
+  let* matches =
     Hashtbl.find_opt idx token_hash |> Option.value ~default:[]
     |> fresh_matches_for_token_hash config token_hash
   in

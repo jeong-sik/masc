@@ -1,8 +1,26 @@
 export type KeeperChatDeliveryKey =
   | { readonly kind: 'operation'; readonly operation_id: string }
+  | {
+      readonly kind: 'operation_checkpoint'
+      readonly operation_id: string
+      readonly trace_id: string
+      readonly turn_count: number
+      readonly sha256: string
+    }
+  | {
+      readonly kind: 'operation_native'
+      readonly operation_id: string
+      readonly continuation_id: string
+    }
   | { readonly kind: 'fusion_run'; readonly request_id: string }
   | { readonly kind: 'workspace_message'; readonly request_id: string }
   | { readonly kind: 'approval_lifecycle'; readonly approval_id: string }
+  | {
+      readonly kind: 'goal_notification'
+      readonly goal_id: string
+      readonly owner: string
+      readonly event: string
+    }
 
 export type KeeperChatTranscriptSlot =
   | { readonly kind: 'accepted_user' }
@@ -78,12 +96,27 @@ function sameDeliveryKey(left: KeeperChatDeliveryKey, right: KeeperChatDeliveryK
   switch (left.kind) {
     case 'operation':
       return right.kind === 'operation' && left.operation_id === right.operation_id
+    case 'operation_checkpoint':
+      return right.kind === 'operation_checkpoint'
+        && left.operation_id === right.operation_id
+        && left.trace_id === right.trace_id
+        && left.turn_count === right.turn_count
+        && left.sha256 === right.sha256
+    case 'operation_native':
+      return right.kind === 'operation_native'
+        && left.operation_id === right.operation_id
+        && left.continuation_id === right.continuation_id
     case 'fusion_run':
       return right.kind === 'fusion_run' && left.request_id === right.request_id
     case 'workspace_message':
       return right.kind === 'workspace_message' && left.request_id === right.request_id
     case 'approval_lifecycle':
       return right.kind === 'approval_lifecycle' && left.approval_id === right.approval_id
+    case 'goal_notification':
+      return right.kind === 'goal_notification'
+        && left.goal_id === right.goal_id
+        && left.owner === right.owner
+        && left.event === right.event
   }
 }
 

@@ -112,6 +112,29 @@ let test_a_write_during_the_decode_is_not_kept () =
   check int "decoded twice" 2 !runs
 ;;
 
+(* A write that keeps the file's version is seen only through the writer's
+   [forget]. Here it lands while the first decode runs: the value that decode
+   read may be the one from before the write, so it is returned but not kept,
+   and the next read decodes again. Keeping resumes after that. *)
+let test_a_forget_during_the_decode_is_not_undone () =
+  with_file
+  @@ fun path ->
+  write path "one";
+  let cache = File_version_cache.create () in
+  let runs = ref 0 in
+  let decode () =
+    incr runs;
+    let seen = read path in
+    if !runs = 1 then File_version_cache.forget cache path;
+    Ok seen
+  in
+  ignore (load cache path ~decode : string);
+  ignore (load cache path ~decode : string);
+  check int "the read after the forget decodes again" 2 !runs;
+  ignore (load cache path ~decode : string);
+  check int "and keeps its value" 2 !runs
+;;
+
 let test_an_error_is_not_kept () =
   with_file
   @@ fun path ->
@@ -159,6 +182,8 @@ let () =
             test_a_forgotten_file_is_decoded_again
         ; test_case "a write during the decode is not kept" `Quick
             test_a_write_during_the_decode_is_not_kept
+        ; test_case "a forget during the decode is not undone" `Quick
+            test_a_forget_during_the_decode_is_not_undone
         ; test_case "an error is not kept" `Quick test_an_error_is_not_kept
         ; test_case "a missing file is decoded every time" `Quick
             test_a_missing_file_is_decoded_every_time

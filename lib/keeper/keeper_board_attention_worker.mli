@@ -151,10 +151,17 @@ module For_testing : sig
   type deferred_rearm_scheduler
 
   val reconcile_quarantines :
-    now:float -> base_path:string -> keeper_name:string -> (unit, string) result
-  (** The process-start quarantine reconciliation pass [run] performs.
-      Exposed so a test can drive the retired-candidate settlement without
-      standing up the full Eio worker lifecycle. *)
+    now:float ->
+    worker_epoch:Keeper_board_attention_partition.Worker_epoch.t ->
+    base_path:string ->
+    keeper_name:string ->
+    (unit, string) result
+  (** The process-start quarantine reconciliation pass [run] performs, under
+      the epoch of the worker that owns the pass. A Ready partition its
+      candidate's quarantine contradicts is claimed and blocked with a
+      [Durable_partition_invariant] reason instead of failing the pass.
+      Exposed so a test can drive it without standing up the full Eio worker
+      lifecycle. *)
 
   val drain_outcome_label : drain_outcome -> string
   (** The drain verdict as one token, as logged. Retry_later keeps its reason

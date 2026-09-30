@@ -458,7 +458,7 @@ let context_flow_uses_declared_connections () =
     (List.exists (String.starts_with ~prefix:"> Project observer · attached") observer_lines
      && List.exists (String.starts_with ~prefix:"  Project metric · attached") observer_lines);
   check bool "overview offers help and opening" true
-    (List.exists (String.starts_with ~prefix:"?:help  Esc:back  Enter:open  h:history/current  i:install  n:new  S:subs  r:refresh") configured_lines);
+    (List.exists (String.starts_with ~prefix:"?:help  Colon:palette  Esc:back  Enter:open  h:history/current  i:install  n:new  S:subs  A:command  r:refresh") configured_lines);
   check bool "overview omits the old timeline" true
     (not (List.exists (String.starts_with ~prefix:"Activity timeline") configured_lines));
   let worker_lines = UI.lines ~width:160 {configured with focus=UI.Instances} in

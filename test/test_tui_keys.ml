@@ -716,20 +716,20 @@ let test_memory_facts_footer_names_filter_and_way_back () =
     "j/k:move  Home/End:top/bottom  Enter:detail  c / C:category  s:sort  a / A:all fleet  Esc:close / clear  /:filter  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     Masc_tui_keys.footer_hints_memory_facts
 
-let sample_memory_fact ~category ~claim : Tui_decode.memory_fact =
-  { Tui_decode.mf_claim = claim
+let sample_memory_fact ~category ~claim : Masc.Tui_decode_memory_facts.memory_fact =
+  { Masc.Tui_decode_memory_facts.mf_claim = claim
   ; mf_category = category
   ; mf_origin = "authored"
   ; mf_first_seen = 0.
   ; mf_last_seen = 0.
   ; mf_memory_id = claim
-  ; mf_events = Tui_decode.no_memory_fact_events
+  ; mf_events = Masc.Tui_decode_memory_facts.no_memory_fact_events
   }
 
 (* The browser open on the snapshot's keeper, with its facts answered the way
    the answer handler settles them. *)
-let answer_memory_facts (state : Masc_tui_types.state) (snapshot : Tui_decode.memory_fact_snapshot) =
-  let keeper = snapshot.Tui_decode.mfs_keeper in
+let answer_memory_facts (state : Masc_tui_types.state) (snapshot : Masc.Tui_decode_memory_facts.memory_fact_snapshot) =
+  let keeper = snapshot.Masc.Tui_decode_memory_facts.mfs_keeper in
   state.Masc_tui_types.memory_facts_keeper <- Some keeper;
   match Masc_tui_fetched.start ~equal:String.equal state.Masc_tui_types.memory_facts ~key:keeper with
   | Masc_tui_fetched.Already_loading -> Alcotest.fail "fixture already loading"
@@ -742,10 +742,10 @@ let memory_state_with_facts () =
   let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
   state.memory_facts_keeper <- Some "alpha";
   answer_memory_facts state
-      { Tui_decode.mfs_keeper = "alpha"
+      { Masc.Tui_decode_memory_facts.mfs_keeper = "alpha"
       ; mfs_ordinary =
-          Tui_decode.Memory_store_present
-            { Tui_decode.mos_revision = 1
+          Masc.Tui_decode_memory_facts.Memory_store_present
+            { Masc.Tui_decode_memory_facts.mos_revision = 1
             ; mos_updated_at = 0.
             ; mos_facts =
                 [ sample_memory_fact ~category:Cat.Lesson ~claim:"a"
@@ -753,18 +753,18 @@ let memory_state_with_facts () =
                 ]
             }
       ; mfs_source =
-          Tui_decode.Memory_store_present
-            { Tui_decode.mss_revision = 1
+          Masc.Tui_decode_memory_facts.Memory_store_present
+            { Masc.Tui_decode_memory_facts.mss_revision = 1
             ; mss_updated_at = 0.
             ; mss_facts =
-                [ { Tui_decode.msf_claim = "bound"
+                [ { Masc.Tui_decode_memory_facts.msf_claim = "bound"
                   ; msf_first_seen = 0.
                   ; msf_path = "docs/a.md"
                   ; msf_sha256 = "cafe"
                   }
                 ]
             ; mss_invalidations =
-                [ { Tui_decode.mi_source_path = "docs/old.md"
+                [ { Masc.Tui_decode_memory_facts.mi_source_path = "docs/old.md"
                   ; mi_invalidated_at = 0.
                   ; mi_reason = "source_changed"
                   }
@@ -793,7 +793,7 @@ let test_memory_fact_rows_follow_the_category_filter () =
   (match memory_fact_rows state with
    | [ Memory_row_fact fact ] ->
        check str "the filter narrows ordinary facts only" "a"
-         fact.Tui_decode.mf_claim
+         fact.Masc.Tui_decode_memory_facts.mf_claim
    | rows ->
        Alcotest.fail
          (Printf.sprintf "unexpected filtered shape (%d rows)"

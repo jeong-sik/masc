@@ -5871,7 +5871,7 @@ type state = {
      carries the keepers the fleet merge could not read beside the facts it
      could; a single keeper's answer has none. *)
   mutable memory_facts:
-    (string, Tui_decode.memory_fact_snapshot * string option) Masc_tui_fetched.t;
+    (string, Masc.Tui_decode_memory_facts.memory_fact_snapshot * string option) Masc_tui_fetched.t;
   mutable memory_facts_cursor: int;
   mutable memory_facts_scroll: int;
   (* One selected claim's wrapped rows. The cursor and renderer ask for the
@@ -8913,9 +8913,9 @@ let lanes_overview_hit (state : state) ~terminal_rows:_ ~row : lanes_overview_hi
    sections apart -- an ordinary fact, a fact bound to a file, and a fact
    the store dropped -- while the cursor walks them as one flat list. *)
 type memory_fact_row =
-  | Memory_row_fact of Tui_decode.memory_fact
-  | Memory_row_source_fact of Tui_decode.memory_source_fact
-  | Memory_row_invalidation of Tui_decode.memory_invalidation
+  | Memory_row_fact of Masc.Tui_decode_memory_facts.memory_fact
+  | Memory_row_source_fact of Masc.Tui_decode_memory_facts.memory_source_fact
+  | Memory_row_invalidation of Masc.Tui_decode_memory_facts.memory_invalidation
 
 (* Memory already trims its filter; count and cursor search must use that
    same query. Other surfaces keep their literal-space search semantics. *)
@@ -8924,13 +8924,13 @@ let surface_search_query surface query =
 
 let memory_fact_search_text = function
   | Memory_row_fact f ->
-      f.Tui_decode.mf_claim ^ " "
-      ^ Memory_category.category_to_string f.Tui_decode.mf_category
-      ^ " " ^ f.Tui_decode.mf_origin
+      f.Masc.Tui_decode_memory_facts.mf_claim ^ " "
+      ^ Memory_category.category_to_string f.Masc.Tui_decode_memory_facts.mf_category
+      ^ " " ^ f.Masc.Tui_decode_memory_facts.mf_origin
   | Memory_row_source_fact f ->
-      f.Tui_decode.msf_claim ^ " " ^ f.Tui_decode.msf_path
+      f.Masc.Tui_decode_memory_facts.msf_claim ^ " " ^ f.Masc.Tui_decode_memory_facts.msf_path
   | Memory_row_invalidation f ->
-      f.Tui_decode.mi_reason ^ " " ^ f.Tui_decode.mi_source_path
+      f.Masc.Tui_decode_memory_facts.mi_reason ^ " " ^ f.Masc.Tui_decode_memory_facts.mi_source_path
 
 (* The filter the Memory surface is narrowed by: the text being typed while a
    search is open, and the applied one otherwise. Every count, every list and
@@ -9108,35 +9108,35 @@ let memory_fact_rows (state : state) : memory_fact_row list =
   | None -> []
   | Some snapshot ->
       let ordinary =
-        match snapshot.Tui_decode.mfs_ordinary with
-        | Tui_decode.Memory_store_read_error _ | Tui_decode.Memory_store_absent
+        match snapshot.Masc.Tui_decode_memory_facts.mfs_ordinary with
+        | Masc.Tui_decode_memory_facts.Memory_store_read_error _ | Masc.Tui_decode_memory_facts.Memory_store_absent
           ->
             []
-        | Tui_decode.Memory_store_present store ->
+        | Masc.Tui_decode_memory_facts.Memory_store_present store ->
             let facts =
               match state.memory_facts_category with
-              | Category_all -> store.Tui_decode.mos_facts
+              | Category_all -> store.Masc.Tui_decode_memory_facts.mos_facts
               | Category_ordinary category ->
                   List.filter
-                    (fun (fact : Tui_decode.memory_fact) ->
-                      fact.Tui_decode.mf_category = category)
-                    store.Tui_decode.mos_facts
+                    (fun (fact : Masc.Tui_decode_memory_facts.memory_fact) ->
+                      fact.Masc.Tui_decode_memory_facts.mf_category = category)
+                    store.Masc.Tui_decode_memory_facts.mos_facts
               | Category_source | Category_dropped -> []
             in
             List.map (fun fact -> Memory_row_fact fact) facts
       in
       let source_rows, invalidation_rows =
-        match snapshot.Tui_decode.mfs_source with
-        | Tui_decode.Memory_store_read_error _ | Tui_decode.Memory_store_absent
+        match snapshot.Masc.Tui_decode_memory_facts.mfs_source with
+        | Masc.Tui_decode_memory_facts.Memory_store_read_error _ | Masc.Tui_decode_memory_facts.Memory_store_absent
           ->
             ([], [])
-        | Tui_decode.Memory_store_present store ->
+        | Masc.Tui_decode_memory_facts.Memory_store_present store ->
             let src =
               match state.memory_facts_category with
               | Category_all | Category_source ->
                   List.map
                     (fun fact -> Memory_row_source_fact fact)
-                    store.Tui_decode.mss_facts
+                    store.Masc.Tui_decode_memory_facts.mss_facts
               | Category_ordinary _ | Category_dropped -> []
             in
             let inv =
@@ -9144,7 +9144,7 @@ let memory_fact_rows (state : state) : memory_fact_row list =
               | Category_all | Category_dropped ->
                   List.map
                     (fun row -> Memory_row_invalidation row)
-                    store.Tui_decode.mss_invalidations
+                    store.Masc.Tui_decode_memory_facts.mss_invalidations
               | Category_ordinary _ | Category_source -> []
             in
             (src, inv)
@@ -9164,9 +9164,9 @@ let memory_fact_rows (state : state) : memory_fact_row list =
            List.sort
              (fun a b ->
                let ts = function
-                 | Memory_row_fact f -> f.Tui_decode.mf_last_seen
-                 | Memory_row_source_fact f -> f.Tui_decode.msf_first_seen
-                 | Memory_row_invalidation f -> f.Tui_decode.mi_invalidated_at
+                 | Memory_row_fact f -> f.Masc.Tui_decode_memory_facts.mf_last_seen
+                 | Memory_row_source_fact f -> f.Masc.Tui_decode_memory_facts.msf_first_seen
+                 | Memory_row_invalidation f -> f.Masc.Tui_decode_memory_facts.mi_invalidated_at
                in
                Stdlib.compare (ts b) (ts a))
              filtered_rows
@@ -9179,11 +9179,11 @@ let memory_fact_rows (state : state) : memory_fact_row list =
              (fun a b ->
                let key = function
                  | Memory_row_fact f ->
-                   (match f.Tui_decode.mf_events.Tui_decode.mfe_retrieval with
-                    | Tui_decode.Retrieved { last_at; _ } -> (0, last_at)
-                    | Tui_decode.Never_retrieved -> (1, f.Tui_decode.mf_last_seen))
-                 | Memory_row_source_fact f -> (2, f.Tui_decode.msf_first_seen)
-                 | Memory_row_invalidation f -> (2, f.Tui_decode.mi_invalidated_at)
+                   (match f.Masc.Tui_decode_memory_facts.mf_events.Masc.Tui_decode_memory_facts.mfe_retrieval with
+                    | Masc.Tui_decode_memory_facts.Retrieved { last_at; _ } -> (0, last_at)
+                    | Masc.Tui_decode_memory_facts.Never_retrieved -> (1, f.Masc.Tui_decode_memory_facts.mf_last_seen))
+                 | Memory_row_source_fact f -> (2, f.Masc.Tui_decode_memory_facts.msf_first_seen)
+                 | Memory_row_invalidation f -> (2, f.Masc.Tui_decode_memory_facts.mi_invalidated_at)
                in
                let g_a, t_a = key a in
                let g_b, t_b = key b in
@@ -9195,12 +9195,12 @@ let memory_fact_rows (state : state) : memory_fact_row list =
                let key = function
                  | Memory_row_fact f ->
                    ( 0
-                   , (match f.Tui_decode.mf_events.Tui_decode.mfe_retrieval with
-                      | Tui_decode.Retrieved { count; _ } -> count
-                      | Tui_decode.Never_retrieved -> 0)
-                   , f.Tui_decode.mf_last_seen )
-                 | Memory_row_source_fact f -> (1, 0, f.Tui_decode.msf_first_seen)
-                 | Memory_row_invalidation f -> (1, 0, f.Tui_decode.mi_invalidated_at)
+                   , (match f.Masc.Tui_decode_memory_facts.mf_events.Masc.Tui_decode_memory_facts.mfe_retrieval with
+                      | Masc.Tui_decode_memory_facts.Retrieved { count; _ } -> count
+                      | Masc.Tui_decode_memory_facts.Never_retrieved -> 0)
+                   , f.Masc.Tui_decode_memory_facts.mf_last_seen )
+                 | Memory_row_source_fact f -> (1, 0, f.Masc.Tui_decode_memory_facts.msf_first_seen)
+                 | Memory_row_invalidation f -> (1, 0, f.Masc.Tui_decode_memory_facts.mi_invalidated_at)
                in
                let g_a, n_a, t_a = key a in
                let g_b, n_b, t_b = key b in
@@ -9213,7 +9213,7 @@ let memory_fact_rows (state : state) : memory_fact_row list =
              (fun a b ->
                let cat = function
                  | Memory_row_fact f ->
-                     (0, Memory_category.category_to_string f.Tui_decode.mf_category)
+                     (0, Memory_category.category_to_string f.Masc.Tui_decode_memory_facts.mf_category)
                  | Memory_row_source_fact _ -> (1, "source")
                  | Memory_row_invalidation _ -> (2, "dropped")
                in
@@ -9224,9 +9224,9 @@ let memory_fact_rows (state : state) : memory_fact_row list =
                else if p_a <> p_b then Stdlib.compare p_a p_b
                else
                  let claim = function
-                   | Memory_row_fact f -> f.Tui_decode.mf_claim
-                   | Memory_row_source_fact f -> f.Tui_decode.msf_claim
-                   | Memory_row_invalidation f -> f.Tui_decode.mi_reason
+                   | Memory_row_fact f -> f.Masc.Tui_decode_memory_facts.mf_claim
+                   | Memory_row_source_fact f -> f.Masc.Tui_decode_memory_facts.msf_claim
+                   | Memory_row_invalidation f -> f.Masc.Tui_decode_memory_facts.mi_reason
                  in
                  String.compare (claim a) (claim b))
              filtered_rows
@@ -9234,9 +9234,9 @@ let memory_fact_rows (state : state) : memory_fact_row list =
            List.sort
              (fun a b ->
                let claim = function
-                 | Memory_row_fact f -> f.Tui_decode.mf_claim
-                 | Memory_row_source_fact f -> f.Tui_decode.msf_claim
-                 | Memory_row_invalidation f -> f.Tui_decode.mi_reason
+                 | Memory_row_fact f -> f.Masc.Tui_decode_memory_facts.mf_claim
+                 | Memory_row_source_fact f -> f.Masc.Tui_decode_memory_facts.msf_claim
+                 | Memory_row_invalidation f -> f.Masc.Tui_decode_memory_facts.mi_reason
                in
                String.compare (claim a) (claim b))
              filtered_rows)
@@ -9250,24 +9250,24 @@ let memory_fact_categories (state : state) : memory_category_filter list =
   | None -> []
   | Some snapshot ->
       let ordinary_cats =
-        match snapshot.Tui_decode.mfs_ordinary with
-        | Tui_decode.Memory_store_read_error _ | Tui_decode.Memory_store_absent
+        match snapshot.Masc.Tui_decode_memory_facts.mfs_ordinary with
+        | Masc.Tui_decode_memory_facts.Memory_store_read_error _ | Masc.Tui_decode_memory_facts.Memory_store_absent
           ->
             []
-        | Tui_decode.Memory_store_present store ->
-            store.Tui_decode.mos_facts
-            |> List.map (fun (fact : Tui_decode.memory_fact) ->
-                 Category_ordinary fact.Tui_decode.mf_category)
+        | Masc.Tui_decode_memory_facts.Memory_store_present store ->
+            store.Masc.Tui_decode_memory_facts.mos_facts
+            |> List.map (fun (fact : Masc.Tui_decode_memory_facts.memory_fact) ->
+                 Category_ordinary fact.Masc.Tui_decode_memory_facts.mf_category)
             |> List.sort_uniq Stdlib.compare
       in
       let source_cats =
-        match snapshot.Tui_decode.mfs_source with
-        | Tui_decode.Memory_store_read_error _ | Tui_decode.Memory_store_absent
+        match snapshot.Masc.Tui_decode_memory_facts.mfs_source with
+        | Masc.Tui_decode_memory_facts.Memory_store_read_error _ | Masc.Tui_decode_memory_facts.Memory_store_absent
           ->
             []
-        | Tui_decode.Memory_store_present store ->
-            (if store.Tui_decode.mss_facts <> [] then [ Category_source ] else [])
-            @ (if store.Tui_decode.mss_invalidations <> [] then [ Category_dropped ] else [])
+        | Masc.Tui_decode_memory_facts.Memory_store_present store ->
+            (if store.Masc.Tui_decode_memory_facts.mss_facts <> [] then [ Category_source ] else [])
+            @ (if store.Masc.Tui_decode_memory_facts.mss_invalidations <> [] then [ Category_dropped ] else [])
       in
       ordinary_cats @ source_cats
 

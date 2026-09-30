@@ -1,3 +1,4 @@
+open Masc.Tui_decode_memory_facts
 open Masc_tui_types
 open Masc.Tui_decode
 open Masc.Tui_decode_memory_health

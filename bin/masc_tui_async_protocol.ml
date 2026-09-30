@@ -239,7 +239,7 @@ type async_msg =
      facts and, for the "all keepers" merge, the keepers it could not read. *)
   | Memory_facts_loaded of
       string Masc_tui_fetched.request
-      * (Masc.Tui_decode.memory_fact_snapshot * string option, string) result
+      * (Masc.Tui_decode_memory_facts.memory_fact_snapshot * string option, string) result
   | Repository_changes_loaded of
       Masc.Tui_decode.repository_change_scope
       * (Masc.Tui_decode.repository_change_snapshot, string) result

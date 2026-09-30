@@ -15,6 +15,7 @@ def run(executable, no_color=False):
     planning["task_backlog"] = {"todo": 11, "claimed": 12, "in_progress": 13,
         "awaiting_verification": 14, "done": 15, "cancelled": 16}
     _, repositories = h.repositories_fixture()
+    repositories["repositories"][0]["status"] = "wire\n\x1b[9D"
     repositories["repositories"].append({**repositories["repositories"][0],
         "id":"next-repo", "name":"next-repo", "local_path":"workspace/next-repo",
         "resolved_local_path":"/srv/masc/workspace/next-repo"})
@@ -47,6 +48,8 @@ def run(executable, no_color=False):
                 needle=needle, controls=(h.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
             frame = h.resize_and_wait(process, fd, output, rows=rows, columns=columns,
                 needle=needle, controls=(h.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
+            if b"wire\n" in frame or b"\x1b[9D" in frame:
+                raise AssertionError("repository status injected a newline or terminal cursor control")
             if selected_name is not None and not h.keeper_row_selected(selected_name).search(frame):
                 raise AssertionError(f"selected repository {selected_name!r} vanished from its table")
             print("STUDIO_CAPTURE="+json.dumps({"name":name+("-no-color" if no_color else ""),

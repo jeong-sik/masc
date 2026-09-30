@@ -10930,7 +10930,8 @@ let render_repository_list (state : state) =
               let line = Render_schedule.workspace_row ~path_width
                 { Render_schedule.wrow_name = Terminal_text.single_line r.rp_name
                 ; wrow_branch = Terminal_text.single_line r.rp_default_branch
-                ; wrow_status = Masc.Tui_decode.repository_status_word r.rp_status
+                ; wrow_status = Terminal_text.single_line
+                    (Masc.Tui_decode.repository_status_word r.rp_status)
                 ; wrow_sync = if r.rp_auto_sync then "auto" else "manual"
                 ; wrow_path = Terminal_text.single_line r.rp_resolved_local_path } in
               if idx = state.repositories_cursor then

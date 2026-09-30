@@ -385,6 +385,12 @@ val drop_last_utf8_word : string -> string
     Alt+Backspace in a chat draft. The separator before the word stays, so two
     presses walk two words. Empty or invalid text is preserved. *)
 
+val begin_frame : unit -> unit
+(** Marks the start of a frame. Laying out a non-ASCII text reuses the pieces
+    this frame or the previous one got for the same text; a text the previous
+    frame did not lay out is split again. The TUI calls it once per frame, a
+    frame that draws a picture included. *)
+
 val display_width : string -> int
 (** Approximate the display cells of a terminal that draws extended grapheme
     clusters as indivisible layout pieces. Renderer-owned ANSI CSI and
@@ -563,11 +569,6 @@ val chat_role_label_width : pane_cells:int -> int
     messages made every body re-wrap whenever a differently-named speaker
     posted. The bounded 10--14 cell result keeps the built-in activity names
     whole without turning their alignment padding into a wide empty gutter. *)
-
-val local_body_cells : pane_cells:int -> inner_width:int -> int
-(** Conservative body width for a local message in the inline chat layout.
-    Reserves the rail, clock and full role-label budget so fixed-width
-    content such as a QR code is never sent into a wrapping body column. *)
 
 val speaker_mark : style -> string
 (** One glyph per speaker. Colour says the same thing more legibly, and

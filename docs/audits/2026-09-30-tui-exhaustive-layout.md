@@ -66,6 +66,12 @@ S02 목록 부분은 [#40220](https://github.com/jeong-sik/masc/pull/40220)으�
 
 S02 기준 실행: 설치 main `86751f610442e4d82992ebc54bf9eb8ba45ef6d2`를 별도 임시 fixture PTY에 띄워 40×32 color/lane 읽기에서 정상 probe(1 reachable/0 failed/0 skipped)를 확인했으나 route/probe header와 상태가 프레임 밖으로 잘렸다. [텍스트 frame·provenance](../evidence/tui-audit-2026-09-30/runtime-list-before-86751.txt)를 저장했다. 바이너리 해시는 실행 전후 같았다. 이 실행은 원래 결함만 재현하며 수정 head·NO_COLOR·나머지 폭/모드·운영 데이터의 검증은 아니다.
 
+R03 Workspace Activity는 [#40230](https://github.com/jeong-sik/masc/pull/40230)의 `c6677251ad98639c7cbc4390eecef7c690390caa`로 목록 파일/결과를 우선 배정하고 `v:context`에서 전체 repository/path·Keeper·Task 제목/ID·execution·기록 사실을 읽도록 했다. 페이지/키는 같은 물리 행 예산과 one-row overlap을 쓰며 선택이 사라지면 reader를 닫는다. 독립 리뷰가 overlay 입력 guard와 30열 초과를 찾아 직접 보완했다. 새 PTY는 30/40/60/80/120열×18행·color/NO_COLOR에서 전체 메타데이터 복원·Home·선택 초기화를 검사하며 실제 Task 읽기 신호를 먼저 기다린다. [집중 run36681385350](https://github.com/jeong-sik/masc/actions/runs/36681385350)와 [probe36680543354](https://github.com/jeong-sik/masc/actions/runs/36680543354)는 요청 상태이며 실행 PASS는 미확인이다. 처음 요청한 `36680299952`는 없는 `test_tui_keyboard_input-changes` alias를 포함해 취소를 요청하고, 선언된 `changes-newline` 가족으로 다시 요청했다. 이 이전 요청은 실행 증거가 아니다. Refresh/stale/overlay 차단·Enter 경로는 소스 검토만 했다. [설치 바이너리의 원래 경로 손실](../evidence/tui-audit-2026-09-30/workspace-activity-before.txt)은 해시를 고정한 복사본의 별도 fixture PTY 100×30 color에서 재현했고 원문도 저장했다.
+
+O05 후속: `893ca15b5b998433196541e575bdfdf7419c52dc`의 [run36673794831](https://github.com/jeong-sik/masc/actions/runs/36673794831)은 success이며 [원문 발췌](../evidence/tui-audit-2026-09-30/link-preview-targeted-pass.txt)에 전체 URL/안내·거절 읽기·29-test 성공이 있다. compiled unit scope이며 실제 modal PTY/스크린샷·필수 체크·설치를 대신하지 않는다.
+
+R02 세 읽기의 `ac8df5fb74` run36673795966은 recorded 40열 color의 tail/gutter/clamp/재열기를 통과한 뒤, 같은 24×40 크기의 keeper-tree에서 새 resize 출력을 기다려 멈췄다. [원문](../evidence/tui-audit-2026-09-30/recorded-diff-resize-failure.txt)의 실제 tree 본문은 이미 그려져 있었다. `6766ed25f4ab9515bc380284a60603a1a3f234aa`는 실제 PTY 크기를 읽어 같은 크기일 때만 이 대기를 건너뛰며 모든 실제 행·폭·tail·gutter 검사를 유지한다. 독립 응답 리뷰를 마쳤고 [새 집중 run36680037724](https://github.com/jeong-sik/masc/actions/runs/36680037724)을 요청했다. 나머지 reader/폭/NO_COLOR의 실행 통과는 아직 없다.
+
 ## 수정과 남은 결함
 
 `PR`는 구현이 게시되었다는 뜻이다. 아래에 적힌 PR들의 현재 head·CI·리뷰·병합 상태는 작업 직전에 다시 확인한다.
@@ -96,7 +102,7 @@ S02 기준 실행: 설치 main `86751f610442e4d82992ebc54bf9eb8ba45ef6d2`를 별
 | S05 | Prompt registry/assets | key/source/file/vars metadata 원문 도달 불가 | 필드 wrap 필요 |
 | S06/S07 | Presets | detail logical row 잘림; retained refresh failure에서 list_height+1행 | [#40141](https://github.com/jeong-sik/masc/pull/40141), 전체 detail wrap·실제 페이지 높이·실패 행 배정·refetch 동안 읽기 유지; 집중 실행 검증 대기 |
 | S08/S09/S10 | Voice | input tail/caret·endpoint metadata 잘림; assignment cursor 미추종 | [#40117](https://github.com/jeong-sik/masc/pull/40117), wizard/assignment; 실행 검증 대기, endpoint 추가 필요 |
-| R03 | Workspace Activity | fixed clock/keeper/task 뒤 file 잘림 | 반응형 행·선택 path wrap 필요 |
+| R03 | Workspace Activity | fixed clock/keeper/task 뒤 file 잘림 | [#40230](https://github.com/jeong-sik/masc/pull/40230), 반응형 목록·전체 Context reader; 실행 대기 |
 | R04 | Code memo/history | subject/provenance 논리 행의 잘린 suffix 도달 불가 | 필드 wrap 또는 수평 탐색 필요 |
 | S11 | Tools | root path/rejection/composition 행·skill usage last-used 잘림 | 상세 검사·wrap/반응형 열 필요 |
 | O05 | Link preview | 설명 원문이 narrow frame에서 한 줄 잘림 | [#40209](https://github.com/jeong-sik/masc/pull/40209), 전체 URL·설명·거절 wrap, 실행 검증 대기 |

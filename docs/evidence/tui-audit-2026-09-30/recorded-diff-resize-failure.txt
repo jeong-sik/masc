@@ -1,0 +1,10 @@
+Run: https://github.com/jeong-sik/masc/actions/runs/36673795966
+Head (run metadata): ac8df5fb7487bbd04bf72b2b5b5ae7144182da7b
+Raw suite log SHA256: b67f70cabd7e02b76391c9ce4aaccd5ac80761d2ed51cd073f0e0592136f6aba
+Scope: recorded40color exercise and subsequent reopen/other-file steps reached next keeper-tree reader. The same24x40 resize then waited for fresh output although both body rows were already present. Keeper-tree pan, project reader, remaining widths and NO_COLOR were not reached.
+
+RECORDED_DIFF_PAN_PTY {"reader": "recorded", "width": 40, "no_color": false, "clamped_rows": ["  - Z                                   ", "  +                                     "]}
+[targeted] test_tui_recorded_diff_pan_pty: FAIL exit 1 in 35s
+Test Successful in 0.026s. 126 tests run.
+Test Successful in 0.000s. 17 tests run.
+Test Successful in 0.000s. 5 tests run.

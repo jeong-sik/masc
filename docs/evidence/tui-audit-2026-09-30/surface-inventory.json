@@ -398,7 +398,11 @@
       "finding_ids": [
         "R03"
       ],
-      "followup_source_evidence": "86751f610442e4d82992ebc54bf9eb8ba45ef6d2 still has date16/keeper18/task16 before path and one-row selected metadata; PR40177 does not repair this reader; source-only"
+      "followup_source_evidence": "86751f610442e4d82992ebc54bf9eb8ba45ef6d2 still has date16/keeper18/task16 before path and one-row selected metadata; PR40177 does not repair this reader; source-only",
+      "implementation_prs": [
+        40230
+      ],
+      "implementation_evidence": "c6677251ad98639c7cbc4390eecef7c690390caa source/static/review only; responsive30/40/60/80/120 rows and full Context reader fixture added; run36681385350/probe36680543354 requested, not execution PASS."
     }
   ],
   "global_overlays": [
@@ -566,5 +570,35 @@
     "binary_sha256": "96955f7800f497c831f6cd25c953d0143cc8c6441f0b7935d18198f49008760b",
     "receipt": "runtime-list-before-86751.txt",
     "scope": "installed binary in isolated fixture PTY,40x32,color,lane,healthy singleton; original clipping reproduced only. No repaired head or full matrix proof."
+  },
+  "link_preview_targeted_evidence": {
+    "head": "893ca15b5b998433196541e575bdfdf7419c52dc",
+    "run": 36673794831,
+    "receipt": "link-preview-targeted-pass.txt",
+    "raw": "link-preview-targeted.raw.txt",
+    "scope": "compiled unit29tests success, not actual modal PTY/screenshot/required checks/install"
+  },
+  "recorded_diff_resize_response": {
+    "failed_head": "ac8df5fb7487bbd04bf72b2b5b5ae7144182da7b",
+    "failed_run": 36673795966,
+    "repair_head": "6766ed25f4ab9515bc380284a60603a1a3f234aa",
+    "requested_run": 36680037724,
+    "scope": "recorded40color initialreader checks passed; unchangedsizewait failedbeforekeeper_tree pan; source-reviewed no-op wait repair, remaining matrix pending",
+    "receipt": "recorded-diff-resize-failure.txt",
+    "raw": "recorded-diff-resize-failure.raw.txt"
+  },
+  "workspace_activity_baseline_fixture": {
+    "binary_head": "86751f610442e4d82992ebc54bf9eb8ba45ef6d2",
+    "binary_sha256": "96955f7800f497c831f6cd25c953d0143cc8c6441f0b7935d18198f49008760b",
+    "fixture_head": "c6677251ad98639c7cbc4390eecef7c690390caa",
+    "receipt": "workspace-activity-before.txt",
+    "raw": "workspace-activity-before.raw.txt",
+    "scope": "frozen installed copy in isolated100x30colorPTY, original path-tail loss afterloadedTask/data; no repaired or full matrix proof"
+  },
+  "workspace_activity_targeted_request": {
+    "head": "c6677251ad98639c7cbc4390eecef7c690390caa",
+    "run": 36681385350,
+    "probe": 36680543354,
+    "scope": "requested, execution pending; earlier36680299952 cancel requested for absent changes alias, not proof"
   }
 }

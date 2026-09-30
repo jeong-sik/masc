@@ -1,0 +1,18 @@
+Run: https://github.com/jeong-sik/masc/actions/runs/36673794831
+Head (run metadata): 893ca15b5b998433196541e575bdfdf7419c52dc
+Raw suite log SHA256: 0ead411005a49e542c3cd6b817f9b41de913837139b40fd9223fce3251d206be
+Scope: compiled link-preview unit suite, 29 tests. Actual modal PTY, screenshot, required checks and installation not proven.
+
+[targeted] test/test_tui_link_preview: stanza env MASC_BASE_PATH= ZAI_API_KEY= TYPESAFEAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+[targeted] test/test_tui_link_preview: start 2026-09-30T06:17:36Z
+  [OK]          render                    0   compact badge.
+  [OK]          render                    1   inline card column alignment.
+  [OK]          render                    2   notion 2-column card alignment.
+  [OK]          render                    3   notion narrow fallback.
+  [OK]          render                    4   modal card.
+  [OK]          render                    5   modal keeps complete URL and in...
+  [OK]          render                    6   modal hints name what the keys do.
+  [OK]          render                    7   a refused image url is remember...
+  [OK]          render                    8   an undecided image url says not...
+Test Successful in 0.015s. 29 tests run.
+[targeted] test/test_tui_link_preview: OK in 0s

@@ -12636,7 +12636,7 @@ def run_activity_logs_tab_pane_regression(executable: str) -> None:
     """Dashboard, Work and Usage share the pane's 102-column surface floor.
 
     Home stays compact by default. An explicit Ctrl-L choice opens the
-    Recent pane, whose102-column surface boundary then persists on Work and
+    Recent pane, whose 102-column surface boundary then persists on Work and
     Usage. Activity Events and Logs suppress it because they own that content.
     """
 
@@ -12651,10 +12651,10 @@ def run_activity_logs_tab_pane_regression(executable: str) -> None:
         resize_and_wait(process, master_fd, output, rows=38,
                         columns=ACTING_PANE_THRESHOLD_COLUMNS,
                         needle=b"MASC Dashboard", final_cursor=b"\x1b[?25l")
-        if pane_row(output) >= 0:
-            raise AssertionError("default Home grew an Activity pane without a reader choice")
-        # Home's default is hidden; measure the shared boundary only after an
-        # actual user choice, preserving every geometry assertion below.
+        # Home starts without a feed. An explicit pane choice still applies
+        # on Home and survives the following surface switches.
+        drain_until_quiet(process, master_fd, output)
+        assert pane_row(output) < 0, screen_text(bytes(output))
         send_and_wait(process, master_fd, output, b"\x0c", b"[Recent]")
         for title, ready, whole_row in (
             (b"MASC Dashboard", b"Continue", b"Choose a Keeper"),

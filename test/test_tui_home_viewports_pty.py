@@ -65,7 +65,8 @@ def viewport_journey(executable, *, unread, no_color):
             }))
             # Exercise Home's selected-row dispatch at each size, rather
             # than proving only that a global shortcut works at the last one.
-            h.send_and_wait(process, fd, output, b"kkkk\r", b"MASC Approvals")
+            home.select_destination(process, fd, output, b"Approvals and questions:")
+            h.send_and_wait(process, fd, output, b"\r", b"MASC Approvals")
             home.assert_no_decision_posts(requests)
             h.palette_go(process, fd, output, b"go dashboard", ready)
         # The same recipient-selection action remains available after all

@@ -282,7 +282,7 @@ let overview_header (state : state) =
 
 let render_overview (state : state) =
   let terminal_rows, cols = get_terminal_size () in
-  let decisions = home_decision_rows state in
+  let all_decisions = home_decision_rows state in
   let continuation = home_continue_rows state in
   let selected = home_selected_action state in
   let health =
@@ -334,12 +334,16 @@ let render_overview (state : state) =
         Option.is_some state.home_selected && Option.is_none selected
       in
       let warning_rows = if selection_changed then 1 else 0 in
+      (* Keep continuation and new work visible while the request window
+         follows the selected identity. All rows remain reachable with j/k. *)
+      let first, capacity = home_decision_window state ~budget in
+      let decisions = List.drop first all_decisions |> List.take capacity in
       let actions = decisions @ continuation in
       (* Headers and action destinations take precedence over health/history
-         context. A wider queue is still an aggregate destination here, not
-         a reason to push continuation below the screen. *)
+         context. The request window preserves continuation below it even
+         when the queue contains more rows than the viewport. *)
       let essential_rows = List.length actions + 2 + warning_rows in
-      if budget >= essential_rows then begin
+      if budget >= essential_rows && (all_decisions = [] || capacity > 0) then begin
         let spare = budget - essential_rows in
         let context =
           let readings =
@@ -362,9 +366,13 @@ let render_overview (state : state) =
         if gaps > 0 then c.push_empty ();
         (match decisions with
          | [] -> c.push_styled ~style:(Theme.recede ())
-             " No decision is waiting on you."
+             (if all_decisions = [] then " No decision is waiting on you."
+              else " Decision rows above · j/k to choose")
          | _ :: _ ->
-             c.push_styled ~style:Ansi.bold " Needs your decision";
+             c.push_styled ~style:Ansi.bold
+               (if List.length decisions = List.length all_decisions then " Needs your decision"
+                else Printf.sprintf " Needs your decision · rows %d-%d/%d · j/k for more"
+                  (first + 1) (first + List.length decisions) (List.length all_decisions));
              List.iter draw_row decisions);
         if gaps > 1 then c.push_empty ();
         c.push_styled ~style:Ansi.bold " Continue";
@@ -373,6 +381,7 @@ let render_overview (state : state) =
         (* Extremely short terminals show destinations around the selected
            identity. j/k reaches every destination; this is a viewport limit,
            never a limit on requests or execution. *)
+        let actions = all_decisions @ continuation in
         let available = max 0 (budget - warning_rows) in
         let count = List.length actions in
         let index =
@@ -1610,7 +1619,9 @@ let render_question_reader (state : state) =
   let asks = question_asks state in
   let selected = List.nth_opt asks state.ask_cursor in
   box_top buf cols;
-  box_line buf cols (screen_title " MASC Approvals / Questions");
+  box_line buf cols (screen_title
+    (" MASC Approvals / Questions"
+     ^ approval_list_note ~name:"questions" (approvals_questions_reading state)));
   box_line buf cols
     (match selected with
      | None -> "  No questions waiting"
@@ -1623,10 +1634,14 @@ let render_question_reader (state : state) =
            (state.ask_cursor + 1) (List.length asks) (state.ask_question_cursor + 1)
            (List.length row.ar_questions) answered Ansi.reset);
   box_line buf cols
-    (if Option.is_some state.ask_text_entry then "  Enter: save written answer · Esc: cancel writing"
-     else
-       "  Left/Right: previous/next question · [/]: previous/next ask · "
-       ^ "PgUp/PgDn: page · Home/End: top/bottom · Esc: approvals");
+    (match state.asks_error with
+     | Some error -> "  Question source unavailable · " ^ Terminal_text.single_line error
+     | None ->
+       if Option.is_some state.ask_text_entry then "  Enter: save written answer · Esc: cancel writing"
+       else
+         "  Left/Right: previous/next question · [/]: previous/next ask · "
+         ^ "PgUp/PgDn: page · Home/End: top/bottom · Esc: "
+         ^ (match state.followed_from with Some (Overview, _) -> "Dashboard" | _ -> "approvals"));
   box_divider buf cols;
   let lines, room = ask_question_viewport state in
   let limit = max 0 (List.length lines - room) in
@@ -16013,7 +16028,19 @@ let render_surface (state : state) =
                in
                render_planning_detail state
                  ~armed:(goal_action_armed_for state goal_id) ~confirmation goal
-           | None -> render_planning_list state)
+           | None ->
+               (match state.home_opened_request with
+                | Some (Home_goal_confirmation selected) when selected = goal_id ->
+                    let terminal_rows, cols = get_terminal_size () in
+                    surface_chrome ~overflow:Fits state ~terminal_rows ~cols
+                      ~surface_key:"planning_detail"
+                      ~title:("Goal · " ^ Terminal_text.single_line goal_id)
+                      ~status:[] ~hints:"Esc:Dashboard  r:refresh"
+                      ~body:(fun ~budget:_ c ->
+                        c.push (match state.planning_error with
+                          | Some error -> " Goal detail unavailable · " ^ Terminal_text.single_line error
+                          | None -> " Goal detail not read · waiting for its source"))
+                | Some _ | None -> render_planning_list state))
   | Approvals when (match state.ask_answer_mode with Ask_answering _ -> true | Ask_browsing -> false) ->
       render_question_reader state
   | Approvals ->
@@ -16906,6 +16933,29 @@ let render_lane_addons state (view : Masc_tui_lane_addons.t) =
    presses that act inside it ([press_changes_the_surface]). *)
 type drawn = Surface_drawn | Overlay_drawn
 
+(* One pure frame choice owns overlay priority for both drawing and the
+   application's preparation of state tied to an actually visible surface. *)
+let frame_choice (state : state) ~terminal_rows =
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  if Render_schedule.Viewport.requires_compact_frame ~rows then `Too_small rows
+  else match play_card_shown state with
+  | Some card -> `Play_card card
+  | None -> match state.account_login with
+  | Some view -> `Account_login view
+  | None -> match state.lane_addons with
+  | Some view -> `Lane_addons view
+  | None ->
+      if state.about_open then `About
+      else if state.palette_open then `Palette
+      else if state.context_inspector_open then `Context
+      else if state.keeper_deletions_open then `Keeper_deletions
+      else if state.help_open then `Help
+      else if state.agenda_open then `Agenda
+      else if state.answering_open then `Answering
+      else if state.patch_modal_open then `Patch
+      else if state.link_modal_open then `Link
+      else `Surface
+
 let render (state : state) =
   (* Marks number the targets of this frame alone. *)
   Masc_tui_hit.reset press_marks;
@@ -16923,49 +16973,36 @@ let render (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   (* The composer owns the terminal's last row; everything this surface
      lays out fits above it. *)
-  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  if Render_schedule.Viewport.requires_compact_frame ~rows
-  then
+  match frame_choice state ~terminal_rows with
+  | `Too_small rows ->
     let frame, clamped = render_terminal_too_small state ~rows ~cols in
     (frame, clamped, None, Overlay_drawn)
-  else match play_card_shown state with
-  | Some card ->
+  | `Play_card card ->
     let frame, clamped = render_play_card state card in
     (frame, clamped, None, Overlay_drawn)
-  | None -> match state.account_login with
-  | Some view -> let frame, clamped = render_account_login state view in (frame,clamped,None,Overlay_drawn)
-  | None -> match state.lane_addons with
-  | Some view ->
+  | `Account_login view -> let frame, clamped = render_account_login state view in (frame,clamped,None,Overlay_drawn)
+  | `Lane_addons view ->
     let frame, clamped = render_lane_addons state view in
     (frame, clamped, None, Overlay_drawn)
-  | None -> if state.about_open then
-    let frame, clamped = render_about state in
-    (frame, clamped, None, Overlay_drawn)
-  else if state.palette_open then
-    let frame, clamped = render_palette state in
-    (frame, clamped, None, Overlay_drawn)
-  else if state.context_inspector_open then
-    let frame, clamped = render_context_inspector state in
-    (frame, clamped, None, Overlay_drawn)
-  else if state.keeper_deletions_open then
-    let frame, clamped = render_keeper_deletions state in
-    (frame, clamped, None, Overlay_drawn)
-  else if state.help_open then
-    let frame, clamped = render_help state in
-    (frame, clamped, None, Overlay_drawn)
-  else if state.agenda_open then
-    let frame, clamped = render_agenda state in
-    (frame, clamped, None, Overlay_drawn)
-  else if state.answering_open then
-    let frame, clamped = render_answering state in
-    (frame, clamped, None, Overlay_drawn)
-  else if state.patch_modal_open then
-    let frame, clamped = render_patch_modal state in
-    (frame, clamped, None, Overlay_drawn)
-  else if state.link_modal_open then
-    let frame, clamped = render_link_preview_modal state in
-    (frame, clamped, None, Overlay_drawn)
-  else
+  | `About ->
+    let frame, clamped = render_about state in (frame, clamped, None, Overlay_drawn)
+  | `Palette ->
+    let frame, clamped = render_palette state in (frame, clamped, None, Overlay_drawn)
+  | `Context ->
+    let frame, clamped = render_context_inspector state in (frame, clamped, None, Overlay_drawn)
+  | `Keeper_deletions ->
+    let frame, clamped = render_keeper_deletions state in (frame, clamped, None, Overlay_drawn)
+  | `Help ->
+    let frame, clamped = render_help state in (frame, clamped, None, Overlay_drawn)
+  | `Agenda ->
+    let frame, clamped = render_agenda state in (frame, clamped, None, Overlay_drawn)
+  | `Answering ->
+    let frame, clamped = render_answering state in (frame, clamped, None, Overlay_drawn)
+  | `Patch ->
+    let frame, clamped = render_patch_modal state in (frame, clamped, None, Overlay_drawn)
+  | `Link ->
+    let frame, clamped = render_link_preview_modal state in (frame, clamped, None, Overlay_drawn)
+  | `Surface ->
     let frame, clamped = render_surface state in
     let presented_approval =
       match state.view with

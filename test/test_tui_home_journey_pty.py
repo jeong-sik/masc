@@ -2,6 +2,7 @@
 import base64
 import json
 import os
+import re
 from pathlib import Path
 import sys
 
@@ -12,6 +13,20 @@ SOURCE_MODULES = (
     "bin/masc_tui_render_prim.ml", "bin/masc_tui_keys.ml",
     "bin/masc_tui_render_chat.ml",
 )
+
+
+def select_destination(process, fd, output, label, *, destinations=12):
+    os.write(fd, b"k" * destinations)
+    h.drain_until_quiet(process, fd, output)
+    pattern = re.compile(rb"\x1b\[7m[^\r\n]*" + re.escape(label))
+    for index in range(destinations):
+        rows = h.screen_rows(bytes(output), preserve_styles=True)
+        if any(pattern.search(row) for row in rows.values()):
+            return
+        if index + 1 < destinations:
+            os.write(fd, b"j")
+            h.drain_until_quiet(process, fd, output)
+    raise AssertionError(f"Home destination not selected: {label!r}")
 
 
 def capture(process, fd, output, name, needle, *, columns=80):
@@ -65,8 +80,9 @@ def unknown_and_resume(executable):
         h.send_and_wait(process, fd, output, b"c", b"Esc:list")
         h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
         h.palette_go(process, fd, output, b"go dashboard", b"Continue with beta")
-        # Approvals are unread; the next row is the explicitly opened chat.
-        h.send_and_wait(process, fd, output, b"j\r", b"Esc:Dashboard")
+        # Select the conversation by its visible destination, independent of cards.
+        select_destination(process, fd, output, b"Continue with beta")
+        h.send_and_wait(process, fd, output, b"\r", b"Esc:Dashboard")
         h.send_and_wait(process, fd, output, b"home-draft", b"home-draft")
         h.send_and_wait(process, fd, output, b"\x1b", b"Continue with beta")
         capture(process, fd, output, "resume-beta", b"Continue with beta", columns=120)
@@ -86,7 +102,10 @@ def requests_are_navigation(executable):
     def interact(process, fd, _slave, output, _base):
         h.wait_for_output(process, fd, output, b"Approvals and questions: 3", start=0, timeout=10)
         capture(process, fd, output, "requests", b"Approvals and questions: 3")
-        h.send_and_wait(process, fd, output, b"\r", b"MASC Approvals")
+        select_destination(process, fd, output, b"namespace_pause")
+        detail = h.send_and_wait(process, fd, output, b"\r", b"reason-token-a")
+        assert b"reason-token-a" in h.screen_text(detail), detail
+        h.send_and_wait(process, fd, output, b"\x1b", b"Enter:open")
         assert_no_decision_posts(requests)
         os.write(fd, b"q")
 
@@ -116,9 +135,9 @@ def automatic_gate_is_not_a_human_decision(executable):
         h.send_and_wait(process, fd, output, b"r", b"Approvals and questions: 1 need you")
         # Change the width so capture receives a full redraw after refresh;
         # requesting the current 80x24 size does not produce another frame.
-        frame = capture(process, fd, output, "mixed-gate", b"3 automatic", columns=120)
+        frame = capture(process, fd, output, "mixed-gate", b"Approval", columns=120)
         assert b"Approvals and questions: 1 need you" in frame
-        assert b"3 automatic" in frame
+        assert frame.count(b"Approval ") == 1, frame
         os.write(fd, b"q")
 
     h.run_terminal_scenario(executable, description="Home excludes automatic Gate work",
@@ -135,17 +154,14 @@ def refresh_preserves_destination(executable):
 
     def interact(process, fd, _slave, output, _base):
         h.wait_for_output(process, fd, output, b"No decision is waiting", start=0, timeout=10)
-        # Resolve the initial unread selection, leaving Choose highlighted.
-        os.write(fd, b"j")
-        h.drain_until_quiet(process, fd, output)
-        assert b"Choose a Keeper" in h.screen_text(bytes(output))
+        select_destination(process, fd, output, b"Choose a Keeper")
         current.extend(items)
         h.send_and_wait(process, fd, output, b"r", b"Approvals and questions: 3")
         capture(process, fd, output, "request-inserted", b"Approvals and questions: 3")
         h.send_and_wait(process, fd, output, b"\r", b"MASC Keepers")
         assert_no_decision_posts(requests)
         h.palette_go(process, fd, output, b"go dashboard", b"Continue")
-        h.send_and_wait(process, fd, output, b"k", b"Approvals and questions: 3")
+        select_destination(process, fd, output, b"namespace_pause")
         current.clear()
         h.send_and_wait(process, fd, output, b"r", b"Selection changed")
         # A removed destination must never silently fall through to another.
@@ -167,16 +183,21 @@ def empty_roster_preserves_confirmation(executable):
         "created_at": "2026-09-28T00:00:00Z", "updated_at": "2026-09-29T00:00:00Z",
     }
 
+    planning_goal = dict(h.planning_goal("goal-home", "Retained goal"),
+                         phase="awaiting_confirmation")
+    fixtures[h.PLANNING_PATH] = h.planning_snapshot([planning_goal])
+
     def prepare(base):
         for path in (Path(base) / ".masc" / "keepers").glob("*.json"):
             path.unlink()
         seed_goals(base, [goal])
 
     def interact(process, fd, _slave, output, _base):
-        h.wait_for_output(process, fd, output, b"1 Goals to confirm", start=0, timeout=10)
-        frame = capture(process, fd, output, "no-keepers-with-goal", b"1 Goals to confirm")
+        h.wait_for_output(process, fd, output, b"Confirm Goal", start=0, timeout=10)
+        frame = capture(process, fd, output, "no-keepers-with-goal", b"Confirm Goal")
         assert b"Create a Keeper" in frame
-        h.send_and_wait(process, fd, output, b"j\r", b"MASC Agenda")
+        select_destination(process, fd, output, b"goal-home")
+        h.send_and_wait(process, fd, output, b"\r", b"metric-goal-home")
         h.wait_for_output(process, fd, output, b"Retained goal", start=0, timeout=10)
         h.send_and_wait(process, fd, output, b"\x1b", b"Create a Keeper")
         os.write(fd, b"q")

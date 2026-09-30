@@ -1835,10 +1835,14 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
   check int "resize polling consumes one pending signal" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"consume_resize_request" ~callee:"Atomic.exchange");
-  check int "render owns one compact viewport gate" 1
+  check int "the shared frame choice owns one compact viewport gate" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_render.ml" ~binding_name:"frame_choice"
+       ~callee:"Render_schedule.Viewport.requires_compact_frame");
+  check int "render uses the same frame choice as Home preparation" 1
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_render.ml" ~binding_name:"render"
-       ~callee:"Render_schedule.Viewport.requires_compact_frame");
+       ~callee:"frame_choice");
   check int "compact render has one fallback branch" 1
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_render.ml" ~binding_name:"render"

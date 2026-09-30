@@ -5,12 +5,14 @@
 2026-09-29. This checklist records remaining acceptance work; it is not a
 runtime-success or merge verdict.
 
-The current Home is a destination summary: requests open Approvals or Agenda,
-and continuation opens an explicitly visited conversation or Keeper selection.
-It does not yet render individual request cards. The conversation-receipt
-stack adds persistence independently of the opening preference, with typed
-missing, unreadable, session-only and durability-unconfirmed states. Same-workspace
-restart and failure-path PTY evidence is still required before acceptance.
+The decision-card stack on #40137 replaces aggregate-only Home navigation with
+kind-and-request-ID rows, preserves successful sources during another source's
+failure, and windows requests while retaining continuation. Exact readers retain
+a Home return origin and request identity across asynchronous refresh. These are
+source changes under validation, not rendered or runtime acceptance evidence.
+The independent creation and complete-draft PRs still require whole-feature
+integration. Receipt restart fixtures now run both binaries through the same
+terminal-owning shell; their latest execution remains pending.
 
 | Required behavior | Current source or test | Evidence still required |
 |---|---|---|
@@ -31,9 +33,9 @@ restart and failure-path PTY evidence is still required before acceptance.
 | Short-height Home reserves continuation and new work | Renderer currently ignores its body budget | Height-aware layout and short-height PTY acceptance |
 | Wider Home does not add default panels | CI replay frames 03, 06, 09, 12 show the automatic Recent pane at 160 columns | Suppress automatic extra Home panels while preserving explicit operator choices |
 | Overview startup remembers a last conversation across restarts | `home_last_chat` is session-only | Independent durable navigation receipt and restart/deletion verification |
-| All sources retain their distinct decision identity | Home currently aggregates destinations | Individual request projection with kind + authoritative request ID; duplicate and same-task cases |
+| All sources retain their distinct decision identity | `home_request`, `home_decision_rows`, `reconcile_home_request_detail` | Current-head individual request, duplicate, same-Keeper distinct calls, partial-source failure and detail-refresh PTY results |
 | Acceptance sizes and color-independent actions | `test_tui_home_viewports_pty.py`: 80×24, 120×32, 160×48, normal and NO_COLOR | Targeted run 36654334047 passed at `45c065b875`; raw CI frame replay and screenshots are recorded below |
-| Large queues preserve continuation and reach every request | Home aggregates queue; details own their paging | Overflow journey through details and back with selection restored |
+| Large queues preserve continuation and reach every request | Retained `home_decision_scroll` and request viewport in `render_overview` | Overflow journey at acceptance sizes and detail return with selection/window retained |
 | Accepted decisions distinguish receipt from application | Existing detail actions | Accepted-but-not-applied fixture and fresh-read verification |
 | Usage entry is independent of prior Telemetry visit | Existing Usage keyboard scenario | Current-head targeted suite and rendered Usage evidence |
 | Improved time to first action | No user timing measurement here | Same-task before/after operator observation; do not infer speed from layout |

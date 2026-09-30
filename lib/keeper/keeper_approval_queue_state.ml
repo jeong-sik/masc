@@ -175,6 +175,13 @@ let validate_exact_attempt_candidate
        ())
 ;;
 
+(* The effect request's identity. [turn_id] is deliberately absent: it names
+   the turn that asked, not the effect being asked for. Keeping it in this
+   comparison made every next-turn retry of the same call a fresh approval —
+   measured 2026-08-16: one identical web_search deferred in turns
+   28959/28960/28961 produced three approvals, three auto-judge approvals,
+   and three replays of the same 17,712-byte output into the same context
+   (#28866). The turn that asked is still recorded on the entry for audit. *)
 let pending_entry_matches
       (entry : pending_approval)
       ~base_path

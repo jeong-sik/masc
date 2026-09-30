@@ -18,7 +18,7 @@
 
 - Open the shared DOS spectator directly with `go DOS` in the TUI command palette. Escape returns to the previous screen; game input and controller changes remain server-owned (#39852).
 - The Memory table now draws one row under the selected keeper: its state, when its memory was last saved, and an action row only when there is something to do (a lag, a lag that could not be read, Librarian failures, a stall, a read error or a server alert). Press `d` to show the full ledger detail — snapshot revision, recall size, source-bound snapshot and the context cycle rows — exactly as before (#39908).
-- Editing a Goal's `due_date` or `priority` now appends a `goal_edited` event to `goal_events.jsonl` with the editor and each changed field as `{from, to}`. Setting the same value again, or editing only the title, records nothing. If the row cannot be appended, the edit still succeeds and the error log names the goal and the payload. The dashboard timeline shows the row as `Goal Edit`, and marks a row it cannot read as a warning (#39951).
+- Editing a Goal's `due_date` or `priority` now appends a `goal_edited` event to `goal_events.jsonl` with the editor and each changed field as `{from, to}`. Setting the same due date or priority again, or editing only the title, emits no `goal_edited` field-diff event; the committed upsert still records a `goal_updated` snapshot, including the current title. If the row cannot be appended, the edit still succeeds and the error log names the goal and the payload. The dashboard timeline shows the row as `Goal Edit`, and marks a row it cannot read as a warning (#39951).
 - Keeper portrait reads expose the 18-accessory catalog and accept `preview_item` to return a retained PNG preview. Explicit starting/preview modes separate the picture's equipment from the unchanged starting gear; previews do not grant ownership or persist equipment. (#39987)
 - An AI agent handed a shared DOS play invite link can now join: the `/play` page points it at `GET /play/agent.md`, a public guide to the seat over MCP (`/mcp/play`) or plain HTTP, with this server's addresses and each move's tool schema. (#40035)
 - With a `candle.toml`, the Goal verifier appends a `Snapshot` row to the Candle ledger before it commits a passing result, and refuses the commit when the row cannot be written. Without a `candle.toml`, or when Candle is disabled, nothing changes. The server logs at start whether Candle is off, enabled or disabled. A `candle.toml` that links to a missing file, or that is not a regular file, reads as disabled with a reason (#39978).
@@ -36,7 +36,7 @@
 
 ### Changed
 
-- Stacked feature PRs use independent source review and manually requested focused checks; automatic full verification is reserved for release and tag candidates. A failed or timed-out check is never counted as passing (#40280, #40297, #40298).
+- Stacked feature PRs use independent source review and manually requested focused checks. Release candidates require an explicitly dispatched full verification cycle; version-tag pushes separately trigger the Release workflow. A failed or timed-out check is never counted as passing (#40280, #40297, #40298).
 - The TUI now opens on a measured Dashboard, groups Goals and active Tasks
   under Work, and shows provider quota history, Keeper token and cost reports,
   and operational telemetry in Usage. Missing and failed readings remain
@@ -113,6 +113,8 @@
 
 ### Fixed
 
+- Refuse TUI Board posts, comments and votes while workspace identity is unverified, keeping the draft available for retry after verification. (#40314)
+- Schedule a committed Task verification submission even when a later projection fails, so durable awaiting-verification tasks do not lose their verifier notification. (#40315)
 - Long command palette searches keep the edited text and caret visible, including on narrow terminals and with Korean input (#40110).
 - Background Antigravity account checks avoid repeated macOS Keychain password dialogs when access requires confirmation and report the account as unavailable instead (#40268).
 - Keep previously loaded Keeper conversation pages visible when switching away and back, even if the next refresh fails (#40145).

@@ -731,6 +731,8 @@ let test_broadcast_retry_reconciles_receipt_during_slow_fanout () =
         (member "delivery" original=member "delivery" precommit_replay);
       check string "durable message receipt returns before any recipient projection" "committed"
         (member "delivery" original |> text "status");
+      check string "committed receipt transfers recovery to the durable recipient ledger" "durable_admitted"
+        (member "delivery" original |> member "receipt" |> text "fanout_state");
       check Alcotest.int "publication does not run synchronous fleet handler" 0 !immediate_calls;
       check Alcotest.int "publication does not inline root recipient work" 0 (List.length !calls);
       unwrap (Runtime.recover_fleet ~config ~sw);
@@ -894,6 +896,8 @@ let test_broadcast_pending_commit_recovers_same_identity () =
           (`Assoc (args @ send_id @ ["broadcast",`Bool true])) |> unwrap) in
     check string "admitted intention remains queued while authoritative commit is rejected" "pending_commit"
       (member "delivery" result |> text "status");
+    check bool "rejected workspace commit cannot transfer client retry ownership" true
+      (member "delivery" result |> member "receipt" = `Null);
     let evidence = member "evidence" result in
     check bool "failed Broadcast retains the exact selected evidence" true
       (Sys.file_exists (text "path" evidence));

@@ -54,8 +54,14 @@ val task_cache_signal_of_args :
 
 (** State of this immediate fanout invocation. [Fanout_not_started] reports an
     early return before projection; [Fanout_finished] reports that the delivery
-    invocation ended, not that every Keeper accepted or read the message. *)
-type fanout_state = Fanout_not_started | Fanout_active | Fanout_finished
+    invocation ended, not that every Keeper accepted or read the message.
+    [Fanout_durable_admitted] is set by a host only after it commits both the
+    authoritative row and the durable recipient obligations. *)
+type fanout_state =
+  | Fanout_not_started
+  | Fanout_active
+  | Fanout_finished
+  | Fanout_durable_admitted
 
 type broadcast_delivery =
   { request_id : string

@@ -55,6 +55,17 @@ let test_storage_refusal () = fixture (fun path ->
   let channel=open_out_bin path in output_string channel "{\n"; close_out channel;
   check bool "corrupt journal never replaces an uncertain old identity" true
     (Result.is_error (Pending.prepare ~path ~scope (request "never-replace"))))
+let test_durable_admission () = fixture (fun path ->
+  let scope="workspace-deferred" in
+  let prepared=require (Pending.prepare ~path ~scope (request "durable-send")) in
+  let receipt=`Assoc ["delivery",`Assoc ["status",`String "committed";
+    "request_id",`String "durable-send";"receipt",`Assoc ["fanout_state",`String "durable_admitted"]]] in
+  require (Pending.acknowledge ~path ~scope ~request:prepared receipt);
+  let next=require (Pending.prepare ~path ~scope (request "next-durable-send")) in
+  check string "ledger ownership lets a later deliberate send use its own identity"
+    "next-durable-send" (id next))
+
 let () = run "Durable TUI Broadcast identity" ["recovery",[
   test_case "process restart and acknowledged next send" `Quick test_restart;
-  test_case "storage refuses ambiguous sends" `Quick test_storage_refusal]]
+  test_case "storage refuses ambiguous sends" `Quick test_storage_refusal;
+  test_case "durable recipient ownership acknowledges without waiting for fanout" `Quick test_durable_admission]]

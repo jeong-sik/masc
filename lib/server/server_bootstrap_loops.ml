@@ -376,11 +376,14 @@ let append_workspace_message_to_recipient ~base_path ~sender_authority
   let open Result.Syntax in
   let* request_id=Keeper_chat_delivery_identity.Request_id.of_string delivery.request_id in
   let delivery_key=Keeper_chat_delivery_identity.Workspace_message request_id in
-  let speaker : Keeper_chat_store.speaker = {
-    speaker_id=Some delivery.from_agent;speaker_name=Some delivery.from_agent;
-    speaker_authority=(match sender_authority with
-      | Lane_addon_broadcast_delivery.Keeper_sender -> Keeper_chat_store.Keeper
-      | External_sender -> Keeper_chat_store.External)} in
+  let* speaker = match sender_authority with
+    | Lane_addon_broadcast_delivery.Keeper_sender ->
+        (match Keeper_identity.Keeper_id.of_string delivery.from_agent with
+         | Some keeper_id -> Ok (Keeper_chat_store.keeper_speaker keeper_id)
+         | None -> Error "admitted Keeper sender identity is invalid")
+    | External_sender ->
+        Ok {Keeper_chat_store.speaker_id=Some delivery.from_agent;
+          speaker_name=Some delivery.from_agent; speaker_authority=Keeper_chat_store.External} in
   let appended=Eio_unix.run_in_systhread (fun () ->
     Keeper_chat_store.append_user_message_once ~base_dir:base_path ~keeper_name ~delivery_key
       ~content:delivery.content ~surface:Surface_ref.Broadcast ~external_message_id:delivery.request_id

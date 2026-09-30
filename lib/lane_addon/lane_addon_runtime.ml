@@ -1016,7 +1016,8 @@ let commit_fleet m ~config (record : Fleet_ledger.record) =
     ~caller:payload.caller ~operation_id:payload.operation_id ~seq:delivery.seq) |> fleet_result
     |> Result.map_error (fun e -> Fleet_uncertain_commit e) in
   observe_fleet_settlement receipt;
-  Ok delivery
+  (* The ledger now owns recovery independently of the requesting client. *)
+  Ok {delivery with Workspace_broadcast.fanout_state=Fanout_durable_admitted}
 (* These tables are owned by the Eio owner domain. Claim before forking and
    retain the claim through the durable acknowledgement, not just projection.
    No shared I/O lock or recipient await belongs to the Pulse consumer. *)

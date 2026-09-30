@@ -824,6 +824,48 @@ let test_durable_fleet_recipient_projection_is_idempotent () =
       ~base_path:config.base_path ~sender_authority:Masc.Lane_addon_broadcast_delivery.External_sender message ~keeper_name:"../outside"))
 ;;
 
+let test_deferred_keeper_identity_matches_ordinary_projection () =
+  with_workspace @@ fun config ->
+  List.iter (persist_meta config) ["alpha";"beta"];
+  let sender="BeTa" in
+  let ordinary_id="wmsg-" ^ String.make 32 'd' in
+  let deferred_id="wmsg-" ^ String.make 32 'e' in
+  let make request_id=fleet_delivery ~request_id ~from_agent:sender ~content:"same Keeper identity" in
+  Broadcast_wakeup.project_workspace_message_to_fleet ~base_path:config.base_path
+    ~registered_keepers:(fun () -> [sender,sender;"alpha","alpha"]) (make ordinary_id);
+  let append ()=Broadcast_wakeup.append_workspace_message_to_recipient
+    ~base_path:config.base_path ~sender_authority:Masc.Lane_addon_broadcast_delivery.Keeper_sender
+    (make deferred_id) ~keeper_name:"alpha" in
+  check bool "mixed-case deferred Keeper append succeeds" true (Result.is_ok (append ()));
+  check bool "same deferred Keeper projection remains idempotent" true (Result.is_ok (append ()));
+  let speaker request_id=speaker_of_row ~base_path:config.base_path ~keeper_name:"alpha" ~request_id in
+  let ordinary=speaker ordinary_id and deferred=speaker deferred_id in
+  check (option string) "ordinary canonical Keeper id" (Some "beta") ordinary.speaker_id;
+  check (option string) "deferred shares ordinary canonical Keeper id" ordinary.speaker_id deferred.speaker_id;
+  check (option string) "deferred shares ordinary canonical Keeper name" ordinary.speaker_name deferred.speaker_name;
+  check bool "retained authority remains Keeper" true
+    (deferred.speaker_authority=Keeper_chat_store.Keeper);
+  check int "canonical retry stores one recipient row" 1
+    (count_delivery_rows ~base_path:config.base_path ~keeper_name:"alpha" ~request_id:deferred_id);
+  let external_id="wmsg-" ^ String.make 32 'f' in
+  check bool "retained external authority is accepted" true
+    (Result.is_ok (Broadcast_wakeup.append_workspace_message_to_recipient
+      ~base_path:config.base_path ~sender_authority:Masc.Lane_addon_broadcast_delivery.External_sender
+      (make external_id) ~keeper_name:"alpha"));
+  let external_speaker=speaker external_id in
+  check (option string) "external id remains its opaque original spelling" (Some sender) external_speaker.speaker_id;
+  check bool "external is not promoted by Keeper-shaped identity" true
+    (external_speaker.speaker_authority=Keeper_chat_store.External);
+  let invalid_id="wmsg-" ^ String.make 32 'a' in
+  check bool "invalid admitted Keeper identity refuses projection" true
+    (Result.is_error (Broadcast_wakeup.append_workspace_message_to_recipient
+      ~base_path:config.base_path ~sender_authority:Masc.Lane_addon_broadcast_delivery.Keeper_sender
+      (fleet_delivery ~request_id:invalid_id ~from_agent:"   " ~content:"invalid sender")
+      ~keeper_name:"alpha"));
+  check int "invalid Keeper identity writes no transcript row" 0
+    (count_delivery_rows ~base_path:config.base_path ~keeper_name:"alpha" ~request_id:invalid_id)
+;;
+
 let () =
   run
     "broadcast_wakeup_policy"
@@ -868,6 +910,8 @@ let () =
             test_deferred_cancelled_primary_wakes_precommit_retry
         ; test_case "fleet projection preserves the mention row" `Quick
             test_fleet_projection_preserves_the_mention_row
+        ; test_case "deferred Keeper identity matches ordinary projection" `Quick
+            test_deferred_keeper_identity_matches_ordinary_projection
         ; test_case "a Keeper's broadcast is Keeper speech" `Quick
             test_fleet_projection_from_a_keeper_is_keeper_speech
         ; test_case "an unregistered author stays external" `Quick

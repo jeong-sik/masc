@@ -69,8 +69,14 @@ let task_cache_signal_of_args args =
 
 (** State of this immediate fanout invocation. [Fanout_not_started] reports an
     early return before projection; [Fanout_finished] reports that the delivery
-    invocation ended, not that every Keeper accepted or read the message. *)
-type fanout_state = Fanout_not_started | Fanout_active | Fanout_finished
+    invocation ended, not that every Keeper accepted or read the message.
+    [Fanout_durable_admitted] is set by a host only after it commits both the
+    authoritative row and the durable recipient obligations. *)
+type fanout_state =
+  | Fanout_not_started
+  | Fanout_active
+  | Fanout_finished
+  | Fanout_durable_admitted
 
 type broadcast_delivery =
   { request_id : string
@@ -207,7 +213,8 @@ let broadcast_delivery_to_yojson delivery =
     ; "mention_delivery", mention_delivery_to_yojson delivery.mention_delivery
     ; "fanout_state", `String (match delivery.fanout_state with
         | Fanout_not_started -> "not_started"
-        | Fanout_active -> "active" | Fanout_finished -> "finished")
+        | Fanout_active -> "active" | Fanout_finished -> "finished"
+        | Fanout_durable_admitted -> "durable_admitted")
     ]
 
 let emit_message_activity config ~from_agent ~content ~mention
@@ -983,7 +990,8 @@ let broadcast_with_mention ?trace_context ?request_id ?on_committed ~fleet_deliv
        | Immediate_fleet, Some reason -> Deferred reason
      in
      observe stored_msg_type;
-     Ok { delivery with mention_delivery; fanout_state=Fanout_finished })
+     Ok { delivery with mention_delivery; fanout_state=(match fleet_delivery with
+       | Immediate_fleet -> Fanout_finished | Deferred_fleet -> Fanout_not_started) })
 
 let broadcast_internal ?trace_context ?request_id ?on_committed ?(fleet_delivery=Immediate_fleet) ?(msg_type = "broadcast") ?task_cache_signal
       ~audience config ~from_agent ~content =
@@ -1134,7 +1142,7 @@ let broadcast_once ?(fleet_delivery=Immediate_fleet) ~request_id config ~from_ag
        fills recipients missed by cancellation/restart and deduplicates those
        already written. A passive row proves commit, not completed fanout. *)
     let run () = match fleet_delivery with
-      | Deferred_fleet -> Ok delivery
+      | Deferred_fleet -> Ok {delivery with fanout_state=Fanout_not_started}
       | Immediate_fleet -> Ok {delivery with mention_delivery=deliver_committed_mention ~audience config message;
           fanout_state=Fanout_finished} in
     match message.mention with
@@ -1148,7 +1156,7 @@ let broadcast_once ?(fleet_delivery=Immediate_fleet) ~request_id config ~from_ag
     match existing with
     | Some (message, delivery) ->
         (match fleet_delivery with
-         | Deferred_fleet -> Ok delivery
+         | Deferred_fleet -> Ok {delivery with fanout_state=Fanout_not_started}
          | Immediate_fleet -> match admit_exact_request key with
          | Active_request _ -> Ok delivery
          | Own_request operation -> own operation (fun () ->

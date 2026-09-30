@@ -1574,7 +1574,7 @@ let render_approvals (state : state) =
 
   (* Every row the surface spends around the queue, read back off the buffers
      they were drawn into. Declared beside the drawing instead, the rows above
-     the queue were subtracted twice -- once inside [boxed_surface_chrome_rows]
+     the queue were subtracted twice -- once inside a fixed chrome budget
      and again as the two Gate lane rows -- so the surface came out two rows
      short of its budget. [finish_surface] pads a short surface under its last
      row, and the last row here is the footer: it floated two rows above the

@@ -148,11 +148,6 @@ fi
 # the way guards run for a week, and that single stale finding was the only
 # thing keeping this audit's exit code non-zero.
 #
-# Whether guards actually run is what check-guards-are-wired.py answers, and
-# it answers it by reachability rather than by step name. It runs in the same
-# lint suite as this audit, so repeating it here would only add a second
-# reader of the same fact.
-
 section "Broad Active-Source Smell Sample"
 rg -n \
   'DESIGN SMELL|hardcoded|heuristic|string matching|String\.starts_with|List\.mem .*\\[ "' \

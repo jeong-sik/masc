@@ -168,9 +168,9 @@ val broadcast_once :
     write. In [Immediate_fleet], an idle retry replays the idempotent fleet
     projection to recover interrupted recipients; an active fanout returns its
     receipt immediately. [Deferred_fleet] retries only return the receipt;
-    the root-owned recipient journal performs recovery. A retry that arrived
-    before the primary row waits only for row readiness, not fleet delivery;
-    a failed or cancelled attempt wakes it to reread. Reusing
+    the root-owned recipient journal performs recovery. A retry before primary
+    commit waits for row readiness, not fleet delivery; failed or cancelled
+    attempts wake it to reread. Reusing
     an identity with different content or sender is rejected. This path always
     declares [Fleet_conversation]; callers cannot replay a different audience.
     [Deferred_fleet] is only for a host with durable recipient obligations:

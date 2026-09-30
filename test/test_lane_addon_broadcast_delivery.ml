@@ -93,6 +93,65 @@ let test_pending_marker_crash_boundaries () = fixture (fun root ledger ->
       (match D.recover ledger with Error (D.Corrupt _) -> true | _ -> false))
     [("sender_authority",`String "owner")::List.remove_assoc "sender_authority" fields;
      List.remove_assoc "sender_authority" fields])
+let test_pending_journal_loss_and_invalid_identity () = fixture (fun root ledger ->
+  ignore (require (D.admit ledger payload));
+  let file=Sys.readdir root |> Array.to_list |> List.find (fun name -> Filename.check_suffix name ".jsonl") in
+  let journal=Filename.concat root file in
+  let marker=Filename.concat (Filename.concat root "pending") file in
+  let original=Fs_compat.load_file journal in
+  Sys.remove journal;
+  check bool "missing pending evidence refuses recovery" true
+    (match D.recover ledger with Error (D.Corrupt _) -> true | _ -> false);
+  check bool "missing journal is never recreated" false (Sys.file_exists journal);
+  check bool "missing evidence retains its durable marker" true (Sys.file_exists marker);
+  let channel=open_out_bin journal in output_string channel "torn";close_out channel;
+  check bool "torn pending evidence refuses recovery" true
+    (match D.recover ledger with Error (D.Corrupt _) -> true | _ -> false);
+  check string "torn evidence is unchanged" "torn" (Fs_compat.load_file journal);
+  check bool "torn evidence retains its marker" true (Sys.file_exists marker);
+  let channel=open_out_bin journal in output_string channel original;close_out channel;
+  let invalid=Filename.concat (Filename.concat root "pending") "invalid.jsonl" in
+  let channel=open_out_bin invalid in close_out channel;
+  check bool "malformed pending identity refuses recovery" true
+    (match D.recover ledger with Error (D.Corrupt _) -> true | _ -> false);
+  check bool "malformed identity creates no journal" false
+    (Sys.file_exists (Filename.concat root "invalid.jsonl"));
+  check bool "invalid marker remains auditable" true (Sys.file_exists invalid);
+  Sys.remove invalid;
+  check int "restored authoritative journal resumes exact obligation" 1
+    (List.length (require (D.recover ledger)).pending))
+let test_existing_update_boundaries () = fixture (fun root _ ->
+  let missing=Filename.concat (Filename.concat root "absent") "journal.jsonl" in
+  let called=ref false in
+  let decide bytes=called:=true;Some "suffix",bytes in
+  check bool "existing-only missing result is typed" true
+    (match Fs_compat.update_existing_private_file_durable_locked_result missing decide with
+     | Fs_compat.Private_file_succeeded None -> true | _ -> false);
+  check bool "missing never invokes callback" false !called;
+  check bool "missing never creates parent" false (Sys.file_exists (Filename.dirname missing));
+  let fifo=Filename.concat root "fifo" in Unix.mkfifo fifo 0o600;
+  check bool "FIFO refused before reading or invoking callback" true
+    (match Fs_compat.update_existing_private_file_durable_locked_result fifo decide with
+     | Fs_compat.Private_file_failed (Fs_compat.Unexpected_transaction_file_kind Unix.S_FIFO) -> true
+     | _ -> false);
+  check bool "FIFO never invokes callback" false !called;
+  let journal=Filename.concat root "regular" in
+  let channel=open_out_bin journal in output_string channel "original";close_out channel;
+  let alias=Filename.concat root "alias" in Unix.symlink journal alias;
+  check bool "symlink refused" true
+    (match Fs_compat.update_existing_private_file_durable_locked_result alias decide with
+     | Fs_compat.Private_file_failed (Fs_compat.Unexpected_transaction_file_kind Unix.S_LNK) -> true
+     | _ -> false);
+  Sys.remove alias;
+  let io : Fs_compat.private_jsonl_transaction_io_for_testing = {
+    before_sync_parent=(fun _ -> ());
+    close_fd=(fun fd -> Unix.close fd;raise (Sys_error "fixture close failed"))} in
+  check bool "semantic refusal and cleanup remain distinct" true
+    (match Fs_compat.update_existing_private_file_durable_locked_with_io_for_testing ~io journal
+       (fun bytes -> None,Error bytes) with
+     | Fs_compat.Private_file_succeeded_with_cleanup_failure {value=Some (Error "original");_} -> true
+     | _ -> false);
+  check string "read-only semantic refusal changes no bytes" "original" (Fs_compat.load_file journal))
 let test_status_misses_do_not_persist () = fixture (fun root ledger ->
   let missing_root=Filename.concat root "not-created" in
   let missing=D.create ~root:missing_root in
@@ -263,6 +322,8 @@ let test_regular_descriptor_boundary () = fixture (fun root ledger ->
   check bool "refusals preserve original journal bytes and receipt" true
     (D.find ledger ~caller:payload.caller ~operation_id:operation=Ok (Some admitted)))
 let () = run "Durable optional Lane Broadcast intentions" ["recovery",[
+  test_case "missing and invalid pending journals preserve evidence" `Quick test_pending_journal_loss_and_invalid_identity;
+  test_case "existing-only transaction typed boundaries" `Quick test_existing_update_boundaries;
   test_case "pending index crash boundaries and strict authority" `Quick test_pending_marker_crash_boundaries;
   test_case "unknown mutations leave no durable files" `Quick test_unknown_mutations_do_not_persist;
   test_case "regular descriptor and writerless FIFO boundary" `Quick test_regular_descriptor_boundary;

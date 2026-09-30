@@ -1134,7 +1134,9 @@ let broadcast_once ?(fleet_delivery=Immediate_fleet) ~request_id config ~from_ag
     let* existing = lookup () in
     match existing with
     | Some (message, delivery) ->
-        (match admit_exact_request key with
+        (match fleet_delivery with
+         | Deferred_fleet -> Ok delivery
+         | Immediate_fleet -> match admit_exact_request key with
          | Active_request _ -> Ok delivery
          | Own_request operation -> own operation (fun () ->
              signal_exact_request operation Row_visible;

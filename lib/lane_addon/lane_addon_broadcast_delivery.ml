@@ -16,6 +16,9 @@ let create ~root = {root;io=None}
 let transaction t path decide = match t.io with
   | None -> Fs_compat.update_private_file_durable_locked_result path decide
   | Some io -> Fs_compat.update_private_file_durable_locked_with_io_for_testing ~io path decide
+let existing_transaction t path decide = match t.io with
+  | None -> Fs_compat.update_existing_private_file_durable_locked_result path decide
+  | Some io -> Fs_compat.update_existing_private_file_durable_locked_with_io_for_testing ~io path decide
 module For_testing = struct
   let create ~root ~io = {root;io=Some io}
 end
@@ -149,8 +152,7 @@ let transact t ~mode ~caller ~operation_id decide =
         match checked with
         | Error e -> None,Error e
         | Ok (event,record) ->
-            (* Index pending intentions before appending them while retaining
-               the admitted journal's writer lock. *)
+            (* Persist discoverability before appending any pending intention. *)
             let indexed=if complete record then Ok () else ensure_pending t filename in
             (match indexed with
              | Error error -> None,Error error
@@ -181,8 +183,7 @@ let transact t ~mode ~caller ~operation_id decide =
   | Fs_compat.Private_file_failed_with_cleanup_failure {error;cleanup_failure} ->
       Error (Settlement_failed {primary=error;
         cleanup=Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure}) in
-  (* Completion is durable before retirement. A crash before unlink merely
-     leaves a completed marker for the next recovery pass to retire. *)
+  (* Retire only after terminal journal commit; restart may safely retry retirement. *)
   Result.map (settle_marker t filename) result)
 let admit t payload =
   let* ()=validate payload in
@@ -249,8 +250,10 @@ let recover t = protect (fun () ->
   List.fold_left (fun acc name ->
     let* recovery=acc in
     if not (Filename.check_suffix name ".jsonl") then Ok recovery else
+    let digest=String.sub name 0 (String.length name-6) in
+    if not (valid_digest digest) then Error (Corrupt "invalid pending journal filename") else
     let filename=Filename.concat t.root name in
-    let outcome=transaction t filename
+    let outcome=existing_transaction t filename
       (fun bytes ->
         let decoded=decode bytes in
         (* Marker creation may precede a failed admission. Remove that empty
@@ -260,16 +263,19 @@ let recover t = protect (fun () ->
           | Ok None -> Result.map (fun () -> None) (remove_marker t filename)
           | Ok (Some _) | Error _ -> decoded in
         None,decoded) in
+    let present = function
+      | None -> Error (Corrupt "pending journal is missing")
+      | Some result -> result in
     let* record,settlement_error=match outcome with
-      | Fs_compat.Private_file_succeeded result -> Result.map (fun r -> r,None) result
+      | Fs_compat.Private_file_succeeded result -> Result.map (fun r -> r,None) (present result)
       | Fs_compat.Private_file_succeeded_with_cleanup_failure {value;cleanup_failure} ->
-          (match value with
+          (match present value with
            | Ok r -> Ok (r,Some (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure))
            | Error primary -> Error (Settlement_failed {primary;
                cleanup=Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure}))
-      | Fs_compat.Private_file_failed e -> Error (Io_error (Fs_compat.durable_append_error_to_string e))
+      | Fs_compat.Private_file_failed e -> Error (Io_error (Fs_compat.private_jsonl_transaction_error_to_string e))
       | Fs_compat.Private_file_failed_with_cleanup_failure {error;cleanup_failure} ->
-          Error (Settlement_failed {primary=Io_error (Fs_compat.durable_append_error_to_string error);
+          Error (Settlement_failed {primary=Io_error (Fs_compat.private_jsonl_transaction_error_to_string error);
             cleanup=Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure}) in
     match record with
     | None -> (match settlement_error with None -> Ok recovery | Some detail -> Error (Io_error detail))

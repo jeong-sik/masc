@@ -48,7 +48,10 @@ val recover : t -> (recovery, error) result
 (** Restart scans only durable pending markers, created before admission and
     retired after terminal journal commit. Full journals remain addressable for
     exact replay and audit; completed history is not reread on every pulse.
-    Malformed pending journals fail the authoritative scan; no record is discarded.
+    Pending filenames must be exact lowercase SHA-256 journal identities.
+    Missing or malformed pending journals fail the authoritative scan without
+    creating a replacement journal or discarding the marker. An existing empty
+    pre-admission journal may retire its marker under the exclusive journal lock.
     Completed records with descriptor settlement failures are returned separately
     and never put back into the pending drain. *)
 

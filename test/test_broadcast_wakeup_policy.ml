@@ -428,7 +428,7 @@ let test_broadcast_retry_recovers_interrupted_fleet_projection () =
 
 type first_write_end = Reject_first_write | Cancel_first_write
 
-let retry_after_uncommitted_attempt first_write_end =
+let retry_after_uncommitted_attempt ?(fleet_delivery=Workspace_broadcast.Immediate_fleet) first_write_end =
   with_workspace @@ fun config ->
   Eio.Switch.run @@ fun sw ->
   let request_id = "wmsg-" ^ String.make 32 'd' in
@@ -460,7 +460,7 @@ let retry_after_uncommitted_attempt first_write_end =
     let (_ : Workspace_broadcast.broadcast_delivery -> Workspace_broadcast.mention_delivery) =
       Workspace_broadcast.For_testing.replace_on_broadcast_mention previous_fanout in
     if not (Eio.Promise.is_resolved allow_first) then Eio.Promise.resolve mark_allow_first ()) (fun () ->
-    let send () = Workspace_broadcast.broadcast_once ~request_id config
+    let send () = Workspace_broadcast.broadcast_once ~fleet_delivery ~request_id config
       ~from_agent:"external-agent" ~content:"retained evidence" in
     let first = Eio.Fiber.fork_promise ~sw (fun () ->
       Eio.Cancel.sub (fun context -> Eio.Promise.resolve mark_first_context context; send ())) in
@@ -481,7 +481,10 @@ let retry_after_uncommitted_attempt first_write_end =
       | Error error -> fail (Workspace_broadcast.broadcast_error_to_string error) in
     check string "waiting retry keeps the exact request identity" request_id receipt.request_id;
     check int "failed primary attempt was followed by one real commit" 2 !writes;
-    check int "only the committed attempt reaches fleet projection" 1 !fanouts;
+    let expected_fanouts=match fleet_delivery with
+      | Workspace_broadcast.Immediate_fleet -> 1
+      | Workspace_broadcast.Deferred_fleet -> 0 in
+    check int "only immediate committed attempts reach inline fleet projection" expected_fanouts !fanouts;
     let replay = match send () with
       | Ok receipt -> receipt
       | Error error -> fail (Workspace_broadcast.broadcast_error_to_string error) in
@@ -493,6 +496,11 @@ let test_primary_refusal_wakes_precommit_retry () =
   retry_after_uncommitted_attempt Reject_first_write
 let test_cancelled_primary_wakes_precommit_retry () =
   retry_after_uncommitted_attempt Cancel_first_write
+
+let test_deferred_primary_refusal_wakes_precommit_retry () =
+  retry_after_uncommitted_attempt ~fleet_delivery:Workspace_broadcast.Deferred_fleet Reject_first_write
+let test_deferred_cancelled_primary_wakes_precommit_retry () =
+  retry_after_uncommitted_attempt ~fleet_delivery:Workspace_broadcast.Deferred_fleet Cancel_first_write
 
 (* The named target's row is written by the mention path with its mention ids.
    The fanout runs afterwards over the same delivery key, so it must find that
@@ -799,6 +807,10 @@ let () =
             test_primary_refusal_wakes_precommit_retry
         ; test_case "cancelled primary wakes a precommit Broadcast retry" `Quick
             test_cancelled_primary_wakes_precommit_retry
+        ; test_case "deferred primary refusal wakes a precommit Broadcast retry" `Quick
+            test_deferred_primary_refusal_wakes_precommit_retry
+        ; test_case "deferred cancelled primary wakes a precommit Broadcast retry" `Quick
+            test_deferred_cancelled_primary_wakes_precommit_retry
         ; test_case "fleet projection preserves the mention row" `Quick
             test_fleet_projection_preserves_the_mention_row
         ; test_case "a Keeper's broadcast is Keeper speech" `Quick

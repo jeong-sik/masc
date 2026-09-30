@@ -40,7 +40,7 @@ def board_interaction(process, fd, _slave, output, _base):
 
 
 def output_handoff_scenario(executable):
-    fixture = h.AtomicChatFixture()
+    fixture = h.AtomicChatFixture(no_control_token=True)
     phase = {"tail": "FIRST_PROGRESS_LINE\n한글 진행 내용", "failed": False}
 
     def turns():
@@ -100,9 +100,14 @@ def output_handoff_scenario(executable):
             if b"SECOND_PROGRESS_LINE" in b"\n".join(rows.values()):
                 raise AssertionError(f"empty preview retained previous output: {rows!r}")
         finally:
+            settlement_start = len(output)
             fixture.release.set()
             fixture.release_interrupt.set()
             fixture.release_first_acceptance.set()
+        # Esc interrupts an active request. Wait for the actual return action
+        # before using it, rather than racing the terminal events after release.
+        h.wait_for_output(process, fd, output, b"Esc:list",
+                          start=settlement_start, timeout=12)
         h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
         h.write_all(fd, output, b"q")
 

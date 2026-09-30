@@ -988,6 +988,8 @@ let assemble_hooks
                         file instead of starving the main Eio domain. *)
                      Domain_pool_ref.submit_io_or_inline (fun () ->
                        Keeper_memory_os_recall.render_if_enabled
+                         ~artifact_reader_available:
+                           (List.mem Keeper_runtime_schemas_toml.artifact_read.name schema_filter)
                          ~config
                          ~meta
                          ~keepers_dir:memory_os_keepers_dir

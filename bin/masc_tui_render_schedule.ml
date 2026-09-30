@@ -297,7 +297,7 @@ let memory_cells ?(state_style = "") ?(size_style = "") ?(delta_style = "")
   @ revision
   @ [ Table.cell ~align:Table.Right ~header:"FACTS" ~width:memory_facts_width
         values.mrow_facts
-    ; Table.cell ~align:Table.Right ~style:size_style ~header:"RECALL"
+    ; Table.cell ~align:Table.Right ~style:size_style ~header:"STORED"
         ~width:memory_size_width values.mrow_size
     ]
   @ source

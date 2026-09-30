@@ -746,7 +746,7 @@ let test_source_bound_write_discards_stale_claim_and_recreates () =
     |> fun execution -> execution.Masc.Keeper_tool_execution.raw_output
     |> Yojson.Safe.from_string
   in
-  let render_at ~now =
+  let render_prompt ~now =
     Masc.Keeper_memory_os_recall.render_if_enabled
       ~config
       ~meta
@@ -755,6 +755,24 @@ let test_source_bound_write_discards_stale_claim_and_recreates () =
       ~now
       ()
     |> Option.value ~default:""
+  in
+  let render_at ~now =
+    let prompt = render_prompt ~now in
+    match List.rev (String.split_on_char '\n' prompt) with
+    | reference :: _ ->
+      (match Yojson.Safe.from_string reference with
+       | json ->
+         (match Masc.Tool_output.normalized_artifact_ref_of_json json with
+          | Masc.Tool_output.Decoded_normalized_artifact_ref artifact ->
+            (match Masc.Tool_blob_store.fetch
+               (Masc.Tool_blob_store.create ~base_path:config.base_path)
+               ~sha256:artifact.sha256 with
+             | Ok (Some body) -> body
+             | Ok None -> Alcotest.fail "recall artifact is missing"
+             | Error error -> Alcotest.fail (Masc.Tool_blob_store.fetch_error_to_string error))
+          | _ -> prompt)
+       | exception Yojson.Json_error _ -> prompt)
+    | [] -> prompt
   in
   let render () = render_at ~now:(Time_compat.now ()) in
   write_source "region=us-west-1\n";
@@ -792,6 +810,19 @@ let test_source_bound_write_discards_stale_claim_and_recreates () =
        (string_field "source_sha256" matched)
    | _ -> Alcotest.fail "expected one source-bound memory match");
   let first_prompt = render () in
+  let index_prompt = render_prompt ~now:(Time_compat.now ()) in
+  Alcotest.(check bool) "stored claim is not copied into the model prompt" false
+    (contains ~needle:"deployment region is us-west-1" index_prompt);
+  Alcotest.(check bool) "complete memory is reachable through a paged reader" true
+    (contains ~needle:"keeper_artifact_read" index_prompt);
+  let no_reader = Masc.Keeper_memory_os_recall.render_if_enabled
+    ~artifact_reader_available:false ~config ~meta ~keepers_dir
+    ~keeper_id:meta.name ~now:(Time_compat.now ()) ()
+    |> Option.value ~default:"" in
+  Alcotest.(check bool) "missing reader is explicit rather than an unusable reference" true
+    (contains ~needle:"retrieval is unavailable" no_reader);
+  Alcotest.(check bool) "missing reader does not fall back to full injection" false
+    (contains ~needle:"deployment region is us-west-1" no_reader);
   Alcotest.(check bool)
     "unchanged source claim reaches recall"
     true

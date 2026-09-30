@@ -1,9 +1,11 @@
-(** Render current ordinary and source-bound Memory OS facts.
+(** Publish current ordinary and source-bound Memory OS facts for demand recall.
 
     Ordinary facts come from the same snapshot as the dashboard. Source-bound
     facts are revalidated against their exact file bytes before injection;
     changed or unavailable sources contribute a typed invalidation instead of
-    their old claim. Recall never truncates, ranks, or partially injects facts.
+    their old claim. The complete projection is stored as an immutable artifact;
+    the prompt carries its identity and availability, not all stored knowledge.
+    Search and paged artifact reads retain access to every selected fact.
 
     Each store is rendered as present, authoritatively empty/absent, or
     unavailable. Empty and absent states explicitly supersede earlier current
@@ -29,7 +31,8 @@ val render_context
 val enabled : unit -> bool
 
 val render_if_enabled
-  :  config:Workspace.config
+  :  ?artifact_reader_available:bool
+  -> config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
   -> keepers_dir:string
   -> keeper_id:string

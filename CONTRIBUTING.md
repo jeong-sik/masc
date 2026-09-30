@@ -100,21 +100,15 @@ built binary.
 
 ## What CI runs
 
-On every pull request (`pr-check.yml`):
+CI is manual and review comes first. Ordinary stacked PRs use independent
+function, logic and code-cleanliness reviews; approve when no P0/P1/P2 issue
+remains and collect P3 issues for later. There is no PR/push/nightly CI.
 
-- **lint**: about 40 scripts through `scripts/ci/run-lint-suite.sh
-  blocking-pr`, run to completion so every failure is listed at once. An
-  advisory set follows and is recorded, not enforced.
-- **check**: source text integrity, the RFC index,
-  `scripts/check-doc-truth.sh`, release and namespace fixtures,
-  `dune build @check`, then every suite the pull request's changes select,
-  within an 18-minute budget that names the suites it could not run
-  (`scripts/ci/run-edited-tests.sh`), and the suites that need no build.
-- **dashboard-types**: type-checks the SPA.
-
-The full test suite is `test.yml`, on a daily schedule and on dispatch, not
-per pull request. `release.yml` runs on a tag push and builds the published
-binaries. `ci.yml` is a dispatchable build.
+`pr-check.yml` provides explicit syntax/configuration/credential checks in a
+two-minute job. `ci.yml` builds only Core for the bottom of a stack, also
+within two minutes. At `release/vX.Y.Z`, `release-candidate.yml` runs the full
+compile, typecheck, behavior and installation cycle. Tag publication waits
+for full checks and tests. See [the workflow](docs/CI-REVIEW-WORKFLOW.md).
 
 ## Commits
 
@@ -131,10 +125,12 @@ chore: bump version to 0.34.0
 
 ## Pull requests
 
-1. Branch from `main` as `feat/<topic>`, `fix/<topic>`, or `docs/<topic>`.
+1. Create a stack: the bottom PR targets `main`; each later PR targets the
+   preceding stack branch.
 2. Write tests for new behaviour.
-3. Run the focused checks for what you changed through
-   `scripts/dune-local.sh`. CI owns the full-suite result.
+3. Review from independent perspectives. Request only minimal manual checks
+   before release; do not wait or poll for CI. Full verification belongs to
+   the Release/Tag boundary.
 4. Open a **draft** pull request linked to at least one issue. The template
    asks for `Summary`, `Product impact`, `Evidence`, `Direct evidence`,
    `Review evidence`, and `Linked issue`. Fill them, and leave the two
@@ -222,8 +218,7 @@ reproduce, expected versus actual behaviour, and the relevant log
   one: after merging `0.33.0`, tag `v0.33.0` before opening `0.34.0`.
 - Run `bash scripts/check-version-truth.sh` and `bash scripts/check-doc-truth.sh`
   before a release review; the tag workflow runs the former and CI runs the
-  latter. `check-release-train-guard.sh` is not wired into CI yet
-  (`scripts/ci/guards-not-wired.txt`).
+  latter.
 - `scripts/bump-version.sh` runs `python3 scripts/changelog-fragments.py
   assemble`, which folds `changelog.d/*.md` into `## [Unreleased]` and
   deletes them; move those entries into the version section before tagging.

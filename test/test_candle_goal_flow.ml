@@ -290,6 +290,37 @@ let test_an_unpublished_appraiser_keeps_the_confirmed_obligation () =
    | _ -> fail "the confirmed Goal must still have exactly one pending payout")
 ;;
 
+let test_a_missing_appraiser_lane_keeps_the_confirmed_obligation () =
+  with_workspace @@ fun config ->
+  with_actual_appraiser_availability @@ fun () ->
+  enable_candle config;
+  let snapshot = Exact_fixture.resolver_snapshot ~source:config.base_path [] in
+  ignore
+    (Exact_fixture.publish_registry ~lane_id:"goal_verifier" ~slot_ids:[]
+       ~cli_slot_ids:[ Exact_fixture.cli_primary_runtime ] snapshot : Registry.t);
+  (match Registry.current () with
+   | Ok _ -> ()
+   | Error error -> fail (Registry.publication_error_to_string error));
+  (match Server_candle_appraiser.available () with
+   | Error _ -> ()
+   | Ok () -> fail "the fixture must not declare candle_appraiser");
+  let goal_id = goal_in_verifying config in
+  pass config goal_id;
+  confirmed config goal_id;
+  let verdict = current_verdict config goal_id in
+  check string "the missing lane does not block human confirmation"
+    "completed" (phase config goal_id);
+  check rows_testable "the missing lane cannot discard either durable fact"
+    [ "snapshot", goal_id, verdict.request_id; "payout_owed", goal_id, verdict.request_id ]
+    (rows config);
+  publish_appraiser config;
+  (match Candle_payout.waiting (ledger_events config) with
+   | [ waiting ] ->
+     check string "publishing an appraiser registry retains the original verified obligation"
+       verdict.verification_run_id waiting.verification_run_id
+   | _ -> fail "publishing an appraiser registry must retain exactly one pending payout")
+;;
+
 let test_a_confirmed_pass_leaves_a_payout_owed () =
   with_workspace
   @@ fun config ->
@@ -804,6 +835,8 @@ let () =
             test_same_second_retry_uses_the_confirmed_run_snapshot
         ; test_case "an unpublished appraiser keeps the confirmed obligation" `Quick
             test_an_unpublished_appraiser_keeps_the_confirmed_obligation
+        ; test_case "a missing appraiser lane keeps the confirmed obligation" `Quick
+            test_a_missing_appraiser_lane_keeps_the_confirmed_obligation
         ; test_case "a confirmed pass leaves a payout owed" `Quick test_a_confirmed_pass_leaves_a_payout_owed
         ; test_case
             "without a candle.toml a confirmation writes nothing"

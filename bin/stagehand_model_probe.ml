@@ -8,7 +8,62 @@ module Exact = Agent_core.Exact_output
 type fixture = Extract | Progress | Act
 type route = Primary | Fallback | Injected_primary_then_fallback
 type failure = Model_refused of int | Envelope_invalid | Shape_invalid
-             | Semantics_invalid | Injection_missing | Unexpected_exception
+             | Semantics_invalid | Injection_missing
+
+(* Why the probe stopped before any trial counted. The token is the public
+   category; [all_of_setup_failure] is what [--list-setup-reasons] prints, so
+   the offline controls read the set from here rather than keeping a copy. *)
+type setup_failure =
+  | Fixture_count_invalid
+  | Fixture_protocol_invalid
+  | Registry_unavailable
+  | Lane_requires_exactly_two_http_slots_no_cli
+  | Lane_model_capability_refused
+  | Lane_declared_slots_not_both_admitted
+  | Injection_listener_invalid
+  | Injection_catalog_rejected
+  | Injection_target_rejected
+  | Runtime_config_rejected
+  | Runtime_catalog_models_missing
+  | Registry_publication_rejected
+  | Embedded_source_commit_required
+  | Validation_self_test_failed
+  | Unexpected_cli_argument
+  | Publication_test_requires_config_only
+  | Publication_test_slots_not_distinct
+  | Fixtures_required
+  | Explicit_config_base_output_repetitions_and_injection_deadline_required
+  | Probe_input_or_output_unavailable
+[@@deriving enumerate]
+
+let setup_failure_token = function
+  | Fixture_count_invalid -> "fixture_count_invalid"
+  | Fixture_protocol_invalid -> "fixture_protocol_invalid"
+  | Registry_unavailable -> "registry_unavailable"
+  | Lane_requires_exactly_two_http_slots_no_cli -> "lane_requires_exactly_two_http_slots_no_cli"
+  | Lane_model_capability_refused -> "lane_model_capability_refused"
+  | Lane_declared_slots_not_both_admitted -> "lane_declared_slots_not_both_admitted"
+  | Injection_listener_invalid -> "injection_listener_invalid"
+  | Injection_catalog_rejected -> "injection_catalog_rejected"
+  | Injection_target_rejected -> "injection_target_rejected"
+  | Runtime_config_rejected -> "runtime_config_rejected"
+  | Runtime_catalog_models_missing -> "runtime_catalog_models_missing"
+  | Registry_publication_rejected -> "registry_publication_rejected"
+  | Embedded_source_commit_required -> "embedded_source_commit_required"
+  | Validation_self_test_failed -> "validation_self_test_failed"
+  | Unexpected_cli_argument -> "unexpected_cli_argument"
+  | Publication_test_requires_config_only -> "publication_test_requires_config_only"
+  | Publication_test_slots_not_distinct -> "publication_test_slots_not_distinct"
+  | Fixtures_required -> "fixtures_required"
+  | Explicit_config_base_output_repetitions_and_injection_deadline_required ->
+      "explicit_config_base_output_repetitions_and_injection_deadline_required"
+  | Probe_input_or_output_unavailable -> "probe_input_or_output_unavailable"
+
+(* The process exit status: 0 every trial valid, 1 an invalid trial, 2 a setup
+   refusal, 3 an exception nothing here handles. Only 2 carries a category. *)
+let exit_invalid_trial = 1
+let exit_setup_refused = 2
+let exit_internal_error = 3
 
 let fixture_name = function Extract -> "extract" | Progress -> "progress" | Act -> "act"
 let route_name = function
@@ -21,7 +76,6 @@ let failure_name = function
   | Shape_invalid -> "fixture_shape_invalid"
   | Semantics_invalid -> "fixture_semantics_invalid"
   | Injection_missing -> "injected_primary_not_observed"
-  | Unexpected_exception -> "unexpected_exception"
 
 let field key = function `Assoc fields -> List.assoc_opt key fields | _ -> None
 let string = function Some (`String value) -> Some value | _ -> None
@@ -91,35 +145,35 @@ let answer_value answer =
        | _ -> Error Envelope_invalid)
   | _ -> Error Envelope_invalid
 
-exception Setup of string
-let reject category = raise (Setup category)
+exception Setup of setup_failure
+let reject failure = raise (Setup failure)
 
 let load_fixtures path =
   let params = match Yojson.Safe.from_file path with
     | `List [extract; progress; act] -> [Extract, extract; Progress, progress; Act, act]
-    | _ -> reject "fixture_count_invalid"
+    | _ -> reject Fixture_count_invalid
   in
   List.iter (fun (fixture, params) ->
     let expected = match fixture with Extract -> "Extraction" | Progress -> "Metadata" | Act -> "Act" in
     match Model.parse_params params with
     | Ok {generation = Model.Structured {name; _}; _} when name = expected -> ()
-    | Ok _ | Error _ -> reject "fixture_protocol_invalid") params;
+    | Ok _ | Error _ -> reject Fixture_protocol_invalid) params;
   params
 
 let lane_pair () =
-  let registry = match Registry.current () with Ok r -> r | Error _ -> reject "registry_unavailable" in
+  let registry = match Registry.current () with Ok r -> r | Error _ -> reject Registry_unavailable in
   let lane_id = Standalone_lane.to_id Standalone_lane.Browser_stagehand in
   let declared = match Registry.declared_lane registry ~lane_id with
     | Some {slot_ids = [first; second]; cli_slot_ids = []; _} -> first, second
-    | Some _ | None -> reject "lane_requires_exactly_two_http_slots_no_cli"
+    | Some _ | None -> reject Lane_requires_exactly_two_http_slots_no_cli
   in
   match Registry.resolve_lane registry ~lane_id with
   | Ok ({selected_slots = [first; second]; cli_slots = []} as lane)
       when declared = (first.slot_id, second.slot_id) ->
       (match Model.admit_lane lane with
        | Ok {http_slots = [_; _]; cli_slots = []; refused_slots = []} -> first, second
-       | Ok _ | Error _ -> reject "lane_model_capability_refused")
-  | Ok _ | Error _ -> reject "lane_declared_slots_not_both_admitted"
+       | Ok _ | Error _ -> reject Lane_model_capability_refused)
+  | Ok _ | Error _ -> reject Lane_declared_slots_not_both_admitted
 
 let slot_json (slot : Registry.selected_slot) =
   let projected = Exact.projection_target slot.admitted_target in
@@ -133,7 +187,7 @@ let injected_slot ~sw ~net ~timeout_s ~primary_id =
   let socket = Eio.Net.listen net ~sw ~backlog:8 ~reuse_addr:true
       (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0)) in
   let port = match Eio.Net.listening_addr socket with
-    | `Tcp (_, port) -> port | _ -> reject "injection_listener_invalid"
+    | `Tcp (_, port) -> port | _ -> reject Injection_listener_invalid
   in
   let callback _conn _request body =
     (* See [injected_slot]: drain the request before the fixed 503; its body is not evidence. *)
@@ -152,10 +206,10 @@ let injected_slot ~sw ~net ~timeout_s ~primary_id =
   let snapshot = match Exact.load_resolver_snapshot
       ~io:{getenv = (fun _ -> Ok None)}
       ~catalog:(Exact.Full_replacement {source = "manual probe injection"; contents}) () with
-    | Ok snapshot -> snapshot | Error _ -> reject "injection_catalog_rejected"
+    | Ok snapshot -> snapshot | Error _ -> reject Injection_catalog_rejected
   in
   let admitted_target = match Exact.admit_target_ref snapshot primary_id with
-    | Ok target -> target | Error _ -> reject "injection_target_rejected"
+    | Ok target -> target | Error _ -> reject Injection_target_rejected
   in
   ({Registry.slot_id = primary_id; admitted_target}, requests, server_errors)
 
@@ -173,17 +227,16 @@ let initialize_runtime ~env ~config =
   Eio_context.set_clock (Eio.Stdenv.clock env);
   (match Runtime.init_default_strict_report ~config_path:config with
    | Ok () -> ()
-   | Error (Runtime.Runtime_config_error _) -> reject "runtime_config_rejected"
-   | Error (Runtime.Missing_catalog_models _) -> reject "runtime_catalog_models_missing");
+   | Error (Runtime.Runtime_config_error _) -> reject Runtime_config_rejected
+   | Error (Runtime.Missing_catalog_models _) -> reject Runtime_catalog_models_missing);
   (try
-     Server_runtime_bootstrap.For_testing.configure_exact_output_registry
-       ~config_path:config ()
-   with Env_config_core.Config_error _ -> reject "registry_publication_rejected");
+     Server_runtime_bootstrap.publish_exact_output_registry_from_file ~config_path:config
+   with Env_config_core.Config_error _ -> reject Registry_publication_rejected);
   lane_pair ()
 
 let run ~env ~sw ~config ~base_path ~fixtures ~repetitions ~injection_timeout_s channel =
   let source_commit = match Build_identity.embedded_commit with
-    | Some commit -> commit | None -> reject "embedded_source_commit_required"
+    | Some commit -> commit | None -> reject Embedded_source_commit_required
   in
   let primary, fallback = initialize_runtime ~env ~config in
   let net = Eio.Stdenv.net env and clock = Eio.Stdenv.clock env in
@@ -211,8 +264,6 @@ let run ~env ~sw ~config ~base_path ~fixtures ~repetitions ~injection_timeout_s 
                   ~net ~clock ~base_path ~resolve_lane params with
           | Error error -> Error (Model_refused error.Browser_stagehand_wire.code)
           | Ok answer -> Result.bind (answer_value answer) (validate fixture)
-          | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-          | exception _ -> Error Unexpected_exception
         in
         (match result with Ok () | Error Semantics_invalid -> incr shape_valid | Error _ -> ());
         let result = match route with
@@ -243,7 +294,7 @@ let self_test fixtures =
   let action = `Assoc ["elementId", `String "0-18"; "description", `String "Submit order";
                        "method", `String "click"; "arguments", `List []] in
   let act = `Assoc ["action", action; "twoStep", `Bool false] in
-  let require ok = if not ok then reject "validation_self_test_failed" in
+  let require ok = if not ok then reject Validation_self_test_failed in
   require (List.length fixtures = 3);
   List.iter (fun (fixture, value) ->
     require (validate fixture value = Ok ());
@@ -254,7 +305,7 @@ let self_test fixtures =
   require (validate Act (`Assoc ["action", `Null; "twoStep", `Bool false]) = Error Semantics_invalid);
   let action_with key value = match action with
     | `Assoc fields -> `Assoc ((key, value) :: List.remove_assoc key fields)
-    | _ -> reject "validation_self_test_failed"
+    | _ -> reject Validation_self_test_failed
   in
   let act_with_action value = `Assoc ["action", value; "twoStep", `Bool false] in
   require (validate Act (act_with_action (action_with "elementId" (`String "not-an-id"))) = Error Shape_invalid);
@@ -267,46 +318,95 @@ let self_test fixtures =
   require (answer_value (envelope "{}") = Error Envelope_invalid);
   require (answer_value (`Assoc []) = Error Envelope_invalid)
 
+(* What a control run reports through [--control-result]. The offline
+   controls read only this file: its outcome, and for a setup refusal the
+   category token. Library output on stdout and stderr stays private. *)
+type control_outcome =
+  | Control_passed
+  | Control_setup_refused of setup_failure
+  | Control_internal_error
+
+let control_outcome_json = function
+  | Control_passed -> `Assoc ["outcome", `String "passed"]
+  | Control_setup_refused failure ->
+      `Assoc ["outcome", `String "setup_refused"; "reason", `String (setup_failure_token failure)]
+  | Control_internal_error -> `Assoc ["outcome", `String "internal_error"]
+
+let write_control_result path outcome =
+  let fd = Unix.openfile path [Unix.O_WRONLY; Unix.O_CREAT; Unix.O_EXCL] 0o600 in
+  let channel = Unix.out_channel_of_descr fd in
+  Fun.protect ~finally:(fun () -> close_out_noerr channel) (fun () ->
+    output_string channel (Yojson.Safe.to_string (control_outcome_json outcome) ^ "\n"))
+
+type completion = Reasons_listed | Control_finished | Trials_finished of bool
+
 let () =
   let config = ref "" and base_path = ref "" and fixture_path = ref "" and output = ref "" in
   let repetitions = ref 0 and injection_timeout_s = ref 0. and check_only = ref false in
-  let publication_only = ref false in
-  Arg.parse
-    ["--config", Arg.Set_string config, "isolated runtime.toml";
-     "--base-path", Arg.Set_string base_path, "isolated workspace base path";
-     "--fixtures", Arg.Set_string fixture_path, "recorded llm-generate-params.json";
-     "--output", Arg.Set_string output, "new secret-free JSONL file (must not exist)";
-     "--repetitions", Arg.Set_int repetitions, "positive invocation count per fixture per route";
-     "--injection-timeout-s", Arg.Set_float injection_timeout_s, "positive loopback test transport deadline";
-     "--self-test", Arg.Set check_only, "validate fixtures and offline validator controls only";
-     "--config-publication-self-test", Arg.Set publication_only,
-       "load isolated config and publish/admit its two-slot lane without model calls"]
-    (fun _ -> reject "unexpected_cli_argument") "stagehand_model_probe";
-  try
-    if !publication_only then begin
-      if !config = "" || !check_only then reject "publication_test_requires_config_only";
+  let publication_only = ref false and list_reasons = ref false and control_result = ref None in
+  let body () =
+    Arg.parse
+      ["--config", Arg.Set_string config, "isolated runtime.toml";
+       "--base-path", Arg.Set_string base_path, "isolated workspace base path";
+       "--fixtures", Arg.Set_string fixture_path, "recorded llm-generate-params.json";
+       "--output", Arg.Set_string output, "new secret-free JSONL file (must not exist)";
+       "--repetitions", Arg.Set_int repetitions, "positive invocation count per fixture per route";
+       "--injection-timeout-s", Arg.Set_float injection_timeout_s, "positive loopback test transport deadline";
+       "--self-test", Arg.Set check_only, "validate fixtures and offline validator controls only";
+       "--config-publication-self-test", Arg.Set publication_only,
+         "load isolated config and publish/admit its two-slot lane without model calls";
+       "--control-result", Arg.String (fun path -> control_result := Some path),
+         "new file for a self-test's outcome as one JSON object (must not exist)";
+       "--list-setup-reasons", Arg.Set list_reasons,
+         "print every setup refusal category as one JSON array and stop"]
+      (fun _ -> reject Unexpected_cli_argument) "stagehand_model_probe";
+    if !list_reasons then begin
+      print_endline (Yojson.Safe.to_string
+        (`List (List.map (fun failure -> `String (setup_failure_token failure)) all_of_setup_failure)));
+      Reasons_listed
+    end else if !publication_only then begin
+      if !config = "" || !check_only then reject Publication_test_requires_config_only;
       Eio_main.run (fun env ->
         let primary, fallback = initialize_runtime ~env ~config:!config in
-        if primary.slot_id = fallback.slot_id then reject "publication_test_slots_not_distinct");
-      print_endline "runtime configuration and Exact lane publication: passed (no model callbacks)"
+        if primary.slot_id = fallback.slot_id then reject Publication_test_slots_not_distinct);
+      print_endline "runtime configuration and Exact lane publication: passed (no model callbacks)";
+      Control_finished
     end else begin
-    if !fixture_path = "" then reject "fixtures_required";
+    if !fixture_path = "" then reject Fixtures_required;
     let fixtures = load_fixtures !fixture_path in
-    if !check_only then (self_test fixtures; print_endline "fixture validators: passed")
+    if !check_only then (self_test fixtures; print_endline "fixture validators: passed"; Control_finished)
     else begin
       if !config = "" || !base_path = "" || !output = "" || !repetitions <= 0
          || not (Float.is_finite !injection_timeout_s) || !injection_timeout_s <= 0.
-      then reject "explicit_config_base_output_repetitions_and_injection_deadline_required";
+      then reject Explicit_config_base_output_repetitions_and_injection_deadline_required;
       let fd = Unix.openfile !output [Unix.O_WRONLY; Unix.O_CREAT; Unix.O_EXCL] 0o600 in
       let channel = Unix.out_channel_of_descr fd in
-      let ok = Fun.protect ~finally:(fun () -> close_out channel) (fun () ->
+      Trials_finished (Fun.protect ~finally:(fun () -> close_out channel) (fun () ->
         Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
           run ~env ~sw ~config:!config ~base_path:!base_path ~fixtures
-            ~repetitions:!repetitions ~injection_timeout_s:!injection_timeout_s channel))) in
-      if not ok then exit 1
+            ~repetitions:!repetitions ~injection_timeout_s:!injection_timeout_s channel))))
     end
     end
-  with
-  | Setup category -> prerr_endline category; exit 2
-  | Sys_error _ | Unix.Unix_error _ | Yojson.Json_error _ ->
-      prerr_endline "probe_input_or_output_unavailable"; exit 2
+  in
+  let report outcome = Option.iter (fun path -> write_control_result path outcome) !control_result in
+  match body () with
+  | Reasons_listed -> ()
+  | Control_finished -> report Control_passed
+  | Trials_finished true -> ()
+  | Trials_finished false -> exit exit_invalid_trial
+  | exception Setup failure ->
+      prerr_endline (setup_failure_token failure);
+      report (Control_setup_refused failure);
+      exit exit_setup_refused
+  | exception (Sys_error _ | Unix.Unix_error _ | Yojson.Json_error _) ->
+      prerr_endline (setup_failure_token Probe_input_or_output_unavailable);
+      report (Control_setup_refused Probe_input_or_output_unavailable);
+      exit exit_setup_refused
+  (* The process boundary. Model.create documents that its dependencies'
+     exceptions propagate; without this arm the OCaml runtime would exit with
+     2 and make an internal error read as a setup refusal. The exception text
+     goes to the private stderr only. *)
+  | exception exn ->
+      prerr_endline ("internal error: " ^ Printexc.to_string exn);
+      report Control_internal_error;
+      exit exit_internal_error

@@ -9660,7 +9660,7 @@ let apply_account_emails_load state = function
 let apply_provider_history_load state (days, result) =
   if days = state.provider_history_days then
     match result with
-    | Ok (history : Tui_decode.provider_usage_history)
+    | Ok (history : Masc.Tui_decode_usage.provider_usage_history)
       when history.puh_days = days ->
         state.provider_history <-
           Provider_history_read

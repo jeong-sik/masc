@@ -33,11 +33,11 @@ type http_scoped_surface_results = {
      rows and the provider usage windows. *)
   http_runtime_quota:
     ((Masc.Tui_decode.runtime_option list, string) result
-    * (Masc.Tui_decode.provider_usage_windows, string) result)
+    * (Masc.Tui_decode_usage.provider_usage_windows, string) result)
     option;
-  http_keeper_usage: (Masc.Tui_decode.keeper_usage_window, string) result option;
+  http_keeper_usage: (Masc.Tui_decode_usage.keeper_usage_window, string) result option;
   http_provider_history:
-    (int * (Masc.Tui_decode.provider_usage_history, string) result) option;
+    (int * (Masc.Tui_decode_usage.provider_usage_history, string) result) option;
   (* [None] off the Overview, the one surface that draws the GOALS section. *)
   http_overview_goals: (Masc.Tui_decode.overview_goal list, string) result option;
   (* [None] off Usage, the surface that draws account emails. *)

@@ -44,6 +44,7 @@ type dispatch_credential_error =
 let runtime_table = Runtime_toml_namespace.(key Runtime)
 let fusion_table = Runtime_toml_namespace.(key Fusion)
 let providers_table = Runtime_toml_namespace.(key Providers)
+let assignments_table = Runtime_toml_namespace.(path Runtime) "assignments"
 let lanes_table = Runtime_toml_namespace.(path Runtime) "lanes"
 let exact_output_lanes_table = Runtime_toml_namespace.(path Runtime) "exact_output_lanes"
 

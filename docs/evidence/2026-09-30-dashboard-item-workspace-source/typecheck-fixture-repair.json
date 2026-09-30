@@ -1,0 +1,42 @@
+{
+  "scope": "fixture source repair; local syntax/whitespace only, no build or typecheck",
+  "local_parent": "e472ff8a4554e8a644920446afb46f275d7efcde",
+  "full_publication_parent": "a065328066d9996f8658238e3077cad70c2c063c",
+  "local_partial_baseline": "4e12031c141d30dafde4aa604ca05c22660e9395",
+  "known_required_failure": {
+    "pr": 40190,
+    "run_id": 36670626246,
+    "job_id": 109751275615,
+    "published_head_prefix": "ce7d95ca11",
+    "excerpt": "src/components/keeper-items-panel.test.ts(81,24): error TS2532: Object is possibly 'undefined'.",
+    "source": "primary log excerpt supplied by root agent; child did not download the full job"
+  },
+  "fixture_sha256": "6f1f8f583083c936722ee2ea85cea88f527e9d6e879402b297e3f0689c2bb26e",
+  "repair": "optional mock call access and runtime AbortSignal guard; existing ABA/abort/stale-response assertions retained",
+  "checks": [
+    {
+      "command": [
+        "node",
+        "--experimental-strip-types",
+        "--check",
+        "dashboard/src/components/keeper-items-panel.test.ts"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    }
+  ],
+  "required_typecheck_after_fix": "not observed",
+  "component_execution": "not observed",
+  "bundle_effect_attribution": "await full-parent baseline; no bundle assertion or parent imports changed"
+}

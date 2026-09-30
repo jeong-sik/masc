@@ -78,7 +78,8 @@ describe('Keeper Item tab', () => {
     expect(fetchKeeperItems).toHaveBeenCalledTimes(1)
     fireEvent.click(screen.getByRole('button', { name: '새로고침' }))
     await waitFor(() => expect(fetchKeeperItems).toHaveBeenCalledTimes(2))
-    const heldSignal = fetchKeeperItems.mock.calls[1][1] as AbortSignal
+    const heldSignal = fetchKeeperItems.mock.calls[1]?.[1]
+    if (!(heldSignal instanceof AbortSignal)) throw new Error('Held Item request requires an AbortSignal')
     await act(async () => { observeWorkspace('/fixture/workspace-b') })
     expect(await screen.findByText('보유 2 / 18개')).toBeTruthy()
     expect(screen.getByText('0.300 Candle')).toBeTruthy()

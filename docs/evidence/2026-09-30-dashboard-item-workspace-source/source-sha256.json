@@ -1,7 +1,7 @@
 {
   "dashboard/src/store.ts": "a9bc9fa1720208cd6c5439148e6f489fa57103bc448b5e12ee6da937ce828b39",
   "dashboard/src/components/keeper-items-panel.ts": "76fccad068760ac16015e9428eb9045566122ef07007592acb13d3848b0f59c3",
-  "dashboard/src/components/keeper-items-panel.test.ts": "99a48749610f370419735667994da0ca7597912a7597560d505136d63fa9380b",
+  "dashboard/src/components/keeper-items-panel.test.ts": "6f1f8f583083c936722ee2ea85cea88f527e9d6e879402b297e3f0689c2bb26e",
   "docs/constitution.xml": "071a446cb3ff5ad1a6643163b3e458077d26f0bb1f3fd9553f832a9132f43471",
   "lib/dashboard/dashboard_execution.ml": "383fecb1a9d47294d43b2f091bd7f88544c957e83f579619de19d7b790bf9d40",
   "lib/server/server_dashboard_http_execution_surfaces.ml": "b422d4b7428c4cbf2e1c2e672380b76a94675bd6dbb49b0d5828fbad9e32c7cb",

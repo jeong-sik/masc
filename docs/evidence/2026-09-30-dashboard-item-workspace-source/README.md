@@ -45,4 +45,12 @@ For a CI-produced preview, set `KEEPER_ITEMS_FIXTURE_URL` to its `/dev-fixtures/
 
 `syntax-checks.json` retains Node `--experimental-strip-types --check` exit codes for four changed TypeScript source files and the preview config, Node `--check` for the new browser script, and `git diff --check`. These checks parse source and inspect whitespace only. Vitest, TypeScript typecheck, browser, Dune/native tests, CI, installation and production were not executed for this candidate. No runtime success, PR approval or release verdict is claimed.
 
-Published as child PR #40190 over the full a065328066d9996f8658238e3077cad70c2c063c parent tree. Targeted component/store execution, typecheck and CI-built browser preview remain pending.
+Published as child PR #40190 over the full a065328066d9996f8658238e3077cad70c2c063c parent tree.
+
+## Known CI failure and fixture repair
+
+The root agent supplied the primary log excerpt from required PR run `36670626246`, job `109751275615`, at published head prefix `ce7d95ca11`: `src/components/keeper-items-panel.test.ts(81,24): error TS2532: Object is possibly 'undefined'.` The assertion that two mock calls occurred does not narrow an indexed array access for TypeScript's `noUncheckedIndexedAccess` rule.
+
+The regression now obtains the held request's signal through optional call access and explicitly requires an `AbortSignal` before using it. A missing recorded call or signal fails the scenario; the A/B/A, abort and stale-response assertions stay intact. `typecheck-fixture-repair.json` retains the supplied failure excerpt, local source provenance and syntax/whitespace checks. These local checks do not prove the required typecheck or component suite now succeeds.
+
+The separate Dashboard artifact run `36670622682` at the same published head prefix failed its existing production bundle contract on eager Effect modules. The source audit found inherited eager schema imports independently of the Item/store edge; attribution to the full a065 parent requires its baseline bundle run. This fixture repair changes neither bundle assertions nor those inherited imports. Targeted component/store execution and CI-built browser proof remain unverified.

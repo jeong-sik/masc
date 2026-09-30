@@ -31,12 +31,12 @@
 - Share one model list across provider accounts through `model_sets` and provider `model-set` references, keeping explicit binding overrides and account identities separate. #40096
 - Remember explicitly visited Home conversations across restarts independently of startup preferences, distinguish failed or uncertain saves, and preserve named history while Keeper roster reads are unavailable. #40137
 - Show individual Home decisions by request identity, keep successful source readings during partial failures, preserve exact detail and return context across refresh, and retain continuation beside long request lists. #40152
-- Runtime v opens complete default and ordered media route metadata, boot admission differences and read/action/probe diagnostics in a scrollable read-only detail, including when no candidate exists. (#40293)
-- Patch review supports Shift+Left/Right to pan long lines while old/new coordinates and diff markers stay fixed. Horizontal position is visible and clamps to actual content and pane width, resetting on reopen. (#40301)
 - Lane Add-ons now show package descriptions and the selected declared result before activity, with multiline report bodies, visible selection and separate coverage/delivery readings (#40206).
 - Match Records navigation to displayed chronology, reuse the selected result while rendering, and expose each selected result’s exact Lane in Summary and raw detail (#40206).
 - Keeper chats show the conversation partner's portrait below the left Keeper list, without taking rows from the conversation or composer. The portrait follows the chat target, stays put while browsing the list, and yields on small or colourless terminals. Chats show the roster by default; an explicit Ctrl-B choice is retained. (#39883).
 - The TUI `/about` screen gathers registered Keeper portraits around its candle, then settles into a static scene; `[tui].reduce_motion` opens the final scene directly (#40013).
+- Open Approvals and Questions directly from the Dashboard, including when the queue is empty. (#40092)
+- Keeper Candle balance, catalog and purchase tools use the canonical Portrait Item catalog and explicit `shop.prices_milli` prices. Purchases atomically debit the authoritative ledger and grant ownership; duplicate purchases and insufficient funds leave it unchanged. Keeper turn identity or the authenticated Keeper credential selects the account. (#40365)
 
 ### Changed
 
@@ -98,18 +98,14 @@
 - TUI Home now prioritizes operator decisions and explicit conversation destinations, with detail kept in Work and Usage. Unread sources stay visible, automatic Gate work is excluded from human decisions, and chat return and selection survive refresh. (#39817)
 - Keep Plan Usage directly reachable through its top-level tab, Home `m`, `go Usage` and `/cost`; `/metrics` and `/telemetry` explicitly open diagnostics. (#39817)
 - `/play invite` shows the invite link and a QR code on a card instead of a chat row, and copies the link only when `y` is pressed. The TUI keeps every card it issued by name until it exits or the invite is revoked: `/play link` reopens the newest and `/play link <name>` an earlier one. A link longer than the card scrolls with `j`/`k`, the arrow keys or the mouse wheel. A refused invite or revoke shows the server's message and what it says is missing, not only the error code (#39877).
-- Voice metadata wraps to the available pane width. Keeper and voice selectors stay visible while their complete identities scroll below; setup keeps the active input and caret visible while full input, draft and probe details remain readable. (#40282)
-- Patch review and Keeper voice assignment can open help without losing their reader state. Help starts with the active nested reader controls, and patch/Runtime detail footers use the same binding tables. Voice assignment also names metadata paging and edges. (#40304)
-- Integrate responsive Workspace Activity rows and full selected-record Context into the TUI stack; preserve reader ownership and show active Activity help. (#40316)
-- Integrate complete literal Code memo reading and physical-row navigation into the TUI stack, with shared active memo help/footer bindings. (#40319)
-- Integrate full Code history metadata and visible-row Enter ownership into the TUI stack, preserving memo navigation and adding active history help. (#40320)
-- Keep Enter owned by the focused file tree when History remains open in the other pane. (#40320)
-- Integrate complete Tools metadata, revision and timestamp reading plus composition dependencies into the TUI stack, using physical rows for display and navigation. (#40325)
-- Integrate complete Prompt registry and runtime asset detail documents with physical-row paging and edge navigation into the TUI stack. (#40327)
 - Keeper chat gives the draft a terminal-themed background, highlights slash-command choices across their row, and keeps send, newline, command discovery and escape hints ahead of display controls. The input keeps its existing history budget and command execution semantics. (#39890)
 - The chat picker offers Play subcommands without executing them during selection; invite arguments remain explicit. (#39890)
 - Board attention settles a Jev relevant or not-relevant answer whose confidence reaches `[typesafeai] board_attention_confidence_floor` (default 0.3) without asking the `board_attention_exact` LLM lane. A Jev answer of either decision below the floor goes to the lane, so a low-confidence relevant answer, which used to settle, is now judged by the lane; uncertain and failed answers still go to the lane. The terminal entry's `jev.answer = not_relevant` now means Jev settled the candidate; a re-judged answer is `low_confidence`. #40413
 - A Jev answer that settles a Board attention candidate records its confidence on the terminal entry, so `[typesafeai] board_attention_confidence_floor` can be re-tuned from the logs. #40420
+- TUI Next Request now explains which history atoms a Librarian working state represents and separates binding eviction settings from forecast size and model limits (#40028).
+- Clarify when proactive history eviction applies and identify the snapshot's covering Turn Boundary log row in Next Request (#40028).
+- Move TUI Board list, compose and reading screens into a dedicated renderer with an explicit frame interface, preserving read-cache and scroll behavior. (#40150)
+- The default Keeper prompt now calls "about two minutes" an example of how small a pre-release check should be, not a time limit or a pass/fail rule. It matches `docs/constitution.xml`. (#40363)
 
 ### Removed
 
@@ -236,8 +232,6 @@
 - The TUI Code history wraps complete commit and Keeper metadata, exposes file/scope and action notes, and resolves Enter from the record owning the first visible row. Every record remains selectable even when the document fits the pane (#40247). History preserves literal metadata symbols, and diff/notes footers omit the unsupported Enter action.
 - Tools wraps complete paths, diagnostics and provenance at the frame width, preserves literal revisions and recorded timestamps, and exposes composition nodes and dependencies in usage cards (#40263).
 - Review and Verdict details wrap complete metadata, evidence references and goal metrics at the pane width, preserve literal reasons and recorded creation timestamps, and retain full armed/action-error details in the scrolling document (#40277).
-- Repository diff responses are tied to reader, repository scope, file and request generation. Patch review keeps its own data and errors rather than showing a cached diff from another reader. (#40296)
-- Runtime Enter/Right only opens a row from the listing. Open row and route/status readers retain their identity and scroll position even when refresh reorders the hidden listing. (#40306)
 - Integrate responsive Runtime list columns with the stacked route/status reader, active help and stable detail identity. Candidate identity and route/probe share the available pane width while auxiliary columns fold first. (#40309)
 - Keep the selected Tools Skill visible above every tab and show its complete source, package and revision in the document; display and Enter/edit share the same typed selection. (#40328)
 - Hiding a chat's Keeper list or narrowing the window returns keyboard focus to the composer and preserves the current conversation and draft. Showing the list again does not steal focus. (#39883).
@@ -252,12 +246,52 @@
 - Show local TUI chat input by its Queue position without guessing that accepted requests are running or inferring precedence from submission counters. #40384
 - Link the chat queue regression test to its existing answering library so release candidate checks can compile the Queue assertions. #40399
 - A Board attention candidate an operator requeued from a quarantine asks Jev first, like a pending candidate, instead of going straight to the `board_attention_exact` LLM lane. #40428
+- Voice metadata wraps to the available pane width. Keeper and voice selectors stay visible while their complete identities scroll below; setup keeps the active input and caret visible while full input, draft and probe details remain readable. (#40282)
+- Runtime v opens complete default and ordered media route metadata, boot admission differences and read/action/probe diagnostics in a scrollable read-only detail, including when no candidate exists. (#40293)
+- Repository diff responses are tied to reader, repository scope, file and request generation. Patch review keeps its own data and errors rather than showing a cached diff from another reader. (#40296)
+- Patch review supports Shift+Left/Right to pan long lines while old/new coordinates and diff markers stay fixed. Horizontal position is visible and clamps to actual content and pane width, resetting on reopen. (#40301)
+- Patch review and Keeper voice assignment can open help without losing their reader state. Help starts with the active nested reader controls, and patch/Runtime detail footers use the same binding tables. Voice assignment also names metadata paging and edges. (#40304)
+- Runtime Enter/Right only opens a row from the listing. Open row and route/status readers retain their identity and scroll position even when refresh reorders the hidden listing. (#40306)
+- Integrate responsive Workspace Activity rows and full selected-record Context into the TUI stack; preserve reader ownership and show active Activity help. (#40316)
+- Integrate complete literal Code memo reading and physical-row navigation into the TUI stack, with shared active memo help/footer bindings. (#40319)
+- Integrate full Code history metadata and visible-row Enter ownership into the TUI stack, preserving memo navigation and adding active history help. (#40320)
+- Keep Enter owned by the focused file tree when History remains open in the other pane. (#40320)
+- Integrate complete Tools metadata, revision and timestamp reading plus composition dependencies into the TUI stack, using physical rows for display and navigation. (#40325)
+- Integrate complete Prompt registry and runtime asset detail documents with physical-row paging and edge navigation into the TUI stack. (#40327)
+- Verify Next Request wording across the current visible Context rows and stop the PTY scenario at its reported scroll boundary. (#40028)
+- Label carried tokens as the retained, eviction-adjusted ledger baseline rather than the latest request usage. (#40028)
+- Preserve text, images and image references as a complete Keeper-specific draft when leaving and returning to a conversation; switching recipients cannot reuse another Keeper's unsent media. #40116
+- Keep failed Keeper creation declarations editable, handle malformed JSON safely, and open the confirmed Keeper's conversation for an explicit first request. #40120
+- Keep long Keeper Info and Channels metadata readable through wrapped detail rows, including paths, references, channel names and CJK errors. #40131
+- Preserve metadata SGR styling on independently drawn continuation rows. Keep interactive channel binding rows single-line while the selected Binding target and metadata retain full wrapping. #40131
+- Wrap learned names independently of binding selection, cover an unbound long mapping, and link the PTY suite to the styled wrapping module. #40131
+- Preserve complete Presets descriptions, source paths and restore results on narrow terminals, with physical-row paging and selection retention during refresh (#40141).
+- Keep command palette selection inside the list and show its origin and explicit Code question before execution. Lane Add-ons uses `:` for the shared palette and `A` for advanced commands; Escape preserves the prior screen (#40151).
+- Pan long Code diff lines with Shift-arrow keys while keeping line numbers fixed and preserving the original file's position. (#40196)
+- Read complete link preview URLs, instructions and refusal details in narrow TUI modals using terminal-safe wrapped rows. (#40209)
+- A Keeper that runs on an official client (Codex) no longer has every Librarian continuity snapshot refused after the model call. Snapshot capture and restore find the covering line through `Keeper_turn_boundaries.witness_line`, so the start state of a turn covers the prefix when no end line carries an atom position. Only lines of the history's current generation count, so an earlier generation that ended at the same atom and digest does not hide the current start state (#40359).
+- Admit Ultra as Max for Claude Code and reject unadmitted Ultra before CLI launch; scope GPT-6 Sol Responses effort to its supported ladder while preserving Codex Ultra and existing model limits. (#40361)
+- A Keeper on Codex no longer loses its turn when the model spawns a Codex sub-agent. Every app-server client now starts with `agents.enabled=false` and `features.multi_agent_v2=false`. `features.multi_agent=false` alone did not work: the model catalog declares `gpt-6.1-sol` as v2 and outranks it (#40364).
+- Account reads and purchases refuse corrupt or incomplete Candle ledger data without invoking startup recovery. Replaying stored purchases keeps their original prices after configuration changes. (#40365)
+- Classify Candle shop calls as generic tool completions, without attributing them to appraiser execution or browser/machine changes. (#40365)
+- Order unlisted Goal titles by the exact committed store version retained in creation/update snapshots; report unknown or conflicting ordering without inventing a latest title. (#40369)
+- A Librarian continuity-only run whose snapshot the store refused is now recorded as `Failed` with code `continuity_not_committed`. It was recorded as `Succeeded`, so the lane list showed 100% while the snapshot never committed (#40373).
+- Refuse native stack merge readiness when an included prerequisite was closed without merging, while preserving already merged and out-of-scope members. #40406
+- Report zero directly edited test sources for asset-only PRs while preserving attributed suite selection. (#40422)
+- Repair malformed fragment headings and bullets while retaining the original entries. (#40425)
+- Keep implicit executable selection inside the physical requested checkout, including symlinks. Explicit external paths remain supported; invalid explicit paths fail. Log selected-path provenance. (#40426)
+- Retain the dictionary payload type so backfill and failing-journal fixtures can index and mutate it without erasing it to object. (#40429)
+- Align the catalog with supported benchmark profiles, fix jq profile filtering, and validate selected profiles and prompt assets before server creation. Add --check-live-plan for inspection without server/model calls. (#40430)
+- The Tools screen now pages through its reading with PgUp and PgDn, including entries below the first screen (#40442).
+- Task Review displays Created in the terminal timezone while preserving the complete value when scrolling (#40449).
+- Cite #40028 in its last changelog bullet so `changelog-fragments.py assemble` accepts the fragment (#40453).
 
 ### Documentation
 
 - Add repository strategy and English/Korean contributor workflows for people, external AI sessions and Keeper lanes; align CONTRIBUTING with current CI and review procedures. #40109
 - Propose server-generated fixtures for client decoder tests, with expected-value assertions for every consumed field and contrasting present/null schedule values (#40000).
 - Define deterministic encoder inputs, separately encoded response cases, unknown-discriminator rejection and existing standalone TUI decoder coverage; retain immutable source evidence for the proposal (#40000).
+- Add RFC board-attention-asks-jev-once-per-event: ask Jev once per Board event with one question per eligible keeper, move task verification off the shared GLM slots, and record the before and after measurements of the Jev confidence gate. #40450
 
 ### Internal
 
@@ -280,6 +314,12 @@
 - Move operator question types and decoding into Tui_decode_asks and isolate the server's pure question projection (#40100).
 - Add PTY coverage for Planning list and detail footer hints while opening and stepping through goals, returning to the list, and changing its filter (#39967).
 - Link the chat queue wiring suite to its Answering renderer so release compilation validates activity rows (#40313).
+- Cover cancellation of a queued vision artifact store with a domain-pool regression test (#40016).
+- Move materialized runtime values, credential admission and frozen dispatch properties into Runtime_instance with direct callers, keeping catalog and durable commit authority in Runtime (#40139).
+- Move runtime reference, lane and capacity validation into a dedicated owner while preserving config transaction authority and validation order (#40213).
+- Move immutable approval queue identity, deduplication, restart classification, workspace selection, append-log delta, and ordering calculations into `Keeper_approval_queue_state`, keeping persistence and dispatch in the queue owner (#40229).
+- Move Memory fact models, strict snapshot decoding and fleet projection to their own module, updating consumers and PTY dependencies without changing fact readings. (#40255)
+- Record live checkpoint save timing, stage, outcome, and canonical file size for performance diagnosis (#40454).
 
 ### Performance
 

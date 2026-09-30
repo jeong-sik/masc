@@ -102,7 +102,7 @@ def run(executable):
             b"ARMED: a again to approve task-901 [vr-old]",
         )
         detail = h.screen_text(bytes(output))
-        if b"a twice:approve x:reject with reason" not in detail:
+        if b"a twice: approve; x: reject with reason" not in detail:
             raise AssertionError(f"detail lost its persistent verdict guidance: {detail!r}")
         if any(path == h.VERIFICATION_VERDICT_PATH for path, _ in detail_requests):
             raise AssertionError("first a in detail sent a verdict")

@@ -17,7 +17,6 @@ import test_tui_keyboard_input as h
 
 SOURCE_MODULES = (
     "bin/masc_tui.ml", "bin/masc_tui_types.ml", "bin/masc_tui_render.ml",
-    "bin/masc_tui_loader.ml", "lib/goal/goal_store.ml",
 )
 OPERATOR_PATH = "/api/v1/operator?view=summary&include_messages=0&include_keepers=0"
 HELD_PATH = "/api/v1/keepers/tool-approvals"
@@ -233,7 +232,7 @@ def each_failed_source_keeps_other_cards(executable):
             note = b"Approvals and questions: " + failed_label + b" not fully read"
             # Match the sole-source label through the end of its drawn row,
             # so transient boot notes cannot satisfy the settled-source barrier.
-            settled = re.compile(re.escape(note) + rb"(?: |\x1b\[[0-9;]*m)*\x1b\[0m\x1b\[[0-9;]*H")
+            settled = re.compile(re.escape(note) + rb"(?: |\x1b\[[0-9;]*m)*\x1b\[0m(?:\x1b\[[0-9;]*H|\x1b\[\?25l\x1b\[\?7h)")
             h.wait_for_output(process, fd, output, settled, start=0, timeout=10)
             h.resize_and_wait(process, fd, output, rows=24, columns=81,
                               needle=note, controls=(h.FULL_REDRAW,),
@@ -346,15 +345,6 @@ def goal_opens_exact_detail(executable):
                  phase="awaiting_confirmation", criterion_revision="r1",
                  created_at=goal["created_at"], updated_at=goal["updated_at"])
     fixtures[h.PLANNING_PATH] = h.planning_snapshot([other, goal])
-    # Goal_store persists the criterion, not the HTTP-only verification view.
-    stored_goals = [{
-        "id": row["id"], "criterion_revision": row["criterion_revision"],
-        "title": row["title"], "metric": row["metric"],
-        "target_value": row["target_value"], "due_date": None,
-        "priority": row["priority"], "phase": row["phase"],
-        "last_review_note": None, "last_review_at": None,
-        "created_at": row["created_at"], "updated_at": row["updated_at"],
-    } for row in (other, goal)]
     requests = []
 
     def interact(process, fd, _slave, output, base):
@@ -372,7 +362,7 @@ def goal_opens_exact_detail(executable):
         os.write(fd, b"q")
 
     run(executable, "Home Goal card opens the same Goal detail without mutation",
-        fixtures, interact, requests, prepare=lambda base: home.seed_goals(base, stored_goals))
+        fixtures, interact, requests, prepare=lambda base: home.seed_goals(base, [other, goal]))
 
 
 def question_identity_and_return(executable):

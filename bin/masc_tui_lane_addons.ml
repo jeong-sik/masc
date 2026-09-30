@@ -467,6 +467,7 @@ let evidence_receipt_lines json =
               | Some "broadcast" -> "Broadcast" | _ -> "Keeper delivery" in
             (match text (member "status" delivery), text (member "error" delivery) with
              | Some "failed", Some error -> [destination ^ " failed: " ^ error ^ " · the bundle stays preserved"]
+             | Some "pending_commit", _ -> [destination ^ " queued · workspace commit is pending; retry uses the same request"]
              | Some "outcome_unknown", _ -> [destination ^ " outcome unknown · evidence preserved; verify before resending"]
              | Some "committed", _ -> [destination ^ " committed · Keeper reads and actions are unverified"]
              | Some status, _ -> [destination ^ " " ^ status]

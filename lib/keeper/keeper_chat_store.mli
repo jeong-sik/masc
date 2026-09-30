@@ -502,6 +502,16 @@ val append_user_message_once :
   unit ->
   (append_once_result, string) result
 
+(** [chat_dir base_dir] is the directory holding one transcript file per
+    keeper. *)
+val chat_dir : string -> string
+
+(** [transcript_provenance_readable contents] runs the read that every
+    append-once delivery makes over a transcript before it writes. [Error]
+    names the first line that read refuses; a transcript with such a line
+    rejects every later delivery to its keeper. Reads only. *)
+val transcript_provenance_readable : string -> (unit, string) result
+
 (** [chat_path ~base_dir ~keeper_name] is the on-disk JSONL path backing
     this keeper's chat history. The file is append-only, so its
     (mtime, size) pair changes on every persisted message — callers use

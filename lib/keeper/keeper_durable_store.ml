@@ -712,6 +712,25 @@ let gate_pending_store =
   }
 ;;
 
+let keeper_chat_transcript_store =
+  { store = "keeper chat transcripts"
+  ; on_refusal =
+      "the running server rejects every append-once delivery to that keeper's \
+       transcript, so its new questions and replies are not stored; with the \
+       server stopped, back up the file and repair or remove the named line"
+  ; scan =
+      (fun ~base_path ->
+         Ok
+           (scan_files
+              ~paths:
+                (files_under
+                   (Keeper_chat_store.chat_dir base_path)
+                   ~keep:(fun name -> Filename.check_suffix name ".jsonl"))
+              ~decode:(fun ~path:_ contents ->
+                Keeper_chat_store.transcript_provenance_readable contents)))
+  }
+;;
+
 module Id = struct
   type t =
     | Keeper_meta
@@ -732,6 +751,7 @@ module Id = struct
     | Memory_absorbed
     | Memory_os_events
     | Keeper_event_queue
+    | Keeper_chat_transcripts
   [@@deriving enumerate]
 end
 
@@ -777,6 +797,7 @@ let reader : Id.t -> reader = function
   | Id.Memory_absorbed -> Preflight_only memory_absorbed_store
   | Id.Memory_os_events -> Preflight_only memory_os_events_store
   | Id.Keeper_event_queue -> Refuse_boot (Refusing.Event_queue, event_queue_store)
+  | Id.Keeper_chat_transcripts -> Preflight_only keeper_chat_transcript_store
 ;;
 
 let name id =

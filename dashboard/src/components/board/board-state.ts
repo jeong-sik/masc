@@ -1,4 +1,5 @@
 import { signal } from '@preact/signals'
+import { focusedCommentNeedsAncestors, mergeCommentPages } from './comment-context'
 import { showToast } from '../common/toast'
 import {
   boardPosts,
@@ -332,19 +333,6 @@ export function visibilityBadgeColor(vis: string): string {
 }
 
 // ── Data operations ────────────────────────────────────────────────
-function focusedCommentNeedsAncestors(comments: readonly BoardComment[], focusedCommentId: string): boolean {
-  const byId = new Map(comments.map(comment => [comment.id, comment]))
-  const visited = new Set<string>()
-  let id: string | null | undefined = focusedCommentId
-  while (id && !visited.has(id)) {
-    visited.add(id)
-    const comment = byId.get(id)
-    if (!comment) return true
-    id = comment.parent_id
-  }
-  return false
-}
-
 export async function loadPostDetail(postId: string, focusedCommentId?: string | null) {
   const requestId = ++detailRequestId
   detailPostId.value = postId
@@ -393,7 +381,7 @@ export async function loadPostDetail(postId: string, focusedCommentId?: string |
       if (older.commentPage.offset >= page.offset) {
         throw new Error('Older comment page did not advance toward the start')
       }
-      comments = [...older.comments, ...comments]
+      comments = mergeCommentPages(older.comments, comments)
       page = older.commentPage
     }
     detailComments.value = comments
@@ -422,11 +410,7 @@ export async function loadOlderPostComments(postId: string) {
   try {
     const data = await fetchBoardPost(postId, offset, page.offset - offset)
     if (detailPostId.value !== postId || detailRequestId !== requestId) return
-    const seen = new Set(detailComments.value.map(comment => comment.id))
-    detailComments.value = [
-      ...data.comments.filter(comment => !seen.has(comment.id)),
-      ...detailComments.value,
-    ]
+    detailComments.value = mergeCommentPages(data.comments, detailComments.value)
     detailCommentPage.value = data.commentPage
   } catch (err) {
     console.warn('[Board] failed to load older comments:', postId, err)

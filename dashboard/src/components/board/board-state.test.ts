@@ -41,7 +41,7 @@ import {
   type ContentCategory,
   type VisibleBoardGroups,
 } from './board-state'
-import type { BoardPost } from '../../types'
+import type { BoardComment, BoardPost } from '../../types'
 import { fetchBoardFlairs, fetchBoardHearths, fetchBoardPost, type BoardFlair, type BoardHearth } from '../../api'
 import { showToast } from '../common/toast'
 
@@ -452,6 +452,25 @@ describe('loadPostDetail', () => {
     expect(fetchBoardPost).toHaveBeenNthCalledWith(3, 'p1', 0, 5)
     expect(detailComments.value.map(comment => [comment.id, comment.parent_id]))
       .toEqual([['root', null], ['parent', 'root'], ['reply', 'parent']])
+  })
+
+  it('deduplicates overlapping ancestor pages without replacing retained comments', async () => {
+    const reply: BoardComment = {
+      id: 'reply', post_id: 'p1', parent_id: 'parent', author: 'keeper',
+      content: 'retained reply', created_at: '2026-09-30T00:00:00Z',
+    }
+    const parent: BoardComment = { ...reply, id: 'parent', parent_id: null, content: 'parent' }
+    vi.mocked(fetchBoardPost)
+      .mockResolvedValueOnce({ ...makePost(), comments: [reply],
+        commentPage: { offset: 20, total: 21 } })
+      .mockResolvedValueOnce({ ...makePost(),
+        comments: [parent, { ...reply, content: 'overlapping reply' }, parent],
+        commentPage: { offset: 0, total: 20 } })
+
+    await loadPostDetail('p1', 'reply')
+
+    expect(detailComments.value).toEqual([parent, reply])
+    expect(fetchBoardPost).toHaveBeenCalledTimes(2)
   })
 
   it('does not fetch older pages for a focused root already in the newest page', async () => {

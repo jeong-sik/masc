@@ -36,6 +36,7 @@
 - Lane Add-ons now show package descriptions and the selected declared result before activity, with multiline report bodies, visible selection and separate coverage/delivery readings (#40206).
 - Match Records navigation to displayed chronology, reuse the selected result while rendering, and expose each selected result’s exact Lane in Summary and raw detail (#40206).
 - Keeper chats show the conversation partner's portrait below the left Keeper list, without taking rows from the conversation or composer. The portrait follows the chat target, stays put while browsing the list, and yields on small or colourless terminals. Chats show the roster by default; an explicit Ctrl-B choice is retained. (#39883).
+- The TUI `/about` screen gathers registered Keeper portraits around its candle, then settles into a static scene; `[tui].reduce_motion` opens the final scene directly (#40013).
 
 ### Changed
 
@@ -107,6 +108,8 @@
 - Integrate complete Prompt registry and runtime asset detail documents with physical-row paging and edge navigation into the TUI stack. (#40327)
 - Keeper chat gives the draft a terminal-themed background, highlights slash-command choices across their row, and keeps send, newline, command discovery and escape hints ahead of display controls. The input keeps its existing history budget and command execution semantics. (#39890)
 - The chat picker offers Play subcommands without executing them during selection; invite arguments remain explicit. (#39890)
+- Board attention settles a Jev relevant or not-relevant answer whose confidence reaches `[typesafeai] board_attention_confidence_floor` (default 0.3) without asking the `board_attention_exact` LLM lane. A Jev answer of either decision below the floor goes to the lane, so a low-confidence relevant answer, which used to settle, is now judged by the lane; uncertain and failed answers still go to the lane. The terminal entry's `jev.answer = not_relevant` now means Jev settled the candidate; a re-judged answer is `low_confidence`. #40413
+- A Jev answer that settles a Board attention candidate records its confidence on the terminal entry, so `[typesafeai] board_attention_confidence_floor` can be re-tuned from the logs. #40420
 
 ### Removed
 
@@ -244,6 +247,11 @@
   effects remain at WARN; Codex failure logs now include error details (#39983).
 - Keep the TUI chat queue summary visible through submission and server admission, excluding started or settled batch inputs. Preserve local NEXT previews and queue actions at 80 columns, and distinguish awaiting receipts and delivery rechecks from confirmed queued input. #40340
 - Ctrl-O in Keeper chat now reopens retained image attachments from loaded history, keeps queued attachments available even when server and client clocks disagree, and preserves the staged draft when a delayed history load provides no newer arrival evidence. Settled local images no longer hide newer saved images in a bounded history tail. Artifact responses are checked against their recorded digest and byte count before decoding; HTTP requests stay on the Eio fiber while successful payload decoding runs in a worker (#40345).
+- Keeper event-queue snapshots encode on an independent worker so an owner-lock holder cannot wait behind a recovery worker needing the same lock. Codec shutdown releases protected writers waiting to submit, and strict durability confirmation uses the same state encoder (#40357).
+- Recognize native GitHub Stack merge scope, check every included PR before submission, and teach coding agents and Keepers the native API workflow (#40383).
+- Show local TUI chat input by its Queue position without guessing that accepted requests are running or inferring precedence from submission counters. #40384
+- Link the chat queue regression test to its existing answering library so release candidate checks can compile the Queue assertions. #40399
+- A Board attention candidate an operator requeued from a quarantine asks Jev first, like a pending candidate, instead of going straight to the `board_attention_exact` LLM lane. #40428
 
 ### Documentation
 
@@ -270,6 +278,8 @@
 - Add paired CI measurements and raw trace receipts for vision artifact storage and load (#39990).
 - Move terminal escaping, text previews and timestamp presentation into Tui_terminal_text with direct callers (#40097).
 - Move operator question types and decoding into Tui_decode_asks and isolate the server's pure question projection (#40100).
+- Add PTY coverage for Planning list and detail footer hints while opening and stepping through goals, returning to the list, and changing its filter (#39967).
+- Link the chat queue wiring suite to its Answering renderer so release compilation validates activity rows (#40313).
 
 ### Performance
 

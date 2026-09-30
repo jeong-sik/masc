@@ -48,6 +48,10 @@ Presets `3128a81dda`의 필수 run `36666262338`은 PTY holder의 bare Event.wai
 
 Board [#40088](https://github.com/jeong-sik/masc/pull/40088)은 조회 시 main에 merge commit `f960a2dada3583777c2abada69be2c557a8d4e59`로 병합되어 있었다. 필수 5 checks success를 확인했으나 설치 바이너리의 반영은 확인하지 않았다. Chat [#40186](https://github.com/jeong-sik/masc/pull/40186)의 `4e220fb942`는 전체 foreign stop 명령·물리 행 예산을 보완했으며 독립 리뷰/응답 리뷰 및 parsing을 마쳤다. 최신 CI는 요청되어 있고 아직 실행 PASS를 선언하지 않는다.
 
+Schedules 경고 복구 `f088db60a2`의 [run36668855707](https://github.com/jeong-sik/masc/actions/runs/36668855707)은 success로 완료했다. [원문 발췌](../evidence/tui-audit-2026-09-30/schedules-repair-pass.txt)에 checkout SHA·viewport·기존 hold·source-status의 실제 PASS/OK가 있다. 해당 집중 fixture 범위를 증명하며 필수 PR 검사나 설치 바이너리 확인을 대신하지 않는다.
+
+R02의 Code 부분은 [#40196](https://github.com/jeong-sik/masc/pull/40196)으로 별도 수정했다. 기존 Shift 화살표가 보이지 않는 파일 offset을 바꾸던 결함 대신 diff 전용 offset·실제 wire body 폭 clamp를 쓰고, old/new 번호와 +/- gutter는 고정한다. history/notes/Repository Changes는 뒤의 파일 pan을 거부한다. 독립 리뷰에서 마지막 overlay 조건 누락을 찾았고 직접 확인 후 공유 selector에 반영했다. 40/60/80/120열·color/NO_COLOR PTY fixture는 추가/삭제 끝부분·한글 셀 경계·clamp·파일 위치 보존·history/notes 이동 거부를 검사한다. Repository Changes guard는 소스 검토만 했다. 최신 head `abfe0affb1`에 집중 실행·probe를 요청했으며 실행 PASS와 화면은 미확인이다. 기록된 Changes와 Repository Changes의 diff 수평 접근은 여전히 남았다.
+
 ## 수정과 남은 결함
 
 `PR`는 구현이 게시되었다는 뜻이다. 아래에 적힌 PR들의 현재 head·CI·리뷰·병합 상태는 작업 직전에 다시 확인한다.

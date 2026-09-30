@@ -5478,6 +5478,7 @@ type state = {
      drew the candle (Masc_tui_emblem_screen.drawn) and puts it back to [-1]
      when none did, so a screen without it stops repainting. *)
   mutable emblem_frame: int;
+  mutable about_reduce_motion: bool;
   (* /about: the candle over the surface, with the theme and the keeper count.
      Modal, like the help sheet; Esc closes it. *)
   mutable about_open: bool;
@@ -6503,10 +6504,10 @@ type state = {
   mutable msg_references: Masc_tui_keeper_chat_projection.image_reference list;
   (* Ctrl-O weighs a staged image against a .png the conversation named by
      which is newer, so the batch carries a recency marker: an anchor to the
-     history row that was newest when the newest attachment entered the
-     composer. [None] is a real answer -- staged while the history was empty,
-     so any row it holds now arrived later. Meaningful only while
-     [msg_attachments] is non-empty and reset when it clears. *)
+     session row that was newest when the newest attachment entered the
+     composer. [None] means staging preceded all observed session rows.
+     Loading historical rows alone does not supersede the draft. Meaningful
+     only while [msg_attachments] is non-empty and reset when it clears. *)
   mutable msg_attachments_since: msg_anchor option;
   mutable msg_target_keeper_name: string option;
   mutable msg_return: keeper_chat_return;
@@ -8100,6 +8101,7 @@ let create_state
   roster_marquee_frame = 0;
   activity_frame = -1;
   emblem_frame = -1;
+  about_reduce_motion = false;
   about_open = false;
   keeper_detail_focus = Right_pane;
   keeper_message_focus = Right_pane;
@@ -12089,6 +12091,70 @@ let keeper_observed_interrupt_rows (state : state) =
    the row that names the observed turn. On the 2026-09-22 screen the band
    was five rows, all in the status colour, for two facts: a turn is
    running, and this pane's line waits behind it. *)
+(* The local queue releases a request when its POST starts, before the Keeper
+   starts running it. Keep promoted requests while their POST is pending,
+   then accepted, still-waiting requests until RUN_STARTED. An admission's
+   queue_length is only a snapshot and cannot supply the current count.
+   In-flight entries are newest first,
+   while the local queue already carries its dispatch order. *)
+type keeper_message_pending_delivery =
+  | Local_pending
+  | Awaiting_receipt
+  | Keeper_queued
+  | Rechecking_delivery
+
+let keeper_message_waiting_requests (state : state) ~keeper_name =
+  let module Executions = Set.Make (String) in
+  let remember_started executions log =
+    if not (String.equal (turn_log_keeper_name log) keeper_name) then executions
+    else
+      let transcript = log.tl_transcript in
+      let started = match Masc_tui_keeper_chat_transcript.phase transcript with
+        | Working | Stream_ended | Stream_failed _ -> true
+        | Waiting -> Masc_tui_keeper_chat_transcript.awaiting_continuation transcript in
+      if started then Executions.add (turn_log_execution_id log) executions else executions
+  in
+  (* A batch's watchers receive its journal independently. A sibling's run
+     start (or retained terminal log) already proves this execution consumed
+     its bound inputs, even while another watcher is catching up. *)
+  let started = List.fold_left remember_started Executions.empty state.msg_settled_logs in
+  let started = List.fold_left (fun ids (entry : inflight) ->
+      remember_started ids entry.log) started state.msg_inflight in
+  let local = Masc_tui_keeper_chat_queue.waiting_for_keeper
+      state.msg_queued ~keeper_name in
+  let submitted =
+    List.rev state.msg_inflight
+    |> List.filter_map (fun (entry : inflight) ->
+      if not (String.equal entry.sent_request.keeper_name keeper_name)
+         || Executions.mem (turn_log_execution_id entry.log) started
+         || List.exists (fun (item : Masc_tui_keeper_chat_queue.item) ->
+              Masc_tui_keeper_chat_projection.same_request_identity
+                item.request entry.sent_request) local
+      then None
+      else
+        let transcript = entry.log.tl_transcript in
+        match Masc_tui_keeper_chat_transcript.phase transcript,
+              Masc_tui_keeper_chat_transcript.admission transcript with
+        | Waiting, None
+          when not (Masc_tui_keeper_chat_transcript.awaiting_continuation transcript) ->
+            (match entry.phase, entry.origin with
+             | Turn_reconciling, (Promoted_queue _ | Direct_submission) ->
+                 Some (entry.sent_request, Rechecking_delivery)
+             | Turn_streaming, Promoted_queue _ ->
+                 Some (entry.sent_request, Awaiting_receipt)
+             | Turn_streaming, Direct_submission -> None)
+        | Waiting, Some (Masc_tui_keeper_chat_live.Queued, _)
+          when not (Masc_tui_keeper_chat_transcript.awaiting_continuation transcript) ->
+            let delivery = match entry.phase with
+              | Turn_streaming -> Keeper_queued
+              | Turn_reconciling -> Rechecking_delivery in
+            Some (entry.sent_request, delivery)
+        | Waiting, (None | Some _) | (Working | Stream_ended | Stream_failed _), _ -> None)
+  in
+  submitted @ List.map (fun (item : Masc_tui_keeper_chat_queue.item) ->
+    item.request, Local_pending) local
+;;
+
 let keeper_message_activity_rows (state : state) =
   match state.msg_target_keeper_name with
   | None -> []
@@ -12122,9 +12188,18 @@ let keeper_message_activity_rows (state : state) =
           ~text_tail_drawn:(observed_turn_text_drawn state keeper_name)
           state.keeper_turns
     in
-    let waiting_items = Masc_tui_keeper_chat_queue.waiting_for_keeper
+    let waiting_items = keeper_message_waiting_requests state ~keeper_name in
+    let waiting_count = List.length waiting_items in
+    let local = Masc_tui_keeper_chat_queue.waiting_for_keeper
       state.msg_queued ~keeper_name in
-    let local_count = List.length waiting_items in
+    let awaiting_receipt, keeper_queued, rechecking =
+      List.fold_left (fun (awaiting, queued, rechecking) (_, delivery) ->
+        match delivery with
+        | Local_pending -> awaiting, queued, rechecking
+        | Awaiting_receipt -> awaiting + 1, queued, rechecking
+        | Keeper_queued -> awaiting, queued + 1, rechecking
+        | Rechecking_delivery -> awaiting, queued, rechecking + 1)
+        (0, 0, 0) waiting_items in
     let retained = List.exists (fun (name, _, intervention) ->
       name = keeper_name && match intervention with
       | Retained_after_stop -> true | Awaiting_control _ -> false)
@@ -12133,21 +12208,36 @@ let keeper_message_activity_rows (state : state) =
     let queue_rows =
       match waiting_items with
       | [] -> []
-      | first :: _ ->
-        let preview =
-          let single = String.map (fun c -> if c = '\n' || c = '\r' then ' ' else c) first.request.message in
-          let trimmed = String.trim single in
-          if String.length trimmed > 34 then
-            String.sub trimmed 0 31 ^ "..."
-          else trimmed
-        in
-        let intent_str = match first.intent with
-          | Steer_after_interrupt -> " [steer]"
-          | Next -> ""
-        in
+      | _ :: _ ->
+        (* Server-side edit/reorder changes the input independently of this
+           session's request. Only local unsent input has an authoritative
+           preview here; /queue reads the server's current contents/order. *)
+        let count_row count label =
+          if count = 0 then [] else [plain (Printf.sprintf "%d %s" count label)] in
+        let local_rows = match local with
+          | [] -> []
+          | first :: _ ->
+            let preview =
+              Masc_tui_keeper_chat_projection.terminal_safe_text first.request.message
+              |> String.trim
+              |> fun text -> Masc_tui_message_layout.fit_width text 34 |> String.trim in
+            let intent_str = match first.intent with
+              | Steer_after_interrupt -> " [steer]"
+              | Next -> "" in
+            [ { Masc_tui_answering.lead = "Local NEXT" ^ intent_str
+              ; rest = Printf.sprintf ": \"%s\"" preview
+              ; keys = "" } ] in
         let auto_tag = if state.user_input_priority_next then "auto-next:on" else "auto-next:off" in
-        [ plain (Printf.sprintf "Queue (%d waiting · %s) NEXT%s: \"%s\" · Ctrl-T:queue"
-            local_count auto_tag intent_str preview) ]
+        (* The renderer reserves [keys] before fitting [rest]. Keep the
+           aggregate, delivery evidence and local preview on separate rows;
+           the status budget counts this same projection. *)
+        [ { Masc_tui_answering.lead = Printf.sprintf "Queue (%d pending)" waiting_count
+          ; rest = " · " ^ auto_tag
+          ; keys = " · Ctrl-T:queue" } ]
+        @ count_row keeper_queued "queued at Keeper · /queue"
+        @ count_row awaiting_receipt "awaiting receipt"
+        @ count_row rechecking "rechecking delivery"
+        @ local_rows
     in
     activity @ (if retained then
       [plain "Input retained after Esc; /queue resume sends it"]

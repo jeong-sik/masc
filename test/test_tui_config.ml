@@ -438,6 +438,17 @@ let opening_cases =
         | _ -> Alcotest.fail "unknown opening was silently ignored")
   ]
 
+let reduce_motion_cases =
+  [ Alcotest.test_case "reduce motion starts at the final about frame" `Quick
+      (fun () ->
+        check_lift "enabled" (Some true)
+          (Config.reduce_motion_of_doc (doc_of "[tui]\nreduce_motion = true\n"));
+        check_lift "disabled" (Some false)
+          (Config.reduce_motion_of_doc (doc_of "[tui]\nreduce_motion = false\n"));
+        check_lift "absent" None
+          (Config.reduce_motion_of_doc (doc_of "[tui]\ntheme = \"dusk\"\n")))
+  ]
+
 let () =
   Alcotest.run "tui_config"
     [ ("board_sort", board_sort_cases)
@@ -445,6 +456,7 @@ let () =
     ; ("theme_of_doc", cases)
     ; ("table_frame_of_doc", frame_cases)
     ; ( "lift_colours", lift_cases )
+    ; ("reduce_motion", reduce_motion_cases)
     ; ("hints_visible_of_doc", hints_cases)
     ; ("coalesce_queued_input", coalesce_cases)
     ; ("send_on_stop", send_on_stop_cases)

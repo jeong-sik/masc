@@ -596,7 +596,7 @@ let test_provider_for_vision_uses_runtime_temperature () =
       (match Runtime.get_runtime_by_id runtime_id with
        | None -> failwith "selected vision runtime should resolve"
        | Some runtime ->
-         (match runtime.Runtime.execution with
+         (match runtime.Runtime_instance.execution with
           | Runtime_execution.Codex_app_server _
           | Runtime_execution.Claude_code _
           | Runtime_execution.Antigravity_cli _
@@ -962,7 +962,7 @@ let test_vision_candidates_follow_quota_window () =
       let now = Unix.gettimeofday () in
       let scope id =
         match Runtime.get_runtime_by_id id with
-        | Some rt -> Runtime.quota_scope_of_runtime rt
+        | Some rt -> Runtime_instance.quota_scope_of_runtime rt
         | None -> failwith ("missing runtime " ^ id)
       in
       assert (Vt.vision_runtime_ids ~now = [ "p1.vision-a"; "p2.vision-b" ]);
@@ -982,7 +982,7 @@ let test_vision_402_marks_the_account_exhausted_and_moves_on () =
         let handle = store_image meta "\x89PNG\r\n\x1a\nraw" in
         let scope id =
           match Runtime.get_runtime_by_id id with
-          | Some rt -> Runtime.quota_scope_of_runtime rt
+          | Some rt -> Runtime_instance.quota_scope_of_runtime rt
           | None -> failwith ("missing runtime " ^ id)
         in
         let calls = ref 0 in

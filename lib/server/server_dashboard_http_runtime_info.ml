@@ -912,7 +912,7 @@ let dashboard_runtime_status_of_http_status = function
 
 let dashboard_runtime_provider_probe_json
     ?(http_get = dashboard_runtime_probe_http_get)
-    (rt : Runtime.t)
+    (rt : Runtime_instance.t)
   =
   let runtime_kind = dashboard_runtime_probe_transport_kind rt.provider.transport in
   let auth_kind = dashboard_runtime_provider_auth_kind rt.provider.credentials in
@@ -1088,7 +1088,7 @@ let dashboard_runtime_provider_probe_json
 let dashboard_runtime_probe_representatives runtimes =
   let _, representatives_rev =
     List.fold_left
-      (fun (seen, representatives_rev) (runtime : Runtime.t) ->
+      (fun (seen, representatives_rev) (runtime : Runtime_instance.t) ->
          if Set_util.StringSet.mem runtime.provider.id seen
          then seen, representatives_rev
          else
@@ -1100,7 +1100,7 @@ let dashboard_runtime_probe_representatives runtimes =
   List.rev representatives_rev
 ;;
 
-let dashboard_runtime_project_provider_probe (runtime : Runtime.t) probe =
+let dashboard_runtime_project_provider_probe (runtime : Runtime_instance.t) probe =
   let json =
     match probe.json with
     | `Assoc fields ->
@@ -1167,13 +1167,13 @@ let dashboard_runtime_probe_payload_json_of_runtimes ?default_id runtimes =
   in
   let probes_by_provider =
     List.map2
-      (fun (runtime : Runtime.t) probe -> runtime.provider.id, probe)
+      (fun (runtime : Runtime_instance.t) probe -> runtime.provider.id, probe)
       representatives
       provider_probes
   in
   let probes =
     List.map
-      (fun (runtime : Runtime.t) ->
+      (fun (runtime : Runtime_instance.t) ->
          let probe = List.assoc runtime.provider.id probes_by_provider in
          dashboard_runtime_project_provider_probe runtime probe)
       runtimes
@@ -1243,7 +1243,7 @@ let run_dashboard_runtime_probe () =
   | None ->
     let runtimes = Runtime.get_runtimes () in
     let default_id =
-      Runtime.get_default_runtime () |> Option.map (fun (rt : Runtime.t) -> rt.id)
+      Runtime.get_default_runtime () |> Option.map (fun (rt : Runtime_instance.t) -> rt.id)
     in
     dashboard_runtime_probe_payload_json_of_runtimes ?default_id runtimes
 ;;
@@ -1531,7 +1531,7 @@ let runtime_auth_kind_of_credential = function
 ;;
 
 let runtime_default_runtime_id () =
-  Runtime.get_default_runtime () |> Option.map (fun (rt : Runtime.t) -> rt.id)
+  Runtime.get_default_runtime () |> Option.map (fun (rt : Runtime_instance.t) -> rt.id)
 ;;
 
 (* Canonical wire strings for the thinking-control-format capability, matching
@@ -1625,7 +1625,7 @@ let response_format_json : Llm_provider.Types.response_format -> Yojson.Safe.t =
     `Assoc [ "kind", `String "json_schema"; "has_schema", `Bool true ]
 ;;
 
-let runtime_request_config_json (rt : Runtime.t) =
+let runtime_request_config_json (rt : Runtime_instance.t) =
   match rt.execution with
   | Runtime_execution.Codex_app_server config ->
     `Assoc
@@ -1763,7 +1763,7 @@ let runtime_declared_model_capabilities_json
       ]
 ;;
 
-let runtime_declared_spec_json (rt : Runtime.t) =
+let runtime_declared_spec_json (rt : Runtime_instance.t) =
   `Assoc
     [ "source", `String runtime_inventory_source
     ; ( "provider"
@@ -1817,7 +1817,7 @@ let runtime_declared_spec_json (rt : Runtime.t) =
     ]
 ;;
 
-let effective_capabilities_json (rt : Runtime.t) =
+let effective_capabilities_json (rt : Runtime_instance.t) =
   match rt.execution with
   | Runtime_execution.Codex_app_server _ ->
     `Assoc
@@ -1904,7 +1904,7 @@ let effective_capabilities_json (rt : Runtime.t) =
       ])
 ;;
 
-let runtime_parameter_policy_json (rt : Runtime.t) =
+let runtime_parameter_policy_json (rt : Runtime_instance.t) =
   let module RD = Llm_provider.Reasoning_dialect in
   let sampling_parameter_json_list values =
     values
@@ -1956,7 +1956,7 @@ let runtime_parameter_policy_json (rt : Runtime.t) =
     ]
 ;;
 
-let runtime_inventory_entry_json ~default_id (rt : Runtime.t) =
+let runtime_inventory_entry_json ~default_id (rt : Runtime_instance.t) =
   let runtime_kind = runtime_kind_of_transport rt.provider.transport in
   let is_official_client_runtime =
     match rt.execution with
@@ -1995,7 +1995,7 @@ let runtime_inventory_entry_json ~default_id (rt : Runtime.t) =
     ; "status", `String runtime_status
     ; "available", `Bool (not is_official_client_runtime)
     ; "is_default_runtime", `Bool (Option.equal String.equal default_id (Some rt.id))
-    ; "max_context", `Int (Runtime.max_context_of_runtime rt)
+    ; "max_context", `Int (Runtime_instance.max_context_of_runtime rt)
     ; "tools_support", `Bool (rt.model.tools_support && not is_official_client_runtime)
     ; "thinking_support", Json_util.bool_opt_to_json
         (if is_official_client_runtime then Some false else rt.model.thinking_support)
@@ -2143,7 +2143,7 @@ let gate_hitl_json () =
 let runtime_inventory_json () =
   let runtimes = Runtime.get_runtimes () in
   let default_id = runtime_default_runtime_id () in
-  let kind_of_runtime (rt : Runtime.t) =
+  let kind_of_runtime (rt : Runtime_instance.t) =
     runtime_kind_of_transport rt.provider.transport
     |> runtime_dashboard_kind_of_runtime_kind
   in
@@ -2152,7 +2152,7 @@ let runtime_inventory_json () =
     |> List.filter (fun rt -> String.equal (kind_of_runtime rt) kind)
     |> List.length
   in
-  let provider_ids = List.map (fun (rt : Runtime.t) -> rt.provider.id) runtimes in
+  let provider_ids = List.map (fun (rt : Runtime_instance.t) -> rt.provider.id) runtimes in
   `Assoc
     [ "updated_at", `String (Masc_domain.now_iso ())
     ; "source", `String runtime_inventory_source

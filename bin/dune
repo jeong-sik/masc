@@ -1749,6 +1749,7 @@
  (modules
   masc_tui
   masc_tui_render
+  masc_tui_render_board
   masc_tui_loader
   masc_tui_http)
  (public_name masc-tui)
@@ -2064,7 +2065,7 @@
  (name masc_tui_link_preview)
  (wrapped false)
  (modules masc_tui_link_preview)
- (libraries masc_tui_link_label masc_tui_lru masc_tui_message_layout masc_tui_theme uri))
+ (libraries masc masc_tui_link_label masc_tui_lru masc_tui_message_layout masc_tui_theme uri))
 
 (library
  (name masc_tui_image_mosaic)

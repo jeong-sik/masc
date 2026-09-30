@@ -1341,10 +1341,51 @@ let cancel_unhandled_elicitation io ~thread_id ~turn_id ~on_stream_event ~id par
     Ok ())
 ;;
 
-let rec await_turn_terminal io ~tools ~tool_call_count ~tool_effect_attempted ~model_context_window ~thread_id ~turn_id ~model ~seen_final
+type handoff_state = Handoff_unrequested | Handoff_pending | Handoff_accepted | Handoff_rejected
+
+let request_scheduling_handoff io ~thread_id ~turn_id =
+  send_request io ~id:6 ~method_:"turn/steer"
+    ~params:(`Assoc
+      [ "threadId", `String thread_id
+      ; "expectedTurnId", `String turn_id
+      ; "input", `List [`Assoc
+          [ "type", `String "text"
+          ; "text", `String
+              "Host scheduling notice: a direct message is waiting for this Keeper. Preserve completed work and any unfinished next step in a concise progress reply, then finish this turn so the host can deliver the waiting message. Do not start unrelated work. This notice does not contain that message and does not acknowledge or answer it. Do not claim unfinished work is complete."
+          ]]
+      ]);
+  Log.Runtime_agent.info "Codex scheduling handoff requested thread=%s turn=%s" thread_id turn_id
+;;
+
+let rec await_turn_terminal io ~handoff ~handoff_requested ~tools ~tool_call_count ~tool_effect_attempted ~model_context_window ~thread_id ~turn_id ~model ~seen_final
     ~seen_fallback ~seen_usage ~open_tool_call_ids ~on_stream_event =
+  (* Once a dynamic-tool result has been returned, check incoming progress
+     boundaries for waiting input. Never kill the client after
+     sending a result: it still owns persistence of that result. The notice
+     carries no queued input and changes no queue state. *)
+  (match !handoff with
+   | Handoff_unrequested when !tool_call_count > 0 && handoff_requested () ->
+     request_scheduling_handoff io ~thread_id ~turn_id;
+     handoff := Handoff_pending
+   | Handoff_unrequested | Handoff_pending | Handoff_accepted | Handoff_rejected -> ());
+  let continue () = await_turn_terminal io ~handoff ~handoff_requested ~tools
+      ~tool_call_count ~tool_effect_attempted ~model_context_window ~thread_id ~turn_id
+      ~model ~seen_final ~seen_fallback ~seen_usage ~open_tool_call_ids ~on_stream_event in
   let* message = io.receive () in
   match message with
+  | Response { id = 6; result } when !handoff = Handoff_pending ->
+    let* fields = assoc_at "turn/steer" result in
+    let* accepted_turn = required_string "turn/steer" "turnId" fields in
+    if accepted_turn <> turn_id then protocol_error "turn/steer" "accepted turn does not match active turn"
+    else (
+      handoff := Handoff_accepted;
+      Log.Runtime_agent.info "Codex scheduling handoff accepted thread=%s turn=%s" thread_id turn_id;
+      continue ())
+  | Response_error { id = 6; code; message; _ } when !handoff = Handoff_pending ->
+    handoff := Handoff_rejected;
+    Log.Runtime_agent.warn "Codex scheduling handoff refused thread=%s turn=%s code=%d detail=%s"
+      thread_id turn_id code message;
+    continue ()
   | Response _ | Response_error _ ->
     protocol_error "turn" "received an unsolicited JSON-RPC response"
   | Server_request { id; method_ = "item/tool/call"; params } ->
@@ -1360,7 +1401,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~tool_effect_attempted ~m
         params
     in
     await_turn_terminal
-      io
+      io ~handoff ~handoff_requested
       ~tools
       ~tool_call_count ~tool_effect_attempted ~model_context_window
       ~thread_id
@@ -1373,7 +1414,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~tool_effect_attempted ~m
       ~on_stream_event
   | Server_request { id; method_ = "mcpServer/elicitation/request"; params } ->
     let* () = cancel_unhandled_elicitation io ~thread_id ~turn_id ~on_stream_event ~id params in
-    await_turn_terminal io ~tools ~tool_call_count ~tool_effect_attempted ~model_context_window ~thread_id ~turn_id ~model
+    await_turn_terminal io ~handoff ~handoff_requested ~tools ~tool_call_count ~tool_effect_attempted ~model_context_window ~thread_id ~turn_id ~model
       ~seen_final ~seen_fallback ~seen_usage ~open_tool_call_ids ~on_stream_event
   | Server_request { id; method_; _ } ->
     reject_server_request io id;
@@ -1392,7 +1433,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~tool_effect_attempted ~m
        are still open in the background. *)
     io.set_receive_phase Model_turn;
     await_turn_terminal
-      io
+      io ~handoff ~handoff_requested
       ~tools
       ~tool_call_count ~tool_effect_attempted ~model_context_window
       ~thread_id
@@ -1407,7 +1448,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~tool_effect_attempted ~m
     let* (_ : string) = item_delta_notification ~method_ ~thread_id ~turn_id params in
     io.set_receive_phase Model_turn;
     await_turn_terminal
-      io
+      io ~handoff ~handoff_requested
       ~tools
       ~tool_call_count ~tool_effect_attempted ~model_context_window
       ~thread_id
@@ -1427,7 +1468,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~tool_effect_attempted ~m
        phase stays where it is; the read itself already counted as activity. *)
     let* (_ : string) = item_delta_notification ~method_ ~thread_id ~turn_id params in
     await_turn_terminal
-      io
+      io ~handoff ~handoff_requested
       ~tools
       ~tool_call_count ~tool_effect_attempted ~model_context_window
       ~thread_id
@@ -1463,7 +1504,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~tool_effect_attempted ~m
         :: List.filter (fun open_id -> not (String.equal open_id call_id)) open_tool_call_ids
     in
     await_turn_terminal
-      io ~tools ~tool_call_count ~tool_effect_attempted ~model_context_window ~thread_id ~turn_id ~model ~seen_final ~seen_fallback
+      io ~handoff ~handoff_requested ~tools ~tool_call_count ~tool_effect_attempted ~model_context_window ~thread_id ~turn_id ~model ~seen_final ~seen_fallback
       ~seen_usage ~open_tool_call_ids ~on_stream_event
   | Notification { method_ = "item/completed"; params } ->
     let stage = "item/completed" in
@@ -1501,7 +1542,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~tool_effect_attempted ~m
       | None -> seen_final, seen_fallback
     in
     await_turn_terminal
-      io
+      io ~handoff ~handoff_requested
       ~tools
       ~tool_call_count ~tool_effect_attempted ~model_context_window
       ~thread_id
@@ -1526,7 +1567,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~tool_effect_attempted ~m
     if will_retry
     then
       await_turn_terminal
-        io
+        io ~handoff ~handoff_requested
         ~tools
         ~tool_call_count ~tool_effect_attempted ~model_context_window
         ~thread_id
@@ -1557,6 +1598,11 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~tool_effect_attempted ~m
         ~tool_effect_attempted:!tool_effect_attempted
         params
     in
+    (match !handoff with
+     | Handoff_unrequested -> ()
+     | Handoff_pending | Handoff_accepted | Handoff_rejected ->
+       Log.Runtime_agent.info "Codex turn completed after scheduling handoff thread=%s turn=%s"
+         thread_id turn_id);
     Ok (text, seen_usage)
   | Notification { method_ = "thread/tokenUsage/updated"; params } ->
     let* frame = token_usage_notification ~thread_id ~turn_id params in
@@ -1586,7 +1632,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~tool_effect_attempted ~m
       | None -> seen_usage
     in
     await_turn_terminal
-      io
+      io ~handoff ~handoff_requested
       ~tools
       ~tool_call_count ~tool_effect_attempted ~model_context_window
       ~thread_id
@@ -1608,7 +1654,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~tool_effect_attempted ~m
          "Codex app-server rate-limit update not read: %s"
          (Runtime_provider_usage_window.decode_error_to_string error));
     await_turn_terminal
-      io
+      io ~handoff ~handoff_requested
       ~tools
       ~tool_call_count ~tool_effect_attempted ~model_context_window
       ~thread_id
@@ -1624,7 +1670,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~tool_effect_attempted ~m
      message resets the stream-idle liveness boundary. *)
   | Notification _ ->
     await_turn_terminal
-      io
+      io ~handoff ~handoff_requested
       ~tools
       ~tool_call_count ~tool_effect_attempted ~model_context_window
       ~thread_id
@@ -1706,7 +1752,7 @@ let history_item (message : history_message) =
     ]
 ;;
 
-let run_protocol io (config : config) ~protocol_cwd ~dynamic_tools ~reasoning_effort
+let run_protocol io (config : config) ~handoff_requested ~protocol_cwd ~dynamic_tools ~reasoning_effort
     ~thread_mode ~history ~developer_context ~prompt ~images ~on_thread_ready ~on_turn_starting ~on_turn_dispatched ~on_prompt_sent
     ~on_turn_started ~on_stream_event =
   send_request io ~id:1 ~method_:"initialize"
@@ -1865,7 +1911,7 @@ let run_protocol io (config : config) ~protocol_cwd ~dynamic_tools ~reasoning_ef
   let model_context_window = ref None in
   let* text, turn_usage =
     await_turn_terminal
-      io
+      io ~handoff:(ref Handoff_unrequested) ~handoff_requested
       ~tools:dynamic_tools
       ~tool_call_count ~tool_effect_attempted ~model_context_window
       ~thread_id
@@ -2195,7 +2241,7 @@ let with_spawned_client ~mgr ~clock ~cwd config run =
            }))
 ;;
 
-let run_spawned ~mgr ~clock ~cwd ~protocol_cwd config ~dynamic_tools
+let run_spawned ~mgr ~clock ~cwd ~protocol_cwd config ~handoff_requested ~dynamic_tools
     ~reasoning_effort ~thread_mode ~history ~developer_context ~prompt ~images ~on_thread_ready
     ~on_turn_starting ~on_turn_dispatched ~on_prompt_sent ~on_turn_started ~on_stream_event =
   with_spawned_client
@@ -2210,6 +2256,7 @@ let run_spawned ~mgr ~clock ~cwd ~protocol_cwd config ~dynamic_tools
     run_protocol
       io
       config
+      ~handoff_requested
       ~protocol_cwd
       ~dynamic_tools
       ~reasoning_effort
@@ -2358,7 +2405,7 @@ let read_rate_limits ~mgr ~clock ~cwd config =
   probe_metadata ~mgr ~clock ~cwd config rate_limits_read_protocol
 ;;
 
-let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(thread_mode = Start) ~mgr ~clock ~cwd
+let run_turn ?(handoff_requested = fun () -> false) ?(dynamic_tools = []) ?reasoning_effort ?(thread_mode = Start) ~mgr ~clock ~cwd
     ?(history = [])
     ?(developer_context = [])
     ?(on_prompt_sent = fun () -> ())
@@ -2400,6 +2447,7 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(thread_mode = Start) ~mgr
               ~cwd
               ~protocol_cwd
               config
+              ~handoff_requested
               ~dynamic_tools
               ~reasoning_effort
               ~thread_mode

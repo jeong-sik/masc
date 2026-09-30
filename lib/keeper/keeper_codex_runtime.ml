@@ -1399,6 +1399,16 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
         in
         (match
        Runtime_codex_app_server.run_turn
+         ~handoff_requested:(fun () ->
+           match Keeper_owner_registry.get ~base_path ~keeper_name with
+           | Error _ -> false
+           | Ok owner ->
+             let operations = Keeper_owner.operation_projection owner in
+             (match Keeper_owner.turn_in_flight owner with
+              | Some { lane = Keeper_owner.Autonomous; _ } ->
+                not operations.store_unavailable && operations.has_claimable_queued
+              | Some { lane = (Keeper_owner.Chat_operation | Keeper_owner.Maintenance); _ }
+              | None -> false))
          ~mgr:(Posix_spawn_process_mgr.foreground_mgr ~clock
            ~grace_seconds:Process_eio.child_exit_grace_seconds)
          ~clock

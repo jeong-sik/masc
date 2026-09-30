@@ -25,7 +25,7 @@ val approval_queue_summary :
   now_ts:float ->
   base_path:string ->
   unit ->
-  (approval_summary, Keeper_approval_queue.storage_error) result
+  (approval_summary, Keeper_approval_queue_result.storage_error) result
 (** Read the current approval queue and produce depth + wait-time
     percentiles. Durable store unavailability remains explicit. *)
 
@@ -73,7 +73,7 @@ val gate_tool_events_json_with_pending_result_for_testing :
   now_ts:float ->
   window_minutes:int ->
   ( Keeper_approval_queue_rules_types.pending_approval list
-  , Keeper_approval_queue.storage_error )
+  , Keeper_approval_queue_result.storage_error )
   result ->
   Yojson.Safe.t
 (** Project an injected workspace read result through the production

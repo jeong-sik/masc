@@ -23668,15 +23668,23 @@ and is loaded on demand through keeper_skill.
                         else max 0 (state.resource_scroll + (direction * page)))
                   | Left_pane ->
                       move_list_by_rows state ~delta:(direction * page))
-             (* No row list to page. Overview's two panes and Activity's ring
-                are built by the frame out of text the frame formats, so the
-                count a page needs does not exist at the keypress; Config's
-                five panes each carry a cursor of their own meaning. Activity
-                goes to the newest with g, Tools with Home and End. Left named
-                rather than folded into the arm above, so the day one of them
-                gains a row list this reads as a lie rather than as silence
-                (#35305). *)
-             | Overview | Acting | Config | Tools -> ())
+             | Tools ->
+                 (match scrolled_surface state Tools with
+                  | None -> ()
+                  | Some scrolled ->
+                      let height =
+                        surface_body_height ~rows:(surface_rows state) scrolled
+                      in
+                      state.tools_scroll <-
+                        (if direction > 0 then
+                           Masc_tui_scroll.page_down
+                             ~count:scrolled.sc_count ~height state.tools_scroll
+                         else
+                           Masc_tui_scroll.page_up
+                             ~count:scrolled.sc_count ~height state.tools_scroll))
+             (* Overview's two panes and Activity's ring have no counted row
+                list to page; Config's panes carry cursors of their own. *)
+             | Overview | Acting | Config -> ())
        (* On Config, s and t hop to Resources and Tools and r is the global
           refresh, so the pane takes u, twice, for the destructive restore.
           Its save key is n, answered inside the [n] dispatch below, which

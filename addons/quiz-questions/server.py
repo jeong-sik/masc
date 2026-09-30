@@ -44,7 +44,11 @@ def fact(observation: dict) -> dict:
     record, = evidence([object_value(observation["record"], "fact.record")])
     if record["uri"].startswith(("lane-evidence:", "lane-sequence:")):
         raise InvalidInput(f"fact {observation['id']} cites the host copy, not a record")
-    return {"field": field, "subject": subject, "answer": answer, "record": record}
+    snapshots = evidence(observation.get("evidence"))
+    if not snapshots or snapshots[0]["sha256"] is None:
+        raise InvalidInput(f"fact {observation['id']} is missing immutable snapshot evidence")
+    return {"field": field, "subject": subject, "answer": answer,
+            "record": record, "snapshot": snapshots[0]}
 
 
 def choices_for(question_id: str, answer: str, pool: list[str]) -> list[str]:
@@ -77,7 +81,9 @@ def observe(binding: dict, sources: tuple[Source, ...]) -> dict:
             if template is None:
                 no_template.add(value["field"])
                 continue
-            question_id = stable_id(source.source_id, source.incarnation, item["id"])
+            snapshot = value["snapshot"]
+            question_id = stable_id(source.source_id, source.incarnation, item["id"],
+                                    snapshot["uri"], snapshot["sha256"])
             choices = choices_for(question_id, value["answer"], pool[value["field"]])
             if len(choices) < 2:
                 no_contrast.add(value["field"])
@@ -86,6 +92,7 @@ def observe(binding: dict, sources: tuple[Source, ...]) -> dict:
                            title=template.format(subject=value["subject"]),
                            fields={"question_id": question_id, "field": value["field"],
                                    "choices": choices, "record": value["record"]})
+            question["id"] = question_id
             question["evidence"].append(value["record"])
             rows.append(question)
         status = source.coverage(skipped_kinds)
@@ -104,4 +111,4 @@ def observe(binding: dict, sources: tuple[Source, ...]) -> dict:
 
 
 if __name__ == "__main__":
-    serve("masc-quiz-questions", observe)
+    serve("masc-quiz-questions", observe, version="0.1.2")

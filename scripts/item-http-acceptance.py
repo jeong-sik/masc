@@ -18,6 +18,11 @@ import time
 import urllib.error
 import urllib.request
 
+def require(condition, detail):
+    if not condition:
+        raise RuntimeError(detail)
+
+
 parser = argparse.ArgumentParser()
 parser.add_argument('--output', type=Path, required=True)
 parser.add_argument('--binary', type=Path, required=True)
@@ -30,8 +35,8 @@ root.mkdir(parents=True, exist_ok=False)
 binary = args.binary.resolve()
 dashboard = args.dashboard.resolve()
 identity = json.loads((dashboard / '.build-identity.json').read_text())
-assert identity['schema'] == 'masc.dashboard-build.v1'
-assert identity['source_commit'] == args.source_sha, 'dashboard identity differs'
+require(identity['schema'] == 'masc.dashboard-build.v1', 'dashboard build identity schema differs')
+require(identity['source_commit'] == args.source_sha, 'dashboard identity differs')
 source = subprocess.check_output([str(binary), 'build-commit'], text=True).strip()
 if source != args.source_sha:
     raise SystemExit('native probe source differs from prepared dashboard')
@@ -62,12 +67,15 @@ login = subprocess.run([str(binary), 'login', '--base-path', str(base),
     env=env, capture_output=True, text=True, check=True)
 token = json.loads(login.stdout)['bearer_token']
 origin = f'http://127.0.0.1:{port}'
+# These requests target only the isolated child server and carry local auth.
+# Proxy settings in the invoking shell must not route them elsewhere.
+http = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 records = []
 def request(path, authenticated=True):
     headers = {'Authorization': 'Bearer ' + token} if authenticated else {}
     req = urllib.request.Request(origin + path, headers=headers)
     try:
-        response = urllib.request.urlopen(req, timeout=5)
+        response = http.open(req, timeout=5)
     except urllib.error.HTTPError as error:
         response = error
     with response:
@@ -95,22 +103,22 @@ with (root / 'server.log').open('wb') as log:
             time.sleep(0.2)
         path = '/api/v1/keepers/item-runtime-probe/items'
         status, _ = request(path, False)
-        assert status in (401, 403), ('account route bypassed auth', status)
+        require(status in (401, 403), ('account route bypassed auth', status))
         status, body = request(path)
         account = json.loads(body)
         (root / 'account.json').write_bytes(body)
-        assert status == 200 and account['status'] == 'ready', account
-        assert account['balance_milli'] == '0' and account['owned_items'] == [], account
-        assert len(account['catalog']) == 18, account
+        require(status == 200 and account['status'] == 'ready', account)
+        require(account['balance_milli'] == '0' and account['owned_items'] == [], account)
+        require(len(account['catalog']) == 18, account)
         glasses = next(item for item in account['catalog'] if item['id'] == 'glasses')
-        assert glasses['price_status'] == 'priced' and glasses['price_milli'] == '0', glasses
+        require(glasses['price_status'] == 'priced' and glasses['price_milli'] == '0', glasses)
         status, png = request('/api/v1/keepers/item-runtime-probe/portrait.png?size=96')
-        assert status == 200 and png.startswith(b'\x89PNG\r\n\x1a\n'), status
+        require(status == 200 and png.startswith(b'\x89PNG\r\n\x1a\n'), status)
         (root / 'portrait.png').write_bytes(png)
         status, index = request('/dashboard/', False)
-        assert status == 200, status
-        assert hashlib.sha256(index).hexdigest() == hashlib.sha256(
-            (dashboard / 'index.html').read_bytes()).hexdigest(), 'served index differs'
+        require(status == 200, status)
+        require(hashlib.sha256(index).hexdigest() == hashlib.sha256(
+            (dashboard / 'index.html').read_bytes()).hexdigest(), 'served index differs')
         result = dict(source_sha=source, binary_sha256=hashlib.sha256(binary.read_bytes()).hexdigest(),
             fixture_sha256=config_hashes, dashboard_index_sha256=hashlib.sha256(index).hexdigest(),
             scope='Isolated CI binary over real TCP HTTP; synthetic current-schema paused Keeper metadata, empty test ledger and configured catalog; no lifecycle creation, production rollout or Keeper tool execution',

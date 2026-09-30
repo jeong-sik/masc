@@ -462,7 +462,11 @@ let test_declared_sampling_requires_exact_host_callback () = with_fixture (fun e
   let rejected = ref false in
   let oversized = ref false in
   let raises = ref false and blank_model = ref false in
+  let fail_index = ref false in
   let store = Masc.Lane_addon_store.create ~root:(Filename.concat dir "model-evidence") in
+  let index_directory = Filename.concat (Masc.Lane_addon_store.root store)
+    (Filename.concat "sampling" Digestif.SHA256.(to_hex (digest_string "sampling-worker"))) in
+  let saved_index = index_directory ^ ".saved" in
   let invoke ~route ~request (_ : Mcp_protocol.Sampling.create_message_params) =
     incr calls;
     check string "host owns the selected logical route" "fixture-route" route;
@@ -475,6 +479,9 @@ let test_declared_sampling_requires_exact_host_callback () = with_fixture (fun e
     check bool "request is discoverable before host invocation" true
       (List.exists (fun row -> Yojson.Safe.Util.member "state" row = `String "pending"
         && Yojson.Safe.Util.member "request" row = Types.evidence_to_json request) pending);
+    if !fail_index then (
+      Unix.rename index_directory saved_index;
+      write index_directory "fixture blocks terminal index replacement");
     if !raises then failwith "fixture invocation outcome uncertain"
     else if !rejected then Error "fixture model refusal"
     else Ok {Mcp_protocol.Sampling.role=Assistant;content=Text {type_="text";
@@ -538,6 +545,33 @@ let test_declared_sampling_requires_exact_host_callback () = with_fixture (fun e
   check bool "reopened store discovers terminal request evidence" true
     (List.exists (fun row -> Yojson.Safe.Util.member "state" row = `String "finished"
       && Yojson.Safe.Util.member "outcome" row = Yojson.Safe.Util.member "outcome" references) indexed);
+  fail_index := true;
+  Fun.protect ~finally:(fun () ->
+    fail_index := false;
+    if Sys.file_exists saved_index then (
+      Unix.unlink index_directory;
+      Unix.rename saved_index index_directory)) (fun () ->
+    check bool "terminal index failure does not report success" true
+      (Result.is_error (observe worker "good")));
+  let index_failure = Yojson.Safe.from_file (Filename.concat dir (cid ^ ".sampling-reply"))
+    |> Yojson.Safe.Util.member "error" |> Yojson.Safe.Util.member "message"
+    |> Yojson.Safe.Util.to_string |> Yojson.Safe.from_string in
+  check string "terminal index failure remains uncertain" "outcome_unknown"
+    (Yojson.Safe.Util.member "status" index_failure |> Yojson.Safe.Util.to_string);
+  let recovered_references = Yojson.Safe.Util.member "evidence" index_failure in
+  let recovered_outcome = Yojson.Safe.Util.member "outcome" recovered_references |> read_reference in
+  check string "index failure exposes the retained actual answer" "host answer"
+    (recovered_outcome |> Yojson.Safe.Util.member "response"
+      |> Yojson.Safe.Util.member "content" |> Yojson.Safe.Util.member "text"
+      |> Yojson.Safe.Util.to_string);
+  check bool "retained outcome links the returned request" true
+    (Yojson.Safe.Util.member "request" recovered_outcome
+      = Yojson.Safe.Util.member "request" recovered_references);
+  let interrupted = match Masc.Lane_addon_store.sampling_requests recovered ~instance_id:"sampling-worker" with
+    | Ok rows -> rows | Error detail -> fail detail in
+  check bool "failed terminal replacement leaves the original pending record" true
+    (List.exists (fun row -> Yojson.Safe.Util.member "state" row = `String "pending"
+      && Yojson.Safe.Util.member "request" row = Yojson.Safe.Util.member "request" recovered_references) interrupted);
   rejected := true;
   check bool "model refusal is not a synthetic successful observation" true
     (Result.is_error (observe worker "good"));

@@ -98,11 +98,12 @@ let create ~store ~(package : Types.package) ~instance_id ~route ~invoke () =
       | Ok evidence -> Ok evidence
       | Error detail -> Error (Yojson.Safe.to_string (`Assoc ["status",`String "outcome_unknown";
           "error",`String detail;"request",Types.evidence_to_json request])) in
+    let references = `Assoc ["request",Types.evidence_to_json request;"outcome",Types.evidence_to_json evidence] in
     let* () = match save (Finished evidence) with
       | Ok () -> Ok ()
       | Error detail -> Error (Yojson.Safe.to_string (`Assoc ["status",`String "outcome_unknown";
-          "error",`String detail;"request",Types.evidence_to_json request])) in
-    let references = `Assoc ["request",Types.evidence_to_json request;"outcome",Types.evidence_to_json evidence] in
+          "error",`String detail;"request",Types.evidence_to_json request;
+          "evidence",references])) in
     match outcome with
     | Answer answer ->
         let metadata = match answer.S._meta with Some (`Assoc fields) -> fields | _ -> [] in

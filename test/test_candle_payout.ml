@@ -139,6 +139,7 @@ let state_testable =
     (fun ppf (state : Candle_payout.state) ->
        match state with
        | Candle_payout.No_obligation -> Format.pp_print_string ppf "No_obligation"
+       | Candle_payout.Failed w -> Format.fprintf ppf "Failed %s/%s" w.goal_id w.verification_run_id
        | Candle_payout.Settled -> Format.pp_print_string ppf "Settled"
        | Candle_payout.Waiting w -> Format.fprintf ppf "Waiting %s/%s" w.goal_id w.request_id)
     ( = )

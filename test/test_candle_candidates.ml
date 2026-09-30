@@ -1,3 +1,5 @@
+let () = Candle_status.install_appraiser_check (fun () -> Ok ())
+
 (** The first half of a payout (RFC-goal-candle-ledger 3.2, 3.4): from a waiting
     [PayoutOwed] to [Candidates], and to [Unattributed] when nobody can be paid.
     The Tasks and the Keepers come from injected sources; the ledger is the real

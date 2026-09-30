@@ -16,7 +16,12 @@ type task_lookup =
       }
   | Deleted
 
-type unattributed_reason = No_candidates
+type attribution = {
+  grade : Candle_grade.t;
+  grade_trace : Candle_appraisal.trace;
+  relations : Candle_appraisal.task_relation list;
+}
+type unattributed_reason = No_candidates | All_unrelated of attribution | No_related_keepers of attribution
 
 type body =
   | Snapshot of
@@ -53,6 +58,8 @@ type body =
       ; verification_run_id : string
       ; reason : unattributed_reason
       }
+  | Paid of Candle_payment.t
+  | Payout_failed of { goal_id : string; request_id : string; verification_run_id : string; due_date : string }
 
 type t =
   { at : Candle_time.t
@@ -64,6 +71,8 @@ let kind = function
   | Payout_owed _ -> "payout_owed"
   | Candidates _ -> "candidates"
   | Unattributed _ -> "unattributed"
+  | Paid _ -> "paid"
+  | Payout_failed _ -> "payout_failed"
 ;;
 
 let nullable_text = function
@@ -102,7 +111,16 @@ let lookup_fields task_id : task_lookup -> (string * Yojson.Safe.t) list = funct
 
 let unattributed_reason_text = function
   | No_candidates -> "no_candidates"
+  | All_unrelated _ -> "all_unrelated"
+  | No_related_keepers _ -> "no_related_keepers"
 ;;
+
+let attribution_fields = function
+  | No_candidates -> []
+  | All_unrelated a | No_related_keepers a ->
+    ["grade", `String (Candle_grade.to_string a.grade);
+     "grade_trace", Candle_appraisal.trace_json a.grade_trace;
+     "relations", `List (List.map Candle_appraisal.relation_json a.relations)]
 
 let body_fields : body -> (string * Yojson.Safe.t) list = function
   | Snapshot s ->
@@ -139,7 +157,11 @@ let body_fields : body -> (string * Yojson.Safe.t) list = function
     ; "request_id", `String u.request_id
     ; "verification_run_id", `String u.verification_run_id
     ; "reason", `String (unattributed_reason_text u.reason)
-    ]
+    ] @ attribution_fields u.reason
+  | Paid payment -> Candle_payment.to_fields payment
+  | Payout_failed f -> ["goal_id", `String f.goal_id; "request_id", `String f.request_id;
+      "verification_run_id", `String f.verification_run_id;
+      "reason", `String "unreadable_due_date"; "due_date", `String f.due_date]
 ;;
 
 let to_yojson (event : t) : Yojson.Safe.t =
@@ -259,22 +281,35 @@ let candidates_of_fields ~context fields =
   Ok (Candidates { goal_id; request_id; verification_run_id; tasks; candidate_task_ids; candidate_keepers })
 ;;
 
-let unattributed_reason_of_json json =
-  let* text = Candle_json.as_string json in
-  match text with
-  | "no_candidates" -> Ok No_candidates
-  | unknown -> Error (Printf.sprintf "unknown reason %S" unknown)
-;;
-
 let unattributed_of_fields ~context fields =
   let field key decode fields = Candle_json.field ~context key decode fields in
   let* goal_id, fields = field "goal_id" Candle_json.as_non_blank fields in
   let* request_id, fields = field "request_id" Candle_json.as_non_blank fields in
   let* verification_run_id, fields = field "verification_run_id" Candle_json.as_non_blank fields in
-  let* reason, fields = field "reason" unattributed_reason_of_json fields in
+  let* reason_text, fields = field "reason" Candle_json.as_string fields in
+  let* reason, fields = match reason_text with
+    | "no_candidates" -> Ok (No_candidates, fields)
+    | "all_unrelated" | "no_related_keepers" ->
+      let* grade, fields = field "grade" Candle_appraisal.grade_of_json fields in
+      let* grade_trace, fields = field "grade_trace" Candle_appraisal.trace_of_json fields in
+      let* relations, fields = field "relations" (Candle_json.as_list Candle_appraisal.relation_of_json) fields in
+      let attribution = {grade; grade_trace; relations} in
+      Ok ((if reason_text = "all_unrelated" then All_unrelated attribution else No_related_keepers attribution), fields)
+    | _ -> Error "unknown unattributed reason" in
   let* () = Candle_json.finish ~context fields in
   Ok (Unattributed { goal_id; request_id; verification_run_id; reason })
 ;;
+
+let payout_failed_of_fields ~context fields =
+  let field key decode fields = Candle_json.field ~context key decode fields in
+  let* goal_id, fields = field "goal_id" Candle_json.as_non_blank fields in
+  let* request_id, fields = field "request_id" Candle_json.as_non_blank fields in
+  let* verification_run_id, fields = field "verification_run_id" Candle_json.as_non_blank fields in
+  let* reason, fields = field "reason" Candle_json.as_string fields in
+  let* () = if reason = "unreadable_due_date" then Ok () else Error "unknown payout failure" in
+  let* due_date, fields = field "due_date" Candle_json.as_string fields in
+  let* () = Candle_json.finish ~context fields in
+  Ok (Payout_failed {goal_id;request_id;verification_run_id;due_date})
 
 let of_yojson json =
   let context = "candle event" in
@@ -288,6 +323,8 @@ let of_yojson json =
     | "payout_owed" -> payout_owed_of_fields ~context fields
     | "candidates" -> candidates_of_fields ~context fields
     | "unattributed" -> unattributed_of_fields ~context fields
+    | "paid" -> Result.map (fun p -> Paid p) (Candle_payment.of_yojson (`Assoc fields))
+    | "payout_failed" -> payout_failed_of_fields ~context fields
     | unknown -> Error (Printf.sprintf "%s: unknown kind %S" context unknown)
   in
   Ok { at; body }

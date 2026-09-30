@@ -1465,11 +1465,13 @@ let start_post_ready_owner_lanes
   Server_model_setup_resume.install ~sw
     ~base_path:(Mcp_server.workspace_config state).base_path
     ~resume:resume_model_configuration;
+  Candle_status.install_appraiser_check Server_candle_appraiser.available;
   Candle_status.report_at_start ~base_path:(Mcp_server.workspace_config state).base_path;
   let start_authority () =
     start_completion_authority ~sw ~clock state;
     start_goal_verifier ~sw state;
-    Candle_payout_worker.start ~sw ~config:(Mcp_server.workspace_config state);
+    Candle_payout_worker.start ~sw ~config:(Mcp_server.workspace_config state)
+      ~appraise:(Server_candle_appraiser.run ~base_path:(Mcp_server.workspace_config state).base_path);
     Server_workspace_memory_curator.start ~sw
       ~base_path:(Mcp_server.workspace_config state).base_path
   in

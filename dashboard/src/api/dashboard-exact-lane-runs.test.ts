@@ -233,6 +233,17 @@ describe('parseExactLaneRunsResponse', () => {
 })
 
 describe('parseExactLaneRunResponse', () => {
+  it('retains Candle appraisal input, output and selected slot', () => {
+    const run = parseExactLaneRunResponse(detailFixture({
+      lane: 'candle_appraiser', actor: '/workspace/candle', selected_slot: 'appraisal.slot',
+      input: { kind: 'exact', payload: { goal_id: 'goal-1' } }, output: { grade: 'medium' },
+    }))
+    expect(run).toMatchObject({
+      lane: 'candle_appraiser', actor: '/workspace/candle', selectedSlot: 'appraisal.slot',
+      input: { kind: 'exact', payload: { goal_id: 'goal-1' } }, output: { grade: 'medium' },
+    })
+  })
+
   it('keeps a Vendor System One answer separate from the selected-slot contract', () => {
     const run = parseExactLaneRunResponse(detailFixture({
       lane: 'board_attention_exact',

@@ -39,7 +39,7 @@ let append_when_still_open ~base_path (waiting : Candle_payout.waiting) ~still_n
               && String.equal open_payout.verification_run_id waiting.verification_run_id
               && still_needed events ->
          Ok (rows, Written)
-       | Candle_payout.Waiting _ | Candle_payout.No_obligation | Candle_payout.Settled ->
+       | Candle_payout.Waiting _ | Candle_payout.No_obligation | Candle_payout.Failed _ | Candle_payout.Settled ->
          Ok ([], Not_written)))
 ;;
 

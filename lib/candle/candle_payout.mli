@@ -16,10 +16,12 @@ type waiting =
 type state =
   | No_obligation  (** Nothing is owed: no [PayoutOwed] is left open. *)
   | Waiting of waiting  (** The last [PayoutOwed], still open. *)
+  | Failed of waiting (** Deterministic failure for this exact verifier run. *)
   | Settled  (** The Goal was paid, or found to have nobody to pay. *)
 
 val state : goal_id:string -> Candle_event.t list -> state
-(** A Goal is [Settled] once it has an [Unattributed] row. Otherwise it [Waiting]
+(** A Goal is [Settled] once it has a [Paid] or [Unattributed] row. A deterministic
+    [Payout_failed] is [Failed], distinct from no obligation. Otherwise it is [Waiting]
     for the payout of its last [PayoutOwed], if it has one. The Goal's phase is
     not consulted: reopening or dropping the Goal leaves the payout as it was. *)
 
@@ -41,10 +43,13 @@ val owed_pass :
       on when the Goal passed, so the Goal has nothing to be paid for.
     - the Goal already owes a payout, open or settled. A payout is owed once per
       Goal, and confirming again, or confirming a later pass after a reopen,
-      adds no second one. *)
+      adds no second one. A [Failed] obligation admits a different, not-yet-failed
+      verifier run, so a corrected due date can be verified and confirmed again. *)
 
 type pass =
   { goal_created_at : Candle_time.t
+  ; goal : Candle_appraisal.goal
+  ; due_date : string option
   ; linked_task_ids : string list
   }
 (** What the payout of a [Waiting] Goal takes from its [Snapshot]. *)
@@ -59,6 +64,12 @@ type candidates =
 
 val candidates_of : waiting -> Candle_event.t list -> candidates option
 (** What the [Candidates] row written for the payout's request and verifier run decided. *)
+
+val validate_settlement : waiting -> Candle_event.t list -> Candle_event.body -> (unit, string) result
+(** Cross-record admission: exact confirmed run, durable candidate Task coverage,
+    unique relation decisions and exactly the eligible related Keeper recipients.
+    Payment arithmetic alone cannot prove recipient eligibility. Call before the
+    atomic append, or against the preceding ledger when validating a fold. *)
 
 val decide_candidates :
   goal_created_at:Candle_time.t

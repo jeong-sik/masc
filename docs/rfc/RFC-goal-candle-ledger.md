@@ -97,8 +97,8 @@ related: ["every-lane-is-one-row-in-one-registry", "exact-lane-walks-one-slot-li
 | `Snapshot` | 검증기의 통과 결과를 검증 원장에 커밋하기 직전 | goal_id, 검증 요청 id, 검증 실행 id(`verification_run_id`), criterion revision, 검증 통과 시각, Goal 생성 시각, 그때의 기한(Goal 이 들고 있던 그대로. 없을 수 있다), 제목·metric·target, 그때 연결된 Task 의 id 목록 |
 | `PayoutOwed` | 사람이 확정할 때. 확정 기록을 저장한 다음, Goal phase 를 저장하기 전에(3.2) | goal_id, 검증 요청 id, 검증 실행 id(`verification_run_id`), 검증 통과 시각, 확정 시각 |
 | `Candidates` | 일꾼이 Task 를 읽은 뒤, 모델을 부르기 전에 | goal_id, 검증 요청 id, 검증 실행 id(`verification_run_id`), `Snapshot` 의 Task 마다 상태(찾음, 삭제됨)와 찾은 Task 의 제목·담당자·상태·끝난 시각, 후보 Task 와 후보 keeper 목록 |
-| `PayoutFailed` | 다시 시도해도 결과가 같은 이유가 생겼을 때(지금은 기한을 읽을 수 없음 하나) | goal_id, 검증 요청 id, 이유 |
-| `Paid` | 지급할 때. 한 줄에 전부 적는다 | goal_id, 검증 요청 id, 등급, 총액, 답한 lane 슬롯(모델) id(없을 수 있다), 후보 Task 마다 관계 판정, keeper 별 가중치·몫·감액 계수·지급액, 감액에 쓴 값(기준 시각, 기한, 감액률, 바닥) |
+| `PayoutFailed` | 다시 시도해도 결과가 같은 이유가 생겼을 때(지금은 기한을 읽을 수 없음 하나) | goal_id, 검증 요청 id, 검증 실행 id(`verification_run_id`), 이유 |
+| `Paid` | 지급할 때. 한 줄에 전부 적는다 | goal_id, 검증 요청 id, 검증 실행 id(`verification_run_id`), 등급, 총액, 답한 lane 슬롯(모델) id(없을 수 있다), 후보 Task 마다 관계 판정, keeper 별 가중치·몫·감액 계수·지급액, 감액에 쓴 값(기준 시각, 기한, 감액률, 바닥) |
 | `Unattributed` | 받을 keeper 가 없어 지급 없이 끝낼 때 | goal_id, 검증 요청 id, 검증 실행 id(`verification_run_id`), 이유(후보 없음, 관계있는 Task 없음) |
 | `Purchased` | keeper 가 아이템을 살 때 | keeper, 아이템, 낸 금액 |
 | `Equipped` | keeper 가 착용을 바꿀 때 | keeper, 슬롯, 아이템(이름에서 정한 기본 장신구로 되돌릴 때는 `Default`) |
@@ -162,7 +162,7 @@ related: ["every-lane-is-one-row-in-one-registry", "exact-lane-walks-one-slot-li
      | (가) | 없다 | 처음부터 한다 | 지급 의무가 없다 |
      | (나) | 확정 기록만 있다. phase 는 `Awaiting_confirmation` | (나)와 (다)를 한다. `confirmed_at` 은 처음 확정한 시각이다 | 지급 의무가 없다. Goal 이 완료된 적이 없다. 재오픈하면 확정 기록이 지워지고, 다시 통과해 확정하면 새 `Snapshot` 과 새 `PayoutOwed` 를 쓴다 |
      | (다) | 확정 기록과 `PayoutOwed`. phase 는 `Awaiting_confirmation` | `PayoutOwed` 를 새로 쓰지 않고(3.1) phase 만 옮긴다 | `PayoutOwed` 가 남아 지급 대기다. 완료되지 않은 Goal 에 지급이 나간다. 7장에서 운영자가 정한다 |
-**[사실: 현재 구현 범위]** `Candle_payout_worker`는 `Candle_candidates.drain_once`로 후보를 준비하고, 후보 keeper가 없으면 `Unattributed`로 끝낸다(`lib/candle_runtime/candle_payout_worker.ml`, `lib/candle_runtime/candle_candidates.ml`). 모델의 등급·관계 판정과 `Paid` 지급은 다음 단계의 설계다. 서버 maintenance도 후보 일꾼을 다시 깨운다(`lib/server/server_bootstrap_maintenance.ml`).
+**[사실: 현재 구현 범위]** `Candle_payout_worker`는 `Candle_candidates.drain_once`로 후보를 준비하고, 후보 keeper가 없으면 `Unattributed`로 끝낸다. 후보가 있는 지급 의무는 `Candle_appraise.settle_one`을 통해 등급·관계·가중치를 판정하고 `Paid` 또는 `Unattributed`로 기록한다(`lib/candle_runtime/candle_payout_worker.ml`, `lib/candle_runtime/candle_candidates.ml`, `lib/candle_runtime/candle_appraise.ml`). 서버 maintenance는 같은 일꾼을 다시 깨운다(`lib/server/server_bootstrap_maintenance.ml`).
 
 3. **후보와 지급.** 일꾼이 지급 대기 Goal 마다 아래를 한다. 지급 대기 목록은 원장에서 읽고(3.1) Goal 의 phase 는 보지 않는다.
    - Task 를 읽어 후보를 정하고 `Candidates` 를 쓴다(3.4). 같은 Goal id·검증 요청 id·검증 실행 id의 `Candidates` 가 이미 있으면 그것을 쓴다.

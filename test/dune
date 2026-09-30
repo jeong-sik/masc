@@ -7719,3 +7719,9 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_skills_usage_summary)))
+
+(include stanzas/test_candle_appraisal_flow.inc)
+
+(include stanzas/test_candle_balance.inc)
+
+(include stanzas/test_candle_appraiser_transport.inc)

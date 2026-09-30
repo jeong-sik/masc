@@ -316,6 +316,7 @@ let test_proof_pending_drains_to_completed () =
    Candle ledger before its passing result reaches the verification ledger. *)
 
 let enable_candle (config : Workspace.config) =
+  Candle_status.install_appraiser_check (fun () -> Ok ());
   let path = Config_dir_resolver.candle_toml_path_for_base_path ~base_path:config.base_path in
   let rec mkdir_p dir =
     if not (Sys.file_exists dir)

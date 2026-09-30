@@ -11,10 +11,13 @@ type waiting =
 type state =
   | No_obligation
   | Waiting of waiting
+  | Failed of waiting
   | Settled
 
 type pass =
   { goal_created_at : Candle_time.t
+  ; goal : Candle_appraisal.goal
+  ; due_date : string option
   ; linked_task_ids : string list
   }
 
@@ -28,6 +31,8 @@ let is_settled ~goal_id events =
     (fun (event : Candle_event.t) ->
        match event.body with
        | Candle_event.Unattributed unattributed -> String.equal unattributed.goal_id goal_id
+       | Candle_event.Paid p -> String.equal p.identity.goal_id goal_id
+       | Candle_event.Payout_failed _ -> false
        | Candle_event.Snapshot _ | Candle_event.Payout_owed _ | Candle_event.Candidates _ ->
          false)
     events
@@ -48,16 +53,24 @@ let last_owed ~goal_id events =
        | Candle_event.Payout_owed _
        | Candle_event.Snapshot _
        | Candle_event.Candidates _
-       | Candle_event.Unattributed _ -> last)
+       | Candle_event.Unattributed _ | Candle_event.Paid _ | Candle_event.Payout_failed _ -> last)
     None
     events
 ;;
+
+let failed_run ~goal_id ~request_id ~verification_run_id events =
+  List.exists (fun (event : Candle_event.t) -> match event.body with
+    | Candle_event.Payout_failed f -> f.goal_id = goal_id && f.request_id = request_id
+        && f.verification_run_id = verification_run_id
+    | Candle_event.Snapshot _ | Candle_event.Payout_owed _ | Candle_event.Candidates _
+    | Candle_event.Unattributed _ | Candle_event.Paid _ -> false) events
 
 let state ~goal_id events =
   if is_settled ~goal_id events
   then Settled
   else (
     match last_owed ~goal_id events with
+    | Some owed when failed_run ~goal_id ~request_id:owed.request_id ~verification_run_id:owed.verification_run_id events -> Failed owed
     | Some owed -> Waiting owed
     | None -> No_obligation)
 ;;
@@ -69,7 +82,7 @@ let waiting events =
          match event.body with
          | Candle_event.Payout_owed owed ->
            if List.mem owed.goal_id seen then seen else owed.goal_id :: seen
-         | Candle_event.Snapshot _ | Candle_event.Candidates _ | Candle_event.Unattributed _ ->
+         | Candle_event.Snapshot _ | Candle_event.Candidates _ | Candle_event.Unattributed _ | Candle_event.Paid _ | Candle_event.Payout_failed _ ->
            seen)
       []
       events
@@ -79,7 +92,7 @@ let waiting events =
     (fun goal_id ->
        match state ~goal_id events with
        | Waiting owed -> Some owed
-       | No_obligation | Settled -> None)
+       | No_obligation | Failed _ | Settled -> None)
     goal_ids
 ;;
 
@@ -97,19 +110,22 @@ let find_pass ~goal_id ~request_id ~verification_run_id ~passed_at events =
          Some
            ( snapshot.passed_at
            , { goal_created_at = snapshot.goal_created_at
+             ; goal = {Candle_appraisal.title = snapshot.title; metric = snapshot.metric; target_value = snapshot.target_value}
+             ; due_date = snapshot.due_date
              ; linked_task_ids = snapshot.linked_task_ids
              } )
        | Candle_event.Snapshot _
        | Candle_event.Payout_owed _
        | Candle_event.Candidates _
-       | Candle_event.Unattributed _ -> None)
+       | Candle_event.Unattributed _ | Candle_event.Paid _ | Candle_event.Payout_failed _ -> None)
     events
 ;;
 
 let owed_pass ~goal_id ~request_id ~verification_run_id ~passed_at events =
   match state ~goal_id events with
   | Waiting _ | Settled -> None
-  | No_obligation ->
+  | (No_obligation | Failed _) when failed_run ~goal_id ~request_id ~verification_run_id events -> None
+  | No_obligation | Failed _ ->
     Option.map fst (find_pass ~goal_id ~request_id ~verification_run_id ~passed_at events)
 ;;
 
@@ -137,9 +153,59 @@ let candidates_of (waiting : waiting) events =
        | Candle_event.Candidates _
        | Candle_event.Snapshot _
        | Candle_event.Payout_owed _
-       | Candle_event.Unattributed _ -> None)
+       | Candle_event.Unattributed _ | Candle_event.Paid _ | Candle_event.Payout_failed _ -> None)
     events
 ;;
+
+let validate_settlement (waiting : waiting) events body =
+  let ( let* ) = Result.bind in
+  let matches goal_id request_id verification_run_id =
+    goal_id = waiting.goal_id && request_id = waiting.request_id
+    && verification_run_id = waiting.verification_run_id in
+  let candidates = List.find_map (fun (event : Candle_event.t) -> match event.body with
+    | Candle_event.Candidates c when matches c.goal_id c.request_id c.verification_run_id ->
+      Some (c.tasks, c.candidate_task_ids, c.candidate_keepers)
+    | Candle_event.Candidates _ | Candle_event.Snapshot _ | Candle_event.Payout_owed _
+    | Candle_event.Unattributed _ | Candle_event.Paid _ | Candle_event.Payout_failed _ -> None) events in
+  let* tasks, ids, keepers = match candidates with
+    | None -> Error "settlement requires durable Candidates" | Some c -> Ok c in
+  let recipients relations =
+    let actual = List.map (fun (r : Candle_appraisal.task_relation) -> r.task_id) relations in
+    if List.length actual <> List.length (List.sort_uniq String.compare actual)
+       || List.sort String.compare actual <> List.sort String.compare ids then
+      Error "relation decisions must cover each durable candidate task exactly once"
+    else if List.exists (fun id -> match List.assoc_opt id tasks with
+        | Some (Candle_event.Found _) -> false | Some Candle_event.Deleted | None -> true) ids then
+      Error "durable candidate task has no found row"
+    else Ok (List.filter_map (fun (r : Candle_appraisal.task_relation) ->
+      match r.relation, List.assoc_opt r.task_id tasks with
+      | Candle_appraisal.Related, Some (Candle_event.Found {assignee=Some name;_}) when List.mem name keepers -> Some name
+      | Candle_appraisal.Related, (Some (Candle_event.Found _) | Some Candle_event.Deleted | None)
+      | Candle_appraisal.Unrelated, _ -> None) relations |> List.sort_uniq String.compare) in
+  match body with
+  | Candle_event.Paid p when matches p.identity.goal_id p.identity.request_id p.identity.verification_run_id ->
+    let* eligible = recipients p.relations in
+    if eligible = [] then Error "Paid has no related candidate keeper"
+    else Candle_appraisal.validate_weights ~keepers:eligible ~weight_max:p.weight_max
+      (List.map (fun (a : Candle_payment.allocation) -> a.keeper, a.weight) p.allocations)
+  | Candle_event.Unattributed u when matches u.goal_id u.request_id u.verification_run_id ->
+    (match u.reason with
+     | Candle_event.No_candidates -> if keepers = [] then Ok () else Error "candidate keepers exist"
+     | Candle_event.All_unrelated a ->
+       let* eligible = recipients a.relations in
+       if eligible = [] && List.for_all (fun (r : Candle_appraisal.task_relation) -> r.relation = Candle_appraisal.Unrelated) a.relations
+       then Ok () else Error "related tasks cannot close as all_unrelated"
+     | Candle_event.No_related_keepers a ->
+       let* eligible = recipients a.relations in
+       if eligible = [] && List.exists (fun (r : Candle_appraisal.task_relation) -> r.relation = Candle_appraisal.Related) a.relations
+       then Ok () else Error "no_related_keepers does not match relation decisions")
+  | Candle_event.Payout_failed f when matches f.goal_id f.request_id f.verification_run_id ->
+    (match pass_of waiting events with
+     | Some pass when pass.due_date = Some f.due_date -> Ok ()
+     | Some _ | None -> Error "failed due date differs from the confirmed Snapshot")
+  | Candle_event.Paid _ | Candle_event.Unattributed _ | Candle_event.Payout_failed _
+  | Candle_event.Snapshot _ | Candle_event.Payout_owed _ | Candle_event.Candidates _ ->
+    Error "settlement does not name the confirmed verifier run"
 
 let is_candidate ~goal_created_at ~confirmed_at = function
   | Candle_event.Found { status = Candle_event.Done { completed_at }; _ } ->

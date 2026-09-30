@@ -239,7 +239,13 @@ def run_grouped_history(executable: str, captures: Path | None) -> None:
     captured["instances"] = [old_runs[0], active, *old_runs[1:]]
     captured["configuration"]["declarations"] = [{"id": "report", "source_path": active["configuration"]["source_path"],
         "desired_revision": "1", "applied_revision": "1", "instance_id": active["instance_id"]}]
-    fixtures["/api/v1/lane-addons"] = (200, captured)
+    inventory_reads: list[str] = []
+    def inventory(path: str):
+        inventory_reads.append(path)
+        response = json.loads(json.dumps(captured))
+        response["rows"][0]["title"] = f"Fresh DOM inventory {len(inventory_reads)}"
+        return 200, response
+    fixtures["/api/v1/lane-addons"] = terminal.PathHttpResponse(inventory)
     slice_reads: list[str] = []
 
     def retained_slice(path: str):
@@ -258,7 +264,8 @@ def run_grouped_history(executable: str, captures: Path | None) -> None:
         screen = terminal.screen_text(terminal.frame_containing(opened, b"Retained history"))
         if b"> Current reporter" not in screen or b"Repeated counters" in screen:
             raise AssertionError(f"old workers crowded current installations: {screen!r}")
-        terminal.send_and_wait(process, master, output, b"\r", b"Current reporter")
+        first_detail_marker = f"Fresh DOM inventory {len(inventory_reads) + 1}".encode()
+        terminal.send_and_wait(process, master, output, b"\r", first_detail_marker)
         terminal.send_and_wait(process, master, output, b"\x1b", b"h:open")
         history = terminal.send_and_wait(process, master, output, b"h", b"Instance retained-0")
         history_screen = terminal.screen_text(terminal.frame_containing(history, b"Instance retained-0"))
@@ -276,6 +283,15 @@ def run_grouped_history(executable: str, captures: Path | None) -> None:
         returned = terminal.send_and_wait(process, master, output, b"h", b"> Current reporter")
         if b"Repeated counters" in terminal.screen_text(returned):
             raise AssertionError("returning to installations expanded retained workers")
+        before_reopen = len(inventory_reads)
+        live_marker = f"Fresh DOM inventory {before_reopen + 1}".encode()
+        live = terminal.send_and_wait(process, master, output, b"\r", live_marker)
+        if len(inventory_reads) <= before_reopen:
+            raise AssertionError("live detail reused the retained output instead of fetching current inventory")
+        live_screen = terminal.screen_text(terminal.frame_containing(live, live_marker))
+        if b"Preserved old result" in live_screen or b"No observations yet" in live_screen:
+            raise AssertionError(f"live detail retained another run's slice: {live_screen!r}")
+        terminal.send_and_wait(process, master, output, b"\x1b", b"> Current reporter")
         terminal.send_and_wait(process, master, output, b"q", b"MASC Dashboard")
         os.write(master, b"q")
 

@@ -84,6 +84,24 @@ let test_status_misses_do_not_persist () = fixture (fun root ledger ->
   check bool "torn tail remains a corruption, not a successful prefix" true
     (match D.find ledger ~caller:payload.caller ~operation_id:operation with
      | Error (D.Corrupt _) -> true | _ -> false))
+let test_unknown_mutations_do_not_persist () = fixture (fun root ledger ->
+  let check_missing ledger operation_id =
+    check bool "unknown commit retains typed refusal" true
+      (D.commit ledger ~caller:payload.caller ~operation_id ~seq:7=Error D.Unknown_operation);
+    check bool "unknown recipient result retains typed refusal" true
+      (D.recipient_result ledger ~caller:payload.caller ~operation_id
+        ~recipient:"keeper-a" D.Accepted=Error D.Unknown_operation) in
+  let missing_root=Filename.concat root "not-created" in
+  check_missing (D.create ~root:missing_root) operation;
+  check bool "mutation misses do not create directory" false (Sys.file_exists missing_root);
+  let _admitted=require (D.admit ledger payload) in
+  let before=Sys.readdir root |> Array.to_list |> List.sort String.compare in
+  List.iter (fun id -> check_missing ledger (require (D.Request_id.of_string id)))
+    ["never-committed-1";"never-committed-2";"never-committed-3"];
+  check (list string) "mutation misses leave no empty journals" before
+    (Sys.readdir root |> Array.to_list |> List.sort String.compare);
+  let committed=require (D.commit ledger ~caller:payload.caller ~operation_id:operation ~seq:7) in
+  check bool "existing admitted operation still mutates" true (committed.record.workspace=D.Committed 7))
 let test_primary_and_settlement_are_preserved () = fixture (fun root ledger ->
   let _admitted=require (D.admit ledger payload) in
   let io : Fs_compat.private_jsonl_transaction_io_for_testing = {
@@ -120,6 +138,7 @@ let test_primary_and_settlement_are_preserved () = fixture (fun root ledger ->
      | Error (D.Settlement_failed {primary=D.Corrupt _;cleanup}) -> cleanup<>""
      | _ -> false))
 let () = run "Durable optional Lane Broadcast intentions" ["recovery",[
+  test_case "unknown mutations leave no durable files" `Quick test_unknown_mutations_do_not_persist;
   test_case "status misses leave no durable files" `Quick test_status_misses_do_not_persist;
   test_case "primary and descriptor settlement outcomes" `Quick test_primary_and_settlement_are_preserved;
   test_case "reopened commit and partial recipient obligations" `Quick test_restart_and_partial_fanout;

@@ -3582,10 +3582,10 @@ let read_private_jsonl_rows_locked_with_io_for_testing ~io path =
   read_private_jsonl_rows_locked_with_io ~io path
 ;;
 
-let update_private_file_durable_locked_with_io ~io path decide =
+let update_private_file_durable_locked_with_io ?(create=true) ~io path decide =
   test_exec_home_guard ~op:"update_private_file_durable_locked" path;
   let dir = Filename.dirname path in
-  mkdir_p_memoized dir;
+  if create then mkdir_p_memoized dir;
   let path_mu = get_append_path_mutex path in
   run_blocking_private_file_transaction
     ~label:"fs-compat-durable-update"
@@ -3594,7 +3594,7 @@ let update_private_file_durable_locked_with_io ~io path decide =
     Stdlib.Mutex.protect path_mu (fun () ->
       let fd =
         Unix.openfile path
-          [ Unix.O_RDWR; Unix.O_CREAT; Unix.O_APPEND; Unix.O_CLOEXEC ]
+          ([ Unix.O_RDWR; Unix.O_APPEND; Unix.O_CLOEXEC ] @ if create then [Unix.O_CREAT] else [])
           0o600
       in
       private_jsonl_with_fd_outcome
@@ -3624,15 +3624,15 @@ let update_private_file_durable_locked_with_io ~io path decide =
               |> Result.map (fun () -> result))))
 ;;
 
-let update_private_file_durable_locked_result path decide =
-  update_private_file_durable_locked_with_io
+let update_private_file_durable_locked_result ?(create=true) path decide =
+  update_private_file_durable_locked_with_io ~create
     ~io:private_jsonl_transaction_unix_io
     path
     decide
 ;;
 
-let update_private_file_durable_locked_with_io_for_testing ~io path decide =
-  update_private_file_durable_locked_with_io ~io path decide
+let update_private_file_durable_locked_with_io_for_testing ?(create=true) ~io path decide =
+  update_private_file_durable_locked_with_io ~create ~io path decide
 ;;
 
 let rewrite_private_file_durable_locked_result path decide =

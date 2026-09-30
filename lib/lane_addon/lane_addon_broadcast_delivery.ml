@@ -12,9 +12,9 @@ type error = Invalid_input of string | Conflict | Unknown_operation | Corrupt of
 type receipt = {record:record;settlement_error:string option}
 type recovery = {pending:receipt list;settled_with_cleanup:receipt list}
 let create ~root = {root;io=None}
-let transaction t path decide = match t.io with
-  | None -> Fs_compat.update_private_file_durable_locked_result path decide
-  | Some io -> Fs_compat.update_private_file_durable_locked_with_io_for_testing ~io path decide
+let transaction ?(create=true) t path decide = match t.io with
+  | None -> Fs_compat.update_private_file_durable_locked_result ~create path decide
+  | Some io -> Fs_compat.update_private_file_durable_locked_with_io_for_testing ~create ~io path decide
 module For_testing = struct
   let create ~root ~io = {root;io=Some io}
 end
@@ -97,10 +97,10 @@ let protect f = try f () with
   | Sys_error e -> Error (Io_error e)
   | Unix.Unix_error (e,call,arg) -> Error (Io_error (call ^ " " ^ arg ^ ": " ^ Unix.error_message e))
   | Yojson.Json_error e -> Error (Corrupt e)
-let transact t ~caller ~operation_id decide =
+let transact ~create t ~caller ~operation_id decide =
   if String.trim caller="" then Error (Invalid_input "authenticated caller is required") else protect (fun () ->
-  Fs_compat.mkdir_p t.root;
-  let outcome = transaction t (path t caller operation_id)
+  if create then Fs_compat.mkdir_p t.root;
+  let* outcome = try Ok (transaction ~create t (path t caller operation_id)
     (fun bytes -> match decode bytes with
       | Error e -> None,Error e
       | Ok existing ->
@@ -110,7 +110,8 @@ let transact t ~caller ~operation_id decide =
             | _ -> decide existing in
           match checked with
           | Error e -> None,Error e
-          | Ok (event,record) -> Option.map (fun json -> Yojson.Safe.to_string json ^ "\n") event,Ok record) in
+          | Ok (event,record) -> Option.map (fun json -> Yojson.Safe.to_string json ^ "\n") event,Ok record))
+    with Unix.Unix_error (Unix.ENOENT,_,_) when not create -> Error Unknown_operation in
   match outcome with
   | Fs_compat.Private_file_succeeded result -> Result.map (fun r -> {record=r;settlement_error=None}) result
   | Fs_compat.Private_file_succeeded_with_cleanup_failure {value;cleanup_failure} ->
@@ -123,7 +124,7 @@ let transact t ~caller ~operation_id decide =
         cleanup=Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure}))
 let admit t payload =
   let* ()=validate payload in
-  transact t ~caller:payload.caller ~operation_id:payload.operation_id (function
+  transact ~create:true t ~caller:payload.caller ~operation_id:payload.operation_id (function
     | Some r when r.payload=payload -> Ok (None,r)
     | Some _ -> Error Conflict
     | None -> let* r=initial (event_payload payload) in Ok (Some (event_payload payload),r))
@@ -162,7 +163,7 @@ let find t ~caller ~operation_id =
         cleanup=Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure}))
 let commit t ~caller ~operation_id ~seq =
   if seq<=0 then Error (Invalid_input "workspace sequence must be positive") else
-  transact t ~caller ~operation_id (function
+  transact ~create:false t ~caller ~operation_id (function
     | None -> Error Unknown_operation
     | Some r -> match r.workspace with
       | Committed previous when previous=seq -> Ok (None,r)
@@ -170,7 +171,7 @@ let commit t ~caller ~operation_id ~seq =
       | Uncommitted -> let event=`Assoc ["event",`String "committed";"seq",`Int seq] in
           let* next=transition r event in Ok (Some event,next))
 let recipient_result t ~caller ~operation_id ~recipient state =
-  transact t ~caller ~operation_id (function
+  transact ~create:false t ~caller ~operation_id (function
     | None -> Error Unknown_operation
     | Some r ->
         let status,error=match state with Accepted -> "accepted",`Null

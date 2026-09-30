@@ -1216,6 +1216,7 @@ val read_private_jsonl_slice_locked_with_io_for_testing :
   private_file_transaction_outcome
 
 val update_private_file_durable_locked_with_io_for_testing :
+  ?create:bool ->
   io:private_jsonl_transaction_io_for_testing ->
   string ->
   (string -> string option * 'a) ->
@@ -1289,8 +1290,11 @@ val durable_append_error_to_string : durable_append_error -> string
     cached JSONL writers without closing their already-flushed descriptors.
     When the Eio filesystem is active, the transaction and [decide] run in a
     system thread so a contended file cannot stop unrelated fibers; [decide]
-    therefore must not perform Eio effects. *)
+    therefore must not perform Eio effects. With [create=false], no parent
+    directory or file is created; a missing path raises [Unix.ENOENT] before
+    [decide] can run. Existing-file locking and durability are unchanged. *)
 val update_private_file_durable_locked_result :
+  ?create:bool ->
   string ->
   (string -> string option * 'a) ->
   ('a, durable_append_error) private_file_transaction_outcome

@@ -5778,7 +5778,8 @@ let typesafeai_table =
    \  { endpoint = \"http://127.0.0.1:9/judge\", model = \"jev-1.13\", api_key_env = \"TYPESAFEAI_API_KEY\" },\n\
    \  { endpoint = \"http://127.0.0.1:9/reserve\", model = \"~typesafe/jev-latest\", api_key_env = \"OPENROUTER_API_KEY\" },\n\
    ]\n\
-   board_attention = false\nabsorb_gate = true\ncontext_review = true\nskill_applicability = true\n\
+   board_attention = false\nboard_attention_confidence_floor = 0.45\n\
+   absorb_gate = true\ncontext_review = true\nskill_applicability = true\n\
    excluded_keepers = [\"kidsnote-slack-context-collector\", \"other\"]\n"
 ;;
 
@@ -5791,6 +5792,9 @@ let test_typesafeai_absent_is_the_default () =
     check bool "the vendor's own server alone" true
       (t.Runtime_schema.destinations = (Runtime_schema.typesafe_destination, []));
     check bool "the Board gate is on" true t.Runtime_schema.board_attention;
+    check (float 0.0) "the Board confidence floor is the default"
+      Runtime_schema.default_typesafeai.Runtime_schema.board_attention_confidence_floor
+      t.Runtime_schema.board_attention_confidence_floor;
     check bool "the absorb gate is off" false t.Runtime_schema.absorb_gate;
     check bool "Context review is off" false t.Runtime_schema.context_review;
     check bool "Skill applicability is off" false t.Runtime_schema.skill_applicability;
@@ -5814,6 +5818,8 @@ let test_typesafeai_reads_the_whole_table () =
        check string "second key variable" "OPENROUTER_API_KEY" second.Runtime_schema.api_key_env
      | _ -> failf "two destinations, in order; got %d after the first" (List.length rest));
     check bool "board_attention" false t.Runtime_schema.board_attention;
+    check (float 0.0) "board_attention_confidence_floor" 0.45
+      t.Runtime_schema.board_attention_confidence_floor;
     check bool "absorb gate enabled" true t.Runtime_schema.absorb_gate;
     check bool "Context review enabled" true t.Runtime_schema.context_review;
     check bool "Skill applicability enabled" true t.Runtime_schema.skill_applicability;
@@ -5858,6 +5864,16 @@ let test_typesafeai_refuses_a_stray_key () =
     "[typesafeai]\nabsorb = true\n" "unknown [typesafeai] key \"absorb\"";
   typesafeai_rejects ~what:"a sub-table where a switch is expected"
     "[typesafeai.absorb_gate]\nenabled = true\n" "absorb_gate must be a boolean"
+;;
+
+let test_typesafeai_refuses_a_confidence_floor_outside_0_to_1 () =
+  typesafeai_rejects ~what:"a floor above 1"
+    "[typesafeai]\nboard_attention_confidence_floor = 1.5\n" "must be a number from 0 to 1";
+  typesafeai_rejects ~what:"a negative floor"
+    "[typesafeai]\nboard_attention_confidence_floor = -0.1\n" "must be a number from 0 to 1";
+  typesafeai_rejects ~what:"a floor that is not a number"
+    "[typesafeai]\nboard_attention_confidence_floor = \"low\"\n"
+    "board_attention_confidence_floor must be a float"
 ;;
 
 let test_typesafeai_refuses_a_value_that_names_nothing () =
@@ -6319,6 +6335,8 @@ let () =
         ; test_case "reads destinations written as table headers" `Quick
             test_typesafeai_reads_destinations_written_as_table_headers
         ; test_case "refuses a stray key" `Quick test_typesafeai_refuses_a_stray_key
+        ; test_case "refuses a confidence floor outside 0 to 1" `Quick
+            test_typesafeai_refuses_a_confidence_floor_outside_0_to_1
         ; test_case "refuses a value that names nothing" `Quick
             test_typesafeai_refuses_a_value_that_names_nothing
         ] )

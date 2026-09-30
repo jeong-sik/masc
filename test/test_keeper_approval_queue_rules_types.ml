@@ -488,6 +488,56 @@ let test_phase_of_disposition_and_summary () =
      = Q.Phase_queued)
 ;;
 
+module Revision = Keeper_rule_revision
+
+let revision_ok = function Ok value -> value | Error error -> fail error
+
+let test_rule_revision_journey () =
+  let prepare current revision operation_id presence rule =
+    Revision.prepare ~current ~revision ~operation_id ~presence rule |> revision_ok
+    |> Revision.intent_to_yojson |> Revision.intent_of_yojson |> revision_ok in
+  let apply current intent = match Revision.decide ~current intent with
+    | Revision.Apply state -> state |> Revision.state_to_yojson
+        |> Revision.state_of_yojson |> revision_ok
+    | _ -> fail "new mutation must propose a write" in
+  let conflict current intent = match Revision.decide ~current:(Some current) intent with
+    | Revision.Conflict _ -> () | _ -> fail "stale mutation must not change authority" in
+  let a = prepare None "revision-a" "approval-a" Revision.Active
+      { sample_rule with expires_at = Some 1000.0 } in
+  let state_a = apply None a in
+  (match Revision.decide ~current:(Some state_a) a with
+   | Revision.Already_applied _ -> ()
+   | _ -> fail "post-save crash replay must not rewrite the rule");
+  let b = prepare (Some state_a) "revision-b" "approval-b" Revision.Active
+      { sample_rule with id = "rule-b"; expires_at = Some 2000.0;
+        source_approval_id = Some "approval-b" } in
+  let state_b = apply (Some state_a) b in
+  conflict state_b a;
+  let deletion = prepare (Some state_b) "revision-delete" "delete-b"
+      Revision.Deleted state_b.rule in
+  let deleted = apply (Some state_b) deletion in
+  check bool "tombstone cannot authorize" true (Revision.rule deleted = None);
+  conflict deleted b;
+  let c = prepare (Some deleted) "revision-c" "approval-c" Revision.Active sample_rule in
+  let state_c = apply (Some deleted) c in
+  conflict state_c deletion;
+  conflict state_c a;
+  let concurrent = prepare None "revision-other" "approval-other" Revision.Active sample_rule in
+  conflict state_a concurrent
+
+let test_rule_revision_rejects_ambiguous_authority () =
+  let intent = Revision.prepare ~current:None ~revision:"revision-a"
+    ~operation_id:"approval-a" ~presence:Revision.Active sample_rule |> revision_ok in
+  let reject json = match Revision.intent_of_yojson json with
+    | Error _ -> () | Ok _ -> fail "ambiguous revision authority accepted" in
+  match Revision.intent_to_yojson intent with
+  | `Assoc fields ->
+      reject (`Assoc (("expected_revision", `String "revision-a") :: fields));
+      reject (`Assoc (("expected_revision", `String "revision-a")
+        :: List.remove_assoc "expected_revision" fields));
+      reject (`Assoc (("unknown", `Bool true) :: fields))
+  | _ -> fail "intent must encode as an object"
+
 let () =
   run
     "Keeper_approval_queue_rules_types"
@@ -512,6 +562,8 @@ let () =
             "malformed expiry rejected"
             `Quick
             test_rule_parser_rejects_malformed_expiry
+        ; test_case "revision renewal replay deletion journey" `Quick test_rule_revision_journey
+        ; test_case "revision authority decode" `Quick test_rule_revision_rejects_ambiguous_authority
         ; test_case "expiry check is deterministic" `Quick test_rule_expired_is_deterministic
         ; test_case "closed explicit parser" `Quick test_rule_parser_is_closed_and_explicit
         ; test_case

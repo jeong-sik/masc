@@ -23,6 +23,8 @@ def run(executable, no_color):
     resolved["assignments"] = []
     _, probe = h.runtime_probe_response(fresh=True)
     probe["probe"]["providers"] = [h.runtime_probe_provider(RUNTIME_ID, status="reachable")]
+    probe["probe"]["summary"].update({"runtimes": 1, "probed": 1,
+        "reachable": 1, "failed": 0, "skipped": 0, "default_runtime_id": RUNTIME_ID})
     fixtures[h.RUNTIME_RESOLVED_PATH] = (200, resolved)
     fixtures[h.RUNTIME_PROBE_PATH] = (200, probe)
     fixtures[h.RUNTIME_PROBE_FORCE_PATH] = (200, probe)
@@ -31,6 +33,7 @@ def run(executable, no_color):
         h.tab_until(process, fd, output, b"MASC System")
         h.send_and_wait(process, fd, output, b"9", b"MASC System / Runtime")
         h.wait_for_output(process, fd, output, b"tailZ", start=0, timeout=10)
+        h.wait_for_output(process, fd, output, b"reachable", start=0, timeout=10)
         for all_runtimes in (False, True):
             if all_runtimes:
                 h.resize_and_wait(process, fd, output, rows=32, columns=120,

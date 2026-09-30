@@ -1,4 +1,5 @@
 open Json_util
+open Tui_decode_fields
 
 type agent = {
   name : string;
@@ -708,118 +709,6 @@ type context_observation =
 
 let ( let* ) = Result.bind
 
-let member key json =
-  match Json_util.assoc_member_opt key json with
-  | Some v -> v
-  | None -> `Null
-
-let required_member json key =
-  match Json_util.assoc_member_opt key json with
-  | Some value -> Ok value
-  | None -> Error (Printf.sprintf "missing required field '%s'" key)
-
-let optional_string json key =
-  match member key json with
-  | `Null -> Ok None
-  | `String s -> Ok (Some s)
-  | other ->
-      Error
-        (Printf.sprintf "field '%s' must be a string (received %s)" key
-           (Json_util.kind_name other))
-
-let required_nullable_int_field json key =
-  match Json_util.assoc_member_opt key json with
-  | None -> Error (Printf.sprintf "missing required field '%s'" key)
-  | Some `Null -> Ok None
-  | Some (`Int n) -> Ok (Some n)
-  | Some (`Intlit s) -> (
-      match int_of_string_opt s with
-      | Some n -> Ok (Some n)
-      | None ->
-          Error (Printf.sprintf "field '%s' has non-integer intlit %S" key s))
-  | Some other ->
-      Error
-        (Printf.sprintf "field '%s' must be an int or null (received %s)" key
-           (Json_util.kind_name other))
-
-let required_nullable_float_field json key =
-  match Json_util.assoc_member_opt key json with
-  | None -> Error (Printf.sprintf "missing required field '%s'" key)
-  | Some `Null -> Ok None
-  | Some (`Float value) -> Ok (Some value)
-  | Some (`Int value) -> Ok (Some (Float.of_int value))
-  | Some other ->
-      Error
-        (Printf.sprintf "field '%s' must be a float or null (received %s)" key
-           (Json_util.kind_name other))
-
-let required_nullable_string_field json key =
-  match Json_util.assoc_member_opt key json with
-  | None -> Error (Printf.sprintf "missing required field '%s'" key)
-  | Some `Null -> Ok None
-  | Some (`String value) -> Ok (Some value)
-  | Some other ->
-      Error
-        (Printf.sprintf "field '%s' must be a string or null (received %s)" key
-           (Json_util.kind_name other))
-
-let required_nullable_bool_field json key =
-  match Json_util.assoc_member_opt key json with
-  | None -> Error (Printf.sprintf "missing required field '%s'" key)
-  | Some `Null -> Ok None
-  | Some (`Bool value) -> Ok (Some value)
-  | Some other ->
-      Error
-        (Printf.sprintf "field '%s' must be a bool or null (received %s)" key
-           (Json_util.kind_name other))
-
-let require_null_field json key =
-  match Json_util.assoc_member_opt key json with
-  | None -> Error (Printf.sprintf "missing required field '%s'" key)
-  | Some `Null -> Ok ()
-  | Some other ->
-      Error
-        (Printf.sprintf "field '%s' must be null (received %s)" key
-           (Json_util.kind_name other))
-
-let require_string_field json key = require_string json key
-let require_int_field json key = require_int json key
-let require_float_field json key = require_float json key
-let required_bool_field json key =
-  match member key json with
-  | `Bool value -> Ok value
-  | `Null -> Error (Printf.sprintf "missing required field '%s'" key)
-  | bad ->
-      Error
-        (Printf.sprintf "field '%s' must be a bool (received %s)" key
-           (Json_util.kind_name bad))
-
-let require_string_list json key =
-  match member key json with
-  | `List items ->
-      List.mapi
-        (fun idx item ->
-          match item with
-          | `String value -> Ok value
-          | bad ->
-              Error
-                (Printf.sprintf
-                   "field '%s[%d]' must be a string (received %s)" key idx
-                   (Json_util.kind_name bad)))
-        items
-      |> List.fold_left
-           (fun acc item ->
-             let* parsed = acc in
-             let* value = item in
-             Ok (value :: parsed))
-           (Ok [])
-      |> Result.map List.rev
-  | `Null -> Error (Printf.sprintf "missing required field '%s'" key)
-  | other ->
-      Error
-        (Printf.sprintf "field '%s' must be an array (received %s)" key
-           (Json_util.kind_name other))
-
 let decode_status json =
   match member "status" json with
   | `String s -> Ok s
@@ -839,10 +728,10 @@ let decode_status json =
            (Json_util.kind_name other))
 
 let decode_agent json =
-  let* name = require_string_field json "name" in
+  let* name = Json_util.require_string json "name" in
   let* status = decode_status json in
   let* current_task = optional_string json "current_task" in
-  let* last_seen = require_string_field json "last_seen" in
+  let* last_seen = Json_util.require_string json "last_seen" in
   Ok { name; status; current_task; last_seen }
 
 let task_of_domain ?(goal_ids = []) (task : Masc_domain.task) =
@@ -1336,7 +1225,7 @@ let decode_turn_channel raw =
   | None -> Error (Printf.sprintf "unknown current turn channel %S" raw)
 
 let decode_turn_mode json =
-  let* raw = require_string_field json "turn_mode" in
+  let* raw = Json_util.require_string json "turn_mode" in
   match Turn_mode_codec.turn_mode_of_string raw with
   | Some mode -> Ok mode
   | None -> Error (Printf.sprintf "unknown current turn mode %S" raw)
@@ -1446,11 +1335,11 @@ let decode_log_entry json =
     | Some kind -> Ok kind
     | None -> Error "unknown current keeper metrics schema or record kind"
   in
-  let* le_ts = require_string_field json "ts" in
-  let* _ts_unix = require_float_field json "ts_unix" in
-  let* raw_channel = require_string_field json "channel" in
-  let* _name = require_string_field json "name" in
-  let* _trace_id = require_string_field json "trace_id" in
+  let* le_ts = Json_util.require_string json "ts" in
+  let* _ts_unix = Json_util.require_float json "ts_unix" in
+  let* raw_channel = Json_util.require_string json "channel" in
+  let* _name = Json_util.require_string json "name" in
+  let* _trace_id = Json_util.require_string json "trace_id" in
   match kind with
   | Keeper_metrics_record.Heartbeat ->
       if not (String.equal raw_channel "heartbeat") then
@@ -1480,7 +1369,7 @@ let decode_log_entry json =
           }
   | Keeper_metrics_record.Turn ->
       let* le_channel = decode_turn_channel raw_channel in
-      let* le_message_count = require_int_field json "message_count" in
+      let* le_message_count = Json_util.require_int json "message_count" in
       let* () =
         if le_message_count < 0 then
           Error "turn message_count must be non-negative"
@@ -1508,16 +1397,16 @@ let decode_log_entry json =
         required_nullable_int_field usage "cache_read_tokens"
       in
       let* total_tokens = required_nullable_int_field usage "total_tokens" in
-      let* inner_usage_trust = require_string_field usage "usage_trust" in
+      let* inner_usage_trust = Json_util.require_string usage "usage_trust" in
       let* inner_usage_anomaly = require_bool usage "usage_anomaly" in
       let* inner_usage_anomaly_reasons =
         require_string_list usage "usage_anomaly_reasons"
       in
-      let* outer_usage_trust = require_string_field json "usage_trust" in
+      let* outer_usage_trust = Json_util.require_string json "usage_trust" in
       let* outer_usage_anomaly_reasons =
         require_string_list json "usage_anomaly_reasons"
       in
-      let* latency_ms = require_int_field json "latency_ms" in
+      let* latency_ms = Json_util.require_int json "latency_ms" in
       let* () =
         if latency_ms < 0 then Error "latency_ms must be non-negative" else Ok ()
       in
@@ -1533,7 +1422,7 @@ let decode_log_entry json =
           ~outer_reasons:outer_usage_anomaly_reasons
       in
       let* turn_mode = decode_turn_mode json in
-      let* tool_call_count = require_int_field json "tool_call_count" in
+      let* tool_call_count = Json_util.require_int json "tool_call_count" in
       let* le_tools_used = require_string_list json "tools_used" in
       let* () =
         if tool_call_count < 0 then Error "tool_call_count must be non-negative"
@@ -1653,11 +1542,11 @@ let require_object_member json key =
            (Json_util.kind_name other))
 
 let decode_context_unavailable_payload json =
-  let* kind = require_string_field json "kind" in
+  let* kind = Json_util.require_string json "kind" in
   if not (String.equal kind "not_observed") then
     Error (Printf.sprintf "unknown context unavailable kind %S" kind)
   else
-    let* reason = require_string_field json "reason" in
+    let* reason = Json_util.require_string json "reason" in
     context_unavailable_reason_of_json json reason
 
 let validate_context_ratio ~tokens ~maximum ~ratio =
@@ -1700,9 +1589,9 @@ let decode_context_observation ~expected_trace_id json =
       else Ok (Context_unavailable reason)
   | Some `Null ->
       let* ratio = required_nullable_float_field json "context_ratio" in
-      let* tokens = require_int_field json "context_tokens" in
+      let* tokens = Json_util.require_int json "context_tokens" in
       let* maximum = required_nullable_int_field json "context_max" in
-      let* source = require_string_field json "context_source" in
+      let* source = Json_util.require_string json "context_source" in
       if not (String.equal source "turn_record") then
         Error (Printf.sprintf "unknown context observation source %S" source)
       else if
@@ -1713,11 +1602,11 @@ let decode_context_observation ~expected_trace_id json =
       else
         let* () = validate_context_ratio ~tokens ~maximum ~ratio in
         let* context = require_object_member json "context" in
-        let* nested_source = require_string_field context "source" in
+        let* nested_source = Json_util.require_string context "source" in
         let* nested_ratio =
           required_nullable_float_field context "context_ratio"
         in
-        let* nested_tokens = require_int_field context "context_tokens" in
+        let* nested_tokens = Json_util.require_int context "context_tokens" in
         let* nested_maximum =
           required_nullable_int_field context "context_max"
         in
@@ -1729,10 +1618,10 @@ let decode_context_observation ~expected_trace_id json =
           || nested_maximum <> maximum
         then Error "nested and top-level context measurements disagree"
         else
-          let* observed_at = require_string_field context "observed_at" in
+          let* observed_at = Json_util.require_string context "observed_at" in
           let* turn_ref_json = required_member context "turn_ref" in
           let* turn_ref = Ids.Turn_ref.of_yojson turn_ref_json in
-          let* absolute_turn = require_int_field context "absolute_turn" in
+          let* absolute_turn = Json_util.require_int context "absolute_turn" in
           let* request_body_bytes =
             required_nullable_int_field context "request_body_bytes"
           in
@@ -2001,65 +1890,6 @@ let x10_mouse_report ~(button : char) ~(column : char) ~(row : char)
   else Some X10_other_press
 ;;
 
-let missing_field key =
-  Error (Printf.sprintf "missing required field '%s'" key)
-
-let field_type_error key expected value =
-  Error
-    (Printf.sprintf "field '%s' must be %s (received %s)" key expected
-       (Json_util.kind_name value))
-
-let required_string_field json key =
-  match member key json with
-  | `String value -> Ok value
-  | `Null -> missing_field key
-  | bad -> field_type_error key "a string" bad
-
-let optional_string_field json key =
-  match member key json with
-  | `String value -> Ok (Some value)
-  | `Null -> Ok None
-  | bad -> field_type_error key "a string or null" bad
-
-let required_nullable_nonblank_string_field json key =
-  match Json_util.assoc_member_opt key json with
-  | None -> missing_field key
-  | Some `Null -> Ok None
-  | Some (`String value) when String.trim value <> "" -> Ok (Some value)
-  | Some (`String _) -> Error (Printf.sprintf "field '%s' must not be blank" key)
-  | Some bad -> field_type_error key "a non-empty string or null" bad
-
-let optional_bool_field json key =
-  match member key json with
-  | `Bool value -> Ok (Some value)
-  | `Null -> Ok None
-  | bad -> field_type_error key "a boolean or null" bad
-
-(* Absent reads as [None] here: the exact-lane run summary omits its
-   completion fields entirely while a run is still running, rather than
-   sending null. *)
-let optional_float_field json key =
-  match member key json with
-  | `Float value -> Ok (Some value)
-  | `Int value -> Ok (Some (Float.of_int value))
-  | `Null -> Ok None
-  | bad -> field_type_error key "a float or null" bad
-
-let required_int_field json key =
-  match member key json with
-  | `Int value -> Ok value
-  | `Intlit raw -> (
-      match int_of_string_opt raw with
-      | Some value -> Ok value
-      | None -> Error (Printf.sprintf "field '%s' has invalid int %S" key raw))
-  | `Null -> missing_field key
-  | bad -> field_type_error key "an int" bad
-
-let int_field_or json key ~default =
-  match member key json with
-  | `Null -> Ok default
-  | _ -> required_int_field json key
-
 let required_display_field json key =
   (* A bare epoch reaches us here when the server is too old to carry the ISO
      twin. Render it as a date at the one place a display value is formatted,
@@ -2103,40 +1933,6 @@ let required_body_field json =
   | `String value -> Ok value
   | `Null -> required_string_field json "content"
   | bad -> field_type_error "body" "a string" bad
-
-let required_list_field json key =
-  match member key json with
-  | `List items -> Ok items
-  | `Null -> missing_field key
-  | bad -> field_type_error key "an array" bad
-
-let optional_list_field json key =
-  match member key json with
-  | `List items -> Ok items
-  | `Null -> Ok []
-  | bad -> field_type_error key "an array" bad
-
-let required_object_field json key =
-  match member key json with
-  | `Assoc _ as obj -> Ok obj
-  | `Null -> missing_field key
-  | bad -> field_type_error key "an object" bad
-
-let optional_object_field json key =
-  match member key json with
-  | `Assoc _ as obj -> Ok (Some obj)
-  | `Null -> Ok None
-  | bad -> field_type_error key "an object" bad
-
-let decode_list label decode items =
-  let rec loop idx acc = function
-    | [] -> Ok (List.rev acc)
-    | item :: rest -> (
-        match decode item with
-        | Ok decoded -> loop (idx + 1) (decoded :: acc) rest
-        | Error err -> Error (Printf.sprintf "%s[%d]: %s" label idx err))
-  in
-  loop 0 [] items
 
 (* The ledger row the server joins onto each goal. Two shapes reach here: the
    record, whose [completion] names the state, and [ledger_error_to_yojson],
@@ -3726,12 +3522,6 @@ let required_nullable_nonempty_string_field json key =
      | Some bad -> field_type_error key "a non-empty string or null" bad)
   | bad -> field_type_error "skill snapshot rejection" "an object" bad
 
-let required_nonnegative_int_field json key =
-  let* value = required_int_field json key in
-  if value < 0
-  then Error (Printf.sprintf "field '%s' must be non-negative" key)
-  else Ok value
-
 let decode_skill_document_field json =
   let* () = validate_closed_object ~label:"diagnostic.field" ~allowed:[ "kind"; "name" ] json in
   let* kind = required_string_field json "kind" in
@@ -4818,7 +4608,7 @@ let decode_runtime_probe_snapshot json =
   let* rps_refreshed_at_unix =
     required_nullable_float_field json "refreshed_at_unix"
   in
-  let* rps_cache_ttl_sec = require_float_field json "cache_ttl_sec" in
+  let* rps_cache_ttl_sec = Json_util.require_float json "cache_ttl_sec" in
   let* rps_cache_age_sec = required_nullable_float_field json "cache_age_sec" in
   let* rps_cache_hit = required_bool_field json "cache_hit" in
   let* refresh_state = required_string_field json "refresh_state" in
@@ -6151,7 +5941,7 @@ let decode_memory_health_snapshot json =
     then Ok ()
     else Error ("unsupported memory health schema: " ^ schema)
   in
-  let* mhs_generated_at = require_float_field json "generated_at" in
+  let* mhs_generated_at = Json_util.require_float json "generated_at" in
   let* () =
     if Float.is_finite mhs_generated_at && mhs_generated_at >= 0.0
     then Ok ()
@@ -6492,8 +6282,8 @@ let decode_memory_fact json =
     | None -> Error (Printf.sprintf "unknown memory category %S" raw_category)
   in
   let* mf_origin = required_string_field json "origin" in
-  let* mf_first_seen = require_float_field json "first_seen" in
-  let* mf_last_seen = require_float_field json "last_seen" in
+  let* mf_first_seen = Json_util.require_float json "first_seen" in
+  let* mf_last_seen = Json_util.require_float json "last_seen" in
   let* mf_memory_id = required_string_field json "memory_id" in
   let* events_json = required_object_field json "events" in
   let* mf_events = decode_memory_fact_events events_json in
@@ -6509,14 +6299,14 @@ let decode_memory_fact json =
 
 let decode_memory_source_fact json =
   let* msf_claim = required_string_field json "claim" in
-  let* msf_first_seen = require_float_field json "first_seen" in
+  let* msf_first_seen = Json_util.require_float json "first_seen" in
   let* msf_path = required_string_field json "path" in
   let* msf_sha256 = required_string_field json "sha256" in
   Ok { msf_claim; msf_first_seen; msf_path; msf_sha256 }
 
 let decode_memory_invalidation json =
   let* mi_source_path = required_string_field json "source_path" in
-  let* mi_invalidated_at = require_float_field json "invalidated_at" in
+  let* mi_invalidated_at = Json_util.require_float json "invalidated_at" in
   let* mi_reason = required_string_field json "reason" in
   Ok { mi_source_path; mi_invalidated_at; mi_reason }
 
@@ -6540,14 +6330,14 @@ let decode_memory_store_reading ~label decode_present json =
 
 let decode_memory_ordinary_store json =
   let* mos_revision = required_int_field json "revision" in
-  let* mos_updated_at = require_float_field json "updated_at" in
+  let* mos_updated_at = Json_util.require_float json "updated_at" in
   let* facts_json = required_list_field json "facts" in
   let* mos_facts = decode_list "facts" decode_memory_fact facts_json in
   Ok { mos_revision; mos_updated_at; mos_facts }
 
 let decode_memory_source_store json =
   let* mss_revision = required_int_field json "revision" in
-  let* mss_updated_at = require_float_field json "updated_at" in
+  let* mss_updated_at = Json_util.require_float json "updated_at" in
   let* facts_json = required_list_field json "facts" in
   let* mss_facts = decode_list "facts" decode_memory_source_fact facts_json in
   let* invalidations_json = required_list_field json "invalidations" in
@@ -6579,7 +6369,7 @@ let decode_harness_verdict json =
   let* hv_verdict = required_string_field json "verdict" in
   let* hv_evaluator = required_string_field json "evaluator_runtime" in
   let* hv_fallback_reason = optional_string_field json "fallback_reason" in
-  let* hv_at = require_float_field json "timestamp" in
+  let* hv_at = Json_util.require_float json "timestamp" in
   let* hv_notes_hash = required_string_field json "notes_hash" in
   Ok
     { hv_at
@@ -6827,7 +6617,7 @@ let decode_keeper_call json =
         | Invalid_normalized_artifact_ref {detail} -> Error detail
         | Not_normalized_artifact_ref -> Error "keeper call artifact reference is not normalized") refs
     | _ -> Error "keeper call artifact_refs is not an array" in
-  let* kc_at = require_float_field json "ts" in
+  let* kc_at = Json_util.require_float json "ts" in
   let* kc_tool = required_string_field json "tool" in
   let* keeper = required_string_field json "keeper" in
   (* How the call ended is read by the rule every tool-call log reader shares.
@@ -7509,7 +7299,7 @@ let decode_keeper_lane json =
     }
 
 let decode_keeper_lanes_snapshot json =
-  let* kls_generated_at = require_float_field json "generated_at" in
+  let* kls_generated_at = Json_util.require_float json "generated_at" in
   let* kls_count = required_int_field json "count" in
   let* items = required_list_field json "snapshots" in
   let* kls_lanes = decode_list "snapshots" decode_keeper_lane items in
@@ -7789,7 +7579,7 @@ let decode_standalone_lanes_snapshot json =
     else Error ("unsupported schema " ^ schema)
   in
   let* _generated_at = required_string_field json "generated_at" in
-  let* sls_observed_at_unix = require_float_field json "observed_at_unix" in
+  let* sls_observed_at_unix = Json_util.require_float json "observed_at_unix" in
   let* sls_exact_run_projection_count =
     required_int_field json "exact_run_projection_count"
   in
@@ -8046,7 +7836,7 @@ let decode_fusion_run json =
     | Some topology -> Ok topology
     | None -> Error (Printf.sprintf "unknown fusion topology %S" topology)
   in
-  let* fur_started_at = require_float_field json "started_at" in
+  let* fur_started_at = Json_util.require_float json "started_at" in
   let* fur_finished_at = required_nullable_float_field json "finished_at" in
   let* status = required_string_field json "status" in
   let* fur_status =
@@ -8111,7 +7901,7 @@ let decode_fusion_historical_evidence json =
   let* fhe_run_id = required_string_field json "run_id" in
   let* fhe_post_id = required_string_field json "post_id" in
   let* fhe_title = required_string_field json "title" in
-  let* fhe_created_at = require_float_field json "created_at" in
+  let* fhe_created_at = Json_util.require_float json "created_at" in
   if String.trim fhe_run_id = "" || String.trim fhe_post_id = "" then
     Error "historical Fusion evidence requires a run and Board post identity"
   else if not (Float.is_finite fhe_created_at) || fhe_created_at < 0. then
@@ -8584,8 +8374,8 @@ let decode_keeper_tool_approval json =
   let* kta_args = required_string_field json "args" in
   let* kta_question = required_string_field json "question" in
   let* kta_because = optional_string_field json "because" in
-  let* kta_asked_at = require_float_field json "asked_at" in
-  let* kta_timeout_sec = require_float_field json "timeout_sec" in
+  let* kta_asked_at = Json_util.require_float json "asked_at" in
+  let* kta_timeout_sec = Json_util.require_float json "timeout_sec" in
   Ok
     { kta_keeper
     ; kta_tool_call_id
@@ -10084,7 +9874,7 @@ let decode_librarian_run_page json =
       match List.rev runs with
       | [] -> Error "exact lane page says has_more but has no cursor row"
       | last :: _ ->
-          let* started_at = require_float_field last "started_at" in
+          let* started_at = Json_util.require_float last "started_at" in
           let* last_run_id = required_string_field last "run_id" in
           Ok (Some (started_at, last_run_id))
   in
@@ -10285,7 +10075,7 @@ type lane_run_gate_judgment =
 let decode_lane_run_tool json =
   let* lrt_name = required_string_field json "tool_name" in
   let* disposition = required_string_field json "disposition" in
-  let* lrt_duration_ms = require_float_field json "duration_ms" in
+  let* lrt_duration_ms = Json_util.require_float json "duration_ms" in
   Ok
     { lrt_name
     ; lrt_disposition = lane_run_tool_disposition_of_string disposition
@@ -10428,7 +10218,7 @@ let decode_lane_run_summary json =
   let* lrs_lane = required_standalone_lane_field json "lane" in
   let* lrs_subject_id = optional_string_field json "subject_id" in
   let* lrs_actor = required_string_field json "actor" in
-  let* lrs_started_at = require_float_field json "started_at" in
+  let* lrs_started_at = Json_util.require_float json "started_at" in
   let* status_raw = required_string_field json "status" in
   let lrs_status = lane_run_status_of_string status_raw in
   let* lrs_elapsed_s = optional_float_field json "elapsed_s" in
@@ -10961,36 +10751,36 @@ let decode_transport_health json =
      surface can say so, instead of a word the TUI prints as if it were a
      transport path (#27652). *)
   let* th_primary_path =
-    let* raw = require_string_field summary "primary_path" in
+    let* raw = Json_util.require_string summary "primary_path" in
     match Transport_metrics.primary_path_kind_of_string raw with
     | Some kind -> Ok kind
     | None -> Error (Printf.sprintf "summary.primary_path: unknown value %S" raw)
   in
   let* th_queue_pressure =
-    let* raw = require_string_field summary "queue_pressure" in
+    let* raw = Json_util.require_string summary "queue_pressure" in
     match Transport_metrics.queue_pressure_kind_of_string raw with
     | Some kind -> Ok kind
     | None ->
       Error (Printf.sprintf "summary.queue_pressure: unknown value %S" raw)
   in
   let* sse = require_object json "sse" in
-  let* th_sse_sessions = require_int_field sse "sessions_total" in
+  let* th_sse_sessions = Json_util.require_int sse "sessions_total" in
   let* websocket = require_object json "websocket" in
   let* websocket_listening = require_bool websocket "listening" in
   (* A path that is not listening has no sessions to report. Reporting zero
      would read as "listening, nobody connected", which is a different fact. *)
   let* th_websocket_sessions =
     if websocket_listening then
-      Result.map Option.some (require_int_field websocket "sessions")
+      Result.map Option.some (Json_util.require_int websocket "sessions")
     else Ok None
   in
   let* grpc = require_object json "grpc" in
   let* grpc_listening = require_bool grpc "listening" in
   let* th_grpc_port =
-    if grpc_listening then Result.map Option.some (require_int_field grpc "port")
+    if grpc_listening then Result.map Option.some (Json_util.require_int grpc "port")
     else Ok None
   in
-  let* th_events_dropped = require_int_field grpc "events_dropped" in
+  let* th_events_dropped = Json_util.require_int grpc "events_dropped" in
   Ok
     {
       th_primary_path;
@@ -11163,7 +10953,7 @@ let validate_line_evidence_contract
     Error "materialize change carries Edit line_evidence"
 
 let decode_file_change json =
-  let* fc_at = require_float_field json "at" in
+  let* fc_at = Json_util.require_float json "at" in
   let* fc_keeper = required_string_field json "keeper" in
   let* fc_turn = optional_int_or_null json "turn" in
   let* fc_task_id = optional_string_field json "task_id" in
@@ -11280,7 +11070,7 @@ type git_diff = {
 
 let decode_file_change_snapshot json =
   let* fcs_keeper = required_string_field json "keeper" in
-  let* fcs_window_hours = require_float_field json "window_hours" in
+  let* fcs_window_hours = Json_util.require_float json "window_hours" in
   let* fcs_calls_in_window = required_int_field json "calls_in_window" in
   let* changes_json = required_list_field json "changes" in
   let* fcs_changes = decode_list "changes" decode_file_change changes_json in
@@ -11319,7 +11109,7 @@ let decode_file_activity_snapshot json =
   let* fas_codebase = required_string_field json "codebase" in
   let* fas_repo_id = required_string_field json "repo_id" in
   let* fas_file_path = required_string_field json "file_path" in
-  let* fas_window_hours = require_float_field json "window_hours" in
+  let* fas_window_hours = Json_util.require_float json "window_hours" in
   let* fas_calls_in_window = required_int_field json "calls_in_window" in
   let* changes_json = required_list_field json "changes" in
   let* fas_changes = decode_list "changes" decode_file_change changes_json in
@@ -12648,7 +12438,7 @@ let play_object = function
 
 let decode_play_invite_row json =
   let* json = play_object json in
-  let* pi_name = require_string_field json "name" in
+  let* pi_name = Json_util.require_string json "name" in
   let* pi_expires_at = required_nullable_string_field json "expires_at" in
   let* pi_expired = required_bool_field json "expired" in
   let* pi_holds_controller = required_bool_field json "holds_controller" in
@@ -12669,14 +12459,14 @@ let decode_play_invites json =
 
 let decode_play_invite_issued json =
   let* json = play_object json in
-  let* pii_name = require_string_field json "name" in
-  let* pii_expires_at = require_string_field json "expires_at" in
-  let* pii_link = require_string_field json "link" in
+  let* pii_name = Json_util.require_string json "name" in
+  let* pii_expires_at = Json_util.require_string json "expires_at" in
+  let* pii_link = Json_util.require_string json "link" in
   Ok { pii_name; pii_expires_at; pii_link }
 
 let decode_play_invite_revoked json =
   let* json = play_object json in
-  let* pir_name = require_string_field json "name" in
+  let* pir_name = Json_util.require_string json "name" in
   let* pir_revoked = required_bool_field json "revoked" in
   let* pir_released_controller = required_bool_field json "released_controller" in
   let* pir_release_error =

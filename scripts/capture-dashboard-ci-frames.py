@@ -222,12 +222,16 @@ def main() -> None:
                     )
                     page.evaluate("window.term.focus()")
                     page.keyboard.press("Enter")
-                    expected = [line.rstrip() for line in record["screen"].splitlines() if line.strip()]
+                    # Both records contain terminal padding. Ignore only
+                    # trailing ASCII spaces; retain all other content/cells.
+                    expected = [line.rstrip(" ") for line in record["screen"].splitlines()
+                                if line.strip(" ")]
                     page.wait_for_function(
                         """expected => {
                           const buffer = window.term.buffer.active;
                           const lines = Array.from({length: window.term.rows}, (_, i) =>
-                            buffer.getLine(i)?.translateToString(true) ?? '').filter(line => line.trim());
+                            buffer.getLine(i)?.translateToString(true) ?? '')
+                            .map(line => line.replace(/ +$/, '')).filter(line => line.length > 0);
                           return JSON.stringify(lines) === JSON.stringify(expected);
                         }""",
                         arg=expected,

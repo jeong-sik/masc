@@ -1201,6 +1201,12 @@ type private_jsonl_transaction_io_for_testing =
   ; close_fd : Unix.file_descr -> unit
   }
 
+(** Same non-creating shared-lock read with injected descriptor settlement. *)
+val read_private_jsonl_rows_locked_with_io_for_testing :
+  io:private_jsonl_transaction_io_for_testing ->
+  string ->
+  (Private_jsonl_rows.t, Private_jsonl_rows.error) private_file_transaction_outcome
+
 val read_private_jsonl_slice_locked_with_io_for_testing :
   io:private_jsonl_transaction_io_for_testing ->
   string ->

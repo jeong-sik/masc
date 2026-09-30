@@ -128,13 +128,38 @@ let admit t payload =
     | Some _ -> Error Conflict
     | None -> let* r=initial (event_payload payload) in Ok (Some (event_payload payload),r))
 let find t ~caller ~operation_id =
-  (* The same locked transaction serializes reads with admission and updates.
-     A missing operation creates only an empty private journal, never an intent. *)
-  match transact t ~caller ~operation_id (function
-    | Some r -> Ok (None,r) | None -> Error Unknown_operation) with
-  | Error Unknown_operation -> Ok None
-  | Error e -> Error e
-  | Ok receipt -> Ok (Some receipt)
+  if String.trim caller="" then Error (Invalid_input "authenticated caller is required") else protect (fun () ->
+  (* Share the writer's path mutex and descriptor lock without creating a file
+     or its parent directory when this operation has never been admitted. *)
+  let filename=path t caller operation_id in
+  let outcome=match t.io with
+    | None -> Fs_compat.read_private_jsonl_rows_locked_result filename
+    | Some io -> Fs_compat.read_private_jsonl_rows_locked_with_io_for_testing ~io filename in
+  let read = function
+    | Fs_compat.Private_jsonl_rows.Rows_missing -> Ok None
+    | Fs_compat.Private_jsonl_rows.Rows_present {rows;rows_end;end_offset} ->
+        if rows_end<>end_offset then Error (Corrupt "incomplete delivery journal") else
+        let* record=decode rows in
+        match record with
+        | Some r when r.payload.caller<>caller
+            || not (Request_id.equal r.payload.operation_id operation_id) -> Error Conflict
+        | record -> Ok record in
+  let finish result cleanup = match result,cleanup with
+    | Ok (Some record),settlement_error -> Ok (Some {record;settlement_error})
+    | Ok None,None -> Ok None
+    | Ok None,Some detail -> Error (Io_error detail)
+    | Error primary,None -> Error primary
+    | Error primary,Some cleanup -> Error (Settlement_failed {primary;cleanup}) in
+  match outcome with
+  | Fs_compat.Private_file_succeeded value -> finish (read value) None
+  | Fs_compat.Private_file_succeeded_with_cleanup_failure {value;cleanup_failure} ->
+      finish (read value) (Some (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure))
+  | Fs_compat.Private_file_failed error ->
+      Error (Io_error (Fs_compat.Private_jsonl_rows.error_to_string error))
+  | Fs_compat.Private_file_failed_with_cleanup_failure {error;cleanup_failure} ->
+      Error (Settlement_failed {
+        primary=Io_error (Fs_compat.Private_jsonl_rows.error_to_string error);
+        cleanup=Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure}))
 let commit t ~caller ~operation_id ~seq =
   if seq<=0 then Error (Invalid_input "workspace sequence must be positive") else
   transact t ~caller ~operation_id (function

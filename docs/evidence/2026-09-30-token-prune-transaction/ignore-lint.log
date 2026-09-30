@@ -1,0 +1,2 @@
+python3 scripts/lint-ignore-without-comment.py --include-tests --strict --target lib/auth/auth_credential_base.ml test/test_auth_token_prune_transaction.ml
+exit_code=0

@@ -3245,18 +3245,6 @@ let settle_tools_read state ~generation part =
          | _ -> Some { request with tri_pending = pending })
   | Some _ | None -> ()
 
-let tools_skill_profiles state =
-  match state.tools_inventory with
-  | Some
-      { Masc.Tui_decode.ts_effective =
-          Some
-            (Masc.Tui_decode.Effective_surface_available
-               { ets_skill_profiles; _ });
-        _ } ->
-    ets_skill_profiles
-  | Some _ | None -> []
-;;
-
 let normalize_tools_skill_cursor state =
   let count = List.length (tools_skill_profiles state) in
   if count = 0
@@ -3265,10 +3253,6 @@ let normalize_tools_skill_cursor state =
   then state.tools_skill_cursor <- count - 1
   else if state.tools_skill_cursor < 0
   then state.tools_skill_cursor <- 0
-;;
-
-let selected_tools_skill_profile state =
-  List.nth_opt (tools_skill_profiles state) state.tools_skill_cursor
 ;;
 
 let move_tools_skill_cursor state delta =

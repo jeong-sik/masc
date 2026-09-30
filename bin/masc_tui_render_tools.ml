@@ -370,6 +370,33 @@ let skill_usage_box ~cols rows =
     @ [border Ansi.box_bl Ansi.box_br; Ansi.dim, ""]
 ;;
 
+let tools_selection_line ~cols state =
+  let text = match selected_tools_skill_profile state with
+    | None -> "Skill: none"
+    | Some profile ->
+        let prefix = Printf.sprintf "Skill %d/%d: " (state.tools_skill_cursor + 1)
+            (List.length (tools_skill_profiles state)) in
+        prefix ^ Masc_tui_message_layout.fit_middle
+          (max 1 (Masc_tui_frame.inner_width ~cols
+                  - Masc_tui_message_layout.display_width prefix))
+          (Terminal_text.single_line profile.esp_name)
+  in
+  text
+
+let tools_selection_document state =
+  match selected_tools_skill_profile state with
+  | None -> [Ansi.dim, "Action Skill: none"]
+  | Some profile ->
+      let reference = profile.esp_reference in
+      [ Ansi.bold, "Action Skill: " ^ Terminal_text.single_line profile.esp_name
+      ; Ansi.dim, "Source: " ^ Terminal_text.single_line
+          (Skill_reference.identity_source_id_to_string reference.identity)
+      ; Ansi.dim, "Package: " ^ Terminal_text.single_line
+          (Skill_reference.identity_package_id_to_string reference.identity)
+      ; Ansi.dim, "Revision: " ^ Terminal_text.single_line
+          (Skill_reference.content_revision_to_string reference.content_revision)
+      ]
+
 let tools_display_lines ?(cols = 80) (state : state) =
   let registered_tools =
     match state.tools_inventory with
@@ -1497,7 +1524,7 @@ let tools_display_lines ?(cols = 80) (state : state) =
     | Some detail -> [Theme.bad (), "Tools read failed: " ^ Terminal_text.single_line detail]
   in
   let width = max 1 (Masc_tui_frame.inner_width ~cols) in
-  error_lines @ explanation @ pane_lines
+  tools_selection_document state @ error_lines @ explanation @ pane_lines
   |> List.concat_map (fun (style, text) ->
        (* Fitted tables and usage cards already own their alignment. Only
           overlong rows need physical wrapping; never render metadata as

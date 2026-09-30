@@ -26,7 +26,9 @@ elif endpoint.endswith('/pulls/1'):
     data = {'state':'open','draft':False,'merged':False,'user':{'login':state.get('author','writer')},'base':{'ref':state.get('base','stack/parent'),'sha':'c'*40},'head':{'sha':current,'ref':state.get('branch','stack/change')}}
 elif endpoint == 'user': data = {'login':'reviewer'}
 elif '/actions/runs?' in endpoint:
-    data = {'workflow_runs':[{'id':42,'status':'completed','conclusion':state.get('ci','success'),'head_sha':head,'head_branch':state.get('branch','stack/change'),'path':state.get('workflow','.github/workflows/release-candidate.yml')}]}
+    reads = sum('/actions/runs?' in row for row in log.read_text().splitlines())
+    run_id = 43 if state.get('run_moves') and reads >= 2 else 42
+    data = {'workflow_runs':[{'id':run_id,'status':'completed','conclusion':state.get('ci','success'),'head_sha':head,'head_branch':state.get('branch','stack/change'),'path':state.get('workflow','.github/workflows/release-candidate.yml')}]}
 elif endpoint.endswith('/jobs?per_page=100'):
     names = (['verification / Release checks passed','behavior / test suite','release']
              if state.get('workflow') == '.github/workflows/release.yml' else
@@ -191,6 +193,24 @@ class SourceReviewPolicy(unittest.TestCase):
     def test_release_tag_inventory_allows_expected_skipped_extras(self):
         self.state.update(branch='release/v1',reviews=[self.review(run=True)],workflow='.github/workflows/release.yml')
         self.assert_ok(self.invoke('merge-guard.sh','--check','--run','42'))
+
+    def test_release_run_movement_refuses_before_approval_post(self):
+        self.state.update(branch='release/v1',run_moves=True)
+        body=self.root/'body'
+        body.write_text(f'verdict: PASS head: {HEAD} run: 42 by: independent\nFull release review.')
+        result=self.invoke('approve-guard.sh','--body',str(body))
+        self.assertEqual(result.returncode,2,result.stdout+result.stderr)
+        self.assertNotIn('POST ',self.calls.read_text())
+        self.assertNotIn('posted',json.loads(self.fixture.read_text()))
+
+    def test_release_approval_posts_consistent_run_evidence(self):
+        self.state.update(branch='release/v1')
+        body=self.root/'body'
+        body.write_text(f'verdict: PASS head: {HEAD} run: 42 by: independent\nFull release review.')
+        self.assert_ok(self.invoke('approve-guard.sh','--body',str(body)))
+        posted=json.loads(self.fixture.read_text())['posted']['body']
+        self.assertIn('run: 42',posted.splitlines()[0])
+        self.assertIn('release run 42',posted.splitlines()[-1])
 
     def test_release_full_ci_passes(self):
         self.state.update(branch='release/v1',reviews=[self.review(run=True)])

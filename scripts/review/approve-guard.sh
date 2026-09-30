@@ -94,6 +94,8 @@ if [ "$check_only" -eq 0 ]; then
     [[ "$vline" =~ $pattern ]] || refuse "release verdict requires exact-head CI evidence"
     [ "${BASH_REMATCH[1]}" = "$head" ] && [ "${BASH_REMATCH[2]}" = "$release_run" ] || refuse "release verdict names another head or run"
     keeper="${BASH_REMATCH[3]}"
+    # The final release snapshot must admit the same run the frozen body cites.
+    run="${BASH_REMATCH[2]}"
   fi
   [ "$keeper" != "$me" ] || refuse "by must name the reviewing Keeper"
 fi

@@ -44,5 +44,10 @@ held chat history, actual authenticated Item account HTTP/purchase fixtures,
 and tab-strip/keyboard guards. Actual model quality, deployment and live
 continuity remain separate. Native implementation head `f4041a99a7d86886336e4838588dc2f4e47f3b74`
 passed all9selected suites in run36654016413. [Complete raw evidence](../evidence/2026-09-30-item-workspace-authority-f404/README.md)
-retains its source identity, frames and limits; later documentation heads are
-not the tested implementation head.
+retains its source identity, frames and limits. Subsequent heads contain
+functional changes, including the production roster's Candle account revision,
+same-revision Item retry, preview handling and parent integration. The retained
+run does not validate those changes. At `6190ce0cc59facefd1bad136f928c56e7319231e`,
+those paths were reviewed in source but the new native assertions had not run;
+the Test workflow was manually disabled. This documentation correction adds no
+native execution evidence. Current-head native validation remains outstanding.

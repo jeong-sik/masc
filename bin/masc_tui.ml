@@ -24494,12 +24494,15 @@ and is loaded on demand through keeper_skill.
                   state.prompts_librarian_input_loading <- false
                 end
             | Config when state.config_pane = Config_params ->
-                state.runtime_params_cursor <-
+                let next_cursor =
                   min
                     (max 0 (List.length state.runtime_params - 1))
-                    (state.runtime_params_cursor + 1);
-                state.config_scroll <- 0;
-                state.runtime_params_notice <- None
+                    (state.runtime_params_cursor + 1) in
+                if next_cursor <> state.runtime_params_cursor then begin
+                  state.runtime_params_cursor <- next_cursor;
+                  state.config_scroll <- 0;
+                  state.runtime_params_notice <- None
+                end
             | Approvals when state.approval_detail_open ->
                 (* End writes a row past the end and the frame reports the
                    real one back. A j pressed before that frame carries the
@@ -24860,10 +24863,12 @@ and is loaded on demand through keeper_skill.
                   state.prompts_librarian_input_loading <- false
                 end
             | Config when state.config_pane = Config_params ->
-                state.runtime_params_cursor <-
-                  max 0 (state.runtime_params_cursor - 1);
-                state.config_scroll <- 0;
-                state.runtime_params_notice <- None
+                let next_cursor = max 0 (state.runtime_params_cursor - 1) in
+                if next_cursor <> state.runtime_params_cursor then begin
+                  state.runtime_params_cursor <- next_cursor;
+                  state.config_scroll <- 0;
+                  state.runtime_params_notice <- None
+                end
             | Approvals when state.approval_detail_open ->
                 state.approval_detail_scroll <-
                   max 0 (state.approval_detail_scroll - 1)

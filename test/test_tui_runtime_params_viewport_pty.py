@@ -170,7 +170,72 @@ def refresh_identity(executable):
                            interact=interact, http_fixtures=served, http_requests=requests)
 
 
+def boundary_and_string_values(executable):
+    fixtures = h.keeper_runtime_http_fixtures()
+    values = ["\nfoo\n", "  foo", "", "foo"]
+    keys = [f"value-{index}" for index in range(len(values))]
+    fixtures["/api/v1/runtime/params"] = (200, {
+        "parameters": [
+            {"key": key, "current": value, "default": value,
+             "has_override": False,
+             "meta": {"value_type": "string", "description": "\n".join(CONTRACT_ROWS)}}
+            for key, value in zip(keys, values)
+        ],
+    })
+
+    def interact(process, fd, _slave, output, _base):
+        h.palette_go(process, fd, output, b"go system", b"MASC System")
+        h.press_and_settle(process, fd, output, b"p")
+        h.press_and_settle(process, fd, output, b"p")
+        h.wait_for_output(process, fd, output, b"value-0", start=0, timeout=15)
+        h.drain_until_quiet(process, fd, output)
+
+        def press(keys):
+            # Boundary inputs and Home can be no-ops, so a frame is optional.
+            h.write_all(fd, output, keys)
+            if not h.drain_until_quiet(process, fd, output):
+                raise AssertionError("parameter frame did not settle")
+            return h.screen_text(bytes(output))
+
+        def position(screen):
+            match = re.search(rb"\b(\d+)-(\d+)/(\d+)\b", screen)
+            if match is None:
+                raise AssertionError(f"detail position missing: {screen!r}")
+            return tuple(map(int, match.groups()))
+
+        for index, value in enumerate(values):
+            screen = press(b"\x1b[H")
+            literal = json.dumps(value, ensure_ascii=False).encode()
+            if screen.count(literal) < 2:
+                raise AssertionError(f"current/default value lost its JSON representation: {literal!r}; {screen!r}")
+            if index in (0, len(values) - 1):
+                before = position(press(b"\x1b[6~"))
+                if before[0] <= 1:
+                    raise AssertionError(f"fixture did not scroll the contract: {before!r}")
+                after = position(press(b"k" if index == 0 else b"j"))
+                if after != before:
+                    raise AssertionError(f"boundary selection lost detail offset: {before!r} -> {after!r}")
+            if index < len(values) - 1:
+                screen = press(b"j")
+                if position(screen)[0] != 1:
+                    raise AssertionError(f"different selection retained detail offset: {screen!r}")
+        screen = press(b"k")
+        if position(screen)[0] != 1:
+            raise AssertionError(f"previous selection retained detail offset: {screen!r}")
+        # Enter still edits the selected key after the boundary input.
+        screen = press(b"\r")
+        if b"editing value-2" not in screen:
+            raise AssertionError(f"selection identity changed: {screen!r}")
+        press(b"\x1b")
+        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
+        os.write(fd, b"q")
+
+    h.run_terminal_scenario(executable, description="Runtime params preserve boundary reading and exact strings",
+                           interact=interact, http_fixtures=fixtures)
+
+
 if __name__ == "__main__":
     run(os.path.abspath(sys.argv[1]))
     refresh_identity(os.path.abspath(sys.argv[1]))
+    boundary_and_string_values(os.path.abspath(sys.argv[1]))
     print("Runtime parameter value/contract viewport: PASS")

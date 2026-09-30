@@ -14656,8 +14656,8 @@ let render_runtime_params (state : state) =
     | Some row ->
       let open Tui_decode in
       field "Key" row.rpr_key
-      @ field "Current" (runtime_param_value_text ~value_type:row.rpr_value_type row.rpr_current_json)
-      @ field "Default" (runtime_param_value_text ~value_type:row.rpr_value_type row.rpr_default_json)
+      @ field "Current" row.rpr_current_json
+      @ field "Default" row.rpr_default_json
       @ field "Type" (if String.trim row.rpr_value_type = "" then "typed value" else row.rpr_value_type)
       @ (match row.rpr_min_json with None -> [] | Some value -> field "Minimum" value)
       @ (match row.rpr_max_json with None -> [] | Some value -> field "Maximum" value)

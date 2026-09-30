@@ -259,7 +259,7 @@ let test_provider_fields_of_other_clients_are_refused () =
 let test_selected_account_is_required_and_scopes_quota () =
   check_binding_dropped "no selected account" (runtime_toml ~account_home:None ());
   let load_scope home = match load (runtime_toml ~account_home:(Some home) ()) with
-    | Ok (_, runtime, _, _, _) -> runtime.Runtime.quota_scope
+    | Ok (_, runtime, _, _, _) -> runtime.Runtime_instance.quota_scope
     | Error detail -> fail detail in
   let first = load_scope "/synthetic/account-a" in
   let same = load_scope "/synthetic/account-a" in

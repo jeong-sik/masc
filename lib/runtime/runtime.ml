@@ -4,41 +4,15 @@
     간접 레이어를 제거하고, binding(provider × model) 하나를 곧 하나의 Runtime
     으로 본다. 소비자는 Runtime 목록 + default Runtime 을 직접 소비한다.
 
-    타입은 자립 모듈 {!Runtime_schema} 소유 (삭제된 [Runtime_declarative_types]
-    대체). parse 는 {!Runtime_toml}, hot-path materialize 는 {!Runtime_adapter}
-    가 담당한다 — 셋 다 [Runtime_*] 코드 의존 0. *)
+    선언 스키마는 {!Runtime_schema}, materialized 값은 {!Runtime_instance}
+    소유. parse 는 {!Runtime_toml}, provider 실행 해석은 {!Runtime_adapter}
+    가 담당한다. *)
 
 open Runtime_schema
 open Runtime_config_error
+open Runtime_instance
+open Runtime_config_validation
 open Result.Syntax
-
-type t =
-  { id : string
-    (** binding key ["provider.model"], 예 ["runpod_mtp.qwen-runpod"] *)
-  ; provider : provider
-  ; model : model_spec
-  ; binding : binding
-  ; execution : Runtime_execution.t
-    (** Turn owner materialized at load time. HTTP bindings become
-        [Agent_core]; official client runtimes remain distinct and can never
-        be dispatched as a fake LLM provider config. *)
-  ; candidate_backpressure : Runtime_candidate_backpressure.candidate
-    (** Candidate-only backpressure tied to the frozen dispatch binding. *)
-  ; quota_scope : Runtime_quota_window.scope
-    (** Quota ownership key frozen at materialization, from the same
-        credential-alias selection that resolved the dispatched API key
-        (PR #28219 review). *)
-  }
-
-type dispatch_credential_error =
-  | Required_env_credential_missing of
-      { provider_id : string
-      ; env_key : string
-      }
-  | Declared_credential_unavailable of
-      { provider_id : string
-      ; carrier : Agent_core.Error.credential_carrier
-      }
 
 (* runtime.toml tables this module reads or edits, spelled once (#39539). *)
 let runtime_table = Runtime_toml_namespace.(key Runtime)
@@ -49,75 +23,6 @@ let assignments_table = Runtime_toml_namespace.(path Runtime) "assignments"
 let lanes_table = Runtime_toml_namespace.(path Runtime) "lanes"
 let exact_output_lanes_table = Runtime_toml_namespace.(path Runtime) "exact_output_lanes"
 let fusion_presets_table = Runtime_toml_namespace.(path Fusion) "presets"
-
-let dispatch_credential_error_to_string = function
-  | Required_env_credential_missing { provider_id; env_key } ->
-    Printf.sprintf
-      "provider %S requires non-empty credential env %S"
-      provider_id
-      env_key
-  | Declared_credential_unavailable { provider_id; carrier } ->
-    Printf.sprintf
-      "provider %S declares an unavailable %s credential"
-      provider_id
-      (match carrier with
-       | Agent_core.Error.InlineCredential -> "inline"
-       | Agent_core.Error.FileCredential -> "file")
-;;
-
-let dispatch_credential_error_to_core_error = function
-  | Required_env_credential_missing { env_key; _ } ->
-    Agent_core.Error.Config (Agent_core.Error.MissingEnvVar { var_name = env_key })
-  | Declared_credential_unavailable { provider_id; carrier } ->
-    Agent_core.Error.Config
-      (Agent_core.Error.CredentialUnavailable { provider_id; carrier })
-;;
-
-let validate_dispatch_credential
-    ~(provider_config : Llm_provider.Provider_config.t)
-    (runtime : t)
-  =
-  match runtime.execution with
-  | Runtime_execution.Codex_app_server _
-  | Runtime_execution.Claude_code _
-  | Runtime_execution.Antigravity_cli _
-  | Runtime_execution.Muse_serve _ ->
-    Ok ()
-  | Runtime_execution.Agent_core _ ->
-    let requirement =
-      Runtime_adapter.credential_requirement
-        ~provider_id:runtime.provider.id
-        runtime.provider.credentials
-    in
-    if not (Llm_provider.Secret.is_empty provider_config.api_key)
-    then Ok ()
-    else
-      match requirement with
-      | Not_required -> Ok ()
-      (* An unknown provider is not turned away here. This is a pre-dispatch
-         check, and [Runtime_adapter.resolve_api_key] is where the absence is
-         answered with a refusal that names it; failing twice for one cause
-         would report the same thing in two vocabularies. What changed is that
-         the two absences are no longer one value, so this arm now says which
-         one it is letting through. *)
-      | Unknown_provider -> Ok ()
-      | Reference (Env env_key) ->
-        Error
-          (Required_env_credential_missing
-             { provider_id = runtime.provider.id; env_key })
-      | Reference (Inline _) ->
-        Error
-          (Declared_credential_unavailable
-             { provider_id = runtime.provider.id
-             ; carrier = Agent_core.Error.InlineCredential
-             })
-      | Reference (File _) ->
-        Error
-          (Declared_credential_unavailable
-             { provider_id = runtime.provider.id
-             ; carrier = Agent_core.Error.FileCredential
-             })
-;;
 
 type config_source_revision = Config_source_revision of string
 type config_commit_order = Config_commit_order of int64
@@ -294,144 +199,6 @@ let config_observation ~path source_text =
   { path; source_text; source_revision = Config_source_revision digest }
 ;;
 
-(* id 파생의 단일 출처는 {!Runtime_schema.binding_key} — runtime 을 id 로
-   인덱싱하는 모든 호출자와 동일한 ["provider.model"] 규칙을 공유한다. *)
-let id_of_binding (b : binding) : string = binding_key b
-
-(** binding 을 Runtime 으로 변환하되 실패 이유를 보존한다. provider/model
-    resolve 또는 provider_config materialize 가 실패하면 [Error reason] —
-    동작은 fail-closed 그대로(partial-boot 없음, 해당 binding 은 Runtime 목록에서
-    제외)이되 왜 제외되는지 이유를 잃지 않는다. 이 이유는 assignment / default /
-    task-route / lane 검증이 "not found" 대신 근본 원인을 표면화하는 데 쓰인다
-    (Unknown→silent-drop 안티패턴 차단). *)
-(* Quota scope is frozen here, at materialization, from the same
-   credential-alias selection that resolves the dispatched API key. Deriving
-   it later would re-run alias selection against a possibly changed process
-   environment and charge the window to an account the dispatch never used
-   (PR #28219 review). *)
-let quota_scope_of_materialized
-    ~(provider : provider)
-    ~(execution : Runtime_execution.t) =
-  let credential =
-    match execution with
-    | Runtime_execution.Agent_core _ ->
-      Runtime_adapter.effective_credential_reference
-        ~provider_id:provider.id
-        provider.credentials
-    | Runtime_execution.Antigravity_cli _ -> provider.credentials
-    | Runtime_execution.Codex_app_server _
-    | Runtime_execution.Claude_code _
-    | Runtime_execution.Muse_serve _ -> None
-  in
-  let official_home client selected scope =
-    match selected with
-    | None -> Error (client ^ " needs account-home or an absolute CLI home")
-    | Some home ->
-      (match Runtime_account_home.of_string home with
-       | Ok home -> Ok (scope (Some home))
-       | Error reason -> Error (client ^ ": " ^ reason))
-  in
-  match execution with
-  | Runtime_execution.Claude_code client ->
-    official_home "Claude Code"
-      (Runtime_claude_code.effective_account_home client.account_home)
-      Runtime_quota_window.scope_of_claude_code_home
-  | Runtime_execution.Codex_app_server client ->
-    official_home "Codex"
-      (Runtime_codex_app_server.effective_account_home client.account_home)
-      Runtime_quota_window.scope_of_codex_home
-  | Runtime_execution.Muse_serve client ->
-    Runtime_account_home.of_string client.account_home
-    |> Result.map Runtime_quota_window.scope_of_muse_home
-  | Runtime_execution.Agent_core _
-  | Runtime_execution.Antigravity_cli _ ->
-    Ok (Runtime_quota_window.scope_of_credential ~provider_id:provider.id credential)
-;;
-
-(* Why a binding did not become a runtime, as a closed vocabulary rather than a
-   string. The distinction the variant makes is the one the config loader has to
-   act on: [Binding_disabled] and [Provider_disabled] are choices the operator
-   wrote down, [Execution_unbuildable] is a capability limit of the adapter, and
-   the two [*_not_declared] cases are dangling references — the binding names a
-   [\[providers.x\]] or [\[models.y\]] row that does not exist. Collapsing all
-   five into one string is what let a dangling reference be dropped as quietly as
-   a deliberate disable (masc#28403): a [local_llama_server.qwen3-6-35b-uncensored]
-   binding pointed at a model row an unquoted dot had split into
-   [models.qwen3."6-35b-uncensored"], and nothing reported the runtime's absence.
-   Deciding fatality by matching the reason string would be the same defect one
-   layer up, so the vocabulary is closed and {!load_list} matches it. *)
-let of_binding (cfg : config) (b : binding) : (t, drop_reason) result =
-  if not b.enabled
-  then Error Binding_disabled
-  else match provider_of_id cfg b.provider_id, model_of_id cfg b.model_id with
-  | Some provider, Some model ->
-    if not provider.enabled
-    then Error (Provider_disabled provider.id)
-    else
-      (match Runtime_adapter.binding_to_execution cfg b with
-       | Ok execution ->
-         Result.map (fun quota_scope ->
-           { id = id_of_binding b
-           ; provider
-           ; model
-           ; binding = b
-           ; execution
-           ; candidate_backpressure = (
-               let binding = match execution with
-                 | Runtime_execution.Agent_core config ->
-                     (match Agent_core.Binding_identity.of_provider_config
-                       ~transport:Agent_core.Binding_identity.Http config with
-                      | Ok binding -> Runtime_candidate_backpressure.Resolved_http_binding binding
-                      | Error reason -> Runtime_candidate_backpressure.Http_binding_unavailable reason)
-                 | Runtime_execution.Codex_app_server _
-                 | Runtime_execution.Claude_code _
-                 | Runtime_execution.Antigravity_cli _
-                 | Runtime_execution.Muse_serve _ -> Runtime_candidate_backpressure.Official_client_binding
-               in
-               Runtime_candidate_backpressure.create_candidate ~binding)
-           ; quota_scope
-           })
-           (quota_scope_of_materialized ~provider ~execution)
-         |> Result.map_error (fun reason -> Execution_unbuildable reason)
-       | Error reason -> Error (Execution_unbuildable reason))
-  | None, _ -> Error (Provider_not_declared b.provider_id)
-  | Some _, None -> Error (Model_not_declared b.model_id)
-;;
-
-let is_local_provider (provider : provider) =
-  match provider.transport, provider.credentials with
-  | Cli _, _ -> true
-  | Http endpoint, None ->
-    Uri.of_string endpoint |> Uri.host |> Masc_network_defaults.is_loopback_host_opt
-  | Http _, Some _ -> false
-;;
-
-let is_local_runtime (runtime : t) = is_local_provider runtime.provider
-
-(* Split configured bindings into successfully materialized runtimes and the
-   ones that were defined but could not be materialized, each paired with the
-   reason it was dropped. The drop set ([id -> reason]) lets assignment /
-   default / task-route / lane validation surface *why* a target binding is
-   absent from the runtime list (e.g. "provider ... uses protocol messages-http,
-   which the runtime adapter cannot build a provider_config for ...") instead of
-   the misleading "not found among N runtimes", which points the operator at a
-   typo that does not exist. Materialize failure stays fail-closed: the binding
-   is still excluded from [runtimes] (RFC-0206 §2.1). *)
-let partition_bindings (cfg : config) (bindings : binding list)
-  : t list * (string * drop_reason) list
-  =
-  let runtimes, dropped =
-    List.fold_left
-      (fun (runtimes, dropped) (b : binding) ->
-         match of_binding cfg b with
-         | Ok rt -> rt :: runtimes, dropped
-         | Error reason -> runtimes, (id_of_binding b, reason) :: dropped)
-      ([], [])
-      bindings
-  in
-  List.rev runtimes, List.rev dropped
-;;
-
 (* Explain why a validation target [id] is absent from the materialized
    [runtimes]. An [id] present in [dropped_bindings] was defined but failed to
    materialize — surface that reason (the actionable cause). An [id] absent from
@@ -445,146 +212,6 @@ let partition_bindings (cfg : config) (bindings : binding list)
     fail-fast: [\[runtime\] default] 가 없거나 그 id 가 목록에 없으면 [Error].
     silent fallback 일절 없음 (runtime→Runtime 비전: TOML 에 default 없으면
     프로그램 실행 불가). *)
-(* Route ids resolve with lane precedence ([resolve_assignment] prefers a lane
-   over a same-named runtime), so route validation must judge the same target
-   the consumer will actually get: lane first, runtime second. *)
-let find_declared_lane (lanes : Runtime_lane.t list) (id : string) =
-  List.find_opt (fun lane -> String.equal (Runtime_lane.id lane) id) lanes
-;;
-
-(* Each [runtime] reference is validated under its field's admission contract:
-   - [Runtime_only] requires a declared runtime id. media_failover is on it:
-     its entries name runtimes that can read an image, and the order of that
-     list is the whole walk. verifier_exact slots are on it: judgement admits
-     each slot as a direct runtime and dispatches that id alone. No lane
-     expands underneath either.
-   - [Lane_then_runtime] admits a declared lane name or a runtime id. Keeper
-     assignments and route ids are on it, so validation judges the same target
-     [resolve_assignment] hands the consumer: lane first, runtime second.
-   Unknown ids are rejected while loading the configuration. *)
-type reference_domain =
-  | Runtime_only
-  | Lane_then_runtime
-
-type runtime_reference =
-  { site : string (* the config path as the operator wrote it *)
-  ; shape : reference_shape
-  ; id : string
-  ; domain : reference_domain
-  }
-
-(* The list is carried out whole rather than counted here: the caller decides
-   whether an operator sees it, and how much of it. *)
-let validate_no_dangling_bindings
-    ~(dropped_bindings : (string * drop_reason) list) : (unit, load_failure) result =
-  match
-    List.filter
-      (fun (_, reason) -> Option.is_some (dangling_reference_reason reason))
-      dropped_bindings
-  with
-  | [] -> Ok ()
-  | dangling -> Error (Undeclared_bindings dangling)
-;;
-
-let validate_runtime_references
-    ~(dropped_bindings : (string * drop_reason) list) (runtimes : t list)
-    (lanes : Runtime_lane.t list) (references : runtime_reference list)
-  : (unit, load_failure) result
-  =
-  let resolves_as_runtime id =
-    List.exists (fun (r : t) -> String.equal r.id id) runtimes
-  in
-  let resolves (reference : runtime_reference) =
-    match reference.domain with
-    | Runtime_only -> resolves_as_runtime reference.id
-    | Lane_then_runtime ->
-      (* [validate_lanes] already guaranteed every candidate id of a declared
-         lane resolves, so naming the lane is enough. *)
-      Option.is_some (find_declared_lane lanes reference.id)
-      || resolves_as_runtime reference.id
-  in
-  match List.find_opt (fun reference -> not (resolves reference)) references with
-  | None -> Ok ()
-  | Some { site; shape; id; domain = _ } ->
-    Error
-      (Reference_unresolved
-         { site
-         ; shape
-         ; resolution =
-             resolution_of ~dropped_bindings ~runtime_count:(List.length runtimes) id
-         })
-;;
-
-(* Reference constructors keep each site string next to the field it names, so a
-   renamed config key cannot drift away from its diagnostic. *)
-let assignment_references (assignments : (string * string) list) =
-  List.map
-    (fun (keeper_name, runtime_id) ->
-      { site = Printf.sprintf "[%s].%s" assignments_table keeper_name
-      ; shape = Scalar
-      ; id = runtime_id
-      ; domain = Lane_then_runtime
-      })
-    assignments
-;;
-
-let media_failover_references (media_failover : string list) =
-  List.map
-    (fun id ->
-      { site = "[runtime].media_failover"
-      ; shape = List_entry
-      ; id
-      ; domain = Runtime_only
-      })
-    media_failover
-;;
-
-(* [runtime.lanes.<id>] candidate ids must resolve to configured runtimes.
-   Empty candidate lists are rejected at parse time; here we reject unknown ids
-   as operator typos (mirrors [runtime].default validation). *)
-let validate_lanes
-    ~(dropped_bindings : (string * drop_reason) list) (runtimes : t list)
-    (lane_decls : Runtime_schema.lane_decl list)
-  : (unit, load_failure) result
-  =
-  let runtime_exists id =
-    List.exists (fun (r : t) -> String.equal r.id id) runtimes
-  in
-  let rec first_unknown = function
-    | [] -> None
-    | { Runtime_schema.id = lane_id; candidate_ids; _ } :: rest ->
-      (match List.find_opt (fun id -> not (runtime_exists id)) candidate_ids with
-       | Some id -> Some (lane_id, id)
-       | None -> first_unknown rest)
-  in
-  match first_unknown lane_decls with
-  | None -> Ok ()
-  | Some (lane_id, id) ->
-    Error
-      (Lane_candidate_unresolved
-         { lane_id
-         ; resolution =
-             resolution_of ~dropped_bindings ~runtime_count:(List.length runtimes) id
-         })
-;;
-
-(* A lane is exactly the candidates it declares: a keeper reaches another
-   runtime only when a lane names it. *)
-let lanes_of_decls
-    ~(dropped_bindings : (string * drop_reason) list)
-    (runtimes : t list)
-    (lane_decls : Runtime_schema.lane_decl list)
-  : (Runtime_lane.t list, load_failure) result
-  =
-  let* () = validate_lanes ~dropped_bindings runtimes lane_decls in
-  Ok
-    (List.map
-       (fun ({ Runtime_schema.id; candidate_ids } : Runtime_schema.lane_decl) ->
-          Runtime_lane.make ~id candidate_ids)
-       lane_decls)
-;;
-
-
 type missing_catalog_model =
   { runtime_id : string
   ; provider_id : string
@@ -829,131 +456,6 @@ let startup_degradation_to_yojson
        @ reasons_json (catalog_degradation_reason :: reasons parts)
        @ exact_json
        @ [ "next_action", `String (String.concat " " (catalog_next_action :: next_actions parts)) ])
-;;
-
-let capabilities_for_runtime (rt : t) =
-  match rt.execution with
-  | Runtime_execution.Agent_core provider_config ->
-    Llm_provider.Provider_config.capabilities_for_config_model provider_config
-  | Runtime_execution.Codex_app_server _
-  | Runtime_execution.Claude_code _
-  | Runtime_execution.Antigravity_cli _
-  | Runtime_execution.Muse_serve _ -> None
-;;
-
-type max_context_source =
-  | Override
-  | Capability
-  | Override_clamped_by_capability
-
-let max_context_source_to_string = function
-  | Override -> "override"
-  | Capability -> "capability"
-  | Override_clamped_by_capability -> "override_clamped_by_capability"
-;;
-
-(* Effective input context window and the source that produced it.
-   [None] means neither the runtime.toml [model.max-context] override nor the
-   AGENT_CORE capability catalog declares a positive context window for this
-   binding — [validate_runtime_max_context] rejects such a runtime at load
-   (fail-closed; Unknown->Permissive anti-pattern, not a silent default). *)
-let resolve_max_context_of_runtime (rt : t) : (int * max_context_source) option =
-  let capability_cap =
-    match capabilities_for_runtime rt with
-    | Some caps ->
-      (match caps.Llm_provider.Capabilities.max_context_tokens with
-       | Some c when c > 0 -> Some c
-       | Some _ | None -> None)
-    | None -> None
-  in
-  match rt.model.max_context, capability_cap with
-  | Some o, Some c when o > c -> Some (c, Override_clamped_by_capability)
-  | Some o, (Some _ | None) -> Some (o, Override)
-  | None, Some c -> Some (c, Capability)
-  | None, None -> None
-;;
-
-(* The start-prompt ceiling of a Muse runtime: derived from the window its
-   host reports and narrowed by a declared max-prompt-bytes, because the host
-   rewrites an oversized input instead of refusing it
-   ([Runtime_muse_prompt_capacity]). *)
-let muse_prompt_capacity (runtime : t) : (int, Runtime_muse_prompt_capacity.error) result =
-  Runtime_muse_prompt_capacity.start_prompt_bytes
-    ~declared:runtime.model.max_prompt_bytes
-    ~max_context:(Option.map fst (resolve_max_context_of_runtime runtime))
-;;
-
-(* Every materialized runtime must resolve a positive context window from the
-   runtime.toml override or the AGENT_CORE capability catalog. A binding that leaves
-   both unset is a config error rejected here, not a runtime defaulted to a
-   fallback window (RFC-0206 §2.1 no silent fallback). *)
-let validate_runtime_max_context (runtimes : t list)
-  : (unit, load_failure) result
-  =
-  match
-    List.find_opt
-      (fun (r : t) -> Option.is_none (resolve_max_context_of_runtime r))
-      runtimes
-  with
-  | None -> Ok ()
-  | Some r ->
-    Error
-      (Max_context_absent
-         { runtime_id = r.id
-         ; execution_model =
-             (match Runtime_execution.model_id r.execution with
-              | Some model_id -> model_id
-              | None -> "<official-client-selected>")
-         ; declared_model = r.model.id
-         })
-;;
-
-(* A high-water mark above the model's context cannot be reached: the
-   provider refuses first. Checked here, where the model is resolved, because
-   the binding table cannot see [max-context]. *)
-let validate_runtime_context_marks (runtimes : t list) : (unit, load_failure) result =
-  match
-    List.find_map
-      (fun (r : t) ->
-         match r.binding.Runtime_schema.context_marks, resolve_max_context_of_runtime r with
-         | Some marks, Some (max_context, _)
-           when marks.Runtime_schema.high_water_tokens > max_context ->
-           Some
-             (Context_marks_exceed_max_context
-                { runtime_id = r.id
-                ; high_water_tokens = marks.Runtime_schema.high_water_tokens
-                ; max_context
-                })
-         | Some _, Some _ | Some _, None | None, (Some _ | None) -> None)
-      runtimes
-  with
-  | None -> Ok ()
-  | Some failure -> Error failure
-;;
-
-(* A Muse window too small for the host's own overhead leaves no start-prompt
-   ceiling ([muse_prompt_capacity]), declared max-prompt-bytes or not, and is
-   refused here rather than at its first turn. *)
-let validate_muse_prompt_ceilings (runtimes : t list) : (unit, load_failure) result =
-  match
-    List.find_map
-      (fun (r : t) ->
-         match r.provider.api_format with
-         | Muse_serve_runtime ->
-           (match muse_prompt_capacity r with
-            | Ok _ -> None
-            | Error (Runtime_muse_prompt_capacity.Window_below_host_overhead { max_context }) ->
-              Some (Muse_window_below_host_overhead { runtime_id = r.id; max_context })
-            (* A runtime with no resolved window fails
-               [validate_runtime_max_context] instead. *)
-            | Error Runtime_muse_prompt_capacity.No_window_declared -> None)
-         | Messages_api | Chat_completions_api | Ollama_api | Gemini_api
-         | Vertex_gemini_api | Codex_app_server_runtime | Antigravity_cli_runtime
-         | Claude_code_runtime -> None)
-      runtimes
-  with
-  | None -> Ok ()
-  | Some failure -> Error failure
 ;;
 
 (* The lanes and their ids are [Standalone_lane]'s. The Verifier lane
@@ -2333,17 +1835,7 @@ let is_local_runtime_id (id : string) : bool option =
   get_runtime_by_id id |> Option.map is_local_runtime
 ;;
 
-let max_context_of_runtime (rt : t) : int =
-  match resolve_max_context_of_runtime rt with
-  | Some (n, _source) -> n
-  | None ->
-    failwith
-      (Printf.sprintf
-         "Runtime.max_context_of_runtime: %s has no resolvable max-context; \
-          materialize_config should have rejected this at load (no silent \
-          fallback — RFC-0206 §2.1)"
-         rt.id)
-;;
+
 
 (* Resolve a keeper assignment to a lane. Declared lanes are preferred so a lane
    id can shadow a runtime id (lanes are explicit operator routing constructs).
@@ -2422,25 +1914,7 @@ let entry_runtime_id_of_route (route : string) : string option =
   | `Unavailable _ | `Missing -> None
 ;;
 
-let prompt_capacity_bytes (runtime : t) : int option =
-  match runtime.provider.api_format with
-  | Muse_serve_runtime ->
-    (match muse_prompt_capacity runtime with
-     | Ok bytes -> Some bytes
-     (* A full load refuses such a runtime; one built without it (a load that
-        skips the window check, [of_binding]) refuses its own turn with this
-        cause through [muse_prompt_capacity]. *)
-     | Error Runtime_muse_prompt_capacity.No_window_declared
-     | Error (Runtime_muse_prompt_capacity.Window_below_host_overhead _) -> None)
-  | Claude_code_runtime
-  | Antigravity_cli_runtime
-  | Codex_app_server_runtime
-  | Messages_api
-  | Chat_completions_api
-  | Ollama_api
-  | Gemini_api
-  | Vertex_gemini_api -> runtime.model.max_prompt_bytes
-;;
+
 
 (* A lane walks past its head: a candidate that fails is demoted behind its
    siblings (RFC-0458 §3.4, #36935), so any candidate the walk holds may
@@ -2509,20 +1983,6 @@ let max_context_of_runtime_id (id : string) : int option =
   | None -> None
 ;;
 
-(* The model's declared max output tokens (AGENT_CORE capability catalog SSOT).
-   [None] for an official-client runtime, for a model with no catalog row, and
-   for a row that leaves it unset.
-   Mirrors [max_context_of_runtime] but projects the AGENT_CORE-typed capability
-   rather than the runtime.toml [model] record, because max output is owned by
-   the provider/model catalog, not the per-binding runtime config. This is an
-   observable capability ceiling only. AGENT_CORE owns request validation and clamp
-   policy; MASC never turns this value into a request default. *)
-let max_output_tokens_of_runtime (rt : t) : int option =
-  match capabilities_for_runtime rt with
-  | Some caps -> caps.Llm_provider.Capabilities.max_output_tokens
-  | None -> None
-;;
-
 let thinking_support_of_runtime_id (id : string) : bool option =
   match get_runtime_by_id id with
   | Some rt -> rt.model.thinking_support
@@ -2565,19 +2025,13 @@ let turn_timeout_s_of_runtime_id (id : string) : float option =
 ;;
 
 
-(* Reads the scope frozen at materialization ({!of_binding}); no
-   environment access here, so a post-load env change cannot re-select the
-   credential alias out from under the recorded window. *)
-let quota_scope_of_runtime (rt : t) : Runtime_quota_window.scope =
-  rt.quota_scope
-;;
+
 
 let quota_scope_of_runtime_id (id : string) : Runtime_quota_window.scope option =
   match get_runtime_by_id id with
   | Some rt -> Some (quota_scope_of_runtime rt)
   | None -> None
 ;;
-
 let max_prompt_bytes_of_runtime_id (id : string) : int option =
   match get_runtime_by_id id with
   | Some rt -> prompt_capacity_bytes rt

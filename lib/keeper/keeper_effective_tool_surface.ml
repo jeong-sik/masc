@@ -65,7 +65,7 @@ type outcome =
   | Available of t
   | Unavailable of unavailable
 
-let client_kind (runtime : Runtime.t) =
+let client_kind (runtime : Runtime_instance.t) =
   match runtime.execution with
   | Runtime_execution.Agent_core _ -> "agent_core"
   | Runtime_execution.Codex_app_server _ -> "codex"
@@ -346,7 +346,7 @@ let resolve_runtime keeper_name =
           route )
 ;;
 
-let resolve_native_posture ~base_path ~keeper_name (runtime : Runtime.t) =
+let resolve_native_posture ~base_path ~keeper_name (runtime : Runtime_instance.t) =
   match runtime.execution with
   | Runtime_execution.Agent_core _ -> Ok None
   | Runtime_execution.Claude_code _ ->
@@ -382,7 +382,7 @@ let resolve_native_posture ~base_path ~keeper_name (runtime : Runtime.t) =
     |> Result.map Option.some
 ;;
 
-let runtime_tool_delivery (runtime : Runtime.t) =
+let runtime_tool_delivery (runtime : Runtime_instance.t) =
   match runtime.execution with
   (* Muse Code reaches MASC's tools through the loopback MCP bridge
      ([Keeper_muse_runtime]), as Antigravity does. *)

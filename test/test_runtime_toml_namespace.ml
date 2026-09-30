@@ -220,12 +220,12 @@ worker = "second.sol"
     | Ok (runtimes, default, assignments, _, _) ->
       Alcotest.(check (list string)) "only the two enabled bindings materialize"
         ["first.sol"; "second.sol"]
-        (List.sort String.compare (List.map (fun (r : Runtime.t) -> r.id) runtimes));
+        (List.sort String.compare (List.map (fun (r : Runtime_instance.t) -> r.id) runtimes));
       Alcotest.(check string) "generated default resolves" "first.sol" default.id;
       Alcotest.(check (option string)) "generated assignment resolves"
         (Some "second.sol") (List.assoc_opt "worker" assignments);
       List.iter (fun (id, expected_home) ->
-        let runtime = List.find (fun (r : Runtime.t) -> r.id = id) runtimes in
+        let runtime = List.find (fun (r : Runtime_instance.t) -> r.id = id) runtimes in
         match runtime.execution with
         | Runtime_execution.Codex_app_server client ->
           Alcotest.(check (option string)) (id ^ " account home")

@@ -328,7 +328,7 @@ let fanout_runtimes () =
     }
   in
   let materialize binding =
-    match Runtime.of_binding config binding with
+    match Runtime_instance.of_binding config binding with
     | Ok runtime -> runtime
     | Error reason ->
       failf "expected fan-out runtime to materialize: %s"
@@ -397,7 +397,7 @@ let test_switch_fanout_runs_providers_concurrently_in_order () =
    | _ -> failf "missing probe events: %s" trace_text);
   let providers = Yojson.Safe.Util.(member "providers" json |> to_list) in
   check (list string) "rows keep input order"
-    (List.map (fun (rt : Runtime.t) -> rt.id) runtimes)
+    (List.map (fun (rt : Runtime_instance.t) -> rt.id) runtimes)
     (List.map
        (fun row -> Yojson.Safe.Util.(member "runtime_id" row |> to_string))
        providers);

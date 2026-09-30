@@ -26,7 +26,7 @@ type api_format =
    prompt above it, Codex windows its Start and Resume to it from the
    first attempt when one is declared (#37353), and Muse Code lowers the
    ceiling it derives from [max-context] to it
-   ([Runtime.muse_prompt_capacity]). No other runtime reads the field, so a
+   ([Runtime_instance.muse_prompt_capacity]). No other runtime reads the field, so a
    declaration there bounds nothing the provider checks. Every arm is listed
    so a new format has to be decided here. *)
 let api_format_reads_max_prompt_bytes = function
@@ -299,7 +299,7 @@ type model_spec =
   ; max_context : int option
       (** [models.<id>.max-context] operator override. [None] means the AGENT_CORE
           capability catalog's max-context is the sole source; resolved via
-          {!Runtime.resolve_max_context_of_runtime}, never read directly. *)
+          {!Runtime_instance.resolve_max_context_of_runtime}, never read directly. *)
   ; thinking_support : bool option
   ; preserve_thinking : bool option
   ; streaming : bool
@@ -608,7 +608,7 @@ let exec_ssh_endpoint (cfg : config) (name : string) : Exec_ssh_endpoint.t optio
 ;;
 
 (** Runtime id derived from a binding: ["provider.model"]. Single source of id
-    derivation, shared by {!Runtime.id_of_binding} and any caller indexing
+    derivation, shared by {!Runtime_instance.id_of_binding} and any caller indexing
     runtimes by id. *)
 let binding_key (b : binding) : string =
   Printf.sprintf "%s.%s" b.provider_id b.model_id

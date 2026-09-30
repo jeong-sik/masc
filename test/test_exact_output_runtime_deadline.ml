@@ -138,7 +138,7 @@ let with_runtime f =
       | [ runtime ] -> runtime | _ -> fail "expected one runtime" in
     check (option (float 0.0)) "declared Exact body deadline" body
       runtime.provider.exact_body_timeout_s;
-    (match runtime.Runtime.execution with
+    (match runtime.Runtime_instance.execution with
      | Runtime_execution.Agent_core config ->
        check (option (float 0.0)) "ordinary connection deadline is unchanged" connect
          config.connect_timeout_s

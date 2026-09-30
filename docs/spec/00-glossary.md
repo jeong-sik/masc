@@ -296,10 +296,14 @@ status: reference
   TUI 시작 화면과 `/about`에 표시된다(Ivory 왁스, Ember 불꽃, Long Crimson 뿔, Bean 눈, "w" 입,
   Blush, Gilt 접시, 무착용). MCP 도구 `keeper_portrait_read`는 PNG 아티팩트와 시작 장비,
   액세서리 카탈로그를 반환하며 `preview_item`으로 장착 권한 변경 없이 임시 미리보기가 가능하다.
+  소유한 장신구의 실제 착용은 `keeper_candle_equip` 도구를 통해 슬롯별로 반영되며, `default`는
+  이름 기반 시작 장비로 복원한다. 서버와 원격 TUI, 대시보드는 `Keeper_portrait_equipment` 스냅숏을
+  공유해 일관된 착용 모습을 렌더한다.
   TUI에서는 상단 바 축약 캔들, 모자이크 카드, 엠블럼 화면에 렌더된다. 시작 화면과 `/about`의
   마스코트 표시 스타일은 2D 초상화인 `painted`와 3D 점묘 양초인 `dotted`가 있다.
   → [Keeper_portrait_look](../../lib/keeper_portrait/keeper_portrait_look.mli) ·
   [Keeper_portrait_item](../../lib/keeper_portrait/keeper_portrait_item.mli) ·
+  [Keeper_portrait_equipment](../../lib/keeper_portrait/keeper_portrait_equipment.mli) ·
   [Keeper_portrait_draw](../../lib/keeper_portrait/keeper_portrait_draw.mli) ·
   [Keeper_portrait_solid](../../lib/keeper_portrait/keeper_portrait_solid.mli) ·
   [TUI candle styles](../TUI-GUIDE.md)
@@ -1508,16 +1512,21 @@ status: reference
   부동소수점 단위를 쓰지 않는다.
   - 원장(`candle-ledger.jsonl`): `<base-path>/.masc/candle-ledger.jsonl`에 한 줄씩 이벤트를
     덧붙이는 전용 원장. 각 행은 `kind`·`at`과 해당 종류의 필드를 담은 닫힌 JSON 객체다. 현재 원장에
-    기록되는 사건은 7종(`Snapshot`·`Payout_owed`·`Candidates`·`Unattributed`·`Paid`·`Purchased`·`Payout_failed`)이며,
-    잔액과 소유권은 파일에 누적 값을 따로 적지 않고 `Paid` 지급과 `Purchased` 구매를 순서대로 재생하여 계산한다. 구매 한 행은 차감과 소유권 부여를 함께 기록한다. 헌법·승인·도구 호출 원장이나
-    `goal_verifications.json`(검증 원장)과 다른 별개 원장이다.
+    기록되는 사건은 8종(`Snapshot`·`Payout_owed`·`Candidates`·`Unattributed`·`Paid`·`Purchased`·`Equipped`·`Payout_failed`)이며,
+    잔액과 소유권은 파일에 누적 값을 따로 적지 않고 `Paid` 지급과 `Purchased` 구매를 순서대로 재생하여 계산한다. 구매 한 행은 차감과 소유권 부여를 함께 기록한다. 소유한 장신구의 슬롯별 착용은
+    `keeper_candle_equip` 도구를 통해 `Equipped` 사건(`{keeper; slot; choice}`)으로 원장에 덧붙인다.
+    `choice`가 `Default`면 시작 장비를 복원하고, 동일한 선택은 중복 기록하지 않으며 추가 차감도 발생하지 않는다. 헌법·승인·도구 호출 원장이나 `goal_verifications.json`(검증 원장)과 다른 별개 원장이다.
   - 발행과 지급: Goal이 검증기를 통과(`Snapshot`)하고 사람의 확정(`Confirm_completion`)으로
     `Completed`가 되면 지급 의무(`Payout_owed`)가 생긴다. 백그라운드 지급 일꾼이 기여 Task와 Keeper를
     선별(`Candidates`)해 모델 감정을 거쳐 `Paid` 이벤트 한 줄로 지급을 기록한다. 분배는 한 줄에 원자적으로 적히므로
     일부 Keeper만 지급되는 불완전 상태가 없다. 기여자가 없으면 `Unattributed`, 오류 시 `Payout_failed`를 남긴다.
   - 사용처 한정: Candle로 살 수 있는 것은 초상화 장신구(**Keeper Portrait**의 장비 아이템)뿐이다.
     도구, 스킬, 모델, 런타임 예산 등 다른 자원은 구매할 수 없다(헌법 불변식). 상점 구매는
-    `Purchased`로 기록하며, 착용 반영은 후속 장착 스택에서 제공한다.
+    `Purchased`로 기록해 소유권을 부여하고, 소유한 아이템은 `keeper_candle_equip` 도구로 각 슬롯에 착용한다.
+  - 설정과 착용 투영: `<base-path>/.masc/config/candle.toml`에서 활성화 여부를 읽는다. 파일 부재는 `off`(시작 장비 유지),
+    키 없는 파일은 `enabled`, 파싱 실패나 미지원 키·비정규 파일은 `disabled with reason`으로 안전하게 비활성화되어 턴 진행을
+    차단하지 않는다. 서버 대시보드와 원격 TUI는 `Candle_equipment` 투영을 통해 원장의 `Equipped` 사건을 재생하여 최신 착용 상태를 표시한다.
+    초상화 캐시는 빈 슬롯을 명시한 정규 캐시 식별자를 쓰며, 장비 변경 시 마운트된 이미지와 렌더러가 즉시 갱신된다.
   - 잔액 감쇠 규범: 헌법(`<candle>`, `no_wall_clock_death` 예외)은 잔액의 지수 감쇠를 요구한다.
     현재 빌드의 잔액(`Candle_balance.of_events`)은 지급과 구매를 재생하며 시간 감쇠를 적용하지 않고,
     반감기 설정 키는 아직 없다(RFC의 `HalfLifeSet` 이벤트 및 반감기 설정 계획).
@@ -1525,8 +1534,11 @@ status: reference
     유일한 명시적 예외 요구다(Task·Goal·Board 상태는 만료시키지 않는다).
   → [Candle_event](../../lib/candle/candle_event.mli) ·
   [Candle_balance](../../lib/candle/candle_balance.mli) ·
+  [Candle_equipment](../../lib/candle_runtime/candle_equipment.mli) ·
+  [Keeper_portrait_equipment](../../lib/keeper_portrait/keeper_portrait_equipment.mli) ·
   [Candle_ledger](../../lib/candle_store/candle_ledger.mli) ·
   [Candle_time](../../lib/candle/candle_time.mli) ·
+  [keeper_candle_equip](../../config/tools/keeper_candle_equip.toml) ·
   [docs/constitution.xml](../constitution.xml) ·
   [docs/rfc/RFC-goal-candle-ledger.md](../rfc/RFC-goal-candle-ledger.md)
 

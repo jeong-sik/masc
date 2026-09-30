@@ -216,10 +216,10 @@ let ask_age_cells = 6
    read "e-masc-the-lead...  1 question waiting". It is also the reading an
    operator picks the next ask by -- [ar_asked_at] was decoded and drawn
    nowhere. *)
-let ask_summary_line ~now ~(row : Masc.Tui_decode.ask_row) =
-  let count = List.length row.Masc.Tui_decode.ar_questions in
+let ask_summary_line ~now ~(row : Masc.Tui_decode_asks.ask_row) =
+  let count = List.length row.Masc.Tui_decode_asks.ar_questions in
   Printf.sprintf " %s%s  %s  %d question%s waiting%s" Ansi.dim
-    (fit_width (Terminal_text.single_line row.Masc.Tui_decode.ar_keeper) 16)
+    (fit_width (Terminal_text.single_line row.Masc.Tui_decode_asks.ar_keeper) 16)
     (fit_width
        (* [age_text], not a subtraction into [span_text]: the two ends are
           named, so the difference cannot be taken the wrong way round, and a
@@ -228,7 +228,7 @@ let ask_summary_line ~now ~(row : Masc.Tui_decode.ask_row) =
           exists to end. *)
        (Option.value ~default:""
           (Message_layout.age_text ~now
-             ~since:row.Masc.Tui_decode.ar_asked_at))
+             ~since:row.Masc.Tui_decode_asks.ar_asked_at))
        ask_age_cells)
     count
     (if count = 1 then "" else "s")
@@ -270,10 +270,10 @@ let draw_ask_questions buf cols (state : state) ~budget =
           let draft = Ask_projection.draft_for state.ask_draft ~row:selected in
           let answering =
             match answering_ask_id with
-            | Some ask_id -> String.equal ask_id selected.Masc.Tui_decode.ar_id
+            | Some ask_id -> String.equal ask_id selected.Masc.Tui_decode_asks.ar_id
             | None -> false
           in
-          let questions = selected.Masc.Tui_decode.ar_questions in
+          let questions = selected.Masc.Tui_decode_asks.ar_questions in
           let question_blocks =
             List.mapi
               (fun index question ->

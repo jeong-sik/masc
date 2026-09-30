@@ -175,7 +175,7 @@ let held_back_reason key =
    in file order, and the prose before the first marker under the group
    key itself. A marker obeys the prompt-key grammar, so a markdown
    heading with spaces stays inside its paragraph. *)
-let with_prompts_dir files f =
+let with_prompts_dir_at files f =
   let dir = test_dir () in
   let prompts_dir = Filename.concat dir "prompts" in
   Unix.mkdir prompts_dir 0o755;
@@ -190,8 +190,10 @@ let with_prompts_dir files f =
       Prompt_registry.clear ();
       Prompt_registry.set_markdown_dir prompts_dir;
       Lib.Prompt_defaults.init ();
-      f ())
+      f prompts_dir)
 ;;
+
+let with_prompts_dir files f = with_prompts_dir_at files (fun _prompts_dir -> f ())
 
 (* (key, operator_surface) for every registered prompt. *)
 let registered_surfaces () =
@@ -432,6 +434,44 @@ let test_duplicate_and_empty_slots () =
         None (registered_variables "test.dup.b"))
 ;;
 
+(* ── Reading a prompt file once per version ─────────────────────────
+
+   A resolution reads its key's file again only when the file is not the
+   version it last read, and a directory scan starts the reads over. *)
+let edited_group_fixture ~slot_text =
+  "---\ndescription: a group edited on disk\ncategory: test\n---\n### note\n"
+  ^ slot_text ^ "\n"
+
+(* A whole-second modification time that [Unix.utimes] puts back exactly. *)
+let pinned_mtime = 1_700_000_000.0
+
+let test_an_edited_prompt_file_is_read_again () =
+  let open Alcotest in
+  with_prompts_dir_at [ ("test.edit.md", edited_group_fixture ~slot_text:"first") ]
+    (fun prompts_dir ->
+      check string "the first reading" "first" (Prompt_registry.get_prompt "test.edit.note");
+      write_file (Filename.concat prompts_dir "test.edit.md")
+        (edited_group_fixture ~slot_text:"second, longer");
+      check string "the next reading after an edit on disk" "second, longer"
+        (Prompt_registry.get_prompt "test.edit.note"))
+;;
+
+(* The edit keeps the inode and the size and has its modification time put
+   back, as one inside a coarse file-time tick would: only the scan shows it. *)
+let test_a_directory_scan_reads_prompt_files_anew () =
+  let open Alcotest in
+  with_prompts_dir_at [ ("test.edit.md", edited_group_fixture ~slot_text:"first") ]
+    (fun prompts_dir ->
+      let path = Filename.concat prompts_dir "test.edit.md" in
+      Unix.utimes path pinned_mtime pinned_mtime;
+      check string "the first reading" "first" (Prompt_registry.get_prompt "test.edit.note");
+      write_file path (edited_group_fixture ~slot_text:"fifth");
+      Unix.utimes path pinned_mtime pinned_mtime;
+      Prompt_registry.load_prompts_from_directory prompts_dir;
+      check string "the reading after the scan" "fifth"
+        (Prompt_registry.get_prompt "test.edit.note"))
+;;
+
 let () =
   let open Alcotest in
   run "Prompt_registry_defaults"
@@ -447,6 +487,11 @@ let () =
             test_a_slot_declares_its_own_surface
         ; test_case "a repeated marker keeps its first paragraph and an empty one is skipped"
             `Quick test_duplicate_and_empty_slots ] );
+      ( "file_reads",
+        [ test_case "an edited prompt file is read again" `Quick
+            test_an_edited_prompt_file_is_read_again
+        ; test_case "a directory scan reads prompt files anew" `Quick
+            test_a_directory_scan_reads_prompt_files_anew ] );
       ( "registration",
         [
           (* Guards the count assertion below: a bulk key rename that maps two

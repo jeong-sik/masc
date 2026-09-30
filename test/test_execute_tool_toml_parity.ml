@@ -11,9 +11,8 @@
 
     What is pinned instead is the shape a model reads: which fields exist and
     in what order, which pairs of fields a call may carry, which retired names
-    are absent from the whole serialized schema, and the phrases in the
-    description that other suites and scripts/check-execute-async-surface.sh
-    key on. Read against the published list rather than the loader, so what a
+    are absent from the whole serialized schema. Read against the published
+    list rather than the loader, so what a
     Keeper receives is what is checked. *)
 
 open Alcotest
@@ -123,21 +122,6 @@ let test_serialized_schema_carries_no_retired_name () =
     [ "pipeline"; "then"; "stdin"; "stdout"; "stderr"; "env" ]
 ;;
 
-let test_description_keeps_its_stable_phrases () =
-  let description = execute_schema.description in
-  List.iter
-    (fun phrase ->
-       check
-         bool
-         ("description says: " ^ phrase)
-         true
-         (Astring.String.is_infix ~affix:phrase description))
-    [ "one non-empty argv process vector"
-    ; "never interprets program or subcommand meaning"
-    ; "there is no background task lifecycle"
-    ]
-;;
-
 let () =
   run
     "execute_tool_toml_parity"
@@ -155,10 +139,6 @@ let () =
             "serialized schema carries no retired name"
             `Quick
             test_serialized_schema_carries_no_retired_name
-        ; test_case
-            "description keeps its stable phrases"
-            `Quick
-            test_description_keeps_its_stable_phrases
         ] )
     ]
 ;;

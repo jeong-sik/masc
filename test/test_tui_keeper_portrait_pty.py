@@ -9,6 +9,8 @@ import os
 import hashlib
 import json
 import copy
+import threading
+import time
 import re
 import sys
 from pathlib import Path
@@ -343,6 +345,98 @@ def item_account_failure_keeps_the_preview(binary: str) -> None:
         terminal_cols=COLUMNS,
     )
 
+def item_account_is_withdrawn_at_workspace_boundary(binary: str) -> None:
+    fixtures = h.keeper_runtime_http_fixtures()
+    identity = {"base": None, "unread": False, "matched_reads": 0}
+    held = threading.Event()
+    release = threading.Event()
+    served = threading.Event()
+    held_at = [None]
+    arm = [False]
+    balance = ["12500"]
+    ready = {"status": "ready", "keeper": "alpha", "owned_items": [],
+             "catalog": [{"id": item, "slot": slot, "price_status": "unpriced"}
+                         for item, slot in ITEM_CATALOG]}
+
+    def health():
+        if identity["unread"]:
+            return 503, {"error": "fixture identity unavailable"}
+        identity["matched_reads"] += 1
+        base = identity["base"] or ""
+        return 200, {"paths": {"effective_base_path": base,
+                               "effective_masc_root": os.path.join(base, ".masc")}}
+
+    def account():
+        value = balance[0]
+        if arm[0]:
+            arm[0] = False
+            held_at[0] = time.monotonic()
+            held.set()
+            if not release.wait(timeout=30):
+                return 504, {"error": "held fixture read timeout"}
+            def send_held_body():
+                # The fixture server resumes this generator only after its
+                # write and flush succeeded. A callable-return event alone
+                # would fire before any HTTP body reached the socket.
+                yield json.dumps(dict(ready, balance_milli=value)).encode()
+                served.set()
+            return h.StreamingHttpResponse(send_held_body)
+        return 200, dict(ready, balance_milli=value)
+
+    fixtures["/health"] = health
+    fixtures["/api/v1/keepers/alpha/items"] = account
+
+    def await_frame(process, fd, output, predicate):
+        assert h.wait_for_fixture_state(process, fd, output,
+            lambda: predicate(b"\n".join(last_frame_rows(output).values())), timeout=10), \
+            f"workspace boundary did not settle: {last_frame_rows(output)!r}"
+
+    def interact(process, fd, _slave, output, base):
+        try:
+            open_alpha_detail(process, fd, output)
+            h.resize_and_wait(process, fd, output, rows=SHORT_ROWS, columns=COLUMNS, needle=INFO_TAB)
+            h.send_and_wait(process, fd, output, b"]", "▸Items".encode())
+            await_frame(process, fd, output, lambda frame: b"Balance 12.500 Candle" in frame)
+            arm[0] = True
+            os.write(fd, b"r")
+            assert h.wait_for_fixture_state(process, fd, output, held.is_set, timeout=10)
+            identity["unread"] = True
+            await_frame(process, fd, output, lambda frame: "▸Items".encode() not in frame
+                        and b"Balance 12.500 Candle" not in frame)
+            previous_reads = identity["matched_reads"]
+            identity["unread"] = False
+            # Two serial full-refresh probes prove the first matching result
+            # was admitted before its successor could start.
+            assert h.wait_for_fixture_state(process, fd, output,
+                lambda: identity["matched_reads"] >= previous_reads + 2, timeout=10)
+            balance[0] = "13000"
+            h.select_keeper_row(process, fd, output, b"alpha")
+            h.send_and_wait(process, fd, output, b"\r", "▸Items".encode())
+            await_frame(process, fd, output, lambda frame: b"Balance 13.000 Candle" in frame)
+            # Masc_tui_http.default_timeout_sec is 10 seconds. Releasing
+            # after that would test a timeout instead of a late successful read.
+            assert held_at[0] is not None and time.monotonic() - held_at[0] < 10
+            release.set()
+            assert h.wait_for_fixture_state(process, fd, output, served.is_set, timeout=3), \
+                "held HTTP response was not written and flushed"
+            assert time.monotonic() - held_at[0] < 10, "held read exceeded the TUI HTTP timeout"
+            previous_reads = identity["matched_reads"]
+            assert h.wait_for_fixture_state(process, fd, output,
+                lambda: identity["matched_reads"] >= previous_reads + 2, timeout=10)
+            assert h.drain_until_quiet(process, fd, output, quiet=0.05), "late response did not settle"
+            frame = b"\n".join(last_frame_rows(output).values())
+            assert b"Balance 13.000 Candle" in frame and b"Balance 12.500 Candle" not in frame
+            capture_item_screen(output, "workspace-authority-return")
+            os.write(fd, b"q")
+        finally:
+            release.set()
+
+    h.run_terminal_scenario(binary, description="Item detail tokens are withdrawn across unread workspace identity",
+                            interact=interact, http_fixtures=fixtures, terminal_cols=COLUMNS,
+                            prepare_workspace=lambda base: identity.update(base=str(base)),
+                            refresh=0.2)
+
+
 def item_account_follows_roster_revision(binary: str) -> None:
     fixtures = h.keeper_runtime_http_fixtures()
     roster_path = "/api/v1/gate/keepers?detailed=true"
@@ -430,4 +524,5 @@ if __name__ == "__main__":
     item_tab_previews_accessories(binary)
     item_account_failure_keeps_the_preview(binary)
     item_account_follows_roster_revision(binary)
-    print("tui keeper portrait: PASS (6 scenarios)")
+    item_account_is_withdrawn_at_workspace_boundary(binary)
+    print("tui keeper portrait: PASS (7 scenarios)")

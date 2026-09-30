@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Withdraw Item accounts and pending Keeper detail reads when the observed workspace identity changes, retaining monotonic request generations to reject delayed replies after returning to the workspace.
+
 ### Added
 
 - Extend isolated Item HTTP acceptance through authenticated MCP free purchases and equipment, checking ledger ownership and changed/restored portrait bytes.

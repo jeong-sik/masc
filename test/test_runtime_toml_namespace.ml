@@ -216,7 +216,7 @@ worker = "second.sol"
   Fun.protect ~finally:(fun () -> Sys.remove path) (fun () ->
     Out_channel.with_open_bin path (fun channel -> output_string channel text);
     match Runtime.load_list ~config_path:path with
-    | Error failure -> Alcotest.fail (Runtime.to_diagnostic_text ~config_path:path failure)
+    | Error failure -> Alcotest.fail (Runtime_config_error.to_diagnostic_text ~config_path:path failure)
     | Ok (runtimes, default, assignments, _, _) ->
       Alcotest.(check (list string)) "only the two enabled bindings materialize"
         ["first.sol"; "second.sol"]

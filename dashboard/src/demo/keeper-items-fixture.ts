@@ -6,6 +6,7 @@ import { html } from 'htm/preact'
 import { render } from 'preact'
 import { signal } from '@preact/signals'
 import type { Keeper } from '../types'
+import { hydrateExecutionSnapshot } from '../store'
 import { KeeperItemsPanel } from '../components/keeper-items-panel'
 import { KeeperDetailSection, KeeperDetailSectionRail, activeKeeperDetailSection } from '../components/keeper-detail-shell'
 
@@ -26,6 +27,24 @@ declare global {
 window.updateKeeperItemsFixture = revision => {
   keeper.value = { ...keeper.value, candle_account_revision: revision }
 }
+
+// This isolated fixture has no production HTTP/SSE bootstrap. Admit its
+// explicitly synthetic workspace through the same store path as production.
+declare global {
+  interface Window {
+    updateKeeperItemsWorkspaceFixture: (workspaceRoot: string | null) => void
+  }
+}
+let fixturePublicationGeneration = 0
+window.updateKeeperItemsWorkspaceFixture = workspaceRoot => {
+  const accepted = hydrateExecutionSnapshot({
+    execution_publication_epoch: 'keeper-items-browser-fixture',
+    execution_publication_generation: ++fixturePublicationGeneration,
+    status: { project: 'keeper-items-fixture', ...(workspaceRoot === null ? {} : { workspace_root: workspaceRoot }) },
+  })
+  if (!accepted) throw new Error('Item fixture workspace observation refused')
+}
+window.updateKeeperItemsWorkspaceFixture('/fixture/keeper-items')
 
 activeKeeperDetailSection.value = 'keeper-items'
 const root = document.getElementById('app')

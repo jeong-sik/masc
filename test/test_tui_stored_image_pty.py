@@ -140,11 +140,11 @@ def run(executable, *, mode, evidence_dir=None):
         # The notice shares a 100-column footer with key hints. Its reason may
         # be truncated; require the visible reason and artifact label together
         # on one row of the completed retained frame instead of its hidden tail.
-        h.wait_for_output(process, fd, output, reason, start=start, timeout=5)
-        reason_end = h.end_of_needle(output, reason, start)
-        h.wait_for_output(process, fd, output, h.FRAME_END, start=reason_end, timeout=5)
-        frame_end = output.find(h.FRAME_END, reason_end) + len(h.FRAME_END)
-        rows = h.screen_rows(bytes(output[:frame_end]))
+        _keyboard_harness.wait_for_output(process, fd, output, reason, start=start, timeout=5)
+        reason_end = _keyboard_harness.end_of_needle(output, reason, start)
+        _keyboard_harness.wait_for_output(process, fd, output, _keyboard_harness.FRAME_END, start=reason_end, timeout=5)
+        frame_end = output.find(_keyboard_harness.FRAME_END, reason_end) + len(_keyboard_harness.FRAME_END)
+        rows = _keyboard_harness.screen_rows(bytes(output[:frame_end]))
         target = b"sent image ../../label-only.png:"
         if not any(target in row and reason in row for row in rows.values()):
             raise AssertionError("artifact label and rejection reason were not visible in the same completed frame")

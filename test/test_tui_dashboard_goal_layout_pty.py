@@ -37,6 +37,33 @@ def run(executable):
                             interact=interact, http_fixtures=fixtures, terminal_rows=40)
 
 
+def bounded_preview(executable):
+    goals = []
+    for index in range(2):
+        goal = h.planning_goal(f"goal-verbose-{index}", f"Verbose Goal {index}")
+        goal.update({"metric": "long metric clause " * 80, "target_value": "long target " * 80,
+                     "task_count": 4, "task_done_count": 2,
+                     "measurement": {"state": "not_recorded"},
+                     "stagnation_seconds": None, "tasks": [], "children": []})
+        goals.append(goal)
+    fixtures = h.overview_event_http_fixtures()
+    fixtures[h.DASHBOARD_GOALS_PATH] = (200, {"tree": goals})
+
+    def interact(process, fd, _slave, output, _base):
+        h.wait_for_output(process, fd, output, b"More Goal detail in Work", start=0, timeout=10)
+        for width in (80, 60, 120):
+            frame = h.resize_and_wait(process, fd, output, rows=24, columns=width,
+                                      needle=b"More Goal detail in Work", controls=(h.FULL_REDRAW,))
+            screen = h.screen_text(frame)
+            for required in (b"Work", b"Usage", b"Needs you", b"More Goal detail in Work"):
+                assert required in screen, (width, required, screen)
+        os.write(fd, b"q")
+
+    h.run_terminal_scenario(executable, description="Verbose Goal preview preserves Dashboard summaries",
+                            interact=interact, http_fixtures=fixtures, terminal_rows=24)
+
+
 if __name__ == "__main__":
     run(os.path.abspath(sys.argv[1]))
+    bounded_preview(os.path.abspath(sys.argv[1]))
     print("Dashboard Goal layout: PASS")

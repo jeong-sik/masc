@@ -638,10 +638,8 @@ let render_overview (state : state) =
     in
     title :: List.map (fun line -> "   " ^ line) body
   in
-  let summary =
-    dashboard_goal_lines ~cols state
-    @ [ "" ]
-    @ dashboard_work_lines state
+  let other_summaries =
+    dashboard_work_lines state
     @ [ "" ]
     @ dashboard_usage_lines state
     @ [ "" ]
@@ -661,6 +659,19 @@ let render_overview (state : state) =
              "Needs you" off a short terminal, and half a guide names a step
              with no way to finish it (#39526). *)
           let notice = dashboard_opening_notice_lines state in
+          (* Reserve Work, Usage and attention before spending spare rows on
+             Goal criteria. Full metric strings remain in the Work detail. *)
+          let goal_budget = max 0
+            (budget - List.length notice - 2 - List.length other_summaries - 1) in
+          let goals = dashboard_goal_lines ~cols state in
+          let goals =
+            if List.length goals <= goal_budget then goals
+            else if goal_budget = 0 then []
+            else
+              List.filteri (fun index _ -> index < goal_budget - 1) goals
+              @ [ "   More Goal detail in Work" ]
+          in
+          let summary = goals @ (if goals = [] then [] else [ "" ]) @ other_summaries in
           let guide = dashboard_first_use_lines state in
           let guide =
             if List.length notice + 2 + List.length guide + List.length summary

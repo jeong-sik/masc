@@ -1,0 +1,306 @@
+(* The real rotation, prune, revoke and credential publishers contend on one durable
+   transaction. Admission barriers fix order without sleeps or stale lists. *)
+open Alcotest
+module Prune = Auth_token_prune
+
+let () = Mirage_crypto_rng_unix.use_default ()
+
+let auth_ok = function
+  | Ok value -> value
+  | Error error -> fail (Masc_domain.masc_error_to_string error)
+
+let with_workspace f =
+  let base_path = Filename.temp_dir "token-rotation-transaction-" "" in
+  Eio_main.run @@ fun env ->
+  Masc_test_deps.init_eio_clock env;
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path; Fs_compat.clear_fs ()) (fun () ->
+    Auth.save_auth_config base_path
+      { Masc_domain.default_auth_config with enabled = true; require_token = true };
+    f base_path)
+
+let expired = "2000-01-01T00:00:00Z"
+let shared = "rotation-transaction-shared-token"
+
+let seed ?(expiry = None) base_path name =
+  let credential = auth_ok (Auth.save_file_backed_raw_token_credential base_path
+      ~agent_name:name ~role:Masc_domain.Worker ~raw_token:shared) in
+  let credential = { credential with expires_at = expiry } in
+  Auth.save_credential base_path credential;
+  credential
+
+let seed_pair ?(expiry = None) base_path =
+  let first = seed ~expiry base_path "aaa" in
+  let second = seed ~expiry base_path "bbb" in
+  first, second
+
+let rotate base_path = Auth.rotate_shared_tokens base_path
+let prune base_path = Prune.run ~base_path ~now:(Time_compat.now ()) ~mode:Prune.Retire
+let renew base_path = auth_ok (Auth.create_token base_path ~agent_name:"aaa" ~role:Masc_domain.Admin)
+let revoke base_path = Auth.delete_credential base_path "aaa"
+let read path = In_channel.with_open_bin path In_channel.input_all
+let credential base_path name = match Auth.load_credential base_path name with
+  | Some credential -> credential
+  | None -> fail "fixture credential missing"
+let current_raw base_path name = match Auth.load_raw_token base_path ~agent_name:name with
+  | Some raw -> raw
+  | None -> fail "successful rotation lost its raw token"
+let check_recoverable base_path name =
+  let raw = current_raw base_path name in
+  let current = credential base_path name in
+  check string "raw sidecar matches current credential" current.token (Auth.sha256_hash raw);
+  let _verified = auth_ok (Auth.verify_token base_path ~agent_name:name ~token:raw) in
+  ()
+let check_rotated outcomes =
+  match auth_ok outcomes with
+  | [ { Auth.rotated_agents = [ "aaa", Ok (); "bbb", Ok () ]; _ } ] -> ()
+  | _ -> fail "both current shared owners must rotate"
+
+let lock_path base_path = Filename.concat (Unix.realpath (Auth.auth_dir base_path)) ".credentials.lock"
+
+let await_waiter base_path completed =
+  let rec wait () =
+    if File_lock_eio.For_testing.holders_and_waiters ~lock_path:(lock_path base_path) >= 2 then ()
+    else match Eio.Promise.peek completed with
+      | Some _ -> fail "the competing operation bypassed the credential transaction"
+      | None -> Eio.Fiber.yield (); wait () in
+  wait ()
+
+let interleave base_path first second =
+  let admitted, signal_admitted = Eio.Promise.create () in
+  let continue, signal_continue = Eio.Promise.create () in
+  let first_done, signal_first_done = Eio.Promise.create () in
+  let second_done, signal_second_done = Eio.Promise.create () in
+  let armed = Atomic.make true in
+  let previous = Atomic.get File_lock_eio.on_lock_attempt_fn in
+  Atomic.set File_lock_eio.on_lock_attempt_fn
+    (fun ~caller ~retries ~elapsed_s ~outcome ->
+      previous ~caller ~retries ~elapsed_s ~outcome;
+      if String.equal caller "File_lock_eio.durable" && Atomic.compare_and_set armed true false then (
+        Eio.Promise.resolve signal_admitted ();
+        Eio.Promise.await continue));
+  Fun.protect ~finally:(fun () -> Atomic.set File_lock_eio.on_lock_attempt_fn previous)
+    (fun () -> Eio.Switch.run @@ fun sw ->
+      Eio.Fiber.fork ~sw (fun () -> Eio.Promise.resolve signal_first_done (first ()));
+      let rec await_first () =
+        match Eio.Promise.peek admitted, Eio.Promise.peek first_done with
+        | Some (), _ -> ()
+        | None, Some _ -> fail "the first operation bypassed the credential transaction"
+        | None, None -> Eio.Fiber.yield (); await_first () in
+      await_first ();
+      Eio.Fiber.fork ~sw (fun () -> Eio.Promise.resolve signal_second_done (second ()));
+      await_waiter base_path second_done;
+      Eio.Promise.resolve signal_continue ();
+      Eio.Promise.await first_done, Eio.Promise.await second_done)
+
+let test_admin_before_rotation () =
+  with_workspace @@ fun base_path ->
+  let _pair = seed_pair base_path in
+  let (token, current), result = interleave base_path (fun () -> renew base_path) (fun () -> rotate base_path) in
+  check int "renewal breaks the current shared group" 0 (List.length (auth_ok result));
+  check bool "Admin credential is preserved exactly" true (credential base_path "aaa" = current);
+  let _verified = auth_ok (Auth.verify_token base_path ~agent_name:"aaa" ~token) in
+  check string "role remains Admin" "admin" (Masc_domain.agent_role_to_string current.role)
+
+let test_rotation_before_admin () =
+  with_workspace @@ fun base_path ->
+  let _pair = seed_pair base_path in
+  let result, (token, current) = interleave base_path (fun () -> rotate base_path) (fun () -> renew base_path) in
+  check_rotated result;
+  check bool "later Admin renewal remains current" true (credential base_path "aaa" = current);
+  let _verified = auth_ok (Auth.verify_token base_path ~agent_name:"aaa" ~token) in
+  check_recoverable base_path "bbb"
+
+let test_prune_before_rotation () =
+  with_workspace @@ fun base_path ->
+  let _pair = seed_pair ~expiry:(Some expired) base_path in
+  let retired, result = interleave base_path (fun () -> prune base_path) (fun () -> rotate base_path) in
+  check int "prune retired both expired owners" 2 (List.length (auth_ok retired));
+  check int "fresh discovery does not resurrect deleted owners" 0 (List.length (auth_ok result));
+  List.iter (fun name ->
+    check bool "credential stays removed" true (Auth.load_credential base_path name = None);
+    check bool "raw sidecar stays removed" true (Auth.load_raw_token base_path ~agent_name:name = None))
+    [ "aaa"; "bbb" ]
+
+let test_rotation_before_prune () =
+  with_workspace @@ fun base_path ->
+  let _pair = seed_pair ~expiry:(Some expired) base_path in
+  let result, retired = interleave base_path (fun () -> rotate base_path) (fun () -> prune base_path) in
+  check_rotated result;
+  check int "prune sees current live credentials" 0 (List.length (auth_ok retired));
+  List.iter (check_recoverable base_path) [ "aaa"; "bbb" ]
+
+let test_revoke_before_rotation () =
+  with_workspace @@ fun base_path ->
+  let _pair = seed_pair base_path in
+  let (), result = interleave base_path (fun () -> revoke base_path) (fun () -> rotate base_path) in
+  check int "remaining owner is not a shared group" 0 (List.length (auth_ok result));
+  check bool "revocation cannot be resurrected" true (Auth.load_credential base_path "aaa" = None);
+  check bool "revoked raw token stays removed" true (Auth.load_raw_token base_path ~agent_name:"aaa" = None);
+  check string "remaining owner was not rewritten" shared (current_raw base_path "bbb")
+
+let test_rotation_before_revoke () =
+  with_workspace @@ fun base_path ->
+  let _pair = seed_pair base_path in
+  let result, () = interleave base_path (fun () -> rotate base_path) (fun () -> revoke base_path) in
+  check_rotated result;
+  check bool "later revoke removes the rotated credential" true (Auth.load_credential base_path "aaa" = None);
+  check bool "later revoke removes its raw sidecar" true (Auth.load_raw_token base_path ~agent_name:"aaa" = None);
+  check_recoverable base_path "bbb"
+
+let snapshot base_path =
+  List.map read [ Auth.credential_file base_path "aaa"; Auth.raw_token_file base_path "aaa";
+    Auth.credential_file base_path "bbb"; Auth.raw_token_file base_path "bbb" ]
+let check_refused_before_writes base_path before =
+  (match rotate base_path with Error _ -> () | Ok _ -> fail "rotation must refuse the whole plan");
+  check (list string) "all credential and raw bytes survive refusal" before (snapshot base_path)
+
+let test_failed_admission () =
+  with_workspace @@ fun base_path ->
+  let _pair = seed_pair base_path in
+  let before = snapshot base_path in
+  let path = lock_path base_path in
+  Unix.unlink path;
+  Unix.mkdir path 0o700;
+  check_refused_before_writes base_path before
+
+let test_read_failure () =
+  with_workspace @@ fun base_path ->
+  let _pair = seed_pair base_path in
+  let before = snapshot base_path in
+  Unix.mkdir (Auth.credential_file base_path "zzz") 0o700;
+  check_refused_before_writes base_path before
+
+let test_config_failure () =
+  with_workspace @@ fun base_path ->
+  let _pair = seed_pair base_path in
+  let before = snapshot base_path in
+  Auth.save_private_text_file (Auth.auth_config_file base_path) "{";
+  check_refused_before_writes base_path before
+
+let test_ambiguous_names_preserved () =
+  with_workspace @@ fun base_path ->
+  let _, second = seed_pair base_path in
+  Auth.save_private_text_file (Auth.credential_file base_path "aaa") "{";
+  Auth.save_private_text_file (Auth.credential_file base_path "bbb")
+    (Masc_domain.agent_credential_to_yojson { second with agent_name = "other" } |> Yojson.Safe.to_string);
+  let before = snapshot base_path in
+  check int "ambiguous records grant no rotation authority" 0 (List.length (auth_ok (rotate base_path)));
+  check (list string) "ambiguous files remain exact" before (snapshot base_path)
+
+let test_raw_failure_continues () =
+  with_workspace @@ fun base_path ->
+  let _pair = seed_pair base_path in
+  let raw = Auth.raw_token_file base_path "aaa" in
+  Unix.unlink raw;
+  Unix.mkdir raw 0o700;
+  let old = credential base_path "aaa" in
+  let _cached_result = Auth.find_static_credential_by_token base_path ~token:shared in
+  (match auth_ok (rotate base_path) with
+   | [ { Auth.rotated_agents = [ "aaa", Error { raw_token = Auth.Publication_unreadable _;
+       credential = Auth.Not_published; _ }; "bbb", Ok () ]; _ } ] -> ()
+   | _ -> fail "raw failure must report observed state and allow the later owner to rotate");
+  check bool "failed raw write preserves the old credential" true (credential base_path "aaa" = old);
+  check_recoverable base_path "bbb";
+  check bool "old shared bearer has one current owner after partial rotation" true
+    (Result.is_ok (Auth.find_static_credential_by_token base_path ~token:shared))
+
+let test_credential_failure_after_raw_publication () =
+  with_workspace @@ fun base_path ->
+  let _pair = seed_pair base_path in
+  let before = List.map (fun name -> read (Auth.credential_file base_path name)) [ "aaa"; "bbb" ] in
+  let directory = Auth.agents_dir base_path in
+  (* The credential directory is readable, but publication cannot create a
+     replacement file. Raw sidecars live in the writable parent Auth directory. *)
+  Unix.chmod directory 0o500;
+  Fun.protect ~finally:(fun () -> Unix.chmod directory 0o700) (fun () ->
+    match auth_ok (rotate base_path) with
+    | [ { Auth.rotated_agents = [ "aaa", Error { raw_token = Auth.Published;
+        credential = Auth.Not_published; _ }; "bbb", Error { raw_token = Auth.Published;
+        credential = Auth.Not_published; _ } ]; _ } ] -> ()
+    | _ -> fail "second-stage publication failure must report the already changed raw sidecar");
+  check (list string) "credential bytes remained old" before
+    (List.map (fun name -> read (Auth.credential_file base_path name)) [ "aaa"; "bbb" ]);
+  List.iter (fun name -> check bool "failed rotation does not claim a recoverable bearer" false
+    (String.equal (Auth.sha256_hash (current_raw base_path name)) (credential base_path name).token))
+    [ "aaa"; "bbb" ]
+
+let test_uuid_owners_and_aliases () =
+  with_workspace @@ fun base_path ->
+  let first, second = seed_pair base_path in
+  let first = { first with id = Some (Masc_domain.Credential_id.of_string "rotation-uuid-a") } in
+  let second = { second with id = Some (Masc_domain.Credential_id.of_string "rotation-uuid-b") } in
+  Auth.save_credential base_path first;
+  Auth.save_credential base_path second;
+  Auth.save_private_text_file (Auth.credential_file base_path "alias")
+    (Yojson.Safe.to_string (`Assoc [ "redirect_to", `String "rotation-uuid-a.json" ]));
+  check_rotated (rotate base_path);
+  check bool "UUID identity preserved" true ((credential base_path "aaa").id = first.id);
+  check bool "legitimate alias still resolves the canonical owner" true
+    (Auth.load_credential base_path "alias" = Some (credential base_path "aaa"));
+  List.iter (check_recoverable base_path) [ "aaa"; "bbb" ]
+
+let test_forged_uuid_refused () =
+  with_workspace @@ fun base_path ->
+  let first, _ = seed_pair base_path in
+  let token, operator = auth_ok (Auth.ensure_keeper_credential base_path ~agent_name:"operator") in
+  let operator = { operator with role = Masc_domain.Admin } in
+  Auth.save_credential base_path operator;
+  let id = match operator.id with Some id -> id | None -> fail "UUID fixture missing" in
+  let target = Auth.credential_file base_path (Masc_domain.Credential_id.to_string id) in
+  let before_operator = read target in
+  let forged = { first with id = Some id } in
+  let json = Masc_domain.agent_credential_to_yojson forged |> Yojson.Safe.to_string in
+  Auth.save_private_text_file (Auth.credential_file base_path "oldid") json;
+  Auth.save_private_text_file (Auth.credential_file base_path "aaa")
+    (Yojson.Safe.to_string (`Assoc [ "redirect_to", `String "oldid.json" ]));
+  check_refused_before_writes base_path (snapshot base_path);
+  check string "foreign live UUID remains exact" before_operator (read target);
+  let _verified = auth_ok (Auth.verify_token base_path ~agent_name:"operator" ~token) in
+  Auth.save_private_text_file (Auth.credential_file base_path "aaa") json;
+  check_refused_before_writes base_path (snapshot base_path);
+  check string "direct forged UUID also preserves operator" before_operator (read target);
+  let escaped = { first with id = Some (Masc_domain.Credential_id.of_string "../../outside") } in
+  Auth.save_private_text_file (Auth.credential_file base_path "aaa")
+    (Masc_domain.agent_credential_to_yojson escaped |> Yojson.Safe.to_string);
+  check_refused_before_writes base_path (snapshot base_path)
+
+let test_self_redirect_refused () =
+  with_workspace @@ fun base_path ->
+  let first, _ = seed_pair base_path in
+  Auth.save_private_text_file (Auth.credential_file base_path "aaa")
+    (Masc_domain.agent_credential_to_yojson
+      { first with id = Some (Masc_domain.Credential_id.of_string "aaa") } |> Yojson.Safe.to_string);
+  check_refused_before_writes base_path (snapshot base_path)
+
+let test_absent_uuid_collision_refused () =
+  with_workspace @@ fun base_path ->
+  let first, second = seed_pair base_path in
+  let id = Some (Masc_domain.Credential_id.of_string "absent-uuid") in
+  List.iter (fun (name, current) -> Auth.save_private_text_file
+    (Auth.credential_file base_path name)
+    (Masc_domain.agent_credential_to_yojson { current with Masc_domain.id = id } |> Yojson.Safe.to_string))
+    [ "aaa", first; "bbb", second ];
+  check_refused_before_writes base_path (snapshot base_path);
+  check bool "the colliding UUID is never created" false
+    (Sys.file_exists (Auth.credential_file base_path "absent-uuid"))
+
+let () =
+  run "auth_token_rotation_transaction"
+    [ "rotation",
+      [ test_case "Admin renewal before rotation" `Quick test_admin_before_rotation
+      ; test_case "rotation before Admin renewal" `Quick test_rotation_before_admin
+      ; test_case "prune before rotation cannot resurrect credentials" `Quick test_prune_before_rotation
+      ; test_case "rotation before prune retains recoverable raw tokens" `Quick test_rotation_before_prune
+      ; test_case "revoke before rotation cannot resurrect credentials" `Quick test_revoke_before_rotation
+      ; test_case "rotation before revoke is removed completely" `Quick test_rotation_before_revoke
+      ; test_case "failed admission preserves every file" `Quick test_failed_admission
+      ; test_case "read failure precedes every write" `Quick test_read_failure
+      ; test_case "malformed config returns outer Error before writes" `Quick test_config_failure
+      ; test_case "ambiguous names remain unchanged" `Quick test_ambiguous_names_preserved
+      ; test_case "raw failure reports state and later owner succeeds" `Quick test_raw_failure_continues
+      ; test_case "credential failure reports already published raw tokens" `Quick test_credential_failure_after_raw_publication
+      ; test_case "UUID owners and legitimate aliases remain valid" `Quick test_uuid_owners_and_aliases
+      ; test_case "forged UUID and traversal refuse before writes" `Quick test_forged_uuid_refused
+      ; test_case "UUID cannot collide with its named redirect" `Quick test_self_redirect_refused
+      ; test_case "absent UUID write target cannot be shared" `Quick test_absent_uuid_collision_refused ] ]

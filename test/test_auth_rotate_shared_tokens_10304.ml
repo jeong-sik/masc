@@ -62,6 +62,10 @@ let seed_shared_credential base_path ~agent_name ~role ~raw_token =
   | Ok cred -> cred
   | Error e -> failf "seed credential failed: %s" (Masc_domain.masc_error_to_string e)
 
+let rotation_ok = function
+  | Ok outcomes -> outcomes
+  | Error error -> fail (Masc_domain.masc_error_to_string error)
+
 let outcome_names_of (o : Auth.rotation_outcome) =
   List.map fst o.rotated_agents
 
@@ -93,13 +97,11 @@ let raw_token_value base_path agent_name =
 
 let test_no_shared_returns_empty () =
   with_temp_base @@ fun base ->
-  ignore
-    (seed_shared_credential base ~agent_name:"alice" ~role:Masc_domain.Worker
-       ~raw_token:"alice-unique-token");
-  ignore
-    (seed_shared_credential base ~agent_name:"bob" ~role:Masc_domain.Worker
-       ~raw_token:"bob-unique-token");
-  let outcomes = Auth.rotate_shared_tokens base in
+  let _credential = seed_shared_credential base ~agent_name:"alice" ~role:Masc_domain.Worker
+       ~raw_token:"alice-unique-token" in
+  let _credential = seed_shared_credential base ~agent_name:"bob" ~role:Masc_domain.Worker
+       ~raw_token:"bob-unique-token" in
+  let outcomes = Auth.rotate_shared_tokens base |> rotation_ok in
   check int "no shared groups, no rotation"
     0 (List.length outcomes);
   (* Audit confirms nothing to fix. *)
@@ -111,21 +113,18 @@ let test_no_shared_returns_empty () =
 let test_shared_group_rotates_to_unique () =
   with_temp_base @@ fun base ->
   let shared = "shared-bearer-token-abc" in
-  ignore
-    (seed_shared_credential base ~agent_name:"keeper-a"
-       ~role:Masc_domain.Worker ~raw_token:shared);
-  ignore
-    (seed_shared_credential base ~agent_name:"keeper-b"
-       ~role:Masc_domain.Worker ~raw_token:shared);
-  ignore
-    (seed_shared_credential base ~agent_name:"keeper-c"
-       ~role:Masc_domain.Worker ~raw_token:shared);
+  let _credential = seed_shared_credential base ~agent_name:"keeper-a"
+       ~role:Masc_domain.Worker ~raw_token:shared in
+  let _credential = seed_shared_credential base ~agent_name:"keeper-b"
+       ~role:Masc_domain.Worker ~raw_token:shared in
+  let _credential = seed_shared_credential base ~agent_name:"keeper-c"
+       ~role:Masc_domain.Worker ~raw_token:shared in
   (* Audit before rotation: one group of 3. *)
   let groups_before = Auth.audit_token_uniqueness base in
   check int "audit sees 1 group before rotation"
     1 (List.length groups_before);
   (* Rotate. *)
-  let outcomes = Auth.rotate_shared_tokens base in
+  let outcomes = Auth.rotate_shared_tokens base |> rotation_ok in
   check int "rotation reports 1 outcome"
     1 (List.length outcomes);
   let outcome = List.hd outcomes in
@@ -174,17 +173,15 @@ let test_shared_group_rotates_to_unique () =
    from the file it was told to use. *)
 let test_bearer_lookup_follows_rotation () =
   with_temp_base @@ fun base ->
-  ignore
-    (seed_shared_credential base ~agent_name:"alice" ~role:Masc_domain.Worker
-       ~raw_token:"shared-bearer-token");
-  ignore
-    (seed_shared_credential base ~agent_name:"bob" ~role:Masc_domain.Worker
-       ~raw_token:"shared-bearer-token");
+  let _credential = seed_shared_credential base ~agent_name:"alice" ~role:Masc_domain.Worker
+       ~raw_token:"shared-bearer-token" in
+  let _credential = seed_shared_credential base ~agent_name:"bob" ~role:Masc_domain.Worker
+       ~raw_token:"shared-bearer-token" in
   (* Populate the index before rotating: a lookup that only ever runs on a
      cold index cannot observe the staleness this pins. *)
   (match Auth.find_static_credential_by_token base ~token:"shared-bearer-token" with
    | Ok _ | Error _ -> ());
-  ignore (Auth.rotate_shared_tokens base : Auth.rotation_outcome list);
+  let _outcomes = Auth.rotate_shared_tokens base |> rotation_ok in
   [ "alice"; "bob" ]
   |> List.iter (fun agent_name ->
          let rotated = raw_token_value base agent_name in
@@ -206,13 +203,11 @@ let test_bearer_lookup_follows_rotation () =
 let test_rotation_preserves_role () =
   with_temp_base @@ fun base ->
   let shared = "role-mix-shared-token" in
-  ignore
-    (seed_shared_credential base ~agent_name:"admin-keeper"
-       ~role:Masc_domain.Admin ~raw_token:shared);
-  ignore
-    (seed_shared_credential base ~agent_name:"worker-keeper"
-       ~role:Masc_domain.Worker ~raw_token:shared);
-  let _ = Auth.rotate_shared_tokens base in
+  let _credential = seed_shared_credential base ~agent_name:"admin-keeper"
+       ~role:Masc_domain.Admin ~raw_token:shared in
+  let _credential = seed_shared_credential base ~agent_name:"worker-keeper"
+       ~role:Masc_domain.Worker ~raw_token:shared in
+  let _ = Auth.rotate_shared_tokens base |> rotation_ok in
   check string "admin keeper kept Admin role"
     "admin"
     (Masc_domain.agent_role_to_string (credential_role base "admin-keeper"));
@@ -226,19 +221,15 @@ let test_two_shared_groups_sorted_by_prefix () =
   with_temp_base @@ fun base ->
   let token_alpha = "alpha-shared-token-zzz" in
   let token_beta = "beta-shared-token-yyy" in
-  ignore
-    (seed_shared_credential base ~agent_name:"a1" ~role:Masc_domain.Worker
-       ~raw_token:token_alpha);
-  ignore
-    (seed_shared_credential base ~agent_name:"a2" ~role:Masc_domain.Worker
-       ~raw_token:token_alpha);
-  ignore
-    (seed_shared_credential base ~agent_name:"b1" ~role:Masc_domain.Worker
-       ~raw_token:token_beta);
-  ignore
-    (seed_shared_credential base ~agent_name:"b2" ~role:Masc_domain.Worker
-       ~raw_token:token_beta);
-  let outcomes = Auth.rotate_shared_tokens base in
+  let _credential = seed_shared_credential base ~agent_name:"a1" ~role:Masc_domain.Worker
+       ~raw_token:token_alpha in
+  let _credential = seed_shared_credential base ~agent_name:"a2" ~role:Masc_domain.Worker
+       ~raw_token:token_alpha in
+  let _credential = seed_shared_credential base ~agent_name:"b1" ~role:Masc_domain.Worker
+       ~raw_token:token_beta in
+  let _credential = seed_shared_credential base ~agent_name:"b2" ~role:Masc_domain.Worker
+       ~raw_token:token_beta in
+  let outcomes = Auth.rotate_shared_tokens base |> rotation_ok in
   check int "two outcome groups"
     2 (List.length outcomes);
   let prefixes =
@@ -253,14 +244,12 @@ let test_two_shared_groups_sorted_by_prefix () =
 let test_idempotent_after_rotation () =
   with_temp_base @@ fun base ->
   let shared = "second-pass-token" in
-  ignore
-    (seed_shared_credential base ~agent_name:"x"
-       ~role:Masc_domain.Worker ~raw_token:shared);
-  ignore
-    (seed_shared_credential base ~agent_name:"y"
-       ~role:Masc_domain.Worker ~raw_token:shared);
-  let _ = Auth.rotate_shared_tokens base in
-  let second_outcomes = Auth.rotate_shared_tokens base in
+  let _credential = seed_shared_credential base ~agent_name:"x"
+       ~role:Masc_domain.Worker ~raw_token:shared in
+  let _credential = seed_shared_credential base ~agent_name:"y"
+       ~role:Masc_domain.Worker ~raw_token:shared in
+  let _ = Auth.rotate_shared_tokens base |> rotation_ok in
+  let second_outcomes = Auth.rotate_shared_tokens base |> rotation_ok in
   check int "second rotation finds nothing to rotate"
     0 (List.length second_outcomes)
 
@@ -269,18 +258,15 @@ let test_idempotent_after_rotation () =
 let test_scoped_rotation_only_rotates_selected_agents () =
   with_temp_base @@ fun base ->
   let shared = "scoped-shared-token" in
-  ignore
-    (seed_shared_credential base ~agent_name:"keeper-a"
-       ~role:Masc_domain.Worker ~raw_token:shared);
-  ignore
-    (seed_shared_credential base ~agent_name:"keeper-b"
-       ~role:Masc_domain.Worker ~raw_token:shared);
-  ignore
-    (seed_shared_credential base ~agent_name:"admin"
-       ~role:Masc_domain.Admin ~raw_token:shared);
+  let _credential = seed_shared_credential base ~agent_name:"keeper-a"
+       ~role:Masc_domain.Worker ~raw_token:shared in
+  let _credential = seed_shared_credential base ~agent_name:"keeper-b"
+       ~role:Masc_domain.Worker ~raw_token:shared in
+  let _credential = seed_shared_credential base ~agent_name:"admin"
+       ~role:Masc_domain.Admin ~raw_token:shared in
   let outcomes =
     Auth.rotate_shared_tokens_for_agents base
-      ~agent_names:[ "keeper-a"; "keeper-b" ]
+      ~agent_names:[ "keeper-a"; "keeper-b" ] |> rotation_ok
   in
   check int "one scoped outcome" 1 (List.length outcomes);
   let outcome = List.hd outcomes in

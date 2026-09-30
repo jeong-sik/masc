@@ -596,8 +596,8 @@ let list_credentials config : agent_credential list =
   else []
 ;;
 
-(* Prune discovery keeps decode failures distinct from I/O failure: the former
-   preserve their file, the latter abort the whole plan before deletion. These
+(* Current-store discovery keeps decode failures distinct from I/O failure: the former
+   preserve their file, the latter abort the whole plan before mutation. These
    helpers are private to the Auth library and require its current admission. *)
 type stored_credential =
   | Stored_credential of agent_credential
@@ -648,37 +648,44 @@ type credential_prune_snapshot =
   { credentials : (agent_credential * credential_prune_retirement) list
   ; orphaned_redirects : credential_prune_retirement list }
 
-let credential_prune_authority config name stored (credential : agent_credential) =
+(* Existing UUID payloads must belong to the exact current credential; a
+   redirect must name its embedded UUID. Missing direct UUID payloads are
+   distinguishable from an owned existing target. *)
+let credential_owned_uuid_target config name stored (credential : agent_credential) =
   let ( let* ) = Result.bind in
   let refused detail = Error (System (System_error.ValidationError
-      (Printf.sprintf "cannot prune %s: %s" name detail))) in
+      (Printf.sprintf "credential storage authority for %s: %s" name detail))) in
   let uuid_path id =
     match redirect_target_file config (Credential_id.to_string id ^ ".json") with
     | Some target -> Ok target
     | None -> refused "credential UUID is not a store filename" in
   match stored, credential.id with
-  | Stored_credential _, None -> Ok { agent_name = name; uuid_target = None }
+  | Stored_credential _, None -> Ok None
   | Stored_redirect target, Some id ->
     let* uuid = uuid_path id in
     if String.equal target uuid
-    then Ok { agent_name = name; uuid_target = Some target }
+    then Ok (Some target)
     else refused "redirect target disagrees with the credential UUID"
   | Stored_credential _, Some id ->
     let* target = uuid_path id in
     let* present = credential_path_exists target in
-    if not present then Ok { agent_name = name; uuid_target = None }
+    if not present then Ok None
     else
       let* target_record = read_stored_credential config name target in
       (match target_record with
        | Stored_credential current when current = credential ->
-         Ok { agent_name = name; uuid_target = Some target }
+         Ok (Some target)
        | Stored_credential _ | Stored_redirect _ | Unresolved_credential ->
          refused "embedded UUID resolves to another credential")
   | Stored_redirect _, None -> refused "redirected credential has no UUID binding"
   | Unresolved_credential, (Some _ | None) -> refused "credential cannot be resolved"
 ;;
 
-let credential_prune_snapshot_in_transaction (Credential_transaction config) =
+type credential_store_snapshot =
+  { current_credentials : (stored_credential * agent_credential) list
+  ; orphaned_names : string list }
+
+let credential_store_snapshot_in_transaction (Credential_transaction config) =
   let ( let* ) = Result.bind in
   let* files = credential_read_result (fun () -> read_dir (agents_dir config)) in
   let files = Array.to_list files |> List.filter (fun file -> Filename.check_suffix file ".json")
@@ -715,8 +722,7 @@ let credential_prune_snapshot_in_transaction (Credential_transaction config) =
         let* resolved = resolve_stored_credential config name stored in
         (match resolved with
          | Some credential when String.equal credential.agent_name name ->
-           let* authority = credential_prune_authority config name stored credential in
-           current_credentials ((credential, authority) :: acc) rest
+           current_credentials ((stored, credential) :: acc) rest
          | Some _ | None -> current_credentials acc rest)
   in
   let* credentials = current_credentials [] names in
@@ -733,10 +739,27 @@ let credential_prune_snapshot_in_transaction (Credential_transaction config) =
          | Stored_redirect target ->
            let* present = credential_path_exists target in
            if present then current_orphans acc rest
-           else current_orphans ({ agent_name = name; uuid_target = None } :: acc) rest
+           else current_orphans (name :: acc) rest
          | Stored_credential _ | Unresolved_credential -> current_orphans acc rest)
   in
-  let* orphaned_redirects = current_orphans [] orphans in
+  let* orphaned_names = current_orphans [] orphans in
+  Ok { current_credentials = credentials; orphaned_names }
+;;
+
+(* Prune adds deletion authority only after current-store discovery. Rotation
+   uses the same current records without inheriting a deletion manifest. *)
+let credential_prune_snapshot_in_transaction ((Credential_transaction config) as transaction) =
+  let ( let* ) = Result.bind in
+  let* snapshot = credential_store_snapshot_in_transaction transaction in
+  let rec validate acc = function
+    | [] -> Ok (List.rev acc)
+    | (stored, credential) :: rest ->
+      let* uuid_target = credential_owned_uuid_target config credential.agent_name stored credential in
+      let authority = { agent_name = credential.agent_name; uuid_target } in
+      validate ((credential, authority) :: acc) rest in
+  let* credentials = validate [] snapshot.current_credentials in
+  let orphaned_redirects = List.map (fun agent_name -> { agent_name; uuid_target = None })
+      snapshot.orphaned_names in
   Ok { credentials; orphaned_redirects }
 ;;
 

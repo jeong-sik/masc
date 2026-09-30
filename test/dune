@@ -7686,3 +7686,5 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_skills_usage_summary)))
+
+(include stanzas/test_auth_token_rotation_transaction.inc)

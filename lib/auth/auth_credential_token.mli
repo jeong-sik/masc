@@ -100,15 +100,38 @@ val create_token_expiring_in_if_absent :
 (** Check name-file absence and publish under the same credential transaction.
     Existing names are refused even when their credential cannot be read. *)
 
+type rotation_publication =
+  | Published
+  | Not_published
+  | Publication_unreadable of masc_error
+
+type rotation_failure = {
+  error : masc_error;
+  raw_token : rotation_publication;
+  credential : rotation_publication;
+}
+(** Observed publication after a per-agent write failure. Files may have changed
+    before the failure. Unreadable state is retained rather than guessed. *)
+
 type rotation_outcome = {
   token_hash_prefix : string;
-  rotated_agents : (string * (unit, masc_error) result) list;
+  rotated_agents : (string * (unit, rotation_failure) result) list;
 }
 
-val rotate_shared_tokens : string -> rotation_outcome list
+val rotation_failure_to_string : rotation_failure -> string
+
+val rotate_shared_tokens : string -> (rotation_outcome list, masc_error) result
+(** Read the current canonical credentials and rotate shared groups under one
+    Auth transaction. Admission or discovery I/O failure returns [Error] before
+    any rotation. Per-agent publication failures remain in the group's results;
+    a successful agent has both its credential and recoverable raw token written.
+    Rotation forces consumers to fetch their current bearer again. *)
 
 val rotate_shared_tokens_for_agents :
-  string -> agent_names:string list -> rotation_outcome list
+  string -> agent_names:string list -> (rotation_outcome list, masc_error) result
+(** Only the selected canonical names participate in groups. The current role
+    and identity are preserved while publishers, revoke and prune are excluded
+    by the same transaction. *)
 
 (** {1 Bearer-token mismatch helpers} *)
 

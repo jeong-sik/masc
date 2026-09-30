@@ -464,89 +464,129 @@ let create_token_expiring_in_if_absent config ~agent_name ~role ~hours =
          (Printf.sprintf "Failed to create agent credential: %s" (Printexc.to_string exn))))))
 ;;
 
-(** #10304: rotate shared bearer tokens detected by
-    {!audit_token_uniqueness} into per-agent unique tokens.  Each
-    agent in a shared group gets a fresh raw token so its persisted
-    credential carries an unambiguous bearer.  Returns one
-    [rotation_outcome] per group in audit order; per-agent results
-    are reported individually so a single I/O failure does not abort
-    the batch (the audit will still flag that agent on the next
-    run). *)
+type rotation_publication =
+  | Published
+  | Not_published
+  | Publication_unreadable of masc_error
+
+type rotation_failure =
+  { error : masc_error
+  ; raw_token : rotation_publication
+  ; credential : rotation_publication }
+
 type rotation_outcome =
   { token_hash_prefix : string
-  ; rotated_agents : (string * (unit, masc_error) result) list
-  }
+  ; rotated_agents : (string * (unit, rotation_failure) result) list }
 
-let save_rotated_raw_token config (cred : agent_credential) ~raw_token
-  : (agent_credential, masc_error) result
-  =
-  match validate_raw_token raw_token with
-  | Error _ as error -> error
-  | Ok () ->
-    let auth_cfg = load_auth_config config in
-    let rotated =
-      { cred with
-        token = sha256_hash raw_token
-      ; created_at = now_iso ()
-      ; expires_at = expires_at_for_auth_config auth_cfg
-      }
-    in
-    (try
-       persist_raw_token config ~agent_name:rotated.agent_name raw_token;
-       save_credential config rotated;
-       Ok rotated
-     with
-     | Eio.Cancel.Cancelled _ as e -> raise e
-     | exn ->
-       let msg =
-         Printf.sprintf
-           "Failed to rotate agent credential for %s: %s"
-           rotated.agent_name
-           (Printexc.to_string exn)
-       in
-       Log.Auth.error "%s" msg;
-       Error (System (System_error.IoError msg)))
+let rotation_failure_to_string failure =
+  let render = function
+    | Published -> "published"
+    | Not_published -> "not published"
+    | Publication_unreadable error -> "unreadable: " ^ masc_error_to_string error in
+  Printf.sprintf "%s (raw token: %s; credential: %s)"
+    (masc_error_to_string failure.error) (render failure.raw_token) (render failure.credential)
 ;;
 
-let rotate_shared_tokens_matching config ~include_agent : rotation_outcome list =
-  group_credentials_by_token config
-  |> List.filter_map (fun (token_hash, entries) ->
-    let entries =
-      List.filter (fun (cred : agent_credential) -> include_agent cred.agent_name) entries
-    in
-    match entries with
-    | [] | [ _ ] -> None
-    | xs ->
-      let prefix = token_hash_prefix_of token_hash in
-      (* Sort by name so rotation order is stable across runs —
-                operators diffing successive logs see no phantom
-                reorderings. *)
-      let sorted =
-        List.sort
-          (fun (a : agent_credential) (b : agent_credential) ->
-             String.compare a.agent_name b.agent_name)
-          xs
-      in
-      Some (prefix, sorted))
-  |> List.sort (fun (a, _) (b, _) -> String.compare a b)
-  |> List.map (fun (token_hash_prefix, sorted_entries) ->
-    let rotated_agents =
-      List.map
-        (fun (cred : agent_credential) ->
-           let raw_token = generate_token () in
-           match save_rotated_raw_token config cred ~raw_token with
-           | Ok _ -> cred.agent_name, Ok ()
-           | Error e -> cred.agent_name, Error e)
-        sorted_entries
-    in
-    { token_hash_prefix; rotated_agents })
+let observe_rotation_publication config (rotated : agent_credential) =
+  let observe f = match f () with
+    | Ok true -> Published
+    | Ok false -> Not_published
+    | Error error -> Publication_unreadable error in
+  let ( let* ) = Result.bind in
+  let raw_token = observe (fun () ->
+    let path = raw_token_file config rotated.agent_name in
+    let* present = credential_path_exists path in
+    if not present then Ok false
+    else
+      let* raw = credential_read_result (fun () -> read_text_file path) in
+      Ok (String.equal (sha256_hash (String.trim raw)) rotated.token)) in
+  let credential = observe (fun () ->
+    let path = credential_file config rotated.agent_name in
+    let* present = credential_path_exists path in
+    if not present then Ok false
+    else
+      let* stored = read_stored_credential config rotated.agent_name path in
+      let* current = resolve_stored_credential config rotated.agent_name stored in
+      Ok (current = Some rotated)) in
+  raw_token, credential
 ;;
 
-let rotate_shared_tokens config : rotation_outcome list =
+let save_rotated_raw_token_in_transaction
+    ((Credential_transaction config) as transaction) ~auth_cfg (cred : agent_credential) ~raw_token =
+  let rotated =
+    { cred with token = sha256_hash raw_token
+    ; created_at = now_iso ()
+    ; expires_at = expires_at_for_auth_config auth_cfg } in
+  let written = Fun.protect
+      ~finally:(fun () -> !credential_cache_invalidator_ref config)
+      (fun () -> credential_read_result (fun () ->
+        persist_raw_token config ~agent_name:rotated.agent_name raw_token;
+        save_credential_in_transaction transaction rotated)) in
+  match written with
+  | Ok () -> Ok ()
+  | Error error ->
+    let raw_token, credential = observe_rotation_publication config rotated in
+    Error { error; raw_token; credential }
+;;
+
+let rotate_shared_tokens_matching config ~include_agent =
+  with_credential_transaction config (fun transaction ->
+    let ( let* ) = Result.bind in
+    let* snapshot = credential_store_snapshot_in_transaction transaction in
+    let* auth_cfg =
+      try credential_read_result (fun () -> load_auth_config config) with
+      | Auth_config_error { file; reason } ->
+        Error (System (System_error.ValidationError
+          (Printf.sprintf "auth configuration %s: %s" file reason))) in
+    let groups = List.fold_left
+        (fun groups (stored, (cred : agent_credential)) ->
+          if not (include_agent cred.agent_name) then groups
+          else
+            let entries = match List.assoc_opt cred.token groups with
+              | Some entries -> entries
+              | None -> [] in
+            (cred.token, (stored, cred) :: entries) :: List.remove_assoc cred.token groups)
+        [] snapshot.current_credentials in
+    let groups = List.filter_map (fun (token_hash, entries) ->
+      match entries with
+      | [] | [ _ ] -> None
+      | xs -> Some (token_hash_prefix_of token_hash,
+          List.sort (fun (_, (a : agent_credential)) (_, b) -> String.compare a.agent_name b.agent_name) xs))
+        groups |> List.sort (fun (a, _) (b, _) -> String.compare a b) in
+    (* Publication may replace a UUID file or remove a previous redirect target.
+       Validate every selected write target before the first raw sidecar write. *)
+    let rec validate targets = function
+      | [] -> Ok ()
+      | (stored, credential) :: rest ->
+        let* _owned_uuid = credential_owned_uuid_target config credential.agent_name stored credential in
+        let* targets = match credential.id with
+          | None -> Ok targets
+          | Some id ->
+            let target = credential_uuid_file config id in
+            if String.equal target (credential_file config credential.agent_name) then
+              Error (System (System_error.ValidationError
+                (Printf.sprintf "cannot rotate %s: UUID payload and named redirect would share a path"
+                  credential.agent_name)))
+            else if List.mem target targets then
+              Error (System (System_error.ValidationError
+                (Printf.sprintf "cannot rotate %s: another selected owner would write the same UUID"
+                  credential.agent_name)))
+            else Ok (target :: targets) in
+        validate targets rest in
+    let* () = validate [] (List.concat_map snd groups) in
+    Ok (List.map (fun (token_hash_prefix, entries) ->
+      let rotated_agents = List.map (fun (_, (cred : agent_credential)) ->
+        let raw_token = generate_token () in
+        cred.agent_name, save_rotated_raw_token_in_transaction transaction ~auth_cfg cred ~raw_token) entries in
+      { token_hash_prefix; rotated_agents }) groups))
+  |> Result.join
+;;
+
+let rotate_shared_tokens config =
   rotate_shared_tokens_matching config ~include_agent:(fun _ -> true)
 ;;
 
-let rotate_shared_tokens_for_agents config ~agent_names : rotation_outcome list =
+let rotate_shared_tokens_for_agents config ~agent_names =
   let include_agent agent_name = List.exists (String.equal agent_name) agent_names in
   rotate_shared_tokens_matching config ~include_agent
 ;;

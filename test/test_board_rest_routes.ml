@@ -184,7 +184,7 @@ let loopback_request_authority () =
   | Error `Malformed -> fail "failed to construct loopback request authority"
 ;;
 
-let dispatch_json ?(meth = "POST") ?token ~router ~path ~extra_headers ~body () =
+let dispatch_response ?(meth = "POST") ?token ~router ~path ~extra_headers ~body () =
   Server_request_authority.with_current
     (loopback_request_authority ())
     (fun () ->
@@ -254,9 +254,13 @@ let dispatch_json ?(meth = "POST") ?token ~router ~path ~extra_headers ~body () 
          else body_offset (index + 1)
        in
        let offset = body_offset 0 in
-       ( status
-       , Yojson.Safe.from_string
-           (String.sub raw offset (String.length raw - offset)) ))
+       status, String.sub raw offset (String.length raw - offset))
+;;
+
+let dispatch_json ?meth ?token ~router ~path ~extra_headers ~body () =
+  let status, body =
+    dispatch_response ?meth ?token ~router ~path ~extra_headers ~body () in
+  status, Yojson.Safe.from_string body
 ;;
 
 let with_authenticated_activity_router ~prefix ~agent_name f =
@@ -757,6 +761,48 @@ let test_board_list_route_and_projection_share_the_kept_page () =
   check (list string) "the read after the invalidation shows the write"
     [ "the first post"; "the second post" ]
     (page_titles (page ()).Dashboard_cache.json)
+;;
+
+let test_board_list_timeout_cannot_be_not_modified () =
+  with_authenticated_activity_router
+    ~prefix:"board-list-timeout-" ~agent_name:"timeout-reader"
+  @@ fun ~base_path ~config ~state:_ ~sw:_ ~clock:_ ~router ~token ->
+  with_board_store ~base_path @@ fun () ->
+  (* Publish a builder-produced result through the real cache API. This
+     exact route entry includes both the workspace and authenticated actor;
+     a key mismatch returns a normal Board page and fails the wire checks. *)
+  let actor = "timeout-reader" in
+  let key = Printf.sprintf
+    "board:list:%d:%s:-:recent:false:false:-:50:0:-:%d:%s"
+    (String.length config.Workspace.base_path) config.base_path
+    (String.length actor) actor in
+  let read ?etag () =
+    dispatch_response ~meth:"GET" ~router ~token
+      ~path:"/api/v1/board?sort_by=recent"
+      ~extra_headers:(match etag with None -> [] | Some value -> ["if-none-match", value])
+      ~body:"" () in
+  List.iter (fun detail ->
+    Dashboard_cache.invalidate_all ();
+    let envelope = `Assoc
+      ["error", `String Dashboard_cache.timeout_error_code; "message", `String detail] in
+    let payload = Dashboard_cache.get_or_compute_payload key ~ttl:3600.
+      (fun () -> envelope) in
+    check bool "the timeout is a computed builder result" true
+      (payload.origin = Dashboard_cache.Computed);
+    let status, body = read () in
+    check int "first timeout read is 504" 504 status;
+    check string "first timeout carries the cached bytes" payload.raw_json body;
+    let status, body = read ~etag:payload.etag () in
+    check int "matching timeout ETag remains 504" 504 status;
+    check string "matching timeout still carries its evidence" payload.raw_json body)
+    ["builder timeout"; String.make 9000 'x'];
+  Dashboard_cache.invalidate_all ();
+  let payload = Server_board_list_http.payload ~config ~reaction_actor:(Some actor)
+    (Httpun.Request.create `GET "/api/v1/board?sort_by=recent") in
+  let status, body = read ~etag:payload.etag () in
+  check int "a successful unchanged Board page is still 304" 304 status;
+  check string "304 carries no body" "" body;
+  Dashboard_cache.invalidate_all ()
 ;;
 
 let test_board_http_typed_attachments () =
@@ -1392,6 +1438,8 @@ let () =
             test_board_write_routes_use_authenticated_actor
         ; test_case "the Board list route and projection share the kept page" `Quick
             test_board_list_route_and_projection_share_the_kept_page
+        ; test_case "a Board timeout cannot become a conditional 304" `Quick
+            test_board_list_timeout_cannot_be_not_modified
         ; test_case "HTTP Board attachments use typed input" `Quick
             test_board_http_typed_attachments
         ; test_case "sub-board owner comes from auth" `Quick

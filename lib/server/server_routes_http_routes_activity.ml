@@ -935,7 +935,11 @@ let add_routes ~sw ~clock router =
               let payload =
                 Server_board_list_http.payload ~config ~reaction_actor req
               in
-              Http.Response.json_lazy ~request:req ~etag:payload.etag
+              let status =
+                if Dashboard_cache.is_timeout_envelope payload.json
+                then `Gateway_timeout else `OK
+              in
+              Http.Response.json_lazy ~status ~request:req ~etag:payload.etag
                 (fun () -> payload.raw_json) reqd)
        ) request reqd)
 

@@ -444,6 +444,7 @@ let evidence_lines prompt =
   [Printf.sprintf "Preserve %d marked row%s from %s" prompt.row_count
      (if prompt.row_count=1 then "" else "s") prompt.owner_title;
    "Evidence stays preserved; sharing sends its reference. Reads and actions are separate.";
+   "An unanswered Broadcast retries the original saved send, including after restart.";
    "j/k:choose  Enter:preserve  Esc:back"]
   @ [choice 0 "Preserve only"]
   @ List.mapi (fun index keeper -> choice (index+1) ("Preserve and send the reference to " ^ keeper)) prompt.keepers

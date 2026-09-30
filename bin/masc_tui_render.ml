@@ -15491,13 +15491,31 @@ let finish_voice_surface (state : state) ~terminal_rows ~cols ~head ~body ~hints
     ~rows:terminal_rows ~cols buf
 ;;
 
+(* Voice metadata is a literal document. Wrap before boxing, so the boxed
+   rows counted by [finish_voice_surface] include every endpoint and draft
+   value rather than the clipped prefix of each logical line. *)
+let voice_body_rows cols content =
+  let width = framed_inner_width cols in
+  if visible_width content <= width then [ content ]
+  else Message_layout.wrap_words ~max_cells:width content
+;;
+
+let voice_body_line buf cols content =
+  List.iter (fun row -> box_line buf cols (row ^ Ansi.reset))
+    (voice_body_rows cols content)
+;;
+
+let voice_body_line_styled buf cols ~style content =
+  List.iter (box_line_styled buf cols ~style) (voice_body_rows cols content)
+;;
+
 let render_voice_wizard (state : state) (session : voice_wizard_session) =
   let terminal_rows, cols = get_terminal_size () in
   let head = Buffer.create 256 in
   let buf = Buffer.create 2048 in
   let field name value =
-    box_line buf cols
-      (Printf.sprintf "  %s%-12s%s %s" Ansi.dim name Ansi.reset value)
+    voice_body_line buf cols
+      (Printf.sprintf "  %s%-12s%s %s" Ansi.dim name Ansi.reset (Terminal_text.single_line value))
   in
   let draft = session.vws_draft in
   let side =
@@ -15519,33 +15537,33 @@ let render_voice_wizard (state : state) (session : voice_wizard_session) =
   box_top head cols;
   box_line head cols
     (config_pane_title ~cols ~name:(screen_title " MASC Voice · setup") state);
-  box_line buf cols "";
-  box_line buf cols
+  voice_body_line buf cols "";
+  voice_body_line buf cols
     (Printf.sprintf "  %sstep %s%s  %s" Ansi.dim position Ansi.reset
        (Voice_wizard.step_prompt session.vws_step));
-  box_line buf cols "";
+  voice_body_line buf cols "";
   (* The answer being given. A closed set shows its current value and the keys
      that walk it; a text field shows what has been typed, with a cursor so an
      empty field is visibly a field. *)
   (match session.vws_step with
    | Voice_wizard.Section ->
-     box_line buf cols
+     box_line head cols
        (Printf.sprintf "    %s%s%s   %s←/→ or space to switch%s" Ansi.bold side
           Ansi.reset Ansi.dim Ansi.reset)
    | Voice_wizard.Provider ->
-     box_line buf cols
+     box_line head cols
        (Printf.sprintf "    %s%s%s   %s←/→ or space to switch%s" Ansi.bold
           (Voice_wizard.provider_label draft.Voice_wizard.provider)
           Ansi.reset Ansi.dim Ansi.reset)
    | Voice_wizard.Review ->
      (match Voice_wizard.gaps draft with
       | [] ->
-        box_line buf cols
+        voice_body_line buf cols
           (Printf.sprintf "    %senter saves this%s" Ansi.bold Ansi.reset)
       | gaps ->
         List.iter
           (fun gap ->
-            box_line_styled buf cols ~style:(Theme.warn ())
+            voice_body_line_styled buf cols ~style:(Theme.warn ())
               (Printf.sprintf "    %s" (Voice_wizard.gap_message gap)))
           gaps)
    | Voice_wizard.Name
@@ -15553,25 +15571,31 @@ let render_voice_wizard (state : state) (session : voice_wizard_session) =
    | Voice_wizard.Credential
    | Voice_wizard.Model
    | Voice_wizard.Voice ->
-     box_line buf cols
-       (Printf.sprintf "    %s%s%s%s" Ansi.bold session.vws_input Ansi.reset
+     box_line head cols
+       (Printf.sprintf "    %s%s%s%s" Ansi.bold (Message_layout.fit_middle (max 1 (framed_inner_width cols - 5))
+             (Terminal_text.single_line session.vws_input)) Ansi.reset
           (if Masc_tui_types.voice_wizard_is_sending session then "" else "▏")));
+  (match session.vws_step with
+   | Voice_wizard.Name | Voice_wizard.Address | Voice_wizard.Credential
+   | Voice_wizard.Model | Voice_wizard.Voice ->
+       field "typing" session.vws_input
+   | Voice_wizard.Section | Voice_wizard.Provider | Voice_wizard.Review -> ());
   (* A local server that never asked for a key answers 200 only while nothing
      sends it one, so the blank is worth saying out loud rather than leaving as
      an empty line. *)
   (match session.vws_step with
    | Voice_wizard.Credential when String.trim session.vws_input = "" ->
-     box_line buf cols
+     voice_body_line buf cols
        (Printf.sprintf "    %sblank sends no Authorization header%s" Ansi.dim Ansi.reset)
    | Voice_wizard.Address when String.trim session.vws_input = "" ->
      List.iter
        (fun (what, address) ->
-         box_line buf cols
+         voice_body_line buf cols
            (Printf.sprintf "    %stry %s: %s%s" Ansi.dim what address Ansi.reset))
        (Voice_wizard.suggested_addresses draft.Voice_wizard.section)
    | _ -> ());
-  box_line buf cols "";
-  box_line buf cols (Printf.sprintf "  %sdraft%s" Ansi.bold Ansi.reset);
+  voice_body_line buf cols "";
+  voice_body_line buf cols (Printf.sprintf "  %sdraft%s" Ansi.bold Ansi.reset);
   field "side" side;
   field "provider" (Voice_wizard.provider_label draft.Voice_wizard.provider);
   field "name" (shown draft.Voice_wizard.endpoint_id);
@@ -15584,17 +15608,17 @@ let render_voice_wizard (state : state) (session : voice_wizard_session) =
   (match session.vws_status with
    | None -> ()
    | Some status ->
-     box_line buf cols "";
-     box_line_styled buf cols ~style:(Theme.warn ()) (Printf.sprintf "  %s" status));
+     voice_body_line buf cols "";
+     voice_body_line_styled buf cols ~style:(Theme.warn ()) (Printf.sprintf "  %s" (Terminal_text.single_line status)));
   (* Every endpoint, not just the first that answered. A chain stops at the
      first, which is why a dead fallback reads as healthy until the endpoint in
      front of it goes away. *)
   (match session.vws_probe with
    | [] -> ()
    | lines ->
-     box_line buf cols "";
-     box_line buf cols (Printf.sprintf "  %swhat answered%s" Ansi.bold Ansi.reset);
-     List.iter (fun line -> box_line buf cols (Printf.sprintf "    %s" line)) lines);
+     voice_body_line buf cols "";
+     voice_body_line buf cols (Printf.sprintf "  %swhat answered%s" Ansi.bold Ansi.reset);
+     List.iter (fun line -> voice_body_line buf cols (Printf.sprintf "    %s" (Terminal_text.single_line line))) lines);
   finish_voice_surface state ~terminal_rows ~cols ~head ~body:buf
     ~hints:"Enter:next  Up:back  PgUp/PgDn:scroll  Esc:cancel"
 ;;
@@ -15607,47 +15631,46 @@ let render_voice_agent (state : state) (session : voice_agent_session) =
   let terminal_rows, cols = get_terminal_size () in
   let head = Buffer.create 256 in
   let buf = Buffer.create 2048 in
-  let list_block label items cursor draw =
-    box_line buf cols (Printf.sprintf "  %s%s%s" Ansi.bold label Ansi.reset);
-    let count = List.length items in
-    if count = 0
-    then box_line buf cols (Printf.sprintf "    %s\xe2\x80\x94%s" Ansi.dim Ansi.reset)
-    else (
-      (* Every entry is laid out; [finish_voice_surface] takes the window and
-         reports where it is, so a list longer than the screen is scrolled
-         rather than cut at the fold. *)
-      List.iteri
-        (fun index item ->
-          box_line buf cols
-            (if index = cursor
-             then
-               Printf.sprintf "    %s%s %s%s" Ansi.bold Masc_tui_theme.Glyph.current_entry
-                 (draw item)
-                 Ansi.reset
-             else Printf.sprintf "    %s  %s%s" Ansi.dim (draw item) Ansi.reset))
-        items;
-      box_line buf cols
-        (Printf.sprintf "    %s%d of %d%s" Ansi.dim (cursor + 1) count Ansi.reset))
+  let selector label items cursor draw =
+    let position =
+      if items = [] then "0/0"
+      else Printf.sprintf "%d/%d" (cursor + 1) (List.length items)
+    in
+    let prefix = Printf.sprintf "  %s %s: " label position in
+    let value =
+      match List.nth_opt items cursor with
+      | None -> Masc_tui_theme.Glyph.no_value
+      | Some item -> draw item
+    in
+    let room = max 1 (framed_inner_width cols - visible_width prefix) in
+    box_line head cols
+      (prefix ^ Ansi.bold ^ Message_layout.fit_middle room value ^ Ansi.reset)
   in
   box_top head cols;
   box_line head cols
-    (config_pane_title ~cols ~name:(screen_title " MASC Voice \xc2\xb7 keeper voices") state);
-  box_line buf cols "";
-  list_block "keeper  (j/k)" session.vas_agents session.vas_agent_cursor (fun agent ->
-    Terminal_text.single_line agent);
-  box_line buf cols "";
-  list_block "voice  (left/right)" session.vas_voices session.vas_voice_cursor
-    (fun (voice_id, label) ->
-      if String.equal voice_id label
-      then Terminal_text.single_line voice_id
-      else Printf.sprintf "%s  %s%s%s" (Terminal_text.single_line label) Ansi.dim
-             (Terminal_text.single_line voice_id) Ansi.reset);
+    (config_pane_title ~cols ~name:(screen_title " MASC Voice · keeper voices") state);
+  (* Both selected owners stay above the scrolling document. Enter therefore
+     acts on the displayed pair even after paging through long metadata. *)
+  selector "keeper" session.vas_agents session.vas_agent_cursor
+    Terminal_text.single_line;
+  selector "voice" session.vas_voices session.vas_voice_cursor
+    (fun (_, label) -> Terminal_text.single_line label);
+  voice_body_line buf cols "";
+  (match List.nth_opt session.vas_agents session.vas_agent_cursor with
+   | None -> ()
+   | Some agent ->
+       voice_body_line buf cols ("  Keeper: " ^ Terminal_text.single_line agent));
+  (match List.nth_opt session.vas_voices session.vas_voice_cursor with
+   | None -> ()
+   | Some (voice_id, label) ->
+       voice_body_line buf cols ("  Voice: " ^ Terminal_text.single_line label);
+       voice_body_line buf cols ("  Voice ID: " ^ Terminal_text.single_line voice_id));
   (match session.vas_status with
    | None -> ()
    | Some status ->
-     box_line buf cols "";
-     box_line_styled buf cols ~style:(Theme.warn ())
-       (Printf.sprintf "  %s" (Terminal_text.single_line status)));
+     voice_body_line buf cols "";
+     voice_body_line_styled buf cols ~style:(Theme.warn ())
+       ("  " ^ Terminal_text.single_line status));
   finish_voice_surface state ~terminal_rows ~cols ~head ~body:buf
     ~hints:(Masc_tui_keys.footer_hints_voice_agent ())
 ;;
@@ -15661,8 +15684,8 @@ let render_voice (state : state) =
   let head = Buffer.create 256 in
   let buf = Buffer.create 2048 in
   let field name value =
-    box_line buf cols
-      (Printf.sprintf "  %s%-18s%s %s" Ansi.dim name Ansi.reset value)
+    voice_body_line buf cols
+      (Printf.sprintf "  %s%-18s%s %s" Ansi.dim name Ansi.reset (Terminal_text.single_line value))
   in
   let member path json =
     List.fold_left
@@ -15722,12 +15745,12 @@ let render_voice (state : state) =
   let show_endpoints section =
     match endpoints section with
     | [] -> ()
-    | lines -> List.iter (fun line -> box_line buf cols line) lines
+    | lines -> List.iter (fun line -> voice_body_line buf cols line) lines
   in
   box_top head cols;
   box_line head cols
     (config_pane_title ~cols ~name:(screen_title " MASC Voice") state);
-  box_line buf cols "";
+  voice_body_line buf cols "";
   (* Two independent reads feed this pane: the public config says what loaded,
      and the setup read says which endpoints are declared. They used to share
      one match, so a failed config read also erased the endpoint identities the
@@ -15744,24 +15767,24 @@ let render_voice (state : state) =
    | _, Some message ->
        (* The distinction the pane exists for, said in words rather than drawn
           as an empty section. *)
-       box_line_styled buf cols ~style:(Theme.warn ()) "  voice did not load";
-       box_line buf cols (Printf.sprintf "  %s%s%s" Ansi.dim message Ansi.reset)
+       voice_body_line_styled buf cols ~style:(Theme.warn ()) "  voice did not load";
+       voice_body_line buf cols (Printf.sprintf "  %s%s%s" Ansi.dim (Terminal_text.single_line message) Ansi.reset)
    | None, None ->
-       box_line buf cols (Printf.sprintf "  %sreading…%s" Ansi.dim Ansi.reset)
+       voice_body_line buf cols (Printf.sprintf "  %sreading…%s" Ansi.dim Ansi.reset)
    | Some json, None ->
        field "status"
          (Option.value (string_of [ "status" ] json)
             ~default:Masc_tui_theme.Glyph.no_value));
-  box_line buf cols "";
-  box_line buf cols (Printf.sprintf "  %sTTS%s" Ansi.bold Ansi.reset);
+  voice_body_line buf cols "";
+  voice_body_line buf cols (Printf.sprintf "  %sTTS%s" Ansi.bold Ansi.reset);
   from_config (fun json ->
     field "model"
       (Option.value (string_of [ "tts"; "default_model" ] json) ~default:Masc_tui_theme.Glyph.no_value);
     field "voice"
       (Option.value (string_of [ "tts"; "default_voice" ] json) ~default:Masc_tui_theme.Glyph.no_value));
   show_endpoints "tts";
-  box_line buf cols "";
-  box_line buf cols (Printf.sprintf "  %sSTT%s" Ansi.bold Ansi.reset);
+  voice_body_line buf cols "";
+  voice_body_line buf cols (Printf.sprintf "  %sSTT%s" Ansi.bold Ansi.reset);
   from_config (fun json ->
     field "model"
       (Option.value (string_of [ "stt"; "default_model" ] json) ~default:Masc_tui_theme.Glyph.no_value);
@@ -15779,14 +15802,14 @@ let render_voice (state : state) =
   (match state.voice_setup_error with
    | None -> ()
    | Some message ->
-       box_line buf cols "";
-       box_line_styled buf cols ~style:(Theme.warn ())
+       voice_body_line buf cols "";
+       voice_body_line_styled buf cols ~style:(Theme.warn ())
          "  the endpoint list could not be read";
-       box_line buf cols (Printf.sprintf "  %s%s%s" Ansi.dim message Ansi.reset));
-  box_line buf cols "";
-  box_line buf cols (Printf.sprintf "  %sInput%s" Ansi.bold Ansi.reset);
+       voice_body_line buf cols (Printf.sprintf "  %s%s%s" Ansi.dim (Terminal_text.single_line message) Ansi.reset));
+  voice_body_line buf cols "";
+  voice_body_line buf cols (Printf.sprintf "  %sInput%s" Ansi.bold Ansi.reset);
   field "device" (Option.value state.voice_input_device ~default:"unknown");
-  box_line buf cols "";
+  voice_body_line buf cols "";
   (* Where the endpoints above come from. With no [voice] section the loader
      reads the standalone JSON, and naming runtime.toml there sent a reader to a
      file that declares nothing. *)
@@ -15798,7 +15821,7 @@ let render_voice (state : state) =
         | Some _ | None -> "runtime.toml [voice]")
     | Some (Some _ | None) | None -> "runtime.toml [voice]"
   in
-  box_line buf cols
+  voice_body_line buf cols
     (Printf.sprintf "  %s%s declares this; the server says what loaded%s"
        Ansi.dim declared_by Ansi.reset);
   (* The keys are the table's, as on every other Config pane. The row was

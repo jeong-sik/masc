@@ -915,7 +915,7 @@ let current_installations_and_grouped_history_keep_exact_targets () =
         (UI.selected_instance {view with focus}))) [UI.Timeline;UI.Rows];
   let lines = UI.lines ~width:120 view in
   check bool "history is collapsed to an explicit navigation summary" true
-    (List.mem "Retained history · 4 runs · h:open" lines
+    (List.mem "Retained history · 4 instances · h:open" lines
      && not (List.exists (String.starts_with ~prefix:"    Instance old-") lines));
   let config = UI.open_selected_instance {view with instance_cursor=1} in
   check int "inactive declaration still opens repair details" 0 config.configuration_cursor;
@@ -924,8 +924,15 @@ let current_installations_and_grouped_history_keep_exact_targets () =
   let history = UI.toggle_history view in
   check bool "history mode is explicit" true (history.overview_mode=UI.Retained_runs);
   let history_lines = UI.lines ~width:120 history in
-  check int "identical titles and basenames in different paths are distinct source groups" 2
-    (List.length (List.filter (String.equal "a.toml · run project") history_lines));
+  List.iter (fun header ->
+    check bool "history identifies the full declaration path and package" true
+      (List.mem header history_lines))
+    ["/config/a.toml · add-on analysis · run project";
+     "/elsewhere/a.toml · add-on analysis · run project"];
+  let other_addon = {old with id="old-package";incarnation="old-package";addon_id="other"} in
+  let packages = {history with snapshot=Some {snapshot with instances=other_addon::snapshot.instances}} in
+  check bool "packages on the same source and run have distinct headers" true
+    (List.mem "/config/a.toml · add-on other · run project" (UI.lines ~width:120 packages));
   List.iter (fun id -> check bool "retained run identity is visible" true
     (List.mem ("    Instance " ^ id) history_lines)) ["old-a";"old-a-two";"old-b";"old-b-config"];
   let opened = UI.open_selected_instance history in
@@ -940,7 +947,24 @@ let current_installations_and_grouped_history_keep_exact_targets () =
   check (option string) "explicit return restores current list selection" (Some "live-a")
     (Option.map (fun (item : UI.instance) -> item.id) (UI.selected_instance returned));
   check bool "detail ignores history toggle and stays pinned" true
-    (UI.toggle_history opened = opened)
+    (UI.toggle_history opened = opened);
+  let nonzero = {view with instance_cursor=1} in
+  let nonzero_history = UI.toggle_history nonzero in
+  let reordered = UI.reconcile_snapshot nonzero_history
+    {snapshot with instances=worker "new-live" "project" "analysis" UI.Row.Attached None::snapshot.instances} in
+  let restored = UI.toggle_history reordered in
+  check int "return follows the saved declaration identity after list insertion" 2 restored.instance_cursor;
+  check (option string) "nonzero declaration selection survives history navigation" (Some declaration.source_path)
+    (Option.map (fun (item : UI.declaration) -> item.source_path)
+      (UI.selected_declaration (UI.open_selected_instance restored)));
+  let revisit = UI.toggle_history returned in
+  check int "a removed retained selection remains unselected when revisiting" (-1) revisit.instance_cursor;
+  let no_cached_rows = {snapshot with output={rows=[];coverage=[]}} in
+  let empty_open = UI.open_selected_instance {history with snapshot=Some no_cached_rows} in
+  check int "opening retained detail before its slice has no invented record" (-1) empty_open.row_cursor;
+  let loaded = UI.select_initial_result (UI.reconcile_snapshot empty_open snapshot) in
+  check (option string) "fresh scoped records initialize the pinned retained detail" (Some historical_row.id)
+    (Option.map (fun (row : UI.Row.row) -> row.id) (UI.selected_row loaded))
 
 let () = run "TUI Lane package operations" ["operator scenarios",[
   test_case "current installations and grouped retained runs preserve exact targets" `Quick

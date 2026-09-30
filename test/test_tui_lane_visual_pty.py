@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+from urllib.parse import parse_qs, urlsplit
 from pathlib import Path
 
 import test_tui_keyboard_input as terminal
@@ -19,6 +20,7 @@ import test_tui_keyboard_input as terminal
 # masc_tui_lane_addons.ml's, and the palette row this types
 # ("go Lane Add-ons") masc_tui_types.ml's.
 SOURCE_MODULES = (
+    "bin/masc_tui.ml",
     "bin/masc_tui_render.ml",
     "bin/masc_tui_lane_addons.ml",
     "bin/masc_tui_types.ml",
@@ -228,20 +230,29 @@ def run_grouped_history(executable: str, captures: Path | None) -> None:
     for index in range(9):
         owner = f"retained-{index}"
         old_runs.append({**active, "instance_id": owner, "incarnation": owner,
-            "title": "Repeated counters", "phase": {"kind": "detached"},
+            "title": "Repeated counters", "run_id": f"retained world/{index}", "phase": {"kind": "detached"},
             "configuration": {"source_path": "/fixture/lane-addons/" + ("a.toml" if index % 2 == 0 else "b.toml")}})
         old_rows.append({**captured["rows"][0], "id": owner + "/1/result", "lane_id": owner + "/browser",
-            "title": "Preserved old result", "fields": {"old_run": owner}})
+            "title": "Preserved old result", "subject_id": f"retained world/{index}", "fields": {"old_run": owner}})
     captured["instances"] = [old_runs[0], active, *old_runs[1:]]
-    captured["rows"].extend(old_rows)
     captured["configuration"]["declarations"] = [{"id": "report", "source_path": active["configuration"]["source_path"],
         "desired_revision": "1", "applied_revision": "1", "instance_id": active["instance_id"]}]
     fixtures["/api/v1/lane-addons"] = (200, captured)
+    slice_reads: list[str] = []
+
+    def retained_slice(path: str):
+        slice_reads.append(path)
+        query = parse_qs(urlsplit(path).query)
+        if query != {"run_id": ["retained world/0"]}:
+            raise AssertionError(f"history read changed its exact run target: {query!r}")
+        return 200, {"rows": [old_rows[0]], "coverage": [], "complete": True}
+
+    fixtures["/api/v1/lane-addons/slice"] = terminal.PathHttpResponse(retained_slice)
     requests: terminal.HttpRequests = []
 
     def interact(process, master, _slave, output, _base):
         terminal.wait_for_output(process, master, output, b"Health: ", start=0, timeout=10)
-        opened = terminal.send_and_wait(process, master, output, b":go lane add-ons\r", b"Retained history")
+        opened = terminal.send_and_wait(process, master, output, b":go lane add-ons\r", b"> Current reporter")
         screen = terminal.screen_text(terminal.frame_containing(opened, b"Retained history"))
         if b"> Current reporter" not in screen or b"Repeated counters" in screen:
             raise AssertionError(f"old workers crowded current installations: {screen!r}")
@@ -270,7 +281,9 @@ def run_grouped_history(executable: str, captures: Path | None) -> None:
         interact=interact, http_fixtures=fixtures, http_requests=requests)
     if any(path.startswith("/api/v1/lane-addons") for path, _ in requests):
         raise AssertionError("history navigation sent a write")
-    print("Lane current list / grouped retained runs / exact raw target / return: PASS")
+    if len(slice_reads) != 1:
+        raise AssertionError(f"retained detail did not perform exactly one fresh scoped GET: {slice_reads!r}")
+    print("Lane current list / grouped retained instances / fresh scoped GET / exact raw target / return: PASS")
 
 
 def run_declared_report(executable: str, captures: Path | None) -> None:

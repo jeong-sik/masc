@@ -1,0 +1,48 @@
+# File-backed credential publication authority
+
+## Provenance
+
+- Local branch: `fix/file-backed-token-authority-20260930`.
+- Full local parent: `2ce17426a040220b51c5060a5549dc462f3fe425`; root verified its tree equals published parent `f80069e428c29784ad54b6387cfaeb19ff85306a` of the rotation stack.
+- Production implementation commits: `f54e06b8bd78a51f9d4b2968d48300063cf373f4`, then `9d794ff3a0bb00989dd91f65000af670e3af6d78` repairs the independently identified login bootstrap bypass.
+- Code and regression head: `d1535576e0d3e3141a4b878bf6e170ef46d64ade`. It includes the explicit nonblank reader condition required by the deterministic-boundary source gate.
+- Root published draft [PR #40214](https://github.com/jeong-sik/masc/pull/40214) at initial head `c1bf4c05f17456e23d00070b3421e1426936e273`, parent `f80069e428c29784ad54b6387cfaeb19ff85306a`. Its whole tree `728e31539f4bf43c72546c5e13471b09494d6f5f` equals the local code head's tree. These API coordinates were supplied and verified by the root agent; this child performed no network publication or CI dispatch.
+- This bundle and `changelog.d/40214.md` are added after that initial code publication. They do not provide a native verdict for an eventual updated head.
+
+## Reachable feature defects
+
+1. `ensure_keeper_credential` formerly read the current identity and wrote its raw bearer before credential admission. An admitted prune could remove the freshly written raw file, then ensure could recreate only its JSON and return success. An intervening Admin replacement could also be overwritten using the pre-admission Keeper UUID and role decision. Explicit recreation after prune is valid; a successful file-backed result with a missing or mismatched bearer is the defect.
+2. The supplied file-backed operator publisher formerly released credential admission before writing the raw bearer. Revoke could remove the credential before that last raw write, leaving an orphan bearer despite success. Shared rotation could publish a current pair, then have its raw file overwritten by the earlier publisher.
+3. CLI login separately minted the credential and wrote the bearer file. It shared the pair-publication gap and duplicated the token path without `Auth.raw_token_file`'s filename encoding.
+4. A foreign UUID or owner redirect could be reused by ensure's fresh branch and overwrite another canonical credential. A direct self-UUID could make JSON publication overwrite the same path with its redirect and return an unreadable successful result.
+5. The supplied-token contract accepts opaque nonblank bytes. Both public file readers trimmed those bytes, so a successfully persisted surrounding-whitespace bearer failed authentication through file clients.
+6. Independent source review found a second CLI mutation route: missing/disabled auth config called the old Admin bootstrap publisher before the new target preflight. A malformed name or foreign-owner redirect could therefore be overwritten before the final paired publisher examined it.
+
+Production callers are `Server_runtime_startup_credentials.sync_admin_token_env`, `sync_bootable_keeper_credentials`, and `Auth_login.mint`. File clients use the persisted reader in `main_eio.ml`, `masc_tui_http.ml`, and the CLI owner/model paths.
+
+## Repair boundaries
+
+- A private target-scoped reader uses strict name-file presence, current decode/redirect resolution, exact owner identity and UUID ownership. Missing names permit explicit creation; malformed or unreadable current material refuses mutation. The shared UUID ownership rule also refuses a payload path equal to its named credential path. Unrelated corrupt owners do not become a new global issuance gate.
+- Ensure reads current ownership and raw material after admission, preserves an owned existing UUID when recreating, and reuses a current live pair with its actual role. Its existing fresh Keeper policy remains Worker with no expiry. Canonical/raw refusal precedes its separate internal-token initialization.
+- Supplied file-backed publication keeps explicit replacement role and configured expiry. CLI issuance owns target preflight, bootstrap config/secret/Admin-name effects, requested lifetime, and both credential files in one admitted operation. It never re-enters a public create/save/enable wrapper while holding admission. Player login refuses before effects.
+- CLI keeps the three requested lifetimes, auth-change report, URL rendering and env-var passthrough. `Auth.login_auth_change` is the shared type; the existing `Auth_login.auth_change` constructor interface aliases it. The same workspace-secret initializer remains available to the existing public enable operation.
+- The private paired publisher is also used by shared rotation. It writes raw material, then credential/UUID/redirect, and invalidates the token index even on partial failure. Existing rotation publication constructors remain unchanged. Failure observation distinguishes published, unpublished and unreadable raw/credential state; file-backed APIs render that typed observation into their existing `masc_error` result.
+- Public raw readers reject blank material while preserving exact nonblank bytes. CLI reads and reports the path from `Auth.raw_token_file`.
+
+This is serialized publication, not a multi-file crash transaction. A later write failure can leave a changed raw bearer with unchanged JSON; the error reports those observed effects. Login bootstrap config/secret effects can also survive a later publication failure. No rollback or automatic repair is claimed.
+
+## Prepared native feature regression
+
+`test/test_auth_file_backed_transaction.ml` registers 19 cases. Ten cases fix both orders of ensure/prune, Admin/ensure, file-backed publication/revoke, publication/shared rotation and CLI login/revoke using the existing real lock admission observer and waiter count. The remaining cases cover corrupt names, foreign UUIDs/redirects, self-UUID, directory/dangling raw material, failed admission, partial publication, opaque bytes/encoded names, missing or disabled Admin bootstrap against corrupt/foreign targets, and successful Admin bootstrap. The bootstrap refusal case includes all four config/corruption combinations.
+
+The stanza is included from the current `test/dune` and explicitly lists its direct libraries. `native-source-contract.json` records the 19 labels and verifies every Auth function referenced by the regression against the current public interface. It is a source check, not OCaml typechecking or test execution.
+
+Target selectors for the root agent's finishing CI run are `test_auth_file_backed_transaction`, `test_auth_token_rotation_transaction`, `test_auth_token_prune_transaction`, `test_auth`, `test_auth_login`, and `test_credential_index_cache`.
+
+## Static checks and limits
+
+`initial-source-checks.json` retains the earlier source checks at production head `9d794ff3a0bb00989dd91f65000af670e3af6d78`, including the deterministic-boundary failure on `| _ -> Some contents`. The reader was changed to an explicit nonblank condition without changing its byte-preserving behavior.
+
+`final-source-checks.json` retains source-only checks at code head `d1535576e0d3e3141a4b878bf6e170ef46d64ade`: OCaml 5.5.1 parsing for eight source/interface files, diff whitespace, deterministic boundary, finalizer, cancellation and wildcard-match gates all exited zero. The compiler stopped after parsing; it did not typecheck, link or execute the regression. `source-sha256.json` freezes source bytes, the registration and required contract.
+
+No local Dune build, native test, CLI/server runtime exercise, CI completion, deployment or production observation was performed by this child. Parent rotation CI or source review is not a successful native result for this new publisher feature. This bundle contains no release or approval verdict.

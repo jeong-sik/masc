@@ -1,0 +1,162 @@
+{
+  "scope": "source syntax and static gates only; no native execution or build",
+  "local_code_head": "d1535576e0d3e3141a4b878bf6e170ef46d64ade",
+  "checks": [
+    {
+      "command": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "lib/auth/auth.ml"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "lib/auth/auth.mli"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "lib/auth/auth_credential_base.ml"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "lib/auth/auth_credential_token.ml"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "lib/auth/auth_credential_token.mli"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "lib/auth/auth_login.ml"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "lib/auth/auth_login.mli"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "test/test_auth_file_backed_transaction.ml"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "bash",
+        "scripts/ci/check-determinism-contract.sh",
+        "--base",
+        "2ce17426a040220b51c5060a5549dc462f3fe425",
+        "--head",
+        "HEAD"
+      ],
+      "exit_code": 0,
+      "stdout": "=== Scan: new deterministic-boundary ratchet ===\nPASS: no new deterministic-boundary debt added in 2ce17426a040220b51c5060a5549dc462f3fe425...HEAD, staged diff, or worktree diff\n=== Scan: deterministic branch on non-deterministic source ===\n=== Scan: permissive default on unknown input ===\nWARN: Option.value with default on potentially unknown input (sound partial?):\nlib/mcp_server_eio_protocol.ml-486-       let arguments =\nlib/mcp_server_eio_protocol.ml:487:         match Option.value ~default:`Null (Json_util.assoc_member_opt \"arguments\" payload) with\n--\nlib/mcp_server_eio_protocol.ml-1284-        else None)\nlib/mcp_server_eio_protocol.ml:1285:      |> Option.value ~default:0\n--\nlib/mcp_server_eio_call_tool.ml-314-    ~(execution_id : Ids.Execution_id.t) : unit =\nlib/mcp_server_eio_call_tool.ml:315:  let trace_id = Option.value ~default:\"runtime-mcp\" ctx.trace_id in\n--\nlib/mcp_server_eio_call_tool.ml-320-  in\nlib/mcp_server_eio_call_tool.ml:321:  let turn = Option.value ~default:0 ctx.turn in\n--\nlib/keeper/keeper_person_notes.ml-57-    | Some id when String.trim id <> \"\" ->\nlib/keeper/keeper_person_notes.ml:58:        Some (String.trim id, Option.value (field \"note\") ~default:\"\")\n--\nlib/keeper/keeper_tool_in_process_runtime.ml-135-      ?cycle_grant:gate_grant\nlib/keeper/keeper_tool_in_process_runtime.ml:136:      ~keeper_always_allow:(Option.value ~default:false meta.always_allow)\n--\nlib/keeper/keeper_tool_execute_runtime.ml-594-               at the external-effect authorization boundary. *)\nlib/keeper/keeper_tool_execute_runtime.ml:595:            ~keeper_always_allow:(Option.value ~default:false meta.always_allow)\n=== Scan: catch-all permissive default ===\nWARN: catch-all branch returning Some (possible unsound default):\nlib/telemetry_unified/telemetry_unified.ml:113:  | _ -> Some candidate\nlib/telemetry_unified/telemetry_unified.ml-114-\n--\nlib/fs_compat/fs_compat.ml:3167:     | _ -> Some failure)\nlib/fs_compat/fs_compat.ml-3168-;;\n--\nlib/tool_call_quality_benchmark/tool_call_quality_benchmark_summary.ml:161:        , (match tool_values with [] -> None | _ -> Some (avg_float tool_values))\nlib/tool_call_quality_benchmark/tool_call_quality_benchmark_summary.ml:162:        , (match prompt_values with [] -> None | _ -> Some (avg_float prompt_values))\nlib/tool_call_quality_benchmark/tool_call_quality_benchmark_summary.ml:163:        , (match pass_values with [] -> None | _ -> Some (avg_float pass_values))\nlib/tool_call_quality_benchmark/tool_call_quality_benchmark_summary.ml-164-        , List.length values ) )\n--\nlib/server/server_dashboard_http_keeper_api.ml:1161:                  | _ -> Some entry.ts)\nlib/server/server_dashboard_http_keeper_api.ml-1162-                None entries\n--\nlib/server/server_dashboard_http_keeper_api.ml:1893:            | _ -> Some r.ts)\nlib/server/server_dashboard_http_keeper_api.ml-1894-          None records\n--\nlib/server/server_dashboard_http_composite_claims.ml:590:          | _ -> Some \"runtime_blocked\"))\nlib/server/server_dashboard_http_composite_claims.ml-591-  in\n--\n=== Scan: unordered iteration in deterministic context ===\n=== DET/NDT gate: PASS ===\n",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "python3",
+        "scripts/ci/check-fun-protect-finally-guard.py",
+        "--base",
+        "2ce17426a040220b51c5060a5549dc462f3fe425",
+        "--head",
+        "HEAD"
+      ],
+      "exit_code": 0,
+      "stdout": "Fun.protect finalizer guard passed (1 new Fun.protect line(s)).\n",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "python3",
+        "scripts/ci/check-cancel-guard.py"
+      ],
+      "exit_code": 0,
+      "stdout": "cancel-guard exemptions: 119 (budget 119)\nNo wildcard catch violations found.\n",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "python3",
+        "scripts/ci/check-wildcard-only-match.py"
+      ],
+      "exit_code": 0,
+      "stdout": "No wildcard-only match expressions found.\n",
+      "stderr": ""
+    }
+  ],
+  "doc_only_followup": {
+    "scope": "login interface comments describe current ownership; no type signature change from d153",
+    "file": "lib/auth/auth_login.mli",
+    "sha256": "2be115568299e58b7b3c097d67f64a1475c8549d068990605b4dc1d3699ad7b8",
+    "command": [
+      "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+      "-stop-after",
+      "parsing",
+      "lib/auth/auth_login.mli"
+    ],
+    "exit_code": 0,
+    "stdout": "",
+    "stderr": ""
+  }
+}

@@ -2,7 +2,7 @@
     [masc login].
 
     Single mint entry point ({!mint}) that:
-    1. Initialises the Mirage RNG idempotently.
+    1. Admits the current credential and raw-token ownership.
     2. Ensures the auth config has bearer auth required (creating
        it when absent, flipping [require_token] when not yet on).
     3. Mints a bearer and publishes its credential and raw token via
@@ -14,10 +14,9 @@
        three render functions ({!to_yojson}, {!render_shell},
        {!render_text}).
 
-    All internal helpers (URL encoding, shell quoting, RNG init,
-    config-flip, token persistence) stay private — the four entry
-    points cover every documented [masc login] consumer (CLI,
-    JSON API, shell-export).
+    URL encoding and shell quoting stay private. Auth owns the admitted
+    configuration and token publication operation. These entry points serve
+    the documented [masc login] consumers (CLI, JSON API, shell-export).
 
     The server is client-agnostic: the caller (CLI / API consumer)
     supplies the env var name ([~token_env_var]) and the
@@ -128,9 +127,8 @@ val mint :
       decides.
 
     {2 Side effects}
-    - Initialises Mirage's default RNG on first call (idempotent
-      via an internal [Atomic.t] flag — safe across concurrent
-      invocations).
+    - Holds Auth credential admission across target validation, bootstrap
+      configuration and both token files.
     - Mutates the auth config under [base_path] to enable bearer
       auth + [require_token] when not already on. The reported
       {!auth_change} reflects which transition occurred.

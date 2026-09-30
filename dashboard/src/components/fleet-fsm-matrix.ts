@@ -3,8 +3,8 @@
  *
  * Small-multiples matrix of all registered keepers × 4 orthogonal FSM
  * axes (KSM/KTC/KDP/KCL). One chip per (keeper, axis) cell showing
- * the current state. A top strip summarises the 4 joint invariant
- * counts from KeeperCompositeLifecycle.tla.
+ * the current state. A top strip summarises measured invariant violation
+ * counts from the composite observer.
  *
  * Backend: #7723 (LT-16a) → GET /api/v1/keepers/composite.
  *

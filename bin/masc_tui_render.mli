@@ -45,6 +45,10 @@ val set_table_frame : bool -> unit
     screen, which is this, not from what the next frame would draw. *)
 val acting_pane_drawn_cols : unit -> int
 
+val acting_pane_columns : Masc_tui_types.state -> terminal_cols:int -> int
+(** The current Activity pane reservation at this terminal width, usable
+    before a frame is built when reconciling interaction bounds. *)
+
 val acting_pane_suppressed : Masc_tui_types.state -> bool
 (** Whether this frame draws no Activity pane whatever the reader chose: a
     modal covers the whole terminal, and the Activity screen and the Browser
@@ -91,10 +95,17 @@ val render_tools :
   Masc_tui_types.state ->
   Frame_presenter.frame * Masc_tui_types.clamped_scroll option
 val config_content_height : Masc_tui_types.state -> int
+val prompts_detail_viewport : Masc_tui_types.state -> int * int
+(** Wrapped selected prompt/asset row count and the detail's visible rows.
+    Page and edge keys use the same document and geometry as drawing. *)
 val context_inspector_viewport : Masc_tui_types.state -> int * int
 val context_inspector_detail_viewport : Masc_tui_types.state -> int * int
 val keeper_deletions_viewport : Masc_tui_types.state -> int * int
 val help_viewport : Masc_tui_types.state -> int * int
+val patch_modal_horizontal_limit : Masc_tui_types.state -> int
+(** Largest body-cell offset needed to read a patch line while keeping its
+    old/new line numbers and change marker fixed. *)
+
 val patch_modal_viewport : Masc_tui_types.state -> int * int
 (** The patch review overlay's diff-row count and the rows it shows, so the
     page keys move a window and the end key reaches the end. *)

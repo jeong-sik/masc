@@ -126,6 +126,11 @@ val agenda_lines : Masc_tui_types.state -> Masc_tui_agenda.line list
 
 val agenda_viewport : Masc_tui_types.state -> int * int
 val answering_viewport : Masc_tui_types.state -> int * int
+val answering_selected_target :
+  Masc_tui_types.state -> lines:Masc_tui_answering.line list -> string option
+(** The selected keeper only when its actionable row lies in the rendered
+    Answering window. Paging away leaves no visible target until movement
+    brings the cursor back into view. *)
 (** Pure projection for the visible Recent pane, or [None] when it will not
     consume chunks. Dimensions are the raw terminal measurement. The loop
     stores this result inside frame Build timing; rendering never stores it. *)

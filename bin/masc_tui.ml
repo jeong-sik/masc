@@ -21145,8 +21145,8 @@ and is loaded on demand through keeper_skill.
                    | _ -> Masc_tui_scroll.maximum ~count ~height)
             | "\r" ->
                 let lines = Masc_tui_render_prim.answering_lines state in
-                (match List.nth_opt lines state.answering_cursor with
-                 | Some { Masc_tui_answering.target = Some keeper_name; _ } ->
+                (match Masc_tui_render.answering_selected_target state ~lines with
+                 | Some keeper_name ->
                      close ();
                      open_message_for_keeper
                        ~return_to:Keeper_chat_return_list state keeper_name
@@ -21156,7 +21156,7 @@ and is loaded on demand through keeper_skill.
                      launch_keeper_history_load state
                        ~mailbox:async_messages ~keeper_name;
                      state.view <- Keepers Keeper_message
-                 | Some _ | None -> ())
+                 | None -> ())
             | _ -> ())
        | Some k when state.link_modal_open ->
            let close () =

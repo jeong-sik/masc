@@ -1,8 +1,13 @@
 import { signal, effect } from '@preact/signals'
 import { callMcpTool } from '../../api/mcp'
-import { namespaceTruth, namespaceTruthInitializing } from '../../namespace-truth-store'
+import { currentDashboardActor } from '../../api/core'
+import { dispatchOperatorAction, confirmOperatorPendingAction } from '../../operator-store'
+import {
+  namespaceTruth, namespaceTruthInitializing, namespaceTruthError, refreshNamespaceTruth,
+} from '../../namespace-truth-store'
 import { serverStatus, shellAuthSummary } from '../../store'
 import { showToast } from '../common/toast'
+import { requestConfirm } from '../common/confirm-dialog'
 import { dashboardAuthAccess } from '../../lib/dashboard-auth-access'
 import { errorToString } from '../../lib/format-string'
 
@@ -14,24 +19,22 @@ export const flowLoading = signal(false)
 export const maintenanceResult = signal<string | null>(null)
 export const maintenanceLoading = signal(false)
 
-export function syncFlowStateFromDashboardSignals(options: { trustRunning: boolean } = { trustRunning: true }): boolean {
+export function syncFlowStateFromDashboardSignals(): boolean {
+  if (namespaceTruthError.value) {
+    flowState.value = 'unknown'
+    return false
+  }
   if (namespaceTruthInitializing.value) {
     flowState.value = 'initializing'
     return true
   }
 
   const paused = namespaceTruth.value?.root.status?.paused ?? serverStatus.value?.paused
-  if (paused === true) {
-    flowState.value = 'paused'
+  if (typeof paused === 'boolean') {
+    flowState.value = paused ? 'paused' : 'running'
     return true
   }
-  if (paused === false) {
-    if (options.trustRunning) {
-      flowState.value = 'running'
-      return true
-    }
-    return false
-  }
+  flowState.value = 'unknown'
   return false
 }
 
@@ -39,54 +42,63 @@ effect(() => {
   syncFlowStateFromDashboardSignals()
 })
 
-function normalizedFlowStatus(value: unknown): string {
-  return typeof value === 'string' ? value.trim().toLowerCase() : ''
+export async function fetchPauseStatus(): Promise<void> {
+  if (syncFlowStateFromDashboardSignals()) return
+  await refreshNamespaceTruth({ force: true })
+  syncFlowStateFromDashboardSignals()
 }
 
-export async function fetchPauseStatus(): Promise<void> {
-  if (syncFlowStateFromDashboardSignals({ trustRunning: false })) return
+async function changeNamespacePause(paused: boolean): Promise<void> {
+  if (flowLoading.value) return
+  const verb = paused ? 'Pause' : 'Resume'
+  const access = dashboardAuthAccess(shellAuthSummary.value, 'worker')
+  if (!access.allowed) {
+    showToast(access.reason ?? `Missing permission to ${verb.toLowerCase()} the namespace.`, 'error', 6000)
+    return
+  }
+  flowLoading.value = true
   try {
-    const raw = await callMcpTool('masc_pause_status', {})
-    const parsed = JSON.parse(raw) as { paused?: boolean | null; status?: string; initializing?: boolean }
-    const status = normalizedFlowStatus(parsed.status)
-    if (parsed.paused === true || status === 'paused') {
-      flowState.value = 'paused'
-      return
+    const actor = currentDashboardActor()
+    const result = await dispatchOperatorAction({
+      actor,
+      action_type: paused ? 'namespace_pause' : 'namespace_resume',
+      target_type: 'workspace',
+      payload: {},
+    })
+    if (result.confirm_required) {
+      if (!result.confirm_token) throw new Error('Server did not return a confirmation token.')
+      const confirmed = await requestConfirm({
+        title: `${verb} namespace`,
+        message: paused
+          ? 'Pause namespace automation and spawning until resumed?'
+          : 'Resume namespace automation and spawning?',
+        confirmText: verb,
+        tone: paused ? 'danger' : 'info',
+      })
+      await confirmOperatorPendingAction(actor, result.confirm_token, confirmed ? 'confirm' : 'deny')
+      if (!confirmed) return
     }
-    if (parsed.initializing === true || status === 'initializing') {
-      flowState.value = 'initializing'
-      return
+    await refreshNamespaceTruth({ force: true })
+    syncFlowStateFromDashboardSignals()
+    const expected: FlowState = paused ? 'paused' : 'running'
+    if (flowState.value === expected) {
+      showToast(paused ? 'Namespace paused.' : 'Namespace resumed.', 'success')
+    } else {
+      showToast(`${verb} sent; namespace state is ${flowState.value}.`, 'warning')
     }
-    if (parsed.paused === false || status === 'running') {
-      flowState.value = 'running'
-      return
-    }
-    flowState.value = 'unknown'
-  } catch { flowState.value = 'unknown' }
+  } catch (err) {
+    showToast(`${verb} failed: ${errorToString(err)}`, 'error')
+  } finally {
+    flowLoading.value = false
+  }
 }
 
 export async function pauseWorkspace(): Promise<void> {
-  const access = dashboardAuthAccess(shellAuthSummary.value, 'worker')
-  if (!access.allowed) {
-    showToast(access.reason ?? 'Missing permission to pause the namespace.', 'error', 6000)
-    return
-  }
-  flowLoading.value = true
-  try { await callMcpTool('masc_pause', {}); flowState.value = 'paused'; showToast('Namespace paused.', 'success') }
-  catch (err) { showToast(`Pause failed: ${errorToString(err)}`, 'error') }
-  finally { flowLoading.value = false }
+  await changeNamespacePause(true)
 }
 
 export async function resumeWorkspace(): Promise<void> {
-  const access = dashboardAuthAccess(shellAuthSummary.value, 'worker')
-  if (!access.allowed) {
-    showToast(access.reason ?? 'Missing permission to resume the namespace.', 'error', 6000)
-    return
-  }
-  flowLoading.value = true
-  try { await callMcpTool('masc_resume', {}); flowState.value = 'running'; showToast('Namespace resumed.', 'success') }
-  catch (err) { showToast(`Resume failed: ${errorToString(err)}`, 'error') }
-  finally { flowLoading.value = false }
+  await changeNamespacePause(false)
 }
 
 // ── Maintenance ─────────────────────────────────

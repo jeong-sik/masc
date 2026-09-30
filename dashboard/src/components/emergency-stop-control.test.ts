@@ -9,7 +9,6 @@ const {
   flowState,
   flowLoading,
   shellAuthSummary,
-  requestConfirm,
   authAccess,
 } = vi.hoisted(() => ({
   fetchPauseStatus: vi.fn().mockResolvedValue(undefined),
@@ -18,7 +17,6 @@ const {
   flowState: { value: 'running' as 'running' | 'paused' | 'initializing' | 'unknown' },
   flowLoading: { value: false },
   shellAuthSummary: { value: null },
-  requestConfirm: vi.fn().mockResolvedValue(true),
   authAccess: { allowed: true, reason: null as string | null },
 }))
 
@@ -35,8 +33,6 @@ vi.mock('../store', () => ({ shellAuthSummary }))
 vi.mock('../lib/dashboard-auth-access', () => ({
   dashboardAuthAccess: () => authAccess,
 }))
-
-vi.mock('./common/confirm-dialog', () => ({ requestConfirm }))
 
 import { EmergencyStopControl } from './emergency-stop-control'
 
@@ -57,7 +53,6 @@ describe('EmergencyStopControl', () => {
     shellAuthSummary.value = null
     authAccess.allowed = true
     authAccess.reason = null
-    requestConfirm.mockResolvedValue(true)
   })
 
   afterEach(() => {
@@ -75,29 +70,13 @@ describe('EmergencyStopControl', () => {
     expect(container.querySelector('.emergency-stop-control')).toBeTruthy()
   })
 
-  it('pauses the namespace after the confirmation is accepted', async () => {
+  it('delegates Emergency Stop to the shared namespace confirmation flow', async () => {
     render(html`<${EmergencyStopControl} />`, container)
     await flushUi()
-
     const btn = container.querySelector('[data-testid="emergency-stop-control"]') as HTMLButtonElement
     btn.click()
     await flushUi()
-
-    expect(requestConfirm).toHaveBeenCalledTimes(1)
     expect(pauseWorkspace).toHaveBeenCalledTimes(1)
-  })
-
-  it('does not pause when the confirmation is declined', async () => {
-    requestConfirm.mockResolvedValue(false)
-    render(html`<${EmergencyStopControl} />`, container)
-    await flushUi()
-
-    const btn = container.querySelector('[data-testid="emergency-stop-control"]') as HTMLButtonElement
-    btn.click()
-    await flushUi()
-
-    expect(requestConfirm).toHaveBeenCalledTimes(1)
-    expect(pauseWorkspace).not.toHaveBeenCalled()
   })
 
   it('hides the Emergency Stop button when worker access is denied', async () => {

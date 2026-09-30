@@ -1,0 +1,18 @@
+{
+  "command": [
+    "env",
+    "-u",
+    "MASC_CONFIG_DIR",
+    "-u",
+    "MASC_BASE_PATH",
+    "npx",
+    "vitest",
+    "run",
+    "src/components/flow-control/flow-control-state.test.ts",
+    "--maxWorkers=1"
+  ],
+  "cwd": "/masc-work/jazz-developer/masc/.worktrees/647-namespace-resume/dashboard",
+  "started_at": "2026-09-30T15:04:03.406673+00:00",
+  "finished_at": "2026-09-30T15:04:05.204061+00:00",
+  "exit_code": 1
+}

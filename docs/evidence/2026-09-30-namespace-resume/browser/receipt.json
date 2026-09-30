@@ -1,0 +1,99 @@
+{
+  "scope": "Actual controls and API serializers in Chromium; store projections and HTTP responses are fixtures. Not deployment evidence.",
+  "base": "ae82a3b855cc5cb8c37a134ef01eebff35368bc3",
+  "mainSha256": "cd3540a90a3037f72aec5e6c6945449ee6a5bdef43e3f2a4532dbd73ff691759",
+  "fixedSha256": "f3b052505fba3e207fa083c9204193886131bc12bd3624695b69a151362ece85",
+  "sourceUnchanged": true,
+  "receipts": [
+    {
+      "variant": "main",
+      "paused": true,
+      "events": [
+        {
+          "method": "POST",
+          "path": "/mcp",
+          "body": {
+            "jsonrpc": "2.0",
+            "method": "tools/call",
+            "params": {
+              "name": "masc_resume",
+              "arguments": {},
+              "_meta": {
+                "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                "io.modelcontextprotocol/clientCapabilities": {}
+              }
+            },
+            "id": "4d760aea-1efe-4b6c-b320-c9c3301dc5fc"
+          },
+          "response": {
+            "jsonrpc": "2.0",
+            "id": "4d760aea-1efe-4b6c-b320-c9c3301dc5fc",
+            "error": {
+              "code": -32601,
+              "message": "Unknown tool: masc_resume"
+            }
+          }
+        }
+      ],
+      "errors": [],
+      "toasts": [
+        {
+          "message": "Resume failed: Unknown tool: masc_resume",
+          "tone": "error"
+        }
+      ]
+    },
+    {
+      "variant": "fixed",
+      "paused": false,
+      "events": [
+        {
+          "method": "POST",
+          "path": "/api/v1/operator/action",
+          "body": {
+            "actor": "fixture-operator",
+            "action_type": "namespace_resume",
+            "target_type": "workspace",
+            "payload": {}
+          },
+          "response": {
+            "status": "pending_confirm",
+            "confirm_required": true,
+            "confirm_token": "fixture-confirm"
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/operator/confirm",
+          "body": {
+            "actor": "fixture-operator",
+            "confirm_token": "fixture-confirm",
+            "decision": "confirm"
+          },
+          "response": {
+            "status": "ok"
+          }
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/dashboard/project-snapshot",
+          "body": null,
+          "response": {
+            "root": {
+              "status": {
+                "paused": false
+              }
+            }
+          }
+        }
+      ],
+      "errors": [],
+      "toasts": [
+        {
+          "message": "Namespace resumed.",
+          "tone": "success"
+        }
+      ]
+    }
+  ]
+}

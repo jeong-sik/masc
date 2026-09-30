@@ -1,0 +1,13 @@
+{
+  "command": [
+    "node",
+    ".evidence-tools/pyright/dist/index.js",
+    "--project",
+    ".evidence-pyright.json",
+    "--outputjson"
+  ],
+  "cwd": "/masc-work/jazz-developer/masc/.worktrees/647-namespace-resume",
+  "started_at": "2026-09-30T15:33:42.876687+00:00",
+  "finished_at": "2026-09-30T15:33:43.360156+00:00",
+  "exit_code": 0
+}

@@ -91,7 +91,7 @@ let cleanup_dir dir =
 let install_exn ~base_path =
   match AQ.install_persistence ~base_path with
   | Ok report -> report
-  | Error error -> fail (AQ.install_error_to_string error)
+  | Error error -> fail (Masc.Keeper_approval_queue_result.install_error_to_string error)
 
 let rec wait_until ~clock ~deadline predicate =
   if predicate ()
@@ -511,7 +511,7 @@ let test_pending_hitl_approval_keeper_names_filters_persisted_pending () =
               ()
           with
           | Ok submission -> submission.approval_id
-          | Error error -> fail (AQ.storage_error_to_string error)
+          | Error error -> fail (Masc.Keeper_approval_queue_result.storage_error_to_string error)
         in
         approval_ids := id :: !approval_ids
       in
@@ -521,7 +521,7 @@ let test_pending_hitl_approval_keeper_names_filters_persisted_pending () =
         [ blocked.name ]
         (match Sup.pending_hitl_approval_keeper_names config with
          | Ok names -> names
-         | Error error -> fail (AQ.storage_error_to_string error)))
+         | Error error -> fail (Masc.Keeper_approval_queue_result.storage_error_to_string error)))
 
 (* Sweep paths that resolve a keeper's runtime id reach
    [Keeper_meta_contract.runtime_id_of_meta], which falls back to
@@ -1573,7 +1573,7 @@ let test_sweep_reports_pending_hitl_approval () =
             ()
         with
         | Ok submission -> submission.approval_id
-        | Error error -> fail (AQ.storage_error_to_string error)
+        | Error error -> fail (Masc.Keeper_approval_queue_result.storage_error_to_string error)
       in
       approval_id := Some id;
       let baseline = latest_log_seq () in

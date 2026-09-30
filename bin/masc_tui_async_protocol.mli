@@ -232,7 +232,7 @@ type async_msg =
   | Fusion_launched of int * (string, string) result
   | Repositories_loaded of (Masc.Tui_decode.repository_snapshot, string) result
   | Workspace_activity_loaded of string Masc_tui_fetched.request * (workspace_activity_read, string) result
-  | Memory_loaded of (Masc.Tui_decode.memory_health_snapshot, string) result
+  | Memory_loaded of (Masc.Tui_decode_memory_health.memory_health_snapshot, string) result
   (* Carries the request it answers: the browser can be closed or pointed at
      another keeper while a load is in flight, and a late answer for somebody
      else must be dropped, not filed under whoever is open. The answer is the

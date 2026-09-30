@@ -595,14 +595,14 @@ let render_section_tools ~cols (state : state) : string list =
             total_facts
             mhs.mhs_total_source_facts
             (Masc_tui_token_scale.format_estimate Masc_tui_token_scale.fleet
-               (List.fold_left (fun acc (k : Decode.memory_keeper_health) -> acc + k.mkh_snapshot_bytes) 0 mhs.mhs_keepers))
+               (List.fold_left (fun acc (k : Masc.Tui_decode_memory_health.memory_keeper_health) -> acc + k.mkh_snapshot_bytes) 0 mhs.mhs_keepers))
         in
         let rows =
           if mhs.mhs_keepers = [] then
             [ "    (no registered keepers with memory partitions)" ]
           else
             List.map
-              (fun (k : Decode.memory_keeper_health) ->
+              (fun (k : Masc.Tui_decode_memory_health.memory_keeper_health) ->
                 let pct = if total_facts = 0 then 0 else (k.mkh_facts * 100) / total_facts in
                 let bar = Chart.gauge ~width:16 ~value:pct ~max_value:100 ~label:"" () in
                 Printf.sprintf "    %-16s  %4d facts  %s  %s tok%s"

@@ -8,12 +8,7 @@ import test_tui_keyboard_input as h
 # suite when a pull request changes a path the suite names. The tag is worded
 # in masc_tui_fleet_line.ml, read out of the body by tui_decode.ml, and drawn
 # by the Keepers header and the Metrics readiness section.
-SOURCE_MODULES = (
-    "bin/masc_tui_fleet_line.ml",
-    "bin/masc_tui_render.ml",
-    "bin/masc_tui_render_metrics.ml",
-    "lib/tui_decode.ml",
-)
+SOURCE_MODULES = ('bin/masc_tui_fleet_line.ml', 'bin/masc_tui_render.ml', 'bin/masc_tui_render_metrics.ml', 'lib/tui_decode.ml', 'lib/tui_decode_memory_health.ml', 'lib/tui_decode_memory_health.mli')
 
 FLEET_PATH = "/health?full=1"
 # The fleet fixture draws "turn capacity 0/0" on the Keepers header; waiting

@@ -335,10 +335,9 @@ val probe_subscription :
 
 val cli_admitted_reasoning_effort :
   Llm_provider.Reasoning_effort.t -> Llm_provider.Reasoning_effort.t
-(** The CLI's effort vocabulary as a total snap: [Minimal] — the one effort
-    the CLI refuses — becomes [Low]; every other effort is itself. [command]
-    still rejects an un-snapped [Minimal], so this is the survivable path a
-    caller opts into, not a silent coercion inside the argv builder. *)
+(** Admit the canonical effort to Claude Code's CLI vocabulary: [Minimal]
+    becomes [Low] and [Ultra] becomes [Max]. Other declared values stay exact.
+    [command] rejects either unsupported value if a caller skips admission. *)
 
 val command :
   system_prompt_file:string option ->

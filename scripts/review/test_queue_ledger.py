@@ -1163,11 +1163,25 @@ os.execv(os.environ['LEDGER_REAL_GIT'], [os.environ['LEDGER_REAL_GIT'], *args])
         row = self.ledger(comments=[], reviews=[self.approval()])
         self.assertEqual((row["waits_on"], row["review_state"], row["verdict"]), ("integration", "approved", "-"))
 
-    def test_source_refusal_after_integration_pass_stops_merge(self):
+    def test_open_source_cr_after_pass_stops_merge(self):
+        refusal = self.message(
+            f"review: REQUEST_CHANGES head: {self.head} by: reviewer",
+            "2026-01-01T00:59:00Z", id=101, state="CHANGES_REQUESTED", commit_id=self.head)
+        row = self.ledger(reviews=[self.approval(id=100), refusal])
+        self.assertEqual(row["waits_on"], "cr:review-account")
+
+    def test_dismissed_source_cr_does_not_revoke_integration_pass(self):
+        refusal = self.message(
+            f"review: REQUEST_CHANGES head: {self.head} by: reviewer",
+            "2026-01-01T00:59:00Z", state="DISMISSED", commit_id=self.head)
+        approval = self.approval(time="2026-01-01T01:00:00Z")
+        row = self.ledger(reviews=[refusal, approval])
+        self.assertEqual((row["waits_on"], row["verdict"]), ("merge", "PASS by reviewer"))
+
+    def test_source_review_comment_does_not_change_integration_verdict(self):
         row = self.ledger(comments=[self.message(self.verdict()), self.message(
             f"review: REQUEST_CHANGES head: {self.head} by: reviewer", "2026-01-01T00:59:00Z")], reviews=[self.approval()])
-        self.assertEqual(row["waits_on"], "integration")
-        self.assertEqual(row["verdict"], "FAIL by reviewer")
+        self.assertEqual((row["waits_on"], row["verdict"]), ("merge", "PASS by reviewer"))
 
 if __name__ == "__main__":
     unittest.main()

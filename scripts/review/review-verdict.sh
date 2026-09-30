@@ -1,5 +1,6 @@
 # Shared structured verdict reader. Caller supplies GH and repo; read-only.
-# Newest structured verdict for this head; malformed evidence never grants PASS.
+# Newest integration verdict for this head; source reviews are independent.
+# Open source CRs are enforced using their live formal state by merge-check.
 verdict_for() { # pr head
   local lines
   lines=$( { "$GH" api --paginate "repos/$repo/issues/$1/comments" --jq '.[] | [.created_at, .body, (.author_association // "UNKNOWN"), (.updated_at // .created_at)] | @tsv' &&
@@ -11,21 +12,15 @@ verdict_for() { # pr head
       for (i=3; i<n; i++) if (w[i]=="head:") {
         head_fields++; if (w[i+1]==head) names_head=1
       }
-      if ((w[1]=="verdict:" || (w[1]=="review:" && w[2]!="APPROVE")) && names_head) {
+      if (w[1]=="verdict:" && names_head) {
         state=w[2]; run="-"; by="-"
-        # Source approval is deliberately not integration PASS. A later source
-        # refusal (including malformed/unknown review decisions) revokes PASS.
-        if (w[1]=="review:") {
-          if (body ~ /^review: REQUEST_CHANGES head: [0-9a-f]+ by: [A-Za-z0-9._-]+$/ && n==6 && head_fields==1) { state="FAIL"; by=w[6] }
-          else state="INVALID"
-        }
-        if (w[1]=="verdict:" && (state=="PASS" || state=="FAIL")) {
+        if (state=="PASS" || state=="FAIL") {
           if (body ~ /^verdict: (PASS|FAIL) head: [0-9a-f]+ run: [1-9][0-9]* by: [A-Za-z0-9._-]+$/ &&
               n==8 && head_fields==1 && w[3]=="head:" && w[4]==head &&
               w[5]=="run:" && w[6] ~ /^[1-9][0-9]*$/ &&
               w[7]=="by:" && w[8] ~ /^[A-Za-z0-9._-]+$/) { run=w[6]; by=w[8] }
           else state="INVALID"
-        } else if (w[1]=="verdict:" && state!="HOLD" && state!="COMMENT") state="UNKNOWN"
+        } else if (state!="HOLD" && state!="COMMENT") state="UNKNOWN"
         # Positive authority belongs to repository participants. Unknown or
         # outsider PASS never clears a trusted refusal; refusals stay conservative.
         if (state=="PASS" && $3!="OWNER" && $3!="MEMBER" && $3!="COLLABORATOR") state="UNTRUSTED"

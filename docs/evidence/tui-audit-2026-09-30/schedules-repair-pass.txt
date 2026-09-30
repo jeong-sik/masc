@@ -2,8 +2,6 @@ run: 36668855707
 source_head: f088db60a2a3cc5a2bb56513eeb46617032612c2
 scope: focused Schedules viewport, source-status and existing hold fixture PTY; not installed TUI proof
 test suite	Checkout	2026-09-30T04:34:55.2618564Z f088db60a2a3cc5a2bb56513eeb46617032612c2
-test suite	Test	2026-09-30T04:36:25.6877201Z ^[[36;1m    0)   log "[targeted] ${suite}: OK in ${elapsed}s" ;;^[[0m
-test suite	Test	2026-09-30T04:36:25.6913715Z ^[[36;1m    0)   log "[targeted] ${suite_path}: OK in ${elapsed}s" ;;^[[0m
 test suite	Test	2026-09-30T04:40:33.1760416Z Schedule detail physical-row viewport: PASS
 test suite	Test	2026-09-30T04:40:33.2657208Z [targeted] test_tui_schedule_detail_viewport_pty: OK in 50s
 test suite	Test	2026-09-30T04:40:43.4653708Z tui schedule source status regression: PASS

@@ -846,7 +846,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
        catalog clamp obeys the model row (no-op today for anthropic rows,
        whose accepted set the capability layer withholds), and
        [cli_admitted_reasoning_effort] obeys the CLI's own vocabulary
-       ([minimal] -> [low]). The same value feeds the raw_trace start record
+       ([minimal] -> [low], [ultra] -> [max]). The same value feeds the raw_trace start record
        and the command line so observation matches the wire. *)
     let effective_reasoning_effort =
       Host.effective_reasoning_effort

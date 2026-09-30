@@ -9,9 +9,9 @@
  (name masc_keeper_portrait)
  (public_name masc.keeper_portrait)
  (wrapped false)
- (modules keeper_portrait_look keeper_portrait_item keeper_portrait_draw keeper_portrait_solid)
+ (modules keeper_portrait_look keeper_portrait_item keeper_portrait_equipment keeper_portrait_draw keeper_portrait_solid)
  (flags
   (:standard -w +4 -w +33))
  (preprocess
   (pps ppx_enumerate))
- (libraries digestif))
+ (libraries digestif yojson))

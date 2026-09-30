@@ -1553,16 +1553,19 @@ let mcp_config tools =
             ]))
 ;;
 
-(* The CLI's effort vocabulary as a total snap: [minimal] is the one effort
-   the CLI refuses, and its nearest admitted neighbour is [low]. Every other
-   effort is itself. [reasoning_args] below stays the enforcing boundary
-   (a caller that skips this snap still fails loudly rather than sending a
-   flag the CLI rejects); the keeper lane applies the snap so an
-   operator-declared [minimal] survives as a turn instead of killing it,
-   mirroring the Codex lane's catalog clamp. *)
+(* Claude Code's CLI ladder is low/medium/high/xhigh/max. The canonical
+   vocabulary also serves other runtimes, so its unsupported endpoints must
+   be admitted here even when the selected model has no catalog row.
+   https://code.claude.com/docs/en/cli-reference#cli-flags *)
 let cli_admitted_reasoning_effort = function
   | Llm_provider.Reasoning_effort.Minimal -> Llm_provider.Reasoning_effort.Low
-  | effort -> effort
+  | Llm_provider.Reasoning_effort.Ultra -> Llm_provider.Reasoning_effort.Max
+  | (Llm_provider.Reasoning_effort.None_
+    | Llm_provider.Reasoning_effort.Low
+    | Llm_provider.Reasoning_effort.Medium
+    | Llm_provider.Reasoning_effort.High
+    | Llm_provider.Reasoning_effort.XHigh
+    | Llm_provider.Reasoning_effort.Max) as effort -> effort
 ;;
 
 let reasoning_args = function
@@ -1573,7 +1576,15 @@ let reasoning_args = function
     Error
       (Invalid_config
          "Claude Code does not admit reasoning effort minimal; use low, medium, high, xhigh, max, or none")
-  | Some effort ->
+  | Some Llm_provider.Reasoning_effort.Ultra ->
+    Error
+      (Invalid_config
+         "Claude Code does not admit reasoning effort ultra; use low, medium, high, xhigh, max, or none")
+  | Some ((Llm_provider.Reasoning_effort.Low
+          | Llm_provider.Reasoning_effort.Medium
+          | Llm_provider.Reasoning_effort.High
+          | Llm_provider.Reasoning_effort.XHigh
+          | Llm_provider.Reasoning_effort.Max) as effort) ->
     Ok [ "--effort"; Llm_provider.Reasoning_effort.to_string effort ]
 ;;
 

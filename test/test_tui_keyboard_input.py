@@ -99,8 +99,11 @@ class RequestHttpResponse:
     def __init__(
         self,
         resolve: Callable[[bytes], HttpResponse | RawHttpResponse | StreamingHttpResponse],
+        *,
+        get_response: HttpResponse | None = None,
     ) -> None:
         self.resolve = resolve
+        self.get_response = get_response
 
 
 class MethodHttpResponse:
@@ -279,7 +282,10 @@ def test_http_endpoint(
             else:
                 fixture = (503, {"error": "fixture endpoint unavailable"})
             if isinstance(fixture, RequestHttpResponse):
-                resolved = fixture.resolve(request_body or b"")
+                if self.command == "GET" and fixture.get_response is not None:
+                    resolved = fixture.get_response
+                else:
+                    resolved = fixture.resolve(request_body or b"")
             elif isinstance(fixture, MethodHttpResponse):
                 resolved = fixture.resolve(self.command)
             elif isinstance(fixture, PathHttpResponse):
@@ -1621,6 +1627,7 @@ def keeper_runtime_http_fixtures(
                     "activation_mode": "autonomous",
                     "runtime_id": alpha_runtime_id,
                     "runtime_blocker_summary": None,
+                    "portrait": {"state": "ready", "equipment": {"face": "bare_face", "neck": "bare_neck", "head": "bare_head", "hand": "empty_hand", "base": "no_dish"}},
                 },
                 {
                     "runtime_class": "keeper",
@@ -1634,6 +1641,7 @@ def keeper_runtime_http_fixtures(
                     "activation_mode": "on_demand",
                     "runtime_id": beta_runtime_id,
                     "runtime_blocker_summary": None,
+                    "portrait": {"state": "ready", "equipment": {"face": "bare_face", "neck": "bare_neck", "head": "bare_head", "hand": "empty_hand", "base": "no_dish"}},
                 },
             ],
         },
@@ -2145,6 +2153,7 @@ def run_terminal_scenario(
     confirm_exit: bytes = b"q",
     refresh: float = 60.0,
     terminal_cols: int = 100,
+    terminal_rows: int = 30,
     workspace: str = WORKSPACE_PAYLOAD,
     http_fixtures: HttpFixtures | None = None,
     http_requests: HttpRequests | None = None,
@@ -2169,7 +2178,10 @@ def run_terminal_scenario(
     output = PtyOutput()
     process: subprocess.Popen[bytes] | None = None
     try:
-        fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, struct.pack("HHHH", 30, terminal_cols, 0, 0))
+        fcntl.ioctl(
+            slave_fd, termios.TIOCSWINSZ,
+            struct.pack("HHHH", terminal_rows, terminal_cols, 0, 0),
+        )
         os.set_blocking(master_fd, False)
         with tempfile.TemporaryDirectory(prefix="masc-tui-keyboard-") as base_path:
             with test_http_endpoint(
@@ -4846,6 +4858,60 @@ def open_loaded_planning(
 ) -> None:
     # Navigate by named surface so Planning tests do not depend on tab order.
     palette_go(process, master_fd, output, b"go Work", b"plan-alpha-29424")
+
+
+def planning_footer_dispatch_interaction(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    _slave_fd: int,
+    output: bytearray,
+    _base_path: str,
+) -> None:
+    open_loaded_planning(process, master_fd, output)
+    resize_and_wait(
+        process, master_fd, output, rows=32, columns=360,
+        needle=b"plan-alpha-29424", controls=(FULL_REDRAW,),
+        final_cursor=b"\x1b[?25l",
+    )
+
+    def footer() -> bytes:
+        rows = [row for row in screen_rows(bytes(output)).values()
+                if b"j/k:move" in row]
+        if len(rows) != 1:
+            raise AssertionError(f"Planning drew {len(rows)} footer rows")
+        return rows[0]
+
+    list_footer = footer()
+    for hint in (b"Right / Enter:detail", b"f:filter", b"s:sort"):
+        if hint not in list_footer:
+            raise AssertionError(f"Planning list omitted {hint!r}: {list_footer!r}")
+    if b"[ / ]:previous / next" in list_footer:
+        raise AssertionError(f"Planning list offered detail-only navigation: {list_footer!r}")
+
+    send_and_wait(
+        process, master_fd, output, b"\r", b"masc://planning/goal-a-29424"
+    )
+    detail_footer = footer()
+    if b"[ / ]:previous / next" not in detail_footer:
+        raise AssertionError(f"Planning detail omitted goal navigation: {detail_footer!r}")
+    if b"Right / Enter:detail" in detail_footer:
+        raise AssertionError(f"Planning detail offered list-only open: {detail_footer!r}")
+    send_and_wait(
+        process, master_fd, output, b"]", b"masc://planning/goal-b-29424"
+    )
+    if b"[ / ]:previous / next" not in footer():
+        raise AssertionError("Planning detail step lost its footer")
+    send_and_wait(
+        process, master_fd, output, b"\x1b[D", b"Right / Enter:detail"
+    )
+    if b"[ / ]:previous / next" in footer():
+        raise AssertionError("Planning list retained the detail-only hint")
+    send_and_wait(
+        process, master_fd, output, b"f", b"filter:completed"
+    )
+    if b"f:filter" not in footer():
+        raise AssertionError("Planning list filter lost its footer")
+    os.write(master_fd, b"q")
 
 
 def planning_reorder_identity_interaction(fixtures: HttpFixtures) -> Interaction:
@@ -7636,7 +7702,7 @@ def memory_facts_interaction() -> Interaction:
     return interact
 
 
-def memory_journal_fixture() -> HttpResponse:
+def memory_journal_fixture() -> tuple[int, dict[str, object]]:
     return (
         200,
         {
@@ -8499,6 +8565,186 @@ def run_context_inspector_transport_error_regression(executable: str) -> None:
     )
 
 
+def next_request_forecast_fixture(*, with_continuity: bool) -> dict[str, object]:
+    origin: dict[str, object] = (
+        {"kind": "librarian_snapshot", "end_atom": 2698, "boundary_line": 2215}
+        if with_continuity
+        else {"kind": "ledger"}
+    )
+    return {
+        "schema": "masc.keeper.next-request-forecast.v5",
+        "keeper": "alpha",
+        "trace_id": "trace-next-request",
+        "checkpoint_messages": 5217,
+        "wake_line_bytes": 131,
+        "walk": {
+            "lane_id": "kimi_coding.kimi-for-coding",
+            "declared": ["kimi_coding.kimi-for-coding"],
+        },
+        "candidates": [
+            {
+                "runtime_id": "kimi_coding.kimi-for-coding",
+                "lane": {"agent_core": True},
+                "marks": {"high_water_tokens": 100000, "low_water_tokens": 70000},
+                "parts": {"error": "no completed turn on this runtime carried a composition in the newest 200 records"},
+                "history_atoms": 2718,
+                "carried": {
+                    "first_atom": 2698,
+                    "kept_atoms": 20,
+                    "transmitted_bytes": 237300,
+                    "preamble_bytes": None,
+                    "origin": origin,
+                    "counted_tokens": None if with_continuity else 71000,
+                },
+                "assembly": None,
+                "place": {"walks_at": 0, "declared_at": 0, "rest": {"kind": "serving"}},
+            }
+        ],
+    }
+
+
+def scroll_context_one_line(process, master_fd, output) -> bytes:
+    # A scroll paints one frame. send_and_wait(..., FRAME_END) would consume
+    # that marker as its needle and then wait for an unnecessary second frame.
+    read_available(master_fd, output)
+    start = len(output)
+    os.write(master_fd, b"j")
+    wait_for_output(process, master_fd, output, FRAME_END, start=start, timeout=3.0)
+    frame_end = output.find(FRAME_END, start) + len(FRAME_END)
+    return bytes(output[start:frame_end])
+
+
+def open_context_and_read_history_pages(process, master_fd, output) -> bytes:
+    # The loaded context can be taller than the terminal. Walk its actual
+    # reported pages, preserving the bytes for the existing content checks.
+    drawn = send_and_wait(process, master_fd, output, b"\r", b"WHAT WENT IN")
+    while True:
+        visible = screen_text(bytes(output))
+        bounds = re.search(rb"\[lines (\d+)-(\d+)/(\d+)\]", visible)
+        if bounds is None or int(bounds[2]) == int(bounds[3]):
+            break
+        first = int(bounds[1])
+        drawn += scroll_context_one_line(process, master_fd, output)
+        advanced = re.search(rb"\[lines (\d+)-(\d+)/(\d+)\]",
+                             screen_text(bytes(output)))
+        if advanced is None or int(advanced[1]) <= first:
+            raise AssertionError("Context j did not advance its reported window")
+    if b"HOW FAR BACK" not in CSI_RE.sub(b"", drawn):
+        raise AssertionError("Loaded Context pages omitted the history band")
+    return drawn
+
+
+def context_visible_pane(output) -> tuple[bytes, bytes, tuple[int, int, int] | None]:
+    """Current completed Context body, joining only its visible row payloads."""
+    end = output.rfind(FRAME_END)
+    if end < 0:
+        raise AssertionError("Context has no completed frame")
+    completed = bytes(output[:end + len(FRAME_END)])
+    rows = screen_rows(completed)
+    title = next((number for number, row in sorted(rows.items())
+                  if b"MASC Context" in row), None)
+    if title is None:
+        raise AssertionError(f"Context title is not visible: {screen_text(completed)!r}")
+    window = next(((number, match) for number, row in sorted(rows.items())
+                   if (match := LINES_WINDOW_RE.search(row)) is not None), None)
+    bounds = None if window is None else tuple(int(value) for value in window[1].groups())
+    if bounds is not None and not (1 <= bounds[0] <= bounds[1] <= bounds[2]):
+        raise AssertionError(f"Invalid Context window: {bounds!r}")
+    border = "│".encode()
+    payloads = []
+    for number, row in sorted(rows.items()):
+        if number <= title or (window is not None and number >= window[0]):
+            continue
+        plain = row.strip()
+        if plain.startswith(border) and plain.endswith(border):
+            payload = plain[len(border):-len(border)].strip()
+            if payload:
+                payloads.append(payload)
+    return screen_text(completed), b" ".join(payloads), bounds
+
+
+def run_next_request_readability_regression(executable: str) -> None:
+    for with_continuity in (True, False):
+        for cols in (80, 140):
+            fixtures = context_inspector_fixtures()
+            fixtures["/api/v1/keepers/alpha/next-request"] = (
+                200,
+                next_request_forecast_fixture(with_continuity=with_continuity),
+            )
+
+            def interact(process, master_fd, _slave_fd, output, _base_path):
+                resize_and_wait(
+                    process, master_fd, output, rows=32, columns=cols,
+                    needle=b"MASC Dashboard",
+                )
+                send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
+                select_keeper_row(process, master_fd, output, b"alpha")
+                send_and_wait(
+                    process, master_fd, output, b"\r",
+                    b"Keepers \xe2\x96\xb8 \x1b[1malpha",
+                )
+                send_and_wait(
+                    process, master_fd, output, b"m",
+                    b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat",
+                )
+                send_and_wait(
+                    process, master_fd, output, b"/context",
+                    composer_showing(b"/context"),
+                )
+                send_and_wait(process, master_fd, output, b"\r", b"WHAT WENT IN")
+                while True:
+                    visible, pane, bounds = context_visible_pane(output)
+                    if (
+                        b"Config / Runtime:" in pane
+                        and b"model limit." in pane
+                        and b"History preview:" in pane
+                        and (
+                            (b"Librarian working state" in pane)
+                            if with_continuity
+                            else (b"front from this runtime's ledger" in pane)
+                        )
+                    ):
+                        break
+                    # At the last reported row j changes nothing, so no new
+                    # frame is expected. Fail here with the current viewport.
+                    if bounds is None or bounds[1] == bounds[2]:
+                        raise AssertionError(
+                            f"Next Request meaning not visible at {cols} columns "
+                            f"at Context window {bounds!r}: {visible!r}"
+                        )
+                    first = bounds[0]
+                    scroll_context_one_line(process, master_fd, output)
+                    _visible, _pane, advanced = context_visible_pane(output)
+                    if advanced is None or advanced[0] <= first:
+                        raise AssertionError(
+                            f"Context j did not advance its reported window: "
+                            f"{bounds!r} -> {advanced!r}"
+                        )
+                if b"100.0k / 70.0k" in visible:
+                    raise AssertionError("trim settings still look like a forecast figure")
+                print(
+                    f"NEXT_REQUEST_CAPTURE {'continuity' if with_continuity else 'ledger'} "
+                    f"{cols}x32\n{visible.decode(errors='replace')}"
+                )
+                send_and_wait(
+                    process, master_fd, output, b"\x1b",
+                    b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat",
+                )
+                escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
+                os.write(master_fd, b"q")
+
+            run_terminal_scenario(
+                executable,
+                description=(
+                    f"Next Request {'Librarian' if with_continuity else 'ledger'} "
+                    f"copy at {cols} columns"
+                ),
+                interact=interact,
+                terminal_cols=cols,
+                http_fixtures=fixtures,
+            )
+
+
 def context_inspector_interaction() -> Interaction:
     def interact(
         process: subprocess.Popen[bytes],
@@ -8525,8 +8771,8 @@ def context_inspector_interaction() -> Interaction:
         send_and_wait(
             process, master_fd, output, b"/context", composer_showing(b"/context")
         )
-        composition = send_and_wait(
-            process, master_fd, output, b"\r", b"HOW FAR BACK"
+        composition = open_context_and_read_history_pages(
+            process, master_fd, output
         )
         composition_plain = CSI_RE.sub(b"", composition)
         for needle in (
@@ -13059,7 +13305,7 @@ def code_lane_interaction(
         process, master_fd, output, b"d", LEXED_LET
     )
     diff_plain = CSI_RE.sub(b"", diff_frame).decode("utf-8")
-    for needle in ("diff vs HEAD: lib/a.ml", "let a = 1", "let x = 1"):
+    for needle in ("diff col 1 vs HEAD: lib/a.ml", "let a = 1", "let x = 1"):
         if needle not in diff_plain:
             raise AssertionError(
                 f"the diff view missed {needle!r}: {diff_plain!r}"
@@ -14077,7 +14323,8 @@ def schedule_detail_interaction() -> Interaction:
             b"masc://keepers/alpha",
             b"schedule-stimulus-proof-701",
             b"schedule-occurrence-proof-701",
-            b"2026-08-25 09:30:20",
+            b"Turn started",
+            b"2026-08-25T09:30:20Z",
             b"Turn finished",
             b"WORK RESULT",
             b"bounded by its start and finish rows",
@@ -14087,6 +14334,10 @@ def schedule_detail_interaction() -> Interaction:
                 raise AssertionError(
                     f"Schedule turn/result page omitted {needle!r}: {result_plain!r}"
                 )
+        result_rows = screen_rows(result_page)
+        if not any(b"Turn started" in row and b"2026-08-25T09:30:20Z" in row
+                   for row in result_rows.values()):
+            raise AssertionError(f"Turn started row lost its exact ISO fixture timestamp: {result_rows!r}")
         returned = send_and_wait(process, master_fd, output, b"\x1b[D", b"j/k:move")
         returned_plain = CSI_RE.sub(b"", returned)
         for needle in (b"schedule-proof-701", b"status:running", b"queue:matched_pending/2 pending"):
@@ -16611,6 +16862,12 @@ def run_first_install_credential_regression(executable: str) -> None:
 def run_planning_review_regression(executable: str) -> None:
     run_terminal_scenario(
         executable,
+        description="Planning footer follows list and detail dispatch",
+        interact=planning_footer_dispatch_interaction,
+        http_fixtures=planning_selection_http_fixtures(),
+    )
+    run_terminal_scenario(
+        executable,
         description="Planning preserves selected goals and footer across resize",
         interact=planning_resize_budget_interaction,
         http_fixtures=planning_selection_http_fixtures(),
@@ -18371,7 +18628,9 @@ def resources_mcp_fixture() -> HttpFixtures:
         )
 
     fixtures = overview_event_http_fixtures()
-    fixtures["/mcp"] = RequestHttpResponse(answer)
+    fixtures["/mcp"] = RequestHttpResponse(
+        answer, get_response=(405, {"error": "fixture does not offer an SSE stream"})
+    )
     return fixtures
 
 

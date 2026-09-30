@@ -3,6 +3,7 @@
 type waiting =
   { goal_id : string
   ; request_id : string
+  ; verification_run_id : string
   ; passed_at : Candle_time.t
   ; confirmed_at : Candle_time.t
   }
@@ -40,6 +41,7 @@ let last_owed ~goal_id events =
          Some
            { goal_id
            ; request_id = owed.request_id
+           ; verification_run_id = owed.verification_run_id
            ; passed_at = owed.passed_at
            ; confirmed_at = owed.confirmed_at
            }
@@ -81,15 +83,16 @@ let waiting events =
     goal_ids
 ;;
 
-(* The pass a Snapshot fixed, when the Snapshot is of this Goal and request and
-   was made at [passed_at] (given in the ledger's own text form). *)
-let find_pass ~goal_id ~request_id ~passed_at events =
+(* The pass a Snapshot fixed for this Goal, request and verifier run. A time
+   is evidence about a run, not its identity: distinct runs can share a second. *)
+let find_pass ~goal_id ~request_id ~verification_run_id ~passed_at events =
   List.find_map
     (fun (event : Candle_event.t) ->
        match event.body with
        | Candle_event.Snapshot snapshot
          when String.equal snapshot.goal_id goal_id
               && String.equal snapshot.request_id request_id
+              && String.equal snapshot.verification_run_id verification_run_id
               && String.equal (Candle_time.to_rfc3339 snapshot.passed_at) passed_at ->
          Some
            ( snapshot.passed_at
@@ -103,11 +106,11 @@ let find_pass ~goal_id ~request_id ~passed_at events =
     events
 ;;
 
-let owed_pass ~goal_id ~request_id ~passed_at events =
+let owed_pass ~goal_id ~request_id ~verification_run_id ~passed_at events =
   match state ~goal_id events with
   | Waiting _ | Settled -> None
   | No_obligation ->
-    Option.map fst (find_pass ~goal_id ~request_id ~passed_at events)
+    Option.map fst (find_pass ~goal_id ~request_id ~verification_run_id ~passed_at events)
 ;;
 
 let pass_of (waiting : waiting) events =
@@ -116,6 +119,7 @@ let pass_of (waiting : waiting) events =
     (find_pass
        ~goal_id:waiting.goal_id
        ~request_id:waiting.request_id
+       ~verification_run_id:waiting.verification_run_id
        ~passed_at:(Candle_time.to_rfc3339 waiting.passed_at)
        events)
 ;;
@@ -126,7 +130,8 @@ let candidates_of (waiting : waiting) events =
        match event.body with
        | Candle_event.Candidates c
          when String.equal c.goal_id waiting.goal_id
-              && String.equal c.request_id waiting.request_id ->
+              && String.equal c.request_id waiting.request_id
+              && String.equal c.verification_run_id waiting.verification_run_id ->
          Some
            { candidate_task_ids = c.candidate_task_ids; candidate_keepers = c.candidate_keepers }
        | Candle_event.Candidates _

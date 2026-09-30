@@ -204,6 +204,7 @@ let test_a_confirmed_pass_with_a_snapshot_is_owed () =
     let time text = Result.get_ok (Candle_time.of_rfc3339 text) in
     check string "goal" "goal-1" owed.goal_id;
     check string "request" "req-1" owed.request_id;
+    check string "verifier run" "run-1" owed.verification_run_id;
     check bool "passed_at is the pass" true (Candle_time.equal owed.passed_at (time "2026-09-28T06:32:00Z"));
     check
       bool

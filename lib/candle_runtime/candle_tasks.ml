@@ -62,12 +62,15 @@ let linked_task_ids config ~goal_id =
      | None -> Ok [])
 ;;
 
-(* A blank name is no name: the ledger refuses a blank text, and nobody can be
-   paid under it. *)
-let assignee_of (status : Masc_domain.task_status) =
-  match Masc_domain.task_performer_of_status status with
-  | Some name when not (String.equal (String.trim name) "") -> Some name
-  | Some _ | None -> None
+(* A claimed or completed Task must identify its performer. The shared Task
+   decoder maps missing/non-string names to an empty string; that is unreadable
+   payout evidence, not proof that nobody should be paid. *)
+let assignee_of (task : Masc_domain.task) =
+  match Masc_domain.task_performer_of_status task.task_status with
+  | Some name when String.equal (String.trim name) "" ->
+    Error (Printf.sprintf "task %s has no readable assignee" task.id)
+  | Some name -> Ok (Some name)
+  | None -> Ok None
 ;;
 
 let status_of_task (task : Masc_domain.task) =
@@ -86,9 +89,10 @@ let status_of_task (task : Masc_domain.task) =
 
 let found_of_task (task : Masc_domain.task) =
   let* status = status_of_task task in
+  let* assignee = assignee_of task in
   Ok
     (Candle_event.Found
-       { title = task.title; assignee = assignee_of task.task_status; status })
+       { title = task.title; assignee; status })
 ;;
 
 let find_task task_id tasks =

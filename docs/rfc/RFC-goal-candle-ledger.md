@@ -88,8 +88,8 @@ related: ["every-lane-is-one-row-in-one-registry", "0267", "0362", "0387", "0435
 
 | 이벤트 | 남기는 때 | 담는 것 |
 |---|---|---|
-| `Snapshot` | 검증기의 통과 결과를 검증 원장에 커밋하기 직전 | goal_id, 검증 요청 id, criterion revision, 검증 통과 시각, Goal 생성 시각, 그때의 기한(없음, 날짜, 읽을 수 없는 값 중 하나), 제목·metric·target, 그때 연결된 Task 의 id 목록 |
-| `PayoutOwed` | 사람이 확정한 뒤 일꾼이 처음 하는 일 | goal_id, 검증 요청 id, 검증 통과 시각, 연결된 Task 마다 id·제목·담당자·상태·끝난 시각(이 줄을 쓸 때의 값), 후보 keeper 목록 |
+| `Snapshot` | 검증기의 통과 결과를 검증 원장에 커밋하기 직전 | goal_id, 검증 요청 id, 검증 실행 id(`verification_run_id`), criterion revision, 검증 통과 시각, Goal 생성 시각, 그때의 기한(없음, 날짜, 읽을 수 없는 값 중 하나), 제목·metric·target, 그때 연결된 Task 의 id 목록 |
+| `PayoutOwed` | 사람이 확정한 뒤 일꾼이 처음 하는 일 | goal_id, 검증 요청 id, 검증 실행 id(`verification_run_id`), 검증 통과 시각, 연결된 Task 마다 id·제목·담당자·상태·끝난 시각(이 줄을 쓸 때의 값), 후보 keeper 목록 |
 | `PayoutFailed` | 다시 시도해도 결과가 같은 이유가 생겼을 때(지금은 기한을 읽을 수 없음 하나) | goal_id, 검증 요청 id, 이유 |
 | `Paid` | 지급할 때. 한 줄에 전부 적는다 | goal_id, 검증 요청 id, 등급, 총액, 답한 lane 슬롯(모델) id, keeper 별 가중치·몫·감액 계수·지급액, 감액에 쓴 값(시계, 기한, 감액률, 바닥) |
 | `Unattributed` | 받을 keeper 가 없어 지급 없이 끝낼 때 | goal_id, 이유(후보 없음, lane 이 기여자 없음으로 판정) |
@@ -140,7 +140,7 @@ related: ["every-lane-is-one-row-in-one-registry", "0267", "0362", "0387", "0435
    - `Snapshot` 을 쓰지 못하면 그 전이를 거절한다. 검증기는 거절된 커밋을 실패로 남겨 두고 멈춘다. Goal 전이가 원장 기록을 phase 쓰기보다 먼저 하고 그 실패가 phase 쓰기를 막는 기존 순서와 같다(`lib/workspace_goals.ml:409-416`). 이 거절은 Candle 이 켜져 있을 때만 일어난다.
    - `Snapshot` 에 넣는 Task 정보는 연결 파일의 id 목록뿐이다. 복구용 사본을 섞지 않는 함수(`read_goal_task_links_authoritative_r`)로 읽고, 읽지 못하면 쓰지 않고 전이를 거절한다.
    - 잠금 순서는 Goal, backlog, links 다음에 Candle 원장이다(2장). 원장 잠금은 덧붙이는 동안만 잡고 그 안에서 다른 잠금을 잡지 않는다.
-   - 전이가 그 뒤에 실패하면 쓸모없는 `Snapshot` 이 남고, 같은 요청이 다시 오면 `Snapshot` 이 하나 더 남는다. 지급은 `PayoutOwed` 가 가리키는 것(검증 요청 id 와 통과 시각이 같은 `Snapshot`)만 쓴다.
+   - 전이가 그 뒤에 실패하면 쓸모없는 `Snapshot` 이 남고, 같은 요청이 다시 오면 `Snapshot` 이 하나 더 남는다. 지급은 `PayoutOwed` 가 가리키는 것(Goal id·검증 요청 id·검증 실행 id와 통과 시각이 같은 `Snapshot`)만 쓴다. 통과 시각은 초 단위이므로 실행 식별자가 될 수 없다. 같은 초의 재시도도 실제 검증 실행 id로 구분한다.
 2. **사람의 확정.** `confirm_completion` 이 확정을 커밋하면 지급 일꾼을 깨운다. 일꾼은 깨어나면 먼저 `Completed` 이고 확정된 결과와 맞는 `Snapshot` 이 있는데 새 `PayoutOwed` 를 쓸 수 있는 상태(3.1)인 Goal 마다 `PayoutOwed` 를 쓴다. `Snapshot` 이 고정한 Task id 마다 backlog 와 `tasks-archive.json` 에서 제목·담당자·상태·끝난 시각을 읽어 적고, 그 값으로 후보 keeper 를 정해 함께 적는다(3.4). 검증 통과 때 `AwaitingVerification` 이던 Task 가 확정 전에 끝났으면 후보가 된다. 완료를 요청하는 시점을 골라서 경쟁자의 Task 를 후보에서 빼는 일을 막으려는 것이다. 읽거나 쓰지 못하면 다음에 깨어날 때 다시 한다.
 3. **지급.** 일꾼은 이어서 지급 대기 Goal 마다 모델을 부르고(3.4) `Paid` 나 `Unattributed` 를 쓴다. 일꾼은 Goal 검증기와 같은 모양이다(2장). 조건 변수로 깨우고, Goal 하나에 하나만 돈다. 깨우는 때는 사람의 확정을 처리한 뒤, 다른 지급이 끝났을 때, 서버를 시작할 때다. 점검 루프나 확정 요청 안에서 모델을 부르지 않는다. 그 시간만큼 다른 요청이 멈추기 때문이다. 시계로 다시 시도하지 않는다.
    - 확정을 커밋한 뒤 일꾼이 `PayoutOwed` 를 쓰기 전에 그 Goal 이 재오픈되면 이 지급을 놓친다. 서버가 죽어서 일꾼이 늦게 깨어나는 경우도 같다. 이 틈은 받아들인다.

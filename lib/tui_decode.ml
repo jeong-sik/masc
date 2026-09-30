@@ -3164,6 +3164,11 @@ let standalone_lane_answer (lane : standalone_lane) =
          inventory and rendered prompt as Input, the proposal as Output, \
          outcome, and selected slot."
     }
+  | Standalone_lane.Candle_appraiser ->
+    { sla_output_meaning =
+        "Output meaning: the validated payout grade, each candidate Task's relation to the Goal, and Keeper weights, or no contributor."
+    ; sla_evidence = structured_output_without_ledger
+    }
   | Standalone_lane.Verifier ->
     { sla_output_meaning =
         "Output meaning: Task completion or Goal proof verdict, reason, and \
@@ -3274,6 +3279,7 @@ let decode_standalone_lane json =
     | Standalone_lane.Librarian
     | Standalone_lane.Hitl_auto_judge
     | Standalone_lane.Workspace_curator
+    | Standalone_lane.Candle_appraiser
     | Standalone_lane.Verifier
     | Standalone_lane.Browser_stagehand -> Ok None
   in
@@ -5071,6 +5077,7 @@ let decode_librarian_run_page json =
          | Standalone_lane.Hitl_auto_judge
          | Standalone_lane.Board_attention
          | Standalone_lane.Workspace_curator
+         | Standalone_lane.Candle_appraiser
          | Standalone_lane.Verifier
          | Standalone_lane.Browser_stagehand -> None)
       rows
@@ -5316,6 +5323,7 @@ let decode_lane_run_gate_judgment ~(lane : Standalone_lane.t) ~status ~output =
   | Standalone_lane.Librarian
   | Standalone_lane.Board_attention
   | Standalone_lane.Workspace_curator
+  | Standalone_lane.Candle_appraiser
   | Standalone_lane.Verifier
   | Standalone_lane.Browser_stagehand -> Ok Lane_run_not_gate_judgment
   | Standalone_lane.Hitl_auto_judge ->
@@ -5531,6 +5539,7 @@ let decode_lane_run_detail json =
       | Standalone_lane.Librarian
       | Standalone_lane.Hitl_auto_judge
       | Standalone_lane.Workspace_curator
+      | Standalone_lane.Candle_appraiser
       | Standalone_lane.Verifier
       | Standalone_lane.Browser_stagehand ->
         false
@@ -5630,6 +5639,7 @@ let decode_lane_run_detail json =
     | Standalone_lane.Librarian
     | Standalone_lane.Board_attention
     | Standalone_lane.Workspace_curator
+    | Standalone_lane.Candle_appraiser
     | Standalone_lane.Verifier
     | Standalone_lane.Browser_stagehand -> decode_judgment ()
   in

@@ -669,7 +669,9 @@ let slash_hint_text ~restore draft =
   | spans -> Some (String.concat "" (List.map paint spans))
 
 let composer_line state ~cols =
-  match browser_lane_on_screen state with
+  if state.view = Overview && not state.composer_focused then
+    Theme.recede () ^ fit_width " Choose a Keeper before writing · i:choose" cols ^ Ansi.reset
+  else match browser_lane_on_screen state with
   (* The page reader owns the keys here, so there is no composer to draw. The
      row it would take stays empty: the title already names the lane, its
      source and its browser, and a second copy down here is a state the reader

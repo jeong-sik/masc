@@ -1501,16 +1501,41 @@ type jev_run =
 
 (* Runs the exact flow with Jev switched on and answering [jev_choice], in
    front of one LLM slot that answers relevant. *)
+(* [candidate] after an operator requeued it from a quarantine: the durable
+   requeue the worker executes like a pending candidate. *)
+let requeued_after_quarantine (pending : Candidate.candidate) : Candidate.candidate =
+  let quarantine : Candidate.quarantine =
+    { quarantine_id = "ba-quarantine-" ^ pending.candidate_id
+    ; partition_id = "ba-root-" ^ pending.candidate_id
+    ; partition_generation = Masc.Keeper_board_attention_partition_generation.initial
+    ; failure_category = Candidate.Exact_lane_exhausted
+    ; attempt_provenance = None
+    ; quarantined_at = 2.0
+    ; prior_status = Candidate.Resumable_pending { last_delivery_failure = None }
+    }
+  in
+  { pending with
+    status =
+      Candidate.Quarantine
+        { quarantine
+        ; phase = Candidate.Requeued { requeued_at = 4.0; requested_by = "operator-test" }
+        }
+  }
+;;
+
 let execute_behind_jev
       ?(jev_confidence = 0.6)
       ?(jev_probabilities = [ "relevant", 0.2; "not_relevant", 0.8 ])
+      ?(requeued = false)
       ~name
       ~jev_choice
       ()
   =
   with_prompt_registry (fun () ->
     run_eio_with_http_pool (fun ~sw ~net ~clock ->
-      let candidate = candidate name in
+      let candidate =
+        if requeued then requeued_after_quarantine (candidate name) else candidate name
+      in
       let jev =
         Fixture.start_server
           ~sw
@@ -1725,6 +1750,30 @@ let settle_floor =
 ;;
 
 let below_the_settle_floor = settle_floor /. 2.0
+
+(* A requeued quarantine is executed like a pending candidate, so Jev is asked
+   first for it too; before, it skipped Jev and went to the LLM lane. *)
+let test_jev_settles_a_requeued_candidate () =
+  let run =
+    execute_behind_jev
+      ~requeued:true
+      ~name:"board-attention-jev-requeued"
+      ~jev_choice:"not_relevant"
+      ~jev_confidence:0.9
+      ~jev_probabilities:[ "relevant", 0.05; "not_relevant", 0.95 ]
+      ()
+  in
+  check_terminal_jev "requeued" ~answer:"not_relevant" ~rejudged:None run;
+  Alcotest.(check int) "Jev is asked for the requeued candidate" 1 run.jev_posts;
+  Alcotest.(check int) "the LLM lane is not asked" 0 run.llm_posts;
+  match run.result with
+  | Ok judgment ->
+    (match judgment.Candidate.source with
+     | Candidate.Vendor_system_one _ -> ()
+     | Candidate.Exact_attempt _ | Candidate.Cli_lane_slot ->
+       Alcotest.fail "the requeued candidate's judgment must be Jev's")
+  | Error _ -> Alcotest.fail "the requeued candidate did not complete the flow"
+;;
 
 (* Either decision below the floor goes to the LLM lane, and the terminal entry
    keeps what Jev decided next to what the lane decided. *)
@@ -2368,6 +2417,10 @@ let () =
             "a Jev decision at the settle floor is kept"
             `Quick
             test_jev_confidence_at_the_floor_settles
+        ; Alcotest.test_case
+            "a requeued candidate asks Jev first"
+            `Quick
+            test_jev_settles_a_requeued_candidate
         ; Alcotest.test_case "invalid confidence delegates to the LLM lane" `Quick
             test_jev_invalid_confidence_is_judged_again
         ; Alcotest.test_case

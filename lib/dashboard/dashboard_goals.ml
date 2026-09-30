@@ -385,7 +385,7 @@ let goal_detail_json_ready ~(config : Workspace.config)
           [
             ("generated_at", `String (Masc_domain.now_iso ()));
             ( "approval_queue_state",
-              Keeper_approval_queue.approval_queue_ready_state_json );
+              Keeper_approval_queue_result.approval_queue_ready_state_json );
             ("goal", tree_node_to_json ~events_for_goal ~verification_for_goal
                         ~measurement_for_goal node);
             ("linked_tasks", `List (List.map task_to_tree_json node.tasks));
@@ -400,7 +400,7 @@ let goal_detail_json_ready ~(config : Workspace.config)
 let goal_detail_json_with_pending_reader
     ~(read_pending :
        base_path:string ->
-       (Yojson.Safe.t list, Keeper_approval_queue.storage_error) result)
+       (Yojson.Safe.t list, Keeper_approval_queue_result.storage_error) result)
     ~(config : Workspace.config) ~goal_id =
   match read_pending ~base_path:config.base_path with
   | Ok pending_approvals ->
@@ -411,7 +411,7 @@ let goal_detail_json_with_pending_reader
           [
             ("generated_at", `String (Masc_domain.now_iso ()));
             ( "approval_queue_state",
-              Keeper_approval_queue.approval_queue_unavailable_state_json
+              Keeper_approval_queue_result.approval_queue_unavailable_state_json
                 error );
             ("goal", `Null);
             ("linked_tasks", `Null);
@@ -472,7 +472,7 @@ let dashboard_goals_tree_json_ready ~(config : Workspace.config)
     [
       ("generated_at", `String (Masc_domain.now_iso ()));
       ( "approval_queue_state",
-        Keeper_approval_queue.approval_queue_ready_state_json );
+        Keeper_approval_queue_result.approval_queue_ready_state_json );
       ( "tree",
         `List
           (List.map
@@ -503,7 +503,7 @@ let dashboard_goals_tree_json_ready ~(config : Workspace.config)
 let dashboard_goals_tree_json_with_pending_reader
     ~(read_pending :
        base_path:string ->
-       (Yojson.Safe.t list, Keeper_approval_queue.storage_error) result)
+       (Yojson.Safe.t list, Keeper_approval_queue_result.storage_error) result)
     ~(config : Workspace.config) =
   match read_pending ~base_path:config.base_path with
   | Ok pending_approvals ->
@@ -513,7 +513,7 @@ let dashboard_goals_tree_json_with_pending_reader
         [
           ("generated_at", `String (Masc_domain.now_iso ()));
           ( "approval_queue_state",
-            Keeper_approval_queue.approval_queue_unavailable_state_json error );
+            Keeper_approval_queue_result.approval_queue_unavailable_state_json error );
           ("tree", `Null);
           ("summary", `Null);
         ]

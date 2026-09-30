@@ -7833,3 +7833,4 @@
 (alias
  (name runtest)
  (deps (alias runtest-harness-server-binary)))
+(include stanzas/test_candle_purchase_flow.inc)

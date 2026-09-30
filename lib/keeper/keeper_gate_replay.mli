@@ -64,9 +64,9 @@ type outcome =
           remains unacknowledged. If the raw effect result still exists in
           process, later attempts repair persistence without rerunning it. *)
   | Resolution_absent of
-      { absence : Keeper_approval_queue.resolution_absence }
+      { absence : Keeper_approval_queue_result.resolution_absence }
       (** The durable store has no resolution behind the queued approval
-          ({!Keeper_approval_queue.resolution_absence}): nothing can be
+          ({!Keeper_approval_queue_result.resolution_absence}): nothing can be
           replayed and reading again cannot change that. The turn proceeds
           with this told to the model once; the queue entry is retired at
           intake, so no wake stays behind it. *)

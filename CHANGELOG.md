@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Separate Keeper health counts from the title and show the selected Board post title above the table. CI captures wide, narrow, short and NO_COLOR fixture screens with source and full-terminal pixel evidence (#40155).
+
 ## [0.49.0] - 2026-09-29
 
 ### Fresh state required

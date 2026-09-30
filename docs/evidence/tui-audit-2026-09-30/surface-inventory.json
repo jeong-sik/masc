@@ -607,5 +607,23 @@
     "run": 36683716774,
     "probe": 36683719767,
     "scope": "source/static and independent response reviews only; complete author/body physical-row fixture30/40/60/80/120/160 color/NO_COLOR added, new-head execution pending. R04 commit-history remains unrepaired."
+  },
+  "code_history_layout_request": {
+    "head": "1b907b070f95ec32d0ba35808b458c5a70a2fc95",
+    "pr": 40247,
+    "run": 36685970463,
+    "probe": 36685975680,
+    "scope": "source/static and independent response reviews only, executable/matrix/screenshots/install unproved",
+    "baseline_receipt": "code-history-before.txt",
+    "baseline_raw": "code-history-before.raw.txt"
+  },
+  "recorded_diff_folded_path_response": {
+    "failed_head": "6766ed25f4ab9515bc380284a60603a1a3f234aa",
+    "failed_run": 36680037724,
+    "requested_run": 36685060343,
+    "receipt": "recorded-diff-folded-path-failure.txt",
+    "raw": "recorded-diff-folded-path-failure.raw.txt",
+    "scope": "nine color pan receipts then fullpathneedle failure; raw truncated so source-supported inference only; remaining project widths/NO_COLOR unproved",
+    "repair_head": "602762aec20b26045bbf7af3c462d7c7acc01d17"
   }
 }

@@ -74,6 +74,10 @@ R02 세 읽기의 `ac8df5fb74` run36673795966은 recorded 40열 color의 tail/gu
 
 R04 메모 부분: [#40240](https://github.com/jeong-sik/masc/pull/40240)의 `3af8d721aec436688b12063caa15f57ebfc7523d`는 실제 file-pane 폭에서 메모 작성자·본문·읽기 실패 설명을 전부 wrap한다. 그린 줄과 같은 행 수로 j/k·Page·Home/End를 움직이고, resize 뒤 범위를 벗어난 위치에서 바로 움직이도록 보정한다. 독립 적대적 리뷰가 resize 후 k 및 footer 항목 공백 문제를 찾았고 수정·응답 리뷰를 마쳤다. 30/40/60/80/120/160열 color/NO_COLOR fixture는 전체 원문 복원·page overlap·끝에서 resize 뒤 k·재열기 초기화를 검사한다. [집중 run36683716774](https://github.com/jeong-sik/masc/actions/runs/36683716774)와 [probe36683719767](https://github.com/jeong-sik/masc/actions/runs/36683719767)는 요청 상태이다. 소스/정적 검사는 통과했으나 수정 head의 실행·스크린샷·필수 체크·설치는 아직 미확인이며, commit-history 제목·출처는 이 PR의 수정 범위가 아니다.
 
+R04 history 부분: [#40247](https://github.com/jeong-sik/masc/pull/40247)의 `1b907b070f95ec32d0ba35808b458c5a70a2fc95`는 Commit/Author/Subject 및 Keeper/Task/Turn/Execution/Lines/Result, 파일·scope·coverage·file note를 실제 file-pane 폭에서 전부 wrap한다. Enter는 첫 표시 줄의 record owner를 해소하며, 진단/coverage 줄은 열 대상이 없다. 적대적 리뷰가 두 짧은 기록/마지막 기록의 선택 불가를 찾아 최종 물리 행까지 이동하도록 고쳤고 응답 리뷰를 마쳤다. 30/40/60/80/120/160열 color/NO_COLOR + 짧은 두 commit fixture를 추가했다. [집중 run36685970463](https://github.com/jeong-sik/masc/actions/runs/36685970463), [probe36685975680](https://github.com/jeong-sik/masc/actions/runs/36685975680)는 요청 상태로 수정 head의 실행·스크린샷·필수 체크·설치는 아직 없다. [기준 바이너리100×18 실측](../evidence/tui-audit-2026-09-30/code-history-before.txt)은 정상 읽기·1 exact Keeper change 뒤 원래 제목/출처 손실만 증명한다. Loading/failure·exact110열·1행·입력 overlay는 소스 검토뿐이다.
+
+R02 재검증: run36680037724/head6766은 [9개 color pan receipt](../evidence/tui-audit-2026-09-30/recorded-diff-folded-path-failure.txt) 뒤 project40 목록에서 full `second.ml`을 기다리다 실패했다. 원문이 Dune에서 잘려 마지막 frame은 확인할 수 없다. 소스의 12셀 path 접기는 `lib…econd.ml`을 그리므로 incompatible needle이라는 추론이다. `602762aec2`는 두 대기를 `cond.ml`로 바꾸고 Enter의 고유 SECONDHEAD와 이전 REMOVEHEAD 부재를 유지한다. 독립 응답 리뷰를 마쳤고 [새 집중 run36685060343](https://github.com/jeong-sik/masc/actions/runs/36685060343)을 요청했다. 나머지 project 폭·NO_COLOR는 미검증이다.
+
 ## 수정과 남은 결함
 
 `PR`는 구현이 게시되었다는 뜻이다. 아래에 적힌 PR들의 현재 head·CI·리뷰·병합 상태는 작업 직전에 다시 확인한다.
@@ -105,7 +109,7 @@ R04 메모 부분: [#40240](https://github.com/jeong-sik/masc/pull/40240)의 `3a
 | S06/S07 | Presets | detail logical row 잘림; retained refresh failure에서 list_height+1행 | [#40141](https://github.com/jeong-sik/masc/pull/40141), 전체 detail wrap·실제 페이지 높이·실패 행 배정·refetch 동안 읽기 유지; 집중 실행 검증 대기 |
 | S08/S09/S10 | Voice | input tail/caret·endpoint metadata 잘림; assignment cursor 미추종 | [#40117](https://github.com/jeong-sik/masc/pull/40117), wizard/assignment; 실행 검증 대기, endpoint 추가 필요 |
 | R03 | Workspace Activity | fixed clock/keeper/task 뒤 file 잘림 | [#40230](https://github.com/jeong-sik/masc/pull/40230), 반응형 목록·전체 Context reader; 실행 대기 |
-| R04 | Code memo/history | subject/provenance 논리 행의 잘린 suffix 도달 불가 | [#40240](https://github.com/jeong-sik/masc/pull/40240), 메모 작성자·본문 wrap/물리 행 탐색; 실행 대기, history 제목·출처는 남음 |
+| R04 | Code memo/history | subject/provenance 논리 행의 잘린 suffix 도달 불가 | [#40240](https://github.com/jeong-sik/masc/pull/40240), 메모 작성자·본문 wrap/물리 행 탐색; 실행 대기; [#40247](https://github.com/jeong-sik/masc/pull/40247), history 전체 필드/줄 owner/파일·scope·결과 note, 실행 대기 |
 | S11 | Tools | root path/rejection/composition 행·skill usage last-used 잘림 | 상세 검사·wrap/반응형 열 필요 |
 | O05 | Link preview | 설명 원문이 narrow frame에서 한 줄 잘림 | [#40209](https://github.com/jeong-sik/masc/pull/40209), 전체 URL·설명·거절 wrap, 실행 검증 대기 |
 

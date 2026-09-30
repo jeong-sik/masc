@@ -1810,12 +1810,13 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
        ~binding_name:"refill_input_reader"
        ~callee:"Render_schedule.Input_wait.await"
      = 1);
-  check int "surface renderers perform no direct stdout writes" 0
-    (Ast_grep.count_calls
-       ~module_path:"bin/masc_tui_render.ml" ~callee:"print_string");
-  check int "surface renderers perform no direct flushes" 0
-    (Ast_grep.count_calls
-       ~module_path:"bin/masc_tui_render.ml" ~callee:"flush");
+  List.iter
+    (fun module_path ->
+      check int (module_path ^ " performs no direct stdout writes") 0
+        (Ast_grep.count_calls ~module_path ~callee:"print_string");
+      check int (module_path ^ " performs no direct flushes") 0
+        (Ast_grep.count_calls ~module_path ~callee:"flush"))
+    [ "bin/masc_tui_render.ml"; "bin/masc_tui_render_board.ml" ];
   check int "main has one frame presentation boundary" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"main" ~callee:"Frame_presenter.present");

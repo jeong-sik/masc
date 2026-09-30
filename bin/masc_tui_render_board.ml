@@ -2,10 +2,8 @@
     entry points; the read cache and Board row layout live with this surface. *)
 
 open Masc_tui_types
-open Tui_decode
 open Masc_tui_ansi
 open Masc_tui_render_prim
-open Masc_tui_press
 
 module Frame_presenter = Masc_tui_frame_presenter
 module Board_read_layout = Masc_tui_board_read_layout

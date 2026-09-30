@@ -2,10 +2,6 @@
 
 ## [Unreleased]
 
-### Added
-
-- Optional Item HTTP acceptance in the manual Linux probe workflow, with source-matched native/dashboard artifacts and an isolated synthetic Keeper workspace.
-
 ## [0.49.0] - 2026-09-29
 
 ### Fresh state required

@@ -2929,11 +2929,12 @@ def pressing_a_row_of_a_scrolled_list_opens_it(
     # Wait for both fixture results before capturing a pointer coordinate;
     # otherwise the second press can land on the row above the first one.
     wait_for_output(process, master_fd, output, b"fleet ok", start=0, timeout=3.0)
-    wait_for_output(
+    assert wait_for_fixture_state(
         process, master_fd, output,
-        b"live keeper status unavailable: fixture endpoint unavailable",
-        start=0, timeout=3.0,
-    )
+        lambda: b"1 healthy" in screen_text(bytes(output))
+        and b"1 idle" in screen_text(bytes(output)),
+        timeout=3.0,
+    ), f"the live pointer-test roster did not load: {screen_text(bytes(output))!r}"
     select_keeper_row(process, master_fd, output, b"alpha")
     last = LONG_ROSTER_CREW[-1].encode()
     notches = b"\x1b[<65;5;5M" * (len(LONG_ROSTER_CREW) + 2)
@@ -16393,7 +16394,7 @@ def run_keyboard_regression(executable: str, *, group: int | None = None) -> Non
             executable,
             description="pressing a row of a scrolled list opens it",
             interact=pressing_a_row_of_a_scrolled_list_opens_it,
-            http_fixtures=compact_input_gate_http_fixtures(),
+            http_fixtures=pointer_fixtures,
             prepare_workspace=seed_long_roster,
         )
         run_terminal_scenario(

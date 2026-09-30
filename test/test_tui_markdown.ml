@@ -8,7 +8,6 @@ let tagged : Markdown.palette =
   ; emphasis = ("<i>", "</i>")
   ; strike = ("<s>", "</s>")
   ; code = ("<c>", "</c>")
-  ; code_qr = ("<qr>", "</qr>")
     (* The level is in the tag so a test can say which heading it got. *)
   ; heading = (fun level -> (Printf.sprintf "<h%d>" level, Printf.sprintf "</h%d>" level))
   ; quote = ("<q>", "</q>")
@@ -354,17 +353,6 @@ let test_fenced_code_keeps_its_line_breaks () =
        ; "\xe2\x94\x82 <k>let</k><c> y = </c><n>2</n>"
        ])
     (render "```ocaml\nlet x = 1\nlet y = 2\n```")
-
-let test_qr_fence_paints_whole_quiet_zone () =
-  let source = "```qr\n  █  \n     \n```" in
-  check_rows "QR has no code gutter or border"
-    [ "<qr>  █  </qr>"; "<qr>     </qr>" ]
-    (render source);
-  let palette = Masc_tui_render_prim.chat_markdown_palette ~closing:"<close>" in
-  check_rows "QR foreground and background survive the chat palette"
-    [ "\027[30;47m  █  \027[0m<close>"
-    ; "\027[30;47m     \027[0m<close>" ]
-    (render ~palette source)
 
 (* A mermaid fence is drawn, not lexed: the rows the diagram module lays
    out ride the plain code rows inside the gutter, under the fence header
@@ -930,8 +918,6 @@ let () =
     ; ( "fenced code"
       , [ Alcotest.test_case "keeps its line breaks" `Quick
             test_fenced_code_keeps_its_line_breaks
-        ; Alcotest.test_case "QR paints black on white through the quiet zone" `Quick
-            test_qr_fence_paints_whole_quiet_zone
         ; Alcotest.test_case "a mermaid fence is drawn" `Quick test_mermaid_fence_is_drawn
         ; Alcotest.test_case "a mermaid fence of another kind shows its source" `Quick
             test_mermaid_fence_of_another_kind_shows_its_source

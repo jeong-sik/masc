@@ -18,6 +18,8 @@ import test_tui_keyboard_input as h
 # scripts/ci/run-edited-tests.sh runs this suite when a pull request changes a
 # path named here.
 SOURCE_MODULES = (
+    "bin/masc_tui_input_reader.ml",
+    "bin/masc_tui_input_reader.mli",
     "bin/masc_tui.ml",
     "bin/masc_tui_composer.ml",
     "bin/masc_tui_command.ml",

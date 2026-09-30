@@ -265,8 +265,6 @@ def item_tab_previews_accessories(binary: str) -> None:
                 ({"id": item, "slot": slot, "price_status": "unpriced"}
                  if item == "dish_oak" else
                  {"id": item, "slot": slot, "price_status": "priced", "price_milli": "1000"})
-                for item, slot in catalog
-                {"id": item, "slot": slot, "price_status": "priced", "price_milli": "1000"}
                 for item, slot in ITEM_CATALOG
             ],
         },

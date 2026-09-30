@@ -1,0 +1,104 @@
+(** Board detail reads and post/comment/vote execution. *)
+
+open Masc_tui_types
+open Masc_tui_async_protocol
+
+module Board_detail = Masc_tui_board_detail
+
+let start_board_post_refresh state ~host ~port ~post_id ~deliver ~report_error =
+  (match Board_detail.view_for state.board_detail ~post_id with
+   | Board_detail.Absent -> state.board_history_post_id <- None
+   | Board_detail.Loading | Board_detail.Ready _ | Board_detail.Failed _ -> ());
+  match Board_detail.start state.board_detail ~post_id with
+  | Board_detail.Already_loading -> ()
+  | Board_detail.Started (detail, request) ->
+    state.board_detail <- detail;
+    let full_history = state.board_history_post_id = Some post_id in
+    let load_result () =
+      try Masc_tui_loader.load_board_post ~full_history ~host ~port ~post_id () with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    let run_refresh () =
+      try
+        deliver (Board_post_refresh_done (request, load_result ()))
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn ->
+          deliver
+            (Board_post_refresh_done
+               (request, Error (Printexc.to_string exn)))
+    in
+    match Eio_context.get_switch_opt () with
+    | Some sw -> Eio.Fiber.fork ~sw run_refresh
+    | None -> Masc_tui_board_updates.apply_board_post_load state ~report_error request (load_result ())
+
+let start_board_post state ~host ~deliver ~report ~(title : string) ~(body : string) ?hearth () =
+  state.board_post_error <- None;
+  state.board_post_inflight <- true;
+  report "system" "posting to Board";
+  (* What this send answers for: the completion clears and lands against
+     these, not against whatever the operator typed while it was out. *)
+  let sent_draft = Buffer.contents state.board_draft in
+  let port = state.port in
+  let run_post () =
+    let result =
+      match Masc_tui_http.post_board_new ~host ~port ~title ~body ?hearth () with
+      | Error err -> Error err
+      | Ok json -> Masc.Tui_decode.tool_envelope_outcome json
+    in
+    deliver
+      (Board_new_post_done { reply_to = None; sent_draft; result })
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw -> Eio.Fiber.fork ~sw run_post
+  | None -> run_post ()
+
+
+(* Request a goal lifecycle change through the tools route. Runs in a fiber
+   like the other writes; the outcome lands in the shared mailbox and the
+   server's phase rules decide, so the TUI never pre-guesses a transition. *)
+
+let start_board_comment state ~host ~deliver ~report ~(post_id : string)
+    ~(content : string) =
+  state.board_post_error <- None;
+  state.board_post_inflight <- true;
+  report "system" "commenting on Board";
+  let sent_draft = Buffer.contents state.board_draft in
+  let port = state.port in
+  let run_comment () =
+    let result =
+      match Masc_tui_http.post_board_comment ~host ~port ~post_id ~content with
+      | Error err -> Error err
+      | Ok json -> Masc.Tui_decode.tool_envelope_outcome json
+    in
+    deliver
+      (Board_new_post_done { reply_to = Some post_id; sent_draft; result })
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw -> Eio.Fiber.fork ~sw run_comment
+  | None -> run_comment ()
+
+(* Send a vote through the tools route. The voter is stamped by the route,
+   so the payload says only which post and which way. *)
+
+let start_board_vote state ~host ~deliver ~report ~(post_id : string) ~(up : bool) =
+  report "system"
+    (Printf.sprintf "voting %s on %s" (if up then "up" else "down") post_id);
+  let port = state.port in
+  let run_vote () =
+    let result =
+      match Masc_tui_http.post_board_vote ~host ~port ~post_id ~up with
+      | Error err -> Error err
+      | Ok json -> Masc.Tui_decode.tool_envelope_outcome json
+    in
+    deliver (Board_vote_done result)
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw -> Eio.Fiber.fork ~sw run_vote
+  | None -> run_vote ()
+
+(* The vote keys on the list row under the cursor. Two presses: the first
+   names the post and direction, the same press again sends it. The post id
+   is captured at arm time, so moving the cursor between presses re-arms
+   for the new row rather than voting on the one the operator left. *)

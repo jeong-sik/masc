@@ -5,6 +5,7 @@
   masc_test_deps
   masc.keeper_identity
   masc.mcp_client
+  masc.masc_tool_blob_store
   masc.skill_config
   masc.skill_snapshot
   masc.skill_reference

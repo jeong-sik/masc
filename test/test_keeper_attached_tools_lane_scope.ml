@@ -547,6 +547,7 @@ pointer = "/profile"
   let seeded_id = ref "" in
   let previous_base = Sys.getenv_opt "MASC_BASE_PATH" in
   Fun.protect ~finally:(fun () ->
+    Keeper_tool_call_log.reset_for_testing ();
     Board_dispatch.reset_for_test ();
     Board.reset_global_for_test ();
     (match previous_base with
@@ -556,6 +557,8 @@ pointer = "/profile"
     ~prepare:(fun dir ->
       workspace := Some (Workspace.default_config dir);
       Unix.putenv "MASC_BASE_PATH" dir;
+      Keeper_tool_call_log.reset_for_testing ();
+      Keeper_tool_call_log.init ~base_path:dir ();
       Board.reset_global_for_test ();
       Board_dispatch.reset_for_test ();
       Board_dispatch.init_jsonl ();
@@ -565,6 +568,30 @@ pointer = "/profile"
       | Error _ -> fail "isolated Board seed failed")
     (fun _bundle ->
       let agent = match !cell with Some agent -> agent | None -> fail "Agent missing" in
+      let config = match !workspace with Some config -> config | None -> fail "workspace missing" in
+      let decode_json content =
+        match Tool_output.decode_from_agent_core content with
+        | Tool_output.Not_marker -> Yojson.Safe.from_string content
+        | Tool_output.Invalid_marker { detail } -> fail detail
+        | Tool_output.Decoded reference ->
+          let stored =
+            match Tool_blob_store.fetch
+              (Tool_blob_store.create ~base_path:config.base_path)
+              ~sha256:reference.sha256 with
+            | Ok (Some payload) ->
+              check int "stored output matches its declared byte count"
+                reference.bytes (String.length payload);
+              Yojson.Safe.from_string payload
+            | Ok None -> fail "composition output blob is absent"
+            | Error error -> fail (Tool_blob_store.fetch_error_to_string error) in
+          if String.equal reference.mime Tool_output.artifact_manifest_mime then
+            (match Tool_output.artifact_manifest_of_json stored with
+             | Tool_output.Decoded_artifact_manifest { structured_content; _ } ->
+               structured_content
+             | Tool_output.Not_artifact_manifest ->
+               fail "composition output is not a typed result manifest"
+             | Tool_output.Invalid_artifact_manifest { detail } -> fail detail)
+          else stored in
       let find name = match Agent_core.Tool_set.find name (Agent_core.Agent.tools agent) with
         | Some tool -> tool | None -> failf "tool %s is not callable" name in
       let execute_raw id tool input =
@@ -576,7 +603,7 @@ pointer = "/profile"
         Agent_core.Tool.execute ~invocation tool input in
       let execute id tool input =
         match execute_raw id tool input with
-        | Ok output -> Yojson.Safe.from_string output.content
+        | Ok output -> decode_json output.content
         | Error error -> failf "real handler failed: %s" error.Agent_core.Types.message in
       check bool "generated schema absent before discovery" false
         (Agent_core.Tool_set.mem name (Agent_core.Agent.tools agent));
@@ -616,7 +643,6 @@ pointer = "/profile"
           match String.split_on_char ' ' line with
           | id :: _ -> String.equal id !seeded_id
           | [] -> false) (String.split_on_char '\n' search_text));
-      let config = match !workspace with Some config -> config | None -> fail "workspace missing" in
       let evidence () = match Keeper_skill_composition_evidence.load_latest config reference with
         | Ok (Some evidence) -> Keeper_skill_composition_evidence.to_yojson evidence
         | Ok None -> fail "no exact-reference composition evidence"

@@ -119,15 +119,14 @@
     "test/test_auth_token_rotation_transaction.ml": "cc97132d3a6c57982cc809d7af1055cfbb402a5156a077b46fb778f8ff1fbe9b",
     "test/dune": "d8b6563cbca6ad63ed66924139318a52d346bf635eb641b87421815b30affb72",
     "test/stanzas/test_auth_token_rotation_transaction.inc": "9f6c38881d5a493d79291bb60bf006a302ab31d3106112b1a05cde679fb90718",
-    "changelog.d/999997.md": "0fc154f16e4f7e2496c67786c06f105454715070e55e812ddb14c6941a25dd81",
-    "docs/audits/2026-09-30-token-rotation-authority.md": "c8f539441ab4d2fa1e215ba6da6e492833ce712394d5ab8e8bbda4c1306e0484"
+    "docs/audits/2026-09-30-token-rotation-authority.md": "c8f539441ab4d2fa1e215ba6da6e492833ce712394d5ab8e8bbda4c1306e0484",
+    "changelog.d/40182.md": "51228d50dbfa7e9b8da63d0f3c6e76ea37d71ee46fef624f4ccec1530683d9b8"
   },
   "native_tests": "not_run_locally",
   "feature_suite": "test_auth_token_rotation_transaction",
   "feature_scenarios": 16,
   "existing_suite": "test_auth_rotate_shared_tokens_10304",
   "current_main_composition": "root owns publication and composed native validation",
-  "changelog_placeholder": "999997 must be replaced by actual PR number, including citation",
   "committed_diff_check": {
     "checked_commit": "91915492c75a7a81c1a063b3f0b98731a9942e74",
     "command": [
@@ -140,5 +139,7 @@
     ],
     "exit_code": 0,
     "limit": "only committed rotation diff against local parent; no compilation or native execution"
-  }
+  },
+  "published_parent": "b5f401cbf540c1461408bd1d5885fabc5b0b2d85",
+  "pull_request": 40182
 }

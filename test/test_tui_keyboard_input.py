@@ -1335,6 +1335,13 @@ def row_budget_http_fixtures() -> HttpFixtures:
         for index in range(1, 6)
     ]
     return {
+        # This layout scenario has no currency. Answer the Overview's roster
+        # read so an unrelated fixture failure does not consume a body row.
+        "/api/v1/gate/keepers?detailed=true": (
+            200,
+            {"candle": {"status": "off"}, "count": 0, "total": 0,
+             "truncated": False, "keepers": []},
+        ),
         "/api/v1/dashboard/transport-health": transport_health_fixture(),
         "/api/v1/dashboard/briefing": (
             200,

@@ -14,10 +14,12 @@ import ast
 import io
 import os
 import re
+import runpy
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from collections.abc import Callable
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
@@ -33,6 +35,8 @@ import tui_keyboard_walk as _keyboard_walk
 # a glob declares in dune but no single path here can name.
 SOURCE_MODULES = (
     "test/test_tui_keyboard_input.py",
+    "test/test_tui_search_count.py",
+    "evidence/39827/capture.py",
     "test/dune",
     "test/tui_keyboard_approvals.py",
     "test/tui_keyboard_board.py",
@@ -161,6 +165,45 @@ class ScenarioSelectionTest(unittest.TestCase):
                 redirect_stderr(io.StringIO()):
             _keyboard_harness.main([self.stand_in, *argv], families, families[0])
         return raised.exception
+
+    def test_tracked_capture_helpers_resolve_from_the_entry(self) -> None:
+        samples = (
+            "evidence/39827/capture.py",
+            "docs/evidence/tui-footer-parse-once-2026-09-27/profile-scenario.py",
+            "docs/evidence/browser-bidi-live-20260913/corrected/capture.py",
+        )
+        for relative in samples:
+            source = ast.parse((HERE.parent / relative).read_text())
+            names = {node.attr for node in ast.walk(source)
+                     if isinstance(node, ast.Attribute)
+                     and isinstance(node.value, ast.Name) and node.value.id == "h"}
+            self.assertTrue(names, relative)
+            for name in names:
+                with self.subTest(capture=relative, helper=name):
+                    self.assertTrue(hasattr(_keyboard_entry, name), name)
+
+    def test_about_capture_constructs_both_fixtures_before_a_terminal(self) -> None:
+        calls = []
+        with tempfile.TemporaryDirectory(prefix="tui-capture-contract-") as out:
+            argv = ["capture.py", self.stand_in, out, "contract"]
+            with patch.object(sys, "argv", argv), redirect_stdout(io.StringIO()), \
+                    patch.object(_keyboard_entry, "run_terminal_scenario",
+                                 side_effect=lambda *a, **kw: calls.append((a, kw))):
+                runpy.run_path(str(HERE.parent / "evidence/39827/capture.py"), run_name="__main__")
+        self.assertEqual([kw["terminal_cols"] for _, kw in calls], [80, 140])
+        for args, kwargs in calls:
+            self.assertEqual(args, (str(Path(self.stand_in).resolve()),))
+            self.assertIn("/api/v1/gate/keepers?detailed=true", kwargs["http_fixtures"])
+
+    def test_search_count_constructs_board_details_before_a_terminal(self) -> None:
+        import test_tui_search_count
+        class ReachedTerminal(Exception):
+            pass
+        with patch.object(_keyboard_harness, "run_terminal_scenario",
+                          side_effect=ReachedTerminal) as terminal:
+            with self.assertRaises(ReachedTerminal):
+                test_tui_search_count.run(self.stand_in)
+        self.assertEqual(terminal.call_count, 1)
 
     def test_list_names_every_family_once_and_each_description_once_inside_it(self) -> None:
         listing = self.harness("--list")

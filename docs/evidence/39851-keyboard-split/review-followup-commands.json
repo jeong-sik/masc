@@ -1,0 +1,97 @@
+{
+  "source_parent": "ccef0a8dab4d54e64853f0a73216d268a07d89a5",
+  "reviewed_starting_head": "05b37147817d5aabb9df43d40ed37c7f8ec335ed",
+  "scope": "Source equivalence and local Python verification; no Dune build, native TUI run or CI dispatch",
+  "commands": [
+    {
+      "command": [
+        "python3",
+        "scripts/verify-tui-keyboard-split.py",
+        "--before-ref",
+        "ccef0a8dab4d54e64853f0a73216d268a07d89a5",
+        "--output",
+        "docs/evidence/39851-keyboard-split/move.json"
+      ],
+      "cwd": ".",
+      "exit": 0,
+      "result": "373 definitions, no missing/extra/changed bodies, 44 families and 152 descriptions identical"
+    },
+    {
+      "command": [
+        "python3",
+        "-m",
+        "unittest",
+        "test_tui_keyboard_scenario_selection",
+        "test_tui_fixture_shutdown",
+        "test_tui_keeper_row_selection",
+        "test_tui_stall_observation",
+        "test_tui_artifact_comparison"
+      ],
+      "cwd": "test",
+      "exit": 0,
+      "result": "36 tests; native terminal calls in new capture/search-count regressions mocked"
+    },
+    {
+      "command": [
+        "ruff",
+        "check",
+        "test/test_tui_keyboard_input.py"
+      ],
+      "cwd": ".",
+      "exit": 0
+    },
+    {
+      "command": [
+        "ruff",
+        "format",
+        "--check",
+        "test/test_tui_keyboard_input.py"
+      ],
+      "cwd": ".",
+      "exit": 0
+    },
+    {
+      "command": [
+        "python3",
+        "-m",
+        "py_compile",
+        "test/test_tui_keyboard_input.py",
+        "test/test_tui_search_count.py",
+        "test/test_tui_keyboard_scenario_selection.py"
+      ],
+      "cwd": ".",
+      "exit": 0
+    },
+    {
+      "command": [
+        "python3",
+        "scripts/changelog-fragments.py",
+        "check"
+      ],
+      "cwd": ".",
+      "exit": 1,
+      "result": "Initial full inventory check reported the existing #40234 missing citation and 11 unrelated malformed fragments. #40234 citation was repaired; unrelated fragment files were not changed."
+    },
+    {
+      "command": [
+        "python3",
+        "scripts/changelog-fragments.py",
+        "check",
+        "--dir",
+        "/tmp/masc-codex-review-20260930/40234-fragments"
+      ],
+      "cwd": ".",
+      "exit": 0,
+      "result": "1 owned fragment checked"
+    },
+    {
+      "command": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "cwd": ".",
+      "exit": 0
+    }
+  ]
+}

@@ -14,6 +14,7 @@ from tui_keyboard_browser import (
     run_browser_screenshot_regression,
 )
 from tui_keyboard_chat import (
+    GRAPHICS_SUPPORTED_REPLY as GRAPHICS_SUPPORTED_REPLY,
     run_chat_clarity_regression,
     run_chat_retained_stop_regression,
     run_mermaid_chat_regression,
@@ -25,8 +26,43 @@ from tui_keyboard_dashboard import (
 from tui_keyboard_fusion import (
     run_fusion_history_regression,
 )
-from tui_keyboard_harness import ScenarioFamily, main
+
+# Tracked capture/profile scripts use this public helper surface. Keep
+# explicit exports while the family registry delegates implementation to owners.
+from tui_keyboard_harness import (
+    COMPOSER_FOCUSED as COMPOSER_FOCUSED,
+    CSI_RE as CSI_RE,
+    FRAME_END as FRAME_END,
+    FULL_REDRAW as FULL_REDRAW,
+    PathHttpResponse as PathHttpResponse,
+    RequestHttpResponse as RequestHttpResponse,
+    WINDOW_TEXT_RE as WINDOW_TEXT_RE,
+    configure_child_terminal as configure_child_terminal,
+    drain_until_quiet as drain_until_quiet,
+    end_of_needle as end_of_needle,
+    find_needle as find_needle,
+    keeper_metadata as keeper_metadata,
+    keeper_row_selected as keeper_row_selected,
+    keeper_runtime_http_fixtures as keeper_runtime_http_fixtures,
+    overview_event_http_fixtures as overview_event_http_fixtures,
+    palette_go as palette_go,
+    read_available as read_available,
+    resize_and_wait as resize_and_wait,
+    run_terminal_scenario as run_terminal_scenario,
+    screen_rows as screen_rows,
+    screen_text as screen_text,
+    select_keeper_row as select_keeper_row,
+    send_and_wait as send_and_wait,
+    wait_for_fixture_event as wait_for_fixture_event,
+    wait_for_fixture_state as wait_for_fixture_state,
+    wait_for_output as wait_for_output,
+    write_all as write_all,
+    ScenarioFamily,
+    main,
+)
 from tui_keyboard_keepers import (
+    CONNECTORS_PATH as CONNECTORS_PATH,
+    CONNECTOR_NAMES_PATH as CONNECTOR_NAMES_PATH,
     run_keeper_lanes_regression,
     run_keeper_settings_activation_regression,
 )

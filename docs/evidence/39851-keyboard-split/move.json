@@ -1,6 +1,6 @@
 {
-  "before_ref": "86751f610442e4d82992ebc54bf9eb8ba45ef6d2",
-  "source_sha256": "81a4f473c8386f4345e2f85e620ddf83257bccaff9385637ebbe43335978950f",
+  "before_ref": "ccef0a8dab4d54e64853f0a73216d268a07d89a5",
+  "source_sha256": "890a9e80adc6e6ddfd3346c76780992da18780aec0c783da334b32a21c768153",
   "definitions_before": [
     "AtomicChatFixture",
     "CollectScenarioNames",
@@ -52,6 +52,7 @@
     "board_detail_comment",
     "board_detail_isolation_http_fixtures",
     "board_detail_isolation_interaction",
+    "board_detail_page",
     "board_json_http_fixtures",
     "board_json_interaction",
     "board_paginated_detail_http_fixtures",
@@ -426,6 +427,7 @@
     "board_detail_comment",
     "board_detail_isolation_http_fixtures",
     "board_detail_isolation_interaction",
+    "board_detail_page",
     "board_json_http_fixtures",
     "board_json_interaction",
     "board_paginated_detail_http_fixtures",
@@ -1327,6 +1329,7 @@
     "approval_selection_snapshot": "test/tui_keyboard_harness.py",
     "approval_selection_http_fixtures": "test/tui_keyboard_harness.py",
     "board_selection_post": "test/tui_keyboard_harness.py",
+    "board_detail_page": "test/tui_keyboard_harness.py",
     "board_selection_http_fixtures": "test/tui_keyboard_harness.py",
     "board_json_http_fixtures": "test/tui_keyboard_harness.py",
     "board_detail_comment": "test/tui_keyboard_harness.py",

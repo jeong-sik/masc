@@ -4864,6 +4864,10 @@
  (deps
   test_tui_keyboard_scenario_selection.py
   test_tui_keyboard_input.py
+  test_tui_search_count.py
+  ../evidence/39827/capture.py
+  ../docs/evidence/tui-footer-parse-once-2026-09-27/profile-scenario.py
+  ../docs/evidence/browser-bidi-live-20260913/corrected/capture.py
   test_tui_keyboard_general_pty.py
   test_tui_keyboard_surfaces_pty.py
   test_tui_keyboard_overview_pty.py

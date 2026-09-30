@@ -1,0 +1,10 @@
+name = "keeper_candle_purchase"
+description = "Buy one portrait accessory for yourself at its current configured milli-Candle price. Requires enough Candle and refuses an item you already own. Buying does not equip the item. Your Keeper identity comes from this turn."
+additional_properties = false
+defer_loading = false
+
+[[params]]
+name = "item"
+type = "string"
+required = true
+description = "A canonical item id returned by keeper_candle_catalog."

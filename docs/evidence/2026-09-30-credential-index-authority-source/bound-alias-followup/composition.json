@@ -1,0 +1,216 @@
+{
+  "scope": "same #40259 static matched verification gap; source-only follow-up, no independent UUID bearer authority",
+  "local_parent": "7dafe7e671cfbce6aeb0cf047dcd67516daad48c",
+  "parent_tree": "9ae5a41149b3a03fad5a3ed329b5141978facb21",
+  "actual_publication_parent_coordinate_source": "root supplied exact API head/tree and two file JSON receipts; imported local synthetic parent tree independently equals supplied actual f81 tree, no network by child",
+  "source_commit": "487c4b02d920adcf5d97c1b6e659ec8a1f0a1d08",
+  "prepared_case_count": 7,
+  "registered_cases": [
+    "cold index rejects intact UUID with missing name",
+    "warm index rejects intact UUID with missing name",
+    "cold index rejects intact UUID with malformed name",
+    "warm index rejects intact UUID with malformed name",
+    "cold index uses current Worker over old Admin UUID",
+    "warm index uses current Worker over old Admin UUID",
+    "current UUID owner and supported aliases keep authority"
+  ],
+  "prepared_fixture_extension": "All six missing/malformed/WorkerB warm/cold transitions retain actual stored alias and UUID data; both identities verify and CanAdmin succeed before transition, then both APIs return typed InvalidToken. Healthy seventh fixture admits current UUID and stored/generated/Keeper aliases and CanAdmin. UUID and stored-alias bytes stay intact.",
+  "static_preservation": {
+    "public_signatures_unchanged": true,
+    "oauth_branches_byte_unchanged": true,
+    "expiry_helper_called_first_with_same_now_expression": true,
+    "unchanged_rest_of_token_module": true,
+    "test_registration_unchanged": true,
+    "critical_parent_files": [
+      {
+        "path": "lib/auth/auth.ml",
+        "sha256": "7120e74999aa53287b8b8ab7509840fa08bd0fcf2e23d7dd9962f74cc36e2f57",
+        "git_blob": "53e51c2672aca7cc139f70c91d9b46a9d6e94dd8",
+        "byte_identical_to_parent": true
+      },
+      {
+        "path": "lib/auth/auth_login.ml",
+        "sha256": "5456acdd9b175bcb0f94259fce16ff688d1e6950527f41d1a6baccb52e6380d5",
+        "git_blob": "75b2ee8c25ce1c218834a3c6c159e1c838573178",
+        "byte_identical_to_parent": true
+      },
+      {
+        "path": "lib/auth/auth_login.mli",
+        "sha256": "e6142ad25b3558b9f4e5356143938a4a783622b9a9563605ae69018d3f4a883f",
+        "git_blob": "46b226bc43e2f4533b84d3a36a9ce52d17654497",
+        "byte_identical_to_parent": true
+      },
+      {
+        "path": "lib/auth/auth_oauth.ml",
+        "sha256": "06b8a3adbeee81d79ec7f50f2ae66257815ca0e8daefc5b97376f43c3bf02634",
+        "git_blob": "4d83a55312097e7cec0e7f82081608e2c8eeecde",
+        "byte_identical_to_parent": true
+      },
+      {
+        "path": "lib/auth/auth_oauth.mli",
+        "sha256": "0fd7917ee870d82ae2018303388d1c35bcc94ba5088fdfdd0298ba040f949695",
+        "git_blob": "814bfe7a506a48a33133298b2322c38a01cb5b82",
+        "byte_identical_to_parent": true
+      },
+      {
+        "path": "lib/auth/dune",
+        "sha256": "4e657a92c2d445933c4d51eccd9dbfd28196bb9e146ef65cc005753a4679dc63",
+        "git_blob": "db5bcb42e52ad2cfd9c03dcf2513a78e48dd8d27",
+        "byte_identical_to_parent": true
+      },
+      {
+        "path": "test/test_auth_file_backed_transaction.ml",
+        "sha256": "72b0216770ae5783e1d938209dc9226d6c6b2d00d4264fb30b6a185d05df3a0b",
+        "git_blob": "a616025bb23edc830cce1cd54e73d50541dcb47a",
+        "byte_identical_to_parent": true
+      },
+      {
+        "path": "test/test_auth_regular_read_boundary.ml",
+        "sha256": "09f5a628b9443f192bf1a16e6bc25b6daea8cd23ed69dc6445569b5b63609029",
+        "git_blob": "5f0ffa8ef17b0c9f51025de1f8417d989edd3f14",
+        "byte_identical_to_parent": true
+      },
+      {
+        "path": "test/test_auth_credential_index_cache.ml",
+        "sha256": "afac6658adba73a22808b1d48870473d1d1c235add2da3efea481646e1ce13ea",
+        "git_blob": "6261a7f3935242889b6bbe3b4932cc08542430f9",
+        "byte_identical_to_parent": true
+      },
+      {
+        "path": "test/test_auth.ml",
+        "sha256": "f4155e5679c577a77dbe0c2640bc89dce67999a85ad1b1b97cc7ae579cd4a2db",
+        "git_blob": "c317c44da2cb3cd03e62043d407f6dbfad67d8ee",
+        "byte_identical_to_parent": true
+      },
+      {
+        "path": "test/test_auth_login.ml",
+        "sha256": "7a0113dfa45554afde14c9a1216c4b1a6c58c681cf97aba3d25722c3fa65145c",
+        "git_blob": "f2d6f42df5fe97d07138fcef50aa4dd7c5e3e85c",
+        "byte_identical_to_parent": true
+      },
+      {
+        "path": "test/test_auth_token_rotation_transaction.ml",
+        "sha256": "805857b223ae3245055ff6e9108797822f6102299367b5f2ecdd08092501af1e",
+        "git_blob": "3115329d5280b545e00f396ea7191deaf3994ed2",
+        "byte_identical_to_parent": true
+      },
+      {
+        "path": "test/test_auth_rotate_shared_tokens_10304.ml",
+        "sha256": "352b240f495aa617e63fdc54d585d1d7db7015b1069dd3113cbf1a971542b62a",
+        "git_blob": "1bcf7182b918aa76b2dd4d26eec47dea241939ac",
+        "byte_identical_to_parent": true
+      },
+      {
+        "path": "test/test_auth_token_prune_transaction.ml",
+        "sha256": "4cad0bcd4ff86af07b78b4e4a5f1b0a85169186c1d03fcd3c976d9aaeaf1c3a6",
+        "git_blob": "5ddbafdd6ff0c9e64b736bbdf757d679c3089cfd",
+        "byte_identical_to_parent": true
+      },
+      {
+        "path": "test/test_credential_expiry.ml",
+        "sha256": "4b11b9ebbdabd77b6a0a69f95e835ab908a0910c659044624e47e60f1bb41a39",
+        "git_blob": "00fcb4dac3bc6d2cd89ef268edb692c036562019",
+        "byte_identical_to_parent": true
+      },
+      {
+        "path": "lib/keeper/keeper_dos_controller.ml",
+        "sha256": "f976a45b9e7df32e90023cbc0984e71253e8585e9acb6e3875eefdb8e3465281",
+        "git_blob": "20c3bcaf6acab931f2ebb8e4fa9bdfff79481be7",
+        "byte_identical_to_parent": true
+      },
+      {
+        "path": "lib/keeper/keeper_dos_controller.mli",
+        "sha256": "810ad58ba0beac49cdf26a47619c24bc6354d317002c740f1bc9088fb27743c7",
+        "git_blob": "896ab482b160df3986df00f7228463f3673ec315",
+        "byte_identical_to_parent": true
+      },
+      {
+        "path": "test/test_dos_tools.ml",
+        "sha256": "410c151a926a6374063b3ad80de135aff65a5960b882f0b09ee2459a5f3a32a3",
+        "git_blob": "450441ab3d8ef2ebea53cebe7d4bbdff38da605e",
+        "byte_identical_to_parent": true
+      },
+      {
+        "path": "test/test_dos_input_routes.ml",
+        "sha256": "d9370ac207f6e84211238d63f6fcbf60a4a6bf9b326a0e2f0aa205015aa8c865",
+        "git_blob": "65508da320c5d7d5be991694435579d3361eb5fd",
+        "byte_identical_to_parent": true
+      },
+      {
+        "path": "lib/server/server_auth.ml",
+        "sha256": "d4ad18f512f16e8941e4301d980614cdcbc9a0ab5bdf2348a89ffd2be96a0d93",
+        "git_blob": "7dcf8b20302c749930d025314f09ad25cba071dc",
+        "byte_identical_to_parent": true
+      },
+      {
+        "path": "lib/server/server_auth.mli",
+        "sha256": "0b6a731ef8ca6ad95e8f1b742bc9110e87257bc0edf275d4e1d7cecbc4045101",
+        "git_blob": "9fe934d79d7f5eb29947bde51bb076a29b2e8c58",
+        "byte_identical_to_parent": true
+      },
+      {
+        "path": "lib/server/server_routes_http_routes_play.ml",
+        "sha256": "65c109a6f9acf8b400bc6ec9763cb927b3056062e2ecea0a97ff07b8d2e39c71",
+        "git_blob": "a05f436ff53a3bb97cb3c6fab05127420418febe",
+        "byte_identical_to_parent": true
+      },
+      {
+        "path": "lib/server/server_routes_http_routes_play.mli",
+        "sha256": "a8a11a4f27b0527598292eab878f469da6b21694113dd09e799f815d13e67b18",
+        "git_blob": "9c1a694dfec1c6c904bcc10a6c0389d1cbfb9e2e",
+        "byte_identical_to_parent": true
+      },
+      {
+        "path": "lib/auth/auth_credential_base.ml",
+        "sha256": "a04c41d45876d71fa49b15e02253de0e5f1a4360b212640e2f34b6adc3601ec7",
+        "git_blob": "9d9d00253c7cac2037275a21940b5b8104e2408b",
+        "byte_identical_to_parent": true
+      },
+      {
+        "path": "test/dune",
+        "sha256": "87c137632af312eb6923addc40d26a585c68270ceb13feac61f88c040f71bd4d",
+        "git_blob": "16081fbeb72d1eb9189546cfd0b51ca39eb7c064",
+        "byte_identical_to_parent": true
+      },
+      {
+        "path": "test/stanzas/test_auth_credential_index_authority.inc",
+        "sha256": "3c3d67abe499e5d36ce1d701fa4f495e448ac8840c95cb27840e7a7078e454b3",
+        "git_blob": "0799aaf93d47d9192b95641e39e8d74cecb81db1",
+        "byte_identical_to_parent": true
+      },
+      {
+        "path": "lib/types/types_auth.ml",
+        "sha256": "c3d8bd1e5995484f8ddd520a6b1a452556dc14ead31e3f8c7c3a5c34c9f35f7b",
+        "git_blob": "bb78092b47c0dde1acffd90c5750cca7900b1e41",
+        "byte_identical_to_parent": true
+      },
+      {
+        "path": "lib/types/types_auth.mli",
+        "sha256": "8ab7127080d82f0f6ca78f7551c53865169b543c68a2c7be4f1bf48122932493",
+        "git_blob": "d180f36564e6e1cde02bdd5af950a395d24fb9a1",
+        "byte_identical_to_parent": true
+      }
+    ]
+  },
+  "new_policy_cache_counter_retry_loop": false,
+  "native_execution": "not run for this follow-up",
+  "prior_native_scope": "root reported prior seven-case native coverage; those earlier cases omitted bound stored alias/directUUID verification. No raw prior native artifacts were inspected by this child and no prior success proves this repair.",
+  "publication": "root owns review, docs/code overlay and exact published-head CI",
+  "actual_publication_parent_head": "f81dc06dfaeb2c8cdd8d19ddb06003c0ea1f2f03",
+  "original_reviewed_code_commit": "fc055da94acbc1e7b30468aa88d2cc13f847771c",
+  "original_reviewed_source_fixture_fragment_bytes_unchanged": true,
+  "external_parent_imports": [
+    {
+      "path": "lib/auth/auth_credential_base.ml",
+      "git_blob": "9d9d00253c7cac2037275a21940b5b8104e2408b",
+      "source_json_sha256": "bfd3ebccc9b63fc77991407a6360c4318d7b3f5d00d609824533b1c8ed200c06",
+      "exact_local_synthetic_parent_bytes": true
+    },
+    {
+      "path": "docs/evidence/2026-09-30-credential-index-authority-source/README.md",
+      "git_blob": "fcb4d59751cdf455575c141f0ea796068ff1c374",
+      "source_json_sha256": "2885cded0a45af17de2c80e3adaeedf47fdc83c2d598d26dc322f24525efd2ac",
+      "exact_local_synthetic_parent_bytes": true
+    }
+  ]
+}

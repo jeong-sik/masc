@@ -51,6 +51,16 @@ let test_old_uuid_cannot_authorize ~warm state = with_workspace @@ fun base_path
   let name = "operator" in
   let old_token, old_admin, uuid = seed_admin base_path name in
   let old_bytes = read uuid in
+  let uuid_name = Filename.basename uuid |> Filename.remove_extension in
+  let stored_alias = "short-operator" in
+  let () = auth_ok (Auth.ensure_credential_alias base_path ~canonical_name:name ~alias_name:stored_alias) in
+  let alias_file = Auth.credential_file base_path stored_alias in
+  let alias_bytes = read alias_file in
+  List.iter (fun agent_name ->
+    check bool "bound UUID and stored alias verify before the transition" true
+      (auth_ok (Auth.verify_token base_path ~agent_name ~token:old_token) = old_admin);
+    let () = auth_ok (Auth.check_permission base_path ~agent_name ~token:(Some old_token)
+      ~permission:D.CanAdmin) in ()) [ uuid_name; stored_alias ];
   if warm then (
     check bool "old Admin is valid before the external transition" true
       (auth_ok (Auth.find_static_credential_by_token base_path ~token:old_token) = old_admin));
@@ -64,6 +74,16 @@ let test_old_uuid_cannot_authorize ~warm state = with_workspace @@ fun base_path
    | Malformed_name -> Auth.save_private_text_file named "{"
    | Current_worker -> Auth.save_private_text_file named
        (D.agent_credential_to_yojson replacement |> Yojson.Safe.to_string));
+  List.iter (fun agent_name ->
+    let rejected label = function
+      | Error (D.Auth (D.Auth_error.InvalidToken _)) -> ()
+      | Error error -> fail (D.masc_error_to_string error)
+      | Ok _ -> fail label in
+    rejected "bound UUID or stored alias verified the retired Admin"
+      (Auth.verify_token base_path ~agent_name ~token:old_token);
+    rejected "bound UUID or stored alias granted CanAdmin to the retired Admin"
+      (Auth.check_permission base_path ~agent_name ~token:(Some old_token)
+        ~permission:D.CanAdmin)) [ uuid_name; stored_alias ];
   denied "old UUID Admin authenticated as a static bearer"
     (Auth.find_static_credential_by_token base_path ~token:old_token);
   denied "old UUID Admin authenticated through general bearer lookup"
@@ -90,6 +110,9 @@ let test_old_uuid_cannot_authorize ~warm state = with_workspace @@ fun base_path
       | Error error -> fail (D.masc_error_to_string error)
       | Ok _ -> fail "Play must not promote the replacement Worker to Admin");
      check bool "normal MCP still authorizes the current Worker" true (Result.is_ok (mcp base_path new_token)));
+  check string "authorization preserves the stored alias bytes" alias_bytes (read alias_file);
+  check bool "stored alias remains readable as old credential data" true
+    (Auth.load_credential base_path stored_alias = Some old_admin);
   check string "authorization did not delete or mutate the old UUID evidence" old_bytes (read uuid);
   check bool "direct UUID data lookup remains available" true
     (Auth.load_credential base_path (D.Credential_id.to_string
@@ -101,8 +124,11 @@ let test_current_uuid_and_aliases_remain_authoritative () = with_workspace @@ fu
   let () = auth_ok (Auth.ensure_credential_alias base_path ~canonical_name:"alpha" ~alias_name:"short-alpha") in
   List.iter (fun agent_name ->
     check bool "current canonical and supported aliases preserve the full Admin" true
-      (auth_ok (Auth.verify_token base_path ~agent_name ~token) = admin))
-    [ "alpha"; "short-alpha"; "alpha-fair-tapir"; "keeper-alpha-agent" ];
+      (auth_ok (Auth.verify_token base_path ~agent_name ~token) = admin);
+    let () = auth_ok (Auth.check_permission base_path ~agent_name ~token:(Some token)
+      ~permission:D.CanAdmin) in ())
+    [ "alpha"; Filename.basename uuid |> Filename.remove_extension;
+      "short-alpha"; "alpha-fair-tapir"; "keeper-alpha-agent" ];
   check bool "current UUID-backed bearer authenticates" true
     (auth_ok (Auth.find_static_credential_by_token base_path ~token) = admin);
   check string "Play resolves current Admin actor" "alpha" (auth_ok (play_admin base_path token));

@@ -1,5 +1,17 @@
 # Credential index current named authority
 
+## Current bound UUID and stored alias follow-up
+
+Source commit `487c4b02d920adcf5d97c1b6e659ec8a1f0a1d08` extends the original repair on immutable local parent `7dafe7e671cfbce6aeb0cf047dcd67516daad48c`, tree `9ae5a41149b3a03fad5a3ed329b5141978facb21`. Root supplied actual publication parent `f81dc06dfaeb2c8cdd8d19ddb06003c0ea1f2f03`, whose complete tree matches this local synthetic parent. The two external f81 files were imported byte exactly before reapplying the same source repair; corrected Auth base comments and the historical README hash-scope correction are preserved. Original source receipts below remain historical; the follow-up source identities and checks are recorded separately in [bound-alias-followup/composition.json](bound-alias-followup/composition.json), [source-checks.json](bound-alias-followup/source-checks.json), and [source-sha256.json](bound-alias-followup/source-sha256.json).
+
+The original index repair did not cover `verify_token`'s direct `Some credential` branch. An intact old Admin UUID could still authenticate when selected by its UUID filename or a stored redirect alias, and `Auth.check_permission` used that verification result. The owner's named binding could meanwhile be missing, malformed, or replaced by a Worker. Reading the UUID as data did not authorize this stale credential.
+
+Static hash-match verification now runs the existing expiry helper first, then the existing complete current named credential comparison. A stale binding returns typed `Auth_error.InvalidToken`. Existing expiry errors and OAuth mismatch/missing fallback paths are preserved. Public function signatures, direct credential data lookup, regular readers, cold/cache authority repair and test registrations are unchanged. No policy, retry loop, cache setting or counter was introduced.
+
+The same seven feature cases now seed a real stored redirect alias before each external transition. The six transition cases prove UUID and stored alias Admin verification and actual `Auth.check_permission CanAdmin` access before the transition, then require typed `InvalidToken` from both APIs after it. They preserve exact old UUID and alias bytes and continue reading both as data. The healthy case adds positive current UUID/stored alias verification and permission controls alongside existing generated/Keeper aliases, Play and MCP entrypoints.
+
+Four OCaml 5.5.1 files parsed and targeted lint/committed diff gates passed. The revised seven cases have **not been executed** by this child; prior native cases omitted the new bound-alias assertions. No local typecheck, build, native test, network or CI run was performed. Root owns independent review and exact published-head verification.
+
 ## Source composition
 
 Implementation started from immutable Reader source parent `af47f73fa32b5815cfc98346cc39c2d1213aba7d`, tree `af0d0b59812c5c529d0c8174abac51d5f6b5f544`, obtained from the local Reader clone. The final local Reader parent is `f510f860016d50e792a7b71865a7e9d66ded3b14`, tree `1cd93a0ce54979756a329bef9945fc6ef61c84d2`. Its assignment update changes Reader documentation and its numbered fragment; production and tests are unchanged. No Git network operation was used. This child's assigned fragment is `changelog.d/40259.md`.

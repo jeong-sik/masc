@@ -155,3 +155,6 @@ val verify_token_owner_alias :
 
 val verify_token :
   string -> agent_name:string -> token:string -> (agent_credential, masc_error) result
+(** Static verification through a UUID or stored redirect alias requires the
+    complete credential to still match its owner's current named binding.
+    Direct UUID data reads do not grant independent bearer authority. *)

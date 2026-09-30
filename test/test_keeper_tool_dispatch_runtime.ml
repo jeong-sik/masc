@@ -6648,12 +6648,17 @@ let test_direct_execute_artifact_manifest_survives_maintenance () =
 ;;
 
 let test_direct_execute_post_effect_artifact_failure_closes_official_client_loop () =
+  let phase name =
+    Printf.eprintf "dispatch-artifact-failure: %s\n%!" name
+  in
+  phase "setup-start";
   with_exec_fixture
     ~require_sandbox:true
     ~process:true
     ~always_allow:true
     "direct-shell-ir-post-effect-artifact-failure"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       phase "fixture-ready";
        let bundle =
          Masc.Keeper_tools_agent_core_bundle.For_testing.make_tool_bundle
            ~config
@@ -6663,7 +6668,10 @@ let test_direct_execute_post_effect_artifact_failure_closes_official_client_loop
            ()
        in
        Fun.protect
-         ~finally:bundle.cleanup
+         ~finally:(fun () ->
+           phase "before-bundle-cleanup";
+           bundle.cleanup ();
+           phase "bundle-cleanup-returned")
          (fun () ->
             let blob_root =
               Tool_blob_store.create ~base_path:config.base_path
@@ -6671,6 +6679,7 @@ let test_direct_execute_post_effect_artifact_failure_closes_official_client_loop
             in
             Fs_compat.mkdir_p (Filename.dirname blob_root);
             Fs_compat.save_file blob_root "artifact persistence is blocked";
+            phase "artifact-root-blocked";
             let marker = playground_file ~config ~meta "execute-invocations" in
             let oversized =
               String.make
@@ -6710,6 +6719,7 @@ let test_direct_execute_post_effect_artifact_failure_closes_official_client_loop
               | Some tool -> tool
               | None -> fail "direct Execute tool was not projected"
             in
+            phase "before-execute-call";
             let result =
               execute.call
                 ~call_id:"direct-execute-post-effect-failure"
@@ -6719,6 +6729,7 @@ let test_direct_execute_post_effect_artifact_failure_closes_official_client_loop
                         ^ Filename.quote oversized)
                    ])
             in
+            phase "execute-call-returned";
             check bool "artifact persistence failure is visible" false result.success;
             check string
               "the process effect occurs exactly once before settlement"

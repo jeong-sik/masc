@@ -2876,11 +2876,12 @@ def pressing_a_row_chooses_then_opens_it(
     # Wait for both fixture results before capturing a pointer coordinate;
     # otherwise the second press can land on the row above the first one.
     wait_for_output(process, master_fd, output, b"fleet ok", start=0, timeout=3.0)
-    wait_for_output(
+    assert wait_for_fixture_state(
         process, master_fd, output,
-        b"live keeper status unavailable: fixture endpoint unavailable",
-        start=0, timeout=3.0,
-    )
+        lambda: b"1 healthy" in screen_text(bytes(output))
+        and b"1 idle" in screen_text(bytes(output)),
+        timeout=3.0,
+    ), f"the live pointer-test roster did not load: {screen_text(bytes(output))!r}"
     select_keeper_row(process, master_fd, output, b"alpha")
     beta_row = screen_row_of(screen_rows(bytes(output)), b"beta")
     if beta_row < 0:
@@ -16378,11 +16379,15 @@ def run_keyboard_regression(executable: str, *, group: int | None = None) -> Non
             description="pressing a tab opens it",
             interact=pressing_a_tab_opens_it,
         )
+        pointer_fixtures = compact_input_gate_http_fixtures()
+        pointer_fixtures["/api/v1/gate/keepers?detailed=true"] = (
+            keeper_runtime_http_fixtures()["/api/v1/gate/keepers?detailed=true"]
+        )
         run_terminal_scenario(
             executable,
             description="pressing a row chooses, then opens it",
             interact=pressing_a_row_chooses_then_opens_it,
-            http_fixtures=compact_input_gate_http_fixtures(),
+            http_fixtures=pointer_fixtures,
         )
         run_terminal_scenario(
             executable,

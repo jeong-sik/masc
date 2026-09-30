@@ -77,7 +77,7 @@ assert.equal('href' in htmlXlink, false,
 assert.equal(svgXlink.href, 'http://example.test/svg-destination',
   'an SVG anchor is still followed through XLink');
 assert.equal(
-  vm.runInContext("window[Symbol.for('masc.browser.scene.refs.v3')].links.size", xlink.context), 2,
+  vm.runInContext("window[Symbol.for('masc.browser.scene.refs.v4')].links.size", xlink.context), 2,
   'the HTML XLink anchor never enters the link map');
 
 // A recycled anchor remains the same DOM object, but not the same observation.
@@ -97,7 +97,7 @@ for (let revision=0;revision<100;revision++) {
   recycled.link.href='http://example.test/revision/'+revision;
   recycled.read();
 }
-const registry=vm.runInContext("window[Symbol.for('masc.browser.scene.refs.v3')]",recycled.context);
+const registry=vm.runInContext("window[Symbol.for('masc.browser.scene.refs.v4')]",recycled.context);
 assert.equal(registry.nodes.size,1,'connected recycled anchor retains only its latest reference');
 assert.equal(registry.links.size,1,'superseded href pins are retired');
 assert.throws(() => vm.runInContext('browserScene(reference)',recycled.context), /scene_node_detached/);

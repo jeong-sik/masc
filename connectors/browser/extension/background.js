@@ -14,7 +14,17 @@ function browserScene(args) {
     try { return new URL(raw,element.baseURI || document.baseURI).href; }
     catch { return null; }
   };
-  const key = Symbol.for('masc.browser.scene.refs.v3');
+  // WAI-ARIA 1.2 roles are ordered fallbacks, not simultaneous declarations.
+  // https://www.w3.org/TR/wai-aria-1.2/#roles
+  const ariaRoles = new Set('alert alertdialog application article banner blockquote button caption cell checkbox code columnheader combobox complementary contentinfo definition deletion dialog directory document emphasis feed figure form generic grid gridcell group heading img insertion link list listbox listitem log main marquee math menu menubar menuitem menuitemcheckbox menuitemradio meter navigation none note option paragraph presentation progressbar radio radiogroup region row rowgroup rowheader scrollbar search searchbox separator slider spinbutton status strong subscript suggestion superscript switch tab table tablist tabpanel term textbox time timer toolbar tooltip tree treegrid treeitem'.split(' '));
+  const effectiveRole = element => (element.getAttribute('role') || '').split(/\s+/)
+    .find(role => ariaRoles.has(role)) || null;
+  const actionRoles = new Set('button link checkbox radio switch menuitem menuitemcheckbox menuitemradio tab option combobox'.split(' '));
+  const labelledControl = element => {
+    const target=element.localName === 'label' ? element.control : null;
+    return target instanceof HTMLInputElement && ['checkbox','radio'].includes(target.type) ? target : null;
+  };
+  const key = Symbol.for('masc.browser.scene.refs.v4');
   let state = window[key];
   const sameDocument = state && state.document === document && state.root === document.documentElement;
   if (args.mode === 'resolve' || args.mode === 'resolve_link') {
@@ -23,6 +33,11 @@ function browserScene(args) {
     const element = ref && ref.deref();
     if (!element || !element.isConnected || element.ownerDocument !== document)
       throw new Error('scene_node_detached');
+    if (state.labels.has(args.nodeId)) {
+      const pinned = state.labels.get(args.nodeId), current = labelledControl(element);
+      if (!current || current !== pinned.target.deref() || current.type !== pinned.type)
+        throw new Error('scene_label_control_changed');
+    }
     if (args.mode === 'resolve_link') {
       if (!state.links.has(args.nodeId)) throw new Error('scene_link_not_observed');
       if (linkHref(element) !== state.links.get(args.nodeId)) throw new Error('scene_link_destination_changed');
@@ -36,24 +51,28 @@ function browserScene(args) {
     const id = Array.from(crypto.getRandomValues(new Uint8Array(16)),
       byte => byte.toString(16).padStart(2,'0')).join('');
     state = {document, root:document.documentElement, id, next:0,
-      ids:new WeakMap(), nodes:new Map(), links:new Map()};
+      ids:new WeakMap(), nodes:new Map(), links:new Map(), labels:new Map()};
     window[key] = state;
   }
   if (args.mode === 'viewport') return {documentId:state.id,width:innerWidth,height:innerHeight,scrollX,scrollY};
   // Weak references preserve identity through reordering without retaining
   // detached page nodes for the lifetime of a single-page application.
   for (const [id, ref] of state.nodes) if (!ref.deref()?.isConnected) {
-    state.nodes.delete(id); state.links.delete(id);
+    state.nodes.delete(id); state.links.delete(id); state.labels.delete(id);
   }
   const nodeId = element => {
     let id = state.ids.get(element);
-    const href = linkHref(element);
+    const href = linkHref(element), target = labelledControl(element);
+    const pinned = id && state.labels.get(id);
+    const labelChanged = pinned ? target !== pinned.target.deref() || target?.type !== pinned.type
+      : target !== null;
     // A recycled anchor gets a new observation reference. Retire its old
     // reference so connected virtualized anchors cannot accumulate revisions.
-    if (!id || (href !== null && state.links.get(id) !== href)) {
-      if (id) { state.nodes.delete(id); state.links.delete(id); }
+    if (!id || (href !== null && state.links.get(id) !== href) || labelChanged) {
+      if (id) { state.nodes.delete(id); state.links.delete(id); state.labels.delete(id); }
       id = 'n' + (++state.next); state.ids.set(element,id);
       if (href !== null) state.links.set(id,href);
+      if (target !== null) state.labels.set(id,{target:new WeakRef(target),type:target.type});
     }
     state.nodes.set(id,new WeakRef(element));
     return id;
@@ -64,7 +83,7 @@ function browserScene(args) {
   // otherwise retain the closest standard landmark that was actually exposed.
   const attribute = (element, name) =>
     typeof element.getAttribute === 'function' ? element.getAttribute(name) : null;
-  const regionRole = element => String(attribute(element,'role') || element.localName || '')
+  const regionRole = element => String(effectiveRole(element) || element.localName || '')
     .trim().toLowerCase();
   const regionTokens = new Set(['main','navigation','complementary','region','log',
     'banner','contentinfo','search','form','article','header','footer','section']);
@@ -72,17 +91,18 @@ function browserScene(args) {
     if (!element || element.nodeType !== 1) return false;
     const tag = element.localName || '', role = attribute(element,'role') || '';
     if (['main','nav','aside','section','article','header','footer','search'].includes(tag)) return true;
-    if (role.split(/\s+/).some(token => regionTokens.has(token))) return true;
+    if (regionTokens.has(effectiveRole(element))) return true;
     return tag === 'form' && (attribute(element,'aria-label') !== null
       || attribute(element,'aria-labelledby') !== null);
   };
   // Only declared DOM semantics make a custom control actionable. A native
   // label is itself an activation target, including a hidden radio's label.
-  const controlSelector = 'button,input:not([type=hidden]),textarea,select,summary,label,[contenteditable=true],[onclick],[role~=button],[role~=link],[role~=checkbox],[role~=radio],[role~=switch],[role~=menuitem],[role~=menuitemcheckbox],[role~=menuitemradio],[role~=tab],[role~=option],[role~=combobox]';
-  const labelledControl = element => {
-    const target=element.localName === 'label' ? element.control : null;
-    return target instanceof HTMLInputElement && ['checkbox','radio'].includes(target.type) ? target : null;
-  };
+  const nativeControlSelector = 'button,input:not([type=hidden]),textarea,select,summary,[contenteditable=true]';
+  const controlSelector = nativeControlSelector + ',label,[onclick],[role]';
+  const isControl = element => linkHref(element) !== null
+    || (element.localName === 'label' ? labelledControl(element) !== null
+      : element.matches(nativeControlSelector) || element.hasAttribute('onclick')
+        || actionRoles.has(effectiveRole(element)));
   const disabledControl = element => {
     const target = labelledControl(element) || element;
     if (target.matches(':disabled')) return true;
@@ -140,12 +160,17 @@ function browserScene(args) {
     const pending=Array.from(element.childNodes || []).reverse(), parts=[];
     while (pending.length) {
       const child=pending.pop();
+      if (typeof child === 'string') { parts.push(child); continue; }
       if (child.nodeType === 3) {
         const parent=child.parentElement;
         if (!parent || !child.textContent || !visible(parent)) continue;
         const range=document.createRange(); range.selectNodeContents(child);
         if (boxes(range.getClientRects(),parent).length) parts.push(child.textContent);
       } else if (child.nodeType === 1 && rendered(child)) {
+        if (child.localName === 'br' && visible(child)) { parts.push('\n'); continue; }
+        const boundary = visible(child) && ['block','list-item','table-row','flex','grid'].includes(css(child).display);
+        const separator = css(child).display === 'table-cell' ? '\t' : '\n';
+        if (boundary || css(child).display === 'table-cell') { parts.push(separator); pending.push(separator); }
         for (let i=child.childNodes.length-1;i>=0;i--) pending.push(child.childNodes[i]);
       }
     }
@@ -205,7 +230,7 @@ function browserScene(args) {
     for (let ancestor=element; ancestor; ancestor=ancestor.parentElement) {
       const tag=ancestor.localName || '';
       if (/^h[1-6]$/.test(tag)) return Number(tag.slice(1));
-      if (ancestor.getAttribute('role') === 'heading') {
+      if (effectiveRole(ancestor) === 'heading') {
         const raw=ancestor.getAttribute('aria-level');
         return /^[1-6]$/.test(raw || '') ? Number(raw) : null;
       }
@@ -238,8 +263,8 @@ function browserScene(args) {
     const regions = [...(root.matches(selector) ? [root] : []),...root.querySelectorAll(selector)];
     for (const region of regions) {
       if (truncated) break;
-      if (!visible(region)) continue;
-      const role = region.getAttribute('role') || region.localName;
+      if (!visible(region) || !semanticRegion(region)) continue;
+      const role = effectiveRole(region) || region.localName;
       const name = regionLabel(region);
       describe('region',region,name,boxes(region.getClientRects(),region),{role});
     }
@@ -279,8 +304,7 @@ function browserScene(args) {
     if (node.nodeType !== 1 || ['script','style','noscript','template'].includes(node.localName)
         || !rendered(node)) continue;
     const tag=node.localName;
-    const control=linkHref(node) !== null || (node.matches(controlSelector)
-      && (tag !== 'label' || labelledControl(node) !== null));
+    const control=isControl(node);
     if (control && visible(node)) {
       const labelledBy = (attribute(node,'aria-labelledby') || '').split(/\s+/).filter(Boolean)
         .map(id => document.getElementById?.(id)?.textContent || '').join(' ').trim();
@@ -294,18 +318,26 @@ function browserScene(args) {
       describe('control',node,label,boxes(node.getClientRects(),node),{
         ...(linkHref(node) !== null ? {href:linkHref(node)} : {}),
         controlType:input ? node.type : tag,disabled,editable,
-        role:attribute(node,'role'),
+        role:effectiveRole(node),
         ...(target instanceof HTMLInputElement && ['checkbox','radio'].includes(target.type)
-          ? {checked:!!target.checked} : {}),
+          ? {checked:!!target.checked,...(target.type === 'checkbox' ? {indeterminate:!!target.indeterminate} : {})} : {}),
         ...(['true','false','mixed'].includes(attribute(node,'aria-checked'))
           ? {ariaChecked:attribute(node,'aria-checked')} : {}),
+        ...(['tab','option','row','treeitem','gridcell'].includes(effectiveRole(node))
+          && ['true','false'].includes(attribute(node,'aria-selected'))
+          ? {ariaSelected:attribute(node,'aria-selected')} : {}),
         clickable:typeof node.click === 'function' && !disabled,
         headingLevel:headingLevel(node)});
-      // Containers can declare an action while retaining independent inputs.
+      // A delegated handler does not consume its heading, prose or raster
+      // descendants. Intrinsic/ARIA controls retain their own label semantics.
+      if (node.hasAttribute('onclick') && !node.matches(nativeControlSelector)
+          && !actionRoles.has(effectiveRole(node)) && tag !== 'label') {
+        for (let i=node.childNodes.length-1;i>=0;i--) stack.push(node.childNodes[i]);
+        continue;
+      }
       // Visit the outermost nested controls; each visits its own descendants.
       const nested=Array.from(node.querySelectorAll?.(controlSelector+',a') || [])
-        .filter(child => linkHref(child) !== null || (child.matches(controlSelector)
-          && (child.localName !== 'label' || labelledControl(child) !== null)));
+        .filter(isControl);
       const nestedSet=new Set(nested);
       for (let i=nested.length-1;i>=0;i--) {
         let ancestor=nested[i].parentElement;
@@ -529,6 +561,12 @@ async function pageElements(args) {
   const [page] = await browser.tabs.executeScript(tabId, {
     runAt: "document_end",
     code: '(' + (function () {
+// WAI-ARIA 1.2 roles are ordered fallbacks, not simultaneous declarations.
+// https://www.w3.org/TR/wai-aria-1.2/#roles
+const ariaRoles = new Set('alert alertdialog application article banner blockquote button caption cell checkbox code columnheader combobox complementary contentinfo definition deletion dialog directory document emphasis feed figure form generic grid gridcell group heading img insertion link list listbox listitem log main marquee math menu menubar menuitem menuitemcheckbox menuitemradio meter navigation none note option paragraph presentation progressbar radio radiogroup region row rowgroup rowheader scrollbar search searchbox separator slider spinbutton status strong subscript suggestion superscript switch tab table tablist tabpanel term textbox time timer toolbar tooltip tree treegrid treeitem'.split(' '));
+const effectiveRole = element => (element.getAttribute('role') || '').split(/\s+/)
+  .find(role => ariaRoles.has(role)) || null;
+const actionRoles = new Set('button link checkbox radio switch menuitem menuitemcheckbox menuitemradio tab option combobox'.split(' '));
 const nodes = Array.from(document.querySelectorAll('a[href],button,input:not([type=hidden]),textarea,select,summary,label,[contenteditable=true],[onclick],[role~=button],[role~=link],[role~=checkbox],[role~=radio],[role~=switch],[role~=menuitem],[role~=menuitemcheckbox],[role~=menuitemradio],[role~=tab],[role~=option],[role~=combobox]'));
 function selector(el) {
   const parts=[];
@@ -540,6 +578,9 @@ function selector(el) {
   return parts.join(' > ');
 }
 const visible = nodes.filter(el=>el.getClientRects().length && getComputedStyle(el).visibility!=='hidden'
+  && (!el.getAttribute('role') || actionRoles.has(effectiveRole(el))
+    || ['a','button','input','textarea','select','summary','label'].includes(el.localName)
+    || el.getAttribute('onclick') !== null || el.getAttribute('contenteditable') === 'true')
   && (el.localName!=='label' || (el.control?.localName==='input' && ['checkbox','radio'].includes(el.control.type))));
 function disabled(el) {
   const target=(el.localName==='label' && el.control) || el;
@@ -557,13 +598,17 @@ function name(el) {
 }
 function observe(el) {
   const result = {selector:selector(el),tag:el.localName,
-    role:el.getAttribute('role'),type:el.getAttribute('type'),name:name(el),
+    role:effectiveRole(el),type:el.getAttribute('type'),name:name(el),
     text:(el.innerText || '').slice(0,500),href:el.href || null,disabled:disabled(el)};
   const target=(el.localName==='label' && el.control) || el;
   if (target.localName==='input' && ['checkbox','radio'].includes(target.type))
     result.checked=!!target.checked;
+  if (target.localName==='input' && target.type==='checkbox') result.indeterminate=!!target.indeterminate;
   if (['true','false','mixed'].includes(el.getAttribute('aria-checked')))
     result.ariaChecked=el.getAttribute('aria-checked');
+  if (['tab','option','row','treeitem','gridcell'].includes(effectiveRole(el))
+      && ['true','false'].includes(el.getAttribute('aria-selected')))
+    result.ariaSelected=el.getAttribute('aria-selected');
   if (el.localName==='input') {
     // Read the normalized DOM type: missing/unknown types behave as text inputs.
     result.type=el.type;

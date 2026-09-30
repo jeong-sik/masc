@@ -316,6 +316,44 @@ try:
  elements_script=(root/'lib/browser_page_script.ml').read_text().split('let elements = {|',1)[1].split('|}',1)[0]
  form_elements=js(elements_script)
  check('elements exposes selected native label and ARIA state',any(n['tag']=='label' and n['text']=='Card B' and n.get('checked') is True for n in form_elements['elements']) and any(n['text']=='Custom card' and n.get('ariaChecked')=='true' for n in form_elements['elements']))
+ # Review regressions: references preserve activation targets and declared semantics.
+ js("""document.body.innerHTML=`<style>body{font:16px sans-serif;margin:8px}label{display:inline-block}input[type=radio]{display:none}</style>\n <input id="card-a" type="radio" name="review-card"><label for="card-a">Card A</label>\n <input id="card-b" type="radio" name="review-card"><label for="card-b">Card B</label>\n <button id="separated">Save<br>draft<span style="display:none">HIDDEN_LABEL</span></button>
+ <main id="delegated" onclick="this.dataset.clicked='yes'"><h2>Delegated heading</h2><p>Delegated paragraph</p><img alt="Delegated raster" style="width:40px;height:40px" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=="></main>
+ <input id="native-mixed" type="checkbox" style="display:none"><label for="native-mixed">Native mixed</label>
+ <div role="tab" aria-selected="false" onclick="this.setAttribute('aria-selected','true')">Selectable tab</div>
+ <div role="option" aria-selected="true">Selected option</div>
+ <div role="heading button" aria-level="2">First role heading</div>
+ <div role="future-role button">Fallback button</div>`;
+ document.querySelector('#native-mixed').indeterminate=true;""")
+ semantics=observe()
+ check('control labels preserve br separators and filter hidden descendants',control(semantics,'Save\ndraft')['text']=='Save\ndraft')
+ check('delegated onclick retains heading geometry',any(n['kind']=='text' and n['text']=='Delegated heading' and n['headingLevel']==2 and n['rects'] for n in semantics['nodes']))
+ check('delegated onclick retains paragraphs',any(n['kind']=='text' and n['text']=='Delegated paragraph' for n in semantics['nodes']))
+ check('delegated onclick retains raster descendants',any(n['kind']=='raster' and n['text']=='Delegated raster' for n in semantics['nodes']))
+ check('hidden native checkbox mixed state survives label projection',control(semantics,'Native mixed')['indeterminate'] is True and control(semantics,'Native mixed')['checked'] is False)
+ check('selected tab and option state are observed',control(semantics,'Selectable tab')['ariaSelected']=='false' and control(semantics,'Selected option')['ariaSelected']=='true')
+ act(semantics,control(semantics,'Selectable tab'),action='click')
+ check('tab selection can be verified after activation',control(observe(),'Selectable tab')['ariaSelected']=='true')
+ check('effective heading role is not a fallback button',any(n['kind']=='text' and n['text']=='First role heading' and n['headingLevel']==2 for n in semantics['nodes']) and not any(n['kind']=='control' and n['text']=='First role heading' for n in semantics['nodes']))
+ check('unknown leading role permits supported button fallback',control(semantics,'Fallback button')['role']=='button')
+ form_elements=js(elements_script)
+ check('elements and scene agree on separators',next(n for n in form_elements['elements'] if n['text']=='Save\ndraft')['text']==control(semantics,'Save\ndraft')['text'])
+ check('elements exposes mixed labels and selected controls',any(n['text']=='Native mixed' and n.get('indeterminate') is True for n in form_elements['elements']) and any(n['text']=='Selectable tab' and n.get('ariaSelected')=='true' for n in form_elements['elements']))
+ check('elements omits a non-actionable first role',not any(n['text']=='First role heading' for n in form_elements['elements']))
+ js("document.querySelector('[role=option]').setAttribute('aria-selected','mixed');")
+ check('invalid aria-selected is not advertised as a boolean state','ariaSelected' not in control(observe(),'Selected option') and not any(n['text']=='Selected option' and 'ariaSelected' in n for n in js(elements_script)['elements']))
+ before_retarget=observe();old_label=control(before_retarget,'Card B')
+ js("document.querySelector('label[for=card-b]').htmlFor='card-a'; document.querySelector('#card-b').checked=true;")
+ try:act(before_retarget,old_label,action='click');raise AssertionError('changed label association accepted')
+ except RuntimeError as e:check('label association mutation rejects before activation','scene_label_control_changed' in str(e))
+ check('refused old label did not select its new input',js("return document.querySelector('#card-b').checked;") is True)
+ after_retarget=observe();new_label=control(after_retarget,'Card B')
+ check('reread assigns a fresh label identity',new_label['nodeId']!=old_label['nodeId'])
+ try:act(before_retarget,old_label,action='click');raise AssertionError('retired label reference accepted')
+ except RuntimeError as e:check('reread retires previous label references','scene_node_detached' in str(e))
+ act(after_retarget,new_label,action='click')
+ check('fresh label observation activates the newly observed input',js("return document.querySelector('#card-a').checked;") is True)
+ # End review regressions.
  (a.out/'form-controls.json').write_text(json.dumps({'scene':observe(),'elements':form_elements},ensure_ascii=False,indent=2))
  form_png=call('GET','/session/'+sid+'/screenshot')
  assert isinstance(form_png,str)

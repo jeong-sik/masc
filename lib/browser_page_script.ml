@@ -18,6 +18,12 @@ let text_cap requested =
 ;;
 
 let elements = {|
+// WAI-ARIA 1.2 roles are ordered fallbacks, not simultaneous declarations.
+// https://www.w3.org/TR/wai-aria-1.2/#roles
+const ariaRoles = new Set('alert alertdialog application article banner blockquote button caption cell checkbox code columnheader combobox complementary contentinfo definition deletion dialog directory document emphasis feed figure form generic grid gridcell group heading img insertion link list listbox listitem log main marquee math menu menubar menuitem menuitemcheckbox menuitemradio meter navigation none note option paragraph presentation progressbar radio radiogroup region row rowgroup rowheader scrollbar search searchbox separator slider spinbutton status strong subscript suggestion superscript switch tab table tablist tabpanel term textbox time timer toolbar tooltip tree treegrid treeitem'.split(' '));
+const effectiveRole = element => (element.getAttribute('role') || '').split(/\s+/)
+  .find(role => ariaRoles.has(role)) || null;
+const actionRoles = new Set('button link checkbox radio switch menuitem menuitemcheckbox menuitemradio tab option combobox'.split(' '));
 const nodes = Array.from(document.querySelectorAll('a[href],button,input:not([type=hidden]),textarea,select,summary,label,[contenteditable=true],[onclick],[role~=button],[role~=link],[role~=checkbox],[role~=radio],[role~=switch],[role~=menuitem],[role~=menuitemcheckbox],[role~=menuitemradio],[role~=tab],[role~=option],[role~=combobox]'));
 function selector(el) {
   const parts=[];
@@ -29,6 +35,9 @@ function selector(el) {
   return parts.join(' > ');
 }
 const visible = nodes.filter(el=>el.getClientRects().length && getComputedStyle(el).visibility!=='hidden'
+  && (!el.getAttribute('role') || actionRoles.has(effectiveRole(el))
+    || ['a','button','input','textarea','select','summary','label'].includes(el.localName)
+    || el.getAttribute('onclick') !== null || el.getAttribute('contenteditable') === 'true')
   && (el.localName!=='label' || (el.control?.localName==='input' && ['checkbox','radio'].includes(el.control.type))));
 function disabled(el) {
   const target=(el.localName==='label' && el.control) || el;
@@ -46,13 +55,17 @@ function name(el) {
 }
 function observe(el) {
   const result = {selector:selector(el),tag:el.localName,
-    role:el.getAttribute('role'),type:el.getAttribute('type'),name:name(el),
+    role:effectiveRole(el),type:el.getAttribute('type'),name:name(el),
     text:(el.innerText || '').slice(0,500),href:el.href || null,disabled:disabled(el)};
   const target=(el.localName==='label' && el.control) || el;
   if (target.localName==='input' && ['checkbox','radio'].includes(target.type))
     result.checked=!!target.checked;
+  if (target.localName==='input' && target.type==='checkbox') result.indeterminate=!!target.indeterminate;
   if (['true','false','mixed'].includes(el.getAttribute('aria-checked')))
     result.ariaChecked=el.getAttribute('aria-checked');
+  if (['tab','option','row','treeitem','gridcell'].includes(effectiveRole(el))
+      && ['true','false'].includes(el.getAttribute('aria-selected')))
+    result.ariaSelected=el.getAttribute('aria-selected');
   if (el.localName==='input') {
     // Read the normalized DOM type: missing/unknown types behave as text inputs.
     result.type=el.type;

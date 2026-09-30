@@ -262,7 +262,13 @@ def roster_failure_and_deletion(executable):
             metadata.unlink()
             # The unchanged chat title need not redraw on deletion. Home's
             # unavailable assertion below verifies the complete new roster.
-            home(process, fd, output, b"Last conversation beta unavailable")
+            home(process, fd, output, b"MASC Dashboard")
+            # Confirm deletion through an explicit authoritative roster reread.
+            drawn = h.send_and_wait(process, fd, output, b"r",
+                                    b"conversation beta unavailable")
+            current = h.screen_text(drawn)
+            assert b"Continue with beta" not in current, current
+            assert b"roster unavailable; read history" not in current, current
         finally:
             metadata.write_bytes(original)
         os.write(fd, b"q")

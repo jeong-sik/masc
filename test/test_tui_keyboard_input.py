@@ -12620,6 +12620,11 @@ def run_activity_logs_tab_pane_regression(executable: str) -> None:
         resize_and_wait(process, master_fd, output, rows=38,
                         columns=ACTING_PANE_THRESHOLD_COLUMNS,
                         needle=b"MASC Dashboard", final_cursor=b"\x1b[?25l")
+        # Home starts without a feed. An explicit pane choice still applies
+        # on Home and survives the following surface switches.
+        drain_until_quiet(process, master_fd, output)
+        assert pane_row(output) < 0, screen_text(bytes(output))
+        send_and_wait(process, master_fd, output, b"\x0c", b"[Recent]")
         for title, ready, whole_row in (
             (b"MASC Dashboard", b"Continue", b"Choose a Keeper"),
             (b"MASC Work", b"D12 Goal", b"D12 Goal"),

@@ -2263,6 +2263,13 @@ let render_board_list (state : state) =
                     (board_sort_explanation state.board_sort))
                  " · H:choose hearth"))
         ; (fun () -> c.push (board_hearth_census_line ~cols state))
+        ; (fun () ->
+            match List.nth_opt state.board_posts
+                (max 0 (min state.board_cursor (count - 1))) with
+            | None -> c.push_empty ()
+            | Some post ->
+                c.push ("  Selected post · " ^ Ansi.bold
+                  ^ Terminal_text.single_line post.bp_title ^ Ansi.reset))
         ; c.push_divider
         ; (fun () ->
             c.push_styled ~style:(Theme.recede ())
@@ -4940,11 +4947,6 @@ let render_keeper_list (state : state) =
        so reported no count, and named n/N on surfaces where those keys do
        nothing. *)
     ^ search_marker_styled state
-    ^ (match keeper_roster_summary readings with
-       | [] -> ""
-       | parts ->
-           Ansi.dim ^ "   " ^ Ansi.reset
-           ^ String.concat (Ansi.dim ^ " \xc2\xb7 " ^ Ansi.reset) parts)
   in
   (* The roster is the surface an operator watches to see which keepers are
      up, and it was the one top-level surface whose title never said whether
@@ -4966,6 +4968,12 @@ let render_keeper_list (state : state) =
 
   Buffer.add_string buf
     (Printf.sprintf " %s%s%s\n" (Theme.recede ()) (draw_hline (cols - 2)) Ansi.reset);
+
+  (match keeper_roster_summary readings with
+   | [] -> ()
+   | parts ->
+       box_line buf cols
+         ("  Health  " ^ String.concat (Ansi.dim ^ " · " ^ Ansi.reset) parts));
 
   (match (state.fleet_safety, state.fleet_safety_error) with
    | _, Some err ->

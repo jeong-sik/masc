@@ -1045,7 +1045,7 @@ let exact_lane_cli_slot_references
 
 (* One declared [cli_slots] entry that resolves to a configured runtime the
    CLI tail cannot call ([exact_lane_cli_slot_unservable], declared with
-   [load_failure] above since the failure type needs it).
+   [Runtime_config_error.load_failure] since the failure type needs it).
    [exact_lane_cli_slot_references] above already refuses an id that resolves
    to nothing; this is the other half of what [Keeper_lane_cli_oneshot.run]
    requires before it will dispatch a cli_slots id: an official client

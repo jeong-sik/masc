@@ -1,6 +1,6 @@
 {
   "algorithm": "sha256",
-  "scope": "source/evidence candidate before local commit; this manifest excludes itself",
+  "scope": "Assigned PR40241 publication source/evidence; manifest excludes itself",
   "files": [
     {
       "path": "dashboard/src/api/schemas/candle-observation.ts",
@@ -27,12 +27,12 @@
       "sha256": "0a17d57c9434da43f362419a46c0e4827490c19f115601fb6aeb00b1f0b6dc8c"
     },
     {
-      "path": "changelog.d/999995.md",
-      "sha256": "ac1047f29a29c5514a34a9b2bab202459a1cf422492ab007841e62dfc4c65889"
+      "path": "changelog.d/40241.md",
+      "sha256": "1090e7d6dc5c4ffb23bcf7c3f4e62e1c8e646899d737e8722b06a8e78e6d037f"
     },
     {
       "path": "docs/evidence/2026-09-30-dashboard-economy-domain-source/README.md",
-      "sha256": "4ac70a5c55b41fe3b9996230bb1eef307c7425c7f0e709efdd9bc07c589f219b"
+      "sha256": "cb3204f7d12166e2ecf39a356f5d8135c18ee642b4bb79ad2cb1c75e0ccb3b0d"
     },
     {
       "path": "docs/evidence/2026-09-30-dashboard-economy-domain-source/composition.json",

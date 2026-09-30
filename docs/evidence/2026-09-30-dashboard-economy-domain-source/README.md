@@ -49,3 +49,7 @@ src/components/keeper-items-panel.test.ts
 ```
 
 The Item workspace browser scenario still needs an actual CI-produced preview and retained browser evidence. This source candidate makes no browser, release or production claim.
+
+## Assigned publication
+
+PR #40241 stacks only this reviewed delta over actual #40190 head9464d7404c97b086d1b5cdc7af2c817e8f5d23cc. No placeholder changelog was published. The numbered40241 fragment and source hash manifest replace the local placeholder; the six source/test files remain byte exact to the reviewed fdf9dff9 candidate. This is source parity, not typecheck, Vitest, bundle or browser evidence.

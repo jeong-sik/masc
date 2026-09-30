@@ -350,14 +350,14 @@ let test_replay_failure_keeps_historical_evidence_readable () =
     (reference |> member "post_id" |> to_string);
   check bool "no invented lifecycle or completion timestamp" true
     (member "status" reference = `Null && member "finished_at" reference = `Null);
-  (match Tui_decode.decode_fusion_snapshot response with
+  (match Masc.Tui_decode_fusion.decode_fusion_snapshot response with
    | Error detail -> fail detail
    | Ok snapshot ->
        check int "TUI can select the historical result" 1
          (List.length snapshot.fus_historical_evidence);
        check bool "TUI knows the startup read lost rows" true
          (match snapshot.fus_replay with
-          | Tui_decode.Fusion_replayed { malformed_lines = 1; dropped_running = 1;
+          | Masc.Tui_decode_fusion.Fusion_replayed { malformed_lines = 1; dropped_running = 1;
                                         incomplete = false } -> true
           | _ -> false));
   let status, detail = Server_routes_http_routes_dashboard.For_testing.fusion_run_detail_response

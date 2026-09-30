@@ -137,12 +137,14 @@ epic = 5000
    operator confirmed on 2026-09-29. *)
 let seed_payout ?(linked_task_ids = []) (config : Workspace.config) ~goal_id =
   let request_id = "req-" ^ goal_id in
+  let verification_run_id = "run-" ^ goal_id in
   let rows : E.t list =
     [ { at = at "2026-09-28T06:32:01Z"
       ; body =
           E.Snapshot
             { goal_id
             ; request_id
+            ; verification_run_id
             ; criterion_revision = "rev-1"
             ; passed_at = at "2026-09-28T06:32:00Z"
             ; goal_created_at = at "2026-09-20T01:00:00Z"
@@ -158,6 +160,7 @@ let seed_payout ?(linked_task_ids = []) (config : Workspace.config) ~goal_id =
           E.Payout_owed
             { goal_id
             ; request_id
+            ; verification_run_id
             ; passed_at = at "2026-09-28T06:32:00Z"
             ; confirmed_at = at "2026-09-29T05:00:00Z"
             }
@@ -314,13 +317,56 @@ let test_a_worker_can_start_again_once_its_switch_has_ended () =
     await_within env "the second payout" (fun () -> settled other))
 ;;
 
+(* Corrupt contributor evidence must remain retryable. Exercise the actual
+   archive decoder and payout pass, then repair the same row and retry. *)
+let test_unreadable_contributor_waits_for_repair () =
+  List.iter (fun damaged_assignee ->
+    with_workspace @@ fun _env config ->
+    enable_candle config;
+    write_keeper config "keeper-a";
+    seed_payout config ~goal_id:"goal-corrupt" ~linked_task_ids:[ "task-corrupt" ];
+    let task = make_task ~id:"task-corrupt" (done_by "keeper-a" "2026-09-25T00:00:00Z") in
+    let row = Masc_domain.task_to_yojson task in
+    let damaged =
+      match row with
+      | `Assoc fields ->
+        let fields = List.remove_assoc "assignee" fields in
+        `Assoc (match damaged_assignee with None -> fields | Some value -> ("assignee", value) :: fields)
+      | _ -> fail "task encoder did not produce an object"
+    in
+    let write row =
+      Workspace_utils_ops.write_json config (Workspace_utils_paths_backend.archive_path config)
+        (`Assoc [ "tasks", `List [row] ])
+    in
+    let drain () = Candle_candidates.drain_once ~now:(fun () -> 1_790_000_000.) config |> ok_or_fail in
+    write damaged;
+    (match drain () with
+     | [Candle_candidates.Retry_later { detail; _ }] ->
+       check bool "names unreadable contributor" true
+         (String_util.contains_substring detail "assignee")
+     | _ -> fail "corrupt contributor must not settle the payout");
+    check (list string) "no irreversible candidate or unattributed row"
+      ["snapshot"; "payout_owed"] (kinds config);
+    write row;
+    (match drain () with
+     | [Candle_candidates.Wrote_candidates _] -> ()
+     | _ -> fail "repaired contribution must be collected");
+    check (list string) "the repaired payout still awaits appraisal"
+      ["snapshot"; "payout_owed"; "candidates"] (kinds config);
+    match last_candidates config with
+    | Some (_, keepers) -> check (list string) "original contributor is retained" ["keeper-a"] keepers
+    | None -> fail "no repaired Candidates row")
+    [None; Some `Null; Some (`Int 7); Some (`String ""); Some (`String "  ")]
+;;
+
 let test_a_wake_with_no_worker_running_does_nothing () = Candle_payout_worker.wake ()
 
 let () =
   run
     "candle_payout_worker"
     [ ( "worker"
-      , [ test_case
+      , [ test_case "unreadable contributor waits for repair" `Quick test_unreadable_contributor_waits_for_repair
+        ; test_case
             "the worker settles a waiting payout when it starts"
             `Quick
             test_the_worker_settles_a_waiting_payout_when_it_starts

@@ -1201,6 +1201,50 @@ let terminalize_pending_turn_completed
     state
 ;;
 
+(* A turn leaves its batch pending until its terminal receipt, and a
+   schedule withdrawal, a transfer or another source's terminal may remove an
+   entry of that batch meanwhile; a withdrawal fold reads the pending list
+   once and may find an entry already settled when it reaches it. The
+   operation's own receipt answers first, so a replay still reads as a
+   replay; only an operation with no receipt whose source identity is gone
+   from the pending entries has nothing left to do. *)
+let pending_source_left ~operator_operation_id ~source state =
+  Option.is_none (prior_disposition_by_operation_id operator_operation_id state)
+  && not
+       (List.exists
+          (fun entry -> Keeper_event_queue.stimulus_identity_equal source entry.source)
+          state.pending_entries)
+;;
+
+let pending_turn_selection_withdrawn ~(selection : pending_selection) state =
+  pending_source_left
+    ~operator_operation_id:
+      (turn_attempt_terminal_operation_id
+         ~admitted_revision:selection.admitted_revision
+         selection.source)
+    ~source:selection.source
+    state
+;;
+
+let pending_cancellation_source_withdrawn ~(cancellation : accepted_cancellation) state =
+  pending_source_left
+    ~operator_operation_id:cancellation.operator_operation_id
+    ~source:cancellation.source
+    state
+;;
+
+type admitted_selection_standing =
+  | Admitted_selection_pending
+  | Admitted_selection_withdrawn
+
+let admitted_selection_standing ~selection state =
+  if pending_turn_selection_withdrawn ~selection state
+  then Ok Admitted_selection_withdrawn
+  else
+    validate_pending_selection ~selection state
+    |> Result.map (fun () -> Admitted_selection_pending)
+;;
+
 let restore_pending_transition entry state apply =
   let* replayed, result = apply state in
   let actual_receipt =

@@ -26,6 +26,7 @@ let event ~at ~linked_task_ids (goal : Goal_store.goal) (verdict : Goal_verifica
         Candle_event.Snapshot
           { goal_id = goal.id
           ; request_id = verdict.request_id
+          ; verification_run_id = verdict.verification_run_id
           ; criterion_revision = goal.criterion_revision
           ; passed_at
           ; goal_created_at

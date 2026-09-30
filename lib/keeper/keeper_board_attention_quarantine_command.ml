@@ -1,5 +1,6 @@
 module Candidate = Keeper_board_attention_candidate
 module Partition = Keeper_board_attention_partition
+module Quarantine_pair = Keeper_board_attention_quarantine_pair
 module Wake = Keeper_board_attention_worker_wake
 
 let request_schema = "keeper.board_attention.quarantine.recovery.request.v1"
@@ -405,18 +406,8 @@ let execute_with_before_partition_commit
     |> Result.map_error (fun detail -> Partition_state_conflict detail)
   in
   let* partition = find_partition ~base_path command in
-  let generation_matches =
-    Partition.Generation.equal
-      observed.quarantine.partition_generation
-      partition.generation
-  in
-  let ready_generation_matches =
-    Partition.Generation.is_direct_successor
-      ~previous:observed.quarantine.partition_generation
-      partition.generation
-  in
-  match observed.phase, partition.state with
-  | Candidate.Requeued _, Partition.Blocked _ when generation_matches ->
+  match Quarantine_pair.classify partition observed with
+  | Quarantine_pair.Blocked_requeued ->
     before_partition_commit partition;
     let* ready = commit_partition_ready ~base_path command partition in
     request_wake
@@ -425,11 +416,7 @@ let execute_with_before_partition_commit
       command
       candidate
       ready
-  | Candidate.Requeued _, Partition.Blocked _ ->
-    Error
-      (Partition_state_conflict
-         "a newer Blocked generation is awaiting candidate projection")
-  | Candidate.Requeued _, Partition.Ready when ready_generation_matches ->
+  | Quarantine_pair.Ready_requeued ->
     let* ready = confirm_ready_partition ~base_path partition in
     request_wake
       ~base_path
@@ -437,20 +424,8 @@ let execute_with_before_partition_commit
       command
       candidate
       ready
-  | Candidate.Requeued _,
-    Partition.Ready ->
-    Error
-      (Partition_state_conflict
-         "Ready partition is not the authorized generation successor")
-  | Candidate.Requeued _,
-    (Partition.Running _ | Partition.Completed _ | Partition.Settled _
-    | Partition.Abandoned _) ->
-    Error
-      (Partition_state_conflict
-         "partition advanced beyond the authorized Ready boundary")
-  | (Candidate.Quarantined | Candidate.Requeue_requested _),
-    Partition.Blocked _
-    when generation_matches ->
+  | Quarantine_pair.Blocked_awaiting_request
+  | Quarantine_pair.Blocked_requeue_requested ->
     let* requested =
       match
         Candidate.request_quarantine_requeue
@@ -484,17 +459,26 @@ let execute_with_before_partition_commit
       command
       authorized
       ready
-  | (Candidate.Quarantined | Candidate.Requeue_requested _),
-    Partition.Blocked _ ->
+  | Quarantine_pair.Blocked_unrecorded ->
     Error
       (Partition_state_conflict
          "candidate quarantine targets a different Blocked generation")
-  | (Candidate.Quarantined | Candidate.Requeue_requested _),
-    (Partition.Ready | Partition.Running _ | Partition.Completed _
-    | Partition.Settled _ | Partition.Abandoned _) ->
+  | Quarantine_pair.Inconsistent inconsistency ->
+    Error
+      (Partition_state_conflict
+         (Quarantine_pair.inconsistency_to_string inconsistency))
+  | Quarantine_pair.Advanced_requeued ->
+    Error
+      (Partition_state_conflict
+         "partition advanced beyond the authorized Ready boundary")
+  | Quarantine_pair.Advanced_without_requeue ->
     Error
       (Partition_state_conflict
          "partition became claimable before candidate requeue authorization")
+  | Quarantine_pair.Other_partition ->
+    Error
+      (Candidate_state_conflict
+         "candidate quarantine names a different partition")
 ;;
 
 let execute =

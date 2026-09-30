@@ -21,12 +21,13 @@ from urllib.parse import quote, urlsplit, urlunsplit
 from urllib.request import Request
 
 import proof_http
+import skill_activation_events
 
 
 REQUIRED_PRODUCER_ARTIFACTS = {
     "health.json",
     "dashboard-tools.json",
-    "skill-activations.json",
+    skill_activation_events.EVENTS_FILENAME,
     "tui-build-evidence.json",
     "masc_tui.exe",
 }
@@ -357,10 +358,15 @@ def verify_producer_artifacts(
         (root / "dashboard-tools.json").read_bytes(),
         "producer dashboard-tools.json",
     )
-    ledger = decode_object(
-        (root / "skill-activations.json").read_bytes(),
-        "producer skill-activations.json",
-    )
+    events_name = skill_activation_events.EVENTS_FILENAME
+    try:
+        ledger = skill_activation_events.fold_event_log(
+            (root / events_name).read_bytes()
+        )
+    except skill_activation_events.SkillLedgerError as error:
+        raise CaptureError(f"producer {events_name}: {error}") from error
+    if ledger is None:
+        raise CaptureError(f"producer {events_name} has recorded nothing")
     projection = object_field(dashboard, "skill_activations", "producer dashboard")
     require(
         projection.get("ledger") == ledger,
@@ -697,7 +703,7 @@ def synchronize_ttyd_terminal_size(
     # frame; ttyd has applied its preferences before forwarding that frame.
     page.wait_for_function(
         "marker => document.querySelector('.xterm-screen')?.innerText.includes(marker)",
-        arg="MASC Overview",
+        arg="MASC Dashboard",
         timeout=int(timeout * 1000),
     )
     replay_ttyd_terminal_size(page, cols=cols, rows=rows)
@@ -840,13 +846,12 @@ def selected_surface_from_screen(value: str) -> str | None:
 
 
 def goto_tools(page: Any, timeout: float) -> None:
-    # Tools left the Tab ring and hangs off Config under [t], so the walk
-    # goes to the Config stop and hops from there.
+    # Tools hangs off the System stop under [t].
     deadline = time.monotonic() + timeout
     current = selected_surface_from_screen(screen_text(page))
     require(current is not None, "TUI did not expose its selected surface")
     visited = [current]
-    while current != "Config" and time.monotonic() < deadline:
+    while current != "System" and time.monotonic() < deadline:
         press(page, "Tab")
         observed = current
         while observed == current and time.monotonic() < deadline:
@@ -855,12 +860,12 @@ def goto_tools(page: Any, timeout: float) -> None:
             if selected is not None:
                 observed = selected
         require(observed != current, "TUI surface selection did not advance")
-        require(observed not in visited, "TUI completed a surface cycle without Config")
+        require(observed not in visited, "TUI completed a surface cycle without System")
         visited.append(observed)
         current = observed
-    require(current == "Config", "TUI did not reach the Config surface")
+    require(current == "System", "TUI did not reach the System surface")
     press(page, "t")
-    wait_screen(page, "MASC Config / Tools", max(0.001, deadline - time.monotonic()))
+    wait_screen(page, "MASC System / Tools", max(0.001, deadline - time.monotonic()))
 
 
 def selected_keeper_from_screen(value: str) -> str | None:
@@ -882,7 +887,7 @@ def selected_keeper_from_screen(value: str) -> str | None:
 
 def selected_tools_pane_from_screen(value: str) -> str | None:
     for line in value.splitlines():
-        if "MASC Config / Tools" not in line:
+        if "MASC System / Tools" not in line:
             continue
         for token in line.split():
             pane_token = token.lstrip("|")
@@ -967,7 +972,7 @@ def receipt_projection_revision(ledger_revision: str, skill_tool_use_id: str) ->
 
 def tools_surface_is_connected(value: str) -> bool:
     return any(
-        line.strip().startswith("MASC Config / Tools ") and line.rstrip().endswith("[connected]")
+        line.strip().startswith("MASC System / Tools ") and line.rstrip().endswith("[connected]")
         for line in value.splitlines()
     )
 
@@ -1178,7 +1183,7 @@ def main() -> int:
                 timeout=args.timeout,
                 token=token,
             ) as (page, terminal_attestation):
-                wait_screen(page, "MASC Overview", args.timeout)
+                wait_screen(page, "MASC Dashboard", args.timeout)
                 goto_tools(page, args.timeout)
                 visited_keepers = select_exact_keeper(
                     page, selected["keeper"], args.timeout

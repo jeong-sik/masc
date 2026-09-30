@@ -10,12 +10,13 @@ let ok_or_fail = function
 let at text = ok_or_fail (Candle_time.of_rfc3339 text)
 let pass_text = "2026-09-28T06:32:00Z"
 
-let snapshot ?(goal_id = "goal-1") ?(request_id = "req-1") ?(passed_at = pass_text) () : E.t =
+let snapshot ?(goal_id = "goal-1") ?(request_id = "req-1") ?(verification_run_id = "run-1") ?(passed_at = pass_text) () : E.t =
   { at = at "2026-09-28T06:32:01Z"
   ; body =
       E.Snapshot
         { goal_id
         ; request_id
+        ; verification_run_id
         ; criterion_revision = "rev-1"
         ; passed_at = at passed_at
         ; goal_created_at = at "2026-09-20T01:00:00Z"
@@ -28,24 +29,26 @@ let snapshot ?(goal_id = "goal-1") ?(request_id = "req-1") ?(passed_at = pass_te
   }
 ;;
 
-let owed ?(goal_id = "goal-1") ?(request_id = "req-1") ?(passed_at = pass_text) () : E.t =
+let owed ?(goal_id = "goal-1") ?(request_id = "req-1") ?(verification_run_id = "run-1") ?(passed_at = pass_text) () : E.t =
   { at = at "2026-09-29T05:00:01Z"
   ; body =
       E.Payout_owed
         { goal_id
         ; request_id
+        ; verification_run_id
         ; passed_at = at passed_at
         ; confirmed_at = at "2026-09-29T05:00:00Z"
         }
   }
 ;;
 
-let candidates_row ?(goal_id = "goal-1") ?(request_id = "req-1") ?(keepers = [ "keeper-a" ]) () : E.t =
+let candidates_row ?(goal_id = "goal-1") ?(request_id = "req-1") ?(verification_run_id = "run-1") ?(keepers = [ "keeper-a" ]) () : E.t =
   { at = at "2026-09-29T05:10:00Z"
   ; body =
       E.Candidates
         { goal_id
         ; request_id
+        ; verification_run_id
         ; tasks = []
         ; candidate_task_ids = [ "task-1" ]
         ; candidate_keepers = keepers
@@ -53,16 +56,16 @@ let candidates_row ?(goal_id = "goal-1") ?(request_id = "req-1") ?(keepers = [ "
   }
 ;;
 
-let unattributed ?(goal_id = "goal-1") ?(request_id = "req-1") () : E.t =
+let unattributed ?(goal_id = "goal-1") ?(request_id = "req-1") ?(verification_run_id = "run-1") () : E.t =
   { at = at "2026-09-29T05:20:00Z"
-  ; body = E.Unattributed { goal_id; request_id; reason = E.No_candidates }
+  ; body = E.Unattributed { goal_id; request_id; verification_run_id; reason = E.No_candidates }
   }
 ;;
 
 let pass = Alcotest.testable (fun ppf time -> Format.pp_print_string ppf (Candle_time.to_rfc3339 time)) Candle_time.equal
 
-let owed_pass ?(goal_id = "goal-1") ?(request_id = "req-1") ?(passed_at = pass_text) events =
-  Candle_payout.owed_pass ~goal_id ~request_id ~passed_at events
+let owed_pass ?(goal_id = "goal-1") ?(request_id = "req-1") ?(verification_run_id = "run-1") ?(passed_at = pass_text) events =
+  Candle_payout.owed_pass ~goal_id ~request_id ~verification_run_id ~passed_at events
 ;;
 
 let check_owed label expected events =
@@ -77,6 +80,8 @@ let test_no_snapshot_owes_nothing () =
   check_owed "an empty ledger" None [];
   check_owed "another Goal's Snapshot" None [ snapshot ~goal_id:"goal-2" () ];
   check_owed "another request's Snapshot" None [ snapshot ~request_id:"req-2" () ];
+  check_owed "another verifier run in the same second" None
+    [ snapshot ~verification_run_id:"other-run" () ];
   check_owed
     "the same request passed at another time"
     None
@@ -139,9 +144,10 @@ let state_testable =
     ( = )
 ;;
 
-let waiting_for ?(goal_id = "goal-1") ?(request_id = "req-1") () : Candle_payout.waiting =
+let waiting_for ?(goal_id = "goal-1") ?(request_id = "req-1") ?(verification_run_id = "run-1") () : Candle_payout.waiting =
   { goal_id
   ; request_id
+  ; verification_run_id
   ; passed_at = at pass_text
   ; confirmed_at = at "2026-09-29T05:00:00Z"
   }
@@ -222,7 +228,11 @@ let test_a_payout_takes_its_pass_from_the_matching_snapshot () =
 ;;
 
 let test_a_payout_finds_the_candidates_written_for_its_request () =
-  let events = [ owed (); candidates_row ~request_id:"req-0" ~keepers:[ "old" ] (); candidates_row () ] in
+  let events =
+    [ owed (); candidates_row ~request_id:"req-0" ~keepers:[ "old" ] ()
+    ; candidates_row ~verification_run_id:"other-run" ~keepers:[ "orphan" ] ()
+    ; candidates_row () ]
+  in
   (match Candle_payout.candidates_of (waiting_for ()) events with
    | Some found ->
      Alcotest.(check (list string)) "keepers" [ "keeper-a" ] found.candidate_keepers;

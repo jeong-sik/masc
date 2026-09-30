@@ -222,6 +222,11 @@ let test_reports_reach_the_resolved_document () =
       |> to_list
       |> List.map (fun p ->
         p |> member "id" |> to_string, p |> member "display_name" |> to_string));
+  (* The row carries the id the usage history stores its points under, so a
+     reader joins the two by comparing, never by hashing the scope again. *)
+  check string "claude row names the history's scope id"
+    (Server_provider_usage_history.scope_id claude_scope)
+    Yojson.Safe.Util.(claude_row |> member "scope_id" |> to_string);
   let codex_row = usage_row after codex_label in
   check (list string) "codex windows as reported, sparse update kept them"
     [ "five_hour percent=100 resets=1790200000 source=codex.account_rate_limits_updated"
@@ -459,6 +464,45 @@ let test_codex_read_falls_back_and_refuses_a_bad_map () =
     check string "names the map" "account/rateLimits/read.rateLimitsByLimitId" path
   | Error error -> failf "unexpected error: %s" (Usage.decode_error_to_string error)
   | Ok _ -> fail "a list map was accepted"
+;;
+
+let test_durable_sink_receives_only_accepted_report () =
+  with_runtimes (fun () ->
+    let scope = scope_of "usage_codex.sol" in
+    let report =
+      decode_ok (Usage.decode_codex_rate_limits_updated
+                   (Yojson.Safe.from_string codex_exhausted_params))
+    in
+    let received = ref [] in
+    Fun.protect
+      ~finally:(fun () ->
+        Usage.set_record_observer (fun ~scope:_ ~observed_at:_ _ -> ()))
+      (fun () ->
+        Usage.set_record_observer (fun ~scope:_ ~observed_at report ->
+          received := (observed_at, List.length report.Usage.windows) :: !received);
+        Usage.record ~scope ~observed_at:1790400000.0 report;
+        Usage.record ~scope ~observed_at:1790400000.0 report;
+        check (list (pair (float 0.0) int))
+          "one durable report for one accepted observation"
+          [1790400000.0, 2] !received))
+;;
+
+let test_sink_failure_marks_history_gap () =
+  with_runtimes (fun () ->
+    let scope = scope_of "usage_codex.sol" in
+    let report =
+      decode_ok (Usage.decode_codex_rate_limits_updated
+                   (Yojson.Safe.from_string codex_exhausted_params))
+    in
+    Fun.protect
+      ~finally:(fun () ->
+        Usage.set_record_observer (fun ~scope:_ ~observed_at:_ _ -> ()))
+      (fun () ->
+        Usage.set_record_observer (fun ~scope:_ ~observed_at:_ _ ->
+          failwith "synthetic sink failure");
+        Usage.record ~scope ~observed_at:1790500000.0 report;
+        check (option (float 0.0)) "failed report time is retained"
+          (Some 1790500000.0) (Usage.record_observer_failure_at ())))
 ;;
 
 (* --- HTTP usage endpoints: responses captured 2026-09-24, identifiers
@@ -865,6 +909,8 @@ let refusal_read decode body =
   | Runtime_provider_usage_read.Spent_until resets_at ->
     Printf.sprintf "spent until %.0f" resets_at
   | Spent_without_reset -> "spent without reset"
+  | Spent_in_several_limits limit_ids ->
+    "spent in " ^ String.concat "," (List.map (Option.value ~default:"-") limit_ids)
   | No_window_spent -> "no window spent"
 ;;
 
@@ -896,7 +942,18 @@ let test_only_gating_windows_explain_a_refusal () =
   check string "one short of the limit is headroom"
     "no window spent"
     (refusal_read Usage.decode_kimi_coding_usages
-       {|{"usage":{"limit":"100","used":"85","resetTime":"2026-09-30T10:10:16Z"},"limits":[{"window":{"duration":300,"timeUnit":"TIME_UNIT_MINUTE"},"detail":{"limit":"100","used":"99","resetTime":"2026-09-24T15:10:16Z"}}]}|})
+       {|{"usage":{"limit":"100","used":"85","resetTime":"2026-09-30T10:10:16Z"},"limits":[{"window":{"duration":300,"timeUnit":"TIME_UNIT_MINUTE"},"detail":{"limit":"100","used":"99","resetTime":"2026-09-24T15:10:16Z"}}]}|});
+  (* A Codex spent-usage refusal does not name the limit that refused it. The
+     read lists every metered limit, so a bucket that resets in a week must not
+     hold a call whose bucket resets in an hour. *)
+  check string "spent buckets of two Codex limits name no rest"
+    "spent in codex,codex_other"
+    (refusal_read Usage.decode_codex_rate_limits_read
+       {|{"rateLimits":{"limitId":"codex","primary":{"usedPercent":100,"windowDurationMins":300,"resetsAt":1790300000}},"rateLimitsByLimitId":{"codex":{"limitId":"codex","primary":{"usedPercent":100,"windowDurationMins":300,"resetsAt":1790300000},"secondary":null},"codex_other":{"primary":{"usedPercent":100,"windowDurationMins":10080,"resetsAt":1790900000},"secondary":null}}}|});
+  check string "two spent windows of one Codex limit rest until the later reset"
+    "spent until 1790900000"
+    (refusal_read Usage.decode_codex_rate_limits_read
+       {|{"rateLimits":{"limitId":"codex","primary":{"usedPercent":100,"windowDurationMins":300,"resetsAt":1790300000}},"rateLimitsByLimitId":{"codex":{"limitId":"codex","primary":{"usedPercent":100,"windowDurationMins":300,"resetsAt":1790300000},"secondary":{"usedPercent":100,"windowDurationMins":10080,"resetsAt":1790900000}},"codex_other":{"primary":{"usedPercent":12,"windowDurationMins":300,"resetsAt":1790301000},"secondary":null}}}|})
 ;;
 
 (* --- Repeating a read: [run_full]'s clock moves only when every fiber
@@ -1031,6 +1088,10 @@ let () =
             test_claude_default_and_explicit_home_share_scope
         ; test_case "codex read falls back and refuses a bad map" `Quick
             test_codex_read_falls_back_and_refuses_a_bad_map
+        ; test_case "sink receives accepted reports once" `Quick
+            test_durable_sink_receives_only_accepted_report
+        ; test_case "sink failure marks history gap" `Quick
+            test_sink_failure_marks_history_gap
         ] )
     ; ( "http usage endpoints"
       , [ test_case "openrouter-key" `Quick test_openrouter_key

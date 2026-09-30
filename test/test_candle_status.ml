@@ -68,6 +68,7 @@ let row : Candle_event.t =
       Candle_event.Snapshot
         { goal_id = "goal-1"
         ; request_id = "req-1"
+        ; verification_run_id = "run-1"
         ; criterion_revision = "rev-1"
         ; passed_at = time "2026-08-31T00:00:00Z"
         ; goal_created_at = time "2026-08-01T00:00:00Z"

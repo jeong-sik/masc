@@ -178,6 +178,21 @@ val handle_cycle_exception :
   registry_entry:Keeper_registry.registry_entry ->
   meta:keeper_meta -> exn -> keepalive_turn_outcome
 
+type turn_terminal_settlement =
+  { settled : bool
+  ; queue_failure : string option
+  }
+
+val turn_terminal_settlement :
+  label:string ->
+  (Keeper_registry_event_queue.turn_ack_result, string) result ->
+  turn_terminal_settlement
+(** How one admitted entry's turn-end terminal leaves the batch: [settled]
+    when a receipt committed or replayed, or when the entry was withdrawn
+    while the turn ran ([Turn_selection_withdrawn] is neither a failure nor a
+    reason to deliver it again). [queue_failure] carries the detail the loop
+    records as an event-queue failure. *)
+
 type batch_disposition =
   | Batch_ack_completed
   | Batch_ack_attention_only

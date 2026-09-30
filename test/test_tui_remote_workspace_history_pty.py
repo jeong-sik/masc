@@ -172,6 +172,9 @@ def run(binary: str, captures: Path | None) -> None:
                 lambda: predicate(screen(output)), timeout=WAIT_SECONDS), f"{label}: {screen(output)!r}"
 
         try:
+            h.resize_and_wait(process, fd, output,
+                rows=34, columns=TERMINAL_COLUMNS, needle=b"MASC Dashboard",
+                controls=(h.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
             assert str(Path(local_base).resolve()) == wire.local_base
             metadata_path = Path(local_base, ".masc", "keepers", "alpha.json")
             metadata_bytes = metadata_path.read_bytes()
@@ -286,7 +289,7 @@ def run(binary: str, captures: Path | None) -> None:
     h.run_terminal_scenario(binary,
         description="workspace change withdraws held chat history and retains its unsent draft",
         interact=interact, prepare_workspace=wire.prepare, http_fixtures=fixtures,
-        http_requests=posts, refresh=0.5, terminal_rows=34, terminal_cols=TERMINAL_COLUMNS)
+        http_requests=posts, refresh=0.5, terminal_cols=TERMINAL_COLUMNS)
 
 
 def scoped_roster_authority(binary: str) -> None:
@@ -335,6 +338,9 @@ def scoped_roster_authority(binary: str) -> None:
         try:
             # At 80 columns the Activity pane is not drawn. Board does not
             # need the roster, so entering Keepers dispatches a scoped GET.
+            h.resize_and_wait(process, fd, output,
+                rows=32, columns=80, needle=b"MASC Dashboard",
+                controls=(h.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
             h.palette_go(process, fd, output, b"go Board", b"MASC Board")
             await_screen(lambda text: b"workspace-b-board" in text, "B Board read did not settle")
             with wire.lock:
@@ -367,7 +373,7 @@ def scoped_roster_authority(binary: str) -> None:
     h.run_terminal_scenario(binary,
         description="superseded scoped roster cannot replace a newer full workspace reading",
         interact=interact, prepare_workspace=wire.prepare, http_fixtures=fixtures,
-        refresh=30.0, terminal_rows=32, terminal_cols=80)
+        refresh=30.0, terminal_cols=80)
 
 
 def queued_workspace_inputs(binary: str) -> None:
@@ -399,6 +405,9 @@ def queued_workspace_inputs(binary: str) -> None:
             assert h.wait_for_fixture_state(process, fd, output,
                 lambda: predicate(screen(output)), timeout=WAIT_SECONDS), label
         try:
+            h.resize_and_wait(process, fd, output,
+                rows=40, columns=TERMINAL_COLUMNS, needle=b"MASC Dashboard",
+                controls=(h.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
             h.tab_until(process, fd, output, b"MASC Keepers")
             h.select_keeper_row(process, fd, output, b"alpha")
             h.send_and_wait(process, fd, output, b"m", "Keepers ▸ alpha ▸ chat".encode())
@@ -440,7 +449,7 @@ def queued_workspace_inputs(binary: str) -> None:
     h.run_terminal_scenario(binary,
         description="workspace change suspends complete unsent inputs until explicit resume in A",
         interact=interact, prepare_workspace=wire.prepare, http_fixtures=fixtures,
-        refresh=0.5, terminal_rows=40, terminal_cols=TERMINAL_COLUMNS)
+        refresh=0.5, terminal_cols=TERMINAL_COLUMNS)
 
 
 def staged_payload_workspace_inputs(binary: str) -> None:
@@ -471,6 +480,9 @@ def staged_payload_workspace_inputs(binary: str) -> None:
             assert h.wait_for_fixture_state(process, fd, output,
                 lambda: predicate(screen(output)), timeout=WAIT_SECONDS), label
         try:
+            h.resize_and_wait(process, fd, output,
+                rows=40, columns=300, needle=b"MASC Dashboard",
+                controls=(h.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
             h.tab_until(process, fd, output, b"MASC Keepers")
             h.select_keeper_row(process, fd, output, b"alpha")
             h.send_and_wait(process, fd, output, b"m", "Keepers ▸ alpha ▸ chat".encode())
@@ -522,7 +534,7 @@ def staged_payload_workspace_inputs(binary: str) -> None:
     h.run_terminal_scenario(binary,
         description="staged image bytes and references retain exact workspace and Keeper ownership",
         interact=interact, prepare_workspace=prepare, http_fixtures=fixtures,
-        refresh=0.5, terminal_rows=40, terminal_cols=300)
+        refresh=0.5, terminal_cols=300)
 
 
 def armed_schedule_and_runtime_workspace(binary: str) -> None:
@@ -554,6 +566,9 @@ def armed_schedule_and_runtime_workspace(binary: str) -> None:
                      "/api/v1/tools/masc_schedule_cancel": h.RequestHttpResponse(cancel)})
     requests = []
     def interact(process, fd, _slave, output, _base):
+        h.resize_and_wait(process, fd, output,
+            rows=45, columns=300, needle=b"MASC Dashboard",
+            controls=(h.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
         def await_screen(predicate, label):
             assert h.wait_for_fixture_state(process, fd, output,
                 lambda: predicate(screen(output)), timeout=WAIT_SECONDS), label
@@ -590,7 +605,7 @@ def armed_schedule_and_runtime_workspace(binary: str) -> None:
     h.run_terminal_scenario(binary,
         description="workspace switch withdraws schedule confirmation, runtime picker and unknown-identity lifecycle",
         interact=interact, prepare_workspace=wire.prepare, http_fixtures=fixtures,
-        http_requests=requests, refresh=0.5, terminal_rows=45, terminal_cols=300)
+        http_requests=requests, refresh=0.5, terminal_cols=300)
 
 
 def observer_workspace_retirement(binary: str) -> None:
@@ -639,6 +654,9 @@ def observer_workspace_retirement(binary: str) -> None:
             assert h.wait_for_fixture_state(process, fd, output,
                 lambda: predicate(screen(output)), timeout=WAIT_SECONDS), label
         try:
+            h.resize_and_wait(process, fd, output,
+                rows=45, columns=300, needle=b"MASC Dashboard",
+                controls=(h.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
             h.tab_until(process, fd, output, b"MASC System")
             h.send_and_wait(process, fd, output, b"A", b"MASC Activity")
             h.send_and_wait(process, fd, output, b"f", b"scope actions")
@@ -662,7 +680,7 @@ def observer_workspace_retirement(binary: str) -> None:
     h.run_terminal_scenario(binary,
         description="workspace switch retires live observer session, cursor and acting events",
         interact=interact, prepare_workspace=wire.prepare, http_fixtures=fixtures,
-        refresh=0.5, terminal_rows=45, terminal_cols=300)
+        refresh=0.5, terminal_cols=300)
 
 
 def identity_refresh_workspace_chain(binary: str) -> None:
@@ -707,6 +725,9 @@ def identity_refresh_workspace_chain(binary: str) -> None:
             assert len(title_rows) == 1, h.screen_rows(bytes(output))
             h.press_label_on_screen(process, fd, output, b"Identity", row=title_rows[0], needle=marker)
         try:
+            h.resize_and_wait(process, fd, output,
+                rows=45, columns=300, needle=b"MASC Dashboard",
+                controls=(h.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
             h.tab_until(process, fd, output, b"MASC Keepers")
             h.select_keeper_row(process, fd, output, b"alpha")
             h.send_and_wait(process, fd, output, b"\r", b"Total Turns:")
@@ -744,7 +765,7 @@ def identity_refresh_workspace_chain(binary: str) -> None:
     h.run_terminal_scenario(binary,
         description="workspace withdrawal cancels held identity mutation before its next provider and allows fresh A retry",
         interact=interact, prepare_workspace=wire.prepare, http_fixtures=fixtures,
-        refresh=0.5, terminal_rows=45, terminal_cols=300)
+        refresh=0.5, terminal_cols=300)
 
 
 
@@ -765,6 +786,9 @@ def bundle_identity_during_read(binary: str) -> None:
     fixtures.update({ROSTER_PATH: wire.roster, "/health": wire.health,
                      "/health?full=1": wire.health})
     def interact(process, fd, _slave, output, _base):
+        h.resize_and_wait(process, fd, output,
+            rows=34, columns=TERMINAL_COLUMNS, needle=b"MASC Dashboard",
+            controls=(h.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
         h.tab_until(process, fd, output, b"MASC Keepers")
         assert h.wait_for_fixture_state(process, fd, output,
             lambda: b"a.current" in screen(output), timeout=WAIT_SECONDS)
@@ -789,7 +813,7 @@ def bundle_identity_during_read(binary: str) -> None:
     h.run_terminal_scenario(binary,
         description="discard a bundle whose workspace changes during its roster GET",
         interact=interact, prepare_workspace=wire.prepare, http_fixtures=fixtures,
-        refresh=30.0, terminal_rows=34, terminal_cols=TERMINAL_COLUMNS)
+        refresh=30.0, terminal_cols=TERMINAL_COLUMNS)
 
 
 def settings_editor_workspace_change(binary: str) -> None:
@@ -809,6 +833,9 @@ def settings_editor_workspace_change(binary: str) -> None:
             f"while not Path({str(release)!r}).exists(): time.sleep(0.01)\n")
         def interact(process, fd, _slave, output, _base):
             try:
+                h.resize_and_wait(process, fd, output,
+                    rows=40, columns=TERMINAL_COLUMNS, needle=b"MASC Dashboard",
+                    controls=(h.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
                 h.tab_until(process, fd, output, b"MASC Keepers")
                 h.select_keeper_row(process, fd, output, b"alpha")
                 os.write(fd, b"e")
@@ -830,7 +857,7 @@ def settings_editor_workspace_change(binary: str) -> None:
             description="same-revision workspace replacement during settings editor refuses the POST",
             interact=interact, prepare_workspace=wire.prepare, http_fixtures=fixtures,
             http_requests=posts, extra_env={"EDITOR": shlex.join([sys.executable, str(editor)])},
-            refresh=30.0, terminal_rows=40, terminal_cols=TERMINAL_COLUMNS)
+            refresh=30.0, terminal_cols=TERMINAL_COLUMNS)
 
 
 def ask_workspace_withdrawal(binary: str) -> None:
@@ -854,6 +881,9 @@ def ask_workspace_withdrawal(binary: str) -> None:
         posts: h.HttpRequests = []
         def interact(process, fd, _slave, output, _base):
             try:
+                h.resize_and_wait(process, fd, output,
+                    rows=40, columns=TERMINAL_COLUMNS, needle=b"MASC Dashboard",
+                    controls=(h.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
                 h.palette_go(process, fd, output, b"go Approvals", b"Questions waiting on you")
                 h.send_and_wait(process, fd, output, b"a", b"Enter:answer")
                 h.send_and_wait(process, fd, output, b"1", b"1 (o) ")
@@ -887,7 +917,7 @@ def ask_workspace_withdrawal(binary: str) -> None:
         h.run_terminal_scenario(binary,
             description=f"Ask editor and held submit are withdrawn with workspace (admitted={submit})",
             interact=interact, prepare_workspace=wire.prepare, http_fixtures=fixtures,
-            http_requests=posts, refresh=0.5, terminal_rows=40, terminal_cols=TERMINAL_COLUMNS)
+            http_requests=posts, refresh=0.5, terminal_cols=TERMINAL_COLUMNS)
 
 
 def github_workspace_withdrawal(binary: str) -> None:
@@ -912,6 +942,9 @@ def github_workspace_withdrawal(binary: str) -> None:
             assert h.wait_for_fixture_state(process, fd, output,
                 lambda: predicate(screen(output)), timeout=WAIT_SECONDS)
         try:
+            h.resize_and_wait(process, fd, output,
+                rows=45, columns=300, needle=b"MASC Dashboard",
+                controls=(h.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
             h.tab_until(process, fd, output, b"MASC Keepers")
             h.select_keeper_row(process, fd, output, b"alpha")
             h.send_and_wait(process, fd, output, b"\r", b"Total Turns:")
@@ -948,7 +981,7 @@ def github_workspace_withdrawal(binary: str) -> None:
     h.run_terminal_scenario(binary,
         description="GitHub device stream cannot restore a withdrawn workspace view",
         interact=interact, prepare_workspace=wire.prepare, http_fixtures=fixtures,
-        http_requests=posts, refresh=0.5, terminal_rows=45, terminal_cols=300)
+        http_requests=posts, refresh=0.5, terminal_cols=300)
 
 
 def connector_workspace_withdrawal(binary: str) -> None:
@@ -990,6 +1023,9 @@ def connector_workspace_withdrawal(binary: str) -> None:
             await_screen(lambda text: marker in text and b"333 (name unknown)" in text,
                          "fresh connector targets are not visible")
         try:
+            h.resize_and_wait(process, fd, output,
+                rows=45, columns=300, needle=b"MASC Dashboard",
+                controls=(h.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
             h.tab_until(process, fd, output, b"MASC Keepers")
             h.select_keeper_row(process, fd, output, b"alpha")
             h.send_and_wait(process, fd, output, b"\r", b"Total Turns:")
@@ -1030,7 +1066,7 @@ def connector_workspace_withdrawal(binary: str) -> None:
     h.run_terminal_scenario(binary,
         description="workspace switch withdraws connector arms and held sequential writes with reused IDs",
         interact=interact, prepare_workspace=wire.prepare, http_fixtures=fixtures,
-        refresh=0.5, terminal_rows=45, terminal_cols=300)
+        refresh=0.5, terminal_cols=300)
 
 
 if __name__ == "__main__":

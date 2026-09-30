@@ -38,7 +38,7 @@
 
 ### Changed
 
-- Stacked feature PRs use independent source review and manually requested focused checks. Release candidates require an explicitly dispatched full verification cycle; version-tag pushes separately trigger the Release workflow. A failed or timed-out check is never counted as passing (#40280, #40297, #40298).
+- Stacked feature PRs use independent source review and manually requested focused checks. Release candidates require an explicitly dispatched full verification cycle. Version-tag pushes trigger the Release workflow only while that workflow is enabled; publication follows the operator-approved release path. A failed or timed-out check is never counted as passing (#40280, #40297, #40298).
 - The TUI now opens on a measured Dashboard, groups Goals and active Tasks
   under Work, and shows provider quota history, Keeper token and cost reports,
   and operational telemetry in Usage. Missing and failed readings remain

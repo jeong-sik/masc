@@ -98,7 +98,9 @@ let test_backlog_transition_and_archive_preserve_exact_references () =
   |> expect_transition;
   let transitioned = task_of config task_id in
   check_references "state transitions" expected transitioned.skills;
-  Workspace.append_archive_tasks config [ transitioned ];
+  (match Workspace.append_archive_tasks config [ transitioned ] with
+   | Ok () -> ()
+   | Error detail -> fail ("archive write failed: " ^ detail));
   match
     Workspace.read_orphaned_nonterminal_tasks config
     |> List.find_opt (fun (task : Masc_domain.task) -> String.equal task.id task_id)

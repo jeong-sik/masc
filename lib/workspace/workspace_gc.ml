@@ -44,6 +44,8 @@ let heartbeat config ~agent_name =
   end else
     Agent_not_found agent_name
 
+exception Task_archive_failed of string
+
 (** Explicit age-based garbage collection. The caller must choose the retention
     horizon; this layer has no default retention policy. Agent lifecycle is not
     part of GC and remains an explicit operator action. *)
@@ -111,8 +113,21 @@ let gc config ~days () =
       in
       let live_tasks_after_gc = kept_tasks @ restored in
 
-      (* Backlog first: on a crash before the archive is rewritten below, the
-         restored task survives in both stores and the next GC pass dedups it.
+      (* Archive first. The backlog commit below is the point after which an
+         archived task lives only in the archive, so the archive has to hold
+         it before that commit. A crash between the two writes leaves the task
+         in both stores: the next pass archives it again (a row already in the
+         archive wins) and then removes it from the backlog. An archive that
+         cannot be read or written stops the pass here, with the backlog as it
+         was. The archive lock is taken inside the backlog lock and released
+         before the backlog write; nothing takes them in the other order. *)
+      (match append_archive_tasks config archived_tasks with
+       | Ok () -> ()
+       | Error detail -> raise (Task_archive_failed detail));
+
+      (* Restoring runs the other way: the backlog first, then the archive
+         drop below. A crash between them leaves the restored task in both
+         stores and the next pass drops the archive copy.
          The shared backlog lock keeps this read-modify-write on the same
          revision lineage as task creation and transitions. *)
       if archived_tasks <> [] || restored <> [] then begin
@@ -122,11 +137,6 @@ let gc config ~days () =
       end;
       live_tasks_after_gc, archived_tasks, restored)
   in
-  (* Archive I/O has its own lock and is intentionally outside the contended
-     backlog critical section. The backlog commit remains first, preserving
-     the existing restore crash order; a subsequent GC pass deduplicates a
-     restored task left in both stores. *)
-  if archived_tasks <> [] then append_archive_tasks config archived_tasks;
   (* Drop every orphaned non-terminal entry from the archive, including any
      that was already live (a pure duplicate). *)
   if orphaned <> [] then

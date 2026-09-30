@@ -2529,6 +2529,13 @@ let gc_backlog_has config task_id =
     (Workspace.read_backlog config).tasks
 ;;
 
+(* A test that seeds the archive wants the seed to have landed. *)
+let append_archive config tasks =
+  match Workspace.append_archive_tasks config tasks with
+  | Ok () -> ()
+  | Error detail -> Alcotest.fail ("seeding the archive failed: " ^ detail)
+;;
+
 let gc_message_path_with_content config content =
   let messages_dir = Workspace.messages_dir config in
   let matching_paths =
@@ -2636,7 +2643,7 @@ let test_gc_restores_orphaned_nonterminal_from_archive () =
     in
     (* Simulate the orphaning a buggy GC pass produced: obligation lives in the
        archive only, absent from the backlog. *)
-    Workspace.append_archive_tasks config [ orphan ];
+    append_archive config [ orphan ];
     Alcotest.(check bool)
       "precondition: orphan not yet in backlog"
       false
@@ -2669,7 +2676,7 @@ let test_gc_restored_task_preserves_old_messages_same_pass () =
              ; verification_id = "verif-904"
              })
     in
-    Workspace.append_archive_tasks config [ orphan ];
+    append_archive config [ orphan ];
     let content = "verification context for task-904" in
     let _ =
       Workspace.broadcast ~audience:Workspace_broadcast.System_record
@@ -2722,6 +2729,74 @@ let test_gc_archives_terminal_tasks () =
     let archive_ids = Workspace.read_archive_task_ids config in
     Alcotest.(check bool) "done task archived" true (List.mem 902 archive_ids);
     Alcotest.(check bool) "cancelled task archived" true (List.mem 903 archive_ids))
+;;
+
+let gc_done_task id =
+  gc_make_task
+    ~id
+    ~created_at:gc_ancient_ts
+    ~status:
+      (Masc_domain.Done
+         { assignee = "claude"; completed_at = gc_ancient_ts; notes = None })
+;;
+
+(* The backlog commit is the point after which an archived task lives only in
+   the archive, so a crash right after it loses whatever the archive does not
+   hold yet. [on_task_mutation_fn] runs when the backlog commit settles: read
+   the archive there. *)
+let test_gc_archives_before_it_commits_the_backlog () =
+  with_test_env (fun config ->
+    write_tasks config [ gc_done_task "task-920"; gc_done_task "task-921" ];
+    let archive_ids_at_commit = ref [] in
+    let previous = Atomic.get Workspace_hooks.on_task_mutation_fn in
+    Atomic.set Workspace_hooks.on_task_mutation_fn (fun () ->
+      archive_ids_at_commit :=
+        List.sort Int.compare (Workspace.read_archive_task_ids config)
+        :: !archive_ids_at_commit);
+    Fun.protect
+      ~finally:(fun () -> Atomic.set Workspace_hooks.on_task_mutation_fn previous)
+      (fun () -> ignore (Workspace.gc config ~days:1 ()));
+    (match !archive_ids_at_commit with
+     | [ ids ] ->
+       Alcotest.(check (list int))
+         "the archive already holds both tasks when the backlog commit settles"
+         [ 920; 921 ]
+         ids
+     | commits ->
+       Alcotest.fail
+         (Printf.sprintf "expected one backlog commit, saw %d" (List.length commits)));
+    Alcotest.(check bool) "first task left the live backlog" false
+      (gc_backlog_has config "task-920");
+    Alcotest.(check bool) "second task left the live backlog" false
+      (gc_backlog_has config "task-921"))
+;;
+
+(* A directory where the archive file should be cannot be read as an archive.
+   That is not an empty archive: GC stops before it touches the backlog, so
+   the task it was about to archive stays live, and the path is left alone. *)
+let test_gc_stops_before_the_backlog_when_the_archive_is_unreadable () =
+  with_test_env (fun config ->
+    write_tasks config [ gc_done_task "task-922" ];
+    let archive_path = Workspace_utils_paths_backend.archive_path config in
+    Fs_compat.mkdir_p archive_path;
+    let occupant = Filename.concat archive_path "occupant" in
+    Fs_compat.save_file occupant "keep";
+    Fun.protect
+      ~finally:(fun () ->
+        Sys.remove occupant;
+        Unix.rmdir archive_path)
+      (fun () ->
+        (match Workspace.gc config ~days:1 () with
+         | (_ : string) -> Alcotest.fail "gc returned although the archive cannot be read"
+         | exception Workspace.Task_archive_failed detail ->
+           Alcotest.(check bool)
+             "the failure names the archive file"
+             true
+             (str_contains detail "tasks-archive.json"));
+        Alcotest.(check bool) "the task is still live" true
+          (gc_backlog_has config "task-922");
+        Alcotest.(check bool) "the archive path is untouched" true
+          (Sys.file_exists occupant)))
 ;;
 
 (* ============================================================ *)
@@ -2808,10 +2883,76 @@ let test_append_archive_tasks () =
       ; skills = []
       }
     in
-    Workspace.append_archive_tasks config [ task ];
+    append_archive config [ task ];
     (* Add a new task to verify archive max ID is checked *)
     let result = Workspace.add_task config ~title:"New Task" ~priority:1 ~description:"" in
     Alcotest.(check bool) "task added" true (contains_check result))
+;;
+
+let archive_file config = Workspace_utils_paths_backend.archive_path config
+
+let archive_append_error config tasks =
+  match Workspace.append_archive_tasks config tasks with
+  | Ok () -> Alcotest.fail "append reported success on an archive it cannot read"
+  | Error detail -> detail
+;;
+
+(* A file that is not an archive stays exactly as it was: the append reports
+   the failure and does not replace it with a new archive of one task. *)
+let test_append_archive_tasks_refuses_a_file_that_is_not_an_archive () =
+  List.iter
+    (fun (label, content) ->
+      with_test_env (fun config ->
+        let path = archive_file config in
+        Fs_compat.save_file path content;
+        let detail = archive_append_error config [ gc_done_task "task-930" ] in
+        Alcotest.(check bool)
+          (label ^ ": the error names the archive file")
+          true
+          (str_contains detail "tasks-archive.json");
+        Alcotest.(check string)
+          (label ^ ": the file is untouched")
+          content
+          (Fs_compat.load_file path)))
+    [ "not json", "this is not json"
+    ; "blank", ""
+    ; "no tasks list", {|{"last_updated":"2026-01-01T00:00:00Z"}|}
+    ; "tasks is not a list", {|{"tasks":"task-1"}|}
+    ]
+;;
+
+(* A row the archive holds without an id is not a duplicate and not ours to
+   drop, the rule [drop_archive_tasks] already states for the same file. *)
+let test_append_archive_tasks_keeps_a_row_with_no_id () =
+  with_test_env (fun config ->
+    let path = archive_file config in
+    Fs_compat.save_file path {|{"tasks":[{"title":"row with no id"}]}|};
+    append_archive config [ gc_done_task "task-931" ];
+    let rows =
+      match Yojson.Safe.from_string (Fs_compat.load_file path) with
+      | `Assoc fields ->
+        (match List.assoc_opt "tasks" fields with
+         | Some (`List rows) -> rows
+         | Some _ | None -> Alcotest.fail "the archive lost its tasks list")
+      | _ -> Alcotest.fail "the archive is not an object"
+    in
+    Alcotest.(check int) "both rows are in the archive" 2 (List.length rows);
+    Alcotest.(check bool) "the row with no id survived" true
+      (List.exists
+         (fun row ->
+           Option.is_none (Json_util.get_string row "id")
+           && Json_util.get_string row "title" = Some "row with no id")
+         rows))
+;;
+
+(* A missing archive is an empty one: the first append creates it. *)
+let test_append_archive_tasks_creates_the_archive () =
+  with_test_env (fun config ->
+    Alcotest.(check bool) "precondition: no archive yet" false
+      (Sys.file_exists (archive_file config));
+    append_archive config [ gc_done_task "task-932" ];
+    Alcotest.(check (list int)) "the archive holds the task" [ 932 ]
+      (Workspace.read_archive_task_ids config))
 ;;
 
 (* ============================================================ *)
@@ -3556,6 +3697,14 @@ let () =
             "archives terminal tasks"
             `Quick
             test_gc_archives_terminal_tasks
+        ; Alcotest.test_case
+            "archives before it commits the backlog"
+            `Quick
+            test_gc_archives_before_it_commits_the_backlog
+        ; Alcotest.test_case
+            "stops before the backlog when the archive is unreadable"
+            `Quick
+            test_gc_stops_before_the_backlog_when_the_archive_is_unreadable
         ] )
     ; (* === Task ID Parsing === *)
       ( "task_id"
@@ -3570,7 +3719,21 @@ let () =
             test_next_task_number_includes_durable_event_history
         ] )
     ; (* === Archive === *)
-      "archive", [ Alcotest.test_case "append tasks" `Quick test_append_archive_tasks ]
+      ( "archive"
+      , [ Alcotest.test_case "append tasks" `Quick test_append_archive_tasks
+        ; Alcotest.test_case
+            "append refuses a file that is not an archive"
+            `Quick
+            test_append_archive_tasks_refuses_a_file_that_is_not_an_archive
+        ; Alcotest.test_case
+            "append keeps a row with no id"
+            `Quick
+            test_append_archive_tasks_keeps_a_row_with_no_id
+        ; Alcotest.test_case
+            "append creates a missing archive"
+            `Quick
+            test_append_archive_tasks_creates_the_archive
+        ] )
     ; ( "revision"
       , [ Alcotest.test_case
             "version bumps exactly once per commit"

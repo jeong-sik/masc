@@ -75,31 +75,47 @@ let decide ~appraise ~(policy : Candle_config.payout_policy) events (waiting : C
          Ok (E.Paid payment))
   | None, _, _ -> Error (A.Transport_unavailable "no Snapshot names the confirmed verifier run")
   | Some _, (None | Some _), None | Some _, None, Some _ -> Error (A.Transport_unavailable "Candidates are not durable yet")
+type settlement_refusal =
+  | Settlement_unavailable of string
+  | Invalid_settlement of string
+
+let settlement_enabled ~base_path =
+  match Candle_status.current ~base_path with
+  | Candle_config.Enabled _ -> Ok ()
+  | Candle_config.Off -> Error "Candle was turned off during appraisal"
+  | Candle_config.Disabled {reason} -> Error ("Candle disabled during appraisal: " ^ reason)
+
 let settle ~now ~appraise ~policy ~base_path events (waiting : Candle_payout.waiting) =
   let* body = decide ~appraise ~policy events waiting in
-  (* A model wait may outlive an operator disable. Keep the accepted policy
-     snapshot for arithmetic, but never append new money after disable. *)
-  let* () = match Candle_status.current ~base_path with
-    | Candle_config.Enabled _ -> Ok ()
-    | Candle_config.Off -> Error (A.Transport_unavailable "Candle was turned off during appraisal")
-    | Candle_config.Disabled {reason} -> Error (A.Transport_unavailable ("Candle disabled during appraisal: " ^ reason)) in
+  (* Keep accepted arithmetic inputs, but recheck availability after the
+     yielding ledger read on every compare-and-append attempt. This is an
+     observation before append, not a lock on external policy-file edits. *)
+  let* () = settlement_enabled ~base_path
+    |> Result.map_error (fun detail -> A.Transport_unavailable detail) in
   let* at = Candle_stamp.at ~now |> Result.map_error (fun detail -> A.Transport_unavailable detail) in
   Candle_ledger.update ~base_path (fun view ->
     match Candle_payout.state ~goal_id:waiting.goal_id (Candle_ledger.events view) with
     | Candle_payout.Waiting current when current = waiting ->
+      let* () = settlement_enabled ~base_path
+        |> Result.map_error (fun detail -> Settlement_unavailable detail) in
       let events = Candle_ledger.events view in
-      let* () = Candle_payout.validate_settlement waiting events body in
+      let* () = Candle_payout.validate_settlement waiting events body
+        |> Result.map_error (fun detail -> Invalid_settlement detail) in
       let* () = match body with
         | E.Paid payment ->
-          let* balance = Candle_balance.of_events events |> Result.map_error Candle_balance.error_to_string in
-          Candle_balance.credit balance payment |> Result.map (fun _ -> ()) |> Result.map_error Candle_balance.error_to_string
+          let* balance = Candle_balance.of_events events
+            |> Result.map_error (fun error -> Invalid_settlement (Candle_balance.error_to_string error)) in
+          Candle_balance.credit balance payment |> Result.map (fun _ -> ())
+          |> Result.map_error (fun error -> Invalid_settlement (Candle_balance.error_to_string error))
         | E.Unattributed _ | E.Payout_failed _ | E.Snapshot _ | E.Payout_owed _ | E.Candidates _ -> Ok () in
       Ok ([{E.at;body}], Settled waiting.goal_id)
     | Candle_payout.Waiting _ | Candle_payout.No_obligation | Candle_payout.Failed _ | Candle_payout.Settled -> Ok ([], Superseded waiting.goal_id))
   |> Result.map_error (function
-    | Candle_ledger.Refused detail | Candle_ledger.Event_unwritable detail -> A.Invalid_response detail
+    | Candle_ledger.Refused (Settlement_unavailable detail) -> A.Transport_unavailable detail
+    | Candle_ledger.Refused (Invalid_settlement detail) | Candle_ledger.Event_unwritable detail -> A.Invalid_response detail
     | (Candle_ledger.Read_failed _ | Candle_ledger.Write_failed _ | Candle_ledger.Write_locked _) as error ->
-      A.Transport_unavailable (Candle_ledger.update_error_to_string Fun.id error))
+      A.Transport_unavailable (Candle_ledger.update_error_to_string
+        (function Settlement_unavailable detail | Invalid_settlement detail -> detail) error))
 let pending ~base_path =
   Candle_ledger.read ~base_path |> Result.map (fun view -> Candle_payout.waiting (Candle_ledger.events view))
   |> Result.map_error Candle_ledger.read_error_to_string

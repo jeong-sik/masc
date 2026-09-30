@@ -8840,15 +8840,32 @@ let newest_named_image rows =
          | Masc_tui_image_preview.No_image -> None
          | image -> Some image)
 
-(* Only an image observed after staging can supersede the draft. A history
-   load alone supplies no such observation, even if it completed after paste.
-   Select within those observations first: a future-clock history row must
-   not hide the eligible session image before this comparison takes place. *)
+let image_request_is_active state entry =
+  let matches request =
+    String.equal request.Keeper_chat.keeper_name entry.me_keeper_name
+    && String.equal request.request_id entry.me_request_id
+  in
+  (match Chat_queue.find state.msg_queued ~request_id:entry.me_request_id with
+   | Some item -> matches item.request
+   | None -> false)
+  || List.exists (fun (inflight : inflight) ->
+       matches inflight.sent_request
+       && match Masc_tui_keeper_chat_transcript.phase inflight.log.tl_transcript with
+          | Waiting | Working -> true
+          | Stream_ended | Stream_failed _ -> false)
+       state.msg_inflight
+
+(* Active local inputs precede loaded history even across clock skew. Once
+   settled, a local row follows the canonical timeline: a bounded history
+   response may omit that row forever while including newer images.
+   Only an image observed after staging can supersede the draft; a delayed
+   history load alone supplies no such observation. *)
 let conversation_image state =
   let session = image_session_rows state in
   let observed =
     match state.msg_attachments, state.msg_attachments_since with
-    | [], _ | _ :: _, None -> Some session
+    | [], _ -> Some (List.filter (image_request_is_active state) session)
+    | _ :: _, None -> Some session
     | _ :: _, Some since -> msg_entries_after_anchor session since
   in
   match Option.bind observed newest_named_image with
@@ -8883,12 +8900,7 @@ let open_stored_image state ~mailbox ~notice ~name reference =
         | Ok (status_code, body) ->
             Eio_guard.run_in_systhread ~label:"tui-sent-image-decode" (fun () ->
               let response = Masc_tui_http.decode_json ~allow_empty:false ~status_code ~body in
-              Result.bind response (function
-                | `Assoc fields ->
-                    (match List.assoc_opt "content" fields with
-                     | Some (`String payload) -> Masc_tui_image_preview.decode_payload payload
-                     | Some _ | None -> Error "sent image response has no payload")
-                | _ -> Error "invalid sent image response"))
+              Result.bind response (Masc_tui_image_preview.decode_artifact reference))
       in
       enqueue_async mailbox (Sent_image_ready { generation; view; keeper_name; name; result })
     in

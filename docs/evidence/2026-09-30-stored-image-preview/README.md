@@ -26,20 +26,32 @@ screen projection, and `before.png` renders that projection with Pillow;
 colours are illustrative. No production Keeper input or runtime setting was
 changed by this fixture.
 
-The patch selects the newest observed session image first, including queued
-rows. With a staged draft, only observations after its saved session anchor
-qualify. The loaded/session timeline supplies a fallback when no such image
-exists; its timestamps cannot hide a newer session candidate even when the
-server clock runs ahead. When an image cannot be proven newer than the staged
-draft from retained session observations, the draft wins. History loading
-alone cannot steal its preview. This conservative policy does not implement
-persistent arrival ordering.
+The patch gives active queued or inflight session images priority over loaded
+history, including when the server clock runs ahead. Settled session images
+instead follow the canonical loaded/session timeline: an old local user row
+can remain after it falls outside the server's bounded history tail, and must
+not permanently hide a newer saved image. With a staged draft, only session
+observations after its saved anchor can supersede it. When such an observation
+cannot be established, the draft wins. History loading alone cannot steal its
+preview. This conservative policy does not implement persistent arrival
+ordering.
 
 The authenticated artifact request and non-success refusal stay on the Eio
 fiber. Only successful JSON/base64 decoding moves to the system thread.
+Before base64 decoding, the artifact envelope must contain typed `sha256`,
+`bytes`, and `content` fields. Its digest and byte count must match the recorded
+reference, and the actual content length and SHA-256 must match as well. These
+checks cover the retained wire string, including a data URI prefix when
+present; they do not compare the decoded PNG size to the wire byte count.
 The existing generation, view and Keeper guards discard obsolete previews.
 
 Validation:
+
+- `artifact-decoder-typecheck.json` records successful OCaml 5.5.1 standalone
+  type checks of the new image-preview interface, implementation and test.
+  These used existing repository/opam dependency interfaces; implementation
+  and test checks stopped after typing. This is neither linked test execution
+  nor a whole-application type check.
 
 - Installed binary: the failure above reproduced in an isolated PTY.
 - Changed OCaml files: OCaml 5.5.1 parsing passed.
@@ -55,8 +67,14 @@ Validation:
   expectation updated from waiting to pending.
 
 The registered PTY scenario covers successful retained bytes, HTTP refusal,
-malformed content, queued images and delayed history. Additional queued and
-delayed-history cases simulate a server clock one hour ahead of the client.
+malformed or missing envelope fields, mismatched reference digest or byte
+count, same-length content corruption, queued images and delayed history.
+Additional queued and delayed-history cases simulate a server clock one hour
+ahead of the client. The settled-history case sends a local image, observes its
+reply and a completed frame without pending activity, then requires Ctrl-O to
+open a newer saved image from a bounded tail that omits the old user request.
+Pure artifact tests cover both bare base64 and data URI payloads, required
+envelope fields, and substituted or corrupted content.
 The cancellation case is a bounded negative observation, not proof that a late client mailbox
 event was consumed. These scenarios have not run against a patched binary.
 No CI, local full build, installation or production success is claimed.

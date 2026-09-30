@@ -2,6 +2,7 @@
 import argparse
 import base64
 import hashlib
+import json
 import os
 from pathlib import Path
 import threading
@@ -10,8 +11,9 @@ import time
 import test_tui_keyboard_input as h
 
 SOURCE_MODULES = ("bin/masc_tui.ml", "bin/masc_tui_image_preview.ml")
-MODES = ("success", "refused", "malformed", "cancel", "queued", "queued-clock-skew",
-         "delayed-history", "delayed-history-clock-skew")
+MODES = ("success", "refused", "malformed", "wrong-digest", "wrong-bytes",
+         "corrupt-content", "missing-envelope", "cancel", "queued", "queued-clock-skew",
+         "delayed-history", "delayed-history-clock-skew", "settled-history")
 CHAT = "Keepers ▸ alpha ▸ chat".encode()
 STAGED_NAME = "newest.png"
 # A test observation window, not proof that the client handled its stale result.
@@ -28,11 +30,13 @@ def run(executable, *, mode, evidence_dir=None):
     queued = mode in ("queued", "queued-clock-skew")
     delayed_history = mode in ("delayed-history", "delayed-history-clock-skew")
     clock_skew = mode in ("queued-clock-skew", "delayed-history-clock-skew")
+    settled_history = mode == "settled-history"
     queue = h.AtomicChatFixture(hold_first_acceptance=True) if queued else None
     fixtures = queue.fixtures if queue is not None else {}
     history = h.GatedHttpResponse((200, []), hold_seconds=15)
     image = []
     request_count = []
+    submitted = []
 
     def prepare(base_path):
         h.seed_image_workspace(base_path)
@@ -50,8 +54,26 @@ def run(executable, *, mode, evidence_dir=None):
             }],
         }])
         fixtures["/api/v1/keepers/alpha/chat/history"] = (
-            history if delayed_history else history.response
+            history if delayed_history else (lambda: history.response)
         )
+
+        if settled_history:
+            def complete_local_image(body):
+                submitted.append(json.loads(body))
+                # A later bounded tail no longer includes the original user
+                # request. Its session row therefore survives reconciliation.
+                # This timestamp follows the POST; no clock wait is needed.
+                history.response = (200, [{
+                    "id": "newer-retained-image", "role": "user",
+                    "content": "bounded-tail-image-ready", "ts": time.time(),
+                    "attachments": [{
+                        "id": "newer-image", "type": "image", "name": "newer-retained.png",
+                        "mime_type": "image/png", "data": marker,
+                    }],
+                }])
+                return h.keeper_chat_succeeded_response(body)
+
+            fixtures["/api/v1/keepers/chat/stream"] = h.RequestHttpResponse(complete_local_image)
 
         def fetch():
             request_count.append(sha)
@@ -61,9 +83,19 @@ def run(executable, *, mode, evidence_dir=None):
             response_ready.set()
             if mode == "refused":
                 return 503, {"error": "fixture artifact unavailable"}
+            envelope = {"sha256": sha, "bytes": len(payload), "mime": "text/plain", "content": payload}
             if mode == "malformed":
-                return 200, {"content": 123}
-            return 200, {"content": payload}
+                envelope["content"] = 123
+            elif mode == "wrong-digest":
+                envelope["sha256"] = "a" * 64
+            elif mode == "wrong-bytes":
+                envelope["bytes"] = len(payload) + 1
+            elif mode == "corrupt-content":
+                # Same length and still valid base64, but not the recorded blob.
+                envelope["content"] = ("A" if payload[0] != "A" else "B") + payload[1:]
+            elif mode == "missing-envelope":
+                envelope = {"content": payload}
+            return 200, envelope
 
         fixtures["/api/v1/artifacts/" + sha] = fetch
 
@@ -124,6 +156,29 @@ def run(executable, *, mode, evidence_dir=None):
                     loaded_end = h.end_of_needle(output, b"retained-image-ready", loaded_from)
                     h.wait_for_output(process, fd, output, h.FRAME_END, start=loaded_end, timeout=5)
 
+            if settled_history:
+                stage(process, fd, output, base_path)
+                h.send_and_wait(process, fd, output, b"settled-local-image", h.composer_showing(b"settled-local-image"))
+                sent_from = len(output)
+                os.write(fd, b"\r")
+                h.wait_for_output(process, fd, output, b"reply-settled-local-image", start=sent_from, timeout=5)
+                h.wait_for_output(process, fd, output, b"bounded-tail-image-ready", start=sent_from, timeout=5)
+
+                def settled_frame():
+                    end = output.rfind(h.FRAME_END)
+                    if end < sent_from:
+                        return False
+                    screen = h.screen_text(bytes(output[:end + len(h.FRAME_END)]))
+                    return (b"reply-settled-local-image" in screen
+                            and b"bounded-tail-image-ready" in screen
+                            and b"IN PROGRESS" not in screen and b"Queue (" not in screen
+                            and b"stream ended; settling" not in screen)
+
+                if not h.wait_for_fixture_state(process, fd, output, settled_frame, timeout=5):
+                    raise AssertionError("new bounded history was not drawn after the image turn settled")
+                if len(submitted) != 1 or len(submitted[0].get("attachments", [])) != 1:
+                    raise AssertionError("local image turn did not submit its attachment")
+
             start = len(output)
             os.write(fd, b"\x0f")
             if queued or delayed_history:
@@ -163,12 +218,22 @@ def run(executable, *, mode, evidence_dir=None):
                 h.send_and_wait(process, fd, output, b"\x15", h.composer_showing(b""))
                 print(f"Cancellation observation: no image transfer for {CANCELLATION_OBSERVATION_SECONDS}s "
                       "after fixture release; client completion is unobserved")
-            elif mode == "success":
-                wait_for_image(process, fd, output, start=start, title=b"../../label-only.png")
+            elif mode in ("success", "settled-history"):
+                title = b"newer-retained.png" if settled_history else b"../../label-only.png"
+                wait_for_image(process, fd, output, start=start, title=title)
                 dismiss_image(process, fd, output)
             else:
-                error = (b"sent image response has no payload" if mode == "malformed" else b"fixture artifact unavailable")
+                if mode in ("malformed", "missing-envelope"):
+                    error = b"sent image response requires sha256, bytes, and content"
+                elif mode in ("wrong-digest", "wrong-bytes"):
+                    error = b"sent image response does not match its recorded artifact"
+                elif mode == "corrupt-content":
+                    error = b"sent image content does not match its recorded digest"
+                else:
+                    error = b"fixture artifact unavailable"
                 h.wait_for_output(process, fd, output, error, start=start, timeout=5)
+                if b"a=T" in output[start:]:
+                    raise AssertionError("a rejected artifact emitted image bytes")
                 h.send_and_wait(process, fd, output, b"still-alive", h.composer_showing(b"still-alive"))
                 h.send_and_wait(process, fd, output, b"\x15", h.composer_showing(b""))
             if not (queued or delayed_history) and len(request_count) != 1:

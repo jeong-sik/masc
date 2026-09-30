@@ -4018,7 +4018,7 @@
 (test
  (name test_tui_image_preview)
  (modules test_tui_image_preview)
- (libraries alcotest masc_tui_image_preview masc_tui_keeper_chat_projection masc.masc_tool_blob_store))
+ (libraries alcotest masc_tui_image_preview masc_tui_keeper_chat_projection masc.masc_tool_blob_store digestif))
 
 (test
  (name test_tui_keeper_chat_projection)

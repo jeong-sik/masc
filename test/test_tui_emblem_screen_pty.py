@@ -405,15 +405,15 @@ def about_turns_the_candle(binary: str) -> None:
 
     def transfer_after(process, fd, output: bytearray, start: int, what: str):
         """A complete mascot transfer after the key, including its PNG."""
-        seen = start
-        for _ in range(STEP_TRANSFER_LIMIT):
-            h.wait_for_output(process, fd, output, MASCOT_TRANSFER_HEAD, start=seen,
-                              timeout=STEP_WAIT_SECONDS)
-            seen = MASCOT_TRANSFER_HEAD.search(bytes(output), seen).end()
-            transfers = mascot_transfers(bytes(output[start:]))
-            if transfers:
-                return transfers[-1]
-        raise AssertionError(f"no {what} candle was sent after the key")
+        # A settled style change sends one picture. Keep its header while the
+        # remaining chunks arrive; there need not be another transfer to wait for.
+        complete = h.wait_for_fixture_state(
+            process, fd, output,
+            lambda: bool(mascot_transfers(bytes(output[start:]))),
+            timeout=STEP_WAIT_SECONDS * STEP_TRANSFER_LIMIT,
+        )
+        assert complete, f"no complete {what} candle was sent after the key"
+        return mascot_transfers(bytes(output[start:]))[-1]
 
     def interact(process, fd, _slave, output, _base):
         h.send_and_wait(process, fd, output, b"3", b"MASC Keepers")

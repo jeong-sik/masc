@@ -20087,7 +20087,7 @@ and is loaded on demand through keeper_skill.
                           state.fusion_scroll <- 0;
                           start_fusion_run state ~mailbox:async_messages ~request))
             | Some (Fusion_launch_started _) | None -> ())
-       (* The arrival consumes its first key. Esc leaves the overlay; every
+       (* A visible arrival consumes its first key. Esc leaves the overlay; every
           other key reaches the final frame without also activating a shortcut
           below it. In particular q cannot arm quit while skipping motion. *)
        | Some "esc" when state.about_open ->
@@ -20095,6 +20095,7 @@ and is loaded on demand through keeper_skill.
            state.emblem_frame <- -1;
            state.quit_armed <- false
        | Some _ when state.about_open
+                     && Masc_tui_emblem_screen.drawn () = Masc_tui_emblem_screen.Moving
                      && state.emblem_frame < Masc_tui_emblem_screen.final_frame ->
            state.emblem_frame <- Masc_tui_emblem_screen.final_frame;
            state.quit_armed <- false;

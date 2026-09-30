@@ -24,6 +24,8 @@ from test_tui_lane_visual_pty import snapshot
 # text with no PTY scenario running, and main sat red until someone ran the
 # suite by hand.
 SOURCE_MODULES = (
+    "lib/tui_terminal_text.ml",
+    "lib/tui_terminal_text.mli",
     # Read off the walk's own needles rather than guessed: each of these owns
     # a literal this file waits for and no other bin source spells it --
     # "MASC Lane Add-ons" and "MASC Dashboard" (render), "Run action on" and
@@ -105,7 +107,7 @@ def main(executable: str, captures: Path | None) -> None:
             raise AssertionError('Successful evidence preservation was reported as a request failure')
         # Raw detail puts the complete receipt after the records; scroll to
         # it rather than assuming it fits on the first terminal page.
-        key(b'D', b'Rows')
+        key(b'D', b'Raw details')
         start = len(output)
         os.write(master, b'J' * 80)
         if not terminal.drain_until_quiet(process, master, output):

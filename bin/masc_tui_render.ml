@@ -2422,10 +2422,11 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
               Masc_tui_frame_timing.time_stage ~name:"board.thread.order"
                 (fun () -> Board_comment_thread.order comments)
             in
-            Masc_tui_frame_timing.time_stage ~name:"board.thread.rows_wrap"
-              (fun () ->
-                ordered
-                |> List.concat_map
+            let comment_lines =
+              Masc_tui_frame_timing.time_stage ~name:"board.thread.rows_wrap"
+                (fun () ->
+                  ordered
+                  |> List.concat_map
               (fun (depth, c) ->
                  let rail =
                    if depth <= 0 then ""
@@ -2491,6 +2492,15 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
                      in
                      metadata
                      @ List.map (fun line -> content_prefix ^ line) lines))
+            in
+            if List.length comments < post.bp_comment_count then
+              Printf.sprintf "  Showing %d of %d comments (o: all comments)"
+                (List.length comments) post.bp_comment_count
+              :: comment_lines
+            else
+              (* The post header already counts the complete thread. Keep
+                 the small comment viewport for its actual comment rows. *)
+              comment_lines
       in
       (body_lines, detail_lines))
   in
@@ -2618,7 +2628,9 @@ let render_board_read (state : state) (list_post : board_post) =
       ~hints:
         (Masc_tui_keys.footer_hints_board_read
            ~focus_posts:(state.board_focus = Left_pane)
-           ~focus_comments:state.board_comments_focused ~layout)
+           ~focus_comments:state.board_comments_focused
+           ~full_history:(state.board_history_post_id = Some list_post.bp_id)
+           ~layout)
   in
   Masc_tui_frame_timing.finish_stage ~name:"board.render_prep" prep_started;
   match layout with
@@ -8392,12 +8404,12 @@ let render_system_logs (state : state) =
   box_line buf cols header;
   box_divider buf cols;
   (* The message takes what the named columns leave, asked of the columns. *)
-  let message_width =
-    Render_schedule.system_log_message_width
+  let log_layout =
+    Render_schedule.system_log_layout
       ~inner_width:(max 1 (framed_inner_width cols - 2))
   in
   let col_hdr =
-    "  " ^ Render_schedule.system_log_header_row ~message_width
+    "  " ^ Render_schedule.system_log_header_row ~layout:log_layout
   in
   box_line_styled buf cols ~style:(Theme.recede ()) col_hdr;
   box_divider buf cols;
@@ -8456,7 +8468,7 @@ let render_system_logs (state : state) =
              module name used to push every column right of it out of line. *)
           let line =
             "  "
-            ^ Render_schedule.system_log_row ~message_width ~level_style
+            ^ Render_schedule.system_log_row ~layout:log_layout ~level_style
                 ~styles:
                   { Render_schedule.slog_time_style = Ansi.dim
                   ; slog_module_style =
@@ -10564,12 +10576,12 @@ let render_repository_list (state : state) =
     ~body:(fun ~budget c ->
       (* The path takes what the named columns leave, asked of the columns
          rather than of a constant standing in for their total. *)
-      let path_width =
-        Render_schedule.workspace_path_width
+      let repository_layout =
+        Render_schedule.workspace_layout
           ~inner_width:(max 1 (framed_inner_width cols - 2))
       in
       c.push_styled ~style:(Theme.recede ())
-        ("  " ^ Render_schedule.workspace_header_row ~path_width);
+        ("  " ^ Render_schedule.workspace_header_row ~layout:repository_layout);
       c.push_divider ();
       (match state.repositories_error with
        | None -> ()
@@ -10615,7 +10627,7 @@ let render_repository_list (state : state) =
               let open Masc.Tui_decode in
               let line =
                 "  "
-                ^ Render_schedule.workspace_row ~path_width
+                ^ Render_schedule.workspace_row ~layout:repository_layout
                     { Render_schedule.wrow_name =
                         Terminal_text.single_line r.rp_name
                     ; wrow_branch =
@@ -16299,13 +16311,34 @@ let render_palette (state : state) =
 
      The overlay contract draws the box and fills the rows under a short list
      of matches, so the footer stays on the composer's row. *)
+  let caret = "\xe2\x96\x8c" in
+  let prompt = Ansi.bold ^ prompt ^ Ansi.reset ^ " " in
+  let inner_width = framed_inner_width cols in
+  let prompt_width = Message_layout.display_width prompt in
+  let caret_width = Message_layout.display_width caret in
+  (* Keep the end being edited on screen. The masthead yields before the
+     filter loses all of its cells; it returns as the viewport grows. *)
+  let query = Terminal_text.single_line state.palette_query in
+  let title = screen_title title ^ "  " in
+  let title =
+    if Message_layout.display_width title + prompt_width + caret_width
+       + Message_layout.display_width query > inner_width
+    then "" else title
+  in
+  let query_width =
+    max 0
+      (inner_width - Message_layout.display_width title - prompt_width
+       - caret_width)
+  in
+  let query =
+    Message_layout.input_viewport ~max_cells:query_width
+      query
+  in
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"palette"
     ~frame:Chrome_overlay
     ~title:
-      (screen_title title ^ "  "
-       ^ Ansi.bold ^ prompt ^ Ansi.reset ^ " "
-       ^ (Terminal_text.single_line state.palette_query)
-       ^ ((Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "\xe2\x96\x8c" ^ Ansi.reset))
+      (title ^ prompt ^ query
+       ^ Masc_tui_theme.tone Masc_tui_theme.Accent ^ caret ^ Ansi.reset)
     (* [key:label] items, two spaces apart, the way every other footer is
        written. In the dotted form this row was one item with no colon, so
        {!Masc_tui_footer} could shed no whole key and keep no door: it fell
@@ -16490,6 +16523,54 @@ let render_link_preview_modal (state : state) =
               if index >= scroll && index < scroll + content_height then
                 c.push line)
             content_lines)
+
+(* The invite card: the link a /play invite answer carries, and its QR. Where
+   each row falls, and whether the QR fits at all, is decided by
+   [Masc_tui_play_card.draw]; this only gives each kind of row its look. The
+   QR rows arrive coloured and go in as they are: a theme colour on them would
+   turn the code into a picture that no phone reads. *)
+let play_card_indent = "  "
+
+let render_play_card (state : state) card =
+  let terminal_rows, cols = get_terminal_size () in
+  (* The window as the operator sees it. The rows and columns a frame is laid
+     out in are that less the navigation strip and any pane beside the surface,
+     so a size the card asks for is added to this, not to those. *)
+  let window_rows, window_cols = Masc_tui_ansi.get_terminal_size () in
+  surface_chrome
+    ~overflow:(Scrolled { scroll = state.play_invite_scroll;
+                          report = (fun scroll -> Play_invite_scroll scroll) })
+    state ~terminal_rows ~cols ~surface_key:"play-invite"
+    ~frame:Chrome_overlay
+    ~title:(screen_title " MASC Play invite")
+    ~hints:"j/k:scroll  y:copy link  Esc:close"
+    ~body:(fun ~budget c ->
+      let width = framed_inner_width cols - String.length play_card_indent in
+      List.iter
+        (fun row ->
+          match row with
+          | Masc_tui_play_card.Heading text ->
+              c.push_styled ~style:Ansi.bold (play_card_indent ^ text)
+          | Masc_tui_play_card.Advice text ->
+              c.push_styled ~style:(Theme.recede ()) (play_card_indent ^ text)
+          | Masc_tui_play_card.Link_row text | Masc_tui_play_card.Qr_row text ->
+              c.push (play_card_indent ^ text)
+          | Masc_tui_play_card.Note text ->
+              c.push_styled ~style:(Theme.warn ()) (play_card_indent ^ text)
+          | Masc_tui_play_card.Qr_needs { columns; rows } ->
+              (* The card counts its own cells and says what it lacks. What
+                 surrounds them -- the frame, the composer, the agenda strip,
+                 the navigation strip -- stays the same when the window grows,
+                 so the window needs what it has now plus the card's shortfall
+                 in each direction. *)
+              c.push_styled ~style:(Theme.warn ())
+                (Printf.sprintf
+                   "%sthe QR needs a window of %d columns by %d rows"
+                   play_card_indent
+                   (window_cols + max 0 (columns - width))
+                   (window_rows + max 0 (rows - budget)))
+          | Masc_tui_play_card.Blank -> c.push_empty ())
+        (Masc_tui_play_card.draw card ~width ~rows:budget))
 
 (* The record's rows and the viewport that shows them, the way
    [help_viewport] answers for the sheet: one pair for the keypress that
@@ -16846,7 +16927,11 @@ let render (state : state) =
   then
     let frame, clamped = render_terminal_too_small state ~rows ~cols in
     (frame, clamped, None, Overlay_drawn)
-  else match state.account_login with
+  else match play_card_shown state with
+  | Some card ->
+    let frame, clamped = render_play_card state card in
+    (frame, clamped, None, Overlay_drawn)
+  | None -> match state.account_login with
   | Some view -> let frame, clamped = render_account_login state view in (frame,clamped,None,Overlay_drawn)
   | None -> match state.lane_addons with
   | Some view ->

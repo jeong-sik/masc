@@ -224,27 +224,39 @@ or a missing prerequisite. Avoid unrelated repairs inside the same PR.
 
 ## 5. Review and integrate
 
-A reviewer reads the contract and diff, inspects behavior evidence and checks the
-current PR head's completed run. Address each actionable finding with a change
-or a source-backed explanation; resolve a thread only when its concern is handled.
-Update the PR description when the scope, evidence or remaining risks change;
-reviewers should not have to reconstruct the result from a comment chain.
-A push creates a new head, so an earlier PASS does not certify the new one.
-A reviewer who issued REQUEST_CHANGES must clear their own request once the
-corrected head’s required checks pass.
+A reviewer reads the contract and current-head diff, then records an independent
+code judgment. Approve or request changes when the reviewed evidence supports it;
+CI need not have started or completed. State unverified behavior rather than
+claiming a run that has not happened. Address each finding with a change or a
+source-backed explanation; resolve a thread only when its concern is handled.
+Update the PR description when scope, evidence or remaining risks change.
 
-MASC's structured decision line uses literal values:
+A push creates a new head, so an earlier review does not certify new changes.
+The reviewer clears their own REQUEST_CHANGES once the corrected code resolves
+their findings, independently of CI. Green CI alone does not resolve a finding.
+
+The code-review first line uses actual values:
+
+```text
+review: APPROVE|REQUEST_CHANGES head: <40-character-current-SHA> by: <Keeper-name>
+```
+
+Use [approve-guard.sh](../../scripts/review/approve-guard.sh) for APPROVE; its
+`--check` mode checks review eligibility. The author or a session that pushed
+the PR cannot independently approve it. Code approval does not declare CI success
+or permission to merge.
+
+Integration has its own decision line:
 
 ```text
 verdict: PASS|FAIL head: <40-character-current-SHA> run: <PR-check-run-id> by: <Keeper-name>
 ```
 
-The line above is a format, not a verdict. Never publish placeholders as PASS.
-Use [approve-guard.sh](../../scripts/review/approve-guard.sh) for APPROVE. The author
-or a session that pushed the PR cannot independently approve it. Check main
-freshness: overlapping changes to PR files or shared validation inputs require
-integrating main and a fresh run. Read current reviews and issue comments again
-before integration, including decisions posted after an earlier PASS.
+These lines show formats, not decisions. Never publish alternatives or placeholders
+as actual values. An integration PASS cites the current head's completed successful
+PR-check run. Check main freshness: overlapping changes to PR files or shared
+validation inputs require integrating main and a fresh run. Read current reviews
+and comments again before integration, including later blocking decisions.
 
 Keepers handle merge. The constitution provides a limited exception for an
 operator-launched external session using `jeong-sik`: all five current-head checks

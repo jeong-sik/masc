@@ -208,23 +208,35 @@ base, 시간 초과, 환경 준비 중 무엇이 원인인지 가려 같은 PR�
 
 ## 5. 리뷰하고 통합하기
 
-리뷰어는 계약과 diff, 동작 증거, 현재 head의 완료된 PR-check run을 읽습니다. 지적마다
-수정하거나 소스로 설명하고, 문제가 해결된 스레드만 닫습니다. Push하면 head가 바뀌므로
-이전 PASS가 새 변경을 증명하지 않습니다. 범위·증거·남은 위험이 바뀌면 PR 본문도
-갱신하여 리뷰어가 댓글 전체에서 결과를 조합하지 않아도 되게 합니다. REQUEST_CHANGES를 남긴 리뷰어는 수정된
-head의 필수 검사가 통과하면 자신의 변경 요청을 직접 해제합니다.
+리뷰어는 계약과 현재 head의 diff를 읽고 독립적인 코드 판단을 남깁니다. 검토한 증거로
+판단할 수 있으면 Approve나 변경 요청을 내며 CI 시작·완료를 기다리지 않습니다.
+실행하지 않은 검사는 실행했다고 쓰지 않고 미확인 동작을 명시합니다. 지적마다 수정하거나
+소스로 설명하고, 문제가 해결된 스레드만 닫습니다. 범위·증거·남은 위험이 바뀌면 PR 본문도 갱신합니다.
 
-MASC의 구조화된 판정 줄은 실제 값을 적습니다.
+Push하면 head가 바뀌므로 이전 리뷰가 새 변경을 증명하지 않습니다. REQUEST_CHANGES를
+남긴 리뷰어는 수정된 코드가 자신의 지적을 해결했으면 CI와 별개로 변경 요청을 해제합니다.
+CI 통과만으로 리뷰 지적이 해결되지는 않습니다.
+
+코드 리뷰 첫 줄은 실제 값을 적습니다.
+
+```text
+review: APPROVE|REQUEST_CHANGES head: <40-character-current-SHA> by: <Keeper-name>
+```
+
+APPROVE에는 [approve-guard.sh](../../scripts/review/approve-guard.sh)를 사용합니다.
+`--check`는 리뷰 가능 여부를 검사합니다. 작성하거나 push한 세션은 그 PR을 독립 승인할
+수 없습니다. 코드 승인은 CI 성공이나 병합 허가를 선언하지 않습니다.
+
+병합에는 별도의 판정 줄을 사용합니다.
 
 ```text
 verdict: PASS|FAIL head: <40-character-current-SHA> run: <PR-check-run-id> by: <Keeper-name>
 ```
 
-위는 형식이며 판정이 아닙니다. Placeholder를 PASS로 게시하지 마세요.
-APPROVE에는 [approve-guard.sh](../../scripts/review/approve-guard.sh)를 사용합니다.
-작성하거나 push한 세션은 그 PR을 독립 승인할 수 없습니다. 최신 main이 PR 파일이나 공용
-검사 입력을 바꿨으면 main을 반영하고 새 run을 받습니다. 병합 전에 현재 리뷰와 이슈 댓글을
-다시 읽고 이전 PASS 뒤의 판단까지 확인합니다.
+위는 형식이며 판정이 아닙니다. 선택지나 placeholder를 실제 값으로 게시하지 마세요.
+병합 PASS는 현재 head의 완료된 성공 PR-check run을 가리킵니다. 최신 main이 PR 파일이나
+공용 검사 입력을 바꿨으면 main을 반영하고 새 run을 받습니다. 병합 전에 현재 리뷰와 댓글을
+다시 읽고 이후의 차단 판단까지 확인합니다.
 
 병합은 Keeper가 담당합니다. 헌법은 운영자가 띄운 외부 세션 중 `jeong-sik` 계정을 사용하는
 경우에만 제한된 예외를 둡니다. 현재 head의 필수 검사 5개가 모두 완료·성공하고, 같은 head와

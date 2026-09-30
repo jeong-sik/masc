@@ -12,7 +12,7 @@ usability experiment, installation test, or proof of Keeper continuity.
 | External AI session | AGENTS and constitution execution_protocol | No local Dune build, no CI watch/wait, isolated changes, parallel adversarial review on moving work units |
 | Work coordination | config/tools/masc_goal_upsert.toml, masc_add_task.toml, masc_transition.toml, masc_board_post.toml | Goal source/target, explicit Task link, claim/start, handoff and Board purpose documented |
 | Validation and CI | .github/workflows/pr-check.yml, test.yml, linux-x64-probe.yml, release.yml | Draft skips required jobs; ready runs five required checks; targeted/full verification and binary probe have distinct purposes |
-| Review/integration | constitution, scripts/review/approve-guard.sh, merge-guard.sh, ci-freshness.py | Current head/run, later reviews, base freshness, limited external merge exception and guard required |
+| Review/integration | constitution, scripts/review/approve-guard.sh, merge-guard.sh, ci-freshness.py | Head-bound code review is separate from current-head CI/run, later reviews, base freshness and guarded integration |
 | Evidence/resume | config/tools/masc_transition.toml, masc_goal_transition.toml, keeper_task_done.toml | Verification submission, typed evidence, final human Goal confirmation and reread-before-retry documented |
 
 Source-matched procedure count: **6 / 6**. This count measures the coverage of the
@@ -97,3 +97,12 @@ that the earlier green PR run failed freshness; the revised head needs new CI.
 The fix review identified inherited `MASC_CONFIG_DIR` as an escape from the
 launch example's separate config root. The example now clears that variable for
 the command and states that existing target-directory configuration still applies.
+
+
+## Operator clarification: review is separate from CI
+
+The operator rejected waiting for CI before code review decisions. The English
+and Korean guides now distinguish `review: APPROVE|REQUEST_CHANGES` from the
+CI-backed integration `verdict: PASS|FAIL`. Clearing a review request depends on
+reviewing the corrected code, not a green check. The separate policy change is
+tracked by issue #40138 and task-1851; this contributor PR depends on that change.

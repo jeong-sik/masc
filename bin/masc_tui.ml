@@ -1924,6 +1924,8 @@ type async_msg =
       string * (Masc.Tui_decode.verification_evidence,
                 Masc_tui_types.Verification_evidence_read.failure) result
   | Keeper_config_view_loaded of Masc_tui_types.detail_read_request * (string list, string) result
+  | Keeper_items_loaded of
+      Masc_tui_types.detail_read_request * (Masc_tui_keeper_items.t, string) result
   | Keeper_sandbox_view_loaded of
       Masc_tui_types.detail_read_request * (Masc_tui_keeper_sandbox.t, string) result
   | Keeper_sandbox_logs_loaded of
@@ -4230,6 +4232,36 @@ let launch_keeper_config_view state ~mailbox keeper_name =
     ~deliver:(fun result ->
       enqueue_async mailbox (Keeper_config_view_loaded (request, result)))
     (fun () -> Masc_tui_loader.load_keeper_config_view ~host ~port ~keeper_name)
+
+let item_authority_ready state =
+  match state.server_identity with
+  | Some identity ->
+      identity.Tui_decode.sid_state_ready <> Some false
+      && not (String.equal identity.sid_base_path "")
+      && not (String.equal identity.sid_masc_root "")
+  | None -> false
+
+let withdraw_keeper_items_reading state =
+  state.item_account <- None;
+  state.item_account_error <- Some "Workspace identity unavailable or changed";
+  state.detail_reads <- List.filter
+      (fun request -> request.drr_tab <> Detail_items) state.detail_reads
+
+let launch_keeper_items state ~mailbox keeper_name =
+  if not (item_authority_ready state) then withdraw_keeper_items_reading state
+  else
+  let request = mark_detail_read_started state ~tab:Detail_items ~keeper:keeper_name in
+  let host = server_peer_host in
+  let port = state.port in
+  Masc_tui_async_read.launch
+    ~deliver:(fun result ->
+      enqueue_async mailbox (Keeper_items_loaded (request, result)))
+    (fun () ->
+      let path = "/api/v1/keepers/"
+        ^ Masc_tui_http.percent_encode_path_segment keeper_name ^ "/items" in
+      let ( let* ) = Result.bind in
+      let* json = Masc_tui_http.get_json ~host ~port ~path in
+      Masc_tui_keeper_items.decode ~keeper_name json)
 
 let launch_keeper_sandbox_view state ~mailbox keeper_name =
   let request = mark_detail_read_started state ~tab:Detail_sandbox ~keeper:keeper_name in
@@ -10630,6 +10662,20 @@ let apply_http_scoped_surfaces state results =
    match reloads it, so a screen never shows rows from a workspace the server
    just stopped serving. *)
 let apply_server_identity_reading state reading =
+  let same_item_authority =
+    match state.server_identity, reading with
+    | Some previous, Ok current ->
+        previous.Tui_decode.sid_state_ready <> Some false
+        && current.Tui_decode.sid_state_ready <> Some false
+        && String.equal
+             (Masc_tui_types.canonical_path previous.sid_base_path)
+             (Masc_tui_types.canonical_path current.sid_base_path)
+        && String.equal
+             (Masc_tui_types.canonical_path previous.sid_masc_root)
+             (Masc_tui_types.canonical_path current.sid_masc_root)
+    | None, _ | Some _, Error _ -> false
+  in
+  if not same_item_authority then withdraw_keeper_items_reading state;
   state.server_identity <- Masc_tui_types.server_identity_of_refresh reading;
   state.workspace_identity <-
     Masc_tui_types.workspace_identity_of_refresh
@@ -10712,7 +10758,10 @@ let load_keeper_logs_if_safe state base_path limit keeper =
 let launch_detail_tab_reading state ~mailbox (keeper : keeper) =
   match state.detail_tab with
   | Detail_info -> launch_keeper_board_quarantines state ~mailbox keeper.k_name
-  | Detail_items -> ()
+  | Detail_items ->
+      state.item_account <- None;
+      state.item_account_error <- None;
+      launch_keeper_items state ~mailbox keeper.k_name
   | Detail_sandbox ->
       state.keeper_sandbox_view <- None;
       state.keeper_sandbox_view_error <- None;
@@ -13650,6 +13699,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            apply_approval_observation state
              { ao_ticket; ao_result = Error err })
       approval_ticket;
+      withdraw_keeper_items_reading state;
       state.server_identity <- None;
       state.connection_status <- Masc_tui_types.Disconnected;
       add_event state "error" err;
@@ -13905,6 +13955,21 @@ let apply_async_message state ~base_path ~http_refresh_inflight
             state.keeper_config_view_error <- None
         | Error detail ->
             state.keeper_config_view_error <- Some detail)
+  | Keeper_items_loaded (request, result) -> (
+      let current = Masc_tui_types.finish_detail_read state request in
+      let still_selected =
+        match selected_keeper state with
+        | Some keeper -> String.equal keeper.k_name request.drr_keeper
+        | None -> false
+      in
+      if current && still_selected && item_authority_ready state then
+        match result with
+        | Ok account ->
+            state.item_account <- Some (request.drr_keeper, account);
+            state.item_account_error <- None
+        | Error detail ->
+            state.item_account <- None;
+            state.item_account_error <- Some detail)
   | Keeper_sandbox_view_loaded (request, result) -> (
       let keeper_name = request.drr_keeper in
       let current = Masc_tui_types.finish_detail_read state request in

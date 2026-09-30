@@ -22,13 +22,17 @@
 - [좁은 Usage 기준](../evidence/tui-audit-2026-09-30/baseline/usage-80.png)
 - [좁은 System 기준](../evidence/tui-audit-2026-09-30/baseline/system-80.png)
 
-Board 최신 수정 head `40ebc2634e418770ca10eb7065a561cd5c6005a1`의 [집중 Linux PTY run 36647966652](https://github.com/jeong-sik/masc/actions/runs/36647966652)은 success다. [probe 36648531190](https://github.com/jeong-sik/masc/actions/runs/36648531190) artifact의 SHA256SUMS 네 파일을 확인했고, TUI의 `--build-commit`도 같은 head다.
+아래 비교에 사용한 수정 head `40ebc2634e418770ca10eb7065a561cd5c6005a1`의 [집중 Linux PTY run 36647966652](https://github.com/jeong-sik/masc/actions/runs/36647966652)은 success다. [probe 36648531190](https://github.com/jeong-sik/masc/actions/runs/36648531190) artifact의 SHA256SUMS 네 파일을 확인했고, TUI의 `--build-commit`도 같은 head다. 후속 main 통합 head의 실행 증거를 대신하지 않는다.
 
 같은 fixture 작성자 `wkbl-reader`, 같은 실측 **242×41**에서 [수정 전](../evidence/tui-audit-2026-09-30/board-comparison-before/board-detail-240.png)은 댓글 본문을 작성자 옆의 작은 잔여 폭으로 감싼다. [수정 후](../evidence/tui-audit-2026-09-30/board-comparison-after/board-detail-240.png)는 댓글 영역 전체 폭으로 감싼다. 기준 native 바이너리와 수정 Linux CI 바이너리를 각각 임시 fixture PTY에서 실행했다. 후자는 Docker Ubuntu 22.04에서 실행하며, 전용 proxy container의 loopback을 host fixture HTTP로 연결했다. 운영 서버·활성 사용자 세션의 캡처가 아니다. [재현 방법과 provenance](../evidence/tui-audit-2026-09-30/board-comparison.md)를 함께 보관한다.
 
 Board PR check `36648042151` 및 Usage PR check `36648043868`의 edited-test 단계는 각각 89/91개 실행 뒤 같은 네 alias를 미통과로 나열했다. 실제 AssertionError는 account_login_pty에서 키 `2`를 보내 Keepers를 기다리는 fixture다. 다른 세 alias(account_login_removal_pty, activity_title_dot_belongs_to_the_strip, approval_detail_scroll_pty)는 PASS를 출력했지만, `run-edited-tests.sh`가 공유 Dune wave의 exit 1 뒤 전체 그룹을 미검증으로 분류했다. 이 결과는 전체 필수 체크 성공이 아니며, fixture 원인 대조와 수정이 남아 있다. 병합·운영 반영도 별도 확인 대상이다.
 
-팔레트 새 PTY 시나리오는 기준 바이너리에서 40열의 입력 tail/caret 손실을 재현했다. 이 실패는 수정 전 재현 증거이며 수정 후 통과 증거가 아니다.
+공통 로그인 fixture 수정은 [#40057](https://github.com/jeong-sik/masc/pull/40057), main `78c5270e98aa731e0c3a240edf6a6efcd253dfbc`로 들어왔다. 동일한 수정인 #40065는 source 파일 diff가 없음을 확인하고 닫았다. #40065의 필수 체크가 녹색이어도 merge guard는 `post_run_overlap`을 거절했다. 이 거절을 우회하지 않았다. Board·Work·Usage·Tables·Dashboard는 main `1a52f26bc9c609d5b37728f25f1def2d71893e24`를 통합했고 새 head CI가 필요하다.
+
+팔레트 새 PTY 시나리오는 기준 바이너리에서 40열의 입력 tail/caret 손실을 재현했다. 수정 head `f5490ac599683e90f75d65e7071606650a30d7e6`의 [집중 run 36654450971](https://github.com/jeong-sik/masc/actions/runs/36654450971)은 success로 완료했다. 원문 PASS·화면·후속 head는 별도 확인해야 한다.
+
+후속 집중 실행에서 확인한 실패와 응답은 구별한다. Keeper `36659398897`은 이미 Home인 화면에서 새 출력을 기다렸고, `3308aef6b4`에서 no-op 검사를 보완했다. Clients `36659294011`은 접힌 이름에 `long-`를 기대했고, `8f1bd0ee90`에서 관측 열로 행을 찾고 접힌 이름을 따로 검사하도록 바꿨다. Task `36660324248`은 초기 durable Task 읽기 전에 동적 팔레트를 열었고, `be39f068a1`에서 같은 backlog projection의 준비 신호와 완료 frame을 기다린다. 보완된 시나리오의 통과를 아직 선언하지 않는다.
 
 ## 수정과 남은 결함
 
@@ -49,17 +53,16 @@ Board PR check `36648042151` 및 Usage PR check `36648043868`의 edited-test 단
 | K02 | Keeper logs | 75셀 고정 표 뒤 cost/work/tools가 도달 불가 | 구현 필요 |
 | K03/S03 | Connectors/Clients | printf 최소 폭으로 긴 이름이 열을 밀고 channel/last seen 소실 | [#40118](https://github.com/jeong-sik/masc/pull/40118), 공유 Table.fit; 실행 검증 대기 |
 | K04 | Schedules 상세/목록 | recurrence/ID/digest/fence 원문 잘림, mandatory target 폭 과다 | 구현 필요 |
-| K05 | Runtime picker | mandatory 24셀×2 + chrome이 작은 frame 초과 | 구현 필요 |
+| K05 | Runtime picker | mandatory 24셀×2 + chrome이 작은 frame 초과 | [#40143](https://github.com/jeong-sik/masc/pull/40143), 실제 셀 폭으로 열 배정; 집중 실행 검증 대기 |
 | K06 | Chat inflight row | 다른 Keeper 이름 뒤 interrupt 행동이 잘림 | 구현 필요 |
 | R02 | 기록된 diff | 세로 스크롤만 있어 긴 줄 뒤 차이가 도달 불가; shift 키가 file offset만 바꿈 | 실제 diff 수평 탐색 필요 |
 | S02 | Runtime 목록 | 77셀 고정 열이 route/probe/detail을 밀어냄 | 반응형 열 필요; Enter 상세 fallback 있음 |
 | W02 | Task 상세 | title/status/actor/reason/ID 등 고정 metadata가 원문을 잃음 | [#40133](https://github.com/jeong-sik/masc/pull/40133), 모든 metadata/history를 물리 행 스크롤에 포함; 집중 실행 검증 대기 |
-| W03 | Goal 상세 | title/owner/metric/due/priority 등 고정 metadata가 원문을 잃음 | 필드 wrap 및 행 예산 재설계 필요 |
-| W04 | 짧은 Goal 상세 | fixed13+timestamp3+linked8이 24행을 소모 | linked/body/footer 전체 행 배정 필요 |
+| W03/W04 | Goal 상세·짧은 창 | metadata가 잘리고 fixed chrome/linked task cap이 본문을 밀어냄 | [#40142](https://github.com/jeong-sik/masc/pull/40142), 전체 metadata/연결 Task/타임라인을 물리 행 스크롤에 포함; 집중 실행 검증 대기 |
 | W05/W06 | Review/Verdict 상세 | title/task/request/agent/gate/goal metric metadata 잘림 | 필드 wrap 필요 |
-| S04 | Runtime params | key/current/default 최소 폭, selected contract 도달 불가 | 표·선택 contract 재배치 필요 |
+| S04 | Runtime params | key/current/default 최소 폭, selected contract 도달 불가 | [#40135](https://github.com/jeong-sik/masc/pull/40135), 전체 필드 스크롤·실제 페이지 높이·refresh key identity; 집중 실행 검증 대기 |
 | S05 | Prompt registry/assets | key/source/file/vars metadata 원문 도달 불가 | 필드 wrap 필요 |
-| S06/S07 | Presets | detail logical row 잘림; retained refresh failure에서 list_height+1행 | detail wrap·실패 상태/행 예산 수정 필요 |
+| S06/S07 | Presets | detail logical row 잘림; retained refresh failure에서 list_height+1행 | [#40141](https://github.com/jeong-sik/masc/pull/40141), 전체 detail wrap·실제 페이지 높이·실패 행 배정·refetch 동안 읽기 유지; 집중 실행 검증 대기 |
 | S08/S09/S10 | Voice | input tail/caret·endpoint metadata 잘림; assignment cursor 미추종 | [#40117](https://github.com/jeong-sik/masc/pull/40117), wizard/assignment; 실행 검증 대기, endpoint 추가 필요 |
 | R03 | Workspace Activity | fixed clock/keeper/task 뒤 file 잘림 | 반응형 행·선택 path wrap 필요 |
 | R04 | Code memo/history | subject/provenance 논리 행의 잘린 suffix 도달 불가 | 필드 wrap 또는 수평 탐색 필요 |

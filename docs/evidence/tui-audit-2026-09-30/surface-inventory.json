@@ -36,7 +36,7 @@
     {
       "name": "render_board_read",
       "source_review": "reviewed with findings",
-      "runtime_evidence": "baseline top-level only; detail/state proof pending",
+      "runtime_evidence": "focused Linux PTY and same-size before/after captures on 40ebc263; latest integrated head and complete state matrix pending",
       "finding_ids": [
         "B01"
       ]
@@ -55,7 +55,11 @@
       "runtime_evidence": "pending",
       "finding_ids": [
         "S03"
-      ]
+      ],
+      "implementation_prs": [
+        40118
+      ],
+      "implementation_evidence": "source-reviewed repair; current-head executable and state-matrix proof pending"
     },
     {
       "name": "render_code",
@@ -84,7 +88,11 @@
       "runtime_evidence": "pending",
       "finding_ids": [
         "K03"
-      ]
+      ],
+      "implementation_prs": [
+        40118
+      ],
+      "implementation_evidence": "source-reviewed repair; current-head executable and state-matrix proof pending"
     },
     {
       "name": "render_fusion_detail",
@@ -124,7 +132,11 @@
       "runtime_evidence": "pending",
       "finding_ids": [
         "K01"
-      ]
+      ],
+      "implementation_prs": [
+        40131
+      ],
+      "implementation_evidence": "source-reviewed repair; current-head executable and state-matrix proof pending"
     },
     {
       "name": "render_keeper_list",
@@ -189,7 +201,11 @@
       "finding_ids": [
         "W03",
         "W04"
-      ]
+      ],
+      "implementation_prs": [
+        40142
+      ],
+      "implementation_evidence": "source-reviewed repair; current-head executable and state-matrix proof pending"
     },
     {
       "name": "render_planning_list",
@@ -204,7 +220,11 @@
       "finding_ids": [
         "S06",
         "S07"
-      ]
+      ],
+      "implementation_prs": [
+        40141
+      ],
+      "implementation_evidence": "source-reviewed repair; current-head executable and state-matrix proof pending"
     },
     {
       "name": "render_prompts",
@@ -262,7 +282,11 @@
       "runtime_evidence": "pending",
       "finding_ids": [
         "S04"
-      ]
+      ],
+      "implementation_prs": [
+        40135
+      ],
+      "implementation_evidence": "source-reviewed repair; current-head executable and state-matrix proof pending"
     },
     {
       "name": "render_runtime_pick",
@@ -270,7 +294,11 @@
       "runtime_evidence": "pending",
       "finding_ids": [
         "K05"
-      ]
+      ],
+      "implementation_prs": [
+        40143
+      ],
+      "implementation_evidence": "source-reviewed repair; current-head executable and state-matrix proof pending"
     },
     {
       "name": "render_schedules",
@@ -300,7 +328,11 @@
       "runtime_evidence": "pending",
       "finding_ids": [
         "W02"
-      ]
+      ],
+      "implementation_prs": [
+        40133
+      ],
+      "implementation_evidence": "source-reviewed repair; current-head executable and state-matrix proof pending"
     },
     {
       "name": "render_themes",

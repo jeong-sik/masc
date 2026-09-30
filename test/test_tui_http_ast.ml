@@ -1875,7 +1875,7 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
      The old attention page's emptiness says nothing about human decisions. *)
   check int "Home reads the shared decision projection once" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path
-       ~binding_name:"render_overview" ~callee:"Masc_tui_home_model.home_decision_rows");
+       ~binding_name:"render_overview" ~callee:"Masc_tui_home.home_decision_rows");
   check int "board read consumes one shared row allocation" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path
        ~binding_name:"board_read_pane"

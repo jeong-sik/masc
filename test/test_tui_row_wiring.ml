@@ -258,7 +258,7 @@ let test_the_overview_draws_the_decision_projection () =
 
   in
   Alcotest.(check int) "the row draws the decision projection" 1
-    (calls "Masc_tui_home_model.home_decision_rows");
+    (calls "Masc_tui_home.home_decision_rows");
   Alcotest.(check int) "and counts no population of its own" 0
     (calls "Masc_tui_approvals_model.approvals_surface_pending");
   Alcotest.(check int) "and makes no reading judgement of its own" 0

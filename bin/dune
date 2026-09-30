@@ -1443,9 +1443,9 @@
  (libraries masc_tui_types masc_tui_operator_projection masc_tui_ask_projection masc))
 
 (library
- (name masc_tui_home_model)
+ (name masc_tui_home)
  (wrapped false)
- (modules masc_tui_home_model)
+ (modules masc_tui_home)
  (libraries masc_tui_types masc_tui_approvals_model masc_tui_ansi masc_tui_agenda
   masc_tui_message_layout masc_tui_config masc.keeper_registry masc))
 
@@ -1763,7 +1763,7 @@
   masc_tui_http)
  (public_name masc-tui)
  (package masc)
- (libraries masc_tui_home_model masc_tui_approvals_model masc_tui_surface_navigation
+ (libraries masc_tui_home masc_tui_approvals_model masc_tui_surface_navigation
   masc_tui_account_login
   masc_tui_play_card
   masc_tui_sgr_text

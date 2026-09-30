@@ -283,9 +283,9 @@ let overview_header (state : state) =
 
 let render_overview (state : state) =
   let terminal_rows, cols = get_terminal_size () in
-  let all_decisions = Masc_tui_home_model.home_decision_rows state in
-  let continuation = Masc_tui_home_model.home_continue_rows state in
-  let selected = Masc_tui_home_model.home_selected_action state in
+  let all_decisions = Masc_tui_home.home_decision_rows state in
+  let continuation = Masc_tui_home.home_continue_rows state in
+  let selected = Masc_tui_home.home_selected_action state in
   let health =
     match Terminal_text.optional_single_line state.overview_error, state.overview with
     | Some error, _ -> " Health: unavailable · " ^ error
@@ -337,7 +337,7 @@ let render_overview (state : state) =
       let warning_rows = if selection_changed then 1 else 0 in
       (* Keep continuation and new work visible while the request window
          follows the selected identity. All rows remain reachable with j/k. *)
-      let first, capacity = Masc_tui_home_model.home_decision_window state ~budget in
+      let first, capacity = Masc_tui_home.home_decision_window state ~budget in
       let decisions = List.drop first all_decisions |> List.take capacity in
       let actions = decisions @ continuation in
       (* Headers and action destinations take precedence over health/history

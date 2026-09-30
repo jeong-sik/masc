@@ -6,6 +6,7 @@
 
 open Masc_tui_types
 open Tui_decode
+open Masc.Tui_decode_fusion
 open Masc_tui_ansi
 open Masc_tui_press
 

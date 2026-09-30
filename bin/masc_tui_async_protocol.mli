@@ -219,16 +219,16 @@ type async_msg =
   | Verification_loaded of (Masc.Tui_decode.verification_snapshot, string) result
   | Harness_loaded of (Masc.Tui_decode.harness_snapshot, string) result
   | Fusion_runs_loaded of
-      unit Masc_tui_fetched.request * (Masc.Tui_decode.fusion_snapshot, string) result
+      unit Masc_tui_fetched.request * (Masc.Tui_decode_fusion.fusion_snapshot, string) result
   | Fusion_detail_loaded of
-      int * string * (Masc.Tui_decode.fusion_detail, string) result
+      int * string * (Masc.Tui_decode_fusion.fusion_detail, string) result
   | Fusion_historical_detail_loaded of
-      int * Masc.Tui_decode.fusion_historical_evidence
-      * (Masc.Tui_decode.fusion_historical_detail, string) result
+      int * Masc.Tui_decode_fusion.fusion_historical_evidence
+      * (Masc.Tui_decode_fusion.fusion_historical_detail, string) result
   (* Both carry the launch generation: the answer to a read or a submit the
      operator already left must not open or close a form they are not in. *)
   | Fusion_launch_options_loaded of
-      int * (Masc.Tui_decode.fusion_launch_options, string) result
+      int * (Masc.Tui_decode_fusion.fusion_launch_options, string) result
   | Fusion_launched of int * (string, string) result
   | Repositories_loaded of (Masc.Tui_decode.repository_snapshot, string) result
   | Workspace_activity_loaded of string Masc_tui_fetched.request * (workspace_activity_read, string) result

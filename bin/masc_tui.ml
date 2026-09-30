@@ -7920,8 +7920,8 @@ let selected_surface_reference state =
        | Fusion_list, Some _ ->
            Option.map
              (function
-               | Tui_decode.Fusion_retained_run run -> Link.reference Fusion_run run.fur_run_id
-               | Tui_decode.Fusion_historical_evidence evidence ->
+               | Masc.Tui_decode_fusion.Fusion_retained_run run -> Link.reference Fusion_run run.fur_run_id
+               | Masc.Tui_decode_fusion.Fusion_historical_evidence evidence ->
                    Link.reference Board_post evidence.fhe_post_id)
              (selected_fusion_entry state)
        | Fusion_list, None -> None)
@@ -9744,12 +9744,12 @@ let apply_planning_load state = function
 let apply_fusion_runs_load state request = function
   | Ok snapshot ->
       let keeper_run_id =
-        Option.map (fun (_, run) -> run.Tui_decode.fur_run_id)
+        Option.map (fun (_, run) -> run.Masc.Tui_decode_fusion.fur_run_id)
           (selected_keeper_run state)
       in
       let current_selected_id =
         match state.fusion_mode with
-        | Fusion_historical_detail reference -> Some (fusion_entry_identity (Tui_decode.Fusion_historical_evidence reference))
+        | Fusion_historical_detail reference -> Some (fusion_entry_identity (Masc.Tui_decode_fusion.Fusion_historical_evidence reference))
         | Fusion_detail run_id -> Some ("run:" ^ run_id)
         | Fusion_list -> Option.map fusion_entry_identity (selected_fusion_entry state)
       in
@@ -9772,7 +9772,7 @@ let apply_fusion_runs_load state request = function
       let keeper_runs = selected_keeper_runs state in
       state.keeper_run_cursor <-
         Option.bind keeper_run_id (fun id ->
-          List.find_index (fun run -> String.equal run.Tui_decode.fur_run_id id) keeper_runs)
+          List.find_index (fun run -> String.equal run.Masc.Tui_decode_fusion.fur_run_id id) keeper_runs)
         |> Option.value ~default:(max 0 (min state.keeper_run_cursor (List.length keeper_runs - 1)));
       state.fusion_launch_error <- None;
       (* A run the form just started is selected the first time the list
@@ -9782,9 +9782,9 @@ let apply_fusion_runs_load state request = function
            match
              fusion_snapshot_entries snapshot
              |> List.find_index (function
-                  | Tui_decode.Fusion_retained_run run ->
+                  | Masc.Tui_decode_fusion.Fusion_retained_run run ->
                       String.equal run.fur_run_id started.fls_run_id
-                  | Tui_decode.Fusion_historical_evidence _ -> false)
+                  | Masc.Tui_decode_fusion.Fusion_historical_evidence _ -> false)
            with
            | Some cursor ->
                state.fusion_cursor <- cursor;
@@ -9828,14 +9828,14 @@ let apply_fusion_detail_load state generation run_id result =
     | Fusion_historical_detail _ | Fusion_list -> false
   then
     match result with
-    | Ok detail when String.equal detail.Tui_decode.fud_run.fur_run_id run_id ->
+    | Ok detail when String.equal detail.Masc.Tui_decode_fusion.fud_run.fur_run_id run_id ->
         state.fusion_detail <- Some detail;
         state.fusion_detail_error <- None
     | Ok detail ->
         state.fusion_detail_error <-
           Some
             (Printf.sprintf "fusion detail returned run %s for request %s"
-               detail.Tui_decode.fud_run.fur_run_id run_id)
+               detail.Masc.Tui_decode_fusion.fud_run.fur_run_id run_id)
     | Error detail -> state.fusion_detail_error <- Some detail
 
 let apply_fusion_historical_detail_load state generation reference result =
@@ -9845,7 +9845,7 @@ let apply_fusion_historical_detail_load state generation reference result =
          | Fusion_list | Fusion_detail _ -> false)
   then
     match result with
-    | Ok detail when detail.Tui_decode.fhd_reference = reference ->
+    | Ok detail when detail.Masc.Tui_decode_fusion.fhd_reference = reference ->
         state.fusion_historical_detail <- Some detail;
         state.fusion_detail_error <- None
     | Ok _ ->
@@ -11649,13 +11649,13 @@ let open_harness_detail state =
 let open_fusion_detail state ~mailbox =
   match selected_fusion_entry state with
   | None -> ()
-  | Some (Tui_decode.Fusion_historical_evidence evidence) ->
+  | Some (Masc.Tui_decode_fusion.Fusion_historical_evidence evidence) ->
       state.fusion_mode <- Fusion_historical_detail evidence;
       state.fusion_scroll <- 0;
       state.fusion_historical_detail <- None;
       state.fusion_detail_error <- None;
       launch_fusion_historical_detail_load state ~mailbox ~reference:evidence
-  | Some (Tui_decode.Fusion_retained_run run) ->
+  | Some (Masc.Tui_decode_fusion.Fusion_retained_run run) ->
       state.fusion_mode <- Fusion_detail run.fur_run_id;
       state.fusion_scroll <- 0;
       state.fusion_detail <- None;
@@ -15764,8 +15764,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                    looking at; without one, the roster's own cursor does. *)
                 let keeper =
                   match selected_fusion_entry state with
-                  | Some (Tui_decode.Fusion_retained_run run) -> Some run.fur_keeper
-                  | Some (Tui_decode.Fusion_historical_evidence _) | None ->
+                  | Some (Masc.Tui_decode_fusion.Fusion_retained_run run) -> Some run.fur_keeper
+                  | Some (Masc.Tui_decode_fusion.Fusion_historical_evidence _) | None ->
                       Option.map (fun (k : keeper) -> k.k_name) (selected_keeper state)
                 in
                 (match Masc_tui_fusion_launch.open_form ~keepers ~keeper ~options with
@@ -21180,19 +21180,19 @@ and is loaded on demand through keeper_skill.
        | Some "K" when state.view = Fusion
            && (match state.fusion_mode, selected_fusion_entry state with
                | Fusion_historical_detail _, _
-               | Fusion_list, Some (Tui_decode.Fusion_historical_evidence _) -> true
+               | Fusion_list, Some (Masc.Tui_decode_fusion.Fusion_historical_evidence _) -> true
                | _ -> false) ->
            report_action state "system" "Historical Board evidence has no retained caller identity"
        | Some "K" when state.view = Fusion ->
            let run = match state.fusion_mode, fusion_snapshot state with
              | Fusion_detail id, Some snapshot -> List.find_opt
-                 (fun (run : Tui_decode.fusion_run) -> String.equal run.fur_run_id id) snapshot.fus_runs
+                 (fun (run : Masc.Tui_decode_fusion.fusion_run) -> String.equal run.fur_run_id id) snapshot.fus_runs
              | Fusion_list, Some _ ->
                  (match selected_fusion_entry state with
-                  | Some (Tui_decode.Fusion_retained_run run) -> Some run
-                  | Some (Tui_decode.Fusion_historical_evidence _) | None -> None)
+                  | Some (Masc.Tui_decode_fusion.Fusion_retained_run run) -> Some run
+                  | Some (Masc.Tui_decode_fusion.Fusion_historical_evidence _) | None -> None)
              | Fusion_historical_detail _, _ | _, None -> None in
-           (match Option.bind run (fun (run : Tui_decode.fusion_run) ->
+           (match Option.bind run (fun (run : Masc.Tui_decode_fusion.fusion_run) ->
               List.find_index (fun (k : keeper) -> String.equal k.k_name run.fur_keeper) state.keepers) with
             | None -> report_action state "system" "The calling Keeper is not in the current roster"
             | Some index ->
@@ -21201,15 +21201,15 @@ and is loaded on demand through keeper_skill.
                 Option.iter (open_keeper_detail state ~base_path ~mailbox:async_messages) (selected_keeper state);
                 state.detail_tab <- Detail_runs;
                 state.keeper_run_cursor <-
-                  Option.bind run (fun (run : Tui_decode.fusion_run) ->
-                    List.find_index (fun (candidate : Tui_decode.fusion_run) ->
+                  Option.bind run (fun (run : Masc.Tui_decode_fusion.fusion_run) ->
+                    List.find_index (fun (candidate : Masc.Tui_decode_fusion.fusion_run) ->
                       String.equal candidate.fur_run_id run.fur_run_id)
                       (selected_keeper_runs state))
                   |> Option.value ~default:0)
        | Some "B" when state.view = Fusion
            && state.fusion_mode = Fusion_list ->
            (match selected_fusion_entry state with
-            | Some (Tui_decode.Fusion_historical_evidence reference) ->
+            | Some (Masc.Tui_decode_fusion.Fusion_historical_evidence reference) ->
                 state.followed_from <- Some (state.view, None);
                 state.board_mode <- Board_read reference.fhe_post_id;
                 state.board_scroll <- 0;
@@ -21219,7 +21219,7 @@ and is loaded on demand through keeper_skill.
                 goto_surface state ~mailbox:async_messages Board;
                 start_board_post_refresh state ~host:server_peer_host ~port:state.port
                   ~post_id:reference.fhe_post_id ~mailbox:async_messages
-            | Some (Tui_decode.Fusion_retained_run _) | None ->
+            | Some (Masc.Tui_decode_fusion.Fusion_retained_run _) | None ->
                 report_action state "system" "Open a Fusion run to follow its Board evidence")
        | Some "B" when state.view = Fusion ->
            (match state.fusion_mode, state.fusion_detail with

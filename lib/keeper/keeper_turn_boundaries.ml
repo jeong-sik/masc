@@ -415,25 +415,90 @@ let atom_position_stated ~trace_id (record : record) =
   | History_restarted _ -> None
 ;;
 
+let start_position_stated ~trace_id (record : record) =
+  match record.event with
+  | Turn_ended
+      { turn_ref
+      ; history_at_start = Continued_history_from { start_atom; start_atom_digest }
+      ; position = _
+      } ->
+    if String.equal (Ids.Turn_ref.trace_id turn_ref) trace_id
+    then Some (turn_ref, start_atom, start_atom_digest)
+    else None
+  | Turn_ended
+      { turn_ref = _; history_at_start = Fresh_history | Continued_history; position = _ }
+  | History_restarted _ -> None
+;;
+
+let is_position ~end_atom ~last_atom_digest = function
+  | Some (turn_ref, stated_end, stated_digest)
+    when stated_end = end_atom && String.equal stated_digest last_atom_digest ->
+    Some turn_ref
+  | Some _ | None -> None
+;;
+
+let states_position ~trace_id ~end_atom ~last_atom_digest record =
+  match is_position ~end_atom ~last_atom_digest (atom_position_stated ~trace_id record) with
+  | Some _ as ended -> ended
+  | None ->
+    is_position ~end_atom ~last_atom_digest (start_position_stated ~trace_id record)
+;;
+
+(* The lines that number the atoms of [trace_id] from zero again. A start
+   line before one of them states a position of a history that is gone. *)
+let restarts_history ~trace_id (record : record) =
+  match record.event with
+  | History_restarted { trace_id = restarted } -> String.equal restarted trace_id
+  | Turn_ended { turn_ref; history_at_start = Fresh_history; position = _ } ->
+    String.equal (Ids.Turn_ref.trace_id turn_ref) trace_id
+  | Turn_ended
+      { turn_ref = _
+      ; history_at_start = Continued_history | Continued_history_from _
+      ; position = _
+      } -> false
+;;
+
 let witness_line ?through ~trace_id ~end_atom ~last_atom_digest lines =
-  List.fold_left
-    (fun latest (line, decoded) ->
-       let counted =
-         match through with
-         | None -> true
-         | Some last_counted -> line <= last_counted
-       in
-       if not counted
-       then latest
-       else (
-         match decoded with
-         | Error (_ : read_error) -> latest
-         | Ok record ->
-           (match atom_position_stated ~trace_id record with
-            | Some (turn_ref, stated_end, stated_digest)
-              when stated_end = end_atom && String.equal stated_digest last_atom_digest ->
-              Some (line, record.recorded_at, turn_ref)
-            | Some _ | None -> latest)))
-    None
-    lines
+  let ended_at, started_at =
+    List.fold_left
+      (fun ((ended_at, started_at) as found) (line, decoded) ->
+         let counted =
+           match through with
+           | None -> true
+           | Some last_counted -> line <= last_counted
+         in
+         if not counted
+         then found
+         else (
+           match decoded with
+           | Error (_ : read_error) -> found
+           | Ok record ->
+             let witness turn_ref = Some (line, record.recorded_at, turn_ref) in
+             let ended_at =
+               match
+                 is_position ~end_atom ~last_atom_digest
+                   (atom_position_stated ~trace_id record)
+               with
+               | Some turn_ref -> witness turn_ref
+               | None -> ended_at
+             in
+             let started_at =
+               if restarts_history ~trace_id record then None else started_at
+             in
+             let started_at =
+               match
+                 started_at,
+                 is_position ~end_atom ~last_atom_digest
+                   (start_position_stated ~trace_id record)
+               with
+               | None, Some turn_ref -> witness turn_ref
+               | Some _, (Some _ | None) | None, None -> started_at
+             in
+             ended_at, started_at))
+      (None, None)
+      lines
+  in
+  match ended_at with
+  | Some _ -> ended_at
+  | None -> started_at
 ;;

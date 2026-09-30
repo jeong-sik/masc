@@ -711,7 +711,11 @@ status: reference
     `usage-read`를 선언했으면 Keeper turn walk가 해당 endpoint를 한 번 읽는다(#38975).
     그 보고에서 모델 호출을 막는 창이 한도까지 소진된 경우에만 별도
     `Runtime_quota_window` 증거로 기록하고, 이후 후보 순서가 그 증거를 읽어 해당 scope를
-    뒤로 둔다. Muse의 모델 오류 뒤 `usage/read`는 선택된 계정의 소진 창을 확인해
+    뒤로 둔다. Codex turn 이 사용량 소진(`usageLimitExceeded`)으로 거절되면 같은 계정의
+    `account/rateLimits/read` 를 한 번 읽어 표를 갱신한다. 거절된 호출의 `limit_id`를
+    식별할 수 없으므로 단일 버킷도 휴식 시각으로 쓰지 않고 기존 `Observed`를 유지한다(#39997).
+    HTTP 403 뒤 읽기는 과거 리셋으로 거절 증거를 지우지 않는다.
+    Muse의 모델 오류 뒤 `usage/read`는 선택된 계정의 소진 창을 확인해
     `Runtime_quota_window`에만 기록한다(#39810). 이 읽기는 사용량 관측값을 이 표에
     추가하지 않고 실패한 turn도 재전송하지 않는다. 소진율이나 리셋 시각만으로 일반
     가용성을 추론하는 것은 아니다.

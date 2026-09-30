@@ -1,0 +1,3 @@
+### Added
+
+- Add a durable optional Lane Broadcast intention journal with stable caller operation identities, immutable recipient snapshots and restart-visible pending projection obligations; runtime delivery integration remains separate (#40233).

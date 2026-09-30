@@ -7690,3 +7690,8 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_skills_usage_summary)))
+
+(test
+ (name test_lane_addon_broadcast_delivery)
+ (modules test_lane_addon_broadcast_delivery)
+ (libraries masc alcotest unix))

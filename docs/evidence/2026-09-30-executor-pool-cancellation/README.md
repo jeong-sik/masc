@@ -36,7 +36,11 @@ The three component cases cover running-worker cancellation without replay,
 withdrawal while waiting for capacity, and successful nested/inline calls.
 The added Dashboard case covers timed-out fills and lazy payload preparation,
 no late cache publication, preservation of an existing JSON AST and recovery.
-That Dashboard case has only been syntax-checked locally; it has not executed.
+The Dashboard regression now runs as two independent cases in the focused
+`test_dashboard_cache_cancellation.exe` target. Both fail with the original
+executor body and pass with the restored patch. The actual `masc.dashboard`
+library is linked. Raw logs, exact source hashes and UTC receipts are in
+[dashboard-integration/README.md](dashboard-integration/README.md).
 
 ## Reproduction
 
@@ -45,16 +49,17 @@ From the worktree, with the required dependencies installed:
 ```sh
 env -u MASC_CONFIG_DIR -u MASC_BASE_PATH bash scripts/dune-local.sh build test/test_executor_pool_cancellation.exe
 env -u MASC_CONFIG_DIR -u MASC_BASE_PATH _build/default/test/test_executor_pool_cancellation.exe
-env -u MASC_CONFIG_DIR -u MASC_BASE_PATH bash scripts/dune-local.sh build test/test_dashboard_cache.exe
-env -u MASC_CONFIG_DIR -u MASC_BASE_PATH _build/default/test/test_dashboard_cache.exe test offload
+env -u MASC_CONFIG_DIR -u MASC_BASE_PATH bash scripts/dune-local.sh build test/test_dashboard_cache_cancellation.exe
+env -u MASC_CONFIG_DIR -u MASC_BASE_PATH _build/default/test/test_dashboard_cache_cancellation.exe
 ```
 
 The recorded local builds set `MASC_SKIP_DEPS_CHECK=1` because the installed
-DOS/MSX pins differ from the repository declarations. The small Core target
-does not depend on those libraries. This does not validate the full repository
+DOS/MSX pins differ from the repository declarations. The focused Core and
+Dashboard targets do not depend on those libraries. This does not validate the full repository
 toolchain. Shared pins were not changed. Full builds, CI dispatch and production
 30-second saturation were not run. Temporary probe files were removed.
 
 [근거] Original process logs and source-bound JSON receipts in this directory;
-2026-09-30 10:42–10:49 UTC; High for the component RED/GREEN result,
-unverified for the Dashboard integration behavior.
+2026-09-30 10:42–10:49 UTC (component) and 11:44:22–11:44:35 UTC
+(Dashboard); High for the tested RED/GREEN paths, unverified for
+installed-server behavior.

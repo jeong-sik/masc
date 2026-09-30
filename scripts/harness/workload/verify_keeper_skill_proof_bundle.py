@@ -20,6 +20,7 @@ import zlib
 import join_natural_keeper_skill_ledger as ledger_join
 import keeper_skill_use_proof as proof_collector
 import capture_keeper_skill_tui_proof as tui_capture
+import skill_activation_events
 
 
 SCHEMA = "masc.keeper-skill-proof-verification/v1"
@@ -29,6 +30,7 @@ TUI_SCHEMA = "masc.keeper-skill-tui-proof.v5"
 BUILD_SCHEMA = "masc.tui-build-evidence/v1"
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+JOIN_EVENT_LOGS = {ledger_join.DURABLE_EVENTS_BEFORE, ledger_join.DURABLE_EVENTS_AFTER}
 JOIN_ARTIFACTS = {
     "producer-receipt.json",
     "health-before.json",
@@ -37,15 +39,14 @@ JOIN_ARTIFACTS = {
     "dashboard-tools-after.json",
     "historical-skill-activations-before.json",
     "historical-skill-activations-after.json",
-    "durable-skill-activations-before.json",
-    "durable-skill-activations-after.json",
+    *JOIN_EVENT_LOGS,
     "source-before.json",
     "source-after.json",
 }
 PROOF_ARTIFACTS = {
     "health.json",
     "dashboard-tools.json",
-    "skill-activations.json",
+    skill_activation_events.EVENTS_FILENAME,
     "tui-build-evidence.json",
     "masc_tui.exe",
 }
@@ -375,6 +376,16 @@ def decode_artifacts(
     }
 
 
+def fold_event_log_artifact(payload: bytes, context: str) -> dict[str, Any]:
+    try:
+        ledger = skill_activation_events.fold_event_log(payload)
+    except skill_activation_events.SkillLedgerError as error:
+        raise VerificationError(f"{context}: {error}") from error
+    if ledger is None:
+        raise VerificationError(f"{context} has recorded nothing")
+    return ledger
+
+
 def normalized_join_reference(match: dict[str, Any]) -> dict[str, str]:
     reference = object_field(match, "reference", "join match")
     identity = object_field(reference, "identity", "join match reference")
@@ -483,7 +494,13 @@ def parse_turn_ref(value: str) -> tuple[str, int]:
 def validate_join_authorities(
     join: dict[str, Any], payloads: dict[str, bytes]
 ) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
-    decoded = decode_artifacts(payloads, JOIN_ARTIFACTS, "join")
+    decoded = decode_artifacts(payloads, JOIN_ARTIFACTS - JOIN_EVENT_LOGS, "join")
+    decoded.update(
+        {
+            name: fold_event_log_artifact(payloads[name], f"join artifact {name}")
+            for name in JOIN_EVENT_LOGS
+        }
+    )
     inputs = object_field(join, "inputs", "join")
     receipt_raw = payloads["producer-receipt.json"]
     try:
@@ -501,12 +518,12 @@ def validate_join_authorities(
             dashboard_after=decoded["dashboard-tools-after.json"],
             historical_before=decoded["historical-skill-activations-before.json"],
             historical_after=decoded["historical-skill-activations-after.json"],
-            durable_ledger=decoded["durable-skill-activations-before.json"],
-            durable_ledger_after=decoded["durable-skill-activations-after.json"],
-            durable_ledger_raw=payloads["durable-skill-activations-before.json"],
-            durable_ledger_after_raw=payloads["durable-skill-activations-after.json"],
+            durable_ledger=decoded[ledger_join.DURABLE_EVENTS_BEFORE],
+            durable_ledger_after=decoded[ledger_join.DURABLE_EVENTS_AFTER],
+            durable_ledger_raw=payloads[ledger_join.DURABLE_EVENTS_BEFORE],
+            durable_ledger_after_raw=payloads[ledger_join.DURABLE_EVENTS_AFTER],
         )
-    except ledger_join.JoinError as error:
+    except (ledger_join.JoinError, skill_activation_events.SkillLedgerError) as error:
         raise VerificationError(f"join raw authority is invalid: {error}") from error
     for field in (
         "producer",
@@ -534,15 +551,17 @@ def validate_proof_authorities(
     joined_ledger: dict[str, Any],
 ) -> dict[str, Any]:
     decoded = decode_artifacts(
-        payloads,
-        {"health.json", "dashboard-tools.json", "skill-activations.json"},
-        "proof",
+        payloads, {"health.json", "dashboard-tools.json"}, "proof"
+    )
+    events_name = skill_activation_events.EVENTS_FILENAME
+    durable_ledger = fold_event_log_artifact(
+        payloads[events_name], f"proof artifact {events_name}"
     )
     try:
         recomputed = proof_collector.validate_proof(
             health=decoded["health.json"],
             dashboard=decoded["dashboard-tools.json"],
-            durable_ledger=decoded["skill-activations.json"],
+            durable_ledger=durable_ledger,
             keeper=keeper,
             expected_source_sha=expected_source_sha,
             skill_tool_use_id=skill_tool_use_id,
@@ -550,7 +569,11 @@ def validate_proof_authorities(
         raw_server = ledger_join.health_identity(
             decoded["health.json"], expected_source_head=expected_source_sha
         )
-    except (proof_collector.ProofError, ledger_join.JoinError) as error:
+    except (
+        proof_collector.ProofError,
+        ledger_join.JoinError,
+        skill_activation_events.SkillLedgerError,
+    ) as error:
         raise VerificationError(f"proof raw authority is invalid: {error}") from error
     require(
         object_field(proof, "proof", "proof") == recomputed,
@@ -558,7 +581,7 @@ def validate_proof_authorities(
     )
     require(raw_server == join_server, "proof raw server differs from join")
     require(
-        decoded["skill-activations.json"] == joined_ledger,
+        durable_ledger == joined_ledger,
         "proof durable ledger differs from join raw authority",
     )
     return recomputed
@@ -662,7 +685,7 @@ def verify_bundle(
         skill_tool_use_id=selected_id,
         expected_source_sha=string_field(join_source, "head", "join source"),
         join_server=join_server,
-        joined_ledger=join_decoded["durable-skill-activations-after.json"],
+        joined_ledger=join_decoded[ledger_join.DURABLE_EVENTS_AFTER],
     )
     join_ledger = object_field(join, "ledger", "join")
     identity = {
@@ -727,7 +750,7 @@ def verify_bundle(
     require(proof_actions != [], "proof has no later model-selected action")
     require(match.get("actions") == proof_actions, "join and proof actions differ")
     durable_activations = list_field(
-        join_decoded["durable-skill-activations-after.json"],
+        join_decoded[ledger_join.DURABLE_EVENTS_AFTER],
         "activations",
         "joined durable Skill ledger",
     )
@@ -763,7 +786,7 @@ def verify_bundle(
     )
     require(
         durability.get("ledger_sha256")
-        == proof_artifacts["skill-activations.json"]["sha256"],
+        == proof_artifacts[skill_activation_events.EVENTS_FILENAME]["sha256"],
         "proof durable ledger SHA differs from its artifact",
     )
 

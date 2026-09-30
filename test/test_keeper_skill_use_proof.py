@@ -7,6 +7,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+import skill_activation_event_log_fixture as log_fixture
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_PATH = (
@@ -26,6 +28,7 @@ def load_module():
 
 
 proof = load_module()
+events = proof.skill_activation_events
 SHA = "a" * 40
 INSTANCE = "018f1d5e-7b3c-7abc-8def-0123456789ab"
 
@@ -101,7 +104,7 @@ def fixture():
         "activations": [activation],
         "transition_rejections": [],
     }
-    ledger["revision"] = proof.ledger_revision(ledger)
+    ledger["revision"] = events.ledger_revision(ledger)
     dashboard = {
         "effective_keeper_surface": {
             "status": "available",
@@ -153,7 +156,7 @@ def fixture():
 
 
 def refresh_projection(dashboard, ledger):
-    ledger["revision"] = proof.ledger_revision(ledger)
+    ledger["revision"] = events.ledger_revision(ledger)
     projection = dashboard["skill_activations"]
     projection["summary"] = proof.summarize(
         ledger["activations"], ledger["transition_rejections"]
@@ -613,7 +616,7 @@ class KeeperSkillUseProofTest(unittest.TestCase):
     def test_rejects_handoff_without_later_action(self):
         health, dashboard, ledger = fixture()
         ledger["activations"][0]["actions"] = []
-        ledger["revision"] = proof.ledger_revision(ledger)
+        ledger["revision"] = events.ledger_revision(ledger)
         dashboard["skill_activations"]["summary"]["instruction_actions_observed"] = 0
         dashboard["skill_activations"]["scoped_summaries"][0]["summary"][
             "instruction_actions_observed"
@@ -638,7 +641,7 @@ class KeeperSkillUseProofTest(unittest.TestCase):
         ledger["transition_rejections"] = [
             {"kind": "action_before_delivery", "skill_tool_use_id": "call-skill-1"}
         ]
-        ledger["revision"] = proof.ledger_revision(ledger)
+        ledger["revision"] = events.ledger_revision(ledger)
 
         with self.assertRaisesRegex(proof.ProofError, "has rejected transitions"):
             self.validate(health, dashboard, ledger)
@@ -683,7 +686,32 @@ class KeeperSkillUseProofTest(unittest.TestCase):
         decoded = proof.decode_json(payload, "dashboard fixture")
         projection = decoded["skill_activations"]["ledger"]
         self.assertEqual(projection, ledger)
-        self.assertEqual(projection["revision"], proof.ledger_revision(projection))
+        self.assertEqual(projection["revision"], events.ledger_revision(projection))
+
+    def test_durable_ledger_is_the_folded_session_event_log(self):
+        _, _, ledger = fixture()
+        with tempfile.TemporaryDirectory() as raw:
+            events_path = Path(raw) / events.EVENTS_FILENAME
+            payload = log_fixture.event_log(ledger)
+            events_path.write_bytes(payload)
+
+            self.assertEqual(proof.read_durable_ledger(events_path), (ledger, payload))
+
+            events_path.write_bytes(b"")
+            with self.assertRaisesRegex(proof.ProofError, "has recorded nothing"):
+                proof.read_durable_ledger(events_path)
+
+            events_path.write_bytes(payload + b"\n")
+            with self.assertRaises(proof.ProofError) as caught:
+                proof.read_durable_ledger(events_path)
+            self.assertIs(
+                caught.exception.__cause__.fault,
+                events.SkillLedgerFault.BLANK_EVENT_ROW,
+            )
+
+            events_path.unlink()
+            with self.assertRaisesRegex(proof.ProofError, "cannot read"):
+                proof.read_durable_ledger(events_path)
 
     def test_accepts_call_id_action_identity(self):
         health, dashboard, ledger = fixture()
@@ -691,7 +719,7 @@ class KeeperSkillUseProofTest(unittest.TestCase):
             "kind": "call_id",
             "call_id": "call-action-1",
         }
-        ledger["revision"] = proof.ledger_revision(ledger)
+        ledger["revision"] = events.ledger_revision(ledger)
 
         result = self.validate(health, dashboard, ledger)
 

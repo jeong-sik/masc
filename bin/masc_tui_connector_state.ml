@@ -1,7 +1,6 @@
-module Reading = Masc.Tui_decode
 
-let badge_word : Reading.connector_connection -> string = function
-  | Reading.Connector_connected -> "CONNECTED"
+let badge_word : Masc.Tui_decode_connectors.connector_connection -> string = function
+  | Masc.Tui_decode_connectors.Connector_connected -> "CONNECTED"
   | Connector_connected_unavailable -> "CONNECTED / UNAVAILABLE"
   | Connector_disconnected -> "DISCONNECTED"
   | Connector_offline -> "UNAVAILABLE"
@@ -14,8 +13,8 @@ let badge_word : Reading.connector_connection -> string = function
    cut to twelve cells reads as [CONNECTED], which is a different state.
    OCaml does not enumerate a variant for us, so a new connection has to be
    added here as well; [test_tui_connector_state] pins the count. *)
-let all_connections : Reading.connector_connection list =
-  [ Reading.Connector_connected
+let all_connections : Masc.Tui_decode_connectors.connector_connection list =
+  [ Masc.Tui_decode_connectors.Connector_connected
   ; Connector_connected_unavailable
   ; Connector_disconnected
   ; Connector_offline
@@ -45,8 +44,8 @@ let list_row_name_cells ~inner ~fixed_cells ~tail_cells =
   let left = inner - fixed_cells - badge_column_cells - tail_cells in
   min name_cells_preferred (max name_cells_floor left)
 
-let gateway_word : Reading.connector_gateway_state -> string = function
-  | Reading.Connector_gateway_disconnected -> "disconnected"
+let gateway_word : Masc.Tui_decode_connectors.connector_gateway_state -> string = function
+  | Masc.Tui_decode_connectors.Connector_gateway_disconnected -> "disconnected"
   | Connector_gateway_awaiting_hello -> "awaiting_hello"
   | Connector_gateway_identifying -> "identifying"
   | Connector_gateway_resuming -> "resuming"
@@ -54,8 +53,8 @@ let gateway_word : Reading.connector_gateway_state -> string = function
   | Connector_gateway_reconnect_pending -> "reconnect_pending"
   | Connector_gateway_failed -> "failed"
 
-let poll_word : Reading.connector_poll_state -> string = function
-  | Reading.Connector_poll_not_started -> "not_started"
+let poll_word : Masc.Tui_decode_connectors.connector_poll_state -> string = function
+  | Masc.Tui_decode_connectors.Connector_poll_not_started -> "not_started"
   | Connector_poll_polling -> "polling"
   | Connector_poll_degraded -> "degraded"
 
@@ -66,15 +65,15 @@ let poll_word : Reading.connector_poll_state -> string = function
    the half the badge already spelled, and leaves the reader to guess which
    half the row meant. Every other pair adds a reading: a resuming gateway
    under CONNECTED / UNAVAILABLE, a disconnected one under UNAVAILABLE. *)
-let badge_says_gateway (connection : Reading.connector_connection) :
-    Reading.connector_gateway_state -> bool = function
-  | Reading.Connector_gateway_connected -> (
+let badge_says_gateway (connection : Masc.Tui_decode_connectors.connector_connection) :
+    Masc.Tui_decode_connectors.connector_gateway_state -> bool = function
+  | Masc.Tui_decode_connectors.Connector_gateway_connected -> (
       match connection with
-      | Reading.Connector_connected | Connector_connected_unavailable -> true
+      | Masc.Tui_decode_connectors.Connector_connected | Connector_connected_unavailable -> true
       | Connector_disconnected | Connector_offline | Connector_stale -> false)
   | Connector_gateway_disconnected -> (
       match connection with
-      | Reading.Connector_disconnected -> true
+      | Masc.Tui_decode_connectors.Connector_disconnected -> true
       | Connector_connected | Connector_connected_unavailable
       | Connector_offline | Connector_stale ->
           false)
@@ -84,15 +83,15 @@ let badge_says_gateway (connection : Reading.connector_connection) :
       false
 
 (* No badge speaks of polling, so a poll state always adds a reading. *)
-let badge_says_poll (_ : Reading.connector_connection) :
-    Reading.connector_poll_state -> bool = function
-  | Reading.Connector_poll_not_started | Connector_poll_polling
+let badge_says_poll (_ : Masc.Tui_decode_connectors.connector_connection) :
+    Masc.Tui_decode_connectors.connector_poll_state -> bool = function
+  | Masc.Tui_decode_connectors.Connector_poll_not_started | Connector_poll_polling
   | Connector_poll_degraded ->
       false
 
-let runtime_state_to_draw (connector : Reading.connector) =
-  let connection = connector.Reading.cn_connection in
-  match connector.Reading.cn_gateway_state, connector.Reading.cn_poll_state with
+let runtime_state_to_draw (connector : Masc.Tui_decode_connectors.connector) =
+  let connection = connector.Masc.Tui_decode_connectors.cn_connection in
+  match connector.Masc.Tui_decode_connectors.cn_gateway_state, connector.Masc.Tui_decode_connectors.cn_poll_state with
   | Some gateway, _ ->
       if badge_says_gateway connection gateway then None
       else Some (gateway_word gateway)

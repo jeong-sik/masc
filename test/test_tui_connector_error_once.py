@@ -5,11 +5,7 @@ import sys
 
 import test_tui_keyboard_input as h
 
-SOURCE_MODULES = (
-    "bin/masc_tui.ml",
-    "bin/masc_tui_loader.ml",
-    "bin/masc_tui_render.ml",
-)
+SOURCE_MODULES = ('bin/masc_tui.ml', 'bin/masc_tui_loader.ml', 'bin/masc_tui_render.ml', 'lib/tui_decode_connectors.ml', 'lib/tui_decode_connectors.mli')
 
 CONNECTORS = "/api/v1/gate/connectors"
 EMPTY = (200, {"connectors": [], "total": 0, "active_count": 0})

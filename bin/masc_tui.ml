@@ -15776,7 +15776,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           let previous_id =
             Option.bind state.connectors (fun previous ->
                 Option.map
-                  (fun (connector : Tui_decode.connector) -> connector.cn_id)
+                  (fun (connector : Masc.Tui_decode_connectors.connector) -> connector.cn_id)
                   (List.nth_opt previous.cs_connectors state.connectors_cursor))
           in
           state.connectors <- Some snapshot;
@@ -15787,7 +15787,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
              | Some id ->
                  let rec find index = function
                    | [] -> 0
-                   | (connector : Tui_decode.connector) :: rest ->
+                   | (connector : Masc.Tui_decode_connectors.connector) :: rest ->
                        if String.equal connector.cn_id id then index
                        else find (index + 1) rest
                  in
@@ -17189,7 +17189,7 @@ let main
     Option.bind state.connectors (fun snapshot ->
         List.nth_opt snapshot.cs_connectors state.connectors_cursor)
   in
-  let selected_connector_binding (connector : Tui_decode.connector) =
+  let selected_connector_binding (connector : Masc.Tui_decode_connectors.connector) =
     List.nth_opt connector.cn_bindings state.connectors_binding_cursor
   in
   let handle_connector_bind () =

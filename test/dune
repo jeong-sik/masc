@@ -7786,3 +7786,5 @@
 
 (include stanzas/test_tui_prompts_layout_pty.inc)
 
+
+(include stanzas/test_candle_purchase_flow.inc)

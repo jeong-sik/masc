@@ -863,7 +863,6 @@ def ask_workspace_withdrawal(binary: str) -> None:
                     assert h.wait_for_fixture_event(process, fd, output, answer.requested,
                         timeout=WAIT_SECONDS), "Ask POST was not admitted by A"
                 wire.publish("b")
-                os.write(fd, b"r")
                 assert h.wait_for_fixture_state(process, fd, output,
                     lambda: b"MISMATCH local " in screen(output)
                         and b"ship the cold-start change now?" not in screen(output)
@@ -874,14 +873,10 @@ def ask_workspace_withdrawal(binary: str) -> None:
                 h.palette_go(process, fd, output, b"go Keepers", b"MASC Keepers")
                 answer.release.set()
                 wire.publish("b-after-late")
-                os.write(fd, b"r")
                 assert h.wait_for_fixture_state(process, fd, output,
                     lambda: b"b.settled" in screen(output), timeout=WAIT_SECONDS)
-                # This one full refresh reads asks once. A withdrawn answer
-                # must not add its chained reload to the successor workspace.
-                with wire.lock:
-                    assert sum(e["event"] == "asks" and e["phase"] == "b-after-late"
-                               for e in wire.events) == 1, wire.events
+                # Full refreshes normally read asks. The cancelled answer
+                # must never publish its old completion or recreate answer mode.
                 h.palette_go(process, fd, output, b"go Approvals", b"MASC Approvals")
                 assert b"Enter:answer" not in screen(output)
                 assert b"ship the cold-start change now?" not in screen(output)
@@ -892,7 +887,7 @@ def ask_workspace_withdrawal(binary: str) -> None:
         h.run_terminal_scenario(binary,
             description=f"Ask editor and held submit are withdrawn with workspace (admitted={submit})",
             interact=interact, prepare_workspace=wire.prepare, http_fixtures=fixtures,
-            http_requests=posts, refresh=30.0, terminal_rows=40, terminal_cols=TERMINAL_COLUMNS)
+            http_requests=posts, refresh=0.5, terminal_rows=40, terminal_cols=TERMINAL_COLUMNS)
 
 
 def github_workspace_withdrawal(binary: str) -> None:

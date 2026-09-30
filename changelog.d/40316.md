@@ -1,0 +1,1 @@
+- Integrate responsive Workspace Activity rows and full selected-record Context into the TUI stack; preserve reader ownership and show active Activity help.

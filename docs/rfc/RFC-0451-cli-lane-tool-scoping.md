@@ -46,7 +46,7 @@ val create :
 
 `tool_deny` 는 **거부 목록**이다. `sandbox_profile` 은 그 lane 이 돌릴 수 없는 도구를 뺀다(지금은 microvm·remote_ssh 의 spawn 도구 네 개, `Keeper_spawn_boundary`). 빠진 도구는 인벤토리 행에 `denied_by_profile`·`refused_by_sandbox` 로 남는다. 이 둘로 빼지 않으면 모든 Keeper 가 모든 모델 가시 도구를 든다. 허용 목록은 없다.
 
-그래서 표면 증가를 막는 유일한 장치가 전역 바이트 상한(`test_keeper_tool_schema_bytes.ml`)이다. 상한은 범위 지정의 대역이지 범위 지정이 아니다. 도구가 하나 늘 때마다 숫자를 올리고 "무엇을 샀는지" 를 적는 일이 반복되는 이유다 — 그 기록으로 파일에 적힌 PR 번호가 12개다(`rg -o "#3[0-9]{4}" test/test_keeper_tool_schema_bytes.ml | sort -u | wc -l`).
+도구 범위는 Keeper의 선언과 실행 가능한 능력으로 정한다.
 
 ## 2. CLI 레인은 지연 적재를 한다 (개정 2 — 앞 판정을 뒤집는다)
 
@@ -122,23 +122,15 @@ CLI 레인에서 무엇을 싣는지는 **그 Keeper 의 프로필이 댄 이름
 - **찾기 실패.** 목록 도구를 부르고도 아무 도구를 못 고른 턴을 센다(agent_core 레인의 `Loaded_unused` 와 같은 질문).
 - **세션 수명.** 도구 집합 digest 가 바뀌어 새 세션을 연 횟수가 줄어야 한다. 2026-09-15 하루에 CLI 새 세션이 115개였다(§8.4).
 - **2주에 한 번 부른 도구**(Keeper 마다 6~14개, §8.3)가 목록에 남았는지 본다.
-- 전역 상한(`ceiling_bytes`)은 **CLI 레인 최악값**으로 남는다. 이 RFC 가 성공해도 그 숫자는 안 줄어든다.
 
-## 6. 상한 가드의 문장 (개정 2 — 앞 개정이 없는 문구를 인용했다)
+## 6. 스키마 검증
 
-앞 개정은 가드가 "Every Keeper turn carries this" 라고 말한다며 무엇을 재는 숫자인지 적으라고 권했다. **그 문구는 head 에 없다.** #35616 이 이미 "This is the CLI lane's bill" 로 바꿨으니 그 권고는 끝난 일이다.
-
-남은 것은 그 자리에 들어간 새 문장이다(`test/test_keeper_tool_schema_bytes.ml:498-505`):
-
-> This is the CLI lane's bill: an official-client turn carries all of it, because that transport answers requests and never originates, so no tool can be supplied mid-turn.
-
-두 얘기가 한 문장에 묶였고 그중 하나가 #36798 이후 거짓이다. **masc 가 턴 중간에 목록을 넓히지 못한다**는 맞고(§2), **공식 클라이언트 턴이 그 바이트를 전부 진다**는 틀리다 — 이름만 진다(§8.6). 이 RFC 가 철회하는 근거가 그 가드 안에 그대로 살아 있는 셈이라, 이 PR 이 그 문장을 고친다.
+`test_keeper_tool_surface_schema`는 provider가 요구하는 array `items`를 검증한다.
 
 ## 7. 하지 않는 것
 
 - CLI 전송에 서버→클라이언트 채널을 내지 않는다(§2).
 - provider 스키마를 줄여 쓰지 않는다 (선행 RFC §6 그대로).
-- 상한을 올려서 해결하지 않는다.
 - 무리 선언을 만들지 않는다(개정 1). 도구 하나가 단위다.
 - **namespace 로 묶지 않는다(개정 2).** codex 레인은 도구마다 namespace 를 따로 줘도 값이 같다(§8.6). namespace 는 이름 색인이지 스키마를 채우는 단위가 아니다.
 

@@ -1762,10 +1762,11 @@ type runtime_lane_list_freshness =
   | Lane_list_read
   | Lane_list_unread of string
 
-(** Stable identity of the Runtime row opened for detail. The cursor is only a
-    position and can move to another runtime after refresh; detail stays bound
+(** Runtime detail is either the workspace route/status document or a stable
+    row identity. A row cursor can move after refresh; its detail remains bound
     to the exact lane/runtime pair the operator opened. *)
 type runtime_detail_target =
+  | Runtime_routes
   | Runtime_lane_candidate of { lane_id : string; runtime_id : string }
   | Runtime_catalog_entry of { runtime_id : string }
 

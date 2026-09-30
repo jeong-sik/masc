@@ -1,0 +1,1 @@
+Runtime v opens complete default and ordered media route metadata, boot admission differences and read/action/probe diagnostics in a scrollable read-only detail, including when no candidate exists.

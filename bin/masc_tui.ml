@@ -19918,6 +19918,9 @@ and is loaded on demand through keeper_skill.
                  state.runtime_param_edit <- None;
                  state.runtime_params_notice <-
                    Some (true, edit.rpe_key ^ ": edit cancelled")
+               | "home" | "end" ->
+                 state.config_scroll <-
+                   (if String.equal k "home" then 0 else Masc_tui_types.clamped_scroll_end)
                | "pageup" | "pagedown" ->
                  let terminal_rows, _ = get_terminal_size () in
                  let _, detail_height =

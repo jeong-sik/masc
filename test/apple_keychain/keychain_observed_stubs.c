@@ -1,3 +1,5 @@
+/* Dune checks the foreign sources even when the macOS test is disabled. */
+#ifdef __APPLE__
 #include <Security/Security.h>
 
 /* A headless runner may reject a prompt even if MASC left interaction enabled.
@@ -46,3 +48,4 @@ CAMLprim value masc_test_observed_keychain_counts(value unit) {
   Store_field(counts, 2, Val_int(interaction_violations));
   CAMLreturn(counts);
 }
+#endif

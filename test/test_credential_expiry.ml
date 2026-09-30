@@ -214,6 +214,41 @@ let test_invalid_exact_identity_refuses_prefix_bearer () =
   check bool "explicit revocation removes the malformed named file" false
     (Sys.file_exists (Auth.credential_file base_path exact_name))
 
+let test_alias_revocation_preserves_canonical_owner () =
+  List.iter (fun malformed -> with_workspace @@ fun base_path _ ->
+    let canonical = "keeper-alpha-agent" in
+    let token, credential = auth_ok (Auth.create_token_without_expiry base_path
+        ~agent_name:canonical ~role:Masc_domain.Worker) in
+    let id = Masc_domain.Credential_id.generate () in
+    Auth.save_credential base_path { credential with id = Some id };
+    Auth.save_private_text_file (Auth.raw_token_file base_path canonical) token;
+    let () = auth_ok (Auth.ensure_credential_alias base_path ~canonical_name:canonical ~alias_name:"alpha") in
+    if malformed then Auth.save_credential base_path
+        { credential with id = Some id; expires_at = Some "invalid" };
+    let paths = [Auth.credential_file base_path canonical; Auth.credential_file base_path "alpha";
+                 Filename.concat (Filename.dirname (Auth.credential_file base_path canonical))
+                   (Masc_domain.Credential_id.to_string id ^ ".json"); Auth.raw_token_file base_path canonical] in
+    let bytes () = List.map (fun path -> In_channel.with_open_bin path In_channel.input_all) paths in
+    let before = bytes () in
+    let result = Auth.with_credential_transaction base_path (fun transaction ->
+      Auth.delete_credential_in_transaction transaction "alpha") |> Result.join in
+    check bool "alias cannot revoke canonical owner, even with malformed expiry" true (Result.is_error result);
+    check bool "alias rejection preserves every canonical artifact" true (bytes () = before)) [false; true]
+
+let test_revoke_unlinks_dangling_named_path () =
+  with_workspace @@ fun base_path _ ->
+  let path = Auth.credential_file base_path "dangling" in
+  Unix.symlink (Filename.concat base_path "missing-credential") path;
+  let result = Auth.with_credential_transaction base_path (fun transaction ->
+    check bool "dangling entry is admitted" true
+      (auth_ok (Auth.credential_exists_in_transaction transaction "dangling"));
+    Auth.delete_credential_in_transaction transaction "dangling") |> Result.join in
+  let () = auth_ok result in
+  let present = try let _ = Unix.lstat path in true
+    with Unix.Unix_error (Unix.ENOENT, _, _) -> false in
+  check bool "successful revoke actually unlinks the dangling entry" false present;
+  check int "no diagnostic remains after revoke" 0 (List.length (Auth.list_credential_results base_path))
+
 let test_dangling_credential_directory_is_unreadable () =
   with_workspace @@ fun base_path _ ->
   let dir = Filename.dirname (Auth.credential_file base_path "unused") in
@@ -229,7 +264,9 @@ let test_dangling_credential_directory_is_unreadable () =
 let () =
   run "credential expiry feature"
     [ "bearer, OAuth, seats and inventory",
-      [ test_case "malformed exact credential refuses prefix bearer and can be revoked" `Quick
+      [ test_case "redirect aliases cannot revoke canonical owners" `Quick test_alias_revocation_preserves_canonical_owner
+      ; test_case "revoke actually unlinks dangling named paths" `Quick test_revoke_unlinks_dangling_named_path
+      ; test_case "malformed exact credential refuses prefix bearer and can be revoked" `Quick
           test_invalid_exact_identity_refuses_prefix_bearer
       ; test_case "dangling credential directory is unavailable" `Quick
           test_dangling_credential_directory_is_unreadable

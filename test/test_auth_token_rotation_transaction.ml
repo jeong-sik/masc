@@ -358,7 +358,8 @@ let test_failed_supplied_token_preserves_previous_raw () =
       ~agent_name:"operator" ~role:Masc_domain.Admin ~raw_token:"recoverable-old-token") in
   let id = Masc_domain.Credential_id.generate () in
   Auth.save_credential base_path { original with id = Some id };
-  let uuid_file = Auth.credential_uuid_file base_path id in
+  let uuid_file = Filename.concat (Filename.dirname (Auth.credential_file base_path "operator"))
+      (Masc_domain.Credential_id.to_string id ^ ".json") in
   let previous_uuid = read uuid_file in
   let directory = Filename.dirname (Auth.credential_file base_path "operator") in
   Unix.chmod directory 0o500;
@@ -381,6 +382,42 @@ let test_failed_keeper_remint_preserves_previous_pair () =
       (Result.is_error (Auth.ensure_keeper_credential base_path ~agent_name:"aaa")));
   check bool "failed Keeper remint restores both old pairs" true (snapshot base_path = before)
 
+let test_extended_redirect_remains_a_current_owner () =
+  with_workspace @@ fun base_path ->
+  let first, _second = seed_pair base_path in
+  Auth.save_credential base_path { first with id = Some (Masc_domain.Credential_id.generate ()) };
+  let named = Auth.credential_file base_path "aaa" in
+  let fields = match Yojson.Safe.from_string (read named) with
+    | `Assoc fields -> fields | _ -> fail "expected redirect fixture" in
+  Auth.save_private_text_file named
+    (Yojson.Safe.to_string (`Assoc (("note", `String "extra redirect metadata") :: fields)));
+  check bool "normal credential loading accepts the redirect extension" true
+    (Auth.load_credential base_path "aaa" <> None);
+  (match auth_ok (rotate base_path) with
+   | [{Auth.rotated_agents = ["aaa", Ok (); "bbb", Ok ()]; _}] -> ()
+   | _ -> fail "extended redirect must participate in the shared-owner rotation");
+  List.iter (check_recoverable base_path) ["aaa"; "bbb"]
+
+let test_fifo_diagnostic_listing_refuses_without_blocking () =
+  match Unix.fork () with
+  | 0 ->
+    Sys.set_signal Sys.sigalrm Sys.Signal_default;
+    let _previous_alarm_seconds = Unix.alarm 5 in
+    (try with_workspace (fun base_path ->
+       Unix.mkfifo (Auth.credential_file base_path "fifo") 0o600;
+       match Auth.list_credential_results base_path with
+       | [Error (Auth.Unreadable_credential _)] -> ()
+       | _ -> fail "nonregular diagnostic entry must be unreadable"); exit 0
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn -> prerr_endline (Printexc.to_string exn); exit 2)
+  | pid ->
+    let _, status = Unix.waitpid [] pid in
+    match status with
+    | Unix.WEXITED 0 -> ()
+    | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
+      fail "diagnostic FIFO read must refuse without waiting for a writer"
+
 let test_keeper_batch_updates_its_admitted_index () =
   with_workspace @@ fun base_path ->
   let _pair = seed_pair base_path in
@@ -395,7 +432,9 @@ let test_keeper_batch_updates_its_admitted_index () =
 let () =
   run "auth_token_rotation_transaction"
     [ "rotation",
-      [ test_case "same-owner partial UUID publication can retry" `Quick test_same_owner_partial_uuid_can_retry
+      [ test_case "extended redirects remain current owners" `Quick test_extended_redirect_remains_a_current_owner
+      ; test_case "diagnostic listing refuses FIFO without blocking" `Quick test_fifo_diagnostic_listing_refuses_without_blocking
+      ; test_case "same-owner partial UUID publication can retry" `Quick test_same_owner_partial_uuid_can_retry
       ; test_case "noncanonical UUID refuses before writes" `Quick test_noncanonical_uuid_is_refused
       ; test_case "failed supplied-token write preserves old bearer" `Quick test_failed_supplied_token_preserves_previous_raw
       ; test_case "failed Keeper remint preserves previous pair" `Quick test_failed_keeper_remint_preserves_previous_pair

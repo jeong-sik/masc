@@ -289,7 +289,9 @@ let load_redirect_target config path =
     | Sys_error _ | Yojson.Json_error _ -> None)
 ;;
 
-let remove_file_if_exists path = if file_exists path then remove_file path
+let remove_file_if_exists path =
+  try run_blocking_io (fun () -> Unix.unlink path) with
+  | Unix.Unix_error (Unix.ENOENT, _, _) -> ()
 
 (* [agent_name]'s own file, then the id-named file its redirect stub points
    to. A name that signs in with another name's token (a generated nickname,
@@ -545,9 +547,74 @@ let persist_raw_token config ~agent_name raw_token =
   save_private_text_file (raw_token_file config agent_name) raw_token
 ;;
 
+(* Open nonblocking and validate the descriptor we actually read. Following a
+   regular-file symlink is allowed; special-file replacement cannot block. *)
+let read_regular_credential_text path =
+  run_blocking_io (fun () ->
+    let fd = Unix.openfile path [Unix.O_RDONLY; Unix.O_NONBLOCK; Unix.O_CLOEXEC] 0 in
+    Fun.protect ~finally:(fun () -> Unix.close fd) (fun () ->
+      let before = Unix.fstat fd in
+      if before.Unix.st_kind <> Unix.S_REG then
+        raise (Sys_error (Printf.sprintf "credential path is not a regular file: %s" path));
+      let content = Buffer.create 256 in
+      let chunk = Bytes.create 4096 in
+      let rec read () =
+        let count = Unix.read fd chunk 0 (Bytes.length chunk) in
+        if count > 0 then (Buffer.add_subbytes content chunk 0 count; read ()) in
+      read ();
+      let after = Unix.fstat fd in
+      let named = Unix.stat path in
+      if before.Unix.st_dev <> after.Unix.st_dev || before.Unix.st_ino <> after.Unix.st_ino
+         || before.Unix.st_size <> after.Unix.st_size || before.Unix.st_mtime <> after.Unix.st_mtime
+         || before.Unix.st_ctime <> after.Unix.st_ctime
+         || after.Unix.st_dev <> named.Unix.st_dev || after.Unix.st_ino <> named.Unix.st_ino
+      then raise (Sys_error (Printf.sprintf "credential changed during verified read: %s" path));
+      Buffer.contents content))
+;;
+
+(* Revocation admits only the payload's canonical name. Expiry need not decode,
+   but an alias must not retire another owner's UUID and leave its raw bearer. *)
+let validate_revocation_owner config agent_name =
+  let file = credential_file config agent_name in
+  let refused detail = Error (System (System_error.ValidationError
+      (Printf.sprintf "cannot revoke %s: %s" agent_name detail))) in
+  let read_json path =
+    try
+      Ok (Some (Yojson.Safe.from_string (read_regular_credential_text path)))
+    with
+    | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
+    | Yojson.Json_error _ -> refused "credential owner cannot be decoded"
+    | Sys_error detail -> Error (System (System_error.IoError detail))
+    | Unix.Unix_error (error, operation, argument) ->
+      Error (System (System_error.IoError
+        (Printf.sprintf "%s(%s): %s" operation argument (Unix.error_message error))))
+    | Eio.Io _ as exn -> Error (System (System_error.IoError (Printexc.to_string exn))) in
+  let ( let* ) = Result.bind in
+  let* named = read_json file in
+  let* payload = match named with
+    | Some (`Assoc fields) ->
+      (match List.assoc_opt "redirect_to" fields with
+       | Some (`String target) ->
+         (match redirect_target_file config target with
+          | Some path -> read_json path
+          | None -> refused "invalid redirect target")
+       | _ -> Ok named)
+    | _ -> Ok named in
+  match payload with
+  | None -> Ok () (* Missing targets and dangling named symlinks can be unlinked. *)
+  | Some (`Assoc fields) ->
+    (match List.assoc_opt "agent_name" fields with
+     | Some (`String owner) when String.equal owner agent_name -> Ok ()
+     | Some (`String _) -> refused "requested name is an alias, not the canonical owner"
+     | _ -> refused "credential owner cannot be decoded")
+  | Some _ -> refused "credential owner cannot be decoded"
+;;
+
 (** Delete using the caller's admitted workspace. The public wrapper and
     multi-effect transactions share this implementation. *)
 let delete_credential_in_transaction (Credential_transaction config) agent_name =
+  let ( let* ) = Result.bind in
+  let* () = validate_revocation_owner config agent_name in
   try
     Fun.protect ~finally:(fun () -> !credential_cache_invalidator_ref config)
       (fun () ->
@@ -605,6 +672,39 @@ let list_credentials config : agent_credential list =
   else []
 ;;
 
+let credential_read_result f =
+  try Ok (f ()) with
+  | Sys_error detail -> Error (System (System_error.IoError detail))
+  | Unix.Unix_error (error, operation, argument) ->
+    Error (System (System_error.IoError
+      (Printf.sprintf "%s(%s): %s" operation argument (Unix.error_message error))))
+  | Eio.Io _ as exn -> Error (System (System_error.IoError (Printexc.to_string exn)))
+;;
+
+let read_owned_credential_text config path =
+  let ( let* ) = Result.bind in
+  (* Prune holds the shared publisher transaction: a FIFO must never wait for
+     a writer here. This existing reader opens nonblocking, verifies the real
+     FD and no-follow path identity, closes it, and propagates cancellation. *)
+  (* The transaction already canonicalizes its store root. Preserve relative
+     base paths and directory aliases without following the JSON leaf. All
+     callers supply discovered or validated direct children of this store. *)
+  let* ownership_root =
+    credential_read_result (fun () ->
+      run_blocking_io (fun () -> Unix.realpath (agents_dir config)))
+  in
+  let owned_path = Filename.concat ownership_root (Filename.basename path) in
+  match Fs_compat.load_owned_regular_file ~ownership_root owned_path with
+    | Ok (Some content) -> Ok content
+    | Ok None ->
+        Error (System (System_error.IoError
+          (Printf.sprintf "credential disappeared before verified read: %s" path)))
+    | Error error ->
+        Error (System (System_error.IoError
+          (Fs_compat.owned_regular_file_read_error_to_string error)))
+
+;;
+
 type credential_listing_error =
   | Invalid_credential_expiry of
       { agent_name : string; role : agent_role; timestamp : string }
@@ -642,7 +742,10 @@ let list_credential_results config =
        | _ -> unreadable path reason)
   in
   let read_json path =
-    try Ok (Yojson.Safe.from_string (read_text_file path)) with
+    match read_owned_credential_text config path with
+    | Error error -> unreadable path (masc_error_to_string error)
+    | Ok content ->
+    try Ok (Yojson.Safe.from_string content) with
     | Sys_error reason | Yojson.Json_error reason -> unreadable path reason
     | Unix.Unix_error (error, operation, argument) ->
       unreadable path (Printf.sprintf "%s(%s): %s" operation argument (Unix.error_message error))
@@ -652,12 +755,15 @@ let list_credential_results config =
     let ( let* ) = Result.bind in
     let* json = read_json path in
     match json with
-    | `Assoc [ "redirect_to", `String target ] ->
-      (match redirect_target_file config target with
-       | None -> unreadable path "invalid redirect target"
-       | Some target_path ->
-         let* target_json = read_json target_path in
-         decode target_path target_json)
+    | `Assoc fields ->
+      (match List.assoc_opt "redirect_to" fields with
+       | Some (`String target) ->
+         (match redirect_target_file config target with
+          | None -> unreadable path "invalid redirect target"
+          | Some target_path ->
+            let* target_json = read_json target_path in
+            decode target_path target_json)
+       | _ -> decode path json)
     | _ -> decode path json
   in
   let dir = agents_dir config in
@@ -689,14 +795,6 @@ type stored_credential =
   | Stored_redirect of string
   | Unresolved_credential
 
-let credential_read_result f =
-  try Ok (f ()) with
-  | Sys_error detail -> Error (System (System_error.IoError detail))
-  | Unix.Unix_error (error, operation, argument) ->
-    Error (System (System_error.IoError
-      (Printf.sprintf "%s(%s): %s" operation argument (Unix.error_message error))))
-  | Eio.Io _ as exn -> Error (System (System_error.IoError (Printexc.to_string exn)))
-;;
 
 (* File-backed bearers must survive HTTP header construction and extraction
    without changing the bytes that were hashed. Direct token APIs retain
@@ -722,37 +820,22 @@ let read_regular_credential_file path =
 
 let read_stored_credential config name path =
   let ( let* ) = Result.bind in
-  (* Prune holds the shared publisher transaction: a FIFO must never wait for
-     a writer here. This existing reader opens nonblocking, verifies the real
-     FD and no-follow path identity, closes it, and propagates cancellation. *)
-  (* The transaction already canonicalizes its store root. Preserve relative
-     base paths and directory aliases without following the JSON leaf. All
-     callers supply discovered or validated direct children of this store. *)
-  let* ownership_root =
-    credential_read_result (fun () ->
-      run_blocking_io (fun () -> Unix.realpath (agents_dir config)))
-  in
-  let owned_path = Filename.concat ownership_root (Filename.basename path) in
-  let* content =
-    match Fs_compat.load_owned_regular_file ~ownership_root owned_path with
-    | Ok (Some content) -> Ok content
-    | Ok None ->
-        Error (System (System_error.IoError
-          (Printf.sprintf "credential disappeared before verified read: %s" path)))
-    | Error error ->
-        Error (System (System_error.IoError
-          (Fs_compat.owned_regular_file_read_error_to_string error)))
-  in
+  let* content = read_owned_credential_text config path in
   match Yojson.Safe.from_string content with
   | exception Yojson.Json_error _ -> Ok Unresolved_credential
-  | `Assoc [ "redirect_to", `String target ] ->
-    (match redirect_target_file config target with
-     | Some path -> Ok (Stored_redirect path)
-     | None -> Ok Unresolved_credential)
   | json ->
-    (match credential_of_json name json with
-     | Some credential -> Ok (Stored_credential credential)
-     | None -> Ok Unresolved_credential)
+    let redirect = match json with
+      | `Assoc fields -> List.assoc_opt "redirect_to" fields
+      | _ -> None in
+    (match redirect with
+     | Some (`String target) ->
+       (match redirect_target_file config target with
+        | Some path -> Ok (Stored_redirect path)
+        | None -> Ok Unresolved_credential)
+     | _ ->
+       match credential_of_json name json with
+       | Some credential -> Ok (Stored_credential credential)
+       | None -> Ok Unresolved_credential)
 ;;
 
 let resolve_stored_credential config name = function

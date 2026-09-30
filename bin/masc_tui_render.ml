@@ -12683,7 +12683,8 @@ let render_runtime (state : state) =
 ;;
 
 let tools_scrolled state =
-  tools_scrolled_for_lines state (Render_tools.tools_display_lines state)
+  let _, cols = get_terminal_size () in
+  tools_scrolled_for_lines state (Render_tools.tools_display_lines ~cols state)
 ;;
 
 let render_tools (state : state) =
@@ -12710,7 +12711,7 @@ let render_tools (state : state) =
        box_line_styled buf cols ~style:(Theme.bad ())
          ("  " ^ Keeper_chat.terminal_safe_text detail);
        box_divider buf cols);
-  let display_lines = Render_tools.tools_display_lines state in
+  let display_lines = Render_tools.tools_display_lines ~cols state in
   let layout = tools_scrolled_for_lines state display_lines in
   let drawable = layout.sc_count in
   let content_height =

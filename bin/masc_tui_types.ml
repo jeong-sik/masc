@@ -6324,7 +6324,7 @@ type state = {
   mutable code_history:
     (code_workspace_scope * string, code_history_listing) Masc_tui_fetched.t;
   mutable code_history_open: bool;
-  mutable code_history_scroll: int;
+  mutable code_history_scroll: int;  (** Physical wrapped rows; Enter resolves the visible row owner. *)
   (* The file pane's diff view: d on an open file swaps the content for what
      the working tree holds against HEAD, keyed the same way. One overlay at
      a time -- opening this closes the history and vice versa. *)

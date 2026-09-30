@@ -7772,3 +7772,4 @@
 (include stanzas/test_tui_runtime_list_layout_pty.inc)
 (include stanzas/test_tui_workspace_activity_layout_pty.inc)
 (include stanzas/test_tui_code_memo_layout_pty.inc)
+(include stanzas/test_tui_code_history_layout_pty.inc)

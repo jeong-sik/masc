@@ -7221,6 +7221,23 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
     let selected_item =
       List.nth_opt Keeper_portrait_item.all state.item_cursor
     in
+    let item_row cursor index item =
+      let worn =
+        match portrait_reading with
+        | Tui_decode.Unavailable _ -> false
+        | Tui_decode.Ready equipment ->
+            (match Keeper_portrait_item.in_slot equipment
+                     (Keeper_portrait_item.slot item) with
+             | None -> false
+             | Some equipped ->
+                 String.equal (Keeper_portrait_item.id equipped)
+                   (Keeper_portrait_item.id item))
+      in
+      Printf.sprintf "  %s %2d %-5s %s%s"
+        (if index = cursor then ">" else " ") (index + 1)
+        (Keeper_portrait_item.slot_id (Keeper_portrait_item.slot item))
+        (Keeper_portrait_item.id item) (if worn then "  equipped" else "")
+    in
     let portrait =
       match state.detail_tab, portrait_reading with
       | Detail_info, Tui_decode.Ready equipment ->
@@ -7235,53 +7252,46 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
       | (Detail_sandbox | Detail_instructions | Detail_secrets | Detail_github
         | Detail_identity | Detail_channels | Detail_automation | Detail_runs), _ -> None
     in
+    let portrait =
+      match state.detail_tab, portrait with
+      | Detail_items, Some band ->
+          let labels = List.mapi (item_row state.item_cursor) Keeper_portrait_item.all in
+          if List.exists (fun line -> Message_layout.display_width line > inner)
+               (Masc_tui_keeper_portrait.beside band labels)
+          then None else Some band
+      | _, portrait -> portrait
+    in
 
     let item_lines () =
       let items = Keeper_portrait_item.all in
       let count = List.length items in
       let cursor = max 0 (min (count - 1) state.item_cursor) in
-      let first = max 0 (min (cursor - 4) (count - 10)) in
+      let headline =
+        [ Printf.sprintf "  Items %d/%d · j/k to preview" (cursor + 1) count
+        ; "  Preview changes this picture only"
+        ] in
+      let observation =
+        match portrait_reading with
+        | Tui_decode.Ready _ -> []
+        | Tui_decode.Unavailable reason ->
+            [ "  Portrait unavailable: " ^ Terminal_text.single_line reason ] in
+      let footer = [ ""; "  Ownership and prices are not available in this view." ] in
+      let reserved = List.length headline + List.length observation + List.length footer in
+      let visible = min count (max 1 (base_height - reserved)) in
+      let first = max 0 (min (cursor - (visible / 2)) (count - visible)) in
       let rows =
         items
         |> List.mapi (fun index item -> index, item)
         |> List.filter_map (fun (index, item) ->
-             if index < first || index >= first + 10 then None
-             else
-               let worn =
-                 match portrait_reading with
-                 | Tui_decode.Unavailable _ -> false
-                 | Tui_decode.Ready equipment ->
-                     (match Keeper_portrait_item.in_slot equipment
-                              (Keeper_portrait_item.slot item) with
-                      | None -> false
-                      | Some equipped ->
-                          String.equal (Keeper_portrait_item.id equipped)
-                            (Keeper_portrait_item.id item))
-               in
-               Some (Printf.sprintf "  %s %-2d %-5s %-20s%s"
-                 (if index = cursor then ">" else " ") (index + 1)
-                 (Keeper_portrait_item.slot_id (Keeper_portrait_item.slot item))
-                 (Keeper_portrait_item.id item)
-                 (if worn then "  equipped" else "")))
-      in
-      let headline =
-        [ Printf.sprintf "  Items %d/%d · j/k to preview" (cursor + 1) count
-        ; "  Preview changes this picture only"
-        ]
+             if index < first || index >= first + visible then None
+             else Some (item_row cursor index item))
       in
       let listing =
         match portrait with
         | Some band -> Masc_tui_keeper_portrait.beside band (headline @ rows)
         | None -> headline @ rows
       in
-      let observation =
-        match portrait_reading with
-        | Tui_decode.Ready _ -> []
-        | Tui_decode.Unavailable reason ->
-            [ "  Portrait unavailable: " ^ Terminal_text.single_line reason ]
-      in
-      listing @ observation
-      @ [ ""; "  Ownership and prices are not available in this view." ]
+      listing @ observation @ footer
     in
 
     (* Each tab projects only when selected. Retained data for the other

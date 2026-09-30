@@ -15,6 +15,14 @@ pids = 16
 max_reply_bytes = 4194304
 
 [interface]
+presentation = '''{
+  "description": "Fusion 분석 본문과 근거를 에이전트가 읽을 보고서로 만듭니다",
+  "readings": [
+    {"lane_id": "fusion/report", "path": ["body"], "label": "보고서", "format": "text"},
+    {"lane_id": "fusion/report", "path": ["input_complete"], "label": "입력 근거 모두 있음", "format": "boolean"},
+    {"lane_id": "fusion/report", "path": ["delivery_label"], "label": "전달", "format": "text"}
+  ]
+}'''
 # Installation bindings are checked against this contract before a worker starts.
 # Inputs are lane_output ports only.
 binding_schema = '''{

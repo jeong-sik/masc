@@ -149,7 +149,8 @@ def reports(source: Source, observation: dict, *, recognized: bool):
                        "producer": producer, "producer_status": producer_status,
                        "upstream_coverage": upstream_coverage,
                        "upstream_rows": [value[0] for value in group.values()],
-                       "delivery_status": "not_attempted"})
+                       "delivery_status": "not_attempted",
+                       "delivery_label": "아직 전달하지 않음"})
         item["id"] = stable_id(item["id"], run_id, "report")
         item["actor"] = None
         result.append(ReportDraft(item, content))

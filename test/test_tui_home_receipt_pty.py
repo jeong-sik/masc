@@ -260,10 +260,9 @@ def roster_failure_and_deletion(executable):
             # A complete deletion keeps already-open history readable; Home
             # offers selection rather than resuming the deleted recipient.
             metadata.unlink()
-            # The unchanged chat title need not redraw on deletion. Home's
-            # unavailable assertion below verifies the complete new roster.
-            home(process, fd, output, b"MASC Dashboard")
-            # Confirm deletion through an explicit authoritative roster reread.
+            # Leave the history composer through its Home reference before
+            # requesting a fresh authoritative roster reading.
+            h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
             drawn = h.send_and_wait(process, fd, output, b"r",
                                     b"conversation beta unavailable")
             current = h.screen_text(drawn)

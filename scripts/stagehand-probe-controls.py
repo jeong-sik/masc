@@ -1,50 +1,96 @@
 #!/usr/bin/env python3
-"""Run offline controls, retaining only fixed diagnostic categories publicly."""
+"""Run offline controls, retaining only typed outcomes and setup categories publicly."""
 import argparse
+from enum import Enum
 import json
 from pathlib import Path
 import subprocess
 import tempfile
 
 
-SETUP_CATEGORIES = frozenset({
-    "fixture_count_invalid", "fixture_protocol_invalid", "validation_self_test_failed",
-    "runtime_config_rejected", "runtime_catalog_models_missing",
-    "registry_publication_rejected", "registry_unavailable",
-    "lane_requires_exactly_two_http_slots_no_cli", "lane_model_capability_refused",
-    "lane_declared_slots_not_both_admitted", "publication_test_slots_not_distinct",
-    "probe_input_or_output_unavailable",
-})
+class Outcome(Enum):
+    """The probe's --control-result outcome (control_outcome in the probe)."""
+    PASSED = "passed"
+    SETUP_REFUSED = "setup_refused"
+    INTERNAL_ERROR = "internal_error"
+
+
+# The exit status the probe pairs with each outcome.
+OUTCOME_EXIT = {Outcome.PASSED: 0, Outcome.SETUP_REFUSED: 2, Outcome.INTERNAL_ERROR: 3}
+
+
+def setup_reasons(binary: Path) -> "frozenset[str] | None":
+    """The setup categories the probe itself lists, or None when it cannot say."""
+    try:
+        listed = subprocess.run([str(binary.resolve()), "--list-setup-reasons"],
+                                capture_output=True, check=False)
+    except OSError:
+        return None
+    if listed.returncode != 0:
+        return None
+    # The list is the probe's last line; anything a library printed first is ignored.
+    lines = [line for line in listed.stdout.splitlines() if line.strip()]
+    if not lines:
+        return None
+    try:
+        reasons = json.loads(lines[-1])
+    except ValueError:
+        return None
+    if not isinstance(reasons, list) or not all(isinstance(reason, str) for reason in reasons):
+        return None
+    return frozenset(reasons)
+
+
+def reading_of(result_path: Path, code: int, reasons: "frozenset[str] | None") -> "tuple[bool, str]":
+    """(passed, category) from one control's result file. Library output is never consulted."""
+    try:
+        result = json.loads(result_path.read_text())
+    except (OSError, ValueError):
+        return False, "control_result_missing"
+    if not isinstance(result, dict):
+        return False, "control_result_invalid"
+    try:
+        outcome = Outcome(result.get("outcome"))
+    except ValueError:
+        return False, "control_result_invalid"
+    if OUTCOME_EXIT[outcome] != code:
+        return False, "control_result_contradicts_exit"
+    if outcome is Outcome.PASSED:
+        return True, "passed"
+    if outcome is Outcome.INTERNAL_ERROR:
+        return False, "internal_error"
+    if reasons is None:
+        return False, "setup_reasons_unavailable"
+    reason = result.get("reason")
+    if isinstance(reason, str) and reason in reasons:
+        return False, reason
+    return False, "control_result_invalid"
 
 
 def run_controls(binary: Path, fixtures: Path, config: Path, output: Path) -> int:
     controls = [
-        ("fixture_validators", ["--self-test", "--fixtures", str(fixtures)],
-         b"fixture validators: passed"),
-        ("configuration_publication", ["--config-publication-self-test", "--config", str(config)],
-         b"runtime configuration and Exact lane publication: passed (no model callbacks)"),
+        ("fixture_validators", ["--self-test", "--fixtures", str(fixtures)]),
+        ("configuration_publication", ["--config-publication-self-test", "--config", str(config)]),
     ]
+    reasons = setup_reasons(binary)
     readings = []
     # Library output can contain configuration details. Never copy it into the
-    # artifact or console; the receipt admits exact fixed lines only.
+    # artifact or console; the receipt admits the typed result file only.
     with tempfile.TemporaryDirectory(prefix="stagehand-private-controls-") as private:
-        for name, args, expected in controls:
+        for name, args in controls:
             stdout = Path(private) / (name + ".stdout")
             stderr = Path(private) / (name + ".stderr")
+            result_path = Path(private) / (name + ".result.json")
             try:
                 with stdout.open("wb") as out, stderr.open("wb") as err:
-                    result = subprocess.run([str(binary.resolve()), *args], stdout=out, stderr=err,
-                                            check=False)
+                    result = subprocess.run(
+                        [str(binary.resolve()), *args, "--control-result", str(result_path)],
+                        stdout=out, stderr=err, check=False)
                 code = result.returncode
-                if code == 0:
-                    category = "passed" if expected in stdout.read_bytes().splitlines() else "success_marker_missing"
-                else:
-                    lines = stderr.read_bytes().splitlines()
-                    last = lines[-1].decode("ascii", "replace") if lines else ""
-                    category = last if code == 2 and last in SETUP_CATEGORIES else "unclassified_control_failure"
+                passed, category = reading_of(result_path, code, reasons)
             except OSError:
-                code, category = None, "control_execution_unavailable"
-            readings.append({"name": name, "status": "passed" if category == "passed" else "failed",
+                code, passed, category = None, False, "control_execution_unavailable"
+            readings.append({"name": name, "status": "passed" if passed else "failed",
                              "exit_code": code, "category": category})
     receipt = {"schema_version": 1, "provider_execution": "not_run_in_ci", "controls": readings}
     output.parent.mkdir(parents=True, exist_ok=True)

@@ -1,0 +1,162 @@
+{
+  "weights-base": {
+    "mapped_contributor": "keeper-a",
+    "trials": 20,
+    "share_counts": {
+      "1/2": 16,
+      "3/5": 4
+    },
+    "weight_counts": [
+      {
+        "weights": {
+          "keeper-a": 5,
+          "keeper-b": 5
+        },
+        "count": 16
+      },
+      {
+        "weights": {
+          "keeper-a": 6,
+          "keeper-b": 4
+        },
+        "count": 4
+      }
+    ]
+  },
+  "weights-injection": {
+    "mapped_contributor": "keeper-a",
+    "trials": 20,
+    "share_counts": {
+      "1/2": 18,
+      "3/5": 2
+    },
+    "weight_counts": [
+      {
+        "weights": {
+          "keeper-a": 5,
+          "keeper-b": 5
+        },
+        "count": 18
+      },
+      {
+        "weights": {
+          "keeper-a": 6,
+          "keeper-b": 4
+        },
+        "count": 2
+      }
+    ]
+  },
+  "weights-reordered": {
+    "mapped_contributor": "keeper-a",
+    "trials": 20,
+    "share_counts": {
+      "1/2": 14,
+      "2/5": 4,
+      "3/5": 1,
+      "5/11": 1
+    },
+    "weight_counts": [
+      {
+        "weights": {
+          "keeper-a": 4,
+          "keeper-b": 6
+        },
+        "count": 4
+      },
+      {
+        "weights": {
+          "keeper-a": 5,
+          "keeper-b": 5
+        },
+        "count": 14
+      },
+      {
+        "weights": {
+          "keeper-a": 5,
+          "keeper-b": 6
+        },
+        "count": 1
+      },
+      {
+        "weights": {
+          "keeper-a": 6,
+          "keeper-b": 4
+        },
+        "count": 1
+      }
+    ]
+  },
+  "weights-renamed": {
+    "mapped_contributor": "mira",
+    "trials": 20,
+    "share_counts": {
+      "1/2": 15,
+      "3/5": 4,
+      "5/11": 1
+    },
+    "weight_counts": [
+      {
+        "weights": {
+          "mira": 5,
+          "sol": 5
+        },
+        "count": 15
+      },
+      {
+        "weights": {
+          "mira": 5,
+          "sol": 6
+        },
+        "count": 1
+      },
+      {
+        "weights": {
+          "mira": 6,
+          "sol": 4
+        },
+        "count": 4
+      }
+    ]
+  },
+  "weights-split": {
+    "mapped_contributor": "keeper-a",
+    "trials": 20,
+    "share_counts": {
+      "1/2": 9,
+      "2/5": 2,
+      "3/5": 8,
+      "6/11": 1
+    },
+    "weight_counts": [
+      {
+        "weights": {
+          "keeper-a": 4,
+          "keeper-b": 6
+        },
+        "count": 2
+      },
+      {
+        "weights": {
+          "keeper-a": 5,
+          "keeper-b": 5
+        },
+        "count": 9
+      },
+      {
+        "weights": {
+          "keeper-a": 6,
+          "keeper-b": 4
+        },
+        "count": 8
+      },
+      {
+        "weights": {
+          "keeper-a": 6,
+          "keeper-b": 5
+        },
+        "count": 1
+      }
+    ]
+  }
+}

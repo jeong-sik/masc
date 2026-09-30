@@ -1,0 +1,26 @@
+{
+  "schema": "masc.candle_appraiser_eval.v1",
+  "source_commit": "4fae8f4e3fef99a0b23871dd6bfc58a0250df43f",
+  "runtime_id": "glm-coding.glm-5.3-flash",
+  "credential_env": "ZAI_API_KEY_SB",
+  "trials": 1,
+  "case_count": 1,
+  "planned_calls": 1,
+  "runtime_config_sha256": "97e96bfeaa9567756b108e462e6eb46c1bfa465d12eaa6b70ac806d59f5fcbc3",
+  "cases_sha256": "3947eb37fd5e40e4c6e687a6c130651c1dddf9ad8a065709edbeb428259e2f0b",
+  "prompt_sha256": {
+    "candle_appraiser_grade.md": "ad555b807b75b214a1efdc4d3616403ae5a6cd95068dc2ed8591c544659008f9",
+    "candle_appraiser_relation.md": "515f02279539c69e38d86202b48d865687f89446e560cff9692d141c0fb731ad",
+    "candle_appraiser_weights.md": "2adf48d36d1686f2b5be67855850da2b7d109eb18777ced390d187894c00d4ae"
+  },
+  "evaluation_overrides": {
+    "exact-body-timeout-s": 1200.0,
+    "source-exact-body-timeout-s": 1200.0,
+    "max-output-tokens": 4096
+  },
+  "calibration": {
+    "status": "not_performed",
+    "reason": "No human-graded set of 20 Goals is supplied"
+  },
+  "scope": "Synthetic isolated stage judgments; no Goal, Task, Candle ledger or Paid mutations"
+}

@@ -1,0 +1,30 @@
+{
+  "schema": "masc.candle_appraiser_eval.v1",
+  "source_commit": "4fae8f4e3fef99a0b23871dd6bfc58a0250df43f",
+  "runtime_id": "glm-coding.glm-5.3-flash",
+  "observed_calls": 1,
+  "planned_calls": 1,
+  "complete": true,
+  "calibration": {
+    "status": "not_performed",
+    "reason": "No human-graded set of 20 Goals is supplied"
+  },
+  "cases": {
+    "grade-base": {
+      "observed": 1,
+      "planned": 1,
+      "missing": 0,
+      "statuses": {
+        "ok": 1
+      },
+      "answers": {
+        "small": 1
+      },
+      "modes": [
+        "small"
+      ]
+    }
+  },
+  "comparisons": [],
+  "acceptance": "Measurements only. RFC proposal thresholds need operator adoption; no global PASS is inferred."
+}

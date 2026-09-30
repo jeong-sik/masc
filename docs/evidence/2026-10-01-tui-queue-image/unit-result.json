@@ -1,0 +1,11 @@
+{
+  "scenario": "unit",
+  "source_head": "cf6a0c37b52ce0a05ad4b717a4e98585c4cde131",
+  "binary_sha256": "b34850c6918b9bdcddb7cb792e7700ca6ce88a343937b821d07c01c9d6b3043c",
+  "command": [
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-keeper-snapshot-codec-pool/_build/default/test/test_tui_image_preview.exe"
+  ],
+  "fixtures": [],
+  "exit_code": 0,
+  "elapsed_seconds": 0.85
+}

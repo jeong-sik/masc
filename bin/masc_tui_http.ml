@@ -3175,7 +3175,7 @@ let fetch_git_diff ?repo ~(host : string) ~(port : int)
     {!submit_keeper_ask_answer} takes ids back, so nothing on this side ever
     matches a choice by its wording. *)
 let fetch_keeper_asks ?keeper_name ~(host : string) ~(port : int) () :
-    (Masc.Tui_decode.asks_snapshot, string) result =
+    (Masc.Tui_decode_asks.asks_snapshot, string) result =
   (* No keeper named means the whole fleet. An operator opening this surface
      does not know which Keeper is stuck yet, and asking them to pick a name
      first is asking them to guess. *)
@@ -3198,7 +3198,7 @@ let fetch_keeper_asks ?keeper_name ~(host : string) ~(port : int) () :
       Error (refusal ~status_code:status ~body)
   | Ok (_, body) -> (
       match Yojson.Safe.from_string body with
-      | json -> Masc.Tui_decode.decode_asks_snapshot json
+      | json -> Masc.Tui_decode_asks.decode_asks_snapshot json
       | exception Yojson.Json_error detail -> Error ("asks were not JSON: " ^ detail))
 
 (** Answer one question of one ask ([POST /api/v1/keepers/ask-answer]).

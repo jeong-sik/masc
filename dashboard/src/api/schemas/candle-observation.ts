@@ -46,6 +46,13 @@ export function readCandleBalance(value: unknown): string | null | undefined {
   return value === null ? null : isCandleAmount(value) ? value : undefined
 }
 
+/** Missing/malformed revisions differ from the producer's explicit null. */
+export function readCandleAccountRevision(value: unknown): string | null | undefined {
+  return value === null ? null
+    : typeof value === 'string' && /^[0-9a-f]{64}$/.exec(value)?.[0] === value
+      ? value : undefined
+}
+
 function candleRosterAgrees(reading: CandleObservation, rows: unknown): boolean {
   if (!Array.isArray(rows)) return false
   for (const row of rows) {

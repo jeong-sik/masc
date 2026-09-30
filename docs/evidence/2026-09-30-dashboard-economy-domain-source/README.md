@@ -24,11 +24,11 @@ The old amount regex could match before a final line terminator. Matching the co
 
 This is closed domain validation, not a generic replacement schema framework. It reuses the repository's record guard and canonical equipment vocabulary. Effect remains the existing library for the lazy Gate/Item API boundaries, and its installed v3.22.1 type declaration explicitly supports `Schema.declare(typePredicate)`. No dependency or schema framework was added, and no second Portrait validation implementation was introduced.
 
-Construction-only schema exports with no outside consumer were removed. Store hydration remains synchronous. Workspace tokens, publication epochs, connection generations, HTTP/SSE admission, Item account revisions, browser fixtures, Vite configuration and the production bundle assertions are unchanged.
+The construction-only Effect schemas were removed. The first published child also removed `readCandleAccountRevision`, which still had a consumer in `keeper-store-normalize.ts`; the later repair restores that pure decoder. Store hydration remains synchronous. Workspace tokens, publication epochs, connection generations, HTTP/SSE admission, Item account revisions, browser fixtures, Vite configuration and the production bundle assertions are unchanged.
 
 ## Verification and remaining gate
 
-`source-checks.json` records Node v26.3.0 syntax checks for the six changed TypeScript files and `git diff --check`, all exit 0. `composition.json` records the parent identities and thirteen unchanged authority/build paths. `source-sha256.json` identifies retained candidate files.
+`source-checks.json` records Node v26.3.0 syntax checks for the six changed TypeScript files and `git diff --check`, all exit 0. `composition.json` records the parent identities and thirteen paths compared against the partial local parent. Twelve of those hashes match the first published child, but the published `keeper-store-normalize.ts` differs and still imports the revision decoder. These local comparisons are not proof that every published consumer was retained. `source-checks.json` and `source-sha256.json` describe the historical candidate, before the revision repair.
 
 `source-boundary.json` derives the local static source closure from the preceding source graph with the two changed imports. Its reachable Effect import sources go from two to zero. This is an import approximation on a partial local tree, not Rollup output and not proof for the full published tree.
 
@@ -52,4 +52,16 @@ The Item workspace browser scenario still needs an actual CI-produced preview an
 
 ## Assigned publication
 
-PR #40241 stacks only this reviewed delta over actual #40190 head9464d7404c97b086d1b5cdc7af2c817e8f5d23cc. No placeholder changelog was published. The numbered40241 fragment and source hash manifest replace the local placeholder; the six source/test files remain byte exact to the reviewed fdf9dff9 candidate. This is source parity, not typecheck, Vitest, bundle or browser evidence.
+At its first publication, PR #40241 stacked the child delta over #40190 head9464d7404c97b086d1b5cdc7af2c817e8f5d23cc. No placeholder changelog was published. The numbered40241 fragment and source hash manifest replace the local placeholder; the six source/test files at headfc5bb8afc5cfe2a25a74fa70afc3a2477cc04337 were byte exact to the reviewed fdf9dff9 candidate. This is source parity, not typecheck, Vitest, bundle or browser evidence.
+
+## Published-child link failure and repair
+
+Dashboard run `36684106255` at `fc5bb8afc5cfe2a25a74fa70afc3a2477cc04337`
+failed with Rollup's missing `readCandleAccountRevision` export, before the
+intended production-bundle assertions or requested feature/browser checks
+could pass. The published normalizer's existing import was absent from the
+partial local comparison. The repair restores the decoder without importing
+Effect and tests exact lowercase 64-byte hex, explicit null, missing/malformed
+values and trailing line separators. The historical receipts above are kept;
+they do not certify these repaired files. New current-head bundle, feature and
+browser execution remains required.

@@ -111,7 +111,7 @@ def main() -> None:
         "source_sha": run["headSha"], "run": run,
         "binary_sha256": sorted(binaries),
         "suite_pass_seen": any(
-            record_payload(line) == "tui dashboard studio PTY: PASS"
+            args.suite_pass_marker is not None and record_payload(line) == args.suite_pass_marker
             for line in log.splitlines()
         ),
         "log_sha256": digest(args.log.read_bytes()), "frames": [],

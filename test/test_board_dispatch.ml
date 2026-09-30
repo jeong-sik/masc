@@ -2658,8 +2658,8 @@ let () =
          (with_eio test_dashboard_detail_uses_authenticated_reaction_actor);
        Alcotest.test_case "post detail response format boundary" `Quick
          test_board_post_response_format_query_contract;
-       test_case "comment context restores page and focus ancestors" `Quick
-         test_dashboard_comment_context_contains_page_and_focus_ancestors;
+       Alcotest.test_case "comment context restores page and focus ancestors" `Quick
+         (with_eio test_dashboard_comment_context_contains_page_and_focus_ancestors);
        Alcotest.test_case "SSE reaction_changed" `Quick
         (with_eio test_board_sse_reaction_changed);
       Alcotest.test_case "board signal reaction_changed resolves comment parent" `Quick

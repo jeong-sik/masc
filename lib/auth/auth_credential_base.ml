@@ -671,7 +671,11 @@ let list_credential_results config =
   let dir = agents_dir config in
   let entries =
     try
-      if not (file_exists dir) then []
+      let present =
+        try
+          let _ = run_blocking_io (fun () -> Unix.lstat dir) in true
+        with Unix.Unix_error (Unix.ENOENT, _, _) -> false in
+      if not present then []
       else read_dir dir |> Array.to_list
         |> List.filter (fun file -> Filename.check_suffix file ".json")
         |> List.sort String.compare

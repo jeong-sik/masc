@@ -1059,24 +1059,27 @@ let token_list_cmd_exit base_path =
   Cmd.Exit.ok
 
 let token_revoke_cmd_exit base_path agent =
-  let base_path, creds = token_credentials base_path in
-  let known =
-    List.exists (fun (c : Types_auth.agent_credential) -> c.agent_name = agent) creds
-  in
-  if not known
-  then (
+  let base_path = Env_config.normalize_masc_base_path_input base_path in
+  let retired = Auth.with_credential_transaction base_path (fun transaction ->
+    let ( let* ) = Result.bind in
+    let* present = Auth.credential_exists_in_transaction transaction agent in
+    if not present then Ok false
+    else Auth.delete_credential_in_transaction transaction agent |> Result.map (fun () -> true))
+    |> Result.join in
+  match retired with
+  | Error error ->
+    Printf.eprintf "cannot retire %S: %s\n" agent (Masc_domain.masc_error_to_string error);
+    Cmd.Exit.some_error
+  | Ok false ->
     Printf.eprintf
-      "no credential named %S; `masc token list` shows what this workspace holds\n"
-      agent;
-    Cmd.Exit.some_error)
-  else (
-    Auth.delete_credential base_path agent;
+      "no credential named %S; `masc token list` shows what this workspace holds\n" agent;
+    Cmd.Exit.some_error
+  | Ok true ->
     Printf.printf
       "retired %s. Its bearer stops validating from the next request; anything \
        still exporting it needs a new one from `masc login --agent %s`.\n"
-      agent
-      agent;
-    Cmd.Exit.ok)
+      agent agent;
+    Cmd.Exit.ok
 
 (* Only expired credentials. Removing one that already authenticates nothing is
    garbage collection rather than a security decision, which is why this needs

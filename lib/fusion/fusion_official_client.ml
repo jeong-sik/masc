@@ -4,7 +4,7 @@
 let runtime_execution ~runtime_id =
   match Runtime.get_runtime_by_id runtime_id with
   | None -> None
-  | Some runtime -> Some runtime.Runtime.execution
+  | Some runtime -> Some runtime.Runtime_instance.execution
 ;;
 
 let is_official_client ~runtime_id =
@@ -317,7 +317,7 @@ let prepare_antigravity_panel_home ~base_dir ~oauth_source =
   Ok (home, cwd)
 ;;
 
-let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runtime.t) ~system_prompt ?timeout_s ?output_schema ~prompt () =
+let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runtime_instance.t) ~system_prompt ?timeout_s ?output_schema ~prompt () =
   let ( let* ) = Result.bind in
   (* The Codex and Claude adapters take the system prompt as an option and
      treat [None] as "client default"; Antigravity and Muse Code get it
@@ -329,8 +329,8 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
   let runtime_id = runtime.id in
   (* Capture ownership with the execution before any subprocess yields. A
      runtime catalog reload may change the credential alias under this id. *)
-  let execution = runtime.Runtime.execution in
-  let quota_scope = Runtime.quota_scope_of_runtime runtime in
+  let execution = runtime.Runtime_instance.execution in
+  let quota_scope = Runtime_instance.quota_scope_of_runtime runtime in
   let succeeded (text : response) =
     on_usage text.usage;
     Runtime_quota_window.note_succeeded ~scope:quota_scope;
@@ -469,7 +469,7 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
       |> Result.map_error (fun detail -> Setup_failure detail)
     in
     let* () =
-      match Runtime.muse_prompt_capacity runtime with
+      match Runtime_instance.muse_prompt_capacity runtime with
       | Error error ->
         Error (Muse_failure (Runtime_muse_serve.Invalid_config
           ("Muse Code has no prompt ceiling: "

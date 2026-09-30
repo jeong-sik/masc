@@ -545,9 +545,14 @@ STANZAS
       return 1
   fi
 
-  count=$(printf '%s\n' "${sources}" | wc -l | tr -d ' ')
+  count=0
+  if [ -n "${sources}" ]; then
+    count=$(printf '%s\n' "${sources}" | wc -l | tr -d ' ')
+  fi
   echo "test sources this pull request edits: ${count}"
-  printf '%s\n' "${sources}" | sed 's/^/  /'
+  if [ -n "${sources}" ]; then
+    printf '%s\n' "${sources}" | sed 's/^/  /'
+  fi
 
   # Preserve every attributed suite, including wide pull requests. The caller's
   # job timeout reports a real failure if execution cannot finish; list length
@@ -1077,6 +1082,25 @@ self_test() {
       failures=$((failures + 1))
     fi
   }
+
+  check_source_count() {
+    local label="$1" want="$2" output
+    shift 2
+    changed=$(printf '%s\n' "$@")
+    if output=$(select_sources) && printf '%s\n' "${output}" \
+      | grep -Fxq "test sources this pull request edits: ${want}"; then
+      echo "ok   ${label}"
+    else
+      echo "FAIL ${label}: expected ${want} direct test sources"
+      failures=$((failures + 1))
+    fi
+  }
+  check_source_count "asset-only selection reports zero edited test sources" 0 \
+    config/prompts/foo.md
+  check_source_count "one directly edited test reports one source" 1 \
+    test/test_tui_graphics.ml
+  check_source_count "two directly edited tests report two sources" 2 \
+    test/test_tui_graphics.ml test/test_tui_board_composer.ml
 
   # The regression this mapping exists for: #34247 edited only this module and
   # ran no suite, so the escape it dropped went to main.

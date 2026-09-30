@@ -202,13 +202,37 @@ let test_render_modal_card () =
   let modal_lines = render_modal_card ~width:60 ~height:20 p in
   check bool "modal card has content lines" true (List.length modal_lines > 0)
 
+let test_modal_keeps_complete_url_and_instructions () =
+  let url = "https://example.com/" ^ String.make 140 'x' ^ "/한글끝.png" in
+  List.iter (fun width ->
+    let lines = render_modal_card ~width ~height:4 (synthesize_preview url) in
+    check bool "each rendered row fits the actual modal width" true
+      (List.for_all (fun line -> Masc_tui_message_layout.display_width line <= width) lines);
+    check bool "each physical row is valid UTF-8" true
+      (List.for_all String.is_valid_utf_8 lines);
+    let rec url_lines = function
+      | [] -> fail "modal has no complete URL reader"
+      | line :: rest ->
+          (match Astring.String.cut ~sep:"URL:" line with
+           | None -> url_lines rest
+           | Some (_, first) -> String.trim first :: List.map String.trim rest) in
+    check string "the complete URL survives wrapping and short window height"
+      url (String.concat "" (url_lines lines));
+    let joined = String.concat " " (List.map String.trim lines) in
+    check bool "the image viewing instruction reaches its final word" true
+      (Option.is_some (Astring.String.find_sub ~sub:"terminal graphics engine." joined)))
+    [30; 40; 60; 80; 120]
+
 (* A URL the background fetch refused stays refused: the store keeps the
    answer, and the card says why instead of showing nothing. One case per
    refusal, so a fetch failure, an empty body, an unreadable cache file and a
    decoder rejection each reach the card with their own words. *)
 let card_says ~url sub =
   let lines = render_modal_card ~width:80 ~height:20 (synthesize_preview url) in
-  List.exists (fun l -> Option.is_some (Astring.String.find_sub ~sub l)) lines
+  check bool "wrapped refusal rows fit" true
+    (List.for_all (fun l -> Masc_tui_message_layout.display_width l <= 80) lines);
+  let visible = String.concat " " (List.map String.trim lines) in
+  Option.is_some (Astring.String.find_sub ~sub visible)
 
 let test_a_refused_image_url_is_remembered_and_said () =
   clear_cache ();
@@ -350,6 +374,7 @@ let () =
         ; test_case "notion 2-column card alignment" `Quick test_render_notion_card_2column_alignment
         ; test_case "notion narrow fallback" `Quick test_render_notion_card_narrow_fallback
         ; test_case "modal card" `Quick test_render_modal_card
+        ; test_case "modal keeps complete URL and instructions" `Quick test_modal_keeps_complete_url_and_instructions
         ; test_case "modal hints name what the keys do" `Quick
             test_modal_hints_name_what_the_keys_do
         ; test_case "a refused image url is remembered and said" `Quick

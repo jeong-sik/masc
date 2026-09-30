@@ -589,7 +589,7 @@ let model_capabilities_override_of_model_spec
 (* The window handed to AGENT_CORE is MASC's effective window, not the raw
    runtime.toml override (#36540). Keeper turns are budgeted with the override
    clamped by the capability catalog cap
-   ([Runtime.resolve_max_context_of_runtime]), and AGENT_CORE's
+   ([Runtime_instance.resolve_max_context_of_runtime]), and AGENT_CORE's
    [Provider_config.context_window] — exact-fit admission and response
    telemetry — reads [config.max_context] verbatim when set. Passing the raw
    override sized those paths against a window the keeper budget never

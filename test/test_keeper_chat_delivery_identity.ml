@@ -63,46 +63,6 @@ let test_approval_lifecycle_roundtrip () =
     (Identity.delivery_key_equal key decoded)
 ;;
 
-(* #39571: the Goal notice key bundles goal id, recipient owner and the one
-   event, so a repeated scan, a retry or a restart dedups to one row while a
-   new event or a changed owner is a new notice. *)
-let test_goal_notification_roundtrip () =
-  let key =
-    Identity.Goal_notification
-      { goal_id = "goal-1"; owner = "keeper-a"; event = "refuted:req-1" }
-  in
-  let decoded =
-    Identity.delivery_key_to_yojson key
-    |> Identity.delivery_key_of_yojson
-    |> expect_ok
-  in
-  check bool "goal notification identity roundtrips" true
-    (Identity.delivery_key_equal key decoded);
-  check bool "a new event is a different key" false
-    (Identity.delivery_key_equal key
-       (Identity.Goal_notification
-          { goal_id = "goal-1"; owner = "keeper-a"; event = "refuted:req-2" }));
-  check bool "a changed owner is a different key" false
-    (Identity.delivery_key_equal key
-       (Identity.Goal_notification
-          { goal_id = "goal-1"; owner = "keeper-b"; event = "refuted:req-1" }));
-  check bool "a different goal is a different key" false
-    (Identity.delivery_key_equal key
-       (Identity.Goal_notification
-          { goal_id = "goal-2"; owner = "keeper-a"; event = "refuted:req-1" }));
-  (match
-     Identity.delivery_key_of_yojson
-       (`Assoc
-           [ "kind", `String "goal_notification"
-           ; "goal_id", `String "goal-1"
-           ; "owner", `String ""
-           ; "event", `String "refuted:req-1"
-           ])
-   with
-   | Error _ -> ()
-   | Ok _ -> fail "a blank owner was accepted")
-;;
-
 let test_transcript_slot_roundtrip () =
   let slots =
     [ Identity.Accepted_user
@@ -230,10 +190,6 @@ let () =
             "approval lifecycle roundtrip"
             `Quick
             test_approval_lifecycle_roundtrip
-        ; test_case
-            "goal notification roundtrip"
-            `Quick
-            test_goal_notification_roundtrip
         ; test_case
             "transcript slots roundtrip"
             `Quick

@@ -1601,14 +1601,40 @@ let run_turn
                        | None -> snapshot.checkpoint.working_context)
                   }
                 in
-                match
+                let save_started_at = Time_compat.now () in
+                let save_started_mono = Mtime_clock.now () in
+                let save_result =
                   Keeper_checkpoint_store.save_agent_core_classified_with_encoding_memo
                     ~session_dir:session.session_dir
                     ~encoding_memo:checkpoint_encoding_memo
                     ~history_retained:
                       (Runtime_params.get Runtime_settings.keeper_checkpoint_history_retained)
                     checkpoint
-                with
+                in
+                let save_finished_mono = Mtime_clock.now () in
+                let save_finished_at = Time_compat.now () in
+                let duration_ms =
+                  Mtime.Span.to_float_ns (Mtime.span save_started_mono save_finished_mono)
+                  /. 1_000_000.
+                in
+                let outcome, canonical_bytes =
+                  match save_result with
+                  | Ok (Keeper_checkpoint_store.Saved { canonical_bytes; _ }) ->
+                    "saved", Option.fold ~none:"unknown" ~some:string_of_int canonical_bytes
+                  | Ok (Keeper_checkpoint_store.Stale_noop _) -> "stale_noop", "unknown"
+                  | Error _ -> "error", "unknown"
+                in
+                Log.Keeper.info ~keeper_name:meta.name ~turn_id:manifest_keeper_turn_id
+                  "checkpoint_save trace_id=%s stage=%s turn_count=%d start_s=%.6f end_s=%.6f duration_ms=%.3f canonical_bytes=%s outcome=%s"
+                  trace_id
+                  (Agent_core.Agent.checkpoint_stage_to_string snapshot.stage)
+                  checkpoint.turn_count
+                  save_started_at
+                  save_finished_at
+                  duration_ms
+                  canonical_bytes
+                  outcome;
+                match save_result with
                 | Ok (Keeper_checkpoint_store.Saved _) ->
                   last_persisted_checkpoint_ref := Some checkpoint;
                   if Atomic.compare_and_set restart_notice_after_first_save true false
@@ -2326,16 +2352,8 @@ let run_turn
                 (Turn_record.tool_surface_to_json
                    (List.map
                       (fun (tool : Agent_core.Tool.t) ->
-                         (* The wire encoding, not the storage one.
-                            [tool_schema_to_yojson] also emits [parameters],
-                            the derived view kept for argument validation; a
-                            definition carrying both is rejected on the way
-                            out, so those bytes reach no provider. Counting
-                            them put Execute at 10,396 bytes against the
-                            7,239 it sends, and ranked the surface by a
-                            number nobody is charged for. masc never sets
-                            [strict], so what this records is exactly what
-                            test_keeper_tool_schema_bytes ratchets. *)
+                         (* Record the exact provider wire schema; storage-only
+                            derived parameters are excluded. *)
                          { Turn_record.name = tool.Agent_core.Tool.schema.name
                          ; schema_bytes =
                              Agent_core.Base.Tool.wire_bytes_of_schema

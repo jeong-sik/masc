@@ -1,13 +1,12 @@
 #!/usr/bin/env bash
 # Unified code-smell audit wrapper.
 #
-# Aggregates the four point-tools introduced after the 2026-05-19
+# Aggregates the point-tools introduced after the 2026-05-19
 # baseline audit (memory/masc-code-smell-report-2026-05-19.html)
 # into one reproducible run:
 #
 #   1. Godfile census         (>= 1000 LoC .ml files)
 #   2. ignore() justification (scripts/lint-ignore-without-comment.py)
-#   3. Magic number repetition (scripts/lint-magic-number.sh)
 #   4. Catch-all classification (scripts/audit-catchall.sh)
 #      - anonymous `_` RHS-shape buckets
 #      - bare binding catch-all usage buckets
@@ -19,8 +18,7 @@
 #
 # All sub-tools are informational by default. Pass `--strict` to
 # require zero unjustified ignore() AND zero `other`-bucket catch-
-# all arms (the two ratchet candidates). Magic-number is always
-# advisory since allowlist tuning is project-specific.
+# all arms (the two ratchet candidates).
 
 set -euo pipefail
 
@@ -74,16 +72,6 @@ if [[ -x "$SCRIPT_DIR/lint-ignore-without-comment.py" ]]; then
 else
   printf '_(lint-ignore-without-comment.py not present — skipped)_\n\n'
   unjust_n=0
-fi
-
-# 3. Magic number repetition
-printf '## 3. Magic-number repetition (>= 5 reps in a single file)\n\n'
-if [[ -x "$SCRIPT_DIR/lint-magic-number.sh" ]]; then
-  printf '```\n'
-  bash "$SCRIPT_DIR/lint-magic-number.sh" 2>/dev/null | head -25 || true
-  printf '```\n\n'
-else
-  printf '_(lint-magic-number.sh not present — skipped)_\n\n'
 fi
 
 # 4. Catch-all classification

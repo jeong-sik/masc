@@ -1,6 +1,0 @@
-type measurement
-
-val measure
-  :  request:string
-  -> on_socket_ready:(unit -> unit)
-  -> measurement

@@ -64,20 +64,12 @@ PY
 "이걸 검색해" 라고 넘길 방법이 없다. 즉 지금 카탈로그 합성은 전부 0-인자 스냅샷이다.
 파라미터가 없으니 능력 하나당 TOML 항목 하나를 복제하는 것 말고는 변형이 없다.
 
-### 1.3 스킬은 일부러 꺼져 있고, 도구 표면은 상한 근처다
+### 1.3 스킬 로딩과 선택 행동
 
 - Keeper 의 claude-code 런타임 스폰은 `--setting-sources=` (빈 값) 으로 스킬 로딩을 끈다.
   같은 환경에서 플래그만 빼면 빌트인+플러그인 91개 스킬이 로드된다 (2026-08-24 실측,
   아티팩트 "스킬은 어떻게 로드되는가"). 지금 masc 에는 SKILL.md 를 읽는 코드가 없다.
-- 도구 스키마 표면 상한은 `test/test_keeper_tool_schema_bytes.ml:44` 의 85,000 B.
-  **정정 (2026-08-25 재측정, main `3dafed3f98`)**: 이 문서 초판은 08-21~23 의 수치
-  (79,512 B / 88,138 B)를 인용했는데 그 뒤 표면이 줄었다. 현재
-  `model_visible_schemas ()` 기준 **82개 / 69,282 B, 여유 15,718 B** — "도구로 넣는
-  길이 막혀 있다" 는 초판의 압박 서술은 더 이상 사실이 아니다. 게이트는 양방향이라
-  (여유가 상한의 1/3 을 넘어도 실패) 표면을 12,616 B 이상 더 줄이면 상한도 같이
-  내려야 한다. 스킬의 근거는 예산 압박이 아니라 §1.1 의 선택 행동과, 지시 스킬의
-  표면 비용이 0 B 라는 구조적 성질에 있다. 참고로 설명문은 표면의 28%뿐이고
-  단일 최대 항목은 `Execute` 8,455 B (반복 문단 4,158 B — `$ref` 미검증이라 보류)다.
+- 스킬의 근거는 §1.1의 선택 행동이다. 지시 스킬은 도구 스키마를 추가하지 않는다.
 - 도구 *정의* 는 이미 밖에 있다: `config/tools/*.toml` 113개
   (`Tool_definition_toml` 로더). 도구 *도움말* 은 아직 안이다:
   `tool_help_registry.ml` 의 `short_description`/`when_to_use`/`details_markdown` 은
@@ -266,7 +258,6 @@ current task 뿐 아니라 함께 든 task 의 스킬도 프롬프트·admission
 ## 5. 수용 기준
 
 - 지시 스킬 N개는 도구 스키마 표면을 0 B 늘린다. 합성 스킬만 도구가 된다.
-  `test_keeper_tool_schema_bytes` 상한 85,000 B 유지.
 - Agent Skills frontmatter 계약을 어긴 SKILL.md는 source candidate와 content revision을
   가진 rejection으로 격리된다. source 문서의 fenced block/plan 오류는 frozen
   Instruction과 projection diagnostic으로 남고 합성 도구는 생기지 않는다.

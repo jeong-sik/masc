@@ -1,0 +1,238 @@
+name: Release full checks
+permissions:
+  contents: read
+concurrency:
+  group: release-full-checks-${{ github.run_id }}
+  cancel-in-progress: false
+jobs:
+  tla:
+    name: TLA model check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v7
+      with:
+        fetch-depth: 0
+    - name: Run all TLC models
+      run: bash scripts/tla-check.sh
+  distribution:
+    name: distribution and installation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v7
+      with:
+        fetch-depth: 0
+    - name: Install distribution verification tools
+      run: 'set -euo pipefail
+
+        bash scripts/ci/apt-refresh.sh
+
+        sudo apt-get install -y --no-install-recommends ripgrep jq python3-yaml gcc libc6-dev binutils
+
+        '
+    - name: Verify release distribution fixtures
+      run: python3 test/test_release_dashboard_bundle.py -v
+    - name: Verify release evidence receipt with private captures
+      run: python3 test/test_release_evidence_report.py -v
+    - name: Verify the glibc floor check
+      run: python3 test/test_glibc_floor_check.py -v
+    - name: Installer onboarding and removal behavior
+      run: 'python3 test/test_package_macos_runtime.py
+
+        python3 test/test_installer_dependencies.py -v
+
+        python3 test/test_installer_wizard.py -v
+
+        python3 test/test_installer_upgrade.py -v
+
+        python3 test/test_installer_uninstall.py -v
+
+        python3 test/test_install_runtime_setup.py -v
+
+        python3 test/test_onboarding_journey.py -v
+
+        '
+    - name: Verify the bench dependency diagnosis
+      run: python3 test/test_bench_deps_diagnosis.py -v
+    - name: Verify onboarding oracle ordering and sibling selection
+      run: 'node --test test/test_imp_onboarding_browser.cjs
+
+        python3 test/test_imp_onboarding_acceptance.py
+
+        '
+    - name: Check committed credentials
+      run: python3 scripts/ci/check-committed-secrets.py
+  check:
+    name: dune build @check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+    - name: Free disk space
+      run: "set -euo pipefail\ncleanup_pids=()\nsudo rm -rf /usr/local/lib/android & cleanup_pids+=(\"$!\")\nsudo\
+        \ rm -rf /usr/share/dotnet & cleanup_pids+=(\"$!\")\nsudo rm -rf /opt/ghc /usr/local/.ghcup & cleanup_pids+=(\"\
+        $!\")\nsudo rm -rf /opt/hostedtoolcache/CodeQL & cleanup_pids+=(\"$!\")\nsudo docker image prune --all --force\
+        \ & cleanup_pids+=(\"$!\")\nfor cleanup_pid in \"${cleanup_pids[@]}\"; do\n  wait \"${cleanup_pid}\" ||\
+        \ true\ndone\n"
+    - name: Checkout
+      uses: actions/checkout@v7
+    - name: Check source text integrity
+      run: scripts/ci/check-source-text-integrity.sh
+    - name: Setup OCaml toolchain
+      uses: ./.github/actions/setup-ocaml-toolchain
+    - name: Pin external OCaml dependencies
+      uses: ./.github/actions/pin-ocaml-deps
+      with:
+        pin-flags: --with-bisect
+    - name: Install system and OCaml dependencies
+      uses: ./.github/actions/install-ocaml-deps
+      with:
+        install-flags: --with-test
+        os-packages: jq ripgrep poppler-utils ffmpeg libreoffice-impress python3-venv
+    - name: Prepare managed presentation verification inputs
+      run: python3 scripts/ci/prepare-presentation-verifier.py
+    - name: Make pnpm available to the suites that read a dashboard PATH
+      run: corepack enable && corepack prepare pnpm@10.31.0 --activate
+    - name: Verify standalone namespace fixtures
+      run: python3 test/test_run_standalone_suites.py --compile-fixtures -v
+    - name: Build
+      env:
+        DUNE_JOBS: '4'
+      run: 'set -euo pipefail
+
+        node_targets=$(python3 scripts/ci/list-node-alias-targets.py)
+
+        printf ''browser parity suites:\n%s\n'' "${node_targets}"
+
+        dune build @check @test/stanzas/runtest ${node_targets}
+
+        '
+    - name: masc.opam matches dune-project regeneration
+      run: bash scripts/check-opam-file-regenerated.sh
+    - name: Build the Keeper sandbox image the sandboxed suites read through
+      run: 'set -euo pipefail
+
+        docker build -t masc-sandbox-test:ci - < sandbox-images/base/Dockerfile
+
+        docker image inspect masc-sandbox-test:ci --format ''{{.Id}}''
+
+        '
+  release-check:
+    name: dune build --profile release @check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+    - name: Free disk space
+      run: "set -euo pipefail\ncleanup_pids=()\nsudo rm -rf /usr/local/lib/android & cleanup_pids+=(\"$!\")\nsudo\
+        \ rm -rf /usr/share/dotnet & cleanup_pids+=(\"$!\")\nsudo rm -rf /opt/ghc /usr/local/.ghcup & cleanup_pids+=(\"\
+        $!\")\nsudo rm -rf /opt/hostedtoolcache/CodeQL & cleanup_pids+=(\"$!\")\nsudo docker image prune --all --force\
+        \ & cleanup_pids+=(\"$!\")\nfor cleanup_pid in \"${cleanup_pids[@]}\"; do\n  wait \"${cleanup_pid}\" ||\
+        \ true\ndone\n"
+    - name: Checkout
+      uses: actions/checkout@v7
+    - name: Setup OCaml toolchain
+      uses: ./.github/actions/setup-ocaml-toolchain
+    - name: Pin external OCaml dependencies
+      uses: ./.github/actions/pin-ocaml-deps
+    - name: Install system and OCaml dependencies
+      uses: ./.github/actions/install-ocaml-deps
+      with:
+        install-flags: --with-test
+    - name: Build
+      env:
+        DUNE_JOBS: '4'
+      run: 'set -euo pipefail
+
+        dune build --profile release @check
+
+        '
+  dashboard-types:
+    name: dashboard typecheck
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v7
+    - name: Set up Node
+      uses: actions/setup-node@v7
+      with:
+        node-version: '22'
+    - name: Install dashboard dependencies
+      working-directory: dashboard
+      run: 'set -euo pipefail
+
+        corepack enable && corepack prepare pnpm@10.31.0 --activate
+
+        pnpm install --frozen-lockfile
+
+        '
+    - name: Type-check
+      working-directory: dashboard
+      run: pnpm typecheck
+    - name: Run the dashboard tests that read backend source
+      run: 'set -euo pipefail
+
+        coupled=$(python3 scripts/ci/list-dashboard-backend-coupled-tests.py)
+
+        printf ''backend-coupled dashboard suites:\n%s\n'' "${coupled}"
+
+        cd dashboard
+
+        pnpm exec vitest run ${coupled}
+
+        '
+    - name: Build browser preview
+      working-directory: dashboard
+      run: pnpm exec vite build --config vite.preview.config.ts
+    - name: Record browser preview provenance
+      env:
+        PR_HEAD_COMMIT: ${{ github.sha }}
+      run: "python3 - <<'PY'\nimport hashlib, json, os, subprocess\nfrom pathlib import Path\nroot = Path('assets/dashboard')\n\
+        files = sorted(path for path in root.rglob('*') if path.is_file())\nif not (root / 'index.html').is_file():\n\
+        \    raise SystemExit('Dashboard build did not produce index.html')\nmanifest = {\n    'checkout_commit':\
+        \ subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),\n    'pr_head_commit': os.environ['PR_HEAD_COMMIT'],\n\
+        \    'run_id': os.environ['GITHUB_RUN_ID'],\n    'run_attempt': os.environ['GITHUB_RUN_ATTEMPT'],\n    'files':\
+        \ {str(path.relative_to(root)): hashlib.sha256(path.read_bytes()).hexdigest()\n              for path in\
+        \ files},\n}\n(root / 'preview-provenance.json').write_text(json.dumps(manifest, indent=2) + '\\n')\nPY\n"
+    - name: Upload browser preview
+      uses: actions/upload-artifact@v7
+      with:
+        name: dashboard-preview-${{ github.sha }}-${{ github.run_attempt }}
+        path: assets/dashboard/
+        include-hidden-files: true
+        if-no-files-found: error
+  required-success:
+    if: ${{ always() }}
+    name: Release checks passed
+    needs:
+    - tla
+    - distribution
+    - check
+    - release-check
+    - dashboard-types
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+    - name: Require every full check
+      env:
+        RESULTS: ${{ toJSON(needs) }}
+      run: 'python3 - <<''PYCODE''
+
+        import json, os
+
+        results = json.loads(os.environ[''RESULTS''])
+
+        raise SystemExit(0 if all(job[''result''] == ''success'' for job in results.values()) else 1)
+
+        PYCODE
+
+        '
+'on':
+  workflow_call: {}

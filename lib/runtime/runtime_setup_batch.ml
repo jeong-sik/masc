@@ -217,7 +217,7 @@ let configure_locked ~pending_credentials ~default_lane_id ~binary ~base ~expect
       if parsed.Runtime_schema.default_runtime_id = Some lane_id
          && List.exists (fun (lane:Runtime_schema.lane_decl) -> String.equal lane.id lane_id) parsed.lane_decls
       then Ok () else Error Invalid_selection in
-  let existing = List.map Runtime.id_of_binding parsed.Runtime_schema.bindings in
+  let existing = List.map Runtime_instance.id_of_binding parsed.Runtime_schema.bindings in
   let previous_primary = match default_lane_id with
     | None -> parsed.Runtime_schema.default_runtime_id
     | Some lane_id ->

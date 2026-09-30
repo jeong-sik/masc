@@ -4323,7 +4323,7 @@ let install_pending_summary ~base_path ~keeper_name ~bind_exact =
   Approval_queue.For_testing.reset_runtime_state ();
   (match Approval_queue.install_persistence ~base_path with
    | Ok _ -> ()
-   | Error error -> fail (Approval_queue.install_error_to_string error));
+   | Error error -> fail (Masc.Keeper_approval_queue_result.install_error_to_string error));
   let id =
     match
       Approval_queue.submit_pending
@@ -4335,13 +4335,13 @@ let install_pending_summary ~base_path ~keeper_name ~bind_exact =
         ()
     with
     | Ok submission -> submission.approval_id
-    | Error error -> fail (Approval_queue.storage_error_to_string error)
+    | Error error -> fail (Masc.Keeper_approval_queue_result.storage_error_to_string error)
   in
   (match Approval_queue.mark_summary_pending ~id with
    | Ok true -> ()
    | Ok false -> fail "summary did not become pending"
    | Error error ->
-     fail (Approval_queue.summary_transition_error_to_string error));
+     fail (Masc.Keeper_approval_queue_result.summary_transition_error_to_string error));
   if bind_exact
   then (
     let entry =
@@ -4360,7 +4360,7 @@ let install_pending_summary ~base_path ~keeper_name ~bind_exact =
         ~request_body_sha256:(String.make 64 'a')
     with
     | Ok _ -> ()
-    | Error error -> fail (Approval_queue.exact_attempt_error_to_string error));
+    | Error error -> fail (Masc.Keeper_approval_queue_result.exact_attempt_error_to_string error));
   id
 ;;
 
@@ -4616,7 +4616,7 @@ let test_destructive_shutdown_drains_bound_summary_then_completes () =
              with
              | Ok _ -> ()
              | Error error ->
-               fail (Approval_queue.exact_attempt_error_to_string error));
+               fail (Masc.Keeper_approval_queue_result.exact_attempt_error_to_string error));
             let finalized =
               match
                 Shutdown_finalize.run

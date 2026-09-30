@@ -1,3 +1,0 @@
-module Nested : sig
-  val measure : request:string -> callback:(unit -> unit) -> unit
-end

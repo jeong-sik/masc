@@ -1,4 +1,0 @@
-val post_sync_once_with_evidence
-  :  ?before_dispatch:(unit -> (unit, string) result)
-  -> unit
-  -> unit

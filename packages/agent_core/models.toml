@@ -311,9 +311,9 @@ cache_read_multiplier = 0.1
 # 가격은 developers.openai.com 2026-09-07: sol $4/$20, terra $2/$12, luna 는
 # #34066 의 openai-responses 행에 이미 있다(구독 레인은 이 행과 api-name 을
 # 공유한다).
-# 두 행 모두 max 까지 받는다. codex CLI 목록(~/.codex/models_cache.json,
-# 2026-09-22)이 low~max 이고, 아래 openai-responses 행의 2026-09-07
-# /v1/responses 실측도 max 에 200 이었다. codex 레인은 이 bare 행 목록으로
+# Codex CLI cache (2026-09-30) now advertises ultra for Sol and Terra.
+# The provider-scoped openai-responses rows keep their own probed ladders.
+# codex 레인은 이 bare 행 목록으로
 # effort 를 깎으므로(keeper_official_client_host.ml
 # clamp_reasoning_effort_to_catalog) max 가 없으면 max 바인딩이 xhigh 로 나간다.
 [[models]]
@@ -321,7 +321,7 @@ id_prefix = "gpt-5.6-sol"
 base = "openai_chat_extended"
 max_context_tokens = 1050000
 max_output_tokens = 128000
-accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]
 input_per_million = 4.0
 output_per_million = 20.0
 cache_write_multiplier = 1.25
@@ -332,11 +332,29 @@ id_prefix = "gpt-5.6-terra"
 base = "openai_chat_extended"
 max_context_tokens = 1050000
 max_output_tokens = 128000
-accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]
 input_per_million = 2.0
 output_per_million = 12.0
 cache_write_multiplier = 1.25
 cache_read_multiplier = 0.1
+
+# Codex model/list snapshot, 2026-09-29: GPT-6.1 Sol advertises low..ultra
+# and a 272000-token default context. Keep its own ladder so the official
+# client host preserves ultra instead of snapping it to an older model.
+# https://learn.chatgpt.com/docs/config-file/config-reference#configtoml
+[[models]]
+id_prefix = "gpt-6.1-sol"
+base = "openai_chat_extended"
+max_context_tokens = 272000
+accepted_reasoning_efforts = ["low", "medium", "high", "xhigh", "max", "ultra"]
+
+# Codex cache, 2026-09-30: Astra shares the six-level ladder and default
+# context of 6.1 Sol. A bare row keeps it from falling to generic gpt.
+[[models]]
+id_prefix = "gpt-6-astra"
+base = "openai_chat_extended"
+max_context_tokens = 272000
+accepted_reasoning_efforts = ["low", "medium", "high", "xhigh", "max", "ultra"]
 
 # 2026-09-23: GPT-6 Sol and Luna (announced 2026-09-22) joined the codex CLI
 # cache that day. This project's OpenAI key has no model access for either id,
@@ -352,7 +370,9 @@ id_prefix = "gpt-6-sol"
 base = "openai_chat_extended"
 max_context_tokens = 1050000
 max_output_tokens = 128000
-accepted_reasoning_efforts = ["none", "low", "medium", "high", "xhigh", "max"]
+# Codex cache 2026-09-30 adds ultra; the direct Responses observations
+# above establish the earlier values, not direct API support for ultra.
+accepted_reasoning_efforts = ["none", "low", "medium", "high", "xhigh", "max", "ultra"]
 input_per_million = 2.0
 output_per_million = 10.0
 cache_write_multiplier = 1.25
@@ -2591,6 +2611,21 @@ supports_parallel_tool_calls = true
 supports_native_streaming = true
 input_per_million = 2.0
 output_per_million = 12.0
+cache_write_multiplier = 1.25
+cache_read_multiplier = 0.1
+
+# Responses supports none through max for GPT-6 Sol. Keep this endpoint's
+# ladder separate from the bare Codex row, which advertises ultra.
+# https://developers.openai.com/api/docs/models/gpt-6-sol
+[[models]]
+id_prefix = "gpt-6-sol"
+base = "openai_chat_extended"
+provider_name = "openai-responses"
+max_context_tokens = 1050000
+max_output_tokens = 128000
+accepted_reasoning_efforts = ["none", "low", "medium", "high", "xhigh", "max"]
+input_per_million = 2.0
+output_per_million = 10.0
 cache_write_multiplier = 1.25
 cache_read_multiplier = 0.1
 

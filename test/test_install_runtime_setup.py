@@ -1579,13 +1579,20 @@ class WorkspaceFromCurrentDirectory(unittest.TestCase):
 
 @unittest.skipUnless(BINARY, 'actual binary is supplied by targeted CI')
 class InstalledModelCatalog(unittest.TestCase):
-    def test_astra_exact_provider_scoped_catalog_is_not_generic_gpt_fallback(self):
+    def test_astra_client_and_provider_contexts_resolve_their_own_exact_rows(self):
         result=subprocess.run([BINARY,'runtime-model-list','codex'],check=True,capture_output=True,text=True)
         models=json.loads(result.stdout)['models']
         astra=next(row for row in models if row['id']=='gpt-6-astra')
-        self.assertEqual(astra['max_context'],1050000)
+        self.assertEqual(astra['max_context'],272000)
         result=subprocess.run([BINARY,'runtime-model-info','gpt-6-astra','--client','codex'],check=True,capture_output=True,text=True)
+        self.assertEqual(json.loads(result.stdout)['max_context'],272000)
+        result=subprocess.run([BINARY,'runtime-model-info','gpt-6-astra','--provider','openai-responses'],
+                              check=True,capture_output=True,text=True)
         self.assertEqual(json.loads(result.stdout)['max_context'],1050000)
+        result=subprocess.run([BINARY,'runtime-model-list','--provider','openai-responses'],
+                              check=True,capture_output=True,text=True)
+        provider_astra=next(row for row in json.loads(result.stdout)['models'] if row['id']=='gpt-6-astra')
+        self.assertEqual(provider_astra['max_context'],1050000)
         unknown=subprocess.run([BINARY,'runtime-model-info','gpt-unknown-fixture','--client','codex'],capture_output=True,text=True)
         self.assertNotEqual(unknown.returncode,0)
         self.assertEqual(unknown.stdout,'')

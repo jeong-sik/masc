@@ -7,14 +7,6 @@ on:
         description: 'Optional Release run ID with a successful linux-x64 job for installed Kata acceptance'
         type: string
         default: ''
-  pull_request:
-    paths:
-      - '.github/workflows/kata-volume-smoke.yml'
-      - 'scripts/smoke-nerdctl-kata-volume.sh'
-      - 'scripts/keeper-first-turn-smoke.py'
-      - 'lib/keeper/keeper_sandbox_microvm.ml'
-      - 'lib/keeper/keeper_sandbox_microvm.mli'
-
 permissions:
   contents: read
   actions: read

@@ -10,6 +10,7 @@ permissions:
   contents: write
   actions: write
   issues: write
+  pull-requests: read
 
 # Supersede older candidates on this branch as one unit. Child workflows use
 # separate run-scoped groups so they cannot cancel their caller or other lanes.
@@ -21,7 +22,6 @@ jobs:
   validate:
     name: Release candidate ref
     runs-on: ubuntu-24.04
-    timeout-minutes: 2
     steps:
       - name: Require a release branch or tag
         run: |

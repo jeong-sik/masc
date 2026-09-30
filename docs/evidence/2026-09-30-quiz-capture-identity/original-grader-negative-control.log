@@ -1,0 +1,38 @@
+FFF
+======================================================================
+FAIL: test_rotating_bytes_with_the_same_incarnation_refuses_then_recovers (__main__.Grader.test_rotating_bytes_with_the_same_incarnation_refuses_then_recovers)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/masc-quiz-identity-negative-5yelzlfk/addons/tests/test_quiz_lane.py", line 397, in test_rotating_bytes_with_the_same_incarnation_refuses_then_recovers
+    self.assertEqual(refused["status"], "failed_before_effect")
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'confirmed' != 'failed_before_effect'
+- confirmed
++ failed_before_effect
+
+
+======================================================================
+FAIL: test_equal_fact_ids_from_another_source_do_not_answer_this_question (__main__.Grader.test_equal_fact_ids_from_another_source_do_not_answer_this_question)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/masc-quiz-identity-negative-5yelzlfk/addons/tests/test_quiz_lane.py", line 453, in test_equal_fact_ids_from_another_source_do_not_answer_this_question
+    self.assertEqual(body["status"], "failed_before_effect")
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'confirmed' != 'failed_before_effect'
+- confirmed
++ failed_before_effect
+
+
+======================================================================
+FAIL: test_question_without_immutable_snapshot_digest_is_not_observed (__main__.Grader.test_question_without_immutable_snapshot_digest_is_not_observed)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/masc-quiz-identity-negative-5yelzlfk/addons/tests/test_quiz_lane.py", line 461, in test_question_without_immutable_snapshot_digest_is_not_observed
+    self.assertTrue(results[0]["isError"])
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: False is not true
+
+----------------------------------------------------------------------
+Ran 3 tests in 0.351s
+
+FAILED (failures=3)

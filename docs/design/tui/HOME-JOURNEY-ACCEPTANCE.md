@@ -1,11 +1,14 @@
 # Home journey acceptance
 
-2026-09-30. Integration PR #40176 targets main and incorporates main commit
-`c112b2030652a5a25360f5d5322f8dc6da99c598`. The integrated source includes
-#39817/#40113/#40130/#40137/#40152 and creation/drafts #40120/#40116.
-Targeted run [36670914903](https://github.com/jeong-sik/masc/actions/runs/36670914903)
-was requested for `e3b9b019c1b72185053247deb238ec2aded4d618`; its outcome is
-unproven here. This checklist records acceptance work, not a runtime or merge verdict.
+2026-09-30. Integration PR #40176 targets main. The Home product source head
+is `2f507d79d65946d168d118f0bf07893738a65b6b`, incorporating main
+`0c37b5c28586cb812799c872aad99fffe67ee809`. Validation follow-up #40284
+is stacked directly on #40176; this documentation follow-up is above #40284.
+The integrated source includes #39817/#40113/#40130/#40137/#40152 and
+creation/drafts #40120/#40116. Current-head run 36698729943 was cancelled:
+TLA and Dashboard typechecking succeeded, Dune and lint did not complete, and
+the aggregate required-success job failed. This is not build success.
+This checklist records acceptance work, not a runtime or merge verdict.
 
 The combined source covers Home request identities and partial readings, saved
 explicit conversations independent of startup, complete per-Keeper drafts, and
@@ -47,15 +50,19 @@ these checks do not emulate every terminal's display rules.
 These are synthetic fixture observations when executed. They cannot prove
 Keeper operation, production readiness, installation, or human action timing.
 
-Run the focused acceptance in CI with:
+## Verification policy
 
-```sh
-gh workflow run test.yml --ref <branch> -f suite=test_tui_home_viewports_pty
-```
+Follow `docs/AGENTIC-WORKFLOW.md`: feature and CI improvement stacks stay
+separate. Only the bottom of a stack receives a minimal Core build; upper PRs
+receive source review. No automatic CI or repeated long dispatches are requested.
+Full integration and runtime verification belong to the Release/Tag candidate.
+Test and native probe workflows were manually disabled, and the operator chose
+to preserve that setting. Their absence is not a passing executable result.
 
-No local Dune build is needed. Current-head required PR checks, focused test
-results, binary provenance, fixture screenshots and production observations
-must remain separate evidence. A passing viewport suite closes only its row.
+At the release boundary, bind every executed fixture and screenshot to the
+candidate binary SHA, harness SHA and artifact checksums. Keep source approval,
+Core build, Full CI, fixture behavior, installed/runtime observations and human
+timing separate. A passing viewport suite closes only its own row.
 
 ## Current viewport evidence
 
@@ -70,11 +77,11 @@ Run 36664548724 at `5924e6846516bb9bc97bbdf96b5a2abdd3a39294` passed
 Home layout (2 scenarios) and viewport (4 scenarios, 12 frames), but the overall
 run failed in request-label/detail assertions and unchanged-title redraw waits.
 Those observations are limited to that pre-integration head. Later runs and their results must be read against their exact head before any
-acceptance claim. The current requested run is listed at the top.
+acceptance claim. The current cancelled run is recorded at the top.
 
 Remaining deliverables include Task-card detail acceptance, connection-loss and
 draft-during-notification cases, accepted-but-not-applied decisions, current-head
-screenshots, required merge checks and freshness, installation/runtime inspection,
+screenshots, release candidate execution evidence, installation/runtime inspection,
 and same-task before/after operator timing. No timing improvement is claimed.
 
 Full HTTP loss and local Task detail/deletion now have a dedicated fixture suite,
@@ -88,13 +95,14 @@ detail assertions and deletion refresh observation. It does not establish curren
 
 ## Delivery evidence still open
 
-The integration is not ready to merge until the current head passes all five
-required PR checks, the relevant targeted suites, and live main freshness.
+Source approval and scoped merge readiness follow the current execution protocol;
+they do not establish whole Home acceptance. Current candidate execution and
+the relevant whole-journey results remain unproven.
 The Usage family `test_tui_keyboard_input-dashboard-usage` must be included in
 final verification; passing Home navigation alone does not prove its independent
 Telemetry/Usage behavior. A CI probe artifact must identify its source SHA and
 checksums before installed or runtime observations can be attributed to this change.
-No local build, historical screenshot, or HTML prototype closes those gates.
+No historical screenshot or HTML prototype establishes current candidate behavior.
 
 Human timing requires an operator performing the same first-assignment, resume,
 and decision tasks before and after the change. Record the binary SHA, workspace

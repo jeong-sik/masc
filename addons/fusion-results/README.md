@@ -37,6 +37,8 @@ the panel/judge computation into a package.
 
 ## Evidence and failure semantics
 
+- The named `result` port includes both status and result lanes so its related
+  status row and recorded failure cause stay available to downstream consumers.
 - Status rows preserve exact run ID, keeper, preset, topology, run lifecycle,
   failure code, timestamps and the API's evidence state.
 - The source incarnation must equal the detail's run ID. Pending evidence

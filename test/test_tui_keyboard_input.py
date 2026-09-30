@@ -7690,7 +7690,7 @@ def memory_facts_interaction() -> Interaction:
     return interact
 
 
-def memory_journal_fixture() -> HttpResponse:
+def memory_journal_fixture() -> tuple[int, dict[str, object]]:
     return (
         200,
         {

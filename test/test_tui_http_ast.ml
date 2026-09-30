@@ -1029,7 +1029,7 @@ let test_operator_approvals_use_current_contract () =
        ~needle:"Confirmation outcome unverified");
   check int "payload has its own visible row" 1
     (Ast_grep.count_string_literals
-       ~module_path:"bin/masc_tui_render.ml"
+       ~module_path:"bin/masc_tui_render_approvals.ml"
        ~needle:"  %spayload=%s%s");
   check bool "approval renderer sanitizes direct external text" true
     (Ast_grep.count_calls_in_value_binding

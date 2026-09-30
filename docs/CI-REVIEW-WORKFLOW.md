@@ -27,6 +27,10 @@ verification belong to `release-candidate.yml` at Release/Tag. Release publicati
 requires an explicit `publish=true` dispatch on an existing version tag and full
 successful verification. Specialized host and packaging proofs remain manual.
 
+Prefer short, focused checks: the constitution's "about two minutes"
+describes their intended scale, not a timeout or a pass/fail threshold.
+Only an actual successful completion is build evidence.
+
 A combined candidate receipt names that candidate and selected coverage. It does
 not become an individual PR's check, an independent source approval or merge
 permission. Ordinary review guards do not need a CI receipt; Release admission

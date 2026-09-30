@@ -11,8 +11,13 @@ import unicodedata
 
 import test_tui_keyboard_input as h
 
-SOURCE_MODULES = ('bin/masc_tui_render_tools.ml', 'bin/masc_tui_tool_table.ml',
-                  'bin/masc_tui_render.ml')
+SOURCE_MODULES = (
+    "bin/masc_tui_render_tools.ml",
+    "bin/masc_tui_tool_table.ml",
+    "bin/masc_tui_render.ml",
+    "lib/tui_decode_skill_evidence.ml",
+    "lib/tui_decode_skill_evidence.mli",
+)
 LONG_NAME = 'long-skill-' + 'x' * 100 + '-tail'
 
 

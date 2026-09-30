@@ -210,7 +210,7 @@ let test_the_fusion_launch_form_claims_while_open () =
   state.Tui_types.fusion_launch <- Some (Tui_types.Fusion_launch_reading_presets 1);
   check target "reading presets is not a field" None (resolved state);
   let options =
-    { Masc.Tui_decode.flo_enabled = true
+    { Masc.Tui_decode_fusion.flo_enabled = true
     ; flo_default_preset = "trio"
     ; flo_presets = [ "trio" ]
     }
@@ -375,10 +375,10 @@ let test_reader_discards_active_and_queued_voice () =
 
 let test_ask_answer_input_ownership () =
   let state = fresh_state () in
-  let question : Masc.Tui_decode.ask_question =
+  let question : Masc.Tui_decode_asks.ask_question =
     { aq_id = "q1"; aq_header = "Route"; aq_prompt = "Which route?";
-      aq_mode = Masc.Tui_decode.Ask_single;
-      aq_free_text = Masc.Tui_decode.Ask_choices_only;
+      aq_mode = Masc.Tui_decode_asks.Ask_single;
+      aq_free_text = Masc.Tui_decode_asks.Ask_choices_only;
       aq_choices = [{ac_id = "route"; ac_label = "Offered route"; ac_description = None}] }
   in
   state.Tui_types.view <- Tui_types.Approvals;
@@ -441,7 +441,7 @@ let test_the_loop_drops_a_launch_form_left_on_another_surface () =
   let state = fresh_state () in
   state.Tui_types.view <- Tui_types.Fusion;
   let options =
-    { Masc.Tui_decode.flo_enabled = true
+    { Masc.Tui_decode_fusion.flo_enabled = true
     ; flo_default_preset = "trio"
     ; flo_presets = [ "trio" ]
     }

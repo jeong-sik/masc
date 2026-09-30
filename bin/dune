@@ -1686,6 +1686,8 @@
   masc_tui_link_preview
   masc_tui_terminal_palette
   masc_tui_roster_pane
+  masc_tui_chat_portrait
+  masc_tui_portrait_view
   masc_tui_keeper_chat_queue
   masc_tui_answering
   masc_tui_esc_interrupt
@@ -2050,7 +2052,7 @@
  (name masc_tui_image_preview)
  (wrapped false)
  (modules masc_tui_image_preview)
- (libraries masc_tui_keeper_chat_projection masc_tui_image_ref masc.masc_tool_blob_store base64))
+ (libraries masc_tui_keeper_chat_projection masc_tui_image_ref masc.masc_tool_blob_store base64 digestif yojson))
 
 (library
  (name masc_tui_link_label)
@@ -2079,6 +2081,7 @@
  (modules masc_tui_portrait_view)
  (libraries
   masc.keeper_portrait
+  masc_tui_frame_presenter
   masc_tui_graphics
   masc_tui_image_mosaic
   masc_tui_terminal_palette))
@@ -2091,6 +2094,7 @@
  (modules masc_tui_emblem_screen)
  (libraries
   masc.keeper_portrait
+  masc_tui_keeper_portrait
   masc_tui_graphics
   masc_tui_message_layout
   masc_tui_portrait_view
@@ -2108,6 +2112,13 @@
   masc_tui_graphics
   masc_tui_portrait_view
   masc_tui_terminal_palette))
+
+(library
+ (name masc_tui_chat_portrait)
+ (wrapped false)
+ (modules masc_tui_chat_portrait)
+ (libraries masc_tui_keeper_portrait masc_tui_portrait_view
+  masc_tui_graphics masc_tui_terminal_palette masc_tui_ansi masc_tui_frame))
 
 ;; Decides, by magic bytes, whether a downloaded body may sit in the preview
 ;; image cache, and what a curl or ffmpeg exit status means. Kept apart from

@@ -36,8 +36,10 @@ val find : t -> caller:string -> operation_id:Request_id.t -> (receipt option, e
 val commit : t -> caller:string -> operation_id:Request_id.t -> seq:int -> (receipt, error) result
 val recipient_result : t -> caller:string -> operation_id:Request_id.t ->
   recipient:string -> recipient_state -> (receipt, error) result
-(** Failures remain Pending. Accepted recipients are monotone; callers pass the
-    same workspace_request_id to append_user_message_once on every attempt. *)
+(** Failures remain Pending. [Pending None] cannot erase a saved failed-attempt
+    detail; that regression is [Conflict]. Accepted recipients are monotone;
+    callers pass the same workspace_request_id to append_user_message_once on
+    every attempt. *)
 val complete : record -> bool
 type recovery = {pending:receipt list;settled_with_cleanup:receipt list}
 val recover : t -> (recovery, error) result

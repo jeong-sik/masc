@@ -74,6 +74,8 @@ let transition record json =
             | "pending",`String detail -> Ok (Pending (Some detail))
             | _ -> Error (Corrupt "invalid recipient state") in
           (match record.workspace,List.assoc_opt recipient record.recipients,next with
+           | Committed _,Some (Pending (Some _)),Pending None ->
+               Error (Corrupt "pending update cannot erase failed-attempt evidence")
            | Committed _,Some (Pending _),_ | Committed _,Some Accepted,Accepted ->
                Ok {record with recipients=List.map (fun (name,old) ->
                  name,(if name=recipient then next else old)) record.recipients}

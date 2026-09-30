@@ -27,6 +27,15 @@ let test_restart_and_partial_fanout () = fixture (fun root ledger ->
   let failed=require (D.recipient_result ledger ~caller:payload.caller ~operation_id:operation
     ~recipient:"keeper-b" (D.Pending (Some "transcript store unavailable"))) in
   check bool "failed recipient keeps its obligation" false (D.complete failed.record);
+  check bool "pending reset cannot erase failed-attempt evidence" true
+    (D.recipient_result ledger ~caller:payload.caller ~operation_id:operation
+      ~recipient:"keeper-b" (D.Pending None)=Error D.Conflict);
+  let retained=require (D.find (reopen ()) ~caller:payload.caller ~operation_id:operation) in
+  check bool "refused reset retains latest failure after restart" true
+    (match retained with
+     | Some receipt -> List.assoc "keeper-b" receipt.record.recipients =
+         D.Pending (Some "transcript store unavailable")
+     | None -> false);
   let recovered=(require (D.recover (reopen ()))).pending |> List.hd in
   check bool "partial fanout retains accepted and failed recipients exactly" true
     (recovered.record.recipients=["keeper-a",D.Accepted;

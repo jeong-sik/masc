@@ -54,6 +54,7 @@ type issued =
   }
 
 let play_path = "/play"
+let agent_guide_path = play_path ^ "/agent.md"
 
 (* Every gap at once, so the operator fixes the setup in one pass. *)
 let readiness ~(auth_config : Masc_domain.auth_config) ~public_base_url =

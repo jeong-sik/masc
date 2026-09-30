@@ -142,8 +142,8 @@ let with_runtime ?(explicit_publication = false) f =
                  Fun.protect ~finally:Config_dir_resolver.reset (fun () ->
                    check (option string) "ambient resolver points to conflicting file"
                      (Some (Filename.concat root "runtime.toml")) (Runtime.config_path ());
-                   Server_runtime_bootstrap.For_testing.configure_exact_output_registry
-                     ~config_path:path ()))
+                   Server_runtime_bootstrap.publish_exact_output_registry_from_file
+                     ~config_path:path))
           else
             Server_runtime_bootstrap.For_testing.configure_exact_output_registry
               ~config_root:root ());

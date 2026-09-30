@@ -305,8 +305,13 @@ let install_domain_pool_references domain_pool =
   Executor_pool_ref.set (Domain_pool.executor_pool domain_pool)
 ;;
 
+let publish_exact_output_registry_from_file ~config_path =
+  configure_exact_output_registry ~config_path ()
+;;
+
 module For_testing = struct
-  let configure_exact_output_registry = configure_exact_output_registry
+  let configure_exact_output_registry ?config_root () =
+    configure_exact_output_registry ?config_root ()
   let mandatory_exact_output_lane_violations = mandatory_exact_output_lane_violations
 
   let require_explicit_mandatory_exact_output_lanes =

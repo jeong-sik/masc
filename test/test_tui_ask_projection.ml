@@ -371,20 +371,26 @@ let test_silent_when_nothing_arrived () =
   Alcotest.(check bool) "no arrival, no ring, even off the surface" false
     (Ask.should_ring_for_new_ask ~new_ids:[] ~operator_is_watching_asks:false)
 
-(* Wire fields follow server_routes_http_keeper_stream.ml's ask projections.
-   Exercise decoding through the answer draft, so record-label changes cannot
-   disconnect the transport reading from the operator's selected choice. *)
+(* The producer's real row encoder feeds the decoder and answer draft.
+   This proves the module split preserves the operator's choice identities
+   and the server's free-text capability, beyond a hand-written JSON fixture. *)
 let test_wire_question_reaches_the_answer_draft () =
-  let snapshot = Yojson.Safe.from_string {|{
-    "keeper":"reader", "open_count":1, "asks":[{
-      "keeper":"reader", "ask_id":"wire-ask", "asked_at":42,
-      "context":"Choose a deployment window", "questions":[{
-        "question_id":"window", "header":"Window", "prompt":"When?",
-        "mode":"single", "free_text":{"allowed":true,"hint":"another time"},
-        "choices":[{"choice_id":"later","label":"After lunch","description":null}]
-      }], "resolution":{"state":"open"}
-    }]
-  }|} in
+  let valid = function
+    | Ok value -> value
+    | Error _ -> Alcotest.fail "could not construct the producer's question"
+  in
+  let module Domain = Masc.Keeper_ask in
+  let choice = valid (Domain.choice ~choice_id:"later" ~label:"After lunch" ()) in
+  let question = valid (Domain.question ~question_id:"window" ~header:"Window"
+    ~prompt:"When?" ~choices:[choice] ~mode:Domain.Single
+    ~free_text:Domain.Choices_only) in
+  let ask = valid (Domain.ask ~ask_id:"wire-ask" ~keeper_name:"reader"
+    ~questions:[question] ~context:"Choose a deployment window"
+    ~continuation:(Masc.Keeper_continuation_channel.unrouted "wire projection test") ~asked_at:42. ()) in
+  let row = Masc.Server_keeper_ask_projection.ask_row_json ~keeper_name:"reader"
+    (ask.ask_id, (ask, Domain.Open)) in
+  let snapshot = `Assoc [ "keeper", `String "reader"; "open_count", `Int 1;
+    "asks", `List [row] ] in
   match Masc.Tui_decode_asks.decode_asks_snapshot snapshot with
   | Error error -> Alcotest.fail error
   | Ok snapshot ->
@@ -394,6 +400,10 @@ let test_wire_question_reaches_the_answer_draft () =
              (Some "Choose a deployment window") row.ar_context;
            (match row.ar_questions with
             | [question] ->
+                (match question.aq_free_text with
+                 | Masc.Tui_decode_asks.Ask_free_text_allowed _ -> ()
+                 | Masc.Tui_decode_asks.Ask_choices_only ->
+                     Alcotest.fail "producer offers an operator alternative");
                 (match question.aq_choices with
                  | [choice] ->
                      let draft = Ask.toggle_choice

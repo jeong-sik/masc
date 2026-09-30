@@ -210,7 +210,7 @@ let test_the_fusion_launch_form_claims_while_open () =
   state.Tui_types.fusion_launch <- Some (Tui_types.Fusion_launch_reading_presets 1);
   check target "reading presets is not a field" None (resolved state);
   let options =
-    { Masc.Tui_decode.flo_enabled = true
+    { Masc.Tui_decode_fusion.flo_enabled = true
     ; flo_default_preset = "trio"
     ; flo_presets = [ "trio" ]
     }
@@ -441,7 +441,7 @@ let test_the_loop_drops_a_launch_form_left_on_another_surface () =
   let state = fresh_state () in
   state.Tui_types.view <- Tui_types.Fusion;
   let options =
-    { Masc.Tui_decode.flo_enabled = true
+    { Masc.Tui_decode_fusion.flo_enabled = true
     ; flo_default_preset = "trio"
     ; flo_presets = [ "trio" ]
     }

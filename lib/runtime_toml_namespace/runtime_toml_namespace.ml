@@ -1,6 +1,7 @@
 type t =
   | Providers
   | Models
+  | Model_sets
   | Runtime
   | Exec
   | Egress
@@ -21,6 +22,7 @@ type t =
 let key = function
   | Providers -> "providers"
   | Models -> "models"
+  | Model_sets -> "model_sets"
   | Runtime -> "runtime"
   | Exec -> "exec"
   | Egress -> "egress"

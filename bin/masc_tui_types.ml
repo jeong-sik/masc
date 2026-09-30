@@ -1859,7 +1859,7 @@ end
 type fusion_mode =
   | Fusion_list
   | Fusion_detail of string
-  | Fusion_historical_detail of Tui_decode.fusion_historical_evidence
+  | Fusion_historical_detail of Masc.Tui_decode_fusion.fusion_historical_evidence
 
 (** How many list reads a started run is waited for. The read that was
     already in flight when the run started cannot carry it, so one more is
@@ -2120,7 +2120,6 @@ type planning_goal = Tui_decode.planning_goal
   pg_id: string;
   pg_criterion_revision: string option;
   pg_title: string;
-  pg_owner: Goal_store.owner;
   pg_phase: Goal_phase.t;
   pg_priority: int;
   pg_due_date: string option;
@@ -2786,13 +2785,14 @@ let identity_login_landed ~providers ~login =
       | Identity_declared _ | Identity_unreadable _ -> false)
     providers
 
-(** Where [Esc] returns after the chat pane was opened. Keeping only the three
-    legal destinations makes a new Keeper sub-view an explicit compiler error
+(** Where [Esc] returns after the chat pane was opened. Keeping only the legal
+    destinations makes a new Keeper sub-view an explicit compiler error
     instead of silently becoming the detail view. *)
 type keeper_chat_return =
   | Keeper_chat_return_list
   | Keeper_chat_return_detail
   | Keeper_chat_return_lanes
+  | Keeper_chat_return_home
 
 (** Where [Esc] returns after the Changes surface was opened. [f] opens it
     from the roster and from the detail, which name the same keeper through
@@ -2939,14 +2939,10 @@ let rec surface_needs ~keeper_pane_drawn surface =
   needs
 
 and surface_needs_of_surface : surface -> surface_needs = function
-  (* Dashboard summarizes quota coverage and reads the Goal tree. Usage reads
-     the same quota response for per-scope detail and recorded history. *)
+  (* Home reads decision sources. Work owns Goal evidence and Usage owns
+     provider reports; their detail payloads do not belong on this screen. *)
   | Overview ->
-      { nothing with
-        needs_transport = true
-      ; needs_runtime_quota = true
-      ; needs_overview_goals = true
-      }
+      { nothing with needs_operator_approvals = true; needs_asks = true }
   (* Its rows come from the acting store and the keeper list, neither of which
      is fetched here. *)
   | Acting -> nothing
@@ -5241,6 +5237,35 @@ module Verification_evidence_read = struct
     | Launch_failure of string
 end
 
+(* Home links identify destinations, never an inferred approval target. The
+   approval/agenda screens still own the exact request and its decision. *)
+type home_request =
+  | Home_held_call of { keeper : string; call_id : string }
+  | Home_gate_request of string
+  | Home_operator_request of string
+  | Home_question of string
+  | Home_goal_confirmation of string
+  | Home_operator_task of string
+
+type home_action =
+  | Home_approvals
+  | Home_request of home_request
+  | Home_agenda
+  | Home_resume of string
+  | Home_read_last of string
+  | Home_choose_keeper
+  | Home_create_keeper
+
+type acting_pane_preference =
+  | Default_acting_pane
+  | Chosen_acting_pane of Masc_tui_acting_pane.layout
+
+type home_chat_receipt =
+  | No_chat_receipt
+  | Recorded_chat of Keeper_id.Keeper_name.t
+  | Session_chat of { keeper : Keeper_id.Keeper_name.t; save_error : string }
+  | Unconfirmed_chat of { keeper : Keeper_id.Keeper_name.t; detail : string }
+  | Unreadable_chat_receipt of string
 (* The server sends each invite's link once and keeps only its hash. Keep the
    cards newest first in this TUI process so issuing another invite does not
    erase the first person's only link. [shown_name] selects the card on screen;
@@ -5251,6 +5276,10 @@ type play_invite =
   }
 
 type state = {
+  mutable home_selected : home_action option;
+  mutable home_decision_scroll : int;
+  mutable home_opened_request : home_request option;
+  mutable home_last_chat : home_chat_receipt;
   mutable metrics_scroll: int;
   mutable metrics_section: metrics_section;
   mutable usage_telemetry_open: bool;
@@ -5393,8 +5422,9 @@ type state = {
      [Masc_tui_acting_pane.pane_cols] columns for the fleet's live feed, or
      [wide_pane_cols] wide. Same contract as the roster: narrow, wide or
      hidden is the reader's choice and survives a resize; whether the
-     terminal holds it is the terminal's. *)
-  mutable acting_pane_layout: Masc_tui_acting_pane.layout;
+     terminal holds it is the terminal's. The default is resolved by surface:
+     Home keeps its destinations alone, while other surfaces start narrow. *)
+  mutable acting_pane_preference: acting_pane_preference;
   (* Rows scrolled into the pane's full list; zero is the overview. The
      renderer clamps it to what the list holds and a toggle resets it. *)
   mutable acting_pane_scroll: int;
@@ -6358,14 +6388,14 @@ type state = {
   (* The retained-run list. A failed refresh keeps the rows it had and says
      why beside them ([Masc_tui_fetched.Stale]), rather than a registry that
      could not be read drawing as an empty one. *)
-  mutable fusion_runs: (unit, Tui_decode.fusion_snapshot) Masc_tui_fetched.t;
+  mutable fusion_runs: (unit, Masc.Tui_decode_fusion.fusion_snapshot) Masc_tui_fetched.t;
   (* Why the launch form could not open. Not a reading of the run list, so it
      is not folded into that list's failure; the next list answer clears it. *)
   mutable fusion_launch_error: string option;
   mutable fusion_cursor: int;
   mutable fusion_scroll: int;
   mutable fusion_mode: fusion_mode;
-  mutable fusion_detail: Tui_decode.fusion_detail option;
+  mutable fusion_detail: Masc.Tui_decode_fusion.fusion_detail option;
   mutable fusion_detail_error: string option;
   (* A detail GET captures this generation. A late response for a run the
      operator already left cannot replace the exact run now on screen. *)
@@ -6374,8 +6404,8 @@ type state = {
      do not pile another GET on top of it; changing runs still starts a new
      request immediately, whose pair replaces this marker. *)
   mutable fusion_detail_inflight: (int * string) option;
-  mutable fusion_historical_detail: Tui_decode.fusion_historical_detail option;
-  mutable fusion_historical_inflight: (int * Tui_decode.fusion_historical_evidence) option;
+  mutable fusion_historical_detail: Masc.Tui_decode_fusion.fusion_historical_detail option;
+  mutable fusion_historical_inflight: (int * Masc.Tui_decode_fusion.fusion_historical_evidence) option;
   mutable fusion_launch: fusion_launch option;
   (* The read or the submit the form is waiting on. A key that closes the
      form bumps it, so the answer to a read the operator left cannot open
@@ -7591,9 +7621,9 @@ let detail_read_waiting state ~tab ~keeper =
 let selected_keeper (state : state) =
   List.nth_opt state.keepers state.keeper_cursor
 
-let fusion_snapshot_entries (snapshot : Tui_decode.fusion_snapshot) =
-  List.map (fun run -> Tui_decode.Fusion_retained_run run) snapshot.fus_runs
-  @ List.map (fun evidence -> Tui_decode.Fusion_historical_evidence evidence)
+let fusion_snapshot_entries (snapshot : Masc.Tui_decode_fusion.fusion_snapshot) =
+  List.map (fun run -> Masc.Tui_decode_fusion.Fusion_retained_run run) snapshot.fus_runs
+  @ List.map (fun evidence -> Masc.Tui_decode_fusion.Fusion_historical_evidence evidence)
       snapshot.fus_historical_evidence
 
 let fusion_runs_view (state : state) =
@@ -7612,8 +7642,8 @@ let fusion_list_entries (state : state) =
   | Some snapshot -> fusion_snapshot_entries snapshot
 
 let fusion_entry_identity = function
-  | Tui_decode.Fusion_retained_run run -> "run:" ^ run.fur_run_id
-  | Tui_decode.Fusion_historical_evidence evidence -> "board:" ^ evidence.fhe_post_id
+  | Masc.Tui_decode_fusion.Fusion_retained_run run -> "run:" ^ run.fur_run_id
+  | Masc.Tui_decode_fusion.Fusion_historical_evidence evidence -> "board:" ^ evidence.fhe_post_id
 
 let selected_fusion_entry state =
   List.nth_opt (fusion_list_entries state) state.fusion_cursor
@@ -7622,9 +7652,9 @@ let fusion_detail_entry_index state =
   fusion_list_entries state
   |> List.find_index (fun entry ->
       match state.fusion_mode, entry with
-      | Fusion_detail id, Tui_decode.Fusion_retained_run run ->
+      | Fusion_detail id, Masc.Tui_decode_fusion.Fusion_retained_run run ->
           String.equal id run.fur_run_id
-      | Fusion_historical_detail reference, Tui_decode.Fusion_historical_evidence candidate ->
+      | Fusion_historical_detail reference, Masc.Tui_decode_fusion.Fusion_historical_evidence candidate ->
           String.equal reference.fhe_post_id candidate.fhe_post_id
           && String.equal reference.fhe_run_id candidate.fhe_run_id
       | _ -> false)
@@ -7632,7 +7662,7 @@ let fusion_detail_entry_index state =
 let selected_keeper_runs (state : state) =
   match selected_keeper state, fusion_snapshot state with
   | Some keeper, Some snapshot ->
-      List.filter (fun (run : Tui_decode.fusion_run) ->
+      List.filter (fun (run : Masc.Tui_decode_fusion.fusion_run) ->
           String.equal run.fur_keeper keeper.k_name) snapshot.fus_runs
   | _ -> []
 
@@ -7741,6 +7771,15 @@ let goal_action_armed_for (state : state) (goal_id : string) =
   | Some (armed_goal, armed_action) when String.equal armed_goal goal_id ->
       Some armed_action
   | Some _ | None -> None
+
+(* A compact Home never grows a feed just because the terminal grew. An
+   explicit reader choice still applies on Home and survives surface changes. *)
+let acting_pane_layout (state : state) =
+  match state.acting_pane_preference with
+  | Chosen_acting_pane layout -> layout
+  | Default_acting_pane ->
+      if state.view = Overview then Masc_tui_acting_pane.Hidden
+      else Masc_tui_acting_pane.Narrow
 
 (** New Keeper messages require a complete roster observation. [state.keepers]
     may intentionally retain the previous complete roster while a detail or log
@@ -7907,6 +7946,10 @@ let create_state
     ()
   =
   {
+  home_selected = None;
+  home_decision_scroll = 0;
+  home_opened_request = None;
+  home_last_chat = No_chat_receipt;
   metrics_scroll = 0;
   metrics_section = Section_fleet;
   usage_telemetry_open = false;
@@ -7970,7 +8013,7 @@ let create_state
      cost of being wrong here -- whereas the column was drawn on every frame
      whether or not anyone read it. *)
   roster_pane_hidden = true;
-  acting_pane_layout = Masc_tui_acting_pane.Narrow;
+  acting_pane_preference = Default_acting_pane;
   acting_pane_scroll = 0;
   acting_pane_cursor = None;
   acting_pane_tab = Masc_tui_acting_pane.Tab_fleet;
@@ -11204,13 +11247,13 @@ let surface_row_texts (state : state) : surface -> string list option =
                 (List.map
                    (fun entry ->
                      match entry with
-                     | Tui_decode.Fusion_retained_run run ->
-                         run.Tui_decode.fur_run_id ^ " "
-                         ^ run.Tui_decode.fur_keeper ^ " "
-                         ^ run.Tui_decode.fur_preset
-                     | Tui_decode.Fusion_historical_evidence evidence ->
-                         evidence.Tui_decode.fhe_post_id ^ " "
-                         ^ evidence.Tui_decode.fhe_title)
+                     | Masc.Tui_decode_fusion.Fusion_retained_run run ->
+                         run.Masc.Tui_decode_fusion.fur_run_id ^ " "
+                         ^ run.Masc.Tui_decode_fusion.fur_keeper ^ " "
+                         ^ run.Masc.Tui_decode_fusion.fur_preset
+                     | Masc.Tui_decode_fusion.Fusion_historical_evidence evidence ->
+                         evidence.Masc.Tui_decode_fusion.fhe_post_id ^ " "
+                         ^ evidence.Masc.Tui_decode_fusion.fhe_title)
                    entries)))
   | Changes when Option.is_some (opened_file_change state) -> None
   | Changes -> (

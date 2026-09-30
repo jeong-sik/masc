@@ -50,9 +50,10 @@ export type MemoryJournalSupportInvalidation = {
 
 export type MemoryJournalSourceKind = 'librarian' | 'explicit_write' | 'explicit_retract'
 
-// A committed pass wrote a revision. A failed pass did not, so the two are
-// separate members rather than one shape with nulls — a reader that has to
-// check a null to tell them apart will eventually forget to.
+// A committed pass names the snapshot revision it left in force: a new one,
+// or the stored one when the pass changed no fact. A failed pass names none,
+// so the two are separate members rather than one shape with nulls — a
+// reader that has to check a null to tell them apart will eventually forget to.
 export type MemoryJournalEntry =
   | {
       readonly ok: true

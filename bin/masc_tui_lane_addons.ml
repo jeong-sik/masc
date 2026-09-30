@@ -326,11 +326,13 @@ let selected_instance view = Option.bind view.snapshot (fun snapshot ->
         String.equal instance.id id && String.equal instance.incarnation incarnation) snapshot.instances
   | Overview ->
       (match view.focus with
-       | Timeline | Rows -> Option.bind (selected_row view) (row_owner snapshot.instances)
-       | Configurations -> Option.bind (selected_declaration view) (fun declaration ->
+       | Configurations when view.presentation=Technical -> Option.bind (selected_declaration view) (fun declaration ->
            Option.bind declaration.instance_id (fun id ->
-             List.find_opt (fun (instance : instance) -> instance.id=id) snapshot.instances))
-       | Connections | Instances ->
+             List.find_opt (fun (instance : instance) ->
+               instance.id=id && (match view.overview_mode with
+                 | Current_installations -> not (retained instance)
+                 | Retained_runs -> true)) snapshot.instances))
+       | Timeline | Rows | Configurations | Connections | Instances ->
            (match at_cursor (overview_entries ~mode:view.overview_mode snapshot) view.instance_cursor with
             | Some (`Instance item) -> Some item | Some (`Declaration _) | None -> None)))
 let open_selected_instance view =

@@ -435,8 +435,11 @@ let context_flow_uses_declared_connections () =
   let configured = {view with presentation=UI.Summary;focus=UI.Configurations;
     configuration_cursor=0;instance_cursor=1} in
   let configured_lines = UI.lines ~width:160 configured in
-  check (option string) "configuration action targets its selected declaration" (Some producer.id)
+  check (option string) "summary actions target the visibly selected worker despite hidden configuration focus" (Some consumer.id)
     (Option.map (fun (i : UI.instance) -> i.id) (UI.selected_instance configured));
+  check (option string) "technical installation actions target their selected declaration" (Some producer.id)
+    (Option.map (fun (i : UI.instance) -> i.id)
+      (UI.selected_instance {configured with presentation=UI.Technical}));
   check bool "overview lists both workers regardless of hidden focus" true
     (List.exists (String.starts_with ~prefix:"  Project observer · attached") configured_lines
      && List.exists (String.starts_with ~prefix:"> Project metric · attached") configured_lines);
@@ -657,7 +660,7 @@ let refresh_preserves_operator_target () =
   check bool "timeline cannot act through a replaced row owner" true
     (UI.selected_instance {replaced with focus=UI.Timeline}=None);
   let draft = Draft.create "worker.toml" |> ok in
-  let editing = UI.put_document {view with focus=UI.Configurations} draft in
+  let editing = UI.put_document {view with focus=UI.Configurations;presentation=UI.Technical} draft in
   let changed declaration instances = UI.reconcile_snapshot editing {snapshot with instances;
     configuration=Some {directory="/config";complete=true;declarations=[declaration]}} in
   List.iter (fun (label,declaration,instances) ->
@@ -854,9 +857,12 @@ let current_installations_and_grouped_history_keep_exact_targets () =
     desired=Some "1";applied=Some "1";instance_id=Some "old-b-config";
     issues=["missing image"];origin=UI.Parsed_declaration} in
   let retired_declaration = worker "old-b-config" "project" "b" UI.Row.Detached (Some declaration.source_path) in
+  let historical_row : UI.Row.row = {id="old-a/1/result";lane_id="old-a/result";
+    kind=UI.Row.Value;title="Old result";observed_at=1.;subject_id="project";
+    clock=None;actor=None;fields=[];evidence=[];related_ids=[]} in
   let snapshot : UI.snapshot = {instances=[old;current;other;old_two;retired_declaration];
     configuration=Some {directory="/config";complete=true;declarations=[declaration]};
-    output={rows=[];coverage=[]};complete=None} in
+    output={rows=[historical_row];coverage=[]};complete=None} in
   let view = {UI.initial with snapshot=Some snapshot} in
   check int "current worker and inactive declaration replace repeated retained rows" 2
     (UI.overview_count snapshot);
@@ -864,12 +870,18 @@ let current_installations_and_grouped_history_keep_exact_targets () =
     (UI.overview_count ~mode:UI.Retained_runs snapshot);
   check (option string) "overview actions target visible live worker, not hidden old worker" (Some current.id)
     (Option.map (fun (item : UI.instance) -> item.id) (UI.selected_instance view));
+  List.iter (fun focus ->
+    check (option string) "hidden overview focus cannot select a historical row owner" (Some current.id)
+      (Option.map (fun (item : UI.instance) -> item.id)
+        (UI.selected_instance {view with focus}))) [UI.Timeline;UI.Rows];
   let lines = UI.lines ~width:120 view in
   check bool "history is collapsed to an explicit navigation summary" true
     (List.mem "Retained history · 4 runs · h:open" lines
      && not (List.exists (String.starts_with ~prefix:"    Instance old-") lines));
   let config = UI.open_selected_instance {view with instance_cursor=1} in
   check int "inactive declaration still opens repair details" 0 config.configuration_cursor;
+  check (option string) "inactive current declaration cannot advertise its detached worker" None
+    (Option.map (fun (item : UI.instance) -> item.id) (UI.selected_instance config));
   let history = UI.toggle_history view in
   check bool "history mode is explicit" true (history.overview_mode=UI.Retained_runs);
   let history_lines = UI.lines ~width:120 history in

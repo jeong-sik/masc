@@ -12090,7 +12090,7 @@ let runtime_routes_detail_lines state ~width =
                @ List.concat_map (field ~style:(Theme.warn ()) "Probe error") probe.rps_errors
                @ List.concat_map (field "Probe limitation") probe.rps_limitations)
   in
-  optional "Resolved read error" state.runtime_surface_error
+  optional "Runtime read warning" state.runtime_surface_error
   @ resolved
   @ (match state.runtime_lane_notice with
      | None -> []

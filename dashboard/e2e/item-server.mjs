@@ -35,6 +35,9 @@ try {
     }
   })
   await page.goto(`${target.origin}/dashboard/#keepers?keeper=${encodeURIComponent(keeper)}`)
+  // Keeper routes open the chat workspace; its detail action exposes the tabs.
+  await page.getByRole('button', { name: '대화 도구', exact: true }).click()
+  await page.getByTestId('kw-chat-command-detail').click()
   await page.getByRole('tab', { name: '아이템', exact: true }).click()
   const panel = page.getByRole('tabpanel', { name: '아이템', exact: true })
   await panel.getByText('0.000 Candle', { exact: true }).first().waitFor()

@@ -18,7 +18,7 @@ and unowned equipment, equips the item, and verifies ledger-backed account
 ownership and changed PNG bytes. Restoring the default must restore the
 original PNG; the other slots must stay unchanged. Before restoration, Chromium
 opens the production bundle served by that same native process, follows the
-Keeper route and Item tab, and checks zero balance, one owned item and its
+Keeper route, opens 대화 도구 → 상세, selects the Item tab, and checks zero balance, one owned item and its
 equipped marker through real authenticated API requests. External browser
 requests are blocked; API responses are never replaced by fixtures. Finally
 the harness stops its server, starts a new process against the same isolated

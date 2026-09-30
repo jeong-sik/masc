@@ -2120,7 +2120,6 @@ type planning_goal = Tui_decode.planning_goal
   pg_id: string;
   pg_criterion_revision: string option;
   pg_title: string;
-  pg_owner: Goal_store.owner;
   pg_phase: Goal_phase.t;
   pg_priority: int;
   pg_due_date: string option;

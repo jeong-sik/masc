@@ -260,7 +260,6 @@ type planning_goal = {
   pg_id : string;
   pg_criterion_revision : string option;
   pg_title : string;
-  pg_owner : Goal_store.owner;
   pg_phase : Goal_phase.t;
   pg_priority : int;
   pg_due_date : string option;
@@ -1366,11 +1365,6 @@ let decode_planning_goal json =
   let* pg_id = required_string_field json "id" in
   let* pg_criterion_revision = optional_string_field json "criterion_revision" in
   let* pg_title = required_string_field json "title" in
-  let* pg_owner =
-    match Json_util.assoc_member_opt "owner" json with
-    | None | Some `Null -> Ok Goal_store.Unknown_owner
-    | Some owner_json -> Goal_store.owner_of_yojson owner_json
-  in
   let* raw_phase = required_string_field json "phase" in
   let* pg_phase =
     match Goal_phase.parse raw_phase with
@@ -1392,7 +1386,6 @@ let decode_planning_goal json =
       pg_id;
       pg_criterion_revision;
       pg_title;
-      pg_owner;
       pg_phase;
       pg_priority;
       pg_due_date;
@@ -2711,7 +2704,6 @@ type overview_goal_measurement =
 type overview_goal = {
   og_id : string;
   og_title : string;
-  og_owner : Goal_store.owner;
   og_completion : string option;
       (** The Goal's current completion state from the verification ledger
           ([proof_refuted], [proof_proven], [proof_pending], [idle],
@@ -2788,14 +2780,6 @@ let rec decode_overview_goal_node json =
   in
   let* og_id = malformed (required_string_field json "id") in
   let* og_title = malformed (required_string_field json "title") in
-  (* [owner] is optional so a payload written before #39571 still decodes;
-     an absent member reads as the explicit [Unknown_owner]. *)
-  let* og_owner =
-    malformed
-      (match Json_util.assoc_member_opt "owner" json with
-       | None | Some `Null -> Ok Goal_store.Unknown_owner
-       | Some owner_json -> Goal_store.owner_of_yojson owner_json)
-  in
   let* raw_phase = malformed (required_string_field json "phase") in
   (* [verification.completion.state] is optional: a payload written before the
      Overview carried the ledger, or one whose ledger could not be read, has no
@@ -2845,7 +2829,6 @@ let rec decode_overview_goal_node json =
   Ok
     ({ og_id
      ; og_title
-     ; og_owner
      ; og_completion
      ; og_phase
      ; og_priority

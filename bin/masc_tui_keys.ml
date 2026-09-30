@@ -951,6 +951,7 @@ let for_surface = function
       @ row_list_jumps @ listing_meta
   | Tools ->
       [ b Navigate "j/k" "scroll"
+      ; b Navigate "PgUp/PgDn" "page"
       ; b Navigate "Home/End" "top/bottom"
       ; b Navigate "p" "section"
           ~help:"available / async runs / receipts / usage / all tools"

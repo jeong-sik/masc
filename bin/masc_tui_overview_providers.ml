@@ -78,14 +78,14 @@ let percent_of_full = 100
 
 (* Fraction and percent meet only here, to draw a meter. *)
 let share_of_full = function
-  | Tui_decode.Utilization_fraction value -> value
-  | Tui_decode.Utilization_percent value ->
+  | Masc.Tui_decode_usage.Utilization_fraction value -> value
+  | Masc.Tui_decode_usage.Utilization_percent value ->
       float_of_int value /. float_of_int percent_of_full
 
 (* The full value of the unit the provider reported in, not a threshold. *)
 let at_or_past_full = function
-  | Tui_decode.Utilization_fraction value -> value >= 1.0
-  | Tui_decode.Utilization_percent value -> value >= percent_of_full
+  | Masc.Tui_decode_usage.Utilization_fraction value -> value >= 1.0
+  | Masc.Tui_decode_usage.Utilization_percent value -> value >= percent_of_full
 
 (* Twelve significant digits cut binary noise such as 0.29 *. 100. =
    28.999999999999996 before the floor, and still keep 0.9999 below 100. *)
@@ -101,12 +101,12 @@ let percent_of_fraction value =
   int_of_float (Float.floor hundredths)
 
 let utilization_text = function
-  | Tui_decode.Utilization_fraction value when Float.is_finite value ->
+  | Masc.Tui_decode_usage.Utilization_fraction value when Float.is_finite value ->
       Printf.sprintf "%d%%" (percent_of_fraction value)
-  | Tui_decode.Utilization_fraction value ->
+  | Masc.Tui_decode_usage.Utilization_fraction value ->
       (* Not a number to convert: shown as it came. *)
       Printf.sprintf "%g" value
-  | Tui_decode.Utilization_percent value -> Printf.sprintf "%d%%" value
+  | Masc.Tui_decode_usage.Utilization_percent value -> Printf.sprintf "%d%%" value
 
 let minutes_per_hour = 60
 let minutes_per_day = 24 * minutes_per_hour
@@ -121,12 +121,12 @@ let minutes_label minutes =
   else Printf.sprintf "%dm" minutes
 
 let kind_label = function
-  | Tui_decode.Window_five_hour -> "5h"
-  | Tui_decode.Window_seven_day -> "7d"
-  | Tui_decode.Window_duration_minutes minutes -> minutes_label minutes
-  | Tui_decode.Window_provider_label label -> Terminal_text.single_line label
+  | Masc.Tui_decode_usage.Window_five_hour -> "5h"
+  | Masc.Tui_decode_usage.Window_seven_day -> "7d"
+  | Masc.Tui_decode_usage.Window_duration_minutes minutes -> minutes_label minutes
+  | Masc.Tui_decode_usage.Window_provider_label label -> Terminal_text.single_line label
 
-let window_label (window : Tui_decode.provider_usage_window) =
+let window_label (window : Masc.Tui_decode_usage.provider_usage_window) =
   match window.puw_limit_id with
   | None -> kind_label window.puw_kind
   | Some limit -> Terminal_text.single_line limit ^ " " ^ kind_label window.puw_kind
@@ -172,13 +172,13 @@ let heard_text ~now observed_at =
 (* The server names the scope's id on the row, the same id its history
    points carry; hashing it again here would be a second definition that
    could drift from the first. *)
-let scope_id (account : Tui_decode.provider_usage_account) =
+let scope_id (account : Masc.Tui_decode_usage.provider_usage_account) =
   account.pua_scope_id
 
 (* The id's leading cells, enough to tell scopes apart on one screen. *)
 let scope_id_cells = 8
 
-let scope_name (account : Tui_decode.provider_usage_account) =
+let scope_name (account : Masc.Tui_decode_usage.provider_usage_account) =
   let id = scope_id account in
   let id =
     Terminal_text.single_line
@@ -190,7 +190,7 @@ let scope_name (account : Tui_decode.provider_usage_account) =
       Terminal_text.single_line
         (String.concat ", "
            (List.map
-              (fun (provider : Tui_decode.provider_usage_provider) ->
+              (fun (provider : Masc.Tui_decode_usage.provider_usage_provider) ->
                 provider.pup_display_name)
               providers))
       ^ " · " ^ id
@@ -241,12 +241,12 @@ let exhausted_tag ~now = function
 (* The account's email, read from its client's login file, for each provider
    billed to it. Two providers on one scope normally name one account; if they
    name two, both are drawn, since that is what the login files say. *)
-let account_email ~account_emails (account : Tui_decode.provider_usage_account) =
+let account_email ~account_emails (account : Masc.Tui_decode_usage.provider_usage_account) =
   match (account_emails : Types.overview_account_emails_reading) with
   | Types.Account_emails_read { emails; unreadable_rows = _ } ->
       let found =
         List.filter_map
-          (fun (provider : Tui_decode.provider_usage_provider) ->
+          (fun (provider : Masc.Tui_decode_usage.provider_usage_provider) ->
             List.assoc_opt provider.pup_id emails)
           account.pua_providers
       in
@@ -265,7 +265,7 @@ type name_cell =
 type row =
   | Window_row of {
       name : name_cell;
-      window : Tui_decode.provider_usage_window;
+      window : Masc.Tui_decode_usage.provider_usage_window;
       heard : string option;
       tag : string option;
     }
@@ -281,23 +281,23 @@ type row =
 (* Exhausted accounts first: a short budget cuts the section from the bottom,
    and the rows it keeps should be the ones that explain a stuck Keeper. Then
    accounts that reported, then the silent ones. *)
-let account_rank observed (account : Tui_decode.provider_usage_account) =
+let account_rank observed (account : Masc.Tui_decode_usage.provider_usage_account) =
   match (observed, account.pua_state) with
   | Observed_exhausted _, _ -> 0
-  | Not_observed_exhausted, Tui_decode.Account_reported _ -> 1
-  | Not_observed_exhausted, Tui_decode.Account_not_reported_since_start -> 2
+  | Not_observed_exhausted, Masc.Tui_decode_usage.Account_reported _ -> 1
+  | Not_observed_exhausted, Masc.Tui_decode_usage.Account_not_reported_since_start -> 2
 
 (* An account that has not reported since the server started and has no
    observed exhaustion draws nothing. Its row said only "no usage data" beside
    a generic setup name, which told the operator neither which account it was
    nor anything about it. *)
-let account_rows ~now (observed, (account : Tui_decode.provider_usage_account)) =
+let account_rows ~now (observed, (account : Masc.Tui_decode_usage.provider_usage_account)) =
   let name = scope_name account in
   let tag = exhausted_tag ~now observed in
   match account.pua_state, tag with
-  | Tui_decode.Account_not_reported_since_start, None -> []
-  | Tui_decode.Account_not_reported_since_start, Some tag -> [ Silent_row { name; tag } ]
-  | Tui_decode.Account_reported (first, rest), (None | Some _) ->
+  | Masc.Tui_decode_usage.Account_not_reported_since_start, None -> []
+  | Masc.Tui_decode_usage.Account_not_reported_since_start, Some tag -> [ Silent_row { name; tag } ]
+  | Masc.Tui_decode_usage.Account_reported (first, rest), (None | Some _) ->
       (* Windows of one report share its hearing time; a window heard at
          another time says its own. *)
       Window_row
@@ -307,7 +307,7 @@ let account_rows ~now (observed, (account : Tui_decode.provider_usage_account)) 
         ; tag
         }
       :: List.map
-           (fun (window : Tui_decode.provider_usage_window) ->
+           (fun (window : Masc.Tui_decode_usage.provider_usage_window) ->
              let heard =
                if Float.equal window.puw_observed_at first.puw_observed_at then
                  None
@@ -349,10 +349,10 @@ let meter_min_cells = 10
 (* A window that counts something a model call does not need never alarms:
    it being full refuses no model call. A limit the server could not classify
    is drawn like one that gates, since nothing says it does not. *)
-let window_tone (window : Tui_decode.provider_usage_window) =
+let window_tone (window : Masc.Tui_decode_usage.provider_usage_window) =
   match window.puw_role with
-  | Tui_decode.Role_counts_other_use -> Some Ansi.dim
-  | Tui_decode.Role_gates_model_calls | Tui_decode.Role_unclassified_limit ->
+  | Masc.Tui_decode_usage.Role_counts_other_use -> Some Ansi.dim
+  | Masc.Tui_decode_usage.Role_gates_model_calls | Masc.Tui_decode_usage.Role_unclassified_limit ->
       if at_or_past_full window.puw_utilization then Some (Theme.bad ())
       else None
 
@@ -370,11 +370,11 @@ let draw_rows ~now ~width rows =
   in
   let label_w = window_cells window_label in
   let value_w =
-    window_cells (fun (window : Tui_decode.provider_usage_window) ->
+    window_cells (fun (window : Masc.Tui_decode_usage.provider_usage_window) ->
         utilization_text window.puw_utilization)
   in
   let reset_w =
-    window_cells (fun (window : Tui_decode.provider_usage_window) ->
+    window_cells (fun (window : Masc.Tui_decode_usage.provider_usage_window) ->
         snd (reset_text ~now window.puw_resets_at))
   in
   let gap = "  " in
@@ -466,10 +466,10 @@ let section ~(providers : Types.overview_providers_reading) ~runtimes ~account_e
                 (Terminal_text.single_line reason) Ansi.reset
             ]
         }
-  | Types.Providers_read { Tui_decode.puws_since = _; puws_accounts } ->
+  | Types.Providers_read { Masc.Tui_decode_usage.puws_since = _; puws_accounts } ->
       let ordered =
         List.map
-          (fun (account : Tui_decode.provider_usage_account) ->
+          (fun (account : Masc.Tui_decode_usage.provider_usage_account) ->
             (observed_exhaustion ~runtimes account.pua_scope, account))
           puws_accounts
         |> List.stable_sort (fun (oa, a) (ob, b) ->

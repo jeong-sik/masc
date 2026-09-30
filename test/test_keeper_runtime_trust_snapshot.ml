@@ -1183,7 +1183,7 @@ let test_approval_queue_failure_remains_typed_unavailable () =
             ; "terminal_reason_code", `String "success"
             ]);
        let read_pending ~base_path =
-         let error : Masc.Keeper_approval_queue.storage_error =
+         let error : Masc.Keeper_approval_queue_result.storage_error =
            {
              path =
                Filename.concat base_path

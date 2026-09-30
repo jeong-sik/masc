@@ -24,5 +24,6 @@ val judge_candidate :
   unit ->
   (judged, string) result
 (** Evaluates the current signal with explicit relevant, not_relevant and
-    uncertain choices. Uncertainty is [Needs_review]; confidence is observation
-    only. Returns [Error] for transport, invalid response or unoffered choice. *)
+    uncertain choices. Uncertainty is [Needs_review]; the caller compares
+    [confidence] with its floor. Returns [Error] for transport, invalid
+    response or unoffered choice. *)

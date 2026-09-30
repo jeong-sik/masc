@@ -228,15 +228,37 @@ def portrait_as_pixels(binary: str) -> None:
 
 def item_tab_previews_accessories(binary: str) -> None:
     fixtures = h.keeper_runtime_http_fixtures()
+    catalog = [
+        ("glasses", "face"), ("shades", "face"), ("eye_patch", "face"),
+        ("plaster", "face"), ("freckles", "face"), ("beard", "face"),
+        ("scarf", "neck"), ("bow_tie", "neck"), ("medal", "neck"),
+        ("bow", "head"), ("crown", "head"), ("beanie", "head"),
+        ("book", "hand"), ("mug", "hand"), ("quill", "hand"),
+        ("dish_gilt", "base"), ("dish_silver", "base"), ("dish_oak", "base"),
+    ]
+    fixtures["/api/v1/keepers/alpha/items"] = (
+        200,
+        {
+            "status": "ready", "keeper": "alpha", "balance_milli": "12500",
+            "owned_items": ["glasses"],
+            "catalog": [
+                ({"id": item, "slot": slot, "price_status": "unpriced"}
+                 if item == "dish_oak" else
+                 {"id": item, "slot": slot, "price_status": "priced", "price_milli": "1000"})
+                for item, slot in catalog
+            ],
+        },
+    )
 
     def interact(process, fd, _slave, output, _base):
         open_alpha_detail(process, fd, output)
         h.resize_and_wait(process, fd, output, rows=SHORT_ROWS, columns=COLUMNS, needle=INFO_TAB)
         h.send_and_wait(process, fd, output, b"]", "▸Items".encode())
+        h.wait_for_output(process, fd, output, b"Balance 12.500 Candle", start=0, timeout=3.0)
         h.drain_until_quiet(process, fd, output)
         first = last_frame_rows(output)
         assert row_of(first, b"Items 1/18") > 0
-        assert row_of(first, b"glasses") > 0
+        assert b"owned" in first[row_of(first, b"glasses")]
         assert portrait_rows(first), "the Item preview has no picture at 100x24"
         h.send_and_wait(process, fd, output, b"j", b"Items 2/18")
         h.drain_until_quiet(process, fd, output)
@@ -251,6 +273,7 @@ def item_tab_previews_accessories(binary: str) -> None:
         h.send_and_wait(process, fd, output, b"\x1b[F", b"Items 18/18")
         h.drain_until_quiet(process, fd, output)
         assert row_of(last_frame_rows(output), b"> 18 base  dish_oak") > 0
+        assert row_of(last_frame_rows(output), b"Selected: unpriced") > 0
         h.send_and_wait(process, fd, output, b"\x1b[H", b"Items 1/18")
         h.drain_until_quiet(process, fd, output)
         assert row_of(last_frame_rows(output), b">  1 face  glasses") > 0
@@ -270,6 +293,7 @@ def item_tab_previews_accessories(binary: str) -> None:
                           final_cursor=b"\x1b[?25l")
         narrow = last_frame_rows(output)
         assert row_of(narrow, b"> 18 base  dish_oak") > 0, "resize lost the last accessory name"
+        assert row_of(narrow, b"Selected: unpriced") > 0, "narrow Items hid the authoritative price"
         assert not portrait_rows(narrow), "narrow Items pane retained a portrait beside clipped names"
         os.write(fd, b"q")
 
@@ -282,10 +306,34 @@ def item_tab_previews_accessories(binary: str) -> None:
     )
 
 
+def item_account_failure_keeps_the_preview(binary: str) -> None:
+    fixtures = h.keeper_runtime_http_fixtures()
+    fixtures["/api/v1/keepers/alpha/items"] = (503, {"error": "ledger unreadable"})
+
+    def interact(process, fd, _slave, output, _base):
+        open_alpha_detail(process, fd, output)
+        h.resize_and_wait(process, fd, output, rows=SHORT_ROWS, columns=COLUMNS, needle=INFO_TAB)
+        h.send_and_wait(process, fd, output, b"]", b"Account unavailable:")
+        h.drain_until_quiet(process, fd, output)
+        rows = last_frame_rows(output)
+        assert row_of(rows, b"Items 1/18") > 0
+        assert portrait_rows(rows), "an account read failure hid the separate portrait preview"
+        os.write(fd, b"q")
+
+    h.run_terminal_scenario(
+        binary,
+        description="an unreadable Item account stays visible without hiding the preview",
+        interact=interact,
+        http_fixtures=fixtures,
+        terminal_cols=COLUMNS,
+    )
+
+
 if __name__ == "__main__":
     binary = str(Path(sys.argv[1]).resolve())
     portrait_follows_the_terminal_height(binary)
     no_portrait_under_no_color(binary)
     portrait_as_pixels(binary)
     item_tab_previews_accessories(binary)
-    print("tui keeper portrait: PASS (4 scenarios)")
+    item_account_failure_keeps_the_preview(binary)
+    print("tui keeper portrait: PASS (5 scenarios)")

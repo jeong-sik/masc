@@ -2786,13 +2786,14 @@ let identity_login_landed ~providers ~login =
       | Identity_declared _ | Identity_unreadable _ -> false)
     providers
 
-(** Where [Esc] returns after the chat pane was opened. Keeping only the three
-    legal destinations makes a new Keeper sub-view an explicit compiler error
+(** Where [Esc] returns after the chat pane was opened. Keeping only the legal
+    destinations makes a new Keeper sub-view an explicit compiler error
     instead of silently becoming the detail view. *)
 type keeper_chat_return =
   | Keeper_chat_return_list
   | Keeper_chat_return_detail
   | Keeper_chat_return_lanes
+  | Keeper_chat_return_home
 
 (** Where [Esc] returns after the Changes surface was opened. [f] opens it
     from the roster and from the detail, which name the same keeper through
@@ -2939,14 +2940,10 @@ let rec surface_needs ~keeper_pane_drawn surface =
   needs
 
 and surface_needs_of_surface : surface -> surface_needs = function
-  (* Dashboard summarizes quota coverage and reads the Goal tree. Usage reads
-     the same quota response for per-scope detail and recorded history. *)
+  (* Home reads decision sources. Work owns Goal evidence and Usage owns
+     provider reports; their detail payloads do not belong on this screen. *)
   | Overview ->
-      { nothing with
-        needs_transport = true
-      ; needs_runtime_quota = true
-      ; needs_overview_goals = true
-      }
+      { nothing with needs_operator_approvals = true; needs_asks = true }
   (* Its rows come from the acting store and the keeper list, neither of which
      is fetched here. *)
   | Acting -> nothing
@@ -5241,6 +5238,15 @@ module Verification_evidence_read = struct
     | Launch_failure of string
 end
 
+(* Home links identify destinations, never an inferred approval target. The
+   approval/agenda screens still own the exact request and its decision. *)
+type home_action =
+  | Home_approvals
+  | Home_agenda
+  | Home_resume of string
+  | Home_choose_keeper
+  | Home_create_keeper
+
 (* The server sends each invite's link once and keeps only its hash. Keep the
    cards newest first in this TUI process so issuing another invite does not
    erase the first person's only link. [shown_name] selects the card on screen;
@@ -5251,6 +5257,8 @@ type play_invite =
   }
 
 type state = {
+  mutable home_selected : home_action option;
+  mutable home_last_chat : string option;
   mutable metrics_scroll: int;
   mutable metrics_section: metrics_section;
   mutable usage_telemetry_open: bool;
@@ -7907,6 +7915,8 @@ let create_state
     ()
   =
   {
+  home_selected = None;
+  home_last_chat = None;
   metrics_scroll = 0;
   metrics_section = Section_fleet;
   usage_telemetry_open = false;
@@ -11094,6 +11104,106 @@ let approvals_count_label (state : state) =
   let on_screen = approvals_surface_pending state in
   if approvals_reading_current state then string_of_int on_screen
   else Printf.sprintf "%d?" on_screen
+
+let approval_item_needs_person = function
+  | Keeper_tool_row _ | Operator_row _ -> true
+  | Gate_row (pending : Tui_decode.gate_pending) ->
+      match pending.gp_phase with
+      | Gate_human_required -> true
+      | Gate_queued | Gate_judging | Gate_blocked -> false
+
+let approvals_human_pending (state : state) =
+  List.length (List.filter approval_item_needs_person (approval_items state))
+  + approvals_open_question_count state
+
+(* Only exact operator-owned states enter Home's decision section. Automatic
+   verification and generic incident severity do not mean a person must act. *)
+let home_decision_rows (state : state) =
+  let approvals =
+    if approvals_reading_current state then
+      match approvals_human_pending state with
+      | 0 -> []
+      | count ->
+          let automatic = approvals_surface_pending state - count in
+          let detail =
+            if automatic = 0 then "open requests"
+            else Printf.sprintf "%d automatic" automatic
+          in
+          [ Home_approvals,
+            Printf.sprintf "Approvals and questions: %d need you  · %s" count detail ]
+    else
+      [ Home_approvals, "Approvals and questions: not fully read  · inspect sources" ]
+  in
+  let goals =
+    match state.goals_to_confirm with
+    | Masc_tui_agenda.Read [] -> []
+    | Read goals ->
+        [ Printf.sprintf "%d Goals to confirm" (List.length goals) ]
+    | Not_read -> [ "Goal confirmations not read" ]
+    | Read_failed _ -> [ "Goal confirmations unavailable" ]
+  in
+  let tasks =
+    match state.tasks_error, state.operator_stalled with
+    | Some _, _ -> [ "operator task reading unavailable" ]
+    | None, None -> [ "operator tasks not read" ]
+    | None, Some [] -> []
+    | None, Some tasks ->
+        [ Printf.sprintf "%d tasks need an operator" (List.length tasks) ]
+  in
+  approvals
+  @ (match goals @ tasks with
+     | [] -> []
+     | notes -> [ Home_agenda, String.concat "; " notes ^ "  · open agenda" ])
+
+let home_continue_rows (state : state) =
+  let last =
+    match state.home_last_chat, state.opening_mode with
+    | Some name, _ -> Some name
+    | None, Masc_tui_config.Last (Some name) ->
+        Some (Keeper_id.Keeper_name.to_string name)
+    | None, (Masc_tui_config.Last None | Masc_tui_config.Overview
+            | Masc_tui_config.Keeper _) -> None
+  in
+  let resume =
+    match last with
+    | Some name when state.workspace_identity = Workspace_identity_match
+                   && keeper_available_for_new_message state name ->
+        [ Home_resume name, "Continue with " ^ Tui_decode.sanitize_terminal_text name ]
+    | Some _ | None -> []
+  in
+  let choose =
+    match state.workspace_identity, state.local_workspace, state.keepers_error, state.keepers with
+    | Workspace_identity_match, Local_workspace_read, None, [] ->
+        [ Home_create_keeper, "Create a Keeper  · choose who will take the work" ]
+    | _ ->
+        [ Home_choose_keeper,
+          (match resume with
+           | [] -> "Choose a Keeper  · start a conversation"
+           | _ :: _ -> "New work  · choose a Keeper") ]
+  in
+  resume @ choose
+
+let home_actions state =
+  List.map fst (home_decision_rows state @ home_continue_rows state)
+
+let home_selected_action state =
+  let actions = home_actions state in
+  match state.home_selected with
+  | None -> List.nth_opt actions 0
+  | Some action ->
+      if List.mem action actions then Some action else None
+
+let home_step state ~backwards =
+  let actions = home_actions state in
+  let current = home_selected_action state in
+  let index =
+    match List.find_index (fun action -> Some action = current) actions with
+    | None -> 0
+    | Some index ->
+        if backwards then max 0 (index - 1)
+        else min (List.length actions - 1) (index + 1)
+  in
+  state.home_selected <- List.nth_opt actions index
 
 (* One title clause per list that was not read, in the order the lists are
    drawn. A list with nothing read and nothing kept is "unread" whether or not

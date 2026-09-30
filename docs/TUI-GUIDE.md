@@ -250,10 +250,10 @@ named Keeper's chat; it needs `opening_keeper`. `last` opens the most recent
 chat target and updates `opening_keeper` when a different Keeper's chat is
 opened. The choice and the name are separate, so a Keeper named `last` can
 be selected. If the target is unavailable, the TUI starts on the Dashboard
-and shows the reason on its first row. An invalid opening setting also starts
+and shows the reason near the top. An invalid opening setting also starts
 on the Dashboard with a reason.
 
-The candle on the startup splash and `/about` comes in two styles. `painted`
+The candle on `/about` comes in two styles. `painted`
 is the 2D portrait, with smooth shading, a flickering flame and blinking
 eyes. `dotted` is a small 3D figure in square dots that sways on its axis.
 On a Kitty terminal it is sent as many pixels as its rows show, so the
@@ -2178,3 +2178,34 @@ Librarian deferred and failure counts are observations since the server started,
 On a repository, `H` reads the last 24 hours of recorded clone writes from the loaded Keeper roster. The activity page shows counts by Keeper and each change's date, Task ID and file. Failed Keeper reads and calls omitted by the source decoder remain visible. It counts recorded changes, not time spent working; absolute writes outside registered clones are not attributed to a repository.
 
 Select a row and press Enter to open the original Keeper's file. In Code, `H` opens file history and `m` opens notes. Esc from activity returns to the repository list.
+
+
+## Dashboard: decisions and conversations
+
+Dashboard gives its body to two sections: **Needs your decision** and
+**Continue**. Approvals/questions open their existing queue; Goal confirmations
+and tasks waiting on the operator open Agenda. These links open readers, never
+approve a request. Unknown or failed source reads keep a visible entry rather
+than claiming that no decision is waiting. Automatic verifier work and generic
+incidents are not counted as operator decisions.
+
+Use j/k or the arrows to choose, then Enter to open. `p` opens requests, `;`
+opens Agenda, and `m` opens Usage. Work retains Goal observations, task lists,
+and verification evidence; Usage retains quota and telemetry detail. Home shows
+only a brief task-flow reading, with no duplicated tables or quota graphs.
+
+Continue uses a Keeper whose chat was explicitly opened in this TUI session,
+or the saved target when `opening = "last"`. A fixed `opening = "keeper"`
+target is not a last-chat record. With no available remembered target, choose a
+Keeper. An empty, successfully read roster offers creation while any existing
+Goal or task decisions remain visible. Home's `i` also selects a Keeper before
+writing. A conversation opened through Continue returns to Dashboard with Esc
+and keeps its draft through the existing per-Keeper draft store.
+
+Plan Usage is a frequent-use destination on the top-level **Usage** tab, not
+an expanded Home panel. The tab, Home's `m`, `go Usage` and `/cost` open its
+account rows even if the previous visit ended in Telemetry. The account reading
+includes scope, observed usage,
+reset times and freshness; scrolling reaches rows below the viewport. `p`
+opens the separate Telemetry reading, as do `/metrics` and `/telemetry`.
+A missing report is not a zero balance.

@@ -283,6 +283,7 @@ let test_misc_tools_name_the_source_they_move () =
     | Sources.Machine_changed Masc.Machine_lane.Msx -> "msx"
     | Sources.Machine_changed Masc.Machine_lane.Dos -> "dos"
     | Sources.Browser_changed -> "browser"
+    | Sources.Fusion_changed _ -> "fusion"
     | Sources.Tool_completed -> "tool" in
   let activity operation = label (Sources.activity_of_misc_operation operation) in
   check string "stepping the MSX moves its capture" "msx"
@@ -342,7 +343,73 @@ let test_built_in_lanes_offer_what_parse_accepts () =
   check bool "an automation document source is accepted" true
     (Result.is_ok (Sources.parse (document Browser_lane.Lane_name.Automation)))
 
+let test_fusion_capture_retains_exact_state_across_terminal_change () =
+  with_store (fun dir store ->
+    let old_base = Sys.getenv_opt "MASC_BASE_PATH" in
+    let reset () =
+      Masc.Board_dispatch.reset_for_test ();
+      Masc.Board.reset_global_for_test () in
+    Fun.protect ~finally:(fun () ->
+      reset ();
+      match old_base with Some value -> Unix.putenv "MASC_BASE_PATH" value
+      | None -> Unix.unsetenv "MASC_BASE_PATH")
+      (fun () ->
+        Unix.putenv "MASC_BASE_PATH" dir;
+        reset ();
+        let registry = Fusion_run_registry.global () in
+        let run_id = "fusion-capture-" ^ Store.digest dir in
+        Fusion_run_registry.register_running registry ~run_id
+          ~keeper:"fixture" ~preset:"default" ~roster:Fusion_types.preset_roster
+          ~topology:Fusion_types.Simple ~started_at:1.;
+        let read () = require (Sources.acquire ~store ~package:(package dir 16384)
+          ~resolve_lane_output:(fun ~installation_id:_ -> Error "unused")
+          ~binding:(binding [`Assoc ["source_id",`String "fusion";
+            "kind",`String "fusion_run";"run_id",`String run_id]]))
+          |> list |> List.hd |> member "observations" |> list |> List.hd in
+        let first = read () in
+        let reference = member "evidence" first |> list |> List.hd |> own_reference in
+        let frozen = require (Store.read_blob store reference) in
+        check string "captures exact registered run" run_id
+          (first |> member "detail" |> member "run" |> member "run_id" |> text);
+        Fusion_run_registry.mark_completed registry ~run_id
+          ~outcome:(Fusion_run_registry.Failed {reason="fixture failure";code="fixture"});
+        let terminal = read () in
+        check string "captures terminal failure" "failed"
+          (terminal |> member "detail" |> member "run" |> member "status" |> text);
+        check string "old running capture is still frozen" frozen
+          (require (Store.read_blob store reference));
+        check bool "observed actor is not the requested Keeper" true
+          (member "actor" terminal=`Null)))
+
+let test_fusion_binding_targets_only_exact_run () =
+  let source run_id = `Assoc ["source_id",`String "fusion";
+    "kind",`String "fusion_run";"run_id",`String run_id] in
+  let interest = require (Sources.refresh_interest (binding [source "run-one"])) in
+  check bool "exact update wakes this source" true
+    (Sources.interested interest (Sources.Fusion_changed "run-one"));
+  check bool "another run does not wake this source" false
+    (Sources.interested interest (Sources.Fusion_changed "run-two"));
+  check bool "tool completions do not wake Fusion" false
+    (Sources.interested interest Sources.Tool_completed);
+  let bad = `Assoc ["source_id",`String "fusion";"kind",`String "fusion_run";
+    "run_id",`String "run-one";"path",`String "/guessed"] in
+  check bool "unknown fields rejected" true
+    (Result.is_error (Sources.parse (binding [bad])));
+  check bool "unknown run is unavailable, not fabricated" true
+    (with_store (fun dir store ->
+       let sources = require (Sources.acquire ~store ~package:(package dir 16384)
+         ~resolve_lane_output:(fun ~installation_id:_ -> Error "unused")
+         ~binding:(binding [source "definitely-unregistered-fusion-run"])) in
+       match list sources with
+       | [captured] -> member "complete" captured = `Bool false
+           && member "observations" captured = `List []
+       | _ -> false))
+
 let () = run "Lane source provenance" ["acquisition", [
+  test_case "Fusion captures retain earlier state across terminal updates" `Quick
+    test_fusion_capture_retains_exact_state_across_terminal_change;
+  test_case "Fusion bindings target exact run updates and preserve unavailable coverage" `Quick
+    test_fusion_binding_targets_only_exact_run;
   test_case "activity follows declared typed sources" `Quick test_source_activity_does_not_infer_ownership;
   test_case "native input ledger is captured and retained with frame identity" `Quick test_native_input_history_is_frozen_with_capture;
   test_case "DOS capture retains the machine's history" `Quick test_dos_capture_retains_the_machines_history;

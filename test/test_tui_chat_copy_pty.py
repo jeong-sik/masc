@@ -9,13 +9,14 @@ import os
 import re
 import sys
 
-import test_tui_keyboard_input as h
+import tui_keyboard_harness as h
 
 SOURCE_MODULES = (
     "bin/masc_tui.ml",
     "bin/masc_tui_command.ml",
     "bin/masc_tui_keeper_chat_history.ml",
     "bin/masc_tui_link.ml",
+    "test/tui_keyboard_harness.py",
 )
 
 LONG_REPLY = (

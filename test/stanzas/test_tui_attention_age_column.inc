@@ -2,8 +2,8 @@
  (alias runtest-test_tui_attention_age_column)
  (deps
   test_tui_attention_age_column.py
-  test_tui_keyboard_input.py
-  ../bin/masc_tui.exe)
+  ../bin/masc_tui.exe
+  tui_keyboard_harness.py)
  (action
   (run
    python3

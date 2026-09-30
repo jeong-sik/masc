@@ -6,14 +6,15 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
-import zlib
-import struct
 import os
 import re
+import struct
 import sys
+import zlib
 from pathlib import Path
 
-import test_tui_keyboard_input as h
+import tui_keyboard_chat as _keyboard_chat
+import tui_keyboard_harness as _keyboard_harness
 
 # scripts/ci/run-edited-tests.sh runs this suite when a pull request changes a
 # path named here.
@@ -30,6 +31,10 @@ SOURCE_MODULES = (
     "bin/masc_tui_types.ml",
     "lib/keeper_portrait/keeper_portrait_draw.ml",
     "lib/keeper_portrait/keeper_portrait_look.ml",
+    "test/tui_keyboard_chat.py",
+    "test/tui_keyboard_harness.py",
+    "test/tui_keyboard_observer.py",
+    "test/tui_keyboard_tools.py",
 )
 
 BRIEFING = "/api/v1/dashboard/briefing"
@@ -56,7 +61,7 @@ RESIZED_COLUMNS = 99
 CHAT_SEND_PATH = "/api/v1/keepers/chat/stream"
 # CSI 6 ; height ; width t: the terminal saying a cell is 10 px wide and 20
 # tall, then its answer to the graphics query.
-KITTY_TERMINAL_REPLIES = b"\x1b[6;20;10t" + h.GRAPHICS_SUPPORTED_REPLY
+KITTY_TERMINAL_REPLIES = b"\x1b[6;20;10t" + _keyboard_chat.GRAPHICS_SUPPORTED_REPLY
 CELL_WIDTH, CELL_HEIGHT = 10, 20
 # The id the TUI places its candle under (Masc_tui_portrait_view).
 MASCOT_IMAGE_ID = b"41"
@@ -82,9 +87,9 @@ def wait_for_whole_frame(process, fd, output: bytearray, needle: bytes,
     """Wait for [needle] and for the end of the frame that carries it. The
     candle steps every 150 ms, so the screen does not go quiet while it is up;
     the end of a frame is when that frame's rows can be read."""
-    h.wait_for_output(process, fd, output, needle, start=start, timeout=timeout)
-    h.wait_for_output(process, fd, output, h.FRAME_END,
-                      start=h.end_of_needle(output, needle, start), timeout=3.0)
+    _keyboard_harness.wait_for_output(process, fd, output, needle, start=start, timeout=timeout)
+    _keyboard_harness.wait_for_output(process, fd, output, _keyboard_harness.FRAME_END,
+                      start=_keyboard_harness.end_of_needle(output, needle, start), timeout=3.0)
 
 
 def stepped_transfers(process, fd, output: bytearray,
@@ -95,7 +100,7 @@ def stepped_transfers(process, fd, output: bytearray,
     seen = start
     transfers: list[tuple[dict[bytes, bytes], bytes]] = []
     for _ in range(STEP_TRANSFER_LIMIT):
-        h.wait_for_output(process, fd, output, MASCOT_TRANSFER_HEAD, start=seen,
+        _keyboard_harness.wait_for_output(process, fd, output, MASCOT_TRANSFER_HEAD, start=seen,
                           timeout=STEP_WAIT_SECONDS)
         seen = MASCOT_TRANSFER_HEAD.search(bytes(output), seen).end()
         transfers = mascot_transfers(bytes(output[start:]))
@@ -106,7 +111,7 @@ def stepped_transfers(process, fd, output: bytearray,
 
 
 def candle_rows(output: bytearray, *, preserve_styles: bool = False) -> list[bytes]:
-    rows = h.screen_rows(bytes(output), preserve_styles=preserve_styles)
+    rows = _keyboard_harness.screen_rows(bytes(output), preserve_styles=preserve_styles)
     return [text for _, text in sorted(rows.items()) if HALF_BLOCK.search(text)]
 
 
@@ -166,7 +171,7 @@ def mascot_transfers(wire: bytes) -> list[tuple[dict[bytes, bytes], bytes]]:
 
 
 def assert_working_overview(output: bytearray) -> bytes:
-    screen = h.screen_text(bytes(output))
+    screen = _keyboard_harness.screen_text(bytes(output))
     for label in (b"MASC Dashboard", b"Goals", b"Work", b"Usage", b"Needs you"):
         assert label in screen, f"working Dashboard omitted {label!r}: {screen!r}"
     assert STARTUP_CAPTION not in screen, "startup branding replaced the work"
@@ -181,28 +186,28 @@ def frame_evidence(binary: str, phase: str, output: bytearray) -> None:
     print(json.dumps({
         "phase": phase,
         "binary_sha256": hashlib.sha256(Path(binary).read_bytes()).hexdigest(),
-        "screen": h.screen_text(bytes(output)).decode("utf-8", "replace"),
+        "screen": _keyboard_harness.screen_text(bytes(output)).decode("utf-8", "replace"),
     }, ensure_ascii=False), flush=True)
 
 
 def startup_overview(binary: str, *, no_color: bool = False,
                      graphics: bool = False, narrow: bool = False,
                      fail_first: bool = False) -> None:
-    fixtures = h.keeper_runtime_http_fixtures()
+    fixtures = _keyboard_harness.keeper_runtime_http_fixtures()
     briefing = fixtures[BRIEFING]
     response = (503, {"error": "briefing temporarily unavailable"}) if fail_first else briefing
-    gate = h.GatedHttpResponse(response, subsequent_response=briefing, hold_seconds=20.0)
+    gate = _keyboard_harness.GatedHttpResponse(response, subsequent_response=briefing, hold_seconds=20.0)
     fixtures[BRIEFING] = gate
     mode = "no-color" if no_color else "kitty" if graphics else "narrow" if narrow else "error" if fail_first else "mosaic"
 
     def interact(process, fd, _slave, output, _base):
         try:
-            assert h.wait_for_fixture_event(process, fd, output, gate.requested, timeout=5.0), \
+            assert _keyboard_harness.wait_for_fixture_event(process, fd, output, gate.requested, timeout=5.0), \
                 "the first overview read never went out"
             wait_for_whole_frame(process, fd, output, UNREAD_BRIEFING, start=0, timeout=5.0)
             if narrow:
-                h.resize_and_wait(process, fd, output, rows=24, columns=80,
-                                  needle=UNREAD_BRIEFING, controls=(h.FULL_REDRAW,))
+                _keyboard_harness.resize_and_wait(process, fd, output, rows=24, columns=80,
+                                  needle=UNREAD_BRIEFING, controls=(_keyboard_harness.FULL_REDRAW,))
             screen = assert_working_overview(output)
             assert b"Connecting to workspace" in screen, repr(screen)
             assert b"press 'r'" not in screen and b"press r" not in screen, \
@@ -224,7 +229,7 @@ def startup_overview(binary: str, *, no_color: bool = False,
         finally:
             gate.release.set()
 
-    h.run_terminal_scenario(binary, description="startup keeps the working Dashboard: " + mode,
+    _keyboard_harness.run_terminal_scenario(binary, description="startup keeps the working Dashboard: " + mode,
                             interact=interact, http_fixtures=fixtures,
                             terminal_cols=80 if narrow else SCENARIO_COLUMNS,
                             extra_env={"NO_COLOR": "1"} if no_color else None,
@@ -232,38 +237,38 @@ def startup_overview(binary: str, *, no_color: bool = False,
 
 
 def startup_keys_work(binary: str) -> None:
-    fixtures = h.keeper_runtime_http_fixtures()
+    fixtures = _keyboard_harness.keeper_runtime_http_fixtures()
     briefing = fixtures[BRIEFING]
-    gate = h.GatedHttpResponse(briefing, subsequent_response=briefing, hold_seconds=20.0)
+    gate = _keyboard_harness.GatedHttpResponse(briefing, subsequent_response=briefing, hold_seconds=20.0)
     fixtures[BRIEFING] = gate
 
     def interact(process, fd, _slave, output, _base):
         try:
             wait_for_whole_frame(process, fd, output, UNREAD_BRIEFING, start=0, timeout=5.0)
             assert_working_overview(output)
-            h.send_and_wait(process, fd, output, b"3", b"MASC Keepers")
-            h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
-            assert h.drain_until_quiet(process, fd, output), "Dashboard kept animating"
+            _keyboard_harness.send_and_wait(process, fd, output, b"3", b"MASC Keepers")
+            _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
+            assert _keyboard_harness.drain_until_quiet(process, fd, output), "Dashboard kept animating"
             assert_working_overview(output)
             gate.release.set()
             os.write(fd, b"q")
         finally:
             gate.release.set()
 
-    h.run_terminal_scenario(binary, description="Dashboard keys work during the first read",
+    _keyboard_harness.run_terminal_scenario(binary, description="Dashboard keys work during the first read",
                             interact=interact, http_fixtures=fixtures)
 
 
 def about_screen(binary: str, *, no_color: bool) -> None:
-    fixtures = h.keeper_runtime_http_fixtures()
+    fixtures = _keyboard_harness.keeper_runtime_http_fixtures()
     fixtures["/api/v1/keepers/alpha/chat/history"] = (200, [])
 
     def interact(process, fd, _slave, output, _base):
-        h.send_and_wait(process, fd, output, b"3", b"MASC Keepers")
-        h.select_keeper_row(process, fd, output, b"alpha")
-        h.send_and_wait(process, fd, output, b"c", CHAT_TITLE)
+        _keyboard_harness.send_and_wait(process, fd, output, b"3", b"MASC Keepers")
+        _keyboard_harness.select_keeper_row(process, fd, output, b"alpha")
+        _keyboard_harness.send_and_wait(process, fd, output, b"c", CHAT_TITLE)
         start = len(output)
-        h.send_and_wait(process, fd, output, b"/about\r", ABOUT_CAPTION)
+        _keyboard_harness.send_and_wait(process, fd, output, b"/about\r", ABOUT_CAPTION)
         # The workspace the harness seeds holds alpha and beta.
         wait_for_whole_frame(process, fd, output, b"Keepers: 2", start=start, timeout=3.0)
         rows = candle_rows(output, preserve_styles=True)
@@ -276,14 +281,14 @@ def about_screen(binary: str, *, no_color: bool) -> None:
             assert any(FOREGROUND_ESCAPE in row for row in rows), \
                 "the candle was drawn without colour"
         # Esc closes /about and nothing else: the chat is still underneath.
-        h.send_and_wait(process, fd, output, b"\x1b", CHAT_TITLE)
-        assert h.drain_until_quiet(process, fd, output), "the screen kept moving after /about closed"
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", CHAT_TITLE)
+        assert _keyboard_harness.drain_until_quiet(process, fd, output), "the screen kept moving after /about closed"
         assert not candle_rows(output), "the candle stayed after /about closed"
-        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
-        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
         os.write(fd, b"q")
 
-    h.run_terminal_scenario(
+    _keyboard_harness.run_terminal_scenario(
         binary,
         description="/about shows the candle " + ("not at all under NO_COLOR" if no_color else "as a coloured mosaic"),
         interact=interact,
@@ -293,20 +298,20 @@ def about_screen(binary: str, *, no_color: bool) -> None:
 
 
 def about_screen_with_graphics(binary: str) -> None:
-    fixtures = h.keeper_runtime_http_fixtures()
+    fixtures = _keyboard_harness.keeper_runtime_http_fixtures()
 
     def interact(process, fd, _slave, output, _base):
         # The composer writes to the keeper the roster cursor holds, and it
         # holds none until the roster is read: an i that arrives first has
         # nobody to write to and is dropped. Choose alpha first, as
         # about_owns_the_keys does.
-        h.send_and_wait(process, fd, output, b"3", b"MASC Keepers")
-        h.select_keeper_row(process, fd, output, b"alpha")
-        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
-        h.send_and_wait(process, fd, output, b"i", h.COMPOSER_FOCUSED)
+        _keyboard_harness.send_and_wait(process, fd, output, b"3", b"MASC Keepers")
+        _keyboard_harness.select_keeper_row(process, fd, output, b"alpha")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
+        _keyboard_harness.send_and_wait(process, fd, output, b"i", _keyboard_harness.COMPOSER_FOCUSED)
         start = len(output)
-        h.send_and_wait(process, fd, output, b"/about\r", ABOUT_CAPTION)
-        h.wait_for_output(process, fd, output, PLACEMENT, start=start, timeout=5.0)
+        _keyboard_harness.send_and_wait(process, fd, output, b"/about\r", ABOUT_CAPTION)
+        _keyboard_harness.wait_for_output(process, fd, output, PLACEMENT, start=start, timeout=5.0)
         # Keep reading while the candle steps. A sleep that reads nothing lets
         # the terminal's buffer fill under a transfer, the TUI then
         # waits in write mid-picture, and one read afterwards sees a cut one.
@@ -329,7 +334,7 @@ def about_screen_with_graphics(binary: str) -> None:
         row, column = int(placement[1]), int(placement[2])
         rows_tall = int(fields[b"r"])
         cells_wide = -(-rows_tall * CELL_HEIGHT // CELL_WIDTH)
-        caption_row = h.screen_row_of(h.screen_rows(bytes(output)), ABOUT_CAPTION)
+        caption_row = _keyboard_harness.screen_row_of(_keyboard_harness.screen_rows(bytes(output)), ABOUT_CAPTION)
         assert caption_row == row + rows_tall + 1, \
             f"the picture spans rows {row}..{row + rows_tall - 1} but the caption is at {caption_row}"
         left = column - 1
@@ -338,58 +343,58 @@ def about_screen_with_graphics(binary: str) -> None:
         assert not candle_rows(output), "real pixels were drawn as a mosaic as well"
         # Esc closes /about and takes the picture down with it.
         start = len(output)
-        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
-        h.wait_for_output(process, fd, output, MASCOT_DELETE, start=start, timeout=3.0)
-        assert h.drain_until_quiet(process, fd, output), "the screen kept moving after /about closed"
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
+        _keyboard_harness.wait_for_output(process, fd, output, MASCOT_DELETE, start=start, timeout=3.0)
+        assert _keyboard_harness.drain_until_quiet(process, fd, output), "the screen kept moving after /about closed"
         after = bytes(output[output.find(MASCOT_DELETE, start):])
         assert not mascot_transfers(after), "the candle was placed again after /about closed"
         os.write(fd, b"q")
 
-    h.run_terminal_scenario(binary, description="/about places the candle as real pixels on a Kitty terminal",
+    _keyboard_harness.run_terminal_scenario(binary, description="/about places the candle as real pixels on a Kitty terminal",
                             interact=interact, http_fixtures=fixtures,
                             terminal_cols=SCENARIO_COLUMNS,
                             preload_input=KITTY_TERMINAL_REPLIES)
 
 
 def about_owns_the_keys(binary: str) -> None:
-    fixtures = h.keeper_runtime_http_fixtures()
+    fixtures = _keyboard_harness.keeper_runtime_http_fixtures()
     requests: list = []
 
     def interact(process, fd, slave, output, _base):
         # The composer writes to the keeper the roster cursor holds.
-        h.send_and_wait(process, fd, output, b"3", b"MASC Keepers")
-        h.select_keeper_row(process, fd, output, b"alpha")
-        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
-        h.send_and_wait(process, fd, output, b"i", h.COMPOSER_FOCUSED)
-        h.send_and_wait(process, fd, output, b"/about\r", ABOUT_CAPTION)
+        _keyboard_harness.send_and_wait(process, fd, output, b"3", b"MASC Keepers")
+        _keyboard_harness.select_keeper_row(process, fd, output, b"alpha")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
+        _keyboard_harness.send_and_wait(process, fd, output, b"i", _keyboard_harness.COMPOSER_FOCUSED)
+        _keyboard_harness.send_and_wait(process, fd, output, b"/about\r", ABOUT_CAPTION)
         # i would focus the composer, the text would be its draft and Enter
         # would send it -- under /about none of that may happen.
-        h.write_all(fd, output, b"i" + SWALLOWED_TEXT + b"\r")
+        _keyboard_harness.write_all(fd, output, b"i" + SWALLOWED_TEXT + b"\r")
         # The candle keeps the screen moving, so quiet never says the keys
         # were handled. The TUI reads them and handles them before its next
         # loop turn; a resize redraw after that turn is on the far side of
         # the keys, and it draws the whole screen again.
-        h.wait_for_terminal_input_consumed(slave)
-        h.resize_and_wait(process, fd, output, rows=SCENARIO_ROWS, columns=RESIZED_COLUMNS,
-                          needle=ABOUT_CAPTION, controls=(h.FULL_REDRAW,))
-        screen = h.screen_text(bytes(output))
+        _keyboard_harness.wait_for_terminal_input_consumed(slave)
+        _keyboard_harness.resize_and_wait(process, fd, output, rows=SCENARIO_ROWS, columns=RESIZED_COLUMNS,
+                          needle=ABOUT_CAPTION, controls=(_keyboard_harness.FULL_REDRAW,))
+        screen = _keyboard_harness.screen_text(bytes(output))
         assert ABOUT_CAPTION in screen, "a key typed under /about closed it: " + repr(screen)
         assert SWALLOWED_TEXT not in screen, "text typed under /about reached the composer"
-        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
-        assert h.drain_until_quiet(process, fd, output), "the screen kept moving after /about closed"
-        screen = h.screen_text(bytes(output))
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
+        assert _keyboard_harness.drain_until_quiet(process, fd, output), "the screen kept moving after /about closed"
+        screen = _keyboard_harness.screen_text(bytes(output))
         assert ABOUT_CAPTION not in screen, "Esc left /about open"
         assert SWALLOWED_TEXT not in screen, "the swallowed text surfaced after /about closed"
         assert not any(CHAT_SEND_PATH in path for path, _ in requests), \
             "a message was sent while /about was open"
         os.write(fd, b"q")
 
-    h.run_terminal_scenario(binary, description="/about owns the keys until Esc",
+    _keyboard_harness.run_terminal_scenario(binary, description="/about owns the keys until Esc",
                             interact=interact, http_fixtures=fixtures, http_requests=requests)
 
 
 def about_turns_the_candle(binary: str) -> None:
-    fixtures = h.keeper_runtime_http_fixtures()
+    fixtures = _keyboard_harness.keeper_runtime_http_fixtures()
 
     def is_painted(fields: dict[bytes, bytes]) -> bool:
         return int(fields[b"s"]) <= PAINTED_EDGE_CAP
@@ -403,7 +408,7 @@ def about_turns_the_candle(binary: str) -> None:
         passed over."""
         seen = start
         for _ in range(STEP_TRANSFER_LIMIT):
-            h.wait_for_output(process, fd, output, MASCOT_TRANSFER_HEAD, start=seen,
+            _keyboard_harness.wait_for_output(process, fd, output, MASCOT_TRANSFER_HEAD, start=seen,
                               timeout=STEP_WAIT_SECONDS)
             seen = MASCOT_TRANSFER_HEAD.search(bytes(output), seen).end()
             for fields, pixels in mascot_transfers(bytes(output[start:])):
@@ -412,30 +417,30 @@ def about_turns_the_candle(binary: str) -> None:
         raise AssertionError(f"no {what} candle was sent after the key")
 
     def interact(process, fd, _slave, output, _base):
-        h.send_and_wait(process, fd, output, b"3", b"MASC Keepers")
-        h.select_keeper_row(process, fd, output, b"alpha")
-        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
-        h.send_and_wait(process, fd, output, b"i", h.COMPOSER_FOCUSED)
+        _keyboard_harness.send_and_wait(process, fd, output, b"3", b"MASC Keepers")
+        _keyboard_harness.select_keeper_row(process, fd, output, b"alpha")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
+        _keyboard_harness.send_and_wait(process, fd, output, b"i", _keyboard_harness.COMPOSER_FOCUSED)
         start = len(output)
-        h.send_and_wait(process, fd, output, b"/about\r", ABOUT_CAPTION)
-        assert b"c:candle" in h.screen_text(bytes(output)), "/about does not say c turns the candle"
+        _keyboard_harness.send_and_wait(process, fd, output, b"/about\r", ABOUT_CAPTION)
+        assert b"c:candle" in _keyboard_harness.screen_text(bytes(output)), "/about does not say c turns the candle"
         transfer_after(process, fd, output, start, is_painted, "painted")
         # c turns it to the dotted figure, drawn as many pixels as it shows.
         start = len(output)
-        h.write_all(fd, output, b"c")
+        _keyboard_harness.write_all(fd, output, b"c")
         fields, pixels = transfer_after(process, fd, output, start, is_dotted, "dotted")
         edge = int(fields[b"s"])
         assert edge > PAINTED_EDGE_CAP, "the dotted candle is no larger than the painted one"
         assert len(pixels) == edge * edge * 4, "the transfer is not the picture it declares"
-        assert ABOUT_CAPTION in h.screen_text(bytes(output)), "c closed /about"
+        assert ABOUT_CAPTION in _keyboard_harness.screen_text(bytes(output)), "c closed /about"
         # And back again.
         start = len(output)
-        h.write_all(fd, output, b"c")
+        _keyboard_harness.write_all(fd, output, b"c")
         transfer_after(process, fd, output, start, is_painted, "painted")
-        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
         os.write(fd, b"q")
 
-    h.run_terminal_scenario(
+    _keyboard_harness.run_terminal_scenario(
         binary,
         description="c on /about turns the candle between painted and dotted",
         interact=interact,

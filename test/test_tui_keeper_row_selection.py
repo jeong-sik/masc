@@ -1,9 +1,10 @@
 """Deterministic frame/keypress regressions for the PTY fixture's selector."""
 
+import os as _keyboard_os
 from unittest import TestCase, main
 from unittest.mock import Mock, patch
 
-import test_tui_keyboard_input as h
+import tui_keyboard_harness as h
 
 
 def frame(selected: bytes | None, *, clear: bool = False) -> bytes:
@@ -52,7 +53,7 @@ class KeeperSelection(TestCase):
             patch.object(h, "read_available", side_effect=drain),
             patch.object(h, "wait_for_output", side_effect=wait),
             patch.object(h, "poll_for_output", side_effect=poll),
-            patch.object(h.os, "write") as write,
+            patch.object(_keyboard_os, "write") as write,
         ):
             h.select_keeper_row(Mock(), 1, output, name)
         return [call.args[1] for call in write.call_args_list]
@@ -128,7 +129,7 @@ class KeeperSelection(TestCase):
             patch.object(h, "read_available"),
             patch.object(h, "wait_for_output") as wait,
             patch.object(h, "poll_for_output", return_value=False) as poll,
-            patch.object(h.os, "write") as write,
+            patch.object(_keyboard_os, "write") as write,
         ):
             with self.assertRaisesRegex(AssertionError, "gamma.*never became selected"):
                 h.select_keeper_row(Mock(), 1, output, b"gamma")
@@ -161,3 +162,8 @@ class ScreenRows(TestCase):
 
 if __name__ == "__main__":
     main()
+
+# Exact helper inputs consumed by the PR test selector.
+SOURCE_MODULES = (
+    "test/tui_keyboard_harness.py",
+)

@@ -5,13 +5,13 @@ the footer names that package."""
 
 import json
 import os
-from pathlib import Path
 import shlex
 import subprocess
 import sys
 import tempfile
+from pathlib import Path
 
-import test_tui_keyboard_input as h
+import tui_keyboard_harness as h
 
 SOURCE_MODULES = (
     "bin/masc_tui.ml",
@@ -25,6 +25,7 @@ SOURCE_MODULES = (
     "lib/keeper/keeper_skill_catalog.mli",
     "lib/keeper/keeper_tool_composition_catalog.ml",
     "lib/keeper/keeper_tool_composition_catalog.mli",
+    "test/tui_keyboard_harness.py",
 )
 
 CREATE_PATH = "/api/v1/skills/editor/create"

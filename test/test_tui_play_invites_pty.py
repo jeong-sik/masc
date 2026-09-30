@@ -4,7 +4,7 @@ import json
 import os
 import sys
 
-import test_tui_keyboard_input as h
+import tui_keyboard_harness as h
 
 SOURCE_MODULES = (
     "bin/masc_tui.ml",
@@ -12,6 +12,7 @@ SOURCE_MODULES = (
     "bin/masc_tui_http.ml",
     "lib/tui_decode.ml",
     "bin/masc_tui_play_qr.ml",
+    "test/tui_keyboard_harness.py",
 )
 
 LINK = "https://play.example.test/play#fixture-secret"

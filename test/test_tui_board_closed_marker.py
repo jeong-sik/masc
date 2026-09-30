@@ -2,7 +2,8 @@
 summary detail in the read pane (task-1758/#39356 completion criterion 4)."""
 import os
 import sys
-import test_tui_keyboard_input as h
+
+import tui_keyboard_harness as h
 
 # The sources this scenario stands over. scripts/ci/run-edited-tests.sh runs
 # a suite when a pull request changes a path the suite names, so without this
@@ -13,6 +14,7 @@ SOURCE_MODULES = (
     "bin/masc_tui_render.ml",
     "bin/masc_tui_loader.ml",
     "bin/masc_tui_types.ml",
+    "test/tui_keyboard_harness.py",
 )
 
 LOCK = b"\xf0\x9f\x94\x92"  # U+1F512 LOCK, the closed-post marker.

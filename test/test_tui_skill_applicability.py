@@ -6,13 +6,13 @@ import base64
 import hashlib
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
-from typing import Any, cast
 import zlib
+from pathlib import Path
+from typing import Any, cast
 
-import test_tui_keyboard_input as h
+import tui_keyboard_harness as h
 
 
 def _row_success(row: dict[str, Any]) -> bool:
@@ -203,3 +203,8 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+# Exact helper inputs consumed by the PR test selector.
+SOURCE_MODULES = (
+    "test/tui_keyboard_harness.py",
+)

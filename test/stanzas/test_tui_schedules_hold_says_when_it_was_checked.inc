@@ -5,8 +5,9 @@
  (alias runtest-test_tui_schedules_hold_says_when_it_was_checked)
  (deps
   test_tui_schedules_hold_says_when_it_was_checked.py
-  test_tui_keyboard_input.py
-  ../bin/masc_tui.exe)
+  ../bin/masc_tui.exe
+  tui_keyboard_harness.py
+  tui_keyboard_schedule.py)
  (action
   (run
    python3

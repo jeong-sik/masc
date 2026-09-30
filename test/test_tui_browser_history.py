@@ -2,13 +2,17 @@
 import hashlib
 import json
 import os
-from pathlib import Path
 import sys
 import threading
+from pathlib import Path
 
-import test_tui_keyboard_input as h
+import tui_keyboard_harness as h
 
-SOURCE_MODULES = ("bin/masc_tui_browser.ml", "bin/masc_tui_browser.mli")
+SOURCE_MODULES = (
+    "bin/masc_tui_browser.ml",
+    "bin/masc_tui_browser.mli",
+    "test/tui_keyboard_harness.py",
+)
 
 
 def run(binary, *, quit_from_history=False, disconnected=False):

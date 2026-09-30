@@ -7,12 +7,13 @@ import sys
 import termios
 import time
 
-import test_tui_keyboard_input as h
+import tui_keyboard_harness as h
 
 # The sources this scenario stands over. scripts/ci/run-edited-tests.sh runs a
 # suite when a pull request changes a path the suite names.
 SOURCE_MODULES = (
     "bin/masc_tui_termios.ml",
+    "test/tui_keyboard_harness.py",
 )
 
 # The keys masc_tui_termios takes off the tty layer so its own reader sees

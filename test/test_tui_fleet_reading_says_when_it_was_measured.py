@@ -2,7 +2,8 @@
 import os
 import sys
 import time
-import test_tui_keyboard_input as h
+
+import tui_keyboard_harness as h
 
 # The sources this scenario stands over. scripts/ci/run-edited-tests.sh runs a
 # suite when a pull request changes a path the suite names. The tag is worded
@@ -13,6 +14,7 @@ SOURCE_MODULES = (
     "bin/masc_tui_render.ml",
     "bin/masc_tui_render_metrics.ml",
     "lib/tui_decode.ml",
+    "test/tui_keyboard_harness.py",
 )
 
 FLEET_PATH = "/health?full=1"

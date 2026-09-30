@@ -5,8 +5,8 @@
  (alias runtest-test_tui_fleet_reading_says_when_it_was_measured)
  (deps
   test_tui_fleet_reading_says_when_it_was_measured.py
-  test_tui_keyboard_input.py
-  ../bin/masc_tui.exe)
+  ../bin/masc_tui.exe
+  tui_keyboard_harness.py)
  (action
   (run
    python3

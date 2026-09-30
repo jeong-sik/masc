@@ -11,18 +11,21 @@ selected fails at once on a binary that is not there.
 from __future__ import annotations
 
 import ast
-from collections.abc import Callable
-from contextlib import redirect_stderr, redirect_stdout
 import io
 import os
-from pathlib import Path
 import re
 import subprocess
 import sys
 import tempfile
 import unittest
+from collections.abc import Callable
+from contextlib import redirect_stderr, redirect_stdout
+from pathlib import Path
 
-import test_tui_keyboard_input as h
+import test_tui_keyboard_input as _keyboard_entry
+import tui_keyboard_harness as _keyboard_harness
+import tui_keyboard_harness as harness
+import tui_keyboard_walk as _keyboard_walk
 
 # scripts/ci/run-edited-tests.sh runs a suite when a pull request changes a
 # path the suite names. The choice lives in the harness, and the rule check
@@ -31,6 +34,30 @@ import test_tui_keyboard_input as h
 SOURCE_MODULES = (
     "test/test_tui_keyboard_input.py",
     "test/dune",
+    "test/tui_keyboard_approvals.py",
+    "test/tui_keyboard_board.py",
+    "test/tui_keyboard_browser.py",
+    "test/tui_keyboard_chat.py",
+    "test/tui_keyboard_clients.py",
+    "test/tui_keyboard_context.py",
+    "test/tui_keyboard_dashboard.py",
+    "test/tui_keyboard_fusion.py",
+    "test/tui_keyboard_harness.py",
+    "test/tui_keyboard_keepers.py",
+    "test/tui_keyboard_machines.py",
+    "test/tui_keyboard_memory.py",
+    "test/tui_keyboard_observer.py",
+    "test/tui_keyboard_planning.py",
+    "test/tui_keyboard_repositories.py",
+    "test/tui_keyboard_resources.py",
+    "test/tui_keyboard_runtime.py",
+    "test/tui_keyboard_schedule.py",
+    "test/tui_keyboard_startup.py",
+    "test/tui_keyboard_terminal.py",
+    "test/tui_keyboard_tools.py",
+    "test/tui_keyboard_voice.py",
+    "test/tui_keyboard_walk.py",
+    "test/tui_keyboard_workspace.py",
 )
 
 HERE = Path(__file__).resolve().parent
@@ -60,7 +87,8 @@ KEYBOARD_ON_RUNTEST = re.compile(
 # the same two and at most one family name as operands.
 KEYBOARD_RULE = re.compile(
     r"\(rule\s*\(alias runtest-test_tui_keyboard_input(?:-(?P<alias>[a-z0-9-]+))?\)\s*"
-    r"\(deps\s+test_tui_keyboard_input\.py\s+\.\./bin/masc_tui\.exe\)\s*"
+    r"\(deps\s+test_tui_keyboard_input\.py\s+\.\./bin/masc_tui\.exe"
+    r"(?P<helpers>(?:\s+tui_keyboard_[a-z_]+\.py)+)\)\s*"
     r"\(action\s*\(run\s+python3\s+%\{dep:test_tui_keyboard_input\.py\}\s+"
     r"%\{dep:\.\./bin/masc_tui\.exe\}(?:\s+(?P<family>[a-z0-9-]+))?\)\)\)"
 )
@@ -93,7 +121,7 @@ def listed(output: str) -> list[tuple[str, list[str]]]:
 def scenarios(*descriptions: str) -> Callable[[str], None]:
     def run(executable: str) -> None:
         for description in descriptions:
-            h.run_terminal_scenario(
+            _keyboard_harness.run_terminal_scenario(
                 executable, description=description, interact=unused_interaction
             )
 
@@ -128,10 +156,10 @@ class ScenarioSelectionTest(unittest.TestCase):
             check=False,
         )
 
-    def run_main(self, argv: list[str], families: tuple[h.ScenarioFamily, ...]) -> SystemExit:
+    def run_main(self, argv: list[str], families: tuple[_keyboard_harness.ScenarioFamily, ...]) -> SystemExit:
         with self.assertRaises(SystemExit) as raised, redirect_stdout(io.StringIO()), \
                 redirect_stderr(io.StringIO()):
-            h.main([self.stand_in, *argv], families, families[0])
+            _keyboard_harness.main([self.stand_in, *argv], families, families[0])
         return raised.exception
 
     def test_list_names_every_family_once_and_each_description_once_inside_it(self) -> None:
@@ -140,7 +168,7 @@ class ScenarioSelectionTest(unittest.TestCase):
         printed = listed(listing.stdout)
         self.assertEqual(
             [family for family, _ in printed],
-            [family.name for family in h.SCENARIO_FAMILIES],
+            [family.name for family in _keyboard_entry.SCENARIO_FAMILIES],
         )
         for family, descriptions in printed:
             self.assertTrue(descriptions, f"family {family} lists no scenario")
@@ -155,7 +183,7 @@ class ScenarioSelectionTest(unittest.TestCase):
 
     def test_a_description_outside_the_family_exits_before_running_and_says_where_it_is(self) -> None:
         printed = dict(listed(self.harness("--list").stdout))
-        default = printed[h.KEYBOARD_FAMILY.name]
+        default = printed[_keyboard_entry.KEYBOARD_FAMILY.name]
         owners: dict[str, list[str]] = {}
         for family, descriptions in printed.items():
             for description in descriptions:
@@ -179,7 +207,7 @@ class ScenarioSelectionTest(unittest.TestCase):
 
     def test_usage_errors_exit_before_any_family_runs(self) -> None:
         started: list[str] = []
-        family = h.ScenarioFamily("probe", "probe regression", (started.append,))
+        family = _keyboard_harness.ScenarioFamily("probe", "probe regression", (started.append,))
         for argv in (
             ["probe", "--list", "--scenario", "anything"],
             ["no-such-family"],
@@ -195,28 +223,28 @@ class ScenarioSelectionTest(unittest.TestCase):
         def run(executable: str) -> None:
             for description in ("first", "second", "third"):
                 try:
-                    h.run_terminal_scenario(
+                    _keyboard_harness.run_terminal_scenario(
                         executable, description=description, interact=unused_interaction
                     )
                 except AssertionError as error:
                     reached.append((description, str(error)))
 
-        family = h.ScenarioFamily("probe", "probe regression", (run,))
-        selection = h.RunNamedScenarios(frozenset({"second"}), [])
-        h.run_family(family, self.missing, selection)
+        family = _keyboard_harness.ScenarioFamily("probe", "probe regression", (run,))
+        selection = _keyboard_harness.RunNamedScenarios(frozenset({"second"}), [])
+        _keyboard_harness.run_family(family, self.missing, selection)
         self.assertEqual(selection.ran, ["second"])
         self.assertEqual([description for description, _ in reached], ["second"])
         self.assertIn(self.missing, reached[0][1])
-        self.assertEqual(h.scenario_selection, h.RunEveryScenario())
+        self.assertEqual(harness.scenario_selection, _keyboard_harness.RunEveryScenario())
 
     def test_a_family_that_repeats_a_description_cannot_be_collected(self) -> None:
-        family = h.ScenarioFamily(
+        family = _keyboard_harness.ScenarioFamily(
             "probe", "probe regression", (scenarios("once", "twice", "once"),)
         )
         with self.assertRaises(AssertionError) as raised:
-            h.collect_scenario_names(family, self.stand_in)
+            _keyboard_harness.collect_scenario_names(family, self.stand_in)
         self.assertIn(repr("once"), str(raised.exception))
-        self.assertEqual(h.scenario_selection, h.RunEveryScenario())
+        self.assertEqual(harness.scenario_selection, _keyboard_harness.RunEveryScenario())
 
     def test_a_selected_description_that_does_not_run_fails_the_run(self) -> None:
         calls: list[str] = []
@@ -225,28 +253,28 @@ class ScenarioSelectionTest(unittest.TestCase):
             # Collection sees "planned"; the real run describes it otherwise.
             calls.append(executable)
             description = "planned" if len(calls) == 1 else "renamed after collection"
-            h.run_terminal_scenario(
+            _keyboard_harness.run_terminal_scenario(
                 executable, description=description, interact=unused_interaction
             )
 
-        family = h.ScenarioFamily("probe", "probe regression", (run,))
+        family = _keyboard_harness.ScenarioFamily("probe", "probe regression", (run,))
         failure = self.run_main(["probe", "--scenario", "planned"], (family,))
         self.assertEqual(len(calls), 2)
         self.assertIsInstance(failure.code, str)
         self.assertIn(repr("planned"), str(failure.code))
 
     def test_keyboard_shards_cover_each_default_scenario_once(self) -> None:
-        default = h.collect_scenario_names(h.KEYBOARD_FAMILY, self.stand_in)
+        default = _keyboard_harness.collect_scenario_names(_keyboard_entry.KEYBOARD_FAMILY, self.stand_in)
         parts: list[str] = []
         for index, name in enumerate(SHARD_NAMES):
-            family = h.ScenarioFamily(
+            family = _keyboard_harness.ScenarioFamily(
                 name,
                 name,
-                (lambda executable, index=index: h.run_keyboard_regression(
+                (lambda executable, index=index: _keyboard_walk.run_keyboard_regression(
                     executable, group=index
                 ),),
             )
-            parts.extend(h.collect_scenario_names(family, self.stand_in))
+            parts.extend(_keyboard_harness.collect_scenario_names(family, self.stand_in))
             wrapper = ast.parse(
                 (HERE / f"test_tui_keyboard_{name}_pty.py").read_text()
             )
@@ -263,6 +291,29 @@ class ScenarioSelectionTest(unittest.TestCase):
         self.assertEqual(len(parts), len(set(parts)), "a scenario runs in two shards")
         self.assertCountEqual(parts, default)
 
+    def test_family_rules_declare_every_imported_keyboard_module(self) -> None:
+        required: set[str] = set()
+        pending = [HARNESS]
+        while pending:
+            tree = ast.parse(pending.pop().read_text())
+            for node in ast.walk(tree):
+                names = (
+                    [alias.name for alias in node.names]
+                    if isinstance(node, ast.Import)
+                    else [node.module] if isinstance(node, ast.ImportFrom) else []
+                )
+                for name in names:
+                    if name is None or not name.startswith("tui_keyboard_"):
+                        continue
+                    filename = name + ".py"
+                    if filename not in required:
+                        required.add(filename)
+                        pending.append(HERE / filename)
+        self.assertTrue(required, "the entry imports no keyboard helpers")
+        for rule in KEYBOARD_RULE.finditer(rule_files_text()):
+            with self.subTest(family=rule["family"]):
+                self.assertEqual(set(rule["helpers"].split()), required)
+
     def test_every_family_has_one_rule_on_runtest_and_every_rule_names_a_family(self) -> None:
         text = rule_files_text()
         rules = [match.groupdict() for match in KEYBOARD_RULE.finditer(text)]
@@ -277,8 +328,8 @@ class ScenarioSelectionTest(unittest.TestCase):
         self.assertEqual(
             named,
             sorted(
-                family.name for family in h.SCENARIO_FAMILIES
-                if family is not h.KEYBOARD_FAMILY
+                family.name for family in _keyboard_entry.SCENARIO_FAMILIES
+                if family is not _keyboard_entry.KEYBOARD_FAMILY
             ),
         )
         self.assertEqual(

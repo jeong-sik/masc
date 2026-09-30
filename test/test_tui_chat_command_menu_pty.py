@@ -2,11 +2,16 @@
 import json
 import os
 import sys
-import test_tui_keyboard_input as h
+
+import tui_keyboard_harness as h
 
 SOURCE_MODULES = (
-    "bin/masc_tui_command.ml", "bin/masc_tui.ml", "bin/masc_tui_types.ml",
-    "bin/masc_tui_render_chat.ml", "bin/masc_tui_observation_layout.ml",
+    "bin/masc_tui_command.ml",
+    "bin/masc_tui.ml",
+    "bin/masc_tui_types.ml",
+    "bin/masc_tui_render_chat.ml",
+    "bin/masc_tui_observation_layout.ml",
+    "test/tui_keyboard_harness.py",
 )
 CHAT = "Keepers ▸ alpha ▸ chat".encode()
 

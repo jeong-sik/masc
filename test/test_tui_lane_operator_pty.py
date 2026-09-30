@@ -9,10 +9,10 @@ import argparse
 import copy
 import json
 import os
-import tomllib
 from pathlib import Path
 
-import test_tui_keyboard_input as terminal
+import tomllib
+import tui_keyboard_harness as terminal
 from test_tui_lane_visual_pty import snapshot
 
 # The sources this walk stands over. scripts/ci/run-edited-tests.sh reads the
@@ -24,21 +24,13 @@ from test_tui_lane_visual_pty import snapshot
 # text with no PTY scenario running, and main sat red until someone ran the
 # suite by hand.
 SOURCE_MODULES = (
-    # Read off the walk's own needles rather than guessed: each of these owns
-    # a literal this file waits for and no other bin source spells it --
-    # "MASC Lane Add-ons" and "MASC Dashboard" (render), "Run action on" and
-    # "no available worker" (lane_addons), "Install Add-on:", "Image
-    # unverified:" and "Local draft only." (lane_installer), "Review input"
-    # (schema_form).
     "bin/masc_tui_render.ml",
     "bin/masc_tui_lane_addons.ml",
     "bin/masc_tui_lane_installer.ml",
     "bin/masc_tui_schema_form.ml",
-    # Not for a word on screen: the walk types ":go lane add-ons" and the
-    # keys j / Enter / 4 / e, so the palette row and dispatcher own the path
-    # it takes even though it waits for nothing they spell.
     "bin/masc_tui_types.ml",
     "bin/masc_tui.ml",
+    "test/tui_keyboard_harness.py",
 )
 
 

@@ -7,9 +7,12 @@ import threading
 import unittest
 from unittest.mock import patch
 
-import test_tui_keyboard_input as h
+import tui_keyboard_harness as h
 
-SOURCE_MODULES = ("test/test_tui_keyboard_input.py",)
+SOURCE_MODULES = (
+    "test/test_tui_keyboard_input.py",
+    "test/tui_keyboard_harness.py",
+)
 
 
 class FixtureShutdown(unittest.TestCase):

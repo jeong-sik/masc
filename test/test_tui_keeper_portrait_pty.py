@@ -10,7 +10,8 @@ import re
 import sys
 from pathlib import Path
 
-import test_tui_keyboard_input as h
+import tui_keyboard_chat as _keyboard_chat
+import tui_keyboard_harness as _keyboard_harness
 
 # scripts/ci/run-edited-tests.sh runs this suite when a pull request changes a
 # path named here.
@@ -23,6 +24,10 @@ SOURCE_MODULES = (
     "bin/masc_tui_render_prim.ml",
     "lib/keeper_portrait/keeper_portrait_draw.ml",
     "lib/keeper_portrait/keeper_portrait_look.ml",
+    "test/tui_keyboard_chat.py",
+    "test/tui_keyboard_harness.py",
+    "test/tui_keyboard_observer.py",
+    "test/tui_keyboard_tools.py",
 )
 
 # U+2580 and U+2584, the half blocks the mosaic is drawn in.
@@ -51,7 +56,7 @@ SHORT_ROWS = 24
 COLUMNS = 100
 # CSI 6 ; height ; width t: the terminal saying a cell is 10 px wide and 20
 # tall, then its answer to the graphics query.
-KITTY_TERMINAL_REPLIES = b"\x1b[6;20;10t" + h.GRAPHICS_SUPPORTED_REPLY
+KITTY_TERMINAL_REPLIES = b"\x1b[6;20;10t" + _keyboard_chat.GRAPHICS_SUPPORTED_REPLY
 # Masc_tui_graphics.image_id Keeper_portrait.
 PORTRAIT_IMAGE_ID = b"42"
 PLACEMENT = re.compile(rb"\x1b7\x1b\[(\d+);(\d+)H\x1b_G([^;]*);")
@@ -66,10 +71,10 @@ PORTRAIT_COLUMN = 1 + 2 + 2
 
 def last_frame_rows(output: bytearray, *, preserve_styles: bool = False) -> dict[int, bytes]:
     """The screen as of the last completed frame."""
-    end = output.rfind(h.FRAME_END)
+    end = output.rfind(_keyboard_harness.FRAME_END)
     assert end >= 0, "no frame was completed"
-    drawn = PLACED_PICTURE.sub(b"", bytes(output[: end + len(h.FRAME_END)]))
-    return h.screen_rows(drawn, preserve_styles=preserve_styles)
+    drawn = PLACED_PICTURE.sub(b"", bytes(output[: end + len(_keyboard_harness.FRAME_END)]))
+    return _keyboard_harness.screen_rows(drawn, preserve_styles=preserve_styles)
 
 
 def kitty_fields(control: bytes) -> dict[bytes, bytes]:
@@ -86,7 +91,7 @@ def portrait_rows(rows: dict[int, bytes]) -> list[int]:
 
 
 def row_of(rows: dict[int, bytes], needle: bytes) -> int:
-    number = h.screen_row_of(rows, needle)
+    number = _keyboard_harness.screen_row_of(rows, needle)
     assert number >= 0, f"no row says {needle!r}: {rows!r}"
     return number
 
@@ -130,29 +135,29 @@ def assert_portrait_beside_identity(output: bytearray) -> None:
 
 
 def open_alpha_detail(process, fd, output) -> None:
-    h.send_and_wait(process, fd, output, b"3", b"MASC Keepers")
-    h.select_keeper_row(process, fd, output, b"alpha")
-    h.send_and_wait(process, fd, output, b"\r", INFO_TAB)
-    h.drain_until_quiet(process, fd, output)
+    _keyboard_harness.send_and_wait(process, fd, output, b"3", b"MASC Keepers")
+    _keyboard_harness.select_keeper_row(process, fd, output, b"alpha")
+    _keyboard_harness.send_and_wait(process, fd, output, b"\r", INFO_TAB)
+    _keyboard_harness.drain_until_quiet(process, fd, output)
 
 
 def portrait_follows_the_terminal_height(binary: str) -> None:
-    fixtures = h.keeper_runtime_http_fixtures()
+    fixtures = _keyboard_harness.keeper_runtime_http_fixtures()
 
     def interact(process, fd, _slave, output, _base):
         open_alpha_detail(process, fd, output)
         assert_portrait_beside_identity(output)
         # A short terminal keeps every row for facts.
-        h.resize_and_wait(process, fd, output, rows=SHORT_ROWS, columns=COLUMNS, needle=IDENTITY)
-        h.drain_until_quiet(process, fd, output)
+        _keyboard_harness.resize_and_wait(process, fd, output, rows=SHORT_ROWS, columns=COLUMNS, needle=IDENTITY)
+        _keyboard_harness.drain_until_quiet(process, fd, output)
         assert_facts_full_width(last_frame_rows(output), "on a short terminal")
         # And the portrait comes back when the rows do.
-        h.resize_and_wait(process, fd, output, rows=TALL_ROWS, columns=COLUMNS, needle=IDENTITY)
-        h.drain_until_quiet(process, fd, output)
+        _keyboard_harness.resize_and_wait(process, fd, output, rows=TALL_ROWS, columns=COLUMNS, needle=IDENTITY)
+        _keyboard_harness.drain_until_quiet(process, fd, output)
         assert_portrait_beside_identity(output)
         os.write(fd, b"q")
 
-    h.run_terminal_scenario(
+    _keyboard_harness.run_terminal_scenario(
         binary,
         description="the keeper detail's portrait stands beside Identity and yields to a short terminal",
         interact=interact,
@@ -162,7 +167,7 @@ def portrait_follows_the_terminal_height(binary: str) -> None:
 
 
 def no_portrait_under_no_color(binary: str) -> None:
-    fixtures = h.keeper_runtime_http_fixtures()
+    fixtures = _keyboard_harness.keeper_runtime_http_fixtures()
 
     def interact(process, fd, _slave, output, _base):
         open_alpha_detail(process, fd, output)
@@ -170,7 +175,7 @@ def no_portrait_under_no_color(binary: str) -> None:
         assert_facts_full_width(last_frame_rows(output), "under NO_COLOR")
         os.write(fd, b"q")
 
-    h.run_terminal_scenario(
+    _keyboard_harness.run_terminal_scenario(
         binary,
         description="the keeper detail draws no portrait under NO_COLOR",
         interact=interact,
@@ -181,7 +186,7 @@ def no_portrait_under_no_color(binary: str) -> None:
 
 
 def portrait_as_pixels(binary: str) -> None:
-    fixtures = h.keeper_runtime_http_fixtures()
+    fixtures = _keyboard_harness.keeper_runtime_http_fixtures()
 
     def interact(process, fd, _slave, output, _base):
         start = len(output)
@@ -207,16 +212,16 @@ def portrait_as_pixels(binary: str) -> None:
             "the facts did not leave the picture its rows"
         # Leaving the detail takes the picture down with it.
         start = len(output)
-        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
-        h.wait_for_output(process, fd, output, PORTRAIT_DELETE, start=start, timeout=3.0)
-        h.drain_until_quiet(process, fd, output)
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+        _keyboard_harness.wait_for_output(process, fd, output, PORTRAIT_DELETE, start=start, timeout=3.0)
+        _keyboard_harness.drain_until_quiet(process, fd, output)
         after = bytes(output[output.find(PORTRAIT_DELETE, start):])
         assert not any(
             kitty_fields(match[3]).get(b"i") == PORTRAIT_IMAGE_ID for match in PLACEMENT.finditer(after)
         ), "the portrait was placed again after the detail closed"
         os.write(fd, b"q")
 
-    h.run_terminal_scenario(
+    _keyboard_harness.run_terminal_scenario(
         binary,
         description="the keeper detail places its portrait as real pixels on a Kitty terminal",
         interact=interact,

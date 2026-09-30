@@ -4,16 +4,21 @@ import json
 import os
 import sys
 
-import test_tui_keyboard_input as h
+import tui_keyboard_chat as _keyboard_chat
+import tui_keyboard_harness as _keyboard_harness
 
 SOURCE_MODULES = (
     "bin/masc_tui_render_chat.ml",
     "bin/masc_tui_types.ml",
+    "test/tui_keyboard_chat.py",
+    "test/tui_keyboard_harness.py",
+    "test/tui_keyboard_observer.py",
+    "test/tui_keyboard_tools.py",
 )
 
 
-class BatchFixture(h.AtomicChatFixture):
-    def stream(self, body: bytes) -> h.StreamingHttpResponse:
+class BatchFixture(_keyboard_chat.AtomicChatFixture):
+    def stream(self, body: bytes) -> _keyboard_harness.StreamingHttpResponse:
         response = super().stream(body)
         request = json.loads(body)
         with self.lock:
@@ -60,7 +65,7 @@ class BatchFixture(h.AtomicChatFixture):
                 ]
                 yield b"\n\n".join(events) + b"\n\n"
 
-        return h.StreamingHttpResponse(chunks)
+        return _keyboard_harness.StreamingHttpResponse(chunks)
 
 
 def run(executable: str) -> None:
@@ -68,37 +73,37 @@ def run(executable: str) -> None:
 
     def interact(process, master_fd, _slave_fd, output, _base_path):
         try:
-            h.open_atomic_chat(process, master_fd, output)
+            _keyboard_chat.open_atomic_chat(process, master_fd, output)
             for index, message in enumerate(
                 (b"batch-one", b"batch-two", b"batch-three", b"next-turn"), 1
             ):
-                h.send_and_wait(
+                _keyboard_harness.send_and_wait(
                     process, master_fd, output,
-                    message, h.composer_showing(message),
+                    message, _keyboard_harness.composer_showing(message),
                 )
                 os.write(master_fd, b"\r")
-                h.wait_for_atomic_admissions(
+                _keyboard_chat.wait_for_atomic_admissions(
                     process, master_fd, output, fixture, index
                 )
-            h.wait_for_output(
+            _keyboard_harness.wait_for_output(
                 process, master_fd, output,
                 b"3 messages in one turn \xc2\xb7 running", start=0, timeout=10,
             )
-            screen = h.screen_text(bytes(output))
+            screen = _keyboard_harness.screen_text(bytes(output))
             grouped = b"3 messages in one turn \xc2\xb7 running"
             if screen.count(b"3 messages in one turn") != 1 or grouped not in screen:
                 raise AssertionError(f"batch drew multiple status rows: {screen!r}")
             if len(fixture.submitted) != 4:
                 raise AssertionError("TUI failed to submit the later message")
             fixture.release.set()
-            h.escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
-            h.send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
+            _keyboard_harness.escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
+            _keyboard_harness.send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
             os.write(master_fd, b"q")
         finally:
             fixture.release_interrupt.set()
             fixture.release.set()
 
-    h.run_terminal_scenario(
+    _keyboard_harness.run_terminal_scenario(
         executable,
         description="Server batch has one TUI status row",
         interact=interact,

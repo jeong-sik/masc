@@ -22,7 +22,7 @@ import time
 import unicodedata
 import zlib
 
-import test_tui_keyboard_input as h
+import tui_keyboard_harness as h
 
 TERMINAL_ROWS = 30
 
@@ -288,3 +288,8 @@ def check_all(
             + ", ".join(f"{key}: {pair}" for key, pair in moved.items())
             + (f"; expected but not measured: {unmeasured}" if unmeasured else "")
         )
+
+# Exact helper inputs consumed by the PR test selector.
+SOURCE_MODULES = (
+    "test/tui_keyboard_harness.py",
+)

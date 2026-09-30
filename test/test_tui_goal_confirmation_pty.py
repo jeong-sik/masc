@@ -10,19 +10,23 @@ import subprocess
 import sys
 import threading
 
-import test_tui_keyboard_input as h
+import tui_keyboard_harness as _keyboard_harness
+import tui_keyboard_planning as _keyboard_planning
 
 SOURCE_MODULES = (
     "bin/masc_tui.ml",
     "bin/masc_tui_http.ml",
     "bin/masc_tui_render.ml",
     "bin/masc_tui_planning_detail.ml",
+    "test/tui_keyboard_approvals.py",
+    "test/tui_keyboard_harness.py",
+    "test/tui_keyboard_planning.py",
 )
 
 
 def run(executable: str, *, replace_proof: bool) -> None:
     goal_id = "goal-confirmation"
-    goal = h.planning_goal(goal_id, "plan-alpha-29424")
+    goal = _keyboard_harness.planning_goal(goal_id, "plan-alpha-29424")
     goal.update(phase="awaiting_confirmation", criterion_revision="revision-1")
     verdict = {
         "outcome": "proven",
@@ -45,19 +49,19 @@ def run(executable: str, *, replace_proof: bool) -> None:
         "goal": goal,
         "verification": {"goal_id": goal_id, "completion": proof},
     }
-    fixtures = h.overview_event_http_fixtures()
-    fixtures[h.PLANNING_PATH] = h.planning_snapshot([goal])
+    fixtures = _keyboard_harness.overview_event_http_fixtures()
+    fixtures[_keyboard_harness.PLANNING_PATH] = _keyboard_harness.planning_snapshot([goal])
     read_count = 0
     posted: list[object] = []
     submit_entered = threading.Event()
     release_submit = threading.Event()
 
-    def read() -> h.HttpResponse:
+    def read() -> _keyboard_harness.HttpResponse:
         nonlocal read_count
         read_count += 1
         return 200, response
 
-    def submit(body: bytes) -> h.HttpResponse:
+    def submit(body: bytes) -> _keyboard_harness.HttpResponse:
         posted.append(json.loads(body))
         submit_entered.set()
         if not release_submit.wait(timeout=15.0):
@@ -84,11 +88,11 @@ def run(executable: str, *, replace_proof: bool) -> None:
                 confirmed_at="2026-09-19T08:01:00Z",
             ),
         }
-        fixtures[h.PLANNING_PATH] = h.planning_snapshot([confirmed_goal])
+        fixtures[_keyboard_harness.PLANNING_PATH] = _keyboard_harness.planning_snapshot([confirmed_goal])
         return 200, confirmed
 
     fixtures[f"/api/v1/goals/confirmation?goal_id={goal_id}"] = read
-    fixtures["/api/v1/goals/confirmation"] = h.RequestHttpResponse(submit)
+    fixtures["/api/v1/goals/confirmation"] = _keyboard_harness.RequestHttpResponse(submit)
 
     def interact(
         process: subprocess.Popen[bytes],
@@ -97,7 +101,7 @@ def run(executable: str, *, replace_proof: bool) -> None:
         output: bytearray,
         _base_path: str,
     ) -> None:
-        h.resize_and_wait(
+        _keyboard_harness.resize_and_wait(
             process,
             master_fd,
             output,
@@ -106,15 +110,15 @@ def run(executable: str, *, replace_proof: bool) -> None:
             needle=b"MASC Dashboard",
             final_cursor=b"\x1b[?25l",
         )
-        h.open_loaded_planning(process, master_fd, output)
+        _keyboard_planning.open_loaded_planning(process, master_fd, output)
         # Keep the Goal visible when its phase changes to completed.
         for phase_filter in (b"completed", b"dropped", b"all"):
-            h.send_and_wait(process, master_fd, output, b"f", b"filter:" + phase_filter)
-        h.send_and_wait(process, master_fd, output, b"\r", b"[a] Confirm proof")
-        proof_frame = h.send_and_wait(
+            _keyboard_harness.send_and_wait(process, master_fd, output, b"f", b"filter:" + phase_filter)
+        _keyboard_harness.send_and_wait(process, master_fd, output, b"\r", b"[a] Confirm proof")
+        proof_frame = _keyboard_harness.send_and_wait(
             process, master_fd, output, b"a", b"CONFIRM THIS PROOF"
         )
-        h.wait_for_output(
+        _keyboard_harness.wait_for_output(
             process, master_fd, output, b"Verifier run: run-1", start=0, timeout=5.0
         )
         if read_count != 1 or posted:
@@ -125,32 +129,32 @@ def run(executable: str, *, replace_proof: bool) -> None:
             b"confirmation proof changed" if replace_proof else b"reached its target"
         )
         try:
-            submitting_frame = h.send_and_wait(
+            submitting_frame = _keyboard_harness.send_and_wait(
                 process, master_fd, output, b"a", b"Sending proof confirmation..."
             )
-            if not h.wait_for_fixture_event(
+            if not _keyboard_harness.wait_for_fixture_event(
                 process, master_fd, output, submit_entered, timeout=3.0
             ):
                 raise AssertionError("confirmation POST never reached the server")
             # Repeated input and leaving/reopening the detail cannot unsend
             # the pending POST or permit a second request while it is held.
-            h.write_all(master_fd, output, b"aa")
-            h.send_and_wait(process, master_fd, output, b"\x1b", h.PLANNING_LIST_HEADER)
-            h.send_and_wait(
+            _keyboard_harness.write_all(master_fd, output, b"aa")
+            _keyboard_harness.send_and_wait(process, master_fd, output, b"\x1b", _keyboard_harness.PLANNING_LIST_HEADER)
+            _keyboard_harness.send_and_wait(
                 process, master_fd, output, b"\r", b"Sending proof confirmation..."
             )
             result_start = len(output)
         finally:
             release_submit.set()
-        h.wait_for_output(
+        _keyboard_harness.wait_for_output(
             process, master_fd, output, needle, start=result_start, timeout=5.0
         )
-        h.wait_for_output(
+        _keyboard_harness.wait_for_output(
             process,
             master_fd,
             output,
-            h.FRAME_END,
-            start=h.end_of_needle(output, needle, result_start),
+            _keyboard_harness.FRAME_END,
+            start=_keyboard_harness.end_of_needle(output, needle, result_start),
             timeout=3.0,
         )
         result_frame = bytes(output[result_start:])
@@ -184,7 +188,7 @@ def run(executable: str, *, replace_proof: bool) -> None:
         )
         os.write(master_fd, b"q")
 
-    h.run_terminal_scenario(
+    _keyboard_harness.run_terminal_scenario(
         executable,
         description="Goal confirmation preserves the inspected proof"
         + (" when the server proof changes" if replace_proof else ""),

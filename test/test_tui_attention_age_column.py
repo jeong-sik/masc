@@ -1,12 +1,14 @@
 """The Attention panel's age column is drawn when some item has an age."""
 import os
 import sys
-import test_tui_keyboard_input as h
+
+import tui_keyboard_harness as h
 
 # The sources this scenario stands over. scripts/ci/run-edited-tests.sh runs a
 # suite when a pull request changes a path the suite names.
 SOURCE_MODULES = (
     "bin/masc_tui_render.ml",
+    "test/tui_keyboard_harness.py",
 )
 
 BRIEFING = "/api/v1/dashboard/briefing"

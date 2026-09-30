@@ -1,0 +1,14 @@
+F
+======================================================================
+FAIL: test_family_rules_declare_every_imported_keyboard_module (test_tui_keyboard_scenario_selection.ScenarioSelectionTest.test_family_rules_declare_every_imported_keyboard_module) (family='memory-journal')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/masc-work/jazz-developer/masc/.worktrees/39851-keyboard-split/test/test_tui_keyboard_scenario_selection.py", line 315, in test_family_rules_declare_every_imported_keyboard_module
+    self.assertEqual(set(rule["helpers"].split()), required)
+AssertionError: Items in the second set but not the first:
+'tui_keyboard_harness.py'
+
+----------------------------------------------------------------------
+Ran 1 test in 0.179s
+
+FAILED (failures=1)

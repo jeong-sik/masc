@@ -1,7 +1,8 @@
 """The Board's hearth census row budgets what it draws."""
 import os
 import sys
-import test_tui_keyboard_input as h
+
+import tui_keyboard_harness as h
 
 # The sources this scenario stands over. scripts/ci/run-edited-tests.sh runs a
 # suite when a pull request changes a path the suite names. The frame and the
@@ -11,6 +12,7 @@ SOURCE_MODULES = (
     "bin/masc_tui_render.ml",
     "bin/masc_tui_frame.ml",
     "bin/masc_tui_acting_pane.ml",
+    "test/tui_keyboard_harness.py",
 )
 
 # No trailing space: the row draws the word dimmed, so a reset sits between

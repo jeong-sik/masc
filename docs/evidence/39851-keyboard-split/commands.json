@@ -1,0 +1,63 @@
+[
+  {
+    "name": "move",
+    "command": [
+      "python3",
+      "scripts/verify-tui-keyboard-split.py",
+      "--before-ref",
+      "86751f610442e4d82992ebc54bf9eb8ba45ef6d2",
+      "--output",
+      "docs/evidence/39851-keyboard-split/move.json"
+    ],
+    "cwd": ".",
+    "exit": 0
+  },
+  {
+    "name": "focused-unit",
+    "command": [
+      "python3",
+      "-m",
+      "unittest",
+      "test_tui_keyboard_scenario_selection",
+      "test_tui_fixture_shutdown",
+      "test_tui_keeper_row_selection",
+      "test_tui_stall_observation",
+      "test_tui_artifact_comparison"
+    ],
+    "cwd": "test",
+    "exit": 0
+  },
+  {
+    "name": "new-script-lint",
+    "command": [
+      "/masc-work/jazz-developer/quality-tools-39851/bin/ruff",
+      "check",
+      "scripts/verify-tui-keyboard-split.py",
+      "test/test_tui_keyboard_input.py"
+    ],
+    "cwd": ".",
+    "exit": 0
+  },
+  {
+    "name": "new-script-format",
+    "command": [
+      "/masc-work/jazz-developer/quality-tools-39851/bin/ruff",
+      "format",
+      "--check",
+      "scripts/verify-tui-keyboard-split.py",
+      "test/test_tui_keyboard_input.py"
+    ],
+    "cwd": ".",
+    "exit": 0
+  },
+  {
+    "name": "diff-check",
+    "command": [
+      "git",
+      "diff",
+      "--check"
+    ],
+    "cwd": ".",
+    "exit": 0
+  }
+]

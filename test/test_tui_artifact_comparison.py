@@ -1,15 +1,20 @@
 """Reject incomplete or inconsistent repeated-input evidence receipts."""
 import copy
 import importlib.util
-from pathlib import Path
 import sys
 import unittest
+from pathlib import Path
+
 import test_tui_input_frame_pty as scenario
+from tui_keyboard_keepers import CONNECTOR_NAMES_PATH
 
 SOURCE_MODULES = (
     "scripts/harness/perf/compare_tui_artifacts.py",
     "scripts/harness/perf/linux_probe_artifact.py",
     "test/test_tui_input_frame_pty.py",
+    "test/tui_keyboard_harness.py",
+    "test/tui_keyboard_keepers.py",
+    "test/tui_keyboard_runtime.py",
 )
 
 root = Path(__file__).resolve().parents[1]
@@ -37,7 +42,7 @@ def receipt():
 class ReceiptTests(unittest.TestCase):
     def test_retained_fixture_respects_directory_scope_and_cursor(self):
         fixtures, _ = scenario.input_fixtures(501)
-        directory = fixtures[scenario.h.CONNECTOR_NAMES_PATH].resolve
+        directory = fixtures[CONNECTOR_NAMES_PATH].resolve
         def read(kind, suffix=""):
             status, page = directory(f"/api/v1/gate/connector/names?name=discord&scope={kind}&offset=0&limit=500{suffix}")
             self.assertEqual(status, 200)

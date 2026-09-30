@@ -3,7 +3,11 @@
 ; conflict whatever else they touch (#36385).
 (rule
  (alias runtest-test_tui_feed_row_counts_events)
- (deps test_tui_feed_row_counts_events.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_feed_row_counts_events.py
+  ../bin/masc_tui.exe
+  tui_keyboard_harness.py
+  tui_keyboard_observer.py)
  (action
   (run python3 %{dep:test_tui_feed_row_counts_events.py} %{dep:../bin/masc_tui.exe})))
 

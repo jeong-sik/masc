@@ -4,7 +4,7 @@ import json
 import os
 import sys
 
-import test_tui_keyboard_input as h
+import tui_keyboard_harness as h
 
 # The queue and questions are separate readings. With Approvals off the main
 # ring, the palette reaches their shared surface and the title still counts
@@ -14,6 +14,7 @@ SOURCE_MODULES = (
     "bin/masc_tui_render_prim.ml",
     "bin/masc_tui_render.ml",
     "bin/masc_tui_keys.ml",
+    "test/tui_keyboard_harness.py",
 )
 
 def open_ask_snapshot() -> dict[str, object]:

@@ -3,7 +3,12 @@
 ; conflict whatever else they touch (#36385).
 (rule
  (alias runtest-test_tui_lane_heading_keeps_its_reading)
- (deps test_tui_lane_heading_keeps_its_reading.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps
+  test_tui_lane_heading_keeps_its_reading.py
+  ../bin/masc_tui.exe
+  tui_keyboard_harness.py
+  tui_keyboard_keepers.py
+  tui_keyboard_runtime.py)
  (action
   (run python3 %{dep:test_tui_lane_heading_keeps_its_reading.py} %{dep:../bin/masc_tui.exe})))
 

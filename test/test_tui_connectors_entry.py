@@ -10,17 +10,18 @@ while it kept advertising `b:bind  u:unbind` in its own footer.
 from __future__ import annotations
 
 import os
-from pathlib import Path
 import signal
 import subprocess
 import sys
+from pathlib import Path
 
-import test_tui_keyboard_input as h
+import tui_keyboard_harness as h
 
 SOURCE_MODULES = (
     "bin/masc_tui.ml",
     "bin/masc_tui_types.ml",
     "bin/masc_tui_render.ml",
+    "test/tui_keyboard_harness.py",
 )
 CONNECTORS = "/api/v1/gate/connectors"
 TITLE = b"MASC Connectors"

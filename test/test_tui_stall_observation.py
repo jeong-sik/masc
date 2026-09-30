@@ -1,12 +1,17 @@
 """Timeout diagnostics retain observations made before a wait starts."""
 
 import os
+import os as _keyboard_os
+import time as _keyboard_time
 import unittest
 from unittest.mock import Mock, patch
 
-import test_tui_keyboard_input as h
+import tui_keyboard_harness as h
 
-SOURCE_MODULES = ("test/test_tui_keyboard_input.py",)
+SOURCE_MODULES = (
+    "test/test_tui_keyboard_input.py",
+    "test/tui_keyboard_harness.py",
+)
 
 
 class StallObservation(unittest.TestCase):
@@ -19,16 +24,16 @@ class StallObservation(unittest.TestCase):
         os.set_blocking(reader, False)
         try:
             os.write(writer, b"first frame")
-            with patch.object(h.time, "monotonic", return_value=10.0), \
+            with patch.object(_keyboard_time, "monotonic", return_value=10.0), \
                  patch.object(h, "_child_cpu_ticks", return_value=(100, 200)):
                 h.read_available(reader, output)
             # A successful wait with no new bytes must not reset the baseline.
-            with patch.object(h.time, "monotonic", return_value=14.0):
+            with patch.object(_keyboard_time, "monotonic", return_value=14.0):
                 h.wait_for_output(process, reader, output, b"first", start=0, timeout=3)
                 h.read_available(reader, output)
-            with patch.object(h.time, "monotonic", side_effect=[14., 14., 17., 17.]), \
+            with patch.object(_keyboard_time, "monotonic", side_effect=[14., 14., 17., 17.]), \
                  patch.object(h, "_child_cpu_ticks", return_value=(300, 500)), \
-                 patch.object(h.os, "sysconf", return_value=100):
+                 patch.object(_keyboard_os, "sysconf", return_value=100):
                 with self.assertRaises(AssertionError) as error:
                     h.wait_for_output(process, reader, output, b"missing", start=0, timeout=3)
             text = str(error.exception)

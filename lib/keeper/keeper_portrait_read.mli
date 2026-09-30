@@ -1,4 +1,4 @@
-(** Read-only portrait and equipment view for the current Keeper. *)
+(** Read-only portrait, accessory catalog and previews for the current Keeper. *)
 
 val minimum_size : int
 val maximum_size : int
@@ -9,9 +9,8 @@ val default_size : int
     the renderer could draw it. *)
 
 val equipment_to_json : Keeper_portrait_look.equipment -> Yojson.Safe.t
-(** The equipment as the tool reports it. Exposed so a test can compare the
-    tool's output against {!Keeper_portrait_look.equipment_of_name} without
-    duplicating the constructor-to-string mapping. *)
+(** The displayed equipment, using {!Keeper_portrait_item}'s canonical ids
+    for nonempty slots. Empty slots retain their explicit empty labels. *)
 
 val handle
   :  keeper_name:string
@@ -19,5 +18,9 @@ val handle
   -> start_time:Tool_timing.started
   -> args:Yojson.Safe.t
   -> Tool_result.result
-(** Return the current equipment and a PNG handle retained in the Keeper's
-    vision store, including after transient screen frames are evicted. *)
+(** Return a PNG handle retained in the Keeper's vision store, including after
+    transient screen frames are evicted. [preview_item] selects one catalog
+    item for the returned picture only. The response distinguishes [starting]
+    and [preview] modes, and reports both the starting equipment and the
+    equipment shown in the PNG. It does not report inventory or persist an
+    equipment choice. *)

@@ -178,7 +178,9 @@ val mcp_transport_http_deps :
     then writes the JSON response. Collapses parallel read bursts to one
     compute per [ttl] and runs heavy compute (subprocess / store query /
     large JSON) off the main HTTP domain so it does not head-of-line-block
-    other requests. [compress] defaults to [true]. *)
+    other requests. The response is {!Server_cached_read_http.respond}: the
+    bytes the cache serialized with the entry, and 504 for a timeout
+    envelope. [compress] defaults to [true]. *)
 val respond_cached_read :
   ?compress:bool ->
   request:Httpun.Request.t ->

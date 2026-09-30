@@ -1,8 +1,8 @@
 id = "quiz-grader"
-revision = "0.1.1"
+revision = "0.1.2"
 title = "Answers graded against the record"
 contributions = ["derive", "act"]
-image = "masc-lane-quiz-grader:0.1.1"
+image = "masc-lane-quiz-grader:0.1.2"
 command = ["python3", "server.py"]
 
 [world.actions]

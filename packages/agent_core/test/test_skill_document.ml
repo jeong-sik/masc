@@ -279,6 +279,35 @@ let test_authored_keeps_document_validation () =
     ]
 ;;
 
+(* Blank means every scalar is Python-style whitespace, or there is none. A
+   byte that does not decode is not whitespace, wherever it sits. *)
+let test_blank_values () =
+  List.iter
+    (fun (label, value, expected) ->
+       Alcotest.(check bool) label expected (Skill_document.is_blank value))
+    [ "empty", "", true
+    ; "ASCII whitespace", " \t\r\n\x0b\x0c", true
+    ; "file, group, record and unit separators", "\x1c\x1d\x1e\x1f", true
+    ; "no-break and ideographic space", "\xc2\xa0\xe3\x80\x80", true
+    ; "line separator", "\xe2\x80\xa8", true
+    ; "a letter", "a", false
+    ; "a letter after whitespace", " \xe3\x80\x80x", false
+    ; "a letter before whitespace", "x \t", false
+    ; "Hangul", "\xed\x95\x9c", false
+    ; "zero width space", "\xe2\x80\x8b", false
+    ; "an invalid byte", "\xff", false
+    ; "whitespace, then an invalid byte", "  \xff", false
+    ; "an invalid byte, then whitespace", "\xff  ", false
+    ; "a truncated scalar after whitespace", " \xe3\x80", false
+    ; "a space encoded in two bytes", "\xc0\xa0", false
+    ; "a space encoded in three bytes", "\xe0\x80\xa0", false
+    ; "a surrogate", "\xed\xa0\x80", false
+    ; "a lone continuation byte", "\x80", false
+    ; "escape, just below the separators", "\x1b", false
+    ; "a megabyte of spaces", String.make 1_048_576 ' ', true
+    ]
+;;
+
 let () =
   Alcotest.run
     "skill_document"
@@ -312,5 +341,6 @@ let () =
             "authored keeps document validation"
             `Quick
             test_authored_keeps_document_validation
+        ; Alcotest.test_case "blank values" `Quick test_blank_values
         ] ) ]
 ;;

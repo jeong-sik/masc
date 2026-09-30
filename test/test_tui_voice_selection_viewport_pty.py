@@ -95,7 +95,8 @@ def assignment(executable):
         h.tab_until(process, fd, output, b"MASC Keepers")
         h.wait_for_output(process, fd, output, b"keeper-00",
                           start=roster_start, timeout=15)
-        h.open_the_voice_pane(process, fd, output)
+        # The selected Config pane survives the roster visit.
+        h.tab_until(process, fd, output, b"MASC Voice")
         settle(process, fd, output, b"a")
         h.wait_for_output(process, fd, output, b"voice-00", start=0, timeout=15)
         h.drain_until_quiet(process, fd, output)

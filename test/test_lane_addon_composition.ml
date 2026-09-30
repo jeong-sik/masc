@@ -595,7 +595,7 @@ let test_native_fusion_report_is_readable_after_detach () =
           | _ -> fail "delivery has no readable artifact marker" in
         let broadcast = Runtime.dispatch ~caller:"fixture-operator" ~config ~operation:Runtime.Evidence
           (`Assoc ["instance_id",`String consumer;"row_ids",`List [`String (text "id" row)];
-            "broadcast",`Bool true]) |> unwrap in
+            "broadcast",`Bool true;"request_id",`String "composition-broadcast"]) |> unwrap in
         let broadcast_delivery = member "delivery" broadcast in
         check string "explicit Broadcast commits independently of Keeper acceptance" "committed"
           (text "status" broadcast_delivery);

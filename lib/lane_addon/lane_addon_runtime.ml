@@ -60,7 +60,7 @@ type entry = {
 }
 type manager = { store : Lane_addon_store.t; entries : (string, entry) Hashtbl.t;
   recovering : (string, unit) Hashtbl.t;
-  configuration_mutex : Eio.Mutex.t; action_mutex : Eio.Mutex.t; mutable configuration_status : Yojson.Safe.t;
+  configuration_mutex : Eio.Mutex.t; action_mutex : Eio.Mutex.t; broadcast_mutex : Eio.Mutex.t; mutable configuration_status : Yojson.Safe.t;
   mutable configuration_nudge : unit -> unit }
 let managers : (string, manager) Hashtbl.t = Hashtbl.create 4
 let override : backend option ref = ref None
@@ -457,7 +457,7 @@ let manager config =
   | Some m -> m
   | None -> let m = { store = Lane_addon_store.create ~root; entries = Hashtbl.create 8;
                      recovering = Hashtbl.create 4; configuration_mutex = Eio.Mutex.create ();
-                     action_mutex = Eio.Mutex.create ();
+                     action_mutex = Eio.Mutex.create (); broadcast_mutex = Eio.Mutex.create ();
                      configuration_status = `Null; configuration_nudge = (fun () -> ()) } in
       Hashtbl.add managers root m; m
 (* Entries and their wake promises belong to the root-switch owner domain. A
@@ -827,6 +827,34 @@ let enqueue_action ?caller m args =
           wake ~request:Run_actions e;
           Ok (Lane_addon_action.to_json receipt)))
 
+let prepare_broadcast m ~base_path ~caller ~instance_id ~request_id ~row_ids ~freeze =
+  let identity = `Assoc ["caller",`String caller;"instance_id",`String instance_id;
+    "row_ids",`List (List.sort String.compare row_ids |> List.map (fun id -> `String id))] in
+  let input_digest = Lane_addon_store.digest (Yojson.Safe.to_string identity) in
+  let request_digest = Lane_addon_store.digest (Yojson.Safe.to_string
+    (`List [`String caller;`String request_id])) in
+  (* Workspace request IDs carry 16 bytes, encoded as 32 lowercase hex digits. *)
+  let broadcast_id = "wmsg-" ^ String.sub request_digest 0 32 in
+  Eio.Mutex.use_ro m.broadcast_mutex (fun () ->
+    let* previous = offload (fun () -> Lane_addon_store.load_broadcast m.store ~instance_id ~request_id:broadcast_id) in
+    match previous with
+    | Some previous ->
+        let* fields = object_ previous in
+        let* digest = text fields "input_digest" in
+        if not (String.equal digest input_digest) then Error "Broadcast identity belongs to different evidence"
+        else (match List.assoc_opt "evidence" fields with
+          | Some (`Assoc _ as evidence) -> Ok (broadcast_id, evidence)
+          | _ -> Error "retained Broadcast record has no exact published evidence")
+    | None ->
+        let* frozen = freeze () in
+        let* evidence = offload (fun () -> Lane_addon_store.publish_for_keeper
+          ~base_path m.store frozen) in
+        let record = `Assoc ["request_id",`String request_id;"input_digest",`String input_digest;
+          "identity",identity;"evidence",evidence] in
+        let* () = offload (fun () -> Lane_addon_store.save_broadcast m.store
+          ~instance_id ~request_id:broadcast_id record) in
+        Ok (broadcast_id, evidence))
+
 let dispatch ?caller ~config ~operation json = Eio_context.run_on_owner_domain (fun () ->
   let* args = request_result (object_ json) in
   let allowed = match operation with
@@ -834,7 +862,7 @@ let dispatch ?caller ~config ~operation json = Eio_context.run_on_owner_domain (
     | Inspect -> ["instance_id"]
     | Observe | Detach -> ["instance_id"]
     | Slice -> ["run_id"; "lane_id"; "since"; "until"]
-    | Evidence -> ["instance_id"; "row_ids"; "keeper_name"; "broadcast"]
+    | Evidence -> ["instance_id"; "row_ids"; "keeper_name"; "broadcast"; "request_id"]
     | Act -> ["instance_id"; "expected_incarnation"; "request_id"; "action"]
     | Action_status -> ["instance_id"; "request_id"] in
   let names = List.map fst args in
@@ -860,18 +888,24 @@ let dispatch ?caller ~config ~operation json = Eio_context.run_on_owner_domain (
         | true, None -> Ok To_broadcast
         | false, None -> Ok Preserve_only
         | false, Some _ -> request_result (text args "keeper_name") |> Result.map (fun name -> To_keeper name) in
+      let* broadcast_request_id = match destination, List.assoc_opt "request_id" args with
+        | To_broadcast, _ -> request_result (text args "request_id") |> Result.map Option.some
+        | (Preserve_only | To_keeper _), None -> Ok None
+        | (Preserve_only | To_keeper _), Some _ -> Error (Request_rejected "request_id is only used with Broadcast") in
       let* id = request_result (text args "instance_id") in
-      let* binding = match Hashtbl.find_opt m.entries id with
-        | Some e -> Ok (entry_json e)
-        | None -> Result.map (fun fields -> `Assoc fields) (persisted_binding m id) in
       let* ids = match List.assoc_opt "row_ids" args with
         | Some (`List values) ->
             List.fold_left (fun acc -> function `String id -> let* ids = acc in Ok (id :: ids)
               | _ -> Error (Request_rejected "row_ids must contain strings")) (Ok []) values
         | _ -> Error (Request_rejected "row_ids requires an array") in
-      let* frozen = runtime_result (offload (fun () -> Lane_addon_store.freeze m.store ~instance_id:id ~binding ~row_ids:ids)) in
+      let freeze () =
+        let* binding = match Hashtbl.find_opt m.entries id with
+          | Some e -> Ok (entry_json e)
+          | None -> Result.map (fun fields -> `Assoc fields) (persisted_binding m id) in
+        runtime_result (offload (fun () -> Lane_addon_store.freeze m.store
+          ~instance_id:id ~binding ~row_ids:ids)) in
       (match destination with
-       | Preserve_only -> Ok frozen
+       | Preserve_only -> freeze ()
        | To_keeper _ | To_broadcast ->
            let destination_name = match destination with
              | To_keeper _ -> "keeper" | To_broadcast -> "broadcast" | Preserve_only -> "preserve" in
@@ -879,8 +913,18 @@ let dispatch ?caller ~config ~operation json = Eio_context.run_on_owner_domain (
              let* caller = match caller with
                | Some value when String.trim value <> "" -> Ok value
                | _ -> Error "evidence delivery requires an authenticated caller" in
-             let* evidence = offload (fun () -> Lane_addon_store.publish_for_keeper
-               ~base_path:config.base_path m.store frozen) in
+             let* broadcast_request, evidence = match destination with
+               | To_broadcast ->
+                   let* request_id = Option.to_result ~none:"Broadcast request identity is missing" broadcast_request_id in
+                   prepare_broadcast m ~base_path:config.base_path ~caller
+                     ~instance_id:id ~request_id ~row_ids:ids
+                     ~freeze:(fun () -> freeze () |> Result.map_error error_to_string)
+                   |> Result.map (fun (id,evidence) -> Some id,evidence)
+               | To_keeper _ | Preserve_only ->
+                   let* frozen = freeze () |> Result.map_error error_to_string in
+                   offload (fun () -> Lane_addon_store.publish_for_keeper
+                     ~base_path:config.base_path m.store frozen)
+                   |> Result.map (fun evidence -> None,evidence) in
              let* fields = object_ evidence in let* prompt = text fields "message" in
              let receipt = try (match destination with
                | To_keeper keeper_name ->
@@ -888,7 +932,9 @@ let dispatch ?caller ~config ~operation json = Eio_context.run_on_owner_domain (
                      | Some handler -> Ok handler | None -> Error "Keeper evidence delivery is unavailable" in
                    handler ~config ~caller ~keeper_name ~prompt
                | To_broadcast ->
-                   Workspace_broadcast.broadcast ~audience:Workspace_broadcast.Fleet_conversation
+                   let* request_id = match broadcast_request with
+                     | Some id -> Ok id | None -> Error "Broadcast request identity is missing" in
+                   Workspace_broadcast.broadcast_once ~request_id
                      config ~from_agent:caller ~content:prompt
                    |> Result.map Workspace_broadcast.broadcast_delivery_to_yojson
                    |> Result.map_error Workspace_broadcast.broadcast_error_to_string
@@ -898,8 +944,10 @@ let dispatch ?caller ~config ~operation json = Eio_context.run_on_owner_domain (
                | exn -> Delivery_outcome_unknown (Printexc.to_string exn) in
              Ok (evidence, receipt)
            in
-           let published, receipt = match deliver () with
-             | Ok result -> result | Error message -> frozen, Delivery_failed message in
+           let* published, receipt = match deliver () with
+             | Ok result -> Ok result
+             | Error message ->
+                 let* frozen = freeze () in Ok (frozen, Delivery_failed message) in
            let delivery = match receipt with
              | Delivery_receipt receipt -> `Assoc ["destination",`String destination_name;
                  "status", `String (match destination with To_broadcast -> "committed"
@@ -908,6 +956,9 @@ let dispatch ?caller ~config ~operation json = Eio_context.run_on_owner_domain (
                  "status", `String "failed"; "error", `String message]
              | Delivery_outcome_unknown message -> `Assoc ["destination",`String destination_name;
                  "status",`String "outcome_unknown";"error",`String message] in
+           let delivery = match broadcast_request_id, delivery with
+             | Some request_id, `Assoc fields -> `Assoc (("request_id",`String request_id) :: fields)
+             | _ -> delivery in
            let* fields = runtime_result (object_ published) in Ok (`Assoc (("delivery", delivery) :: fields)))
   | Attach ->
       let* path = request_result (text args "manifest_path") in let* run_id = request_result (text args "run_id") in

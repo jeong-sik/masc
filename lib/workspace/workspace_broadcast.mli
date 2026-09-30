@@ -150,6 +150,16 @@ val broadcast : ?trace_context:string ->
            from_agent:string -> content:string ->
            (broadcast_delivery, broadcast_error) result
 
+val broadcast_once :
+  request_id:string ->
+  Workspace_utils_backend_setup.config -> from_agent:string -> content:string ->
+  (broadcast_delivery, broadcast_error) result
+(** Reconcile an exact producer-owned request after an unanswered call. A
+    committed authoritative message returns its receipt without another write
+    or fleet fanout, even while the original fanout is still running. Reusing
+    an identity with different content or sender is rejected. This path always
+    declares [Fleet_conversation]; callers cannot replay a different audience. *)
+
 module For_testing : sig
   (** Replace the handler and return the prior one. Test isolation only. *)
   val replace_on_broadcast_mention :

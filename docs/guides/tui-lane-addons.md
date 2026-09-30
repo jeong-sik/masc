@@ -113,7 +113,9 @@ Instances에서 소유자를 선택하고 Timeline 또는 Rows에서 그 인스�
 직접 지정은 `:evidence {"instance_id":"<ID>","row_ids":["<row-ID>"]}`, 선택 전달은 `keeper_name`을 추가한다.
 `e`의 마지막 선택인 `Preserve and share the reference via Broadcast`는 선택한 근거의
 읽기 가능한 참조를 workspace Broadcast로 공유한다. 기본값은 보존만 하기이며,
-선택 후 Enter로 제출한다. 직접 지정할 때는 `broadcast:true`를 추가하고 `keeper_name`은 함께 쓰지 않는다.
+선택 후 Enter로 제출한다. 직접 지정할 때는 `broadcast:true`와 보내기 동작마다 새 `request_id`를 추가하고 `keeper_name`은 함께 쓰지 않는다.
+응답을 받지 못한 같은 동작을 재시도할 때는 원래 `request_id`를 유지한다. TUI는 같은 근거의 미응답 보내기를 다시 열면 그 ID를 유지하고, 저장 영수증을 받은 후의 새 보내기에는 새 ID를 만든다.
+재시도는 원래 아티팩트와 이미 저장된 메시지의 영수증을 반환한다. 첫 요청의 Keeper 전달이 아직 진행 중이어도 메시지를 중복 생성하지 않는다.
 보고서 원문을 메시지에 끼워 넣지 않으며, Broadcast 영수증의 request ID·sequence는
 실제 메시지 저장 결과다. `committed`는 공유 기록이며 Keeper 열람이나 실행 완료가 아니다.
 공유가 실패해도 근거는 보존되고 자동으로 다시 보내지 않는다.

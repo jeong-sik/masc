@@ -115,6 +115,15 @@ package scenarios passed on the integration checkout.
 
 ## Explicit report sharing
 
+The host Evidence operation requires a caller-generated `request_id` for every
+`broadcast=true` send. An unanswered send is retried with its original ID; a new
+deliberate send uses a fresh ID even for the same selected rows. The TUI retains
+unacknowledged IDs until a committed receipt and carries them across reopening
+that evidence selection. The host retains the first published artifact and
+reconciles the authoritative message by its exact derived workspace request ID,
+so a retry can recover its receipt while the original fleet fanout is blocked.
+This does not claim fleet delivery or reading has finished.
+
 The host Evidence operation accepts `broadcast=true` as an explicit alternative
 to a single `keeper_name`. The TUI export menu offers workspace sharing after
 the named Keeper choices and defaults to preservation only. Enter submits;

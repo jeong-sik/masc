@@ -28,3 +28,8 @@ description = "Optional single Keeper recipient, mutually exclusive with broadca
 name = "broadcast"
 type = "boolean"
 description = "Explicitly share the preserved evidence reference in the workspace Broadcast stream. Mutually exclusive with keeper_name. A committed message is not proof of a Keeper read or action."
+
+[[params]]
+name = "request_id"
+type = "string"
+description = "Required for broadcast=true. Generate one unique ID per deliberate send and reuse that ID only to reconcile/retry the same unanswered send. A new deliberate send, even of the same rows, uses a new ID."

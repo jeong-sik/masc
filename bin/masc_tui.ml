@@ -13421,6 +13421,9 @@ let apply_async_message state ~base_path ~http_refresh_inflight
             let view = match reply.lar_snapshot with
               | None -> view
               | Some snapshot -> Masc_tui_lane_addons.reconcile_snapshot view snapshot in
+            let view = match reply.lar_receipt with
+              | None -> view
+              | Some receipt -> Masc_tui_lane_addons.acknowledge_broadcast view receipt in
             let view = match initialize_result, reply.lar_snapshot, reply.lar_diagnostic with
               | true, Some _, None -> Masc_tui_lane_addons.select_initial_result view
               | _ -> view in
@@ -20220,7 +20223,7 @@ and is loaded on demand through keeper_skill.
                            update { view with selected = if List.mem row.id view.selected then List.filter ((<>) row.id) view.selected else row.id :: view.selected })
                      | "e" when view.selected <> [] ->
                          let keepers = List.map (fun (keeper : keeper) -> keeper.k_name) state.keepers in
-                         (match Addons.open_evidence ~keepers view with
+                         (match Addons.open_evidence ~request_id:(Random_id.uuid_v7 ()) ~keepers view with
                           | Ok next -> update next
                           | Error detail -> update {view with error=lane_addons_input_failure detail})
                      | _ -> ()))

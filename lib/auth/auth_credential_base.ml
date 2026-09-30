@@ -698,7 +698,27 @@ let validate_file_backed_bearer raw_token =
 
 let read_stored_credential config name path =
   let ( let* ) = Result.bind in
-  let* content = read_regular_auth_file path in
+  (* Prune holds the shared publisher transaction: a FIFO must never wait for
+     a writer here. This existing reader opens nonblocking, verifies the real
+     FD and no-follow path identity, closes it, and propagates cancellation. *)
+  (* The transaction already canonicalizes its store root. Preserve relative
+     base paths and directory aliases without following the JSON leaf. All
+     callers supply discovered or validated direct children of this store. *)
+  let* ownership_root =
+    credential_read_result (fun () ->
+      run_blocking_io (fun () -> Unix.realpath (agents_dir config)))
+  in
+  let owned_path = Filename.concat ownership_root (Filename.basename path) in
+  let* content =
+    match Fs_compat.load_owned_regular_file ~ownership_root owned_path with
+    | Ok (Some content) -> Ok content
+    | Ok None ->
+        Error (System (System_error.IoError
+          (Printf.sprintf "credential disappeared before verified read: %s" path)))
+    | Error error ->
+        Error (System (System_error.IoError
+          (Fs_compat.owned_regular_file_read_error_to_string error)))
+  in
   match Yojson.Safe.from_string content with
   | exception Yojson.Json_error _ -> Ok Unresolved_credential
   | `Assoc [ "redirect_to", `String target ] ->

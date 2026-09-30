@@ -227,7 +227,7 @@ let test_unreadable_revoke_preserves_effects () =
     let status, body = revoke config in
     check_status `Service_unavailable (status, body);
     check string (label ^ ": explicit route error") "credential_unreadable"
-      Yojson.Safe.Util.(member "error" body |> to_string);
+      Yojson.Safe.Util.(member "code" body |> to_string);
     check (option string) (label ^ ": the turn survives") (Some "player") (controller ());
     ignore (Unix.lstat path)) unreadable_name_fixtures
 
@@ -263,7 +263,7 @@ let test_mismatched_revoke_preserves_effects () =
     let status, body = revoke config in
     check_status `Service_unavailable (status, body);
     check string "the route reports identity ambiguity" "credential_identity_mismatch"
-      Yojson.Safe.Util.(member "error" body |> to_string);
+      Yojson.Safe.Util.(member "code" body |> to_string);
     check string "the mismatched credential is not deleted" json (In_channel.with_open_text path In_channel.input_all);
     check (option string) "the held turn is not released" (Some "player") (controller ()))
     [ Masc_domain.Player; Masc_domain.Worker; Masc_domain.Admin ]

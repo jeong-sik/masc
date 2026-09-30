@@ -11,7 +11,7 @@
     "lib/play/play_invite.ml": "b9d22380d1c7d07373e6cfc6e2de8703b63eb8415d627d1730359ceb339e019a",
     "lib/play/play_invite.mli": "53e8229485435be8e2c7a9c0861cf056f609d59754eadd53182eb18344d1a8c4",
     "lib/server/server_routes_http_routes_play.ml": "a4b42093645264f09b4a04568451e20984d7c21bb37a8c83562b60e0814bd50a",
-    "test/test_play_credential_transaction.ml": "096b868c452ed52ff0b4fabd063383fdd33c64f64f64231281be5cd6356fe8ee",
+    "test/test_play_credential_transaction.ml": "f3a4a4c8eb1ed777cf76bb62113788b33bb4595e72c1281c3adbe8e8006dfe74",
     "test/test_play_invite.ml": "0c396afae9396cb6c5d11bead9dfd8e5cd35e70f1f9bcae0bfe344ab7a539f4a",
     "lib/keeper/keeper_dos_controller.ml": "4e6965b0707242574b34604a37543cc70aaf8a4d8505ff2b4b6357d38a40d449",
     "lib/keeper/keeper_dos_controller.mli": "5fbd79f124dc5c8ae713a07712e4cf52fb3166602effb891d2a0ee383ddd3afe",
@@ -22,5 +22,6 @@
     "changelog.d/40136.md": "79480a7e53876a7c20f113d8376d8996ab7773a0b46c1f7c6cd6d7dab9286acc"
   },
   "prior_native_head": "c12151bc94a3e398f9a625d431e1ed8023cb50a5",
-  "local_composition": "Only four overlapping main files were imported locally; publication preserves the full main tree through GitData base_tree."
+  "local_composition": "Only four overlapping main files were imported locally; publication preserves the full main tree through GitData base_tree.",
+  "route_refusal_fixture": "Current main Server_refusal uses code for the discriminant; error is the human sentence."
 }

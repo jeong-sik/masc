@@ -80,7 +80,10 @@ def assignment(executable):
         h.open_the_voice_pane(process, fd, output)
         # Roster data is independently loaded by refresh, so wait for its
         # ready signal in the roster before opening the assignment screen.
-        h.palette_go(process, fd, output, b"go keepers", b"keeper-00")
+        roster_start = len(output)
+        h.tab_until(process, fd, output, b"MASC Keepers")
+        h.wait_for_output(process, fd, output, b"keeper-00",
+                          start=roster_start, timeout=15)
         h.open_the_voice_pane(process, fd, output)
         settle(process, fd, output, b"a")
         h.wait_for_output(process, fd, output, b"voice-00", start=0, timeout=15)

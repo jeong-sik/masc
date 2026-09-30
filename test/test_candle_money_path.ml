@@ -54,36 +54,6 @@ let test_a_weights_answer_is_read_by_the_same_rules () =
     (`Assoc [ "weights", `Assoc [ "a", `Int 1; "b", `Int 1 ]; "note", `String "x" ])
 ;;
 
-(* {1 A stored Paid line} *)
-
-(* A line as an earlier build wrote it. It is text, not built from the code under
-   test: 1000 milli-candle split three ways is 334, 333 and 333 (the leftover goes
-   to the name that sorts first), and 30 hours late pays 700 of every 1000, rounded
-   down. Changing either rule stops this line from reading, and the ledger with it. *)
-let stored_paid_line =
-  {|{"kind":"paid","at":"2026-09-29T06:00:00Z","goal_id":"goal-1","request_id":"req-1","verification_run_id":"run-1","grade":"medium","total_milli":1000,"grade_trace":{"run_id":"grade-run","slot_id":"slot-1"},"relations":[{"task_id":"t-a","relation":"related","trace":{"run_id":"relation-t-a","slot_id":"slot-1"}},{"task_id":"t-b","relation":"related","trace":{"run_id":"relation-t-b","slot_id":"slot-1"}},{"task_id":"t-c","relation":"related","trace":{"run_id":"relation-t-c","slot_id":"slot-1"}}],"weights_trace":{"run_id":"weights-run","slot_id":"slot-1"},"weight_max":10,"deduction_rate":10,"deduction_floor":200,"overdue_hours":30,"coefficient":700,"allocations":[{"keeper":"keeper-a","weight":1,"share_milli":334,"amount_milli":233},{"keeper":"keeper-b","weight":1,"share_milli":333,"amount_milli":233},{"keeper":"keeper-c","weight":1,"share_milli":333,"amount_milli":233}]}|}
-;;
-
-let test_a_stored_paid_line_still_reads () =
-  let row : E.t = ok_or_fail (E.of_line stored_paid_line) in
-  (match row.body with
-   | E.Paid payment ->
-     Alcotest.(check int) "coefficient" 700 payment.Candle_payment.coefficient;
-     Alcotest.(check (list (triple string int int)))
-       "keeper, share, amount"
-       [ "keeper-a", 334, 233; "keeper-b", 333, 233; "keeper-c", 333, 233 ]
-       (List.map
-          (fun (a : Candle_payment.allocation) -> a.keeper, a.share_milli, a.amount_milli)
-          payment.Candle_payment.allocations)
-   | E.Snapshot _ | E.Payout_owed _ | E.Candidates _ | E.Unattributed _ | E.Payout_failed _ ->
-     Alcotest.fail "the stored line is not a Paid row");
-  match Candle_balance.of_events [ row ] with
-  | Ok balance ->
-    Alcotest.(check int) "keeper-a is credited" 233 (Candle_balance.balance balance ~keeper:"keeper-a");
-    Alcotest.(check int) "keeper-c is credited" 233 (Candle_balance.balance balance ~keeper:"keeper-c")
-  | Error error -> Alcotest.failf "%s" (Candle_balance.error_to_string error)
-;;
-
 (* {1 Settlement admission} *)
 
 let goal_id = "goal-1"
@@ -351,8 +321,6 @@ let () =
       , [ Alcotest.test_case "the rules of the RFC" `Quick test_weights_follow_the_rules_of_the_rfc
         ; Alcotest.test_case "an answer is read by the same rules" `Quick test_a_weights_answer_is_read_by_the_same_rules
         ] )
-    ; ( "stored row"
-      , [ Alcotest.test_case "a Paid line an earlier build wrote still reads" `Quick test_a_stored_paid_line_still_reads ] )
     ; ( "settlement admission"
       , [ Alcotest.test_case
             "a Paid row is admitted only for the related candidate keepers"

@@ -281,6 +281,29 @@ status: reference
   [Keeper_unified_prompt](../../lib/keeper/keeper_unified_prompt.mli),
   [Keeper_prompt](../../lib/keeper/keeper_prompt.mli)
 
+**Keeper Portrait (Keeper 초상화)**
+: Keeper의 고유 시각 표현인 양초 임프(candle imp). 몸체(`body`)와 장비(`equipment`)의
+  두 층위로 구성된다. 몸체는 왁스 색상(`wax`: Ivory·Peach·Mint·Lavender·Sky·Butter·Rose·Charcoal 8종),
+  불꽃(`flame`: Ember·Azure·Jade·Violet·Pink·Gold 6종), 뿔 모양(`horn_style`: Nub·Long·One·Ram 4종),
+  뿔 색상(`horn_colour`: Crimson·Soot·Brass·Bone·Blossom 5종), 눈(`eyes`: Bean·Dot·Happy·Sleepy·Sparkle·Wink 6종),
+  입(`mouth`: W·Smile·O·Flat·Fang 5종), 볼터치(`blush`), 흘러내린 왁스(`drips`: 0~3개), 둥근 배경
+  색상(`backdrop_hue`)으로 이루어지며, Keeper 이름의 도메인 분리 SHA-256과 SplitMix64 난수
+  생성기로부터 결정론적으로 도출된다. 저장소에 별도 저장할 필요 없이 동일한 이름은 항상 동일한 몸체를
+  갖는다. 장비는 5개 슬롯으로 양초가 착용하는 아이템이다 — `face`(Bare_face·Glasses·Shades·Eye_patch·
+  Plaster·Freckles·Beard 7종), `neck`(Bare_neck·Scarf·Bow_tie·Medal 4종), `head`(Bare_head·Bow·
+  Crown·Beanie 4종), `hand`(Empty_hand·Book·Mug·Quill 4종), `base`(No_dish·Dish of Gilt/Silver/Oak 4종).
+  시작 장비는 이름의 별도 해시로 정해져 몸체와 독립적이다. MASC 자체의 고유 양초인 `mascot`은
+  TUI 시작 화면과 `/about`에 표시된다(Ivory 왁스, Ember 불꽃, Long Crimson 뿔, Bean 눈, "w" 입,
+  Blush, Gilt 접시, 무착용). MCP 도구 `keeper_portrait_read`는 PNG 아티팩트와 시작 장비,
+  액세서리 카탈로그를 반환하며 `preview_item`으로 장착 권한 변경 없이 임시 미리보기가 가능하다.
+  TUI에서는 상단 바 축약 캔들, 모자이크 카드, 엠블럼 화면에 렌더된다. 시작 화면과 `/about`의
+  마스코트 표시 스타일은 2D 초상화인 `painted`와 3D 점묘 양초인 `dotted`가 있다.
+  → [Keeper_portrait_look](../../lib/keeper_portrait/keeper_portrait_look.mli) ·
+  [Keeper_portrait_item](../../lib/keeper_portrait/keeper_portrait_item.mli) ·
+  [Keeper_portrait_draw](../../lib/keeper_portrait/keeper_portrait_draw.mli) ·
+  [Keeper_portrait_solid](../../lib/keeper_portrait/keeper_portrait_solid.mli) ·
+  [TUI candle styles](../TUI-GUIDE.md)
+
 **Ask (질문)**
 : Keeper가 운영자에게 묻는 durable 질문 묶음. `masc_ask`가 만들고,
   `masc_ask_status`·`masc_ask_withdraw`가 조회·철회하며, 답변은 별도 wake로
@@ -1152,6 +1175,21 @@ status: reference
   [Dos_lane.recent_activity](../../lib/dos_lane/dos_lane.mli),
   [Masc_tui_machine_live.activity_of](../../bin/masc_tui_machine_live.mli),
   [Masc_tui_msx.shows_sidebar](../../bin/masc_tui_msx.mli)
+
+**Agent Core Hook**
+: Agent 실행의 정해진 시점에 호스트가 등록한 동기 판단 콜백. `hook_event`
+  (BeforeTurn·BeforeTurnParams·AfterTurn·PreToolUse·PostToolUse·PostToolUseFailure·
+  OnStop·OnError·OnToolError) 하나를 받아 `hook_decision`
+  (Continue·AdjustParams·ElicitInput·ElicitToolApproval·Nudge·HookFailed·Block)을
+  돌려주는 함수다(`type hook = hook_event -> hook_decision`). `Block`은
+  PreToolUse에서만 정당하고, 호스트는 그 도구를 실행하지 않고 `is_error=true`
+  결과를 낸다. Hook은 **호스트 프로세스 안의 호출 지점**일 뿐이라 설치·격리
+  worker가 아니고, 출력 행·근거 보존·`lane_output` 연결 같은 Add-on 계약을 갖지
+  않는다. 판단 하나를 사건 시점에 부르는 것만 보면 Lane Add-on의 판단 모듈과 같은
+  메커니즘이므로, 'Hook과 다르다'는 주장은 그런 계약이 필요해지는 지점부터만
+  성립한다. **Keeper hook**(매 turn 턴별 문맥을 조립해 얹는 관행)과는 다른 층의
+  용어다.
+  → [Hooks_agent_core](../../packages/agent_core/lib/base/hooks.mli)
 
 **Lane Add-on**
 : 기존 MASC 원장과 실행 환경 위에 붙는 선택적 관측·관계 레이어. MSX Lane의 머신,

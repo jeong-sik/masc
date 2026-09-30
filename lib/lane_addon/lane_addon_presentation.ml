@@ -59,7 +59,7 @@ let render reading fields =
       | _ -> Error "field path does not address an object") in
   let* value = resolve fields reading.path in
   let* value = match reading.format,value with
-    | Text,`String value -> Ok (Yojson.Safe.to_string (`String value))
+    | Text,`String value -> Ok value
     | Number,(`Int _ | `Intlit _) -> Ok (Yojson.Safe.to_string value)
     | Number,`Float number when Float.is_finite number -> Ok (Yojson.Safe.to_string value)
     | Boolean,`Bool _ | Json,_ -> Ok (Yojson.Safe.to_string value)

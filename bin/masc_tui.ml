@@ -367,7 +367,7 @@ let identity_query (state : state) =
 
 let identity_pane_columns (state : state) =
   let _rows, columns = get_terminal_size () in
-  Masc_tui_roster_pane.content_cols ~hidden:state.roster_pane_hidden
+  Masc_tui_roster_pane.content_cols ~hidden:(roster_pane_hidden state)
     ~cols:columns
 
 (* A row cursor over a plain listing: the keypress moves the cursor and the
@@ -1157,6 +1157,7 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
     true
   | ("\t" | "\r") when Option.is_some command_menu ->
     (match command_menu with Some menu -> accept_command_menu menu | None -> false)
+  (* A visible menu consumes Esc before interrupting a turn or leaving chat. *)
   | "esc" when Option.is_some command_menu ->
     state.msg_command_menu <- Masc_tui_command.Menu_dismissed (Buffer.contents state.msg_input);
     true
@@ -10061,7 +10062,7 @@ let apply_asks_load state = function
        | Ask_browsing -> ()
        | Ask_answering { aam_ask_id } ->
            (match List.find_index
-                    (fun (row : Tui_decode.ask_row) -> row.ar_id = aam_ask_id) next_rows with
+                    (fun (row : Masc.Tui_decode_asks.ask_row) -> row.ar_id = aam_ask_id) next_rows with
             | Some index -> state.ask_cursor <- index
             | None -> clear_ask_answering state));
       state.asks_snapshot <- Some snapshot;
@@ -11458,7 +11459,7 @@ let selected_ask_row state =
   match state.ask_answer_mode with
   | Ask_browsing -> List.nth_opt (open_ask_rows state) state.ask_cursor
   | Ask_answering { aam_ask_id } ->
-      List.find_opt (fun (row : Tui_decode.ask_row) -> row.ar_id = aam_ask_id)
+      List.find_opt (fun (row : Masc.Tui_decode_asks.ask_row) -> row.ar_id = aam_ask_id)
         (open_ask_rows state)
 
 let selected_ask_question state =
@@ -17101,23 +17102,19 @@ let main
         ~invalidate_before:(damaged || authority_changed)
         ~write ~flush frame
     with
-    | Frame_presenter.Presented repaint ->
+    | Frame_presenter.Presented _ as presented ->
         state.frames_presented <- state.frames_presented + 1;
         commit_presented_approval approval;
         presented_presses := presses;
         presented_reader := reader;
-        (* The frame's pictures go over it once it is on the terminal, and
-           again over any row the frame erased and wrote: a full redraw
-           cleared them all, a row it rewrote may have taken one's cells. *)
-        Masc_tui_portrait_view.flush
-          ~rewritten:
-            (match repaint with
-             | Frame_presenter.Whole_screen -> fun _ -> true
-             | Frame_presenter.Rows rows -> fun row -> List.mem row rows)
-          ~write:write_to_terminal
-    | Frame_presenter.Unchanged ->
+        (* The frame's pictures go over it once it is on the terminal: sent
+           again after a full redraw, whose clear took them, and put back
+           from the pixels the terminal holds over a row the frame erased
+           and wrote. *)
+        Masc_tui_portrait_view.flush presented ~write:write_to_terminal
+    | Frame_presenter.Unchanged as unchanged ->
         (* Same text, but a picture may have moved on a step. *)
-        Masc_tui_portrait_view.flush ~rewritten:(fun _ -> false) ~write:write_to_terminal
+        Masc_tui_portrait_view.flush unchanged ~write:write_to_terminal
   in
   (* Bind the bearer to the workspace actually opened, before any request is
      built. Reported before the recovery load as well, so when neither source
@@ -18554,6 +18551,11 @@ and is loaded on demand through keeper_skill.
              Masc_tui_http.post_schedule_update ~host:server_peer_host
                ~port:state.port ~body_json))
   in
+  let reconcile_chat_focus () =
+    let _, terminal_cols = Masc_tui_ansi.get_terminal_size () in
+    let cols = max 1 (terminal_cols - acting_pane_columns state ~terminal_cols) in
+    reconcile_keeper_message_focus state ~cols
+  in
   let consume_resize_request () =
     if Atomic.exchange resize_requested false then
       invalidate_frame_for_resize frame_presenter render_schedule
@@ -18823,6 +18825,7 @@ and is loaded on demand through keeper_skill.
             | Some (shot, bytes) -> draw_browser_viewport state shot bytes
             | None -> ())
        | Render_schedule.Terminal_size_cache.Unchanged _ -> ());
+      reconcile_chat_focus ();
       (* Any deliberate input withdraws a standing Ctrl-C. Without this the
          armed state outlives the moment it was meant for, and a Ctrl-C typed
          minutes apart from another would read as a double press. *)
@@ -19804,7 +19807,10 @@ and is loaded on demand through keeper_skill.
                                | Some configuration -> update {view with configuration_cursor=max 0
                                    (min (List.length configuration.declarations - 1) (view.configuration_cursor + delta))})
                           | Some snapshot, Addons.Overview, _ ->
-                              update {view with instance_cursor=max 0 (min (Addons.overview_count snapshot - 1) (view.instance_cursor + delta))}
+                              let cursor = max 0 (min (Addons.overview_count snapshot - 1)
+                                (view.instance_cursor + delta)) in
+                              if cursor <> view.instance_cursor then
+                                update {view with instance_cursor=cursor; scroll=0}
                           | Some _, Addons.Detail _, (Addons.Configurations | Addons.Instances | Addons.Connections) -> ()
                           | Some _, Addons.Detail _, Addons.Rows ->
                               update (Addons.move_record view delta)
@@ -20144,17 +20150,17 @@ and is loaded on demand through keeper_skill.
           surface is up. *)
        | Some k when String.equal k toggle_roster_pane_key ->
            (match
-              Masc_tui_roster_pane.toggle_hidden
-                ~hidden:state.roster_pane_hidden ~cols:terminal_columns
+              Masc_tui_roster_pane.toggle_preference state.roster_pane_preference
+                ~in_chat:(state.view = Keepers Keeper_message) ~cols:terminal_columns
             with
             | None ->
                 report_action state "system"
                   (Printf.sprintf
                      "Keeper roster needs %d columns; preference unchanged"
                      Masc_tui_roster_pane.threshold_cols)
-            | Some hidden ->
-                state.roster_pane_hidden <- hidden;
-                if hidden then state.keeper_message_focus <- Right_pane;
+            | Some preference ->
+                state.roster_pane_preference <- preference;
+                reconcile_chat_focus ();
                 Render_schedule.request render_schedule Render_schedule.Force)
        | Some k when String.equal k toggle_acting_pane_key ->
            (match toggle_acting_pane state with
@@ -21791,7 +21797,7 @@ and is loaded on demand through keeper_skill.
        | Some ("j" | "down" | "k" | "up" as move)
          when state.view = Keepers Keeper_detail && state.detail_tab = Detail_runs
               && not (Masc_tui_roster_pane.arrows_go_left
-                ~hidden:state.roster_pane_hidden ~cols:terminal_columns
+                ~hidden:(roster_pane_hidden state) ~cols:terminal_columns
                 ~preferring_left:(state.keeper_detail_focus = Left_pane)) ->
            let count = List.length (selected_keeper_runs state) in
            let delta = if move = "j" || move = "down" then 1 else -1 in
@@ -21800,7 +21806,7 @@ and is loaded on demand through keeper_skill.
        | Some ("\r" | "\n" | "right")
          when state.view = Keepers Keeper_detail && state.detail_tab = Detail_runs
               && not (Masc_tui_roster_pane.arrows_go_left
-                ~hidden:state.roster_pane_hidden ~cols:terminal_columns
+                ~hidden:(roster_pane_hidden state) ~cols:terminal_columns
                 ~preferring_left:(state.keeper_detail_focus = Left_pane)) ->
            (match selected_keeper_run state with
             | None -> ()
@@ -22485,7 +22491,7 @@ and is loaded on demand through keeper_skill.
                           state.approval_detail_scroll <- 0)
                  | Home_question ask_id ->
                      (match List.find_index
-                              (fun (row : Tui_decode.ask_row) -> row.ar_id = ask_id)
+                              (fun (row : Masc.Tui_decode_asks.ask_row) -> row.ar_id = ask_id)
                               (open_ask_rows state) with
                       | None -> report_action state "system" "Question changed; choose again"
                       | Some cursor ->
@@ -24198,7 +24204,7 @@ and is loaded on demand through keeper_skill.
             | Keepers Keeper_detail ->
                 if
                   Masc_tui_roster_pane.arrows_go_left
-                    ~hidden:state.roster_pane_hidden ~cols:terminal_columns
+                    ~hidden:(roster_pane_hidden state) ~cols:terminal_columns
                     ~preferring_left:(state.keeper_detail_focus = Left_pane)
                 then begin
                   state.keeper_cursor <-
@@ -24564,7 +24570,7 @@ and is loaded on demand through keeper_skill.
             | Keepers Keeper_detail ->
                 if
                   Masc_tui_roster_pane.arrows_go_left
-                    ~hidden:state.roster_pane_hidden ~cols:terminal_columns
+                    ~hidden:(roster_pane_hidden state) ~cols:terminal_columns
                     ~preferring_left:(state.keeper_detail_focus = Left_pane)
                 then begin
                   state.keeper_cursor <-
@@ -26562,8 +26568,11 @@ and is loaded on demand through keeper_skill.
            Masc_tui_emblem_screen.begin_frame ();
            Masc_tui_portrait_view.begin_frame ();
            Masc_tui_message_layout.begin_frame ();
-           Masc_tui_portrait_view.flush ~rewritten:(fun _ -> false) ~write:write_to_terminal
+           Masc_tui_portrait_view.flush Frame_presenter.Unchanged ~write:write_to_terminal
        | Render_schedule.Render ->
+           (* Keys and async updates can change the pane reservation after
+              the interaction snapshot. Store the focus the next frame shows. *)
+           reconcile_chat_focus ();
            let frame, clamped, approval, presses =
              Masc_tui_frame_timing.time_tagged Masc_tui_frame_timing.Build
                ~tag:(fun (frame, _, _, _) -> frame.Frame_presenter.surface_key)

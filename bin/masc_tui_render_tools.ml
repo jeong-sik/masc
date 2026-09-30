@@ -113,7 +113,7 @@ let skill_action_lines actions =
          (Terminal_text.single_line action.runtime_id)
          (Terminal_text.single_line action.tool_name)
          (Terminal_text.single_line identity)
-         (Terminal_text.short_timestamp action.observed_at))
+         (Terminal_text.single_line action.observed_at))
     actions
 
 let async_request_observation_lines (state : state) =
@@ -169,20 +169,8 @@ let async_request_observation_lines (state : state) =
 
 (* The Tools sections, named where the reader is standing. Same shape as
    {!config_pane_strip}: a reader who has seen one has seen the other. *)
-(* Enough of a content hash to tell two of them apart, which is the only
-   question a reader asks of one on a screen. The footer already draws commit
-   hashes this way and says why; these are the same kind of value and were
-   drawn whole, so a 64-character revision ran past the width and arrived cut
-   mid-hash -- long enough to fill the line, short of anything to compare.
-
-   Short of the prefix length the value is left as it is: a value that is
-   already short is not a hash, and trimming it would take meaning. *)
-let short_revision_length = 12
-
-let short_revision value =
-  if String.length value <= short_revision_length then value
-  else String.sub value 0 short_revision_length ^ "\xe2\x80\xa6"
-
+(* Revisions remain complete: the physical document wraps them at the
+   viewport width, so operators can compare the actual identities. *)
 (* The Skill discovery roots, in the order the catalog consults them.
 
    The pane named skills and never named where they were looked for, so
@@ -224,7 +212,7 @@ let skill_config_line (config : Masc.Tui_decode.skill_catalog_config option) =
     in
     [ ( Ansi.dim
       , Printf.sprintf "   config %s \xc2\xb7 %s"
-          (short_revision (Terminal_text.single_line revision))
+          (Terminal_text.single_line revision)
           cap )
     ]
   | Some (Skill_config_rejected { source_revision; diagnostics }) ->
@@ -232,7 +220,7 @@ let skill_config_line (config : Masc.Tui_decode.skill_catalog_config option) =
        screen changes when the operator's section stops parsing. *)
     ( Theme.warn ()
     , Printf.sprintf "   runtime.toml Skill config rejected (rev %s) \xe2\x80\x94 defaults in use"
-        (short_revision (Terminal_text.single_line source_revision)) )
+        (Terminal_text.single_line source_revision) )
     :: List.map
          (fun diagnostic ->
             (Theme.warn (), "     " ^ Terminal_text.single_line diagnostic))
@@ -250,9 +238,8 @@ let skill_config_line (config : Masc.Tui_decode.skill_catalog_config option) =
    it, so the pane could say a composition had been invoked twelve times
    without ever saying what it invokes.
 
-   The batches are the ordering the server recorded. The per-node dependency
-   edges are recorded too, and they are a graph; a graph does not fit a
-   summary row, so they stay for a detail view that does not exist yet.
+   The batches are the ordering the server recorded. The usage card follows
+   this summary with the complete node, batch and dependency records.
 
    Same arrow as the Goal stage rail and the Fusion topology row, so three
    surfaces spell a pipeline one way. *)
@@ -276,6 +263,33 @@ let skill_flow_line (flow : Masc.Tui_decode.skill_flow) =
   match List.filter_map batch flow.sf_batches with
   | [] -> None
   | parts -> Some (String.concat "  \xe2\x94\x80\xe2\x96\xb6  " parts)
+;;
+
+(* Complete composition metadata, including nodes outside the recorded
+   batches. The final physical-row projection keeps each value reachable. *)
+let skill_flow_detail_lines (flow : Masc.Tui_decode.skill_flow) =
+  let batches = List.map
+    (fun (batch : Masc.Tui_decode.skill_flow_batch) ->
+      Ansi.dim, Printf.sprintf "Batch %d · %s · nodes: %s"
+        batch.sfb_index
+        (Terminal_text.single_line batch.sfb_execution_mode)
+        (String.concat ", " (List.map Terminal_text.single_line batch.sfb_node_ids)))
+    flow.sf_batches in
+  let nodes = List.concat_map
+    (fun (node : Masc.Tui_decode.skill_flow_node) ->
+      (Ansi.dim, Printf.sprintf "Node %s · tool: %s · batch: %d · mode: %s"
+        (Terminal_text.single_line node.sfn_id)
+        (Terminal_text.single_line node.sfn_tool_name) node.sfn_batch_index
+        (Terminal_text.single_line node.sfn_execution_mode))
+      :: (match node.sfn_dependencies with
+          | [] -> [Ansi.dim, "  Dependencies: none"]
+          | dependencies -> List.map
+              (fun (dependency : Masc.Tui_decode.skill_flow_dependency) ->
+                Ansi.dim, Printf.sprintf "  Dependency %s · kind: %s"
+                  (Terminal_text.single_line dependency.sfd_node_id)
+                  (Terminal_text.single_line dependency.sfd_kind)) dependencies))
+    flow.sf_nodes in
+  batches @ nodes
 ;;
 
 let skill_source_lines ~config ~(sources : Masc.Tui_decode.skill_catalog_source list) =
@@ -792,7 +806,7 @@ let tools_display_lines ?(cols = 80) (state : state) =
             (Terminal_text.single_line composition);
           Ansi.dim,
           "   skill snapshot="
-          ^ short_revision (Terminal_text.single_line ets_skill_snapshot_revision);
+          ^ Terminal_text.single_line ets_skill_snapshot_revision;
           Ansi.dim,
           "   deferred resource bound=" ^ Terminal_text.single_line resource_bound;
           Ansi.bold,
@@ -805,7 +819,7 @@ let tools_display_lines ?(cols = 80) (state : state) =
             ets_tool_surface_bytes;
           Ansi.bold,
           "   Skills — J/K select · Enter evidence · e edit · c new instruction · C new composition";
-          Ansi.dim, "   digest=" ^ short_revision (Terminal_text.single_line digest) ]
+          Ansi.dim, "   digest=" ^ Terminal_text.single_line digest ]
         @ skill_profile_lines
         @ selected_skill_flow_lines
         @ selected_skill_evidence_lines
@@ -926,8 +940,7 @@ let tools_display_lines ?(cols = 80) (state : state) =
                     else " \xc2\xb7 " ^ package)
                    (Skill_reference.content_revision_to_string
                       scoped.scope.reference.content_revision
-                    |> Terminal_text.single_line
-                    |> short_revision)
+                    |> Terminal_text.single_line)
                ; Ansi.dim,
                  Printf.sprintf "     turn %s \xc2\xb7 %s \xc2\xb7 snapshot %s"
                    (Ids.Turn_ref.to_string scoped.scope.turn_ref
@@ -936,8 +949,7 @@ let tools_display_lines ?(cols = 80) (state : state) =
                       scoped.scope.invocation_runtime_id)
                    (Skill_catalog_snapshot.snapshot_revision_to_string
                       scoped.scope.snapshot_revision
-                    |> Terminal_text.single_line
-                    |> short_revision)
+                    |> Terminal_text.single_line)
                ]
                (* What the scope amounts to: how many times it was
                   triggered, how many of those were delivered, and what the
@@ -1166,8 +1178,7 @@ let tools_display_lines ?(cols = 80) (state : state) =
         ; Ansi.dim,
           "   workspace="
           ^ (Masc.Keeper_skill_activation_ledger.workspace_key sap_ledger
-             |> Terminal_text.single_line
-             |> short_revision)
+             |> Terminal_text.single_line)
         ]
         @ (if summary.invalid_transitions = 0 then []
            else
@@ -1311,7 +1322,7 @@ let tools_display_lines ?(cols = 80) (state : state) =
               |> List.stable_sort (fun a b -> String.compare a.su_keeper b.su_keeper)
               |> List.map (fun (row : Masc.Tui_decode.skill_usage_row) ->
                   let last_used = match row.su_last_used_at with
-                    | Some at when String.trim at <> "" -> Terminal_text.short_timestamp at
+                    | Some at when String.trim at <> "" -> Terminal_text.single_line at
                     | Some _ | None -> skill_last_used_label None in
                   let line = Tool_table.skill_usage_keeper_line
                     ~keeper:(Terminal_text.single_line row.su_keeper)
@@ -1333,8 +1344,10 @@ let tools_display_lines ?(cols = 80) (state : state) =
             in
             let flow_rows = match surface.scs_flow with
               | None -> []
-              | Some flow -> (match skill_flow_line flow with
-                  | None -> [] | Some line -> [Ansi.dim, line]) in
+              | Some flow ->
+                  (match skill_flow_line flow with
+                   | None -> [] | Some line -> [Ansi.dim, line])
+                  @ skill_flow_detail_lines flow in
             skill_usage_box ~cols
               ([ Ansi.bold, Terminal_text.single_line surface.scs_name ^ "  "
                    ^ Terminal_text.single_line surface.scs_kind
@@ -1370,7 +1383,7 @@ let tools_display_lines ?(cols = 80) (state : state) =
                     in
                     let revision =
                       rejection.scr_content_revision
-                      |> Option.map short_revision
+                      |> Option.map Terminal_text.single_line
                       |> Option.value ~default:"unavailable"
                     in
                     let diagnostics =
@@ -1462,7 +1475,7 @@ let tools_display_lines ?(cols = 80) (state : state) =
         ]
     | Masc_tui_types.Tools_usage ->
         [ Theme.info (), " 현재 Keeper 세션들에서 읽힌 Skill revision별 사용 집계입니다."
-        ; Ansi.dim, "   TRIGGERED/DELIVERED/ACTIONS=호출/전달/이후 행동 · 마지막 사용은 이 터미널 시각"
+        ; Ansi.dim, "   TRIGGERED/DELIVERED/ACTIONS=호출/전달/이후 행동 · 마지막 사용은 원장에 기록된 시각"
         ; Ansi.dim, "   호출 기록이 있는 행만 표시합니다. 읽지 못한 원장은 아래에 표시합니다."
         ]
     | Masc_tui_types.Tools_catalog ->
@@ -1479,5 +1492,17 @@ let tools_display_lines ?(cols = 80) (state : state) =
     | Masc_tui_types.Tools_usage -> Lazy.force usage_matrix_lines
     | Masc_tui_types.Tools_catalog -> Lazy.force catalog_lines
   in
-  explanation @ pane_lines
+  let error_lines = match state.tools_error with
+    | None -> []
+    | Some detail -> [Theme.bad (), "Tools read failed: " ^ Terminal_text.single_line detail]
+  in
+  let width = max 1 (Masc_tui_frame.inner_width ~cols) in
+  error_lines @ explanation @ pane_lines
+  |> List.concat_map (fun (style, text) ->
+       (* Fitted tables and usage cards already own their alignment. Only
+          overlong rows need physical wrapping; never render metadata as
+          Markdown or shorten its identities to fit the frame. *)
+       if Masc_tui_message_layout.display_width text <= width then [style, text]
+       else Masc_tui_message_layout.wrap_words ~max_cells:width text
+            |> List.map (fun line -> style, line))
 ;;

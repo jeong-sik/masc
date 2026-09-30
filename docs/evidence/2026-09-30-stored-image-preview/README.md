@@ -49,8 +49,10 @@ Validation:
 - The Keeper `ocaml-agent-ic` independently advised keeping HTTP refusal
   handling on the fiber, then found that a future-clock loaded row could hide
   an eligible session image. The follow-up selects the eligible session
-  candidate before falling back to the historical timeline. Independent review
-  of this follow-up is still pending.
+  candidate before falling back to the historical timeline. Independent source
+  review passed at `9f539386806b15b2a75c35353bbd40be30f4eb25`. The parent's
+  subsequent queue-status change is integrated with the corresponding PTY
+  expectation updated from waiting to pending.
 
 The registered PTY scenario covers successful retained bytes, HTTP refusal,
 malformed content, queued images and delayed history. Additional queued and

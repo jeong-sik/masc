@@ -46,12 +46,24 @@ def window(output, columns):
     # an Activity pane and still render Code without its left tree.
     counter = rows[position].decode("utf-8", errors="strict")
     boundary = cell_width(counter[:match.start()])
+    # The Recent pane starts one cell after its left border. Its header,
+    # rather than any memo/history payload, identifies the right boundary.
+    right = columns
+    for text in rows.values():
+        header = text.decode("utf-8", errors="strict")
+        marker = header.find("[Recent]")
+        if marker >= 0:
+            right = cell_width(header[:marker]) - 1
+            break
+    assert boundary < right <= columns, (boundary, right, columns)
     body = []
     for offset in range(last - first + 1):
         line = rows.get(position + 1 + offset, b"").decode("utf-8", errors="strict")
         cells = cell_width(line)
         assert cells <= columns, (columns, cells, line)
-        body.append(from_cell(line, boundary))
+        suffix = from_cell(line, right)
+        prefix = line[:len(line) - len(suffix)]
+        body.append(from_cell(prefix, boundary))
     return first, last, total, body
 
 

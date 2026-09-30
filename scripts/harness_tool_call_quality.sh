@@ -14,6 +14,8 @@ MODELS="${TOOL_CALL_QUALITY_MODELS:-}"
 KEEPERS="${TOOL_CALL_QUALITY_KEEPERS:-bench-analyst,bench-executor,bench-verifier}"
 CASE_IDS="${TOOL_CALL_QUALITY_CASE_IDS:-}"
 LIVE_MODE="${TOOL_CALL_QUALITY_LIVE:-0}"
+CHECK_LIVE_PLAN=0
+LIVE_CASE_ROWS=""
 REPEATS="${TOOL_CALL_QUALITY_REPEATS:-3}"
 TIMEOUT_SEC="${TOOL_CALL_QUALITY_TIMEOUT_SEC:-90}"
 WORKSPACE_ROOT="${TOOL_CALL_QUALITY_WORKSPACE_ROOT:-${ROOT_DIR}}"
@@ -42,8 +44,12 @@ Usage:
                                        [--artifact-dir DIR] [--format json|csv]
                                        [--view provider-model-keeper|provider-model|keeper]
 
+  scripts/harness_tool_call_quality.sh --check-live-plan [--cases PATH]
+                                       [--keepers CSV] [--case-ids CSV]
+
 Modes:
   default  Aggregate an existing evidence JSON file through the benchmark CLI.
+  --check-live-plan  Validate selected profiles and prompt assets without execution.
   --live   Start an isolated local MASC server, execute benchmark runs, emit raw
            evidence JSON, then summarize it with the benchmark CLI.
 EOF
@@ -125,7 +131,7 @@ select_case_rows() {
       | select(($case_ids | length) == 0 or ($case_ids | index($case.id)))
       | select(
           ($keepers | length) == 0
-          or ([.keeper_profiles[] | select($keepers | index(.))] | length > 0)
+          or ([.keeper_profiles[] as $profile | select($keepers | index($profile))] | length > 0)
         )
     ' "${CASES_PATH}"
 }
@@ -136,8 +142,9 @@ keeper_profiles_for_case() {
   keepers_json="$(csv_to_json "${KEEPERS}")"
   printf '%s' "${case_json}" \
     | jq -r --argjson keepers "${keepers_json}" '
-        .keeper_profiles[]
-        | select(($keepers | length) == 0 or ($keepers | index(.)))
+        .keeper_profiles[] as $profile
+        | select(($keepers | length) == 0 or ($keepers | index($profile)))
+        | $profile
       '
 }
 
@@ -233,6 +240,42 @@ benchmark_instructions() {
       ;;
   esac
 
+}
+
+# Resolve the entire profile vocabulary before filtering so stale catalog rows
+# cannot silently disappear from a default run. Cache the selected rows before
+# any server or Keeper effects; process-substitution failures cannot hide here.
+prepare_live_plan() {
+  local profiles profile selected_profiles case_json
+  require_cmd jq
+  profiles="$(jq -er '
+    [.cases[] | .keeper_profiles
+      | if type == "array" and length > 0 then .[]
+        else error("case keeper_profiles must be a nonempty array") end
+      | if type == "string" and length > 0 then .
+        else error("keeper profile must be a nonempty string") end]
+    | unique | .[]
+  ' "${CASES_PATH}")" || return 1
+  selected_profiles="$(csv_to_json "${KEEPERS}" | jq -r '.[]')" || return 1
+  while IFS= read -r profile; do
+    [[ -z "${profile}" ]] && continue
+    benchmark_instructions "${profile}" >/dev/null || return 1
+  done <<< "${profiles}
+${selected_profiles}"
+  LIVE_CASE_ROWS="$(select_case_rows)" || return 1
+  if [[ -z "${LIVE_CASE_ROWS}" ]]; then
+    echo "no benchmark cases match the requested cases and keeper profiles" >&2
+    return 1
+  fi
+}
+
+print_live_plan() {
+  local case_json profiles
+  while IFS= read -r case_json; do
+    profiles="$(keeper_profiles_for_case "${case_json}" | jq -Rsc 'split("\n") | map(select(length > 0))')"
+    printf '%s' "${case_json}" | jq -c --argjson profiles "${profiles}" \
+      '{case_id: .id, keeper_profiles: $profiles}'
+  done <<< "${LIVE_CASE_ROWS}"
 }
 
 prepare_live_environment() {
@@ -810,6 +853,7 @@ run_live_harness() {
     exit 2
   fi
 
+  prepare_live_plan
   prepare_live_environment
   start_live_server
 
@@ -834,7 +878,7 @@ run_live_harness() {
             >> "${evidence_jsonl}"
         done
       done < <(keeper_profiles_for_case "${case_json}")
-    done < <(select_case_rows)
+    done <<< "${LIVE_CASE_ROWS}"
   done < <(printf '%s\n' "${MODELS}" | tr ',' '\n')
 
   raw_evidence_path="${LIVE_RUN_DIR}/evidence_runs.json"
@@ -936,6 +980,10 @@ while [[ $# -gt 0 ]]; do
       REQUIRE_ROUTE_EVIDENCE=0
       shift
       ;;
+    --check-live-plan)
+      CHECK_LIVE_PLAN=1
+      shift
+      ;;
     --live)
       LIVE_MODE=1
       shift
@@ -966,7 +1014,10 @@ done
 
 mkdir -p "${OUT_DIR}"
 
-if [[ "${LIVE_MODE}" == "1" ]]; then
+if [[ "${CHECK_LIVE_PLAN}" == "1" ]]; then
+  prepare_live_plan
+  print_live_plan
+elif [[ "${LIVE_MODE}" == "1" ]]; then
   run_live_harness
 else
   run_evidence_summary

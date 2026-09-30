@@ -76,7 +76,7 @@ let load content =
   without_an_installed_client (fun () ->
     with_runtime_toml content (fun config_path ->
       Runtime.load_list ~config_path
-      |> Result.map_error (Runtime.to_diagnostic_text ~config_path)))
+      |> Result.map_error (Runtime_config_error.to_diagnostic_text ~config_path)))
 ;;
 
 (* A binding the adapter cannot build is dropped, not fatal, so the default
@@ -88,13 +88,13 @@ let check_binding_dropped label content =
       match Runtime.load_list ~config_path with
       | Ok _ -> failf "%s: muse-serve admitted it" label
       | Error
-          (Runtime.Default_runtime_unresolved
-            { unresolved_id; declared_drop = Some (Runtime.Execution_unbuildable _); _ }) ->
+          (Runtime_config_error.Default_runtime_unresolved
+            { unresolved_id; declared_drop = Some (Runtime_config_error.Execution_unbuildable _); _ }) ->
         check string (label ^ ": the default names the dropped binding") runtime_id
           unresolved_id
       | Error failure ->
         failf "%s: refused for another reason: %s" label
-          (Runtime.to_diagnostic_text ~config_path failure)))
+          (Runtime_config_error.to_diagnostic_text ~config_path failure)))
 ;;
 
 let parse_error_paths content =
@@ -167,22 +167,22 @@ let test_prompt_ceiling_comes_from_the_window () =
     with_runtime_toml (runtime_toml ~model_extra:"" ~max_context:(Some 15000) ())
       (fun config_path ->
         match Runtime.load_list ~config_path with
-        | Error (Runtime.Muse_window_below_host_overhead { runtime_id = refused; max_context })
+        | Error (Runtime_config_error.Muse_window_below_host_overhead { runtime_id = refused; max_context })
           ->
           check string "the refused runtime" runtime_id refused;
           check int "the window it could not fit in" 15000 max_context
         | Error failure ->
           failf "expected the host-overhead refusal, got: %s"
-            (Runtime.to_diagnostic_text ~config_path failure)
+            (Runtime_config_error.to_diagnostic_text ~config_path failure)
         | Ok _ -> fail "a window below the host overhead must be refused"));
   without_an_installed_client (fun () ->
     with_runtime_toml (runtime_toml ~max_context:(Some 15000) ()) (fun config_path ->
       match Runtime.load_list ~config_path with
-      | Error (Runtime.Muse_window_below_host_overhead { runtime_id = refused; _ }) ->
+      | Error (Runtime_config_error.Muse_window_below_host_overhead { runtime_id = refused; _ }) ->
         check string "a declared value is refused on the same window" runtime_id refused
       | Error failure ->
         failf "expected the host-overhead refusal with a declared value, got: %s"
-          (Runtime.to_diagnostic_text ~config_path failure)
+          (Runtime_config_error.to_diagnostic_text ~config_path failure)
       | Ok _ -> fail "a declared value must not hide a window below the host overhead"));
   let snapshot = Runtime.For_testing.snapshot () in
   Fun.protect
@@ -259,7 +259,7 @@ let test_provider_fields_of_other_clients_are_refused () =
 let test_selected_account_is_required_and_scopes_quota () =
   check_binding_dropped "no selected account" (runtime_toml ~account_home:None ());
   let load_scope home = match load (runtime_toml ~account_home:(Some home) ()) with
-    | Ok (_, runtime, _, _, _) -> runtime.Runtime.quota_scope
+    | Ok (_, runtime, _, _, _) -> runtime.Runtime_instance.quota_scope
     | Error detail -> fail detail in
   let first = load_scope "/synthetic/account-a" in
   let same = load_scope "/synthetic/account-a" in

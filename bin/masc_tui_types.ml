@@ -1762,6 +1762,16 @@ type runtime_lane_list_freshness =
   | Lane_list_read
   | Lane_list_unread of string
 
+(** Identity of an asynchronous diff read, including its destination. *)
+type repository_diff_reader = Repository_diff_reader | Patch_diff_reader
+
+type repository_diff_request =
+  { rdr_reader : repository_diff_reader
+  ; rdr_scope : Tui_decode.repository_change_scope
+  ; rdr_path : string
+  ; rdr_generation : int
+  }
+
 (** Runtime detail is either the workspace route/status document or a stable
     row identity. A row cursor can move after refresh; its detail remains bound
     to the exact lane/runtime pair the operator opened. *)
@@ -6209,6 +6219,7 @@ type state = {
   mutable repository_changes_scroll: int;
   mutable repository_changes_cursor: int;
   mutable repository_changes_diff: (string * Tui_decode.git_diff) option;
+  mutable repository_changes_diff_generation: int;
   mutable repository_changes_diff_error: string option;
   mutable repository_changes_diff_path: string option;
   mutable repository_changes_diff_scroll: int;
@@ -6219,6 +6230,7 @@ type state = {
   mutable patch_modal_scroll: int;
   mutable patch_modal_path: string option;
   mutable patch_modal_diff: (string * Tui_decode.git_diff) option;
+  mutable patch_modal_generation: int;
   mutable patch_modal_error: string option;
   (* Web Link Preview and Rich Embed modal & settings *)
   mutable link_modal_open: bool;
@@ -8364,6 +8376,7 @@ let create_state
   repository_changes_scroll = 0;
   repository_changes_cursor = 0;
   repository_changes_diff = None;
+  repository_changes_diff_generation = 0;
   repository_changes_diff_error = None;
   repository_changes_diff_path = None;
   repository_changes_diff_scroll = 0;
@@ -8372,6 +8385,7 @@ let create_state
   patch_modal_scroll = 0;
   patch_modal_path = None;
   patch_modal_diff = None;
+  patch_modal_generation = 0;
   patch_modal_error = None;
   link_modal_open = false;
   link_modal_scroll = 0;

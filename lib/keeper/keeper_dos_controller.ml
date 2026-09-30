@@ -7,6 +7,8 @@
      purpose: an operator's pause can outlast the game.
    - A Keeper whose stop has finished leaves the registry but keeps its
      meta. A known Keeper with no registry entry has stopped, and is let go.
+     A Keeper removed for good keeps neither, so its shutdown lets the
+     controller go ([release_retired]).
    - Running, Failing, Draining, Restarting, Crashed (whose only way out is
      an automatic restart) and Offline (launch pending) are on their way
      back and keep the controller.
@@ -89,6 +91,16 @@ let before_move ~config ~who =
   in
   (* Board publication must never run while credential writers are excluded. *)
   Tool_misc_dos_lane.after_announcing released
+;;
+
+let release_retired ~keeper_name ~by =
+  match Tool_misc_dos_lane.release_retired_keeper ~holder:keeper_name ~by with
+  | Ok (true | false) | Error Dos_lane.No_machine -> Ok ()
+  | Error
+      (( Dos_lane.Invalid_request _ | Dos_lane.Unreadable _ | Dos_lane.Held_by _
+       | Dos_lane.Guest_fault _ | Dos_lane.Unsaveable _ | Dos_lane.Checkpoint_refused _
+       | Dos_lane.Other_program _ ) as err) ->
+    Error (Dos_lane.error_to_string err)
 ;;
 
 type call_refusal =

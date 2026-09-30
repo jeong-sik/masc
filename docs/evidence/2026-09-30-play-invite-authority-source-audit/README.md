@@ -1,7 +1,7 @@
 # Play invite credential authority repair
 
-Base: `68295be51f33c85f95e97695e56e2a82791dae6a`.
-Branch: `fix/play-invite-authority-20260930`.
+Current full main base: `c112b2030652a5a25360f5d5322f8dc6da99c598`.
+Branch: `fix/play-current-main-20260930`.
 
 ## Source defects
 
@@ -34,7 +34,7 @@ Branch: `fix/play-invite-authority-20260930`.
 - Controller departure carries the existing transaction to the same presence
   helper. Present files and stat/read errors preserve the holder; read or stat
   exceptions retain their cause in Auth warning logs. The old Play presence
-  helper is removed. Both direct test callers now obtain Auth admission.
+  helper is removed. All three direct test callers now obtain Auth admission, including current main's removed Keeper case.
 
 ## Regressions added, execution pending
 
@@ -78,3 +78,9 @@ the regressions.
 ## Refreshed main composition
 
 The September 30 refresh retains main a254129a87bdb388ad9e967332f32b27abaf8779 agent guidance and Server_refusal responses, replaces ignored lstat metadata with an explicit unused binding, and moves the release entry to changelog.d/40136.md. refresh-parse-only.json records syntax parsing only. The prior c121 native run does not validate this refreshed source. Local composition imported only the four overlapping main files; GitData publication starts with the complete pinned main tree.
+
+## Complete current main integration
+
+The current local tree is cloned from complete main `c112b2030652a5a25360f5d5322f8dc6da99c598`; it replaces the earlier four-file local composition. Play source `62a235575d`, audit refresh `dd52508a32` and code-discriminant fixture `886762f483` were cherry-picked without conflicts. The main `release_retired` API and implementation and the complete test/dune bytes are preserved exactly. The new removed Keeper test retains its behavior and now obtains Auth admission for its departure read.
+
+`current-main-source-checks.json` records OCaml 5.5.1 parsing of all thirteen scoped OCaml files, production ignore lint, the changed-line ignore gate, whitespace and committed-diff determinism checks. These pass. The additional whole-file scan including tests reports 45 inherited fixture discard sites; it is explicitly not an all-files lint pass. Historical parse artifacts remain tied to their older captured sources. No local typecheck, Dune, native, network or CI was run, and this source repair does not claim a native compiler success. Root owns current publication and fresh native checks.

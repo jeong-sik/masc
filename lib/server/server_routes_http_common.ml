@@ -246,9 +246,6 @@ let handle_presence_events request reqd =
    the uncached migration stops being N-of-M hand-patching. [cache_key]
    stays caller-built so request params (limit, actor, ...) vary the entry. *)
 let respond_cached_read ?(compress = true) ~request ~reqd ~cache_key ~ttl compute =
-  let payload =
-    Dashboard_cache.get_or_compute_payload cache_key ~ttl (fun () ->
-      Domain_pool_ref.submit_io_or_inline compute)
-  in
-  Http.Response.json_lazy ~compress ~request ~etag:payload.etag
-    (fun () -> payload.raw_json) reqd
+  Server_cached_read_http.respond ~compress ~request reqd
+    (Dashboard_cache.get_or_compute_payload cache_key ~ttl (fun () ->
+       Domain_pool_ref.submit_io_or_inline compute))

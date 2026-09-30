@@ -598,10 +598,10 @@ let test_fusion_and_lane_checks_see_the_same_seats () =
            List.filter_map
              (fun (reference, route) ->
                 if String.equal route "ghost" then Some reference else None)
-             (Runtime.route_references config seats)
+             (Runtime_config_text.route_references config seats)
          in
          check bool (label ^ ": the lane check reports the seat") true
-           (on_ghost = [ Runtime.Fusion_seat { preset = "trio"; seat } ]);
+           (on_ghost = [ Runtime_config_text.Fusion_seat { preset = "trio"; seat } ]);
          match apply path (Masc.Fusion_config_edit.Upsert_preset probe) with
          | Error (Masc.Fusion_config_edit.Route_unresolved { route = "ghost"; _ }) -> ()
          | Error error ->

@@ -10,8 +10,17 @@ include Auth_credential_token
 
 let ensure_keeper_credential_in_transaction
     ((Credential_transaction config) as transaction) ~find_token ~agent_name =
-    ignore (ensure_internal_keeper_token config);
-    let existing = load_credential config agent_name in
+    let ( let* ) = Result.bind in
+    let* present = credential_path_exists (credential_file config agent_name) in
+    let* existing = if not present then Ok None else
+      let* stored = read_stored_credential config agent_name (credential_file config agent_name) in
+      resolve_stored_credential config agent_name stored in
+    let* raw_present = credential_path_exists (raw_token_file config agent_name) in
+    let* raw = if not raw_present then Ok None else
+      credential_read_result (fun () ->
+        read_regular_credential_text (raw_token_file config agent_name)
+        |> String_util.trim_nonempty) in
+    let* _internal = credential_read_result (fun () -> ensure_internal_keeper_token config) in
     let create_fresh_keeper_token () =
       let raw_token = generate_token () in
       let id, agent_id =
@@ -39,7 +48,7 @@ let ensure_keeper_credential_in_transaction
     in
     let result =
       try
-        match load_raw_token config ~agent_name with
+        match raw with
         | Some raw_token ->
           (match find_token ~token:raw_token with
            | Ok cred when String.equal cred.agent_name agent_name -> Ok (raw_token, cred)

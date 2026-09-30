@@ -893,7 +893,7 @@ let observe_credential_publication config (expected : agent_credential) =
     let* present = credential_path_exists path in
     if not present then Ok false
     else
-      let* raw = credential_read_result (fun () -> read_text_file path) in
+      let* raw = credential_read_result (fun () -> read_regular_credential_text path) in
       Ok (String.equal (sha256_hash raw) expected.token)) in
   let credential = observe (fun () ->
     let path = credential_file config expected.agent_name in
@@ -911,7 +911,7 @@ let publish_file_backed_credential_in_transaction
   let ( let* ) = Result.bind in
   let saved_bytes path =
     let* present = credential_path_exists path in
-    if present then credential_read_result (fun () -> read_text_file path) |> Result.map Option.some
+    if present then credential_read_result (fun () -> read_regular_credential_text path) |> Result.map Option.some
     else Ok None in
   let raw_path = raw_token_file config credential.agent_name in
   let named_path = credential_file config credential.agent_name in

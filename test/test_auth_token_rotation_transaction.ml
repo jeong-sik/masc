@@ -418,6 +418,42 @@ let test_fifo_diagnostic_listing_refuses_without_blocking () =
     | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
       fail "diagnostic FIFO read must refuse without waiting for a writer"
 
+let test_publication_fifo_snapshots_refuse_without_blocking () =
+  match Unix.fork () with
+  | 0 ->
+    Sys.set_signal Sys.sigalrm Sys.Signal_default;
+    let _previous_alarm_seconds = Unix.alarm 5 in
+    (try List.iter (fun raw_fifo -> with_workspace (fun base_path ->
+       let _pair = seed_pair base_path in
+       let named = Auth.credential_file base_path "aaa" in
+       let raw = Auth.raw_token_file base_path "aaa" in
+       let occupied, counterpart = if raw_fifo then raw, named else named, raw in
+       let previous = occupied ^ ".preserved" in
+       let before = read counterpart in
+       Unix.rename occupied previous; Unix.mkfifo occupied 0o600;
+       check bool "supplied writer refuses special-file preflight" true
+         (Result.is_error (Auth.save_file_backed_raw_token_credential base_path
+           ~agent_name:"aaa" ~role:Masc_domain.Worker ~raw_token:"new-unpublished"));
+       check bool "Keeper refuses special-file preflight" true
+         (Result.is_error (Auth.ensure_keeper_credential base_path ~agent_name:"aaa"));
+       (match rotate base_path with
+        | Error _ when not raw_fifo -> ()
+        | Ok [{Auth.rotated_agents = ("aaa", Error _) :: _; _}] when raw_fifo -> ()
+        | _ -> fail "rotation must report the occupied special-file refusal");
+       check string "counterpart remains unchanged" before (read counterpart);
+       Unix.unlink occupied; Unix.rename previous occupied;
+       let _restored = auth_ok (Auth.ensure_keeper_credential base_path ~agent_name:"aaa") in
+       check_recoverable base_path "aaa")) [false; true]; exit 0
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn -> prerr_endline (Printexc.to_string exn); exit 2)
+  | pid ->
+    let _, status = Unix.waitpid [] pid in
+    match status with
+    | Unix.WEXITED 0 -> ()
+    | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
+      fail "publication must refuse FIFO paths without waiting for a writer"
+
 let test_keeper_batch_updates_its_admitted_index () =
   with_workspace @@ fun base_path ->
   let _pair = seed_pair base_path in
@@ -432,7 +468,8 @@ let test_keeper_batch_updates_its_admitted_index () =
 let () =
   run "auth_token_rotation_transaction"
     [ "rotation",
-      [ test_case "extended redirects remain current owners" `Quick test_extended_redirect_remains_a_current_owner
+      [ test_case "publication snapshots refuse FIFO without blocking" `Quick test_publication_fifo_snapshots_refuse_without_blocking
+      ; test_case "extended redirects remain current owners" `Quick test_extended_redirect_remains_a_current_owner
       ; test_case "diagnostic listing refuses FIFO without blocking" `Quick test_fifo_diagnostic_listing_refuses_without_blocking
       ; test_case "same-owner partial UUID publication can retry" `Quick test_same_owner_partial_uuid_can_retry
       ; test_case "noncanonical UUID refuses before writes" `Quick test_noncanonical_uuid_is_refused

@@ -171,6 +171,7 @@ val footer_hints_work_tasks : string
 type code_pane =
   | Code_tree  (** the file list has focus *)
   | Code_file  (** a file is open and nothing covers it *)
+  | Code_diff
   | Code_overlay  (** diff is drawn over the file *)
   | Code_notes  (** wrapped memo document is drawn over the file *)
   | Code_history  (** complete history document is drawn over the file *)

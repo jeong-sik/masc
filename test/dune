@@ -7814,6 +7814,8 @@
 
 (include stanzas/test_candle_appraiser_transport.inc)
 
+(include stanzas/test_tui_code_diff_pan_pty.inc)
+
 (rule
  (alias runtest-test_tui_client_connector_layout_pty)
  (deps test_tui_client_connector_layout_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)

@@ -1,0 +1,40 @@
+{
+  "count": 1,
+  "keepers": [
+    {
+      "portrait": {
+        "state": "ready",
+        "equipment": {
+          "face": "bare_face",
+          "neck": "bare_neck",
+          "head": "crown",
+          "hand": "empty_hand",
+          "base": "dish_oak"
+        }
+      },
+      "runtime_class": "keeper",
+      "name": "portrait-http-probe",
+      "meta": {
+        "name": "portrait-http-probe",
+        "trace_id": "trace-portrait-http-probe",
+        "created_at": "1970-01-01T00:00:00Z",
+        "updated_at": "1970-01-01T00:00:00Z",
+        "sandbox_profile": "docker"
+      },
+      "status": "offline",
+      "phase": "offline",
+      "health": "offline",
+      "paused": false,
+      "next_action": "recover",
+      "runtime_blocker_summary": null,
+      "keepalive_running": false,
+      "activation_mode": "autonomous",
+      "runtime_id": "test_provider.test_model",
+      "created_at": "1970-01-01T00:00:00Z",
+      "updated_at": "1970-01-01T00:00:00Z"
+    }
+  ],
+  "total": 1,
+  "limit": 50,
+  "truncated": false
+}

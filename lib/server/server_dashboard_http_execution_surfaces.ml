@@ -772,6 +772,13 @@ let refresh_execution_default_light_http_body ~config =
     ~prepare:Http_response_payload.prepare ~config ()
 ;;
 
+(* Observe equipment after cached response preparation, outside the publication
+   lock, so a completed purchase/equip is not replaced by an older snapshot. *)
+let prepare_execution_snapshot_broadcast ~config () =
+  refresh_execution_default_light_http_body ~config
+  |> Dashboard_projection_cache.with_current_keeper_portraits ~config
+;;
+
 type execution_read =
   | Published_snapshot of Server_dashboard_http_cache.surface_snapshot * Yojson.Safe.t
   | Unpublished_response of Yojson.Safe.t
@@ -1317,7 +1324,7 @@ let start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock =
         broadcast_cached_surface
           ~encoding:Encode_inline
           ~event_type:"execution_snapshot"
-          (refresh_execution_default_light_http_body ~config:workspace_config);
+          (prepare_execution_snapshot_broadcast ~config:workspace_config ());
         !broadcast_namespace_truth_ref state))
 ;;
 
@@ -1352,7 +1359,7 @@ let execution_cached_http_representation ~(config : Workspace.config)
   let { fixture; actor; full_mode; force } = parameters in
   match fixture, actor, full_mode, force with
   | None, None, false, false ->
-    with_execution_publication_lock (fun () ->
+    let selected = with_execution_publication_lock (fun () ->
       match !execution_default_light_http with
       | Ready payload
         when execution_surface_has_fresh_success_unlocked ()
@@ -1361,8 +1368,13 @@ let execution_cached_http_representation ~(config : Workspace.config)
           Http_response_payload.select_prepared payload.encoded
             ~accept_encoding:(Httpun.Headers.get request.headers "accept-encoding")
         in
-        Some (body, payload.etag, headers)
-      | Empty | Preparing _ | Ready _ -> None)
+        Some (payload.response_json, (body, payload.etag, headers))
+      | Empty | Preparing _ | Ready _ -> None) in
+    (match selected with
+     | Some (json, representation)
+       when Dashboard_projection_cache.with_current_keeper_portraits ~config json = json ->
+       Some representation
+     | Some _ | None -> None)
   | _ -> None
 ;;
 
@@ -1385,6 +1397,8 @@ module For_testing = struct
   let refresh_execution_default_light_http_body
         ?(prepare = Http_response_payload.prepare) ~config () =
     refresh_execution_default_light_http_body_with ~prepare ~config ()
+
+  let prepare_execution_snapshot_broadcast = prepare_execution_snapshot_broadcast
 
   let prepared_payload_for_snapshot = prepared_execution_payload_for_snapshot
 end
@@ -1487,7 +1501,7 @@ type execution_http_response =
   | Execution_json of Yojson.Safe.t
   | Execution_payload of Dashboard_cache.cached_payload
 
-let dashboard_execution_http_response ~sw ~clock context =
+let cached_dashboard_execution_http_response ~sw ~clock context =
   let state = context.state in
   let config = context.config in
   let net = state.Mcp_server.net in
@@ -1660,6 +1674,19 @@ let dashboard_execution_http_response ~sw ~clock context =
       Execution_json
         (with_execution_metadata ~config ~cache_key ~query payload.json)
     else Execution_payload payload
+;;
+
+let dashboard_execution_http_response ~sw ~clock context =
+  let response = cached_dashboard_execution_http_response ~sw ~clock context in
+  match context.parameters.fixture with
+  | Some _ -> response
+  | None ->
+    let refresh = Dashboard_projection_cache.with_current_keeper_portraits ~config:context.config in
+    match response with
+    | Execution_json json -> Execution_json (refresh json)
+    | Execution_payload payload ->
+      let json = refresh payload.json in
+      if json = payload.json then response else Execution_json json
 ;;
 
 let dashboard_execution_http_json ~state ~sw ~clock request =

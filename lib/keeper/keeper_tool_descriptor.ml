@@ -1575,6 +1575,7 @@ let portrait_read_output_schema =
       ; "preview_item", `Assoc
           [ "type", `List [ `String "string"; `String "null" ] ]
       ; "starting_equipment", equipment
+      ; "current_equipment", equipment
       ; "equipment", equipment
       ; "catalog", `Assoc [ "type", `String "array"; "items", item ]
       ; "artifact", `Assoc [ "type", `String "string" ]
@@ -1583,7 +1584,7 @@ let portrait_read_output_schema =
       ; "height", `Assoc [ "type", `String "integer" ]
       ; "bytes", `Assoc [ "type", `String "integer" ]
       ]
-    ~required:[ "name"; "mode"; "preview_item"; "starting_equipment"; "equipment"
+    ~required:[ "name"; "mode"; "preview_item"; "starting_equipment"; "current_equipment"; "equipment"
               ; "catalog"; "artifact"; "media_type"; "width"; "height"; "bytes" ]
 ;;
 
@@ -3002,6 +3003,7 @@ let internal_descriptors : t list =
   ; masc_misc_descriptor ~ordinary_execution_mode:Concurrent "candle_balance" "keeper_candle_balance" ~readonly:true
   ; masc_misc_descriptor ~ordinary_execution_mode:Concurrent "candle_catalog" "keeper_candle_catalog" ~readonly:true
   ; masc_misc_descriptor "candle_purchase" "keeper_candle_purchase" ~readonly:false
+  ; masc_misc_descriptor "candle_equip" "keeper_candle_equip" ~readonly:false
   (* MSX lane (RFC-0439 §3.5): the shared machine is one piece of state, so
      none of these opts into concurrent batches. *)
   ; masc_misc_descriptor "msx_load" "masc_msx_load" ~readonly:false

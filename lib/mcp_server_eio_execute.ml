@@ -442,6 +442,7 @@ let execute_tool_eio
                     | Some Tool_schemas_misc.Misc_candle_balance -> candle Keeper_candle_tools.Balance
                     | Some Tool_schemas_misc.Misc_candle_catalog -> candle Keeper_candle_tools.Catalog
                     | Some Tool_schemas_misc.Misc_candle_purchase -> candle Keeper_candle_tools.Purchase
+                    | Some Tool_schemas_misc.Misc_candle_equip -> candle Keeper_candle_tools.Equip
                     (* Keeper-only, like spawn and code_query above: the
                        portrait is the Keeper's own, drawn from its name, and
                        this endpoint has no Keeper turn to name. The name is

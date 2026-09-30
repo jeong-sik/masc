@@ -58,7 +58,7 @@ let goal_ids events =
        | E.Unattributed { goal_id; _ }
        | E.Payout_failed { goal_id; _ } -> goal_id
        | E.Paid p -> p.identity.goal_id
-       | E.Purchased _ -> Alcotest.fail "a purchase has no Goal identity")
+       | E.Equipped _ | E.Purchased _ -> Alcotest.fail "a purchase has no Goal identity")
     events
 ;;
 

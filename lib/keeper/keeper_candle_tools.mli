@@ -5,6 +5,7 @@ type operation =
   | Balance
   | Catalog
   | Purchase
+  | Equip
 
 val handle
   :  operation:operation

@@ -20,6 +20,7 @@
   masc.keeper_portrait
   masc_candle_store
   masc_candle_config
+  masc_keeper_identity
   masc_goal
   masc_workspace
   masc_types

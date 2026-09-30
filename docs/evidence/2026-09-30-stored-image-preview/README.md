@@ -1,5 +1,7 @@
 # Stored image preview
 
+Patched execution follow-up: [2026-10-01 Queue/image build and PTY evidence](../2026-10-01-tui-queue-image/README.md). The observations below retain their original source/binary scope.
+
 Issue: https://github.com/jeong-sik/masc/issues/40081
 
 The installed TUI 0.49.0 was run in an isolated PTY against an HTTP fixture,

@@ -1,5 +1,3 @@
-module Tui_decode = Masc.Tui_decode
-
 type row = {
   scope_id : string;
   kind : string;
@@ -46,12 +44,12 @@ end
 module Key_map = Map.Make (Key)
 module Day_map = Map.Make (Int)
 
-let of_history ~share (history : Tui_decode.provider_usage_history) =
+let of_history ~share (history : Masc.Tui_decode_usage.provider_usage_history) =
   let last_day = utc_day history.puh_generated_at in
   let first_day = last_day - history.puh_days + 1 in
   let by_key =
     List.fold_left
-      (fun acc (point : Tui_decode.provider_usage_history_point) ->
+      (fun acc (point : Masc.Tui_decode_usage.provider_usage_history_point) ->
         let key = (point.puhp_scope_id, point.puhp_kind, point.puhp_limit_id) in
         let day = utc_day point.puhp_observed_at in
         Key_map.update key

@@ -99,8 +99,12 @@ def run(executable, no_color=False):
         key(b"\x1b",b"studio.enabled")
         key(b"j",b"studio.mode")
         wrapped=capture("system-long-comparison",30,80,b"mention_or_thread")
-        for needle in (b"Current user_only:",b"Default mention_or_thread",b"override"):
-            if needle not in wrapped: raise AssertionError(f"System omitted comparison clause {needle!r}")
+        # Exact JSON strings are drawn separately and may wrap across rows.
+        comparison = re.sub(rb"\s+", b"", wrapped)
+        current = fixtures["/api/v1/runtime/params"][1]["parameters"][1]["current"]
+        for needle in (b"Current" + json.dumps(current).encode(),
+                       b'Default"mention_or_thread"', b"override"):
+            if needle not in comparison: raise AssertionError(f"System omitted comparison clause {needle!r}")
         key(b":go Dashboard\r",b"MASC Dashboard")
         os.write(fd,b"q")
     h.run_terminal_scenario(executable,description="surface studio"+(" no color" if no_color else ""),

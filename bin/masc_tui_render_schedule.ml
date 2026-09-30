@@ -372,10 +372,7 @@ let workspace_branch_width = 12
 let workspace_status_width = 9
 let workspace_sync_width = 6
 
-(* A path is the one reading here with no widest form; it takes what the named
-   columns leave. Below this it is folded so hard that neither end identifies
-   the repository, and the screen is better off dropping cells from the frame
-   than showing a path nobody can place. *)
+(* A path keeps a readable floor while auxiliary columns give way. *)
 let workspace_minimum_path_width = 8
 
 type workspace_row_values = {
@@ -394,27 +391,52 @@ let workspace_no_values =
   ; wrow_path = ""
   }
 
-let workspace_cells ~path_width values =
-  [ Table.cell ~header:"NAME" ~width:workspace_name_width values.wrow_name
-  ; Table.cell ~header:"BRANCH" ~width:workspace_branch_width values.wrow_branch
-  ; Table.cell ~header:"STATUS" ~width:workspace_status_width values.wrow_status
-  ; Table.cell ~header:"SYNC" ~width:workspace_sync_width values.wrow_sync
-  ; Table.cell ~header:"PATH" ~width:path_width values.wrow_path
-  ]
+type workspace_column =
+  | Workspace_name
+  | Workspace_branch
+  | Workspace_status
+  | Workspace_sync
+  | Workspace_path
 
-let workspace_path_width ~inner_width =
-  let named =
-    Table.used_width
-      (workspace_cells ~path_width:0 workspace_no_values)
-  in
-  max workspace_minimum_path_width (inner_width - named)
+let workspace_column_width = function
+  | Workspace_name -> workspace_name_width
+  | Workspace_branch -> workspace_branch_width
+  | Workspace_status -> workspace_status_width
+  | Workspace_sync -> workspace_sync_width
+  | Workspace_path -> workspace_minimum_path_width
 
-let workspace_header_row ~path_width =
-  Table.header_row
-    (workspace_cells ~path_width workspace_no_values)
+let workspace_columns =
+  [ Workspace_name; Workspace_branch; Workspace_status; Workspace_sync; Workspace_path ]
 
-let workspace_row ~path_width values =
-  Table.row (workspace_cells ~path_width values)
+let workspace_minimum_width =
+  Table.used_width
+    (List.map (fun column -> Table.cell ~header:""
+       ~width:(workspace_column_width column) "") workspace_columns)
+
+let workspace_layout ~inner_width =
+  Table.fit ~inner_width ~width:workspace_column_width ~flex:Workspace_path
+    ~drop_order:[ Workspace_sync; Workspace_branch ] workspace_columns
+
+let workspace_cells ~(layout : workspace_column Table.layout) values =
+  List.map
+    (function
+      | Workspace_name ->
+          Table.cell ~header:"NAME" ~width:workspace_name_width values.wrow_name
+      | Workspace_branch ->
+          Table.cell ~header:"BRANCH" ~width:workspace_branch_width values.wrow_branch
+      | Workspace_status ->
+          Table.cell ~header:"STATUS" ~width:workspace_status_width values.wrow_status
+      | Workspace_sync ->
+          Table.cell ~header:"SYNC" ~width:workspace_sync_width values.wrow_sync
+      | Workspace_path ->
+          Table.cell ~header:"PATH" ~width:layout.Table.flex_width values.wrow_path)
+    layout.Table.shown
+
+let workspace_header_row ~layout =
+  Table.header_row (workspace_cells ~layout workspace_no_values)
+
+let workspace_row ~layout values =
+  Table.row (workspace_cells ~layout values)
 
 (* System log columns.
 
@@ -473,36 +495,56 @@ let system_log_no_values =
   ; slog_message = ""
   }
 
+type system_log_column =
+  | Log_time
+  | Log_level
+  | Log_module
+  | Log_keeper
+  | Log_category
+  | Log_message
+
+let system_log_column_width = function
+  | Log_time -> system_log_time_width
+  | Log_level -> system_log_level_width
+  | Log_module -> system_log_module_width
+  | Log_keeper -> system_log_keeper_width
+  | Log_category -> system_log_category_width
+  | Log_message -> system_log_minimum_message_width
+
+let system_log_layout ~inner_width =
+  Table.fit ~inner_width ~width:system_log_column_width ~flex:Log_message
+    ~drop_order:[ Log_category; Log_keeper; Log_module ]
+    [ Log_time; Log_level; Log_module; Log_keeper; Log_category; Log_message ]
+
 let system_log_cells ?(styles = system_log_plain_styles) ?(level_style = "")
-    ~message_width values =
-  [ Table.cell ~style:styles.slog_time_style ~header:"TIME"
-      ~width:system_log_time_width values.slog_time
-  ; Table.cell ~style:level_style ~header:"LEVEL"
-      ~width:system_log_level_width values.slog_level
-  ; Table.cell ~style:styles.slog_module_style ~header:"MODULE"
-      ~width:system_log_module_width values.slog_module
-  ; Table.cell ~style:styles.slog_keeper_style ~header:"KEEPER"
-      ~width:system_log_keeper_width values.slog_keeper
-  ; Table.cell ~style:styles.slog_category_style ~header:"CATEGORY"
-      ~width:system_log_category_width values.slog_category
-  ; Table.cell ~fold:Table.Fold_tail ~header:"MESSAGE" ~width:message_width
-      values.slog_message
-  ]
+    ~(layout : system_log_column Table.layout) values =
+  List.map
+    (function
+      | Log_time ->
+          Table.cell ~style:styles.slog_time_style ~header:"TIME"
+            ~width:system_log_time_width values.slog_time
+      | Log_level ->
+          Table.cell ~style:level_style ~header:"LEVEL"
+            ~width:system_log_level_width values.slog_level
+      | Log_module ->
+          Table.cell ~style:styles.slog_module_style ~header:"MODULE"
+            ~width:system_log_module_width values.slog_module
+      | Log_keeper ->
+          Table.cell ~style:styles.slog_keeper_style ~header:"KEEPER"
+            ~width:system_log_keeper_width values.slog_keeper
+      | Log_category ->
+          Table.cell ~style:styles.slog_category_style ~header:"CATEGORY"
+            ~width:system_log_category_width values.slog_category
+      | Log_message ->
+          Table.cell ~fold:Table.Fold_tail ~header:"MESSAGE"
+            ~width:layout.Table.flex_width values.slog_message)
+    layout.Table.shown
 
-let system_log_message_width ~inner_width =
-  let named =
-    Table.used_width
-      (system_log_cells ~message_width:0 system_log_no_values)
-  in
-  max system_log_minimum_message_width (inner_width - named)
+let system_log_header_row ~layout =
+  Table.header_row (system_log_cells ~layout system_log_no_values)
 
-let system_log_header_row ~message_width =
-  Table.header_row
-    (system_log_cells ~message_width system_log_no_values)
-
-let system_log_row ~styles ~level_style ~message_width values =
-  Table.row
-    (system_log_cells ~styles ~level_style ~message_width values)
+let system_log_row ~styles ~level_style ~layout values =
+  Table.row (system_log_cells ~styles ~level_style ~layout values)
 
 (* Task Review columns.
 

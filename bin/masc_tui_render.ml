@@ -7249,6 +7249,20 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
         | Detail_identity | Detail_channels | Detail_automation | Detail_runs), _ -> None
     in
 
+    let portrait =
+      match state.detail_tab, portrait with
+      | Detail_items, Some band ->
+          let labels = List.mapi (fun index item ->
+            Printf.sprintf "  > %2d %-5s %s equipped"
+              (index + 1)
+              (Keeper_portrait_item.slot_id (Keeper_portrait_item.slot item))
+              (Keeper_portrait_item.id item)) Keeper_portrait_item.all in
+          if List.exists (fun line -> Message_layout.display_width line > inner)
+               (Masc_tui_keeper_portrait.beside band labels)
+          then None else Some band
+      | _, portrait -> portrait
+    in
+
     let item_lines () =
       let items = Keeper_portrait_item.all in
       let count = List.length items in

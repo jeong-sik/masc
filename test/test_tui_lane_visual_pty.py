@@ -231,11 +231,13 @@ def run_navigation_consistency(executable: str) -> None:
             return terminal.send_and_wait(process, master, output, value, needle)
 
         def capture(name, frame):
+            drawn = bytes(output)
+            frame = drawn[drawn.rfind(terminal.FULL_REDRAW):]
             print("STUDIO_CAPTURE=" + json.dumps({
                 "name": name, "rows": 30, "columns": 100,
                 "provenance": "CI fixture PTY",
                 "frame_b64": base64.b64encode(frame).decode(),
-                "screen": terminal.screen_text(frame).decode(errors="replace")}), flush=True)
+                "screen": b"\n".join(terminal.screen_rows(frame).get(row, b"") for row in range(1, 31)).decode(errors="replace")}), flush=True)
 
         terminal.wait_for_output(process, master, output, b"Health: ", start=0, timeout=10)
         for name in (b"Dashboard", b"Work", b"Keepers", b"Usage", b"Board", b"Workspace", b"System"):

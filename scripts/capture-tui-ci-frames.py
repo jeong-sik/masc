@@ -75,6 +75,13 @@ def binary_hashes(log: str) -> set[str]:
     return result
 
 
+def expected_rows(record: dict) -> list[str]:
+    lines = record["screen"].split("\n")
+    if len(lines) != record["rows"]:
+        raise ValueError("PTY screen row count differs from recorded terminal geometry")
+    return [line.rstrip(" ") for line in lines]
+
+
 def terminal_layout(page) -> dict:
     """Measure the actual terminal pixels and any clipping ancestors."""
     return page.evaluate("""() => {
@@ -281,14 +288,13 @@ def main() -> None:
                     page.keyboard.press("Enter")
                     # Both records contain terminal padding. Ignore only
                     # trailing ASCII spaces; retain all other content/cells.
-                    expected = [line.rstrip(" ") for line in record["screen"].splitlines()
-                                if line.strip(" ")]
+                    expected = expected_rows(record)
                     page.wait_for_function(
                         """expected => {
                           const buffer = window.term.buffer.active;
                           const lines = Array.from({length: window.term.rows}, (_, i) =>
                             buffer.getLine(i)?.translateToString(true) ?? '')
-                            .map(line => line.replace(/ +$/, '')).filter(line => line.length > 0);
+                            .map(line => line.replace(/ +$/, ''));
                           return JSON.stringify(lines) === JSON.stringify(expected);
                         }""",
                         arg=expected,

@@ -1,5 +1,6 @@
 """Pending input stays visible as ownership moves from the TUI to the server."""
 import argparse
+import json
 import os
 from pathlib import Path
 import threading
@@ -11,6 +12,83 @@ SOURCE_MODULES = (
     "bin/masc_tui_render_chat.ml",
 )
 CHAT = "Keepers ▸ alpha ▸ chat".encode()
+
+
+class AcceptedQueueReconnectFixture:
+    """Keep acceptance, transport loss, run start and terminal truth separate.
+
+    The Atomic fixture's held Esc receipt keeps a later Enter local. Rechecking
+    delivery alone is not expected to prevent an already accepted FIFO input
+    from admitting another message.
+    """
+
+    def __init__(self):
+        self.queue = h.AtomicChatFixture()
+        self.fixtures = self.queue.fixtures
+        self.fixtures["/api/v1/keepers/chat/stream"] = h.RequestHttpResponse(self.stream)
+        self.disconnect = threading.Event()
+        self.reconnect_requested = threading.Event()
+        self.release_run_start = threading.Event()
+        self.release_terminal = threading.Event()
+        self.terminal_sent = threading.Event()
+        self.attempts = []
+        self.lock = threading.Lock()
+        self.acceptance = None
+
+    def stream(self, body):
+        request = json.loads(body)
+        with self.lock:
+            attempt = len(self.attempts)
+            self.attempts.append(request)
+        if attempt == 0:
+            response = self.queue.stream(body)
+
+            def accepted_then_disconnect():
+                chunks = response.chunks()
+                try:
+                    self.acceptance = next(chunks)
+                    yield self.acceptance
+                    if not self.disconnect.wait(timeout=30):
+                        raise AssertionError("accepted stream was never disconnected")
+                    # Closing this HTTP body without RUN_FINISHED makes its
+                    # accepted operation unresolved, rather than failed.
+                finally:
+                    chunks.close()
+
+            return h.StreamingHttpResponse(accepted_then_disconnect)
+        if attempt == 1:
+            original = self.attempts[0]
+            if request["request_id"] != original["request_id"] or request["message"] != original["message"]:
+                raise AssertionError("reconnect did not preserve the accepted request")
+            self.reconnect_requested.set()
+            if not self.release_run_start.wait(timeout=30):
+                raise AssertionError("reconnect run-start gate was never released")
+            response = h.keeper_chat_succeeded_response(body)
+            blocks = [block for block in response.body.split(b"\n\n") if block]
+
+            def run_then_terminal():
+                if self.acceptance is None:
+                    raise AssertionError("reconnect preceded the initial acceptance")
+                # A re-subscription repeats acceptance, then exposes only
+                # RUN_STARTED. No reply or terminal event can explain the
+                # ensuing reduction in the pending count.
+                yield self.acceptance + blocks[1] + b"\n\n"
+                if not self.release_terminal.wait(timeout=30):
+                    raise AssertionError("reconnect terminal gate was never released")
+                self.terminal_sent.set()
+                yield b"\n\n".join(blocks[2:]) + b"\n\n"
+
+            return h.StreamingHttpResponse(run_then_terminal)
+        if attempt != 2 or request["message"] != "held-local-next":
+            raise AssertionError(f"unexpected additional chat POST: {request!r}")
+        return self.queue.stream(body)
+
+    def release_all(self):
+        self.disconnect.set()
+        self.release_run_start.set()
+        self.release_terminal.set()
+        self.queue.release_interrupt.set()
+        self.queue.release.set()
 
 
 def run(executable: str, evidence_dir: Path | None = None) -> None:
@@ -173,6 +251,101 @@ def run(executable: str, evidence_dir: Path | None = None) -> None:
         interact=h.chat_reconcile_interaction(gate, requests),
         http_fixtures=fixtures,
         http_requests=requests,
+    )
+
+    reconnect = AcceptedQueueReconnectFixture()
+
+    def accepted_reconnect_interaction(process, fd, _slave_fd, output, _base_path):
+        def assert_local_pending(name, *, count, delivery=None):
+            screen = capture(output, name)
+            for expected in (f"Queue ({count} pending".encode(), b'Local NEXT: "held-local-next"'):
+                if expected not in screen:
+                    raise AssertionError("pending queue lost its local input: " + repr(screen))
+            if delivery is not None and delivery not in screen:
+                raise AssertionError("pending queue lost its delivery evidence: " + repr(screen))
+            return screen
+
+        try:
+            h.open_atomic_chat(process, fd, output)
+            h.send_and_wait(process, fd, output, b"accepted-before-cut", h.composer_showing(b"accepted-before-cut"))
+            h.send_and_wait(process, fd, output, b"\r", b"1 queued at Keeper")
+            accepted = capture(output, "accepted-before-disconnect")
+            if b"Queue (1 pending" not in accepted or b"rechecking delivery" in accepted:
+                raise AssertionError("initial queued receipt was not visible: " + repr(accepted))
+
+            # This explicit control receipt, not reconnect state, is what
+            # keeps the next Enter local across RUN_STARTED and terminal.
+            os.write(fd, b"\x1b")
+            if not h.wait_for_fixture_event(process, fd, output, reconnect.queue.interrupted, timeout=5):
+                raise AssertionError("Esc control receipt was not held")
+            h.send_and_wait(process, fd, output, b"held-local-next", h.composer_showing(b"held-local-next"))
+            h.send_and_wait(process, fd, output, b"\r", b"Queue (2 pending")
+            assert_local_pending("accepted-with-local-next", count=2, delivery=b"1 queued at Keeper")
+
+            disconnected_from = len(output)
+            reconnect.disconnect.set()
+            if not h.wait_for_fixture_event(process, fd, output, reconnect.reconnect_requested, timeout=5):
+                raise AssertionError("accepted operation was not re-subscribed")
+            h.wait_for_output(process, fd, output, b"1 rechecking delivery", start=disconnected_from, timeout=5)
+            rechecking_end = h.end_of_needle(output, b"1 rechecking delivery", disconnected_from)
+            h.wait_for_output(process, fd, output, h.FRAME_END, start=rechecking_end, timeout=5)
+            rechecking = assert_local_pending("accepted-rechecking", count=2, delivery=b"1 rechecking delivery")
+            if b"queued at Keeper" in rechecking:
+                raise AssertionError("the old queued receipt still appeared current after disconnect")
+            if len(reconnect.attempts) != 2:
+                raise AssertionError("local input was dispatched before the control receipt")
+
+            running_from = len(output)
+            reconnect.release_run_start.set()
+            h.wait_for_output(process, fd, output, b"Queue (1 pending", start=running_from, timeout=5)
+            running_end = h.end_of_needle(output, b"Queue (1 pending", running_from)
+            h.wait_for_output(process, fd, output, h.FRAME_END, start=running_end, timeout=5)
+            running = assert_local_pending("reconnected-running", count=1)
+            if any(stale in running for stale in (b"queued at Keeper", b"rechecking delivery", b"awaiting receipt")):
+                raise AssertionError("RUN_STARTED left the accepted request in pending delivery: " + repr(running))
+            if reconnect.release_terminal.is_set() or reconnect.terminal_sent.is_set():
+                raise AssertionError("terminal truth escaped before the RUN_STARTED frame assertion")
+            if len(reconnect.attempts) != 2:
+                raise AssertionError("RUN_STARTED dispatched the local input despite its held control receipt")
+
+            terminal_from = len(output)
+            reconnect.release_terminal.set()
+            h.wait_for_output(process, fd, output, b"reply-accepted-before-cut", start=terminal_from, timeout=5)
+            # Release the explicit Esc receipt only after the original reply.
+            # The remaining local input must enter the server exactly once.
+            local_reply_from = len(output)
+            reconnect.queue.release.set()
+            reconnect.queue.release_interrupt.set()
+            h.wait_for_atomic_admissions(process, fd, output, reconnect.queue, 2)
+            local_reply = b"reply-held-local-next"
+            h.wait_for_output(process, fd, output, local_reply, start=local_reply_from, timeout=10)
+            local_reply_end = h.end_of_needle(output, local_reply, local_reply_from)
+            h.wait_for_output(process, fd, output, h.FRAME_END, start=local_reply_end, timeout=5)
+            original, retry, later = reconnect.attempts
+            if original["request_id"] != retry["request_id"] or later["request_id"] == original["request_id"]:
+                raise AssertionError("reconnect or later input changed request identity")
+            if [item["message"] for item in reconnect.attempts] != [
+                "accepted-before-cut", "accepted-before-cut", "held-local-next"
+            ]:
+                raise AssertionError("accepted input or local NEXT was lost or duplicated")
+            # A reply-bearing completed frame proves that pending input
+            # drained. It does not prove the client consumed RUN_FINISHED:
+            # working requests also correctly disappear from this count.
+            drained = capture(output, "reconnect-pending-drained")
+            if local_reply not in drained or b"Queue (" in drained:
+                raise AssertionError("the local reply frame did not show a drained pending queue: " + repr(drained))
+            h.escape_to_keeper_detail(process, fd, output, name=b"alpha")
+            h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+            os.write(fd, b"q")
+        finally:
+            reconnect.release_all()
+
+    h.run_terminal_scenario(
+        executable,
+        description="Accepted queue rechecks delivery and leaves pending at RUN_STARTED",
+        interact=accepted_reconnect_interaction,
+        http_fixtures=reconnect.fixtures,
+        refresh=0.2,
     )
 
 

@@ -229,8 +229,7 @@ let test_the_approvals_title_counts_what_the_badge_counts () =
   Alcotest.(check int) "the title walks the shared pending helper" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:render
        ~binding_name:"render_approvals"
-       ~callee:"Masc_tui_approvals_model.approvals_surface_pending"
-);
+       ~callee:"Masc_tui_approvals_model.approvals_surface_pending");
   (* And names every kind it counted. A total with an unnamed part reads as
      an arithmetic error on screen. *)
   Alcotest.(check int) "the four kinds the surface answers" 4

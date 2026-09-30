@@ -336,6 +336,12 @@ reveal a hidden toggle that had no visible effect when it was pressed.
 
 ### The Activity pane
 
+Home keeps the Recent pane closed by default even on a wide terminal. An
+explicit `Ctrl-L` or `/activity fleet` choice opens it; that choice survives
+navigation and resizing. Other eligible surfaces retain their narrow default.
+On a short Home, decision and continuation destinations take the available
+rows before the ancillary health and completed-work context.
+
 `Ctrl-L` walks the pane on the right of eligible surfaces through narrow, wide
 and hidden. Activity and Logs keep this pane off, since it would repeat their
 own stream, and so does an open modal or the browser lane. On eligible surfaces

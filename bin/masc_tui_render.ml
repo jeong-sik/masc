@@ -138,7 +138,7 @@ let acting_pane_suppressed (state : state) =
 
 let acting_pane_columns (state : state) ~terminal_cols =
   if acting_pane_suppressed state then 0
-  else Masc_tui_acting_pane.drawn_cols ~layout:state.acting_pane_layout ~cols:terminal_cols
+  else Masc_tui_acting_pane.drawn_cols ~layout:(acting_pane_layout state) ~cols:terminal_cols
 
 (* The runtime picker measures this string to decide its column widths, so the
    format lives beside that arithmetic. *)
@@ -325,26 +325,72 @@ let render_overview (state : state) =
     ~title:(overview_header state)
     ~status:[ Masc_tui_footer.Refresh_interval state.refresh_interval ]
     ~hints:(Masc_tui_keys.footer_hints Overview)
-    ~body:(fun ~budget:_ c ->
-      c.push health;
-      c.push_styled ~style:(Theme.recede ()) work;
-      Option.iter (fun notice -> c.push (" " ^ Terminal_text.single_line notice))
-        state.opening_notice;
-      c.push_empty ();
+    ~body:(fun ~budget c ->
       let draw_row (action, label) =
         let line = "  " ^ label in
         if Some action = selected then c.push_selected line else c.push line
       in
-      (match decisions with
-       | [] -> c.push_styled ~style:(Theme.recede ())
-           " No decision is waiting on you."
-       | _ :: _ ->
-           c.push_styled ~style:Ansi.bold " Needs your decision";
-           List.iter draw_row decisions);
-      c.push_empty ();
-      c.push_styled ~style:Ansi.bold " Continue";
-      List.iter draw_row continuation;
-      if Option.is_some state.home_selected && Option.is_none selected then
+      let selection_changed =
+        Option.is_some state.home_selected && Option.is_none selected
+      in
+      let warning_rows = if selection_changed then 1 else 0 in
+      let actions = decisions @ continuation in
+      (* Headers and action destinations take precedence over health/history
+         context. A wider queue is still an aggregate destination here, not
+         a reason to push continuation below the screen. *)
+      let essential_rows = List.length actions + 2 + warning_rows in
+      if budget >= essential_rows then begin
+        let spare = budget - essential_rows in
+        let context =
+          let readings =
+            [ (None, health); (Some (Theme.recede ()), work) ]
+          in
+          match state.opening_notice with
+          | None -> readings
+          | Some notice ->
+              let notice = (None, " " ^ Terminal_text.single_line notice) in
+              if spare < List.length readings + 1 then notice :: readings
+              else readings @ [notice]
+        in
+        let shown_context = List.take (min spare (List.length context)) context in
+        List.iter
+          (function
+            | None, text -> c.push text
+            | Some style, text -> c.push_styled ~style text)
+          shown_context;
+        let gaps = spare - List.length shown_context in
+        if gaps > 0 then c.push_empty ();
+        (match decisions with
+         | [] -> c.push_styled ~style:(Theme.recede ())
+             " No decision is waiting on you."
+         | _ :: _ ->
+             c.push_styled ~style:Ansi.bold " Needs your decision";
+             List.iter draw_row decisions);
+        if gaps > 1 then c.push_empty ();
+        c.push_styled ~style:Ansi.bold " Continue";
+        List.iter draw_row continuation
+      end else begin
+        (* Extremely short terminals show destinations around the selected
+           identity. j/k reaches every destination; this is a viewport limit,
+           never a limit on requests or execution. *)
+        let available = max 0 (budget - warning_rows) in
+        let count = List.length actions in
+        let index =
+          match List.find_index (fun (action, _) -> Some action = selected) actions with
+          | Some index -> index
+          | None -> 0
+        in
+        let show_position = available > 1 in
+        let height = max 0 (available - if show_position then 1 else 0) in
+        let first = max 0 (min index (count - height)) in
+        let window = List.drop first actions |> List.take height in
+        if show_position then
+          c.push_styled ~style:(Theme.recede ())
+            (Printf.sprintf " Home destinations · %d-%d/%d · j/k to choose"
+               (first + 1) (first + List.length window) count);
+        List.iter draw_row window
+      end;
+      if selection_changed then
         c.push_styled ~style:(Theme.warn ()) " Selection changed · j/k to choose again")
 
 (* One task's event history, appended after the detail body so it rides the

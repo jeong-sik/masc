@@ -13159,10 +13159,8 @@ let render_acting (state : state) =
   let held = List.length state.acting in
   (* The agent_core family names its runtime lane, not the keeper; the
      keeper is the one whose trace the event's correlation id carries. *)
-  let traces =
-    List.filter_map (fun keeper ->
-      Option.map (fun trace -> keeper.k_name, trace) (Tui_decode.keeper_trace_id keeper)) state.keepers
-  in
+  let trace_reading = Tui_decode.keeper_trace_projection state.keepers in
+  let traces = trace_reading.bindings in
   (* Visible entries, newest first, paired with the events older than each
      -- in a newest-first list, the tail after it -- so a completed call on
      the page can look up its start. Rows are built only for the page: the
@@ -13275,6 +13273,12 @@ let render_acting (state : state) =
     ("  " ^ Terminal_text.single_line (observer_replay_description state.observer_replay));
   box_line_styled buf cols ~style:(Theme.recede ())
     ("  " ^ Acting.filter_explanation state.acting_filter);
+  List.iter (fun (name, reason) ->
+      let notice = "Trace attribution unavailable for " ^ name ^ ": " ^ reason in
+      Message_layout.wrap_words ~max_cells:(max 1 (cols - 4))
+        (Terminal_text.single_line notice)
+      |> List.iter (fun line -> box_line_styled buf cols ~style:(Theme.warn ()) ("  " ^ line)))
+    trace_reading.unavailable;
   box_divider buf cols;
   (* Measured over every row the filter keeps, not the page on screen, so the
      columns do not move while a reader scrolls. Only the two named columns

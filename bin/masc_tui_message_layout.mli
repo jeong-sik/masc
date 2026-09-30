@@ -519,6 +519,10 @@ val split_cells : max_cells:int -> string -> string list
     text has no word boundaries to wrap at -- a fenced code line, an
     identifier longer than the frame. *)
 
+val split_styled_cells : max_cells:int -> string -> string list
+(** Preserve cell padding and prefer space boundaries for renderer-owned SGR text. Each row
+    restores its inherited style and closes it, so rows can scroll separately. *)
+
 val input_viewport : max_cells:int -> string -> string
 (** Keep the complete input when it fits. Overflow uses a leading […] and the
     newest complete-scalar suffix that fits in the remaining cells. *)

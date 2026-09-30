@@ -510,19 +510,18 @@ let test_http_client_does_not_own_tui_env_contract () =
     (Ast_grep.count_value_bindings ~module_path ~name:"timeout_env")
 ;;
 
-(* The Dashboard's attention section writes three cells of indent ahead of
-   every row it draws. Its empty and unread notes stand in for rows, and they are
-   written for a body that indents them itself -- pasted in whole, a note sat
-   two cells right of the rows it replaces and of the title above them. *)
-let test_the_attention_note_starts_where_its_rows_do () =
-  check int "the note carries no indent of its own" 0
+(* Home's empty decision note replaces a section, not a selectable destination.
+   It shares the section heading's one-cell inset; another inset would make
+   the empty state look like a destination row. *)
+let test_home_empty_decision_note_has_section_indent () =
+  check int "the note adds no second indent" 0
     (Ast_grep.count_exact_string_literals_in_value_binding
        ~module_path:"bin/masc_tui_render.ml" ~binding_name:"render_overview"
-       ~needle:"  Nothing needs attention.");
-  check int "it is still the panel's word" 1
+       ~needle:"  No decision is waiting on you.");
+  check int "the section names the absence of human decisions" 1
     (Ast_grep.count_exact_string_literals_in_value_binding
        ~module_path:"bin/masc_tui_render.ml" ~binding_name:"render_overview"
-       ~needle:"Nothing needs attention.")
+       ~needle:" No decision is waiting on you.")
 ;;
 
 (* A surface whose load failed draws the lane-read message. It names
@@ -1114,7 +1113,7 @@ let test_operator_approvals_use_current_contract () =
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_ansi.ml"
        ~binding_name:"single_line"
-       ~callee:"Masc.Tui_decode.sanitize_terminal_text");
+       ~callee:"Masc.Tui_terminal_text.sanitize_terminal_text");
   check int "approval payload uses its terminal projection" 1
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_render.ml"
@@ -1130,7 +1129,7 @@ let test_operator_approvals_use_current_contract () =
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_operator_projection.ml"
        ~binding_name:"approval_payload_for_terminal"
-       ~callee:"Masc.Tui_decode.sanitize_terminal_text");
+       ~callee:"Masc.Tui_terminal_text.sanitize_terminal_text");
   check int "approval renderer never serializes a raw payload" 0
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_render.ml"
@@ -1836,10 +1835,14 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
   check int "resize polling consumes one pending signal" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"consume_resize_request" ~callee:"Atomic.exchange");
-  check int "render owns one compact viewport gate" 1
+  check int "the shared frame choice owns one compact viewport gate" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_render.ml" ~binding_name:"frame_choice"
+       ~callee:"Render_schedule.Viewport.requires_compact_frame");
+  check int "render uses the same frame choice as Home preparation" 1
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_render.ml" ~binding_name:"render"
-       ~callee:"Render_schedule.Viewport.requires_compact_frame");
+       ~callee:"frame_choice");
   check int "compact render has one fallback branch" 1
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_render.ml" ~binding_name:"render"
@@ -1868,12 +1871,11 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
        ; "surface_body_rows"
        ; "surface_chrome_budget"
        ]);
-  (* Both the attention count in the title and its empty-body note read the
-     shared page state: unread/failed must not become a zero count, and unread
-     must not become a blank body. *)
-  check int "Dashboard's attention title and body both read the shared empty page" 2
+  (* Home's typed decision projection keeps unread/failed sources visible.
+     The old attention page's emptiness says nothing about human decisions. *)
+  check int "Home reads the shared decision projection once" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path
-       ~binding_name:"render_overview" ~callee:"empty_page_of");
+       ~binding_name:"render_overview" ~callee:"home_decision_rows");
   check int "board read consumes one shared row allocation" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path
        ~binding_name:"board_read_pane"
@@ -2418,7 +2420,7 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
     ; "Terminal_text.clock_timestamp"
       (* Not a [Terminal_text] name, but it is a boundary crossing all the
          same: it serializes the approval payload and hands the result to
-         [Masc.Tui_decode.sanitize_terminal_text] before returning
+         [Masc.Tui_terminal_text.sanitize_terminal_text] before returning
          (masc_tui_operator_projection.ml). This list matches on the call
          site's spelling, so a wrapper that sanitizes internally has to be
          named here or the guard reads it as a raw access. *)
@@ -2432,7 +2434,7 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
     ; "Message_layout.wrap_body"
       (* Also not a [Terminal_text] name, and also a boundary: every answer it
          returns is either built from digits and the letters of a span, or is
-         the stamp put through [Masc.Tui_decode.sanitize_terminal_text]
+         the stamp put through [Masc.Tui_terminal_text.sanitize_terminal_text]
          (masc_tui_wire_age.ml, whose interface says so and whose suite pins
          it). It reads the stamp rather than drawing it, which is why it is a
          wrapper and not a [Terminal_text] call. *)
@@ -2541,10 +2543,11 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
   check_fields "task_line" [ "id"; "title" ];
   check_identifiers ~module_path:render_path ~binding:"task_line"
     ~callees:sanitizer_calls [ "name" ];
-  check_fields "render_overview"
-    [ "overview_error"
-    ; "ai_summary"
-    ];
+  check_fields "render_overview" [ "overview_error" ];
+  check int "Home does not draw the removed attention summary" 0
+    (Ast_grep.count_field_accesses_outside_calls_in_value_binding
+       ~module_path:render_path ~binding_name:"render_overview" ~callees:[]
+       ~fields:[ "ai_summary" ]);
   check_fields "render_work_tasks" [ "tasks_error" ];
   (* The Dashboard's title row, visible from the first frame, and
      /about's colour scheme name from the operator's configuration. *)
@@ -2681,7 +2684,7 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
      one helper. It splits the text on LF (not drawn) and escapes each line
      before it wraps. *)
   check_identifiers ~module_path:"bin/masc_tui_planning_detail.ml" ~binding:"wrapped"
-    ~callees:[ "Tui_decode.sanitize_terminal_text"; "String.split_on_char" ]
+    ~callees:[ "Masc.Tui_terminal_text.sanitize_terminal_text"; "String.split_on_char" ]
     [ "text"; "line" ];
   check int "the goal detail heads a stuck goal with the verifier's reason" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path
@@ -2794,18 +2797,18 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
          ~module_path:ansi_path ~binding_name:binding ~callees:[ callee ])
   in
   check_direct_result "single_line"
-    "Masc.Tui_decode.sanitize_terminal_text";
+    "Masc.Tui_terminal_text.sanitize_terminal_text";
   check_direct_result "optional_single_line" "Option.map";
   check_direct_result "single_line_or" "Option.value";
   check_direct_result "single_lines" "List.map";
   check_direct_result "short_timestamp"
-    "Masc.Tui_decode.short_timestamp_for_terminal";
+    "Masc.Tui_terminal_text.short_timestamp_for_terminal";
   check_direct_result "clock_timestamp"
-    "Masc.Tui_decode.clock_timestamp_for_terminal";
+    "Masc.Tui_terminal_text.clock_timestamp_for_terminal";
   check int "shared terminal boundary delegates to the typed sanitizer" 1
     (Ast_grep.count_calls_in_value_binding
        ~module_path:ansi_path ~binding_name:"single_line"
-       ~callee:"Masc.Tui_decode.sanitize_terminal_text");
+       ~callee:"Masc.Tui_terminal_text.sanitize_terminal_text");
   check int "optional boundary maps the sanitizer" 1
     (Ast_grep
      .count_applications_with_exact_positional_identifier_in_value_binding
@@ -2822,12 +2825,12 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
   check int "short timestamp delegates to slice-then-sanitize helper" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:ansi_path
        ~binding_name:"short_timestamp"
-       ~callee:"Masc.Tui_decode.short_timestamp_for_terminal");
+       ~callee:"Masc.Tui_terminal_text.short_timestamp_for_terminal");
   check int "clock timestamp delegates to slice-then-sanitize helper" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:ansi_path
        ~binding_name:"clock_timestamp"
-       ~callee:"Masc.Tui_decode.clock_timestamp_for_terminal");
-  let decode_path = "lib/tui_decode.ml" in
+       ~callee:"Masc.Tui_terminal_text.clock_timestamp_for_terminal");
+  let decode_path = "lib/tui_terminal_text.ml" in
   [ "short_timestamp_for_terminal"; "clock_timestamp_for_terminal" ]
   |> List.iter (fun binding ->
        check_binding decode_path binding;
@@ -3137,8 +3140,8 @@ let () =
         test_case "check success status" `Quick test_is_success_http_status_called;
         test_case "the spectator reads the live route" `Quick
           test_the_spectator_reads_the_live_route;
-        test_case "the attention note starts where its rows do" `Quick
-          test_the_attention_note_starts_where_its_rows_do;
+        test_case "the Home empty decision note has section indent" `Quick
+          test_home_empty_decision_note_has_section_indent;
         test_case "the lane failure row adds no second verdict" `Quick
           test_the_lane_failure_row_adds_no_second_verdict;
         test_case "missing operator token is reported" `Quick

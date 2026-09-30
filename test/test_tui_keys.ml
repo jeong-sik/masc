@@ -35,10 +35,7 @@ let every_surface =
    Named together the way the [ / ] table below is, so the next surface that
    arrives with a cursor and nothing to open has to be a decision. *)
 let enter_atom_count_exceptions =
-  [ (* A summary with no row cursor: Work owns the task list and Keepers the
-       roster (RFC-tui-measured-operator-home), so nothing on it is opened. *)
-    "Dashboard", 0
-  ; (* Charts, not a list: [j/k] scrolls. *)
+  [ (* Charts, not a list: [j/k] scrolls. *)
     "Usage", 0
   ; (* A detail screen. Its tabs carry their own keys. *)
     "Keeper detail", 0
@@ -983,15 +980,15 @@ let test_fusion_historical_evidence_is_a_selectable_board_reference () =
                   "title", `String "Original conclusion"; "created_at", `Float 10.]
         ]
     ] in
-  (match Tui_decode.decode_fusion_snapshot response with
+  (match Masc.Tui_decode_fusion.decode_fusion_snapshot response with
    | Error detail -> Alcotest.fail detail
    | Ok snapshot -> answer_fusion_runs state snapshot);
   check Alcotest.int "history remains in the selectable list with no retained runs"
     1 (List.length (fusion_list_entries state));
   (match selected_fusion_entry state with
-   | Some (Tui_decode.Fusion_historical_evidence evidence) ->
+   | Some (Masc.Tui_decode_fusion.Fusion_historical_evidence evidence) ->
        check str "selection retains original Board identity" "original-post" evidence.fhe_post_id
-   | Some (Tui_decode.Fusion_retained_run _) | None ->
+   | Some (Masc.Tui_decode_fusion.Fusion_retained_run _) | None ->
        Alcotest.fail "historical evidence disappeared or became an invented run");
   check Alcotest.int "historical evidence does not inflate Keeper run count"
     0 (List.length (selected_keeper_runs state))
@@ -1012,7 +1009,7 @@ let test_keeper_runs_selection_survives_a_shorter_list () =
     ]
   in
   let load runs =
-    match Tui_decode.decode_fusion_snapshot (`Assoc
+    match Masc.Tui_decode_fusion.decode_fusion_snapshot (`Assoc
       [ "generated_at", `String "2026-09-07T00:00:00Z"
       ; "replay", `Assoc ["status", `String "not_replayed"]
       ; "historical_evidence", `List []
@@ -1021,7 +1018,7 @@ let test_keeper_runs_selection_survives_a_shorter_list () =
     | Error detail -> Alcotest.fail detail
   in
   let selected () =
-    Option.map (fun (index, run) -> index, run.Tui_decode.fur_run_id)
+    Option.map (fun (index, run) -> index, run.Masc.Tui_decode_fusion.fur_run_id)
       (selected_keeper_run state)
   in
   state.keepers <- [keeper "alpha"; keeper "beta"];
@@ -1059,17 +1056,14 @@ let test_lanes_run_detail_footer_names_its_keys_alone () =
     "j/k:compare  PgUp/PgDn:page  Left / Esc:back  r:refresh  Tab:next  q:quit"
     Masc_tui_keys.footer_hints_lanes_run_detail
 
-(* Dashboard is a summary: Work owns the task list, so the footer offers no
-   task focus, no row movement and nothing to open, only the way to Usage and
-   the keys every listing shares. Work's task list draws its own row from the
-   table rather than from a string in the renderer. *)
+(* Dashboard selects destinations; Work owns task selection and detail. *)
 let test_dashboard_and_work_task_footers () =
   let items hints =
     String.split_on_char ' ' hints |> List.filter (fun item -> item <> "")
   in
   let dashboard = Masc_tui_keys.footer_hints Overview in
-  check str "Dashboard names Usage and the shared keys"
-    "m:Usage  r:refresh  Tab:next  q:quit" dashboard;
+  check str "Dashboard names destination keys and the shared keys"
+    "j/k:choose  Enter:open  p:requests  ;:agenda  m:Usage  r:refresh  Tab:next  q:quit" dashboard;
   List.iter
     (fun item ->
       Alcotest.(check bool) ("Dashboard offers no task key " ^ item) false
@@ -1676,7 +1670,7 @@ let approvals_reading_is_current state =
   state.gate_error <- None;
   state.gate_queue_unavailable <- None;
   state.asks_snapshot <-
-    Some { Masc.Tui_decode.asn_keeper = None; asn_open_count = 0; asn_rows = [] };
+    Some { Masc.Tui_decode_asks.asn_keeper = None; asn_open_count = 0; asn_rows = [] };
   state.asks_error <- None
 
 let approvals_home_in_ring state =
@@ -1845,27 +1839,27 @@ let test_visible_surface_ring_declutter () =
    so a fleet holding one ask of two questions said "1 question" while the
    line three rows below it said "+2 more questions". *)
 let test_the_question_count_counts_questions () =
-  let ask id questions : Tui_decode.ask_row =
-    { Tui_decode.ar_keeper = "jazz-developer"
+  let ask id questions : Masc.Tui_decode_asks.ask_row =
+    { Masc.Tui_decode_asks.ar_keeper = "jazz-developer"
     ; ar_id = id
     ; ar_asked_at = 0.0
     ; ar_context = None
     ; ar_questions =
         List.init questions (fun index ->
-            { Tui_decode.aq_id = Printf.sprintf "%s-q%d" id index
+            { Masc.Tui_decode_asks.aq_id = Printf.sprintf "%s-q%d" id index
             ; aq_header = "header"
             ; aq_prompt = "prompt"
-            ; aq_mode = Tui_decode.Ask_single
-            ; aq_free_text = Tui_decode.Ask_choices_only
+            ; aq_mode = Masc.Tui_decode_asks.Ask_single
+            ; aq_free_text = Masc.Tui_decode_asks.Ask_choices_only
             ; aq_choices = []
             })
-    ; ar_resolution = Tui_decode.Ask_open
+    ; ar_resolution = Masc.Tui_decode_asks.Ask_open
     }
   in
   let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
   state.asks_snapshot <-
     Some
-      { Tui_decode.asn_keeper = None
+      { Masc.Tui_decode_asks.asn_keeper = None
       ; asn_open_count = 2
       ; asn_rows = [ ask "a1" 2; ask "a2" 1 ]
       };
@@ -1879,12 +1873,12 @@ let test_the_question_count_counts_questions () =
      counted either. *)
   state.asks_snapshot <-
     Some
-      { Tui_decode.asn_keeper = None
+      { Masc.Tui_decode_asks.asn_keeper = None
       ; asn_open_count = 1
       ; asn_rows =
           [ ask "a1" 2
-          ; { (ask "a2" 4) with Tui_decode.ar_resolution =
-                Tui_decode.Ask_answered
+          ; { (ask "a2" 4) with Masc.Tui_decode_asks.ar_resolution =
+                Masc.Tui_decode_asks.Ask_answered
                   { aa_answered_at = 1.0; aa_question_ids = [] }
             }
           ]
@@ -1911,7 +1905,7 @@ let test_the_questions_reading_tells_unread_from_none_open () =
     ", questions unread"
     (approval_list_note ~name:"questions" (approvals_questions_reading state));
   state.asks_snapshot <-
-    Some { Tui_decode.asn_keeper = None; asn_open_count = 0; asn_rows = [] };
+    Some { Masc.Tui_decode_asks.asn_keeper = None; asn_open_count = 0; asn_rows = [] };
   Alcotest.(check string) "rows kept from before a failed poll" "stale"
     (reading ());
   state.asks_error <- None;
@@ -1929,28 +1923,28 @@ let test_visible_surface_ring_open_ask () =
   state.view <- Overview;
   state.asks_snapshot <-
     Some
-      { Tui_decode.asn_keeper = Some "jazz-developer"
+      { Masc.Tui_decode_asks.asn_keeper = Some "jazz-developer"
       ; asn_open_count = 1
       ; asn_rows =
-          [ { Tui_decode.ar_keeper = "jazz-developer"
+          [ { Masc.Tui_decode_asks.ar_keeper = "jazz-developer"
             ; ar_id = "ask1"
             ; ar_asked_at = 0.0
             ; ar_context = Some "where to post the measured comment"
             ; ar_questions =
-                [ { Tui_decode.aq_id = "q1"
+                [ { Masc.Tui_decode_asks.aq_id = "q1"
                   ; aq_header = "post or wait"
                   ; aq_prompt = "post the comment as is?"
-                  ; aq_mode = Tui_decode.Ask_single
-                  ; aq_free_text = Tui_decode.Ask_choices_only
+                  ; aq_mode = Masc.Tui_decode_asks.Ask_single
+                  ; aq_free_text = Masc.Tui_decode_asks.Ask_choices_only
                   ; aq_choices =
-                      [ { Tui_decode.ac_id = "post_as_is"
+                      [ { Masc.Tui_decode_asks.ac_id = "post_as_is"
                         ; ac_label = "post as is"
                         ; ac_description = None
                         }
                       ]
                   }
                 ]
-            ; ar_resolution = Tui_decode.Ask_open
+            ; ar_resolution = Masc.Tui_decode_asks.Ask_open
             }
           ]
       };
@@ -2741,7 +2735,6 @@ let planning_goal_row id title =
   { pg_id = id
   ; pg_criterion_revision = None
   ; pg_title = title
-  ; pg_owner = Goal_store.Unknown_owner
   ; pg_phase = Goal_phase.Executing
   ; pg_priority = 1
   ; pg_due_date = None

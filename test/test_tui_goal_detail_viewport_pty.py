@@ -50,8 +50,14 @@ def run(executable):
         {"ts": RAW_CLOCK, "kind": "keeper_event", "lane": "keeper:" + KEEPER,
          "title": "keeper observation", "summary": "TIMELINEEND", "severity": "ok"},
     ]})
-    requests = []
+    confirmation_reads = []
     posted = []
+
+    def confirmation(path):
+        confirmation_reads.append(path)
+        return 503, {"error": "fixture confirmation read must remain hidden"}
+
+    fixtures["/api/v1/goals/confirmation"] = h.PathHttpResponse(confirmation)
 
     def transition(body):
         posted.append(json.loads(body))
@@ -122,17 +128,17 @@ def run(executable):
         fixtures[h.PLANNING_PATH] = h.planning_snapshot([])
         h.send_and_wait(process, fd, output, b"r", b"(no goals)")
         h.drain_until_quiet(process, fd, output)
-        before = len(requests)
+        before = len(confirmation_reads)
         os.write(fd, b"ccxxooaa")
         h.drain_until_quiet(process, fd, output)
         assert len(posted) == 1, posted
-        assert not any("/api/v1/goals/confirmation" in path for path, _ in requests[before:]), requests[before:]
+        assert len(confirmation_reads) == before, confirmation_reads[before:]
         assert b"Actions:" not in screen(output), screen(output)
         os.write(fd, b"q")
 
     h.run_terminal_scenario(executable, description="Goal metadata and all linked Tasks remain reachable",
                             interact=interact, prepare_workspace=prepare,
-                            http_fixtures=fixtures, http_requests=requests)
+                            http_fixtures=fixtures)
 
 
 if __name__ == "__main__":

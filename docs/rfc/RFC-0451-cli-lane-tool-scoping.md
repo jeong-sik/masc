@@ -125,7 +125,7 @@ CLI 레인에서 무엇을 싣는지는 **그 Keeper 의 프로필이 댄 이름
 
 ## 6. 스키마 검증
 
-`test_keeper_tool_surface_schema`는 선언된 도구 목록과 provider가 요구하는 array `items`를 검증한다.
+`test_keeper_tool_surface_schema`는 provider가 요구하는 array `items`를 검증한다.
 
 ## 7. 하지 않는 것
 

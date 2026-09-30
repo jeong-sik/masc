@@ -76,10 +76,11 @@ def run(executable):
             save_task(base, "awaiting_verification")
 
         def interact(process, fd, _slave, output, base):
-            # Task palette entries derive from the loaded durable snapshot.
-            # Startup's Dashboard header appears before that async read; Enter
-            # on a query with no matching entry simply closes the palette.
-            ready = b"1 awaiting verification"
+            # Home owns decisions and continuation. Work shows the durable
+            # Task roster before its exact Task palette entry can be opened.
+            h.palette_go(process, fd, output, b"go Work", b"MASC Work")
+            h.send_and_wait(process, fd, output, b"t", b"MASC Work / Tasks")
+            ready = b"awaiting_verification"
             h.wait_for_output(process, fd, output, ready, start=0, timeout=5)
             h.wait_for_output(process, fd, output, h.FRAME_END,
                               start=h.end_of_needle(output, ready, 0), timeout=3)

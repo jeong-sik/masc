@@ -53,12 +53,20 @@ def exact(value, keys, label, optional=()):
     return value
 
 
+def snapshot_reference(raw, label):
+    # The host prepends its immutable captured deck to each fact; the
+    # questioner preserves that first reference in the question row.
+    references = evidence(raw)
+    if not references or references[0]["sha256"] is None:
+        raise InvalidInput(f"{label} is missing immutable snapshot evidence")
+    return references[0]
+
+
 class Grader:
     def __init__(self):
         self.context = None
         self.questions: dict[str, tuple[dict, dict]] = {}
-        self.deck: dict[str, dict] = {}
-        self.deck_incarnation = None
+        self.deck: dict[tuple[str, str, str], dict] = {}
         self.coverage: list[dict] = []
         self.grades: list[dict] = []
         self.results: dict[str, dict] = {}
@@ -107,7 +115,7 @@ class Grader:
         args = exact(args, ["context", "binding", "sources"], "observe arguments")
         self.bind(args["context"])
         object_value(args["binding"], "binding")
-        questions, deck, deck_incarnation, coverage = {}, {}, None, []
+        questions, deck, coverage = {}, {}, []
         for source in sources_from_json(args["sources"]):
             skipped, seen = set(), 0
             for item in source.observations:
@@ -118,6 +126,10 @@ class Grader:
                     for upstream in object_value(item.get("output"), "output").get("rows", []):
                         fields = upstream.get("fields", {})
                         if "question_id" in fields and "choices" in fields:
+                            for key in ("source_id", "incarnation", "source_event_id"):
+                                string(fields.get(key), "question." + key)
+                            snapshot_reference(upstream.get("evidence"), "question")
+                            evidence([object_value(fields.get("record"), "question.record")])
                             # The host retains the complete upstream output. Keep its
                             # coordinates and evidence, not another question body per grade.
                             reference = {"id": string(upstream.get("id"), "question.id"),
@@ -128,25 +140,25 @@ class Grader:
                 elif kind == "fact":
                     record, = evidence([object_value(item.get("record"), "fact.record")])
                     fact_id = string(item.get("id"), "fact.id")
-                    retained = evidence(item.get("evidence"))
-                    if not retained:
-                        raise InvalidInput("fact is missing retained snapshot evidence")
+                    retained = snapshot_reference(item.get("evidence"), "fact")
                     # snapshot_file prepends its own immutable deck copy. That
                     # reference locates the exact answer without republishing it.
                     reference = {"source_id": source.source_id, "incarnation": source.incarnation,
-                                 "cursor": source.cursor, "id": fact_id, "evidence": [retained[0]]}
-                    deck[fact_id] = {
+                                 "cursor": source.cursor, "id": fact_id, "evidence": [retained]}
+                    fact_key = source.source_id, source.incarnation, fact_id
+                    if fact_key in deck:
+                        raise InvalidInput("duplicate fact within one deck authority")
+                    deck[fact_key] = {
                         "field": string(item.get("field"), "fact.field"),
                         "answer": string(item.get("answer"), "fact.answer"),
                         "record": record, "reference": reference}
-                    deck_incarnation = source.incarnation
                     seen += 1
                 else:
                     skipped.add(str(kind))
             status = source.coverage(skipped)
             status["complete"] = source.complete and not skipped and seen > 0
             coverage.append(status)
-        self.questions, self.deck, self.deck_incarnation = questions, deck, deck_incarnation
+        self.questions, self.deck = questions, deck
         self.coverage = coverage
         return self.output()
 
@@ -173,11 +185,15 @@ class Grader:
         question, question_reference = observed
         if action["choice"] not in question["fields"]["choices"]:
             return self.refuse(request_id, "choice is not one of the question's choices")
-        fact_id = question["fields"].get("source_event_id") or question["subject_id"]
-        fact = self.deck.get(fact_id)
+        fact_id = question["fields"]["source_event_id"]
+        fact_key = question["fields"]["source_id"], question["fields"]["incarnation"], fact_id
+        fact = self.deck.get(fact_key)
         if fact is None:
-            return self.refuse(request_id, "the question's fact is not in this grader's deck")
-        if question["fields"].get("incarnation") != self.deck_incarnation:
+            return self.refuse(request_id, "the deck changed or the question's fact is absent")
+        question_record, = evidence([question["fields"]["record"]])
+        if (snapshot_reference(question["evidence"], "question")
+                != fact["reference"]["evidence"][0]
+                or question_record != fact["record"]):
             return self.refuse(request_id, "the deck changed since the question was asked")
         if fact["field"] != question["fields"].get("field"):
             return self.refuse(request_id, "the deck fact no longer has the question's field")
@@ -209,14 +225,14 @@ class Grader:
                             "choice_index": question["fields"]["choices"].index(action["choice"]),
                             "question_row": question_reference,
                             "correct": correct, "answer_fact": fact["reference"], "fact_id": fact_id,
-                            "deck_incarnation": self.deck_incarnation,
+                            "deck_incarnation": fact["reference"]["incarnation"],
                             "answerer_claimed": answerer, "about_answerer": about_answerer,
                             "request_id": request_id},
                  "evidence": [fact["record"]], "related_ids": []}
         self.grades.append(grade)
         result = {"status": "confirmed",
                   "result": {"checked": f"choice compared with the answer of fact {fact_id} "
-                                        f"in deck incarnation {self.deck_incarnation}",
+                                        f"in deck incarnation {fact['reference']['incarnation']}",
                              "correct": correct, "question_id": action["question_id"],
                              "request_id": request_id},
                   "output": self.output()}
@@ -245,7 +261,7 @@ def main():
             method, params = request.get("method"), object_value(request.get("params", {}), "params")
             if method == "initialize":
                 result = {"protocolVersion": "2025-06-18", "capabilities": {"tools": {}},
-                          "serverInfo": {"name": "masc-quiz-grader", "version": "0.1.1"}}
+                          "serverInfo": {"name": "masc-quiz-grader", "version": "0.1.2"}}
             elif method == "ping":
                 result = {}
             elif method == "tools/list":

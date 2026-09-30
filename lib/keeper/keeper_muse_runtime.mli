@@ -38,6 +38,9 @@ type attempt_outcome =
 
 val run :
   ?official_task_reference:Keeper_official_task_reference.t ->
+  ?composed_context:(unit -> Keeper_official_client_host.composed_context option) ->
+  (* Read after hook assembly to name independently deduplicated context blocks.
+      [None] compares the complete carried context as one unit. *)
   accepts_image_input:bool ->
   ?required_native_posture:Runtime_native_tools.posture ->
   ?official_client_continuation:Keeper_semantic_execution.official_client_checkpoint ->

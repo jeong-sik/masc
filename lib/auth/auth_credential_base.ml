@@ -57,8 +57,6 @@ let internal_keeper_token_holder : string option Atomic.t = Atomic.make None
 let internal_keeper_token () = Atomic.get internal_keeper_token_holder
 let run_blocking_io f = Eio_guard.run_in_systhread ~label:"auth-credential-io" f
 let file_exists path = run_blocking_io (fun () -> Sys.file_exists path)
-let stat_file path = run_blocking_io (fun () -> Unix.stat path)
-let read_text_file path = Fs_compat.load_file path
 let write_text_file path content = Fs_compat.save_file path content
 let chmod path perm = run_blocking_io (fun () -> Unix.chmod path perm)
 let read_dir path = run_blocking_io (fun () -> Sys.readdir path)
@@ -88,16 +86,40 @@ let credential_path_exists file =
   | Eio.Io _ as exn -> Error (System (System_error.IoError (Printexc.to_string exn)))
 ;;
 
-let read_regular_auth_file path =
+let read_regular_auth_file_with_open ~open_file path =
   let ( let* ) = Result.bind in
-  (* [stat] preserves symlinks to regular files, while a dangling link is
-     an I/O refusal rather than permission to replace its occupied path. *)
-  let* stat = credential_read_result (fun () -> stat_file path) in
-  match stat.Unix.st_kind with
-  | Unix.S_REG -> credential_read_result (fun () -> read_text_file path)
-  | Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK ->
-      Error (System (System_error.ValidationError
-        (Printf.sprintf "auth path is not a regular file: %s" path)))
+  let* result = credential_read_result (fun () -> run_blocking_io (fun () ->
+    (* Following a regular-file symlink remains supported. Nonblocking open
+       prevents a replacement FIFO from waiting for a writer before fstat. *)
+    let fd = open_file path [Unix.O_RDONLY; Unix.O_NONBLOCK; Unix.O_CLOEXEC] 0 in
+    let channel = Unix.in_channel_of_descr fd in
+    Fun.protect ~finally:(fun () -> close_in_noerr channel) (fun () ->
+      let before = Unix.fstat fd in
+      if before.Unix.st_kind <> Unix.S_REG then
+        Error (System (System_error.ValidationError
+          (Printf.sprintf "auth path is not a regular file: %s" path)))
+      else
+        let content = In_channel.input_all channel in
+        let after = Unix.fstat fd in
+        let named = Unix.stat path in
+        if before.Unix.st_size <> after.Unix.st_size
+           || before.Unix.st_mtime <> after.Unix.st_mtime
+           || before.Unix.st_ctime <> after.Unix.st_ctime
+           || after.Unix.st_dev <> named.Unix.st_dev
+           || after.Unix.st_ino <> named.Unix.st_ino then
+          Error (System (System_error.IoError
+            (Printf.sprintf "auth path changed during verified read: %s" path)))
+        else Ok content))) in
+  result
+;;
+
+let read_regular_auth_file path =
+  read_regular_auth_file_with_open ~open_file:Unix.openfile path
+;;
+
+module Regular_read_for_testing = struct
+  let read_with_open = read_regular_auth_file_with_open
+end
 ;;
 
 (** Ensure auth directories exist *)

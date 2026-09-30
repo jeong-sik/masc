@@ -8,6 +8,14 @@
 
 open Masc_domain
 
+module Regular_read_for_testing : sig
+  val read_with_open :
+    open_file:(string -> Unix.open_flag list -> int -> Unix.file_descr) ->
+    string -> (string, masc_error) result
+  (** Exercise the production descriptor reader with a deterministic open
+      boundary; no process-wide hook or production reader is changed. *)
+end
+
 (** {1 Token Generation} *)
 
 val generate_token : unit -> string

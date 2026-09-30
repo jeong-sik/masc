@@ -425,7 +425,7 @@ open Alcotest
    increase is the declared Item surface; pin the measured inventory. *)
 (* Release candidate run 36684397461, job 109786805662, measured 129,411
    bytes across the same 147 tools at 58347bd20a9112ec5b578348ea69426f1a382e3c.
-   Main c112b20306 clarified masc_dos_pass.to: the 49-byte description
+   Main a254129a87 (#40035) clarified masc_dos_pass.to: the 49-byte description
    "Keeper who takes the controller. Omit to free it." became the 65-byte
    "Keeper, operator or invited player who takes it. Omit to free it."
    Account for those existing controller recipients and pin the measured

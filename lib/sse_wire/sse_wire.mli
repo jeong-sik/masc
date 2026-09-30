@@ -1,3 +1,13 @@
+val data_payload_line : string -> string option
+(** Read one SSE data field, stripping one optional space after the colon and
+    a trailing CR. Bare [data] is an empty field; other fields are ignored. *)
+
+val data_payloads_of_stream : string -> string list
+(** Payloads of complete blank-line-terminated events in a buffered UTF-8
+    stream. Joins data fields with LF, accepts LF/CRLF/CR and an initial BOM,
+    and discards an unterminated event at EOF. Event/id/retry fields are not
+    projected by this payload-only reader. *)
+
 (** Canonical Server-Sent Events wire framing. *)
 
 val format_event : ?id:int -> ?event_type:string -> string -> string

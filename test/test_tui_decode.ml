@@ -2496,12 +2496,37 @@ let test_context_observation_rejects_hybrids_and_prior_trace () =
 let test_parse_keeper_chat_response_sse_delta () =
   let response =
     "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n\
-     data: {\"type\":\"content_delta\",\"delta\":\"hello\"}\n\
-     data: {\"type\":\"delta\",\"delta\":\" world\"}\n"
+     data: {\"type\":\"content_delta\",\"delta\":\"hello\"}\n\n\
+     data: {\"type\":\"delta\",\"delta\":\" world\"}\n\n"
   in
   match Tui_decode.parse_keeper_chat_response response with
   | Ok text -> Alcotest.(check string) "delta text" "hello world" text
   | Error err -> Alcotest.fail err
+
+let test_parse_keeper_chat_response_sse_framing () =
+  List.iter (fun newline ->
+    let response = "\239\187\191" ^ String.concat newline
+      [ ": comment"; "id: 42"; "event: message";
+        "data:{\"type\":\"delta\","; "data:\"delta\":\"hello\"}"; "";
+        "data"; "";
+        "data: {\"type\":\"delta\",\"delta\":\" world\"}"; "";
+        "data: [DONE]"; ""; "" ] in
+    match Tui_decode.parse_keeper_chat_response response with
+    | Ok text -> Alcotest.(check string) "multiline framed text" "hello world" text
+    | Error err -> Alcotest.fail err) [ "\n"; "\r\n"; "\r" ];
+  (match Tui_decode.parse_keeper_chat_response "data:[DONE]\n\n" with
+   | Ok text -> Alcotest.(check string) "empty terminal" "" text
+   | Error err -> Alcotest.fail err);
+  List.iter (fun response ->
+    match Tui_decode.parse_keeper_chat_response response with
+    | Error _ -> () | Ok _ -> Alcotest.fail "invalid or incomplete frame was dispatched")
+    [ "data:{\"type\":\"delta\",\"delta\":\"unfinished\"}\n";
+      " data:{\"type\":\"delta\",\"delta\":\"indented\"}\n\n";
+      "data:{invalid-json}\n\n" ];
+  match Tui_decode.parse_keeper_chat_response
+      "data:{\"type\":\"RUN_ERROR\",\"message\":\"boom\"}\r\r" with
+  | Error error -> Alcotest.(check string) "framed terminal error" "boom" error
+  | Ok _ -> Alcotest.fail "terminal error was lost"
 
 let test_parse_keeper_chat_response_ag_ui_sse () =
   let response =
@@ -12716,6 +12741,8 @@ let () =
       [
         Alcotest.test_case "sse delta" `Quick
           test_parse_keeper_chat_response_sse_delta;
+        Alcotest.test_case "keeper SSE framing" `Quick
+          test_parse_keeper_chat_response_sse_framing;
         Alcotest.test_case "AG-UI SSE" `Quick
           test_parse_keeper_chat_response_ag_ui_sse;
         Alcotest.test_case "AG-UI error" `Quick

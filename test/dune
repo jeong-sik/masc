@@ -7883,3 +7883,8 @@
  (deps (alias runtest-test_tool_quality_live_plan)))
 
 (include stanzas/test_candle_purchase_flow.inc)
+
+(test
+ (name test_sse_wire_payload)
+ (modules test_sse_wire_payload)
+ (libraries alcotest masc.sse_wire))

@@ -1,3 +1,49 @@
+let data_payload_line line =
+  let line_len = String.length line in
+  let line_len =
+    if line_len > 0 && Char.equal line.[line_len - 1] '\r'
+    then line_len - 1
+    else line_len
+  in
+  let prefix = "data:" in
+  let prefix_len = String.length prefix in
+  if line_len >= prefix_len
+     && String.equal (String.sub line 0 prefix_len) prefix
+  then
+    let payload_start =
+      if line_len > prefix_len && Char.equal line.[prefix_len] ' '
+      then prefix_len + 1
+      else prefix_len
+    in
+    Some (String.sub line payload_start (line_len - payload_start))
+  else if line_len = 4 && String.equal (String.sub line 0 line_len) "data"
+  then Some ""
+  else None
+
+
+let data_payloads_of_stream stream =
+  let length = String.length stream in
+  let start = if String.starts_with ~prefix:"\239\187\191" stream then 3 else 0 in
+  let consume_line line pending completed =
+    if String.equal line "" then
+      match pending with
+      | [] -> [], completed
+      | _ -> [], String.concat "\n" (List.rev pending) :: completed
+    else match data_payload_line line with
+      | None -> pending, completed
+      | Some data -> data :: pending, completed in
+  let rec scan line_start index pending completed =
+    if index >= length then List.rev completed
+    else match stream.[index] with
+      | '\r' | '\n' ->
+          let line = String.sub stream line_start (index - line_start) in
+          let pending, completed = consume_line line pending completed in
+          let next = if stream.[index] = '\r' && index + 1 < length
+              && stream.[index + 1] = '\n' then index + 2 else index + 1 in
+          scan next next pending completed
+      | _ -> scan line_start (index + 1) pending completed in
+  scan start start [] []
+
 let add_header buf name value =
   Buffer.add_string buf name;
   Buffer.add_string buf ": ";

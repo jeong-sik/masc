@@ -656,10 +656,14 @@ let modal_hints ~total_links ~has_image =
   ^ "Esc:close"
 
 let render_modal_card ~width ~height:_ p =
-  let card = render_notion_card ~width:(max 30 (width - 4)) p in
-  let inner_width = max 20 (width - 6) in
+  let card = render_notion_card ~width:(max 1 (width - 4)) p in
+  let inner_width = max 1 (width - 2) in
   let lines = ref [] in
   let add s = lines := s :: !lines in
+  let add_text text =
+    Masc_tui_message_layout.wrap_words ~max_cells:inner_width
+      (String.trim (Masc.Tui_decode.sanitize_terminal_text text))
+    |> List.iter (fun line -> add ("  " ^ line)) in
   List.iter add card;
   add "";
   (match p.image_url with
@@ -673,32 +677,32 @@ let render_modal_card ~width ~height:_ p =
        | Some (Refused refusal) ->
            (* Said out loud, so a card with no picture is not mistaken for a
               page with no og:image. *)
-           add ("  preview: " ^ mosaic_refusal_text refusal);
-           add "  [r] fetch the preview again";
+           add_text ("  preview: " ^ mosaic_refusal_text refusal);
+           add_text "  [r] fetch the preview again";
            add ""
        | Some (Mosaic _) | None -> ())
    | None -> ());
   (match p.kind with
    | Image_direct { ext } ->
-       add (Printf.sprintf "  \xf0\x9f\x96\xbc\xef\xb8\x8f  Direct Image: %s format" (String.uppercase_ascii ext));
-       add "  Press [v] to view this image directly inside the terminal graphics engine."
+       add_text (Printf.sprintf "  \xf0\x9f\x96\xbc\xef\xb8\x8f  Direct Image: %s format" (String.uppercase_ascii ext));
+       add_text "  Press [v] to view this image directly inside the terminal graphics engine."
    | YouTube { video_id } ->
-       add (Printf.sprintf "  \xe2\x96\xb6\xef\xb8\x8f  YouTube Video Stream (ID: %s)" video_id);
-       add "  Press [o] to open the video in your default system browser.";
-       add "  Press [v] to view the high-resolution video thumbnail in the terminal."
+       add_text (Printf.sprintf "  \xe2\x96\xb6\xef\xb8\x8f  YouTube Video Stream (ID: %s)" video_id);
+       add_text "  Press [o] to open the video in your default system browser.";
+       add_text "  Press [v] to view the high-resolution video thumbnail in the terminal."
    | Arxiv { id } ->
-       add (Printf.sprintf "  \xf0\x9f\x93\x84  arXiv e-Print Archive Paper %s" id);
-       add "  Press [o] to read the paper and abstract in your browser."
+       add_text (Printf.sprintf "  \xf0\x9f\x93\x84  arXiv e-Print Archive Paper %s" id);
+       add_text "  Press [o] to read the paper and abstract in your browser."
    | HackerNews { item_id } ->
-       add (Printf.sprintf "  \xf0\x9f\x9f\xa7  Hacker News Item #%s" item_id);
-       add "  Press [o] to join the discussion thread in your browser."
+       add_text (Printf.sprintf "  \xf0\x9f\x9f\xa7  Hacker News Item #%s" item_id);
+       add_text "  Press [o] to join the discussion thread in your browser."
    | Github { label; owner; repo } ->
-       add (Printf.sprintf "  \xf0\x9f\x90\x99  %s/%s \xc2\xb7 %s" owner repo label);
-       add "  Press [o] to inspect the pull request / issue in GitHub.";
-       add "  Press [v] to preview the GitHub social card in terminal graphics."
+       add_text (Printf.sprintf "  \xf0\x9f\x90\x99  %s/%s \xc2\xb7 %s" owner repo label);
+       add_text "  Press [o] to inspect the pull request / issue in GitHub.";
+       add_text "  Press [v] to preview the GitHub social card in terminal graphics."
    | Web_page ->
-       add "  \xf0\x9f\x8c\x90  Web Resource Bookmark";
-       add "  Press [o] to open in default browser.");
+       add_text "  \xf0\x9f\x8c\x90  Web Resource Bookmark";
+       add_text "  Press [o] to open in default browser.");
   add "";
-  add (Printf.sprintf "  \xe2\x86\x97 URL: %s" (Masc_tui_message_layout.fit_width p.url (inner_width - 8)));
+  add_text (Printf.sprintf "  \xe2\x86\x97 URL: %s" p.url);
   List.rev !lines

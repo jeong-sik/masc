@@ -682,7 +682,7 @@ let due_date_refusal = function
             raw)
      | Goal_due.No_due_date | Goal_due.Due_date _ -> None)
 
-let upsert_goal config ?id ?title ?metric ?target_value ?due_date
+let upsert_goal_with_revision config ?id ?title ?metric ?target_value ?due_date
     ?priority () =
   let is_new_goal = id = None in
   if is_new_goal && (title = None || title = Some "") then
@@ -790,9 +790,13 @@ let upsert_goal config ?id ?title ?metric ?target_value ?due_date
            | Some msg -> Error (Rejected msg)
            | None ->
           (match find_goal_in state.goals resolved_id, !upserted with
-          | Some goal, Some upserted -> Ok (goal, upserted)
+          | Some goal, Some upserted -> Ok (goal, upserted, state.version)
           | Some _, None | None, (Some _ | None) ->
               Error (Rejected "failed to save goal"))))
+
+let upsert_goal config ?id ?title ?metric ?target_value ?due_date ?priority () =
+  upsert_goal_with_revision config ?id ?title ?metric ?target_value ?due_date ?priority ()
+  |> Result.map (fun (goal, action, _store_version) -> goal, action)
 
 let compute_rollup goals =
   let count predicate =

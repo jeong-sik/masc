@@ -351,7 +351,7 @@ let () =
                   the current file (backup retained)"
                  incoming_turn_count
                  known_turn_count)
-          | Ok (Store.Saved { relation = _; turn_count }) ->
+          | Ok (Store.Saved { relation = _; turn_count; canonical_bytes = _ }) ->
             Printf.printf
               "applied: purged checkpoint saved at turn_count %d\n"
               turn_count;

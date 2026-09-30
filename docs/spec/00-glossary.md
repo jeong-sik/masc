@@ -434,6 +434,23 @@ status: reference
       격리 수가 화면에서 축소 왜곡되지 않게 한다.
   → [Keeper_board_attention_candidate](../../lib/keeper/keeper_board_attention_candidate.mli) · [Keeper_board_attention_quarantine_command](../../lib/keeper/keeper_board_attention_quarantine_command.mli) · [Masc_tui_board_quarantine](../../bin/masc_tui_board_quarantine.mli)
 
+**Jev (TypeSafe AI System One 판정 어댑터)**
+: Board Attention Candidate의 관련성을 비자기회귀 System One 1회 요청으로 신속 판정하는
+  TypeSafe AI 어댑터(`Typesafeai_board_attention`). 신뢰도 조건을 충족한 후보를 직접 확정하여
+  `board_attention_exact`의 LLM 판정 요청을 줄인다(#40413·#40420·#40428).
+  - 양방향 직접 확정(`Jev_decided`): `relevant` 또는 `not_relevant` 판정 신뢰도가
+    `[typesafeai].board_attention_confidence_floor`(기본값 0.3) 이상이면 LLM 레인을 거치지 않고
+    후보를 즉시 종단 확정한다. `not_relevant` 역시 신뢰도 충족 시 LLM 레인을 건너뛰고 직접 확정된다.
+  - LLM 레인 이관: 신뢰도 미달(`Jev_low_confidence`), 명시적 불확실성(`Needs_review` / `Jev_uncertain`),
+    호출 실패(`Jev_failed`), 또는 비활성화(`Jev_off`·`Jev_cli_only`) 시에는 설정된 board_attention_exact 슬롯/CLI 경로로 이관하여 재판정한다.
+  - 재큐 후보 우선 판정: 격리(Quarantine)에서 재투입된 후보(`Requeued_pending`)도 `ask_jev`의
+    첫 번째 관문을 거치며, 재큐 후보에도 같은 직접 확정 조건을 적용한다(#40428).
+  - 신뢰도 관측 가능성: 확정된 종단 로그 행에 실제 신뢰도가 보존되어 운영자가 임계값을 사후
+    재조정할 수 있는 정량적 근거를 제공한다(#40420).
+  → [Typesafeai_board_attention](../../lib/typesafeai/typesafeai_board_attention.mli) ·
+  [Keeper_board_attention_exact_flow](../../lib/keeper/keeper_board_attention_exact_flow.ml) ·
+  [config/runtime.toml](../../config/runtime.toml)
+
 **Keeper Cycle**
 : 현재 상태와 event를 관찰하고 Keeper turn 실행 여부를 결정하는 서버 loop의
   한 회차. 모든 cycle이 모델 호출을 실행하지는 않는다.

@@ -7767,3 +7767,5 @@
 (include stanzas/test_candle_balance.inc)
 
 (include stanzas/test_candle_appraiser_transport.inc)
+
+(include stanzas/test_tui_review_verdict_layout_pty.inc)

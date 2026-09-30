@@ -2223,12 +2223,21 @@ let post_board_comment ~(host : string) ~(port : int) ~(post_id : string)
   post_json ~host ~port ~path:"/api/v1/tools/masc_board_comment"
     ~body:(Yojson.Safe.to_string payload)
 
-(** Fetch /api/v1/board/<postId> (post detail + comments). *)
-let fetch_board_post ~(host : string) ~(port : int) ~(post_id : string) : (Yojson.Safe.t, string) result =
+(** Fetch /api/v1/board/<postId> with an explicit comment page when needed. *)
+let fetch_board_post ?comment_offset ?comment_limit ~(host : string)
+    ~(port : int) ~(post_id : string) () : (Yojson.Safe.t, string) result =
+  let page_query =
+    (match comment_offset with
+     | None -> ""
+     | Some offset -> Printf.sprintf "&comment_offset=%d" offset)
+    ^ (match comment_limit with
+       | None -> ""
+       | Some limit -> Printf.sprintf "&comment_limit=%d" limit)
+  in
   get_json ~host ~port
     ~path:
-      (Printf.sprintf "/api/v1/board/%s?format=flat"
-         (percent_encode_path_segment post_id))
+      (Printf.sprintf "/api/v1/board/%s?format=flat%s"
+         (percent_encode_path_segment post_id) page_query)
 
 (** Fetch /api/v1/dashboard/scheduled-automation (schedule list projection).
     The server sorts active-first by due time and caps rows at its own limit,

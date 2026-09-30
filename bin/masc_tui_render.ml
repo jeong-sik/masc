@@ -2654,10 +2654,11 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
               Masc_tui_frame_timing.time_stage ~name:"board.thread.order"
                 (fun () -> Board_comment_thread.order comments)
             in
-            Masc_tui_frame_timing.time_stage ~name:"board.thread.rows_wrap"
-              (fun () ->
-                ordered
-                |> List.concat_map
+            let comment_lines =
+              Masc_tui_frame_timing.time_stage ~name:"board.thread.rows_wrap"
+                (fun () ->
+                  ordered
+                  |> List.concat_map
               (fun (depth, c) ->
                  let rail =
                    if depth <= 0 then ""
@@ -2723,6 +2724,15 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
                      in
                      metadata
                      @ List.map (fun line -> content_prefix ^ line) lines))
+            in
+            if List.length comments < post.bp_comment_count then
+              Printf.sprintf "  Showing %d of %d comments (o: all comments)"
+                (List.length comments) post.bp_comment_count
+              :: comment_lines
+            else
+              (* The post header already counts the complete thread. Keep
+                 the small comment viewport for its actual comment rows. *)
+              comment_lines
       in
       (body_lines, detail_lines))
   in
@@ -2850,7 +2860,9 @@ let render_board_read (state : state) (list_post : board_post) =
       ~hints:
         (Masc_tui_keys.footer_hints_board_read
            ~focus_posts:(state.board_focus = Left_pane)
-           ~focus_comments:state.board_comments_focused ~layout)
+           ~focus_comments:state.board_comments_focused
+           ~full_history:(state.board_history_post_id = Some list_post.bp_id)
+           ~layout)
   in
   Masc_tui_frame_timing.finish_stage ~name:"board.render_prep" prep_started;
   match layout with

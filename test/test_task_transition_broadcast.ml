@@ -543,11 +543,43 @@ let test_verdict_activity_tracks_the_committed_terminal () =
     ]
 ;;
 
+let test_submit_schedules_review_after_log_failure () =
+  with_test_env (fun config ~baseline_seq:_ ->
+    let task_id = "task-submit-log-failure" in
+    seed config (make_task ~id:task_id ~status:(D.InProgress { assignee = owner; started_at = now }));
+    let events_dir = Filename.concat (Workspace_utils_paths_backend.masc_dir config) "events" in
+    let dated = Jsonl_writer.dated_path_now ~base_dir:events_dir in
+    if Sys.file_exists dated.Jsonl_writer.path then Unix.unlink dated.path;
+    Unix.mkdir dated.path 0o755;
+    let previous = Atomic.get Workspace_hooks.verification_submitted_fn in
+    let scheduled = ref None in
+    Fun.protect
+      ~finally:(fun () ->
+        Atomic.set Workspace_hooks.verification_submitted_fn previous;
+        Unix.rmdir dated.path)
+      (fun () ->
+        Atomic.set Workspace_hooks.verification_submitted_fn
+          (fun _config ~task:_ ~assignee ~verification_id ->
+            scheduled := Some (assignee, verification_id));
+        check_ok "committed submit survives failed event append"
+          (transition config ~task_id ~action:D.Submit_for_verification
+             ~notes:"Deliverable and evidence: event-log fault scenario" ());
+        match List.find_opt (fun (task : D.task) -> String.equal task.id task_id)
+                (Workspace.get_tasks_raw config) with
+        | Some { task_status = D.AwaitingVerification { assignee; verification_id; _ }; _ } ->
+            Alcotest.(check (option (pair string string)))
+              "committed obligation reaches authority scheduling"
+              (Some (assignee, verification_id)) !scheduled
+        | Some _ | None -> Alcotest.fail "submission did not remain committed"))
+;;
+
 let () =
   Alcotest.run
     "task transition broadcast"
     [ ( "committed transitions"
-      , [ Alcotest.test_case "cancel carries its reason" `Quick
+      , [ Alcotest.test_case "submit scheduling survives event log failure" `Quick
+            test_submit_schedules_review_after_log_failure
+        ; Alcotest.test_case "cancel carries its reason" `Quick
             test_cancel_broadcasts_reason
         ; Alcotest.test_case "an unclaimed cancel is terminal" `Quick
             test_cancel_of_an_unclaimed_task_is_announced_as_terminal

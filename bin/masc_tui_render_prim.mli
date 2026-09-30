@@ -351,24 +351,24 @@ val keeper_lane_idle_text : int -> string
 val boxed_surface_chrome_rows : int
 
 val selected_ask_question :
-  Masc_tui_types.state -> Masc.Tui_decode.ask_question option
+  Masc_tui_types.state -> Masc.Tui_decode_asks.ask_question option
 
 val draw_ask_question :
   Buffer.t ->
   int ->
   Masc_tui_types.state ->
-  row:Masc.Tui_decode.ask_row ->
+  row:Masc.Tui_decode_asks.ask_row ->
   draft:Ask_projection.draft ->
-  question:Masc.Tui_decode.ask_question ->
+  question:Masc.Tui_decode_asks.ask_question ->
   answering:bool -> selected_question:bool -> unit
 
-val draw_ask_context : Buffer.t -> int -> row:Masc.Tui_decode.ask_row -> unit
+val draw_ask_context : Buffer.t -> int -> row:Masc.Tui_decode_asks.ask_row -> unit
 
 val ask_block : (Buffer.t -> 'a) -> string * int
 
 val question_hints : Masc_tui_types.state -> string
 
-val question_asks : Masc_tui_types.state -> Masc.Tui_decode.ask_row list
+val question_asks : Masc_tui_types.state -> Masc.Tui_decode_asks.ask_row list
 
 val ask_question_viewport : Masc_tui_types.state -> string list * int
 
@@ -474,35 +474,35 @@ val system_log_level_style : Masc.Tui_decode.system_log_level -> string
 val system_log_category_text : Masc.Tui_decode.system_log_entry -> string
 
 val fusion_run_status_color :
-  Masc_tui_types.Tui_decode.fusion_run_status -> string
+  Masc.Tui_decode_fusion.fusion_run_status -> string
 
 val fusion_run_stage_compact :
-  Masc_tui_types.Tui_decode.fusion_run_stage -> string
+  Masc.Tui_decode_fusion.fusion_run_stage -> string
 (** A running run's stage, short enough for the table's STATE cell. *)
 
 val fusion_run_state_text :
-  status:Masc_tui_types.Tui_decode.fusion_run_status ->
-  stage:Masc_tui_types.Tui_decode.fusion_run_stage ->
+  status:Masc.Tui_decode_fusion.fusion_run_status ->
+  stage:Masc.Tui_decode_fusion.fusion_run_stage ->
   string
 (** What the Fusion table's STATE cell says: the stage while the run is
     running, [completed] once it has, and the server's failure code for a run
     that failed. *)
 
 val fusion_run_progress_text :
-  Masc_tui_types.Tui_decode.fusion_run_stage -> string
+  Masc.Tui_decode_fusion.fusion_run_stage -> string
 
 val sidebar_row_lead_cells : int
 (** What a list index spends before a row's label: the caret the cursor wears
     and a space each side. The room a label folds to is the frame's inner
     width less this, which is what a width check has to compare against. *)
 
-val fusion_run_clock : Masc_tui_types.Tui_decode.fusion_run -> string
+val fusion_run_clock : Masc.Tui_decode_fusion.fusion_run -> string
 
 val fusion_run_duration :
-  now:float -> Masc_tui_types.Tui_decode.fusion_run -> string
+  now:float -> Masc.Tui_decode_fusion.fusion_run -> string
 
 val fusion_run_age :
-  now:float -> Masc_tui_types.Tui_decode.fusion_run -> string
+  now:float -> Masc.Tui_decode_fusion.fusion_run -> string
 
 val repository_change_status : Masc.Tui_decode.repository_change -> string
 
@@ -515,7 +515,12 @@ val resolve_change_context :
 
 val build_change_context_lines : change_context -> string list
 
-val tree_diff_row_span : width:int -> Masc.Tui_decode.git_diff_row -> Span.t
+val tree_diff_gutter : Masc.Tui_decode.git_diff_row -> string
+(** Literal old/new coordinates and change marker; its measured width is shared
+    by diff rendering and horizontal bounds. *)
+
+val tree_diff_row_span :
+  ?hscroll:int -> width:int -> Masc.Tui_decode.git_diff_row -> Span.t
 
 val render_diff_surface :
   Masc_tui_types.state ->

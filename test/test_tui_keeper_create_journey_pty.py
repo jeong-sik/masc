@@ -6,6 +6,7 @@ from pathlib import Path
 import shlex
 import sys
 import tempfile
+import time
 
 import test_tui_keyboard_input as h
 import test_tui_home_journey_pty as home
@@ -90,8 +91,19 @@ def creation_journey(executable, *, wrong_receipt, from_home=False, reconfigured
                 h.send_and_wait(process, fd, output, b"\r" if from_home else b"a", message)
                 assert len(authored) == (0 if collision else 1), authored
                 assert not [body for path, body in requests if path == "/api/v1/keepers/chat/stream"]
-                h.send_and_wait(process, fd, output, b"a", message)
-                assert (editor_root / "input-2.json").read_text() == DECLARATION
+                # The second refusal can leave identical screen bytes. Wait
+                # for the second authored input and actual POST admission,
+                # rather than accepting a delayed repaint of the first error.
+                os.write(fd, b"a")
+                deadline = time.monotonic() + 5
+                second_input = editor_root / "input-2.json"
+                while not second_input.exists() or (not collision and len(authored) < 2):
+                    h.read_available(fd, output)
+                    assert process.poll() is None, "creation retry exited the TUI"
+                    assert time.monotonic() < deadline, "creation retry never reopened its authored input"
+                    time.sleep(0.01)
+                h.drain_until_quiet(process, fd, output)
+                assert second_input.read_text() == DECLARATION
                 assert len(authored) == (0 if collision else 2), authored
                 assert b"Keepers \xe2\x96\xb8 gamma \xe2\x96\xb8 chat" not in h.screen_text(bytes(output))
                 os.write(fd, b"q")

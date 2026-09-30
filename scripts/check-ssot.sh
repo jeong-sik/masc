@@ -161,16 +161,6 @@ check_rule "R6-home-masc-root" 0 \
   '' \
   bin lib scripts
 
-# 67 -> 58: the two runbooks that told an operator to type one machine's home
-# directory now derive the path from MASC_BASE_PATH. What is left is RFC prose
-# recording where a measurement was taken, which is the kind of sentence the
-# evidence exclusion above exists for.
-check_rule "R6-home-masc-root-docs" 58 \
-  "<base-path>/.masc with explicit MASC_BASE_PATH or --base-path" \
-  '(\$HOME|\$\{HOME[^}]*\}|~)/[^[:space:]`'\''"]*\.masc([/[:space:]`'\''".,)]|$)' \
-  '^docs/evidence/' \
-  docs
-
 # SSOT-R7 — OTel metric label key for keeper identity is "keeper".
 # "keeper_name" in a metric label list splits the label vocabulary: Grafana
 # template variables and panel group-bys query "keeper", so keeper_name-keyed

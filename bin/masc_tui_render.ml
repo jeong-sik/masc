@@ -8445,12 +8445,12 @@ let render_system_logs (state : state) =
   box_line buf cols header;
   box_divider buf cols;
   (* The message takes what the named columns leave, asked of the columns. *)
-  let message_width =
-    Render_schedule.system_log_message_width
+  let log_layout =
+    Render_schedule.system_log_layout
       ~inner_width:(max 1 (framed_inner_width cols - 2))
   in
   let col_hdr =
-    "  " ^ Render_schedule.system_log_header_row ~message_width
+    "  " ^ Render_schedule.system_log_header_row ~layout:log_layout
   in
   box_line_styled buf cols ~style:(Theme.recede ()) col_hdr;
   box_divider buf cols;
@@ -8509,7 +8509,7 @@ let render_system_logs (state : state) =
              module name used to push every column right of it out of line. *)
           let line =
             "  "
-            ^ Render_schedule.system_log_row ~message_width ~level_style
+            ^ Render_schedule.system_log_row ~layout:log_layout ~level_style
                 ~styles:
                   { Render_schedule.slog_time_style = Ansi.dim
                   ; slog_module_style =
@@ -10617,12 +10617,12 @@ let render_repository_list (state : state) =
     ~body:(fun ~budget c ->
       (* The path takes what the named columns leave, asked of the columns
          rather than of a constant standing in for their total. *)
-      let path_width =
-        Render_schedule.workspace_path_width
+      let repository_layout =
+        Render_schedule.workspace_layout
           ~inner_width:(max 1 (framed_inner_width cols - 2))
       in
       c.push_styled ~style:(Theme.recede ())
-        ("  " ^ Render_schedule.workspace_header_row ~path_width);
+        ("  " ^ Render_schedule.workspace_header_row ~layout:repository_layout);
       c.push_divider ();
       (match state.repositories_error with
        | None -> ()
@@ -10668,7 +10668,7 @@ let render_repository_list (state : state) =
               let open Masc.Tui_decode in
               let line =
                 "  "
-                ^ Render_schedule.workspace_row ~path_width
+                ^ Render_schedule.workspace_row ~layout:repository_layout
                     { Render_schedule.wrow_name =
                         Terminal_text.single_line r.rp_name
                     ; wrow_branch =
@@ -16364,13 +16364,34 @@ let render_palette (state : state) =
 
      The overlay contract draws the box and fills the rows under a short list
      of matches, so the footer stays on the composer's row. *)
+  let caret = "\xe2\x96\x8c" in
+  let prompt = Ansi.bold ^ prompt ^ Ansi.reset ^ " " in
+  let inner_width = framed_inner_width cols in
+  let prompt_width = Message_layout.display_width prompt in
+  let caret_width = Message_layout.display_width caret in
+  (* Keep the end being edited on screen. The masthead yields before the
+     filter loses all of its cells; it returns as the viewport grows. *)
+  let query = Terminal_text.single_line state.palette_query in
+  let title = screen_title title ^ "  " in
+  let title =
+    if Message_layout.display_width title + prompt_width + caret_width
+       + Message_layout.display_width query > inner_width
+    then "" else title
+  in
+  let query_width =
+    max 0
+      (inner_width - Message_layout.display_width title - prompt_width
+       - caret_width)
+  in
+  let query =
+    Message_layout.input_viewport ~max_cells:query_width
+      query
+  in
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"palette"
     ~frame:Chrome_overlay
     ~title:
-      (screen_title title ^ "  "
-       ^ Ansi.bold ^ prompt ^ Ansi.reset ^ " "
-       ^ (Terminal_text.single_line state.palette_query)
-       ^ ((Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "\xe2\x96\x8c" ^ Ansi.reset))
+      (title ^ prompt ^ query
+       ^ Masc_tui_theme.tone Masc_tui_theme.Accent ^ caret ^ Ansi.reset)
     (* [key:label] items, two spaces apart, the way every other footer is
        written. In the dotted form this row was one item with no colon, so
        {!Masc_tui_footer} could shed no whole key and keep no door: it fell

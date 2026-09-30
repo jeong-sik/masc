@@ -59,6 +59,16 @@ let test_the_context_inspector_moves_one_row () =
   notch state ~drawn:(Context_inspector_scroll 0) Masc.Tui_decode.Wheel_down;
   Alcotest.(check int) "one row" 3 state.context_inspector_scroll
 
+(* The invite card is drawn over a surface and windows its rows as the link
+   preview does, so a notch moves a long link one row, as j and k do. *)
+let test_the_invite_card_moves_one_row () =
+  let state = make_state () in
+  state.play_invite_scroll <- 2;
+  notch state ~drawn:(Play_invite_scroll 0) Masc.Tui_decode.Wheel_down;
+  Alcotest.(check int) "one row down" 3 state.play_invite_scroll;
+  notch state ~drawn:(Play_invite_scroll 0) Masc.Tui_decode.Wheel_up;
+  Alcotest.(check int) "one row back" 2 state.play_invite_scroll
+
 let () =
   Alcotest.run "tui_wheel_reader"
     [ ( "wheel over a reader"
@@ -69,6 +79,8 @@ let () =
         ; Alcotest.test_case "the top holds" `Quick test_the_top_holds
         ; Alcotest.test_case "the context inspector moves one row" `Quick
             test_the_context_inspector_moves_one_row
+        ; Alcotest.test_case "the invite card moves one row" `Quick
+            test_the_invite_card_moves_one_row
         ; Alcotest.test_case "readers with a wheel of their own are left alone"
             `Quick test_readers_with_a_wheel_of_their_own_are_left_alone
         ] )

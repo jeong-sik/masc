@@ -127,6 +127,35 @@ class FusionResults(unittest.TestCase):
         self.assertFalse(output["coverage"][0]["complete"])
         self.assertIn("unrelated", output["coverage"][0]["detail"])
 
+    def test_source_incarnation_must_match_detail_run(self):
+        snapshot = source(detail())
+        snapshot["incarnation"] = "another-run"
+        result = call("fusion-results", [snapshot])
+        self.assertTrue(result["isError"])
+        self.assertNotIn("structuredContent", result)
+        self.assertIn("incarnation", result["content"][0]["text"])
+        output = call("fusion-results", [source(detail())])["structuredContent"]
+        for row in output["rows"]:
+            self.assertEqual(row["subject_id"], RUN)
+            self.assertEqual(row["fields"]["incarnation"], RUN)
+        self.assertEqual(output["coverage"][0]["incarnation"], RUN)
+
+    def test_evidence_lifecycle_matches_run_state(self):
+        for run_state in ("running", "completed", "failed"):
+            for evidence_state in ("recorded", "pending", "absent"):
+                with self.subTest(run=run_state, evidence=evidence_state):
+                    result = call("fusion-results", [source(detail(run_state, evidence_state))])
+                    invalid = ((evidence_state == "pending" and run_state != "running")
+                               or (evidence_state == "absent" and run_state == "running"))
+                    self.assertEqual(result["isError"], invalid)
+                    if invalid:
+                        self.assertNotIn("structuredContent", result)
+                    else:
+                        output = result["structuredContent"]
+                        self.assertEqual(len(output["rows"]), 2 if evidence_state == "recorded" else 1)
+                        self.assertEqual(output["coverage"][0]["complete"],
+                                         run_state != "running" and evidence_state == "recorded")
+
     def test_export_identity_changes_with_evidence_and_keeps_run(self):
         sys.path.insert(0, str(ADDONS / "fusion-results"))
         spec = importlib.util.spec_from_file_location("fusion_export", ADDONS / "fusion-results/export_snapshot.py")

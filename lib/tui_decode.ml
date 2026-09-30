@@ -12348,7 +12348,7 @@ let play_invite_refusal ~status_code ~body =
     | `Assoc fields ->
       let text_of = function
         | `String value when String.trim value <> "" ->
-          Some (sanitize_terminal_text (String.trim value))
+          Some (Tui_terminal_text.sanitize_terminal_text (String.trim value))
         | `String _ | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _ ->
           None
       in

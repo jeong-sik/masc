@@ -6,6 +6,7 @@ type browser_selection = Live of Browser_lane.client_id | Automation
 (** The lane name ({!Browser_lane.Lane_name.to_wire}) a selection reads from. *)
 val browser_selection_lane : browser_selection -> string
 type source =
+  | Fusion_run of { id : string; run_id : string }
   | Snapshot_file of { id : string; path : string }
   | Msx_capture of { id : string }
   | Dos_capture of { id : string }
@@ -16,7 +17,7 @@ val parse : Yojson.Safe.t -> (source list, string) result
 (** Typed source bindings shared by acquisition and read-only presentation. *)
 val validate : Yojson.Safe.t -> (unit, string) result
 type kind = Snapshot_file_kind | Msx_capture_kind | Dos_capture_kind
-  | Lane_output_kind | Browser_document_kind
+  | Lane_output_kind | Browser_document_kind | Fusion_run_kind
 val kind_of_string : string -> kind option
 val kind_to_string : kind -> string
 (** The wire name of a source kind, as a binding's ["kind"] spells it. *)
@@ -30,6 +31,7 @@ val offers : Lane_id.builtin -> kind list
     [browser_document] source only from a Browser Lane backend listed here;
     Stagehand has no idle document observer and offers none. *)
 type activity = Tool_completed | Machine_changed of Machine_lane.t | Browser_changed
+  | Fusion_changed of string
 type refresh_interest
 val refresh_interest : Yojson.Safe.t -> (refresh_interest, string) result
 val interested : refresh_interest -> activity -> bool

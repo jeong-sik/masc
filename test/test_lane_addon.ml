@@ -484,7 +484,27 @@ let test_activity_from_another_domain_reaches_the_owner () =
     detach config id;
     await_phase clock config id "detached")
 
+let test_fusion_status_hint_wakes_only_its_bound_run () =
+  with_fixture (fun env _sw config dir _state ->
+    let watcher run_id =
+      unwrap (dispatch config Runtime.Attach [
+        "manifest_path",`String (manifest dir "good");"run_id",`String "world";
+        "binding",`Assoc ["sources",`List [`Assoc [
+          "source_id",`String "fusion";"kind",`String "fusion_run";
+          "run_id",`String run_id]]]]) |> text "instance_id" in
+    let one = watcher "fusion-one" and two = watcher "fusion-two" in
+    let clock = Eio.Stdenv.clock env in
+    let seq id = int "observation_seq" (instance config id) in
+    await clock (fun () -> seq one=1 && seq two=1);
+    Runtime.notify_fusion_run ~run_id:"fusion-one";
+    await clock (fun () -> seq one=2);
+    check Alcotest.int "another Fusion binding did not run" 1 (seq two);
+    List.iter (detach config) [one;two];
+    List.iter (fun id -> await_phase clock config id "detached") [one;two])
+
 let () = run "Lane Add-on runtime" ["optional extension", [
+  test_case "Fusion state hint wakes only the exact run binding" `Quick
+    test_fusion_status_hint_wakes_only_its_bound_run;
   test_case "a human MSX press wakes machine watchers exactly once" `Quick
     test_human_press_wakes_machine_watchers_once;
   test_case "a human MSX load wakes machine watchers exactly once" `Quick

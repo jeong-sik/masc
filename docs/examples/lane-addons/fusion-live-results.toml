@@ -1,0 +1,10 @@
+id = "fusion-results"
+run_id = "fusion-report"
+manifest_path = "../../../addons/fusion-results/lane.toml"
+
+[binding]
+[[binding.sources]]
+source_id = "fusion"
+kind = "fusion_run"
+# Exact canonical Fusion request/run ID returned by the existing submit path.
+run_id = "<exact-fusion-run-id>"

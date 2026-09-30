@@ -36,7 +36,7 @@ let with_environment name value f =
   let previous = Sys.getenv_opt name in
   Unix.putenv name value;
   Fun.protect ~finally:(fun () -> Unix.putenv name (Option.value ~default:"" previous)) f
-let with_fixture ?(produce=(fun ~binding:_ ~sources:_ -> output)) ?(allow_stop=ref true)
+let with_fixture ?produce_package ?(produce=(fun ~binding:_ ~sources:_ -> output)) ?(allow_stop=ref true)
     ?(stop_attempts=ref []) f =
   let root = Filename.temp_dir "lane-composition-" "" |> Unix.realpath in
   Fun.protect ~finally:(fun () -> remove root) (fun () ->
@@ -58,13 +58,16 @@ let with_fixture ?(produce=(fun ~binding:_ ~sources:_ -> output)) ?(allow_stop=r
                 directory (Runtime.configuration_directory config);
               let received = Hashtbl.create 4 and stopped = ref [] in
               let backend : Runtime.For_testing.backend = {
-                start=(fun ~sw:_ ~instance_id ~package:_ ~on_created ->
+                start=(fun ~sw:_ ~instance_id ~package ~on_created ->
                   let connection : Runtime.For_testing.connection = {
                     container_id=Store.digest instance_id;
                     action_schema = (fun () -> None);
                     act = (fun ~arguments:_ -> Error "read-only fixture");
                     observe=(fun ~binding ~sources ->
-                      Hashtbl.replace received instance_id sources; Ok (produce ~binding ~sources));
+                      Hashtbl.replace received instance_id sources;
+                      Ok (match produce_package with
+                        | Some produce_package -> produce_package package ~binding ~sources
+                        | None -> produce ~binding ~sources));
                     stop=(fun () ->
                       stop_attempts := instance_id :: !stop_attempts;
                       if not !allow_stop then Error "fixture cleanup unavailable"
@@ -483,7 +486,130 @@ let test_native_msx_history_crosses_worker_freeze_and_detach () =
       check string "full original history remains readable after Detach and Lane-store removal"
         expected (reconstruct before.input_count reference [])))
 
+let fusion_package (package : Types.package) ~binding ~sources =
+  let tests = Filename.concat package.directory "../tests" in
+  let script = {|import json, sys
+sys.path.insert(0, sys.argv[1])
+from test_packages import ProtocolCase
+output = ProtocolCase().call(sys.argv[2], json.loads(sys.argv[3]), json.loads(sys.argv[4]))
+assert "rows" in output, output
+print(json.dumps(output))
+|} in
+  Eio_unix.run_in_systhread (fun () ->
+    let channel = Unix.open_process_args_in "python3"
+      [|"python3"; "-c"; script; tests; package.id;
+        Yojson.Safe.to_string binding; Yojson.Safe.to_string sources|] in
+    let bytes = match In_channel.input_all channel with
+      | bytes -> bytes
+      | exception exn -> ignore (Unix.close_process_in channel); raise exn in
+    match Unix.close_process_in channel with
+    | Unix.WEXITED 0 -> unwrap (Types.output_of_json (Yojson.Safe.from_string bytes))
+    | _ -> fail "Fusion package MCP stdio observation failed")
+
+let test_native_fusion_report_is_readable_after_detach () =
+  with_fixture ~produce_package:fusion_package (fun clock config root directory _received _stopped ->
+    with_environment "MASC_BASE_PATH" root (fun () ->
+      let reset_board () = Board_dispatch.reset_for_test (); Board.reset_global_for_test () in
+      reset_board ();
+      Fun.protect ~finally:reset_board (fun () ->
+        let registry = Fusion_run_registry.global () in
+        let run_id = "fusion-chain-" ^ Store.digest root in
+        Fusion_run_registry.register_running registry ~run_id ~keeper:"fixture-producer"
+          ~preset:"default" ~roster:Fusion_types.preset_roster
+          ~topology:Fusion_types.Simple ~started_at:1.;
+        let body = "Measured alternative A preserves the original evidence." in
+        let origin : Board.post_origin = {turn_ref=None; source=Some "fusion";
+          fusion_run_id=Some run_id; fusion_producer=Some "fixture-producer"} in
+        ignore (unwrap (Board_dispatch.create_post_once_by_fusion_run_id ~fusion_run_id:run_id
+          ~author:"fixture-producer" ~content:body ~meta_json:(`Assoc [])
+          ~post_kind:Board.System_post ~visibility:Board.Unlisted ~ttl_hours:0 ~origin ()
+          |> Result.map_error Board.show_board_error));
+        Fusion_run_registry.mark_completed registry ~run_id ~outcome:Fusion_run_registry.Succeeded;
+        let addons = match Sys.getenv_opt "DUNE_SOURCEROOT" with
+          | Some source_root -> Filename.concat source_root "addons"
+          | None -> Filename.concat (Filename.dirname Sys.executable_name) "../addons" in
+        let declaration id sources =
+          let path = Filename.concat directory (id ^ ".toml") in
+          write path (Printf.sprintf "id=%S\nrun_id=\"fusion-chain\"\nmanifest_path=%S\n[binding]\nsources=%s\n"
+            id (Filename.concat addons (id ^ "/lane.toml")) sources);
+          path in
+        let producer_path = declaration "fusion-results" (Printf.sprintf
+          {|[{source_id="fusion",kind="fusion_run",run_id=%S}]|} run_id) in
+        let report_path = declaration "fusion-report" (edge "fusion-results") in
+        reconcile config directory;
+        let producer = active config "fusion-results" |> text "instance_id" in
+        let consumer = active config "fusion-report" |> text "instance_id" in
+        let report () = inspect config |> list "rows" |> List.find_opt (fun row ->
+          member "lane_id" row = `String (consumer ^ "/fusion/report")
+          && member "input_complete" (member "fields" row) = `Bool true) in
+        await clock (fun () -> Option.is_some (report ()));
+        let row = require_some "complete Fusion report missing" (report ()) in
+        let fields = member "fields" row in
+        check string "exact native Fusion run crosses both packages" run_id (text "fusion_run_id" fields);
+        check string "upstream installation survives composition" producer
+          (member "producer" fields |> text "instance_id");
+        check string "report does not claim delivery from observation" "not_attempted"
+          (text "delivery_status" fields);
+        check bool "report retains the Board analysis body" true
+          (String.split_on_char '\n' (text "body" fields) |> List.mem body);
+        let delivery = ref None in
+        Runtime.register_delivery_handler (fun ~config:_ ~caller ~keeper_name ~prompt ->
+          delivery := Some (caller, keeper_name, prompt);
+          Ok (`Assoc ["request_id",`String "fixture-request";"status",`String "deferred"]));
+        let frozen = Runtime.dispatch ~caller:"fixture-operator" ~config ~operation:Runtime.Evidence
+          (`Assoc ["instance_id",`String consumer;"row_ids",`List [`String (text "id" row)];
+            "keeper_name",`String "fixture-keeper"]) |> unwrap in
+        check string "delivery acceptance remains deferred, not read" "deferred"
+          (member "delivery" frozen |> member "receipt" |> text "status");
+        let caller, keeper, prompt = require_some "delivery callback missing" !delivery in
+        check string "delivery preserves authenticated caller" "fixture-operator" caller;
+        check string "delivery targets the selected Keeper" "fixture-keeper" keeper;
+        let artifact = match Tool_output.decode_from_agent_core prompt with
+          | Tool_output.Decoded artifact -> artifact
+          | _ -> fail "delivery has no readable artifact marker" in
+        let read sha =
+          let buffer = Buffer.create 1024 in
+          let rec pages offset =
+            let _, page = Keeper_artifact_read.handle_with_page ~base_path:root
+              ~args:(`Assoc ["sha256",`String sha;"offset",`Int offset]) in
+            match page with
+            | Some page when page.encoding = Keeper_artifact_read.Utf_8 ->
+                Buffer.add_string buffer page.content;
+                if not page.eof then (
+                  check bool "artifact pagination advances" true (page.next_offset > offset);
+                  pages page.next_offset)
+            | _ -> fail "Keeper cannot read the published UTF-8 report evidence" in
+          pages 0; Buffer.contents buffer in
+        let artifacts = match Tool_output.artifact_manifest_of_json
+            (Yojson.Safe.from_string (read artifact.sha256)) with
+          | Tool_output.Decoded_artifact_manifest {structured_content; _} ->
+              list "artifacts" structured_content
+          | _ -> fail "invalid report evidence manifest" in
+        let retained = List.map (fun item ->
+          let reference = match Tool_output.normalized_artifact_ref_of_json (member "artifact" item) with
+            | Tool_output.Decoded_normalized_artifact_ref reference -> reference
+            | _ -> fail "invalid published evidence reference" in
+          reference.sha256, read reference.sha256) artifacts in
+        check bool "publication carries the exact report row" true
+          (List.exists (fun (_, bytes) ->
+            let record = Yojson.Safe.from_string bytes in
+            match member "output" record with
+            | `Assoc output -> (match List.assoc_opt "rows" output with
+                | Some (`List rows) -> List.mem row rows
+                | Some _ | None -> false)
+            | _ -> false) retained);
+        Sys.remove producer_path; Sys.remove report_path; reconcile config directory;
+        await clock (fun () ->
+          text "kind" (member "phase" (instance config producer)) = "detached"
+          && text "kind" (member "phase" (instance config consumer)) = "detached");
+        let store = Store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
+        remove (Store.root store);
+        List.iter (fun (sha, expected) ->
+          check string "Keeper artifact bytes survive Detach and Lane-store removal" expected (read sha)) retained)))
+
 let () = run "TOML cross-Lane composition" ["world inputs",[
+  test_case "native Fusion report crosses packages and remains Keeper-readable" `Quick
+    test_native_fusion_report_is_readable_after_detach;
   test_case "native input history crosses worker and survives Detach" `Quick
     test_native_msx_history_crosses_worker_freeze_and_detach;
   test_case "named output feeds statistics and preserves mapping revisions" `Quick

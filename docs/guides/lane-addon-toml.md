@@ -36,7 +36,10 @@ Dashboard의 **New TOML / Edit TOML**과 Keeper의 선언 편집 도구도 같�
 
 `manifest_path`와 `binding.sources`의 `snapshot_file.path`는 선언 파일이 있는 디렉터리를 기준으로
 해석한다. 그 밖의 package-specific binding 문자열을 파일 경로로 추측하거나 확장하지 않는다.
-현재 source 종류는 `snapshot_file`, `msx_capture`, `browser_document`, `lane_output`이다.
+현재 source 종류는 `snapshot_file`, `msx_capture`, `browser_document`, `lane_output`, `fusion_run`이다.
+`fusion_run`은 정확한 Fusion run ID의 현재 상태와 Board 근거를 호스트에서 캡처한다.
+Fusion 상태 갱신 시 해당 run을 연결한 설치만 다시 관측한다. 모델 계산·인증·기존 전달 수명은 바꾸지 않는다.
+결과는 발표 시점의 보존 캡처이며 Board 카드의 나중 편집을 자동 추적하지 않는다.
 `lane_output`은 같은 run의 다른 설치가 완료한 출력을 읽는다. `browser_document`는 이미 열린
 정확한 Browser 대상을 요구하며, 선언을 추가한다고 새 세션이나 탭을 만들지 않는다.
 MSX 예제는 incarnation을 고정하지 않으므로 기존 머신의 load/restore를 구분해서 계속 관측한다.

@@ -1,0 +1,193 @@
+"""Render supplied Fusion outputs as reports with explicit coverage and lineage.
+
+No model calls, publication, credentials or delivery claims live in this worker.
+The host retains and delivers reports through its existing evidence surface.
+"""
+from __future__ import annotations
+
+from enum import Enum
+from dataclasses import dataclass
+from pathlib import Path
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from protocol import (InvalidInput, Source, boolean, evidence, object_value,
+                      optional_string, row, serve, stable_id, string)
+
+
+class RunState(Enum):
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+@dataclass(frozen=True)
+class ReportContent:
+    run_id: str
+    heading: str
+    post_body: str | None
+    failure: tuple[str, str] | None
+
+
+@dataclass(frozen=True)
+class ReportDraft:
+    item: dict
+    content: ReportContent
+
+
+def render_body(content: ReportContent, *, complete: bool) -> str:
+    body = f"# Fusion 보고서 · {content.heading}\n\n실행: {content.run_id}\n"
+    body += "\n입력 범위: " + ("기록된 실행 결과" if complete else "불완전한 결과") + "\n"
+    if content.failure is not None:
+        code, error = content.failure
+        body += f"\n실패: {code} · {error}\n"
+    if content.post_body is not None:
+        body += f"\n## 보존된 분석 내용\n\n{content.post_body}\n"
+    else:
+        body += "\n보존된 분석 내용이 아직 없습니다.\n"
+    return body + "\n전달 상태: 이 보고서의 전달·열람은 별도 기록으로 확인합니다.\n"
+
+
+def run_state(value):
+    try:
+        return RunState(value)
+    except (ValueError, TypeError) as error:
+        raise InvalidInput("Unknown Fusion run status") from error
+
+
+def coverage(value, label):
+    value = object_value(value, label)
+    for key in ("source_id", "incarnation"):
+        string(value.get(key), f"{label}.{key}")
+    for key in ("cursor", "detail"):
+        if key not in value:
+            raise InvalidInput(f"{label}.{key} is required")
+        optional_string(value[key], f"{label}.{key}")
+    boolean(value.get("complete"), f"{label}.complete")
+    return value
+
+
+def reports(source: Source, observation: dict, *, recognized: bool):
+    producer = object_value(observation.get("producer"), "producer")
+    for key in ("installation_id", "instance_id", "run_id",
+                "configuration_revision", "package_revision"):
+        string(producer.get(key), f"producer.{key}")
+    sequence = producer.get("observation_seq")
+    if isinstance(sequence, bool) or not isinstance(sequence, int) or sequence < 1:
+        raise InvalidInput("producer.observation_seq must be a positive completed sequence")
+    retained = evidence(observation.get("evidence"))
+    if not retained or not any(item["sha256"] is not None for item in retained):
+        raise InvalidInput("Report input requires a retained upstream output digest")
+    output = object_value(observation.get("output"), "output")
+    if not isinstance(output.get("rows"), list) or not isinstance(output.get("coverage"), list):
+        raise InvalidInput("Output must contain rows and coverage arrays")
+    upstream_coverage = [coverage(item, "output coverage") for item in output["coverage"]]
+    producer_status = coverage(observation.get("producer_status"), "producer_status")
+    base_complete = (source.complete and recognized and producer_status["complete"]
+                     and bool(upstream_coverage) and all(c["complete"] for c in upstream_coverage))
+    groups = {}
+    skipped = set()
+    ports = {f"{producer['instance_id']}/fusion/status": "fusion/status",
+             f"{producer['instance_id']}/fusion/result": "fusion/result"}
+    for original in output["rows"]:
+        original = object_value(original, "upstream row")
+        lane = string(original.get("lane_id"), "row.lane_id")
+        if lane not in ports:
+            skipped.add(lane)
+            continue
+        lane = ports[lane]
+        string(original.get("id"), "row.id")
+        fields = object_value(original.get("fields"), "row.fields")
+        boolean(fields.get("input_complete"), "row.input_complete")
+        if lane == "fusion/status":
+            run = object_value(fields.get("fusion_run"), "fusion_run")
+            run_id = string(run.get("run_id"), "fusion_run.run_id")
+            status = run_state(run.get("status"))
+            if status is RunState.FAILED:
+                string(run.get("failure_code"), "fusion_run.failure_code")
+                string(run.get("error"), "fusion_run.error")
+        else:
+            run_id = string(fields.get("fusion_run_id"), "fusion_run_id")
+            status = run_state(fields.get("run_status"))
+            post = object_value(fields.get("board_post"), "board_post")
+            string(post.get("id"), "board_post.id")
+            if not isinstance(post.get("body"), str):
+                raise InvalidInput("board_post.body must be text")
+            origin = object_value(post.get("origin"), "board_post.origin")
+            if origin.get("source") != "fusion" or origin.get("fusion_run_id") != run_id:
+                raise InvalidInput("Report evidence belongs to another Fusion run")
+        group = groups.setdefault(run_id, {})
+        if lane in group:
+            raise InvalidInput("Duplicate Fusion row for the same run and port")
+        if group and next(iter(group.values()))[1] is not status:
+            raise InvalidInput("Fusion status and result disagree")
+        group[lane] = (original, status)
+
+    result, completions = [], []
+    for run_id, group in groups.items():
+        status = next(iter(group.values()))[1]
+        status_row = group.get("fusion/status")
+        result_row = group.get("fusion/result")
+        post = result_row[0]["fields"]["board_post"] if result_row else None
+        complete = (base_complete and not skipped and status is not RunState.RUNNING
+                    and post is not None
+                    and all(item[0]["fields"]["input_complete"] for item in group.values()))
+        # A failed run can have complete evidence. Completeness never means success.
+        heading = {RunState.RUNNING: "분석 진행 중", RunState.COMPLETED: "분석 완료",
+                   RunState.FAILED: "분석 실패"}[status]
+        failure = None
+        if status_row and status is RunState.FAILED:
+            run = status_row[0]["fields"]["fusion_run"]
+            failure = (run["failure_code"], run["error"])
+        content = ReportContent(run_id, heading, post["body"] if post else None, failure)
+        item = row(source, observation, lane="fusion/report", subject=run_id,
+                   title=f"Fusion 보고서 · {heading}", kind="value", fields={
+                       "format": "markdown", "fusion_run_id": run_id,
+                       "run_status": status.value, "input_complete": complete,
+                       "board_post_id": post["id"] if post else None,
+                       "scope": "supplied_fusion_output", "content_trust": "untrusted_source_text",
+                       "producer": producer, "producer_status": producer_status,
+                       "upstream_coverage": upstream_coverage,
+                       "upstream_rows": [value[0] for value in group.values()],
+                       "delivery_status": "not_attempted",
+                       "delivery_label": "아직 전달하지 않음"})
+        item["id"] = stable_id(item["id"], run_id, "report")
+        item["actor"] = None
+        result.append(ReportDraft(item, content))
+        completions.append(complete)
+    return result, bool(result) and all(completions) and not skipped, skipped
+
+
+def observe(binding: dict, sources: tuple[Source, ...]) -> dict:
+    rows, statuses = [], []
+    if not sources:
+        return {"rows": [], "coverage": [{"source_id": "fusion-report/input",
+                "incarnation": "unobserved", "cursor": None, "complete": False,
+                "detail": "No Fusion output supplied; no report is available"}]}
+    for source in sources:
+        accepted = [obs for obs in source.observations if obs.get("kind") == "lane_output"]
+        skipped = {str(obs.get("kind", "untyped")) for obs in source.observations
+                   if obs.get("kind") != "lane_output"}
+        source_rows, completions = [], []
+        for obs in accepted:
+            projected, complete, skipped_lanes = reports(source, obs, recognized=not skipped)
+            source_rows.extend(projected)
+            completions.append(complete)
+            skipped.update(skipped_lanes)
+        status = source.coverage(skipped)
+        status["complete"] = bool(completions) and all(completions) and not skipped
+        if not status["complete"]:
+            status["detail"] = "; ".join(filter(None, (status["detail"],
+                "Report input is partial; run success, delivery and reading are separate states")))
+            for draft in source_rows:
+                draft.item["fields"]["input_complete"] = False
+        for draft in source_rows:
+            draft.item["fields"]["body"] = render_body(
+                draft.content, complete=draft.item["fields"]["input_complete"])
+            rows.append(draft.item)
+        statuses.append(status)
+    return {"rows": rows, "coverage": statuses}
+
+
+if __name__ == "__main__":
+    serve("masc-fusion-report", observe)

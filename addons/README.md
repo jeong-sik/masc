@@ -17,6 +17,8 @@ step in other Keeper activity.
 | [dos-world](dos-world/README.md) | Runs a homebrew DOS counter, accepts an optional action and emits guest-state and screen artifacts. | Owns its DOS/WASM machine inside its worker; replacement starts a new machine. |
 | [quiz-questions](quiz-questions/) | Derives questions from a supplied fact deck without publishing the answer key. | Reads the deck; owns no source records or score. |
 | [quiz-grader](quiz-grader/README.md) | Grades answers against the same deck and retains exact upstream question references. | Keeps attempts and scores in worker memory; the host retains completed outputs and action receipts. |
+| [fusion-results](fusion-results/README.md) | Projects captured Fusion status and exact-run Board evidence into named outputs for downstream packages. | Owns its projection worker; Fusion compute, credentials and durable delivery stay in the existing host. |
+| [fusion-report](fusion-report/README.md) | Produces readable reports from Fusion outputs, preserving failures, incomplete input and exact evidence lineage. | Owns its report worker; publication and Keeper delivery remain host operations. |
 
 Removing an observer or metric package leaves the source owner intact. Removing
 the DOS package ends its own environment through its worker lifecycle. The host

@@ -14,6 +14,9 @@ val dispatch : ?caller:string -> config:Workspace.config -> operation:operation 
     interested in the typed activity receive a capture hint. Repeated hints
     coalesce; explicit observations take precedence over refresh hints. *)
 val notify_activity : config:Workspace.config -> activity:Lane_addon_sources.activity -> unit
+val notify_fusion_run : run_id:string -> unit
+(** Capture hints for exact-run bindings against the process-wide Fusion registry.
+    No I/O or package callback; work is carried to the owner domain. *)
 
 type skill_export_owner = Declaration of string | Instance of string
 type skill_export = {

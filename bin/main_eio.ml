@@ -1851,7 +1851,7 @@ let runtime_verify_cmd_exit base_path runtime_id timeout_s =
     let loaded = try
       let (_ : string option) = Server_runtime_bootstrap.configure_agent_core_model_catalog_env () in
       Runtime.load_list ~config_path
-      |> Result.map_error (Runtime.to_diagnostic_text ~config_path)
+      |> Result.map_error (Runtime_config_error.to_diagnostic_text ~config_path)
       with Env_config_core.Config_error message -> Error message in
     match loaded with
     | Error message ->
@@ -2253,7 +2253,7 @@ let runtime_probe_cmd_exit base_path runtime_id =
   match Runtime.load_list ~config_path:runtime_config_path with
   | Error failure ->
       Printf.eprintf "runtime-probe failed: %s\n"
-        (Runtime.to_diagnostic_text ~config_path:runtime_config_path failure);
+        (Runtime_config_error.to_diagnostic_text ~config_path:runtime_config_path failure);
       1
   | Ok (runtimes, _default, _, _, _) -> (
       match
@@ -3829,7 +3829,7 @@ let setup_validate_runtime base_path =
     try
       let (_ : string option) = Server_runtime_bootstrap.configure_agent_core_model_catalog_env () in
       Runtime.load_list ~config_path
-      |> Result.map_error (Runtime.to_diagnostic_text ~config_path)
+      |> Result.map_error (Runtime_config_error.to_diagnostic_text ~config_path)
     with Env_config_core.Config_error message -> Error message
   in
   match loaded with

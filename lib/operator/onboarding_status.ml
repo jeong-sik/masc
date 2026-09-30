@@ -96,7 +96,7 @@ let model_checks config_path =
        from the constructor. *)
     None, None,
     [check Runtime_configuration Invalid
-       (Runtime.to_operator_text ~config_path failure)
+       (Runtime_config_error.to_operator_text ~config_path failure)
        [Inspect_configuration; Configure_models]]
   | Ok (runtimes, default, assignments, _, lanes) ->
     let loaded = check Runtime_configuration Satisfied "runtime.toml loads." [Configure_models] in

@@ -27,7 +27,7 @@ let set_runtime_lane_candidates ?runtime_config_path ?expected_source_revision
    rendered once here instead of at every call below. *)
 let load_list_text ~config_path =
   Runtime.load_list ~config_path
-  |> Result.map_error (Runtime.to_diagnostic_text ~config_path)
+  |> Result.map_error (Runtime_config_error.to_diagnostic_text ~config_path)
 ;;
 
 module J = Yojson.Safe.Util
@@ -1820,7 +1820,7 @@ tools-support = true
       let binding = List.hd config.Runtime_schema.bindings in
       (match Runtime.of_binding config binding with
        | Error reason -> Alcotest.failf "relative inherited home dropped runtime: %s"
-           (Runtime.string_of_drop_reason reason)
+           (Runtime_config_error.string_of_drop_reason reason)
        | Ok runtime ->
          let expected = Filename.concat (Sys.getcwd ()) "relative-claude-account" in
          Alcotest.(check string) "runtime quota uses the selected child home"
@@ -1855,7 +1855,7 @@ tools-support = true
           | None -> Alcotest.fail ("missing binding " ^ id)
         in
         (match Runtime.of_binding config (binding "codex") with
-            | Error (Runtime.Execution_unbuildable reason) ->
+            | Error (Runtime_config_error.Execution_unbuildable reason) ->
               Alcotest.(check bool) "selected account needs a real home" true
                 (String_util.contains_substring reason "account-home")
             | Error _ | Ok _ ->
@@ -1864,7 +1864,7 @@ tools-support = true
          | Ok _ -> ()
          | Error reason ->
            Alcotest.failf "unrelated HTTP binding was rejected: %s"
-             (Runtime.string_of_drop_reason reason))))
+             (Runtime_config_error.string_of_drop_reason reason))))
 ;;
 
 (* The base file, loaded, with the official clients and [lane] written after
@@ -3734,7 +3734,7 @@ let load_lane_config content =
   write_file path content;
   match Runtime.load_list ~config_path:path with
   | Ok loaded -> Ok loaded
-  | Error failure -> Error (Runtime.to_diagnostic_text ~config_path:path failure)
+  | Error failure -> Error (Runtime_config_error.to_diagnostic_text ~config_path:path failure)
 ;;
 
 let lane_named lanes name =
@@ -3850,15 +3850,15 @@ let test_a_cli_slot_naming_a_client_without_an_output_schema_channel_is_refused 
   write_file path config;
   match Runtime.load_list ~config_path:path with
   | Error
-      (Runtime.Exact_lane_cli_slot_unservable
+      (Runtime_config_error.Exact_lane_cli_slot_unservable
         { lane_id = "librarian_exact"
         ; slot_id
         ; provider_id = "muse_code"
-        ; reason = Runtime.Client_without_output_schema
+        ; reason = Runtime_config_error.Client_without_output_schema
         }) -> Alcotest.(check string) "the offending entry" muse_serve_runtime_id slot_id
   | Error failure ->
     Alcotest.failf "refused for another reason: %s"
-      (Runtime.to_diagnostic_text ~config_path:path failure)
+      (Runtime_config_error.to_diagnostic_text ~config_path:path failure)
   | Ok _ -> Alcotest.failf "a %s entry naming Muse Code loaded" field)
     ["cli_slots"; "slots"]
 ;;

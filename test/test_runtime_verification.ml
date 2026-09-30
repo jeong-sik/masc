@@ -241,7 +241,7 @@ streaming = true
     | [] | _ :: _ :: _ -> fail "credential fixture declares one binding"
     | [ binding ] ->
       (match Runtime.of_binding { config with providers } binding with
-       | Error reason -> fail (Runtime.string_of_drop_reason reason)
+       | Error reason -> fail (Runtime_config_error.string_of_drop_reason reason)
        | Ok runtime ->
          { runtime with
            Runtime.provider =
@@ -420,7 +420,7 @@ streaming = true
         | [ binding ] ->
           (match Runtime.of_binding config binding with
            | Ok runtime -> runtime
-           | Error reason -> fail (Runtime.string_of_drop_reason reason))
+           | Error reason -> fail (Runtime_config_error.string_of_drop_reason reason))
         | [] | _ :: _ :: _ -> fail "silent endpoint fixture declares one binding"
       in
       f ~env ~sw ~runtime))
@@ -1307,7 +1307,7 @@ tools-support = true
       match config.Runtime_schema.bindings with
       | [binding] -> (match Runtime.of_binding config binding with
           | Ok runtime -> runtime
-          | Error reason -> fail (Runtime.string_of_drop_reason reason))
+          | Error reason -> fail (Runtime_config_error.string_of_drop_reason reason))
       | [] | _ :: _ :: _ -> fail "one Muse readiness binding" in
     let check_case mode expected_failure =
       let script = Filename.concat directory mode in

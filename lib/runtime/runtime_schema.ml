@@ -197,7 +197,7 @@ type provider =
         response body. [None] declares no body deadline; boot then leaves an
         exact-output lane slot on this provider out of its lane and reports
         it ([Runtime.exact_slot_degradation]), a save that adds such a slot
-        is refused ([Runtime.Exact_slot_body_deadlines_absent], #38779), and
+        is refused ([Runtime_config_error.Exact_slot_body_deadlines_absent], #38779), and
         a target that reaches plan admission without one is refused there
         (Missing_deadline). This does not replace [connect_timeout_s] or
         ordinary Keeper per-call body deadlines. *)

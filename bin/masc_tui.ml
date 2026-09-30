@@ -4545,6 +4545,14 @@ let launch_preset_call state ~mailbox ~call ~wrap =
       enqueue_async mailbox (wrap result))
     (fun () -> call ~host ~port)
 
+(* A revoked invite's link opens nothing, so its card goes, whether or not it
+   is the one on screen. The card carries the name the server sent, made safe
+   to draw, so the name asked for is compared in the same form. *)
+let forget_play_invite state ~name =
+  state.play_invite <-
+    Masc_tui_types.play_invite_forget state.play_invite
+      (Tui_decode.sanitize_terminal_text name)
+
 let launch_presets_load state ~mailbox =
   state.presets_error <- None;
   launch_preset_call state ~mailbox
@@ -10221,68 +10229,45 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
         ~call:Masc_tui_http.list_play_invites
         ~wrap:(fun result ->
           Play_invites_listed (target, Result.bind result Tui_decode.decode_play_invites))
-  | Masc_tui_command.Play_link ->
+  | Masc_tui_command.Play_link requested_name ->
       Buffer.clear state.msg_input;
-      (match state.play_invite_link with
-       | None -> notice ~kind:Notice_reply "No play link has been issued in this TUI session"
-       | Some (name, link) ->
-           Terminal_write_repair.note ();
-           write_to_terminal (Link.osc52_copy link);
-           notice ~kind:Notice_reply
-             ("Last play link issued in this TUI session for " ^ name
-              ^ " (copied via OSC 52; current validity not checked): " ^ link))
-  | Masc_tui_command.Play_qr ->
-      Buffer.clear state.msg_input;
-      (match state.play_invite_link with
-       | None -> notice ~kind:Notice_reply "No play link has been issued in this TUI session"
-       | Some (name, link) ->
-           let terminal_rows, terminal_cols = get_terminal_size () in
-           let pane_cells =
-             Masc_tui_roster_pane.content_cols
-               ~hidden:(roster_pane_hidden state) ~cols:terminal_cols
-           in
-           let inner_width = framed_inner_width pane_cells in
-           let available_cells =
-             Masc_tui_message_layout.local_body_cells ~pane_cells ~inner_width
-           in
-           (match Masc_tui_play_qr.render ~available_cells link with
-            | Error Masc_tui_play_qr.Too_large ->
-                notice ~kind:Notice_failure "Play link is too long to encode as a QR code"
-            | Error (Masc_tui_play_qr.Pane_too_narrow { required_cells; available_cells }) ->
-                notice ~kind:Notice_failure
-                  (Printf.sprintf "Play QR needs %d body columns; this pane has %d. Widen the terminal or hide the roster"
-                     required_cells available_cells)
-            | Ok qr ->
-                let status_rows = keeper_message_status_rows state in
-                let visible_rows =
-                  Masc_tui_message_layout.message_history_height
-                    ~terminal_rows ~status_rows
-                in
-                let qr_rows = List.length (String.split_on_char '\n' qr) in
-                if qr_rows + 4 > visible_rows then
-                  notice ~kind:Notice_failure
-                    (Printf.sprintf "Play QR needs %d chat rows; this pane has %d. Make the terminal taller"
-                       (qr_rows + 4) visible_rows)
-                else
-                  chat_notice state ~keeper_name:target ~kind:Notice_reply
-                    ("Play QR for " ^ name ^ " (current validity not checked):\n```qr\n"
-                     ^ qr ^ "\n```")))
-  | Masc_tui_command.Play_invite { name; hours } ->
-      (match target with
+      (* The cards carry names made safe to draw, so the name typed is
+         compared in the same form. *)
+      let requested_name =
+        Option.map Tui_decode.sanitize_terminal_text requested_name
+      in
+      (let card =
+         match requested_name with
+         | None -> Masc_tui_types.play_invite_latest state
+         | Some name -> Masc_tui_types.play_invite_find state name
+       in
+       match card with
        | None ->
-           notice ~kind:Notice_failure
-             "Open a Keeper chat first: the one-time play link is shown there, in this TUI only, and is not sent to the Keeper"
-       | Some _ ->
-           Buffer.clear state.msg_input;
-           launch_preset_call state ~mailbox
-             ~call:(fun ~host ~port ->
-               Ok (Masc_tui_http.issue_play_invite ~host ~port ~name ~hours))
-             ~wrap:(fun result ->
-               Play_invite_issued (target,
-                 decode_play_mutation Tui_decode.decode_play_invite_issued
-                   (match result with
-                    | Ok outcome -> outcome
-                    | Error detail -> Masc_tui_http.Post_unanswered detail))))
+           notice ~kind:Notice_reply
+             (match requested_name with
+              | None -> "No play link has been issued in this TUI session"
+              | Some name -> "No local play link for " ^ name)
+       | Some card ->
+           state.play_invite <-
+             { state.play_invite with shown_name = Some (Masc_tui_play_card.name card) };
+           state.play_invite_scroll <- 0)
+  | Masc_tui_command.Play_invite { name; hours } ->
+      if state.play_invite_inflight then
+        notice ~kind:Notice_failure
+          "An invite request is still waiting for the server; wait for its card"
+      else begin
+        Buffer.clear state.msg_input;
+        state.play_invite_inflight <- true;
+        launch_preset_call state ~mailbox
+          ~call:(fun ~host ~port ->
+            Ok (Masc_tui_http.issue_play_invite ~host ~port ~name ~hours))
+          ~wrap:(fun result ->
+            Play_invite_issued (target,
+              decode_play_mutation Tui_decode.decode_play_invite_issued
+                (match result with
+                 | Ok outcome -> outcome
+                 | Error detail -> Masc_tui_http.Post_unanswered detail)))
+      end
   | Masc_tui_command.Play_revoke name ->
       Buffer.clear state.msg_input;
       launch_preset_call state ~mailbox
@@ -10558,6 +10543,7 @@ let leave_board_detail state =
   state.board_scroll <- 0;
   state.board_comment_scroll <- 0;
   state.board_comments_focused <- false;
+  state.board_history_post_id <- None;
   state.board_detail <- Board_detail.clear state.board_detail
 
 let apply_board_hearths_load state = function
@@ -11712,12 +11698,16 @@ let apply_board_post_load state request result =
     | Error err -> fail err
 
 let start_board_post_refresh state ~host ~port ~post_id ~mailbox =
+  (match Board_detail.view_for state.board_detail ~post_id with
+   | Board_detail.Absent -> state.board_history_post_id <- None
+   | Board_detail.Loading | Board_detail.Ready _ | Board_detail.Failed _ -> ());
   match Board_detail.start state.board_detail ~post_id with
   | Board_detail.Already_loading -> ()
   | Board_detail.Started (detail, request) ->
     state.board_detail <- detail;
+    let full_history = state.board_history_post_id = Some post_id in
     let load_result () =
-      try load_board_post ~host ~port ~post_id with
+      try load_board_post ~full_history ~host ~port ~post_id () with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
     in
@@ -11737,6 +11727,7 @@ let start_board_post_refresh state ~host ~port ~post_id ~mailbox =
 
 let open_board_post state ~mailbox ~focus (post : board_post) =
   state.board_mode <- Board_read post.bp_id;
+  state.board_history_post_id <- None;
   state.board_focus <- focus;
   state.board_scroll <- 0;
   state.board_comment_scroll <- 0;
@@ -13105,8 +13096,7 @@ let handle_composer_key state ~base_path ~mailbox key =
           operator is not looking at, so the chat pane comes forward the way
           it does for a message. *)
        | Masc_tui_command.Queue _
-       | Masc_tui_command.Play_invites | Masc_tui_command.Play_link
-       | Masc_tui_command.Play_qr
+       | Masc_tui_command.Play_invites | Masc_tui_command.Play_link _
        | Masc_tui_command.Play_invite _
        | Masc_tui_command.Play_revoke _ | Masc_tui_command.Play_invalid _
        | Masc_tui_command.Preset_list | Masc_tui_command.Preset_save _
@@ -14480,15 +14470,32 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            chat_notice state ~keeper_name:target ~kind:Notice_reply
              ("Shared DOS play invites:\n" ^ String.concat "\n" (List.map row invites)))
   | Play_invite_issued (target, result) ->
+      state.play_invite_inflight <- false;
       (match result with
        | Play_answered (Ok invite) ->
-           state.play_invite_link <- Some (invite.Tui_decode.pii_name, invite.pii_link);
-           Terminal_write_repair.note ();
-           write_to_terminal (Link.osc52_copy invite.pii_link);
-           chat_notice state ~keeper_name:target ~kind:Notice_reply
-             (Printf.sprintf
-                "Play invite %s expires %s. Link copied via OSC 52 (terminal support unconfirmed): %s"
-                invite.pii_name invite.pii_expires_at invite.pii_link)
+           (* The link is a credential the server will not show again. It goes
+              to the card and, on [y], the clipboard: not to the chat row,
+              the footer or the session log. *)
+           (match
+              Masc_tui_play_card.make
+                ~project:Masc_tui_play_card.project_for_terminal
+                ~name:invite.Tui_decode.pii_name
+                ~expires_at:invite.pii_expires_at ~link:invite.pii_link
+            with
+            | Ok card ->
+                let stored = Masc_tui_types.play_invite_store state.play_invite card in
+                state.play_invite <- stored;
+                state.play_invite_scroll <- 0;
+                chat_notice state ~keeper_name:target ~kind:Notice_reply
+                  (Masc_tui_play_card.issued_notice card
+                     ~retained:(Masc_tui_types.play_invite_holds_earlier stored))
+            | Error reason ->
+                (* The link is the server's public base URL and a hex token,
+                   so a link the card refuses names the base URL. The reason is
+                   the card's own sentence and carries no part of the link. *)
+                chat_notice state ~keeper_name:target ~kind:Notice_failure
+                  ("play invite may exist, but its link cannot be shown: " ^ reason
+                   ^ "; check MASC_HTTP_BASE_URL, then list and revoke it before retrying"))
        | Play_answered (Error _) ->
            chat_notice state ~keeper_name:target ~kind:Notice_failure
              "play invite may exist, but its one-time link was unreadable; list and revoke it before retrying"
@@ -14504,17 +14511,11 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       in
       (match result with
        | Play_revoke_absent ->
-           (match state.play_invite_link with
-            | Some (held_name, _) when String.equal held_name requested_name ->
-                state.play_invite_link <- None
-            | Some _ | None -> ());
+           forget_play_invite state ~name:requested_name;
            chat_notice state ~keeper_name:target ~kind:Notice_reply
              ("Play invite " ^ requested_name ^ " is absent (no invite has that name)")
        | Play_revoke_result (Play_answered (Ok revoked)) ->
-           (match state.play_invite_link with
-            | Some (held_name, _) when String.equal held_name revoked.Tui_decode.pir_name ->
-                state.play_invite_link <- None
-            | Some _ | None -> ());
+           forget_play_invite state ~name:revoked.Tui_decode.pir_name;
            (match revoked.pir_release_error with
             | Some detail ->
                 chat_notice state ~keeper_name:target ~kind:Notice_failure
@@ -19528,6 +19529,11 @@ and is loaded on demand through keeper_skill.
         | Some _ | None -> None
       in
       (match input with
+       (* The invite card owns every key, and a paste is keys. One that reached
+          the composer under the card would put the link [y] just copied into a
+          draft that goes to a Keeper on the next Enter. It is first, above the
+          overlays the card is drawn over. *)
+       | Some (Pasted _) when Option.is_some (Masc_tui_types.play_card_shown state) -> ()
        | Some (Pasted paste) when Option.is_some state.lane_addons ->
            (match state.lane_addons with
             | Some ({installer=Some installer;_} as view) ->
@@ -19939,6 +19945,32 @@ and is loaded on demand through keeper_skill.
            state.browser_lane <- Some (Browser_lane_view.yield_refresh_to_input view)
        | None, _ | Some _, None -> ());
       (match key with
+       (* The invite card holds the only copy of a link, so it takes every key and
+          closes on the operator's own: Esc or q, after which /play link brings
+          it back. Enter does not close it, so a second Enter, pressed while
+          the answer was on its way, cannot close the card it opens. [y] copies
+          the link to the terminal clipboard and says so without naming it.
+          Ctrl-T is left to its arm below: a terminal that ignores OSC 52 has
+          only the mouse to copy the link with, and this is a screen worth
+          copying from. *)
+       | Some k
+         when Option.is_some (Masc_tui_types.play_card_shown state)
+              && not (String.equal k toggle_mouse_tracking_key) ->
+           (match k, Masc_tui_types.play_card_shown state with
+            | ("esc" | "q" | "Q"), Some _ ->
+                state.play_invite <- { state.play_invite with shown_name = None }
+            | ("y" | "Y"), Some card ->
+                copy_reference_to_terminal render_schedule
+                  (Masc_tui_play_card.link card);
+                report_action state "system"
+                  "Asked the terminal to copy the invite link (OSC 52, unconfirmed)"
+            | ("j" | "down"), Some _ ->
+                state.play_invite_scroll <- Masc_tui_types.scroll_down_from state.play_invite_scroll ~by:1
+            | ("k" | "up"), Some _ ->
+                state.play_invite_scroll <- max 0 (state.play_invite_scroll - 1)
+            | "g", Some _ -> state.play_invite_scroll <- 0
+            | "G", Some _ -> state.play_invite_scroll <- Masc_tui_types.clamped_scroll_end
+            | _, _ -> ())
        | Some key when Option.is_some state.account_login ->
            (match state.account_login with
             | Some view ->
@@ -23298,6 +23330,20 @@ and is loaded on demand through keeper_skill.
                        launch_code_history_load state
                          ~mailbox:async_messages ~path)
                 end)
+       | Some "o" when state.view = Board ->
+           (match state.board_mode with
+            | Board_read post_id
+              when Board_detail.is_ready state.board_detail ~post_id ->
+                state.board_history_post_id <-
+                  (if state.board_history_post_id = Some post_id then None
+                   else Some post_id);
+                (* [o] swaps the comment list, so both windows start again
+                   from the top, as they do when a post is opened. *)
+                state.board_scroll <- 0;
+                state.board_comment_scroll <- 0;
+                start_board_post_refresh state ~host ~port ~post_id
+                  ~mailbox:async_messages
+            | Board_list | Board_compose | Board_read _ -> ());
        | Some ("z" | "Z") when state.view = Board ->
            (match state.board_mode with
             | Board_read _ -> (

@@ -2654,10 +2654,11 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
               Masc_tui_frame_timing.time_stage ~name:"board.thread.order"
                 (fun () -> Board_comment_thread.order comments)
             in
-            Masc_tui_frame_timing.time_stage ~name:"board.thread.rows_wrap"
-              (fun () ->
-                ordered
-                |> List.concat_map
+            let comment_lines =
+              Masc_tui_frame_timing.time_stage ~name:"board.thread.rows_wrap"
+                (fun () ->
+                  ordered
+                  |> List.concat_map
               (fun (depth, c) ->
                  let rail =
                    if depth <= 0 then ""
@@ -2723,6 +2724,15 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
                      in
                      metadata
                      @ List.map (fun line -> content_prefix ^ line) lines))
+            in
+            if List.length comments < post.bp_comment_count then
+              Printf.sprintf "  Showing %d of %d comments (o: all comments)"
+                (List.length comments) post.bp_comment_count
+              :: comment_lines
+            else
+              (* The post header already counts the complete thread. Keep
+                 the small comment viewport for its actual comment rows. *)
+              comment_lines
       in
       (body_lines, detail_lines))
   in
@@ -2850,7 +2860,9 @@ let render_board_read (state : state) (list_post : board_post) =
       ~hints:
         (Masc_tui_keys.footer_hints_board_read
            ~focus_posts:(state.board_focus = Left_pane)
-           ~focus_comments:state.board_comments_focused ~layout)
+           ~focus_comments:state.board_comments_focused
+           ~full_history:(state.board_history_post_id = Some list_post.bp_id)
+           ~layout)
   in
   Masc_tui_frame_timing.finish_stage ~name:"board.render_prep" prep_started;
   match layout with
@@ -16723,6 +16735,54 @@ let render_link_preview_modal (state : state) =
                 c.push line)
             content_lines)
 
+(* The invite card: the link a /play invite answer carries, and its QR. Where
+   each row falls, and whether the QR fits at all, is decided by
+   [Masc_tui_play_card.draw]; this only gives each kind of row its look. The
+   QR rows arrive coloured and go in as they are: a theme colour on them would
+   turn the code into a picture that no phone reads. *)
+let play_card_indent = "  "
+
+let render_play_card (state : state) card =
+  let terminal_rows, cols = get_terminal_size () in
+  (* The window as the operator sees it. The rows and columns a frame is laid
+     out in are that less the navigation strip and any pane beside the surface,
+     so a size the card asks for is added to this, not to those. *)
+  let window_rows, window_cols = Masc_tui_ansi.get_terminal_size () in
+  surface_chrome
+    ~overflow:(Scrolled { scroll = state.play_invite_scroll;
+                          report = (fun scroll -> Play_invite_scroll scroll) })
+    state ~terminal_rows ~cols ~surface_key:"play-invite"
+    ~frame:Chrome_overlay
+    ~title:(screen_title " MASC Play invite")
+    ~hints:"j/k:scroll  y:copy link  Esc:close"
+    ~body:(fun ~budget c ->
+      let width = framed_inner_width cols - String.length play_card_indent in
+      List.iter
+        (fun row ->
+          match row with
+          | Masc_tui_play_card.Heading text ->
+              c.push_styled ~style:Ansi.bold (play_card_indent ^ text)
+          | Masc_tui_play_card.Advice text ->
+              c.push_styled ~style:(Theme.recede ()) (play_card_indent ^ text)
+          | Masc_tui_play_card.Link_row text | Masc_tui_play_card.Qr_row text ->
+              c.push (play_card_indent ^ text)
+          | Masc_tui_play_card.Note text ->
+              c.push_styled ~style:(Theme.warn ()) (play_card_indent ^ text)
+          | Masc_tui_play_card.Qr_needs { columns; rows } ->
+              (* The card counts its own cells and says what it lacks. What
+                 surrounds them -- the frame, the composer, the agenda strip,
+                 the navigation strip -- stays the same when the window grows,
+                 so the window needs what it has now plus the card's shortfall
+                 in each direction. *)
+              c.push_styled ~style:(Theme.warn ())
+                (Printf.sprintf
+                   "%sthe QR needs a window of %d columns by %d rows"
+                   play_card_indent
+                   (window_cols + max 0 (columns - width))
+                   (window_rows + max 0 (rows - budget)))
+          | Masc_tui_play_card.Blank -> c.push_empty ())
+        (Masc_tui_play_card.draw card ~width ~rows:budget))
+
 (* The record's rows and the viewport that shows them, the way
    [help_viewport] answers for the sheet: one pair for the keypress that
    bounds the scroll and the frame that draws it, and one row off the height
@@ -17078,7 +17138,11 @@ let render (state : state) =
   then
     let frame, clamped = render_terminal_too_small state ~rows ~cols in
     (frame, clamped, None, Overlay_drawn)
-  else match state.account_login with
+  else match play_card_shown state with
+  | Some card ->
+    let frame, clamped = render_play_card state card in
+    (frame, clamped, None, Overlay_drawn)
+  | None -> match state.account_login with
   | Some view -> let frame, clamped = render_account_login state view in (frame,clamped,None,Overlay_drawn)
   | None -> match state.lane_addons with
   | Some view ->

@@ -100,21 +100,15 @@ built binary.
 
 ## What CI runs
 
-On every pull request (`pr-check.yml`):
+CI is manual and review comes first. Ordinary stacked PRs use independent
+function, logic and code-cleanliness reviews; approve when no P0/P1/P2 issue
+remains and collect P3 issues for later. There is no PR/push/nightly CI.
 
-- **lint**: about 40 scripts through `scripts/ci/run-lint-suite.sh
-  blocking-pr`, run to completion so every failure is listed at once. An
-  advisory set follows and is recorded, not enforced.
-- **check**: source text integrity, the RFC index,
-  `scripts/check-doc-truth.sh`, release and namespace fixtures,
-  `dune build @check`, then every suite the pull request's changes select,
-  within an 18-minute budget that names the suites it could not run
-  (`scripts/ci/run-edited-tests.sh`), and the suites that need no build.
-- **dashboard-types**: type-checks the SPA.
-
-The full test suite is `test.yml`, on a daily schedule and on dispatch, not
-per pull request. `release.yml` runs on a tag push and builds the published
-binaries. `ci.yml` is a dispatchable build.
+`pr-check.yml` provides explicit syntax/configuration/credential checks in a
+two-minute job. `ci.yml` builds only Core for the bottom of a stack, also
+within two minutes. At `release/vX.Y.Z`, `release-candidate.yml` runs the full
+compile, typecheck, behavior and installation cycle. Tag publication waits
+for full checks and tests. See [the workflow](docs/CI-REVIEW-WORKFLOW.md).
 
 ## Commits
 
@@ -131,10 +125,12 @@ chore: bump version to 0.34.0
 
 ## Pull requests
 
-1. Branch from `main` as `feat/<topic>`, `fix/<topic>`, or `docs/<topic>`.
+1. Create a stack: the bottom PR targets `main`; each later PR targets the
+   preceding stack branch.
 2. Write tests for new behaviour.
-3. Run the focused checks for what you changed through
-   `scripts/dune-local.sh`. CI owns the full-suite result.
+3. Review from independent perspectives. Request only minimal manual checks
+   before release; do not wait or poll for CI. Full verification belongs to
+   the Release/Tag boundary.
 4. Open a **draft** pull request linked to at least one issue. The template
    asks for `Summary`, `Product impact`, `Evidence`, `Direct evidence`,
    `Review evidence`, and `Linked issue`. Fill them, and leave the two
@@ -162,44 +158,6 @@ chore: bump version to 0.34.0
    `artifact:` entry, and never let a `note:` stand alone as completion
    evidence. Submission moves the task to awaiting_verification; completion
    requires the completion authority's verdict.
-
-## Review decisions and integration
-
-Code review and CI answer separate questions. A reviewer can approve the current
-head, or request changes with concrete findings, before CI starts or finishes.
-An author or a session that pushed the PR cannot independently approve it.
-
-Use this first line for a code review, followed by the reviewed scope and evidence:
-
-```text
-review: APPROVE|REQUEST_CHANGES head: <40-character-current-SHA> by: <Keeper-name>
-```
-
-`APPROVE` goes through `scripts/review/approve-guard.sh`; its `--check` mode checks
-review eligibility, not CI; it still requires `--body` with the real review
-header and evidence. For example, after setting `PR` and `HEAD_SHA` to the
-reviewed PR and commit:
-
-```bash
-bash scripts/review/approve-guard.sh --check --repo jeong-sik/masc \
-  --pr "$PR" --head "$HEAD_SHA" --body review.md
-```
-
-Remove `--check` to publish the approval. A reviewer clears their own change request when the
-corrected code resolves the finding. Green CI alone does not resolve a review.
-
-Integration has a separate decision line:
-
-```text
-verdict: PASS|FAIL head: <40-character-current-SHA> run: <PR-check-run-id> by: <Keeper-name>
-```
-
-These lines show formats; replace the alternatives and placeholders with actual
-values. A code approval does not grant an integration PASS. Merge still requires
-successful current-head required CI, main freshness, an independent approval
-bound to that head, and no outstanding change requests or later blocking decision.
-Keepers use `scripts/review/merge-guard.sh`; external sessions follow the limited
-merge exception in the constitution. Re-review new changes after the head moves.
 
 ## Issues
 
@@ -260,8 +218,7 @@ reproduce, expected versus actual behaviour, and the relevant log
   one: after merging `0.33.0`, tag `v0.33.0` before opening `0.34.0`.
 - Run `bash scripts/check-version-truth.sh` and `bash scripts/check-doc-truth.sh`
   before a release review; the tag workflow runs the former and CI runs the
-  latter. `check-release-train-guard.sh` is not wired into CI yet
-  (`scripts/ci/guards-not-wired.txt`).
+  latter.
 - `scripts/bump-version.sh` runs `python3 scripts/changelog-fragments.py
   assemble`, which folds `changelog.d/*.md` into `## [Unreleased]` and
   deletes them; move those entries into the version section before tagging.

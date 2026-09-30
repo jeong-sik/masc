@@ -428,20 +428,31 @@ let transition_task_outcome_r
                       | Masc_domain.Done _
                       | Masc_domain.Cancelled _ -> None)
                  });
+          let run_post_commit label f =
+            try f () with
+            | Eio.Cancel.Cancelled _ as exn -> raise exn
+            | exn ->
+              Log.TaskState.error
+                "task transition committed but projection failed task_id=%s agent=%s action=%s label=%s detail=%s"
+                task_id agent_name action_s label (Printexc.to_string exn)
+          in
           (* RFC-0221 §3.3: clear stale agent task-cache entries AFTER the
              commit so agents that cache the task don't emit stale broadcasts
              referencing the old status. *)
+          run_post_commit "task_cache" (fun () ->
           Task_cache_invariant.clear_stale_agent_task config
             ~cause:Task_cache_invariant.After_commit
             ~agent_name ~task_id ~status:new_status
-            ~module_name:"transition_task_r";
+            ~module_name:"transition_task_r");
+          run_post_commit "agent_state" (fun () ->
           update_local_agent_state config ~agent_name (fun agent ->
             match set_current with
             | Some _ -> { agent with status = Busy; current_task = Some task_id }
             | None ->
               if agent.current_task = Some task_id
               then { agent with status = Active; current_task = None }
-              else agent);
+              else agent));
+          run_post_commit "transition_log" (fun () ->
           log_event
             config
             (transition_log_event
@@ -455,7 +466,7 @@ let transition_task_outcome_r
                ?notes:(trim_opt (Some notes))
                ?reason:stated_reason
                ?handoff_context:backlog_update.persisted_handoff_context
-               ());
+               ()));
           (* Post-commit projection, isolated like the terminal hook below. The
              backlog write already committed, so letting [broadcast] escape here
              would report a committed transition as [IoError] and skip both the
@@ -488,6 +499,7 @@ let transition_task_outcome_r
                   agent_name
                   action_s
                   (Printexc.to_string exn)));
+          run_post_commit "activity" (fun () ->
           (match new_status with
            | Masc_domain.Claimed _ ->
              emit_task_activity config ~agent_name ~task_id
@@ -548,7 +560,7 @@ let transition_task_outcome_r
                ~agent_name
                ~task_id
                ~kind:(Event_kind.Task.to_string Event_kind.Task.Submit_for_verification)
-               ~payload);
+               ~payload));
              (match new_status with
               | Masc_domain.AwaitingVerification { assignee; verification_id; _ } ->
                 (try

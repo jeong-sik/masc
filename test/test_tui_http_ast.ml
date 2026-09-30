@@ -174,19 +174,23 @@ let test_the_categorical_guard_rejects_a_raw_hue () =
 ;;
 
 let test_tui_render_asks_the_theme_for_a_categorical_hue () =
-  let violations =
-    Ast_grep.parse_implementation_or_fail "bin/masc_tui_render.ml"
-    |> colour_path_violations ~reserved:(fun segment ->
-         List.mem segment categorical_hue_segments)
-  in
-  match violations with
-  | [] -> ()
-  | _ ->
-    failf
-      "bin/masc_tui_render.ml names a categorical hue instead of a Theme slot:\n%s"
-      (violations
-       |> List.map status_color_violation_to_string
-       |> String.concat "\n")
+  List.iter
+    (fun module_path ->
+      let violations =
+        Ast_grep.parse_implementation_or_fail module_path
+        |> colour_path_violations ~reserved:(fun segment ->
+             List.mem segment categorical_hue_segments)
+      in
+      match violations with
+      | [] -> ()
+      | _ ->
+        failf "%s names a categorical hue instead of a Theme slot:\n%s"
+          module_path
+          (violations
+           |> List.map status_color_violation_to_string
+           |> String.concat "\n"))
+    [ "bin/masc_tui_render.ml"; "bin/masc_tui_render_code.ml"
+    ; "bin/masc_tui_render_resources.ml" ]
 ;;
 
 let test_theme_apply_is_boot_and_the_surface () =
@@ -196,18 +200,22 @@ let test_theme_apply_is_boot_and_the_surface () =
 ;;
 
 let test_tui_status_colors_use_theme_tokens () =
-  let violations =
-    Ast_grep.parse_implementation_or_fail "bin/masc_tui_render.ml"
-    |> reserved_status_color_path_violations
-  in
-  match violations with
-  | [] -> ()
-  | _ ->
-    failf
-      "bin/masc_tui_render.ml bypasses semantic Theme status tokens:\n%s"
-      (violations
-       |> List.map status_color_violation_to_string
-      |> String.concat "\n")
+  List.iter
+    (fun module_path ->
+      let violations =
+        Ast_grep.parse_implementation_or_fail module_path
+        |> reserved_status_color_path_violations
+      in
+      match violations with
+      | [] -> ()
+      | _ ->
+        failf "%s bypasses semantic Theme status tokens:\n%s"
+          module_path
+          (violations
+           |> List.map status_color_violation_to_string
+           |> String.concat "\n"))
+    [ "bin/masc_tui_render.ml"; "bin/masc_tui_render_code.ml"
+    ; "bin/masc_tui_render_resources.ml" ]
 ;;
 
 let test_tui_ansi_status_helpers_use_theme_tokens () =
@@ -492,6 +500,8 @@ let test_no_row_marks_its_own_timestamp_with_a_zone () =
             (Ast_grep.count_string_literals ~module_path ~needle))
         [ "(local)"; "local date"; "local time"; "local timezone" ])
     [ "bin/masc_tui_render.ml"
+    ; "bin/masc_tui_render_code.ml"
+    ; "bin/masc_tui_render_resources.ml"
     ; "bin/masc_tui_render_memory.ml"
     ; "bin/masc_tui_render_chat.ml"
     ; "bin/masc_tui_render_prim.ml"

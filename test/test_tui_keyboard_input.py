@@ -9295,7 +9295,8 @@ def skills_usage_clarity_interaction(
         )
         rendered = CSI_RE.sub(b"", usage)
         expected = [
-            f"{1 if observed else 0} of 2 catalog Skills observed; {1 if observed else 2} without retained invocation".encode(),
+            f"{1 if observed else 0} of 2 catalog Skills observed".encode(),
+            f"{1 if observed else 2} without retained invocation".encode(),
             b"Scope: exact Skill revisions in current Keeper sessions",
             f"Activation ledgers loaded: {ledgers_loaded}; unavailable: {len(unavailable)}".encode(),
         ]

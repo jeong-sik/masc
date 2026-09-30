@@ -132,7 +132,7 @@ let chat_activity ?(frame = -1) ?(stop_keys = "") ~now ~keeper_name ~error rows 
     stale
     @ [ { lead = Printf.sprintf "%s %s%s · %s" mark observed (lane_word lane)
                    (elapsed_text ~now started_at_unix)
-        ; rest = " · " ^ Tui_decode.sanitize_terminal_text status
+        ; rest = " · " ^ Masc.Tui_terminal_text.sanitize_terminal_text status
         ; keys = stop_keys
         } ]
 ;;

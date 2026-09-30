@@ -1020,8 +1020,8 @@ let add_routes ~sw ~clock router =
              exclude_system
              exclude_automation
          in
-         let json =
-           Dashboard_cache.get_or_compute
+         let payload =
+           Dashboard_cache.get_or_compute_payload
              cache_key
              ~ttl:Server_dashboard_http_core_cache.standard_cache_ttl_s
              (fun () ->
@@ -1036,7 +1036,7 @@ let add_routes ~sw ~clock router =
                     ) hearths));
                   ]))
          in
-         Http.Response.json_value json reqd
+         Server_cached_read_http.respond ~request:req reqd payload
        ) request reqd)
 
   |> Http.Router.get "/api/v1/board/curation" (fun request reqd ->
@@ -1215,16 +1215,22 @@ let add_routes ~sw ~clock router =
                        reqd
                        (Server_board_post_response_format.error_json error)
                    | Ok response_format ->
-                     let voter = board_voter_query req in
-                     let status, body =
-                       board_post_detail_json
-                         ~voter
-                         ~reaction_actor
-                         ~config:(Some config)
-                         ~response_format
-                         ~post_id
-                     in
-                     respond_json_with_cors ~status request reqd body))
+                     (match
+                        board_comment_request_of_query
+                          ~offset:(query_param req "comment_offset")
+                          ~limit:(query_param req "comment_limit")
+                      with
+                      | Error error ->
+                        respond_json_value_with_cors ~status:`Bad_request
+                          request reqd error
+                      | Ok comment_request ->
+                        let voter = board_voter_query req in
+                        let status, body =
+                          board_post_detail_json ~comment_request
+                            ~voter ~reaction_actor ~config:(Some config)
+                            ~response_format ~post_id ()
+                        in
+                        respond_json_with_cors ~status request reqd body)))
        ) request reqd)
 
   (* The four Board post/comment/vote routes below consume the auth resolver's

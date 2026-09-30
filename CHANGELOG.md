@@ -4,21 +4,37 @@
 
 ## [0.49.0] - 2026-09-30
 
+### Upgrade notes
+
+- Update the server and TUI together to use the shared Goal model and actor-based activity display. No compatibility reader or automatic migration is provided. (#39975)
+
 ### Fresh state required
 
 - DOS checkpoints saved before this release are refused on restore: the DOS core now writes machine snapshots in format 3 and does not read format 2. Start the DOS game again (#39944).
+- Prepare `goals.json` and `goals.json.last-good` without `owner`, `notified_refuted_key`, and `notified_overdue_key`, preserving the remaining Goal data. The closed decoder rejects those fields; a rejected row makes the entire store unavailable. (#39975)
+- If `<base-path>/.masc/keeper_chat/<sanitized-keeper-name>.jsonl` contains a row whose `delivery_key.kind` is `goal_notification`, remove that row's `delivery_key` and `transcript_slot` together while preserving its message body and other fields. Otherwise the unsupported identity blocks strict append-once delivery, including unrelated chat deliveries. Prepare data with writers stopped, backups, and atomic replacement; this change performs no data cleanup. (#39975)
 
 ### Added
 
 - Open the shared DOS spectator directly with `go DOS` in the TUI command palette. Escape returns to the previous screen; game input and controller changes remain server-owned (#39852).
 - The Memory table now draws one row under the selected keeper: its state, when its memory was last saved, and an action row only when there is something to do (a lag, a lag that could not be read, Librarian failures, a stall, a read error or a server alert). Press `d` to show the full ledger detail — snapshot revision, recall size, source-bound snapshot and the context cycle rows — exactly as before (#39908).
 - Editing a Goal's `due_date` or `priority` now appends a `goal_edited` event to `goal_events.jsonl` with the editor and each changed field as `{from, to}`. Setting the same value again, or editing only the title, records nothing. If the row cannot be appended, the edit still succeeds and the error log names the goal and the payload. The dashboard timeline shows the row as `Goal Edit`, and marks a row it cannot read as a warning (#39951).
-- Add an opt-in combined-tree CI evidence path for Keeper batch review and one squash publication of the tested ROLL. It preserves each member's successful checks and independent approval, reconstructs the reviewed tree, and stops on changed evidence or unexpected landing results. Operational use remains subject to rule adoption. (#39553)
 - Keeper portrait reads expose the 18-accessory catalog and accept `preview_item` to return a retained PNG preview. Explicit starting/preview modes separate the picture's equipment from the unchanged starting gear; previews do not grant ownership or persist equipment. (#39987)
 - An AI agent handed a shared DOS play invite link can now join: the `/play` page points it at `GET /play/agent.md`, a public guide to the seat over MCP (`/mcp/play`) or plain HTTP, with this server's addresses and each move's tool schema. (#40035)
+- With a `candle.toml`, the Goal verifier appends a `Snapshot` row to the Candle ledger before it commits a passing result, and refuses the commit when the row cannot be written. Without a `candle.toml`, or when Candle is disabled, nothing changes. The server logs at start whether Candle is off, enabled or disabled. A `candle.toml` that links to a missing file, or that is not a regular file, reads as disabled with a reason (#39978).
+- With a `candle.toml`, confirming a Goal's passing result appends a `PayoutOwed` row to the Candle ledger, once per Goal, and refuses the confirmation when the row cannot be written. Nothing is written without a `Snapshot` for that pass, or without an enabled `candle.toml` (#39979).
+- With a `candle.toml`, a worker reads the Tasks of each confirmed payout and appends a `Candidates` row, or an `Unattributed` row when no Keeper can be paid. It runs at server start, after a confirmation and on each maintenance tick. It calls no model yet (#39981).
+- Add checked integer Candle payout arithmetic for whole overdue hours, bounded deductions, and allocation by largest remainders with deterministic name ordering for ties. This calculation layer is part of the payout integration; it does not enable production payments on its own. (#39985)
+- Require explicit amounts for the five Candle payout grades and validated weight/deduction settings before recording payout evidence; reject incomplete or overflowing policies without supplying defaults. (#39995)
+- Connect the optional Candle appraiser lane to durable payout settlement, with separate grade, Task relation and contribution requests, exact execution evidence, and integer payment records. (#40004)
+- Support GPT-6.1 Sol and all Codex models advertising `ultra`, preserving the selected effort on turn and capability-verification requests. #40090
+- Share one model list across provider accounts through `model_sets` and provider `model-set` references, keeping explicit binding overrides and account identities separate. #40096
+- Remember explicitly visited Home conversations across restarts independently of startup preferences, distinguish failed or uncertain saves, and preserve named history while Keeper roster reads are unavailable. #40137
+- Show individual Home decisions by request identity, keep successful source readings during partial failures, preserve exact detail and return context across refresh, and retain continuation beside long request lists. #40152
 
 ### Changed
 
+- Stacked feature PRs use independent source review and manually requested focused checks; automatic full verification is reserved for release and tag candidates. A failed or timed-out check is never counted as passing (#40280, #40297, #40298).
 - The TUI now opens on a measured Dashboard, groups Goals and active Tasks
   under Work, and shows provider quota history, Keeper token and cost reports,
   and operational telemetry in Usage. Missing and failed readings remain
@@ -72,6 +88,10 @@
   a ledger with 1,643 schedules, 2,039 wakes and 4,131 notes such a refresh
   took 0.58-0.61 ms instead of 1.47-1.59 ms, about 0.5 ms of it the ledger
   lock (#40034).
+- Show the newest 20 Board comments by default in post detail, with a total count and a way to load older comments (#39555).
+- TUI Home now prioritizes operator decisions and explicit conversation destinations, with detail kept in Work and Usage. Unread sources stay visible, automatic Gate work is excluded from human decisions, and chat return and selection survive refresh. (#39817)
+- Keep Plan Usage directly reachable through its top-level tab, Home `m`, `go Usage` and `/cost`; `/metrics` and `/telemetry` explicitly open diagnostics. (#39817)
+- `/play invite` shows the invite link and a QR code on a card instead of a chat row, and copies the link only when `y` is pressed. The TUI keeps every card it issued by name until it exits or the invite is revoked: `/play link` reopens the newest and `/play link <name>` an earlier one. A link longer than the card scrolls with `j`/`k`, the arrow keys or the mouse wheel. A refused invite or revoke shows the server's message and what it says is missing, not only the error code (#39877).
 
 ### Removed
 
@@ -79,9 +99,12 @@
   embedded recipe when a Keeper's image is missing from the store; it refuses
   the missing image. A Keeper's image is the build the host catalog promoted,
   and `masc sandbox-image` is what builds and promotes (#38798).
+- `/play qr` is gone. The QR code of an issued invite link is drawn only on the invite card that `/play invite` opens and `/play link` reopens, so the one-time link no longer appears in a chat row, the footer or the event log. The card draws its QR only on a terminal with 256 colours or more, so with `NO_COLOR` or on a 16-colour terminal it shows the link text alone (#39877).
 
 ### Fixed
 
+- Long command palette searches keep the edited text and caret visible, including on narrow terminals and with Korean input (#40110).
+- Background Antigravity account checks avoid repeated macOS Keychain password dialogs when access requires confirmation and report the account as unavailable instead (#40268).
 - Keep previously loaded Keeper conversation pages visible when switching away and back, even if the next refresh fails (#40145).
 - A Keeper waiting for a missing sandbox image reports the refusal once and
   again when its cause changes, instead of warning on every supervisor sweep
@@ -94,19 +117,6 @@
 - Preserve the explicitly selected runtime file through Exact registry publication; offline control failures retain fixed diagnostic receipts and a diagnostic binary artifact while CI remains failed. (#39390)
 - Retain typed Stagehand model refusal observations in probe trials, including HTTP status and prior candidate failures, without publishing provider bodies, messages or credentials (#39390).
 - Correct the real-model runbook's retired fallback example and state the account, catalog and artifact prerequisites for a new isolated measurement (#39390).
-- Require shared CI freshness checks before review approval and Keeper merges, including add-only Dune overlaps, and recheck trusted verdicts and change requests before writes. (#39421)
-- Check only the main history required to reach a proven candidate ancestor, allowing older shallow boundaries while refusing gaps inside the comparison. (#39421)
-- Invalidate dashboard and other non-OCaml evidence when shared PR-check, lint, test-selection or review-policy inputs change. (#39421)
-- Bind CI runs to the PR branch and association, include directly executed checker inputs, and recheck workflow/check state plus trusted formal approval before Keeper merges. Explicit repository paths work outside a checkout. (#39421)
-- Treat root OCaml build inputs as shared for every ready PR; conservatively include repository scripts, GitHub automation and test scripts so indirect mandatory lint changes invalidate old evidence. Recheck live head/open/draft/base/merged state around the final CI read, and reject missing approval-option values without looping. (#39421)
-- Treat nested Dune stanzas, includes, and dashboard build manifests/configs as shared evidence inputs; hold the review queue at review until a trusted formal approval lands, and reject truncated queue-ledger options without looping. (#39421)
-- Batch missing PR-head fetches before evaluating the review queue, and re-read structured verdicts after the final CI check before approval or merge guards return or write. (#39421)
-- Include non-product fixture/configuration inputs and the real HTTP-client staging fixture in CI freshness; retain creation order for edited PASS comments and read skipped-job policy from the immutable reviewed commit. (#39421)
-- Name shared CI input groups with their required-check consumers instead of treating every non-product file as shared. Unrelated evidence, proposals, and independent release fragments preserve an ordinary PR's successful run; changing a fragment consumer still requires fresh evidence after another fragment lands. Direct file overlaps and shared build inputs retain their checks. (#39421)
-- Include the TLA specification tree in shared CI inputs so changes to spec/source references, configuration pairs, and coverage cannot reuse an older disjoint PR run. (#39421)
-- Exempt skipped jobs only for recognized positive job-level dispatch conditions; unsupported condition forms refuse. Recheck formal change requests after approval's final CI read, including requests without a structured verdict. (#39421)
-- Require an unassociated run's check suite to name the candidate PR and branch before freshness can use it; another same-SHA/same-branch PR's suite refuses. (#39421)
-- Reuse the shared merge approval check before and after final CI: the same latest non-author approval must have trusted repository authority and name the current head in its verdict and guard footer. A retargeted REST commit ID is insufficient. (#39421)
 - Reopening the DOS spectator preserves previously observed activity when its next live read fails (#39852).
 - Saving a model in `/login` probes only the runtimes the save adds and a runtime promoted to first call, so an exhausted account already in the chain no longer blocks the save (#39885).
 - The TUI rejects a partly checked save receipt containing malformed runtime IDs instead of silently dropping them and showing a successful save (#39885).
@@ -146,8 +156,6 @@
   wake withdrawn under a running turn answers `Turn_selection_withdrawn`
   instead of failing the cycle (#40006).
 - Approval and merge guards now read the main commit identity when a large commit's file list spans multiple GitHub API pages. (#40011)
-- Report distinct batch CLI exit codes for failed ROLL checks, incorrect landing trees, external input changes, and missing member evidence; keep invalid input, infrastructure errors, and pending merges separate. (#39553)
-- Apply all batch landing gates in merge preflight, retain paths restored by later members when checking main overlap, verify current PASS runs, and recheck every member and ROLL approval at the final boundary. Original PRs remain open until a Keeper records verified absorption. (#39553)
 - The Keeper Skill proof harness and `scripts/skill-usage-stats.py` read each session's `skill-activation-events.jsonl` through one fold that applies the server's event rules, and the Python ledger revision escapes U+007F the way the server does (#39881).
 - Reject complete Skill event rows with missing fields, invalid nested evidence, or turn references from another session before proof readers project a ledger (#39881).
 - Keep quiz results linked to the exact upstream question through compact retained-evidence references, without inventing local relations or treating a claimed answerer as the observed actor. Grade titles use question IDs, selected choices use their retained question indices, and expected answers reference the retained deck fact, so long prompts and answers do not multiply across grades. Publish quiz-grader revision 0.1.1 so managed installations replace the worker. #39955
@@ -183,6 +191,23 @@
 - A blank `hearth` query on `GET /api/v1/board` is no filter. It used to filter to posts with an empty hearth, an empty page, and cache that page under the key of the unfiltered listing. (#40052)
 - `/api/v1/dashboard/tasks/history`, `/workspace`, `/provider-logs`, `/config`, `/keeper-memory-health` and `/board` answer a timeout envelope larger than 8 KB with 504; it went out as 200. (#40060)
 - Wrap multiline Board comments using the full comment pane width rather than the space remaining beside author metadata (#40088).
+- Preserve the Home journey and current Play invite state, dependencies and independent PTY rules when integrating current main. (#39817)
+- Goal is a shared workspace objective. Remove creator ownership, the unknown-owner sentinel, and private refuted/overdue notifications. Keep public proof announcements, refuted/overdue views, and Task claim responsibility. (#39975)
+- Record creation and every successful edit with the caller and committed Goal snapshot. Goal timelines name those actors and retain the latest title after a Goal leaves the active store. (#39975)
+- Keep a committed Goal edit successful when its event projection cannot be appended. The tool receipt reports each snapshot, criterion-induced phase event, and exact due-date/priority edit event as recorded or failed, preserving failed payloads and errors; failures are logged and cancellation still propagates. Exact changes use the prior Goal read under the same write lock. (#39975)
+- Reject negative payout shares before multiplication, including at a zero deduction coefficient, so a 63-bit wrapped negative input cannot become a positive payment. Report weight-sum and multiplication overflow through the same typed arithmetic error. (#39985)
+- Keep Candle payouts pending when a completed Task has unreadable contributor evidence, so repairing its assignee can recover the payout instead of leaving it permanently unattributed. (#39988)
+- Bind Candle payout snapshots and candidates to the confirmed verifier run so a failed same-second attempt cannot supply another run's contribution evidence. (#39993)
+- Isolate concurrent Goal appraisals, distinguish event retries from maintenance retries, and refuse payments after disable, outside durable candidate ownership, or beyond cumulative integer balances. (#40004)
+- Retain an explicit failed appraisal receipt when prompt rendering fails, with no provider dispatch or invented prompt bytes. (#40004)
+- Keep the exact-lane refusal contract fixture complete when the Candle appraiser is registered; preserve unknown-lane rejection and unchanged preference storage. (#40004)
+- Candle baseline reports count recorded Goal due-date and priority changes by actor from explicit before/after events, state when edit evidence was not observed, and omit ownership statistics for shared Goals. The archived baseline stays unchanged. (#40017)
+- Keeper guidance connects task-based Skill discovery to exact argument loading and Composition execution, including async completion checks and valid search syntax (#40049).
+- Fold auxiliary System log and Workspace table columns as the terminal narrows, keeping log messages and repository paths aligned with their headers (#40094).
+- Edit inline and dotted model/binding declarations in the runtime dashboard, report assignment changes consistently, and remove dependent runtime references when deleting a provider. #40096
+- Keep Home's Recent pane closed by default on wide terminals while preserving explicit pane choices, and prioritize decision and continuation destinations on short Home frames. #40130
+- Prepare Home selection and request-window state before rendering, retaining ready-source focus and pure drawing. (#40152)
+- Keep mobile Keeper commands visible and scroll the menu within the actual space below its anchor, including short landscape screens; give runtime alerts the full detail row (#40224).
 
 ### Internal
 
@@ -196,6 +221,9 @@
   not in the tree; it states what actually bounds a binding that does not
   declare the key (#39980).
 - Add an isolated CI checkpoint-history comparison with matched fixtures, runtime-events capture and raw evidence for task-611 (#39974).
+- `Candle_config` reads `candle.toml` and answers whether the Candle reward currency is on: no file is off, a file with no key is enabled, and a path that cannot be examined or read, a file that is not TOML, or holds a key this build does not know is disabled with a reason. The server keeps running in every case (#39928).
+- Move shared TUI JSON field readers into Tui_decode_fields and direct consumers to their owning module (#40104).
+- Move Fusion wire types and decoding into Tui_decode_fusion and update transport, rendering and test consumers (#40105).
 
 ### Performance
 
@@ -219,6 +247,8 @@
 - The skill catalog projects each entry of a published skill snapshot once. The effective catalog, the operator catalog, the skill inventory and a task's resolved skills all read that projection; a keeper turn used to project the whole snapshot at least twice, and the skills route once per request. For the 21 live skills, the catalog, inventory and operator projections together took 8.57 ms each time and take 2.5 µs once the snapshot has been projected. One snapshot is kept at a time: another workspace's snapshot, or the previous publication still held by a running turn, is projected on its own and replaces it. (#40085)
 - `GET /api/v1/runtime/resolved` lists the keeper directory once per request; the assignment rows and the lanes they resolve to come from that one listing. With the live runtime.toml (117 runtimes) and a keeper directory of 106 entries, building the document took about 582 µs and takes about 515 µs, the cost of one listing. (#40086)
 - Eighteen dashboard, keeper, board and workspace reads that answer a whole page from the dashboard cache now send the bytes the cache serialized with the entry, instead of serializing and MD5-hashing the page again on every request (goals 0.365 ms, briefing 0.342 ms, planning 0.183 ms per request, measured on the live pages). The six reads that already sent kept bytes no longer parse a page of 8 KB or less on every request to look for a timeout envelope. The dashboard bootstrap and the startup warm-up fill the planning, config and keeper-memory-health entries the way their routes read them, so a route read no longer serializes a warm-up's entry on the executor. (#40060)
+- The TUI reuses the grapheme layout of a non-ASCII text that the current or the previous frame laid out, instead of splitting the text into clusters again. While a keeper turn runs the TUI redraws every 150 ms, and splitting non-ASCII text was 14% of an idle TUI's busy samples on its main thread. On the lines of a copy of the live board (1,000 lines, 684 of them non-ASCII), fitting every line to 80 cells took 2.96–3.00 ms per frame and now takes 0.46–0.49 ms. The first layout of a text costs more, because its pieces are kept: 5.0 µs instead of 4.1 µs for 40 Hangul syllables, and 1,000 such texts keep 1.6 MB until a frame passes without them. ASCII text, escapes included, is laid out as before and not kept. (#40080)
+- Each runtime row of `GET /api/v1/runtime/resolved` reads its output ceiling and declared reasoning effort from the runtime it renders. Over 117 configured runtimes, looking each one up again by id took about 47 µs of every request, and the lookup read the loaded state a second time. `Runtime.max_output_tokens_of_runtime` takes the runtime. (#40087)
 
 ## [0.48.0] - 2026-09-29
 

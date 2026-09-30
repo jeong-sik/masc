@@ -1,0 +1,35 @@
+ Dashboard  Work  ▸Keepers  Usage  Board  Workspace  System
+
+   Keepers ▸ alpha  Info  ▸Items  Sandbox  Settings  Secrets  GitHub  Identity  Channels  Automation  Runs                    
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+             ▄▄▄▄▄▄           Items 1/18 · j/k to preview                                                                     
+         ▄▀▀▀▀▀▀▀▀▀▀▀▀▄       Balance 3.250 Candle · preview only                                                             
+       ▄▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▄     > 1  face  glasses               1.750                                                          
+      ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀      2  face  shades                1.750                                                          
+     ▄▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▄     3  face  eye_patch             1.750                                                          
+     ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀     4  face  plaster               1.750                                                          
+     ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀     5  face  freckles              1.750                                                          
+     ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀     6  face  beard                 1.750                                                          
+      ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀      7  neck  scarf                 1.750                                                          
+       ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀       8  neck  bow_tie               1.750                                                          
+         ▀▀▀▀▀▀▀▀▀▀▀▀▀▀         9  neck  medal                 1.750                                                          
+             ▀▀▀▀▀▀             10 head  bow                   1.750                                                          
+    Selected: 1.750                                                                                                           
+    Preview changes this picture only.                                                                                        
+                                                                                                                              
+                                                                                                                              
+                                                                                                                              
+                                                                                                                              
+                                                                                                                              
+                                                                                                                              
+                                                                                                                              
+                                                                                                                              
+                                                                                                                              
+                                                                                                                              
+                                                                                                                              
+                                                                                                                              
+                                                                                                                              
+                                                                                                                              
+
+  [ ]:tab  j/k:preview  PgUp/PgDn:page  Home/End:first/last  p:pause  w:wake  s:shutdown  Left / Esc:back  q:quit  …?
+ › to alpha   (i to write)                                                                                                    

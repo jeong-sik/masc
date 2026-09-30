@@ -512,6 +512,15 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+      - name: Upload Item workspace authority terminal evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: tui-item-workspace-authority
+          path: ${{ runner.temp }}/tui-item-workspace-authority/
+          if-no-files-found: ignore
+          retention-days: 14
+
       - name: Upload the full Dune suite log
         if: always()
         uses: actions/upload-artifact@v7

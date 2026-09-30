@@ -1,0 +1,210 @@
+"""Real PTY Item reads cannot cross a server workspace boundary.
+
+Synthetic HTTP observations exercise the real TUI, not a live deployment.
+The same Keeper name deliberately appears in both workspaces.
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+from pathlib import Path
+import sys
+
+import test_tui_keyboard_input as h
+import test_tui_remote_workspace_history_pty as authority
+
+SOURCE_MODULES = (
+    "bin/masc_tui.ml",
+    "bin/masc_tui_types.ml",
+    "bin/masc_tui_keeper_items.ml",
+    "bin/masc_tui_render.ml",
+)
+ITEM_PATH = "/api/v1/keepers/alpha/items"
+CATALOG = (
+    ("glasses", "face"), ("shades", "face"), ("eye_patch", "face"),
+    ("plaster", "face"), ("freckles", "face"), ("beard", "face"),
+    ("scarf", "neck"), ("bow_tie", "neck"), ("medal", "neck"),
+    ("bow", "head"), ("crown", "head"), ("beanie", "head"),
+    ("book", "hand"), ("mug", "hand"), ("quill", "hand"),
+    ("dish_gilt", "base"), ("dish_silver", "base"), ("dish_oak", "base"),
+)
+
+
+def account(balance: str, owned: str, price: str):
+    return 200, {
+        "status": "ready", "keeper": "alpha", "balance_milli": balance,
+        "owned_items": [owned],
+        "catalog": [
+            {"id": item, "slot": slot, "price_status": "priced", "price_milli": price}
+            for item, slot in CATALOG
+        ],
+    }
+
+
+class ItemWire(authority.WorkspaceWire):
+    def __init__(self, roster):
+        super().__init__(roster)
+        self.account_state = "ready"
+
+    def change_account(self, state):
+        assert state in ("ready", "failed", "off")
+        with self.lock:
+            self.account_state = state
+
+    def arm_items(self):
+        with self.lock:
+            assert self.phase == "a" and not self.held_started.is_set()
+            self.hold_next = True
+
+    def items(self):
+        with self.lock:
+            phase, state = self.phase, self.account_state
+            held = self.hold_next and phase == "a"
+            if held:
+                self.hold_next = False
+            self.events.append({"event": "items", "phase": phase, "state": state, "held": held})
+        if held:
+            self.held_started.set()
+            if not self.release_held.wait(timeout=30.0):
+                return 504, {"error": "held Item read timed out"}
+            self.held_returned.set()
+            return account("99999", "glasses", "99999")
+        if state == "failed":
+            return 503, {"error": "current Item ledger unreadable"}
+        if state == "off":
+            return 200, {"status": "off", "keeper": "alpha"}
+        if phase == "a":
+            return account("12500", "glasses", "1000")
+        if phase == "a-returned":
+            return account("3250", "quill", "1750")
+        return account("7500", "crown", "2000")
+
+
+def run(binary, captures):
+    fixtures = h.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
+    wire = ItemWire(fixtures[authority.ROSTER_PATH][1])
+    fixtures[authority.ROSTER_PATH] = wire.roster
+    fixtures["/health"] = wire.health
+    fixtures["/health?full=1"] = wire.health
+    fixtures[ITEM_PATH] = wire.items
+    posts: h.HttpRequests = []
+
+    def interact(process, fd, _slave, output, _base):
+        def visible():
+            return authority.screen(output)
+
+        def wait(predicate, label):
+            assert h.wait_for_fixture_state(process, fd, output,
+                lambda: predicate(visible()), timeout=authority.WAIT_SECONDS), \
+                f"{label}: {visible()!r}"
+
+        def capture(name):
+            if captures is not None:
+                (captures / (name + ".txt")).write_bytes(visible())
+                (captures / (name + ".pty")).write_bytes(output)
+            print("ITEM_AUTHORITY_FRAME " + name + "\n" + visible().decode(errors="replace"), flush=True)
+
+        def item_row(name):
+            rows = [line for line in visible().splitlines() if name in line]
+            assert rows, f"{name!r} absent: {visible()!r}"
+            return b"\n".join(rows)
+
+        def open_items(*, first=False):
+            h.select_keeper_row(process, fd, output, b"alpha")
+            h.send_and_wait(process, fd, output, b"\r",
+                "▸Info".encode() if first else "▸Items".encode())
+            if first:
+                h.send_and_wait(process, fd, output, b"]", "▸Items".encode())
+
+        try:
+            h.tab_until(process, fd, output, b"MASC Keepers")
+            wait(lambda text: b"a.current" in text and b"MISMATCH" not in text, "A roster")
+            open_items(first=True)
+            wait(lambda text: b"Balance 12.500 Candle" in text and b"owned" in text, "A Item account")
+            assert b"1.000" in item_row(b"glasses") and b"owned" in item_row(b"glasses")
+            capture("a-ready")
+            wire.arm_items()
+            os.write(fd, b"r")
+            assert h.wait_for_fixture_event(process, fd, output, wire.held_started,
+                timeout=authority.WAIT_SECONDS), "refresh did not launch the held A Item read"
+            wire.publish("b")
+            wait(lambda text: b"b.current" in text and b"MISMATCH local " in text
+                and b"MASC Keepers" in text and "▸Items".encode() not in text,
+                "workspace B did not withdraw A's Item detail")
+            assert b"12.500" not in visible() and b"owned" not in visible()
+            capture("b-with-a-read-held")
+            after_b = len(output)
+            wire.release_held.set()
+            assert h.wait_for_fixture_event(process, fd, output, wire.held_returned,
+                timeout=authority.WAIT_SECONDS), "held A Item response was not released"
+            wire.publish("b-after-late")
+            wait(lambda text: b"b.settled" in text, "fresh B roster after release")
+            h.resize_and_wait(process, fd, output, rows=35,
+                columns=authority.TERMINAL_COLUMNS, needle=b"b.settled", controls=(h.FULL_REDRAW,))
+            open_items()
+            wait(lambda text: b"Balance 7.500 Candle" in text, "B Item account did not load")
+            assert b"12.500" not in visible() and b"99.999" not in visible()
+            assert b"2.000" in item_row(b"glasses") and b"owned" not in item_row(b"glasses")
+            h.send_and_wait(process, fd, output, b"j" * 10, b"Items 11/18")
+            wait(lambda text: b"crown" in text and b"owned" in text, "B's owned crown")
+            assert b"2.000" in item_row(b"crown") and b"owned" in item_row(b"crown")
+            capture("b-ready")
+            h.send_and_wait(process, fd, output, b"k" * 10, b"Items 1/18")
+            wire.change_account("failed")
+            os.write(fd, b"r")
+            wait(lambda text: b"Account unavailable:" in text and b"current Item ledger unreadable" in text,
+                "B's failed current read was hidden")
+            assert b"Balance " not in visible() and b"owned" not in visible()
+            capture("b-unread")
+            wire.change_account("off")
+            os.write(fd, b"r")
+            wait(lambda text: b"Candle off" in text, "Off retained a monetary reading")
+            assert b"Balance " not in visible() and b"owned" not in visible()
+            capture("b-off")
+            wire.change_account("ready")
+            os.write(fd, b"r")
+            wait(lambda text: b"Balance 7.500 Candle" in text, "B account did not recover")
+            capture("b-recovered")
+            wire.publish("a-returned")
+            wait(lambda text: b"a.returned" in text and b"MISMATCH" not in text
+                and "▸Items".encode() not in text, "return to A retained B Item detail")
+            open_items()
+            wait(lambda text: b"Balance 3.250 Candle" in text, "A did not re-read its current Item account")
+            assert b"7.500" not in visible() and b"99.999" not in visible()
+            assert b"1.750" in item_row(b"glasses") and b"owned" not in item_row(b"glasses")
+            assert b"99.999" not in h.CSI_RE.sub(b"", bytes(output[after_b:])), \
+                "late A Item money was rendered after the workspace boundary"
+            capture("a-current-after-return")
+            assert not [p for p, _ in posts if p.startswith("/api/v1/keepers/")], \
+                "read-only Item navigation submitted Keeper work"
+            os.write(fd, b"q")
+        finally:
+            wire.release_held.set()
+            if captures is not None:
+                (captures / "complete.pty").write_bytes(output)
+                with wire.lock:
+                    events = list(wire.events)
+                (captures / "requests.json").write_text(json.dumps({
+                    "gets": events, "posts": [{"path": p, "body": json.loads(b)} for p, b in posts],
+                }, indent=2) + "\n")
+
+    h.run_terminal_scenario(binary, description="Item accounts follow A/B/A workspace authority",
+        interact=interact, prepare_workspace=wire.prepare, http_fixtures=fixtures,
+        http_requests=posts, refresh=0.5, terminal_rows=34,
+        terminal_cols=authority.TERMINAL_COLUMNS)
+
+
+if __name__ == "__main__":
+    binary = str(Path(sys.argv[1]).resolve())
+    root = os.environ.get("RUNNER_TEMP")
+    captures = Path(root, "tui-item-workspace-authority") if root else None
+    if captures is not None:
+        captures.mkdir(parents=True, exist_ok=True)
+        (captures / "manifest.json").write_text(json.dumps({
+            "scope": "synthetic HTTP A/B/A Item accounts through a real PTY; no live deployment",
+            "binary_sha256": hashlib.sha256(Path(binary).read_bytes()).hexdigest(),
+            "scenario_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+        }, indent=2) + "\n")
+    run(binary, captures)
+    print("Item workspace authority: PASS (withdrawal, late response, failure, Off, recovery)")

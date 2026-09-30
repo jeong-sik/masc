@@ -11103,6 +11103,12 @@ let apply_http_scoped_surfaces state results =
    just stopped serving. *)
 let withdraw_keeper_workspace_presentation state =
   state.msg_loaded_pages <- [];
+  (* Detail requests belong to the authority that launched them. Removing
+     their pending tokens rejects late replies, including A -> B -> A; the
+     monotonic request generation is deliberately not reset. *)
+  state.detail_reads <- [];
+  state.item_account <- None;
+  state.item_account_error <- None;
   let draft = materialise_spilled_paste state (Buffer.contents state.msg_input) in
   Buffer.clear state.msg_input;
   Buffer.add_string state.msg_input draft;
@@ -11115,7 +11121,7 @@ let withdraw_keeper_workspace_presentation state =
   state.msg_live <- None;
   state.composer_focused <- false;
   (match state.view with
-   | Keepers Keeper_message ->
+   | Keepers Keeper_message | Keepers Keeper_detail ->
      state.view <- Keepers Keeper_list;
      set_msg_scroll state 0
    | _ -> ())
@@ -14422,7 +14428,9 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         | Ok account ->
             state.item_account <- Some (request.drr_keeper, account);
             state.item_account_error <- None
-        | Error detail -> state.item_account_error <- Some detail)
+        | Error detail ->
+            state.item_account <- None;
+            state.item_account_error <- Some detail)
   | Keeper_sandbox_view_loaded (request, result) -> (
       let keeper_name = request.drr_keeper in
       let current = Masc_tui_types.finish_detail_read state request in

@@ -469,6 +469,7 @@ type exact_lane = Standalone_lane.t =
   | Workspace_curator
   | Verifier
   | Browser_stagehand
+  | Candle_appraiser
 
 (* One [runtime.exact_output_lanes.<lane>].<key> reference, named the way
    every reference-list builder in this file names one. *)
@@ -1979,22 +1980,6 @@ let resolve_max_context_of_runtime_id (id : string)
 let max_context_of_runtime_id (id : string) : int option =
   match get_runtime_by_id id with
   | Some rt -> Some (max_context_of_runtime rt)
-  | None -> None
-;;
-
-(* The model's declared max output tokens (AGENT_CORE capability catalog SSOT), or
-   [None] when the runtime is unknown or the catalog row leaves it unset.
-   Mirrors [max_context_of_runtime_id] but projects the AGENT_CORE-typed capability
-   rather than the runtime.toml [model] record, because max output is owned by
-   the provider/model catalog, not the per-binding runtime config. This is an
-   observable capability ceiling only. AGENT_CORE owns request validation and clamp
-   policy; MASC never turns this value into a request default. *)
-let max_output_tokens_of_runtime_id (id : string) : int option =
-  match get_runtime_by_id id with
-  | Some rt ->
-    (match capabilities_for_runtime rt with
-     | Some caps -> caps.Llm_provider.Capabilities.max_output_tokens
-     | None -> None)
   | None -> None
 ;;
 
@@ -3934,7 +3919,7 @@ let set_first_run_runtime ?runtime_config_path ?(fallback_runtime_ids = []) ?(bi
           | Verifier, Ok () -> slots, cli_slots
           | Verifier, Error _ ->
             judgeable_declared_verifier_slots, judgeable_declared_verifier_cli_slots
-          | (Librarian | Hitl_auto_judge | Board_attention | Workspace_curator | Browser_stagehand), _ ->
+          | (Librarian | Hitl_auto_judge | Board_attention | Workspace_curator | Browser_stagehand | Candle_appraiser), _ ->
             slots, cli_slots
         in
         let next =
@@ -3951,12 +3936,12 @@ let set_first_run_runtime ?runtime_config_path ?(fallback_runtime_ids = []) ?(bi
                 in
                 Toml_line_editor.edit_table_multiline_array content ~path ~key:"cli_slots" ~values:lane_cli_slots)
             next
-            (* Shared-memory curation and the browser-specific Stagehand model
-               are explicitly configured, not enabled by provisioning a
-               general-purpose runtime. *)
+            (* Shared-memory curation, the browser-specific Stagehand model and
+               Candle appraisal are explicitly configured, not enabled by
+               provisioning a general-purpose runtime. *)
             (List.filter
                (function
-                 | Workspace_curator | Browser_stagehand -> false
+                 | Workspace_curator | Browser_stagehand | Candle_appraiser -> false
                  | Librarian | Hitl_auto_judge | Board_attention | Verifier -> true)
                Standalone_lane.all)
         in

@@ -114,3 +114,11 @@ val quota_scope_of_runtime : t -> Runtime_quota_window.scope
 (** Non-secret quota-scope identity derived from this resolved runtime
     snapshot.  Use this form across a provider call so a concurrent catalog
     reload cannot rebind the response to a different credential account. *)
+
+val max_output_tokens_of_runtime : t -> int option
+(** Declared max output tokens (AGENT_CORE capability catalog) for the model bound to
+    [rt]. [None] for an official-client runtime (Codex app-server, Claude Code,
+    Antigravity CLI, Muse serve), which the catalog does not describe, for a
+    model with no catalog row, and for a row that leaves it unset. This is an
+    observable capability ceiling only; AGENT_CORE owns request validation and
+    clamp policy, and MASC never turns it into a request default. *)

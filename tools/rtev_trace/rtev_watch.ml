@@ -49,6 +49,14 @@ let () =
   let dir = Sys.argv.(1) in
   let pid = int_of_string Sys.argv.(2) in
   let seconds = float_of_string Sys.argv.(3) in
+  let control = Sys.getenv_opt "MASC_RTEV_CONTROL_DIR" in
+  let mark name stamp = match control with
+    | None -> ()
+    | Some dir -> Out_channel.with_open_text (Filename.concat dir name)
+        (fun out -> Printf.fprintf out "%.9f\n" stamp) in
+  let stopping () = match control with
+    | None -> false
+    | Some dir -> Sys.file_exists (Filename.concat dir "stop") in
   let opens : (int * RE.runtime_phase, int64) Hashtbl.t = Hashtbl.create 64 in
   let spans : (int * RE.runtime_phase, acc) Hashtbl.t = Hashtbl.create 64 in
   let counters : (int * RE.runtime_counter, int * int) Hashtbl.t = Hashtbl.create 64 in
@@ -94,13 +102,16 @@ let () =
   in
   drain_all ();
   let t_start = Unix.gettimeofday () in
+  mark "ready" t_start;
   Printf.printf "ready pid=%d started_at_unix=%.6f\n%!" pid t_start;
   let events = ref 0 in
-  while Unix.gettimeofday () -. t_start < seconds do
+  while not (stopping ()) && Unix.gettimeofday () -. t_start < seconds do
     events := !events + RE.read_poll cursor callbacks None;
     Unix.sleepf 0.02
   done;
+  events := !events + RE.read_poll cursor callbacks None;
   let t_end = Unix.gettimeofday () in
+  mark "ended" t_end;
   let window = t_end -. t_start in
   Printf.printf "window started_at_unix=%.6f ended_at_unix=%.6f\n" t_start t_end;
   Printf.printf "pid=%d dir=%s window_s=%.1f backlog_drained=%d events=%d lost=%d\n\n"

@@ -216,7 +216,8 @@ let muse_reasoning_effort ~requested ~model =
   |> Option.map (function
     | Llm_provider.Reasoning_effort.None_ -> Runtime_muse_msp.Effort_none
     | Minimal -> Effort_minimal | Low -> Effort_low | Medium -> Effort_medium
-    | High -> Effort_high | XHigh -> Effort_xhigh | Max -> Effort_max)
+    | High -> Effort_high | XHigh -> Effort_xhigh | Max -> Effort_max
+    | Ultra -> Effort_ultra)
 ;;
 
 type image_input = { media_type : string; base64_data : string }

@@ -958,7 +958,7 @@ let check_first_run_lanes path runtime_id ~cli ~judges =
         match exact_lane with
         | Runtime.Verifier -> true
         | Runtime.Librarian | Runtime.Hitl_auto_judge | Runtime.Board_attention
-        | Runtime.Workspace_curator | Runtime.Browser_stagehand -> false
+        | Runtime.Workspace_curator | Runtime.Browser_stagehand | Runtime.Candle_appraiser -> false
       in
       let expected =
         if is_verifier && not judges
@@ -987,13 +987,17 @@ let check_first_run_lanes path runtime_id ~cli ~judges =
         Alcotest.(check (list string)) (id ^ " CLI slots") expected_cli lane.cli_slot_ids)
       (List.filter
          (function
-           | Runtime.Workspace_curator | Runtime.Browser_stagehand -> false
+           | Runtime.Workspace_curator | Runtime.Browser_stagehand | Runtime.Candle_appraiser -> false
            | Runtime.Librarian | Runtime.Hitl_auto_judge | Runtime.Board_attention
            | Runtime.Verifier -> true)
          Standalone_lane.all);
     Alcotest.(check bool) "shared-memory curator is explicitly configured" false
       (List.exists (fun (lane : Runtime_schema.exact_output_lane_decl) ->
-         String.equal lane.id "workspace_curator_exact") config.exact_output_lane_decls)
+         String.equal lane.id "workspace_curator_exact") config.exact_output_lane_decls);
+    Alcotest.(check bool) "Candle appraisal is explicitly configured" false
+      (List.exists (fun (lane : Runtime_schema.exact_output_lane_decl) ->
+         String.equal lane.id (Standalone_lane.to_id Standalone_lane.Candle_appraiser))
+         config.exact_output_lane_decls)
 ;;
 
 let test_first_run_runtime_binds_supporting_lanes () =
@@ -1947,6 +1951,24 @@ let test_an_official_client_joins_the_curator_cli_slots () =
        Alcotest.(check (list string)) "the curator's HTTP slots are unchanged"
          [ "openai.gpt" ]
          (exact_lane_slots path "workspace_curator_exact"))
+;;
+
+let test_candle_appraiser_is_explicitly_configured_with_both_transports () =
+  with_official_client_runtime_file (fun path ->
+    let lane = Standalone_lane.Candle_appraiser in
+    let lane_id = Standalone_lane.to_id lane in
+    Alcotest.(check bool) "appraisal does not block startup when absent" true
+      (Standalone_lane.obligation lane = Standalone_lane.Optional);
+    Runtime.set_exact_output_lane_slots ~runtime_config_path:path
+      ~lane ~slots:[ "openai.gpt" ] ()
+    |> lane_write_ok "configure Candle HTTP slot";
+    Runtime.append_exact_output_lane_slot ~runtime_config_path:path
+      ~lane ~slot:"codex.codex" ()
+    |> lane_write_ok "append Candle CLI fallback";
+    Alcotest.(check (list string)) "appraisal HTTP order survives the save"
+      [ "openai.gpt" ] (exact_lane_slots path lane_id);
+    Alcotest.(check (list string)) "appraisal CLI fallback survives the save"
+      [ "codex.codex" ] (exact_lane_cli_slots path lane_id))
 ;;
 
 (* A lane an official client's append creates declares [cli_slots] alone. The
@@ -3079,23 +3101,127 @@ let test_seed_of_thinking_support_gate_contract () =
 ;;
 
 let test_max_output_tokens_accessor_projects_catalog () =
+  let max_output_tokens id =
+    Option.bind (Runtime.get_runtime_by_id id) Runtime_instance.max_output_tokens_of_runtime
+  in
   with_runtime_thinking (fun () ->
     Alcotest.(check (option int))
       "explicitly declared catalog ceiling is projected verbatim"
       (Some 200000)
-      (Runtime.max_output_tokens_of_runtime_id "ollama_cloud.bigout");
+      (max_output_tokens "ollama_cloud.bigout");
     Alcotest.(check (option int))
       "catalog row projects its declared max_output_tokens"
       (Some 65536)
-      (Runtime.max_output_tokens_of_runtime_id "ollama_cloud.thinkdefault");
+      (max_output_tokens "ollama_cloud.thinkdefault");
     Alcotest.(check (option int))
       "reasoning runtime whose model is absent from the catalog projects None"
       None
-      (Runtime.max_output_tokens_of_runtime_id "ollama_cloud.think");
+      (max_output_tokens "ollama_cloud.think");
     Alcotest.(check (option int))
       "unknown runtime id projects None (no capability record)"
       None
-      (Runtime.max_output_tokens_of_runtime_id "bogus.binding"))
+      (max_output_tokens "bogus.binding"))
+;;
+
+(* Three bindings of the fixture catalog's provider that differ in output
+   ceiling and declared effort. The default declares both, so its row is
+   checked against values that are not null. *)
+let runtime_config_resolved_rows =
+  {|
+[runtime]
+default = "ollama_cloud.effortful"
+
+[providers.ollama_cloud]
+display-name = "Ollama Cloud"
+protocol = "openai-compatible-http"
+endpoint = "https://ollama.example/v1"
+
+[models.effortful]
+api-name = "qwen36-35b-a3b-mtp"
+max-context = 128000
+tools-support = true
+thinking-support = true
+reasoning-effort = "high"
+streaming = true
+
+[models.bigout]
+api-name = "reasoning-big-out"
+max-context = 1000000
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.think]
+api-name = "think"
+max-context = 128000
+tools-support = true
+thinking-support = true
+streaming = true
+
+[ollama_cloud.effortful]
+is-default = true
+max-concurrent = 1
+
+[ollama_cloud.bigout]
+max-concurrent = 1
+
+[ollama_cloud.think]
+max-concurrent = 1
+|}
+;;
+
+let test_resolved_rows_carry_their_own_binding () =
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
+  with_temp_dir "runtime-resolved-rows" @@ fun dir ->
+  (* [Workspace.default_config] points the process at [dir], and the config
+     directory resolver keeps what it found there. Both go back after this
+     case, because [dir] is removed. *)
+  Masc_test_deps.with_process_env Env_config_core.base_path_env_key (Some dir)
+  @@ fun () ->
+  Fun.protect
+    ~finally:(fun () ->
+      Runtime.For_testing.restore runtime_snapshot;
+      Config_dir_resolver.reset ())
+    (fun () ->
+      with_model_catalog_content runtime_thinking_model_catalog @@ fun () ->
+      let path = Filename.concat dir "runtime.toml" in
+      write_file path runtime_config_resolved_rows;
+      (match Runtime.init_default ~config_path:path with
+       | Ok () -> ()
+       | Error msg -> Alcotest.failf "runtime init_default failed: %s" msg);
+      let json =
+        Server_dashboard_runtime_resolved_json.build
+          ~generated_at_iso:"2026-09-30T00:00:00Z"
+          ~config:(Workspace.default_config dir)
+      in
+      let row id =
+        match
+          List.find_opt
+            (fun row -> String.equal (row |> J.member "id" |> J.to_string) id)
+            (json |> J.member "runtimes" |> J.to_list)
+        with
+        | Some row -> row
+        | None -> Alcotest.failf "no resolved row for %s" id
+      in
+      let fields row =
+        ( Yojson.Safe.to_string (J.member "max_output_tokens" row)
+        , Yojson.Safe.to_string (J.member "declared_reasoning_effort" row) )
+      in
+      Alcotest.(check (list (triple string string string)))
+        "each row's ceiling and declared effort come from its own binding"
+        [ "ollama_cloud.effortful", "65536", {|"high"|}
+        ; "ollama_cloud.bigout", "200000", "null"
+        ; "ollama_cloud.think", "null", "null"
+        ]
+        (List.map
+           (fun id ->
+              let ceiling, effort = fields (row id) in
+              id, ceiling, effort)
+           [ "ollama_cloud.effortful"; "ollama_cloud.bigout"; "ollama_cloud.think" ]);
+      Alcotest.(check (pair string string))
+        "the default runtime's row carries its own binding"
+        ("65536", {|"high"|})
+        (fields (J.member "default_runtime" json)))
 ;;
 
 let test_max_context_accessor_clamps_to_provider_cap () =
@@ -4028,9 +4154,13 @@ let () =
         ] )
     ; ( "runtime token capacity projection"
       , [ Alcotest.test_case
-            "max_output_tokens_of_runtime_id projects catalog ceiling"
+            "max_output_tokens_of_runtime projects catalog ceiling"
             `Quick
             test_max_output_tokens_accessor_projects_catalog
+        ; Alcotest.test_case
+            "resolved rows carry their own binding"
+            `Quick
+            test_resolved_rows_carry_their_own_binding
         ; Alcotest.test_case
             "max_context_of_runtime_id clamps runtime TOML to provider cap"
             `Quick
@@ -4112,6 +4242,10 @@ let () =
             "multiple official client accounts stay distinct"
             `Quick
             test_multiple_official_client_accounts_are_distinct_runtimes
+        ; Alcotest.test_case
+            "Candle appraisal is explicitly configured with both transports"
+            `Quick
+            test_candle_appraiser_is_explicitly_configured_with_both_transports
         ; Alcotest.test_case
             "a CLI append to an undeclared lane writes only cli_slots"
             `Quick

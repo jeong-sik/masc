@@ -71,6 +71,60 @@ def open_loaded_planning(
     palette_go(process, master_fd, output, b"go Work", b"plan-alpha-29424")
 
 
+def planning_footer_dispatch_interaction(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    _slave_fd: int,
+    output: bytearray,
+    _base_path: str,
+) -> None:
+    open_loaded_planning(process, master_fd, output)
+    resize_and_wait(
+        process, master_fd, output, rows=32, columns=360,
+        needle=b"plan-alpha-29424", controls=(FULL_REDRAW,),
+        final_cursor=b"\x1b[?25l",
+    )
+
+    def footer() -> bytes:
+        rows = [row for row in screen_rows(bytes(output)).values()
+                if b"j/k:move" in row]
+        if len(rows) != 1:
+            raise AssertionError(f"Planning drew {len(rows)} footer rows")
+        return rows[0]
+
+    list_footer = footer()
+    for hint in (b"Right / Enter:detail", b"f:filter", b"s:sort"):
+        if hint not in list_footer:
+            raise AssertionError(f"Planning list omitted {hint!r}: {list_footer!r}")
+    if b"[ / ]:previous / next" in list_footer:
+        raise AssertionError(f"Planning list offered detail-only navigation: {list_footer!r}")
+
+    send_and_wait(
+        process, master_fd, output, b"\r", b"masc://planning/goal-a-29424"
+    )
+    detail_footer = footer()
+    if b"[ / ]:previous / next" not in detail_footer:
+        raise AssertionError(f"Planning detail omitted goal navigation: {detail_footer!r}")
+    if b"Right / Enter:detail" in detail_footer:
+        raise AssertionError(f"Planning detail offered list-only open: {detail_footer!r}")
+    send_and_wait(
+        process, master_fd, output, b"]", b"masc://planning/goal-b-29424"
+    )
+    if b"[ / ]:previous / next" not in footer():
+        raise AssertionError("Planning detail step lost its footer")
+    send_and_wait(
+        process, master_fd, output, b"\x1b[D", b"Right / Enter:detail"
+    )
+    if b"[ / ]:previous / next" in footer():
+        raise AssertionError("Planning list retained the detail-only hint")
+    send_and_wait(
+        process, master_fd, output, b"f", b"filter:completed"
+    )
+    if b"f:filter" not in footer():
+        raise AssertionError("Planning list filter lost its footer")
+    os.write(master_fd, b"q")
+
+
 def planning_reorder_identity_interaction(fixtures: HttpFixtures) -> Interaction:
     def interact(
         process: subprocess.Popen[bytes],
@@ -556,6 +610,12 @@ def planning_activity_actor_interaction() -> Interaction:
 
 
 def run_planning_review_regression(executable: str) -> None:
+    run_terminal_scenario(
+        executable,
+        description="Planning footer follows list and detail dispatch",
+        interact=planning_footer_dispatch_interaction,
+        http_fixtures=planning_selection_http_fixtures(),
+    )
     run_terminal_scenario(
         executable,
         description="Planning preserves selected goals and footer across resize",

@@ -1109,7 +1109,7 @@
 (test
  (name test_keeper_event_queue_codec_pool)
  (modules test_keeper_event_queue_codec_pool)
- (libraries alcotest masc.keeper_runtime masc.masc_core eio_main yojson unix))
+ (libraries alcotest masc.keeper_runtime masc.masc_core eio eio_main yojson unix))
 
 (test
  (name test_subsystem_health_state)

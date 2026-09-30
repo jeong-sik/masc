@@ -44,6 +44,20 @@ also covers encoding byte parity, release/reinstallation, and shutdown while
 the writer holds its lock. A child-process fatal alarm bounds a hung test;
 it introduces no product timeout.
 
-These tests have not been executed. The reduced reproduction in the original
-issue is not production-path runtime evidence. No full build, CI, live pool
-configuration change, installation or production success is claimed.
+The focused native target was subsequently built and executed:
+
+```sh
+opam exec --switch=5.5.1 -- scripts/dune-local.sh exec ./test/test_keeper_event_queue_codec_pool.exe
+```
+
+The first attempt found a missing direct `eio` test dependency. After adding
+it to the test stanza, all three cases passed: Alcotest run `4NEEPAOJ`,
+0.067 seconds. `persistence.000.output` through `persistence.002.output` retain
+the original assertion logs. `targeted-run.json` records the starting commit,
+the one uncommitted build-input correction, source hashes and binary hash.
+
+This executed real persistence update/read calls and the codec, using isolated
+temporary workspaces. It did not execute the complete recovery sweep,
+transfer/reaction projection or live server. The reduced reproduction in the
+original issue remains separate evidence. No full application build, CI,
+live pool configuration change, installation or production success is claimed.

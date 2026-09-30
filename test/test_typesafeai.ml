@@ -345,6 +345,8 @@ let policy
       ?(enabled = true)
       ?(destinations = Runtime_schema.default_typesafeai.Runtime_schema.destinations)
       ?(board_attention = true)
+      ?(board_attention_confidence_floor =
+        Runtime_schema.default_typesafeai.Runtime_schema.board_attention_confidence_floor)
       ?(absorb_gate = false)
       ?(context_review = false)
       ?(skill_applicability = false)
@@ -355,6 +357,7 @@ let policy
   { Runtime_schema.lane_enabled = enabled
   ; destinations
   ; board_attention
+  ; board_attention_confidence_floor
   ; absorb_gate
   ; context_review
   ; skill_applicability

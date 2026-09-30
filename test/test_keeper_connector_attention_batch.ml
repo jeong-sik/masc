@@ -255,7 +255,7 @@ let approve_grant_exn ~base_path ~keeper_name ~request =
         ~call_summary:None ~base_path ()
     with
     | Ok submission -> submission.approval_id
-    | Error error -> fail (Keeper_approval_queue.storage_error_to_string error)
+    | Error error -> fail (Masc.Keeper_approval_queue_result.storage_error_to_string error)
   in
   (match
      Keeper_approval_queue.resolve_with_policy
@@ -410,12 +410,12 @@ let test_proactive_yields_only_to_ready_intake () =
      | Error error -> fail (Keeper_owner_registry.command_error_to_string error));
     (match Keeper_approval_queue.install_persistence ~base_path with
      | Ok _ -> ()
-     | Error error -> fail (Keeper_approval_queue.install_error_to_string error));
+     | Error error -> fail (Masc.Keeper_approval_queue_result.install_error_to_string error));
     let approval_id =
       match Keeper_approval_queue.submit_pending ~keeper_name
           ~tool_name:"external-effect" ~input:(`Assoc []) ~call_summary:None ~base_path () with
       | Ok submission -> submission.approval_id
-      | Error error -> fail (Keeper_approval_queue.storage_error_to_string error)
+      | Error error -> fail (Masc.Keeper_approval_queue_result.storage_error_to_string error)
     in
     (* Model a resolution wake observed before the approval leaves pending. *)
     let waiting : Q.stimulus =
@@ -490,7 +490,7 @@ let test_one_intake_admits_only_one_hitl_resolution () =
      | Error error -> fail (Keeper_owner_registry.command_error_to_string error));
     (match Keeper_approval_queue.install_persistence ~base_path with
      | Ok _ -> ()
-     | Error error -> fail (Keeper_approval_queue.install_error_to_string error));
+     | Error error -> fail (Masc.Keeper_approval_queue_result.install_error_to_string error));
     let first_id = approve_grant_exn ~base_path ~keeper_name ~request:"first" in
     let second_id = approve_grant_exn ~base_path ~keeper_name ~request:"second" in
     let first, second =

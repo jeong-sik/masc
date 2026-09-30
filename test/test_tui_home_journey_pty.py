@@ -136,7 +136,9 @@ def refresh_preserves_destination(executable):
     def interact(process, fd, _slave, output, _base):
         h.wait_for_output(process, fd, output, b"No decision is waiting", start=0, timeout=10)
         # Resolve the initial unread selection, leaving Choose highlighted.
-        h.send_and_wait(process, fd, output, b"j", b"Choose a Keeper")
+        os.write(fd, b"j")
+        h.drain_until_quiet(process, fd, output)
+        assert b"Choose a Keeper" in h.screen_text(bytes(output))
         current.extend(items)
         h.send_and_wait(process, fd, output, b"r", b"Approvals and questions: 3")
         capture(process, fd, output, "request-inserted", b"Approvals and questions: 3")

@@ -7,9 +7,10 @@ runtime-success or merge verdict.
 
 The current Home is a destination summary: requests open Approvals or Agenda,
 and continuation opens an explicitly visited conversation or Keeper selection.
-It does not yet render individual request cards or persist a last conversation
-independently of `opening = "last"`. Those limitations remain part of the full
-Home journey work, rather than being treated as completed requirements.
+It does not yet render individual request cards. The conversation-receipt
+stack adds persistence independently of the opening preference, with typed
+missing, unreadable, session-only and durability-unconfirmed states. Same-workspace
+restart and failure-path PTY evidence is still required before acceptance.
 
 | Required behavior | Current source or test | Evidence still required |
 |---|---|---|

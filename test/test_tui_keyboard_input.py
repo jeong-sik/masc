@@ -2155,9 +2155,12 @@ def run_terminal_scenario(
     conflicting_env_base_path: bool = False,
     omit_operator_token: bool = False,
     starts_in_chat: bool = False,
+    launch_count: int = 1,
 ) -> None:
     if not scenario_admitted(scenario_selection, description):
         return
+    if launch_count < 1:
+        raise ValueError("launch_count must be positive")
     executable = tui_executable(executable)
     workspace_rendered = (
         WORKSPACE_RENDERED if workspace == WORKSPACE_PAYLOAD else workspace.encode()
@@ -2249,8 +2252,17 @@ def run_terminal_scenario(
                         # installs its own handlers for both, so ignoring
                         # them here only keeps the shell alive to stop
                         # itself after the TUI exits.
-                        "trap '' INT TERM; kill -STOP $$; \"$@\"; tui_status=$?; "
-                        'kill -STOP $$; exit "$tui_status"',
+                        (
+                            "trap '' INT TERM; kill -STOP $$; \"$@\"; tui_status=$?; "
+                            'kill -STOP $$; exit "$tui_status"'
+                            if launch_count == 1 else
+                            "trap '' INT TERM; kill -STOP $$; "
+                            f"launches_left={launch_count}; "
+                            'while [ "$launches_left" -gt 0 ]; do '
+                            '"$@"; tui_status=$?; kill -STOP $$; '
+                            'launches_left=$((launches_left - 1)); done; '
+                            'exit "$tui_status"'
+                        ),
                         "masc-tui-test-launcher",
                         executable,
                         "--base-path",
@@ -12623,8 +12635,9 @@ def run_tab_strip_keeps_current_entry_regression(executable: str) -> None:
 def run_activity_logs_tab_pane_regression(executable: str) -> None:
     """Dashboard, Work and Usage share the pane's 102-column surface floor.
 
-    At the narrow threshold they all retain the Recent pane. Activity's
-    Events and Logs readings suppress it, because they own that content.
+    Home stays compact by default. An explicit Ctrl-L choice opens the
+    Recent pane, whose102-column surface boundary then persists on Work and
+    Usage. Activity Events and Logs suppress it because they own that content.
     """
 
     def pane_row(output: bytearray) -> int:
@@ -12638,6 +12651,11 @@ def run_activity_logs_tab_pane_regression(executable: str) -> None:
         resize_and_wait(process, master_fd, output, rows=38,
                         columns=ACTING_PANE_THRESHOLD_COLUMNS,
                         needle=b"MASC Dashboard", final_cursor=b"\x1b[?25l")
+        if pane_row(output) >= 0:
+            raise AssertionError("default Home grew an Activity pane without a reader choice")
+        # Home's default is hidden; measure the shared boundary only after an
+        # actual user choice, preserving every geometry assertion below.
+        send_and_wait(process, master_fd, output, b"\x0c", b"[Recent]")
         for title, ready, whole_row in (
             (b"MASC Dashboard", b"Continue", b"Choose a Keeper"),
             (b"MASC Work", b"D12 Goal", b"D12 Goal"),

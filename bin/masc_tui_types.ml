@@ -10977,26 +10977,32 @@ let approvals_count_label (state : state) =
   if approvals_reading_current state then string_of_int on_screen
   else Printf.sprintf "%d?" on_screen
 
+let approval_item_needs_person = function
+  | Keeper_tool_row _ | Operator_row _ -> true
+  | Gate_row (pending : Tui_decode.gate_pending) ->
+      match pending.gp_phase with
+      | Gate_human_required -> true
+      | Gate_queued | Gate_judging | Gate_blocked -> false
+
+let approvals_human_pending (state : state) =
+  List.length (List.filter approval_item_needs_person (approval_items state))
+  + approvals_open_question_count state
+
 (* Only exact operator-owned states enter Home's decision section. Automatic
    verification and generic incident severity do not mean a person must act. *)
 let home_decision_rows (state : state) =
   let approvals =
     if approvals_reading_current state then
-      match
-        List.length state.keeper_tool_approvals
-        + List.length (operator_approval_items state)
-        + approvals_open_question_count state
-        + List.fold_left
-            (fun count (pending : Tui_decode.gate_pending) ->
-              match pending.gp_phase with
-              | Gate_human_required -> count + 1
-              | Gate_queued | Gate_judging | Gate_blocked -> count)
-            0 state.gate_pending
-      with
+      match approvals_human_pending state with
       | 0 -> []
       | count ->
+          let automatic = approvals_surface_pending state - count in
+          let detail =
+            if automatic = 0 then "open requests"
+            else Printf.sprintf "%d automatic" automatic
+          in
           [ Home_approvals,
-            Printf.sprintf "Approvals and questions: %d  · open requests" count ]
+            Printf.sprintf "Approvals and questions: %d need you  · %s" count detail ]
     else
       [ Home_approvals, "Approvals and questions: not fully read  · inspect sources" ]
   in

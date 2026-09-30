@@ -113,7 +113,10 @@ def automatic_gate_is_not_a_human_decision(executable):
         assert b"Needs your decision" not in frame
         # The same read becomes actionable only with the typed human handoff.
         gate[1]["approval_queue"].append(dict(template, id="appr-human", phase="human_required"))
-        h.send_and_wait(process, fd, output, b"r", b"Approvals and questions: 1")
+        h.send_and_wait(process, fd, output, b"r", b"Approvals and questions: 1 need you")
+        frame = capture(process, fd, output, "mixed-gate", b"3 automatic")
+        assert b"Approvals and questions: 1 need you" in frame
+        assert b"3 automatic" in frame
         os.write(fd, b"q")
 
     h.run_terminal_scenario(executable, description="Home excludes automatic Gate work",

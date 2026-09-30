@@ -2167,13 +2167,23 @@ Select a row and press Enter to open the original Keeper's file. In Code, `H` op
 ## Dashboard: decisions and conversations
 
 Dashboard gives its body to two sections: **Needs your decision** and
-**Continue**. Approvals/questions open their existing queue; Goal confirmations
-and tasks waiting on the operator open Agenda. These links open readers, never
-approve a request. Unknown or failed source reads keep a visible entry rather
-than claiming that no decision is waiting. Automatic verifier work and generic
+**Continue**. Individual request rows show their kind, recipient and reason.
+Enter opens that exact held-call, approval, question, Goal or task reader;
+it never submits a decision. Identity is the request kind plus its authoritative
+ID, so two calls belonging to one Keeper remain distinct while repeated delivery
+of one request is shown once. The full requests and Agenda destinations remain
+available. A failed source has its own visible reading; successful sources keep
+their request rows. Unknown or failed reads never claim that no decision is waiting. Automatic verifier work and generic
 incidents are not counted as operator decisions.
 
-Use j/k or the arrows to choose, then Enter to open. `p` opens requests, `;`
+Use j/k or the arrows to choose, then Enter to open. Long request lists window
+around the selected identity while Continue and new work remain visible; the
+heading states the shown row range. Esc from a Home-opened reader returns to
+Home with its selection and request window retained. If the request disappears
+or its source becomes unreadable, Home requires explicit reselection. A new
+top-level navigation ends the previous reader's return context.
+
+`p` opens requests, `;`
 opens Agenda, and `m` opens Usage. Work retains Goal observations, task lists,
 and verification evidence; Usage retains quota and telemetry detail. Home shows
 only a brief task-flow reading, with no duplicated tables or quota graphs.

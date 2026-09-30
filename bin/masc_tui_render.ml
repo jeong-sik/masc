@@ -282,9 +282,21 @@ let overview_header (state : state) =
 
 let render_overview (state : state) =
   let terminal_rows, cols = get_terminal_size () in
-  let decisions = home_decision_rows state in
+  let all_decisions = home_decision_rows state in
   let continuation = home_continue_rows state in
   let selected = home_selected_action state in
+  (* The first rendered destination owns focus even before a navigation key
+     is pressed. A later insertion must not replace that visible identity. *)
+  let initial_reading_ready = match selected with
+    | Some (Home_request _ | Home_resume _ | Home_read_last _) -> true
+    | Some Home_approvals -> approvals_reading_current state
+    | Some (Home_choose_keeper | Home_create_keeper) ->
+        approvals_reading_current state && Option.is_some state.operator_stalled
+        && (match state.goals_to_confirm with Masc_tui_agenda.Read _ -> true | _ -> false)
+    | Some Home_agenda | None -> false
+  in
+  if Option.is_none state.home_selected && initial_reading_ready then
+    state.home_selected <- selected;
   let health =
     match Terminal_text.optional_single_line state.overview_error, state.overview with
     | Some error, _ -> " Health: unavailable · " ^ error
@@ -334,12 +346,26 @@ let render_overview (state : state) =
         Option.is_some state.home_selected && Option.is_none selected
       in
       let warning_rows = if selection_changed then 1 else 0 in
+      (* Keep continuation and new work visible while the request window
+         follows the selected identity. All rows remain reachable with j/k. *)
+      let capacity = max 0 (budget - List.length continuation - 2 - warning_rows) in
+      let selected_decision =
+        List.find_index (fun (action, _) -> Some action = selected) all_decisions
+      in
+      let first = max 0 (min state.home_decision_scroll (List.length all_decisions - capacity)) in
+      let first = match selected_decision with
+        | Some index when index < first -> index
+        | Some index when index >= first + capacity -> max 0 (index - capacity + 1)
+        | Some _ | None -> first
+      in
+      state.home_decision_scroll <- first;
+      let decisions = List.drop first all_decisions |> List.take capacity in
       let actions = decisions @ continuation in
       (* Headers and action destinations take precedence over health/history
-         context. A wider queue is still an aggregate destination here, not
-         a reason to push continuation below the screen. *)
+         context. The request window preserves continuation below it even
+         when the queue contains more rows than the viewport. *)
       let essential_rows = List.length actions + 2 + warning_rows in
-      if budget >= essential_rows then begin
+      if budget >= essential_rows && (all_decisions = [] || capacity > 0) then begin
         let spare = budget - essential_rows in
         let context =
           let readings =
@@ -362,9 +388,13 @@ let render_overview (state : state) =
         if gaps > 0 then c.push_empty ();
         (match decisions with
          | [] -> c.push_styled ~style:(Theme.recede ())
-             " No decision is waiting on you."
+             (if all_decisions = [] then " No decision is waiting on you."
+              else " Decision rows above · j/k to choose")
          | _ :: _ ->
-             c.push_styled ~style:Ansi.bold " Needs your decision";
+             c.push_styled ~style:Ansi.bold
+               (if List.length decisions = List.length all_decisions then " Needs your decision"
+                else Printf.sprintf " Needs your decision · rows %d-%d/%d · j/k for more"
+                  (first + 1) (first + List.length decisions) (List.length all_decisions));
              List.iter draw_row decisions);
         if gaps > 1 then c.push_empty ();
         c.push_styled ~style:Ansi.bold " Continue";
@@ -373,6 +403,7 @@ let render_overview (state : state) =
         (* Extremely short terminals show destinations around the selected
            identity. j/k reaches every destination; this is a viewport limit,
            never a limit on requests or execution. *)
+        let actions = all_decisions @ continuation in
         let available = max 0 (budget - warning_rows) in
         let count = List.length actions in
         let index =
@@ -1610,7 +1641,9 @@ let render_question_reader (state : state) =
   let asks = question_asks state in
   let selected = List.nth_opt asks state.ask_cursor in
   box_top buf cols;
-  box_line buf cols (screen_title " MASC Approvals / Questions");
+  box_line buf cols (screen_title
+    (" MASC Approvals / Questions"
+     ^ approval_list_note ~name:"questions" (approvals_questions_reading state)));
   box_line buf cols
     (match selected with
      | None -> "  No questions waiting"
@@ -1623,10 +1656,14 @@ let render_question_reader (state : state) =
            (state.ask_cursor + 1) (List.length asks) (state.ask_question_cursor + 1)
            (List.length row.ar_questions) answered Ansi.reset);
   box_line buf cols
-    (if Option.is_some state.ask_text_entry then "  Enter: save written answer · Esc: cancel writing"
-     else
-       "  Left/Right: previous/next question · [/]: previous/next ask · "
-       ^ "PgUp/PgDn: page · Home/End: top/bottom · Esc: approvals");
+    (match state.asks_error with
+     | Some error -> "  Question source unavailable · " ^ Terminal_text.single_line error
+     | None ->
+       if Option.is_some state.ask_text_entry then "  Enter: save written answer · Esc: cancel writing"
+       else
+         "  Left/Right: previous/next question · [/]: previous/next ask · "
+         ^ "PgUp/PgDn: page · Home/End: top/bottom · Esc: "
+         ^ (match state.followed_from with Some (Overview, _) -> "Dashboard" | _ -> "approvals"));
   box_divider buf cols;
   let lines, room = ask_question_viewport state in
   let limit = max 0 (List.length lines - room) in
@@ -16012,7 +16049,19 @@ let render_surface (state : state) =
                in
                render_planning_detail state
                  ~armed:(goal_action_armed_for state goal_id) ~confirmation goal
-           | None -> render_planning_list state)
+           | None ->
+               (match state.home_opened_request with
+                | Some (Home_goal_confirmation selected) when selected = goal_id ->
+                    let terminal_rows, cols = get_terminal_size () in
+                    surface_chrome ~overflow:Fits state ~terminal_rows ~cols
+                      ~surface_key:"planning_detail"
+                      ~title:("Goal · " ^ Terminal_text.single_line goal_id)
+                      ~status:[] ~hints:"Esc:Dashboard  r:refresh"
+                      ~body:(fun ~budget:_ c ->
+                        c.push (match state.planning_error with
+                          | Some error -> " Goal detail unavailable · " ^ Terminal_text.single_line error
+                          | None -> " Goal detail not read · waiting for its source"))
+                | Some _ | None -> render_planning_list state))
   | Approvals when (match state.ask_answer_mode with Ask_answering _ -> true | Ask_browsing -> false) ->
       render_question_reader state
   | Approvals ->

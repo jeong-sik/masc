@@ -5227,8 +5227,17 @@ end
 
 (* Home links identify destinations, never an inferred approval target. The
    approval/agenda screens still own the exact request and its decision. *)
+type home_request =
+  | Home_held_call of { keeper : string; call_id : string }
+  | Home_gate_request of string
+  | Home_operator_request of string
+  | Home_question of string
+  | Home_goal_confirmation of string
+  | Home_operator_task of string
+
 type home_action =
   | Home_approvals
+  | Home_request of home_request
   | Home_agenda
   | Home_resume of string
   | Home_read_last of string
@@ -5248,6 +5257,8 @@ type home_chat_receipt =
 
 type state = {
   mutable home_selected : home_action option;
+  mutable home_decision_scroll : int;
+  mutable home_opened_request : home_request option;
   mutable home_last_chat : home_chat_receipt;
   mutable metrics_scroll: int;
   mutable metrics_section: metrics_section;
@@ -7861,6 +7872,8 @@ let create_state
   =
   {
   home_selected = None;
+  home_decision_scroll = 0;
+  home_opened_request = None;
   home_last_chat = No_chat_receipt;
   metrics_scroll = 0;
   metrics_section = Section_fleet;
@@ -11010,44 +11023,134 @@ let approvals_human_pending (state : state) =
   List.length (List.filter approval_item_needs_person (approval_items state))
   + approvals_open_question_count state
 
-(* Only exact operator-owned states enter Home's decision section. Automatic
-   verification and generic incident severity do not mean a person must act. *)
+let home_request_of_approval = function
+  | Keeper_tool_row held ->
+      Home_held_call { keeper = held.Tui_decode.kta_keeper; call_id = held.kta_tool_call_id }
+  | Gate_row pending -> Home_gate_request pending.Tui_decode.gp_id
+  | Operator_row item -> Home_operator_request item.ap_token
+
+(* Current successes survive another source's failure. Stale snapshots are
+   reachable through their source reading, never offered as current requests. *)
 let home_decision_rows (state : state) =
-  let approvals =
-    if approvals_reading_current state then
-      match approvals_human_pending state with
-      | 0 -> []
-      | count ->
-          let automatic = approvals_surface_pending state - count in
-          let detail =
-            if automatic = 0 then "open requests"
-            else Printf.sprintf "%d automatic" automatic
+  let reading = approvals_reading state in
+  let clean = Tui_decode.sanitize_terminal_text in
+  let approval_rows =
+    approval_items state
+    |> List.filter_map (fun row ->
+      let current, who, why, kind, request_id = match row with
+        | Keeper_tool_row held ->
+            list_is_read reading.held_calls, held.kta_keeper, held.kta_question, "Held call", held.kta_tool_call_id
+        | Gate_row pending ->
+            list_is_read reading.gate_queue, pending.gp_keeper, pending.gp_display_tool, "Approval", pending.gp_id
+        | Operator_row item ->
+            list_is_read reading.confirm_queue, item.ap_actor, item.ap_summary, "Approval", item.ap_token
+      in
+      if current && approval_item_needs_person row then
+        Some (Home_request (home_request_of_approval row),
+              Printf.sprintf "%s · %s [%s] · %s" kind (clean who)
+                (Masc_tui_message_layout.fit_middle 12 (clean request_id)) (clean why))
+      else None)
+  in
+  let questions =
+    if list_is_read reading.questions then
+      Option.value ~default:[] (approvals_open_questions state)
+      |> List.map (fun (row : Tui_decode.ask_row) ->
+          let why = match row.ar_context, row.ar_questions with
+            | Some reason, _ -> reason
+            | None, question :: _ -> question.aq_prompt
+            | None, [] -> "open question"
           in
-          [ Home_approvals,
-            Printf.sprintf "Approvals and questions: %d need you  · %s" count detail ]
-    else
-      [ Home_approvals, "Approvals and questions: not fully read  · inspect sources" ]
+          Home_request (Home_question row.ar_id),
+          Printf.sprintf "Question · %s [%s] · %s" (clean row.ar_keeper)
+            (Masc_tui_message_layout.fit_middle 12 (clean row.ar_id)) (clean why))
+    else []
   in
-  let goals =
-    match state.goals_to_confirm with
-    | Masc_tui_agenda.Read [] -> []
-    | Read goals ->
-        [ Printf.sprintf "%d Goals to confirm" (List.length goals) ]
-    | Not_read -> [ "Goal confirmations not read" ]
-    | Read_failed _ -> [ "Goal confirmations unavailable" ]
+  let source_notes =
+    approval_row_lists reading @ ["questions", reading.questions]
+    |> List.filter_map (fun (name, status) -> match status with
+        | List_read -> None
+        | List_not_read _ -> Some (name ^ " not fully read"))
   in
-  let tasks =
-    match state.tasks_error, state.operator_stalled with
-    | Some _, _ -> [ "operator task reading unavailable" ]
-    | None, None -> [ "operator tasks not read" ]
-    | None, Some [] -> []
-    | None, Some tasks ->
-        [ Printf.sprintf "%d tasks need an operator" (List.length tasks) ]
+  let approvals =
+    let notes =
+      match state.approval_snapshot with
+      | Some snapshot when snapshot.aps_hidden_count > 0 ->
+          source_notes @ [Printf.sprintf "%d requests outside current filter" snapshot.aps_hidden_count]
+      | Some _ | None -> source_notes
+    in
+    match notes with
+    | [] ->
+        let count =
+          List.map fst (approval_rows @ questions) |> List.sort_uniq compare |> List.length
+        in
+        if count = 0 then []
+        else [Home_approvals, Printf.sprintf "Approvals and questions: %d need you · all requests" count]
+    | _ :: _ -> [Home_approvals, "Approvals and questions: " ^ String.concat "; " notes]
   in
-  approvals
-  @ (match goals @ tasks with
-     | [] -> []
-     | notes -> [ Home_agenda, String.concat "; " notes ^ "  · open agenda" ])
+  let goals = match state.goals_to_confirm with
+    | Masc_tui_agenda.Read rows ->
+        List.map (fun (row : Masc_tui_agenda.goal_to_confirm) ->
+          Home_request (Home_goal_confirmation row.goal_id),
+          Printf.sprintf "Confirm Goal · %s · %s" (clean row.goal_id) (clean row.title)) rows
+    | Not_read -> [Home_agenda, "Goal confirmations not read · inspect sources"]
+    | Read_failed _ -> [Home_agenda, "Goal confirmations unavailable · inspect sources"]
+  in
+  let tasks = match state.tasks_error, state.operator_stalled with
+    | Some _, _ -> [Home_agenda, "Operator tasks unavailable · inspect sources"]
+    | None, None -> [Home_agenda, "Operator tasks not read · inspect sources"]
+    | None, Some rows ->
+        List.map (fun (row : Masc_tui_agenda.stalled) ->
+          Home_request (Home_operator_task row.task_id),
+          Printf.sprintf "Operator task · %s · %s" (clean row.task_id) (clean row.what)) rows
+  in
+  (* Equality is kind plus authoritative request ID, never a Keeper/task
+     grouping key. Distinct calls belonging to one Keeper remain distinct. *)
+  List.fold_left (fun rows ((action, label) as row) ->
+    match List.assoc_opt action rows with
+    | None -> rows @ [row]
+    | Some previous when action = Home_agenda ->
+        List.map (fun (key, text) ->
+          if key = action then key, previous ^ "; " ^ label else key, text) rows
+    | Some _ -> rows) [] (approval_rows @ questions @ goals @ tasks @ approvals)
+
+let clear_ask_answering state =
+  state.ask_answer_mode <- Ask_browsing;
+  state.ask_draft <- None;
+  state.ask_text_entry <- None;
+  state.pending_ask_submit <- None
+
+let reconcile_home_request_detail state =
+  match state.home_opened_request with
+  | None -> ()
+  | Some request ->
+      let expected_surface = match request with
+        | Home_held_call _ | Home_gate_request _ | Home_operator_request _ | Home_question _ -> Approvals
+        | Home_goal_confirmation _ | Home_operator_task _ -> Planning
+      in
+      if state.view <> expected_surface then begin
+        state.home_opened_request <- None;
+        (match state.followed_from with
+         | Some (Overview, _) -> state.followed_from <- None
+         | Some _ | None -> ())
+      end else if not (List.mem_assoc (Home_request request) (home_decision_rows state)) then begin
+        (match request with Home_question _ -> clear_ask_answering state | _ -> ());
+        state.home_opened_request <- None;
+        state.approval_detail_open <- false;
+        state.pending_approval_action <- None;
+        state.followed_from <- None;
+        state.view <- Overview
+      end else
+        match request with
+        | Home_held_call _ | Home_gate_request _ | Home_operator_request _ ->
+            Option.iter (fun index -> state.approval_cursor <- index)
+              (List.find_index (fun row -> home_request_of_approval row = request)
+                 (approval_items state))
+        | Home_question ask_id ->
+            Option.iter (fun index -> state.ask_cursor <- index)
+              (List.find_index (fun (row : Tui_decode.ask_row) -> row.ar_id = ask_id)
+                 (Option.value ~default:[] (approvals_open_questions state)))
+        | Home_goal_confirmation goal_id -> state.planning_mode <- Planning_detail goal_id
+        | Home_operator_task task_id -> state.task_detail_id <- Some task_id
 
 let home_continue_rows (state : state) =
   let last =

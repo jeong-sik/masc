@@ -81,7 +81,7 @@ def short_home_keeps_destinations(executable):
     }
 
     def interact(process, fd, _slave, output, _base):
-        h.wait_for_output(process, fd, output, b"1 Goals to confirm", start=0, timeout=10)
+        h.wait_for_output(process, fd, output, b"Confirm Goal", start=0, timeout=10)
         h.send_and_wait(process, fd, output, b"i", b"MASC Keepers")
         h.select_keeper_row(process, fd, output, b"beta")
         h.send_and_wait(process, fd, output, b"c", b"Esc:list")
@@ -89,13 +89,14 @@ def short_home_keeps_destinations(executable):
         h.palette_go(process, fd, output, b"go dashboard", b"Continue with beta")
         frame = capture(process, fd, output, name="short-home-all-destinations",
                         rows=17, columns=80, needle=b"New work")
-        for expected in (b"3 need you", b"1 Goals to confirm", b"Continue with beta", b"New work", b"Enter:open"):
+        for expected in (b"3 need you", b"Confirm Goal", b"Continue with beta", b"New work", b"Enter:open"):
             assert expected in frame, (expected, frame)
         # Home fits its minimum chrome height; grow before entering the
         # composer, whose own fixed chrome requires additional rows.
         capture(process, fd, output, name="short-home-before-chat",
                 rows=24, columns=80, needle=b"New work")
-        h.send_and_wait(process, fd, output, b"kkkkjj\r", b"Esc:Dashboard")
+        home.select_destination(process, fd, output, b"Continue with beta")
+        h.send_and_wait(process, fd, output, b"\r", b"Esc:Dashboard")
         h.send_and_wait(process, fd, output, b"short-draft", b"short-draft")
         h.send_and_wait(process, fd, output, b"\x1b", b"Continue with beta")
         h.send_and_wait(process, fd, output, b"\r", b"short-draft")

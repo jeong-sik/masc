@@ -190,6 +190,7 @@ let () =
   drain_all ();
   let t_start = Unix.gettimeofday () in
   mark "ready" t_start;
+  Printf.printf "ready pid=%d started_at_unix=%.6f\n%!" pid t_start;
   let events = ref 0 in
   while not (stopping ()) && Unix.gettimeofday () -. t_start < seconds do
     events := !events + RE.read_poll cursor callbacks None;
@@ -199,6 +200,7 @@ let () =
   let t_end = Unix.gettimeofday () in
   mark "ended" t_end;
   let window = t_end -. t_start in
+  Printf.printf "window started_at_unix=%.6f ended_at_unix=%.6f\n" t_start t_end;
   Printf.printf "pid=%d window_s=%.1f events=%d lost=%d\n\n" pid window !events !lost;
   let domains = List.sort compare (Hashtbl.fold (fun d _ l -> d :: l) states []) in
   Printf.printf "%-7s %9s %10s %8s %8s %8s %8s %9s\n" "domain" "runs" "run_ms" "busy%" ">=10ms" ">=50ms" ">=100ms" "max_ms";

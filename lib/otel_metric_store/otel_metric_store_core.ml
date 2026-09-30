@@ -17,11 +17,65 @@ type metric =
   ; labels : label list
   }
 
+(* Every series, by its key and by its name. The tables are reachable only
+   through this signature. Its two writes, [ensure] and [write], file a series
+   only when no series holds its key, and filing puts it under both tables,
+   so a key holds one series and a total over one name reads all of that
+   name's series. The exception is an allocation failure while filing grows
+   the key table: the series is then keyed but not named, and totals leave it
+   out. Both tables hold the same mutable records, so a total reads values as
+   they are updated, and nothing removes a series. Every operation runs with
+   [metrics_mutex] held. *)
+module Series : sig
+  val find_opt : string -> metric option
+
+  (** [ensure key make] files [make ()] under [key] when no series holds
+      [key], and leaves a held series as it is. *)
+  val ensure : string -> (unit -> metric) -> unit
+
+  (** [write key ~make ~change] applies [change] to the series under [key],
+      or files [make ()] when no series holds [key]. *)
+  val write : string -> make:(unit -> metric) -> change:(metric -> unit) -> unit
+
+  val fold : (metric -> 'acc -> 'acc) -> 'acc -> 'acc
+  val total : string -> float
+end = struct
+  let by_key : (string, metric) Hashtbl.t = Hashtbl.create 64
+  let by_name : (string, metric list) Hashtbl.t = Hashtbl.create 64
+  let find_opt key = Hashtbl.find_opt by_key key
+
+  let file key (series : metric) =
+    let named =
+      match Hashtbl.find_opt by_name series.name with
+      | Some named -> named
+      | None -> []
+    in
+    Hashtbl.add by_key key series;
+    Hashtbl.replace by_name series.name (series :: named)
+  ;;
+
+  let ensure key make = if not (Hashtbl.mem by_key key) then file key (make ())
+
+  let write key ~make ~change =
+    match Hashtbl.find_opt by_key key with
+    | Some series -> change series
+    | None -> file key (make ())
+  ;;
+
+  let fold f init = Hashtbl.fold (fun _ series acc -> f series acc) by_key init
+
+  let total name =
+    match Hashtbl.find_opt by_name name with
+    | Some named -> List.fold_left (fun acc (m : metric) -> acc +. m.value) 0.0 named
+    | None -> 0.0
+  ;;
+end
+
 (** Metrics are shared by fibers/domains, so reads and writes are serialized
     through [Stdlib.Mutex]. It is available during module initialization and
     protects both registration and float updates. *)
-let metrics : (string, metric) Hashtbl.t = Hashtbl.create 64
 let metrics_mutex = Stdlib.Mutex.create ()
+;;
 
 (* #10682: capture the caller stack for rare EDEADLK re-entry failures so the
    next diagnostic render can name the offending metric path. *)
@@ -72,9 +126,8 @@ let register_counter ~name ~help ?(labels = []) () =
   best_effort (fun () ->
     let key = metric_key name labels in
     with_lock (fun () ->
-      if not (Hashtbl.mem metrics key)
-      then
-        Hashtbl.add metrics key { name; help; metric_type = Counter; value = 0.0; labels }))
+      Series.ensure key (fun () ->
+        { name; help; metric_type = Counter; value = 0.0; labels })))
 ;;
 
 (* Zero-fill declaration: registers the unlabeled 0-cell at module-init time
@@ -89,17 +142,16 @@ let register_gauge ~name ~help ?(labels = []) () =
   best_effort (fun () ->
     let key = metric_key name labels in
     with_lock (fun () ->
-      if not (Hashtbl.mem metrics key)
-      then Hashtbl.add metrics key { name; help; metric_type = Gauge; value = 0.0; labels }))
+      Series.ensure key (fun () ->
+        { name; help; metric_type = Gauge; value = 0.0; labels })))
 ;;
 
 let register_histogram ~name ~help ?(labels = []) () =
   best_effort (fun () ->
     let key = metric_key name labels in
     with_lock (fun () ->
-      if not (Hashtbl.mem metrics key)
-      then
-        Hashtbl.add metrics key { name; help; metric_type = Histogram; value = 0.0; labels }))
+      Series.ensure key (fun () ->
+        { name; help; metric_type = Histogram; value = 0.0; labels })))
 ;;
 
 let declare_gauge name =
@@ -137,36 +189,30 @@ let inc_counter name ?(labels = []) ?(delta = 1.0) () =
   best_effort (fun () ->
     let key = metric_key name labels in
     with_lock (fun () ->
-      match Hashtbl.find_opt metrics key with
-      | Some m -> m.value <- m.value +. delta
-      | None ->
-        Hashtbl.add
-          metrics
-          key
-          { name; help = name; metric_type = Counter; value = delta; labels }))
+      Series.write
+        key
+        ~make:(fun () -> { name; help = name; metric_type = Counter; value = delta; labels })
+        ~change:(fun m -> m.value <- m.value +. delta)))
 ;;
 
 let set_gauge name ?(labels = []) value =
   best_effort (fun () ->
     let key = metric_key name labels in
     with_lock (fun () ->
-      match Hashtbl.find_opt metrics key with
-      | Some m -> m.value <- value
-      | None ->
-        Hashtbl.add metrics key { name; help = name; metric_type = Gauge; value; labels }))
+      Series.write
+        key
+        ~make:(fun () -> { name; help = name; metric_type = Gauge; value; labels })
+        ~change:(fun m -> m.value <- value)))
 ;;
 
 let inc_gauge name ?(labels = []) ?(delta = 1.0) () =
   best_effort (fun () ->
     let key = metric_key name labels in
     with_lock (fun () ->
-      match Hashtbl.find_opt metrics key with
-      | Some m -> m.value <- m.value +. delta
-      | None ->
-        Hashtbl.add
-          metrics
-          key
-          { name; help = name; metric_type = Gauge; value = delta; labels }))
+      Series.write
+        key
+        ~make:(fun () -> { name; help = name; metric_type = Gauge; value = delta; labels })
+        ~change:(fun m -> m.value <- m.value +. delta)))
 ;;
 
 let dec_gauge name ?(labels = []) ?(delta = 1.0) () =
@@ -175,25 +221,19 @@ let dec_gauge name ?(labels = []) ?(delta = 1.0) () =
 
 let get_metric_value name ?(labels = []) () =
   let key = metric_key name labels in
-  with_lock (fun () -> Hashtbl.find_opt metrics key |> Option.map (fun m -> m.value))
+  with_lock (fun () -> Series.find_opt key |> Option.map (fun m -> m.value))
 ;;
 
 let metric_value_or_zero name ?(labels = []) () =
   get_metric_value name ~labels () |> Option.value ~default:0.0
 ;;
 
-let metric_total name =
-  with_lock (fun () ->
-    Hashtbl.fold
-      (fun _ (m : metric) acc -> if String.equal m.name name then acc +. m.value else acc)
-      metrics
-      0.0)
-;;
+let metric_total name = with_lock (fun () -> Series.total name)
 
 let snapshot () =
   with_lock (fun () ->
-    Hashtbl.fold
-      (fun _ (m : metric) acc ->
+    Series.fold
+      (fun (m : metric) acc ->
          { name = m.name
          ; help = m.help
          ; metric_type = m.metric_type
@@ -201,7 +241,6 @@ let snapshot () =
          ; labels = m.labels
          }
          :: acc)
-      metrics
       [])
 ;;
 
@@ -211,25 +250,20 @@ let observe_histogram name ?(labels = []) value =
     let count_name = histogram_count_name name in
     let count_key = metric_key count_name labels in
     with_lock (fun () ->
-      (match Hashtbl.find_opt metrics key with
-       | Some m -> m.value <- m.value +. value
-       | None ->
-         Hashtbl.add
-           metrics
-           key
-           { name; help = name; metric_type = Histogram; value; labels });
-      (match Hashtbl.find_opt metrics count_key with
-       | Some m -> m.value <- m.value +. 1.0
-       | None ->
-         Hashtbl.add
-           metrics
-           count_key
-           { name = count_name
-           ; help = name ^ " observation count"
-           ; metric_type = Counter
-           ; value = 1.0
-           ; labels
-           });
+      Series.write
+        key
+        ~make:(fun () -> { name; help = name; metric_type = Histogram; value; labels })
+        ~change:(fun m -> m.value <- m.value +. value);
+      Series.write
+        count_key
+        ~make:(fun () ->
+          { name = count_name
+          ; help = name ^ " observation count"
+          ; metric_type = Counter
+          ; value = 1.0
+          ; labels
+          })
+        ~change:(fun m -> m.value <- m.value +. 1.0);
       (match Hashtbl.find_opt histogram_buckets name with
        | Some bounds ->
          List.iter
@@ -239,32 +273,28 @@ let observe_histogram name ?(labels = []) value =
               let bucket_key = metric_key (name ^ "_bucket") bucket_labels in
               if value <= bound
               then
-                match Hashtbl.find_opt metrics bucket_key with
-                | Some m -> m.value <- m.value +. 1.0
-                | None ->
-                  Hashtbl.add
-                    metrics
-                    bucket_key
+                Series.write
+                  bucket_key
+                  ~make:(fun () ->
                     { name = name ^ "_bucket"
                     ; help = name ^ " bucket"
                     ; metric_type = Counter
                     ; value = 1.0
                     ; labels = bucket_labels
                     })
+                  ~change:(fun m -> m.value <- m.value +. 1.0))
            bounds;
          let inf_labels = ("le", "+Inf") :: labels in
          let inf_key = metric_key (name ^ "_bucket") inf_labels in
-         (match Hashtbl.find_opt metrics inf_key with
-          | Some m -> m.value <- m.value +. 1.0
-          | None ->
-            Hashtbl.add
-              metrics
-              inf_key
-              { name = name ^ "_bucket"
-              ; help = name ^ " bucket"
-              ; metric_type = Counter
-              ; value = 1.0
-              ; labels = inf_labels
-              })
+         Series.write
+           inf_key
+           ~make:(fun () ->
+             { name = name ^ "_bucket"
+             ; help = name ^ " bucket"
+             ; metric_type = Counter
+             ; value = 1.0
+             ; labels = inf_labels
+             })
+           ~change:(fun m -> m.value <- m.value +. 1.0)
        | None -> ())))
 ;;

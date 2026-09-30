@@ -9,8 +9,10 @@
     candle stands on a round backdrop in the body's colour and is not clipped
     to it: the tallest flame's tip, the dish's rim and a scarf's tail on a
     short candle can reach past the backdrop's edge. Nothing reaches the
-    image border, at any pose. Everything else outside the backdrop is
-    transparent. *)
+    image border, at any pose. The square frame fits the backdrop and the
+    whole outfit with a pixel of clearance. Full flicker and bob swings are
+    included so the frame stays fixed during motion. Everything else outside
+    the backdrop is transparent. *)
 
 type rgb = { red : int; green : int; blue : int }
 
@@ -64,6 +66,12 @@ val pose_at : milliseconds:int -> pose
 val render_posed :
   Keeper_portrait_look.body -> Keeper_portrait_look.equipment -> pose -> size -> image
 
+val render_compact_posed :
+  Keeper_portrait_look.body -> Keeper_portrait_look.equipment -> pose -> size -> image
+(** A simpler candle silhouette for terminal mosaics at 24–40 pixels. It
+    keeps the face and flame large enough to read and leaves the backdrop
+    transparent. Placed pixel portraits continue to use [render_posed]. *)
+
 val pixel : image -> x:int -> y:int -> rgb * int
 (** Colour and alpha of one pixel. [x] and [y] are clamped to the image. *)
 
@@ -97,8 +105,15 @@ module For_testing : sig
   (** {!render_posed} evaluating every part at every sample, with no region
       skipped. It must give the same bytes. *)
 
+  val render_in_frame_of :
+    Keeper_portrait_look.body -> Keeper_portrait_look.equipment ->
+    frame_of:Keeper_portrait_look.equipment -> pose -> size -> image
+  (** Draw one outfit through another outfit's frame. Comparing their pixels
+      then measures occlusion without mixing in a change of projection. *)
+
   val pixel_of_point : size -> float * float -> int * int
-  (** The pixel a point in shape units (y grows downward) lands on. *)
+  (** The pixel a point in shape units (y grows downward) lands on in the
+      default frame. *)
 
   val wax_bounds : Keeper_portrait_look.body -> float * float * float * float
   (** Left, top, right and bottom edges of the wax block, shape units. *)

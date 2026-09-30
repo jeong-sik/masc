@@ -59,12 +59,70 @@ type summary =
   ; stalls : int
   }
 
-(* Nearest-rank percentile: the smallest value such that [p] of the samples
-   are at or below it. [sorted] is ascending and non-empty. *)
-let nearest_rank sorted p =
-  let n = Array.length sorted in
+(* Nearest rank: the index an ascending sort of [n] samples would give the
+   smallest value such that [p] of the samples are at or below it. *)
+let nearest_rank_index n p =
   let rank = int_of_float (Float.ceil (p *. Float.of_int n)) in
-  sorted.(Int.max 0 (Int.min (n - 1) (rank - 1)))
+  Int.max 0 (Int.min (n - 1) (rank - 1))
+;;
+
+(* Each round of [select] partitions a slice around the value at its middle
+   index and keeps the side that holds the rank. A ring whose order keeps an
+   extreme value at the middle index -- a lag that falls and rises within the
+   window -- sheds a sample or two per round, so a selection would cost a
+   round per sample. A selection therefore gets two rounds per halving of its
+   slice and sorts the slice it is left with once they are spent: at worst it
+   costs those rounds and one sort. *)
+let rounds_per_halving = 2
+
+(* The fewest halvings that bring [m] samples down to one. *)
+let halvings_to_one m =
+  let rec count halvings =
+    if 1 lsl halvings >= m then halvings else count (halvings + 1)
+  in
+  count 0
+;;
+
+(* [select xs lo hi k] puts at [xs.(k)] a value equal, by [Float.compare], to
+   the one an ascending sort would put there, and leaves every value in
+   [lo, k) at or below it and every value in (k, hi] at or above it. It
+   reorders only [xs.(lo..hi)], which must contain [k]. *)
+let rec select_within xs lo hi k ~rounds =
+  if lo < hi
+  then
+    if rounds = 0
+    then Array.stable_sort_sub Float.compare xs lo (hi - lo + 1)
+    else begin
+      let pivot = xs.(lo + ((hi - lo) / 2)) in
+      let i = ref lo in
+      let j = ref hi in
+      while !i <= !j do
+        while Float.compare xs.(!i) pivot < 0 do
+          incr i
+        done;
+        while Float.compare xs.(!j) pivot > 0 do
+          decr j
+        done;
+        if !i <= !j
+        then begin
+          let v = xs.(!i) in
+          xs.(!i) <- xs.(!j);
+          xs.(!j) <- v;
+          incr i;
+          decr j
+        end
+      done;
+      (* Every index between [!j] and [!i] holds the pivot, already in place. *)
+      let rounds = rounds - 1 in
+      if k <= !j
+      then select_within xs lo !j k ~rounds
+      else if k >= !i
+      then select_within xs !i hi k ~rounds
+    end
+;;
+
+let select xs lo hi k =
+  select_within xs lo hi k ~rounds:(rounds_per_halving * halvings_to_one (hi - lo + 1))
 ;;
 
 let milliseconds_per_second = 1000.0
@@ -76,7 +134,6 @@ let summarize t =
   if n = 0
   then None
   else begin
-    Array.sort Float.compare xs;
     let ms seconds = seconds *. milliseconds_per_second in
     let sum = Array.fold_left ( +. ) 0.0 xs in
     let stalls =
@@ -85,12 +142,30 @@ let summarize t =
         0
         xs
     in
+    let largest =
+      Array.fold_left
+        (fun acc x -> if Float.compare x acc > 0 then x else acc)
+        xs.(0)
+        xs
+    in
+    (* The three ranks ascend, and after each selection every sample above
+       the chosen index is at or above the chosen value, so the next rank is
+       looked for only there. Only [xs], the copy [samples] made, is
+       reordered. *)
+    let at_rank ~above p =
+      let k = nearest_rank_index n p in
+      select xs above (n - 1) k;
+      k, xs.(k)
+    in
+    let k50, p50 = at_rank ~above:0 0.50 in
+    let k95, p95 = at_rank ~above:k50 0.95 in
+    let _, p99 = at_rank ~above:k95 0.99 in
     Some
       { samples = n
-      ; p50_ms = ms (nearest_rank xs 0.50)
-      ; p95_ms = ms (nearest_rank xs 0.95)
-      ; p99_ms = ms (nearest_rank xs 0.99)
-      ; max_ms = ms xs.(n - 1)
+      ; p50_ms = ms p50
+      ; p95_ms = ms p95
+      ; p99_ms = ms p99
+      ; max_ms = ms largest
       ; mean_ms = ms (sum /. Float.of_int n)
       ; stalls
       }

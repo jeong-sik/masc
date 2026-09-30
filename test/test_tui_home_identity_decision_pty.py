@@ -6,6 +6,7 @@ No owner-store execution or production behavior is established by this suite.
 import copy
 import json
 import os
+import re
 from pathlib import Path
 import sys
 
@@ -88,7 +89,7 @@ def foreign_decision(executable, kind):
             home.assert_no_decision_posts(requests)
             h.send_and_wait(process, fd, output, b"y", REFUSAL)
         elif kind == "ask":
-            h.send_and_wait(process, fd, output, b"1", b"(o) c-yes")
+            h.send_and_wait(process, fd, output, b"1", re.compile(rb"\(o\) (?:\x1b\[[0-9;:]*m)*c-yes"))
             h.send_and_wait(process, fd, output, b"\r", ASK_REFUSAL)
             os.write(fd, b"\r")
             h.drain_until_quiet(process, fd, output)

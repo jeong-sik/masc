@@ -6,6 +6,7 @@ prove these journeys; an executable built with the parent fix is required.
 import copy
 import json
 import os
+import re
 import sys
 import threading
 
@@ -68,7 +69,7 @@ def recovery_journey(executable, *, submit):
         h.wait_for_output(process, fd, output, CONTEXT, start=0, timeout=10)
         cards.select_home(process, fd, output, CONTEXT, destinations=3)
         h.send_and_wait(process, fd, output, b"\r", b"ship the cold-start change now?")
-        h.send_and_wait(process, fd, output, b"1", b"(o) c-yes")
+        h.send_and_wait(process, fd, output, b"1", re.compile(rb"\(o\) (?:\x1b\[[0-9;:]*m)*c-yes"))
         h.send_and_wait(process, fd, output, b"\x1b[C", b"Question 2/2")
         h.send_and_wait(process, fd, output, b"t", b"write: ")
         h.send_and_wait(process, fd, output, TEXT, TEXT)
@@ -96,7 +97,7 @@ def recovery_journey(executable, *, submit):
         assert b"Question source unavailable; refresh before answering" in h.screen_text(bytes(output))
         no_posts()
         h.send_and_wait(process, fd, output, b"\x1b[D", b"Question 1/2")
-        visible = reader_frame(process, fd, output, b"(o) c-yes")
+        visible = reader_frame(process, fd, output, re.compile(rb"\(o\) (?:\x1b\[[0-9;:]*m)*c-yes"))
         assert b"(o) c-yes" in visible and b"(o) c-no" not in visible, visible
         h.send_and_wait(process, fd, output, b"\x1b[C", b"Question 2/2")
         # Return to a partial answer with an unsaved text buffer before the
@@ -120,7 +121,7 @@ def recovery_journey(executable, *, submit):
         if submit:
             h.send_and_wait(process, fd, output, b"\r", TEXT)
             h.send_and_wait(process, fd, output, b"\x1b[D", b"Question 1/2")
-            visible = reader_frame(process, fd, output, b"(o) c-yes")
+            visible = reader_frame(process, fd, output, re.compile(rb"\(o\) (?:\x1b\[[0-9;:]*m)*c-yes"))
             assert b"(o) c-yes" in visible, visible
             h.send_and_wait(process, fd, output, b"\r", b"Press enter again to answer alpha")
             no_posts()

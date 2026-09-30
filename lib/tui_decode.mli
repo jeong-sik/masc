@@ -2172,69 +2172,6 @@ type lsp_answer =
 
 val decode_lsp_answer : Yojson.Safe.t -> (lsp_answer, string) result
 
-(** {1 Questions a Keeper put to the operator}
-
-    Decoded from [GET /api/v1/keepers/asks]. The rows carry choice ids
-    alongside labels and the answer POST takes ids back, so a surface built on
-    these types never matches on label text: rewording a choice cannot orphan
-    an answer already recorded. *)
-
-type ask_choice = {
-  ac_id : string;  (** what an answer names; never the label *)
-  ac_label : string;
-  ac_description : string option;
-}
-
-type ask_mode =
-  | Ask_single
-  | Ask_multi
-
-type ask_free_text =
-  | Ask_free_text_allowed of { aft_hint : string option }
-  | Ask_choices_only
-
-type ask_question = {
-  aq_id : string;
-  aq_header : string;  (** two or three words; what a narrow row shows *)
-  aq_prompt : string;
-  aq_mode : ask_mode;
-  aq_free_text : ask_free_text;
-  aq_choices : ask_choice list;
-}
-
-type ask_resolution =
-  | Ask_open
-  | Ask_answered of {
-      aa_answered_at : float;
-      aa_question_ids : string list;
-    }
-  | Ask_withdrawn of {
-      aw_reason : string;
-      aw_withdrawn_at : float;
-    }
-
-type ask_row = {
-  ar_keeper : string;
-  ar_id : string;
-  ar_asked_at : float;
-  ar_context : string option;
-      (** why the Keeper is asking, in its own words. A row that hides this
-          reads as a decision with no stakes. *)
-  ar_questions : ask_question list;
-  ar_resolution : ask_resolution;
-}
-
-type asks_snapshot = {
-  asn_keeper : string option;
-  asn_open_count : int;  (** the server's count, not [List.length asn_rows] *)
-  asn_rows : ask_row list;
-}
-
-val decode_asks_snapshot : Yojson.Safe.t -> (asks_snapshot, string) result
-(** A row whose mode or free-text shape is unknown fails the decode rather
-    than defaulting: a surface that guessed would offer the operator a control
-    the server will refuse. *)
-
 type goal_timeline_event = {
   gt_ts : string;
   gt_kind : string;
@@ -2301,55 +2238,6 @@ type verification_evidence =
 
 val decode_verification_evidence :
   Yojson.Safe.t -> (verification_evidence, string) result
-
-(** Strict hard-cut decoder for [/api/v1/skills/evidence]. The endpoint's
-    current projection is explicitly incomplete; missing or weakened coverage
-    fields are rejected instead of becoming zeroes in the terminal. *)
-type skill_evidence_status =
-  | Skill_evidence_observed
-  | Skill_evidence_not_observed_in_retained_coverage
-
-type skill_evidence_composition_scope =
-  | Skill_evidence_exact_reference_latest_completed
-  | Skill_evidence_composition_unavailable
-
-type skill_evidence_coverage =
-  { sec_composition_scope : skill_evidence_composition_scope
-  ; sec_composition_records_read : int
-  ; sec_composition_unavailable : string list
-  ; sec_activation_scope : string
-  ; sec_activation_sessions_inspected : int
-  ; sec_activation_ledgers_loaded : int
-  ; sec_activation_gap_count : int
-  ; sec_activation_owner_gap_count : int
-  }
-
-type skill_evidence_owner_claim =
-  { seo_keeper : string
-  ; seo_source : string
-  }
-
-type skill_evidence_activation_item =
-  { sea_trace_id : string
-  ; sea_owner_status : string
-  ; sea_owner_claims : skill_evidence_owner_claim list
-  ; sea_owner_gap_count : int
-  ; sea_activation : Yojson.Safe.t
-  }
-
-type skill_evidence_activation =
-  | Skill_evidence_most_recent_observed of skill_evidence_activation_item
-  | Skill_evidence_most_recent_observed_timestamp_tie of
-      skill_evidence_activation_item list
-
-type skill_evidence =
-  { se_status : skill_evidence_status
-  ; se_activation : skill_evidence_activation option
-  ; se_composition : Yojson.Safe.t option
-  ; se_coverage : skill_evidence_coverage
-  }
-
-val decode_skill_evidence : Yojson.Safe.t -> (skill_evidence, string) result
 
 val runtime_context_source_label : runtime_context_source -> string
 val runtime_reasoning_effort_label : Llm_provider.Reasoning_effort.t -> string

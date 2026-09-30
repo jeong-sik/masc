@@ -1,13 +1,5 @@
 name: Terminal-Bench harness tests
-# benchmarks/terminal_bench/tests had no CI: they ran only when someone ran
-# pytest by hand before a bench run.
-#
-# Its own workflow behind paths: rather than a job in pr-check.yml, which runs
-# on every pull request: the suite installs harbor and its dependencies, and
-# almost no pull request touches the bench. The paths are everything the suite
-# reads: the bench directory; config/ and skills/, which
-# configs/render_configs.py copies into every rendered arm; and the two OCaml
-# sources tests/test_endpoint_env.py compares the env_file refusals with.
+# Run harness tests and source-pair comparisons only by explicit dispatch.
 on:
   workflow_dispatch:
     inputs:
@@ -21,6 +13,10 @@ on:
         default: false
       compare_server:
         description: Compare two existing Linux x64 manual probe artifacts
+        type: boolean
+        default: false
+      compare_vision:
+        description: Measure vision artifact storage and load on the fixed source pair
         type: boolean
         default: false
       checkpoint_histories:
@@ -75,11 +71,11 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: bench-tests-${{ inputs.compare_checkpoint_history && 'compare-checkpoint-history' || inputs.compare_server && 'compare-server' || inputs.compare_tui && 'compare-tui' || 'pytest' }}-${{ github.ref }}
+  group: bench-tests-${{ inputs.compare_checkpoint_history && 'compare-checkpoint-history' || inputs.compare_vision && 'compare-vision' || inputs.compare_server && 'compare-server' || inputs.compare_tui && 'compare-tui' || 'pytest' }}-${{ github.ref }}
   cancel-in-progress: true
 jobs:
   pytest:
-    if: ${{ !inputs.compare_tui && !inputs.compare_server && !inputs.compare_checkpoint_history }}
+    if: ${{ !inputs.compare_tui && !inputs.compare_server && !inputs.compare_vision && !inputs.compare_checkpoint_history }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     defaults:
@@ -115,7 +111,7 @@ jobs:
           sys.exit(1 if skipped else 0)
           PY
   compare-tui:
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.compare_tui && !inputs.compare_server }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.compare_tui && !inputs.compare_server && !inputs.compare_vision && !inputs.compare_checkpoint_history }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -175,9 +171,10 @@ jobs:
         with:
           python-version: '3.12'
       - run: python3 -m unittest discover -s test -p test_server_artifact_comparison.py -v
+      - run: python3 -m unittest discover -s scripts/harness/perf -p test_vision_artifact_compare.py -v
       - run: python3 test/test_checkpoint_history_comparison.py
   compare-server:
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.compare_server }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.compare_server && !inputs.compare_vision && !inputs.compare_checkpoint_history }}
     needs: server-harness-tests
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -226,6 +223,44 @@ jobs:
           path: comparison-results/
           if-no-files-found: warn
 
+  compare-vision:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.compare_vision && !inputs.compare_server && !inputs.compare_tui && !inputs.compare_checkpoint_history }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/setup-ocaml-toolchain
+      - uses: ./.github/actions/pin-ocaml-deps
+      - uses: ./.github/actions/install-ocaml-deps
+        with:
+          install-flags: --with-test
+          os-packages: jq ripgrep
+      - name: Measure the same vision artifacts on both source commits
+        env:
+          DUNE_JOBS: "2"
+        run: |
+          python3 scripts/harness/perf/vision_artifact_compare.py \
+            --output "${RUNNER_TEMP}/vision-results" --count 40 --seconds 90 --pairs 3
+      - name: Retain identity, latency, scheduler and runtime-event receipts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: vision-artifact-comparison-${{ github.run_id }}-attempt-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/vision-results/summary.json
+            ${{ runner.temp }}/vision-results/fixture-sha256.txt
+            ${{ runner.temp }}/vision-results/window-*/receipt.json
+            ${{ runner.temp }}/vision-results/window-*/cleanup.json
+            ${{ runner.temp }}/vision-results/window-*/failure.json
+            ${{ runner.temp }}/vision-results/window-*/stdout.jsonl
+            ${{ runner.temp }}/vision-results/window-*/stderr.txt
+            ${{ runner.temp }}/vision-results/window-*/rtev_*.txt
+            ${{ runner.temp }}/vision-results/window-*/rtev_*-control/ready
+            ${{ runner.temp }}/vision-results/window-*/rtev_*-control/ended
+            ${{ runner.temp }}/vision-results/window-*/state/window-start
+            ${{ runner.temp }}/vision-results/window-*/state/window-complete
   compare-checkpoint-history:
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.compare_checkpoint_history }}
     needs: server-harness-tests
@@ -240,7 +275,8 @@ jobs:
         env:
           TUI: ${{ inputs.compare_tui }}
           SERVER: ${{ inputs.compare_server }}
-        run: test "$TUI" != true && test "$SERVER" != true
+          VISION: ${{ inputs.compare_vision }}
+        run: test "$TUI" != true && test "$SERVER" != true && test "$VISION" != true
       - uses: ./.github/actions/setup-ocaml-toolchain
       - name: Build only the runtime-events readers
         run: |

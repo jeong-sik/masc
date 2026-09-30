@@ -443,7 +443,7 @@ let context_flow_uses_declared_connections () =
   check bool "overview offers help and opening" true
     (List.exists (String.starts_with ~prefix:"?:help  Esc:back  Enter:open  i:install  n:new  S:subs  r:refresh") configured_lines);
   check bool "overview omits the old timeline" true
-    (not (List.exists (String.starts_with ~prefix:"Horizontal Lane timeline") configured_lines));
+    (not (List.exists (String.starts_with ~prefix:"Activity timeline") configured_lines));
   let worker_lines = UI.lines ~width:160 {configured with focus=UI.Instances} in
   check bool "worker controls remain visible for the selected worker" true
     (List.exists (String.starts_with ~prefix:"    Enter:open  o:observe  d:remove") worker_lines);

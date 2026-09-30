@@ -1,0 +1,41 @@
+{
+  "actual_parent": "a065328066d9996f8658238e3077cad70c2c063c",
+  "actual_parent_branch": "feat/item-economy-integration-20260930",
+  "actual_parent_source": "root-supplied GitHub API payloads; no child network",
+  "local_old_baseline": "09826ddd4f4f4e66432f40c2902493ea99c6f4b0",
+  "local_consumer_import": "c5f4233aef1471fd1eacc418f72c24c7ca5a6760",
+  "local_partial_baseline": "4e12031c141d30dafde4aa604ca05c22660e9395",
+  "publication_rule": "overlay only local delta from partial baseline onto actual full parent tree",
+  "imported_files": [
+    {
+      "path": "dashboard/src/components/keeper-items-panel.ts",
+      "parent_git_blob": "7a1a9c479ffa568aa7e61e935387c0dc079a6f89",
+      "import_payload": "masc-dashboard-current-overlap.json",
+      "sha256": "00d4131ab9ba4905f984e5c62c5637841ab4c82ca29129a68d985f4d6abdb562"
+    },
+    {
+      "path": "dashboard/src/components/keeper-items-panel.test.ts",
+      "parent_git_blob": "1d409a767f90d2150038f4216a03d0f3ac54b93c",
+      "import_payload": "masc-dashboard-current-overlap.json",
+      "sha256": "d1c80efe9f16eb5c8eca4acc46f4da8f700eef4d95d57d5898aa52de35c4a57f"
+    },
+    {
+      "path": "dashboard/src/demo/keeper-items-fixture.ts",
+      "parent_git_blob": "0efdd07ff5faa0de69ba16397a1149d9fc759ca1",
+      "import_payload": "masc-dashboard-current-overlap.json",
+      "sha256": "937e7d9978f90e5d99d4901aafd9d6d7da659c20dba5087a71f2b93a0f8c07b2"
+    },
+    {
+      "path": "dashboard/vite.preview.config.ts",
+      "parent_git_blob": "196d4ea5a39f8e22709ced460c72d34d7e27c3a0",
+      "import_payload": "masc-dashboard-current-browser-overlap.json",
+      "sha256": "14a891c92d5516067d4d486a28d7220a72c883e6af91ecc9e8e1084d01e3d45d"
+    },
+    {
+      "path": "dashboard/e2e/keeper-items.mjs",
+      "parent_git_blob": "1ed74e297d5e926a65bc50a1255fb5d351bbb14b",
+      "import_payload": "masc-dashboard-current-browser-overlap.json",
+      "sha256": "8cc77ec741641442e5774a60fa938deb6d318963e9aea76405fcd2e56f5c7d5a"
+    }
+  ]
+}

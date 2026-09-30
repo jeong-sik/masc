@@ -1,0 +1,37 @@
+# Item HTTP acceptance
+
+Run the **Manual probe artifacts** workflow on the desired Item branch with
+`target=linux-x64` and `capture_item_http=true`. It builds the release binaries
+and production dashboard from that checkout, then starts its own loopback
+server in a fresh temporary workspace. No installed MASC process is contacted.
+
+The `item-http-<sha>` artifact contains an HTTP receipt, the Item account JSON,
+a portrait PNG and the isolated server log. The receipt records source SHA,
+binary hash, dashboard index hash, fixture hashes and HTTP response hashes.
+The harness requires the native `build-commit` and dashboard build identity to
+match the workflow SHA. It verifies readiness, refusal of anonymous account
+reads, an authenticated empty wallet and catalog, PNG delivery, and delivery
+of the exact production dashboard index.
+
+Inputs are a synthetic paused Keeper in the current metadata schema, an empty
+ledger, and explicit test prices/payout policy. This proves real HTTP routing
+with those inputs. It does not prove Keeper lifecycle creation, model-driven
+purchase/equipment, a real payout, browser interaction or production rollout.
+Browser and TUI transition evidence comes from the separate dashboard and
+Test workflows.
+
+The script accepts only a new output directory. Provider credentials and
+operator runtime settings are excluded from the child environment. Login
+credentials remain in the temporary workspace auth directory until cleanup;
+that directory is removed on exit and never included in the artifact paths.
+
+For a previously built CI binary and dashboard:
+
+```sh
+python3 scripts/item-http-acceptance.py \
+  --binary /path/to/main_eio.exe --dashboard /path/to/assets/dashboard \
+  --source-sha FULL_SOURCE_SHA --output /new/temp/evidence
+```
+
+A failed run is not a passing receipt. Inspect the workflow step and server
+log before interpreting the artifact.

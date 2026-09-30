@@ -1,0 +1,4 @@
+[keeper]
+sandbox_profile = "docker"
+sandbox_image = "base"
+instructions = "Isolated Item runtime verification; no autonomous turns."

@@ -26,7 +26,7 @@ val supervise_keepalive :
 
 val pending_hitl_approval_keeper_names :
   Workspace.config ->
-  (string list, Keeper_approval_queue.storage_error) result
+  (string list, Keeper_approval_queue_result.storage_error) result
 (** Return persisted keeper names that currently have a pending HITL
     approval. Durable queue unavailability remains explicit. Used by
     [sweep_and_recover] to surface otherwise silent chat stalls without

@@ -73,6 +73,9 @@ let is_enabled () = Result.is_ok (lane_destinations ())
    keeper whose content must not leave is excluded whichever gate asks. *)
 let is_excluded ~keeper_id = List.mem keeper_id (policy ()).Runtime_schema.excluded_keepers
 
+let board_attention_confidence_floor () =
+  (policy ()).Runtime_schema.board_attention_confidence_floor
+
 (* One switch per gate on top of the lane's, then the exclusion. A key turns
    the lane on; each gate can still be turned off by name, so adding a gate
    does not switch on another one that nobody reviewed with it. The Board

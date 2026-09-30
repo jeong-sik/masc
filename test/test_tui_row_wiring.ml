@@ -985,7 +985,7 @@ let test_both_strips_mark_where_they_are_from_one_value () =
    says nothing on screen but a smaller board. *)
 let test_the_board_title_counts_through_the_helper_that_knows_the_board () =
   let asks callee =
-    Ast_grep.count_calls_in_value_binding ~module_path:render
+    Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_render_board.ml"
       ~binding_name:"render_board_list" ~callee
   in
   Alcotest.(check int) "the title asks what the board holds" 1
@@ -1118,7 +1118,7 @@ let test_the_tasks_list_pane_says_which_task_each_row_is () =
 
 let test_the_board_age_column_reads_the_sort_once () =
   let asks ~callee =
-    Ast_grep.count_calls_in_value_binding ~module_path:render
+    Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_render_board.ml"
       ~binding_name:"render_board_list" ~callee
   in
   Alcotest.(check int) "the list asks which time the sort ordered by" 1

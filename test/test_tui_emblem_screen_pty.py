@@ -18,6 +18,8 @@ import test_tui_keyboard_input as h
 # scripts/ci/run-edited-tests.sh runs this suite when a pull request changes a
 # path named here.
 SOURCE_MODULES = (
+    "bin/masc_tui_input_reader.ml",
+    "bin/masc_tui_input_reader.mli",
     "bin/masc_tui.ml",
     "bin/masc_tui_composer.ml",
     "bin/masc_tui_command.ml",
@@ -167,11 +169,12 @@ def mascot_transfers(wire: bytes) -> list[tuple[dict[bytes, bytes], bytes]]:
 
 def assert_working_overview(output: bytearray) -> bytes:
     screen = h.screen_text(bytes(output))
-    for label in (b"MASC Dashboard", b"Goals", b"Work", b"Usage", b"Needs you"):
+    for label in (b"MASC Dashboard", b"Work:", b"Continue", b"Choose a Keeper"):
         assert label in screen, f"working Dashboard omitted {label!r}: {screen!r}"
+    assert (b"Needs your decision" in screen
+            or b"No decision is waiting on you." in screen), screen
     assert STARTUP_CAPTION not in screen, "startup branding replaced the work"
-    # Work's sparkline uses lower blocks, including U+2584. The candle's
-    # mosaic also paints upper half blocks, which the chart never emits.
+    # Home must remain usable without the startup candle's upper half blocks.
     assert b"\xe2\x96\x80" not in output, "startup drew a mosaic candle"
     assert not MASCOT_TRANSFER_HEAD.search(bytes(output)), "startup placed a mascot image"
     return screen
@@ -296,14 +299,11 @@ def about_screen_with_graphics(binary: str) -> None:
     fixtures = h.keeper_runtime_http_fixtures()
 
     def interact(process, fd, _slave, output, _base):
-        # The composer writes to the keeper the roster cursor holds, and it
-        # holds none until the roster is read: an i that arrives first has
-        # nobody to write to and is dropped. Choose alpha first, as
-        # about_owns_the_keys does.
+        # Select a real Keeper before opening its message composer.
         h.send_and_wait(process, fd, output, b"3", b"MASC Keepers")
         h.select_keeper_row(process, fd, output, b"alpha")
-        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
-        h.send_and_wait(process, fd, output, b"i", h.COMPOSER_FOCUSED)
+        h.send_and_wait(process, fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
+        h.send_and_wait(process, fd, output, b"c", b"Esc:detail")
         start = len(output)
         h.send_and_wait(process, fd, output, b"/about\r", ABOUT_CAPTION)
         h.wait_for_output(process, fd, output, PLACEMENT, start=start, timeout=5.0)
@@ -338,11 +338,14 @@ def about_screen_with_graphics(binary: str) -> None:
         assert not candle_rows(output), "real pixels were drawn as a mosaic as well"
         # Esc closes /about and takes the picture down with it.
         start = len(output)
-        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
+        h.send_and_wait(process, fd, output, b"\x1b", CHAT_TITLE)
         h.wait_for_output(process, fd, output, MASCOT_DELETE, start=start, timeout=3.0)
         assert h.drain_until_quiet(process, fd, output), "the screen kept moving after /about closed"
         after = bytes(output[output.find(MASCOT_DELETE, start):])
         assert not mascot_transfers(after), "the candle was placed again after /about closed"
+        h.send_and_wait(process, fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
+        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
         os.write(fd, b"q")
 
     h.run_terminal_scenario(binary, description="/about places the candle as real pixels on a Kitty terminal",
@@ -356,11 +359,11 @@ def about_owns_the_keys(binary: str) -> None:
     requests: list = []
 
     def interact(process, fd, slave, output, _base):
-        # The composer writes to the keeper the roster cursor holds.
+        # Open the selected Keeper's message composer.
         h.send_and_wait(process, fd, output, b"3", b"MASC Keepers")
         h.select_keeper_row(process, fd, output, b"alpha")
-        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
-        h.send_and_wait(process, fd, output, b"i", h.COMPOSER_FOCUSED)
+        h.send_and_wait(process, fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
+        h.send_and_wait(process, fd, output, b"c", b"Esc:detail")
         h.send_and_wait(process, fd, output, b"/about\r", ABOUT_CAPTION)
         # i would focus the composer, the text would be its draft and Enter
         # would send it -- under /about none of that may happen.
@@ -375,13 +378,16 @@ def about_owns_the_keys(binary: str) -> None:
         screen = h.screen_text(bytes(output))
         assert ABOUT_CAPTION in screen, "a key typed under /about closed it: " + repr(screen)
         assert SWALLOWED_TEXT not in screen, "text typed under /about reached the composer"
-        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
+        h.send_and_wait(process, fd, output, b"\x1b", CHAT_TITLE)
         assert h.drain_until_quiet(process, fd, output), "the screen kept moving after /about closed"
         screen = h.screen_text(bytes(output))
         assert ABOUT_CAPTION not in screen, "Esc left /about open"
         assert SWALLOWED_TEXT not in screen, "the swallowed text surfaced after /about closed"
         assert not any(CHAT_SEND_PATH in path for path, _ in requests), \
             "a message was sent while /about was open"
+        h.send_and_wait(process, fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
+        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
         os.write(fd, b"q")
 
     h.run_terminal_scenario(binary, description="/about owns the keys until Esc",
@@ -414,8 +420,8 @@ def about_turns_the_candle(binary: str) -> None:
     def interact(process, fd, _slave, output, _base):
         h.send_and_wait(process, fd, output, b"3", b"MASC Keepers")
         h.select_keeper_row(process, fd, output, b"alpha")
-        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
-        h.send_and_wait(process, fd, output, b"i", h.COMPOSER_FOCUSED)
+        h.send_and_wait(process, fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
+        h.send_and_wait(process, fd, output, b"c", b"Esc:detail")
         start = len(output)
         h.send_and_wait(process, fd, output, b"/about\r", ABOUT_CAPTION)
         assert b"c:candle" in h.screen_text(bytes(output)), "/about does not say c turns the candle"
@@ -432,6 +438,9 @@ def about_turns_the_candle(binary: str) -> None:
         start = len(output)
         h.write_all(fd, output, b"c")
         transfer_after(process, fd, output, start, is_painted, "painted")
+        h.send_and_wait(process, fd, output, b"\x1b", CHAT_TITLE)
+        h.send_and_wait(process, fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
+        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
         h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
         os.write(fd, b"q")
 

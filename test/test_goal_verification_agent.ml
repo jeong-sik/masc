@@ -310,6 +310,137 @@ let test_proof_pending_drains_to_completed () =
   | _ -> fail "ledger must hold the proven verdict"
 ;;
 
+(* {1 Candle Snapshot (RFC-goal-candle-ledger 3.2)}
+
+   With a candle.toml in place, the verifier writes the Goal's Snapshot to the
+   Candle ledger before its passing result reaches the verification ledger. *)
+
+let enable_candle (config : Workspace.config) =
+  Candle_status.install_appraiser_check (fun () -> Ok ());
+  let path = Config_dir_resolver.candle_toml_path_for_base_path ~base_path:config.base_path in
+  let rec mkdir_p dir =
+    if not (Sys.file_exists dir)
+    then (
+      mkdir_p (Filename.dirname dir);
+      Unix.mkdir dir 0o755)
+  in
+  mkdir_p (Filename.dirname path);
+  Out_channel.with_open_bin path (fun oc -> Out_channel.output_string oc {|[payout]
+weight_max = 10
+deduction_rate = 10
+deduction_floor = 200
+[payout.grades_milli]
+trivial = 1000
+small = 2000
+medium = 3000
+large = 4000
+epic = 5000
+|})
+;;
+
+let candle_ledger_path (config : Workspace.config) =
+  Candle_ledger.path ~base_path:config.base_path
+;;
+
+let candle_snapshots (config : Workspace.config) =
+  match Candle_ledger.read ~base_path:config.base_path with
+  | Ok view -> Candle_ledger.events view
+  | Error error -> fail (Candle_ledger.read_error_to_string error)
+;;
+
+let approve_and_drain config =
+  with_lane_and_reviewer
+    ~slots:(fun () -> Ok [ "verifier-a" ])
+    ~reviewer:
+      (recording_reviewer (ref []) [ "verifier-a", Stub_approve "all 3 services verified" ])
+    (fun () -> drain config)
+;;
+
+let test_a_passing_verdict_leaves_a_candle_snapshot () =
+  with_workspace
+  @@ fun config ->
+  enable_candle config;
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Provable goal" in
+  ignore (must_succeed "request_complete" (transition ctx goal_id "request_complete"));
+  let request_id, _ = pending_identity config goal_id in
+  approve_and_drain config;
+  check string "the Goal moved on" "awaiting_confirmation" (stored_phase config goal_id);
+  let verdict =
+    match (ledger_record config goal_id).completion with
+    | Goal_verification.Proof_proven verdict -> verdict
+    | Goal_verification.Completion_idle
+    | Goal_verification.Proof_pending _
+    | Goal_verification.Proof_refuted _
+    | Goal_verification.Human_confirmed _ -> fail "the ledger must hold the proven verdict"
+  in
+  match candle_snapshots config with
+  | [ { Candle_event.body = Candle_event.Snapshot s; _ } ] ->
+    check string "the Goal" goal_id s.goal_id;
+    check string "the request that passed" request_id s.request_id;
+    check string "when it passed is when the verdict was made"
+      verdict.Goal_verification.recorded_at
+      (Candle_time.to_rfc3339 s.passed_at)
+  | snapshots ->
+    fail (Printf.sprintf "expected one Snapshot, got %d rows" (List.length snapshots))
+;;
+
+let test_without_a_candle_toml_the_verifier_writes_no_snapshot () =
+  with_workspace
+  @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Provable goal" in
+  ignore (must_succeed "request_complete" (transition ctx goal_id "request_complete"));
+  approve_and_drain config;
+  check string "the Goal moved on" "awaiting_confirmation" (stored_phase config goal_id);
+  check bool "no ledger" false (Sys.file_exists (candle_ledger_path config))
+;;
+
+let test_a_refutation_leaves_no_candle_snapshot () =
+  with_workspace
+  @@ fun config ->
+  enable_candle config;
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Refutable goal" in
+  ignore (must_succeed "request_complete" (transition ctx goal_id "request_complete"));
+  with_lane_and_reviewer
+    ~slots:(fun () -> Ok [ "verifier-a" ])
+    ~reviewer:
+      (recording_reviewer (ref []) [ "verifier-a", Stub_reject "the metric did not move" ])
+    (fun () -> drain config);
+  check string "back to executing" "executing" (stored_phase config goal_id);
+  check bool "no ledger" false (Sys.file_exists (candle_ledger_path config))
+;;
+
+(* A Snapshot that cannot be written refuses the commit: the request stays
+   pending and the Goal stays in Verifying, so a later pass can still be paid.
+   The ledger path is a directory here, after the ledger was read once. *)
+let test_a_snapshot_that_cannot_be_written_keeps_the_proof_pending () =
+  with_workspace
+  @@ fun config ->
+  enable_candle config;
+  ignore (Candle_status.current ~base_path:config.base_path : Candle_config.t);
+  Unix.mkdir (candle_ledger_path config) 0o755;
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Provable goal" in
+  ignore (must_succeed "request_complete" (transition ctx goal_id "request_complete"));
+  let request_id, _ = pending_identity config goal_id in
+  approve_and_drain config;
+  check string "the Goal stays in Verifying" "verifying" (stored_phase config goal_id);
+  (match (ledger_record config goal_id).completion with
+   | Goal_verification.Proof_pending pending ->
+     check string "the same request is still pending" request_id pending.request_id
+   | Goal_verification.Completion_idle
+   | Goal_verification.Proof_proven _
+   | Goal_verification.Proof_refuted _
+   | Goal_verification.Human_confirmed _ ->
+     fail "a refused Snapshot must not consume the request");
+  Unix.rmdir (candle_ledger_path config);
+  approve_and_drain config;
+  check string "the next pass goes through" "awaiting_confirmation" (stored_phase config goal_id);
+  check int "and leaves exactly one Snapshot" 1 (List.length (candle_snapshots config))
+;;
+
 (* The judge holds a read surface rooted at the shared playground, and it is
    built from the workspace alone. This goal has no linked Task and no
    producer of its own: the measurement is simply a file somebody wrote under
@@ -1723,6 +1854,24 @@ let () =
         ; test_case "verifying goal with a missing request is rearmed and drained"
             `Quick
             test_verifying_goal_with_a_missing_request_is_rearmed_and_drained
+        ] )
+    ; ( "candle snapshot"
+      , [ test_case
+            "a passing verdict leaves a candle snapshot"
+            `Quick
+            test_a_passing_verdict_leaves_a_candle_snapshot
+        ; test_case
+            "without a candle.toml the verifier writes no snapshot"
+            `Quick
+            test_without_a_candle_toml_the_verifier_writes_no_snapshot
+        ; test_case
+            "a refutation leaves no candle snapshot"
+            `Quick
+            test_a_refutation_leaves_no_candle_snapshot
+        ; test_case
+            "a snapshot that cannot be written keeps the proof pending"
+            `Quick
+            test_a_snapshot_that_cannot_be_written_keeps_the_proof_pending
         ] )
     ]
 ;;

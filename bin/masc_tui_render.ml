@@ -7156,92 +7156,38 @@ let render_keeper_logs (state : state) =
     box_line buf cols header;
     box_divider buf cols;
 
-    (* The names come from the same description as the readings, in the module
-       that owns the widths. Written here, they were eight numbers away from
-       the eight they named. *)
     box_line_styled buf cols ~style:(Theme.recede ())
-      Observation_layout.plain_log_header;
+      "  TIME  KIND  LATENCY · full facts below";
     box_divider buf cols;
 
-    (match state.log_error with
-      | None -> ()
-      | Some error ->
-          let style =
-            match error with
-            | Metrics_tail.Storage_error _ -> (Theme.bad ())
-            | Metrics_tail.Row_errors _ -> (Theme.warn ())
-          in
-          let diagnostic =
-            Keeper_chat.terminal_safe_text
-              (Metrics_tail.error_to_string error)
-          in
-          box_line_styled buf cols ~style
-            ("  " ^ diagnostic);
-          box_divider buf cols);
-
-    (* Content area *)
+    let log_rows = Masc_tui_types.keeper_log_rows state ~cols in
+    let row_count = List.length log_rows in
     let content_height =
-      Metrics_tail.content_height ~terminal_rows:rows ~error:state.log_error
+      Metrics_tail.content_height ~terminal_rows:rows ~error:None
     in
     let scroll =
-      Metrics_tail.normalize_scroll ~entry_count:total_entries ~content_height
-        state.log_scroll
+      Metrics_tail.normalize_scroll ~entry_count:row_count ~content_height
+        (if state.log_wrap_cols = Some cols then state.log_scroll else 0)
     in
-
-    if total_entries = 0 then begin
+    let visible = Rows.of_list ~first:scroll ~height:content_height log_rows in
+    for index = 0 to content_height - 1 do
+      if row_count = 0 && index = 0 then
+        box_line_styled buf cols ~style:(Theme.recede ())
+          ("  " ^ Metrics_tail.empty_message state.log_error)
+      else
+        match Rows.at visible (scroll + index) with
+        | Some (diagnostic, line) ->
+            let style = match diagnostic with
+              | None -> Ansi.reset
+              | Some (Metrics_tail.Storage_error _) -> Theme.bad ()
+              | Some (Metrics_tail.Row_errors _) -> Theme.warn () in
+            box_line_styled buf cols ~style line
+        | None -> box_empty buf cols
+    done;
+    if row_count > content_height then
       box_line_styled buf cols ~style:(Theme.recede ())
-        ("  " ^ Metrics_tail.empty_message state.log_error);
-      for _ = 1 to content_height - 1 do
-        box_empty buf cols
-      done
-    end else begin
-      let visible =
-        Metrics_tail.visible ~entries:state.log_entries ~content_height ~scroll
-      in
-      let drawn = ref 0 in
-      List.iter
-        (fun (e : Tui_decode.log_entry) ->
-          incr drawn;
-          let time_str = Terminal_text.clock_timestamp e.le_ts in
-          let tool_names = Terminal_text.single_lines e.le_tools_used in
-          let tools_str =
-            if List.length tool_names > 0 then
-              " "
-              ^ String.concat ","
-                  (List.filteri (fun i _ -> i < 2) tool_names)
-            else ""
-          in
-          let terminal_entry =
-            { e with
-              le_work_kind =
-                Terminal_text.optional_single_line e.le_work_kind
-            }
-          in
-          let line =
-            Observation_layout.plain_log_row ~time:time_str terminal_entry
-            ^ tools_str
-          in
-          box_line buf cols line)
-        visible;
-      for _ = !drawn to content_height - 1 do
-        box_empty buf cols
-      done
-    end;
-
-    (* Scroll indicator: the same "rows X-Y of Z" shape the tool-call pane
-       reads, so one glance answers both how far and how much is left -- a
-       bare "scroll N" said the offset but not the distance either way. *)
-    if total_entries > content_height then begin
-      (* Counted back from the newest, because that is the direction the rows
-         are drawn in: row 1 is the last thing that happened. A bare
-         "rows 1-20 of 300" read as the start of the file. *)
-      let indicator =
-        Printf.sprintf "newest %d-%d of %d" (scroll + 1)
-          (min total_entries (scroll + content_height))
-          total_entries
-      in
-      box_line_styled buf cols ~style:(Theme.recede ()) indicator
-    end;
+        (Printf.sprintf "newest rows %d-%d of %d" (scroll + 1)
+           (min row_count (scroll + content_height)) row_count);
 
     box_bottom buf cols;
 
@@ -7249,7 +7195,8 @@ let render_keeper_logs (state : state) =
       (footer_line state ~max_cells:cols
          ~hints:(Masc_tui_keys.footer_hints state.view));
 
-    finish_surface state ~surface_key:"keeper-logs" ~rows:terminal_rows
+    finish_surface state ~clamped:(Keeper_logs_scroll { scroll; cols })
+      ~surface_key:"keeper-logs" ~rows:terminal_rows
       ~cols buf
   end
 

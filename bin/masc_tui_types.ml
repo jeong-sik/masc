@@ -5871,6 +5871,7 @@ type state = {
   mutable log_entries: log_entry list;
   mutable log_error: Metrics_tail.load_error option;
   mutable log_scroll: int;
+  mutable log_wrap_cols: int option;
   mutable live_context: Masc_tui_context_state.t;
   mutable overview: overview_snapshot option;
   mutable overview_error: string option;
@@ -8302,6 +8303,7 @@ let create_state
   log_entries = [];
   log_error = None;
   log_scroll = 0;
+  log_wrap_cols = None;
   live_context = Masc_tui_context_state.empty;
   overview = None;
   overview_error = None;
@@ -9093,6 +9095,7 @@ type clamped_scroll =
   | Schedule_detail_scroll of int
   | Keeper_detail of int
   | Keeper_calls of int
+  | Keeper_logs_scroll of { scroll : int; cols : int }
   | Acting of int
   | Acting_selection of int * int
   | Acting_detail_scroll of int
@@ -9202,6 +9205,9 @@ let apply_clamped_scroll (state : state) = function
   | Fusion_detail_scroll value -> state.fusion_scroll <- value
   | Runtime_detail_scroll value -> state.runtime_detail_scroll <- value
   | System_log_detail_scroll value -> state.system_logs_detail_scroll <- value
+  | Keeper_logs_scroll { scroll; cols } ->
+      state.log_scroll <- scroll;
+      state.log_wrap_cols <- Some cols
   | Planning_detail_scroll value -> state.planning_scroll <- value
   | Lane_run_detail_scroll { scroll; content_height } ->
       state.lane_run_detail_scroll <- scroll;
@@ -9335,6 +9341,28 @@ let surface_body_rows (state : state) ~terminal_rows =
      - Masc_tui_composer.rows_for ~terminal_rows
      - agenda_chrome_rows state)
 ;;
+
+(* Count the rows after wrapping, shared by the reader and every movement key.
+   Entry order is newest first; facts inside each entry keep their reading order. *)
+let keeper_log_rows (state : state) ~cols =
+  let width = Masc_tui_frame.inner_width ~cols in
+  let diagnostics =
+    match state.log_error with
+    | None -> []
+    | Some error ->
+        Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (width - 2))
+          (Tui_decode.sanitize_terminal_text (Metrics_tail.error_to_string error))
+        |> List.map (fun line -> Some error, "  " ^ line)
+  in
+  let entries =
+    List.rev state.log_entries
+    |> List.concat_map (fun (entry : Tui_decode.log_entry) ->
+         Masc_tui_observation_layout.log_entry_rows ~width
+           ~time:(Tui_decode.clock_timestamp_for_terminal ~localtime:Unix.localtime entry.le_ts)
+           entry
+         |> List.map (fun line -> None, line))
+  in
+  diagnostics @ entries
 
 (* The three layouts the Board read surface draws in. Both the pane split and
    the [z] key read this one answer: spelled as a pair of booleans it admitted

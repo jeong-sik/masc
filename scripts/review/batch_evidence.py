@@ -386,7 +386,7 @@ def roll_input_snapshot(pull, batch):
     return snapshot
 
 
-def roll_run_receipt(f, gh, repo, batch, roll_pr, roll_tree, digest):
+def roll_run_receipt(f, gh, repo, batch, roll_pr, roll_tree, snapshot, run_attempt):
     with tempfile.TemporaryDirectory(prefix="masc-roll-evidence-") as target:
         try:
             f.command([gh, "run", "download", str(batch.run), "--repo", repo,
@@ -397,9 +397,27 @@ def roll_run_receipt(f, gh, repo, batch, roll_pr, roll_tree, digest):
             raise Refusal(Reason.ROLL_RUN_RECEIPT_MISMATCH, ExitCode.ROLL) from error
     suites = value.get("required_suites") if isinstance(value, dict) else None
     executed = value.get("executed_suites") if isinstance(value, dict) else None
+    checkout = value.get("checkout_commit") if isinstance(value, dict) else None
+    if not isinstance(checkout, str) or not re.fullmatch(r"[0-9a-f]{40}", checkout):
+        raise Refusal(Reason.ROLL_RUN_RECEIPT_MISMATCH, ExitCode.ROLL)
+    try:
+        commit = f.api(gh, f"repos/{repo}/git/commits/{checkout}")
+    except f.Unavailable as error:
+        raise Refusal(Reason.ROLL_RUN_RECEIPT_MISMATCH, ExitCode.ROLL) from error
+    if (commit.get("sha") != checkout
+            or commit.get("tree", {}).get("sha") != roll_tree
+            or [row.get("sha") for row in commit.get("parents", [])]
+            != [batch.base, batch.roll]):
+        raise Refusal(Reason.ROLL_RUN_RECEIPT_MISMATCH, ExitCode.ROLL)
     if (not isinstance(value, dict)
             or value.get("schema") != "masc.roll.run.v1"
-            or value.get("input_digest") != digest
+            or value.get("input_digest") != snapshot["digest"]
+            or value.get("base") != snapshot["base"]
+            or value.get("members") != snapshot["members"]
+            or value.get("result") != "success"
+            or value.get("missing_suites") != []
+            or type(value.get("run_attempt")) is not int
+            or value["run_attempt"] != run_attempt
             or value.get("roll_pr") != roll_pr
             or value.get("roll_head") != batch.roll
             or value.get("roll_tree") != roll_tree
@@ -442,7 +460,9 @@ def evaluate(f, *, line, repo, pr, head, run, git_dir, gh, landing=False, expect
         raise Refusal(Reason.ROLL_VERDICT_NAMES_ANOTHER_RUN, ExitCode.ROLL)
     if candidate is not None and candidate != roll and run is not None:
         raise Refusal(Reason.MEMBER_RUN_NOT_APPLICABLE, ExitCode.MEMBER)
-    exact_run(f, gh, prefix, roll.pr, roll.head, roll_pull["head"]["ref"], batch.run, failure=ExitCode.ROLL)
+    checked_run = exact_run(
+        f, gh, prefix, roll.pr, roll.head, roll_pull["head"]["ref"],
+        batch.run, failure=ExitCode.ROLL)
     if not arrived:
         current_checks(f, gh, repo, roll.pr, roll.head, git_dir, failure=ExitCode.ROLL)
     roll_review_state(f, gh, repo, roll, batch.run, required=landing)
@@ -451,8 +471,9 @@ def evaluate(f, *, line, repo, pr, head, run, git_dir, gh, landing=False, expect
     trees = Trees(f, git_dir)
     for identity in (batch.base, batch.roll, main, *(member.head for member in batch.members)):
         trees.ensure(identity)
+    tested_tree = trees.tree(trees.merge(batch.base, batch.roll))
     run_receipt = roll_run_receipt(
-        f, gh, repo, batch, roll.pr, trees.tree(batch.roll), snapshot["digest"])
+        f, gh, repo, batch, roll.pr, tested_tree, snapshot, checked_run.get("run_attempt"))
 
     pulls, member_reviews = {}, {}
     previous = None

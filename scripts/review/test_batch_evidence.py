@@ -126,7 +126,7 @@ print(value)
             "merge_commit_sha": None, "user": {"login": f"author-{pr}"},
             "base": {"ref": "main", "sha": self.base}, "head": {"sha": head, "ref": branch}})
         run_id = self.run_ids[pr]
-        run = {"id": run_id, "run_number": 10, "workflow_id": 70,
+        run = {"id": run_id, "run_number": 10, "run_attempt": 1, "workflow_id": 70,
                "name": "PR Check", "head_sha": head, "head_branch": branch,
                "event": "pull_request", "path": ".github/workflows/pr-check.yml",
                "status": "completed", "conclusion": "success",
@@ -195,12 +195,19 @@ print(value)
             for pr in members]}
         body = "<!-- masc-roll-input-v1\n" + json.dumps(fields) + "\n-->"
         self.get("pulls/99")["body"] = body
+        roll_tree = self.git("rev-parse", self.roll + "^{tree}")
+        checkout = self.git("commit-tree", roll_tree, "-p", self.base,
+                            "-p", self.roll, input="PR merge checkout\n")
+        self.put(f"git/commits/{checkout}", {
+            "sha": checkout, "tree": {"sha": roll_tree},
+            "parents": [{"sha": self.base}, {"sha": self.roll}]})
         self.data["__roll_receipt"] = {
             "schema": "masc.roll.run.v1", "input_digest": RI.parse_body(body)["digest"],
-            "roll_pr": 99, "roll_head": self.roll,
-            "roll_tree": self.git("rev-parse", self.roll + "^{tree}"),
-            "run_id": 900, "required_suites": ["suite-a"],
-            "executed_suites": ["suite-a"]}
+            "base": self.base, "members": fields["members"],
+            "roll_pr": 99, "roll_head": self.roll, "roll_tree": roll_tree,
+            "checkout_commit": checkout, "run_id": 900, "run_attempt": 1,
+            "required_suites": ["suite-a"], "executed_suites": ["suite-a"],
+            "missing_suites": [], "result": "success"}
         for pr in [*self.heads, 99]:
             comments = [{"id": pr * 10, "body": self.line,
                          "author_association": "COLLABORATOR", "user": {"login": "publisher"},
@@ -345,9 +352,15 @@ print(value)
         self.data = copy.deepcopy(original)
         for field, value in [
             ("input_digest", "sha256:" + "0" * 64),
+            ("base", self.heads[1]),
+            ("members", []),
             ("roll_head", self.heads[1]),
             ("roll_tree", self.base),
+            ("checkout_commit", self.base),
             ("run_id", 901),
+            ("run_attempt", 2),
+            ("result", "failure"),
+            ("missing_suites", ["suite-a"]),
             ("required_suites", []),
             ("executed_suites", []),
             ("executed_suites", ["suite-b"])]:
@@ -355,6 +368,16 @@ print(value)
                 self.data["__roll_receipt"][field] = value
                 self.refusal("batch_roll_run_receipt_mismatch", E.ROLL)
                 self.data = copy.deepcopy(original)
+
+    def test_run_checkout_commit_must_bind_base_and_roll(self):
+        checkout = self.data["__roll_receipt"]["checkout_commit"]
+        commit = self.get(f"git/commits/{checkout}")
+        original = copy.deepcopy(commit)
+        commit["parents"][0]["sha"] = self.heads[1]
+        self.refusal("batch_roll_run_receipt_mismatch", E.ROLL)
+        self.put(f"git/commits/{checkout}", copy.deepcopy(original))
+        self.get(f"git/commits/{checkout}")["tree"]["sha"] = self.base
+        self.refusal("batch_roll_run_receipt_mismatch", E.ROLL)
 
     def test_roll_body_change_during_final_admission_refuses(self):
         moved = copy.deepcopy(self.get("pulls/99"))

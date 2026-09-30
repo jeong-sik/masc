@@ -689,6 +689,36 @@ let test_a_stopped_holders_controller_is_let_go () =
     ]
 ;;
 
+(* A Keeper removed for good leaves no registry entry and no meta, only its
+   own credential, which has no expiry. The next move reads that like an agent
+   coming back, so the shutdown that removes it lets the controller go. *)
+let test_a_removed_keeper_lets_its_controller_go () =
+  with_workspace (fun base_path ->
+    let config = Workspace.default_config base_path in
+    install_program ~base_path "hello.com" hello_com;
+    (match Auth.create_token base_path ~agent_name:"cao-cao" ~role:Masc_domain.Worker with
+     | Ok _ -> ()
+     | Error e -> fail (Masc_domain.masc_error_to_string e));
+    with_holder ~base_path Not_a_keeper "cao-cao" (fun () ->
+      boot ~agent:"cao-cao" ~base_path "hello.com";
+      let departure =
+        match Auth.with_credential_transaction base_path (fun transaction ->
+          Keeper_dos_controller.holder_left ~transaction ~config
+            ~now:(Unix.gettimeofday ()) "cao-cao") with
+        | Ok departure -> departure
+        | Error error -> fail (Masc_domain.masc_error_to_string error)
+      in
+      check bool "the next move cannot see that a removed Keeper left" true
+        (Option.is_none departure);
+      check (result unit string) "removing a Keeper that holds nothing" (Ok ())
+        (Keeper_dos_controller.release_retired ~keeper_name:"liu-bei" ~by:"operator");
+      check (option string) "leaves the holder" (Some "cao-cao") (current_controller ());
+      check (result unit string) "removing the holder" (Ok ())
+        (Keeper_dos_controller.release_retired ~keeper_name:"cao-cao" ~by:"operator");
+      check (option string) "frees the controller" None (current_controller ());
+      check bool "and the next Keeper moves" true (keeper_press ~base_path "liu-bei" "a")))
+;;
+
 (* RFC play-link-for-the-shared-machine §2.8: under enforced auth, a holder
    whose credential ran out has left. A holder that is not a
    Keeper has also left when no credential carries its name. Where requests
@@ -1426,6 +1456,8 @@ let () =
             test_a_pass_to_an_impossible_name_is_refused
         ; test_case "stopped holder is let go" `Quick
             test_a_stopped_holders_controller_is_let_go
+        ; test_case "a removed Keeper lets its controller go" `Quick
+            test_a_removed_keeper_lets_its_controller_go
         ; test_case "a Keeper passes only to someone at the machine" `Quick
             test_a_keeper_passes_only_to_someone_at_the_machine
         ; test_case "a holder departs with its credential" `Quick

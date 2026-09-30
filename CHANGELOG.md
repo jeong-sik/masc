@@ -2,10 +2,6 @@
 
 ## [Unreleased]
 
-### Fixed
-
-- Withdraw Item accounts and pending Keeper detail reads when the observed workspace identity changes, retaining monotonic request generations to reject delayed replies after returning to the workspace.
-
 ## [0.49.0] - 2026-09-29
 
 ### Fresh state required

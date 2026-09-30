@@ -104,7 +104,7 @@ S05 구현 후속: [#40254](https://github.com/jeong-sik/masc/pull/40254)의 `c0
 | K05 | Runtime picker | mandatory 24셀×2 + chrome이 작은 frame 초과 | [#40143](https://github.com/jeong-sik/masc/pull/40143), 실제 셀 폭으로 열 배정; 집중 실행 검증 대기 |
 | K06 | Chat inflight row | 다른 Keeper 이름 뒤 interrupt 행동이 잘림 | [#40186](https://github.com/jeong-sik/masc/pull/40186), 전체 중단 명령을 먼저 wrap·공유 물리 행 예산; 실행 검증 대기 |
 | R02 | diff 읽기 | 기록된 호출·Changes working tree·Repository Changes는 세로 위치만 있어 긴 줄 끝이 도달 불가; Code Shift 키는 가려진 file offset을 바꿈 | Code 부분 [#40196](https://github.com/jeong-sik/masc/pull/40196); 나머지 세 읽기 경로 [#40208](https://github.com/jeong-sik/masc/pull/40208), 실행 검증 대기 |
-| S02 | Runtime 목록 | 77셀 고정 열이 route/probe/detail을 밀어냄 | [#40220](https://github.com/jeong-sik/masc/pull/40220), 목록 열 배정 수정·실행 대기; default/media 행은 남음 |
+| S02 | Runtime 목록 | 77셀 고정 열이 route/probe/detail을 밀어냄 | [#40220](https://github.com/jeong-sik/masc/pull/40220), 목록 열 배정 수정; [#40293](https://github.com/jeong-sik/masc/pull/40293) 전체 route/status 읽기 추가·소스 승인, 실행 미검증 |
 | W02 | Task 상세 | title/status/actor/reason/ID 등 고정 metadata가 원문을 잃음 | [#40133](https://github.com/jeong-sik/masc/pull/40133), 모든 metadata/history를 물리 행 스크롤에 포함; 집중 실행 검증 대기 |
 | W03/W04 | Goal 상세·짧은 창 | metadata가 잘리고 fixed chrome/linked task cap이 본문을 밀어냄 | [#40142](https://github.com/jeong-sik/masc/pull/40142), 전체 metadata/연결 Task/타임라인을 물리 행 스크롤에 포함; 집중 실행 검증 대기 |
 | W05/W06 | Review/Verdict 상세 | title/task/request/agent/gate/goal metric metadata 잘림 | [#40277](https://github.com/jeong-sik/masc/pull/40277) 전체 필드 wrap; CI 비활성화로 실행 미확인 |

@@ -281,7 +281,8 @@
       "implementation_prs": [
         40220
       ],
-      "implementation_evidence": "S02 listing portion at68b11bce73 source/static/review only; width40/60/80/120 lane/catalog color/NO_COLOR focused fixture added, runtime pending. Default/media routes and warning/fallback/smaller frames remain."
+      "implementation_evidence": "S02 listing portion at68b11bce73 source/static/review only; width40/60/80/120 lane/catalog color/NO_COLOR focused fixture added, runtime pending. Default/media routes and warning/fallback/smaller frames remain.",
+      "route_followup": "PR40293 exact e948ac6276beba010fbaf1189a10926d3e5af045 source-reviewed full routes/status reader; read-only v access independent of candidates, runtime not verified"
     },
     {
       "name": "render_runtime_detail",

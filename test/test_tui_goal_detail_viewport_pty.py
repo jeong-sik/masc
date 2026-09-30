@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 import test_tui_keyboard_input as h
 
-SOURCE_MODULES = ("bin/masc_tui_render.ml", "bin/masc_tui.ml")
+SOURCE_MODULES = ("bin/masc_tui_render.ml", "bin/masc_tui.ml", "bin/masc_tui_planning_detail.ml")
 GOAL_ID = "goal-detail-viewport"
 TITLE = "TITLEHEAD " + "한 " * 18 + "goal evidence " * 8 + "TITLEEND"
 OWNER = "owner-" + "delegated-" * 20 + "OWNEREND"
@@ -15,6 +15,9 @@ TARGET = "TARGETHEAD " + "measured target " * 12 + "TARGETEND"
 DUE = "2026-09-30T01:02:03Z source timezone " + "due-evidence-" * 10 + "DUEEND"
 NOTE = "NOTEHEAD\n\n" + "review observation " * 12 + "\nNOTEEND"
 STAMP = "2026-09-30T01:02:03Z"
+APPROVAL = "approval-" + "0123456789abcdef" * 10 + "APPROVALEND"
+KEEPER = "keeper-" + "delegated-" * 18 + "KEEPEREND"
+RAW_CLOCK = "unreadable-clock-" + "raw-timestamp-" * 12 + "CLOCKEND"
 WINDOW = re.compile(rb"\[lines (\d+)-(\d+)/(\d+)\]")
 
 def screen(output):
@@ -42,7 +45,12 @@ def run(executable):
                 last_review_note=NOTE)
     fixtures = h.overview_event_http_fixtures()
     fixtures[h.PLANNING_PATH] = h.planning_snapshot([goal])
-    fixtures[f"/api/v1/dashboard/goals/detail?goal_id={GOAL_ID}"] = (200, {"timeline": []})
+    fixtures[f"/api/v1/dashboard/goals/detail?goal_id={GOAL_ID}"] = (200, {"timeline": [
+        {"ts": STAMP, "kind": "approval_state", "lane": "approval:" + APPROVAL,
+         "title": "approval evidence", "summary": "pending approval", "severity": "warn"},
+        {"ts": RAW_CLOCK, "kind": "keeper_event", "lane": "keeper:" + KEEPER,
+         "title": "keeper observation", "summary": "TIMELINEEND", "severity": "ok"},
+    ]})
     requests = []
     posted = []
 
@@ -66,9 +74,10 @@ def run(executable):
         for width in (30, 60, 80, 120):
             h.resize_and_wait(process, fd, output, rows=400, columns=width,
                               needle=b"TITLEHEAD", final_cursor=b"\x1b[?25l")
+            h.wait_for_output(process, fd, output, b"TIMELINEEND", start=0, timeout=10)
             h.drain_until_quiet(process, fd, output)
             all_text = compact(screen(output))
-            for value in (TITLE, GOAL_ID, OWNER, METRIC, TARGET, DUE, NOTE, STAMP):
+            for value in (TITLE, GOAL_ID, OWNER, METRIC, TARGET, DUE, NOTE, STAMP, APPROVAL, KEEPER, RAW_CLOCK):
                 assert compact(value.encode()) in all_text, (width, value, all_text)
             for index in range(12):
                 assert f"task-linked-{index:02d}".encode() in all_text, (width, index, all_text)
@@ -93,7 +102,7 @@ def run(executable):
                 h.drain_until_quiet(process, fd, output)
                 assert window(output)[0] == 2, window(output)
                 h.send_and_wait(process, fd, output, b"k", b"TITLEHEAD")
-                h.send_and_wait(process, fd, output, b"\x1b[F", b"NOTEEND")
+                h.send_and_wait(process, fd, output, b"\x1b[F", b"TIMELINEEND")
                 h.drain_until_quiet(process, fd, output)
                 start, end, count = window(output)
                 assert start > 1 and end == count, (start, end, count)

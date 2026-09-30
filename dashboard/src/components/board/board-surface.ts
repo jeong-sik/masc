@@ -1449,7 +1449,7 @@ export function BoardSurface() {
     : null
 
   if (postId && !post && detailPostId.value !== postId && !detailLoading.value) {
-    void loadPostDetail(postId)
+    void loadPostDetail(postId, route.value.params.comment ?? null)
   }
 
   if (postId) {

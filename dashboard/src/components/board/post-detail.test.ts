@@ -80,6 +80,7 @@ vi.mock('./board-state', () => ({
   detailLoading: { value: false },
   detailLoadingOlder: { value: false },
   detailPostId: { value: null },
+  detailFocusedCommentId: { value: null },
   loadOlderPostComments: vi.fn(),
   commentText: { value: '' },
   commentSubmitting: { value: false },
@@ -122,7 +123,7 @@ import {
   countCommentDescendants,
   filterCommentTree,
 } from './post-detail'
-import { detailCommentPage, detailComments, detailPostId, loadPostDetail } from './board-state'
+import { detailCommentPage, detailComments, detailPostId, detailFocusedCommentId, loadPostDetail } from './board-state'
 import { requestBoardContextInference, toggleReaction, voteComment, votePost } from '../../api/board'
 import type { BoardComment, BoardPost } from '../../types/core'
 
@@ -132,6 +133,7 @@ afterEach(() => {
   routerMock.route.value = { params: {} }
   detailComments.value = []
   detailPostId.value = null
+  detailFocusedCommentId.value = null
   detailCommentPage.value = { offset: 0, total: 0 }
 })
 
@@ -522,6 +524,19 @@ describe('PostDetail', () => {
     rerender(h(PostDetail, { post: { ...post } }))
 
     await waitFor(() => expect(loadPostDetail).toHaveBeenCalledExactlyOnceWith(post.id, 'reply'))
+  })
+
+  it('does not restart a focused detail when it remounts before ancestors arrive', () => {
+    const post = { id: 'post-1', author: 'keeper', title: 'Post', body: 'Body', tags: [],
+      votes: 0, comment_count: 21, created_at: '', updated_at: '' } as BoardPost
+    detailPostId.value = post.id
+    detailFocusedCommentId.value = 'reply'
+    detailComments.value = []
+    routerMock.route.value = { params: { post: post.id, comment: 'reply' } }
+    const mounted = render(h(PostDetail, { post }))
+    mounted.unmount()
+    render(h(PostDetail, { post: { ...post } }))
+    expect(loadPostDetail).not.toHaveBeenCalled()
   })
 
   it('renders the classification reason when present', () => {

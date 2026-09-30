@@ -558,9 +558,10 @@ describe('loadPostDetail', () => {
     await loadPostDetail('p1', 'reply')
 
     expect(fetchBoardPost).toHaveBeenCalledTimes(2)
-    expect(detailPost.value).toBeNull()
-    expect(detailComments.value).toEqual([])
-    expect(showToast).toHaveBeenCalledWith('글을 불러오는 데 실패했습니다', 'error')
+    expect(detailPost.value?.id).toBe('p1')
+    expect(detailComments.value.map(comment => comment.id)).toEqual(['reply'])
+    expect(detailCommentPage.value.offset).toBe(20)
+    expect(showToast).toHaveBeenCalledWith('이전 댓글을 불러오는 데 실패했습니다', 'error')
   })
 
   it('leaves detailPost.closed undefined for an open post', async () => {
@@ -581,5 +582,39 @@ describe('loadPostDetail', () => {
     await loadPostDetail('post-open')
 
     expect(detailPost.value?.closed).toBeUndefined()
+  })
+})
+
+describe('focused detail continuity', () => {
+  it('retains focus across a same-route action reload and resets it for another post', async () => {
+    const reply = { id: 'reply', parent_id: 'parent' } as BoardComment
+    const parent = { id: 'parent', parent_id: null } as BoardComment
+    vi.mocked(fetchBoardPost).mockImplementation(async (id, offset) => ({
+      ...makePost({ id }), comments: offset === 0 ? [parent] : [reply],
+      commentPage: { offset: offset === 0 ? 0 : 20, total: 21 },
+    } as any))
+    await loadPostDetail('focused-post', 'reply')
+    await loadPostDetail('focused-post')
+    expect(detailComments.value.map(comment => comment.id)).toEqual(['parent', 'reply'])
+    expect(vi.mocked(fetchBoardPost).mock.calls.slice(-2)).toEqual([
+      ['focused-post'], ['focused-post', 0, 20],
+    ])
+    await loadPostDetail('another-post')
+    expect(detailComments.value.map(comment => comment.id)).toEqual(['reply'])
+    expect(fetchBoardPost).toHaveBeenCalledTimes(5)
+  })
+
+  it('keeps the successfully read post and pages when later ancestor paging fails', async () => {
+    vi.mocked(fetchBoardPost)
+      .mockResolvedValueOnce({ ...makePost({ id: 'partial-post' }), comments: [{ id: 'reply', parent_id: 'parent' }],
+        commentPage: { offset: 40, total: 41 } } as any)
+      .mockResolvedValueOnce({ ...makePost({ id: 'partial-post' }), comments: [{ id: 'parent', parent_id: 'root' }],
+        commentPage: { offset: 20, total: 41 } } as any)
+      .mockRejectedValueOnce(new Error('fixture older page unavailable'))
+    await loadPostDetail('partial-post', 'reply')
+    expect(detailPost.value?.id).toBe('partial-post')
+    expect(detailComments.value.map(comment => comment.id)).toEqual(['parent', 'reply'])
+    expect(detailCommentPage.value).toEqual({ offset: 20, total: 41 })
+    expect(showToast).toHaveBeenCalledWith('이전 댓글을 불러오는 데 실패했습니다', 'error')
   })
 })

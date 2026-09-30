@@ -65,6 +65,7 @@ export const detailCommentPage = signal<BoardCommentPage>({ offset: 0, total: 0 
 export const detailLoading = signal(false)
 export const detailLoadingOlder = signal(false)
 export const detailPostId = signal<string | null>(null)
+export const detailFocusedCommentId = signal<string | null>(null)
 let detailRequestId = 0
 
 // ── Signals: hearth filters ───────────────────────────────────────
@@ -335,6 +336,9 @@ export function visibilityBadgeColor(vis: string): string {
 // ── Data operations ────────────────────────────────────────────────
 export async function loadPostDetail(postId: string, focusedCommentId?: string | null) {
   const requestId = ++detailRequestId
+  const focus = focusedCommentId === undefined && detailPostId.value === postId
+    ? detailFocusedCommentId.value : focusedCommentId?.trim() || null
+  detailFocusedCommentId.value = focus
   detailPostId.value = postId
   detailPost.value = null
   detailComments.value = []
@@ -373,19 +377,26 @@ export async function loadPostDetail(postId: string, focusedCommentId?: string |
     }
     let comments = data.comments
     let page = data.commentPage
-    while (focusedCommentId && page.offset > 0
-      && focusedCommentNeedsAncestors(comments, focusedCommentId)) {
-      const offset = Math.max(0, page.offset - COMMENT_PAGE_SIZE)
-      const older = await fetchBoardPost(postId, offset, page.offset - offset)
-      if (detailPostId.value !== postId || detailRequestId !== requestId) return
-      if (older.commentPage.offset >= page.offset) {
-        throw new Error('Older comment page did not advance toward the start')
-      }
-      comments = mergeCommentPages(older.comments, comments)
-      page = older.commentPage
-    }
     detailComments.value = comments
     detailCommentPage.value = page
+    try {
+      while (focus && page.offset > 0 && focusedCommentNeedsAncestors(comments, focus)) {
+        const offset = Math.max(0, page.offset - COMMENT_PAGE_SIZE)
+        const older = await fetchBoardPost(postId, offset, page.offset - offset)
+        if (detailPostId.value !== postId || detailRequestId !== requestId) return
+        if (older.commentPage.offset >= page.offset) {
+          throw new Error('Older comment page did not advance toward the start')
+        }
+        comments = mergeCommentPages(older.comments, comments)
+        page = older.commentPage
+        detailComments.value = comments
+        detailCommentPage.value = page
+      }
+    } catch (err) {
+      if (detailPostId.value !== postId || detailRequestId !== requestId) return
+      console.warn('[Board] failed to load focused comment ancestors:', postId, err)
+      showToast('이전 댓글을 불러오는 데 실패했습니다', 'error')
+    }
   } catch (err) {
     console.warn('[Board] failed to load post detail:', postId, err)
     if (detailPostId.value === postId && detailRequestId === requestId) {

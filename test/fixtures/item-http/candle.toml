@@ -10,4 +10,5 @@ large = 1000
 epic = 1000
 [shop.prices_milli]
 glasses = 0
+shades = 0
 crown = 200

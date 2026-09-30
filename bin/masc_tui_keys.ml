@@ -1249,8 +1249,8 @@ type code_pane =
   | Code_tree  (** the file list has focus *)
   | Code_file  (** a file is open and nothing covers it *)
   | Code_overlay  (** diff is drawn over the file *)
-  | Code_history  (** complete history document is drawn over the file *)
   | Code_notes  (** wrapped memo document is drawn over the file *)
+  | Code_history  (** complete history document is drawn over the file *)
 
 let code_notes_bindings =
   [ b Navigate "j/k" "scroll"

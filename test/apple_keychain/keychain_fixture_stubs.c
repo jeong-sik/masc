@@ -1,3 +1,4 @@
+#ifdef __APPLE__
 #include <caml/mlvalues.h>
 #include <caml/fail.h>
 #include <Security/Security.h>
@@ -30,3 +31,4 @@ CAMLprim value masc_test_keychain_set_interaction(value allowed) {
     caml_failwith("cannot set fixture interaction setting");
   return Val_unit;
 }
+#endif /* __APPLE__ */

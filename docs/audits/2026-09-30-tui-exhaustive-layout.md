@@ -107,14 +107,14 @@ S05 구현 후속: [#40254](https://github.com/jeong-sik/masc/pull/40254)의 `c0
 | S02 | Runtime 목록 | 77셀 고정 열이 route/probe/detail을 밀어냄 | [#40220](https://github.com/jeong-sik/masc/pull/40220), 목록 열 배정 수정·실행 대기; default/media 행은 남음 |
 | W02 | Task 상세 | title/status/actor/reason/ID 등 고정 metadata가 원문을 잃음 | [#40133](https://github.com/jeong-sik/masc/pull/40133), 모든 metadata/history를 물리 행 스크롤에 포함; 집중 실행 검증 대기 |
 | W03/W04 | Goal 상세·짧은 창 | metadata가 잘리고 fixed chrome/linked task cap이 본문을 밀어냄 | [#40142](https://github.com/jeong-sik/masc/pull/40142), 전체 metadata/연결 Task/타임라인을 물리 행 스크롤에 포함; 집중 실행 검증 대기 |
-| W05/W06 | Review/Verdict 상세 | title/task/request/agent/gate/goal metric metadata 잘림 | 필드 wrap 필요 |
+| W05/W06 | Review/Verdict 상세 | title/task/request/agent/gate/goal metric metadata 잘림 | [#40277](https://github.com/jeong-sik/masc/pull/40277) 전체 필드 wrap; CI 비활성화로 실행 미확인 |
 | S04 | Runtime params | key/current/default 최소 폭, selected contract 도달 불가 | [#40135](https://github.com/jeong-sik/masc/pull/40135), 전체 필드 스크롤·실제 페이지 높이·refresh key identity; 집중 실행 검증 대기 |
 | S05 | Prompt registry/assets | key/source/file/vars metadata 원문 도달 불가 | [#40254](https://github.com/jeong-sik/masc/pull/40254), 전체 literal metadata/오류·공유 detail 페이지, 실행 대기 |
 | S06/S07 | Presets | detail logical row 잘림; retained refresh failure에서 list_height+1행 | [#40141](https://github.com/jeong-sik/masc/pull/40141), 전체 detail wrap·실제 페이지 높이·실패 행 배정·refetch 동안 읽기 유지; 집중 실행 검증 대기 |
 | S08/S09/S10 | Voice | input tail/caret·endpoint metadata 잘림; assignment cursor 미추종 | [#40117](https://github.com/jeong-sik/masc/pull/40117), wizard/assignment; 실행 검증 대기, endpoint 추가 필요 |
 | R03 | Workspace Activity | fixed clock/keeper/task 뒤 file 잘림 | [#40230](https://github.com/jeong-sik/masc/pull/40230), 반응형 목록·Context; 10개 fixture 조합/Repositories/Changes newline 통과, 추가 상태·설치 미검증 |
 | R04 | Code memo/history | subject/provenance 논리 행의 잘린 suffix 도달 불가 | [#40240](https://github.com/jeong-sik/masc/pull/40240), 메모 작성자·본문 wrap/물리 행 탐색; 실행 대기; [#40247](https://github.com/jeong-sik/masc/pull/40247), history 전체 필드/줄 owner/파일·scope·결과 note, 실행 대기 |
-| S11 | Tools | root path/rejection/composition 행·skill usage last-used 잘림 | 상세 검사·wrap/반응형 열 필요 |
+| S11 | Tools | root path/rejection/composition 행·skill usage last-used 잘림 | [#40263](https://github.com/jeong-sik/masc/pull/40263) 전체 물리 행 wrap·composition 상세; 실행 검증 미확인 |
 | O05 | Link preview | 설명 원문이 narrow frame에서 한 줄 잘림 | [#40209](https://github.com/jeong-sik/masc/pull/40209), 전체 URL·설명·거절 wrap, 실행 검증 대기 |
 
 ## source review의 한계와 다음 검증
@@ -148,3 +148,13 @@ History705 run36692381154 reached the first30-color case's final query check and
 Prompts c0c3 run36689755419 passed the full new10-case registry/asset PTY suite and held-back fixture; the overall run failed one of126 compiled keys cases because its exact Config union expectation omitted the new Home/End detail action. Head1be34f2ae7457c115b34910fe9320ee84de39921 changes that expected contract; focused36696374901/probe36696378672 are requested. Prior-head primary PASS is not newhead execution proof. See `prompts-pty-pass-key-expectation-failure.txt/.raw`.
 
 Root inspected failure sources and raw outcomes; independent hostile and response reviews found no remaining source blocker after the repairs. No local build. The full audit, current-head required checks, integration, installation and production verification remain outstanding.
+
+### Review/Verdict W05/W06 source repair and validation-route limit
+
+PR#40277 headae678a798507e0f5633f180db0d2f5a9e9c67307 (base0c37b5c285) wraps complete metadata at the actual pane width before computing document count. Review retains full recorded Created, evidence headers and armed/action-error detail; Verdict retains literal title/reason/fallback and complete goal title/metric/target. The existing dispatch and confirmation handlers are unchanged.
+
+The24-case fixture covers two panes ×six widths ×color/NO_COLOR with j/Home/End and exact whole-field reconstruction. The fixture waits for an accepted typed artifact row before Home/collection and reads only completed frames. Response review corrected heading-specific indentation in the left content boundary, and every j asserts its actual first row. Page overlap/refresh/stale/armed/error/actions remain source-reviewed only. Static guards and independent reviews passed; no local build.
+
+`review-detail-before.txt/.raw`, `review-detail-before-screen.txt` and `review-detail-before-browser.png/.txt` reproduce original four-field clipping in complete100x18 color fixture frames from frozen867. They do not prove the repaired head or production behavior.
+
+Both focused Test and manual probe dispatches were rejectedHTTP422 because workflows are disabled_manually. PR checks were absent. The active release-candidate lane has a tag/release/v* manual-entry guard and was not used for the ordinary fix branch. `review-verdict-ci-dispatch-rejected.txt` records the limit. No workflow was re-enabled. The verification-route decision is pending; the full TUI goal remains active and is not achieved.

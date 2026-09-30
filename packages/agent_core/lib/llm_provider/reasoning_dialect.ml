@@ -311,7 +311,8 @@ let normalize_effort_value dialect effort =
       | Reasoning_effort.Minimal
       | Reasoning_effort.Low
       | Reasoning_effort.Medium
-      | Reasoning_effort.XHigh ) ) -> None
+      | Reasoning_effort.XHigh
+      | Reasoning_effort.Ultra ) ) -> None
   | Preserve_effort, effort -> Some (Reasoning_effort.to_string effort)
 ;;
 
@@ -391,7 +392,8 @@ let request_control_fields
                | Reasoning_effort.Medium
                | Reasoning_effort.High
                | Reasoning_effort.XHigh
-               | Reasoning_effort.Max ) ) -> Some Request_control_field
+               | Reasoning_effort.Max
+               | Reasoning_effort.Ultra ) ) -> Some Request_control_field
          | Some true, (Some Reasoning_effort.None_ | None) | (Some false | None), _ ->
            None
        in

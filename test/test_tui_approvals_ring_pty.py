@@ -19,7 +19,8 @@ SOURCE_MODULES = (
 def open_ask_snapshot() -> dict[str, object]:
     """One open question, no approvals anywhere.
 
-    The wire shape follows lib/tui_decode.ml (decode_asks_snapshot and
+    The wire shape follows lib/tui_decode_asks.ml (decode_asks_snapshot), and
+    lib/tui_decode.ml (
     friends): the badge counts the rows Masc_tui_ask_projection.open_rows
     keeps (resolution open), not the snapshot's open_count field.
     """

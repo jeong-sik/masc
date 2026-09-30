@@ -10,7 +10,10 @@ LANE_ID = "fixture-lane-아주긴이름-primary-tailL"
 
 
 def screen(output):
-    return h.screen_text(bytes(output)).decode("utf-8", errors="strict")
+    raw = bytes(output)
+    end = raw.rfind(h.FRAME_END)
+    assert end >= 0, "no completed terminal frame"
+    return h.screen_text(raw[:end + len(h.FRAME_END)]).decode("utf-8", errors="strict")
 
 
 def run(executable, no_color):
@@ -41,19 +44,26 @@ def run(executable, no_color):
                 size = os.get_terminal_size(fd)
                 assert (size.columns, size.lines) == (120, 32), size
                 h.send_and_wait(process, fd, output, b"p", b"All runtimes")
-            for columns in (40, 60, 80, 120):
+            for columns in (30, 40, 60, 80, 120):
+                resize_start = len(output)
                 h.resize_and_wait(process, fd, output, rows=32, columns=columns,
                                   needle=b"ROUTE / PROBE", controls=(h.FULL_REDRAW,))
+                clear = output.rfind(h.FULL_REDRAW, resize_start)
+                assert clear >= resize_start
+                h.wait_for_output(process, fd, output, h.FRAME_END,
+                    start=h.end_of_needle(output, b"ROUTE / PROBE", clear), timeout=3)
                 visible = screen(output)
+                suffix = RUNTIME_ID[-4:] if columns == 30 else "tailZ"
+                status = "ready / reach" if columns == 30 else "ready / reachable"
                 candidate_rows = [row for row in visible.splitlines()
-                                  if "tailZ" in row and "ready / reachable" in row]
+                                  if suffix in row and status in row]
                 assert len(candidate_rows) == 1, (columns, all_runtimes, visible)
                 cells = sum(0 if unicodedata.combining(char) else
                             2 if unicodedata.east_asian_width(char) in ("W", "F") else 1
                             for char in candidate_rows[0])
                 assert cells <= columns, (columns, cells, candidate_rows)
                 assert "\\x1B" not in candidate_rows[0], candidate_rows
-                if columns == 40:
+                if columns in (30, 40):
                     assert "…" in candidate_rows[0], candidate_rows
                 # The full identity is read through the same selected row.
                 h.send_and_wait(process, fd, output, b"\r", b"Runtime ID:")

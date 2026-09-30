@@ -1,5 +1,4 @@
 module Form = Masc_tui_schema_form
-module Decode = Masc.Tui_decode
 
 type request =
   { keeper : string
@@ -93,7 +92,7 @@ let first_or_default ~default names =
   | Some name when List.mem name names -> Some name
   | Some _ | None -> List.nth_opt names 0
 
-let open_form ~keepers ~keeper ~(options : Decode.fusion_launch_options) =
+let open_form ~keepers ~keeper ~(options : Masc.Tui_decode_fusion.fusion_launch_options) =
   let* () =
     if options.flo_enabled then Ok ()
     else Error "Fusion is disabled in runtime.toml; enable [fusion] before launching a run"

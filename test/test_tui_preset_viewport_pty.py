@@ -128,7 +128,7 @@ def run(executable, no_color):
         hold_detail.set()
         os.write(fd, b"r")
         try:
-            assert detail_entered.wait(5), "same-name refresh did not refetch detail"
+            assert h.wait_for_fixture_event(process, fd, output, detail_entered, timeout=5), "same-name refresh did not refetch detail"
             # Inspect refresh-era frames, rather than an unchanged old End
             # frame that happened to be quiet before the renderer ran.
             h.send_and_wait(process, fd, output, b"\x1b[H", b"DESCHEAD")

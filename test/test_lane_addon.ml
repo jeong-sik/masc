@@ -514,7 +514,9 @@ let test_broadcast_failure_keeps_evidence_without_automatic_retry () =
     let previous = Workspace_broadcast.For_testing.replace_write_json_commit
       (fun _ _ _ -> incr attempts; Error "fixture authoritative write rejected") in
     let result = Fun.protect ~finally:(fun () ->
-      ignore (Workspace_broadcast.For_testing.replace_write_json_commit previous)) (fun () ->
+      let _replaced_writer =
+        Workspace_broadcast.For_testing.replace_write_json_commit previous in
+      ()) (fun () ->
         check bool "two destinations are refused before publication" true
           (Result.is_error (Runtime.dispatch ~caller:"fixture-operator" ~config ~operation:Runtime.Evidence
             (`Assoc (args @ ["broadcast",`Bool true;"keeper_name",`String "someone"]))));
@@ -524,7 +526,7 @@ let test_broadcast_failure_keeps_evidence_without_automatic_retry () =
         let unauthenticated = dispatch config Runtime.Evidence (args @ ["broadcast",`Bool true]) |> unwrap in
         check string "sharing requires an authenticated caller" "failed"
           (member "delivery" unauthenticated |> text "status");
-        check int "invalid requests never reach Broadcast" 0 !attempts;
+        check Alcotest.int "invalid requests never reach Broadcast" 0 !attempts;
         Runtime.dispatch ~caller:"fixture-operator" ~config ~operation:Runtime.Evidence
           (`Assoc (args @ ["broadcast",`Bool true])) |> unwrap) in
     check string "failed authoritative publication remains a failed delivery" "failed"
@@ -532,10 +534,10 @@ let test_broadcast_failure_keeps_evidence_without_automatic_retry () =
     let evidence = member "evidence" result in
     check bool "failed Broadcast retains the exact selected evidence" true
       (Sys.file_exists (text "path" evidence));
-    check int "one explicit request attempts one message write" 1 !attempts;
+    check Alcotest.int "one explicit request attempts one message write" 1 !attempts;
     ignore (unwrap (dispatch config Runtime.Inspect []));
     ignore (unwrap (dispatch config Runtime.Evidence args));
-    check int "inspection and preservation never rebroadcast" 1 !attempts;
+    check Alcotest.int "inspection and preservation never rebroadcast" 1 !attempts;
     Runtime.register_delivery_handler (fun ~config:_ ~caller:_ ~keeper_name:_ ~prompt:_ ->
       failwith "fixture recipient raised after accepting");
     let uncertain = Runtime.dispatch ~caller:"fixture-operator" ~config ~operation:Runtime.Evidence

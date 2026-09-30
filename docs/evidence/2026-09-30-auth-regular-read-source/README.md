@@ -4,6 +4,8 @@ This is a source candidate. No local Dune build, typecheck, native test, browser
 
 ## Parent and scope
 
+This reader repair is #40256. Its initial published API head is `193fba3502ace69615893c739cbc59b3e301d93b` (tree `c8b7f558f1e924242bab0516005fd381ac725ec3`), based on the actual #40214 parent below. The local source commit `ca0dba014899ef8a067eba608a30c2ce64efa980` freezes the code and eight fixture cases; later fragment/provenance updates do not change that source.
+
 Actual publication parent: `f01a7fd45d7cc0f8e3d17b492ffd27c0b5f477c1` (#40214). Exact local full-tree parent: `33980ad07aa717c5f68e7acc51dd5de6ec21e6b5`. The local parent/tree binding was supplied by the publishing root session; the exact local tree and changed file identities are retained in `composition.json`.
 
 This child repairs one family of file reads. A FIFO with no writer was opened by public bearer readers and configuration loading, and by related Auth/OAuth metadata readers. The configuration and OAuth cases can hold credential admission or the OAuth store lock while waiting for a writer that does not exist.

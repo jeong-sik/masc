@@ -1,10 +1,10 @@
 {
   "algorithm": "sha256",
-  "scope": "source/evidence candidate; immutable source commit above, manifest excludes itself",
+  "scope": "current candidate source/evidence after assigning40256 fragment; code and fixture source remain immutableca0dba014899ef8a067eba608a30c2ce64efa980; manifest excludes itself",
   "files": [
     {
-      "path": "changelog.d/999993.md",
-      "sha256": "8bc309830e4c4f4b4dbdf7a6a5d7282d3edb8ff982d4fa680c662b5f3da1f132"
+      "path": "changelog.d/40256.md",
+      "sha256": "430f9d17c0f7505afabe00a853305c2e3f7ba61310c5adc22c0f929f0c4c1aca"
     },
     {
       "path": "lib/auth/auth.ml",
@@ -48,11 +48,11 @@
     },
     {
       "path": "docs/evidence/2026-09-30-auth-regular-read-source/README.md",
-      "sha256": "9cc5584bf17572ce2e770bd7591b91dec3229b783bc11c081541f8c923e97d8b"
+      "sha256": "3b421338390b29334af9f1f5841983ec735cfcabc22088201fd90d86865e363f"
     },
     {
       "path": "docs/evidence/2026-09-30-auth-regular-read-source/composition.json",
-      "sha256": "166fc9d8d1b9fd0b5f6c9f3e689eb2f84844df4eceda30a94b44943595215edd"
+      "sha256": "65eb6d7b1eff52fe41f73f63adfdeb968bdb9a55d3c9a385e1819ee3a828f01a"
     },
     {
       "path": "docs/evidence/2026-09-30-auth-regular-read-source/parse-checks.json",

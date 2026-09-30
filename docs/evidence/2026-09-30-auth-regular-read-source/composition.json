@@ -9,10 +9,6 @@
   "branch": "fix/auth-regular-read-boundary-20260930",
   "changed_source": [
     {
-      "path": "changelog.d/999993.md",
-      "sha256": "8bc309830e4c4f4b4dbdf7a6a5d7282d3edb8ff982d4fa680c662b5f3da1f132"
-    },
-    {
       "path": "lib/auth/auth.ml",
       "sha256": "7120e74999aa53287b8b8ab7509840fa08bd0fcf2e23d7dd9962f74cc36e2f57"
     },
@@ -289,5 +285,16 @@
   "oauth_dependency": "Auth_oauth already references Auth_credential_base; shared reader does not introduce a cycle",
   "native_execution": "not performed",
   "typecheck_or_build": "not performed",
-  "production_effects": "none"
+  "production_effects": "none",
+  "pr": 40256,
+  "actual_initial_publication_head": "193fba3502ace69615893c739cbc59b3e301d93b",
+  "actual_initial_publication_tree": "c8b7f558f1e924242bab0516005fd381ac725ec3",
+  "original_source_fragment": {
+    "path": "changelog.d/999993.md",
+    "sha256": "8bc309830e4c4f4b4dbdf7a6a5d7282d3edb8ff982d4fa680c662b5f3da1f132"
+  },
+  "release_fragment": {
+    "path": "changelog.d/40256.md",
+    "sha256": "430f9d17c0f7505afabe00a853305c2e3f7ba61310c5adc22c0f929f0c4c1aca"
+  }
 }

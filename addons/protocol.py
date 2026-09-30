@@ -18,6 +18,10 @@ class InvalidInput(ValueError):
     pass
 
 
+class UnknownMethod(ValueError):
+    pass
+
+
 def object_value(value: Any, field: str) -> dict:
     if not isinstance(value, dict):
         raise InvalidInput(f"{field} must be an object")
@@ -157,6 +161,7 @@ def serve(name: str, observe: Callable[[dict, tuple[Source, ...]], dict],
         raise InvalidInput("max_reply_bytes must be a positive integer")
     for line in sys.stdin:
         request_id = None
+        method = None
         try:
             request = object_value(json.loads(line), "request")
             request_id = request.get("id")
@@ -191,11 +196,11 @@ def serve(name: str, observe: Callable[[dict, tuple[Source, ...]], dict],
                 except InvalidInput as error:
                     result = {"content": [{"type": "text", "text": str(error)}], "isError": True}
             else:
-                response = {"jsonrpc": "2.0", "id": request_id,
-                            "error": {"code": -32601, "message": "Method not found"}}
-                print(json.dumps(response), flush=True)
-                continue
+                raise UnknownMethod
             response = {"jsonrpc": "2.0", "id": request_id, "result": result}
+        except UnknownMethod:
+            response = {"jsonrpc": "2.0", "id": request_id,
+                        "error": {"code": -32601, "message": "Method not found"}}
         except json.JSONDecodeError:
             response = {"jsonrpc": "2.0", "id": None,
                         "error": {"code": -32700, "message": "Parse error"}}
@@ -204,9 +209,13 @@ def serve(name: str, observe: Callable[[dict, tuple[Source, ...]], dict],
                         "error": {"code": -32602, "message": str(error)}}
         encoded = json.dumps(response, ensure_ascii=False, allow_nan=False)
         if max_reply_bytes is not None and len((encoded + "\n").encode("utf-8")) > max_reply_bytes:
-            response = {"jsonrpc": "2.0", "id": request_id, "result": {
-                "content": [{"type": "text", "text": "Observation exceeds the declared reply envelope; no report was accepted"}],
-                "isError": True}}
+            if method == "tools/call":
+                response = {"jsonrpc": "2.0", "id": request_id, "result": {
+                    "content": [{"type": "text", "text": "Observation exceeds the declared reply envelope; no output was accepted"}],
+                    "isError": True}}
+            else:
+                response = {"jsonrpc": "2.0", "id": request_id,
+                            "error": {"code": -32603, "message": "Reply too large"}}
             encoded = json.dumps(response, ensure_ascii=False, allow_nan=False)
             if len((encoded + "\n").encode("utf-8")) > max_reply_bytes:
                 raise RuntimeError("Declared reply envelope cannot contain an exact JSON-RPC error response")

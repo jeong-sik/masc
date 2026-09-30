@@ -12,7 +12,9 @@ lanes = ["fusion/report-context", "fusion/report"]
 cpus = 0.5
 memory_bytes = 134217728
 pids = 16
-max_reply_bytes = 4194304
+# The 4 MiB results envelope grows when the report adds Markdown and
+# retained producer provenance. This package owns its separate reply allocation.
+max_reply_bytes = 8388608
 
 [interface]
 presentation = '''{

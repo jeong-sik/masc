@@ -28,9 +28,12 @@ After these workflow changes are integrated into main, publish the prepared
 candidate branch explicitly and dispatch `leader-ci.yml` on main. Set its
 `candidate` input to the receipt's exact candidate SHA.
 Supply the preparation receipt as the `selection` JSON input. Select any of
-`compile`, `release_profile`, `dashboard`, `tla`, `lint` and `tests`; all default
-to false. `suites` narrows the behavior run when `tests` is selected. There is
-no changed-file heuristic choosing work for the leader.
+`compile` (bottom Core only) or `tests`; both default to false. `tests` requires
+explicit nonempty `suites` and uses the minimal runner. Every ordinary job,
+including setup, is limited to two minutes. Broad release-profile, dashboard,
+TLA, lint and full behavior checks remain in `release-candidate.yml` on a
+release branch or version tag. There is no changed-file heuristic choosing
+work for the leader.
 
 The runner rechecks current source approvals using the integrated main guard,
 reconstructs the combined Git commit, and requires it to equal the explicit candidate

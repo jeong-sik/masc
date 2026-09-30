@@ -481,5 +481,35 @@
     "Fusion list/detail/historical detail/launch",
     "Runtime exact-lane editor and runtime picker",
     "Browser addons/live/history"
-  ]
+  ],
+  "diff_access_audit": {
+    "source_head": "c112b2030652a5a25360f5d5322f8dc6da99c598",
+    "provenance": "direct current source inspection; no executable proof",
+    "code_diff_implementation_pr": 40196,
+    "unimplemented_readers": [
+      {
+        "reader": "recorded tool-call before/after",
+        "renderer": "bin/masc_tui_render.ml:11164",
+        "state": "changes_diff_row + changes_diff_scroll",
+        "evidence": "diff_row_span applies Span.truncate to marker and complete body; no horizontal position or input route",
+        "required_verification": "long removed/added tail reachable with fixed +/- marker; reopening or changed selection owns its position; materialized blob without recorded bytes remains explicit"
+      },
+      {
+        "reader": "Changes working tree",
+        "renderer": "bin/masc_tui_render.ml:11490",
+        "shared_renderer": "bin/masc_tui_render_prim.ml:2980",
+        "state": "changes_tree_diff_path + changes_tree_diff + changes_diff_scroll",
+        "evidence": "diff_surface has ds_scroll only; tree_diff_row_span truncates composed old/new gutter and body",
+        "required_verification": "body pans while old/new/marker remain fixed; stale path answer refused; held or failed refresh keeps correct reading and position"
+      },
+      {
+        "reader": "Repository Changes working tree",
+        "renderer": "bin/masc_tui_render_prim.ml:3060",
+        "shared_renderer": "bin/masc_tui_render_prim.ml:2980",
+        "state": "repository_changes_diff_path + repository_changes_diff + repository_changes_diff_scroll",
+        "evidence": "same no-horizontal diff_surface; opens from selected repository-change row with its scope",
+        "required_verification": "body pans in project/repository scope; selected path changes reset own position; list and hidden Code file never move"
+      }
+    ]
+  }
 }

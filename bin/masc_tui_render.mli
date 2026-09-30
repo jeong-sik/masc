@@ -140,6 +140,16 @@ val acting_pane_chunk_projection :
   Masc_tui_types.state -> terminal_rows:int -> terminal_cols:int ->
   Masc_tui_acting.chunk_projection option
 
+val frame_choice :
+  Masc_tui_types.state -> terminal_rows:int ->
+  [ `Too_small of int
+  | `Play_card of Masc_tui_play_card.t
+  | `Account_login of Masc_tui_account_login.t
+  | `Lane_addons of Masc_tui_lane_addons.t
+  | `About | `Palette | `Context | `Keeper_deletions | `Help
+  | `Agenda | `Answering | `Patch | `Link | `Surface ]
+(** The visible surface or overlay, also used before preparing Home focus. *)
+
 val render :
   Masc_tui_types.state ->
   Frame_presenter.frame * Masc_tui_types.clamped_scroll option *

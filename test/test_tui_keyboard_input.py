@@ -8607,6 +8607,10 @@ def run_next_request_readability_regression(executable: str) -> None:
             )
 
             def interact(process, master_fd, _slave_fd, output, _base_path):
+                resize_and_wait(
+                    process, master_fd, output, rows=32, columns=cols,
+                    needle=b"MASC Dashboard",
+                )
                 send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
                 select_keeper_row(process, master_fd, output, b"alpha")
                 send_and_wait(
@@ -8671,7 +8675,6 @@ def run_next_request_readability_regression(executable: str) -> None:
                 ),
                 interact=interact,
                 terminal_cols=cols,
-                terminal_rows=32,
                 http_fixtures=fixtures,
             )
 

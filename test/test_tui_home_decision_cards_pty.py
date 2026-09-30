@@ -312,6 +312,13 @@ def operator_task_survives_supplemental_failure(executable):
             h.send_and_wait(process, fd, output, b"r", b"Same primary task after refresh")
             drawn = h.screen_text(bytes(output))
             assert b"MASC Task" in drawn and b"task-777" in drawn, drawn
+            if relative == "tasks/goal_task_links.json":
+                assert b"membership unknown" in drawn, drawn
+                assert b"not linked to a goal" not in drawn, drawn
+                (Path(base) / ".masc" / relative).write_text(json.dumps({"links": []}))
+                h.send_and_wait(process, fd, output, b"r", b"not linked to a goal")
+                drawn = h.screen_text(bytes(output))
+                assert b"membership unknown" not in drawn, drawn
             home.assert_no_decision_posts(requests)
             h.send_and_wait(process, fd, output, b"\x1b", b"Enter:open")
             assert_selected(output, b"Operator task")

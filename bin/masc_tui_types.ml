@@ -9126,8 +9126,8 @@ let task_goal_reading (state : state) ~task_id =
   | Masc_tui_agenda.Not_read -> Masc_tui_agenda.Not_read
   | Read_failed reason -> Masc_tui_agenda.Read_failed reason
   | Read goal_task_links ->
-      let index = Masc.Workspace_goal_index.build_task_goal_index ~goal_task_links () in
-      Masc_tui_agenda.Read (Masc.Workspace_goal_index.goals_for_task index ~task_id)
+      let index = Workspace_goal_index.build_task_goal_index ~goal_task_links () in
+      Masc_tui_agenda.Read (Workspace_goal_index.goals_for_task index ~task_id)
 
 (* The strip above the composer: what fires next, and who is blocked on the
    operator. Both are already in the state and neither was readable from the

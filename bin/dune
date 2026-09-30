@@ -1364,6 +1364,8 @@
   masc_tui_connector_unbind
   ;; [sch_last_wake_status] is the schedule contract's wake_status.
   masc.masc_schedule
+  ;; [task_goal_reading] derives Task Goal ids from the goal-link registry.
+  masc_workspace
   masc_tui_answering
   masc.voice_wizard
   masc.voice_setup

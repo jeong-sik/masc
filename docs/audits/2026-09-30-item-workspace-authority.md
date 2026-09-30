@@ -1,0 +1,46 @@
+# Item account observations belong to one workspace
+
+## Finding
+
+Composing Item account PR #40029 with remote roster PR #40053 exposes a real
+authority violation. Item accounts are keyed by Keeper name. Pending detail
+reads carry a monotonically increasing request generation, but the workspace
+transition previously invalidated only chat/history, not detail requests or
+Item accounts. A and B can both name `alpha`: A's wallet, prices and ownership
+can then be presented as B's, and a delayed A request can still be accepted.
+
+The finding follows the production request, response-admission and render
+paths, and was independently reviewed. No failing native reproduction has
+been measured yet. Earlier 885 and 3d2 evidence predates this Item composition
+and does not prove this fix.
+
+## Repair
+
+- The existing workspace transition withdraws Keeper detail as well as chat
+  to the current roster. A fresh detail entry invokes the existing selected
+  tab reader; it cannot remain on A's facts while B's roster settles.
+- Clear pending detail tokens and the Item account/error at that transition.
+  Keep the monotonically increasing generation counter. Old replies have no
+  current token, including A→B→A; reopening creates a new token. A second
+  workspace-generation field would duplicate this authority invalidation.
+- An accepted failed Item read withdraws the account rather than allowing a
+  previous Ready value to outrank its error in rendering.
+
+No purchase/equip semantics, arithmetic, HTTP wire schema, permissions,
+refresh cadence or ledger state change. Generic detail-token invalidation
+also rejects stale config/sandbox/identity readers using the same mechanism.
+
+## Verification scope
+
+`test_tui_item_workspace_authority_pty` drives the actual TUI through isolated
+HTTP fixtures: A ready account, held A refresh, B authority with the same
+Keeper, late response, B ready/failed/Off/recovered reads, and current A after
+return. It asserts withdrawal of the detail, absence of old money/ownership,
+and no Keeper POST. Frames, complete PTY bytes, request events and binary
+hashes are uploaded as `tui-item-workspace-authority`.
+
+The finishing selection also includes existing local/remote Portrait PTYs,
+held chat history, actual authenticated Item account HTTP/purchase fixtures,
+and tab-strip/keyboard guards. Actual model quality, deployment and live
+continuity remain separate. Native result is pending until its raw log is
+inspected.

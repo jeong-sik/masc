@@ -3892,6 +3892,18 @@
   masc_tui_preset_text
   masc_tui_types))
 
+; The QR's colours are read back from the escapes the mosaic writes, and the
+; mosaic writes none under NO_COLOR.
+(test
+ (name test_tui_play_card)
+ (modules test_tui_play_card)
+ (libraries
+  alcotest
+  masc_tui_play_card
+  masc_tui_terminal_palette
+  qrc)
+ (action (setenv MASC_TUI_FORCE_COLOR 1 (run %{test}))))
+
 (test
  (name test_tui_surface_needs)
  (modules test_tui_surface_needs)
@@ -4561,11 +4573,6 @@
  (name test_tui_link)
  (modules test_tui_link)
  (libraries alcotest base64 masc_tui_link))
-
-(test
- (name test_tui_play_qr)
- (modules test_tui_play_qr)
- (libraries alcotest masc_tui_play_qr masc_tui_message_layout))
 
 (test
  (name test_tui_planning_order)
@@ -6740,6 +6747,16 @@
  (name runtest)
  (deps (alias runtest-test_tui_play_invites_pty)))
 
+(rule
+ (alias runtest-test_tui_play_card_pty)
+ (deps test_tui_play_card_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_play_card_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_play_card_pty)))
+
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_tab_strip_pty)))
@@ -7686,6 +7703,16 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_client_connector_layout_pty)))
+
+(rule
+ (alias runtest-test_tui_palette_input_viewport_pty)
+ (deps test_tui_palette_input_viewport_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_palette_input_viewport_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_palette_input_viewport_pty)))
 
 (rule
  (alias runtest-test_tui_skills_usage_summary)

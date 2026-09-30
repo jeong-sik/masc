@@ -170,7 +170,8 @@ def run(binary):
             h.send_and_wait(process, fd, output, b"b",
                             b"Choose browser \xc2\xb7 separate sessions do not share login")
             h.wait_for_output(process, fd, output, b"Zen", start=chooser_start, timeout=3.0)
-            h.read_available(fd, output)
+            h.wait_for_output(process, fd, output, h.FRAME_END,
+                              start=bytes(output).rfind(b"Zen", chooser_start))
             picker = h.screen_text(bytes(output))
             for option in (b"Zen", b"Stagehand Chromium", b"Independent Firefox/Zen"):
                 assert option in picker, (option, picker)

@@ -16804,7 +16804,8 @@ def run_browser_client_picker_regression(executable: str) -> None:
         # b clears the displayed inventory until discovery settles. Require a
         # row from this request, not Firefox text in an earlier chooser frame.
         wait_for_output(process, master_fd, output, b"Firefox", start=chooser_start, timeout=3.0)
-        read_available(master_fd, output)
+        wait_for_output(process, master_fd, output, FRAME_END,
+                        start=bytes(output).rfind(b"Firefox", chooser_start))
         picker = screen_text(bytes(output))
         for option in (b"Firefox", b"Stagehand Chromium", b"Independent Firefox/Zen"):
             if option not in picker:

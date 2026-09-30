@@ -265,9 +265,9 @@ let find_static_credential_in_index index ~token =
     require_live_credential ~now:(Time_compat.now ()) first
 ;;
 
-let find_static_credential_in_transaction transaction ~token =
+let find_static_credential_in_transaction ?(leaf_policy = Owned_regular_only) transaction ~token =
   let ( let* ) = Result.bind in
-  let* snapshot = credential_store_snapshot_in_transaction transaction in
+  let* snapshot = credential_store_snapshot_in_transaction ~leaf_policy transaction in
   let index = build_token_index (List.map snd snapshot.current_credentials) in
   find_static_credential_in_index index ~token
 ;;

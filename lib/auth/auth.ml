@@ -58,14 +58,14 @@ let ensure_keeper_credential_in_transaction
 let ensure_keeper_credential config ~agent_name =
   with_credential_transaction config (fun transaction ->
     ensure_keeper_credential_in_transaction transaction ~agent_name
-      ~find_token:(find_static_credential_in_transaction transaction))
+      ~find_token:(find_static_credential_in_transaction ~leaf_policy:Follow_regular_symlink transaction))
   |> Result.join
 ;;
 
 let ensure_keeper_credentials config ~agent_names =
   with_credential_transaction config (fun transaction ->
     let ( let* ) = Result.bind in
-    let* snapshot = credential_store_snapshot_in_transaction transaction in
+    let* snapshot = credential_store_snapshot_in_transaction ~leaf_policy:Follow_regular_symlink transaction in
     let credentials = List.map snd snapshot.current_credentials in
     let index = build_token_index credentials in
     let by_name = Hashtbl.create (List.length credentials) in

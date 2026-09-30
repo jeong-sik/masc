@@ -337,6 +337,12 @@ let test_regular_symlink_authority_remains_readable () = with_workspace @@ fun b
     Unix.rename path target; Unix.symlink target path)
     [ Auth.credential_file base_path "keeper"; Auth.raw_token_file base_path "keeper" ];
   let _issued_pair = auth_ok (ensure base_path) in
+  check_pair base_path "keeper";
+  let batch = auth_ok (Auth.ensure_keeper_credentials base_path ~agent_names:["keeper"]) in
+  List.iter (fun (_, issued) -> ignore (auth_ok issued)) batch;
+  let _admin = auth_ok (set_admin base_path) in
+  check_pair base_path "keeper";
+  let _login = auth_ok (login base_path) in
   check_pair base_path "keeper"
 
 type bootstrap_config = Missing_config | Disabled_config

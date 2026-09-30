@@ -59,6 +59,7 @@ val find_static_credential_in_index :
 (** Only for an index owned by the caller's admitted transaction. *)
 
 val find_static_credential_in_transaction :
+  ?leaf_policy:Auth_credential_base.credential_leaf_policy ->
   Auth_credential_base.credential_transaction -> token:string ->
   (agent_credential, masc_error) result
 (** Reads all current owners under the caller's transaction, without consulting

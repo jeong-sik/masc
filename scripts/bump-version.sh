@@ -129,8 +129,7 @@ echo "  SPEC-INDEX.md updated"
 # quickstart names the release being cut. Nothing else moves them, and they
 # sat on v0.35.14 while five later releases went out. Until the tag exists
 # the pins name a release readers cannot download yet; the README's "check tag
-# availability" line, which check-doc-truth.sh requires beside every pin,
-# moves with them.
+# availability" line moves with them.
 for readme in README.md README.ko.md; do
   sedi -E "s#releases/tag/v[0-9]+\.[0-9]+\.[0-9]+#releases/tag/v$NEW_VERSION#g" \
     "$ROOT_DIR/$readme"
@@ -140,8 +139,7 @@ done
 for install_doc in README.md README.ko.md docs/INSTALL.md docs/INSTALL.ko.md; do
   sedi -E "s/^TAG=v[^ ]+$/TAG=v$NEW_VERSION/" "$ROOT_DIR/$install_doc"
 done
-# The site pages name one version in prose, a heading and the pin, and
-# check-doc-truth.sh refuses any other version token on them.
+# The site pages name the release version in prose, a heading and the pin.
 for site_doc in \
   docs-site/src/content/docs/getting-started/quickstart.md \
   docs-site/src/content/docs/ko/getting-started/quickstart.md; do

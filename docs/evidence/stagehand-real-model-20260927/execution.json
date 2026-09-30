@@ -1,0 +1,21 @@
+{
+  "source_commit": "c54123bba424c016a12ed0e023434586704d1b89",
+  "binary_sha256": "fd37c32272c3fca4b88697cc81949d770330db967748a0214477cd348a109cd1",
+  "started_at_unix": 1790448992.567849,
+  "repetitions": 3,
+  "injection_timeout_s": 30,
+  "scope": "isolated real provider fixture probe; no live runtime mutation",
+  "exit_code": 1,
+  "elapsed_s": 32.57230305671692,
+  "result_rows": 37,
+  "started_at_utc": "2026-09-26T18:56:32.567849+00:00",
+  "artifact_run": 36262869811,
+  "artifact_job": 108461893183,
+  "isolated_base": true,
+  "live_runtime_changed": false,
+  "host_offline_controls": {
+    "fixture_validators": 0,
+    "configuration_publication": 0
+  },
+  "results_sha256": "70b2314bd522861bc0add8c24649659470a8653f802ef52da492f657d83d85c0"
+}

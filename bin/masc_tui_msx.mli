@@ -90,6 +90,12 @@ val adjust_size : float -> unit
     between a quarter and full. A local view setting -- the machine's frame
     is the server's and is never resized. *)
 
+val server_key : string -> string option
+(** The MSX lane's name for a key the human typed on the MSX screen
+    ([masc_msx_press]), or [None] when the key is not a game key: space, the
+    arrows, Return, Backspace and one printable character. Esc and the
+    spectator's own keys are handled before this is asked. *)
+
 val consume : write:(string -> unit) -> Masc_tui_types.state -> string -> bool
 (** One key while open. [esc] closes the screen and returns [false] (the caller
     then owes the normal frame a full repaint). Every other key repaints the

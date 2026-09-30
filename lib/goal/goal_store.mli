@@ -255,13 +255,14 @@ val upsert_goal :
   ?due_date:string ->
   ?priority:int ->
   unit ->
-  (goal * [ `created | `updated of Goal_phase.t ], write_error) result
+  (goal * [ `created | `updated of goal ], write_error) result
 (** Creates a new goal when [id] is omitted (mints [goal-<ms>-<4 hex digits>]
     internally), updates the matched row otherwise. Returns the resolved goal
-    paired with [`created], or [`updated previous_phase] carrying the phase
-    the row held before this write: an edit to the title, [metric] or
-    [target_value] moves a [Verifying], [Awaiting_confirmation] or [Completed]
-    goal back to [Executing], and the caller records that move.
+    paired with [`created], or [`updated previous] carrying the row as it was
+    before this write, read inside the write lock. The caller records what
+    changed. An edit to the title, [metric] or [target_value] moves a
+    [Verifying], [Awaiting_confirmation] or [Completed] goal back to
+    [Executing]. An edit to [due_date] or [priority] moves no phase.
 
     {!Rejected}:
     - [title] required for new goals (omit / empty string on a new goal id).

@@ -6,10 +6,14 @@ created: 2026-09-23
 author: dancer + claude
 supersedes: []
 superseded_by: null
-related: ["0464"]
+related: ["0464", "tui-measured-operator-home"]
 ---
 
 # RFC-0465: 열린 PR 이 Overview 에 닿는다
+
+2026-09-25 운영자 결정으로 아래 Team 행·Overview PR 표시 제안(§0의 3번,
+§5의 5번)은 [측정 중심 TUI 구성](RFC-tui-measured-operator-home.md)이 대체한다.
+서버의 PR 조회 API와 Keeper 귀속 규칙은 별도 기능으로 남는다.
 
 ## 0. 결정할 것
 

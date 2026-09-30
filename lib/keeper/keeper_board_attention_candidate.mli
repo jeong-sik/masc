@@ -333,6 +333,11 @@ val quarantine :
   attempt_provenance:attempt_provenance option ->
   quarantined_at:float ->
   (candidate, string) result
+(** Record the quarantine of one Blocked partition generation. Repeating the
+    same quarantine changes nothing. A requeued quarantine, or one of the same
+    partition at another generation, is replaced by the new [Quarantined] one,
+    and the candidate keeps its prior domain status. A quarantine of another
+    partition without a finished requeue is refused. *)
 
 val request_quarantine_requeue :
   base_path:string ->

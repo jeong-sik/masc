@@ -20,10 +20,17 @@ const DashboardRuntimeProviderProbeStatusSchema = Schema.Literal(
   'network_error',
 )
 
+// lib/server/server_dashboard_http_runtime_info.ml publishes a probed payload
+// as [Health_status.to_string] of Ok | Idle | Degraded | Unavailable
+// (dashboard_runtime_probe_payload_json_of_runtimes, #27560). The zero-count
+// envelope from dashboard_runtime_probe_degraded_envelope carries its own
+// words: 'unreachable' when a background refresh raised, 'warming_up' on a
+// cold start with no cached value.
 const DashboardRuntimeProbeStatusSchema = Schema.Literal(
-  'reachable',
-  'no_http_runtimes',
+  'ok',
+  'idle',
   'degraded',
+  'unavailable',
   'unreachable',
   'warming_up',
 )

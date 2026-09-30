@@ -123,15 +123,17 @@ def layout(top, title, rules, bottom, last, blank, windows=(), **pinned):
 KEEPERS = layout("blank", 3, (4, 7, 28), None, 28, 17)
 BOARD = layout("blank", 3, (4, 7, 9), None, 13, 15)
 CONFIG = layout("blank", 3, (4, 9), None, 27, 1, last_source_line=18)
-# The fixture has local metadata but an empty live roster. Since #40010,
-# Info shows Identity (three rows) and Portrait unavailable (one) in place
-# of the old twelve-row name mosaic: 46 - 12 + 4 = 38 content rows.
-# At head 29f31ed3f9d99a0563af385bbdb3d97ebaa80b4a, PR check
-# 36674192191 job 109755479707 measured all eight Info frames: 38 content
-# rows, seven blanks without a roster, with unchanged borders and viewport.
-DETAIL = layout("blank", 3, (4,), None, 27, 7, ("1-22/38",))
-DETAIL_BESIDE_ROSTER = layout("border", 3, (4, 28), 28, 28, 0, ("1-22/38",),
+# The normal walk restores the live roster after the Board fixture. Replay
+# of PR-check job109790368513's eight Info frames keeps46 content rows and
+# the22-row window, with six blanks in the bare candle's transparent band.
+DETAIL = layout("blank", 3, (4,), None, 27, 6, ("1-22/46",))
+DETAIL_BESIDE_ROSTER = layout("border", 3, (4, 28), 28, 28, 0, ("1-22/46",),
                               roster={"top": 2, "bottom": 28})
+# Empty live roster is a separate authority scenario: local metadata must not
+# invent equipment. Retain the previously recorded38-row unavailable reading.
+ABSENT_DETAIL = layout("blank", 3, (4,), None, 27, 7, ("1-22/38",))
+ABSENT_DETAIL_BESIDE_ROSTER = layout("border", 3, (4, 28), 28, 28, 0, ("1-22/38",),
+                                     roster={"top": 2, "bottom": 28})
 CHAT_BESIDE_ROSTER = layout("blank", 3, (4, 26), None, 29, 19,
                             roster={"top": 2, "bottom": 27})
 CHAT = layout("blank", 3, (4, 26), None, 29, 19)
@@ -179,7 +181,7 @@ def observer_stream():
         time.sleep(OBSERVER_KEEPALIVE_SECONDS)
 
 
-def fixtures() -> region.ServedFixtures:
+def fixtures(*, absent_live_roster=False) -> region.ServedFixtures:
     """Every request the TUI makes on its way to these screens, answered.
 
     Where nothing is waiting -- no approvals, asks, schedules, pull requests,
@@ -192,6 +194,9 @@ def fixtures() -> region.ServedFixtures:
     # Keep Board's four posts while restoring the observed Keepers and their
     # portraits over Board's empty Overview roster.
     served[roster_path] = keeper_roster
+    if absent_live_roster:
+        status, payload = keeper_roster
+        served[roster_path] = (status, {**payload, "count": 0, "total": 0, "keepers": []})
     served["/api/v1/board/hearths"] = (200, {"hearths": []})
     served["/api/v1/dashboard/gate"] = h.empty_gate_snapshot()
     served["/api/v1/dashboard/gate/keeper-settings"] = (200, {
@@ -252,7 +257,7 @@ def fixtures() -> region.ServedFixtures:
     return region.ServedFixtures(served)
 
 
-def interaction(served: region.ServedFixtures):
+def interaction(served: region.ServedFixtures, *, absent_live_roster=False):
     measured: dict[tuple[str, object], dict[str, object]] = {}
 
     def take(process, fd, output, screen: str, columns: int) -> None:
@@ -275,14 +280,18 @@ def interaction(served: region.ServedFixtures):
             measured[(screen, columns)]["roster"] = region.measure_pane(
                 rows, left=0, right=left)
         if screen in ("keeper-detail", "keeper-detail-roster"):
-            # Local metadata cannot supply equipment absent from the live roster.
-            # Keep the reason and identity visible rather than invent a portrait.
             body = "\n".join(region.body_row(rows, row, left=left, right=right)
                              for row in range(3, region.TERMINAL_ROWS - 1))
-            for text in ("Identity", "Name: alpha", "Paused: no",
-                         "Portrait: unavailable: absent from live roster"):
+            for text in ("Identity", "Name: alpha", "Paused: no"):
                 if text not in body:
                     raise AssertionError(f"{where}: Info omitted {text!r}: {body!r}")
+            unavailable = "Portrait: unavailable: absent from live roster"
+            if absent_live_roster:
+                if unavailable not in body:
+                    raise AssertionError(f"{where}: Info omitted {unavailable!r}: {body!r}")
+            else:
+                if unavailable in body or not any(glyph in body for glyph in ("▀", "▄")):
+                    raise AssertionError(f"{where}: live equipment lost its portrait: {body!r}")
         if screen == "config":
             # The body ends on a source line whose number leads the row. A
             # height one off shows a line more or fewer, or the frame cuts.
@@ -312,6 +321,23 @@ def interaction(served: region.ServedFixtures):
             raise AssertionError("the input sentinel was not erased")
 
     def interact(process, fd, _slave, output, _base):
+        if absent_live_roster:
+            h.tab_until(process, fd, output, b"MASC Keepers")
+            h.select_keeper_row(process, fd, output, b"alpha")
+            h.send_and_wait(process, fd, output, b"\r", INFO_TAB)
+            sweep(process, fd, output, "keeper-detail", INFO_TAB, WIDTHS)
+            h.resize_and_wait(process, fd, output, rows=region.TERMINAL_ROWS,
+                              columns=157, needle=INFO_TAB, controls=(h.FULL_REDRAW,))
+            h.send_and_wait(process, fd, output, CTRL_B, ROSTER_HEADING)
+            sweep(process, fd, output, "keeper-detail-roster", ROSTER_HEADING, ROSTER_WIDTHS)
+            expected = {**{("keeper-detail", width): ABSENT_DETAIL for width in WIDTHS},
+                        **{("keeper-detail-roster", width): ABSENT_DETAIL_BESIDE_ROSTER
+                           for width in ROSTER_WIDTHS}}
+            region.print_measured(measured)
+            region.check_all(measured, expected)
+            h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+            h.send_and_wait(process, fd, output, b"q", b"q: press again to quit")
+            return
         h.tab_until(process, fd, output, b"MASC Keepers")
         sweep(process, fd, output, "keepers", b"beta", WIDTHS)
 
@@ -391,5 +417,12 @@ if __name__ == "__main__":
         description="Region baseline: Board, Config, keeper detail and chat",
         interact=interaction(served),
         http_fixtures=served,
+    )
+    absent = fixtures(absent_live_roster=True)
+    h.run_terminal_scenario(
+        os.path.abspath(sys.argv[1]),
+        description="Region baseline: Info refuses equipment absent from live roster",
+        interact=interaction(absent, absent_live_roster=True),
+        http_fixtures=absent,
     )
     print("region baseline: PASS")

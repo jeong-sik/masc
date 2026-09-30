@@ -947,22 +947,33 @@ let ledger_times state =
    append-only evidence about intent and history, which [prune_completed] also
    leaves behind, and a note about a schedule the ledger no longer holds is
    still what someone wrote. *)
+(* When anything was last written about [request], if it is a terminal
+   schedule that finished a wake. Only such a schedule is forgotten, once
+   [now] is more than the retention past this time. *)
+let last_written_if_finished ~finished ~written_about (request : schedule_request) =
+  if not (Schedule_domain.is_terminal request.status)
+  then None
+  else
+    Option.map
+      (fun finished_at ->
+         Float.max
+           finished_at
+           (Option.value
+              (Hashtbl.find_opt written_about request.schedule_id)
+              ~default:finished_at))
+      (Hashtbl.find_opt finished request.schedule_id)
+;;
+
+let past_retention ~now ~retention_days last_written =
+  now -. last_written > retention_seconds ~retention_days
+;;
+
 let forget_finished_schedules ~now ~retention_days state =
   let finished, written_about = ledger_times state in
-  let forgettable (request : schedule_request) =
-    Schedule_domain.is_terminal request.status
-    &&
-    match Hashtbl.find_opt finished request.schedule_id with
+  let forgettable request =
+    match last_written_if_finished ~finished ~written_about request with
     | None -> false
-    | Some finished_at ->
-      let last_written =
-        Float.max
-          finished_at
-          (Option.value
-             (Hashtbl.find_opt written_about request.schedule_id)
-             ~default:finished_at)
-      in
-      now -. last_written > retention_seconds ~retention_days
+    | Some last_written -> past_retention ~now ~retention_days last_written
   in
   let forgotten_ids = Hashtbl.create 16 in
   let kept =
@@ -985,6 +996,36 @@ let forget_finished_schedules ~now ~retention_days state =
   , Hashtbl.length forgotten_ids )
 ;;
 
+(* The oldest [last_written_if_finished] among a state's schedules, kept for
+   the state it was taken from. [now -. t] never shrinks as [t] gets older,
+   so when the oldest is not past the retention no schedule is, and the pass
+   would forget nothing. A time that is not a number is past no retention,
+   so [Float.min_num] leaves it out. The store hands every tick of an
+   unchanged ledger the same decoded state, so those ticks take this once
+   instead of indexing every wake and note again. *)
+let oldest_last_written_of_last_state : (state * float option) option Atomic.t =
+  Atomic.make None
+;;
+
+let oldest_last_written state =
+  match Atomic.get oldest_last_written_of_last_state with
+  | Some (seen, oldest) when seen == state -> oldest
+  | Some _ | None ->
+    let finished, written_about = ledger_times state in
+    let oldest =
+      List.fold_left
+        (fun oldest request ->
+           match last_written_if_finished ~finished ~written_about request, oldest with
+           | None, _ -> oldest
+           | Some last_written, None -> Some last_written
+           | Some last_written, Some earlier -> Some (Float.min_num earlier last_written))
+        None
+        state.schedules
+    in
+    Atomic.set oldest_last_written_of_last_state (Some (state, oldest));
+    oldest
+;;
+
 let refresh_due config ~now ~retention_days =
   Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
     let* state = load_for_mutation config in
@@ -1002,9 +1043,18 @@ let refresh_due config ~now ~retention_days =
         ([], 0)
     in
     (* A clock behind the ledger's own last write cannot judge how long ago
-       anything finished, so such a tick only marks what is due. *)
+       anything finished, so such a tick only marks what is due. A tick that
+       marked nothing holds the loaded state's own schedules, so when the
+       oldest of them is inside the retention it has nothing to forget. *)
+    let nothing_to_forget () =
+      match oldest_last_written state with
+      | None -> true
+      | Some oldest -> not (past_retention ~now ~retention_days oldest)
+    in
     let schedules, wakes, forgotten =
       if now < state.updated_at
+      then schedules, state.wakes, 0
+      else if changed = 0 && nothing_to_forget ()
       then schedules, state.wakes, 0
       else forget_finished_schedules ~now ~retention_days { state with schedules }
     in

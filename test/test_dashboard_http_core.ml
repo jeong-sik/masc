@@ -4350,6 +4350,134 @@ let test_tools_routes_serve_prepared_http_representations () =
       "/mcp" 403)
 
 
+(* A dashboard read that answers straight from [Dashboard_cache] sends the bytes
+   the cache serialized with the entry. The prepared-payload hook fires each
+   time the cache turns a value into those bytes, so two reads of an unchanged
+   entry count one: a route that serialized the cached value on every request
+   counts none, and one that prepared the bytes per request counts two.
+   Left out: [/harness-health] and [/board/hearths], whose stores sit under
+   [Env_config.base_path] outside this fixture's workspace; [/telemetry],
+   whose one-second TTL could lapse between the two reads; the keeper
+   [/trajectory] and [/file-changes] reads, which need a keeper record and an
+   admin token; and git [blame]/[log]/[diff], which need a repository. *)
+let test_cached_dashboard_reads_send_the_kept_bytes () =
+  with_test_env @@ fun ~env ~sw ~config ->
+  let previous_state = Server_auth.For_testing.snapshot_server_state () in
+  Fun.protect ~finally:(fun () ->
+    Server_auth.For_testing.restore_server_state previous_state;
+    Dashboard_cache.invalidate_all ()) (fun () ->
+    let state = Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path in
+    let config = Lib.Mcp_server.workspace_config state in
+    ignore (Workspace.init config ~agent_name:None);
+    Server_auth.For_testing.restore_server_state (Some state);
+    Unix.mkdir (Filename.concat config.base_path "fixture-dir") 0o755;
+    let router =
+      Server_routes_http_routes_dashboard.add_routes ~sw
+        ~clock:(Eio.Stdenv.clock env) (Lib.Http_server_eio.Router.create ())
+      |> Server_routes_http_routes_workspace.add_routes
+    in
+    List.iter (fun target ->
+      Dashboard_cache.invalidate_all ();
+      let prepared = ref 0 in
+      let (first_status, first_headers, first_body),
+          (second_status, second_headers, second_body) =
+        Dashboard_cache.For_testing.with_payload_prepared_hook
+          (fun _ -> incr prepared)
+          (fun () ->
+             let first = tools_h1_wire_response ~router ~headers:[] target in
+             first, tools_h1_wire_response ~router ~headers:[] target)
+      in
+      check int (target ^ " answers") 200 first_status;
+      check int (target ^ " answers again") 200 second_status;
+      check int (target ^ " serializes its page once") 1 !prepared;
+      check string (target ^ " sends the kept bytes again") first_body second_body;
+      check (option string) (target ^ " keeps one validator")
+        (List.assoc_opt "etag" first_headers)
+        (List.assoc_opt "etag" second_headers))
+      [ "/api/v1/dashboard/planning"
+      ; "/api/v1/dashboard/goals"
+      ; "/api/v1/dashboard/goals/detail?goal_id=goal-absent"
+      ; "/api/v1/dashboard/briefing"
+      ; "/api/v1/dashboard/briefing/sections"
+      ; "/api/v1/dashboard/tool-quality?window_hours=1"
+      ; "/api/v1/dashboard/eval-feed"
+      ; "/api/v1/keepers/fixture-keeper/tool-stats"
+      ; "/api/v1/workspace/tree"
+      ; "/api/v1/workspace/children?path=fixture-dir"
+      ])
+
+(* A timeout envelope goes out as 504 whoever produced it: the cache (origin
+   [Timeout]) or a builder with a shorter ceiling of its own, whose envelope
+   the cache keeps as a computed page. Both envelopes here pass 8 KB, past the
+   body parse [json_lazy] falls back on. A page goes out as 200 with its kept
+   validator, and 304 when the client holds it. *)
+let test_cached_read_status_comes_from_the_payload_json () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config:_ ->
+  let payload origin json =
+    { Dashboard_cache.json
+    ; raw_json = Yojson.Safe.to_string json
+    ; etag = "W/\"fixture\""
+    ; origin
+    ; encoded = None
+    }
+  in
+  let read ?(headers = []) payload =
+    let router =
+      Lib.Http_server_eio.Router.create ()
+      |> Lib.Http_server_eio.Router.get "/cached" (fun request reqd ->
+        Server_cached_read_http.respond ~request reqd payload)
+    in
+    tools_h1_wire_response ~router ~headers "/cached"
+  in
+  let envelope =
+    `Assoc
+      [ "error", `String Dashboard_cache.timeout_error_code
+      ; "key", `String (String.make 9000 'k')
+      ]
+  in
+  List.iter
+    (fun (label, origin) ->
+       let cached = payload origin envelope in
+       check bool (label ^ " is past the body parse's reach") true
+         (String.length cached.raw_json > 8192);
+       let status, headers, _ = read cached in
+       check int (label ^ " is 504") 504 status;
+       check (option string) (label ^ " carries no validator") None
+         (List.assoc_opt "etag" headers))
+    [ "a cache timeout", Dashboard_cache.Timeout
+    ; "a builder's timeout kept as a page", Dashboard_cache.Computed
+    ];
+  let page = payload Dashboard_cache.Computed (`Assoc [ "posts", `List [] ]) in
+  let status, headers, body = read page in
+  check int "a page is 200" 200 status;
+  check (option string) "a page carries its validator" (Some page.etag)
+    (List.assoc_opt "etag" headers);
+  check string "a page sends its kept bytes" page.raw_json body;
+  let status, _, body = read ~headers:[ "if-none-match", page.etag ] page in
+  check int "a page the client holds is 304" 304 status;
+  check string "a 304 has no body" "" body
+
+(* [respond_cached_read] answers through the same responder: a builder that
+   returns a timeout envelope larger than 8 KB gets 504, which the body parse
+   behind [json_lazy] would have sent as 200. *)
+let test_respond_cached_read_sends_a_builder_timeout_as_504 () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config:_ ->
+  Fun.protect ~finally:Dashboard_cache.invalidate_all (fun () ->
+    Dashboard_cache.invalidate_all ();
+    let router =
+      Lib.Http_server_eio.Router.create ()
+      |> Lib.Http_server_eio.Router.get "/cached-read" (fun request reqd ->
+        Server_routes_http_common.respond_cached_read ~request ~reqd
+          ~cache_key:"test:cached-read-builder-timeout" ~ttl:60.0 (fun () ->
+            `Assoc
+              [ "error", `String Dashboard_cache.timeout_error_code
+              ; "key", `String (String.make 9000 'k')
+              ]))
+    in
+    let status, headers, _ = tools_h1_wire_response ~router ~headers:[] "/cached-read" in
+    check int "a builder's timeout is 504" 504 status;
+    check (option string) "it carries no validator" None (List.assoc_opt "etag" headers))
+
 let test_execution_routes_serve_prepared_http_representations () =
   with_execution_payload_env @@ fun ~env ~sw ~state ->
   let previous_state = Server_auth.For_testing.snapshot_server_state () in
@@ -5848,7 +5976,7 @@ let test_runtime_routing_creates_and_removes_a_lane () =
   check string "an exact lane the server does not run is refused"
     "unknown exact-output lane: verifer_exact (expected one of librarian_exact, \
      hitl_auto_judge, board_attention_exact, workspace_curator_exact, verifier_exact, \
-     browser_stagehand_exact)"
+     browser_stagehand_exact, candle_appraiser)"
     (refusal
        (post "append to a misspelled exact lane" 400
           {|{"lane":"exact/verifer_exact","action":"append","runtime_id":"test_provider.test_model"}|}));
@@ -7019,6 +7147,12 @@ let () =
             test_tools_routes_serve_prepared_http_representations;
           test_case "authenticated execution routes reuse prepared encodings" `Quick
             test_execution_routes_serve_prepared_http_representations;
+          test_case "cached dashboard reads send the kept bytes" `Quick
+            test_cached_dashboard_reads_send_the_kept_bytes;
+          test_case "a cached read's status comes from the payload's JSON" `Quick
+            test_cached_read_status_comes_from_the_payload_json;
+          test_case "respond_cached_read sends a builder's timeout as 504" `Quick
+            test_respond_cached_read_sends_a_builder_timeout_as_504;
           test_case "RFC-0138 telemetry_summary wire returns snapshot" `Quick
             test_telemetry_summary_snapshot_wire_returns_snapshot;
           test_case "RFC-0138 telemetry_summary wire falls back when empty" `Quick

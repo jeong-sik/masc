@@ -1279,6 +1279,7 @@ type exact_lane = Standalone_lane.t =
   | Workspace_curator
   | Verifier
   | Browser_stagehand
+  | Candle_appraiser
 
 (* One [runtime.exact_output_lanes.<lane>].<key> reference, named the way
    every reference-list builder in this file names one. *)
@@ -4776,7 +4777,7 @@ let set_first_run_runtime ?runtime_config_path ?(fallback_runtime_ids = []) ?(bi
           | Verifier, Ok () -> slots, cli_slots
           | Verifier, Error _ ->
             judgeable_declared_verifier_slots, judgeable_declared_verifier_cli_slots
-          | (Librarian | Hitl_auto_judge | Board_attention | Workspace_curator | Browser_stagehand), _ ->
+          | (Librarian | Hitl_auto_judge | Board_attention | Workspace_curator | Browser_stagehand | Candle_appraiser), _ ->
             slots, cli_slots
         in
         let next =
@@ -4793,12 +4794,12 @@ let set_first_run_runtime ?runtime_config_path ?(fallback_runtime_ids = []) ?(bi
                 in
                 Toml_line_editor.edit_table_multiline_array content ~path ~key:"cli_slots" ~values:lane_cli_slots)
             next
-            (* Shared-memory curation and the browser-specific Stagehand model
-               are explicitly configured, not enabled by provisioning a
-               general-purpose runtime. *)
+            (* Shared-memory curation, the browser-specific Stagehand model and
+               Candle appraisal are explicitly configured, not enabled by
+               provisioning a general-purpose runtime. *)
             (List.filter
                (function
-                 | Workspace_curator | Browser_stagehand -> false
+                 | Workspace_curator | Browser_stagehand | Candle_appraiser -> false
                  | Librarian | Hitl_auto_judge | Board_attention | Verifier -> true)
                Standalone_lane.all)
         in

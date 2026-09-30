@@ -196,10 +196,44 @@ let test_persisted_invalid_invite_reaches_diagnostic_projections () =
      | Ok _ -> fail "Play must not silently omit persisted malformed invites"))
     [ false; true ]
 
+let test_invalid_exact_identity_refuses_prefix_bearer () =
+  with_workspace @@ fun base_path _ ->
+  let token, _owner = auth_ok (Auth.create_token_without_expiry base_path
+      ~agent_name:"alpha" ~role:Masc_domain.Worker) in
+  let exact_name = "keeper-alpha-agent" in
+  let _, exact = auth_ok (Auth.create_token_without_expiry base_path
+      ~agent_name:exact_name ~role:Masc_domain.Worker) in
+  Auth.save_credential base_path { exact with expires_at = Some "invalid" };
+  check bool "present invalid exact credential blocks prefix alias fallback" true
+    (Result.is_error (Auth.verify_token base_path ~agent_name:exact_name ~token));
+  let retired = Auth.with_credential_transaction base_path (fun transaction ->
+    let present = auth_ok (Auth.credential_exists_in_transaction transaction exact_name) in
+    check bool "explicit revoke still finds malformed credential" true present;
+    Auth.delete_credential_in_transaction transaction exact_name) |> Result.join in
+  let () = auth_ok retired in
+  check bool "explicit revocation removes the malformed named file" false
+    (Sys.file_exists (Auth.credential_file base_path exact_name))
+
+let test_dangling_credential_directory_is_unreadable () =
+  with_workspace @@ fun base_path _ ->
+  let dir = Filename.dirname (Auth.credential_file base_path "unused") in
+  if Sys.file_exists dir then Unix.rmdir dir;
+  Unix.symlink (Filename.concat base_path "absent-target") dir;
+  (match Auth.list_credential_results base_path with
+   | [ Error (Auth.Unreadable_credential _) ] -> ()
+   | _ -> fail "a dangling agents directory is a storage failure, not an empty store");
+  (match Invite.list ~base_path ~now:(Time_compat.now ()) with
+   | Error (Auth.Unreadable_credential _) -> ()
+   | _ -> fail "Play must preserve credential directory failures")
+
 let () =
   run "credential expiry feature"
     [ "bearer, OAuth, seats and inventory",
-      [ test_case "persisted malformed invites reach listings and inventory" `Quick
+      [ test_case "malformed exact credential refuses prefix bearer and can be revoked" `Quick
+          test_invalid_exact_identity_refuses_prefix_bearer
+      ; test_case "dangling credential directory is unavailable" `Quick
+          test_dangling_credential_directory_is_unreadable
+      ; test_case "persisted malformed invites reach listings and inventory" `Quick
           test_persisted_invalid_invite_reaches_diagnostic_projections
       ; test_case "offsets and fractions share the whole-second boundary" `Quick
           test_representations_share_auth_and_prune_boundary

@@ -82,6 +82,7 @@ def short_home_keeps_destinations(executable):
 
     def interact(process, fd, _slave, output, _base):
         h.wait_for_output(process, fd, output, b"1 Goals to confirm", start=0, timeout=10)
+        h.wait_for_output(process, fd, output, b"Approvals and questions: 3", start=0, timeout=10)
         h.send_and_wait(process, fd, output, b"i", b"MASC Keepers")
         h.select_keeper_row(process, fd, output, b"beta")
         h.send_and_wait(process, fd, output, b"c", b"Esc:list")

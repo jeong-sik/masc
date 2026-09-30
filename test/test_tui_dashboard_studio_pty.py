@@ -57,7 +57,7 @@ def capture(process, fd, output, *, name, rows, columns, needle):
         "name": name, "rows": rows, "columns": columns,
         "provenance": "CI fixture PTY",
         "frame_b64": base64.b64encode(frame).decode(),
-        "screen": screen.decode(errors="replace"),
+        "screen": b"\n".join(h.screen_rows(frame).get(row, b"") for row in range(1, rows + 1)).decode(errors="replace"),
     }), flush=True)
     return screen
 

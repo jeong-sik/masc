@@ -19,6 +19,14 @@ def github_line(payload):
 
 
 class EvidenceRecords(unittest.TestCase):
+    def test_full_terminal_rows_preserve_blank_cells_and_positions(self):
+        record = {"rows": 4, "screen": "heading  \n\n detail \n"}
+        self.assertEqual(replay.expected_rows(record), ["heading", "", " detail", ""])
+        shifted = {"rows": 4, "screen": "\nheading\n detail\n"}
+        self.assertNotEqual(replay.expected_rows(record), replay.expected_rows(shifted))
+        with self.assertRaises(ValueError):
+            replay.expected_rows({"rows": 4, "screen": "heading\n detail"})
+
     def test_plain_and_github_frames_ignore_echoed_commands(self):
         record = {"name": "wide", "columns": 140, "rows": 42}
         frame = "STUDIO_CAPTURE=" + json.dumps(record)

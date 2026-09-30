@@ -759,5 +759,15 @@
     "review": "independent system_audit and agenda_finish source PASS at exact recorded head; no unresolved P0/P1/P2, initial public-interface P1 repaired",
     "validation": "syntax parsing of four implementations and two interfaces, diff check only",
     "execution": "not run under source-only policy"
+  },
+  "active_reader_help_stack": {
+    "pr": 40304,
+    "base_pr": 40301,
+    "base_head": "a720c60817917a6b1fbe32a7c20da7d8e1f6e8aa",
+    "head": "080c6e12fa9f75faab19075ad9d831da9bc7d372",
+    "scope": "reachable patch/voice assignment help, active reader first, shared help/footer bindings and saving-state controls",
+    "review": "system_audit and agenda_finish source PASS at exact recorded head; no unresolved P0/P1/P2; narrow pan/exit/omission-marker P2 repaired",
+    "validation": "syntax parsing of four implementations and key interface, diff check only",
+    "execution": "not run under source-only policy"
   }
 }

@@ -111,7 +111,7 @@ S05 구현 후속: [#40254](https://github.com/jeong-sik/masc/pull/40254)의 `c0
 | S04 | Runtime params | key/current/default 최소 폭, selected contract 도달 불가 | [#40135](https://github.com/jeong-sik/masc/pull/40135), 전체 필드 스크롤·실제 페이지 높이·refresh key identity; 집중 실행 검증 대기 |
 | S05 | Prompt registry/assets | key/source/file/vars metadata 원문 도달 불가 | [#40254](https://github.com/jeong-sik/masc/pull/40254), 전체 literal metadata/오류·공유 detail 페이지, 실행 대기 |
 | S06/S07 | Presets | detail logical row 잘림; retained refresh failure에서 list_height+1행 | [#40141](https://github.com/jeong-sik/masc/pull/40141), 전체 detail wrap·실제 페이지 높이·실패 행 배정·refetch 동안 읽기 유지; 집중 실행 검증 대기 |
-| S08/S09/S10 | Voice | input tail/caret·endpoint metadata 잘림; assignment cursor 미추종 | [#40117](https://github.com/jeong-sik/masc/pull/40117), wizard/assignment; 실행 검증 대기, endpoint 추가 필요 |
+| S08/S09/S10 | Voice | input tail/caret·endpoint metadata 잘림; assignment cursor 미추종 | [#40117](https://github.com/jeong-sik/masc/pull/40117), wizard/assignment; [#40282](https://github.com/jeong-sik/masc/pull/40282) 전체 metadata·고정 선택/입력 소스 승인, 실행 미검증 |
 | R03 | Workspace Activity | fixed clock/keeper/task 뒤 file 잘림 | [#40230](https://github.com/jeong-sik/masc/pull/40230), 반응형 목록·Context; 10개 fixture 조합/Repositories/Changes newline 통과, 추가 상태·설치 미검증 |
 | R04 | Code memo/history | subject/provenance 논리 행의 잘린 suffix 도달 불가 | [#40240](https://github.com/jeong-sik/masc/pull/40240), 메모 작성자·본문 wrap/물리 행 탐색; 실행 대기; [#40247](https://github.com/jeong-sik/masc/pull/40247), history 전체 필드/줄 owner/파일·scope·결과 note, 실행 대기 |
 | S11 | Tools | root path/rejection/composition 행·skill usage last-used 잘림 | [#40263](https://github.com/jeong-sik/masc/pull/40263) 전체 물리 행 wrap·composition 상세; 실행 검증 미확인 |
@@ -121,7 +121,7 @@ S05 구현 후속: [#40254](https://github.com/jeong-sik/masc/pull/40254)의 `c0
 
 Calls exact fields, Fusion list/detail/launch, Memory overview/list, Runtime detail, Resources, Approval detail, Themes, Models, lane run list/detail, Code file body는 조사한 소스 경로에서 새로운 확정 결함을 찾지 못했다. 상세 tab·input mode·empty/unread/failed/stale 상태와 NO_COLOR까지 실행한 전수 PASS를 뜻하지 않는다. [inventory](../evidence/tui-audit-2026-09-30/surface-inventory.json)의 미조사 상태는 남겨둔다.
 
-다음 단계는 (1) 남은 필드·표·행 예산·선택 문제 구현, (2) source-bound 수정 바이너리에서 전후 screenshot/PTY/로그 확보, (3) 각 현재 head의 PR checks와 targeted suite 원문 확인, (4) main 도착과 실제 설치/실행 바이너리 SHA 확인, (5) 전체 inventory completion audit다. 새 PR을 만들었다는 이유만으로 전체 목표를 완료 처리하지 않는다.
+다음 단계는 (1) 남은 필드·표·행 예산·선택 문제 구현, (2) source-bound 수정 바이너리에서 전후 screenshot/PTY/로그 확보, (3) 운영자 source-only 정책에 따라 일반 PR CI를 추가 실행하지 않고 Release/Tag에서 누적 통합·런타임 검증, (4) main 도착과 실제 설치/실행 바이너리 SHA 확인, (5) 전체 inventory completion audit다. 새 PR을 만들었다는 이유만으로 전체 목표를 완료 처리하지 않는다.
 
 ### Focused Code-reader follow-up and Activity capture
 
@@ -188,3 +188,11 @@ PR [#40301](https://github.com/jeong-sik/masc/pull/40301) stacks directly above 
 An initial P1 source review found missing public primitive declarations. The repaired `.mli` exports `tree_diff_gutter` and the optional `tree_diff_row_span` horizontal argument; the renderer interface also exports the limit read by key handling. Independent source verdicts are `verdict: PASS head: a720c60817917a6b1fbe32a7c20da7d8e1f6e8aa by: system_audit` and `verdict: PASS head: a720c60817917a6b1fbe32a7c20da7d8e1f6e8aa by: agenda_finish`, with no unresolved P0/P1/P2. These are separate from GitHub approval and executable evidence. Syntax parsing of four changed implementations and both interfaces, plus diff whitespace check passed. No build, CI, PTY, repaired-head screenshot, installed-binary or production verification was run.
 
 Release/Tag validation must read complete long added/removed/context tails, retain fixed coordinates with six-digit line numbers, cover CJK at pan boundaries, exercise rapid Shift key input, wheel/page/home/end axis ownership, clamp after narrow/wide resize and shorter diff data, check reopen reset, and repeat with/without color and Activity reservation. These are future scenarios, not executed results.
+
+## Active nested reader help
+
+PR [#40304](https://github.com/jeong-sik/masc/pull/40304) stacks directly above #40301 at `a720c60817917a6b1fbe32a7c20da7d8e1f6e8aa`. Head `080c6e12fa9f75faab19075ad9d831da9bc7d372` allows `?` to open help from Patch review and Keeper voice assignment. Voice assignment yields key ownership while help is open, so help closes back to the preserved pair and document offset. Patch help similarly preserves both axes.
+
+The help sheet's state-aware entry point puts Patch review, Keeper voices or Runtime detail controls first; the parent surface remains an unmarked reference section. Shared bindings drive both patch/detail footers and active help. Voice assignment names metadata paging/edges, and both its footer and help offer only help/back during an in-flight save, matching the dispatcher. Wizard text fields retain printable question marks.
+
+Syntax parsing of the four changed implementations and key-table interface plus diff whitespace check passed. An initial response review found a P2 narrow-footer regression from a long Shift key spelling. The shared binding retains compact `Shift+←/→` and `Esc:close`, including the fitter omission marker in the narrow-width reasoning; full Shift and q/Q spellings remain in help text. Independent final-head source verdicts are `verdict: PASS head: 080c6e12fa9f75faab19075ad9d831da9bc7d372 by: system_audit` and `verdict: PASS head: 080c6e12fa9f75faab19075ad9d831da9bc7d372 by: agenda_finish`, with no unresolved P0/P1/P2; these are separate from GitHub approval and executable evidence. No build, CI, PTY, screenshot, installed or production proof was obtained. Release/Tag verification must open help, scroll it, try action keys while help owns input, close it, and check unchanged underlying pair/axes; repeat for Runtime routes/row detail, color/NO_COLOR, narrow/wide panes, and voice save completion while help remains open.

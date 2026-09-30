@@ -298,19 +298,30 @@ let task_line ~cols (task : task) =
           (Terminal_text.single_line goal)
           Ansi.reset
   in
-  let prefix =
+  let prefix id =
     Printf.sprintf "%s%s%s %s[%s]%s " status_color
-      (task_status_icon task.status) Ansi.reset Ansi.dim
-      (Terminal_text.single_line task.id) Ansi.reset
+      (task_status_icon task.status) Ansi.reset Ansi.dim id Ansi.reset
   in
-  let suffix =
-    Printf.sprintf " %s(%s%s)%s %s" status_color status assignee Ansi.reset
+  let suffix owner =
+    Printf.sprintf " %s(%s%s)%s %s" status_color status owner Ansi.reset
       (priority_indicator task.priority)
   in
-  (* Reserve state, owner and priority before spending cells on the title.
-     Goal links are optional in the list; the task detail always shows them.
-     The surface adds one leading space and two selection-marker cells. *)
-  let available = max 0 (cols - 7) in
+  (* State and priority are never shortened. The remaining cells are shared
+     by the identifier, owner and title; each identifier gets at most a third
+     before the title takes the remainder. This bounds long owner names too.
+     Goal links appear only when the full title leaves room; detail keeps all
+     identifiers. The frame and leading space consume five cells. *)
+  let available = max 0 (cols - 5) in
+  let fixed_chrome = Message_layout.display_width (prefix "")
+    + Message_layout.display_width (suffix "") in
+  let share = max 0 (available - fixed_chrome) / 3 in
+  let id = Terminal_text.single_line task.id in
+  let id = fit_width id (min share (Message_layout.display_width id)) in
+  let assignee =
+    fit_width assignee (min share (Message_layout.display_width assignee))
+  in
+  let prefix = prefix id in
+  let suffix = suffix assignee in
   let fixed = Message_layout.display_width prefix + Message_layout.display_width suffix in
   let title = Terminal_text.single_line task.title in
   let goal_tag =

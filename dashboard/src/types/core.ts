@@ -1331,6 +1331,7 @@ export interface Keeper {
   /** Required by the live wire; absent local fixtures are explicitly unavailable. */
   portrait?: KeeperPortraitReading
   candle_balance_milli?: string | null
+  candle_account_revision?: string | null
   declaration_only?: boolean
   preparation_requirements?: Array<'runtime_check_required' | 'sandbox_check_required' | 'declaration_invalid'>
   name: string

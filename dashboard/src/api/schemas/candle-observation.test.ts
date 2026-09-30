@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { candleAmountText, readCandleBalance, readCandleObservation } from './candle-observation'
+import { candleAmountText, readCandleAccountRevision, readCandleBalance, readCandleObservation } from './candle-observation'
 
 const ready = { status: 'ready', issued_milli: '18446744073709551614000', burned_milli: '1000', circulating_milli: '18446744073709551613000' } as const
 
@@ -21,6 +21,11 @@ describe('Candle observation', () => {
       expect(readCandleBalance(value)).toBeUndefined()
     }
     expect(readCandleBalance(null)).toBeNull()
+    expect(readCandleAccountRevision('a'.repeat(64))).toBe('a'.repeat(64))
+    expect(readCandleAccountRevision(null)).toBeNull()
+    for (const value of [undefined, 'A'.repeat(64), 'a'.repeat(63), 1]) {
+      expect(readCandleAccountRevision(value)).toBeUndefined()
+    }
     expect(readCandleObservation({ status: 'off' })).toEqual({ status: 'off' })
     expect(readCandleObservation({ status: 'disabled', reason: 'ledger unreadable' })).toEqual({ status: 'disabled', reason: 'ledger unreadable' })
   })

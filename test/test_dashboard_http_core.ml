@@ -3240,11 +3240,14 @@ beanie = 200
   let item = match Keeper_portrait_item.of_id item_id with
     | Some item -> item | None -> fail "portrait catalog item missing" in
   let expected = Keeper_portrait_item.preview item starting in
+  let account_revision = Candle_observe.account_revision
+    (Candle_observe.read ~base_path) ~keeper in
   (* Preserve the real builder's name-before-portrait order: an unchanged
      authority must not defeat the prepared-byte path by reordering fields. *)
   let row = `Assoc ["name", `String keeper;
     "portrait", Portrait.reading_to_json (Portrait.Ready starting);
-    "candle_balance_milli", `String "1000"] in
+    "candle_balance_milli", `String "1000";
+    "candle_account_revision", Json_util.option_to_yojson (fun value -> `String value) account_revision] in
   let ready_candle = Candle_observation.Ready
     {issued_milli="1000";burned_milli="0";circulating_milli="1000"} in
   let candle_json = Candle_observation.to_json ready_candle in
@@ -3338,6 +3341,71 @@ beanie = 200
       | Candle_observation.Off | Candle_observation.Ready _ -> false)
     ~expected_balance:None;
   check string "warm HTTP and SSE preparation never repair the damaged ledger" corrupt (Fs_compat.load_file ledger)
+
+let test_candle_account_revision_tracks_free_purchase_and_price_edit () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let base_path = config.Workspace.base_path in
+  let keeper = "free-item-keeper" in
+  let policy_path = Config_dir_resolver.candle_toml_path_for_base_path ~base_path in
+  let write_policy price =
+    mkdir_p (Filename.dirname policy_path);
+    write_file policy_path (Printf.sprintf {|[payout]
+weight_max = 1
+deduction_rate = 0
+deduction_floor = 1000
+[payout.grades_milli]
+trivial = 1000
+small = 1000
+medium = 1000
+large = 1000
+epic = 1000
+[shop.prices_milli]
+crown = %d
+|} price)
+  in
+  write_policy 0;
+  Candle_status.install_appraiser_check (fun () -> Ok ());
+  let row () =
+    let snapshot = `Assoc ["keepers", `List [`Assoc ["name", `String keeper]]] in
+    let projected = Dashboard_projection_cache.with_current_keeper_observations ~config snapshot in
+    match Yojson.Safe.Util.(projected |> member "keepers" |> to_list) with
+    | [row] -> row
+    | _ -> fail "Item revision projection lost the Keeper"
+  in
+  let revision row = Yojson.Safe.Util.(row |> member "candle_account_revision" |> to_string) in
+  let first = row () in
+  let owner = match Keeper_id.Keeper_name.of_string keeper with
+    | Ok owner -> owner | Error reason -> fail reason in
+  let item = match Keeper_portrait_item.of_id "crown" with
+    | Some item -> item | None -> fail "crown absent from catalog" in
+  (match Candle_shop.purchase ~now:(fun () -> 1790640000.) ~base_path ~keeper:owner ~item with
+   | Ok _ -> ()
+   | Error error -> fail (Candle_shop.error_to_string error));
+  let purchased = row () in
+  check bool "free purchase changes Item account revision" false
+    (String.equal (revision first) (revision purchased));
+  check bool "free purchase preserves observed balance" true
+    (Yojson.Safe.Util.member "candle_balance_milli" first
+     = Yojson.Safe.Util.member "candle_balance_milli" purchased);
+  check bool "free purchase preserves observed outfit" true
+    (Yojson.Safe.Util.member "portrait" first
+     = Yojson.Safe.Util.member "portrait" purchased);
+  write_policy 1;
+  let repriced = row () in
+  check bool "price-only edit changes Item account revision" false
+    (String.equal (revision purchased) (revision repriced));
+  check bool "price-only edit preserves observed balance" true
+    (Yojson.Safe.Util.member "candle_balance_milli" purchased
+     = Yojson.Safe.Util.member "candle_balance_milli" repriced);
+  write_file policy_path "not = [\n";
+  let disabled = row () in
+  write_file policy_path "[shop]\n";
+  let differently_disabled = row () in
+  check bool "changed disabled reason changes Item account revision" false
+    (String.equal (revision disabled) (revision differently_disabled));
+  check bool "disabled readings withdraw the balance" true
+    (Yojson.Safe.Util.member "candle_balance_milli" disabled = `Null
+     && Yojson.Safe.Util.member "candle_balance_milli" differently_disabled = `Null)
 
 let test_execution_parameterized_payload_reuses_decorated_bytes () =
   with_execution_payload_env @@ fun ~env ~sw ~state ->
@@ -7270,6 +7338,8 @@ let () =
             test_execution_first_compute_reuses_prepared_bytes;
           test_case "warm execution and briefing follow equipped or unreadable authority" `Quick
             test_warm_dashboard_responses_follow_equipment_authority;
+          test_case "Item account revision follows free purchase and price edit" `Quick
+            test_candle_account_revision_tracks_free_purchase_and_price_edit;
           test_case "execution parameterized response reuses decorated bytes" `Quick
             test_execution_parameterized_payload_reuses_decorated_bytes;
           test_case "execution parameterized responses separate queries" `Quick

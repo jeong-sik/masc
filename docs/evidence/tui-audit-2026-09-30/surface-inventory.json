@@ -845,5 +845,96 @@
     "review": "system_audit and agenda_finish source PASS at exact head, no unresolved P0/P1/P2",
     "validation": "three OCaml implementations/two interfaces syntax, Python AST, diff check; imported14-case fixture not executed",
     "execution": "not run under source-only policy"
+  },
+  "code_history_integration_stack": {
+    "pr": 40320,
+    "base_pr": 40319,
+    "base_head": "d4a43183c8aa12cf492c4ddcbe28d9254c39a129",
+    "head": "25e7d7fe1255ffaa5a9e1907939e658ce0bca0cf",
+    "imported_pr": 40247,
+    "imported_head": "bad6edd4cf70d11efaf8c48fb2161f95a96959c5",
+    "imported_base": "04256f2b1d46fe9d49f884215b2d6c0025defa3a",
+    "scope": "complete literal commit/Keeper history, physical-row Enter owner, final short record selectable, active history help/footer while preserving Memo; Enter history branch requires file-pane focus",
+    "review": "system_audit and agenda_finish source PASS exact head; constructor P1 and hidden History Enter P2 repaired; no unresolved P0/P1/P2",
+    "validation": "OCaml syntax of four product implementations/two interfaces/existing keys test, Python AST and diff checks; imported14-case fixture unexecuted",
+    "execution": "not run under source-only policy"
+  },
+  "tools_integration_stack": {
+    "pr": 40325,
+    "base_pr": 40320,
+    "base_head": "25e7d7fe1255ffaa5a9e1907939e658ce0bca0cf",
+    "head": "2961d59a3813071d9098774d302e52af0e83a9a2",
+    "imported_pr": 40263,
+    "imported_head": "7dc1f9df828e41f32d2bed6d34be41f9f9942ff2",
+    "imported_base": "04256f2b1d46fe9d49f884215b2d6c0025defa3a",
+    "scope": "complete literal revisions/timestamps/roots/errors across5Tools panes; full usage composition batches/nodes/dependencies; actualphysicalrows sharednavigation",
+    "review": "system_audit and agenda_finish source PASS exact head, no introduced P0/P1/P2; inherited action-target visibility remains follow-up",
+    "validation": "OCaml implementation/interface syntax and Python AST PASS; base-to-head diffcheck reports test/dune:7725 extra blank EOF (P3 deferred); usage-only10case fixture unexecuted",
+    "execution": "not run under source-only policy",
+    "remaining": [
+      "J/K selection visibility source repair is40328; runtime actionproof pending",
+      "P3 test/dune:7725 extra blank EOF"
+    ]
+  },
+  "prompts_integration_stack": {
+    "pr": 40327,
+    "base_pr": 40325,
+    "base_head": "2961d59a3813071d9098774d302e52af0e83a9a2",
+    "head": "8a669cc634c30b33fba56a5420292c8360442a75",
+    "imported_pr": 40254,
+    "imported_head": "962a592aab93ffb3ddcdd6ec1a92a4f8a1bcca45",
+    "imported_base": "04256f2b1d46fe9d49f884215b2d6c0025defa3a",
+    "scope": "full registry/asset document and literal metadata/heldback/stale diagnostics, shared physical-row page/edges while preserving edits/read-only asset boundary",
+    "review": "system_audit and agenda_finish source PASS at exact head, no unresolved P0/P1/P2",
+    "validation": "three product ML/one MLI/existingkeys syntax, Python AST, fullbasediffcheck PASS; fixture10casesunexecuted",
+    "execution": "not run under source-only policy"
+  },
+  "tools_selection_stack": {
+    "pr": 40328,
+    "base_pr": 40327,
+    "base_head": "8a669cc634c30b33fba56a5420292c8360442a75",
+    "head": "2133cf01a38b9c10bf87f54051c4b3bce70be6b2",
+    "scope": "pinned Skill index/count/name on all5Tools tabs; complete actionreference document; shared typed selection for display and Enter/edit; fixedrow budget included",
+    "review": "system_audit and agenda_finish source PASS exact head, no unresolved P0/P1/P2",
+    "validation": "five implementation and one interface syntax parses, full base-to-head whitespace check PASS; no newtests or execution",
+    "execution": "not run under source-only policy",
+    "deferred_p3": [
+      "Types helper insertion has extra blank lines",
+      "Render_tools introductory comment has stale exported-definition count"
+    ]
+  },
+  "work_usage_integration_stack": {
+    "pr": 40331,
+    "base_pr": 40328,
+    "base_head": "2133cf01a38b9c10bf87f54051c4b3bce70be6b2",
+    "head": "f4ba0a43d3df621d2249e19fabdd8eaab7634354",
+    "imported_prs": [
+      40089,
+      40091
+    ],
+    "imported_heads": [
+      "6d669cec6cc5c2a8060a30869b5e1f8973db29bd",
+      "ddcc61139e1e1966db07a48eca303e4918128ce3"
+    ],
+    "imported_base": "ff7f49c40cd09e36acd18e76df0c0c512f6a7eab",
+    "scope": "bounded Task ID/owner/title preserving state and priority; typed compact status and middleIDfold fix30/40; Usagewrapbeforephysicalcount",
+    "review": "system_audit and agenda_finish source PASS exacthead, no unresolved P0/P1/P2; narrow fullstatusoverflow P2 repaired",
+    "validation": "OCaml syntax, two Python AST and fullbasediffcheck PASS; color-only importedfixtures unexecuted",
+    "execution": "not run under source-only policy"
+  },
+  "dashboard_goal_stack": {
+    "pr": 40333,
+    "base_pr": 40331,
+    "base_head": "f4ba0a43d3df621d2249e19fabdd8eaab7634354",
+    "head": "f808a2992eefbe519bd0ca103188656639f01480",
+    "reference_pr": 40095,
+    "reference_pr_state": "closed, unmerged",
+    "reference_head": "7baf1e4d594019644288704dcd7cc93f78fe5bae",
+    "reference_base": "179544426ada771d76ccdf262760b3f1f80bb766",
+    "scope": "bounded Goal title preview followed by complete actual/target/linked-task clauses wrapped at actualFramewidth; physicalrowsfeedDashboardbudget",
+    "review": "system_audit and agenda_finish source PASS exacthead, no unresolved P0/P1/P2",
+    "validation": "OCaml syntax/Python AST/fullbasediffcheck PASS; adapted5widthcolorfixture40rowsunexecuted",
+    "execution": "not run under source-only policy",
+    "remaining": "short-pane summary omissions persist visibly; wholeDashboard states/sections require releaseverification"
   }
 }

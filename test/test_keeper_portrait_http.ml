@@ -505,15 +505,23 @@ beanie = 200
     check bool "same choice is a no-op" false Yojson.Safe.Util.(same |> member "changed" |> to_bool);
     check string "same choice does not append" stable (ledger_bytes ());
     Keeper_tool_surface.For_testing.reset_keeper_list_cache ();
-    let roster = match !Keeper_dispatch_ref.dispatch ~config ~agent_name:"observer"
+    let public_roster () = match !Keeper_dispatch_ref.dispatch ~config ~agent_name:"observer"
       ~publication_recovery_provider:Masc_test_deps.non_runtime_publication_recovery_provider
       ~name:"masc_keeper_list" ~args:(`Assoc ["detailed", `Bool true]) () with
       | Some result -> Yojson.Safe.from_string (Tool_result.message result)
       | None -> fail "public Keeper roster not registered" in
-    let runtime_rows, errors, _, _ = require_ok Fun.id (Tui_decode.decode_keeper_runtime_list roster) in
+    let runtime_rows, errors, _, _, candle = require_ok Fun.id (Tui_decode.decode_keeper_runtime_list (public_roster ())) in
     check int "public roster has no metadata error rows" 0 (List.length errors);
+    (match require_ok Fun.id candle with
+     | Candle_observation.Ready supply ->
+       check string "actual paid amount is issued" "1000" supply.issued_milli;
+       check string "purchase burns only its price" "200" supply.burned_milli;
+       check string "equipping leaves circulating amount unchanged" "800" supply.circulating_milli
+     | Candle_observation.Off | Candle_observation.Disabled _ -> fail "paid ledger observation unavailable");
     let reading = match runtime_rows with
-      | [row] -> row.Tui_decode.kr_portrait
+      | [row] ->
+        check (option string) "remote wallet comes from the same ledger reading" (Some "800") row.Tui_decode.kr_candle_balance_milli;
+        row.Tui_decode.kr_portrait
       | _ -> fail "expected one healthy decoded Keeper runtime row" in
     check bool "public roster and real TUI decoder preserve equipped input" true
       (reading = Keeper_portrait_equipment.Ready expected);
@@ -532,6 +540,18 @@ beanie = 200
     (match dashboard_portrait () with
      | Keeper_portrait_equipment.Unavailable _ -> ()
      | Keeper_portrait_equipment.Ready _ -> fail "dashboard hid unreadable authority with cached gear");
+    let damaged_rows, errors, _, _, damaged_candle = require_ok Fun.id
+      (Tui_decode.decode_keeper_runtime_list (public_roster ())) in
+    check int "currency failure does not invent a Keeper metadata error" 0 (List.length errors);
+    (match require_ok Fun.id damaged_candle with
+     | Candle_observation.Disabled {reason} -> check bool "ledger error is observable" true (String.length reason > 0)
+     | Candle_observation.Off | Candle_observation.Ready _ -> fail "damaged ledger concealed its failure");
+    (match runtime_rows, damaged_rows with
+     | [before], [row] ->
+       check (option string) "damaged ledger withdraws prior balance" None row.Tui_decode.kr_candle_balance_milli;
+       check bool "Keeper lifecycle reading survives currency failure" true
+         (before.kr_phase = row.kr_phase && before.kr_health = row.kr_health && before.kr_keepalive_running = row.kr_keepalive_running)
+     | _ -> fail "currency failure hid the healthy Keeper");
     check string "portrait read does not truncate damaged ledger" corrupt (ledger_bytes ());
     (match Sys.getenv_opt "RUNNER_TEMP" with
      | None -> ()

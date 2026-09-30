@@ -9,6 +9,7 @@ import tomllib
 import test_tui_keyboard_input as h
 
 SOURCE_MODULES = (
+    "bin/masc_tui_home.ml", "bin/masc_tui_home.mli",
     "bin/masc_tui.ml",
     "bin/masc_tui_config.ml",
     "bin/masc_tui_types.ml",

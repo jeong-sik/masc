@@ -16,6 +16,7 @@ import test_tui_home_journey_pty as home
 import test_tui_keyboard_input as h
 
 SOURCE_MODULES = (
+    "bin/masc_tui_home.ml", "bin/masc_tui_home.mli",
     "bin/masc_tui.ml", "bin/masc_tui_types.ml", "bin/masc_tui_render.ml",
 )
 OPERATOR_PATH = "/api/v1/operator?view=summary&include_messages=0&include_keepers=0"

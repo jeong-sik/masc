@@ -1,4 +1,4 @@
-import { Either, Schema } from 'effect'
+import { isRecord } from '../../lib/type-guards'
 
 // Wire vocabulary mirrors Keeper_portrait_item; the parity test reads its
 // actual constructor-to-id mappings so adding equipment cannot silently drift.
@@ -10,25 +10,42 @@ export const EQUIPMENT_IDS = {
   base: ['no_dish', 'dish_gilt', 'dish_silver', 'dish_oak'],
 } as const
 
-export const KeeperEquipmentSchema = Schema.Struct({
-  face: Schema.Literal(...EQUIPMENT_IDS.face),
-  neck: Schema.Literal(...EQUIPMENT_IDS.neck),
-  head: Schema.Literal(...EQUIPMENT_IDS.head),
-  hand: Schema.Literal(...EQUIPMENT_IDS.hand),
-  base: Schema.Literal(...EQUIPMENT_IDS.base),
-})
-export const KeeperPortraitSchema = Schema.Union(
-  Schema.Struct({ state: Schema.Literal('ready'), equipment: KeeperEquipmentSchema }),
-  Schema.Struct({ state: Schema.Literal('unavailable'), reason: Schema.String.pipe(Schema.filter(value => value.trim().length > 0)) }),
-)
-export type KeeperEquipment = Schema.Schema.Type<typeof KeeperEquipmentSchema>
-export type KeeperPortraitReading = Schema.Schema.Type<typeof KeeperPortraitSchema>
+export type KeeperEquipment = {
+  readonly [Slot in keyof typeof EQUIPMENT_IDS]: typeof EQUIPMENT_IDS[Slot][number]
+}
+export type KeeperPortraitReading =
+  | { readonly state: 'ready'; readonly equipment: KeeperEquipment }
+  | { readonly state: 'unavailable'; readonly reason: string }
+
+function isKeeperEquipment(value: unknown): value is KeeperEquipment {
+  return isRecord(value) && Object.keys(value).length === Object.keys(EQUIPMENT_IDS).length
+    && Object.keys(EQUIPMENT_IDS).every(slot => Object.hasOwn(value, slot))
+    && EQUIPMENT_IDS.face.some(id => id === value.face)
+    && EQUIPMENT_IDS.neck.some(id => id === value.neck)
+    && EQUIPMENT_IDS.head.some(id => id === value.head)
+    && EQUIPMENT_IDS.hand.some(id => id === value.hand)
+    && EQUIPMENT_IDS.base.some(id => id === value.base)
+}
+
+/** Shared by execution observations and the lazy Gate wire decoder.
+ * A malformed portrait is false; it is never a producer-declared unavailable row. */
+export function isKeeperPortraitReading(value: unknown): value is KeeperPortraitReading {
+  if (!isRecord(value) || !Object.hasOwn(value, 'state') || Object.keys(value).length !== 2) return false
+  switch (value.state) {
+    case 'ready': return Object.hasOwn(value, 'equipment') && isKeeperEquipment(value.equipment)
+    case 'unavailable': return Object.hasOwn(value, 'reason')
+      && typeof value.reason === 'string' && value.reason.trim().length > 0
+    default: return false
+  }
+}
 
 export function readKeeperPortrait(value: unknown): KeeperPortraitReading {
-  const parsed = Schema.decodeUnknownEither(KeeperPortraitSchema, { onExcessProperty: 'error' })(value)
-  return Either.isRight(parsed)
-    ? parsed.right
-    : { state: 'unavailable', reason: 'Portrait observation missing or malformed' }
+  if (!isKeeperPortraitReading(value)) {
+    return Object.freeze({ state: 'unavailable', reason: 'Portrait observation missing or malformed' })
+  }
+  return value.state === 'ready'
+    ? Object.freeze({ state: 'ready', equipment: Object.freeze({ ...value.equipment }) })
+    : Object.freeze({ state: 'unavailable', reason: value.reason })
 }
 
 export function keeperEquipmentKey(equipment: KeeperEquipment): string {

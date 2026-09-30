@@ -1,0 +1,19 @@
+{
+  "workflow_run": 36675841756,
+  "job": 109760501265,
+  "head": "a065328066d9996f8658238e3077cad70c2c063c",
+  "scope": "inherited parent baseline, not a result for this candidate",
+  "raw_sha256": "89d804cccfe7c58c46c20581dbe91ed12f5be1721d3d0db9e2157fa5ee777d75",
+  "gzip_sha256": "65b665ab065b57a728c719a763e2ff1a31230b75656ade6b64c202b751546ea4",
+  "prior_step": {
+    "suites_passed": 9,
+    "cases_passed": 442,
+    "claim_source": "retained raw log lines 273-274"
+  },
+  "failed_step": "Verify production bundle contract",
+  "failed_assertion": "src/dashboard-bundle-preload.test.ts:152: initialModuleIds.some(isEffectModule) expected false, received true",
+  "bundle_cases": {
+    "failed": 1,
+    "passed": 2
+  }
+}

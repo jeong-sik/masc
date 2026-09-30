@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { candleAmountText, readCandleAccountRevision, readCandleBalance, readCandleObservation } from './candle-observation'
+import { candleAmountText, readCandleBalance, readCandleObservation, readCandleRosterObservation } from './candle-observation'
 
 const ready = { status: 'ready', issued_milli: '18446744073709551614000', burned_milli: '1000', circulating_milli: '18446744073709551613000' } as const
 
@@ -21,12 +21,46 @@ describe('Candle observation', () => {
       expect(readCandleBalance(value)).toBeUndefined()
     }
     expect(readCandleBalance(null)).toBeNull()
-    expect(readCandleAccountRevision('a'.repeat(64))).toBe('a'.repeat(64))
-    expect(readCandleAccountRevision(null)).toBeNull()
-    for (const value of [undefined, 'A'.repeat(64), 'a'.repeat(63), 1]) {
-      expect(readCandleAccountRevision(value)).toBeUndefined()
-    }
     expect(readCandleObservation({ status: 'off' })).toEqual({ status: 'off' })
     expect(readCandleObservation({ status: 'disabled', reason: 'ledger unreadable' })).toEqual({ status: 'disabled', reason: 'ledger unreadable' })
+  })
+
+  it('rejects excess envelope fields and noncanonical amount bytes in every observation', () => {
+    for (const value of [{ status: 'off', extra: true }, { status: 'disabled', reason: 'unreadable', extra: true },
+      { ...ready, extra: true }, { status: 'disabled', reason: ' \n ' },
+      { status: 'ready', issued_milli: '0', burned_milli: '0' }]) {
+      expect(readCandleObservation(value).status).toBe('unavailable')
+    }
+    for (const amount of ['0\n', '1\n', '1\r', '1\r\n', '1\u2028', '1\u2029', ' 1', '1 ', '１', '٠']) {
+      expect(readCandleBalance(amount)).toBeUndefined()
+      expect(readCandleObservation({ status: 'ready', issued_milli: amount,
+        burned_milli: '0', circulating_milli: amount }).status).toBe('unavailable')
+    }
+  })
+
+  it('keeps the envelope and all raw wallet rows in the same observation', () => {
+    expect(readCandleRosterObservation(ready, [
+      { name: 'alpha', candle_balance_milli: '9007199254740993', portrait: { state: 'unavailable' } },
+      { name: 'beta', candle_balance_milli: '0', status: 'active' },
+    ])).toEqual(ready)
+    for (const envelope of [{ status: 'off' }, { status: 'disabled', reason: 'ledger unreadable' }]) {
+      expect(readCandleRosterObservation(envelope, [{ name: 'alpha', candle_balance_milli: null }])).toEqual(envelope)
+      for (const row of [{ name: 'alpha' }, { candle_balance_milli: undefined }, { candle_balance_milli: '0' }]) {
+        expect(readCandleRosterObservation(envelope, [row]).status).toBe('unavailable')
+      }
+    }
+    for (const rows of [undefined, null, {}, Array(1), [null], [{}], [{ candle_balance_milli: null }],
+      [{ candle_balance_milli: '1' }, { candle_balance_milli: '01' }]]) {
+      expect(readCandleRosterObservation(ready, rows).status).toBe('unavailable')
+    }
+    expect(readCandleRosterObservation(ready, []).status).toBe('ready')
+  })
+
+  it('retains an immutable observation when the original wire record changes', () => {
+    const wire = { ...ready }
+    const reading = readCandleObservation(wire)
+    Object.assign(wire, { issued_milli: '0' })
+    expect(reading).toEqual(ready)
+    expect(Object.isFrozen(reading)).toBe(true)
   })
 })

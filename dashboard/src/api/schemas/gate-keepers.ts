@@ -1,6 +1,10 @@
-import { KeeperPortraitSchema } from './keeper-portrait'
+import { isKeeperPortraitReading } from './keeper-portrait'
 import { KEEPER_ACTIVATION_MODES } from '../../lib/keeper-activation-mode'
 import { Data, Effect, ParseResult, Schema } from 'effect'
+
+// Gate retains its typed schema drift channel while using the same strict
+// Portrait wire predicate as the synchronous execution projection.
+const KeeperPortraitSchema = Schema.declare(isKeeperPortraitReading)
 
 const KeeperMetaWireSchema = Schema.Struct({
   name: Schema.NonEmptyString,

@@ -7,17 +7,21 @@
 
 ## 여러 Lane을 함께 읽기
 
-Add-ons는 처음 열 때 Timeline을 보여준다. 숫자로 바로 이동하거나 `Tab`으로 다음 화면을 연다.
+Add-ons는 처음 열 때 설치 목록을 보여준다. 패키지의 설명으로 할 수 있는 일을 확인하고,
+`j/k`로 고른 뒤 Enter로 결과를 연다. 상세 화면에서는 숫자나 `Tab`으로 이동한다.
 
 | 키 | 화면 | 읽을 내용 |
 | --- | --- | --- |
-| `1` | Timeline | Lane은 가로 열, 관측 UTC 시각은 세로 행. 같은 시각의 사건을 나란히 비교 |
+| `1` | Results | 선택한 결과 본문·표시값을 먼저 읽고, 아래 Activity timeline에서 사건을 비교 |
 | `2` | Connections (`Links`) | 설정된 입력 → worker → named output 연결과 관측 범위 |
 | `3` | Installations (`Installs`) | TOML 선언, desired/applied revision, 적용 오류 |
-| `4` | Instances (`Workers`) | 실제 인스턴스의 phase·관측·행동·제거 |
-| `5` | Rows | 선택한 관측의 원문 필드와 근거 선택 |
+| `4` | Records | 선택한 관측의 원문 필드와 근거 선택 |
 
-Timeline에서 `j/k`는 관측 시각 순서로 사건을 선택한다. 같은 시각의 사건도 각각 선택할 수 있다.
+Results에서 `j/k`는 사건을 선택하고 본문을 바꾼다. `>`가 현재 결과를 가리킨다.
+패키지는 `interface.presentation`에 설명과 Lane별 표시 필드를 선언할 수 있다.
+텍스트 본문은 줄바꿈을 유지하며, 선언된 필드가 없으면 unavailable로 표시된다.
+입력의 complete와 분석 성공·전달·열람은 서로 다른 상태다. `D`는 원문 좌표와 근거를 펼친다.
+Activity timeline에서 같은 시각의 사건도 각각 선택할 수 있다.
 `←/→`는 이웃 Lane으로 이동한다. 선택 시각 이후의 첫 사건을 선택하고, 없으면 그 Lane의 마지막 사건을 선택한다.
 화면보다 Lane이나 사건이 많으면 선택 위치를 따라 표시 범위가 이동한다. `J/K`로 긴 상세 내용을 스크롤한다.
 `●`는 event, `◆`는 value, `↔`는 relation이다. 선택한 셀과 근거로 표시한 행은 별도 표시로 구분한다.
@@ -41,7 +45,7 @@ Connections의 화살표는 선언된 binding이다. 성공한 전달이나 인�
 기존 서버와 같은 validator로 검사한다. 특정 패키지 이름이나 행동 이름을 추측하지 않는다.
 필수 자유 입력이 있는 스키마는 고급 `:act` 경로를 사용한다. `D`는 상세 보기이며
 원문 스키마·revision·연결·근거를 펼친다. 기본 화면에도 오류와 불완전한 입력은 표시된다.
-`Tab`은 인스턴스 → 관측 행 → 설치 선언 순으로 선택 영역을 옮긴다.
+상세 화면의 `Tab`은 Results → Links → Installation → Records 순으로 옮긴다.
 
 ## 패키지와 설치 선언
 

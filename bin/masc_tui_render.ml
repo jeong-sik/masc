@@ -466,6 +466,7 @@ let dashboard_opening_notice_lines (state : state) =
   | None -> []
 
 let dashboard_usage_lines (state : state) =
+  let open Masc.Tui_decode_usage in
   let accounts =
     match state.overview_providers with
     | Providers_unread -> "quota scope reports not observed"
@@ -475,7 +476,7 @@ let dashboard_usage_lines (state : state) =
         let total = List.length reading.puws_accounts in
         let reported =
           List.fold_left
-            (fun count (account : Tui_decode.provider_usage_account) ->
+            (fun count (account : Masc.Tui_decode_usage.provider_usage_account) ->
               match account.pua_state with
               | Account_reported _ -> count + 1
               | Account_not_reported_since_start -> count)
@@ -13414,6 +13415,7 @@ let provider_history_lines (state : state) =
          | rows -> List.map chart rows)
 
 let usage_lines ~cols (state : state) =
+  let open Masc.Tui_decode_usage in
   let scopes =
     match Overview_providers.section
             ~providers:state.overview_providers ~runtimes:state.overview_quota
@@ -13443,7 +13445,7 @@ let usage_lines ~cols (state : state) =
            kuw_window_minutes freshness)
         :: (if kuw_rows = [] then [ "   No Keepers in the returned roster" ]
             else List.map
-              (fun (row : Tui_decode.keeper_usage_row) ->
+              (fun (row : Masc.Tui_decode_usage.keeper_usage_row) ->
                 let tokens =
                   Option.fold ~none:"unreported" ~some:string_of_int row.kur_tokens in
                 let cost =

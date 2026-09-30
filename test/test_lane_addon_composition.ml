@@ -710,6 +710,28 @@ sources=%s
     (Result.is_ok (Runtime.dispatch ~caller:owner ~config ~operation:Runtime.Inspect
       (`Assoc ["instance_id",`String saved]))))
 
+let test_configured_fusion_rechecks_owner_before_capture () = with_fixture (fun clock config root directory received _ ->
+  let owner = "initial-owner" in
+  let run_id = register_private_run root owner in
+  ignore (declare directory (manifest root) "private-source" (fusion_source run_id));
+  reconcile config directory;
+  let id = active config "private-source" |> text "instance_id" in
+  await clock (fun () -> Option.is_some (source received id));
+  let before = instance config id in
+  let sequence = member "observation_seq" before in
+  let prior = Hashtbl.find received id in
+  check string "configured capture is bound to retained private owner" owner
+    (before |> member "source_access" |> text "keeper");
+  Fusion_run_registry.register_running (Fusion_run_registry.global ()) ~run_id
+    ~keeper:"replacement-owner" ~preset:"default" ~roster:Fusion_types.preset_roster
+    ~topology:Fusion_types.Simple ~started_at:2.;
+  Runtime.notify_fusion_run ~run_id;
+  await clock (fun () -> text "kind" (member "phase" (instance config id)) = "failed");
+  check bool "owner replacement commits no foreign observation" true
+    (member "observation_seq" (instance config id) = sequence);
+  check bool "worker never receives the replacement owner's source" true
+    (Hashtbl.find received id = prior))
+
 let test_shared_consumer_refuses_new_private_producer () = with_fixture (fun clock config root directory received _ ->
   let package = manifest root in
   ignore (declare directory package "a-consumer" (edge "z-producer"));
@@ -742,6 +764,7 @@ let () = run "TOML cross-Lane composition" ["world inputs",[
   test_case "native Fusion report crosses packages and remains Keeper-readable" `Quick
     test_native_fusion_report_is_readable_after_detach;
   test_case "private visibility survives declared output graph" `Quick test_private_visibility_crosses_declared_output_graph;
+  test_case "configured Fusion capture rechecks its retained owner" `Quick test_configured_fusion_rechecks_owner_before_capture;
   test_case "shared consumer refuses replacement with private producer" `Quick test_shared_consumer_refuses_new_private_producer;
   test_case "native input history crosses worker and survives Detach" `Quick
     test_native_msx_history_crosses_worker_freeze_and_detach;

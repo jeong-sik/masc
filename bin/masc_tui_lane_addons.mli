@@ -1,9 +1,11 @@
 module Row = Masc.Lane_addon_types
 module Document = Masc_tui_lane_declaration
 module Action = Masc.Lane_addon_action
+type runtime_presence = Live_entry | Retained_binding | Presence_unknown
 type instance = {
   id : string; run_id : string; addon_id : string; title : string;
-  revision : string; phase : Row.phase; observation_seq : int; rows_count : int;
+  revision : string; phase : Row.phase; runtime_presence : runtime_presence;
+  observation_seq : int; rows_count : int;
   installation_id : string option; source_path : string option; binding : Yojson.Safe.t; outputs : Row.output_ports;
   skills_directory : string option; incarnation : string; action_schema : Yojson.Safe.t option; binding_schema : Yojson.Safe.t option; display : Masc.Lane_addon_presentation.t;
 }

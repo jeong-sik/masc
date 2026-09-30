@@ -648,17 +648,22 @@ let snapshot m ~access ?instance_id () =
       | Ok Detaching when (match text fields "instance_id" with
           | Ok id -> Hashtbl.mem m.recovering id | Error _ -> false) -> Detaching
       | _ -> Failed "previous process; explicit detach can verify container cleanup" in
-    Ok (`Assoc (("phase", phase_to_json phase)
+    Ok (`Assoc (("runtime_presence", `String "retained")
+      :: ("phase", phase_to_json phase)
       :: ("configuration", Option.fold ~none:`Null ~some:configuration_json owner)
-      :: (fields |> List.remove_assoc "phase" |> List.remove_assoc "configuration")))
+      :: (fields |> List.remove_assoc "runtime_presence"
+          |> List.remove_assoc "phase" |> List.remove_assoc "configuration")))
     | _ -> Error "invalid retained instance" in
   let* past = List.fold_right (fun value acc ->
     let* values = acc in let* value = retained value in Ok (value :: values)) past (Ok []) in
   let output = { rows = List.concat_map (fun e -> e.output.rows) live;
     coverage = List.concat_map (fun e -> status_coverage e :: e.output.coverage) live } in
+  let live_json entry = match entry_json entry with
+    | `Assoc fields -> `Assoc (("runtime_presence", `String "live") :: fields)
+    | _ -> assert false in
   match output_to_json output with
   | `Assoc fields -> Ok (`Assoc (("configuration", visible_configuration m ~access)
-      :: ("instances", `List (List.map entry_json live @ past)) :: fields))
+      :: ("instances", `List (List.map live_json live @ past)) :: fields))
   | _ -> assert false
 let slice m ~access args =
   let optional_text key = match List.assoc_opt key args with
@@ -1400,8 +1405,11 @@ let reconcile_configuration ~config ~directory = Eio_context.run_on_owner_domain
                  | Ok () ->
                      let owner = Some {id=d.id; source_path=d.source_path; revision=d.revision} in
                      let attached = let* visibility = desired_visibility [] d in
+                       let source_access = match visibility with
+                         | Keeper_only keeper -> Lane_addon_sources.Keeper keeper
+                         | Shared | Operator_only -> Lane_addon_sources.Operator_configuration in
                        attach_entry ~sw m ~run_id:d.run_id ~package:d.package ~binding:d.binding ~configuration:owner
-                         ~source_access:Lane_addon_sources.Operator_configuration ~visibility in
+                         ~source_access ~visibility in
                      match attached with
                      | Ok _ -> () | Error message -> add_issue ~id:d.id d.source_path message)
            | _ -> add_issue ~id:d.id d.source_path "multiple workers claim this configuration identity") snapshot.declarations

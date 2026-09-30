@@ -6,9 +6,12 @@ contain the terminal output produced by the binary after real keyboard input.
 from __future__ import annotations
 
 import argparse
+import base64
+import hashlib
 import json
 import os
 from urllib.parse import parse_qs, urlsplit
+import re
 from pathlib import Path
 
 import test_tui_keyboard_input as terminal
@@ -21,6 +24,7 @@ import test_tui_keyboard_input as terminal
 # ("go Lane Add-ons") masc_tui_types.ml's.
 SOURCE_MODULES = (
     "bin/masc_tui.ml",
+    "bin/masc_tui_keys.ml",
     "lib/tui_terminal_text.ml",
     "lib/tui_terminal_text.mli",
     "bin/masc_tui_render.ml",
@@ -44,7 +48,7 @@ def snapshot() -> dict:
             "fields": {"fixture": "concurrent-lanes"}, "evidence": [],
             "related_ids": [f"{owner}/1/event-1", "outside-current-slice"] if index == 3 else []})
     instance = {"instance_id": owner, "run_id": "shared-world", "addon_id": "scene-fixture",
-        "title": "World observer", "revision": "1", "phase": {"kind": "attached"},
+        "title": "World observer", "revision": "1", "runtime_presence": "live", "phase": {"kind": "attached"},
         "observation_seq": 1, "rows_count": len(rows), "incarnation": owner,
         "configuration": None, "action_schema": None,
         "binding": {"sources": [{"source_id": "frames", "kind": "lane_output",
@@ -118,7 +122,7 @@ def main(executable: str, captures: Path | None) -> None:
         help_output = key(b"?", b"Lane Add-ons keys")
         help_screen = screen(help_output, b"Lane Add-ons keys")
         for needle in (b"Esc:close", b"j/k select", b"Enter open", b"1 Results",
-                       b"4 Records", b"E edit", b"e export marked rows", b":act"):
+                       b"4 Records", b"E edit", b"e export marked rows", b"A command"):
             if needle not in help_screen:
                 raise AssertionError(f"Lane help omitted {needle!r}")
         key(b"\x1b", b"Lane Add-ons \xc2\xb7 0 declared \xc2\xb7 1 active \xc2\xb7 1 failed workers")
@@ -289,7 +293,13 @@ def run_grouped_history(executable: str, captures: Path | None) -> None:
     captured["instances"] = [old_runs[0], active, *old_runs[1:]]
     captured["configuration"]["declarations"] = [{"id": "report", "source_path": active["configuration"]["source_path"],
         "desired_revision": "1", "applied_revision": "1", "instance_id": active["instance_id"]}]
-    fixtures["/api/v1/lane-addons"] = (200, captured)
+    inventory_reads: list[str] = []
+    def inventory(path: str):
+        inventory_reads.append(path)
+        response = json.loads(json.dumps(captured))
+        response["rows"][0]["title"] = f"Fresh DOM inventory {len(inventory_reads)}"
+        return 200, response
+    fixtures["/api/v1/lane-addons"] = terminal.PathHttpResponse(inventory)
     slice_reads: list[str] = []
 
     def retained_slice(path: str):
@@ -308,7 +318,8 @@ def run_grouped_history(executable: str, captures: Path | None) -> None:
         screen = terminal.screen_text(terminal.frame_containing(opened, b"Retained history"))
         if b"> Current reporter" not in screen or b"Repeated counters" in screen:
             raise AssertionError(f"old workers crowded current installations: {screen!r}")
-        terminal.send_and_wait(process, master, output, b"\r", b"Current reporter")
+        first_detail_marker = f"Fresh DOM inventory {len(inventory_reads) + 1}".encode()
+        terminal.send_and_wait(process, master, output, b"\r", first_detail_marker)
         terminal.send_and_wait(process, master, output, b"\x1b", b"h:open")
         history = terminal.send_and_wait(process, master, output, b"h", b"Instance retained-0")
         history_screen = terminal.screen_text(terminal.frame_containing(history, b"Instance retained-0"))
@@ -326,6 +337,15 @@ def run_grouped_history(executable: str, captures: Path | None) -> None:
         returned = terminal.send_and_wait(process, master, output, b"h", b"> Current reporter")
         if b"Repeated counters" in terminal.screen_text(returned):
             raise AssertionError("returning to installations expanded retained workers")
+        before_reopen = len(inventory_reads)
+        live_marker = f"Fresh DOM inventory {before_reopen + 1}".encode()
+        live = terminal.send_and_wait(process, master, output, b"\r", live_marker)
+        if len(inventory_reads) <= before_reopen:
+            raise AssertionError("live detail reused the retained output instead of fetching current inventory")
+        live_screen = terminal.screen_text(terminal.frame_containing(live, live_marker))
+        if b"Preserved old result" in live_screen or b"No observations yet" in live_screen:
+            raise AssertionError(f"live detail retained another run's slice: {live_screen!r}")
+        terminal.send_and_wait(process, master, output, b"\x1b", b"> Current reporter")
         terminal.send_and_wait(process, master, output, b"q", b"MASC Dashboard")
         os.write(master, b"q")
 
@@ -336,6 +356,67 @@ def run_grouped_history(executable: str, captures: Path | None) -> None:
     if len(slice_reads) != 1:
         raise AssertionError(f"retained detail did not perform exactly one fresh scoped GET: {slice_reads!r}")
     print("Lane current list / grouped retained instances / fresh scoped GET / exact raw target / return: PASS")
+
+
+def run_navigation_consistency(executable: str) -> None:
+    fixtures = terminal.overview_event_http_fixtures()
+    fixtures["/api/v1/lane-addons"] = (200, snapshot())
+
+    def interact(process, master, _slave, output, _base):
+        def key(value, needle):
+            return terminal.send_and_wait(process, master, output, value, needle)
+
+        def capture(name, frame):
+            drawn = bytes(output)
+            frame = drawn[drawn.rfind(terminal.FULL_REDRAW):]
+            print("STUDIO_CAPTURE=" + json.dumps({
+                "name": name, "rows": 30, "columns": 100,
+                "provenance": "CI fixture PTY",
+                "frame_b64": base64.b64encode(frame).decode(),
+                "screen": b"\n".join(terminal.screen_rows(frame).get(row, b"") for row in range(1, 31)).decode(errors="replace")}), flush=True)
+
+        terminal.wait_for_output(process, master, output, b"Health: ", start=0, timeout=10)
+        for name in (b"Dashboard", b"Work", b"Keepers", b"Usage", b"Board", b"Workspace", b"System"):
+            title = b"MASC " + name
+            key(b":go " + name + b"\r", title)
+            palette = key(b":", b"From " + name)
+            capture("palette-from-" + name.decode().lower(), palette)
+            key(b"\x1b", title)
+        key(b":go Dashboard\r", b"MASC Dashboard")
+        initial = key(b":go ", re.compile(rb":(?:\x1b\[[0-9;]*m)* go "))
+        counts = re.findall(rb"(\d+) commands .*? (\d+)/(\d+)", terminal.screen_text(initial))
+        if not counts:
+            raise AssertionError("palette did not expose selection position")
+        total = int(counts[-1][2])
+        if total < 2:
+            raise AssertionError("fixture has no second navigation candidate")
+        key(b"\x1b[B" * (total + 3), f"{total}/{total}".encode())
+        key(b"\x1b[A", f"{total - 1}/{total}".encode())
+        key(b"\x1b[H", f"1/{total}".encode())
+        key(b"\x1b[F", f"{total}/{total}".encode())
+        key(b"\x15", b"type to filter")
+        key(b"zzzz_no_destination", b"No matching command")
+        key(b"\r", b"MASC Dashboard")
+        preview = key(b":def explicit_symbol", b"definition explicit_symbol")
+        capture("palette-code-question", preview)
+        if b"Ask about this symbol" not in terminal.screen_text(preview):
+            raise AssertionError("typed Code action has no execution preview")
+        key(b"\r", b"hover, def and refs ask about the file open")
+        key(b":go lane add-ons\r", b"World observer")
+        capture("palette-from-addons", key(b":", b"From Lane Add-ons"))
+        key(b"\x1b", b"World observer")
+        draft = key(b"A::act", b":::act")
+        if b"MASC Command palette" in terminal.screen_text(draft):
+            raise AssertionError("advanced text input intercepted a literal colon")
+        key(b"\x1b", b"World observer")
+        key(b":go Board\r", b"MASC Board")
+        key(b":go Dashboard\r", b"MASC Dashboard")
+        os.write(master, b"q")
+
+    terminal.run_terminal_scenario(executable,
+        description="palette navigation preserves origin, clamps selection and escapes Add-ons",
+        interact=interact, http_fixtures=fixtures, workspace="Navigation fixture")
+    print("TUI navigation consistency: PASS")
 
 
 def run_declared_report(executable: str, captures: Path | None) -> None:
@@ -428,6 +509,9 @@ if __name__ == "__main__":
     args = parser.parse_args()
     main(os.path.abspath(args.executable), args.capture_dir)
     run_installation_detail(os.path.abspath(args.executable))
+    with open(args.executable, "rb") as binary:
+        print("STUDIO_BINARY_SHA256=" + hashlib.sha256(binary.read()).hexdigest(), flush=True)
+    run_navigation_consistency(os.path.abspath(args.executable))
     run_declared_report(os.path.abspath(args.executable), args.capture_dir)
     run_grouped_history(os.path.abspath(args.executable), args.capture_dir)
     run_declared_layers(os.path.abspath(args.executable), args.capture_dir)

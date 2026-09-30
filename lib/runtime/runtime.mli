@@ -6,9 +6,8 @@
     선언 스키마는 {!Runtime_schema}, materialized 값은 {!Runtime_instance} 소유. *)
 
 open Runtime_config_error
-open Runtime_instance
-
 open Runtime_schema
+open Runtime_instance
 
 val exact_slot_list_key_of_api_format : api_format -> string option
 (** The declaration key used when an exact-output lane appends a binding with

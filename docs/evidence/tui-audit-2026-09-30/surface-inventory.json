@@ -961,5 +961,18 @@
       }
     ],
     "scope": "original source inventory has12global branches; this later source adds Play card before account login, bringing observed branches to13"
+  },
+  "goal_detail_integration_stack": {
+    "pr": 40341,
+    "base_pr": 40336,
+    "base_head": "b44ef2cea9afd6890a22d7663db3991dcd67ce38",
+    "head": "2e1648a7d7617c5aa3f3253a1168ed8b470fd144",
+    "imported_pr": 40142,
+    "imported_head": "ed89a64045558e31a7f85f587410870b46d289df",
+    "imported_base": "ff7f49c40cd09e36acd18e76df0c0c512f6a7eab",
+    "scope": "full physical Goal metadata/all linked Tasks/proof/timeline; pinned actions; visible Goal guard; exact confirmation retained across Home/End; Task cancel preserved",
+    "review": "system_audit and agenda_finish source PASS final head, no unresolved P0/P1/P2; P3 unused timestamp helper deferred",
+    "validation": "OCaml syntax/Python AST/full base diff PASS; 5width color detail fixture and overflowing confirmation edge extension unexecuted",
+    "execution": "not run under source-only policy"
   }
 }

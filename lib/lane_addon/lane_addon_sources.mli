@@ -62,6 +62,9 @@ type access = Operator_configuration | Keeper of string | Unauthenticated
 val access_to_json : access -> Yojson.Safe.t
 val access_of_json : Yojson.Safe.t -> (access, string) result
 val has_native_fusion : Yojson.Safe.t -> (bool, string) result
+val fusion_owner : access:access -> run_id:string -> (string, string) result
+(** Read the authoritative registry owner only after the same Fusion access
+    check used for acquisition. Unknown and foreign runs share one denial. *)
 val authorize : access:access -> Yojson.Safe.t -> (unit, string) result
 (** Reject unowned native Fusion bindings before attaching. Acquisition repeats
     the check before capturing any evidence. *)

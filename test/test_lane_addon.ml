@@ -535,7 +535,50 @@ let test_fusion_status_hint_wakes_only_its_bound_run () =
     check Alcotest.int "durable ownership still hides private rows after restart" 0
       (member "rows" foreign_slice |> Yojson.Safe.Util.to_list |> List.length))
 
+let test_private_fusion_reads_survive_retirement () = with_fixture (fun env _sw config dir _state ->
+  let owner = "private-owner" and foreign = "private-reader" in
+  let run_id = "private-fusion-" ^ Store.digest dir in
+  Fusion_run_registry.register_running (Fusion_run_registry.global ()) ~run_id
+    ~keeper:owner ~preset:"default" ~roster:Fusion_types.preset_roster
+    ~topology:Fusion_types.Simple ~started_at:1.;
+  let call caller operation fields = Runtime.dispatch ~caller ~config ~operation (`Assoc fields) in
+  let id = unwrap (call owner Runtime.Attach ["manifest_path",`String (manifest dir "good");
+    "run_id",`String "private-world";"binding",`Assoc ["sources",`List [`Assoc [
+      "source_id",`String "fusion";"kind",`String "fusion_run";"run_id",`String run_id]]]])
+    |> text "instance_id" in
+  let clock = Eio.Stdenv.clock env in
+  await clock (fun () -> int "observation_seq" (instance config id) = 1);
+  let view = unwrap (call owner Runtime.Inspect ["instance_id",`String id]) in
+  let row_id = member "rows" view |> Yojson.Safe.Util.to_list |> List.hd |> text "id" in
+  let denied operation fields = match call foreign operation fields with
+    | Error detail -> check string "uniform exact-instance denial" "Lane instance is unavailable to this caller" detail
+    | Ok _ -> fail "foreign Keeper accessed private instance" in
+  List.iter (fun operation -> denied operation ["instance_id",`String id])
+    [Runtime.Inspect;Runtime.Observe;Runtime.Detach;Runtime.Act;Runtime.Action_status];
+  denied Runtime.Evidence ["instance_id",`String id;"row_ids",`List [`String row_id]];
+  let public = unwrap (call foreign Runtime.Inspect []) in
+  check int "unfiltered inspection exposes no private instances" 0
+    (member "instances" public |> Yojson.Safe.Util.to_list |> List.length);
+  check int "unfiltered inspection exposes no private rows" 0
+    (member "rows" public |> Yojson.Safe.Util.to_list |> List.length);
+  check int "foreign range query excludes private observations" 0
+    (unwrap (call foreign Runtime.Slice []) |> member "rows" |> Yojson.Safe.Util.to_list |> List.length);
+  check bool "claimed owner with unauthenticated HTTP access is refused" true
+    (Result.is_error (Lane_addon_runtime.dispatch ~caller:owner ~access:Lane_addon_sources.Unauthenticated
+      ~config ~operation:Runtime.Inspect (`Assoc ["instance_id",`String id])));
+  ignore (unwrap (call owner Runtime.Evidence ["instance_id",`String id;"row_ids",`List [`String row_id]]));
+  ignore (unwrap (call owner Runtime.Detach ["instance_id",`String id]));
+  await_phase clock config id "detached";
+  Runtime.For_testing.reset ();
+  check int "owner can read durable rows after host manager restart" 1
+    (unwrap (call owner Runtime.Slice []) |> member "rows" |> Yojson.Safe.Util.to_list |> List.length);
+  denied Runtime.Inspect ["instance_id",`String id];
+  denied Runtime.Evidence ["instance_id",`String id;"row_ids",`List [`String row_id]];
+  check int "historical inspection excludes private bindings" 0
+    (unwrap (call foreign Runtime.Inspect []) |> member "instances" |> Yojson.Safe.Util.to_list |> List.length))
+
 let () = run "Lane Add-on runtime" ["optional extension", [
+  test_case "Fusion read ownership survives retirement and restart" `Quick test_private_fusion_reads_survive_retirement;
   test_case "Fusion state hint wakes only the exact run binding" `Quick
     test_fusion_status_hint_wakes_only_its_bound_run;
   test_case "a human MSX press wakes machine watchers exactly once" `Quick

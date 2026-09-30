@@ -302,7 +302,7 @@ def run_full_width_comments(executable: str) -> None:
     post["comment_count"] = len(comments)
     fixtures["/api/v1/board?sort_by=hot"] = (200, {"posts": [post]})
     fixtures["/api/v1/board/post-width?format=flat"] = (
-        200, {"post": post, "comments": comments})
+        200, h.board_detail_page(post, comments))
 
     def interact(process, fd, _slave, output, _base):
         h.wait_for_output(process, fd, output, b"Health: ", start=0, timeout=10)

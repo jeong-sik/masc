@@ -206,8 +206,10 @@ print(value)
             "base": self.base, "members": fields["members"],
             "roll_pr": 99, "roll_head": self.roll, "roll_tree": roll_tree,
             "checkout_commit": checkout, "run_id": 900, "run_attempt": 1,
-            "required_suites": ["suite-a"], "executed_suites": ["suite-a"],
-            "missing_suites": [], "result": "success"}
+            "required_suites": ["test/suite_a.py"],
+            "executed_suites": ["test/suite_a.py"],
+            "missing_suites": [], "unexpected_suites": [],
+            "runner_exit": 0, "result": "success"}
         for pr in [*self.heads, 99]:
             comments = [{"id": pr * 10, "body": self.line,
                          "author_association": "COLLABORATOR", "user": {"login": "publisher"},
@@ -360,10 +362,14 @@ print(value)
             ("run_id", 901),
             ("run_attempt", 2),
             ("result", "failure"),
-            ("missing_suites", ["suite-a"]),
+            ("runner_exit", 1),
+            ("missing_suites", ["test/suite_a.py"]),
+            ("unexpected_suites", ["test/extra.py"]),
             ("required_suites", []),
             ("executed_suites", []),
-            ("executed_suites", ["suite-b"])]:
+            ("executed_suites", ["test/suite_b.py"]),
+            ("required_suites", ["test/suite_b.py", "test/suite_a.py"]),
+            ("executed_suites", ["../test/suite_a.py"])]:
             with self.subTest(field=field, value=value):
                 self.data["__roll_receipt"][field] = value
                 self.refusal("batch_roll_run_receipt_mismatch", E.ROLL)

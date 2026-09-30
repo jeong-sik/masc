@@ -415,7 +415,9 @@ def roll_run_receipt(f, gh, repo, batch, roll_pr, roll_tree, snapshot, run_attem
             or value.get("base") != snapshot["base"]
             or value.get("members") != snapshot["members"]
             or value.get("result") != "success"
+            or value.get("runner_exit") != 0
             or value.get("missing_suites") != []
+            or value.get("unexpected_suites") != []
             or type(value.get("run_attempt")) is not int
             or value["run_attempt"] != run_attempt
             or value.get("roll_pr") != roll_pr
@@ -425,9 +427,11 @@ def roll_run_receipt(f, gh, repo, batch, roll_pr, roll_tree, snapshot, run_attem
             or not isinstance(suites, list) or not suites
             or not isinstance(executed, list)
             or any(not isinstance(s, str) or not s for s in suites + executed)
-            or len(set(suites)) != len(suites)
-            or len(set(executed)) != len(executed)
-            or set(suites) != set(executed)):
+            or any(s.startswith("/") or ".." in s.split("/")
+                   or not s.endswith((".ml", ".py")) for s in suites + executed)
+            or suites != sorted(set(suites))
+            or executed != sorted(set(executed))
+            or suites != executed):
         raise Refusal(Reason.ROLL_RUN_RECEIPT_MISMATCH, ExitCode.ROLL)
     return value
 

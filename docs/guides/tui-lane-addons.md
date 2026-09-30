@@ -60,8 +60,8 @@ Links의 화살표는 선언된 binding이다. 성공한 전달이나 인과관�
 
 패키지의 `lane.toml`은 image·command·world outputs·Skills를 정의한다.
 CI에서 준비한 이미지를 MASC의 Docker에 로드하고 패키지 파일을 서버가 읽을 위치에 둔다.
-설치 `.toml`은 서버가 읽는 lane-addons 디렉터리 바로 아래에 둔다. 기본 위치는 `<base-path>/.masc/lane-addons/`이며,
-선언 화면의 Source가 가리키는 실제 경로를 따른다.
+설치 `.toml`은 서버가 읽는 lane-addons 설정 디렉터리 바로 아래에 둔다. 기본 위치는 `<base-path>/.masc/config/lane-addons/`이며(`MASC_CONFIG_DIR` 설정 시 `<resolved config root>/lane-addons/`),
+화면의 `TOML installations`나 선언 항목의 Source가 가리키는 실제 경로를 따른다.
 `n` → 직접 하위 파일명 `dos-stats.toml` → Enter로 편집기를 열고 아래 선언을 작성한다.
 먼저 `addons/dos-world/install.toml`로 `dos-demo` 설치를 준비하고, manifest 경로를 실제 경로로 바꾼다.
 

@@ -604,7 +604,7 @@ def code_lane_interaction(
         process, master_fd, output, b"d", LEXED_LET
     )
     diff_plain = CSI_RE.sub(b"", diff_frame).decode("utf-8")
-    for needle in ("diff vs HEAD: lib/a.ml", "let a = 1", "let x = 1"):
+    for needle in ("diff col 1 vs HEAD: lib/a.ml", "let a = 1", "let x = 1"):
         if needle not in diff_plain:
             raise AssertionError(
                 f"the diff view missed {needle!r}: {diff_plain!r}"
@@ -685,6 +685,7 @@ def code_lane_interaction(
             f"the candidate jump did not move the cursor gutter: {picked!r}"
         )
     os.write(master_fd, b"q")
+
 
 
 # RFC-0429 §1.3 and §4. The second recorded change carries

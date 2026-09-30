@@ -63,7 +63,7 @@ def run(executable, no_color):
             "last_updated": "2026-08-22T00:00:00Z", "version": 1}), encoding="utf-8")
 
     def interact(process, fd, _slave, output, _base):
-        ready = b"1 awaiting verification"
+        ready = b"MASC Dashboard"
         _keyboard_harness.wait_for_output(process, fd, output, ready, start=0, timeout=10)
         _keyboard_harness.wait_for_output(process, fd, output, _keyboard_harness.FRAME_END,
                           start=_keyboard_harness.end_of_needle(output, ready, 0), timeout=3)

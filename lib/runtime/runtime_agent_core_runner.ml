@@ -79,12 +79,12 @@ let resolve_runtime_providers ~runtime_id () =
      each resolved runtime carries exactly one provider_config. *)
   let runtime_id = String.trim runtime_id in
   let provider_config_of_runtime rt =
-    match rt.Runtime.execution with
+    match rt.Runtime_instance.execution with
     | Runtime_execution.Agent_core provider_config ->
-      (match Runtime.validate_dispatch_credential ~provider_config rt with
+      (match Runtime_instance.validate_dispatch_credential ~provider_config rt with
        | Ok () -> Ok provider_config
        | Error error ->
-         Error (Runtime.dispatch_credential_error_to_string error))
+         Error (Runtime_instance.dispatch_credential_error_to_string error))
     | Runtime_execution.Codex_app_server _
     | Runtime_execution.Claude_code _
     | Runtime_execution.Muse_serve _
@@ -92,12 +92,12 @@ let resolve_runtime_providers ~runtime_id () =
       Error
         (Printf.sprintf
            "runtime %S is owned by an official client, not Agent Core"
-           rt.Runtime.id)
+           rt.Runtime_instance.id)
     | Runtime_execution.Antigravity_cli _ ->
       Error
         (Printf.sprintf
            "runtime %S is owned by antigravity-cli, not the Agent Core"
-           rt.Runtime.id)
+           rt.Runtime_instance.id)
   in
   if String.equal runtime_id "" then
     match Runtime.get_default_runtime () with
@@ -156,7 +156,7 @@ let resolve_runtime_providers_for_turn ~runtime_id () =
     if String.equal runtime_id ""
     then (
       match Runtime.get_default_runtime () with
-      | Some rt -> rt.Runtime.id
+      | Some rt -> rt.Runtime_instance.id
       | None -> runtime_id)
     else runtime_id
   in

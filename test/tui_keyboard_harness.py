@@ -94,8 +94,12 @@ class RequestHttpResponse:
     def __init__(
         self,
         resolve: Callable[[bytes], HttpResponse | RawHttpResponse | StreamingHttpResponse],
+        *,
+        get_response: HttpResponse | None = None,
     ) -> None:
         self.resolve = resolve
+        self.get_response = get_response
+
 
 
 class MethodHttpResponse:
@@ -274,7 +278,10 @@ def test_http_endpoint(
             else:
                 fixture = (503, {"error": "fixture endpoint unavailable"})
             if isinstance(fixture, RequestHttpResponse):
-                resolved = fixture.resolve(request_body or b"")
+                if self.command == "GET" and fixture.get_response is not None:
+                    resolved = fixture.get_response
+                else:
+                    resolved = fixture.resolve(request_body or b"")
             elif isinstance(fixture, MethodHttpResponse):
                 resolved = fixture.resolve(self.command)
             elif isinstance(fixture, PathHttpResponse):
@@ -377,6 +384,7 @@ def test_http_endpoint(
                 thread.join(timeout=2.0)
                 if thread.is_alive():
                     raise AssertionError("fixture HTTP server did not stop")
+
 
 
 def assert_workspace_payload_is_inert(output: bytearray) -> None:
@@ -2140,6 +2148,7 @@ def run_terminal_scenario(
     confirm_exit: bytes = b"q",
     refresh: float = 60.0,
     terminal_cols: int = 100,
+    terminal_rows: int = 30,
     workspace: str = WORKSPACE_PAYLOAD,
     http_fixtures: HttpFixtures | None = None,
     http_requests: HttpRequests | None = None,
@@ -2164,7 +2173,10 @@ def run_terminal_scenario(
     output = PtyOutput()
     process: subprocess.Popen[bytes] | None = None
     try:
-        fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, struct.pack("HHHH", 30, terminal_cols, 0, 0))
+        fcntl.ioctl(
+            slave_fd, termios.TIOCSWINSZ,
+            struct.pack("HHHH", terminal_rows, terminal_cols, 0, 0),
+        )
         os.set_blocking(master_fd, False)
         with tempfile.TemporaryDirectory(prefix="masc-tui-keyboard-") as base_path:
             with test_http_endpoint(
@@ -2386,6 +2398,7 @@ def run_terminal_scenario(
                     raise
         os.close(master_fd)
         os.close(slave_fd)
+
 
 
 def navigate_with_arrows_and_quit(

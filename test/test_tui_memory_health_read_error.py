@@ -6,12 +6,7 @@ import sys
 import tui_keyboard_harness as _keyboard_harness
 import tui_keyboard_memory as _keyboard_memory
 
-SOURCE_MODULES = (
-    "bin/masc_tui_render.ml",
-    "bin/masc_tui_render_memory.ml",
-    "test/tui_keyboard_harness.py",
-    "test/tui_keyboard_memory.py",
-)
+SOURCE_MODULES = ('bin/masc_tui_render.ml', 'bin/masc_tui_render_memory.ml', 'test/tui_keyboard_harness.py', 'test/tui_keyboard_memory.py', 'lib/tui_decode_memory_facts.ml', 'lib/tui_decode_memory_facts.mli')
 
 ERROR = b"memory health load failed: HTTP 503: fixture memory unavailable"
 

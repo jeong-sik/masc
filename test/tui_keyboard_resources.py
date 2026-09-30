@@ -103,8 +103,11 @@ def resources_mcp_fixture() -> HttpFixtures:
         )
 
     fixtures = overview_event_http_fixtures()
-    fixtures["/mcp"] = RequestHttpResponse(answer)
+    fixtures["/mcp"] = RequestHttpResponse(
+        answer, get_response=(405, {"error": "fixture does not offer an SSE stream"})
+    )
     return fixtures
+
 
 
 def resources_detail_interaction() -> Interaction:

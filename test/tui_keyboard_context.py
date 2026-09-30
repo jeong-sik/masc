@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+from tui_keyboard_harness import FRAME_END
+from tui_keyboard_harness import LINES_WINDOW_RE
+import re
+from tui_keyboard_harness import read_available
+from tui_keyboard_harness import screen_rows
+from tui_keyboard_harness import wait_for_output
+
 import os
 import subprocess
 
@@ -81,8 +88,8 @@ def context_inspector_interaction() -> Interaction:
         send_and_wait(
             process, master_fd, output, b"/context", composer_showing(b"/context")
         )
-        composition = send_and_wait(
-            process, master_fd, output, b"\r", b"HOW FAR BACK"
+        composition = open_context_and_read_history_pages(
+            process, master_fd, output
         )
         composition_plain = CSI_RE.sub(b"", composition)
         for needle in (
@@ -260,3 +267,188 @@ def context_inspector_interaction() -> Interaction:
         os.write(master_fd, b"q")
 
     return interact
+
+
+
+def next_request_forecast_fixture(*, with_continuity: bool) -> dict[str, object]:
+    origin: dict[str, object] = (
+        {"kind": "librarian_snapshot", "end_atom": 2698, "boundary_line": 2215}
+        if with_continuity
+        else {"kind": "ledger"}
+    )
+    return {
+        "schema": "masc.keeper.next-request-forecast.v5",
+        "keeper": "alpha",
+        "trace_id": "trace-next-request",
+        "checkpoint_messages": 5217,
+        "wake_line_bytes": 131,
+        "walk": {
+            "lane_id": "kimi_coding.kimi-for-coding",
+            "declared": ["kimi_coding.kimi-for-coding"],
+        },
+        "candidates": [
+            {
+                "runtime_id": "kimi_coding.kimi-for-coding",
+                "lane": {"agent_core": True},
+                "marks": {"high_water_tokens": 100000, "low_water_tokens": 70000},
+                "parts": {"error": "no completed turn on this runtime carried a composition in the newest 200 records"},
+                "history_atoms": 2718,
+                "carried": {
+                    "first_atom": 2698,
+                    "kept_atoms": 20,
+                    "transmitted_bytes": 237300,
+                    "preamble_bytes": None,
+                    "origin": origin,
+                    "counted_tokens": None if with_continuity else 71000,
+                },
+                "assembly": None,
+                "place": {"walks_at": 0, "declared_at": 0, "rest": {"kind": "serving"}},
+            }
+        ],
+    }
+
+
+
+def scroll_context_one_line(process, master_fd, output) -> bytes:
+    # A scroll paints one frame. send_and_wait(..., FRAME_END) would consume
+    # that marker as its needle and then wait for an unnecessary second frame.
+    read_available(master_fd, output)
+    start = len(output)
+    os.write(master_fd, b"j")
+    wait_for_output(process, master_fd, output, FRAME_END, start=start, timeout=3.0)
+    frame_end = output.find(FRAME_END, start) + len(FRAME_END)
+    return bytes(output[start:frame_end])
+
+
+
+def open_context_and_read_history_pages(process, master_fd, output) -> bytes:
+    # The loaded context can be taller than the terminal. Walk its actual
+    # reported pages, preserving the bytes for the existing content checks.
+    drawn = send_and_wait(process, master_fd, output, b"\r", b"WHAT WENT IN")
+    while True:
+        visible = screen_text(bytes(output))
+        bounds = re.search(rb"\[lines (\d+)-(\d+)/(\d+)\]", visible)
+        if bounds is None or int(bounds[2]) == int(bounds[3]):
+            break
+        first = int(bounds[1])
+        drawn += scroll_context_one_line(process, master_fd, output)
+        advanced = re.search(rb"\[lines (\d+)-(\d+)/(\d+)\]",
+                             screen_text(bytes(output)))
+        if advanced is None or int(advanced[1]) <= first:
+            raise AssertionError("Context j did not advance its reported window")
+    if b"HOW FAR BACK" not in CSI_RE.sub(b"", drawn):
+        raise AssertionError("Loaded Context pages omitted the history band")
+    return drawn
+
+
+
+def context_visible_pane(output) -> tuple[bytes, bytes, tuple[int, int, int] | None]:
+    """Current completed Context body, joining only its visible row payloads."""
+    end = output.rfind(FRAME_END)
+    if end < 0:
+        raise AssertionError("Context has no completed frame")
+    completed = bytes(output[:end + len(FRAME_END)])
+    rows = screen_rows(completed)
+    title = next((number for number, row in sorted(rows.items())
+                  if b"MASC Context" in row), None)
+    if title is None:
+        raise AssertionError(f"Context title is not visible: {screen_text(completed)!r}")
+    window = next(((number, match) for number, row in sorted(rows.items())
+                   if (match := LINES_WINDOW_RE.search(row)) is not None), None)
+    bounds = None if window is None else tuple(int(value) for value in window[1].groups())
+    if bounds is not None and not (1 <= bounds[0] <= bounds[1] <= bounds[2]):
+        raise AssertionError(f"Invalid Context window: {bounds!r}")
+    border = "│".encode()
+    payloads = []
+    for number, row in sorted(rows.items()):
+        if number <= title or (window is not None and number >= window[0]):
+            continue
+        plain = row.strip()
+        if plain.startswith(border) and plain.endswith(border):
+            payload = plain[len(border):-len(border)].strip()
+            if payload:
+                payloads.append(payload)
+    return screen_text(completed), b" ".join(payloads), bounds
+
+
+
+def run_next_request_readability_regression(executable: str) -> None:
+    for with_continuity in (True, False):
+        for cols in (80, 140):
+            fixtures = context_inspector_fixtures()
+            fixtures["/api/v1/keepers/alpha/next-request"] = (
+                200,
+                next_request_forecast_fixture(with_continuity=with_continuity),
+            )
+
+            def interact(process, master_fd, _slave_fd, output, _base_path):
+                resize_and_wait(
+                    process, master_fd, output, rows=32, columns=cols,
+                    needle=b"MASC Dashboard",
+                )
+                send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
+                select_keeper_row(process, master_fd, output, b"alpha")
+                send_and_wait(
+                    process, master_fd, output, b"\r",
+                    b"Keepers \xe2\x96\xb8 \x1b[1malpha",
+                )
+                send_and_wait(
+                    process, master_fd, output, b"m",
+                    b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat",
+                )
+                send_and_wait(
+                    process, master_fd, output, b"/context",
+                    composer_showing(b"/context"),
+                )
+                send_and_wait(process, master_fd, output, b"\r", b"WHAT WENT IN")
+                while True:
+                    visible, pane, bounds = context_visible_pane(output)
+                    if (
+                        b"Config / Runtime:" in pane
+                        and b"model limit." in pane
+                        and b"History preview:" in pane
+                        and (
+                            (b"Librarian working state" in pane)
+                            if with_continuity
+                            else (b"front from this runtime's ledger" in pane)
+                        )
+                    ):
+                        break
+                    # At the last reported row j changes nothing, so no new
+                    # frame is expected. Fail here with the current viewport.
+                    if bounds is None or bounds[1] == bounds[2]:
+                        raise AssertionError(
+                            f"Next Request meaning not visible at {cols} columns "
+                            f"at Context window {bounds!r}: {visible!r}"
+                        )
+                    first = bounds[0]
+                    scroll_context_one_line(process, master_fd, output)
+                    _visible, _pane, advanced = context_visible_pane(output)
+                    if advanced is None or advanced[0] <= first:
+                        raise AssertionError(
+                            f"Context j did not advance its reported window: "
+                            f"{bounds!r} -> {advanced!r}"
+                        )
+                if b"100.0k / 70.0k" in visible:
+                    raise AssertionError("trim settings still look like a forecast figure")
+                print(
+                    f"NEXT_REQUEST_CAPTURE {'continuity' if with_continuity else 'ledger'} "
+                    f"{cols}x32\n{visible.decode(errors='replace')}"
+                )
+                send_and_wait(
+                    process, master_fd, output, b"\x1b",
+                    b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat",
+                )
+                escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
+                os.write(master_fd, b"q")
+
+            run_terminal_scenario(
+                executable,
+                description=(
+                    f"Next Request {'Librarian' if with_continuity else 'ledger'} "
+                    f"copy at {cols} columns"
+                ),
+                interact=interact,
+                terminal_cols=cols,
+                http_fixtures=fixtures,
+            )

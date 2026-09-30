@@ -203,7 +203,7 @@ def currency_follows_workspace_authority(binary: str, captures: Path | None) -> 
         if phase == "identity-error":
             return h.RawHttpResponse(503, b'{"error":"identity deliberately unavailable"}')
         effective = base if phase == "a-ready" else base + "-workspace-b"
-        payload = h.fleet_safety_fixture()
+        _, payload = h.fleet_safety_fixture()
         payload["paths"] = {"effective_base_path": effective,
                             "effective_masc_root": effective + "/.masc"}
         payload["startup"] = {"state_ready": phase != "b-booting"}

@@ -2,11 +2,8 @@
 
 import os
 from pathlib import Path
-import select
 import signal
-import subprocess
 import sys
-import time
 import tomllib
 
 import test_tui_keyboard_input as h
@@ -65,67 +62,27 @@ def visit_beta(process, fd, output):
 
 
 def restart(process, fd, slave, output, check):
-    """Leave the launcher's stop notification pending for the outer harness."""
-    if sys.platform != "linux":
-        raise AssertionError("same-workspace restart requires Linux waitid WNOWAIT")
-    argv = process.args[4:]
-    def argument(name):
-        return argv[argv.index(name) + 1]
-
-    # Mirror run_terminal_scenario's controlled environment. All identity and
-    # endpoint arguments come from the original real-binary argv.
-    environment = os.environ.copy()
-    for name in ("LINES", "COLUMNS", "NO_COLOR", "MASC_TUI_FORCE_COLOR", "TMUX"):
-        environment.pop(name, None)
-    environment["PATH"] = h.path_without_masc(environment.get("PATH", ""))
-    environment.update(
-        MASC_CONFIG_DIR="",
-        MASC_BASE_PATH=argument("--base-path"),
-        MASC_HOST="127.0.0.1",
-        MASC_TUI_SYNC="off",
-        TERM="xterm-256color",
-        MASC_TOKEN="masc-tui-keyboard-regression-token",
-    )
-    # --workspace, --port and --refresh remain exactly those of the live
-    # fixture server in argv; the harness does not export them as env vars.
+    """Resume the same terminal-owning shell for its second binary launch."""
     start = len(output)
     os.write(fd, b"qq")
-    deadline = time.monotonic() + 5
-    while True:
-        h.read_available(fd, output)
-        status = os.waitid(
-            os.P_PID, process.pid, os.WSTOPPED | os.WNOHANG | os.WNOWAIT
-        )
-        if status is not None:
-            if status.si_code != os.CLD_STOPPED or status.si_status != signal.SIGSTOP:
-                raise AssertionError(f"unexpected launcher stop: {status!r}")
-            break
-        if time.monotonic() >= deadline:
-            raise AssertionError("first TUI did not leave its launcher stopped")
-        select.select([fd], [], [], 0.05)
+    h.wait_for_stop(process, fd, output, timeout=5,
+                    description="first receipt TUI exit before restart")
     if b"Goodbye!" not in output[start:]:
         raise AssertionError("first TUI did not finish before restart")
-    # No setsid/TIOCSCTTY: the original launcher still owns this slave.
-    child = subprocess.Popen(
-        argv, stdin=slave, stdout=slave, stderr=slave,
-        env=environment, close_fds=True,
-    )
+    # The shell keeps the controlling terminal, argv, stdin and environment.
     restarted = h.PtyOutput()
-    restarted.pid = child.pid
-    try:
-        check(child, fd, restarted)
-        home(child, fd, restarted, b"MASC Dashboard")
-        end = len(restarted)
-        os.write(fd, b"qq")
-        h.wait_for_output(child, fd, restarted, b"Goodbye!", start=end, timeout=5)
-        if child.wait(timeout=2) != 0:
-            raise AssertionError("restarted TUI exited unsuccessfully")
-    finally:
-        if child.poll() is None:
-            child.kill()
-            child.wait(timeout=2)
-    # Do not SIGCONT or waitpid the original shell. run_terminal_scenario
-    # consumes the preserved stop, checks termios, and resumes it itself.
+    restarted.pid = process.pid
+    os.kill(process.pid, signal.SIGCONT)
+    check(process, fd, restarted)
+    home(process, fd, restarted, b"MASC Dashboard")
+    end = len(restarted)
+    os.write(fd, b"qq")
+    h.wait_for_output(process, fd, restarted, b"Goodbye!", start=end, timeout=5)
+    # Keep only launch two's bytes for the outer harness's final exit checks.
+    output.clear()
+    output.extend(restarted)
+    # The outer harness consumes the second stop, checks termios, then resumes
+    # this same wrapper to exit. No exit-confirmation bytes remain to send.
 
 
 def persistence(executable, mode):
@@ -158,6 +115,9 @@ def persistence(executable, mode):
                                   f"Keepers ▸ {target} ▸ chat".encode(),
                                   start=0, timeout=10)
                 h.send_and_wait(child, child_fd, child_output, b"\x1b", b":settings")
+            else:
+                h.wait_for_output(child, child_fd, child_output, b"MASC Dashboard",
+                                  start=0, timeout=30)
             home(child, child_fd, child_output, b"Continue with beta")
             if config_path(base).read_bytes() != committed:
                 raise AssertionError("restart overwrote explicit beta receipt")
@@ -168,6 +128,7 @@ def persistence(executable, mode):
         executable, description=f"Home receipt same workspace restart {mode}",
         interact=interact, prepare_workspace=prepare(initial),
         http_fixtures=fixtures(), confirm_exit=b"",
+        launch_count=2,
         extra_env={"MASC_CONFIG_DIR": ""}, starts_in_chat=mode != "overview",
         terminal_cols=140,
     )
@@ -202,6 +163,7 @@ def unavailable_receipts(executable):
 def session_only(executable):
     def interact(process, fd, _slave, output, base):
         # Deterministic even as root: a directory cannot be read as config.
+        # This fails the save's load-before-write step, not its atomic write.
         path = config_path(base)
         original = path.read_bytes()
         path.unlink()
@@ -212,14 +174,14 @@ def session_only(executable):
             frame = h.resize_and_wait(process, fd, output, rows=32, columns=140,
                                       needle=b"this session only", controls=(h.FULL_REDRAW,))
             if b"Continue with beta" not in h.screen_text(frame):
-                raise AssertionError("failed write lost the session target")
+                raise AssertionError("failed config load lost the session target")
         finally:
             path.rmdir()
             path.write_bytes(original)
         os.write(fd, b"q")
 
     h.run_terminal_scenario(
-        executable, description="Home failed receipt write stays session only",
+        executable, description="Home receipt load-before-write failure stays session only",
         interact=interact, prepare_workspace=prepare('opening = "overview"\n'),
         http_fixtures=fixtures(),
         extra_env={"MASC_CONFIG_DIR": ""}, terminal_cols=140,
@@ -317,7 +279,7 @@ if __name__ == "__main__":
         for mode in ("overview", "keeper", "last"):
             persistence(executable, mode)
     else:
-        print("Home receipt restart: SKIP (Linux waitid WNOWAIT required)")
+        print("Home receipt restart: SKIP (Linux restart fixture only)")
     unavailable_receipts(executable)
     session_only(executable)
     changed_disk_mode(executable)

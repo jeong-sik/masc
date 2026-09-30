@@ -2140,9 +2140,12 @@ def run_terminal_scenario(
     conflicting_env_base_path: bool = False,
     omit_operator_token: bool = False,
     starts_in_chat: bool = False,
+    launch_count: int = 1,
 ) -> None:
     if not scenario_admitted(scenario_selection, description):
         return
+    if launch_count < 1:
+        raise ValueError("launch_count must be positive")
     executable = tui_executable(executable)
     workspace_rendered = (
         WORKSPACE_RENDERED if workspace == WORKSPACE_PAYLOAD else workspace.encode()
@@ -2231,8 +2234,17 @@ def run_terminal_scenario(
                         # installs its own handlers for both, so ignoring
                         # them here only keeps the shell alive to stop
                         # itself after the TUI exits.
-                        "trap '' INT TERM; kill -STOP $$; \"$@\"; tui_status=$?; "
-                        'kill -STOP $$; exit "$tui_status"',
+                        (
+                            "trap '' INT TERM; kill -STOP $$; \"$@\"; tui_status=$?; "
+                            'kill -STOP $$; exit "$tui_status"'
+                            if launch_count == 1 else
+                            "trap '' INT TERM; kill -STOP $$; "
+                            f"launches_left={launch_count}; "
+                            'while [ "$launches_left" -gt 0 ]; do '
+                            '"$@"; tui_status=$?; kill -STOP $$; '
+                            'launches_left=$((launches_left - 1)); done; '
+                            'exit "$tui_status"'
+                        ),
                         "masc-tui-test-launcher",
                         executable,
                         "--base-path",

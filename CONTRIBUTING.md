@@ -260,8 +260,7 @@ reproduce, expected versus actual behaviour, and the relevant log
   one: after merging `0.33.0`, tag `v0.33.0` before opening `0.34.0`.
 - Run `bash scripts/check-version-truth.sh` and `bash scripts/check-doc-truth.sh`
   before a release review; the tag workflow runs the former and CI runs the
-  latter. `check-release-train-guard.sh` is not wired into CI yet
-  (`scripts/ci/guards-not-wired.txt`).
+  latter.
 - `scripts/bump-version.sh` runs `python3 scripts/changelog-fragments.py
   assemble`, which folds `changelog.d/*.md` into `## [Unreleased]` and
   deletes them; move those entries into the version section before tagging.

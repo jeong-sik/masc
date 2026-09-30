@@ -1470,7 +1470,7 @@ type http_scoped_surface_results = {
   (* [None] on surfaces that do not draw them. Each is read by one surface, and
      leaving it out keeps whatever that surface last observed rather than
      dropping it. *)
-  http_asks: (Tui_decode.asks_snapshot, string) result option;
+  http_asks: (Masc.Tui_decode_asks.asks_snapshot, string) result option;
   http_board: (board_post list, string) result option;
   (* The board's hearth census rides with its listing: the two are read for
      one surface and a cycle keyed on a census the listing has outgrown walks
@@ -1627,7 +1627,7 @@ type async_msg =
   | Ask_answer_done of
       string
       * (Yojson.Safe.t, string) result
-      * (Tui_decode.asks_snapshot, string) result
+      * (Masc.Tui_decode_asks.asks_snapshot, string) result
   | Keeper_chat_dispatch_started of
       Keeper_chat.request * bool * bool Eio.Promise.u
   | Keeper_chat_done of
@@ -10023,12 +10023,12 @@ let apply_approvals_load state = function
    that read it (iTerm2, WezTerm, kitty) and is ignored elsewhere. Neither
    moves the cursor, so this writes out of band rather than through the frame.
    The banner names the Keeper so it says who is waiting. *)
-let notify_new_asks (snapshot : Tui_decode.asks_snapshot) arrived_ids =
+let notify_new_asks (snapshot : Masc.Tui_decode_asks.asks_snapshot) arrived_ids =
   let keeper_of id =
     List.find_opt
-      (fun (row : Tui_decode.ask_row) -> String.equal row.Tui_decode.ar_id id)
-      snapshot.Tui_decode.asn_rows
-    |> Option.map (fun (row : Tui_decode.ask_row) -> row.Tui_decode.ar_keeper)
+      (fun (row : Masc.Tui_decode_asks.ask_row) -> String.equal row.Masc.Tui_decode_asks.ar_id id)
+      snapshot.Masc.Tui_decode_asks.asn_rows
+    |> Option.map (fun (row : Masc.Tui_decode_asks.ask_row) -> row.Masc.Tui_decode_asks.ar_keeper)
   in
   let message =
     match List.filter_map keeper_of arrived_ids with
@@ -11460,8 +11460,8 @@ let selected_ask_row state =
 let selected_ask_question state =
   match selected_ask_row state with
   | None -> None
-  | Some (row : Tui_decode.ask_row) ->
-      List.nth_opt row.Tui_decode.ar_questions state.ask_question_cursor
+  | Some (row : Masc.Tui_decode_asks.ask_row) ->
+      List.nth_opt row.Masc.Tui_decode_asks.ar_questions state.ask_question_cursor
 
 (* Leaving the mode drops the draft. An answer half-written against a question
    the operator walked away from is not a thing to restore later; the Keeper
@@ -11471,14 +11471,14 @@ let leave_ask_answering state = clear_ask_answering state
 let enter_ask_answering state =
   match selected_ask_row state with
   | None -> report_action state "system" "No question is waiting on you"
-  | Some (row : Tui_decode.ask_row) ->
+  | Some (row : Masc.Tui_decode_asks.ask_row) ->
       (* The answer flow is drawn by the approvals list. With an approval's
          detail open that surface is not on screen, so [a] used to set the mode
          and change nothing an operator could see -- the keypress landed and
          the questions stayed hidden. Close the detail, which is where the
          operator asked to go. *)
       state.approval_detail_open <- false;
-      state.ask_answer_mode <- Ask_answering { aam_ask_id = row.Tui_decode.ar_id };
+      state.ask_answer_mode <- Ask_answering { aam_ask_id = row.Masc.Tui_decode_asks.ar_id };
       state.ask_question_cursor <- 0;
       state.ask_question_scroll <- 0;
       state.ask_draft <- Some (Ask.draft_for state.ask_draft ~row);
@@ -11504,8 +11504,8 @@ let move_ask_cursor state delta =
          looking at, and [a] is the key that says they mean it. *)
       | Ask_browsing, _ -> ()
       | Ask_answering _, None -> ()
-      | Ask_answering _, Some (row : Tui_decode.ask_row) ->
-          state.ask_answer_mode <- Ask_answering { aam_ask_id = row.Tui_decode.ar_id };
+      | Ask_answering _, Some (row : Masc.Tui_decode_asks.ask_row) ->
+          state.ask_answer_mode <- Ask_answering { aam_ask_id = row.Masc.Tui_decode_asks.ar_id };
           state.ask_draft <- Some (Ask.draft_for state.ask_draft ~row)
     end
   end
@@ -11513,8 +11513,8 @@ let move_ask_cursor state delta =
 let move_ask_question_cursor state delta =
   match selected_ask_row state with
   | None -> ()
-  | Some (row : Tui_decode.ask_row) ->
-      let count = List.length row.Tui_decode.ar_questions in
+  | Some (row : Masc.Tui_decode_asks.ask_row) ->
+      let count = List.length row.Masc.Tui_decode_asks.ar_questions in
       if count > 0 then begin
         state.ask_question_cursor <-
           max 0 (min (count - 1) (state.ask_question_cursor + delta));
@@ -11534,8 +11534,8 @@ let with_ask_draft state f =
 let toggle_ask_choice state index =
   match selected_ask_question state with
   | None -> ()
-  | Some (question : Tui_decode.ask_question) -> (
-      match List.nth_opt question.Tui_decode.aq_choices index with
+  | Some (question : Masc.Tui_decode_asks.ask_question) -> (
+      match List.nth_opt question.Masc.Tui_decode_asks.aq_choices index with
       | None -> ()
       | Some choice ->
           with_ask_draft state (fun draft question ->
@@ -11556,7 +11556,7 @@ let toggle_ask_choice state index =
 let begin_ask_text_entry state =
   match (selected_ask_row state, selected_ask_question state) with
   | Some row, Some question ->
-      let slot = Ask.free_text_slot ~ask_id:row.Tui_decode.ar_id question in
+      let slot = Ask.free_text_slot ~ask_id:row.Masc.Tui_decode_asks.ar_id question in
       let existing =
         match Ask.response_for (Ask.draft_for state.ask_draft ~row) ~question with
         | Some (Ask.Draft_wrote text) -> text
@@ -11588,7 +11588,7 @@ let commit_ask_text_entry state =
       let ask_id = Ask.free_text_ask_id entry.ate_slot in
       (match
          List.find_opt
-           (fun (row : Tui_decode.ask_row) -> String.equal row.Tui_decode.ar_id ask_id)
+           (fun (row : Masc.Tui_decode_asks.ask_row) -> String.equal row.Masc.Tui_decode_asks.ar_id ask_id)
            (open_ask_rows state)
        with
        | Some row ->
@@ -11666,7 +11666,7 @@ let handle_ask_submit state ~mailbox =
   | None ->
   match selected_ask_row state with
   | None -> ()
-  | Some (row : Tui_decode.ask_row) -> (
+  | Some (row : Masc.Tui_decode_asks.ask_row) -> (
       let draft = Ask.draft_for state.ask_draft ~row in
       match Ask.readiness draft ~row with
       | Ask.Not_open ->
@@ -11679,12 +11679,12 @@ let handle_ask_submit state ~mailbox =
             (Printf.sprintf "Still unanswered: %s"
                (String.concat ", "
                   (List.map
-                     (fun (q : Tui_decode.ask_question) -> q.Tui_decode.aq_header)
+                     (fun (q : Masc.Tui_decode_asks.ask_question) -> q.Masc.Tui_decode_asks.aq_header)
                      questions)))
       | Ask.Ready answers -> (
           match
             Ask.gate_transition ~inflight:state.ask_submit_inflight
-              ~pending:state.pending_ask_submit ~ask_id:row.Tui_decode.ar_id
+              ~pending:state.pending_ask_submit ~ask_id:row.Masc.Tui_decode_asks.ar_id
           with
           | Ask.Ask_gate_blocked_inflight ->
               state.pending_ask_submit <- None;
@@ -11693,17 +11693,17 @@ let handle_ask_submit state ~mailbox =
               state.pending_ask_submit <- Some ask_id;
               report_action state "system"
                 (Printf.sprintf "Press enter again to answer %s"
-                   row.Tui_decode.ar_keeper)
+                   row.Masc.Tui_decode_asks.ar_keeper)
           | Ask.Ask_gate_submit ->
               (* Name the Keeper and what was chosen, not the ask's opaque id,
                  so the confirmation says which decision landed and as what. *)
               let answered_label =
                 match Ask.summarize_answer draft ~row with
-                | "" -> row.Tui_decode.ar_keeper
-                | chosen -> Printf.sprintf "%s: %s" row.Tui_decode.ar_keeper chosen
+                | "" -> row.Masc.Tui_decode_asks.ar_keeper
+                | chosen -> Printf.sprintf "%s: %s" row.Masc.Tui_decode_asks.ar_keeper chosen
               in
-              start_ask_answer state ~keeper_name:row.Tui_decode.ar_keeper
-                ~ask_id:row.Tui_decode.ar_id ~answered_label ~answers ~mailbox))
+              start_ask_answer state ~keeper_name:row.Masc.Tui_decode_asks.ar_keeper
+                ~ask_id:row.Masc.Tui_decode_asks.ar_id ~answered_label ~answers ~mailbox))
 
 (* Run one lifecycle action's steps against the server.
 

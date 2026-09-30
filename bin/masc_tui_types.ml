@@ -5860,7 +5860,7 @@ type state = {
   (* Questions Keepers put to a human, drawn beside the approvals. [None]
      means nothing has been read yet, which is not the same as a fleet with
      no open questions. *)
-  mutable asks_snapshot: Masc.Tui_decode.asks_snapshot option;
+  mutable asks_snapshot: Masc.Tui_decode_asks.asks_snapshot option;
   mutable asks_error: string option;
   (* Answering happens in its own mode. The surface's own keys are spoken for
      -- arrows walk the approval queue, y and n decide it -- and a question
@@ -11020,8 +11020,8 @@ let approvals_open_question_count (state : state) =
   match approvals_open_questions state with
   | Some rows ->
       List.fold_left
-        (fun total (row : Tui_decode.ask_row) ->
-          total + List.length row.Tui_decode.ar_questions)
+        (fun total (row : Masc.Tui_decode_asks.ask_row) ->
+          total + List.length row.Masc.Tui_decode_asks.ar_questions)
         0 rows
   | None -> 0
 

@@ -1891,7 +1891,7 @@ let load_keeper_roster ~(host : string) ~(port : int) :
    sanitizer: a CR, a tab, or a stray OSC in fetched text is data to show
    escaped, not a control to replay into the frame. *)
 let sanitize_view_lines lines =
-  List.map Masc.Tui_decode.sanitize_terminal_text lines
+  List.map Masc.Tui_terminal_text.sanitize_terminal_text lines
 
 let load_keeper_config_view ~(host : string) ~(port : int)
     ~(keeper_name : string) : (string list, string) result =
@@ -1906,7 +1906,7 @@ let load_keeper_config_view ~(host : string) ~(port : int)
        would escape it along with the data. *)
     Ok
       (Masc_tui_keeper_config.view_lines
-         ~sanitize:Masc.Tui_decode.sanitize_terminal_text json)
+         ~sanitize:Masc.Tui_terminal_text.sanitize_terminal_text json)
 
 let load_keeper_sandbox_view ~(host : string) ~(port : int)
     ~(keeper_name : string) : (Masc_tui_keeper_sandbox.t, string) result =
@@ -1916,7 +1916,7 @@ let load_keeper_sandbox_view ~(host : string) ~(port : int)
   | Error err -> Error ("keeper sandbox status load failed: " ^ err)
   | Ok json ->
     Masc_tui_keeper_sandbox.decode
-      ~sanitize:Masc.Tui_decode.sanitize_terminal_text
+      ~sanitize:Masc.Tui_terminal_text.sanitize_terminal_text
       json
 
 let load_keeper_sandbox_logs ~(host : string) ~(port : int)
@@ -1928,7 +1928,7 @@ let load_keeper_sandbox_logs ~(host : string) ~(port : int)
   | Error err -> Error ("keeper sandbox logs load failed: " ^ err)
   | Ok json ->
     Masc_tui_keeper_sandbox.decode_logs
-      ~sanitize:Masc.Tui_decode.sanitize_terminal_text json
+      ~sanitize:Masc.Tui_terminal_text.sanitize_terminal_text json
 
 let load_keeper_config_editor ~(host : string) ~(port : int)
     ~(keeper_name : string) : (Yojson.Safe.t * string, string) result =
@@ -1947,7 +1947,7 @@ let load_keeper_github_identity_view ~(host : string) ~(port : int)
   | Ok json ->
     Ok
       (Masc_tui_github_identity.view_lines
-         ~sanitize:Masc.Tui_decode.sanitize_terminal_text json)
+         ~sanitize:Masc.Tui_terminal_text.sanitize_terminal_text json)
 
 let load_keeper_board_quarantines ~(host : string) ~(port : int)
     ~(keeper_name : string) :

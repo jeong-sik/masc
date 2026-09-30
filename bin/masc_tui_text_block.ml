@@ -26,10 +26,18 @@ let drop_line_terminator line =
   if length > 0 && line.[length - 1] = '\r' then String.sub line 0 (length - 1)
   else line
 
+let lines text =
+  let rec split = function
+    | [] -> []
+    | [line] -> [line]
+    | line :: rest -> drop_line_terminator line :: split rest
+  in
+  split (String.split_on_char '\n' text)
+
 let rows_of_line ~max_cells line =
   match
     Message_layout.wrap_words ~max_cells
-      (Masc.Tui_decode.sanitize_terminal_text (drop_line_terminator line))
+      (Masc.Tui_terminal_text.sanitize_terminal_text (drop_line_terminator line))
   with
   (* [wrap_words] answers nothing for a line with no words. The break was
      written, so the blank row it asks for is drawn. *)

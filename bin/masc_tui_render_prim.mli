@@ -351,24 +351,24 @@ val keeper_lane_idle_text : int -> string
 val boxed_surface_chrome_rows : int
 
 val selected_ask_question :
-  Masc_tui_types.state -> Masc.Tui_decode.ask_question option
+  Masc_tui_types.state -> Masc.Tui_decode_asks.ask_question option
 
 val draw_ask_question :
   Buffer.t ->
   int ->
   Masc_tui_types.state ->
-  row:Masc.Tui_decode.ask_row ->
+  row:Masc.Tui_decode_asks.ask_row ->
   draft:Ask_projection.draft ->
-  question:Masc.Tui_decode.ask_question ->
+  question:Masc.Tui_decode_asks.ask_question ->
   answering:bool -> selected_question:bool -> unit
 
-val draw_ask_context : Buffer.t -> int -> row:Masc.Tui_decode.ask_row -> unit
+val draw_ask_context : Buffer.t -> int -> row:Masc.Tui_decode_asks.ask_row -> unit
 
 val ask_block : (Buffer.t -> 'a) -> string * int
 
 val question_hints : Masc_tui_types.state -> string
 
-val question_asks : Masc_tui_types.state -> Masc.Tui_decode.ask_row list
+val question_asks : Masc_tui_types.state -> Masc.Tui_decode_asks.ask_row list
 
 val ask_question_viewport : Masc_tui_types.state -> string list * int
 
@@ -515,7 +515,12 @@ val resolve_change_context :
 
 val build_change_context_lines : change_context -> string list
 
-val tree_diff_row_span : width:int -> Masc.Tui_decode.git_diff_row -> Span.t
+val tree_diff_gutter : Masc.Tui_decode.git_diff_row -> string
+(** Literal old/new coordinates and change marker; its measured width is shared
+    by diff rendering and horizontal bounds. *)
+
+val tree_diff_row_span :
+  ?hscroll:int -> width:int -> Masc.Tui_decode.git_diff_row -> Span.t
 
 val render_diff_surface :
   Masc_tui_types.state ->

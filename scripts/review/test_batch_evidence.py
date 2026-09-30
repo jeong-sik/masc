@@ -369,6 +369,14 @@ print(value)
                 self.refusal("batch_roll_run_receipt_mismatch", E.ROLL)
                 self.data = copy.deepcopy(original)
 
+    def test_run_rerun_attempt_during_final_admission_refuses(self):
+        endpoint = PREFIX + "/actions/runs/900"
+        current = copy.deepcopy(self.get("actions/runs/900"))
+        rerun = copy.deepcopy(current)
+        rerun["run_attempt"] = 2
+        self.responses[endpoint] = [current, current, rerun]
+        self.refusal("batch_roll_run_receipt_mismatch", E.ROLL)
+
     def test_run_checkout_commit_must_bind_base_and_roll(self):
         checkout = self.data["__roll_receipt"]["checkout_commit"]
         commit = self.get(f"git/commits/{checkout}")

@@ -556,8 +556,12 @@ def evaluate(f, *, line, repo, pr, head, run, git_dir, gh, landing=False, expect
             or (not arrived and trees.paths(main, final) & external)):
         raise Refusal(Reason.FINAL_LANDING_TREE_MISMATCH, ExitCode.LANDING)
 
-    # Recheck the ROLL run, then the member review and refusal snapshots.
-    exact_run(f, gh, prefix, roll.pr, roll.head, roll_pull["head"]["ref"], batch.run, failure=ExitCode.ROLL)
+    # Recheck the same ROLL attempt, then member reviews and refusals.
+    final_run = exact_run(
+        f, gh, prefix, roll.pr, roll.head, roll_pull["head"]["ref"],
+        batch.run, failure=ExitCode.ROLL)
+    if final_run.get("run_attempt") != checked_run.get("run_attempt"):
+        raise Refusal(Reason.ROLL_RUN_RECEIPT_MISMATCH, ExitCode.ROLL)
     if not arrived:
         current_checks(f, gh, repo, roll.pr, roll.head, git_dir, failure=ExitCode.ROLL)
     for member in batch.members:

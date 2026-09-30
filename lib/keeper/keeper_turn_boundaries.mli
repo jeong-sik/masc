@@ -105,7 +105,10 @@ type position =
   | Empty_atom_history  (** A checkpoint was saved and holds no atom. *)
   | No_atom_history
       (** The runtime keeps no Agent-Core checkpoint (an official client), so
-          the turn has no atom history to end. *)
+          the turn has no atom history to end. Atoms an Agent-Core candidate
+          of the same turn saved before the official client answered are in
+          the saved history all the same; the next line's start state names
+          where they end ({!witness_line}). *)
   | Stale_noop
       (** An Agent-Core turn whose checkpoint save was a stale no-op: a newer
           writer owns the canonical checkpoint, and this turn's messages are
@@ -122,7 +125,12 @@ type position =
 
     [Continued_history_from] carries the start state so that a line is
     self-describing: a later line can answer what an unreadable line before it
-    was, which is what ends the stall of RFC §4.4 row 2c (masc#37061). It is a
+    was, which is what ends the stall of RFC §4.4 row 2c (masc#37061). The
+    start state is also a position of the saved history: the turns of a keeper
+    do not overlap, so the history a turn loads is where every turn before it
+    left the history, including one that saved atoms and then failed, was
+    cancelled or handed the turn to an official client without an end line
+    of its own ({!witness_line}). It is a
     new branch of this sum type, not a field added to [Turn_ended], because the
     line is strictly decoded (RFC §5). [Continued_history] is the bare token a
     line written before this branch existed carries, and the fallback when the
@@ -250,12 +258,40 @@ val atom_position_stated
   -> record
   -> (Ids.Turn_ref.t * int * string) option
 
+(** The turn and atom position [record]'s start state names for [trace_id]:
+    a turn of that trace that started from a saved history of [start_atom]
+    atoms and [start_atom_digest], returned as [(turn_ref, start_atom,
+    start_atom_digest)]. A bare [Continued_history], a fresh start, a restart
+    line and a turn of another trace name none. Pure. *)
+val start_position_stated
+  :  trace_id:string
+  -> record
+  -> (Ids.Turn_ref.t * int * string) option
+
+(** The turn of [record] when it states the position [end_atom],
+    [last_atom_digest] of [trace_id], as the end of its turn or as the history
+    its turn started from. Pure. *)
+val states_position
+  :  trace_id:string
+  -> end_atom:int
+  -> last_atom_digest:string
+  -> record
+  -> Ids.Turn_ref.t option
+
 (** The line that states a read position: the last of [lines] ending a turn of
     [trace_id] with exactly [end_atom] atoms and [last_atom_digest], as
     [(line, recorded_at, turn_ref)]. With [through], only lines numbered at
     most [through] count: the lines a position has taken in, its
     [boundary_lines_seen] ({!Keeper_librarian_progress}). A line that cannot
     be decoded, a restart line and a turn with no atom position state none.
+
+    A position no line ends at is stated by the first line whose turn
+    started from it ({!start_position_stated}) after the last restart of
+    [trace_id] among the lines counted. That is where the atoms a turn saved
+    and then left without an end line end: an Agent-Core candidate whose
+    turn failed, was cancelled or was answered by an official client. The
+    first such line is the earliest one written after those atoms were saved,
+    so a reader orders them before every later turn.
 
     This is the one test of whether a position stands on the log. The
     Librarian reads from a position only when this finds its line, and stops

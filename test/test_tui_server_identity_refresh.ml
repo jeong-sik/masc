@@ -83,10 +83,32 @@ let test_local_rows_are_unread_until_the_workspace_is_read () =
   Alcotest.(check string) "a read with an error failed" "failed"
     (page (Some "keeper metadata unavailable"))
 
+let test_request_authority_requires_complete_current_identity () =
+  let before = identity "/a" in
+  let accepts after =
+    Masc_tui_types.server_workspace_matches ~expected:(Some before) after
+  in
+  Alcotest.(check bool) "same workspace" true (accepts (Ok before));
+  Alcotest.(check bool) "dynamic health does not revoke" true
+    (accepts (Ok { before with sid_uptime = Some "30s" }));
+  Alcotest.(check bool) "different base" false (accepts (Ok (identity "/b")));
+  Alcotest.(check bool) "different runtime root" false
+    (accepts (Ok { before with sid_masc_root = "/a/other-root" }));
+  Alcotest.(check bool) "booting successor" false
+    (accepts (Ok { before with sid_state_ready = Some false }));
+  Alcotest.(check bool) "unavailable successor" false (accepts (Error "unavailable"));
+  Alcotest.(check bool) "no prior identity" false
+    (Masc_tui_types.server_workspace_matches ~expected:None (Ok before));
+  Alcotest.(check bool) "missing root cannot authorize" false
+    (let incomplete = { before with sid_masc_root = "" } in
+     Masc_tui_types.server_workspace_matches ~expected:(Some incomplete) (Ok incomplete))
+
 let () =
   Alcotest.run "tui_server_identity_refresh"
     [ ( "server-identity-refresh"
-      , [ Alcotest.test_case "same endpoint replaces A with B" `Quick
+      , [ Alcotest.test_case "request authority requires complete current identity" `Quick
+            test_request_authority_requires_complete_current_identity
+        ; Alcotest.test_case "same endpoint replaces A with B" `Quick
             test_same_endpoint_restart_replaces_a_with_b
         ; Alcotest.test_case "failed probe is unread, not stale" `Quick
             test_failed_probe_is_unread_not_stale

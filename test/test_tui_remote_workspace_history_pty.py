@@ -11,6 +11,8 @@ import copy
 import hashlib
 import json
 import os
+import shlex
+import tempfile
 from pathlib import Path
 import sys
 import threading
@@ -745,6 +747,214 @@ def identity_refresh_workspace_chain(binary: str) -> None:
         refresh=0.5, terminal_rows=45, terminal_cols=300)
 
 
+
+def bundle_identity_during_read(binary: str) -> None:
+    fixtures = h.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
+    class BundleWire(WorkspaceWire):
+        armed = False
+        def roster(self):
+            payload = super().roster()
+            with self.lock:
+                swap = self.armed
+                self.armed = False
+            if swap:
+                self.publish("b")
+                payload[1]["keepers"][0]["runtime_id"] = "cross-workspace-poison"
+            return payload
+    wire = BundleWire(fixtures[ROSTER_PATH][1])
+    fixtures.update({ROSTER_PATH: wire.roster, "/health": wire.health,
+                     "/health?full=1": wire.health})
+    def interact(process, fd, _slave, output, _base):
+        h.tab_until(process, fd, output, b"MASC Keepers")
+        assert h.wait_for_fixture_state(process, fd, output,
+            lambda: b"a.current" in screen(output), timeout=WAIT_SECONDS)
+        with wire.lock:
+            wire.armed = True
+        start = len(output)
+        os.write(fd, b"r")
+        def boundary_observed():
+            with wire.lock:
+                return any(e["event"] == "health" and e["phase"] == "b" for e in wire.events)
+        assert h.wait_for_fixture_state(process, fd, output, boundary_observed,
+            timeout=WAIT_SECONDS), "post-roster B identity was not probed"
+        h.resize_and_wait(process, fd, output, rows=36, columns=TERMINAL_COLUMNS,
+                         needle=b"MASC Keepers", controls=(h.FULL_REDRAW,))
+        os.write(fd, b"r")
+        assert h.wait_for_fixture_state(process, fd, output,
+            lambda: b"b.current" in screen(output) and b"MISMATCH local " in screen(output),
+            timeout=WAIT_SECONDS), "a fresh coherent B bundle did not recover"
+        assert b"cross-workspace-poison" not in h.CSI_RE.sub(b"", bytes(output[start:])), \
+            "an A-started bundle displayed the B response before revalidation"
+        os.write(fd, b"q")
+    h.run_terminal_scenario(binary,
+        description="discard a bundle whose workspace changes during its roster GET",
+        interact=interact, prepare_workspace=wire.prepare, http_fixtures=fixtures,
+        refresh=30.0, terminal_rows=34, terminal_cols=TERMINAL_COLUMNS)
+
+
+def settings_editor_workspace_change(binary: str) -> None:
+    fixtures = h.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
+    wire = WorkspaceWire(fixtures[ROSTER_PATH][1])
+    fixtures.update({ROSTER_PATH: wire.roster, "/health": wire.health,
+                     "/health?full=1": wire.health,
+                     h.KEEPER_SETTINGS_PATH: h.keeper_settings_fixture()})
+    posts: h.HttpRequests = []
+    with tempfile.TemporaryDirectory(prefix="tui-workspace-editor-") as work:
+        started, release = Path(work, "started"), Path(work, "release")
+        editor = Path(work, "edit.py")
+        editor.write_text("import json, sys, time\nfrom pathlib import Path\n"
+            "path=Path(sys.argv[1]); value=json.loads(path.read_text())\n"
+            "value['activation_mode']='autonomous'; path.write_text(json.dumps(value))\n"
+            f"Path({str(started)!r}).touch()\n"
+            f"while not Path({str(release)!r}).exists(): time.sleep(0.01)\n")
+        def interact(process, fd, _slave, output, _base):
+            try:
+                h.tab_until(process, fd, output, b"MASC Keepers")
+                h.select_keeper_row(process, fd, output, b"alpha")
+                os.write(fd, b"e")
+                assert h.wait_for_fixture_state(process, fd, output, started.exists,
+                    timeout=WAIT_SECONDS), "settings editor did not open"
+                # The clone keeps the same keeper name and config revision.
+                # No event-loop refresh can retire A while $EDITOR blocks.
+                wire.publish("b")
+                release.touch()
+                assert h.wait_for_fixture_state(process, fd, output,
+                    lambda: b"settings not saved" in screen(output), timeout=WAIT_SECONDS), \
+                    "post-editor identity change was not visibly refused"
+                assert not [p for p, _ in posts if p == h.KEEPER_SETTINGS_PATH], \
+                    "the edited A patch was posted to same-revision B"
+                os.write(fd, b"q")
+            finally:
+                release.touch()
+        h.run_terminal_scenario(binary,
+            description="same-revision workspace replacement during settings editor refuses the POST",
+            interact=interact, prepare_workspace=wire.prepare, http_fixtures=fixtures,
+            http_requests=posts, extra_env={"EDITOR": shlex.join([sys.executable, str(editor)])},
+            refresh=30.0, terminal_rows=40, terminal_cols=TERMINAL_COLUMNS)
+
+
+def ask_workspace_withdrawal(binary: str) -> None:
+    # Exercise both the armed editor and an already admitted, held POST.
+    for submit in (False, True):
+        fixtures = h.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
+        wire = WorkspaceWire(fixtures[ROSTER_PATH][1])
+        answer = h.GatedHttpResponse((200, {"ok": True}), hold_seconds=30.0)
+        b_asks = threading.Event()
+        def asks():
+            with wire.lock:
+                phase = wire.phase
+                wire.events.append({"event": "asks", "phase": phase})
+            if phase == "a":
+                return h.keeper_asks_response()
+            b_asks.set()
+            return 503, {"error": "B questions unavailable"}
+        fixtures.update({ROSTER_PATH: wire.roster, "/health": wire.health,
+            "/health?full=1": wire.health, h.KEEPER_ASKS_PATH: asks,
+            h.KEEPER_ASK_ANSWER_PATH: answer})
+        posts: h.HttpRequests = []
+        def interact(process, fd, _slave, output, _base):
+            try:
+                h.palette_go(process, fd, output, b"go Approvals", b"Questions waiting on you")
+                h.send_and_wait(process, fd, output, b"a", b"Enter:answer")
+                h.send_and_wait(process, fd, output, b"1", b"1 (o) ")
+                h.send_and_wait(process, fd, output, b"\r", b"Press Enter again to send")
+                if submit:
+                    os.write(fd, b"\r")
+                    assert h.wait_for_fixture_event(process, fd, output, answer.requested,
+                        timeout=WAIT_SECONDS), "Ask POST was not admitted by A"
+                wire.publish("b")
+                os.write(fd, b"r")
+                assert h.wait_for_fixture_state(process, fd, output,
+                    lambda: b"MISMATCH local " in screen(output)
+                        and b"ship the cold-start change now?" not in screen(output)
+                        and b"Press Enter again to send" not in screen(output),
+                    timeout=WAIT_SECONDS), "A question/editor/confirmation survived B failure"
+                assert h.wait_for_fixture_event(process, fd, output, b_asks,
+                    timeout=WAIT_SECONDS), "B failing asks read was not observed"
+                h.palette_go(process, fd, output, b"go Keepers", b"MASC Keepers")
+                answer.release.set()
+                wire.publish("b-after-late")
+                os.write(fd, b"r")
+                assert h.wait_for_fixture_state(process, fd, output,
+                    lambda: b"b.settled" in screen(output), timeout=WAIT_SECONDS)
+                # This one full refresh reads asks once. A withdrawn answer
+                # must not add its chained reload to the successor workspace.
+                with wire.lock:
+                    assert sum(e["event"] == "asks" and e["phase"] == "b-after-late"
+                               for e in wire.events) == 1, wire.events
+                h.palette_go(process, fd, output, b"go Approvals", b"MASC Approvals")
+                assert b"Enter:answer" not in screen(output)
+                assert b"ship the cold-start change now?" not in screen(output)
+                assert len([p for p, _ in posts if p == h.KEEPER_ASK_ANSWER_PATH]) == int(submit)
+                os.write(fd, b"q")
+            finally:
+                answer.release.set()
+        h.run_terminal_scenario(binary,
+            description=f"Ask editor and held submit are withdrawn with workspace (admitted={submit})",
+            interact=interact, prepare_workspace=wire.prepare, http_fixtures=fixtures,
+            http_requests=posts, refresh=30.0, terminal_rows=40, terminal_cols=TERMINAL_COLUMNS)
+
+
+def github_workspace_withdrawal(binary: str) -> None:
+    fixtures = h.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
+    wire = WorkspaceWire(fixtures[ROSTER_PATH][1])
+    release = threading.Event()
+    def chunks():
+        yield b'data: {"text":"A-device-code-visible"}\n\n'
+        assert release.wait(timeout=30), "GitHub stream was not released"
+        yield b'data: {"text":"A-late-device-code-forbidden"}\n\n'
+    def identity():
+        with wire.lock:
+            phase = wire.phase
+        return 200, {"hostname": "github.com", "effective": {
+            "authenticated": True, "login": phase + "-github-current", "scopes": []}}
+    fixtures.update({ROSTER_PATH: wire.roster, "/health": wire.health,
+        "/health?full=1": wire.health, "/api/v1/keepers/alpha/github-identity": identity,
+        "/api/v1/keepers/alpha/github-login": h.StreamingHttpResponse(chunks)})
+    posts: h.HttpRequests = []
+    def interact(process, fd, _slave, output, _base):
+        def await_screen(predicate):
+            assert h.wait_for_fixture_state(process, fd, output,
+                lambda: predicate(screen(output)), timeout=WAIT_SECONDS)
+        try:
+            h.tab_until(process, fd, output, b"MASC Keepers")
+            h.select_keeper_row(process, fd, output, b"alpha")
+            h.send_and_wait(process, fd, output, b"\r", b"Total Turns:")
+            title_rows = [row for row, text in h.screen_rows(bytes(output)).items()
+                          if b"Info" in text and b"GitHub" in text]
+            assert len(title_rows) == 1
+            h.press_label_on_screen(process, fd, output, b"GitHub", row=title_rows[0],
+                                    needle=b"a-github-current")
+            h.send_and_wait(process, fd, output, b"L", b"A-device-code-visible")
+            wire.publish("b")
+            await_screen(lambda text: b"MISMATCH local " in text and b"A-device-code-visible" not in text)
+            boundary = len(output)
+            release.set()
+            wire.publish("b-after-late")
+            # Re-entering obtains a fresh, stamped B observation after the
+            # server released the stale stream; it cannot recreate A's view.
+            h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+            await_screen(lambda text: b"b.settled" in text)
+            h.select_keeper_row(process, fd, output, b"alpha")
+            h.send_and_wait(process, fd, output, b"\r", b"GitHub")
+            title_rows = [row for row, text in h.screen_rows(bytes(output)).items()
+                          if b"Info" in text and b"GitHub" in text]
+            assert len(title_rows) == 1
+            h.press_label_on_screen(process, fd, output, b"GitHub", row=title_rows[0],
+                                    needle=b"b-after-late-github-current")
+            await_screen(lambda text: b"b-after-late-github-current" in text)
+            assert b"A-late-device-code-forbidden" not in h.CSI_RE.sub(b"", bytes(output[boundary:]))
+            assert len([p for p, _ in posts if p.startswith("/api/v1/keepers/alpha/github-login")]) == 1
+            h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+            os.write(fd, b"q")
+        finally:
+            release.set()
+    h.run_terminal_scenario(binary,
+        description="GitHub device stream cannot restore a withdrawn workspace view",
+        interact=interact, prepare_workspace=wire.prepare, http_fixtures=fixtures,
+        http_requests=posts, refresh=0.5, terminal_rows=45, terminal_cols=300)
+
+
 if __name__ == "__main__":
     binary = str(Path(sys.argv[1]).resolve())
     artifact_root = os.environ.get("RUNNER_TEMP")
@@ -756,6 +966,10 @@ if __name__ == "__main__":
             "binary_sha256": hashlib.sha256(Path(binary).read_bytes()).hexdigest(),
             "scenario_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
         }, indent=2) + "\n")
+    bundle_identity_during_read(binary)
+    settings_editor_workspace_change(binary)
+    ask_workspace_withdrawal(binary)
+    github_workspace_withdrawal(binary)
     run(binary, captures)
     queued_workspace_inputs(binary)
     scoped_roster_authority(binary)

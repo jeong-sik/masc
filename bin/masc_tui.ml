@@ -1994,6 +1994,9 @@ type http_surface_results = {
    and nothing else, so there are no surfaces to carry. *)
 type http_refresh_outcome =
   | Refresh_surfaces of http_surface_results
+  | Refresh_workspace_unconfirmed of
+      { detail : string; unreachable : bool;
+        approval_ticket : Approval.Listing_order.ticket option }
   | Refresh_server_booting of
       { identity : (Tui_decode.server_identity, string) result
       ; (* The ticket [start_http_refresh] took before the probe went
@@ -2052,6 +2055,7 @@ let decode_play_mutation decode = function
 
 type async_msg =
   | Workspace_scoped of workspace_authority * async_msg
+  | Workspace_identity_unconfirmed of string
   | Lane_package_preview_loaded of int * string * (Yojson.Safe.t, string) result
   | Keeper_queue_loaded of string * int option * Masc_tui_queue_inspection.action * (string list, string) result
   | Lane_addons_loaded of int * (lane_addons_reply, lane_addons_failure) result
@@ -2496,6 +2500,18 @@ let enqueue_async mailbox msg =
 let workspace_enqueue state =
   let authority = state.workspace_authority in
   fun mailbox message -> enqueue_async mailbox (Workspace_scoped (authority, message))
+
+let check_workspace_request state ~mailbox ~authority ~identity ~host ~port () =
+  if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
+  else
+    let reading = Masc_tui_loader.load_server_identity ~host ~port in
+    if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
+    else if Masc_tui_types.server_workspace_matches ~expected:identity reading then Ok ()
+    else begin
+      let detail = "Workspace identity changed or is unavailable; request withdrawn" in
+      enqueue_async mailbox (Workspace_scoped (authority, Workspace_identity_unconfirmed detail));
+      Error detail
+    end
 
 (* Retire the cancellation context synchronously at the authority boundary,
    including while a request is connecting. Completion stamps also reject a
@@ -4523,6 +4539,9 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
    finish in the browser. When the stream ends the tab re-reads the
    identity observation, which is the fact the login was for. *)
 let launch_github_login state ~mailbox keeper_name =
+  let enqueue_async = workspace_enqueue state in
+  let authority = state.workspace_authority in
+  let identity = state.server_identity in
   let host = server_peer_host in
   let port = state.port in
   (* Read once, at the key press: ticking another scope while the device flow
@@ -4568,6 +4587,8 @@ let launch_github_login state ~mailbox keeper_name =
         in
         let result =
           try
+            let ( let* ) = Result.bind in
+            let* () = check_workspace_request state ~mailbox ~authority ~identity ~host ~port () in
             Masc_tui_http.post_keeper_github_login_streaming ~clock ~host
               ~port ~keeper_name ~scopes
               ~on_chunk:flush_lines
@@ -4579,19 +4600,22 @@ let launch_github_login state ~mailbox keeper_name =
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
+      fork_workspace_job state ~sw run
   | None ->
       enqueue_async mailbox
         (Github_login_finished (keeper_name, Error "Eio switch is unavailable"))
 
 let launch_github_token_save state ~mailbox keeper_name token =
+  let enqueue_async = workspace_enqueue state in
+  let authority = state.workspace_authority in
+  let identity = state.server_identity in
   let host = server_peer_host in
   let port = state.port in
   let run () =
     let result =
       try
+        let ( let* ) = Result.bind in
+        let* () = check_workspace_request state ~mailbox ~authority ~identity ~host ~port () in
         Masc_tui_http.post_keeper_github_token ~host ~port ~keeper_name ~token ()
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -4601,9 +4625,7 @@ let launch_github_token_save state ~mailbox keeper_name token =
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
+      fork_workspace_job state ~sw run
   | None ->
       enqueue_async mailbox
         (Github_token_saved (keeper_name, Error "Eio switch is unavailable"))
@@ -11196,8 +11218,18 @@ let load_http_surfaces ~host ~port ~approval_ticket ~board_sort
         ~board_sort ~board_hearth ~system_log_level ~provider_history_days
         ~needs:{ needs with needs_asks = true }
     in
-    Refresh_surfaces
-      { http_overview; http_approvals; http_scoped; http_server_identity }
+    let identity_after = load_server_identity ~host ~port in
+    if Masc_tui_types.server_is_booting identity_after then
+      Refresh_server_booting { identity = identity_after; approval_ticket }
+    else if Masc_tui_types.server_workspace_matches
+        ~expected:(Result.to_option http_server_identity) identity_after then
+      Refresh_surfaces
+        { http_overview; http_approvals; http_scoped; http_server_identity = identity_after }
+    else Refresh_workspace_unconfirmed
+        { detail = "Workspace identity changed or unavailable during surface collection; bundle discarded";
+          unreachable = Result.is_error http_server_identity && Result.is_error identity_after
+            && Result.is_error http_overview;
+          approval_ticket }
   end
 
 let apply_http_scoped_surfaces state results =
@@ -11294,6 +11326,16 @@ let withdraw_keeper_workspace_presentation state ~previous =
   state.approval_snapshot <- None;
   state.approvals_error <- None;
   state.approval_detail_open <- false;
+  state.asks_snapshot <- None;
+  state.asks_error <- None;
+  state.ask_answer_mode <- Ask_browsing;
+  state.ask_cursor <- 0;
+  state.ask_question_cursor <- 0;
+  state.ask_question_scroll <- 0;
+  state.ask_draft <- None;
+  state.ask_text_entry <- None;
+  state.pending_ask_submit <- None;
+  state.ask_submit_inflight <- false;
   state.runtime_pick_keeper <- None;
   state.runtime_pick_list <- Masc_tui_pick_list.closed;
   state.runtime_catalog <- [];
@@ -11394,11 +11436,14 @@ let withdraw_keeper_workspace_presentation state ~previous =
 
 let apply_server_identity_reading state reading =
   let previous = state.workspace_identity in
+  let previous_server = state.server_identity in
   state.server_identity <- Masc_tui_types.server_identity_of_refresh reading;
   state.workspace_identity <-
     Masc_tui_types.workspace_identity_of_refresh
       ~local_base_path:state.local_base_path reading;
-  let same_workspace = match previous, state.workspace_identity with
+  let same_workspace =
+    Masc_tui_types.server_workspace_matches ~expected:previous_server reading
+    && match previous, state.workspace_identity with
     | Workspace_identity_match, Workspace_identity_match -> true
     | Workspace_identity_mismatch prior, Workspace_identity_mismatch current ->
       String.equal prior.server_base_path current.server_base_path
@@ -11417,12 +11462,8 @@ let apply_server_identity_reading state reading =
     withdraw_keeper_workspace_presentation state ~previous
   end;
   match state.workspace_identity with
-  | Masc_tui_types.Workspace_identity_mismatch current ->
-    let same_remote = match previous with
-      | Workspace_identity_mismatch prior ->
-        String.equal prior.server_base_path current.server_base_path
-      | Workspace_identity_match | Workspace_identity_unread -> false
-    in
+  | Masc_tui_types.Workspace_identity_mismatch _ ->
+    let same_remote = same_workspace in
     clear_local_workspace ~keep_keeper_rows:same_remote state;
     apply_keeper_log_snapshot state
       { entries = []; error = Some Metrics_tail.Remote_workspace };
@@ -11489,7 +11530,17 @@ let apply_server_booting state ~identity ~approval_ticket =
     approval_ticket;
   state.connection_status <- Masc_tui_types.Booting
 
+let apply_workspace_unconfirmed state ~detail ~unreachable ~approval_ticket =
+  apply_server_identity_reading state (Error detail);
+  Option.iter (fun ao_ticket ->
+    apply_approval_observation state {ao_ticket; ao_result = Error detail}) approval_ticket;
+  state.connection_status <-
+    (if unreachable then Masc_tui_types.Disconnected else Masc_tui_types.Degraded);
+  add_event state "error" detail
+
 let apply_http_refresh_outcome state = function
+  | Refresh_workspace_unconfirmed { detail; unreachable; approval_ticket } ->
+    apply_workspace_unconfirmed state ~detail ~unreachable ~approval_ticket
   | Refresh_surfaces results -> apply_http_surfaces state results
   | Refresh_server_booting { identity; approval_ticket } ->
     apply_server_booting state ~identity ~approval_ticket
@@ -12496,12 +12547,18 @@ let apply_ask_answer_completion state answered_label result asks =
 (* TEL-OK: the TUI-local submit gate emits user-visible events here; the
    ask-answer endpoint owns the durable answer telemetry. *)
 let start_ask_answer state ~keeper_name ~ask_id ~answered_label ~answers ~mailbox =
+  let enqueue_async = workspace_enqueue state in
+  let authority = state.workspace_authority in
+  let identity = state.server_identity in
   state.ask_submit_inflight <- true;
   let host = server_peer_host in
   let port = state.port in
+  let check () = check_workspace_request state ~mailbox ~authority ~identity ~host ~port () in
   let run_action () =
     let result =
       try
+        let ( let* ) = Result.bind in
+        let* () = check () in
         Masc_tui_http.post_keeper_ask_answer ~host ~port ~keeper_name ~ask_id
           ~answers ~session_id:None
       with
@@ -12509,26 +12566,21 @@ let start_ask_answer state ~keeper_name ~ask_id ~answered_label ~answers ~mailbo
       | exn -> Error (Printexc.to_string exn)
     in
     let asks =
-      try Masc_tui_http.fetch_keeper_asks ~host ~port () with
+      try
+        let ( let* ) = Result.bind in
+        let* () = check () in
+        let* asks = Masc_tui_http.fetch_keeper_asks ~host ~port () in
+        let* () = check () in
+        Ok asks
+      with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error ("asks reload failed: " ^ Printexc.to_string exn)
     in
     enqueue_async mailbox (Ask_answer_done (answered_label, result, asks))
   in
   match Eio_context.get_switch_opt () with
-  | Some sw -> Eio.Fiber.fork ~sw run_action
-  | None ->
-      let result =
-        try
-          Masc_tui_http.post_keeper_ask_answer ~host ~port ~keeper_name ~ask_id
-            ~answers ~session_id:None
-        with exn -> Error (Printexc.to_string exn)
-      in
-      let asks =
-        try Masc_tui_http.fetch_keeper_asks ~host ~port () with
-        | exn -> Error ("asks reload failed: " ^ Printexc.to_string exn)
-      in
-      apply_ask_answer_completion state answered_label result asks
+  | Some sw -> fork_workspace_job state ~sw run_action
+  | None -> run_action ()
 
 let handle_ask_submit state ~mailbox =
   match selected_ask_row state with
@@ -13834,6 +13886,9 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
         | Keeper_chat_done (_, _, _, acknowledge) ->
           ignore (Eio.Promise.try_resolve acknowledge ())
         | _ -> ())
+  | Workspace_identity_unconfirmed detail ->
+      apply_server_identity_reading state (Error detail);
+      report_action state "error" detail
   | Lane_package_preview_loaded (generation,path,result) ->
       map_lane_addons state (fun view ->
         if view.generation<>generation then view else
@@ -14132,6 +14187,13 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
         state.voice_floor <- None;
         chat_notice state ~keeper_name:(Some keeper) ~kind:Notice_failure
           ("voice failed: " ^ error))
+  | Http_refresh_done (Refresh_workspace_unconfirmed { detail; unreachable; approval_ticket }) ->
+      http_refresh_inflight := false;
+      state.http_refresh_started_ns <- None;
+      apply_workspace_unconfirmed state ~detail ~unreachable ~approval_ticket;
+      react_to_server_contact state ~base_path ~host:server_peer_host
+        ~port:state.port ~http_refresh_inflight ~http_scoped_refresh_inflight
+        ~scoped_refresh_followup ~mailbox
   | Http_refresh_done (Refresh_server_booting { identity; approval_ticket }) ->
       http_refresh_inflight := false;
       state.http_refresh_started_ns <- None;
@@ -19154,6 +19216,9 @@ and is loaded on demand through keeper_skill.
             (row.Tui_decode.pr_key ^ ": clear failed: " ^ detail)))
   in
   let handle_keeper_settings_edit () =
+    let authority = state.workspace_authority in
+    let identity = state.server_identity in
+    let check () = check_workspace_request state ~mailbox:async_messages ~authority ~identity ~host ~port () in
     match selected_keeper state with
     | None ->
       (* Every other outcome of this handler reports: no $EDITOR, a load
@@ -19168,8 +19233,12 @@ and is loaded on demand through keeper_skill.
           "no $EDITOR set; export EDITOR to edit keeper settings here"
       | Some _ -> (
         match
-          Masc_tui_loader.load_keeper_config_editor ~host ~port
-            ~keeper_name:keeper.k_name
+          let ( let* ) = Result.bind in
+          let* () = check () in
+          let* observed = Masc_tui_loader.load_keeper_config_editor ~host ~port
+              ~keeper_name:keeper.k_name in
+          let* () = check () in
+          Ok observed
         with
         | Error detail -> report_action state "error" detail
         | Ok (observed, stem) ->
@@ -19213,7 +19282,11 @@ and is loaded on demand through keeper_skill.
                   report_action state "system"
                     (keeper.k_name ^ ": no settings changed")
               | Ok patch -> (
-                match
+                match check () with
+                | Error detail ->
+                  apply_server_identity_reading state (Error detail);
+                  report_action state "error" (keeper.k_name ^ ": settings not saved: " ^ detail)
+                | Ok () -> match
                   Masc_tui_http.post_keeper_config ~host ~port
                     ~keeper_name:keeper.k_name
                     ~patch_json:(Yojson.Safe.to_string patch)

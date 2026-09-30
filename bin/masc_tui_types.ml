@@ -91,6 +91,19 @@ let server_is_booting
   | Ok { Tui_decode.sid_state_ready = Some true | None; _ } | Error _ -> false
 ;;
 
+(* A bundle or action belongs to one complete server workspace identity.
+   Dynamic health counters do not change that authority; missing identity or
+   a booting successor cannot authorize use of an earlier observation. *)
+let server_workspace_matches ~expected reading =
+  match expected, reading with
+  | Some before, Ok after ->
+      before.Tui_decode.sid_base_path <> "" && before.sid_masc_root <> ""
+      && String.equal before.sid_base_path after.Tui_decode.sid_base_path
+      && String.equal before.sid_masc_root after.sid_masc_root
+      && not (server_is_booting reading)
+  | None, (Ok _ | Error _) | Some _, Error _ -> false
+;;
+
 type workspace_authority = Workspace_authority of int
 
 type workspace_identity =

@@ -78,17 +78,20 @@ val about_cached_frames : unit -> int
 
 val about_rows :
   style:style -> cols:int -> rows:int -> caption:string list ->
-  frame:int -> keepers:string list ->
+  frame:int -> keepers:(string * Keeper_portrait_look.equipment option) list ->
   display:Masc_tui_portrait_view.display ->
   project:(Masc_tui_terminal_palette.rgb -> Masc_tui_terminal_palette.projected_color option) ->
   origin:int * int -> about_laid_out
 (** One finite arrival from the registered Keeper roster. Portraits retain
-    their roster identity in Kitty and mosaic displays; names that cannot fit
+    their raw roster identity and observed equipment in Kitty and mosaic
+    displays. [None] equipment retains the safe name and count without
+    drawing a portrait. Names that cannot fit
     appear in the +N count. The answer is still after [final_frame]. *)
 
 val about_body :
   cols:int -> rows:int -> caption:string list -> frame:int ->
-  keepers:string list -> origin:int * int -> string list
+  keepers:(string * Keeper_portrait_look.equipment option) list ->
+  origin:int * int -> string list
 (** {!about_rows} using the current terminal display and portrait placements. *)
 
 (** How many Keepers /about can say the workspace holds. *)

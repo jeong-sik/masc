@@ -16218,7 +16218,16 @@ let render_about (state : state) =
         ~keepers:(match keepers with
           | Masc_tui_emblem_screen.Keepers_read _ ->
               List.map (fun (keeper : Tui_decode.keeper) ->
-                Terminal_text.single_line keeper.k_name) state.keepers
+                let equipment =
+                  match (keeper_reading state keeper).Keeper_control.liveness with
+                  | Keeper_control.Present runtime ->
+                    (match runtime.kr_portrait with
+                     | Tui_decode.Ready equipment -> Some equipment
+                     | Tui_decode.Unavailable _ -> None)
+                  | Keeper_control.Unobserved | Keeper_control.Absent
+                  | Keeper_control.Invalid _ -> None
+                in
+                keeper.k_name, equipment) state.keepers
           | Masc_tui_emblem_screen.Keepers_unreadable
           | Masc_tui_emblem_screen.Keepers_unread -> [])
         ~caption:

@@ -11143,7 +11143,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
        | Reconnecting -> Masc_tui_types.Reconnecting
        | Disconnected | Connecting -> Masc_tui_types.Connecting);
     let needs =
-      Masc_tui_types.full_refresh_needs
+      Masc_tui_types.full_refresh_needs ~about_open:state.about_open
         ~scoped_refresh_inflight:!scoped_refresh_inflight
         ~keeper_pane_drawn:
           (not (Masc_tui_render.acting_pane_suppressed state))
@@ -17255,7 +17255,7 @@ let main
      change, rather than asking each of the places that change it to remember. *)
   let drawn_needs =
     ref
-      (Masc_tui_types.surface_needs
+      (Masc_tui_types.surface_needs ~about_open:state.about_open
          ~keeper_pane_drawn:(not (Masc_tui_render.acting_pane_suppressed state))
          state.view)
   in
@@ -26409,7 +26409,7 @@ and is loaded on demand through keeper_skill.
          once per distinct [surface_needs] record. A scoped refresh neither
          repeats them nor changes connection status. *)
       let needed =
-        Masc_tui_types.surface_needs
+        Masc_tui_types.surface_needs ~about_open:state.about_open
           ~keeper_pane_drawn:
             (not (Masc_tui_render.acting_pane_suppressed state))
           state.view

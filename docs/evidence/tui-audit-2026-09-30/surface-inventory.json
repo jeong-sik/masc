@@ -835,5 +835,31 @@
     "review": "system_audit and agenda_finish source PASS exact head; constructor P1 and hidden History Enter P2 repaired; no unresolved P0/P1/P2",
     "validation": "OCaml syntax of four product implementations/two interfaces/existing keys test, Python AST and diff checks; imported14-case fixture unexecuted",
     "execution": "not run under source-only policy"
+  },
+  "tools_integration_stack": {
+    "pr": 40325,
+    "base_pr": 40320,
+    "base_head": "25e7d7fe1255ffaa5a9e1907939e658ce0bca0cf",
+    "head": "2961d59a3813071d9098774d302e52af0e83a9a2",
+    "imported_pr": 40263,
+    "imported_head": "7dc1f9df828e41f32d2bed6d34be41f9f9942ff2",
+    "imported_base": "04256f2b1d46fe9d49f884215b2d6c0025defa3a",
+    "scope": "complete literal revisions/timestamps/roots/errors across5Tools panes; full usage composition batches/nodes/dependencies; actualphysicalrows sharednavigation",
+    "review": "system_audit and agenda_finish source PASS exact head, no introduced P0/P1/P2; inherited action-target visibility remains follow-up",
+    "validation": "OCaml implementation/interface syntax and Python AST PASS; base-to-head diffcheck reports test/dune:7725 extra blank EOF (P3 deferred); usage-only10case fixture unexecuted",
+    "execution": "not run under source-only policy",
+    "remaining": [
+      "Existing J/K semantic Skill selection does not follow document scroll; action-target visibility not repaired",
+      "P3 test/dune:7725 extra blank EOF"
+    ]
+  },
+  "prompts_integration_preparation": {
+    "branch": "fix/tui-prompts-integration-stack-20260930",
+    "head": "20871465e32ebdf5bd21f1d3433983fc70be25ec",
+    "base_head": "2961d59a3813071d9098774d302e52af0e83a9a2",
+    "imported_pr": 40254,
+    "imported_head": "962a592aab93ffb3ddcdd6ec1a92a4f8a1bcca45",
+    "status": "local source integration prepared, not pushed or independently reviewed",
+    "validation": "syntax/AST only; fixture unexecuted"
   }
 }

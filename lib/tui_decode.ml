@@ -7576,6 +7576,11 @@ let standalone_lane_answer (lane : standalone_lane) =
          inventory and rendered prompt as Input, the proposal as Output, \
          outcome, and selected slot."
     }
+  | Standalone_lane.Candle_appraiser ->
+    { sla_output_meaning =
+        "Output meaning: the validated payout grade, each candidate Task's relation to the Goal, and Keeper weights, or no contributor."
+    ; sla_evidence = structured_output_without_ledger
+    }
   | Standalone_lane.Verifier ->
     { sla_output_meaning =
         "Output meaning: Task completion or Goal proof verdict, reason, and \
@@ -7686,6 +7691,7 @@ let decode_standalone_lane json =
     | Standalone_lane.Librarian
     | Standalone_lane.Hitl_auto_judge
     | Standalone_lane.Workspace_curator
+    | Standalone_lane.Candle_appraiser
     | Standalone_lane.Verifier
     | Standalone_lane.Browser_stagehand -> Ok None
   in
@@ -10074,6 +10080,7 @@ let decode_librarian_run_page json =
          | Standalone_lane.Hitl_auto_judge
          | Standalone_lane.Board_attention
          | Standalone_lane.Workspace_curator
+         | Standalone_lane.Candle_appraiser
          | Standalone_lane.Verifier
          | Standalone_lane.Browser_stagehand -> None)
       rows
@@ -10319,6 +10326,7 @@ let decode_lane_run_gate_judgment ~(lane : Standalone_lane.t) ~status ~output =
   | Standalone_lane.Librarian
   | Standalone_lane.Board_attention
   | Standalone_lane.Workspace_curator
+  | Standalone_lane.Candle_appraiser
   | Standalone_lane.Verifier
   | Standalone_lane.Browser_stagehand -> Ok Lane_run_not_gate_judgment
   | Standalone_lane.Hitl_auto_judge ->
@@ -10534,6 +10542,7 @@ let decode_lane_run_detail json =
       | Standalone_lane.Librarian
       | Standalone_lane.Hitl_auto_judge
       | Standalone_lane.Workspace_curator
+      | Standalone_lane.Candle_appraiser
       | Standalone_lane.Verifier
       | Standalone_lane.Browser_stagehand ->
         false
@@ -10633,6 +10642,7 @@ let decode_lane_run_detail json =
     | Standalone_lane.Librarian
     | Standalone_lane.Board_attention
     | Standalone_lane.Workspace_curator
+    | Standalone_lane.Candle_appraiser
     | Standalone_lane.Verifier
     | Standalone_lane.Browser_stagehand -> decode_judgment ()
   in
@@ -12710,3 +12720,40 @@ let play_revoke_http_error ~status_code ~body =
   | Ok detail -> Printf.sprintf "%s (HTTP %d: controller release failed)"
       (sanitize_terminal_text detail) status_code
   | Error _ -> http_status_error ~status_code ~body
+
+(* The play routes refuse with [{error: <code>, message: <sentence>}] and add
+   what is missing ([missing]) or who holds the name ([taken_by]) as a further
+   field. [http_status_error] reads only [error], which is the code, and would
+   leave the operator with "HTTP 409: not_ready". A refusal about the
+   credential (401, 403) is worded where the credential is known, a status
+   that is not a client refusal is not a refusal, and a body with no sentence
+   in it has nothing to add, so all three answer [None]. *)
+let play_invite_refusal ~status_code ~body =
+  if status_code < 400 || status_code >= 500 || status_code = 401 || status_code = 403
+  then None
+  else (
+    match Yojson.Safe.from_string body with
+    | exception Yojson.Json_error _ -> None
+    | `Assoc fields ->
+      let text_of = function
+        | `String value when String.trim value <> "" ->
+          Some (sanitize_terminal_text (String.trim value))
+        | `String _ | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _ ->
+          None
+      in
+      let text field = Option.bind (List.assoc_opt field fields) text_of in
+      let gaps =
+        match List.assoc_opt "missing" fields with
+        | Some (`List gaps) -> List.filter_map text_of gaps
+        | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _) | None -> []
+      in
+      Option.map
+        (fun sentence ->
+          let details =
+            (if gaps = [] then [] else [ "missing: " ^ String.concat ", " gaps ])
+            @ Option.to_list (Option.map (fun holder -> "held by a " ^ holder) (text "taken_by"))
+          in
+          Printf.sprintf "HTTP %d: %s%s" status_code sentence
+            (if details = [] then "" else " (" ^ String.concat "; " details ^ ")"))
+        (text "message")
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None)

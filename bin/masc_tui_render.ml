@@ -28,7 +28,6 @@ module Keeper_chat = Masc_tui_keeper_chat_projection
 module Keeper_chat_diff = Masc_tui_keeper_chat_diff
 module Keeper_chat_transcript = Masc_tui_keeper_chat_transcript
 module Render_schedule = Masc_tui_render_schedule
-module Overview_goals = Masc_tui_overview_goals
 module Overview_providers = Masc_tui_overview_providers
 module Layout = Masc_tui_layout
 module Agenda = Masc_tui_agenda
@@ -139,7 +138,7 @@ let acting_pane_suppressed (state : state) =
 
 let acting_pane_columns (state : state) ~terminal_cols =
   if acting_pane_suppressed state then 0
-  else Masc_tui_acting_pane.drawn_cols ~layout:state.acting_pane_layout ~cols:terminal_cols
+  else Masc_tui_acting_pane.drawn_cols ~layout:(acting_pane_layout state) ~cols:terminal_cols
 
 (* The runtime picker measures this string to decide its column widths, so the
    format lives beside that arithmetic. *)
@@ -206,51 +205,6 @@ let workspace_health_label = function
   | Workspace_health_ok -> "ok"
   | Workspace_health_unknown -> "unknown"
 
-(* Syslog's own names for these levels, which is why "crit" is the word and
-   not a short spelling of one. The level used to read "critical" and the
-   badge fitted it to five cells, so the row that most needed reading was the
-   only one drawn cut: [crit~]. *)
-let attention_severity_label = function
-  | Attention_critical -> "crit"
-  | Attention_bad -> "bad"
-  | Attention_warning -> "warn"
-  | Attention_info -> "info"
-
-let attention_severity_color = function
-  | Attention_critical | Attention_bad -> (Theme.bad ())
-  | Attention_warning -> (Theme.warn ())
-  | Attention_info -> (Theme.info ())
-
-(* The badge column, measured from the vocabulary rather than chosen for it.
-   Fitting the label to a fixed five cells did two things: it cut the longest
-   level, and it padded the shorter ones inside their own brackets, which drew
-   [bad  ] and [warn ] -- a gap before a closing bracket reads as a typo, not
-   as a column. Taking the width from the labels means a level added or
-   renamed later widens the column instead of being cut by it.
-
-   Critical and bad share a colour (see above), so the word is the only thing
-   that tells those two rows apart. That is the reason the word may not be
-   cut, and the reason this is measured instead of assumed. *)
-let attention_severity_badge_cells =
-  let bracket_cells = 2 in
-  bracket_cells
-  + List.fold_left
-      (fun widest severity ->
-        max widest
-          (Message_layout.display_width (attention_severity_label severity)))
-      0
-      [ Attention_critical; Attention_bad; Attention_warning; Attention_info ]
-
-(* [level] in its colour, padded to the column outside the colour so a theme
-   that paints a background does not paint the gap. *)
-let attention_severity_badge severity =
-  let drawn = "[" ^ attention_severity_label severity ^ "]" in
-  attention_severity_color severity
-  ^ drawn ^ Ansi.reset
-  ^ String.make
-      (max 0 (attention_severity_badge_cells - Message_layout.display_width drawn))
-      ' '
-
 (* Blame reaches further back than the two surfaces [keeper_lane_idle_text]
    serves. A line untouched since a repository's first year is ordinary, and
    "3684d" is not a reading anyone converts in their head. Weeks and years
@@ -316,45 +270,7 @@ let task_line (task : task) =
 (* Dashboard rows summarize sources without changing their meaning. The full
    task list lives in Work, Keeper rows in Keepers, and account windows in
    Usage. A missing reading is never projected as a zero. *)
-let dashboard_attention (state : state) =
-  Option.to_list (transport_attention_item state.transport)
-  @
-  match state.overview with
-  | None -> []
-  | Some overview -> overview.ov_attention_items
-
-(* The control plane's word for each Keeper, counted. The states that are not
-   "active" are the ones an operator acts on, so those are named; a fleet where
-   every Keeper is active says only its number. Who each one is stays on
-   Keepers. *)
-let dashboard_keeper_line (state : state) =
-  match state.overview with
-  | None -> "Keepers: not observed"
-  | Some { ov_keeper_listing = Keeper_snapshot_unread.Not_listed; _ } ->
-      "Keepers: not observed"
-  | Some { ov_keeper_listing = Keeper_snapshot_unread.Unreadable detail; _ } ->
-      "Keepers: unlisted (" ^ Terminal_text.single_line detail ^ ")"
-  | Some ({ ov_keeper_listing = Keeper_snapshot_unread.Listed; _ } as overview) ->
-      let liveness = overview.ov_keeper_liveness in
-      let parts =
-        List.filter_map
-          (fun (count, label) ->
-            if count = 0 then None
-            else Some (Printf.sprintf "%d %s" count label))
-          [ (liveness.klc_paused, "paused")
-          ; (liveness.klc_offline, "offline")
-          ; (liveness.klc_idle, "idle")
-          ; (liveness.klc_unreadable, "state unreadable")
-          ]
-      in
-      Printf.sprintf "Keepers: %d listed%s · individual state in Keepers"
-        overview.ov_keepers
-        (match parts with
-         | [] -> ""
-         | _ :: _ -> Printf.sprintf " (%s)" (String.concat ", " parts))
-
-(* The Dashboard keeps the same compact title and working layout from the
-   first frame through loading, success and failure. *)
+(* The Dashboard keeps its working layout through loading and failure. *)
 let overview_header (state : state) =
   let now = Unix.localtime (Unix.gettimeofday ()) in
   Printf.sprintf "%s  %s[%s]%s  %02d:%02d:%02d  %s"
@@ -364,155 +280,13 @@ let overview_header (state : state) =
     now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec
     (connection_badge state)
 
-let dashboard_work_lines (state : state) =
-  match state.task_flow with
-  | None ->
-      [ " Work  · task flow not observed"
-      ; (match state.tasks_error with
-         | Some error -> "   " ^ Terminal_text.single_line error
-         | None -> "   Waiting for a durable task snapshot") ]
-  | Some flow ->
-      let recent = flow.Masc_tui_task_flow.recent in
-      let current = flow.current in
-      let completed =
-        List.map
-          (fun (day : Masc_tui_task_flow.day) -> day.d_completed)
-          flow.daily
-      in
-      [ Printf.sprintf " Work  · 24h: %d created · %d currently done · %d currently cancelled"
-          recent.created recent.completed recent.cancelled
-      ; Printf.sprintf "   Open: %d working · %d awaiting verification · %d claimed · %d todo"
-          current.in_progress current.awaiting_verification current.claimed
-          current.todo
-      ; Printf.sprintf "   Currently done by UTC day (%d days): %s"
-          (List.length flow.daily) (Chart.sparkline ~min:0 completed) ]
-      @ (match state.tasks_error with
-         | None -> []
-         | Some reason ->
-             [ "   Coverage: " ^ Terminal_text.single_line reason ])
-
-let dashboard_preview_rows = 2
-
-let dashboard_goal_lines (state : state) =
-  match state.overview_goals with
-  | Goals_unread -> [ " Goals · not observed" ]
-  | Goals_failed reason ->
-      [ " Goals · unavailable: " ^ Terminal_text.single_line reason ]
-  | Goals_read goals ->
-      let active = Overview_goals.drawn_goals goals in
-      let shown =
-        List.filteri (fun index _ -> index < dashboard_preview_rows) active
-      in
-      let heading =
-        Printf.sprintf " Goals · %d active · metric and linked tasks are separate"
-          (List.length active)
-      in
-      heading
-      :: (if shown = [] then [ "   No active Goal" ]
-          else
-            List.map
-              (fun (goal : Tui_decode.overview_goal) ->
-                let actual =
-                  match goal.og_measurement with
-                  | Goal_measurement_unread -> "not observed"
-                  | Goal_measurement_not_recorded -> "not recorded"
-                  | Goal_measurement_unavailable _ -> "unavailable"
-                  | Goal_measurement_reported { value; _ } ->
-                      Terminal_text.single_line value ^ " (reported)"
-                in
-                let target =
-                  match goal.og_metric, goal.og_target_value with
-                  | Some metric, Some target ->
-                      Printf.sprintf "%s → %s"
-                        (Terminal_text.single_line metric)
-                        (Terminal_text.single_line target)
-                  | Some metric, None -> Terminal_text.single_line metric
-                  | None, Some target -> Terminal_text.single_line target
-                  | None, None -> "target unavailable"
-                in
-                Printf.sprintf "   %s · actual %s · target %s · linked tasks %d/%d done"
-                  (Terminal_text.single_line goal.og_title) actual target
-                  goal.og_task_done_count goal.og_task_count)
-              shown)
-      @ (if List.length active > List.length shown then
-           [ Printf.sprintf "   +%d more Goals in Work"
-               (List.length active - List.length shown) ]
-         else [])
-
-(* A fleet with no Keeper yet has nothing to summarize, so the first screen
-   says how to make one (#39526). Only a listing that answered with zero
-   Keepers says so: an unread or failed listing is not an empty fleet. *)
-let dashboard_first_use_lines (state : state) =
-  match state.overview, state.overview_error with
-  | Some overview, None
-    when overview.ov_keeper_listing = Keeper_snapshot_unread.Listed
-         && overview.ov_keepers = 0 ->
-      [ " Start here (2 steps)"
-      ; Printf.sprintf
-          "   1. New Keeper: masc keeper-create --edit --host %s --port %d"
-          Masc_network_defaults.masc_http_loopback_peer state.port
-      ; Printf.sprintf "   2. Open Keepers with %s, select it, and press Enter."
-          Masc_tui_keys.keepers_jump.Masc_tui_keys.key
-      ; ""
-      ]
-  | (Some _ | None), (Some _ | None) -> []
-
-(* A configured opening chat that could not open says why before anything
-   else, so the operator is not left wondering why the Dashboard is showing
-   (#39727). *)
-let dashboard_opening_notice_lines (state : state) =
-  match state.opening_notice with
-  | Some reason -> [ " " ^ Terminal_text.single_line reason ]
-  | None -> []
-
-let dashboard_usage_lines (state : state) =
-  let accounts =
-    match state.overview_providers with
-    | Providers_unread -> "quota scope reports not observed"
-    | Providers_failed reason ->
-        "quota scope reports unavailable: " ^ Terminal_text.single_line reason
-    | Providers_read reading ->
-        let total = List.length reading.puws_accounts in
-        let reported =
-          List.fold_left
-            (fun count (account : Tui_decode.provider_usage_account) ->
-              match account.pua_state with
-              | Account_reported _ -> count + 1
-              | Account_not_reported_since_start -> count)
-            0 reading.puws_accounts
-        in
-        Printf.sprintf "%d/%d quota scopes reported since server start"
-          reported total
-  in
-  let quota =
-    match state.overview_quota with
-    | Quota_unread -> "runtime quota not observed"
-    | Quota_failed reason ->
-        "runtime quota unavailable: " ^ Terminal_text.single_line reason
-    | Quota_read runtimes ->
-        let blocked =
-          List.fold_left
-            (fun count (runtime : Tui_decode.runtime_option) ->
-              if runtime.ro_quota_exhausted then count + 1 else count)
-            0 runtimes
-        in
-        Printf.sprintf "%d runtime quota blocks observed" blocked
-  in
-  [ " Usage · " ^ accounts; "   " ^ quota ^ " · scope windows in Usage" ]
-
 let render_overview (state : state) =
   let terminal_rows, cols = get_terminal_size () in
-  let overview_error = Terminal_text.optional_single_line state.overview_error in
-  let unread_note =
-    match state.connection_status, state.http_refresh_started_ns with
-    | Booting, _ -> "Waiting for workspace server…"
-    | Connecting, _
-    | (Connected | Degraded | Reconnecting | Disconnected), Some _ -> "Loading…"
-    | (Connected | Degraded | Reconnecting | Disconnected), None ->
-        String.trim page_unread_note
-  in
+  let all_decisions = home_decision_rows state in
+  let continuation = home_continue_rows state in
+  let selected = home_selected_action state in
   let health =
-    match overview_error, state.overview with
+    match Terminal_text.optional_single_line state.overview_error, state.overview with
     | Some error, _ -> " Health: unavailable · " ^ error
     | None, None ->
         let status =
@@ -522,108 +296,111 @@ let render_overview (state : state) =
           | (Connected | Degraded | Reconnecting | Disconnected), Some _ ->
               "Loading Dashboard…"
           | (Connected | Degraded | Reconnecting | Disconnected), None ->
-              "not observed — press 'r' to refresh"
+              "Health: not observed — press 'r' to refresh"
         in
         " " ^ status
     | None, Some overview ->
-        Printf.sprintf " Health: %s · %s"
-          (workspace_health_label overview.ov_workspace_health)
-          (dashboard_keeper_line state)
+        " Health: " ^ workspace_health_label overview.ov_workspace_health
+        ^ (match overview.ov_keeper_listing with
+           | Keeper_snapshot_unread.Unreadable detail ->
+               " · Keepers unlisted: " ^ Terminal_text.single_line detail
+           | Not_listed -> " · Keepers not observed"
+           | Listed ->
+               match overview.ov_keeper_liveness.klc_unreadable with
+               | 0 -> ""
+               | count -> Printf.sprintf " · %d Keeper states unreadable" count)
   in
-  (* The count the tab badge and the Approvals header read: held Keeper tool
-     calls, Gate rows, confirm-queue entries and open questions.
-     [approvals_count_label] also decides the "?" tail from the same per-list
-     readings the Approvals title uses. *)
-  let approval_count = Masc_tui_types.approvals_count_label state in
-  let attention = dashboard_attention state in
-  let attention_lines =
-    (* An unread or failed overview is not an empty one: its count would
-       read as a zero the operator never saw (#39526). *)
-    let counted =
-      match attention with
-      | _ :: _ -> Printf.sprintf "%d attention items" (List.length attention)
-      | [] -> (
-          match empty_page_of ~snapshot:state.overview ~error:overview_error with
-          | Page_empty -> "0 attention items"
-          | Page_unread | Page_failed -> "attention not observed")
-    in
-    let title =
-      Printf.sprintf " Needs you · %s · %s approvals (p in Work)" counted
-        approval_count
-    in
-    let shown =
-      List.filteri (fun index _ -> index < dashboard_preview_rows) attention
-    in
-    (* The age answers "why is this still here". It is drawn when some shown
-       item carries a time; an unstamped one then shows the no-value mark, so
-       summaries start on one edge. *)
-    let shows_age =
-      List.exists
-        (fun (item : attention_item) -> Option.is_some item.ai_evidence_ts)
-        shown
-    in
-    let item_line (item : attention_item) =
-      let age_cell =
-        if not shows_age then ""
+  let work =
+    match state.task_flow, state.tasks_error with
+    | _, Some _ -> " Work: reading unavailable · open Work for the source"
+    | None, None -> " Work: not observed"
+    | Some flow, None ->
+        if flow.Masc_tui_task_flow.unparseable_timestamps > 0 then
+          " Work: partial timestamp coverage · details in Work"
         else
-          let age_label =
-            match item.ai_evidence_ts with
-            | Some ts ->
-                keeper_lane_idle_text (int_of_float (Unix.gettimeofday () -. ts))
-            | None -> Masc_tui_theme.Glyph.no_value
-          in
-          Printf.sprintf "%s%s%s " Ansi.dim (fit_width age_label 3) Ansi.reset
-      in
-      Printf.sprintf "%s %s%s"
-        (attention_severity_badge item.ai_severity)
-        age_cell
-        (Terminal_text.single_line item.ai_summary)
-    in
-    (* The note stands in for rows, so it starts where they do. *)
-    let body =
-      match shown with
-      | _ :: _ -> List.map item_line shown
-      | [] -> (
-          match empty_page_of ~snapshot:state.overview ~error:overview_error with
-          | Page_empty -> [ Ansi.dim ^ "Nothing needs attention." ^ Ansi.reset ]
-          | Page_unread ->
-              [ Ansi.dim ^ unread_note ^ Ansi.reset ]
-          | Page_failed -> [])
-    in
-    title :: List.map (fun line -> "   " ^ line) body
+          Printf.sprintf " Work: %d currently done in the last 24h · details in Work"
+            flow.Masc_tui_task_flow.recent.completed
   in
-  let summary =
-    dashboard_goal_lines state
-    @ [ "" ]
-    @ dashboard_work_lines state
-    @ [ "" ]
-    @ dashboard_usage_lines state
-    @ [ "" ]
-    @ attention_lines
-  in
-  (* The shared chrome holds the rows the budget has no room for and says how
-     many, so a short terminal that loses "Needs you" off the bottom shows
-     that something was not drawn. *)
   surface_chrome ~overflow:Fits state ~terminal_rows ~cols ~surface_key:"overview"
     ~title:(overview_header state)
     ~status:[ Masc_tui_footer.Refresh_interval state.refresh_interval ]
     ~hints:(Masc_tui_keys.footer_hints Overview)
     ~body:(fun ~budget c ->
-      Masc_tui_frame_timing.time_stage ~name:"overview.layout" (fun () ->
-          (* The first-use steps are drawn whole or not at all, and only in
-             rows the summary leaves: cut from the bottom, they would push
-             "Needs you" off a short terminal, and half a guide names a step
-             with no way to finish it (#39526). *)
-          let notice = dashboard_opening_notice_lines state in
-          let guide = dashboard_first_use_lines state in
-          let guide =
-            if List.length notice + 2 + List.length guide + List.length summary
-               <= budget
-            then guide
-            else []
+      let draw_row (action, label) =
+        let line = "  " ^ label in
+        if Some action = selected then c.push_selected line else c.push line
+      in
+      let selection_changed =
+        Option.is_some state.home_selected && Option.is_none selected
+      in
+      let warning_rows = if selection_changed then 1 else 0 in
+      (* Keep continuation and new work visible while the request window
+         follows the selected identity. All rows remain reachable with j/k. *)
+      let first, capacity = home_decision_window state ~budget in
+      let decisions = List.drop first all_decisions |> List.take capacity in
+      let actions = decisions @ continuation in
+      (* Headers and action destinations take precedence over health/history
+         context. The request window preserves continuation below it even
+         when the queue contains more rows than the viewport. *)
+      let essential_rows = List.length actions + 2 + warning_rows in
+      if budget >= essential_rows && (all_decisions = [] || capacity > 0) then begin
+        let spare = budget - essential_rows in
+        let context =
+          let readings =
+            [ (None, health); (Some (Theme.recede ()), work) ]
           in
-          notice @ [ health; "" ] @ guide @ summary)
-      |> List.iter c.push)
+          match state.opening_notice with
+          | None -> readings
+          | Some notice ->
+              let notice = (None, " " ^ Terminal_text.single_line notice) in
+              if spare < List.length readings + 1 then notice :: readings
+              else readings @ [notice]
+        in
+        let shown_context = List.take (min spare (List.length context)) context in
+        List.iter
+          (function
+            | None, text -> c.push text
+            | Some style, text -> c.push_styled ~style text)
+          shown_context;
+        let gaps = spare - List.length shown_context in
+        if gaps > 0 then c.push_empty ();
+        (match decisions with
+         | [] -> c.push_styled ~style:(Theme.recede ())
+             (if all_decisions = [] then " No decision is waiting on you."
+              else " Decision rows above · j/k to choose")
+         | _ :: _ ->
+             c.push_styled ~style:Ansi.bold
+               (if List.length decisions = List.length all_decisions then " Needs your decision"
+                else Printf.sprintf " Needs your decision · rows %d-%d/%d · j/k for more"
+                  (first + 1) (first + List.length decisions) (List.length all_decisions));
+             List.iter draw_row decisions);
+        if gaps > 1 then c.push_empty ();
+        c.push_styled ~style:Ansi.bold " Continue";
+        List.iter draw_row continuation
+      end else begin
+        (* Extremely short terminals show destinations around the selected
+           identity. j/k reaches every destination; this is a viewport limit,
+           never a limit on requests or execution. *)
+        let actions = all_decisions @ continuation in
+        let available = max 0 (budget - warning_rows) in
+        let count = List.length actions in
+        let index =
+          match List.find_index (fun (action, _) -> Some action = selected) actions with
+          | Some index -> index
+          | None -> 0
+        in
+        let show_position = available > 1 in
+        let height = max 0 (available - if show_position then 1 else 0) in
+        let first = max 0 (min index (count - height)) in
+        let window = List.drop first actions |> List.take height in
+        if show_position then
+          c.push_styled ~style:(Theme.recede ())
+            (Printf.sprintf " Home destinations · %d-%d/%d · j/k to choose"
+               (first + 1) (first + List.length window) count);
+        List.iter draw_row window
+      end;
+      if selection_changed then
+        c.push_styled ~style:(Theme.warn ()) " Selection changed · j/k to choose again")
 
 (* One task's event history, appended after the detail body so it rides the
    same scroll. Loaded lazily on detail entry; the id check drops an answer
@@ -1842,7 +1619,9 @@ let render_question_reader (state : state) =
   let asks = question_asks state in
   let selected = List.nth_opt asks state.ask_cursor in
   box_top buf cols;
-  box_line buf cols (screen_title " MASC Approvals / Questions");
+  box_line buf cols (screen_title
+    (" MASC Approvals / Questions"
+     ^ approval_list_note ~name:"questions" (approvals_questions_reading state)));
   box_line buf cols
     (match selected with
      | None -> "  No questions waiting"
@@ -1855,10 +1634,14 @@ let render_question_reader (state : state) =
            (state.ask_cursor + 1) (List.length asks) (state.ask_question_cursor + 1)
            (List.length row.ar_questions) answered Ansi.reset);
   box_line buf cols
-    (if Option.is_some state.ask_text_entry then "  Enter: save written answer · Esc: cancel writing"
-     else
-       "  Left/Right: previous/next question · [/]: previous/next ask · "
-       ^ "PgUp/PgDn: page · Home/End: top/bottom · Esc: approvals");
+    (match state.asks_error with
+     | Some error -> "  Question source unavailable · " ^ Terminal_text.single_line error
+     | None ->
+       if Option.is_some state.ask_text_entry then "  Enter: save written answer · Esc: cancel writing"
+       else
+         "  Left/Right: previous/next question · [/]: previous/next ask · "
+         ^ "PgUp/PgDn: page · Home/End: top/bottom · Esc: "
+         ^ (match state.followed_from with Some (Overview, _) -> "Dashboard" | _ -> "approvals"));
   box_divider buf cols;
   let lines, room = ask_question_viewport state in
   let limit = max 0 (List.length lines - room) in
@@ -2654,10 +2437,11 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
               Masc_tui_frame_timing.time_stage ~name:"board.thread.order"
                 (fun () -> Board_comment_thread.order comments)
             in
-            Masc_tui_frame_timing.time_stage ~name:"board.thread.rows_wrap"
-              (fun () ->
-                ordered
-                |> List.concat_map
+            let comment_lines =
+              Masc_tui_frame_timing.time_stage ~name:"board.thread.rows_wrap"
+                (fun () ->
+                  ordered
+                  |> List.concat_map
               (fun (depth, c) ->
                  let rail =
                    if depth <= 0 then ""
@@ -2723,6 +2507,15 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
                      in
                      metadata
                      @ List.map (fun line -> content_prefix ^ line) lines))
+            in
+            if List.length comments < post.bp_comment_count then
+              Printf.sprintf "  Showing %d of %d comments (o: all comments)"
+                (List.length comments) post.bp_comment_count
+              :: comment_lines
+            else
+              (* The post header already counts the complete thread. Keep
+                 the small comment viewport for its actual comment rows. *)
+              comment_lines
       in
       (body_lines, detail_lines))
   in
@@ -2850,7 +2643,9 @@ let render_board_read (state : state) (list_post : board_post) =
       ~hints:
         (Masc_tui_keys.footer_hints_board_read
            ~focus_posts:(state.board_focus = Left_pane)
-           ~focus_comments:state.board_comments_focused ~layout)
+           ~focus_comments:state.board_comments_focused
+           ~full_history:(state.board_history_post_id = Some list_post.bp_id)
+           ~layout)
   in
   Masc_tui_frame_timing.finish_stage ~name:"board.render_prep" prep_started;
   match layout with
@@ -5972,6 +5767,7 @@ let render_lane_run_list (state : state) ~(lane : Standalone_lane.t) =
     | Standalone_lane.Hitl_auto_judge
     | Standalone_lane.Board_attention
     | Standalone_lane.Workspace_curator
+    | Standalone_lane.Candle_appraiser
     | Standalone_lane.Browser_stagehand -> "ACTOR"
   in
   (* The slot takes what the drawn columns leave. *)
@@ -8624,12 +8420,12 @@ let render_system_logs (state : state) =
   box_line buf cols header;
   box_divider buf cols;
   (* The message takes what the named columns leave, asked of the columns. *)
-  let message_width =
-    Render_schedule.system_log_message_width
+  let log_layout =
+    Render_schedule.system_log_layout
       ~inner_width:(max 1 (framed_inner_width cols - 2))
   in
   let col_hdr =
-    "  " ^ Render_schedule.system_log_header_row ~message_width
+    "  " ^ Render_schedule.system_log_header_row ~layout:log_layout
   in
   box_line_styled buf cols ~style:(Theme.recede ()) col_hdr;
   box_divider buf cols;
@@ -8688,7 +8484,7 @@ let render_system_logs (state : state) =
              module name used to push every column right of it out of line. *)
           let line =
             "  "
-            ^ Render_schedule.system_log_row ~message_width ~level_style
+            ^ Render_schedule.system_log_row ~layout:log_layout ~level_style
                 ~styles:
                   { Render_schedule.slog_time_style = Ansi.dim
                   ; slog_module_style =
@@ -10796,12 +10592,12 @@ let render_repository_list (state : state) =
     ~body:(fun ~budget c ->
       (* The path takes what the named columns leave, asked of the columns
          rather than of a constant standing in for their total. *)
-      let path_width =
-        Render_schedule.workspace_path_width
+      let repository_layout =
+        Render_schedule.workspace_layout
           ~inner_width:(max 1 (framed_inner_width cols - 2))
       in
       c.push_styled ~style:(Theme.recede ())
-        ("  " ^ Render_schedule.workspace_header_row ~path_width);
+        ("  " ^ Render_schedule.workspace_header_row ~layout:repository_layout);
       c.push_divider ();
       (match state.repositories_error with
        | None -> ()
@@ -10847,7 +10643,7 @@ let render_repository_list (state : state) =
               let open Masc.Tui_decode in
               let line =
                 "  "
-                ^ Render_schedule.workspace_row ~path_width
+                ^ Render_schedule.workspace_row ~layout:repository_layout
                     { Render_schedule.wrow_name =
                         Terminal_text.single_line r.rp_name
                     ; wrow_branch =
@@ -16238,7 +16034,19 @@ let render_surface (state : state) =
                in
                render_planning_detail state
                  ~armed:(goal_action_armed_for state goal_id) ~confirmation goal
-           | None -> render_planning_list state)
+           | None ->
+               (match state.home_opened_request with
+                | Some (Home_goal_confirmation selected) when selected = goal_id ->
+                    let terminal_rows, cols = get_terminal_size () in
+                    surface_chrome ~overflow:Fits state ~terminal_rows ~cols
+                      ~surface_key:"planning_detail"
+                      ~title:("Goal · " ^ Terminal_text.single_line goal_id)
+                      ~status:[] ~hints:"Esc:Dashboard  r:refresh"
+                      ~body:(fun ~budget:_ c ->
+                        c.push (match state.planning_error with
+                          | Some error -> " Goal detail unavailable · " ^ Terminal_text.single_line error
+                          | None -> " Goal detail not read · waiting for its source"))
+                | Some _ | None -> render_planning_list state))
   | Approvals when (match state.ask_answer_mode with Ask_answering _ -> true | Ask_browsing -> false) ->
       render_question_reader state
   | Approvals ->
@@ -16537,13 +16345,34 @@ let render_palette (state : state) =
 
      The overlay contract draws the box and fills the rows under a short list
      of matches, so the footer stays on the composer's row. *)
+  let caret = "\xe2\x96\x8c" in
+  let prompt = Ansi.bold ^ prompt ^ Ansi.reset ^ " " in
+  let inner_width = framed_inner_width cols in
+  let prompt_width = Message_layout.display_width prompt in
+  let caret_width = Message_layout.display_width caret in
+  (* Keep the end being edited on screen. The masthead yields before the
+     filter loses all of its cells; it returns as the viewport grows. *)
+  let query = Terminal_text.single_line state.palette_query in
+  let title = screen_title title ^ "  " in
+  let title =
+    if Message_layout.display_width title + prompt_width + caret_width
+       + Message_layout.display_width query > inner_width
+    then "" else title
+  in
+  let query_width =
+    max 0
+      (inner_width - Message_layout.display_width title - prompt_width
+       - caret_width)
+  in
+  let query =
+    Message_layout.input_viewport ~max_cells:query_width
+      query
+  in
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"palette"
     ~frame:Chrome_overlay
     ~title:
-      (screen_title title ^ "  "
-       ^ Ansi.bold ^ prompt ^ Ansi.reset ^ " "
-       ^ (Terminal_text.single_line state.palette_query)
-       ^ ((Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "\xe2\x96\x8c" ^ Ansi.reset))
+      (title ^ prompt ^ query
+       ^ Masc_tui_theme.tone Masc_tui_theme.Accent ^ caret ^ Ansi.reset)
     (* [key:label] items, two spaces apart, the way every other footer is
        written. In the dotted form this row was one item with no colon, so
        {!Masc_tui_footer} could shed no whole key and keep no door: it fell
@@ -16728,6 +16557,54 @@ let render_link_preview_modal (state : state) =
               if index >= scroll && index < scroll + content_height then
                 c.push line)
             content_lines)
+
+(* The invite card: the link a /play invite answer carries, and its QR. Where
+   each row falls, and whether the QR fits at all, is decided by
+   [Masc_tui_play_card.draw]; this only gives each kind of row its look. The
+   QR rows arrive coloured and go in as they are: a theme colour on them would
+   turn the code into a picture that no phone reads. *)
+let play_card_indent = "  "
+
+let render_play_card (state : state) card =
+  let terminal_rows, cols = get_terminal_size () in
+  (* The window as the operator sees it. The rows and columns a frame is laid
+     out in are that less the navigation strip and any pane beside the surface,
+     so a size the card asks for is added to this, not to those. *)
+  let window_rows, window_cols = Masc_tui_ansi.get_terminal_size () in
+  surface_chrome
+    ~overflow:(Scrolled { scroll = state.play_invite_scroll;
+                          report = (fun scroll -> Play_invite_scroll scroll) })
+    state ~terminal_rows ~cols ~surface_key:"play-invite"
+    ~frame:Chrome_overlay
+    ~title:(screen_title " MASC Play invite")
+    ~hints:"j/k:scroll  y:copy link  Esc:close"
+    ~body:(fun ~budget c ->
+      let width = framed_inner_width cols - String.length play_card_indent in
+      List.iter
+        (fun row ->
+          match row with
+          | Masc_tui_play_card.Heading text ->
+              c.push_styled ~style:Ansi.bold (play_card_indent ^ text)
+          | Masc_tui_play_card.Advice text ->
+              c.push_styled ~style:(Theme.recede ()) (play_card_indent ^ text)
+          | Masc_tui_play_card.Link_row text | Masc_tui_play_card.Qr_row text ->
+              c.push (play_card_indent ^ text)
+          | Masc_tui_play_card.Note text ->
+              c.push_styled ~style:(Theme.warn ()) (play_card_indent ^ text)
+          | Masc_tui_play_card.Qr_needs { columns; rows } ->
+              (* The card counts its own cells and says what it lacks. What
+                 surrounds them -- the frame, the composer, the agenda strip,
+                 the navigation strip -- stays the same when the window grows,
+                 so the window needs what it has now plus the card's shortfall
+                 in each direction. *)
+              c.push_styled ~style:(Theme.warn ())
+                (Printf.sprintf
+                   "%sthe QR needs a window of %d columns by %d rows"
+                   play_card_indent
+                   (window_cols + max 0 (columns - width))
+                   (window_rows + max 0 (rows - budget)))
+          | Masc_tui_play_card.Blank -> c.push_empty ())
+        (Masc_tui_play_card.draw card ~width ~rows:budget))
 
 (* The record's rows and the viewport that shows them, the way
    [help_viewport] answers for the sheet: one pair for the keypress that
@@ -17062,6 +16939,29 @@ let render_lane_addons state (view : Masc_tui_lane_addons.t) =
    presses that act inside it ([press_changes_the_surface]). *)
 type drawn = Surface_drawn | Overlay_drawn
 
+(* One pure frame choice owns overlay priority for both drawing and the
+   application's preparation of state tied to an actually visible surface. *)
+let frame_choice (state : state) ~terminal_rows =
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  if Render_schedule.Viewport.requires_compact_frame ~rows then `Too_small rows
+  else match play_card_shown state with
+  | Some card -> `Play_card card
+  | None -> match state.account_login with
+  | Some view -> `Account_login view
+  | None -> match state.lane_addons with
+  | Some view -> `Lane_addons view
+  | None ->
+      if state.about_open then `About
+      else if state.palette_open then `Palette
+      else if state.context_inspector_open then `Context
+      else if state.keeper_deletions_open then `Keeper_deletions
+      else if state.help_open then `Help
+      else if state.agenda_open then `Agenda
+      else if state.answering_open then `Answering
+      else if state.patch_modal_open then `Patch
+      else if state.link_modal_open then `Link
+      else `Surface
+
 let render (state : state) =
   (* Marks number the targets of this frame alone. *)
   Masc_tui_hit.reset press_marks;
@@ -17079,45 +16979,36 @@ let render (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   (* The composer owns the terminal's last row; everything this surface
      lays out fits above it. *)
-  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  if Render_schedule.Viewport.requires_compact_frame ~rows
-  then
+  match frame_choice state ~terminal_rows with
+  | `Too_small rows ->
     let frame, clamped = render_terminal_too_small state ~rows ~cols in
     (frame, clamped, None, Overlay_drawn)
-  else match state.account_login with
-  | Some view -> let frame, clamped = render_account_login state view in (frame,clamped,None,Overlay_drawn)
-  | None -> match state.lane_addons with
-  | Some view ->
+  | `Play_card card ->
+    let frame, clamped = render_play_card state card in
+    (frame, clamped, None, Overlay_drawn)
+  | `Account_login view -> let frame, clamped = render_account_login state view in (frame,clamped,None,Overlay_drawn)
+  | `Lane_addons view ->
     let frame, clamped = render_lane_addons state view in
     (frame, clamped, None, Overlay_drawn)
-  | None -> if state.about_open then
-    let frame, clamped = render_about state in
-    (frame, clamped, None, Overlay_drawn)
-  else if state.palette_open then
-    let frame, clamped = render_palette state in
-    (frame, clamped, None, Overlay_drawn)
-  else if state.context_inspector_open then
-    let frame, clamped = render_context_inspector state in
-    (frame, clamped, None, Overlay_drawn)
-  else if state.keeper_deletions_open then
-    let frame, clamped = render_keeper_deletions state in
-    (frame, clamped, None, Overlay_drawn)
-  else if state.help_open then
-    let frame, clamped = render_help state in
-    (frame, clamped, None, Overlay_drawn)
-  else if state.agenda_open then
-    let frame, clamped = render_agenda state in
-    (frame, clamped, None, Overlay_drawn)
-  else if state.answering_open then
-    let frame, clamped = render_answering state in
-    (frame, clamped, None, Overlay_drawn)
-  else if state.patch_modal_open then
-    let frame, clamped = render_patch_modal state in
-    (frame, clamped, None, Overlay_drawn)
-  else if state.link_modal_open then
-    let frame, clamped = render_link_preview_modal state in
-    (frame, clamped, None, Overlay_drawn)
-  else
+  | `About ->
+    let frame, clamped = render_about state in (frame, clamped, None, Overlay_drawn)
+  | `Palette ->
+    let frame, clamped = render_palette state in (frame, clamped, None, Overlay_drawn)
+  | `Context ->
+    let frame, clamped = render_context_inspector state in (frame, clamped, None, Overlay_drawn)
+  | `Keeper_deletions ->
+    let frame, clamped = render_keeper_deletions state in (frame, clamped, None, Overlay_drawn)
+  | `Help ->
+    let frame, clamped = render_help state in (frame, clamped, None, Overlay_drawn)
+  | `Agenda ->
+    let frame, clamped = render_agenda state in (frame, clamped, None, Overlay_drawn)
+  | `Answering ->
+    let frame, clamped = render_answering state in (frame, clamped, None, Overlay_drawn)
+  | `Patch ->
+    let frame, clamped = render_patch_modal state in (frame, clamped, None, Overlay_drawn)
+  | `Link ->
+    let frame, clamped = render_link_preview_modal state in (frame, clamped, None, Overlay_drawn)
+  | `Surface ->
     let frame, clamped = render_surface state in
     let presented_approval =
       match state.view with

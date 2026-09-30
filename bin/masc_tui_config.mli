@@ -4,6 +4,7 @@ type opening = Overview | Last of Keeper_id.Keeper_name.t option | Keeper of Kee
 
 type t = private {
   opening : (opening, string) result;
+  last_chat_keeper : (Keeper_id.Keeper_name.t option, string) result;
   theme : string option;
   board_sort : string option;
   candle : string option;
@@ -20,15 +21,25 @@ val opening_keeper_of_doc :
   Keeper_toml_loader.toml_doc -> (Keeper_id.Keeper_name.t option, string) result
 val opening_of_doc : Keeper_toml_loader.toml_doc -> (opening, string) result
 
-val set_opening_keeper :
-  base_path:string -> Keeper_id.Keeper_name.t -> (unit, string) result
-(** Remember the last chat target under the runtime.toml config write lock. *)
+val last_chat_keeper_of_doc :
+  Keeper_toml_loader.toml_doc -> (Keeper_id.Keeper_name.t option, string) result
+(** Missing is [Ok None]; invalid receipt data is [Error], never a target. *)
+
+val record_chat_visit :
+  base_path:string -> Keeper_id.Keeper_name.t ->
+  (Runtime.config_durability, string) result
+(** Store an explicitly opened conversation under Runtime's config write
+    lock. The current on-disk [Last] mode also updates its opening target in
+    that same commit; [Overview] and [Keeper] leave the startup choice and
+    target untouched. A visible commit retains its durability distinction. *)
 
 val load : base_path:string -> t
 (** Resolve and parse runtime.toml once, then extract an immutable snapshot of
     all TUI settings. A later call reads current disk state; no process cache.
     Missing, unreadable or unparseable files leave optional settings [None]
-    and [opening] at [Ok Overview]. Explicit [false] stays [Some false]. *)
+    and [opening] at [Ok Overview]. [last_chat_keeper] retains read/parse errors
+    so unread history is not presented as missing. Explicit [false] stays
+    [Some false]. *)
 
 (* [tui].theme, given an already-parsed runtime.toml document. [None] when the
    key (or the [tui] table) is absent. Pure, so the caller's file read stays

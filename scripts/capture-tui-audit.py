@@ -85,7 +85,7 @@ def main():
     c = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(c)
     c.EXECUTABLE = executable
-    c.TTYD = Path(ttyd)
+    c.TTYD = Path(ttyd).resolve()
     os.environ['MASC_TOKEN'] = 'masc-tui-keyboard-regression-token'
     os.environ['PATH'] = h.path_without_masc(os.environ.get('PATH', ''))
     fixtures = h.overview_event_http_fixtures()

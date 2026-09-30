@@ -22526,7 +22526,7 @@ and is loaded on demand through keeper_skill.
            goto_surface state ~mailbox:async_messages System_logs
        | Some ("j" | "down" | "k" | "up" as key) when state.view = Overview ->
            home_step state ~backwards:(key = "k" || key = "up")
-       | Some "p" when state.view = Overview ->
+       | Some ("p" | "P") when state.view = Overview ->
            goto_surface state ~mailbox:async_messages Approvals
        | Some ("\r" | "\n" | "enter") when state.view = Overview ->
            (match home_selected_action state with
@@ -26653,7 +26653,9 @@ and is loaded on demand through keeper_skill.
                       if Option.is_none state.home_selected
                          && home_initial_reading_ready state selected then
                         state.home_selected <- selected;
-                      let budget = Masc_tui_render_prim.surface_chrome_budget state ~terminal_rows in
+                      (* The persistent requests link owns the first body row. *)
+                      let budget = max 0
+                          (Masc_tui_render_prim.surface_chrome_budget state ~terminal_rows - 1) in
                       let first, _ = home_decision_window state ~budget in
                       state.home_decision_scroll <- first
                   | _ -> ());

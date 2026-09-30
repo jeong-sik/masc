@@ -327,6 +327,10 @@ let render_overview (state : state) =
     ~status:[ Masc_tui_footer.Refresh_interval state.refresh_interval ]
     ~hints:(Masc_tui_keys.footer_hints Overview)
     ~body:(fun ~budget c ->
+      c.push
+        (" " ^ pressable (Press_surface Approvals)
+           (Ansi.bold ^ Theme.info () ^ "p:Approvals / Questions" ^ Ansi.reset));
+      let budget = max 0 (budget - 1) in
       let draw_row (action, label) =
         let line = "  " ^ label in
         if Some action = selected then c.push_selected line else c.push line

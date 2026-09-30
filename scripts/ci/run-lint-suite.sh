@@ -52,18 +52,9 @@ run_self_test_when_changed() {
 }
 
 blocking_lints() {
-  run_self_test_when_changed "PR check Draft/Ready approval contract" \
-    ".github/workflows/pr-check.yml scripts/review/approve-guard.sh scripts/review/approve-guard-selftest.sh scripts/review/pr-check-run-contract.sh scripts/review/fixtures/pr-check-draft-jobs-39834.json" \
-    bash scripts/review/approve-guard-selftest.sh --workflow .github/workflows/pr-check.yml
-  run_self_test_when_changed "Review queue ledger readiness" \
-    "scripts/review/queue-ledger.sh scripts/review/test_queue_ledger.py scripts/review/ci-freshness.py scripts/review/batch_evidence.py scripts/review/review-verdict.sh scripts/review/pr-check-run-contract.sh scripts/review/fixtures/pr-check-draft-jobs-39834.json" \
-    python3 scripts/review/test_queue_ledger.py
-  run_self_test_when_changed "Review approval and merge boundary" \
-    "scripts/review/approve-guard.sh scripts/review/approve-guard-selftest.sh scripts/review/merge-guard.sh scripts/review/ci-checks.sh scripts/review/ci-freshness.py scripts/review/batch_evidence.py scripts/review/review-verdict.sh scripts/review/pr-check-run-contract.sh scripts/review/fixtures/pr-check-draft-jobs-39834.json" \
-    bash scripts/review/approve-guard-selftest.sh
-  run_self_test_when_changed "Combined-tree batch review evidence" \
-    "scripts/review/batch_evidence.py scripts/review/test_batch_evidence.py scripts/review/land-batch.sh scripts/review/ci-freshness.py scripts/review/ci-checks.sh scripts/review/review-verdict.sh scripts/review/approve-guard.sh scripts/review/merge-guard.sh" \
-    python3 scripts/review/test_batch_evidence.py
+  run_self_test_when_changed "Source review and release admission" \
+    "scripts/review/approve-guard.sh scripts/review/merge-guard.sh scripts/review/ci-checks.sh scripts/review/review-verdict.sh scripts/review/queue-ledger.sh scripts/review/test_source_review_policy.py" \
+    python3 scripts/review/test_source_review_policy.py
   run_lint "Installer terminal wizard" python3 test/test_installer_wizard.py
   run_lint "Installer upgrade configuration" python3 test/test_installer_upgrade.py
   run_self_test_when_changed "Stagehand probe offline controls" \

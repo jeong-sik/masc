@@ -1152,13 +1152,26 @@ let context_write_json = function
 
 type write_scope = Context_only | Context_and_memory
 
+(* How one continuity publication ended. The caller that owns nothing else
+   decides its run's outcome from it. *)
+type continuity_publication =
+  | Continuity_committed
+  | Continuity_not_committed of string
+
+(* The [Failed] code of a run whose only product, the continuity snapshot, was
+   not committed. *)
+let continuity_not_committed_code = "continuity_not_committed"
+
 let commit_continuity ~commit ~observe =
   (* The executor job has its own cancellation scope. Keep its caller alive
      until all disk effects and their observation finish; shutdown/purge must
      not run past a detached writer after cancellation of the await. *)
-  Eio.Cancel.protect (fun () ->
-    observe (Domain_pool_ref.submit_io_or_inline commit));
-  Eio.Fiber.check ()
+  let observed =
+    Eio.Cancel.protect (fun () ->
+      observe (Domain_pool_ref.submit_io_or_inline commit))
+  in
+  Eio.Fiber.check ();
+  observed
 ;;
 
 let run_best_effort
@@ -1359,25 +1372,28 @@ let run_best_effort
                    continuity_write := `Assoc
                      ["status", `String "committed"; "end_atom", `Int snapshot.end_atom;
                       "prefix_sha256", `String snapshot.prefix_sha256];
-                   on_continuity_committed ~served_by:served_slot snapshot
+                   on_continuity_committed ~served_by:served_slot snapshot;
+                   Continuity_committed
                  | Error detail ->
                    continuity_write := `Assoc ["status", `String "failed"; "detail", `String detail];
+                   let reason = "continuity state not committed: " ^ detail in
                    (* A snapshot that did not commit -- a CAS the history moved
                       under, a disk error -- is not the range's size, so the
                       caller keeps the width and logs this cause. *)
-                   on_not_committed
-                     { detail = "continuity state not committed: " ^ detail
-                     ; walk_shows_size = false
-                     };
-                   Log.Keeper.warn ~keeper_name:keeper_id "continuity state not committed: %s" detail)
+                   on_not_committed { detail = reason; walk_shows_size = false };
+                   Log.Keeper.warn ~keeper_name:keeper_id "%s" reason;
+                   Continuity_not_committed reason)
              in
              match answer with
              | Working_context_answer proposed ->
                organize_working_context proposed;
                Ok (`Context_organized (exact_output, selected_slot))
              | Continuity_state_answer { prepared; working_state } ->
-               publish_continuity prepared working_state;
-               Ok (`Context_organized (exact_output, selected_slot))
+               (match publish_continuity prepared working_state with
+                | Continuity_committed ->
+                  Ok (`Context_organized (exact_output, selected_slot))
+                | Continuity_not_committed reason ->
+                  Ok (`Continuity_not_committed (reason, exact_output, selected_slot)))
              | Memory_answer { selection; continuity_answer } ->
              (* A continuity range owns no pending input; only a Memory pass
                 without one organizes the working context. An organization the
@@ -1488,7 +1504,10 @@ let run_best_effort
              (match continuity_answer with
               | Memory_only -> ()
               | Continuity { prepared; working_state } ->
-                publish_continuity prepared working_state);
+                (* The Memory decision is saved above and stands. A snapshot
+                   that did not commit is on the run's output and in the log. *)
+                (match publish_continuity prepared working_state with
+                 | Continuity_committed | Continuity_not_committed _ -> ()));
              (* The snapshot is committed; each supersede it carried out is now
                 a Revised event on the old id (RFC-0418). A supersede of a
                 memory the keeper removed during the pass was not carried out
@@ -1519,6 +1538,16 @@ let run_best_effort
            match result with
            | Ok (`Context_organized (exact_output, selected_slot)) ->
              complete ~selected_slot Exact_lane_run_registry.Succeeded
+               (`Assoc [ "memory_write", `String "skipped_context_only"
+                       ; "exact_output", exact_output ]);
+             Eio.Fiber.check ()
+           | Ok (`Continuity_not_committed (reason, exact_output, selected_slot)) ->
+             (* The answer was accepted and the store refused it. The snapshot
+                is this pass's whole product, so the run failed, as a Memory
+                snapshot that cannot be written fails its run. *)
+             complete ~selected_slot
+               (Exact_lane_run_registry.Failed
+                  { code = continuity_not_committed_code; detail = reason })
                (`Assoc [ "memory_write", `String "skipped_context_only"
                        ; "exact_output", exact_output ]);
              Eio.Fiber.check ()

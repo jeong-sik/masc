@@ -22,7 +22,7 @@ execution and visual evidence remain required for that combined behavior.
 | A newly inserted destination does not steal selection | `refresh_preserves_destination` | Current-head PTY pass |
 | Removed selection requires reselection | `home_selected_action`; refresh scenario | Current-head pass; deleted Keeper resume case |
 | Fixed startup Keeper is not a last-chat receipt | `remember_home_chat`; `opening_boot_frames` | Current-head Overview PTY pass |
-| Home chat returns with draft intact | `Keeper_chat_return_home`; `unknown_and_resume` | Current-head PTY pass; draft during incoming notification |
+| Home chat returns with draft intact | `Keeper_chat_return_home`; `unknown_and_resume` | Combined-head `background_ask_keeps_beta_draft` text/media/no-autosend evidence |
 | Text, attachments and references stay bound to their recipient | `message_draft`, complete save/restore in `open_message_for_keeper` | Combined-head `test_tui_keeper_draft_payload_pty` A→B→A wire results |
 | Creation failures retain input and malformed JSON is recoverable | `keeper_creation_draft`, guarded JSON/name parsing and receipt validation | Combined-head malformed/refused/success retries from Home and Keeper list |
 | Created Keeper is selected for the first assignment | Named chat handoff with no-op queue drainer and typed Home return | Combined-head explicit first-assignment wire target, response and Home return |
@@ -33,7 +33,7 @@ execution and visual evidence remain required for that combined behavior.
 | All sources retain their distinct decision identity | `home_request`, `home_decision_rows`, `reconcile_home_request_detail` | Current-head individual request, duplicate, same-Keeper distinct calls, partial-source failure and detail-refresh PTY results |
 | Acceptance sizes and color-independent actions | `test_tui_home_viewports_pty.py`: 80×24, 120×32, 160×48, normal and NO_COLOR | Targeted run 36654334047 passed at `45c065b875`; raw CI frame replay and screenshots are recorded below |
 | Large queues preserve continuation and reach every request | Retained `home_decision_scroll` and request viewport in `render_overview` | Overflow journey at acceptance sizes and detail return with selection/window retained |
-| Accepted decisions distinguish receipt from application | Typed Completed/Deferred/Execution_failed outcomes | Home-origin accepted-but-not-applied fixture and fresh-read verification |
+| Accepted decisions distinguish receipt from application | Typed outcomes, dispatch-bound Home receipt, `test_tui_home_decision_receipt_pty` | Combined-head deferred receipt and fresh pending/removed source observations |
 | Usage entry is independent of prior Telemetry visit | Existing Usage keyboard scenario | Current-head targeted suite and rendered Usage evidence |
 | Improved time to first action | No user timing measurement here | Same-task before/after operator observation; do not infer speed from layout |
 

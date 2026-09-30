@@ -8209,6 +8209,10 @@ let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
   | Some _ when Option.is_some state.keepers_error ->
       report_action state "error"
         "Cannot send while the Keeper roster is unavailable"
+  | Some target when state.keeper_creation_awaiting_roster = Some target
+                     && not (keeper_available_for_new_message state target) ->
+      report_action state "error"
+        "Creation accepted; waiting for the current Keeper roster · draft retained · r to refresh"
   | Some target when not (keeper_available_for_new_message state target) ->
       report_action state "error"
         (Printf.sprintf "Cannot send: Keeper %s is no longer registered"
@@ -11841,6 +11845,17 @@ let step_board_read state ~mailbox ~delta =
       end
 
 let apply_approval_decision_result state approval decision approvals result =
+  (match state.home_decision_inflight with
+   | Some (Home_operator_request token as request) when token = approval.ap_token ->
+       let receipt = match result with
+         | Ok (Approval.Completed _) -> approval_decision_done decision ^ ": " ^ approval.ap_summary
+         | Ok (Approval.Deferred _) -> "Confirmation accepted; action deferred: " ^ approval.ap_summary
+         | Ok (Approval.Execution_failed (_, detail)) -> "Confirmation accepted; action failed: " ^ approval.ap_summary ^ " · " ^ detail
+         | Error error -> approval_decision_unverified decision ^ ": " ^ approval.ap_summary ^ " · " ^ error
+       in
+       state.home_decision_receipt <- Some (request, receipt)
+   | Some _ | None -> ());
+  state.home_decision_inflight <- None;
   (match result with
    | Ok (Approval.Completed _) ->
        report_action state "system"
@@ -11876,6 +11891,7 @@ let start_approval_decision state approval decision ~mailbox =
   | Ok (flow, generation) ->
     let () = state.approval_flow <- flow in
     let () = state.pending_approval_action <- None in
+    state.home_decision_inflight <- state.home_opened_request;
     let host = server_peer_host in
     let port = state.port in
     let run_action () =
@@ -16937,6 +16953,10 @@ let drain_async_messages state ~base_path ~http_refresh_inflight
   let rec loop changed =
     match Eio.Stream.take_nonblocking mailbox with
     | None ->
+        (match state.keeper_creation_awaiting_roster with
+         | Some keeper when keeper_available_for_new_message state keeper ->
+             state.keeper_creation_awaiting_roster <- None
+         | Some _ | None -> ());
         reconcile_home_request_detail state;
         changed
     | Some { ready_at_ns; message = msg } ->
@@ -18901,6 +18921,7 @@ and is loaded on demand through keeper_skill.
           launch_keeper_sandbox_view state ~mailbox:async_messages keeper.k_name)
   in
   let handle_keeper_create ?(return_to = Keeper_chat_return_list) () =
+    let return_to = Option.value state.keeper_creation_return ~default:return_to in
     match Masc_tui_editor.editor_command () with
     | None ->
       report_action state "error" "no $EDITOR set; export EDITOR to create a keeper here"
@@ -18922,6 +18943,7 @@ and is loaded on demand through keeper_skill.
       | Error abort -> report_editor_abort state ~action:"create" abort
       | Ok declaration -> (
         state.keeper_creation_draft <- Some declaration;
+        state.keeper_creation_return <- Some return_to;
         let refuse detail =
           goto_surface state ~mailbox:async_messages (Keepers Keeper_list);
           report_action state "error"
@@ -18961,7 +18983,11 @@ and is loaded on demand through keeper_skill.
              | Some (`Bool true), Some (`String "up"), Some (`String name)
                when String.equal name declared_name ->
                  state.keeper_creation_draft <- None;
+                 state.keeper_creation_return <- None;
                  load_local_workspace_if_safe state base_path;
+                 state.keeper_creation_awaiting_roster <-
+                   (if keeper_available_for_new_message state declared_name then None
+                    else Some declared_name);
                  open_message_for_keeper ~return_to
                    state declared_name ~drain_queue:(fun () -> ());
                  set_msg_scroll state 0;
@@ -24183,7 +24209,9 @@ and is loaded on demand through keeper_skill.
             | Some (origin, _) ->
                 state.followed_from <- None;
                 goto_surface state ~mailbox:async_messages origin;
-                report_action state "system" "back")
+                (* A Home return must retain the decision's receipt or
+                   failure notice; navigation is not its replacement. *)
+                if origin <> Overview then report_action state "system" "back")
        | Some "esc" when state.repository_changes_open ->
            if Option.is_some state.repository_changes_diff_path then
              close_repository_changes_diff state

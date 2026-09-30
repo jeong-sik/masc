@@ -5266,6 +5266,8 @@ type state = {
   mutable home_selected : home_action option;
   mutable home_decision_scroll : int;
   mutable home_opened_request : home_request option;
+  mutable home_decision_receipt : (home_request * string) option;
+  mutable home_decision_inflight : home_request option;
   mutable home_last_chat : home_chat_receipt;
   mutable metrics_scroll: int;
   mutable metrics_section: metrics_section;
@@ -5714,6 +5716,8 @@ type state = {
   (* A refused creation remains editable, including malformed JSON. The
      editor owns a temporary file, so the declaration must survive here. *)
   mutable keeper_creation_draft: string option;
+  mutable keeper_creation_return: keeper_chat_return option;
+  mutable keeper_creation_awaiting_roster: string option;
   (* The live roster reading, separate from the durable one above: it answers
      whether a keepalive fiber is running each keeper, which metadata on disk
      cannot. It is typed rather than a plain list because "the roster did not
@@ -7886,6 +7890,8 @@ let create_state
   home_selected = None;
   home_decision_scroll = 0;
   home_opened_request = None;
+  home_decision_receipt = None;
+  home_decision_inflight = None;
   home_last_chat = No_chat_receipt;
   metrics_scroll = 0;
   metrics_section = Section_fleet;
@@ -8075,6 +8081,8 @@ let create_state
   keepers = [];
   keepers_error = None;
   keeper_creation_draft = None;
+  keeper_creation_return = None;
+  keeper_creation_awaiting_roster = None;
   keeper_roster = Masc_tui_keeper_control.Roster_unobserved;
   keeper_roster_error = None;
   keeper_action_inflight = None;

@@ -85,16 +85,10 @@ def creation_journey(executable, *, wrong_receipt, from_home=False):
             h.send_and_wait(process, fd, output, b"\r" if from_home else b"a", b"Keeper declaration is not JSON")
             assert process.poll() is None
             assert authored == [], authored
-            if from_home:
-                h.palette_go(process, fd, output, b"go dashboard", b"Create a Keeper")
-                home.select_destination(process, fd, output, b"Create a Keeper")
-            h.send_and_wait(process, fd, output, b"\r" if from_home else b"a", b"fixture declaration refused")
+            h.send_and_wait(process, fd, output, b"a", b"fixture declaration refused")
             assert (editor_root / "input-2.json").read_text() == MALFORMED
             assert authored == [DECLARATION.encode()], authored
-            if from_home:
-                h.palette_go(process, fd, output, b"go dashboard", b"Create a Keeper")
-                home.select_destination(process, fd, output, b"Create a Keeper")
-            h.send_and_wait(process, fd, output, b"\r" if from_home else b"a", b"declaration accepted")
+            h.send_and_wait(process, fd, output, b"a", b"declaration accepted")
             assert (editor_root / "input-3.json").read_text() == DECLARATION
             assert authored == [DECLARATION.encode(), DECLARATION.encode()], authored
             frame = h.resize_and_wait(

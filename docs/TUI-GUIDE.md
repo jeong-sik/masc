@@ -2183,6 +2183,14 @@ Home with its selection and request window retained. If the request disappears
 or its source becomes unreadable, Home requires explicit reselection. A new
 top-level navigation ends the previous reader's return context.
 
+A Home-origin operator decision retains its last receipt in the Home context.
+A confirmation accepted with execution deferred remains labelled deferred;
+request presence is determined by the current source read. This session receipt
+does not prove application or survive restart. Creation retries retain their
+original return destination alongside the authored declaration. If the lifecycle
+accepts creation before its roster appears, the named draft remains available
+while sending waits for a reliable roster observation.
+
 `p` opens requests, `;`
 opens Agenda, and `m` opens Usage. Work retains Goal observations, task lists,
 and verification evidence; Usage retains quota and telemetry detail. Home shows

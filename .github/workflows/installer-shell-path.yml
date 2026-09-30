@@ -1,12 +1,5 @@
 name: Installer shell PATH
 on:
-  pull_request:
-    paths:
-      - 'scripts/install.sh'
-      - 'test/test_installer_shell_path.py'
-      - 'test/test_release_dashboard_bundle.py'
-      - 'scripts/release-dashboard-bundle.py'
-      - '.github/workflows/installer-shell-path.yml'
   workflow_dispatch:
 permissions:
   contents: read

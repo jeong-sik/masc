@@ -126,7 +126,7 @@ max_reply_bytes=4194304
   let sent_requests = List.rev !requests in
   check int "primary failure walks only the declared secondary" 2 (List.length sent_requests);
   check (list string) "model hint never changes the operator's ordered route"
-    ["/primary/v1/chat/completions";"/secondary/v1/chat/completions"] (List.map fst sent_requests);
+    ["/primary/chat/completions";"/secondary/chat/completions"] (List.map fst sent_requests);
   List.iter (fun (_,body) ->
     check int "requested provider output limit is serialized" 37 Yojson.Safe.Util.(member "max_tokens" body |> to_int);
     check (float 0.) "operator temperature wins; undeclared models use the request"

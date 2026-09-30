@@ -29,6 +29,15 @@ module type LABELS = sig
   val label : string
 end
 
+(* The bytes [equal] compares.  The .mli makes [t] private, so outside
+   this file a key is made only by [equality_key]. *)
+module Equality_key = struct
+  type t = string
+
+  let compare = String.compare
+  let equal = String.equal
+end
+
 (* One rule, three instances.  The abstract [t] each caller sees comes
    from the .mli, not from here. *)
 module Make (L : LABELS) = struct
@@ -47,9 +56,11 @@ module Make (L : LABELS) = struct
     | Error message -> invalid_arg (L.label ^ ": " ^ message)
   ;;
 
-  let equal a b =
-    String.equal (String.lowercase_ascii a) (String.lowercase_ascii b)
-  ;;
+  (* The bytes [equal] compares, so a table keyed by it finds exactly the
+     values [equal] would. *)
+  let equality_key t : Equality_key.t = String.lowercase_ascii t
+
+  let equal a b = Equality_key.equal (equality_key a) (equality_key b)
 
   let to_string t = t
 end
@@ -92,8 +103,6 @@ module Model_id = struct
 
         let label = "Model_identifiers.Model_id"
       end)
-
-  let equal_id_prefix ~prefix t = equal (Id_prefix.to_string prefix) t
 
   let starts_with ~prefix t =
     starts_with_folded ~prefix:(Id_prefix.to_string prefix) t

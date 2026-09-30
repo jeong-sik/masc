@@ -9890,7 +9890,7 @@ let runtime_routes_detail_lines state ~width =
         @ (match snapshot.rss_probe with
            | None -> field "Probe" "unavailable; no observation has been read"
            | Some probe ->
-               field "Probe status" (Tui_decode.runtime_probe_status_to_string probe.rps_status)
+               field "Probe status" (Masc.Tui_decode_runtime_probe.runtime_probe_status_to_string probe.rps_status)
                @ List.concat_map (field ~style:(Theme.warn ()) "Probe error") probe.rps_errors
                @ List.concat_map (field "Probe limitation") probe.rps_limitations)
   in
@@ -10491,7 +10491,7 @@ let render_runtime (state : state) =
                    ~identity:(Terminal_text.single_line (runtime.ro_provider ^ " / " ^ runtime.ro_model))
                    ~status:(runtime_route_probe_badge runtime
                      (Option.bind state.runtime_surface (fun snapshot ->
-                       Tui_decode.runtime_probe_for_id snapshot ~runtime_id:runtime.ro_id)))
+                       Masc.Tui_decode_runtime_probe.runtime_probe_for_id snapshot.Masc.Tui_decode.rss_probe ~runtime_id:runtime.ro_id)))
                    ~detail:(Terminal_text.single_line (Masc_tui_theme.strip_sgr detail))) in
                if index + scroll = state.runtime_cursor then
                  c.push_selected (Masc_tui_theme.strip_sgr line)

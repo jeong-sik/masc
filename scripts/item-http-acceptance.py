@@ -118,15 +118,22 @@ def rpc(method, params, notification=False):
     assert envelope.get('id') == rpc_sequence and 'error' not in envelope, envelope
     return envelope['result']
 
-def tool(name, arguments, error_code=None):
+def tool(name, arguments, error_code=None, validation_reason=None):
     result = rpc('tools/call', {'name': name, 'arguments': arguments})
     failed = result.get('isError', False)
-    assert failed == (error_code is not None), result
     data = result['structuredContent']
+    # Persist real response data before checking the expected rejection contract.
+    # Candle handler and protocol schema middleware expose different typed fields.
+    entry = {'server_generation': server_generation, 'name': name,
+             'arguments': arguments, 'is_error': failed, 'data': data}
+    tool_records.append(entry)
+    (root / 'tool-calls.json').write_text(json.dumps(tool_records, indent=2) + '\n')
+    assert failed == (error_code is not None or validation_reason is not None), result
     if error_code is not None:
         assert data['error_code'] == error_code, data
-    tool_records.append({'server_generation': server_generation, 'name': name, 'arguments': arguments, 'is_error': failed,
-                         'data': data})
+    if validation_reason is not None:
+        assert data['validation'] == 'agent_core_tool_middleware', data
+        assert data['reason'] == validation_reason, data
     return data
 
 def await_ready(server):
@@ -168,7 +175,8 @@ with (root / 'server.log').open('wb') as log:
         rpc('notifications/initialized', {}, notification=True)
         own = tool('keeper_candle_balance', {})
         assert own['keeper'] == 'item-runtime-probe' and own['balance_milli'] == '0', own
-        tool('keeper_candle_balance', {'keeper': 'another-keeper'}, 'invalid_arguments')
+        tool('keeper_candle_balance', {'keeper': 'another-keeper'},
+             validation_reason='empty_schema_args')
         starting = tool('keeper_candle_equip', {'slot': 'face', 'item': 'default'})['equipment']
         item = 'shades' if starting['face'] == 'glasses' else 'glasses'
         tool('keeper_candle_equip', {'slot': 'face', 'item': item}, 'equipment_refused')

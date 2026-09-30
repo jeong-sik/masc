@@ -2,8 +2,8 @@
 
     An invite is a credential with the [Player] role and an expiry. The
     operator issues it under a name, hands the link on, and revokes it by
-    that name. This module owns the credential side only: whoever calls
-    {!revoke} frees the DOS controller the name may still hold. *)
+    that name. This module owns the credential side only: {!revoke} keeps its
+    caller's controller effect inside the credential transaction. *)
 
 (** An invite's name: the [who] its presses are recorded under.
 
@@ -53,6 +53,13 @@ type issued =
   ; link : string  (** [<public base>/play#<raw token>]; the only copy of the token *)
   }
 
+val play_path : string
+(** [/play]: the page a person opens the link in. *)
+
+val agent_guide_path : string
+(** [/play/agent.md]: how an agent that was handed the link joins, read
+    without a credential. The link's token is not in it. *)
+
 val issue :
   base_path:string ->
   public_base_url:string option ->
@@ -100,7 +107,15 @@ type revoked =
 type revoke_error =
   | Not_an_invite of Masc_domain.agent_role
       (** The name belongs to a credential of another role; nothing changed. *)
+  | Credential_not_deleted of Masc_domain.masc_error
+      (** Credential storage or lock admission failed; no controller effect ran. *)
 
-val revoke : base_path:string -> name:Name.t -> (revoked, revoke_error) result
-(** Deletes the invite's credential; its bearer stops validating from the
-    next request. *)
+val revoke :
+  base_path:string -> name:Name.t -> after_revoke:(revoked -> 'a) ->
+  ('a, revoke_error) result
+(** Checks the current role and deletes the invite in one Auth transaction;
+    its bearer stops validating from the next request. [after_revoke] runs for
+    both [Deleted] and [Already_gone], before credential writers can resume.
+    It may free a controller or check Keeper identity but must not enter an
+    Auth transaction or perform Board publication. Flush announcements after
+    this returns. *)

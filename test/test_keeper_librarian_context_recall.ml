@@ -30,14 +30,21 @@ let artifact_of_index ~keepers_dir =
   | Tool_output.Decoded_normalized_artifact_ref reference -> reference
   | _ -> fail "index must contain a retention-visible typed artifact reference"
 
+let check_notice ~keepers_dir ~status =
+  let body = Option.get (Recall.render ~keepers_dir ~keeper_name:"keeper" ()) in
+  check bool "explicit lifecycle status" true (String_util.contains_substring body status);
+  check bool "notice does not revive an artifact pointer" false
+    (String_util.contains_substring body "sha256=");
+  body
+
 let test_growth_does_not_expand_prompt () = with_store @@ fun ~base_path ~keepers_dir ->
   let first = commit ~keepers_dir ~previous:None "Campaign in progress" in
   ok (Recall.publish ~base_path ~keepers_dir ~keeper_name:"keeper" first);
-  let small = Option.get (Recall.render ~keepers_dir ~keeper_name:"keeper") in
+  let small = Option.get (Recall.render ~keepers_dir ~keeper_name:"keeper" ()) in
   let large_text = String.make (Common.max_tool_result_wire_bytes * 4) 'x' in
   let second = commit ~keepers_dir ~previous:(Some first) large_text in
   ok (Recall.publish ~base_path ~keepers_dir ~keeper_name:"keeper" second);
-  let large = Option.get (Recall.render ~keepers_dir ~keeper_name:"keeper") in
+  let large = Option.get (Recall.render ~keepers_dir ~keeper_name:"keeper" ()) in
   check bool "prompt growth contains only byte-count digits" true
     (String.length large - String.length small <= String.length (string_of_int (String.length large_text)));
   let reference = artifact_of_index ~keepers_dir in
@@ -62,24 +69,22 @@ let test_growth_does_not_expand_prompt () = with_store @@ fun ~base_path ~keeper
      | Tool_result.Deferred () | Tool_result.Failed _ -> false);
   (* A derived index without its authoritative owner must never be injected. *)
   Sys.remove (Filename.concat keepers_dir "keeper.working-context.json");
-  check (option string) "index recall fails closed without its owner snapshot"
-    None (Recall.render ~keepers_dir ~keeper_name:"keeper")
+  ignore (check_notice ~keepers_dir ~status:"No organized working contexts")
 
 let test_stale_publish_and_corruption () = with_store @@ fun ~base_path ~keepers_dir ->
   let first = commit ~keepers_dir ~previous:None "first" in
   let second = commit ~keepers_dir ~previous:(Some first) "second" in
   ok (Recall.publish ~base_path ~keepers_dir ~keeper_name:"keeper" second);
-  let current = Recall.render ~keepers_dir ~keeper_name:"keeper" in
+  let current = Recall.render ~keepers_dir ~keeper_name:"keeper" () in
   check bool "older publisher cannot overwrite newer index" true
     (Result.is_error (Recall.publish ~base_path ~keepers_dir ~keeper_name:"keeper" first));
   check (option string) "newer context stays available" current
-    (Recall.render ~keepers_dir ~keeper_name:"keeper");
+    (Recall.render ~keepers_dir ~keeper_name:"keeper" ());
   ok (Fs_compat.save_file_atomic (Recall.path ~keepers_dir ~keeper_name:"keeper") "{");
-  check (option string) "broken advisory index cannot prevent input admission" None
-    (Recall.render ~keepers_dir ~keeper_name:"keeper");
+  ignore (check_notice ~keepers_dir ~status:"working context is unavailable");
   ok (Recall.publish ~base_path ~keepers_dir ~keeper_name:"keeper" second);
   check (option string) "next background publication repairs advisory index" current
-    (Recall.render ~keepers_dir ~keeper_name:"keeper")
+    (Recall.render ~keepers_dir ~keeper_name:"keeper" ())
 
 let test_recovered_generation_replaces_old_index () = with_store @@ fun ~base_path ~keepers_dir ->
   let first = commit ~keepers_dir ~previous:None "first generation" in
@@ -91,29 +96,97 @@ let test_recovered_generation_replaces_old_index () = with_store @@ fun ~base_pa
   let rebuilt = commit ~keepers_dir ~previous:None "recovered generation" in
   check bool "new generation has a lower revision" true (rebuilt.revision < second.revision);
   ok (Recall.publish ~base_path ~keepers_dir ~keeper_name:"keeper" rebuilt);
-  let current = Recall.render ~keepers_dir ~keeper_name:"keeper" in
+  let current = Recall.render ~keepers_dir ~keeper_name:"keeper" () in
   check bool "old generation cannot publish over recovered snapshot" true
     (Result.is_error (Recall.publish ~base_path ~keepers_dir ~keeper_name:"keeper" second));
   check bool "equal numeric revision from old generation is also rejected" true
     (Result.is_error (Recall.publish ~base_path ~keepers_dir ~keeper_name:"keeper" first));
   check (option string) "recovered reference remains available" current
-    (Recall.render ~keepers_dir ~keeper_name:"keeper")
+    (Recall.render ~keepers_dir ~keeper_name:"keeper" ())
 
 let test_committed_snapshot_invalidates_stale_projection () =
   with_store @@ fun ~base_path ~keepers_dir ->
   let first = commit ~keepers_dir ~previous:None "first context" in
   ok (Recall.publish ~base_path ~keepers_dir ~keeper_name:"keeper" first);
   check bool "first projection is available" true
-    (Option.is_some (Recall.render ~keepers_dir ~keeper_name:"keeper"));
+    (Option.is_some (Recall.render ~keepers_dir ~keeper_name:"keeper" ()));
   let second = commit ~keepers_dir ~previous:(Some first) "second context" in
-  check (option string) "older projection is not consumed after owner commit" None
-    (Recall.render ~keepers_dir ~keeper_name:"keeper");
+  ignore (check_notice ~keepers_dir ~status:"working context is unavailable");
   ok (Recall.publish ~base_path ~keepers_dir ~keeper_name:"keeper" second);
   check bool "matching replacement projection is available" true
-    (Option.is_some (Recall.render ~keepers_dir ~keeper_name:"keeper"))
+    (Option.is_some (Recall.render ~keepers_dir ~keeper_name:"keeper" ()))
+
+let test_recall_lifecycle_retires_and_restores_held_pointer () =
+  with_store @@ fun ~base_path ~keepers_dir ->
+  let module Host = Keeper_official_client_host in
+  let held = ref [] in
+  let deliver ?(artifact_reader_available = true) () =
+    let body = Option.get (Recall.render ~artifact_reader_available ~keepers_dir ~keeper_name:"keeper" ()) in
+    let composed_context : Host.composed_context =
+      { carrier_sha256 = Digestif.SHA256.(digest_string body |> to_hex)
+      ; blocks = [Prompt_block_id.Librarian_working_context, body] } in
+    let message : Agent_core.Types.message =
+      { role = System; content = [Text body]; name = None; tool_call_id = None
+      ; metadata = Agent_core.Types.Extra_system_context_provenance.metadata } in
+    let delivery = Host.resume_prompt ~goal:"NEXT_TICK" ~held:!held
+      ~composed_context [message] in
+    held := delivery.held_context;
+    delivery.prompt
+  in
+  let first = commit ~keepers_dir ~previous:None "first context" in
+  ok (Recall.publish ~base_path ~keepers_dir ~keeper_name:"keeper" first);
+  let original = deliver () in
+  check bool "current artifact is delivered" true
+    (String_util.contains_substring original "sha256=");
+  check string "unchanged reference stays held" "NEXT_TICK" (deliver ());
+  let reader_unavailable = deliver ~artifact_reader_available:false () in
+  check bool "lost reader withdraws current artifact pointer" true
+    (String_util.contains_substring reader_unavailable "working context is unavailable");
+  check string "unchanged reader absence is deduplicated" "NEXT_TICK"
+    (deliver ~artifact_reader_available:false ());
+  check string "reader recovery restores the reference" original (deliver ());
+  let index = Recall.path ~keepers_dir ~keeper_name:"keeper" in
+  Sys.remove index;
+  let unavailable = deliver () in
+  check bool "missing index retires held current reference" true
+    (String_util.contains_substring unavailable "working context is unavailable");
+  check string "same missing state is not appended every tick" "NEXT_TICK" (deliver ());
+  ok (Fs_compat.save_file_atomic index "{");
+  check string "corrupt index shares stable unavailable status" "NEXT_TICK" (deliver ());
+  ok (Recall.publish ~base_path ~keepers_dir ~keeper_name:"keeper" first);
+  check string "repair resends identical artifact after invalidation" original (deliver ());
+  let owner = Context.path ~keepers_dir ~keeper_id:"keeper" in
+  let saved_owner = In_channel.with_open_bin owner In_channel.input_all in
+  ok (Fs_compat.save_file_atomic owner "{");
+  check string "corrupt authority invalidates the pointer" unavailable (deliver ());
+  ok (Fs_compat.save_file_atomic owner saved_owner);
+  check string "authority recovery resends reference" original (deliver ());
+  let second = commit ~keepers_dir ~previous:(Some first) "second context" in
+  check string "unpublished new owner revision invalidates reference" unavailable (deliver ());
+  ok (Recall.publish ~base_path ~keepers_dir ~keeper_name:"keeper" second);
+  check bool "matching new revision is delivered" true
+    (String_util.contains_substring (deliver ()) "sha256=");
+  let empty = ok (Context.commit ~observed_sources:[] ~keepers_dir ~keeper_id:"keeper"
+    ~expected_version:(Some (Context.version second)) ~sources:[] []) in
+  let cleared = deliver () in
+  check bool "committed empty state differs from unavailable" true
+    (String_util.contains_substring cleared "No organized working contexts");
+  check bool "empty state withdraws pointer" false
+    (String_util.contains_substring cleared "sha256=");
+  check string "unchanged empty state is not repeated" "NEXT_TICK" (deliver ());
+  ok (Recall.publish ~base_path ~keepers_dir ~keeper_name:"keeper" empty);
+  check string "publishing empty state does not revive artifact" "NEXT_TICK" (deliver ());
+  Sys.remove owner;
+  check string "absent owner remains confirmed empty" "NEXT_TICK" (deliver ());
+  let recovered = commit ~keepers_dir ~previous:None "recovered context" in
+  check string "new generation awaiting publication is unavailable" unavailable (deliver ());
+  ok (Recall.publish ~base_path ~keepers_dir ~keeper_name:"keeper" recovered);
+  check bool "new generation re-enters recall" true
+    (String_util.contains_substring (deliver ()) "sha256=")
 
 let () = run "working context recall"
-  ["progress", [test_case "recovered generation replaces older high revision" `Quick test_recovered_generation_replaces_old_index;
+  ["progress", [test_case "held recall follows empty unavailable and recovered context" `Quick test_recall_lifecycle_retires_and_restores_held_pointer;
+    test_case "recovered generation replaces older high revision" `Quick test_recovered_generation_replaces_old_index;
     test_case "growing context remains paged and off request path" `Quick test_growth_does_not_expand_prompt;
     test_case "stale publication and corrupt index recovery" `Quick test_stale_publish_and_corruption;
     test_case "owner commit invalidates stale projection" `Quick test_committed_snapshot_invalidates_stale_projection]]

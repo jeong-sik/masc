@@ -1509,7 +1509,11 @@ let restored_phase previous_settlement =
    plans [previous_settlement = None]. *)
 let frontier_restored_to previous_settlement frontier =
   match frontier.delivery with
-  | Canonical_source_guard -> { frontier with acknowledged_turn = previous_settlement }
+  | Canonical_source_guard ->
+    (* The canonical snapshot was already held, but this claim's context
+       blocks may never have reached the client. Only a settled delivery can
+       certify those digests; the retry must be allowed to send them again. *)
+    { frontier with acknowledged_turn = previous_settlement; held_context = [] }
   | Prepared_start_context | Held_by_vendor_session -> frontier
 ;;
 

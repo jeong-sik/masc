@@ -259,13 +259,16 @@ def roster_failure_and_deletion(executable):
                 raise AssertionError("read-only history sent a chat mutation")
             # A complete deletion keeps already-open history readable; Home
             # offers selection rather than resuming the deleted recipient.
-            metadata.unlink()
-            # Leave the history composer through its Home reference before
-            # requesting a fresh authoritative roster reading.
+            # Return while metadata is still broken, retaining the named
+            # read-only history. Delete only after that frame so r requests an
+            # actual transition instead of asking an unchanged frame to redraw.
             h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
-            # Escape may already have drawn the unavailable receipt. A refresh
-            # may emit only changed rows, so require a completed post-key frame
-            # and inspect the composed screen rather than a duplicate label.
+            h.read_available(fd, output)
+            before_deletion = h.screen_text(bytes(output))
+            assert b"roster unavailable; read history" in before_deletion, before_deletion
+            metadata.unlink()
+            # A refresh can emit only changed rows. Require its completed frame
+            # and inspect the composed screen instead of a duplicate label.
             start = len(output)
             os.write(fd, b"r")
             h.wait_for_terminal_input_consumed(_slave)

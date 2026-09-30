@@ -36,7 +36,7 @@ concurrency:
 jobs:
   scope:
     if: github.event.pull_request.draft == false
-    name: PR inspection scope
+    name: ${{ github.event.pull_request.draft == true && 'Draft snapshot / PR inspection scope' || 'PR inspection scope' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -628,13 +628,14 @@ jobs:
     # A Ready summary always runs, including when a required job fails or skips.
     if: ${{ always() && github.event.pull_request.draft == false }}
     name: ${{ github.event.pull_request.draft == true && 'Draft snapshot / PR required success' || 'PR required success' }}
-    needs: [tla, lint, check, release-check, dashboard-types]
+    needs: [scope, tla, lint, check, release-check, dashboard-types]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - name: Require Ready and five successful jobs
+      - name: Require Ready, scope and five successful jobs
         env:
           PR_DRAFT: ${{ github.event.pull_request.draft }}
+          SCOPE_RESULT: ${{ needs.scope.result }}
           TLA_RESULT: ${{ needs.tla.result }}
           LINT_RESULT: ${{ needs.lint.result }}
           CHECK_RESULT: ${{ needs.check.result }}
@@ -642,10 +643,11 @@ jobs:
           DASHBOARD_RESULT: ${{ needs['dashboard-types'].result }}
         run: |
           set -euo pipefail
-          printf 'draft=%s tla=%s lint=%s check=%s release=%s dashboard=%s\n' \
-            "$PR_DRAFT" "$TLA_RESULT" "$LINT_RESULT" "$CHECK_RESULT" \
+          printf 'draft=%s scope=%s tla=%s lint=%s check=%s release=%s dashboard=%s\n' \
+            "$PR_DRAFT" "$SCOPE_RESULT" "$TLA_RESULT" "$LINT_RESULT" "$CHECK_RESULT" \
             "$RELEASE_RESULT" "$DASHBOARD_RESULT"
           test "$PR_DRAFT" = false
+          test "$SCOPE_RESULT" = success
           test "$TLA_RESULT" = success
           test "$LINT_RESULT" = success
           test "$CHECK_RESULT" = success

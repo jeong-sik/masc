@@ -544,7 +544,45 @@ for fault in fail pending missing split other-workflow; do
     split) mutate "$d/checkruns.json" '.check_runs[0].check_suite.id=77' ;;
     other-workflow) mutate "$d/actions.json" '.workflow_runs[0].workflow_id=2 | .workflow_runs[0].path=".github/workflows/other.yml"' ;;
   esac
-  race_case "ready-$fault-not-hidden-by-draft" 2 'requires six successful checks'
+  race_case "ready-$fault-not-hidden-by-draft" 2 'requires the complete successful check set'
+done
+# A ROLL scope is a seventh exact job, with the same Draft/Ready isolation.
+scope_race_setup() {
+  race_setup "$1"
+  "$JQ" --arg h "$H" '.jobs += [{
+    name:"github.event.pull_request.draft == true && '\''Draft snapshot / PR inspection scope'\'' || '\''PR inspection scope'\''",
+    status:"completed",conclusion:"skipped",id:299,run_id:901,head_sha:$h
+  }]' "$1/jobs-901.json" >"$1/p" && mv "$1/p" "$1/jobs-901.json"
+  "$JQ" --slurpfile jobs "$1/jobs-901.json" '.check_runs |=
+    (map(select(.check_suite.id==55)) +
+    [{name:"PR inspection scope",status:"completed",conclusion:"success",id:199,check_suite:{id:55}}] +
+    [$jobs[0].jobs[] | {name,status,conclusion,id,check_suite:{id:66}}])' "$1/checkruns.json" >"$1/p" && mv "$1/p" "$1/checkruns.json"
+}
+d="$work/race-scope"; scope_race_setup "$d"
+race_case exact-scoped-draft-with-ready 0 'WOULD APPROVE'
+for fault in missing failure skipped pending split unexpected; do
+  d="$work/race-scope-ready-$fault"; scope_race_setup "$d"
+  case "$fault" in
+    missing) change='.check_runs |= map(select(.id!=199))' ;;
+    failure|skipped) change='.check_runs[] |= if .id==199 then .conclusion="'$fault'" else . end' ;;
+    pending) change='.check_runs[] |= if .id==199 then .status="queued" else . end' ;;
+    split) change='.check_runs[] |= if .id==199 then .check_suite.id=77 else . end' ;;
+    unexpected) change='.check_runs[] |= if .id==199 then .name="unexpected" else . end' ;;
+  esac
+  mutate "$d/checkruns.json" "$change"
+  race_case "scope-ready-$fault-refused" 2 'requires the complete successful check set'
+done
+for fault in duplicate success pending wrong-name wrong-head; do
+  d="$work/race-scope-draft-$fault"; scope_race_setup "$d"
+  case "$fault" in
+    duplicate) change='.jobs += [.jobs[-1] | .id=399]' ;;
+    success) change='.jobs[-1].conclusion="success"' ;;
+    pending) change='.jobs[-1].status="queued"' ;;
+    wrong-name) change='.jobs[-1].name="PR inspection scope"' ;;
+    wrong-head) change='.jobs[-1].head_sha="wrong"' ;;
+  esac
+  mutate "$d/jobs-901.json" "$change"
+  race_case "scope-draft-$fault-refused" 2 'invalid Draft snapshot'
 done
 # Pagination must be aggregated before checking six: three + three is valid;
 # six + an extra seventh row is invalid, including a duplicate name.
@@ -568,7 +606,7 @@ mutate "$d/checkruns.json" '.check_runs += [(.check_runs[0] | .id=99 | .conclusi
 race_case earlier-failed-check-in-same-ready-suite 0 'WOULD APPROVE'
 d="$work/race-rerun-failed"; race_setup "$d"
 mutate "$d/checkruns.json" '.check_runs += [(.check_runs[0] | .id=999 | .conclusion="failure")]'
-race_case latest-failed-check-in-ready-suite 2 'requires six successful checks'
+race_case latest-failed-check-in-ready-suite 2 'requires the complete successful check set'
 d="$work/race-transport"; race_setup "$d"
 FAKE_FAIL='*/jobs*' race_case draft-jobs-transport-is-infra-error 1 'gh api repos/o/r/actions/runs/901/jobs'
 d="$work/race-nojq"; race_setup "$d"
@@ -588,7 +626,7 @@ captured_run=$("$JQ" -r '.jobs[0].run_id' "$captured")
 "$JQ" --slurpfile captured "$captured" '.check_runs |= (map(select(.check_suite.id==55)) + [$captured[0].jobs[] | {name,status,conclusion,id,check_suite:{id:66}}])' "$d/checkruns.json" >"$d/p" && mv "$d/p" "$d/checkruns.json"
 run_case captured-api-draft-with-synthetic-ready 0 'WOULD APPROVE' 0 "$d" --check --repo o/r --pr 5 --head "$captured_head"
 mutate "$d/actions.json" '.workflow_runs |= .[1:]'
-run_case captured-api-draft-alone-not-green 2 'requires six successful checks' 0 "$d" --check --repo o/r --pr 5 --head "$captured_head"
+run_case captured-api-draft-alone-not-green 2 'requires the complete successful check set' 0 "$d" --check --repo o/r --pr 5 --head "$captured_head"
 # Even an older noncancelled malformed expression must refuse before generic
 # lost-suite filtering, including all-success markers and a changed else arm.
 for expression_fault in else-arm condition all-success wrapped wrapped-success; do
@@ -1026,31 +1064,32 @@ if [ -n "$workflow" ]; then
   # actual summary shell for each unsuccessful needs result, not a copied gate.
   expected_names="$work/workflow-names"
   : >"$expected_names"
-  for check_name in 'TLA model check' 'lint suite' 'dune build @check' 'dune build --profile release @check' 'dashboard typecheck' 'PR required success'; do
+  source "$here/pr-check-run-contract.sh"
+  while IFS= read -r check_name; do
     printf "    name: \${{ github.event.pull_request.draft == true && 'Draft snapshot / %s' || '%s' }}\n" "$check_name" "$check_name" >>"$expected_names"
-  done
+  done < <(pr_check_names scope)
   if diff -u <(LC_ALL=C sort "$expected_names") <(grep '^    name:' "$workflow" | LC_ALL=C sort) &&
      grep -qFx "  group: pr-check-\${{ github.event.pull_request.number }}-\${{ github.event.pull_request.draft == true && 'draft' || 'ready' }}" "$workflow" &&
      grep -qFx '  cancel-in-progress: true' "$workflow" &&
-     [ "$(grep -cFx '    if: github.event.pull_request.draft == false' "$workflow")" = 5 ] &&
+     [ "$(grep -cFx '    if: github.event.pull_request.draft == false' "$workflow")" = 6 ] &&
      grep -qFx '    if: ${{ always() && github.event.pull_request.draft == false }}' "$workflow" &&
-     grep -qFx '    needs: [tla, lint, check, release-check, dashboard-types]' "$workflow"; then
+     grep -qFx '    needs: [scope, tla, lint, check, release-check, dashboard-types]' "$workflow"; then
     pass=$((pass+1)); echo 'ok   workflow-ready-names-and-draft-isolation'
   else fail=$((fail+1)); echo 'FAIL workflow-ready-names-and-draft-isolation'; fi
   sed -n '/^  required-success:/,$p' "$workflow" | sed -n '/^        run: |/,$p' | tail -n +2 | sed 's/^          //' >"$work/summary.sh"
-  for field in PR_DRAFT TLA_RESULT LINT_RESULT CHECK_RESULT RELEASE_RESULT DASHBOARD_RESULT; do
+  for field in PR_DRAFT SCOPE_RESULT TLA_RESULT LINT_RESULT CHECK_RESULT RELEASE_RESULT DASHBOARD_RESULT; do
     for result in failure cancelled skipped pending ''; do
-      if env PR_DRAFT=false TLA_RESULT=success LINT_RESULT=success CHECK_RESULT=success RELEASE_RESULT=success DASHBOARD_RESULT=success \
+      if env PR_DRAFT=false SCOPE_RESULT=success TLA_RESULT=success LINT_RESULT=success CHECK_RESULT=success RELEASE_RESULT=success DASHBOARD_RESULT=success \
         "$field=$result" bash "$work/summary.sh" >"$work/summary.out" 2>&1; then
         fail=$((fail+1)); echo "FAIL summary-accepted-$field-$result"
       else pass=$((pass+1)); echo "ok   summary-refuses-$field-$result"; fi
     done
   done
-  if env PR_DRAFT=false TLA_RESULT=success LINT_RESULT=success CHECK_RESULT=success RELEASE_RESULT=success DASHBOARD_RESULT=success \
+  if env PR_DRAFT=false SCOPE_RESULT=success TLA_RESULT=success LINT_RESULT=success CHECK_RESULT=success RELEASE_RESULT=success DASHBOARD_RESULT=success \
     bash "$work/summary.sh" >"$work/summary.out" 2>&1; then
     pass=$((pass+1)); echo 'ok   ready-summary-five-successes'
   else fail=$((fail+1)); echo 'FAIL ready-summary-five-successes'; fi
-  if env PR_DRAFT=true TLA_RESULT=success LINT_RESULT=success CHECK_RESULT=success RELEASE_RESULT=success DASHBOARD_RESULT=success \
+  if env PR_DRAFT=true SCOPE_RESULT=success TLA_RESULT=success LINT_RESULT=success CHECK_RESULT=success RELEASE_RESULT=success DASHBOARD_RESULT=success \
     bash "$work/summary.sh" >"$work/summary.out" 2>&1; then
     fail=$((fail+1)); echo 'FAIL summary-accepted-current-draft'
   else pass=$((pass+1)); echo 'ok   summary-refuses-current-draft'; fi

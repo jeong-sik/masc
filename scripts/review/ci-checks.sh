@@ -95,7 +95,7 @@ runs="$(printf '%s\n' "$runs" | awk -F '\t' -v ignored="$unrelated_suites" 'BEGI
 pr_check_classify "$repo" "$head" "$wf_all" "$runs" ci_gh_json || return 1
 [ -z "$PR_CHECK_INVALID" ] || ci_reasons+=("$PR_CHECK_INVALID")
 if [ -n "$PR_CHECK_DRAFT_RUNS$PR_CHECK_CANCELLED_RUNS" ]; then
-  [ "$PR_CHECK_READY_OK" = yes ] || ci_reasons+=("Draft snapshot exclusion requires six successful checks in the selected Ready PR-check suite")
+  [ "$PR_CHECK_READY_OK" = yes ] || ci_reasons+=("Draft snapshot exclusion requires the complete successful check set in the selected Ready PR-check suite")
   wf_all="$(printf '%s\n' "$wf_all" | awk -F '\t' -v ignored="$PR_CHECK_DRAFT_RUNS $PR_CHECK_CANCELLED_RUNS" 'BEGIN {n=split(ignored,a," "); for(i=1;i<=n;i++) drop[a[i]]=1} NF && !($7 in drop)')"
 fi
 # A failed manual Release run is ignorable only when the validator itself

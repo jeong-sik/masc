@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Shared PR-check Draft snapshot evidence. Source from Bash 3.2 callers.
 # JSON is decoded by the caller's paginated gh --jq callback, never standalone jq.
-# Only the complete six-job skipped expression signature is excludable as Draft.
+# Only the complete skipped expression signature is excludable as Draft.
+# The deployed six-job workflow and the ROLL scope's seven-job workflow are
+# distinct exact sets; an arbitrary extra job is never excluded.
 # Cancelled twins retain their existing loser rule. Historical
 # canonical skipped checks and unrelated workflows keep the caller's policy.
 PR_CHECK_WORKFLOWS_JQ='.workflow_runs[] | [(.workflow_id|tostring), (if .conclusion == "cancelled" then "0" else "1" end), (.run_number|tostring), (.name // "-"), .status, (.conclusion // "none"), (.id|tostring), ((.check_suite_id // 0)|tostring), (.event // "none"), (.path // "-"), (.head_branch // "-"), (.head_sha // "-"), (.created_at // "-")] | @tsv'
@@ -10,17 +12,18 @@ PR_CHECK_CHECKS_JQ='.check_runs[] | [.name, .status, (.conclusion // "none"), (.
 pr_check_names() {
   printf '%s\n' 'TLA model check' 'lint suite' 'dune build @check' \
     'dune build --profile release @check' 'dashboard typecheck' 'PR required success'
+  if [ "${1:-}" = scope ]; then printf '%s\n' 'PR inspection scope'; fi
 }
 
 # A job skipped by its job-level if does not evaluate name. Actions returns
 # the expression body without ${{ }} (run 36514675023), while Ready jobs
-# evaluate to the canonical names above. Match the six exact wire values;
+# evaluate to the canonical names above. Match the exact wire values;
 # neither an arbitrary expression nor a Draft-looking substring is evidence.
 pr_check_draft_names() {
   local name
   while IFS= read -r name; do
     printf "github.event.pull_request.draft == true && 'Draft snapshot / %s' || '%s'\n" "$name" "$name"
-  done < <(pr_check_names)
+  done < <(pr_check_names "${1:-}")
 }
 
 # Keep the guard's latest per-name rule, constrained to ONE selected suite.
@@ -38,12 +41,13 @@ pr_check_classify() { # repo head workflow-TSV check-TSV gh_json_callback
   PR_CHECK_READY_RUN=""; PR_CHECK_READY_SUITE=""; PR_CHECK_READY_OK=no
   local repo="$1" head="$2" workflows="$3" checks="$4" api="$5"
   local suites suite meta count wid rank num name status conclusion run event path branch sha created
-  local jobs rows expected actual pairs check_pairs draft_wid="" ready
+  local jobs rows expected scoped_expected actual pairs check_pairs draft_wid="" ready scope_seen=no
   # A reserved marker only selects candidates for strict validation. A
   # malformed wrapper/condition must not disappear as an older lost suite.
   suites=$(printf '%s\n' "$checks" | awk -F '\t' 'index($1,"Draft snapshot / ")>0 {print $5}' | sort -u)
   [ -n "$suites" ] || return 0
   expected=$(pr_check_draft_names | LC_ALL=C sort)
+  scoped_expected=$(pr_check_draft_names scope | LC_ALL=C sort)
   for suite in $suites; do
     meta=$(printf '%s\n' "$workflows" | awk -F '\t' -v suite="$suite" '$8 == suite')
     count=$(printf '%s\n' "$meta" | awk 'NF {n++} END {print n+0}')
@@ -58,7 +62,7 @@ pr_check_classify() { # repo head workflow-TSV check-TSV gh_json_callback
     fi
     draft_wid="$wid"
     # A cancelled sibling already loses under the caller's existing run rule.
-    # It may never have emitted all six jobs. Keep this distinct from the
+    # It may never have emitted all required jobs. Keep this distinct from the
     # complete skipped-Draft proof, and still require independent Ready evidence.
     if [ "$conclusion" = cancelled ] && printf '%s\n' "$workflows" | awk -F '\t' -v wid="$wid" \
       '$1 == wid && $6 != "cancelled" {found=1} END {exit !found}'; then
@@ -74,10 +78,11 @@ pr_check_classify() { # repo head workflow-TSV check-TSV gh_json_callback
     jobs=$("$api" "repos/$repo/actions/runs/$run/jobs?filter=latest&per_page=100" \
       '.jobs[] | [.name, .status, (.conclusion // "none"), (.id|tostring), ((.run_id // 0)|tostring), (.head_sha // "-")] | @tsv') || return 1
     actual=$(printf '%s\n' "$jobs" | cut -f1 | LC_ALL=C sort)
-    if [ "$actual" != "$expected" ] || ! printf '%s\n' "$jobs" | awk -F '\t' -v run="$run" -v head="$head" \
+    if { [ "$actual" != "$expected" ] && [ "$actual" != "$scoped_expected" ]; } || ! printf '%s\n' "$jobs" | awk -F '\t' -v run="$run" -v head="$head" \
       'NF != 6 || $2 != "completed" || $3 != "skipped" || $4 !~ /^[1-9][0-9]*$/ || seen[$4]++ || $5 != run || $6 != head {bad=1} END {exit bad}'; then
       PR_CHECK_INVALID="invalid Draft snapshot jobs for run $run"; return 0
     fi
+    if [ "$actual" = "$scoped_expected" ]; then scope_seen=yes; fi
     rows=$(pr_check_suite_rows "$checks" "$suite")
     pairs=$(printf '%s\n' "$jobs" | cut -f1-4 | LC_ALL=C sort)
     check_pairs=$(printf '%s\n' "$rows" | cut -f1-4 | LC_ALL=C sort)
@@ -103,7 +108,9 @@ pr_check_classify() { # repo head workflow-TSV check-TSV gh_json_callback
   rows=$(pr_check_suite_rows "$checks" "$suite")
   actual=$(printf '%s\n' "$rows" | cut -f1 | LC_ALL=C sort)
   expected=$(pr_check_names | LC_ALL=C sort)
-  [ "$actual" = "$expected" ] || return 0
+  scoped_expected=$(pr_check_names scope | LC_ALL=C sort)
+  if [ "$scope_seen" = yes ]; then expected="$scoped_expected"; fi
+  [ "$actual" = "$expected" ] || [ "$actual" = "$scoped_expected" ] || return 0
   if printf '%s\n' "$rows" | awk -F '\t' \
     '$2 != "completed" || $3 != "success" || $4 !~ /^[1-9][0-9]*$/ || seen[$4]++ {bad=1} END {exit bad}'; then
     PR_CHECK_READY_OK=yes

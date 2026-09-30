@@ -19,5 +19,23 @@
     "result": "passed",
     "typescript": "passed",
     "scope": "Failed preview alert, return to observed portrait, unchanged wallet/ownership; frontend only"
+  },
+  "parent_propagation_check": {
+    "source_head": "72cc41a57d337ae7a8539f92b21111e67c3167c1",
+    "parent_head": "c06b7d01855a130696565543659c82bc2e8f3828",
+    "tests": 31,
+    "files": 4,
+    "duration_seconds": 5.37,
+    "result": "passed",
+    "test_files": [
+      "src/api/keeper-items.test.ts",
+      "src/components/keeper-items-panel.test.ts",
+      "src/components/keeper-portrait.test.ts",
+      "src/components/candle-economy.test.ts"
+    ],
+    "typescript": "tsc --noEmit passed",
+    "ocaml": "stop-after parsing passed for portrait implementation/interface and HTTP test",
+    "scope": "Frontend contracts and component behavior after parent propagation; native HTTP/router/browser/installed TUI remain unverified",
+    "ci_dispatches": 0
   }
 }

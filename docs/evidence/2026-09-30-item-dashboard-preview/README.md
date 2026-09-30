@@ -14,3 +14,14 @@ current PNG.
 Chromium screenshot capture was refused by the sandbox at bootstrap_check_in
 (permission denied 1100). No CI was dispatched. Installed deployment remains
 unverified.
+
+## Parent propagation check
+
+Source `72cc41a57d337ae7a8539f92b21111e67c3167c1` on strict amount parent
+`c06b7d01855a130696565543659c82bc2e8f3828` passed 31 tests in four affected
+frontend suites in 5.37 seconds. `tsc --noEmit` passed. The portrait server
+implementation, interface and HTTP scenario parsed successfully.
+
+These checks cover Item amount, account, portrait and preview recovery
+contracts in the frontend. Native HTTP, browser rendering and installed TUI
+execution on this head remain unverified. No build or CI was started.

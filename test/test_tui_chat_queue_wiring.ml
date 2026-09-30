@@ -3354,13 +3354,13 @@ let test_the_support_threshold_reserves_the_scrollback_row () =
   let state =
     Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
   in
-  let newest_status_rows = Tui_types.keeper_message_status_rows state in
+  let newest_status_rows = Tui_types.keeper_message_status_rows state ~terminal_cols:80 in
   let newest =
     Tui_types.keeper_message_support_status_rows state
       ~status_rows:newest_status_rows
   in
   state.msg_scroll <- 1;
-  let reading_back_status_rows = Tui_types.keeper_message_status_rows state in
+  let reading_back_status_rows = Tui_types.keeper_message_status_rows state ~terminal_cols:80 in
   let reading_back =
     Tui_types.keeper_message_support_status_rows state
       ~status_rows:reading_back_status_rows

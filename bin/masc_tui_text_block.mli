@@ -6,3 +6,10 @@
     would take the row a caller puts its label on. *)
 
 val rows : max_cells:int -> string -> string list
+
+val lines : string -> string list
+(** Split at LF, removing a trailing CR only when it belongs to that LF's
+    CRLF terminator. Preserve blank lines, spaces, and standalone CR,
+    including a CR at the end of the text. Returned lines are raw text;
+    consumers must sanitize them at the terminal display boundary. This
+    performs no wrapping or trimming. *)

@@ -81,7 +81,13 @@ type placement = {
 
 val placement_bytes : placement -> string
 (** Save the cursor, move to the corner, transfer the pixels under the
-    placement's id, restore the cursor. *)
+    placement's id, which also places them, restore the cursor. [""] when
+    the encoder refuses the pixels. *)
+
+val put_bytes : placement -> string
+(** Save the cursor, move to the corner, place the pixels the terminal
+    already holds under the placement's id ({!Masc_tui_graphics.put}),
+    restore the cursor. No pixels travel. *)
 
 val set_display : display -> unit
 (** What this terminal draws. Set once, after the start-up probe. Until then
@@ -96,15 +102,32 @@ val begin_frame : unit -> unit
 val request : placement -> unit
 (** The frame being built wants this picture on screen. *)
 
-val flush : rewritten:(int -> bool) -> write:(string -> unit) -> unit
-(** After a frame reached the terminal. [rewritten row] says whether the
-    frame erased and wrote that 0-based terminal row again; a full redraw
-    says so for every row, a frame that sent nothing for none. Places every
-    requested picture that is new, moved or changed, or that covers a
-    rewritten row, and deletes every picture the frame no longer asks for.
-    A picture the protocol encoder refuses is not counted as on screen, so
-    the next frame tries it again. [write] must carry
-    the bytes to the terminal as they are (wrapped for tmux by the caller).
-    A screen that takes the whole terminal -- a picture, the MSX screen --
-    retires ours with {!begin_frame} and a flush: deleting what someone
-    else's delete-all already took is a no-op for the terminal. *)
+(** What one presented frame sends for one picture it asked for. *)
+type send =
+  | Keep  (** the terminal still shows this picture where it was placed *)
+  | Put
+      (** the terminal still holds these pixels: place them again, a few
+          dozen bytes. For a picture that moved, and for one a rewritten
+          row crossed. *)
+  | Transmit
+      (** send the pixels, which places them. For a new or changed picture,
+          and after a clear screen, which takes the pixels with the
+          placements. *)
+
+val send :
+  Masc_tui_frame_presenter.present_result -> shown:placement option -> placement -> send
+(** [shown]: what the terminal was last sent under the picture's id.
+    [Presented Whole_screen] cleared the screen ([ESC [2J]); [Presented
+    (Rows rows)] erased ([ESC [2K]) and wrote these 0-based rows again;
+    [Unchanged] wrote nothing. *)
+
+val flush : Masc_tui_frame_presenter.present_result -> write:(string -> unit) -> unit
+(** After a frame reached the terminal, or after nothing did ([Unchanged]).
+    Sends each requested picture what {!send} says, and deletes every
+    picture the frame no longer asks for. A picture the protocol encoder
+    refuses is not counted as on screen, so the next frame tries it again.
+    [write] must carry the bytes to the terminal as they are (wrapped for
+    tmux by the caller). A screen that takes the whole terminal -- a
+    picture, the MSX screen -- retires ours with {!begin_frame} and a flush:
+    deleting what someone else's delete-all already took is a no-op for the
+    terminal. *)

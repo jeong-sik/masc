@@ -60,8 +60,11 @@ let with_eio_temp_dir_and_clock f =
     ~finally:Fs_compat.clear_fs
     (fun () -> with_temp_dir (f ~clock:(Eio.Stdenv.clock env)))
 
+(* A fresh listing per call, so every scan reads every file. *)
+let scan_requests base_path = V.list_projected (V.listing ~project:Result.ok ()) base_path
+
 let scan_exn base_path =
-  match V.list_requests base_path with
+  match scan_requests base_path with
   | Ok scan -> scan
   | Error detail -> Alcotest.fail detail
 ;;
@@ -69,7 +72,7 @@ let scan_exn base_path =
 (* Most cases here care only about the requests that read. Asserting the scan
    found nothing unreadable keeps them honest: without it a case could pass
    while quietly rejecting the record it meant to be reading. *)
-let list_requests_exn base_path =
+let readable_requests_exn base_path =
   let scan = scan_exn base_path in
   Alcotest.(check int)
     "no unreadable requests" 0 (List.length scan.V.unreadable);
@@ -229,6 +232,39 @@ let test_stalled_projection_names_no_interval_for_a_shared_timer () =
   check_names content [ "task-101"; "vrf:vrf-101"; "retry scheduled"; "timer" ];
   check_omits content
     [ "retry scheduled in"; "60 s"; "no retry armed"; "Forward path"; "HITL" ]
+;;
+
+let test_stalled_projection_names_last_runtime_and_next_attempt () =
+  let subject =
+    VP.Task_review
+      { task_id = "task-101"
+      ; verification_id = "vrf-101"
+      ; disposition = VP.Retry_scheduled { delay = VP.Full_interval { seconds = 60.0 } }
+      }
+  in
+  let content =
+    VP.For_testing.stalled_board_content_with_runtime
+      ~subject
+      ~gate:"evaluator_unavailable"
+      ~detail:"Rate limited: slow (retry_after: 120.000s)"
+      ~evaluator_runtime:(Some "glm-coding.glm-5-3")
+      ~now:0.0
+  in
+  check_names content
+    [ "last runtime: glm-coding.glm-5-3"
+    ; "retry_after: 120.000s"
+    ; "next attempt around 1970-01-01T00:01:00Z"
+    ];
+  let metadata =
+    VP.For_testing.stalled_metadata_with_runtime
+      ~authority:(Masc_domain.System_llm_agent { agent_run_id = "test-runtime" })
+      ~subject
+      ~gate:"evaluator_unavailable"
+      ~detail:"Rate limited: slow (retry_after: 120.000s)"
+      ~evaluator_runtime:(Some "glm-coding.glm-5-3")
+  in
+  Alcotest.(check string) "runtime in metadata" "glm-coding.glm-5-3"
+    (Yojson.Safe.Util.(metadata |> member "evaluator_runtime" |> to_string))
 ;;
 
 let stall_authority_for_decoding =
@@ -2426,7 +2462,7 @@ let test_create_rejects_blank_criterion_before_write () =
       Alcotest.(check int)
         "no request was written"
         0
-        (List.length (list_requests_exn base_path)))
+        (List.length (readable_requests_exn base_path)))
 
 (* RFC-0221 §3.1: [delete_request] removes the record (compensation) and is
    idempotent — deleting a missing record is success, so a caller can compensate
@@ -2453,21 +2489,21 @@ let test_delete_request () =
         | Ok _ -> Alcotest.fail "load after delete should report not-found"
         | Error _ -> ())
 
-let test_list_requests () =
+let test_scan_requests () =
   with_temp_dir (fun base_path ->
     let _ = V.create_request ~base_path ~task_id:"t1"
         ~output:`Null ~criteria:[] ~worker:"a" () in
     let _ = V.create_request ~base_path ~task_id:"t2"
         ~output:`Null ~criteria:[] ~worker:"b" () in
-    let reqs = list_requests_exn base_path in
+    let reqs = readable_requests_exn base_path in
     Alcotest.(check int) "two requests" 2 (List.length reqs))
 
-let test_list_requests_missing_dir_stays_quiet () =
+let test_scan_missing_dir_stays_quiet () =
   with_temp_dir (fun base_path ->
     let before =
       persistence_counter (Read_drop_reason.to_wire Read_drop_reason.List_dir_error)
     in
-    let reqs = list_requests_exn base_path in
+    let reqs = readable_requests_exn base_path in
     Alcotest.(check int) "no requests" 0 (List.length reqs);
     Alcotest.(check (float 0.1)) "missing dir does not increment metric"
       before
@@ -2493,7 +2529,7 @@ let test_request_path_uses_current_store () =
    but made it total: 171 records written by a producer removed on 2026-08-07
    were enough to answer /api/v1/dashboard/proof with 500 for five days, naming
    one path while saying nothing about the other 170 or the 122 that read fine. *)
-let test_list_requests_isolates_bad_entry_with_metric () =
+let test_scan_isolates_bad_entry_with_metric () =
   with_temp_dir (fun base_path ->
     let _ = V.create_request ~base_path ~task_id:"t1"
         ~output:`Null ~criteria:[] ~worker:"a" () in
@@ -2502,7 +2538,7 @@ let test_list_requests_isolates_bad_entry_with_metric () =
     let before =
       persistence_counter (Read_drop_reason.to_wire Read_drop_reason.Entry_load_error)
     in
-    (match V.list_requests base_path with
+    (match scan_requests base_path with
      | Error detail -> Alcotest.fail detail
      | Ok scan ->
        Alcotest.(check int)
@@ -2533,7 +2569,7 @@ let test_list_requests_isolates_bad_entry_with_metric () =
 (* The scan reports every unreadable file, not just the one it stopped at. The
    old contract could only ever name one, which is what made a 171-record
    problem look like a 1-record problem. *)
-let test_list_requests_reports_every_unreadable_entry () =
+let test_scan_reports_every_unreadable_entry () =
   with_temp_dir (fun base_path ->
     let _ = V.create_request ~base_path ~task_id:"t1"
         ~output:`Null ~criteria:[] ~worker:"a" () in
@@ -2544,7 +2580,7 @@ let test_list_requests_reports_every_unreadable_entry () =
        actually accumulated on disk, as opposed to a truncated write. *)
     Fs_compat.save_file (Filename.concat dir "broken-c.json")
       {|{"id":"x","task_id":"t","output":null,"criteria":[{"type":"custom","description":"d"}],"worker":"w","created_at":1.0}|};
-    match V.list_requests base_path with
+    match scan_requests base_path with
     | Error detail -> Alcotest.fail detail
     | Ok scan ->
       Alcotest.(check int)
@@ -2552,7 +2588,7 @@ let test_list_requests_reports_every_unreadable_entry () =
       Alcotest.(check int)
         "all three unreadable files reported" 3 (List.length scan.V.unreadable))
 
-let test_list_requests_rereads_current_request_content () =
+let test_scan_rereads_current_request_content () =
   with_temp_dir (fun base_path ->
     let request =
       match
@@ -2570,14 +2606,14 @@ let test_list_requests_rereads_current_request_content () =
     Alcotest.(check int)
       "initial request is readable"
       1
-      (List.length (list_requests_exn base_path));
+      (List.length (readable_requests_exn base_path));
     Fs_compat.save_file (VS.request_path base_path request.id) "{not-json";
     (* The point of the case is that the second scan reads the file again
        instead of reusing the first result. It used to observe that through the
        scan failing; now the same re-read shows as the record moving out of
        [readable] and into [unreadable], which says where it went as well as
        that it moved. *)
-    match V.list_requests base_path with
+    match scan_requests base_path with
     | Error detail -> Alcotest.fail detail
     | Ok scan ->
       Alcotest.(check int)
@@ -2588,6 +2624,52 @@ let test_list_requests_rereads_current_request_content () =
         "the rewritten file is accounted for"
         1
         (List.length scan.V.unreadable))
+
+(* The domain a projection ran on, as a scan saw it. *)
+let projected_on_domain base_path =
+  let ran_on = Atomic.make None in
+  let listing =
+    V.listing
+      ~project:(fun (request : V.verification_request) ->
+        Atomic.set ran_on (Some (Domain.self () :> int));
+        Ok request.V.id)
+      ()
+  in
+  match V.list_projected listing base_path with
+  | Error detail -> Alcotest.fail detail
+  | Ok scan ->
+    Alcotest.(check int) "the request is listed" 1 (List.length scan.V.readable);
+    (match Atomic.get ran_on with
+     | Some domain -> domain
+     | None -> Alcotest.fail "the projection never ran")
+;;
+
+(* With a domain pool installed the walk and the projection run on a pool
+   domain, so a scan that reads every request file does not hold the domain
+   that asked for it. Without one they run in the caller. *)
+let test_scan_runs_on_the_domain_pool_when_one_is_installed () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Fun.protect ~finally:Fs_compat.clear_fs @@ fun () ->
+  with_temp_dir @@ fun base_path ->
+  (match
+     V.create_request ~base_path ~task_id:"t1" ~output:`Null ~criteria:[] ~worker:"a" ()
+   with
+   | Ok (_ : V.verification_request) -> ()
+   | Error detail -> Alcotest.fail detail);
+  let caller = (Domain.self () :> int) in
+  Alcotest.(check int)
+    "without a pool the projection runs in the caller"
+    caller
+    (projected_on_domain base_path);
+  Eio.Switch.run @@ fun sw ->
+  Domain_pool_ref.set (Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env));
+  Fun.protect ~finally:Domain_pool_ref.clear_for_tests @@ fun () ->
+  Alcotest.(check bool)
+    "with a pool it runs on another domain"
+    true
+    (projected_on_domain base_path <> caller)
+;;
 
 let create_evidence_request ~base_path ~request_id ~artifact_path =
   let profile_path =
@@ -4606,6 +4688,8 @@ let () =
         test_stalled_projection_says_retry_when_one_is_scheduled;
       Alcotest.test_case "stalled projection names no interval for a shared timer" `Quick
         test_stalled_projection_names_no_interval_for_a_shared_timer;
+      Alcotest.test_case "stalled projection names last runtime and next attempt" `Quick
+        test_stalled_projection_names_last_runtime_and_next_attempt;
       Alcotest.test_case "stalled metadata keeps typed authority" `Quick
         test_stalled_metadata_preserves_typed_authority;
       Alcotest.test_case "stall disposition metadata decodes strictly" `Quick
@@ -4636,19 +4720,21 @@ let () =
       Alcotest.test_case "create rejects blank criterion" `Quick
         test_create_rejects_blank_criterion_before_write;
       Alcotest.test_case "delete request (idempotent)" `Quick test_delete_request;
-      Alcotest.test_case "list requests" `Quick test_list_requests;
-      Alcotest.test_case "list requests missing dir stays quiet" `Quick
-        test_list_requests_missing_dir_stays_quiet;
+      Alcotest.test_case "scan requests" `Quick test_scan_requests;
+      Alcotest.test_case "scan missing dir stays quiet" `Quick
+        test_scan_missing_dir_stays_quiet;
       Alcotest.test_case "verifications dir resolves active store" `Quick
         test_verifications_dir_resolves_active_store;
       Alcotest.test_case "request path uses current store" `Quick
         test_request_path_uses_current_store;
-      Alcotest.test_case "list requests isolates bad entry with metric" `Quick
-        test_list_requests_isolates_bad_entry_with_metric;
-      Alcotest.test_case "list requests reports every unreadable entry" `Quick
-        test_list_requests_reports_every_unreadable_entry;
-      Alcotest.test_case "list requests rereads current content" `Quick
-        test_list_requests_rereads_current_request_content;
+      Alcotest.test_case "scan isolates bad entry with metric" `Quick
+        test_scan_isolates_bad_entry_with_metric;
+      Alcotest.test_case "scan reports every unreadable entry" `Quick
+        test_scan_reports_every_unreadable_entry;
+      Alcotest.test_case "scan rereads current content" `Quick
+        test_scan_rereads_current_request_content;
+      Alcotest.test_case "scan runs on the domain pool when one is installed" `Quick
+        test_scan_runs_on_the_domain_pool_when_one_is_installed;
       Alcotest.test_case "submitted evidence authority-scoped and contained" `Quick
         test_submitted_evidence_inspection_is_authority_scoped_and_contained;
       Alcotest.test_case "submit snapshot resolves Docker relative refs" `Quick

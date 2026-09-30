@@ -187,7 +187,7 @@ function providerProbePayload() {
     refresh_state: 'served_stale',
     probe: {
       source: 'runtime.toml',
-      status: 'reachable',
+      status: 'ok',
       checked_at: '2026-07-05T00:00:00Z',
       probe_ok: true,
       summary: {

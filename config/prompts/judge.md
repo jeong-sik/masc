@@ -29,7 +29,8 @@ operator_surface: primary
 `verdicts` 필드 하나만 있는 JSON 객체 하나를, 다른 텍스트 없이 반환합니다.
 verdict에는 항목의 정확한 `candidate_id`, "relevant" 또는 "not_relevant"
 `decision`, 그리고 제공된 JSON에만 근거한 비어 있지 않은 `rationale`이
-들어갑니다.
+들어갑니다. 각 verdict 객체의 키는 `candidate_id`, `decision`, `rationale`
+세 개뿐입니다. 판단 설명은 `rationale` 문자열 안에 적으세요.
 
 {
   "verdicts": [

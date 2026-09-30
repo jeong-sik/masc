@@ -940,12 +940,38 @@ let dependencies node =
   stable_unique_node_ids (node.after @ Json_template.dependencies node.input)
 ;;
 
-let descriptor_entries descriptors =
+(* Each registered descriptor with the names the Keeper model calls it by.
+   The table and the names are fixed when the program starts, and deriving
+   the names walks the descriptor's input schema, so this is done once here
+   instead of in every [create]. The first descriptor registered under an
+   id is the one that id names. *)
+type registered_descriptor =
+  { descriptor : Keeper_tool_descriptor.t
+  ; model_names : string list
+  }
+
+let registered_by_id : (string, registered_descriptor) Hashtbl.t =
+  let registered = Keeper_tool_descriptor.all_descriptors () in
+  let table = Hashtbl.create (List.length registered) in
+  List.iter
+    (fun (descriptor : Keeper_tool_descriptor.t) ->
+       if not (Hashtbl.mem table descriptor.id)
+       then
+         Hashtbl.add
+           table
+           descriptor.id
+           { descriptor
+           ; model_names = Keeper_tool_descriptor.keeper_model_names descriptor
+           })
+    registered;
+  table
+;;
+
+let descriptor_entries registered =
   List.concat_map
-    (fun descriptor ->
-       Keeper_tool_descriptor.keeper_model_names descriptor
-       |> List.map (fun name -> name, descriptor))
-    descriptors
+    (fun { descriptor; model_names } ->
+       List.map (fun name -> name, descriptor) model_names)
+    registered
 ;;
 
 (* Names owned by descriptors the Keeper model cannot call. [registered_names]
@@ -953,10 +979,10 @@ let descriptor_entries descriptors =
    [keeper_model_names] has gone empty — which is exactly what tells an
    off-surface name apart from one nothing owns. This index never admits
    execution; it only names the rejection. *)
-let off_surface_entries descriptors =
+let off_surface_entries registered =
   List.concat_map
-    (fun descriptor ->
-       match Keeper_tool_descriptor.keeper_model_names descriptor with
+    (fun { descriptor; model_names } ->
+       match model_names with
        | _ :: _ -> []
        | [] ->
          let reason =
@@ -969,18 +995,30 @@ let off_surface_entries descriptors =
          in
          Keeper_tool_descriptor.registered_names descriptor
          |> List.map (fun name -> name, reason))
-    descriptors
+    registered
 ;;
 
 let canonicalize_descriptors descriptors =
   let rec canonicalize resolved = function
     | [] -> Ok (List.rev resolved)
-    | descriptor :: rest ->
-      (match Keeper_tool_descriptor.find_id descriptor.Keeper_tool_descriptor.id with
+    | (descriptor : Keeper_tool_descriptor.t) :: rest ->
+      (match Hashtbl.find_opt registered_by_id descriptor.id with
        | None -> Error (Unknown_descriptor_id descriptor.id)
-       | Some canonical -> canonicalize (canonical :: resolved) rest)
+       | Some registered -> canonicalize (registered :: resolved) rest)
   in
   canonicalize [] descriptors
+;;
+
+module Name_set = Set.Make (String)
+
+(* The first name that repeats an earlier one, in one pass over [names]. *)
+let first_repeated_name names =
+  let rec find seen = function
+    | [] -> None
+    | name :: rest ->
+      if Name_set.mem name seen then Some name else find (Name_set.add name seen) rest
+  in
+  find Name_set.empty names
 ;;
 
 let first_duplicate equal values =
@@ -1167,7 +1205,7 @@ let create ~descriptors nodes =
         | None ->
           let descriptors = descriptor_entries canonical_descriptors in
           let off_surface = off_surface_entries canonical_descriptors in
-          (match first_duplicate String.equal (List.map fst descriptors) with
+          (match first_repeated_name (List.map fst descriptors) with
            | Some name -> Error (Duplicate_tool_name name)
            | None ->
              (match validate_known_tools descriptors off_surface nodes with

@@ -434,9 +434,10 @@ let after_announcing result =
    tool surface does not read (RFC-0194). Called before a call that needs the
    controller, it frees a departed holder's controller and tells the board.
 
-   The holder's state is read between two lane calls, not under the lane's
-   lock, so a holder resumed in those milliseconds still loses it and must
-   wait for a pass like any other player. And the name is
+   The caller holds the credential transaction through this read and release,
+   and flushes the queued announcement after that transaction. Keeper registry
+   state can still change between the two lane calls: a resumed Keeper must
+   wait for a pass like any other player. The name is
    the caller's own: an MCP client named like a stopped Keeper is let go as
    that Keeper would be. *)
 (* A revoked invite can never pass the controller its name holds (RFC
@@ -445,31 +446,26 @@ let after_announcing result =
    first: a request the invitee sent before that and that reaches the lane
    after this can still take the freed controller. Where every request needs
    a credential, the next move by anyone else lets it go again
-   ([No_credential]). *)
+   ([No_credential]). The caller holds the Auth transaction until this release
+   completes, and flushes the Board announcement after leaving it. *)
 let release_revoked_invite ~holder ~by =
-  let released =
-    off_domain (fun () ->
-      Dos_lane.release_left ~holder
-        ~announce:
-          (announce ~author:by
-             (Printf.sprintf "%s 님의 초대가 회수되어 DOS 조종권이 풀렸어요" holder)))
-  in
-  (match released with
-   | Ok true -> flush_announcements ()
-   | Ok false | Error _ -> ());
-  released
+  off_domain (fun () ->
+    Dos_lane.release_left ~holder
+      ~announce:
+        (announce ~author:by
+           (Printf.sprintf "%s 님의 초대가 회수되어 DOS 조종권이 풀렸어요" holder)))
 ;;
 
 type holder_departure =
   | Keeper_stopped
-  | Player_expired
+  | Credential_expired
   | No_credential
 
 let departure_notice holder = function
   | Keeper_stopped ->
     Printf.sprintf "%s 님의 Keeper 가 멈춰서 DOS 조종권이 풀렸어요" holder
-  | Player_expired ->
-    Printf.sprintf "%s 님의 플레이 초대가 만료되어 DOS 조종권이 풀렸어요" holder
+  | Credential_expired ->
+    Printf.sprintf "%s 님의 접속 권한이 만료되어 DOS 조종권이 풀렸어요" holder
   | No_credential ->
     Printf.sprintf "%s 님은 접속 권한이 없어서 DOS 조종권이 풀렸어요" holder
 ;;
@@ -488,14 +484,28 @@ let free_left_controller ~holder_left ~who =
              (announce ~author:who
                 (departure_notice holder reason)))
      with
-     (* Posted now: the call that follows may be refused before it reaches
-        the lane, and would not post it. *)
-     | Ok true -> flush_announcements ()
+     (* The caller publishes the queued notice after its transaction, even
+        when the subsequent machine operation is refused. *)
+     | Ok true -> ()
      (* A hand-off that landed after the read above: that pass stands. *)
      | Ok false -> ()
      (* The machine went away; the call that follows reports it. *)
      | Error _ -> ()))
   | Ok _ | Error _ -> ()
+;;
+
+(* A Keeper removed for good cannot pass either, but the next move cannot
+   always tell that it left: with its meta gone, its own credential, which
+   has no expiry, reads like an agent that is coming back. The shutdown that
+   removes it lets its controller go here and tells the board, with the notice
+   a stopped Keeper's controller gets. [by] is who asked for the removal. No
+   credential transaction is held here, so the notice is posted before this
+   returns. *)
+let release_retired_keeper ~holder ~by =
+  after_announcing
+    (off_domain (fun () ->
+       Dos_lane.release_left ~holder
+         ~announce:(announce ~author:by (departure_notice holder Keeper_stopped))))
 ;;
 
 let handle_load ~tool_name ~start_time ~base_path ~agent_name args =

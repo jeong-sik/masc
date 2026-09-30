@@ -25,6 +25,7 @@
 #                    [--replace-own-cr REVIEW_ID] [--git-dir DIR]
 #   approve-guard.sh --check --run PR_CHECK_ID ...
 #   approve-guard.sh --check ...   # evaluate only, never writes (safe probe)
+#   approve-guard.sh --merge-check --receipt-json ...  # verified approval IDs
 #   approve-guard.sh --merge-check --repo O/R --pr N --head SHA40
 #                                  # trusted non-author approvals bound to this head
 # Exit: 0 approved/skipped/would-approve, 2 refused (reasons on stderr), 1 infra error.
@@ -36,11 +37,11 @@
 set -u
 GH="${GUARD_GH:-gh}"
 here="$(cd "$(dirname "$0")" && pwd)"
-check_only=0; merge_check=0; repo=""; pr=""; head=""; body=""; replace_cr=""; cited_run=""
+check_only=0; merge_check=0; receipt_json=0; repo=""; pr=""; head=""; body=""; replace_cr=""; cited_run=""; batch=""
 gitdir="${GUARD_REPO_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null)}"
 while [ $# -gt 0 ]; do
   case "$1" in
-    --run|--git-dir|--repo|--pr|--head|--body|--replace-own-cr)
+    --run|--git-dir|--repo|--pr|--head|--body|--replace-own-cr|--batch)
       if [ $# -lt 2 ] || [ -z "${2-}" ] || [[ "${2-}" == --* ]]; then
         echo "approve-guard: $1 requires a value" >&2
         exit 1
@@ -49,6 +50,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --check) check_only=1; shift ;;
     --merge-check) merge_check=1; shift ;;
+    --receipt-json) receipt_json=1; shift ;;
     --run) cited_run="${2-}"; shift 2 ;;
     --git-dir) gitdir="${2-}"; shift 2 ;;
     --repo) repo="${2-}"; shift 2 ;;
@@ -56,6 +58,7 @@ while [ $# -gt 0 ]; do
     --head) head="${2-}"; shift 2 ;;
     --body) body="${2-}"; shift 2 ;;
     --replace-own-cr) replace_cr="${2-}"; shift 2 ;;
+    --batch) batch="${2-}"; shift 2 ;;
     *) echo "approve-guard: unknown argument: $1" >&2; exit 1 ;;
   esac
 done
@@ -94,6 +97,9 @@ v_run=""; v_by=""
 if [ "$merge_check" -eq 1 ] && [ "$check_only" -eq 1 ]; then
   refuse "--merge-check and --check are separate read-only modes"
 fi
+if [ "$receipt_json" -eq 1 ] && [ "$merge_check" -ne 1 ]; then
+  refuse "--receipt-json requires --merge-check"
+fi
 if [ "$check_only" -eq 0 ] && [ "$merge_check" -eq 0 ]; then
   if [ -n "$body" ] && [ -s "$body" ]; then
     vline="$(head -n 1 "$body" | tr -d '\r')"
@@ -109,6 +115,16 @@ if [ "$check_only" -eq 0 ] && [ "$merge_check" -eq 0 ]; then
   fi
 fi
 [ ${#reasons[@]} -eq 0 ] || finish_refused
+
+# Freeze the caller's file so reads and the approval body use the same line.
+batch_args=(); batch_line=""
+if [ -n "$batch" ]; then
+  batch_line=$(python3 -c 'import sys; from pathlib import Path; sys.path.insert(0, sys.argv[1]); from batch_evidence import parse; print(parse(Path(sys.argv[2]).read_text()).line)' "$here" "$batch") || exit 1
+  batch_copy=$(mktemp) || exit 1
+  trap 'rm -f "$batch_copy"' EXIT
+  printf '%s\n' "$batch_line" > "$batch_copy"
+  batch_args=(--batch "$batch_copy")
+fi
 
 # The verdict line and final guard footer bind an approval to one head.
 footer_prefix="$(printf 'approve-guard: head \x60%s\x60 · ' "$head")"
@@ -146,7 +162,12 @@ if [ "$merge_check" -eq 1 ]; then
   [ -n "$approvals" ] || { refuse "no non-author APPROVED review has this head in its verdict and guard footer with trusted repository authority"; finish_refused; }
   latest_head="$(gh_json "repos/$repo/pulls/$pr" '.head.sha')" || exit 1
   [ "$latest_head" = "$head" ] || { refuse "head moved during merge check: PR head is $latest_head"; finish_refused; }
-  echo "MERGE-CHECK PASS #$pr head $head approvals:$approvals"
+  if [ "$receipt_json" -eq 1 ]; then
+    python3 -c 'import json, sys; print(json.dumps({"pr": int(sys.argv[1]), "head": sys.argv[2], "approval_ids": [int(value) for value in sys.argv[3].split()]}))' \
+      "$pr" "$head" "$approvals" || exit 1
+  else
+    echo "MERGE-CHECK PASS #$pr head $head approvals:$approvals"
+  fi
   exit 0
 fi
 
@@ -210,9 +231,14 @@ fi
 [[ "$v_run" =~ ^[1-9][0-9]*$ ]] || refuse "no explicit successful PR-check run for freshness"
 [ ${#reasons[@]} -eq 0 ] || finish_refused
 freshness=$(GUARD_GH="$GH" python3 "$here/ci-freshness.py" --repo "$repo" --pr "$pr" \
-  --head "$head" --run "$v_run" --git-dir "$gitdir")
+  --head "$head" --run "$v_run" --git-dir "$gitdir" ${batch_args[@]+"${batch_args[@]}"})
 fresh_rc=$?
 if [ "$fresh_rc" -ne 0 ]; then
+  if [ -n "$batch" ]; then
+    # Preserve the batch CLI's typed refusal through merge-guard to land-batch.
+    printf '%s\n' "$freshness" >&2
+    exit "$fresh_rc"
+  fi
   refuse "CI freshness: $freshness"
   finish_refused
 fi
@@ -257,13 +283,21 @@ check_structured_verdict
 # too; the structured-verdict reader cannot enforce shared-account CR consent.
 check_open_change_requests
 [ ${#reasons[@]} -eq 0 ] || finish_refused
+if [ -n "$batch" ]; then
+  # Revalidate all batch members and live main after the last ordinary gate.
+  GUARD_GH="$GH" python3 "$here/ci-freshness.py" --repo "$repo" --pr "$pr" \
+    --head "$head" --run "$v_run" --git-dir "$gitdir" ${batch_args[@]+"${batch_args[@]}"} >/dev/null || exit $?
+  check_open_change_requests
+  check_structured_verdict
+  [ ${#reasons[@]} -eq 0 ] || finish_refused
+fi
 [ -z "$PR_CHECK_DRAFT_RUNS" ] || footer="${footer} · verified Draft snapshot runs:${PR_CHECK_DRAFT_RUNS}"
 [ -z "$PR_CHECK_CANCELLED_RUNS" ] || footer="${footer} · cancelled Draft snapshot twins:${PR_CHECK_CANCELLED_RUNS}"
 if [ "$check_only" -eq 1 ]; then
   echo "WOULD APPROVE #${pr} head ${head} (${n_runs} check-runs, workflow runs ${wf_ids[*]})"
   exit 0
 fi
-if ! resp="$({ cat "$body"; printf '%s' "$footer"; } | "$GH" api -X POST "repos/${repo}/pulls/${pr}/reviews" \
+if ! resp="$({ cat "$body"; [ -z "$batch_line" ] || printf '\n\n%s\n' "$batch_line"; printf '%s' "$footer"; } | "$GH" api -X POST "repos/${repo}/pulls/${pr}/reviews" \
     -f event=APPROVE -f "commit_id=${head}" -F body=@- \
     --jq '[(.id|tostring), .state, .commit_id] | @tsv' 2>&1)"; then
   echo "approve-guard: POST review failed: $resp" >&2; exit 1

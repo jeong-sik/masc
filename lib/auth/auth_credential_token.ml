@@ -254,19 +254,22 @@ let find_static_credential_by_token config ~token : (agent_credential, masc_erro
        require_live_credential ~now:(Time_compat.now ()) first)
 ;;
 
-let find_static_credential_in_transaction transaction ~token =
+let find_static_credential_in_index index ~token =
   let ( let* ) = Result.bind in
-  let* snapshot = credential_store_snapshot_in_transaction transaction in
   let token_hash = sha256_hash token in
-  let matches = List.filter_map (fun (_, (credential : agent_credential)) ->
-    if constant_time_string_equal credential.token token_hash then Some credential else None)
-      snapshot.current_credentials in
-  match matches with
-  | [] -> Error (Auth (Auth_error.InvalidToken "Token mismatch"))
-  | first :: rest ->
+  match Hashtbl.find_opt index token_hash with
+  | None | Some [] -> Error (Auth (Auth_error.InvalidToken "Token mismatch"))
+  | Some (first :: rest) ->
     let* () = check_credential_collisions
         ~token_hash_prefix:(token_hash_prefix_of token_hash) first rest in
     require_live_credential ~now:(Time_compat.now ()) first
+;;
+
+let find_static_credential_in_transaction ?(leaf_policy = Owned_regular_only) transaction ~token =
+  let ( let* ) = Result.bind in
+  let* snapshot = credential_store_snapshot_in_transaction ~leaf_policy transaction in
+  let index = build_token_index (List.map snd snapshot.current_credentials) in
+  find_static_credential_in_index index ~token
 ;;
 
 (** Resolve either an OAuth access token or the existing static bearer.
@@ -444,6 +447,7 @@ let create_file_backed_login_token config ~agent_name ~role ~lifetime =
         |> Result.map_error file_backed_publication_error in
       Ok (raw_token, credential, auth_change))
     |> Result.join
+
 ;;
 
 (* ============================================ *)
@@ -662,7 +666,11 @@ let verify_token_owner_alias config ~agent_name ~token =
 let verify_token config ~agent_name ~token : (agent_credential, masc_error) result =
   match load_credential config agent_name with
   | None ->
-    (match Auth_oauth.find_access_credential ~base_path:config ~token with
+    let ( let* ) = Result.bind in
+    let* present = credential_path_exists (credential_file config agent_name) in
+    if present then Error (Auth (Auth_error.InvalidToken
+      "The exact credential exists but cannot be decoded; alias fallback is refused"))
+    else (match Auth_oauth.find_access_credential ~base_path:config ~token with
      | Ok (Some credential) when String.equal credential.agent_name agent_name ->
        Ok credential
      | Ok (Some credential) ->

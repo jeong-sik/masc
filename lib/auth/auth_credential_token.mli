@@ -53,7 +53,13 @@ val find_static_credential_by_token :
     OAuth access token cannot mint a new OAuth grant recursively. General
     request authentication should use {!find_credential_by_token}. *)
 
+val find_static_credential_in_index :
+  (string, agent_credential list) Hashtbl.t -> token:string ->
+  (agent_credential, masc_error) result
+(** Only for an index owned by the caller's admitted transaction. *)
+
 val find_static_credential_in_transaction :
+  ?leaf_policy:Auth_credential_base.credential_leaf_policy ->
   Auth_credential_base.credential_transaction -> token:string ->
   (agent_credential, masc_error) result
 (** Reads all current owners under the caller's transaction, without consulting
@@ -147,7 +153,7 @@ val rotate_shared_tokens : string -> (rotation_outcome list, masc_error) result
 
 val rotate_shared_tokens_for_agents :
   string -> agent_names:string list -> (rotation_outcome list, masc_error) result
-(** Only the selected canonical names participate in groups. The current role
+(** Shared groups are discovered globally; only selected canonical owners are rotated. The current role
     and identity are preserved while publishers, revoke and prune are excluded
     by the same transaction. *)
 

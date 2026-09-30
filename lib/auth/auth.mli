@@ -180,7 +180,9 @@ val raw_token_file : string -> string -> string
 val delete_credential : string -> string -> unit
 (** Retire [agent_name]: the credential, its redirect stub and UUID file, and
     the raw token file, then invalidate the credential cache. The bearer stops
-    validating from the next request. Absent files are not an error. *)
+    validating from the next request. Absent files are not an error. Redirect
+    aliases are refused: request the payload's canonical owner instead. Expiry
+    decoding is not required for explicit canonical-owner revocation. *)
 
 val delete_credential_in_transaction :
   credential_transaction -> string -> (unit, masc_error) result
@@ -349,6 +351,12 @@ val verify_internal_keeper_token :
 
 val ensure_internal_keeper_token :
   string -> string
+
+val ensure_keeper_credentials :
+  string -> agent_names:string list ->
+  ((string * (string * agent_credential, masc_error) result) list, masc_error) result
+(** Batch startup sync under one admitted snapshot. A publication failure stops
+    later writes rather than trusting an index with uncertain store effects. *)
 
 val ensure_keeper_credential :
   string -> agent_name:string ->

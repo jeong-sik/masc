@@ -34,7 +34,10 @@ import {
   refreshBoardFlairs,
   refreshBoardHearths,
   loadPostDetail,
+  loadOlderPostComments,
   detailPost,
+  detailComments,
+  detailCommentPage,
   type ContentCategory,
   type VisibleBoardGroups,
 } from './board-state'
@@ -79,6 +82,7 @@ beforeEach(() => {
   boardFlairsLoading.value = false
   vi.mocked(fetchBoardHearths).mockReset()
   vi.mocked(fetchBoardFlairs).mockReset()
+  vi.mocked(fetchBoardPost).mockReset()
   vi.mocked(showToast).mockReset()
 })
 
@@ -369,6 +373,7 @@ describe('loadPostDetail', () => {
         summary: 'moved to the successor',
       },
       comments: [],
+      commentPage: { offset: 0, total: 0 },
     } as any)
 
     await loadPostDetail('post-closed')
@@ -379,6 +384,49 @@ describe('loadPostDetail', () => {
       successor_id: 'p-successor000000000000000000000',
       summary: 'moved to the successor',
     })
+  })
+
+  it('prepends older pages without losing the newest comments', async () => {
+    const comment = (n: number) => ({ id: `c${n}`, content: `comment ${n}` })
+    vi.mocked(fetchBoardPost)
+      .mockResolvedValueOnce({ ...makePost({ id: 'p1', comment_count: 45 }),
+        comments: Array.from({ length: 20 }, (_, index) => comment(index + 26)),
+        commentPage: { offset: 25, total: 45 },
+      } as any)
+      .mockResolvedValueOnce({ ...makePost({ id: 'p1', comment_count: 45 }),
+        comments: Array.from({ length: 20 }, (_, index) => comment(index + 6)),
+        commentPage: { offset: 5, total: 45 },
+      } as any)
+      .mockResolvedValueOnce({ ...makePost({ id: 'p1', comment_count: 45 }),
+        comments: Array.from({ length: 5 }, (_, index) => comment(index + 1)),
+        commentPage: { offset: 0, total: 45 },
+      } as any)
+
+    await loadPostDetail('p1')
+    expect(detailComments.value[0]?.id).toBe('c26')
+    await loadOlderPostComments('p1')
+    expect(fetchBoardPost).toHaveBeenNthCalledWith(2, 'p1', 5, 20)
+    await loadOlderPostComments('p1')
+    expect(fetchBoardPost).toHaveBeenNthCalledWith(3, 'p1', 0, 5)
+    expect(detailCommentPage.value).toEqual({ offset: 0, total: 45 })
+    expect(detailComments.value).toHaveLength(45)
+    expect(detailComments.value[0]?.id).toBe('c1')
+    expect(detailComments.value[44]?.id).toBe('c45')
+  })
+
+  it('loads a linked older comment before showing its focus route', async () => {
+    vi.mocked(fetchBoardPost)
+      .mockResolvedValueOnce({ ...makePost({ id: 'p1', comment_count: 25 }),
+        comments: [{ id: 'c6' }], commentPage: { offset: 5, total: 25 },
+      } as any)
+      .mockResolvedValueOnce({ ...makePost({ id: 'p1', comment_count: 25 }),
+        comments: [{ id: 'c1' }], commentPage: { offset: 0, total: 25 },
+      } as any)
+
+    await loadPostDetail('p1', 'c1')
+    expect(fetchBoardPost).toHaveBeenNthCalledWith(2, 'p1', 0, 5)
+    expect(detailComments.value.map(comment => comment.id)).toContain('c1')
+    expect(detailCommentPage.value.offset).toBe(0)
   })
 
   it('leaves detailPost.closed undefined for an open post', async () => {
@@ -393,6 +441,7 @@ describe('loadPostDetail', () => {
       created_at: '2026-04-02T00:00:00Z',
       updated_at: '2026-04-02T00:00:00Z',
       comments: [],
+      commentPage: { offset: 0, total: 0 },
     } as any)
 
     await loadPostDetail('post-open')

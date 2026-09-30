@@ -1,0 +1,441 @@
+{
+  "source_head": "65562ff5f7567f9b3a3b2c2b466d556d368d85ba",
+  "source": "bin/masc_tui_render.ml:render_surface",
+  "coverage_definition": "Every distinct renderer called by the surface dispatcher; does not count per-renderer tabs/forms or global overlays. No-defect source review is not executable proof.",
+  "renderers": [
+    {
+      "name": "render_acting",
+      "source_review": "needs deeper state-by-state review",
+      "runtime_evidence": "pending",
+      "finding_ids": []
+    },
+    {
+      "name": "render_approval_detail",
+      "source_review": "reviewed; no concrete new defect established",
+      "runtime_evidence": "pending",
+      "finding_ids": []
+    },
+    {
+      "name": "render_approvals",
+      "source_review": "needs deeper state-by-state review",
+      "runtime_evidence": "pending",
+      "finding_ids": []
+    },
+    {
+      "name": "render_board_compose",
+      "source_review": "needs deeper state-by-state review",
+      "runtime_evidence": "pending",
+      "finding_ids": []
+    },
+    {
+      "name": "render_board_list",
+      "source_review": "needs deeper state-by-state review",
+      "runtime_evidence": "baseline top-level only; detail/state proof pending",
+      "finding_ids": []
+    },
+    {
+      "name": "render_board_read",
+      "source_review": "reviewed with findings",
+      "runtime_evidence": "baseline top-level only; detail/state proof pending",
+      "finding_ids": [
+        "B01"
+      ]
+    },
+    {
+      "name": "render_changes",
+      "source_review": "reviewed with findings",
+      "runtime_evidence": "pending",
+      "finding_ids": [
+        "R02"
+      ]
+    },
+    {
+      "name": "render_clients",
+      "source_review": "reviewed with findings",
+      "runtime_evidence": "pending",
+      "finding_ids": [
+        "S03"
+      ]
+    },
+    {
+      "name": "render_code",
+      "source_review": "reviewed with findings",
+      "runtime_evidence": "pending",
+      "finding_ids": [
+        "R04",
+        "R02"
+      ]
+    },
+    {
+      "name": "render_config",
+      "source_review": "needs deeper state-by-state review",
+      "runtime_evidence": "baseline top-level only; detail/state proof pending",
+      "finding_ids": []
+    },
+    {
+      "name": "render_config_models",
+      "source_review": "reviewed; no concrete new defect established",
+      "runtime_evidence": "pending",
+      "finding_ids": []
+    },
+    {
+      "name": "render_connectors",
+      "source_review": "reviewed with findings",
+      "runtime_evidence": "pending",
+      "finding_ids": [
+        "K03"
+      ]
+    },
+    {
+      "name": "render_fusion_detail",
+      "source_review": "reviewed; no concrete new defect established",
+      "runtime_evidence": "pending",
+      "finding_ids": []
+    },
+    {
+      "name": "render_fusion_launch",
+      "source_review": "reviewed; no concrete new defect established",
+      "runtime_evidence": "pending",
+      "finding_ids": []
+    },
+    {
+      "name": "render_fusion_list",
+      "source_review": "reviewed; no concrete new defect established",
+      "runtime_evidence": "pending",
+      "finding_ids": []
+    },
+    {
+      "name": "render_harness",
+      "source_review": "reviewed with findings",
+      "runtime_evidence": "pending",
+      "finding_ids": [
+        "W06"
+      ]
+    },
+    {
+      "name": "render_keeper_calls",
+      "source_review": "reviewed; no concrete new defect established",
+      "runtime_evidence": "pending",
+      "finding_ids": []
+    },
+    {
+      "name": "render_keeper_detail",
+      "source_review": "reviewed with findings",
+      "runtime_evidence": "pending",
+      "finding_ids": [
+        "K01"
+      ]
+    },
+    {
+      "name": "render_keeper_list",
+      "source_review": "reviewed; no concrete new defect established",
+      "runtime_evidence": "baseline top-level only; detail/state proof pending",
+      "finding_ids": []
+    },
+    {
+      "name": "render_keeper_logs",
+      "source_review": "reviewed with findings",
+      "runtime_evidence": "pending",
+      "finding_ids": [
+        "K02"
+      ]
+    },
+    {
+      "name": "render_keeper_message",
+      "source_review": "reviewed with findings",
+      "runtime_evidence": "pending",
+      "finding_ids": [
+        "K06"
+      ]
+    },
+    {
+      "name": "render_lanes",
+      "source_review": "reviewed; no concrete new defect established",
+      "runtime_evidence": "pending",
+      "finding_ids": []
+    },
+    {
+      "name": "render_memory",
+      "source_review": "reviewed; no concrete new defect established",
+      "runtime_evidence": "pending",
+      "finding_ids": []
+    },
+    {
+      "name": "render_memory_facts",
+      "source_review": "reviewed; no concrete new defect established",
+      "runtime_evidence": "pending",
+      "finding_ids": []
+    },
+    {
+      "name": "render_metrics",
+      "source_review": "reviewed with findings",
+      "runtime_evidence": "baseline top-level only; detail/state proof pending",
+      "finding_ids": [
+        "U01"
+      ]
+    },
+    {
+      "name": "render_overview",
+      "source_review": "reviewed with findings",
+      "runtime_evidence": "baseline top-level only; detail/state proof pending",
+      "finding_ids": [
+        "D01"
+      ]
+    },
+    {
+      "name": "render_planning_detail",
+      "source_review": "reviewed with findings",
+      "runtime_evidence": "pending",
+      "finding_ids": [
+        "W03",
+        "W04"
+      ]
+    },
+    {
+      "name": "render_planning_list",
+      "source_review": "needs deeper state-by-state review",
+      "runtime_evidence": "baseline top-level only; detail/state proof pending",
+      "finding_ids": []
+    },
+    {
+      "name": "render_presets",
+      "source_review": "reviewed with findings",
+      "runtime_evidence": "pending",
+      "finding_ids": [
+        "S06",
+        "S07"
+      ]
+    },
+    {
+      "name": "render_prompts",
+      "source_review": "reviewed with findings",
+      "runtime_evidence": "pending",
+      "finding_ids": [
+        "S05"
+      ]
+    },
+    {
+      "name": "render_question_reader",
+      "source_review": "needs deeper state-by-state review",
+      "runtime_evidence": "pending",
+      "finding_ids": []
+    },
+    {
+      "name": "render_repositories",
+      "source_review": "reviewed with findings",
+      "runtime_evidence": "baseline top-level only; detail/state proof pending",
+      "finding_ids": [
+        "R01"
+      ]
+    },
+    {
+      "name": "render_repository_changes",
+      "source_review": "reviewed with findings",
+      "runtime_evidence": "pending",
+      "finding_ids": [
+        "R02"
+      ]
+    },
+    {
+      "name": "render_resources",
+      "source_review": "reviewed; no concrete new defect established",
+      "runtime_evidence": "pending",
+      "finding_ids": []
+    },
+    {
+      "name": "render_runtime",
+      "source_review": "reviewed with findings",
+      "runtime_evidence": "pending",
+      "finding_ids": [
+        "S02"
+      ]
+    },
+    {
+      "name": "render_runtime_detail",
+      "source_review": "reviewed; no concrete new defect established",
+      "runtime_evidence": "pending",
+      "finding_ids": []
+    },
+    {
+      "name": "render_runtime_params",
+      "source_review": "reviewed with findings",
+      "runtime_evidence": "pending",
+      "finding_ids": [
+        "S04"
+      ]
+    },
+    {
+      "name": "render_runtime_pick",
+      "source_review": "reviewed with findings",
+      "runtime_evidence": "pending",
+      "finding_ids": [
+        "K05"
+      ]
+    },
+    {
+      "name": "render_schedules",
+      "source_review": "reviewed with findings",
+      "runtime_evidence": "pending",
+      "finding_ids": [
+        "K04"
+      ]
+    },
+    {
+      "name": "render_system_log_detail",
+      "source_review": "needs deeper state-by-state review",
+      "runtime_evidence": "pending",
+      "finding_ids": []
+    },
+    {
+      "name": "render_system_logs",
+      "source_review": "reviewed with findings",
+      "runtime_evidence": "pending",
+      "finding_ids": [
+        "S01"
+      ]
+    },
+    {
+      "name": "render_task_detail",
+      "source_review": "reviewed with findings",
+      "runtime_evidence": "pending",
+      "finding_ids": [
+        "W02"
+      ]
+    },
+    {
+      "name": "render_themes",
+      "source_review": "reviewed; no concrete new defect established",
+      "runtime_evidence": "pending",
+      "finding_ids": []
+    },
+    {
+      "name": "render_tools",
+      "source_review": "reviewed with findings",
+      "runtime_evidence": "pending",
+      "finding_ids": [
+        "S11"
+      ]
+    },
+    {
+      "name": "render_verification",
+      "source_review": "reviewed with findings",
+      "runtime_evidence": "pending",
+      "finding_ids": [
+        "W05"
+      ]
+    },
+    {
+      "name": "render_voice",
+      "source_review": "reviewed with findings",
+      "runtime_evidence": "pending",
+      "finding_ids": [
+        "S08",
+        "S09",
+        "S10"
+      ]
+    },
+    {
+      "name": "render_work_tasks",
+      "source_review": "reviewed with findings",
+      "runtime_evidence": "pending",
+      "finding_ids": [
+        "W01"
+      ]
+    },
+    {
+      "name": "render_workspace_activity",
+      "source_review": "reviewed with findings",
+      "runtime_evidence": "pending",
+      "finding_ids": [
+        "R03"
+      ]
+    }
+  ],
+  "global_overlays": [
+    {
+      "name": "palette",
+      "source_review": "reviewed with findings",
+      "finding_ids": [
+        "O01"
+      ],
+      "runtime_evidence": "pending"
+    },
+    {
+      "name": "agenda",
+      "source_review": "reviewed with findings",
+      "finding_ids": [
+        "O02"
+      ],
+      "runtime_evidence": "pending"
+    },
+    {
+      "name": "answering",
+      "source_review": "reviewed with findings",
+      "finding_ids": [
+        "O03",
+        "O04"
+      ],
+      "runtime_evidence": "pending"
+    },
+    {
+      "name": "help",
+      "source_review": "reviewed; no concrete new defect established",
+      "finding_ids": [],
+      "runtime_evidence": "pending"
+    },
+    {
+      "name": "context inspector",
+      "source_review": "reviewed; no concrete new defect established",
+      "finding_ids": [],
+      "runtime_evidence": "pending"
+    },
+    {
+      "name": "browser live/history",
+      "source_review": "reviewed; no concrete new defect established",
+      "finding_ids": [],
+      "runtime_evidence": "pending"
+    },
+    {
+      "name": "patch",
+      "source_review": "reviewed with findings",
+      "finding_ids": [
+        "R02"
+      ],
+      "runtime_evidence": "pending"
+    },
+    {
+      "name": "link preview",
+      "source_review": "reviewed with findings",
+      "finding_ids": [
+        "O05"
+      ],
+      "runtime_evidence": "pending"
+    },
+    {
+      "name": "deletion confirmation",
+      "source_review": "reviewed; no concrete new defect established",
+      "finding_ids": [],
+      "runtime_evidence": "pending"
+    },
+    {
+      "name": "compact terminal",
+      "source_review": "reviewed; no concrete new defect established",
+      "finding_ids": [],
+      "runtime_evidence": "pending"
+    }
+  ],
+  "detail_modes_requiring_separate_evidence": [
+    "Keeper Info/Sandbox/Settings/Secrets/GitHub/Identity/Channels/Automation/Runs tabs; Context inspector separately",
+    "System runtime.toml/models/params/prompts/presets/themes/voice",
+    "Tools five pane modes",
+    "Resources list/detail focus",
+    "Code directory/file/history/memo/diff",
+    "Voice wizard steps and assignment phases",
+    "Goal inspection/submitting/confirmation",
+    "Approval ask/held-tool/operator/gate detail kinds",
+    "Memory ordinary/source/invalidation details",
+    "Fusion list/detail/historical detail/launch",
+    "Runtime exact-lane editor and runtime picker",
+    "Browser addons/live/history"
+  ]
+}

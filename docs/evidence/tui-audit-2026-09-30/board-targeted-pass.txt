@@ -1,0 +1,6 @@
+Excerpt from gh run view 36647966652 --log; original log line numbers.
+4273: test suite	UNKNOWN STEP	2026-09-30T00:07:20.3260075Z Board full width comments: PASS
+4274: test suite	UNKNOWN STEP	2026-09-30T00:07:20.3260718Z Board independent windows: PASS
+4275: test suite	UNKNOWN STEP	2026-09-30T00:07:20.3261220Z Long Board thread scrolling: PASS
+4276: test suite	UNKNOWN STEP	2026-09-30T00:07:20.3261743Z Board read comments beside the post: PASS
+4277: test suite	UNKNOWN STEP	2026-09-30T00:07:20.3262322Z Board read window names what it counts: PASS

@@ -1,0 +1,205 @@
+{
+  "binary_commit": "65562ff5f7567f9b3a3b2c2b466d556d368d85ba",
+  "binary_sha256": "198037a1354a3e565f5ec7d474e1b2579fa637a5b3d31fae2e8ca124633e765f",
+  "captures": [
+    {
+      "stem": "dashboard-80",
+      "terminal": {
+        "columns": 80,
+        "rows": 41
+      },
+      "provenance": "baseline_binary_fixture_PTY"
+    },
+    {
+      "stem": "work-80",
+      "terminal": {
+        "columns": 80,
+        "rows": 41
+      },
+      "provenance": "baseline_binary_fixture_PTY"
+    },
+    {
+      "stem": "keepers-80",
+      "terminal": {
+        "columns": 80,
+        "rows": 41
+      },
+      "provenance": "baseline_binary_fixture_PTY"
+    },
+    {
+      "stem": "usage-80",
+      "terminal": {
+        "columns": 80,
+        "rows": 41
+      },
+      "provenance": "baseline_binary_fixture_PTY"
+    },
+    {
+      "stem": "board-80",
+      "terminal": {
+        "columns": 80,
+        "rows": 41
+      },
+      "provenance": "baseline_binary_fixture_PTY"
+    },
+    {
+      "stem": "workspace-80",
+      "terminal": {
+        "columns": 80,
+        "rows": 41
+      },
+      "provenance": "baseline_binary_fixture_PTY"
+    },
+    {
+      "stem": "system-80",
+      "terminal": {
+        "columns": 80,
+        "rows": 41
+      },
+      "provenance": "baseline_binary_fixture_PTY"
+    },
+    {
+      "stem": "board-detail-80",
+      "terminal": {
+        "columns": 80,
+        "rows": 41
+      },
+      "provenance": "baseline_binary_fixture_PTY"
+    },
+    {
+      "stem": "dashboard-120",
+      "terminal": {
+        "columns": 120,
+        "rows": 41
+      },
+      "provenance": "baseline_binary_fixture_PTY"
+    },
+    {
+      "stem": "work-120",
+      "terminal": {
+        "columns": 120,
+        "rows": 41
+      },
+      "provenance": "baseline_binary_fixture_PTY"
+    },
+    {
+      "stem": "keepers-120",
+      "terminal": {
+        "columns": 120,
+        "rows": 41
+      },
+      "provenance": "baseline_binary_fixture_PTY"
+    },
+    {
+      "stem": "usage-120",
+      "terminal": {
+        "columns": 120,
+        "rows": 41
+      },
+      "provenance": "baseline_binary_fixture_PTY"
+    },
+    {
+      "stem": "board-120",
+      "terminal": {
+        "columns": 120,
+        "rows": 41
+      },
+      "provenance": "baseline_binary_fixture_PTY"
+    },
+    {
+      "stem": "workspace-120",
+      "terminal": {
+        "columns": 120,
+        "rows": 41
+      },
+      "provenance": "baseline_binary_fixture_PTY"
+    },
+    {
+      "stem": "system-120",
+      "terminal": {
+        "columns": 120,
+        "rows": 41
+      },
+      "provenance": "baseline_binary_fixture_PTY"
+    },
+    {
+      "stem": "board-detail-120",
+      "terminal": {
+        "columns": 120,
+        "rows": 41
+      },
+      "provenance": "baseline_binary_fixture_PTY"
+    },
+    {
+      "stem": "dashboard-240",
+      "terminal": {
+        "columns": 242,
+        "rows": 41
+      },
+      "provenance": "baseline_binary_fixture_PTY"
+    },
+    {
+      "stem": "work-240",
+      "terminal": {
+        "columns": 242,
+        "rows": 41
+      },
+      "provenance": "baseline_binary_fixture_PTY"
+    },
+    {
+      "stem": "keepers-240",
+      "terminal": {
+        "columns": 242,
+        "rows": 41
+      },
+      "provenance": "baseline_binary_fixture_PTY"
+    },
+    {
+      "stem": "usage-240",
+      "terminal": {
+        "columns": 242,
+        "rows": 41
+      },
+      "provenance": "baseline_binary_fixture_PTY"
+    },
+    {
+      "stem": "board-240",
+      "terminal": {
+        "columns": 242,
+        "rows": 41
+      },
+      "provenance": "baseline_binary_fixture_PTY"
+    },
+    {
+      "stem": "workspace-240",
+      "terminal": {
+        "columns": 242,
+        "rows": 41
+      },
+      "provenance": "baseline_binary_fixture_PTY"
+    },
+    {
+      "stem": "system-240",
+      "terminal": {
+        "columns": 242,
+        "rows": 41
+      },
+      "provenance": "baseline_binary_fixture_PTY"
+    },
+    {
+      "stem": "board-detail-240",
+      "terminal": {
+        "columns": 242,
+        "rows": 41
+      },
+      "provenance": "baseline_binary_fixture_PTY"
+    }
+  ],
+  "complete": true,
+  "limitations": [
+    "Synthetic fixture data",
+    "Baseline before fixes",
+    "Missing fixture API returns HTTP503",
+    "Terminal dimensions are measured, not filename values"
+  ]
+}

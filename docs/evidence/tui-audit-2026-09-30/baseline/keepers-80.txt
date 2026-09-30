@@ -1,0 +1,41 @@
+ Dashboard  Work  ▸Keepers  Usage  Board  Workspace  System
+
+   MASC Keepers (2)   1 healthy · 1 idle            09:56:05  HTTP [connected]
+ ──────────────────────────────────────────────────────────────────────────────
+    fleet ok   running 0/0   turn capacity 0/0
+     HEALTH     KEEPER                             TURN TASK
+ ──────────────────────────────────────────────────────────────────────────────
+     ●          alpha                                 — —
+     · idle     beta                                  — —
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    OPERATIONS unavailable · keeper lanes load failed: HTTP 503: fixture endp…
+ ──────────────────────────────────────────────────────────────────────────────
+  j/k:move  p:pause  w:wake  s:shutdown  x:delete  e:settings  a:new  q:quit  …?
+ › to alpha   (i to write)

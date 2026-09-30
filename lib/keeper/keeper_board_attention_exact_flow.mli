@@ -70,7 +70,8 @@ type 'callback_error execution_error =
       ; binding_standing : Agent_core.Exact_output.flow_binding_standing
           (** [Every_binding_resting] only when every HTTP slot the walk
               visited refused for its binding's standing (quota or rate limit
-              spent, capacity full, payment refused) and no slot's answer was
+              spent, capacity full, payment refused) or failed on the network
+              before the request was dispatched, and no slot's answer was
               rejected by the domain decoder. *)
       }
   | Cli_slots_exhausted of

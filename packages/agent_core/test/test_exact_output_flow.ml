@@ -3948,6 +3948,90 @@ let test_every_candidate_rate_limited_is_every_binding_resting () =
   | Error _ -> fail "a rate-limited lane did not end on its last candidate's refusal"
 ;;
 
+(* A connection to a port nothing listens on is refused before any byte of the
+   request is written. No provider read the input, so the input cannot be the
+   reason, and the lane waits for the network instead of quarantining. Live, a
+   DNS outage quarantined 1,154 Board attention candidates this way. *)
+let test_network_failure_before_dispatch_is_every_binding_resting () =
+  let result, posts =
+    with_server ~response:"unused"
+    @@ fun ~sw:_ ~net ~clock ~base_url:_ ->
+    with_catalog
+      [ catalog_entry ~id:"unreachable-a" ~base_url:"http://127.0.0.1:1" ~native:true ~json:true ()
+      ; catalog_entry ~id:"unreachable-b" ~base_url:"http://127.0.0.1:1" ~native:true ~json:true ()
+      ]
+    @@ fun snapshot ->
+    execute_with_accepting_test_validator
+      ~clock
+      ~net
+      ~on_measurement_terminal:(fun _ -> Ok ())
+      ~before_measurement_dispatch:(fun _ -> Ok ())
+      ~before_dispatch:(fun _ -> Ok ())
+      ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
+      (start_flow (frozen_flow snapshot [ "unreachable-a"; "unreachable-b" ]))
+  in
+  check int "nothing reached the fixture server" 0 posts;
+  match result with
+  | Error (EO.Flow_exact_execution_failed failure) ->
+    (match failure.cause.cause with
+     | EO.Completion_failed
+         { error = Http_client.NetworkError _ | Http_client.TimeoutError _
+         ; dispatch = EO.No_generation_dispatch
+         } -> ()
+     | other ->
+       failf
+         "a refused connection was not a network failure before dispatch: %s"
+         (EO.execution_error_cause_to_string other));
+    check
+      bool
+      "every visited binding is at rest"
+      true
+      (EO.flow_execution_binding_standing (EO.Flow_exact_execution_failed failure)
+       = EO.Every_binding_resting)
+  | Ok _ -> fail "an unreachable lane produced an answer"
+  | Error _ -> fail "an unreachable lane did not end on its last candidate's failure"
+;;
+
+(* The server reads the whole request and drops the connection. The request was
+   dispatched, so the provider may have acted on it: the failure is not a
+   binding at rest. *)
+let test_dropped_connection_after_dispatch_is_not_a_binding_at_rest () =
+  let result, posts =
+    with_server ~abort_completion:true ~response:"unused"
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
+    with_catalog
+      [ catalog_entry ~id:"dropped-a" ~base_url ~native:true ~json:true ()
+      ; catalog_entry ~id:"dropped-b" ~base_url ~native:true ~json:true ()
+      ]
+    @@ fun snapshot ->
+    execute_with_accepting_test_validator
+      ~clock
+      ~net
+      ~on_measurement_terminal:(fun _ -> Ok ())
+      ~before_measurement_dispatch:(fun _ -> Ok ())
+      ~before_dispatch:(fun _ -> Ok ())
+      ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
+      (start_flow (frozen_flow snapshot [ "dropped-a"; "dropped-b" ]))
+  in
+  check int "both candidates were dispatched" 2 posts;
+  match result with
+  | Error (EO.Flow_exact_execution_failed failure) ->
+    (match failure.cause.cause with
+     | EO.Completion_failed { error = _; dispatch = EO.Generation_dispatch_started } -> ()
+     | other ->
+       failf
+         "a dropped connection was not a completion failure after dispatch: %s"
+         (EO.execution_error_cause_to_string other));
+    check
+      bool
+      "a dropped connection after dispatch is not rest"
+      true
+      (EO.flow_execution_binding_standing (EO.Flow_exact_execution_failed failure)
+       = EO.Not_every_binding_resting)
+  | Ok _ -> fail "a dropped connection produced an answer"
+  | Error _ -> fail "a dropped connection did not end on its last candidate's failure"
+;;
+
 let test_serialized_request_413_refusal_advances_once_to_successor () =
   assert_typed_capacity_refusal_advances_once
     ~refused_kind:"openai_compat"
@@ -5269,6 +5353,14 @@ let () =
             "every candidate rate limited is every binding resting"
             `Quick
             test_every_candidate_rate_limited_is_every_binding_resting
+        ; test_case
+            "network failure before dispatch is every binding resting"
+            `Quick
+            test_network_failure_before_dispatch_is_every_binding_resting
+        ; test_case
+            "a connection dropped after dispatch is not a binding at rest"
+            `Quick
+            test_dropped_connection_after_dispatch_is_not_a_binding_at_rest
         ; test_case
             "HTTP 429 rate limit advances with one dispatch per candidate"
             `Quick

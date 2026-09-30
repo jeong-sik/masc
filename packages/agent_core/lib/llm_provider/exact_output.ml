@@ -1899,16 +1899,27 @@ let provider_failure_is_binding_rest : Http_client.provider_failure_kind -> bool
   | Http_client.Unknown_provider_failure _ -> false
 ;;
 
+(* A transport failure before the generation request was dispatched (DNS,
+   refused connection, connect timeout) reached no provider, so it says nothing
+   about the input, and the binding serves nothing until the network is back.
+   After a dispatch the provider may have acted on the request, so the same
+   failure is not rest. *)
 let execution_cause_is_binding_rest = function
   | Provider_response_refused { refusal; http_status = _ } ->
     provider_refusal_is_binding_rest refusal
   | Completion_failed { error = Http_client.ProviderFailure { kind; message = _ }; dispatch = _ }
     -> provider_failure_is_binding_rest kind
   | Completion_failed
+      { error = Http_client.NetworkError _ | Http_client.TimeoutError _
+      ; dispatch = No_generation_dispatch
+      } -> true
+  | Completion_failed
+      { error = Http_client.NetworkError _ | Http_client.TimeoutError _
+      ; dispatch = Generation_dispatch_started
+      } -> false
+  | Completion_failed
       { error =
           ( Http_client.HttpError _
-          | Http_client.NetworkError _
-          | Http_client.TimeoutError _
           | Http_client.AcceptRejected _
           | Http_client.ProviderTerminal _ )
       ; dispatch = _

@@ -5791,6 +5791,8 @@ type state = {
   mutable clients_surface_inflight: bool;
   mutable clients_surface_scroll: int;
   mutable clients_surface_cursor: int;
+  mutable client_detail: Tui_decode.client_row option;
+  mutable client_detail_scroll: int;
   mutable clients_surface_generation: int;
   (* Run drill-down under the standalone observation rows. [lane_runs] is the
      summary page of the lane named in [lanes_mode]; payloads stay behind the
@@ -7623,6 +7625,7 @@ let play_invite_forget current name =
 let modal_owns_keys (state : state) =
   state.help_open || state.keeper_deletions_open || state.agenda_open
   || state.context_inspector_open || state.about_open
+  || Option.is_some state.client_detail
   || Option.is_some (play_card_shown state)
 
 let close_context_inspector (state : state) =
@@ -7649,6 +7652,8 @@ let close_key_modals (state : state) =
   state.help_scroll <- 0;
   state.about_open <- false;
   state.keeper_deletions_open <- false;
+  state.client_detail <- None;
+  state.client_detail_scroll <- 0;
   if state.agenda_open then close_agenda state;
   if state.context_inspector_open then close_context_inspector state
 
@@ -8019,6 +8024,8 @@ let create_state
   clients_surface_inflight = false;
   clients_surface_scroll = 0;
   clients_surface_cursor = 0;
+  client_detail = None;
+  client_detail_scroll = 0;
   clients_surface_generation = 0;
   lanes_mode = Lanes_overview;
   lanes_standalone_cursor = 0;
@@ -8694,6 +8701,7 @@ type clamped_scroll =
   | Acting_selection of int * int
   | Acting_detail_scroll of int
   | Memory_fact_detail_scroll of int
+  | Client_detail_scroll of int
   | Verification_detail_scroll of int
   | Harness_detail_scroll of int
   | Fusion_detail_scroll of int
@@ -8790,6 +8798,7 @@ let apply_clamped_scroll (state : state) = function
   | Acting_selection (scroll, cursor) -> state.acting_scroll <- scroll; state.acting_cursor <- cursor
   | Acting_detail_scroll value -> state.acting_detail_scroll <- value
   | Memory_fact_detail_scroll value -> state.memory_fact_detail_scroll <- value
+  | Client_detail_scroll value -> state.client_detail_scroll <- value
   | Verification_detail_scroll value ->
       state.verification_detail_scroll <- value
   | Harness_detail_scroll value -> state.harness_detail_scroll <- value

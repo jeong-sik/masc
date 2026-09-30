@@ -21,6 +21,7 @@ SOURCE_MODULES = (
     "bin/masc_tui.ml",
     "bin/masc_tui_keeper_items.ml",
     "bin/masc_tui_types.ml",
+    "lib/tui_decode.ml",
     "bin/masc_tui_graphics.ml",
     "bin/masc_tui_image_mosaic.ml",
     "bin/masc_tui_keeper_portrait.ml",
@@ -346,12 +347,17 @@ def item_account_follows_roster_revision(binary: str) -> None:
     fixtures = h.keeper_runtime_http_fixtures()
     roster_path = "/api/v1/gate/keepers?detailed=true"
     roster = copy.deepcopy(fixtures[roster_path][1])
+    roster_polls = []
     roster["candle"] = {"status": "ready", "issued_milli": "12500",
                         "burned_milli": "0", "circulating_milli": "12500"}
     for row in roster["keepers"]:
         row["candle_balance_milli"] = "12500" if row["name"] == "alpha" else "0"
         row["candle_account_revision"] = "a" * 64
-    fixtures[roster_path] = lambda: (200, copy.deepcopy(roster))
+    def read_roster():
+        roster_polls.append(copy.deepcopy(roster))
+        return 200, copy.deepcopy(roster)
+
+    fixtures[roster_path] = read_roster
     account = {"status": "ready", "keeper": "alpha", "balance_milli": "12500",
                "owned_items": [], "catalog": [
                    {"id": item, "slot": slot,
@@ -390,6 +396,11 @@ def item_account_follows_roster_revision(binary: str) -> None:
         publish_revision("c")
         await_text(process, fd, output, b"0.001 owned")
         capture_item_screen(output, "automatic-price-change")
+        previous_polls = len(roster_polls)
+        assert h.wait_for_fixture_state(process, fd, output,
+            lambda: len(roster_polls) > previous_polls, timeout=10.0), \
+            "ordinary roster cadence stopped after the price change"
+        h.drain_until_quiet(process, fd, output)
         assert len(calls) == 3, f"unchanged roster revisions reread the account: {len(calls)}"
         assert all(reading["balance_milli"] == "12500" for reading in calls)
         os.write(fd, b"q")

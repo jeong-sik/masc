@@ -499,7 +499,7 @@ other = "test_provider.test_model"
    installed owner plus a declarative manifest makes an accidental update
    observable in both durable files and the owner projection. No lane is
    started and this context has neither a network nor a process manager. *)
-let check_create_only_refusal_preserves_existing ~create_only ~expected_error () =
+let check_create_only_refusal_preserves_existing ?(config_only = false) ~create_only ~expected_error () =
   with_workspace @@ fun ~env ~sw ~config ~keepers_dir ~runtime_path ->
   let keeper_name = "create-only-existing" in
   let toml_path = Filename.concat keepers_dir (keeper_name ^ ".toml") in
@@ -520,21 +520,25 @@ activation_mode = "manual"
       { meta with instructions = "Keep the existing declaration";
                   activation_mode = Masc.Keeper_activation_mode.Manual }
   in
-  (match Owner_registry.create_meta ~base_path:config.base_path meta with
+  (if not config_only then match Owner_registry.create_meta ~base_path:config.base_path meta with
    | Ok (Some _) -> ()
    | Ok None -> fail "fixture owner creation returned no metadata"
    | Error error -> fail (Owner_registry.command_error_to_string error));
   let meta_path = Profile.keeper_meta_path config keeper_name in
-  let metadata_before = read_file meta_path in
+  let metadata_snapshot () =
+    if Sys.file_exists meta_path then Some (read_file meta_path) else None
+  in
+  let metadata_before = metadata_snapshot () in
   let declaration_before = read_file toml_path in
   let runtime_before = read_file runtime_path in
   let owner_snapshot () =
     match Store.read_meta config keeper_name with
-    | Ok (Some value) -> Yojson.Safe.to_string (Masc.Keeper_meta_json.meta_to_json value)
-    | Ok None -> fail "existing owner metadata disappeared"
+    | Ok (Some value) -> Some (Yojson.Safe.to_string (Masc.Keeper_meta_json.meta_to_json value))
+    | Ok None -> None
     | Error detail -> fail detail
   in
   let owner_before = owner_snapshot () in
+  check bool "fixture metadata presence" (not config_only) (Option.is_some owner_before);
   let ctx : _ Profile.context =
     { config; agent_name = "test-agent"; sw; clock = Eio.Stdenv.clock env
     ; proc_mgr = None; net = None
@@ -554,10 +558,10 @@ activation_mode = "manual"
   check bool "production keeper_up refuses" false (Profile.tool_result_success result);
   check string "refusal comes from create-only admission" expected_error
     (Profile.tool_result_body result);
-  check string "durable metadata bytes unchanged" metadata_before (read_file meta_path);
+  check (option string) "durable metadata bytes unchanged" metadata_before (metadata_snapshot ());
   check string "declarative TOML bytes unchanged" declaration_before (read_file toml_path);
   check string "runtime TOML bytes unchanged" runtime_before (read_file runtime_path);
-  check string "owner metadata projection unchanged" owner_before (owner_snapshot ());
+  check (option string) "owner metadata projection unchanged" owner_before (owner_snapshot ());
   check bool "refusal did not start a Keeper lane" true
     (Option.is_none (Masc.Keeper_registry.get ~base_path:config.base_path keeper_name))
 ;;
@@ -590,6 +594,10 @@ let () =
                ~expected_runtime:"test_provider.other_model")
         ; test_case "create-only refuses existing Keeper without metadata or config writes" `Quick
             (check_create_only_refusal_preserves_existing ~create_only:(`Bool true)
+               ~expected_error:"Keeper already exists; creation did not reconfigure it. Choose a new name.")
+        ; test_case "create-only refuses config-only declaration without materialization" `Quick
+            (check_create_only_refusal_preserves_existing ~config_only:true
+               ~create_only:(`Bool true)
                ~expected_error:"Keeper already exists; creation did not reconfigure it. Choose a new name.")
         ; test_case "string create-only is rejected without writes" `Quick
             (check_create_only_refusal_preserves_existing ~create_only:(`String "true")

@@ -6083,7 +6083,7 @@ type state = {
      between the two presses, so the schedule id is captured at arm time and a
      press on a different row re-arms for that row. *)
   mutable schedule_cancel_armed: string option;
-  mutable schedule_cancel_error: string option;
+  mutable schedule_cancel_error: (string * string) option;
   mutable lanes: Tui_decode.keeper_lanes_snapshot option;
   mutable keeper_lanes_inflight: bool;
   mutable standalone_lanes: Tui_decode.standalone_lanes_snapshot option;

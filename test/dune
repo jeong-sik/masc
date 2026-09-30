@@ -7735,6 +7735,7 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_chat_load_errors_pty)))
+(include stanzas/test_tui_schedule_detail_viewport_pty.inc)
 (rule
  (alias runtest-test_tui_keeper_create_journey_pty)
  (deps test_tui_keeper_create_journey_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)

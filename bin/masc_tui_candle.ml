@@ -19,3 +19,9 @@ let balance_text reading amount = match reading with
   | Some (Ok (Candle_observation.Disabled {reason})) -> Some ("disabled: " ^ reason)
   | Some (Ok (Candle_observation.Ready _)) ->
     Some (match amount with Some value -> amount_text value ^ " Candle" | None -> "unavailable")
+
+let compact_status = function
+  | None | Some (Ok Candle_observation.Off) -> None
+  | Some (Error _) -> Some "Candle unavailable: ?:Candle details"
+  | Some (Ok (Candle_observation.Disabled _)) -> Some "Candle disabled: ?:Candle details"
+  | Some (Ok (Candle_observation.Ready _)) -> Some "Candle ready: ?:Candle details"

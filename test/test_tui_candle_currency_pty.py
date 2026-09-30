@@ -10,6 +10,7 @@ import copy
 import hashlib
 import json
 import os
+import re
 import sys
 import threading
 from pathlib import Path
@@ -20,6 +21,7 @@ import test_tui_keyboard_input as h
 SOURCE_MODULES = (
     "bin/masc_tui.ml",
     "bin/masc_tui_render.ml",
+    "bin/masc_tui_render_prim.ml",
     "bin/masc_tui_candle.ml",
     "bin/masc_tui_keeper_control.ml",
     "lib/tui_decode.ml",
@@ -175,6 +177,78 @@ def run(binary: str, phase: str, captures: Path | None):
         terminal_rows=38, terminal_cols=120)
 
 
+def short_overview_keeps_its_baseline(binary: str) -> None:
+    # Compare the current Dashboard's short-screen projection with Candle off.
+    # Main gives its first rows to health and Goals and labels any overflow;
+    # it no longer promises the old Overview's five-todo/attention floor.
+    baseline = {}
+    def core_rows(visible):
+        markers = (b"Goals", b"actual ", b"linked tasks", b"Work", b"Open:",
+                   b"Usage", b"Needs you", b"attention-", b"rows not shown", b"row not shown")
+        return tuple(line for line in visible.splitlines()
+                     if any(marker in line for marker in markers))
+    for phase in ("off", "disabled", "error", "ready"):
+        fixtures = h.row_budget_http_fixtures()
+        roster_payload = copy.deepcopy(h.keeper_runtime_http_fixtures()[ROSTER_PATH][1])
+        reason = " ".join(["diagnostic-part"] * 40) + " candle-diagnostic-end"
+        if phase == "off":
+            roster_payload["candle"] = {"status": "off"}
+        elif phase == "disabled":
+            roster_payload["candle"] = {"status": "disabled", "reason": reason}
+            # A successful zero-Keeper roster must still offer full details.
+            roster_payload.update(keepers=[], count=0, total=0, truncated=False)
+        elif phase == "error":
+            # Actual transport failure: there is no healthy Keeper Info to
+            # rely on, so the global details route must remain accessible.
+            fixtures[ROSTER_PATH] = (500, {"error": reason})
+        else:
+            roster_payload["candle"] = dict(READY)
+            for row in roster_payload["keepers"]:
+                row["candle_balance_milli"] = BALANCE_MILLI if row["name"] == "alpha" else "0"
+        if phase != "error":
+            fixtures[ROSTER_PATH] = (200, roster_payload)
+
+        def interact(process, fd, _slave, output, _base):
+            await_screen(process, fd, output,
+                lambda text: b"attention-2" in text and b"Goals" in text,
+                "loaded baseline task and attention rows")
+            for height in (16, 14):
+                h.resize_and_wait(process, fd, output, rows=height, columns=100,
+                    needle=b"MASC Dashboard", controls=(h.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
+                visible = screen(output)
+                for expected in (b"Goals", b"q:quit"):
+                    assert expected in visible, (phase, height, expected, visible)
+                assert re.search(rb"\+\d+ rows? not shown", visible), visible
+                projected = core_rows(visible)
+                if phase == "off":
+                    baseline[height] = projected
+                else:
+                    assert projected == baseline[height], (phase, height, baseline[height], projected)
+                if phase == "off":
+                    assert b"Candle " not in visible, visible
+                else:
+                    status = {"disabled": b"Candle disabled:", "error": b"Candle unavailable:",
+                              "ready": b"Candle ready:"}[phase]
+                    assert status in visible, visible
+                    h.send_and_wait(process, fd, output, b"?", b"Candle details")
+                    seen = bytearray(screen(output))
+                    targets = SUMMARY if phase == "ready" else (b"candle-diagnostic-end",)
+                    for _ in range(45):
+                        if all(target in seen for target in targets):
+                            break
+                        start = len(output)
+                        os.write(fd, b"j")
+                        h.wait_for_output(process, fd, output, h.FRAME_END, start=start, timeout=3)
+                        seen.extend(screen(output))
+                    assert all(target in seen for target in targets), (phase, height, seen)
+                    h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
+            os.write(fd, b"q")
+
+        h.run_terminal_scenario(binary, description="short Candle Overview keeps baseline " + phase,
+            interact=interact, http_fixtures=fixtures,
+            prepare_workspace=h.seed_row_budget_workspace, terminal_rows=38, terminal_cols=100)
+
+
 if __name__ == "__main__":
     binary = str(Path(sys.argv[1]).resolve())
     artifact_root = os.environ.get("RUNNER_TEMP")
@@ -188,4 +262,5 @@ if __name__ == "__main__":
         }, indent=2) + "\n")
     for phase in ("disabled", "malformed-supply", "malformed-balance", "off"):
         run(binary, phase, captures)
-    print("Candle currency TUI: PASS (4 real PTY scenarios)")
+    short_overview_keeps_its_baseline(binary)
+    print("Candle currency TUI: PASS (8 real PTY scenarios)")

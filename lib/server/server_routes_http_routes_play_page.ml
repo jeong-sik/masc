@@ -424,7 +424,7 @@ function send(path, body) {
     if (ended || !machine) return;
     const r = await api('POST', path, body);
     if (ended) return;
-    if (!r.json || r.json.ok !== true) setStatus('action', (r.json && r.json.message) || ('요청이 거절됐어요 (' + r.status + ')'));
+    if (!r.json || r.json.ok !== true) setStatus('action', (r.json && (r.json.message || r.json.error)) || ('요청이 거절됐어요 (' + r.status + ')'));
     else setStatus('action', '');
     await refreshSeat();
   }).catch(() => setStatus('action', '보내지 못했어요. 연결을 확인해 주세요.'));

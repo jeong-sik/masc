@@ -3,7 +3,7 @@ rfc: "clients-read-the-fixture-the-server-wrote"
 title: "클라이언트 decoder 는 서버가 쓴 fixture 로 시험한다"
 status: Draft
 created: 2026-09-29
-updated: 2026-09-29
+updated: 2026-09-30
 author: claude
 related: ["0079", "0057"]
 ---
@@ -55,12 +55,13 @@ TUI 감사는 이번 주 `fix(tui)` 중 wire 이름·모양 수정을 약 15건�
 1. **자리.** `dashboard/src/api/fixtures/<endpoint>.json` 에 둔다. 이미 있는 두 파일과 같은 곳이다. 이름은 route 를 따른다. 예: `dashboard-gate-snapshot.json`, `dashboard-schedules.json`.
 2. **서버 쪽 테스트.** 실제 인코더로 응답을 만든다. 테스트 전용 인코더나 손으로 쓴 `Assoc` 를 쓰지 않는다. 그 결과를 파일과 `Yojson.Safe.equal` 로 비교한다. 다르면 인코더의 JSON 전체를 실패 메시지에 싣는다. 작성자는 CI 로그의 그 JSON 으로 파일을 바꾼다. 로컬 빌드는 필요 없다.
 3. **값 종류를 다 담는다.** 인코더가 닫힌 합타입을 쓰면(상태 단어, kind, phase) 파일에 모든 생성자가 한 번씩 나오게 한다. 타입에 `all` 목록이 있으면 그것으로 만든다. 한 가지 모양만 고정하면 F02 같은 결함은 못 잡는다.
-4. **웹 쪽 테스트.** vitest 가 파일을 import 해서 decoder 에 넣고, 모든 행이 받아들여지는지 본다. 이어서 "모르는 키 하나 더하기", "필수 키 하나 빼기" 두 변형이 거절되는지 본다.
+4. **웹 쪽 테스트.** vitest 가 파일을 import 해서 decoder 에 넣고, 모든 행이 받아들여지는지 본다. 클라이언트가 소비하는 각 필드의 디코딩 결과를 fixture 의 기대값과 대조한다. 성공 여부만 확인하지 않고, 값·상태 생성자·중첩 필드·목록의 내용과 순서·선택 값의 유무를 확인한다. 이어서 "모르는 키 하나 더하기", "필수 키 하나 빼기" 두 변형이 거절되는지 본다.
 5. **TUI 쪽 테스트.**
-   - `lib/tui_decode.ml` 의 decoder 는 OCaml 테스트가 같은 파일을 읽어 decode 한다.
+   - `lib/tui_decode.ml` 의 decoder 는 OCaml 테스트가 같은 파일을 읽어 decode 하고, 웹과 같이 소비하는 각 필드의 결과를 fixture 의 기대값과 대조한다. `Ok` 나 `None` 을 반환했다는 사실만으로 통과시키지 않는다.
+   - 예를 들어 `fsm.next_due_at` 에 일정 시각이 있는 서버 fixture 는 TUI 의 다음 일정 값이 그 시각을 담은 `Some` 인지 확인한다. `fsm.next_due_at` 이 `null` 인 fixture 는 `None` 인지 별도로 확인한다. 필드를 무시해서 두 입력 모두 `Ok None` 으로 읽는 decoder 는 실패해야 한다.
    - `bin/masc_tui_loader.ml` 의 decoder 는 `Tui_decode` 로 옮긴 뒤 같은 방식으로 시험한다. 옮기는 것이 이 RFC 의 선행 작업이다.
    - PTY 시나리오가 그 endpoint 의 응답이 필요하면 파일을 `json.load` 로 읽는다. 그리고 시나리오가 다루는 필드만 바꾼다. 인라인 dict 로 응답 전체를 새로 쓰지 않는다.
-6. **가드가 잡는지 확인한다.** 새 fixture 를 더하는 PR 은 인코더에서 키 하나를 지우면 서버 쪽 테스트가 실패한다는 것을 한 번 보인다. 통과하는 가드가 잡는 가드는 아니다.
+6. **가드가 잡는지 확인한다.** 새 fixture 를 더하는 PR 은 인코더에서 키 하나를 지우면 서버 쪽 테스트가 실패한다는 것을 한 번 보인다. 클라이언트가 소비하는 필드 하나를 decoder 가 무시하거나 다른 값으로 읽게 바꿨을 때도 그 클라이언트 테스트가 실패해야 한다. 통과하는 가드가 잡는 가드는 아니다.
 
 ### 순서
 

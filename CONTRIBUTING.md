@@ -1,4 +1,10 @@
+<p align="center">
+  <img src="docs/assets/candle.svg" width="88" alt="MASC Keeper">
+</p>
+
 # Contributing to MASC
+
+[First contribution](docs/guides/CONTRIBUTOR-WORKFLOW.md#1-make-a-first-contribution) · [AI sessions](docs/guides/CONTRIBUTOR-WORKFLOW.md#2-start-an-ai-development-session) · [Source map](#where-things-are) · [한국어 안내](docs/guides/CONTRIBUTOR-WORKFLOW.ko.md)
 
 Start here when changing MASC. You can contribute documentation without an
 OCaml toolchain, report a reproducible problem, or change a feature with evidence.
@@ -15,8 +21,9 @@ not required to contribute.
 | External AI coding session | Read [AGENTS.md](AGENTS.md) and the full [constitution](docs/constitution.xml) first; no local Dune builds or CI wait loops |
 | Keeper development lane | Read the task contract and lane instructions; local tests are allowed with a toolchain, while PR/targeted CI provides verification evidence |
 
-`execution_protocol` in the constitution owns coding-agent workflow where it
-overrides the local-build guidance here. Keeper runtime prompts are separate.
+> [!NOTE]
+> `execution_protocol` in the constitution owns coding-agent workflow where it
+> overrides the local-build guidance here. Keeper runtime prompts are separate.
 
 ## Choose a contribution
 

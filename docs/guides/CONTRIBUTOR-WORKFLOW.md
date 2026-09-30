@@ -1,12 +1,32 @@
+<p align="center">
+  <img src="../assets/candle.svg" width="88" alt="MASC Keeper">
+</p>
+
 # Repository strategy and contributor workflow
 
 [한국어](CONTRIBUTOR-WORKFLOW.ko.md) · [Contributing](../../CONTRIBUTING.md)
 
-This guide describes how a change moves from a problem to a reviewed result in
-MASC. It applies to people, external coding agents and Keeper development lanes.
-The [constitution](../constitution.xml), especially `execution_protocol`, owns
-the repository's development contract. This guide explains how to apply it;
-workflow YAML and scripts show what is currently enforced.
+From a problem to a reviewed change, with evidence and a clear handoff.
+
+| What brings you here? | Start here |
+|---|---|
+| **First contribution** | [Documentation · fork · first PR](#1-make-a-first-contribution) |
+| **Develop with AI** | [Session setup · responsibility · execution boundaries](#2-start-an-ai-development-session) |
+| **Team work** | [Issue · Goal · Task · Board](#3-coordinate-the-work) |
+| **Verify a change** | [CI](#4-validate-and-request-ci) · [review and integration](#5-review-and-integrate) · [evidence and resume](#6-submit-evidence-and-resume-later) |
+
+> [!NOTE]
+> The [constitution](../constitution.xml), especially `execution_protocol`, owns
+> the development contract. This guide explains how to apply it; workflow YAML
+> and scripts show what is currently enforced.
+
+```mermaid
+flowchart LR
+    A["Problem and issue"] --> B["Change on a separate branch"]
+    B --> C["Draft PR"]
+    C --> D["Ready · CI · review"]
+    D --> E["Integrate into main"]
+```
 
 ## Repository strategy
 
@@ -30,6 +50,8 @@ not need the OCaml toolchain. Read the relevant source and linked manual before
 editing a factual claim. For code, use the source prerequisites in
 [README](../../README.md#from-source).
 
+### Check the problem and existing work
+
 Choose an existing issue or write down the problem, expected result and how it
 will be checked. Search issues, open/closed PRs and current source before starting:
 
@@ -43,6 +65,8 @@ These commands require GitHub CLI authentication and ripgrep. GitHub's issue/PR
 search and your editor's search work too. For a small fix, describe the reproduction
 in the linked issue. Discuss a new public contract or broad architecture change
 there before implementing it. If a PR already solves the problem, help review it.
+
+### Prepare a branch
 
 With repository write access, use your existing clone:
 
@@ -67,6 +91,8 @@ cd ../masc-your-topic
 Use `git remote -v` to check an existing clone instead of adding a duplicate remote.
 Choose an unused directory. Keep runtime tests under a separate base path and
 use a free port; the checkout and the workspace containing `.masc` are different.
+
+### Your first documentation PR
 
 For a first documentation patch, edit one factual claim and its translation where
 present, run `bash scripts/check-doc-truth.sh` and `git diff --check`, and check the

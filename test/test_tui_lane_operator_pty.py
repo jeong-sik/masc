@@ -214,8 +214,15 @@ def broadcast_export(executable: str, captures: Path | None) -> None:
     selected = data['rows'][0]['id']
     fixtures = terminal.overview_event_http_fixtures()
     fixtures['/api/v1/lane-addons'] = (200, data)
-    status, roster = fixtures['/api/v1/gate/keepers?detailed=true']
-    fixtures['/api/v1/gate/keepers?detailed=true'] = (status, {**roster, 'keepers': []})
+    fixtures['/api/v1/gate/keepers?detailed=true'] = (200, {
+        'count': 0, 'total': 0, 'truncated': False, 'keepers': []})
+
+    def prepare_workspace(base_path: str) -> None:
+        # The export choices read the canonical local Keeper roster. Remove
+        # only the harness's two seeded identities in this temporary workspace.
+        for name in ('alpha', 'beta'):
+            (Path(base_path) / '.masc' / 'keepers' / f'{name}.json').unlink()
+
     accepted: list[dict] = []
     requests: terminal.HttpRequests = []
 
@@ -261,7 +268,8 @@ def broadcast_export(executable: str, captures: Path | None) -> None:
         os.write(master, b'q')
 
     terminal.run_terminal_scenario(executable, description='Explicit Lane evidence Broadcast',
-        interact=interact, http_fixtures=fixtures, http_requests=requests)
+        interact=interact, http_fixtures=fixtures, http_requests=requests,
+        prepare_workspace=prepare_workspace)
     print('Selected evidence / explicit Broadcast / cancelled draft / committed receipt: PASS')
 
 

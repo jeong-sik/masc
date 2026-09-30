@@ -1280,9 +1280,9 @@ let lines ?(height=24) ?(failed_note = "") ~width view =
         let receipt_lines = List.concat_map (fun line ->
           Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
             (Masc.Tui_decode.sanitize_terminal_text line)) receipt_lines in
-        receipt_lines @ (match view.screen with
-        | Overview -> overview_lines ~width view
-        | Detail _ -> detail_lines ~width view
+        (match view.screen with
+        | Overview -> overview_lines ~width view @ receipt_lines
+        | Detail _ -> receipt_lines @ detail_lines ~width view
             @ (match view.focus with
                | Connections -> [""] @ (flow_lines view |> List.concat_map (fun line ->
                    Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)

@@ -12,6 +12,8 @@ import test_tui_keyboard_input as h
 SOURCE_MODULES = (
     "bin/masc_tui_render.ml",
     "bin/masc_tui_layout.ml",
+    "bin/masc_tui.ml",
+    "bin/masc_tui_loader.ml",
 )
 
 
@@ -38,11 +40,19 @@ def run(executable: str) -> None:
         fixtures[f"{detail_path}&comment_offset={offset}&comment_limit=100"] = (
             200, h.board_detail_page(post, comments, offset=offset, limit=100))
 
+    first_page_path = f"{detail_path}&comment_offset=0&comment_limit=100"
+    fixtures[first_page_path] = h.SequencedHttpResponse([
+        (503, {"error": "full history temporarily unavailable"}),
+        (200, h.board_detail_page(post, comments, offset=0, limit=100)),
+    ])
+
     def interact(process, fd, _slave, output, _base):
         h.wait_for_output(process, fd, output, b"Health: ", start=0, timeout=10)
         h.palette_go(process, fd, output, b"go board", b"MASC Board")
         h.wait_for_output(process, fd, output, ONE_POST_LISTED, start=0, timeout=10)
         h.send_and_wait(process, fd, output, b"\r", b"Showing 20 of 128 comments")
+        h.send_and_wait(process, fd, output, b"o", b"full history temporarily unavailable")
+        h.send_and_wait(process, fd, output, b"o", b"Showing 20 of 128 comments")
         h.send_and_wait(process, fd, output, b"o", b"Comment 000")
         h.read_available(fd, output)
         start = len(output)

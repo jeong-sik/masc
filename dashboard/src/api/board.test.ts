@@ -953,6 +953,21 @@ describe('fetchBoardCuration', () => {
 })
 
 describe('fetchBoardPost', () => {
+  it('requests focused context directly and uses the complete companion rows', async () => {
+    const root = { id: 'root', thread_offset: 0, post_id: 'post-1', author: 'keeper', content: 'root', created_at: 1_713_000_000 }
+    const reply = { ...root, id: 'reply', thread_offset: 219, parent_id: 'root', content: 'reply' }
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      post: { id: 'post-1', body: 'Body' }, comments: [reply],
+      comment_context: [root, reply], comment_revision: 'snapshot-revision',
+      comment_page: { offset: 200, total: 220 },
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetchMock)
+    const result = await fetchBoardPost('post-1', undefined, undefined, 'reply')
+    expect(result.comments.map(comment => comment.id)).toEqual(['root', 'reply'])
+    expect(result.commentPage).toEqual({ offset: 200, total: 220, revision: 'snapshot-revision' })
+    expect(fetchMock.mock.calls[0]?.[0]).toContain('comment_focus=reply')
+  })
+
   it('normalizes comment vote fields from the server detail payload', async () => {
     const rawResponse = {
       post: {

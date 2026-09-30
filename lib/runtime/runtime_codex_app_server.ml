@@ -2419,9 +2419,18 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(thread_mode = Start) ~mgr
        turn.thread_id
        turn.turn_id
        turn.model
+   | Error (Stopped_by_host stop as stopped)
+     when not (Runtime_official_client_tool.host_stop_failed stop) ->
+     (* The Keeper settles this stop as a completed or yielded turn
+        ({!Keeper_official_client_host}). Logged as a failure it made 123
+        WARN lines on 2026-09-29 for turns that ended as designed. *)
+     Log.Runtime_agent.info
+       "Codex app-server turn stopped by host: %s"
+       (error_to_string stopped)
    | Error error ->
      Log.Runtime_agent.warn
-       "Codex app-server subscription turn failed (kind=%s)"
-       (error_kind error));
+       "Codex app-server subscription turn failed (kind=%s): %s"
+       (error_kind error)
+       (error_to_string error));
   result
 ;;

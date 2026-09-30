@@ -89,14 +89,65 @@ def settled(process, fd, output) -> bytes:
     return bytes(output)
 
 
+# QR pixels are opaque black/white; portraits use this glyph too, with
+# their own colours or a default background for a transparent pixel. Decode
+# actual SGR colour state so even one remaining QR cell fails the close check.
+Color = tuple[str, tuple[int, ...]]
+QR_COLORS: frozenset[Color] = frozenset({
+    ("rgb", (0, 0, 0)), ("rgb", (255, 255, 255)),
+    # Fixed xterm-256 cube entries, independent of the terminal's ANSI theme.
+    ("indexed", (16,)), ("indexed", (231,)),
+})
+SGR_OR_HALF_BLOCK = re.compile(rb"\x1b\[([0-9;]*)m|" + UPPER_HALF_BLOCK)
+
+
+def qr_row_cells(text: bytes) -> int:
+    foreground: Color | None = None
+    background: Color | None = None
+    count = 0
+    for token in SGR_OR_HALF_BLOCK.finditer(text):
+        encoded = token.group(1)
+        if encoded is None:
+            if foreground in QR_COLORS and background in QR_COLORS:
+                count += 1
+            continue
+        parameters = [int(value or b"0") for value in encoded.split(b";")]
+        index = 0
+        while index < len(parameters):
+            code = parameters[index]
+            index += 1
+            if code == 0:
+                foreground = background = None
+            elif code == 39:
+                foreground = None
+            elif code == 49:
+                background = None
+            elif code in (38, 48):
+                color: Color | None = None
+                if index < len(parameters):
+                    mode = parameters[index]
+                    index += 1
+                    size = {2: 3, 5: 1}.get(mode, 0)
+                    if size and index + size <= len(parameters):
+                        color = ("rgb" if mode == 2 else "indexed",
+                                 tuple(parameters[index:index + size]))
+                        index += size
+                if code == 38:
+                    foreground = color
+                else:
+                    background = color
+            elif 30 <= code <= 37 or 90 <= code <= 97:
+                foreground = None  # ANSI theme colours are not fixed QR pixels.
+            elif 40 <= code <= 47 or 100 <= code <= 107:
+                background = None
+    return count
+
+
 def qr_cells(drawn: bytes) -> list[int]:
-    """QR cells on each screen row that holds any, top row first."""
-    rows = h.screen_rows(drawn)
-    return [
-        text.count(UPPER_HALF_BLOCK)
-        for _, text in sorted(rows.items())
-        if UPPER_HALF_BLOCK in text
-    ]
+    """Opaque black/white QR cells per painted screen row, top row first."""
+    rows = h.screen_rows(drawn, preserve_styles=True)
+    return [count for _, text in sorted(rows.items())
+            if (count := qr_row_cells(text))]
 
 
 def press(process, fd, output, key: bytes, needle) -> int:

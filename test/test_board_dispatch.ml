@@ -1607,6 +1607,48 @@ let test_dashboard_detail_uses_authenticated_reaction_actor () =
        true
        (summary |> member "reacted" |> to_bool)
 
+let test_dashboard_comment_context_contains_page_and_focus_ancestors () =
+  let post = match Board_dispatch.create_post ~author:"context-reader"
+      ~content:"comment context" ~post_kind:Board.Human_post () with
+    | Ok post -> post | Error error -> Alcotest.fail (Board.show_board_error error) in
+  let post_id = Board.Post_id.to_string post.id in
+  let add ?parent_id content = match Board_dispatch.add_comment ~post_id
+      ~author:"context-reader" ~content ?parent_id () with
+    | Ok comment -> Board.Comment_id.to_string comment.id
+    | Error error -> Alcotest.fail (Board.show_board_error error) in
+  let root = add "root" in
+  let old_reply = add ~parent_id:root "old focused reply" in
+  for index = 1 to 20 do ignore (add (string_of_int index)) done;
+  let newest_reply = add ~parent_id:root "newest reply" in
+  let read ?focused_comment () =
+    let status, body = Server_routes_http_runtime.board_post_detail_json
+      ?focused_comment ~config:None ~voter:None ~reaction_actor:None
+      ~response_format:Server_board_post_response_format.Flat ~post_id () in
+    Alcotest.(check bool) "detail available" true (status = `OK);
+    Yojson.Safe.from_string body in
+  let ids key json = Yojson.Safe.Util.(json |> member key |> to_list)
+    |> List.map (fun row -> Yojson.Safe.Util.(row |> member "id" |> to_string)) in
+  let latest = read () in
+  Alcotest.(check bool) "ordinary numeric page excludes old root" false
+    (List.mem root (ids "comments" latest));
+  Alcotest.(check bool) "newest reply stays in the page" true
+    (List.mem newest_reply (ids "comments" latest));
+  Alcotest.(check bool) "ordinary context restores its parent" true
+    (List.mem root (ids "comment_context" latest));
+  let focused = read ~focused_comment:old_reply () in
+  Alcotest.(check bool) "direct focus includes the old reply" true
+    (List.mem old_reply (ids "comment_context" focused));
+  Alcotest.(check bool) "direct focus retains its ancestor" true
+    (List.mem root (ids "comment_context" focused));
+  let missing = read ~focused_comment:"deleted-comment" () in
+  Alcotest.(check (list string)) "missing focus still returns the ordinary context"
+    (ids "comment_context" latest) (ids "comment_context" missing);
+  ignore (add "appended after the page");
+  let changed = read () in
+  Alcotest.(check bool) "appending invalidates the page snapshot revision" true
+    (Yojson.Safe.Util.member "comment_revision" latest <>
+     Yojson.Safe.Util.member "comment_revision" changed)
+
 let test_board_post_response_format_query_contract () =
   let check_format label expected query =
     match Server_board_post_response_format.of_query query with
@@ -2616,6 +2658,8 @@ let () =
          (with_eio test_dashboard_detail_uses_authenticated_reaction_actor);
        Alcotest.test_case "post detail response format boundary" `Quick
          test_board_post_response_format_query_contract;
+       Alcotest.test_case "comment context restores page and focus ancestors" `Quick
+         (with_eio test_dashboard_comment_context_contains_page_and_focus_ancestors);
        Alcotest.test_case "SSE reaction_changed" `Quick
         (with_eio test_board_sse_reaction_changed);
       Alcotest.test_case "board signal reaction_changed resolves comment parent" `Quick

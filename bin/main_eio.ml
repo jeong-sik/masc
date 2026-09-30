@@ -3583,7 +3583,7 @@ let wizard_model_entries client catalog =
         entry.id_prefix
     | _ -> false)
 
-let wizard_model_context ?(prefer_bare = false) model entries =
+let wizard_model_context ?(bare_only = false) model entries =
   let exact_entries = entries
     |> List.filter (fun (entry : Llm_provider.Model_catalog.model_entry) ->
       String.equal
@@ -3592,12 +3592,10 @@ let wizard_model_context ?(prefer_bare = false) model entries =
       || Option.fold ~none:false ~some:(List.mem model) entry.supported_models)
   in
   let entries =
-    if prefer_bare
+    if bare_only
     then
-      match List.filter (fun (entry : Llm_provider.Model_catalog.model_entry) ->
-        Option.is_none entry.provider_name) exact_entries with
-      | [] -> exact_entries
-      | bare -> bare
+      List.filter (fun (entry : Llm_provider.Model_catalog.model_entry) ->
+        Option.is_none entry.provider_name) exact_entries
     else exact_entries
   in
   let contexts = entries
@@ -3642,7 +3640,7 @@ let runtime_model_list_cmd =
                        (* Bare rows describe the native client; a direct API
                           row can have a different context for the same ID. *)
                        (wizard_model_context
-                          ~prefer_bare:(match client with Wizard_codex -> true | Wizard_claude_code -> false)
+                          ~bare_only:(match client with Wizard_codex -> true | Wizard_claude_code -> false)
                           model entries)))))
       | None, Some provider_id -> Runtime_wizard_inventory.provider_model_rows provider_id
     in
@@ -3812,10 +3810,10 @@ let runtime_model_info_cmd =
       (* A generic family prefix is not evidence for an unknown model. The
          explicit provider owns its scoped exact row; Codex owns its bare
          exact row. Conflicts within that chosen source remain unknown. *)
-      let prefer_bare = match client, provider with
+      let bare_only = match client, provider with
         | Some Wizard_codex, None -> true
         | Some Wizard_claude_code, _ | None, _ | Some Wizard_codex, Some _ -> false in
-      match wizard_model_context ~prefer_bare model entries with
+      match wizard_model_context ~bare_only model entries with
       | Some context ->
         print_endline (Yojson.Safe.to_string (`Assoc ["model", `String model; "max_context", `Int context])); 0
       | None -> 1

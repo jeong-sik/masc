@@ -6,6 +6,13 @@ account's `model/list` response through isolated model refresh, setup metadata,
 the dashboard model picker, and terminal setup. These fields are discovery
 evidence, not proof that the account completed a model turn.
 
+The static Codex model list and context lookup require an exact bare catalog
+row. A context declared only for an API provider does not establish the native
+client's context, so that model is omitted from the static Codex list and its
+client lookup refuses. Isolated account-native refresh discovers the actual
+available models and reads their effective context from the fresh CLI cache.
+Explicit provider queries retain their provider-scoped catalog context.
+
 An explicitly configured `reasoning-effort` is admitted on the same app-server
 connection that will run the turn. After `thread/start` or `thread/resume`
 reports the actual model, MASC reads all model-list pages, including hidden

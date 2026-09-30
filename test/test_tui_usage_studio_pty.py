@@ -98,9 +98,10 @@ def journey(executable, no_color=False):
         compact = capture(process, fd, output, "plan-compact", 30, 80, b"catalogue reopens")
         if b"0%" not in compact or b"exhausted (observed)" not in compact:
             raise AssertionError("compact Plan conflated observed blocking and provider usage")
-        capture(process, fd, output, "plan-short", 14, 80, b"Plan usage")
+        capture(process, fd, output, "terminal-too-small", 14, 80, b"terminal too small")
+        capture(process, fd, output, "plan-short", 16, 80, b"Plan usage")
         h.send_and_wait(process, fd, output, b"j", b"Claude")
-        short = capture(process, fd, output, "plan-short-scrolled", 14, 80, b"Claude")
+        short = capture(process, fd, output, "plan-short-scrolled", 16, 80, b"Claude")
         if b"Claude" not in short:
             raise AssertionError("short Usage cannot expose its content by scrolling")
         capture(process, fd, output, "plan-restored", 30, 120, b"Claude")

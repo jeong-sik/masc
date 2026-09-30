@@ -65,6 +65,13 @@
   reads over. Resolving all 263 keys of a copy of the live prompt directory
   took 0.47-0.48 ms instead of 29.9-30.3 ms (#40046).
 - Lane Add-ons raw details stay with the selected installation or record, replacing the retired five-tab text screen (#40107).
+- A schedule refresh that changes no status no longer indexes every wake
+  and note to find finished schedules past the retention. It keeps, for
+  each decoded ledger state, the oldest last write of a finished schedule,
+  and skips the pass while that write is inside the retention. On a copy of
+  a ledger with 1,643 schedules, 2,039 wakes and 4,131 notes such a refresh
+  took 0.58-0.61 ms instead of 1.47-1.59 ms, about 0.5 ms of it the ledger
+  lock (#40034).
 
 ### Removed
 
@@ -174,6 +181,8 @@
 - The TUI now shows the reason a shared-play route (invites, pad, screen, seat) gives for refusing a request, instead of only its code such as `not_ready`. Those routes answer with the sentence in `error` and the code in `code`. (#40050)
 - Cached Board timeout responses remain HTTP 504 when a conditional request matches their ETag, including large timeout envelopes. (#40052)
 - A blank `hearth` query on `GET /api/v1/board` is no filter. It used to filter to posts with an empty hearth, an empty page, and cache that page under the key of the unfiltered listing. (#40052)
+- `/api/v1/dashboard/tasks/history`, `/workspace`, `/provider-logs`, `/config`, `/keeper-memory-health` and `/board` answer a timeout envelope larger than 8 KB with 504; it went out as 200. (#40060)
+- Wrap multiline Board comments using the full comment pane width rather than the space remaining beside author metadata (#40088).
 
 ### Internal
 
@@ -209,6 +218,7 @@
 - Building a Keeper tool plan no longer re-derives every registered tool's model names or scans the descriptor list once per descriptor. The names are computed once when the program starts, and a plan looks descriptors up by id. Parsing the 21 skills of a copy of the live catalog, 8 of them compositions, took 3.44 ms and takes 2.31 ms, with the same answer for every skill. (#40084)
 - The skill catalog projects each entry of a published skill snapshot once. The effective catalog, the operator catalog, the skill inventory and a task's resolved skills all read that projection; a keeper turn used to project the whole snapshot at least twice, and the skills route once per request. For the 21 live skills, the catalog, inventory and operator projections together took 8.57 ms each time and take 2.5 µs once the snapshot has been projected. One snapshot is kept at a time: another workspace's snapshot, or the previous publication still held by a running turn, is projected on its own and replaces it. (#40085)
 - `GET /api/v1/runtime/resolved` lists the keeper directory once per request; the assignment rows and the lanes they resolve to come from that one listing. With the live runtime.toml (117 runtimes) and a keeper directory of 106 entries, building the document took about 582 µs and takes about 515 µs, the cost of one listing. (#40086)
+- Eighteen dashboard, keeper, board and workspace reads that answer a whole page from the dashboard cache now send the bytes the cache serialized with the entry, instead of serializing and MD5-hashing the page again on every request (goals 0.365 ms, briefing 0.342 ms, planning 0.183 ms per request, measured on the live pages). The six reads that already sent kept bytes no longer parse a page of 8 KB or less on every request to look for a timeout envelope. The dashboard bootstrap and the startup warm-up fill the planning, config and keeper-memory-health entries the way their routes read them, so a route read no longer serializes a warm-up's entry on the executor. (#40060)
 
 ## [0.48.0] - 2026-09-29
 

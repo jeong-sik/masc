@@ -174,6 +174,8 @@ val reschedule_after_due_signal : now:float -> schedule_request -> schedule_requ
 val payload_of_yojson : Yojson.Safe.t -> (payload, string) result
 val payload_to_yojson : payload -> Yojson.Safe.t
 val payload_digest : payload -> string
+(** SHA-256 of the payload's canonical JSON, taken when {!payload_of_yojson}
+    decoded it, so reading it costs nothing. *)
 
 val mark_due : now:float -> schedule_request -> schedule_request
 (** Observes time for active requests. [Scheduled] and [Due] requests whose

@@ -35,6 +35,7 @@
 - Patch review supports Shift+Left/Right to pan long lines while old/new coordinates and diff markers stay fixed. Horizontal position is visible and clamps to actual content and pane width, resetting on reopen. (#40301)
 - Lane Add-ons now show package descriptions and the selected declared result before activity, with multiline report bodies, visible selection and separate coverage/delivery readings (#40206).
 - Match Records navigation to displayed chronology, reuse the selected result while rendering, and expose each selected result’s exact Lane in Summary and raw detail (#40206).
+- Keeper chats show the conversation partner's portrait below the left Keeper list, without taking rows from the conversation or composer. The portrait follows the chat target, stays put while browsing the list, and yields on small or colourless terminals. Chats show the roster by default; an explicit Ctrl-B choice is retained. (#39883).
 
 ### Changed
 
@@ -104,6 +105,8 @@
 - Keep Enter owned by the focused file tree when History remains open in the other pane. (#40320)
 - Integrate complete Tools metadata, revision and timestamp reading plus composition dependencies into the TUI stack, using physical rows for display and navigation. (#40325)
 - Integrate complete Prompt registry and runtime asset detail documents with physical-row paging and edge navigation into the TUI stack. (#40327)
+- Keeper chat gives the draft a terminal-themed background, highlights slash-command choices across their row, and keeps send, newline, command discovery and escape hints ahead of display controls. The input keeps its existing history budget and command execution semantics. (#39890)
+- The chat picker offers Play subcommands without executing them during selection; invite arguments remain explicit. (#39890)
 
 ### Removed
 
@@ -234,6 +237,13 @@
 - Runtime Enter/Right only opens a row from the listing. Open row and route/status readers retain their identity and scroll position even when refresh reorders the hidden listing. (#40306)
 - Integrate responsive Runtime list columns with the stacked route/status reader, active help and stable detail identity. Candidate identity and route/probe share the available pane width while auxiliary columns fold first. (#40309)
 - Keep the selected Tools Skill visible above every tab and show its complete source, package and revision in the document; display and Enter/edit share the same typed selection. (#40328)
+- Hiding a chat's Keeper list or narrowing the window returns keyboard focus to the composer and preserves the current conversation and draft. Showing the list again does not steal focus. (#39883).
+- On Kitty-protocol terminals, a Keeper portrait in chat or in the Keeper detail is no longer sent again in full each time text beside it changes, such as a running turn's progress mark, a streaming reply or typing. The pixels are sent once; a row written over the picture puts it back by its image id in a few dozen bytes, and only a cleared screen or a changed picture sends the pixels again. (#39883).
+- Codex host stops at completed or deferred terminal tool boundaries and
+  repeated tool calls are logged at INFO, like Claude Code. Failed terminal
+  effects remain at WARN; Codex failure logs now include error details (#39983).
+- Keep the TUI chat queue summary visible through submission and server admission, excluding started or settled batch inputs. Preserve local NEXT previews and queue actions at 80 columns, and distinguish awaiting receipts and delivery rechecks from confirmed queued input. #40340
+- Ctrl-O in Keeper chat now reopens retained image attachments from loaded history, keeps queued attachments available even when server and client clocks disagree, and preserves the staged draft when a delayed history load provides no newer arrival evidence. Settled local images no longer hide newer saved images in a bounded history tail. Artifact responses are checked against their recorded digest and byte count before decoding; HTTP requests stay on the Eio fiber while successful payload decoding runs in a worker (#40345).
 
 ### Documentation
 

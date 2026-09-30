@@ -2048,7 +2048,7 @@ status: reference
     각자의 독립 스택으로 분리해 진행한다.
   - 구성 확인과 병합: PR의 REST stack 메타데이터와 Stacks API로 Native Stack인지 먼저 확인한다.
     API 조회 실패는 stack 없음이 아니라 미확인이다. Native Stack은 선택한 PR까지의 미병합 하위 PR을
-    함께 아래부터 `stack.base`에 병합한다. `baseRefName`이 `main`이 아니라는 이유로 수동 retarget하지 않는다.
+    비동기 병합 API로 함께 아래부터 `stack.base`에 병합한다. `baseRefName`이 `main`이 아니라는 이유로 수동 retarget하지 않는다.
     포함된 각 PR의 현재 head·독립 승인·판정을 검토하고 병합 직전에 스택 구성과 head를 다시 확인한다.
     stack이 없는 일반 브랜치 체인은 부모부터 병합하고 이후 실제 base와 diff를 다시 확인한다.
     base나 head가 바뀌어 diff가 달라지면 변경 범위를 독립 검토한다. 개별 PR 리뷰는 전체 스택 승인이 아니다.

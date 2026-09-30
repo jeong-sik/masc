@@ -1727,6 +1727,7 @@
  (name masc_tui)
  (modules
   masc_tui
+  masc_tui_async_protocol
   masc_tui_render
   masc_tui_loader
   masc_tui_http)

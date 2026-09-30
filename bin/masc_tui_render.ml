@@ -536,61 +536,16 @@ let render_overview (state : state) =
      readings the Approvals title uses. *)
   let approval_count = Masc_tui_types.approvals_count_label state in
   let attention = dashboard_attention state in
-  let attention_lines =
-    (* An unread or failed overview is not an empty one: its count would
-       read as a zero the operator never saw (#39526). *)
+  let attention_head =
     let counted =
       match attention with
       | _ :: _ -> Printf.sprintf "%d attention items" (List.length attention)
-      | [] -> (
+      | [] ->
           match empty_page_of ~snapshot:state.overview ~error:overview_error with
           | Page_empty -> "0 attention items"
-          | Page_unread | Page_failed -> "attention not observed")
+          | Page_unread | Page_failed -> "attention not observed"
     in
-    let title =
-      Printf.sprintf " Needs you · %s · %s approvals (p in Work)" counted
-        approval_count
-    in
-    let shown =
-      List.filteri (fun index _ -> index < dashboard_preview_rows) attention
-    in
-    (* The age answers "why is this still here". It is drawn when some shown
-       item carries a time; an unstamped one then shows the no-value mark, so
-       summaries start on one edge. *)
-    let shows_age =
-      List.exists
-        (fun (item : attention_item) -> Option.is_some item.ai_evidence_ts)
-        shown
-    in
-    let item_line (item : attention_item) =
-      let age_cell =
-        if not shows_age then ""
-        else
-          let age_label =
-            match item.ai_evidence_ts with
-            | Some ts ->
-                keeper_lane_idle_text (int_of_float (Unix.gettimeofday () -. ts))
-            | None -> Masc_tui_theme.Glyph.no_value
-          in
-          Printf.sprintf "%s%s%s " Ansi.dim (fit_width age_label 3) Ansi.reset
-      in
-      Printf.sprintf "%s %s%s"
-        (attention_severity_badge item.ai_severity)
-        age_cell
-        (Terminal_text.single_line item.ai_summary)
-    in
-    (* The note stands in for rows, so it starts where they do. *)
-    let body =
-      match shown with
-      | _ :: _ -> List.map item_line shown
-      | [] -> (
-          match empty_page_of ~snapshot:state.overview ~error:overview_error with
-          | Page_empty -> [ Ansi.dim ^ "Nothing needs attention." ^ Ansi.reset ]
-          | Page_unread ->
-              [ Ansi.dim ^ unread_note ^ Ansi.reset ]
-          | Page_failed -> [])
-    in
-    title :: List.map (fun line -> "   " ^ line) body
+    "Needs you · " ^ counted
   in
   let palette =
     Masc_tui_terminal_palette.snapshot_palette
@@ -631,7 +586,6 @@ let render_overview (state : state) =
   in
   let goal_head, goal_details = split_lines (dashboard_goal_lines state) in
   let usage_head, usage_details = split_lines (dashboard_usage_lines state) in
-  let attention_head, _ = split_lines attention_lines in
   let attention_details =
     List.map
       (fun (item : attention_item) ->
@@ -640,7 +594,14 @@ let render_overview (state : state) =
           | Attention_keeper name -> Terminal_text.single_line name ^ ": "
           | Attention_other _ -> ""
         in
-        attention_severity_label item.ai_severity ^ " · "
+        let age =
+          match item.ai_evidence_ts with
+          | None -> ""
+          | Some ts ->
+              " · " ^ keeper_lane_idle_text
+                (max 0 (int_of_float (Unix.gettimeofday () -. ts)))
+        in
+        attention_severity_label item.ai_severity ^ age ^ " · "
         ^ (match item.ai_blocker_summary with
            | Some cause -> target ^ Terminal_text.single_line cause
            | None -> Terminal_text.single_line item.ai_summary))
@@ -716,7 +677,7 @@ let render_overview (state : state) =
           let body =
             Masc_tui_dashboard.render ~width
               ~height:(max 0 (budget - List.length prelude))
-              ~selected:state.dashboard_section ~palette cards
+              ~selected:state.dashboard_section ~palette ~quiet:(Theme.recede ()) cards
           in
           prelude @ List.map (fun row -> margin ^ row) body)
       |> List.iter c.push)

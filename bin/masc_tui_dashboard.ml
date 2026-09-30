@@ -43,7 +43,7 @@ let border ~width ~selected ~palette card =
   ^ repeat (width - 2 - Text.display_width title) Theme.Box.h
   ^ Theme.Box.tr ^ Theme.Sgr.reset
 
-let panel ~width ~height ~selected ~palette card =
+let panel ~width ~height ~selected ~palette ~quiet card =
   let inner = max 1 (width - 4) in
   let color = Theme.status_readable palette card.status in
   let content =
@@ -55,13 +55,13 @@ let panel ~width ~height ~selected ~palette card =
     List.mapi
       (fun index line ->
         let style = if index = 0 then color ^ Theme.Sgr.bold else "" in
-        Theme.tone Theme.Dim ^ Theme.Box.v ^ Theme.Sgr.reset ^ " "
+        quiet ^ Theme.Box.v ^ Theme.Sgr.reset ^ " "
         ^ style ^ Text.fit_width line inner ^ Theme.Sgr.reset ^ " "
-        ^ Theme.tone Theme.Dim ^ Theme.Box.v ^ Theme.Sgr.reset)
+        ^ quiet ^ Theme.Box.v ^ Theme.Sgr.reset)
       (content @ List.init (max 0 (height - 2 - List.length content)) (fun _ -> ""))
   in
   border ~width ~selected ~palette card :: body
-  @ [ Theme.tone Theme.Dim ^ Theme.Box.bl ^ repeat (width - 2) Theme.Box.h
+  @ [ quiet ^ Theme.Box.bl ^ repeat (width - 2) Theme.Box.h
       ^ Theme.Box.br ^ Theme.Sgr.reset ]
 
 (* Two 48-cell panels leave room for a useful sentence beside a measured
@@ -72,7 +72,7 @@ let band_height = 5
 let minimum_pair_height = 7
 let wide_height = (2 * minimum_pair_height) + band_height + 2
 
-let render ~width ~height ~selected ~palette cards =
+let render ~width ~height ~selected ~palette ~quiet cards =
   let width = max 1 width in
   let height = max 0 height in
   if width >= (2 * minimum_panel_width) + gutter && height >= wide_height then
@@ -80,17 +80,41 @@ let render ~width ~height ~selected ~palette cards =
     let left_width = (width - gutter) / 2 in
     let right_width = width - gutter - left_width in
     let pair left right =
-      let left = panel ~width:left_width ~height:pair_height ~selected ~palette left in
-      let right = panel ~width:right_width ~height:pair_height ~selected ~palette right in
+      let left = panel ~width:left_width ~height:pair_height ~selected ~palette ~quiet left in
+      let right = panel ~width:right_width ~height:pair_height ~selected ~palette ~quiet right in
       List.map2 (fun l r -> l ^ String.make gutter ' ' ^ r) left right
     in
     match cards with
     | [ attention; work; goals; keepers; usage ] ->
         pair attention work @ [ "" ] @ pair goals keepers @ [ "" ]
-        @ panel ~width ~height:band_height ~selected ~palette usage
+        @ panel ~width ~height:band_height ~selected ~palette ~quiet usage
     | [] | _ :: _ ->
-        List.concat_map (panel ~width ~height:minimum_pair_height ~selected ~palette) cards
+        List.concat_map (panel ~width ~height:minimum_pair_height ~selected ~palette ~quiet) cards
         |> take_rows ~height
+  else if height < 2 * List.length cards then
+    let rows =
+      List.map
+        (fun card ->
+          let chosen = card.section = selected in
+          let marker = if chosen then "› " else "  " in
+          let style = if chosen then Theme.Sgr.reverse else quiet in
+          style ^ Text.fit_width (marker ^ label card.section ^ " · " ^ card.summary) width
+          ^ Theme.Sgr.reset)
+        cards
+    in
+    if List.length rows <= height then rows
+    else
+      let selected_index =
+        match List.find_index (fun card -> card.section = selected) cards with
+        | Some index -> index
+        | None -> 0
+      in
+      let shown = max 1 (height - 1) in
+      let offset = max 0 (min selected_index (List.length rows - shown)) in
+      List.drop offset rows |> List.take shown
+      |> fun visible ->
+        if height <= 1 then List.take height visible
+        else visible @ [ Text.fit_width "j/k cards · Enter opens selection" width ]
   else
     (* Every card keeps its heading and one summary. Only the selected card
        expands, so selection and the next action survive a small terminal. *)

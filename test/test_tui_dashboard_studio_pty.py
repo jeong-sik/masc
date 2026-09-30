@@ -77,6 +77,8 @@ def navigation(executable, *, no_color=False):
                 raise AssertionError(f"compact Dashboard lost {value!r}: {compact!r}")
         h.send_and_wait(process, fd, output, b"r", "› Work".encode())
         h.send_and_wait(process, fd, output, b"\r", b"MASC Work")
+        # Work's existing first Esc leaves task focus; its next Esc returns.
+        h.send_and_wait(process, fd, output, b"\x1b", h.FRAME_END)
         h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
         h.send_and_wait(process, fd, output, b"j", "› Goals".encode())
         h.send_and_wait(process, fd, output, b"\r", b"MASC Work")
@@ -88,6 +90,10 @@ def navigation(executable, *, no_color=False):
         h.send_and_wait(process, fd, output, b"j", "› Usage".encode())
         h.send_and_wait(process, fd, output, b"\r", b"MASC Usage")
         h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
+        tiny = capture(process, fd, output, name="short-usage", rows=18, columns=80,
+                       needle="› Usage".encode())
+        if "› Usage".encode() not in tiny:
+            raise AssertionError("short Dashboard hid its selected destination")
         # Previous wraps from Attention to Usage and next back to Attention.
         h.send_and_wait(process, fd, output, b"j", "› Needs you".encode())
         h.send_and_wait(process, fd, output, b"k", "› Usage".encode())

@@ -16,7 +16,7 @@ type card = {
 
 val render :
   width:int -> height:int -> selected:section ->
-  palette:Masc_tui_terminal_palette.t option -> card list -> string list
+  palette:Masc_tui_terminal_palette.t option -> quiet:string -> card list -> string list
 (** Wide viewports arrange two pairs and a Usage band. Compact viewports
     retain every destination and expand the selected card. Content is wrapped
     in terminal cells; omitted detail is counted, never presented as absent. *)

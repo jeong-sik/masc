@@ -958,17 +958,3 @@ let render_question_reader (state : state) =
   box_bottom buf cols;
   Buffer.add_string buf (footer_line state ~max_cells:cols ~hints:(question_hints state));
   finish_surface state ~surface_key:"approval-questions" ~rows:terminal_rows ~cols buf
-
-(* Who wrote it, in one column. 1561 of this workspace's 2171 posts are system
-   posts and 588 are automation; the 22 a person wrote are what an operator is
-   scanning for, so those are the ones that get a mark. *)
-(* The widths now live beside their column names in [Render_schedule], which
-   is the one place the header and the rows both read. The age column is sized
-   for the widest [span_text] draws, "99d23h": a board's oldest live threads are
-   days old, so the day tier is the one it holds. *)
-
-(* Four cells of lead sit ahead of the mark on the header and on every row, so
-   the table gets what the frame leaves less those four. Summing the widths and
-   their gaps by hand is what the column description replaced: the sum was
-   written once for the rows and once for the header, and the two drifted until
-   REPLIES sat past the right edge whatever the title was sized to. *)

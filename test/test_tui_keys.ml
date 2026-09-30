@@ -211,7 +211,7 @@ let drawn_rows () =
   @ List.map
       (fun (name, pane) -> (name, footer_hints_code ~pane))
       [ ("Code / tree", Code_tree); ("Code / file", Code_file)
-      ; ("Code / history", Code_overlay)
+      ; ("Code / overlays", Code_overlay); ("Code / history", Code_history)
       ]
 
 let test_no_drawn_row_names_one_key_twice () =
@@ -3214,6 +3214,9 @@ let test_the_code_footer_names_the_keys_of_the_pane_it_draws () =
   let overlay =
     Masc_tui_keys.footer_hints_code ~pane:Masc_tui_keys.Code_overlay
   in
+  let history =
+    Masc_tui_keys.footer_hints_code ~pane:Masc_tui_keys.Code_history
+  in
   let holds needle haystack =
     let n = String.length needle and h = String.length haystack in
     let rec scan i =
@@ -3242,15 +3245,16 @@ let test_the_code_footer_names_the_keys_of_the_pane_it_draws () =
      it is up. *)
   check Alcotest.bool "an overlay drops the code keys" false
     (holds "b:blame" overlay);
-  (* The history view has commits to open; the other two panes do not, and
-     named the key anyway until it was read off a running screen. *)
-  check Alcotest.bool "an overlay opens a commit" true
-    (holds "Enter (history):open" overlay);
+  (* Only history has records to open. Diff and notes do not handle Enter. *)
+  check Alcotest.bool "history names the visible record action" true
+    (holds "Enter:top entry" history);
+  check Alcotest.bool "diff or notes has no Enter action" false
+    (holds "Enter" overlay);
   List.iter
     (fun (label, hints) ->
        check Alcotest.bool (label ^ " has no commit to open") false
          (holds "Enter (history)" hints))
-    [ ("the tree", tree); ("an open file", file) ]
+    [ ("the tree", tree); ("an open file", file); ("diff or notes", overlay) ]
 
 let test_code_asks_the_language_server_three_questions () =
   (* K hover, D definition, R references -- one family, one case each, and

@@ -13660,7 +13660,7 @@ let code_pane_content_height (state : state) =
 
 let code_history_rows (state : state) ~cols =
   let wrap owner text =
-    Message_layout.wrap_body ~markdown:document_markdown
+    Message_layout.wrap_body
       ~max_cells:(max 1 (cols - 6)) ~sanitize:Terminal_text.single_line text
     |> List.map (fun text -> (owner, text))
   in

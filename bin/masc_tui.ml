@@ -21899,29 +21899,51 @@ and is loaded on demand through keeper_skill.
                      start_board_post_refresh state ~host:server_peer_host ~port:state.port
                        ~post_id:evidence.fe_post_id ~mailbox:async_messages)
             | _ -> report_action state "system" "Open a Fusion run to follow its Board evidence")
-       | Some ("h" | "H") when state.view = Repositories && not state.repository_changes_open ->
+       | Some ("h" | "H") when state.view = Repositories && not state.repository_changes_open && Option.is_none state.workspace_activity_repo ->
            (match state.repositories with
             | None -> ()
             | Some snapshot ->
                 Option.iter (fun (repo : Tui_decode.repository) ->
                   state.workspace_activity_repo <- Some repo.rp_id;
                   state.workspace_activity_cursor <- 0;
+                  state.workspace_activity_context_scroll <- None;
                   launch_workspace_activity state ~mailbox:async_messages ~repo_id:repo.rp_id)
                   (List.nth_opt snapshot.rs_repositories state.repositories_cursor))
-       | Some ("esc" | "left") when state.view = Repositories && Option.is_some state.workspace_activity_repo ->
-           state.workspace_activity_repo <- None
-       | Some ("r" | "R") when state.view = Repositories && Option.is_some state.workspace_activity_repo ->
+       | Some ("v" | "V") when state.view = Repositories && not state.repository_changes_open && Option.is_some state.workspace_activity_repo && Option.is_none state.workspace_activity_context_scroll ->
+           let _, _, selected = workspace_activity_selection state in
+           if Option.is_some selected then state.workspace_activity_context_scroll <- Some 0
+       | Some ("esc" | "left") when state.view = Repositories && not state.repository_changes_open && Option.is_some state.workspace_activity_context_scroll ->
+           state.workspace_activity_context_scroll <- None
+       | Some ("j" | "down" | "k" | "up" | "pageup" | "pagedown" | "home" | "end" | "g" | "G" as move)
+         when state.view = Repositories && not state.repository_changes_open && Option.is_some state.workspace_activity_repo
+              && Option.is_some state.workspace_activity_context_scroll ->
+           let terminal_rows, cols = get_terminal_size () in
+           let count = List.length (workspace_activity_context_lines state ~cols) in
+           let height = workspace_activity_context_height state ~surface_rows:(surface_body_rows state ~terminal_rows) in
+           let maximum = max 0 (count - height) in
+           let old = match state.workspace_activity_context_scroll with Some scroll -> max 0 (min maximum scroll) | None -> 0 in
+           let next = match move with
+             | "home" | "g" -> 0 | "end" | "G" -> maximum
+             | "j" | "down" -> old + 1 | "k" | "up" -> old - 1
+             | "pageup" -> old - Masc_tui_scroll.page_step ~height
+             | _ -> old + Masc_tui_scroll.page_step ~height in
+           state.workspace_activity_context_scroll <- Some (max 0 (min maximum next))
+       | Some ("esc" | "left") when state.view = Repositories && not state.repository_changes_open && Option.is_some state.workspace_activity_repo ->
+           state.workspace_activity_repo <- None;
+           state.workspace_activity_context_scroll <- None
+       | Some ("r" | "R") when state.view = Repositories && not state.repository_changes_open && Option.is_some state.workspace_activity_repo ->
            Option.iter (fun repo_id -> launch_workspace_activity state ~mailbox:async_messages ~repo_id)
              state.workspace_activity_repo
        | Some ("j" | "down" | "k" | "up" | "pageup" | "pagedown" as move)
-         when state.view = Repositories && Option.is_some state.workspace_activity_repo ->
+         when state.view = Repositories && not state.repository_changes_open && Option.is_some state.workspace_activity_repo ->
            let terminal_rows, _ = get_terminal_size () in
            let page = workspace_activity_page_rows ~surface_rows:(surface_body_rows state ~terminal_rows) in
            let delta = match move with "j" | "down" -> 1 | "k" | "up" -> -1 | "pageup" -> -page | _ -> page in
            state.workspace_activity_cursor <- max 0 (min (List.length (workspace_activity_rows state) - 1)
-             (state.workspace_activity_cursor + delta))
+             (state.workspace_activity_cursor + delta));
+           state.workspace_activity_context_scroll <- None
        | Some ("\r" | "\n" | "right")
-         when state.view = Repositories && Option.is_some state.workspace_activity_repo ->
+         when state.view = Repositories && not state.repository_changes_open && Option.is_some state.workspace_activity_repo ->
            let _, _, selected = workspace_activity_selection state in
            (match state.workspace_activity_repo, selected with
             | Some repo_id, Some (change, relative_path) ->
@@ -21930,7 +21952,7 @@ and is loaded on demand through keeper_skill.
                 launch_code_entries_load state ~mailbox:async_messages;
                 launch_code_file_load state ~mailbox:async_messages ~path
             | None, _ | _, None -> ())
-       | Some key when state.view = Repositories && Option.is_some state.workspace_activity_repo
+       | Some key when state.view = Repositories && not state.repository_changes_open && Option.is_some state.workspace_activity_repo
            && not (List.mem key ["tab"; "shift-tab"; "\t"; "q"; "?"; ":"]) -> ()
        | Some ("v" | "V")
          when state.view = Config && state.config_pane = Config_runtime ->

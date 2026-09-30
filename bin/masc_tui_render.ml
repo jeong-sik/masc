@@ -10505,12 +10505,41 @@ let repository_context_lines ~width (repo : Masc.Tui_decode.repository) =
   @ wrap "Keepers" keepers
   @ failure
 
+type workspace_activity_column = Activity_date | Activity_keeper | Activity_task | Activity_result | Activity_path
+
+let workspace_activity_cells ~cols ~date ~keeper ~task ~result ~path =
+  let width = function
+    | Activity_date -> 16 | Activity_keeper -> 18 | Activity_task -> 16
+    | Activity_result -> String.length "RESULT" | Activity_path -> 8 in
+  let layout = Masc_tui_table.fit ~inner_width:(max 1 (framed_inner_width cols - 2))
+    ~width ~flex:Activity_path ~drop_order:[Activity_task; Activity_date; Activity_keeper]
+    [Activity_date; Activity_keeper; Activity_task; Activity_result; Activity_path] in
+  List.map (fun column ->
+    let header, value, fold = match column with
+      | Activity_date -> "DATE", date, Masc_tui_table.Fold_tail
+      | Activity_keeper -> "KEEPER", keeper, Masc_tui_table.Fold_middle
+      | Activity_task -> "TASK", task, Masc_tui_table.Fold_middle
+      | Activity_result -> "RESULT", result, Masc_tui_table.Fold_tail
+      | Activity_path -> "FILE", path, Masc_tui_table.Fold_middle in
+    Masc_tui_table.cell ~header ~fold
+      ~width:(if column = Activity_path then layout.flex_width else width column) value) layout.shown
+
 let render_workspace_activity (state : state) repo_id =
   let terminal_rows, cols = get_terminal_size () in
   let rows, cursor, selected = workspace_activity_selection state in
+  let title = match state.workspace_activity_context_scroll with
+    | None -> " MASC Workspace / Activity · " ^ Terminal_text.single_line repo_id
+    | Some requested ->
+        let count = List.length (workspace_activity_context_lines state ~cols) in
+        let height = workspace_activity_context_height state
+          ~surface_rows:(surface_body_rows state ~terminal_rows) in
+        let scroll = max 0 (min requested (max 0 (count - height))) in
+        " Context [" ^ Masc_tui_scroll.window_text ~scroll ~height count ^ "]" in
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"workspace-activity"
-    ~title:(screen_title (" MASC Workspace / Activity · " ^ Terminal_text.single_line repo_id))
-    ~hints:"j/k:select  PgUp/PgDn:page  Enter:file  r:refresh  Esc:repositories"
+    ~title:(screen_title title)
+    ~hints:(match state.workspace_activity_context_scroll with
+      | None -> "v:context  j/k:select  PgUp/PgDn:page  Enter:file  r:refresh  Esc:back"
+      | Some _ -> "j/k:scroll  PgUp/PgDn:page  Home/End:edges  Enter:file  r:refresh  Esc:list")
     ~body:(fun ~budget c ->
       let listing ~budget reading =
           let failures, omitted = List.fold_left (fun (failures, omitted) (_, result) ->
@@ -10526,7 +10555,8 @@ let render_workspace_activity (state : state) repo_id =
               Printf.sprintf "%s %d" (Terminal_text.single_line name)
                 (List.length (List.filter (fun ((change : Tui_decode.file_change), _) -> change.fc_keeper = name) rows))) names));
           c.push_styled ~style:(Theme.recede ()) "  Recorded clone writes from loaded Keepers · Enter opens file; H history, m notes in Code";
-          c.push "  DATE              KEEPER             TASK             FILE";
+          let cells = workspace_activity_cells ~cols in
+          c.push ("  " ^ Masc_tui_table.header_row (cells ~date:"" ~keeper:"" ~task:"" ~result:"" ~path:""));
           c.push_divider ();
           let room = max 1 (budget - 7) in
           let first = max 0 (cursor - room + 1) in
@@ -10536,35 +10566,44 @@ let render_workspace_activity (state : state) repo_id =
             | None -> if i = 0 && rows = [] then c.push "  No recorded clone writes in this window" else c.push_empty ()
             | Some (change, path) ->
                 let tm = Unix.localtime change.Tui_decode.fc_at in
-                let line = Printf.sprintf "  %04d-%02d-%02d %02d:%02d %-18s %-16s %s"
-                  (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday tm.Unix.tm_hour tm.Unix.tm_min
-                  (fit_width (Terminal_text.single_line change.fc_keeper) 18)
-                  (fit_width (Terminal_text.single_line (Option.value change.fc_task_id ~default:"unlinked")) 16)
-                  (Terminal_text.single_line path) in
+                let date = Printf.sprintf "%04d-%02d-%02d %02d:%02d"
+                  (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday tm.Unix.tm_hour tm.Unix.tm_min in
+                let task = match change.fc_task_id with None -> "unlinked" | Some id -> id in
+                let line = "  " ^ Masc_tui_table.row (cells ~date
+                  ~keeper:(Terminal_text.single_line change.fc_keeper)
+                  ~task:(Terminal_text.single_line task)
+                  ~result:(if change.fc_succeeded then "ok" else "failed")
+                  ~path:(Terminal_text.single_line path)) in
                 if first + i = cursor then c.push_selected line else c.push line
           done;
           c.push_divider ();
           c.push (match selected with
             | None -> "  Task and file links appear when a recorded change names them"
-            | Some (change, path) ->
-                "  " ^ Terminal_text.single_line path ^ " · " ^
-                (match change.fc_task_id with
-                 | None -> "No Task recorded"
-                 | Some id ->
-                     match List.find_opt (fun (t : Tui_decode.task) -> t.id = id) state.tasks with
-                     | None -> "Task " ^ Terminal_text.single_line id
-                     | Some task -> Terminal_text.single_line (task.id ^ " · " ^ task.title)))
+            | Some (_, path) ->
+                "  v:context · " ^ Message_layout.fit_middle
+                  (max 1 (framed_inner_width cols - Message_layout.display_width "  v:context · "))
+                  (Terminal_text.single_line path))
       in
+      let show ~budget reading = match state.workspace_activity_context_scroll with
+        | None -> listing ~budget reading
+        | Some requested ->
+            let lines = workspace_activity_context_lines state ~cols in
+            let scroll = max 0 (min requested (max 0 (List.length lines - budget))) in
+            let window = Rows.of_list ~first:scroll ~height:budget lines in
+            for index = 0 to budget - 1 do
+              match Rows.at window (scroll + index) with
+              | None -> c.push_empty () | Some line -> c.push line
+            done in
       match Masc_tui_fetched.view_for ~equal:String.equal state.workspace_activity ~key:repo_id with
       | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading -> c.push "  Reading recorded file changes..."
       | Masc_tui_fetched.Failed message -> c.push_styled ~style:(Theme.bad ()) ("  " ^ Terminal_text.single_line message)
-      | Masc_tui_fetched.Ready reading -> listing ~budget reading
+      | Masc_tui_fetched.Ready reading -> show ~budget reading
       (* The changes already read stay, with the failed refresh above them so
          they read as the last good reading rather than a fresh one. *)
       | Masc_tui_fetched.Stale (reading, message) ->
           c.push_styled ~style:(Theme.bad ())
             ("  Refresh failed, showing the last read: " ^ Terminal_text.single_line message);
-          listing ~budget:(budget - 1) reading)
+          show ~budget:(max 1 (budget - 1)) reading)
 
 let render_repository_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in

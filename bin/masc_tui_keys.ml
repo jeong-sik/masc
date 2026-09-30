@@ -1775,6 +1775,16 @@ let help_sections ?current () =
           ; ("Param marks", Masc_tui_config_mark.param_legend)
           ])
 
+let workspace_activity_bindings ~context =
+  [ b Navigate "j/k" (if context then "scroll" else "select")
+  ; b Navigate "PgUp/PgDn" "page"
+  ; b Act "Enter / Right" "file" ~help:"open the selected recorded file in Code"
+  ; b Act "r / R" "refresh"
+  ; b Navigate "Esc / Left" (if context then "list" else "repositories")
+  ; b Navigate "?" "help"
+  ] @ (if context then [b Navigate "Home/End / g/G" "edges"]
+       else [b Navigate "v / V" "context" ~help:"read the selected record's full path, Task and execution metadata"])
+
 let help_sections_for_state (state : state) =
   let active =
     if state.patch_modal_open then Some ("Patch review", patch_review_bindings)
@@ -1787,6 +1797,11 @@ let help_sections_for_state (state : state) =
       Some ("Keeper voices", bindings)
     else if state.view = Runtime && Option.is_some state.runtime_detail_target then
       Some ("Runtime detail", runtime_detail_bindings)
+    else if state.view = Repositories && not state.repository_changes_open
+            && Option.is_some state.workspace_activity_repo then
+      let context = Option.is_some state.workspace_activity_context_scroll in
+      Some ((if context then "Activity context" else "Workspace Activity"),
+            workspace_activity_bindings ~context)
     else None
   in
   match active with

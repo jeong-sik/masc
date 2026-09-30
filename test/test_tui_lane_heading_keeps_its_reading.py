@@ -105,7 +105,7 @@ def run_unapplied_installations(executable: str) -> None:
     def interact(process, fd, _slave, output, _base_path):
         h.wait_for_output(process, fd, output, b"Health: ", start=0, timeout=10)
         h.palette_go(process, fd, output, b"go lanes", b"MASC Lanes")
-        h.send_and_wait(process, fd, output, b"A", b"Recorded observations")
+        h.send_and_wait(process, fd, output, b"A", b"Lane Add-ons \xc2\xb7 2 declared")
         frame = h.send_and_wait(process, fd, output, b"\x1b", b"2 declared")
         reading = b"Lane Add-ons: 2 declared \xc2\xb7 0 active \xc2\xb7 2 config issues"
         if reading not in h.screen_text(frame):

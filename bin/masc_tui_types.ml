@@ -5225,8 +5225,8 @@ module Verification_evidence_read = struct
     | Launch_failure of string
 end
 
-(* Home links identify destinations, never an inferred approval target. The
-   approval/agenda screens still own the exact request and its decision. *)
+(* Home carries authoritative request identity; existing detail readers own
+   each explicit decision. *)
 type home_request =
   | Home_held_call of { keeper : string; call_id : string }
   | Home_gate_request of string
@@ -5254,6 +5254,13 @@ type home_chat_receipt =
   | Session_chat of { keeper : Keeper_id.Keeper_name.t; save_error : string }
   | Unconfirmed_chat of { keeper : Keeper_id.Keeper_name.t; detail : string }
   | Unreadable_chat_receipt of string
+
+type message_draft = {
+  draft_text : string;
+  draft_attachments : Masc_tui_keeper_chat_projection.attachment list;
+  draft_references : Masc_tui_keeper_chat_projection.image_reference list;
+  draft_attachments_since : msg_anchor option;
+}
 
 type state = {
   mutable home_selected : home_action option;
@@ -5704,6 +5711,9 @@ type state = {
   mutable events: event list;
   mutable keepers: keeper list;
   mutable keepers_error: string option;
+  (* A refused creation remains editable, including malformed JSON. The
+     editor owns a temporary file, so the declaration must survive here. *)
+  mutable keeper_creation_draft: string option;
   (* The live roster reading, separate from the durable one above: it answers
      whether a keepalive fiber is running each keeper, which metadata on disk
      cannot. It is typed rather than a plain list because "the roster did not
@@ -6473,7 +6483,9 @@ type state = {
   mutable msg_attachments_since: msg_anchor option;
   mutable msg_target_keeper_name: string option;
   mutable msg_return: keeper_chat_return;
-  mutable msg_drafts: (string * string) list;
+  (* The entire unsent payload belongs to its Keeper, including image-only
+     drafts. Restoring another target cannot inherit its staged media. *)
+  mutable msg_drafts: (string * message_draft) list;
   mutable msg_history: msg_entry list;
   (* How far back the arrows have walked through what this pane sent, and the
      draft they set aside to do it. [None] means the composer holds the
@@ -8062,6 +8074,7 @@ let create_state
   events = [];
   keepers = [];
   keepers_error = None;
+  keeper_creation_draft = None;
   keeper_roster = Masc_tui_keeper_control.Roster_unobserved;
   keeper_roster_error = None;
   keeper_action_inflight = None;

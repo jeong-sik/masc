@@ -1006,9 +1006,17 @@ let save_message_draft state =
           state.msg_drafts
       in
       let text = Buffer.contents state.msg_input in
+      let draft =
+        { draft_text = text
+        ; draft_attachments = state.msg_attachments
+        ; draft_references = state.msg_references
+        ; draft_attachments_since = state.msg_attachments_since
+        }
+      in
       state.msg_drafts <-
-        if String.equal text "" then other_drafts
-        else (keeper_name, text) :: other_drafts
+        if String.equal text "" && draft.draft_attachments = []
+           && draft.draft_references = [] then other_drafts
+        else (keeper_name, draft) :: other_drafts
 
 let recovered_paste_send_locked_for state keeper_name =
   match keeper_name with
@@ -1283,8 +1291,16 @@ let open_message_for_keeper ?(return_to = Keeper_chat_return_detail)
   state.msg_return <- return_to;
   state.keeper_message_focus <- Right_pane;
   Buffer.clear state.msg_input;
-  List.assoc_opt keeper_name state.msg_drafts
-  |> Option.iter (Buffer.add_string state.msg_input);
+  (match List.assoc_opt keeper_name state.msg_drafts with
+   | None ->
+       state.msg_attachments <- [];
+       state.msg_references <- [];
+       state.msg_attachments_since <- None
+   | Some draft ->
+       Buffer.add_string state.msg_input draft.draft_text;
+       state.msg_attachments <- draft.draft_attachments;
+       state.msg_references <- draft.draft_references;
+       state.msg_attachments_since <- draft.draft_attachments_since);
   drain_queue ()
 
 (* Leaving puts the draft away, and a line held only for that compose
@@ -1319,15 +1335,18 @@ let clear_current_message_draft state =
 let consume_dispatched_message_draft state request =
   state.msg_drafts <-
     List.filter
-      (fun (keeper_name, text) ->
+      (fun (keeper_name, draft) ->
         not
           (String.equal keeper_name request.Keeper_chat.keeper_name
-           && String.equal text request.message))
+           && String.equal draft.draft_text request.message
+           && draft.draft_attachments = request.attachments
+           && draft.draft_references = request.references))
       state.msg_drafts;
   match state.msg_target_keeper_name with
   | Some keeper_name
     when String.equal keeper_name request.Keeper_chat.keeper_name
          && String.equal (Buffer.contents state.msg_input) request.message
+         && state.msg_attachments = [] && state.msg_references = []
          && not (recovered_paste_send_locked state) ->
       clear_current_message_draft state
   | Some _ | None -> save_message_draft state
@@ -18881,7 +18900,7 @@ and is loaded on demand through keeper_skill.
           state.keeper_sandbox_view_error <- None;
           launch_keeper_sandbox_view state ~mailbox:async_messages keeper.k_name)
   in
-  let handle_keeper_create () =
+  let handle_keeper_create ?(return_to = Keeper_chat_return_list) () =
     match Masc_tui_editor.editor_command () with
     | None ->
       report_action state "error" "no $EDITOR set; export EDITOR to create a keeper here"
@@ -18891,31 +18910,73 @@ and is loaded on demand through keeper_skill.
          is what went wrong: this form carried two fields across the whole
          time [sandbox_profile] was required, and every keeper made through
          it came back 400. *)
-      let stem = Masc.Keeper_turn_up_args.creation_stem in
+      let stem =
+        match state.keeper_creation_draft with
+        | Some declaration -> declaration
+        | None -> Masc.Keeper_turn_up_args.creation_stem
+      in
       match
         Masc_tui_editor.roundtrip ~restore:restore_terminal
           ~reenter:reenter_terminal stem
       with
       | Error abort -> report_editor_abort state ~action:"create" abort
       | Ok declaration -> (
+        state.keeper_creation_draft <- Some declaration;
+        let refuse detail =
+          goto_surface state ~mailbox:async_messages (Keepers Keeper_list);
+          report_action state "error"
+            (detail ^ " · press a to edit the retained declaration")
+        in
         let declared_name =
           match Yojson.Safe.from_string declaration with
+          | exception Yojson.Json_error detail ->
+              Error ("Keeper declaration is not JSON: " ^ detail)
           | `Assoc fields -> (
             match List.assoc_opt "name" fields with
-            | Some (`String value) -> String.trim value
-            | _ -> "")
-          | _ -> ""
+            | Some (`String value) ->
+                Keeper_id.Keeper_name.of_string (String.trim value)
+                |> Result.map Keeper_id.Keeper_name.to_string
+            | Some _ | None -> Error "declaration needs a non-empty name string")
+          | _ -> Error "Keeper declaration must be a JSON object"
         in
-        if String.length declared_name = 0 then
-          report_action state "error"
-            "declaration needs a non-empty \"name\" string; nothing was created"
-        else
-          match
+        match declared_name with
+        | Error detail -> refuse detail
+        | Ok declared_name ->
+          (match
             Masc_tui_http.post_keeper_up ~host ~port ~keeper_name:declared_name
               ~declaration_json:declaration
           with
-          | Ok _ -> report_action state "system" (declared_name ^ ": keeper created")
-          | Error detail -> report_action state "error" detail))
+          | Error detail -> refuse detail
+          | Ok receipt ->
+            (* This is the lifecycle route's typed JSON boundary. A 200
+               alone cannot bind the composer to the submitted Keeper. *)
+            let member key =
+              match receipt with
+              | `Assoc fields -> List.assoc_opt key fields
+              | _ -> None
+            in
+            (match
+               member "ok", member "action", member "name"
+             with
+             | Some (`Bool true), Some (`String "up"), Some (`String name)
+               when String.equal name declared_name ->
+                 state.keeper_creation_draft <- None;
+                 load_local_workspace_if_safe state base_path;
+                 open_message_for_keeper ~return_to
+                   state declared_name ~drain_queue:(fun () -> ());
+                 set_msg_scroll state 0;
+                 state.view <- Keepers Keeper_message;
+                 launch_keeper_history_load state ~mailbox:async_messages
+                   ~keeper_name:declared_name;
+                 start_http_refresh state ~host ~port ~intent:Revalidate
+                   ~refresh_inflight:http_refresh_inflight
+                   ~scoped_refresh_inflight:http_scoped_refresh_inflight
+                   ~scoped_refresh_followup ~mailbox:async_messages;
+                 report_action state "system"
+                   (declared_name ^ ": declaration accepted · write the first request")
+             | _ ->
+                 refuse
+                   "Creation response did not confirm this Keeper; inspect the roster before retrying"))))
   in
   (* Same shape as [handle_keeper_create]: several fields at once go through
      $EDITOR rather than a modal the TUI does not otherwise have. The stem
@@ -22918,7 +22979,7 @@ and is loaded on demand through keeper_skill.
                 state.view <- Keepers Keeper_message
             | Home_choose_keeper ->
                 goto_surface state ~mailbox:async_messages (Keepers Keeper_list)
-            | Home_create_keeper -> handle_keeper_create ()))
+            | Home_create_keeper -> handle_keeper_create ~return_to:Keeper_chat_return_home ()))
         | Some ("m" | "M") when state.view = Overview ->
             goto_surface state ~mailbox:async_messages Metrics
         | Some ("p" | "P") when state.view = Metrics ->

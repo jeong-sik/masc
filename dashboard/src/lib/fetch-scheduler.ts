@@ -54,6 +54,29 @@ export class FetchScheduler {
   }
 
   /**
+   * Request an immediate refresh and wait until the latest data is reflected.
+   * When a fetch is already in flight, sets the urgent flag and waits for the
+   * follow-up fetch triggered by drainPending(). Returns a promise that
+   * resolves only after the urgent follow-up (if any) has completed.
+   */
+  async requestNowAndWait(): Promise<void> {
+    if (!this.inflight) {
+      // No inflight — requestNow starts a fetch immediately.
+      this.requestNow()
+      if (this.inflight) await this.inflight
+      return
+    }
+    // Inflight exists — requestNow sets urgent flag; wait for current fetch,
+    // then wait for the follow-up triggered by drainPending.
+    const current = this.inflight
+    await current
+    // drainPending may have started a new fetch; if so, wait for it.
+    if (this.inflight && this.inflight !== current) {
+      await this.inflight
+    }
+  }
+
+  /**
    * Request an immediate refresh. Skips debounce window, but still
    * deduplicates with any inflight request — sets urgent dirty flag
    * so a re-fetch fires as soon as the current one completes.

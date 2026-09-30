@@ -47,8 +47,14 @@ def fixtures():
     return result
 
 
+def completed(output):
+    end = output.rfind(h.FRAME_END)
+    assert end >= 0, 'No completed redraw'
+    return bytes(output[:end + len(h.FRAME_END)])
+
+
 def window(output, columns):
-    rows = h.screen_rows(bytes(output))
+    rows = h.screen_rows(completed(output))
     counter_row, match = next((row, WINDOW.search(text.decode('utf-8')))
         for row, text in sorted(rows.items()) if WINDOW.search(text.decode('utf-8')))
     first, last, total = map(int, match.groups())
@@ -67,8 +73,12 @@ def run(binary, columns, no_color):
         h.tab_until(process, fd, output, b'MASC System')
         h.send_and_wait(process, fd, output, b't', b'MASC System / Tools')
         h.send_and_wait(process, fd, output, b'p' * 3, b'1 of 2 catalog Skills observed')
+        h.read_available(fd, output)
+        start = len(output)
         h.resize_and_wait(process, fd, output, rows=18, columns=columns,
                           needle=b'[rows 1-', controls=(h.FULL_REDRAW,))
+        h.wait_for_output(process, fd, output, h.FRAME_END,
+                          start=h.end_of_needle(output, b'[rows 1-', start), timeout=3)
         collected = {}
         while True:
             first, last, total, body = window(output, columns)

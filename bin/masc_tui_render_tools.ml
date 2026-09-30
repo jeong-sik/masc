@@ -370,6 +370,33 @@ let skill_usage_box ~cols rows =
     @ [border Ansi.box_bl Ansi.box_br; Ansi.dim, ""]
 ;;
 
+let tools_selection_line ~cols state =
+  let text = match selected_tools_skill_profile state with
+    | None -> "Skill: none"
+    | Some profile ->
+        let prefix = Printf.sprintf "Skill %d/%d: " (state.tools_skill_cursor + 1)
+            (List.length (tools_skill_profiles state)) in
+        prefix ^ Masc_tui_message_layout.fit_middle
+          (max 1 (Masc_tui_frame.inner_width ~cols
+                  - Masc_tui_message_layout.display_width prefix))
+          (Terminal_text.single_line profile.esp_name)
+  in
+  text
+
+let tools_selection_document state =
+  match selected_tools_skill_profile state with
+  | None -> [Ansi.dim, "Action Skill: none"]
+  | Some profile ->
+      let reference = profile.esp_reference in
+      [ Ansi.bold, "Action Skill: " ^ Terminal_text.single_line profile.esp_name
+      ; Ansi.dim, "Source: " ^ Terminal_text.single_line
+          (Skill_reference.identity_source_id_to_string reference.identity)
+      ; Ansi.dim, "Package: " ^ Terminal_text.single_line
+          (Skill_reference.identity_package_id_to_string reference.identity)
+      ; Ansi.dim, "Revision: " ^ Terminal_text.single_line
+          (Skill_reference.content_revision_to_string reference.content_revision)
+      ]
+
 let tools_display_lines ?(cols = 80) (state : state) =
   let registered_tools =
     match state.tools_inventory with
@@ -633,31 +660,31 @@ let tools_display_lines ?(cols = 80) (state : state) =
             in
             (match state.tools_skill_evidence with
              | Some (observed_key, json) when String.equal key observed_key ->
-              (match Tui_decode.decode_skill_evidence json with
+              (match Masc.Tui_decode_skill_evidence.decode_skill_evidence json with
                | Error _ ->
                  [ Theme.bad (), "     Retained evidence response is malformed" ]
                | Ok evidence ->
                let evidence_lines =
-                 match evidence.Masc.Tui_decode.se_status with
-                 | Masc.Tui_decode.Skill_evidence_not_observed_in_retained_coverage ->
+                 match evidence.Masc.Tui_decode_skill_evidence.se_status with
+                 | Masc.Tui_decode_skill_evidence.Skill_evidence_not_observed_in_retained_coverage ->
                   [ Theme.warn (),
                     "     Retained evidence: not found in retained coverage (not proof of never)"
                   ]
-                 | Masc.Tui_decode.Skill_evidence_observed ->
+                 | Masc.Tui_decode_skill_evidence.Skill_evidence_observed ->
                   let activation_lines =
                     let items, tied =
                       match evidence.se_activation with
                       | None -> [], false
-                      | Some (Masc.Tui_decode.Skill_evidence_most_recent_observed item) ->
+                      | Some (Masc.Tui_decode_skill_evidence.Skill_evidence_most_recent_observed item) ->
                         [ item ], false
                       | Some
-                          (Masc.Tui_decode.Skill_evidence_most_recent_observed_timestamp_tie
+                          (Masc.Tui_decode_skill_evidence.Skill_evidence_most_recent_observed_timestamp_tie
                              items) ->
                         items, true
                     in
                     List.concat_map
                       (fun item ->
-                         let activation = item.Masc.Tui_decode.sea_activation in
+                         let activation = item.Masc.Tui_decode_skill_evidence.sea_activation in
                          let string_field name =
                            match json_assoc_member_opt name activation with
                            | Some (`String value) -> value
@@ -675,7 +702,7 @@ let tools_display_lines ?(cols = 80) (state : state) =
                          in
                          let keepers =
                            item.sea_owner_claims
-                           |> List.map (fun claim -> claim.seo_keeper)
+                           |> List.map (fun claim -> claim.Masc.Tui_decode_skill_evidence.seo_keeper)
                            |> String.concat ","
                          in
                          [ Ansi.bold,
@@ -754,12 +781,12 @@ let tools_display_lines ?(cols = 80) (state : state) =
                   activation_lines @ composition_lines
                in
                let coverage_lines =
-                 let coverage = evidence.Masc.Tui_decode.se_coverage in
+                 let coverage = evidence.Masc.Tui_decode_skill_evidence.se_coverage in
                  let composition_scope =
                    match coverage.sec_composition_scope with
-                   | Masc.Tui_decode.Skill_evidence_exact_reference_latest_completed ->
+                   | Masc.Tui_decode_skill_evidence.Skill_evidence_exact_reference_latest_completed ->
                      "latest_completed"
-                   | Masc.Tui_decode.Skill_evidence_composition_unavailable ->
+                   | Masc.Tui_decode_skill_evidence.Skill_evidence_composition_unavailable ->
                      "unavailable"
                  in
                  let unavailable =
@@ -1497,7 +1524,7 @@ let tools_display_lines ?(cols = 80) (state : state) =
     | Some detail -> [Theme.bad (), "Tools read failed: " ^ Terminal_text.single_line detail]
   in
   let width = max 1 (Masc_tui_frame.inner_width ~cols) in
-  error_lines @ explanation @ pane_lines
+  tools_selection_document state @ error_lines @ explanation @ pane_lines
   |> List.concat_map (fun (style, text) ->
        (* Fitted tables and usage cards already own their alignment. Only
           overlong rows need physical wrapping; never render metadata as

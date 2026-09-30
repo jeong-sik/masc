@@ -685,6 +685,8 @@ type exact_lane = Standalone_lane.t =
   | Browser_stagehand
       (** Answers the Stagehand extension's [llm.generate] for the browser
           lane (RFC-browser-lane-stagehand §3.7). *)
+  | Candle_appraiser
+      (** Appraises the grade, Task relations and Keeper contribution weights of a confirmed Candle payout. *)
 
 val verifier_runtime_admission : t -> (unit, string) result
 (** The one answer to "can this runtime judge a completion review?", used by
@@ -1287,8 +1289,7 @@ val set_exact_output_lane_slots :
     that table is read. A lane the file declares other than as its own table
     (inline, or through dotted keys) is refused rather than declared twice, and
     so is a slot the lane already declares as a CLI slot, and a binding whose
-    provider is an official client, which can only be a CLI slot — on
-    [Workspace_curator], which walks no CLI tail, no list at all. An empty
+    provider is an official client, which can only be a CLI slot. An empty
     [slots] is this writer's own floor: it names the whole catalog order.
     Taking the last catalog slot off a lane that keeps a CLI slot is
     {!drop_exact_output_lane_slot}. *)
@@ -1305,9 +1306,8 @@ val append_exact_output_lane_slot :
     {!set_exact_output_lane_slots}. A binding whose provider is an official
     client (Codex app-server, Antigravity CLI, Claude Code) goes to
     [cli_slots]; every other id goes to [slots], where the registry admits or
-    reports it when it publishes the lane. An official client is refused on
-    [Workspace_curator]: that lane walks no CLI tail, and its runs refuse a
-    lane declaring one. A lane table this creates for a CLI slot declares
+    reports it when it publishes the lane. A lane table this creates for a CLI
+    slot declares
     [cli_slots] alone; the parser reads an absent [slots] as empty. Declared
     slots
     the exact-output registry did not admit stay in place. Refused, by name,

@@ -35,10 +35,7 @@ let every_surface =
    Named together the way the [ / ] table below is, so the next surface that
    arrives with a cursor and nothing to open has to be a decision. *)
 let enter_atom_count_exceptions =
-  [ (* A summary with no row cursor: Work owns the task list and Keepers the
-       roster (RFC-tui-measured-operator-home), so nothing on it is opened. *)
-    "Dashboard", 0
-  ; (* Charts, not a list: [j/k] scrolls. *)
+  [ (* Charts, not a list: [j/k] scrolls. *)
     "Usage", 0
   ; (* A detail screen. Its tabs carry their own keys. *)
     "Keeper detail", 0
@@ -983,15 +980,15 @@ let test_fusion_historical_evidence_is_a_selectable_board_reference () =
                   "title", `String "Original conclusion"; "created_at", `Float 10.]
         ]
     ] in
-  (match Tui_decode.decode_fusion_snapshot response with
+  (match Masc.Tui_decode_fusion.decode_fusion_snapshot response with
    | Error detail -> Alcotest.fail detail
    | Ok snapshot -> answer_fusion_runs state snapshot);
   check Alcotest.int "history remains in the selectable list with no retained runs"
     1 (List.length (fusion_list_entries state));
   (match selected_fusion_entry state with
-   | Some (Tui_decode.Fusion_historical_evidence evidence) ->
+   | Some (Masc.Tui_decode_fusion.Fusion_historical_evidence evidence) ->
        check str "selection retains original Board identity" "original-post" evidence.fhe_post_id
-   | Some (Tui_decode.Fusion_retained_run _) | None ->
+   | Some (Masc.Tui_decode_fusion.Fusion_retained_run _) | None ->
        Alcotest.fail "historical evidence disappeared or became an invented run");
   check Alcotest.int "historical evidence does not inflate Keeper run count"
     0 (List.length (selected_keeper_runs state))
@@ -1012,7 +1009,7 @@ let test_keeper_runs_selection_survives_a_shorter_list () =
     ]
   in
   let load runs =
-    match Tui_decode.decode_fusion_snapshot (`Assoc
+    match Masc.Tui_decode_fusion.decode_fusion_snapshot (`Assoc
       [ "generated_at", `String "2026-09-07T00:00:00Z"
       ; "replay", `Assoc ["status", `String "not_replayed"]
       ; "historical_evidence", `List []
@@ -1021,7 +1018,7 @@ let test_keeper_runs_selection_survives_a_shorter_list () =
     | Error detail -> Alcotest.fail detail
   in
   let selected () =
-    Option.map (fun (index, run) -> index, run.Tui_decode.fur_run_id)
+    Option.map (fun (index, run) -> index, run.Masc.Tui_decode_fusion.fur_run_id)
       (selected_keeper_run state)
   in
   state.keepers <- [keeper "alpha"; keeper "beta"];
@@ -1059,17 +1056,14 @@ let test_lanes_run_detail_footer_names_its_keys_alone () =
     "j/k:compare  PgUp/PgDn:page  Left / Esc:back  r:refresh  Tab:next  q:quit"
     Masc_tui_keys.footer_hints_lanes_run_detail
 
-(* Dashboard is a summary: Work owns the task list, so the footer offers no
-   task focus, no row movement and nothing to open, only the way to Usage and
-   the keys every listing shares. Work's task list draws its own row from the
-   table rather than from a string in the renderer. *)
+(* Dashboard selects destinations; Work owns task selection and detail. *)
 let test_dashboard_and_work_task_footers () =
   let items hints =
     String.split_on_char ' ' hints |> List.filter (fun item -> item <> "")
   in
   let dashboard = Masc_tui_keys.footer_hints Overview in
-  check str "Dashboard names Usage and the shared keys"
-    "m:Usage  r:refresh  Tab:next  q:quit" dashboard;
+  check str "Dashboard names destination keys and the shared keys"
+    "j/k:choose  Enter:open  p:requests  ;:agenda  m:Usage  r:refresh  Tab:next  q:quit" dashboard;
   List.iter
     (fun item ->
       Alcotest.(check bool) ("Dashboard offers no task key " ^ item) false
@@ -2741,7 +2735,6 @@ let planning_goal_row id title =
   { pg_id = id
   ; pg_criterion_revision = None
   ; pg_title = title
-  ; pg_owner = Goal_store.Unknown_owner
   ; pg_phase = Goal_phase.Executing
   ; pg_priority = 1
   ; pg_due_date = None

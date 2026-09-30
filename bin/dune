@@ -745,7 +745,8 @@
   masc.runtime
   masc.runtime_toml_namespace
   masc.toml_line_editor
-  masc.voice_config))
+  masc.voice_config
+  unix))
 
 (library
  (name masc_tui_theme_catalog)
@@ -1354,7 +1355,7 @@
  (name masc_tui_types)
  (wrapped false)
  (modules masc_tui_types)
- (libraries masc_tui_config masc_tui_account_login digestif mtime.clock.os masc_tui_command masc_tui_play_card masc_tui_pick_list masc_tui_esc_interrupt masc_tui_planning_detail
+ (libraries masc.keeper_registry masc_tui_config masc_tui_account_login digestif mtime.clock.os masc_tui_command masc_tui_play_card masc_tui_pick_list masc_tui_esc_interrupt masc_tui_planning_detail
   ;; [threshold_cols] is the width two panes need: the Board read layout is
   ;; decided here so the footer and the frame cannot disagree about it.
   masc_tui_roster_pane
@@ -1440,6 +1441,13 @@
  (wrapped false)
  (modules masc_tui_approvals_model)
  (libraries masc_tui_types masc_tui_operator_projection masc_tui_ask_projection masc))
+
+(library
+ (name masc_tui_home_model)
+ (wrapped false)
+ (modules masc_tui_home_model)
+ (libraries masc_tui_types masc_tui_approvals_model masc_tui_ansi masc_tui_agenda
+  masc_tui_message_layout masc_tui_config masc.keeper_registry masc))
 
 (library
  (name masc_tui_surface_navigation)
@@ -1755,7 +1763,7 @@
   masc_tui_http)
  (public_name masc-tui)
  (package masc)
- (libraries masc_tui_approvals_model masc_tui_surface_navigation
+ (libraries masc_tui_home_model masc_tui_approvals_model masc_tui_surface_navigation
   masc_tui_account_login
   masc_tui_play_card
   masc_tui_sgr_text

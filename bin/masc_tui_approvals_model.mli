@@ -40,3 +40,8 @@ val approvals_count_label : Masc_tui_types.state -> string
 val approval_list_note : name:string -> approval_list_reading -> string
 val approvals_title_notes : approvals_reading -> string
 val approvals_empty_queue : approvals_reading -> approvals_empty_queue
+
+val list_is_read : approval_list_reading -> bool
+val approval_row_lists : approvals_reading -> (string * approval_list_reading) list
+val approval_item_needs_person : approval_row -> bool
+val approvals_human_pending : Masc_tui_types.state -> int

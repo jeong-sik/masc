@@ -135,6 +135,64 @@ let test_a_forget_during_the_decode_is_not_undone () =
   check int "and keeps its value" 2 !runs
 ;;
 
+(* A whole-second modification time that [Unix.utimes] puts back exactly. *)
+let pinned_mtime = 1_700_000_000.0
+let pin_mtime path mtime = Unix.utimes path mtime mtime
+
+(* The same forget with a real write behind it: the file is rewritten in
+   place at the same size and its modification time put back, so only the
+   forget shows the write. The read after it returns what the file holds. *)
+let test_a_write_seen_only_through_forget_is_read () =
+  with_file
+  @@ fun path ->
+  write path "one";
+  pin_mtime path pinned_mtime;
+  let cache = File_version_cache.create () in
+  let runs = ref 0 in
+  let decode () =
+    incr runs;
+    let seen = read path in
+    if !runs = 1
+    then begin
+      write path "two";
+      pin_mtime path pinned_mtime;
+      File_version_cache.forget cache path
+    end;
+    Ok seen
+  in
+  check string "the first read returns what it decoded" "one" (load cache path ~decode);
+  check string "the next read returns the rewritten file" "two" (load cache path ~decode)
+;;
+
+(* A writer that never forgets rewrites the file under a new modification
+   time. The next decode reads that, but a forget of another file lands while
+   it runs, so its value is not kept. The file then goes back to its first
+   version with other bytes. The entry kept for that first version must be
+   gone by then, or it answers for the new bytes. *)
+let test_a_declined_keep_drops_an_entry_for_another_version () =
+  with_file
+  @@ fun path ->
+  write path "one";
+  pin_mtime path pinned_mtime;
+  let cache = File_version_cache.create () in
+  let runs = ref 0 in
+  let decode () =
+    incr runs;
+    let seen = read path in
+    if !runs = 2 then File_version_cache.forget cache (path ^ ".other");
+    Ok seen
+  in
+  check string "the first version is kept" "one" (load cache path ~decode);
+  write path "two";
+  pin_mtime path (pinned_mtime +. 1.0);
+  check string "the rewrite is read" "two" (load cache path ~decode);
+  write path "six";
+  pin_mtime path pinned_mtime;
+  check string "the first version with other bytes is read, not answered from the entry"
+    "six" (load cache path ~decode);
+  check int "decoded three times" 3 !runs
+;;
+
 let test_an_error_is_not_kept () =
   with_file
   @@ fun path ->
@@ -182,6 +240,10 @@ let () =
             test_a_forgotten_file_is_decoded_again
         ; test_case "a write during the decode is not kept" `Quick
             test_a_write_during_the_decode_is_not_kept
+        ; test_case "a write seen only through forget is read" `Quick
+            test_a_write_seen_only_through_forget_is_read
+        ; test_case "a declined keep drops an entry for another version" `Quick
+            test_a_declined_keep_drops_an_entry_for_another_version
         ; test_case "a forget during the decode is not undone" `Quick
             test_a_forget_during_the_decode_is_not_undone
         ; test_case "an error is not kept" `Quick test_an_error_is_not_kept

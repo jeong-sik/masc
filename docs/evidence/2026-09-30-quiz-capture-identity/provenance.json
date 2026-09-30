@@ -1,0 +1,49 @@
+{
+  "scope": "Python questioner/grader over real stdio; synthetic two-source inputs; no Docker/native host/Keeper/installation",
+  "checked_at": "2026-09-30T01:40:11.262794+00:00",
+  "original_source_base": "2eb083ee7f209ccf0f20b51749bdace09ded3af1",
+  "first_repair_candidate": "5d1c20d90bd1bd28f6aecdcc3a35c709cd61c631",
+  "python": "Python 3.14.4",
+  "quiz_tests": {
+    "command": [
+      "python3",
+      "-B",
+      "addons/tests/test_quiz_lane.py"
+    ],
+    "tests": 27,
+    "exit_code": 0
+  },
+  "negative_controls": {
+    "original_grader": {
+      "tests": [
+        "Grader.test_rotating_bytes_with_the_same_incarnation_refuses_then_recovers",
+        "Grader.test_equal_fact_ids_from_another_source_do_not_answer_this_question",
+        "Grader.test_question_without_immutable_snapshot_digest_is_not_observed"
+      ],
+      "exit_code": 1,
+      "failures": 3
+    },
+    "original_questioner_and_grader": {
+      "tests": [
+        "Grader.test_an_answerer_can_grade_a_new_capture_without_rewriting_the_old_grade"
+      ],
+      "exit_code": 1,
+      "failures": 1
+    }
+  },
+  "shared_protocol": {
+    "script": "import importlib.util, unittest\nspec=importlib.util.spec_from_file_location(\"packages\", \"addons/tests/test_packages.py\")\nmodule=importlib.util.module_from_spec(spec); spec.loader.exec_module(module)\ndef flatten(suite):\n    for item in suite:\n        if isinstance(item, unittest.TestSuite): yield from flatten(item)\n        else: yield item\ntests=[t for t in flatten(unittest.defaultTestLoader.loadTestsFromModule(module)) if t._testMethodName != \"test_served_html_is_used_without_extra_network_access\"]\nassert len(tests)==13\nresult=unittest.TextTestRunner().run(unittest.TestSuite(tests))\nraise SystemExit(0 if result.wasSuccessful() else 1)\n",
+    "tests": 13,
+    "exit_code": 0,
+    "excluded_test": "test_served_html_is_used_without_extra_network_access",
+    "reason": "The full 14-case run reached 13 passing tests; this case failed binding 127.0.0.1 with PermissionError in the restricted environment. No bypass or retry of that case."
+  },
+  "source_sha256": {
+    "addons/quiz-grader/server.py": "fed6ac73ae511f6f11f4e79ae4d90abd260a563a294da57ed1a11c70b5083abf",
+    "addons/quiz-grader/lane.toml": "eea5dd6d1374877548a54568c0238242312efffd6767ccec69f8ddd535f8a3c1",
+    "addons/quiz-questions/server.py": "00f2c1075a16fb5c1dc947f828eab7b4c30ab25788de32596e8ef8b86a689083",
+    "addons/quiz-questions/lane.toml": "ed5a2fa26cfd8d80d7caab1994009e327e0d2a5f9562620f40ce8f1ab80ad588",
+    "addons/protocol.py": "694108235985e142c8b0885a34d5d6355b56e9ac2eec9fb9b2bcd44642549362",
+    "addons/tests/test_quiz_lane.py": "8a7c6bbf668001a139705887a94a25dab59ac45074b57b6b4e85fb3774bc33ea"
+  }
+}

@@ -231,6 +231,7 @@ type stream_event =
   | Dynamic_tool_finished of { call_id : string }
   | Native_tool_started of Runtime_native_tools.observation
   | Native_tool_finished of Runtime_native_tools.observation
+  | Compaction_observed
   | Elicitation_cancelled of
       { server_name : string
       ; mode : elicitation_mode
@@ -931,6 +932,7 @@ type item_kind =
   | Mcp_tool_call
   | Sleep
   | Model_item
+  | Compaction_item
   | Dynamic_tool_item
   | Unclassified_item of string
 
@@ -941,8 +943,8 @@ let item_kind_of_item ~stage item =
   | Some (`String "fileChange") -> Ok File_change
   | Some (`String "mcpToolCall") -> Ok Mcp_tool_call
   | Some (`String "sleep") -> Ok Sleep
-  | Some (`String ("userMessage" | "agentMessage" | "plan" | "reasoning"
-                  | "contextCompaction")) -> Ok Model_item
+  | Some (`String "contextCompaction") -> Ok Compaction_item
+  | Some (`String ("userMessage" | "agentMessage" | "plan" | "reasoning")) -> Ok Model_item
   | Some (`String "dynamicToolCall") -> Ok Dynamic_tool_item
   | Some (`String kind) -> Ok (Unclassified_item kind)
   | Some _ -> protocol_error stage "item type must be a string"
@@ -989,7 +991,7 @@ let tool_item_of_item ~stage item =
         ; origin = Runtime_native_tools.Mcp_wrapper
         })
   | Sleep -> tool_item ~observation:(fun _ -> None)
-  | Model_item | Dynamic_tool_item -> Ok None
+  | Model_item | Compaction_item | Dynamic_tool_item -> Ok None
   | Unclassified_item kind -> tool_item ~observation:(built_in kind)
 ;;
 
@@ -1464,6 +1466,11 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~tool_effect_attempted ~m
   | Notification { method_ = "item/completed"; params } ->
     let stage = "item/completed" in
     let* item = active_turn_item ~stage ~thread_id ~turn_id params in
+    let* kind = item_kind_of_item ~stage item in
+    (match kind with
+     | Compaction_item -> emit_stream_event on_stream_event Compaction_observed
+     | Command_execution | File_change | Mcp_tool_call | Sleep | Model_item
+     | Dynamic_tool_item | Unclassified_item _ -> ());
     let* tool_item = tool_item_of_item ~stage item in
     let open_tool_call_ids =
       match tool_item with
@@ -2412,9 +2419,18 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(thread_mode = Start) ~mgr
        turn.thread_id
        turn.turn_id
        turn.model
+   | Error (Stopped_by_host stop as stopped)
+     when not (Runtime_official_client_tool.host_stop_failed stop) ->
+     (* The Keeper settles this stop as a completed or yielded turn
+        ({!Keeper_official_client_host}). Logged as a failure it made 123
+        WARN lines on 2026-09-29 for turns that ended as designed. *)
+     Log.Runtime_agent.info
+       "Codex app-server turn stopped by host: %s"
+       (error_to_string stopped)
    | Error error ->
      Log.Runtime_agent.warn
-       "Codex app-server subscription turn failed (kind=%s)"
-       (error_kind error));
+       "Codex app-server subscription turn failed (kind=%s): %s"
+       (error_kind error)
+       (error_to_string error));
   result
 ;;

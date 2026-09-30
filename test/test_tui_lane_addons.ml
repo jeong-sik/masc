@@ -133,6 +133,14 @@ let configuration_and_ports () =
   check bool "Enter opens the exact broken installation" true
     (issue.focus=UI.Configurations && issue.presentation=UI.Technical
      && issue.configuration_cursor=1);
+  let raw_issue = UI.lines ~width:120
+    {overview with instance_cursor=1; focus=UI.Instances; presentation=UI.Technical} in
+  check bool "raw detail follows the selected unresolved installation" true
+    (List.exists
+      (String.starts_with ~prefix:"> unresolved installation · /config/lane-addons/broken.toml")
+      raw_issue
+     && not (List.exists (fun line -> String.ends_with ~suffix:"custom.toml" line)
+       raw_issue));
   check bool "Installation detail retains the selected source and a return path" true
     (List.exists (String.starts_with ~prefix:"Installation details · broken.toml")
        (UI.lines ~width:120 issue)
@@ -435,7 +443,7 @@ let context_flow_uses_declared_connections () =
   check bool "overview offers help and opening" true
     (List.exists (String.starts_with ~prefix:"?:help  Esc:back  Enter:open  i:install  n:new  S:subs  r:refresh") configured_lines);
   check bool "overview omits the old timeline" true
-    (not (List.exists (String.starts_with ~prefix:"Horizontal Lane timeline") configured_lines));
+    (not (List.exists (String.starts_with ~prefix:"Activity timeline") configured_lines));
   let worker_lines = UI.lines ~width:160 {configured with focus=UI.Instances} in
   check bool "worker controls remain visible for the selected worker" true
     (List.exists (String.starts_with ~prefix:"    Enter:open  o:observe  d:remove") worker_lines);
@@ -692,11 +700,15 @@ let detail_keeps_installation_ownership () =
     instance_id=Some id;issues=[];origin=UI.Parsed_declaration} in
   let row owner lane observed_at : UI.Row.row = {id=owner ^ "-" ^ lane;
     lane_id=owner ^ "/" ^ lane;kind=UI.Row.Value;title=owner ^ " " ^ lane;
-    observed_at;subject_id="project";clock=None;actor=None;
+    observed_at;subject_id=(if owner="b" && lane="last" then "guest" else "project");
+    clock=(if owner="b" && lane="last" then Some {domain="emulator";value="17"} else None);
+    actor=(if owner="b" && lane="last" then Some "operator" else None);
     fields=[];evidence=[];related_ids=[]} in
   let snapshot : UI.snapshot = {instances=[worker "a";worker "b"];
     output={rows=[row "a" "first" 1.;row "b" "first" 2.;
-      row "a" "last" 3.;row "b" "last" 4.];coverage=[]};complete=Some true;
+      row "a" "last" 3.;row "b" "last" 4.];
+      coverage=[{source_id="source-b";incarnation="inc-17";cursor=Some "offset-42";
+        complete=false;detail=Some "partial read"}]};complete=Some false;
     configuration=Some {directory="/config";complete=true;
       declarations=[declaration "a";declaration "b"]}} in
   let overview = {UI.initial with snapshot=Some snapshot;focus=UI.Instances;
@@ -712,6 +724,18 @@ let detail_keeps_installation_ownership () =
   let selected_id view = Option.map (fun (r : UI.Row.row) -> r.id) (UI.selected_row view) in
   check (option string) "Records starts at displayed installation" (Some "b-first") (selected_id detail);
   let last = UI.move_record {detail with focus=UI.Rows} 1 in
+  let raw = String.concat "" (UI.lines ~width:80 {last with presentation=UI.Technical}) in
+  let contains text =
+    let n = String.length text in
+    let rec at i = i+n <= String.length raw
+      && (String.sub raw i n=text || at (i+1)) in
+    at 0 in
+  List.iter (fun text -> check bool "selected empty-field record keeps its provenance" true
+    (contains text))
+    ["Row b-last";"Observed 1970-01-01 00:00:04.000 UTC";"Subject guest";
+     "Actor operator";"Clock emulator · 17";"Snapshot partial";
+     "source-b · partial · incarnation inc-17 · cursor offset-42 · partial read"];
+  check bool "raw detail excludes another installation's record" false (contains "Row a-last");
   check (option string) "Records next skips another installation's intervening row"
     (Some "b-last") (selected_id last);
   check (option string) "Records next stays within displayed installation"
@@ -738,7 +762,163 @@ let detail_keeps_installation_ownership () =
   check bool "replacement cannot inherit old detail's evidence export" true
     (Result.is_error (UI.evidence_request refreshed))
 
+let declared_results_show_body_before_activity_and_keep_raw_evidence () =
+  let module P = Masc.Lane_addon_presentation in
+  let display = P.of_json (`Assoc ["description",`String "Read an analysis report";
+    "readings",`List [
+      `Assoc ["lane_id",`String "report";"path",`List [`String "body"];
+        "label",`String "Report";"format",`String "text"];
+      `Assoc ["lane_id",`String "report";"path",`List [`String "complete"];
+        "label",`String "Input complete";"format",`String "boolean"];
+      `Assoc ["lane_id",`String "report";"path",`List [`String "delivery"];
+        "label",`String "Delivery";"format",`String "text"]]]) |> ok in
+  let worker : UI.instance = {id="report-worker";incarnation="incarnation";run_id="project";
+    addon_id="custom";title="Project report";revision="1";phase=UI.Row.Attached;
+    observation_seq=1;rows_count=1;source_path=None;binding=`Assoc ["sources",`List []];
+    outputs=[];skills_directory=None;action_schema=None;binding_schema=None;display} in
+  let row : UI.Row.row = {id="report-row";lane_id="report-worker/report";kind=UI.Row.Value;
+    title="Useful analysis";observed_at=1.;subject_id="project";clock=None;actor=None;
+    fields=["body",`String "First finding\nSecond finding";"complete",`Bool false;
+      "delivery",`String "not attempted";"private_coordinate",`String "retained in raw"];
+    evidence=[];related_ids=[]} in
+  let snapshot : UI.snapshot = {instances=[worker];output={rows=[row];coverage=[]};
+    complete=None;configuration=None} in
+  let overview = {UI.initial with snapshot=Some snapshot} in
+  check bool "package purpose is visible before opening" true
+    (List.mem "    Read an analysis report" (UI.lines ~width:100 overview));
+  let detail = UI.open_selected_instance overview in
+  let lines = UI.lines ~width:100 detail in
+  check bool "body is multiline text, not escaped JSON" true
+    (List.mem "  Report: First finding" lines && List.mem "  Second finding" lines);
+  check bool "partial input and delivery remain distinct" true
+    (List.mem "  Input complete: false" lines && List.mem "  Delivery: not attempted" lines);
+  check bool "the visible report carries the selected marker" true
+    (List.mem "> Useful analysis" lines);
+  let index value = List.find_index (String.equal value) lines |> Option.get in
+  check bool "results precede the activity timeline" true
+    (index "  Second finding" < index "Activity timeline");
+  let raw_lines = UI.lines ~width:100 {detail with presentation=UI.Technical} in
+  check bool "raw coordinates remain under details with the JSON formatter's layout" true
+    (List.for_all (fun line -> List.mem line raw_lines)
+      (String.split_on_char '\n' (Yojson.Safe.pretty_to_string (`Assoc row.fields))));
+  let second = {row with id="second-report";title="Another analysis";observed_at=2.;
+    fields=["body",`String "Other first finding\nOther second finding";
+      "complete",`Bool true;"delivery",`String "not attempted"]} in
+  let two = {detail with snapshot=Some {snapshot with output={rows=[row;second];coverage=[]}}} in
+  let before = UI.lines ~width:100 two in
+  check bool "only the selected report expands its body" true
+    (List.mem "> Useful analysis" before && List.mem "  Another analysis" before
+     && not (List.mem "  Report: Other first finding" before));
+  let moved = UI.move_observation {two with scroll=7} 1 in
+  let after = UI.lines ~width:100 moved in
+  check int "selecting another report starts at its visible result" 0 moved.scroll;
+  check bool "actual activity navigation moves the expanded body and marker together" true
+    (List.mem "> Another analysis" after
+     && List.mem "  Report: Other first finding" after
+     && List.mem "  Other second finding" after
+     && not (List.mem "  Report: First finding" after));
+  check (option string) "the raw detail target is the visible selected report"
+    (Some second.id) (Option.map (fun (row : UI.Row.row) -> row.id) (UI.selected_row moved));
+  let moved_raw = UI.lines ~width:100 {moved with presentation=UI.Technical} in
+  check bool "D exposes the same report and excludes the previous one" true
+    (List.mem "Row second-report" moved_raw && not (List.mem "Row report-row" moved_raw));
+  let unselected = {two with row_cursor=(-1)} in
+  let unselected_lines = UI.lines ~width:100 unselected in
+  check bool "a vanished selection asks for explicit navigation without choosing a report" true
+    (List.mem "Choose a result with j/k." unselected_lines
+     && not (List.mem "> Useful analysis" unselected_lines)
+     && not (List.mem "  Report: First finding" unselected_lines));
+  check (option string) "j explicitly chooses a report from no selection" (Some row.id)
+    (Option.map (fun (row : UI.Row.row) -> row.id)
+      (UI.selected_row (UI.move_observation unselected 1)));
+  let missing = {row with fields=[]} in
+  let missing_detail = {detail with snapshot=Some {snapshot with output={rows=[missing];coverage=[]}}} in
+  check bool "missing declared data is explicitly unavailable" true
+    (List.mem "  Report: unavailable · field unavailable" (UI.lines ~width:100 missing_detail));
+  let foreign = {row with lane_id="report-worker/other"} in
+  check bool "readings are scoped to the exact declared Lane" true
+    (not (List.mem "  Report: First finding" (UI.lines ~width:100
+      {detail with snapshot=Some {snapshot with output={rows=[foreign];coverage=[]}}})));
+  let windows = {row with fields=["body",`String "First\r\n\r\nSecond\rstandalone\r"]} in
+  let windows_detail = {detail with snapshot=Some {snapshot with output={rows=[windows];coverage=[]}}} in
+  let windows_lines = UI.lines ~width:100 windows_detail in
+  check bool "CRLF report lines omit terminator CR and expose standalone CR" true
+    (List.mem "  Report: First" windows_lines
+     && List.mem "  " windows_lines
+     && List.mem "  Second\\x0Dstandalone\\x0D" windows_lines);
+  let grade = {row with id="grade";lane_id=worker.id ^ "/grades";
+    title="Old grade";observed_at=0.;fields=["grade",`String "incorrect"]} in
+  let score = {row with id="score";title="Declared score";observed_at=3.} in
+  let score_snapshot = {snapshot with output={rows=[grade;score];coverage=[]}} in
+  let preferred = UI.open_selected_instance {overview with snapshot=Some score_snapshot} in
+  check (option string) "opening selects declared result after preceding ordinary observations"
+    (Some score.id) (Option.map (fun (row : UI.Row.row) -> row.id) (UI.selected_row preferred));
+  let producer_last = {row with id="last";title="Last result";observed_at=5.} in
+  let producer_middle = {row with id="middle";title="Middle result";observed_at=2.} in
+  let unsorted = UI.open_selected_instance {overview with snapshot=Some
+    {snapshot with output={rows=[producer_last;row;producer_middle];coverage=[]}}} in
+  check (option string) "opening uses the same chronology as navigation" (Some row.id)
+    (Option.map (fun (row : UI.Row.row) -> row.id) (UI.selected_row unsorted));
+  let unsorted_lines = UI.lines ~width:100 unsorted in
+  let index text = List.find_index (String.equal text) unsorted_lines |> Option.get in
+  check bool "other results follow the advertised navigation order" true
+    (index "  Middle result" < index "  Last result");
+  check (option string) "j reaches the next displayed result" (Some producer_middle.id)
+    (Option.map (fun (row : UI.Row.row) -> row.id) (UI.selected_row (UI.move_observation unsorted 1)));
+  let retained_worker = {worker with phase=UI.Row.Detached} in
+  let other_worker = {worker with id="foreign-worker";incarnation="foreign-incarnation"} in
+  let foreign_row = {row with id="foreign-row";lane_id="foreign-worker/report";observed_at=0.} in
+  let same_title = {producer_middle with id="middle-a";title=row.title;
+    lane_id=worker.id ^ "/other"} in
+  let tied = {producer_middle with id="middle-z"} in
+  let original_rows = [producer_last;foreign_row;tied;row;same_title] in
+  let retained_snapshot = {snapshot with instances=[retained_worker;other_worker];
+    output={rows=original_rows;coverage=[]}} in
+  let records = {detail with snapshot=Some retained_snapshot;
+    screen=UI.Detail (retained_worker.id, retained_worker.incarnation); focus=UI.Rows;
+    row_cursor=(List.find_index (fun (candidate : UI.Row.row) -> candidate.id=row.id) original_rows |> Option.get)} in
+  let selected_id view = Option.map (fun (row : UI.Row.row) -> row.id) (UI.selected_row view) in
+  let records_lines = UI.lines ~width:100 records in
+  let index text = List.find_index (String.equal text) records_lines |> Option.get in
+  check bool "Records displays retained owner rows chronologically with deterministic ties" true
+    (index ("Row " ^ row.id) < index "Row middle-a"
+     && index "Row middle-a" < index "Row middle-z"
+     && index "Row middle-z" < index "Row last"
+     && not (List.mem "Row foreign-row" records_lines));
+  let next = UI.move_record {records with scroll=9} 1 in
+  check (option string) "Records j selects the next displayed exact row" (Some same_title.id) (selected_id next);
+  check int "Records movement resets document scrolling" 0 next.scroll;
+  check (option string) "Records k returns to the displayed predecessor" (Some row.id)
+    (selected_id (UI.move_record next (-1)));
+  check (option string) "Records timestamp ties use row identity order" (Some tied.id)
+    (selected_id (UI.move_record next 1));
+  check bool "rendering and navigation preserve immutable producer order" true
+    (Option.map (fun (snapshot : UI.snapshot) -> snapshot.output.rows) next.snapshot = Some original_rows);
+  let same_title_summary = UI.lines ~width:100 {next with focus=UI.Timeline} in
+  check bool "same-titled results expose the selected exact Lane" true
+    (List.mem ("  Lane " ^ same_title.lane_id) same_title_summary);
+  let same_title_raw = UI.lines ~width:100 {next with presentation=UI.Technical} in
+  check bool "raw evidence joins the same selected row and Lane" true
+    (List.mem ("Row " ^ same_title.id) same_title_raw
+     && List.mem ("Lane " ^ same_title.lane_id) same_title_raw
+     && not (List.mem ("Row " ^ row.id) same_title_raw));
+  let exported = UI.evidence_request {next with selected=[same_title.id]} |> ok in
+  check bool "chronological movement preserves exact export ownership" true
+    (exported = UI.Evidence (`Assoc ["instance_id",`String worker.id;
+      "row_ids",`List [`String same_title.id]]));
+  let many = List.init 6 (fun index -> {worker with id=Printf.sprintf "worker-%d" index;
+    title=Printf.sprintf "Worker %d" index;
+    display={display with description=Some (String.concat " " (List.init 30 (fun _ -> Printf.sprintf "description-%d" index)))}}) in
+  let selected_overview = {overview with instance_cursor=5;snapshot=Some {snapshot with instances=many}} in
+  let selected_lines = UI.lines ~width:30 selected_overview in
+  let first_rows = List.filteri (fun index _ -> index < 12) selected_lines |> String.concat "\n" in
+  check bool "selected Add-on remains near the overview top despite preceding long descriptions" true
+    (List.exists (String.starts_with ~prefix:"> Worker 5") (String.split_on_char '\n' first_rows)
+     && not (List.exists (fun line -> String.starts_with ~prefix:"    description-4" line) selected_lines))
+
 let () = run "TUI Lane package operations" ["operator scenarios",[
+  test_case "declared results show body before activity and preserve raw evidence" `Quick
+    declared_results_show_body_before_activity_and_keep_raw_evidence;
   test_case "detail keeps installation ownership for edit, navigation and export" `Quick detail_keeps_installation_ownership;
   test_case "refresh retains exact operator targets and exposes failure" `Quick refresh_preserves_operator_target;
   test_case "evidence export chooses a Keeper by name" `Quick evidence_export_chooses_a_keeper_by_name;

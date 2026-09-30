@@ -9,8 +9,9 @@ let text = Yojson.Safe.Util.to_string
 let items = Yojson.Safe.Util.to_list
 let require = function Ok value -> value | Error detail -> fail detail
 
-let fixture root ~reject_context ~overflow_resume ~hold_first_resume =
+let fixture root ~reject_context ~overflow_resume ~hold_first_resume ~compact_resume ~compact_item =
   let capture = Filename.concat root "requests.jsonl" in
+  write capture "";
   let command = Filename.concat root "codex-fixture" in
   write command (Printf.sprintf {|#!/usr/bin/env python3
 import json, sys, os
@@ -20,6 +21,8 @@ capture = %S
 reject_context = %s
 overflow_resume = %s
 hold_first_resume = %s
+compact_resume = %s
+compact_item = %s
 turn_id = 'fresh-turn'
 def emit(value):
     print(json.dumps(value), flush=True)
@@ -54,16 +57,29 @@ for line in sys.stdin:
                 out.write('rejected before effects')
             emit({'method':'turn/completed','params':{'threadId':'context-thread','turn':{'id':turn_id,'items':[],'status':'failed','error':{'message':'context is full','codexErrorInfo':'contextWindowExceeded'}}}})
             continue
+        if compact_resume and turn_id == 'resumed-turn' and not os.path.exists(capture+'.compacted'):
+            with open(capture+'.compacted', 'w') as out:
+                out.write('compaction followed by another model response')
+            request_usage = {'inputTokens':100,'cachedInputTokens':0,'outputTokens':10,'reasoningOutputTokens':0,'totalTokens':110}
+            estimate = {'inputTokens':0,'cachedInputTokens':0,'outputTokens':0,'reasoningOutputTokens':0,'totalTokens':50}
+            if compact_item:
+                emit({'method':'item/completed','params':{'threadId':'context-thread','turnId':turn_id,
+                     'item':{'type':'contextCompaction','id':'compact-1'}}})
+            for last in ((request_usage,) if compact_item else (estimate, request_usage)):
+                emit({'method':'thread/tokenUsage/updated','params':{'threadId':'context-thread','turnId':turn_id,
+                     'tokenUsage':{'last':last,'total':request_usage,'modelContextWindow':400000}}})
         item = {'type':'agentMessage','id':'answer','text':'CONTEXT_RECEIVED','phase':'final_answer'}
         emit({'method':'item/completed','params':{'threadId':'context-thread','turnId':turn_id,'completedAtMs':1,'item':item}})
         emit({'method':'turn/completed','params':{'threadId':'context-thread','turn':{'id':turn_id,'items':[item],'status':'completed'}}})
 |} capture (if reject_context then "True" else "False")
     (if overflow_resume then "True" else "False")
-    (if hold_first_resume then "True" else "False"));
+    (if hold_first_resume then "True" else "False")
+    (if compact_resume then "True" else "False")
+    (if compact_item then "True" else "False"));
   Unix.chmod command 0o700;
   command, capture
 
-let with_fixture ?(worker_pool = false) ?(reject_context = false) ?(overflow_resume = false) ?(hold_first_resume = false) ?max_prompt_bytes test =
+let with_fixture ?(worker_pool = false) ?(reject_context = false) ?(overflow_resume = false) ?(hold_first_resume = false) ?(compact_resume = false) ?(compact_item = false) ?max_prompt_bytes test =
   Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
   let previous_pool = Domain_pool_ref.get () in
   Eio.Switch.on_release sw (fun () ->
@@ -86,7 +102,7 @@ let with_fixture ?(worker_pool = false) ?(reject_context = false) ?(overflow_res
     ~base_path:root ~sandbox_profile:None "context-fixture";
   let saved = Runtime.For_testing.snapshot () in
   Eio.Switch.on_release sw (fun () -> Runtime.For_testing.restore saved; Fs_compat.remove_tree root);
-  let command, capture = fixture root ~reject_context ~overflow_resume ~hold_first_resume in
+  let command, capture = fixture root ~reject_context ~overflow_resume ~hold_first_resume ~compact_resume ~compact_item in
   let config_path = Filename.concat root "runtime.toml" in
   write config_path (Printf.sprintf {|
 [providers.codex]
@@ -108,17 +124,25 @@ default = "codex.context"
     | Some {execution=Runtime_execution.Codex_app_server config;_} -> config
     | Some _ | None -> fail "fixture runtime missing" in
   let reports = ref [] in
-  let run ?official_task_reference ?model_input_projection
+  let run ?official_task_reference ?model_input_projection ?prompt_blocks
       ?carried_front_seed ?librarian_front ?on_model_input_window_observation
       ?(turn_start = Keeper_carried_front.Turn_boundary { end_atom = 0 })
       ?(initial_messages=[Agent_core.Types.user_msg "Previous completed work"])
       ?official_client_continuation ?on_event
       ?(goal="Continue from current World State.") ~instructions ~world () =
+    let composed_context = ref None in
     let hooks = { Agent_core.Hooks.empty with before_turn_params = Some (function
       | Agent_core.Hooks.BeforeTurnParams {current_params;_} ->
+        (* Production records the block witness in this hook. Reading it before
+           preparation would observe None and silently resend the carrier. *)
+        composed_context := Option.map (fun blocks ->
+          { Keeper_official_client_host.carrier_sha256 =
+              Digestif.SHA256.(digest_string world |> to_hex)
+          ; blocks }) prompt_blocks;
         Agent_core.Hooks.AdjustParams {current_params with extra_system_context=Some world}
       | _ -> Agent_core.Hooks.Continue) } in
     Keeper_codex_runtime.run
+      ~composed_context:(fun () -> !composed_context)
         ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input
           ~runtime:(Runtime.get_runtime_by_id "codex.context" |> Option.get)) ~runtime_id:"codex.context" ~keeper_name:"context-fixture"
       ~turn_start
@@ -304,6 +328,175 @@ let test_resume_carries_per_turn_context_in_front_of_the_goal ?(worker_pool = fa
    | [Keeper_official_client_host.Whole_input_transmitted _;
       Keeper_official_client_host.Held_by_client_session] -> ()
    | _ -> fail "a Start transmits its prepared context; a Resume leaves the conversation to the thread")
+
+let test_resume_deduplicates_context_blocks () =
+  with_fixture @@ fun ~run ~capture ~reports:_ ->
+  let instructions = "Keeper instructions" in
+  let send ~memory ~world ~clock =
+    let prompt_blocks =
+      [ Prompt_block_id.Memory_os_recall, memory
+      ; Prompt_block_id.Dynamic_context, world
+      ; Prompt_block_id.Temporal_summary, clock
+      ; Prompt_block_id.Operator_note, "OPERATOR_NOTE"
+      ] in
+    let before = List.length (read_requests capture) in
+    successful (run ~instructions ~prompt_blocks
+      ~world:(String.concat "\n\n" (List.map snd prompt_blocks)) ());
+    read_requests capture |> List.filteri (fun i _ -> i >= before)
+  in
+  let first = send ~memory:"RECALL_A" ~world:"WORLD_1" ~clock:"CLOCK_1" in
+  check bool "fresh thread receives recall" true
+    (String_util.contains_substring (Yojson.Safe.to_string (`List first)) "RECALL_A");
+  let check_resume rows expected =
+    check int "same session resumes" 1
+      (List.length (List.filter (fun row -> member "method" row = `String "thread/resume") rows));
+    let sent = turn_text rows in
+    List.iter (fun (marker, present) ->
+      check bool marker present (String_util.contains_substring sent marker)) expected;
+    check bool "operator note is delivered even unchanged" true
+      (String_util.contains_substring sent "OPERATOR_NOTE")
+  in
+  let second = send ~memory:"RECALL_A" ~world:"WORLD_2" ~clock:"CLOCK_2" in
+  check_resume second [ "RECALL_A", false; "WORLD_2", true; "CLOCK_2", true ];
+  let third = send ~memory:"RECALL_B" ~world:"WORLD_2" ~clock:"CLOCK_3" in
+  check_resume third [ "RECALL_A", false; "RECALL_B", true; "WORLD_2", false; "CLOCK_3", true ];
+  let fourth = send ~memory:"RECALL_B" ~world:"WORLD_3" ~clock:"CLOCK_4" in
+  check_resume fourth [ "RECALL_B", false; "WORLD_3", true; "CLOCK_4", true ]
+
+let test_context_blocks_survive_fresh_retry () =
+  with_fixture ~overflow_resume:true @@ fun ~run ~capture ~reports:_ ->
+  let send world =
+    let prompt_blocks =
+      [ Prompt_block_id.Memory_os_recall, "RECALL_RETRY"
+      ; Prompt_block_id.Dynamic_context, world ] in
+    let before = List.length (read_requests capture) in
+    successful (run ~instructions:"Keeper instructions" ~prompt_blocks
+      ~world:(String.concat "\n\n" (List.map snd prompt_blocks)) ());
+    read_requests capture |> List.filteri (fun i _ -> i >= before)
+  in
+  ignore (send "WORLD_1");
+  let retried = send "WORLD_2" in
+  check bool "overflowing resume omits held recall" false
+    (String_util.contains_substring (turn_text retried) "RECALL_RETRY");
+  let fresh = List.find (fun row -> member "method" row = `String "thread/start") retried in
+  check bool "replacement thread receives recall" true
+    (String_util.contains_substring
+       (fresh |> member "params" |> member "developerInstructions" |> text) "RECALL_RETRY");
+  check bool "settled replacement remembers the recall" false
+    (String_util.contains_substring (turn_text (send "WORLD_3")) "RECALL_RETRY")
+
+let check_compaction_receipt_survives_later_request_usage ~compact_item () =
+  with_fixture ~compact_resume:true ~compact_item @@ fun ~run ~capture ~reports:_ ->
+  List.iteri (fun index recall_expected ->
+    let prompt_blocks =
+      [ Prompt_block_id.Memory_os_recall, "RECALL_AFTER_COMPACTION"
+      ; Prompt_block_id.Temporal_summary, Printf.sprintf "COMPACTION_TICK_%d" index ] in
+    let before = List.length (read_requests capture) in
+    successful (run ~instructions:"Keeper instructions" ~prompt_blocks
+      ~world:(String.concat "\n\n" (List.map snd prompt_blocks)) ());
+    let rows = read_requests capture |> List.filteri (fun i _ -> i >= before) in
+    let sent = if index = 0 then Yojson.Safe.to_string (`List rows) else turn_text rows in
+    check bool "compacted session receives recall again despite later request usage"
+      recall_expected (String_util.contains_substring sent "RECALL_AFTER_COMPACTION");
+    if index > 0 then
+      check int "compaction does not require a new thread" 1
+        (List.length (List.filter (fun row -> member "method" row = `String "thread/resume") rows)))
+    [true; false; true; false]
+
+let test_compaction_receipt_survives_later_request_usage () =
+  check_compaction_receipt_survives_later_request_usage ~compact_item:false ()
+
+let test_compaction_item_invalidates_recall_without_usage_estimate () =
+  check_compaction_receipt_survives_later_request_usage ~compact_item:true ()
+
+let test_recall_lifecycle_across_native_ticks () =
+  with_fixture @@ fun ~run ~capture ~reports:_ ->
+  let module Current = Keeper_memory_os_current in
+  let module Memory = Keeper_memory_os_types in
+  let keepers_dir = Filename.concat (Filename.dirname capture) "recall-store" in
+  Unix.mkdir keepers_dir 0o700;
+  let keeper_id = "context-fixture" in
+  let path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id in
+  let fact claim : Memory.fact =
+    { claim; category = Constraint; first_seen = 1.; last_seen = 1.
+    ; origin = { kind = Authored; trace_id = "recall-cycle" }
+    ; basis = Observed Transcript } in
+  let replace ?(now = 1.) expected_revision facts =
+    match Current.replace ~keepers_dir ~keeper_id ~expected_revision
+      ~now ~source:{kind = Librarian; trace_id = "recall-cycle"} ~facts () with
+    | Ok _ -> ()
+    | Error _ -> fail "fixture could not replace the committed memory"
+  in
+  let tick = ref 0 in
+  let send ~changed =
+    incr tick;
+    let recall = Keeper_memory_os_recall.render_context ~keepers_dir ~keeper_id () in
+    check bool "current memory availability is explicit" true (recall <> "");
+    let clock = Printf.sprintf "CYCLE_TICK_%d" !tick in
+    let prompt_blocks =
+      [ Prompt_block_id.Memory_os_recall, recall
+      ; Prompt_block_id.Temporal_summary, clock ] in
+    let before = List.length (read_requests capture) in
+    successful (run ~instructions:"Keeper instructions" ~prompt_blocks
+      ~world:(String.concat "\n\n" (List.map snd prompt_blocks)) ());
+    let rows = read_requests capture |> List.filteri (fun i _ -> i >= before) in
+    let sent = if !tick = 1 then
+        List.find (fun row -> member "method" row = `String "thread/start") rows
+        |> member "params" |> member "developerInstructions" |> text
+      else (
+        check int "subsequent tick resumes the same session" 1
+          (List.length (List.filter (fun row -> member "method" row = `String "thread/resume") rows));
+        turn_text rows)
+    in
+    (* The model receives the encoded context envelope. Compare its text
+       against the actual rendered snapshot rather than estimating tokens. *)
+    let encoded = Yojson.Safe.to_string (`String recall) in
+    let body = String.sub encoded 1 (String.length encoded - 2) in
+    check bool (Printf.sprintf "tick %d delivers exactly when state changes" !tick)
+      changed (String_util.contains_substring sent body);
+    check bool "the current tick still reaches the model" true
+      (String_util.contains_substring sent clock);
+    recall
+  in
+  replace None [fact "CURRENT_FACT_A"];
+  let original_file = Fs_compat.load_file path in
+  let present = send ~changed:true in
+  ignore (send ~changed:false);
+  replace (Some 1) [fact "CURRENT_FACT_B"];
+  let revised = send ~changed:true in
+  check bool "revised memory changes the delivered state" true (present <> revised);
+  replace (Some 2) [];
+  let empty_file = Fs_compat.load_file path in
+  let cleared = send ~changed:true in
+  check bool "cleared snapshot carries no previous claim" false
+    (String_util.contains_substring cleared "CURRENT_FACT_");
+  ignore (send ~changed:false);
+  write path "{broken snapshot";
+  let unavailable = send ~changed:true in
+  check bool "read failure is distinct from authoritative empty memory" true
+    (unavailable <> cleared);
+  ignore (send ~changed:false);
+  write path empty_file;
+  check string "recovery re-delivers the same empty snapshot" cleared (send ~changed:true);
+  Unix.unlink path;
+  let absent = send ~changed:true in
+  check bool "missing snapshot is distinct from a failed read" true (absent <> unavailable);
+  ignore (send ~changed:false);
+  write path original_file;
+  check string "returning to an earlier snapshot re-delivers it" present (send ~changed:true);
+  (* Each Librarian pass can commit unchanged facts with a new revision/time.
+     That bookkeeping and the changing clock must not append another Recall.
+     This is a test horizon, not a runtime deduplication gate. *)
+  for revision = 1 to 16 do
+    replace ~now:(float_of_int (100 + revision)) (Some revision) [fact "CURRENT_FACT_A"];
+    ignore (send ~changed:false)
+  done;
+  (match Keeper_official_client_session_store.load
+      ~base_path:(Filename.dirname capture) ~keeper_name:keeper_id with
+   | Ok (Some {context_frontier = Some frontier; _}) ->
+     check int "delivery receipts stay bounded by the two block identities"
+       2 (List.length frontier.held_context)
+   | Ok _ | Error _ -> fail "settled native session lost its context frontier")
 
 let test_rejected_context_never_submits_turn () =
   with_fixture ~reject_context:true @@ fun ~run ~capture ~reports ->
@@ -800,6 +993,11 @@ let test_declared_limit_above_history_changes_nothing () =
 
 
 let () = run "Keeper current Codex context" ["native requests",[
+  test_case "compaction item invalidates recall without usage estimate" `Quick test_compaction_item_invalidates_recall_without_usage_estimate;
+  test_case "compaction invalidates recall despite later request usage" `Quick test_compaction_receipt_survives_later_request_usage;
+  test_case "resume delivers only changed blocks and pending operator note" `Quick test_resume_deduplicates_context_blocks;
+  test_case "fresh overflow retry receives and remembers recall" `Quick test_context_blocks_survive_fresh_retry;
+  test_case "memory changes, clears, fails and recovers across native ticks" `Quick test_recall_lifecycle_across_native_ticks;
   test_case "operator interruption preserves previous Codex settlement" `Quick test_operator_interrupt_preserves_previous_native_settlement;
   test_case "a declared prompt limit windows a Start" `Quick test_declared_limit_windows_start;
   test_case "a Start carries the range, not the whole history" `Quick test_start_carries_the_range_not_the_whole_history;

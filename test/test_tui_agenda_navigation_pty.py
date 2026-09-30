@@ -55,7 +55,8 @@ def run(executable):
         h.wait_for_output(process, fd, output, b"AGENDA_SCHEDULE_00", start=0, timeout=10)
         h.send_and_wait(process, fd, output, b";", b"MASC Agenda")
         require(b"Coming up", b"AGENDA_SCHEDULE_00")
-        h.send_and_wait(process, fd, output, b"\r", b"MASC Agenda")
+        # Enter on a schedule is a no-op and need not emit a new frame.
+        os.write(fd, b"\r")
         require(b"MASC Agenda", b"AGENDA_SCHEDULE_00")
         h.send_and_wait(process, fd, output, b"\x1b[6~", b"AGENDA_SCHEDULE_19")
         require(b"AGENDA_SCHEDULE_19")
@@ -69,7 +70,7 @@ def run(executable):
         if not h.wait_for_fixture_event(process, fd, output, painted, timeout=10):
             raise AssertionError("Agenda did not refresh while reading its first page")
         require(b"Coming up", b"AGENDA_SCHEDULE_00")
-        h.send_and_wait(process, fd, output, b"\r", b"MASC Agenda")
+        os.write(fd, b"\r")
         require(b"MASC Agenda", b"AGENDA_SCHEDULE_00")
         h.send_and_wait(process, fd, output, b"k", b"alpha is holding AgendaHeld")
         # Insert schedules above the same selected call. Following a target

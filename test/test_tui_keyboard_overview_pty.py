@@ -40,6 +40,8 @@ SOURCE_MODULES = (
     "test/tui_keyboard_tools.py",
     "test/tui_keyboard_walk.py",
     "test/tui_keyboard_workspace.py",
+    "lib/tui_decode_usage.ml",
+    "lib/tui_decode_usage.mli",
 )
 
 

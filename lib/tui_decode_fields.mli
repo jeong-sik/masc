@@ -1,4 +1,4 @@
-(** Internal field readers shared by TUI wire decoders.
+(** Field readers shared by TUI wire decoders.
     These functions retain the wire contracts' distinction between required,
     nullable and optional fields; malformed values return a field error.
     They perform no I/O and contain no domain or display projection. *)

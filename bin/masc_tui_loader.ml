@@ -554,12 +554,12 @@ let decode_workspace_health raw =
            other)
 
 let decode_attention_item json =
-  let* ai_kind = required_string_field json "kind" in
-  let* raw_severity = required_string_field json "severity" in
+  let* ai_kind = Masc.Tui_decode_fields.required_string_field json "kind" in
+  let* raw_severity = Masc.Tui_decode_fields.required_string_field json "severity" in
   let* ai_severity = decode_attention_severity raw_severity in
-  let* ai_summary = required_string_field json "summary" in
-  let* target_type = required_string_field json "target_type" in
-  let* target_id = optional_string_field json "target_id" in
+  let* ai_summary = Masc.Tui_decode_fields.required_string_field json "summary" in
+  let* target_type = Masc.Tui_decode_fields.required_string_field json "target_type" in
+  let* target_id = Masc.Tui_decode_fields.optional_string_field json "target_id" in
   (* The producers write ["keeper"] with the Keeper's name as the id
      (lib/dashboard/dashboard_execution.ml, the keeper status bridge). A
      keeper item without a name names nobody to join on, so it stays with the
@@ -576,7 +576,7 @@ let decode_attention_item json =
      row survives without it. *)
   let* evidence_log_ts =
     match Yojson.Safe.Util.member "evidence" json with
-    | `Assoc _ as nested -> optional_string_field nested "log_ts"
+    | `Assoc _ as nested -> Masc.Tui_decode_fields.optional_string_field nested "log_ts"
     | _ -> Ok None
   in
   (* The keeper status bridge puts the blocker's own sentence under
@@ -588,7 +588,7 @@ let decode_attention_item json =
     | `Assoc _ as evidence -> (
         match Yojson.Safe.Util.member "runtime_blocker" evidence with
         | `Assoc _ as blocker ->
-            optional_string_field blocker "runtime_blocker_summary"
+            Masc.Tui_decode_fields.optional_string_field blocker "runtime_blocker_summary"
         | _ -> Ok None)
     | _ -> Ok None
   in
@@ -605,17 +605,17 @@ let decode_attention_item json =
     }
 
 let decode_attention_items json_list =
-  decode_list "attention_items" decode_attention_item json_list
+  Masc.Tui_decode_fields.decode_list "attention_items" decode_attention_item json_list
 
 let decode_board_post ?(require_body = false) json =
-  let* bp_id = required_string_field json "id" in
-  let* bp_author = required_string_field json "author" in
-  let* bp_title = required_string_field json "title" in
+  let* bp_id = Masc.Tui_decode_fields.required_string_field json "id" in
+  let* bp_author = Masc.Tui_decode_fields.required_string_field json "author" in
+  let* bp_title = Masc.Tui_decode_fields.required_string_field json "title" in
   let* bp_body =
     if require_body then required_body_field json else optional_body_field json
   in
-  let* bp_votes = required_int_field json "votes" in
-  let* bp_comment_count = required_int_field json "comment_count" in
+  let* bp_votes = Masc.Tui_decode_fields.required_int_field json "votes" in
+  let* bp_comment_count = Masc.Tui_decode_fields.required_int_field json "comment_count" in
   let* bp_created_at =
     required_display_any_field json [ "created_at_iso"; "created_at" ]
   in
@@ -650,9 +650,9 @@ let decode_board_post ?(require_body = false) json =
     match Yojson.Safe.Util.member "closed" json with
     | `Null -> Ok None
     | `Assoc _ as nested ->
-        let* bpc_closed_by = required_string_field nested "closed_by" in
-        let* bpc_successor_id = optional_string_field nested "successor_id" in
-        let* bpc_summary = optional_string_field nested "summary" in
+        let* bpc_closed_by = Masc.Tui_decode_fields.required_string_field nested "closed_by" in
+        let* bpc_successor_id = Masc.Tui_decode_fields.optional_string_field nested "successor_id" in
+        let* bpc_summary = Masc.Tui_decode_fields.optional_string_field nested "summary" in
         let bpc_closed_at =
           match Yojson.Safe.Util.member "closed_at" nested with
           | `Float value -> Some value
@@ -665,8 +665,8 @@ let decode_board_post ?(require_body = false) json =
           (Printf.sprintf "board post closed must be an object or null: %s"
              (Yojson.Safe.to_string value))
   in
-  let* bp_hearth = optional_string_field json "hearth" in
-  let* raw_kind = optional_string_field json "post_kind" in
+  let* bp_hearth = Masc.Tui_decode_fields.optional_string_field json "hearth" in
+  let* raw_kind = Masc.Tui_decode_fields.optional_string_field json "post_kind" in
   (* Optional, and an unknown value is carried rather than rejected: the list
      is a projection for a pane, and a post whose kind this build does not know
      is still a post the operator should see. *)
@@ -733,22 +733,22 @@ let load_board_hearths ~(host : string) ~(port : int) :
   | Ok json -> decode_board_hearths json
 
 let decode_board_posts json_list =
-  decode_list "posts" decode_board_post json_list
+  Masc.Tui_decode_fields.decode_list "posts" decode_board_post json_list
 
 let decode_board_comment json =
-  let* bc_id = required_string_field json "id" in
+  let* bc_id = Masc.Tui_decode_fields.required_string_field json "id" in
   (* Optional because a top-level comment has none, not because the field may
      be absent: the wire always carries the key and answers [null] there. *)
-  let* bc_parent_id = optional_string_field json "parent_id" in
-  let* bc_author = required_string_field json "author" in
-  let* bc_content = required_string_field json "content" in
+  let* bc_parent_id = Masc.Tui_decode_fields.optional_string_field json "parent_id" in
+  let* bc_author = Masc.Tui_decode_fields.required_string_field json "author" in
+  let* bc_content = Masc.Tui_decode_fields.required_string_field json "content" in
   let* bc_created_at =
     required_display_any_field json [ "created_at_iso"; "created_at" ]
   in
   Ok { bc_id; bc_parent_id; bc_author; bc_content; bc_created_at }
 
 let decode_board_comments json_list =
-  decode_list "comments" decode_board_comment json_list
+  Masc.Tui_decode_fields.decode_list "comments" decode_board_comment json_list
 
 (* The kind beside the name is a word, not the wire token: the row read
    "Operator Proof (human_operator)" and "keeper-701 (automated_actor)". The
@@ -763,13 +763,13 @@ let schedule_actor_kind_word = function
 let decode_schedule_actor json field =
   match Yojson.Safe.Util.member field json with
   | `Assoc _ as actor ->
-      let* id = required_string_field actor "id" in
-      let* kind = required_string_field actor "kind" in
+      let* id = Masc.Tui_decode_fields.required_string_field actor "id" in
+      let* kind = Masc.Tui_decode_fields.required_string_field actor "kind" in
       let* kind =
         Schedule_contract_values.actor_kind_of_string kind
         |> Result.map_error Schedule_contract_values.decode_error_to_string
       in
-      let* display_name = optional_string_field actor "display_name" in
+      let* display_name = Masc.Tui_decode_fields.optional_string_field actor "display_name" in
       let name = Option.value ~default:id display_name in
       Ok (Printf.sprintf "%s (%s)" name (schedule_actor_kind_word kind))
   | value ->
@@ -780,7 +780,7 @@ let decode_schedule_actor json field =
 let optional_nested_string_field json object_field field =
   match Yojson.Safe.Util.member object_field json with
   | `Null -> Ok None
-  | `Assoc _ as nested -> optional_string_field nested field
+  | `Assoc _ as nested -> Masc.Tui_decode_fields.optional_string_field nested field
   | value ->
       Error
         (Printf.sprintf "schedule %s must be an object or null: %s"
@@ -829,33 +829,33 @@ let required_schedule_json_field json field =
 
 let decode_schedule_row json =
   let* sch_schedule_instance_id =
-    required_string_field json "schedule_instance_id"
+    Masc.Tui_decode_fields.required_string_field json "schedule_instance_id"
   in
-  let* sch_schedule_id = required_string_field json "schedule_id" in
-  let* sch_status = required_string_field json "status" in
-  let* sch_source = required_string_field json "source" in
+  let* sch_schedule_id = Masc.Tui_decode_fields.required_string_field json "schedule_id" in
+  let* sch_status = Masc.Tui_decode_fields.required_string_field json "status" in
+  let* sch_source = Masc.Tui_decode_fields.required_string_field json "source" in
   let* sch_requested_by = decode_schedule_actor json "requested_by" in
   let* sch_scheduled_by = decode_schedule_actor json "scheduled_by" in
-  let* sch_requested_at_iso = required_string_field json "requested_at_iso" in
-  let* sch_due_at_iso = optional_string_field json "due_at_iso" in
-  let* sch_next_due_at_iso = optional_string_field json "next_due_at_iso" in
-  let* sch_expires_at_iso = optional_string_field json "expires_at_iso" in
+  let* sch_requested_at_iso = Masc.Tui_decode_fields.required_string_field json "requested_at_iso" in
+  let* sch_due_at_iso = Masc.Tui_decode_fields.optional_string_field json "due_at_iso" in
+  let* sch_next_due_at_iso = Masc.Tui_decode_fields.optional_string_field json "next_due_at_iso" in
+  let* sch_expires_at_iso = Masc.Tui_decode_fields.optional_string_field json "expires_at_iso" in
   let* sch_recurrence_summary =
-    required_string_field json "recurrence_summary"
+    Masc.Tui_decode_fields.required_string_field json "recurrence_summary"
   in
   let* sch_recurrence = required_schedule_json_field json "recurrence" in
-  let* sch_payload_digest = required_string_field json "payload_digest" in
+  let* sch_payload_digest = Masc.Tui_decode_fields.required_string_field json "payload_digest" in
   let* sch_payload = required_schedule_json_field json "payload" in
-  let* sch_payload_kind = optional_string_field json "payload_kind" in
-  let* sch_payload_support = required_string_field json "payload_support" in
+  let* sch_payload_kind = Masc.Tui_decode_fields.optional_string_field json "payload_kind" in
+  let* sch_payload_support = Masc.Tui_decode_fields.required_string_field json "payload_support" in
   let* sch_payload_dispatch_tool =
-    optional_string_field json "payload_dispatch_tool"
+    Masc.Tui_decode_fields.optional_string_field json "payload_dispatch_tool"
   in
-  let* sch_payload_target = optional_string_field json "payload_target" in
+  let* sch_payload_target = Masc.Tui_decode_fields.optional_string_field json "payload_target" in
   let* sch_payload_keeper_name =
-    optional_string_field json "payload_keeper_name"
+    Masc.Tui_decode_fields.optional_string_field json "payload_keeper_name"
   in
-  let* sch_payload_summary = optional_string_field json "payload_summary" in
+  let* sch_payload_summary = Masc.Tui_decode_fields.optional_string_field json "payload_summary" in
   let* sch_last_wake_status =
     (* The server writes this from [wake_status_to_string], so a word the
        contract does not list is a wire error, not a fourth status. *)
@@ -998,15 +998,15 @@ let decode_schedule_row json =
     }
 
 let decode_schedule_rows json_list =
-  decode_list "requests" decode_schedule_row json_list
+  Masc.Tui_decode_fields.decode_list "requests" decode_schedule_row json_list
 
 (* The snapshot keeps the server's ok/unknown split: on a store read failure
    the route reports [status = "unknown"] with a null [request_count] and an
    empty row list, and the pane must not draw that as "no schedules". *)
 let decode_schedule_snapshot json =
-  let* scs_status = required_string_field json "status" in
+  let* scs_status = Masc.Tui_decode_fields.required_string_field json "status" in
   let* scs_read_error =
-    optional_string_field json "schedule_store_read_error"
+    Masc.Tui_decode_fields.optional_string_field json "schedule_store_read_error"
   in
   let* scs_request_count =
     match Yojson.Safe.Util.member "request_count" json with
@@ -1075,7 +1075,7 @@ let decode_schedule_snapshot json =
           (Printf.sprintf "schedules counts must be an object or null: %s"
              (Yojson.Safe.to_string other))
   in
-  let* rows = required_list_field json "requests" in
+  let* rows = Masc.Tui_decode_fields.required_list_field json "requests" in
   let* scs_rows = decode_schedule_rows rows in
   let* scs_runner_status = Tui_decode.decode_schedule_runner_status json in
   Ok
@@ -1098,13 +1098,13 @@ let load_schedules ~(host : string) ~(port : int) :
 
 let decode_schedule_wake json =
   let* swk_status =
-    let* word = required_string_field json "status" in
+    let* word = Masc.Tui_decode_fields.required_string_field json "status" in
     Schedule_contract_values.wake_status_of_string word
     |> Result.map_error Schedule_contract_values.decode_error_to_string
   in
-  let* swk_started_at_iso = optional_string_field json "started_at_iso" in
-  let* swk_finished_at_iso = optional_string_field json "finished_at_iso" in
-  let* swk_error = optional_string_field json "error" in
+  let* swk_started_at_iso = Masc.Tui_decode_fields.optional_string_field json "started_at_iso" in
+  let* swk_finished_at_iso = Masc.Tui_decode_fields.optional_string_field json "finished_at_iso" in
+  let* swk_error = Masc.Tui_decode_fields.optional_string_field json "error" in
   Ok { swk_status; swk_started_at_iso; swk_finished_at_iso; swk_error }
 
 (* The lookup answers four ways and only one of them carries a schedule. The
@@ -1112,16 +1112,16 @@ let decode_schedule_wake json =
    history, because "this schedule has never woken" and "the store could not
    be read" are the two readings this pane exists to keep apart. *)
 let decode_schedule_wake_history json =
-  let* status = required_string_field json "status" in
-  let* swh_schedule_id = required_string_field json "schedule_id" in
+  let* status = Masc.Tui_decode_fields.required_string_field json "status" in
+  let* swh_schedule_id = Masc.Tui_decode_fields.required_string_field json "schedule_id" in
   match status with
   | "found" ->
-      let* wake_jsons = required_list_field json "wakes" in
-      let* swh_wakes = decode_list "wakes" decode_schedule_wake wake_jsons in
+      let* wake_jsons = Masc.Tui_decode_fields.required_list_field json "wakes" in
+      let* swh_wakes = Masc.Tui_decode_fields.decode_list "wakes" decode_schedule_wake wake_jsons in
       (* [wake_count] rides the wire for a JSON reader; the pane counts the
          list it is about to draw, so the two cannot drift apart on screen. *)
       let* swh_retention_per_schedule =
-        required_int_field json "wake_retention_per_schedule"
+        Masc.Tui_decode_fields.required_int_field json "wake_retention_per_schedule"
       in
       Ok { swh_schedule_id; swh_wakes; swh_retention_per_schedule }
   | "not_found" ->
@@ -1129,7 +1129,7 @@ let decode_schedule_wake_history json =
   | "invalid_id" -> Error "the schedule lookup was asked for an empty id"
   | "unavailable" ->
       let reason =
-        match optional_string_field json "reason" with
+        match Masc.Tui_decode_fields.optional_string_field json "reason" with
         | Ok (Some reason) -> reason
         | Ok None | Error _ -> "no reason given"
       in
@@ -1157,7 +1157,7 @@ let load_board_list ~(host : string) ~(port : int)
   match fetch_board ~host ~port ~sort_by ~hearth with
   | Error err -> Error ("board load failed: " ^ err)
   | Ok json ->
-      let* posts = required_list_field json "posts" in
+      let* posts = Masc.Tui_decode_fields.required_list_field json "posts" in
       decode_board_posts posts
 
 (** Load board post detail from /api/v1/board/<postId> *)
@@ -1175,7 +1175,7 @@ let load_board_post ~(host : string) ~(port : int) ~(post_id : string) :
             | value -> value
           in
           let* post = decode_board_post ~require_body:true post_json in
-          let* comments_json = optional_list_field json "comments" in
+          let* comments_json = Masc.Tui_decode_fields.optional_list_field json "comments" in
           let* comments = decode_board_comments comments_json in
           Ok (post, comments))
 
@@ -1427,30 +1427,30 @@ let load_overview ~(host : string) ~(port : int) :
   match fetch_dashboard_briefing ~host ~port with
   | Error err -> Error ("overview load failed: " ^ err)
   | Ok json ->
-      let* summary = required_object_field json "summary" in
+      let* summary = Masc.Tui_decode_fields.required_object_field json "summary" in
       let* incidents =
-        let* items = optional_list_field json "incidents" in
+        let* items = Masc.Tui_decode_fields.optional_list_field json "incidents" in
         decode_attention_items items
       in
       let* attention_queue =
-        let* items = optional_list_field json "attention_queue" in
+        let* items = Masc.Tui_decode_fields.optional_list_field json "attention_queue" in
         decode_attention_items items
       in
-      let* agent_briefs = optional_list_field json "agent_briefs" in
-      let* keeper_briefs = optional_list_field json "keeper_briefs" in
+      let* agent_briefs = Masc.Tui_decode_fields.optional_list_field json "agent_briefs" in
+      let* keeper_briefs = Masc.Tui_decode_fields.optional_list_field json "keeper_briefs" in
       (* Keepers the server listed but could not build a row for. They are
          not in [keeper_briefs]; before #38090 they were in neither, and the
          Overview counted a fleet that had lost a Keeper as a smaller one. *)
       let* keepers_unread =
-        let* items = required_list_field json "keepers_unread" in
+        let* items = Masc.Tui_decode_fields.required_list_field json "keepers_unread" in
         Keeper_snapshot_unread.list_of_json (`List items)
       in
       let* ov_keeper_listing =
-        let* listing = required_object_field json "keepers_listing" in
+        let* listing = Masc.Tui_decode_fields.required_object_field json "keepers_listing" in
         Keeper_snapshot_unread.listing_of_json listing
       in
       let* ov_workspace_health =
-        let* workspace_health = required_string_field summary "workspace_health" in
+        let* workspace_health = Masc.Tui_decode_fields.required_string_field summary "workspace_health" in
         decode_workspace_health workspace_health
       in
       (* Counted from the lists the briefing carries. The summary object
@@ -1487,7 +1487,7 @@ let load_overview ~(host : string) ~(port : int) :
             keepers_unread
       in
       let ov_mcp_agents = List.length agent_briefs in
-      let* ov_generated_at = required_string_field json "generated_at" in
+      let* ov_generated_at = Masc.Tui_decode_fields.required_string_field json "generated_at" in
       Ok
         {
           ov_workspace_health;

@@ -56,7 +56,8 @@ while IFS=$'\t' read -r pr author base head branch draft; do
           waits=merge
           if [ "${pr_stack:-null}" != null ]; then
             if GUARD_GH="$GH" bash "$here/merge-guard.sh" --check --repo "$repo" --pr "$pr" --head "$head" >/dev/null; then
-              waits="merge native stack through #$pr"
+              target=$(printf '%s' "$pr_stack" | jq -r '.base.ref')
+              waits="merge native stack through #$pr into $target"
             else waits="native stack review or changed scope"; fi
           elif [ "$base" != main ]; then
             parent=$(printf '%s\n' "$rows" | awk -F '\t' -v base="$base" '$5==base {print $1; exit}')

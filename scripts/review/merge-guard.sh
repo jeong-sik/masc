@@ -34,6 +34,7 @@ snapshot_scope() {
 }
 scope=$(snapshot_scope)
 native=$(printf '%s' "$scope" | jq -r '.stack != null')
+target=$(printf '%s' "$scope" | jq -r 'if .stack != null then .stack.base.ref else .scope[0].identity.base.ref end')
 if [ "$native" = false ] && [ "$(printf '%s' "$scope" | jq -r '.scope[0].identity.base.ref')" != main ]; then
   echo "WAITING PARENT #$pr: non-native branch chain; land the parent and retarget to main" >&2
   exit 2
@@ -60,10 +61,10 @@ if [ "$scope" != "$current_scope" ]; then
 fi
 members=$(printf '%s' "$scope" | jq -r '[.scope[] | select(.identity.state == "open") | "#" + (.number|tostring)] | join(", ")')
 if [ "$check" -eq 1 ]; then
-  echo "WOULD MERGE $members through #$selected_pr head $selected_head native_stack=$native"
+  echo "WOULD MERGE $members through #$selected_pr into $target head $selected_head native_stack=$native"
   exit 0
 fi
 # GitHub exposes a SHA precondition only for the selected PR, not an all-head
 # compare-and-swap. The snapshot is admission evidence, not an atomic guarantee.
 response=$("$GH" api -X PUT "repos/$repo/pulls/$selected_pr/merge-async" -f merge_method=squash -f "sha=$selected_head")
-printf 'ASYNC MERGE RECEIPT for %s (acceptance is not completion):\n%s\n' "$members" "$response"
+printf 'ASYNC MERGE RECEIPT for %s into %s (acceptance is not completion):\n%s\n' "$members" "$target" "$response"

@@ -291,13 +291,13 @@ class SourceReviewPolicy(unittest.TestCase):
         self.assertIn('/actions/runs?', self.calls.read_text())
         self.assertNotIn('PUT ', self.calls.read_text())
 
-    def test_native_custom_base_and_closed_lower_member(self):
+    def test_native_feature_branch_target_and_closed_lower_member(self):
         self.native_stack()
-        self.state['stack_base'] = 'trunk'
-        self.state['prs']['2'].update(base='trunk',pr_state='closed',merged=True,reviews=[])
+        self.state['stack_base'] = 'feature/integration'
+        self.state['prs']['2'].update(base='feature/integration',pr_state='closed',merged=True,reviews=[])
         result = self.invoke('merge-guard.sh','--check')
         self.assert_ok(result)
-        self.assertIn('WOULD MERGE #1 through #1', result.stdout)
+        self.assertIn('WOULD MERGE #1 through #1 into feature/integration', result.stdout)
         self.assertNotIn('/pulls/2/reviews', self.calls.read_text())
 
     def test_native_membership_drift_prevents_write(self):
@@ -309,20 +309,22 @@ class SourceReviewPolicy(unittest.TestCase):
 
     def test_native_async_acceptance_is_receipt_not_completion(self):
         self.native_stack()
+        self.state['stack_base'] = 'feature/integration'
         result = self.invoke('merge-guard.sh')
         self.assert_ok(result)
-        self.assertIn('ASYNC MERGE RECEIPT for #2, #1', result.stdout)
+        self.assertIn('ASYNC MERGE RECEIPT for #2, #1 into feature/integration', result.stdout)
         self.assertIn('fixture-request', result.stdout)
         self.assertIn('PUT repos/team/repo/pulls/1/merge-async', self.calls.read_text())
         self.assertNotIn('PUT repos/team/repo/pulls/2', self.calls.read_text())
 
     def test_native_queue_reports_scope_not_parent_wait(self):
         self.native_stack()
+        self.state['stack_base'] = 'feature/integration'
         self.fixture.write_text(json.dumps(self.state))
         result = subprocess.run(['bash',str(HERE/'queue-ledger.sh'),'--repo','team/repo'],
                                 env=self.env,text=True,capture_output=True)
         self.assert_ok(result)
-        self.assertIn('merge native stack through #1', result.stdout)
+        self.assertIn('merge native stack through #1 into feature/integration', result.stdout)
         self.assertNotIn('parent #2', result.stdout)
 
 if __name__=='__main__': unittest.main()

@@ -181,10 +181,10 @@ type async_msg =
   | Keeper_chat_history_loaded of
       int
       * string
-      * (Keeper_chat_history.decoded, string) result
-      * (Keeper_chat_history.decoded, string) result
+      * (Masc_tui_keeper_chat_history.decoded, string) result
+      * (Masc_tui_keeper_chat_history.decoded, string) result
   | Keeper_chat_copy_loaded of
-      int * string * (Keeper_chat_history.decoded, string) result
+      int * string * (Masc_tui_keeper_chat_history.decoded, string) result
   | Keeper_chat_journal_loaded of
       { keeper_name : string
       ; operation_id : string
@@ -197,7 +197,7 @@ type async_msg =
   | Context_inspector_loaded of
       int * string * Masc_tui_context_inspector.reading
   | Keeper_chat_older_loaded of
-      int * string * float * (Keeper_chat_history.page, string) result
+      int * string * float * (Masc_tui_keeper_chat_history.page, string) result
   | Lanes_loaded of
       ( Masc.Tui_decode.keeper_lanes_snapshot
         * Masc.Tui_decode.keeper_secret_projection list,

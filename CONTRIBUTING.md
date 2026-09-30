@@ -152,9 +152,10 @@ CI is manual and review comes first. Ordinary stacked PRs use independent
 function, logic and code-cleanliness reviews; approve when no P0/P1/P2 issue
 remains and collect P3 issues for later. There is no PR/push/nightly CI.
 
-`pr-check.yml` provides explicit syntax/configuration/credential checks in a
-two-minute job. `ci.yml` builds only Core for the bottom of a stack, also
-within two minutes. At `release/vX.Y.Z`, `release-candidate.yml` runs the full
+`pr-check.yml` provides explicit syntax/configuration/credential checks.
+`ci.yml` builds only Core for the bottom of a stack. Prefer short, focused
+checks: the constitution's "about two minutes" describes their intended scale,
+not a timeout or a pass/fail threshold. At `release/vX.Y.Z`, `release-candidate.yml` runs the full
 compile, typecheck, behavior and installation cycle. Tag publication waits
 for full checks and tests. See [the workflow](docs/CI-REVIEW-WORKFLOW.md).
 

@@ -4203,7 +4203,23 @@ let launch_keeper_config_view state ~mailbox keeper_name =
       enqueue_async mailbox (Keeper_config_view_loaded (request, result)))
     (fun () -> Masc_tui_loader.load_keeper_config_view ~host ~port ~keeper_name)
 
+let item_authority_ready state =
+  match state.server_identity with
+  | Some identity ->
+      identity.Tui_decode.sid_state_ready <> Some false
+      && not (String.equal identity.sid_base_path "")
+      && not (String.equal identity.sid_masc_root "")
+  | None -> false
+
+let withdraw_keeper_items_reading state =
+  state.item_account <- None;
+  state.item_account_error <- Some "Workspace identity unavailable or changed";
+  state.detail_reads <- List.filter
+      (fun request -> request.drr_tab <> Detail_items) state.detail_reads
+
 let launch_keeper_items state ~mailbox keeper_name =
+  if not (item_authority_ready state) then withdraw_keeper_items_reading state
+  else
   let request = mark_detail_read_started state ~tab:Detail_items ~keeper:keeper_name in
   let host = server_peer_host in
   let port = state.port in
@@ -10630,6 +10646,20 @@ let apply_server_identity_reading state reading =
      workspace becomes ready again before those reads finish. *)
   if not (same_currency_workspace state.server_identity (Result.to_option reading))
   then withdraw_currency_authority state;
+  let same_item_authority =
+    match state.server_identity, reading with
+    | Some previous, Ok current ->
+        previous.Tui_decode.sid_state_ready <> Some false
+        && current.Tui_decode.sid_state_ready <> Some false
+        && String.equal
+             (Masc_tui_types.canonical_path previous.sid_base_path)
+             (Masc_tui_types.canonical_path current.sid_base_path)
+        && String.equal
+             (Masc_tui_types.canonical_path previous.sid_masc_root)
+             (Masc_tui_types.canonical_path current.sid_masc_root)
+    | None, _ | Some _, Error _ -> false
+  in
+  if not same_item_authority then withdraw_keeper_items_reading state;
   state.server_identity <- Masc_tui_types.server_identity_of_refresh reading;
   state.workspace_identity <-
     Masc_tui_types.workspace_identity_of_refresh
@@ -13657,6 +13687,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            apply_approval_observation state
              { ao_ticket; ao_result = Error err })
       approval_ticket;
+      withdraw_keeper_items_reading state;
       state.server_identity <- None;
       withdraw_currency_authority state;
       state.connection_status <- Masc_tui_types.Disconnected;
@@ -13931,12 +13962,14 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         | Some keeper -> String.equal keeper.k_name request.drr_keeper
         | None -> false
       in
-      if current && still_selected then
+      if current && still_selected && item_authority_ready state then
         match result with
         | Ok account ->
             state.item_account <- Some (request.drr_keeper, account);
             state.item_account_error <- None
-        | Error detail -> state.item_account_error <- Some detail)
+        | Error detail ->
+            state.item_account <- None;
+            state.item_account_error <- Some detail)
   | Keeper_sandbox_view_loaded (request, result) -> (
       let keeper_name = request.drr_keeper in
       let current = Masc_tui_types.finish_detail_read state request in

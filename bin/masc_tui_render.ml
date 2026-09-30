@@ -6786,7 +6786,34 @@ type client_table_column =
   | Client_status_column | Client_name_column | Client_type_column
   | Client_acting_for_column | Client_task_column | Client_last_seen_column
 
+let render_client_detail state (client : Masc.Tui_decode.client_row) =
+  let terminal_rows, cols = get_terminal_size () in
+  let width = max 1 (framed_inner_width cols - 2) in
+  let field label value =
+    ("  " ^ Ansi.bold ^ label ^ Ansi.reset)
+    :: (Message_layout.wrap_words ~max_cells:width (Terminal_text.single_line value)
+        |> List.map (fun line -> "  " ^ line))
+  in
+  let optional = function Some value -> value | None -> Masc_tui_theme.Glyph.no_value in
+  let lines = field "Name:" client.cr_name
+    @ field "Status:" (Masc.Tui_decode.client_status_to_string client.cr_status)
+    @ field "Type:" client.cr_agent_type
+    @ field "Acting for:" (optional client.cr_keeper_name)
+    @ field "Task:" (optional client.cr_current_task)
+    @ field "Last seen (as read):" client.cr_last_seen
+    @ field "Observation age:" (Masc_tui_wire_age.text ~now:(Unix.gettimeofday ()) client.cr_last_seen)
+  in
+  surface_chrome state ~terminal_rows ~cols ~surface_key:"client-detail"
+    ~frame:Chrome_overlay ~title:(screen_title " MASC Client Detail")
+    ~hints:"j/k:scroll  PgUp/PgDn:page  g/G:first/last  Esc:clients"
+    ~overflow:(Scrolled {scroll=state.client_detail_scroll;
+                        report=(fun scroll -> Client_detail_scroll scroll)})
+    ~body:(fun ~budget:_ c -> List.iter c.push lines)
+
 let render_clients (state : state) =
+  match state.client_detail with
+  | Some client -> render_client_detail state client
+  | None ->
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
@@ -6822,6 +6849,15 @@ let render_clients (state : state) =
   (* Measured from the rows like the verification submitter column: a fixed
      width puts the columns after the longest name out of line with the
      rest, and session names are the column the eye scans by. *)
+  let table_width = max 0 (framed_inner_width cols - 2) in
+  let last_seen_width =
+    List.fold_left (fun widest (row : Masc.Tui_decode.client_row) ->
+      max widest (Message_layout.display_width (Masc_tui_wire_age.text ~now:now_s row.cr_last_seen)))
+      (Message_layout.display_width "LAST SEEN") clients
+    (* The table keeps its status and identity floor. Exact observations that
+       exceed this share are read in the selected client's scrollable detail. *)
+    |> min (max 9 (table_width - 9 - 16 - 2 * Masc_tui_table.cell_gap))
+  in
   let name_width =
     List.fold_left
       (fun widest (row : Masc.Tui_decode.client_row) ->
@@ -6830,6 +6866,10 @@ let render_clients (state : state) =
               (Terminal_text.single_line row.Masc.Tui_decode.cr_name)))
       16 clients
     |> min 24
+    (* A future or unreadable stamp is deliberately shown verbatim by the age
+       projection. Give its measured width priority over the identity floor,
+       rather than disguising a raw clock as a folded age. *)
+    |> min (max 1 (table_width - 9 - last_seen_width - 2 * Masc_tui_table.cell_gap))
   in
   (* The column carries a reading only where a client is bound to a Keeper
      under a name of its own. Where no row has one, its cells and header are
@@ -6837,7 +6877,8 @@ let render_clients (state : state) =
      loses them: "last seen 01:4…" is not a time. *)
   let acting_for_drawn = Masc_tui_types.clients_act_for_others clients in
   let column_width = function
-    | Client_status_column | Client_task_column | Client_last_seen_column -> 9
+    | Client_status_column | Client_task_column -> 9
+    | Client_last_seen_column -> last_seen_width
     | Client_name_column -> name_width
     | Client_type_column -> 10
     | Client_acting_for_column -> 16
@@ -6849,7 +6890,7 @@ let render_clients (state : state) =
   in
   (* Keep identity, state and the observation age. Bindings, implementation
      type and task links yield in that order before the clock is cut. *)
-  let layout = Masc_tui_table.fit ~inner_width:(max 0 (framed_inner_width cols - 2))
+  let layout = Masc_tui_table.fit ~inner_width:table_width
     ~width:column_width ~flex:Client_name_column
     ~drop_order:[ Client_acting_for_column; Client_type_column; Client_task_column ] columns in
   let cells ~status ~name ~agent_type ~keeper ~task ~last_seen =

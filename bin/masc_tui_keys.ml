@@ -588,6 +588,7 @@ let for_surface = function
       @ row_list_jumps @ listing_meta
   | Clients ->
       [ b Navigate "j/k" "move" ~help:"move the roster cursor"
+      ; b Act "Enter" "detail" ~help:"read the client's full identity and observation"
         (* Two doors, one action: both call [goto_surface Runtime]. As two
            bindings the sheet printed the answer twice, one row under the
            other, and the second row's help differed from the first by a

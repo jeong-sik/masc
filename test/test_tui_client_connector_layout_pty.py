@@ -2,10 +2,15 @@
 import json
 import os
 import sys
+import threading
 
 import test_tui_keyboard_input as h
 
-SOURCE_MODULES = ("bin/masc_tui_render.ml", "bin/masc_tui_table.ml")
+SOURCE_MODULES = ("bin/masc_tui_render.ml", "bin/masc_tui_table.ml", "bin/masc_tui.ml",
+                  "bin/masc_tui_types.ml", "bin/masc_tui_keys.ml")
+FUTURE = "2099-01-01T00:00:00Z"
+MALFORMED = "unparseable-clock-reading"
+LONG_STAMP = "unreadable-" + "longclock" * 30 + "-STAMPEND"
 
 
 def screen(output):
@@ -30,8 +35,10 @@ def run_tables(executable):
     clients["clients"] = [
         h.clients_row("long-" + "client" * 20 + "-END", "codex", "active", "owner", "task-123"),
         h.clients_row("한" * 40 + "-END", "keeper", "busy", "other-owner", "task-456"),
+        h.clients_row("future", "codex", "listening", None, None),
+        h.clients_row("malformed", "codex", "inactive", None, None),
     ]
-    for row, last_seen in zip(clients["clients"], ("", "bad-clock")):
+    for row, last_seen in zip(clients["clients"], ("", "bad-clock", FUTURE, MALFORMED)):
         row["last_seen"] = last_seen
     fixtures[h.CONNECTORS_PATH] = (200, {
         "total": 3, "active_count": 2,
@@ -57,7 +64,8 @@ def run_tables(executable):
                 if surface == "Clients":
                     header = next(row for row in rows if "LAST SEEN" in row and "STATUS" in row)
                     boundaries = [header.index("STATUS"), header.index("NAME"), header.index("LAST SEEN")]
-                    for name, status, seen in (("long-", "active", "never"), ("한", "busy", "bad-clock")):
+                    for name, status, seen in (("long-", "active", "never"), ("한", "busy", "bad-clock"),
+                                              ("future", "listening", FUTURE), ("malformed", "inactive", MALFORMED)):
                         row = next(row for row in rows if name in row and seen in row)
                         assert cell_slice(row, boundaries[0], boundaries[1]) == status, row
                         assert cell_slice(row, boundaries[2], width - 2) == seen, row
@@ -80,6 +88,75 @@ def run_tables(executable):
         os.write(fd, b"q")
 
     h.run_terminal_scenario(executable, description="Clients and Connectors align CJK names with observations",
+                            interact=interact, http_fixtures=fixtures)
+
+
+def run_client_exact_read(executable):
+    fixtures = h.clients_http_fixtures()
+    _, payload = fixtures["/api/v1/dashboard/clients"]
+    row = h.clients_row("raw-clock-client", "codex", "active", "owner", "task-123")
+    row["last_seen"] = LONG_STAMP
+    payload["clients"] = [row]
+
+    def interact(process, fd, _slave, output, _base):
+        h.palette_go(process, fd, output, b"go Clients", b"raw-clock-client")
+        h.resize_and_wait(process, fd, output, rows=24, columns=60,
+                          needle=b"raw-clock-client", final_cursor=b"\x1b[?25l")
+        h.send_and_wait(process, fd, output, b"\r", b"MASC Client Detail")
+        # A tall frame reconstructs the entire raw observation, while G in
+        # a normal-height frame reaches its wrapped final evidence row.
+        h.resize_and_wait(process, fd, output, rows=100, columns=60,
+                          needle=b"STAMPEND", final_cursor=b"\x1b[?25l")
+        h.drain_until_quiet(process, fd, output)
+        compact = b"".join(b"".join(screen(output).values()).split())
+        compact = h.unwrapped(compact).replace(b" ", b"")
+        assert LONG_STAMP.encode() in compact, compact
+        h.resize_and_wait(process, fd, output, rows=24, columns=60,
+                          needle=b"MASC Client Detail", final_cursor=b"\x1b[?25l")
+        h.send_and_wait(process, fd, output, b"G", b"STAMPEND")
+        h.drain_until_quiet(process, fd, output)
+        assert any(b"STAMPEND" in line for line in screen(output).values()), screen(output)
+        h.send_and_wait(process, fd, output, b"g", b"raw-clock-client")
+        # Enter and refresh inside the read cannot change the roster cursor
+        # or substitute another client; Esc returns to the same row.
+        os.write(fd, b"r\r")
+        h.drain_until_quiet(process, fd, output)
+        assert any(b"MASC Client Detail" in line for line in screen(output).values()), screen(output)
+        h.send_and_wait(process, fd, output, b"\x1b", b"LAST SEEN")
+        assert any(b"raw-clock-client" in line for line in screen(output).values()), screen(output)
+        os.write(fd, b"q")
+
+    h.run_terminal_scenario(executable, description="Client detail retains arbitrarily long observation evidence",
+                            interact=interact, http_fixtures=fixtures)
+
+
+def run_retained_read(executable):
+    fixtures = h.clients_http_fixtures()
+    _, payload = fixtures["/api/v1/dashboard/clients"]
+    failed = threading.Event()
+    fixtures["/api/v1/dashboard/clients"] = lambda: ((503, {"error": "reading failed"})
+                                                        if failed.is_set() else (200, payload))
+    connector_payload = {"total": 1, "active_count": 1, "connectors": [{
+        "connector_id": "discord", "display_name": "RetainedConnector", "available": True,
+        "connected": True, "status": "connected", "channel": "#retained"}]}
+    fixtures[h.CONNECTORS_PATH] = lambda: ((503, {"error": "reading failed"})
+                                          if failed.is_set() else (200, connector_payload))
+
+    def interact(process, fd, _slave, output, _base):
+        for surface, retained in (("Clients", b"analyst-agent"), ("Connectors", b"#retained")):
+            failed.clear()
+            h.palette_go(process, fd, output, ("go " + surface).encode(), retained)
+            failed.set()
+            h.send_and_wait(process, fd, output, b"r", b"HTTP 503")
+            h.drain_until_quiet(process, fd, output)
+            rows = screen(output)
+            assert any(retained in row for row in rows.values()), rows
+            assert not any(b"nothing here is a reading" in row for row in rows.values()), rows
+            print("CLIENT_CONNECTOR_RETAINED_READ " + json.dumps({"surface": surface,
+                  "rows": [row.decode("utf-8", "replace") for row in rows.values()]}), flush=True)
+        os.write(fd, b"q")
+
+    h.run_terminal_scenario(executable, description="Client and Connector failed refreshes retain read rows",
                             interact=interact, http_fixtures=fixtures)
 
 
@@ -121,6 +198,8 @@ def run_read_states(executable, failed):
 if __name__ == "__main__":
     executable = os.path.abspath(sys.argv[1])
     run_tables(executable)
+    run_client_exact_read(executable)
+    run_retained_read(executable)
     run_read_states(executable, False)
     run_read_states(executable, True)
     print("Client and Connector responsive layout: PASS")

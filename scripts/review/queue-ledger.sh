@@ -55,9 +55,14 @@ while IFS=$'\t' read -r pr author base head branch draft; do
         elif GUARD_GH="$GH" bash "$here/approve-guard.sh" --merge-check --repo "$repo" --pr "$pr" --head "$head" >/dev/null; then
           waits=merge
           if [ "${pr_stack:-null}" != null ]; then
-            if GUARD_GH="$GH" bash "$here/merge-guard.sh" --check --repo "$repo" --pr "$pr" --head "$head" >/dev/null; then
-              target=$(printf '%s' "$pr_stack" | jq -r '.base.ref')
-              waits="merge native stack through #$pr into $target"
+            if accepted_scope=$(GUARD_GH="$GH" bash "$here/merge-guard.sh" --check --scope-json --repo "$repo" --pr "$pr" --head "$head"); then
+              target=$(printf '%s' "$accepted_scope" | jq -r 'if .stack != null then .stack.base.ref else .scope[0].identity.base.ref end')
+              if [ "$fmt" = md ]; then
+                target=$(printf '%s' "$target" | python3 -c 'import sys; print(sys.stdin.read().replace("\\", "\\\\").replace("|", "\\|"), end="")')
+              fi
+              if [ "$(printf '%s' "$accepted_scope" | jq -r '.stack != null')" = true ]; then
+                waits="merge native stack through #$pr into $target"
+              else waits="merge into $target"; fi
             else waits="native stack review or changed scope"; fi
           elif [ "$base" != main ]; then
             parent=$(printf '%s\n' "$rows" | awk -F '\t' -v base="$base" '$5==base {print $1; exit}')

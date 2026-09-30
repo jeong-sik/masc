@@ -80,7 +80,9 @@ Do not use `--admin` or `--auto`.
 
 The API's `sha` pins the selected head, not a client-supplied vector of all lower
 heads. The final snapshot reduces races but is not an atomic all-head lock.
-GitHub's server-side checks still apply. Capture the response's `details.uuid` and retrieve its result:
+GitHub's server-side checks still apply. Receipt output labels the destination as the preflight target, not an accepted
+destination: stack metadata may still change between that read and the request.
+Capture the response's `details.uuid` and retrieve its result:
 
 ```bash
 gh api repos/OWNER/REPO/pulls/NUMBER/merge-async/UUID

@@ -22,12 +22,14 @@ before landing the child. See the [Native GitHub Stacks guide](../../docs/guides
 `merge-guard.sh --check --repo O/R --pr N --head SHA` checks each included
 PR's current head, independent trusted head-bound approval and latest blocking
 reviews or structured decision. It rechecks stack membership and included
-head/base identities before admission. Check and receipt output name the actual
+head/base identities before admission. Check output names the validated
 merge target: a native stack can land into another feature branch, whose PR
 is outside this stack scope. That is not main integration. It does not call Actions
 for an ordinary head. External coding agents use this read-only check before submitting a native
 stack via `PUT /repos/O/R/pulls/N/merge-async`; for a non-native PR, use
-`gh pr merge --match-head-commit SHA`. The asynchronous receipt is acceptance,
+`gh pr merge --match-head-commit SHA`. The asynchronous receipt labels only the preflight target, since GitHub accepts
+only the selected head SHA as a precondition; its accepted destination remains
+unconfirmed until the result is read. The receipt is acceptance,
 not completion: confirm the result and each included PR's merged state before
 reporting success. The guide above documents the request and its SHA boundary.
 

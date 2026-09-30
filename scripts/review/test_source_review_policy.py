@@ -34,6 +34,9 @@ elif re.search(r'/pulls/\d+$', endpoint):
     if count >= state.get('base_move_after', 100000): data['base']['sha'] = 'f'*40
     if fixture.get('native'):
         members = fixture.get('members', [2,1,3])
+        if fixture.get('stack_target_moves') and count > 1:
+            fixture['stack_base'] = fixture['stack_target_moves']
+            pathlib.Path(os.environ['REVIEW_FIXTURE']).write_text(json.dumps(fixture))
         data['stack'] = {'id':99,'number':10,'position':members.index(number)+1,'size':len(members),'base':{'ref':fixture.get('stack_base','main'),'sha':'c'*40}}
 elif endpoint.endswith('/stacks/10'):
     members = fixture.get('members', [2,1,3])
@@ -336,10 +339,36 @@ class SourceReviewPolicy(unittest.TestCase):
         self.state['stack_base'] = 'feature/integration'
         result = self.invoke('merge-guard.sh')
         self.assert_ok(result)
-        self.assertIn('ASYNC MERGE RECEIPT for #2, #1 into feature/integration', result.stdout)
+        self.assertIn('ASYNC MERGE RECEIPT for #2, #1 (preflight target: feature/integration; accepted destination unconfirmed', result.stdout)
         self.assertIn('fixture-request', result.stdout)
         self.assertIn('PUT repos/team/repo/pulls/1/merge-async', self.calls.read_text())
         self.assertNotIn('PUT repos/team/repo/pulls/2', self.calls.read_text())
+
+    def test_native_queue_uses_guard_target_after_initial_read(self):
+        self.native_stack()
+        self.state.update(stack_base='feature/old', stack_target_moves='feature/current')
+        self.fixture.write_text(json.dumps(self.state))
+        result=subprocess.run(['bash',str(HERE/'queue-ledger.sh'),'--repo','team/repo'],
+            env=self.env,text=True,capture_output=True)
+        self.assert_ok(result)
+        self.assertIn('merge native stack through #1 into feature/current', result.stdout)
+        self.assertNotIn('feature/old', result.stdout)
+        self.assertNotIn('PUT ', self.calls.read_text())
+
+    def test_native_queue_escapes_markdown_target_only(self):
+        for fmt, expected in [('md', r'feature/a\|b'), ('tsv', 'feature/a|b')]:
+            self.native_stack()
+            self.state['stack_base']='feature/a|b'
+            self.fixture.write_text(json.dumps(self.state))
+            result=subprocess.run(['bash',str(HERE/'queue-ledger.sh'),'--repo','team/repo','--format',fmt],
+                env=self.env,text=True,capture_output=True)
+            self.assert_ok(result)
+            self.assertIn('merge native stack through #1 into '+expected, result.stdout)
+
+    def test_guard_json_requires_read_only_check(self):
+        result=self.invoke('merge-guard.sh','--scope-json')
+        self.assertNotEqual(result.returncode,0)
+        self.assertNotIn('PUT ', self.calls.read_text())
 
     def test_native_queue_reports_scope_not_parent_wait(self):
         self.native_stack()

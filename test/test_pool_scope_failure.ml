@@ -8,12 +8,13 @@ let request mode pool ~clock ~url ~headers ~responses ~chunks =
     (* No request timeout: a failed client scope must settle this wait. *)
     Pool.request pool ~method_:`POST ~url ~headers ~body:"request" ()
   | Streaming_request ->
-    Pool.request_streaming pool ~clock ~idle_timeout_sec:30.0
+    Pool.request_streaming pool ~retention:Pool.Keep_body ~clock ~idle_timeout_sec:30.0
       ~method_:`POST ~url ~headers ~body:"request"
       ~on_response:(fun ~status:_ ~headers:_ -> incr responses)
       ~on_chunk:(fun chunk -> chunks := chunk :: !chunks) ()
     |> Result.map (function
-      | Pool.Streamed { response; _ } | Pool.Buffered response -> response)
+      | Pool.Streamed { status; headers; body; _ } -> { Pool.status; headers; body }
+      | Pool.Buffered response -> response)
 
 let start_server ~sw ~net requests =
   let listener = Eio.Net.listen ~sw ~backlog:8 net

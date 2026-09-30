@@ -47,6 +47,7 @@ let test_block_id_post_tool_round_classes () =
     ; (Prompt_block_id.Dynamic_context, false)
     ; (Prompt_block_id.Temporal_summary, false)
     ; (Prompt_block_id.Memory_os_recall, false)
+    ; (Prompt_block_id.Librarian_working_context, false)
     ; (Prompt_block_id.Operator_note, true)
     ; (Prompt_block_id.Skill_compositions, false)
     ]

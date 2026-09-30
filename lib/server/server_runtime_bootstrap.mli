@@ -100,12 +100,17 @@ type mandatory_exact_output_lane_violation =
   | Mandatory_lane_missing of { lane_id : string }
   | Mandatory_lane_without_slots of { lane_id : string }
 
+val publish_exact_output_registry_from_file : config_path:string -> unit
+(** Publish the exact-output lanes [config_path] declares and the catalog its
+    loaded runtimes give them, through the same publication boot uses. The
+    file is the authority even when its name is not [runtime.toml] and the
+    ambient configuration root names another file. For a standalone tool that
+    loads one explicit configuration, such as [bin/stagehand_model_probe.ml].
+    Raises [Env_config_core.Config_error] when a mandatory lane is unusable
+    or the registry refuses the declarations. *)
+
 module For_testing : sig
-  val configure_exact_output_registry :
-    ?config_path:string -> ?config_root:string -> unit -> unit
-  (** An explicit file is the publication authority, including noncanonical
-      filenames. Otherwise resolve [runtime.toml] from [config_root] or the
-      ambient configuration root. *)
+  val configure_exact_output_registry : ?config_root:string -> unit -> unit
 
   val mandatory_exact_output_lane_violations :
     Runtime_schema.exact_output_lane_decl list ->

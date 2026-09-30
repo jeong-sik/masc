@@ -371,7 +371,9 @@ let fusion_board_key = b Navigate "B" "Board evidence"
 
 let for_surface = function
   | Overview ->
-      [ b Navigate "m" "Usage" ~help:"account windows and Keeper usage"
+      [ b Navigate "j/k" "card" ~help:"select a Dashboard card; arrows also move"
+      ; b Navigate "Enter" "open" ~help:"open the selected card's full surface"
+      ; b Navigate "m" "Usage" ~help:"account windows and Keeper usage"
       ]
       @ listing_meta
   | Acting ->

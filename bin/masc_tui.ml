@@ -24541,7 +24541,9 @@ and is loaded on demand through keeper_skill.
                   in
                   if state.schedule_cursor < count - 1 then
                     state.schedule_cursor <- state.schedule_cursor + 1
-            | Overview -> ()
+            | Overview ->
+                state.dashboard_section <-
+                  Masc_tui_dashboard.next state.dashboard_section
             | Verification ->
                 if Option.is_some state.verification_detail_request_id then
                   state.verification_detail_scroll <-
@@ -24883,7 +24885,9 @@ and is loaded on demand through keeper_skill.
                   state.schedule_scroll <- max 0 (state.schedule_scroll - 1)
                 else if state.schedule_cursor > 0 then
                   state.schedule_cursor <- state.schedule_cursor - 1
-            | Overview -> ()
+            | Overview ->
+                state.dashboard_section <-
+                  Masc_tui_dashboard.previous state.dashboard_section
             | Verification ->
                 if Option.is_some state.verification_detail_request_id then
                   state.verification_detail_scroll <-
@@ -25200,7 +25204,30 @@ and is loaded on demand through keeper_skill.
                   | None -> ())
             (* The picker's own arm takes Enter. *)
             | Keepers Keeper_runtime_pick -> ()
-            | Overview -> ()
+            | Overview ->
+                let destination =
+                  match state.dashboard_section with
+                  | Masc_tui_dashboard.Attention ->
+                      if approvals_surface_pending state > 0
+                         || not (approvals_reading_current state)
+                      then Approvals else Keepers Keeper_list
+                  | Masc_tui_dashboard.Work -> Planning
+                  | Masc_tui_dashboard.Goals -> Planning
+                  | Masc_tui_dashboard.Keepers -> Keepers Keeper_list
+                  | Masc_tui_dashboard.Usage -> Metrics
+                in
+                goto_surface state ~mailbox:async_messages destination;
+                (match state.dashboard_section with
+                 | Masc_tui_dashboard.Work ->
+                     state.planning_mode <- Planning_list;
+                     state.task_detail_id <- None;
+                     state.task_focus <- Masc_tui_overview_tasks.focus_list state.tasks
+                 | Masc_tui_dashboard.Goals ->
+                     state.planning_mode <- Planning_list;
+                     state.task_detail_id <- None;
+                     state.task_focus <- Masc_tui_overview_tasks.No_task_focus
+                 | Masc_tui_dashboard.Attention | Masc_tui_dashboard.Keepers
+                 | Masc_tui_dashboard.Usage -> ())
             | Keepers Keeper_list ->
                 (match List.nth_opt state.keepers state.keeper_cursor with
                  | Some keeper ->

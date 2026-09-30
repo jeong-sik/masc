@@ -5252,6 +5252,7 @@ type state = {
      by id. An index into the rows would name another task after a poll
      drops a finished one. *)
   mutable task_focus: Masc_tui_overview_tasks.focus;
+  mutable dashboard_section: Masc_tui_dashboard.section;
   (* What the last backlog read said about the rows. [tasks] holds the same
      rows when they were read and [] otherwise; this says which of the two
      an empty [tasks] is. [tasks_error] stays what the Tasks section prints,
@@ -7840,6 +7841,7 @@ let create_state
   operator_stalled = None;
   goals_to_confirm = Masc_tui_agenda.Not_read;
   task_focus = Masc_tui_overview_tasks.No_task_focus;
+  dashboard_section = Masc_tui_dashboard.Attention;
   task_reading = Masc_tui_overview_tasks.Rows_unread;
   help_open = false;
   keeper_deletions_open = false;

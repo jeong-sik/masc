@@ -404,7 +404,7 @@ let dashboard_goal_lines (state : state) =
         List.filteri (fun index _ -> index < dashboard_preview_rows) active
       in
       let heading =
-        Printf.sprintf " Goals · %d active · metric and linked tasks are separate"
+        Printf.sprintf " Goals · %d active"
           (List.length active)
       in
       heading
@@ -592,37 +592,133 @@ let render_overview (state : state) =
     in
     title :: List.map (fun line -> "   " ^ line) body
   in
-  let summary =
-    dashboard_goal_lines state
-    @ [ "" ]
-    @ dashboard_work_lines state
-    @ [ "" ]
-    @ dashboard_usage_lines state
-    @ [ "" ]
-    @ attention_lines
+  let palette =
+    Masc_tui_terminal_palette.snapshot_palette
+      (Masc_tui_terminal_palette.snapshot ())
   in
-  (* The shared chrome holds the rows the budget has no room for and says how
-     many, so a short terminal that loses "Needs you" off the bottom shows
-     that something was not drawn. *)
+  let card section title summary details status : Masc_tui_dashboard.card =
+    { section; title; summary; details; status }
+  in
+  let split_lines = function
+    | [] -> ("not observed", [])
+    | head :: tail -> (String.trim head, List.map String.trim tail)
+  in
+  let work_head, work_details =
+    match state.task_flow with
+    | None -> split_lines (dashboard_work_lines state)
+    | Some flow ->
+        let current = flow.Masc_tui_task_flow.current in
+        let daily = List.map (fun day -> day.Masc_tui_task_flow.d_completed) flow.daily in
+        let headline =
+          Printf.sprintf "%d working · %d verifying · %d todo"
+            current.in_progress current.awaiting_verification current.todo
+        in
+        let recent = flow.recent in
+        let details =
+          [ Printf.sprintf "24h · %d created · %d currently done · %d cancelled"
+              recent.created recent.completed recent.cancelled
+          ; Printf.sprintf "%d claimed · %d awaiting verification"
+              current.claimed current.awaiting_verification
+          ; Printf.sprintf "Current Done states · %d UTC days" (List.length daily)
+          ; Chart.sparkline ~min:0 daily ]
+          @ Chart.braille_plot ~width:40 ~height:3 ~min_val:0.
+              (List.map float_of_int daily)
+          @ (match state.tasks_error with
+             | None -> []
+             | Some reason -> [ "Coverage: " ^ Terminal_text.single_line reason ])
+        in
+        (headline, details)
+  in
+  let goal_head, goal_details = split_lines (dashboard_goal_lines state) in
+  let usage_head, usage_details = split_lines (dashboard_usage_lines state) in
+  let attention_head, _ = split_lines attention_lines in
+  let attention_details =
+    List.map
+      (fun (item : attention_item) ->
+        let target =
+          match item.ai_target with
+          | Attention_keeper name -> Terminal_text.single_line name ^ ": "
+          | Attention_other _ -> ""
+        in
+        attention_severity_label item.ai_severity ^ " · "
+        ^ (match item.ai_blocker_summary with
+           | Some cause -> target ^ Terminal_text.single_line cause
+           | None -> Terminal_text.single_line item.ai_summary))
+      attention
+  in
+  let attention_status =
+    if List.exists
+         (fun item -> match item.ai_severity with
+           | Attention_critical | Attention_bad -> true
+           | Attention_warning | Attention_info -> false)
+         attention
+    then Masc_tui_theme.Bad
+    else if attention <> [] then Masc_tui_theme.Warn
+    else Masc_tui_theme.Info
+  in
+  let keeper_details =
+    match state.overview with
+    | None -> [ "Waiting for a Keeper snapshot" ]
+    | Some overview ->
+        List.map
+          (fun keeper ->
+            let phase =
+              match keeper.okp_paused, keeper.okp_phase with
+              | Some true, _ -> "paused"
+              | (Some false | None), Keeper_phase phase ->
+                  Tui_decode.keeper_phase_to_string phase
+              | (Some false | None), Keeper_phase_absent -> "no runtime phase"
+              | (Some false | None), Keeper_phase_unreadable _ -> "phase unreadable"
+            in
+            Terminal_text.single_line keeper.okp_name ^ " · " ^ phase)
+          overview.ov_keeper_rows
+  in
+  let attention_destination =
+    if approvals_surface_pending state > 0 || not (approvals_reading_current state)
+    then "Approvals"
+    else "Keepers"
+  in
+  let cards =
+    [ card Masc_tui_dashboard.Attention attention_head
+        (Printf.sprintf "%s approvals · Enter opens %s" approval_count attention_destination)
+        (if attention_details = [] then
+           match empty_page_of ~snapshot:state.overview ~error:overview_error with
+           | Page_empty -> [ "Nothing needs attention." ]
+           | Page_unread -> [ unread_note ]
+           | Page_failed -> []
+         else attention_details)
+        attention_status
+    ; card Masc_tui_dashboard.Work "Work · task flow" work_head
+        work_details Masc_tui_theme.Info
+    ; card Masc_tui_dashboard.Goals goal_head
+        "Measured outcomes · task counts are separate"
+        goal_details Masc_tui_theme.Info
+    ; card Masc_tui_dashboard.Keepers "Keepers · fleet"
+        (dashboard_keeper_line state) keeper_details Masc_tui_theme.Info
+    ; card Masc_tui_dashboard.Usage "Usage · provider availability" usage_head
+        usage_details Masc_tui_theme.Info
+    ]
+  in
   surface_chrome ~overflow:Fits state ~terminal_rows ~cols ~surface_key:"overview"
     ~title:(overview_header state)
     ~status:[ Masc_tui_footer.Refresh_interval state.refresh_interval ]
     ~hints:(Masc_tui_keys.footer_hints Overview)
     ~body:(fun ~budget c ->
       Masc_tui_frame_timing.time_stage ~name:"overview.layout" (fun () ->
-          (* The first-use steps are drawn whole or not at all, and only in
-             rows the summary leaves: cut from the bottom, they would push
-             "Needs you" off a short terminal, and half a guide names a step
-             with no way to finish it (#39526). *)
           let notice = dashboard_opening_notice_lines state in
           let guide = dashboard_first_use_lines state in
           let guide =
-            if List.length notice + 2 + List.length guide + List.length summary
-               <= budget
-            then guide
-            else []
+            if List.length notice + List.length guide + 12 <= budget then guide else []
           in
-          notice @ [ health; "" ] @ guide @ summary)
+          let prelude = notice @ [ health; "" ] @ guide in
+          let width = min 160 (framed_inner_width cols) in
+          let margin = String.make (max 0 ((framed_inner_width cols - width) / 2)) ' ' in
+          let body =
+            Masc_tui_dashboard.render ~width
+              ~height:(max 0 (budget - List.length prelude))
+              ~selected:state.dashboard_section ~palette cards
+          in
+          prelude @ List.map (fun row -> margin ^ row) body)
       |> List.iter c.push)
 
 (* One task's event history, appended after the detail body so it rides the

@@ -3546,6 +3546,7 @@ let render_keeper_message (state : state) =
     in
     let return_hint () =
       match state.msg_return with
+      | Keeper_chat_return_home -> "Esc:Dashboard"
       | Keeper_chat_return_list -> "Esc:list"
       | Keeper_chat_return_detail -> "Esc:detail"
       | Keeper_chat_return_lanes -> "Esc:Lanes"

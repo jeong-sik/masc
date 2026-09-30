@@ -2155,9 +2155,12 @@ def run_terminal_scenario(
     conflicting_env_base_path: bool = False,
     omit_operator_token: bool = False,
     starts_in_chat: bool = False,
+    launch_count: int = 1,
 ) -> None:
     if not scenario_admitted(scenario_selection, description):
         return
+    if launch_count < 1:
+        raise ValueError("launch_count must be positive")
     executable = tui_executable(executable)
     workspace_rendered = (
         WORKSPACE_RENDERED if workspace == WORKSPACE_PAYLOAD else workspace.encode()
@@ -2249,8 +2252,17 @@ def run_terminal_scenario(
                         # installs its own handlers for both, so ignoring
                         # them here only keeps the shell alive to stop
                         # itself after the TUI exits.
-                        "trap '' INT TERM; kill -STOP $$; \"$@\"; tui_status=$?; "
-                        'kill -STOP $$; exit "$tui_status"',
+                        (
+                            "trap '' INT TERM; kill -STOP $$; \"$@\"; tui_status=$?; "
+                            'kill -STOP $$; exit "$tui_status"'
+                            if launch_count == 1 else
+                            "trap '' INT TERM; kill -STOP $$; "
+                            f"launches_left={launch_count}; "
+                            'while [ "$launches_left" -gt 0 ]; do '
+                            '"$@"; tui_status=$?; kill -STOP $$; '
+                            'launches_left=$((launches_left - 1)); done; '
+                            'exit "$tui_status"'
+                        ),
                         "masc-tui-test-launcher",
                         executable,
                         "--base-path",
@@ -4155,9 +4167,9 @@ def assert_row_budgeted_surfaces(
     output: bytearray,
     _base_path: str,
 ) -> None:
-    # The Dashboard title is visible before its data, so the title alone
-    # does not say the briefing arrived; its first attention item does.
-    wait_for_output(process, master_fd, output, b"attention-1", start=0, timeout=10.0)
+    # Home is interactive while connecting. This fixture's health reading,
+    # rather than its early entry points, proves the briefing arrived.
+    wait_for_output(process, master_fd, output, b"Health: ok", start=0, timeout=10.0)
 
     overview = resize_and_wait(
         process,
@@ -4169,35 +4181,18 @@ def assert_row_budgeted_surfaces(
         controls=(FULL_REDRAW,),
         final_cursor=b"\x1b[?25l",
     )
-    # The compact Dashboard gives its first rows to health, measured Goals,
-    # and durable Work. Attention follows those sections when room permits.
-    for expected in (b"MASC Dashboard", b"Health:", b"Goals", b"q:quit"):
+    # Home keeps decision entry points and a conversation entry visible;
+    # generic incidents never become operator decisions by severity alone.
+    for expected in (b"MASC Dashboard", b"Health:", b"Continue", b"q:quit"):
         if expected not in overview:
             raise AssertionError(f"compact Dashboard omitted {expected!r}: {overview!r}")
-    if b"attention-4" in overview or b"attention-6" in overview:
-        raise AssertionError(f"compact Dashboard exceeded its attention limit: {overview!r}")
-    # Sixteen rows cannot hold "Needs you" under the sections above it, and
-    # the cut says how many rows it left out rather than drop them silently.
-    if re.search(rb"\+\d+ rows? not shown", overview) is None:
-        raise AssertionError(f"compact Dashboard hid its cut rows: {overview!r}")
-
     expanded = resize_and_wait(
-        process,
-        master_fd,
-        output,
-        rows=30,
-        columns=100,
-        # The title also renders before the briefing arrives. Inspect the
-        # expanded row budget only after its second attention row is visible.
-        needle=b"attention-2",
-        controls=(FULL_REDRAW,),
-        final_cursor=b"\x1b[?25l",
+        process, master_fd, output, rows=30, columns=100,
+        needle=b"Continue", controls=(FULL_REDRAW,), final_cursor=b"\x1b[?25l",
     )
-    for expected in (b"Work", b"Needs you", b"attention-1", b"attention-2"):
-        if expected not in expanded:
-            raise AssertionError(f"expanded Dashboard omitted {expected!r}: {expanded!r}")
-    if b"attention-3" in expanded:
-        raise AssertionError(f"Dashboard displayed more than two attention rows: {expanded!r}")
+    for forbidden in (b"attention-1", b"attention-2", b"linked tasks", b"scope windows in Usage"):
+        if forbidden in expanded:
+            raise AssertionError(f"Home repeated detail content: {expanded!r}")
     tab_until(process, master_fd, output, b"MASC Keepers")
     tab_until(process, master_fd, output, b"MASC Board")
     send_and_wait(process, master_fd, output, b"\r", b"comment-5")
@@ -5634,17 +5629,12 @@ def board_detail_authority_interaction(
         try:
             open_loaded_board(process, master_fd, output, post_count=2)
             fixtures["/api/v1/board?sort_by=hot"] = late_list
-            # The Overview draws the new briefing's attention item, which is
-            # how the walk below knows the refresh reached it.
+            # Home retains the briefing's unreadable-source reason. Use it
+            # to observe the refresh without relying on removed incident cards.
             late_briefing = overview_event_briefing()
-            late_briefing["attention_queue"] = [
-                {
-                    "kind": "fixture_marker",
-                    "severity": "info",
-                    "summary": "late-list-applied",
-                    "target_type": "board",
-                }
-            ]
+            late_briefing["keepers_listing"] = {
+                "state": "unreadable", "detail": "late-list-applied"
+            }
             fixtures["/api/v1/dashboard/briefing"] = (200, late_briefing)
 
             read_available(master_fd, output)
@@ -11245,6 +11235,10 @@ def standalone_lane_fixture(
             "changes; semantic verification is not performed.",
             False,
         ),
+        "candle_appraiser": (
+            "Appraises a confirmed Goal payout grade, each candidate Task's relation to the Goal, and Keeper contribution weights.",
+            False,
+        ),
         "verifier_exact": (
             "Reviews Task completion and Goal proof evidence.",
             False,
@@ -11324,6 +11318,7 @@ def standalone_lanes_response() -> HttpResponse:
                     "browser_stagehand_exact", "Browser Stagehand",
                     status="no_retained_observation", retained=0,
                 ),
+                standalone_lane_fixture("candle_appraiser", "Candle Appraiser"),
             ],
         },
     )
@@ -12642,8 +12637,9 @@ def run_tab_strip_keeps_current_entry_regression(executable: str) -> None:
 def run_activity_logs_tab_pane_regression(executable: str) -> None:
     """Dashboard, Work and Usage share the pane's 102-column surface floor.
 
-    At the narrow threshold they all retain the Recent pane. Activity's
-    Events and Logs readings suppress it, because they own that content.
+    Home stays compact by default. An explicit Ctrl-L choice opens the
+    Recent pane, whose 102-column surface boundary then persists on Work and
+    Usage. Activity Events and Logs suppress it because they own that content.
     """
 
     def pane_row(output: bytearray) -> int:
@@ -12657,8 +12653,13 @@ def run_activity_logs_tab_pane_regression(executable: str) -> None:
         resize_and_wait(process, master_fd, output, rows=38,
                         columns=ACTING_PANE_THRESHOLD_COLUMNS,
                         needle=b"MASC Dashboard", final_cursor=b"\x1b[?25l")
+        # Home starts without a feed. An explicit pane choice still applies
+        # on Home and survives the following surface switches.
+        drain_until_quiet(process, master_fd, output)
+        assert pane_row(output) < 0, screen_text(bytes(output))
+        send_and_wait(process, master_fd, output, b"\x0c", b"[Recent]")
         for title, ready, whole_row in (
-            (b"MASC Dashboard", b"D12 Goal", b"linked tasks 0/1 done"),
+            (b"MASC Dashboard", b"Continue", b"Choose a Keeper"),
             (b"MASC Work", b"D12 Goal", b"D12 Goal"),
             (b"MASC Usage", b"D12 provider", b"40%"),
         ):
@@ -15301,7 +15302,10 @@ def task_dispatch_interaction(requests: HttpRequests) -> Interaction:
             process, master_fd, output, b"feed: closed", start=0, timeout=10.0
         )
         tab_until(process, master_fd, output, b"MASC Dashboard")
-        send_and_wait(process, master_fd, output, b"i", b"\xe2\x80\xba to alpha")
+        send_and_wait(process, master_fd, output, b"i", b"MASC Keepers")
+        select_keeper_row(process, master_fd, output, b"alpha")
+        send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
+        send_and_wait(process, master_fd, output, b"c", b"Esc:detail")
         send_and_wait(process, master_fd, output, b"/task Lanes surface", b"/task Lanes surface")
         os.write(master_fd, b"\r")
         chat_body = wait_for_http_request(
@@ -15408,7 +15412,7 @@ def unread_keeper_counted_interaction() -> Interaction:
             process,
             master_fd,
             output,
-            b"Keepers: 1 listed (1 state unreadable)",
+            b"1 Keeper states unreadable",
             start=0,
             timeout=10.0,
         )
@@ -15464,7 +15468,7 @@ def unlisted_keepers_named_interaction() -> Interaction:
             process,
             master_fd,
             output,
-            b"(EACCES)",
+            b"Keepers unlisted: EACCES",
             start=0,
             timeout=10.0,
         )
@@ -15511,10 +15515,9 @@ def paused_apart_from_stopped_interaction() -> Interaction:
         output: bytearray,
         _base_path: str,
     ) -> None:
-        # The first screen counts listed Keepers without guessing state from
-        # recent tasks or folding paused/stopped into a synthetic idle count.
+        # Home no longer derives a fleet state summary from briefing rows.
         wait_for_output(
-            process, master_fd, output, b"Keepers: 5 listed", start=0, timeout=10.0
+            process, master_fd, output, b"Continue", start=0, timeout=10.0
         )
         frame = resize_and_wait(
             process, master_fd, output, rows=30, columns=120,
@@ -15536,36 +15539,16 @@ def attention_drawn_once_interaction() -> Interaction:
         output: bytearray,
         _base_path: str,
     ) -> None:
-        wait_for_output(
-            process,
-            master_fd,
-            output,
-            b"sangsu has external attention",
-            start=0,
-            timeout=10.0,
-        )
-        wait_for_output(
-            process, master_fd, output, b"analyst needs operator", start=0, timeout=3.0
-        )
-        # One full repaint to count rows in: the ordinary paints are row
-        # diffs, so counting in the raw stream would count repaints.
+        wait_for_output(process, master_fd, output, b"Continue", start=0, timeout=10.0)
         frame = resize_and_wait(
-            process,
-            master_fd,
-            output,
-            rows=30,
-            columns=99,
-            needle=b"sangsu has external attention",
-            controls=(FULL_REDRAW,),
-            final_cursor=b"\x1b[?25l",
+            process, master_fd, output, rows=30, columns=99, needle=b"Continue",
+            controls=(FULL_REDRAW,), final_cursor=b"\x1b[?25l",
         )
-        repeated = frame.count(b"sangsu has external attention")
-        if repeated != 1:
-            raise AssertionError(
-                f"an attention fact on two briefing lists drew {repeated} rows: {frame!r}"
-            )
-        if frame.count(b"analyst needs operator") != 1:
-            raise AssertionError(f"the distinct item vanished: {frame!r}")
+        # Incident text is not an authoritative operator request. Neither
+        # duplicated nor distinct briefing incidents enter Home's decisions.
+        for label in (b"sangsu has external attention", b"analyst needs operator"):
+            if label in frame:
+                raise AssertionError(f"Home projected an incident as a decision: {frame!r}")
 
         os.write(master_fd, b"q")
 
@@ -20184,10 +20167,12 @@ def dashboard_usage_interaction(
     _base_path: str,
 ) -> None:
     wait_for_output(process, master_fd, output, b"MASC Dashboard", start=0, timeout=30.0)
-    wait_for_output(process, master_fd, output, b"actual 3 (reported)", start=0, timeout=10.0)
+    wait_for_output(process, master_fd, output, b"Continue", start=0, timeout=10.0)
     dashboard = unwrapped(screen_text(bytes(output)))
-    if b"Goals" not in dashboard or b"Work" not in dashboard or b"linked tasks 0/1 done" not in dashboard:
-        raise AssertionError(f"Dashboard summary missing: {dashboard!r}")
+    if b"Work:" not in dashboard or b"Continue" not in dashboard:
+        raise AssertionError(f"Dashboard entry missing: {dashboard!r}")
+    if b"actual 3 (reported)" in dashboard or b"linked tasks 0/1 done" in dashboard:
+        raise AssertionError(f"Dashboard duplicated Work detail: {dashboard!r}")
     print("DASHBOARD_PTY_SCREEN=" + json.dumps(dashboard.decode("utf-8", errors="replace")), flush=True)
     send_and_wait(process, master_fd, output, b"\t", b"Fixture Goal")
     send_and_wait(process, master_fd, output, b"\r", b"Actual: 3 (reported)")
@@ -20217,14 +20202,30 @@ def dashboard_usage_interaction(
     send_and_wait(process, master_fd, output, b"p", b"MASC Usage")
     send_and_wait(process, master_fd, output, b"w", b"1 UTC days")
     send_and_wait(process, master_fd, output, b"w", b"7 UTC days")
+    # Leave from diagnostics: Home's Usage shortcut must still open accounts.
+    send_and_wait(process, master_fd, output, b"p", b"MASC Usage / Telemetry")
     system = tab_until(process, master_fd, output, b"MASC System")
     if b"MASC System" not in system:
         raise AssertionError(f"System is not on the main ring: {system!r}")
     send_and_wait(process, master_fd, output, b"A", b"MASC Activity")
     tab_until(process, master_fd, output, b"MASC Dashboard")
-    send_and_wait(process, master_fd, output, b"i", b"\xe2\x80\xba to alpha")
+    send_and_wait(process, master_fd, output, b"m", b"7 UTC days")
+    usage = screen_text(bytes(output))
+    if b"MASC Usage / Telemetry" in usage:
+        raise AssertionError(f"Home Usage shortcut resumed diagnostics: {usage!r}")
+    send_and_wait(process, master_fd, output, b"p", b"MASC Usage / Telemetry")
+    palette_go(process, master_fd, output, b"go Usage", b"7 UTC days")
+    send_and_wait(process, master_fd, output, b"p", b"MASC Usage / Telemetry")
+    palette_go(process, master_fd, output, b"go Keepers", b"MASC Keepers")
+    select_keeper_row(process, master_fd, output, b"alpha")
+    send_and_wait(process, master_fd, output, b"c", b"Esc:list")
     send_and_wait(process, master_fd, output, b"/cost", b"/cost")
-    send_and_wait(process, master_fd, output, b"\r", b"MASC Usage")
+    send_and_wait(process, master_fd, output, b"\r", b"7 UTC days")
+    send_and_wait(process, master_fd, output, b"i", b"to alpha")
+    send_and_wait(process, master_fd, output, b"/telemetry", b"/telemetry")
+    send_and_wait(process, master_fd, output, b"\r", b"MASC Usage / Telemetry")
+    tab_until(process, master_fd, output, b"MASC Usage")
+    wait_for_output(process, master_fd, output, b"7 UTC days", start=output.rfind(b"MASC Usage"))
     os.write(master_fd, b"q")
 
 

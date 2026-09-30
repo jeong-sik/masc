@@ -235,7 +235,7 @@ let global =
   [ b Meta "Tab / Shift-Tab" "next / previous surface"
   ; keepers_jump
   ; b Meta "r" "refresh the current surface"
-  ; b Meta "i" "focus the composer (message the shown keeper)"
+  ; b Meta "i" "focus the composer; on Dashboard, choose a Keeper"
   ; b Meta ":" "command palette"
   ; b Meta ";"
       "agenda: what is coming, and who is waiting on you; Enter opens a row"
@@ -370,7 +370,11 @@ let fusion_board_key = b Navigate "B" "Board evidence"
 
 let for_surface = function
   | Overview ->
-      [ b Navigate "m" "Usage" ~help:"account windows and Keeper usage"
+      [ b Navigate "j/k" "choose" ~help:"move between decision links and conversations"
+      ; b Navigate "Enter" "open" ~help:"open the selected destination; never approve"
+      ; b Navigate "p" "requests" ~help:"approvals and questions"
+      ; b Navigate ";" "agenda" ~help:"Goal confirmations and tasks waiting on you"
+      ; b Navigate "m" "Usage" ~help:"account windows and Keeper usage"
       ]
       @ listing_meta
   | Acting ->

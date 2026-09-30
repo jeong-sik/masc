@@ -2,7 +2,7 @@
 
 ## [Unreleased]
 
-## [0.49.0] - 2026-09-29
+## [0.49.0] - 2026-09-30
 
 ### Fresh state required
 
@@ -13,6 +13,8 @@
 - Open the shared DOS spectator directly with `go DOS` in the TUI command palette. Escape returns to the previous screen; game input and controller changes remain server-owned (#39852).
 - The Memory table now draws one row under the selected keeper: its state, when its memory was last saved, and an action row only when there is something to do (a lag, a lag that could not be read, Librarian failures, a stall, a read error or a server alert). Press `d` to show the full ledger detail — snapshot revision, recall size, source-bound snapshot and the context cycle rows — exactly as before (#39908).
 - Editing a Goal's `due_date` or `priority` now appends a `goal_edited` event to `goal_events.jsonl` with the editor and each changed field as `{from, to}`. Setting the same value again, or editing only the title, records nothing. If the row cannot be appended, the edit still succeeds and the error log names the goal and the payload. The dashboard timeline shows the row as `Goal Edit`, and marks a row it cannot read as a warning (#39951).
+- Add an opt-in combined-tree CI evidence path for Keeper batch review and one squash publication of the tested ROLL. It preserves each member's successful checks and independent approval, reconstructs the reviewed tree, and stops on changed evidence or unexpected landing results. Operational use remains subject to rule adoption. (#39553)
+- Keeper portrait reads expose the 18-accessory catalog and accept `preview_item` to return a retained PNG preview. Explicit starting/preview modes separate the picture's equipment from the unchanged starting gear; previews do not grant ownership or persist equipment. (#39987)
 
 ### Changed
 
@@ -40,6 +42,9 @@
 - `masc_task_set_goal` and the dashboard assign-goal route refuse a `done` or `cancelled` task. A task-goal link carries no timestamp, so a task finished before it was linked could not be told apart from work done for the goal (#39910).
 - Where auth requires a token, `masc_dos_pass` hands the DOS controller only to a Keeper, an operator or an unexpired invite; any other name is refused and the controller stays where it was. A Keeper's call, the play page's DOS routes and an MCP client run the same check (#39915).
 - Account login selects and verifies multiple usable models in one save, shows unavailable reasons, lets you retry after removing a failed model, and opens an existing account's remaining models without another login (#39971).
+- Terminal mosaic portraits in Keeper Info and `/about` draw a simpler candle silhouette with a larger face and flame at small sizes (#39886).
+- The `sangokushi-2` and `sangokushi-3` Skills describe the controls checked on new games: going to war, placing units with the digit keys and 0 (the 삼국지2 second-unit prompt stays until the cursor leaves the taken hex), battle commands, going back with an empty Enter, the 삼국지3 protection box `[孫李呂]`, the missing `ENDSTIL.DAT` for the 삼국지3 ending, and watching all-AI games (#39982).
+- Refresh English and Korean README with a candle Keeper illustration, current onboarding and TUI navigation; correct server lifecycle, MCP token identities and sandbox build paths, and mark the browser dashboard as incomplete. #40037
 
 ### Removed
 
@@ -113,6 +118,35 @@
   wake withdrawn under a running turn answers `Turn_selection_withdrawn`
   instead of failing the cycle (#40006).
 - Approval and merge guards now read the main commit identity when a large commit's file list spans multiple GitHub API pages. (#40011)
+- Report distinct batch CLI exit codes for failed ROLL checks, incorrect landing trees, external input changes, and missing member evidence; keep invalid input, infrastructure errors, and pending merges separate. (#39553)
+- Apply all batch landing gates in merge preflight, retain paths restored by later members when checking main overlap, verify current PASS runs, and recheck every member and ROLL approval at the final boundary. Original PRs remain open until a Keeper records verified absorption. (#39553)
+- The Keeper Skill proof harness and `scripts/skill-usage-stats.py` read each session's `skill-activation-events.jsonl` through one fold that applies the server's event rules, and the Python ledger revision escapes U+007F the way the server does (#39881).
+- Reject complete Skill event rows with missing fields, invalid nested evidence, or turn references from another session before proof readers project a ledger (#39881).
+- Keep quiz results linked to the exact upstream question through compact retained-evidence references, without inventing local relations or treating a claimed answerer as the observed actor. Grade titles use question IDs, selected choices use their retained question indices, and expected answers reference the retained deck fact, so long prompts and answers do not multiply across grades. Publish quiz-grader revision 0.1.1 so managed installations replace the worker. #39955
+- Codex and Muse Keeper resumes omit unchanged Recall blocks while preserving changed memory and restoring it after observed compaction. Antigravity continues to resend context because its transport does not report compaction (#39972).
+- Codex observes completed compaction items directly and retains compaction invalidation when later usage frames arrive in the same turn (#39972).
+- Recall now communicates empty, unavailable, disabled and recovered memory across consecutive turns. Identical facts no longer replay merely because a memory commit changes its revision or update time (#39972).
+- Turn records expose the separate `librarian_working_context` block in the dashboard and TUI, so a Librarian reference update does not resend unchanged ordinary Recall (#39972).
+- HTTP 403 usage reads retain refusal evidence when a reported reset has
+  already passed, instead of recording an already-expired rest (#39997).
+- Codex usage reads after a refusal refresh diagnostics without converting
+  unrelated metered bucket resets into an account-wide rest. The refusal
+  does not identify its limit_id, so its existing Observed record remains;
+  this does not resolve the repeated Codex quota retry interval (#39997).
+- A Board attention candidate quarantine that contradicts its Ready partition
+  at process start now blocks only that partition, with a
+  `Durable_partition_invariant` reason the operator requeue can clear, instead
+  of stopping the Keeper's whole Board attention worker until the next
+  restart. The worker and the operator requeue command share one exhaustive
+  classification of the pair (#40003).
+- Delayed quarantine writes cannot replace a newer generation or reset an
+  operator requeue request; only strictly later generations replace unfinished
+  quarantine state (#40003).
+- The Librarian reads atoms that an Agent-Core candidate saved in a turn
+  that then failed or was answered by an official client: the next turn's
+  start state now witnesses where they end, so the atom position,
+  continuity and checkpoint purge no longer stop there (#40019).
+- Bind Quiz grading and question identities to immutable captured decks, rejecting stale or substituted facts and allowing new captures to be answered without rewriting previous grades. (#40125)
 
 ### Internal
 
@@ -125,6 +159,7 @@
 - The `max-concurrent` comment no longer names a provider HTTP gate that is
   not in the tree; it states what actually bounds a binding that does not
   declare the key (#39980).
+- Add an isolated CI checkpoint-history comparison with matched fixtures, runtime-events capture and raw evidence for task-611 (#39974).
 
 ### Performance
 
@@ -135,6 +170,7 @@
 - A keeper turn asks several times which input modalities its run needs (for the reroute decision, the media walk and each attempt); each ask used to drop checkpoint messages equal to an earlier one, hashing and comparing whole messages. A repeated message adds no modality, so the modalities are now read off the messages as they come. On a 75 MB checkpoint of 20,512 messages one ask took 49.47 ms on the server's main domain and now takes 0.96 ms (median of five) (#39943).
 - `/health` summarizes the 600-sample scheduler lag ring on every request. The summary now selects its three percentiles instead of sorting the ring, and takes the maximum in one pass: 38.0 µs to 9.4 µs on a random ring. The percentiles and the maximum are the values the sort gave; the mean adds the samples in ring order, so it can differ from before in the last bits. A ring that defeats the selection's pivot, such as a lag rising and falling smoothly within the window, has what is left sorted after a bounded number of rounds, so over every starting position of such a ring the summary took at most 32.7 µs, under the 38.5 µs median of the sort (#39946).
 - The verification listing (`/api/v1/verification/requests`, `/api/v1/verification/summary` and the proof compose) walks the request directory, reads and projects the request files on the domain pool, not on the domain that asked, which in the server is the one serving requests. The first listing after a start parses and projects every file under 128 KiB (1,829 of 1,946 on the live store) and every later listing stats every file; a heartbeat fiber on the calling domain went from gaps of up to 17-24 ms to 1.4-13 ms during the first listing of the live store, measured under host load (#40005).
+- A board flush no longer turns every post and comment back into JSON. The posts and comments snapshots now keep each value's row and render again only the values replaced since the last snapshot, with byte-identical output. On the live board (1,529 posts, 10,128 comments, 20.3 MB), which flushes several times a minute and rendered it all on the domain serving requests, a snapshot with one post replaced took 84.5-85.2 ms of serialization and now takes 7.0-7.2 ms. The first snapshot after a start still renders everything, and the kept rows add about the board's size in memory (#39989).
 
 ## [0.48.0] - 2026-09-29
 

@@ -123,3 +123,22 @@ scenario execution because remote metrics unavailability was assigned as a strin
 to the existing typed `Metrics_tail.load_error` field. The executable build then
 aborted. Quiz23 and collector4 cases passed; the46 selected suites did not all run.
 The previous source reviews and parser checks missed this type mismatch.
+
+## Integration type failure ate84
+
+The next47-suite run36607930676 reached a second TUI compile error: an
+unannotated remote row callback could not resolve `k_origin`.
+[The raw log](../evidence/2026-09-30-candle-integration-e84/README.md)
+preserves the failure. Again only Quiz23 and collector4 ran successfully;
+no TUI scenario result is claimed. PR#40053 fixes the callback argument type.
+
+## New payout review findings
+
+External review of#40004 identified three separate concerns: temporary lane
+unavailability suppressing Snapshot/PayoutOwed (#40054), permanent provider
+refusals retrying on every maintenance pulse (#40055), and historical Paid
+reads recomputing current arithmetic (#40056). The first two are confirmed
+source defects under repair; the third requires preserving strict structural
+ledger validation while separating historical values from new-payment math.
+PR#40064 implements the typed provider-refusal classification and is awaiting
+native transport/worker verification. Model calibration remains separate.

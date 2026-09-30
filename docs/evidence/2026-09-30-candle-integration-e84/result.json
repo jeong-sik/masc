@@ -1,0 +1,20 @@
+{
+  "head": "e84d2d9caa4761d03880b5947324bb5d350a7b49",
+  "run_id": 36607930676,
+  "test_step": "failure",
+  "raw_log_sha256": "51c58478feb1113efb27b80cd42e17a8f54b12ae848e5ac8e5ae24287cfb4ee7",
+  "selected_suites": 47,
+  "passed_aliases": {
+    "test_lane_quiz_packages": 23,
+    "test_candle_baseline_collector": 4
+  },
+  "failed_aliases": [
+    "test_tui_keeper_portrait_pty",
+    "test_tui_remote_equipped_portrait",
+    "test_tui_candle_currency_pty",
+    "test_tui_remote_workspace_history_pty",
+    "test_tui_lane_heading_keeps_its_reading"
+  ],
+  "failure": "bin/masc_tui.ml:26082 unbound record field k_origin in Option.fold callback; executable build then aborts",
+  "feature_assertions_reached_in_failed_aliases": false
+}

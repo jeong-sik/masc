@@ -48,4 +48,3 @@ let visible_surface_ring_index (state : state) (view : surface) =
   in
   find 0 ring
 ;;
-

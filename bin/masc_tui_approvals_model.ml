@@ -204,4 +204,3 @@ let approvals_empty_queue (reading : approvals_reading) =
   with
   | [] -> Nothing_pending
   | not_read -> Lists_not_read not_read
-

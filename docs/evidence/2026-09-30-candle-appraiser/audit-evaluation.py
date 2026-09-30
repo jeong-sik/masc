@@ -133,6 +133,9 @@ def main():
             require(completion['outcome'] == receipt['status'], "audit check failed: completion['outcome'] == receipt['status']")
             require(completion['selected_slot'] == receipt['selected_slot'], "audit check failed: completion['selected_slot'] == receipt['selected_slot']")
             require(completion['elapsed_s'] == receipt['elapsed_s'], "audit check failed: completion['elapsed_s'] == receipt['elapsed_s']")
+            if completion['outcome'] == 'failed':
+                require(completion['code'] == receipt['code'], 'completion failure code differs')
+                require(completion['detail'] == receipt['detail'], 'completion failure detail differs')
             side, reference, expected = 'output', completion['output'], receipt['output']
         require(reference['kind'] == 'file', "audit check failed: reference['kind'] == 'file'")
         path = args.evidence/'exact-lane-run-payloads'/run_id/f"{side}-{reference['sha256']}.json"

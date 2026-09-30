@@ -100,14 +100,14 @@ let run ~base_path ~evidence_path ~execute =
     | [lane] when lane.id = Standalone_lane.to_id Standalone_lane.Candle_appraiser
         && lane.slot_ids @ lane.cli_slot_ids = [runtime_id] -> lane
     | _ -> failwith "evaluation requires exactly one declared Candle appraiser slot" in
+  let expected_commit = U.(member "source_commit" plan |> to_string) in
+  (match Build_identity.embedded_commit with
+   | Some commit when commit=expected_commit -> ()
+   | Some _ | None -> failwith "binary commit does not match the prepared source commit");
   if not execute then (
     print_endline (Yojson.Safe.to_string (`Assoc ["mode",`String "validated_without_model_calls";
       "cases",`Int (List.length cases);"trials",`Int trials;"runtime_id",`String runtime_id])))
   else (
-    let expected_commit = U.(member "source_commit" plan |> to_string) in
-    (match Build_identity.embedded_commit with
-     | Some commit when commit=expected_commit -> ()
-     | Some _ | None -> failwith "binary commit does not match the prepared source commit");
     let evidence = if evidence_path="" then Filename.concat base_path "evidence" else evidence_path in
     Unix.mkdir evidence 0o700;
     Unix.putenv Env_config_core.base_path_env_key base_path;

@@ -2039,6 +2039,33 @@ status: reference
   지정할 수 있으므로 권한(authority)이나 실행 증명으로 삼지 않는다.
   → [Server_repository_pulls](../../lib/server/server_repository_pulls.mli)
 
+**Stacked PR (스택 PR)**
+: 대규모 변경이나 연속 작업을 20k 토큰 이하의 작은 단위로 쪼개어 계층적으로 쌓아 올리는 PR 구조.
+  에이전트 협업의 컨텍스트 초과와 병목을 막고 빠른 릴리스 순환을 보장한다(헌법 `<work_unit>`·`<build_and_ci>`·`<merge>`).
+  - 브랜치 계층: 스택의 가장 바닥(bottom) PR만 `main`을 base로 삼고, 그 위의 상위 PR들은 각자
+    직전 스택 브랜치를 base로 지정한다. 기능(피처) 개발 스택과 CI·인프라 개선 스택은 섞지 않고
+    각자의 독립 스택으로 분리해 진행한다.
+  - Native Stack: REST PR의 `stack`과 Stacks API가 구성·순서·최종 base의 근거다.
+    선택한 PR까지의 미병합 하위 PR은 비동기 병합 API로 함께 병합할 수 있다. 부모 미병합이나
+    non-main base만으로 차단하거나 수동 retarget하지 않는다. 전체 포함 범위를 리뷰한다.
+    Native Stack이 아닌 브랜치 체인은 부모부터 처리한다. base나 head가 바뀌면 다시 검토한다.
+    → [Native GitHub Stack 절차](../guides/NATIVE-GITHUB-STACKS.md)
+  - 검증과 승인(2026-09-30 운영 정책): 일반 스택(Ordinary stack)은 CI 실행 여부나 대기에
+    묶이지 않고, 현재 head에 대한 다각도 소스 검토(기능·논리·코드 청결도)를 통해 P0·P1·P2 결함이
+    없으면 즉시 승인(Approve)한다. 판정 줄은 `verdict: PASS head: <40-hex SHA> by: <reviewer>`
+    형식을 쓰며, CI run ID를 요구하지 않는다. 사소한 P3(서식·단순 정리)는 승인을 막지 않고 모아서
+    일괄 수거한다.
+  - 빌드와 릴리스 집약: 일반 PR이나 스택 바닥 PR은 명시적으로 요청한 짧고 가벼운 최소 검사(`pr-check.yml`의
+    구문·자격증명 검사, `ci.yml`의 Core 라이브러리 빌드)만 확인하며, 전체 테스트 그래프는 돌리지 않는다.
+    "2분 정도"는 검사 규모를 설명하는 예시이며 강제 종료 시간이나 성공·실패 판정 기준이 아니다.
+    휴리스틱이나 임의 숫자·문구·snapshot 검사는 만들지 않는다. 전체 검증(Full CI Cycle:
+    `full-check.yml` 및 `release-candidate.yml`)은 개별 PR이 아닌 `release/vX.Y.Z` 브랜치나
+    Tag 단계에 집약하여 수행한다.
+  → [docs/constitution.xml](../constitution.xml) ·
+  [docs/AGENTIC-WORKFLOW.md](../AGENTIC-WORKFLOW.md) ·
+  [docs/CI-REVIEW-WORKFLOW.md](../CI-REVIEW-WORKFLOW.md) ·
+  [scripts/review/merge-guard.sh](../../scripts/review/merge-guard.sh)
+
 **Disposable Build Volume (일회용 빌드 볼륨)**
 : Apple container 샌드박스에서 Keeper의 `_build` 출력이 놓이는, Keeper마다 하나씩
   할당되는 일회용(disposable) 볼륨(RFC-keeper-build-output-returns-to-a-disposable-volume,

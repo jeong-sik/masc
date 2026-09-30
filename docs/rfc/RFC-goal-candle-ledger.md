@@ -162,8 +162,10 @@ related: ["every-lane-is-one-row-in-one-registry", "exact-lane-walks-one-slot-li
      | (가) | 없다 | 처음부터 한다 | 지급 의무가 없다 |
      | (나) | 확정 기록만 있다. phase 는 `Awaiting_confirmation` | (나)와 (다)를 한다. `confirmed_at` 은 처음 확정한 시각이다 | 지급 의무가 없다. Goal 이 완료된 적이 없다. 재오픈하면 확정 기록이 지워지고, 다시 통과해 확정하면 새 `Snapshot` 과 새 `PayoutOwed` 를 쓴다 |
      | (다) | 확정 기록과 `PayoutOwed`. phase 는 `Awaiting_confirmation` | `PayoutOwed` 를 새로 쓰지 않고(3.1) phase 만 옮긴다 | `PayoutOwed` 가 남아 지급 대기다. 완료되지 않은 Goal 에 지급이 나간다. 7장에서 운영자가 정한다 |
+**[사실: 현재 구현 범위]** `Candle_payout_worker`는 `Candle_candidates.drain_once`로 후보를 준비하고, 후보 keeper가 없으면 `Unattributed`로 끝낸다. 후보가 있는 지급 의무는 `Candle_appraise.settle_one`을 통해 등급·관계·가중치를 판정하고 `Paid` 또는 `Unattributed`로 기록한다(`lib/candle_runtime/candle_payout_worker.ml`, `lib/candle_runtime/candle_candidates.ml`, `lib/candle_runtime/candle_appraise.ml`). 서버 maintenance는 같은 일꾼을 다시 깨운다(`lib/server/server_bootstrap_maintenance.ml`).
+
 3. **후보와 지급.** 일꾼이 지급 대기 Goal 마다 아래를 한다. 지급 대기 목록은 원장에서 읽고(3.1) Goal 의 phase 는 보지 않는다.
-   - Task 를 읽어 후보를 정하고 `Candidates` 를 쓴다(3.4). `Candidates` 가 이미 있으면 그것을 쓴다.
+   - Task 를 읽어 후보를 정하고 `Candidates` 를 쓴다(3.4). 같은 Goal id·검증 요청 id·검증 실행 id의 `Candidates` 가 이미 있으면 그것을 쓴다.
    - 모델을 부르고(3.4) `Paid` 나 `Unattributed` 를 쓴다.
    - 일꾼은 Goal 검증기와 같은 모양이다(2장). 조건 변수로 깨우고, 서버를 시작할 때 한 번 훑는다. Goal 하나에 하나만 돈다. 점검 루프나 확정 요청 안에서 모델을 부르지 않는다. 그 시간만큼 다른 요청이 멈추기 때문이다. lane 호출은 fork 해서 다른 Goal 의 처리가 긴 호출 뒤에 줄 서지 않게 하고, 깨움은 Atomic 표시로 놓치지 않게 한다(검증기가 그렇게 한다: `lib/goal_verification_agent.ml:745-770`, `:774`).
    - 일꾼은 이럴 때 깨어난다. `PayoutOwed` 를 썼을 때, 서버를 시작할 때, 다른 지급이 끝났을 때(`Paid`·`Unattributed`·`PayoutFailed`).

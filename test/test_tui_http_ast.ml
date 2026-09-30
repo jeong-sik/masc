@@ -1576,7 +1576,9 @@ let test_the_screen_does_not_read_the_servers_bind_address () =
 
 let test_server_identity_is_revalidated_on_every_refresh () =
   let main_path = "bin/masc_tui.ml" in
-  check int "each full refresh asks the compact identity probe once" 1
+  (* Surface collection is bracketed by identity probes so a same-port
+     workspace replacement cannot publish a mixed-authority bundle. *)
+  check int "each full refresh probes identity before and after collecting surfaces" 2
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"load_http_surfaces" ~callee:"load_server_identity");
   check int "identity-known cache gating is absent" 0
@@ -1595,7 +1597,9 @@ let test_server_identity_is_revalidated_on_every_refresh () =
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"apply_http_surfaces"
        ~callee:"apply_server_identity_reading");
-  check int "a failed refresh withdraws identity through its owner" 1
+  (* Both an unconfirmed request identity and a failed full refresh withdraw
+     through the same transition owner. *)
+  check int "unconfirmed identity and failed refresh both withdraw through their owner" 2
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"apply_async_message" ~callee:"apply_server_identity_reading")
 ;;

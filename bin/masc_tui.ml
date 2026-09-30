@@ -23531,6 +23531,17 @@ and is loaded on demand through keeper_skill.
            let target = if key = Some "end" then count - 1 else 0 in
            step_board_read state ~mailbox:async_messages
              ~delta:(target - state.board_cursor)
+       | Some ("pageup" | "pagedown" | "home" | "end" as move)
+         when state.view = Config && state.config_pane = Config_prompts
+              && not state.repository_changes_open ->
+           let count, height = Masc_tui_render.prompts_detail_viewport state in
+           state.config_scroll <-
+             (match move with
+              | "home" -> 0
+              | "end" -> Masc_tui_scroll.maximum ~count ~height
+              | "pageup" -> Masc_tui_scroll.page_up ~count ~height state.config_scroll
+              | "pagedown" -> Masc_tui_scroll.page_down ~count ~height state.config_scroll
+              | _ -> Masc_tui_scroll.normalize ~count ~height state.config_scroll)
        (* A reading pane before the list behind it: a detail that is open owns
           the scroll keys, and moving the list under it would leave the cursor
           somewhere the reader cannot see. The pane reports its own clamp, so

@@ -207,7 +207,10 @@ let fresh_matches_for_token_hash config token_hash matches =
     (* DET-OK: exact token-hash cache miss means there are no indexed
        credential candidates; this does not infer state from ambiguous input. *)
     match Hashtbl.find_opt idx token_hash with
-    | Some matches -> Ok matches
+    | Some matches ->
+      if List.for_all (credential_matches_live_disk config) matches
+      then Ok matches
+      else Error (Auth (Auth_error.InvalidToken "Credential changed during token lookup"))
     | None -> Ok [])
 ;;
 

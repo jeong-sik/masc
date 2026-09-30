@@ -1,0 +1,37 @@
+# Credential index current named authority
+
+## Source composition
+
+This child starts from immutable Reader parent `af47f73fa32b5815cfc98346cc39c2d1213aba7d`, tree `af0d0b59812c5c529d0c8174abac51d5f6b5f544`, obtained from the local Reader clone. The parent includes the file-backed publisher, HTTP bearer admission and regular-file read boundary. No Git network operation was used. The fragment `changelog.d/999994.md` is a publication placeholder.
+
+Implementation and prepared regression commit: `73b0f50f1d5fa457adcfad65b4ea3d6dd7635248`. The subsequent evidence update changes this README and adds only `composition.json`, `source-checks.json` and `source-sha256.json`; source/interface, fixture and registration bytes are frozen at that commit.
+
+Root assigned the Reader parent [PR #40256](https://github.com/jeong-sik/masc/pull/40256). This publication coordinate was supplied by root; it does not replace the exact local parent identity above or provide an index native/CI result. Root will select the finalized Reader publication tree when overlaying this child.
+
+The own production delta changes the cold authentication index in `Auth_credential_base` and the rebuild result in `Auth_credential_token`, with documentation in their public interfaces. `test/dune` gains one additive include for the new seven-case fixture. Public `list_credentials`, direct UUID data lookup, token lifetime, role policy, credential publication, regular-file readers and OAuth behavior are preserved.
+
+## Reachable authorization defect
+
+An intact UUID payload can survive an external replacement, corruption or removal of its owner's named file. Previously, `list_credentials` could discover that old payload directly and deduplicate the owner before seeing its new named credential. `fresh_matches_for_token_hash` detected stale initial candidates but accepted rebuilt candidates without checking their current named binding again.
+
+This allowed an old Admin bearer to resolve from its intact UUID after its named authority became unknown. `verify_token` could recover it through the existing owner-alias fallback, so normal MCP permission rechecking did not protect that case. With a readable current Worker replacement, exact named verification could refuse the old token, but token-bound HTTP permissions used the indexed Admin role directly. Play invite issue/list/revoke use that production token-bound `CanAdmin` admission.
+
+The current named credential is already the authority used by full-field freshness checks, exact-name verification, renewal and shared rotation. The existing direct UUID lookup test establishes a data-reading capability; it does not establish multiple independent bearer authorities for one name.
+
+## Repair
+
+Cold index construction stays under the existing Auth transaction. Directory records discover distinct owner names; the builder sorts those names and reads each current named binding, accepting only an exact owner match. That current record supplies the token hash and role, independent of directory enumeration order.
+
+The stale-cache path rebuilds once, then applies the existing complete credential comparison to the rebuilt token bucket. A remaining change is `Auth_error.InvalidToken`; there is no retry loop, new cache counter, lifetime, timeout or role gate. Public UUID payload reads and inventory/list data remain available.
+
+## Prepared feature regression
+
+`test/test_auth_credential_index_authority.ml` registers seven cases: cold and warm lookup for missing named authority, malformed regular named authority, and a current Worker replacement, plus healthy UUID-backed owner and supported alias continuity. All six transition fixtures retain the old Admin UUID bytes exactly. They assert old-bearer denial through static/general lookup, exact/generated-alias verification, production Play token-bound `CanAdmin` admission and the MCP auth entrypoint. The Worker cases assert successful current-bearer resolution, its complete current role, generated alias continuity, normal MCP admission and Play Admin refusal. The positive case includes canonical, short redirect, generated and Keeper transport aliases and current Admin HTTP permission.
+
+These are isolated temporary workspace fixtures. HTTP request objects call production authorization functions without launching a server or performing an HTTP mutation. No old UUID file is deleted or corrupted to hide the authority defect.
+
+## Checks and limits
+
+The source receipts record OCaml 5.5.1 parsing only, targeted ignore-comment lint, diff whitespace, committed diff gates and public API/registration checks. Parsing is not typechecking, linking or native execution. Source hashes freeze the own code, fixture, registration, fragment and required contract; parent preservation receipts cover the existing feature suites and interfaces.
+
+No local Dune build, typecheck, native test, server/CLI runtime, network, CI result, installation or production observation was performed for this child. Its seven cases are prepared and have not been run. Parent source checks and older native results do not prove this index change. Root owns independent review, publication and exact published-head CI evidence.

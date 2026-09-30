@@ -1010,7 +1010,19 @@ let credential_token_index config
       Auth_metric_store.metric_auth_credential_index_cache_misses
       ();
     with_credential_transaction config (fun _transaction ->
-       let creds = list_credentials config in
+       (* Directory entries discover owners. Only each owner's current named
+          binding supplies the credential indexed for authentication. An old
+          UUID payload must neither resurrect its bearer nor hide a replacement
+          because it happened to be listed before the named file. *)
+       let creds =
+         list_credentials config
+         |> List.map (fun (credential : agent_credential) -> credential.agent_name)
+         |> List.sort_uniq String.compare
+         |> List.filter_map (fun name ->
+           match load_credential config name with
+           | Some credential when String.equal credential.agent_name name -> Some credential
+           | Some _ | None -> None)
+       in
        let by_token = build_token_index creds in
        with_credential_index_cache_lock (fun () ->
          Hashtbl.replace credential_index_cache key { loaded_at = now; by_token });

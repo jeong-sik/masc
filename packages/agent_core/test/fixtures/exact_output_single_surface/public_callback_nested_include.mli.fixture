@@ -1,3 +1,0 @@
-module Nested : sig
-  include module type of External.Callback
-end

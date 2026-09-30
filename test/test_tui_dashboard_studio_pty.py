@@ -21,7 +21,7 @@ SOURCE_MODULES = (
 def populated_fixtures():
     fixtures = h.keeper_runtime_http_fixtures()
     _, briefing = h.paused_and_stopped_briefing()
-    briefing["attention_items"] = [
+    briefing["incidents"] = [
         {"kind": "keeper_runtime_blocker", "severity": "bad",
          "summary": "alpha: provider unavailable · 점검 필요",
          "target_type": "keeper", "target_id": "alpha"},
@@ -33,7 +33,10 @@ def populated_fixtures():
     goal = h.planning_goal("goal-studio", "팀 대시보드 · measured operator journeys")
     goal.update({"metric": "verified journeys", "target_value": "5",
                  "task_count": 3, "task_done_count": 2,
-                 "measurement": {"state": "not_recorded"}, "children": []})
+                 "measurement": {"state": "not_recorded"},
+                 "stagnation_seconds": None,
+                 "tasks": [{"id": "task-studio-1"}, {"id": "task-studio-2"},
+                           {"id": "task-studio-3"}], "children": []})
     fixtures[h.DASHBOARD_GOALS_PATH] = (200, {"tree": [goal]})
     fixtures[h.PLANNING_PATH] = h.planning_snapshot([goal])
     return fixtures
@@ -82,7 +85,7 @@ def navigation(executable, *, no_color=False):
         for value in (b"Needs you", b"Work", b"Goals", b"Keepers", b"Usage", b"Current Done states"):
             if value not in compact:
                 raise AssertionError(f"compact Dashboard lost {value!r}: {compact!r}")
-        briefing["attention_items"].append({
+        briefing["incidents"].append({
             "kind": "keeper_attention", "severity": "info",
             "summary": "refresh-generation-2", "target_type": "keeper", "target_id": "beta",
         })

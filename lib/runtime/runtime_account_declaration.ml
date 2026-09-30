@@ -416,11 +416,18 @@ let declare ?home_dir ~inherited_home t ~base ~id ~location =
     | Some table when client_of_provider table = Some base.client -> Ok table
     | Some _ | None -> Error (Unknown_base base.id)
   in
-  let* bindings =
-    match Option.map entries (field base.id t.toml) with
-    | Some (_ :: _ as bindings) -> Ok bindings
-    | Some [] | None -> Error (Nothing_to_bind base.id)
+  let* config = Result.map_error (fun errors -> Rejected errors) (Runtime_toml.parse_string t.text) in
+  let* () =
+    if List.exists
+         (fun (binding : Runtime_schema.binding) -> String.equal binding.provider_id base.id)
+         config.bindings
+    then Ok ()
+    else Error (Nothing_to_bind base.id)
   in
+  (* A shared model set is carried by the provider itself. Copy only the
+     source's explicit overrides so future changes to that set reach both
+     accounts, including when the source has no binding table at all. *)
+  let bindings = match field base.id t.toml with Some table -> entries table | None -> [] in
   let* () = if taken t id then Error (Id_taken id) else Ok () in
   let* location = location_of ?home_dir base.client location in
   let* () =
@@ -435,9 +442,8 @@ let declare ?home_dir ~inherited_home t ~base ~id ~location =
       ~indent_width:0
       ~collapse_tables:true
       (Toml.table
-         [ providers_table, Toml.table [ id, provider_copy base ~display_name ~location table ]
-         ; id, Toml.table bindings
-         ])
+         ([ providers_table, Toml.table [ id, provider_copy base ~display_name ~location table ] ]
+          @ match bindings with [] -> [] | _ :: _ -> [ id, Toml.table bindings ]))
   in
   let separator = if String.ends_with ~suffix:"\n" t.text then "" else "\n" in
   let text = t.text ^ separator ^ appended in

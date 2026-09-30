@@ -207,8 +207,13 @@ Unknown 사건이 있어도 확인된 다른 사건만으로 결합식의 판정
 
 1. §1의 main SHA와 안전 fallback의 바이트 차이를 함께 기록하고 전량 경로의 조립 블록·토큰·캐시 기준선을 같은 입력으로 고정하고 격리 픽스처를 만든다.
 2. 결과 타입·영수증과 읽기/선택/예산 실패 및 `Capacity_unobserved` fallback의 모델/운영자 표시를 먼저 추가한다. 기존 경로와 새 경로를 shadow로 나란히 계산하고 실제 모델에는 기존 결과만 보낸다.
-3. typed 링크·만료 조건·source 재검증을 붙인 선택기를 격리 평가한다. start/resume의 known/unobserved 평가와 정확도 게이트를 통과한 뒤에만 전송 경로를 전환한다. projection 상한의 설정값·정책 revision·측정 provenance를 확정하기 전에는 shadow를 유지한다.
-4. 구 RFC §3.7/§6과 이 문서의 충돌을 해소하고 `keeper_memory_os_recall.mli`의 “never truncates, ranks, or partially injects” 문장을 새 계약으로 교체한다.
+3. typed 링크·만료 조건·source 재검증을 붙인 선택기를 격리 평가한다. start/resume의 known/unobserved 평가와 정확도 게이트 통과는 전송 전환의 필요 조건이며, 해당 Keeper의 실제 저장본 준비 완료를 대신하지 않는다. projection 상한의 설정값·정책 revision·측정 provenance를 확정하기 전에는 shadow를 유지한다.
+4. Keeper별 실제 ordinary/source 저장본을 권위 있게 읽어 revision·내용 해시·전체 fact ID 집합을 고정한다. 기존 memory 쓰기 권한을 가진 주체가 각 fact의 근거를 확인하고 명시적 링크와 `Unconditional | Conditional`을 승인한다. metadata 부재를 Unconditional로 바꾸거나 산문에서 링크·조건을 추출하지 않는다. 승인 주체·fact ID·내용 해시·근거를 기록하고, §3의 불변 bundle과 current manifest CAS로 출판한다. 이것은 새 계약의 최초 채택 절차이며 옛 형식을 읽는 호환 경로나 자동 변환 계층을 새 selector에 추가하지 않는다.
+5. 전환 경계는 ordinary/source의 현재 revision·해시·전체 ID 집합과 출판된 bundle을 다시 읽는다. 모든 current fact에 정확히 하나의 승인 metadata가 결합돼 있고 source 재검증·해시·bundle 결합이 성공해야 `Adoption_ready { keeper_id; bundle_revision; ordinary_revision; source_revision; metadata_revision; content_hashes; coverage_fact_ids; approval_refs }` 영수증을 출판한다. 이 영수증은 시간이 아니라 해당 immutable bundle의 권위를 증명한다. 준비 중 fact 추가·교체·invalidation이 있었다면 이전 coverage 영수증으로 전환하지 않고 새 revision 전체를 다시 승인·검증한다. 부분 준비·읽기 실패·CAS 패배·승인 미완료는 `Adoption_pending` 또는 typed 실패이며 기존 전송과 shadow를 유지한다.
+6. 실제 전송 전환은 Keeper별 current manifest와 `Adoption_ready`가 같은 bundle을 가리키는지 확인하는 하나의 출판 경계에서만 허용한다. old writer와 새 bundle writer가 동시에 current를 바꿀 수 있게 두지 않는다. 기존 쓰기 경로도 같은 권위 출판 경계에 참여하도록 연결하거나 해당 Keeper의 쓰기 소유권을 명시적으로 새 writer에 이전한 뒤 전환한다. 그 경계에 참여하지 않는 writer의 동시 변경을 배제할 수 없으면 준비 완료를 주장하지 않고 전환하지 않는다. 전환 이후 fact/metadata 변경은 §3의 bundle CAS를 사용한다. 전환 이전 실패 후 재시도는 마지막 authoritative revision부터 재검증하며 저장 성공을 추정하지 않는다. 모든 Keeper를 한 번에 전환하지 않고 미준비 Keeper는 기존 경로를 유지한다.
+7. 구 RFC §3.7/§6과 이 문서의 충돌을 해소하고 `keeper_memory_os_recall.mli`의 “never truncates, ranks, or partially injects” 문장을 새 계약으로 교체한다. 문서 병합은 위 준비 영수증·평가 결과·권위 출판 경계의 구현 완료나 실제 전환을 뜻하지 않는다.
+
+전환 admission fixture에는 metadata 없는 실제 형식의 ordinary O1/source S1 저장본, 한 component만 준비된 저장본, 준비 중 ordinary/source fact 추가·내용 교체·source invalidation, manifest CAS 패배, 권한 없는 승인, old writer의 동시 쓰기, 실패 뒤 재시도를 포함한다. 미준비·부분 coverage·다른 revision·배제되지 않은 writer에서는 새 전송이 켜지지 않고 기존 경로의 O1/S1 연속성이 유지되는지 확인한다. 완전한 승인 bundle과 쓰기 출판 경계가 준비되면 Keeper별 전환 영수증이 정확한 ID·해시·revision을 가리키며, 전환 직전 변경에는 옛 영수증을 거절하는지 확인한다. 이 fixture와 실제 Keeper별 준비 영수증을 확인하기 전 rollout 완료로 기록하지 않는다.
 
 열린 결정은 상시 fact 지정 권한, MASC projection 바이트 상한의 설정값·정책 revision·측정 provenance, 링크 없는 fact의 연결 지정 권한, 조회 도구가 오래된 source-bound 내용을 거부하는 정확한 표면, Recall control 경계 밖의 다른 전송 실패를 어떻게 복구할지다. Recall control 미전달 때 dispatch 보류는 위에서 확정한 안전 계약이다. 이 Draft는 이 값들을 확인 없이 확정하지 않으며 runtime 변경이나 배포 효과를 주장하지 않는다.
 

@@ -12023,7 +12023,16 @@ let palette_matches (state : state) =
   let needle = String.trim state.palette_query in
   let entries =
     match state.palette_mode with
-    | Palette_jump -> palette_entries state
+    | Palette_jump ->
+        let entries = palette_entries state in
+        (match palette_typed_question state.palette_query with
+         | None -> entries
+         | Some (question, None) ->
+             List.filter (function
+               | _, Palette_lsp (candidate_question, _) ->
+                   String.equal question candidate_question
+               | _ -> false) entries
+         | Some (_, Some _) -> [])
     | Palette_choice { choice_question; _ } ->
         List.map
           (fun name -> (name, Palette_lsp (choice_question, name)))
@@ -12031,8 +12040,8 @@ let palette_matches (state : state) =
   in
   (* Three ranks, entry order kept inside each: a label that starts with the
      query, then one that contains it, then one that only has its characters
-     in order. A K/D pre-fill of "def " therefore lists the cursor line's
-     names before a post that merely mentions "deferred". *)
+     in order. Typed Code questions retain only executable symbol candidates;
+     ordinary jump filters continue ranking destinations and content. *)
   let rank (label, action) =
     let texts = label :: palette_action_words action in
     if List.exists (palette_starts_with ~needle) texts then Some 0

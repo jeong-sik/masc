@@ -16542,7 +16542,7 @@ let render_palette (state : state) =
   let title, prompt, action =
     match state.palette_mode with
     | Masc_tui_types.Palette_jump ->
-        (" MASC Command palette", ":", if Option.is_some explicit_question then "ask" else "run")
+        (" MASC Command palette", ":", if Option.is_some typed_question then "ask" else "run")
     | Masc_tui_types.Palette_choice { choice_question; choice_line } ->
         let names = List.length (Masc_tui_types.code_cursor_line_symbols state) in
         ( Printf.sprintf " %s · %d names on line %d" choice_question names choice_line

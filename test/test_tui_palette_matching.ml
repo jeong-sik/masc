@@ -245,6 +245,34 @@ let test_a_choice_lists_the_names_and_nothing_else () =
     (List.exists (fun label -> String.length label > 3 && String.sub label 0 3 = "go ") (labels ()))
 ;;
 
+let test_typed_code_questions_offer_only_executable_candidates () =
+  let state = create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 () in
+  state.palette_query <- "def";
+  check_names "a reserved Code command offers no unrelated destination" []
+    (List.map fst (palette_matches state));
+  state.code_file <- landed ~path:"lib/a.ml"
+    [ [ ("Foo.bar", Masc_tui_code_lexer.kind_code) ] ];
+  state.view <- Code;
+  state.code_focus_file <- Right_pane;
+  state.code_file_cursor <- 0;
+  check_names "bare def offers definition candidates only" [ "def Foo"; "def bar" ]
+    (List.map fst (palette_matches state));
+  check_bool "all highlighted entries execute the reserved question" true
+    (List.for_all (function
+       | _, Palette_lsp ("definition", _) -> true
+       | _ -> false) (palette_matches state));
+  state.palette_query <- "def explicit_symbol";
+  check_names "an explicit symbol has a direct preview, no competing selection" []
+    (List.map fst (palette_matches state));
+  Alcotest.(check (option (pair string (option string)))) "same canonical question and symbol"
+    (Some ("definition", Some "explicit_symbol"))
+    (palette_typed_question state.palette_query);
+  state.palette_query <- "go Code";
+  check_bool "ordinary destination filtering still works" true
+    (List.exists (function _, Palette_goto Code -> true | _ -> false)
+      (palette_matches state))
+;;
+
 let test_the_cursor_lines_names_are_the_candidates () =
   let state =
     create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
@@ -499,7 +527,9 @@ let () =
             test_a_partial_match_does_not_consume_the_row
         ] )
     ; ( "sources"
-      , [ Alcotest.test_case "the palette lists tasks and posts" `Quick
+      , [ Alcotest.test_case "typed Code questions have only executable candidates" `Quick
+            test_typed_code_questions_offer_only_executable_candidates
+        ; Alcotest.test_case "the palette lists tasks and posts" `Quick
             test_the_palette_lists_tasks_and_posts
         ; Alcotest.test_case "the cursor line's names are the candidates"
             `Quick test_the_cursor_lines_names_are_the_candidates

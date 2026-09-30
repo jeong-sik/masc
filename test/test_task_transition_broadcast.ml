@@ -562,7 +562,8 @@ let test_submit_schedules_review_after_log_failure () =
           (fun _config ~task:_ ~assignee ~verification_id ->
             scheduled := Some (assignee, verification_id));
         check_ok "committed submit survives failed event append"
-          (transition config ~task_id ~action:D.Submit_for_verification ());
+          (transition config ~task_id ~action:D.Submit_for_verification
+             ~notes:"Deliverable and evidence: event-log fault scenario" ());
         match List.find_opt (fun (task : D.task) -> String.equal task.id task_id)
                 (Workspace.get_tasks_raw config) with
         | Some { task_status = D.AwaitingVerification { assignee; verification_id; _ }; _ } ->

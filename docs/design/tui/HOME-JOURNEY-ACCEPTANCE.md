@@ -76,3 +76,12 @@ Remaining deliverables include Task-card detail acceptance, connection-loss and
 draft-during-notification cases, accepted-but-not-applied decisions, current-head
 screenshots, required merge checks and freshness, installation/runtime inspection,
 and same-task before/after operator timing. No timing improvement is claimed.
+
+Full HTTP loss and local Task detail/deletion now have a dedicated fixture suite,
+`test_tui_home_failure_task_pty`. It includes an attempted Enter send with retained
+draft and no chat-delivery POST. Source guards preserve waiting inputs and queues
+before dequeue and block Goal/Task changes while workspace identity is unread or
+mismatched; confirmation bindings are cleared. These additions await executable CI.
+Run 36668937812 at cc4da7d7a2f89ce493d06128168692f9c5896e20 passed
+decision receipts (2), creation (4), and complete drafts (2), but failed card
+detail assertions and deletion refresh observation. It does not establish current-head acceptance.

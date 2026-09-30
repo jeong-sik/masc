@@ -11259,6 +11259,11 @@ let home_continue_rows (state : state) =
           "Last conversation with " ^ Tui_decode.sanitize_terminal_text name
           ^ save_notice
           ^ " · roster unavailable; read history" ]
+    | Some (name, save_notice) when state.workspace_identity = Workspace_identity_unread
+                                   && state.local_workspace = Local_workspace_read ->
+        [ Home_read_last name,
+          "Last conversation with " ^ Tui_decode.sanitize_terminal_text name
+          ^ save_notice ^ " · workspace identity not read; read history" ]
     | Some _ | None -> []
   in
   let choose =

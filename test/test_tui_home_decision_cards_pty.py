@@ -113,8 +113,8 @@ def same_keeper_distinct_and_duplicate(executable):
         h.send_and_wait(process, fd, output, b"r", b"home-new-top-card")
         assert_selected(output, initial)
         select_home(process, fd, output, b"[call-home-b]", destinations=5)
-        detail = h.send_and_wait(process, fd, output, b"\r", b"call=call-home-b")
-        assert b"args=" in h.screen_text(detail), detail
+        detail = h.send_and_wait(process, fd, output, b"\r", b"call-home-b")
+        assert b"echo call-home-b" in h.screen_text(detail), detail
         home.assert_no_decision_posts(requests)
         h.send_and_wait(process, fd, output, b"\x1b", b"Enter:open")
         assert_selected(output, b"[call-home-b]")

@@ -221,12 +221,13 @@ let test_alias_revocation_preserves_canonical_owner () =
         ~agent_name:canonical ~role:Masc_domain.Worker) in
     let id = Masc_domain.Credential_id.generate () in
     Auth.save_credential base_path { credential with id = Some id };
-    Auth.persist_raw_token base_path ~agent_name:canonical token;
+    Auth.save_private_text_file (Auth.raw_token_file base_path canonical) token;
     let () = auth_ok (Auth.ensure_credential_alias base_path ~canonical_name:canonical ~alias_name:"alpha") in
     if malformed then Auth.save_credential base_path
         { credential with id = Some id; expires_at = Some "invalid" };
     let paths = [Auth.credential_file base_path canonical; Auth.credential_file base_path "alpha";
-                 Auth.credential_uuid_file base_path id; Auth.raw_token_file base_path canonical] in
+                 Filename.concat (Filename.dirname (Auth.credential_file base_path canonical))
+                   (Masc_domain.Credential_id.to_string id ^ ".json"); Auth.raw_token_file base_path canonical] in
     let bytes () = List.map (fun path -> In_channel.with_open_bin path In_channel.input_all) paths in
     let before = bytes () in
     let result = Auth.with_credential_transaction base_path (fun transaction ->

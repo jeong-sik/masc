@@ -11212,7 +11212,17 @@ let reconcile_home_request_detail state =
         (match state.followed_from with
          | Some (Overview, _) -> state.followed_from <- None
          | Some _ | None -> ())
-      end else if not (List.mem_assoc (Home_request request) (home_decision_rows state)) then begin
+      end else if
+        (match request with
+         | Home_question _ ->
+             state.workspace_identity <> Workspace_identity_match
+             || (match approvals_questions_reading state with
+                 | List_not_read _ -> true
+                 | List_read -> false)
+         | Home_held_call _ | Home_gate_request _ | Home_operator_request _
+         | Home_goal_confirmation _ | Home_operator_task _ -> false)
+      then ()
+      else if not (List.mem_assoc (Home_request request) (home_decision_rows state)) then begin
         (match request with Home_question _ -> clear_ask_answering state | _ -> ());
         state.home_opened_request <- None;
         state.approval_detail_open <- false;
@@ -11229,7 +11239,16 @@ let reconcile_home_request_detail state =
             Option.iter (fun index -> state.ask_cursor <- index)
               (List.find_index (fun (row : Tui_decode.ask_row) -> row.ar_id = ask_id)
                  (Option.value ~default:[] (approvals_open_questions state)))
-        | Home_goal_confirmation goal_id -> state.planning_mode <- Planning_detail goal_id
+        | Home_goal_confirmation goal_id ->
+            state.planning_mode <- Planning_detail goal_id;
+            (match state.planning with
+             | None -> ()
+             | Some planning ->
+                 Option.iter (fun index -> state.planning_cursor <- index)
+                   (List.find_index
+                      (fun (goal : planning_goal) -> String.equal goal.pg_id goal_id)
+                      (planning_visible_goals ~filter:state.planning_filter
+                         ~sort:state.planning_sort planning.pl_goals)))
         | Home_operator_task task_id -> state.task_detail_id <- Some task_id
 
 let home_continue_rows (state : state) =

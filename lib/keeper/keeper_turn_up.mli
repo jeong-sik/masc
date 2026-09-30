@@ -7,6 +7,9 @@
 type tool_result = Keeper_types_profile.tool_result
 
 (** Handle the [masc_keeper_up] MCP tool call: parse args, look up the
-    existing keeper meta, and dispatch to create or update. *)
+    existing keeper meta, and dispatch to create or update. A boolean
+    [create_only] argument refuses existing metadata before the update branch;
+    creation retains config revision CAS and owner metadata create admission
+    against concurrent publication. *)
 val handle_keeper_up :
   _ Keeper_types_profile.context -> Yojson.Safe.t -> tool_result

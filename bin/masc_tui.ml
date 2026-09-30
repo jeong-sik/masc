@@ -2883,11 +2883,20 @@ let settle_live_turn state (request : Keeper_chat.request) =
    the keypress that asked for it. *)
 (* Answer the call the keeper is held at. Runs on its own fiber: the pane stays
    responsive, and a slow server costs the answer rather than the keypress. *)
+(* Only an actual dispatch supersedes the preceding receipt; a late operator
+   completion cannot restore ownership after another decision starts. *)
+let supersede_home_decision_receipt state =
+  state.home_decision_receipt <- None;
+  state.home_decision_inflight <- None
+
 (* The Approvals-surface twin of [launch_keeper_approval]: same route, no chat
    request to correlate with, so the outcome lands in the session log instead
    of a pane's transcript. *)
 let launch_surface_tool_approval state ~mailbox ~keeper_name ~tool_call_id
     ~allow =
+  if state.workspace_identity <> Workspace_identity_match then
+    report_action state "error" "Cannot decide: workspace identity is unverified"
+  else
   (* Answering a held tool call mutates server state over one round trip, like
      the Gate and operator-confirm decisions beside it. Take the same
      single-action slot so the header shows [submitting] at once and a repeat
@@ -2898,6 +2907,7 @@ let launch_surface_tool_approval state ~mailbox ~keeper_name ~tool_call_id
       report_action state "system" "Approval action already in progress"
   | Ok (flow, generation) -> (
       state.approval_flow <- flow;
+      supersede_home_decision_receipt state;
       let host = server_peer_host in
       let port = state.port in
       let run () =
@@ -3454,6 +3464,9 @@ let launch_gate_snapshot_load ?(intent = Snapshot_read.Poll) state ~mailbox =
    labeled option, because a trailing [?reason] here is unerasable
    (warning 16). *)
 let launch_gate_resolve state ~mailbox ~approval_id ~approve ~reason =
+  if state.workspace_identity <> Workspace_identity_match then
+    report_action state "error" "Cannot decide: workspace identity is unverified"
+  else
   (* A Gate decision mutates durable server state over one round trip. Take the
      same single-action slot the operator-confirm path takes, so the header
      draws [submitting] the instant the key lands and a second press during the
@@ -3464,6 +3477,7 @@ let launch_gate_resolve state ~mailbox ~approval_id ~approve ~reason =
       report_action state "system" "Approval action already in progress"
   | Ok (flow, generation) -> (
       state.approval_flow <- flow;
+      supersede_home_decision_receipt state;
       let host = server_peer_host in
       let port = state.port in
       let run () =
@@ -3492,6 +3506,9 @@ let launch_gate_resolve state ~mailbox ~approval_id ~approve ~reason =
                  generation )))
 
 let launch_gate_auto_judge_retry state ~mailbox (pending : Tui_decode.gate_pending) =
+  if state.workspace_identity <> Workspace_identity_match then
+    report_action state "error" "Cannot decide: workspace identity is unverified"
+  else
   match pending.gp_retry_request with
   | None ->
       report_action state "system"
@@ -3502,6 +3519,7 @@ let launch_gate_auto_judge_retry state ~mailbox (pending : Tui_decode.gate_pendi
           report_action state "system" "Approval action already in progress"
       | Ok (flow, generation) -> (
           state.approval_flow <- flow;
+          supersede_home_decision_receipt state;
           let host = server_peer_host in
           let port = state.port in
           let run () =
@@ -3634,6 +3652,10 @@ let launch_keeper_tool_mode_set state ~mailbox ~keeper_name ~mode =
 
 let launch_keeper_approval state ~mailbox (request : Keeper_chat.request)
     ~tool_call_id ~allow =
+  if state.workspace_identity <> Workspace_identity_match then
+    report_action state "error" "Cannot decide: workspace identity is unverified"
+  else begin
+  supersede_home_decision_receipt state;
   let host = server_peer_host in
   let port = state.port in
   let keeper_name = request.Keeper_chat.keeper_name in
@@ -3658,6 +3680,7 @@ let launch_keeper_approval state ~mailbox (request : Keeper_chat.request)
       enqueue_async mailbox
         (Keeper_chat_approval_answered
            (request, tool_call_id, allow, Error "Eio switch is unavailable"))
+  end
 
 (* Automatic polling shares a pending reading for the same Keeper. Explicit
    refresh and selection changes supersede it, retaining the generation guard. *)
@@ -3887,7 +3910,8 @@ let launch_task_history_load state ~mailbox task_id =
 let launch_task_cancel state ~mailbox ~task_id ~reason =
   if state.workspace_identity <> Workspace_identity_match then
     report_action state "error" "Cannot cancel task: workspace identity is unverified"
-  else
+  else begin
+  supersede_home_decision_receipt state;
   let host = server_peer_host in
   let port = state.port in
   let request_id = Printf.sprintf "tui-cancel-%.6f" (Unix.gettimeofday ()) in
@@ -3926,6 +3950,8 @@ let launch_task_cancel state ~mailbox ~task_id ~reason =
   | None ->
       enqueue_async mailbox
         (Task_cancel_done (task_id, Error "Eio switch is unavailable"))
+
+  end
 
 (* The operator evidence bundle for the verification detail, over HTTP.
    Keyed by task id so a stale answer for a request the operator already
@@ -8082,6 +8108,7 @@ let queue_keeper_steer state ~causal_parent_request_id request =
 
 let launch_waiting_keeper_input state ~mailbox ~keeper_name =
   if state.workspace_identity = Workspace_identity_match
+     && keeper_available_for_new_message state keeper_name
      && not (List.mem_assoc keeper_name state.keeper_chat_control_pending) then begin
     (* Every Enter send, including one without a control token, waits for the
        previous server acceptance. Concurrent HTTP fibers may otherwise reach
@@ -8402,7 +8429,8 @@ let drain_queued_message state ~base_path ~mailbox =
                (before - Chat_queue.length state.msg_queued));
           next ())
   in
-  if state.workspace_identity = Workspace_identity_match then next ()
+  if state.workspace_identity = Workspace_identity_match
+     && Option.is_none state.keepers_error then next ()
 ;;
 
 (* The same words the log projection ends a turn with: one function, so a
@@ -10562,7 +10590,9 @@ let apply_asks_load state = function
            (match List.find_index
                     (fun (row : Tui_decode.ask_row) -> row.ar_id = aam_ask_id) next_rows with
             | Some index -> state.ask_cursor <- index
-            | None -> clear_ask_answering state));
+            | None when state.workspace_identity = Workspace_identity_match ->
+                clear_ask_answering state
+            | None -> ()));
       state.asks_snapshot <- Some snapshot;
       state.asks_error <- None;
       (* Silent while the operator is on the Approvals surface -- the panel is
@@ -11100,10 +11130,10 @@ let apply_server_identity_reading state reading =
   | Masc_tui_types.Workspace_identity_unread -> ()
 
 let apply_http_surfaces state results =
+  apply_server_identity_reading state results.http_server_identity;
   apply_overview_load state results.http_overview;
   Option.iter (apply_approval_observation state) results.http_approvals;
   apply_http_scoped_surfaces state results.http_scoped;
-  apply_server_identity_reading state results.http_server_identity;
   let reached result =
     Result.map (fun _ -> ()) result |> Result.map_error (fun _ -> ())
   in
@@ -11893,6 +11923,9 @@ let apply_approval_decision_completion state generation approval decision result
     apply_approval_decision_result state approval decision approvals result
 
 let start_approval_decision state approval decision ~mailbox =
+  if state.workspace_identity <> Workspace_identity_match then
+    report_action state "error" "Cannot decide: workspace identity is unverified"
+  else
   match Approval.Flow.begin_action state.approval_flow with
   | Error `Already_inflight ->
       state.pending_approval_action <- None;
@@ -11900,6 +11933,7 @@ let start_approval_decision state approval decision ~mailbox =
   | Ok (flow, generation) ->
     let () = state.approval_flow <- flow in
     let () = state.pending_approval_action <- None in
+    supersede_home_decision_receipt state;
     state.home_decision_inflight <- state.home_opened_request;
     let host = server_peer_host in
     let port = state.port in
@@ -12141,6 +12175,11 @@ let apply_ask_answer_completion state answered_label result asks =
 (* TEL-OK: the TUI-local submit gate emits user-visible events here; the
    ask-answer endpoint owns the durable answer telemetry. *)
 let start_ask_answer state ~keeper_name ~ask_id ~answered_label ~answers ~mailbox =
+  if state.workspace_identity <> Workspace_identity_match then
+    report_action state "error" "Cannot answer: workspace identity is unverified; draft retained"
+  else begin
+  supersede_home_decision_receipt state;
+
   state.ask_submit_inflight <- true;
   let host = server_peer_host in
   let port = state.port in
@@ -12174,8 +12213,12 @@ let start_ask_answer state ~keeper_name ~ask_id ~answered_label ~answers ~mailbo
         | exn -> Error ("asks reload failed: " ^ Printexc.to_string exn)
       in
       apply_ask_answer_completion state answered_label result asks
+  end
 
 let handle_ask_submit state ~mailbox =
+  if state.workspace_identity <> Workspace_identity_match then
+    report_action state "error" "Cannot answer: workspace identity is unverified; draft retained"
+  else
   match state.asks_error with
   | Some _ -> report_action state "error" "Question source unavailable; refresh before answering"
   | None ->
@@ -12382,6 +12425,7 @@ let start_goal_transition state ~mailbox ~(goal_id : string)
   if state.workspace_identity <> Workspace_identity_match then
     report_action state "error" "Cannot change goal: workspace identity is unverified"
   else begin
+  supersede_home_decision_receipt state;
   state.goal_action_error <- None;
   report_action state "system"
     (Printf.sprintf "goal %s: %s" goal_id
@@ -12421,6 +12465,7 @@ let handle_goal_confirmation_key state ~mailbox =
        | Goal_confirmation.Inspecting read ->
       match Goal_confirmation_read.view_for ~equal:String.equal read ~key:goal_id with
        | Ready confirmation ->
+           supersede_home_decision_receipt state;
            state.goal_confirmation <- Goal_confirmation.Submitting
                (goal_id, Goal_confirmation_read.clear read);
            Eio.Fiber.fork ~sw (fun () ->
@@ -13770,7 +13815,21 @@ let apply_async_message state ~base_path ~http_refresh_inflight
   | Http_refresh_done (Refresh_surfaces results) ->
       http_refresh_inflight := false;
       state.http_refresh_started_ns <- None;
+      let dispatch_was_unavailable =
+        state.workspace_identity <> Workspace_identity_match
+        || Option.is_some state.keepers_error
+      in
       apply_http_surfaces state results;
+      if dispatch_was_unavailable
+         && state.workspace_identity = Workspace_identity_match
+         && Option.is_none state.keepers_error then begin
+        Chat_queue.waiting state.msg_queued
+        |> List.map (fun (item : Chat_queue.item) -> item.request.keeper_name)
+        |> List.sort_uniq String.compare
+        |> List.iter (fun keeper_name ->
+             launch_waiting_keeper_input state ~mailbox ~keeper_name);
+        drain_queued_message state ~base_path ~mailbox
+      end;
       (* The local roster is trustworthy only after a workspace-matched read.
          Resolve the boot choice once; a key the operator pressed meanwhile
          takes precedence over the saved choice. *)
@@ -18937,6 +18996,9 @@ and is loaded on demand through keeper_skill.
           launch_keeper_sandbox_view state ~mailbox:async_messages keeper.k_name)
   in
   let handle_keeper_create ?(return_to = Keeper_chat_return_list) () =
+    if state.workspace_identity <> Workspace_identity_match then
+      report_action state "error" "Cannot create: workspace identity is unverified; declaration retained"
+    else
     let return_to = Option.value state.keeper_creation_return ~default:return_to in
     match Masc_tui_editor.editor_command () with
     | None ->
@@ -18979,10 +19041,23 @@ and is loaded on demand through keeper_skill.
         in
         match declared_name with
         | Error detail -> refuse detail
+        | Ok _ when state.workspace_identity <> Workspace_identity_match ->
+            refuse "Cannot create: workspace identity is unverified; declaration retained"
+        | Ok declared_name when
+            List.exists (fun keeper -> String.equal keeper.k_name declared_name)
+              state.keepers ->
+            refuse (declared_name ^ ": Keeper already exists; creation did not reconfigure it. Choose a new name.")
         | Ok declared_name ->
+          let create_declaration =
+            match Yojson.Safe.from_string declaration with
+            | `Assoc fields ->
+                Yojson.Safe.to_string
+                  (`Assoc (("create_only", `Bool true) :: List.remove_assoc "create_only" fields))
+            | json -> Yojson.Safe.to_string json
+          in
           (match
             Masc_tui_http.post_keeper_up ~host ~port ~keeper_name:declared_name
-              ~declaration_json:declaration
+              ~declaration_json:create_declaration
           with
           | Error detail -> refuse detail
           | Ok receipt ->
@@ -18998,6 +19073,8 @@ and is loaded on demand through keeper_skill.
              with
              | Some (`Bool true), Some (`String "up"), Some (`String name)
                when String.equal name declared_name ->
+                 (match Masc_cli_keeper_create.successful_outcome receipt with
+                 | Masc_cli_keeper_create.Created _ ->
                  state.keeper_creation_draft <- None;
                  state.keeper_creation_return <- None;
                  load_local_workspace_if_safe state base_path;
@@ -19016,6 +19093,13 @@ and is loaded on demand through keeper_skill.
                    ~scoped_refresh_followup ~mailbox:async_messages;
                  report_action state "system"
                    (declared_name ^ ": declaration accepted · write the first request")
+                 | Masc_cli_keeper_create.Reconfigured { name } ->
+                     refuse (name ^ ": server reconfigured an existing Keeper; no Keeper was created. Inspect its configuration before retrying")
+                 | Masc_cli_keeper_create.Refused detail
+                 | Masc_cli_keeper_create.Unauthorized detail
+                 | Masc_cli_keeper_create.Unreachable detail -> refuse detail
+                 | Masc_cli_keeper_create.Revision_conflict ->
+                     refuse "Creation revision conflict; inspect the roster before retrying")
              | _ ->
                  refuse
                    "Creation response did not confirm this Keeper; inspect the roster before retrying"))))
@@ -22990,6 +23074,7 @@ and is loaded on demand through keeper_skill.
                           state.planning_filter <- Planning_filter_active);
                      navigate Planning;
                      state.planning_mode <- Planning_detail goal_id;
+                     reconcile_home_request_detail state;
                      state.planning_scroll <- 0;
                      state.goal_timeline <- None;
                      launch_goal_timeline_load state ~mailbox:async_messages goal_id

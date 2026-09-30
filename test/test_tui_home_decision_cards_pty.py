@@ -236,24 +236,46 @@ def goal_opens_exact_detail(executable):
     other = dict(h.planning_goal("goal-home-other", "Other goal confirmation"),
                  phase="awaiting_confirmation", criterion_revision="r1",
                  created_at=goal["created_at"], updated_at=goal["updated_at"])
-    fixtures[h.PLANNING_PATH] = h.planning_snapshot([other, goal])
+    goal["priority"] = 2
+    adjacent = dict(h.planning_goal("goal-home-next", "Next Work goal"),
+                    phase="awaiting_confirmation", priority=3)
+    hidden = dict(h.planning_goal("goal-home-hidden", "Completed hidden goal"),
+                  phase="completed", priority=0)
+    # Work filters and sorts this raw order to other -> Home target -> adjacent.
+    fixtures[h.PLANNING_PATH] = h.planning_snapshot([adjacent, hidden, goal, other])
     requests = []
 
     def interact(process, fd, _slave, output, base):
         path = Path(base) / ".masc" / "goals.json"
         before = path.read_bytes()
         h.wait_for_output(process, fd, output, b"Confirm Goal", start=0, timeout=10)
+        h.palette_go(process, fd, output, b"go Work", b"Other goal confirmation")
+        h.send_and_wait(process, fd, output, b"\r", b"metric-goal-home-other")
+        assert b"metric-goal-home-other" in h.screen_text(bytes(output))
+        h.send_and_wait(process, fd, output, b"\x1b", b"Enter:open")
+        h.send_and_wait(process, fd, output, b"\x1b", b"Confirm Goal")
         select_home(process, fd, output, b"goal-home-exact", destinations=3)
         h.send_and_wait(process, fd, output, b"\r", b"Exact goal confirmation")
         visible = h.screen_text(bytes(output))
         assert b"goal-home-exact" in visible and b"metric-goal-home-exact" in visible, visible
         assert b"metric-goal-home-other" not in visible, visible
+        for key, goal_id in ((b"]", b"goal-home-next"),
+                             (b"[", b"goal-home-exact"),
+                             (b"[", b"goal-home-other")):
+            h.send_and_wait(process, fd, output, key, b"metric-" + goal_id)
+            # Redraw also exercises reconciliation after releasing the Home pin.
+            h.send_and_wait(process, fd, output, h.FULL_REDRAW, b"metric-" + goal_id)
+            visible = h.screen_text(bytes(output))
+            assert b"metric-" + goal_id in visible, visible
+            for other_id in (b"goal-home-exact", b"goal-home-next", b"goal-home-other"):
+                if other_id != goal_id:
+                    assert b"metric-" + other_id not in visible, visible
         assert path.read_bytes() == before
         home.assert_no_decision_posts(requests)
         h.send_and_wait(process, fd, output, b"\x1b", b"Enter:open")
         os.write(fd, b"q")
 
-    run(executable, "Home Goal card opens the same Goal detail without mutation",
+    run(executable, "Home Goal syncs a stale Work cursor and brackets follow visible adjacent IDs",
         fixtures, interact, requests, prepare=lambda base: home.seed_goals(base, [other, goal]))
 
 

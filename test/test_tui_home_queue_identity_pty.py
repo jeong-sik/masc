@@ -112,8 +112,8 @@ def queue_identity_journey(executable):
             assert inspect_local() == saved_id, "settlement lost or replaced the local request"
             assert len(fixture.received) == 1, "queued input posted while identity was unread"
 
-            # Opening Home's matching Continue destination drains the saved
-            # local request. Reuse the settled wire response without modeling
+            # A matching health refresh resumes the already-authorized local
+            # request without navigation or another Enter. Reuse the settled wire response without modeling
             # remote priority operations or owner-store execution.
             def recovered_stream(body):
                 request = json.loads(body)
@@ -126,22 +126,6 @@ def queue_identity_journey(executable):
 
             fixture.fixtures["/api/v1/keepers/chat/stream"] = h.RequestHttpResponse(recovered_stream)
             fixture.fixtures.update(health)
-            h.palette_go(process, fd, output, b"go dashboard", b"Continue with alpha")
-            # Select by the visible highlighted destination, as in the
-            # existing Home journey harness; cards may precede Continue.
-            os.write(fd, b"k" * 12)
-            h.drain_until_quiet(process, fd, output, cap=1)
-            selected = re.compile(rb"\x1b\[7m[^\r\n]*Continue with alpha")
-            for index in range(12):
-                rows = h.screen_rows(bytes(output), preserve_styles=True)
-                if any(selected.search(row) for row in rows.values()):
-                    break
-                if index < 11:
-                    os.write(fd, b"j")
-                    h.drain_until_quiet(process, fd, output, cap=1)
-            else:
-                raise AssertionError("Home Continue with alpha was not selected")
-            h.send_and_wait(process, fd, output, b"\r", b"Esc:Dashboard")
             h.wait_for_atomic_admissions(process, fd, output, fixture, 2)
             recovered = fixture.submitted[1]
             assert recovered["request_id"] == saved_id, "recovery minted another request"

@@ -15,6 +15,11 @@ required = true
 description = "Keeper handle (stable). Example: 'keeper-helper'"
 
 [[params]]
+name = "create_only"
+type = "boolean"
+description = "Refuse an existing Keeper without reconfiguring it. Used by creation flows; concurrent configuration writes use the existing revision compare-and-swap, and owner metadata creation refuses an existing owner. Omit or pass false for the explicit create-or-update behavior."
+
+[[params]]
 name = "instructions"
 type = "string"
 description = """

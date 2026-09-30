@@ -31,7 +31,7 @@ CHAT_PATH = "/api/v1/keepers/chat/stream"
 DEFERRED = b"Confirmation accepted; action deferred:"
 
 
-def accepted_but_pending(executable):
+def accepted_but_pending(executable, *, followed_by_held=False):
     fixtures, items, _new = h.approval_selection_http_fixtures()
     item = dict(items[0], confirm_token=TOKEN, trace_id=f"trace-{TOKEN}",
                 payload={"reason": "home-receipt-exact-reason"})
@@ -60,6 +60,21 @@ def accepted_but_pending(executable):
 
     fixtures[cards.OPERATOR_PATH] = listing
     fixtures[CONFIRM_PATH] = h.RequestHttpResponse(confirm)
+    held_path = "/api/v1/keepers/tool-approval"
+    held_rows = []
+    held_item = cards.held("call-after-receipt", "new-held-decision")
+
+    def answer_held(body):
+        assert json.loads(body) == {
+            "name": held_item["keeper"],
+            "tool_call_id": "call-after-receipt", "decision": "approve",
+        }
+        held_rows.clear()
+        return 200, {"settled": True, "remembered": False}
+
+    if followed_by_held:
+        fixtures[cards.HELD_PATH] = lambda: (200, {"pending": copy.deepcopy(held_rows)})
+        fixtures[held_path] = h.RequestHttpResponse(answer_held)
 
     def interact(process, fd, _slave, output, _base):
         h.wait_for_output(process, fd, output, b"[home-a]", start=0, timeout=10)
@@ -90,6 +105,26 @@ def accepted_but_pending(executable):
         # Reopen the retained Home identity; navigating cannot replay the POST.
         h.send_and_wait(process, fd, output, b"\r", b"home-receipt-exact-reason")
         h.send_and_wait(process, fd, output, b"\x1b", b"Enter:open")
+        if followed_by_held:
+            # Navigation and operator arming retain the old receipt. Only
+            # dispatching the newer held decision supersedes it.
+            h.send_and_wait(process, fd, output, b"\r", b"home-receipt-exact-reason")
+            h.send_and_wait(process, fd, output, b"y", b"Press y again: namespace_pause")
+            h.send_and_wait(process, fd, output, b"\x1b", b"Enter:open")
+            assert DEFERRED in cards.frame(process, fd, output, "receipt-after-arming")
+            held_rows.append(held_item)
+            h.send_and_wait(process, fd, output, b"r", b"new-held-decision")
+            cards.select_home(process, fd, output, b"new-held-decision", destinations=4)
+            h.send_and_wait(process, fd, output, b"\r", b"call-after-receipt")
+            home.assert_no_decision_posts([(path, body) for path, body in requests
+                                          if path != CONFIRM_PATH])
+            h.send_and_wait(process, fd, output, b"y", b"allowed ")
+            h.send_and_wait(process, fd, output, b"\x1b", b"Enter:open")
+            visible = cards.frame(process, fd, output, "receipt-superseded-by-held")
+            assert DEFERRED not in visible and b"Last decision receipt" not in visible, visible
+            assert sum(path == held_path for path, _ in requests) == 1, requests
+            os.write(fd, b"q")
+            return
         with lock:
             current.clear()
             before = len(observations)
@@ -125,7 +160,8 @@ def accepted_but_pending(executable):
     assert len(confirmations) == 1, confirmations
     assert json.loads(confirmations[0][1]) == {"confirm_token": TOKEN, "decision": "confirm"}
     home.assert_no_decision_posts([(path, body) for path, body in requests
-                                  if path != CONFIRM_PATH])
+                                  if path not in (CONFIRM_PATH, held_path)])
+    assert sum(path == held_path for path, _ in requests) == int(followed_by_held), requests
 
 
 def background_ask_keeps_beta_draft(executable):
@@ -198,5 +234,6 @@ def background_ask_keeps_beta_draft(executable):
 if __name__ == "__main__":
     exe = os.path.abspath(sys.argv[1])
     accepted_but_pending(exe)
+    accepted_but_pending(exe, followed_by_held=True)
     background_ask_keeps_beta_draft(exe)
-    print("Home decision receipt PTY: PASS (2 scenarios)")
+    print("Home decision receipt PTY: PASS (3 scenarios)")

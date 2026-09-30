@@ -119,3 +119,25 @@ The card detail fixture now uses visible call identity and command content in
 all refresh/window cases; private `call=`/`args=` trace strings are not display
 contracts. A dedicated overflow suite covers 64 distinct requests at each
 acceptance size; its runtime and duration remain unproven until targeted CI.
+
+## Inline review response after ba0a831
+
+Transient Ask read failures retain the Home-opened reader and partial answers;
+only a successful matching-workspace read may clear the removed Ask. Workspace
+identity is applied before HTTP snapshots, and explicit decision dispatches
+refuse unread/mismatched identity. New fixture suites cover foreign-workspace
+decision refusal and question draft recovery. Matching identity/roster recovery
+pumps already-authorized local messages without navigation or another Enter.
+
+Every new decision dispatch supersedes an earlier Home receipt. Home Goal opening
+aligns the Planning cursor with filtered/sorted visible rows before bracket
+navigation. Creation rejects known local collisions and sends `create_only=true`
+so the backend refuses reconfiguration; only typed Created receipts clear the
+retained declaration. The public schema documents this field. A production-handler
+test asserts existing metadata, owner projection and both TOML files remain
+unchanged on refusal. These fixes await current-head execution.
+
+Native probe run36673326151 succeeded at ba0a831, which precedes these fixes.
+The installed c112 server rejects the new create-only argument; completing real
+creation requires the matching new server companion as well as the TUI. No old
+server mutation fallback or UI-only installation can close that journey.

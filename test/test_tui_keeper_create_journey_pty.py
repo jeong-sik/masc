@@ -12,7 +12,7 @@ import test_tui_home_journey_pty as home
 
 SOURCE_MODULES = (
     "bin/masc_tui.ml", "bin/masc_tui_types.ml", "bin/masc_tui_editor.ml",
-    "bin/masc_tui_http.ml",
+    "bin/masc_tui_http.ml", "bin/masc_cli_keeper_create.ml",
 )
 CREATE_PATH = "/api/v1/keepers/gamma/up"
 MALFORMED = '{"name": "gamma",'
@@ -22,7 +22,7 @@ DECLARATION = json.dumps({
 }) + "\n"
 
 
-def creation_journey(executable, *, wrong_receipt, from_home=False):
+def creation_journey(executable, *, wrong_receipt, from_home=False, reconfigured=False, collision=False):
     requests = []
     authored = []
     workspace = {}
@@ -31,11 +31,18 @@ def creation_journey(executable, *, wrong_receipt, from_home=False):
     def prepare(base):
         workspace["base"] = base
         home.seed_goals(base)
+        if collision:
+            Path(base, ".masc", "keepers", "gamma.json").write_text(
+                json.dumps(h.keeper_metadata("gamma")), encoding="utf-8")
+            return
         for path in (Path(base) / ".masc" / "keepers").glob("*.json"):
             path.unlink()
 
     def create(body):
         authored.append(body)
+        assert json.loads(body)["create_only"] is True
+        if reconfigured:
+            return 200, {"ok": True, "action": "up", "name": "gamma", "detail": {"name": "gamma"}}
         if not wrong_receipt and len(authored) == 1:
             return 400, {"error": "fixture declaration refused"}
         if wrong_receipt:
@@ -44,7 +51,7 @@ def creation_journey(executable, *, wrong_receipt, from_home=False):
         # it does not create an actual Keeper process or invoke a provider.
         path = Path(workspace["base"], ".masc", "keepers", "gamma.json")
         path.write_text(json.dumps(h.keeper_metadata("gamma")), encoding="utf-8")
-        return 200, {"ok": True, "action": "up", "name": "gamma", "detail": {}}
+        return 200, {"ok": True, "action": "up", "name": "gamma", "detail": {"name": "gamma", "sandbox_profile": "docker", "network_mode": "none"}}
 
     fixtures[CREATE_PATH] = h.RequestHttpResponse(create)
     fixtures["/api/v1/keepers/gamma/chat/history"] = (200, [])
@@ -63,7 +70,7 @@ def creation_journey(executable, *, wrong_receipt, from_home=False):
             "step = int(count.read_text()) + 1 if count.exists() else 1\n"
             "(root / f'input-{step}.json').write_text(form.read_text())\n"
             "count.write_text(str(step))\n"
-            f"form.write_text({DECLARATION!r} if {wrong_receipt!r} or step > 1 else {MALFORMED!r})\n",
+            f"form.write_text({DECLARATION!r} if {wrong_receipt or reconfigured or collision!r} or step > 1 else {MALFORMED!r})\n",
             encoding="utf-8",
         )
 
@@ -73,7 +80,22 @@ def creation_journey(executable, *, wrong_receipt, from_home=False):
                 h.wait_for_output(process, fd, output, b"Create a Keeper", start=0, timeout=10)
                 home.select_destination(process, fd, output, b"Create a Keeper")
             else:
+                if not collision:
+                    h.wait_for_output(process, fd, output, b"Create a Keeper", start=0, timeout=10)
                 h.palette_go(process, fd, output, b"go keepers", b"MASC Keepers")
+                if collision:
+                    h.wait_for_output(process, fd, output, b"gamma", start=0, timeout=10)
+            if reconfigured or collision:
+                message = b"Keeper already exists" if collision else b"server reconfigured an existing Keeper"
+                h.send_and_wait(process, fd, output, b"\r" if from_home else b"a", message)
+                assert len(authored) == (0 if collision else 1), authored
+                assert not [body for path, body in requests if path == "/api/v1/keepers/chat/stream"]
+                h.send_and_wait(process, fd, output, b"a", message)
+                assert (editor_root / "input-2.json").read_text() == DECLARATION
+                assert len(authored) == (0 if collision else 2), authored
+                assert b"Keepers \xe2\x96\xb8 gamma \xe2\x96\xb8 chat" not in h.screen_text(bytes(output))
+                os.write(fd, b"q")
+                return
             if wrong_receipt:
                 h.send_and_wait(process, fd, output, b"a", b"Creation response did not confirm")
                 assert process.poll() is None
@@ -87,10 +109,10 @@ def creation_journey(executable, *, wrong_receipt, from_home=False):
             assert authored == [], authored
             h.send_and_wait(process, fd, output, b"a", b"fixture declaration refused")
             assert (editor_root / "input-2.json").read_text() == MALFORMED
-            assert authored == [DECLARATION.encode()], authored
+            assert [json.loads(body) for body in authored] == [dict(json.loads(DECLARATION), create_only=True)], authored
             h.send_and_wait(process, fd, output, b"a", b"declaration accepted")
             assert (editor_root / "input-3.json").read_text() == DECLARATION
-            assert authored == [DECLARATION.encode(), DECLARATION.encode()], authored
+            assert [json.loads(body) for body in authored] == [dict(json.loads(DECLARATION), create_only=True)] * 2, authored
             frame = h.resize_and_wait(
                 process, fd, output, rows=24, columns=80,
                 needle="Keepers ▸ gamma ▸ chat".encode(),
@@ -126,7 +148,7 @@ def creation_preserves_retained_queue(executable):
     def create(_body):
         path = Path(workspace["base"], ".masc", "keepers", "gamma.json")
         path.write_text(json.dumps(h.keeper_metadata("gamma")), encoding="utf-8")
-        return 200, {"ok": True, "action": "up", "name": "gamma"}
+        return 200, {"ok": True, "action": "up", "name": "gamma", "detail": {"name": "gamma", "sandbox_profile": "docker", "network_mode": "none"}}
 
     fixture.fixtures[CREATE_PATH] = h.RequestHttpResponse(create)
     fixture.fixtures["/api/v1/keepers/gamma/chat/history"] = (200, [])
@@ -182,5 +204,7 @@ if __name__ == "__main__":
     creation_journey(executable, wrong_receipt=False)
     creation_journey(executable, wrong_receipt=False, from_home=True)
     creation_journey(executable, wrong_receipt=True)
+    creation_journey(executable, wrong_receipt=False, from_home=True, reconfigured=True)
+    creation_journey(executable, wrong_receipt=False, collision=True)
     creation_preserves_retained_queue(executable)
-    print("Keeper create journey PTY: PASS (4 scenarios)")
+    print("Keeper create journey PTY: PASS (6 scenarios)")

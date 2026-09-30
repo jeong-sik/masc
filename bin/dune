@@ -1737,6 +1737,7 @@
  (public_name masc-tui)
  (package masc)
  (libraries
+  masc_cli_keeper_create
   masc_tui_play_qr
   masc_tui_account_login
   masc_tui_sgr_text

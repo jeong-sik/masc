@@ -52,6 +52,15 @@ let config_revision_conflict ~expected ~observed =
        ])
 
 let handle_keeper_up ctx args : tool_result =
+  let create_only =
+    match Json_util.assoc_member_opt "create_only" args with
+    | None | Some (`Bool false) -> Ok false
+    | Some (`Bool true) -> Ok true
+    | Some _ -> Error "create_only must be a boolean"
+  in
+  match create_only with
+  | Error detail -> tool_result_error ~class_:Tool_result.Workflow_rejection detail
+  | Ok create_only ->
   match Runtime_startup_state.get () with
   | Setup_required reason ->
     tool_result_error ~class_:Tool_result.Runtime_failure
@@ -83,9 +92,12 @@ let handle_keeper_up ctx args : tool_result =
         else config_revision_conflict ~expected ~observed)
        |> with_manifest_read_warnings warnings
      | Ok { value = revision, Ok (Some old); warnings } ->
-       Keeper_turn_up_update.update_keeper
+       (if create_only then
+          tool_result_error ~class_:Tool_result.Workflow_rejection
+            "Keeper already exists; creation did not reconfigure it. Choose a new name."
+        else Keeper_turn_up_update.update_keeper
          ~expected_config_revision:revision
          ctx
          p
-         old
+         old)
        |> with_manifest_read_warnings warnings)

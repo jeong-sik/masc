@@ -2199,7 +2199,9 @@ request presence is determined by the current source read. This session receipt
 does not prove application or survive restart. Creation retries retain their
 original return destination alongside the authored declaration. If the lifecycle
 accepts creation before its roster appears, the named draft remains available
-while sending waits for a reliable roster observation.
+while sending waits for a reliable roster observation. Creation refuses an
+existing name and preserves the declaration; a reconfiguration response is
+reported as reconfiguration rather than opening a first-assignment composer.
 
 `p` opens requests, `;`
 opens Agenda, and `m` opens Usage. Work retains Goal observations, task lists,
@@ -2222,7 +2224,10 @@ and keeps its draft through the existing per-Keeper draft store.
 If a previously matched server workspace becomes unreadable, the remembered
 conversation opens as history and retains its draft. New messages and waiting messages stay unsent;
 Goal confirmation and Task changes require a matching workspace reading. Refresh
-to read the server workspace again. A matching reading restores send authority.
+to read the server workspace again. A matching reading restores send authority and resumes already-authorized
+waiting messages once the Keeper roster is reliable. Unsent composer drafts
+remain drafts. A transient question read failure also preserves partial answers;
+submission waits for a successful read.
 
 Plan Usage is a frequent-use destination on the top-level **Usage** tab, not
 an expanded Home panel. The tab, Home's `m`, `go Usage` and `/cost` open its

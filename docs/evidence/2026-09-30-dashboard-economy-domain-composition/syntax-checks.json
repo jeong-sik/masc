@@ -1,0 +1,90 @@
+{
+  "scope": "Syntax only; no TypeScript typecheck, module loading, Vitest, build, emitted bundle or browser execution.",
+  "node": "v26.3.0",
+  "checks": [
+    {
+      "path": "dashboard/src/api/schemas/candle-observation.test.ts",
+      "argv": [
+        "node",
+        "--experimental-strip-types",
+        "--check",
+        "dashboard/src/api/schemas/candle-observation.test.ts"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "path": "dashboard/src/api/schemas/candle-observation.ts",
+      "argv": [
+        "node",
+        "--experimental-strip-types",
+        "--check",
+        "dashboard/src/api/schemas/candle-observation.ts"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "path": "dashboard/src/api/schemas/gate-keepers.test.ts",
+      "argv": [
+        "node",
+        "--experimental-strip-types",
+        "--check",
+        "dashboard/src/api/schemas/gate-keepers.test.ts"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "path": "dashboard/src/api/schemas/keeper-portrait.test.ts",
+      "argv": [
+        "node",
+        "--experimental-strip-types",
+        "--check",
+        "dashboard/src/api/schemas/keeper-portrait.test.ts"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "path": "dashboard/src/api/schemas/keeper-portrait.ts",
+      "argv": [
+        "node",
+        "--experimental-strip-types",
+        "--check",
+        "dashboard/src/api/schemas/keeper-portrait.ts"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "path": "dashboard/src/lib/candle-observation.ts",
+      "argv": [
+        "node",
+        "--experimental-strip-types",
+        "--check",
+        "dashboard/src/lib/candle-observation.ts"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "path": "dashboard/src/lib/keeper-portrait.ts",
+      "argv": [
+        "node",
+        "--experimental-strip-types",
+        "--check",
+        "dashboard/src/lib/keeper-portrait.ts"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    }
+  ]
+}

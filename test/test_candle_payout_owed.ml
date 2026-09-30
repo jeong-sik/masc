@@ -12,6 +12,7 @@ open Masc
 
 let make_goal () : Goal_store.goal =
   { Goal_store.id = "goal-1"
+  ; owner = Goal_store.Unknown_owner
   ; criterion_revision = "rev-1"
   ; title = "Ship the ledger"
   ; metric = Some "tests"
@@ -21,6 +22,8 @@ let make_goal () : Goal_store.goal =
   ; phase = Goal_phase.Awaiting_confirmation
   ; last_review_note = None
   ; last_review_at = None
+  ; notified_refuted_key = None
+  ; notified_overdue_key = None
   ; created_at = "2026-09-20T01:00:00Z"
   ; updated_at = "2026-09-20T01:00:00Z"
   }

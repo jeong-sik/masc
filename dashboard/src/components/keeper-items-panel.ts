@@ -1,7 +1,8 @@
 import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
 import { fetchKeeperItems, type KeeperItemsReading } from '../api/keeper-items'
-import { keeperEquipmentKey, type KeeperEquipment } from '../api/schemas/keeper-portrait'
+import { ApiRequestError } from '../api/core'
+import { keeperEquipmentKey, type KeeperEquipment } from '../lib/keeper-portrait'
 import { KeeperPortrait } from './keeper-portrait'
 import { KeeperBadge } from './keeper-badge'
 import type { Keeper } from '../types'
@@ -40,7 +41,10 @@ export function KeeperItemsPanel({ keeper }: { keeper: Keeper }) {
     fetchKeeperItems(keeper.name, controller.signal)
       .then(value => { if (currentRequest()) setReading({ kind: 'loaded', identity, authority, value }) })
       .catch(error => {
-        if (currentRequest()) setReading({ kind: 'error', identity, authority, message: error instanceof Error ? error.message : 'Item 계정을 읽지 못했습니다' })
+        const message = error instanceof ApiRequestError
+          ? error.detail ?? '계정 요청에 실패했습니다. 다시 시도해주세요.'
+          : error instanceof Error ? error.message : 'Item 계정을 읽지 못했습니다'
+        if (currentRequest()) setReading({ kind: 'error', identity, authority, message })
       })
     return () => controller.abort()
   }, [identity, authority])

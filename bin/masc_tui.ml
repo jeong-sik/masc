@@ -4099,7 +4099,7 @@ let launch_preset_call state ~mailbox ~call ~wrap =
 let forget_play_invite state ~name =
   state.play_invite <-
     Masc_tui_types.play_invite_forget state.play_invite
-      (Tui_decode.sanitize_terminal_text name)
+      (Masc.Tui_terminal_text.sanitize_terminal_text name)
 
 let launch_presets_load state ~mailbox =
   state.presets_error <- None;
@@ -9782,7 +9782,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       (* The cards carry names made safe to draw, so the name typed is
          compared in the same form. *)
       let requested_name =
-        Option.map Tui_decode.sanitize_terminal_text requested_name
+        Option.map Masc.Tui_terminal_text.sanitize_terminal_text requested_name
       in
       (let card =
          match requested_name with

@@ -197,22 +197,6 @@ function serializeTomlKey(key: string): string {
   return BARE_TOML_KEY.test(key) ? key : JSON.stringify(key)
 }
 
-function sectionValues(document: TomlDocument, name: string): Record<string, TomlScalar> {
-  const section = sectionOf(document, name)
-  if (!section) return {}
-  const values: Record<string, TomlScalar> = Object.create(null)
-  for (const entry of section.entries) {
-    const path = getStaticTOMLValue(entry.key)
-    const key = path[0]
-    if (path.length !== 1 || key === undefined) continue
-    const value = getStaticTOMLValue(entry.value)
-    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
-      values[key] = value
-    }
-  }
-  return values
-}
-
 function asString(value: TomlScalar | undefined, fallback = ''): string {
   return typeof value === 'string' ? value : fallback
 }
@@ -223,13 +207,6 @@ function asNumber(value: TomlScalar | undefined): number | null {
 
 function asBoolean(value: TomlScalar | undefined, fallback = false): boolean {
   return typeof value === 'boolean' ? value : fallback
-}
-
-function tableIds(document: TomlDocument, owner: string): string[] {
-  return document.sections.flatMap(section => {
-    const [namespace, id] = section.path
-    return section.kind === 'standard' && section.path.length === 2 && namespace === owner && id !== undefined ? [id] : []
-  })
 }
 
 // Every declared provider, in the shape the server's loader accepts, so the
@@ -285,7 +262,7 @@ function modelSetModels(document: TomlDocument, name: string): string[] {
 }
 
 function modelIds(document: TomlDocument): string[] {
-  return tableIds(document, 'models')
+  return [...declaredKeysUnder(document.rootEntries, document.sections, ['models'])]
 }
 
 // Identity comes from the same parsed TOML paths as providers and models.
@@ -380,12 +357,12 @@ function capBoolean(value: TomlScalar | undefined): boolean | null {
 }
 
 function modelFromDocument(document: TomlDocument, id: string): RuntimeTomlModel {
-  const values = sectionValues(document, `models.${serializeTomlKey(id)}`)
+  const values = tableValues(document, ['models', id])
   // Model capabilities live in the nested [models.<id>.capabilities] section,
   // parsed server-side by lib/runtime/runtime_toml.ml:435-451. The earlier
   // reader looked for a `json-support` key on the top-level model table, which
   // never exists in the SSOT config, so JSON-lane validation never fired.
-  const caps = sectionValues(document, `models.${serializeTomlKey(id)}.capabilities`)
+  const caps = tableValues(document, ['models', id, 'capabilities'])
   // thinking-control-format is intentionally NOT read here: Agent Core
   // request-building never consumes runtime.toml's [models.<id>.capabilities]
   // thinking-control-format key (masc #21521 / agentCore models.toml) — it is the
@@ -449,8 +426,8 @@ export function parseRuntimeTomlEnvironment(
     const parseError = `TOML ${error.lineNumber}:${error.column + 1}: ${error.message}`
     return { defaultRuntimeId: '', assignments: {}, laneIds: [], providers: [], models: [], bindings: [], warnings: [parseError], parseError }
   }
-  const runtimeValues = sectionValues(document, 'runtime')
-  const assignmentValues = sectionValues(document, 'runtime.assignments')
+  const runtimeValues = tableValues(document, ['runtime'])
+  const assignmentValues = tableValues(document, ['runtime', 'assignments'])
   const assignments = Object.fromEntries(
     Object.entries(assignmentValues)
       .filter((entry): entry is [string, string] => typeof entry[1] === 'string'),
@@ -503,7 +480,7 @@ function sourceLineCount(sourceText: string): number {
 }
 
 function sortedSectionEntries(document: TomlDocument, sectionName: string): Array<[string, TomlScalar]> {
-  return Object.entries(sectionValues(document, sectionName)).sort(([left], [right]) =>
+  return Object.entries(tableValues(document, tablePath(sectionName))).sort(([left], [right]) =>
     left.localeCompare(right),
   )
 }
@@ -568,19 +545,60 @@ function ensureSection(lines: string[], document: TomlDocument, sectionName: str
   }
 }
 
+// Inline tables are closed to later declarations. Missing keys must be
+// inserted inside the deepest inline table that owns their path.
+function inlineOwnerOf(document: TomlDocument, path: readonly string[]): { path: readonly string[]; table: AST.TOMLInlineTable } | null {
+  let owner: { path: readonly string[]; table: AST.TOMLInlineTable } | null = null
+  const visit = (base: readonly string[], entries: readonly AST.TOMLKeyValue[]) => {
+    for (const entry of entries) {
+      const full = [...base, ...getStaticTOMLValue(entry.key)]
+      if (entry.value.type === 'TOMLInlineTable' && full.length <= path.length && samePath(full, path.slice(0, full.length))) {
+        owner = { path: full, table: entry.value }
+        visit(full, entry.value.body)
+      }
+    }
+  }
+  visit([], document.rootEntries)
+  for (const section of document.sections) {
+    if (section.kind === 'standard') visit(section.path, section.entries)
+  }
+  return owner
+}
+
 function replaceValue(sourceText: string, sectionName: string, key: string, serialized: string): string {
   const document = parseDocument(sourceText)
-  const ensured = ensureSection([...document.lines], document, sectionName)
-  const entry = entryOf(ensured.section, key)
+  const path = tablePath(sectionName)
+  const entry = tableEntries(document, path).get(key)
   let next: string
   if (entry) {
     next = sourceText.slice(0, entry.value.range[0]) + serialized + sourceText.slice(entry.value.range[1])
   } else {
-    ensured.lines.splice(ensured.section.end, 0, `${serializeTomlKey(key)} = ${serialized}`)
-    next = joinLines(ensured.lines)
+    const inline = inlineOwnerOf(document, path)
+    if (inline) {
+      const offset = inline.table.range[1] - 1
+      const relative = [...path.slice(inline.path.length), key].map(serializeTomlKey).join('.')
+      const addition = `${inline.table.body.length > 0 ? ', ' : ' '}${relative} = ${serialized} `
+      next = sourceText.slice(0, offset) + addition + sourceText.slice(offset)
+    } else {
+      const declared = declaredKeysUnder(document.rootEntries, document.sections, path.slice(0, -1)).has(path[path.length - 1]!)
+      const ancestor = declared ? document.sections
+        .filter(section => section.kind === 'standard' && section.path.length <= path.length
+          && samePath(section.path, path.slice(0, section.path.length)))
+        .sort((left, right) => right.path.length - left.path.length)[0] : undefined
+      if (declared) {
+        // A table defined by dotted keys cannot be declared again with a
+        // header. Extend it under its nearest declared ancestor (or root).
+        const relative = [...path.slice(ancestor?.path.length ?? 0), key].map(serializeTomlKey).join('.')
+        const lines = [...document.lines]
+        lines.splice(ancestor?.end ?? document.sections[0]?.start ?? lines.length, 0, `${relative} = ${serialized}`)
+        next = joinLines(lines)
+      } else {
+        const ensured = ensureSection([...document.lines], document, sectionName)
+        ensured.lines.splice(ensured.section.end, 0, `${serializeTomlKey(key)} = ${serialized}`)
+        next = joinLines(ensured.lines)
+      }
+    }
   }
-  // A dotted assignment or inline table can already own this logical path
-  // without an editable table declaration. Never emit a duplicate table/key.
   parseDocument(next)
   return next
 }
@@ -594,16 +612,26 @@ export function setRuntimeTomlStringArrayKey(sourceText: string, sectionName: st
 }
 
 export function getRuntimeTomlKey(sourceText: string, sectionName: string, key: string): string | undefined {
-  const section = sectionOf(parseDocument(sourceText), sectionName)
-  const entry = section ? entryOf(section, key) : undefined
+  const entry = tableEntries(parseDocument(sourceText), tablePath(sectionName)).get(key)
   return entry ? sourceText.slice(...entry.value.range) : undefined
 }
 
 export function deleteRuntimeTomlKey(sourceText: string, sectionName: string, key: string): string {
   const document = parseDocument(sourceText)
-  const section = sectionOf(document, sectionName)
-  const entry = section ? entryOf(section, key) : undefined
+  const path = tablePath(sectionName)
+  const entry = tableEntries(document, path).get(key)
   if (!entry) return sourceText
+  const inline = inlineOwnerOf(document, path)
+  if (inline) {
+    const index = inline.table.body.indexOf(entry)
+    const before = inline.table.body[index - 1]
+    const after = inline.table.body[index + 1]
+    const start = after ? entry.range[0] : before?.range[1] ?? entry.range[0]
+    const end = after?.range[0] ?? entry.range[1]
+    const next = sourceText.slice(0, start) + sourceText.slice(end)
+    parseDocument(next)
+    return next
+  }
   const lines = [...document.lines]
   lines.splice(entry.loc.start.line - 1, entry.loc.end.line - entry.loc.start.line + 1)
   return joinLines(lines)
@@ -627,6 +655,41 @@ export function cascadeDeleteProvider(
   reservedProviderIds: readonly string[],
 ): string {
   const document = parseDocument(sourceText)
+  const runtimeHere = (runtimeId: string) => splitRuntimeId(runtimeId)?.providerId === providerId
+  const arrayEdits: Array<{ path: readonly string[]; key: string; values: string[] }> = []
+  const readArray = (path: readonly string[], key: string): string[] => {
+    const entry = tableEntries(document, path).get(key)
+    if (!entry) return []
+    const value = getStaticTOMLValue(entry.value)
+    if (!Array.isArray(value) || !value.every((id): id is string => typeof id === 'string')) {
+      throw new Error(`Cannot delete provider: ${[...path, key].join('.')} must be an array of runtime ids`)
+    }
+    return value
+  }
+  const pruneArray = (path: readonly string[], key: string): { changed: boolean; values: string[] } => {
+    const previous = readArray(path, key)
+    const values = previous.filter(runtimeId => !runtimeHere(runtimeId))
+    const changed = values.length !== previous.length
+    if (changed) arrayEdits.push({ path, key, values })
+    return { changed, values }
+  }
+  // Check all dependent routes before returning any edit. Removing an
+  // account must leave each required lane with a candidate or a slot.
+  for (const id of declaredKeysUnder(document.rootEntries, document.sections, ['runtime', 'lanes'])) {
+    const result = pruneArray(['runtime', 'lanes', id], 'candidates')
+    if (result.changed && result.values.length === 0) {
+      throw new Error(`Cannot delete provider ${providerId}: lane ${id} would have no candidates`)
+    }
+  }
+  for (const id of declaredKeysUnder(document.rootEntries, document.sections, ['runtime', 'exact_output_lanes'])) {
+    const path = ['runtime', 'exact_output_lanes', id]
+    const slots = pruneArray(path, 'slots')
+    const cliSlots = pruneArray(path, 'cli_slots')
+    if ((slots.changed || cliSlots.changed) && slots.values.length + cliSlots.values.length === 0) {
+      throw new Error(`Cannot delete provider ${providerId}: exact-output lane ${id} would have no slots`)
+    }
+  }
+  pruneArray(['runtime'], 'media_failover')
   const canDeleteBindingNamespace = !reservedProviderIds.includes(providerId)
   const sectionsToDelete = document.sections.filter(section =>
     (section.path[0] === 'providers' && section.path[1] === providerId)
@@ -637,10 +700,13 @@ export function cascadeDeleteProvider(
   for (const sec of sectionsToDelete) {
     next = deleteRuntimeTomlSection(next, sec)
   }
+  for (const { path, key, values } of arrayEdits) {
+    next = setRuntimeTomlStringArrayKey(next, path.map(serializeTomlKey).join('.'), key, values)
+  }
 
   // Also remove from runtime defaults/assignments if they reference this provider
   const nextDocument = parseDocument(next)
-  const runtimeValues = sectionValues(nextDocument, 'runtime')
+  const runtimeValues = tableValues(nextDocument, ['runtime'])
   // A route names its provider before the first dot. It is cleared by that
   // name, not by the bindings read, since a reserved provider has none read.
   // A lane id can start the same way, so a lane declared in any shape keeps
@@ -658,7 +724,7 @@ export function cascadeDeleteProvider(
   }
   
   // Clean up assignments
-  const assignments = sectionValues(nextDocument, 'runtime.assignments')
+  const assignments = tableValues(nextDocument, ['runtime', 'assignments'])
   for (const [key, value] of Object.entries(assignments)) {
     if (typeof value === 'string' && routesToDeleted(value)) {
       next = deleteRuntimeTomlKey(next, 'runtime.assignments', key)

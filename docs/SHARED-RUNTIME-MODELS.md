@@ -54,6 +54,13 @@ the same API model at different efforts can share a set; changing accounts
 does not require another copy of either profile. Accounts, credentials and
 availability remain provider properties.
 
+The dashboard reads shared models and binding overrides from table headers,
+inline tables and dotted keys. Editing a binding creates or updates only that
+provider's override. Deleting a provider removes its lane candidates, exact
+slots and media fallback references, and refuses a deletion that would empty
+a required lane. Shared models and the model-set definition stay available to
+the remaining accounts.
+
 Repository seeds are copied only for new workspaces. Existing installations
 must apply the model-set declarations through the runtime configuration API
 after deploying a binary that understands them.

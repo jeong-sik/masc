@@ -65,6 +65,67 @@ models = ["sol", "astra"]
 `
 
 describe('runtime TOML dashboard editing helpers', () => {
+  it.each([
+    'models = { sol = { "api-name" = "gpt-6.1-sol", "max-context" = 272000, capabilities = { "supports-response-format-json" = true } } }',
+    'models.sol.api-name = "gpt-6.1-sol"\nmodels.sol.max-context = 272000\nmodels.sol.capabilities.supports-response-format-json = true',
+    '[models]\nsol = { "api-name" = "gpt-6.1-sol", "max-context" = 272000, capabilities = { "supports-response-format-json" = true } }',
+    '[models]\nsol.api-name = "gpt-6.1-sol"\nsol.max-context = 272000\n[models.sol.capabilities]\nsupports-response-format-json = true',
+  ])('projects and edits models declared through AST paths: %s', declaration => {
+    expect(parseRuntimeTomlEnvironment(declaration, runtimeReservedProviderIdsFixture).models).toMatchObject([
+      { id: 'sol', apiName: 'gpt-6.1-sol', maxContext: 272000, jsonSupport: true },
+    ])
+    let edited = setRuntimeTomlModelField(declaration, 'sol', 'max-context', 64000)
+    edited = setRuntimeTomlModelField(edited, 'sol', 'tools-support', true)
+    edited = setRuntimeTomlModelField(edited, 'sol', 'json-support', false)
+    expect(parseRuntimeTomlEnvironment(edited, runtimeReservedProviderIdsFixture).models).toMatchObject([
+      { id: 'sol', maxContext: 64000, toolsSupport: true, jsonSupport: false },
+    ])
+    edited = setRuntimeTomlModelField(edited, 'sol', 'max-context', null)
+    edited = setRuntimeTomlModelField(edited, 'sol', 'json-support', null)
+    expect(parseRuntimeTomlEnvironment(edited, runtimeReservedProviderIdsFixture).models).toMatchObject([
+      { id: 'sol', maxContext: null, toolsSupport: true, jsonSupport: null },
+    ])
+  })
+
+  it('projects a model implicit in its capabilities header and extends its parent legally', () => {
+    const source = '[models.sol.capabilities]\nsupports-response-format-json = true\n'
+    expect(parseRuntimeTomlEnvironment(source, runtimeReservedProviderIdsFixture).models.map(model => model.id)).toEqual(['sol'])
+    const edited = setRuntimeTomlModelField(source, 'sol', 'max-context', 272000)
+    expect(parseRuntimeTomlEnvironment(edited, runtimeReservedProviderIdsFixture).models).toMatchObject([
+      { id: 'sol', maxContext: 272000, jsonSupport: true },
+    ])
+  })
+
+  it('adds a nested capability inside an inline model declaration', () => {
+    const source = 'models = { sol = { "api-name" = "gpt-6.1-sol" } }'
+    const edited = setRuntimeTomlModelField(source, 'sol', 'json-support', true)
+    expect(parseRuntimeTomlEnvironment(edited, runtimeReservedProviderIdsFixture).models).toMatchObject([
+      { id: 'sol', apiName: 'gpt-6.1-sol', jsonSupport: true },
+    ])
+  })
+
+  it.each([
+    '[p]\nsol = { enabled = false }',
+    '[p]\nsol.enabled = false',
+    'p = { sol = { enabled = false } }',
+    'p.sol.enabled = false',
+  ])('edits and clears inline or dotted generated-binding overrides: %s', declaration => {
+    // Root declarations must precede the shared source\'s first table.
+    const source = declaration.startsWith('[')
+      ? `${sharedModelSetSource}\n${declaration}\n`
+      : `${declaration}\n${sharedModelSetSource}`
+    const withProvider = `${source}\n[providers.p]\nmodel-set = "codex_models"\n`
+    let edited = setRuntimeTomlBindingField(withProvider, 'p.sol', 'enabled', true)
+    edited = setRuntimeTomlBindingField(edited, 'p.sol', 'max-concurrent', 3)
+    expect(parseRuntimeTomlEnvironment(edited, runtimeReservedProviderIdsFixture).bindings.find(binding => binding.id === 'p.sol'))
+      .toMatchObject({ enabled: true, maxConcurrent: 3 })
+    edited = setRuntimeTomlBindingField(edited, 'p.sol', 'enabled', null)
+    edited = setRuntimeTomlBindingField(edited, 'p.sol', 'max-concurrent', null)
+    expect(getRuntimeTomlKey(edited, 'p.sol', 'enabled')).toBeUndefined()
+    expect(parseRuntimeTomlEnvironment(edited, runtimeReservedProviderIdsFixture).bindings.find(binding => binding.id === 'p.sol'))
+      .toMatchObject({ enabled: true, maxConcurrent: null })
+  })
+
   it('projects shared model sets for each account without explicit binding tables', () => {
     const environment = parseRuntimeTomlEnvironment(sharedModelSetSource, runtimeReservedProviderIdsFixture)
     expect(environment.bindings.map(binding => binding.id)).toEqual([
@@ -117,6 +178,52 @@ p = { sol = { enabled = false, "max-concurrent" = 2 } }
   it('preserves a remaining generated default when deleting another shared-set account', () => {
     const edited = cascadeDeleteProvider(sharedModelSetSource, 'codex_second', runtimeReservedProviderIdsFixture)
     expect(parseRuntimeTomlEnvironment(edited, runtimeReservedProviderIdsFixture).defaultRuntimeId).toBe('codex.sol')
+  })
+
+  it.each(['tables', 'dotted', 'inline'])('removes deleted generated runtimes from lane, exact-output, and media routes declared as %s', shape => {
+    const arrays = {
+      media_failover: ['codex.sol', 'codex_second.sol'],
+      lanes: { coding: { candidates: ['codex.sol', 'codex_second.sol'] } },
+      exact_output_lanes: { verify: { slots: ['codex.astra', 'codex_second.astra'], cli_slots: ['codex.sol'] } },
+    }
+    let source: string
+    if (shape === 'inline') {
+      source = sharedModelSetSource.replace('[runtime]\ndefault = "codex.sol"',
+        'runtime = { default = "codex.sol", media_failover = ["codex.sol", "codex_second.sol"], lanes = { coding = { candidates = ["codex.sol", "codex_second.sol"] } }, exact_output_lanes = { verify = { slots = ["codex.astra", "codex_second.astra"], cli_slots = ["codex.sol"] } } }')
+    } else if (shape === 'dotted') {
+      source = sharedModelSetSource.replace('default = "codex.sol"', `default = "codex.sol"
+media_failover = ${JSON.stringify(arrays.media_failover)}
+lanes.coding.candidates = ${JSON.stringify(arrays.lanes.coding.candidates)}
+exact_output_lanes.verify.slots = ${JSON.stringify(arrays.exact_output_lanes.verify.slots)}
+exact_output_lanes.verify.cli_slots = ${JSON.stringify(arrays.exact_output_lanes.verify.cli_slots)}`)
+    } else {
+      source = setRuntimeTomlStringArrayKey(sharedModelSetSource, 'runtime', 'media_failover', arrays.media_failover)
+      source += `\n[runtime.lanes.coding]\ncandidates = ${JSON.stringify(arrays.lanes.coding.candidates)}
+[runtime.exact_output_lanes.verify]
+slots = ${JSON.stringify(arrays.exact_output_lanes.verify.slots)}
+cli_slots = ${JSON.stringify(arrays.exact_output_lanes.verify.cli_slots)}\n`
+    }
+    const edited = cascadeDeleteProvider(source, 'codex', runtimeReservedProviderIdsFixture)
+    expect(getStaticTOMLValue(parseTOML(edited))).toMatchObject({ runtime: {
+      default: 'codex_second.sol', media_failover: ['codex_second.sol'],
+      lanes: { coding: { candidates: ['codex_second.sol'] } },
+      exact_output_lanes: { verify: { slots: ['codex_second.astra'], cli_slots: [] } },
+    } })
+  })
+
+  it.each([
+    ['[runtime.lanes.coding]\ncandidates = ["codex.sol"]', 'lane coding would have no candidates'],
+    ['[runtime.exact_output_lanes.verify]\nslots = ["codex.sol"]', 'exact-output lane verify would have no slots'],
+    ['[runtime.exact_output_lanes.verify]\ncli_slots = ["codex.sol"]', 'exact-output lane verify would have no slots'],
+  ])('refuses deleting the last required runtime from %s', (declaration, reason) => {
+    expect(() => cascadeDeleteProvider(`${sharedModelSetSource}\n${declaration}\n`, 'codex', runtimeReservedProviderIdsFixture))
+      .toThrow(reason)
+  })
+
+  it('allows clearing the last optional media runtime on provider deletion', () => {
+    const source = setRuntimeTomlStringArrayKey(sharedModelSetSource, 'runtime', 'media_failover', ['codex.sol'])
+    const edited = cascadeDeleteProvider(source, 'codex', runtimeReservedProviderIdsFixture)
+    expect(getStaticTOMLValue(parseTOML(edited))).toMatchObject({ runtime: { media_failover: [] } })
   })
 
   it('edits a quoted provider table in place', () => {
@@ -594,6 +701,28 @@ sangsu = "runpod_mtp.qwen"
     const impact = runtimeTomlImpactSummary(before, after, runtimeReservedProviderIdsFixture)
 
     expect(impact?.runtimeAssignmentsChanged).toBe(false)
+  })
+
+  it.each([
+    '[runtime]\nassignments = { worker = "p.sol" }\n',
+    '[runtime]\nassignments.worker = "p.sol"\n',
+    'runtime.assignments.worker = "p.sol"\n',
+  ])('detects equal-length assignment edits in semantic TOML layout %s', before => {
+    const after = setRuntimeTomlKey(before, 'runtime.assignments', 'worker', 'q.sol')
+    expect(parseRuntimeTomlEnvironment(after, runtimeReservedProviderIdsFixture).assignments).toEqual({ worker: 'q.sol' })
+    expect(runtimeTomlImpactSummary(before, after, runtimeReservedProviderIdsFixture)).toMatchObject({
+      runtimeAssignmentsChanged: true, charDelta: 0,
+    })
+  })
+
+  it('compares assignment semantics across header, inline, and dotted declarations', () => {
+    const before = '[runtime.assignments]\nworker = "p.sol"\n'
+    for (const after of [
+      '[runtime]\nassignments = { worker = "p.sol" }\n',
+      'runtime.assignments.worker = "p.sol"\n',
+    ]) {
+      expect(runtimeTomlImpactSummary(before, after, runtimeReservedProviderIdsFixture)?.runtimeAssignmentsChanged).toBe(false)
+    }
   })
 
   it('cascades provider deletion to credentials, bindings, and default runtime', () => {

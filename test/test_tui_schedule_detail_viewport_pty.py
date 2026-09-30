@@ -147,8 +147,10 @@ def run(executable):
         h.drain_until_quiet(process, fd, output)
         assert b"HTTP 503" not in screen(output), screen(output)
         for rows in (18, 24):
+            # The document can still be at End, or begin with a long refusal.
+            # Its viewport footer is visible at both positions after resize.
             h.resize_and_wait(process, fd, output, rows=rows, columns=80,
-                              needle=b"SCHEDULE", final_cursor=b"\x1b[?25l")
+                              needle=b"[lines ", final_cursor=b"\x1b[?25l")
             h.send_and_wait(process, fd, output, b"\x1b[F", b"[lines ")
             h.drain_until_quiet(process, fd, output)
             assert window(output)[0] > 1 and window(output)[1] == window(output)[2], window(output)

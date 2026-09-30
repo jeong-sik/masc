@@ -199,7 +199,7 @@ val read_after_account_refusal :
     This read affects the walk order; the startup read ({!read_all}) stays an operator
     projection. A failed read rests nothing. *)
 
-val http_read_of_runtime : Runtime.t -> http_read option
+val http_read_of_runtime : Runtime_instance.t -> http_read option
 (** The runtime's HTTP usage read when its provider declares [usage-read]. *)
 
 type account_refusal_skip =
@@ -218,7 +218,7 @@ type account_refusal_outcome =
 
 val read_runtime_after_account_refusal :
   ?fetch:(api_key:Llm_provider.Secret.t -> string -> (string, http_error) result) ->
-  Runtime.t ->
+  Runtime_instance.t ->
   account_refusal_outcome
 (** {!read_after_account_refusal} for [rt]'s materialized scope, in the
     caller's fiber, at most one per scope at a time (shared with

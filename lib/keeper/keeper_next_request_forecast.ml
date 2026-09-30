@@ -224,7 +224,7 @@ let assembly ~wake_bytes ~history_atoms (parts : measured_parts) (carried : carr
 (* Whether the turn driver would compose a range for this runtime at all.
    An official-client runtime carries none: the spawned client owns its
    context. *)
-let lane_for ~runtime_id (runtime : Runtime.t option) =
+let lane_for ~runtime_id (runtime : Runtime_instance.t option) =
   match Keeper_carried_front.composer_of_runtime runtime with
   | Keeper_carried_front.Not_materialized -> Error (Not_materialized { runtime_id })
   | Keeper_carried_front.Hands_over_its_own_list -> Error (Not_agent_core { runtime_id })

@@ -240,12 +240,12 @@ streaming = true
     match config.Runtime_schema.bindings with
     | [] | _ :: _ :: _ -> fail "credential fixture declares one binding"
     | [ binding ] ->
-      (match Runtime.of_binding { config with providers } binding with
-       | Error reason -> fail (Runtime.string_of_drop_reason reason)
+      (match Runtime_instance.of_binding { config with providers } binding with
+       | Error reason -> fail (Runtime_config_error.string_of_drop_reason reason)
        | Ok runtime ->
          { runtime with
-           Runtime.provider =
-             { runtime.Runtime.provider with Runtime_schema.credentials = Some credential }
+           Runtime_instance.provider =
+             { runtime.Runtime_instance.provider with Runtime_schema.credentials = Some credential }
          })
   in
   let verify runtime =
@@ -418,9 +418,9 @@ streaming = true
       let runtime =
         match config.Runtime_schema.bindings with
         | [ binding ] ->
-          (match Runtime.of_binding config binding with
+          (match Runtime_instance.of_binding config binding with
            | Ok runtime -> runtime
-           | Error reason -> fail (Runtime.string_of_drop_reason reason))
+           | Error reason -> fail (Runtime_config_error.string_of_drop_reason reason))
         | [] | _ :: _ :: _ -> fail "silent endpoint fixture declares one binding"
       in
       f ~env ~sw ~runtime))
@@ -512,7 +512,7 @@ let test_a_silent_http_endpoint_ends_at_the_declared_timeout () =
 let test_a_queued_readiness_run_ends_at_the_declared_timeout () =
   with_silent_endpoint_runtime ~binding_keys:"max-concurrent = 1" @@ fun ~env ~sw ~runtime ->
   let provider_cfg =
-    match runtime.Runtime.execution with
+    match runtime.Runtime_instance.execution with
     | Runtime_execution.Agent_core provider_cfg -> provider_cfg
     | Runtime_execution.Antigravity_cli _
     | Runtime_execution.Claude_code _
@@ -1305,9 +1305,9 @@ tools-support = true
 |} script account_home) with
         | Ok config -> config | Error _ -> fail "Muse readiness binding must parse" in
       match config.Runtime_schema.bindings with
-      | [binding] -> (match Runtime.of_binding config binding with
+      | [binding] -> (match Runtime_instance.of_binding config binding with
           | Ok runtime -> runtime
-          | Error reason -> fail (Runtime.string_of_drop_reason reason))
+          | Error reason -> fail (Runtime_config_error.string_of_drop_reason reason))
       | [] | _ :: _ :: _ -> fail "one Muse readiness binding" in
     let check_case mode expected_failure =
       let script = Filename.concat directory mode in
@@ -1377,7 +1377,7 @@ tools-support = true
       check bool (mode ^ " rests the account only when the window is spent")
         (String.equal expected "quota_exhausted")
         (Runtime_quota_window.is_exhausted
-           ~scope:(Runtime.quota_scope_of_runtime selected) ~now:(Time_compat.now ()));
+           ~scope:(Runtime_instance.quota_scope_of_runtime selected) ~now:(Time_compat.now ()));
       Runtime_quota_window.reset_for_testing ();
       Unix.unlink script)
       ["muse-quota-spent", "quota_exhausted"; "muse-quota-open", "provider_rejected"];
@@ -1386,7 +1386,7 @@ tools-support = true
       let script = Filename.concat directory "muse-invalid-capacity" in
       write script muse_readiness_fixture; Unix.chmod script 0o700;
       let selected = runtime script in
-      let selected = {selected with Runtime.model = {selected.model with max_prompt_bytes}} in
+      let selected = {selected with Runtime_instance.model = {selected.model with max_prompt_bytes}} in
       let result = Verify.verify ~secure_random:env#secure_random ~sw ~net:env#net
         ~mgr ~clock:env#clock ~cwd:Eio.Path.(env#fs / directory)
         ~cwd_path:directory ~timeout_s:15. selected in

@@ -5,7 +5,7 @@ import sys
 
 import test_tui_keyboard_input as h
 
-SOURCE_MODULES = ("bin/masc_tui_render.ml", "bin/masc_tui_render_memory.ml")
+SOURCE_MODULES = ("lib/tui_decode_memory_facts.ml", "lib/tui_decode_memory_facts.mli", "bin/masc_tui_render.ml", "bin/masc_tui_render_memory.ml")
 
 ERROR = b"memory health load failed: HTTP 503: fixture memory unavailable"
 

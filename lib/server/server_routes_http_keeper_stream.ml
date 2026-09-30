@@ -3935,8 +3935,8 @@ let handle_keeper_asks_list state request reqd =
   let rows_for keeper_name =
     Keeper_ask_store.rows ~base_path ~keeper_name
     |> List.filter (fun (_, (_, resolution)) ->
-           include_resolved || Server_keeper_ask_projection.ask_row_is_open resolution)
-    |> List.map (Server_keeper_ask_projection.ask_row_json ~keeper_name)
+           include_resolved || Keeper_ask_operator_projection.ask_row_is_open resolution)
+    |> List.map (Keeper_ask_operator_projection.ask_row_json ~keeper_name)
   in
   match Server_utils.query_param request "name" with
   | Some keeper_name ->

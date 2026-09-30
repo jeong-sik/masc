@@ -386,8 +386,8 @@ let test_wire_question_reaches_the_answer_draft () =
     ~free_text:Domain.Choices_only) in
   let ask = valid (Domain.ask ~ask_id:"wire-ask" ~keeper_name:"reader"
     ~questions:[question] ~context:"Choose a deployment window"
-    ~continuation:(Masc.Keeper_continuation_channel.unrouted "wire projection test") ~asked_at:42. ()) in
-  let row = Masc.Server_keeper_ask_projection.ask_row_json ~keeper_name:"reader"
+    ~continuation:(Keeper_continuation_channel.unrouted "wire projection test") ~asked_at:42. ()) in
+  let row = Masc.Keeper_ask_operator_projection.ask_row_json ~keeper_name:"reader"
     (ask.ask_id, (ask, Domain.Open)) in
   let snapshot = `Assoc [ "keeper", `String "reader"; "open_count", `Int 1;
     "asks", `List [row] ] in

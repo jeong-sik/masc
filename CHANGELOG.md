@@ -10,6 +10,8 @@
 
 ### Added
 
+- Verify Item ownership, wallet and purchased equipment survive an isolated native server restart, including duplicate purchase rejection in a new MCP session.
+
 - Capture the Item tab in the production dashboard served by an isolated native CI server after an authenticated free purchase and equipment change.
 
 - Extend isolated Item HTTP acceptance through authenticated MCP free purchases and equipment, checking ledger ownership and changed/restored portrait bytes.

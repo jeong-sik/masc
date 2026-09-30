@@ -20,7 +20,13 @@ original PNG; the other slots must stay unchanged. Before restoration, Chromium
 opens the production bundle served by that same native process, follows the
 Keeper route and Item tab, and checks zero balance, one owned item and its
 equipped marker through real authenticated API requests. External browser
-requests are blocked; API responses are never replaced by fixtures.
+requests are blocked; API responses are never replaced by fixtures. Finally
+the harness stops its server, starts a new process against the same isolated
+workspace with the purchased accessory equipped. It verifies identical account
+and equipped portrait responses, persisted ownership through a new MCP
+session, repeat-purchase rejection, an unchanged repeated equipment selection,
+and restoration of the original default PNG after restart. The HTTP
+PASS receipt is written only after this restart check.
 
 Inputs are a synthetic paused Keeper in the current metadata schema, an empty
 ledger, and explicit test prices/payout policy. This proves real HTTP routing

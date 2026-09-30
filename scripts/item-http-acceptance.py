@@ -72,6 +72,7 @@ keeper_login = subprocess.run([str(binary), 'login', '--base-path', str(base),
 keeper_token = json.loads(keeper_login.stdout)['bearer_token']
 origin = f'http://127.0.0.1:{port}'
 records = []
+server_generation = 1
 def request(path, authenticated=True):
     headers = {'Authorization': 'Bearer ' + token} if authenticated else {}
     req = urllib.request.Request(origin + path, headers=headers)
@@ -81,7 +82,7 @@ def request(path, authenticated=True):
         response = error
     with response:
         body = response.read()
-        records.append({'path': path, 'authenticated': authenticated,
+        records.append({'server_generation': server_generation, 'path': path, 'authenticated': authenticated,
                         'status': response.status, 'sha256': hashlib.sha256(body).hexdigest()})
         return response.status, body
 
@@ -100,7 +101,7 @@ def rpc(method, params, notification=False):
     req = urllib.request.Request(origin + '/mcp', data=json.dumps(payload).encode(), headers=headers)
     with urllib.request.urlopen(req, timeout=10) as response:
         body = response.read()
-        records.append({'path': '/mcp', 'authenticated': True, 'rpc_method': method,
+        records.append({'server_generation': server_generation, 'path': '/mcp', 'authenticated': True, 'rpc_method': method,
                         'status': response.status, 'sha256': hashlib.sha256(body).hexdigest()})
         if method == 'initialize':
             rpc_session['Mcp-Session-Id'] = response.headers['Mcp-Session-Id']
@@ -124,27 +125,30 @@ def tool(name, arguments, error_code=None):
     data = result['structuredContent']
     if error_code is not None:
         assert data['error_code'] == error_code, data
-    tool_records.append({'name': name, 'arguments': arguments, 'is_error': failed,
+    tool_records.append({'server_generation': server_generation, 'name': name, 'arguments': arguments, 'is_error': failed,
                          'data': data})
     return data
+
+def await_ready(server):
+    deadline = time.monotonic() + 60
+    while True:
+        if server.poll() is not None:
+            raise RuntimeError('isolated server exited during startup; inspect server.log')
+        try:
+            status, _ = request('/health/ready', False)
+            if status == 200:
+                break
+        except (OSError, urllib.error.URLError):
+            pass
+        if time.monotonic() >= deadline:
+            raise RuntimeError('isolated server readiness deadline exceeded')
+        time.sleep(0.2)
 
 with (root / 'server.log').open('wb') as log:
     server = subprocess.Popen([str(binary), '--port', str(port), '--base-path', str(base)],
                               cwd=root, env=env, stdout=log, stderr=log)
     try:
-        deadline = time.monotonic() + 60
-        while True:
-            if server.poll() is not None:
-                raise RuntimeError('isolated server exited during startup; inspect server.log')
-            try:
-                status, _ = request('/health/ready', False)
-                if status == 200:
-                    break
-            except (OSError, urllib.error.URLError):
-                pass
-            if time.monotonic() >= deadline:
-                raise RuntimeError('isolated server readiness deadline exceeded')
-            time.sleep(0.2)
+        await_ready(server)
         path = '/api/v1/keepers/item-runtime-probe/items'
         status, _ = request(path, False)
         assert status in (401, 403), ('account route bypassed auth', status)
@@ -200,10 +204,49 @@ with (root / 'server.log').open('wb') as log:
         assert status == 200, status
         assert hashlib.sha256(index).hexdigest() == hashlib.sha256(
             (dashboard / 'index.html').read_bytes()).hexdigest(), 'served index differs'
+        # Leave the purchased accessory equipped for the restart proof.
+        tool('keeper_candle_equip', {'slot': 'face', 'item': item})
+    finally:
+        server.terminate()
+        try:
+            server.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            server.kill()
+            server.wait()
+
+# Reuse only this harness's isolated workspace and credential store. A new
+# native process must recover the authoritative ledger rather than cached state.
+server_generation = 2
+with (root / 'server.log').open('ab') as log:
+    server = subprocess.Popen([str(binary), '--port', str(port), '--base-path', str(base)],
+                              cwd=root, env=env, stdout=log, stderr=log)
+    try:
+        await_ready(server)
+        status, persisted_body = request(path)
+        persisted = json.loads(persisted_body)
+        assert status == 200 and persisted == account_after, ('restart lost Item account', persisted)
+        (root / 'account-restarted.json').write_bytes(persisted_body)
+        status, persisted_png = request('/api/v1/keepers/item-runtime-probe/portrait.png?size=96')
+        assert status == 200 and persisted_png == equipped_png, 'restart lost purchased equipment'
+        (root / 'portrait-restarted.png').write_bytes(persisted_png)
+        # Sessions belong to a process; authenticate and initialize a fresh MCP session.
+        rpc_session.clear()
+        rpc('initialize', {'protocolVersion': '2025-11-25', 'capabilities': {},
+                           'clientInfo': {'name': 'item-http-restart', 'version': '1'}})
+        rpc('notifications/initialized', {}, notification=True)
+        persisted_wallet = tool('keeper_candle_balance', {})
+        assert persisted_wallet['balance_milli'] == '0' and persisted_wallet['owned_items'] == [item], persisted_wallet
+        tool('keeper_candle_purchase', {'item': item}, 'already_owned')
+        unchanged = tool('keeper_candle_equip', {'slot': 'face', 'item': item})
+        assert unchanged['changed'] is False and unchanged['equipment'] == equipped['equipment'], unchanged
+        restored_after_restart = tool('keeper_candle_equip', {'slot': 'face', 'item': 'default'})
+        assert restored_after_restart['equipment'] == starting, restored_after_restart
+        status, default_after_restart = request('/api/v1/keepers/item-runtime-probe/portrait.png?size=96')
+        assert status == 200 and default_after_restart == png, 'default restore after restart differs'
         result = dict(source_sha=source, binary_sha256=hashlib.sha256(binary.read_bytes()).hexdigest(),
             fixture_sha256=config_hashes, dashboard_index_sha256=hashlib.sha256(index).hexdigest(),
             scope='Isolated CI binary over real TCP HTTP; synthetic current-schema paused Keeper metadata, empty test ledger and configured catalog; authenticated Keeper MCP purchase/equipment calls and ledger-backed HTTP; no lifecycle creation, model-driven decision, paid purchase/payout or production rollout',
-            requests=records, tool_calls=tool_records, browser_captured=args.capture_browser, passed=True)
+            requests=records, tool_calls=tool_records, browser_captured=args.capture_browser, restart_verified=True, passed=True)
         (root / 'http-evidence.json').write_text(json.dumps(result, indent=2) + '\n')
         print('Isolated Item HTTP acceptance: PASS')
     finally:

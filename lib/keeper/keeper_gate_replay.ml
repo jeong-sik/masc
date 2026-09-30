@@ -40,7 +40,7 @@ type outcome =
       ; detail : string
       }
   | Resolution_absent of
-      { absence : Keeper_approval_queue.resolution_absence }
+      { absence : Keeper_approval_queue_result.resolution_absence }
 
 let repair_stage_to_string = function
   | Resolution_lookup -> "resolution_lookup"
@@ -185,7 +185,7 @@ let outcome_to_string = function
   | Resolution_absent { absence } ->
     Printf.sprintf
       "resolution_absent store=%s"
-      (Keeper_approval_queue.resolution_absence_to_string absence)
+      (Keeper_approval_queue_result.resolution_absence_to_string absence)
 ;;
 
 (* Replay recognizes exactly the identity its producer submits; every other
@@ -268,25 +268,25 @@ let persist_replay_effect ~base_path = function
   | Effect_applied output ->
     Result.map
       (fun output_ref ->
-         Keeper_approval_queue.Replay_applied
+         Keeper_approval_queue_result.Replay_applied
            (replay_artifact_identity output_ref))
       (persist_replay_evidence ~base_path output)
   | Effect_applied_with_warning detail ->
     Result.map
       (fun detail_ref ->
-         Keeper_approval_queue.Replay_applied_with_warning
+         Keeper_approval_queue_result.Replay_applied_with_warning
            (replay_artifact_identity detail_ref))
       (persist_replay_evidence ~base_path detail)
   | Effect_failed detail ->
     Result.map
       (fun detail_ref ->
-         Keeper_approval_queue.Replay_failed
+         Keeper_approval_queue_result.Replay_failed
            (replay_artifact_identity detail_ref))
       (persist_replay_evidence ~base_path detail)
   | Effect_indeterminate detail ->
     Result.map
       (fun detail_ref ->
-         Keeper_approval_queue.Replay_indeterminate
+         Keeper_approval_queue_result.Replay_indeterminate
            (replay_artifact_identity detail_ref))
       (persist_replay_evidence ~base_path detail)
 ;;
@@ -356,7 +356,7 @@ let summarize_execution ~operation (execution : Keeper_tool_execution.t) =
 let retire_stale_grant
       ~base_path
       ~approval_id
-      (request : Keeper_approval_queue.approved_resolution_request)
+      (request : Keeper_approval_queue_result.approved_resolution_request)
   =
   match
     Keeper_approval_queue.consume_approved_resolution
@@ -366,17 +366,17 @@ let retire_stale_grant
       ~tool_name:request.tool_name
       ~input:request.input
   with
-  | Ok (Keeper_approval_queue.Consumption_committed _)
-  | Ok Keeper_approval_queue.Consumption_already_committed ->
+  | Ok (Keeper_approval_queue_result.Consumption_committed _)
+  | Ok Keeper_approval_queue_result.Consumption_already_committed ->
     Ok ()
-  | Ok Keeper_approval_queue.Consumption_not_matching ->
+  | Ok Keeper_approval_queue_result.Consumption_not_matching ->
     Error
       (render_gate_replay_prompt
          Prompt_names.keeper_gate_replay_approval_consumption_mismatch
          []
          ~fallback:"approval_consumption_mismatch")
   | Error error ->
-    Error (Keeper_approval_queue.grant_error_to_string error)
+    Error (Keeper_approval_queue_result.grant_error_to_string error)
 ;;
 
 let replay_journal ~base_path ~approval_id outcome =
@@ -388,13 +388,13 @@ let replay_journal ~base_path ~approval_id outcome =
 
 let replay_journal_status ~base_path ~approval_id replay_outcome =
   match replay_journal ~base_path ~approval_id replay_outcome with
-  | Ok Keeper_approval_queue.Replay_recorded -> Ok Replay_journal_recorded
-  | Ok Keeper_approval_queue.Replay_already_recorded ->
+  | Ok Keeper_approval_queue_result.Replay_recorded -> Ok Replay_journal_recorded
+  | Ok Keeper_approval_queue_result.Replay_already_recorded ->
     Ok Replay_journal_already_recorded
-  | Error (Keeper_approval_queue.Grant_replay_not_consumed _) ->
+  | Error (Keeper_approval_queue_result.Grant_replay_not_consumed _) ->
     Ok Replay_grant_not_consumed
   | Error error ->
-    Error (Keeper_approval_queue.grant_error_to_string error)
+    Error (Keeper_approval_queue_result.grant_error_to_string error)
 ;;
 
 let project_replay_outcome_to_chat ~base_path ~approval_id replay_outcome =
@@ -407,7 +407,7 @@ let project_replay_outcome_to_chat ~base_path ~approval_id replay_outcome =
     Log.Keeper.warn
       "approved Gate replay chat projection lookup failed approval=%s: %s"
       approval_id
-      (Keeper_approval_queue.grant_error_to_string error)
+      (Keeper_approval_queue_result.grant_error_to_string error)
   | Ok { request; _ } ->
     (match
        Keeper_approval_queue.ensure_replay_chat_projection
@@ -464,13 +464,13 @@ let replayed_outcome
        project_replay_outcome_to_chat ~base_path ~approval_id replay_outcome;
        let outcome =
          match replay_outcome with
-         | Keeper_approval_queue.Replay_applied output_ref ->
+         | Keeper_approval_queue_result.Replay_applied output_ref ->
            Applied { operation; output_ref; journal }
-         | Keeper_approval_queue.Replay_applied_with_warning detail_ref ->
+         | Keeper_approval_queue_result.Replay_applied_with_warning detail_ref ->
            Applied_with_warning { operation; detail_ref; journal }
-         | Keeper_approval_queue.Replay_failed detail_ref ->
+         | Keeper_approval_queue_result.Replay_failed detail_ref ->
            Failed { operation; detail_ref; journal }
-         | Keeper_approval_queue.Replay_indeterminate detail_ref ->
+         | Keeper_approval_queue_result.Replay_indeterminate detail_ref ->
            Indeterminate { operation; detail_ref; journal }
        in
        replay_execution ?terminal_effect_receipt outcome)
@@ -479,7 +479,7 @@ let replayed_outcome
 let settle_replay_effect
       ~base_path
       ~approval_id
-      ~(request : Keeper_approval_queue.approved_resolution_request)
+      ~(request : Keeper_approval_queue_result.approved_resolution_request)
       ?terminal_effect_receipt
       ~operation
       replay_effect
@@ -520,19 +520,19 @@ let durable_replay_execution
   =
   let verified =
     match replay_outcome with
-    | Keeper_approval_queue.Replay_applied output_ref ->
+    | Keeper_approval_queue_result.Replay_applied output_ref ->
       Result.map
         (fun _ -> `Applied output_ref)
         (retrieve_replay_artifact ~base_path output_ref)
-    | Keeper_approval_queue.Replay_applied_with_warning detail_ref ->
+    | Keeper_approval_queue_result.Replay_applied_with_warning detail_ref ->
       Result.map
         (fun _ -> `Applied_with_warning detail_ref)
         (retrieve_replay_artifact ~base_path detail_ref)
-    | Keeper_approval_queue.Replay_failed detail_ref ->
+    | Keeper_approval_queue_result.Replay_failed detail_ref ->
       Result.map
         (fun _ -> `Failed detail_ref)
         (retrieve_replay_artifact ~base_path detail_ref)
-    | Keeper_approval_queue.Replay_indeterminate detail_ref ->
+    | Keeper_approval_queue_result.Replay_indeterminate detail_ref ->
       Result.map
         (fun _ -> `Indeterminate detail_ref)
         (retrieve_replay_artifact ~base_path detail_ref)
@@ -711,7 +711,7 @@ let append_model_evidence ~approval_id ~user_message = function
     in
     plain_model_message (String.concat "\n" [ user_message; ""; repair_fragment ])
   | Resolution_absent { absence } ->
-    let store = Keeper_approval_queue.resolution_absence_to_string absence in
+    let store = Keeper_approval_queue_result.resolution_absence_to_string absence in
     let absent_fragment =
       render_gate_replay_prompt
         Prompt_names.keeper_gate_replay_resolution_absent
@@ -787,7 +787,7 @@ let user_message_with_hitl_resolution ~base_path ~user_message = function
      with
      | Ok
          { request
-         ; state = Keeper_approval_queue.Resolution_unconsumed
+         ; state = Keeper_approval_queue_result.Resolution_unconsumed
          ; replay_outcome = None
          } ->
        let message = plain_model_message
@@ -799,7 +799,7 @@ let user_message_with_hitl_resolution ~base_path ~user_message = function
        { message with instruction_resolution = Some resolution }
      | Ok
          { request
-         ; state = Keeper_approval_queue.Resolution_consumed
+         ; state = Keeper_approval_queue_result.Resolution_consumed
          ; replay_outcome = Some replay_outcome
          } ->
        Log.Keeper.info
@@ -813,7 +813,7 @@ let user_message_with_hitl_resolution ~base_path ~user_message = function
        |> append_model_evidence ~approval_id ~user_message
      | Ok
          { request
-         ; state = Keeper_approval_queue.Resolution_consumed
+         ; state = Keeper_approval_queue_result.Resolution_consumed
          ; replay_outcome = None
          } ->
        Log.Keeper.error
@@ -837,7 +837,7 @@ let user_message_with_hitl_resolution ~base_path ~user_message = function
                      ])
             ])
      | Ok
-         { state = Keeper_approval_queue.Resolution_unconsumed
+         { state = Keeper_approval_queue_result.Resolution_unconsumed
          ; replay_outcome = Some _
          ; _
          } ->
@@ -861,7 +861,7 @@ let user_message_with_hitl_resolution ~base_path ~user_message = function
        Log.Keeper.error
          "approved Gate request unavailable approval=%s: %s"
          approval_id
-         (Keeper_approval_queue.grant_error_to_string error);
+         (Keeper_approval_queue_result.grant_error_to_string error);
        plain_model_message
          (String.concat
             "\n"
@@ -928,12 +928,12 @@ let connector_post_terminal_effect_receipt connector_post =
 
 let terminal_effect_receipt_of_durable_replay request replay_outcome =
   match
-    replayable_of_operation request.Keeper_approval_queue.tool_name,
+    replayable_of_operation request.Keeper_approval_queue_result.tool_name,
     replay_outcome
   with
   | ( Some Replay_connector_post
-    , ( Keeper_approval_queue.Replay_applied _
-      | Keeper_approval_queue.Replay_applied_with_warning _ ) ) ->
+    , ( Keeper_approval_queue_result.Replay_applied _
+      | Keeper_approval_queue_result.Replay_applied_with_warning _ ) ) ->
     Result.map
       (fun connector_post ->
          Some (connector_post_terminal_effect_receipt connector_post))
@@ -946,8 +946,8 @@ let terminal_effect_receipt_of_durable_replay request replay_outcome =
       | None )
     , _ )
   | Some Replay_connector_post,
-    ( Keeper_approval_queue.Replay_failed _
-    | Keeper_approval_queue.Replay_indeterminate _ ) ->
+    ( Keeper_approval_queue_result.Replay_failed _
+    | Keeper_approval_queue_result.Replay_indeterminate _ ) ->
     Ok None
 ;;
 
@@ -982,7 +982,7 @@ let replay_approved_effect_with_receipt
          ?terminal_effect_receipt
          replay_effect
      | None ->
-       (match Keeper_approval_queue.resolution_absence_of_grant_error error with
+       (match Keeper_approval_queue_result.resolution_absence_of_grant_error error with
         | Some absence ->
           (* The store has no resolution behind this id and will not grow one
              by being read again. The turn goes on with this told to the
@@ -993,12 +993,12 @@ let replay_approved_effect_with_receipt
           replay_execution
             (Repair_required
                { operation = "unknown"
-               ; detail = Keeper_approval_queue.grant_error_to_string error
+               ; detail = Keeper_approval_queue_result.grant_error_to_string error
                ; stage = Resolution_lookup
                })))
   | Ok
       { request
-      ; state = Keeper_approval_queue.Resolution_consumed
+      ; state = Keeper_approval_queue_result.Resolution_consumed
       ; replay_outcome = Some replay_outcome
       } ->
     forget_pending_repair ~base_path:config.base_path ~approval_id;
@@ -1019,7 +1019,7 @@ let replay_approved_effect_with_receipt
          replay_outcome)
   | Ok
       { request
-      ; state = Keeper_approval_queue.Resolution_consumed
+      ; state = Keeper_approval_queue_result.Resolution_consumed
       ; replay_outcome = None
       } ->
     (match
@@ -1046,7 +1046,7 @@ let replay_approved_effect_with_receipt
                ~fallback:"replay_outcome_missing_after_restart")))
   | Ok
       { request
-      ; state = Keeper_approval_queue.Resolution_unconsumed
+      ; state = Keeper_approval_queue_result.Resolution_unconsumed
       ; replay_outcome = Some _
       } ->
     replay_execution
@@ -1061,7 +1061,7 @@ let replay_approved_effect_with_receipt
          })
   | Ok
       { request
-      ; state = Keeper_approval_queue.Resolution_unconsumed
+      ; state = Keeper_approval_queue_result.Resolution_unconsumed
       ; replay_outcome = None
       } ->
     let settle_effect =
@@ -1246,7 +1246,7 @@ module For_testing = struct
     with
     | Ok
         { request
-        ; state = Keeper_approval_queue.Resolution_unconsumed
+        ; state = Keeper_approval_queue_result.Resolution_unconsumed
         ; replay_outcome = None
         } ->
       Ok
@@ -1257,7 +1257,7 @@ module For_testing = struct
            ~operation
            (Effect_failed detail))
     | Ok _ -> Error "invalid_state"
-    | Error error -> Error (Keeper_approval_queue.grant_error_to_string error)
+    | Error error -> Error (Keeper_approval_queue_result.grant_error_to_string error)
   ;;
 
   let with_replay_evidence_persister persist f =

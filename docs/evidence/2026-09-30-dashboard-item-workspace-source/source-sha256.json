@@ -2,7 +2,6 @@
   "dashboard/src/store.ts": "a9bc9fa1720208cd6c5439148e6f489fa57103bc448b5e12ee6da937ce828b39",
   "dashboard/src/components/keeper-items-panel.ts": "76fccad068760ac16015e9428eb9045566122ef07007592acb13d3848b0f59c3",
   "dashboard/src/components/keeper-items-panel.test.ts": "99a48749610f370419735667994da0ca7597912a7597560d505136d63fa9380b",
-  "changelog.d/999996.md": "0220e4dd9255649c30e736f8e7df00f7638e2a5f27058c93627f4a0e04d79d5b",
   "docs/constitution.xml": "071a446cb3ff5ad1a6643163b3e458077d26f0bb1f3fd9553f832a9132f43471",
   "lib/dashboard/dashboard_execution.ml": "383fecb1a9d47294d43b2f091bd7f88544c957e83f579619de19d7b790bf9d40",
   "lib/server/server_dashboard_http_execution_surfaces.ml": "b422d4b7428c4cbf2e1c2e672380b76a94675bd6dbb49b0d5828fbad9e32c7cb",
@@ -14,5 +13,6 @@
   "dashboard/e2e/keeper-items.mjs": "8cc77ec741641442e5774a60fa938deb6d318963e9aea76405fcd2e56f5c7d5a",
   "dashboard/vite.preview.config.ts": "89e47e24b788a4fbca82537d7a9296d98053bbd085b0d93a5d9d7a4211408b7f",
   "dashboard/dev-fixtures/keeper-items-fixture.html": "46e45b1a07448b4165b598714cf6dd4de087a01723a601fb3992962a4bd44370",
-  "dashboard/e2e/keeper-items-workspace.mjs": "c9e03f3adef8e2cf42c40023afc7c924a8f4341aa9bc4a226cb0b31b69e9cb88"
+  "dashboard/e2e/keeper-items-workspace.mjs": "c9e03f3adef8e2cf42c40023afc7c924a8f4341aa9bc4a226cb0b31b69e9cb88",
+  "changelog.d/40190.md": "5b511b319897d57d6eb069a806728f05ae87abb3132cb0d334e6db5223b1cb89"
 }

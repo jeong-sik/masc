@@ -8,7 +8,7 @@
 - `composition.json` records the supplied parent, local import commits and verified Git blob identities of all five imported files. Existing account-revision refresh, free-purchase/repricing tests and the controlled reactive demo revision updater are preserved. The existing browser script remains byte-identical to its imported current-parent version.
 - This is a dependent Dashboard consumer fix. The base is an integration candidate, not a statement that the Item feature shipped on main.
 - `source-sha256.json` records exact candidate source bytes and the unchanged producer/decoder/HTTP client contracts read during the audit.
-- Changelog `999996` is a numeric publication placeholder and must be renamed to the actual PR number before publication.
+- Changelog fragment `40190.md` cites the assigned child PR #40190; no placeholder was published.
 
 ## Reachable defect
 
@@ -44,3 +44,5 @@ For a CI-produced preview, set `KEEPER_ITEMS_FIXTURE_URL` to its `/dev-fixtures/
 ## Evidence limits
 
 `syntax-checks.json` retains Node `--experimental-strip-types --check` exit codes for four changed TypeScript source files and the preview config, Node `--check` for the new browser script, and `git diff --check`. These checks parse source and inspect whitespace only. Vitest, TypeScript typecheck, browser, Dune/native tests, CI, installation and production were not executed for this candidate. No runtime success, PR approval or release verdict is claimed.
+
+Published as child PR #40190 over the full a065328066d9996f8658238e3077cad70c2c063c parent tree. Targeted component/store execution, typecheck and CI-built browser preview remain pending.

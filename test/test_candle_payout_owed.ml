@@ -1,3 +1,5 @@
+let () = Candle_status.install_appraiser_check (fun () -> Ok ())
+
 (** The PayoutOwed step (RFC-goal-candle-ledger 3.2, step 2): what is written to
     the ledger when the operator confirms a pass, and when nothing is. *)
 

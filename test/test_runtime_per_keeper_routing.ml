@@ -958,7 +958,7 @@ let check_first_run_lanes path runtime_id ~cli ~judges =
         match exact_lane with
         | Runtime.Verifier -> true
         | Runtime.Librarian | Runtime.Hitl_auto_judge | Runtime.Board_attention
-        | Runtime.Workspace_curator | Runtime.Browser_stagehand -> false
+        | Runtime.Workspace_curator | Runtime.Browser_stagehand | Runtime.Candle_appraiser -> false
       in
       let expected =
         if is_verifier && not judges
@@ -987,13 +987,17 @@ let check_first_run_lanes path runtime_id ~cli ~judges =
         Alcotest.(check (list string)) (id ^ " CLI slots") expected_cli lane.cli_slot_ids)
       (List.filter
          (function
-           | Runtime.Workspace_curator | Runtime.Browser_stagehand -> false
+           | Runtime.Workspace_curator | Runtime.Browser_stagehand | Runtime.Candle_appraiser -> false
            | Runtime.Librarian | Runtime.Hitl_auto_judge | Runtime.Board_attention
            | Runtime.Verifier -> true)
          Standalone_lane.all);
     Alcotest.(check bool) "shared-memory curator is explicitly configured" false
       (List.exists (fun (lane : Runtime_schema.exact_output_lane_decl) ->
-         String.equal lane.id "workspace_curator_exact") config.exact_output_lane_decls)
+         String.equal lane.id "workspace_curator_exact") config.exact_output_lane_decls);
+    Alcotest.(check bool) "Candle appraisal is explicitly configured" false
+      (List.exists (fun (lane : Runtime_schema.exact_output_lane_decl) ->
+         String.equal lane.id (Standalone_lane.to_id Standalone_lane.Candle_appraiser))
+         config.exact_output_lane_decls)
 ;;
 
 let test_first_run_runtime_binds_supporting_lanes () =
@@ -1947,6 +1951,24 @@ let test_an_official_client_joins_the_curator_cli_slots () =
        Alcotest.(check (list string)) "the curator's HTTP slots are unchanged"
          [ "openai.gpt" ]
          (exact_lane_slots path "workspace_curator_exact"))
+;;
+
+let test_candle_appraiser_is_explicitly_configured_with_both_transports () =
+  with_official_client_runtime_file (fun path ->
+    let lane = Standalone_lane.Candle_appraiser in
+    let lane_id = Standalone_lane.to_id lane in
+    Alcotest.(check bool) "appraisal does not block startup when absent" true
+      (Standalone_lane.obligation lane = Standalone_lane.Optional);
+    Runtime.set_exact_output_lane_slots ~runtime_config_path:path
+      ~lane ~slots:[ "openai.gpt" ] ()
+    |> lane_write_ok "configure Candle HTTP slot";
+    Runtime.append_exact_output_lane_slot ~runtime_config_path:path
+      ~lane ~slot:"codex.codex" ()
+    |> lane_write_ok "append Candle CLI fallback";
+    Alcotest.(check (list string)) "appraisal HTTP order survives the save"
+      [ "openai.gpt" ] (exact_lane_slots path lane_id);
+    Alcotest.(check (list string)) "appraisal CLI fallback survives the save"
+      [ "codex.codex" ] (exact_lane_cli_slots path lane_id))
 ;;
 
 (* A lane an official client's append creates declares [cli_slots] alone. The
@@ -4112,6 +4134,10 @@ let () =
             "multiple official client accounts stay distinct"
             `Quick
             test_multiple_official_client_accounts_are_distinct_runtimes
+        ; Alcotest.test_case
+            "Candle appraisal is explicitly configured with both transports"
+            `Quick
+            test_candle_appraiser_is_explicitly_configured_with_both_transports
         ; Alcotest.test_case
             "a CLI append to an undeclared lane writes only cli_slots"
             `Quick

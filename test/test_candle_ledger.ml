@@ -55,7 +55,9 @@ let goal_ids events =
        | E.Snapshot { goal_id; _ }
        | E.Payout_owed { goal_id; _ }
        | E.Candidates { goal_id; _ }
-       | E.Unattributed { goal_id; _ } -> goal_id)
+       | E.Unattributed { goal_id; _ }
+       | E.Payout_failed { goal_id; _ } -> goal_id
+       | E.Paid p -> p.identity.goal_id)
     events
 ;;
 

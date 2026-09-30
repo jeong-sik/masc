@@ -97,9 +97,9 @@ related: ["every-lane-is-one-row-in-one-registry", "exact-lane-walks-one-slot-li
 | `Snapshot` | 검증기의 통과 결과를 검증 원장에 커밋하기 직전 | goal_id, 검증 요청 id, 검증 실행 id(`verification_run_id`), criterion revision, 검증 통과 시각, Goal 생성 시각, 그때의 기한(Goal 이 들고 있던 그대로. 없을 수 있다), 제목·metric·target, 그때 연결된 Task 의 id 목록 |
 | `PayoutOwed` | 사람이 확정할 때. 확정 기록을 저장한 다음, Goal phase 를 저장하기 전에(3.2) | goal_id, 검증 요청 id, 검증 실행 id(`verification_run_id`), 검증 통과 시각, 확정 시각 |
 | `Candidates` | 일꾼이 Task 를 읽은 뒤, 모델을 부르기 전에 | goal_id, 검증 요청 id, 검증 실행 id(`verification_run_id`), `Snapshot` 의 Task 마다 상태(찾음, 삭제됨)와 찾은 Task 의 제목·담당자·상태·끝난 시각, 후보 Task 와 후보 keeper 목록 |
-| `PayoutFailed` | 다시 시도해도 결과가 같은 이유가 생겼을 때(지금은 기한을 읽을 수 없음 하나) | goal_id, 검증 요청 id, 이유 |
-| `Paid` | 지급할 때. 한 줄에 전부 적는다 | goal_id, 검증 요청 id, 등급, 총액, 답한 lane 슬롯(모델) id(없을 수 있다), 후보 Task 마다 관계 판정, keeper 별 가중치·몫·감액 계수·지급액, 감액에 쓴 값(기준 시각, 기한, 감액률, 바닥) |
-| `Unattributed` | 받을 keeper 가 없어 지급 없이 끝낼 때 | goal_id, 검증 요청 id, 이유(후보 없음, 관계있는 Task 없음) |
+| `PayoutFailed` | 다시 시도해도 결과가 같은 이유가 생겼을 때(지금은 기한을 읽을 수 없음 하나) | goal_id, 검증 요청 id, 검증 실행 id(`verification_run_id`), 이유 |
+| `Paid` | 지급할 때. 한 줄에 전부 적는다 | goal_id, 검증 요청 id, 검증 실행 id(`verification_run_id`), 등급, 총액, 답한 lane 슬롯(모델) id(없을 수 있다), 후보 Task 마다 관계 판정, keeper 별 가중치·몫·감액 계수·지급액, 감액에 쓴 값(기준 시각, 기한, 감액률, 바닥) |
+| `Unattributed` | 받을 keeper 가 없어 지급 없이 끝낼 때 | goal_id, 검증 요청 id, 검증 실행 id(`verification_run_id`), 이유(후보 없음, 관계있는 Task 없음) |
 | `Purchased` | keeper 가 아이템을 살 때 | keeper, 아이템, 낸 금액 |
 | `Equipped` | keeper 가 착용을 바꿀 때 | keeper, 슬롯, 아이템(이름에서 정한 기본 장신구로 되돌릴 때는 `Default`) |
 | `HalfLifeSet` | 설정의 반감기가 원장의 마지막 `HalfLifeSet` 과 다르거나 원장에 값이 없을 때 | 반감기(`Off` 또는 시간) |

@@ -1,3 +1,5 @@
+let () = Candle_status.install_appraiser_check (fun () -> Ok ())
+
 (** Whether Candle is on right now (RFC-goal-candle-ledger 3.9), and the one read
     of the ledger a server start makes. *)
 

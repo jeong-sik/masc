@@ -29,7 +29,12 @@ type task_lookup =
 (** What reading one linked Task found. A Task that could not be read has no row
     here: nothing is written until every linked Task reads. *)
 
-type unattributed_reason = No_candidates
+type attribution = {
+  grade : Candle_grade.t;
+  grade_trace : Candle_appraisal.trace;
+  relations : Candle_appraisal.task_relation list;
+}
+type unattributed_reason = No_candidates | All_unrelated of attribution | No_related_keepers of attribution
 (** Nobody could be paid. *)
 
 type body =
@@ -71,6 +76,8 @@ type body =
       ; verification_run_id : string
       ; reason : unattributed_reason
       }
+  | Paid of Candle_payment.t
+  | Payout_failed of { goal_id : string; request_id : string; verification_run_id : string; due_date : string }
 
 type t =
   { at : Candle_time.t
@@ -79,7 +86,7 @@ type t =
 
 val kind : body -> string
 (** The row's ["kind"]: [snapshot], [payout_owed], [candidates] or
-    [unattributed]. *)
+    [unattributed], [paid] or [payout_failed]. *)
 
 val to_yojson : t -> Yojson.Safe.t
 val of_yojson : Yojson.Safe.t -> (t, string) result

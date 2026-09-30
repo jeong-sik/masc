@@ -11225,6 +11225,10 @@ def standalone_lane_fixture(
             "changes; semantic verification is not performed.",
             False,
         ),
+        "candle_appraiser": (
+            "Appraises a confirmed Goal payout grade, each candidate Task's relation to the Goal, and Keeper contribution weights.",
+            False,
+        ),
         "verifier_exact": (
             "Reviews Task completion and Goal proof evidence.",
             False,
@@ -11304,6 +11308,7 @@ def standalone_lanes_response() -> HttpResponse:
                     "browser_stagehand_exact", "Browser Stagehand",
                     status="no_retained_observation", retained=0,
                 ),
+                standalone_lane_fixture("candle_appraiser", "Candle Appraiser"),
             ],
         },
     )

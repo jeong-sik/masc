@@ -63,6 +63,8 @@ def run_tables(executable):
                                   needle=ready, final_cursor=b"\x1b[?25l")
                 h.drain_until_quiet(process, fd, output)
                 rows = [row.decode("utf-8", "replace") for row in screen(output).values()]
+                print("CLIENT_CONNECTOR_LAYOUT " + json.dumps({"surface": surface, "width": width,
+                      "rows": rows}, ensure_ascii=False), flush=True)
                 if surface == "Clients":
                     header = next(row for row in rows if "LAST SEEN" in row and "STATUS" in row)
                     boundaries = [header.index("STATUS"), header.index("NAME"), header.index("LAST SEEN")]
@@ -75,16 +77,26 @@ def run_tables(executable):
                 else:
                     header = next(row for row in rows if "REACHABLE" in row and "CHANNEL" in row)
                     reach, status, channel = (header.index(label) for label in ("REACHABLE", "STATUS", "CHANNEL"))
-                    for name, reachable, state, route in (("long-", "yes", "connected", "#connected"),
+                    name_start = header.index("CONNECTOR")
+                    name_end = header.index("CONFIGURED") if "CONFIGURED" in header else reach
+                    for name, reachable, state, route in (("long", "yes", "connected", "#connected"),
                                                         ("한", "no", "disconnected", "#unreachable"),
                                                         ("offline", "no", "offline", "—")):
-                        row = next(row for row in rows if name in row and state in row and "REACHABLE" not in row)
+                        matches = [row for row in rows
+                                   if cell_slice(row, channel, width - 2) == route
+                                   and cell_slice(row, status, channel) == state]
+                        assert len(matches) == 1, (surface, width, route, state, rows)
+                        row = matches[0]
+                        displayed_name = cell_slice(row, name_start, name_end)
+                        assert displayed_name.startswith(name), (width, displayed_name, rows)
+                        if name == "offline":
+                            assert displayed_name == name, row
+                        else:
+                            assert displayed_name.endswith("-END") and "…" in displayed_name, row
                         assert cell_slice(row, reach, status) == reachable, row
                         assert cell_slice(row, status, channel) == state, row
                         assert cell_slice(row, channel, width - 2) == route, row
                     assert ("CONFIGURED" in header) == (width >= 80), header
-                print("CLIENT_CONNECTOR_LAYOUT " + json.dumps({"surface": surface, "width": width,
-                      "rows": rows}, ensure_ascii=False), flush=True)
             h.resize_and_wait(process, fd, output, rows=26, columns=100,
                               needle=ready, final_cursor=b"\x1b[?25l")
         os.write(fd, b"q")

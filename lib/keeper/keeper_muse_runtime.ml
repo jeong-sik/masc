@@ -337,6 +337,7 @@ let msp_reasoning_effort : Llm_provider.Reasoning_effort.t -> Msp.reasoning_effo
   | Llm_provider.Reasoning_effort.High -> Msp.Effort_high
   | Llm_provider.Reasoning_effort.XHigh -> Msp.Effort_xhigh
   | Llm_provider.Reasoning_effort.Max -> Msp.Effort_max
+  | Llm_provider.Reasoning_effort.Ultra -> Msp.Effort_ultra
 ;;
 
 (* Only the host's counted-once prompt count normalizes the provider's cache

@@ -1357,7 +1357,7 @@ let test_tui_current_projection_wiring () =
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_types.ml"
        ~binding_name:"keeper_log_rows"
-       ~callee:"Tui_decode.sanitize_terminal_text"
+       ~callee:"Masc.Tui_terminal_text.sanitize_terminal_text"
      >= 1);
   check bool "log input uses viewport-bounded scrolling" true
     (Ast_grep.count_calls_across_files
@@ -2788,7 +2788,7 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
        ~binding_name:"log_entry_rows" ~callees:[] ~fields:[ "le_work_kind" ]);
   check_identifiers ~module_path:"bin/masc_tui_observation_layout.ml"
     ~binding:"log_entry_rows"
-    ~callees:[ "Tui_decode.sanitize_terminal_text" ] [ "text" ];
+    ~callees:[ "Masc.Tui_terminal_text.sanitize_terminal_text" ] [ "text" ];
   check_identifiers ~module_path:"bin/masc_tui_observation_layout.ml"
     ~binding:"log_entry_rows" ~callees:[ "wrap" ] [ "tool"; "work" ];
   check int "logs render the shared row projection" 1

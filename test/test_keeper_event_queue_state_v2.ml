@@ -2001,7 +2001,8 @@ let test_scope_uncertain_rename_requires_durability_confirmation () =
     let confirmations = ref 0 in
     expect_binding_error "strict no-op skipped failing durability confirmation"
       (Persistence.For_testing.bind_pending_repetition_scope_with_confirmation
-        ~confirm_snapshot:(fun path json -> incr confirmations; fail_after_rename path json)
+        ~confirm_snapshot:(fun path state ->
+          incr confirmations; fail_after_rename path (State.to_yojson state))
         ~base_path ~keeper_name ~selections ~scope ());
     Alcotest.(check int) "same binding retried the barrier" 1 !confirmations;
     let notifications = ref 0 in

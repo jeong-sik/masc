@@ -56,7 +56,7 @@ let resolved_capabilities runtime_id =
   match Runtime.get_runtime_by_id runtime_id with
   | None -> failf "runtime %s did not materialize" runtime_id
   | Some runtime ->
-    (match runtime.Runtime.execution with
+    (match runtime.Runtime_instance.execution with
      | Runtime_execution.Agent_core provider ->
        Provider_tool_support.agent_core_capabilities_of_config provider
      | Runtime_execution.Claude_code _

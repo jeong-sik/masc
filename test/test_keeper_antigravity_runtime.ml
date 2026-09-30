@@ -1040,7 +1040,7 @@ let test_spawn_failure_is_pre_dispatch () =
                   let config =
                     match Runtime.get_runtime_by_id "antigravity.gemini" with
                     | Some
-                        { Runtime.execution =
+                        { Runtime_instance.execution =
                             Runtime_execution.Antigravity_cli config
                         ; _
                         } ->
@@ -1195,7 +1195,7 @@ let test_blank_system_prompt_is_refused_not_defaulted () =
                   let config =
                     match Runtime.get_runtime_by_id "antigravity.gemini" with
                     | Some
-                        { Runtime.execution =
+                        { Runtime_instance.execution =
                             Runtime_execution.Antigravity_cli config
                         ; _
                         } ->
@@ -2061,7 +2061,7 @@ let test_losing_claim_cannot_publish_native_policy () =
         Eio_context.set_env env;
         Runtime.init_default ~config_path:runtime_path |> Result.get_ok;
         let config = match Runtime.get_runtime_by_id "antigravity.gemini" with
-          | Some {Runtime.execution=Runtime_execution.Antigravity_cli config; _} -> config
+          | Some {Runtime_instance.execution=Runtime_execution.Antigravity_cli config; _} -> config
           | _ -> fail "Antigravity binding missing" in
         let owner_leaf = Runtime_antigravity_home.keeper_owner_leaf ~keeper_name ~oauth_source in
         let home, _ = Runtime_antigravity_home.prepare_native ~runtime_root ~owner_leaf ~oauth_source
@@ -2124,7 +2124,7 @@ let test_native_policy_failure_releases_claim () =
         Eio_context.set_env env;
         Runtime.init_default ~config_path:runtime_path |> Result.get_ok;
         let config = match Runtime.get_runtime_by_id "antigravity.gemini" with
-          | Some {Runtime.execution=Runtime_execution.Antigravity_cli config; _} -> config
+          | Some {Runtime_instance.execution=Runtime_execution.Antigravity_cli config; _} -> config
           | _ -> fail "Antigravity binding missing" in
         let owner_leaf = Runtime_antigravity_home.keeper_owner_leaf ~keeper_name ~oauth_source in
         let home = Runtime_antigravity_home.prepare ~runtime_root ~owner_leaf ~oauth_source

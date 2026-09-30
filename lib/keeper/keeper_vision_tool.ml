@@ -85,13 +85,13 @@ let vision_runtime_candidates ~now =
   (* Only [runtime.media_failover] qualifies. Capability admission uses the
      same predicate as the Keeper media reroute. *)
   Runtime_agent.media_candidates ()
-  |> Runtime_quota_window.demote_order ~now ~quota_scope_of:(fun (rt : Runtime.t) ->
+  |> Runtime_quota_window.demote_order ~now ~quota_scope_of:(fun (rt : Runtime_instance.t) ->
        Some (Runtime.quota_scope_of_runtime rt))
-  |> List.filter_map (fun (rt : Runtime.t) ->
+  |> List.filter_map (fun (rt : Runtime_instance.t) ->
        let caps = Runtime_agent.input_capabilities_of_runtime rt in
        if not (Runtime_agent.caps_admit_required_modalities caps [ "image" ])
        then None
-       else match rt.Runtime.execution with
+       else match rt.Runtime_instance.execution with
        | Runtime_execution.Agent_core config -> Some (rt.id, rt, Api config)
        | Runtime_execution.Codex_app_server _
        | Runtime_execution.Claude_code _ -> Some (rt.id, rt, Official_client)
@@ -544,7 +544,7 @@ let official_failure_effect : Fusion_official_client.failure -> Tool_result.fail
    same fact for a typed [PaymentRequired]; the read walk meets it as HTTP and
    records it here so the next read starts elsewhere (RFC-0440 §3). Any answer
    that got through clears an observation on that account. *)
-let note_candidate_account ~(runtime : Runtime.t) = function
+let note_candidate_account ~(runtime : Runtime_instance.t) = function
   | Llm_provider.Http_client.HttpError { code = 402; _ } ->
     Runtime_quota_window.note_observed_exhausted
       ~scope:(Runtime.quota_scope_of_runtime runtime)

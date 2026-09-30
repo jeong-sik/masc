@@ -3,27 +3,12 @@
     runtime→Runtime 전환 (RFC-0206). runtime 의 routes/runtime_id/tier/profile
     간접 레이어를 제거하고, binding(provider × model) 하나를 곧 하나의 Runtime
     으로 본다. 소비자는 Runtime 목록 + default Runtime 을 직접 소비한다.
-    타입은 자립 모듈 {!Runtime_schema} 소유. *)
+    선언 스키마는 {!Runtime_schema}, materialized 값은 {!Runtime_instance} 소유. *)
 
 open Runtime_config_error
+open Runtime_instance
 
 open Runtime_schema
-
-type t =
-  { id : string
-  ; provider : provider
-  ; model : model_spec
-  ; binding : binding
-  ; execution : Runtime_execution.t
-  ; candidate_backpressure : Runtime_candidate_backpressure.candidate
-    (** Candidate-only backpressure tied to the frozen dispatch binding. *)
-  ; quota_scope : Runtime_quota_window.scope
-    (** Quota ownership key frozen at materialization, from the same
-        credential-alias selection that resolved the dispatched API key. A
-        later environment change must not re-select the alias at
-        window-recording time, or the window is charged to an account the
-        dispatch never used (PR #28219 review). *)
-  }
 
 val exact_slot_list_key_of_api_format : api_format -> string option
 (** The declaration key used when an exact-output lane appends a binding with
@@ -31,34 +16,6 @@ val exact_slot_list_key_of_api_format : api_format -> string option
     protocol has no output-schema channel and cannot enter an exact lane.
     The runtime writer and the
     resolved picker projection use the same decision. *)
-
-type dispatch_credential_error =
-  | Required_env_credential_missing of
-      { provider_id : string
-      ; env_key : string
-      }
-  | Declared_credential_unavailable of
-      { provider_id : string
-      ; carrier : Agent_core.Error.credential_carrier
-      }
-
-val dispatch_credential_error_to_string : dispatch_credential_error -> string
-
-val dispatch_credential_error_to_core_error :
-  dispatch_credential_error -> Agent_core.Error.t
-(** Preserve a missing environment credential as the existing typed
-    [MissingEnvVar] configuration error. Other unavailable credential carriers
-    use the closed [CredentialUnavailable] variant, so consumers never infer
-    terminal configuration state from broad [InvalidConfig] text. *)
-
-val validate_dispatch_credential :
-  provider_config:Llm_provider.Provider_config.t ->
-  t ->
-  (unit, dispatch_credential_error) result
-(** Fail closed immediately before an Agent Core dispatch when the runtime
-    declares a credential but the final provider config has no secret. A
-    credential-free provider remains valid. This check intentionally happens
-    after materialization so dashboard missing-auth projection stays intact. *)
 
 type config_source_revision = private Config_source_revision of string
 type config_commit_order = private Config_commit_order of int64
@@ -249,8 +206,6 @@ module Assignment_for_testing : sig
      keeper_assignment_cas_error) result
 end
 
-val id_of_binding : binding -> string
-
 val agent_core_model_catalog_env_var_name : string
 
 val exact_output_target_source :
@@ -259,18 +214,6 @@ val exact_output_target_source :
     (exact slot body deadline) applies, and {!exact_output_resolver_catalog}
     decides which catalog the exact-output registry reads, at boot and on
     every config commit. A blank value names no file. *)
-
-val of_binding : config -> binding -> (t, drop_reason) result
-(** Materialize one binding while preserving failure information. [Error reason]
-    when the binding is disabled, its provider/model id is unresolved, or the
-    provider transport/protocol cannot be materialized into a
-    {!Llm_provider.Provider_config.t} (e.g. a [messages-http]
-    provider the runtime adapter has no provider_config path for). The binding is
-    still excluded from the runtime list (fail-closed, RFC-0206 §2.1); this
-    surfaces *why*, so [\[runtime\].default] / [\[runtime.assignments\]] / lane
-    validation can report a dropped target's materialize failure instead of a
-    bare "not found among N runtimes" that points at a non-existent typo. *)
-
 
 type missing_catalog_model =
   { runtime_id : string
@@ -712,42 +655,9 @@ val get_runtime_by_id : string -> t option
     keeper's runtime assignment or the default); [None] makes the driver
     fail fast rather than silently substituting the default (RFC-0207). *)
 
-val is_local_runtime : t -> bool
-(** [is_local_runtime rt] classifies runtime locality from the materialized
-    provider schema: CLI transports are local; HTTP transports are local only
-    when their endpoint is loopback and the provider declares no credential. *)
-
 val is_local_runtime_id : string -> bool option
 (** Locality classification for a configured runtime id, or [None] when the
     runtime id is not currently materialized. *)
-
-type max_context_source =
-  | Override (** runtime.toml [model.max-context] override applies as-is. *)
-  | Capability (** no override configured; the AGENT_CORE capability catalog cap applies. *)
-  | Override_clamped_by_capability
-      (** an override is configured but exceeds the AGENT_CORE capability catalog
-          cap, so the cap wins. *)
-
-val max_context_source_to_string : max_context_source -> string
-(** ["override"] / ["capability"] / ["override_clamped_by_capability"] — wire
-    label for the [/api/v1/runtime/resolved] document. *)
-
-val resolve_max_context_of_runtime : t -> (int * max_context_source) option
-(** Effective input context window and the source that produced it. [None]
-    when neither the runtime.toml [model.max-context] override nor the AGENT_CORE
-    capability catalog declares a positive context window for this binding;
-    [materialize_config] rejects such a runtime at load (fail-closed), so a
-    materialized [t] obtained from {!get_runtimes}/{!get_runtime_by_id} never
-    observes [None] here in practice. *)
-
-val max_context_of_runtime : t -> int
-(** Effective input context window for a materialized runtime.  This applies the
-    same provider-cap clamp as [max_context_of_runtime_id] without re-resolving
-    the runtime id. Derived from {!resolve_max_context_of_runtime}.
-    @raise Failure if that resolves to [None] — unreachable for any [t]
-    produced by {!materialize_config}, which rejects a runtime whose max
-    context cannot be resolved at load time (no silent default —
-    RFC-0206 §2.1). *)
 
 val resolve_max_context_of_runtime_id : string -> (int * max_context_source) option
 (** {!resolve_max_context_of_runtime} looked up by runtime id: the effective
@@ -809,18 +719,6 @@ val quota_scope_of_runtime_id : string -> Runtime_quota_window.scope option
     one row demotes every sibling backed by the same account. [None] when
     the runtime id is unknown. Consumed by
     {!Runtime_quota_window.demote_order} and the matching note site. *)
-
-val muse_prompt_capacity : t -> (int, Runtime_muse_prompt_capacity.error) result
-(** The start-prompt ceiling of a Muse runtime: derived from its resolved
-    window ({!resolve_max_context_of_runtime}) and narrowed by a declared
-    [max-prompt-bytes] ({!Runtime_muse_prompt_capacity.start_prompt_bytes}).
-    A Muse turn applies this and refuses with the error's cause. *)
-
-val prompt_capacity_bytes : t -> int option
-(** The start-prompt ceiling a turn on this runtime applies: the model's
-    declared [max-prompt-bytes], or for a Muse model {!muse_prompt_capacity}.
-    [None] when no ceiling applies, which for Muse means the ceiling cannot
-    be derived and the turn itself refuses. *)
 
 val max_prompt_bytes_of_runtime_id : string -> int option
 (** {!prompt_capacity_bytes} of the runtime with this id, or [None] when the

@@ -596,7 +596,7 @@ let test_provider_for_vision_uses_runtime_temperature () =
       (match Runtime.get_runtime_by_id runtime_id with
        | None -> failwith "selected vision runtime should resolve"
        | Some runtime ->
-         (match runtime.Runtime.execution with
+         (match runtime.Runtime_instance.execution with
           | Runtime_execution.Codex_app_server _
           | Runtime_execution.Claude_code _
           | Runtime_execution.Antigravity_cli _

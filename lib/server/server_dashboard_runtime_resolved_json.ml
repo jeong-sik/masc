@@ -3,9 +3,9 @@
 
    - #15: max-context previously diverged across three sources (runtime.toml
      override, AGENT_CORE hardcoded defaults, AGENT_CORE capability catalog cap). This
-     document reports the one value [Runtime.max_context_of_runtime] resolves,
+     document reports the one value [Runtime_instance.max_context_of_runtime] resolves,
      plus which of [override]/[capability]/[override_clamped_by_capability]
-     produced it ([Runtime.resolve_max_context_of_runtime]).
+     produced it ([Runtime_instance.resolve_max_context_of_runtime]).
    - #14: the settings panel previously rendered only explicit
      [\[runtime.assignments\]] entries. [assignments] here joins every
      configured keeper — including ones riding [\[runtime\].default] with no
@@ -18,7 +18,7 @@ let int_opt_json = Json_util.int_opt_to_json
 
 (* The rate limit this process holds for [rt], and the moment the provider's
    own Retry-After ends it when that is still ahead of [now]. *)
-let runtime_rate_limit ~now (rt : Runtime.t) : bool * float option =
+let runtime_rate_limit ~now (rt : Runtime_instance.t) : bool * float option =
   match
     Runtime_candidate_backpressure.candidate_backpressure ~now
       ~candidate:rt.candidate_backpressure
@@ -38,12 +38,12 @@ let runtime_rate_limit ~now (rt : Runtime.t) : bool * float option =
     false, None
 ;;
 
-let runtime_resolution_json ~now ~scope_label (rt : Runtime.t) : Yojson.Safe.t =
+let runtime_resolution_json ~now ~scope_label (rt : Runtime_instance.t) : Yojson.Safe.t =
   let exact_slot_group =
     Runtime.exact_slot_list_key_of_api_format rt.provider.api_format
   in
   let effective_max_context, source =
-    match Runtime.resolve_max_context_of_runtime rt with
+    match Runtime_instance.resolve_max_context_of_runtime rt with
     | Some resolution -> resolution
     | None ->
       failwith
@@ -77,7 +77,7 @@ let runtime_resolution_json ~now ~scope_label (rt : Runtime.t) : Yojson.Safe.t =
     ; "model", `String rt.model.api_name
     ; "exact_slot_group", string_opt_json exact_slot_group
     ; "effective_max_context", `Int effective_max_context
-    ; "max_context_source", `String (Runtime.max_context_source_to_string source)
+    ; "max_context_source", `String (Runtime_instance.max_context_source_to_string source)
     ; "max_output_tokens", int_opt_json (Runtime.max_output_tokens_of_runtime_id rt.id)
       (* The effort this binding declares. Bindings of one model that differ
          only in effort share provider, model and context, so without it the
@@ -95,7 +95,7 @@ let runtime_resolution_json ~now ~scope_label (rt : Runtime.t) : Yojson.Safe.t =
       , match Runtime.reasoning_effort_of_runtime_id rt.id with
         | Some effort -> `String (Llm_provider.Reasoning_effort.to_string effort)
         | None -> `Null )
-    ; "is_local", `Bool (Runtime.is_local_runtime rt)
+    ; "is_local", `Bool (Runtime_instance.is_local_runtime rt)
     ; "is_default", `Bool rt.binding.is_default
     ; "quota_exhausted", `Bool quota_exhausted
     ; "quota_resets_at", (match quota_resets_at with Some t -> `Float t | None -> `Null)
@@ -153,7 +153,7 @@ let resolved_assignment_json
    Duplicating that exact fallback here (rather than only reporting explicit
    assignments) is bug #14's fix — the resolved document must match what a
    turn actually dispatches to. *)
-let assignment_target (default : Runtime.t option) (keeper_name : string)
+let assignment_target (default : Runtime_instance.t option) (keeper_name : string)
   : string * string option
   =
   match Runtime.runtime_id_for_keeper keeper_name with
@@ -162,10 +162,10 @@ let assignment_target (default : Runtime.t option) (keeper_name : string)
     (* The route the default names, which is what [resolve_assignment] is given
        for a keeper with no assignment; [default] is only the runtime it enters
        on. *)
-    "default", Option.map (fun (_ : Runtime.t) -> Runtime.get_default_route ()) default
+    "default", Option.map (fun (_ : Runtime_instance.t) -> Runtime.get_default_route ()) default
 ;;
 
-let assignment_json (default : Runtime.t option) (keeper_name : string) : Yojson.Safe.t =
+let assignment_json (default : Runtime_instance.t option) (keeper_name : string) : Yojson.Safe.t =
   let assignment_source, runtime_id = assignment_target default keeper_name in
   let resolved =
     match runtime_id with
@@ -200,7 +200,7 @@ let all_keeper_names ~(config : Workspace.config) : string list =
    [\[runtime.lanes\]] table declares, and reporting only declared lanes would
    hide that lane's candidates from the document that is supposed to say what
    dispatch will do. *)
-let dispatchable_lanes ~(config : Workspace.config) (default : Runtime.t option)
+let dispatchable_lanes ~(config : Workspace.config) (default : Runtime_instance.t option)
   : (Runtime_lane.t * lane_origin) list
   =
   let declared = Runtime.lanes () in
@@ -259,7 +259,7 @@ let usage_window_json ({ window; source; observed_at } : Usage.recorded) : Yojso
    sharing a credential share one account and so one set of windows. Each
    provider keeps its [display-name] beside its id: the id is the table key a
    join needs, the name is what the operator wrote to read. *)
-let usage_scopes (runtimes : Runtime.t list) =
+let usage_scopes (runtimes : Runtime_instance.t list) =
   let add groups scope (provider : Runtime_schema.provider) =
     let named (id, _) = String.equal id provider.id in
     let entry = provider.id, provider.display_name in
@@ -275,7 +275,7 @@ let usage_scopes (runtimes : Runtime.t list) =
   in
   let configured =
     List.fold_left
-      (fun groups (rt : Runtime.t) -> add groups (Runtime.quota_scope_of_runtime rt) rt.provider)
+      (fun groups (rt : Runtime_instance.t) -> add groups (Runtime.quota_scope_of_runtime rt) rt.provider)
       []
       runtimes
   in

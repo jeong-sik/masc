@@ -2226,7 +2226,7 @@ let run_direct_attempt
                   let config =
                     match Runtime.get_runtime_by_id "claude.claude" with
                     | Some
-                        { Runtime.execution = Runtime_execution.Claude_code config
+                        { Runtime_instance.execution = Runtime_execution.Claude_code config
                         ; _
                         } ->
                       config

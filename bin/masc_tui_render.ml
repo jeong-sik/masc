@@ -536,17 +536,6 @@ let render_overview (state : state) =
      [approvals_count_label] also decides the "?" tail from the same per-list
      readings the Approvals title uses. *)
   let approval_count = Masc_tui_types.approvals_count_label state in
-  let candle_lines =
-    Masc_tui_candle.summary_lines state.candle_observation
-    |> List.concat_map (fun line ->
-         Message_layout.wrap_words ~max_cells:(max 1 (cols - 4))
-           (Terminal_text.single_line line))
-    |> List.map (fun line -> "  " ^ line)
-  in
-  let header_lines =
-    [ health; "" ] @ candle_lines
-    @ (match candle_lines with [] -> [] | _ :: _ -> [ "" ])
-  in
   let attention = dashboard_attention state in
   let attention_lines =
     (* An unread or failed overview is not an empty one: its count would
@@ -629,13 +618,29 @@ let render_overview (state : state) =
           let notice = dashboard_opening_notice_lines state in
           let guide = dashboard_first_use_lines state in
           let guide =
-            if List.length notice + List.length header_lines
-               + List.length guide + List.length summary
+            if List.length notice + 2 + List.length guide + List.length summary
                <= budget
             then guide
             else []
           in
-          notice @ header_lines @ guide @ summary)
+          (* Currency uses only rows left by the current Dashboard. Its
+             full block is atomic; a crowded screen retains the baseline
+             and names the global, scrollable details route in Health. *)
+          let candle =
+            Masc_tui_candle.summary_lines state.candle_observation
+            |> List.concat_map (fun line ->
+                 Message_layout.wrap_words ~max_cells:(max 1 (cols - 4))
+                   (Terminal_text.single_line line))
+            |> List.map (fun line -> " " ^ line)
+          in
+          let baseline_rows = List.length notice + 2 + List.length guide + List.length summary in
+          let candle = if baseline_rows + List.length candle <= budget then candle else [] in
+          let health =
+            match candle, Masc_tui_candle.compact_status state.candle_observation with
+            | [], Some status -> " " ^ status ^ " · " ^ health
+            | _ -> health
+          in
+          notice @ [ health ] @ candle @ [ "" ] @ guide @ summary)
       |> List.iter c.push)
 
 (* One task's event history, appended after the detail body so it rides the

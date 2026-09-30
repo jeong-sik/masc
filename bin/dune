@@ -1608,6 +1608,7 @@
  (wrapped false)
  (modules masc_tui_render_prim)
  (libraries
+  masc_tui_candle
   masc_tui_frame_timing
   masc_tui_next_request_band
   masc_tui_hit

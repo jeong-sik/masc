@@ -81,6 +81,8 @@ def terminal_layout(page) -> dict:
         const screen = document.querySelector('.xterm-screen');
         if (!screen) return {screen: null, viewport: {width: innerWidth, height: innerHeight}};
         const rect = screen.getBoundingClientRect();
+        const viewport = screen.parentElement.querySelector('.xterm-viewport');
+        const scrollbarWidth = viewport ? Math.max(0, viewport.offsetWidth - viewport.clientWidth) : 0;
         const clippedBy = [];
         for (let ancestor = screen.parentElement; ancestor; ancestor = ancestor.parentElement) {
             const style = getComputedStyle(ancestor);
@@ -94,6 +96,7 @@ def terminal_layout(page) -> dict:
         }
         return {
             viewport: {width: innerWidth, height: innerHeight},
+            native_scrollbar_width: scrollbarWidth,
             screen: {left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom,
                 width: rect.width, height: rect.height, scrollWidth: screen.scrollWidth,
                 scrollHeight: screen.scrollHeight, clientWidth: screen.clientWidth,
@@ -252,12 +255,24 @@ def main() -> None:
                     bounds = layout["screen"]
                     # The initial viewport is only for connection startup.
                     # Use measured pixels, retaining the terminal's margins.
-                    page.set_viewport_size({
-                        "width": int(bounds["right"] + max(1, bounds["left"]) + 1),
+                    viewport_size = {
+                        "width": int(bounds["right"] + max(1, bounds["left"])
+                                     + layout["native_scrollbar_width"] + 1),
                         "height": int(bounds["bottom"] + max(1, bounds["top"]) + 1),
-                    })
-                    # ttyd's FitAddon reacts to viewport changes. Restore the
-                    # recorded cells before releasing the replay bytes.
+                    }
+                    if viewport_size != page.viewport_size:
+                        # ttyd registers a synchronous window resize handler
+                        # that calls FitAddon.fit(). Our listener is registered
+                        # after READY, so its event follows that handler.
+                        page.evaluate("""() => {
+                            window.studioViewportResize = new Promise(resolve => {
+                                window.addEventListener('resize', () => resolve(), {once: true});
+                            });
+                        }""")
+                        page.set_viewport_size(viewport_size)
+                        page.evaluate("window.studioViewportResize")
+                    # Restore exact recorded cells only after ttyd's resize
+                    # handler has finished, before releasing replay bytes.
                     page.evaluate("([cols, rows]) => window.term.resize(cols, rows)", [columns, rows])
                     page.wait_for_function(
                         "([cols, rows]) => window.term.cols === cols && window.term.rows === rows",

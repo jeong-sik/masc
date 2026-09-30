@@ -698,6 +698,7 @@ let known_sub_arguments ~keeper_names word =
   (* [show] goes last: [save] is the older word and shares its first
      letter, so leading with [show] would move where "/preset s" lands. *)
   | "preset" -> [ "save"; "restore"; "show" ]
+  | "play" -> [ "invites"; "invite"; "link"; "revoke" ]
   | "keeper" -> keeper_names
   | _ -> []
 

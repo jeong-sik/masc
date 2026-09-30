@@ -34,14 +34,14 @@ type readable =
 
 (* An HTTP runtime whose provider declares [usage-read] is read with the key
    its execution was materialized with: the same load that froze the
-   runtime's quota scope (Runtime.quota_scope_of_materialized), so the
+   runtime's quota scope in [Runtime_instance.of_binding], so the
    windows land on the account the dispatch uses.  Re-resolving the
    credential here would re-run alias selection against the process
    environment of the read.  runtime.toml refuses [usage-read] on an
    official-client protocol; a Codex app-server and the Antigravity CLI
    answer without a turn. Claude Code states its windows only during one.
    Muse Code is read only after a failed turn, via its selected account. *)
-let how_of_runtime (rt : Runtime.t) =
+let how_of_runtime (rt : Runtime_instance.t) =
   match rt.execution with
   | Runtime_execution.Agent_core config ->
     Option.map
@@ -57,8 +57,8 @@ let how_of_runtime (rt : Runtime.t) =
    account, so reading it once answers for all of them. *)
 let readable_scopes () =
   List.fold_left
-    (fun acc (rt : Runtime.t) ->
-      let scope = Runtime.quota_scope_of_runtime rt in
+    (fun acc (rt : Runtime_instance.t) ->
+      let scope = Runtime_instance.quota_scope_of_runtime rt in
       if List.exists (fun r -> Runtime_quota_window.scope_equal r.scope scope) acc
       then acc
       else (
@@ -604,7 +604,7 @@ let read_codex_after_spent_usage_refusal ~clock ~cwd ~scope codex =
       (read_codex_report ~mgr ~clock ~cwd ~scope codex))
 ;;
 
-let http_read_of_runtime (rt : Runtime.t) =
+let http_read_of_runtime (rt : Runtime_instance.t) =
   match how_of_runtime rt with
   | Some (Http http) -> Some http
   | Some (Codex _ | Antigravity _) | None -> None
@@ -635,8 +635,8 @@ let fetch_of_context () =
   | None, _ | _, None -> None
 ;;
 
-let read_runtime_after_account_refusal ?fetch (rt : Runtime.t) =
-  let scope = Runtime.quota_scope_of_runtime rt in
+let read_runtime_after_account_refusal ?fetch (rt : Runtime_instance.t) =
+  let scope = Runtime_instance.quota_scope_of_runtime rt in
   let outcome =
     match http_read_of_runtime rt with
     | None -> Skipped No_usage_read

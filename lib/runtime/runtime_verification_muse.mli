@@ -22,7 +22,7 @@ val run :
 (** [directory] is the absolute spelling of [cwd]. Product callers supply
     the foreground process manager that owns descendants. The helper forces
     native read posture regardless of the incoming config. [prompt_capacity]
-    is the model's {!Runtime.muse_prompt_capacity}; the complete prompt must
+    is the model's {!Runtime_instance.muse_prompt_capacity}; the complete prompt must
     fit it before HOME preparation or process launch, and an [Error] refuses
     with its cause.
     [reasoning_effort] is the caller's effective frozen model

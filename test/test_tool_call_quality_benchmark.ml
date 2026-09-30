@@ -161,7 +161,7 @@ let test_summary_rollups_and_stability () =
     find_row
       ~provider:(Some "openai")
       ~model:(Some "gpt-5.4")
-      ~keeper:(Some "bench-delta")
+      ~keeper:(Some "bench-analyst")
       summary.grouped_by_provider_model_keeper
   in
   check int "delta unique cases" 2 delta_row.cases_total;
@@ -215,7 +215,7 @@ let test_csv_render_has_headers () =
   check bool "csv header includes stability column" true
     (String_util.contains_substring csv "stability_score");
   check bool "csv contains delta keeper row" true
-    (String_util.contains_substring csv "bench-delta")
+    (String_util.contains_substring csv "bench-analyst")
 
 let test_forbidden_selector_matches_descriptor_evidence () =
   let route_evidence =

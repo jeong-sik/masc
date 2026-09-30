@@ -1,0 +1,43 @@
+{
+  "scope": "Immutable input and isolation verification before completion; no response scoring",
+  "checked_at": "2026-09-29T18:21:21.059698+00:00",
+  "planned_calls": 400,
+  "case_count": 20,
+  "trials_each": 20,
+  "plan_sha256": "7aa1f89ec36acf18f5f4ce7ec4c4f7ba71efb806038181d4eb99be6ee035f233",
+  "cases_sha256": "a67cf6aa002cd87032bceee3c6d6a4a5a3aaddf787e721883e18d12445ba1ef2",
+  "runtime_config_sha256": "97e96bfeaa9567756b108e462e6eb46c1bfa465d12eaa6b70ac806d59f5fcbc3",
+  "source_commit": "4fae8f4e3fef99a0b23871dd6bfc58a0250df43f",
+  "prompt_commit": "0ee4d40910ab0433cc8020c194a104873f7b6f82",
+  "prompt_sha256": {
+    "candle_appraiser_grade.md": "ea0085dc4b0de14f1cd3a61e9edb9ec216c973bb23ca8eb6d9866736c9482a85",
+    "candle_appraiser_relation.md": "515f02279539c69e38d86202b48d865687f89446e560cff9692d141c0fb731ad",
+    "candle_appraiser_weights.md": "2adf48d36d1686f2b5be67855850da2b7d109eb18777ced390d187894c00d4ae"
+  },
+  "executable_sha256": "fd5d67fd9befb6349f20521f1ea86759498d3d83187bbb2812808403df495a19",
+  "runtime_id": "glm-coding.glm-5.3-flash",
+  "frozen_prompts_equal_exact_git_blobs": true,
+  "case_inputs_only_title_metric_target": true,
+  "original_proposal_files_unchanged": {
+    "cases.json": "a67cf6aa002cd87032bceee3c6d6a4a5a3aaddf787e721883e18d12445ba1ef2",
+    "human-grades.csv": "78058f53cc9d45459d16a0006193cfb8d9d19f6005befdf6521cb6e196832ff8",
+    "proposal.json": "4c3368eb2520ac9586ee11c2f0dc8508d6a1bbbad8c0af71e0c0ad14e8427e60",
+    "README.md": "3f730884a7cee129d569fc8ab5956cb7b4d3273ac7b9b5e3f6a2c402e92cb15e"
+  },
+  "human_grade_cells_empty": true,
+  "mounts": [
+    {
+      "destination": "/fixture",
+      "writable": false
+    },
+    {
+      "destination": "/output",
+      "writable": true
+    },
+    {
+      "destination": "/artifact",
+      "writable": false
+    }
+  ],
+  "full_receipt_and_registry_audit": "pending terminal 400-call run"
+}

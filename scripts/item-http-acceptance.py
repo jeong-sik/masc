@@ -141,7 +141,8 @@ def reserve_port():
 
 reservation, port = reserve_port()
 env.update(MASC_BASE_PATH=str(base), MASC_ASSETS_DIR=str(dashboard.parent),
-           MASC_HOST='127.0.0.1', MASC_KEEPER_AUTONOMOUS_ENABLED='0',
+           MASC_HOST='127.0.0.1', MASC_HTTP_AUTH_STRICT='1',
+           MASC_KEEPER_AUTONOMOUS_ENABLED='0',
            MASC_ORCHESTRATOR_ENABLED='0', MASC_OTEL_ENABLED='0')
 login = subprocess.run([str(binary), 'login', '--base-path', str(base),
     '--host', '127.0.0.1', '--port', str(port), '--agent', 'item-probe-admin',

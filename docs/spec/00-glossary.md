@@ -434,6 +434,23 @@ status: reference
       격리 수가 화면에서 축소 왜곡되지 않게 한다.
   → [Keeper_board_attention_candidate](../../lib/keeper/keeper_board_attention_candidate.mli) · [Keeper_board_attention_quarantine_command](../../lib/keeper/keeper_board_attention_quarantine_command.mli) · [Masc_tui_board_quarantine](../../bin/masc_tui_board_quarantine.mli)
 
+**Jev (TypeSafe AI System One 판정 어댑터)**
+: Board Attention Candidate의 관련성을 비자기회귀 System One 1회 요청으로 신속 판정하는
+  TypeSafe AI 어댑터(`Typesafeai_board_attention`). 신뢰도 조건을 충족한 후보를 직접 확정하여
+  `board_attention_exact`의 LLM 판정 요청을 줄인다(#40413·#40420·#40428).
+  - 양방향 직접 확정(`Jev_decided`): `relevant` 또는 `not_relevant` 판정 신뢰도가
+    `[typesafeai].board_attention_confidence_floor`(기본값 0.3) 이상이면 LLM 레인을 거치지 않고
+    후보를 즉시 종단 확정한다. `not_relevant` 역시 신뢰도 충족 시 LLM 레인을 건너뛰고 직접 확정된다.
+  - LLM 레인 이관: 신뢰도 미달(`Jev_low_confidence`), 명시적 불확실성(`Needs_review` / `Jev_uncertain`),
+    호출 실패(`Jev_failed`), 또는 비활성화(`Jev_off`·`Jev_cli_only`) 시에는 설정된 board_attention_exact 슬롯/CLI 경로로 이관하여 재판정한다.
+  - 재큐 후보 우선 판정: 격리(Quarantine)에서 재투입된 후보(`Requeued_pending`)도 `ask_jev`의
+    첫 번째 관문을 거치며, 재큐 후보에도 같은 직접 확정 조건을 적용한다(#40428).
+  - 신뢰도 관측 가능성: 확정된 종단 로그 행에 실제 신뢰도가 보존되어 운영자가 임계값을 사후
+    재조정할 수 있는 정량적 근거를 제공한다(#40420).
+  → [Typesafeai_board_attention](../../lib/typesafeai/typesafeai_board_attention.mli) ·
+  [Keeper_board_attention_exact_flow](../../lib/keeper/keeper_board_attention_exact_flow.ml) ·
+  [config/runtime.toml](../../config/runtime.toml)
+
 **Keeper Cycle**
 : 현재 상태와 event를 관찰하고 Keeper turn 실행 여부를 결정하는 서버 loop의
   한 회차. 모든 cycle이 모델 호출을 실행하지는 않는다.
@@ -1491,18 +1508,18 @@ status: reference
   부동소수점 단위를 쓰지 않는다.
   - 원장(`candle-ledger.jsonl`): `<base-path>/.masc/candle-ledger.jsonl`에 한 줄씩 이벤트를
     덧붙이는 전용 원장. 각 행은 `kind`·`at`과 해당 종류의 필드를 담은 닫힌 JSON 객체다. 현재 원장에
-    기록되는 사건은 6종(`Snapshot`·`Payout_owed`·`Candidates`·`Unattributed`·`Paid`·`Payout_failed`)이며,
-    잔액은 파일에 누적 값을 따로 적지 않고 원장의 `Paid` 사실을 순서대로 재생하여 계산한다. 헌법·승인·도구 호출 원장이나
+    기록되는 사건은 7종(`Snapshot`·`Payout_owed`·`Candidates`·`Unattributed`·`Paid`·`Purchased`·`Payout_failed`)이며,
+    잔액과 소유권은 파일에 누적 값을 따로 적지 않고 `Paid` 지급과 `Purchased` 구매를 순서대로 재생하여 계산한다. 구매 한 행은 차감과 소유권 부여를 함께 기록한다. 헌법·승인·도구 호출 원장이나
     `goal_verifications.json`(검증 원장)과 다른 별개 원장이다.
   - 발행과 지급: Goal이 검증기를 통과(`Snapshot`)하고 사람의 확정(`Confirm_completion`)으로
     `Completed`가 되면 지급 의무(`Payout_owed`)가 생긴다. 백그라운드 지급 일꾼이 기여 Task와 Keeper를
     선별(`Candidates`)해 모델 감정을 거쳐 `Paid` 이벤트 한 줄로 지급을 기록한다. 분배는 한 줄에 원자적으로 적히므로
     일부 Keeper만 지급되는 불완전 상태가 없다. 기여자가 없으면 `Unattributed`, 오류 시 `Payout_failed`를 남긴다.
   - 사용처 한정: Candle로 살 수 있는 것은 초상화 장신구(**Keeper Portrait**의 장비 아이템)뿐이다.
-    도구, 스킬, 모델, 런타임 예산 등 다른 자원은 구매할 수 없다(헌법 불변식). 상점 구매와 착용 반영은
-    RFC 단계적 구현에 따르며, 현재 원장 스키마에는 포함되지 않는다.
+    도구, 스킬, 모델, 런타임 예산 등 다른 자원은 구매할 수 없다(헌법 불변식). 상점 구매는
+    `Purchased`로 기록하며, 착용 반영은 후속 장착 스택에서 제공한다.
   - 잔액 감쇠 규범: 헌법(`<candle>`, `no_wall_clock_death` 예외)은 잔액의 지수 감쇠를 요구한다.
-    현재 빌드의 잔액(`Candle_balance.of_events`)은 `Paid` 사실의 누적이며 시간 감쇠를 적용하지 않고,
+    현재 빌드의 잔액(`Candle_balance.of_events`)은 지급과 구매를 재생하며 시간 감쇠를 적용하지 않고,
     반감기 설정 키는 아직 없다(RFC의 `HalfLifeSet` 이벤트 및 반감기 설정 계획).
     원장에 기록된 과거 사실은 지워지지 않는 불변식을 유지하며, 이는 `no_wall_clock_death` 불변식의
     유일한 명시적 예외 요구다(Task·Goal·Board 상태는 만료시키지 않는다).
@@ -1827,6 +1844,37 @@ status: reference
 **Current Task**
 : 에이전트 기록의 `current_task`, Keeper meta 의 `current_task_id`, planning 의 current
   task. 기준은 backlog 이고 이 셋은 거기서 다시 계산되는 표시다.
+
+**Task Archive (태스크 아카이브 / tasks-archive.json)**
+: 백로그(`tasks/backlog.json`)에서 종결 상태(`Done`, `Cancelled`)로 보존 기간(`days`)을
+  경과한 Task를 영속 보존하기 위해 이동 격리하는 단일 아카이브 파일(`.masc/tasks-archive.json`).
+  최상위 `{"tasks": [...]}` envelope 구조를 가지며(`archive_entries_of_json`),
+  Goal의 Candle 기여도 정산(`RFC-goal-candle-ledger`) 및 사후 감사에서 백로그에 없는
+  종결 Task를 읽는 단일 보존 출처(SSOT)로 동작한다. 새 Task 번호 채번(`next_task_number`) 시
+  백로그 활성 Task, 삭제 영수증(`task_deletion_receipts`), 아카이브, 이벤트 원장 4개 소스의
+  최댓값에 1을 더해 이전 생애주기와의 ID 충돌(aliasing)을 방지한다.
+  아카이브 변경 트랜잭션인 추가(`append_archive_tasks`의 읽기·병합·쓰기) 및 삭제(`drop_archive_tasks`)는
+  `with_file_lock` 잠금 아래에서 수행되어 병행 변경 시 손실을 막으며(단순 조회인 `read_archive_entries`
+  및 Candle 정산 조회는 잠금 없이 읽음), 아카이브 항목 삭제(`drop_archive_tasks`) 시 `id` 필드가 없는
+  항목은 조용히 버리지 않고 보존한다.
+  → [Workspace_task_id](../../lib/workspace/workspace_task_id.mli) ·
+  [Candle_tasks](../../lib/candle_runtime/candle_tasks.mli) ·
+  [RFC-goal-candle-ledger](../rfc/RFC-goal-candle-ledger.md)
+
+**Task GC (태스크 가비지 컬렉션)**
+: 운영자가 보존 기한(`days: int`)을 명시하여 호출하는 백로그 정리 절차(`Workspace_gc.gc`,
+  MCP `masc_gc`). 백로그 잠금 아래에서 보존 기한을 넘긴 종결 Task(`Done`, `Cancelled`)를
+  백로그에서 먼저 제거하고 버전을 올린 뒤, 백로그 잠금을 해제하고 아카이브 잠금 아래에서
+  아카이브에 추가(`append_archive_tasks`)한다. 두 파일 간 기록 시점 사이에 비원자적 구간이
+  존재하므로 크래시 복구 시 일시적으로 두 스토어 어디에도 없는 간극이 생길 수 있으나(`RFC-goal-candle-ledger`),
+  비종결 상태(`Todo`, `Claimed`, `InProgress`, `AwaitingVerification`)는 판정 의무와 활성
+  생애주기를 보존하기 위해 아카이브 대상에서 원천 배제된다 — 특히 판정을 기다리는 의무인
+  `AwaitingVerification`은 완료 권위(Completion Authority)가 실시간으로 판정을 내려야 하므로
+  백로그에 반드시 남아야 한다. 아카이브 내에 비종결 Task가 잔류하는 비정상 격리가 발견되면
+  백로그에 먼저 복원한 후 아카이브에서 제거하는 자가 치유(self-healing, `read_orphaned_nonterminal_tasks`
+  및 `drop_archive_tasks`)를 함께 수행하여 비종결 Task의 영구 유실을 방지한다.
+  → [Workspace_gc](../../lib/workspace/workspace_gc.mli) ·
+  [Workspace_task_id](../../lib/workspace/workspace_task_id.mli)
 
 ## Skills
 

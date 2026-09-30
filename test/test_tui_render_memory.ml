@@ -11,8 +11,8 @@ let make_state () =
 
 (* The browser open on the snapshot's keeper, with its facts answered the way
    the answer handler settles them. *)
-let answer_memory_facts (state : Types.state) (snapshot : Decode.memory_fact_snapshot) =
-  let keeper = snapshot.Decode.mfs_keeper in
+let answer_memory_facts (state : Types.state) (snapshot : Masc.Tui_decode_memory_facts.memory_fact_snapshot) =
+  let keeper = snapshot.Masc.Tui_decode_memory_facts.mfs_keeper in
   state.Types.memory_facts_keeper <- Some keeper;
   match Masc_tui_fetched.start ~equal:String.equal state.Types.memory_facts ~key:keeper with
   | Masc_tui_fetched.Already_loading -> Alcotest.fail "fixture already loading"
@@ -56,14 +56,14 @@ let test_age_label () =
 ;;
 
 let test_fact_row_line () =
-  let fact : Decode.memory_fact =
+  let fact : Masc.Tui_decode_memory_facts.memory_fact =
     { mf_claim = "System uses Roger voice for Tester"
     ; mf_category = Cat.Preference
     ; mf_origin = "manual"
     ; mf_first_seen = 100.0
     ; mf_last_seen = 200.0
     ; mf_memory_id = "mem-1"
-    ; mf_events = Decode.no_memory_fact_events
+    ; mf_events = Masc.Tui_decode_memory_facts.no_memory_fact_events
     }
   in
   let row = Types.Memory_row_fact fact in
@@ -73,7 +73,7 @@ let test_fact_row_line () =
 ;;
 
 let test_source_fact_row_line () =
-  let sfact : Decode.memory_source_fact =
+  let sfact : Masc.Tui_decode_memory_facts.memory_source_fact =
     { msf_claim = "Config points to runtime.toml"
     ; msf_first_seen = 150.0
     ; msf_path = "config/runtime.toml"
@@ -86,7 +86,7 @@ let test_source_fact_row_line () =
 ;;
 
 let test_invalidation_row_line () =
-  let inv : Decode.memory_invalidation =
+  let inv : Masc.Tui_decode_memory_facts.memory_invalidation =
     { mi_source_path = "legacy_docs.md"
     ; mi_invalidated_at = 300.0
     ; mi_reason = "superseded by new spec"
@@ -100,7 +100,7 @@ let test_invalidation_row_line () =
 (* RFC-0418: the detail names what the keeper did with the fact, straight
    from the record; nothing is scored. *)
 let test_detail_names_the_use_record () =
-  let fact : Decode.memory_fact =
+  let fact : Masc.Tui_decode_memory_facts.memory_fact =
     { mf_claim = "the deploy needs assets"
     ; mf_category = Cat.Lesson
     ; mf_origin = "authored"
@@ -109,7 +109,7 @@ let test_detail_names_the_use_record () =
     ; mf_memory_id = "mem-1"
     ; mf_events =
         { mfe_retrieval =
-            Decode.Retrieved
+            Masc.Tui_decode_memory_facts.Retrieved
               { count = 4
               ; distinct_days = 2
               ; last_at = Unix.gettimeofday () -. 7200.0
@@ -139,7 +139,7 @@ let test_detail_names_the_use_record () =
    The two counts after it keep their zeros: they are measured, and a hidden
    measured zero reads as "not measured". *)
 let test_a_fact_nobody_read_says_so_once () =
-  let fact : Decode.memory_fact =
+  let fact : Masc.Tui_decode_memory_facts.memory_fact =
     { mf_claim = "the deploy needs assets"
     ; mf_category = Cat.Lesson
     ; mf_origin = "authored"
@@ -147,7 +147,7 @@ let test_a_fact_nobody_read_says_so_once () =
     ; mf_last_seen = 200.0
     ; mf_memory_id = "mem-2"
     ; mf_events =
-        { mfe_retrieval = Decode.Never_retrieved
+        { mfe_retrieval = Masc.Tui_decode_memory_facts.Never_retrieved
         ; mfe_retracted_count = 0
         ; mfe_revised_from = []
         }
@@ -170,14 +170,14 @@ let test_a_fact_nobody_read_says_so_once () =
 ;;
 
 let test_detail_lines () =
-  let fact : Decode.memory_fact =
+  let fact : Masc.Tui_decode_memory_facts.memory_fact =
     { mf_claim = "Constitution requires evidence for claims"
     ; mf_category = Cat.Constraint
     ; mf_origin = "docs/constitution.xml"
     ; mf_first_seen = 100.0
     ; mf_last_seen = 200.0
     ; mf_memory_id = "mem-rule-1"
-    ; mf_events = Decode.no_memory_fact_events
+    ; mf_events = Masc.Tui_decode_memory_facts.no_memory_fact_events
     }
   in
   let row = Types.Memory_row_fact fact in
@@ -237,19 +237,19 @@ let check_claim_rows ~what lines =
     [ "verbatim."; "reply"; "second" ]
 
 let test_detail_keeps_the_claim_line_breaks () =
-  let fact : Decode.memory_fact =
+  let fact : Masc.Tui_decode_memory_facts.memory_fact =
     { mf_claim = multi_line_claim
     ; mf_category = Cat.Constraint
     ; mf_origin = "manual"
     ; mf_first_seen = 100.0
     ; mf_last_seen = 200.0
     ; mf_memory_id = "mem-lines-1"
-    ; mf_events = Decode.no_memory_fact_events
+    ; mf_events = Masc.Tui_decode_memory_facts.no_memory_fact_events
     }
   in
   check_claim_rows ~what:"fact"
     (Render_memory.memory_fact_detail_lines ~cols:40 (Types.Memory_row_fact fact));
-  let sfact : Decode.memory_source_fact =
+  let sfact : Masc.Tui_decode_memory_facts.memory_source_fact =
     { msf_claim = multi_line_claim
     ; msf_first_seen = 100.0
     ; msf_path = "config/runtime.toml"
@@ -314,7 +314,7 @@ let test_narrow_detail_preserves_provenance () =
 ;;
 
 let test_detail_lines_source_and_invalidation () =
-  let sfact : Decode.memory_source_fact =
+  let sfact : Masc.Tui_decode_memory_facts.memory_source_fact =
     { msf_claim = "Config specifies runtime ports"
     ; msf_first_seen = 100.0
     ; msf_path = "config/runtime.toml"
@@ -328,7 +328,7 @@ let test_detail_lines_source_and_invalidation () =
     (fun line ->
       check bool "source detail line bounded" true (Layout.display_width line <= 80))
     lines_src;
-  let inv : Decode.memory_invalidation =
+  let inv : Masc.Tui_decode_memory_facts.memory_invalidation =
     { mi_source_path = "config/old.toml"
     ; mi_invalidated_at = 200.0
     ; mi_reason = "deprecated"
@@ -350,24 +350,24 @@ let test_detail_lines_source_and_invalidation () =
    block, starts at the one column. Read as the cell after the label's
    padding: the first non-space after the colon that ends the label. *)
 let test_every_detail_block_starts_its_values_in_one_column () =
-  let fact : Decode.memory_fact =
+  let fact : Masc.Tui_decode_memory_facts.memory_fact =
     { mf_claim = "the deploy needs assets"
     ; mf_category = Cat.Lesson
     ; mf_origin = "authored"
     ; mf_first_seen = 100.0
     ; mf_last_seen = 200.0
     ; mf_memory_id = "mem-1"
-    ; mf_events = Decode.no_memory_fact_events
+    ; mf_events = Masc.Tui_decode_memory_facts.no_memory_fact_events
     }
   in
-  let source : Decode.memory_source_fact =
+  let source : Masc.Tui_decode_memory_facts.memory_source_fact =
     { msf_claim = "the config floor is masc.core"
     ; msf_first_seen = 100.0
     ; msf_path = "docs/config.md"
     ; msf_sha256 = "abc123"
     }
   in
-  let dropped : Decode.memory_invalidation =
+  let dropped : Masc.Tui_decode_memory_facts.memory_invalidation =
     { mi_source_path = "docs/old.md"
     ; mi_invalidated_at = 200.0
     ; mi_reason = "source_changed"
@@ -1145,19 +1145,19 @@ let test_render_memory_body_cursor_clamping () =
    table showed never appeared here, because the old word was still there to
    draw -- which is why this one needs a filter applied first. *)
 let test_the_fact_filter_bar_names_the_query_it_counted () =
-  let claim_fact claim id : Decode.memory_fact =
+  let claim_fact claim id : Masc.Tui_decode_memory_facts.memory_fact =
     { mf_claim = claim
     ; mf_category = Cat.Fact
     ; mf_origin = "manual"
     ; mf_first_seen = 100.0
     ; mf_last_seen = 200.0
     ; mf_memory_id = id
-    ; mf_events = Decode.no_memory_fact_events
+    ; mf_events = Masc.Tui_decode_memory_facts.no_memory_fact_events
     }
   in
   let state_of ~applied ~typing =
     let state = make_state () in
-    let store : Decode.memory_ordinary_store =
+    let store : Masc.Tui_decode_memory_facts.memory_ordinary_store =
       { mos_revision = 1
       ; mos_updated_at = 1000.0
       ; mos_facts =
@@ -1167,9 +1167,9 @@ let test_the_fact_filter_bar_names_the_query_it_counted () =
       }
     in
     answer_memory_facts state
-        { Decode.mfs_keeper = "alpha"
-        ; mfs_ordinary = Decode.Memory_store_present store
-        ; mfs_source = Decode.Memory_store_absent
+        { Masc.Tui_decode_memory_facts.mfs_keeper = "alpha"
+        ; mfs_ordinary = Masc.Tui_decode_memory_facts.Memory_store_present store
+        ; mfs_source = Masc.Tui_decode_memory_facts.Memory_store_absent
         ; mfs_events_read_error = None
         };
     state.memory_facts_cursor <- 0;
@@ -1234,13 +1234,13 @@ let test_the_fact_filter_bar_names_the_query_it_counted () =
 let test_the_row_badge_says_what_the_store_says () =
   let fact_row (category : Cat.category) : Types.memory_fact_row =
     Types.Memory_row_fact
-      { Decode.mf_claim = "a claim of a fixed length"
+      { Masc.Tui_decode_memory_facts.mf_claim = "a claim of a fixed length"
       ; mf_category = category
       ; mf_origin = "authored"
       ; mf_first_seen = 100.0
       ; mf_last_seen = 200.0
       ; mf_memory_id = "mem-1"
-      ; mf_events = Decode.no_memory_fact_events
+      ; mf_events = Masc.Tui_decode_memory_facts.no_memory_fact_events
       }
   in
   let line row = Render_memory.memory_fact_row_line ~cols:120 row in
@@ -1273,18 +1273,18 @@ let test_the_row_badge_says_what_the_store_says () =
 let test_every_badge_this_cell_draws_is_its_own () =
   let fact_row (category : Cat.category) : Types.memory_fact_row =
     Types.Memory_row_fact
-      { Decode.mf_claim = "a claim of a fixed length"
+      { Masc.Tui_decode_memory_facts.mf_claim = "a claim of a fixed length"
       ; mf_category = category
       ; mf_origin = "authored"
       ; mf_first_seen = 100.0
       ; mf_last_seen = 200.0
       ; mf_memory_id = "mem-1"
-      ; mf_events = Decode.no_memory_fact_events
+      ; mf_events = Masc.Tui_decode_memory_facts.no_memory_fact_events
       }
   in
   let source_row : Types.memory_fact_row =
     Types.Memory_row_source_fact
-      { Decode.msf_claim = "a claim of a fixed length"
+      { Masc.Tui_decode_memory_facts.msf_claim = "a claim of a fixed length"
       ; msf_first_seen = 100.0
       ; msf_path = "docs/x.md"
       ; msf_sha256 = "abc"
@@ -1292,7 +1292,7 @@ let test_every_badge_this_cell_draws_is_its_own () =
   in
   let dropped_row : Types.memory_fact_row =
     Types.Memory_row_invalidation
-      { Decode.mi_source_path = "docs/x.md"
+      { Masc.Tui_decode_memory_facts.mi_source_path = "docs/x.md"
       ; mi_invalidated_at = 100.0
       ; mi_reason = "gone"
       }
@@ -1347,13 +1347,13 @@ let test_every_badge_this_cell_draws_is_its_own () =
 let test_only_the_alarm_category_is_dressed () =
   let fact_row (category : Cat.category) : Types.memory_fact_row =
     Types.Memory_row_fact
-      { Decode.mf_claim = "a claim of a fixed length"
+      { Masc.Tui_decode_memory_facts.mf_claim = "a claim of a fixed length"
       ; mf_category = category
       ; mf_origin = "authored"
       ; mf_first_seen = 100.0
       ; mf_last_seen = 200.0
       ; mf_memory_id = "mem-1"
-      ; mf_events = Decode.no_memory_fact_events
+      ; mf_events = Masc.Tui_decode_memory_facts.no_memory_fact_events
       }
   in
   let blank word line =
@@ -1389,7 +1389,7 @@ let test_only_the_alarm_category_is_dressed () =
 let test_the_panes_own_two_words_survive () =
   let source_row : Types.memory_fact_row =
     Types.Memory_row_source_fact
-      { Decode.msf_claim = "the config floor is masc.core"
+      { Masc.Tui_decode_memory_facts.msf_claim = "the config floor is masc.core"
       ; msf_first_seen = 100.0
       ; msf_path = "docs/config.md"
       ; msf_sha256 = "cafe0123beef4567cafe0123beef4567"
@@ -1397,7 +1397,7 @@ let test_the_panes_own_two_words_survive () =
   in
   let dropped_row : Types.memory_fact_row =
     Types.Memory_row_invalidation
-      { Decode.mi_source_path = "docs/config.md"
+      { Masc.Tui_decode_memory_facts.mi_source_path = "docs/config.md"
       ; mi_invalidated_at = 200.0
       ; mi_reason = "the file moved"
       }
@@ -1412,26 +1412,26 @@ let test_the_panes_own_two_words_survive () =
 
 let test_render_memory_facts_body () =
   let state = make_state () in
-  let fact : Decode.memory_fact =
+  let fact : Masc.Tui_decode_memory_facts.memory_fact =
     { mf_claim = "Architecture uses modular TUI components"
     ; mf_category = Cat.Fact
     ; mf_origin = "manual"
     ; mf_first_seen = 100.0
     ; mf_last_seen = 200.0
     ; mf_memory_id = "mem-fact-1"
-    ; mf_events = Decode.no_memory_fact_events
+    ; mf_events = Masc.Tui_decode_memory_facts.no_memory_fact_events
     }
   in
-  let store : Decode.memory_ordinary_store =
+  let store : Masc.Tui_decode_memory_facts.memory_ordinary_store =
     { mos_revision = 1
     ; mos_updated_at = 1000.0
     ; mos_facts = [ fact ]
     }
   in
-  let snapshot : Decode.memory_fact_snapshot =
+  let snapshot : Masc.Tui_decode_memory_facts.memory_fact_snapshot =
     { mfs_keeper = "alpha"
-    ; mfs_ordinary = Decode.Memory_store_present store
-    ; mfs_source = Decode.Memory_store_absent
+    ; mfs_ordinary = Masc.Tui_decode_memory_facts.Memory_store_present store
+    ; mfs_source = Masc.Tui_decode_memory_facts.Memory_store_absent
     ; mfs_events_read_error = None
     }
   in
@@ -1460,24 +1460,24 @@ let test_render_memory_facts_body () =
    that; this one reads the cells. *)
 let test_rows_and_header_share_one_grid () =
   let cols = 120 in
-  let fact : Decode.memory_fact =
+  let fact : Masc.Tui_decode_memory_facts.memory_fact =
     { mf_claim = "System uses Roger voice for Tester"
     ; mf_category = Cat.Preference
     ; mf_origin = "manual"
     ; mf_first_seen = 100.0
     ; mf_last_seen = 200.0
     ; mf_memory_id = "mem-1"
-    ; mf_events = Decode.no_memory_fact_events
+    ; mf_events = Masc.Tui_decode_memory_facts.no_memory_fact_events
     }
   in
-  let sfact : Decode.memory_source_fact =
+  let sfact : Masc.Tui_decode_memory_facts.memory_source_fact =
     { msf_claim = "Config points to runtime.toml"
     ; msf_first_seen = 150.0
     ; msf_path = "config/rt.toml" (* 16 cells or fewer: longer paths are shortened *)
     ; msf_sha256 = "abc123sha"
     }
   in
-  let inv : Decode.memory_invalidation =
+  let inv : Masc.Tui_decode_memory_facts.memory_invalidation =
     { mi_source_path = "legacy_docs.md"; mi_invalidated_at = 300.0; mi_reason = "superseded" }
   in
   let cells row = Masc_tui_theme.strip_sgr (Render_memory.memory_fact_row_line ~cols row) in
@@ -1496,13 +1496,13 @@ let test_rows_and_header_share_one_grid () =
   grid "source row" (cells (Types.Memory_row_source_fact sfact)) sfact.msf_path;
   grid "dropped row" (cells (Types.Memory_row_invalidation inv)) inv.mi_source_path;
   let state = make_state () in
-  let store : Decode.memory_ordinary_store =
+  let store : Masc.Tui_decode_memory_facts.memory_ordinary_store =
     { mos_revision = 1; mos_updated_at = 1000.0; mos_facts = [ fact ] }
   in
   answer_memory_facts state
        { mfs_keeper = "alpha"
-       ; mfs_ordinary = Decode.Memory_store_present store
-       ; mfs_source = Decode.Memory_store_absent
+       ; mfs_ordinary = Masc.Tui_decode_memory_facts.Memory_store_present store
+       ; mfs_source = Masc.Tui_decode_memory_facts.Memory_store_absent
        ; mfs_events_read_error = None
        };
   state.memory_facts_cursor <- 0;
@@ -1541,17 +1541,17 @@ let facts_body_lines ?(cols = 120) ?(budget = 30) state =
 
 let three_kinds_state ?(keeper = "alpha") () =
   let state = make_state () in
-  let fact category claim : Decode.memory_fact =
+  let fact category claim : Masc.Tui_decode_memory_facts.memory_fact =
     { mf_claim = claim
     ; mf_category = category
     ; mf_origin = "manual"
     ; mf_first_seen = 100.0
     ; mf_last_seen = 200.0
     ; mf_memory_id = "mem-" ^ claim
-    ; mf_events = Decode.no_memory_fact_events
+    ; mf_events = Masc.Tui_decode_memory_facts.no_memory_fact_events
     }
   in
-  let ordinary : Decode.memory_ordinary_store =
+  let ordinary : Masc.Tui_decode_memory_facts.memory_ordinary_store =
     { mos_revision = 1
     ; mos_updated_at = 1000.0
     ; mos_facts =
@@ -1560,7 +1560,7 @@ let three_kinds_state ?(keeper = "alpha") () =
         ]
     }
   in
-  let source : Decode.memory_source_store =
+  let source : Masc.Tui_decode_memory_facts.memory_source_store =
     { mss_revision = 1
     ; mss_updated_at = 1000.0
     ; mss_facts =
@@ -1580,8 +1580,8 @@ let three_kinds_state ?(keeper = "alpha") () =
   in
   answer_memory_facts state
        { mfs_keeper = keeper
-       ; mfs_ordinary = Decode.Memory_store_present ordinary
-       ; mfs_source = Decode.Memory_store_present source
+       ; mfs_ordinary = Masc.Tui_decode_memory_facts.Memory_store_present ordinary
+       ; mfs_source = Masc.Tui_decode_memory_facts.Memory_store_present source
        ; mfs_events_read_error = None
        };
   state.memory_facts_cursor <- 0;
@@ -1617,13 +1617,13 @@ let test_memory_search_uses_the_filter_text_and_query () =
   state.memory_facts_keeper <- Some "alpha";
   let snapshot = Option.get (Types.memory_facts_snapshot state) in
   let ordinary = match snapshot.mfs_ordinary with
-    | Decode.Memory_store_present store -> store
+    | Masc.Tui_decode_memory_facts.Memory_store_present store -> store
     | _ -> fail "fixture ordinary store missing" in
   let original = List.hd ordinary.mos_facts in
   let fact = { original with mf_claim = "deploy"; mf_category = Cat.Fact;
                             mf_origin = "authored" } in
   answer_memory_facts state { snapshot with mfs_ordinary =
-    Decode.Memory_store_present { ordinary with mos_facts = [fact] } };
+    Masc.Tui_decode_memory_facts.Memory_store_present { ordinary with mos_facts = [fact] } };
   let verify ~typing query expected =
     state.search <- if typing then Some query else None;
     state.search_last <- if typing then "unrelated committed query" else query;
@@ -1809,14 +1809,14 @@ let test_the_narrowest_body_spends_its_row_on_the_sort () =
     (stats_row lines) (List.hd lines)
 
 let test_fleet_fact_row_line () =
-  let fact : Decode.memory_fact =
+  let fact : Masc.Tui_decode_memory_facts.memory_fact =
     { mf_claim = "System uses Roger voice for Tester"
     ; mf_category = Cat.Preference
     ; mf_origin = "tester · manual"
     ; mf_first_seen = 100.0
     ; mf_last_seen = 200.0
     ; mf_memory_id = "mem-1"
-    ; mf_events = Decode.no_memory_fact_events
+    ; mf_events = Masc.Tui_decode_memory_facts.no_memory_fact_events
     }
   in
   let row = Types.Memory_row_fact fact in
@@ -2033,21 +2033,21 @@ let test_facts_selection_follows_the_rendered_viewport () =
   state.memory_facts_sort <- Types.Sort_claim;
   let facts =
     List.init 24 (fun index ->
-      { Decode.mf_claim = Printf.sprintf "fact-%02d %s" index
+      { Masc.Tui_decode_memory_facts.mf_claim = Printf.sprintf "fact-%02d %s" index
           (if index mod 2 = 0 then "short" else String.make 180 'x')
       ; mf_category = Cat.Fact
       ; mf_origin = "manual"
       ; mf_first_seen = 100.0
       ; mf_last_seen = 200.0
       ; mf_memory_id = string_of_int index
-      ; mf_events = Decode.no_memory_fact_events
+      ; mf_events = Masc.Tui_decode_memory_facts.no_memory_fact_events
       })
   in
   answer_memory_facts state
-    { Decode.mfs_keeper = "alpha"
-    ; mfs_ordinary = Decode.Memory_store_present
+    { Masc.Tui_decode_memory_facts.mfs_keeper = "alpha"
+    ; mfs_ordinary = Masc.Tui_decode_memory_facts.Memory_store_present
         { mos_revision = 1; mos_updated_at = 200.0; mos_facts = facts }
-    ; mfs_source = Decode.Memory_store_read_error "source unavailable"
+    ; mfs_source = Masc.Tui_decode_memory_facts.Memory_store_read_error "source unavailable"
     ; mfs_events_read_error = None
     };
   let assert_visible ~cols ~budget () =
@@ -2092,9 +2092,9 @@ let test_facts_selection_follows_the_rendered_viewport () =
 let test_event_sidecar_read_error_is_visible () =
   let state = make_state () in
   answer_memory_facts state
-      { Decode.mfs_keeper = "alpha"
-      ; mfs_ordinary = Decode.Memory_store_absent
-      ; mfs_source = Decode.Memory_store_absent
+      { Masc.Tui_decode_memory_facts.mfs_keeper = "alpha"
+      ; mfs_ordinary = Masc.Tui_decode_memory_facts.Memory_store_absent
+      ; mfs_source = Masc.Tui_decode_memory_facts.Memory_store_absent
       ; mfs_events_read_error = Some "permission denied"
       };
   let styled = ref [] in

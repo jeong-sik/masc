@@ -3,7 +3,6 @@
     not here; the form is pure. *)
 open Alcotest
 module Launch = Masc_tui_fusion_launch
-module Decode = Masc.Tui_decode
 
 let ok = function Ok value -> value | Error detail -> fail detail
 

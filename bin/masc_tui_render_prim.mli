@@ -474,35 +474,35 @@ val system_log_level_style : Masc.Tui_decode.system_log_level -> string
 val system_log_category_text : Masc.Tui_decode.system_log_entry -> string
 
 val fusion_run_status_color :
-  Masc_tui_types.Masc.Tui_decode_fusion.fusion_run_status -> string
+  Masc.Tui_decode_fusion.fusion_run_status -> string
 
 val fusion_run_stage_compact :
-  Masc_tui_types.Masc.Tui_decode_fusion.fusion_run_stage -> string
+  Masc.Tui_decode_fusion.fusion_run_stage -> string
 (** A running run's stage, short enough for the table's STATE cell. *)
 
 val fusion_run_state_text :
-  status:Masc_tui_types.Masc.Tui_decode_fusion.fusion_run_status ->
-  stage:Masc_tui_types.Masc.Tui_decode_fusion.fusion_run_stage ->
+  status:Masc.Tui_decode_fusion.fusion_run_status ->
+  stage:Masc.Tui_decode_fusion.fusion_run_stage ->
   string
 (** What the Fusion table's STATE cell says: the stage while the run is
     running, [completed] once it has, and the server's failure code for a run
     that failed. *)
 
 val fusion_run_progress_text :
-  Masc_tui_types.Masc.Tui_decode_fusion.fusion_run_stage -> string
+  Masc.Tui_decode_fusion.fusion_run_stage -> string
 
 val sidebar_row_lead_cells : int
 (** What a list index spends before a row's label: the caret the cursor wears
     and a space each side. The room a label folds to is the frame's inner
     width less this, which is what a width check has to compare against. *)
 
-val fusion_run_clock : Masc_tui_types.Masc.Tui_decode_fusion.fusion_run -> string
+val fusion_run_clock : Masc.Tui_decode_fusion.fusion_run -> string
 
 val fusion_run_duration :
-  now:float -> Masc_tui_types.Masc.Tui_decode_fusion.fusion_run -> string
+  now:float -> Masc.Tui_decode_fusion.fusion_run -> string
 
 val fusion_run_age :
-  now:float -> Masc_tui_types.Masc.Tui_decode_fusion.fusion_run -> string
+  now:float -> Masc.Tui_decode_fusion.fusion_run -> string
 
 val repository_change_status : Masc.Tui_decode.repository_change -> string
 

@@ -1,7 +1,6 @@
 open Alcotest
 
 module Prim = Masc_tui_render_prim
-module Decode = Masc.Tui_decode
 
 let state status stage = Prim.fusion_run_state_text ~status ~stage
 

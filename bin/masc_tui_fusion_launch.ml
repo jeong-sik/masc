@@ -1,5 +1,4 @@
 module Form = Masc_tui_schema_form
-module Decode = Masc.Tui_decode
 
 type request =
   { keeper : string

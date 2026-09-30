@@ -1,7 +1,6 @@
 (** The seat-routes block of a Fusion run's detail, read as the operator
     reads it: one line per seat, the failed candidates under their seat. *)
 open Alcotest
-module Decode = Masc.Tui_decode
 module Seat_routes = Masc_tui_fusion_seat_routes
 
 let attempt runtime code detail =

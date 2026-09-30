@@ -188,6 +188,7 @@ let commit_goal_confirmation_json ~config ~operator_id json : (Yojson.Safe.t, co
                    let* request_id = rejected (non_empty_string_field fields "request_id") in
                    let* verification_run_id = rejected (non_empty_string_field fields "verification_run_id") in
                    Workspace_goals.confirm_completion config
+                     ~after_confirmation:(Candle_payout_owed.after_confirmation config)
                      ~goal_id ~operator_id ~criterion_revision ~request_id ~verification_run_id
                    |> Result.map_error confirmation_error_of_write_error
                | _ -> Error (Confirmation_rejected "request body must be an object")

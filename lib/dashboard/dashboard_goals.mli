@@ -81,7 +81,8 @@ val unlisted_goal_history_json :
     phase and left it had no surviving record that it existed; this reads the log
     without asking the current list what to look for.
 
-    Per goal: [opened_at] and [title] from its [goal_created] row, the last
+    Per goal: [opened_at] from [goal_created], [title] from the latest creation
+    or update, the last
     [final_phase] it reached, [closed_at] only when that phase is terminal, and
     [lifetime_hours] between the two. A goal opened before [goal_created] existed
     reports null rather than a guessed time, and a goal that left the list

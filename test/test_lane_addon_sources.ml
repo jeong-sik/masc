@@ -3,6 +3,7 @@ open Alcotest
 module Sources = Masc.Lane_addon_sources
 module Store = Masc.Lane_addon_store
 module Types = Masc.Lane_addon_types
+external unsetenv : string -> unit = "masc_test_unsetenv"
 let require = function Ok value -> value | Error error -> fail error
 let member = Yojson.Safe.Util.member
 let text json = Yojson.Safe.Util.to_string json
@@ -352,7 +353,7 @@ let test_fusion_capture_retains_exact_state_across_terminal_change () =
     Fun.protect ~finally:(fun () ->
       reset ();
       match old_base with Some value -> Unix.putenv "MASC_BASE_PATH" value
-      | None -> Unix.unsetenv "MASC_BASE_PATH")
+      | None -> unsetenv "MASC_BASE_PATH")
       (fun () ->
         Unix.putenv "MASC_BASE_PATH" dir;
         reset ();

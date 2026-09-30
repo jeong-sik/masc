@@ -9,7 +9,7 @@ command = ["python3", "server.py"]
 lanes = ["fusion/status"]
 
 [world.outputs.result]
-lanes = ["fusion/result"]
+lanes = ["fusion/status", "fusion/result"]
 
 [resources]
 cpus = 0.5

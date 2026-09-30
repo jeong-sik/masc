@@ -42,40 +42,52 @@ let auth_mode ~(config : Workspace.config) =
   | exception Auth.Auth_config_error { file; reason } -> Unreadable (file ^ ": " ^ reason)
 ;;
 
-let credential_departure ~(config : Workspace.config) ~now holder =
-  match Auth.load_credential config.base_path holder with
-  | Some ({ Masc_domain.agent_name; _ } as credential)
+let credential_departure ~transaction ~(config : Workspace.config) ~now holder =
+  let credential =
+    try Ok (Auth.load_credential config.base_path holder) with
+    | (Sys_error _ | Unix.Unix_error _ | Eio.Io _) as exn ->
+      Error (Printexc.to_string exn)
+  in
+  match credential with
+  | Error detail ->
+    Log.Auth.warn "DOS controller departure cannot read credential for %s: %s" holder detail;
+    None
+  | Ok (Some ({ Masc_domain.agent_name; _ } as credential))
     when String.equal agent_name holder && Play_invite.expired ~now credential ->
     (match auth_mode ~config with
      | Enforced -> Some Tool_misc_dos_lane.Credential_expired
      | Self_declared | Unreadable _ -> None)
-  | Some _ -> None
-  | None ->
+  | Ok (Some _) -> None
+  | Ok None ->
     (match auth_mode ~config with
      | Enforced ->
-       if Play_invite.credential_exists ~base_path:config.base_path holder
-       then None
-       else Some Tool_misc_dos_lane.No_credential
+       (match Auth.credential_exists_in_transaction transaction holder with
+        | Ok false -> Some Tool_misc_dos_lane.No_credential
+        | Ok true -> None
+        | Error error ->
+          Log.Auth.warn "DOS controller departure cannot check credential file for %s: %s"
+            holder (Masc_domain.masc_error_to_string error);
+          None)
      | Self_declared | Unreadable _ -> None)
 ;;
 
-let holder_left ~(config : Workspace.config) ~now holder =
+let holder_left ~transaction ~(config : Workspace.config) ~now holder =
   match Keeper_registry.get_phase ~base_path:config.base_path holder with
   | Some (Paused | Stopped) -> Some Tool_misc_dos_lane.Keeper_stopped
   | Some (Running | Failing | Draining | Restarting | Crashed | Offline) -> None
   | None ->
     (match Keeper_meta_store.read_meta config holder with
      | Ok (Some _) -> Some Tool_misc_dos_lane.Keeper_stopped
-     | Ok None -> credential_departure ~config ~now holder
+     | Ok None -> credential_departure ~transaction ~config ~now holder
      | Error _ -> None)
 ;;
 
 let before_move ~config ~who =
-  let released = Auth.with_credential_transaction config.Workspace.base_path (fun _transaction ->
+  let released = Auth.with_credential_transaction config.Workspace.base_path (fun transaction ->
     (* The credential is read without the token cache, under the same lock as
        all credential writers. Keep that lock until release_left commits. *)
     let now = Time_compat.now () in
-    Tool_misc_dos_lane.free_left_controller ~holder_left:(holder_left ~config ~now) ~who)
+    Tool_misc_dos_lane.free_left_controller ~holder_left:(holder_left ~transaction ~config ~now) ~who)
   in
   (* Board publication must never run while credential writers are excluded. *)
   Tool_misc_dos_lane.after_announcing released

@@ -313,22 +313,24 @@ let expires_at_for_auth_config auth_cfg =
          max_token_expiry_hours)
 ;;
 
+let raw_token_credential ~agent_name ~role ~raw_token ~expires_at =
+  { id = None
+  ; agent_id = None
+  ; agent_name
+  ; token = sha256_hash raw_token
+  ; role
+  ; created_at = now_iso ()
+  ; expires_at
+  }
+;;
+
 let save_raw_token_credential_with_expiry config ~agent_name ~role ~raw_token ~expires_at
   : (agent_credential, masc_error) result
   =
   match validate_raw_token raw_token with
   | Error _ as error -> error
   | Ok () ->
-    let cred =
-      { id = None
-      ; agent_id = None
-      ; agent_name
-      ; token = sha256_hash raw_token
-      ; role
-      ; created_at = now_iso ()
-      ; expires_at
-      }
-    in
+    let cred = raw_token_credential ~agent_name ~role ~raw_token ~expires_at in
     (try
        save_credential config cred;
        Ok cred
@@ -426,6 +428,35 @@ let create_token_expiring_in config ~agent_name ~role ~hours
      with
      | Ok cred -> Ok (raw_token, cred)
      | Error e -> Error e)
+;;
+
+type create_token_error =
+  | Credential_name_taken
+  | Credential_not_created of masc_error
+
+let create_token_expiring_in_if_absent config ~agent_name ~role ~hours =
+  let not_created error = Credential_not_created error in
+  match expires_at_in_hours hours with
+  | Error error -> Error (not_created error)
+  | Ok expires_at ->
+    (try
+       with_credential_transaction config (fun transaction ->
+         match credential_exists_in_transaction transaction agent_name with
+         | Error error -> Error (not_created error)
+         | Ok true -> Error Credential_name_taken
+         | Ok false ->
+           let raw_token = generate_token () in
+           let cred = raw_token_credential ~agent_name ~role ~raw_token
+               ~expires_at:(Some expires_at) in
+           save_credential_in_transaction transaction cred;
+           Ok (raw_token, cred))
+       |> Result.map_error not_created
+       |> Result.join
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Error (not_created (System (System_error.IoError
+         (Printf.sprintf "Failed to create agent credential: %s" (Printexc.to_string exn))))))
 ;;
 
 (** #10304: rotate shared bearer tokens detected by

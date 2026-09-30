@@ -174,16 +174,20 @@ let revoke_response ~config ~by ~raw_name =
               (Masc_domain.agent_role_to_string role)) )
      | Error (Play_invite.Credential_not_deleted error) ->
        `Service_unavailable,
-       Server_refusal.json ~code:"not_deleted" (Masc_domain.masc_error_to_string error))
+       Server_refusal.json ~code:"not_deleted" (Masc_domain.masc_error_to_string error)
+     | Error Play_invite.Credential_unreadable ->
+       `Service_unavailable, Server_refusal.json ~code:"credential_unreadable"
+         ("the credential for " ^ raw_name ^ " could not be read")
+     | Error (Play_invite.Credential_identity_mismatch owner) ->
+       `Service_unavailable, Server_refusal.json ~code:"credential_identity_mismatch"
+         (Printf.sprintf "the credential for %s resolves to %s" raw_name owner))
 
 module For_testing = struct
   let revoke_response = revoke_response
 end
 
-(* One issue or revoke at a time. The name check and the credential write are
-   separate file operations that yield, so two requests for one name could
-   both pass the check, and the second would overwrite the first's
-   credential. *)
+(* Serialize invite routes. Auth's credential transaction owns the name-file
+   check and publication, also excluding credential writers outside these routes. *)
 let invites_lock = Eio.Mutex.create ()
 let one_at_a_time f = Eio.Mutex.use_rw ~protect:true invites_lock f
 

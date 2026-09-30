@@ -70,12 +70,6 @@ let readiness ~(auth_config : Masc_domain.auth_config) ~public_base_url =
   | gaps, None -> Error (gaps @ [ No_public_base_url ])
   | (_ :: _ as gaps), Some _ -> Error gaps
 
-(* The name's own credential file, not [Auth.load_credential]: that one skips
-   a file it cannot parse, and saving over it would hand an existing name to
-   the invitee. The name grammar keeps [Common.safe_filename] from changing it,
-   so this is the only path the name can own. *)
-let credential_exists ~base_path name = Sys.file_exists (Auth.credential_file base_path name)
-
 (* A keeper's credential lives at its name through [Common.safe_filename],
    which lowercases, and keeper names may hold capitals. "Minsu" and "minsu"
    share agents/minsu.json, so the keeper booting later would overwrite the
@@ -97,15 +91,14 @@ let issue ~base_path ~public_base_url ~keeper_names ~name ~hours =
   let* keepers = Result.map_error (fun detail -> Keeper_names_unreadable detail) keeper_names in
   let* () =
     if is_keeper_name ~keepers name then Error (Name_taken Keeper)
-    else if credential_exists ~base_path name then Error (Name_taken Credential)
     else Ok ()
   in
-  match Auth.create_token_expiring_in base_path ~agent_name:name ~role:Masc_domain.Player ~hours with
-  | Error err -> Error (Credential_not_saved err)
+  match Auth.create_token_expiring_in_if_absent base_path ~agent_name:name ~role:Masc_domain.Player ~hours with
+  | Error Auth.Credential_name_taken -> Error (Name_taken Credential)
+  | Error (Auth.Credential_not_created err) -> Error (Credential_not_saved err)
   | Ok (_, { Masc_domain.expires_at = None; _ }) ->
-    (* The record type allows no expiry, though [create_token_expiring_in]
+    (* The record type allows no expiry, though [create_token_expiring_in_if_absent]
        always sets one. An invite that never ends is not handed out. *)
-    Auth.delete_credential base_path name;
     Error
       (Credential_not_saved
          (Masc_domain.System
@@ -140,16 +133,28 @@ type revoked =
 type revoke_error =
   | Not_an_invite of Masc_domain.agent_role
   | Credential_not_deleted of Masc_domain.masc_error
+  | Credential_unreadable
+  | Credential_identity_mismatch of string
 
 let revoke ~base_path ~name ~after_revoke =
   Auth.with_credential_transaction base_path (fun transaction ->
-    match Auth.load_credential base_path name with
-    | Some { Masc_domain.agent_name; role = Masc_domain.Player; _ } when String.equal agent_name name ->
-      Auth.delete_credential_in_transaction transaction name
-      |> Result.map_error (fun error -> Credential_not_deleted error)
-      |> Result.map (fun () -> after_revoke Deleted)
-    | Some { Masc_domain.agent_name; role; _ } when String.equal agent_name name ->
-      Error (Not_an_invite role)
-    | Some _ | None -> Ok (after_revoke Already_gone))
+    match Auth.credential_exists_in_transaction transaction name with
+    | Error error -> Error (Credential_not_deleted error)
+    | Ok false -> Ok (after_revoke Already_gone)
+    | Ok true ->
+      let credential =
+        try Auth.load_credential base_path name with
+        | Sys_error _ | Unix.Unix_error _ | Eio.Io _ -> None
+      in
+      (match credential with
+       | None -> Error Credential_unreadable
+       | Some { Masc_domain.agent_name; _ } when not (String.equal agent_name name) ->
+         Error (Credential_identity_mismatch agent_name)
+       | Some { Masc_domain.role = Masc_domain.Player; _ } ->
+         Auth.delete_credential_in_transaction transaction name
+         |> Result.map_error (fun error -> Credential_not_deleted error)
+         |> Result.map (fun () -> after_revoke Deleted)
+       | Some { Masc_domain.role = (Masc_domain.Worker | Masc_domain.Admin) as role; _ } ->
+         Error (Not_an_invite role)))
   |> Result.map_error (fun error -> Credential_not_deleted error)
   |> Result.join

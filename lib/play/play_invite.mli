@@ -83,11 +83,6 @@ type invite =
   ; expired : bool
   }
 
-val credential_exists : base_path:string -> string -> bool
-(** Whether [name]'s own credential file is there, read or not.
-    [Auth.load_credential] answers [None] both for a missing file and for one
-    it cannot parse, so only this tells the two apart. *)
-
 val expired : now:float -> Masc_domain.agent_credential -> bool
 (** Whether a credential's time has run out at [now]. A credential with no
     [expires_at] never expires; an invite always has one. This is the rule a
@@ -109,6 +104,10 @@ type revoke_error =
       (** The name belongs to a credential of another role; nothing changed. *)
   | Credential_not_deleted of Masc_domain.masc_error
       (** Credential storage or lock admission failed; no controller effect ran. *)
+  | Credential_unreadable
+      (** The name file exists but cannot resolve to a credential. No effect ran. *)
+  | Credential_identity_mismatch of string
+      (** The file resolves to another credential owner. No effect ran. *)
 
 val revoke :
   base_path:string -> name:Name.t -> after_revoke:(revoked -> 'a) ->
@@ -116,6 +115,7 @@ val revoke :
 (** Checks the current role and deletes the invite in one Auth transaction;
     its bearer stops validating from the next request. [after_revoke] runs for
     both [Deleted] and [Already_gone], before credential writers can resume.
+    A present unreadable or mismatched credential is refused, not treated as gone.
     It may free a controller or check Keeper identity but must not enter an
     Auth transaction or perform Board publication. Flush announcements after
     this returns. *)

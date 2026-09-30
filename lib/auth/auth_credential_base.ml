@@ -387,13 +387,26 @@ let with_credential_transaction config f =
       Ok value
 ;;
 
+let credential_exists_in_transaction (Credential_transaction config) agent_name =
+  let file = credential_file config agent_name in
+  try
+    let _stat = run_blocking_io (fun () -> Unix.lstat file) in
+    Ok true
+  with
+  | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok false
+  | Unix.Unix_error (error, operation, argument) ->
+    Error (System (System_error.IoError
+      (Printf.sprintf "%s(%s): %s" operation argument (Unix.error_message error))))
+  | Sys_error detail -> Error (System (System_error.IoError detail))
+  | Eio.Io _ as exn -> Error (System (System_error.IoError (Printexc.to_string exn)))
+;;
+
 (** Save agent credential.
 
     When [cred.id] is present the credential is stored under
     [{uuid}.json] and a redirect stub [{agent_name}.json] is written so
     legacy lookup paths still resolve. *)
-let save_credential config (cred : agent_credential) =
-  let saved = with_credential_transaction config (fun _transaction ->
+let save_credential_in_transaction (Credential_transaction config) (cred : agent_credential) =
   let json = agent_credential_to_yojson cred in
   let json_str = Yojson.Safe.pretty_to_string json in
   let stub_file = credential_file config cred.agent_name in
@@ -416,7 +429,12 @@ let save_credential config (cred : agent_credential) =
      a ref so the cache module can register its invalidator after both
      definitions are visible; see [register_credential_cache_invalidator]
      near [credential_token_index]. *)
-  !credential_cache_invalidator_ref config) in
+  !credential_cache_invalidator_ref config
+;;
+
+let save_credential config cred =
+  let saved = with_credential_transaction config (fun transaction ->
+    save_credential_in_transaction transaction cred) in
   match saved with
   | Ok () -> ()
   | Error error -> raise (Sys_error (masc_error_to_string error))

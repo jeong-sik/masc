@@ -467,6 +467,15 @@ jobs:
           done
           exit "${status}"
 
+      - name: Upload equipped portrait HTTP evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: candle-equipped-portrait
+          path: ${{ runner.temp }}/candle-equipped-portrait/
+          if-no-files-found: ignore
+          retention-days: 14
+
       - name: Upload the full Dune suite log
         if: always()
         uses: actions/upload-artifact@v7

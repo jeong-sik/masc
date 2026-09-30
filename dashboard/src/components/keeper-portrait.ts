@@ -1,4 +1,5 @@
-// Keeper portrait: the candle imp the server draws from the keeper's name.
+import { keeperEquipmentKey, type KeeperPortraitReading } from '../api/schemas/keeper-portrait'
+// Keeper portrait: the name's body wearing the server-observed equipment.
 //
 // GET /api/v1/keepers/:name/portrait.png?size=N is authorised like the
 // keeper's other reads: open on a loopback server, a token once HTTP auth is
@@ -8,7 +9,7 @@
 // strong ETag and `Cache-Control: no-cache`; the fetch asks with
 // `cache: 'no-cache'`, so the browser keeps the file and only revalidates it.
 //
-// When the portrait cannot load (an older server, a keeper that is gone, a
+// When the portrait cannot load (a keeper that is gone, a
 // refused token) the caller's fallback is drawn instead, so the header never
 // shows a broken image icon. A failure is kept for this mount only: opening
 // the keeper again asks once more, and nothing retries on its own.
@@ -60,45 +61,55 @@ export async function fetchKeeperPortrait(
 }
 
 type Portrait =
-  | { kind: 'loading'; path: string }
-  | { kind: 'shown'; path: string; objectUrl: string }
-  | { kind: 'failed'; path: string }
+  | { kind: 'loading'; identity: string }
+  | { kind: 'shown'; identity: string; objectUrl: string }
+  | { kind: 'failed'; identity: string }
 
 export interface KeeperPortraitProps {
   name: string
+  reading: KeeperPortraitReading
   /** Drawn width and height in CSS pixels; fixed so nothing shifts while it loads. */
   sizePx: number
   /** Drawn instead when the portrait cannot load. */
   fallback: VNode
 }
 
-export function KeeperPortrait({ name, sizePx, fallback }: KeeperPortraitProps) {
+export function KeeperPortrait({ name, reading, sizePx, fallback }: KeeperPortraitProps) {
   const path = keeperPortraitUrl(name, sizePx)
-  const [portrait, setPortrait] = useState<Portrait>({ kind: 'loading', path })
+  const equipmentKey = reading.state === 'ready' ? keeperEquipmentKey(reading.equipment) : null
+  const identity = JSON.stringify([path, equipmentKey])
+  const [portrait, setPortrait] = useState<Portrait>({ kind: 'loading', identity })
 
   // Synchronises with two things outside Preact: the request, and the object
-  // URL's lifetime. Each path gets one request; leaving the path or unmounting
+  // URL's lifetime. Each path and equipment snapshot gets one request; changing either or unmounting
   // aborts it and revokes the URL it made.
   useEffect(() => {
+    if (equipmentKey === null) {
+      setPortrait({ kind: 'loading', identity })
+      return
+    }
     const controller = new AbortController()
     let objectUrl: string | null = null
     fetchKeeperPortrait(path, { signal: controller.signal })
       .then(blob => {
         if (controller.signal.aborted) return
         objectUrl = URL.createObjectURL(blob)
-        setPortrait({ kind: 'shown', path, objectUrl })
+        setPortrait({ kind: 'shown', identity, objectUrl })
       })
       .catch(() => {
-        if (!controller.signal.aborted) setPortrait({ kind: 'failed', path })
+        if (!controller.signal.aborted) setPortrait({ kind: 'failed', identity })
       })
     return () => {
       controller.abort()
       if (objectUrl !== null) URL.revokeObjectURL(objectUrl)
     }
-  }, [path])
+  }, [path, identity, equipmentKey])
 
   // A state left from the previous path is not this path's answer.
-  const current: Portrait = portrait.path === path ? portrait : { kind: 'loading', path }
+  if (reading.state === 'unavailable') {
+    return html`<span title=${reading.reason} data-testid="keeper-portrait-unavailable">${fallback}</span>`
+  }
+  const current: Portrait = portrait.identity === identity ? portrait : { kind: 'loading', identity }
   switch (current.kind) {
     case 'failed':
       return fallback
@@ -119,7 +130,7 @@ export function KeeperPortrait({ name, sizePx, fallback }: KeeperPortraitProps) 
         decoding="async"
         class="block shrink-0 rounded-full"
         data-testid="keeper-portrait"
-        onError=${() => setPortrait({ kind: 'failed', path })}
+        onError=${() => setPortrait({ kind: 'failed', identity })}
       />`
   }
 }

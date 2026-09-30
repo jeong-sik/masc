@@ -39,7 +39,7 @@ let current_build () =
   | None -> Unscoped
 
 module Cache = struct
-  type key = string * int
+  type key = string * int * string
 
   type t =
     { byte_budget : int
@@ -112,25 +112,26 @@ let size_of_request = function
   | None -> Ok default_draw_size
   | Some raw -> Option.to_result ~none:raw (parse_size raw)
 
-let draw ~name size =
-  let image = Draw.render (Look.body_of_name name) (Look.equipment_of_name name) size in
+let draw ~name ~equipment size =
+  let image = Draw.render (Look.body_of_name name) equipment size in
   Rgb_png.encode_rgba ~width:image.edge ~height:image.edge ~rgba:image.rgba
 
 (* The cached bytes, or a drawing that is then kept. *)
-let png_of cache ~name size =
+let png_of cache ~name ~equipment size =
   let edge = Draw.int_of_size size in
-  match Cache.find cache (name, edge) with
+  let key = name, edge, Keeper_portrait_equipment.key equipment in
+  match Cache.find cache key with
   | Some png -> Ok png
   | None ->
-    match Domain_pool_ref.submit_cpu_or_inline (fun () -> draw ~name size) with
-    | Ok png -> Cache.add cache (name, edge) png; Ok png
+    match Domain_pool_ref.submit_cpu_or_inline (fun () -> draw ~name ~equipment size) with
+    | Ok png -> Cache.add cache key png; Ok png
     | Error _ as refused -> refused
 
-let build_tag digest ~name size =
+let build_tag digest ~name ~equipment size =
   Http.Response.etag_of_body
-    (String.concat "\000" [ digest; name; string_of_int (Draw.int_of_size size) ])
+    (String.concat "\000" [ digest; name; string_of_int (Draw.int_of_size size); Keeper_portrait_equipment.key equipment ])
 
-let answer ~cache ~build ~name ~size ~keeper_present ~holds_tag =
+let answer ~cache ~build ~name ~size ~keeper_present ~equipment ~holds_tag =
   if not (Keeper_config.validate_name name) then Invalid_name
   else
     match size_of_request size with
@@ -140,16 +141,19 @@ let answer ~cache ~build ~name ~size ~keeper_present ~holds_tag =
       | Error message -> Lookup_failed message
       | Ok false -> Unknown_keeper
       | Ok true ->
+        match equipment () with
+        | Error message -> Lookup_failed message
+        | Ok equipment ->
         match build with
         | Executable digest ->
-          let etag = build_tag digest ~name size in
+          let etag = build_tag digest ~name ~equipment size in
           if holds_tag etag then Not_modified etag
           else (
-            match png_of cache ~name size with
+            match png_of cache ~name ~equipment size with
             | Ok png -> Png { etag; png }
             | Error message -> Encode_failed message)
         | Unscoped ->
-          match png_of cache ~name size with
+          match png_of cache ~name ~equipment size with
           | Error message -> Encode_failed message
           | Ok png ->
             let etag = Http.Response.etag_of_body png in
@@ -185,6 +189,7 @@ let handle_get state request reqd name =
     answer ~cache:process_cache ~build:(current_build ()) ~name
       ~size:(Server_utils.query_param request "size")
       ~keeper_present:(keeper_present config name)
+      ~equipment:(fun () -> Candle_equipment.current ~base_path:config.Workspace.base_path ~keeper:name)
       ~holds_tag:(fun etag -> Http.Response.request_holds_tag ~etag request)
   with
   | Invalid_name -> refuse `Bad_request (Printf.sprintf "invalid keeper name: %s" name)

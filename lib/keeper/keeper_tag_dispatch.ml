@@ -135,6 +135,7 @@ let dispatch
        | Some Tool_schemas_misc.Misc_candle_balance -> candle Keeper_candle_tools.Balance
        | Some Tool_schemas_misc.Misc_candle_catalog -> candle Keeper_candle_tools.Catalog
        | Some Tool_schemas_misc.Misc_candle_purchase -> candle Keeper_candle_tools.Purchase
+       | Some Tool_schemas_misc.Misc_candle_equip -> candle Keeper_candle_tools.Equip
        | Some _ | None -> Tool_misc.dispatch
         { Tool_misc.config
         ; agent_name

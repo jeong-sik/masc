@@ -13,14 +13,15 @@ val equipment_to_json : Keeper_portrait_look.equipment -> Yojson.Safe.t
     for nonempty slots. Empty slots retain their explicit empty labels. *)
 
 val handle
-  :  keeper_name:string
+  :  base_path:string
+  -> keeper_name:string
   -> tool_name:string
   -> start_time:Tool_timing.started
   -> args:Yojson.Safe.t
   -> Tool_result.result
 (** Return a PNG handle retained in the Keeper's vision store, including after
     transient screen frames are evicted. [preview_item] selects one catalog
-    item for the returned picture only. The response distinguishes [starting]
-    and [preview] modes, and reports both the starting equipment and the
-    equipment shown in the PNG. It does not report inventory or persist an
+    item for the returned picture only. The response distinguishes [current]
+    and [preview] modes, and reports starting, currently equipped and
+    rendered equipment shown in the PNG. It does not report inventory or persist an
     equipment choice. *)

@@ -1,0 +1,17 @@
+name = "keeper_candle_equip"
+description = "Equip an owned portrait accessory in one slot for the current Keeper. Use item=default to restore that slot's name-derived starting accessory. This does not spend Candle or change other slots."
+additional_properties = false
+defer_loading = false
+
+[[params]]
+name = "slot"
+type = "string"
+required = true
+enum = ["face", "neck", "head", "hand", "base"]
+description = "Portrait slot to change."
+
+[[params]]
+name = "item"
+type = "string"
+required = true
+description = "Owned item id from the catalog, or default to restore the starting item."

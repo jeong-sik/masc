@@ -103,7 +103,8 @@ let schemas : tool_schema list =
   @ [ Tool_schemas_misc_toml.portrait_read
     ; Tool_schemas_misc_toml.candle_balance
     ; Tool_schemas_misc_toml.candle_catalog
-    ; Tool_schemas_misc_toml.candle_purchase ]
+    ; Tool_schemas_misc_toml.candle_purchase
+    ; Tool_schemas_misc_toml.candle_equip ]
   @ Tool_schemas_operator_surface.schemas
 
 type mcp_runtime_operation =
@@ -198,6 +199,7 @@ type misc_operation =
   | Misc_candle_balance
   | Misc_candle_catalog
   | Misc_candle_purchase
+  | Misc_candle_equip
   | Misc_dos_load
   | Misc_dos_eject
   | Misc_dos_screen
@@ -237,7 +239,7 @@ let dos_controller_need = function
   | Misc_msx_restore | Misc_msx_change_disk | Misc_msx_screen | Misc_msx_press
   | Misc_msx_step | Misc_msx_step_until_change | Misc_msx_peek | Misc_msx_ram_diff
   | Misc_dos_screen | Misc_dos_peek | Misc_dos_save | Misc_portrait_read
-  | Misc_candle_balance | Misc_candle_catalog | Misc_candle_purchase ->
+  | Misc_candle_balance | Misc_candle_catalog | Misc_candle_purchase | Misc_candle_equip ->
     No_controller
 
 let misc_tool_name = function
@@ -284,6 +286,7 @@ let misc_tool_name = function
   | Misc_candle_balance -> "keeper_candle_balance"
   | Misc_candle_catalog -> "keeper_candle_catalog"
   | Misc_candle_purchase -> "keeper_candle_purchase"
+  | Misc_candle_equip -> "keeper_candle_equip"
   | Misc_dos_load -> "masc_dos_load"
   | Misc_dos_eject -> "masc_dos_eject"
   | Misc_dos_screen -> "masc_dos_screen"
@@ -341,6 +344,7 @@ let misc_registered_schema operation : tool_schema option =
   | Misc_candle_balance
   | Misc_candle_catalog
   | Misc_candle_purchase
+  | Misc_candle_equip
   | Misc_dos_load
   | Misc_dos_eject
   | Misc_dos_screen

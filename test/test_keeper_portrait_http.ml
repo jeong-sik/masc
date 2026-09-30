@@ -27,8 +27,11 @@ let roomy_budget = 64 * 1024 * 1024
 
 (* A fresh cache per call, so every answer below draws unless it says otherwise. *)
 let answer ?(cache = Api.Cache.create ~byte_budget:roomy_budget) ?(build = a_build)
-    ?(holds_tag = holds_nothing) ~name ~size ~keeper_present () =
-  Api.answer ~cache ~build ~name ~size ~keeper_present ~holds_tag
+    ?(holds_tag = holds_nothing) ?equipment ~name ~size ~keeper_present () =
+  let equipment = match equipment with
+    | Some read -> read
+    | None -> (fun () -> Ok (Keeper_portrait_look.equipment_of_name name)) in
+  Api.answer ~cache ~build ~name ~size ~keeper_present ~equipment ~holds_tag
 
 let describe = function
   | Api.Png _ -> "Png"
@@ -137,6 +140,38 @@ let test_cache_keeps_drawings_within_its_budget () =
   let tiny = Api.Cache.create ~byte_budget:1 in
   ignore (expect_png (answer ~cache:tiny ~name:keeper ~size:(Some "64") ~keeper_present:present ()));
   check int "a picture larger than the budget is served, not kept" 0 (Api.Cache.length tiny)
+
+let test_equipment_wire_and_cache () =
+  let module Equipment = Keeper_portrait_equipment in
+  let module Item = Keeper_portrait_item in
+  let original = Keeper_portrait_look.bare in
+  let crown = match Item.of_id "crown" with Some value -> value | None -> fail "catalog crown missing" in
+  let equipped = Item.preview crown original in
+  let received = require_ok Fun.id (Equipment.of_json (Equipment.to_json equipped)) in
+  check bool "wire preserves complete rendered equipment" true (received = equipped);
+  let fields = match Equipment.to_json equipped with `Assoc fields -> fields | _ -> fail "equipment object" in
+  let rejects label json = match Equipment.of_json json with
+    | Error _ -> () | Ok _ -> fail label in
+  rejects "missing slot" (`Assoc (List.remove_assoc "head" fields));
+  rejects "duplicate slot" (`Assoc (("head", `String "crown") :: fields));
+  rejects "wrong slot" (`Assoc (("face", `String "crown") :: List.remove_assoc "face" fields));
+  rejects "unknown item" (`Assoc (("head", `String "unknown") :: List.remove_assoc "head" fields));
+  let cache = Api.Cache.create ~byte_budget:roomy_budget in
+  let get ?(holds_tag = holds_nothing) equipment =
+    answer ~cache ~holds_tag ~equipment:(fun () -> Ok equipment)
+      ~name:keeper ~size:(Some "96") ~keeper_present:present () in
+  let before_tag, before_png = expect_tagged_png (get original) in
+  let after_tag, after_png = expect_tagged_png (get ~holds_tag:(String.equal before_tag) received) in
+  check bool "new equipment invalidates old tag" false (before_tag = after_tag);
+  check bool "new equipment changes actual PNG" false (before_png = after_png);
+  check int "distinct equipment has distinct cache entries" 2 (Api.Cache.length cache);
+  let restored_tag, restored_png = expect_tagged_png (get original) in
+  check string "restore returns original bytes" before_png restored_png;
+  check string "restore returns original tag" before_tag restored_tag;
+  match answer ~cache ~holds_tag:(fun _ -> true) ~equipment:(fun () -> Error "ledger unavailable")
+    ~name:keeper ~size:(Some "96") ~keeper_present:present () with
+  | Api.Lookup_failed message -> check string "authority error kept" "ledger unavailable" message
+  | other -> fail ("authority failure must not serve stale cached portrait: " ^ describe other)
 
 (* ---- the real router, over an in-memory HTTP/1.1 connection ---- *)
 
@@ -296,6 +331,153 @@ let test_router_leaves_keeper_metadata_untouched () =
       (get ~router (path ~size:"64" unreadable)).status;
     check bool "and is not rewritten" true (garbled_before = file_state garbled))
 
+let test_purchase_equip_and_remote_portrait () =
+  with_router (fun ~config router ->
+    let base_path = config.Workspace.base_path in
+    let runtime_path = Filename.concat base_path "portrait-test-runtime.toml" in
+    Fs_compat.save_file runtime_path {|[runtime]
+default = "test_provider.test_model"
+[providers.test_provider]
+display-name = "Test Provider"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+[models.test_model]
+api-name = "test-model"
+max-context = 8192
+tools-support = true
+streaming = true
+[test_provider.test_model]
+is-default = true
+max-concurrent = 1
+|};
+    require_ok Fun.id (Runtime.init_default ~config_path:runtime_path);
+    let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+    if not (String.starts_with ~prefix:(base_path ^ Filename.dir_sep) keepers_dir) then fail "Keeper fixture escaped workspace";
+    Fs_compat.mkdir_p keepers_dir;
+    Fs_compat.save_file (Filename.concat keepers_dir (keeper ^ ".toml"))
+      "[keeper]\nsandbox_profile = \"docker\"\nsandbox_image = \"base\"\ninstructions = \"portrait integration fixture\"\n";
+    Candle_status.install_appraiser_check (fun () -> Ok ());
+    let policy_path = Config_dir_resolver.candle_toml_path_for_base_path ~base_path in
+    if not (String.starts_with ~prefix:base_path policy_path) then fail "policy escaped fixture";
+    Fs_compat.mkdir_p (Filename.dirname policy_path);
+    Fs_compat.save_file policy_path {|[payout]
+weight_max = 1
+deduction_rate = 0
+deduction_floor = 1000
+[payout.grades_milli]
+trivial = 1000
+small = 1000
+medium = 1000
+large = 1000
+epic = 1000
+[shop.prices_milli]
+crown = 200
+beanie = 200
+|};
+    let owner = require_ok Fun.id (Keeper_id.Keeper_name.of_string keeper) in
+    let at = require_ok Fun.id (Candle_time.of_rfc3339 "2026-09-29T00:00:00Z") in
+    let payment = require_ok Fun.id (Candle_payment.make
+      ~identity:{goal_id="portrait-goal";request_id="proof-request";verification_run_id="proof-run"}
+      ~grade:Candle_grade.Trivial ~total_milli:1000
+      ~grade_trace:{run_id="grade";slot_id="appraiser"}
+      ~relations:[{task_id="task";relation=Candle_appraisal.Related;trace={run_id="relation";slot_id="appraiser"}}]
+      ~weights_trace:{run_id="weights";slot_id="appraiser"}
+      ~weight_max:1 ~deduction_rate:0 ~deduction_floor:1000 ~overdue_hours:0 ~weights:[keeper,1]) in
+    require_ok (Candle_ledger.update_error_to_string Fun.id)
+      (Candle_ledger.update ~base_path (fun _ -> Ok ([{Candle_event.at;body=Candle_event.Paid payment}], ())));
+    let starting = Keeper_portrait_look.equipment_of_name keeper in
+    let id = match starting.head with Keeper_portrait_look.Crown -> "beanie"
+      | Keeper_portrait_look.Bare_head | Keeper_portrait_look.Bow | Keeper_portrait_look.Beanie -> "crown" in
+    let item = match Keeper_portrait_item.of_id id with Some item -> item | None -> fail "catalog item missing" in
+    let expected = Keeper_portrait_item.preview item starting in
+    let call ?(slot="head") item = Keeper_candle_tools.handle ~operation:Keeper_candle_tools.Equip
+      ~base_path ~keeper_name:keeper ~tool_name:"keeper_candle_equip" ~start_time:(Tool_timing.start ())
+      ~args:(`Assoc ["slot", `String slot;"item",`String item]) in
+    let accepted = function Tool_result.Completed _ as result -> Tool_result.data result
+      | other -> fail (Tool_result.message other) in
+    let ledger_bytes () = Fs_compat.load_file (Candle_ledger.path ~base_path) in
+    let initial = ledger_bytes () in
+    (match call id with Tool_result.Completed _ -> fail "equipped without purchase" | _ -> ());
+    check string "refusal did not mutate ledger" initial (ledger_bytes ());
+    let before = get ~router (path ~size:"96" keeper) in
+    check int "starting portrait" 200 before.status;
+    let snapshot_computations = ref 0 in
+    let dashboard_portrait () =
+      let snapshot = Dashboard_projection_cache.get_or_compute_snapshot_json
+        ~config ~actor:(Some "portrait-fixture") (fun _ ->
+          incr snapshot_computations;
+          `Assoc ["keepers", `Assoc ["items", `List [`Assoc ["name", `String keeper]]]]) in
+      let rows = Yojson.Safe.Util.(snapshot |> member "keepers" |> member "items" |> to_list) in
+      match rows with
+      | [row] -> require_ok Fun.id (Keeper_portrait_equipment.reading_of_json
+          Yojson.Safe.Util.(member "portrait" row))
+      | _ -> fail "dashboard snapshot lost the Keeper row" in
+    check bool "operator snapshot supplies starting portrait" true
+      (dashboard_portrait () = Keeper_portrait_equipment.Ready starting);
+    ignore (require_ok Candle_shop.error_to_string
+      (Candle_shop.purchase ~now:(fun () -> 1790640000.) ~base_path ~keeper:owner ~item));
+    check string "purchase alone does not equip" before.body (get ~router (path ~size:"96" keeper)).body;
+    let purchased = ledger_bytes () in
+    (match call ~slot:"face" id with Tool_result.Completed _ -> fail "head item equipped into face slot" | _ -> ());
+    check string "wrong-slot refusal does not append" purchased (ledger_bytes ());
+    let equipped = accepted (call id) in
+    check bool "first choice changed" true Yojson.Safe.Util.(equipped |> member "changed" |> to_bool);
+    check bool "cached operator metadata exposes fresh equipped portrait" true
+      (dashboard_portrait () = Keeper_portrait_equipment.Ready expected);
+    check int "equipment refresh did not recompute metadata" 1 !snapshot_computations;
+    let after = get ~router ~if_none_match:(header before "etag") (path ~size:"96" keeper) in
+    check int "old tag does not conceal equipped item" 200 after.status;
+    check bool "actual HTTP PNG changed" false (before.body = after.body);
+    let stable = ledger_bytes () in
+    let same = accepted (call id) in
+    check bool "same choice is a no-op" false Yojson.Safe.Util.(same |> member "changed" |> to_bool);
+    check string "same choice does not append" stable (ledger_bytes ());
+    Keeper_tool_surface.For_testing.reset_keeper_list_cache ();
+    let roster = match !Keeper_dispatch_ref.dispatch ~config ~agent_name:"observer"
+      ~publication_recovery_provider:Masc_test_deps.non_runtime_publication_recovery_provider
+      ~name:"masc_keeper_list" ~args:(`Assoc ["detailed", `Bool true]) () with
+      | Some result -> Yojson.Safe.from_string (Tool_result.message result)
+      | None -> fail "public Keeper roster not registered" in
+    let runtime_rows, errors, _, _ = require_ok Fun.id (Tui_decode.decode_keeper_runtime_list roster) in
+    check int "public roster has no metadata error rows" 0 (List.length errors);
+    let reading = match runtime_rows with
+      | [row] -> row.Tui_decode.kr_portrait
+      | _ -> fail "expected one healthy decoded Keeper runtime row" in
+    check bool "public roster and real TUI decoder preserve equipped input" true
+      (reading = Keeper_portrait_equipment.Ready expected);
+    check bool "restart-style replay preserves current equipment" true
+      (require_ok Fun.id (Candle_equipment.current ~base_path ~keeper) = expected);
+    ignore (accepted (call "default"));
+    check string "Default restores exact starting PNG" before.body (get ~router (path ~size:"96" keeper)).body;
+    let account = require_ok Candle_shop.error_to_string (Candle_shop.account ~base_path ~keeper:owner) in
+    check int "equipping spends no Candle" 800 account.balance_milli;
+    check bool "reset preserves purchase ownership" true (List.mem item account.owned_items);
+    Fs_compat.append_file (Candle_ledger.path ~base_path) "{partial";
+    let corrupt = ledger_bytes () in
+    check int "unreadable ledger refuses a cached portrait" 503 (get ~router (path ~size:"96" keeper)).status;
+    (match dashboard_portrait () with
+     | Keeper_portrait_equipment.Unavailable _ -> ()
+     | Keeper_portrait_equipment.Ready _ -> fail "dashboard hid unreadable authority with cached gear");
+    check string "portrait read does not truncate damaged ledger" corrupt (ledger_bytes ());
+    (match Sys.getenv_opt "RUNNER_TEMP" with
+     | None -> ()
+     | Some root ->
+       (* Only CI artifact export may write under the runner home. The
+          workspace and all product mutations retain the isolation guard. *)
+       Masc_test_deps.with_process_env "MASC_TEST_ALLOW_HOME_BASE_PATH" (Some "1")
+       @@ fun () ->
+       let evidence = Filename.concat root "candle-equipped-portrait" in
+       Fs_compat.mkdir_p evidence;
+       Fs_compat.save_file (Filename.concat evidence "before.png") before.body;
+       Fs_compat.save_file (Filename.concat evidence "equipped.png") after.body;
+       Fs_compat.save_file (Filename.concat evidence "manifest.json")
+         (Yojson.Safe.pretty_to_string (`Assoc ["keeper",`String keeper;
+           "before",Keeper_portrait_equipment.to_json starting;
+           "equipped",Keeper_portrait_equipment.to_json expected;
+           "before_etag",`String (header before "etag");"equipped_etag",`String (header after "etag");
+           "build",Build_identity.to_yojson (Build_identity.current ());
+           "scope",`String "real HTTP router fixture after purchase and equip; not live deployment"]))) )
+
 let () =
   run "Keeper portrait HTTP"
     [ "answer",
@@ -307,9 +489,11 @@ let () =
       ; test_case "a held tag is answered without drawing" `Quick test_a_held_tag_is_answered_without_drawing
       ; test_case "tags follow build, name and size" `Quick test_tags_follow_build_name_and_size
       ; test_case "unscoped tags follow the bytes" `Quick test_unscoped_tags_follow_the_bytes
-      ; test_case "cache stays within its byte budget" `Quick test_cache_keeps_drawings_within_its_budget ]
+      ; test_case "cache stays within its byte budget" `Quick test_cache_keeps_drawings_within_its_budget
+      ; test_case "equipment wire changes actual PNG and cache identity" `Quick test_equipment_wire_and_cache ]
     ; "router",
       [ test_case "PNG with a strong tag and 304" `Quick test_router_serves_png_with_a_strong_tag
       ; test_case "400 and 404" `Quick test_router_refusals
       ; test_case "strict auth needs a read token" `Quick test_router_strict_auth_needs_a_read_token
-      ; test_case "GET leaves keeper metadata untouched" `Quick test_router_leaves_keeper_metadata_untouched ] ]
+      ; test_case "GET leaves keeper metadata untouched" `Quick test_router_leaves_keeper_metadata_untouched
+      ; test_case "purchase equip reset and remote portrait share one ledger" `Quick test_purchase_equip_and_remote_portrait ] ]

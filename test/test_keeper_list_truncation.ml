@@ -137,7 +137,7 @@ let list_length json key =
 
 (* Run masc_keeper_list against a workspace seeded with [names], through the
    same dispatch an MCP client and the HTTP route use. *)
-let keeper_list ?(before_list = fun _ -> ()) ~names ~args f =
+let keeper_list ?(before_list = fun _ -> ()) ?after_list ~names ~args f =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   ensure_runtime ();
@@ -166,14 +166,15 @@ let keeper_list ?(before_list = fun _ -> ()) ~names ~args f =
             Masc_test_deps.non_runtime_publication_recovery_provider
         }
       in
-      match Keeper_tool_surface.dispatch ctx ~name:"masc_keeper_list" ~args with
-      | None -> fail "masc_keeper_list did not dispatch"
-      | Some result ->
-        let body = Tool_result.message result in
-        (match Yojson.Safe.from_string body with
-         | exception Yojson.Json_error error ->
-           failf "masc_keeper_list returned invalid JSON: %s" error
-         | json -> f json))
+      let read () = match Keeper_tool_surface.dispatch ctx ~name:"masc_keeper_list" ~args with
+        | None -> fail "masc_keeper_list did not dispatch"
+        | Some result ->
+          let body = Tool_result.message result in
+          match Yojson.Safe.from_string body with
+          | exception Yojson.Json_error error -> failf "masc_keeper_list returned invalid JSON: %s" error
+          | json -> json in
+      f (read ());
+      Option.iter (fun observe -> observe config read) after_list)
 ;;
 
 (* Ten names, sorted, so a limit of 4 keeps k00..k03 and drops the rest —
@@ -432,6 +433,24 @@ let test_missing_current_failure_is_not_clear () =
     | Ok _ -> fail "missing current-failure field was accepted as a clear reading")
 ;;
 
+let test_equipment_failure_and_repair_bypass_the_roster_cache () =
+  let portrait json = match Tui_decode.decode_keeper_runtime_list json with
+    | Ok ([row],[],_,_) -> row.Tui_decode.kr_portrait
+    | _ -> fail "equipment read hid or malformed the Keeper row" in
+  let expected = Keeper_portrait_equipment.Ready (Keeper_portrait_look.equipment_of_name "alpha") in
+  Masc_test_deps.with_process_env "MASC_KEEPER_LIST_CACHE_TTL_S" (Some "3600") (fun () ->
+    keeper_list ~names:["alpha"] ~args:(`Assoc ["detailed",`Bool true])
+      ~after_list:(fun config read ->
+        let path = Config_dir_resolver.candle_toml_path_for_base_path ~base_path:config.Workspace.base_path in
+        if not (String.starts_with ~prefix:config.base_path path) then fail "policy escaped fixture";
+        Out_channel.with_open_bin path (fun oc -> output_string oc "malformed policy");
+        (match portrait (read ()) with
+         | Keeper_portrait_equipment.Unavailable reason -> check bool "failure has evidence" true (String.length reason>0)
+         | Keeper_portrait_equipment.Ready _ -> fail "cached name gear concealed an unreadable policy");
+        Sys.remove path;
+        check bool "repair is visible inside the same cached roster" true (portrait (read ()) = expected))
+      (fun json -> check bool "Off uses server-selected starting equipment" true (portrait json = expected)))
+
 let () =
   run "keeper_list_truncation"
     [ ( "listing truth"
@@ -449,6 +468,7 @@ let () =
     ; ( "one axis per field"
       , [ test_case "row publishes phase, health and paused" `Quick
             test_detailed_row_carries_every_axis
+        ; test_case "equipment failure and repair bypass metadata cache" `Quick test_equipment_failure_and_repair_bypass_the_roster_cache
         ; test_case "health uses the health vocabulary" `Quick
             test_health_is_a_health_word_not_a_surface_word
         ; test_case "an unnamed next action is null" `Quick

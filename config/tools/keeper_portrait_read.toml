@@ -1,11 +1,12 @@
 name = "keeper_portrait_read"
 description = """
-Browse portrait accessories and view the current Keeper's starting portrait.
+Browse portrait accessories and view the current Keeper's equipped portrait.
 
-Returns a durable PNG artifact, starting equipment and the accessory catalog.
-Without preview_item, mode is starting. Pass an id from catalog as preview_item
-to see that accessory on the same Keeper body; mode is then preview.
-equipment describes the picture, and starting_equipment stays unchanged.
+Returns a durable PNG artifact, starting and current equipment and the accessory catalog.
+Without preview_item, mode is current. Pass an id from catalog as preview_item
+to see that accessory on the current outfit of the same Keeper body; mode is then preview.
+equipment describes the picture; current_equipment and starting_equipment
+report the current outfit and name-derived starting outfit respectively.
 Previewing an accessory does not buy or equip it. This read does not report
 purchased inventory."""
 additional_properties = false

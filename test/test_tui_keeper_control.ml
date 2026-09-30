@@ -22,6 +22,7 @@ let runtime ?(keepalive_running = true) ?(health = health "healthy") ?(paused = 
     ?(sandbox_profile = "docker") name :
     Decode.keeper_runtime =
   { kr_name = name
+  ; kr_portrait = Decode.Ready Keeper_portrait_look.bare
   ; kr_health = health
   ; kr_paused = paused
   ; kr_next_action = next_action
@@ -579,6 +580,7 @@ let gate_row ?(health = "healthy") ?(paused = false)
        "meta":{"name":%S,"trace_id":"trace-1","created_at":"2026-08-21T17:32:29Z",
                "updated_at":"2026-08-23T06:53:43Z","sandbox_profile":%S},
        "health":%S,"paused":%b,"next_action":%s,"runtime_blocker_summary":null,
+       "portrait":{"state":"ready","equipment":{"face":"bare_face","neck":"bare_neck","head":"bare_head","hand":"empty_hand","base":"no_dish"}},
        "phase":%S,"keepalive_running":true,"activation_mode":"autonomous","runtime_id":"anthropic.claude-opus-5",
        "created_at":"2026-08-21T17:32:29Z","updated_at":"2026-08-23T06:53:43Z"}|}
     name name name sandbox_profile health paused next_action phase
@@ -586,6 +588,30 @@ let gate_row ?(health = "healthy") ?(paused = false)
 (* The roster is where an operator compares keepers, so the sandbox each one is
    declared for has to survive the decode. Reading it per keeper from a detail
    pane was the thing this replaced. *)
+let test_roster_equipment_is_required_and_failures_stay_per_keeper () =
+  let row = Yojson.Safe.from_string (gate_row "analyst") in
+  let with_portrait portrait = match row with
+    | `Assoc fields -> `Assoc (("portrait",portrait) :: List.remove_assoc "portrait" fields)
+    | _ -> Alcotest.fail "bad row fixture" in
+  let decode row = Decode.decode_keeper_runtime_list (`Assoc ["keepers",`List [row];"total",`Int 1;"truncated",`Bool false]) in
+  let equipped = {Keeper_portrait_look.bare with head=Keeper_portrait_look.Crown} in
+  let ready = Keeper_portrait_equipment.reading_to_json (Keeper_portrait_equipment.Ready equipped) in
+  (match decode (with_portrait ready) with
+   | Ok ([runtime],_,_,_) -> Alcotest.(check bool) "actual server gear survives" true (runtime.Decode.kr_portrait=Decode.Ready equipped)
+   | _ -> Alcotest.fail "equipped row failed");
+  let unavailable = Keeper_portrait_equipment.reading_to_json (Keeper_portrait_equipment.Unavailable "ledger unreadable") in
+  (match decode (with_portrait unavailable) with
+   | Ok ([runtime],[],_,_) -> Alcotest.(check bool) "portrait failure does not discard Keeper" true
+       (runtime.Decode.kr_portrait=Decode.Unavailable "ledger unreadable")
+   | _ -> Alcotest.fail "portrait failure hid Keeper");
+  List.iter (fun invalid -> Alcotest.(check bool) "malformed portrait is never synthesized from name" true
+    (Result.is_error (decode (with_portrait invalid)))) [`Null;`Assoc ["state",`String "ready"];
+      `Assoc ["state",`String "ready";"equipment",`Assoc ["head",`String "unknown"]]];
+  match row with
+  | `Assoc fields -> Alcotest.(check bool) "missing snapshot rejected" true
+      (Result.is_error (decode (`Assoc (List.remove_assoc "portrait" fields))))
+  | _ -> Alcotest.fail "bad row fixture"
+
 let test_roster_decode_reads_the_sandbox_profile () =
   let json =
     Yojson.Safe.from_string
@@ -640,6 +666,7 @@ let test_a_row_without_a_sandbox_profile_is_rejected () =
       {|{"count":1,"total":1,"truncated":false,"keepers":[
          {"runtime_class":"keeper","name":"n","agent_name":"keeper-n-agent",
           "meta":{"name":"n","trace_id":"t","created_at":"c","updated_at":"u"},
+          "portrait":{"state":"ready","equipment":{"face":"bare_face","neck":"bare_neck","head":"bare_head","hand":"empty_hand","base":"no_dish"}},
           "health":"healthy","paused":false,"next_action":null,
           "phase":"running","keepalive_running":true,"activation_mode":"autonomous","runtime_id":"r",
           "created_at":"c","updated_at":"u"}]}|}
@@ -1097,6 +1124,7 @@ let () =
     ; ( "roster"
       , [ Alcotest.test_case "the sandbox profile survives the decode" `Quick
             test_roster_decode_reads_the_sandbox_profile
+        ; Alcotest.test_case "server equipment required; failures preserve Keeper" `Quick test_roster_equipment_is_required_and_failures_stay_per_keeper
         ; Alcotest.test_case "paused stays apart from phase" `Quick
             test_roster_decode_keeps_paused_apart_from_phase
         ; Alcotest.test_case "a row without a sandbox profile is rejected" `Quick

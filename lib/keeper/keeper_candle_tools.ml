@@ -6,11 +6,13 @@ type operation =
   | Balance
   | Catalog
   | Purchase
+  | Equip
 
 type failure =
   | Bad_arguments of string
   | Invalid_keeper of string
   | Shop_failed of Candle_shop.error
+  | Equip_failed of Candle_equipment.error
 
 let account_json (account : Candle_shop.account) =
   `Assoc
@@ -52,6 +54,21 @@ let run ~operation ~base_path ~keeper_name ~args =
     let* () = input (Candle_json.finish ~context fields) in
     let* catalog = shop (Candle_shop.catalog ~base_path) in
     Ok (`Assoc [ "items", `List (List.map entry_json catalog) ])
+  | Equip ->
+    let* slot_id, fields = input (Candle_json.field ~context "slot" Candle_json.as_string fields) in
+    let* id, fields = input (Candle_json.field ~context "item" Candle_json.as_string fields) in
+    let* () = input (Candle_json.finish ~context fields) in
+    let* slot = match Item.slot_of_id slot_id with
+      | Some slot -> Ok slot | None -> Error (Bad_arguments "Unknown portrait slot") in
+    let* choice = match id with
+      | "default" -> Ok Candle_event.Default
+      | id -> (match Item.of_id id with
+        | Some item -> Ok (Candle_event.Item item)
+        | None -> Error (Bad_arguments ("Unknown portrait item " ^ id))) in
+    let* receipt = Candle_equipment.equip ~now:Time_compat.now ~base_path ~keeper ~slot ~choice
+      |> Result.map_error (fun error -> Equip_failed error) in
+    Ok (`Assoc ["keeper", `String keeper_name; "changed", `Bool receipt.changed;
+      "equipment", Keeper_portrait_equipment.to_json receipt.equipment])
   | Purchase ->
     let* id, fields =
       input (Candle_json.field ~context "item" Candle_json.as_string fields)
@@ -77,6 +94,12 @@ let run ~operation ~base_path ~keeper_name ~args =
 let error_info = function
   | Bad_arguments detail -> "invalid_arguments", Tool_result.Workflow_rejection, detail
   | Invalid_keeper detail -> "invalid_keeper", Tool_result.Policy_rejection, detail
+  | Equip_failed error ->
+    let code, class_ = match error with
+      | Candle_equipment.Unavailable _ -> "equipment_unavailable", Tool_result.Dependency_unavailable
+      | Candle_equipment.Invalid_ledger _ -> "account_invalid", Tool_result.Runtime_failure
+      | Candle_equipment.Refused _ -> "equipment_refused", Tool_result.Workflow_rejection in
+    code, class_, Candle_equipment.error_to_string error
   | Shop_failed error ->
     let code, class_ =
       match error with
@@ -92,7 +115,9 @@ let error_info = function
       | Candle_shop.Purchase_refused (Candle_balance.Insufficient_balance _) ->
         "insufficient_balance", Tool_result.Workflow_rejection
       | Candle_shop.Purchase_refused
-          ( Candle_balance.Negative_purchase _
+          ( Candle_balance.Unowned_equipment _
+          | Candle_balance.Wrong_equipment_slot _
+          | Candle_balance.Negative_purchase _
           | Candle_balance.Duplicate_payment _
           | Candle_balance.Balance_overflow _ ) ->
         "invalid_purchase", Tool_result.Runtime_failure

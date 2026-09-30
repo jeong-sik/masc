@@ -104,6 +104,17 @@ let with_cached_surface_success
       Server_dashboard_http_cache.mark_cached_surface_success surface json;
       f ())
 
+let with_mission_cache_success json f =
+  let module Core = Server_dashboard_http_core in
+  let surface = Core.mission_cache in
+  let saved = Core.snapshot surface in
+  let saved_payload = surface.Core.memoized_payload in
+  Fun.protect
+    ~finally:(fun () ->
+      surface.Core.current <- saved;
+      surface.Core.memoized_payload <- saved_payload)
+    (fun () -> Core.mark_cached_surface_success surface json; f ())
+
 let with_env key value f =
   let old = Sys.getenv_opt key in
   Unix.putenv key value;
@@ -3179,6 +3190,109 @@ let test_execution_first_compute_reuses_prepared_bytes () =
         check bool "first compute and warm read reuse identity bytes" true
           (payload.raw_json == warm);
         check string "first compute and warm read retain ETag" payload.etag etag)
+
+let test_warm_dashboard_responses_follow_equipment_authority () =
+  Masc_test_deps.with_process_env Env_config_core.config_dir_env_key None @@ fun () ->
+  Masc_test_deps.with_process_env "MASC_DASHBOARD_FIXTURE" None @@ fun () ->
+  with_test_env @@ fun ~env ~sw ~config ->
+  let module Surface = Server_dashboard_http_execution_surfaces in
+  let module Portrait = Keeper_portrait_equipment in
+  let ok show = function Ok value -> value | Error error -> fail (show error) in
+  let base_path = config.Workspace.base_path in
+  let keeper = "portrait-http-cache" in
+  let policy_path = Config_dir_resolver.candle_toml_path_for_base_path ~base_path in
+  mkdir_p (Filename.dirname policy_path);
+  write_file policy_path {|[payout]
+weight_max = 1
+deduction_rate = 0
+deduction_floor = 1000
+[payout.grades_milli]
+trivial = 1000
+small = 1000
+medium = 1000
+large = 1000
+epic = 1000
+[shop.prices_milli]
+crown = 0
+beanie = 0
+|};
+  Candle_status.install_appraiser_check (fun () -> Ok ());
+  let owner = ok Fun.id (Keeper_id.Keeper_name.of_string keeper) in
+  let starting = Keeper_portrait_look.equipment_of_name keeper in
+  let item_id = match starting.head with
+    | Keeper_portrait_look.Crown -> "beanie"
+    | Keeper_portrait_look.Bare_head | Keeper_portrait_look.Bow
+    | Keeper_portrait_look.Beanie -> "crown" in
+  let item = match Keeper_portrait_item.of_id item_id with
+    | Some item -> item | None -> fail "portrait catalog item missing" in
+  let expected = Keeper_portrait_item.preview item starting in
+  (* Preserve the real builder's name-before-portrait order: an unchanged
+     authority must not defeat the prepared-byte path by reordering fields. *)
+  let row = `Assoc ["name", `String keeper;
+    "portrait", Portrait.reading_to_json (Portrait.Ready starting)] in
+  let execution_seed = `Assoc ["cache_marker", `String "retained-metadata";
+    "keepers", `List [row]; "continuity_briefs", `List [row]] in
+  let mission_seed = `Assoc ["cache_marker", `String "retained-metadata";
+    "keeper_briefs", `List [row];
+    "operator_targets", `Assoc ["keepers", `List [row]]] in
+  Surface.invalidate_execution_cache ();
+  Eio_guard.protect ~finally:Surface.invalidate_execution_cache @@ fun () ->
+  with_cached_surface_success Surface.execution_cache execution_seed @@ fun () ->
+  with_mission_cache_success mission_seed @@ fun () ->
+  let state = Lib.Mcp_server_eio.For_testing.create_state ~base_path () in
+  let clock = Eio.Stdenv.clock env in
+  let req = request_with_headers "/api/v1/dashboard/execution"
+      ["accept-encoding", "identity"] in
+  let context () = Surface.execution_http_request ~state req in
+  let read_execution () = Surface.dashboard_execution_http_json ~state ~sw ~clock req in
+  let read_mission () = Server_dashboard_http_core.dashboard_briefing_http_json
+      ~state ~sw ~clock (request "/api/v1/dashboard/briefing") in
+  let portraits path json =
+    let rows = List.fold_left (fun json key -> Yojson.Safe.Util.member key json) json path
+      |> Yojson.Safe.Util.to_list in
+    List.map (fun row -> ok Fun.id (Portrait.reading_of_json
+      Yojson.Safe.Util.(member "portrait" row))) rows in
+  let assert_surfaces label expected =
+    let execution = read_execution () in
+    let mission = read_mission () in
+    List.iter (fun (json, paths) ->
+      check string (label ^ " preserves metadata") "retained-metadata"
+        Yojson.Safe.Util.(json |> member "cache_marker" |> to_string);
+      List.iter (fun path ->
+        match portraits path json with
+        | [reading] -> check bool (label ^ " " ^ String.concat "." path) true (expected reading)
+        | _ -> fail "cached surface lost or duplicated its Keeper") paths)
+      [execution, [["keepers"]; ["continuity_briefs"]];
+       mission, [["keeper_briefs"]; ["operator_targets"; "keepers"]]] in
+  let first = execution_payload ~state ~sw ~clock req in
+  (match Surface.dashboard_execution_cached_http_representation (context ()) with
+   | Some (body, etag, _) ->
+     check bool "unchanged portrait retains prepared identity bytes" true (body == first.raw_json);
+     check string "unchanged portrait retains its ETag" first.etag etag
+   | None -> fail "unchanged authority discarded prepared execution bytes");
+  assert_surfaces "starting" (fun reading -> reading = Portrait.Ready starting);
+  ignore (ok Candle_shop.error_to_string
+    (Candle_shop.purchase ~now:(fun () -> 1790640000.) ~base_path ~keeper:owner ~item));
+  (match Lib.Keeper_candle_tools.handle ~operation:Lib.Keeper_candle_tools.Equip
+      ~base_path ~keeper_name:keeper ~tool_name:"keeper_candle_equip"
+      ~start_time:(Tool_timing.start ())
+      ~args:(`Assoc ["slot", `String "head"; "item", `String item_id]) with
+   | Tool_result.Completed _ -> ()
+   | result -> fail (Tool_result.message result));
+  check bool "equipped authority refuses old prepared HTTP bytes" true
+    (Option.is_none (Surface.dashboard_execution_cached_http_representation (context ())));
+  assert_surfaces "equipped" (fun reading -> reading = Portrait.Ready expected);
+  check bool "equipment refresh does not rebuild cached execution metadata" true
+    ((Server_dashboard_http_cache.snapshot Surface.execution_cache).json = execution_seed);
+  check bool "equipment refresh does not rebuild cached mission metadata" true
+    ((Server_dashboard_http_core.snapshot Server_dashboard_http_core.mission_cache).json = mission_seed);
+  let ledger = Candle_ledger.path ~base_path in
+  Fs_compat.append_file ledger "{partial";
+  let corrupt = Fs_compat.load_file ledger in
+  check bool "unreadable authority refuses prepared HTTP bytes" true
+    (Option.is_none (Surface.dashboard_execution_cached_http_representation (context ())));
+  assert_surfaces "unreadable" (function Portrait.Unavailable _ -> true | Portrait.Ready _ -> false);
+  check string "warm HTTP reads never repair the damaged ledger" corrupt (Fs_compat.load_file ledger)
 
 let test_execution_parameterized_payload_reuses_decorated_bytes () =
   with_execution_payload_env @@ fun ~env ~sw ~state ->
@@ -7109,6 +7223,8 @@ let () =
             test_execution_default_response_reuses_prepared_bytes;
           test_case "execution first compute reuses prepared bytes" `Quick
             test_execution_first_compute_reuses_prepared_bytes;
+          test_case "warm execution and briefing follow equipped or unreadable authority" `Quick
+            test_warm_dashboard_responses_follow_equipment_authority;
           test_case "execution parameterized response reuses decorated bytes" `Quick
             test_execution_parameterized_payload_reuses_decorated_bytes;
           test_case "execution parameterized responses separate queries" `Quick

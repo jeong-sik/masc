@@ -22,6 +22,7 @@ let test_a_full_page_reads_as_more_not_listed () =
 
 module Decode = Masc.Tui_decode
 module Fetched = Masc_tui_fetched
+module Code_results = Masc_tui_code_results
 
 let start_read ~equal fetched key =
   match Fetched.start ~equal fetched ~key with
@@ -110,11 +111,12 @@ let test_activity_file_starts_without_old_overlays () =
   (* The new read may fail; late answers for the old file still cannot revive
      its overlays or blame next to the failure. *)
   let file, request = start_read ~equal:String.equal state.code_file "repos/masc/lib/new.ml" in
-  state.code_file <- Fetched.complete ~equal:String.equal file request (Error "unreadable");
-  state.code_history <- Fetched.complete ~equal:( = ) state.code_history old_history
+  state.code_file <- file;
+  Code_results.apply_file state request (Error "unreadable");
+  Code_results.apply_history state old_history
     (Ok {chl_entries = []; chl_activity_note = "old file"});
-  state.code_diff <- Fetched.complete ~equal:String.equal state.code_diff old_diff (Error "old diff");
-  state.code_blame <- Fetched.complete ~equal:String.equal state.code_blame old_blame (Ok []);
+  Code_results.apply_diff state old_diff (Error "old diff");
+  Code_results.apply_blame state old_blame (Ok []);
   Alcotest.(check bool) "late history discarded" true (Option.is_none (Fetched.current state.code_history));
   Alcotest.(check bool) "late diff discarded" true (Option.is_none (Fetched.current state.code_diff));
   Alcotest.(check bool) "late blame discarded" true (Option.is_none (Fetched.current state.code_blame));
@@ -162,8 +164,7 @@ let test_a_reply_from_the_scope_just_left_is_dropped () =
     start_read ~equal pending (Code_scope_keeper "beta", "lib/x.ml")
   in
   state.code_history <- switched;
-  state.code_history <-
-    Fetched.complete ~equal state.code_history from_alpha
+  Code_results.apply_history state from_alpha
       (Ok { chl_entries = []; chl_activity_note = "alpha" });
   Alcotest.(check bool) "the pane is still waiting on beta" true
     (match Fetched.current state.code_history with
@@ -201,11 +202,44 @@ let test_moving_before_the_listing_answers_asks_for_the_new_directory () =
   in
   state.code_listing <- listing;
   view_is "lib is asked for while the root is still in flight" "loading";
-  state.code_listing <- Fetched.complete ~equal state.code_listing from_root (Ok []);
+  Code_results.apply_entries state from_root (Ok []);
   view_is "the root's late answer does not settle lib" "loading";
-  state.code_listing <- Fetched.complete ~equal state.code_listing from_lib (Ok []);
+  Code_results.apply_entries state from_lib (Ok []);
   view_is "a directory with no entries is an answer, not a wait" "empty";
   Alcotest.(check int) "and it holds no rows" 0 (List.length (code_entries state))
+;;
+
+let test_file_reply_and_lsp_navigation_share_current_content () =
+  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let old, old_request = start_read ~equal:String.equal state.code_file "old.ml" in
+  let current, request = start_read ~equal:String.equal old "new.ml" in
+  state.code_file <- current;
+  Code_results.apply_file state request (Ok "let first = 1\nlet second = 2");
+  state.code_file_cursor <- 1;
+  let shown = state.code_file in
+  Code_results.apply_file state old_request (Ok "old bytes");
+  Alcotest.(check bool) "late file does not replace current content" true
+    (state.code_file = shown);
+  Alcotest.(check int) "late file does not reset the selected line" 1 state.code_file_cursor;
+  let location path inside line : Decode.lsp_location =
+    {ll_path = path; ll_inside = inside; ll_line = line}
+  in
+  let answer location =
+    Code_results.apply_lsp_answer state ~question:"definition" ~symbol:"first"
+      (Ok (Decode.Lsp_locations [location]))
+  in
+  Alcotest.(check bool) "same-file definition requests reveal, not another load" true
+    (answer (location "new.ml" true 1) = Code_results.Reveal_cursor);
+  Alcotest.(check int) "definition selects its line" 0 state.code_file_cursor;
+  let jumps = List.length state.code_jump_back in
+  Alcotest.(check bool) "outside definition stays on current content" true
+    (answer (location "stdlib.ml" false 4) = Code_results.No_followup);
+  Alcotest.(check int) "outside definition does not add a back entry" jumps
+    (List.length state.code_jump_back);
+  Alcotest.(check bool) "different file requests its own load" true
+    (answer (location "other.ml" true 7) = Code_results.Load_file "other.ml");
+  Alcotest.(check (option int)) "new read keeps the destination line" (Some 7)
+    state.code_target_line
 ;;
 
 let () =
@@ -221,6 +255,9 @@ let () =
         ; Alcotest.test_case "failed file cannot retain old overlays" `Quick
             test_activity_file_starts_without_old_overlays
         ] )
+    ; ( "reply navigation"
+      , [ Alcotest.test_case "late reply and definitions preserve current content" `Quick
+            test_file_reply_and_lsp_navigation_share_current_content ] )
     ; ( "scope"
       , [ Alcotest.test_case "a shared path is not a shared request" `Quick
             test_a_shared_path_is_not_a_shared_request

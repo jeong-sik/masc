@@ -82,6 +82,7 @@ def short_home_keeps_destinations(executable):
 
     def interact(process, fd, _slave, output, _base):
         h.wait_for_output(process, fd, output, b"Confirm Goal", start=0, timeout=10)
+        h.wait_for_output(process, fd, output, b"Approvals and questions: 3", start=0, timeout=10)
         h.send_and_wait(process, fd, output, b"i", b"MASC Keepers")
         h.select_keeper_row(process, fd, output, b"beta")
         h.send_and_wait(process, fd, output, b"c", b"Esc:list")
@@ -89,8 +90,13 @@ def short_home_keeps_destinations(executable):
         h.palette_go(process, fd, output, b"go dashboard", b"Continue with beta")
         frame = capture(process, fd, output, name="short-home-all-destinations",
                         rows=17, columns=80, needle=b"New work")
-        for expected in (b"3 need you", b"Confirm Goal", b"Continue with beta", b"New work", b"Enter:open"):
+        for expected in (b"Approval", b"Needs your decision", b"Continue with beta", b"New work", b"Enter:open"):
             assert expected in frame, (expected, frame)
+        # Individual cards are windowed, rather than all forced into 17 rows.
+        for label in (b"Confirm Goal", b"Approvals and questions:"):
+            home.select_destination(process, fd, output, label)
+            visible = h.screen_text(bytes(output))
+            assert label in visible and b"Continue with beta" in visible and b"New work" in visible
         # Home fits its minimum chrome height; grow before entering the
         # composer, whose own fixed chrome requires additional rows.
         capture(process, fd, output, name="short-home-before-chat",

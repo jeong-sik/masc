@@ -16,14 +16,16 @@ SOURCE_MODULES = (
 
 
 def select_destination(process, fd, output, label, *, destinations=12):
-    h.send_and_wait(process, fd, output, b"k" * destinations, b"Enter:open")
+    os.write(fd, b"k" * destinations)
+    h.drain_until_quiet(process, fd, output)
     pattern = re.compile(rb"\x1b\[7m[^\r\n]*" + re.escape(label))
     for index in range(destinations):
         rows = h.screen_rows(bytes(output), preserve_styles=True)
         if any(pattern.search(row) for row in rows.values()):
             return
         if index + 1 < destinations:
-            h.send_and_wait(process, fd, output, b"j", b"Enter:open")
+            os.write(fd, b"j")
+            h.drain_until_quiet(process, fd, output)
     raise AssertionError(f"Home destination not selected: {label!r}")
 
 

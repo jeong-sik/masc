@@ -30,13 +30,15 @@ def assert_selected(output, label):
 
 def select_home(process, fd, output, label, *, destinations):
     """Traverse the accepted fixture's destinations, checking the drawn band."""
-    h.send_and_wait(process, fd, output, b"k" * destinations, b"Enter:open")
+    os.write(fd, b"k" * destinations)
+    h.drain_until_quiet(process, fd, output)
     for index in range(destinations):
         rows = h.screen_rows(bytes(output), preserve_styles=True)
         if any(selected(label).search(row) for row in rows.values()):
             return
         if index + 1 < destinations:
-            h.send_and_wait(process, fd, output, b"j", b"Enter:open")
+            os.write(fd, b"j")
+            h.drain_until_quiet(process, fd, output)
     raise AssertionError(f"Home never selected {label!r}: {h.screen_text(bytes(output))!r}")
 
 

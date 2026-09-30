@@ -1,3 +1,32 @@
+(* Test funding is a complete historical payout, not an orphan mint. *)
+let funding_rows (at : Candle_time.t) (payment : Candle_payment.t) : Candle_event.t list =
+  let identity = payment.identity in
+  let keeper = match payment.allocations with
+    | [allocation] -> allocation.Candle_payment.keeper
+    | _ -> Alcotest.fail "funding fixture expects one Keeper" in
+  let task_ids = List.map (fun (r : Candle_appraisal.task_relation) -> r.task_id) payment.relations in
+  [ {Candle_event.at;body=Candle_event.Half_life_set Candle_decay.Off}
+  ; {Candle_event.at;body=Candle_event.Snapshot
+      {goal_id=identity.goal_id;request_id=identity.request_id;
+       verification_run_id=identity.verification_run_id;criterion_revision="funding-proof";
+       passed_at=at;goal_created_at=(match Candle_time.of_rfc3339 "1970-01-01T00:00:00Z" with
+         | Ok value -> value | Error detail -> Alcotest.fail detail);
+       due_date=None;title="Completed funding fixture";metric=Some "completed";
+       target_value=Some "1";linked_task_ids=task_ids}}
+  ; {Candle_event.at;body=Candle_event.Payout_owed
+      {goal_id=identity.goal_id;request_id=identity.request_id;
+       verification_run_id=identity.verification_run_id;passed_at=at;confirmed_at=at}}
+  ; {Candle_event.at;body=Candle_event.Candidates
+      {goal_id=identity.goal_id;request_id=identity.request_id;
+       verification_run_id=identity.verification_run_id;
+       tasks=List.map (fun id -> id, Candle_event.Found
+         {title="Completed contribution";assignee=Some keeper;
+          status=Candle_event.Done {completed_at=at}}) task_ids;
+       candidate_task_ids=task_ids;candidate_keepers=[keeper]}}
+  ; {Candle_event.at;body=Candle_event.Paid payment}
+  ]
+;;
+
 (* Confirmed obligations and durable Candidates go through the production
    payout worker. Only the model/source edges are controlled by these tests. *)
 open Alcotest
@@ -29,7 +58,8 @@ let with_workspace f =
       let path = Config_dir_resolver.candle_toml_path_for_base_path ~base_path in
       if not (String.starts_with ~prefix:base_path path) then fail "fixture escaped its workspace";
       Fs_compat.mkdir_p (Filename.dirname path);
-      Fs_compat.save_file path {|[payout]
+      Fs_compat.save_file path {|half_life = "off"
+[payout]
 weight_max = 10
 deduction_rate = 10
 deduction_floor = 200
@@ -89,8 +119,8 @@ let prepared ?request ?run ?due_date config goal_id =
 let paid config goal_id =
   List.filter_map (fun (event : E.t) -> match event.body with
     | E.Paid payment when payment.identity.goal_id = goal_id -> Some payment
-    | E.Paid _ | E.Snapshot _ | E.Payout_owed _ | E.Candidates _
-    | E.Unattributed _ | E.Payout_failed _ -> None) (events config)
+    | E.Half_life_set _ | E.Paid _ | E.Snapshot _ | E.Payout_owed _ | E.Candidates _
+    | E.Unattributed _ | E.Equipped _ | E.Purchased _ | E.Payout_failed _ -> None) (events config)
 
 let one_payment config goal_id = match paid config goal_id with
   | [payment] -> payment | _ -> fail "expected exactly one Paid row"
@@ -165,6 +195,51 @@ let test_worker_pays_once_with_isolated_inputs_and_integer_evidence () =
     (List.map (fun (r : A.task_relation) -> r.trace.run_id) p.relations);
   let decoded = Candle_payment.of_yojson (Candle_payment.to_yojson p) |> ok in
   check bool "ledger decode replays the same integer calculation" true (decoded = p)
+
+let test_allowed_large_weights_settle_with_exact_money_and_evidence () =
+  let scenario ~goal_id ~amount ~weight_max ~weight expected =
+    with_workspace @@ fun _env config ->
+    let path = Config_dir_resolver.candle_toml_path_for_base_path ~base_path:config.base_path in
+    Fs_compat.save_file path (Printf.sprintf
+      "half_life = \"off\"\n[payout]\nweight_max = %d\ndeduction_rate = 0\ndeduction_floor = 1000\n[payout.grades_milli]\ntrivial = 0\nsmall = 0\nmedium = %d\nlarge = 0\nepic = 0\n"
+      weight_max amount);
+    (match Candle_status.current ~base_path:config.base_path with
+     | Candle_config.Enabled policy -> check int "policy admits this exact amount" amount policy.payout.medium_milli
+     | Candle_config.Off | Candle_config.Disabled _ -> fail "the explicit representable policy was rejected");
+    let waiting = prepared ~due_date:None config goal_id in
+    let calls = ref [] in
+    (match drain config (make_runner ~weight calls) with
+     | [Candle_appraise.Settled settled] -> check string "exact Goal settled" goal_id settled
+     | _ -> fail "allowed large weights could not settle their obligation");
+    let payment = one_payment config goal_id in
+    check string "Paid retains the confirmed run" waiting.verification_run_id payment.identity.verification_run_id;
+    check int "configured grade amount stays exact" amount payment.total_milli;
+    check int "no lateness deduction" 1000 payment.coefficient;
+    check (list (pair string int)) "weights survive the serialized Paid evidence"
+      ["keeper-a",weight "keeper-a";"keeper-b",weight "keeper-b"]
+      (List.map (fun (a : Candle_payment.allocation) -> a.keeper,a.weight) payment.allocations);
+    check (list (triple string int int)) "exact shares, amounts and name tie ordering"
+      (List.map (fun (keeper, amount) -> keeper,amount,amount) expected)
+      (List.map (fun (a : Candle_payment.allocation) -> a.keeper,a.share_milli,a.amount_milli) payment.allocations);
+    let balance = match Candle_balance.of_events ~at:(ok (Candle_stamp.at ~now)) (events config) with
+      | Ok balance -> balance | Error error -> fail (Candle_balance.error_to_string error) in
+    List.iter (fun (keeper, paid) -> check int "ledger replay credits the allocation exactly" paid
+      (Candle_balance.balance balance ~keeper)) expected;
+    let supply = Candle_balance.supply balance in
+    check string "all and only the configured money was issued" (string_of_int amount) supply.issued_milli;
+    check string "no currency burned" "0" supply.burned_milli;
+    check string "circulation conserves the payout" (string_of_int amount) supply.circulating_milli;
+    ignore (drain config (make_runner ~weight calls));
+    check int "the settled Goal is paid once" 1 (List.length (paid config goal_id))
+  in
+  scenario ~goal_id:"max-weight-tie" ~amount:1 ~weight_max:max_int ~weight:(fun _ -> max_int)
+    ["keeper-a",1;"keeper-b",0];
+  List.iter (fun factor ->
+    scenario ~goal_id:"scaled-proportions" ~amount:10 ~weight_max:(2 * factor)
+      ~weight:(fun name -> if name="keeper-a" then 2 * factor else factor)
+      ["keeper-a",7;"keeper-b",3]) [1;max_int / 2];
+  scenario ~goal_id:"max-money-tie" ~amount:max_int ~weight_max:max_int ~weight:(fun _ -> max_int)
+    ["keeper-a",(max_int / 2) + 1;"keeper-b",max_int / 2]
 
 let test_invalid_weights_wait_for_an_event_not_a_pulse () =
   with_workspace @@ fun env config ->
@@ -301,7 +376,7 @@ let test_disable_during_appraisal_preserves_the_obligation () =
 let test_cumulative_overflow_refuses_the_real_settlement () =
   with_workspace @@ fun env config ->
   let historical_amount = max_int / 1000 in
-  let history = List.init 1000 (fun i ->
+  let history = List.concat (List.init 1000 (fun i ->
     let payment = Candle_payment.make
       ~identity:{A.goal_id="past-" ^ string_of_int i;request_id="past-request";verification_run_id="past-run"}
       ~grade:Candle_grade.Epic ~total_milli:historical_amount
@@ -309,7 +384,7 @@ let test_cumulative_overflow_refuses_the_real_settlement () =
       ~relations:[{A.task_id="past-task";relation=A.Related;trace=trace "past-relation"}]
       ~weights_trace:(trace "past-weights") ~weight_max:1 ~deduction_rate:0
       ~deduction_floor:1000 ~overdue_hours:0 ~weights:["keeper-a",1] |> ok in
-    {E.at=confirmed_at;body=E.Paid payment}) in
+    funding_rows confirmed_at payment)) in
   append config history;
   let waiting = prepared config "overflow" in
   let calls = ref [] in
@@ -319,7 +394,7 @@ let test_cumulative_overflow_refuses_the_real_settlement () =
   check bool "the actual appraisal reached its weight answer" true
     (List.exists (fun (_, request) -> A.stage request="weights") !calls);
   check int "the new payment was not appended" 0 (List.length (paid config waiting.goal_id));
-  let balance = match Candle_balance.of_events (events config) with
+  let balance = match Candle_balance.of_events ~at:(ok (Candle_stamp.at ~now)) (events config) with
     | Ok balance -> balance | Error error -> fail (Candle_balance.error_to_string error) in
   check int "prior money stays exact" (historical_amount * 1000)
     (Candle_balance.balance balance ~keeper:"keeper-a");
@@ -434,6 +509,7 @@ let () =
   run "candle_appraisal_flow"
     ["payout",
       [test_case "worker pays once with isolated judgments and arithmetic" `Quick test_worker_pays_once_with_isolated_inputs_and_integer_evidence
+      ;test_case "allowed large weights preserve exact money and Paid evidence" `Quick test_allowed_large_weights_settle_with_exact_money_and_evidence
       ;test_case "invalid weights wait for an event, not a pulse" `Quick test_invalid_weights_wait_for_an_event_not_a_pulse
       ;test_case "pulse retries unavailable transport" `Quick test_transport_recovery_is_retried_by_pulse
       ;test_case "unrelated and external-only work mint nothing" `Quick test_unrelated_and_external_only_work_mint_nothing

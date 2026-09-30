@@ -102,6 +102,19 @@ let event_testable =
 
 let line_of row = ok_or_fail (E.to_line row)
 
+let test_half_life_policy_facts () =
+  List.iter (fun half_life ->
+    let row = event (E.Half_life_set half_life) in
+    Alcotest.(check event_testable) "explicit half-life survives a ledger round trip" row
+      (ok_or_fail (E.of_line (line_of row)))) [Candle_decay.Off;Candle_decay.Hours 1;Candle_decay.Hours max_int];
+  let raw value = `Assoc ["kind",`String "half_life_set";"at",Candle_time.to_yojson now;"half_life",value] in
+  List.iter (fun value -> match E.of_yojson (raw value) with
+    | Error _ -> () | Ok _ -> Alcotest.fail "invalid half-life fact accepted")
+    [`Null;`Bool true;`Int 0;`Int (-1);`Float 1.5;`String "OFF";`String "1"];
+  match E.to_line (event (E.Half_life_set (Candle_decay.Hours 0))) with
+  | Error _ -> () | Ok _ -> Alcotest.fail "invalid constructed hours could be written"
+;;
+
 let test_the_row_format () =
   Alcotest.(check string)
     "snapshot"
@@ -339,6 +352,7 @@ let () =
     ; ( "strict reading"
       , [ Alcotest.test_case "every row requires its verifier run" `Quick
             test_every_row_requires_its_verifier_run
+        ; Alcotest.test_case "half-life facts are explicit and closed" `Quick test_half_life_policy_facts
         ; Alcotest.test_case
             "the valid line used below does read"
             `Quick

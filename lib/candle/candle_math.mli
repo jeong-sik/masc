@@ -2,8 +2,9 @@
 
     Amounts are whole milli-candle. Nothing here uses floating point, because a
     float's [exp] and rounding can differ between machines and an amount must
-    not. Every multiplication is checked against the 63-bit range before it is
-    made: an amount that would overflow is refused, never wrapped. *)
+    not. Intermediate products, weight sums and remainders are exact Zarith
+    integers. Public amounts remain [int]; a result outside that range is
+    refused, never wrapped. *)
 
 type error =
   | Negative_total
@@ -13,7 +14,7 @@ type error =
   | Duplicate_name of string
   | Rate_out_of_range of int  (** A rate or floor outside [0, 1000]. *)
   | Negative_hours of int
-  | Overflow  (** An intermediate sum or product would not fit in an [int]. *)
+  | Overflow  (** A final public amount would not fit in an [int]. *)
 
 val error_to_string : error -> string
 

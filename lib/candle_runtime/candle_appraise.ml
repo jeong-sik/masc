@@ -8,7 +8,7 @@ let candidate_tasks (w : Candle_payout.waiting) events =
   List.find_map (fun (event : E.t) -> match event.body with
     | E.Candidates c when c.goal_id = w.goal_id && c.request_id = w.request_id
         && c.verification_run_id = w.verification_run_id -> Some c.tasks
-    | E.Candidates _ | E.Snapshot _ | E.Payout_owed _ | E.Unattributed _ | E.Paid _ | E.Payout_failed _ -> None) events
+    | E.Half_life_set _ | E.Candidates _ | E.Snapshot _ | E.Payout_owed _ | E.Unattributed _ | E.Paid _ | E.Equipped _ | E.Purchased _ | E.Payout_failed _ -> None) events
 let call ~(appraise : A.runner) ~identity request =
   let* answer = appraise ~identity request in
   let* decision = A.decode request (A.decision_json answer.decision) |> Result.map_error (fun detail -> A.Invalid_response detail) in
@@ -77,29 +77,31 @@ let decide ~appraise ~(policy : Candle_config.payout_policy) events (waiting : C
   | Some _, (None | Some _), None | Some _, None, Some _ -> Error (A.Transport_unavailable "Candidates are not durable yet")
 let settle ~now ~appraise ~policy ~base_path events (waiting : Candle_payout.waiting) =
   let* body = decide ~appraise ~policy events waiting in
-  (* A model wait may outlive an operator disable. Keep the accepted policy
-     snapshot for arithmetic, but never append new money after disable. *)
-  let* () = match Candle_status.current ~base_path with
-    | Candle_config.Enabled _ -> Ok ()
-    | Candle_config.Off -> Error (A.Transport_unavailable "Candle was turned off during appraisal")
-    | Candle_config.Disabled {reason} -> Error (A.Transport_unavailable ("Candle disabled during appraisal: " ^ reason)) in
-  let* at = Candle_stamp.at ~now |> Result.map_error (fun detail -> A.Transport_unavailable detail) in
   Candle_ledger.update ~base_path (fun view ->
     match Candle_payout.state ~goal_id:waiting.goal_id (Candle_ledger.events view) with
     | Candle_payout.Waiting current when current = waiting ->
-      let events = Candle_ledger.events view in
-      let* () = Candle_payout.validate_settlement waiting events body in
+      (* Preserve the payout arithmetic accepted before the model wait, but
+         re-read availability and half-life at publication under this CAS. *)
+      let* current_policy = match Candle_status.configured ~base_path with
+        | Candle_config.Enabled policy -> Ok policy
+        | Candle_config.Off -> Error (A.Transport_unavailable "Candle was turned off during appraisal")
+        | Candle_config.Disabled {reason} -> Error (A.Transport_unavailable ("Candle disabled during appraisal: " ^ reason)) in
+      let* at = Candle_stamp.at ~now |> Result.map_error (fun detail -> A.Transport_unavailable detail) in
+      let* prepared = Candle_status.prepare ~at ~half_life:current_policy.half_life (Candle_ledger.events view)
+        |> Result.map_error (fun error -> A.Invalid_response (Candle_balance.error_to_string error)) in
+      let* () = Candle_payout.validate_settlement waiting prepared.events body
+        |> Result.map_error (fun detail -> A.Invalid_response detail) in
       let* () = match body with
         | E.Paid payment ->
-          let* balance = Candle_balance.of_events events |> Result.map_error Candle_balance.error_to_string in
-          Candle_balance.credit balance payment |> Result.map (fun _ -> ()) |> Result.map_error Candle_balance.error_to_string
-        | E.Unattributed _ | E.Payout_failed _ | E.Snapshot _ | E.Payout_owed _ | E.Candidates _ -> Ok () in
-      Ok ([{E.at;body}], Settled waiting.goal_id)
+          Candle_balance.credit prepared.balance ~at payment |> Result.map (fun _ -> ()) |> Result.map_error (fun error -> A.Invalid_response (Candle_balance.error_to_string error))
+        | E.Half_life_set _ | E.Unattributed _ | E.Equipped _ | E.Purchased _ | E.Payout_failed _ | E.Snapshot _ | E.Payout_owed _ | E.Candidates _ -> Ok () in
+      Ok (prepared.policy_events @ [{E.at;body}], Settled waiting.goal_id)
     | Candle_payout.Waiting _ | Candle_payout.No_obligation | Candle_payout.Failed _ | Candle_payout.Settled -> Ok ([], Superseded waiting.goal_id))
   |> Result.map_error (function
-    | Candle_ledger.Refused detail | Candle_ledger.Event_unwritable detail -> A.Invalid_response detail
+    | Candle_ledger.Refused error -> error
+    | Candle_ledger.Event_unwritable detail -> A.Invalid_response detail
     | (Candle_ledger.Read_failed _ | Candle_ledger.Write_failed _ | Candle_ledger.Write_locked _) as error ->
-      A.Transport_unavailable (Candle_ledger.update_error_to_string Fun.id error))
+      A.Transport_unavailable (Candle_ledger.update_error_to_string (function A.Invalid_response detail | A.Transport_unavailable detail -> detail) error))
 let pending ~base_path =
   Candle_ledger.read ~base_path |> Result.map (fun view -> Candle_payout.waiting (Candle_ledger.events view))
   |> Result.map_error Candle_ledger.read_error_to_string
@@ -112,7 +114,7 @@ let settle_one ~now ~appraise ~base_path (waiting : Candle_payout.waiting) =
         |> Result.map_error (fun e -> A.Transport_unavailable (Candle_ledger.read_error_to_string e)) in
       let events = Candle_ledger.events view in
       match Candle_payout.state ~goal_id:waiting.goal_id events with
-      | Candle_payout.Waiting current when current=waiting -> settle ~now ~appraise ~policy ~base_path events waiting
+      | Candle_payout.Waiting current when current=waiting -> settle ~now ~appraise ~policy:policy.payout ~base_path events waiting
       | Candle_payout.Waiting _ | Candle_payout.Failed _ | Candle_payout.No_obligation | Candle_payout.Settled -> Ok (Superseded waiting.goal_id) in
   match result () with
   | Ok outcome -> outcome

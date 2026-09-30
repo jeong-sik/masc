@@ -54,7 +54,8 @@ let with_base_path f =
 let enable base_path =
   let path = Config_dir_resolver.candle_toml_path_for_base_path ~base_path in
   mkdir_p (Filename.dirname path);
-  Out_channel.with_open_bin path (fun oc -> Out_channel.output_string oc {|[payout]
+  Out_channel.with_open_bin path (fun oc -> Out_channel.output_string oc {|half_life = "off"
+[payout]
 weight_max = 10
 deduction_rate = 10
 deduction_floor = 200
@@ -383,6 +384,10 @@ let test_a_payout_that_closed_while_the_tasks_were_read_is_left_alone () =
         seed
           base_path
           [ { E.at = at "2026-09-29T05:30:00Z"
+            ; body = E.Candidates {goal_id;request_id="req-1";verification_run_id="run-1";
+                tasks=List.map (fun id -> id, E.Deleted) task_ids;
+                candidate_task_ids=[];candidate_keepers=[]} }
+          ; { E.at = at "2026-09-29T05:30:00Z"
             ; body = E.Unattributed { goal_id; request_id = "req-1"; verification_run_id = "run-1"; reason = E.No_candidates }
             }
           ];
@@ -394,7 +399,7 @@ let test_a_payout_that_closed_while_the_tasks_were_read_is_left_alone () =
     "superseded"
     [ Candle_candidates.Superseded { goal_id = "goal-1" } ]
     (drained ~sources:closing base_path);
-  check (list string) "only the other writer's row" [ "snapshot"; "payout_owed"; "unattributed" ] (kinds base_path)
+  check (list string) "only the other writer's row" [ "snapshot"; "payout_owed"; "candidates"; "unattributed" ] (kinds base_path)
 ;;
 
 (* Two workers reading the same Tasks: the one that lost the race writes no

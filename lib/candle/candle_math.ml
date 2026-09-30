@@ -20,7 +20,7 @@ let error_to_string = function
   | Duplicate_name name -> Printf.sprintf "%s is named twice" name
   | Rate_out_of_range value -> Printf.sprintf "%d is outside 0..1000" value
   | Negative_hours hours -> Printf.sprintf "%d hours is negative" hours
-  | Overflow -> "the arithmetic does not fit in 63 bits"
+  | Overflow -> "the final amount does not fit in an integer"
 ;;
 
 let thousand = 1000
@@ -56,13 +56,13 @@ let deduction_coefficient ~rate ~floor ~overdue_hours =
     Ok (max floor (thousand - taken)))
 ;;
 
-(* [a * b / c] and [a * b mod c], with the product checked first. *)
+(* The callers validate nonnegative inputs and a positive denominator. Keep
+   the product and remainder exact; only the public monetary quotient is int. *)
 let scaled ~a ~b ~c =
-  if a > 0 && b > max_int / a
-  then Error Overflow
-  else (
-    let product = a * b in
-    Ok (product / c, product mod c))
+  let quotient, remainder = Z.div_rem (Z.mul (Z.of_int a) (Z.of_int b)) c in
+  if Z.fits_int quotient
+  then Ok (Z.to_int quotient, remainder)
+  else Error Overflow
 ;;
 
 let rec first_duplicate seen = function
@@ -77,17 +77,15 @@ let weight_sum weights =
        let* sum = sum in
        if weight < 0
        then Error (Negative_weight name)
-       else if sum > max_int - weight
-       then Error Overflow
-       else Ok (sum + weight))
-    (Ok 0)
+       else Ok (Z.add sum (Z.of_int weight)))
+    (Ok Z.zero)
     weights
 ;;
 
 (* The names that get one more milli-candle, in the order they get it: the
    largest remainder first, and the name that sorts first among equals. *)
 let by_remainder (name_a, remainder_a) (name_b, remainder_b) =
-  match Int.compare remainder_b remainder_a with
+  match Z.compare remainder_b remainder_a with
   | 0 -> String.compare name_a name_b
   | order -> order
 ;;
@@ -102,7 +100,7 @@ let split ~total weights =
       | None -> Ok ()
     in
     let* sum = weight_sum weights in
-    if sum = 0
+    if Z.equal sum Z.zero
     then Error No_weight
     else
       let* parts =
@@ -132,6 +130,6 @@ let deduct ~coefficient share =
   let* () = check_thousandths coefficient in
   if share < 0 then Error (Negative_share share)
   else
-    let* deducted, (_ : int) = scaled ~a:share ~b:coefficient ~c:thousand in
+    let* deducted, (_ : Z.t) = scaled ~a:share ~b:coefficient ~c:(Z.of_int thousand) in
     Ok deducted
 ;;

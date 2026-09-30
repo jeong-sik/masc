@@ -49,15 +49,17 @@ let snapshot ?(request_id = "req-1") goal_id : E.t =
 ;;
 
 let goal_ids events =
-  List.map
+  List.filter_map
     (fun (event : E.t) ->
        match event.body with
        | E.Snapshot { goal_id; _ }
        | E.Payout_owed { goal_id; _ }
        | E.Candidates { goal_id; _ }
        | E.Unattributed { goal_id; _ }
-       | E.Payout_failed { goal_id; _ } -> goal_id
-       | E.Paid p -> p.identity.goal_id)
+       | E.Payout_failed { goal_id; _ } -> Some goal_id
+       | E.Paid p -> Some p.identity.goal_id
+       | E.Half_life_set _ -> None
+       | E.Equipped _ | E.Purchased _ -> Alcotest.fail "a purchase has no Goal identity")
     events
 ;;
 

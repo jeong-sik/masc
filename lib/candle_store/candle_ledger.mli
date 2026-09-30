@@ -8,7 +8,9 @@
 
     A row that does not read fails the whole read. Paying and buying refuse to
     run on a ledger nobody can read, so a bad row has to stop them, not be
-    skipped. *)
+    skipped. Settlement rows must also agree with preceding obligation,
+    Snapshot and Candidates rows. Reads and appends use the same pure payout
+    admission. *)
 
 val path : base_path:string -> string
 

@@ -32,7 +32,7 @@ let is_settled ~goal_id events =
        match event.body with
        | Candle_event.Unattributed unattributed -> String.equal unattributed.goal_id goal_id
        | Candle_event.Paid p -> String.equal p.identity.goal_id goal_id
-       | Candle_event.Payout_failed _ -> false
+       | Candle_event.Half_life_set _ | Candle_event.Equipped _ | Candle_event.Purchased _ | Candle_event.Payout_failed _ -> false
        | Candle_event.Snapshot _ | Candle_event.Payout_owed _ | Candle_event.Candidates _ ->
          false)
     events
@@ -53,7 +53,7 @@ let last_owed ~goal_id events =
        | Candle_event.Payout_owed _
        | Candle_event.Snapshot _
        | Candle_event.Candidates _
-       | Candle_event.Unattributed _ | Candle_event.Paid _ | Candle_event.Payout_failed _ -> last)
+       | Candle_event.Unattributed _ | Candle_event.Paid _ | Candle_event.Half_life_set _ | Candle_event.Equipped _ | Candle_event.Purchased _ | Candle_event.Payout_failed _ -> last)
     None
     events
 ;;
@@ -63,7 +63,7 @@ let failed_run ~goal_id ~request_id ~verification_run_id events =
     | Candle_event.Payout_failed f -> f.goal_id = goal_id && f.request_id = request_id
         && f.verification_run_id = verification_run_id
     | Candle_event.Snapshot _ | Candle_event.Payout_owed _ | Candle_event.Candidates _
-    | Candle_event.Unattributed _ | Candle_event.Paid _ -> false) events
+    | Candle_event.Unattributed _ | Candle_event.Paid _ | Candle_event.Half_life_set _ | Candle_event.Equipped _ | Candle_event.Purchased _ -> false) events
 
 let state ~goal_id events =
   if is_settled ~goal_id events
@@ -82,7 +82,7 @@ let waiting events =
          match event.body with
          | Candle_event.Payout_owed owed ->
            if List.mem owed.goal_id seen then seen else owed.goal_id :: seen
-         | Candle_event.Snapshot _ | Candle_event.Candidates _ | Candle_event.Unattributed _ | Candle_event.Paid _ | Candle_event.Payout_failed _ ->
+         | Candle_event.Snapshot _ | Candle_event.Candidates _ | Candle_event.Unattributed _ | Candle_event.Paid _ | Candle_event.Half_life_set _ | Candle_event.Equipped _ | Candle_event.Purchased _ | Candle_event.Payout_failed _ ->
            seen)
       []
       events
@@ -117,7 +117,7 @@ let find_pass ~goal_id ~request_id ~verification_run_id ~passed_at events =
        | Candle_event.Snapshot _
        | Candle_event.Payout_owed _
        | Candle_event.Candidates _
-       | Candle_event.Unattributed _ | Candle_event.Paid _ | Candle_event.Payout_failed _ -> None)
+       | Candle_event.Unattributed _ | Candle_event.Paid _ | Candle_event.Half_life_set _ | Candle_event.Equipped _ | Candle_event.Purchased _ | Candle_event.Payout_failed _ -> None)
     events
 ;;
 
@@ -153,12 +153,31 @@ let candidates_of (waiting : waiting) events =
        | Candle_event.Candidates _
        | Candle_event.Snapshot _
        | Candle_event.Payout_owed _
-       | Candle_event.Unattributed _ | Candle_event.Paid _ | Candle_event.Payout_failed _ -> None)
+       | Candle_event.Unattributed _ | Candle_event.Paid _ | Candle_event.Half_life_set _ | Candle_event.Equipped _ | Candle_event.Purchased _ | Candle_event.Payout_failed _ -> None)
     events
+;;
+
+let is_candidate ~goal_created_at ~confirmed_at = function
+  | Candle_event.Found { status = Candle_event.Done { completed_at }; _ } ->
+    Candle_time.compare completed_at goal_created_at > 0
+    && Candle_time.compare completed_at confirmed_at <= 0
+  | Candle_event.Found
+      { status =
+          ( Candle_event.Todo
+          | Candle_event.Claimed
+          | Candle_event.In_progress
+          | Candle_event.Awaiting_verification
+          | Candle_event.Cancelled )
+      ; _
+      }
+  | Candle_event.Deleted -> false
 ;;
 
 let validate_settlement (waiting : waiting) events body =
   let ( let* ) = Result.bind in
+  let* pass = match pass_of waiting events with
+    | Some pass -> Ok pass
+    | None -> Error "settlement requires the confirmed Snapshot" in
   let matches goal_id request_id verification_run_id =
     goal_id = waiting.goal_id && request_id = waiting.request_id
     && verification_run_id = waiting.verification_run_id in
@@ -166,9 +185,18 @@ let validate_settlement (waiting : waiting) events body =
     | Candle_event.Candidates c when matches c.goal_id c.request_id c.verification_run_id ->
       Some (c.tasks, c.candidate_task_ids, c.candidate_keepers)
     | Candle_event.Candidates _ | Candle_event.Snapshot _ | Candle_event.Payout_owed _
-    | Candle_event.Unattributed _ | Candle_event.Paid _ | Candle_event.Payout_failed _ -> None) events in
+    | Candle_event.Unattributed _ | Candle_event.Paid _ | Candle_event.Half_life_set _ | Candle_event.Equipped _ | Candle_event.Purchased _ | Candle_event.Payout_failed _ -> None) events in
   let* tasks, ids, keepers = match candidates with
     | None -> Error "settlement requires durable Candidates" | Some c -> Ok c in
+  let* () =
+    if List.exists (fun id ->
+      not (List.mem id pass.linked_task_ids)
+      || (match List.assoc_opt id tasks with
+          | None -> true
+          | Some task -> not (is_candidate ~goal_created_at:pass.goal_created_at
+              ~confirmed_at:waiting.confirmed_at task))) ids
+    then Error "candidate Task is not linked and completed within the confirmed window"
+    else Ok () in
   let recipients relations =
     let actual = List.map (fun (r : Candle_appraisal.task_relation) -> r.task_id) relations in
     if List.length actual <> List.length (List.sort_uniq String.compare actual)
@@ -200,28 +228,25 @@ let validate_settlement (waiting : waiting) events body =
        if eligible = [] && List.exists (fun (r : Candle_appraisal.task_relation) -> r.relation = Candle_appraisal.Related) a.relations
        then Ok () else Error "no_related_keepers does not match relation decisions")
   | Candle_event.Payout_failed f when matches f.goal_id f.request_id f.verification_run_id ->
-    (match pass_of waiting events with
-     | Some pass when pass.due_date = Some f.due_date -> Ok ()
-     | Some _ | None -> Error "failed due date differs from the confirmed Snapshot")
-  | Candle_event.Paid _ | Candle_event.Unattributed _ | Candle_event.Payout_failed _
+    if pass.due_date = Some f.due_date then Ok ()
+    else Error "failed due date differs from the confirmed Snapshot"
+  | Candle_event.Paid _ | Candle_event.Unattributed _ | Candle_event.Half_life_set _ | Candle_event.Equipped _ | Candle_event.Purchased _ | Candle_event.Payout_failed _
   | Candle_event.Snapshot _ | Candle_event.Payout_owed _ | Candle_event.Candidates _ ->
     Error "settlement does not name the confirmed verifier run"
 
-let is_candidate ~goal_created_at ~confirmed_at = function
-  | Candle_event.Found { status = Candle_event.Done { completed_at }; _ } ->
-    Candle_time.compare completed_at goal_created_at > 0
-    && Candle_time.compare completed_at confirmed_at <= 0
-  | Candle_event.Found
-      { status =
-          ( Candle_event.Todo
-          | Candle_event.Claimed
-          | Candle_event.In_progress
-          | Candle_event.Awaiting_verification
-          | Candle_event.Cancelled )
-      ; _
-      }
-  | Candle_event.Deleted -> false
-;;
+let validate_record events body =
+  let goal_id = match body with
+    | Candle_event.Paid p -> Some p.identity.goal_id
+    | Candle_event.Unattributed u -> Some u.goal_id
+    | Candle_event.Payout_failed f -> Some f.goal_id
+    | Candle_event.Snapshot _ | Candle_event.Payout_owed _ | Candle_event.Candidates _
+    | Candle_event.Half_life_set _ | Candle_event.Equipped _ | Candle_event.Purchased _ -> None in
+  match goal_id with
+  | None -> Ok ()
+  | Some goal_id ->
+    match state ~goal_id events with
+    | No_obligation | Failed _ | Settled -> Error "settlement requires an open payout obligation"
+    | Waiting waiting -> validate_settlement waiting events body
 
 let keeper_name ~is_keeper = function
   | Candle_event.Found { assignee = Some name; _ } -> if is_keeper name then Some name else None

@@ -124,7 +124,8 @@ let enable_candle (config : Workspace.config) =
     inside config (Config_dir_resolver.candle_toml_path_for_base_path ~base_path:config.base_path)
   in
   mkdir_p (Filename.dirname path);
-  Out_channel.with_open_bin path (fun oc -> Out_channel.output_string oc {|[payout]
+  Out_channel.with_open_bin path (fun oc -> Out_channel.output_string oc {|half_life = "off"
+[payout]
 weight_max = 10
 deduction_rate = 10
 deduction_floor = 200
@@ -193,7 +194,7 @@ let last_candidates (config : Workspace.config) =
       (fun (event : E.t) ->
          match event.body with
          | E.Candidates c -> Some (c.candidate_task_ids, c.candidate_keepers)
-         | E.Snapshot _ | E.Payout_owed _ | E.Unattributed _ | E.Paid _ | E.Payout_failed _ -> None)
+         | E.Half_life_set _ | E.Snapshot _ | E.Payout_owed _ | E.Unattributed _ | E.Paid _ | E.Equipped _ | E.Purchased _ | E.Payout_failed _ -> None)
       (List.rev (Candle_ledger.events view))
 
 

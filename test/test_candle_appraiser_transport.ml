@@ -414,6 +414,8 @@ let () =
             (test_provider_refusal ~status:`Unauthorized ~rejected:false)
         ; test_case "provider authorization remains retryable" `Quick
             (test_provider_refusal ~status:`Forbidden ~rejected:false)
+        ; test_case "provider missing model or endpoint remains retryable" `Quick
+            (test_provider_refusal ~status:`Not_found ~rejected:false)
         ; test_case "provider payment rest remains retryable" `Quick
             (test_provider_refusal ~status:`Payment_required ~rejected:false)
         ; test_case "provider rate limit remains retryable" `Quick

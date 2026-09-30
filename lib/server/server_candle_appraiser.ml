@@ -30,9 +30,9 @@ let invalid_output = function
        maintenance pulse. Keep it pending until an explicit event, just like
        rejected model output. Availability failures can recover without an edit. *)
     (match refusal with
-     | Exact.Request_body_refused | Exact.Invalid_request | Exact.Not_found
+     | Exact.Request_body_refused | Exact.Invalid_request
      | Exact.Context_overflow | Exact.Input_capacity -> true
-     | Exact.Auth_failed | Exact.Authorization_refused
+     | Exact.Auth_failed | Exact.Authorization_refused | Exact.Not_found
      | Exact.Refusal_body_not_received | Exact.Rate_limited
      | Exact.Overloaded | Exact.Payment_required
      | Exact.Server_error | Exact.Network_error

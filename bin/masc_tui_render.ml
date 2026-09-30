@@ -11208,7 +11208,7 @@ let render_changes_diff (state : state) (change : Masc.Tui_decode.file_change) =
   let header =
     detail_heading ~cols ~lead:(Lead_text (screen_title " MASC Change" ^ " "))
       ~id:(change_row_address change)
-      ~after:(Printf.sprintf "  col %d -%d +%d" (state.changes_diff_hscroll + 1) removed added)
+      ~after:(Printf.sprintf "  -%d +%d" removed added)
       ~tail:(connection_badge state)
   in
   box_top buf cols;
@@ -11273,10 +11273,11 @@ let render_changes_diff (state : state) (change : Masc.Tui_decode.file_change) =
       | None -> box_empty buf cols
       | Some row -> box_line_span buf cols (diff_row_span ~hscroll:state.changes_diff_hscroll ~width:(framed_inner_width cols) row)
     done;
-  Option.iter
-    (box_line_styled buf cols ~style:(Theme.recede ()))
-    (Masc_tui_scroll.position_row ~scroll ~height:content_height
-       ~hint:"esc closes" total);
+  let position = match Masc_tui_scroll.position_row ~scroll ~height:content_height total with
+    | None -> ""
+    | Some text -> " · " ^ String.trim text in
+  box_line_styled buf cols ~style:(Theme.recede ())
+    (Printf.sprintf "  col %d%s · esc closes" (state.changes_diff_hscroll + 1) position);
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols ~hints:"Shift-Left / Shift-Right:pan  j/k:scroll  Left / Esc:back  o:open in editor  q:quit");

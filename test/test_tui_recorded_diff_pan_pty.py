@@ -23,12 +23,15 @@ def screen(output):
     return h.screen_text(completed).decode("utf-8", "strict")
 
 
-def changed_key(process, fd, output, key):
+def changed_key(process, fd, output, key, column):
     # Wait on a fresh completed frame, not a needle already painted before
     # this operation. Draining afterwards consumes all batched pan presses.
     start = len(output)
     h.write_all(fd, output, key)
-    h.wait_for_output(process, fd, output, h.FRAME_END, start=start, timeout=5)
+    needle = f"col {column} ".encode()
+    h.wait_for_output(process, fd, output, needle, start=start, timeout=5)
+    h.wait_for_output(process, fd, output, h.FRAME_END,
+                      start=h.end_of_needle(output, needle, start), timeout=5)
     h.drain_until_quiet(process, fd, output)
 
 
@@ -89,22 +92,22 @@ def exercise(process, fd, output, *, reader, columns, no_color):
     assert "REMOVETAILZ" not in initial, (reader, columns, initial)
     assert_gutters(output, recorded)
     initial_gutters = [re.search(r"[+-] ", row).start() for row in body_rows(output, recorded)]
-    changed_key(process, fd, output, RIGHT * 70)
+    changed_key(process, fd, output, RIGHT * 70, 71)
     middle = screen(output)
     assert "ADDTAILQ" in middle, (reader, columns, middle)
     assert_gutters(output, recorded)
     assert initial_gutters == [re.search(r"[+-] ", row).start() for row in body_rows(output, recorded)], middle
-    changed_key(process, fd, output, RIGHT * 80)
+    changed_key(process, fd, output, RIGHT * 80, 151)
     tail = screen(output)
     assert "REMOVETAILZ" in tail, (reader, columns, tail)
-    changed_key(process, fd, output, RIGHT * 300)
+    changed_key(process, fd, output, RIGHT * 300, len(REMOVED))
     # The longer removed ASCII row sets the bound, not the CJK added row.
     # At its last display cell only Z remains after the fixed minus gutter.
     clamped = body_rows(output, recorded)
     assert any(re.match(r"^\s*(?:- |1\s+-\s+- )Z\s*$", row) for row in clamped), clamped
     if not recorded:
         assert f"col {len(REMOVED)}" in screen(output), screen(output)
-    changed_key(process, fd, output, LEFT * 400)
+    changed_key(process, fd, output, LEFT * 400, 1)
     assert "REMOVEHEAD" in screen(output) and "ADDHEAD" in screen(output), screen(output)
     print("RECORDED_DIFF_PAN_PTY " + json.dumps({"reader": reader, "width": columns,
           "no_color": no_color, "clamped_rows": clamped}), flush=True)
@@ -122,7 +125,7 @@ def run(executable, no_color):
                 h.send_and_wait(process, fd, output, key, b"REMOVEHEAD")
                 exercise(process, fd, output, reader=reader, columns=columns, no_color=no_color)
                 # Reopening the same file resets its body's offset.
-                changed_key(process, fd, output, RIGHT * 30)
+                changed_key(process, fd, output, RIGHT * 30, 31)
                 h.send_and_wait(process, fd, output, b"\x1b", b"preview")
                 h.send_and_wait(process, fd, output, key, b"REMOVEHEAD")
                 assert "ADDHEAD" in screen(output), screen(output)
@@ -141,7 +144,7 @@ def run(executable, no_color):
         for columns in WIDTHS:
             h.send_and_wait(process, fd, output, b"\r", b"REMOVEHEAD")
             exercise(process, fd, output, reader="project_tree", columns=columns, no_color=no_color)
-            changed_key(process, fd, output, RIGHT * 30)
+            changed_key(process, fd, output, RIGHT * 30, 31)
             h.send_and_wait(process, fd, output, b"\x1b", b"lib/a.ml")
             h.send_and_wait(process, fd, output, b"\r", b"REMOVEHEAD")
             assert "ADDHEAD" in screen(output), screen(output)

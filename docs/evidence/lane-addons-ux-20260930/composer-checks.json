@@ -1,0 +1,17 @@
+{
+  "result": "PASS",
+  "scope": "HTML design prototype; example data only",
+  "checks": [
+    "Fusion simple/refine expansion",
+    "Fusion panel edits, JSON round trip, independent duplicate",
+    "add, rename, connect and fan-out",
+    "remove with undo",
+    "branch and join template",
+    "missing source propagation",
+    "JSON export and round trip",
+    "reject cycle, duplicate, incompatible input without replacing graph",
+    "empty board and duplication",
+    "390px body overflow",
+    "no page errors"
+  ]
+}

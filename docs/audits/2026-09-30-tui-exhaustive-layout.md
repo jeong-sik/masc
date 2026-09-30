@@ -72,6 +72,8 @@ O05 후속: `893ca15b5b998433196541e575bdfdf7419c52dc`의 [run36673794831](https
 
 R02 세 읽기의 `ac8df5fb74` run36673795966은 recorded 40열 color의 tail/gutter/clamp/재열기를 통과한 뒤, 같은 24×40 크기의 keeper-tree에서 새 resize 출력을 기다려 멈췄다. [원문](../evidence/tui-audit-2026-09-30/recorded-diff-resize-failure.txt)의 실제 tree 본문은 이미 그려져 있었다. `6766ed25f4ab9515bc380284a60603a1a3f234aa`는 실제 PTY 크기를 읽어 같은 크기일 때만 이 대기를 건너뛰며 모든 실제 행·폭·tail·gutter 검사를 유지한다. 독립 응답 리뷰를 마쳤고 [새 집중 run36680037724](https://github.com/jeong-sik/masc/actions/runs/36680037724)을 요청했다. 나머지 reader/폭/NO_COLOR의 실행 통과는 아직 없다.
 
+R04 메모 부분: [#40240](https://github.com/jeong-sik/masc/pull/40240)의 `3af8d721aec436688b12063caa15f57ebfc7523d`는 실제 file-pane 폭에서 메모 작성자·본문·읽기 실패 설명을 전부 wrap한다. 그린 줄과 같은 행 수로 j/k·Page·Home/End를 움직이고, resize 뒤 범위를 벗어난 위치에서 바로 움직이도록 보정한다. 독립 적대적 리뷰가 resize 후 k 및 footer 항목 공백 문제를 찾았고 수정·응답 리뷰를 마쳤다. 30/40/60/80/120/160열 color/NO_COLOR fixture는 전체 원문 복원·page overlap·끝에서 resize 뒤 k·재열기 초기화를 검사한다. [집중 run36683716774](https://github.com/jeong-sik/masc/actions/runs/36683716774)와 [probe36683719767](https://github.com/jeong-sik/masc/actions/runs/36683719767)는 요청 상태이다. 소스/정적 검사는 통과했으나 수정 head의 실행·스크린샷·필수 체크·설치는 아직 미확인이며, commit-history 제목·출처는 이 PR의 수정 범위가 아니다.
+
 ## 수정과 남은 결함
 
 `PR`는 구현이 게시되었다는 뜻이다. 아래에 적힌 PR들의 현재 head·CI·리뷰·병합 상태는 작업 직전에 다시 확인한다.
@@ -103,7 +105,7 @@ R02 세 읽기의 `ac8df5fb74` run36673795966은 recorded 40열 color의 tail/gu
 | S06/S07 | Presets | detail logical row 잘림; retained refresh failure에서 list_height+1행 | [#40141](https://github.com/jeong-sik/masc/pull/40141), 전체 detail wrap·실제 페이지 높이·실패 행 배정·refetch 동안 읽기 유지; 집중 실행 검증 대기 |
 | S08/S09/S10 | Voice | input tail/caret·endpoint metadata 잘림; assignment cursor 미추종 | [#40117](https://github.com/jeong-sik/masc/pull/40117), wizard/assignment; 실행 검증 대기, endpoint 추가 필요 |
 | R03 | Workspace Activity | fixed clock/keeper/task 뒤 file 잘림 | [#40230](https://github.com/jeong-sik/masc/pull/40230), 반응형 목록·전체 Context reader; 실행 대기 |
-| R04 | Code memo/history | subject/provenance 논리 행의 잘린 suffix 도달 불가 | 필드 wrap 또는 수평 탐색 필요 |
+| R04 | Code memo/history | subject/provenance 논리 행의 잘린 suffix 도달 불가 | [#40240](https://github.com/jeong-sik/masc/pull/40240), 메모 작성자·본문 wrap/물리 행 탐색; 실행 대기, history 제목·출처는 남음 |
 | S11 | Tools | root path/rejection/composition 행·skill usage last-used 잘림 | 상세 검사·wrap/반응형 열 필요 |
 | O05 | Link preview | 설명 원문이 narrow frame에서 한 줄 잘림 | [#40209](https://github.com/jeong-sik/masc/pull/40209), 전체 URL·설명·거절 wrap, 실행 검증 대기 |
 

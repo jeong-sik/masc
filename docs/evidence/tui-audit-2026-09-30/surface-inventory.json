@@ -600,5 +600,12 @@
     "run": 36681385350,
     "probe": 36680543354,
     "scope": "requested, execution pending; earlier36680299952 cancel requested for absent changes alias, not proof"
+  },
+  "code_memo_layout_request": {
+    "head": "3af8d721aec436688b12063caa15f57ebfc7523d",
+    "pr": 40240,
+    "run": 36683716774,
+    "probe": 36683719767,
+    "scope": "source/static and independent response reviews only; complete author/body physical-row fixture30/40/60/80/120/160 color/NO_COLOR added, new-head execution pending. R04 commit-history remains unrepaired."
   }
 }

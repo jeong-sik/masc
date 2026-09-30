@@ -383,11 +383,14 @@ jobs:
           fi
           log "[targeted] EIO_BACKEND=${EIO_BACKEND:-<unset>} timeout=${TARGET_SUITE_TIMEOUT_SEC}s per suite"
           status="${resolution_status}"
+          # Stream fixture records directly to tee: buffered Dune output can
+          # truncate a successful suite mid-JSON. Keep actions serial so their
+          # evidence records cannot interleave.
           for suite in ${aliases[@]+"${aliases[@]}"}; do
             log "[targeted] ${suite}: start $(date -u +%Y-%m-%dT%H:%M:%SZ) (dune alias)"
             started=$(date +%s)
             rc=0
-            timeout -s TERM -k "${TARGET_SUITE_KILL_GRACE_SEC}" "${TARGET_SUITE_TIMEOUT_SEC}"               opam exec -- dune build --root . "@runtest-${suite}" 2>&1 | tee -a "${CI_TEST_LOG_FILE}" || rc=$?
+            timeout -s TERM -k "${TARGET_SUITE_KILL_GRACE_SEC}" "${TARGET_SUITE_TIMEOUT_SEC}"               opam exec -- dune build --root . --no-buffer -j 1 "@runtest-${suite}" 2>&1 | tee -a "${CI_TEST_LOG_FILE}" || rc=$?
             elapsed=$(( $(date +%s) - started ))
             case "${rc}" in
               0)   log "[targeted] ${suite}: OK in ${elapsed}s" ;;

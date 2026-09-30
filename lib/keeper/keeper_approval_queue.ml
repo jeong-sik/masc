@@ -557,8 +557,6 @@ let persist_snapshot_exact_unlocked
   | Unavailable error -> Error error
 ;;
 
-(* Assoc-field validators live in Json_util; these aliases keep the call
-   sites in this module short. *)
 type log_read =
   { log_pending : pending_approval SMap.t
   ; log_deliveries : persisted_delivery SMap.t
@@ -1018,8 +1016,6 @@ let default_continuation_channel () =
   Keeper_continuation_channel.unrouted "no originating connector"
 ;;
 
-let normalized_input_hash = request_fingerprint
-
 type approved_delivery_lookup =
   | Approved_delivery_unconsumed of persisted_delivery
   | Approved_delivery_consumed of persisted_delivery
@@ -1196,7 +1192,9 @@ let consume_approved_resolution
           not
             (String.equal entry.keeper_name keeper_name
              && String.equal entry.tool_name tool_name
-             && String.equal entry.input_hash (normalized_input_hash input))
+             && String.equal
+                  entry.input_hash
+                  (Keeper_approval_request_fingerprint.request_fingerprint input))
         then Ok (Consumption_without_audit Consumption_not_matching)
         else
           let consumed_delivery = { delivery with grant_consumed = true } in
@@ -1262,7 +1260,7 @@ let create_entry
       ~audit_base_path
       ()
   =
-  let input_hash = normalized_input_hash input in
+  let input_hash = Keeper_approval_request_fingerprint.request_fingerprint input in
   { id
   ; keeper_name
   ; tool_name
@@ -2822,7 +2820,7 @@ let submit_pending
       ()
   : (pending_submission, storage_error) result
   =
-  let input_hash = normalized_input_hash input in
+  let input_hash = Keeper_approval_request_fingerprint.request_fingerprint input in
   let continuation_channel =
     Option.value continuation_channel ~default:(default_continuation_channel ())
   in

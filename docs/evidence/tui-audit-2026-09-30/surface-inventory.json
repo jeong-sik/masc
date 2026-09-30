@@ -277,7 +277,11 @@
       "finding_ids": [
         "S02"
       ],
-      "followup_source_evidence": "86751f610442e4d82992ebc54bf9eb8ba45ef6d2 still uses 10/20/20/22 widths below120; PR40177 a5ff52d4f6cf83a11830a5254025110a0ec0aa79 does not repair this listing; source-only"
+      "followup_source_evidence": "86751f610442e4d82992ebc54bf9eb8ba45ef6d2 still uses 10/20/20/22 widths below120; PR40177 a5ff52d4f6cf83a11830a5254025110a0ec0aa79 does not repair this listing; source-only",
+      "implementation_prs": [
+        40220
+      ],
+      "implementation_evidence": "S02 listing portion at68b11bce73 source/static/review only; width40/60/80/120 lane/catalog color/NO_COLOR focused fixture added, runtime pending. Default/media routes and warning/fallback/smaller frames remain."
     },
     {
       "name": "render_runtime_detail",
@@ -535,5 +539,21 @@
     "job": 109744166515,
     "receipt": "tables-targeted-pass.txt",
     "scope": "compiled unit suite, 96 tests success; raw checkout and printed narrow table rows verified; not PTY, required checks or installed binary proof"
+  },
+  "code_diff_hint_response": {
+    "failed_head": "abfe0affb12bc8c2e6b93f9bc8fd3c8bd75a6c08",
+    "failed_run": 36671784007,
+    "receipt": "code-diff-narrow-hint-failure.txt",
+    "repair_head": "bee36c85b7a02d37a33278e82bfd540af1731c42",
+    "new_targeted_run": 36675879028,
+    "new_probe_run": 36676458728,
+    "scope": "source-reviewed narrow hint fix; no latest runtime or screenshot proof"
+  },
+  "runtime_listing_targeted_request": {
+    "pr": 40220,
+    "run": 36676524947,
+    "scope": "requested scoped CI; source/static only, no execution PASS",
+    "head": "68b11bce7304ecd3d5c51d244a0aee8495f353bd",
+    "probe_run": 36676780128
   }
 }

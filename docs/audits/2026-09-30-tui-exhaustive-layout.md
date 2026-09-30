@@ -60,6 +60,10 @@ O05 링크 미리보기는 [#40209](https://github.com/jeong-sik/masc/pull/40209
 
 후속 main `86751f610442e4d82992ebc54bf9eb8ba45ef6d2` 소스 대조에서 S02 Runtime 목록의 작은 폭은 여전히 10/20/20/22셀 고정 열이며 route/probe 앞에 들여쓰기·세 열·간격 55셀이 놓인다. R03 Workspace Activity도 날짜 16셀·Keeper 18셀·Task 16셀 뒤에 파일을 붙이고 선택 경로/Task 제목은 한 행이다. 열린 [surface studio #40177](https://github.com/jeong-sik/masc/pull/40177)의 `a5ff52d4f6cf83a11830a5254025110a0ec0aa79` diff는 repository 목록·Work·Params를 바꾸며 이 두 읽기 경로의 수리는 포함하지 않는다. 이것은 소스 대조이며 현재 바이너리의 실행 측정은 아니다.
 
+R02 Code 후속: `abfe0affb12`의 집중 `36671784007`은 40열에서 diff 본문을 그렸지만 긴 pan 안내가 footer에서 탈락해 첫 시나리오가 실패했다. [원문 발췌](../evidence/tui-audit-2026-09-30/code-diff-narrow-hint-failure.txt)를 보관하며 tail/clamp/isolation 검사가 아직 실행되지 않았음을 명시한다. `bee36c85b7a02d37a33278e82bfd540af1731c42`는 diff 전용 안내를 `Shift-←/→:pan`과 `Esc:back`으로 줄이고 PTY가 두 안내를 모두 요구하도록 했다. 기존 key dispatch와 도움말은 유지되며 독립 리뷰 응답을 마쳤다. [새 집중 run36675879028](https://github.com/jeong-sik/masc/actions/runs/36675879028)과 [새 probe36676458728](https://github.com/jeong-sik/masc/actions/runs/36676458728)은 요청했으며 최신 head 실행과 스크린샷은 미확인이다.
+
+S02 목록 부분은 [#40220](https://github.com/jeong-sik/masc/pull/40220)으로 수정했다. `68b11bce73`는 실제 frame 폭의 공유 Table.fit으로 후보 identity·route/probe를 먼저 보존하고 보조 detail/provider/lane을 순서대로 접는다. 헤더·데이터는 같은 열 배정을 쓰며 Enter의 정확한 lane/runtime 대상은 유지한다. 40/60/80/120열·lane/catalog·color/NO_COLOR fixture가 한 행의 이름 끝·healthy 상태·CJK 셀 폭·Enter에서 전체 ID 복원을 검사한다. 두 독립 소스 리뷰와 정적 검사를 마쳤고 [집중 run36676524947](https://github.com/jeong-sik/masc/actions/runs/36676524947)을 요청했으나 실행 PASS는 아직 없다. [확인용 probe36676780128](https://github.com/jeong-sik/masc/actions/runs/36676780128)도 요청했다. Default/media 고정 행, warning/fallback label·더 작은 창은 남은 범위다.
+
 ## 수정과 남은 결함
 
 `PR`는 구현이 게시되었다는 뜻이다. 아래에 적힌 PR들의 현재 head·CI·리뷰·병합 상태는 작업 직전에 다시 확인한다.
@@ -82,7 +86,7 @@ O05 링크 미리보기는 [#40209](https://github.com/jeong-sik/masc/pull/40209
 | K05 | Runtime picker | mandatory 24셀×2 + chrome이 작은 frame 초과 | [#40143](https://github.com/jeong-sik/masc/pull/40143), 실제 셀 폭으로 열 배정; 집중 실행 검증 대기 |
 | K06 | Chat inflight row | 다른 Keeper 이름 뒤 interrupt 행동이 잘림 | [#40186](https://github.com/jeong-sik/masc/pull/40186), 전체 중단 명령을 먼저 wrap·공유 물리 행 예산; 실행 검증 대기 |
 | R02 | diff 읽기 | 기록된 호출·Changes working tree·Repository Changes는 세로 위치만 있어 긴 줄 끝이 도달 불가; Code Shift 키는 가려진 file offset을 바꿈 | Code 부분 [#40196](https://github.com/jeong-sik/masc/pull/40196); 나머지 세 읽기 경로 [#40208](https://github.com/jeong-sik/masc/pull/40208), 실행 검증 대기 |
-| S02 | Runtime 목록 | 77셀 고정 열이 route/probe/detail을 밀어냄 | 반응형 열 필요; Enter 상세 fallback 있음 |
+| S02 | Runtime 목록 | 77셀 고정 열이 route/probe/detail을 밀어냄 | [#40220](https://github.com/jeong-sik/masc/pull/40220), 목록 열 배정 수정·실행 대기; default/media 행은 남음 |
 | W02 | Task 상세 | title/status/actor/reason/ID 등 고정 metadata가 원문을 잃음 | [#40133](https://github.com/jeong-sik/masc/pull/40133), 모든 metadata/history를 물리 행 스크롤에 포함; 집중 실행 검증 대기 |
 | W03/W04 | Goal 상세·짧은 창 | metadata가 잘리고 fixed chrome/linked task cap이 본문을 밀어냄 | [#40142](https://github.com/jeong-sik/masc/pull/40142), 전체 metadata/연결 Task/타임라인을 물리 행 스크롤에 포함; 집중 실행 검증 대기 |
 | W05/W06 | Review/Verdict 상세 | title/task/request/agent/gate/goal metric metadata 잘림 | 필드 wrap 필요 |

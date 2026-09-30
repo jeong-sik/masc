@@ -30,7 +30,7 @@ type event =
 val open_form :
   keepers:string list ->
   keeper:string option ->
-  options:Masc.Tui_decode.fusion_launch_options ->
+  options:Masc.Tui_decode_fusion.fusion_launch_options ->
   (t, string) result
 (** [keepers] are the roster's names and [keeper] the one to start on, taken
     when it is in the roster and otherwise the first. The preset starts on

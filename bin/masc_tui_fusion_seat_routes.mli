@@ -6,7 +6,7 @@
     the failed attempts indented under their seat, in the order the sink
     recorded them. *)
 
-val lines : Masc.Tui_decode.fusion_seat_route list -> string list
+val lines : Masc.Tui_decode_fusion.fusion_seat_route list -> string list
 (** [<seat> · route <route> → answered by <runtime>] per seat, a seat nobody
     answered saying so instead, then [<runtime>: <code> <detail>] indented
     for each failed attempt. Seats are spelled as the tool ledger spells its

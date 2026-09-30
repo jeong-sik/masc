@@ -37,8 +37,22 @@ def from_cell(text, boundary):
     return ""
 
 
+def completed(output):
+    end = output.rfind(h.FRAME_END)
+    assert end >= 0, "No completed redraw"
+    return bytes(output[:end + len(h.FRAME_END)])
+
+
+def resize(process, fd, output, **kwargs):
+    h.read_available(fd, output)
+    start = len(output)
+    h.resize_and_wait(process, fd, output, **kwargs)
+    h.wait_for_output(process, fd, output, h.FRAME_END,
+                      start=h.end_of_needle(output, kwargs["needle"], start), timeout=3)
+
+
 def window(output, columns):
-    rows = h.screen_rows(bytes(output))
+    rows = h.screen_rows(completed(output))
     position, match = next((index, WINDOW.search(text.decode("utf-8")))
         for index, text in sorted(rows.items()) if WINDOW.search(text.decode("utf-8")))
     first, last, total = map(int, match.groups())
@@ -83,7 +97,7 @@ def run(executable, columns, no_color, hide_recent=True):
         # narrow -> wide -> hidden cycle. Physical widths then equal the Code
         # surface widths used by the split-pane and wrapping assertions.
         if hide_recent:
-            h.resize_and_wait(process, fd, output, rows=18,
+            resize(process, fd, output, rows=18,
                               columns=h.ACTING_PANE_CYCLE_COLUMNS,
                               needle=b"local lock = 1", controls=(h.FULL_REDRAW,))
             h.send_and_wait(process, fd, output, b"\x0c", b"[Recent]")
@@ -92,12 +106,12 @@ def run(executable, columns, no_color, hide_recent=True):
             h.send_and_wait(process, fd, output, b"\x0c", b"local lock = 1")
             assert h.acting_pane_header_cell(output) == -1
         # Resize while the file is open; the fixture starts at 100 columns.
-        h.resize_and_wait(process, fd, output, rows=18, columns=columns,
+        resize(process, fd, output, rows=18, columns=columns,
                           needle=b"local lock = 1", controls=(h.FULL_REDRAW,))
         if hide_recent:
             assert h.acting_pane_header_cell(output) == -1
         h.send_and_wait(process, fd, output, b"m", b"rows 1-")
-        screen = h.screen_text(bytes(output)).decode("utf-8")
+        screen = h.screen_text(completed(output)).decode("utf-8")
         assert "Esc:back" in screen, (columns, no_color, screen)
         captured = {}
         while True:
@@ -120,7 +134,7 @@ def run(executable, columns, no_color, hide_recent=True):
         h.send_and_wait(process, fd, output, b"\x1b[F", f"rows {max(1, total-height+1)}-".encode())
         assert window(output, columns)[1] == total
         resized_columns = 160 if columns != 160 else 40
-        h.resize_and_wait(process, fd, output, rows=18, columns=resized_columns,
+        resize(process, fd, output, rows=18, columns=resized_columns,
                           needle=b"notes: init.lua", controls=(h.FULL_REDRAW,))
         shown_first = window(output, resized_columns)[0]
         expected_first = max(1, shown_first - 1)

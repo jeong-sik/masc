@@ -395,15 +395,16 @@
     {
       "name": "render_workspace_activity",
       "source_review": "reviewed with findings",
-      "runtime_evidence": "pending",
+      "runtime_evidence": "Historical original40230 fixture results do not validate new integration head; Release execution pending.",
       "finding_ids": [
         "R03"
       ],
       "followup_source_evidence": "86751f610442e4d82992ebc54bf9eb8ba45ef6d2 still has date16/keeper18/task16 before path and one-row selected metadata; PR40177 does not repair this reader; source-only",
       "implementation_prs": [
-        40230
+        40230,
+        40316
       ],
-      "implementation_evidence": "c6677251ad98639c7cbc4390eecef7c690390caa source/static/review only; responsive30/40/60/80/120 rows and full Context reader fixture added; run36681385350/probe36680543354 requested, not execution PASS."
+      "implementation_evidence": "PR40316 at 0a0572060da1a2ea8eeb9a03c00d9f3d2b45b93b integrates current remote40230 source into accumulated Runtime/Patch/help stack. Source checks only; latest integrated-head runtime evidence pending."
     }
   ],
   "global_overlays": [
@@ -792,5 +793,21 @@
     "review": "system_audit and agenda_finish source PASS at exact recorded head, no unresolved P0/P1/P2, initial30col candidateellipsis P2 repaired",
     "validation": "syntax/AST/diff checks only; imported refined fixture unexecuted",
     "execution": "not run under source-only policy"
+  },
+  "workspace_activity_integration_stack": {
+    "pr": 40316,
+    "base_pr": 40309,
+    "base_head": "5b005ee6d8c1d2706a0e3847f936cf749eef41b5",
+    "head": "0a0572060da1a2ea8eeb9a03c00d9f3d2b45b93b",
+    "imported_pr": 40230,
+    "imported_head": "08cf7750366f63daa793d80744976f1466bf6e08",
+    "imported_base": "04256f2b1d46fe9d49f884215b2d6c0025defa3a",
+    "scope": "responsive path/result list, full Context metadata and physical-row navigation, refresh selection retention, h/v reader ownership, active Activity help",
+    "review": "system_audit and agenda_finish source PASS at exact recorded head, no unresolved P0/P1/P2; wheel P3 deferred",
+    "validation": "OCaml syntax, Python AST and diff checks only; imported fixture not executed",
+    "execution": "not run under source-only policy",
+    "deferred_p3": [
+      "Context wheel input is consumed without scrolling"
+    ]
   }
 }

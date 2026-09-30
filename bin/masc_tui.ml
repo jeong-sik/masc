@@ -1245,18 +1245,9 @@ let open_message_for_keeper ?(return_to = Keeper_chat_return_detail)
      Keeper must not restore the previous Keeper's draft or image payload. *)
   forget_recall state;
   if state.msg_target_keeper_name <> Some keeper_name then begin
-    (* These readings belong to one conversation. Clear them at the shared
-       target boundary before its replacement request can finish. *)
-    state.msg_loaded <- [];
-    state.msg_loaded_keeper <- None;
-    state.msg_loaded_error <- None;
-    state.msg_loaded_dropped <- 0;
-    state.msg_memory_error <- None;
-    state.msg_memory_dropped <- 0;
-    state.msg_older_cursor <- None;
-    state.msg_older_exist <- false;
-    state.msg_older_loading <- false;
-    state.msg_older_error <- None;
+    (* A failed refresh after revisiting must retain the pages already read
+       for this Keeper, including their exact paging cursor. *)
+    restore_keeper_chat_page state keeper_name;
   end;
   state.msg_target_keeper_name <- Some keeper_name;
   if remember_home_chat then state.home_last_chat <- Some keeper_name;
@@ -6912,8 +6903,6 @@ let launch_keeper_history_load ?(load_file_changes = true) ?(force = false) stat
     let port = state.port in
     state.msg_history_load_generation <- state.msg_history_load_generation + 1;
     state.msg_older_loading <- false;
-    state.msg_memory_error <- None;
-    state.msg_memory_dropped <- 0;
     let generation = state.msg_history_load_generation in
     state.msg_history_inflight <- Some (generation, keeper_name);
     let run () =
@@ -22893,9 +22882,6 @@ and is loaded on demand through keeper_skill.
                     drain_queued_message state ~base_path
                       ~mailbox:async_messages);
                 set_msg_scroll state 0;
-                state.msg_loaded <- [];
-                state.msg_loaded_keeper <- None;
-                state.msg_loaded_error <- None;
                 launch_keeper_history_load state ~mailbox:async_messages
                   ~keeper_name:keeper.k_name
             | None -> ())

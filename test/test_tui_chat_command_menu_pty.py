@@ -16,7 +16,7 @@ CHAT = "Keepers ▸ alpha ▸ chat".encode()
 
 def open_chat(process, fd, output):
     h.resize_and_wait(process, fd, output, rows=38, columns=150, needle=b"MASC Dashboard")
-    h.send_and_wait(process, fd, output, b"3", b"MASC Keepers")
+    h.tab_until(process, fd, output, b"MASC Keepers")
     h.select_keeper_row(process, fd, output, b"alpha")
     h.send_and_wait(process, fd, output, b"\r", "Keepers ▸ \x1b[1malpha".encode())
     h.send_and_wait(process, fd, output, b"m", CHAT)
@@ -248,8 +248,9 @@ def run(executable):
                             preload_input=DARK_PALETTE, extra_env={"COLORTERM": "truecolor"})
 
     def monochrome(process, fd, _slave, output, _base):
-        h.resize_and_wait(process, fd, output, rows=38, columns=150, needle=b"MASC Overview")
-        h.send_and_wait(process, fd, output, b"2", b"alpha")
+        h.resize_and_wait(process, fd, output, rows=38, columns=150, needle=b"MASC Dashboard")
+        h.tab_until(process, fd, output, b"MASC Keepers")
+        h.select_keeper_row(process, fd, output, b"alpha")
         # Open by identity to keep this case independent of roster navigation.
         h.palette_go(process, fd, output, b"keeper alpha", CHAT)
         h.send_and_wait(process, fd, output, b"/", b"Commands  1/")

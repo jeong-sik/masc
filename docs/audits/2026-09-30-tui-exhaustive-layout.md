@@ -78,6 +78,10 @@ R04 history 부분: [#40247](https://github.com/jeong-sik/masc/pull/40247)의 `1
 
 R02 재검증: run36680037724/head6766은 [9개 color pan receipt](../evidence/tui-audit-2026-09-30/recorded-diff-folded-path-failure.txt) 뒤 project40 목록에서 full `second.ml`을 기다리다 실패했다. 원문이 Dune에서 잘려 마지막 frame은 확인할 수 없다. 소스의 12셀 path 접기는 `lib…econd.ml`을 그리므로 incompatible needle이라는 추론이다. `602762aec2`는 두 대기를 `cond.ml`로 바꾸고 Enter의 고유 SECONDHEAD와 이전 REMOVEHEAD 부재를 유지한다. 독립 응답 리뷰를 마쳤고 [새 집중 run36685060343](https://github.com/jeong-sik/masc/actions/runs/36685060343)을 요청했다. 나머지 project 폭·NO_COLOR는 미검증이다.
 
+R03 실행 후속: `c6677251ad98639c7cbc4390eecef7c690390caa` [run36681385350](https://github.com/jeong-sik/masc/actions/runs/36681385350)의 [실제 원문](../evidence/tui-audit-2026-09-30/workspace-activity-targeted-pass.txt)은 Activity layout·Repositories·Changes newline 세 suite PASS를 기록한다. Activity는 30/40/60/80/120열×color/NO_COLOR·18행의 10개 조합에서 목록의 failed/path tail/폭 및 Context의 전체 경로/CJK Task 제목/Execution·Task ID/결과·페이지·Home·기록 전환을 검증했다. 비교는 공백을 제거하므로 원문 공백 보존까지 증명하지 않는다. Refresh/stale/overlay·Enter 경로는 여전히 소스만 검토했다. 같은 head의 probe36680543354는 metadata success이나 artifact 다운로드가 실제 살아 있는 과정이어서 아직 manifest·binary hash/build-commit·스크린샷 증거가 없다. 필수 체크·설치·운영 환경 성공도 아니다.
+
+S05 구현 후속: [#40254](https://github.com/jeong-sik/masc/pull/40254)의 `c0c3d9b1ed2edac61edc3e031fd140b0f206aa7e`는 registry/읽기 전용 assets의 전체 키·경로·소스·실제 변수·설명·오류를 literal wrap으로 상세 문서에 넣고 기존 본문의 Markdown은 유지한다. 페이지/Home/End는 같은 문서·물리 높이를 쓰며 j/k 선택은 상세 위치를 초기화한다. 독립 리뷰가 Librarian 실제 변수 누락과 거절 이유로도 통과할 수 있던 assertion을 찾아 필드명+값 및 별도의 Keeper 분류 문서 비교로 보완했다. 30/40/60/80/120열×color/NO_COLOR·18행 fixture에 전체 metadata/긴 오류·retained refresh/retry·asset·선택 초기화를 추가했다. [집중 run36689755419](https://github.com/jeong-sik/masc/actions/runs/36689755419)와 [probe36689759464](https://github.com/jeong-sik/masc/actions/runs/36689759464)는 요청 상태이며 수정 head 실행/스크린샷/필수 체크/설치는 미확인이다. 첫 읽기/loading/empty·실제 Librarian input fetch·overlay 입력은 소스 검토뿐이다.
+
 ## 수정과 남은 결함
 
 `PR`는 구현이 게시되었다는 뜻이다. 아래에 적힌 PR들의 현재 head·CI·리뷰·병합 상태는 작업 직전에 다시 확인한다.
@@ -105,10 +109,10 @@ R02 재검증: run36680037724/head6766은 [9개 color pan receipt](../evidence/t
 | W03/W04 | Goal 상세·짧은 창 | metadata가 잘리고 fixed chrome/linked task cap이 본문을 밀어냄 | [#40142](https://github.com/jeong-sik/masc/pull/40142), 전체 metadata/연결 Task/타임라인을 물리 행 스크롤에 포함; 집중 실행 검증 대기 |
 | W05/W06 | Review/Verdict 상세 | title/task/request/agent/gate/goal metric metadata 잘림 | 필드 wrap 필요 |
 | S04 | Runtime params | key/current/default 최소 폭, selected contract 도달 불가 | [#40135](https://github.com/jeong-sik/masc/pull/40135), 전체 필드 스크롤·실제 페이지 높이·refresh key identity; 집중 실행 검증 대기 |
-| S05 | Prompt registry/assets | key/source/file/vars metadata 원문 도달 불가 | 필드 wrap 필요 |
+| S05 | Prompt registry/assets | key/source/file/vars metadata 원문 도달 불가 | [#40254](https://github.com/jeong-sik/masc/pull/40254), 전체 literal metadata/오류·공유 detail 페이지, 실행 대기 |
 | S06/S07 | Presets | detail logical row 잘림; retained refresh failure에서 list_height+1행 | [#40141](https://github.com/jeong-sik/masc/pull/40141), 전체 detail wrap·실제 페이지 높이·실패 행 배정·refetch 동안 읽기 유지; 집중 실행 검증 대기 |
 | S08/S09/S10 | Voice | input tail/caret·endpoint metadata 잘림; assignment cursor 미추종 | [#40117](https://github.com/jeong-sik/masc/pull/40117), wizard/assignment; 실행 검증 대기, endpoint 추가 필요 |
-| R03 | Workspace Activity | fixed clock/keeper/task 뒤 file 잘림 | [#40230](https://github.com/jeong-sik/masc/pull/40230), 반응형 목록·전체 Context reader; 실행 대기 |
+| R03 | Workspace Activity | fixed clock/keeper/task 뒤 file 잘림 | [#40230](https://github.com/jeong-sik/masc/pull/40230), 반응형 목록·Context; 10개 fixture 조합/Repositories/Changes newline 통과, 추가 상태·설치 미검증 |
 | R04 | Code memo/history | subject/provenance 논리 행의 잘린 suffix 도달 불가 | [#40240](https://github.com/jeong-sik/masc/pull/40240), 메모 작성자·본문 wrap/물리 행 탐색; 실행 대기; [#40247](https://github.com/jeong-sik/masc/pull/40247), history 전체 필드/줄 owner/파일·scope·결과 note, 실행 대기 |
 | S11 | Tools | root path/rejection/composition 행·skill usage last-used 잘림 | 상세 검사·wrap/반응형 열 필요 |
 | O05 | Link preview | 설명 원문이 narrow frame에서 한 줄 잘림 | [#40209](https://github.com/jeong-sik/masc/pull/40209), 전체 URL·설명·거절 wrap, 실행 검증 대기 |

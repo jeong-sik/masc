@@ -625,5 +625,19 @@
     "raw": "recorded-diff-folded-path-failure.raw.txt",
     "scope": "nine color pan receipts then fullpathneedle failure; raw truncated so source-supported inference only; remaining project widths/NO_COLOR unproved",
     "repair_head": "602762aec20b26045bbf7af3c462d7c7acc01d17"
+  },
+  "workspace_activity_targeted_evidence": {
+    "head": "c6677251ad98639c7cbc4390eecef7c690390caa",
+    "run": 36681385350,
+    "receipt": "workspace-activity-targeted-pass.txt",
+    "raw": "workspace-activity-targeted.raw.txt",
+    "scope": "compiled fixture10width/color combinations at18rows plus Repositories/Changes newline PASS; normalized-whitespace comparisons. Refresh/stale/overlay/Enter/production/install unproved. Probe metadata success only, artifact download active."
+  },
+  "prompts_layout_request": {
+    "head": "c0c3d9b1ed2edac61edc3e031fd140b0f206aa7e",
+    "pr": 40254,
+    "run": 36689755419,
+    "probe": 36689759464,
+    "scope": "source/static/independent reviews only; complete literal metadata and shared detail paging; focused10cases added, execution pending"
   }
 }

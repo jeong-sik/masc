@@ -1,0 +1,64 @@
+{
+  "schema": "masc.feature-native-checkpoint.v1",
+  "observed_at": "2026-09-30T05:21:53.289692+00:00",
+  "prune": {
+    "source_head": "b69576e1f750df5d48735f18986d01e8b26981ca",
+    "run_id": 36669352105,
+    "workflow_conclusion": "success",
+    "resolved_native_suites": 8,
+    "case_counts": [
+      12,
+      3,
+      7,
+      64,
+      12,
+      14,
+      4,
+      17
+    ],
+    "total_native_cases": 133,
+    "raw_sha256": "d589d45d7b71a5ec3f45954cf8a3a160e776dc48593a4787aabbcb740e4efbb8",
+    "raw_bytes": 55058
+  },
+  "rotation": {
+    "source_head": "040761c68ae64cc7165ca9c3f570e086c2354d01",
+    "run_id": 36669420029,
+    "workflow_conclusion": "failure",
+    "native_suites_executed": 0,
+    "failure": "test/test_auth_token_rotation_transaction.ml:212 Auth.agents_dir is not public",
+    "raw_sha256": "38451523467845c7597e263cdb6a67ba3935ed571ac81e0667cf8b38049ef537",
+    "raw_bytes": 21965
+  },
+  "current_composition": {
+    "main": "c112b2030652a5a25360f5d5322f8dc6da99c598",
+    "play": {
+      "head": "19a1a1aca413a1636187c3d73e684ff2b586b010",
+      "tree": "cce704e1b234fa584a8aea95586fc21382245766",
+      "requested_native_run": 36672362813
+    },
+    "expiry": {
+      "head": "5f736b22c48c478e165035e783503ff6f13c6375",
+      "tree": "9a7f36e05f94addfdc149b09f72349af425a08f3"
+    },
+    "prune": {
+      "head": "acb08a586cebbbbe7449ef140c112220fc83a7a1",
+      "tree": "378ea21573be0fb4aa9f367317f022866e9da30b",
+      "requested_native_run": 36672657120
+    },
+    "rotation": {
+      "head": "f80069e428c29784ad54b6387cfaeb19ff85306a",
+      "tree": "3bf3fc1cdc63f6437fe5247c74e98ce271d2a1cd",
+      "requested_native_run": 36672818038
+    },
+    "results": "pending, prior-head native passes do not validate refreshed composition"
+  },
+  "dashboard": {
+    "pr": 40190,
+    "head": "ce7d95cac4af3750e5bb45039102b9b530bdc0e2",
+    "base": "a065328066d9996f8658238e3077cad70c2c063c",
+    "published_delta_blobs_matched": 11,
+    "artifact_run": 36670622682,
+    "pr_run": 36670626246,
+    "vitest_typecheck_browser": "not measured yet; CI queued at observation"
+  }
+}

@@ -2,6 +2,14 @@
 
 These checkpoints name different source commits. They are not a single released or integrated build.
 
+## Latest current-main checkpoint
+
+This section supersedes earlier pending observations below. Play19a1, expiry5f73, pruneacb0 and rotationf800 now preserve complete mainc112 plus each reviewed own delta. Required/current native CI remains pending; no merge/deployment is claimed. Prior pruning b695 completed Test36669352105 with8/8 suites133 cases. Prior rotation040 failed before suites on a private-helper fixture reference; refreshed f800 fixes it. Dashboard40190/ce7 publishes the workspace authority repair over a065; its Vitest/typecheck/browser evidence is queued, not measured. The remaining file-backed Keeper/bootstrap/login publication gaps are being repaired in the next stack.
+
+[Raw logs, current head/tree receipt and evidence limits](../evidence/2026-09-30-credential-current-main-native/README.md).
+
+
+
 | Feature boundary | Repair | Measured checkpoint | Remaining |
 |---|---|---|---|
 | Item account / workspace / Portrait | Clear detail tokens/account on workspace transition; withdraw failed account | [#40111](https://github.com/jeong-sik/masc/pull/40111), f4041a99 native 9/9 suites, includes local/remote Portrait PTYs, Item HTTP/purchase and held history | Draft composition branch; installed runtime not verified |
@@ -22,7 +30,7 @@ Python stdio workers, native host fixtures, terminal PTYs, container image conte
 
 Human Candle calibration remains incomplete: the operator's shared-foundation Epic label is one posthoc anchor, not a fully labelled20-Goal acceptance set. The prepared revised model experiment remains unmeasured through the original production adapter. The approved shared-Goal hard cut still needs fresh runtime data and a stopped-writer rollout.
 
-## Related rotation repair in progress
+## Earlier rotation source checkpoint (superseded)
 
 Startup shared-token rotation still reads its groups before credential admission and writes raw sidecars before separately saving credentials. Source review found Admin renewal overwrite and successful rotation with a missing raw sidecar when prune interleaves. The next work unit is implementing current-group reading and raw/credential publication inside the existing Auth admission. This finding has no native reproduction yet.
 

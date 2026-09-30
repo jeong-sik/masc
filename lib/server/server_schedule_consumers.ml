@@ -395,27 +395,6 @@ let body_keeper_name payload =
       (Schedule_supported_kinds.keeper_wake_target_name_error ~field:"keeper_name")
 ;;
 
-(** Resolve the schedule payload boundary to the canonical Keeper name once.
-    Exact Keeper-name ownership wins; only an absent exact owner is considered
-    as an [agent_name] binding. Ambiguity and storage failures remain errors so
-    a due occurrence is retained instead of being enqueued under the wrong
-    durable owner. *)
-let resolve_keeper_wake_target config requested_name =
-  let base_path = config.Workspace_utils.base_path in
-  match Keeper_registry.get ~base_path requested_name with
-  | Some _ -> Ok requested_name
-  | None ->
-    (match Keeper_meta_store.read_meta config requested_name with
-     | Error detail ->
-       Error
-         (Printf.sprintf
-            "scheduled keeper wake target metadata read failed target=%s: %s"
-            requested_name
-            detail)
-     | Ok (Some _) -> Ok requested_name
-     | Ok None -> Ok requested_name)
-;;
-
 let body_keeper_wake_urgency payload =
   let* raw = Schedule_payload_projection.body_optional_string payload "urgency" in
   match raw with
@@ -1038,13 +1017,8 @@ let dispatch_keeper_wake
       ~commit_acceptance
       payload
   =
-  let* requested_keeper_name = terminal_dispatch_result (body_keeper_name payload) in
+  let* keeper_name = terminal_dispatch_result (body_keeper_name payload) in
   let base_path = config.Workspace_utils.base_path in
-  let* keeper_name =
-    match resolve_keeper_wake_target config requested_keeper_name with
-    | Ok keeper_name -> Ok keeper_name
-    | Error detail -> retryable_dispatch_failure detail
-  in
   let* message =
     terminal_dispatch_result
       (Schedule_payload_projection.body_required_string payload "message")
@@ -1229,16 +1203,7 @@ let cancel_keeper_schedules config ~keeper_name =
     | Ok (Schedule_payload_projection.Keeper_wake, payload) ->
       (match body_keeper_name payload with
        | Error _ -> false
-       | Ok target when String.equal target keeper_name -> true
-       | Ok target ->
-         (match resolve_keeper_wake_target config target with
-          | Ok resolved -> String.equal resolved keeper_name
-          | Error detail ->
-            Log.Keeper.warn
-              "cancel_keeper_schedules: target resolution failed target=%s: %s"
-              target
-              detail;
-            false))
+       | Ok target -> String.equal target keeper_name)
     | Error _ -> false
   in
   (* Cancel propagation (task-370): the queue drain must see the schedule

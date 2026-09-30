@@ -8,6 +8,14 @@
 #ifdef __APPLE__
 #include <CoreFoundation/CoreFoundation.h>
 #include <Security/Security.h>
+#include <pthread.h>
+
+/* kSecUseAuthenticationUIFail does not suppress ACL prompts in file-based
+ * keychains. SecKeychain's interaction setting is process-global: serialize
+ * save/disable/query/restore, including callers on other OCaml domains.
+ * Acquire only after releasing the OCaml runtime, and restore before taking
+ * it again so an OCaml exception cannot leave UI disabled or the lock held. */
+static pthread_mutex_t interaction_lock = PTHREAD_MUTEX_INITIALIZER;
 #endif
 
 /* security(1) find_first_generic_password collapses search errors to missing:
@@ -31,8 +39,17 @@ CAMLprim value masc_antigravity_keychain_item(value path, value remove_item) {
     CFTypeRef data = NULL;
     OSStatus status;
     SecKeychainStatus state = 0;
+    Boolean previous_interaction = false;
+    int restore_interaction = 0;
     caml_enter_blocking_section();
-    status = SecKeychainOpen(owned_path, &keychain);
+    int locked = pthread_mutex_lock(&interaction_lock) == 0;
+    status = locked ? SecKeychainGetUserInteractionAllowed(&previous_interaction)
+                    : errSecNotAvailable;
+    if (status == errSecSuccess) {
+      restore_interaction = 1;
+      status = SecKeychainSetUserInteractionAllowed(false);
+    }
+    if (status == errSecSuccess) status = SecKeychainOpen(owned_path, &keychain);
     free(owned_path);
     if (status == errSecSuccess) status = SecKeychainGetStatus(keychain, &state);
     if (status == errSecSuccess && !(state & kSecUnlockStateStatus))
@@ -60,6 +77,11 @@ CAMLprim value masc_antigravity_keychain_item(value path, value remove_item) {
     if (query) CFRelease(query);
     if (search) CFRelease(search);
     if (keychain) CFRelease(keychain);
+    if (restore_interaction) {
+      OSStatus restored = SecKeychainSetUserInteractionAllowed(previous_interaction);
+      if (restored != errSecSuccess) status = restored;
+    }
+    if (locked) pthread_mutex_unlock(&interaction_lock);
     caml_leave_blocking_section();
     if (status == errSecItemNotFound) outcome = 1;
     else if (status != errSecSuccess) outcome = 3;

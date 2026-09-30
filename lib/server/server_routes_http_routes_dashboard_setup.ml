@@ -214,11 +214,11 @@ let handle_telemetry request reqd =
           ("entries", `List result.entries);
         ])
     in
-    let json =
+    let payload =
       Server_timing.measure timing Cache_lookup (fun () ->
-        Dashboard_cache.get_or_compute cache_key
+        Dashboard_cache.get_or_compute_payload cache_key
           ~ttl:dashboard_telemetry_cache_ttl_sec compute)
     in
-    Http.Response.json_value ~compress:true ~request:req
-      ~extra_headers:(Server_timing.extra_header timing) json reqd
+    Server_cached_read_http.respond ~request:req
+      ~extra_headers:(Server_timing.extra_header timing) reqd payload
   ) request reqd

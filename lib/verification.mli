@@ -86,7 +86,11 @@ val list_projected : 'a listing -> string -> ('a scan, string) result
     parsed. That includes a file that became unreadable without changing (a
     permission change, a disk error): it keeps its projection until it
     changes. An unreadable file is not kept, so it is read again on every
-    pass. *)
+    pass.
+
+    The walk, the reads and the projection run on the domain pool when one is
+    installed ([Domain_pool_ref.submit_cpu_or_inline]), and in the caller
+    otherwise. *)
 
 (** {1 High-level API} *)
 

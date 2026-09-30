@@ -271,6 +271,7 @@ export interface AsyncRequestRow {
   request_id: string
   keeper_name: string
   submitted_by: string
+  request_context: Record<string, unknown> | null
   status: string
   submitted_at: number
   elapsed_sec?: number
@@ -671,6 +672,9 @@ const AsyncRequestObservationSchema = Schema.Union(
       request_id: Schema.NonEmptyString,
       keeper_name: Schema.NonEmptyString,
       submitted_by: Schema.NonEmptyString,
+      // Keeper_msg_async.entry_to_json writes the field on every row: the
+      // submitter's JSON object, or null when none was given.
+      request_context: Schema.NullOr(UnknownRecordSchema),
       status: Schema.NonEmptyString,
       submitted_at: Schema.Number,
       elapsed_sec: Schema.optional(Schema.Number),

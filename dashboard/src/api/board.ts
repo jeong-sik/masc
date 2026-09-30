@@ -298,7 +298,6 @@ export function normalizeKeeperApprovalQueueItem(raw: unknown): KeeperApprovalQu
     'turn_id',
     'task_id',
     'goal_id',
-    'goal_ids',
     'phase',
     'summary_status',
     'exact_attempt',
@@ -414,7 +413,6 @@ export function normalizeKeeperApprovalQueueItem(raw: unknown): KeeperApprovalQu
     turn_id: asInt(raw.turn_id),
     task_id: asNullableString(raw.task_id),
     goal_id: asNullableString(raw.goal_id),
-    goal_ids: asStringList(raw.goal_ids),
     input: raw.input,
     input_preview: asNullableString(raw.input_preview),
     phase,
@@ -1135,12 +1133,23 @@ export async function fetchFusionRunEvidencePost(postRunId: string): Promise<Boa
   }))
 }
 
-export async function fetchBoardPost(postId: string): Promise<BoardPost & { comments: BoardComment[] }> {
+export interface BoardCommentPage {
+  offset: number
+  total: number
+}
+
+export async function fetchBoardPost(
+  postId: string,
+  commentOffset?: number,
+  commentLimit?: number,
+): Promise<BoardPost & { comments: BoardComment[]; commentPage: BoardCommentPage }> {
   return timeBoardRequest('detail', () => runRequest('fetchBoardPost', async () => {
     const params = new URLSearchParams({
       format: 'flat',
       voter: currentDashboardActor(),
     })
+    if (commentOffset !== undefined) params.set('comment_offset', String(commentOffset))
+    if (commentLimit !== undefined) params.set('comment_limit', String(commentLimit))
     const raw = await get<Record<string, unknown>>(`/api/v1/board/${postId}?${params}`)
     const postRaw = isRecord(raw.post) ? raw.post : raw
     const post = normalizeBoardPost(postRaw) ?? {
@@ -1165,7 +1174,14 @@ export async function fetchBoardPost(postId: string): Promise<BoardPost & { comm
     const comments = commentsRaw
       .map(normalizeBoardComment)
       .filter((row): row is BoardComment => row !== null)
-    return { ...post, comments }
+    const pageRaw = isRecord(raw.comment_page) ? raw.comment_page : null
+    const offset = pageRaw?.offset
+    const total = pageRaw?.total
+    if (typeof offset !== 'number' || !Number.isInteger(offset) || offset < 0
+      || typeof total !== 'number' || !Number.isInteger(total) || total < offset) {
+      throw new Error('Board detail returned an invalid comment page')
+    }
+    return { ...post, comments, commentPage: { offset, total } }
   }))
 }
 

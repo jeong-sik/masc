@@ -507,6 +507,7 @@ let test_failed_reads_are_safe_before_the_panel_fits_them () =
   state.schedules_error <- Some raw;
   state.keeper_tool_approvals_error <- Some raw;
   state.tasks_error <- Some raw;
+  state.operator_stalled <- Agenda.Read_failed raw;
   check int "failed reads do not take a strip row" 0
     (Masc_tui_types.agenda_chrome_rows state);
   check int "failed reads preserve the body budget" body_rows

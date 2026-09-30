@@ -9588,7 +9588,7 @@ let runtime_picker_page = 3
    safe here, and the text the typed filter matches: the operator filters by
    exactly what they read. *)
 let runtime_picker_label (runtime : Tui_decode.runtime_option) =
-  Tui_decode.sanitize_terminal_text
+  Tui_terminal_text.sanitize_terminal_text
     (Printf.sprintf "%s   %s / %s" runtime.Tui_decode.ro_id
        runtime.Tui_decode.ro_provider runtime.Tui_decode.ro_model)
 
@@ -10333,7 +10333,7 @@ type runtime_pick_columns = {
 }
 
 let runtime_pick_columns item =
-  let single_line = Tui_decode.sanitize_terminal_text in
+  let single_line = Tui_terminal_text.sanitize_terminal_text in
   match item with
   | Pick_lane (lane, _) ->
       (* A lane's route is its candidates by model, the provider prefix
@@ -10450,7 +10450,7 @@ let runtime_pick_column_widths ~cols items =
       (fun longest item ->
         max longest
           (Masc_tui_message_layout.display_width
-             (Tui_decode.sanitize_terminal_text (runtime_pick_item_id item))))
+             (Tui_terminal_text.sanitize_terminal_text (runtime_pick_item_id item))))
       0 items
   in
   (* The columns divide what is left after the facts. The earlier budget
@@ -10512,7 +10512,7 @@ let aggregate_keeper_stats (keepers : Tui_decode.keeper list) =
    its own qualifier -- "2 probe-only" counts runtimes the probe reached and
    the config does not name, so a row ending at "2" claims something else. *)
 let runtime_authority_rows ~cols (state : state) : string list =
-  let single_line = Tui_decode.sanitize_terminal_text in
+  let single_line = Tui_terminal_text.sanitize_terminal_text in
   let clauses =
     match state.runtime_surface with
     | None ->

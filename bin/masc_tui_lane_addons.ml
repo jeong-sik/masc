@@ -632,7 +632,7 @@ let status_text (view : t) =
   | Some note -> current ^ " · " ^ note
 
 let visual_lines ?(failed_note = "") ~height ~width view =
-  let clean = Masc.Tui_decode.sanitize_terminal_text in
+  let clean = Masc.Tui_terminal_text.sanitize_terminal_text in
   let fit size text = Masc_tui_message_layout.fit_width (clean text) (max 0 size) in
   let line ?active:_ ?(tone=Normal) text = {cells=[tone,fit width text]} in
   let wrap ?(tone=Normal) text =
@@ -853,7 +853,7 @@ let visual_text_lines ?(height=24) ?(failed_note = "") ?(visual=true) ~width vie
        |> List.filter_map (fun (index, item) ->
          if index < first || index >= first + capacity then None
          else Some (Masc_tui_message_layout.fit_width
-           (Masc.Tui_decode.sanitize_terminal_text ((if index=cursor then "> " else "  ") ^ render item)) (max 1 width)))) in
+           (Masc.Tui_terminal_text.sanitize_terminal_text ((if index=cursor then "> " else "  ") ^ render item)) (max 1 width)))) in
   let content = match view.snapshot with
     (* Nothing has been read yet, which is not the same as nothing installed:
        both of these lines said "No Add-ons installed." while the read was
@@ -948,14 +948,14 @@ let visual_text_lines ?(height=24) ?(failed_note = "") ?(visual=true) ~width vie
   let documents = match selected_document view with None -> [] | Some document -> Document.summary document in
   let action = action_lines view in
   let compact lines = List.map (fun line -> Masc_tui_message_layout.fit_width
-    (Masc.Tui_decode.sanitize_terminal_text line) (max 1 width)) lines in
+    (Masc.Tui_terminal_text.sanitize_terminal_text line) (max 1 width)) lines in
   let package_marker = match view.snapshot with
     | Some {instances=first :: _;_} -> ["> " ^ first.title]
     | _ -> [] in
   compact header @ compact error @ draft @ documents @ content @ package_marker @ action @ receipt
   |> List.concat_map (fun line ->
     Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
-      (Masc.Tui_decode.sanitize_terminal_text line))
+      (Masc.Tui_terminal_text.sanitize_terminal_text line))
 
 (* Enumerate only values explicitly closed by the package's schema. Required
    open-ended fields have no invented default and use the advanced command. *)
@@ -990,7 +990,7 @@ let technical_lines ?(height=24) ?(failed_note = "") ~width view =
 
 let installation_detail_lines ~width view =
   let wrap line = Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
-      (Masc.Tui_decode.sanitize_terminal_text line) in
+      (Masc.Tui_terminal_text.sanitize_terminal_text line) in
   let edit_hint = if Option.is_some (selected_source_path view) then "  E:edit TOML" else "" in
   let refresh_hint = if view.loading then "  Reading …" else "  r:refresh" in
   let body = match view.snapshot with
@@ -1118,7 +1118,7 @@ let reading_summary fields =
 
 let overview_lines ~width view =
   let wrap text = Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
-    (Masc.Tui_decode.sanitize_terminal_text text) in
+    (Masc.Tui_terminal_text.sanitize_terminal_text text) in
   let content = match view.snapshot with
     | None -> [unread_body_text ~failed_note:"Read failed · r:retry" view]
     | Some snapshot ->
@@ -1199,7 +1199,7 @@ let help_lines = [
 
 let detail_lines ~width view =
   let wrap text = Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
-    (Masc.Tui_decode.sanitize_terminal_text text) in
+    (Masc.Tui_terminal_text.sanitize_terminal_text text) in
   match selected_instance view, view.snapshot with
   | None, _ -> ["The selected Add-on changed. Esc returns to the list."]
   | Some item, Some snapshot ->
@@ -1319,18 +1319,18 @@ let lines ?(height=24) ?(failed_note = "") ~width view =
        @ diagnostic_lines view
        @ Masc_tui_lane_installer.lines installer)
       |> List.concat_map (fun line -> Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
-        (Masc.Tui_decode.sanitize_terminal_text line))
+        (Masc.Tui_terminal_text.sanitize_terminal_text line))
   | None -> match view.evidence_prompt with
   | Some prompt ->
       (diagnostic_lines view @ evidence_lines prompt)
       |> List.concat_map (fun line -> Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
-           (Masc.Tui_decode.sanitize_terminal_text line))
+           (Masc.Tui_terminal_text.sanitize_terminal_text line))
   | None -> match view.subscription_panel,view.action_menu with
   | Some panel,_ ->
       (Masc_tui_message_layout.fit_width (if view.loading then "Refreshing…" else "Last received subscription state") (max 1 width)
        :: Masc_tui_lane_subscriptions.lines panel)
       |> List.concat_map (fun line -> Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
-           (Masc.Tui_decode.sanitize_terminal_text line))
+           (Masc.Tui_terminal_text.sanitize_terminal_text line))
   | None,Some menu ->
       (["Run action on " ^ menu.target_title]
        @ diagnostic_lines view
@@ -1345,12 +1345,12 @@ let lines ?(height=24) ?(failed_note = "") ~width view =
           | None -> ["No selected action"])))
       |> List.concat_map (fun line ->
         Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
-          (Masc.Tui_decode.sanitize_terminal_text line))
+          (Masc.Tui_terminal_text.sanitize_terminal_text line))
   | None,None ->
       if view.help_open then List.map (fun line ->
         Masc_tui_message_layout.fit_width line (max 1 width)) help_lines
       else if view.presentation = Flow then flow_lines view |> List.concat_map
-        (fun line -> Masc_tui_message_layout.split_cells ~max_cells:(max 1 width) (Masc.Tui_decode.sanitize_terminal_text line))
+        (fun line -> Masc_tui_message_layout.split_cells ~max_cells:(max 1 width) (Masc.Tui_terminal_text.sanitize_terminal_text line))
       else if view.presentation = Technical && view.screen=Overview && view.focus=Configurations
         && Option.is_none view.document_key && Option.is_none view.draft
       then installation_detail_lines ~width view

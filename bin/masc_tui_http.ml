@@ -514,7 +514,7 @@ let fetch_machine_live ~(host : string) ~(port : int)
           | Error _ as error -> error
           | Ok json -> Masc_tui_machine_live.decode source json)
   in
-  Result.map_error Masc.Tui_decode.sanitize_terminal_text result
+  Result.map_error Masc.Tui_terminal_text.sanitize_terminal_text result
 
 (** POST a JSON body and parse the JSON response. *)
 let post_json_with_timeout ~timeout_sec ~(host : string) ~(port : int)
@@ -1788,7 +1788,7 @@ let set_runtime_lane_slots ~(host : string) ~(port : int) ~(lane : string)
       | (first : Runtime_toml.parse_error) :: _ ->
         Printf.sprintf "runtime.toml parse error at %s: %s"
           first.path first.message
-        |> Masc.Tui_decode.sanitize_terminal_text) in
+        |> Masc.Tui_terminal_text.sanitize_terminal_text) in
   let* current = match List.find_opt
       (fun (decl : Runtime_schema.lane_decl) -> String.equal decl.id lane)
       config.Runtime_schema.lane_decls with

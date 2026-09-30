@@ -52,8 +52,8 @@ let of_fields ~width fields =
   let fields =
     List.map
       (fun (label, value) ->
-        ( Tui_decode.sanitize_terminal_text label
-        , Tui_decode.sanitize_terminal_lines value ))
+        ( Tui_terminal_text.sanitize_terminal_text label
+        , Tui_terminal_text.sanitize_terminal_lines value ))
       fields
   in
   let label_cells =

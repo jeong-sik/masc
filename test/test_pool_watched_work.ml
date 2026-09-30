@@ -74,6 +74,7 @@ let test_a_body_that_ended_as_the_idle_window_passed_is_the_body () =
   let read =
     Eio.Fiber.fork_promise ~sw (fun () ->
       Pool.For_testing.read_body_with_idle
+        ~retention:Pool.Keep_body
         ~clock
         ~start_sec:(Eio.Time.now clock)
         ~idle_timeout_sec:window_s

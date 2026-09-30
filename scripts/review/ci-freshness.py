@@ -10,13 +10,21 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
 import os
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 import re
 import subprocess
+import sys
 
 
 class Unavailable(Exception):
     pass
+
+
+class NoPrCheckRun(Unavailable):
+    """No PR-check run names this head. A batch caller blames the PR it reads."""
+
+    def __init__(self):
+        super().__init__("pr_check_run_unavailable")
 
 
 def command(args):
@@ -253,19 +261,25 @@ def current_pr_check(gh, prefix, head, pr, branch):
         and run["conclusion"] != "cancelled"
         and run_names_candidate(run, pr, branch)]
     if not runs:
-        raise Unavailable("pr_check_run_unavailable")
+        raise NoPrCheckRun()
     # Same-head cancelled concurrency twins do not replace a real observation.
     # A newer queued/failed/skipped run DOES replace an older success; evaluate
     # below refuses it instead of asking a reviewer to certify stale evidence.
     return max(runs, key=lambda run: (run["run_number"], run["id"]))["id"]
 
 
-def evaluate(*, repo, pr, head, run, git_dir, gh):
+def evaluate(*, repo, pr, head, run, git_dir, gh, batch_line=None, landing=False):
     if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo):
         raise Unavailable("invalid_repository")
     sha(head)
     if pr <= 0 or (run is not None and run <= 0):
         raise Unavailable("invalid_pr_or_run")
+    if landing and batch_line is None:
+        raise Unavailable("landing_requires_batch")
+    if batch_line is not None:
+        import batch_evidence
+        return batch_evidence.evaluate(sys.modules[__name__], line=batch_line,
+            repo=repo, pr=pr, head=head, run=run, git_dir=git_dir, gh=gh, landing=landing)
     prefix = "repos/" + repo
     current = api(gh, f"{prefix}/pulls/{pr}")
     if (current["state"] != "open" or current["draft"] or current.get("merged")
@@ -373,13 +387,27 @@ def main():
     parser.add_argument("--run", type=int,
                         help="Cited run; omitted only for pre-review queue inspection")
     parser.add_argument("--format", choices=("json", "ledger"), default="json")
+    parser.add_argument("--batch", help="File containing the published immutable batch line")
+    parser.add_argument("--landing", action="store_true", help="Require the ROLL publication target and every bound approval")
     args = parser.parse_args()
+    # Only --batch imports batch_evidence; the approve-guard self-test copies
+    # this file without it. A batch Refusal carries its own exit code.
+    batch = None
+    if args.batch:
+        import batch_evidence as batch
+    # Errors whose message is the receipt's reason token.
+    token_errors = (Unavailable,) if batch is None else (Unavailable, batch.Refusal)
+    batch_code = None
     try:
         result = evaluate(repo=args.repo, pr=args.pr, head=args.head, run=args.run,
-                          git_dir=args.git_dir, gh=os.environ.get("GUARD_GH", "gh"))
-    except (Unavailable, ValueError, KeyError, TypeError, OSError) as error:
-        result = {"status": "unavailable", "reason": str(error) if isinstance(error, Unavailable)
+                          git_dir=args.git_dir, gh=os.environ.get("GUARD_GH", "gh"),
+                          batch_line=Path(args.batch).read_text() if args.batch else None,
+                          landing=args.landing)
+    except (*token_errors, ValueError, KeyError, TypeError, OSError) as error:
+        result = {"status": "unavailable", "reason": str(error) if isinstance(error, token_errors)
                   else "invalid_evidence", "head": args.head, "run": args.run}
+        if batch is not None:
+            batch_code = batch.failure_code(sys.modules[__name__], error)
     if args.format == "ledger":
         if result["status"] == "fresh": print("fresh\t0")
         elif result["status"] == "unavailable": print("unknown:freshness\t?")
@@ -387,7 +415,7 @@ def main():
         else: print("dependency:" + ",".join(result["dependencies"]) + "\t0")
         return 0
     print(json.dumps(result, sort_keys=True))
-    return {"fresh": 0, "stale": 2, "unavailable": 1}[result["status"]]
+    return batch_code if batch_code is not None else {"fresh": 0, "stale": 2, "unavailable": 1}[result["status"]]
 
 
 if __name__ == "__main__":

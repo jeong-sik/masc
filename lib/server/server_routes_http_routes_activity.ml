@@ -1215,16 +1215,22 @@ let add_routes ~sw ~clock router =
                        reqd
                        (Server_board_post_response_format.error_json error)
                    | Ok response_format ->
-                     let voter = board_voter_query req in
-                     let status, body =
-                       board_post_detail_json
-                         ~voter
-                         ~reaction_actor
-                         ~config:(Some config)
-                         ~response_format
-                         ~post_id
-                     in
-                     respond_json_with_cors ~status request reqd body))
+                     (match
+                        board_comment_request_of_query
+                          ~offset:(query_param req "comment_offset")
+                          ~limit:(query_param req "comment_limit")
+                      with
+                      | Error error ->
+                        respond_json_value_with_cors ~status:`Bad_request
+                          request reqd error
+                      | Ok comment_request ->
+                        let voter = board_voter_query req in
+                        let status, body =
+                          board_post_detail_json ~comment_request
+                            ~voter ~reaction_actor ~config:(Some config)
+                            ~response_format ~post_id ()
+                        in
+                        respond_json_with_cors ~status request reqd body)))
        ) request reqd)
 
   (* The four Board post/comment/vote routes below consume the auth resolver's

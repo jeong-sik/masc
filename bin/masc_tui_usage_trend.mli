@@ -26,8 +26,8 @@ val no_report_mark : string
     report is not an idle day. *)
 
 val of_history :
-  share:(Masc.Tui_decode.provider_usage_utilization -> float) ->
-  Masc.Tui_decode.provider_usage_history ->
+  share:(Masc.Tui_decode_usage.provider_usage_utilization -> float) ->
+  Masc.Tui_decode_usage.provider_usage_history ->
   t
 (** [share] reads a reported value as a part of its full window. A point
     outside the answered window keeps its row and draws no day. When one day

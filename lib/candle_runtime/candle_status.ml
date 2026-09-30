@@ -40,9 +40,17 @@ let ensure_recovered ~base_path =
 ;;
 
 (* Installed by the server, so this library never depends on lane registry code.
-   Uninstalled is an observable disabled state, never implicit permission. *)
+   Availability gates appraisal; durable Goal facts use policy and ledger only. *)
 let appraiser_check = Atomic.make (fun () -> Error "candle_appraiser availability is not installed")
 let install_appraiser_check check = Atomic.set appraiser_check check
+
+let with_recovered_ledger ~base_path = function
+  | (Candle_config.Off | Candle_config.Disabled _) as answer -> answer
+  | Candle_config.Enabled policy ->
+    (match ensure_recovered ~base_path with
+     | Recovered | Locked_by_another_process -> Candle_config.Enabled policy
+     | Not_recoverable reason -> Candle_config.Disabled { reason })
+;;
 
 let current ~base_path =
   match Candle_config.load ~base_path with
@@ -50,10 +58,11 @@ let current ~base_path =
   | Candle_config.Enabled policy ->
     (match (Atomic.get appraiser_check) () with
      | Error reason -> Candle_config.Disabled { reason }
-     | Ok () ->
-       match ensure_recovered ~base_path with
-       | Recovered | Locked_by_another_process -> Candle_config.Enabled policy
-       | Not_recoverable reason -> Candle_config.Disabled { reason })
+     | Ok () -> with_recovered_ledger ~base_path (Candle_config.Enabled policy))
+;;
+
+let for_recording ~base_path =
+  with_recovered_ledger ~base_path (Candle_config.load ~base_path)
 ;;
 
 let report_at_start ~base_path =

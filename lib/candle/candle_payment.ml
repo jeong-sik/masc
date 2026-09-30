@@ -19,6 +19,48 @@ let make ~identity ~grade ~total_milli ~grade_trace ~relations ~weights_trace
     Ok ({keeper; weight=List.assoc keeper weights; share_milli; amount_milli} :: acc)) shares (Ok []) in
   Ok {identity; grade; total_milli; grade_trace; relations; weights_trace; weight_max;
       deduction_rate; deduction_floor; overdue_hours; coefficient; allocations}
+
+let validate_for_append paid =
+  let* expected = make ~identity:paid.identity ~grade:paid.grade
+    ~total_milli:paid.total_milli ~grade_trace:paid.grade_trace
+    ~relations:paid.relations ~weights_trace:paid.weights_trace
+    ~weight_max:paid.weight_max ~deduction_rate:paid.deduction_rate
+    ~deduction_floor:paid.deduction_floor ~overdue_hours:paid.overdue_hours
+    ~weights:(List.map (fun a -> a.keeper, a.weight) paid.allocations) in
+  if expected.coefficient <> paid.coefficient || expected.allocations <> paid.allocations
+  then Error "new payment arithmetic does not match its evidence"
+  else Ok ()
+
+(* These are receipt invariants, independent of the formula that produced it.
+   In particular, no split, remainder ordering or deduction is rerun here. *)
+let validate_receipt paid =
+  let in_range name lower upper value =
+    if value < lower || value > upper
+    then Error (Printf.sprintf "payment %s is outside %d..%d" name lower upper)
+    else Ok () in
+  let* () = in_range "total_milli" 0 max_int paid.total_milli in
+  let* () = in_range "deduction_rate" 0 1000 paid.deduction_rate in
+  let* () = in_range "deduction_floor" 0 1000 paid.deduction_floor in
+  let* () = in_range "overdue_hours" 0 max_int paid.overdue_hours in
+  let* () = in_range "coefficient" paid.deduction_floor 1000 paid.coefficient in
+  let weights = List.map (fun a -> a.keeper, a.weight) paid.allocations in
+  let* () = Candle_appraisal.validate_weights
+    ~keepers:(List.map fst weights) ~weight_max:paid.weight_max weights in
+  let rec shares remaining = function
+    | [] ->
+      if remaining = 0 then Ok ()
+      else Error "payment shares do not sum to the recorded total"
+    | allocation :: rest ->
+      let* () = in_range "share_milli" 0 remaining allocation.share_milli in
+      let* () = in_range "amount_milli" 0 allocation.share_milli allocation.amount_milli in
+      if allocation.weight = 0 && allocation.share_milli <> 0
+      then Error "a zero-weight recipient has a nonzero share"
+      else
+        (* Subtraction from the remaining total cannot overflow, even when
+           damaged shares would overflow a sum before it could be checked. *)
+        shares (remaining - allocation.share_milli) rest in
+  shares paid.total_milli paid.allocations
+
 let allocation_json a = `Assoc ["keeper", `String a.keeper; "weight", `Int a.weight;
   "share_milli", `Int a.share_milli; "amount_milli", `Int a.amount_milli]
 let to_fields p = [
@@ -60,8 +102,7 @@ let of_yojson json =
   let* coefficient, fields = field "coefficient" Candle_appraisal.as_int fields in
   let* allocations, fields = field "allocations" (Candle_json.as_list allocation_of_json) fields in
   let* () = Candle_json.finish ~context fields in
-  let* paid = make ~identity:{goal_id;request_id;verification_run_id} ~grade ~total_milli ~grade_trace ~relations
-    ~weights_trace ~weight_max ~deduction_rate ~deduction_floor ~overdue_hours
-    ~weights:(List.map (fun a -> a.keeper, a.weight) allocations) in
-  if paid.coefficient <> coefficient || paid.allocations <> allocations then Error "payment arithmetic does not match its evidence"
-  else Ok paid
+  let paid = {identity={goal_id;request_id;verification_run_id};grade;total_milli;grade_trace;relations;
+    weights_trace;weight_max;deduction_rate;deduction_floor;overdue_hours;coefficient;allocations} in
+  let* () = validate_receipt paid in
+  Ok paid

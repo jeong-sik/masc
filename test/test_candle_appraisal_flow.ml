@@ -164,7 +164,7 @@ let test_worker_pays_once_with_isolated_inputs_and_integer_evidence () =
     ["paid-once:2";"paid-once:3";"paid-once:4"]
     (List.map (fun (r : A.task_relation) -> r.trace.run_id) p.relations);
   let decoded = Candle_payment.of_yojson (Candle_payment.to_yojson p) |> ok in
-  check bool "ledger decode replays the same integer calculation" true (decoded = p)
+  check bool "ledger decode retains the issued payment and its evidence" true (decoded = p)
 
 let test_invalid_weights_wait_for_an_event_not_a_pulse () =
   with_workspace @@ fun env config ->
@@ -191,6 +191,41 @@ let test_invalid_weights_wait_for_an_event_not_a_pulse () =
     await env "event retry settlement" (fun () -> paid config "rejected" <> []);
     idle env);
   ignore (one_payment config "rejected")
+
+let test_refused_transport_waits_for_an_event () =
+  with_workspace @@ fun env config ->
+  ignore (prepared config "provider-refusal");
+  let accept = ref false in
+  let attempts = ref 0 in
+  let calls = ref [] in
+  let runner ~identity request =
+    incr attempts;
+    if !accept then make_runner calls ~identity request
+    else Error (A.Invalid_response "provider refused the unchanged request") in
+  Eio.Switch.run (fun sw ->
+    Candle_payout_worker.start ~sw ~config ~appraise:runner;
+    await env "provider refusal" (fun () -> !attempts > 0);
+    idle env;
+    let refused_attempts = !attempts in
+    check int "refusal has no payment" 0
+      (List.length (paid config "provider-refusal"));
+    Candle_payout_worker.pulse ();
+    idle env;
+    check int "pulse does not redispatch refused request" refused_attempts !attempts;
+    accept := true;
+    Candle_status.install_appraiser_check (fun () -> Error "publication unavailable");
+    Fun.protect
+      ~finally:(fun () -> Candle_status.install_appraiser_check (fun () -> Ok ()))
+      (fun () ->
+        Candle_payout_worker.wake ();
+        idle env;
+        check int "an unavailable pass does not call the provider"
+          refused_attempts !attempts);
+    Candle_payout_worker.pulse ();
+    await env "the retained event retries after availability recovers"
+      (fun () -> paid config "provider-refusal" <> []);
+    idle env);
+  ignore (one_payment config "provider-refusal")
 
 let test_transport_recovery_is_retried_by_pulse () =
   with_workspace @@ fun env config ->
@@ -435,6 +470,7 @@ let () =
     ["payout",
       [test_case "worker pays once with isolated judgments and arithmetic" `Quick test_worker_pays_once_with_isolated_inputs_and_integer_evidence
       ;test_case "invalid weights wait for an event, not a pulse" `Quick test_invalid_weights_wait_for_an_event_not_a_pulse
+      ;test_case "provider refusal waits for an event" `Quick test_refused_transport_waits_for_an_event
       ;test_case "pulse retries unavailable transport" `Quick test_transport_recovery_is_retried_by_pulse
       ;test_case "unrelated and external-only work mint nothing" `Quick test_unrelated_and_external_only_work_mint_nothing
       ;test_case "failed due date waits for a new corrected pass" `Quick test_unreadable_due_date_fails_once_and_a_new_pass_can_repair_it

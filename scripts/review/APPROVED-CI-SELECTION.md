@@ -24,6 +24,35 @@ It changes no checkout and publishes nothing. Conflicts, unapproved members,
 head changes, revoked approvals, change requests or a moving main prevent
 preparation. No Actions/check-run API reads, build or CI dispatch occur here.
 
-The next step is a separate leader-controlled CI runner for this frozen
-candidate. Its result describes the combined candidate. Source approval does
-not claim compilation success, CI success or permission to merge.
+After these workflow changes are integrated into main, publish the prepared
+candidate branch explicitly and dispatch `leader-ci.yml` on main. Set its
+`candidate` input to the receipt's exact candidate SHA.
+Supply the preparation receipt as the `selection` JSON input. Select any of
+`compile`, `release_profile`, `dashboard`, `tla`, `lint` and `tests`; all default
+to false. `suites` narrows the behavior run when `tests` is selected. There is
+no changed-file heuristic choosing work for the leader.
+
+The runner rechecks current source approvals using the integrated main guard,
+reconstructs the combined Git commit, and requires it to equal the explicit candidate
+SHA. Moved main/heads, revoked approvals and a different candidate prevent
+build jobs from starting. The trusted workflow definition comes from main; every selected job checks
+out the exact candidate SHA;
+checks not selected remain skipped and are not counted as passing. The result
+artifact records the candidate, actor, input selection, scopes and results.
+The `leader` receipt field records the caller's stated Keeper identity; GitHub
+repository permissions authorize dispatch. This CLI does not authenticate a
+Keeper runtime leadership role.
+
+Repository CI workflows have no PR/push/tag/scheduled triggers. Specialized
+proof and packaging workflows retain manual dispatch. Release publication is
+an explicit `publish=true` dispatch on an existing v* tag. Issue taxonomy is
+operational issue automation and remains independent of CI. Disabled GitHub
+workflow states remain disabled until these definitions are integrated;
+reenabling an old automatic definition would violate this policy.
+
+The result describes the combined candidate and the selected coverage. It is
+not a PR-check run for each member and does not authorize merge. Existing
+`ci-freshness.py` / `merge-guard.sh` consumers require PR-check evidence and
+will refuse this new receipt; their merge integration is separate. Source
+approval remains independent of compilation and test results. No daily
+schedule is introduced.

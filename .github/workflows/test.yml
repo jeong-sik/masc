@@ -1,63 +1,13 @@
 name: Test
 
-# The manual CI lane (ci.yml) stops at `dune build @check`: it type-checks
-# test/ but links and runs nothing. That is an explicit owner decision
-# (2026-09-02, see the ci.yml header) — linking the ~296 test executables is
-# this repo's slow step.
-#
-# The PR gate (pr-check.yml) stopped there too until 2026-09-06. Since #33507
-# its `@check` job ends by running scripts/ci/run-edited-tests.sh over the
-# suites the pull request selects, inside a 1080-second budget. The step log
-# names them in four groups, in the script's own words:
-#
-#   - test sources this pull request edits
-#   - suites named after the sources this pull request edits
-#   - guards that name the sources this pull request edits
-#   - suites whose code calls a module this pull request edits
-#
-# The fourth is call-graph reachability rather than naming, and it is the
-# widest by far: on #37371 the four groups were 1, 1, 4 and 18 suites, and
-# the step reported "ran 22, skipped 0". Sizing this gate from the first two
-# groups alone understates it several times over.
-#
-# A suite the budget does not reach fails the step by name. So a red `@check`
-# there can be a failing assertion rather than a compile error, and a green
-# one is a real run of those suites — read the step log, not the job
-# conclusion.
-#
-# What that still leaves: a behavioural regression in a suite the pull
-# request neither edits, nor names, nor calls. Nothing in the gate runs
-# those. It happened with the test_keeper_owner actor-38 incident; nothing
-# ran the suite before the breakage landed.
-#
-# This lane covers that rest on a schedule. It runs the full behavioral suite
-# nightly (02:43 KST, off-peak) and on manual dispatch, so a regression the
-# gate does not select surfaces within ~24h instead of never. RFC-0428 moved
-# the selected part into the gate; what is left here is the unselected part
-# and the link cost that keeps it out of every push.
-#
-# A red scheduled run used to reach nobody: GitHub emails only the last
-# editor of the cron line, and a dispatched run notifies only the
-# dispatcher. The last step of this job now files the failure as an issue
-# labelled `nightly-test-lane`, reusing the open one so a run of red
-# nights is one thread. A dispatch files nothing — its dispatcher is
-# already told.
-#
-# See: https://github.com/jeong-sik/masc/issues/33008
-#
-# A dispatch can also name suites. With the `suite` input set, the Test
-# step builds only those executables and runs each straight from
-# _build/default/test under a per-suite timeout, outside dune's (test)
-# action, with ALCOTEST_VERBOSE=1: every case prints its [OK] line as it
-# finishes, so a hang names the case after the last [OK] instead of a
-# suite after 90 minutes. Two suites hung past the full lane's deadline
-# on 2026-09-05 (#33200); this is how to measure them in ten minutes
-# rather than ninety, and with `eio_backend=posix` how to tell an Eio
-# backend difference from a scheduling one.
+# Explicit full or targeted behavior checks on the selected ref.
 
 on:
   workflow_call:
     inputs:
+      candidate_sha:
+        type: string
+        default: ''
       candidate_verification:
         type: boolean
         default: false
@@ -67,64 +17,13 @@ on:
       eio_backend:
         type: string
         default: ""
-  schedule:
-    # 17:43 UTC = 02:43 KST, off-peak for both GitHub runners and the team.
-    - cron: "43 17 * * *"
-  workflow_dispatch:
-    inputs:
-      suite:
-        description: >-
-          Comma-separated test suites to build and run on their own instead of
-          the full runner. Empty runs the full suite. A bare name is resolved
-          under test/, for example test_heartbeat_integration. A suite outside
-          test/ is named by its path from the repository root, for example
-          packages/agent_core/test/test_capabilities -- the 43 suites under
-          packages/ and tools/ have no other spelling here, and a bare name
-          is reported as "no test/<name>.ml and no <name>.ml" while the names
-          that did resolve still run. A name with a
-          test/<name>.py script, or one a test/ dune file declares as
-          (alias runtest-<name>), runs that alias instead
-          (test_tui_keyboard_input).
-        type: string
-        default: ""
-      eio_backend:
-        description: >-
-          EIO_BACKEND for a targeted run, for example posix. Empty leaves
-          the Eio default, io_uring on Linux where available. Ignored
-          when suite is empty.
-        type: string
-        default: ""
 
 permissions:
   contents: read
-  # The scheduled failure below files an issue. A dispatch never reaches
-  # that step, so this scope is unused on every other path.
-  issues: write
 
-# Two kinds of lane plus one per targeted run. A full dispatch shares a lane
-# with the other dispatches of the same ref, where a new dispatch cancels the
-# run in flight instead of stacking a second job for the same commit; the
-# scheduled run has a lane of its own that no dispatch can reach. The dispatch
-# lane was one for the whole repo. Parallel sessions each verify their own
-# branch by dispatching this workflow, so each dispatch cancelled another
-# branch's run: on 2026-09-29, 5 of the last 14 runs ended cancelled. A lane per ref
-# keeps the cancel where it is wanted (a newer dispatch of the same branch
-# supersedes an older one) and spends up to one full run per branch in
-# parallel, which the one-lane rule existed to avoid when a run took 180
-# minutes; a dispatched run now takes 13 to 19 minutes (the 15 most recent completed runs). One group for the whole repo did reach
-# it: on 2026-09-04 the scheduled run (17:43:56Z, 7aed1b696f) was
-# cancelled within two seconds by a branch dispatch created the same
-# second, and of this lane's first 13 runs none completed successfully.
-# A dispatch that names suites runs beside the full lane, not instead of
-# it, so it gets a group of its own keyed by run id: the first targeted
-# dispatch (33951571973, 2026-09-05 07:05:06Z) shared the dispatch lane
-# and cancelled a full run 82 minutes in (33947949528). On the schedule
-# there are no inputs, and `inputs.suite` is null; GitHub compares a null
-# with '' by coercing both to 0, so the test below is false and the
-# scheduled run keeps its lane.
 concurrency:
-  group: ${{ inputs.candidate_verification && format('candidate-test-{0}', github.run_id) || inputs.suite != '' && format('test-targeted-{0}', github.run_id) || github.event_name == 'workflow_dispatch' && format('test-dispatch-{0}', github.ref) || format('test-{0}', github.event_name) }}
-  cancel-in-progress: true
+  group: test-${{ github.run_id }}
+  cancel-in-progress: false
 
 jobs:
   test:
@@ -168,6 +67,8 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.candidate_sha || github.sha }}
 
       - name: Check source text integrity
         run: scripts/ci/check-source-text-integrity.sh
@@ -498,7 +399,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: keeper-creative-proof-${{ github.sha }}
+          name: keeper-creative-proof-${{ inputs.candidate_sha || github.sha }}
           path: |
             ${{ runner.temp }}/keeper-creative-proof
             ${{ runner.temp }}/keeper-creative-image-id.txt
@@ -523,58 +424,6 @@ jobs:
       # the pull-request lane recorded: test_tool_name_prefix_boundary is
       # red on purpose until #33778 is decided.
       - name: Run the suites that need no build
-        if: always()
-        continue-on-error: true
+        if: always() && inputs.suite == ''
         timeout-minutes: 15
         run: python3 scripts/run-standalone-suites.py --all-matching '*'
-
-      # The lane's whole point is that a test-only regression surfaces
-      # within ~24h. Without this step it surfaced only to whoever opened
-      # the Actions tab, which is how the 2026-09-05 hang (#33200) sat
-      # unread. Scheduled runs only: a dispatcher already sees their own
-      # run. Cancellation counts as a failure here because the job-level
-      # 180-minute cap is exactly what a hung suite hits.
-      - name: File the scheduled failure as an issue
-        if: (failure() || cancelled()) && github.event_name == 'schedule'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          # gh infers the repo from the checkout's git remote. This step also
-          # runs when the job failed before Checkout, where there is no remote
-          # to read, so name the repo outright.
-          GH_REPO: ${{ github.repository }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          JOB_STATUS: ${{ job.status }}
-        run: |
-          set -euo pipefail
-          label=nightly-test-lane
-          # --force is a no-op when the label already exists, so the first
-          # red night does not fail on a label nobody created yet.
-          gh label create "${label}" \
-            --color B60205 \
-            --description "야간 테스트 레인이 실패한 실행" \
-            --force
-          # The taxonomy workflow comments on any issue with no declaration
-          # block, so this body carries one. A red lane is a ci defect that
-          # degrades and whose root is that nothing said so.
-          body=$(printf '%s\n\n%s\n%s\n\n%s\n%s\n\n%s\n%s\n%s\n%s\n%s\n%s\n' \
-            "야간 테스트 레인이 \`${JOB_STATUS}\` 로 끝났습니다." \
-            "- 실행: ${RUN_URL}" \
-            "- 커밋: \`${GITHUB_SHA}\`" \
-            "스위트별 판정은 그 실행의 \`suite-runner-log\` 아티팩트에 있습니다." \
-            "단계 출력에는 마지막 120줄만 남습니다." \
-            '```masc-triage' \
-            "kind: defect" \
-            "area: ci" \
-            "impact: degrades" \
-            "must-do: false" \
-            '```')
-          existing=$(gh issue list --state open --label "${label}" \
-            --limit 1 --json number --jq '.[0].number // empty')
-          if [ -n "${existing}" ]; then
-            gh issue comment "${existing}" --body "${body}"
-            echo "commented on #${existing}"
-          else
-            gh issue create --label "${label}" \
-              --title "야간 테스트 레인이 빨갛습니다" \
-              --body "${body}"
-          fi

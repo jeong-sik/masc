@@ -1,0 +1,220 @@
+name: Leader-selected CI
+run-name: Leader-selected CI on ${{ inputs.candidate }} by ${{ github.actor }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate:
+        description: Exact combined candidate SHA; dispatch this workflow on main
+        required: true
+        type: string
+      selection:
+        description: JSON receipt from prepare-approved-batch.py
+        required: true
+        type: string
+      compile:
+        description: OCaml type checking
+        type: boolean
+        default: false
+      release_profile:
+        description: OCaml type checking with the release profile
+        type: boolean
+        default: false
+      dashboard:
+        description: Dashboard type checking and tests
+        type: boolean
+        default: false
+      tla:
+        description: TLA model checking
+        type: boolean
+        default: false
+      lint:
+        description: Functional configuration, syntax and wiring checks
+        type: boolean
+        default: false
+      tests:
+        description: Behavior tests (full when suites is empty)
+        type: boolean
+        default: false
+      suites:
+        description: Comma-separated suites for the behavior test runner
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: leader-ci-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  selection:
+    name: Recheck approved selection
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      # Source authority is read using the integrated main implementation,
+      # not a script supplied by an unverified candidate.
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify candidate and selected scopes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SELECTION: ${{ inputs.selection }}
+          SCOPES: ${{ toJSON(inputs) }}
+          REPOSITORY: ${{ github.repository }}
+          CANDIDATE: ${{ inputs.candidate }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          scopes = json.loads(os.environ['SCOPES'])
+          if os.environ['GITHUB_REF'] != 'refs/heads/main':
+              raise SystemExit('Dispatch leader CI on main')
+          if not any(scopes[name] is True for name in ('compile', 'release_profile', 'dashboard', 'tla', 'lint', 'tests')):
+              raise SystemExit('Select at least one CI scope')
+          if scopes['suites'] and not scopes['tests']:
+              raise SystemExit('Suites require the tests scope')
+          Path('selection.json').write_text(os.environ['SELECTION'])
+          PY
+          python3 scripts/review/verify-approved-selection.py \
+            --selection selection.json --repo "$REPOSITORY" \
+            --candidate "$CANDIDATE" --git-dir . > verified-selection.json
+      - uses: actions/upload-artifact@v7
+        with:
+          name: approved-selection-${{ inputs.candidate }}-${{ github.run_attempt }}
+          path: verified-selection.json
+          if-no-files-found: error
+
+  compile:
+    needs: selection
+    if: inputs.compile
+    uses: ./.github/workflows/ci.yml
+    with:
+      candidate_verification: true
+      candidate_sha: ${{ inputs.candidate }}
+
+  tests:
+    needs: selection
+    if: inputs.tests
+    uses: ./.github/workflows/test.yml
+    with:
+      candidate_verification: true
+      candidate_sha: ${{ inputs.candidate }}
+      suite: ${{ inputs.suites }}
+
+  release-profile:
+    needs: selection
+    if: inputs.release_profile
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.candidate }}
+      - uses: ./.github/actions/setup-ocaml-toolchain
+      - uses: ./.github/actions/pin-ocaml-deps
+      - uses: ./.github/actions/install-ocaml-deps
+        with:
+          install-flags: --with-test
+      - name: Type-check release profile
+        env:
+          DUNE_JOBS: '4'
+        run: dune build --profile release @check
+
+  dashboard:
+    needs: selection
+    if: inputs.dashboard
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.candidate }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+      - name: Check dashboard
+        working-directory: dashboard
+        run: |
+          corepack enable && corepack prepare pnpm@10.31.0 --activate
+          pnpm install --frozen-lockfile
+          pnpm typecheck
+          pnpm test
+
+  tla:
+    needs: selection
+    if: inputs.tla
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.candidate }}
+      - run: bash scripts/tla-check.sh
+
+  lint:
+    needs: selection
+    if: inputs.lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.candidate }}
+      - name: Install syntax and wiring tools
+        run: |
+          bash scripts/ci/apt-refresh.sh
+          sudo apt-get install -y --no-install-recommends ripgrep jq python3-yaml gcc libc6-dev binutils
+      - run: bash scripts/ci/run-lint-suite.sh blocking
+
+  evidence:
+    name: Record selected CI results
+    needs: [selection, compile, tests, release-profile, dashboard, tla, lint]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Record scope and results
+        env:
+          SCOPES: ${{ toJSON(inputs) }}
+          RESULTS: ${{ toJSON(needs) }}
+          CANDIDATE: ${{ inputs.candidate }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          scopes = json.loads(os.environ['SCOPES'])
+          needs = json.loads(os.environ['RESULTS'])
+          keys = {'compile': 'compile', 'tests': 'tests', 'release_profile': 'release-profile',
+                  'dashboard': 'dashboard', 'tla': 'tla', 'lint': 'lint'}
+          chosen = {job: needs[job]['result'] for option, job in keys.items() if scopes[option] is True}
+          passed = bool(chosen) and needs['selection']['result'] == 'success' and all(v == 'success' for v in chosen.values())
+          receipt = {'schema_version': 1, 'candidate': os.environ['CANDIDATE'],
+                     'actor': os.environ['GITHUB_ACTOR'], 'selection': json.loads(scopes['selection']),
+                     'suites': scopes['suites'], 'results': chosen, 'checks_passed': passed,
+                     'run_id': os.environ['GITHUB_RUN_ID'], 'run_attempt': os.environ['GITHUB_RUN_ATTEMPT'],
+                     'merge_authorized': False}
+          Path('leader-ci-results.json').write_text(json.dumps(receipt, indent=2) + '\n')
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as out:
+              out.write('Candidate: `' + receipt['candidate'] + '`\n\n')
+              for job, result in chosen.items():
+                  out.write('- ' + job + ': ' + result + '\n')
+          PY
+      - uses: actions/upload-artifact@v7
+        with:
+          name: leader-ci-results-${{ inputs.candidate }}-${{ github.run_attempt }}
+          path: leader-ci-results.json
+          if-no-files-found: error
+      - name: Require selected checks to pass
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          raise SystemExit(0 if json.loads(Path('leader-ci-results.json').read_text())['checks_passed'] else 1)
+          PY

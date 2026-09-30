@@ -1,49 +1,23 @@
 name: CI
 
-# Runs on manual dispatch or as the compile component of candidate verification. What changed on 2026-09-02 (owner decision) is the shape:
-# the previous 9-job lane (changes / meta / health / build / lint /
-# dashboard / structure-ratchet / shell-ir-ratchet / ci-gate) is now a
-# single job that builds the tree.
-#
-# Scope: `@check` type-checks the whole tree, test/ included, and links
-# nothing. It replaced `@install` on 2026-09-02 for two reasons.
-#
-# @install skips test/ entirely: that day's five main breakages put 3 of
-# 12 repaired sites — and two whole repairs (#32454, #32517) — in test
-# files it would never have compiled.
-#
-# `dune build .` would cover them but link the ~296 executables test/dune
-# declares, and linking is this repo's slow step; the @install job took
-# 10 minutes on 2026-09-02 before any of that. Every one of the five
-# breakages was a compile error — four unbound values or signature
-# mismatches, one shadowed duplicate caught as warning 32 — and @check
-# reports all of them. Nothing that day needed an executable to exist.
-#
-# Lint, dashboard, ratchets, and the ci-gate stopped running here that day,
-# and three of the four came back in pr-check.yml rather than staying gone:
-# the lint suite on 2026-09-05 (#33226), then the dashboard typecheck and the
-# OCaml boundary ratchet. Only the ci-gate runs nowhere. This lane is the
-# compile alone; pr-check.yml is where a pull request meets the rest, and
-# since 2026-09-06 (#33507) it also runs the suites the change selects.
+# Compile the exact manually selected ref; reusable by leader-selected CI.
 
 on:
-  push:
-    branches: [main]
   workflow_call:
     inputs:
+      candidate_sha:
+        type: string
+        default: ''
       candidate_verification:
         type: boolean
         default: false
-  workflow_dispatch: {}
 
 permissions:
   contents: read
-  actions: write
 
-# Finish the main compile already running when another push arrives. Keep one
-# newer pending run so main CI cannot consume one runner per queued commit.
+# Each explicit invocation has its own group; selections do not cancel each other.
 concurrency:
-  group: ${{ inputs.candidate_verification && format('candidate-ci-{0}', github.run_id) || 'ci' }}
+  group: ci-${{ github.run_id }}
   cancel-in-progress: false
 
 jobs:
@@ -76,17 +50,8 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@v7
-
-      - name: Install tools for documentation checks
-        run: |
-          bash scripts/ci/apt-refresh.sh
-          sudo apt-get install -y --no-install-recommends ripgrep
-
-      - name: Check doc truth
-        run: scripts/check-doc-truth.sh
-
-      - name: Verify doc truth uses stable checkout inputs
-        run: python3 test/test_doc_truth_stable_inputs.py
+        with:
+          ref: ${{ inputs.candidate_sha || github.sha }}
 
       - name: Check source text integrity
         run: scripts/ci/check-source-text-integrity.sh

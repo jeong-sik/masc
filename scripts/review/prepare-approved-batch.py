@@ -162,7 +162,11 @@ def main():
                 raise
         print(json.dumps(receipt, sort_keys=True))
         return 0
-    except (Rejected, Refusal) as error:
+    except Refusal as error:
+        unavailable = int(error.code) == 1
+        print(json.dumps({"status": "unavailable" if unavailable else "refused", "reason": str(error)}))
+        return 1 if unavailable else 2
+    except Rejected as error:
         print(json.dumps({"status": "refused", "reason": str(error)}))
         return 2
     except (OSError, ValueError, KeyError, TypeError, SourceUnavailable, f.Unavailable):

@@ -1706,10 +1706,10 @@ let load_memory_health ~(host : string) ~(port : int) :
 
 (** Load one keeper's remembered facts, both stores. *)
 let load_memory_facts ~(host : string) ~(port : int) ~(keeper_name : string) :
-    (Tui_decode.memory_fact_snapshot, string) result =
+    (Masc.Tui_decode_memory_facts.memory_fact_snapshot, string) result =
   match fetch_keeper_memory_facts ~host ~port ~keeper_name with
   | Error err -> Error ("memory facts load failed: " ^ err)
-  | Ok json -> Tui_decode.decode_memory_fact_snapshot json
+  | Ok json -> Masc.Tui_decode_memory_facts.decode_memory_fact_snapshot json
 
 (** Load the current project's Git working-tree changes. *)
 let load_project_changes ~(host : string) ~(port : int) :

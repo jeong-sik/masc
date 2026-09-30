@@ -246,6 +246,20 @@ val delete_goal :
 
 (** {1 Upsert} *)
 
+val upsert_goal_with_revision :
+  Workspace_utils.config ->
+  ?id:string ->
+  ?title:string ->
+  ?metric:string ->
+  ?target_value:string ->
+  ?due_date:string ->
+  ?priority:int ->
+  unit ->
+  (goal * [ `created | `updated of goal ] * int, write_error) result
+(** The upsert outcome with the exact committed store version from the same
+    locked write. Snapshot event readers use this witness to order commits
+    independently of event append order. It is never a later store read. *)
+
 val upsert_goal :
   Workspace_utils.config ->
   ?id:string ->

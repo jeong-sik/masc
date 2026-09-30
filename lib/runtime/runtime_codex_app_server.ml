@@ -2048,6 +2048,24 @@ let terminate_spawned_process ~clock proc stdin_w =
           (Printexc.to_string exn))
 ;;
 
+(* A Codex sub-agent is a separate thread. Its item frames reach this
+   connection under another threadId, and [active_turn_item] ends the turn on
+   the first one. In the 12 rollouts of 2026-09-30 that hold a sub-agent spawn
+   matched to a failed turn, the turn ended that way within 20 seconds. MASC
+   records none of the child's frames, tool calls or token use, so no client
+   this module spawns may create one, whatever the posture.
+   Codex picks the version in this order: [features.multi_agent_v2] (V2), then
+   [agents] enabled=false (disabled), then the model catalog's own
+   multi_agent_version, then [features.multi_agent]. gpt-6.1-sol declares v2 in
+   the catalog, so [features.multi_agent=false] alone leaves its sub-agent tools
+   on: `codex debug prompt-input` (0.159.1) renders the same prompt with and
+   without it, and no sub-agent text once [agents.enabled=false] is set.
+   Upstream: codex-rs/core/src/config/mod.rs (multi_agent_version_for_model),
+   codex-rs/core/src/tools/spec_plan.rs (collab_tools_enabled). *)
+let sub_agent_overrides =
+  [ "-c"; "agents.enabled=false"; "-c"; "features.multi_agent_v2=false" ]
+;;
+
 (* A read posture keeps Codex's permissions read-only, but shell execution
    would still run in the host cwd rather than the Keeper's Docker sandbox.
    Supported app-server CLI overrides outrank inherited config. ShellTool=false
@@ -2065,6 +2083,7 @@ let client_argv (config : config) =
      | Runtime_native_tools.Native_read ->
        [ "-c"; "features.shell_tool=false"; "-c"; "features.unified_exec=false" ]
      | Runtime_native_tools.Native_full | Runtime_native_tools.Native_none -> [])
+  @ sub_agent_overrides
 ;;
 
 let with_spawned_client ~mgr ~clock ~cwd config run =

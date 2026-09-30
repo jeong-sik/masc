@@ -99,8 +99,11 @@ class RequestHttpResponse:
     def __init__(
         self,
         resolve: Callable[[bytes], HttpResponse | RawHttpResponse | StreamingHttpResponse],
+        *,
+        get_response: HttpResponse | None = None,
     ) -> None:
         self.resolve = resolve
+        self.get_response = get_response
 
 
 class MethodHttpResponse:
@@ -279,7 +282,10 @@ def test_http_endpoint(
             else:
                 fixture = (503, {"error": "fixture endpoint unavailable"})
             if isinstance(fixture, RequestHttpResponse):
-                resolved = fixture.resolve(request_body or b"")
+                if self.command == "GET" and fixture.get_response is not None:
+                    resolved = fixture.get_response
+                else:
+                    resolved = fixture.resolve(request_body or b"")
             elif isinstance(fixture, MethodHttpResponse):
                 resolved = fixture.resolve(self.command)
             elif isinstance(fixture, PathHttpResponse):
@@ -2145,6 +2151,7 @@ def run_terminal_scenario(
     confirm_exit: bytes = b"q",
     refresh: float = 60.0,
     terminal_cols: int = 100,
+    terminal_rows: int = 30,
     workspace: str = WORKSPACE_PAYLOAD,
     http_fixtures: HttpFixtures | None = None,
     http_requests: HttpRequests | None = None,
@@ -2169,7 +2176,10 @@ def run_terminal_scenario(
     output = PtyOutput()
     process: subprocess.Popen[bytes] | None = None
     try:
-        fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, struct.pack("HHHH", 30, terminal_cols, 0, 0))
+        fcntl.ioctl(
+            slave_fd, termios.TIOCSWINSZ,
+            struct.pack("HHHH", terminal_rows, terminal_cols, 0, 0),
+        )
         os.set_blocking(master_fd, False)
         with tempfile.TemporaryDirectory(prefix="masc-tui-keyboard-") as base_path:
             with test_http_endpoint(
@@ -7690,7 +7700,7 @@ def memory_facts_interaction() -> Interaction:
     return interact
 
 
-def memory_journal_fixture() -> HttpResponse:
+def memory_journal_fixture() -> tuple[int, dict[str, object]]:
     return (
         200,
         {
@@ -13293,7 +13303,7 @@ def code_lane_interaction(
         process, master_fd, output, b"d", LEXED_LET
     )
     diff_plain = CSI_RE.sub(b"", diff_frame).decode("utf-8")
-    for needle in ("diff vs HEAD: lib/a.ml", "let a = 1", "let x = 1"):
+    for needle in ("diff col 1 vs HEAD: lib/a.ml", "let a = 1", "let x = 1"):
         if needle not in diff_plain:
             raise AssertionError(
                 f"the diff view missed {needle!r}: {diff_plain!r}"
@@ -18611,7 +18621,9 @@ def resources_mcp_fixture() -> HttpFixtures:
         )
 
     fixtures = overview_event_http_fixtures()
-    fixtures["/mcp"] = RequestHttpResponse(answer)
+    fixtures["/mcp"] = RequestHttpResponse(
+        answer, get_response=(405, {"error": "fixture does not offer an SSE stream"})
+    )
     return fixtures
 
 

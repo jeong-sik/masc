@@ -1283,6 +1283,23 @@ let wrap_words ~max_cells text =
   in
   loop [] (String.split_on_char ' ' text)
 
+let wrap_styled_words ~max_cells text =
+  let _, rows =
+    List.fold_left (fun (style, rows) row ->
+      let next_style =
+        List.fold_left (fun style piece ->
+          if piece.ansi && row.[piece.end_offset - 1] = 'm' then
+            let sgr = String.sub row piece.start_offset
+                (piece.end_offset - piece.start_offset) in
+            if sgr = "\027[0m" || sgr = "\027[m" then "" else style ^ sgr
+          else style) style (display_pieces row)
+      in
+      let reset = if String.equal next_style "" then "" else "\027[0m" in
+      next_style, (style ^ row ^ reset) :: rows)
+      ("", []) (wrap_words ~max_cells text)
+  in
+  List.rev rows
+
 let clause_separator = " \xc2\xb7 "
 
 (* A header row of this shape is a list of clauses joined by [clause_separator],

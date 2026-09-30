@@ -7,6 +7,8 @@ import threading
 import test_tui_keyboard_input as h
 
 SOURCE_MODULES = (
+    "bin/masc_tui_render_board.ml",
+    "bin/masc_tui_render_board.mli",
     "bin/masc_tui.ml",
     "bin/masc_tui_loader.ml",
     "bin/masc_tui_keys.ml",

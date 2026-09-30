@@ -267,7 +267,7 @@ let test_lane_guard_refuses_an_official_client_runtime () =
       (match Runtime.get_runtime_by_id "antigravity.gemini" with
        | Some { execution = Runtime_execution.Antigravity_cli _; _ } -> ()
        | Some rt ->
-         failf "fixture resolved the wrong lane: %s" (Runtime_execution.label rt.Runtime.execution)
+         failf "fixture resolved the wrong lane: %s" (Runtime_execution.label rt.Runtime_instance.execution)
        | None -> fail "fixture runtime did not resolve");
       match probe_offline ~runtime_id:"antigravity.gemini" ~tool:"masc_board_list" with
       | Error (Probe.Not_agent_core_lane _) -> ()
@@ -447,7 +447,7 @@ let test_official_client_probe_refuses_antigravity () =
        | Some rt ->
          failf
            "fixture resolved the wrong lane: %s"
-           (Runtime_execution.label rt.Runtime.execution)
+           (Runtime_execution.label rt.Runtime_instance.execution)
        | None -> fail "fixture runtime did not resolve");
       match
         probe_official_client_offline
@@ -505,7 +505,7 @@ let test_official_client_probe_refuses_an_agent_core_runtime () =
        | Some rt ->
          failf
            "fixture resolved the wrong lane: %s"
-           (Runtime_execution.label rt.Runtime.execution)
+           (Runtime_execution.label rt.Runtime_instance.execution)
        | None -> fail "fixture runtime did not resolve");
       match
         probe_official_client_offline ~runtime_id:"local.sample" ~tool:"masc_board_list"

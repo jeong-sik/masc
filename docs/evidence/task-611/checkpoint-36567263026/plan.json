@@ -1,0 +1,17 @@
+{
+  "repository": "jeong-sik/masc",
+  "repository_id": 1136640865,
+  "tracers": "/home/runner/work/_temp/checkpoint-readers/_build/default",
+  "output": "checkpoint-results",
+  "repetitions": 3,
+  "cycles": 90,
+  "baseline_run": 36565596287,
+  "baseline_artifact": 11032430026,
+  "baseline_commit": "d4baba6e5215604bf512640879c5ebf3844fa3b9",
+  "candidate_run": 36565600490,
+  "candidate_artifact": 11031574873,
+  "candidate_commit": "a9d0b74116633a42b1e95e991584e65ccc7d71f6",
+  "platform": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
+  "cpu_count": 4,
+  "scope": "#39761 checkpoint inventory only; not #39766/#39774 or #25893 completion"
+}

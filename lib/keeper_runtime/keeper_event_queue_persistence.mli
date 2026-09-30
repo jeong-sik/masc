@@ -257,7 +257,7 @@ val observe_snapshot_with_errors :
 
 module For_testing : sig
   val bind_pending_repetition_scope_with_confirmation :
-    confirm_snapshot:(string -> Yojson.Safe.t -> (unit, string) result) ->
+    confirm_snapshot:(string -> Keeper_event_queue_state.t -> (unit, string) result) ->
     base_path:string -> keeper_name:string ->
     selections:Keeper_event_queue_state.pending_selection list ->
     scope:Keeper_execution_scope_id.t -> unit ->

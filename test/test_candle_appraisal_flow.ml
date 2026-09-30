@@ -90,7 +90,7 @@ let paid config goal_id =
   List.filter_map (fun (event : E.t) -> match event.body with
     | E.Paid payment when payment.identity.goal_id = goal_id -> Some payment
     | E.Paid _ | E.Snapshot _ | E.Payout_owed _ | E.Candidates _
-    | E.Unattributed _ | E.Payout_failed _ -> None) (events config)
+    | E.Unattributed _ | E.Purchased _ | E.Payout_failed _ -> None) (events config)
 
 let one_payment config goal_id = match paid config goal_id with
   | [payment] -> payment | _ -> fail "expected exactly one Paid row"

@@ -1,14 +1,24 @@
 name: Stack Core build
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: Source-approved bottom PR targeting main; dispatch on main
+        type: string
+        required: true
+      head:
+        description: Exact reviewed PR head SHA
+        type: string
+        required: true
 
 permissions:
   contents: read
+  pull-requests: read
 
 concurrency:
-  group: stack-core-${{ github.ref }}
-  cancel-in-progress: true
+  group: stack-core-${{ inputs.pr }}-${{ inputs.head }}
+  cancel-in-progress: false
 
 jobs:
   core:
@@ -17,8 +27,58 @@ jobs:
     timeout-minutes: 2
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Admit a source-approved bottom candidate
+        id: admission
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          PR: ${{ inputs.pr }}
+          HEAD: ${{ inputs.head }}
+        run: |
+          bash scripts/review/core-admission.sh --repo "$REPOSITORY" --pr "$PR" --head "$HEAD" > "$RUNNER_TEMP/core-admission.json"
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.head }}
+          persist-credentials: false
       - uses: ./.github/actions/setup-ocaml-toolchain
       - uses: ./.github/actions/pin-ocaml-deps
       - uses: ./.github/actions/install-ocaml-deps
-      - name: Build only the runtime library
-        run: opam exec -- dune build lib/masc.cmxa
+      - name: Build only the admitted runtime library
+        id: build
+        env:
+          CANDIDATE: ${{ inputs.head }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$CANDIDATE"
+          opam exec -- dune build lib/masc.cmxa
+      - name: Record the observed checkout and build result
+        if: ${{ always() && steps.admission.outcome == 'success' }}
+        env:
+          BUILD_OUTCOME: ${{ steps.build.outcome }}
+        run: |
+          python3 - <<'PY'
+          import json, os, subprocess
+          from pathlib import Path
+          root = Path(os.environ['RUNNER_TEMP'])
+          admission = json.loads((root / 'core-admission.json').read_text())
+          head = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          tree = subprocess.check_output(['git', 'rev-parse', 'HEAD^{tree}'], text=True).strip()
+          parents = subprocess.check_output(['git', 'show', '-s', '--format=%P', 'HEAD'], text=True).split()
+          outcome = os.environ['BUILD_OUTCOME']
+          receipt = {'schema': 'masc.core-build.v1', 'admission': admission,
+                     'policy_sha': os.environ['GITHUB_SHA'], 'checkout_head': head,
+                     'checkout_tree': tree, 'checkout_parents': parents,
+                     'build_outcome': outcome,
+                     'core_success': outcome == 'success' and head == admission['head'],
+                     'run_id': os.environ['GITHUB_RUN_ID'],
+                     'run_attempt': os.environ['GITHUB_RUN_ATTEMPT'],
+                     'merge_authorized': False}
+          (root / 'core-build.json').write_text(json.dumps(receipt, indent=2) + '\n')
+          PY
+      - uses: actions/upload-artifact@v7
+        if: ${{ always() && steps.admission.outcome == 'success' }}
+        with:
+          name: core-build-${{ inputs.pr }}-${{ inputs.head }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/core-build.json
+          if-no-files-found: error

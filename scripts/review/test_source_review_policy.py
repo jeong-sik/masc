@@ -2,10 +2,11 @@
 """Exercise admission with a fake GitHub transport, including mutation races."""
 import json
 import os
-from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from pathlib import Path
+from typing import Any
 
 HERE = Path(__file__).resolve().parent
 HEAD = 'a' * 40
@@ -62,8 +63,8 @@ sys.stdout.write(result.stdout); sys.stderr.write(result.stderr); sys.exit(resul
 '''
 
 
-class SourceReviewPolicy(unittest.TestCase):
-    def setUp(self):
+class ReviewFixture(unittest.TestCase):
+    def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
@@ -75,21 +76,24 @@ class SourceReviewPolicy(unittest.TestCase):
         self.calls.write_text('')
         self.env = dict(os.environ, GUARD_GH=str(self.fake), LEDGER_GH=str(self.fake),
                         REVIEW_FIXTURE=str(self.fixture), REVIEW_CALLS=str(self.calls))
-        self.state = {'head':HEAD, 'base':'main'}
+        self.state: dict[str, Any] = {'head':HEAD, 'base':'main'}
 
-    def review(self, state='APPROVED', author='reviewer', verdict='PASS', run=False):
+    def review(self, state: str = 'APPROVED', author: str = 'reviewer',
+               verdict: str = 'PASS', run: bool = False) -> dict[str, Any]:
         line = f'verdict: {verdict} head: {HEAD}' + (' run: 42' if run else '') + ' by: independent'
         return {'id':12,'state':state,'body':line+f'\n\n---\napprove-guard: head `{HEAD}` · source review',
                 'user':{'login':author},'author_association':'MEMBER','submitted_at':'2026-09-30T00:00:00Z'}
 
-    def invoke(self, script, *args):
+    def invoke(self, script: str, *args: str) -> subprocess.CompletedProcess[str]:
         self.fixture.write_text(json.dumps(self.state))
         return subprocess.run(['bash',str(HERE/script),'--repo','team/repo','--pr','1','--head',HEAD,*args],
-                              env=self.env,text=True,capture_output=True)
+                              env=self.env,text=True,capture_output=True,check=False)
 
-    def assert_ok(self, result):
+    def assert_ok(self, result: subprocess.CompletedProcess[str]) -> None:
         self.assertEqual(result.returncode,0,result.stdout+result.stderr)
 
+
+class SourceReviewPolicy(ReviewFixture):
     def test_bottom_stack_merges_without_actions(self):
         self.state['reviews']=[self.review()]
         result=self.invoke('merge-guard.sh','--check')
@@ -149,7 +153,7 @@ class SourceReviewPolicy(unittest.TestCase):
         self.state.update(base='stack/parent',reviews=[self.review()])
         self.fixture.write_text(json.dumps(self.state))
         result=subprocess.run(['bash',str(HERE/'queue-ledger.sh'),'--repo','team/repo'],
-                              env=self.env,text=True,capture_output=True)
+                              env=self.env,text=True,capture_output=True,check=False)
         self.assert_ok(result)
         self.assertIn('parent #2',result.stdout)
         self.assertNotIn('/actions/',self.calls.read_text())
@@ -216,5 +220,44 @@ class SourceReviewPolicy(unittest.TestCase):
         self.state.update(branch='release/v1',reviews=[self.review(run=True)])
         self.assert_ok(self.invoke('merge-guard.sh','--check','--run','42'))
         self.assertIn('/actions/',self.calls.read_text())
+
+class CoreAdmission(ReviewFixture):
+    def invoke_core(self) -> subprocess.CompletedProcess[str]:
+        self.fixture.write_text(json.dumps(self.state))
+        return subprocess.run(
+            ['bash', str(HERE / 'core-admission.sh'), '--repo', 'team/repo',
+             '--pr', '1', '--head', HEAD],
+            env=dict(self.env, GITHUB_REF=self.state.get('dispatch_ref', 'refs/heads/main')),
+            text=True, capture_output=True, check=False)
+
+    def test_core_admits_exact_approved_bottom_without_actions(self):
+        self.state['reviews'] = [self.review()]
+        result = self.invoke_core()
+        self.assert_ok(result)
+        receipt = json.loads(result.stdout)
+        self.assertEqual(receipt['head'], HEAD)
+        self.assertEqual(receipt['base'], 'c' * 40)
+        self.assertEqual(receipt['approval_ids'], [12])
+        self.assertFalse(receipt['merge_authorized'])
+        self.assertNotIn('/actions/', self.calls.read_text())
+
+    def test_core_refuses_missing_source_approval(self):
+        self.assertEqual(self.invoke_core().returncode, 2)
+
+    def test_core_refuses_child_and_release(self):
+        for change in [{'base': 'stack/parent'}, {'branch': 'release/v1'}]:
+            with self.subTest(change=change):
+                self.state = {'head': HEAD, 'base': 'main', 'reviews': [self.review()], **change}
+                self.assertEqual(self.invoke_core().returncode, 2)
+
+    def test_core_refuses_moved_head(self):
+        self.state.update(reviews=[self.review()], moved=OTHER, move_after=2)
+        self.assertEqual(self.invoke_core().returncode, 2)
+
+    def test_core_refuses_untrusted_dispatch_ref(self):
+        self.state.update(reviews=[self.review()], dispatch_ref='refs/heads/stack/change')
+        self.assertEqual(self.invoke_core().returncode, 2)
+        self.assertEqual(self.calls.read_text(), '')
+
 
 if __name__=='__main__': unittest.main()

@@ -1653,6 +1653,11 @@
  (modules test_executor_pool_eio_mutex)
  (libraries masc_test_deps))
 
+(test
+ (name test_executor_pool_cancellation)
+ (modules test_executor_pool_cancellation)
+ (libraries alcotest masc.masc_core eio eio_main))
+
 ; Focused single-module tests
 
 (test

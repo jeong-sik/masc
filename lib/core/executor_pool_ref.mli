@@ -57,6 +57,11 @@ val submit_or_inline : ?weight:float -> (unit -> 'a) -> 'a
     [Eio.Switch.run], so effect-based ops keep their handlers), or inline
     in the current fiber when no pool is installed (tests, pre-init).
 
+    Cancelling the caller also cancels a running worker's Eio context.
+    Cancellation is cooperative: blocking Eio operations are interrupted,
+    while CPU loops and blocking system calls must yield before stopping.
+    Work still waiting for pool capacity is withdrawn without invoking [f].
+
     A nested call already running on this shared pool also runs inline. Its
     worker has a live Eio context, while submitting back to a saturated pool
     would wait for the worker currently occupied by the outer call.

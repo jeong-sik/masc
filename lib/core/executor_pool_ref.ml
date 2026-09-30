@@ -101,10 +101,21 @@ let submit_or_inline ?(weight = 1.0) f =
   match Atomic.get pool, Eio_guard.execution_context () with
   | Some _, _ when in_worker_context () -> f ()
   | Some p, Eio_guard.Eio_fiber ->
+      let cancelled, cancel_worker = Eio.Promise.create () in
       (try Eio.Executor_pool.submit_exn p ~weight (fun () ->
-         with_worker_context (fun () -> Eio.Switch.run (fun _sw -> f ())))
+         with_worker_context (fun () ->
+           Eio.Switch.run (fun _sw ->
+             (* Executor_pool awaits its result on the caller but owns the
+                job's context on another domain. Signal that domain instead
+                of only cancelling the caller's result wait. *)
+             Eio.Fiber.first
+               (fun () -> raise (Eio.Promise.await cancelled))
+               f)))
        with
-       | Eio.Cancel.Cancelled _ as e -> raise e
+       | Eio.Cancel.Cancelled _ as exn ->
+           let backtrace = Printexc.get_raw_backtrace () in
+           Eio.Promise.resolve cancel_worker exn;
+           Printexc.raise_with_backtrace exn backtrace
        | exn ->
            Log.Misc.warn "executor_pool submit failed, running inline: %s"
              (Printexc.to_string exn);

@@ -93,7 +93,8 @@ type t =
   }
 
 val kind : body -> string
-(** The closed row-kind discriminator, including payouts, purchases and equipment choices. *)
+(** The row kind: [snapshot], [payout_owed], [candidates], [unattributed],
+    [paid], [purchased], [equipped] or [payout_failed]. *)
 
 val to_yojson : t -> Yojson.Safe.t
 val of_yojson : Yojson.Safe.t -> (t, string) result

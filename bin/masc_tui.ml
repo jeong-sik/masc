@@ -10721,6 +10721,7 @@ let load_keeper_logs_if_safe state base_path limit keeper =
 let launch_detail_tab_reading state ~mailbox (keeper : keeper) =
   match state.detail_tab with
   | Detail_info -> launch_keeper_board_quarantines state ~mailbox keeper.k_name
+  | Detail_items -> ()
   | Detail_sandbox ->
       state.keeper_sandbox_view <- None;
       state.keeper_sandbox_view_error <- None;
@@ -10773,6 +10774,7 @@ let launch_detail_tab_reading state ~mailbox (keeper : keeper) =
 let enter_keeper_detail_tab state ~mailbox tab =
   state.detail_tab <- tab;
   state.detail_scroll <- 0;
+  if tab = Detail_items then state.item_cursor <- 0;
   match selected_keeper state with
   | Some keeper -> launch_detail_tab_reading state ~mailbox keeper
   | None -> ()
@@ -23396,6 +23398,13 @@ and is loaded on demand through keeper_skill.
            state.tools_scroll <-
              move_surface_to_end state ~rows:(surface_rows state)
                ~current:state.tools_scroll
+       | Some ("home" | "end")
+         when state.view = Keepers Keeper_detail
+              && state.detail_tab = Detail_items ->
+           state.item_cursor <-
+             if key = Some "home" then 0
+             else List.length Keeper_portrait_item.all - 1;
+           state.detail_scroll <- 0
        (* Reading a post with the list pane focused: j/k and the page keys move
           the list and open what they land on, so the edge keys reach the first
           and last post the same way. This cannot go through [row_list] -- the
@@ -23583,6 +23592,12 @@ and is loaded on demand through keeper_skill.
                the way Home and End do. Scrolling it instead wrote a value the
                drawing pulled straight back to the selected run, which is the
                same reason the edge keys had to move the cursor. *)
+            | Keepers Keeper_detail when state.detail_tab = Detail_items ->
+                state.item_cursor <-
+                  Masc_tui_scroll.cursor_move
+                    ~count:(List.length Keeper_portrait_item.all)
+                    ~delta:(direction * page) state.item_cursor;
+                state.detail_scroll <- 0
             | Keepers Keeper_detail when state.detail_tab = Detail_runs ->
                 move_list_by_rows state ~delta:(direction * page)
             | Keepers Keeper_detail when state.detail_tab = Detail_channels ->
@@ -24293,6 +24308,13 @@ and is loaded on demand through keeper_skill.
                   refresh_keeper_detail_selection state ~base_path
                     ~mailbox:async_messages
                 end
+                else if state.detail_tab = Detail_items then begin
+                  state.item_cursor <-
+                    Masc_tui_scroll.cursor_down
+                      ~count:(List.length Keeper_portrait_item.all)
+                      state.item_cursor;
+                  state.detail_scroll <- 0
+                end
                 else if state.detail_tab = Detail_identity then
                   move_identity_cursor state ~delta:1
                 else if state.detail_tab = Detail_channels then begin
@@ -24658,6 +24680,13 @@ and is loaded on demand through keeper_skill.
                   state.detail_scroll <- 0;
                   refresh_keeper_detail_selection state ~base_path
                     ~mailbox:async_messages
+                end
+                else if state.detail_tab = Detail_items then begin
+                  state.item_cursor <-
+                    Masc_tui_scroll.cursor_up
+                      ~count:(List.length Keeper_portrait_item.all)
+                      state.item_cursor;
+                  state.detail_scroll <- 0
                 end
                 else if state.detail_tab = Detail_identity then
                   move_identity_cursor state ~delta:(-1)

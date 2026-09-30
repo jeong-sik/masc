@@ -1552,17 +1552,39 @@ let msx_screen_output_schema =
 ;;
 
 let portrait_read_output_schema =
+  let module Item = Keeper_portrait_item in
+  let string_schema = `Assoc [ "type", `String "string" ] in
+  let slot_ids = List.map Item.slot_id Item.slots in
+  let equipment =
+    object_output_schema
+      ~properties:
+        (List.map
+           (fun slot -> Item.slot_id slot, string_schema)
+           Item.slots)
+      ~required:slot_ids
+  in
+  let item =
+    object_output_schema
+      ~properties:[ "id", string_schema; "slot", string_schema ]
+      ~required:[ "id"; "slot" ]
+  in
   object_output_schema
     ~properties:
       [ "name", `Assoc [ "type", `String "string" ]
-      ; "equipment", `Assoc [ "type", `String "object" ]
+      ; "mode", string_schema
+      ; "preview_item", `Assoc
+          [ "type", `List [ `String "string"; `String "null" ] ]
+      ; "starting_equipment", equipment
+      ; "equipment", equipment
+      ; "catalog", `Assoc [ "type", `String "array"; "items", item ]
       ; "artifact", `Assoc [ "type", `String "string" ]
       ; "media_type", `Assoc [ "type", `String "string" ]
       ; "width", `Assoc [ "type", `String "integer" ]
       ; "height", `Assoc [ "type", `String "integer" ]
       ; "bytes", `Assoc [ "type", `String "integer" ]
       ]
-    ~required:[ "name"; "equipment"; "artifact"; "media_type"; "width"; "height"; "bytes" ]
+    ~required:[ "name"; "mode"; "preview_item"; "starting_equipment"; "equipment"
+              ; "catalog"; "artifact"; "media_type"; "width"; "height"; "bytes" ]
 ;;
 
 (* Producer: Keeper_tool_lane_status.handle. [lane], [endpoint] and

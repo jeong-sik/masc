@@ -14,6 +14,10 @@
     constructors without a producer and forward-compatible catch-alls
     are intentionally excluded.
 
+    [Librarian_working_context] names the small working-context artifact index.
+    It changes independently of the ordinary facts in [Memory_os_recall], so
+    official-client resumes compare and deliver these two blocks separately.
+
     [Skill_compositions] names the composition Skills carried by this turn's
     tool surface. It exists because nothing else says they are there to a model
     that does not read tool descriptions: keeper prompt blocks mentioned Skills
@@ -27,6 +31,7 @@ type t =
   | Dynamic_context
   | Temporal_summary
   | Memory_os_recall
+  | Librarian_working_context
   | Operator_note
   | Skill_compositions
 

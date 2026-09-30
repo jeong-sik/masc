@@ -4006,7 +4006,7 @@ let launch_github_login state ~mailbox keeper_name =
                          Some [ payload ]
                    else None)
             |> List.concat
-            |> List.map Masc.Tui_decode.sanitize_terminal_text
+            |> List.map Masc.Tui_terminal_text.sanitize_terminal_text
             |> List.filter (fun line -> String.trim line <> "")
           in
           if lines <> [] then
@@ -4101,7 +4101,7 @@ let launch_preset_call state ~mailbox ~call ~wrap =
 let forget_play_invite state ~name =
   state.play_invite <-
     Masc_tui_types.play_invite_forget state.play_invite
-      (Tui_decode.sanitize_terminal_text name)
+      (Masc.Tui_terminal_text.sanitize_terminal_text name)
 
 let launch_presets_load state ~mailbox =
   state.presets_error <- None;
@@ -9796,7 +9796,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       (* The cards carry names made safe to draw, so the name typed is
          compared in the same form. *)
       let requested_name =
-        Option.map Tui_decode.sanitize_terminal_text requested_name
+        Option.map Masc.Tui_terminal_text.sanitize_terminal_text requested_name
       in
       (let card =
          match requested_name with
@@ -14165,7 +14165,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
               (String.concat "\n" lines)
             |> List.map
                  (List.map (fun (text, kind) ->
-                      (Masc.Tui_decode.sanitize_terminal_text text, kind)))
+                      (Masc.Tui_terminal_text.sanitize_terminal_text text, kind)))
           in
           state.runtime_config_view <- Some
              { rcv_path = path; rcv_rows = rows; rcv_metadata = metadata };
@@ -14223,7 +14223,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
             Masc_tui_code_lexer.rows_of_source ~language content
             |> List.map
                  (List.map (fun (text, kind) ->
-                      (Masc.Tui_decode.sanitize_terminal_text text, kind)))
+                      (Masc.Tui_terminal_text.sanitize_terminal_text text, kind)))
           in
           (* [rows] stays a list for the memo scan and the width fold just
              below, both of which read it once front to back. The pane keeps
@@ -14291,7 +14291,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
              Some
                (match text with
                 | Some t ->
-                    symbol ^ ": " ^ Masc.Tui_decode.sanitize_terminal_text t
+                    symbol ^ ": " ^ Masc.Tui_terminal_text.sanitize_terminal_text t
                 | None -> symbol ^ ": the server has nothing to say here")
        | Ok (Masc.Tui_decode.Lsp_locations []) ->
            state.code_lsp_note <-
@@ -14364,16 +14364,16 @@ let apply_async_message state ~base_path ~http_refresh_inflight
             List.map
               (fun (resource : Masc_tui_mcp.resource) ->
                 { resource with
-                  uri = Masc.Tui_decode.sanitize_terminal_text resource.uri
-                ; name = Masc.Tui_decode.sanitize_terminal_text resource.name
+                  uri = Masc.Tui_terminal_text.sanitize_terminal_text resource.uri
+                ; name = Masc.Tui_terminal_text.sanitize_terminal_text resource.name
                 ; title =
-                    Option.map Masc.Tui_decode.sanitize_terminal_text
+                    Option.map Masc.Tui_terminal_text.sanitize_terminal_text
                       resource.title
                 ; description =
-                    Option.map Masc.Tui_decode.sanitize_terminal_text
+                    Option.map Masc.Tui_terminal_text.sanitize_terminal_text
                       resource.description
                 ; mime_type =
-                    Option.map Masc.Tui_decode.sanitize_terminal_text
+                    Option.map Masc.Tui_terminal_text.sanitize_terminal_text
                       resource.mime_type
                 })
               rows
@@ -14414,17 +14414,17 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            | Ok contents ->
                let sanitize_document text =
                  String.split_on_char '\n' text
-                 |> List.map Masc.Tui_decode.sanitize_terminal_text
+                 |> List.map Masc.Tui_terminal_text.sanitize_terminal_text
                  |> String.concat "\n"
                in
                let contents =
                  List.map
                    (fun (content : Masc_tui_mcp.resource_content) ->
                      { Masc_tui_mcp.rc_uri =
-                         Option.map Masc.Tui_decode.sanitize_terminal_text
+                         Option.map Masc.Tui_terminal_text.sanitize_terminal_text
                            content.rc_uri
                      ; rc_mime_type =
-                         Option.map Masc.Tui_decode.sanitize_terminal_text
+                         Option.map Masc.Tui_terminal_text.sanitize_terminal_text
                            content.rc_mime_type
                      ; rc_kind =
                          (match content.rc_kind with
@@ -14640,7 +14640,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
              Some
                ( keeper_name
                , Masc_tui_github_identity.view_lines
-                   ~sanitize:Masc.Tui_decode.sanitize_terminal_text json );
+                   ~sanitize:Masc.Tui_terminal_text.sanitize_terminal_text json );
            state.github_identity_view_error <- None
        | Error detail ->
            report_action state "error" (keeper_name ^ ": github token save: " ^ detail);

@@ -10446,7 +10446,7 @@ let render_fusion_launch (state : state) ~(form : Masc_tui_fusion_launch.t optio
     List.concat_map
       (fun line ->
         Message_layout.split_cells ~max_cells:(max 1 (width - 2))
-          (Tui_decode.sanitize_terminal_text line))
+          (Masc.Tui_terminal_text.sanitize_terminal_text line))
       text
     |> List.map (fun line -> "  " ^ line)
   in
@@ -16900,9 +16900,9 @@ let render_account_login state view =
     ~body:(fun ~budget c ->
       let lines = Masc_tui_account_login.visible_lines ~height:budget ~width:(framed_inner_width cols) view
         |> List.map (function
-          | Masc_tui_account_login.Text text -> Masc.Tui_decode.sanitize_terminal_text text
+          | Masc_tui_account_login.Text text -> Masc.Tui_terminal_text.sanitize_terminal_text text
           | Masc_tui_account_login.Terminal line ->
-            Masc_tui_sgr_text.render ~sanitize:Masc.Tui_decode.sanitize_terminal_text line) in
+            Masc_tui_sgr_text.render ~sanitize:Masc.Tui_terminal_text.sanitize_terminal_text line) in
       List.iter (fun line -> c.push (fit_width line (framed_inner_width cols))) lines)
 
 

@@ -2685,7 +2685,7 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
     [ "text"; "line" ];
   check int "the goal detail heads a stuck goal with the verifier's reason" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path
-       ~binding_name:"planning_detail_pane"
+       ~binding_name:"planning_detail_lines"
        ~callee:"Planning_detail.unreconciled_lines");
   check int "the Verifying next step comes from the tested sentence" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path

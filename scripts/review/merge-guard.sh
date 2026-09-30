@@ -6,15 +6,22 @@
 set -eu
 here="$(cd "$(dirname "$0")" && pwd)"
 GH="${GUARD_GH:-gh}"
-repo=""; pr=""; head=""; run=""; check=0
+repo=""; pr=""; head=""; run=""; check=0; batch=""
 gitdir="${GUARD_REPO_ROOT:-}"
 while [ $# -gt 0 ]; do
+  case "$1" in
+    --repo|--pr|--head|--run|--git-dir|--batch)
+      if [ $# -lt 2 ] || [ -z "${2-}" ] || [[ "${2-}" == --* ]]; then
+        echo "merge-guard: $1 requires a value" >&2; exit 1
+      fi;;
+  esac
   case "$1" in
     --repo) repo="$2"; shift 2;;
     --pr) pr="$2"; shift 2;;
     --head) head="$2"; shift 2;;
     --run) run="$2"; shift 2;;
     --git-dir) gitdir="$2"; shift 2;;
+    --batch) batch="$2"; shift 2;;
     --check) check=1; shift;;
     *) echo "merge-guard: unknown argument $1" >&2; exit 1;;
   esac
@@ -28,6 +35,13 @@ if ! [[ "$repo" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ && "$pr" =~ ^[1-9][0-9]*$ &
   echo "merge-guard: require --repo owner/name --pr N --head SHA40 --run ID --git-dir DIR" >&2
   exit 2
 fi
+batch_args=()
+if [ -n "$batch" ]; then
+  batch_copy=$(mktemp)
+  trap 'rm -f "$batch_copy"' EXIT
+  cat "$batch" > "$batch_copy"
+  batch_args=(--batch "$batch_copy")
+fi
 source "$here/review-verdict.sh"
 check_verdict() {
   local verdict state cited by
@@ -40,13 +54,13 @@ check_verdict() {
 }
 # Includes current open/head/base, all workflow/checks and open CR checks.
 bash "$here/approve-guard.sh" --check --repo "$repo" --pr "$pr" --head "$head" \
-  --run "$run" --git-dir "$gitdir"
+  --run "$run" --git-dir "$gitdir" ${batch_args[@]+"${batch_args[@]}"}
 # Read both comments and reviews after the expensive checks; a later HOLD/FAIL
 # or malformed decision cannot inherit an earlier approval.
 check_verdict
 # Re-read live head/main immediately before the only write below.
 python3 "$here/ci-freshness.py" --repo "$repo" --pr "$pr" --head "$head" \
-  --run "$run" --git-dir "$gitdir"
+  --run "$run" --git-dir "$gitdir" ${batch_args[@]+"${batch_args[@]}"}
 # A verdict/CR can arrive while the graph is being read. Refresh these at the
 # finishing boundary too; separate reads cannot provide a server-side CAS.
 check_verdict
@@ -66,9 +80,22 @@ check_current_ci
 check_verdict
 # Formal reviews can change while the final workflow/check API reads run.
 check_formal_review_state
+if [ -n "$batch" ]; then
+  # Both preflight and writes may publish only ROLL, with every member and
+  # ROLL itself independently approved at the final admission boundary.
+  python3 "$here/ci-freshness.py" --repo "$repo" --pr "$pr" --head "$head" \
+    --run "$run" --git-dir "$gitdir" ${batch_args[@]+"${batch_args[@]}"} --landing
+fi
 if [ "$check" -eq 1 ]; then
   echo "WOULD MERGE #$pr head $head run $run"
   exit 0
 fi
+merge_rc=0
 "$GH" api -X PUT "repos/$repo/pulls/$pr/merge-async" \
-  -f merge_method=squash -f "sha=$head"
+  -f merge_method=squash -f "sha=$head" || merge_rc=$?
+# A gh authentication failure may be rc4, which batch evidence reserves for
+# a landing-tree refusal. Keep transport/write failures in the infra class.
+if [ -n "$batch" ] && [ "$merge_rc" -ne 0 ]; then
+  exit 1
+fi
+exit "$merge_rc"

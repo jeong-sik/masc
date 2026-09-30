@@ -14,6 +14,17 @@ title shows the question ID. Its full prompt is the referenced row's `title`, an
 ID, with the host-retained snapshot evidence; the fact's `answer` is the exact
 expected value. The record cited by the fact remains the grade's row evidence.
 
+Grading requires the question and fact to name the same source, incarnation,
+fact ID and immutable captured deck URI/SHA-256, including the cited record.
+Rotating a deck's bytes while keeping its declared incarnation cannot change
+an earlier question's answer: the grader refuses that attempt without adding a
+grade or score. Refresh the questioner's output and the grader's deck observation
+to the same capture before submitting again. A missing snapshot digest refuses
+the observation rather than accepting an unbound question. Question and row IDs
+also include that capture's URI/SHA-256. Identical captures keep their IDs; a new
+capture gets a new question, so an answerer may grade it while prior grades retain
+their original question and fact references.
+
 These coordinates preserve the full prompt, selected choice and expected answer
 without copying their potentially large strings into every grade. Cross-worker
 references stay in fields; `related_ids` only links rows in the grader's own

@@ -1,0 +1,10 @@
+{
+  "source_commit": "e716f181773b6f61925f43771283a000c992e26a",
+  "package": "quiz-questions",
+  "image": "masc-lane-quiz-questions:0.1.2",
+  "image_id": "sha256:e5b5af245cb387e736c775407e53bfc185cf32bbd6f8e445ffe3400c27345eb3",
+  "architecture": "arm64",
+  "manifest_sha256": "ed5a2fa26cfd8d80d7caab1994009e327e0d2a5f9562620f40ce8f1ab80ad588",
+  "archive_sha256": "dd44a79903e7348e127308e8214f5cea760d8127727be99a7e6dc5db2c33276a",
+  "workflow_run_id": "36657271661"
+}

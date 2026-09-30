@@ -775,7 +775,8 @@ let forget_recall (state : state) =
   state.msg_recall_at <- None;
   state.msg_recall_draft <- ("", [], [], None)
 
-let open_message_for_keeper ?(return_to = Keeper_chat_return_detail) state
+let open_message_for_keeper ?(return_to = Keeper_chat_return_detail)
+    ?(remember_home_chat = true) state
     keeper_name ~drain_queue =
   (* The paste goes back into the draft before the draft is put away. A spill
      lives with the composer; a saved draft has to stand on its own, and a
@@ -799,25 +800,25 @@ let open_message_for_keeper ?(return_to = Keeper_chat_return_detail) state
   end;
   state.msg_target_keeper_name <- Some keeper_name;
   state.opening_notice <- None;
-  (match state.opening_mode with
-   | Masc_tui_config.Last previous ->
+  (if remember_home_chat then
        (match Keeper_id.Keeper_name.of_string keeper_name with
         | Error reason ->
             add_event state "error" ("Could not remember chat target: " ^ reason)
         | Ok target ->
-            let changed =
-              match previous with
-              | Some previous -> not (Keeper_id.Keeper_name.equal previous target)
-              | None -> true
-            in
-            if changed then
-              (match Masc_tui_config.set_opening_keeper
-                       ~base_path:state.local_base_path target with
-               | Ok () -> state.opening_mode <- Masc_tui_config.Last (Some target)
-               | Error reason ->
-                   add_event state "error"
-                     ("Could not remember chat target: " ^ reason)))
-   | Masc_tui_config.Overview | Masc_tui_config.Keeper _ -> ());
+            (* Another TUI may have visited a different Keeper or changed the
+               startup choice since this state was loaded. Record every explicit
+               visit against the current text under the shared config lock. *)
+            (match Masc_tui_config.record_chat_visit
+                     ~base_path:state.local_base_path target with
+             | Ok Runtime.Durable ->
+                 state.home_last_chat <- Recorded_chat target
+             | Ok (Runtime.Durability_unconfirmed { detail }) ->
+                 state.home_last_chat <- Unconfirmed_chat { keeper = target; detail };
+                 add_event state "error" ("Conversation saved; durability unconfirmed: " ^ detail)
+             | Error reason ->
+                 state.home_last_chat <- Session_chat { keeper = target; save_error = reason };
+                 add_event state "error"
+                   ("Conversation remembered only in this session: " ^ reason))));
   state.msg_live <- live_for_keeper state keeper_name;
   state.msg_return <- return_to;
   state.keeper_message_focus <- Right_pane;
@@ -840,6 +841,7 @@ let leave_keeper_message state ~drain_queue =
   in
   state.view <-
     (match state.msg_return, target_registered with
+     | Keeper_chat_return_home, _ -> Overview
      | Keeper_chat_return_lanes, _ -> Lanes
      | Keeper_chat_return_detail, true -> Keepers Keeper_detail
      | Keeper_chat_return_list, _ | Keeper_chat_return_detail, false ->
@@ -6324,10 +6326,12 @@ let enter_theme_filter state filter =
    a load the other performs. Surfaces not listed refresh on the periodic
    cadence ([surface_needs]); the ones here are snapshots that would
    otherwise read as empty until the next tick. *)
-let goto_surface state ~mailbox (destination : surface) =
+let goto_surface ?(from_reference = false) state ~mailbox (destination : surface) =
   (* The browser reader owns Connectors; refocusing it keeps the reader.
      The transport-list palette hides it explicitly before arriving here.
      Repository changes can overlay any surface, so every jump closes them. *)
+  state.home_opened_request <- None;
+  if not from_reference then state.followed_from <- None;
   leave_browser_lane_for_surface state destination;
   if state.repository_changes_open then close_repository_changes state;
   (match state.view with
@@ -6400,6 +6404,10 @@ let goto_surface state ~mailbox (destination : surface) =
    | Resources -> launch_resources_list state ~mailbox
    | Code -> launch_code_entries_load state ~mailbox
    | Metrics ->
+       (* Usage is the top-level account reading. Explicit telemetry entry
+          opts into diagnostics after navigation, rather than inheriting it. *)
+       state.usage_telemetry_open <- false;
+       state.metrics_scroll <- 0;
        launch_memory_health_load state ~mailbox;
        launch_keeper_tool_approvals_load ~intent:Snapshot_read.Refresh state ~mailbox;
        launch_gate_snapshot_load ~intent:Snapshot_read.Refresh state ~mailbox;
@@ -9007,14 +9015,14 @@ let toggle_acting_pane (state : state) =
     Error "Activity pane is not drawn over this surface; preference unchanged"
   else
   match
-    Masc_tui_acting_pane.next_layout ~layout:state.acting_pane_layout ~cols
+    Masc_tui_acting_pane.next_layout ~layout:(acting_pane_layout state) ~cols
   with
   | None ->
       Error
         (Printf.sprintf "Activity pane needs %d columns; preference unchanged"
            Masc_tui_acting_pane.threshold_cols)
   | Some layout ->
-      state.acting_pane_layout <- layout;
+      state.acting_pane_preference <- Chosen_acting_pane layout;
       state.acting_pane_scroll <- 0;
       state.acting_pane_cursor <- None;
       Ok layout
@@ -9024,15 +9032,20 @@ let toggle_acting_pane (state : state) =
    reader after a later resize, the same rule the toggle follows. *)
 let show_acting_pane_tab (state : state) tab =
   let _rows, cols = Masc_tui_ansi.get_terminal_size () in
-  if Masc_tui_acting_pane.drawn_cols ~layout:Masc_tui_acting_pane.Narrow ~cols = 0 then
+  if Masc_tui_render.acting_pane_suppressed state then
+    Error "Activity pane is not drawn over this surface; preference unchanged"
+  else if Masc_tui_acting_pane.drawn_cols ~layout:Masc_tui_acting_pane.Narrow ~cols = 0 then
     Error
       (Printf.sprintf "Activity pane needs %d columns; preference unchanged"
          Masc_tui_acting_pane.threshold_cols)
   else begin
-    (match state.acting_pane_layout with
+    let layout =
+      match acting_pane_layout state with
      | Masc_tui_acting_pane.Hidden ->
-         state.acting_pane_layout <- Masc_tui_acting_pane.Narrow
-     | Masc_tui_acting_pane.Narrow | Masc_tui_acting_pane.Wide -> ());
+         Masc_tui_acting_pane.Narrow
+      | (Masc_tui_acting_pane.Narrow | Masc_tui_acting_pane.Wide) as layout -> layout
+    in
+    state.acting_pane_preference <- Chosen_acting_pane layout;
     state.acting_pane_tab <- tab;
     state.acting_pane_scroll <- 0;
     Ok ()
@@ -9501,7 +9514,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
         notice ~kind:Notice_failure
           "Activity pane is not drawn over this surface; nothing to scroll"
       else if
-        Masc_tui_acting_pane.drawn_cols ~layout:state.acting_pane_layout ~cols = 0
+        Masc_tui_acting_pane.drawn_cols ~layout:(acting_pane_layout state) ~cols = 0
       then
         notice ~kind:Notice_failure
           "Activity pane is not shown; Ctrl-L or /activity shows it"
@@ -9530,7 +9543,8 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
            state.lane_addons <- Some { view with error = lane_addons_input_failure detail })
   | Masc_tui_command.Open_metrics ->
       Buffer.clear state.msg_input;
-      goto_surface state ~mailbox Metrics
+      goto_surface state ~mailbox Metrics;
+      state.usage_telemetry_open <- true
   | Masc_tui_command.Account_login requested ->
       Buffer.clear state.msg_input;
       let view = Masc_tui_account_login.create requested in
@@ -10052,6 +10066,19 @@ let apply_asks_load state = function
       let arrived =
         Ask.newly_opened_ask_ids ~previous:state.asks_snapshot ~current:snapshot
       in
+      let current_rows =
+        Option.fold ~none:[] ~some:Ask.open_rows state.asks_snapshot
+      in
+      let next_rows = Ask.open_rows snapshot in
+      state.ask_cursor <- Ask.reconcile_cursor ~current_rows
+        ~cursor:state.ask_cursor ~next_rows;
+      (match state.ask_answer_mode with
+       | Ask_browsing -> ()
+       | Ask_answering { aam_ask_id } ->
+           (match List.find_index
+                    (fun (row : Tui_decode.ask_row) -> row.ar_id = aam_ask_id) next_rows with
+            | Some index -> state.ask_cursor <- index
+            | None -> clear_ask_answering state));
       state.asks_snapshot <- Some snapshot;
       state.asks_error <- None;
       (* Silent while the operator is on the Approvals surface -- the panel is
@@ -11442,7 +11469,12 @@ let open_ask_rows state =
   | Some snapshot ->
       Ask.open_rows snapshot
 
-let selected_ask_row state = List.nth_opt (open_ask_rows state) state.ask_cursor
+let selected_ask_row state =
+  match state.ask_answer_mode with
+  | Ask_browsing -> List.nth_opt (open_ask_rows state) state.ask_cursor
+  | Ask_answering { aam_ask_id } ->
+      List.find_opt (fun (row : Tui_decode.ask_row) -> row.ar_id = aam_ask_id)
+        (open_ask_rows state)
 
 let selected_ask_question state =
   match selected_ask_row state with
@@ -11453,11 +11485,7 @@ let selected_ask_question state =
 (* Leaving the mode drops the draft. An answer half-written against a question
    the operator walked away from is not a thing to restore later; the Keeper
    is still waiting either way, and the row says so. *)
-let leave_ask_answering state =
-  state.ask_answer_mode <- Ask_browsing;
-  state.ask_draft <- None;
-  state.ask_text_entry <- None;
-  state.pending_ask_submit <- None
+let leave_ask_answering state = clear_ask_answering state
 
 let enter_ask_answering state =
   match selected_ask_row state with
@@ -11652,6 +11680,9 @@ let start_ask_answer state ~keeper_name ~ask_id ~answered_label ~answers ~mailbo
       apply_ask_answer_completion state answered_label result asks
 
 let handle_ask_submit state ~mailbox =
+  match state.asks_error with
+  | Some _ -> report_action state "error" "Question source unavailable; refresh before answering"
+  | None ->
   match selected_ask_row state with
   | None -> ()
   | Some (row : Tui_decode.ask_row) -> (
@@ -12555,7 +12586,7 @@ let rearm_continuous_capture state ~mailbox ~keeper =
 ;;
 
 let handle_composer_key state ~base_path ~mailbox key =
-  if state.workspace_identity <> Masc_tui_types.Workspace_identity_match
+  if state.view = Overview || state.workspace_identity <> Masc_tui_types.Workspace_identity_match
      || Option.is_some (browser_lane_on_screen state)
   then false
   else
@@ -13268,6 +13299,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                     ^ " (Keeper not found). Showing Dashboard.")
                else (
                  open_message_for_keeper
+                   ~remember_home_chat:false
                    ~return_to:Keeper_chat_return_list state keeper_name
                    ~drain_queue:(fun () ->
                      drain_queued_message state ~base_path ~mailbox);
@@ -13281,7 +13313,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
          short-lived and every other surface would fetch rows it never
          shows. *)
       (match state.view with
-       | Approvals -> launch_keeper_tool_approvals_load state ~mailbox
+       | Overview | Approvals -> launch_keeper_tool_approvals_load state ~mailbox
        | Keepers _ -> launch_keeper_tool_modes_load state ~mailbox
        | _ -> ());
       open_observer_if_due state ~retry_closed:false
@@ -13582,7 +13614,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       http_scoped_refresh_inflight := false;
       apply_http_scoped_surfaces state results;
       (match state.view with
-       | Approvals -> launch_keeper_tool_approvals_load state ~mailbox
+       | Overview | Approvals -> launch_keeper_tool_approvals_load state ~mailbox
        | Keepers _ -> launch_keeper_tool_modes_load state ~mailbox
        | _ -> ());
       start_scoped_refresh_followup state ~host:(server_peer_host)
@@ -16453,7 +16485,9 @@ let drain_async_messages state ~base_path ~http_refresh_inflight
     ~frame_presenter ~render_schedule mailbox =
   let rec loop changed =
     match Eio.Stream.take_nonblocking mailbox with
-    | None -> changed
+    | None ->
+        reconcile_home_request_detail state;
+        changed
     | Some { ready_at_ns; message = msg } ->
         let waited_ns = Int64.sub (Mtime_clock.elapsed_ns ()) ready_at_ns in
         if Int64.compare waited_ns Masc_tui_http.slow_report_ns >= 0 then
@@ -16701,6 +16735,12 @@ let main
      Theme_choice.apply returns false for a name no scheme carries, and the
      [when] guard then leaves theme_choice unset. *)
   let tui_settings = Masc_tui_config.load ~base_path in
+  (match tui_settings.last_chat_keeper with
+   | Ok None -> ()
+   | Ok (Some keeper) -> state.home_last_chat <- Recorded_chat keeper
+   | Error reason ->
+       state.home_last_chat <- Unreadable_chat_receipt reason;
+       add_event state "error" reason);
   (match tui_settings.opening with
    | Ok Masc_tui_config.Overview -> ()
    | Ok (Masc_tui_config.Last None as opening) ->
@@ -20187,7 +20227,12 @@ and is loaded on demand through keeper_skill.
                   | Ask_browsing -> false)
               && not (modal_owns_keys state) ->
            (match k with
-            | "esc" -> leave_ask_answering state
+            | "esc" ->
+                leave_ask_answering state;
+                (match state.home_opened_request with
+                 | Some (Home_question _) ->
+                     goto_surface state ~mailbox:async_messages Overview
+                 | Some _ | None -> ())
             | "left" | "up" | "k" -> move_ask_question_cursor state (-1)
             | "right" | "down" | "j" -> move_ask_question_cursor state 1
             | "pageup" | "pagedown" | "wheel-up" | "wheel-down" ->
@@ -20207,8 +20252,8 @@ and is loaded on demand through keeper_skill.
             | "end" ->
                 state.ask_question_scroll <-
                   Masc_tui_render.ask_question_scroll_limit state
-            | "[" -> move_ask_cursor state (-1)
-            | "]" -> move_ask_cursor state 1
+            | "[" -> state.home_opened_request <- None; move_ask_cursor state (-1)
+            | "]" -> state.home_opened_request <- None; move_ask_cursor state 1
             | "s" | "S" -> skip_ask_question state
             | "c" | "C" -> clear_ask_question state
             (* Ahead of the digit arm below, which takes every one-character
@@ -21745,7 +21790,7 @@ and is loaded on demand through keeper_skill.
             | None -> ()
             | Some (_, run) ->
                 state.followed_from <- Some (state.view, None);
-                goto_surface state ~mailbox:async_messages Fusion;
+                goto_surface ~from_reference:true state ~mailbox:async_messages Fusion;
                 state.fusion_mode <- Fusion_detail run.fur_run_id;
                 state.fusion_scroll <- 0;
                 state.fusion_detail <- None;
@@ -21792,7 +21837,7 @@ and is loaded on demand through keeper_skill.
                 state.board_comment_scroll <- 0;
                 state.board_comments_focused <- false;
                 state.board_focus <- Right_pane;
-                goto_surface state ~mailbox:async_messages Board;
+                goto_surface ~from_reference:true state ~mailbox:async_messages Board;
                 start_board_post_refresh state ~host:server_peer_host ~port:state.port
                   ~post_id:reference.fhe_post_id ~mailbox:async_messages
             | Some (Tui_decode.Fusion_retained_run _) | None ->
@@ -21806,7 +21851,7 @@ and is loaded on demand through keeper_skill.
                 state.board_comment_scroll <- 0;
                 state.board_comments_focused <- false;
                 state.board_focus <- Right_pane;
-                goto_surface state ~mailbox:async_messages Board;
+                goto_surface ~from_reference:true state ~mailbox:async_messages Board;
                 start_board_post_refresh state ~host:server_peer_host ~port:state.port
                   ~post_id:reference.fhe_post_id ~mailbox:async_messages
             | Fusion_detail id, Some detail when id = detail.fud_run.fur_run_id ->
@@ -21819,7 +21864,7 @@ and is loaded on demand through keeper_skill.
                      state.board_comment_scroll <- 0;
                      state.board_comments_focused <- false;
                      state.board_focus <- Right_pane;
-                     goto_surface state ~mailbox:async_messages Board;
+                     goto_surface ~from_reference:true state ~mailbox:async_messages Board;
                      start_board_post_refresh state ~host:server_peer_host ~port:state.port
                        ~post_id:evidence.fe_post_id ~mailbox:async_messages)
             | _ -> report_action state "system" "Open a Fusion run to follow its Board evidence")
@@ -21954,6 +21999,7 @@ and is loaded on demand through keeper_skill.
               && (match state.planning_mode with
                   | Planning_detail _ -> true
                   | Planning_list -> false) ->
+           state.home_opened_request <- None;
            step_detail_cursor
              ~count:
                (match state.planning with
@@ -21989,6 +22035,7 @@ and is loaded on demand through keeper_skill.
           cursor -- so stepping is the cursor move, and the pane follows. *)
        | Some (("[" | "]") as bracket)
          when state.view = Approvals && state.approval_detail_open ->
+           state.home_opened_request <- None;
            step_detail_cursor ~count:(List.length (approval_items state))
              ~cursor:state.approval_cursor
              ~delta:(if bracket = "]" then 1 else -1)
@@ -22369,6 +22416,83 @@ and is loaded on demand through keeper_skill.
            goto_surface state ~mailbox:async_messages Acting
        | Some ("l" | "L") when state.view = Acting ->
            goto_surface state ~mailbox:async_messages System_logs
+       | Some ("j" | "down" | "k" | "up" as key) when state.view = Overview ->
+           home_step state ~backwards:(key = "k" || key = "up")
+       | Some "p" when state.view = Overview ->
+           goto_surface state ~mailbox:async_messages Approvals
+       | Some ("\r" | "\n" | "enter") when state.view = Overview ->
+           (match home_selected_action state with
+            | None -> report_action state "system" "Selection changed; choose again"
+            | Some action ->
+              state.home_selected <- Some action;
+              (match action with
+            | Home_approvals ->
+                goto_surface state ~mailbox:async_messages Approvals
+            | Home_request request ->
+                let navigate destination =
+                  goto_surface ~from_reference:true state ~mailbox:async_messages destination;
+                  state.followed_from <- Some (Overview, None);
+                  state.home_opened_request <- Some request
+                in
+                (match request with
+                 | Home_held_call _ | Home_gate_request _ | Home_operator_request _ ->
+                     (match List.find_index
+                              (fun row -> home_request_of_approval row = request)
+                              (approval_items state) with
+                      | None -> report_action state "system" "Request changed; choose again"
+                      | Some cursor ->
+                          navigate Approvals;
+                          state.approval_cursor <- cursor;
+                          state.approval_detail_open <- true;
+                          state.approval_detail_scroll <- 0)
+                 | Home_question ask_id ->
+                     (match List.find_index
+                              (fun (row : Tui_decode.ask_row) -> row.ar_id = ask_id)
+                              (open_ask_rows state) with
+                      | None -> report_action state "system" "Question changed; choose again"
+                      | Some cursor ->
+                          navigate Approvals;
+                          state.ask_cursor <- cursor;
+                          enter_ask_answering state)
+                 | Home_goal_confirmation goal_id ->
+                     (match state.planning_filter with
+                      | Planning_filter_all | Planning_filter_active -> ()
+                      | Planning_filter_completed | Planning_filter_dropped ->
+                          state.planning_filter <- Planning_filter_active);
+                     navigate Planning;
+                     state.planning_mode <- Planning_detail goal_id;
+                     state.planning_scroll <- 0;
+                     state.goal_timeline <- None;
+                     launch_goal_timeline_load state ~mailbox:async_messages goal_id
+                 | Home_operator_task task_id ->
+                     navigate Planning;
+                     state.planning_mode <- Planning_list;
+                     state.task_detail_id <- Some task_id;
+                     state.task_detail_scroll <- 0;
+                     state.task_history <- None;
+                     state.task_focus <- Masc_tui_overview_tasks.land_on state.tasks ~task_id;
+                     launch_task_history_load state ~mailbox:async_messages task_id)
+            | Home_agenda ->
+                state.agenda_open <- true;
+                state.agenda_scroll <- 0;
+                state.agenda_selected <-
+                  Masc_tui_agenda.step (Masc_tui_render.agenda_lines state)
+                    ~selected:Masc_tui_agenda.Nowhere Masc_tui_agenda.Next
+            | Home_resume keeper_name ->
+                open_message_for_keeper ~return_to:Keeper_chat_return_home state
+                  keeper_name ~drain_queue:(fun () ->
+                    drain_queued_message state ~base_path ~mailbox:async_messages);
+                launch_keeper_history_load state ~mailbox:async_messages ~keeper_name;
+                state.view <- Keepers Keeper_message
+            | Home_read_last keeper_name ->
+                open_message_for_keeper ~remember_home_chat:false
+                  ~return_to:Keeper_chat_return_home state keeper_name
+                  ~drain_queue:(fun () -> ());
+                launch_keeper_history_load state ~mailbox:async_messages ~keeper_name;
+                state.view <- Keepers Keeper_message
+            | Home_choose_keeper ->
+                goto_surface state ~mailbox:async_messages (Keepers Keeper_list)
+            | Home_create_keeper -> handle_keeper_create ()))
         | Some ("m" | "M") when state.view = Overview ->
             goto_surface state ~mailbox:async_messages Metrics
         | Some ("p" | "P") when state.view = Metrics ->
@@ -22613,6 +22737,8 @@ and is loaded on demand through keeper_skill.
            state.agenda_selected <-
              Masc_tui_agenda.step (Masc_tui_render.agenda_lines state)
                ~selected:Masc_tui_agenda.Nowhere Masc_tui_agenda.Next
+       | Some "i" when state.view = Overview ->
+           goto_surface state ~mailbox:async_messages (Keepers Keeper_list)
        | Some "i"
          when (not message_mode)
               && (match state.msg_target_keeper_name with
@@ -23007,7 +23133,7 @@ and is loaded on demand through keeper_skill.
                 (* Recorded before the move, so the way back is where the
                    operator actually was rather than where they land. *)
                 state.followed_from <- Some (state.view, None);
-                goto_surface state ~mailbox:async_messages destination;
+                goto_surface ~from_reference:true state ~mailbox:async_messages destination;
                 (* Landing on the surface is half the move. Every one of
                    these already has a "this one is open" state, and without
                    setting it the operator arrives at the top of a list and
@@ -26395,6 +26521,16 @@ and is loaded on demand through keeper_skill.
                  (match acting_pane_chunk_projection state ~terminal_rows ~terminal_cols with
                   | None -> ()
                   | Some projection -> state.acting_chunk_projection <- Some projection);
+                 (match state.view, Masc_tui_render.frame_choice state ~terminal_rows with
+                  | Overview, `Surface ->
+                      let selected = home_selected_action state in
+                      if Option.is_none state.home_selected
+                         && home_initial_reading_ready state selected then
+                        state.home_selected <- selected;
+                      let budget = Masc_tui_render_prim.surface_chrome_budget state ~terminal_rows in
+                      let first, _ = home_decision_window state ~budget in
+                      state.home_decision_scroll <- first
+                  | _ -> ());
                  render state)
            in
            (* The frame is what the operator will act on next, so the scroll it

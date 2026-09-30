@@ -1503,11 +1503,11 @@ type http_scoped_surface_results = {
      rows and the provider usage windows. *)
   http_runtime_quota:
     ((Tui_decode.runtime_option list, string) result
-    * (Tui_decode.provider_usage_windows, string) result)
+    * (Masc.Tui_decode_usage.provider_usage_windows, string) result)
     option;
-  http_keeper_usage: (Tui_decode.keeper_usage_window, string) result option;
+  http_keeper_usage: (Masc.Tui_decode_usage.keeper_usage_window, string) result option;
   http_provider_history:
-    (int * (Tui_decode.provider_usage_history, string) result) option;
+    (int * (Masc.Tui_decode_usage.provider_usage_history, string) result) option;
   (* [None] off the Overview, the one surface that draws the GOALS section. *)
   http_overview_goals: (Tui_decode.overview_goal list, string) result option;
   (* [None] off Usage, the surface that draws account emails. *)
@@ -10247,7 +10247,7 @@ let apply_account_emails_load state = function
 let apply_provider_history_load state (days, result) =
   if days = state.provider_history_days then
     match result with
-    | Ok (history : Tui_decode.provider_usage_history)
+    | Ok (history : Masc.Tui_decode_usage.provider_usage_history)
       when history.puh_days = days ->
         state.provider_history <-
           Provider_history_read

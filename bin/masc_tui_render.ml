@@ -16550,10 +16550,11 @@ let render_palette (state : state) =
   let caret_width = Message_layout.display_width caret in
   (* Keep the end being edited on screen. The masthead yields before the
      filter loses all of its cells; it returns as the viewport grows. *)
+  let query = Terminal_text.single_line state.palette_query in
   let title = screen_title title ^ "  " in
   let title =
     if Message_layout.display_width title + prompt_width + caret_width
-       >= inner_width
+       + Message_layout.display_width query > inner_width
     then "" else title
   in
   let query_width =
@@ -16563,7 +16564,7 @@ let render_palette (state : state) =
   in
   let query =
     Message_layout.input_viewport ~max_cells:query_width
-      (Terminal_text.single_line state.palette_query)
+      query
   in
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"palette"
     ~frame:Chrome_overlay

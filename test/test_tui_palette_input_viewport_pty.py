@@ -15,12 +15,17 @@ def run(executable, no_color=False):
         h.send_and_wait(process, fd, output, b":", b"MASC Command palette")
         h.send_and_wait(process, fd, output,
                         b"\x1b[200~" + query + b"\x1b[201~", b"(no match)")
-        for width in (40, 60, 120, 28):
+        for width in (40, 60, 120, 28, 31):
             h.resize_and_wait(process, fd, output, rows=24, columns=width,
                               needle=b"(no match)", controls=(h.FULL_REDRAW,))
             screen = h.screen_text(bytes(output))
             if b"TAIL987" + caret not in screen:
                 raise AssertionError(f"{width} columns hide filter tail or caret: {screen!r}")
+        h.send_and_wait(process, fd, output, "끝".encode(), "끝".encode())
+        screen = h.screen_text(bytes(output))
+        if "끝▌".encode() not in screen:
+            raise AssertionError(f"31 columns hide last Korean glyph: {screen!r}")
+        h.send_and_wait(process, fd, output, b"\x7f", b"TAIL987")
         h.send_and_wait(process, fd, output, b"\x7f", b"TAIL98")
         screen = h.screen_text(bytes(output))
         if b"TAIL98" + caret not in screen or b"TAIL987" in screen:

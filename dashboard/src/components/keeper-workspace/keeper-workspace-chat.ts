@@ -6,7 +6,7 @@
 import { html } from 'htm/preact'
 import { lazy, Suspense } from 'preact/compat'
 import { ChevronLeft, MoreHorizontal } from 'lucide-preact'
-import { useEffect, useState } from 'preact/hooks'
+import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks'
 import type { VNode } from 'preact'
 import type { Keeper, KeeperConversationEntry } from '../../types'
 import { KeeperConversationPanel } from '../keeper-shared'
@@ -185,6 +185,36 @@ function WorkspaceCommandButtons({
   onToggleSearch: () => void
 }): VNode {
   const [menuOpen, setMenuOpen] = useState(false)
+  const mobileMenu = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    const menu = mobileMenu.current
+    if (!mobile || !menuOpen || !menu) return
+    const chat = menu.closest('.kw-chat')
+    const header = menu.closest('.kw-chat-head')
+    const viewport = window.visualViewport
+    const fit = () => {
+      const viewportBottom = viewport
+        ? viewport.offsetTop + viewport.height
+        : window.innerHeight
+      const bottom = Math.min(viewportBottom, chat?.getBoundingClientRect().bottom ?? viewportBottom)
+      menu.style.setProperty('--kw-command-available-height', `${Math.max(0, bottom - menu.getBoundingClientRect().top)}px`)
+    }
+    fit()
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(fit)
+    if (chat) observer?.observe(chat)
+    if (header) observer?.observe(header)
+    window.addEventListener('resize', fit)
+    window.addEventListener('scroll', fit, true)
+    viewport?.addEventListener('resize', fit)
+    viewport?.addEventListener('scroll', fit)
+    return () => {
+      observer?.disconnect()
+      window.removeEventListener('resize', fit)
+      window.removeEventListener('scroll', fit, true)
+      viewport?.removeEventListener('resize', fit)
+      viewport?.removeEventListener('scroll', fit)
+    }
+  }, [mobile, menuOpen])
   const [busyAction, setBusyAction] = useState<WorkspaceCommandId | null>(null)
   useEffect(() => {
     if (!menuOpen) return
@@ -263,7 +293,7 @@ function WorkspaceCommandButtons({
           </button>
           ${menuOpen
             ? html`
-                <div class="kw-chat-command-popover chat-ovf-menu v2-monitoring-surface" role="menu" onClick=${(event: Event) => event.stopPropagation()}>
+                <div ref=${mobileMenu} class="kw-chat-command-popover chat-ovf-menu v2-monitoring-surface" role="menu" onClick=${(event: Event) => event.stopPropagation()}>
                   ${commands.some(isLifecycleWorkspaceCommand)
                     ? null
                     // shell.jsx kp-menu-note: the ovf menu explains why the row

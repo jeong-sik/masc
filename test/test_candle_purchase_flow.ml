@@ -195,19 +195,19 @@ let test_tool_purchase_and_restart () =
       int
       "actual Keeper owns its credit"
       1000
-      U.(member "balance_milli" before |> to_int);
+      U.(member "balance_milli" before |> to_string |> int_of_string);
     check
       string
       "the Keeper turn selects its wallet"
       "keeper-a"
       U.(member "keeper" before |> to_string);
     let receipt = buy config "keeper-a" "glasses" |> succeeded in
-    check int "configured price was paid" 400 U.(member "amount_milli" receipt |> to_int);
+    check int "configured price was paid" 400 U.(member "amount_milli" receipt |> to_string |> int_of_string);
     check
       int
       "atomic receipt includes the remaining balance"
       600
-      U.(member "account" receipt |> member "balance_milli" |> to_int);
+      U.(member "account" receipt |> member "balance_milli" |> to_string |> int_of_string);
     check
       (list string)
       "purchase owns the canonical item"
@@ -218,7 +218,7 @@ let test_tool_purchase_and_restart () =
       int
       "another Keeper's wallet is untouched"
       500
-      U.(member "balance_milli" (balance config "keeper-b") |> to_int);
+      U.(member "balance_milli" (balance config "keeper-b") |> to_string |> int_of_string);
     rejected "already_owned" (buy config "keeper-a" "glasses");
     let committed = bytes config in
     rejected
@@ -235,7 +235,7 @@ let test_tool_purchase_and_restart () =
       int
       "fresh process replays the stored debit, not today's price"
       600
-      U.(member "balance_milli" replayed |> to_int);
+      U.(member "balance_milli" replayed |> to_string |> int_of_string);
     check
       (list string)
       "fresh process restores ownership"
@@ -273,7 +273,7 @@ let concurrent_buy config ~initial ~first ~second ~remaining ~retry_code =
     int
     "concurrent requests cannot overspend"
     remaining
-    U.(member "balance_milli" account |> to_int);
+    U.(member "balance_milli" account |> to_string |> int_of_string);
   check
     int
     "only the committed item became owned"
@@ -342,8 +342,33 @@ let test_explicit_prices_and_unpriced_items () =
       int
       "an explicit zero price grants ownership without minting money"
       1000
-      U.(member "balance_milli" (balance config "keeper-a") |> to_int);
+      U.(member "balance_milli" (balance config "keeper-a") |> to_string |> int_of_string);
     rejected "already_owned" (buy config "keeper-a" "glasses"))
+;;
+
+let test_large_tool_amounts_remain_exact () =
+  with_workspace (fun _ _ config ->
+    let amount = 9_007_199_254_740_993 in
+    (* Each payout stays within Candle_math's checked multiplication range;
+       their combined wallet crosses JavaScript's safe-integer boundary. *)
+    credit config ~goal:"large-wallet-a" ~keeper:"keeper-a" 4_503_599_627_370_497;
+    credit config ~goal:"large-wallet-b" ~keeper:"keeper-a" 4_503_599_627_370_496;
+    write_config config
+      ("\n[shop.prices_milli]\nglasses = " ^ string_of_int amount ^ "\n");
+    let account = balance config "keeper-a" in
+    check string "large wallet is a decimal string" (string_of_int amount)
+      U.(member "balance_milli" account |> to_string);
+    let catalog =
+      call config "keeper-a" "keeper_candle_catalog" (`Assoc []) |> succeeded in
+    let glasses = U.(member "items" catalog |> to_list)
+      |> List.find (fun row -> U.(member "id" row |> to_string) = "glasses") in
+    check string "large price is a decimal string" (string_of_int amount)
+      U.(member "price_milli" glasses |> to_string);
+    let receipt = buy config "keeper-a" "glasses" |> succeeded in
+    check string "large debit is a decimal string" (string_of_int amount)
+      U.(member "amount_milli" receipt |> to_string);
+    check string "remaining balance is exact zero" "0"
+      U.(member "account" receipt |> member "balance_milli" |> to_string))
 ;;
 
 let test_corruption_and_partial_tail_are_read_only () =
@@ -511,6 +536,10 @@ let () =
               "prices are explicit and missing items remain unpriced"
               `Quick
               test_explicit_prices_and_unpriced_items
+          ; test_case
+              "large tool amounts stay exact decimal strings"
+              `Quick
+              test_large_tool_amounts_remain_exact
           ; test_case
               "corrupt rows and partial tails are never repaired by reads or purchase"
               `Quick

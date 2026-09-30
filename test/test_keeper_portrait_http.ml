@@ -443,6 +443,8 @@ beanie = 200
       | None -> fail "public Keeper roster not registered" in
     let before = get ~router (path ~size:"160" keeper) in
     check int "starting portrait" 200 before.status;
+    let before96 = get ~router (path ~size:"96" keeper) in
+    check int "starting 96px portrait" 200 before96.status;
     let before_roster = read_roster () in
     let reader = token_for config ~agent_name:"portrait-item-reader" Masc_domain.Worker in
     let credited = get ~router ~token:reader (item_path keeper) in
@@ -497,7 +499,7 @@ beanie = 200
        check bool "Item view reads purchase" true (List.mem item account.owned_items)
      | Masc_tui_keeper_items.Off | Masc_tui_keeper_items.Disabled _ ->
        fail "purchased Item account unavailable");
-    check string "purchase alone does not equip" before.body (get ~router (path ~size:"96" keeper)).body;
+    check string "purchase alone does not equip" before96.body (get ~router (path ~size:"96" keeper)).body;
     let purchased = ledger_bytes () in
     (match call ~slot:"face" id with Tool_result.Completed _ -> fail "head item equipped into face slot" | _ -> ());
     check string "wrong-slot refusal does not append" purchased (ledger_bytes ());

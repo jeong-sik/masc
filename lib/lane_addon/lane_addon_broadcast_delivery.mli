@@ -33,18 +33,25 @@ val admit : t -> payload -> (receipt, error) result
 (** Repeating the exact operation returns its existing identity and recipient
     snapshot. A later fleet roster never changes the admitted recipients. *)
 val find : t -> caller:string -> operation_id:Request_id.t -> (receipt option, error) result
+(** Mutations only open an existing admitted journal. Missing operations return
+    [Unknown_operation] without creating a directory, journal or lock file. *)
 val commit : t -> caller:string -> operation_id:Request_id.t -> seq:int -> (receipt, error) result
 val recipient_result : t -> caller:string -> operation_id:Request_id.t ->
   recipient:string -> recipient_state -> (receipt, error) result
-(** Failures remain Pending. Accepted recipients are monotone; callers pass the
-    same workspace_request_id to append_user_message_once on every attempt. *)
+(** Failures remain Pending. [Pending None] cannot erase a saved failed-attempt
+    detail; that regression is [Conflict]. Accepted recipients are monotone;
+    callers pass the same workspace_request_id to append_user_message_once on
+    every attempt. *)
 val complete : record -> bool
 type recovery = {pending:receipt list;settled_with_cleanup:receipt list}
 val recover : t -> (recovery, error) result
 (** Restart scans only durable pending markers, created before admission and
     retired after terminal journal commit. Full journals remain addressable for
     exact replay and audit; completed history is not reread on every pulse.
-    Malformed pending journals fail the authoritative scan; no record is discarded.
+    Pending filenames must be exact lowercase SHA-256 journal identities.
+    Missing or malformed pending journals fail the authoritative scan without
+    creating a replacement journal or discarding the marker. An existing empty
+    pre-admission journal may retire its marker under the exclusive journal lock.
     Completed records with descriptor settlement failures are returned separately
     and never put back into the pending drain. *)
 

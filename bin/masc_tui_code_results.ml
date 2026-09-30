@@ -65,7 +65,7 @@ let apply_file (state : state) request result = (
         Masc_tui_code_lexer.rows_of_source ~language content
         |> List.map
              (List.map (fun (text, kind) ->
-                  (Masc.Tui_decode.sanitize_terminal_text text, kind)))
+                  (Masc.Tui_terminal_text.sanitize_terminal_text text, kind)))
       in
       (* [rows] stays a list for the memo scan and the width fold just
          below, both of which read it once front to back. The pane keeps
@@ -140,7 +140,7 @@ let apply_lsp_answer (state : state) ~question ~symbol result =
          Some
            (match text with
             | Some t ->
-                symbol ^ ": " ^ Masc.Tui_decode.sanitize_terminal_text t
+                symbol ^ ": " ^ Masc.Tui_terminal_text.sanitize_terminal_text t
             | None -> symbol ^ ": the server has nothing to say here");
        No_followup
    | Ok (Masc.Tui_decode.Lsp_locations []) ->

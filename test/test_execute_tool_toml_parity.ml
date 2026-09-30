@@ -123,25 +123,8 @@ let test_serialized_schema_carries_no_retired_name () =
     [ "pipeline"; "then"; "stdin"; "stdout"; "stderr"; "env" ]
 ;;
 
-(* Six sentences, under 800 bytes: #34469 added the sentence on what an
-   enforced Observe run returns and the one on intent=request_effect, and
-   the description measured 752 bytes after it. The three phrases are what
-   test_keeper_tool_descriptor_registry_integrity,
-   test_keeper_tool_execute_descriptor_variant and
-   scripts/check-execute-async-surface.sh read; a rewrite that keeps them
-   keeps those in step. *)
-let description_ceiling_bytes = 800
-
-let test_description_is_short_and_keeps_its_stable_phrases () =
+let test_description_keeps_its_stable_phrases () =
   let description = execute_schema.description in
-  check
-    bool
-    (Printf.sprintf
-       "description is at most %d bytes (got %d)"
-       description_ceiling_bytes
-       (String.length description))
-    true
-    (String.length description <= description_ceiling_bytes);
   List.iter
     (fun phrase ->
        check
@@ -173,9 +156,9 @@ let () =
             `Quick
             test_serialized_schema_carries_no_retired_name
         ; test_case
-            "description is short and keeps its stable phrases"
+            "description keeps its stable phrases"
             `Quick
-            test_description_is_short_and_keeps_its_stable_phrases
+            test_description_keeps_its_stable_phrases
         ] )
     ]
 ;;

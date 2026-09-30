@@ -2553,6 +2553,8 @@
 
 (include stanzas/test_keeper_production_readiness_gate.inc)
 
+(include stanzas/test_candle_config.inc)
+
 (include stanzas/test_channel_gate.inc)
 
 (include stanzas/test_channel_gate_discord_state.inc)

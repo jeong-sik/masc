@@ -660,7 +660,12 @@ let technical_lines ?(height=24) ?(failed_note = "") ~width view =
     Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
       (Masc.Tui_decode.sanitize_terminal_text text) in
   let raw_row (row : Row.row) =
-    [row.title; "Row " ^ row.id]
+    [row.title; "Row " ^ row.id;
+     "Observed " ^ utc_stamp row.observed_at ^ " UTC";
+     "Subject " ^ row.subject_id]
+    @ Option.to_list (Option.map (fun actor -> "Actor " ^ actor) row.actor)
+    @ Option.to_list (Option.map (fun (clock : Row.clock) ->
+        "Clock " ^ clock.domain ^ " · " ^ clock.value) row.clock)
     @ String.split_on_char '\n' (Yojson.Safe.pretty_to_string (`Assoc row.fields))
     @ List.map (fun (e : Row.evidence) ->
         "Evidence " ^ e.uri ^ " · sha256 " ^ Option.value ~default:"unknown" e.sha256)
@@ -691,12 +696,16 @@ let technical_lines ?(height=24) ?(failed_note = "") ~width view =
           | Overview, Some _ -> []
           | Overview, None -> snapshot.output.rows
           | Detail _, _ -> Option.to_list (selected_row view) in
-        ["Raw details"]
+        ["Raw details";
+         "Snapshot " ^ (match snapshot.complete with
+           | Some true -> "complete" | Some false -> "partial" | None -> "unknown")]
         @ (if rows=[] then [] else "Records" :: List.concat_map raw_row rows)
         @ worker @ configuration
         @ (if snapshot.output.coverage=[] then [] else
              "Coverage" :: List.map (fun (source : Row.coverage) ->
                source.source_id ^ " · " ^ (if source.complete then "complete" else "partial")
+               ^ " · incarnation " ^ source.incarnation
+               ^ " · cursor " ^ Option.value ~default:"unknown" source.cursor
                ^ Option.fold ~none:"" ~some:(fun detail -> " · " ^ detail) source.detail)
                snapshot.output.coverage) in
   let receipt = match view.receipt with

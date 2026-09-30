@@ -420,13 +420,14 @@ open Alcotest
    its 128,595 base was not re-measured after #39454 trimmed four board
    descriptions (about 67 to 98 bytes by replay), so the surface sits that
    far under this ceiling rather than exactly at it. *)
-(* 2026-09-30: capability discovery now explains exact Skill arguments,
-   deferred loading and async result retrieval, with executable FTS examples.
-   JSON-serialized description deltas are +851 bytes against f077ca17de;
-   this is a source replay, not a native inventory measurement. The dynamic
-   keeper_tool_search loader is outside model_visible_schemas. Retain the
-   existing headroom; exact-head CI measures the resulting inventory. *)
-let ceiling_bytes = 130_051
+(* Main's portrait catalog addition measured 129,395 bytes in PR #39987
+   run 36599468592. This PR adds 851 JSON-serialized description bytes for
+   exact Skill arguments, deferred loading, async retrieval and FTS examples
+   (source replay against f077ca17de). Compose both declared surface changes:
+   129,395 + 851 = 130,246. This predicts the merged inventory; current-head
+   CI must measure it. The dynamic keeper_tool_search loader stays outside
+   model_visible_schemas. *)
+let ceiling_bytes = 130_246
 
 
 let schema_json (schema : Masc_domain.tool_schema) =

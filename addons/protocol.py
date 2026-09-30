@@ -148,7 +148,8 @@ INPUT_SCHEMA = {
                                                                             "items": {"type": "object"}}}}
 
 
-def serve(name: str, observe: Callable[[dict, tuple[Source, ...]], dict]) -> None:
+def serve(name: str, observe: Callable[[dict, tuple[Source, ...]], dict],
+          *, version: str = "0.1.0") -> None:
     """One synchronous package worker. Host owns isolation and cancellation."""
     for line in sys.stdin:
         request_id = None
@@ -163,7 +164,7 @@ def serve(name: str, observe: Callable[[dict, tuple[Source, ...]], dict]) -> Non
             params = object_value(request.get("params", {}), "params")
             if method == "initialize":
                 result = {"protocolVersion": "2025-06-18", "capabilities": {"tools": {}},
-                          "serverInfo": {"name": name, "version": "0.1.0"}}
+                          "serverInfo": {"name": name, "version": version}}
             elif method == "ping":
                 result = {}
             elif method == "tools/list":

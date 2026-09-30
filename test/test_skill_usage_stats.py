@@ -1,17 +1,20 @@
 """Deterministic fixture test for scripts/skill-usage-stats.py.
 
-Builds a temporary workspace with two trace ledgers and asserts the cross-session
-rollup: per-skill totals, the instruction/composition split, distinct-session
-counts, and detection of an installed-but-never-activated Skill.
+Builds a temporary workspace with two trace event logs and asserts the
+cross-session rollup: per-skill totals, the instruction/composition split,
+distinct-session counts, and detection of an installed-but-never-activated Skill.
 """
 
+import contextlib
 import importlib.util
-import json
+import io
 import os
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+
+import skill_activation_event_log_fixture as log_fixture
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = REPO_ROOT / "scripts" / "skill-usage-stats.py"
@@ -26,11 +29,33 @@ spec.loader.exec_module(stats)
 
 
 def _activation(name, kind, at, runtime="r1", source="project-masc"):
-    tool = f"keeper_compose_{name}" if kind == "composition" else "keeper_skill"
+    if kind == "composition":
+        invocation = {
+            "kind": kind,
+            "origin": {"kind": "session_composition"},
+            "tool_name": f"keeper_compose_{name}",
+        }
+    else:
+        invocation = {
+            "kind": kind,
+            "origin": {"kind": "session_instruction"},
+            "served_content": {"kind": "skill_body", "bytes": 4, "sha256": "e" * 64},
+        }
     return {
         "identity": {"source_id": source, "package_id": name, "name": name},
-        "invocation": {"kind": kind, "tool_name": tool},
-        "delivery": {"runtime_id": runtime},
+        "content_revision": "c" * 64,
+        "snapshot_revision": "d" * 64,
+        "runtime_id": runtime,
+        "agent_core_turn": 1,
+        "invocation": invocation,
+        "delivery": {
+            "boundary": {"kind": "model_response", "agent_core_turn": 2},
+            "runtime_id": runtime,
+            "delivered_at": at,
+            "content_bytes": 4,
+            "content_sha256": "e" * 64,
+        },
+        "actions": [],
         "activated_at": at,
     }
 
@@ -38,12 +63,21 @@ def _activation(name, kind, at, runtime="r1", source="project-masc"):
 def _write_trace(base, trace_id, activations):
     d = os.path.join(base, ".masc", "traces", trace_id)
     os.makedirs(d, exist_ok=True)
-    with open(os.path.join(d, "skill-activations.json"), "w", encoding="utf-8") as fh:
-        json.dump(
-            {"schema": "masc.skill-activations/v5", "session_id": trace_id,
-             "activations": activations},
-            fh,
-        )
+    ledger = {
+        "workspace_key": "f" * 64,
+        "session_id": trace_id,
+        "activations": [
+            {
+                **activation,
+                "turn_ref": f"{trace_id}#{index}",
+                "skill_tool_use_id": f"{trace_id}-call-{index}",
+            }
+            for index, activation in enumerate(activations, start=1)
+        ],
+        "transition_rejections": [],
+    }
+    with open(os.path.join(d, "skill-activation-events.jsonl"), "wb") as fh:
+        fh.write(log_fixture.event_log(ledger))
 
 
 def _write_skill(base, name):
@@ -90,7 +124,8 @@ class SkillUsageStatsTest(unittest.TestCase):
             self.assertEqual(beta.composition, 2)
             self.assertEqual(len(beta.sessions), 2)
 
-            installed = stats.installed_skill_names(base)
+            with tempfile.TemporaryDirectory() as home:
+                installed = stats.installed_skill_names(base, home)
             unused = installed - set(per_skill)
             self.assertEqual(unused, {"gamma"})
 
@@ -101,15 +136,31 @@ class SkillUsageStatsTest(unittest.TestCase):
             self.assertEqual(dict(per_skill), {})
             self.assertEqual(sessions, set())
 
-    def test_unknown_schema_is_ignored(self):
+    def test_log_with_another_schema_is_skipped_with_a_warning(self):
         with tempfile.TemporaryDirectory() as base:
             d = os.path.join(base, ".masc", "traces", "trace-x")
             os.makedirs(d, exist_ok=True)
-            with open(os.path.join(d, "skill-activations.json"), "w", encoding="utf-8") as fh:
-                json.dump({"schema": "something.else/v1", "activations": [
-                    _activation("alpha", "instruction", "2026-09-01T00:00:00Z")]}, fh)
-            _, total, _ = stats.rollup(base)
+            header = log_fixture.header_row("f" * 64, "trace-x")
+            header["schema"] = "something.else/v1"
+            path = os.path.join(d, "skill-activation-events.jsonl")
+            with open(path, "wb") as fh:
+                fh.write(log_fixture.encode_rows([header]))
+            warnings = io.StringIO()
+            with contextlib.redirect_stderr(warnings):
+                _, total, _ = stats.rollup(base)
             self.assertEqual(total, 0)
+            self.assertIn(path, warnings.getvalue())
+
+    def test_log_without_a_complete_row_counts_nothing(self):
+        with tempfile.TemporaryDirectory() as base:
+            d = os.path.join(base, ".masc", "traces", "trace-x")
+            os.makedirs(d, exist_ok=True)
+            with open(os.path.join(d, "skill-activation-events.jsonl"), "wb") as fh:
+                fh.write(b'{"schema":"masc.skill-activation-events/v1"')
+            per_skill, total, sessions = stats.rollup(base)
+            self.assertEqual(total, 0)
+            self.assertEqual(dict(per_skill), {})
+            self.assertEqual(sessions, set())
 
 
 if __name__ == "__main__":

@@ -711,7 +711,11 @@ status: reference
     `usage-read`를 선언했으면 Keeper turn walk가 해당 endpoint를 한 번 읽는다(#38975).
     그 보고에서 모델 호출을 막는 창이 한도까지 소진된 경우에만 별도
     `Runtime_quota_window` 증거로 기록하고, 이후 후보 순서가 그 증거를 읽어 해당 scope를
-    뒤로 둔다. Muse의 모델 오류 뒤 `usage/read`는 선택된 계정의 소진 창을 확인해
+    뒤로 둔다. Codex turn 이 사용량 소진(`usageLimitExceeded`)으로 거절되면 같은 계정의
+    `account/rateLimits/read` 를 한 번 읽어 표를 갱신한다. 거절된 호출의 `limit_id`를
+    식별할 수 없으므로 단일 버킷도 휴식 시각으로 쓰지 않고 기존 `Observed`를 유지한다(#39997).
+    HTTP 403 뒤 읽기는 과거 리셋으로 거절 증거를 지우지 않는다.
+    Muse의 모델 오류 뒤 `usage/read`는 선택된 계정의 소진 창을 확인해
     `Runtime_quota_window`에만 기록한다(#39810). 이 읽기는 사용량 관측값을 이 표에
     추가하지 않고 실패한 turn도 재전송하지 않는다. 소진율이나 리셋 시각만으로 일반
     가용성을 추론하는 것은 아니다.
@@ -1025,12 +1029,20 @@ status: reference
   쥔 참가자만 기계의 시간을 움직인다. 다른 참가자의 시간 이동 요청은 거절되지만
   화면은 볼 수 있다.
   `masc_dos_pass`로 Keeper에게 넘기면 보드 글이 그 Keeper를 @멘션해 깨운다.
+  모든 요청이 자격증명을 실어야 하는 환경(인증 켜짐·토큰 필수)에서는 기계 앞에
+  앉은 이름(`Play_seat.hand_to`가 돌려주는 Keeper·운영자·만료되지 않은 초대)에게만
+  넘길 수 있고, 다른 이름은 아무 일도 일어나기 전에 거절된다. 그 목록을 읽지 못하면
+  `Seats_unknown`으로 거절한다. 이름을 스스로 적을 수 있는 환경에는 목록이 없어
+  넘김이 그대로 통과한다.
   쥔 Keeper가 일시정지되거나 정지하면 다음 움직임 전에 풀리고, 만료된 `Player`
-  초대의 조종권도 풀린다. 충돌 뒤 자동 재시작을 기다리거나 막 켜지는 중인 Keeper는
-  그대로 쥔다. 조종권의 이름은 차례 기록이며 권한 증명이 아니다. `Player` 권한은
-  별도 자격증명으로 검사한다.
+  초대의 조종권도 풀린다. 모든 요청이 자격증명을 실어야 하는 환경에서는 Keeper가
+  아니면서 자격증명 파일이 없는 이름(회수된 초대)의 조종권도 풀린다. 자격증명
+  파일을 읽지 못한 경우는 없는 것으로 보지 않고 그대로 쥔다. 충돌 뒤 자동 재시작을
+  기다리거나 막 켜지는 중인 Keeper는 그대로 쥔다. 조종권의 이름은 차례 기록이며
+  권한 증명이 아니다. `Player` 권한은 별도 자격증명으로 검사한다.
   → [Dos_lane.pass](../../lib/dos_lane/dos_lane.mli) ·
   [Play_seat.participants](../../lib/play/play_seat.mli) ·
+  [Play_seat.hand_to](../../lib/play/play_seat.mli) ·
   [Keeper_dos_controller.holder_left](../../lib/keeper/keeper_dos_controller.mli)
 
 **Shared DOS Play Invite (공유 DOS 플레이 초대)**
@@ -1038,8 +1050,10 @@ status: reference
   공유 DOS 기계를 보고 조작한다. 초대 이름은 입력과
   조종권의 `who`로 기록되며 Keeper 이름과 겹칠 수 없다. 회수는 자격증명을 지우고
   그 이름이 쥔 조종권의 해제를 시도한다. 해제에 실패하거나 결과가 불명확하면 같은
-  이름으로 다시 회수할 수 있다.
+  이름으로 다시 회수할 수 있다. 링크는 AI 에이전트에게 넘겨도 된다. 에이전트는
+  `/play/agent.md`(에이전트 안내)를 읽고 MCP(`/mcp/play`)나 HTTP 로 같은 자리에 앉는다.
   → [Play_invite](../../lib/play/play_invite.mli) ·
+  [Server_routes_http_routes_play_guide](../../lib/server/server_routes_http_routes_play_guide.mli) ·
   [TUI play invites](../TUI-GUIDE.md)
 
 **기계 체크포인트 (Machine Checkpoint)**

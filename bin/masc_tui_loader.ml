@@ -154,7 +154,8 @@ let load_active_tasks (base_path : string) :
     * Masc_domain.task list
     * string option
     * Masc_tui_task_flow.t option
-    * Masc_tui_agenda.stalled Masc_tui_agenda.reading =
+    * Masc_tui_agenda.stalled Masc_tui_agenda.reading
+    * (string * string list) Masc_tui_agenda.reading =
   let config = Workspace_core.default_config base_path in
   let path = Workspace_backlog.backlog_path config in
   match Workspace_backlog.read_backlog_observation_with_source_r config with
@@ -165,7 +166,8 @@ let load_active_tasks (base_path : string) :
       , []
       , Some reason
       , None
-      , Masc_tui_agenda.Read_failed reason )
+      , Masc_tui_agenda.Read_failed reason
+      , Masc_tui_agenda.Not_read )
   | Ok observation ->
       let recovery_error =
         match observation.recovered_from with
@@ -174,23 +176,21 @@ let load_active_tasks (base_path : string) :
             report path recovery.primary_error;
             Some ("task backlog recovered from backup: " ^ recovery.primary_error)
       in
-      (* The backlog says what the tasks are; the goal-task registry says what
-         they serve. A task record carries no goal on purpose -- the registry
-         is the source of truth -- so reading only the backlog is what left
-         every task on this screen unable to name its goal.
-
-         A registry that cannot be read leaves the links empty rather than
-         failing the whole load: the tasks are still worth showing, and the
-         reason is reported beside them rather than as an absence of links. *)
-      let goals_for_task, goal_link_error =
-        match Workspace_goal_index.read_goal_task_links_r config with
-        | Error err -> (fun _ -> []), Some ("goal links unavailable: " ^ err)
-        | Ok goal_task_links ->
-          let index =
-            Workspace_goal_index.build_task_goal_index ~goal_task_links ()
-          in
-          ( (fun task_id -> Workspace_goal_index.goals_for_task index ~task_id)
-          , None )
+      (* Goal links are supplemental to tasks, but only a successful primary
+         registry read can establish their presence or absence. *)
+      let goal_task_links, goal_link_error =
+        match Workspace_goal_index.read_goal_task_links_authoritative_r config with
+        | Error err ->
+            let reason = "goal links unavailable: " ^ err in
+            Masc_tui_agenda.Read_failed reason, Some reason
+        | Ok links -> Masc_tui_agenda.Read links, None
+      in
+      let goals_for_task =
+        match goal_task_links with
+        | Masc_tui_agenda.Read links ->
+            let index = Workspace_goal_index.build_task_goal_index ~goal_task_links:links () in
+            fun task_id -> Workspace_goal_index.goals_for_task index ~task_id
+        | Not_read | Read_failed _ -> fun _ -> []
       in
       let archived, archive_error =
         match read_archived_tasks config with
@@ -229,7 +229,8 @@ let load_active_tasks (base_path : string) :
                          Masc.Operator_task_attention.task_id item
                      ; what = Masc.Operator_task_attention.summary item
                      ; since_iso = Masc.Operator_task_attention.waiting_since item
-                     }))) )
+                     })))
+      , goal_task_links )
 
 (* The Goals the verifier proved, each waiting on the operator's confirmation.
    Read from the goal store the way the tasks above are read from the backlog,
@@ -347,10 +348,11 @@ let load_from_masc_dir (state : state) (base_path : string) =
   (* Load tasks from their single durable source. The domain rows land first:
      a detail view open across this refresh keeps its row even when the task
      just turned terminal, because the projection below drops exactly those. *)
-  let rows, tasks_domain, tasks_error, task_flow, operator_stalled =
+  let rows, tasks_domain, tasks_error, task_flow, operator_stalled, goal_task_links =
     load_active_tasks base_path
   in
   state.tasks_domain <- tasks_domain;
+  state.goal_task_links <- goal_task_links;
   state.task_reading <- rows;
   state.tasks <-
     (match rows with
@@ -505,6 +507,7 @@ let clear_local_workspace (state : state) =
   state.agents <- [];
   state.tasks <- [];
   state.tasks_domain <- [];
+  state.goal_task_links <- Masc_tui_agenda.Not_read;
   state.task_focus <- Masc_tui_overview_tasks.No_task_focus;
   state.task_reading <- Masc_tui_overview_tasks.Rows_unread;
   state.task_flow <- None;

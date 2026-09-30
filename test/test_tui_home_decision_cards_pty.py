@@ -281,6 +281,11 @@ def operator_task_survives_supplemental_failure(executable):
         def prepare(base):
             seed_operator_task(base)
             (Path(base) / ".masc" / relative).write_text("{broken supplemental source")
+            if relative == "tasks/goal_task_links.json":
+                recovery = Path(base) / ".masc" / (relative + ".last-good")
+                recovery.write_text(json.dumps({"version": 1, "links": [
+                    {"goal_id": "goal-recovery", "task_ids": ["task-777"]}
+                ]}))
 
         def interact(process, fd, _slave, output, base):
             h.wait_for_output(process, fd, output, b"Operator task", start=0, timeout=10)
@@ -290,6 +295,15 @@ def operator_task_survives_supplemental_failure(executable):
             h.send_and_wait(process, fd, output, b"\r", b"Primary task remains visible")
             drawn = h.screen_text(bytes(output))
             assert b"MASC Task" in drawn and b"task-777" in drawn, drawn
+            if relative == "tasks/goal_task_links.json":
+                assert b"links unavailable" in drawn, drawn
+                assert b"not linked to a goal" not in drawn, drawn
+                assert b"goal-recovery" not in drawn, drawn
+                (Path(base) / ".masc" / relative).write_text(json.dumps({"version": 1, "links": []}))
+                h.send_and_wait(process, fd, output, b"r", b"not linked to a goal")
+            else:
+                assert b"not linked to a goal" in drawn, drawn
+                assert b"links unavailable" not in drawn, drawn
             path = Path(base) / ".masc" / "tasks" / "backlog.json"
             snapshot = json.loads(path.read_text())
             snapshot["tasks"][0]["title"] = "Same primary task after refresh"

@@ -5289,6 +5289,7 @@ type state = {
      detail view can show a task after it turns terminal -- the active list
      drops exactly those rows. Replaced wholesale with [tasks] on each load. *)
   mutable tasks_domain: Masc_domain.task list;
+  mutable goal_task_links: (string * string list) Masc_tui_agenda.reading;
   mutable task_flow: Masc_tui_task_flow.t option;
   (* Primary backlog authority, shared by Home and Agenda. Supplemental
      archive/link errors stay in tasks_error and cannot erase this reading. *)
@@ -7954,6 +7955,7 @@ let create_state
   agents = [];
   tasks = [];
   tasks_domain = [];
+  goal_task_links = Masc_tui_agenda.Not_read;
   task_flow = None;
   operator_stalled = Masc_tui_agenda.Not_read;
   goals_to_confirm = Masc_tui_agenda.Not_read;
@@ -9116,6 +9118,16 @@ let changes_budget_note_rows (state : state) =
   match state.changes with
   | Some s when s.Tui_decode.fcs_over_budget > 0 -> 2
   | Some _ | None -> 0
+
+(* Both Task detail and Harness derive their goal references from this reading.
+   Failed or unread stores cannot prove that a task is unlinked. *)
+let task_goal_reading (state : state) ~task_id =
+  match state.goal_task_links with
+  | Masc_tui_agenda.Not_read -> Masc_tui_agenda.Not_read
+  | Read_failed reason -> Masc_tui_agenda.Read_failed reason
+  | Read goal_task_links ->
+      let index = Masc.Workspace_goal_index.build_task_goal_index ~goal_task_links () in
+      Masc_tui_agenda.Read (Masc.Workspace_goal_index.goals_for_task index ~task_id)
 
 (* The strip above the composer: what fires next, and who is blocked on the
    operator. Both are already in the state and neither was readable from the

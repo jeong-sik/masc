@@ -819,6 +819,21 @@ let opened_target state lines =
   Option.map (fun line -> line.Agenda.goes_to)
     (Agenda.selected_line lines ~selected:state.Masc_tui_types.agenda_selected)
 
+let test_task_goal_reading_preserves_source_truth () =
+  let state = agenda_state () in
+  let reading () = Masc_tui_types.task_goal_reading state ~task_id:"task-777" in
+  check bool "an unread registry makes no absence claim" true
+    (reading () = Agenda.Not_read);
+  state.goal_task_links <- Agenda.Read ["goal-a", ["task-777"]; "goal-b", ["task-777"]];
+  check bool "multiple Goal references come from the registry" true
+    (reading () = Agenda.Read ["goal-a"; "goal-b"]);
+  state.goal_task_links <- Agenda.Read_failed "malformed primary";
+  check bool "failed refresh does not reuse references or assert absence" true
+    (reading () = Agenda.Read_failed "malformed primary");
+  state.goal_task_links <- Agenda.Read [];
+  check bool "repaired empty registry proves absence" true
+    (reading () = Agenda.Read [])
+
 let test_distinct_calls_from_one_keeper_remain_reachable () =
   let state = agenda_state () in
   let held tool_call_id : Masc.Tui_decode.keeper_tool_approval =
@@ -1044,7 +1059,9 @@ let () =
             test_the_goal_section_answers_in_words
         ] )
     ; ( "selection across refreshed agenda projections"
-      , [ test_case "Home retains tasks when supplemental sources fail" `Quick
+      , [ test_case "Task Goal references preserve registry reading truth" `Quick
+            test_task_goal_reading_preserves_source_truth
+        ; test_case "Home retains tasks when supplemental sources fail" `Quick
             test_home_task_survives_supplemental_source_failure
         ; test_case "Home and Agenda refuse noncurrent task sources" `Quick
             test_home_and_agenda_refuse_noncurrent_task_source

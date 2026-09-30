@@ -715,14 +715,14 @@ let voice_bar_width = 16
 
 let chat_hints ~enter_hint ~scroll_hint ~switch_hint ~escape_hint ~leave_hint =
   Printf.sprintf
-    "%s  Ctrl-J:newline  Ctrl-R:reasoning  Ctrl-D:tools  Ctrl-N:journal  \
-     Ctrl-F:metadata  Ctrl-O:image  %s%s  %s%s  Ctrl-U:clear  Ctrl-W:word"
-    enter_hint scroll_hint switch_hint escape_hint leave_hint
+    "%s  Ctrl-J:newline  /:commands  %s%s  %s%s  Ctrl-R:reasoning  \
+     Ctrl-D:tools  Ctrl-N:journal  Ctrl-F:metadata  Ctrl-O:image  Ctrl-U:clear  Ctrl-W:word"
+    enter_hint escape_hint leave_hint scroll_hint switch_hint
 
 (** Below 120 columns the fixed set drops to what leaves room for the message
     itself; {!line}'s fitting machinery trims from the tail beyond that. *)
 let compact_chat_hints ~enter_hint ~scroll_hint ~escape_hint =
   Printf.sprintf
-    "%s  Ctrl-J:NL  Ctrl-R:reasoning  Ctrl-D:tools  Ctrl-N:journal  \
-     Ctrl-F:metadata  %s  %s"
-    enter_hint scroll_hint escape_hint
+    "%s  Ctrl-J:NL  /:commands  %s  %s  Ctrl-R:reasoning  Ctrl-D:tools  \
+     Ctrl-N:journal  Ctrl-F:metadata"
+    enter_hint escape_hint scroll_hint

@@ -34,6 +34,7 @@ flowchart LR
   preceding branch. Give each PR one concrete outcome and land the stack bottom first.
 - Keep concurrent changes in separate worktrees. Task claims coordinate who is
   doing the work; they do not lock files or authorize editing another checkout.
+- For GitHub Native Stacks, inspect REST `stack` metadata and follow [Native GitHub Stacks](NATIVE-GITHUB-STACKS.md). Merging a selected PR includes its open downstack PRs; a non-main direct base is not a parent-merge blocker. Review the whole included scope.
 - Document the feature where readers look for it. README introduces the product,
   CONTRIBUTING starts development, manuals explain use, specs define interfaces,
   and RFCs record design proposals. Source and measured behavior support claims.
@@ -127,7 +128,7 @@ Read [AGENTS.md](../../AGENTS.md) and the complete
    source, current review comments and failing logs instead of relying on summaries.
 3. Implement a bounded change. External coding sessions do not run local Dune
    builds. Ordinary stacks use source review. Request a development check only
-   for a concrete need and keep it within two minutes; full CI belongs to the
+   for a concrete need and keep its scope small; full CI belongs to the
    Release/Tag boundary. Do not watch or poll CI.
 4. When moving to the next work unit, assign an adversarial review agent to the
    previous one. Review the findings yourself and address them. A subagent review
@@ -195,10 +196,12 @@ an issue link. Mark the PR ready when its diff and evidence are ready for review
 PR creation, pushes and ready transitions do not automatically start CI.
 
 [pr-check.yml](../../.github/workflows/pr-check.yml) provides explicit source,
-configuration and credential checks within two minutes.
+configuration and credential checks.
 [ci.yml](../../.github/workflows/ci.yml) builds only Core for the bottom PR,
-also within two minutes. Request these only when needed. A cold dependency cache
-may prevent completion in that window; an incomplete run is not build evidence.
+with a focused build. Request these only when needed. The constitution's
+"about two minutes" describes the intended scale, not a timeout or a pass/fail
+threshold. A cold dependency cache can take longer; only an actual successful
+completion is build evidence.
 
 There is no PR, general push or scheduled CI. At `release/vX.Y.Z`, explicitly
 request [release-candidate.yml](../../.github/workflows/release-candidate.yml)

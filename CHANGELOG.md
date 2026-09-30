@@ -238,6 +238,8 @@
 ### Documentation
 
 - Add repository strategy and English/Korean contributor workflows for people, external AI sessions and Keeper lanes; align CONTRIBUTING with current CI and review procedures. #40109
+- Propose server-generated fixtures for client decoder tests, with expected-value assertions for every consumed field and contrasting present/null schedule values (#40000).
+- Define deterministic encoder inputs, separately encoded response cases, unknown-discriminator rejection and existing standalone TUI decoder coverage; retain immutable source evidence for the proposal (#40000).
 
 ### Internal
 

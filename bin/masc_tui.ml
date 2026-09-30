@@ -6396,7 +6396,7 @@ let row_list (state : state) : row_list option =
      page keys reach them through here, which is what makes these arms live
      rather than a landing nobody calls. *)
   | Approvals ->
-      windowed ~count:(List.length (approval_items state))
+      windowed ~count:(List.length (Masc_tui_approvals_model.approval_items state))
         ~cursor:state.approval_cursor (fun index ->
           state.approval_cursor <- index)
   | Schedules ->
@@ -6846,12 +6846,12 @@ let goto_surface state ~mailbox (destination : surface) =
    call this; so does board compose when its handler declines the key, so
    "Tab falls through" stays true while composing. *)
 let cycle_surface state ~mailbox ~backwards =
-  let ring = Masc_tui_types.visible_surface_ring state in
+  let ring = Masc_tui_surface_navigation.visible_surface_ring state in
   let count = List.length ring in
   if count > 0 then begin
     let step = if backwards then count - 1 else 1 in
     let index =
-      (Masc_tui_types.visible_surface_ring_index state state.view + step) mod count
+      (Masc_tui_surface_navigation.visible_surface_ring_index state state.view + step) mod count
     in
     goto_surface state ~mailbox (fst (List.nth ring index))
   end
@@ -8825,9 +8825,9 @@ let follow_target (kind : Link.kind) (id : string) =
 ;;
 
 let approval_row_reference = function
-  | Keeper_tool_row ask -> Some (Link.reference Keeper ask.kta_keeper)
-  | Gate_row pending -> Some (Link.reference Keeper pending.Tui_decode.gp_keeper)
-  | Operator_row item ->
+  | Masc_tui_approvals_model.Keeper_tool_row ask -> Some (Link.reference Keeper ask.kta_keeper)
+  | Masc_tui_approvals_model.Gate_row pending -> Some (Link.reference Keeper pending.Tui_decode.gp_keeper)
+  | Masc_tui_approvals_model.Operator_row item ->
       Option.bind item.ap_target_id (fun target_id ->
           match
             Masc.Operator_action_constants.target_type_of_string
@@ -8923,7 +8923,7 @@ let selected_surface_reference state =
          Workspace target, or one this build does not know, points at no
          surface and gets no reference. *)
       Option.bind
-        (List.nth_opt (approval_items state) state.approval_cursor)
+        (List.nth_opt (Masc_tui_approvals_model.approval_items state) state.approval_cursor)
         approval_row_reference
   | Acting | Metrics
   | Memory | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools
@@ -10444,7 +10444,7 @@ let apply_approvals_load state = function
         else
           keeper_prefix
           + Approval.reconcile_cursor
-              ~current_items:(operator_approval_items state)
+              ~current_items:(Masc_tui_approvals_model.operator_approval_items state)
               ~cursor:operator_cursor ~next_items:snapshot.aps_items
       in
       state.approval_snapshot <- Some snapshot;
@@ -15403,7 +15403,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            state.keeper_tool_approvals <- held;
            state.keeper_tool_approvals_error <- None;
            state.keeper_tool_approvals_observed <- true;
-           let count = List.length (approval_items state) in
+           let count = List.length (Masc_tui_approvals_model.approval_items state) in
            if state.approval_cursor >= count then
              state.approval_cursor <- max 0 (count - 1)
        | Error detail -> state.keeper_tool_approvals_error <- Some detail)
@@ -15588,7 +15588,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            state.gate_rules_unavailable <- snapshot.Tui_decode.gs_rules_unavailable;
            state.gate_error <- None;
            state.gate_snapshot_observed <- true;
-           let count = List.length (approval_items state) in
+           let count = List.length (Masc_tui_approvals_model.approval_items state) in
            if state.approval_cursor >= count then
              state.approval_cursor <- max 0 (count - 1)
        | Error detail -> state.gate_error <- Some detail)
@@ -15614,7 +15614,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                (fun (pending : Tui_decode.gate_pending) ->
                  not (String.equal pending.Tui_decode.gp_id approval_id))
                state.gate_pending;
-           let count = List.length (approval_items state) in
+           let count = List.length (Masc_tui_approvals_model.approval_items state) in
            if state.approval_cursor >= count then
              state.approval_cursor <- max 0 (count - 1);
            launch_gate_snapshot_load ~intent:Snapshot_read.Refresh state ~mailbox
@@ -15728,7 +15728,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           (fun (held : Tui_decode.keeper_tool_approval) ->
             not (String.equal held.kta_tool_call_id tool_call_id))
           state.keeper_tool_approvals;
-      let count = List.length (approval_items state) in
+      let count = List.length (Masc_tui_approvals_model.approval_items state) in
       if state.approval_cursor >= count then
         state.approval_cursor <- max 0 (count - 1);
       report_action state
@@ -17482,20 +17482,20 @@ let main
   let answer_presented_approval decision =
     match
       Approval_authority.resolve ~presented:!presented_approval
-        ~current:(approval_items state) decision
+        ~current:(Masc_tui_approvals_model.approval_items state) decision
     with
-    | Some { Approval_authority.row = Operator_row approval; decision } ->
+    | Some { Approval_authority.row = Masc_tui_approvals_model.Operator_row approval; decision } ->
         handle_approval_decision state approval decision
           ~mailbox:async_messages
-    | Some { Approval_authority.row = Keeper_tool_row held; decision } ->
+    | Some { Approval_authority.row = Masc_tui_approvals_model.Keeper_tool_row held; decision } ->
         launch_surface_tool_approval state ~mailbox:async_messages
           ~keeper_name:held.kta_keeper
           ~tool_call_id:held.kta_tool_call_id
           ~allow:(match decision with Confirm -> true | Deny -> false)
-    | Some { Approval_authority.row = Gate_row pending; decision = Confirm } ->
+    | Some { Approval_authority.row = Masc_tui_approvals_model.Gate_row pending; decision = Confirm } ->
         launch_gate_resolve state ~mailbox:async_messages
           ~approval_id:pending.Tui_decode.gp_id ~approve:true ~reason:None
-    | Some { Approval_authority.row = Gate_row pending; decision = Deny } ->
+    | Some { Approval_authority.row = Masc_tui_approvals_model.Gate_row pending; decision = Deny } ->
         reject_gate_approval pending
     | None ->
         report_action state "system"
@@ -22404,7 +22404,7 @@ and is loaded on demand through keeper_skill.
           cursor -- so stepping is the cursor move, and the pane follows. *)
        | Some (("[" | "]") as bracket)
          when state.view = Approvals && state.approval_detail_open ->
-           step_detail_cursor ~count:(List.length (approval_items state))
+           step_detail_cursor ~count:(List.length (Masc_tui_approvals_model.approval_items state))
              ~cursor:state.approval_cursor
              ~delta:(if bracket = "]" then 1 else -1)
              ~set_cursor:(fun n -> state.approval_cursor <- n)
@@ -22608,11 +22608,11 @@ and is loaded on demand through keeper_skill.
        | Some "R" when state.view = Approvals ->
            (match
               Approval_authority.resolve ~presented:!presented_approval
-                ~current:(approval_items state) Confirm
+                ~current:(Masc_tui_approvals_model.approval_items state) Confirm
             with
-            | Some { Approval_authority.row = Gate_row pending; _ } ->
+            | Some { Approval_authority.row = Masc_tui_approvals_model.Gate_row pending; _ } ->
                 launch_gate_auto_judge_retry state ~mailbox:async_messages pending
-            | Some { Approval_authority.row = (Operator_row _ | Keeper_tool_row _); _ }
+            | Some { Approval_authority.row = (Masc_tui_approvals_model.Operator_row _ | Masc_tui_approvals_model.Keeper_tool_row _); _ }
             | None ->
                 report_action state "system"
                   "Approval list changed; review the updated row before retrying")
@@ -24466,7 +24466,7 @@ and is loaded on demand through keeper_skill.
                 state.approval_detail_scroll <-
                   Masc_tui_types.scroll_down_from state.approval_detail_scroll ~by:1
             | Approvals ->
-                let count = List.length (approval_items state) in
+                let count = List.length (Masc_tui_approvals_model.approval_items state) in
                 if state.approval_cursor < count - 1 then begin
                   state.pending_approval_action <- None;
                   state.approval_cursor <- state.approval_cursor + 1
@@ -25218,7 +25218,7 @@ and is loaded on demand through keeper_skill.
             | Approvals ->
                 (* The list draws the ask on one row; this is where the whole
                    thing is readable before [y] answers it. *)
-                if List.length (approval_items state) > 0 then begin
+                if List.length (Masc_tui_approvals_model.approval_items state) > 0 then begin
                   state.approval_detail_open <- true;
                   state.approval_detail_scroll <- 0
                 end

@@ -229,10 +229,8 @@ let test_the_approvals_title_counts_what_the_badge_counts () =
   Alcotest.(check int) "the title walks the shared pending helper" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:render
        ~binding_name:"render_approvals"
-       ~callee:"approvals_surface_pending"
-     + Ast_grep.count_calls_in_value_binding ~module_path:render
-         ~binding_name:"render_approvals"
-         ~callee:"Masc_tui_types.approvals_surface_pending");
+       ~callee:"Masc_tui_approvals_model.approvals_surface_pending"
+);
   (* And names every kind it counted. A total with an unnamed part reads as
      an arithmetic error on screen. *)
   Alcotest.(check int) "the four kinds the surface answers" 4
@@ -244,7 +242,7 @@ let test_the_approvals_title_counts_what_the_badge_counts () =
   Alcotest.(check int) "the questions come off the shared reading" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:render
        ~binding_name:"render_approvals"
-       ~callee:"Masc_tui_types.approvals_open_question_count");
+       ~callee:"Masc_tui_approvals_model.approvals_open_question_count");
   Alcotest.(check int) "and the surface reads the asks snapshot nowhere else" 0
     (reads ~binding_name:"render_approvals" ~fields:[ "asks_snapshot" ])
 
@@ -259,8 +257,8 @@ let test_the_overview_row_counts_every_approval_list () =
     (reads ~binding_name:"render_overview"
        ~fields:[ "aps_visible_count"; "aps_total_count" ]);
   (* The row, the ring and the Approvals title count one population and judge
-     one reading. [approvals_count_label] takes the count from
-     [approvals_surface_pending] and the "?" from [approvals_reading_current],
+     one reading. [Masc_tui_approvals_model.approvals_count_label] takes the count from
+     [Masc_tui_approvals_model.approvals_surface_pending] and the "?" from [Masc_tui_approvals_model.approvals_reading_current],
      and test_tui_keys checks that the label follows the reading. Here: the
      row draws that label and keeps no copy of either half. Two copies of the
      judgement drift: at fe6315aa69 (2026-09-26) the strip's copy left the Gate
@@ -268,15 +266,14 @@ let test_the_overview_row_counts_every_approval_list () =
   let calls callee =
     Ast_grep.count_calls_in_value_binding ~module_path:render
       ~binding_name:"render_overview" ~callee
-    + Ast_grep.count_calls_in_value_binding ~module_path:render
-        ~binding_name:"render_overview" ~callee:("Masc_tui_types." ^ callee)
+
   in
   Alcotest.(check int) "the row draws the shared count label" 1
-    (calls "approvals_count_label");
+    (calls "Masc_tui_approvals_model.approvals_count_label");
   Alcotest.(check int) "and counts no population of its own" 0
-    (calls "approvals_surface_pending");
+    (calls "Masc_tui_approvals_model.approvals_surface_pending");
   Alcotest.(check int) "and makes no reading judgement of its own" 0
-    (calls "approvals_reading_current" + calls "approvals_reading");
+    (calls "Masc_tui_approvals_model.approvals_reading_current" + calls "Masc_tui_approvals_model.approvals_reading");
   Alcotest.(check int) "and reads no approval list's state itself" 0
     (reads ~binding_name:"render_overview"
        ~fields:
@@ -300,15 +297,14 @@ let test_the_approvals_screen_reads_the_shared_readings () =
   let calls callee =
     Ast_grep.count_calls_in_value_binding ~module_path:render
       ~binding_name:"render_approvals" ~callee
-    + Ast_grep.count_calls_in_value_binding ~module_path:render
-        ~binding_name:"render_approvals" ~callee:("Masc_tui_types." ^ callee)
+
   in
   Alcotest.(check int) "one reading for the whole screen" 1
-    (calls "approvals_reading");
+    (calls "Masc_tui_approvals_model.approvals_reading");
   Alcotest.(check int) "the title notes come from it" 1
-    (calls "approvals_title_notes");
+    (calls "Masc_tui_approvals_model.approvals_title_notes");
   Alcotest.(check int) "the empty queue comes from it" 1
-    (calls "approvals_empty_queue");
+    (calls "Masc_tui_approvals_model.approvals_empty_queue");
   Alcotest.(check int) "no list's failure state is read beside it" 0
     (reads ~binding_name:"render_approvals"
        ~fields:

@@ -1428,10 +1428,22 @@
  (libraries masc_tui_composer masc_tui_types))
 
 (library
+ (name masc_tui_approvals_model)
+ (wrapped false)
+ (modules masc_tui_approvals_model)
+ (libraries masc_tui_types masc_tui_operator_projection masc_tui_ask_projection masc))
+
+(library
+ (name masc_tui_surface_navigation)
+ (wrapped false)
+ (modules masc_tui_surface_navigation)
+ (libraries masc_tui_types masc_tui_approvals_model))
+
+(library
  (name masc_tui_approval_authority)
  (wrapped false)
  (modules masc_tui_approval_authority)
- (libraries masc_tui_types))
+ (libraries masc_tui_approvals_model masc_tui_types))
 
 (library
  (name masc_tui_terminal_title)
@@ -1600,7 +1612,7 @@
  (name masc_tui_render_prim)
  (wrapped false)
  (modules masc_tui_render_prim)
- (libraries
+ (libraries masc_tui_approvals_model masc_tui_surface_navigation
   masc_tui_frame_timing
   masc_tui_next_request_band
   masc_tui_hit
@@ -1735,7 +1747,7 @@
   masc_tui_http)
  (public_name masc-tui)
  (package masc)
- (libraries
+ (libraries masc_tui_approvals_model masc_tui_surface_navigation
   masc_tui_play_qr
   masc_tui_account_login
   masc_tui_sgr_text

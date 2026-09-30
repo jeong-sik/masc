@@ -1,22 +1,22 @@
 open Masc_tui_types
 
 type resolved = {
-  row : approval_row;
+  row : Masc_tui_approvals_model.approval_row;
   decision : approval_decision;
 }
 
 let same_identity left right =
   match left, right with
-  | Keeper_tool_row left, Keeper_tool_row right ->
+  | Masc_tui_approvals_model.Keeper_tool_row left, Masc_tui_approvals_model.Keeper_tool_row right ->
       String.equal left.kta_keeper right.kta_keeper
       && String.equal left.kta_tool_call_id right.kta_tool_call_id
-  | Gate_row left, Gate_row right ->
+  | Masc_tui_approvals_model.Gate_row left, Masc_tui_approvals_model.Gate_row right ->
       String.equal left.Tui_decode.gp_id right.Tui_decode.gp_id
-  | Operator_row left, Operator_row right ->
+  | Masc_tui_approvals_model.Operator_row left, Masc_tui_approvals_model.Operator_row right ->
       String.equal left.ap_token right.ap_token
-  | Keeper_tool_row _, (Operator_row _ | Gate_row _)
-  | Gate_row _, (Keeper_tool_row _ | Operator_row _)
-  | Operator_row _, (Keeper_tool_row _ | Gate_row _) ->
+  | Masc_tui_approvals_model.Keeper_tool_row _, (Masc_tui_approvals_model.Operator_row _ | Masc_tui_approvals_model.Gate_row _)
+  | Masc_tui_approvals_model.Gate_row _, (Masc_tui_approvals_model.Keeper_tool_row _ | Masc_tui_approvals_model.Operator_row _)
+  | Masc_tui_approvals_model.Operator_row _, (Masc_tui_approvals_model.Keeper_tool_row _ | Masc_tui_approvals_model.Gate_row _) ->
       false
 
 let resolve ~presented ~current decision =

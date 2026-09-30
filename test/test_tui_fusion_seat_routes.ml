@@ -1,21 +1,20 @@
 (** The seat-routes block of a Fusion run's detail, read as the operator
     reads it: one line per seat, the failed candidates under their seat. *)
 open Alcotest
-module Decode = Masc.Tui_decode
 module Seat_routes = Masc_tui_fusion_seat_routes
 
 let attempt runtime code detail =
-  { Decode.fsa_runtime = runtime; fsa_code = code; fsa_detail = detail }
+  { Masc.Tui_decode_fusion.fsa_runtime = runtime; fsa_code = code; fsa_detail = detail }
 
 let test_one_line_per_seat_with_its_failed_attempts_under_it () =
   let routes =
-    [ { Decode.fsr_seat = Decode.Fusion_panel_seat "first"
+    [ { Masc.Tui_decode_fusion.fsr_seat = Masc.Tui_decode_fusion.Fusion_panel_seat "first"
       ; fsr_route = "panel-lane"
       ; fsr_answered_by = Some "glm-4.6"
       ; fsr_failed_attempts = [ attempt "deepseek" "rate_limited" "429 from the provider" ]
       }
-    ; { Decode.fsr_seat =
-          Decode.Fusion_judge_seat { fs_role = Decode.Judge_meta; fs_identity = "meta" }
+    ; { Masc.Tui_decode_fusion.fsr_seat =
+          Masc.Tui_decode_fusion.Fusion_judge_seat { fs_role = Masc.Tui_decode_fusion.Judge_meta; fs_identity = "meta" }
       ; fsr_route = "judge-lane"
       ; fsr_answered_by = None
       ; fsr_failed_attempts =
@@ -34,8 +33,8 @@ let test_one_line_per_seat_with_its_failed_attempts_under_it () =
 
 let test_a_seat_that_answered_first_has_no_attempts_under_it () =
   let routes =
-    [ { Decode.fsr_seat =
-          Decode.Fusion_judge_seat { fs_role = Decode.Judge_single; fs_identity = "single" }
+    [ { Masc.Tui_decode_fusion.fsr_seat =
+          Masc.Tui_decode_fusion.Fusion_judge_seat { fs_role = Masc.Tui_decode_fusion.Judge_single; fs_identity = "single" }
       ; fsr_route = "opus"
       ; fsr_answered_by = Some "opus"
       ; fsr_failed_attempts = []
@@ -52,7 +51,7 @@ let test_a_seat_that_answered_first_has_no_attempts_under_it () =
    provider wrote is the one place an escape sequence could reach the screen. *)
 let test_a_failure_detail_cannot_carry_an_escape_sequence () =
   let routes =
-    [ { Decode.fsr_seat = Decode.Fusion_panel_seat "first"
+    [ { Masc.Tui_decode_fusion.fsr_seat = Masc.Tui_decode_fusion.Fusion_panel_seat "first"
       ; fsr_route = "\027[31mlane"
       ; fsr_answered_by = None
       ; fsr_failed_attempts = [ attempt "opus" "refused" "\027[2Jcleared your screen" ]

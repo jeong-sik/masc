@@ -106,7 +106,7 @@ def run(executable, *, mode, evidence_dir=None):
                     raise AssertionError("first admission was not held")
                 stage(process, fd, output, base_path)
                 h.send_and_wait(process, fd, output, b"queued-image", h.composer_showing(b"queued-image"))
-                h.send_and_wait(process, fd, output, b"\r", b"Queue (2 waiting")
+                h.send_and_wait(process, fd, output, b"\r", b"Queue (2 pending")
                 if len(queue.received) != 1:
                     raise AssertionError("image request was not waiting locally behind the first admission")
             else:

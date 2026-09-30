@@ -970,9 +970,10 @@ let test_queue_summary_follows_admission_and_execution () =
     [other.sent_request.request_id] (waiting "beta");
   state.msg_target_keeper_name <- Some "alpha";
   let rows = Tui_types.keeper_message_activity_rows state in
-  check bool "submitted input has no stale NEXT preview" true
-    (List.exists (fun (row : Masc_tui_answering.chat_activity_row) ->
-       row.lead = "Queue (3 waiting · auto-next:off) · 2 submitted · /queue · local NEXT: \"local\" · Ctrl-T:queue") rows);
+  check (list string) "queue status and local preview have separate rows"
+    ["Queue (3 pending) · auto-next:off · Ctrl-T:queue"
+    ; "2 queued at Keeper · /queue"; "Local NEXT: \"local\""]
+    (List.map Masc_tui_answering.chat_activity_row_text rows);
   (match Masc_tui_keeper_chat_queue.push state.msg_queued ~submitted_at:1. first.sent_request with
    | Error detail -> fail detail
    | Ok (queue, _) -> state.msg_queued <- queue);
@@ -1002,12 +1003,27 @@ let test_queue_summary_follows_admission_and_execution () =
   let promoted = {promoted with origin=Tui_types.Promoted_queue {
       submission_seq=0; intent=Masc_tui_keeper_chat_queue.Next; causal_parent_request_id=None}} in
   state.msg_inflight <- [promoted];
+  let expect_delivery label expected =
+    match Tui_types.keeper_message_waiting_requests state ~keeper_name:"alpha" with
+    | [(_, delivery)] -> check bool label true (delivery = expected)
+    | _ -> fail (label ^ ": expected one pending request") in
   check (list string) "local queue remains visible while POST awaits admission"
     [promoted.sent_request.request_id] (waiting "alpha");
+  expect_delivery "POST without receipt is not confirmed queued" Tui_types.Awaiting_receipt;
+  promoted.phase <- Tui_types.Turn_reconciling;
+  expect_delivery "unacknowledged reconnect is explicitly uncertain" Tui_types.Rechecking_delivery;
   Tui_types.turn_log_add ~now:9. promoted.log ~seq:None
     (Live.Accepted {admission=Live.Queued;queue_length=1;interactive=None});
+  expect_delivery "old admission does not claim current certainty during reconnect"
+    Tui_types.Rechecking_delivery;
+  promoted.phase <- Tui_types.Turn_streaming;
+  expect_delivery "live queued receipt restores confirmed status" Tui_types.Keeper_queued;
   check (list string) "acceptance preserves the same queued request"
-    [promoted.sent_request.request_id] (waiting "alpha")
+    [promoted.sent_request.request_id] (waiting "alpha");
+  promoted.phase <- Tui_types.Turn_reconciling;
+  Tui_types.turn_log_add ~now:10. promoted.log ~seq:None Live.Run_started;
+  check (list string) "started execution leaves pending even while reconnecting"
+    [] (waiting "alpha")
 ;;
 
 (* Settling commits the log, keeps it when it has anything to draw, and

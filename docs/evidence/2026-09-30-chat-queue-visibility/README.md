@@ -23,7 +23,7 @@ earlier on the old executable than the initial capture-producing version.
 The OCaml lifecycle test covers execution start, completion, failure,
 continuation checkpoints, keeper scoping, and local/submitted overlap.
 
-Validation performed:
+Initial implementation validation, before the review response below:
 
 - Existing executable: FAIL reproduced and captured as above.
 - Changed production OCaml module: `ocamlc` 5.5.1 isolated typecheck PASS,
@@ -37,3 +37,24 @@ yet run against it; no CI was dispatched. A Full CI build and the registered
 focused PTY/lifecycle tests remain release validation under the repository's
 execution protocol. These captures prove the old defect, not a repaired
 production session.
+
+The review response separates the aggregate pending count, confirmed Keeper
+queue count, delivery checks, and local NEXT preview into individual activity
+rows. The header reserves Ctrl-T before fitting auto-next; the renderer and
+status-height budget still consume the same row projection. A request awaiting
+its first receipt is labelled `awaiting receipt`; a reconnecting request is
+labelled `rechecking delivery` even when an older receipt said Queued.
+
+The focused PTY scenario now includes two accepted requests plus one local
+request at 80 columns, verifies the local preview and Ctrl-T remain visible,
+visits another Keeper while requests remain pending, and returns before
+releasing the held control receipt. It also runs the existing reconnect
+fixture with an explicit uncertainty assertion. Lifecycle coverage checks the
+typed transition from awaiting receipt through reconciling and confirmed
+queued to execution start.
+
+For this response, three changed OCaml files passed parsing, three changed
+Python files passed syntax checks, and `git diff --check` passed. The added
+80-column, navigation and reconnect cases have not been executed against a
+patched binary. The existing screenshots and ANSI files remain evidence of
+the original defect only.

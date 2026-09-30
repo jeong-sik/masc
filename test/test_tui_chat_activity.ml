@@ -69,7 +69,8 @@ let test_the_band_does_not_repeat_the_admission () =
            [ "Your message"; "Your request"; "queued at the server" ])
     | rows -> fail (String.concat " | " (texts rows)))
     [ None, []; Some Live.Running, []; Some Live.Settled, []
-    ; Some Live.Queued, ["Queue (1 waiting · auto-next:off) · 1 submitted · /queue"] ]
+    ; Some Live.Queued,
+        ["Queue (1 pending) · auto-next:off · Ctrl-T:queue"; "1 queued at Keeper · /queue"] ]
 
 (* The band names only a turn it observed for this keeper. With a line of
    this pane queued: nothing for no turn, another keeper's turn, an idle or
@@ -167,7 +168,7 @@ let test_a_request_in_the_live_batch_is_the_live_rows () =
   Tui.turn_log_add ~now:6. other ~seq:(Some 3) Live.Run_finished;
   state.msg_settled_logs <- [other];
   check (list string) "another Keeper's execution cannot consume this pending input"
-    ["Queue (1 waiting · auto-next:off) · 1 submitted · /queue"]
+    ["Queue (1 pending) · auto-next:off · Ctrl-T:queue"; "1 queued at Keeper · /queue"]
     (texts (Tui.keeper_message_activity_rows state))
 
 let test_started_and_finished_requests_stop_waiting () =
@@ -198,7 +199,7 @@ let test_local_queue_is_not_server_admission () =
   add "alpha" "local-alpha";
   add "beta" "local-beta";
   check (list string) "only target's unsent messages are counted"
-    ["Queue (1 waiting · auto-next:off) · NEXT: \"hello\" · Ctrl-T:queue"]
+    ["Queue (1 pending) · auto-next:off · Ctrl-T:queue"; "Local NEXT: \"hello\""]
     (texts (Tui.keeper_message_activity_rows state));
   state.msg_target_keeper_name <- None;
   check (list string) "no target has no attributed activity" []
@@ -218,7 +219,8 @@ let test_working_request_survives_newer_queued_view () =
      visible even while the live row draws that newer request. *)
   check (list string) "the working request the live row is not drawing stays visible"
     ["Current direct conversation · shared-execution · in progress"
-    ; "Queue (1 waiting · auto-next:off) · 1 submitted · /queue"]
+    ; "Queue (1 pending) · auto-next:off · Ctrl-T:queue"
+    ; "1 queued at Keeper · /queue"]
     (texts (Tui.keeper_message_activity_rows state));
   check (list string) "stale autonomous interrupt rows are suppressed" []
     (Tui.keeper_observed_interrupt_rows state)

@@ -76,15 +76,49 @@ type provider_entry = Model_provider_catalog.entry =
   ; serves_bare_rows : bool
   }
 
+module String_map = Map.Make (String)
+module Row_key_map = Map.Make (Model_identifiers.Equality_key)
+
 type t =
   { models : model_entry list
   ; providers : provider_entry list
+  ; scoped_rows : model_entry Row_key_map.t String_map.t
+    (* The rows that name a provider, by the provider's normalized label and
+       then by the row's [Id_prefix.equality_key], each to the first such row
+       in [models]: the row [lookup_for_provider_result] answers with, found
+       without scanning [models]. A catalog is never changed after [make]. *)
   }
 
 exception Invalid_embedded_catalog of string
 
-let empty = { models = []; providers = [] }
-let of_model_entries models = { empty with models }
+let normalize_label value = String.lowercase_ascii (String.trim value)
+
+let index_scoped_rows models =
+  List.fold_left
+    (fun index (entry : model_entry) ->
+       match entry.provider_name with
+       | None -> index
+       | Some declared ->
+         let label = normalize_label declared in
+         let key = Model_identifiers.Id_prefix.equality_key entry.id_prefix in
+         let rows =
+           match String_map.find_opt label index with
+           | Some rows -> rows
+           | None -> Row_key_map.empty
+         in
+         if Row_key_map.mem key rows
+         then index
+         else String_map.add label (Row_key_map.add key entry rows) index)
+    String_map.empty
+    models
+;;
+
+let make ~models ~providers =
+  { models; providers; scoped_rows = index_scoped_rows models }
+;;
+
+let empty = make ~models:[] ~providers:[]
+let of_model_entries models = make ~models ~providers:[]
 let model_entries t = t.models
 let provider_entries t = t.providers
 
@@ -762,11 +796,11 @@ let parse_table_array toml key parse =
            results)
 ;;
 
-let normalize_label value = String.lowercase_ascii (String.trim value)
-
+(* The id is folded by the key the provider-scoped index files rows under,
+   so no two rows this check lets through share an index slot. *)
 let model_row_key (entry : model_entry) =
   Option.map normalize_label entry.provider_name,
-  normalize_label (Model_identifiers.Id_prefix.to_string entry.id_prefix)
+  Model_identifiers.Id_prefix.equality_key entry.id_prefix
 ;;
 
 let provider_entry_key (entry : provider_entry) = normalize_label entry.id
@@ -819,7 +853,7 @@ let catalog_of_toml toml =
      | Ok providers ->
        (match reject_duplicate_rows models providers with
         | Error _ as e -> e
-        | Ok () -> Ok { models; providers }))
+        | Ok () -> Ok (make ~models ~providers)))
 ;;
 
 let parse_catalog ~source parse =
@@ -937,17 +971,11 @@ let lookup_for_provider_result t ~provider_name ~model_id =
   match Model_identifiers.Model_id.of_string model_id with
   | Error detail -> Error (Malformed_model_id detail)
   | Ok model_id ->
+    let key = Model_identifiers.Model_id.equality_key model_id in
     let find_exact label =
-      List.find_opt
-        (fun entry ->
-           match entry.provider_name with
-           | None -> false
-           | Some declared ->
-             String.equal label (normalize_label declared)
-             && Model_identifiers.Model_id.equal_id_prefix
-                  ~prefix:entry.id_prefix
-                  model_id)
-        t.models
+      match String_map.find_opt label t.scoped_rows with
+      | Some rows -> Row_key_map.find_opt key rows
+      | None -> None
     in
     let requested = normalize_label provider_name in
     match find_exact requested with

@@ -753,20 +753,13 @@ let reopen store ~post_id : (unit, board_error) Result.t =
 ;;
 
 let posts_jsonl_snapshot store =
-  let buf = Buffer.create 4096 in
-  Hashtbl.iter (fun _ (pst : post) ->
-    Buffer.add_string buf (Yojson.Safe.to_string (post_to_yojson pst));
-    Buffer.add_char buf '\n'
-  ) store.posts;
-  Buffer.contents buf
+  Board_snapshot_rows.render ~rows:store.post_rows ~to_json:post_to_yojson store.posts
 
 let comments_jsonl_snapshot store =
-  let buf = Buffer.create 4096 in
-  Hashtbl.iter (fun _ (cmt : comment) ->
-    Buffer.add_string buf (Yojson.Safe.to_string (comment_to_yojson cmt));
-    Buffer.add_char buf '\n'
-  ) store.comments;
-  Buffer.contents buf
+  Board_snapshot_rows.render
+    ~rows:store.comment_rows
+    ~to_json:comment_to_yojson
+    store.comments
 
 let reactions_jsonl_snapshot store =
   let buf = Buffer.create 4096 in

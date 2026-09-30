@@ -118,14 +118,82 @@ let current_history_lines own =
   |> List.rev
 ;;
 
+(* A position a line of the current history states, as a cut point before it
+   is matched against a checkpoint. *)
+type stated =
+  { stated_line : int
+  ; stated_recorded_at : float
+  ; stated_turn_ref : Ids.Turn_ref.t
+  ; stated_end_atom : int
+  ; stated_digest : string
+  }
+
+module Position_key = struct
+  type t = int * string
+
+  let compare (left_atom, left_digest) (right_atom, right_digest) =
+    match Int.compare left_atom right_atom with
+    | 0 -> String.compare left_digest right_digest
+    | order -> order
+  ;;
+end
+
+module Position_set = Set.Make (Position_key)
+
+(* Every end line's position, and, once, each start state no end line states,
+   at the first line that states it -- the line {!B.witness_line} answers for
+   it. A start state an end line also states is that line's cut point, so it
+   adds none: every Agent-Core turn starts where the one before it ended. The
+   others are where turns that left no end line left the history: an
+   Agent-Core candidate that saved atoms and then failed, was cancelled or was
+   answered by an official client. In line order. *)
+let stated_positions ~trace_id current_history =
+  let stated line (written : B.record) (turn_ref, end_atom, digest) =
+    { stated_line = line
+    ; stated_recorded_at = written.recorded_at
+    ; stated_turn_ref = turn_ref
+    ; stated_end_atom = end_atom
+    ; stated_digest = digest
+    }
+  in
+  let ended =
+    List.filter_map
+      (fun (line, written) ->
+         Option.map (stated line written) (B.atom_position_stated ~trace_id written))
+      current_history
+  in
+  let ended_keys =
+    List.fold_left
+      (fun keys { stated_end_atom; stated_digest; _ } ->
+         Position_set.add (stated_end_atom, stated_digest) keys)
+      Position_set.empty
+      ended
+  in
+  let _keys, started_rev =
+    List.fold_left
+      (fun ((keys, started_rev) as found) (line, written) ->
+         match B.start_position_stated ~trace_id written with
+         | None -> found
+         | Some ((_turn_ref, end_atom, digest) as position) ->
+           if Position_set.mem (end_atom, digest) keys
+           then found
+           else
+             ( Position_set.add (end_atom, digest) keys
+             , stated line written position :: started_rev ))
+      (ended_keys, [])
+      current_history
+  in
+  List.stable_sort
+    (fun left right ->
+       match Int.compare left.stated_line right.stated_line with
+       | 0 -> Int.compare left.stated_end_atom right.stated_end_atom
+       | order -> order)
+    (ended @ List.rev started_rev)
+;;
+
 let has_completed_atom_boundary ~trace_id ~lines =
-  current_history_lines (lines_of_trace ~trace_id lines)
-  |> List.exists (fun (_, (written : B.record)) ->
-    match written.event with
-    | B.Turn_ended { position = B.Atom_history _; _ } -> true
-    | B.Turn_ended
-        { position = B.Empty_atom_history | B.No_atom_history | B.Stale_noop; _ }
-    | B.History_restarted _ -> false)
+  stated_positions ~trace_id (current_history_lines (lines_of_trace ~trace_id lines))
+  <> []
 ;;
 
 let may_have_unread ~trace_id ~lines ~progress =
@@ -135,23 +203,31 @@ let may_have_unread ~trace_id ~lines ~progress =
   unreadable_lines lines <> []
   || match progress with
   | None ->
-    List.exists
-      (fun (_, (written : B.record)) ->
-         is_restart written
-         || match written.event with
-            | B.Turn_ended { position = B.Atom_history _; _ } -> true
-            | B.Turn_ended _ | B.History_restarted _ -> false)
-      own
+    List.exists (fun (_, written) -> is_restart written) own
+    || stated_positions ~trace_id own <> []
   | Some ({ P.position; boundary_lines_seen } : P.t) ->
     not (String.equal trace_id position.trace_id)
     || complete_line_count lines < boundary_lines_seen
     || List.exists
          (fun (line, (written : B.record)) ->
             (line > boundary_lines_seen && is_restart written)
-            || match written.event with
-               | B.Turn_ended { position = B.Atom_history { end_atom; _ }; _ } ->
-                 line > boundary_lines_seen || end_atom > position.end_atom
-               | B.Turn_ended _ | B.History_restarted _ -> false)
+            || (match B.atom_position_stated ~trace_id written with
+                | Some (_turn_ref, end_atom, _digest) ->
+                  line > boundary_lines_seen || end_atom > position.end_atom
+                | None -> false)
+            ||
+            (* Each official-client turn states the history it started from.
+               While that is the position already read, the line is not atom
+               work, so a keeper on an official client does not reload its
+               checkpoint every turn. *)
+            match B.start_position_stated ~trace_id written with
+            | Some (_turn_ref, start_atom, start_digest) ->
+              start_atom > position.end_atom
+              || (line > boundary_lines_seen
+                  && not
+                       (start_atom = position.end_atom
+                        && String.equal start_digest position.last_atom_digest))
+            | None -> false)
          own
 ;;
 
@@ -166,22 +242,14 @@ let matches_checkpoint ~digest_at ~atom_count ~end_atom ~digest =
 (* Row 2a: an endpoint must match the loaded checkpoint. Repeated messages
    can also match an earlier history, so [select] first discards cut points
    before the latest restart of this trace. A mismatching line is not an error. *)
-let cut_point ~digest_at ~atom_count (written : B.record) =
-  match written.event with
-  | B.Turn_ended
-      { turn_ref = _
-      ; history_at_start = _
-      ; position = B.Atom_history { end_atom; last_atom_digest }
-      } ->
-    if matches_checkpoint ~digest_at ~atom_count ~end_atom ~digest:last_atom_digest
-    then Some (end_atom, last_atom_digest)
-    else None
-  | B.Turn_ended
-      { turn_ref = _
-      ; history_at_start = _
-      ; position = B.Empty_atom_history | B.No_atom_history | B.Stale_noop
-      }
-  | B.History_restarted { trace_id = _ } -> None
+let cut_point ~digest_at ~atom_count { stated_end_atom; stated_digest; _ } =
+  if matches_checkpoint
+       ~digest_at
+       ~atom_count
+       ~end_atom:stated_end_atom
+       ~digest:stated_digest
+  then Some (stated_end_atom, stated_digest)
+  else None
 ;;
 
 type start =
@@ -251,8 +319,8 @@ let select ~trace_id ~lines ~progress ~messages extent =
          | [] -> None
        in
        let cuts =
-         current_history
-         |> List.filter_map (fun (_, written) -> cut_point ~digest_at ~atom_count written)
+         stated_positions ~trace_id current_history
+         |> List.filter_map (cut_point ~digest_at ~atom_count)
        in
        (* Row 3c: a restart line beyond the count the progress file holds was
           appended after the position last moved. It wins over a position that
@@ -325,8 +393,8 @@ let unread_turns ~trace_id ~lines ~progress ~messages =
   let _labelled, atom_count = Window.annotate messages in
   let digest_at = Window.atom_opening_digest messages in
   let cuts =
-    current_history_lines own
-    |> List.filter_map (fun (_, written) -> cut_point ~digest_at ~atom_count written)
+    stated_positions ~trace_id (current_history_lines own)
+    |> List.filter_map (cut_point ~digest_at ~atom_count)
   in
   let seen_before =
     match progress with
@@ -459,16 +527,15 @@ type atom_cut =
 let cut_lines ~trace_id ~lines ~messages (range : range) =
   let _labelled, atom_count = Window.annotate messages in
   let digest_at = Window.atom_opening_digest messages in
-  current_history_lines (lines_of_trace ~trace_id lines)
-  |> List.filter_map (fun (line, (written : B.record)) ->
-    match cut_point ~digest_at ~atom_count written, written.event with
-    | Some (end_atom, _), B.Turn_ended { turn_ref; _ }
-      when end_atom > range.start_atom && end_atom <= range.end_atom ->
+  stated_positions ~trace_id (current_history_lines (lines_of_trace ~trace_id lines))
+  |> List.filter_map (fun stated ->
+    match cut_point ~digest_at ~atom_count stated with
+    | Some (end_atom, _) when end_atom > range.start_atom && end_atom <= range.end_atom ->
       Some
-        { cut_line = line
+        { cut_line = stated.stated_line
         ; cut_end_atom = end_atom
-        ; cut_recorded_at = written.recorded_at
-        ; cut_turn_ref = turn_ref
+        ; cut_recorded_at = stated.stated_recorded_at
+        ; cut_turn_ref = stated.stated_turn_ref
         }
-    | Some _, (B.Turn_ended _ | B.History_restarted _) | None, _ -> None)
+    | Some _ | None -> None)
 ;;

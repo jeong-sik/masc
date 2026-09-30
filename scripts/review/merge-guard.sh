@@ -28,17 +28,42 @@ check_verdict() {
     return 2
   fi
 }
-check_current_ci
-check_verdict
-GUARD_GH="$GH" bash "$here/approve-guard.sh" --merge-check --repo "$repo" --pr "$pr" --head "$head"
-check_current_ci
-check_verdict
-GUARD_GH="$GH" bash "$here/approve-guard.sh" --merge-check --repo "$repo" --pr "$pr" --head "$head"
-# Pin both the current head and the base observed throughout admission.
-read_current_pr
-if [ "$pr_base" != main ]; then
-  echo "WAITING PARENT #$pr base $pr_base: land the parent and retarget to main" >&2
+selected_pr="$pr"; selected_head="$head"; selected_run="$run"
+snapshot_scope() {
+  GUARD_GH="$GH" python3 "$here/stack-scope.py" "$repo" "$selected_pr" "$selected_head"
+}
+scope=$(snapshot_scope)
+native=$(printf '%s' "$scope" | jq -r '.stack != null')
+if [ "$native" = false ] && [ "$(printf '%s' "$scope" | jq -r '.scope[0].identity.base.ref')" != main ]; then
+  echo "WAITING PARENT #$pr: non-native branch chain; land the parent and retarget to main" >&2
   exit 2
 fi
-if [ "$check" -eq 1 ]; then echo "WOULD MERGE #$pr head $head policy $review_policy"; exit 0; fi
-"$GH" api -X PUT "repos/$repo/pulls/$pr/merge-async" -f merge_method=squash -f "sha=$head"
+admit_scope() {
+  local members
+  members=$(printf '%s' "$scope" | jq -r '.scope[] | select(.identity.state == "open") | [.number, .identity.head.sha] | @tsv')
+  [ -n "$members" ] || { echo "REFUSED: no open PRs in merge scope" >&2; return 2; }
+  while IFS=$'\t' read -r pr head; do
+    review_identity=""; run=""
+    [ "$pr" != "$selected_pr" ] || run="$selected_run"
+    check_current_ci || return $?
+    check_verdict || return $?
+    GUARD_GH="$GH" bash "$here/approve-guard.sh" --merge-check --repo "$repo" --pr "$pr" --head "$head" || return $?
+  done <<<"$members"
+}
+# Revalidate every included PR, then freeze the same membership and identities.
+admit_scope
+admit_scope
+current_scope=$(snapshot_scope)
+if [ "$scope" != "$current_scope" ]; then
+  echo "REFUSED: stack membership, PR head, base or identity moved during admission" >&2
+  exit 2
+fi
+members=$(printf '%s' "$scope" | jq -r '[.scope[] | select(.identity.state == "open") | "#" + (.number|tostring)] | join(", ")')
+if [ "$check" -eq 1 ]; then
+  echo "WOULD MERGE $members through #$selected_pr head $selected_head native_stack=$native"
+  exit 0
+fi
+# GitHub exposes a SHA precondition only for the selected PR, not an all-head
+# compare-and-swap. The snapshot is admission evidence, not an atomic guarantee.
+response=$("$GH" api -X PUT "repos/$repo/pulls/$selected_pr/merge-async" -f merge_method=squash -f "sha=$selected_head")
+printf 'ASYNC MERGE RECEIPT for %s (acceptance is not completion):\n%s\n' "$members" "$response"

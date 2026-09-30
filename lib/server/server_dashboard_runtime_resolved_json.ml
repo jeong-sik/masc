@@ -298,6 +298,7 @@ let usage_scope_json ~scope_label (scope, providers) : Yojson.Safe.t =
   in
   `Assoc
     [ "scope", `String (scope_label scope)
+    ; "scope_id", `String (Server_provider_usage_history.scope_id scope)
     ; ( "providers"
       , `List
           (List.map

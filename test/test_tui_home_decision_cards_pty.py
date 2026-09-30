@@ -107,7 +107,11 @@ def same_keeper_distinct_and_duplicate(executable):
     requests = []
 
     def interact(process, fd, _slave, output, _base):
-        h.wait_for_output(process, fd, output, b"[call-home-b]", start=0, timeout=10)
+        # Held calls can arrive before the separate confirmation/question
+        # reads. Observe their completed aggregate before measuring this frame;
+        # the exact distinct call IDs and deduplication are still checked below.
+        h.wait_for_output(process, fd, output,
+                          b"Approvals and questions: 2 need you", start=0, timeout=10)
         visible = frame(process, fd, output, "distinct-authority-ids")
         assert visible.count(b"Held call") == 2, visible
         assert visible.count(b"same held reason") == 2, visible

@@ -263,9 +263,28 @@ def roster_failure_and_deletion(executable):
             # Leave the history composer through its Home reference before
             # requesting a fresh authoritative roster reading.
             h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
-            drawn = h.send_and_wait(process, fd, output, b"r",
-                                    b"conversation beta unavailable")
-            current = h.screen_text(drawn)
+            # Escape may already have drawn the unavailable receipt. A refresh
+            # may emit only changed rows, so require a completed post-key frame
+            # and inspect the composed screen rather than a duplicate label.
+            start = len(output)
+            os.write(fd, b"r")
+            h.wait_for_terminal_input_consumed(_slave)
+
+            def refreshed_receipt_is_unavailable():
+                end = output.rfind(h.FRAME_END)
+                if end < start:
+                    return False
+                current = h.screen_text(bytes(output[:end + len(h.FRAME_END)]))
+                return (b"conversation beta unavailable" in current
+                        and b"Continue with beta" not in current
+                        and b"roster unavailable; read history" not in current)
+
+            if not h.wait_for_fixture_state(process, fd, output,
+                    refreshed_receipt_is_unavailable, timeout=3.0):
+                raise AssertionError(f"fresh completed Home receipt did not reflect deletion: {bytes(output)!r}")
+            end = output.rfind(h.FRAME_END)
+            current = h.screen_text(bytes(output[:end + len(h.FRAME_END)]))
+            assert b"conversation beta unavailable" in current, current
             assert b"Continue with beta" not in current, current
             assert b"roster unavailable; read history" not in current, current
         finally:

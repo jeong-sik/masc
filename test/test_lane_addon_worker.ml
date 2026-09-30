@@ -88,6 +88,8 @@ elif action == "start":
         if "id" not in request: continue
         method = request["method"]
         if method == "initialize":
+            (root / (cid + ".sampling-capability")).write_text(
+                json.dumps("sampling" in request["params"]["capabilities"]))
             if mode == "hang_initialize":
                 (root / (cid + ".blocked")).write_text(method)
                 while True: signal.pause()
@@ -135,6 +137,15 @@ elif action == "start":
                         "result":{"applied":1}, "output":packet}, "content":[]}
                 else:
                     result = {"structuredContent":packet, "content":[]}
+            if mode == "sampling":
+                output({"jsonrpc":"2.0", "id":"sample-1", "method":"sampling/createMessage",
+                    "params":{"messages":[{"role":"user","content":{"type":"text","text":"Compare inputs"}}],
+                        "includeContext":"none", "maxTokens":64}})
+                reply = json.loads(sys.stdin.readline())
+                assert reply["id"] == "sample-1", reply
+                (root / (cid + ".sampling-reply")).write_text(json.dumps(reply))
+                if "error" in reply:
+                    result = {"isError":True, "content":[{"type":"text","text":reply["error"]["message"]}]}
         else: result = {}
         output({"jsonrpc": "2.0", "id": request["id"], "result": result})
 else: raise SystemExit(2)
@@ -168,6 +179,7 @@ let package directory mode : Types.package = {
   contributions = [ Types.Observe ]; image = "fixture/image";
   command = [ "observer"; mode ]; directory; skills_directory = None; action_tool = None; outputs = [];
   binding_schema=None;presentation=Masc.Lane_addon_presentation.empty;refresh_policy=Types.Every_hint;
+  model_access=Types.Model_disabled;
   resources = { cpus = 0.5; memory_bytes = 67_108_864L;
                 pids = 16; max_reply_bytes = 4096 };
 }
@@ -445,7 +457,39 @@ let test_image_preview_does_not_create_worker () = with_fixture (fun env _sw dir
   write (Filename.concat dir "daemon-unavailable") "offline";
   check bool "daemon failure stays an error rather than absence" true (Result.is_error (inspect ())))
 
+let test_declared_sampling_requires_exact_host_callback () = with_fixture (fun env sw dir docker ->
+  let calls = ref 0 in
+  let sampling_handler (_ : Mcp_protocol.Sampling.create_message_params) =
+    incr calls;
+    Ok {Mcp_protocol.Sampling.role=Assistant;content=Text {type_="text";text="host answer"};
+      model="host-fixture";stop_reason=Some "endTurn";_meta=None} in
+  let start_model model_access sampling_handler =
+    Worker.start ~sw ~clock:(Eio.Stdenv.clock env) ~control_timeout_sec
+      ~mgr:(Eio.Stdenv.process_mgr env) ~instance_id:"sampling-worker"
+      ~package:{(package dir "sampling") with model_access} ~docker_command:docker ?sampling_handler () in
+  check bool "required model handler cannot be omitted" true
+    (Result.is_error (start_model Types.Host_sampling None));
+  check bool "ordinary observer cannot be given model access" true
+    (Result.is_error (start_model Types.Model_disabled (Some sampling_handler)));
+  check bool "mismatched access starts no container" false
+    (Array.exists (fun path -> Filename.check_suffix path ".json") (Sys.readdir dir));
+  let worker = unwrap (start_model Types.Host_sampling (Some sampling_handler)) in
+  let cid = Worker.container_id worker in
+  check bool "configured model access is advertised to the exact worker" true
+    (Yojson.Safe.from_file (Filename.concat dir (cid ^ ".sampling-capability"))=`Bool true);
+  ignore (unwrap (observe worker "good"));
+  check int "one package model request calls host once" 1 !calls;
+  let reply = Yojson.Safe.from_file (Filename.concat dir (cid ^ ".sampling-reply")) in
+  check string "host-selected model response crosses worker transport" "host-fixture"
+    (reply |> Yojson.Safe.Util.member "result" |> Yojson.Safe.Util.member "model" |> Yojson.Safe.Util.to_string);
+  let argv = Yojson.Safe.from_file (Filename.concat dir (cid ^ ".json"))
+    |> Yojson.Safe.Util.member "argv" |> Yojson.Safe.Util.to_list |> List.map Yojson.Safe.Util.to_string in
+  check bool "sampling preserves requested network isolation" true (List.mem "none" argv);
+  check bool "model callback adds no container environment injection" false (List.mem "--env" argv);
+  unwrap (Worker.stop worker))
+
 let () = run "Lane Add-on worker" [ "lifecycle", [
+  test_case "declared sampling requires the exact host callback" `Quick test_declared_sampling_requires_exact_host_callback;
   test_case "image preview is read only and preserves engine failures" `Quick test_image_preview_does_not_create_worker;
   test_case "world action and binary artifact ingress" `Quick test_world_action_artifact_ingress;
   test_case "structured observation and exact removal" `Quick test_structured_observation_and_exact_removal;

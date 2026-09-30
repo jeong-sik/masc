@@ -76,6 +76,11 @@ val convert_tools
 
 type t
 
+(** Optional host-owned model access. The subprocess sends standard MCP
+    sampling requests; the host chooses credentials and model policy. *)
+type sampling_handler = Mcp_protocol.Sampling.create_message_params ->
+  (Mcp_protocol.Sampling.create_message_result, string) result
+
 (** {1 Connection lifecycle} *)
 
 val connect
@@ -86,6 +91,7 @@ val connect
   -> ?env:string array
   -> ?max_response_bytes:int
   -> ?stderr:Eio.Flow.sink_ty Eio.Resource.t
+  -> ?sampling_handler:sampling_handler
   -> unit
   -> (t, Error.t) result
 

@@ -804,6 +804,42 @@ let test_source_bound_write_discards_stale_claim_and_recreates () =
     "unchanged memory renders the same block at a later clock"
     first_prompt
     (render_at ~now:(Time_compat.now () +. 3600.0));
+  with_env "MASC_KEEPER_MEMORY_OS_RECALL" "0" (fun () ->
+    let disabled = render () in
+    Alcotest.(check bool) "disabled recall suspends prior facts explicitly" true
+      (contains ~needle:"Recall is disabled" disabled);
+    Alcotest.(check string) "disabled state is stable" disabled (render ()));
+  Alcotest.(check string) "re-enabling restores exact prior block" first_prompt (render ());
+  let source_snapshot_path = Masc.Keeper_memory_source_current.path_for_keepers_dir
+    ~keepers_dir ~keeper_id:meta.name in
+  let saved_source_snapshot = Fs_compat.load_file source_snapshot_path in
+  let source_before = match Masc.Keeper_memory_source_current.read_for_keepers_dir
+      ~keepers_dir ~keeper_id:meta.name with
+    | Ok (Some snapshot) -> snapshot
+    | Ok None -> Alcotest.fail "source snapshot missing"
+    | Error detail -> Alcotest.fail detail in
+  let recommitted_source = { source_before with revision = source_before.revision + 1;
+    updated_at = source_before.updated_at +. 3600.0 } in
+  Fs_compat.save_file source_snapshot_path
+    (Yojson.Safe.to_string (Masc.Keeper_memory_source_current.to_json recommitted_source));
+  Alcotest.(check string) "source commit metadata does not replay unchanged facts"
+    first_prompt (render ());
+  Fs_compat.save_file source_snapshot_path "{ not json";
+  let source_unavailable = render () in
+  Alcotest.(check bool) "source-store failure explicitly marks uncertainty" true
+    (contains ~needle:"Source-bound memory is unavailable" source_unavailable);
+  Alcotest.(check string) "source-store failure is stable" source_unavailable (render ());
+  Fs_compat.save_file source_snapshot_path saved_source_snapshot;
+  Alcotest.(check string) "source recovery restores the exact prior block" first_prompt (render ());
+  let ordinary_snapshot_path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id:meta.name in
+  Fs_compat.save_file ordinary_snapshot_path "{ not json";
+  let ordinary_unavailable = render () in
+  Alcotest.(check bool) "ordinary failure is not rendered as empty" true
+    (contains ~needle:"Ordinary memory is unavailable" ordinary_unavailable);
+  Alcotest.(check bool) "readable source facts survive ordinary failure" true
+    (contains ~needle:"deployment region is us-west-1" ordinary_unavailable);
+  Sys.remove ordinary_snapshot_path;
+  Alcotest.(check string) "ordinary absence recovery restores the prior block" first_prompt (render ());
   write_source "region=eu-west-1\n";
   let invalidated_prompt = render () in
   Alcotest.(check bool)

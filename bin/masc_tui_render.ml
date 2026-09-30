@@ -2469,56 +2469,43 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
                      created_at
                      Ansi.reset
                  in
-                 (* [heading] must itself fit before content can join it on
-                    the same row: a narrow column can be too narrow for the
-                    author chip and date alone, and wrapping content to
-                    whatever a negative or near-zero remainder leaves is not
-                    wrapping -- it is clipping with extra steps (p-7784d032
-                    follow-up: a wide-column approximation of the heading's
-                    width left almost no room for content once the column
-                    narrowed). When the heading claims the column on its own,
-                    content gets its own row wrapped to the width left after
-                    its thread rail instead of the sliver the heading did not
-                    use. *)
+                 (* Wrap for the rows that will draw the body. Only a whole
+                    single-line reply that fits beside the metadata joins it;
+                    paragraphs below the heading use the entire comment pane. *)
                  let inner_width = framed_inner_width comment_wrap_cols in
                  let heading_width = Message_layout.display_width heading in
                  let joined_budget = inner_width - heading_width - 2 in
-                 if joined_budget >= 8 then
-                   match
-                     Message_layout.wrap_body ~markdown:board_document_markdown
-                       ~max_cells:joined_budget
-                       ~sanitize:Terminal_text.single_line c.bc_content
-                   with
-                   | [] -> [ heading ^ "  " ^ Ansi.dim ^ "\xc2\xb7" ^ Ansi.reset ]
-                   | [ line ] -> [ heading ^ "  " ^ line ]
-                   | lines ->
-                       heading
-                       :: List.map
-                            (fun line -> "  " ^ rail ^ "  " ^ line) lines
-                 else
-                   let identity =
-                     Printf.sprintf "  %s%s@%s%s%s" rail
-                       (Masc_tui_theme.tone Masc_tui_theme.Accent)
-                       author Ansi.reset author_role
-                   in
-                   let timestamp =
-                     Printf.sprintf "  %s%s%s%s" rail Ansi.dim created_at
-                       Ansi.reset
-                   in
-                   let content_prefix = "  " ^ rail ^ "  " in
-                   let content_width =
-                     max 1
-                       (inner_width
-                       - Message_layout.display_width content_prefix)
-                   in
-                   let lines =
-                     Message_layout.wrap_body
-                       ~markdown:board_document_markdown
-                       ~max_cells:content_width
-                       ~sanitize:Terminal_text.single_line c.bc_content
-                   in
-                   identity :: timestamp
-                   :: List.map (fun line -> content_prefix ^ line) lines))
+                 let content_prefix = "  " ^ rail ^ "  " in
+                 let content_width =
+                   max 1
+                     (inner_width - Message_layout.display_width content_prefix)
+                 in
+                 let lines =
+                   Message_layout.wrap_body
+                     ~markdown:board_document_markdown
+                     ~max_cells:content_width
+                     ~sanitize:Terminal_text.single_line c.bc_content
+                 in
+                 match lines with
+                 | [ line ] when Message_layout.display_width line <= joined_budget ->
+                     [ heading ^ "  " ^ line ]
+                 | lines ->
+                     let metadata =
+                       if heading_width <= inner_width then [ heading ]
+                       else
+                         let identity =
+                           Printf.sprintf "  %s%s@%s%s%s" rail
+                             (Masc_tui_theme.tone Masc_tui_theme.Accent)
+                             author Ansi.reset author_role
+                         in
+                         let timestamp =
+                           Printf.sprintf "  %s%s%s%s" rail Ansi.dim created_at
+                             Ansi.reset
+                         in
+                         [ identity; timestamp ]
+                     in
+                     metadata
+                     @ List.map (fun line -> content_prefix ^ line) lines))
       in
       (body_lines, detail_lines))
   in
@@ -12513,7 +12500,8 @@ let render_runtime (state : state) =
 ;;
 
 let tools_scrolled state =
-  tools_scrolled_for_lines state (Render_tools.tools_display_lines state)
+  let _, cols = get_terminal_size () in
+  tools_scrolled_for_lines state (Render_tools.tools_display_lines ~cols state)
 ;;
 
 let render_tools (state : state) =
@@ -12540,7 +12528,7 @@ let render_tools (state : state) =
        box_line_styled buf cols ~style:(Theme.bad ())
          ("  " ^ Keeper_chat.terminal_safe_text detail);
        box_divider buf cols);
-  let display_lines = Render_tools.tools_display_lines state in
+  let display_lines = Render_tools.tools_display_lines ~cols state in
   let layout = tools_scrolled_for_lines state display_lines in
   let drawable = layout.sc_count in
   let content_height =

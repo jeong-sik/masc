@@ -1033,9 +1033,11 @@ let token_credentials base_path =
   (base_path, Auth.list_credentials base_path)
 
 let token_list_cmd_exit base_path =
-  let base_path, creds = token_credentials base_path in
+  let base_path = Env_config.normalize_masc_base_path_input base_path in
+  let creds, failures = Auth.list_credential_results base_path |> List.partition_map
+      (function Ok credential -> Either.Left credential | Error error -> Either.Right error) in
   let now = Unix.gettimeofday () in
-  if creds = []
+  if creds = [] && failures = []
   then print_endline "no credentials in this workspace"
   else begin
     List.iter
@@ -1045,11 +1047,13 @@ let token_list_cmd_exit base_path =
          in
          print_endline (Auth_token_inventory.row ~now ~raw_present c))
       (Auth_token_inventory.ordered ~now creds);
+    List.iter (fun error -> print_endline (Auth_token_inventory.error_row error)) failures;
     let expired = List.length (Auth_token_inventory.expired ~now creds) in
     Printf.printf
-      "\n%d credential(s), %d expired.%s\n"
+      "\n%d credential(s), %d expired, %d unreadable.%s\n"
       (List.length creds)
       expired
+      (List.length failures)
       (if expired > 0 then " `masc token prune` removes the expired ones." else "")
   end;
   Cmd.Exit.ok

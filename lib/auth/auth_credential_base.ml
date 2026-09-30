@@ -613,6 +613,78 @@ let list_credentials config : agent_credential list =
   else []
 ;;
 
+type credential_listing_error =
+  | Invalid_credential_expiry of
+      { agent_name : string; role : agent_role; timestamp : string }
+  | Unreadable_credential of { path : string; reason : string }
+
+let credential_listing_error_to_string = function
+  | Invalid_credential_expiry { agent_name; timestamp; _ } ->
+    Printf.sprintf "invalid credential expiry for %s: %S" agent_name timestamp
+  | Unreadable_credential { path; reason } ->
+    Printf.sprintf "credential %s is unreadable: %s" path reason
+;;
+
+let list_credential_results config =
+  let unreadable path reason = Error (Unreadable_credential { path; reason }) in
+  let decode path json =
+    match agent_credential_of_yojson json with
+    | Ok credential -> Ok credential
+    | Error reason ->
+      (* Parse the remaining fields only to identify the rejected record for
+         diagnostics. The placeholder never escapes as a valid credential. *)
+      (match json with
+       | `Assoc fields ->
+         (match List.assoc_opt "expires_at" fields with
+          | Some (`String timestamp) ->
+            (match Credential_expiry.parse (Some timestamp) with
+             | Ok _ -> unreadable path reason
+             | Error (Credential_expiry.Invalid_timestamp _) ->
+               let without_expiry = `Assoc (List.map (fun (key, value) ->
+                 key, if String.equal key "expires_at" then `Null else value) fields) in
+               (match agent_credential_of_yojson without_expiry with
+                | Error _ -> unreadable path reason
+                | Ok credential -> Error (Invalid_credential_expiry
+                    { agent_name = credential.agent_name; role = credential.role; timestamp })))
+          | Some _ | None -> unreadable path reason)
+       | _ -> unreadable path reason)
+  in
+  let read_json path =
+    try Ok (Yojson.Safe.from_string (read_text_file path)) with
+    | Sys_error reason | Yojson.Json_error reason -> unreadable path reason
+    | Unix.Unix_error (error, operation, argument) ->
+      unreadable path (Printf.sprintf "%s(%s): %s" operation argument (Unix.error_message error))
+    | Eio.Io _ as exn -> unreadable path (Printexc.to_string exn)
+  in
+  let read path =
+    let ( let* ) = Result.bind in
+    let* json = read_json path in
+    match json with
+    | `Assoc [ "redirect_to", `String target ] ->
+      (match redirect_target_file config target with
+       | None -> unreadable path "invalid redirect target"
+       | Some target_path ->
+         let* target_json = read_json target_path in
+         decode target_path target_json)
+    | _ -> decode path json
+  in
+  let dir = agents_dir config in
+  let entries =
+    try
+      if not (file_exists dir) then []
+      else read_dir dir |> Array.to_list
+        |> List.filter (fun file -> Filename.check_suffix file ".json")
+        |> List.sort String.compare
+        |> List.map (fun file -> read (Filename.concat dir file))
+    with
+    | Sys_error reason -> [ unreadable dir reason ]
+    | Unix.Unix_error (error, operation, argument) ->
+      [ unreadable dir (Printf.sprintf "%s(%s): %s" operation argument (Unix.error_message error)) ]
+    | Eio.Io _ as exn -> [ unreadable dir (Printexc.to_string exn) ]
+  in
+  List.sort_uniq compare entries
+;;
+
 (* ============================================ *)
 (* Credential token-hash index cache             *)
 (* ============================================ *)

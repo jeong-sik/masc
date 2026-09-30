@@ -94,6 +94,14 @@ def run(executable):
             text, oldest = window(output, columns)
             if oldest[1] != oldest[2] or b"Messages: 123" not in text:
                 raise AssertionError(f"End did not reach oldest facts: {text!r}")
+            press(process, fd, output, b"\x1b[5~")
+            _, paged_back = window(output, columns)
+            if paged_back[0] != max(1, oldest[0] - (oldest[1] - oldest[0])):
+                raise AssertionError(f"PageUp skipped wrapped facts: {oldest!r} -> {paged_back!r}")
+            press(process, fd, output, b"r")
+            _, refreshed = window(output, columns)
+            if refreshed != paged_back:
+                raise AssertionError(f"refresh moved unchanged log position: {paged_back!r} -> {refreshed!r}")
         os.write(fd, b"q")
 
     h.run_terminal_scenario(executable, description="Keeper log facts wrap without skipping rows",

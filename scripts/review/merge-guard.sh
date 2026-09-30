@@ -38,8 +38,8 @@ check_verdict() {
     return 2
   fi
 }
-# Includes current open/head/base, all workflow/checks and open CR checks.
-bash "$here/approve-guard.sh" --check --repo "$repo" --pr "$pr" --head "$head" \
+# Includes current open/head/base and all workflow/checks; review state is separate.
+bash "$here/approve-guard.sh" --integration-check --repo "$repo" --pr "$pr" --head "$head" \
   --run "$run" --git-dir "$gitdir"
 # Read both comments and reviews after the expensive checks; a later HOLD/FAIL
 # or malformed decision cannot inherit an earlier approval.

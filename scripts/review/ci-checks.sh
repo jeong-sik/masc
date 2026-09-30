@@ -1,8 +1,8 @@
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/pr-check-run-contract.sh" || return 1
-# Read-only workflow/check gate shared by approval and the final merge read.
+# Read-only workflow/check gate for integration preflight and final merge.
 # Caller supplies GH, repo, pr, head and gitdir. On success wf, wf_ids, n_runs,
 # dispatch_skips and ignored_release_run_suites describe the admitted checks
-# for the approval receipt.
+# for the integration receipt.
 # Status 1 means an API read failed; status 2 means the checks refuse the write.
 ci_gh_json() {
   local out

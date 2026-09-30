@@ -19,12 +19,13 @@ REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
 
 `.github/workflows/pr-check.yml` 에서 확인한 사실이다. 판단이 이상하면 이 파일부터 다시 읽는다.
 
-- PR 이 열리거나(`opened`) push 되거나(`synchronize`) 다시 열릴 때(`reopened`)만 돈다.
-  Draft → Ready 전환은 새 run 을 만들지 않는다.
-- 동시성 그룹이 `pr-check-<PR 번호>` 이고 `cancel-in-progress: true` 다. 새 push 가 오면 앞 run 은
-  `cancelled` 로 끝난다.
-- 체크는 넷이다: `lint suite`, `dune build @check`, `dune build --profile release @check`,
-  `dashboard typecheck`.
+- PR opened/synchronize/reopened/ready_for_review/converted_to_draft 이벤트에서 돈다.
+  Draft 는 필수 job을 건너뛰며 Ready 전환이 필수 검사를 시작한다.
+- 동시성 그룹은 PR 번호와 draft/ready 구분을 포함하고 `cancel-in-progress: true` 다.
+  같은 그룹의 새 push 가 앞 run 을 취소한다.
+- 필수 체크는 다섯이다: `lint suite`, `dune build @check`,
+  `dune build --profile release @check`, `dashboard typecheck`, `TLA model check`.
+  TLA job은 specs 변경이 있을 때만 TLC를 실행한다.
 - `dune build @check` 잡의 마지막 스텝 `Run the tests this pull request edits` 가
   `scripts/ci/run-edited-tests.sh <PR 번호>` 를 돌린다. 고른 스위트가 실패하면 이 체크가 빨개진다.
   - 무엇이 돌았는지는 체크 이름에 안 나온다. 잡 로그의 `== <스위트>` 줄, `ran N, skipped M`,
@@ -39,6 +40,19 @@ REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
 - CI 가 컴파일하는 트리는 PR head 가 아니라 `refs/pull/<N>/merge`, 즉 head 를 그 순간의 main 에
   합친 트리다. 로그의 줄 번호가 내 파일과 안 맞으면 합친 트리 탓이다.
 - PR 이 main 과 충돌하면(`mergeable_state` 가 `dirty`) GitHub 이 run 을 아예 만들지 않는다.
+
+## 코드 리뷰와 CI 분리
+
+- `queue-ledger.sh`의 `review_state=needed`는 CI 대기와 별개인 리뷰 작업이다.
+  `waits_on=ci:*`여도 코드 리뷰를 진행한다. `waits_on=integration`은 병합 판정 대기다.
+- 코드와 계약을 읽어 판단이 가능하면 CI 상태와 별개로 APPROVE 또는 REQUEST_CHANGES를 남긴다.
+  첫 줄은 `review: APPROVE|REQUEST_CHANGES head: <40자 sha> by: <Keeper 이름>`이다.
+- APPROVE에는 `approve-guard.sh`를 사용한다. `--check`는 리뷰 가능 여부를 확인하며
+  CI 완료를 요구하지 않는다. 공유 계정의 기존 CR을 덮어쓰려면 해당 지적을 읽고
+  `--replace-own-cr`로 정확한 review ID를 지정한다.
+- 자신의 CR은 수정된 코드를 검토하여 지적이 해결되었을 때 해제한다. CI 통과만으로 해제하지 않는다.
+- 병합은 별도다. 현재 head의 필수 CI·freshness·독립 승인·미해결 CR과 최신 판정을
+  `merge-guard.sh`에서 검사한다. `review: APPROVE`는 병합용 `verdict: PASS`가 아니다.
 
 ## 1. 순찰 순서
 
@@ -150,7 +164,7 @@ REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
 | `dune build @runtest` 가 조용히 끝남 | 캐시에서 이전 결과를 재생했을 수 있다 | 방금 돌았다 (`--force` 출력이 증거) |
 | PR 이 `merged` | 병합 버튼이 눌렸다 | 마지막으로 push 한 수정이 main 에 있다 |
 
-- 체크가 끝나기 전에 병합하면 main 이 빨개질 수 있다. 병합 전 네 체크의 `conclusion` 이 전부 `success`
+- 체크가 끝나기 전에 병합하면 main 이 빨개질 수 있다. 병합 전 다섯 필수 체크의 `conclusion` 이 전부 `success`
   인지 본다. `in_progress` 가 하나라도 있으면 기다리지 말고 다음 PR 로 넘어간다.
 - Draft 는 병합되지 않는다(merge-async 가 `Pull request is in draft.` 로 거부). Ready 전환은 REST 에
   없어서 `gh pr ready` 가 필요하다. GraphQL 이 살아 있을 때 해 둔다.

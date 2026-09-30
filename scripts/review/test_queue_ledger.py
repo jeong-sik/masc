@@ -145,7 +145,7 @@ for page in pages if pages is not None else [fixtures[key]]:
                     state=fields.pop("state", "COMMENTED"), **fields)
 
     def approval(self, head=None, time="2026-01-01T00:55:00Z", **fields):
-        return self.message(self.verdict(head=head) + f"\n\napprove-guard: head `{head or self.head}` · fixture", time, state="APPROVED",
+        return self.message(f"review: APPROVE head: {head or self.head} by: reviewer" + f"\n\napprove-guard: head `{head or self.head}` · fixture", time, state="APPROVED",
                             commit_id=head or self.head, **fields)
 
     def ledger(self, comments=None, reviews=None, fail=None, mutate=lambda data: None,
@@ -303,7 +303,7 @@ os.execv(os.environ['LEDGER_REAL_GIT'], [os.environ['LEDGER_REAL_GIT'], *args])
 
     def test_later_review_hold_replaces_comment_pass(self):
         row = self.ledger(reviews=[self.message(self.verdict("HOLD"), "2026-01-01T00:50:00Z")])
-        self.assertEqual((row["waits_on"], row["verdict"]), ("review", "HOLD"))
+        self.assertEqual((row["waits_on"], row["verdict"]), ("integration", "HOLD"))
 
     def test_later_comment_invalidates_review_pass(self):
         for first_line, verdict in [(self.verdict("COMMENT"), "COMMENT"),
@@ -317,13 +317,13 @@ os.execv(os.environ['LEDGER_REAL_GIT'], [os.environ['LEDGER_REAL_GIT'], *args])
             with self.subTest(first_line=first_line):
                 row = self.ledger(comments=[self.message(first_line, "2026-01-01T00:50:00Z")],
                                   reviews=[self.message(self.verdict())])
-                self.assertEqual((row["waits_on"], row["verdict"]), ("review", verdict))
+                self.assertEqual((row["waits_on"], row["verdict"]), ("integration", verdict))
 
     def test_annotated_commented_failure_replaces_pass(self):
         row = self.ledger(reviews=[self.message(
             f"verdict: FAIL (P1) head: {self.head} run: 900 by: reviewer",
             "2026-01-01T00:50:00Z")])
-        self.assertEqual((row["waits_on"], row["verdict"]), ("review", "INVALID"))
+        self.assertEqual((row["waits_on"], row["verdict"]), ("integration", "INVALID"))
 
     def test_edit_and_same_timestamp_cannot_hide_hold(self):
         row = self.ledger(comments=[self.message(self.verdict("HOLD"),
@@ -342,7 +342,7 @@ os.execv(os.environ['LEDGER_REAL_GIT'], [os.environ['LEDGER_REAL_GIT'], *args])
                         self.verdict("HOLD"), "2026-01-01T00:45:00Z")],
                     comments=[self.message(self.verdict(), "2026-01-01T00:50:00Z",
                                            author_association=association)])
-                self.assertEqual((row["waits_on"], row["verdict"]), ("review", "UNTRUSTED by reviewer"))
+                self.assertEqual((row["waits_on"], row["verdict"]), ("integration", "UNTRUSTED by reviewer"))
 
     def test_new_pass_after_hold_counts(self):
         row = self.ledger(comments=[self.message(self.verdict("HOLD"))],
@@ -359,7 +359,7 @@ os.execv(os.environ['LEDGER_REAL_GIT'], [os.environ['LEDGER_REAL_GIT'], *args])
                 for messages in [[old_pass, refusal], [refusal, old_pass]]:
                     row = self.ledger(comments=messages, reviews=[self.approval(time="2026-01-01T00:30:00Z")])
                     self.assertEqual((row["waits_on"], row["verdict"]),
-                                     ("review", "FAIL by reviewer" if state == "FAIL" else state))
+                                     ("integration", "FAIL by reviewer" if state == "FAIL" else state))
 
     def test_shared_pin_invalidates_ocaml_run_without_direct_overlap(self):
         self.main_change("masc.opam.locked")
@@ -1146,6 +1146,28 @@ os.execv(os.environ['LEDGER_REAL_GIT'], [os.environ['LEDGER_REAL_GIT'], *args])
         row = self.ledger(change=self.draft_race, fail="jobs:901")
         self.assertTrue(row["waits_on"].startswith("unknown:"), row)
 
+
+    def test_source_approval_needed_visible_while_ci_pending(self):
+        def pending(data):
+            data["prs"][0]["statusCheckRollup"][0]["conclusion"] = None
+        row = self.ledger(mutate=pending)
+        self.assertEqual((row["waits_on"], row["review_state"]), ("ci:pending", "needed"))
+
+    def test_source_approved_visible_while_ci_failed(self):
+        def failed(data):
+            data["prs"][0]["statusCheckRollup"][0]["conclusion"] = "FAILURE"
+        row = self.ledger(mutate=failed, reviews=[self.approval()])
+        self.assertEqual((row["waits_on"], row["review_state"]), ("ci:fail", "approved"))
+
+    def test_source_approval_does_not_supply_integration_pass(self):
+        row = self.ledger(comments=[], reviews=[self.approval()])
+        self.assertEqual((row["waits_on"], row["review_state"], row["verdict"]), ("integration", "approved", "-"))
+
+    def test_source_refusal_after_integration_pass_stops_merge(self):
+        row = self.ledger(comments=[self.message(self.verdict()), self.message(
+            f"review: REQUEST_CHANGES head: {self.head} by: reviewer", "2026-01-01T00:59:00Z")], reviews=[self.approval()])
+        self.assertEqual(row["waits_on"], "integration")
+        self.assertEqual(row["verdict"], "FAIL by reviewer")
 
 if __name__ == "__main__":
     unittest.main()

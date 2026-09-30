@@ -424,7 +424,7 @@ function send(path, body) {
     if (ended || !machine) return;
     const r = await api('POST', path, body);
     if (ended) return;
-    if (!r.json || r.json.ok !== true) setStatus('action', (r.json && r.json.message) || ('요청이 거절됐어요 (' + r.status + ')'));
+    if (!r.json || r.json.ok !== true) setStatus('action', (r.json && (r.json.message || r.json.error)) || ('요청이 거절됐어요 (' + r.status + ')'));
     else setStatus('action', '');
     await refreshSeat();
   }).catch(() => setStatus('action', '보내지 못했어요. 연결을 확인해 주세요.'));
@@ -529,7 +529,7 @@ let controller_json () =
 let seat_response ~config ~name =
   match Play_seat.hand_to config ~now:(Time_compat.now ()) with
   | Error detail ->
-    `Service_unavailable, `Assoc [ ("error", `String "keepers_unreadable"); ("message", `String detail) ]
+    `Service_unavailable, Server_refusal.json ~code:"keepers_unreadable" detail
   | Ok participants ->
     ( `OK
     , `Assoc

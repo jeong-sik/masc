@@ -809,5 +809,18 @@
     "deferred_p3": [
       "Context wheel input is consumed without scrolling"
     ]
+  },
+  "code_memo_integration_stack": {
+    "pr": 40319,
+    "base_pr": 40316,
+    "base_head": "0a0572060da1a2ea8eeb9a03c00d9f3d2b45b93b",
+    "head": "d4a43183c8aa12cf492c4ddcbe28d9254c39a129",
+    "imported_pr": 40240,
+    "imported_head": "228c25fbf29f37bcafa33c6e5008c54acbbee423",
+    "imported_base": "04256f2b1d46fe9d49f884215b2d6c0025defa3a",
+    "scope": "complete literal author/body and physical-row movement at actual file pane width; shared active memo help/footer",
+    "review": "system_audit and agenda_finish source PASS at exact head, no unresolved P0/P1/P2",
+    "validation": "three OCaml implementations/two interfaces syntax, Python AST, diff check; imported14-case fixture not executed",
+    "execution": "not run under source-only policy"
   }
 }

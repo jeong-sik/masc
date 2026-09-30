@@ -1102,7 +1102,7 @@ let test_speak_summary_is_the_first_line_of_the_message () =
 let test_resolution_absent_tells_the_model_once () =
   let outcome =
     Masc.Keeper_gate_replay.Resolution_absent
-      { absence = Masc.Keeper_approval_queue.Resolution_missing }
+      { absence = Masc.Keeper_approval_queue_result.Resolution_missing }
   in
   let message =
     Masc.Keeper_gate_replay.append_model_evidence

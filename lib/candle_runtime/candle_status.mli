@@ -1,9 +1,10 @@
 (** Is Candle on right now (RFC-goal-candle-ledger 3.9)?
 
-    [current] reads configuration and checks appraiser availability before
-    ledger recovery. [for_recording] reads the same configuration and owns
-    the same recovery without checking the appraiser: its temporary absence
-    cannot discard Snapshot or PayoutOwed facts.
+    [configured] reads configuration and checks appraiser availability without
+    touching the ledger. [current] additionally owns ledger recovery.
+    [for_recording] reads the same configuration and owns the same recovery
+    without checking the appraiser: its temporary absence cannot discard
+    Snapshot or PayoutOwed facts.
 
     The first eligible recovery call for a base path in this process runs
     {!Candle_ledger.recover_at_start}: a tail left by an append that never
@@ -22,6 +23,11 @@
     Recovery runs once per process. A tail left later refuses every transition
     until the server restarts. Two things leave one: a second writer that died
     mid-append, and an append of this process whose rollback failed too. *)
+
+val configured : base_path:string -> Candle_config.t
+(** Current configuration and appraiser availability only. Does not recover,
+    truncate or otherwise change the ledger. Read and purchase surfaces use
+    this before their authoritative ledger read. *)
 
 val current : base_path:string -> Candle_config.t
 

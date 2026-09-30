@@ -1571,6 +1571,8 @@ let test_concurrent_execution_opt_ins_are_exact () =
   Alcotest.(check (list string))
     "only explicitly audited handlers opt into concurrent batches"
     [ "keeper_artifact_read"
+    ; "keeper_candle_balance"
+    ; "keeper_candle_catalog"
     ; "keeper_capability_search"
     ; "keeper_constitution_read"
     ; "keeper_lane_status"

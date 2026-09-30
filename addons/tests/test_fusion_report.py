@@ -117,15 +117,26 @@ class FusionReport(unittest.TestCase):
                 size = (low + high) // 2
                 value = detail()
                 value["evidence"]["post"]["body"] = atom * size
-                payload, _result = wire("fusion-results", [source(value)])
-                if len(payload) <= producer_limit:
+                payload, result = wire("fusion-results", [source(value)])
+                self.assertLessEqual(len(payload), producer_limit)
+                if not result["isError"]:
+                    self.assertIn("structuredContent", result)
                     low = size
                 else:
+                    self.assertNotIn("structuredContent", result)
                     high = size
             value["evidence"]["post"]["body"] = atom * low
             producer_wire, output = wire("fusion-results", [source(value)])
             self.assertLessEqual(len(producer_wire), producer_limit)
-            self.assertGreater(len(producer_wire), producer_limit - 100)
+            self.assertFalse(output["isError"])
+            # A bounded refusal is a small legal reply, not an accepted body.
+            # One additional atom crosses the actual producer admission edge.
+            larger = copy.deepcopy(value)
+            larger["evidence"]["post"]["body"] = atom * (low + 1)
+            larger_wire, refused = wire("fusion-results", [source(larger)])
+            self.assertLessEqual(len(larger_wire), producer_limit)
+            self.assertTrue(refused["isError"])
+            self.assertNotIn("structuredContent", refused)
             payload, result = wire("fusion-report", [upstream(output["structuredContent"])])
             self.assertFalse(result["isError"])
             self.assertLessEqual(len(payload), report_limit)
@@ -155,13 +166,18 @@ class FusionReport(unittest.TestCase):
             self.assertTrue(item["fields"]["input_complete"])
 
     def test_unrepresentable_report_is_explicitly_refused_without_truncation(self):
-        value = detail()
-        value["evidence"]["post"]["body"] = "x" * 4194304
-        payload, result = wire("fusion-report", [upstream(project(value))])
-        self.assertLessEqual(len(payload), 4194304)
+        root = Path(__file__).resolve().parents[1]
+        report_limit = tomllib.loads((root / "fusion-report/lane.toml").read_text())["resources"]["max_reply_bytes"]
+        output = project(detail())
+        # Exercise the report worker's output boundary with synthetic retained
+        # evidence. A live producer now refuses this size before composition.
+        result_row = next(row for row in output["rows"] if row["lane_id"] == "fusion/result")
+        result_row["fields"]["board_post"]["body"] = "x" * report_limit
+        payload, result = wire("fusion-report", [upstream(output)])
+        self.assertLessEqual(len(payload), report_limit)
         self.assertTrue(result["isError"])
         self.assertNotIn("structuredContent", result)
-        self.assertIn("no report was accepted", result["content"][0]["text"])
+        self.assertIn("no output was accepted", result["content"][0]["text"])
 
     def test_many_small_runs_and_large_shared_producer_have_one_context(self):
         captures = []

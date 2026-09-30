@@ -131,7 +131,7 @@ let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context)
      Log.Keeper.error
        "pending HITL visibility unavailable workspace=%s error=%s"
        base_path
-       (Keeper_approval_queue.storage_error_to_string error));
+       (Keeper_approval_queue_result.storage_error_to_string error));
   (* Phase 2: sweep order — restart/unregister FIRST, reconcile LAST.
      This prevents reconcile from re-launching keepers that sweep is about
      to process (defense-in-depth alongside is_registered check). *)

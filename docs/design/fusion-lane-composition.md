@@ -72,3 +72,12 @@ Source authority: `lib/fusion_core/fusion_run_registry.ml`,
 `lib/fusion/fusion_orchestrator.mli`,
 `lib/fusion/fusion_delivery_obligation.mli`,
 and [generic output composition](../guides/lane-output-composition.md).
+## Readable report output
+
+The `fusion-report` package adds an executable projection after `fusion-results`:
+native Fusion run → captured status/result → report → host Evidence delivery.
+Its named `report` port contains the retained analysis body and exact input
+lineage. The package keeps analysis completion, input completeness and delivery
+as separate states. Report generation is implemented; model computation inside
+an isolated Fusion package and graph-driven Broadcast execution remain follow-up
+work under issue #40183.

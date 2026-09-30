@@ -19525,7 +19525,7 @@ and is loaded on demand through keeper_skill.
         | Some _ | None -> None
       in
       (match input with
-       | Some (Pasted paste) when Option.is_some state.lane_addons ->
+       | Some (Pasted paste) when Option.is_some state.lane_addons && not state.palette_open ->
            (match state.lane_addons with
             | Some ({installer=Some installer;_} as view) ->
                 state.lane_addons <- Some {view with installer=Some
@@ -19981,7 +19981,7 @@ and is loaded on demand through keeper_skill.
                 | "\r" | "\n" | "enter" ->
                     launch_voice_agent_voice_save state ~mailbox:async_messages session
                 | _ -> ()))
-       | Some key when Option.is_some state.lane_addons ->
+       | Some key when Option.is_some state.lane_addons && not state.palette_open ->
            let module Addons = Masc_tui_lane_addons in
            (match state.lane_addons with
             | None -> ()
@@ -20109,7 +20109,12 @@ and is loaded on demand through keeper_skill.
                           | Ok installer -> invalidate {view with installer=Some installer;document_key=None;error=None;scroll=0}
                           | Error detail -> update {view with error=lane_addons_input_failure detail})
                      | "n" -> update {view with draft=Some "";naming=true;document_key=None;scroll=0}
-                     | ":" -> update { view with draft = Some ""; naming=false; scroll = 0 }
+                     | ":" ->
+                         state.palette_open <- true;
+                         state.palette_mode <- Palette_jump;
+                         state.palette_query <- "";
+                         state.palette_cursor <- 0
+                     | "A" -> update { view with draft = Some ""; naming=false; scroll = 0 }
                      | "E" ->
                          (match Addons.selected_document view with
                           | Some _ -> update {view with editor_ready=true}
@@ -20154,7 +20159,7 @@ and is loaded on demand through keeper_skill.
                            | Ok next -> update next
                            | Error detail -> update {view with error=lane_addons_input_failure detail})
                      | "t" ->
-                         (match view.last_action with None -> update {view with error=lane_addons_input_failure "No action request yet; :act submits one"}
+                         (match view.last_action with None -> update {view with error=lane_addons_input_failure "No action request yet; A opens a command, then act submits one"}
                           | Some request -> launch_lane_addons state ~mailbox:async_messages (Addons.Action_status request))
                      | "o" ->
                          (match Addons.selected_instance view with
@@ -21285,38 +21290,22 @@ and is loaded on demand through keeper_skill.
              state.palette_query <- "";
              state.palette_cursor <- 0
            in
+           let typed_question =
+             match state.palette_mode with
+             | Palette_jump -> palette_typed_question state.palette_query
+             | Palette_choice _ -> None
+           in
+           let move_palette by =
+             let last = max 0 (List.length (palette_matches state) - 1) in
+             let current = max 0 (min state.palette_cursor last) in
+             state.palette_cursor <- max 0 (min last (current + by))
+           in
            (match k with
             | "esc" -> close ()
-            | "\r" when
-                (let q = String.trim state.palette_query in
-                 List.exists
-                   (fun (prefix, _) -> String.starts_with ~prefix q)
-                   Masc_tui_types.lsp_question_prefixes) ->
-                (* A typed command, not an entry: the argument is the symbol
-                   the language-server question is asked about, on the Code
-                   pane's cursor line. *)
-                let q = String.trim state.palette_query in
-                let question, symbol =
-                  match String.index_opt q ' ' with
-                  | Some i ->
-                      ( String.sub q 0 i,
-                        String.trim
-                          (String.sub q (i + 1) (String.length q - i - 1)) )
-                  | None -> (q, "")
-                in
-                (* The typed word back to the question it names, through the
-                   same table the entries were built from. *)
-                let question =
-                  match
-                    List.find_opt
-                      (fun (prefix, _) ->
-                        String.equal (String.trim prefix) question)
-                      Masc_tui_types.lsp_question_prefixes
-                  with
-                  | Some (_, canonical) -> canonical
-                  | None -> question
-                in
-                if String.equal symbol "" then begin
+            | "\r" when Option.is_some typed_question ->
+                (match typed_question with
+                 | None -> ()
+                 | Some (question, None) ->
                   (* Bare "def " or "hover ": run the highlighted candidate
                      entry -- the cursor line's names ride the palette list,
                      so Enter alone picks the one in view. *)
@@ -21328,7 +21317,7 @@ and is loaded on demand through keeper_skill.
                             (List.length matches - 1)))
                   in
                   close ();
-                  match chosen with
+                  (match chosen with
                   | Some (_, Masc_tui_types.Palette_lsp (question, symbol))
                     ->
                       start_code_lsp_question state
@@ -21336,9 +21325,8 @@ and is loaded on demand through keeper_skill.
                   | Some _ | None ->
                       report_action state "error"
                         (question ^ " needs a symbol: :" ^ question
-                       ^ " <name>")
-                end
-                else begin
+                       ^ " <name>"))
+                 | Some (question, Some symbol) ->
                   close ();
                   if state.view <> Code || Option.is_none (Masc_tui_fetched.current_key state.code_file)
                   then
@@ -21347,8 +21335,7 @@ and is loaded on demand through keeper_skill.
                        Code surface"
                   else
                     start_code_lsp_question state ~mailbox:async_messages
-                      ~question ~symbol
-                end
+                      ~question ~symbol)
             | "\r" ->
                 let matches = Masc_tui_types.palette_matches state in
                 let chosen =
@@ -21356,6 +21343,11 @@ and is loaded on demand through keeper_skill.
                     (max 0 (min state.palette_cursor (List.length matches - 1)))
                 in
                 close ();
+                (match chosen, state.lane_addons with
+                 | Some _, Some view ->
+                     state.lane_addons_cached <- view;
+                     state.lane_addons <- None
+                 | Some _, None | None, (Some _ | None) -> ());
                 (match chosen with
                  | Some (_, Masc_tui_types.Palette_hide_browser_lane) ->
                      hide_browser_lane state
@@ -21439,8 +21431,11 @@ and is loaded on demand through keeper_skill.
                      start_code_lsp_question state ~mailbox:async_messages
                        ~question ~symbol
                  | None -> ())
-            | "down" -> state.palette_cursor <- state.palette_cursor + 1
-            | "up" -> state.palette_cursor <- max 0 (state.palette_cursor - 1)
+            | "down" | "\014" -> move_palette 1
+            | "up" | "\016" -> move_palette (-1)
+            | "home" -> state.palette_cursor <- 0
+            | "end" -> state.palette_cursor <- max 0 (List.length (palette_matches state) - 1)
+            | "\021" -> state.palette_query <- ""; state.palette_cursor <- 0
             | "\127" | "\b" ->
                 state.palette_query <-
                   Masc_tui_message_layout.drop_last_utf8_scalar

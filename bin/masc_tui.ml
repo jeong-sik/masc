@@ -23272,6 +23272,19 @@ and is loaded on demand through keeper_skill.
                        launch_code_diff_load state ~mailbox:async_messages
                          ~path)
                 end)
+       | Some ("pageup" | "pagedown" | "home" | "end" as move)
+         when state.view = Code && state.code_focus_file = Right_pane
+              && state.code_history_open && not state.repository_changes_open ->
+           let count, height = Masc_tui_render.code_history_viewport state in
+           let current = Masc_tui_scroll.normalize ~count ~height:1 state.code_history_scroll in
+           let maximum = Masc_tui_scroll.maximum ~count ~height:1 in
+           let page = Masc_tui_scroll.page_step ~height in
+           state.code_history_scroll <-
+             (match move with
+              | "home" -> 0 | "end" -> maximum
+              | "pageup" -> max 0 (current - page)
+              | "pagedown" -> min maximum (current + page)
+              | _ -> current)
        | Some "H" when state.view = Code && state.code_focus_file = Right_pane ->
            (* History over the open file. The capital only: lowercase h/l
               choose panes, while shifted arrows pan the file. Same key closes
@@ -23283,6 +23296,7 @@ and is loaded on demand through keeper_skill.
                   state.code_history_open <- false
                 else begin
                   state.code_history_open <- true;
+                  state.code_history_scroll <- 0;
                   state.code_diff_open <- false;
                   state.code_notes_open <- false;
                   (* Already about this file in this scope -- loaded,
@@ -24363,14 +24377,9 @@ and is loaded on demand through keeper_skill.
                             (state.code_diff_scroll + 1)
                     | Some (_, _) | None -> ())
                   else if state.code_history_open then (
-                    match Masc_tui_fetched.current state.code_history with
-                    | Some (_, Masc_tui_fetched.Ready listing) ->
-                        state.code_history_scroll <-
-                          min
-                            (max 0 (List.length listing.chl_entries - 1))
-                            (state.code_history_scroll + 1)
-                    (* No listing to move a cursor through. *)
-                    | Some (_, _) | None -> ())
+                    let count, _ = Masc_tui_render.code_history_viewport state in
+                    state.code_history_scroll <-
+                      Masc_tui_scroll.down ~count ~height:1 state.code_history_scroll)
                   else
                     match Masc_tui_fetched.current state.code_file with
                     | Some (_, Masc_tui_fetched.Ready rows) ->
@@ -24732,9 +24741,10 @@ and is loaded on demand through keeper_skill.
                   else if state.code_diff_open then
                     state.code_diff_scroll <-
                       max 0 (state.code_diff_scroll - 1)
-                  else if state.code_history_open then
+                  else if state.code_history_open then (
+                    let count, _ = Masc_tui_render.code_history_viewport state in
                     state.code_history_scroll <-
-                      max 0 (state.code_history_scroll - 1)
+                      Masc_tui_scroll.up ~count ~height:1 state.code_history_scroll)
                   else
                     match Masc_tui_fetched.current state.code_file with
                     | Some (_, Masc_tui_fetched.Ready rows) ->
@@ -25097,10 +25107,9 @@ and is loaded on demand through keeper_skill.
                      producer-recorded line without claiming it was
                      committed. *)
                   match Masc_tui_fetched.current state.code_history with
-                  | Some (_, Masc_tui_fetched.Ready listing) -> (
+                  | Some (_, Masc_tui_fetched.Ready _) -> (
                       match
-                        List.nth_opt listing.chl_entries
-                          state.code_history_scroll
+                        Masc_tui_render.code_history_selected state
                       with
                       | None -> ()
                       | Some (Hist_keeper_change change) -> (

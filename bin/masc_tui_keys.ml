@@ -1213,7 +1213,8 @@ let footer_hints_work_tasks = hints_of_bindings work_tasks_bindings
 type code_pane =
   | Code_tree  (** the file list has focus *)
   | Code_file  (** a file is open and nothing covers it *)
-  | Code_overlay  (** history, diff or notes is drawn over the file *)
+  | Code_overlay  (** diff or notes is drawn over the file *)
+  | Code_history  (** complete history document is drawn over the file *)
 
 let footer_hints_code ~pane =
   let file_keys =
@@ -1228,7 +1229,7 @@ let footer_hints_code ~pane =
     match pane with
     | Code_tree -> overlay_keys @ file_keys
     | Code_file -> overlay_keys
-    | Code_overlay ->
+    | Code_overlay | Code_history ->
         (* [Right / Enter] names the tree and file panes' open. With the
            history overlay up, the one arm behind Right and Enter takes the
            overlay's branch instead, so the row drew two items holding the
@@ -1242,6 +1243,10 @@ let footer_hints_code ~pane =
          { b with label = (match pane with Code_tree -> "move" | _ -> "scroll") }
        else b)
   |> hints_of_bindings
+  |> fun hints ->
+      match pane with
+      | Code_history -> "j/k:scroll  PgUp/PgDn:page  Home/End:edges  Enter:top entry  Left / Esc:back"
+      | Code_tree | Code_file | Code_overlay -> hints
 
 (* The Runtime footer is the table's, with the two keys that depend on the
    reading on screen: [p] names where it goes from here, and [e] exists only on

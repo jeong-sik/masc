@@ -49,7 +49,7 @@ def window(output, columns):
     return first, last, total, body
 
 
-def fixtures(short=False):
+def fixtures(short, requests):
     result = h.code_memo_fixtures()
     result[h.WORKSPACE_TREE_ROOT_PATH] = (200, [{
         "path": FILE, "label": FILE, "depth": 0, "parent": "",
@@ -76,6 +76,15 @@ def fixtures(short=False):
         "file_path": FILE, "window_hours": 24, "calls_in_window": len(changes),
         "changes": changes, "incomplete_over_budget": 0, "incomplete_malformed": 0,
         "unattributed_over_budget": 0, "unattributed_malformed": 0}})
+    # The shared http_requests ledger records writes only. Capture these GET
+    # routes through their actual fixture callbacks without changing that ledger.
+    for endpoint in ("/api/v1/workspace/file", "/api/v1/git/log",
+                     "/api/v1/ide/file-activity"):
+        response = result[endpoint]
+        def capture(path, response=response):
+            requests.append((path, b""))
+            return response
+        result[endpoint] = h.PathHttpResponse(capture)
     return result
 
 
@@ -150,7 +159,7 @@ def run(executable, columns, no_color, short=False):
 
     h.run_terminal_scenario(executable,
         description=f"Code history full metadata/owner {columns} NO_COLOR={no_color} short={short}",
-        interact=interact, http_fixtures=fixtures(short), http_requests=requests,
+        interact=interact, http_fixtures=fixtures(short, requests),
         extra_env={"NO_COLOR": "1"} if no_color else {})
 
 

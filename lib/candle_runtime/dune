@@ -1,9 +1,9 @@
 (include_subdirs no)
 
 ;; The parts of Candle that run inside the server (RFC-goal-candle-ledger 3):
-;; whether Candle is on right now, the step that writes a Goal's Snapshot when
-;; the verifier passes it, and the step that writes its PayoutOwed when the
-;; operator confirms the pass.
+;; whether Candle is on right now, the steps that write a Goal's Snapshot and
+;; PayoutOwed when the verifier passes it and the operator confirms it, and the
+;; worker that prepares the payout.
 ;;
 ;; This is the only Candle library that knows about a Goal. masc_candle,
 ;; masc_candle_store and masc_candle_config know nothing of it, and masc_goal
@@ -26,4 +26,5 @@
   masc_config_dir_resolver
   masc_log
   time_compat
+  eio
   ptime))

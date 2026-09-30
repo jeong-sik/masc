@@ -160,7 +160,10 @@ let goal_ids events =
   List.map
     (fun (event : Candle_event.t) ->
        match event.body with
-       | Candle_event.Snapshot { goal_id; _ } | Candle_event.Payout_owed { goal_id; _ } -> goal_id)
+       | Candle_event.Snapshot { goal_id; _ }
+       | Candle_event.Payout_owed { goal_id; _ }
+       | Candle_event.Candidates { goal_id; _ }
+       | Candle_event.Unattributed { goal_id; _ } -> goal_id)
     events
 ;;
 
@@ -229,6 +232,7 @@ let test_the_snapshot_holds_what_the_goal_held () =
     let time text = Result.get_ok (Candle_time.of_rfc3339 text) in
     check string "goal" "goal-1" s.goal_id;
     check string "request" "req-1" s.request_id;
+    check string "verifier run" "run-1" s.verification_run_id;
     check string "criterion revision" "rev-1" s.criterion_revision;
     check bool "passed_at is the verdict's recorded_at" true
       (Candle_time.equal s.passed_at (time "2026-09-28T06:32:00Z"));
@@ -284,6 +288,7 @@ let earlier_snapshot : Candle_event.t =
       Candle_event.Snapshot
         { goal_id = "goal-earlier"
         ; request_id = "req-0"
+        ; verification_run_id = "run-0"
         ; criterion_revision = "rev-0"
         ; passed_at = time "2026-08-31T00:00:00Z"
         ; goal_created_at = time "2026-08-01T00:00:00Z"

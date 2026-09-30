@@ -1154,8 +1154,8 @@ let voice_agent_bindings =
   ]
 
 let patch_review_bindings =
-  [ b Navigate "Shift-Left / Shift-Right" "pan"
-      ~help:"move the diff text horizontally while file coordinates remain fixed"
+  [ b Navigate "Shift+←/→" "pan"
+      ~help:"Shift-Left / Shift-Right moves diff text horizontally while file coordinates remain fixed"
   ; b Navigate "j/k" "scroll"
   ; b Navigate "PgUp/PgDn / d/u" "page"
   ; b Navigate "Home/End / g/G" "edges"

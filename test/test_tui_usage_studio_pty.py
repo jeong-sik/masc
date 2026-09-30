@@ -67,7 +67,7 @@ def fixtures():
 
 
 def capture(process, fd, output, name, rows, columns, needle):
-    h.resize_and_wait(process, fd, output, rows=rows + 1, columns=columns + 1,
+    h.resize_and_wait(process, fd, output, rows=rows, columns=columns + 1,
                       needle=needle, controls=(h.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
     frame = h.resize_and_wait(process, fd, output, rows=rows, columns=columns,
                              needle=needle, controls=(h.FULL_REDRAW,), final_cursor=b"\x1b[?25l")

@@ -7,10 +7,12 @@ sessions use read-only commands; only Keepers approve and merge.
 
 ## Evidence and the publication target
 
-Every original member keeps its own exact head, successful PR-check run,
-current PASS and independent head-bound approval. The ROLL PR is the actual
-publication target and needs its own five successful checks, PASS and
-independent approval. Its run never becomes a member's run.
+Every original member keeps a fixed head and review base, an independent
+non-author `member-review: COMPLETE` of its full delta at that head, and no
+later FAIL/HOLD or open change request. Member CI, PASS and approval are not
+inferred from the ROLL run. The ROLL PR is the publication target and needs
+its own successful required checks, PASS and independent head-bound approval.
+Its run never becomes a member's run.
 
 Publish the same line on ROLL and every member PR, then save it in a file:
 
@@ -24,6 +26,24 @@ order is tree reconstruction order. The run's PR and branch association must
 identify one ROLL PR. Trusted repository participants publish the line, and
 `by:` names a Keeper rather than the shared account login. Session independence
 still requires the reviewer to know which session pushed the commit.
+
+The ROLL PR body must also contain exactly one immutable input block:
+
+```text
+<!-- masc-roll-input-v1
+{"base":"<BASE40>","members":[{"pr":1,"head":"<HEAD40>","review_base":"<REVIEW_BASE40>"}]}
+-->
+```
+
+Use actual PR numbers and full commit IDs. Keep members in reconstruction order.
+For the first member, `review_base` is the merge base of the fixed ROLL base
+and that member head; for a stacked child it is the reviewed parent base.
+`python3 scripts/review/roll_input.py --body-file <saved-ROLL-body>` validates
+the block and prints its digest. The cited ROLL Actions run must upload an
+artifact named `roll-evidence` containing `roll-evidence.json`; the guard
+compares its input digest, tested checkout parents/tree, run identity and
+executed suite set with the fixed body and current ROLL head. The CI producer
+owns this receipt. An absent or mismatched receipt refuses publication.
 
 ## Read-only preparation
 
@@ -43,16 +63,18 @@ conservative and does not infer batches from titles or labels.
 
 ## What the guard proves
 
-- Every member head and the ROLL head have their own successful current checks
-  and PASS. An open CR or a later FAIL/HOLD blocks publication.
+- Each member retains a fixed head and independent full-delta source review.
+  An open CR or a later FAIL/HOLD blocks publication. The ROLL head supplies
+  the current checks, PASS, and bound approval.
 - Git reconstructs BASE plus all ordered member heads and compares the full
   tree with ROLL. Temporary Git objects do not change a checkout or branch.
 - Main changes after BASE avoid the union of member-applied paths and shared
   inputs. A path restored by a later member remains in that union. The final
   tree preserves only those admitted external changes.
 - After the last expensive checks and mutable identity/verdict reads, the
-  guard rechecks every member and ROLL's independent footer-bound approval.
-  A dismissed or missing approval refuses publication.
+  guard rechecks each member's source review and refusal state, plus the
+  ROLL's independent footer-bound approval. A dismissed or missing ROLL
+  approval refuses publication.
 - One invocation submits at most one head-pinned squash request, targeting
   ROLL. No A, A+B or other intermediate member tree is written to main.
 - Arrival proof checks the API merge commit in main's first-parent history,
@@ -77,7 +99,7 @@ A concrete member passed to `ci-freshness.py --batch` after publication refuses
 with code 6 (the ledger reports unknown freshness); it cannot authorize a new
 approval or be mistaken for an arrival audit. Only verified
 arrival produces `absorption_candidates`. A Keeper separately records the
-mapping from original head/run/approval evidence to ROLL run and arrival
+mapping from original head/review evidence to the ROLL run and arrival
 commit, then closes the original PRs as absorbed. They are not reported as
 individually merged. Already closed originals need no repeated metadata action.
 
@@ -90,14 +112,14 @@ landing; `main` is the current observed tip and `post_landing_commits` lists its
 later first-parent commits. Later edits do not become pre-landing conflicts or
 alter that historical tree proof. A merged resume cannot reconstruct past approvals from
 current API state: its historical approval mapping is marked unavailable
-without the saved preflight receipt. Current member head/run and actual Git
+without the saved preflight receipt. Current member head/review and actual Git
 arrival proof remain separately reported.
 
 ## Limits and refusal codes
 
 - Head changes require a new batch, including a clean main-only merge. This
   implementation has no head-equivalence exception.
-- All five checks must succeed. Budget exhaustion is ROLL failure; a targeted
+- All required ROLL checks must succeed. Budget exhaustion is ROLL failure; a targeted
   supplemental run cannot waive it. There is no arbitrary member-count cap.
 - GitHub's separate API reads and merge request have no combined
   checks/approvals/main CAS. Final reads reduce the race; they cannot eliminate

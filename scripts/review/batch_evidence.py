@@ -279,7 +279,7 @@ def member_review(f, gh, prefix, member, base, author):
 
 def member_failure(f, gh, repo, member):
     value = decision(f, gh, repo, member)
-    if value and value[0] == "FAIL":
+    if value and value[0] in {"FAIL", "HOLD"}:
         raise Refusal(Reason.MEMBER_HAS_LATE_FAIL, ExitCode.MEMBER)
 
 

@@ -462,12 +462,15 @@ print(value)
     def test_member_run_number_cannot_impersonate_roll_receipt(self):
         self.refusal("batch_member_run_not_applicable", E.MEMBER, run_override=901)
 
-    def test_member_late_fail_refuses_without_member_ci(self):
-        self.get("issues/2/comments?per_page=100").append({
-            "id": 999, "created_at": "2026-01-01T00:50:00Z",
-            "author_association": "MEMBER", "user": {"login": "reviewer"},
-            "body": f"verdict: FAIL head: {self.heads[2]} run: 902 by: reviewer"})
-        self.refusal("batch_member_has_late_fail", E.MEMBER)
+    def test_member_late_fail_or_hold_refuses_without_member_ci(self):
+        for verdict in ("FAIL", "HOLD"):
+            with self.subTest(verdict=verdict):
+                self.get("issues/2/comments?per_page=100").append({
+                    "id": 999, "created_at": "2026-01-01T00:50:00Z",
+                    "author_association": "MEMBER", "user": {"login": "reviewer"},
+                    "body": f"verdict: {verdict} head: {self.heads[2]} run: 902 by: reviewer"})
+                self.refusal("batch_member_has_late_fail", E.MEMBER)
+                self.get("issues/2/comments?per_page=100").pop()
 
     def test_three_members_publish_only_tested_complete_tree(self):
         base = self.base

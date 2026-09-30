@@ -74,7 +74,7 @@ blocking_lints() {
     "scripts/review/approve-guard.sh scripts/review/approve-guard-selftest.sh scripts/review/merge-guard.sh scripts/review/ci-checks.sh scripts/review/ci-freshness.py scripts/review/batch_evidence.py scripts/review/review-verdict.sh scripts/review/pr-check-run-contract.sh scripts/review/fixtures/pr-check-draft-jobs-39834.json" \
     bash scripts/review/approve-guard-selftest.sh
   run_self_test_when_changed "Combined-tree batch review evidence" \
-    "scripts/review/batch_evidence.py scripts/review/test_batch_evidence.py scripts/review/land-batch.sh scripts/review/ci-freshness.py scripts/review/ci-checks.sh scripts/review/review-verdict.sh scripts/review/approve-guard.sh scripts/review/merge-guard.sh" \
+    "scripts/review/batch_evidence.py scripts/review/roll_input.py scripts/review/test_batch_evidence.py scripts/review/land-batch.sh scripts/review/ci-freshness.py scripts/review/ci-checks.sh scripts/review/review-verdict.sh scripts/review/approve-guard.sh scripts/review/merge-guard.sh" \
     python3 scripts/review/test_batch_evidence.py
   run_lint "Installer terminal wizard" python3 test/test_installer_wizard.py
   run_lint "Installer upgrade configuration" python3 test/test_installer_upgrade.py

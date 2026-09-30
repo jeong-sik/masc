@@ -247,23 +247,31 @@ opening_keeper = "alpha"
 
 An absent `opening` or `overview` starts on the Dashboard. `keeper` opens the
 named Keeper's chat; it needs `opening_keeper`. `last` opens the most recent
-chat target and updates `opening_keeper` when a different Keeper's chat is
-opened. The choice and the name are separate, so a Keeper named `last` can
+explicitly visited chat target from `last_chat_keeper`. Explicit visits record
+that key in every opening mode; while the stored opening mode is `last`, the
+same locked config commit also updates `opening_keeper`. Automatic startup
+does not record a visit. A missing receipt uses the chosen Last opening target. The choice and the name are separate, so a Keeper named `last` can
 be selected. If the target is unavailable, the TUI starts on the Dashboard
-and shows the reason on its first row. An invalid opening setting also starts
+and shows the reason near the top. An invalid opening setting also starts
 on the Dashboard with a reason.
 
-The candle on the startup splash and `/about` comes in two styles. `painted`
-is the 2D portrait, with smooth shading, a flickering flame and blinking
-eyes. `dotted` is a small 3D figure in square dots that sways on its axis.
-On a Kitty terminal it is sent as many pixels as its rows show, so the
-terminal never scales a dot. `c` on `/about` turns the candle to the other
-style and stores it; an absent key is `painted`, and an unknown one is
-named in the event log:
+`/about` shows the registered Keepers gathering beside the candle, then
+settling into a still roster after about two seconds. A narrow terminal shows
+two portraits and counts the rest as `+N`; a wider one shows up to four.
+Kitty graphics and the half-block mosaic use the same positions. A key
+during the arrival skips to the final frame without also activating its usual
+action; Esc closes `/about` directly. The animation stops when the final frame is drawn
+or the screen is closed. Set `reduce_motion` to show that frame immediately.
+
+The candle has two styles. `painted` is a 2D portrait with a flickering flame;
+`dotted` is a small figure in square dots. `c` on the settled `/about` screen
+turns the candle to the other style and stores it; an absent key is `painted`,
+and an unknown one is named in the event log:
 
 ```toml
 [tui]
 candle = "dotted" # or "painted"
+reduce_motion = true # optional; default false
 ```
 
 The table measures the seven colours MASC uses for semantic text against a
@@ -336,6 +344,12 @@ reveal a hidden toggle that had no visible effect when it was pressed.
 
 ### The Activity pane
 
+Home keeps the Recent pane closed by default even on a wide terminal. An
+explicit `Ctrl-L` or `/activity fleet` choice opens it; that choice survives
+navigation and resizing. Other eligible surfaces retain their narrow default.
+On a short Home, decision and continuation destinations take the available
+rows before the ancillary health and completed-work context.
+
 `Ctrl-L` walks the pane on the right of eligible surfaces through narrow, wide
 and hidden. Activity and Logs keep this pane off, since it would repeat their
 own stream, and so does an open modal or the browser lane. On eligible surfaces
@@ -401,6 +415,10 @@ to that Goal's current criterion revision. The screen says `not recorded`,
 `not observed`, or `unavailable` when it has no valid value. The count of
 linked Tasks marked done is a separate fact; it never becomes the Goal's
 measured value.
+
+Goals are shared across the workspace. Open Work → Goals for the metric,
+proof, and activity. Creation, edits, and phase changes name the caller in
+their activity events.
 
 Work shows current Task statuses and a 14-day UTC plot of Tasks *currently*
 done by their completion date. Its coverage line names backlog, Goal-link,
@@ -1985,7 +2003,7 @@ Per surface:
 | `e` | Schedules | Modify the selected active schedule atomically |
 | `x` | Schedules | Cancel the selected schedule (armed: same key again sends) |
 | `e` | Keeper list or detail | Edit the selected keeper's settings in `$EDITOR` (JSON patch; only the fields you keep in the file are sent). Exit 0 sends, any other exit changes nothing |
-| `a` | Keeper list or detail | Create a keeper: a declaration stub opens in `$EDITOR`; the `name` field in the file names the new keeper |
+| `a` | Keeper list or detail | Create a keeper in `$EDITOR`. Malformed or refused declarations remain available for another `a` in this session. A confirmed response opens that Keeper's composer; writing and sending the first request is a separate action |
 | Left / `Esc` | any structural detail or logs view | Back one level; Left never interrupts chat |
 | `Enter` | Message | Send |
 | `Ctrl-G` | Message | Switch to the next Keeper while no turn is in flight |
@@ -2178,3 +2196,49 @@ Librarian deferred and failure counts are observations since the server started,
 On a repository, `H` reads the last 24 hours of recorded clone writes from the loaded Keeper roster. The activity page shows counts by Keeper and each change's date, Task ID and file. Failed Keeper reads and calls omitted by the source decoder remain visible. It counts recorded changes, not time spent working; absolute writes outside registered clones are not attributed to a repository.
 
 Select a row and press Enter to open the original Keeper's file. In Code, `H` opens file history and `m` opens notes. Esc from activity returns to the repository list.
+
+
+## Dashboard: decisions and conversations
+
+Dashboard gives its body to two sections: **Needs your decision** and
+**Continue**. Individual request rows show their kind, recipient and reason.
+Enter opens that exact held-call, approval, question, Goal or task reader;
+it never submits a decision. Identity is the request kind plus its authoritative
+ID, so two calls belonging to one Keeper remain distinct while repeated delivery
+of one request is shown once. The full requests and Agenda destinations remain
+available. A failed source has its own visible reading; successful sources keep
+their request rows. Unknown or failed reads never claim that no decision is waiting. Automatic verifier work and generic
+incidents are not counted as operator decisions.
+
+Use j/k or the arrows to choose, then Enter to open. Long request lists window
+around the selected identity while Continue and new work remain visible; the
+heading states the shown row range. Esc from a Home-opened reader returns to
+Home with its selection and request window retained. If the request disappears
+or its source becomes unreadable, Home requires explicit reselection. A new
+top-level navigation ends the previous reader's return context.
+
+`p` opens requests, `;`
+opens Agenda, and `m` opens Usage. Work retains Goal observations, task lists,
+and verification evidence; Usage retains quota and telemetry detail. Home shows
+only a brief task-flow reading, with no duplicated tables or quota graphs.
+
+Continue uses the last explicitly visited conversation saved as
+`[tui].last_chat_keeper`, independently of the opening preference. A fixed
+`opening = "keeper"` target is not a last-chat record. Failed saves retain the
+visited target with a session-only notice; a visible save whose durability is
+unconfirmed has its own notice. Unreadable receipts show history unavailable.
+A failed roster read offers named history without permitting a new send.
+A deleted recipient can remain visible in already-open history; Home requires
+choosing an available Keeper to continue. With no available remembered target, choose a
+Keeper. An empty, successfully read roster offers creation while any existing
+Goal or task decisions remain visible. Home's `i` also selects a Keeper before
+writing. A conversation opened through Continue returns to Dashboard with Esc
+and keeps its draft through the existing per-Keeper draft store.
+
+Plan Usage is a frequent-use destination on the top-level **Usage** tab, not
+an expanded Home panel. The tab, Home's `m`, `go Usage` and `/cost` open its
+account rows even if the previous visit ended in Telemetry. The account reading
+includes scope, observed usage,
+reset times and freshness; scrolling reaches rows below the viewport. `p`
+opens the separate Telemetry reading, as do `/metrics` and `/telemetry`.
+A missing report is not a zero balance.

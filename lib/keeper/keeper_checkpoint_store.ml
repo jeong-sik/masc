@@ -443,8 +443,9 @@ let publish_summary_after_parse ~canonical_path ~identity_before checkpoint =
 let publish_summary_after_write ~canonical_path checkpoint =
   match canonical_identity_opt canonical_path with
   | Some identity ->
-    publish_summary ~canonical_path (summary_of_checkpoint ~identity checkpoint)
-  | None -> ()
+    publish_summary ~canonical_path (summary_of_checkpoint ~identity checkpoint);
+    Some identity.size
+  | None -> None
 
 let load_agent_core ~(session_dir : string) ~(session_id : string) :
     (Agent_core.Checkpoint.t, checkpoint_load_error) result =
@@ -524,7 +525,11 @@ let canonical_byte_count ~(session_dir : string) ~(session_id : string)
 type save_agent_core_relation = [ `Cold | `Forward | `Equal ]
 
 type save_agent_core_outcome =
-  | Saved of { relation : save_agent_core_relation; turn_count : int }
+  | Saved of
+      { relation : save_agent_core_relation
+      ; turn_count : int
+      ; canonical_bytes : int option
+      }
   | Stale_noop of { incoming_turn_count : int; known_turn_count : int }
 
 let save_relation ~known ~incoming =
@@ -1216,7 +1221,7 @@ let save_agent_core_if_source_with
        of bytes whose hash already matched, so a save that leaves none behind
        makes the next one decode the whole checkpoint. *)
     let publish ~canonical_path auxiliary =
-      publish_summary_after_write ~canonical_path candidate;
+      ignore (publish_summary_after_write ~canonical_path candidate);
       let installed = { installed_ref = candidate_ref; auxiliary } in
       committed_installation := Some installed;
       Installed installed
@@ -1539,12 +1544,13 @@ module For_testing = struct
 end
 
 let save_outcome_after_write ~session_dir ~canonical_path ~known ~history_retained ckpt =
-  publish_summary_after_write ~canonical_path ckpt;
+  let canonical_bytes = publish_summary_after_write ~canonical_path ckpt in
   archive_agent_core_history_best_effort ~session_dir ~retained:history_retained ckpt;
   Ok
     (Saved
        { relation = save_relation ~known ~incoming:ckpt.turn_count
        ; turn_count = ckpt.turn_count
+       ; canonical_bytes
        })
 
 let save_agent_core_classified_typed

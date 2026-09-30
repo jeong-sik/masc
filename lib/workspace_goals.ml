@@ -197,16 +197,57 @@ let emit_goal_event (ctx : context) ~goal_id ~event_type ~payload =
        ])
 ;;
 
-(* An edit to a goal's due date or priority moves no phase, so no other row
-   remembers the value it replaced, and a due date pushed back left no trace
-   (#39878). One row per edit holds only the fields that changed, each as
-   {from, to}. It records the edit and never refuses it. The edit is already
-   stored when the row is appended, so a row that cannot be appended does not
-   fail the edit: the error log carries the goal and the payload.
+let goal_snapshot_event_payload (ctx : context) ~store_version (goal : Goal_store.goal) =
+  (* The Goal encoder supplies the complete object snapshot. Attribution is
+     event metadata, so it is added here and is never stored on the Goal. *)
+  let fields = Goal_store.goal_to_yojson goal |> Yojson.Safe.Util.to_assoc in
+  `Assoc (("store_version", `Int store_version) :: ("actor", `String ctx.agent_name) :: fields)
+;;
+
+type goal_event_recording =
+  | Event_recorded
+  | Event_recording_failed of string
+
+(* The Goal write has committed before its audit projection runs. Report each
+   append separately: failure must neither reverse that success nor claim a
+   snapshot, phase or exact edit event reached the ledger. *)
+let record_committed_goal_event (ctx : context) ~goal_id ~event_type ~payload =
+  let recording =
+    try
+      emit_goal_event ctx ~goal_id ~event_type ~payload;
+      Event_recorded
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn ->
+      let detail = Printexc.to_string exn in
+      Log.Misc.error
+        "goal event recording failed after Goal commit goal_id=%s event_type=%s payload=%s detail=%s"
+        goal_id event_type (Yojson.Safe.to_string payload) detail;
+      Event_recording_failed detail
+  in
+  event_type, payload, recording
+;;
+
+let goal_event_recording_to_yojson (event_type, payload, recording) =
+  let fields =
+    match recording with
+    | Event_recorded -> [ "status", `String "recorded" ]
+    | Event_recording_failed detail ->
+      [ "status", `String "failed"; "error", `String detail; "payload", payload ]
+  in
+  `Assoc (("event_type", `String event_type) :: fields)
+;;
+
+(* An edit to a goal's due date or priority moves no phase. Its exact audit row
+   retains the values it replaced (#39878). One row per edit holds only the
+   fields that changed, each as
+   {from, to}. [previous] is the row returned from the same locked upsert,
+   never an earlier read or a neighboring event snapshot. The committed
+   event recorder reports a failed append without reversing the stored edit.
 
    The row is appended after the store's lock is released, so the file does not
    guarantee the order of two edits that overlap. *)
-let emit_goal_edit (ctx : context) ~(previous : Goal_store.goal) (goal : Goal_store.goal) =
+let goal_edit_event_payload (ctx : context) ~(previous : Goal_store.goal) (goal : Goal_store.goal) =
   let change field ~from_json ~to_json = field, `Assoc [ "from", from_json; "to", to_json ] in
   let due_date =
     if Option.equal String.equal previous.due_date goal.due_date
@@ -225,17 +266,8 @@ let emit_goal_edit (ctx : context) ~(previous : Goal_store.goal) (goal : Goal_st
       [ change "priority" ~from_json:(`Int previous.priority) ~to_json:(`Int goal.priority) ]
   in
   match due_date @ priority with
-  | [] -> ()
-  | changes ->
-    let payload = `Assoc (("actor", `String ctx.agent_name) :: changes) in
-    (try emit_goal_event ctx ~goal_id:goal.id ~event_type:"goal_edited" ~payload with
-     | Eio.Cancel.Cancelled _ as exn -> raise exn
-     | exn ->
-       Log.Misc.error
-         "goal edit not recorded after it was stored goal_id=%s payload=%s detail=%s"
-         goal.id
-         (Yojson.Safe.to_string payload)
-         (Printexc.to_string exn))
+  | [] -> None
+  | changes -> Some (`Assoc (("actor", `String ctx.agent_name) :: changes))
 ;;
 
 (* RFC-0387 stage 2: wake the goal verifier lane after a durable
@@ -354,7 +386,7 @@ let handle_goal_upsert ~tool_name ~start_time (ctx : context) args : Tool_result
     let target_value = get_string_opt args "target_value" in
     let due_date = get_string_opt args "due_date" in
     (match
-          Goal_store.upsert_goal
+          Goal_store.upsert_goal_with_revision
             ctx.config
             ?id
             ?title
@@ -362,7 +394,6 @@ let handle_goal_upsert ~tool_name ~start_time (ctx : context) args : Tool_result
             ?target_value
             ?due_date
             ?priority
-            ~owner:ctx.agent_name
             ()
         with
         | Error (Goal_store.Rejected msg) ->
@@ -375,48 +406,57 @@ let handle_goal_upsert ~tool_name ~start_time (ctx : context) args : Tool_result
         | Error (Goal_store.Persist_failed _ as error) ->
           error_result_typed ~tool_name ~start_time ~code:Internal_error
             (Goal_store.write_error_to_string error)
-        | Ok (goal, action) ->
-          let action_name =
+        | Ok (goal, action, store_version) ->
+          let action_name, event_type =
             match action with
-            | `created -> "created"
-            | `updated _ -> "updated"
+            | `created -> "created", "goal_created"
+            | `updated _ -> "updated", "goal_updated"
           in
-          (* A goal's creation emitted nothing, so goals.json -- which holds only
-             the current set -- was the only record that one ever existed. A goal
-             that finished and left the set left nothing behind to count or to
-             name, which is why "how many goals were opened" and "what were they"
-             had no answer (#35359). Phase transitions already emit; this closes
-             the other end of the same ledger. The payload is the goal as created
-             so its title outlives its row in the store. An update is not a second
-             beginning and emits no goal_created; an update that moves the phase
-             records a goal_phase event, and one that changes the due date or
-             priority records a goal_edited event. *)
-          (match action with
-           | `created ->
-             emit_goal_event ctx ~goal_id:goal.id ~event_type:"goal_created"
-               ~payload:(Goal_store.goal_to_yojson goal)
+          (* Every committed upsert attempts to record its caller and snapshot.
+             The title remains at payload.title for Goal history after the row
+             leaves the current store. *)
+          let snapshot_recording =
+            record_committed_goal_event ctx ~goal_id:goal.id ~event_type
+              ~payload:(goal_snapshot_event_payload ctx ~store_version goal)
+          in
+          let update_recordings = match action with
+           | `created -> []
            | `updated previous ->
              (* An edit to the success criterion takes a Verifying,
                 Awaiting_confirmation or Completed goal back to Executing
                 (Goal_store.upsert_goal). That is a phase move like any
                 other, so it enters the same ledger with the phase it left and
                 who moved it. *)
-             if previous.phase <> goal.phase then
-               emit_goal_event ctx ~goal_id:goal.id ~event_type:"goal_phase"
-                 ~payload:
-                   (`Assoc
-                      [ "phase", Goal_phase.to_yojson goal.phase
-                      ; "previous_phase", Goal_phase.to_yojson previous.phase
-                      ; "actor", `String ctx.agent_name
-                      ; "cause", `String "criterion_edit"
-                      ]);
-             emit_goal_edit ctx ~previous goal);
+             let phase_recordings =
+               if previous.phase <> goal.phase then
+                 [ record_committed_goal_event ctx ~goal_id:goal.id ~event_type:"goal_phase"
+                   ~payload:
+                     (`Assoc
+                        [ "phase", Goal_phase.to_yojson goal.phase
+                        ; "previous_phase", Goal_phase.to_yojson previous.phase
+                        ; "actor", `String ctx.agent_name
+                        ; "cause", `String "criterion_edit"
+                        ]) ]
+               else []
+             in
+             let edit_recordings =
+               match goal_edit_event_payload ctx ~previous goal with
+               | None -> []
+               | Some payload ->
+                 [ record_committed_goal_event ctx ~goal_id:goal.id
+                     ~event_type:"goal_edited" ~payload ]
+             in
+             phase_recordings @ edit_recordings
+          in
           ok_result
             ~tool_name
             ~start_time
             [ "action", `String action_name
             ; "goal_id", `String goal.id
             ; "goal", Goal_store.goal_to_yojson goal
+            ; "event_recordings", `List
+                (List.map goal_event_recording_to_yojson
+                   (snapshot_recording :: update_recordings))
             ; ( "task_goal_id_example"
               , `String
                   (Printf.sprintf
@@ -581,213 +621,6 @@ let announce_proof_verdict
       (Workspace_broadcast.broadcast_error_to_string error)
 ;;
 
-(* {1 Owner-directed Goal notices (#39571)}
-
-   A Goal records the Keeper that created it. Two events are worth one direct
-   notice to that owner: a refuted proof verdict, and a due date that passed
-   while the Goal is still executing or verifying. The notice is a Pending
-   Message in the owner's own transcript, not a fleet broadcast: the owner is
-   the one who must act, and a broadcast would put the same line in every
-   Keeper's window.
-
-   A Goal with no recorded owner has no recipient. The notice is skipped and
-   the screen keeps showing "unknown" so the operator can set an owner
-   explicitly; nothing is posted to the Board on the owner's behalf.
-
-   Delivery is idempotent by the [Goal_notification] key (goal id, owner, and
-   the one event). The same event, a retry after a failed send, or a restart
-   all reuse the key, so the owner's transcript gains exactly one row. The
-   Goal's marker is written only after the row is durably committed, so a
-   crash between the two re-sends and the append-once path keeps the count at
-   one. *)
-
-type goal_notice_kind =
-  | Refuted_notice
-  | Overdue_notice
-
-let goal_notice_key ~goal_id ~owner ~event = goal_id ^ "|" ^ owner ^ "|" ^ event
-
-let goal_notice_speaker : Keeper_chat_store.speaker =
-  { speaker_id = Some "goal-verifier"
-  ; speaker_name = Some "goal-verifier"
-  ; speaker_authority = Keeper_chat_store.External
-  }
-;;
-
-let deliver_goal_owner_notice config ~(goal : Goal_store.goal) ~event ~content =
-  match goal.Goal_store.owner with
-  | Goal_store.Unknown_owner -> Ok ()
-  | Goal_store.Owner owner ->
-    let delivery_key =
-      Keeper_chat_delivery_identity.Goal_notification
-        { goal_id = goal.Goal_store.id; owner; event }
-    in
-    let mentions =
-      match Keeper_identity.Keeper_id.of_string owner with
-      | Some keeper_id -> [ keeper_id ]
-      | None -> []
-    in
-    (match
-       Keeper_chat_store.append_user_message_once
-         ~base_dir:config.Workspace_utils_backend_setup.base_path
-         ~keeper_name:owner
-         ~delivery_key
-         ~content
-         ~surface:Surface_ref.Agent
-         ~speaker:goal_notice_speaker
-         ~extra_mentions:mentions
-         ()
-     with
-     | Ok _ -> Ok ()
-     | Error detail -> Error detail)
-;;
-
-let mark_goal_notice config ~goal_id kind ~key =
-  let apply (goal : Goal_store.goal) =
-    match kind with
-    | Refuted_notice -> { goal with Goal_store.notified_refuted_key = Some key }
-    | Overdue_notice -> { goal with Goal_store.notified_overdue_key = Some key }
-  in
-  match Goal_store.transact_goal config ~goal_id (fun goal -> Ok (apply goal, ())) with
-  | Ok _ -> ()
-  | Error error ->
-    Log.Misc.warn
-      "goal notice marker write failed goal_id=%s: %s"
-      goal_id
-      (Goal_store.write_error_to_string error)
-;;
-
-let refuted_notice_event (verdict : Goal_verification.verdict) =
-  "refuted:" ^ verdict.Goal_verification.request_id
-;;
-
-let refuted_notice_content ~(goal : Goal_store.goal)
-    (verdict : Goal_verification.verdict) =
-  Printf.sprintf
-    "[goal_verdict] %s — %s\noutcome: refuted\nevidence: %s"
-    goal.Goal_store.id
-    goal.Goal_store.title
-    verdict.Goal_verification.evidence
-;;
-
-(* Deliver the one refuted notice owed for [verdict] to [owner], then record the
-   marker. The marker is written only after the row is durably committed, so a
-   failed send leaves the debt outstanding for the next scan to retry. *)
-let deliver_refuted_notice config ~(goal : Goal_store.goal) ~owner
-    (verdict : Goal_verification.verdict) =
-  let event = refuted_notice_event verdict in
-  let key = goal_notice_key ~goal_id:goal.Goal_store.id ~owner ~event in
-  match
-    deliver_goal_owner_notice config ~goal ~event
-      ~content:(refuted_notice_content ~goal verdict)
-  with
-  | Ok () -> mark_goal_notice config ~goal_id:goal.Goal_store.id Refuted_notice ~key
-  | Error detail ->
-    Log.Misc.warn
-      "goal refuted owner notice failed goal_id=%s owner=%s: %s"
-      goal.Goal_store.id
-      owner
-      detail
-;;
-
-let notify_goal_refuted config ~(goal : Goal_store.goal)
-    (verdict : Goal_verification.verdict) =
-  match goal.Goal_store.owner with
-  | Goal_store.Unknown_owner -> ()
-  | Goal_store.Owner owner -> deliver_refuted_notice config ~goal ~owner verdict
-;;
-
-(* The overdue notice is judged by the server's periodic/restart scan, never as
-   a side effect of a list query: a read must not send. The scan is idempotent
-   — the marker skips an already-notified Goal, and the delivery key makes a
-   re-send a no-op — so it is safe to run on every maintenance tick.
-
-   A Goal is overdue once [now] is past its due date in UTC ({!Goal_due}); the
-   operator's time zone plays no part. A value that is not a due date is not
-   overdue. [now] is the wall clock unless a caller passes one. *)
-let scan_overdue_goal_notifications ?now config =
-  let now =
-    match now with
-    | Some now -> Some now
-    | None -> Ptime.of_float_s (Time_compat.now ())
-  in
-  match Goal_store.list_goals_result config (), now with
-  | Error _, _ | Ok _, None -> ()
-  | Ok goals, Some now ->
-    List.iter
-      (fun (goal : Goal_store.goal) ->
-         match goal.Goal_store.owner, goal.Goal_store.phase with
-         | Goal_store.Unknown_owner, _ -> ()
-         | Goal_store.Owner owner, (Goal_phase.Executing | Goal_phase.Verifying) ->
-           (match goal.Goal_store.due_date with
-            | Some due_date when Goal_due.is_overdue ~now (Goal_due.read (Some due_date)) ->
-              let event = "overdue:" ^ due_date in
-              let key = goal_notice_key ~goal_id:goal.Goal_store.id ~owner ~event in
-              if goal.Goal_store.notified_overdue_key = Some key
-              then ()
-              else (
-                let content =
-                  Printf.sprintf
-                    "[goal_overdue] %s — %s\ndue_date: %s\nphase: %s"
-                    goal.Goal_store.id
-                    goal.Goal_store.title
-                    due_date
-                    (Goal_phase.to_string goal.Goal_store.phase)
-                in
-                match deliver_goal_owner_notice config ~goal ~event ~content with
-                | Ok () ->
-                  mark_goal_notice config ~goal_id:goal.Goal_store.id Overdue_notice ~key
-                | Error detail ->
-                  Log.Misc.warn
-                    "goal overdue owner notice failed goal_id=%s owner=%s: %s"
-                    goal.Goal_store.id
-                    owner
-                    detail)
-            | _ -> ())
-         | Goal_store.Owner _, _ -> ())
-      goals
-;;
-
-(* A refuted verdict is delivered at commit time, but a failed send must not be
-   the owner's last chance to hear it. The same periodic/restart scan reconciles
-   the ledger's current refuted verdict against the Goal's marker: a send that
-   failed (no marker) is retried, and a Goal whose owner changed after the
-   verdict reaches the new owner because the key carries the owner. A verdict
-   whose criterion no longer matches the Goal is stale and is not re-sent. *)
-let scan_refuted_goal_notifications config =
-  match Goal_store.list_goals_result config () with
-  | Error _ -> ()
-  | Ok goals ->
-    (match Goal_verification.load_records_authoritative config with
-     | Error detail ->
-       Log.Misc.warn
-         "goal refuted owner notice scan skipped: verification ledger unreadable: %s"
-         detail
-     | Ok records ->
-       List.iter
-         (fun (goal : Goal_store.goal) ->
-            match goal.Goal_store.owner with
-            | Goal_store.Unknown_owner -> ()
-            | Goal_store.Owner owner ->
-              (match
-                 List.find_opt
-                   (fun (record : Goal_verification.record) ->
-                      String.equal record.Goal_verification.goal_id goal.Goal_store.id)
-                   records
-               with
-               | Some ({ Goal_verification.completion =
-                           Goal_verification.Proof_refuted verdict; _ } as record)
-                 when Goal_verification.relation_for_goal ~goal record
-                      = Goal_verification.Current ->
-                 let event = refuted_notice_event verdict in
-                 let key = goal_notice_key ~goal_id:goal.Goal_store.id ~owner ~event in
-                 if goal.Goal_store.notified_refuted_key = Some key
-                 then ()
-                 else deliver_refuted_notice config ~goal ~owner verdict
-               | Some _ | None -> ()))
-         goals)
-;;
-
 let gate_event_payload (ctx : context) ~phase (verdict : Goal_verification.verdict) =
   let outcome_fields =
     match verdict.outcome with
@@ -902,10 +735,7 @@ let commit_verifier_decision ?before_proof_commit ~tool_name ~start_time config
        if changed then (
          emit_goal_event ctx ~goal_id ~event_type:"goal_phase"
            ~payload:(gate_event_payload ctx ~phase:goal.phase verdict);
-         announce_proof_verdict ctx ~goal verdict;
-         (match verdict.outcome with
-          | Goal_verification.Refuted _ -> notify_goal_refuted config ~goal verdict
-          | Goal_verification.Proven -> ()));
+         announce_proof_verdict ctx ~goal verdict);
        ok_result ~tool_name ~start_time
          [ "goal_id", `String goal_id
          ; "action", `String (Goal_phase.action_to_string action)

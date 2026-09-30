@@ -27,7 +27,7 @@ let set_runtime_lane_candidates ?runtime_config_path ?expected_source_revision
    rendered once here instead of at every call below. *)
 let load_list_text ~config_path =
   Runtime.load_list ~config_path
-  |> Result.map_error (Runtime.to_diagnostic_text ~config_path)
+  |> Result.map_error (Runtime_config_error.to_diagnostic_text ~config_path)
 ;;
 
 module J = Yojson.Safe.Util
@@ -958,7 +958,7 @@ let check_first_run_lanes path runtime_id ~cli ~judges =
         match exact_lane with
         | Runtime.Verifier -> true
         | Runtime.Librarian | Runtime.Hitl_auto_judge | Runtime.Board_attention
-        | Runtime.Workspace_curator | Runtime.Browser_stagehand -> false
+        | Runtime.Workspace_curator | Runtime.Browser_stagehand | Runtime.Candle_appraiser -> false
       in
       let expected =
         if is_verifier && not judges
@@ -987,13 +987,17 @@ let check_first_run_lanes path runtime_id ~cli ~judges =
         Alcotest.(check (list string)) (id ^ " CLI slots") expected_cli lane.cli_slot_ids)
       (List.filter
          (function
-           | Runtime.Workspace_curator | Runtime.Browser_stagehand -> false
+           | Runtime.Workspace_curator | Runtime.Browser_stagehand | Runtime.Candle_appraiser -> false
            | Runtime.Librarian | Runtime.Hitl_auto_judge | Runtime.Board_attention
            | Runtime.Verifier -> true)
          Standalone_lane.all);
     Alcotest.(check bool) "shared-memory curator is explicitly configured" false
       (List.exists (fun (lane : Runtime_schema.exact_output_lane_decl) ->
-         String.equal lane.id "workspace_curator_exact") config.exact_output_lane_decls)
+         String.equal lane.id "workspace_curator_exact") config.exact_output_lane_decls);
+    Alcotest.(check bool) "Candle appraisal is explicitly configured" false
+      (List.exists (fun (lane : Runtime_schema.exact_output_lane_decl) ->
+         String.equal lane.id (Standalone_lane.to_id Standalone_lane.Candle_appraiser))
+         config.exact_output_lane_decls)
 ;;
 
 let test_first_run_runtime_binds_supporting_lanes () =
@@ -1814,14 +1818,14 @@ tools-support = true
         (String.concat "; " (List.map (fun e -> e.Runtime_toml.message) errors))
     | Ok config ->
       let binding = List.hd config.Runtime_schema.bindings in
-      (match Runtime.of_binding config binding with
+      (match Runtime_instance.of_binding config binding with
        | Error reason -> Alcotest.failf "relative inherited home dropped runtime: %s"
-           (Runtime.string_of_drop_reason reason)
+           (Runtime_config_error.string_of_drop_reason reason)
        | Ok runtime ->
          let expected = Filename.concat (Sys.getcwd ()) "relative-claude-account" in
          Alcotest.(check string) "runtime quota uses the selected child home"
            ("official:claude-code:home:" ^ expected)
-           (Runtime_quota_window.scope_to_string (Runtime.quota_scope_of_runtime runtime))));
+           (Runtime_quota_window.scope_to_string (Runtime_instance.quota_scope_of_runtime runtime))));
   Masc_test_deps.with_process_env "HOME" (Some "") (fun () ->
     Masc_test_deps.with_process_env "CODEX_HOME" (Some "") (fun () ->
       match Runtime_toml.parse_string
@@ -1850,17 +1854,17 @@ tools-support = true
           | Some b -> b
           | None -> Alcotest.fail ("missing binding " ^ id)
         in
-        (match Runtime.of_binding config (binding "codex") with
-            | Error (Runtime.Execution_unbuildable reason) ->
+        (match Runtime_instance.of_binding config (binding "codex") with
+            | Error (Runtime_config_error.Execution_unbuildable reason) ->
               Alcotest.(check bool) "selected account needs a real home" true
                 (String_util.contains_substring reason "account-home")
             | Error _ | Ok _ ->
               Alcotest.fail "selected official client without HOME gained a shared scope");
-        (match Runtime.of_binding config (binding "http") with
+        (match Runtime_instance.of_binding config (binding "http") with
          | Ok _ -> ()
          | Error reason ->
            Alcotest.failf "unrelated HTTP binding was rejected: %s"
-             (Runtime.string_of_drop_reason reason))))
+             (Runtime_config_error.string_of_drop_reason reason))))
 ;;
 
 (* The base file, loaded, with the official clients and [lane] written after
@@ -1947,6 +1951,24 @@ let test_an_official_client_joins_the_curator_cli_slots () =
        Alcotest.(check (list string)) "the curator's HTTP slots are unchanged"
          [ "openai.gpt" ]
          (exact_lane_slots path "workspace_curator_exact"))
+;;
+
+let test_candle_appraiser_is_explicitly_configured_with_both_transports () =
+  with_official_client_runtime_file (fun path ->
+    let lane = Standalone_lane.Candle_appraiser in
+    let lane_id = Standalone_lane.to_id lane in
+    Alcotest.(check bool) "appraisal does not block startup when absent" true
+      (Standalone_lane.obligation lane = Standalone_lane.Optional);
+    Runtime.set_exact_output_lane_slots ~runtime_config_path:path
+      ~lane ~slots:[ "openai.gpt" ] ()
+    |> lane_write_ok "configure Candle HTTP slot";
+    Runtime.append_exact_output_lane_slot ~runtime_config_path:path
+      ~lane ~slot:"codex.codex" ()
+    |> lane_write_ok "append Candle CLI fallback";
+    Alcotest.(check (list string)) "appraisal HTTP order survives the save"
+      [ "openai.gpt" ] (exact_lane_slots path lane_id);
+    Alcotest.(check (list string)) "appraisal CLI fallback survives the save"
+      [ "codex.codex" ] (exact_lane_cli_slots path lane_id))
 ;;
 
 (* A lane an official client's append creates declares [cli_slots] alone. The
@@ -2272,13 +2294,13 @@ let test_get_runtime_by_id_resolves_and_fails_fast () =
       "known id resolves to its runtime"
       (Some "openai.gpt")
       (Option.map
-         (fun (rt : Runtime.t) -> rt.Runtime.id)
+         (fun (rt : Runtime_instance.t) -> rt.Runtime_instance.id)
          (Runtime.get_runtime_by_id "openai.gpt"));
     Alcotest.(check (option string))
       "unknown id resolves to None (driver fails fast, no default substitution)"
       None
       (Option.map
-         (fun (rt : Runtime.t) -> rt.Runtime.id)
+         (fun (rt : Runtime_instance.t) -> rt.Runtime_instance.id)
          (Runtime.get_runtime_by_id "bogus.binding")))
 ;;
 
@@ -2291,10 +2313,10 @@ let test_get_runtime_by_id_resolves_and_fails_fast () =
 
 let provider_base_url_of_runtime_id runtime_id =
   match Runtime.get_runtime_by_id runtime_id with
-  | Some { Runtime.execution = Runtime_execution.Agent_core provider_config; _ } ->
+  | Some { Runtime_instance.execution = Runtime_execution.Agent_core provider_config; _ } ->
     provider_config.Llm_provider.Provider_config.base_url
   | Some rt ->
-    Alcotest.failf "fixture runtime %s is not agent_core" rt.Runtime.id
+    Alcotest.failf "fixture runtime %s is not agent_core" rt.Runtime_instance.id
   | None -> Alcotest.failf "fixture runtime %s missing from catalog" runtime_id
 ;;
 
@@ -2480,11 +2502,11 @@ let test_runtime_budget_source_survives_to_status_json () =
         (Keeper_context_runtime.max_context_resolution_error_to_string error)
     | Ok resolution ->
       (match resolution.Keeper_context_runtime.runtime_budget_source with
-       | Runtime.Override -> ()
-       | (Runtime.Capability | Runtime.Override_clamped_by_capability) as other ->
+       | Runtime_instance.Override -> ()
+       | (Runtime_instance.Capability | Runtime_instance.Override_clamped_by_capability) as other ->
          Alcotest.failf
            "expected the runtime.toml override source, got %s"
-           (Runtime.max_context_source_to_string other));
+           (Runtime_instance.max_context_source_to_string other));
       let json =
         Keeper_context_runtime.context_budget_json_of_resolution
           ~runtime_id:"openai.gpt"
@@ -3080,7 +3102,7 @@ let test_seed_of_thinking_support_gate_contract () =
 
 let test_max_output_tokens_accessor_projects_catalog () =
   let max_output_tokens id =
-    Option.bind (Runtime.get_runtime_by_id id) Runtime.max_output_tokens_of_runtime
+    Option.bind (Runtime.get_runtime_by_id id) Runtime_instance.max_output_tokens_of_runtime
   in
   with_runtime_thinking (fun () ->
     Alcotest.(check (option int))
@@ -3226,7 +3248,7 @@ let test_agent_core_provider_config_carries_effective_context_window () =
   with_runtime_thinking (fun () ->
     let provider_config_of runtime_id =
       match Runtime.get_runtime_by_id runtime_id with
-      | Some (rt : Runtime.t) ->
+      | Some (rt : Runtime_instance.t) ->
         (match rt.execution with
          | Runtime_execution.Agent_core config -> config
          | Runtime_execution.Codex_app_server _
@@ -3305,7 +3327,7 @@ let test_max_context_of_uncatalogued_model_keeps_runtime_declaration () =
         Alcotest.(check string)
           "source is the runtime.toml override, not a preset clamp"
           "override"
-          (Runtime.max_context_source_to_string source))
+          (Runtime_instance.max_context_source_to_string source))
 ;;
 
 let test_historical_qwen36_context_overflow_fixture_replays_provider_cap () =
@@ -3712,7 +3734,7 @@ let load_lane_config content =
   write_file path content;
   match Runtime.load_list ~config_path:path with
   | Ok loaded -> Ok loaded
-  | Error failure -> Error (Runtime.to_diagnostic_text ~config_path:path failure)
+  | Error failure -> Error (Runtime_config_error.to_diagnostic_text ~config_path:path failure)
 ;;
 
 let lane_named lanes name =
@@ -3828,15 +3850,15 @@ let test_a_cli_slot_naming_a_client_without_an_output_schema_channel_is_refused 
   write_file path config;
   match Runtime.load_list ~config_path:path with
   | Error
-      (Runtime.Exact_lane_cli_slot_unservable
+      (Runtime_config_error.Exact_lane_cli_slot_unservable
         { lane_id = "librarian_exact"
         ; slot_id
         ; provider_id = "muse_code"
-        ; reason = Runtime.Client_without_output_schema
+        ; reason = Runtime_config_error.Client_without_output_schema
         }) -> Alcotest.(check string) "the offending entry" muse_serve_runtime_id slot_id
   | Error failure ->
     Alcotest.failf "refused for another reason: %s"
-      (Runtime.to_diagnostic_text ~config_path:path failure)
+      (Runtime_config_error.to_diagnostic_text ~config_path:path failure)
   | Ok _ -> Alcotest.failf "a %s entry naming Muse Code loaded" field)
     ["cli_slots"; "slots"]
 ;;
@@ -4220,6 +4242,10 @@ let () =
             "multiple official client accounts stay distinct"
             `Quick
             test_multiple_official_client_accounts_are_distinct_runtimes
+        ; Alcotest.test_case
+            "Candle appraisal is explicitly configured with both transports"
+            `Quick
+            test_candle_appraiser_is_explicitly_configured_with_both_transports
         ; Alcotest.test_case
             "a CLI append to an undeclared lane writes only cli_slots"
             `Quick

@@ -96,14 +96,14 @@ let model_checks config_path =
        from the constructor. *)
     None, None,
     [check Runtime_configuration Invalid
-       (Runtime.to_operator_text ~config_path failure)
+       (Runtime_config_error.to_operator_text ~config_path failure)
        [Inspect_configuration; Configure_models]]
   | Ok (runtimes, default, assignments, _, lanes) ->
     let loaded = check Runtime_configuration Satisfied "runtime.toml loads." [Configure_models] in
     let selected = Runtime_verification.initial_runtime_id
       ~default_runtime_id:default.id ~assignments ~lanes ~keeper_name:"imp" in
     let runtime = Option.bind selected (fun id ->
-      List.find_opt (fun (runtime : Runtime.t) -> String.equal runtime.id id) runtimes) in
+      List.find_opt (fun (runtime : Runtime_instance.t) -> String.equal runtime.id id) runtimes) in
     match runtime with
     | None ->
       (* A loaded list has validated every assignment, lane candidate and the

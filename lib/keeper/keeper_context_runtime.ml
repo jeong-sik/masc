@@ -64,7 +64,7 @@ type max_context_resolution = {
      runtime.toml override, or that override clamped by the capability.
      Dropping this rendered a runtime.toml override as "runtime_provider_cap" in keeper status JSON,
      disguising the #25463 config drift as a provider fact. *)
-  runtime_budget_source : Runtime.max_context_source;
+  runtime_budget_source : Runtime_instance.max_context_source;
   requested_context_window : int;
   effective_budget : int;
 }
@@ -116,7 +116,7 @@ let context_budget_json_of_resolution
      key provider_context_window, which disguised the #25463 262144 config
      drift as a provider fact for weeks. *)
   let runtime_budget_source =
-    Runtime.max_context_source_to_string resolution.runtime_budget_source
+    Runtime_instance.max_context_source_to_string resolution.runtime_budget_source
   in
   `Assoc
     [ ("runtime_id", `String runtime_id)
@@ -181,13 +181,13 @@ let generate_trace_id = Keeper_identity.generate_trace_id
 
 let resolve_max_context_resolution_for_runtime
       ~requested_override
-      (runtime : Runtime.t)
+      (runtime : Runtime_instance.t)
   =
   match requested_override with
   | Some requested when requested <= 0 ->
     Error (Invalid_requested_context_override requested)
   | Some _ | None ->
-    (match Runtime.resolve_max_context_of_runtime runtime with
+    (match Runtime_instance.resolve_max_context_of_runtime runtime with
      | None ->
        Error (Runtime_context_window_unavailable { runtime_id = runtime.id })
      | Some (runtime_budget, runtime_budget_source) ->

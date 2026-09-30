@@ -1,234 +1,60 @@
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/pr-check-run-contract.sh" || return 1
-# Read-only workflow/check gate shared by approval and the final merge read.
-# Caller supplies GH, repo, pr, head and gitdir. On success wf, wf_ids, n_runs,
-# dispatch_skips and ignored_release_run_suites describe the admitted checks
-# for the approval receipt.
-# Status 1 means an API read failed; status 2 means the checks refuse the write.
+# Live PR identity and release evidence shared by approval and merge.
+# Ordinary stacks are reviewed from source; only release/v* heads require CI.
 ci_gh_json() {
-  local out
-  if ! out="$("$GH" api --paginate "$1" --jq "$2" 2>&1)"; then
-    echo "approve-guard: gh api $1 failed: $out" >&2; return 1
-  fi
-  printf '%s' "$out"
+  "$GH" api --paginate "$1" --jq "$2"
 }
 
-ci_dispatch_only_job() { # job name; immutable workflow text on stdin
-  # Recognize only the repository's single-line positive equality form, with
-  # optional conjunctions. This is deliberately not a YAML/expression parser:
-  # OR, negation, multiline/quoted conditions and unknown shapes refuse. Step
-  # text and comments cannot supply a job-level condition.
-  python3 -c '
-import re, sys
-header = "  " + sys.argv[1] + ":"
-active, conditions = False, []
-for line in sys.stdin.read().splitlines():
-    if line == header:
-        active = True
-        continue
-    if not active:
-        continue
-    if line and not line.startswith("    ") and not line.lstrip().startswith("#"):
-        break
-    if line.startswith("    if:"):
-        conditions.append(line[len("    if:"):].strip())
-if len(conditions) != 1:
-    raise SystemExit(1)
-condition = conditions[0]
-pattern = r"\$\{\{\s*github\.event_name\s*==\s*([\x27\x22])workflow_dispatch\1\s*(?:&&\s*.+)?\s*\}\}"
-raise SystemExit(0 if "||" not in condition and re.fullmatch(pattern, condition) else 1)
-' "$1"
-}
-
-ci_current_pr_branch() {
-  local row state draft base current merged branch
-  row="$(ci_gh_json "repos/${repo}/pulls/${pr}" '[.state, (.draft|tostring), .base.ref, .head.sha, (.merged|tostring), (.head.ref // "")] | @tsv')" || return 1
-  IFS=$'\t' read -r state draft base current merged branch <<<"$row"
-  if [ "$state" != open ] || [ "$draft" != false ] || [ "$base" != main ] ||
-     [ "$current" != "$head" ] || [ "$merged" != false ] || [ -z "$branch" ]; then
-    echo "REFUSED #${pr} head ${head}" >&2
-    [ "$state" = open ] && [ "$merged" = false ] || echo "  - PR state is '$state' (merged=$merged)" >&2
-    [ "$draft" = false ] || echo "  - PR is Draft or draft state is unavailable" >&2
-    [ "$base" = main ] || echo "  - base is '$base', not main" >&2
-    [ "$current" = "$head" ] || echo "  - head moved: PR head is $current" >&2
-    [ -n "$branch" ] || echo "  - current PR branch unavailable" >&2
+read_current_pr() {
+  local row
+  row=$(ci_gh_json "repos/$repo/pulls/$pr" '[.state, (.draft|tostring), .base.ref, .head.sha, (.merged|tostring), .head.ref, .user.login, .base.sha, ((.stack // null)|tojson)] | @tsv') || return 1
+  IFS=$'\t' read -r pr_state pr_draft pr_base pr_current pr_branch_merged pr_branch pr_author pr_base_sha pr_stack <<<"$row"
+  if [ "$pr_state" != open ] || [ "$pr_draft" != false ] || [ "$pr_branch_merged" != false ] ||
+     [ "$pr_current" != "$head" ] || [ -z "$pr_base" ] || [ -z "$pr_branch" ] || [ -z "$pr_author" ]; then
+    echo "REFUSED #$pr: require open, ready PR on exact head $head" >&2
     return 2
   fi
-  printf '%s' "$branch"
+  if [ -n "${review_identity:-}" ] && [ "$review_identity" != "$row" ]; then
+    echo "REFUSED #$pr: PR head, base or identity moved during review" >&2
+    return 2
+  fi
+  review_identity="$row"
+  review_policy=source
+  case "$pr_branch" in release/v*) review_policy=release;; esac
 }
 
 check_current_ci() {
-  local ci_reasons=()
-  local ci_branch ci_end_branch unrelated_suites active_suites
-  ci_branch="$(ci_current_pr_branch)" || return $?
-# ---- 3. workflow runs on this exact SHA (catches queued workflows) ----
-# One SHA can carry several runs of one workflow: a run cancelled by a
-# concurrency group, or a failed run followed by a reopen or a dispatch that
-# passed. Only the newest run of each workflow/event says what it thinks
-# of this SHA now -- the same rule section 4 applies per check name.
-# A cancelled run says nothing about the SHA; it lost a concurrency race. On
-# #39049 (2026-09-25) runs 14708 (success) and 14709 (cancelled) of one
-# workflow started in the same second, so the newest number was the cancelled
-# twin. A cancelled run is therefore ranked below every run that is not
-# cancelled; it decides only when every run of that workflow was cancelled,
-# and then the guard refuses. A newer queued or in-progress run still outranks
-# an older finished one.
-# sort+awk rather than an associative array: lanes may run bash 3.2.
-wf_all="$(ci_gh_json "repos/${repo}/actions/runs?head_sha=${head}&per_page=100" '.workflow_runs[] | [(.workflow_id|tostring), (if .conclusion == "cancelled" then "0" else "1" end), (.run_number|tostring), (.name // "-"), .status, (.conclusion // "none"), (.id|tostring), ((.check_suite_id // 0)|tostring), (.event // "none"), (.path // "-"), (.head_branch // "-"), (.head_sha // "-"), (.created_at // "-"), ([.pull_requests[]?.number | tostring] | join(","))] | @tsv')" || return 1
-# Different PR branches may share a SHA. Bind PR-event rows before picking
-# a newest run, and discard their suites as well as superseded/cancelled ones.
-# Empty associations require the event branch; ci-freshness validates the cited
-# run's suite linkage independently. Non-PR workflows keep their existing gate.
-unrelated_suites="$(printf '%s\n' "$wf_all" | awk -F '\t' -v branch="$ci_branch" -v pr="$pr" '
-  NF && $9=="pull_request" && ($11!=branch || ($14!="" && $14!=pr)) {
-    if ($8!="0") printf "%s ", $8
-  }')"
-wf_all="$(printf '%s\n' "$wf_all" | awk -F '\t' -v branch="$ci_branch" -v pr="$pr" '
-  NF && ($9!="pull_request" || ($11==branch && ($14=="" || $14==pr)))')"
-if ! printf '%s\n' "$wf_all" | awk -F '\t' '
-  $9=="pull_request" && $10==".github/workflows/pr-check.yml" { found=1 }
-  END { exit !found }'; then
-  ci_reasons+=("no PR-check workflow run for PR ${pr} branch ${ci_branch}")
-fi
-# Classify only candidate-owned suites, after excluding another same-SHA PR.
-runs="$(ci_gh_json "repos/${repo}/commits/${head}/check-runs?per_page=100" "$PR_CHECK_CHECKS_JQ")" || return 1
-runs="$(printf '%s\n' "$runs" | awk -F '\t' -v ignored="$unrelated_suites" 'BEGIN {n=split(ignored,a," "); for(i=1;i<=n;i++) drop[a[i]]=1} NF && !($5 in drop)')"
-pr_check_classify "$repo" "$head" "$wf_all" "$runs" ci_gh_json || return 1
-[ -z "$PR_CHECK_INVALID" ] || ci_reasons+=("$PR_CHECK_INVALID")
-if [ -n "$PR_CHECK_DRAFT_RUNS$PR_CHECK_CANCELLED_RUNS" ]; then
-  [ "$PR_CHECK_READY_OK" = yes ] || ci_reasons+=("Draft snapshot exclusion requires six successful checks in the selected Ready PR-check suite")
-  wf_all="$(printf '%s\n' "$wf_all" | awk -F '\t' -v ignored="$PR_CHECK_DRAFT_RUNS $PR_CHECK_CANCELLED_RUNS" 'BEGIN {n=split(ignored,a," "); for(i=1;i<=n;i++) drop[a[i]]=1} NF && !($7 in drop)')"
-fi
-# A failed manual Release run is ignorable only when the validator itself
-# recorded the intended ref refusal. A runner/setup failure on the same ref
-# must remain a failed workflow. The four jobs are fixed by release.yml; any
-# missing, unexpected, or non-skipped downstream job fails closed.
-ignored_release_dispatches=""
-release_candidates="$(printf '%s\n' "$wf_all" | awk -F '\t' -v ref="$ci_branch" 'NF && $5 == "completed" && $6 != "success" && $9 == "workflow_dispatch" && $10 == ".github/workflows/release.yml" && $11 == ref && ref !~ /^release\/v/ { print $7 "\t" $8 }')"
-while IFS=$'\t' read -r release_run release_suite; do
-  [ -n "${release_run:-}" ] || continue
-  validator_id="$(ci_gh_json "repos/${repo}/actions/runs/${release_run}/jobs?per_page=100" '.jobs as $jobs | if ([$jobs[] | .name] | sort) == (["Validate manual Release ref", "release-body", "build", "release"] | sort) and ([$jobs[] | select(.name == "Validate manual Release ref" and .status == "completed" and .conclusion == "failure" and ([.steps[]? | select(.name == "Refuse unsupported manual ref" and .status == "completed" and .conclusion == "failure")] | length) == 1)] | length) == 1 and ([$jobs[] | select(.name != "Validate manual Release ref" and (.status != "completed" or .conclusion != "skipped"))] | length) == 0 then $jobs[] | select(.name == "Validate manual Release ref") | .id else empty end')" || return 1
-  [ -n "$validator_id" ] || continue
-  marker="$(ci_gh_json "repos/${repo}/check-runs/${validator_id}/annotations?per_page=100" '[.[] | select(.annotation_level == "failure" and .title == "MASC_RELEASE_REF_REJECTED" and (.message | startswith("Manual Release is limited to tags and release/v* branches.")))] | length')" || return 1
-  [ "$marker" = "1" ] || continue
-  ignored_release_dispatches="${ignored_release_dispatches}${release_run}"$'\t'"${release_suite}"$'\n'
-done <<<"$release_candidates"
-ignored_release_run_suites="$(printf '%s\n' "$ignored_release_dispatches" | awk -F '\t' 'NF { if (ids != "") ids = ids ","; ids = ids $1 "/" $2 } END { print ids }')"
-ignored_release_suites="$(printf '%s\n' "$ignored_release_dispatches" | awk -F '\t' 'NF && $2 != "0" { printf "%s ", $2 }')"
-wf_all="$(printf '%s\n' "$wf_all" | awk -F '\t' -v ignored="$ignored_release_run_suites" 'BEGIN { n=split(ignored, a, ","); for (i=1;i<=n;i++) { split(a[i], p, "/"); if (p[1] != "") drop[p[1]]=1 } } NF && !($7 in drop)')"
-wf_all="$(printf '%s\n' "$wf_all" | sort -t "$(printf '\t')" -k1,1 -k2,2nr -k3,3nr)"
-wf="$(printf '%s\n' "$wf_all" | awk -F '\t' 'NF && !seen[$1 SUBSEP $9]++')"
-# Event kinds remain separate: a newer workflow_dispatch success is not a
-# replacement for this PR event's failure on a multi-event workflow.
-# Which suite belongs to which event and workflow file: section 4 needs it to
-# tell a by-design skipped dispatch job from a skipped one that should have run.
-suite_kinds="$(printf '%s\n' "$wf_all" | awk -F '\t' 'NF && $8 + 0 != 0 { print $8 "\t" $9 "\t" $10 }')"
-# The check suites of the runs that lost (older, or cancelled twins). Their
-# check-runs are dropped in section 4: #39049's cancelled twin run 14709 owned
-# the newest suite (97837801954) and all five of its check-runs were skipped.
-lost_suites="${unrelated_suites}$(printf '%s\n' "$wf_all" | awk -F '\t' 'NF && seen[$1 SUBSEP $9]++ && $8 != "0" {printf "%s ", $8}')"
-wf_ids=()
-while IFS=$'\t' read -r _wid _rank _num name status concl id _suite; do
-  [ -n "${name:-}" ] || continue
-  wf_ids+=("$id")
-  if [ "$status" != "completed" ] || [ "$concl" != "success" ]; then
-    ci_reasons+=("workflow '${name}' run ${id} is ${status}/${concl}")
+  read_current_pr || return $?
+  release_run=""
+  [ "$review_policy" = release ] || return 0
+  local rows selected status conclusion sha branch path jobs required
+  rows=$(ci_gh_json "repos/$repo/actions/runs?head_sha=$head&per_page=100" '.workflow_runs[] | select(.path == ".github/workflows/release-candidate.yml" or .path == ".github/workflows/release.yml") | [.id, .status, (.conclusion // "none"), .head_sha, .head_branch, .path] | @tsv') || return 1
+  selected=$(printf '%s\n' "$rows" | awk -F '\t' -v sha="$head" -v branch="$pr_branch" '$4==sha && $5==branch' | sort -t "$(printf '\t')" -k1,1nr | head -n 1)
+  IFS=$'\t' read -r release_run status conclusion sha branch path <<<"$selected"
+  if [ -z "$release_run" ] || [ "$status" != completed ] || [ "$conclusion" != success ] ||
+     { [ -n "${run:-}" ] && [ "$run" != "$release_run" ]; }; then
+    echo "REFUSED #$pr: release requires the latest completed successful exact-head Release/RC run" >&2
+    return 2
   fi
-done <<<"$wf"
-[ ${#wf_ids[@]} -gt 0 ] || ci_reasons+=("no workflow runs for ${head}")
-# Required jobs must exist in the admitted PR-check run itself. Other workflows
-# and successful subsets cannot supply a deleted or renamed required job.
-while IFS=$'\t' read -r required_run; do
-  [ -n "$required_run" ] || continue
-  required_jobs="$(ci_gh_json "repos/${repo}/actions/runs/${required_run}/jobs?per_page=100" '.jobs[] | [.name, .status, (.conclusion // "none"), (.id|tostring)] | @tsv')" || return 1
-  required_jobs="$(printf '%s\n' "$required_jobs" | sort -t "$(printf '\t')" -k1,1 -k4,4nr | awk -F '\t' 'NF && !seen[$1]++')"
-  for required_name in "lint suite" "dune build @check" "dune build --profile release @check" "dashboard typecheck" "TLA model check"; do
-    if ! printf '%s\n' "$required_jobs" | awk -F '\t' -v name="$required_name" '$1==name && $2=="completed" && $3=="success" { found=1 } END { exit !found }'; then
-      ci_reasons+=("required PR-check job '${required_name}' missing or not successful in run ${required_run}")
-    fi
-  done
-done <<<"$(printf '%s\n' "$wf" | awk -F '\t' '$9=="pull_request" && $10==".github/workflows/pr-check.yml" { print $7 }')"
-
-
-# ---- 4. check-runs on this exact SHA ----
-# One SHA can carry several check-runs of one name: a Draft-time suite whose
-# jobs were skipped, then the suite that ran after ready_for_review; or a
-# failed run followed by a re-run. The API returns every suite's rows, not one
-# per name, so only the row from the newest suite says what that check thinks
-# of this SHA now. The newest suite is the highest check_suite id, not the
-# highest check-run id: on #39046 (2026-09-25) the Draft-time skipped row of
-# 'dune build @check' had check-run id 108051996594, above the Ready-time
-# success 108051995088, while its suite 97836272095 was older than 97836300496.
-# Within one suite (a re-run), the higher check-run id is the newer row.
-# sort+awk rather than an associative array: lanes may run bash 3.2.
-# Rows from a suite whose workflow run lost in section 3 never count.
-runs="$(printf '%s\n' "$runs" | awk -F '\t' -v lost="$lost_suites" -v ignored="$ignored_release_suites $PR_CHECK_DRAFT_SUITES $PR_CHECK_CANCELLED_SUITES" 'BEGIN { n = split(lost, l, " "); for (i = 1; i <= n; i++) if (l[i] != "") drop[l[i]] = 1; n = split(ignored, x, " "); for (i = 1; i <= n; i++) if (x[i] != "") drop[x[i]] = 1 } NF && !($5 in drop)')"
-# Classification used started_at; the workflow/event key below is column six.
-runs="$(printf '%s\n' "$runs" | cut -f1-5)"
-# A multi-event workflow may use the same check name in PR and dispatch
-# suites. Keep the newest check in each admitted workflow/event, so a dispatch
-# success cannot replace a PR failure. Checks without a workflow suite retain
-# the original newest-suite-per-name rule.
-active_suites="$(printf '%s\n' "$wf" | awk -F '\t' 'NF && $8!="0" { printf "%s:%s:%s ", $8, $1, $9 }')"
-runs="$(printf '%s\n' "$runs" | awk -F '\t' -v keys="$active_suites" '
-  BEGIN {
-    OFS=FS; n=split(keys, rows, " ")
-    for (i=1; i<=n; i++) if (split(rows[i], fields, ":")==3) owner[fields[1]]=fields[2] ":" fields[3]
-  }
-  NF { print $0, ($5 in owner ? owner[$5] : "unlinked") }
-' | sort -t "$(printf '\t')" -k1,1 -k6,6 -k5,5nr -k4,4nr | awk -F '\t' '
-  BEGIN { OFS=FS }
-  NF && !seen[$1 SUBSEP $6]++ { print $1,$2,$3,$4,$5 }')"
-# A skipped row of the newest suite is a refusal, except when the job is one
-# the pull_request event never runs: its `if:` requires workflow_dispatch
-# (#38873, 2026-09-25: compare-tui exists only to be dispatched, so every PR
-# run of that workflow carries it skipped). Narrow on purpose: a required job
-# whose `if:` misfires still refuses, so this cannot turn a broken check
-# green. Read the workflow at the immutable candidate head, never the caller's
-# checkout (which may still hold main's old condition). Only a pull_request
-# suite receives an exemption; a dispatch suite owns the job's real verdict.
-dispatch_skips=""
-n_runs=0; run_ids=()
-while IFS=$'\t' read -r name status concl id suite; do
-  [ -n "${name:-}" ] || continue
-  if [ "$status" = "completed" ] && [ "$concl" = "skipped" ]; then
-    suite_event="$(printf '%s\n' "$suite_kinds" | awk -F '\t' -v s="$suite" '$1 == s { print $2; exit }')"
-    if [ "$suite_event" = "pull_request" ]; then
-      # The check-run does not name its workflow file; find it from the runs
-      # of this suite that section 3 already read.
-      suite_path="$(printf '%s\n' "$suite_kinds" | awk -F '\t' -v s="$suite" '$1 == s { print $3; exit }')"
-      # Freshness later also fetches missing objects, but this gate runs
-      # first. Preserve main-only clone support without checking out any ref.
-      if ! git -C "$gitdir" cat-file -e "$head^{commit}" 2>/dev/null; then
-        if ! git -C "$gitdir" fetch --quiet --no-tags origin "$head" 2>/dev/null; then
-          echo "approve-guard: candidate workflow object unavailable for $head" >&2
-          return 1
-        fi
-      fi
-      if [ -n "$suite_path" ] && \
-         wf_source="$(git -C "$gitdir" show "$head:$suite_path" 2>/dev/null)" && \
-         printf '%s\n' "$wf_source" | ci_dispatch_only_job "$name"; then
-        dispatch_skips="$dispatch_skips $name"
-        continue
-      fi
-    fi
+  case "$path" in
+    .github/workflows/release-candidate.yml)
+      required="compile / Release checks passed|behavior / test suite|installation / release|Record candidate verification";;
+    .github/workflows/release.yml)
+      required="verification / Release checks passed|behavior / test suite|release";;
+    *) return 2;;
+  esac
+  jobs=$(ci_gh_json "repos/$repo/actions/runs/$release_run/jobs?per_page=100" '.jobs[] | [.name, .status, (.conclusion // "none"), .id] | @tsv') || return 1
+  jobs=$(printf '%s\n' "$jobs" | sort -t "$(printf '\t')" -k1,1 -k4,4nr | awk -F '\t' 'NF && !seen[$1]++')
+  # Reusable workflows deliberately skip publishing-only branches during an
+  # RC. Require the full verification summaries, not every optional job.
+  if ! printf '%s\n' "$jobs" | awk -F '\t' -v required="$required" '
+    BEGIN {n=split(required,names,"[|]"); for(i=1;i<=n;i++) wanted[names[i]]=1}
+    NF {
+      if ($2!="completed" || ($3!="success" && $3!="skipped")) bad=1
+      if ($1 in wanted && $2=="completed" && $3=="success") passed[$1]=1
+    }
+    END {for(name in wanted) if(!(name in passed)) bad=1; exit bad}'; then
+    echo "REFUSED #$pr: full Release/RC verification jobs are missing or not successful" >&2
+    return 2
   fi
-  n_runs=$((n_runs+1)); run_ids+=("$id")
-  if [ "$status" != "completed" ] || [ "$concl" != "success" ]; then
-    ci_reasons+=("check '${name}' is ${status}/${concl} (check-run ${id})")
-  fi
-done <<<"$runs"
-[ "$n_runs" -gt 0 ] || ci_reasons+=("no check-runs on ${head} (empty is not green)")
-if [ ${#ci_reasons[@]} -ne 0 ]; then
-  echo "REFUSED #${pr} head ${head}" >&2
-  printf '  - %s\n' "${ci_reasons[@]}" >&2
-  return 2
-fi
-# Checks can take several reads. Finish on the same live PR identity/state as
-# they started; at the final gate, callers then write without another API read.
-# Separate reads still cannot supply an atomic GitHub state/checks CAS.
-ci_end_branch="$(ci_current_pr_branch)" || return $?
-if [ "$ci_end_branch" != "$ci_branch" ]; then
-  echo "REFUSED #${pr} head ${head}: PR branch moved during check" >&2
-  return 2
-fi
+  read_current_pr
 }

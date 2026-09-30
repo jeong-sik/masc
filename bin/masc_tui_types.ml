@@ -5751,7 +5751,9 @@ type state = {
   mutable keeper_roster: Masc_tui_keeper_control.roster;
   mutable keeper_roster_error: string option;
   mutable candle_observation: (Candle_observation.t, string) result option;
-  mutable candle_authority_generation : int;
+  (* A scoped roster read belongs to this observed workspace incarnation.
+     Replace on authority withdrawal; returning to the same paths is new. *)
+  mutable candle_read_authority: unit ref;
   mutable keeper_action_inflight:
     (string * Masc_tui_keeper_control.action) option;
   mutable keeper_action_pending: Masc_tui_keeper_control.pending option;
@@ -8230,7 +8232,7 @@ let create_state
   keeper_roster = Masc_tui_keeper_control.Roster_unobserved;
   keeper_roster_error = None;
   candle_observation = None;
-  candle_authority_generation = 0;
+  candle_read_authority = ref ();
   keeper_action_inflight = None;
   keeper_action_pending = None;
   keeper_action_serial = 0;

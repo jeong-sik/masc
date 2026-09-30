@@ -3551,7 +3551,7 @@ let test_production_turn_records_its_keeper_as_the_failure_recorder () =
         | Some runtime -> runtime | None -> fail "the Codex runtime resolves" in
       recorded_by :=
         (match Runtime_candidate_backpressure.candidate_backpressure
-                 ~now:(Unix.gettimeofday ()) ~candidate:runtime.Runtime.candidate_backpressure with
+                 ~now:(Unix.gettimeofday ()) ~candidate:runtime.Runtime_instance.candidate_backpressure with
          | Some
              { Runtime_candidate_backpressure.failed_attempt =
                  Some (Runtime_candidate_backpressure.Failed_attempt { recorded_by; _ })

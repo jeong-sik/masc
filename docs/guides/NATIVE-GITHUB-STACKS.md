@@ -65,9 +65,14 @@ Do not use `--admin` or `--auto`.
 
 The API's `sha` pins the selected head, not a client-supplied vector of all lower
 heads. The final snapshot reduces races but is not an atomic all-head lock.
-GitHub's server-side checks still apply. Capture the request response and returned
-status URL. Acceptance is not a successful merge: at a work boundary, read that
-status and confirm each included PR's merged state and merge commit. Report
+GitHub's server-side checks still apply. Capture the response's `details.uuid` and retrieve its result:
+
+```bash
+gh api repos/OWNER/REPO/pulls/NUMBER/merge-async/UUID
+```
+
+Acceptance is not a successful merge: at a work boundary, read that result and
+confirm each included PR's merged state and merge commit. Report
 queued, in progress, failed and merged distinctly; do not resubmit an uncertain
 operation before reading its result. A stack operation is atomic for its included
 group, as described in the official API contract.

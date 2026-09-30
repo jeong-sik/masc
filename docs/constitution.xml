@@ -368,7 +368,7 @@
       코딩 에이전트는 merge-guard.sh 를 --check 로 사용한다. Native Stack 의 실제 병합은
       전체 포함 범위가 승인된 경우 PUT pulls/{number}/merge-async 에 선택한 현재 head 를 sha 로 전달한다.
       일반 PR 의 실제 병합은 gh pr merge --match-head-commit (현재 head) 로 한다.
-      비동기 접수와 완료를 구분하고 반환된 상태 경로 및 각 PR 의 merged 상태·병합 커밋을 확인한다.
+      비동기 접수와 완료를 구분하고 반환된 details.uuid 의 비동기 결과 및 각 PR 의 merged 상태·병합 커밋을 확인한다.
       --auto 와 --admin 을 쓰지 않는다. 구체 절차는 docs/guides/NATIVE-GITHUB-STACKS.md 를 따른다.
     </merge>
   </execution_protocol>

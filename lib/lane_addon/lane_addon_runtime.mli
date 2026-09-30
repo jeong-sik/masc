@@ -6,6 +6,23 @@ val error_to_string : error -> string
 val register_delivery_handler :
   (config:Workspace.config -> caller:string -> keeper_name:string -> prompt:string ->
     (Yojson.Safe.t, string) result) -> unit
+type fleet_backend = {
+  snapshot : config:Workspace.config -> caller:string -> (Lane_addon_broadcast_delivery.sender_authority * string list,string) result;
+  project : config:Workspace.config -> sender_authority:Lane_addon_broadcast_delivery.sender_authority -> delivery:Workspace_broadcast.broadcast_delivery ->
+    recipient:string -> (unit,string) result;
+}
+val register_fleet_backend : fleet_backend -> unit
+(** Install trusted host roster capture and idempotent single-recipient projection.
+    Snapshot is captured before durable admission, never on retry. *)
+val recover_fleet : config:Workspace.config -> sw:Eio.Switch.t -> (unit,string) result
+(** Scan durable intentions and schedule independent commit/recipient jobs on
+    the supplied server-root switch. Returns after scheduling, without waiting
+    for recipient I/O. Repeated scans share each operation/recipient's in-flight
+    owner. Job failures remain durable pending obligations and are logged;
+    cancellation releases ownership so the next service can retry. *)
+val start_fleet_service : config:Workspace.config -> sw:Eio.Switch.t -> clock:_ Eio.Time.clock -> unit
+(** Server-root Pulse owns reconciliation and retry. Failed recipients remain
+    pending; a committed message is only read, never republished if missing. *)
 val dispatch : ?caller:string -> ?access:Lane_addon_sources.access -> config:Workspace.config -> operation:operation -> Yojson.Safe.t ->
   (Yojson.Safe.t, error) result
 (** No I/O and no package callback. Runs on the root-switch owner domain: a

@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { EQUIPMENT_IDS } from './schemas/keeper-portrait'
-import { parseKeeperItems } from './keeper-items'
+import { fetchKeeperItems, parseKeeperItems } from './keeper-items'
 
 const revision = 'a'.repeat(64)
 const catalog = Object.entries(EQUIPMENT_IDS).flatMap(([slot, ids]) =>
@@ -69,5 +69,26 @@ describe('Keeper Item account wire', () => {
       expect(crown.price_milli).toBe(amount)
       expect(parsed.catalog.find(item => item.id === 'book')).toMatchObject({ price_status: 'unpriced' })
     }
+  })
+})
+
+afterEach(() => vi.unstubAllGlobals())
+
+describe('Keeper Item request workspace authority', () => {
+  it('sends the captured canonical workspace even before a replacement is observed', async () => {
+    const expected = '/captured/workspace A & exact'
+    const server = '/replacement/workspace B'
+    const fetch = vi.fn(async (input: string) => {
+      const request = new URL(input, 'http://fixture.invalid')
+      expect(request.pathname).toBe('/api/v1/keepers/rondo/items')
+      expect(request.searchParams.get('expected_workspace')).toBe(expected)
+      return new Response(JSON.stringify({ error: 'Server workspace changed' }), {
+        status: request.searchParams.get('expected_workspace') === server ? 200 : 409,
+        headers: { 'content-type': 'application/json' },
+      })
+    })
+    vi.stubGlobal('fetch', fetch)
+    await expect(fetchKeeperItems('rondo', expected)).rejects.toMatchObject({ status: 409 })
+    expect(fetch).toHaveBeenCalledTimes(1)
   })
 })

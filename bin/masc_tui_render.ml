@@ -7019,7 +7019,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
     in
     let account =
       match state.item_account with
-      | Some (name, account) when String.equal name k.k_name -> Some account
+      | Some (name, (_, account)) when String.equal name k.k_name -> Some account
       | Some _ | None -> None
     in
     let milli value = Printf.sprintf "%d.%03d" (value / 1000) (value mod 1000) in

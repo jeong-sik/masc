@@ -1637,6 +1637,7 @@ def keeper_runtime_http_fixtures(
                     "runtime_id": alpha_runtime_id,
                     "runtime_blocker_summary": None,
                     "candle_balance_milli": None,
+                    "candle_account_revision": None,
                     "portrait": {"state": "ready", "equipment": {"face": "bare_face", "neck": "bare_neck", "head": "bare_head", "hand": "empty_hand", "base": "no_dish"}},
                 },
                 {
@@ -1652,6 +1653,7 @@ def keeper_runtime_http_fixtures(
                     "runtime_id": beta_runtime_id,
                     "runtime_blocker_summary": None,
                     "candle_balance_milli": None,
+                    "candle_account_revision": None,
                     "portrait": {"state": "ready", "equipment": {"face": "bare_face", "neck": "bare_neck", "head": "bare_head", "hand": "empty_hand", "base": "no_dish"}},
                 },
             ],

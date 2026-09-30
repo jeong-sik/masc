@@ -373,6 +373,7 @@ let item_account reply =
   require_ok Fun.id
     (Masc_tui_keeper_items.decode ~keeper_name:keeper
        (Yojson.Safe.from_string reply.body))
+  |> snd
 
 let test_router_serves_png_with_a_strong_tag () =
   with_router (fun ~config:_ router ->
@@ -589,6 +590,16 @@ beanie = %d
     let changed_json = Yojson.Safe.from_string (get ~router ~token:reader (item_path keeper)).body in
     let changed_revision = Yojson.Safe.Util.(changed_json |> member "account_revision" |> to_string) in
     check bool "price B changes actual response revision" false (original_revision = changed_revision);
+    let changed_reading = require_ok Fun.id (Masc_tui_keeper_items.decode ~keeper_name:keeper changed_json) in
+    check bool "TUI refuses price B beside the retained price A roster" true
+      (Result.is_error (Masc_tui_keeper_items.match_revision
+        ~expected_revision:(Ok (Some original_revision)) changed_reading));
+    check bool "TUI accepts price B only with its matching observed roster revision" true
+      (Result.is_ok (Masc_tui_keeper_items.match_revision
+        ~expected_revision:(Ok (Some changed_revision)) changed_reading));
+    check bool "an unobserved roster cannot authorize an otherwise valid Item body" true
+      (Result.is_error (Masc_tui_keeper_items.match_revision
+        ~expected_revision:(Error "roster unavailable") changed_reading));
     check (option string) "price B response uses the same current roster view identity"
       (Candle_observe.account_revision (Candle_observe.read ~now:Time_compat.now ~base_path) ~keeper)
       (Some changed_revision);
@@ -611,7 +622,7 @@ beanie = %d
       | _ -> fail "Item account response is not an object" in
     (match Masc_tui_keeper_items.decode ~keeper_name:keeper
         (with_balance (`String (string_of_int max_int))) with
-     | Ok (Masc_tui_keeper_items.Ready account) ->
+     | Ok (_, Masc_tui_keeper_items.Ready account) ->
        check int "Item decoder keeps the full OCaml wallet range" max_int account.balance_milli
      | Ok _ | Error _ -> fail "Item decoder lost a valid large wallet");
     List.iter (fun amount ->

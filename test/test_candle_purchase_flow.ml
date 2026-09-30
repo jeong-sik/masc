@@ -611,6 +611,36 @@ let test_policy_intervals_preserve_purchase_and_equipped_ownership () =
     check int "only historical Off, Hours and restored Off are recorded" 3 (List.length policy_facts))
 ;;
 
+let test_purchase_reprices_each_cursor_attempt () =
+  List.iter (fun remove_price ->
+    with_workspace (fun _ _ config ->
+      credit config ~goal:"retry-price-funding" ~keeper:"keeper-a" 2000;
+      let keeper=ok (Keeper_id.Keeper_name.of_string "keeper-a") in
+      let item=match Item.of_id "glasses" with Some item -> item | None -> fail "missing glasses" in
+      let changed=ref false and competing_bytes=ref "" in
+      let now () =
+        if not !changed then (
+          changed:=true;
+          write_config config (if remove_price then "" else "\n[shop.prices_milli]\nglasses = 700\n");
+          (* Append after purchase read but before its CAS append, through the
+             real ledger API, so the purchase must ask its callback again. *)
+          append config [{E.at;body=E.Half_life_set Candle_decay.Off}];
+          competing_bytes:=bytes config);
+        Ptime.to_float_s (Candle_time.to_ptime at) in
+      let result=Candle_shop.purchase ~now ~base_path:config.Workspace.base_path ~keeper ~item in
+      if remove_price then (
+        check bool "repricing to unpriced refuses the retried purchase" true
+          (match result with Error (Candle_shop.Unpriced _) -> true | _ -> false);
+        check string "refused retry writes no monetary event" !competing_bytes (bytes config))
+      else (
+        let receipt=match result with Ok receipt -> receipt | Error error -> fail (Candle_shop.error_to_string error) in
+        check int "retry charges current explicit price" 700 receipt.amount_milli;
+        check int "retry debits current price exactly once" 1300 receipt.account.balance_milli;
+        check int "one durable purchase follows contended cursor" 1
+          (List.length (List.filter (fun (event : E.t) -> match event.body with
+            | E.Purchased _ -> true | _ -> false) (events config)))))) [false;true]
+;;
+
 let test_tool_surface_is_eager () =
   List.iter
     (fun name ->
@@ -652,7 +682,8 @@ let () =
     run
       "candle_purchase_flow"
       [ ( "public tools and ledger"
-        , [ test_case
+        , [ test_case "purchase reprices every real cursor retry" `Quick test_purchase_reprices_each_cursor_attempt
+          ; test_case
               "recorded decay keeps purchase ownership and portrait equipment coherent" `Quick
               test_policy_intervals_preserve_purchase_and_equipped_ownership
           ; test_case

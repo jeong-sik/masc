@@ -1905,7 +1905,7 @@ type async_msg =
                 Masc_tui_types.Verification_evidence_read.failure) result
   | Keeper_config_view_loaded of Masc_tui_types.detail_read_request * (string list, string) result
   | Keeper_items_loaded of
-      Masc_tui_types.detail_read_request * (Masc_tui_keeper_items.t, string) result
+      Masc_tui_types.detail_read_request * (string option * Masc_tui_keeper_items.t, string) result
   | Keeper_sandbox_view_loaded of
       Masc_tui_types.detail_read_request * (Masc_tui_keeper_sandbox.t, string) result
   | Keeper_sandbox_logs_loaded of
@@ -4221,6 +4221,11 @@ let withdraw_keeper_items state =
   state.detail_reads <- List.filter
     (fun request -> request.drr_tab <> Detail_items) state.detail_reads
 
+let keeper_item_revision state keeper_name =
+  match Keeper_control.liveness_of_roster state.keeper_roster keeper_name with
+  | Keeper_control.Present runtime -> runtime.kr_candle_account_revision
+  | Unobserved | Invalid _ | Absent -> Error "Keeper account revision is not observed in the current roster"
+
 let launch_keeper_items state ~mailbox keeper_name =
   withdraw_keeper_items state;
   match state.workspace_identity, state.server_identity with
@@ -4229,6 +4234,7 @@ let launch_keeper_items state ~mailbox keeper_name =
     state.item_account_error <- Some "Server workspace identity is unavailable or differs from the local workspace"
   | Workspace_identity_match, Some identity ->
   let request = mark_detail_read_started state ~tab:Detail_items ~keeper:keeper_name in
+  let expected_revision = keeper_item_revision state keeper_name in
   let host = server_peer_host in
   let port = state.port in
   Masc_tui_async_read.launch
@@ -4240,7 +4246,9 @@ let launch_keeper_items state ~mailbox keeper_name =
         ^ Masc_tui_http.percent_encode_query_value identity.Tui_decode.sid_base_path in
       let ( let* ) = Result.bind in
       let* json = Masc_tui_http.get_json ~host ~port ~path in
-      Masc_tui_keeper_items.decode ~keeper_name json)
+      let* reading = Masc_tui_keeper_items.decode ~keeper_name json in
+      let* _ = Masc_tui_keeper_items.match_revision ~expected_revision reading in
+      Ok reading)
 
 let launch_keeper_sandbox_view state ~mailbox keeper_name =
   let request = mark_detail_read_started state ~tab:Detail_sandbox ~keeper:keeper_name in
@@ -10299,7 +10307,14 @@ let apply_keeper_roster_load state = function
   | Ok (roster, candle) ->
       state.candle_observation <- Some candle;
       state.keeper_roster <- roster;
-      state.keeper_roster_error <- None
+      state.keeper_roster_error <- None;
+      (match state.item_account with
+       | None -> ()
+       | Some (keeper_name, reading) ->
+         (match Masc_tui_keeper_items.match_revision
+             ~expected_revision:(keeper_item_revision state keeper_name) reading with
+          | Ok _ -> ()
+          | Error detail -> state.item_account <- None; state.item_account_error <- Some detail))
   | Error failure ->
       (* The last good roster is dropped rather than kept: a stale one reports
          fibers as running after the reading that said so stopped arriving,
@@ -10307,6 +10322,8 @@ let apply_keeper_roster_load state = function
          back to unobserved withdraws the actions instead of offering the
          wrong one. *)
       state.keeper_roster <- Keeper_control.Roster_unobserved;
+      state.item_account <- None;
+      state.item_account_error <- Some "Keeper account revision is not observed in the current roster";
       state.candle_observation <- Some (Error (Keeper_control.roster_failure_message
         ~credential_sent:(Masc_tui_http.operator_token_present ()) failure));
       remember_surface_error state ~surface:"keeper roster"
@@ -13942,6 +13959,10 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       if current && still_selected
          && state.workspace_identity = Masc_tui_types.Workspace_identity_match
          && Option.is_some state.server_identity then
+        let result = Result.bind result (fun reading ->
+          Masc_tui_keeper_items.match_revision
+            ~expected_revision:(keeper_item_revision state request.drr_keeper) reading
+          |> Result.map (fun _ -> reading)) in
         match result with
         | Ok account ->
             state.item_account <- Some (request.drr_keeper, account);

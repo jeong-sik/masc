@@ -336,7 +336,27 @@ let tools_pane_strip ~cols (state : state) =
        ])
 ;;
 
-let tools_display_lines (state : state) =
+let skill_usage_box ~cols rows =
+  let width = Masc_tui_frame.inner_width ~cols in
+  let content_width = max 1 (width - 4) in
+  let border left right = Ansi.dim, left ^ draw_hline (max 0 (width - 2)) ^ right in
+  let body =
+    List.concat_map (fun (style, text) ->
+      (if Masc_tui_message_layout.display_width text <= content_width then [text]
+       else Masc_tui_message_layout.wrap_words ~max_cells:content_width text)
+      |> List.map (fun line ->
+        style, Ansi.box_v ^ " " ^ fit_width line content_width ^ " " ^ Ansi.box_v)) rows
+  in
+  if width < 5 then
+    List.concat_map (fun (style, text) ->
+      Masc_tui_message_layout.wrap_words ~max_cells:(max 1 width) text
+      |> List.map (fun line -> style, line)) rows
+  else
+    border Ansi.box_tl Ansi.box_tr :: body
+    @ [border Ansi.box_bl Ansi.box_br; Ansi.dim, ""]
+;;
+
+let tools_display_lines ?(cols = 80) (state : state) =
   let registered_tools =
     match state.tools_inventory with
     | None -> []
@@ -1245,82 +1265,93 @@ let tools_display_lines (state : state) =
                surface.scs_usage <> [])
             sc_surfaces
         in
-        let unobserved = List.length sc_surfaces - List.length used in
+        let total field rows =
+          List.fold_left (fun sum (row : Masc.Tui_decode.skill_usage_row) ->
+            sum + field row) 0 rows
+        in
+        let invocations rows = total (fun row -> row.su_invocations) rows in
+        let compare_surface (a : Masc.Tui_decode.skills_catalog_surface) b =
+          let count = Int.compare (invocations b.scs_usage) (invocations a.scs_usage) in
+          if count <> 0 then count else
+          let name = String.compare a.scs_name b.scs_name in
+          if name <> 0 then name else String.compare a.scs_kind b.scs_kind
+        in
+        let used = List.stable_sort compare_surface used in
+        let all_rows = List.concat_map
+          (fun (surface : Masc.Tui_decode.skills_catalog_surface) -> surface.scs_usage) used in
+        let keepers = all_rows |> List.map (fun row -> row.su_keeper)
+          |> List.sort_uniq String.compare |> List.length in
         let coverage_lines =
           match sc_usage_coverage with
-          | None -> [ Theme.warn (), "   Activation ledger coverage: unavailable" ]
+          | None -> [ Theme.warn (), "Activation ledger coverage: unavailable; totals may be partial." ]
           | Some coverage ->
               ( Ansi.dim,
-                Printf.sprintf "   Activation ledgers loaded: %d; unavailable: %d"
-                  coverage.suc_ledgers_loaded
-                  (List.length coverage.suc_unavailable) )
-              :: List.map
-                   (fun detail -> Theme.warn (), "   Unavailable: " ^ Terminal_text.single_line detail)
-                   coverage.suc_unavailable
+                Printf.sprintf "Activation ledgers loaded: %d; unavailable: %d"
+                  coverage.suc_ledgers_loaded (List.length coverage.suc_unavailable) )
+              :: (match coverage.suc_unavailable with
+                  | [] -> []
+                  | _ -> [Theme.warn (), "Partial totals: unavailable ledgers are excluded."])
         in
-        let heading =
-          skill_source_lines ~config:sc_config ~sources:sc_sources
-          @ [ Ansi.bold,
-            Printf.sprintf " Skill Usage — %d of %d catalog Skills observed; %d without retained invocation"
-              (List.length used) (List.length sc_surfaces) unobserved
-          ; Ansi.dim, "   Scope: exact Skill revisions in current Keeper sessions"
-          ; Ansi.dim, "   No retained invocation does not establish never used."
-          ]
-          @ coverage_lines
-          @ [ Ansi.dim, Tool_table.skill_usage_name_indent ^ "SKILL"
-          (* One skill's keepers do not fit beside its name -- there can be
-             several -- so they stand on the lines below it, one each, in
-             columns. Joined onto one line with interpuncts, six keepers ran
-             past the pane and the counts of the last of them could not be
-             read at all. *)
-          ; Ansi.dim,
-            Tool_table.skill_usage_keeper_indent
-            ^ Tool_table.skill_usage_keeper_header ]
+        let heading = skill_usage_box ~cols
+          ([ Ansi.bold,
+             Printf.sprintf "Skill Usage — %d of %d catalog Skills observed"
+               (List.length used) (List.length sc_surfaces)
+           ; Theme.info (), Printf.sprintf "Keepers %d · TRIGGERED %d · DELIVERED %d · ACTIONS %d"
+               keepers (invocations all_rows)
+               (total (fun row -> row.su_deliveries) all_rows)
+               (total (fun row -> row.su_actions) all_rows)
+           ; Ansi.dim, "Scope: exact Skill revisions in current Keeper sessions"
+           ; Ansi.dim, Printf.sprintf "%d without retained invocation; this does not establish never used."
+               (List.length sc_surfaces - List.length used)
+           ] @ coverage_lines)
         in
-        let rows =
-          List.concat_map
-            (fun (surface : Masc.Tui_decode.skills_catalog_surface) ->
-               let keeper_rows =
-                 surface.scs_usage
-                 |> List.map (fun (row : Masc.Tui_decode.skill_usage_row) ->
-                        ( Ansi.dim
-                        , Tool_table.skill_usage_keeper_indent
-                          ^ Tool_table.skill_usage_keeper_line
-                              ~keeper:(Terminal_text.single_line row.su_keeper)
-                              ~invocations:row.su_invocations
-                              ~deliveries:row.su_deliveries
-                              ~actions:row.su_actions
-                                (* The server writes RFC 3339 on the UTC
-                                   timeline; the pane's other clocks are the
-                                   terminal's zone, and the two are nine
-                                   hours apart in Seoul. *)
-                              ~last_used:
-                                (match row.su_last_used_at with
-                                 | Some at when String.trim at <> "" ->
-                                     Terminal_text.short_timestamp at
-                                 | Some _ | None -> skill_last_used_label None) ))
-               in
-               (* Which kind a skill is says why it has a plan under it, or
-                  why it has none: only a composition runs a flow. *)
-               let named =
-                 Printf.sprintf "%s  %s"
-                   (Terminal_text.single_line surface.scs_name)
-                   (Terminal_text.single_line surface.scs_kind)
-               in
-               let flow_rows =
-                 match surface.scs_flow with
-                 | None -> []
-                 | Some flow ->
-                   (match skill_flow_line flow with
-                    | None -> []
-                    | Some line ->
-                      [ ( Ansi.dim
-                        , Tool_table.skill_usage_keeper_indent ^ line ) ])
-               in
-               ((Ansi.bold, Tool_table.skill_usage_name_indent ^ named)
-                :: keeper_rows)
-               @ flow_rows)
-            used
+        let rows = List.concat_map
+          (fun (surface : Masc.Tui_decode.skills_catalog_surface) ->
+            let keeper_readings = surface.scs_usage
+              |> List.stable_sort (fun a b -> String.compare a.su_keeper b.su_keeper)
+              |> List.map (fun (row : Masc.Tui_decode.skill_usage_row) ->
+                  let last_used = match row.su_last_used_at with
+                    | Some at when String.trim at <> "" -> Terminal_text.short_timestamp at
+                    | Some _ | None -> skill_last_used_label None in
+                  let line = Tool_table.skill_usage_keeper_line
+                    ~keeper:(Terminal_text.single_line row.su_keeper)
+                    ~invocations:row.su_invocations ~deliveries:row.su_deliveries
+                    ~actions:row.su_actions ~last_used in
+                  row, last_used, line)
+            in
+            let fits line = Masc_tui_message_layout.display_width line
+              <= Masc_tui_frame.inner_width ~cols - 4 in
+            let table_mode = fits Tool_table.skill_usage_keeper_header
+              && List.for_all (fun (_, _, line) -> fits line) keeper_readings in
+            let keeper_rows = List.concat_map
+              (fun (row, last_used, line) ->
+                  if table_mode then [Ansi.dim, line]
+                  else [ Ansi.bold, Terminal_text.single_line row.su_keeper
+                       ; Ansi.dim, Printf.sprintf "TRIGGERED %d · DELIVERED %d · ACTIONS %d"
+                           row.su_invocations row.su_deliveries row.su_actions
+                       ; Ansi.dim, "LAST USED " ^ last_used ]) keeper_readings
+            in
+            let flow_rows = match surface.scs_flow with
+              | None -> []
+              | Some flow -> (match skill_flow_line flow with
+                  | None -> [] | Some line -> [Ansi.dim, line]) in
+            skill_usage_box ~cols
+              ([ Ansi.bold, Terminal_text.single_line surface.scs_name ^ "  "
+                   ^ Terminal_text.single_line surface.scs_kind
+               ; Theme.info (), Printf.sprintf "TRIGGERED %d · DELIVERED %d · ACTIONS %d"
+                   (invocations surface.scs_usage)
+                   (total (fun row -> row.su_deliveries) surface.scs_usage)
+                   (total (fun row -> row.su_actions) surface.scs_usage)
+               ]
+               @ (if table_mode
+                  then [Ansi.dim, Tool_table.skill_usage_keeper_header] else [])
+               @ keeper_rows @ flow_rows)) used
+        in
+        let unavailable_rows = match sc_usage_coverage with
+          | None -> []
+          | Some coverage -> List.map (fun detail ->
+              Theme.warn (), " Unavailable: " ^ Terminal_text.single_line detail)
+              coverage.suc_unavailable
         in
         let rejection_rows =
           match sc_rejections with
@@ -1400,7 +1431,9 @@ let tools_display_lines (state : state) =
                     ])
                  shadows
         in
-        heading @ rows @ rejection_rows @ shadow_rows
+        heading @ rows @ unavailable_rows
+        @ skill_source_lines ~config:sc_config ~sources:sc_sources
+        @ rejection_rows @ shadow_rows
     in
     error_lines @ reading_lines
     end

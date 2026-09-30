@@ -663,6 +663,27 @@ let test_upsert_returns_the_row_as_it_was_before_an_update () =
   | Ok (_, `created) -> fail "an existing id must update, not create"
   | Error error -> fail (write_error_msg error)
 
+let test_upsert_revision_witness_survives_later_commits () =
+  with_workspace @@ fun config ->
+  let upsert ?id title =
+    match Goal_store.upsert_goal_with_revision config ?id ~title ~metric:"m" ~target_value:"1" () with
+    | Ok result -> result
+    | Error error -> fail (write_error_msg error) in
+  let created, _, created_version = upsert "created" in
+  check int "creation witness is the committed store version" (available config).version created_version;
+  let first, _, first_version = upsert ~id:created.id "first update" in
+  check int "first update has its own committed witness" (available config).version first_version;
+  ignore (upsert_exn config ~title:"another Goal" ~metric:"m" ~target_value:"1" ());
+  let last, action, last_version = upsert ~id:created.id "last update" in
+  check int "intervening Goal write is included in the final witness" (first_version + 2) last_version;
+  check int "returned final revision is authoritative" (available config).version last_version;
+  check bool "create and edit commit ordering is strict" true (created_version < first_version);
+  check string "earlier snapshot stays the exact earlier title" "first update" first.title;
+  check string "latest snapshot carries its own title" "last update" last.title;
+  match action with
+  | `updated previous -> check string "previous row comes from the same write" first.title previous.title
+  | `created -> fail "existing Goal must remain an update"
+
 let test_transact_goal_authoritative_and_noop () =
   with_workspace @@ fun config ->
   let goal = upsert_exn config ~title:"Atomic Goal" ~metric:"count" ~target_value:"10" () in
@@ -1022,6 +1043,7 @@ let () =
   run "Goal_store"
     [ ( "proof identity",
         [ test_case "criterion edits invalidate proof phase" `Quick test_criterion_edits_invalidate_proof_phase;
+          test_case "upsert revision witness survives later commits" `Quick test_upsert_revision_witness_survives_later_commits;
           test_case "transaction uses primary and preserves no-op" `Quick test_transact_goal_authoritative_and_noop;
           test_case "missing revision refuses bound mutation" `Quick test_missing_criterion_revision_refuses_bound_mutation ] );
       ( "due date",

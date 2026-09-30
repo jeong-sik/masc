@@ -20,7 +20,7 @@ type expired_ask =
    call id: the retry carries a fresh tool_call_id, so identity here is
    (keeper, tool, canonical-args fingerprint) — the same fingerprint the
    durable approval rules use
-   ({!Keeper_approval_queue_rules.request_fingerprint}).
+   ({!Keeper_approval_request_fingerprint.request_fingerprint}).
 
    [remembered_answered_at] is what keeps a 180-second-window human decision
    from becoming a permanent credential: past [ttl_sec] the entry is stale
@@ -73,7 +73,7 @@ let shared_store = create ()
 let shared () = shared_store
 
 let fingerprint_of (args : Yojson.Safe.t) =
-  Keeper_approval_queue_rules.request_fingerprint args
+  Keeper_approval_request_fingerprint.request_fingerprint args
 
 (* Entries older than the TTL leave on every write and every read, so the
    lists cannot grow on nothing but time: an unattended keeper whose asks

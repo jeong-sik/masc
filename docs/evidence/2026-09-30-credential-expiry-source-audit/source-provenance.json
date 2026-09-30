@@ -14,18 +14,11 @@
   "partial_main_test_dune_patch_sha256": "988d8ccfef3ae8ed26fa4e83567c0b225934408dda299845a71555111d5d773e",
   "test_dune_with_own_include_removed_sha256": "d70b111c6cd3b19a56017b64eb357e6d95ae30e45de88cde4bebb22e5ff03122",
   "test_dune_main_patch_plus_only_own_include_verified": true,
-  "child_changelog_placeholder": {
-    "path": "changelog.d/999999.md",
-    "citation": "#999999",
-    "must_replace_with_actual_pr_before_publication": true,
-    "initial_draft_policy": "Placeholder stays local; initial draft publication omits it and final publication uses its assigned PR number."
-  },
   "native_tests_executed": false,
   "ci_executed": false,
   "source_sha256": {
     "CHANGELOG.md": "e9802a940869ed2a7e0687182b2bb7c200faac17786959644f2b9766fe83fec9",
     "changelog.d/40136.md": "79480a7e53876a7c20f113d8376d8996ab7773a0b46c1f7c6cd6d7dab9286acc",
-    "changelog.d/999999.md": "b60f660c90c1e1a20bc9b92928763feea64050a66b900defb49a6a99efc8922e",
     "docs/rfc/RFC-play-link-for-the-shared-machine.md": "15fb6478da178822c05462c3bb93fe436de648d84d5c9147d4b8edfd355fbaf1",
     "lib/auth/auth.mli": "2a0a09a2f4459ce901e819ec6d939a0db0425b025978126dc556621de58b506d",
     "lib/auth/auth_credential_base.ml": "452f6b991f0fe7401bafc51c6c14813deee32f2b9ec55b5934d2e3ac3282e7b6",
@@ -51,8 +44,13 @@
     "test/test_dos_input_routes.ml": "d9370ac207f6e84211238d63f6fcbf60a4a6bf9b326a0e2f0aa205015aa8c865",
     "test/test_dos_tools.ml": "72e3b83e43830a80f4a8e998015da6d03249cb47007aef91cefaac0f1a2f9f34",
     "test/test_play_credential_transaction.ml": "f3a4a4c8eb1ed777cf76bb62113788b33bb4595e72c1281c3adbe8e8006dfe74",
-    "test/test_play_invite.ml": "9ac084ff11095f4a493072e9410a06933474d250f8b044b6915fb7cf36982c7f"
+    "test/test_play_invite.ml": "9ac084ff11095f4a493072e9410a06933474d250f8b044b6915fb7cf36982c7f",
+    "changelog.d/40171.md": "1490bc6c233acbbdf0c47d736c81b44343b1a97135ace5228004e2e52302290a"
   },
   "partial_main_routes_play_mli_sha256": "fbd7219366800c3b42a5359f25b8b8dc660a8591c36d16900b45706e819e69b4",
-  "parent_fixture_overlay": "Two route assertions use the current Server_refusal code field; already present in the published parent."
+  "parent_fixture_overlay": "Two route assertions use the current Server_refusal code field; already present in the published parent.",
+  "child_changelog": {
+    "path": "changelog.d/40171.md",
+    "pull_request": 40171
+  }
 }

@@ -115,3 +115,5 @@ or live runtime experiment was performed. Required finishing validation includes
 `dos_input_routes` and `dos_tools` against the published candidate head.
 
 The raw main patch is base64-encoded in main-test-dune-patch.json to preserve context bytes without trailing-whitespace lines. The parent route fixture uses the code discriminant in published parent 6714e7eaf75403046b69aed4d3aec55c09c01271; parent-fixture-parse.json records the additional syntax check.
+
+Published as stacked PR #40171. The assigned changelog fragment is changelog.d/40171.md; native and required checks must cite the final public head.

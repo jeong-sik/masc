@@ -217,6 +217,7 @@ def superseded_scoped_match_journey(executable):
     gate = h.GatedHttpResponse(operator(old_operator_label), hold_seconds=30.0)
     newer_operator_read = threading.Event()
     newer_asks_read = threading.Event()
+    released_asks_read = threading.Event()
     briefing = fixtures[BRIEFING]
 
     def record(path):
@@ -252,7 +253,10 @@ def superseded_scoped_match_journey(executable):
         if phase == "new-full":
             newer_asks_read.set()
             return new_response
-        if phase in ("old-scoped", "released"):
+        if phase == "released":
+            released_asks_read.set()
+            return old_response
+        if phase == "old-scoped":
             return old_response
         return empty_response
 
@@ -338,6 +342,9 @@ def superseded_scoped_match_journey(executable):
                 assert calls.count((BRIEFING, "new-full")) == 1, calls
                 assert ("/health", "new-full") in calls, calls
                 assert calls.count((cards.OPERATOR_PATH, "new-full")) == 1, calls
+                # A timed-out old operator GET must not masquerade as the
+                # new full asks GET before the held response is released.
+                assert calls.count((h.KEEPER_ASKS_PATH, "new-full")) == 1, calls
                 assert calls.index(("/health", "old-scoped")) < calls.index(
                     ("/health", "new-full")
                 ) < calls.index((h.KEEPER_ASKS_PATH, "new-full")), calls
@@ -346,6 +353,9 @@ def superseded_scoped_match_journey(executable):
             assert h.wait_for_fixture_event(process, fd, output, gate.completed, timeout=10), (
                 "old scoped GET never completed after release"
             )
+            assert h.wait_for_fixture_event(
+                process, fd, output, released_asks_read, timeout=10
+            ), "old scoped reader never consumed its released operator response"
             # Consume the returned response and mailbox, then force a fresh
             # frame: accumulated pre-release mismatch bytes are not evidence.
             h.drain_until_quiet(process, fd, output, cap=1)

@@ -8853,6 +8853,7 @@ type clamped_scroll =
      it -- later endpoints, the probe's last rows, the footer -- could not be
      reached. *)
   | Voice_scroll of int
+  | Preset_detail_scroll of int
   (* The Keepers list window, which the frame keeps still while the cursor
      is on it. Worked out from the cursor alone, the cursor sat on the bottom
      row once the list scrolled, and choosing a row above it moved the whole
@@ -8922,6 +8923,7 @@ let apply_clamped_scroll (state : state) = function
   | Patch_modal_scroll value -> state.patch_modal_scroll <- value
   | Link_modal_scroll value -> state.link_modal_scroll <- value
   | Voice_scroll value -> state.config_scroll <- value
+  | Preset_detail_scroll value -> state.config_scroll <- value
   | Keeper_list_scroll value -> state.keeper_list_scroll <- value
   | Context_inspector_scroll value -> state.context_inspector_scroll <- value
 
@@ -10776,8 +10778,8 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
        (* The voice pane draws neither the file nor a list the state holds.
           It was counted as the file's rows, a bound that has nothing to do
           with what it draws; the frame reports [Voice_scroll] instead. *)
-       | Config_voice -> None
-       | Config_runtime | Config_params | Config_prompts | Config_presets
+       | Config_voice | Config_presets -> None
+       | Config_runtime | Config_params | Config_prompts
        | Config_themes ->
          listing ~error:state.runtime_config_view_error (file_rows ()))
   (* Acting counts rows the drawing builds out of formatted text, not rows the

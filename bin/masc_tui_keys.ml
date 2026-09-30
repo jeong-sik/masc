@@ -49,6 +49,9 @@ let config_bindings =
              and presets, and moves the selection a page on models and themes",
       Some [ Config_runtime; Config_models; Config_prompts; Config_presets
            ; Config_themes; Config_voice ]
+  ; b Navigate "Home/End" "detail"
+      ~help:"first and last wrapped detail rows of the selected preset",
+      Some [ Config_presets ]
   ; b Navigate "v" "read status"
       ~help:"runtime.toml: source revision, validation issues, and application/restart details",
       Some [ Config_runtime ]

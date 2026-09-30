@@ -95,7 +95,7 @@ r1d의 멤버가 모두 롤업 경로로 착지했는지는 다시 세지 않았
 1. 현재 head가 MEMBERS의 head40과 정확히 같다. 이 구현은 main을 충돌 없이 합친 새 head도 같은 것으로 취급하지 않는다. head가 바뀌면 새 배치를 만든다.
 2. 현재 head 자신의 성공한 PR-check run을 인용하는 신뢰 가능한 최신 PASS가 있다. 첫 줄은 `verdict: PASS head: <head40> run: <run> by: <Keeper>`다. ROLL run을 멤버 run으로 적지 않는다.
 3. 필수 검사 5개와 기존 워크플로·check gate가 모두 성공한다. 멤버 run의 main 신선도만 결합 증거로 대신한다.
-4. 독립된 승인 계정이 작성한, 코드 리뷰 줄(`review: APPROVE head: <head40> by: <Keeper>`)과 approve-guard footer가 head에 묶인 유효한 승인이 있다. 승인 세션은 그 PR에 push하지 않은 세션이어야 한다.
+4. 독립된 승인 계정이 작성한, 판정 줄과 approve-guard footer가 head에 묶인 유효한 승인이 있다. 승인 세션은 그 PR에 push하지 않은 세션이어야 한다.
 5. PR이 open이고 Draft가 아니며 base는 main이다. 열린 CR이나 최신 FAIL/HOLD가 없어야 한다.
 
 **ROLL도 별도의 실제 PR로서 자기 head와 자기 run의 PASS, 필수 검사 5개, 독립된 footer-bound 승인, 열린 CR/FAIL 없음이 필요하다.** 멤버들의 승인이나 배치 줄만으로 ROLL 승인을 대신하지 않는다.
@@ -111,7 +111,7 @@ batch: PASS landing: ROLL roll: <ROLL40> base: <BASE40> run: <ROLL PR-check run>
 - `landing: ROLL`은 실제 병합 대상이 ROLL이라는 명시적 계약이다. 이 필드가 없는 줄은 받지 않는다.
 - ROLL PR 번호는 해당 run의 PR/branch 연결로 유일하게 확인한다. 외부에서 번호를 추측하지 않는다.
 - 가드는 BASE에 고정된 멤버들을 적용한 Git 트리가 ROLL과 같은지 다시 계산한다.
-- 배치 줄은 멤버/ROLL의 판정 줄이나 승인을 대신하지 않는다. 승인 본문의 첫 코드 리뷰 줄과 마지막 footer는 head에 묶인다. 코드 승인은 CI 판정과 별개다.
+- 배치 줄은 멤버/ROLL의 판정 줄이나 승인을 대신하지 않는다. 승인 본문의 첫 판정 줄과 마지막 footer는 그대로 유지한다.
 
 | 조건 | PR별 경로 | 제안된 배치 경로 |
 |---|---|---|
@@ -137,7 +137,7 @@ GitHub의 개별 API 읽기와 병합 요청에는 체크·승인·main을 한�
 
 ### 3.4 가드 연결
 
-- `approve-guard.sh --batch`는 멤버 또는 ROLL의 코드 승인에 배치 줄을 기록하며 CI·신선도를 검증하지 않는다. 결합 신선도 검증은 `--integration-check --batch`와 병합 단계가 담당한다. 판정·승인 계정 독립성은 그대로다.
+- `approve-guard.sh --batch`는 멤버 또는 ROLL의 승인에 결합 신선도 증거를 쓸 수 있다. 판정·승인 계정 독립성은 그대로다.
 - `ci-freshness.py --batch`는 모든 멤버의 고정 head와 ROLL 결합 트리, 외부 main 입력을 검사한다.
 - `merge-guard.sh --batch`의 `--check`와 실제 쓰기는 모두 ROLL 착지와 모든 유효한 승인을 마지막 경계에서 요구한다.
 - `land-batch.sh`는 ROLL 쓰기 하나와 도착 증명을 관리한다. 미병합 prefix 복구나 개별 멤버 병합 경로를 두지 않는다.

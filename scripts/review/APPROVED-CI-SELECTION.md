@@ -7,8 +7,9 @@ or approval does not start CI.
 Source review uses `approve-guard.sh` independently of CI. The preparation
 command reads its approval receipts, combines only the leader's explicit
 selection, then rechecks approvals and main. This initial path selects open,
-Ready PRs targeting main; stack members become eligible after their base is
-integrated and the PR is retargeted to main.
+Ready ordinary PRs targeting main; stack members become eligible after their base is
+integrated and the PR is retargeted to main. Release heads use the explicit
+release verification workflow rather than this source-only preparation path.
 
 ```sh
 python3 scripts/review/prepare-approved-batch.py \

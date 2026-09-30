@@ -7,7 +7,6 @@ guard supplies approval authority independently of CI.
 import argparse
 from dataclasses import dataclass
 from enum import Enum
-import importlib.util
 import json
 import os
 from pathlib import Path
@@ -15,7 +14,6 @@ import re
 import subprocess
 import sys
 
-from batch_evidence import Trees, Refusal
 
 
 class Reason(Enum):
@@ -25,6 +23,8 @@ class Reason(Enum):
     APPROVAL_CHANGED = "approval_changed"
     UNSELECTED_BASE = "unselected_base"
     NO_CHANGES = "no_changes"
+    MERGE_CONFLICT = "merge_conflict"
+    SELECTION_CHANGED = "selection_changed"
 
 
 class SourceUnavailable(Exception):
@@ -35,6 +35,61 @@ class Rejected(Exception):
     def __init__(self, reason):
         super().__init__(reason.value)
         self.reason = reason
+
+
+
+def sha(value):
+    if not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{40}", value) is None:
+        raise SourceUnavailable("invalid_commit_identity")
+    return value
+
+
+def command(args):
+    result = subprocess.run(args, text=True, capture_output=True)
+    if result.returncode:
+        raise SourceUnavailable("command_failed")
+    return result.stdout
+
+
+def api(gh, endpoint):
+    return json.loads(command([gh, "api", endpoint]))
+
+
+class Trees:
+    """Compose actual Git trees without changing a checkout or publishing."""
+    def __init__(self, commands, git_dir):
+        self.commands = commands
+        self.git = ["git", "-C", git_dir]
+
+    def ensure(self, commit):
+        self.commands.sha(commit)
+        present = subprocess.run(self.git + ["cat-file", "-e", commit + "^{commit}"],
+                                 capture_output=True)
+        if present.returncode:
+            self.commands.command(self.git + ["fetch", "--quiet", "--no-tags", "origin", commit])
+        self.commands.command(self.git + ["cat-file", "-e", commit + "^{commit}"])
+
+    def tree(self, commit):
+        return self.commands.sha(self.commands.command(
+            self.git + ["rev-parse", commit + "^{tree}"]).strip())
+
+    def merge(self, left, right):
+        result = subprocess.run(self.git + ["merge-tree", "--write-tree", left, right],
+                                text=True, capture_output=True)
+        if result.returncode == 1:
+            raise Rejected(Reason.MERGE_CONFLICT)
+        if result.returncode:
+            raise SourceUnavailable("tree_merge_failed")
+        tree = self.commands.sha(result.stdout.splitlines()[0])
+        result = subprocess.run(self.git + ["-c", "user.name=Approved selection",
+            "-c", "user.email=approved-selection@example.invalid", "-c", "commit.gpgSign=false",
+            "commit-tree", tree, "-p", left, "-p", right],
+            input="Explicit source-approved candidate\n", text=True, capture_output=True,
+            env=os.environ | {"GIT_AUTHOR_DATE": "2000-01-01T00:00:00Z",
+                              "GIT_COMMITTER_DATE": "2000-01-01T00:00:00Z"})
+        if result.returncode:
+            raise SourceUnavailable("tree_commit_failed")
+        return self.commands.sha(result.stdout.strip())
 
 
 @dataclass(frozen=True)
@@ -87,12 +142,13 @@ def prepare(f, *, repo, leader, selected, git_dir, gh, approve=source_approval):
     base = f.sha(f.api(gh, prefix + "/commits/main")["sha"])
     trees = Trees(f, git_dir)
     trees.ensure(base)
-    approvals = tuple(approve(repo, m, gh=gh) for m in selected)
-    combined = base
+    pulls = []
+    identities = {}
     for m in selected:
         pull = f.api(gh, prefix + f"/pulls/{m.pr}")
         if (pull["state"] != "open" or pull["draft"] is not False
-                or pull["head"]["sha"] != m.head or pull["base"]["ref"] != "main"):
+                or pull["head"]["sha"] != m.head or pull["base"]["ref"] != "main"
+                or pull["head"]["ref"].startswith("release/v")):
             raise Rejected(Reason.INVALID_SELECTION)
         parent = f.sha(pull["base"]["sha"])
         trees.ensure(parent)
@@ -101,6 +157,12 @@ def prepare(f, *, repo, leader, selected, git_dir, gh, approve=source_approval):
                                capture_output=True)
         if check.returncode:
             raise Rejected(Reason.UNSELECTED_BASE)
+        pulls.append(m)
+        identities[m.pr] = (pull["base"]["ref"], pull["base"]["sha"],
+                            pull["head"]["ref"], pull["head"]["sha"])
+    approvals = tuple(approve(repo, m, gh=gh) for m in pulls)
+    combined = base
+    for m in pulls:
         combined = trees.merge(combined, m.head)
     if trees.tree(combined) == trees.tree(base):
         raise Rejected(Reason.NO_CHANGES)
@@ -110,6 +172,11 @@ def prepare(f, *, repo, leader, selected, git_dir, gh, approve=source_approval):
         current = approve(repo, initial.member, gh=gh)
         if not set(initial.ids).issubset(current.ids):
             raise Rejected(Reason.APPROVAL_CHANGED)
+        pull = f.api(gh, prefix + f"/pulls/{initial.member.pr}")
+        if (pull["state"] != "open" or pull["draft"] is not False
+                or (pull["base"]["ref"], pull["base"]["sha"],
+                    pull["head"]["ref"], pull["head"]["sha"]) != identities[initial.member.pr]):
+            raise Rejected(Reason.SELECTION_CHANGED)
     if f.sha(f.api(gh, prefix + "/commits/main")["sha"]) != base:
         raise Rejected(Reason.MAIN_MOVED)
     return {
@@ -127,11 +194,7 @@ def main():
         parser.add_argument("--" + name, required=True)
     parser.add_argument("--member", type=member, action="append", required=True)
     args = parser.parse_args()
-    spec = importlib.util.spec_from_file_location("approved_batch_freshness",
-                                                 Path(__file__).with_name("ci-freshness.py"))
-    f = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = f
-    spec.loader.exec_module(f)
+    f = sys.modules[__name__]
     try:
         git = ["git", "-C", args.git_dir]
         f.command(git + ["check-ref-format", "--branch", args.branch])
@@ -162,10 +225,10 @@ def main():
                 raise
         print(json.dumps(receipt, sort_keys=True))
         return 0
-    except (Rejected, Refusal) as error:
+    except Rejected as error:
         print(json.dumps({"status": "refused", "reason": str(error)}))
         return 2
-    except (OSError, ValueError, KeyError, TypeError, SourceUnavailable, f.Unavailable):
+    except (OSError, ValueError, KeyError, TypeError, SourceUnavailable):
         print(json.dumps({"status": "unavailable", "reason": "evidence_read_failed"}))
         return 1
 

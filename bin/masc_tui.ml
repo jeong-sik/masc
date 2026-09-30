@@ -4769,9 +4769,13 @@ let item_account_revision state keeper_name =
     | Keeper_control.Roster_partial { observed; _ }
     | Keeper_control.Roster_invalid { observed; _ } -> observed
   in
-  List.find_opt (fun (row : Tui_decode.keeper_runtime) ->
-    String.equal row.kr_name keeper_name) rows
-  |> Option.map (fun row -> keeper_name, row.Tui_decode.kr_candle_account_revision)
+  Option.bind
+    (List.find_opt (fun (row : Tui_decode.keeper_runtime) ->
+       String.equal row.kr_name keeper_name) rows)
+    (fun row ->
+      match row.Tui_decode.kr_candle_account_revision with
+      | Ok revision -> Some (keeper_name, Ok revision)
+      | Error _ -> None)
 
 let launch_keeper_items state ~mailbox keeper_name =
   let enqueue_async = workspace_enqueue state in

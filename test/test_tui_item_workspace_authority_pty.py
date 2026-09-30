@@ -47,6 +47,7 @@ class ItemWire(authority.WorkspaceWire):
         super().__init__(roster)
         self.account_state = "ready"
         self.roster_unavailable = False
+        self.malformed_revision = False
         self.booting = False
 
     def set_booting(self, booting):
@@ -65,12 +66,22 @@ class ItemWire(authority.WorkspaceWire):
         with self.lock:
             self.roster_unavailable = unavailable
 
+    def set_malformed_revision(self, malformed):
+        with self.lock:
+            self.malformed_revision = malformed
+
     def roster(self):
         with self.lock:
             unavailable = self.roster_unavailable
+            malformed = self.malformed_revision
         if unavailable:
             return 503, {"error": "current roster unavailable"}
-        return super().roster()
+        status, payload = super().roster()
+        if malformed:
+            for row in payload["keepers"]:
+                if row["name"] == "alpha":
+                    row["candle_account_revision"] = {"unexpected": "object"}
+        return status, payload
 
     def change_account(self, state):
         assert state in ("ready", "failed", "off")
@@ -209,6 +220,14 @@ def run(binary, captures):
             wire.set_roster_unavailable(False)
             wait(lambda text: b"Balance 3.250 Candle" in text,
                  "same-revision roster recovery did not reload the account")
+            wire.set_malformed_revision(True)
+            wait(lambda text: b"Item account revision" in text,
+                 "malformed revision retained Item monetary facts")
+            assert b"Balance " not in visible() and b"owned" not in visible()
+            capture("a-revision-malformed")
+            wire.set_malformed_revision(False)
+            wait(lambda text: b"Balance 3.250 Candle" in text,
+                 "valid revision recovery did not reload Item facts")
             wire.set_booting(True)
             wait(lambda text: b"Item account revision" in text,
                  "booting same-workspace server retained Item facts")

@@ -358,12 +358,6 @@ let move_runtime_config_cursor state ~delta =
 (* The columns the Identity pane wraps its notice at. Asked of the terminal
    the same way {!surface_rows} asks for its rows, so the key handler counts
    the lines the renderer is about to draw. *)
-(* The query the list is showing, which is the empty one whenever the filter
-   is not open. Asked here so the renderer, the cursor and the keys all read
-   the same list. *)
-let identity_query (state : state) =
-  Option.value state.identity_filter ~default:""
-
 let identity_pane_columns (state : state) =
   let _rows, columns = get_terminal_size () in
   Masc_tui_roster_pane.content_cols ~hidden:state.roster_pane_hidden
@@ -421,11 +415,11 @@ let move_identity_cursor (state : state) ~delta =
   | Some (_, providers) ->
       let count =
         List.length
-          (Masc_tui_identity_model.identity_connectable ~query:(identity_query state)
+          (Masc_tui_identity_model.identity_connectable ~query:(Masc_tui_identity_input.current_query state)
              providers)
       in
       if count > 0 then begin
-        let query = identity_query state in
+        let query = Masc_tui_identity_input.current_query state in
         let cursor =
           Masc_tui_identity_model.identity_cursor_clamped ~query ~providers
             state.identity_cursor
@@ -17495,31 +17489,9 @@ and is loaded on demand through keeper_skill.
                the composer path would put it in a chat draft -- a credential
                in a message nobody meant to write. *)
             | Some Text_identity_app_form ->
-                Option.iter
-                  (fun form ->
-                    state.identity_app_form <-
-                      Some
-                        (match form.Masc_tui_identity_model.iaf_field with
-                         | Masc_tui_identity_model.App_client_id ->
-                           { form with
-                             Masc_tui_identity_model.iaf_client_id =
-                               form.Masc_tui_identity_model.iaf_client_id ^ text
-                           }
-                         | Masc_tui_identity_model.App_client_secret ->
-                           { form with
-                             Masc_tui_identity_model.iaf_client_secret =
-                               form.Masc_tui_identity_model.iaf_client_secret ^ text
-                           }
-                         | Masc_tui_identity_model.App_scopes ->
-                           { form with
-                             Masc_tui_identity_model.iaf_scopes =
-                               form.Masc_tui_identity_model.iaf_scopes ^ text
-                           }))
-                  state.identity_app_form
+           Masc_tui_identity_input.paste_form state text
             | Some Text_identity_filter ->
-                state.identity_filter <-
-                  Some (Option.value state.identity_filter ~default:"" ^ text);
-                state.identity_cursor <- 0
+           Masc_tui_identity_input.paste_filter state text
             | Some Text_github_token ->
                 let current = Option.value state.github_token_input ~default:"" in
                 state.github_token_input <- Some (current ^ text)
@@ -19395,56 +19367,8 @@ and is loaded on demand through keeper_skill.
           secret rather than leaving it in the process. *)
        | Some k
          when text_input_target state ~compact_viewport
-              = Some Text_identity_app_form -> (
-           match state.identity_app_form with
-           | None -> ()
-           | Some form -> (
-               let set text =
-                 state.identity_app_form <-
-                   Some
-                     (match form.Masc_tui_identity_model.iaf_field with
-                      | Masc_tui_identity_model.App_client_id ->
-                        { form with Masc_tui_identity_model.iaf_client_id = text }
-                      | Masc_tui_identity_model.App_client_secret ->
-                        { form with Masc_tui_identity_model.iaf_client_secret = text }
-                      | Masc_tui_identity_model.App_scopes ->
-                        { form with Masc_tui_identity_model.iaf_scopes = text })
-               in
-               let current =
-                 match form.Masc_tui_identity_model.iaf_field with
-                 | Masc_tui_identity_model.App_client_id -> form.Masc_tui_identity_model.iaf_client_id
-                 | Masc_tui_identity_model.App_client_secret ->
-                   form.Masc_tui_identity_model.iaf_client_secret
-                 | Masc_tui_identity_model.App_scopes -> form.Masc_tui_identity_model.iaf_scopes
-               in
-               match k with
-               | "esc" -> state.identity_app_form <- None
-               | "\127" | "\b" ->
-                 set (Masc_tui_message_layout.drop_last_utf8_scalar current)
-               | "\r" | "\n" -> (
-                   match form.Masc_tui_identity_model.iaf_field with
-                   | Masc_tui_identity_model.App_client_id ->
-                     state.identity_app_form <-
-                       Some
-                         { form with
-                           Masc_tui_identity_model.iaf_field =
-                             Masc_tui_identity_model.App_client_secret
-                         }
-                   | Masc_tui_identity_model.App_client_secret ->
-                     state.identity_app_form <-
-                       Some
-                         { form with
-                           Masc_tui_identity_model.iaf_field = Masc_tui_identity_model.App_scopes
-                         }
-                   | Masc_tui_identity_model.App_scopes ->
-                     Masc_tui_identity_requests.launch_app_save state ~host:server_peer_host ~deliver:(fun message -> enqueue_async async_messages message)
-                       ~form;
-                     state.identity_app_form <- None)
-               | s
-                 when (String.length s = 1 && Char.code s.[0] >= 32)
-                      || (String.length s > 1 && Char.code s.[0] >= 0x80) ->
-                 set (current ^ s)
-               | _ -> ()))
+              = Some Text_identity_app_form ->
+           Masc_tui_identity_input.app_form_key state ~save:(fun ~form -> Masc_tui_identity_requests.launch_app_save state ~host:server_peer_host ~deliver:(fun message -> enqueue_async async_messages message) ~form) k
        | Some k
          when (state.view = Runtime || state.view = Lanes)
               && (match state.runtime_lane_pick with
@@ -19637,73 +19561,15 @@ and is loaded on demand through keeper_skill.
         | Some ("T" | "t")
           when state.view = Keepers Keeper_detail
                && state.detail_tab = Detail_identity
-               && not compact_viewport -> (
-            match (selected_keeper state, state.identity_view) with
-            | Some keeper, Some (stamp, providers)
-              when String.equal stamp keeper.k_name -> (
-                match
-                  Masc_tui_identity_model.identity_cursor_provider
-                    ~query:(identity_query state) ~providers
-                    state.identity_cursor
-                with
-                | Some (provider_id, _) -> (
-                    let row =
-                      List.find_map
-                        (function
-                          | Masc_tui_identity_model.Identity_declared
-                              { idp_id
-                              ; idp_tools
-                              ; idp_enabled
-                              ; idp_switch_problem
-                              ; _
-                              }
-                            when String.equal idp_id provider_id ->
-                              Some (idp_tools, idp_enabled, idp_switch_problem)
-                          | Masc_tui_identity_model.Identity_declared _
-                          | Masc_tui_identity_model.Identity_unreadable _ -> None)
-                        providers
-                    in
-                    match row with
-                    | Some (Some _, enabled, None) ->
-                        state.identity_attempt_error <- None;
-                        Masc_tui_identity_requests.launch_switch state ~host:server_peer_host ~deliver:(fun message -> enqueue_async async_messages message)
-                          ~keeper_name:keeper.k_name ~provider_id
-                          ~enabled:(enabled = Some false)
-                    | Some (Some _, _, Some problem) ->
-                        state.identity_attempt_error <-
-                          Some
-                            ( Masc_tui_identity_model.Notice_bad
-                            , "switch store unreadable: " ^ problem )
-                    | Some (None, _, _) | None ->
-                        report_action state "system"
-                          "connect it first; the switch is for an attached service")
-                | None -> ())
-            | Some _, (Some _ | None) | None, _ -> ())
+               && not compact_viewport ->
+           Masc_tui_identity_input.toggle state
+             ~switch:(fun ~keeper_name ~provider_id ~enabled -> Masc_tui_identity_requests.launch_switch state ~host:server_peer_host ~deliver:(fun message -> enqueue_async async_messages message) ~keeper_name ~provider_id ~enabled)
+             ~report:(fun level detail -> report_action state level detail)
         | Some ("A" | "a")
           when state.view = Keepers Keeper_detail
                && state.detail_tab = Detail_identity
-               && not compact_viewport -> (
-           match (selected_keeper state, state.identity_view) with
-           | Some keeper, Some (stamp, providers)
-             when String.equal stamp keeper.k_name -> (
-               match
-                 Masc_tui_identity_model.identity_cursor_provider
-                   ~query:(identity_query state) ~providers
-                   state.identity_cursor
-               with
-               | Some (provider_id, label) ->
-                 state.identity_attempt_error <- None;
-                 state.identity_app_form <-
-                   Some
-                     { Masc_tui_identity_model.iaf_provider = provider_id
-                     ; iaf_label = label
-                     ; iaf_field = Masc_tui_identity_model.App_client_id
-                     ; iaf_client_id = ""
-                     ; iaf_client_secret = ""
-                     ; iaf_scopes = ""
-                     }
-               | None -> ())
-           | Some _, (Some _ | None) | None, _ -> ())
+               && not compact_viewport ->
+           Masc_tui_identity_input.open_app_form state
        (* The Identity list narrows as you type, which the row search above
           deliberately does not: sixty-seven rows is a list to look things up
           in rather than scroll. While it is open every printable key is
@@ -19712,44 +19578,10 @@ and is loaded on demand through keeper_skill.
           than characters and keep moving the cursor through what is left. *)
        | Some k
          when text_input_target state ~compact_viewport
-              = Some Text_identity_filter -> (
-           let query = Option.value state.identity_filter ~default:"" in
-           let narrow text =
-             state.identity_filter <- Some text;
-             (* Back to the top: the row the cursor was on may not be in the
-                shorter list, and keeping the index would move the marker to
-                whatever happens to sit there now. *)
-             state.identity_cursor <- 0
-           in
-           match k with
-           | "esc" -> state.identity_filter <- None
-           | "up" -> move_identity_cursor state ~delta:(-1)
-           | "down" -> move_identity_cursor state ~delta:1
-           | "\127" | "\b" ->
-             if String.equal query ""
-             then state.identity_filter <- None
-             else narrow (Masc_tui_message_layout.drop_last_utf8_scalar query)
-           | "\r" | "\n" -> (
-               match (selected_keeper state, state.identity_view) with
-               | Some keeper, Some (stamp, providers)
-                 when String.equal stamp keeper.k_name -> (
-                   match
-                     Masc_tui_identity_model.identity_cursor_provider
-                       ~query:(identity_query state) ~providers
-                       state.identity_cursor
-                   with
-                   | Some (provider_id, label) ->
-                     state.identity_login <- None;
-                     state.identity_attempt_error <- None;
-                     Masc_tui_identity_requests.launch_login state ~host:server_peer_host ~deliver:(fun message -> enqueue_async async_messages message)
-                       ~keeper_name:keeper.k_name ~provider_id ~label
-                   | None -> ())
-               | Some _, (Some _ | None) | None, _ -> ())
-           | s
-             when (String.length s = 1 && Char.code s.[0] >= 32)
-                  || (String.length s > 1 && Char.code s.[0] >= 0x80) ->
-             narrow (query ^ s)
-           | _ -> ())
+              = Some Text_identity_filter ->
+           Masc_tui_identity_input.filter_key state
+             ~move_cursor:(fun ~delta -> move_identity_cursor state ~delta)
+             ~login:(fun ~keeper_name ~provider_id ~label -> Masc_tui_identity_requests.launch_login state ~host:server_peer_host ~deliver:(fun message -> enqueue_async async_messages message) ~keeper_name ~provider_id ~label) k
        | Some k
          when text_input_target state ~compact_viewport
               = Some Text_github_token -> (
@@ -20514,46 +20346,15 @@ and is loaded on demand through keeper_skill.
               && state.detail_tab = Detail_identity
               && String.length digit = 1
               && digit.[0] >= '1'
-              && digit.[0] <= '9' -> (
-           let wanted = Char.code digit.[0] - Char.code '1' in
-           match (selected_keeper state, state.identity_view) with
-           | Some keeper, Some (stamp, providers)
-             when String.equal stamp keeper.k_name -> (
-               match
-                 List.nth_opt
-                   (Masc_tui_identity_model.identity_connectable
-                      ~query:(identity_query state) providers)
-                   wanted
-               with
-               | Some (provider_id, label) ->
-                   (* Left where the operator pressed, so the marker and the
-                      arrows carry on from the row they just started. *)
-                   state.identity_cursor <- wanted;
-                   state.identity_login <- None;
-                   state.identity_attempt_error <- None;
-                   Masc_tui_identity_requests.launch_login state ~host:server_peer_host ~deliver:(fun message -> enqueue_async async_messages message)
-                     ~keeper_name:keeper.k_name ~provider_id ~label
-               | None -> ())
-           | Some _, (Some _ | None) | None, _ -> ())
+              && digit.[0] <= '9' ->
+           Masc_tui_identity_input.start_numbered state
+             ~login:(fun ~keeper_name ~provider_id ~label -> Masc_tui_identity_requests.launch_login state ~host:server_peer_host ~deliver:(fun message -> enqueue_async async_messages message) ~keeper_name ~provider_id ~label)
+             ~index:(Char.code digit.[0] - Char.code '1')
        | Some ("R" | "r")
          when state.view = Keepers Keeper_detail
-              && state.detail_tab = Detail_identity -> (
-           match (selected_keeper state, state.identity_view) with
-           | Some keeper, Some (stamp, providers)
-             when String.equal stamp keeper.k_name ->
-               let attached =
-                 List.filter_map
-                   (function
-                     | Masc_tui_identity_model.Identity_declared
-                         { idp_id; idp_tools = Some _; _ } -> Some idp_id
-                     | Masc_tui_identity_model.Identity_declared _
-                     | Masc_tui_identity_model.Identity_unreadable _ -> None)
-                   providers
-               in
-               if attached <> [] then
-                 Masc_tui_identity_requests.launch_refresh state ~host:server_peer_host ~deliver:(fun message -> enqueue_async async_messages message)
-                   ~keeper_name:keeper.k_name ~provider_ids:attached
-           | Some _, (Some _ | None) | None, _ -> ())
+              && state.detail_tab = Detail_identity ->
+           Masc_tui_identity_input.refresh_attached state
+             ~refresh:(fun ~keeper_name ~provider_ids -> Masc_tui_identity_requests.launch_refresh state ~host:server_peer_host ~deliver:(fun message -> enqueue_async async_messages message) ~keeper_name ~provider_ids)
        | Some "R" when state.view = Approvals ->
            (match
               Approval_authority.resolve ~presented:!presented_approval
@@ -23116,22 +22917,9 @@ and is loaded on demand through keeper_skill.
           the cursor is the only way to reach a row. *)
        | Some "\r" | Some "\n"
          when state.view = Keepers Keeper_detail
-              && state.detail_tab = Detail_identity -> (
-           match (selected_keeper state, state.identity_view) with
-           | Some keeper, Some (stamp, providers)
-             when String.equal stamp keeper.k_name -> (
-               match
-                 Masc_tui_identity_model.identity_cursor_provider
-                   ~query:(identity_query state) ~providers
-                   state.identity_cursor
-               with
-               | Some (provider_id, label) ->
-                   state.identity_login <- None;
-                   state.identity_attempt_error <- None;
-                   Masc_tui_identity_requests.launch_login state ~host:server_peer_host ~deliver:(fun message -> enqueue_async async_messages message)
-                     ~keeper_name:keeper.k_name ~provider_id ~label
-               | None -> ())
-           | Some _, (Some _ | None) | None, _ -> ())
+              && state.detail_tab = Detail_identity ->
+           Masc_tui_identity_input.start_cursor state
+             ~login:(fun ~keeper_name ~provider_id ~label -> Masc_tui_identity_requests.launch_login state ~host:server_peer_host ~deliver:(fun message -> enqueue_async async_messages message) ~keeper_name ~provider_id ~label)
        | Some ("\r" | "\n" | "right") when state.repository_changes_open -> (
            match state.repository_changes_diff_path with
            | Some _ -> ()

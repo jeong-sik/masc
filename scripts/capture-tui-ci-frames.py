@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+from datetime import datetime
 import hashlib
 import json
 import os
@@ -17,6 +18,7 @@ from pathlib import Path
 import shutil
 import signal
 import socket
+import string
 import subprocess
 import sys
 import tempfile
@@ -27,12 +29,48 @@ def digest(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def record_payload(line: str) -> str | None:
+    # gh run --log prefixes stdout with job, step and an ISO timestamp.
+    # Only unwrap that transport envelope; echoed workflow commands containing
+    # a record marker remain commands, not records emitted by the PTY suite.
+    envelope = line.split("\t", 2)
+    if len(envelope) == 1:
+        return line
+    if len(envelope) != 3:
+        return None
+    timestamp, separator, payload = envelope[2].partition(" ")
+    if not separator:
+        return None
+    try:
+        datetime.fromisoformat(timestamp)
+    except ValueError:
+        return None
+    return payload
+
+
 def captures(log: str) -> list[dict]:
     result = []
+    marker = "STUDIO_CAPTURE="
     for line in log.splitlines():
-        marker = "STUDIO_CAPTURE="
-        if marker in line:
-            result.append(json.loads(line.split(marker, 1)[1]))
+        payload = record_payload(line)
+        if payload is None:
+            continue
+        if payload.startswith(marker):
+            result.append(json.loads(payload[len(marker):]))
+    return result
+
+
+def binary_hashes(log: str) -> set[str]:
+    result = set()
+    marker = "STUDIO_BINARY_SHA256="
+    for line in log.splitlines():
+        payload = record_payload(line)
+        if payload is None or not payload.startswith(marker):
+            continue
+        value = payload[len(marker):]
+        if len(value) != 64 or any(char not in string.hexdigits for char in value):
+            raise ValueError("malformed STUDIO_BINARY_SHA256 record")
+        result.add(value.lower())
     return result
 
 
@@ -42,7 +80,7 @@ def main() -> None:
     parser.add_argument("--run-info", type=Path)
     parser.add_argument("--expected-head")
     parser.add_argument("--out", type=Path)
-    parser.add_argument("--suite-pass-marker", required=False)
+    parser.add_argument("--suite-pass-marker")
     parser.add_argument("--replay", type=Path, help=argparse.SUPPRESS)
     args = parser.parse_args()
     if args.replay is not None:
@@ -66,16 +104,16 @@ def main() -> None:
     frames = captures(log)
     if not frames:
         raise SystemExit("log contains no STUDIO_CAPTURE records")
-    binary_hashes = {
-        line.split("STUDIO_BINARY_SHA256=", 1)[1].strip()
-        for line in log.splitlines() if "STUDIO_BINARY_SHA256=" in line
-    }
+    binaries = binary_hashes(log)
     args.out.mkdir(parents=True, exist_ok=True)
     evidence = {
         "provenance": "xterm replay of CI fixture PTY frames",
         "source_sha": run["headSha"], "run": run,
-        "binary_sha256": sorted(binary_hashes),
-        "suite_pass_seen": bool(args.suite_pass_marker and args.suite_pass_marker in log),
+        "binary_sha256": sorted(binaries),
+        "suite_pass_seen": any(
+            record_payload(line) == "tui dashboard studio PTY: PASS"
+            for line in log.splitlines()
+        ),
         "log_sha256": digest(args.log.read_bytes()), "frames": [],
     }
     with sync_playwright() as playwright:

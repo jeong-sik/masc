@@ -1,9 +1,20 @@
 import { describe, expect, it } from 'vitest'
-import { candleAmountText, readCandleBalance, readCandleObservation, readCandleRosterObservation } from './candle-observation'
+import { candleAmountText, readCandleAccountRevision, readCandleBalance, readCandleObservation, readCandleRosterObservation } from './candle-observation'
 
 const ready = { status: 'ready', issued_milli: '18446744073709551614000', burned_milli: '1000', circulating_milli: '18446744073709551613000' } as const
 
 describe('Candle observation', () => {
+  it('retains exact canonical account revisions and distinguishes missing from null', () => {
+    const revision = 'a1'.repeat(32)
+    expect(readCandleAccountRevision(revision)).toBe(revision)
+    expect(readCandleAccountRevision(null)).toBeNull()
+    for (const value of [undefined, 0, {}, '', revision.slice(1), revision + '0',
+      revision.toUpperCase(), 'g'.repeat(64), ' ' + revision, revision + ' ',
+      revision + '\n', revision + '\r', revision + '\r\n', revision + '\u2028', revision + '\u2029']) {
+      expect(readCandleAccountRevision(value)).toBeUndefined()
+    }
+  })
+
   it('keeps aggregate and wallet amounts exact beyond machine integers', () => {
     expect(readCandleObservation(ready)).toEqual(ready)
     expect(readCandleBalance('9007199254740993')).toBe('9007199254740993')

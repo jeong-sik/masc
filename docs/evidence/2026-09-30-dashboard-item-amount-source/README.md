@@ -24,4 +24,12 @@ Required current-head CI selectors include `src/api/keeper-items.test.ts`, `src/
 
 ## Assigned publication
 
-PR #40252 overlays only this reviewed delta on actual #40241 headfc5bb8afc5cfe2a25a74fa70afc3a2477cc04337. No placeholder fragment was published. The three source/test files remain byte identical to reviewed2dbbc6e; the40252 fragment and manifest replace local placeholder data. Source parity is not a current typecheck/test/browser result.
+At first publication, PR #40252 overlaid this child delta on #40241 headfc5bb8afc5cfe2a25a74fa70afc3a2477cc04337. No placeholder fragment was published. The three source/test files at d2cb2f795b9939fb7428c04392cad754e2fe4ed8 were byte identical to reviewed2dbbc6e; the40252 fragment and manifest replaced local placeholder data. This historical source parity is not a current typecheck/test/browser result.
+
+## Parent repair integration
+
+Dashboard artifact run `36689030636` failed at published child `d2cb2f795b9939fb7428c04392cad754e2fe4ed8`: Rollup could not resolve `readCandleAccountRevision`, still imported by the actual Keeper normalizer. The integration includes parent repair `5be8d8fc35164915a3507898ce6fde117f379bb6` from #40241 through a merge, without duplicating its implementation. The strict amount export and Item regressions remain intact.
+
+The original `source-checks.json`, `composition.json`, and `source-sha256.json` are historical source receipts, preserved byte for byte. Before integration, all seven manifest file hashes matched the child, but only sixteen of the seventeen local-parent boundary hashes matched the actual publication tree: the normalizer differed, as already documented for #40241. After integration, the Candle schema includes the restored revision export and this README and changelog include the integration note; their original manifest hashes no longer describe the current files. The historical receipt does not establish current-tree identity or native success.
+
+Current-head Dashboard artifact verification must cover the production bundle contract, Item public parser, Candle observation parser, Item panel, and workspace authority. Local syntax and pure predicate controls are separate from those native results and from browser or production evidence.

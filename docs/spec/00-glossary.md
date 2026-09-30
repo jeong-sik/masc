@@ -1836,8 +1836,10 @@ status: reference
   종결 Task를 읽는 단일 보존 출처(SSOT)로 동작한다. 새 Task 번호 채번(`next_task_number`) 시
   백로그 활성 Task, 삭제 영수증(`task_deletion_receipts`), 아카이브, 이벤트 원장 4개 소스의
   최댓값에 1을 더해 이전 생애주기와의 ID 충돌(aliasing)을 방지한다.
-  아카이브 파일 읽기·쓰기는 `with_file_lock` 잠금 아래에서 수행되어 병행 접근 시 손실을 막으며,
-  아카이브 항목 삭제(`drop_archive_tasks`) 시 `id` 필드가 없는 항목은 조용히 버리지 않고 보존한다.
+  아카이브 변경 트랜잭션인 추가(`append_archive_tasks`의 읽기·병합·쓰기) 및 삭제(`drop_archive_tasks`)는
+  `with_file_lock` 잠금 아래에서 수행되어 병행 변경 시 손실을 막으며(단순 조회인 `read_archive_entries`
+  및 Candle 정산 조회는 잠금 없이 읽음), 아카이브 항목 삭제(`drop_archive_tasks`) 시 `id` 필드가 없는
+  항목은 조용히 버리지 않고 보존한다.
   → [Workspace_task_id](../../lib/workspace/workspace_task_id.mli) ·
   [Candle_tasks](../../lib/candle_runtime/candle_tasks.mli) ·
   [RFC-goal-candle-ledger](../rfc/RFC-goal-candle-ledger.md)

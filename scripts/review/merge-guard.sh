@@ -81,8 +81,8 @@ check_verdict
 # Formal reviews can change while the final workflow/check API reads run.
 check_formal_review_state
 if [ -n "$batch" ]; then
-  # Both preflight and writes may publish only ROLL, with every member and
-  # ROLL itself independently approved at the final admission boundary.
+  # Only ROLL is merged. Final admission rechecks every member's fixed
+  # source review and refusal state; CI, PASS, and approval belong to ROLL.
   python3 "$here/ci-freshness.py" --repo "$repo" --pr "$pr" --head "$head" \
     --run "$run" --git-dir "$gitdir" ${batch_args[@]+"${batch_args[@]}"} --landing
 fi

@@ -29,6 +29,7 @@ def load(name, path):
 
 F = load("batch_test_freshness", HERE / "ci-freshness.py")
 B = load("batch_test_evidence", HERE / "batch_evidence.py")
+RI = load("batch_test_roll_input", HERE / "roll_input.py")
 E = B.ExitCode
 R = B.Reason
 REQUIRED = ("lint suite", "dune build @check", "dune build --profile release @check",
@@ -82,10 +83,15 @@ from pathlib import Path
 args = sys.argv[1:]
 with Path(__file__).with_name('requests.jsonl').open('a') as log:
     log.write(json.dumps(args) + '\\n')
+data = json.loads(Path(__file__).with_name('api.json').read_text())
+if args[:2] == ['run', 'download']:
+    target = Path(args[args.index('--dir') + 1])
+    target.mkdir(parents=True, exist_ok=True)
+    (target / 'roll-evidence.json').write_text(json.dumps(data['__roll_receipt']))
+    raise SystemExit(0)
 if not args or args[0] != 'api':
     raise SystemExit('fixture refuses non-API operation')
 endpoint = next(a for a in args[1:] if a == 'user' or a.startswith('repos/'))
-data = json.loads(Path(__file__).with_name('api.json').read_text())
 if any(arg in {'-X', '--method', '-f', '-F', '--field', '--raw-field'} for arg in args):
     if args[1:3] == ['-X', 'PUT'] and endpoint.endswith('/merge-async') and '__write_exit' in data:
         raise SystemExit(data['__write_exit'])
@@ -118,7 +124,7 @@ print(value)
         self.put(f"pulls/{pr}", {
             "number": pr, "state": "open", "draft": False, "merged": False,
             "merge_commit_sha": None, "user": {"login": f"author-{pr}"},
-            "base": {"ref": "main"}, "head": {"sha": head, "ref": branch}})
+            "base": {"ref": "main", "sha": self.base}, "head": {"sha": head, "ref": branch}})
         run_id = self.run_ids[pr]
         run = {"id": run_id, "run_number": 10, "workflow_id": 70,
                "name": "PR Check", "head_sha": head, "head_branch": branch,
@@ -183,19 +189,41 @@ print(value)
         members = members or list(self.heads)
         self.line = (f"batch: PASS landing: ROLL roll: {self.roll} base: {self.base} run: 900 members: "
                      + ",".join(f"{pr}@{self.heads[pr]}" for pr in members) + " by: keeper")
+        fields = {"base": self.base, "members": [
+            {"pr": pr, "head": self.heads[pr],
+             "review_base": self.get(f"pulls/{pr}")["base"]["sha"]}
+            for pr in members]}
+        body = "<!-- masc-roll-input-v1\n" + json.dumps(fields) + "\n-->"
+        self.get("pulls/99")["body"] = body
+        self.data["__roll_receipt"] = {
+            "schema": "masc.roll.run.v1", "input_digest": RI.parse_body(body)["digest"],
+            "roll_pr": 99, "roll_head": self.roll,
+            "roll_tree": self.git("rev-parse", self.roll + "^{tree}"),
+            "run_id": 900, "required_suites": ["suite-a"],
+            "executed_suites": ["suite-a"]}
         for pr in [*self.heads, 99]:
             comments = [{"id": pr * 10, "body": self.line,
                          "author_association": "COLLABORATOR", "user": {"login": "publisher"},
                          "created_at": "2026-01-01T00:40:00Z"}]
-            if pr in {*self.heads, 99}:
-                head = self.roll if pr == 99 else self.heads[pr]
+            if pr == 99:
                 comments.append({"id": pr * 10 + 1,
-                    "body": f"verdict: PASS head: {head} run: {self.run_ids[pr]} by: reviewer",
+                    "body": f"verdict: PASS head: {self.roll} run: {self.run_ids[pr]} by: reviewer",
                     "author_association": "MEMBER", "user": {"login": "reviewer"},
                     "created_at": "2026-01-01T00:41:00Z"})
             self.put(f"issues/{pr}/comments?per_page=100", comments)
+            if pr != 99:
+                member_base = self.get(f"pulls/{pr}")["base"]["sha"]
+                self.put(f"pulls/{pr}/reviews?per_page=100", [{
+                    "id": 100 + pr, "state": "COMMENTED", "author_association": "MEMBER",
+                    "user": {"login": "independent-reviewer"},
+                    "commit_id": self.heads[pr],
+                    "submitted_at": "2026-01-01T00:42:00Z",
+                    "body": (f"member-review: COMPLETE pr: {pr} "
+                             f"base: {member_base} "
+                             f"head: {self.heads[pr]} scope: full-delta by: reviewer")
+                }])
 
-    def evaluate(self, pr=1, *, landing=False, real_gates=False):
+    def evaluate(self, pr=1, *, landing=False, real_gates=False, run_override=None):
         self.fixture.write_text(json.dumps(self.data))
         with ExitStack() as stack:
             stack.enter_context(patch.dict(os.environ, {"GUARD_GH": str(self.fake)}))
@@ -206,13 +234,13 @@ print(value)
                     self.assertFalse(self.get(f"pulls/{checked_pr}")["merged"],
                                      "published batch must not invoke open-PR CI gates")
                 stack.enter_context(patch.object(B, "current_checks", side_effect=checks))
-                stack.enter_context(patch.object(B, "verdict", side_effect=lambda _f, _g, _r, m: self.run_ids[m.pr]))
             return B.evaluate(F, line=self.line, repo="o/r", pr=pr, head=self.roll if pr == 99 else self.heads[pr],
-                              run=self.run_ids[pr], git_dir=str(self.repo),
+                              run=run_override if run_override is not None else (self.run_ids[pr] if pr == 99 else None),
+                              git_dir=str(self.repo),
                               gh=str(self.fake), landing=landing)
 
     def approvals(self):
-        for pr, head in [*self.heads.items(), (99, self.roll)]:
+        for pr, head in [(99, self.roll)]:
             review = {"id": 100 + pr, "state": "APPROVED",
                       "user": {"login": "independent-reviewer"},
                       "author_association": "MEMBER", "commit_id": head,
@@ -294,6 +322,95 @@ print(value)
 
 
 
+    def test_roll_input_parser_is_exact_and_digest_is_stable(self):
+        body = self.get("pulls/99")["body"]
+        first = RI.parse_body(body)
+        fields = {"members": list(reversed(first["members"])), "base": first["base"]}
+        reordered_keys = "<!-- masc-roll-input-v1\n" + json.dumps(fields) + "\n-->"
+        self.assertNotEqual(first["digest"], RI.parse_body(reordered_keys)["digest"])
+        with self.assertRaisesRegex(ValueError, "exactly one"):
+            RI.parse_body(body + "\n" + body)
+        with self.assertRaisesRegex(ValueError, "duplicate"):
+            RI.parse_body('<!-- masc-roll-input-v1\n{"base":"'
+                          + self.base + '","base":"' + self.base
+                          + '","members":[]}\n-->')
+        with self.assertRaisesRegex(ValueError, "invalid ROLL member fields"):
+            RI.parse_body(body.replace('"review_base":', '"partial_base":'))
+
+    def test_roll_body_and_run_receipt_must_match_current_inputs(self):
+        original = copy.deepcopy(self.data)
+        self.get("pulls/99")["body"] = self.get("pulls/99")["body"].replace(
+            self.base, self.heads[1], 1)
+        self.refusal("batch_roll_input_mismatch", E.ROLL)
+        self.data = copy.deepcopy(original)
+        for field, value in [
+            ("input_digest", "sha256:" + "0" * 64),
+            ("roll_head", self.heads[1]),
+            ("roll_tree", self.base),
+            ("run_id", 901),
+            ("required_suites", []),
+            ("executed_suites", []),
+            ("executed_suites", ["suite-b"])]:
+            with self.subTest(field=field, value=value):
+                self.data["__roll_receipt"][field] = value
+                self.refusal("batch_roll_run_receipt_mismatch", E.ROLL)
+                self.data = copy.deepcopy(original)
+
+    def test_roll_body_change_during_final_admission_refuses(self):
+        moved = copy.deepcopy(self.get("pulls/99"))
+        moved["body"] = moved["body"].replace(self.heads[1], self.base, 1)
+        self.later("pulls/99", moved)
+        self.refusal("batch_roll_input_mismatch", E.ROLL)
+
+    def test_stacked_members_use_roll_ci_without_member_runs(self):
+        parent = self.heads[1]
+        child = self.change(parent, "lib/two.ml", "let two = 2\n")
+        self.git("checkout", "-q", "--detach", self.base)
+        self.git("merge", "-q", "--no-ff", "--no-edit", child)
+        self.heads[2] = child
+        self.roll = self.git("rev-parse", "HEAD")
+        self.install_pr(2, child)
+        self.install_pr(99, self.roll)
+        self.get("pulls/2")["base"] = {"ref": "branch-1", "sha": parent}
+        self.set_line()
+        self.approvals()
+        for member in (1, 2):
+            head = self.heads[member]
+            run = self.run_ids[member]
+            for endpoint in (f"actions/runs/{run}",
+                             f"actions/runs?head_sha={head}&event=pull_request&per_page=100",
+                             f"actions/runs?head_sha={head}&per_page=100",
+                             f"actions/runs/{run}/jobs?per_page=100",
+                             f"commits/{head}/check-runs?per_page=100"):
+                self.data.pop(PREFIX + "/" + endpoint, None)
+        receipt = self.evaluate(pr=99, landing=True)
+        self.assertEqual(receipt["status"], "fresh")
+        self.assertEqual(receipt["roll_run"], 900)
+        self.assertEqual([(row["pr"], row["base"], row["review_id"])
+                          for row in receipt["members"]],
+                         [(1, self.base, 101), (2, parent, 102)])
+        self.assertTrue(all("run" not in row for row in receipt["members"]))
+        landed = self.run_landing()
+        self.assertEqual((landed["status"], landed["absorption_candidates"]),
+                         ("published", [1, 2]))
+
+    def test_stacked_child_base_or_review_commit_change_refuses(self):
+        self.get("pulls/2")["base"] = {"ref": "branch-1", "sha": self.heads[1]}
+        self.refusal("batch_member_head_or_base_changed", E.MEMBER)
+        self.get("pulls/2")["base"] = {"ref": "main", "sha": self.base}
+        self.get("pulls/2/reviews?per_page=100")[0]["commit_id"] = self.base
+        self.refusal("batch_member_without_current_review", E.MEMBER)
+
+    def test_member_run_number_cannot_impersonate_roll_receipt(self):
+        self.refusal("batch_member_run_not_applicable", E.MEMBER, run_override=901)
+
+    def test_member_late_fail_refuses_without_member_ci(self):
+        self.get("issues/2/comments?per_page=100").append({
+            "id": 999, "created_at": "2026-01-01T00:50:00Z",
+            "author_association": "MEMBER", "user": {"login": "reviewer"},
+            "body": f"verdict: FAIL head: {self.heads[2]} run: 902 by: reviewer"})
+        self.refusal("batch_member_has_late_fail", E.MEMBER)
+
     def test_three_members_publish_only_tested_complete_tree(self):
         base = self.base
         for flag in "abc":
@@ -335,9 +452,10 @@ print(value)
         observation = result["preflight_observation"]
         self.assertEqual(observation["scope"], "preflight_before_merge_guard_not_write_boundary")
         self.assertEqual([(row["pr"], row["approval_ids"]) for row in observation["approvals"]],
-                         [(1, [101]), (2, [102]), (99, [199])])
+                         [(99, [199])])
         self.assertEqual(observation["members"],
-                         [{"pr": pr, "head": head, "run": self.run_ids[pr]} for pr, head in self.heads.items()])
+                         [{"pr": pr, "head": head, "base": self.base, "review_id": 100 + pr}
+                          for pr, head in self.heads.items()])
         self.assertNotIn("absorption_candidates", result)
         self.assertEqual(self.calls[self.write_read_offsets[0]:], [PREFIX + "/pulls/99"])
         self.assertEqual(self.main, self.base)
@@ -427,12 +545,12 @@ print(value)
         review["user"]["login"] = "author-99"
         self.refusal("evidence_read_failed", E.MEMBER, pr=99, landing=True)
 
-    def test_cli_final_member_approval_dismissal_refuses_without_write(self):
+    def test_cli_final_member_source_review_dismissal_refuses_without_write(self):
         self.approvals()
         review = copy.deepcopy(self.get("pulls/2/reviews?per_page=100")[0])
         review["state"] = "DISMISSED"
         # The last main read follows all CI/tree/verdict snapshots. A later
-        # member loses its approval there, immediately before admission.
+        # A member loses its source review immediately before admission.
         self.data["__after_reads"] = {PREFIX + "/commits/main": {
             "remaining": 2, "values": {
                 PREFIX + "/pulls/2/reviews": [review],
@@ -462,8 +580,8 @@ print(value)
         result = subprocess.run(args + ["--merge-check"], env=dict(os.environ, GUARD_GH=str(self.fake),
                                 PATH=str(nojq) + os.pathsep + os.environ["PATH"]),
                                 capture_output=True, text=True, timeout=20)
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual(json.loads(result.stdout), {"pr": 1, "head": self.heads[1], "approval_ids": [101]})
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn("no non-author APPROVED review", result.stdout + result.stderr)
         requests = [json.loads(line) for line in (self.root / "requests.jsonl").read_text().splitlines()]
         self.assertFalse(any(set(row) & {"-X", "--method", "-f", "-F", "--field", "--raw-field"}
                              for row in requests))
@@ -510,12 +628,12 @@ print(value)
         self.assertEqual(json.loads(result.stdout)["reason"], "landing_requires_batch")
 
     def test_red_roll_or_member_run_refuses(self):
-        for run in [900, 901, 902]:
-            with self.subTest(run=run):
-                self.get(f"actions/runs/{run}")["conclusion"] = "failure"
-                self.refusal("batch_run_not_current_successful_exact_pr_check",
-                             E.ROLL if run == 900 else E.MEMBER)
-                self.get(f"actions/runs/{run}")["conclusion"] = "success"
+        self.get("actions/runs/900")["conclusion"] = "failure"
+        self.refusal("batch_run_not_current_successful_exact_pr_check", E.ROLL)
+        self.get("actions/runs/900")["conclusion"] = "success"
+        for run in [901, 902]:
+            self.get(f"actions/runs/{run}")["conclusion"] = "failure"
+        self.assertEqual(self.evaluate()["status"], "fresh")
 
     def test_foreign_run_identity_refuses(self):
         original = copy.deepcopy(self.get("actions/runs/900"))
@@ -534,10 +652,11 @@ print(value)
         self.refusal("batch_run_not_current_successful_exact_pr_check", E.ROLL)
 
     def test_absent_run_association_requires_matching_suite(self):
-        self.get("actions/runs/901")["pull_requests"] = []
+        self.get("actions/runs/900")["pull_requests"] = []
         self.assertEqual(self.evaluate()["status"], "fresh")
-        self.get("check-suites/1901")["pull_requests"] = [{"number": 7}]
-        self.refusal("batch_run_suite_not_linked_to_pr", E.MEMBER)
+        self.get("check-suites/1900")["pull_requests"] = [{"number": 7}]
+        self.put("pulls/7", copy.deepcopy(self.get("pulls/1")))
+        self.refusal("batch_roll_pr_identity_unavailable", E.ROLL)
 
     def test_empty_run_association_rejects_ambiguous_suite(self):
         run = self.get("actions/runs/900")
@@ -575,8 +694,8 @@ print(value)
                 self.get(f"issues/{pr}/comments?per_page=100")[0]["author_association"] = "COLLABORATOR"
 
     def test_formal_change_request_refuses(self):
-        self.put("pulls/2/reviews?per_page=100", [
-            {"id": 1, "state": "CHANGES_REQUESTED", "user": {"login": "reviewer"}}])
+        self.get("pulls/2/reviews?per_page=100").append(
+            {"id": 200, "state": "CHANGES_REQUESTED", "user": {"login": "reviewer"}})
         self.refusal("batch_member_has_open_change_request", E.MEMBER)
 
     def test_roll_formal_change_request_refuses_initial_and_late(self):
@@ -659,14 +778,17 @@ print(value)
         self.later("pulls/99", moved)
         self.refusal("batch_roll_or_main_moved_during_check", E.INVALID)
 
-    def test_late_structured_verdict_run_change_refuses(self):
+    def test_late_source_review_change_refuses(self):
+        actual = B.member_review
         counts = {1: 0, 2: 0}
-        def verdict(_f, _gh, _repo, member):
+        def review(f, gh, prefix, member, base, author):
+            result = actual(f, gh, prefix, member, base, author)
             counts[member.pr] += 1
-            return 999 if member.pr == 2 and counts[2] > 1 else self.run_ids[member.pr]
-        # Supply this gate directly so evaluate does not replace our sequence.
-        with patch.object(B, "current_checks"), patch.object(B, "verdict", side_effect=verdict):
-            self.refusal("batch_member_verdict_changed_during_check", E.MEMBER, real_gates=True)
+            if member.pr == 2 and counts[2] > 1:
+                result["id"] = 999
+            return result
+        with patch.object(B, "member_review", side_effect=review):
+            self.refusal("batch_member_review_changed_during_check", E.MEMBER)
 
     def test_late_newer_success_invalidates_cited_roll_run(self):
         endpoint = f"actions/runs?head_sha={self.roll}&event=pull_request&per_page=100"
@@ -683,24 +805,22 @@ print(value)
     def test_real_shell_gate_rejects_check_failure_hidden_by_green_run(self):
         if not shutil.which("jq"):
             self.skipTest("real shell gates require jq")
-        self.get(f"commits/{self.heads[2]}/check-runs?per_page=100")["check_runs"][0]["conclusion"] = "failure"
-        self.refusal("evidence_read_failed", E.MEMBER, real_gates=True)
+        self.get(f"commits/{self.roll}/check-runs?per_page=100")["check_runs"][0]["conclusion"] = "failure"
+        self.refusal("evidence_read_failed", E.ROLL, real_gates=True)
 
-    def test_real_shell_verdict_rejects_outsider_pass(self):
-        if not shutil.which("jq"):
-            self.skipTest("real shell gates require jq")
-        self.get("issues/2/comments?per_page=100")[1]["author_association"] = "NONE"
-        self.refusal("batch_member_without_current_pass", E.MEMBER, real_gates=True)
+    def test_source_review_rejects_outsider(self):
+        self.get("pulls/2/reviews?per_page=100")[0]["author_association"] = "NONE"
+        self.refusal("batch_member_without_current_review", E.MEMBER)
 
     def test_real_shell_final_ci_gate_rejects_late_check_failure(self):
         if not shutil.which("jq"):
             self.skipTest("real shell gates require jq")
-        endpoint = f"commits/{self.heads[2]}/check-runs?per_page=100"
+        endpoint = f"commits/{self.roll}/check-runs?per_page=100"
         good = copy.deepcopy(self.get(endpoint))
         failed = copy.deepcopy(good)
         failed["check_runs"][0]["conclusion"] = "failure"
         self.data["__responses"] = {PREFIX + "/" + endpoint: [good, failed]}
-        self.refusal("evidence_read_failed", E.MEMBER, real_gates=True)
+        self.refusal("evidence_read_failed", E.ROLL, real_gates=True)
 
     def test_main_move_during_final_roll_check_refuses(self):
         if not shutil.which("jq"):
@@ -746,9 +866,9 @@ print(value)
                             "author_association": "MEMBER", "user": {"login": "reviewer"}}])
                     self.fixture.write_text(json.dumps(self.data))
                     result = subprocess.run([
-                        "bash", str(HERE / script), "--check", "--repo", "o/r", "--pr", "99" if script == "merge-guard.sh" else "1",
-                        "--head", self.roll if script == "merge-guard.sh" else self.heads[1],
-                        "--run", "900" if script == "merge-guard.sh" else "901", "--git-dir", str(self.repo),
+                        "bash", str(HERE / script), "--check", "--repo", "o/r", "--pr", "99",
+                        "--head", self.roll,
+                        "--run", "900", "--git-dir", str(self.repo),
                         "--batch", str(batch)], env=dict(os.environ, GUARD_GH=str(self.fake)),
                         capture_output=True, text=True, timeout=120)
                     if state == "valid":
@@ -758,7 +878,7 @@ print(value)
                         self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
                         reason = ("batch_roll_review_refuses_evidence" if state == "roll-fail"
                                   else "batch_member_has_open_change_request")
-                        if script == "merge-guard.sh" and state == "roll-cr":
+                        if state == "roll-cr":
                             reason = "open CHANGES_REQUESTED"
                         self.assertIn(reason, result.stdout + result.stderr)
         requests = [json.loads(line) for line in (self.root / "requests.jsonl").read_text().splitlines()]
@@ -772,7 +892,7 @@ print(value)
     def test_land_entry_missing_second_approval_refuses_before_any_write(self):
         self.approvals()
         self.put("pulls/2/reviews?per_page=100", [])
-        with self.refused("evidence_read_failed", E.MEMBER):
+        with self.refused("batch_member_without_current_review", E.MEMBER):
             self.run_landing()
         self.assertEqual(self.writes, [])
 
@@ -817,21 +937,18 @@ print(value)
         self.assertEqual((code, receipt["status"]), (3, "unavailable"), receipt)
         self.assertEqual(receipt["reason"], "batch_run_not_current_successful_exact_pr_check")
 
-    def test_cli_roll_job_failure_is_three_and_member_run_failure_is_six(self):
+    def test_cli_roll_job_failure_and_member_run_irrelevance(self):
+        self.approvals()
         jobs = self.get("actions/runs/900/jobs?per_page=100")["jobs"]
         jobs[0]["conclusion"] = "failure"
         code, receipt = self.cli()
         self.assertEqual((code, receipt["reason"]), (3, "batch_required_jobs_not_all_successful"))
         jobs[0]["conclusion"] = "success"
         self.get("actions/runs/901")["conclusion"] = "failure"
-        code, receipt = self.cli()
-        self.assertEqual((code, receipt["reason"]), (6, "batch_run_not_current_successful_exact_pr_check"))
-        self.get("actions/runs/901")["conclusion"] = "success"
         member_runs = self.get(f"actions/runs?head_sha={self.heads[1]}&event=pull_request&per_page=100")
-        listed, member_runs["workflow_runs"] = member_runs["workflow_runs"], []
+        member_runs["workflow_runs"] = []
         code, receipt = self.cli()
-        self.assertEqual((code, receipt["reason"]), (6, "pr_check_run_unavailable"))
-        member_runs["workflow_runs"] = listed
+        self.assertEqual((code, receipt["status"]), (0, "checked"), receipt)
         self.get(f"actions/runs?head_sha={self.roll}&event=pull_request&per_page=100")["workflow_runs"] = []
         code, receipt = self.cli()
         self.assertEqual((code, receipt["reason"]), (3, "pr_check_run_unavailable"))
@@ -855,7 +972,7 @@ print(value)
         self.approvals()
         self.put("pulls/2/reviews?per_page=100", [])
         code, receipt = self.cli()
-        self.assertEqual((code, receipt["reason"]), (6, "evidence_read_failed"))
+        self.assertEqual((code, receipt["reason"]), (6, "batch_member_without_current_review"))
 
     def test_cli_invalid_input_and_infrastructure_are_distinct(self):
         code, receipt = self.cli(line="not a batch line\n")
@@ -870,7 +987,8 @@ print(value)
         R.EVIDENCE_READ_FAILED: {E.INFRASTRUCTURE, E.ROLL, E.MEMBER, E.LANDING, E.MAIN_OVERLAP},
         R.INVALID_APPROVAL_RECEIPT: {E.INFRASTRUCTURE},
         R.LINE_NOT_PUBLISHED_BY_TRUSTED_PARTICIPANT: {E.ROLL, E.MEMBER},
-        R.MEMBER_WITHOUT_CURRENT_PASS: {E.MEMBER},
+        R.MEMBER_WITHOUT_CURRENT_REVIEW: {E.MEMBER},
+        R.MEMBER_HAS_LATE_FAIL: {E.MEMBER},
         R.ROLL_REVIEW_REFUSES_EVIDENCE: {E.ROLL},
         R.MEMBER_HAS_OPEN_CHANGE_REQUEST: {E.ROLL, E.MEMBER},
         R.PR_CHECK_RUN_UNAVAILABLE: {E.ROLL, E.MEMBER},
@@ -883,7 +1001,10 @@ print(value)
         R.LANDING_REQUIRES_ROLL: {E.MEMBER},
         R.ROLL_ALREADY_MERGED: {E.MEMBER},
         R.ROLL_NOT_YET_MERGED: {E.MEMBER},
-        R.MEMBER_VERDICT_NAMES_ANOTHER_RUN: {E.MEMBER},
+        R.ROLL_VERDICT_NAMES_ANOTHER_RUN: {E.ROLL},
+        R.MEMBER_RUN_NOT_APPLICABLE: {E.MEMBER},
+        R.ROLL_INPUT_MISMATCH: {E.ROLL},
+        R.ROLL_RUN_RECEIPT_MISMATCH: {E.ROLL},
         R.MEMBER_HEAD_OR_BASE_CHANGED: {E.MEMBER},
         R.MEMBER_NO_LONGER_OPEN: {E.MEMBER},
         R.TREE_MERGE_CONFLICT_OR_UNAVAILABLE: {E.LANDING, E.INFRASTRUCTURE},
@@ -899,7 +1020,7 @@ print(value)
         R.FINAL_LANDING_TREE_MISMATCH: {E.LANDING},
         R.MEMBER_MOVED_DURING_CHECK: {E.MEMBER},
         R.PUBLICATION_CHANGED_DURING_CHECK: {E.MEMBER},
-        R.MEMBER_VERDICT_CHANGED_DURING_CHECK: {E.MEMBER},
+        R.MEMBER_REVIEW_CHANGED_DURING_CHECK: {E.MEMBER},
         R.ROLL_OR_MAIN_MOVED_DURING_CHECK: {E.INVALID},
     }
 
@@ -996,6 +1117,19 @@ print(value)
         self.data['user'] = {"login": "operator"}
         self.data['__write_exit'] = 4  # gh help exit-codes: authentication required.
         self.get("pulls/1")["changed_files"] = 1
+        self.put("issues/1/comments?per_page=100",
+                 self.get("issues/1/comments?per_page=100") + [{
+                     "id": 12, "created_at": "2026-01-01T00:50:00Z",
+                     "author_association": "MEMBER", "user": {"login": "reviewer"},
+                     "body": f"verdict: PASS head: {self.heads[1]} run: 901 by: reviewer"}])
+        member_approval = {
+            "id": 101, "state": "APPROVED", "author_association": "MEMBER",
+            "user": {"login": "independent-reviewer"}, "commit_id": self.heads[1],
+            "submitted_at": "2026-01-01T00:52:00Z",
+            "body": f"verdict: PASS head: {self.heads[1]} run: 901 by: reviewer\n\n"
+                    f"approve-guard: head `{self.heads[1]}` · fixture evidence"}
+        self.get("pulls/1/reviews?per_page=100").append(member_approval)
+        self.put("pulls/1/reviews/101", member_approval)
         self.put("pulls/1/files?per_page=100", [{"filename": "lib/one.ml"}])
         self.get("actions/runs/901")["created_at"] = "2026-01-01T00:30:00Z"
         self.get("actions/runs/900")["created_at"] = "2026-01-01T00:30:00Z"
@@ -1032,6 +1166,7 @@ print(value)
         for pr, head in [(1, first), (2, second), (99, roll)]:
             old = self.get(f"pulls/{pr}")["head"]["sha"]
             self.get(f"pulls/{pr}")["head"]["sha"] = head
+            self.get(f"pulls/{pr}")["base"]["sha"] = self.base
             self.get(f"actions/runs/{self.run_ids[pr]}")["head_sha"] = head
             for suffix in ["&event=pull_request&per_page=100", "&per_page=100"]:
                 runs = copy.deepcopy(self.get(f"actions/runs?head_sha={old}" + suffix))

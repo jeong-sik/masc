@@ -1,7 +1,11 @@
 """Immutable combined-tree evidence for the opt-in batch review path.
 
-The reviewed ROLL is published in one squash. Member checks, verdicts and
-approvals remain separate gates; no untested member prefix is published.
+The reviewed ROLL is published in one squash. Each member needs a non-author
+GitHub review on its current commit with a first line:
+member-review: COMPLETE pr: N base: BASE40 head: HEAD40 scope: full-delta by: KEEPER
+The base is the batch main base or the preceding member head for a stack.
+The ROLL alone supplies integrated CI, PASS, and approval. Member CI run
+numbers are never aliases for the ROLL run.
 Git merge-tree/commit-tree create objects, never edit a checkout or branch.
 """
 from dataclasses import dataclass
@@ -14,6 +18,8 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import tempfile
+import roll_input
 
 
 class ExitCode(IntEnum):
@@ -38,7 +44,8 @@ class Reason(Enum):
     EVIDENCE_READ_FAILED = "evidence_read_failed"
     INVALID_APPROVAL_RECEIPT = "invalid_approval_receipt"
     LINE_NOT_PUBLISHED_BY_TRUSTED_PARTICIPANT = "batch_line_not_published_by_trusted_participant"
-    MEMBER_WITHOUT_CURRENT_PASS = "batch_member_without_current_pass"
+    MEMBER_WITHOUT_CURRENT_REVIEW = "batch_member_without_current_review"
+    MEMBER_HAS_LATE_FAIL = "batch_member_has_late_fail"
     ROLL_REVIEW_REFUSES_EVIDENCE = "batch_roll_review_refuses_evidence"
     MEMBER_HAS_OPEN_CHANGE_REQUEST = "batch_member_has_open_change_request"
     PR_CHECK_RUN_UNAVAILABLE = "pr_check_run_unavailable"
@@ -51,7 +58,10 @@ class Reason(Enum):
     LANDING_REQUIRES_ROLL = "batch_landing_requires_roll"
     ROLL_ALREADY_MERGED = "batch_roll_already_merged"
     ROLL_NOT_YET_MERGED = "batch_roll_not_yet_merged"
-    MEMBER_VERDICT_NAMES_ANOTHER_RUN = "batch_member_verdict_names_another_run"
+    ROLL_VERDICT_NAMES_ANOTHER_RUN = "batch_roll_verdict_names_another_run"
+    MEMBER_RUN_NOT_APPLICABLE = "batch_member_run_not_applicable"
+    ROLL_INPUT_MISMATCH = "batch_roll_input_mismatch"
+    ROLL_RUN_RECEIPT_MISMATCH = "batch_roll_run_receipt_mismatch"
     MEMBER_HEAD_OR_BASE_CHANGED = "batch_member_head_or_base_changed"
     MEMBER_NO_LONGER_OPEN = "batch_member_no_longer_open"
     TREE_MERGE_CONFLICT_OR_UNAVAILABLE = "batch_tree_merge_conflict_or_unavailable"
@@ -67,7 +77,7 @@ class Reason(Enum):
     FINAL_LANDING_TREE_MISMATCH = "batch_final_landing_tree_mismatch"
     MEMBER_MOVED_DURING_CHECK = "batch_member_moved_during_check"
     PUBLICATION_CHANGED_DURING_CHECK = "batch_publication_changed_during_check"
-    MEMBER_VERDICT_CHANGED_DURING_CHECK = "batch_member_verdict_changed_during_check"
+    MEMBER_REVIEW_CHANGED_DURING_CHECK = "batch_member_review_changed_during_check"
     ROLL_OR_MAIN_MOVED_DURING_CHECK = "batch_roll_or_main_moved_during_check"
 
 
@@ -232,11 +242,45 @@ def decision(f, gh, repo, member):
         "batch-verdict", gh, repo, str(reader), str(member.pr), member.head]).split()
 
 
-def verdict(f, gh, repo, member):
+def member_review(f, gh, prefix, member, base, author):
+    """A non-author's explicit review of exactly this member's full delta."""
+    pattern = re.compile(
+        r"member-review: COMPLETE pr: ([1-9][0-9]*) base: ([0-9a-f]{40}) "
+        r"head: ([0-9a-f]{40}) scope: full-delta by: ([A-Za-z0-9._-]+)")
+    rows = [row for page in f.api_pages(
+        gh, f"{prefix}/pulls/{member.pr}/reviews?per_page=100") for row in page]
+    valid = []
+    for row in rows:
+        if (row.get("state") not in {"COMMENTED", "APPROVED"}
+                or row.get("author_association") not in {"OWNER", "MEMBER", "COLLABORATOR"}):
+            continue
+        login = row.get("user", {}).get("login")
+        if not login or login == author:
+            continue
+        first = row.get("body", "").splitlines()[:1]
+        match = pattern.fullmatch(first[0]) if first else None
+        if not match:
+            continue
+        pr, reviewed_base, reviewed_head, keeper = match.groups()
+        if (int(pr) != member.pr or reviewed_base != base or reviewed_head != member.head
+                or row.get("commit_id") != member.head or keeper in {author, login}):
+            continue
+        review_id = row.get("id")
+        submitted = row.get("submitted_at")
+        if type(review_id) is not int or review_id <= 0 or not submitted:
+            continue
+        valid.append((review_id, login, keeper, submitted, row["body"]))
+    if not valid:
+        raise Refusal(Reason.MEMBER_WITHOUT_CURRENT_REVIEW, ExitCode.MEMBER)
+    review_id, login, keeper, submitted, body = max(valid)
+    return {"id": review_id, "login": login, "by": keeper, "submitted_at": submitted,
+            "base": base, "head": member.head, "body": body}
+
+
+def member_failure(f, gh, repo, member):
     value = decision(f, gh, repo, member)
-    if len(value) != 3 or value[0] != "PASS" or not value[1].isdecimal():
-        raise Refusal(Reason.MEMBER_WITHOUT_CURRENT_PASS, ExitCode.MEMBER)
-    return int(value[1])
+    if value and value[0] == "FAIL":
+        raise Refusal(Reason.MEMBER_HAS_LATE_FAIL, ExitCode.MEMBER)
 
 
 def roll_review_state(f, gh, repo, member, run, *, required=False):
@@ -330,18 +374,60 @@ def approvals(f, gh, repo, git_dir, members):
     return receipts
 
 
+def roll_input_snapshot(pull, batch):
+    try:
+        snapshot = roll_input.parse_body(pull.get("body"))
+    except ValueError as error:
+        raise Refusal(Reason.ROLL_INPUT_MISMATCH, ExitCode.ROLL) from error
+    if (snapshot["base"] != batch.base
+            or [(row["pr"], row["head"]) for row in snapshot["members"]]
+            != [(row.pr, row.head) for row in batch.members]):
+        raise Refusal(Reason.ROLL_INPUT_MISMATCH, ExitCode.ROLL)
+    return snapshot
+
+
+def roll_run_receipt(f, gh, repo, batch, roll_pr, roll_tree, digest):
+    with tempfile.TemporaryDirectory(prefix="masc-roll-evidence-") as target:
+        try:
+            f.command([gh, "run", "download", str(batch.run), "--repo", repo,
+                       "--name", "roll-evidence", "--dir", target])
+            raw = (Path(target) / "roll-evidence.json").read_text()
+            value = json.loads(raw)
+        except (OSError, ValueError, f.Unavailable) as error:
+            raise Refusal(Reason.ROLL_RUN_RECEIPT_MISMATCH, ExitCode.ROLL) from error
+    suites = value.get("required_suites") if isinstance(value, dict) else None
+    executed = value.get("executed_suites") if isinstance(value, dict) else None
+    if (not isinstance(value, dict)
+            or value.get("schema") != "masc.roll.run.v1"
+            or value.get("input_digest") != digest
+            or value.get("roll_pr") != roll_pr
+            or value.get("roll_head") != batch.roll
+            or value.get("roll_tree") != roll_tree
+            or type(value.get("run_id")) is not int or value["run_id"] != batch.run
+            or not isinstance(suites, list) or not suites
+            or not isinstance(executed, list)
+            or any(not isinstance(s, str) or not s for s in suites + executed)
+            or len(set(suites)) != len(suites)
+            or len(set(executed)) != len(executed)
+            or set(suites) != set(executed)):
+        raise Refusal(Reason.ROLL_RUN_RECEIPT_MISMATCH, ExitCode.ROLL)
+    return value
+
+
 def same_pull(before, after):
     return (all(after.get(key) == before.get(key)
                 for key in ("state", "draft", "merged", "merge_commit_sha"))
             and after["head"]["sha"] == before["head"]["sha"]
             and after["head"]["ref"] == before["head"]["ref"]
-            and after["base"]["ref"] == before["base"]["ref"])
+            and after["base"]["ref"] == before["base"]["ref"]
+            and after["base"]["sha"] == before["base"]["sha"])
 
 
 def evaluate(f, *, line, repo, pr, head, run, git_dir, gh, landing=False, expected_main=None):
     batch = parse(line)
     prefix = "repos/" + repo
     roll, roll_pull = resolve_roll(f, gh, repo, batch)
+    snapshot = roll_input_snapshot(roll_pull, batch)
     arrived = bool(roll_pull.get("merged"))
     candidate = None if pr is None and head is None and run is None else Member(pr, head)
     if candidate is not None and candidate not in (*batch.members, roll):
@@ -353,7 +439,9 @@ def evaluate(f, *, line, repo, pr, head, run, git_dir, gh, landing=False, expect
     if candidate is None and not arrived:
         raise Refusal(Reason.ROLL_NOT_YET_MERGED, ExitCode.MEMBER)
     if candidate == roll and run != batch.run:
-        raise Refusal(Reason.MEMBER_VERDICT_NAMES_ANOTHER_RUN, ExitCode.MEMBER)
+        raise Refusal(Reason.ROLL_VERDICT_NAMES_ANOTHER_RUN, ExitCode.ROLL)
+    if candidate is not None and candidate != roll and run is not None:
+        raise Refusal(Reason.MEMBER_RUN_NOT_APPLICABLE, ExitCode.MEMBER)
     exact_run(f, gh, prefix, roll.pr, roll.head, roll_pull["head"]["ref"], batch.run, failure=ExitCode.ROLL)
     if not arrived:
         current_checks(f, gh, repo, roll.pr, roll.head, git_dir, failure=ExitCode.ROLL)
@@ -363,26 +451,42 @@ def evaluate(f, *, line, repo, pr, head, run, git_dir, gh, landing=False, expect
     trees = Trees(f, git_dir)
     for identity in (batch.base, batch.roll, main, *(member.head for member in batch.members)):
         trees.ensure(identity)
+    run_receipt = roll_run_receipt(
+        f, gh, repo, batch, roll.pr, trees.tree(batch.roll), snapshot["digest"])
 
-    pulls, member_runs = {}, {}
-    for member in batch.members:
+    pulls, member_reviews = {}, {}
+    previous = None
+    for index, member in enumerate(batch.members):
         pull = f.api(gh, f"{prefix}/pulls/{member.pr}")
         pulls[member.pr] = pull
-        if pull["head"]["sha"] != member.head or pull["base"]["ref"] != "main" or pull["draft"]:
+        parent_ref = pulls[previous.pr]["head"]["ref"] if previous is not None else None
+        if pull["base"]["ref"] == "main":
+            expected_base = batch.base
+        elif previous is not None and pull["base"]["ref"] == parent_ref:
+            expected_base = previous.head
+            if pull["base"]["sha"] != expected_base:
+                raise Refusal(Reason.MEMBER_HEAD_OR_BASE_CHANGED, ExitCode.MEMBER)
+        else:
             raise Refusal(Reason.MEMBER_HEAD_OR_BASE_CHANGED, ExitCode.MEMBER)
+        if (pull["head"]["sha"] != member.head or pull["draft"]
+                or snapshot["members"][index]["review_base"] != expected_base):
+            raise Refusal(Reason.MEMBER_HEAD_OR_BASE_CHANGED, ExitCode.MEMBER)
+        ancestry = subprocess.run(trees.git + ["merge-base", "--is-ancestor", expected_base,
+                                              member.head], capture_output=True)
+        if ancestry.returncode == 1:
+            raise Refusal(Reason.MEMBER_HEAD_OR_BASE_CHANGED, ExitCode.MEMBER)
+        if ancestry.returncode:
+            raise Refusal(Reason.TREE_MERGE_CONFLICT_OR_UNAVAILABLE, ExitCode.INFRASTRUCTURE)
         # Original PRs are absorbed, never individually merged by this path.
         # After verified publication, a Keeper may already have closed some.
         if pull.get("merged") or (not arrived and pull["state"] != "open"):
             raise Refusal(Reason.MEMBER_NO_LONGER_OPEN, ExitCode.MEMBER)
         published[member.pr] = trusted_line(f, gh, prefix, member.pr, batch)
-        cited = verdict(f, gh, repo, member)
-        if member == candidate and cited != run:
-            raise Refusal(Reason.MEMBER_VERDICT_NAMES_ANOTHER_RUN, ExitCode.MEMBER)
-        exact_run(f, gh, prefix, member.pr, member.head, pull["head"]["ref"], cited)
-        if not arrived:
-            current_checks(f, gh, repo, member.pr, member.head, git_dir)
+        member_reviews[member.pr] = member_review(
+            f, gh, prefix, member, expected_base, pull["user"]["login"])
         review_state(f, gh, prefix, member)
-        member_runs[member.pr] = cited
+        member_failure(f, gh, repo, member)
+        previous = member
 
     reconstructed, member_paths = batch.base, set()
     for member in batch.members:
@@ -431,12 +535,7 @@ def evaluate(f, *, line, repo, pr, head, run, git_dir, gh, landing=False, expect
             or (not arrived and trees.paths(main, final) & external)):
         raise Refusal(Reason.FINAL_LANDING_TREE_MISMATCH, ExitCode.LANDING)
 
-    # Finish expensive CI reads before final identity/decision snapshots.
-    for member in batch.members:
-        exact_run(f, gh, prefix, member.pr, member.head,
-                  pulls[member.pr]["head"]["ref"], member_runs[member.pr])
-        if not arrived:
-            current_checks(f, gh, repo, member.pr, member.head, git_dir)
+    # Recheck the ROLL run, then the member review and refusal snapshots.
     exact_run(f, gh, prefix, roll.pr, roll.head, roll_pull["head"]["ref"], batch.run, failure=ExitCode.ROLL)
     if not arrived:
         current_checks(f, gh, repo, roll.pr, roll.head, git_dir, failure=ExitCode.ROLL)
@@ -446,10 +545,15 @@ def evaluate(f, *, line, repo, pr, head, run, git_dir, gh, landing=False, expect
             raise Refusal(Reason.MEMBER_MOVED_DURING_CHECK, ExitCode.MEMBER)
         if trusted_line(f, gh, prefix, member.pr, batch) != published[member.pr]:
             raise Refusal(Reason.PUBLICATION_CHANGED_DURING_CHECK, ExitCode.MEMBER)
-        if verdict(f, gh, repo, member) != member_runs[member.pr]:
-            raise Refusal(Reason.MEMBER_VERDICT_CHANGED_DURING_CHECK, ExitCode.MEMBER)
+        expected_base = member_reviews[member.pr]["base"]
+        if member_review(f, gh, prefix, member, expected_base,
+                         pulls[member.pr]["user"]["login"]) != member_reviews[member.pr]:
+            raise Refusal(Reason.MEMBER_REVIEW_CHANGED_DURING_CHECK, ExitCode.MEMBER)
         review_state(f, gh, prefix, member)
+        member_failure(f, gh, repo, member)
     end_roll = f.api(gh, f"{prefix}/pulls/{roll.pr}")
+    if roll_input_snapshot(end_roll, batch) != snapshot:
+        raise Refusal(Reason.ROLL_INPUT_MISMATCH, ExitCode.ROLL)
     roll_review_state(f, gh, repo, roll, batch.run, required=landing)
     if (not same_pull(roll_pull, end_roll)
             or trusted_line(f, gh, prefix, roll.pr, batch, failure=ExitCode.ROLL) != published[roll.pr]
@@ -457,14 +561,16 @@ def evaluate(f, *, line, repo, pr, head, run, git_dir, gh, landing=False, expect
         raise Refusal(Reason.ROLL_OR_MAIN_MOVED_DURING_CHECK, ExitCode.INVALID)
     approval_receipts = None
     if landing:
-        # Final admission boundary: check every bound approval AFTER all
-        # expensive evidence and mutable decision reads. DISMISSED is not an
-        # approval. Separate GitHub reads still cannot provide atomic CAS.
-        approval_receipts = approvals(f, gh, repo, git_dir, (*batch.members, roll))
+        # The ROLL alone needs a bound approval. Member source reviews and
+        # refusal state were re-read above; no member CI or approval is inferred.
+        approval_receipts = approvals(f, gh, repo, git_dir, (roll,))
     result = {"status": "published" if arrived else "fresh", "kind": "batch", "head": head,
               "run": run, "main": main, "base": batch.base, "roll": batch.roll,
               "roll_pr": roll.pr, "roll_run": batch.run,
-              "members": [{"pr": member.pr, "head": member.head, "run": member_runs[member.pr]}
+              "input_digest": snapshot["digest"], "run_receipt": run_receipt,
+              "members": [{"pr": member.pr, "head": member.head,
+                           "base": member_reviews[member.pr]["base"],
+                           "review_id": member_reviews[member.pr]["id"]}
                           for member in batch.members],
               "tree": trees.tree(final), "external_paths": sorted(external),
               "overlap": [], "dependencies": [], "commits": []}

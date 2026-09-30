@@ -388,7 +388,7 @@ def main():
                         help="Cited run; omitted only for pre-review queue inspection")
     parser.add_argument("--format", choices=("json", "ledger"), default="json")
     parser.add_argument("--batch", help="File containing the published immutable batch line")
-    parser.add_argument("--landing", action="store_true", help="Require the ROLL publication target and every bound approval")
+    parser.add_argument("--landing", action="store_true", help="Require the ROLL publication target, member source reviews, and ROLL approval")
     args = parser.parse_args()
     # Only --batch imports batch_evidence; the approve-guard self-test copies
     # this file without it. A batch Refusal carries its own exit code.

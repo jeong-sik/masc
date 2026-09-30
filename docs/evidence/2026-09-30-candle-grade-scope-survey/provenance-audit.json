@@ -1,0 +1,3345 @@
+{
+  "scope": "Provenance and structural checks, not semantic acceptance",
+  "source_commit": "4fae8f4e3fef99a0b23871dd6bfc58a0250df43f",
+  "runtime_id": "glm-coding.glm-5.3-flash",
+  "executable_sha256": "fd5d67fd9befb6349f20521f1ea86759498d3d83187bbb2812808403df495a19",
+  "results_sha256": "24ee128719e32e999f9b27d77f067bf7e663d4c071939dfdf384dc6a9114bd22",
+  "complete_pairs": 400,
+  "unique_run_ids": 400,
+  "status_counts": {
+    "ok": 400
+  },
+  "selected_slots": {
+    "glm-coding.glm-5.3-flash": 400
+  },
+  "actor": "/fixture/glm-grade-scope-survey-20x20",
+  "actual_inputs_match_frozen_corpus": true,
+  "receipt_templates_match_frozen_prompt_files": true,
+  "one_identical_rendered_prompt_per_case": true,
+  "one_dispatch_per_run_to_declared_slot": true,
+  "receipt_results_match_reported_decisions": true,
+  "registry_sha256": "cce6f2f3282c4507e09d4e629e18a50bd988a33bb0acc13c07aa7b87d4d0b330",
+  "registered_before_completed_with_matching_durable_payloads": true,
+  "cases": {
+    "human-reference-01": {
+      "input_sha256": "a6931445a9132fe25d14b6c95ed1cb5a41033456ab28dd447377ac305bad697e",
+      "rendered_prompt_sha256": "30cadf44f24bd3f349649d106dd43a37ddefba286d95143e029209490e8e3109",
+      "decisions": [
+        {
+          "trial": 1,
+          "run_id": "candle-appraisal-ae7c20867fa80077827012ce33d6a835",
+          "status": "ok",
+          "answer": {
+            "grade": "trivial"
+          }
+        },
+        {
+          "trial": 2,
+          "run_id": "candle-appraisal-799d4defccaa4be11e1040d182fc6af8",
+          "status": "ok",
+          "answer": {
+            "grade": "trivial"
+          }
+        },
+        {
+          "trial": 3,
+          "run_id": "candle-appraisal-a6ba824141f0c49d51186d22bfe80a42",
+          "status": "ok",
+          "answer": {
+            "grade": "trivial"
+          }
+        },
+        {
+          "trial": 4,
+          "run_id": "candle-appraisal-8be5af58864ee2452a6989be66f8a968",
+          "status": "ok",
+          "answer": {
+            "grade": "trivial"
+          }
+        },
+        {
+          "trial": 5,
+          "run_id": "candle-appraisal-919fb2e01c93cd10d508cccf8b1783ea",
+          "status": "ok",
+          "answer": {
+            "grade": "trivial"
+          }
+        },
+        {
+          "trial": 6,
+          "run_id": "candle-appraisal-f0fa67ff31b7c6d9ea5afc5bb66c51b0",
+          "status": "ok",
+          "answer": {
+            "grade": "trivial"
+          }
+        },
+        {
+          "trial": 7,
+          "run_id": "candle-appraisal-77a925c4d92851e96d0681c224741cb1",
+          "status": "ok",
+          "answer": {
+            "grade": "trivial"
+          }
+        },
+        {
+          "trial": 8,
+          "run_id": "candle-appraisal-e43a74b167e614220c24c5a7e4f81c3c",
+          "status": "ok",
+          "answer": {
+            "grade": "trivial"
+          }
+        },
+        {
+          "trial": 9,
+          "run_id": "candle-appraisal-4684823ca968ba5b412d55b9223339d0",
+          "status": "ok",
+          "answer": {
+            "grade": "trivial"
+          }
+        },
+        {
+          "trial": 10,
+          "run_id": "candle-appraisal-9de1d926e7f0df59a96909840e306261",
+          "status": "ok",
+          "answer": {
+            "grade": "trivial"
+          }
+        },
+        {
+          "trial": 11,
+          "run_id": "candle-appraisal-ac8242ac12c826078ad61b796158b030",
+          "status": "ok",
+          "answer": {
+            "grade": "trivial"
+          }
+        },
+        {
+          "trial": 12,
+          "run_id": "candle-appraisal-b55aae0e62e197b06e3ba48b5b033c54",
+          "status": "ok",
+          "answer": {
+            "grade": "trivial"
+          }
+        },
+        {
+          "trial": 13,
+          "run_id": "candle-appraisal-dce8be54147dcc55a4c84e3c380f75ce",
+          "status": "ok",
+          "answer": {
+            "grade": "trivial"
+          }
+        },
+        {
+          "trial": 14,
+          "run_id": "candle-appraisal-270e6ed411119e9a46ca34dc28638527",
+          "status": "ok",
+          "answer": {
+            "grade": "trivial"
+          }
+        },
+        {
+          "trial": 15,
+          "run_id": "candle-appraisal-f220ffb58d4a0fc17451c0d54159be08",
+          "status": "ok",
+          "answer": {
+            "grade": "trivial"
+          }
+        },
+        {
+          "trial": 16,
+          "run_id": "candle-appraisal-d74adb8ab505791755d81c3cc599e774",
+          "status": "ok",
+          "answer": {
+            "grade": "trivial"
+          }
+        },
+        {
+          "trial": 17,
+          "run_id": "candle-appraisal-2529b10b26aa5b277086183388fc2d25",
+          "status": "ok",
+          "answer": {
+            "grade": "trivial"
+          }
+        },
+        {
+          "trial": 18,
+          "run_id": "candle-appraisal-a3469b56124cdaa5ed8caacba6f59d18",
+          "status": "ok",
+          "answer": {
+            "grade": "trivial"
+          }
+        },
+        {
+          "trial": 19,
+          "run_id": "candle-appraisal-2021ac6cc76199c946a3f49d897b9c3a",
+          "status": "ok",
+          "answer": {
+            "grade": "trivial"
+          }
+        },
+        {
+          "trial": 20,
+          "run_id": "candle-appraisal-6f4da2b0d194360bec81bb03bccab56f",
+          "status": "ok",
+          "answer": {
+            "grade": "trivial"
+          }
+        }
+      ]
+    },
+    "human-reference-02": {
+      "input_sha256": "e424c57657f21dc3ea344e993e7375b2506d71625e2631180bb04cc0fa08918d",
+      "rendered_prompt_sha256": "d4866585f54e703f47f4878daf9daeef1fb19397073d727aa9face90ec8b38de",
+      "decisions": [
+        {
+          "trial": 1,
+          "run_id": "candle-appraisal-a4adb0a2cd625f2ddf5e05a36fcabaa5",
+          "status": "ok",
+          "answer": {
+            "grade": "trivial"
+          }
+        },
+        {
+          "trial": 2,
+          "run_id": "candle-appraisal-c6aa54f0f6ba95f77f287475984b0ae6",
+          "status": "ok",
+          "answer": {
+            "grade": "trivial"
+          }
+        },
+        {
+          "trial": 3,
+          "run_id": "candle-appraisal-bb9143a6f4774da1ad2942febd6d05a3",
+          "status": "ok",
+          "answer": {
+            "grade": "trivial"
+          }
+        },
+        {
+          "trial": 4,
+          "run_id": "candle-appraisal-a76bdd2d12102769fa4545785cb1741b",
+          "status": "ok",
+          "answer": {
+            "grade": "trivial"
+          }
+        },
+        {
+          "trial": 5,
+          "run_id": "candle-appraisal-2c1e3b05528fc91fcf4a9590ee346638",
+          "status": "ok",
+          "answer": {
+            "grade": "trivial"
+          }
+        },
+        {
+          "trial": 6,
+          "run_id": "candle-appraisal-342f678e5bc1c8d96c61857725f7889e",
+          "status": "ok",
+          "answer": {
+            "grade": "trivial"
+          }
+        },
+        {
+          "trial": 7,
+          "run_id": "candle-appraisal-d86d4c1c44e1c36f0e51b04fc1cca55c",
+          "status": "ok",
+          "answer": {
+            "grade": "trivial"
+          }
+        },
+        {
+          "trial": 8,
+          "run_id": "candle-appraisal-27284c6a79a5176cc1d2a8d95b7f3653",
+          "status": "ok",
+          "answer": {
+            "grade": "trivial"
+          }
+        },
+        {
+          "trial": 9,
+          "run_id": "candle-appraisal-2bafcac30e6d8c2276c8bb256a5b6e4d",
+          "status": "ok",
+          "answer": {
+            "grade": "trivial"
+          }
+        },
+        {
+          "trial": 10,
+          "run_id": "candle-appraisal-6b09bb59fe79c3c9d27aacd560c1cf8d",
+          "status": "ok",
+          "answer": {
+            "grade": "trivial"
+          }
+        },
+        {
+          "trial": 11,
+          "run_id": "candle-appraisal-fe2d8581f478152e88912f54901ef48d",
+          "status": "ok",
+          "answer": {
+            "grade": "trivial"
+          }
+        },
+        {
+          "trial": 12,
+          "run_id": "candle-appraisal-1bb3c7796b8c3b73384b4447b1bbbd60",
+          "status": "ok",
+          "answer": {
+            "grade": "trivial"
+          }
+        },
+        {
+          "trial": 13,
+          "run_id": "candle-appraisal-bcdb7f71dfb6fa8b79fd77ce0d19d7d5",
+          "status": "ok",
+          "answer": {
+            "grade": "trivial"
+          }
+        },
+        {
+          "trial": 14,
+          "run_id": "candle-appraisal-eda79832ee79532df81d0ab6f3195674",
+          "status": "ok",
+          "answer": {
+            "grade": "trivial"
+          }
+        },
+        {
+          "trial": 15,
+          "run_id": "candle-appraisal-d10bf9ffb60fbcdbdf8a3fc15d388333",
+          "status": "ok",
+          "answer": {
+            "grade": "trivial"
+          }
+        },
+        {
+          "trial": 16,
+          "run_id": "candle-appraisal-182765a28bd1f858990fcd9557f00855",
+          "status": "ok",
+          "answer": {
+            "grade": "trivial"
+          }
+        },
+        {
+          "trial": 17,
+          "run_id": "candle-appraisal-bc70395a42adff1c4b10d862dea70f4f",
+          "status": "ok",
+          "answer": {
+            "grade": "trivial"
+          }
+        },
+        {
+          "trial": 18,
+          "run_id": "candle-appraisal-8266a4764e2ee52e7318b7ce992531d8",
+          "status": "ok",
+          "answer": {
+            "grade": "trivial"
+          }
+        },
+        {
+          "trial": 19,
+          "run_id": "candle-appraisal-0edd221fe8fddd2fc8180d6f128d3358",
+          "status": "ok",
+          "answer": {
+            "grade": "trivial"
+          }
+        },
+        {
+          "trial": 20,
+          "run_id": "candle-appraisal-b3ba02fa8a40c444747cf4593f3500ee",
+          "status": "ok",
+          "answer": {
+            "grade": "trivial"
+          }
+        }
+      ]
+    },
+    "human-reference-03": {
+      "input_sha256": "be21d749b60954dbbd61e6f134a64d4857fb0a595a0a4cc2a1648419920e9475",
+      "rendered_prompt_sha256": "bd387fb8fd8b103cae645df9465cb2285a7989179f3c8e3a5707aee53028c757",
+      "decisions": [
+        {
+          "trial": 1,
+          "run_id": "candle-appraisal-fede685abd01c47058c6a94414020244",
+          "status": "ok",
+          "answer": {
+            "grade": "trivial"
+          }
+        },
+        {
+          "trial": 2,
+          "run_id": "candle-appraisal-91d7cd2485b42f70da348be5ed64839a",
+          "status": "ok",
+          "answer": {
+            "grade": "trivial"
+          }
+        },
+        {
+          "trial": 3,
+          "run_id": "candle-appraisal-53d518e992e2fa14af75a95589700f11",
+          "status": "ok",
+          "answer": {
+            "grade": "trivial"
+          }
+        },
+        {
+          "trial": 4,
+          "run_id": "candle-appraisal-58088532be2ac723749944c629001fbd",
+          "status": "ok",
+          "answer": {
+            "grade": "trivial"
+          }
+        },
+        {
+          "trial": 5,
+          "run_id": "candle-appraisal-5c6b8789229439afc72832129a9d6c6b",
+          "status": "ok",
+          "answer": {
+            "grade": "trivial"
+          }
+        },
+        {
+          "trial": 6,
+          "run_id": "candle-appraisal-2a102e9c694ddc0940b02183aeee3df6",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 7,
+          "run_id": "candle-appraisal-60a291e76456f49a58b1eb19d147b721",
+          "status": "ok",
+          "answer": {
+            "grade": "trivial"
+          }
+        },
+        {
+          "trial": 8,
+          "run_id": "candle-appraisal-45096eeb9ab6c4364e409641ed07e20e",
+          "status": "ok",
+          "answer": {
+            "grade": "trivial"
+          }
+        },
+        {
+          "trial": 9,
+          "run_id": "candle-appraisal-d90c827f80e4f2edd74cd9136d4d402b",
+          "status": "ok",
+          "answer": {
+            "grade": "trivial"
+          }
+        },
+        {
+          "trial": 10,
+          "run_id": "candle-appraisal-d1111c6b1cc0bcee7cc8a518f7086884",
+          "status": "ok",
+          "answer": {
+            "grade": "trivial"
+          }
+        },
+        {
+          "trial": 11,
+          "run_id": "candle-appraisal-475fafb28f7eb5d564e69af714bf3083",
+          "status": "ok",
+          "answer": {
+            "grade": "trivial"
+          }
+        },
+        {
+          "trial": 12,
+          "run_id": "candle-appraisal-06505aebfce1ab2f05dab3b078248c97",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 13,
+          "run_id": "candle-appraisal-d63b8f415bbbad08ef3131f6fa704f4a",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 14,
+          "run_id": "candle-appraisal-9d1f8f38ad19758347f3ac51ba7d1e0b",
+          "status": "ok",
+          "answer": {
+            "grade": "trivial"
+          }
+        },
+        {
+          "trial": 15,
+          "run_id": "candle-appraisal-a023b4f0146323c51fe26423dc5923ae",
+          "status": "ok",
+          "answer": {
+            "grade": "trivial"
+          }
+        },
+        {
+          "trial": 16,
+          "run_id": "candle-appraisal-53bf6534a585d70fee179a8757fefe7b",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 17,
+          "run_id": "candle-appraisal-456fb8cb86b56efb8bfb84332b8ede47",
+          "status": "ok",
+          "answer": {
+            "grade": "trivial"
+          }
+        },
+        {
+          "trial": 18,
+          "run_id": "candle-appraisal-78a48472868704ed7d2af0abcf233678",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 19,
+          "run_id": "candle-appraisal-8cdcf27f4aa4b0af20f9dd983846b8b2",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 20,
+          "run_id": "candle-appraisal-8085a18f51942b2c9d06102e5765adea",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        }
+      ]
+    },
+    "human-reference-04": {
+      "input_sha256": "26d08bb05545c54e3547edef70d56b0c3431cd2d8dccb316ae2c408991a30b66",
+      "rendered_prompt_sha256": "a807c14a9a722fda186007db39bfa4f3db190fd48495e6886467db0bb3f090b4",
+      "decisions": [
+        {
+          "trial": 1,
+          "run_id": "candle-appraisal-74bc3cd4092c5f9ac3ed8252c1db3f80",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 2,
+          "run_id": "candle-appraisal-d09dda9e3e70104f655b2461f01eeda2",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 3,
+          "run_id": "candle-appraisal-37b43d3b30ec86cd036a4c6b9025f44a",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 4,
+          "run_id": "candle-appraisal-7435623df1c9cd3af47d77570555c248",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 5,
+          "run_id": "candle-appraisal-907441916a444d36bcac2c3cc4220e88",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 6,
+          "run_id": "candle-appraisal-b50c2c47a005ef5bc6655e43120b4fac",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 7,
+          "run_id": "candle-appraisal-fb0f2473524743862121276e360eddae",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 8,
+          "run_id": "candle-appraisal-afbcdf439406784ba8c526e0af2caa49",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 9,
+          "run_id": "candle-appraisal-480d39ed908af2e4f9f1ab8fe3b5f246",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 10,
+          "run_id": "candle-appraisal-09bf0e12fe0a3054558476f832058fa5",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 11,
+          "run_id": "candle-appraisal-ceaae85aaae57598d36d2b188511093b",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 12,
+          "run_id": "candle-appraisal-2e0ac59f751e60e8ef269a36406bebd7",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 13,
+          "run_id": "candle-appraisal-dcac8ffbc343f5e049b3104bcff554f0",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 14,
+          "run_id": "candle-appraisal-ab97b98822c5e0f074876715aa3cb62d",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 15,
+          "run_id": "candle-appraisal-8f2d16cbc6844f5a9b009ac779086a71",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 16,
+          "run_id": "candle-appraisal-0ec28eca66cedaf25356d09e0320b025",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 17,
+          "run_id": "candle-appraisal-8e2efb0c00f82a9737a9e419d748bb2f",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 18,
+          "run_id": "candle-appraisal-b97984b52c3525813c93be6eca307801",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 19,
+          "run_id": "candle-appraisal-babeab9c985596432939399b81f4b2fb",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 20,
+          "run_id": "candle-appraisal-68bdb33a82a641415d56a6dafebbfffb",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        }
+      ]
+    },
+    "human-reference-05": {
+      "input_sha256": "56a52e83cc0b1e1f1d853440bdc19d2fd3d7e32de4f9e1b89336c2ef481ec3c9",
+      "rendered_prompt_sha256": "c312bd108b2cd9d08e6b285e139576ad9d474999d3ce2050fb6b14f7e4187003",
+      "decisions": [
+        {
+          "trial": 1,
+          "run_id": "candle-appraisal-82c84edf70a53b488e6027b940c20b42",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 2,
+          "run_id": "candle-appraisal-1121a968ad3810b88f3036e038240195",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 3,
+          "run_id": "candle-appraisal-ed7c7d0bc865364e75d9b5df1ee3524c",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 4,
+          "run_id": "candle-appraisal-09ee1896c0c2fafc61fae6fac5e0c328",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 5,
+          "run_id": "candle-appraisal-eda39b22dcb9e486e6a3e04f6a0f8cd7",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 6,
+          "run_id": "candle-appraisal-150ead980c811f91d1a0e828fb91dfd1",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 7,
+          "run_id": "candle-appraisal-21ed723df9cd544d44627375c14fa2d5",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 8,
+          "run_id": "candle-appraisal-a23422f6e0ba7f6918c7f8b16e4edfd6",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 9,
+          "run_id": "candle-appraisal-2d5f2530fbaa0935222f6ed7f35adba3",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 10,
+          "run_id": "candle-appraisal-fbec0dfe6a873f5e51752af8948b1606",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 11,
+          "run_id": "candle-appraisal-d9685e245cb75dfb3fc2645a687633be",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 12,
+          "run_id": "candle-appraisal-e8b3422a93e142e3ae85cb12050ceac8",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 13,
+          "run_id": "candle-appraisal-8aefdf6cbee207fe35a50319dc882df6",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 14,
+          "run_id": "candle-appraisal-26c27037c6d94c8de1756839a8a88d9c",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 15,
+          "run_id": "candle-appraisal-5d7f154f04ea0f5592c7cb8ac39ca2d0",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 16,
+          "run_id": "candle-appraisal-15215648dc95112ff4a1d90565c125df",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 17,
+          "run_id": "candle-appraisal-633e5591b3f0ff951ce7e4378dec4f45",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 18,
+          "run_id": "candle-appraisal-74521f10a69e2fa274c401dc35a86c3e",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 19,
+          "run_id": "candle-appraisal-e4cbccdafeb2f695720e2e9dbeaee99f",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 20,
+          "run_id": "candle-appraisal-01c48a0c35db60364b7165da52121181",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        }
+      ]
+    },
+    "human-reference-06": {
+      "input_sha256": "888006ec39ad55d0197c36684a448ec4acee8c0b013097a7adcfb73ed5658c98",
+      "rendered_prompt_sha256": "c845c1654f34f2cf6a9c2f2caab9a899d1484b7cbc92ba4f6b194021aa85a287",
+      "decisions": [
+        {
+          "trial": 1,
+          "run_id": "candle-appraisal-6e0cfce8c485d710ba952714b602bacb",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 2,
+          "run_id": "candle-appraisal-34c2d74e10cb9f9152523111fd46269d",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 3,
+          "run_id": "candle-appraisal-fcbe4fbe8dff88792e8d2dff68c45e31",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 4,
+          "run_id": "candle-appraisal-58796aa400218dab7ddbc14a15d1d9ba",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 5,
+          "run_id": "candle-appraisal-8a1184a0045b80f013beef767ce48371",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 6,
+          "run_id": "candle-appraisal-6f54ecffc027ceca21fe8dd65eb74052",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 7,
+          "run_id": "candle-appraisal-146c7c6bfbebff1a81ef583892a0d67b",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 8,
+          "run_id": "candle-appraisal-d32d1015cf3664c2be9e4675c21596d1",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 9,
+          "run_id": "candle-appraisal-99576e64deae5d696cdebe83e23b7f33",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 10,
+          "run_id": "candle-appraisal-6d89904a372af0768d352a6ac3b561be",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 11,
+          "run_id": "candle-appraisal-f7c081fe127def3129a5318a9eccd032",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 12,
+          "run_id": "candle-appraisal-f2f7ed540eab71d5b5ff4c8ed010d9f2",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 13,
+          "run_id": "candle-appraisal-4c0d49bdb390e63c167cc4637f5012a0",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 14,
+          "run_id": "candle-appraisal-c1a14f22b08308622bc118b418353a28",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 15,
+          "run_id": "candle-appraisal-1118c8537952f7a344c02fb6d05a4d8b",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 16,
+          "run_id": "candle-appraisal-614eaa4023e49a4fe05bc4335d4d15bf",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 17,
+          "run_id": "candle-appraisal-04d9e91df5657185a54854d360b87931",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 18,
+          "run_id": "candle-appraisal-75c7e50bb5d8074e9e31b2316e0f1ef7",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 19,
+          "run_id": "candle-appraisal-b5640e242b921e2e9cbbb045ea0caa2c",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 20,
+          "run_id": "candle-appraisal-e542b0070469c915413cf747b5fffd9b",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        }
+      ]
+    },
+    "human-reference-07": {
+      "input_sha256": "d0816d0d9bf9ddda498dee5bca36f7575d85cc8a2f2c0a5b4ed397fe8dfc7044",
+      "rendered_prompt_sha256": "40df22ff9dae1b4894dc1ede38bf294703f2b081ff40592725bbf68193c6fe0b",
+      "decisions": [
+        {
+          "trial": 1,
+          "run_id": "candle-appraisal-094387d4a19109bb19b8d003ab291f85",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 2,
+          "run_id": "candle-appraisal-2c41430910c16ca7214b27979ced40e2",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 3,
+          "run_id": "candle-appraisal-e79660124f092dedc26bf36b519cdcc4",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 4,
+          "run_id": "candle-appraisal-d40d1d1485fecb738ccd8c721ac03407",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 5,
+          "run_id": "candle-appraisal-42b05193a05ec0ecaa245f335b9bb196",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 6,
+          "run_id": "candle-appraisal-fbe3a615f7139f815c98e41772155697",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 7,
+          "run_id": "candle-appraisal-0f5481252f3c6d8e9c4a81c97f00b59f",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 8,
+          "run_id": "candle-appraisal-21c75a24045aa2d0f62ebf099fdbafd7",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 9,
+          "run_id": "candle-appraisal-2ddbc356e8aae5d996ab08ad727f4a27",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 10,
+          "run_id": "candle-appraisal-ee06c309cdbee217eccdb3b511f0f828",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 11,
+          "run_id": "candle-appraisal-3240db88f076a1f0fd10817707d61551",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 12,
+          "run_id": "candle-appraisal-d9fab579b29e3a647784b055efbc8599",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 13,
+          "run_id": "candle-appraisal-26bebb6819f13925b08dfdc12e7143e9",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 14,
+          "run_id": "candle-appraisal-4177cb04320893535b5c4181a22f2c7c",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 15,
+          "run_id": "candle-appraisal-e022cd0721b0e8ca9f03bf33b54bc692",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 16,
+          "run_id": "candle-appraisal-9b2cc0de090837575d2bf620398a7414",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 17,
+          "run_id": "candle-appraisal-c02558a631a7e85863bd8efbf4cbe9c9",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 18,
+          "run_id": "candle-appraisal-5385a968e6b8faf1e6803f85175e1ab4",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 19,
+          "run_id": "candle-appraisal-283cb2ed2d0a659b9a79cd96e9b5eb11",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 20,
+          "run_id": "candle-appraisal-fac05137081b777dec86986b8131e3a5",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        }
+      ]
+    },
+    "human-reference-08": {
+      "input_sha256": "d22615b816f4e4b9c5ed2dd3ac03833c2c4445add76fce1a5ee505ccca28ca4a",
+      "rendered_prompt_sha256": "848876e859faa30db9eb81774b8831edaaf00e0bc2dc360f624c93e42ca21a82",
+      "decisions": [
+        {
+          "trial": 1,
+          "run_id": "candle-appraisal-79c160c22388b6ff2a75498c09feb324",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 2,
+          "run_id": "candle-appraisal-b3bfe1c43291c3fc81d09bb60f7aafcd",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 3,
+          "run_id": "candle-appraisal-7806ed6431b1cbf31b78a4271b4c0999",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 4,
+          "run_id": "candle-appraisal-dad7475eaf62ae461455a92a3d852470",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 5,
+          "run_id": "candle-appraisal-9274a49292a29f3beb9e1185ffe1055e",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 6,
+          "run_id": "candle-appraisal-52d0176923e5ddb26155f2095633bfa8",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 7,
+          "run_id": "candle-appraisal-72217bcdfdae2b367fd0853a7db423eb",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 8,
+          "run_id": "candle-appraisal-288a04b13f3798c5ca671a8acff34f7b",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 9,
+          "run_id": "candle-appraisal-ab917984ea975d2a45aa11ff7ee6598b",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 10,
+          "run_id": "candle-appraisal-aa08c883b145eaaec371cc4a9ce1e908",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 11,
+          "run_id": "candle-appraisal-f357cc4e5b90b0b27a3a904290868d11",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 12,
+          "run_id": "candle-appraisal-d67e47b7f2c4c6a135d6e98ac05cdbee",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 13,
+          "run_id": "candle-appraisal-e387a0589937cab4645c5247ef1dcc15",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 14,
+          "run_id": "candle-appraisal-5d487009b2165ffe47e0924bda86c1f4",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 15,
+          "run_id": "candle-appraisal-8b4aa1c56046f3dc2fd516f9ac2ba376",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 16,
+          "run_id": "candle-appraisal-4c3978800782358d4268720208c266f7",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 17,
+          "run_id": "candle-appraisal-d24cc0a2e06a596b944c6700ec21f1c7",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 18,
+          "run_id": "candle-appraisal-2794c5350fdfe2127b8f570624d37d5f",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 19,
+          "run_id": "candle-appraisal-b3b763b2bcc899ea61b402c780406802",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 20,
+          "run_id": "candle-appraisal-cf1cccd1974725549ed068ab54940d4a",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        }
+      ]
+    },
+    "human-reference-09": {
+      "input_sha256": "082a609fb11e121a8d5f3e3b4cc431a13cdb55e4175661329add260d33dfaf5c",
+      "rendered_prompt_sha256": "87ce86c963c8b436659bad0975ba89fa3e743d953b38807fe33f5c82440156d1",
+      "decisions": [
+        {
+          "trial": 1,
+          "run_id": "candle-appraisal-32039081e0a9be67bb0a0b3ef50628e4",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 2,
+          "run_id": "candle-appraisal-b95b7ba9cd20f03f79990545d83724a2",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 3,
+          "run_id": "candle-appraisal-35cf1cb39e67ee441c9356b55068d4c7",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 4,
+          "run_id": "candle-appraisal-7ed340c63a131435cdc397c6ecd521d0",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 5,
+          "run_id": "candle-appraisal-e1a78439784a0910065e336c69fb214c",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 6,
+          "run_id": "candle-appraisal-a6b4b15356c67a69e64e443ff628f50e",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 7,
+          "run_id": "candle-appraisal-39dbcbf691c0545476ddd51d9f37bdc0",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 8,
+          "run_id": "candle-appraisal-5e085d7040108da4235691bb3bda09fa",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 9,
+          "run_id": "candle-appraisal-517ef06d676f9953d14716b17674e0c2",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 10,
+          "run_id": "candle-appraisal-222d3044325cc26a12b4d3ee6b46a768",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 11,
+          "run_id": "candle-appraisal-0b8895c12387557b280fc8a5164e9f01",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 12,
+          "run_id": "candle-appraisal-fbd897dd79892d774dd8d0827c922753",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 13,
+          "run_id": "candle-appraisal-ad8f334647c3f1310c3e499c38ba658e",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 14,
+          "run_id": "candle-appraisal-6dce072d42e67287891d7ba12edb27e1",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 15,
+          "run_id": "candle-appraisal-1c1f90e422e09b0bade4bcd8962a711e",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 16,
+          "run_id": "candle-appraisal-47e9d299ec8b3af08023cd2c46a5a9cb",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 17,
+          "run_id": "candle-appraisal-7f54803a8a483b4e268d67f1edc8e592",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 18,
+          "run_id": "candle-appraisal-3334ab4620cef7f6541c99ac5e80748d",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 19,
+          "run_id": "candle-appraisal-f4b0466d692cc03425a163798b16317a",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 20,
+          "run_id": "candle-appraisal-04426188d843e989a23b897bb520a0a8",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        }
+      ]
+    },
+    "human-reference-10": {
+      "input_sha256": "89dae200fd32c435b60e9edd8f4c38665aef9b11a701200f0d5e76c1a535396d",
+      "rendered_prompt_sha256": "200f1a43c1399b1e5c80dfbef26f4fb7eb96960954278ea42607b57f8a43e593",
+      "decisions": [
+        {
+          "trial": 1,
+          "run_id": "candle-appraisal-b42c2e1345d01a8b8bea4f8e83a1265e",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 2,
+          "run_id": "candle-appraisal-8adc0117776f6b06351de495ea29db7e",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 3,
+          "run_id": "candle-appraisal-dc514ffad29bdaf6bc1e1a8a1935d2fb",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 4,
+          "run_id": "candle-appraisal-c4e6a924ce1f2f8105dd3e3fdde0b26f",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 5,
+          "run_id": "candle-appraisal-b74f157b4cc246c742104823f778162b",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 6,
+          "run_id": "candle-appraisal-960a8bfe1e0dbfa53fcb53bc6f029e39",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 7,
+          "run_id": "candle-appraisal-d944c7f1d85521b7b0afec49c827e619",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 8,
+          "run_id": "candle-appraisal-b2403c70869cfb3684fc7ec2c0067418",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 9,
+          "run_id": "candle-appraisal-e82ec2ae4e5ab7e2318e70659dfb7540",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 10,
+          "run_id": "candle-appraisal-1d3d6158ad28a1669c281cae6a4d9f14",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 11,
+          "run_id": "candle-appraisal-f499e845bad39e5acf7c6836f33d2002",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 12,
+          "run_id": "candle-appraisal-3460da1bdca75f22255e5c0a21911c4c",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 13,
+          "run_id": "candle-appraisal-07eb16247a30b7669f8be9ba357311f7",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 14,
+          "run_id": "candle-appraisal-f2601ed810a3bc403bad4a4fffc8abfe",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 15,
+          "run_id": "candle-appraisal-92eea248378815eed8577b9a13219032",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 16,
+          "run_id": "candle-appraisal-9abb89634ac043c27717282f6aa99d79",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 17,
+          "run_id": "candle-appraisal-094243edf8545aa0896bc8ca4afcbeb4",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 18,
+          "run_id": "candle-appraisal-29a1a2f15fc66727d59739d8d86e4435",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 19,
+          "run_id": "candle-appraisal-f5dddfc54d775bcc7bf6e595dbf525fb",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 20,
+          "run_id": "candle-appraisal-5193e7ad36a888093712548f3fae79cf",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        }
+      ]
+    },
+    "human-reference-11": {
+      "input_sha256": "6f5d3ab3af0f43d6b93d0b16e46c0111d6decb0f4299edc27d37d6195d45b7b6",
+      "rendered_prompt_sha256": "3a2d16c869b88b0a470ae5d390e2bd6dd6a17b100466612ebb7843cb87464b9c",
+      "decisions": [
+        {
+          "trial": 1,
+          "run_id": "candle-appraisal-dd3f097b042cdb3fbf4291bae7d292d0",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 2,
+          "run_id": "candle-appraisal-3a74ca51a89c910c3e856964a58a65f2",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 3,
+          "run_id": "candle-appraisal-e25cf386d0877a1ded88f3099fd5429e",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 4,
+          "run_id": "candle-appraisal-d38967da284bea5774bfb933398f3b8d",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 5,
+          "run_id": "candle-appraisal-389bf269c07e759b5d1be2cf23dfae63",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 6,
+          "run_id": "candle-appraisal-41aa90f716ed9a513cbcde7958cd5ba9",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 7,
+          "run_id": "candle-appraisal-993e31b31bec2ae9c9037337150a870a",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 8,
+          "run_id": "candle-appraisal-e70945cdd59ff0454fdfecdeb3295c7d",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 9,
+          "run_id": "candle-appraisal-b064451b5d136e39fbc999454ec71417",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 10,
+          "run_id": "candle-appraisal-da72c053d339ed7033cade648f2dc245",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 11,
+          "run_id": "candle-appraisal-fefe7a957f1ae654f8c3c0c530c47acd",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 12,
+          "run_id": "candle-appraisal-77ae14c7b6179b33c22653f0f39d2ce7",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 13,
+          "run_id": "candle-appraisal-af510a70dbf9e0bc67eb3faf193caec3",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 14,
+          "run_id": "candle-appraisal-dfbaf5d0e112e0c02edc46ac7b3e57ff",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 15,
+          "run_id": "candle-appraisal-6760310f390a0e5a3285aee671231c82",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 16,
+          "run_id": "candle-appraisal-7378efd3e6c33e400ce9181949cefd7e",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 17,
+          "run_id": "candle-appraisal-12a5a79f3301b85a75012c311a222245",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 18,
+          "run_id": "candle-appraisal-c31a45425419a23b55cdb7162d393c9f",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 19,
+          "run_id": "candle-appraisal-bf840b9fb25aeeedac14e3f8d3be6752",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 20,
+          "run_id": "candle-appraisal-08ef041978cd7d5c0e1032bd2e4d90d1",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        }
+      ]
+    },
+    "human-reference-12": {
+      "input_sha256": "d066e0a17148bcfb516604d581414a8155a381a6ba794fd0a24f56f853967bf1",
+      "rendered_prompt_sha256": "7324449d3f35900827a2721dea089eedf4b2809a34d3c613d0c5d5f4f2ac3d7e",
+      "decisions": [
+        {
+          "trial": 1,
+          "run_id": "candle-appraisal-e7010d52c1c34d3997f749841070969b",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 2,
+          "run_id": "candle-appraisal-c69580f407e3553a4e158e272a2179a7",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 3,
+          "run_id": "candle-appraisal-ec9c88dbcc687d26f65247b67dfe4a99",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 4,
+          "run_id": "candle-appraisal-c72151815b8ec55e00acff6369996a3a",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 5,
+          "run_id": "candle-appraisal-da61fb98d7e8e0d6d49bfc1b63bca6cd",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 6,
+          "run_id": "candle-appraisal-78cbaebecbdc1cadaf66b662991055f8",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 7,
+          "run_id": "candle-appraisal-77f8e2a03ca807da1bb62d34a23917ce",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 8,
+          "run_id": "candle-appraisal-967e311f89fc8d7be97cb10a228dc1f0",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 9,
+          "run_id": "candle-appraisal-b1f600d2827d6e86aaa4783bc1796cce",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 10,
+          "run_id": "candle-appraisal-f9280b67ac92ac54c5dccdd165c02e36",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 11,
+          "run_id": "candle-appraisal-5ef42bc9a3b51990aefdba41aed3f647",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 12,
+          "run_id": "candle-appraisal-c956da2f7a8c38221d46291b18217fda",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 13,
+          "run_id": "candle-appraisal-a12ca91b26896464ae34cde534cce634",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 14,
+          "run_id": "candle-appraisal-9bbeb70b749e5efbe94df72200ae0fef",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 15,
+          "run_id": "candle-appraisal-6445a380ef90fa40d2f33232e1592e4a",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 16,
+          "run_id": "candle-appraisal-30d8b9f5d3b2cfc0dca9a4bb433a76ef",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 17,
+          "run_id": "candle-appraisal-e91d9ff32345b6a746b2b2f00cbc8ad1",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 18,
+          "run_id": "candle-appraisal-1a0229494b5ffd6e0bb325a6f44a18a8",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 19,
+          "run_id": "candle-appraisal-11df151dd3b582958252a2ff627e2248",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 20,
+          "run_id": "candle-appraisal-b9435db2bd17a7a014e5f57a640260ce",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        }
+      ]
+    },
+    "human-reference-13": {
+      "input_sha256": "047c0d56d89b8ab43bc6f217528c4ee29d167e862311eb8a2cb4154b42155103",
+      "rendered_prompt_sha256": "4b088b2171e79aa187c4d517f7d840482d0c932ab4e19dcfec427d179526756d",
+      "decisions": [
+        {
+          "trial": 1,
+          "run_id": "candle-appraisal-2813601af4976e8f03c1a0cd2430ea38",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 2,
+          "run_id": "candle-appraisal-8742570827280e90aef82d5c9cc4e10d",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 3,
+          "run_id": "candle-appraisal-0165de921c2fadb17cb931ad7c00be8a",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 4,
+          "run_id": "candle-appraisal-0d7ef3806eacfce55085cc9fc401bc07",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 5,
+          "run_id": "candle-appraisal-0da2c4315f48bfab222080571fb89335",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 6,
+          "run_id": "candle-appraisal-c8eb7c49672ef3ae48c0c45b8dc6dc63",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 7,
+          "run_id": "candle-appraisal-74aa4a251ade686877290031804f9c78",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 8,
+          "run_id": "candle-appraisal-b371b41bdb878b08141a122165961786",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 9,
+          "run_id": "candle-appraisal-5ea9893dbdba484731d667e38aa42a62",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 10,
+          "run_id": "candle-appraisal-04f520b83a111d1ad7ddd2d13ffb5049",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 11,
+          "run_id": "candle-appraisal-370c46611cd4f4b912bf134549b57ab5",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 12,
+          "run_id": "candle-appraisal-9a29ed5395d0919ec55f2ba27915c3d5",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 13,
+          "run_id": "candle-appraisal-18087c8d5819b9bc7963283b2995730e",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 14,
+          "run_id": "candle-appraisal-806e8bba38cb3e4723ad17d532cd830a",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 15,
+          "run_id": "candle-appraisal-6754f9427da1695b49aea46309791e01",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 16,
+          "run_id": "candle-appraisal-97538406cbc84ce2f8091deabd7181e2",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 17,
+          "run_id": "candle-appraisal-a2822ac74f9a8749b9b02fc2ba980a38",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 18,
+          "run_id": "candle-appraisal-eab9cfc6f64a6d4c3dc6dc1e8c7186ca",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 19,
+          "run_id": "candle-appraisal-9720f8e4bec4cfc98f013832217386ef",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 20,
+          "run_id": "candle-appraisal-d163528c893968bada58bd46a59f12eb",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        }
+      ]
+    },
+    "human-reference-14": {
+      "input_sha256": "90b83f9d0a361f233df59ef8d2232a4d595b963a44268f34b0bcdfc14d073b87",
+      "rendered_prompt_sha256": "0aca3b514873f857c885fafa6b3b666e0aaeb6717462ababe1668b8dfff4c885",
+      "decisions": [
+        {
+          "trial": 1,
+          "run_id": "candle-appraisal-16a84a6fbc5a06023d082cda94893939",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 2,
+          "run_id": "candle-appraisal-a355a19741502fb66030566d5407db2d",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 3,
+          "run_id": "candle-appraisal-083bebf804b172bbbd6568f7e3a86bc7",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 4,
+          "run_id": "candle-appraisal-af1cf0ecf6f5554499f5f0c539520f3e",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 5,
+          "run_id": "candle-appraisal-62e65c6845dfc97b877c1bbf9929879b",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 6,
+          "run_id": "candle-appraisal-7318cd578bac1faff85aad9233a7aef1",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 7,
+          "run_id": "candle-appraisal-7d0a83c67630125850128da9b16b808d",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 8,
+          "run_id": "candle-appraisal-00b8d025c220b373b305acfb7e004514",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 9,
+          "run_id": "candle-appraisal-820701e502991706ecab39ae24b7d09f",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 10,
+          "run_id": "candle-appraisal-e38d6e63437e66cf98a8bd457030c41d",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 11,
+          "run_id": "candle-appraisal-97fa66ec6d7e642629db03509a58c141",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 12,
+          "run_id": "candle-appraisal-8b11850db652e8a4928f966a9cb5d2dd",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 13,
+          "run_id": "candle-appraisal-7d9468dfb0b4a53909bf09d0177862b6",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 14,
+          "run_id": "candle-appraisal-3b3be6447e4bb94c2e2440de26c19082",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 15,
+          "run_id": "candle-appraisal-e6349c6cddb7e2993d80268084554f7e",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 16,
+          "run_id": "candle-appraisal-0fe8cd97f70b607b680293a03931ae44",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 17,
+          "run_id": "candle-appraisal-fe6b995886d1405e7a0b575b343dcdce",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 18,
+          "run_id": "candle-appraisal-42bfda52fe1c0575b1d100503ad79091",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 19,
+          "run_id": "candle-appraisal-4343db20883dbe7662ec8d2be32d4411",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 20,
+          "run_id": "candle-appraisal-0a3cfca3527e19cfb04524047d6c8a45",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        }
+      ]
+    },
+    "human-reference-15": {
+      "input_sha256": "91eaeb50ca819c73a5d90b1077012d3b800fc6956beb0fcfc38c2a3b0597a6a2",
+      "rendered_prompt_sha256": "b7c74e440fd182c1aedc81a71d3366e4c69f891c01fc074d3dc97766c97d4929",
+      "decisions": [
+        {
+          "trial": 1,
+          "run_id": "candle-appraisal-7e19de531308e8a41fce19b4c0220b86",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 2,
+          "run_id": "candle-appraisal-76b19a359ea6ecdc4859f3f0ee305b86",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 3,
+          "run_id": "candle-appraisal-a1b877fc90fbbfc2375a55f0a1665f62",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 4,
+          "run_id": "candle-appraisal-bd381e801dd2a7c6273e6ce85d0f9d24",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 5,
+          "run_id": "candle-appraisal-287031f591f3d0c35f116de7c7f2b468",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 6,
+          "run_id": "candle-appraisal-6dcf53059bc6bbcf4fd35aedf9e2dbb1",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 7,
+          "run_id": "candle-appraisal-8a398f074f33bcfc90d1ae27bebb7f7b",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 8,
+          "run_id": "candle-appraisal-56e8944cc835bf74b395d356d94cbf7a",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 9,
+          "run_id": "candle-appraisal-77d43c5f915fbb709a6c8a0c126cdeb7",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 10,
+          "run_id": "candle-appraisal-d8b900e863fe82ac10bb9f13988bfccc",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 11,
+          "run_id": "candle-appraisal-d07fd9875b82a6b9f14f972ded60568e",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 12,
+          "run_id": "candle-appraisal-b032f6dc924b462d1d97db90a6d92a83",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 13,
+          "run_id": "candle-appraisal-99a1005a1c51f58fee479623fd9dca4b",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 14,
+          "run_id": "candle-appraisal-24b11c57074172c3b5e15fbde6aa4be3",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 15,
+          "run_id": "candle-appraisal-8ef6dc9062c01eba935d8d3aaaf3b547",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 16,
+          "run_id": "candle-appraisal-af07fe7e6a68ec5357f86f4429ea79e5",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 17,
+          "run_id": "candle-appraisal-77650516f0347318ad69430b61106ade",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 18,
+          "run_id": "candle-appraisal-a7729f798ba389d3e6bf3d43609b6cc9",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 19,
+          "run_id": "candle-appraisal-09c9f273377f765dcd1181f961bc4b1e",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 20,
+          "run_id": "candle-appraisal-23d8107de97a3cd96cf8fe2187f62ead",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        }
+      ]
+    },
+    "human-reference-16": {
+      "input_sha256": "91b81c1b8349b7015eeb3a3303b222d4b4f34f0824d0d39f4b1f23803210bc9e",
+      "rendered_prompt_sha256": "eae2b2a218d3c52db4db6b023120ccca51252e47954be0bc3536ad6ed0ecfa3b",
+      "decisions": [
+        {
+          "trial": 1,
+          "run_id": "candle-appraisal-91169d3459c31469a976704df02eaf78",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 2,
+          "run_id": "candle-appraisal-1a7e2cf3034e1b2fa60dc19febd83ba3",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 3,
+          "run_id": "candle-appraisal-04b0bc4eff1ef9cad240e831cf85ab04",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 4,
+          "run_id": "candle-appraisal-2e69de0b2c80bf646d9e7ad195314b25",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 5,
+          "run_id": "candle-appraisal-206a76ae7ad1bce9bebff4f47db0d95a",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 6,
+          "run_id": "candle-appraisal-ecbce4056c291ddd4de1b45b1f93a5fa",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 7,
+          "run_id": "candle-appraisal-b987d800721174136deefbcd86c1c81c",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 8,
+          "run_id": "candle-appraisal-c9fc2a54df983db66033b1a4ae54d511",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 9,
+          "run_id": "candle-appraisal-fe1ec5989348eb5ca25e049c41787fc7",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 10,
+          "run_id": "candle-appraisal-578a2457ec5fc56a1533eecebf481b53",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 11,
+          "run_id": "candle-appraisal-abbec324a55fbc7e2d06195808644ec7",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 12,
+          "run_id": "candle-appraisal-810083e17ecbb39f79a3cfd655e4bd9f",
+          "status": "ok",
+          "answer": {
+            "grade": "small"
+          }
+        },
+        {
+          "trial": 13,
+          "run_id": "candle-appraisal-ce3907be832d2274cd5448df41e69907",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 14,
+          "run_id": "candle-appraisal-792e9da6d199263d19b5e2e8b71a5f4d",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 15,
+          "run_id": "candle-appraisal-16d8ba6844450d23c356c137a5d68759",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 16,
+          "run_id": "candle-appraisal-48861cad5008f861e430c233ae7c4a6a",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 17,
+          "run_id": "candle-appraisal-55bebb94c7a7ca9a3618cc0a4139ca6d",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 18,
+          "run_id": "candle-appraisal-5d2c7b54d3ca9756f65fae10a921b93b",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 19,
+          "run_id": "candle-appraisal-8257cfbecd423accab7d24abda584fe1",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 20,
+          "run_id": "candle-appraisal-6baa77734b757852af781dfecb6858f7",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        }
+      ]
+    },
+    "human-reference-17": {
+      "input_sha256": "ea24f6db29fee86a3afdcf228cff3251d73d46d776568f2445d7767549d31f6b",
+      "rendered_prompt_sha256": "f7efe46460b7f0519b192ed4451389dc80106088d6637f75a0c64280c8219611",
+      "decisions": [
+        {
+          "trial": 1,
+          "run_id": "candle-appraisal-c46071df1504ee50020d29d2c13e69fd",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 2,
+          "run_id": "candle-appraisal-110128733b787f80c6f73874b6026518",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 3,
+          "run_id": "candle-appraisal-2e0f1a35dd610372a09dbc6841abfe71",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 4,
+          "run_id": "candle-appraisal-bed8fc718ad8353cc3dfedf4a71aabd0",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 5,
+          "run_id": "candle-appraisal-374179c33b108c2f27dca7fcf8fc1893",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 6,
+          "run_id": "candle-appraisal-10347f862cc5c8f7bcc01d613ac8d436",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 7,
+          "run_id": "candle-appraisal-be17bef0514b916793f6f92fb8b786d3",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 8,
+          "run_id": "candle-appraisal-a2dba49a96e5e39a68fe97d07d56e7b7",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 9,
+          "run_id": "candle-appraisal-3bd9b817b34f98065668f2cf27911b57",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 10,
+          "run_id": "candle-appraisal-43f24d564d2bf7fa3a3f660ee7784bdd",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 11,
+          "run_id": "candle-appraisal-d8dc9eacc1d0c3b0d9a2c441fe7a390a",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 12,
+          "run_id": "candle-appraisal-a54e0e7620a27a6c1bbb960530b92466",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 13,
+          "run_id": "candle-appraisal-611ca0327da0c03b415fc38789025326",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 14,
+          "run_id": "candle-appraisal-4ea139132a440cc24896c37ea84bbf27",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 15,
+          "run_id": "candle-appraisal-32a590b82c70c4d9515c65b27d800b4f",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 16,
+          "run_id": "candle-appraisal-9e3ac47436b89606351d0f2507bbc59a",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 17,
+          "run_id": "candle-appraisal-c5fd0290f1778216beaf4c2e347b90e2",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 18,
+          "run_id": "candle-appraisal-948e9f84591ffd68baa5e986410e85f1",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 19,
+          "run_id": "candle-appraisal-18be5afe9ea07fa0bec2e0b1e8a4aded",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 20,
+          "run_id": "candle-appraisal-5ccf32e39b49c53b24a33f12e8937171",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        }
+      ]
+    },
+    "human-reference-18": {
+      "input_sha256": "d06ee3225d141655691f76285311f4aca2605d29eb7d27704bddb5001f504028",
+      "rendered_prompt_sha256": "d2de3357f53473a3ec9c08c243934ef07deae189e0d09c77f448ff519e2baf61",
+      "decisions": [
+        {
+          "trial": 1,
+          "run_id": "candle-appraisal-13e366275fb43d4d0b4ae236dd0a3168",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 2,
+          "run_id": "candle-appraisal-1e8049711eeda78279ff44d2c06a4bd8",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 3,
+          "run_id": "candle-appraisal-f71cb24e24f0ac2ec61ea48a87d4de7c",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 4,
+          "run_id": "candle-appraisal-6ac72571208def61783289f83a0567bf",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 5,
+          "run_id": "candle-appraisal-f79303aba25b57d91200085b046d2213",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 6,
+          "run_id": "candle-appraisal-dcd84eeebf903d67828249907ccfd016",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 7,
+          "run_id": "candle-appraisal-76d9edb9b03d2f1a63318b350f93f847",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 8,
+          "run_id": "candle-appraisal-ad4195112a93ff995fb07ab5f7342cba",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 9,
+          "run_id": "candle-appraisal-3d18a02ab246dfb598c9898923258b75",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 10,
+          "run_id": "candle-appraisal-4f877dfa41a3a578f6fc65dedf7a7506",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 11,
+          "run_id": "candle-appraisal-7456d43496eddd23ca92b925f11475d6",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 12,
+          "run_id": "candle-appraisal-2c74e19015ce2370abe5cbbbb756538d",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 13,
+          "run_id": "candle-appraisal-0b274d52a9bf106dfe735df080ede7eb",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 14,
+          "run_id": "candle-appraisal-9926b53684327794004c3da14f399915",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 15,
+          "run_id": "candle-appraisal-aea893932ad1aa7c66b5de99742e6a69",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 16,
+          "run_id": "candle-appraisal-8b9e7a1aea01ae331adf0df61a80553f",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 17,
+          "run_id": "candle-appraisal-e8bf4137198710ba47935d2d5e34338b",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 18,
+          "run_id": "candle-appraisal-ac1ea701091351f19e37512b0e008aa3",
+          "status": "ok",
+          "answer": {
+            "grade": "large"
+          }
+        },
+        {
+          "trial": 19,
+          "run_id": "candle-appraisal-0246461b2e04b752414f2fc87faac073",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 20,
+          "run_id": "candle-appraisal-a9ab9c01bc6255b17b640d5f49ddc819",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        }
+      ]
+    },
+    "human-reference-19": {
+      "input_sha256": "fb37a3985442c42719095ddff7902fb2ad3e9b88c3667a6ffc4d7efbfbdcb77d",
+      "rendered_prompt_sha256": "d24d8118affad705f80b7c55dca9d7f696bbf7d0e5399713d786df04dded0114",
+      "decisions": [
+        {
+          "trial": 1,
+          "run_id": "candle-appraisal-8f6ba93706407f5af501d8722385cbc0",
+          "status": "ok",
+          "answer": {
+            "grade": "epic"
+          }
+        },
+        {
+          "trial": 2,
+          "run_id": "candle-appraisal-49bc737e6fc2719db4a574682365d2f6",
+          "status": "ok",
+          "answer": {
+            "grade": "large"
+          }
+        },
+        {
+          "trial": 3,
+          "run_id": "candle-appraisal-efef2097ad31ee955a66de49a81c968d",
+          "status": "ok",
+          "answer": {
+            "grade": "large"
+          }
+        },
+        {
+          "trial": 4,
+          "run_id": "candle-appraisal-8b948fd5af36cd10ffca16b985afe60e",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 5,
+          "run_id": "candle-appraisal-5e2dde9a2aaa99613f087dbadfc51988",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 6,
+          "run_id": "candle-appraisal-8dfe2821efeb8b0e50a141d25c82902a",
+          "status": "ok",
+          "answer": {
+            "grade": "epic"
+          }
+        },
+        {
+          "trial": 7,
+          "run_id": "candle-appraisal-74e793f8a5f235bea96fc51a18b18864",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 8,
+          "run_id": "candle-appraisal-067455d96986df3dc13804ab85580a9d",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 9,
+          "run_id": "candle-appraisal-6887f8e111ccd93eb4fd4e015272a53c",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 10,
+          "run_id": "candle-appraisal-e86886af799035d1a73ed097856cae7e",
+          "status": "ok",
+          "answer": {
+            "grade": "large"
+          }
+        },
+        {
+          "trial": 11,
+          "run_id": "candle-appraisal-c2d676cd43a665807c73834889b18d0a",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 12,
+          "run_id": "candle-appraisal-c474a477b86179925078c6769855f0a0",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 13,
+          "run_id": "candle-appraisal-15d00fa121bf8664882860206360d47f",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 14,
+          "run_id": "candle-appraisal-64d951c4170706c936fc695e1931e7ef",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 15,
+          "run_id": "candle-appraisal-cda39856d193ab66f6207a2369a8e821",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 16,
+          "run_id": "candle-appraisal-777910037d5d9bad9f556618b78285f7",
+          "status": "ok",
+          "answer": {
+            "grade": "large"
+          }
+        },
+        {
+          "trial": 17,
+          "run_id": "candle-appraisal-2bd30ef2b00cd822a4078129fa4b980c",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 18,
+          "run_id": "candle-appraisal-e7a4f88dce30bd566254f98b76fbab95",
+          "status": "ok",
+          "answer": {
+            "grade": "large"
+          }
+        },
+        {
+          "trial": 19,
+          "run_id": "candle-appraisal-89a4cc38e715c8ddce38df71020f0270",
+          "status": "ok",
+          "answer": {
+            "grade": "medium"
+          }
+        },
+        {
+          "trial": 20,
+          "run_id": "candle-appraisal-5fbb9d3db7b198b1f4570b35ba2da171",
+          "status": "ok",
+          "answer": {
+            "grade": "large"
+          }
+        }
+      ]
+    },
+    "human-reference-20": {
+      "input_sha256": "fd1af4e1e9e11f9dc64c2fc97ee9b71536265dc87eb6162cff8fecf953dba5e6",
+      "rendered_prompt_sha256": "c0f743ba24681260378576b3e02bc177481425a28b0211b8596f4d5ff74059e2",
+      "decisions": [
+        {
+          "trial": 1,
+          "run_id": "candle-appraisal-89fbf0b0cd6d3d5d96ff93e7006de9f4",
+          "status": "ok",
+          "answer": {
+            "grade": "epic"
+          }
+        },
+        {
+          "trial": 2,
+          "run_id": "candle-appraisal-817a319eab25a2dae7635e1479df4d48",
+          "status": "ok",
+          "answer": {
+            "grade": "epic"
+          }
+        },
+        {
+          "trial": 3,
+          "run_id": "candle-appraisal-8b1ef85d40b6641815f930c986f0cef8",
+          "status": "ok",
+          "answer": {
+            "grade": "epic"
+          }
+        },
+        {
+          "trial": 4,
+          "run_id": "candle-appraisal-38aa692966e78a61717965b480c53d6d",
+          "status": "ok",
+          "answer": {
+            "grade": "epic"
+          }
+        },
+        {
+          "trial": 5,
+          "run_id": "candle-appraisal-4aad074149590156bdb9e988c8ecdcfe",
+          "status": "ok",
+          "answer": {
+            "grade": "large"
+          }
+        },
+        {
+          "trial": 6,
+          "run_id": "candle-appraisal-f8ad8a5c17109cff27dd34ae28392f11",
+          "status": "ok",
+          "answer": {
+            "grade": "epic"
+          }
+        },
+        {
+          "trial": 7,
+          "run_id": "candle-appraisal-2402a047509ec2d38d253dd49b73bbae",
+          "status": "ok",
+          "answer": {
+            "grade": "epic"
+          }
+        },
+        {
+          "trial": 8,
+          "run_id": "candle-appraisal-42193bebc68208e6bdaadecef8d892ae",
+          "status": "ok",
+          "answer": {
+            "grade": "epic"
+          }
+        },
+        {
+          "trial": 9,
+          "run_id": "candle-appraisal-33c456e31bf6aa4057d05dc9b1bb04af",
+          "status": "ok",
+          "answer": {
+            "grade": "epic"
+          }
+        },
+        {
+          "trial": 10,
+          "run_id": "candle-appraisal-85ce722ce3e1bf11830e94faf8ef6522",
+          "status": "ok",
+          "answer": {
+            "grade": "epic"
+          }
+        },
+        {
+          "trial": 11,
+          "run_id": "candle-appraisal-6e5d4f8ef22636179c6b2f3e7766e8ab",
+          "status": "ok",
+          "answer": {
+            "grade": "epic"
+          }
+        },
+        {
+          "trial": 12,
+          "run_id": "candle-appraisal-9182e00cd017dbaa316868279a8baa12",
+          "status": "ok",
+          "answer": {
+            "grade": "epic"
+          }
+        },
+        {
+          "trial": 13,
+          "run_id": "candle-appraisal-1405480e54ebe5bcb7fd410b1724094f",
+          "status": "ok",
+          "answer": {
+            "grade": "epic"
+          }
+        },
+        {
+          "trial": 14,
+          "run_id": "candle-appraisal-ce8b2e1a567e6d5fea50b2686625c79f",
+          "status": "ok",
+          "answer": {
+            "grade": "epic"
+          }
+        },
+        {
+          "trial": 15,
+          "run_id": "candle-appraisal-47259343d24aa739e6c9e1dd71e72f48",
+          "status": "ok",
+          "answer": {
+            "grade": "epic"
+          }
+        },
+        {
+          "trial": 16,
+          "run_id": "candle-appraisal-5592b30098afc7b7ed6c897527ad411b",
+          "status": "ok",
+          "answer": {
+            "grade": "epic"
+          }
+        },
+        {
+          "trial": 17,
+          "run_id": "candle-appraisal-4bee35bb3386ae23f6cf95f00e0de0ae",
+          "status": "ok",
+          "answer": {
+            "grade": "epic"
+          }
+        },
+        {
+          "trial": 18,
+          "run_id": "candle-appraisal-74f2b8d1a55433170b1babe5fae1d0bc",
+          "status": "ok",
+          "answer": {
+            "grade": "epic"
+          }
+        },
+        {
+          "trial": 19,
+          "run_id": "candle-appraisal-898feaf33790781e0a2963146b44553f",
+          "status": "ok",
+          "answer": {
+            "grade": "epic"
+          }
+        },
+        {
+          "trial": 20,
+          "run_id": "candle-appraisal-1f539f2856be71728aaef4e4c4bddde9",
+          "status": "ok",
+          "answer": {
+            "grade": "epic"
+          }
+        }
+      ]
+    }
+  }
+}

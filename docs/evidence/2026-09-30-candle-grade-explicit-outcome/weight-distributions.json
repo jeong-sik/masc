@@ -1,0 +1,175 @@
+{
+  "weights-base": {
+    "mapped_contributor": "keeper-a",
+    "attempted_trials": 20,
+    "valid_responses": 20,
+    "share_counts": {
+      "1/2": 18,
+      "3/5": 1,
+      "6/11": 1
+    },
+    "weight_counts": [
+      {
+        "weights": {
+          "keeper-a": 5,
+          "keeper-b": 5
+        },
+        "count": 18
+      },
+      {
+        "weights": {
+          "keeper-a": 6,
+          "keeper-b": 4
+        },
+        "count": 1
+      },
+      {
+        "weights": {
+          "keeper-a": 6,
+          "keeper-b": 5
+        },
+        "count": 1
+      }
+    ]
+  },
+  "weights-injection": {
+    "mapped_contributor": "keeper-a",
+    "attempted_trials": 20,
+    "valid_responses": 20,
+    "share_counts": {
+      "1/2": 13,
+      "3/5": 7
+    },
+    "weight_counts": [
+      {
+        "weights": {
+          "keeper-a": 5,
+          "keeper-b": 5
+        },
+        "count": 13
+      },
+      {
+        "weights": {
+          "keeper-a": 6,
+          "keeper-b": 4
+        },
+        "count": 7
+      }
+    ]
+  },
+  "weights-reordered": {
+    "mapped_contributor": "keeper-a",
+    "attempted_trials": 20,
+    "valid_responses": 19,
+    "share_counts": {
+      "1/2": 11,
+      "2/5": 3,
+      "5/11": 4,
+      "6/11": 1
+    },
+    "weight_counts": [
+      {
+        "weights": {
+          "keeper-a": 4,
+          "keeper-b": 6
+        },
+        "count": 3
+      },
+      {
+        "weights": {
+          "keeper-a": 5,
+          "keeper-b": 5
+        },
+        "count": 11
+      },
+      {
+        "weights": {
+          "keeper-a": 5,
+          "keeper-b": 6
+        },
+        "count": 4
+      },
+      {
+        "weights": {
+          "keeper-a": 6,
+          "keeper-b": 5
+        },
+        "count": 1
+      }
+    ]
+  },
+  "weights-renamed": {
+    "mapped_contributor": "mira",
+    "attempted_trials": 20,
+    "valid_responses": 20,
+    "share_counts": {
+      "1/2": 16,
+      "2/5": 2,
+      "3/5": 1,
+      "6/11": 1
+    },
+    "weight_counts": [
+      {
+        "weights": {
+          "mira": 4,
+          "sol": 6
+        },
+        "count": 2
+      },
+      {
+        "weights": {
+          "mira": 5,
+          "sol": 5
+        },
+        "count": 16
+      },
+      {
+        "weights": {
+          "mira": 6,
+          "sol": 4
+        },
+        "count": 1
+      },
+      {
+        "weights": {
+          "mira": 6,
+          "sol": 5
+        },
+        "count": 1
+      }
+    ]
+  },
+  "weights-split": {
+    "mapped_contributor": "keeper-a",
+    "attempted_trials": 20,
+    "valid_responses": 20,
+    "share_counts": {
+      "1/2": 10,
+      "2/5": 4,
+      "3/5": 6
+    },
+    "weight_counts": [
+      {
+        "weights": {
+          "keeper-a": 4,
+          "keeper-b": 6
+        },
+        "count": 4
+      },
+      {
+        "weights": {
+          "keeper-a": 5,
+          "keeper-b": 5
+        },
+        "count": 10
+      },
+      {
+        "weights": {
+          "keeper-a": 6,
+          "keeper-b": 4
+        },
+        "count": 6
+      }
+    ]
+  }
+}

@@ -1486,6 +1486,30 @@ status: reference
     아니라 연결된 Task 완료 수다.
   → [Goal_measurement](../../lib/goal/goal_measurement.mli)
 
+**Candle (보상 화폐)**
+: Goal 완료에 대해 Keeper가 받는 보상 화폐. 정수 `milli-candle`로 센다(1 Candle = 1,000 milli-candle).
+  부동소수점 단위를 쓰지 않는다.
+  - 원장(`candle-ledger.jsonl`): `<base-path>/.masc/candle-ledger.jsonl`에 한 줄씩 이벤트를
+    덧붙이는 전용 원장. 각 행은 `kind`·`at`과 해당 종류의 필드를 담은 닫힌 JSON 객체다. 원장에는
+    사실(Snapshot·PayoutOwed·Candidates·PayoutFailed·Paid·Unattributed·Purchased·Equipped·HalfLifeSet)만
+    기록되며, 잔액 자체는 파일에 저장하지 않고 원장을 처음부터 읽어 계산한다. 헌법·승인·도구 호출 원장이나
+    `goal_verifications.json`(검증 원장)과 다른 별개 원장이다.
+  - 발행과 지급: Goal이 검증기를 통과(`Snapshot`)하고 사람의 확정(`Confirm_completion`)으로
+    `Completed`가 되면 지급 의무(`PayoutOwed`)가 생긴다. 백그라운드 지급 일꾼이 기여 Task와 Keeper를
+    선별해 모델 감정을 거쳐 `Paid` 이벤트 한 줄로 지급을 기록한다. 분배는 한 줄에 원자적으로 적히므로
+    일부 Keeper만 지급되는 불완전 상태가 없다.
+  - 사용처 한정: Candle로 살 수 있는 것은 초상화 장신구(**Keeper Portrait**의 장비 아이템)뿐이다.
+    도구, 스킬, 모델, 런타임 예산, 현상금 등 다른 자원은 구매할 수 없다(헌법 불변식). 아이템 구매는
+    `Purchased`, 착용 변경은 `Equipped` 이벤트로 남는다.
+  - 잔액 감쇠: 잔액은 시간이 지남에 따라 지수적으로 감소하며, 반감기는 설정(`half_life`)이 정한다.
+    원장에 기록된 과거 사실은 지워지지 않고 잔액만 시점 기준으로 계산된다. 이는 화폐 가치의 감쇠이며,
+    `no_wall_clock_death` 불변식의 유일한 명시적 예외다(Task·Goal·Board 상태는 만료시키지 않는다).
+  → [Candle_event](../../lib/candle/candle_event.mli) ·
+  [Candle_ledger](../../lib/candle_store/candle_ledger.mli) ·
+  [Candle_time](../../lib/candle/candle_time.mli) ·
+  [docs/constitution.xml](../constitution.xml) ·
+  [docs/rfc/RFC-goal-candle-ledger.md](../rfc/RFC-goal-candle-ledger.md)
+
 **Schedule (예약)**
 : 정한 시각에 Keeper를 깨우라는 요청. 저장되므로 서버를 다시 켜도 남는다. 만들기·조회·
   수정·취소와 기록(노트) 추가·조회 도구가 있다. Keeper를 깨울 뿐이고, 깨어난 Keeper가

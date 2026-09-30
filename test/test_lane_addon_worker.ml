@@ -459,10 +459,27 @@ let test_image_preview_does_not_create_worker () = with_fixture (fun env _sw dir
 
 let test_declared_sampling_requires_exact_host_callback () = with_fixture (fun env sw dir docker ->
   let calls = ref 0 in
-  let sampling_handler (_ : Mcp_protocol.Sampling.create_message_params) =
+  let rejected = ref false in
+  let oversized = ref false in
+  let raises = ref false and blank_model = ref false in
+  let store = Masc.Lane_addon_store.create ~root:(Filename.concat dir "model-evidence") in
+  let invoke ~route ~request (_ : Mcp_protocol.Sampling.create_message_params) =
     incr calls;
-    Ok {Mcp_protocol.Sampling.role=Assistant;content=Text {type_="text";text="host answer"};
-      model="host-fixture";stop_reason=Some "endTurn";_meta=None} in
+    check string "host owns the selected logical route" "fixture-route" route;
+    let bytes = match Masc.Lane_addon_store.read_blob store request with
+      | Ok bytes -> bytes | Error detail -> fail detail in
+    check string "request is durable before any model invocation" "model_request"
+      (Yojson.Safe.from_string bytes |> Yojson.Safe.Util.member "kind" |> Yojson.Safe.Util.to_string);
+    if !raises then failwith "fixture invocation outcome uncertain"
+    else if !rejected then Error "fixture model refusal"
+    else Ok {Mcp_protocol.Sampling.role=Assistant;content=Text {type_="text";
+      text=(if !oversized then String.make 4096 'x' else "host answer")};
+      model=(if !blank_model then "" else "host-fixture");stop_reason=Some "endTurn";
+      _meta=Some (`Assoc ["provider_note",`String "fixture"])} in
+  let sampling_handler = match Masc.Lane_addon_sampling.create ~store
+      ~package:{(package dir "sampling") with model_access=Types.Host_sampling}
+      ~instance_id:"sampling-worker" ~route:"fixture-route" ~invoke () with
+    | Ok handler -> handler | Error detail -> fail detail in
   let start_model model_access sampling_handler =
     Worker.start ~sw ~clock:(Eio.Stdenv.clock env) ~control_timeout_sec
       ~mgr:(Eio.Stdenv.process_mgr env) ~instance_id:"sampling-worker"
@@ -482,6 +499,72 @@ let test_declared_sampling_requires_exact_host_callback () = with_fixture (fun e
   let reply = Yojson.Safe.from_file (Filename.concat dir (cid ^ ".sampling-reply")) in
   check string "host-selected model response crosses worker transport" "host-fixture"
     (reply |> Yojson.Safe.Util.member "result" |> Yojson.Safe.Util.member "model" |> Yojson.Safe.Util.to_string);
+  let metadata = reply |> Yojson.Safe.Util.member "result" |> Yojson.Safe.Util.member "_meta" in
+  check string "provider metadata remains available" "fixture"
+    (metadata |> Yojson.Safe.Util.member "provider_note" |> Yojson.Safe.Util.to_string);
+  let read_reference reference =
+    let reference = match Types.evidence_of_json reference with Ok ref -> ref | Error error -> fail error in
+    match Masc.Lane_addon_store.read_blob store reference with
+    | Ok bytes -> Yojson.Safe.from_string bytes | Error error -> fail error in
+  let references = Yojson.Safe.Util.member "masc.lane_sampling" metadata in
+  let retained = read_reference (Yojson.Safe.Util.member "outcome" references) in
+  check string "actual model response is retained separately" "host-fixture"
+    (retained |> Yojson.Safe.Util.member "response" |> Yojson.Safe.Util.member "model" |> Yojson.Safe.Util.to_string);
+  check bool "outcome links the original exact request" true
+    (Yojson.Safe.Util.member "request" retained=Yojson.Safe.Util.member "request" references);
+  rejected := true;
+  check bool "model refusal is not a synthetic successful observation" true
+    (Result.is_error (observe worker "good"));
+  let failure = Yojson.Safe.from_file (Filename.concat dir (cid ^ ".sampling-reply"))
+    |> Yojson.Safe.Util.member "error" |> Yojson.Safe.Util.member "message" |> Yojson.Safe.Util.to_string
+    |> Yojson.Safe.from_string in
+  let failure_record = failure |> Yojson.Safe.Util.member "evidence"
+    |> Yojson.Safe.Util.member "outcome" |> read_reference in
+  check string "host errors retain neutral evidence without assuming policy rejection" "host_error"
+    (failure_record |> Yojson.Safe.Util.member "status" |> Yojson.Safe.Util.to_string);
+  check string "package sees the host-error state without reading host files" "host_error"
+    (failure |> Yojson.Safe.Util.member "status" |> Yojson.Safe.Util.to_string);
+  rejected := false; oversized := true;
+  check bool "response retention failure does not report success" true
+    (Result.is_error (observe worker "good"));
+  let uncertain = Yojson.Safe.from_file (Filename.concat dir (cid ^ ".sampling-reply"))
+    |> Yojson.Safe.Util.member "error" |> Yojson.Safe.Util.member "message" |> Yojson.Safe.Util.to_string
+    |> Yojson.Safe.from_string in
+  check string "post-invocation persistence failure remains uncertain" "outcome_unknown"
+    (uncertain |> Yojson.Safe.Util.member "status" |> Yojson.Safe.Util.to_string);
+  check string "uncertain outcome still exposes its durable request" "model_request"
+    (uncertain |> Yojson.Safe.Util.member "request" |> read_reference
+      |> Yojson.Safe.Util.member "kind" |> Yojson.Safe.Util.to_string);
+  oversized := false; raises := true;
+  check bool "invocation exception reaches the package as an error" true (Result.is_error (observe worker "good"));
+  let inline_error () = Yojson.Safe.from_file (Filename.concat dir (cid ^ ".sampling-reply"))
+    |> Yojson.Safe.Util.member "error" |> Yojson.Safe.Util.member "message" |> Yojson.Safe.Util.to_string
+    |> Yojson.Safe.from_string in
+  check string "package can distinguish uncertain invocation from host error" "outcome_unknown"
+    (inline_error () |> Yojson.Safe.Util.member "status" |> Yojson.Safe.Util.to_string);
+  raises := false; blank_model := true;
+  check bool "missing model identity is not accepted as an answer" true (Result.is_error (observe worker "good"));
+  let invalid = inline_error () in
+  check string "invalid response is explicit to the package" "invalid_response"
+    (invalid |> Yojson.Safe.Util.member "status" |> Yojson.Safe.Util.to_string);
+  let invalid_record = invalid |> Yojson.Safe.Util.member "evidence"
+    |> Yojson.Safe.Util.member "outcome" |> read_reference in
+  check string "malformed actual answer remains in retained evidence" "host answer"
+    (invalid_record |> Yojson.Safe.Util.member "response" |> Yojson.Safe.Util.member "content"
+      |> Yojson.Safe.Util.member "text" |> Yojson.Safe.Util.to_string);
+  let original_request = references |> Yojson.Safe.Util.member "request" |> read_reference in
+  let params = match Mcp_protocol.Sampling.create_message_params_of_yojson
+      (Yojson.Safe.Util.member "params" original_request) with
+    | Ok params -> params | Error detail -> fail detail in
+  let tiny_package = {(package dir "sampling") with model_access=Types.Host_sampling;
+    resources={(package dir "sampling").resources with max_reply_bytes=1}} in
+  let bounded = match Masc.Lane_addon_sampling.create ~store ~package:tiny_package
+      ~instance_id:"bounded-model" ~route:"fixture-route" ~invoke () with
+    | Ok handler -> handler | Error detail -> fail detail in
+  let before = !calls in
+  check bool "unretained oversized request is refused before invocation" true
+    (Result.is_error (bounded params));
+  check int "retention is required before the model is called" before !calls;
   let argv = Yojson.Safe.from_file (Filename.concat dir (cid ^ ".json"))
     |> Yojson.Safe.Util.member "argv" |> Yojson.Safe.Util.to_list |> List.map Yojson.Safe.Util.to_string in
   check bool "sampling preserves requested network isolation" true (List.mem "none" argv);

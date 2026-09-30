@@ -6811,9 +6811,6 @@ let render_client_detail state (client : Masc.Tui_decode.client_row) =
     ~body:(fun ~budget:_ c -> List.iter c.push lines)
 
 let render_clients (state : state) =
-  match state.client_detail with
-  | Some client -> render_client_detail state client
-  | None ->
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
@@ -17221,7 +17218,11 @@ let render (state : state) =
   else if state.link_modal_open then
     let frame, clamped = render_link_preview_modal state in
     (frame, clamped, None, Overlay_drawn)
-  else
+  else match state.client_detail with
+  | Some client ->
+    let frame, clamped = render_client_detail state client in
+    (frame, clamped, None, Overlay_drawn)
+  | None ->
     let frame, clamped = render_surface state in
     let presented_approval =
       match state.view with

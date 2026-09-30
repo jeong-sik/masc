@@ -160,6 +160,58 @@ def run_retained_read(executable):
                             interact=interact, http_fixtures=fixtures)
 
 
+def run_client_modal_boundary(executable):
+    fixtures = h.clients_http_fixtures()
+
+    def interact(process, fd, _slave, output, _base):
+        h.palette_go(process, fd, output, b"go Clients", b"analyst-agent")
+        # Search Enter settles the query for n/N; the next Enter reads the
+        # matching client. A detail must not steal the first submission.
+        h.send_and_wait(process, fd, output, b"/analyst", b"/analyst")
+        h.send_and_wait(process, fd, output, b"\r", b"/analyst")
+        h.drain_until_quiet(process, fd, output)
+        rows = screen(output)
+        assert not any(b"MASC Client Detail" in row for row in rows.values()), rows
+        search = next(row for row in rows.values() if b"/analyst" in row)
+        assert b"n/N" in search and "▌".encode() not in search, search
+        h.send_and_wait(process, fd, output, b"\r", b"MASC Client Detail")
+        h.drain_until_quiet(process, fd, output)
+        assert any(b"analyst-agent" in row for row in screen(output).values()), screen(output)
+        # The global strip is still visible above an overlay, but its tabs
+        # cannot change the caller underneath an open client reading.
+        strip = screen(output).get(1, b"")
+        index = strip.find(b"Board")
+        if index < 0:
+            raise AssertionError(f"the client detail lost its surface strip: {strip!r}")
+        column = len(strip[:index].decode("utf-8")) + 1
+        click = b"\x1b[<0;%d;1M\x1b[<0;%d;1m" % (column, column)
+        os.write(fd, click)
+        h.drain_until_quiet(process, fd, output)
+        assert any(b"MASC Client Detail" in row for row in screen(output).values()), screen(output)
+        # Keys still belong to the visible overlay after that pointer event.
+        os.write(fd, b"j")
+        h.drain_until_quiet(process, fd, output)
+        assert any(b"MASC Client Detail" in row for row in screen(output).values()), screen(output)
+        h.send_and_wait(process, fd, output, b"\x1b", b"LAST SEEN")
+        h.drain_until_quiet(process, fd, output)
+        assert any(b"analyst-agent" in row for row in screen(output).values()), screen(output)
+        assert any(b"/analyst" in row and b"n/N" in row for row in screen(output).values()), screen(output)
+        h.send_and_wait(process, fd, output, b"\r", b"MASC Client Detail")
+        h.drain_until_quiet(process, fd, output)
+        assert any(b"analyst-agent" in row for row in screen(output).values()), screen(output)
+        assert not any(b"codex-mcp-client" in row for row in screen(output).values()), screen(output)
+        h.send_and_wait(process, fd, output, b"\x1b", b"LAST SEEN")
+        # Closing the modal restores real strip navigation and the new
+        # surface receives its own keys, without a hidden client key owner.
+        h.press_label_on_screen(process, fd, output, b"Board", row=1, needle=b"MASC Board")
+        h.send_and_wait(process, fd, output, b"?", b"MASC Cheat Sheet")
+        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Board")
+        os.write(fd, b"q")
+
+    h.run_terminal_scenario(executable, description="Client detail is a global overlay and search owns its Enter",
+                            interact=interact, http_fixtures=fixtures)
+
+
 def run_read_states(executable, failed):
     fixtures = h.overview_event_http_fixtures()
     client_payload = {"schema": "masc.dashboard.clients.v1", "generated_at": "2026-09-30T00:00:00Z",
@@ -199,6 +251,7 @@ if __name__ == "__main__":
     executable = os.path.abspath(sys.argv[1])
     run_tables(executable)
     run_client_exact_read(executable)
+    run_client_modal_boundary(executable)
     run_retained_read(executable)
     run_read_states(executable, False)
     run_read_states(executable, True)

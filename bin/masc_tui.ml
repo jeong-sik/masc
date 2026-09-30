@@ -20969,7 +20969,8 @@ and is loaded on demand through keeper_skill.
        | Some ("\r" | "\n" | "enter")
          when state.view = Clients && not compact_viewport && not (modal_owns_keys state)
               && not state.palette_open && not state.answering_open
-              && not state.patch_modal_open && not state.link_modal_open ->
+              && not state.patch_modal_open && not state.link_modal_open
+              && Option.is_none (text_input_target state ~compact_viewport) ->
            (match state.clients_surface with
             | None -> ()
             | Some snapshot ->

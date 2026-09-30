@@ -7,7 +7,7 @@ import test_tui_memory_fact_detail_pty as detail
 
 SOURCE_MODULES = ("bin/masc_tui_render.ml", "bin/masc_tui_render_memory.ml")
 # Force overflow at both 80 and 30 columns in the short frame, while the
-# 100-row reading still holds the complete record at either width.
+# full reading grows by the observed overflow, retaining the entire record.
 CLAIM = "CLAIMHEAD\n\n" + "단어 " * 200 + "\nCLAIMTAIL"
 ORIGIN = "keeper: " + "long-owner/" * 10 + " ENDORIGIN"
 MEMORY_ID = "memory-" + "0123456789" * 10 + " ENDMEMORY"
@@ -43,6 +43,15 @@ def run(executable, source):
             h.resize_and_wait(process, master_fd, output, rows=100, columns=width,
                               needle=b"CLAIMHEAD", final_cursor=b"\x1b[?25l")
             h.drain_until_quiet(process, master_fd, output)
+            # At 30 columns the wrapped record can exceed the 100-row
+            # viewport. Read its actual window instead of assuming a height.
+            if b"[lines " in detail.plain_screen(output):
+                first, last, total = detail.detail_window(output)
+                full_rows = 100 + total - (last - first + 1)
+                h.resize_and_wait(process, master_fd, output, rows=full_rows,
+                                  columns=width, needle=b"CLAIMHEAD",
+                                  final_cursor=b"\x1b[?25l")
+                h.drain_until_quiet(process, master_fd, output)
             screen = compact(detail.plain_screen(output))
             expected = (PATH, SHA) if source else (ORIGIN, MEMORY_ID)
             for value in (CLAIM,) + expected:

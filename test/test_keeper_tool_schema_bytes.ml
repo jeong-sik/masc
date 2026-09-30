@@ -431,7 +431,14 @@ open Alcotest
    a Keeper can equip an owned accessory or restore one slot's starting
    item, then read the actual equipped portrait. Pin to the measured
    inventory without adding headroom. *)
-let ceiling_bytes = 131_080
+(* 2026-09-30: PR-check 36677979729, job 109767034558, measured
+   131,096 bytes across 151 tools at
+   f20b4fce7fd3b1ce0076d82cbf8b65dd4a244510. Since the preceding
+   caa414d390 reading, config/tools/masc_dos_pass.toml's [to] description
+   gained 16 serialized bytes to name operators and invited players as
+   controller recipients. Equipment's schemas are unchanged. Preserve that
+   DOS control surface and pin to this measured inventory, with no headroom. *)
+let ceiling_bytes = 131_096
 
 
 let schema_json (schema : Masc_domain.tool_schema) =

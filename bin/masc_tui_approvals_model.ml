@@ -50,8 +50,8 @@ let approvals_open_question_count (state : state) =
   match approvals_open_questions state with
   | Some rows ->
       List.fold_left
-        (fun total (row : Tui_decode_asks.ask_row) ->
-          total + List.length row.Tui_decode_asks.ar_questions)
+        (fun total (row : Masc.Tui_decode_asks.ask_row) ->
+          total + List.length row.Masc.Tui_decode_asks.ar_questions)
         0 rows
   | None -> 0
 

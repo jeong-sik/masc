@@ -427,7 +427,7 @@ let dashboard_work_lines (state : state) =
 
 let dashboard_preview_rows = 2
 
-let dashboard_goal_lines (state : state) =
+let dashboard_goal_lines ~cols (state : state) =
   match state.overview_goals with
   | Goals_unread -> [ " Goals · not observed" ]
   | Goals_failed reason ->
@@ -444,7 +444,7 @@ let dashboard_goal_lines (state : state) =
       heading
       :: (if shown = [] then [ "   No active Goal" ]
           else
-            List.map
+            List.concat_map
               (fun (goal : Tui_decode.overview_goal) ->
                 let actual =
                   match goal.og_measurement with
@@ -464,9 +464,21 @@ let dashboard_goal_lines (state : state) =
                   | None, Some target -> Terminal_text.single_line target
                   | None, None -> "target unavailable"
                 in
-                Printf.sprintf "   %s · actual %s · target %s · linked tasks %d/%d done"
-                  (Terminal_text.single_line goal.og_title) actual target
-                  goal.og_task_done_count goal.og_task_count)
+                let width = max 1 (framed_inner_width cols - Message_layout.display_width "   ") in
+                let title =
+                  "   " ^ fit_width (Terminal_text.single_line goal.og_title) width
+                in
+                (* The title cannot consume the metric's cells. Keep each
+                   measurement clause together where possible, and count the
+                   wrapped rows before the Dashboard allocates its body. *)
+                title
+                :: (Message_layout.pack_clauses ~max_cells:width
+                      [ "actual " ^ actual
+                      ; "target " ^ target
+                      ; Printf.sprintf "linked tasks %d/%d done"
+                          goal.og_task_done_count goal.og_task_count
+                      ]
+                    |> List.map (fun line -> "   " ^ line)))
               shown)
       @ (if List.length active > List.length shown then
            [ Printf.sprintf "   +%d more Goals in Work"
@@ -627,7 +639,7 @@ let render_overview (state : state) =
     title :: List.map (fun line -> "   " ^ line) body
   in
   let summary =
-    dashboard_goal_lines state
+    dashboard_goal_lines ~cols state
     @ [ "" ]
     @ dashboard_work_lines state
     @ [ "" ]

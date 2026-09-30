@@ -1,0 +1,1 @@
+- Keep Dashboard Goal measurements and linked-task counts on their own wrapped rows so long titles cannot displace them.

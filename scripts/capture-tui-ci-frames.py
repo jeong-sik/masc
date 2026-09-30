@@ -152,14 +152,15 @@ def main() -> None:
                         "width": columns * 10 + 24, "height": rows * 20 + 24})
                     page = context.new_page()
                     page.goto(f"http://127.0.0.1:{port}")
-                    page.wait_for_selector(".xterm-helper-textarea")
+                    page.wait_for_selector(".xterm-helper-textarea", state="attached")
                     page.wait_for_function("window.term && window.term.buffer.active.getLine(0)")
                     page.evaluate("([cols, rows]) => window.term.resize(cols, rows)", [columns, rows])
                     page.wait_for_function(
                         "([cols, rows]) => window.term.cols === cols && window.term.rows === rows",
                         arg=[columns, rows],
                     )
-                    page.locator(".xterm-helper-textarea").press("Enter")
+                    page.evaluate("window.term.focus()")
+                    page.keyboard.press("Enter")
                     expected = [line.rstrip() for line in record["screen"].splitlines() if line.strip()]
                     page.wait_for_function(
                         """expected => {

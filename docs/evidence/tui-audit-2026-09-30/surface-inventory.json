@@ -486,6 +486,9 @@
     "source_head": "c112b2030652a5a25360f5d5322f8dc6da99c598",
     "provenance": "direct current source inspection; no executable proof",
     "code_diff_implementation_pr": 40196,
+    "remaining_readers_implementation_pr": 40208,
+    "focused_run": 36673795966,
+    "execution_status": "pending at ac8df5fb74; fixture excludes refresh, repository scope switching and patch modal",
     "unimplemented_readers": [
       {
         "reader": "recorded tool-call before/after",
@@ -510,6 +513,13 @@
         "evidence": "same no-horizontal diff_surface; opens from selected repository-change row with its scope",
         "required_verification": "body pans in project/repository scope; selected path changes reset own position; list and hidden Code file never move"
       }
-    ]
+    ],
+    "implementation_note": "unimplemented_readers describes the audited base; three repairs now published in40208, executable proof pending"
+  },
+  "link_preview_repair": {
+    "pr": 40209,
+    "source_head": "893ca15b5b",
+    "focused_run": 36673794831,
+    "status": "source review and static checks only; focused execution and actual modal PTY pending"
   }
 }

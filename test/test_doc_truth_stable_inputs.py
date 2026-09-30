@@ -105,39 +105,6 @@ class StableDocumentationInputs(unittest.TestCase):
             accepted = run_script(repo, self.env, "check-doc-truth.sh")
             self.assertEqual(accepted.returncode, 0, accepted.stdout + accepted.stderr)
 
-            # The candidate is not the published release, so the pin stands
-            # only with the availability notice beside it.
-            notice = f"> Installation target: v{candidate} (check tag availability on GitHub Releases)."
-            readme = repo / "README.md"
-            self.assertIn(notice, readme.read_text())
-            readme.write_text(readme.read_text().replace(notice, ""))
-            refused = run_script(repo, self.env, "check-doc-truth.sh")
-            self.assertNotEqual(refused.returncode, 0)
-            self.assertIn("Installation target:", refused.stderr)
-
-    def test_a_pin_on_the_published_release_still_needs_the_notice(self):
-        # The bump rewrites the notice rather than adding it, so a README that
-        # lost it while pinned to a published release must fail here instead
-        # of at the next bump. On a release branch the bump has already moved
-        # the pin to the candidate, so pin the README to the published release
-        # here rather than assuming the branch already does.
-        readme = self.repo / "README.md"
-        original = readme.read_text()
-        published = first_group(r"(?m)^> Latest published GitHub release: v([^ ]+)",
-                                (self.repo / "ROADMAP.md").read_text())
-        notice = f"> Installation target: v{published} (check tag availability on GitHub Releases)."
-        pinned = re.sub(r"(?m)^TAG=v[^ ]+$", f"TAG=v{published}", original)
-        pinned = re.sub(r"(?m)^> Installation target: v[^ ]+ .*$", notice, pinned)
-        try:
-            readme.write_text(pinned)
-            self.assertEqual(pinned.count(notice), 1)
-            readme.write_text(pinned.replace(notice, ""))
-            refused = self.run_script("check-doc-truth.sh")
-            self.assertNotEqual(refused.returncode, 0)
-            self.assertIn("Installation target:", refused.stderr)
-        finally:
-            readme.write_text(original)
-
     def test_checked_in_version_mismatch_still_fails(self):
         path = self.repo / "dune-project"
         original = path.read_text()

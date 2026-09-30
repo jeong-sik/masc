@@ -1,0 +1,1 @@
+- Integrate complete Task metadata and transition evidence into one physical-row document; page movement and cancel keys follow the visible Task reader.

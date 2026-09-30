@@ -17600,9 +17600,10 @@ let main
      empty reason leaves the task untouched. The server's FSM decides
      whether the task is still cancellable. *)
   let handle_task_cancel () =
-    match state.task_detail_id with
+    match task_detail_on_screen state with
     | None -> ()
-    | Some task_id -> (
+    | Some (task : Masc_domain.task) -> (
+        let task_id = task.id in
         match Masc_tui_editor.editor_command () with
         | None ->
             report_action state "error"
@@ -23211,6 +23212,12 @@ and is loaded on demand through keeper_skill.
            let page = surface_page_rows state in
            let direction = if key = Some "pagedown" then 1 else -1 in
            (match state.view with
+            | Planning when state.planning_mode = Planning_list
+                            && Masc_tui_overview_tasks.is_focused state.task_focus
+                            && Option.is_some (task_detail_on_screen state) ->
+                let count, height = Masc_tui_render.task_detail_viewport state in
+                let move = if direction > 0 then Masc_tui_scroll.page_down else Masc_tui_scroll.page_up in
+                state.task_detail_scroll <- move ~count ~height state.task_detail_scroll
             (* Applying a scheme used to live on the page keys, where the
                footer never said it was and where PageDown is a scroll
                everywhere else; it answers to Enter. Emptying the arm left the
@@ -25428,7 +25435,9 @@ and is loaded on demand through keeper_skill.
                             (Printf.sprintf "closed %s:%d" path line))))
        | Some ("a" | "A") when state.view = Planning ->
            handle_goal_confirmation_key state ~mailbox:async_messages
-       | Some "c" | Some "C" | Some "x" | Some "X" | Some "o" | Some "O" when state.view = Planning ->
+       | Some "c" | Some "C" | Some "x" | Some "X" | Some "o" | Some "O"
+         when state.view = Planning
+              && (match state.planning_mode with Planning_detail _ -> true | Planning_list -> false) ->
            (* Goal lifecycle, detail only: the list keeps j/k/Enter and the
               letters stay navigation-free there. The first press arms, the
               same press submits; the server owns the phase rules. *)
@@ -25498,7 +25507,9 @@ and is loaded on demand through keeper_skill.
            state.system_logs_scroll <- 0;
            state.system_logs_cursor <- 0
        | Some "x" | Some "X"
-         when state.view = Planning && state.task_detail_id <> None ->
+         when state.view = Planning && state.planning_mode = Planning_list
+              && Masc_tui_overview_tasks.is_focused state.task_focus
+              && Option.is_some (task_detail_on_screen state) ->
            (* Cancel wants a reason, and $EDITOR is the form we already
               have; the editor itself is the confirmation step. *)
            handle_task_cancel ()

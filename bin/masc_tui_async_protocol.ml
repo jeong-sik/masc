@@ -121,7 +121,7 @@ type async_msg =
      seconds would otherwise land on whoever happens to be selected when it
      arrives. *)
   (* The wizard's replies carry the save they answer, and
-     [Masc_tui_types.voice_wizard_after_save] and its two siblings drop one the
+     [Masc_tui_voice_wizard_session.voice_wizard_after_save] and its two siblings drop one the
      open session is not waiting on. *)
   | Voice_wizard_saved of int * Masc_tui_voice_wizard_session.voice_wizard_save_reply
   (* The keeper-voice screen: the voices its endpoint answers to, and what

@@ -3234,7 +3234,7 @@ let planning_confirmation_view (state : state) ~goal_id =
   | Planning_detail.Submitting (submitted_goal, _) when String.equal submitted_goal goal_id -> `Submitting
   | Planning_detail.Submitting _ -> `Inspect Absent
 
-let planning_detail_action_rows ~cols (goal : planning_goal) =
+let planning_detail_action_rows ~cols ~armed (goal : planning_goal) =
   let item action =
     let key = planning_action_key action and label = planning_action_label action in
     let text = Printf.sprintf "[%s] %s" key label in
@@ -3250,8 +3250,15 @@ let planning_detail_action_rows ~cols (goal : planning_goal) =
   Message_layout.wrap_words ~max_cells:(max 1 (framed_inner_width cols - 2))
     ("Actions: " ^ String.concat "   " actions)
   |> List.map (fun line -> "  " ^ line)
+  |> fun rows -> rows @ (match armed with
+       | None -> []
+       | Some action ->
+           Message_layout.wrap_words ~max_cells:(max 1 (framed_inner_width cols - 2))
+             (Printf.sprintf "ARMED: %s [%s] -- press again to submit; other keys cancel"
+                (planning_action_label action) (planning_action_key action))
+           |> List.map (fun line -> "  " ^ Theme.warn () ^ line ^ Ansi.reset))
 
-let planning_detail_lines (state : state) ~armed ~confirmation ~cols (goal : planning_goal) =
+let planning_detail_lines (state : state) ~confirmation ~cols (goal : planning_goal) =
   let width = max 1 (framed_inner_width cols - 2) in
   let field ?(tone = Planning_detail.Note) label text =
     let prefix = "  " ^ label ^ ": " in
@@ -3280,11 +3287,6 @@ let planning_detail_lines (state : state) ~armed ~confirmation ~cols (goal : pla
          | None -> [] | Some value -> field ~tone:Planning_detail.Quiet label value)
          ["Created", goal.pg_created_at; "Updated", goal.pg_updated_at; "Reviewed", goal.pg_last_review_at])
     @ field ~tone:Planning_detail.Quiet "Link" (Link.reference Goal goal.pg_id)
-    @ (match armed with
-       | None -> []
-       | Some action -> field ~tone:Planning_detail.Waiting "ARMED"
-           (Printf.sprintf "%s [%s] -- press again to submit; other keys cancel"
-             (planning_action_label action) (planning_action_key action)))
     @ (match state.goal_action_error with None -> [] | Some error -> field ~tone:Planning_detail.Refused "Error" error)
   in
   let linked_tasks = List.filter (fun (row : Tui_decode.task) -> List.mem goal.pg_id row.goal_ids) state.tasks in
@@ -3330,9 +3332,9 @@ let planning_detail_viewport (state : state) =
       (match List.find_opt (fun (goal : planning_goal) -> String.equal goal.pg_id goal_id) snapshot.pl_goals with
        | None -> 0, max 1 (rows - framed_chrome_rows)
        | Some goal ->
-           let action_rows = List.length (planning_detail_action_rows ~cols goal) in
+           let action_rows = List.length (planning_detail_action_rows ~cols ~armed:(goal_action_armed_for state goal_id) goal) in
            let count = List.length (planning_detail_lines state ~cols goal
-             ~armed:(goal_action_armed_for state goal_id) ~confirmation:(planning_confirmation_view state ~goal_id)) in
+             ~confirmation:(planning_confirmation_view state ~goal_id)) in
            count, planning_detail_height ~rows ~action_rows ~count)
   | Planning_list, _ | Planning_detail _, None -> 0, max 1 (rows - framed_chrome_rows)
 
@@ -3344,9 +3346,9 @@ let planning_detail_pane (state : state) ~armed ~confirmation ~rows ~cols (goal 
   box_top buf cols;
   box_line buf cols header;
   box_divider buf cols;
-  let actions = planning_detail_action_rows ~cols goal in
+  let actions = planning_detail_action_rows ~cols ~armed goal in
   List.iter (box_line buf cols) actions;
-  let lines = planning_detail_lines state ~armed ~confirmation ~cols goal in
+  let lines = planning_detail_lines state ~confirmation ~cols goal in
   let count = List.length lines in
   let height = planning_detail_height ~rows ~action_rows:(List.length actions) ~count in
   let scroll = Masc_tui_scroll.normalize ~count ~height state.planning_scroll in

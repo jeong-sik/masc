@@ -2,6 +2,7 @@
 import json
 import os
 import sys
+from pathlib import Path
 
 import test_tui_keyboard_input as h
 
@@ -76,6 +77,16 @@ def assignment(executable):
                    for index in range(32)],
     })
 
+    def prepare_workspace(base_path):
+        # Voice assignments read the local Keeper metadata. Replace only
+        # the two default names seeded in this scenario's temporary workspace.
+        keepers = Path(base_path) / ".masc" / "keepers"
+        for name in ("alpha", "beta"):
+            (keepers / f"{name}.json").unlink()
+        for agent in agents:
+            (keepers / f"{agent}.json").write_text(
+                json.dumps(h.keeper_metadata(agent)), encoding="utf-8")
+
     def interact(process, fd, _slave, output, _base):
         h.open_the_voice_pane(process, fd, output)
         # Roster data is independently loaded by refresh, so wait for its
@@ -135,7 +146,7 @@ def assignment(executable):
 
     h.run_terminal_scenario(executable, description="Voice assignment follows both selections",
                            interact=interact, http_fixtures=fixtures,
-                           http_requests=requests)
+                           http_requests=requests, prepare_workspace=prepare_workspace)
 
 
 if __name__ == "__main__":

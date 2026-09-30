@@ -1,0 +1,81 @@
+{
+  "scope": "Real KeeperConfigPanel source in Chromium with isolated synthetic API; not installed server acceptance.",
+  "passed": true,
+  "posts": [
+    {
+      "skills": {
+        "names": [
+          "first-skill"
+        ]
+      },
+      "expected_config_revision": {
+        "manifest": {
+          "state": "sha256",
+          "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "runtime_assignment": {
+          "state": "runtime_config_missing"
+        }
+      }
+    },
+    {
+      "skills": {
+        "names": [
+          "second-skill"
+        ]
+      },
+      "expected_config_revision": {
+        "manifest": {
+          "state": "sha256",
+          "value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        "runtime_assignment": {
+          "state": "runtime_config_missing"
+        }
+      }
+    },
+    {
+      "instructions": "First instructions",
+      "expected_config_revision": {
+        "manifest": {
+          "state": "sha256",
+          "value": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        },
+        "runtime_assignment": {
+          "state": "runtime_config_missing"
+        }
+      }
+    },
+    {
+      "instructions": "Later instructions",
+      "expected_config_revision": {
+        "manifest": {
+          "state": "sha256",
+          "value": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        },
+        "runtime_assignment": {
+          "state": "runtime_config_missing"
+        }
+      }
+    }
+  ],
+  "snapshots": [
+    {
+      "name": "skills-pending",
+      "text": "SP\nsave-probe\ntier-group.keeper_unified\n실행 중\n◈\n정체성\n¶\n프롬프트\n◷\n런타임\n⚖\n실행 정책\n⚿\n권한·샌드박스\n⬡\n훅\n◉\n상태·진단\nCONTROL BACKING\n4\nLIVE READ\nVerify gate\nGET /api/v1/keepers/:name/config execution.verify\nread-only execution policy projection\nGET config · 1 config field · missing 1 config field\nLIVE WRITE\nActivation mode\nGET /api/v1/keepers/:name/config activation_mode\nPATCH /api/v1/keepers/:name/config activation_mode\nGET config · PATCH config#activation_mode · 2 config fields · missing 1 config field\nLIVE WRITE\nKeeper Skills\nGET /api/v1/keepers/:name/config skills.names\nPATCH /api/v1/keepers/:name/config skills\nGET config · PATCH config#skills.names · 1 config field\nLIVE WRITE\nVoice gate bypass\nGET /api/v1/keepers/:name/config voice_always_allow\nPATCH /api/v1/keepers/:name/config voice_always_allow\nGET config · PATCH config#voice_always_allow · 1 config field\n검증\n검증OFF\n☠ 제거됨 · Handoff_triggered 이벤트와 자동 핸드오프 임계치는 소스에서 삭제됐습니다 — config 스키마에 handoff 설정 필드가 없습니다.\n실행 방식\n수동 시작 / 시작 시 준비하고 요청에 반응 / 주기적으로 자율 실행\n수동 시작\n요청 시 실행\n자율 실행\n음성 승인 생략\n음성 합성 발화 시 게이트 승인 대기 없이 즉시 재생\nKEEPER SKILLS\n\nKeeper TOML의 [keeper.skills] 선택을 그대로 편집합니다. 이름 비교는 정확히 일치하며, 현재 카탈로그에 없는 이름도 저장 후 관측 화면에 남습니다.\n\nSkill 선택\n전체 또는 정확한 이름 목록\n모든 공개 Skill\n이름으로 선택\n한 줄에 하나 · 빈 목록은 어떤 Skill도 선택하지 않음\n실행 정책 · save-probe\n변경된 Keeper 설정\n초기화하기\n저장 중..."
+    },
+    {
+      "name": "skills-preserved",
+      "text": "SP\nsave-probe\ntier-group.keeper_unified\n실행 중\n◈\n정체성\n¶\n프롬프트\n◷\n런타임\n⚖\n실행 정책\n⚿\n권한·샌드박스\n⬡\n훅\n◉\n상태·진단\nCONTROL BACKING\n4\nLIVE READ\nVerify gate\nGET /api/v1/keepers/:name/config execution.verify\nread-only execution policy projection\nGET config · 1 config field · missing 1 config field\nLIVE WRITE\nActivation mode\nGET /api/v1/keepers/:name/config activation_mode\nPATCH /api/v1/keepers/:name/config activation_mode\nGET config · PATCH config#activation_mode · 2 config fields · missing 1 config field\nLIVE WRITE\nKeeper Skills\nGET /api/v1/keepers/:name/config skills.names\nPATCH /api/v1/keepers/:name/config skills\nGET config · PATCH config#skills.names · 1 config field\nLIVE WRITE\nVoice gate bypass\nGET /api/v1/keepers/:name/config voice_always_allow\nPATCH /api/v1/keepers/:name/config voice_always_allow\nGET config · PATCH config#voice_always_allow · 1 config field\n검증\n검증OFF\n☠ 제거됨 · Handoff_triggered 이벤트와 자동 핸드오프 임계치는 소스에서 삭제됐습니다 — config 스키마에 handoff 설정 필드가 없습니다.\n실행 방식\n수동 시작 / 시작 시 준비하고 요청에 반응 / 주기적으로 자율 실행\n수동 시작\n요청 시 실행\n자율 실행\n음성 승인 생략\n음성 합성 발화 시 게이트 승인 대기 없이 즉시 재생\nKEEPER SKILLS\n\nKeeper TOML의 [keeper.skills] 선택을 그대로 편집합니다. 이름 비교는 정확히 일치하며, 현재 카탈로그에 없는 이름도 저장 후 관측 화면에 남습니다.\n\nSkill 선택\n전체 또는 정확한 이름 목록\n모든 공개 Skill\n이름으로 선택\n한 줄에 하나 · 빈 목록은 어떤 Skill도 선택하지 않음\n실행 정책 · save-probe\n변경된 Keeper 설정\n초기화하기\nKeeper 설정 저장"
+    },
+    {
+      "name": "prompt-preserved",
+      "text": "SP\nsave-probe\ntier-group.keeper_unified\n실행 중\n◈\n정체성\n¶\n프롬프트\n◷\n런타임\n⚖\n실행 정책\n⚿\n권한·샌드박스\n⬡\n훅\n◉\n상태·진단\nCONTROL BACKING\n2\nLIVE WRITE\nKeeper instructions\nGET /api/v1/keepers/:name/config prompt.instructions + sources.override_fields\nPATCH /api/v1/keepers/:name/config instructions\nGET config · PATCH config#instructions · 2 config fields · missing 1 config field\nBROWSER LOCAL\nPrompt preview mode\npromptPreviewTab signal\nswitch visible prompt preview only\nlocal:promptPreviewTab\n저장취소\n프롬프트 (편집)\n지시사항● 수정됨\n18 글자\n⛶\n프롬프트 · save-probe\n변경된 Keeper 설정\n초기화하기\nKeeper 설정 저장"
+    },
+    {
+      "name": "runtime-unsaved-preserved",
+      "text": "SP\nsave-probe\ntier-group.keeper_unified\n실행 중\n◈\n정체성\n¶\n프롬프트\n◷\n런타임\n⚖\n실행 정책\n⚿\n권한·샌드박스\n⬡\n훅\n◉\n상태·진단\nCONTROL BACKING\n5\nLIVE WRITE\nSandbox and network\nGET /api/v1/keepers/:name/config sandbox_profile/network_mode + toml:manifest path unavailable\nPATCH /api/v1/keepers/:name/config sandbox/network/path fields\nGET config · PATCH config#sandbox/network/path fields · 4 config fields · missing 1 config field\nLIVE WRITE\nMention targets\nGET /api/v1/keepers/:name/config workspace.mention_targets + toml:manifest path unavailable\nPATCH /api/v1/keepers/:name/config mention_targets\nGET config · PATCH config#mention_targets · 3 config fields · missing 1 config field\nLIVE WRITE\nBoard interests\nGET /api/v1/keepers/:name/config workspace.board_interests + toml:manifest path unavailable\nPATCH /api/v1/keepers/:name/config board_interests\nGET config · PATCH config#board_interests · 3 config fields · missing 1 config field\nLIVE READ\nEffective scope\nGET /api/v1/keepers/:name/config sandbox_roots + workspace.bound_workspace_ids\nread-only computed access projection\nGET config · 2 config fields\nLIVE WRITE\nGitHub CLI identity\nGET /api/v1/keepers/:name/github-identity stored/effective probes\nPOST /api/v1/keepers/:name/github-login operator web login stream\nGET providers · POST providers\n실행 범위 · 샌드박스\nsandbox_profile\ndocker\nmicrovm\nremote_ssh\nnetwork_mode\ninherit\nnone\nsandbox: /synthetic\n처음 설치하나요? · Keeper Docker Sandbox 프리플라이트\n6 steps\nmention_targets1개\nboard_interests1개\n참여 네임스페이스\nnone\nGITHUB CLI 계정\n새로고침GitHub 로그인\n\nKeeper 전용으로 저장된 GitHub CLI 계정과 호스트에 투영된 자격 증명을 GitHub API로 각각 확인합니다.\n\n로그인할 때 추가로 받을 권한 (기본 repo, read:org, gist)\nworkflow.github/workflows 를 바꿀 수 있어요. workflow 는 저장소 secrets 로 돌아요.write:packagesGitHub Packages(ghcr.io 이미지 포함)에 올릴 수 있어요. read:packages 도 같이 받아요.\n\nGET /api/v1/keepers/save-probe/github-identity?hostname=github.com: Outside the isolated config fixture\n\n업무 서비스 연결\n\n동의 화면에서 승인하면 토큰이 이 Keeper 전용 시크릿으로 저장되고, 그 서비스의 도구가 이 Keeper 표면에 올라옵니다. 브라우저가 돌아오기 전까지는 아무것도 기록되지 않습니다.\n\n불러오는 중...\n\n권한·샌드박스 · save-probe\n변경된 Keeper 설정\n초기화하기\nKeeper 설정 저장"
+    }
+  ],
+  "errors": []
+}

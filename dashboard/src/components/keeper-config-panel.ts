@@ -474,7 +474,16 @@ export function rebaseRuntimeDraftOnFreshConfig(
   seen: KeeperConfig,
   fresh: KeeperConfig,
 ): RuntimeDraft {
-  const base = initRuntimeDraftFromConfig(seen)
+  return rebaseRuntimeDraft(draft, initRuntimeDraftFromConfig(seen), fresh)
+}
+
+// Success compares against the submitted draft, while a conflict compares
+// against the server config the user originally saw.
+function rebaseRuntimeDraft(
+  draft: RuntimeDraft,
+  base: RuntimeDraft,
+  fresh: KeeperConfig,
+): RuntimeDraft {
   const rebased = initRuntimeDraftFromConfig(fresh)
   if (draft.runtime_id !== base.runtime_id) rebased.runtime_id = draft.runtime_id
   if (draft.activation_mode !== base.activation_mode) {
@@ -512,6 +521,22 @@ export function rebaseRuntimeDraftOnFreshConfig(
         && draftSelection.prior_names_text !== baseSelection.prior_names_text)
   if (selectionChanged) rebased.skill_selection = { ...draftSelection }
   return rebased
+}
+
+function applySavedConfig(
+  name: string,
+  updated: KeeperConfig,
+  submittedRuntimeDraft: RuntimeDraft,
+): void {
+  // applyKeeperConfigUpdate synchronously resets the runtime draft through
+  // its subscription. Capture newer edits first, then put only those edits
+  // on the authoritative response, including its normalization and revision.
+  const current = runtimeDraft.value
+  const preserved = current?.keeperName === name
+    ? rebaseRuntimeDraft(current.draft, submittedRuntimeDraft, updated)
+    : null
+  applyKeeperConfigUpdate(name, updated)
+  if (preserved) runtimeDraft.value = { keeperName: name, draft: preserved }
 }
 
 export function keeperRuntimeConfigWriteUnsupportedReason(c: KeeperConfig): string | null {
@@ -1742,6 +1767,7 @@ function EditTextarea({ field, label, rows = 6 }: { field: keyof EditDraft; labe
         rows=${rows}
         dirty=${dirty}
         onChange=${(value: string) => updateDraft(field, value)}
+        onInput=${(value: string) => updateDraft(field, value)}
       />
     </div>
   `
@@ -1957,7 +1983,7 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
         activeOwner?.keeperName !== saveRequest.owner.keeperName
         || activeOwner.epoch !== saveRequest.owner.epoch
       ) return
-      applyKeeperConfigUpdate(keeperName, updated)
+      applySavedConfig(keeperName, updated, rd)
       void refreshKeeperSurfacesAfterConfigSave()
       const durabilityWarning = configDurabilityWarningMessage(
         'Keeper 설정은',
@@ -2090,10 +2116,14 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
         activeOwner?.keeperName !== panelOwner.keeperName
         || activeOwner.epoch !== panelOwner.epoch
       ) return
-      applyKeeperConfigUpdate(keeperName, updated)
+      applySavedConfig(keeperName, updated, initRuntimeDraftFromConfig(c))
       void refreshKeeperSurfacesAfterConfigSave()
-      editMode.value = false
-      editDraft.value = null
+      const hasLaterEdits = editDraft.value !== null
+        && editDraft.value.instructions !== draft.instructions
+      if (!hasLaterEdits) {
+        editMode.value = false
+        editDraft.value = null
+      }
       lastSavedAt.value = new Date().toISOString()
       const durabilityWarning = configDurabilityWarningMessage(
         '프롬프트는',
@@ -2102,7 +2132,7 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
       if (durabilityWarning) {
         showToast(durabilityWarning, 'warning')
       } else {
-        showToast(`프롬프트 저장 완료${runtimeSyncToastSuffix(updated.runtime_sync)}`, 'success')
+        showToast(`프롬프트 저장 완료${runtimeSyncToastSuffix(updated.runtime_sync)}${hasLaterEdits ? ' · 저장 중 추가한 편집은 남겨뒀어요' : ''}`, 'success')
       }
     } catch (err) {
       const activeOwner = activeKeeperConfigOwner.value

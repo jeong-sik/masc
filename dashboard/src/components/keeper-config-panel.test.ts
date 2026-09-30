@@ -2120,6 +2120,173 @@ describe('KeeperConfigPanel', () => {
     }
   })
 
+  it('keeps Skill edits made while the same panel is saving and uses the new revision', async () => {
+    let resolveSave!: (value: KeeperConfig) => void
+    const pending = new Promise<KeeperConfig>(resolve => { resolveSave = resolve })
+    const base = makeKeeperConfig({ skills: { names: ['base-skill'] } })
+    const updated = makeKeeperConfig({
+      skills: { names: ['first-skill'] },
+      config_revision: {
+        manifest: { state: 'sha256', value: 'b'.repeat(64) },
+        runtime_assignment: { state: 'runtime_config_missing' },
+      },
+    })
+    mocks.fetchKeeperConfig.mockResolvedValueOnce(base)
+    mocks.patchKeeperConfig.mockReturnValueOnce(pending).mockResolvedValueOnce(updated)
+    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
+    await flush()
+    await flush()
+    selectKcfTab(container, '실행 정책')
+    await flush()
+    const names = () => container.querySelector('textarea[aria-label="Skill 이름"]') as HTMLTextAreaElement
+    const save = () => Array.from(container.querySelectorAll('button')).find(button =>
+      button.textContent?.includes('Keeper 설정 저장'),
+    ) as HTMLButtonElement
+    names().value = 'first-skill'
+    names().dispatchEvent(new Event('input', { bubbles: true }))
+    await flush()
+    save().click()
+    await flush()
+    names().value = 'second-skill'
+    names().dispatchEvent(new Event('input', { bubbles: true }))
+    await flush()
+    expect(mocks.patchKeeperConfig).toHaveBeenNthCalledWith(
+      1, base.name, { skills: { names: ['first-skill'] } }, base.config_revision,
+    )
+    resolveSave(updated)
+    await flush()
+    await flush()
+    expect(names().value).toBe('second-skill')
+    expect(save().disabled).toBe(false)
+    save().click()
+    await flush()
+    expect(mocks.patchKeeperConfig).toHaveBeenNthCalledWith(
+      2, base.name, { skills: { names: ['second-skill'] } }, updated.config_revision,
+    )
+  })
+
+  it('accepts normalized saved fields while preserving only later runtime edits', async () => {
+    let resolveSave!: (value: KeeperConfig) => void
+    const pending = new Promise<KeeperConfig>(resolve => { resolveSave = resolve })
+    const base = makeKeeperConfig()
+    const updated = makeKeeperConfig({
+      workspace: { ...base.workspace, mention_targets: ['alpha', 'beta'] },
+      config_revision: {
+        manifest: { state: 'sha256', value: 'b'.repeat(64) },
+        runtime_assignment: { state: 'runtime_config_missing' },
+      },
+    })
+    mocks.fetchKeeperConfig.mockResolvedValueOnce(base)
+    mocks.patchKeeperConfig.mockReturnValueOnce(pending).mockResolvedValueOnce(updated)
+    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
+    await flush()
+    await flush()
+    selectKcfTab(container, '권한·샌드박스')
+    await flush()
+    const field = (name: string) => container.querySelector(`textarea[aria-label="${name}"]`) as HTMLTextAreaElement
+    const save = () => Array.from(container.querySelectorAll('button')).find(button =>
+      button.textContent?.includes('Keeper 설정 저장'),
+    ) as HTMLButtonElement
+    field('mention_targets').value = 'alpha\n beta \nalpha\n'
+    field('mention_targets').dispatchEvent(new Event('input', { bubbles: true }))
+    await flush()
+    save().click()
+    await flush()
+    field('board_interests').value = 'later-interest'
+    field('board_interests').dispatchEvent(new Event('input', { bubbles: true }))
+    await flush()
+    resolveSave(updated)
+    await flush()
+    await flush()
+    expect(field('mention_targets').value).toBe('alpha\nbeta')
+    expect(field('board_interests').value).toBe('later-interest')
+    save().click()
+    await flush()
+    expect(mocks.patchKeeperConfig).toHaveBeenNthCalledWith(
+      2, base.name, { board_interests: ['later-interest'] }, updated.config_revision,
+    )
+  })
+
+  it.each(['none', 'inline', 'expanded'] as const)('preserves unsaved runtime edits when a prompt save settles with %s editing', async editing => {
+    const laterEdit = editing !== 'none'
+    let resolveSave!: (value: KeeperConfig) => void
+    const pending = new Promise<KeeperConfig>(resolve => { resolveSave = resolve })
+    const base = makeKeeperConfig()
+    const updated = makeKeeperConfig({
+      prompt: { ...base.prompt, instructions: 'first instructions' },
+      config_revision: {
+        manifest: { state: 'sha256', value: 'b'.repeat(64) },
+        runtime_assignment: { state: 'runtime_config_missing' },
+      },
+    })
+    mocks.fetchKeeperConfig.mockResolvedValueOnce(base)
+    mocks.patchKeeperConfig.mockReturnValueOnce(pending).mockResolvedValueOnce(updated)
+    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
+    await flush()
+    await flush()
+    selectKcfTab(container, '권한·샌드박스')
+    await flush()
+    const interests = container.querySelector('textarea[aria-label="board_interests"]') as HTMLTextAreaElement
+    interests.value = 'unsaved-interest'
+    interests.dispatchEvent(new Event('input', { bubbles: true }))
+    await flush()
+    selectKcfTab(container, '프롬프트')
+    await flush()
+    const button = (text: string) => Array.from(container.querySelectorAll('button')).find(b =>
+      b.textContent?.trim() === text,
+    ) as HTMLButtonElement
+    button('편집하기').click()
+    await flush()
+    const typeInstructions = async (value: string) => {
+      const input = container.querySelector('textarea') as HTMLTextAreaElement
+      input.value = value
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+      input.dispatchEvent(new FocusEvent('blur', { bubbles: true }))
+      await flush()
+    }
+    await typeInstructions('first instructions')
+    button('저장').click()
+    await flush()
+    if (laterEdit) {
+      if (editing === 'expanded') {
+        const expand = container.querySelector('button[title="전체 화면으로 편집"]') as HTMLButtonElement
+        expand.click()
+        await flush()
+      }
+      const inputs = container.querySelectorAll('textarea')
+      const input = inputs[inputs.length - 1] as HTMLTextAreaElement
+      input.focus()
+      input.value = 'second instructions'
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+      await flush()
+      expect(document.activeElement).toBe(input)
+    }
+    resolveSave(updated)
+    await flush()
+    await flush()
+    if (laterEdit) {
+      const inputs = container.querySelectorAll('textarea')
+      expect((inputs[inputs.length - 1] as HTMLTextAreaElement).value).toBe('second instructions')
+      if (editing === 'expanded') {
+        button('확인').click()
+        await flush()
+      }
+      expect(button('저장').disabled).toBe(false)
+      button('저장').click()
+      await flush()
+      expect(mocks.patchKeeperConfig).toHaveBeenNthCalledWith(
+        2, base.name, { instructions: 'second instructions' }, updated.config_revision,
+      )
+    } else {
+      expect(container.querySelector('textarea')).toBeNull()
+      expect(button('편집하기')).toBeDefined()
+    }
+    selectKcfTab(container, '권한·샌드박스')
+    await flush()
+    expect((container.querySelector('textarea[aria-label="board_interests"]') as HTMLTextAreaElement).value)
+      .toBe('unsaved-interest')
+  })
+
   it('does not let a late Keeper A save overwrite Keeper B Skill edits', async () => {
     let resolveKeeperA: ((value: KeeperConfig) => void) | undefined
     const keeperASave = new Promise<KeeperConfig>(resolve => {

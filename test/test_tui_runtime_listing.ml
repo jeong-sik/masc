@@ -458,7 +458,9 @@ let test_runtime_detail_keeps_its_owner () =
         rrs_media_failover = []; rrs_media_failover_declared = [];
         rrs_runtimes = List.map runtime ids;
         rrs_lanes =
-          [{rrl_id = "lane"; rrl_runtime_ids = ids; rrl_declared = true}] }
+          (match ids with
+           | [] -> []
+           | _ -> [{rrl_id = "lane"; rrl_runtime_ids = ids; rrl_declared = true}]) }
     in
     match Masc.Tui_decode.join_runtime_surface ~probe:None ~probe_error:None ~resolved with
     | Ok snapshot -> snapshot

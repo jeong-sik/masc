@@ -35,6 +35,11 @@ val save_broadcast : t -> instance_id:string -> request_id:string -> Yojson.Safe
 val load_broadcast : t -> instance_id:string -> request_id:string -> (Yojson.Safe.t option, string) result
 (** Retain the exact published evidence before sending its idempotent Broadcast.
     Repeated sends read that original artifact, not a changing live binding. *)
+val save_sampling_request : t -> instance_id:string -> request_id:string ->
+  Yojson.Safe.t -> (unit, string) result
+val sampling_requests : t -> instance_id:string -> (Yojson.Safe.t list, string) result
+(** Discover requests after cancellation or restart, including pending rows that
+    have no terminal evidence. Records are atomically replaced, never removed. *)
 val bindings : t -> (Yojson.Safe.t list, string) result
 (** Reconciles each binding sequence with retained observation filenames so a
     failed binding write cannot hide a renamed observation. Exact record reads

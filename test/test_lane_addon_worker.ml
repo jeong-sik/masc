@@ -470,6 +470,11 @@ let test_declared_sampling_requires_exact_host_callback () = with_fixture (fun e
       | Ok bytes -> bytes | Error detail -> fail detail in
     check string "request is durable before any model invocation" "model_request"
       (Yojson.Safe.from_string bytes |> Yojson.Safe.Util.member "kind" |> Yojson.Safe.Util.to_string);
+    let pending = match Masc.Lane_addon_store.sampling_requests store ~instance_id:"sampling-worker" with
+      | Ok rows -> rows | Error detail -> fail detail in
+    check bool "request is discoverable before host invocation" true
+      (List.exists (fun row -> Yojson.Safe.Util.member "state" row = `String "pending"
+        && Yojson.Safe.Util.member "request" row = Types.evidence_to_json request) pending);
     if !raises then failwith "fixture invocation outcome uncertain"
     else if !rejected then Error "fixture model refusal"
     else Ok {Mcp_protocol.Sampling.role=Assistant;content=Text {type_="text";
@@ -489,6 +494,11 @@ let test_declared_sampling_requires_exact_host_callback () = with_fixture (fun e
     (Result.is_error (start_model Types.Host_sampling None));
   check bool "ordinary observer cannot be given model access" true
     (Result.is_error (start_model Types.Model_disabled (Some sampling_handler)));
+  check bool "broker for another worker is rejected before container creation" true
+    (Result.is_error (Worker.start ~sw ~clock:(Eio.Stdenv.clock env) ~control_timeout_sec
+      ~mgr:(Eio.Stdenv.process_mgr env) ~instance_id:"different-worker"
+      ~package:{(package dir "sampling") with model_access=Types.Host_sampling}
+      ~docker_command:docker ~sampling_handler ()));
   check bool "mismatched access starts no container" false
     (Array.exists (fun path -> Filename.check_suffix path ".json") (Sys.readdir dir));
   let worker = unwrap (start_model Types.Host_sampling (Some sampling_handler)) in
@@ -522,6 +532,12 @@ let test_declared_sampling_requires_exact_host_callback () = with_fixture (fun e
       if key="masc.lane_sampling" then Some (Yojson.Safe.Util.to_string value) else None) raw_metadata);
   check bool "outcome links the original exact request" true
     (Yojson.Safe.Util.member "request" retained=Yojson.Safe.Util.member "request" references);
+  let recovered = Masc.Lane_addon_store.create ~root:(Masc.Lane_addon_store.root store) in
+  let indexed = match Masc.Lane_addon_store.sampling_requests recovered ~instance_id:"sampling-worker" with
+    | Ok rows -> rows | Error detail -> fail detail in
+  check bool "reopened store discovers terminal request evidence" true
+    (List.exists (fun row -> Yojson.Safe.Util.member "state" row = `String "finished"
+      && Yojson.Safe.Util.member "outcome" row = Yojson.Safe.Util.member "outcome" references) indexed);
   rejected := true;
   check bool "model refusal is not a synthetic successful observation" true
     (Result.is_error (observe worker "good"));
@@ -545,6 +561,11 @@ let test_declared_sampling_requires_exact_host_callback () = with_fixture (fun e
   check string "uncertain outcome still exposes its durable request" "model_request"
     (uncertain |> Yojson.Safe.Util.member "request" |> read_reference
       |> Yojson.Safe.Util.member "kind" |> Yojson.Safe.Util.to_string);
+  let pending_after_failure = match Masc.Lane_addon_store.sampling_requests recovered ~instance_id:"sampling-worker" with
+    | Ok rows -> rows | Error detail -> fail detail in
+  check bool "uncertain response remains discoverable after reopening the store" true
+    (List.exists (fun row -> Yojson.Safe.Util.member "state" row = `String "pending"
+      && Yojson.Safe.Util.member "request" row = Yojson.Safe.Util.member "request" uncertain) pending_after_failure);
   oversized := false; raises := true;
   check bool "invocation exception reaches the package as an error" true (Result.is_error (observe worker "good"));
   let inline_error () = Yojson.Safe.from_file (Filename.concat dir (cid ^ ".sampling-reply"))
@@ -573,7 +594,9 @@ let test_declared_sampling_requires_exact_host_callback () = with_fixture (fun e
     | Ok handler -> handler | Error detail -> fail detail in
   let before = !calls in
   check bool "unretained oversized request is refused before invocation" true
-    (Result.is_error (bounded params));
+    (Result.is_error ((match Masc.Lane_addon_sampling.for_worker bounded
+        ~package:tiny_package ~instance_id:"bounded-model" with
+        | Ok handler -> handler | Error detail -> fail detail) params));
   check int "retention is required before the model is called" before !calls;
   let argv = Yojson.Safe.from_file (Filename.concat dir (cid ^ ".json"))
     |> Yojson.Safe.Util.member "argv" |> Yojson.Safe.Util.to_list |> List.map Yojson.Safe.Util.to_string in

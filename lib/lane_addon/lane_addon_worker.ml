@@ -259,8 +259,11 @@ let start ~sw ~clock ~control_timeout_sec ~mgr ~instance_id ~(package : package)
   let* () = if Float.is_finite control_timeout_sec && control_timeout_sec > 0. then Ok ()
     else Error (Invalid_package "control_timeout_sec must be finite and positive") in
   let* () = validate_package package in
-  let* () = match package.model_access, sampling_handler with
-    | Model_disabled, None | Host_sampling, Some _ -> Ok ()
+  let* sampling_handler = match package.model_access, sampling_handler with
+    | Model_disabled, None -> Ok None
+    | Host_sampling, Some broker ->
+        Lane_addon_sampling.for_worker broker ~package ~instance_id
+        |> Result.map Option.some |> Result.map_error (fun detail -> Invalid_package detail)
     | Host_sampling, None -> Error (Invalid_package "package requires host sampling; no host model handler is configured")
     | Model_disabled, Some _ -> Error (Invalid_package "package does not declare host sampling") in
   let* () = match package.action_tool, artifact_store with

@@ -551,9 +551,20 @@
   },
   "runtime_listing_targeted_request": {
     "pr": 40220,
-    "run": 36676524947,
+    "run": 36677494108,
     "scope": "requested scoped CI; source/static only, no execution PASS",
-    "head": "68b11bce7304ecd3d5c51d244a0aee8495f353bd",
-    "probe_run": 36676780128
+    "head": "b9db8b2b0f0823d85108785f2bdea6797167c2ee",
+    "probe_run": 36676780128,
+    "superseded_runs_cancel_requested": [
+      36676524947,
+      36677120757
+    ],
+    "probe_head": "68b11bce7304ecd3d5c51d244a0aee8495f353bd"
+  },
+  "runtime_listing_baseline_fixture": {
+    "binary_commit": "86751f610442e4d82992ebc54bf9eb8ba45ef6d2",
+    "binary_sha256": "96955f7800f497c831f6cd25c953d0143cc8c6441f0b7935d18198f49008760b",
+    "receipt": "runtime-list-before-86751.txt",
+    "scope": "installed binary in isolated fixture PTY,40x32,color,lane,healthy singleton; original clipping reproduced only. No repaired head or full matrix proof."
   }
 }

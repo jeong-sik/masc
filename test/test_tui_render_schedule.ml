@@ -253,190 +253,6 @@ let test_compact_viewport_uses_largest_fixed_chrome_budget () =
   check bool "normal terminals keep the selected surface" false
     (Schedule.Viewport.requires_compact_frame ~rows:30)
 
-let overview_frame_rows ~terminal_rows:_ (allocation : Schedule.overview_allocation) =
-  10 + allocation.spacing_rows
-  + allocation.intro_rows
-  + allocation.attention_rows
-  + (if allocation.goal_rows > 0
-     then allocation.goal_rows + Schedule.overview_goal_chrome_rows
-     else 0)
-  + (if allocation.team_rows > 0
-     then allocation.team_rows + Schedule.overview_team_chrome_rows
-     else 0)
-  + (if allocation.providers_rows > 0
-     then allocation.providers_rows + Schedule.overview_providers_chrome_rows
-     else 0)
-  + allocation.task_error_rows
-  + allocation.task_rows
-  + allocation.filler_rows
-
-(* What the Tasks block cannot give up: the task error row when there is
-   one, then the first held task and the backlog line beside it -- or the
-   one row an empty or unread list gets. *)
-let overview_task_floor ~task_count ~has_task_error =
-  let error_rows = if has_task_error then 1 else 0 in
-  let task_rows =
-    if task_count <= 0 then if has_task_error then 0 else 1 else task_count
-  in
-  error_rows + min task_rows 2
-
-let overview_blocks (allocation : Schedule.overview_allocation) =
-  [ ("intro", allocation.intro_rows)
-  ; ("attention", allocation.attention_rows)
-  ; ("goals", allocation.goal_rows)
-  ; ("providers", allocation.providers_rows)
-  ; ("team", allocation.team_rows)
-  ; ("task error", allocation.task_error_rows)
-  ; ("tasks", allocation.task_rows)
-  ]
-
-(* The Overview at every height from 23 to 70 and every mix of blocks. The
-   defects this replaces were mixes nobody had drawn: GOALS and Team together
-   left Tasks one row at 40 (#38607), and adding Providers above them made a
-   36-row terminal draw fewer Tasks rows than a 32-row one (#38911). Each
-   block keeps what it cannot give up, the frame reaches the bottom, and no
-   block loses a row as the terminal grows or as the panel loses items. *)
-let test_overview_rows_are_shared_floors_first () =
-  let allocate ~terminal_rows ~attention_count ~goal_count ~team
-      ~providers_count ~task_count ~has_task_error =
-    let team_count, team_stuck = team in
-    Schedule.allocate_overview ~intro_count:0 ~terminal_rows ~attention_count ~goal_count
-      ~team_count ~team_stuck ~providers_count ~task_count ~has_task_error
-  in
-  List.iter
-    (fun attention_count ->
-      List.iter
-        (fun goal_count ->
-          List.iter
-            (fun ((team_count, team_stuck) as team) ->
-              List.iter
-                (fun providers_count ->
-                  List.iter
-                    (fun task_count ->
-                      List.iter
-                        (fun has_task_error ->
-                          for terminal_rows = 23 to 70 do
-                            let at terminal_rows =
-                              allocate ~terminal_rows ~attention_count
-                                ~goal_count ~team ~providers_count ~task_count
-                                ~has_task_error
-                            in
-                            let allocation = at terminal_rows in
-                            let case =
-                              Printf.sprintf
-                                "rows %d attention %d goals %d team %d%s \
-                                 providers %d tasks %d%s"
-                                terminal_rows attention_count goal_count
-                                team_count
-                                (if team_stuck then " (stuck)" else "")
-                                providers_count task_count
-                                (if has_task_error then " (error)" else "")
-                            in
-                            check int (case ^ ": the frame is exact")
-                              terminal_rows
-                              (overview_frame_rows ~terminal_rows allocation);
-                            List.iter
-                              (fun (block, rows) ->
-                                if rows < 0 then
-                                  failf "%s: %s has %d rows" case block rows)
-                              (overview_blocks allocation);
-                            if
-                              allocation.task_error_rows + allocation.task_rows
-                              < overview_task_floor ~task_count ~has_task_error
-                            then
-                              failf "%s: Tasks drew %d rows, under its floor"
-                                case allocation.task_rows;
-                            if goal_count > 0 && allocation.goal_rows < 1 then
-                              failf "%s: GOALS lost its headline" case;
-                            if team_stuck && allocation.team_rows < 1 then
-                              failf "%s: Team lost its stuck Keeper" case;
-                            if allocation.team_rows > team_count then
-                              failf "%s: Team drew %d of %d rows" case
-                                allocation.team_rows team_count;
-                            if allocation.providers_rows > providers_count then
-                              failf "%s: Providers drew %d of %d rows" case
-                                allocation.providers_rows providers_count;
-                            List.iter2
-                              (fun (block, rows) (_, taller) ->
-                                if taller < rows then
-                                  failf "%s: one more row takes %s from %d to %d"
-                                    case block rows taller)
-                              (overview_blocks allocation)
-                              (overview_blocks (at (terminal_rows + 1)));
-                            (* [Overview_team.settle] hands the items a drawn
-                               Team row carries out of the panel, and needs the
-                               Team block not to shrink for it. *)
-                            if attention_count > 0 then begin
-                              let fewer =
-                                allocate ~terminal_rows
-                                  ~attention_count:(attention_count - 1)
-                                  ~goal_count ~team ~providers_count ~task_count
-                                  ~has_task_error
-                              in
-                              if fewer.team_rows < allocation.team_rows then
-                                failf "%s: one attention item fewer takes Team \
-                                       from %d to %d rows"
-                                  case allocation.team_rows fewer.team_rows
-                            end
-                          done)
-                        [ false; true ])
-                    [ 0; 1; 8; 687 ])
-                [ 0; 1; 8 ])
-            [ (0, false); (1, false); (1, true); (13, false); (13, true); (60, true) ])
-        [ 0; 1; 9; 30 ])
-    [ 0; 1; 6; 10 ]
-
-(* #38607's viewport: 40 rows, six attention items, GOALS asking for nine
-   rows and Team for thirteen. Served first come first served the backlog
-   kept one row and drew one held task with nothing beside it. *)
-let test_overview_goals_and_team_leave_the_backlog_its_floor () =
-  let live =
-    Schedule.allocate_overview ~intro_count:0 ~terminal_rows:40 ~attention_count:6
-      ~goal_count:9 ~team_count:13 ~team_stuck:false ~providers_count:0
-      ~task_count:8 ~has_task_error:false
-  in
-  check int "the panel keeps its ceiling" 6 live.attention_rows;
-  check int "every goal fits" 9 live.goal_rows;
-  check int "Team takes what the backlog's floor leaves" 8 live.team_rows;
-  check int "the backlog keeps a task and its backlog line" 2 live.task_rows;
-  check int "40-row frame is exact" 40 (overview_frame_rows ~terminal_rows:40 live)
-
-(* This 32-row fixture leaves 30 Overview rows after its composer and agenda.
-   The first-use guide takes five rows while nine usage accounts retain four
-   rows and an omission row. *)
-let test_overview_first_use_keeps_the_guide_and_usage_count () =
-  let allocation =
-    Schedule.allocate_overview ~terminal_rows:30 ~intro_count:5
-      ~attention_count:0 ~goal_count:3 ~providers_count:9
-      ~team_count:0 ~team_stuck:false ~task_count:0 ~has_task_error:false
-  in
-  check int "the complete two-step guide" 5 allocation.intro_rows;
-  check int "the empty-goals explanation" 3 allocation.goal_rows;
-  check int "four accounts and an omission row" 5 allocation.providers_rows;
-  check int "the task empty note remains" 1 allocation.task_rows;
-  check int "the frame remains exact" 30 (overview_frame_rows ~terminal_rows:30 allocation)
-
-(* Below the heights the table covers the floors do not all fit, and they
-   are paid in the order the blocks are served. *)
-let test_overview_floors_are_paid_in_serving_order () =
-  let crowded rows =
-    Schedule.allocate_overview ~intro_count:0 ~terminal_rows:rows
-      ~attention_count:6 ~goal_count:9 ~team_count:13 ~team_stuck:true
-      ~providers_count:8 ~task_count:8 ~has_task_error:false
-  in
-  check int "23 rows keep compact chrome" 0 (crowded 23).spacing_rows;
-  check int "24 rows add one quiet row" 1 (crowded 24).spacing_rows;
-  check int "25 rows add the second quiet row" 2 (crowded 25).spacing_rows;
-  let tight =
-    Schedule.allocate_overview ~intro_count:0 ~terminal_rows:14 ~attention_count:6
-      ~goal_count:1 ~team_count:0 ~team_stuck:false ~providers_count:0
-      ~task_count:2 ~has_task_error:false
-  in
-  check int "the panel keeps its first item" 1 tight.attention_rows;
-  check int "GOALS keeps its headline" 1 tight.goal_rows;
-  check int "the backlog gets the last row" 1 tight.task_rows;
-  check int "14-row frame is exact" 14 (overview_frame_rows ~terminal_rows:14 tight)
-
 (* The surface is the box, the key footer under it, and -- when the post or
    the thread has more lines than it can show -- the position line the pane
    writes above the box bottom. The footer and the position line were left out
@@ -457,98 +273,6 @@ let board_read_frame_rows ~body_line_count ~comment_line_count
   + position_rows
   + allocation.body_rows
   + allocation.comment_rows
-
-(* The frame is exactly as tall as the terminal, at every size and whatever
-   the data. Short of it, the surface stops partway down the screen and leaves
-   the footer stranded in the middle; over it, the terminal scrolls and the top
-   of the frame is lost. *)
-let test_overview_frame_always_fills_the_terminal () =
-  List.iter
-    (fun ( attention_count
-         , goal_count
-         , team_count
-         , team_stuck
-         , providers_count
-         , task_count
-         , has_task_error ) ->
-      for terminal_rows = 14 to 80 do
-        let allocation =
-          Schedule.allocate_overview ~intro_count:0 ~terminal_rows ~attention_count
-            ~goal_count ~team_count ~team_stuck ~providers_count ~task_count
-            ~has_task_error
-        in
-        check int
-          (Printf.sprintf "rows %d data %d/%d/%d/%b/%d/%d/%b" terminal_rows
-             attention_count goal_count team_count team_stuck providers_count
-             task_count has_task_error)
-          terminal_rows
-          (overview_frame_rows ~terminal_rows allocation)
-      done)
-    [ (0, 0, 0, false, 0, 0, false)
-    ; (0, 0, 0, false, 0, 0, true)
-    ; (6, 0, 0, false, 0, 5, false)
-    ; (0, 0, 0, false, 0, 5, false)
-    ; (40, 0, 0, false, 0, 40, true)
-    ; (1, 0, 0, false, 0, 1, false)
-    ; (6, 6, 13, true, 4, 40, true)
-    ; (6, 30, 60, false, 9, 40, false)
-    ; (10, 1, 3, true, 1, 687, false)
-    ]
-
-(* A long attention list must not take the whole viewport: the backlog is the
-   other half of what this surface answers. The panel is bounded, so a list of
-   eighty costs the backlog nothing. *)
-let test_overview_task_block_keeps_a_share_of_a_tall_viewport () =
-  let crowded =
-    Schedule.allocate_overview ~intro_count:0 ~terminal_rows:60
-      ~attention_count:80 ~goal_count:0 ~team_count:0 ~team_stuck:false ~providers_count:0 ~task_count:20 ~has_task_error:false
-  in
-  check int "the panel stops at its ceiling" 6 crowded.attention_rows;
-  check int "every task is still drawn" 20 crowded.task_rows
-
-(* The task block is bounded by its item count rather than by a constant, so a
-   tall terminal shows the whole backlog and pads the rest. The panel keeps its
-   ceiling: past the sixth row its title counts what did not fit. *)
-let test_overview_blocks_grow_to_their_item_counts () =
-  let roomy =
-    Schedule.allocate_overview ~intro_count:0 ~terminal_rows:60
-      ~attention_count:9 ~goal_count:0 ~team_count:0 ~team_stuck:false ~providers_count:0 ~task_count:12 ~has_task_error:false
-  in
-  check int "the panel stops at its ceiling" 6 roomy.attention_rows;
-  check int "every task is drawn" 12 roomy.task_rows;
-  check bool "the remainder becomes filler" true (roomy.filler_rows > 0)
-
-(* Pull request lines under the Team block take only blank rows: the 23-row
-   Overview keeps every task, and a tall one draws the lines. *)
-let test_team_detail_lines_take_only_spare_rows () =
-  let tight =
-    Schedule.allocate_overview ~intro_count:0 ~terminal_rows:23
-      ~attention_count:6 ~goal_count:0 ~team_count:0 ~team_stuck:false ~providers_count:0 ~task_count:5
-      ~has_task_error:false
-  in
-  let spent = Schedule.spend_spare_rows_on_team tight ~extra:3 in
-  check int "no blank row, no pull request line" tight.team_rows spent.team_rows;
-  check int "the backlog is untouched" tight.task_rows spent.task_rows;
-  let tall =
-    Schedule.allocate_overview ~intro_count:0 ~terminal_rows:40
-      ~attention_count:2 ~goal_count:0 ~team_count:4 ~team_stuck:false ~providers_count:0 ~task_count:3
-      ~has_task_error:false
-  in
-  let spent = Schedule.spend_spare_rows_on_team tall ~extra:3 in
-  check int "three lines join the drawn block" (tall.team_rows + 3) spent.team_rows;
-  check int "paid from the filler" (tall.filler_rows - 3) spent.filler_rows;
-  check int "the backlog is untouched" tall.task_rows spent.task_rows;
-  check int "40-row frame is exact" 40 (overview_frame_rows ~terminal_rows:40 spent);
-  let empty =
-    Schedule.allocate_overview ~intro_count:0 ~terminal_rows:40
-      ~attention_count:2 ~goal_count:0 ~team_count:0 ~team_stuck:false ~providers_count:0 ~task_count:3
-      ~has_task_error:false
-  in
-  let spent = Schedule.spend_spare_rows_on_team empty ~extra:2 in
-  check int "a new block opens with two rows" 2 spent.team_rows;
-  check int "and pays its chrome from the filler"
-    (empty.filler_rows - 2 - Schedule.overview_team_chrome_rows) spent.filler_rows;
-  check int "40-row frame is exact" 40 (overview_frame_rows ~terminal_rows:40 spent)
 
 let test_board_read_rows_reserve_comments_and_footer () =
   let crowded =
@@ -1148,10 +872,11 @@ let workspace_overflowing =
    was allocated for rather than falling short of it or spilling past it. *)
 let test_workspace_path_takes_the_remainder () =
   for inner_width = 20 to 300 do
-    let path_width = Schedule.workspace_path_width ~inner_width in
+    let layout = Schedule.workspace_layout ~inner_width in
+    let path_width = layout.Masc_tui_table.flex_width in
     let drawn =
       Masc_tui_message_layout.display_width
-        (Schedule.workspace_header_row ~path_width)
+        (Schedule.workspace_header_row ~layout)
     in
     if path_width > Schedule.workspace_minimum_path_width then
       check int
@@ -1166,15 +891,18 @@ let test_workspace_path_takes_the_remainder () =
 
 (* The defect that stood here: a header and a row carrying the same widths in
    two format strings. *)
+
 let test_workspace_header_and_row_share_their_offsets () =
   for inner_width = 60 to 240 do
-    let path_width = Schedule.workspace_path_width ~inner_width in
-    let header = Schedule.workspace_header_row ~path_width in
-    let row = Schedule.workspace_row ~path_width workspace_probe in
+    let layout = Schedule.workspace_layout ~inner_width in
+    let header = Schedule.workspace_header_row ~layout in
+    let row = Schedule.workspace_row ~layout workspace_probe in
     check_left_cell "NAME" "N" ~header ~row ~inner_width;
-    check_left_cell "BRANCH" "B" ~header ~row ~inner_width;
+    (if List.mem Schedule.Workspace_branch layout.Masc_tui_table.shown then
+       check_left_cell "BRANCH" "B" ~header ~row ~inner_width);
     check_left_cell "STATUS" "S" ~header ~row ~inner_width;
-    check_left_cell "SYNC" "Y" ~header ~row ~inner_width;
+    (if List.mem Schedule.Workspace_sync layout.Masc_tui_table.shown then
+       check_left_cell "SYNC" "Y" ~header ~row ~inner_width);
     check_left_cell "PATH" "P" ~header ~row ~inner_width
   done
 
@@ -1182,17 +910,17 @@ let test_workspace_header_and_row_share_their_offsets () =
    longer than the frame: none of it may move a column. *)
 let test_workspace_row_width_does_not_depend_on_its_readings () =
   for inner_width = 60 to 240 do
-    let path_width = Schedule.workspace_path_width ~inner_width in
+    let layout = Schedule.workspace_layout ~inner_width in
     let width text = Masc_tui_message_layout.display_width text in
-    let header = width (Schedule.workspace_header_row ~path_width) in
+    let header = width (Schedule.workspace_header_row ~layout) in
     check int
       (Printf.sprintf "inner %d: a short row" inner_width)
       header
-      (width (Schedule.workspace_row ~path_width workspace_probe));
+      (width (Schedule.workspace_row ~layout workspace_probe));
     check int
       (Printf.sprintf "inner %d: an overflowing row" inner_width)
       header
-      (width (Schedule.workspace_row ~path_width workspace_overflowing))
+      (width (Schedule.workspace_row ~layout workspace_overflowing))
   done
 
 (* System log columns.
@@ -1564,15 +1292,15 @@ let test_schedule_columns_hold_their_offsets () =
    column. *)
 let test_system_log_colour_costs_no_cells () =
   for inner_width = 60 to 240 do
-    let message_width = Schedule.system_log_message_width ~inner_width in
+    let layout = Schedule.system_log_layout ~inner_width in
     let width text = Masc_tui_message_layout.display_width text in
-    let header = width (Schedule.system_log_header_row ~message_width) in
+    let header = width (Schedule.system_log_header_row ~layout) in
     let plain =
-      Schedule.system_log_row ~message_width ~level_style:""
+      Schedule.system_log_row ~layout ~level_style:""
         ~styles:Schedule.system_log_plain_styles system_log_probe
     in
     let dressed =
-      Schedule.system_log_row ~message_width ~level_style:"\027[33m"
+      Schedule.system_log_row ~layout ~level_style:"\027[33m"
         ~styles:system_log_dressed system_log_probe
     in
     check int
@@ -1585,7 +1313,7 @@ let test_system_log_colour_costs_no_cells () =
       (Printf.sprintf "inner %d: an overflowing dressed row" inner_width)
       header
       (width
-         (Schedule.system_log_row ~message_width ~level_style:"\027[31m"
+         (Schedule.system_log_row ~layout ~level_style:"\027[31m"
             ~styles:system_log_dressed system_log_overflowing))
   done
 
@@ -1593,10 +1321,11 @@ let test_system_log_colour_costs_no_cells () =
    says nothing worth the row it costs. *)
 let test_system_log_message_takes_the_remainder () =
   for inner_width = 20 to 300 do
-    let message_width = Schedule.system_log_message_width ~inner_width in
+    let layout = Schedule.system_log_layout ~inner_width in
+    let message_width = layout.Masc_tui_table.flex_width in
     let drawn =
       Masc_tui_message_layout.display_width
-        (Schedule.system_log_header_row ~message_width)
+        (Schedule.system_log_header_row ~layout)
     in
     if message_width > Schedule.system_log_minimum_message_width then
       check int
@@ -1612,19 +1341,56 @@ let test_system_log_message_takes_the_remainder () =
 (* The offsets the two format strings could disagree about. *)
 let test_system_log_header_and_row_share_their_offsets () =
   for inner_width = 60 to 240 do
-    let message_width = Schedule.system_log_message_width ~inner_width in
-    let header = Schedule.system_log_header_row ~message_width in
+    let layout = Schedule.system_log_layout ~inner_width in
+    let header = Schedule.system_log_header_row ~layout in
     let row =
-      Schedule.system_log_row ~message_width ~level_style:""
+      Schedule.system_log_row ~layout ~level_style:""
         ~styles:Schedule.system_log_plain_styles system_log_probe
     in
     check_left_cell "TIME" "T" ~header ~row ~inner_width;
     check_left_cell "LEVEL" "L" ~header ~row ~inner_width;
-    check_left_cell "MODULE" "M" ~header ~row ~inner_width;
-    check_left_cell "KEEPER" "K" ~header ~row ~inner_width;
-    check_left_cell "CATEGORY" "C" ~header ~row ~inner_width;
+    (if List.mem Schedule.Log_module layout.Masc_tui_table.shown then
+       check_left_cell "MODULE" "M" ~header ~row ~inner_width);
+    (if List.mem Schedule.Log_keeper layout.Masc_tui_table.shown then
+       check_left_cell "KEEPER" "K" ~header ~row ~inner_width);
+    (if List.mem Schedule.Log_category layout.Masc_tui_table.shown then
+       check_left_cell "CATEGORY" "C" ~header ~row ~inner_width);
     check_left_cell "MESSAGE" "G" ~header ~row ~inner_width
   done
+
+let test_narrow_repository_and_log_tables () =
+  List.iter
+    (fun inner_width ->
+      let workspace = Schedule.workspace_layout ~inner_width in
+      let logs = Schedule.system_log_layout ~inner_width in
+      let repository = Schedule.workspace_row ~layout:workspace
+          { workspace_probe with wrow_path = "/repo/example" } in
+      let entry = Schedule.system_log_row ~layout:logs ~level_style:""
+          ~styles:Schedule.system_log_plain_styles
+          { system_log_probe with slog_message = "failure details" } in
+      let width = Masc_tui_message_layout.display_width in
+      check int "repository fits the viewport" inner_width (width repository);
+      check int "log entry fits the viewport" inner_width (width entry);
+      List.iter
+        (fun column -> check bool "repository context stays visible" true
+            (List.mem column workspace.Masc_tui_table.shown))
+        Schedule.[ Workspace_name; Workspace_status; Workspace_path ];
+      List.iter
+        (fun column -> check bool "log context stays visible" true
+            (List.mem column logs.Masc_tui_table.shown))
+        Schedule.[ Log_time; Log_level; Log_message ];
+      Printf.printf "repository %d columns: %s\n%!" inner_width repository;
+      check bool "repository path keeps its root and distinguishing basename" true
+        (holds "/" repository && holds "example" repository);
+      if inner_width = 40 then
+        check bool "a folded path is visibly abbreviated" true
+          (holds "…" repository)
+      else
+        check bool "the complete short path remains visible when it fits" true
+          (holds "/repo/example" repository);
+      check bool "log message reaches the screen" true
+        (holds "failure" entry))
+    [ 40; 56; 74; 100; 160 ]
 
 (* Lane run and file change columns.
 
@@ -1819,10 +1585,10 @@ let test_headers_fit_their_columns () =
             (Schedule.allocate_memory_columns ~inner_width) )
       ; ( "workspace"
         , Schedule.workspace_header_row
-            ~path_width:(Schedule.workspace_path_width ~inner_width) )
+            ~layout:(Schedule.workspace_layout ~inner_width) )
       ; ( "system log"
         , Schedule.system_log_header_row
-            ~message_width:(Schedule.system_log_message_width ~inner_width) )
+            ~layout:(Schedule.system_log_layout ~inner_width) )
       ; ( "lane run"
         , Schedule.lane_run_header_row ~identity_header:"ACTOR"
             ~layout:(Schedule.lane_run_layout ~inner_width) )
@@ -2631,7 +2397,7 @@ let test_every_sentence_column_gives_way_at_its_tail () =
     harness_layout.Masc_tui_table.flex_width;
   let rows =
     [ ( "system log"
-      , Schedule.system_log_row ~message_width:prose_width ~level_style:""
+      , Schedule.system_log_row ~layout:(Schedule.system_log_layout ~inner_width:(prose_width + 57)) ~level_style:""
           ~styles:Schedule.system_log_plain_styles
           { system_log_probe with slog_message = sentence } )
     ; ( "verification"
@@ -2833,22 +2599,6 @@ let () =
             test_quit_shortcut_does_not_steal_message_input
         ; test_case "compact viewport follows fixed chrome budget" `Quick
             test_compact_viewport_uses_largest_fixed_chrome_budget
-        ; test_case "overview rows are shared floors first" `Quick
-            test_overview_rows_are_shared_floors_first
-        ; test_case "overview GOALS and Team leave the backlog its floor" `Quick
-            test_overview_goals_and_team_leave_the_backlog_its_floor
-        ; test_case "first use keeps its steps and a usage count" `Quick
-            test_overview_first_use_keeps_the_guide_and_usage_count
-        ; test_case "overview floors are paid in serving order" `Quick
-            test_overview_floors_are_paid_in_serving_order
-        ; test_case "overview frame always fills the terminal" `Quick
-            test_overview_frame_always_fills_the_terminal
-        ; test_case "overview tasks keep a share of a tall viewport" `Quick
-            test_overview_task_block_keeps_a_share_of_a_tall_viewport
-        ; test_case "overview blocks grow to their item counts" `Quick
-            test_overview_blocks_grow_to_their_item_counts
-        ; test_case "team detail lines take only spare rows" `Quick
-            test_team_detail_lines_take_only_spare_rows
         ; test_case "board read reserves comments and footer" `Quick
             test_board_read_rows_reserve_comments_and_footer
         ; test_case "board read reaches hidden comments" `Quick
@@ -2891,6 +2641,8 @@ let () =
             test_memory_columns_drop_from_the_right
         ; test_case "memory name width never shrinks" `Quick
             test_memory_name_width_never_shrinks_as_the_terminal_grows
+        ; test_case "narrow repositories and logs keep their primary text" `Quick
+            test_narrow_repository_and_log_tables
         ; test_case "workspace path takes the remainder" `Quick
             test_workspace_path_takes_the_remainder
         ; test_case "workspace header and row share their offsets" `Quick

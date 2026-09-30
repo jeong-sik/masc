@@ -67,9 +67,14 @@ val global : binding list
     printable key before its cross-surface fallback runs; each such binding's
     help text states that boundary. *)
 
+val keepers_jump : binding
+(** The shared Keepers jump. Its [key] is the one {!opens_keepers} matches and
+    the one the Dashboard's first-use steps name. *)
+
 val opens_keepers : message_mode:bool -> string -> bool
 (** Whether [key] is the shared Keepers jump after earlier input owners have
-    declined it. Message mode never treats printable [2] as this jump. *)
+    declined it. Message mode never treats the printable {!keepers_jump} key
+    as this jump. *)
 
 val cancels_two_press :
   input_seen:bool -> key:string option -> second_press:string list -> bool
@@ -101,6 +106,10 @@ val footer_hints : ?detail_open:bool -> Masc_tui_types.surface -> string
     Left out by a surface that does own one, every binding stands too -- the
     behaviour from before this argument existed, and the one
     {!has_detail_scoped_keys} exists to catch. *)
+
+val footer_hints_metrics : telemetry:bool -> string
+(** Usage footer, showing only the keys for the visible Usage or Telemetry
+    reading. *)
 
 type approvals_footer =
   | Approval_browsing
@@ -135,7 +144,7 @@ val footer_hints_approval_detail : string
     ("y / n"), the spelling {!Masc_tui_footer} pins, so a narrow row gives up
     the scroll before it gives up the answer. *)
 
-val footer_hints_voice_agent : unit -> string
+val footer_hints_voice_agent : ?saving:bool -> unit -> string
 (** The keeper-voice screen's own row: the keeper axis, the voice axis, the
     write and the way out. Its keys are not the Config pane's, so the row is
     the screen's rather than the pane's. *)
@@ -153,16 +162,18 @@ val footer_hints_prompt_assets : string
 (** The prompts pane while it shows the read-only runtime assets: its keys
     without the ones that edit the registry, and [o] named for the way back. *)
 
-val footer_hints_overview : task_focus:bool -> string
-(** The Overview footer. Separate from {!footer_hints} because Overview owns
-    one runtime fact the static table cannot: whether the task list is
-    selected (task_focus). The projection drops the keys dead in the other
-    mode — the table stays the SSOT, no second key list. *)
+val work_tasks_bindings : binding list
+(** Work's task list while it owns j/k. *)
+
+val footer_hints_work_tasks : string
+(** {!work_tasks_bindings} as a footer. *)
 
 type code_pane =
   | Code_tree  (** the file list has focus *)
   | Code_file  (** a file is open and nothing covers it *)
-  | Code_overlay  (** history, diff or notes is drawn over the file *)
+  | Code_overlay  (** diff is drawn over the file *)
+  | Code_notes  (** wrapped memo document is drawn over the file *)
+  | Code_history  (** complete history document is drawn over the file *)
 
 val footer_hints_code : pane:code_pane -> string
 (** The Code footer, narrowed to what [pane] answers.
@@ -184,6 +195,7 @@ val footer_hints_resources : detail_focus:bool -> string
 val footer_hints_board_read :
   focus_posts:bool ->
   focus_comments:bool ->
+  full_history:bool ->
   layout:Masc_tui_types.board_read_layout ->
   string
 (** The Board read footer. [focus_posts] is whether j/k moves the post list
@@ -279,6 +291,14 @@ val help_surfaces : (string * Masc_tui_types.surface) list
 (** One sheet section per surface family, and the surface it answers for. Read
     by the guard that checks a destination the palette offers by name is named
     that way on the sheet. *)
+
+val help_sections_for_state :
+  Masc_tui_types.state -> (string * (string * string) list) list
+(** Put the active nested reader's own keys first, ahead of surface reference
+    sections. This is the help sheet's state-aware entry point. *)
+
+val footer_hints_patch_review : unit -> string
+val footer_hints_runtime_detail : unit -> string
 
 val help_sections :
   ?current:Masc_tui_types.surface -> unit -> (string * (string * string) list) list

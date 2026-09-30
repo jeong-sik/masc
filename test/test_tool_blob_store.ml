@@ -456,6 +456,60 @@ let test_fetch_range_cold_validates_without_materialising () =
              "warm fetch_range failed: %s"
              (B.fetch_error_to_string error)))
 
+let test_cancel_queued_cold_range_read_leaves_cache_empty () =
+  with_temp_dir (fun dir ->
+    let store = B.create ~base_path:dir in
+    let payload = String.make 1_048_576 'p' in
+    let reference =
+      B.put store ~bytes:payload ~mime:"application/octet-stream"
+      |> stored_ref_exn
+    in
+    Eio_main.run @@ fun env ->
+    Eio.Switch.run @@ fun sw ->
+    let pool = Domain_pool.create ~sw ~domain_count:1 env#domain_mgr in
+    let previous_pool = Domain_pool_ref.get () in
+    Eio.Switch.on_release sw (fun () ->
+      match previous_pool with
+      | None -> Domain_pool_ref.clear_for_tests ()
+      | Some previous -> Domain_pool_ref.set previous);
+    Domain_pool_ref.set pool;
+    let occupied, signal_occupied = Eio.Promise.create () in
+    let released, release_worker = Eio.Promise.create () in
+    Eio.Fiber.fork ~sw (fun () ->
+      Domain_pool.submit_cpu pool (fun () ->
+        Eio.Promise.resolve signal_occupied ();
+        Eio.Promise.await released));
+    Eio.Promise.await occupied;
+    let context, signal_context = Eio.Promise.create () in
+    let cancelled = Eio.Fiber.fork_promise ~sw (fun () ->
+      try
+        Eio.Cancel.sub (fun cc ->
+          Eio.Promise.resolve signal_context cc;
+          ignore (B.fetch_range store ~sha256:reference.sha256 ~offset:0 ~max_bytes:64));
+        false
+      with Eio.Cancel.Cancelled _ -> true)
+    in
+    let cc = Eio.Promise.await context in
+    Eio.Fiber.yield ();
+    Alcotest.(check bool) "cold read waits for the occupied pool" false
+      (Eio.Promise.is_resolved cancelled);
+    let sibling = Eio.Fiber.fork_promise ~sw (fun () -> "progress") in
+    Alcotest.(check string) "another fiber progresses" "progress"
+      (Eio.Promise.await_exn sibling);
+    Eio.Cancel.cancel cc Exit;
+    Alcotest.(check bool) "queued read propagates cancellation" true
+      (Eio.Promise.await_exn cancelled);
+    Eio.Promise.resolve release_worker ();
+    Domain_pool.submit_cpu pool (fun () -> ());
+    Alcotest.(check bool) "cancelled read did not admit a cache entry" true
+      (Option.is_none (B.For_testing.validated_snapshot store ~sha256:reference.sha256));
+    match B.fetch_range store ~sha256:reference.sha256 ~offset:0 ~max_bytes:64 with
+    | Ok (Some range) ->
+      Alcotest.(check string) "subsequent read returns verified bytes"
+        (String.sub payload 0 64) range.content
+    | Ok None -> Alcotest.fail "artifact vanished after cancellation"
+    | Error error -> Alcotest.fail (B.fetch_error_to_string error))
+
 let shard_path_of store sha256 =
   Filename.concat
     (Filename.concat (B.root_dir store) (String.sub sha256 0 2))
@@ -1987,6 +2041,8 @@ let () =
             test_fetch_range_miss_returns_none_fast;
           Alcotest.test_case "cold fetch range validates without materialising" `Quick
             test_fetch_range_cold_validates_without_materialising;
+          Alcotest.test_case "cancelled queued cold range leaves cache empty" `Quick
+            test_cancel_queued_cold_range_read_leaves_cache_empty;
           Alcotest.test_case "cold fetch range returns only bytes it hashed" `Quick
             test_fetch_range_cold_returns_only_bytes_it_hashed;
           Alcotest.test_case "range digest window is a slice of the hashed bytes" `Quick

@@ -10,6 +10,8 @@ from pathlib import Path
 import test_tui_keyboard_input as h
 
 SOURCE_MODULES = (
+    "bin/masc_tui_input_reader.ml",
+    "bin/masc_tui_input_reader.mli",
     "bin/masc_tui.ml",
     "bin/masc_tui_paste.ml",
     "bin/masc_tui_paste.mli",
@@ -22,7 +24,7 @@ def run(executable: str) -> None:
     def interact(process, master_fd, _slave_fd, output, _base_path):
         h.wait_for_output(process, master_fd, output, h.BRACKETED_PASTE_ON,
                           start=0, timeout=5.0)
-        h.send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        h.send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
         h.select_keeper_row(process, master_fd, output, b"alpha")
         h.send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
         h.send_and_wait(process, master_fd, output, b"m", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
@@ -68,7 +70,7 @@ def run(executable: str) -> None:
     def split_marker_interact(process, master_fd, _slave_fd, output, _base_path):
         h.wait_for_output(process, master_fd, output, h.BRACKETED_PASTE_ON,
                           start=0, timeout=5.0)
-        h.send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        h.send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
         h.select_keeper_row(process, master_fd, output, b"alpha")
         h.send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
         h.send_and_wait(process, master_fd, output, b"m", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
@@ -107,7 +109,7 @@ def run(executable: str) -> None:
     def truncated_csi_interact(process, master_fd, _slave_fd, output, _base_path):
         h.wait_for_output(process, master_fd, output, h.BRACKETED_PASTE_ON,
                           start=0, timeout=5.0)
-        h.send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        h.send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
         h.select_keeper_row(process, master_fd, output, b"alpha")
         h.send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
         h.send_and_wait(process, master_fd, output, b"m", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
@@ -150,7 +152,7 @@ def run(executable: str) -> None:
     def interrupted_interact(process, master_fd, _slave_fd, output, _base_path):
         h.wait_for_output(process, master_fd, output, h.BRACKETED_PASTE_ON,
                           start=0, timeout=5.0)
-        h.send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        h.send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
         h.select_keeper_row(process, master_fd, output, b"alpha")
         h.send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
         h.send_and_wait(process, master_fd, output, b"m", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
@@ -209,7 +211,7 @@ def run(executable: str) -> None:
     def prior_draft_interact(process, master_fd, _slave_fd, output, _base_path):
         h.wait_for_output(process, master_fd, output, h.BRACKETED_PASTE_ON,
                           start=0, timeout=5.0)
-        h.send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        h.send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
         h.select_keeper_row(process, master_fd, output, b"alpha")
         h.send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
         h.send_and_wait(process, master_fd, output, b"m", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
@@ -263,7 +265,7 @@ def run(executable: str) -> None:
         h.seed_image_workspace(base_path)
         h.wait_for_output(process, master_fd, output, h.BRACKETED_PASTE_ON,
                           start=0, timeout=5.0)
-        h.send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        h.send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
         h.select_keeper_row(process, master_fd, output, b"alpha")
         h.send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
         h.send_and_wait(process, master_fd, output, b"m", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
@@ -318,7 +320,7 @@ def run(executable: str) -> None:
     def keeper_lock_interact(process, master_fd, _slave_fd, output, _base_path):
         h.wait_for_output(process, master_fd, output, h.BRACKETED_PASTE_ON,
                           start=0, timeout=5.0)
-        h.send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        h.send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
         h.select_keeper_row(process, master_fd, output, b"alpha")
         h.send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
         h.send_and_wait(process, master_fd, output, b"m", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
@@ -406,7 +408,7 @@ def run(executable: str) -> None:
     def board_recovery_interact(process, master_fd, _slave_fd, output, _base_path):
         h.wait_for_output(process, master_fd, output, h.BRACKETED_PASTE_ON,
                           start=0, timeout=5.0)
-        h.send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        h.send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
         h.select_keeper_row(process, master_fd, output, b"alpha")
         h.send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
         h.send_and_wait(process, master_fd, output, b"m", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
@@ -427,7 +429,7 @@ def run(executable: str) -> None:
                           start=0, timeout=5.0)
         h.send_and_wait(process, master_fd, output, b"\x1b", b"d:discard")
         h.send_and_wait(process, master_fd, output, b"d", b"MASC Board")
-        h.send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        h.send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
         h.select_keeper_row(process, master_fd, output, b"alpha")
         h.send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
         h.send_and_wait(process, master_fd, output, b"m", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
@@ -460,7 +462,7 @@ def run(executable: str) -> None:
     def late_tail_interact(process, master_fd, _slave_fd, output, _base_path):
         h.wait_for_output(process, master_fd, output, h.BRACKETED_PASTE_ON,
                           start=0, timeout=5.0)
-        h.send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        h.send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
         h.select_keeper_row(process, master_fd, output, b"alpha")
         h.send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
         h.send_and_wait(process, master_fd, output, b"m", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
@@ -509,7 +511,7 @@ def run(executable: str) -> None:
     def continuous_interact(process, master_fd, _slave_fd, output, _base_path):
         h.wait_for_output(process, master_fd, output, h.BRACKETED_PASTE_ON,
                           start=0, timeout=5.0)
-        h.send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        h.send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
         h.select_keeper_row(process, master_fd, output, b"alpha")
         h.send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
         h.send_and_wait(process, master_fd, output, b"m", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")

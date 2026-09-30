@@ -37,6 +37,7 @@ fi
 scope_tool="${repo_root}/scripts/ci/dune_suite_scope.py"
 stanza_reader="${repo_root}/scripts/ci/stanza_env.py"
 reference_tool="${repo_root}/scripts/ci/referencing_suites.py"
+linked_library_tool="${repo_root}/scripts/ci/linked_library_suites.py"
 
 python_suite_is_runnable() {
   local stem candidate_dir
@@ -166,11 +167,6 @@ CANDIDATES
   # and within a day five MSX tools were added over it -- change_disk at 278
   # bytes, press at 745. The guard was green on main the whole time because
   # nothing ran it.
-  # The ceiling on what every turn carries is the same shape again: #34409
-  # grew the model-visible schemas by 664 bytes and the ratchet failed that
-  # night, because the pull request edited config/tools and nothing else.
-  # The file says growth "has to be argued for in the PR that causes it",
-  # which needs the PR to be told.
   tools_changed=$( { printf '%s\n' "${changed}" \
     | grep -E '^config/tools/' || [ $? -eq 1 ]; } | head -1)
   #
@@ -180,16 +176,9 @@ CANDIDATES
   # editing twelve of those files and nothing else; the suite went red on
   # keeper_tools_list and stayed red until #36773.
   tool_definition_guards="test/test_keeper_tool_definition_source.ml
-test/test_keeper_tool_schema_bytes.ml
+test/test_keeper_tool_surface_schema.ml
 test/test_tool_loading_declarations.ml
 test/test_tools_coverage.ml"
-
-  # The per-description bound, one axis in from the whole-surface ceiling.
-  # test_tools_coverage reads Masc.Config.raw_all_tool_schemas -- the embedded
-  # config/tools set -- and bounds each description at max_description_chars.
-  # Nightly 34384710653 failed it on masc_browser_interact at 1,634 chars
-  # against a 1,080 limit, and the pull request that grew it edited no
-  # test/*.ml.
 
   # config/prompts is the same shape a third time. Every keeper turn is built
   # from the assembled system prompt, and test_keeper_system_prompt_blocks
@@ -651,6 +640,34 @@ STANZAS
       | grep -v '^[[:space:]]*$' | sort -u)
   fi
 
+  # A selected test/*.ml can be a library module, not an executable. Follow
+  # its (modules ...) owner to the (test)/(tests) stanzas that link that
+  # library, including stanzas loaded from .inc files. Keep directly edited
+  # modules in the direct execution class after replacing them.
+  if ! linked_map=$(printf '%s\n' "${sources}" | python3 "${linked_library_tool}"); then
+    echo "linked_library_suites.py failed" >&2
+    exit 1
+  fi
+  if [ -n "${linked_map}" ]; then
+    expand_linked_sources() {
+      local source targets expanded=""
+      while IFS= read -r source; do
+        [ -n "${source}" ] || continue
+        targets=$(printf '%s\n' "${linked_map}" \
+          | awk -F "$(printf '\t')" -v path="${source}" '$1 == path { print $2 }')
+        [ -n "${targets}" ] || targets="${source}"
+        expanded=$(printf '%s\n%s\n' "${expanded}" "${targets}")
+      done <<LINK_SOURCES
+$1
+LINK_SOURCES
+      printf '%s\n' "${expanded}" | awk 'NF' | sort -u
+    }
+    echo "test library modules select linked executables:"
+    printf '%s\n' "${linked_map}" | cut -f 2 | sort -u | sed 's/^/  /'
+    sources=$(expand_linked_sources "${sources}")
+    direct_sources=$(expand_linked_sources "${direct_sources}")
+  fi
+
   # Return no selection only when no input mapped to a runnable suite.
   if ! printf '%s\n' "${sources}" | grep -v '^[[:space:]]*$' > /dev/null; then
     echo "no suite left to run"
@@ -921,22 +938,23 @@ ENVS
       done
     done
 
-  # A .py suite has no executable to build and run, so dune runs its rule: the
-  # rule supplies the deps, sandbox and environment its action declares.
-  # Default-bound rules share one dune invocation, which lets DUNE_JOBS run
-  # their independent sandboxes concurrently. Before this, a broad selection
-  # paid every PTY rule serially: run 35502819681 passed 414 suites, then spent
-  # the final two seconds on the first of 15 remaining PTY rules. Directly
-  # edited rules remain their own earlier execution class. Selection and the
-  # fail-closed step budget are unchanged.
-    if [ "${python_count}" -gt 1 ]; then
-      local python_targets=()
-      i=0
-      while [ "${i}" -lt "${python_count}" ]; do
+    # Python rules retain Dune's dependencies, sandbox and action environment.
+    # One unbounded alias list gives later queued rules only the remainder of
+    # a single suite's cap (#38801: 62 aliases shared 300s and exited 124).
+    # Admit at most the existing Dune worker count per invocation, then give
+    # the next wave its own unchanged cap within the remaining step budget.
+    # Dune invocations stay sequential because they share one build directory;
+    # independent actions inside a wave still use Dune's native parallelism.
+    i=0
+    while [ "${i}" -lt "${python_count}" ]; do
+      local python_targets=() python_ids=() python_wave_count=0
+      while [ "${i}" -lt "${python_count}" ] && [ "${python_wave_count}" -lt "${linked_jobs}" ]; do
         source=${python_sources[i]}
         dir=$(dirname "${source}")
         name=$(basename "${source}" .py)
-        python_targets[i]="@${dir}/runtest-${name}"
+        python_targets[python_wave_count]="@${dir}/runtest-${name}"
+        python_ids[python_wave_count]="${dir}/${name}"
+        python_wave_count=$((python_wave_count + 1))
         i=$((i + 1))
       done
       if [ "$(budget_left)" -le 0 ]; then
@@ -944,60 +962,38 @@ ENVS
         limit=0
       else
         limit=$(bounded_by_budget "${per_suite_timeout}")
-        echo "== running ${python_count} dune-rule suites in one invocation"
+        if [ "${python_wave_count}" -eq 1 ]; then
+          echo "== ${python_ids[0]} (dune rule)"
+        else
+          echo "== running ${python_wave_count} dune-rule suites in one wave"
+        fi
         status=0
         timeout "${limit}" dune build "${python_targets[@]}" < /dev/null || status=$?
       fi
       if [ "${status}" -eq 0 ]; then
-        ran=$((ran + python_count))
+        ran=$((ran + python_wave_count))
       else
-        i=0
-        while [ "${i}" -lt "${python_count}" ]; do
-          source=${python_sources[i]}
-          i=$((i + 1))
-          dir=$(dirname "${source}")
-          name=$(basename "${source}" .py)
+        local python_wave_index=0 reason_prefix=""
+        [ "${python_wave_count}" -eq 1 ] || reason_prefix="dune-rule wave "
+        while [ "${python_wave_index}" -lt "${python_wave_count}" ]; do
+          id=${python_ids[python_wave_index]}
+          python_wave_index=$((python_wave_index + 1))
+          # A failed shared invocation does not identify one failing alias.
+          # Keep all of that wave unverified, without blaming later waves.
           if [ "${limit}" -eq 0 ]; then
-            failed="${failed}${dir}/${name} (not run: the step budget ran out)\n"
+            failed="${failed}${id} (not run: the step budget ran out)\n"
           elif [ "${status}" -eq 124 ] && [ "${limit}" -lt "${per_suite_timeout}" ]; then
-            failed="${failed}${dir}/${name} (dune-rule batch stopped at the step budget after ${limit}s)\n"
+            failed="${failed}${id} (${reason_prefix}stopped at the step budget after ${limit}s)\n"
           elif [ "${status}" -eq 124 ]; then
-            failed="${failed}${dir}/${name} (dune-rule batch timed out after ${limit}s; exit ${status})\n"
+            failed="${failed}${id} (${reason_prefix}timed out after ${limit}s; exit ${status})\n"
+          elif [ "${python_wave_count}" -eq 1 ]; then
+            failed="${failed}${id} (run: exit ${status}, limit ${limit}s)\n"
           else
-            failed="${failed}${dir}/${name} (dune-rule batch: exit ${status}, limit ${limit}s)\n"
+            failed="${failed}${id} (dune-rule wave: exit ${status}, limit ${limit}s)\n"
           fi
         done
       fi
-    else
-      # Asked for by path (@test/runtest-x, not @runtest-x) so a name that
-      # stopped existing fails here instead of matching another directory.
-      i=0
-      while [ "${i}" -lt "${python_count}" ]; do
-        source=${python_sources[i]}
-        i=$((i + 1))
-        dir=$(dirname "${source}")
-        name=$(basename "${source}" .py)
-        if [ "$(budget_left)" -le 0 ]; then
-          failed="${failed}${dir}/${name} (not run: the step budget ran out)\n"
-          continue
-        fi
-        local own
-        own=${per_suite_timeout}
-        limit=$(bounded_by_budget "${own}")
-        echo "== ${dir}/${name} (dune rule)"
-        status=0
-        timeout "${limit}" dune build "@${dir}/runtest-${name}" < /dev/null || status=$?
-        if [ "${status}" -eq 0 ]; then
-          ran=$((ran + 1))
-        elif [ "${status}" -eq 124 ] && [ "${limit}" -lt "${own}" ]; then
-          failed="${failed}${dir}/${name} (stopped at the step budget after ${limit}s)\n"
-        elif [ "${status}" -eq 124 ]; then
-          failed="${failed}${dir}/${name} (timed out after ${limit}s; exit ${status})\n"
-        else
-          failed="${failed}${dir}/${name} (run: exit ${status}, limit ${limit}s)\n"
-        fi
-      done
-    fi
+    done
   done
 }
 
@@ -1187,7 +1183,7 @@ self_test() {
   # grows; the tree guard is what it must never lose.
   # Expected suite and probe path share a line on purpose: a probe path alone
   # on its line reads as a scan-scope declaration to
-  # scripts/lint/guard-scan-targets-exist.sh, and these probes must not exist.
+  # the source tree, and these probes must not exist.
   check "an unreferenced bin/ source still selects the tree-reading suite" \
     "test/test_keeper_toml.ml" "bin/no_suite_names_this_probe.ml"
   check "an unreferenced packages/ source still selects the tree-reading suite" \
@@ -1231,7 +1227,7 @@ self_test() {
     test/test_wide_13.ml
 
   check "thirteen edited suites retain both themselves and asset guards" \
-    "test/test_keeper_toml.ml test/test_keeper_tool_definition_source.ml test/test_keeper_tool_schema_bytes.ml test/test_managed_assets_sync_from_binary.ml test/test_tool_loading_declarations.ml test/test_tools_coverage.ml ${wide_sources}" \
+    "test/test_keeper_toml.ml test/test_keeper_tool_definition_source.ml test/test_keeper_tool_surface_schema.ml test/test_managed_assets_sync_from_binary.ml test/test_tool_loading_declarations.ml test/test_tools_coverage.ml ${wide_sources}" \
     test/test_wide_01.ml test/test_wide_02.ml test/test_wide_03.ml \
     test/test_wide_04.ml test/test_wide_05.ml test/test_wide_06.ml \
     test/test_wide_07.ml test/test_wide_08.ml test/test_wide_09.ml \
@@ -1239,7 +1235,7 @@ self_test() {
     test/test_wide_13.ml config/tools/foo.toml
 
   check "a tool definition reaches every guard over it" \
-    "test/test_keeper_tool_definition_source.ml test/test_keeper_tool_schema_bytes.ml test/test_managed_assets_sync_from_binary.ml test/test_tool_loading_declarations.ml test/test_tools_coverage.ml" \
+    "test/test_keeper_tool_definition_source.ml test/test_keeper_tool_surface_schema.ml test/test_managed_assets_sync_from_binary.ml test/test_tool_loading_declarations.ml test/test_tools_coverage.ml" \
     "config/tools/foo.toml"
   # The three regressions the module and file-name rules exist for, with the
   # source files each pull request changed.
@@ -1311,6 +1307,9 @@ self_test() {
   check_direct "an edited suite stays direct before attribution expands selection" \
     "test/test_tui_keyboard_input.py" \
     "test/test_tui_keyboard_input.py"
+  check_direct "an edited test library module selects its linked executables" \
+    "test/test_keeper_tool_matrix.ml test/test_mcp_tool_matrix.ml test/test_mcp_tool_runtime_workspace_path.ml" \
+    "test/test_keeper_tool_matrix_cases.ml"
   # tui_browser names five suites, over the per-module cap, so the name
   # mapping attributes nothing to this interface. What is left is the
   # scenario that declares the path and the one suite whose stanza links the
@@ -1428,17 +1427,18 @@ FAKE
   }
   runner_calls_check() {
     local label="$1" want_calls="$2"
+    local want_failures="${RUNNER_WANT_FAILURES:-}"
     shift 2
     local calls got recorded_call
     calls=$(mktemp)
     got=$(RUNNER_DUNE_CALLS_FILE="${calls}" runner_failures "$@")
     recorded_call=$(cat "${calls}")
     rm -f "${calls}"
-    if [ -z "${got}" ] && [ "${recorded_call}" = "${want_calls}" ]; then
+    if [ "${got}" = "${want_failures}" ] && [ "${recorded_call}" = "${want_calls}" ]; then
       echo "ok   ${label}"
     else
       echo "FAIL ${label}"
-      echo "     want: no failures, dune calls in order: ${want_calls}"
+      echo "     want: ${want_failures:-no failures}, dune calls in order: ${want_calls}"
       echo "     got:  ${got:-<nothing>}, dune invocation(s): ${recorded_call:-<nothing>}"
       failures=$((failures + 1))
     fi
@@ -1467,8 +1467,9 @@ FAKE
       "test/test_slow_one (stopped at the step budget);test/test_slow_two (stopped at the step budget);test/test_zz_after (not run: the step budget ran out);" \
       0 2 test_slow_one test_slow_two test_zz_after
 
-  runner_check "a failing Python alias rejects the parallel batch" \
-    "test/test_python_failing (dune-rule batch: exit 1, limit <bounded>s);test/test_python_ok (dune-rule batch: exit 1, limit <bounded>s);" \
+  RUNNER_DUNE_JOBS=2 \
+    runner_check "a failing Python alias rejects its parallel wave" \
+    "test/test_python_failing (dune-rule wave: exit 1, limit <bounded>s);test/test_python_ok (dune-rule wave: exit 1, limit <bounded>s);" \
     0 30 test/test_python_failing.py test/test_python_ok.py
   RUNNER_PER_SUITE_TIMEOUT=1 \
     runner_check "a linked suite cap records timeout status" \
@@ -1478,30 +1479,54 @@ FAKE
     runner_check "a single Python rule cap records timeout status" \
       "test/test_python_slow (timed out after 1s; exit 124);" \
       0 30 test/test_python_slow.py
-  RUNNER_PER_SUITE_TIMEOUT=1 \
-    runner_check "a Python batch cap records shared timeout status" \
-      "test/test_python_slow (dune-rule batch timed out after 1s; exit 124);test/test_python_ok (dune-rule batch timed out after 1s; exit 124);" \
+  RUNNER_DUNE_JOBS=2 RUNNER_PER_SUITE_TIMEOUT=1 \
+    runner_check "a Python wave cap records shared timeout status" \
+      "test/test_python_slow (dune-rule wave timed out after 1s; exit 124);test/test_python_ok (dune-rule wave timed out after 1s; exit 124);" \
       0 30 test/test_python_slow.py test/test_python_ok.py
-  runner_check "a Python batch stopped by the step budget stays distinct" \
-    "test/test_python_slow (dune-rule batch stopped at the step budget);test/test_python_ok (dune-rule batch stopped at the step budget);" \
+  RUNNER_DUNE_JOBS=2 \
+    runner_check "a Python wave stopped by the step budget stays distinct" \
+    "test/test_python_slow (dune-rule wave stopped at the step budget);test/test_python_ok (dune-rule wave stopped at the step budget);" \
     0 3 test/test_python_slow.py test/test_python_ok.py
   runner_check "a linked exit status is preserved without inferring its cause" \
     "test/test_exit137 (run: exit 137, limit <bounded>s);" 0 600 test_exit137
   runner_check "a single Python rule preserves its exit status" \
     "test/test_python_exit137 (run: exit 137, limit <bounded>s);" \
     0 600 test/test_python_exit137.py
-  runner_check "a Python batch preserves its shared exit status" \
-    "test/test_python_exit137 (dune-rule batch: exit 137, limit <bounded>s);test/test_python_ok (dune-rule batch: exit 137, limit <bounded>s);" \
+  RUNNER_DUNE_JOBS=2 \
+    runner_check "a Python wave preserves its shared exit status" \
+    "test/test_python_exit137 (dune-rule wave: exit 137, limit <bounded>s);test/test_python_ok (dune-rule wave: exit 137, limit <bounded>s);" \
     0 600 test/test_python_exit137.py test/test_python_ok.py
-  runner_calls_check "the keyboard alias joins the default-bound Python batch" \
+  RUNNER_DUNE_JOBS=2 \
+    runner_calls_check "the keyboard alias joins one bounded Python wave" \
     "@test/runtest-test_tui_keyboard_input @test/runtest-test_python_one" \
     0 30 test/test_tui_keyboard_input.py test/test_python_one.py
   # Count the call instead of inferring one call from whether two-second
   # stand-in builds fit inside a three-second wall-clock budget. On a loaded
   # runner the setup could consume that one-second margin before dune began.
-  runner_calls_check "default-bound Python rules share one dune invocation" \
+  RUNNER_DUNE_JOBS=2 \
+    runner_calls_check "one Python wave shares one dune invocation" \
     "@test/runtest-test_python_one @test/runtest-test_python_two" \
     0 30 test/test_python_one.py test/test_python_two.py
+  # Each stand-in rule is shorter than the existing suite cap, but their
+  # combined duration is longer. They cannot share one cap with one worker.
+  RUNNER_DUNE_JOBS=1 RUNNER_PER_SUITE_TIMEOUT=2 FAKE_DUNE_SUITE_SECONDS=1.2 \
+    runner_calls_check "queued Python rules each receive a fresh wave cap" \
+      $'@test/runtest-test_python_slow_one\n@test/runtest-test_python_slow_two' \
+      0 30 test/test_python_slow_one.py test/test_python_slow_two.py
+  RUNNER_DUNE_JOBS=2 \
+    runner_calls_check "Python waves use the existing worker count and keep every target" \
+      $'@test/runtest-test_python_one @test/runtest-test_python_two\n@test/runtest-test_python_three' \
+      0 30 test/test_python_one.py test/test_python_two.py test/test_python_three.py
+  RUNNER_DUNE_JOBS=2 \
+  RUNNER_WANT_FAILURES="test/test_python_failing (dune-rule wave: exit 1, limit <bounded>s);test/test_python_ok (dune-rule wave: exit 1, limit <bounded>s);" \
+    runner_calls_check "a Python failure names only its wave and later waves continue" \
+      $'@test/runtest-test_python_failing @test/runtest-test_python_ok\n@test/runtest-test_python_later' \
+      0 30 test/test_python_failing.py test/test_python_ok.py test/test_python_later.py
+  RUNNER_DUNE_JOBS=2 \
+  RUNNER_WANT_FAILURES="test/test_python_slow (dune-rule wave stopped at the step budget);test/test_python_ok (dune-rule wave stopped at the step budget);test/test_python_later (not run: the step budget ran out);" \
+    runner_calls_check "a spent Python wave budget names every unreached target" \
+      "@test/runtest-test_python_slow @test/runtest-test_python_ok" \
+      0 3 test/test_python_slow.py test/test_python_ok.py test/test_python_later.py
   # The build starts with budget left and outlasts it, so the timeout on the
   # build is what ends it. With a one-second budget the budget was already
   # spent before the build began, and that case passed without the timeout.

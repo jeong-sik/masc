@@ -469,15 +469,15 @@ let test_http_get_uses_auth_headers () =
    names all three -- and the Clients title walked from one to the next twice,
    spelling the first step "/" and the second the middle dot: "MASC Config /
    Runtime \xc2\xb7 Clients". Two spellings of one kind of step, in one
-   string. Every other title that walks surfaces uses "/" (Config / Runtime,
-   Config / Resources, Workspace / Code). *)
+   string. Every other title that walks surfaces uses "/" (System / Runtime,
+   System / Resources, Workspace / Code). *)
 let test_the_clients_path_spells_its_steps_alike () =
   let module_path = "bin/masc_tui_render.ml" in
   check int "no step spelled with the middle dot" 0
     (Ast_grep.count_string_literals ~module_path ~needle:"Runtime \xc2\xb7 Clients");
   check bool "the path reads with one separator" true
     (Ast_grep.count_string_literals ~module_path
-       ~needle:"Config / Runtime / Clients"
+       ~needle:"System / Runtime / Clients"
      > 0)
 ;;
 
@@ -510,19 +510,18 @@ let test_http_client_does_not_own_tui_env_contract () =
     (Ast_grep.count_value_bindings ~module_path ~name:"timeout_env")
 ;;
 
-(* The Overview's Attention panel writes two cells of indent ahead of every
-   row it draws. Its empty and unread notes stand in for rows, and they are
-   written for a body that indents them itself -- pasted in whole, a note sat
-   two cells right of the rows it replaces and of the title above them. *)
-let test_the_attention_note_starts_where_its_rows_do () =
-  check int "the note carries no indent of its own" 0
+(* Home's empty decision note replaces a section, not a selectable destination.
+   It shares the section heading's one-cell inset; another inset would make
+   the empty state look like a destination row. *)
+let test_home_empty_decision_note_has_section_indent () =
+  check int "the note adds no second indent" 0
     (Ast_grep.count_exact_string_literals_in_value_binding
        ~module_path:"bin/masc_tui_render.ml" ~binding_name:"render_overview"
-       ~needle:"  Nothing needs attention.");
-  check int "it is still the panel's word" 1
+       ~needle:"  No decision is waiting on you.");
+  check int "the section names the absence of human decisions" 1
     (Ast_grep.count_exact_string_literals_in_value_binding
        ~module_path:"bin/masc_tui_render.ml" ~binding_name:"render_overview"
-       ~needle:"Nothing needs attention.")
+       ~needle:" No decision is waiting on you.")
 ;;
 
 (* A surface whose load failed draws the lane-read message. It names
@@ -753,81 +752,39 @@ let test_recent_projection_is_prepared_inside_frame_build () =
     [["prepare"; "store"; "render"]] (List.rev !build_steps)
 ;;
 
-(* Render must use the cache tested by test_tui_overview_cache. Counting
-   references also catches pipes and partial applications bypassing it. *)
-let test_overview_projections_are_made_once_per_input () =
-  let open Parsetree in
-  let render = "bin/masc_tui_render.ml" in
-  let cache = "bin/masc_tui_overview_cache.ml" in
-  let references path name =
-    let count = ref 0 in
-    let iter =
-      { Ast_iterator.default_iterator with
-        expr = (fun self expression ->
-          (match expression.pexp_desc with
-           | Pexp_ident { txt; _ } when Ast_grep.longident_to_string txt = name ->
-             incr count
-           | _ -> ());
-          Ast_iterator.default_iterator.expr self expression)
-      }
-    in
-    iter.structure iter (Ast_grep.parse_implementation_or_fail path);
-    !count
-  in
-  List.iter
-    (fun (binding_name, callee) ->
-      check int ("binding exists: " ^ binding_name) 1
-        (Ast_grep.count_value_bindings ~module_path:render ~name:binding_name);
-      check int ("render uses tested cache: " ^ binding_name) 1
-        (Ast_grep.count_calls_in_value_binding ~module_path:render
-           ~binding_name ~callee))
-    [ "overview_backlog", "Masc_tui_overview_cache.backlog";
-      "overview_team", "Masc_tui_overview_cache.team" ];
-  check int "renderer keeps one cache across frames" 1
-    (Ast_grep.count_calls_in_value_binding ~module_path:render
-       ~binding_name:"overview_cache" ~callee:"Masc_tui_overview_cache.create");
-  check int "renderer never constructs another cache" 1
-    (references render "Masc_tui_overview_cache.create");
-  List.iter
-    (fun name -> check int ("no render bypass: " ^ name) 0 (references render name))
-    [ "Overview_tasks.backlog"; "Overview_team.project";
-      "Masc_tui_overview_tasks.backlog"; "Masc_tui_overview_team.project" ];
-  check int "one Todo summary computation" 1 (references cache "Tasks.backlog");
-  check int "one Team projection computation" 1 (references cache "Team.project")
-;;
-
 let test_user_message_background_has_one_render_snapshot () =
   let main_path = "bin/masc_tui.ml" in
+  let input_path = "bin/masc_tui_input_reader.ml" in
   (* Every binding this test still reaches for is drawn by the chat surface,
      which is its own file. *)
   let chat_path = "bin/masc_tui_render_chat.ml" in
   let ansi_path = "bin/masc_tui_ansi.ml" in
   check int "late palette publication clears its callback before use" 1
-    (Ast_grep.count_field_clears_to_none ~module_path:main_path
+    (Ast_grep.count_field_clears_to_none ~module_path:input_path
        ~binding_name:"take_late_palette_publisher"
        ~field_name:"late_palette_publisher");
   check int "late palette helper gates on its one-shot publisher" 1
     (Ast_grep.count_field_accesses_outside_calls_in_value_binding
-       ~module_path:main_path ~binding_name:"publish_late_terminal_palette"
+       ~module_path:input_path ~binding_name:"publish_late_terminal_palette"
        ~callees:[] ~fields:[ "late_palette_publisher" ]);
   check int "late palette helper reads the O(1) decoder palette" 1
-    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+    (Ast_grep.count_calls_in_value_binding ~module_path:input_path
        ~binding_name:"publish_late_terminal_palette"
        ~callee:"Masc_tui_terminal_probe.palette");
   check int "late palette helper consumes the one-shot publisher" 1
-    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+    (Ast_grep.count_calls_in_value_binding ~module_path:input_path
        ~binding_name:"publish_late_terminal_palette"
        ~callee:"take_late_palette_publisher");
   check int "input checks publication after next and before probe removal" 3
-    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+    (Ast_grep.count_calls_in_value_binding ~module_path:input_path
        ~binding_name:"take_input_byte"
        ~callee:"publish_late_terminal_palette");
   check int "late publication updates the palette authority" 1
-    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+    (Ast_grep.count_calls_in_value_binding ~module_path:input_path
        ~binding_name:"install_late_palette_publisher"
        ~callee:"Masc_tui_terminal_palette.set_current");
   check int "late publication requests one full repaint" 1
-    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+    (Ast_grep.count_calls_in_value_binding ~module_path:input_path
        ~binding_name:"install_late_palette_publisher"
        ~callee:"request_full_repaint");
   check int "startup has one conditional late publisher installation" 1
@@ -1156,7 +1113,7 @@ let test_operator_approvals_use_current_contract () =
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_ansi.ml"
        ~binding_name:"single_line"
-       ~callee:"Masc.Tui_decode.sanitize_terminal_text");
+       ~callee:"Masc.Tui_terminal_text.sanitize_terminal_text");
   check int "approval payload uses its terminal projection" 1
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_render.ml"
@@ -1172,7 +1129,7 @@ let test_operator_approvals_use_current_contract () =
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_operator_projection.ml"
        ~binding_name:"approval_payload_for_terminal"
-       ~callee:"Masc.Tui_decode.sanitize_terminal_text");
+       ~callee:"Masc.Tui_terminal_text.sanitize_terminal_text");
   check int "approval renderer never serializes a raw payload" 0
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_render.ml"
@@ -1770,24 +1727,25 @@ let test_planning_refresh_reconciles_navigation_identity () =
 
 let test_render_loop_uses_monotonic_dirty_schedule () =
   let main_path = "bin/masc_tui.ml" in
+  let input_path = "bin/masc_tui_input_reader.ml" in
   check int "the render loop queries buffered and terminal-ready input" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"main" ~callee:"input_reader_has_ready_input");
   check int "readiness includes the reader's buffered input" 1
-    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+    (Ast_grep.count_calls_in_value_binding ~module_path:input_path
        ~binding_name:"input_reader_has_ready_input"
        ~callee:"input_reader_has_pending_bytes");
   check int "readiness includes bytes waiting in the terminal" 1
-    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+    (Ast_grep.count_calls_in_value_binding ~module_path:input_path
        ~binding_name:"input_reader_has_ready_input" ~callee:"terminal_has_bytes");
   check int "queued input includes the terminal probe replay" 1
-    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+    (Ast_grep.count_calls_in_value_binding ~module_path:input_path
        ~binding_name:"input_reader_has_pending_bytes"
        ~callee:"Masc_tui_terminal_probe.has_replay");
   (* A character the decoder holds is awaiting bytes that have not arrived;
      it is not input ready to act on, so it must not postpone a frame. *)
   check int "an incomplete character does not postpone a frame" 0
-    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+    (Ast_grep.count_calls_in_value_binding ~module_path:input_path
        ~binding_name:"input_reader_has_pending_bytes"
        ~callee:"Masc_tui_input_decoder.pending");
   check bool "main loop reads a monotonic clock" true
@@ -1849,7 +1807,7 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
      input owns the deadline, and EINTR has to come back as a retry rather
      than as end of input. *)
   check bool "interrupted input uses the deadline-aware retry contract" true
-    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+    (Ast_grep.count_calls_in_value_binding ~module_path:input_path
        ~binding_name:"refill_input_reader"
        ~callee:"Render_schedule.Input_wait.await"
      = 1);
@@ -1877,10 +1835,14 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
   check int "resize polling consumes one pending signal" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"consume_resize_request" ~callee:"Atomic.exchange");
-  check int "render owns one compact viewport gate" 1
+  check int "the shared frame choice owns one compact viewport gate" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_render.ml" ~binding_name:"frame_choice"
+       ~callee:"Render_schedule.Viewport.requires_compact_frame");
+  check int "render uses the same frame choice as Home preparation" 1
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_render.ml" ~binding_name:"render"
-       ~callee:"Render_schedule.Viewport.requires_compact_frame");
+       ~callee:"frame_choice");
   check int "compact render has one fallback branch" 1
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_render.ml" ~binding_name:"render"
@@ -1890,30 +1852,30 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
        ~module_path:"bin/masc_tui_render.ml" ~binding_name:"render"
        ~callee:"render_surface");
   let render_path = "bin/masc_tui_render.ml" in
-  check int "overview layout owns one shared row allocation" 1
+  (* The Dashboard is a fixed set of summary sections over one body height;
+     it holds no Team block, task panel or attention window whose rows a
+     shared allocation would split (RFC-tui-measured-operator-home). That
+     height is the shared chrome's budget, which also says how many rows a
+     short terminal could not hold. *)
+  check int "Dashboard draws through the shared chrome once" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path
-       ~binding_name:"overview_layout"
-       ~callee:"Render_schedule.allocate_overview");
-  check int "overview renderer consumes one shared layout" 1
+       ~binding_name:"render_overview" ~callee:"surface_chrome");
+  check int "and reads no body height of its own" 0
+    (List.fold_left
+       (fun total callee ->
+         total
+         + Ast_grep.count_calls_in_value_binding ~module_path:render_path
+             ~binding_name:"render_overview" ~callee)
+       0
+       [ "Masc_tui_types.surface_body_rows"
+       ; "surface_body_rows"
+       ; "surface_chrome_budget"
+       ]);
+  (* Home's typed decision projection keeps unread/failed sources visible.
+     The old attention page's emptiness says nothing about human decisions. *)
+  check int "Home reads the shared decision projection once" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path
-       ~binding_name:"render_overview" ~callee:"overview_layout");
-  (* Both the Attention count in the title and its empty-body note read the
-     shared page state: unread/failed must not become a zero count, and unread
-     must not become a blank body. *)
-  check int "Attention title and body both read the shared empty page" 2
-    (Ast_grep.count_calls_in_value_binding ~module_path:render_path
-       ~binding_name:"render_overview" ~callee:"empty_page_of");
-  (* The overview reads its bounds off [row_budget], the one value the layout
-     above returns. How many times it reads them is how much the surface
-     draws, not whether the allocation is shared: #29684 moved the number
-     from five to six by adding a task-panel window that reads the same
-     [task_rows]. A second source is what breaks the sharing, so that is what
-     is asked for, and none is allowed. *)
-  check int "overview bounds every variable section from that one allocation" 0
-    (Ast_grep.count_field_accesses_off_other_records_in_value_binding
-       ~module_path:render_path ~binding_name:"render_overview"
-       ~record:"row_budget"
-       ~fields:[ "attention_rows"; "task_error_rows"; "task_rows" ]);
+       ~binding_name:"render_overview" ~callee:"home_decision_rows");
   check int "board read consumes one shared row allocation" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path
        ~binding_name:"board_read_pane"
@@ -2458,7 +2420,7 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
     ; "Terminal_text.clock_timestamp"
       (* Not a [Terminal_text] name, but it is a boundary crossing all the
          same: it serializes the approval payload and hands the result to
-         [Masc.Tui_decode.sanitize_terminal_text] before returning
+         [Masc.Tui_terminal_text.sanitize_terminal_text] before returning
          (masc_tui_operator_projection.ml). This list matches on the call
          site's spelling, so a wrapper that sanitizes internally has to be
          named here or the guard reads it as a raw access. *)
@@ -2472,7 +2434,7 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
     ; "Message_layout.wrap_body"
       (* Also not a [Terminal_text] name, and also a boundary: every answer it
          returns is either built from digits and the letters of a span, or is
-         the stamp put through [Masc.Tui_decode.sanitize_terminal_text]
+         the stamp put through [Masc.Tui_terminal_text.sanitize_terminal_text]
          (masc_tui_wire_age.ml, whose interface says so and whose suite pins
          it). It reads the stamp rather than drawing it, which is why it is a
          wrapper and not a [Terminal_text] call. *)
@@ -2581,35 +2543,20 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
   check_fields "task_line" [ "id"; "title" ];
   check_identifiers ~module_path:render_path ~binding:"task_line"
     ~callees:sanitizer_calls [ "name" ];
-  check_fields "render_overview"
-    [ "overview_error"
-    ; "ai_summary"
-    ];
-  (* The Overview's title row, visible from the first frame, and
+  check_fields "render_overview" [ "overview_error" ];
+  check int "Home does not draw the removed attention summary" 0
+    (Ast_grep.count_field_accesses_outside_calls_in_value_binding
+       ~module_path:render_path ~binding_name:"render_overview" ~callees:[]
+       ~fields:[ "ai_summary" ]);
+  check_fields "render_work_tasks" [ "tasks_error" ];
+  (* The Dashboard's title row, visible from the first frame, and
      /about's colour scheme name from the operator's configuration. *)
   check_fields "overview_header" [ "workspace" ];
   check_fields "render_about" [ "theme_choice" ];
-  check_fields "overview_layout" [ "tasks_error" ];
   (* The TUI session block prints event text this process wrote from
      server answers and editor output. *)
   check_fields ~module_path:"bin/masc_tui_render_metrics.ml"
     "render_section_fleet" [ "content" ];
-  (* The Team block prints Keeper names and task text that producers wrote. *)
-  (* pr_tag_of_keeper and spend_tag_of_keeper look the name up, and
-     spend_tags and spend_total take the names as lookup keys; none of them
-     draws it. *)
-  check_fields
-    ~non_rendering_calls:
-      [ "pr_tag_of_keeper"; "spend_tag_of_keeper"; "spend_tags"; "spend_total" ]
-    "overview_team_lines"
-    [ "okp_name"; "id"; "title" ];
-  (* The spend line prints the transport or decode failure it was given. *)
-  check_identifiers ~module_path:"bin/masc_tui_keeper_spend.ml" ~binding:"lines"
-    ~callees:sanitizer_calls [ "err" ];
-  (* The pull request lines print repository ids and failure text the server
-     relayed from GitHub. *)
-  check_fields ~module_path:"bin/masc_tui_repository_pulls.ml" "lines"
-    [ "rp_repository" ];
   (* [ap_summary] is not in this list: the press-again line and the row
      summary both moved into [approval_detail_line], and the guard follows
      the field rather than the surface's name. *)
@@ -2734,7 +2681,7 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
      one helper. It splits the text on LF (not drawn) and escapes each line
      before it wraps. *)
   check_identifiers ~module_path:"bin/masc_tui_planning_detail.ml" ~binding:"wrapped"
-    ~callees:[ "Tui_decode.sanitize_terminal_text"; "String.split_on_char" ]
+    ~callees:[ "Masc.Tui_terminal_text.sanitize_terminal_text"; "String.split_on_char" ]
     [ "text"; "line" ];
   check int "the goal detail heads a stuck goal with the verifier's reason" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path
@@ -2847,18 +2794,18 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
          ~module_path:ansi_path ~binding_name:binding ~callees:[ callee ])
   in
   check_direct_result "single_line"
-    "Masc.Tui_decode.sanitize_terminal_text";
+    "Masc.Tui_terminal_text.sanitize_terminal_text";
   check_direct_result "optional_single_line" "Option.map";
   check_direct_result "single_line_or" "Option.value";
   check_direct_result "single_lines" "List.map";
   check_direct_result "short_timestamp"
-    "Masc.Tui_decode.short_timestamp_for_terminal";
+    "Masc.Tui_terminal_text.short_timestamp_for_terminal";
   check_direct_result "clock_timestamp"
-    "Masc.Tui_decode.clock_timestamp_for_terminal";
+    "Masc.Tui_terminal_text.clock_timestamp_for_terminal";
   check int "shared terminal boundary delegates to the typed sanitizer" 1
     (Ast_grep.count_calls_in_value_binding
        ~module_path:ansi_path ~binding_name:"single_line"
-       ~callee:"Masc.Tui_decode.sanitize_terminal_text");
+       ~callee:"Masc.Tui_terminal_text.sanitize_terminal_text");
   check int "optional boundary maps the sanitizer" 1
     (Ast_grep
      .count_applications_with_exact_positional_identifier_in_value_binding
@@ -2875,12 +2822,12 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
   check int "short timestamp delegates to slice-then-sanitize helper" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:ansi_path
        ~binding_name:"short_timestamp"
-       ~callee:"Masc.Tui_decode.short_timestamp_for_terminal");
+       ~callee:"Masc.Tui_terminal_text.short_timestamp_for_terminal");
   check int "clock timestamp delegates to slice-then-sanitize helper" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:ansi_path
        ~binding_name:"clock_timestamp"
-       ~callee:"Masc.Tui_decode.clock_timestamp_for_terminal");
-  let decode_path = "lib/tui_decode.ml" in
+       ~callee:"Masc.Tui_terminal_text.clock_timestamp_for_terminal");
+  let decode_path = "lib/tui_terminal_text.ml" in
   [ "short_timestamp_for_terminal"; "clock_timestamp_for_terminal" ]
   |> List.iter (fun binding ->
        check_binding decode_path binding;
@@ -3190,8 +3137,8 @@ let () =
         test_case "check success status" `Quick test_is_success_http_status_called;
         test_case "the spectator reads the live route" `Quick
           test_the_spectator_reads_the_live_route;
-        test_case "the attention note starts where its rows do" `Quick
-          test_the_attention_note_starts_where_its_rows_do;
+        test_case "the Home empty decision note has section indent" `Quick
+          test_home_empty_decision_note_has_section_indent;
         test_case "the lane failure row adds no second verdict" `Quick
           test_the_lane_failure_row_adds_no_second_verdict;
         test_case "missing operator token is reported" `Quick
@@ -3216,10 +3163,6 @@ let () =
           "Recent projection is prepared inside frame Build"
           `Quick
           test_recent_projection_is_prepared_inside_frame_build;
-        test_case
-          "Overview projections are made once per input"
-          `Quick
-          test_overview_projections_are_made_once_per_input;
         test_case
           "user message background has one render snapshot"
           `Quick

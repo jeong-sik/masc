@@ -10,6 +10,8 @@ import tempfile
 import unittest
 import zlib
 
+import skill_activation_event_log_fixture as log_fixture
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_PATH = (
@@ -35,6 +37,9 @@ def load_module():
 
 
 verifier = load_module()
+events = verifier.skill_activation_events
+DURABLE_EVENTS_BEFORE = verifier.ledger_join.DURABLE_EVENTS_BEFORE
+DURABLE_EVENTS_AFTER = verifier.ledger_join.DURABLE_EVENTS_AFTER
 HEAD = "a" * 40
 TREE = "b" * 40
 WORKSPACE = "c" * 64
@@ -127,7 +132,7 @@ def activation():
             },
         },
         "delivery": {
-            "boundary": {"kind": "model_response", "agent_core_turn": 7},
+            "boundary": {"kind": "model_response", "agent_core_turn": 8},
             "runtime_id": "runtime-one",
             "delivered_at": "2026-08-27T00:00:02Z",
             "content_bytes": 12,
@@ -138,7 +143,7 @@ def activation():
                 "identity": {"kind": "call_id", "call_id": "call-action-1"},
                 "tool_name": "keeper_status",
                 "runtime_id": "runtime-one",
-                "agent_core_turn": 7,
+                "agent_core_turn": 8,
                 "observed_at": "2026-08-27T00:00:03Z",
             }
         ],
@@ -155,7 +160,7 @@ def ledger():
         "activations": [activation()],
         "transition_rejections": [],
     }
-    value["revision"] = verifier.proof_collector.ledger_revision(value)
+    value["revision"] = events.ledger_revision(value)
     return value
 
 
@@ -316,8 +321,6 @@ def make_bundle(root: Path):
         "dashboard-tools-after.json": copy.deepcopy(projected),
         "historical-skill-activations-before.json": historical(durable),
         "historical-skill-activations-after.json": historical(copy.deepcopy(durable)),
-        "durable-skill-activations-before.json": durable,
-        "durable-skill-activations-after.json": copy.deepcopy(durable),
         "source-before.json": source(),
         "source-after.json": source(),
     }
@@ -325,6 +328,10 @@ def make_bundle(root: Path):
     for name, value in raw_values.items():
         if name != "producer-receipt.json":
             join_payloads[name] = write_json_preserving_order(join_root / name, value)
+    durable_log = log_fixture.event_log(durable)
+    for name in (DURABLE_EVENTS_BEFORE, DURABLE_EVENTS_AFTER):
+        (join_root / name).write_bytes(durable_log)
+        join_payloads[name] = durable_log
     recomputed_join = verifier.ledger_join.validate_join(
         receipt=producer_receipt,
         receipt_raw=receipt_raw,
@@ -337,10 +344,10 @@ def make_bundle(root: Path):
         dashboard_after=raw_values["dashboard-tools-after.json"],
         historical_before=raw_values["historical-skill-activations-before.json"],
         historical_after=raw_values["historical-skill-activations-after.json"],
-        durable_ledger=raw_values["durable-skill-activations-before.json"],
-        durable_ledger_after=raw_values["durable-skill-activations-after.json"],
-        durable_ledger_raw=join_payloads["durable-skill-activations-before.json"],
-        durable_ledger_after_raw=join_payloads["durable-skill-activations-after.json"],
+        durable_ledger=durable,
+        durable_ledger_after=copy.deepcopy(durable),
+        durable_ledger_raw=join_payloads[DURABLE_EVENTS_BEFORE],
+        durable_ledger_after_raw=join_payloads[DURABLE_EVENTS_AFTER],
     )
     join = {
         "schema": verifier.JOIN_SCHEMA,
@@ -368,12 +375,13 @@ def make_bundle(root: Path):
     proof_raw_values = {
         "health.json": health(),
         "dashboard-tools.json": copy.deepcopy(projected),
-        "skill-activations.json": copy.deepcopy(durable),
     }
     proof_payloads = {
         name: write_json_preserving_order(proof_root / name, value)
         for name, value in proof_raw_values.items()
     }
+    (proof_root / events.EVENTS_FILENAME).write_bytes(durable_log)
+    proof_payloads[events.EVENTS_FILENAME] = durable_log
     proof_payloads["tui-build-evidence.json"] = build_raw
     proof_payloads["masc_tui.exe"] = executable
     dashboard_png = png(1440, 1000)
@@ -381,7 +389,7 @@ def make_bundle(root: Path):
     proof_identity = verifier.proof_collector.validate_proof(
         health=proof_raw_values["health.json"],
         dashboard=proof_raw_values["dashboard-tools.json"],
-        durable_ledger=proof_raw_values["skill-activations.json"],
+        durable_ledger=copy.deepcopy(durable),
         keeper="keeper-one",
         expected_source_sha=HEAD,
         skill_tool_use_id=SKILL_ID,
@@ -415,8 +423,8 @@ def make_bundle(root: Path):
         },
         "proof": proof_identity,
         "durability": {
-            "ledger_sha256": verifier.digest(proof_payloads["skill-activations.json"]),
-            "ledger_bytes": len(proof_payloads["skill-activations.json"]),
+            "ledger_sha256": verifier.digest(proof_payloads[events.EVENTS_FILENAME]),
+            "ledger_bytes": len(proof_payloads[events.EVENTS_FILENAME]),
             "dashboard_projection_equals_ledger": True,
         },
         "dashboard": {
@@ -442,11 +450,11 @@ def make_bundle(root: Path):
     )
     frame_rows = (
         [
-            "MASC Config / Tools 14:10:47 [connected]",
+            "MASC System / Tools 14:10:47 [connected]",
             f"receipt_sha256={receipt_sha256}",
         ],
         [
-            "MASC Config / Tools 14:10:48 [connected]",
+            "MASC System / Tools 14:10:48 [connected]",
             f"receipt_sha256={receipt_sha256}",
             "q quit  ↑↓ scroll",
         ],
@@ -634,10 +642,10 @@ class VerifyKeeperSkillProofBundleTest(unittest.TestCase):
     def test_durable_ledger_raw_byte_drift_reaches_offline_join_verifier(self):
         with tempfile.TemporaryDirectory() as raw:
             bundle = make_bundle(Path(raw))
-            name = "durable-skill-activations-after.json"
+            name = DURABLE_EVENTS_AFTER
             path = bundle["join_root"] / name
-            value = json.loads(path.read_bytes())
-            changed = (json.dumps(value, indent=2, sort_keys=True) + "\n").encode()
+            rows = [json.loads(line) for line in path.read_bytes().splitlines()]
+            changed = log_fixture.encode_rows(rows, separators=(", ", ": "))
             self.assertNotEqual(path.read_bytes(), changed)
             path.write_bytes(changed)
             bundle["join"]["artifacts"][name] = file_identity(changed)
@@ -647,6 +655,34 @@ class VerifyKeeperSkillProofBundleTest(unittest.TestCase):
                 "join raw authority is invalid: durable Skill ledger bytes changed",
             ):
                 verify(bundle)
+
+    def test_proof_event_log_must_fold_to_the_dashboard_ledger(self):
+        def replace_proof_log(bundle, keep_row):
+            name = events.EVENTS_FILENAME
+            path = bundle["proof_root"] / name
+            rows = [json.loads(line) for line in path.read_bytes().splitlines()]
+            payload = log_fixture.encode_rows([row for row in rows if keep_row(row)])
+            path.write_bytes(payload)
+            bundle["proof"]["artifacts"][name] = file_identity(payload)
+
+        with tempfile.TemporaryDirectory() as raw:
+            bundle = make_bundle(Path(raw))
+            replace_proof_log(bundle, lambda row: row["kind"] != "action_observed")
+            with self.assertRaisesRegex(
+                verifier.VerificationError,
+                "proof raw authority is invalid: Dashboard ledger does not equal",
+            ):
+                verify(bundle)
+
+        with tempfile.TemporaryDirectory() as raw:
+            bundle = make_bundle(Path(raw))
+            replace_proof_log(bundle, lambda row: row["kind"] != "activation_recorded")
+            with self.assertRaises(verifier.VerificationError) as caught:
+                verify(bundle)
+        self.assertIs(
+            caught.exception.__cause__.fault,
+            events.SkillLedgerFault.UNKNOWN_EVENT_ACTIVATION,
+        )
 
     def test_current_join_observation_tamper_is_rejected(self):
         for field in ("current_surface", "current_projection"):
@@ -885,7 +921,7 @@ class VerifyKeeperSkillProofBundleTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             bundle = make_bundle(Path(raw))
             for frame in bundle["tui"]["frames"]:
-                frame["visible_text"] = "MASC Config / Tools 14:10:47 [connected]"
+                frame["visible_text"] = "MASC System / Tools 14:10:47 [connected]"
                 frame["visible_text_sha256"] = verifier.digest(
                     frame["visible_text"].encode()
                 )
@@ -906,7 +942,7 @@ class VerifyKeeperSkillProofBundleTest(unittest.TestCase):
                 name = f"tui-three-frame-{index:03d}.png"
                 payload = png(1200, 900 + index)
                 (bundle["tui_root"] / name).write_bytes(payload)
-                visible_text = "MASC Config / Tools 14:10:47 [connected]\n" + receipt_line
+                visible_text = "MASC System / Tools 14:10:47 [connected]\n" + receipt_line
                 frames.append(
                     {
                         "visible_text": visible_text,

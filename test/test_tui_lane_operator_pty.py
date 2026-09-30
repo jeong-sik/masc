@@ -24,9 +24,11 @@ from test_tui_lane_visual_pty import snapshot
 # text with no PTY scenario running, and main sat red until someone ran the
 # suite by hand.
 SOURCE_MODULES = (
+    "lib/tui_terminal_text.ml",
+    "lib/tui_terminal_text.mli",
     # Read off the walk's own needles rather than guessed: each of these owns
     # a literal this file waits for and no other bin source spells it --
-    # "MASC Lane Add-ons" and "MASC Overview" (render), "Run action on" and
+    # "MASC Lane Add-ons" and "MASC Dashboard" (render), "Run action on" and
     # "no available worker" (lane_addons), "Install Add-on:", "Image
     # unverified:" and "Local draft only." (lane_installer), "Review input"
     # (schema_form).
@@ -105,7 +107,7 @@ def main(executable: str, captures: Path | None) -> None:
             raise AssertionError('Successful evidence preservation was reported as a request failure')
         # Raw detail puts the complete receipt after the records; scroll to
         # it rather than assuming it fits on the first terminal page.
-        key(b'D', b'Rows')
+        key(b'D', b'Raw details')
         start = len(output)
         os.write(master, b'J' * 80)
         if not terminal.drain_until_quiet(process, master, output):
@@ -135,7 +137,7 @@ def main(executable: str, captures: Path | None) -> None:
             (captures / 'target-identity.pty').write_bytes(bytes(output))
             (captures / 'requests.json').write_text(json.dumps(accepted, indent=2))
         key(b'q', b'Lane Add-ons \xc2\xb7 1 declared \xc2\xb7 2 active \xc2\xb7 0 failed workers')
-        key(b'q', b'MASC Overview')
+        key(b'q', b'MASC Dashboard')
         os.write(master, b'q')
 
     terminal.run_terminal_scenario(executable, description='Lane operator target identity',
@@ -198,7 +200,7 @@ def guided_install(executable: str, captures: Path | None) -> None:
             captures.mkdir(parents=True, exist_ok=True)
             (captures / 'guided-install.pty').write_bytes(bytes(output))
             (captures / 'guided-install-request.json').write_text(json.dumps(saved, indent=2))
-        key(b'q', b'MASC Overview')
+        key(b'q', b'MASC Dashboard')
         os.write(master, b'q')
     terminal.run_terminal_scenario(executable, description='Lane guided package installation',
         interact=interact, http_fixtures=fixtures, http_requests=requests)

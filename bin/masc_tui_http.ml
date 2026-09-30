@@ -514,7 +514,7 @@ let fetch_machine_live ~(host : string) ~(port : int)
           | Error _ as error -> error
           | Ok json -> Masc_tui_machine_live.decode source json)
   in
-  Result.map_error Masc.Tui_decode.sanitize_terminal_text result
+  Result.map_error Masc.Tui_terminal_text.sanitize_terminal_text result
 
 (** POST a JSON body and parse the JSON response. *)
 let post_json_with_timeout ~timeout_sec ~(host : string) ~(port : int)
@@ -565,10 +565,22 @@ let http_delete ~(host : string) ~(port : int) ~(path : string) =
 let list_play_invites ~host ~port =
   get_json ~host ~port ~path:"/api/v1/play/invites"
 
+(* The play routes say why in [message]; the shared refusal reads only the
+   [error] code, which leaves the operator with "HTTP 409: not_ready". The
+   credential's own 401 and 403, and a body with no sentence in it, keep the
+   shared wording. *)
+let play_mutation_outcome = function
+  | Ok (status_code, body) as answer when status_code >= 400 && status_code < 500 ->
+    (match Masc.Tui_decode.play_invite_refusal ~status_code ~body with
+     | Some said -> Post_refused said
+     | None -> mutation_outcome answer)
+  | answer -> mutation_outcome answer
+
 let issue_play_invite ~host ~port ~name ~hours =
-  post_json_outcome ~host ~port ~path:"/api/v1/play/invites"
+  http_post ~headers:(auth_headers ()) ~host ~port ~path:"/api/v1/play/invites"
     ~body:(Yojson.Safe.to_string
       (`Assoc [ "name", `String name; "hours", `Int hours ]))
+  |> play_mutation_outcome
 
 type revoke_outcome = Revoke_absent | Revoke_other of post_outcome
 
@@ -582,7 +594,7 @@ let revoke_play_invite ~host ~port ~name =
       Revoke_absent
   | Ok (status_code, body) when status_code >= 500 ->
       Revoke_other (Post_unanswered (Masc.Tui_decode.play_revoke_http_error ~status_code ~body))
-  | answer -> Revoke_other (mutation_outcome answer)
+  | answer -> Revoke_other (play_mutation_outcome answer)
 
 let post_json ~(host : string) ~(port : int) ~(path : string) ~(body : string) : (Yojson.Safe.t, string) result =
   match http_post ~headers:(auth_headers ()) ~host ~port ~path ~body with
@@ -753,7 +765,7 @@ let post_keeper_chat_streaming ?(admission_intent = Masc_tui_keeper_chat_project
   in
   match
     with_credential_refresh_on ~refused:stream_refused @@ fun () ->
-    Masc_http_client.post_stream ~clock
+    Masc_http_client.post_stream ~retention:Masc_http_client.Pool.Keep_body ~clock
       ~idle_timeout_sec:keeper_chat_timeout_sec ~url
       ~headers:(json_headers (("Accept", "text/event-stream") :: auth_headers ()))
       ~body ~on_chunk ()
@@ -762,9 +774,9 @@ let post_keeper_chat_streaming ?(admission_intent = Masc_tui_keeper_chat_project
       Error (Masc_tui_keeper_chat_projection.Transport_error detail)
   | Ok (Masc_http_client.Pool.Buffered { status; body; _ }) ->
       Error (Masc_tui_keeper_chat_projection.Http_error { status; body })
-  | Ok (Masc_http_client.Pool.Streamed { response; _ }) ->
+  | Ok (Masc_http_client.Pool.Streamed { body; _ }) ->
       Masc_tui_keeper_chat_projection.decode_response_with_provenance ~request
-        response.Masc_http_client.Pool.body
+        body
       |> Result.map_error (fun error ->
              Masc_tui_keeper_chat_projection.Protocol_error error)
 
@@ -1687,21 +1699,18 @@ let fetch_operator_snapshot ~(host : string) ~(port : int) :
     ~path:"/api/v1/operator?view=summary&include_messages=0&include_keepers=0"
 
 (** GET /api/v1/runtime/resolved — runtimes and keeper assignments. *)
-(** GET /api/v1/repositories/pulls -- open pull requests of the registered
-    GitHub repositories (RFC-0465). *)
-let fetch_repository_pulls ~(host : string) ~(port : int) :
-    (Yojson.Safe.t, string) result =
-  get_json ~host ~port ~path:"/api/v1/repositories/pulls"
-
-(** GET /api/v1/dashboard/keeper-costs -- each Keeper's cost and tokens over
-    the server's default window, which the answer's [window_minutes] names. *)
-let fetch_keeper_costs ~(host : string) ~(port : int) :
-    (Yojson.Safe.t, string) result =
-  get_json ~host ~port ~path:"/api/v1/dashboard/keeper-costs"
-
 let fetch_dashboard_goals ~(host : string) ~(port : int) :
     (Yojson.Safe.t, string) result =
   get_json ~host ~port ~path:"/api/v1/dashboard/goals"
+
+let fetch_keeper_usage ~(host : string) ~(port : int) :
+    (Yojson.Safe.t, string) result =
+  get_json ~host ~port ~path:"/api/v1/dashboard/keeper-costs?window=1440"
+
+let fetch_provider_usage_history ~(host : string) ~(port : int) ~(days : int) :
+    (Yojson.Safe.t, string) result =
+  get_json ~host ~port
+    ~path:(Printf.sprintf "/api/v1/dashboard/provider-usage-history?days=%d" days)
 
 let fetch_runtime_resolved ~(host : string) ~(port : int) :
     (Yojson.Safe.t, string) result =
@@ -1791,7 +1800,7 @@ let set_runtime_lane_slots ~(host : string) ~(port : int) ~(lane : string)
       | (first : Runtime_toml.parse_error) :: _ ->
         Printf.sprintf "runtime.toml parse error at %s: %s"
           first.path first.message
-        |> Masc.Tui_decode.sanitize_terminal_text) in
+        |> Masc.Tui_terminal_text.sanitize_terminal_text) in
   let* current = match List.find_opt
       (fun (decl : Runtime_schema.lane_decl) -> String.equal decl.id lane)
       config.Runtime_schema.lane_decls with
@@ -2214,12 +2223,21 @@ let post_board_comment ~(host : string) ~(port : int) ~(post_id : string)
   post_json ~host ~port ~path:"/api/v1/tools/masc_board_comment"
     ~body:(Yojson.Safe.to_string payload)
 
-(** Fetch /api/v1/board/<postId> (post detail + comments). *)
-let fetch_board_post ~(host : string) ~(port : int) ~(post_id : string) : (Yojson.Safe.t, string) result =
+(** Fetch /api/v1/board/<postId> with an explicit comment page when needed. *)
+let fetch_board_post ?comment_offset ?comment_limit ~(host : string)
+    ~(port : int) ~(post_id : string) () : (Yojson.Safe.t, string) result =
+  let page_query =
+    (match comment_offset with
+     | None -> ""
+     | Some offset -> Printf.sprintf "&comment_offset=%d" offset)
+    ^ (match comment_limit with
+       | None -> ""
+       | Some limit -> Printf.sprintf "&comment_limit=%d" limit)
+  in
   get_json ~host ~port
     ~path:
-      (Printf.sprintf "/api/v1/board/%s?format=flat"
-         (percent_encode_path_segment post_id))
+      (Printf.sprintf "/api/v1/board/%s?format=flat%s"
+         (percent_encode_path_segment post_id) page_query)
 
 (** Fetch /api/v1/dashboard/scheduled-automation (schedule list projection).
     The server sorts active-first by due time and caps rows at its own limit,
@@ -3108,7 +3126,8 @@ let post_keeper_github_login_streaming ~clock ~(host : string) ~(port : int)
   in
   match
     with_credential_refresh_on ~refused:stream_refused @@ fun () ->
-    Masc_http_client.post_stream ~clock ~idle_timeout_sec:900.0 ~url
+    Masc_http_client.post_stream ~retention:Masc_http_client.Pool.Discard_body ~clock
+      ~idle_timeout_sec:900.0 ~url
       ~headers:(json_headers (("Accept", "text/event-stream") :: auth_headers ()))
       ~body:"{}" ~on_chunk ()
   with
@@ -3178,7 +3197,7 @@ let fetch_git_diff ?repo ~(host : string) ~(port : int)
     {!submit_keeper_ask_answer} takes ids back, so nothing on this side ever
     matches a choice by its wording. *)
 let fetch_keeper_asks ?keeper_name ~(host : string) ~(port : int) () :
-    (Masc.Tui_decode.asks_snapshot, string) result =
+    (Masc.Tui_decode_asks.asks_snapshot, string) result =
   (* No keeper named means the whole fleet. An operator opening this surface
      does not know which Keeper is stuck yet, and asking them to pick a name
      first is asking them to guess. *)
@@ -3201,7 +3220,7 @@ let fetch_keeper_asks ?keeper_name ~(host : string) ~(port : int) () :
       Error (refusal ~status_code:status ~body)
   | Ok (_, body) -> (
       match Yojson.Safe.from_string body with
-      | json -> Masc.Tui_decode.decode_asks_snapshot json
+      | json -> Masc.Tui_decode_asks.decode_asks_snapshot json
       | exception Yojson.Json_error detail -> Error ("asks were not JSON: " ^ detail))
 
 (** Answer one question of one ask ([POST /api/v1/keepers/ask-answer]).
@@ -3379,7 +3398,8 @@ let browser_lane_action ~host ~port ~source operation =
 let post_setup_login_streaming ~clock ~host ~port ~body ~on_chunk =
   let url = url_of ~host ~port ~path:"/api/v1/setup/accounts/login" in
   match with_credential_refresh_on ~refused:stream_refused @@ fun () ->
-    Masc_http_client.post_stream ~retain_body:false ~clock ~idle_timeout_sec:Float.infinity ~url
+    Masc_http_client.post_stream ~retention:Masc_http_client.Pool.Discard_body ~clock
+      ~idle_timeout_sec:Float.infinity ~url
       ~headers:(json_headers (("Accept", "text/event-stream") :: auth_headers ()))
       ~body ~on_chunk () with
   | Error _ -> Error "Login stream unavailable; recheck the login status."

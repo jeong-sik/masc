@@ -38,7 +38,11 @@ type pending_work = { goal_id : string }
 type deferral =
   | Review_not_bound of { detail : string }
   | Proof_lookup_unavailable of { detail : string }
-  | Not_reviewed of { gate : string; detail : string }
+  | Not_reviewed of
+      { gate : string
+      ; detail : string
+      ; evaluator_runtime : string option
+      }
   | Verdict_without_reason
   | Commit_refused of { detail : string }
 
@@ -286,13 +290,19 @@ let goal_proof_lookup config ~submitted_evidence =
 
    The application-owned worker crosses a typed internal boundary. Public MCP
    callers can request lifecycle changes but cannot name verifier verdicts or
-   impersonate the fixed verifier authority. *)
+   impersonate the fixed verifier authority.
+
+   A passing verdict is committed after the Candle Snapshot step has recorded
+   the Goal's inputs to a payout (RFC-goal-candle-ledger 3.2). The step writes
+   nothing unless Candle is enabled, and while it is enabled a Snapshot that
+   cannot be written refuses the commit, so the request stays pending. *)
 
 let commit_gate_verdict config ~goal_id ~request_id ~criterion ~verification_run_id ~decision ~evidence
   : (unit, string) result
   =
   let result =
     Workspace_goals.commit_verifier_decision
+      ~before_proof_commit:(Candle_snapshot.before_proof_commit config)
       ~tool_name:"goal_verifier_commit"
       ~start_time:(Tool_timing.start ())
       config
@@ -328,12 +338,19 @@ let defer ~goal_id deferral =
    and changes neither the outcome nor the pending row. Cancellation is not
    contained. *)
 let announce_deferral ~goal_id ~request_id deferral =
+  let evaluator_runtime =
+    match deferral with
+    | Not_reviewed { evaluator_runtime; _ } -> evaluator_runtime
+    | Review_not_bound _ | Proof_lookup_unavailable _ | Verdict_without_reason
+    | Commit_refused _ -> None
+  in
   match
-    Verification_protocol.notify_stalled_verification
+    Verification_protocol.notify_stalled_verification_with_runtime
       ~authority:Workspace_goals.verifier_authority
       ~subject:(Verification_protocol.Goal_review { goal_id; request_id })
       ~gate:(deferral_gate deferral)
       ~detail:(deferral_detail deferral)
+      ~evaluator_runtime
   with
   | () -> ()
   | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
@@ -424,6 +441,7 @@ let process_pending_work_inner
                (Not_reviewed
                   { gate = Task.Anti_rationalization.gate_to_string result.gate
                   ; detail
+                  ; evaluator_runtime = Some result.evaluator_runtime
                   })
            | Some review_verdict ->
              let evidence =
@@ -875,7 +893,11 @@ module For_testing = struct
   type nonrec deferral = deferral =
     | Review_not_bound of { detail : string }
     | Proof_lookup_unavailable of { detail : string }
-    | Not_reviewed of { gate : string; detail : string }
+    | Not_reviewed of
+      { gate : string
+      ; detail : string
+      ; evaluator_runtime : string option
+      }
     | Verdict_without_reason
     | Commit_refused of { detail : string }
 

@@ -50,71 +50,6 @@ module Viewport : sig
   val requires_compact_frame : rows:int -> bool
 end
 
-type overview_allocation = {
-  intro_rows : int;
-      (** Rows for a first-use explanation, paid before the usage accounts. *)
-  attention_rows : int;
-  goal_rows : int;
-      (** Rows of the GOALS block, its headline included. The divider under
-          it is one more row, drawn only when this is positive. *)
-  team_rows : int;
-      (** Keeper rows in the Team block. The block's title and its closing
-          divider are two more rows, drawn only when this is positive. *)
-  providers_rows : int;
-      (** Rows of the Providers section. Its title and closing divider are
-          {!overview_providers_chrome_rows} more, drawn only when this is
-          positive. *)
-  task_error_rows : int;
-  task_rows : int;
-  spacing_rows : int;
-      (** At most two quiet rows, added one per viewport row after height 23,
-          so growing the terminal never takes a row from a content block. *)
-  filler_rows : int;
-      (** Blank rows the renderer draws between the task block and the bottom
-          border. Without them a surface whose content is shorter than the
-          terminal ends partway down the screen and leaves its own footer in
-          the middle of it. *)
-}
-
-val overview_team_chrome_rows : int
-(** The Team block's title row and the divider under it, drawn only when
-    [team_rows] is positive. *)
-
-val overview_goal_chrome_rows : int
-(** The blank row under Goals, drawn only when [goal_rows] is
-    positive. *)
-
-val overview_providers_chrome_rows : int
-(** The Plan usage title and its blank row, drawn only
-    when [providers_rows] is positive. *)
-
-val spend_spare_rows_on_team : overview_allocation -> extra:int -> overview_allocation
-(** Adds up to [extra] Team rows out of [filler_rows] only: rows nothing else
-    on the Overview wanted. A Team block not yet drawn also pays its
-    {!overview_team_chrome_rows} from the filler, and gets nothing unless at
-    least one row is left after them. Every other count is unchanged. *)
-
-val allocate_overview :
-  terminal_rows:int ->
-  intro_count:int ->
-  attention_count:int ->
-  goal_count:int ->
-  team_count:int ->
-  team_stuck:bool ->
-  providers_count:int ->
-  task_count:int ->
-  has_task_error:bool ->
-  overview_allocation
-(** The blocks share the rows through {!Masc_tui_layout.allocate}, served in
-    the order Attention panel, GOALS, first-use explanation, Providers, Team,
-    Tasks. Each is first paid what it cannot give up -- the panel's first row,
-    the GOALS headline,
-    the first Team row when [team_stuck] says it is a stuck Keeper, the first
-    held task and the backlog line -- and then each grows, in the same order,
-    to what it wants. A block with no room for one row besides its chrome is
-    not drawn at all and its rows are filler. A taller terminal never gives
-    any block fewer rows, and fewer attention items never give Team fewer. *)
-
 (** {1 Keeper roster columns} *)
 
 val keeper_marker_width : int
@@ -217,16 +152,21 @@ type workspace_row_values = {
 }
 (** One repository row's readings, already rendered as text. *)
 
-val workspace_path_width : inner_width:int -> int
-(** Cells the path may occupy: what the named columns leave, never below
-    {!workspace_minimum_path_width}. Computed from the column widths rather
-    than from a constant kept in step with them by hand. *)
+type workspace_column =
+  | Workspace_name
+  | Workspace_branch
+  | Workspace_status
+  | Workspace_sync
+  | Workspace_path
 
-val workspace_header_row : path_width:int -> string
-val workspace_row : path_width:int -> workspace_row_values -> string
-(** The header and one row, laid out on the same columns. This screen used to
-    print one format string in two places; a column can no longer exist in the
-    header at a width the rows do not use. *)
+val workspace_layout : inner_width:int -> workspace_column Masc_tui_table.layout
+(** Keep repository, status and path. Fold sync and then branch as the
+    viewport narrows; path receives the remaining cells. *)
+
+val workspace_header_row : layout:workspace_column Masc_tui_table.layout -> string
+val workspace_row :
+  layout:workspace_column Masc_tui_table.layout -> workspace_row_values -> string
+(** Header and rows share the measured column allocation. *)
 
 (** {1 System log columns} *)
 
@@ -254,21 +194,23 @@ val system_log_plain_styles : system_log_styles
 (** No dress at all, for a caller drawing an undressed row and for the tests
     that check a dressed row measures the same. *)
 
-val system_log_message_width : inner_width:int -> int
-(** Cells the message may occupy: what the named columns leave, never below
-    {!system_log_minimum_message_width}. *)
+type system_log_column =
+  | Log_time
+  | Log_level
+  | Log_module
+  | Log_keeper
+  | Log_category
+  | Log_message
 
-val system_log_header_row : message_width:int -> string
+val system_log_layout : inner_width:int -> system_log_column Masc_tui_table.layout
+(** Keep time, level and message. Fold category, keeper and module in that
+    order when they would squeeze the message below its readable floor. *)
 
+val system_log_header_row : layout:system_log_column Masc_tui_table.layout -> string
 val system_log_row :
-  styles:system_log_styles ->
-  level_style:string ->
-  message_width:int ->
-  system_log_row_values ->
-  string
-(** One entry, laid out on the same columns as {!system_log_header_row}. The
-    widths used to live in two format strings, the row's threaded between five
-    escape sequences where nothing could compare them with the header's. *)
+  styles:system_log_styles -> level_style:string ->
+  layout:system_log_column Masc_tui_table.layout -> system_log_row_values -> string
+(** Header and styled rows share the measured column allocation. *)
 
 (** {1 Task Review columns} *)
 

@@ -285,6 +285,16 @@
   eio
   eio_main))
 
+;; Manual real-model Stagehand fixture evidence; no browser or Keeper loop.
+(executable
+ (name stagehand_model_probe)
+ (modules stagehand_model_probe)
+ (preprocess
+  (pps ppx_enumerate))
+ (libraries masc masc.runtime masc.server masc.config masc_eio_context agent_core
+  masc.agent_core.llm_provider masc.fs_compat
+  cohttp cohttp-eio yojson unix eio eio_main))
+
 ;; Deployment preflight helper.  The shell gate delegates runtime lease
 ;; ownership and schedule signal decoding to the same OCaml authorities used
 ;; by the server instead of reimplementing either contract in shell.
@@ -365,6 +375,14 @@
  (wrapped false)
  (modules masc_tui_chart)
  (libraries masc_tui_theme masc_tui_message_layout))
+
+;; Usage's quota scope trend, built once per provider history answer so the
+;; frame draws rows rather than regrouping every point on every repaint.
+(library
+ (name masc_tui_usage_trend)
+ (wrapped false)
+ (modules masc_tui_usage_trend)
+ (libraries masc masc_tui_chart))
 
 (library
  (name masc_tui_ask_projection)
@@ -478,7 +496,7 @@
  (name masc_tui_lane_addons)
  (wrapped false)
  (modules masc_tui_lane_addons)
- (libraries masc masc_tui_message_layout masc_tui_lane_declaration masc_tui_schema_form masc_tui_lane_installer masc_tui_lane_subscriptions masc_tui_theme yojson unix))
+ (libraries masc masc_tui_message_layout masc_tui_text_block masc_tui_lane_declaration masc_tui_schema_form masc_tui_lane_installer masc_tui_lane_subscriptions masc_tui_theme yojson unix))
 
 ;; The Fusion launch form: what it offers, what a submit means, what the
 ;; overlay says. Names Fusion_types for the topology sum, so it lists
@@ -517,6 +535,20 @@
  (wrapped false)
  (modules masc_tui_preset_text)
  (libraries masc masc_tui_fetched masc_tui_message_layout))
+
+;; The card an issued play invite is drawn as: pure, so a test reads the exact
+;; rows an operator sees. The QR is drawn by the portraits' half-block mosaic in
+;; two colours of its own.
+(library
+ (name masc_tui_play_card)
+ (wrapped false)
+ (modules masc_tui_play_card)
+ (libraries
+  masc
+  masc_tui_image_mosaic
+  masc_tui_terminal_palette
+  masc_tui_theme
+  qrc))
 
 (library
  (name masc_tui_mcp)
@@ -713,7 +745,8 @@
   masc.runtime
   masc.runtime_toml_namespace
   masc.toml_line_editor
-  masc.voice_config))
+  masc.voice_config
+  unix))
 
 (library
  (name masc_tui_theme_catalog)
@@ -804,12 +837,6 @@
  (preprocess
   (pps ppx_enumerate))
  (libraries base64 masc.masc_compression))
-
-(library
- (name masc_tui_play_qr)
- (wrapped false)
- (modules masc_tui_play_qr)
- (libraries qrc))
 
 (library
  (name masc_tui_link)
@@ -972,7 +999,7 @@
  (modules masc_tui_render_schedule)
  ; masc_tui_scroll so the keeper detail's clamp is the shared one rather than
  ; a second copy of the same arithmetic.
- (libraries masc_tui_layout masc_tui_message_layout masc_tui_scroll
+ (libraries masc_tui_message_layout masc_tui_scroll
   masc_tui_table masc_tui_theme))
 
 (library
@@ -1328,7 +1355,7 @@
  (name masc_tui_types)
  (wrapped false)
  (modules masc_tui_types)
- (libraries masc_tui_config masc_tui_account_login digestif mtime.clock.os masc_tui_command masc_tui_pick_list masc_tui_esc_interrupt masc_tui_planning_detail
+ (libraries masc.keeper_registry masc_tui_config masc_tui_account_login digestif mtime.clock.os masc_tui_command masc_tui_play_card masc_tui_pick_list masc_tui_esc_interrupt masc_tui_planning_detail
   ;; [threshold_cols] is the width two panes need: the Board read layout is
   ;; decided here so the footer and the frame cannot disagree about it.
   masc_tui_roster_pane
@@ -1348,6 +1375,7 @@
   masc.browser_lane
   masc.sse_wire
   masc_tui_task_flow
+  masc_tui_usage_trend
   masc_tui_runtime_config_view
   masc_tui_runtime_account_form
   masc_tui_frame
@@ -1455,6 +1483,7 @@
  (modules masc_tui_render_tools)
  (libraries
   masc_tui_press
+  masc_tui_frame
   masc_tui_message_layout
   masc
   masc_types
@@ -1674,20 +1703,6 @@
   masc_tui_types
   unix))
 
-;; The Overview Team block's projection (RFC-0464): pure, so a test can read
-;; it without the renderer.
-(library
- (name masc_tui_overview_team)
- (wrapped false)
- (modules masc_tui_overview_team)
- (libraries masc masc_types masc_tui_types))
-
-(library
- (name masc_tui_overview_cache)
- (wrapped false)
- (modules masc_tui_overview_cache)
- (libraries masc masc_types masc_tui_types masc_tui_overview_team masc_tui_overview_tasks))
-
 ;; The Overview's GOALS section: whether the fleet's work moves any goal. A
 ;; library so a test can draw it from a fixture of the server's goal tree.
 (library
@@ -1720,29 +1735,6 @@
   masc_tui_message_layout
   unix))
 
-;; RFC-0465: the Overview's pull request reading, decoder and lines. A
-;; library so a test can decode the server's own encoder output.
-(library
- (name masc_tui_repository_pulls)
- (wrapped false)
- (modules masc_tui_repository_pulls)
- (libraries unix masc masc_tui_types masc_tui_ansi yojson))
-;; The Overview's spend reading (GET /api/v1/dashboard/keeper-costs),
-;; decoder and Team row tags. A library so a test can decode the server's
-;; own encoder output.
-(library
- (name masc_tui_keeper_spend)
- (wrapped false)
- (modules masc_tui_keeper_spend)
- (libraries
-  masc
-  masc.dashboard_utils
-  masc_tui_types
-  masc_tui_ansi
-  masc_tui_message_layout
-  yojson))
-
-
 (executable
  (name masc_tui)
  (modules
@@ -1753,8 +1745,8 @@
  (public_name masc-tui)
  (package masc)
  (libraries
-  masc_tui_play_qr
   masc_tui_account_login
+  masc_tui_play_card
   masc_tui_sgr_text
   masc_tui_emblem_screen
   masc_tui_keeper_portrait
@@ -1762,8 +1754,7 @@
   masc_tui_hit
   masc_tui_press
   masc_tui_pick_list
-  masc_tui_repository_pulls
-  masc_tui_keeper_spend
+  masc_tui_usage_trend
   digestif
   masc.string_util
   masc.keeper_runtime
@@ -1792,8 +1783,6 @@
   masc.build_commit
   masc.sse_wire
   masc_tui_task_flow
-  masc_tui_overview_team
-  masc_tui_overview_cache
   masc_tui_overview_goals
   masc_tui_overview_providers
   masc.masc_tool_blob_store
@@ -1818,6 +1807,7 @@
   masc_tui_terminal_palette
   masc_tui_terminal_probe
   masc_tui_input_decoder
+  masc_tui_input_reader
   masc_tui_code_lexer
   masc_tui_memo
   masc_tui_span
@@ -2199,3 +2189,21 @@
   masc_tui_paste
   masc_tui_terminal_palette
   masc_tui_utf8_input))
+
+(library
+ (name masc_tui_input_reader)
+ (wrapped false)
+ (modules masc_tui_input_reader)
+ (libraries
+  masc
+  masc_core
+  masc_eio_context
+  masc_tui_input_decoder
+  masc_tui_terminal_probe
+  masc_tui_terminal_palette
+  masc_tui_render_schedule
+  masc_tui_paste
+  eio
+  eio.unix
+  unix
+  mtime.clock.os))

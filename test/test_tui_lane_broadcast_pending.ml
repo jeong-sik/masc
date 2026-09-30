@@ -31,7 +31,15 @@ let test_restart () = fixture (fun path ->
   check bool "foreign receipt refuses retirement" true
     (Result.is_error (Pending.acknowledge ~path ~scope ~request:recovered
       (`Assoc ["delivery",`Assoc ["status",`String "committed";"request_id",`String "other-send"]])));
-  let receipt=`Assoc ["delivery",`Assoc ["status",`String "committed";"request_id",`String "first-send"]] in
+  let delivered state=`Assoc ["delivery",`Assoc ["status",`String "committed";
+    "request_id",`String "first-send";"receipt",`Assoc ["fanout_state",`String state]]] in
+  require (Pending.acknowledge ~path ~scope ~request:recovered (delivered "not_started"));
+  require (Pending.acknowledge ~path ~scope ~request:recovered (delivered "active"));
+  check string "committed row during active fanout keeps restart retry identity" "first-send"
+    (id (require (Pending.prepare ~path ~scope (request "after-active-retry"))));
+  check bool "unknown fanout state cannot consume retry identity" true
+    (Result.is_error (Pending.acknowledge ~path ~scope ~request:recovered (delivered "unknown")));
+  let receipt=delivered "finished" in
   require (Pending.acknowledge ~path ~scope ~request:recovered receipt);
   let deliberate=Pending.prepare ~path ~scope (request "deliberate-next-send") |> require in
   check string "acknowledged later action has a new identity" "deliberate-next-send" (id deliberate);

@@ -52,6 +52,11 @@ val task_cache_signal_of_args :
     [Error] carrying the message the caller reports, so every tool surface
     rejects a half-given signal in the same words. *)
 
+(** State of this immediate fanout invocation. [Fanout_not_started] reports an
+    early return before projection; [Fanout_finished] reports that the delivery
+    invocation ended, not that every Keeper accepted or read the message. *)
+type fanout_state = Fanout_not_started | Fanout_active | Fanout_finished
+
 type broadcast_delivery =
   { request_id : string
   ; seq : int
@@ -61,6 +66,7 @@ type broadcast_delivery =
   ; mention : string option
   ; msg_type : string
   ; mention_delivery : mention_delivery
+  ; fanout_state : fanout_state
   ; audience : audience
   }
 
@@ -167,7 +173,8 @@ val broadcast_once :
     committed authoritative message returns its receipt without another message
     write. In [Immediate_fleet], an idle retry replays the idempotent fleet
     projection to recover interrupted recipients; an active fanout returns its
-    receipt immediately. [Deferred_fleet] retries only return the receipt;
+    receipt immediately with [Fanout_active]. Clients retain the retry identity
+    until [Fanout_finished]. [Deferred_fleet] retries only return the receipt;
     the root-owned recipient journal performs recovery. A retry before primary
     commit waits for row readiness, not fleet delivery; failed or cancelled
     attempts wake it to reread. Reusing

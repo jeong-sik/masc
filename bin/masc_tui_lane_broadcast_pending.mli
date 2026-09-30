@@ -3,7 +3,9 @@
     serialize with a cross-process journal lock. Errors refuse a new send. *)
 val prepare : path:string -> scope:string -> Yojson.Safe.t -> (Yojson.Safe.t, string) result
 
-(** Retire only the matching committed receipt. Missing/failed receipts retain
-    the original identity. A storage failure must remain visible to the user. *)
+(** Retire only a matching committed receipt whose immediate fanout handler has
+    finished. Active fanout keeps the durable identity for cancellation recovery.
+    Missing/failed receipts retain the identity; malformed committed receipts
+    and storage failures remain visible to the user. *)
 val acknowledge : path:string -> scope:string -> request:Yojson.Safe.t ->
   Yojson.Safe.t -> (unit, string) result

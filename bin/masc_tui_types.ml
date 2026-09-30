@@ -10545,7 +10545,8 @@ let runtime_pick_item_id = function
    text that tells them apart, and at a fixed 24 cells every one of them was
    cut to the same [claude_code.claude-sonn…]. The target column therefore
    takes the longest id, and the route column, which repeats provider and
-   model, gives up that room. Neither goes below the 24 cells both had. *)
+   model, gives up that room. Twenty-four cells is the preferred floor when
+   the measured frame can contain both columns. *)
 let runtime_pick_min_column_cells = 24
 
 (* The context size as the row writes it. It lives here, not in the renderer,
@@ -10727,13 +10728,22 @@ let keeper_runtime_picker_empty_note view =
    [cursor ^ badge ^ target ^ "  " ^ route ^ "  " ^ facts]. *)
 let runtime_pick_fixed_cells = 2 + runtime_pick_badge_cells + 2 + 2
 
+(* The preferred name columns can only be floors when the frame can pay for
+   both. Below that width, divide the remaining cells between names and facts
+   instead of reserving columns outside the terminal. *)
+let runtime_pick_column_floor ~cols =
+  let available = max 0 (Masc_tui_frame.inner_width ~cols - runtime_pick_fixed_cells) in
+  if available >= 2 * runtime_pick_min_column_cells
+  then runtime_pick_min_column_cells
+  else max 1 (available / 3)
+
 (* What is left for the facts once the chrome and the two column floors are
    paid. At 80 columns that is 15 cells, which one fact fills. *)
 let runtime_pick_tail_budget ~cols =
   max 0
     (Masc_tui_frame.inner_width ~cols
      - runtime_pick_fixed_cells
-     - (2 * runtime_pick_min_column_cells))
+     - (2 * runtime_pick_column_floor ~cols))
 
 (* The facts a row can afford, dropped from the front.
 
@@ -10770,6 +10780,7 @@ let runtime_pick_properties_room ~cols ~target ~route =
   max 0 (Masc_tui_frame.inner_width ~cols - runtime_pick_fixed_cells - target - route)
 
 let runtime_pick_column_widths ~cols items =
+  let floor = runtime_pick_column_floor ~cols in
   let longest_id =
     List.fold_left
       (fun longest item ->
@@ -10790,12 +10801,12 @@ let runtime_pick_column_widths ~cols items =
   in
   let shared =
     max
-      (2 * runtime_pick_min_column_cells)
+      (2 * floor)
       (Masc_tui_frame.inner_width ~cols - runtime_pick_fixed_cells - longest_tail)
   in
   let target =
-    max runtime_pick_min_column_cells
-      (min longest_id (shared - runtime_pick_min_column_cells))
+    max floor
+      (min longest_id (shared - floor))
   in
   target, shared - target
 

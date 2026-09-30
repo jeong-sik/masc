@@ -12573,8 +12573,12 @@ let render_runtime_pick (state : state) =
             in
             let target =
               Message_layout.fit_middle target_width columns.Masc_tui_types.rpc_target
+              |> fun text -> fit_width text target_width
             in
-            let route_col = fit_width columns.Masc_tui_types.rpc_route route_width in
+            let route_col =
+              Message_layout.fit_middle route_width columns.Masc_tui_types.rpc_route
+              |> fun text -> fit_width text route_width
+            in
             let facts =
               Masc_tui_types.runtime_pick_visible_facts ~cols item
               |> List.map (fun (fact : Masc_tui_types.runtime_pick_fact) ->
@@ -12585,10 +12589,9 @@ let render_runtime_pick (state : state) =
             in
             Printf.sprintf "%s%s  %s  %s" badge target route_col facts
           in
-          c.push
-            (if view.Masc_tui_pick_list.selected_row = Some row then
-               Ansi.reverse ^ ">" ^ Ansi.reset ^ " " ^ line
-             else "  " ^ line))
+          if view.Masc_tui_pick_list.selected_row = Some row then
+            c.push_selected ("> " ^ Masc_tui_theme.strip_sgr line)
+          else c.push ("  " ^ line))
         view.Masc_tui_pick_list.rows)
 
 (* The Resources surface: the MCP resource inventory on the left, the

@@ -25,7 +25,7 @@ let describe = function
   | Fetched.Ready runs -> Printf.sprintf "ready: %d runs" (List.length runs)
 
 let check name expected state =
-  Alcotest.(check string) name expected (describe (Types.keeper_runs_view state))
+  Alcotest.(check string) name expected (describe (Masc_tui_fusion_model.keeper_runs_view state))
 
 let failure = "fusion runs load failed: HTTP 503"
 

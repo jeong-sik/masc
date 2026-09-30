@@ -97,16 +97,16 @@ let test_the_overlay_is_what_the_search_reaches () =
       Alcotest.(check (option (list string)))
         (label ^ " searches the paths on screen")
         (Some [ "lib/quokka.ml"; "bin/main.ml" ])
-        (surface_row_texts state view);
+        (Masc_tui_surface_search.surface_row_texts state view);
       Alcotest.(check (option int)) (label ^ " counts a path it draws")
-        (Some 1) (surface_search_count state view ~query:"quokka");
+        (Some 1) (Masc_tui_surface_search.surface_search_count state view ~query:"quokka");
       Alcotest.(check (option int)) (label ^ " does not count the host's rows")
-        (Some 0) (surface_search_count state view ~query:"zebra-keeper");
+        (Some 0) (Masc_tui_surface_search.surface_search_count state view ~query:"zebra-keeper");
       (* Enter on a row replaces the list with that path's diff, which is text:
          no row for the count to describe and none for [n] to land on. *)
       state.repository_changes_diff_path <- Some "lib/quokka.ml";
       Alcotest.(check (option int)) (label ^ " offers no search over the diff")
-        None (surface_search_count state view ~query:"quokka"))
+        None (Masc_tui_surface_search.surface_search_count state view ~query:"quokka"))
     (overlay_hosts
     @ [ "the Repositories list", Repositories; "the Code tree", Code ])
 

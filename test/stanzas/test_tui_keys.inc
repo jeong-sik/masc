@@ -1,7 +1,7 @@
 (test
  (name test_tui_keys)
  (modules test_tui_keys)
- (libraries masc_tui_approvals_model masc_tui_surface_navigation alcotest yojson masc masc.masc_goal masc.repo_manager
+ (libraries masc_tui_fusion_model masc_tui_surface_search masc_tui_approvals_model masc_tui_surface_navigation alcotest yojson masc masc.masc_goal masc.repo_manager
   ;; The modify gate is checked against the schedule contract's own status
   ;; vocabulary, so the test reads that list instead of keeping a copy.
   masc.masc_schedule

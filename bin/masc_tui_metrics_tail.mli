@@ -24,6 +24,12 @@ type row_error =
           still consumes the physical window. *)
 
 type load_error =
+  | Remote_workspace
+      (** Local metrics were deliberately not read because the connected
+          server serves a different workspace. No storage failure occurred. *)
+  | Workspace_unconfirmed
+      (** The server workspace has not been established. Cached local metrics
+          are withdrawn until a matching workspace is observed again. *)
   | Storage_error of Dated_jsonl.read_error
   | Row_errors of {
       physical_rows : int;
@@ -37,8 +43,8 @@ type snapshot = {
 
 val empty : snapshot
 val error_to_string : load_error -> string
-(** Operator-facing diagnostic that delegates storage failures to
-    [Dated_jsonl.read_error_to_string]. *)
+(** Operator-facing diagnostic that keeps remote unavailability separate from
+    storage failures, which delegate to [Dated_jsonl.read_error_to_string]. *)
 val resolve_with :
   expected_keeper:string ->
   read_recent:(int -> (Dated_jsonl.recent_entry list, Dated_jsonl.read_error) result) ->

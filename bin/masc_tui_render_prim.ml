@@ -1037,9 +1037,8 @@ let acting_pane_changes (state : state) : Masc_tui_acting_pane.changes =
 
 
 let recent_chunk_projection (state : state) =
-  let traces =
-    List.map (fun (keeper : keeper) -> keeper.k_name, keeper.k_trace_id) state.keepers
-  in
+  let trace_reading = Tui_decode.keeper_trace_projection state.keepers in
+  let traces = trace_reading.bindings in
   Masc_tui_acting.refresh_projection
     ~previous:state.acting_chunk_projection ~traces state.acting
 
@@ -1102,6 +1101,7 @@ let acting_pane_input (state : state) : Masc_tui_acting_pane.input =
            Pane.Whole_fleet)
   ; feed
   ; keepers
+  ; trace_unavailable = (Tui_decode.keeper_trace_projection state.keepers).unavailable
   ; keepers_error = state.keepers_error
   ; selected =
       Option.map (fun (keeper : keeper) -> keeper.k_name) (selected_keeper state)
@@ -2774,7 +2774,8 @@ let resolve_change_context (state : state) ~(path_opt : string option) : change_
     | Some fc when Option.is_some fc.Masc.Tui_decode.fc_task_id -> fc.Masc.Tui_decode.fc_task_id
     | _ ->
         (match keeper_record with
-         | Some k -> k.Masc.Tui_decode.k_current_task_id
+         | Some k -> Option.bind k.Masc.Tui_decode.k_activity
+             (fun activity -> activity.Masc.Tui_decode.k_current_task_id)
          | None -> None)
   in
   let turn =

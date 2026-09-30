@@ -5294,7 +5294,8 @@ type state = {
      archive/link errors stay in tasks_error and cannot erase this reading. *)
   mutable operator_stalled: Masc_tui_agenda.stalled Masc_tui_agenda.reading;
   (* Availability of the registry behind each task row's goal_ids. An empty
-     projection cannot claim an absent link when the registry was not read. *)
+     projection cannot claim an absent link when the registry was not read.
+     The reading payload is empty; memberships live on task.goal_ids. *)
   mutable task_goal_links: unit Masc_tui_agenda.reading;
   (* Goals the verifier proved and only the operator's confirmation closes,
      read from the goal store on the same load as the tasks, so the agenda

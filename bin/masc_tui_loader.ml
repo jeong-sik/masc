@@ -234,7 +234,7 @@ let load_active_tasks (base_path : string) :
                      })))
       , (match goal_link_error with
          | Some reason -> Masc_tui_agenda.Read_failed reason
-         | None -> Masc_tui_agenda.Read ()) )
+         | None -> Masc_tui_agenda.Read []) )
 
 (* The Goals the verifier proved, each waiting on the operator's confirmation.
    Read from the goal store the way the tasks above are read from the backlog,

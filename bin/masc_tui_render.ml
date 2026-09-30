@@ -480,10 +480,10 @@ let task_detail_pane (state : state) ~rows ~cols (task : Masc_domain.task) buf =
         box_line buf cols
           (Ansi.dim ^ "  Goal        (membership unknown: "
            ^ Terminal_text.single_line reason ^ ")" ^ Ansi.reset)
-      | Masc_tui_agenda.Read (), [] ->
+      | Masc_tui_agenda.Read _, [] ->
         box_line buf cols
           (Ansi.dim ^ "  Goal        (not linked to a goal)" ^ Ansi.reset)
-      | Masc_tui_agenda.Read (), goal_ids ->
+      | Masc_tui_agenda.Read _, goal_ids ->
         List.iteri
           (fun index goal_id ->
             let label = if index = 0 then "Goal" else "" in
@@ -9339,7 +9339,7 @@ let harness_goal_lines (state : state) (verdict : Masc.Tui_decode.harness_verdic
       [ Ansi.dim, "  Towards      membership unknown: goal links not read" ]
   | Masc_tui_agenda.Read_failed reason, _ ->
       [ Ansi.dim, "  Towards      membership unknown: " ^ Terminal_text.single_line reason ]
-  | Masc_tui_agenda.Read (), [] ->
+  | Masc_tui_agenda.Read _, [] ->
     (* Two different silences, told apart. A task this screen has never seen
        (the backlog has not loaded, or the verdict judged something already
        archived) is not the same as a task that serves no goal, and drawing
@@ -9353,7 +9353,7 @@ let harness_goal_lines (state : state) (verdict : Masc.Tui_decode.harness_verdic
       [ Ansi.dim, "  Towards      this task is not linked to a goal" ]
     else
       [ Ansi.dim, "  Towards      the judged task is not in this backlog" ]
-  | Masc_tui_agenda.Read (), goal_ids ->
+  | Masc_tui_agenda.Read _, goal_ids ->
     (Ansi.bold, "  TOWARDS")
     :: List.concat_map
          (fun id ->

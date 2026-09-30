@@ -7,11 +7,11 @@ from urllib.parse import parse_qs, urlsplit
 import test_tui_keyboard_input as h
 
 SOURCE_MODULES = (
-    'bin/masc_tui.ml',
-    'bin/masc_tui_render.ml',
-    'bin/masc_tui_keys.ml',
-    'bin/masc_tui_render_code.ml',
-    'bin/masc_tui_render_code.mli',
+    "bin/masc_tui.ml",
+    "bin/masc_tui_render.ml",
+    "bin/masc_tui_keys.ml",
+    "bin/masc_tui_render_code.ml",
+    "bin/masc_tui_render_code.mli",
 )
 FILE = "notes/[draft](final).lua"
 AUTHOR = "AUTHORHEAD-`literal`-" + "a" * 110 + "-AUTHORTAIL"

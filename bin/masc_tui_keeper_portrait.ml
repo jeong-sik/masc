@@ -61,8 +61,11 @@ let image ?(compact = false) c ~name ~equipment size =
     | None ->
         let body = Look.body_of_name name in
         let picture =
-          if compact then Draw.render_compact_posed body equipment Draw.still size
-          else Draw.render body equipment size
+          match compact, equipment.Look.face, equipment.Look.neck,
+                equipment.Look.head, equipment.Look.hand with
+          | true, Look.Bare_face, Look.Bare_neck, Look.Bare_head, Look.Empty_hand ->
+              Draw.render_compact_posed body equipment Draw.still size
+          | _ -> Draw.render body equipment size
         in
         { name; equipment_key; edge; compact; picture }
   in

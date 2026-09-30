@@ -25,11 +25,15 @@ def run(executable):
         h.palette_go(process, master_fd, output, b"go Usage", b"MASC Usage")
         h.wait_for_output(process, master_fd, output, b"usage-layout-keeper", start=0, timeout=10)
         for width in (80, 60, 120):
-            h.resize_and_wait(process, master_fd, output, rows=50, columns=width,
-                              needle=b"usage-layout-keeper", final_cursor=b"\x1b[?25l")
-            h.drain_until_quiet(process, master_fd, output)
-            screen = h.unwrapped(h.screen_text(bytes(output)))
-            for evidence in (b"tokens 9876", b"cost $0.1234", b"7 malformed rows"):
+            frame = h.resize_and_wait(process, master_fd, output, rows=50, columns=width,
+                                      needle=b"usage-layout-keeper", controls=(h.FULL_REDRAW,),
+                                      final_cursor=b"\x1b[?25l")
+            # Read this resize's completed frame so an earlier, wider screen
+            # cannot supply coverage that disappeared at the current width.
+            screen = h.unwrapped(h.screen_text(frame))
+            for evidence in (b"tokens 9876 (9 reported, 3 missing)",
+                             b"cost $0.1234 (8 reported, 4 missing)",
+                             b"7 malformed rows"):
                 if evidence not in screen:
                     raise AssertionError(f"Usage evidence lost at {width} columns: {evidence!r}, {screen!r}")
         # Make the wrapped content exceed the body, then reach its final row.

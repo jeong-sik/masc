@@ -7796,3 +7796,23 @@
 (alias
  (name runtest)
  (deps (alias runtest-harness-server-binary)))
+
+(rule
+ (alias runtest-test_tool_quality_live_plan)
+ (deps
+  test_tool_quality_live_plan.py
+  ../scripts/harness_tool_call_quality.sh
+  ../scripts/harness/jsonrpc_sse.sh
+  ../scripts/harness/lib/test_framework.sh
+  ../scripts/harness/lib/server_bootstrap.sh
+  ../scripts/harness/lib/mcp_call.sh
+  ../scripts/harness/lib/mcp_jsonrpc.sh
+  ../benchmarks/data/tool_call_quality_cases.json
+  ../config/prompts/harness.tool_quality.analyst.txt
+  ../config/prompts/harness.tool_quality.executor.txt
+  ../config/prompts/harness.tool_quality.verifier.txt)
+ (action (run python3 %{dep:test_tool_quality_live_plan.py})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tool_quality_live_plan)))

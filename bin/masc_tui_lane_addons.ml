@@ -658,7 +658,7 @@ let technical_lines ?(height=24) ?(failed_note = "") ~width view =
   let _ = height in
   let wrap text =
     Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
-      (Masc.Tui_decode.sanitize_terminal_text text) in
+      (Masc.Tui_terminal_text.sanitize_terminal_text text) in
   let raw_row (row : Row.row) =
     [row.title; "Row " ^ row.id;
      "Observed " ^ utc_stamp row.observed_at ^ " UTC";
@@ -724,7 +724,7 @@ let technical_lines ?(height=24) ?(failed_note = "") ~width view =
 
 let installation_detail_lines ~width view =
   let wrap line = Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
-      (Masc.Tui_decode.sanitize_terminal_text line) in
+      (Masc.Tui_terminal_text.sanitize_terminal_text line) in
   let edit_hint = if Option.is_some (selected_source_path view) then "  E:edit TOML" else "" in
   let refresh_hint = if view.loading then "  Reading …" else "  r:refresh" in
   let body = match view.snapshot with
@@ -853,7 +853,7 @@ let reading_summary fields =
 
 let overview_lines ~width view =
   let wrap text = Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
-    (Masc.Tui_decode.sanitize_terminal_text text) in
+    (Masc.Tui_terminal_text.sanitize_terminal_text text) in
   let content = match view.snapshot with
     | None -> [unread_body_text ~failed_note:"Read failed · r:retry" view]
     | Some snapshot ->
@@ -935,7 +935,7 @@ let help_lines = [
 
 let detail_lines ~width view =
   let wrap text = Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
-    (Masc.Tui_decode.sanitize_terminal_text text) in
+    (Masc.Tui_terminal_text.sanitize_terminal_text text) in
   match selected_instance view, view.snapshot with
   | None, _ -> ["The selected Add-on changed. Esc returns to the list."]
   | Some item, Some snapshot ->
@@ -1055,18 +1055,18 @@ let lines ?(height=24) ?(failed_note = "") ~width view =
        @ diagnostic_lines view
        @ Masc_tui_lane_installer.lines installer)
       |> List.concat_map (fun line -> Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
-        (Masc.Tui_decode.sanitize_terminal_text line))
+        (Masc.Tui_terminal_text.sanitize_terminal_text line))
   | None -> match view.evidence_prompt with
   | Some prompt ->
       (diagnostic_lines view @ evidence_lines prompt)
       |> List.concat_map (fun line -> Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
-           (Masc.Tui_decode.sanitize_terminal_text line))
+           (Masc.Tui_terminal_text.sanitize_terminal_text line))
   | None -> match view.subscription_panel,view.action_menu with
   | Some panel,_ ->
       (Masc_tui_message_layout.fit_width (if view.loading then "Refreshing…" else "Last received subscription state") (max 1 width)
        :: Masc_tui_lane_subscriptions.lines panel)
       |> List.concat_map (fun line -> Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
-           (Masc.Tui_decode.sanitize_terminal_text line))
+           (Masc.Tui_terminal_text.sanitize_terminal_text line))
   | None,Some menu ->
       (["Run action on " ^ menu.target_title]
        @ diagnostic_lines view
@@ -1081,12 +1081,12 @@ let lines ?(height=24) ?(failed_note = "") ~width view =
           | None -> ["No selected action"])))
       |> List.concat_map (fun line ->
         Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
-          (Masc.Tui_decode.sanitize_terminal_text line))
+          (Masc.Tui_terminal_text.sanitize_terminal_text line))
   | None,None ->
       if view.help_open then List.map (fun line ->
         Masc_tui_message_layout.fit_width line (max 1 width)) help_lines
       else if view.presentation = Flow then flow_lines view |> List.concat_map
-        (fun line -> Masc_tui_message_layout.split_cells ~max_cells:(max 1 width) (Masc.Tui_decode.sanitize_terminal_text line))
+        (fun line -> Masc_tui_message_layout.split_cells ~max_cells:(max 1 width) (Masc.Tui_terminal_text.sanitize_terminal_text line))
       else if view.presentation = Technical && view.screen=Overview && view.focus=Configurations
         && Option.is_none view.document_key && Option.is_none view.draft
       then installation_detail_lines ~width view

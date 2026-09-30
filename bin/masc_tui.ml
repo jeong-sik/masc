@@ -9384,6 +9384,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       Buffer.clear state.msg_input;
       state.patch_modal_open <- true;
       state.patch_modal_scroll <- 0;
+      state.patch_modal_hscroll <- 0;
       state.patch_modal_diff <- None;
       state.patch_modal_error <- None;
       let target_path =
@@ -20850,12 +20851,21 @@ and is loaded on demand through keeper_skill.
            let close () =
              state.patch_modal_open <- false;
              state.patch_modal_scroll <- 0;
+             state.patch_modal_hscroll <- 0;
              state.patch_modal_path <- None;
              state.patch_modal_diff <- None;
              state.patch_modal_error <- None
            in
            (match k with
             | "esc" | "q" | "Q" -> close ()
+            | "shift-left" ->
+                let limit = Masc_tui_render.patch_modal_horizontal_limit state in
+                state.patch_modal_hscroll <-
+                  max 0 (min state.patch_modal_hscroll limit - 1)
+            | "shift-right" ->
+                let limit = Masc_tui_render.patch_modal_horizontal_limit state in
+                state.patch_modal_hscroll <-
+                  min limit (max 0 state.patch_modal_hscroll + 1)
             | "j" | "down" ->
                 state.patch_modal_scroll <- state.patch_modal_scroll + 1
             | "k" | "up" ->

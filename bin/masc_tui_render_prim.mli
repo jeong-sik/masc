@@ -515,7 +515,12 @@ val resolve_change_context :
 
 val build_change_context_lines : change_context -> string list
 
-val tree_diff_row_span : width:int -> Masc.Tui_decode.git_diff_row -> Span.t
+val tree_diff_gutter : Masc.Tui_decode.git_diff_row -> string
+(** Literal old/new coordinates and change marker; its measured width is shared
+    by diff rendering and horizontal bounds. *)
+
+val tree_diff_row_span :
+  ?hscroll:int -> width:int -> Masc.Tui_decode.git_diff_row -> Span.t
 
 val render_diff_surface :
   Masc_tui_types.state ->

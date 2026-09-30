@@ -16491,6 +16491,22 @@ let render_palette (state : state) =
    move ten rows whatever the window was, and to reach the end by leaving five
    rows on screen -- a number the renderer's own clamp then corrected, which is
    why it went unnoticed. *)
+let patch_modal_horizontal_limit (state : state) =
+  let _, cols = get_terminal_size () in
+  let width = framed_inner_width cols in
+  match state.patch_modal_diff with
+  | None -> 0
+  | Some (_, diff) ->
+      List.fold_left
+        (fun limit row ->
+          let body_width = max 1 (width - visible_width (tree_diff_gutter row)) in
+          let cells =
+            visible_width (Terminal_text.single_line row.Tui_decode.gdr_text)
+          in
+          max limit (max 0 (cells - body_width)))
+        0 diff.Tui_decode.gd_rows
+;;
+
 let patch_modal_viewport (state : state) =
   let terminal_rows, _cols = get_terminal_size () in
   let diff_opt =
@@ -16531,16 +16547,18 @@ let render_patch_modal (state : state) =
   let total, content_height = patch_modal_viewport state in
   let max_scroll = max 0 (total - content_height) in
   let scroll = max 0 (min state.patch_modal_scroll max_scroll) in
+  let limit = patch_modal_horizontal_limit state in
+  let hscroll = max 0 (min state.patch_modal_hscroll limit) in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"patch-modal"
     ~frame:Chrome_overlay
-    ~overflow:(Self_scrolled (fun () -> Patch_modal_scroll scroll))
+    ~overflow:(Self_scrolled (fun () -> Patch_modal_scroll (scroll, hscroll)))
     ~title:
       (screen_title " MASC Patch review" ^ "  " ^ Ansi.bold
        ^ Terminal_text.single_line path_label ^ Ansi.reset)
-    ~hints:"e:edit  j/k:scroll  d/u:page  g/G:top/bottom  Esc/q:close"
+    ~hints:"Shift+←/→:pan  e:edit  j/k:scroll  d/u:page  g/G:edges  Esc/q:close"
     ~body:(fun ~budget:_ c ->
       c.push_styled ~style:(Theme.recede ())
-        "  old   new     diff preview (syntax colored)";
+        (Printf.sprintf "  old / new · col %d/%d" (hscroll + 1) (limit + 1));
       c.push_divider ();
       if total = 0 then
         c.push
@@ -16560,7 +16578,7 @@ let render_patch_modal (state : state) =
             if index >= scroll && index < scroll + content_height then
               c.push
                 (fit_width
-                   (Masc_tui_span.render (tree_diff_row_span ~width row))
+                   (Masc_tui_span.render (tree_diff_row_span ~hscroll ~width row))
                    width))
           diff_rows
       end;

@@ -6258,6 +6258,7 @@ type state = {
      in $EDITOR. *)
   mutable patch_modal_open: bool;
   mutable patch_modal_scroll: int;
+  mutable patch_modal_hscroll: int;
   mutable patch_modal_path: string option;
   mutable patch_modal_diff: (string * Tui_decode.git_diff) option;
   mutable patch_modal_generation: int;
@@ -8426,6 +8427,7 @@ let create_state
   repository_changes_return_chat = false;
   patch_modal_open = false;
   patch_modal_scroll = 0;
+  patch_modal_hscroll = 0;
   patch_modal_path = None;
   patch_modal_diff = None;
   patch_modal_generation = 0;
@@ -9029,7 +9031,7 @@ type clamped_scroll =
      is knowable at the keypress, which steps by one or jumps to 9999 and lets
      the frame say where that landed. They wrote the answer back from inside
      the drawing instead, which is the one thing the renderer must not do. *)
-  | Patch_modal_scroll of int
+  | Patch_modal_scroll of int * int
   | Link_modal_scroll of int
   | Play_invite_scroll of int
   (* The voice pane and its wizard lay out lines out of two HTTP reads and the
@@ -9104,7 +9106,9 @@ let apply_clamped_scroll (state : state) = function
   | Resource_scroll value -> state.resource_scroll <- value
   | Metrics_scroll value -> state.metrics_scroll <- value
   | Approval_detail_scroll value -> state.approval_detail_scroll <- value
-  | Patch_modal_scroll value -> state.patch_modal_scroll <- value
+  | Patch_modal_scroll (vertical, horizontal) ->
+      state.patch_modal_scroll <- vertical;
+      state.patch_modal_hscroll <- horizontal
   | Link_modal_scroll value -> state.link_modal_scroll <- value
   | Play_invite_scroll value -> state.play_invite_scroll <- value
   | Voice_scroll value -> state.config_scroll <- value

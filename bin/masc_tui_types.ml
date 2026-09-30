@@ -9442,14 +9442,14 @@ let keeper_log_rows (state : state) ~cols =
     | None -> []
     | Some error ->
         Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (width - 2))
-          (Tui_decode.sanitize_terminal_text (Metrics_tail.error_to_string error))
+          (Masc.Tui_terminal_text.sanitize_terminal_text (Metrics_tail.error_to_string error))
         |> List.map (fun line -> Some error, "  " ^ line)
   in
   let entries =
     List.rev state.log_entries
     |> List.concat_map (fun (entry : Tui_decode.log_entry) ->
          Masc_tui_observation_layout.log_entry_rows ~width
-           ~time:(Tui_decode.clock_timestamp_for_terminal ~localtime:Unix.localtime entry.le_ts)
+           ~time:(Masc.Tui_terminal_text.clock_timestamp_for_terminal ~localtime:Unix.localtime entry.le_ts)
            entry
          |> List.map (fun line -> None, line))
   in

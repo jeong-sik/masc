@@ -53,7 +53,7 @@ their scope; this slice does not close them.
   separate. This roadmap does not bump any of them.
 - Source, CI, installed binary, live destination result and UI proof have separate
   statuses. A release claim links the applicable evidence at the shipped revision.
-- Existing Goal ownership and contracts are preserved. Reuse their evidence only
+- Goal success criteria and completion contracts are preserved. Reuse their evidence only
   where its source/runtime/workload matches the new acceptance scope.
 - Runtime budgets and arbitrary agent counts are not substitutes for verified
   work. Measurements guide development decisions, not lifetime expiry for tasks.

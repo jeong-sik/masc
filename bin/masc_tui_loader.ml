@@ -1743,29 +1743,29 @@ let load_harness ~(host : string) ~(port : int) :
 
 (** Load the retained Fusion registry list. *)
 let load_fusion_runs ~(host : string) ~(port : int) :
-    (Tui_decode.fusion_snapshot, string) result =
+    (Masc.Tui_decode_fusion.fusion_snapshot, string) result =
   match fetch_fusion_runs ~host ~port with
   | Error err -> Error ("fusion runs load failed: " ^ err)
-  | Ok json -> Tui_decode.decode_fusion_snapshot json
+  | Ok json -> Masc.Tui_decode_fusion.decode_fusion_snapshot json
 
 (** Load one exact Fusion run/evidence projection. *)
 let load_fusion_historical_detail ~(host : string) ~(port : int) ~reference =
-  match fetch_board_post ~host ~port ~post_id:reference.Tui_decode.fhe_post_id () with
+  match fetch_board_post ~host ~port ~post_id:reference.Masc.Tui_decode_fusion.fhe_post_id () with
   | Error err -> Error ("Fusion Board original load failed: " ^ err)
-  | Ok json -> Tui_decode.decode_fusion_historical_detail ~reference json
+  | Ok json -> Masc.Tui_decode_fusion.decode_fusion_historical_detail ~reference json
 
 let load_fusion_detail ~(host : string) ~(port : int) ~(run_id : string) :
-    (Tui_decode.fusion_detail, string) result =
+    (Masc.Tui_decode_fusion.fusion_detail, string) result =
   match fetch_fusion_detail ~host ~port ~run_id with
   | Error err -> Error ("fusion detail load failed: " ^ err)
-  | Ok json -> Tui_decode.decode_fusion_detail json
+  | Ok json -> Masc.Tui_decode_fusion.decode_fusion_detail json
 
 (** Read what the launch form offers. *)
 let load_fusion_launch_options ~(host : string) ~(port : int) :
-    (Tui_decode.fusion_launch_options, string) result =
+    (Masc.Tui_decode_fusion.fusion_launch_options, string) result =
   match fetch_fusion_config ~host ~port with
   | Error err -> Error ("fusion presets load failed: " ^ err)
-  | Ok json -> Tui_decode.decode_fusion_launch_options json
+  | Ok json -> Masc.Tui_decode_fusion.decode_fusion_launch_options json
 
 (** Start a Fusion run and read back its run id. A refusal is the server's
     sentence; an unanswered request says so, because the run may have
@@ -1776,7 +1776,7 @@ let launch_fusion_run ~(host : string) ~(port : int)
     post_fusion_launch ~host ~port ~keeper:request.Masc_tui_fusion_launch.keeper
       ~body:(Masc_tui_fusion_launch.request_body request)
   with
-  | Post_answered json -> Tui_decode.decode_fusion_launch_receipt json
+  | Post_answered json -> Masc.Tui_decode_fusion.decode_fusion_launch_receipt json
   | Post_refused detail -> Error detail
   | Post_unanswered detail ->
       Error ("fusion launch unanswered: " ^ detail ^ "; the run may have started, r refreshes the list")

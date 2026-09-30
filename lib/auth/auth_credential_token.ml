@@ -547,9 +547,7 @@ let rotate_shared_tokens_matching config ~include_agent =
     let* auth_cfg = credential_auth_config_result config in
     let groups = List.fold_left
         (fun groups (stored, (cred : agent_credential)) ->
-          if not (include_agent cred.agent_name) then groups
-          else
-            let entries = match List.assoc_opt cred.token groups with
+          let entries = match List.assoc_opt cred.token groups with
               | Some entries -> entries
               | None -> [] in
             (cred.token, (stored, cred) :: entries) :: List.remove_assoc cred.token groups)
@@ -557,8 +555,14 @@ let rotate_shared_tokens_matching config ~include_agent =
     let groups = List.filter_map (fun (token_hash, entries) ->
       match entries with
       | [] | [ _ ] -> None
-      | xs -> Some (token_hash_prefix_of token_hash,
-          List.sort (fun (_, (a : agent_credential)) (_, b) -> String.compare a.agent_name b.agent_name) xs))
+      | xs ->
+        let selected = List.filter (fun (_, (credential : agent_credential)) ->
+          include_agent credential.agent_name) xs in
+        (match selected with
+         | [] -> None
+         | _ :: _ -> Some (token_hash_prefix_of token_hash,
+             List.sort (fun (_, (a : agent_credential)) (_, b) ->
+               String.compare a.agent_name b.agent_name) selected)))
         groups |> List.sort (fun (a, _) (b, _) -> String.compare a b) in
     (* Publication may replace a UUID file or remove a previous redirect target.
        Validate every selected write target before the first raw sidecar write. *)
@@ -570,7 +574,14 @@ let rotate_shared_tokens_matching config ~include_agent =
           | None -> Ok targets
           | Some id ->
             let target = credential_uuid_file config id in
-            if List.mem target targets then
+            if List.exists (fun (_, (owner : agent_credential)) ->
+              not (String.equal owner.agent_name credential.agent_name)
+              && Option.equal Credential_id.equal owner.id credential.id)
+                snapshot.current_credentials then
+              Error (System (System_error.ValidationError
+                (Printf.sprintf "cannot rotate %s: another current owner has the same UUID"
+                  credential.agent_name)))
+            else if List.mem target targets then
               Error (System (System_error.ValidationError
                 (Printf.sprintf "cannot rotate %s: another selected owner would write the same UUID"
                   credential.agent_name)))

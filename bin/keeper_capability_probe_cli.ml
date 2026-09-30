@@ -120,14 +120,14 @@ let render_prompt template ~tool =
 let lane_label runtime_id =
   match Runtime.get_runtime_by_id runtime_id with
   | None -> "unresolvable"
-  | Some rt -> Runtime_execution.label rt.Runtime.execution
+  | Some rt -> Runtime_execution.label rt.Runtime_instance.execution
 ;;
 
 let is_agent_core runtime_id =
   match Runtime.get_runtime_by_id runtime_id with
   | None -> false
   | Some rt ->
-    (match rt.Runtime.execution with
+    (match rt.Runtime_instance.execution with
      | Runtime_execution.Agent_core _ -> true
      | Runtime_execution.Codex_app_server _
      | Runtime_execution.Antigravity_cli _

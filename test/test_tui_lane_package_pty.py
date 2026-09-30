@@ -194,7 +194,7 @@ def main(executable: str) -> None:
                 raise AssertionError("saved TOML without a worker is missing from the Add-on list")
             key(b"\r", b"TOML installations")
             key(b"\x1b", b"Lane Add-ons \xc2\xb7 1 declared")
-            key(b":act " + json.dumps(action_request).encode() + b"\r", b"state queued")
+            key(b"Aact " + json.dumps(action_request).encode() + b"\r", b"state queued")
             key(b"t", b"state confirmed")
             key(b"q", b"MASC Dashboard")
             os.write(master_fd, b"q")

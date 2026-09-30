@@ -56,10 +56,10 @@ type max_context_source =
 
 val max_context_of_runtime : t -> int
 (** Effective input context window for a materialized runtime.  This applies the
-    same provider-cap clamp as [max_context_of_runtime_id] without re-resolving
+    same provider-cap clamp as {!Runtime.max_context_of_runtime_id} without re-resolving
     the runtime id. Derived from {!resolve_max_context_of_runtime}.
     @raise Failure if that resolves to [None] — unreachable for any [t]
-    produced by {!Runtime.materialize_config}, which rejects a runtime whose max
+    loaded by {!Runtime.load_list}, which rejects a runtime whose max
     context cannot be resolved at load time (no silent default —
     RFC-0206 §2.1). *)
 
@@ -90,7 +90,7 @@ val resolve_max_context_of_runtime : t -> (int * max_context_source) option
 (** Effective input context window and the source that produced it. [None]
     when neither the runtime.toml [model.max-context] override nor the AGENT_CORE
     capability catalog declares a positive context window for this binding;
-    [materialize_config] rejects such a runtime at load (fail-closed), so a
+    {!Runtime.load_list} rejects such a runtime at load (fail-closed), so a
     materialized [t] obtained from {!Runtime.get_runtimes}/{!Runtime.get_runtime_by_id} never
     observes [None] here in practice. *)
 

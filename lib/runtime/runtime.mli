@@ -634,14 +634,14 @@ val entry_runtime_id_of_route : string -> string option
     answers [None] for a lane name. *)
 
 val smallest_max_prompt_bytes_of_route : string -> int option
-(** The smallest start-prompt ceiling ({!prompt_capacity_bytes}) of any
+(** The smallest start-prompt ceiling ({!Runtime_instance.prompt_capacity_bytes}) of any
     candidate the route may walk: every candidate of a declared lane, or the
     runtime itself when the route names one. A candidate without one adds no
     ceiling and does not erase one a sibling has. [None] when no candidate
     has a ceiling, or when the route names neither a lane nor a runtime. *)
 
 val smallest_max_prompt_bytes_of_runtime_ids : string list -> int option
-(** The smallest start-prompt ceiling ({!prompt_capacity_bytes}) of the
+(** The smallest start-prompt ceiling ({!Runtime_instance.prompt_capacity_bytes}) of the
     named runtimes, for a walk whose candidate list is already fixed (a
     deferred lane suffix). An id without one, or that the loaded catalog does
     not hold, adds no ceiling and does not erase one another id has. [None]
@@ -660,7 +660,7 @@ val is_local_runtime_id : string -> bool option
     runtime id is not currently materialized. *)
 
 val resolve_max_context_of_runtime_id : string -> (int * max_context_source) option
-(** {!resolve_max_context_of_runtime} looked up by runtime id: the effective
+(** {!Runtime_instance.resolve_max_context_of_runtime} looked up by runtime id: the effective
     input context window together with the source that produced it, or [None]
     when the id is not configured. Budget surfaces must carry the source —
     dropping it rendered a runtime.toml override as ["runtime_provider_cap"]
@@ -721,7 +721,7 @@ val quota_scope_of_runtime_id : string -> Runtime_quota_window.scope option
     {!Runtime_quota_window.demote_order} and the matching note site. *)
 
 val max_prompt_bytes_of_runtime_id : string -> int option
-(** {!prompt_capacity_bytes} of the runtime with this id, or [None] when the
+(** {!Runtime_instance.prompt_capacity_bytes} of the runtime with this id, or [None] when the
     id is unknown or no ceiling applies. *)
 
 val context_marks_of_runtime_id : string -> Runtime_schema.context_marks option
@@ -730,7 +730,7 @@ val context_marks_of_runtime_id : string -> Runtime_schema.context_marks option
 
 val validate_muse_prompt_ceilings : t list -> (unit, load_failure) result
 (** Refuses a Muse runtime whose resolved window cannot hold the host's own
-    overhead, so no start-prompt ceiling exists ({!muse_prompt_capacity})
+    overhead, so no start-prompt ceiling exists ({!Runtime_instance.muse_prompt_capacity})
     whatever [max-prompt-bytes] it declares. *)
 
 val validate_runtime_context_marks : t list -> (unit, load_failure) result

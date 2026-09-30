@@ -34,7 +34,7 @@ type readable =
 
 (* An HTTP runtime whose provider declares [usage-read] is read with the key
    its execution was materialized with: the same load that froze the
-   runtime's quota scope (Runtime.quota_scope_of_materialized), so the
+   runtime's quota scope in [Runtime_instance.of_binding], so the
    windows land on the account the dispatch uses.  Re-resolving the
    credential here would re-run alias selection against the process
    environment of the read.  runtime.toml refuses [usage-read] on an

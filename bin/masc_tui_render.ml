@@ -8110,7 +8110,7 @@ let render_keeper_logs (state : state) =
     in
     let scroll =
       Metrics_tail.normalize_scroll ~entry_count:row_count ~content_height
-        state.log_scroll
+        (if state.log_wrap_cols = Some cols then state.log_scroll else 0)
     in
     let visible = Rows.of_list ~first:scroll ~height:content_height log_rows in
     for index = 0 to content_height - 1 do
@@ -8119,7 +8119,12 @@ let render_keeper_logs (state : state) =
           ("  " ^ Metrics_tail.empty_message state.log_error)
       else
         match Rows.at visible (scroll + index) with
-        | Some line -> box_line buf cols line
+        | Some (diagnostic, line) ->
+            let style = match diagnostic with
+              | None -> Ansi.reset
+              | Some (Metrics_tail.Storage_error _) -> Theme.bad ()
+              | Some (Metrics_tail.Row_errors _) -> Theme.warn () in
+            box_line_styled buf cols ~style line
         | None -> box_empty buf cols
     done;
     if row_count > content_height then
@@ -8133,7 +8138,8 @@ let render_keeper_logs (state : state) =
       (footer_line state ~max_cells:cols
          ~hints:(Masc_tui_keys.footer_hints state.view));
 
-    finish_surface state ~surface_key:"keeper-logs" ~rows:terminal_rows
+    finish_surface state ~clamped:(Keeper_logs_scroll { scroll; cols })
+      ~surface_key:"keeper-logs" ~rows:terminal_rows
       ~cols buf
   end
 

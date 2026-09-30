@@ -188,7 +188,9 @@ let log_entry_rows ~width ~time (entry : Tui_decode.log_entry) =
   @ wrap ("Timestamp: " ^ entry.le_ts)
   @ wrap ("Channel: " ^ log_channel_label entry.le_channel)
   @ wrap ("Messages: " ^ cells.messages ^ "  In/out: " ^ cells.usage)
-  @ wrap ("Cost: " ^ cells.cost)
+  @ wrap ("Cost: " ^ (match entry.le_cost_usd with
+      | None -> "--"
+      | Some cost -> "$" ^ string_of_float cost))
   @ (match entry.le_work_kind with
      | None -> []
      | Some work -> wrap ("Work: " ^ work))

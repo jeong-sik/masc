@@ -25629,10 +25629,7 @@ and is loaded on demand through keeper_skill.
            load_keeper_logs_if_safe state base_path 200 keeper;
            (match keeper with
             | Some _ ->
-                state.log_scroll <-
-                  Metrics_tail.maximum_scroll
-                    ~entry_count:(keeper_log_row_count state)
-                    ~content_height:(keeper_log_content_height state);
+                state.log_scroll <- 0;
                 state.view <- Keepers Keeper_logs
             | None -> ())
 | Some "c" | Some "C"

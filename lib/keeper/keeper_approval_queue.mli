@@ -34,14 +34,6 @@ open Keeper_approval_queue_result
 val install_persistence :
   base_path:string -> (install_report, install_error) result
 
-(** Run the snapshot decode {!install_persistence} runs on
-    [gate/pending.json], without installing anything. [Error] carries the
-    loader's own message: an unsupported [version] (which names the runtime
-    reset), a malformed snapshot, or the first entry the loader would drop.
-    The append log is not read. *)
-val validate_pending_snapshot :
-  base_path:string -> Yojson.Safe.t -> (unit, string) result
-
 (** Read the exact approved request from the durable resolution journal. [None]
     means that its one-shot authorization has already been consumed. *)
 val approved_resolution_request :

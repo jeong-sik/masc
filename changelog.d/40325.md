@@ -1,0 +1,1 @@
+- Integrate complete Tools metadata, revision and timestamp reading plus composition dependencies into the TUI stack, using physical rows for display and navigation.

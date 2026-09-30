@@ -11888,6 +11888,23 @@ let workspace_entries_count_label total =
 let lsp_question_prefixes =
   [ "def ", "definition"; "hover ", "hover"; "refs ", "references" ]
 
+(* A Code question is a whole command word, followed by an optional symbol.
+   Other text remains a palette filter. Both Enter and the preview read this. *)
+let palette_typed_question query =
+  let query = String.trim query in
+  let word, symbol =
+    match String.index_opt query ' ' with
+    | None -> query, None
+    | Some index ->
+        let symbol = String.trim (String.sub query (index + 1)
+            (String.length query - index - 1)) in
+        String.sub query 0 index,
+        (if String.equal symbol "" then None else Some symbol)
+  in
+  List.find_map (fun (prefix, question) ->
+      if String.equal word (String.trim prefix) then Some (question, symbol)
+      else None) lsp_question_prefixes
+
 let palette_entries (state : state) =
   [ "settings", Palette_config Config_params ]
   @ List.concat_map (fun lane ->

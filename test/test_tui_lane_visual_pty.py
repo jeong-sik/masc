@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 from pathlib import Path
 
 import test_tui_keyboard_input as terminal
@@ -214,6 +215,52 @@ def run_installation_detail(executable: str) -> None:
     print("Lane Add-on Installation detail: PASS")
 
 
+def run_navigation_consistency(executable: str) -> None:
+    fixtures = terminal.overview_event_http_fixtures()
+    fixtures["/api/v1/lane-addons"] = (200, snapshot())
+
+    def interact(process, master, _slave, output, _base):
+        def key(value, needle):
+            return terminal.send_and_wait(process, master, output, value, needle)
+
+        terminal.wait_for_output(process, master, output, b"Health: ", start=0, timeout=10)
+        for name in (b"Dashboard", b"Work", b"Keepers", b"Usage", b"Board", b"Workspace", b"System"):
+            title = b"MASC " + name
+            key(b":go " + name + b"\r", title)
+            key(b":", b"From " + name)
+            key(b"\x1b", title)
+        key(b":go Dashboard\r", b"MASC Dashboard")
+        initial = key(b":go ", b"type to filter")
+        counts = re.findall(rb"(\d+) commands .*? (\d+)/(\d+)", terminal.screen_text(initial))
+        if not counts:
+            raise AssertionError("palette did not expose selection position")
+        total = int(counts[-1][2])
+        if total < 2:
+            raise AssertionError("fixture has no second navigation candidate")
+        key(b"\x1b[B" * (total + 3), f"{total}/{total}".encode())
+        key(b"\x1b[A", f"{total - 1}/{total}".encode())
+        key(b"\x1b[H", f"1/{total}".encode())
+        key(b"\x1b[F", f"{total}/{total}".encode())
+        key(b"\x15", b"type to filter")
+        key(b"zzzz_no_destination", b"No matching command")
+        key(b"\r", b"MASC Dashboard")
+        preview = key(b":def explicit_symbol", b"definition explicit_symbol")
+        if b"Ask about this symbol" not in terminal.screen_text(preview):
+            raise AssertionError("typed Code action has no execution preview")
+        key(b"\r", b"hover, def and refs ask about the file open")
+        key(b":go lane add-ons\r", b"World observer")
+        key(b":", b"From Lane Add-ons")
+        key(b"\x1b", b"World observer")
+        key(b":go Board\r", b"MASC Board")
+        key(b":go Dashboard\r", b"MASC Dashboard")
+        os.write(master, b"q")
+
+    terminal.run_terminal_scenario(executable,
+        description="palette navigation preserves origin, clamps selection and escapes Add-ons",
+        interact=interact, http_fixtures=fixtures)
+    print("TUI navigation consistency: PASS")
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("executable")
@@ -221,3 +268,4 @@ if __name__ == "__main__":
     args = parser.parse_args()
     main(os.path.abspath(args.executable), args.capture_dir)
     run_installation_detail(os.path.abspath(args.executable))
+    run_navigation_consistency(os.path.abspath(args.executable))

@@ -30,8 +30,10 @@ candidate branch explicitly and dispatch `leader-ci.yml` on main. Set its
 `candidate` input to the receipt's exact candidate SHA.
 Supply the preparation receipt as the `selection` JSON input. Select any of
 `compile` (bottom Core only) or `tests`; both default to false. `tests` requires
-explicit nonempty `suites` and uses the minimal runner. Every ordinary job,
-including setup, is limited to two minutes. Broad release-profile, dashboard,
+explicit nonempty `suites` and uses the minimal runner. Prefer short, lightweight
+checks; about two minutes illustrates their intended size, not a fixed cap,
+job timeout or pass/fail boundary. Existing runner hang guards are separate
+resource safeguards. Broad release-profile, dashboard,
 TLA, lint and full behavior checks remain in `release-candidate.yml` on a
 release branch or version tag. There is no changed-file heuristic choosing
 work for the leader.

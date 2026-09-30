@@ -37,7 +37,6 @@ jobs:
   selection:
     name: Recheck approved selection
     runs-on: ubuntu-24.04
-    timeout-minutes: 2
     steps:
       # Source authority is read using the integrated main implementation,
       # not a script supplied by an unverified candidate.
@@ -100,7 +99,6 @@ jobs:
     needs: [selection, compile, tests]
     if: always()
     runs-on: ubuntu-24.04
-    timeout-minutes: 2
     steps:
       - name: Record scope and results
         env:

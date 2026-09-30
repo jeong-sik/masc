@@ -184,8 +184,10 @@ def run(binary: str, phase: str, captures: Path | None):
 def currency_follows_workspace_authority(binary: str, captures: Path | None) -> None:
     fixtures = h.keeper_runtime_http_fixtures(alpha_runtime_id="currency.authority")
     original = copy.deepcopy(fixtures[ROSTER_PATH][1])
-    phases = {"current": "a-ready", "base": ""}
+    phases = {"current": "a-ready", "base": "", "hold": False}
     lock = threading.Lock()
+    held_started = threading.Event()
+    release_held = threading.Event()
     b_summary = (b"Candle issued: 1.000", b"Candle burned: 0.000", b"Candle circulating: 1.000")
 
     def prepare(base):
@@ -201,7 +203,7 @@ def currency_follows_workspace_authority(binary: str, captures: Path | None) -> 
         with lock:
             phase, base = phases["current"], phases["base"]
         if phase == "identity-error":
-            return h.RawHttpResponse(503, b'{"error":"identity deliberately unavailable"}')
+            return h.RawHttpResponse(503, b'{"error":"identity deliberately unavailable"}', content_type="application/json")
         effective = base if phase == "a-ready" else base + "-workspace-b"
         _, payload = h.fleet_safety_fixture()
         payload["paths"] = {"effective_base_path": effective,
@@ -212,6 +214,8 @@ def currency_follows_workspace_authority(binary: str, captures: Path | None) -> 
     def roster():
         with lock:
             phase = phases["current"]
+            held = phases["hold"]
+            phases["hold"] = False
         payload = copy.deepcopy(original)
         payload["candle"] = dict(READY) if phase == "a-ready" else {
             "status": "ready", "issued_milli": "1000",
@@ -219,6 +223,10 @@ def currency_follows_workspace_authority(binary: str, captures: Path | None) -> 
         for row in payload["keepers"]:
             row["candle_balance_milli"] = (
                 BALANCE_MILLI if phase == "a-ready" else "1000") if row["name"] == "alpha" else "0"
+        if held:
+            held_started.set()
+            if not release_held.wait(timeout=30):
+                raise AssertionError("held authority roster was never released")
         return 200, payload
 
     fixtures["/health"] = health
@@ -259,6 +267,30 @@ def currency_follows_workspace_authority(binary: str, captures: Path | None) -> 
         publish("b-ready")
         os.write(fd, b"r")
         seen("recovered", lambda text: all(line in text for line in b_summary))
+        publish("a-ready")
+        os.write(fd, b"r")
+        seen("a-before-held", lambda text: all(line in text for line in SUMMARY))
+        h.send_and_wait(process, fd, output, b"A", b"MASC Activity")
+        # Activity asks for no roster. Entering Dashboard therefore launches
+        # a scoped roster request; its A response is frozen before the switch.
+        with lock:
+            phases["hold"] = True
+        try:
+            h.palette_go(process, fd, output, b"go Dashboard", b"MASC Dashboard")
+            assert h.wait_for_fixture_event(process, fd, output, held_started,
+                timeout=WAIT_SECONDS), "A scoped roster did not enter its held response"
+            publish("b-booting")
+            seen("held-b-booting", lambda text: b"booting" in text and no_currency(text))
+            publish("b-ready")
+            seen("held-b-ready", lambda text: b"[connected]" in text
+                 and b"workspace mismatch" in text and no_currency(text))
+            after_release = len(output)
+            release_held.set()
+            seen("held-recovered", lambda text: all(line in text for line in b_summary))
+            assert not any(line in h.CSI_RE.sub(b"", bytes(output[after_release:]))
+                           for line in SUMMARY), "late A roster restored foreign currency"
+        finally:
+            release_held.set()
         os.write(fd, b"q")
 
     h.run_terminal_scenario(binary, description="Candle amounts follow current workspace authority",

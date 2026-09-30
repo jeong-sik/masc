@@ -1177,11 +1177,11 @@ let load_board_post ?(full_history = false) ~(host : string) ~(port : int)
     in
     Masc_tui_frame_timing.time_stage ~name:"board.model_decode"
       (fun () ->
-        let* comments_json = optional_list_field json "comments" in
+        let* comments_json = Masc.Tui_decode_fields.optional_list_field json "comments" in
         let* comments = decode_board_comments comments_json in
-        let* page = required_object_field json "comment_page" in
-        let* actual_offset = required_int_field page "offset" in
-        let* total = required_int_field page "total" in
+        let* page = Masc.Tui_decode_fields.required_object_field json "comment_page" in
+        let* actual_offset = Masc.Tui_decode_fields.required_int_field page "offset" in
+        let* total = Masc.Tui_decode_fields.required_int_field page "total" in
         match offset with
         | Some expected when actual_offset <> expected ->
             Error "board detail returned a different comment offset"

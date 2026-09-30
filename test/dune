@@ -1,3 +1,4 @@
+(include stanzas/test_capture_dashboard_ci_frames.inc)
 (include stanzas/test_tui_dashboard_studio_pty.inc)
 (include stanzas/test_librarian_working_state_evaluation.inc)
 (include stanzas/test_librarian_working_state_cli.inc)

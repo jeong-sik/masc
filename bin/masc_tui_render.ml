@@ -3206,7 +3206,7 @@ let render_planning_list (state : state) =
            (fun width -> studio_panel ~width ~title:"Goals · measured outcomes"
               ~lines:(Message_layout.wrap_words ~max_cells:(max 1 (width - 4))
                 (planning_rollup_row ~cols:width p.pl_rollup)))
-           (fun width -> studio_panel ~width ~title:"Tasks · current backlog"
+           (fun width -> studio_panel ~width ~title:"Tasks · Backlog:"
               ~lines:(Message_layout.wrap_words ~max_cells:(max 1 (width - 4)) backlog))
        in
        let summary_card_rows = List.length summary_cards in

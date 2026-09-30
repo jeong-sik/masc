@@ -10,6 +10,9 @@ SOURCE_MODULES = ("bin/masc_tui_render.ml", "bin/masc_tui.ml")
 
 def run(executable, no_color=False):
     fixtures = h.planning_selection_http_fixtures()
+    planning = fixtures[h.PLANNING_PATH][1]
+    planning["task_backlog"] = {"todo": 11, "claimed": 12, "in_progress": 13,
+        "awaiting_verification": 14, "done": 15, "cancelled": 16}
     _, repositories = h.repositories_fixture()
     repositories["repositories"].append({**repositories["repositories"][0],
         "id":"next-repo", "name":"next-repo", "local_path":"workspace/next-repo",
@@ -46,8 +49,12 @@ def run(executable, no_color=False):
         h.wait_for_output(process,fd,output,b"Health: ",start=0,timeout=10)
         key(b":go Work\r",b"plan-alpha-29424")
         wide=capture("work-wide",36,160,b"Goals")
-        for needle in ("Goals · measured outcomes".encode(),"Tasks · current backlog".encode()):
+        for needle in ("Goals · measured outcomes".encode(),"Tasks · Backlog:".encode(),
+                b"done=15", b"cancelled=16"):
             if needle not in wide: raise AssertionError(f"Work omitted {needle!r}")
+        medium=capture("work-medium",24,120,b"plan-alpha-29424")
+        for needle in (b"Backlog:", b"done=15", b"cancelled=16"):
+            if needle not in medium: raise AssertionError(f"Work omitted {needle!r} at 120 columns")
         capture("work-narrow",24,80,b"plan-alpha-29424")
         key(b":go Workspace\r",b"/srv/masc/workspace/masc")
         for name,rows,cols in (("workspace-wide",32,160),("workspace-narrow",24,80)):

@@ -56,7 +56,11 @@ def operator_menu_from_dashboard(executable: str) -> None:
                     process, fd, output, menu,
                     row=menu_row, needle=b"MASC Approvals",
                 )
-                keyboard.send_and_wait(process, fd, output, b"1", b"MASC Dashboard")
+                # Approvals belongs to Work; the current navigation has no
+                # global 1 jump. Verify each rendered return, rather than
+                # waiting for a Dashboard title after an ignored key.
+                keyboard.send_and_wait(process, fd, output, b"\x1b", b"MASC Work")
+                keyboard.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
             keyboard.resize_and_wait(
                 process, fd, output, rows=40, columns=80, needle=menu,
                 controls=(keyboard.FULL_REDRAW,), final_cursor=b"\x1b[?25l",

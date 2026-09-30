@@ -242,7 +242,7 @@ def run_navigation_consistency(executable: str) -> None:
             capture("palette-from-" + name.decode().lower(), palette)
             key(b"\x1b", title)
         key(b":go Dashboard\r", b"MASC Dashboard")
-        initial = key(b":go ", b"type to filter")
+        initial = key(b":go ", re.compile(rb":(?:\x1b\[[0-9;]*m)* go "))
         counts = re.findall(rb"(\d+) commands .*? (\d+)/(\d+)", terminal.screen_text(initial))
         if not counts:
             raise AssertionError("palette did not expose selection position")

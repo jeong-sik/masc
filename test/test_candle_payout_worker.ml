@@ -193,7 +193,7 @@ let last_candidates (config : Workspace.config) =
       (fun (event : E.t) ->
          match event.body with
          | E.Candidates c -> Some (c.candidate_task_ids, c.candidate_keepers)
-         | E.Snapshot _ | E.Payout_owed _ | E.Unattributed _ | E.Paid _ | E.Payout_failed _ -> None)
+         | E.Snapshot _ | E.Payout_owed _ | E.Unattributed _ | E.Paid _ | E.Purchased _ | E.Payout_failed _ -> None)
       (List.rev (Candle_ledger.events view))
 
 

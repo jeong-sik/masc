@@ -240,7 +240,7 @@ let evict_block ~read ~mode ~keeper_name ~eager_budget (block : Agent_core.Types
 let runtime_takes_images_itself id =
   match Runtime.get_runtime_by_id id with
   | None -> false
-  | Some (rt : Runtime.t) ->
+  | Some (rt : Runtime_instance.t) ->
     Runtime_agent.caps_admit_required_modalities
          (Runtime_agent.input_capabilities_of_runtime rt)
          [ "image" ]

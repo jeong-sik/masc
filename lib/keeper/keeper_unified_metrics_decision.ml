@@ -89,9 +89,9 @@ let append_decision_record
         ~keeper_name:meta.name
     with
     | Ok count ->
-      Keeper_approval_queue.approval_queue_ready_state_json, `Int count
+      Keeper_approval_queue_result.approval_queue_ready_state_json, `Int count
     | Error error ->
-      ( Keeper_approval_queue.approval_queue_unavailable_state_json error
+      ( Keeper_approval_queue_result.approval_queue_unavailable_state_json error
       , `Null )
   in
   let turn_mode =

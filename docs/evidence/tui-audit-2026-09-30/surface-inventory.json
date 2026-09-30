@@ -210,7 +210,7 @@
     {
       "name": "render_planning_detail",
       "source_review": "reviewed with findings",
-      "runtime_evidence": "pending",
+      "runtime_evidence": "focused viewport and confirmation PTY PASS at e38b210cd189fae660078b2571c2198d17ff95c9, run 36665786174; receipt focused-passes-20260930.txt. Full matrix, later heads, required checks and installed/production proof remain unverified.",
       "finding_ids": [
         "W03",
         "W04"
@@ -218,7 +218,7 @@
       "implementation_prs": [
         40142
       ],
-      "implementation_evidence": "source-reviewed repair; current-head executable and state-matrix proof pending"
+      "implementation_evidence": "focused viewport and confirmation PTY PASS at e38b210cd189fae660078b2571c2198d17ff95c9, run 36665786174; receipt focused-passes-20260930.txt. Full matrix, later heads, required checks and installed/production proof remain unverified."
     },
     {
       "name": "render_planning_list",
@@ -936,5 +936,17 @@
     "validation": "OCaml syntax/Python AST/fullbasediffcheck PASS; adapted5widthcolorfixture40rowsunexecuted",
     "execution": "not run under source-only policy",
     "remaining": "short-pane summary omissions persist visibly; wholeDashboard states/sections require releaseverification"
+  },
+  "later_global_overlay_additions": {
+    "source_head": "ff7f49c40cd09e36acd18e76df0c0c512f6a7eab",
+    "source": "bin/masc_tui_render.ml:frame_choice",
+    "overlays": [
+      {
+        "name": "Play card",
+        "source_review": "branch identified after original audit source; detailed review pending",
+        "runtime_evidence": "not covered by this capture walk"
+      }
+    ],
+    "scope": "original source inventory has12global branches; this later source adds Play card before account login, bringing observed branches to13"
   }
 }

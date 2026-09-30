@@ -583,7 +583,7 @@ let move_record view delta =
   match view.snapshot with
   | None -> view
   | Some snapshot ->
-      let rows = rows_in_screen view snapshot in
+      let rows = ordered_rows view snapshot in
       let rec find position = function
         | [] -> -1
         | (index, _) :: rest -> if index=view.row_cursor then position else find (position+1) rest in
@@ -708,7 +708,7 @@ let technical_lines ?(height=24) ?(failed_note = "") ~width view =
     Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
       (Masc.Tui_decode.sanitize_terminal_text text) in
   let raw_row (row : Row.row) =
-    [row.title; "Row " ^ row.id;
+    [row.title; "Row " ^ row.id; "Lane " ^ row.lane_id;
      "Observed " ^ utc_stamp row.observed_at ^ " UTC";
      "Subject " ^ row.subject_id]
     @ Option.to_list (Option.map (fun actor -> "Actor " ^ actor) row.actor)
@@ -1034,18 +1034,19 @@ let detail_lines ~width view =
         tab Timeline "1 Results"; tab Connections "2 Links";
         tab Configurations "3 Installation"; tab Rows "4 Records"] in
       let rows = List.map snd (ordered_rows view snapshot) in
+      let selected = selected_row view in
       let body = match view.focus with
       | Timeline | Instances ->
           if rows=[] then ["No observations yet. o:observe this Add-on."]
           else Option.to_list item.display.description
             @ [""; "Results"]
-            @ (match selected_row view with
+            @ (match selected with
                | None -> ["Choose a result with j/k."; ""]
                | Some row ->
-                   ["> " ^ row.title; "  " ^ utc_stamp row.observed_at ^ " UTC"]
+                   ["> " ^ row.title; "  Lane " ^ row.lane_id; "  " ^ utc_stamp row.observed_at ^ " UTC"]
                    @ result_lines item row @ [""])
             @ (let other_rows = List.filter (fun (row : Row.row) ->
-                 match selected_row view with
+                 match selected with
                  | None -> true
                  | Some selected -> not (String.equal selected.id row.id)) rows in
                if other_rows=[] then [] else
@@ -1053,7 +1054,7 @@ let detail_lines ~width view =
                  @ List.map (fun (row : Row.row) -> "  " ^ row.title) other_rows
                  @ [""])
             @ ["Activity timeline"]
-            @ timeline_lines ~width ~instances:[item] ?selected:(selected_row view) rows
+            @ timeline_lines ~width ~instances:[item] ?selected rows
             @ (if snapshot.output.coverage=[] then [] else [""; "Coverage for this slice"])
             @ List.map (fun (source : Row.coverage) ->
                 source.source_id ^ " · " ^ (if source.complete then "complete" else "PARTIAL") ^
@@ -1088,7 +1089,7 @@ let detail_lines ~width view =
           if rows=[] then ["No observations yet."]
           else List.concat_map (fun (row : Row.row) ->
             [(if Option.fold ~none:false ~some:(fun (selected : Row.row) -> selected.id = row.id)
-                 (selected_row view) then "> " else "  ")
+                 selected then "> " else "  ")
              ^ (if List.mem row.id view.selected then "[selected] " else "") ^ row.title;
              "Row " ^ row.id;
              Yojson.Safe.pretty_to_string (`Assoc row.fields)]

@@ -644,11 +644,11 @@ let test_board_lane_detail_draws_typed_jev_readiness () =
 let test_the_code_tree_draws_one_folder_arrow () =
   Alcotest.(check int) "both rows read the arrow from the mark module" 2
     (Ast_grep.count_identifiers_outside_calls_in_value_binding
-       ~module_path:render ~binding_name:"render_code" ~callees:[]
+       ~module_path:"bin/masc_tui_render_code.ml" ~binding_name:"render_code" ~callees:[]
        ~identifiers:[ "File_icon.folder_glyph" ]);
   Alcotest.(check int) "and neither borrows the current-entry glyph" 0
     (Ast_grep.count_identifiers_outside_calls_in_value_binding
-       ~module_path:render ~binding_name:"render_code" ~callees:[]
+       ~module_path:"bin/masc_tui_render_code.ml" ~binding_name:"render_code" ~callees:[]
        ~identifiers:[ "Masc_tui_theme.Glyph.current_entry" ])
 
 (* Full loading diagnostics are read through /errors. Exception details still

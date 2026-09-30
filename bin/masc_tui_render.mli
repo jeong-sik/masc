@@ -1,6 +1,6 @@
 (** Screen dispatch and shared rendering projections.
-    Board list, composer and read screens are owned by
-    {!Masc_tui_render_board}. *)
+    Board screens and the workspace Code viewport live in
+    {!Masc_tui_render_board} and {!Masc_tui_render_code}. *)
 
 module Frame_presenter = Masc_tui_frame_presenter
 module Ask_projection = Masc_tui_ask_projection
@@ -27,7 +27,6 @@ module Keeper_control = Masc_tui_keeper_control
 module Task_selection = Masc_tui_task_selection
 module Tool_tree = Masc_tui_tool_tree
 module Theme_choice = Masc_tui_theme_choice
-module File_icon = Masc_tui_file_icon
 module Approval_detail = Masc_tui_approval_detail
 module Planning_detail = Masc_tui_planning_detail
 module Link = Masc_tui_link
@@ -89,7 +88,6 @@ val tools_scrolled : Masc_tui_types.state -> Masc_tui_types.scrolled
 val render_tools :
   Masc_tui_types.state ->
   Frame_presenter.frame * Masc_tui_types.clamped_scroll option
-val code_pane_content_height : Masc_tui_types.state -> int
 val config_content_height : Masc_tui_types.state -> int
 val context_inspector_viewport : Masc_tui_types.state -> int * int
 val context_inspector_detail_viewport : Masc_tui_types.state -> int * int

@@ -1337,7 +1337,7 @@ let test_tui_current_projection_wiring () =
      regressions. *)
   check int "Board renderer selects detail by post identity" 1
     (Ast_grep.count_calls_in_value_binding
-       ~module_path:"bin/masc_tui_render.ml"
+       ~module_path:"bin/masc_tui_render_board.ml"
        ~binding_name:"board_read_pane"
        ~callee:"Board_detail.view_for");
   check bool "metadata refresh reconciles the selected log identity" true
@@ -1873,15 +1873,15 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path
        ~binding_name:"render_overview" ~callee:"empty_page_of");
   check int "board read consumes one shared row allocation" 1
-    (Ast_grep.count_calls_in_value_binding ~module_path:render_path
+    (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_render_board.ml"
        ~binding_name:"board_read_pane"
        ~callee:"Layout.allocate_board_read");
   check int "board body and comments share the allocation" 2
     (Ast_grep.count_field_accesses_outside_calls_in_value_binding
-       ~module_path:render_path ~binding_name:"board_read_pane" ~callees:[]
+       ~module_path:"bin/masc_tui_render_board.ml" ~binding_name:"board_read_pane" ~callees:[]
        ~fields:[ "body_rows"; "comment_rows" ]);
   check int "board read projects the two scroll offsets together" 1
-    (Ast_grep.count_calls_in_value_binding ~module_path:render_path
+    (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_render_board.ml"
        ~binding_name:"board_read_pane"
        ~callee:"Layout.project_board_read_scroll");
   (* Position labels and the returned clamp read the same independent
@@ -1891,24 +1891,24 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
     (fun field ->
       check bool ("board renderer consumes projected " ^ field) true
         (Ast_grep.count_field_accesses_outside_calls_in_value_binding
-           ~module_path:render_path ~binding_name:"board_read_pane" ~callees:[]
+           ~module_path:"bin/masc_tui_render_board.ml" ~binding_name:"board_read_pane" ~callees:[]
            ~fields:[ field ] > 0))
     board_scroll_fields;
   check int "board offsets all come from the scroll projection" 0
     (Ast_grep.count_field_accesses_off_other_records_in_value_binding
-       ~module_path:render_path ~binding_name:"board_read_pane" ~record:"scroll"
+       ~module_path:"bin/masc_tui_render_board.ml" ~binding_name:"board_read_pane" ~record:"scroll"
        ~fields:board_scroll_fields);
   check int "board rendering never bypasses normalization with raw scroll" 0
     (Ast_grep.count_field_accesses_outside_calls_in_value_binding
-       ~module_path:render_path ~binding_name:"board_read_pane"
+       ~module_path:"bin/masc_tui_render_board.ml" ~binding_name:"board_read_pane"
        ~callees:[ "Layout.project_board_read_scroll" ]
        ~fields:[ "board_scroll"; "board_comment_scroll" ]);
   check int "side board read owns one row allocation" 1
-    (Ast_grep.count_calls_in_value_binding ~module_path:render_path
+    (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_render_board.ml"
        ~binding_name:"draw_board_read_side"
        ~callee:"Layout.allocate_board_read_side");
   check int "side board read owns one scroll projection" 1
-    (Ast_grep.count_calls_in_value_binding ~module_path:render_path
+    (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_render_board.ml"
        ~binding_name:"draw_board_read_side"
        ~callee:"Layout.project_board_read_scroll");
   (* Two doors notice a resize and they learn of it differently: SIGWINCH
@@ -2596,7 +2596,7 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
      [approvals_error] here. *)
   check_identifiers ~module_path:"bin/masc_tui_render.ml" ~binding:"render_approvals"
     ~callees:sanitizer_calls [ "cause" ];
-  check_fields "render_board_list"
+  check_fields ~module_path:"bin/masc_tui_render_board.ml" "render_board_list"
     [ "board_list_error"; "bp_id"; "bp_author"; "bp_title" ];
   (* [String.equal] keeps a post out of its own related list. Comparison never
      reaches the terminal, and sanitizing first would be wrong besides: two
@@ -2604,7 +2604,7 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
   check_fields
     ~non_rendering_calls:
       [ "Board_detail.view_for"; "String.equal"; "Link.scan" ]
-    "board_read_pane"
+    ~module_path:"bin/masc_tui_render_board.ml" "board_read_pane"
     [ "bp_id"
     ; "bp_hearth"
     ; "bp_author"
@@ -2633,7 +2633,7 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
   check_fields ~module_path:"bin/masc_tui_render_metrics.ml"
     "render_section_tools"
     [ "mkh_keeper_id"; "gp_display_tool"; "kta_tool" ];
-  check_identifiers ~module_path:render_path ~binding:"board_read_pane"
+  check_identifiers ~module_path:"bin/masc_tui_render_board.ml" ~binding:"board_read_pane"
     ~callees:sanitizer_calls [ "id" ];
   (* Every split surface hands its list through one sidebar, so this is the
      single place a row label can reach the terminal unsanitized. Seven
@@ -2895,7 +2895,7 @@ let test_the_session_filter_reads_the_transcript () =
    spelling widths again: one layout -- the columns a narrow list keeps and
    the title's share -- asked once, and the two rows built from it. *)
 let test_the_board_header_and_rows_share_one_layout () =
-  let module_path = "bin/masc_tui_render.ml" in
+  let module_path = "bin/masc_tui_render_board.ml" in
   let in_board callee =
     Ast_grep.count_calls_in_value_binding ~module_path
       ~binding_name:"render_board_list" ~callee
@@ -2932,7 +2932,7 @@ let test_the_answering_overlay_is_the_shared_contract () =
    row the surface stops drawing cannot leave a gap behind it. *)
 let test_the_board_list_frame_is_the_shared_contract () =
   let in_board callee =
-    Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_render.ml"
+    Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_render_board.ml"
       ~binding_name:"render_board_list" ~callee
   in
   check int "the frame is drawn by the contract" 1 (in_board "surface_chrome");

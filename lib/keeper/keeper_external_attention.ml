@@ -275,6 +275,11 @@ type read_error =
       ; rows_end : int
       ; end_offset : int
       }
+  | Non_regular_file of
+      { path : string
+      ; kind : Unix.file_kind
+      ; cleanup_failure : Fs_compat.private_jsonl_operation_failure option
+      }
   | Io_failed of
       { path : string
       ; cause : exn
@@ -303,6 +308,13 @@ let read_error_to_string = function
       path
       rows_end
       end_offset
+  | Non_regular_file { path; kind; cleanup_failure } ->
+    let detail = Printf.sprintf "%s external attention is not a regular file: %s"
+        path (Fs_compat.file_kind_to_string kind) in
+    (match cleanup_failure with
+     | None -> detail
+     | Some failure -> detail ^ "; transaction settlement also failed: "
+         ^ Fs_compat.private_jsonl_operation_failure_to_string failure)
   | Io_failed { path; cause } ->
     Printf.sprintf
       "%s external attention read failed: %s"
@@ -409,11 +421,22 @@ let load_events_snapshot ~base_path ~keeper_name =
         (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure);
     Error (Settlement_failed { path; primary_cause; cleanup_failure })
   in
+  let non_regular_file ?cleanup_failure kind =
+    let error = Non_regular_file { path; kind; cleanup_failure } in
+    report_read_drop ~reason:Read_drop_reason.Entry_load_error
+      ~path ~detail:(read_error_to_string error);
+    Error error
+  in
   match Fs_compat.read_private_jsonl_rows_locked_result path with
   | Fs_compat.Private_file_succeeded rows -> of_rows rows
   | Fs_compat.Private_file_succeeded_with_cleanup_failure
       { value = _; cleanup_failure } ->
     settlement_failed cleanup_failure
+  | Fs_compat.Private_file_failed (Fs_compat.Private_jsonl_rows.Non_regular_file kind) ->
+    non_regular_file kind
+  | Fs_compat.Private_file_failed_with_cleanup_failure
+      { error = Fs_compat.Private_jsonl_rows.Non_regular_file kind; cleanup_failure } ->
+    non_regular_file ~cleanup_failure kind
   | Fs_compat.Private_file_failed (Fs_compat.Private_jsonl_rows.Io_failed cause) ->
     io_failed cause
   | Fs_compat.Private_file_failed_with_cleanup_failure

@@ -83,7 +83,7 @@ let acknowledge ~path ~scope ~request receipt =
        | Some (`String "committed"),Some (`String received) when String.equal received id ->
            (match Option.bind (field "receipt" delivery) (field "fanout_state") with
             | Some (`String ("not_started" | "active")) -> Ok ()
-            | Some (`String "finished") ->
+            | Some (`String ("finished" | "durable_admitted")) ->
                 transact ~path (fun pending ->
                   if List.assoc_opt (scope,selected) pending=Some id
                   then Some (event "acknowledged" scope selected id),Ok ()

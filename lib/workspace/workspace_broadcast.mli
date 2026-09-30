@@ -54,8 +54,14 @@ val task_cache_signal_of_args :
 
 (** State of this immediate fanout invocation. [Fanout_not_started] reports an
     early return before projection; [Fanout_finished] reports that the delivery
-    invocation ended, not that every Keeper accepted or read the message. *)
-type fanout_state = Fanout_not_started | Fanout_active | Fanout_finished
+    invocation ended, not that every Keeper accepted or read the message.
+    [Fanout_durable_admitted] is set by a host only after it commits both the
+    authoritative row and the durable recipient obligations. *)
+type fanout_state =
+  | Fanout_not_started
+  | Fanout_active
+  | Fanout_finished
+  | Fanout_durable_admitted
 
 type broadcast_delivery =
   { request_id : string
@@ -156,21 +162,32 @@ val broadcast : ?trace_context:string ->
            from_agent:string -> content:string ->
            (broadcast_delivery, broadcast_error) result
 
+val find_broadcast : request_id:string -> Workspace_utils_backend_setup.config ->
+  from_agent:string -> content:string -> (broadcast_delivery option, broadcast_error) result
+(** Read the exact authoritative committed row without publishing. Missing is
+    [Ok None]; unavailable, corrupt and contradictory rows remain errors. *)
+
+val validate_deferred_fleet_content : string -> (unit,broadcast_error) result
+(** Check before durable admission. The Lane caller supplies a host-authored
+    stored-artifact marker; selected report text is kept inside its artifact. *)
+type fleet_delivery_mode = Immediate_fleet | Deferred_fleet
 val broadcast_once :
-  request_id:string ->
+  ?fleet_delivery:fleet_delivery_mode -> request_id:string ->
   Workspace_utils_backend_setup.config -> from_agent:string -> content:string ->
   (broadcast_delivery, broadcast_error) result
 (** Reconcile an exact producer-owned request after an unanswered call. A
     committed authoritative message returns its receipt without another message
-    write. An idle retry replays the idempotent fleet projection to recover
-    interrupted recipients; an active fanout returns its receipt immediately
-    with [Fanout_active]. Clients retain their retry identity until a receipt
-    has [Fanout_finished], so cancellation can be reconciled by an idle retry.
-    A retry that arrived before the primary row waits only for row readiness,
-    not fleet delivery; a failed or cancelled attempt wakes it to reread.
-    Reusing
+    write. In [Immediate_fleet], an idle retry replays the idempotent fleet
+    projection to recover interrupted recipients; an active fanout returns its
+    receipt immediately with [Fanout_active]. Clients retain the retry identity
+    until [Fanout_finished]. [Deferred_fleet] retries only return the receipt;
+    the root-owned recipient journal performs recovery. A retry before primary
+    commit waits for row readiness, not fleet delivery; failed or cancelled
+    attempts wake it to reread. Reusing
     an identity with different content or sender is rejected. This path always
-    declares [Fleet_conversation]; callers cannot replay a different audience. *)
+    declares [Fleet_conversation]; callers cannot replay a different audience.
+    [Deferred_fleet] is only for a host with durable recipient obligations:
+    it commits without synchronous projection and refuses mention-bearing text. *)
 
 module For_testing : sig
   val replace_on_exact_request_wait : (string -> unit) -> (string -> unit)

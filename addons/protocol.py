@@ -149,8 +149,12 @@ INPUT_SCHEMA = {
 
 
 def serve(name: str, observe: Callable[[dict, tuple[Source, ...]], dict],
-          *, version: str = "0.1.0") -> None:
+          *, version: str = "0.1.0", text_summary: Callable[[dict], str] | None = None,
+          max_reply_bytes: int | None = None) -> None:
     """One synchronous package worker. Host owns isolation and cancellation."""
+    if max_reply_bytes is not None and (isinstance(max_reply_bytes, bool)
+            or not isinstance(max_reply_bytes, int) or max_reply_bytes <= 0):
+        raise InvalidInput("max_reply_bytes must be a positive integer")
     for line in sys.stdin:
         request_id = None
         try:
@@ -180,7 +184,8 @@ def serve(name: str, observe: Callable[[dict, tuple[Source, ...]], dict],
                 try:
                     output = observe(object_value(arguments.get("binding"), "binding"),
                                      sources_from_json(arguments.get("sources")))
-                    encoded = json.dumps(output, ensure_ascii=False, allow_nan=False)
+                    encoded = (json.dumps(output, ensure_ascii=False, allow_nan=False)
+                               if text_summary is None else string(text_summary(output), "output summary"))
                     result = {"content": [{"type": "text", "text": encoded}],
                               "structuredContent": output, "isError": False}
                 except InvalidInput as error:
@@ -197,4 +202,12 @@ def serve(name: str, observe: Callable[[dict, tuple[Source, ...]], dict],
         except InvalidInput as error:
             response = {"jsonrpc": "2.0", "id": request_id,
                         "error": {"code": -32602, "message": str(error)}}
-        print(json.dumps(response, ensure_ascii=False, allow_nan=False), flush=True)
+        encoded = json.dumps(response, ensure_ascii=False, allow_nan=False)
+        if max_reply_bytes is not None and len((encoded + "\n").encode("utf-8")) > max_reply_bytes:
+            response = {"jsonrpc": "2.0", "id": request_id, "result": {
+                "content": [{"type": "text", "text": "Observation exceeds the declared reply envelope; no report was accepted"}],
+                "isError": True}}
+            encoded = json.dumps(response, ensure_ascii=False, allow_nan=False)
+            if len((encoded + "\n").encode("utf-8")) > max_reply_bytes:
+                raise RuntimeError("Declared reply envelope cannot contain an exact JSON-RPC error response")
+        print(encoded, flush=True)

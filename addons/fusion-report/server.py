@@ -9,10 +9,11 @@ from enum import Enum
 from dataclasses import dataclass
 from pathlib import Path
 import sys
+import tomllib
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from protocol import (InvalidInput, Source, boolean, evidence, object_value,
-                      optional_string, row, serve, stable_id, string)
+                      number, optional_string, row, serve, stable_id, string)
 
 
 class RunState(Enum):
@@ -32,7 +33,7 @@ class ReportContent:
 @dataclass(frozen=True)
 class ReportDraft:
     item: dict
-    content: ReportContent
+    content: ReportContent | None
 
 
 def render_body(content: ReportContent, *, complete: bool) -> str:
@@ -67,6 +68,28 @@ def coverage(value, label):
     return value
 
 
+def row_coordinates(original):
+    # Full payloads remain readable in the host-owned immutable output blob.
+    # Coordinates retain the exact rows without repeating their analysis body.
+    for key in ("id", "lane_id", "subject_id"):
+        string(original.get(key), f"row.{key}")
+    if original.get("kind") not in ("event", "value", "relation"):
+        raise InvalidInput("Unknown upstream row kind")
+    number(original.get("observed_at"), "row.observed_at")
+    if "actor" not in original:
+        raise InvalidInput("row.actor is required")
+    optional_string(original["actor"], "row.actor")
+    if "clock" not in original:
+        raise InvalidInput("row.clock is required")
+    if original["clock"] is not None:
+        clock = object_value(original["clock"], "row.clock")
+        string(clock.get("domain"), "row.clock.domain")
+        string(clock.get("value"), "row.clock.value")
+    evidence(original.get("evidence"))
+    return {key: original[key] for key in (
+        "id", "lane_id", "kind", "subject_id", "observed_at", "clock", "actor", "evidence")}
+
+
 def reports(source: Source, observation: dict, *, recognized: bool):
     producer = object_value(observation.get("producer"), "producer")
     for key in ("installation_id", "instance_id", "run_id",
@@ -83,6 +106,10 @@ def reports(source: Source, observation: dict, *, recognized: bool):
         raise InvalidInput("Output must contain rows and coverage arrays")
     upstream_coverage = [coverage(item, "output coverage") for item in output["coverage"]]
     producer_status = coverage(observation.get("producer_status"), "producer_status")
+    if source.incarnation != producer["instance_id"]:
+        raise InvalidInput("Source incarnation does not identify this producer instance")
+    if producer_status["incarnation"] != producer["instance_id"]:
+        raise InvalidInput("Producer status incarnation does not identify this producer instance")
     base_complete = (source.complete and recognized and producer_status["complete"]
                      and bool(upstream_coverage) and all(c["complete"] for c in upstream_coverage))
     groups = {}
@@ -97,6 +124,7 @@ def reports(source: Source, observation: dict, *, recognized: bool):
             continue
         lane = ports[lane]
         string(original.get("id"), "row.id")
+        row_coordinates(original)
         fields = object_value(original.get("fields"), "row.fields")
         boolean(fields.get("input_complete"), "row.input_complete")
         if lane == "fusion/status":
@@ -116,6 +144,8 @@ def reports(source: Source, observation: dict, *, recognized: bool):
             origin = object_value(post.get("origin"), "board_post.origin")
             if origin.get("source") != "fusion" or origin.get("fusion_run_id") != run_id:
                 raise InvalidInput("Report evidence belongs to another Fusion run")
+        if original["subject_id"] != run_id:
+            raise InvalidInput("Fusion row subject does not identify its exact run")
         group = groups.setdefault(run_id, {})
         if lane in group:
             raise InvalidInput("Duplicate Fusion row for the same run and port")
@@ -124,11 +154,26 @@ def reports(source: Source, observation: dict, *, recognized: bool):
         group[lane] = (original, status)
 
     result, completions = [], []
+    context = row(source, observation, lane="fusion/report-context",
+                  subject=producer["instance_id"], title="Fusion report input provenance", kind="value",
+                  fields={"producer": producer, "producer_status": producer_status,
+                          "upstream_coverage": upstream_coverage,
+                          "upstream_rows": [row_coordinates(value[0]) for group in groups.values()
+                                            for value in group.values()],
+                          "skipped_lanes": sorted(skipped), "input_complete": False,
+                          "scope": "supplied_fusion_output"})
+    context["id"] = stable_id(context["id"], "context")
+    context["actor"] = None
     for run_id, group in groups.items():
         status = next(iter(group.values()))[1]
         status_row = group.get("fusion/status")
         result_row = group.get("fusion/result")
         post = result_row[0]["fields"]["board_post"] if result_row else None
+        if status_row and result_row:
+            status_fields = status_row[0]["fields"]
+            if (status_fields.get("evidence_status") != "recorded"
+                    or status_fields.get("board_post_id") != post["id"]):
+                raise InvalidInput("Fusion status and result Board evidence disagree")
         complete = (base_complete and not skipped and status is not RunState.RUNNING
                     and post is not None
                     and all(item[0]["fields"]["input_complete"] for item in group.values()))
@@ -146,16 +191,19 @@ def reports(source: Source, observation: dict, *, recognized: bool):
                        "run_status": status.value, "input_complete": complete,
                        "board_post_id": post["id"] if post else None,
                        "scope": "supplied_fusion_output", "content_trust": "untrusted_source_text",
-                       "producer": producer, "producer_status": producer_status,
-                       "upstream_coverage": upstream_coverage,
-                       "upstream_rows": [value[0] for value in group.values()],
                        "delivery_status": "not_attempted",
                        "delivery_label": "아직 전달하지 않음"})
         item["id"] = stable_id(item["id"], run_id, "report")
         item["actor"] = None
+        item["evidence"] = []
+        item["related_ids"] = [context["id"]]
         result.append(ReportDraft(item, content))
         completions.append(complete)
-    return result, bool(result) and all(completions) and not skipped, skipped
+    complete = bool(result) and all(completions) and not skipped
+    if result:
+        context["fields"]["input_complete"] = complete
+        result.insert(0, ReportDraft(context, None))
+    return result, complete, skipped
 
 
 def observe(binding: dict, sources: tuple[Source, ...]) -> dict:
@@ -182,12 +230,16 @@ def observe(binding: dict, sources: tuple[Source, ...]) -> dict:
             for draft in source_rows:
                 draft.item["fields"]["input_complete"] = False
         for draft in source_rows:
-            draft.item["fields"]["body"] = render_body(
-                draft.content, complete=draft.item["fields"]["input_complete"])
+            if draft.content is not None:
+                draft.item["fields"]["body"] = render_body(
+                    draft.content, complete=draft.item["fields"]["input_complete"])
             rows.append(draft.item)
         statuses.append(status)
     return {"rows": rows, "coverage": statuses}
 
 
 if __name__ == "__main__":
-    serve("masc-fusion-report", observe)
+    manifest = tomllib.loads(Path(__file__).with_name("lane.toml").read_text())
+    serve("masc-fusion-report", observe,
+          text_summary=lambda output: "Fusion reports are retained in structuredContent with exact upstream coordinates and evidence.",
+          max_reply_bytes=manifest["resources"]["max_reply_bytes"])

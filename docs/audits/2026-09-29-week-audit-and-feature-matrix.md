@@ -9,7 +9,7 @@
 
 - 발견 id 는 영역 접두어를 붙인다. `RT-` Runtime·Lane·Schedule, `MM-` Memory·Librarian·Skills·Context, `DM-` Board·Task·Goal·HITL·Candle·Play, `TU-` TUI·대시보드.
 - 심각도: **P0** 기본 흐름이 지금 깨짐, **P1** 실제 결함, **P2** 정리 대상.
-- "확인"은 코드 경로를 직접 따라갔다는 뜻이다. "라이브"는 `~/me/.masc` 로그나 상태 파일로 확인했다는 뜻이다. 둘 다 아니면 "보고만"이라고 적는다.
+- "확인"은 코드 경로를 직접 따라갔다는 뜻이다. "라이브"는 `<base-path>/.masc`의 로그나 상태 파일로 확인했다는 뜻이다. 여기서 base-path는 관측 대상 서버의 유효 workspace 경로이며 `MASC_BASE_PATH` 또는 `--base-path`로 명시할 수 있다. 둘 다 아니면 "보고만"이라고 적는다.
 - 로컬 빌드와 테스트는 돌리지 않았다(저장소 `execution_protocol`).
 
 ## 1. 기능 표

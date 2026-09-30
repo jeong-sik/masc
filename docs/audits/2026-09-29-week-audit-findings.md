@@ -62,7 +62,7 @@ id 접두어: `RT-` Runtime·Lane·Schedule, `MM-` Memory·Librarian·Skills·Co
 | MM-C5 | P2 | 틀린 주석 | `keeper_official_client_host.ml:89-97` | 주 이전 | 주석은 "resume 에도 --system-prompt 에 합친다"고 하지만 실제 동작과 다릅니다. | High |
 | MM-S1 | P2 | waste | `keeper_run_tools_hooks.ml:483-520`, `keeper_skill_activation_ledger.ml:2342-2383` | 주 이전(#39862 가 그대로 둠) | Skill 을 쓰지 않은 step 도 checkpoint lock 을 잡고 tail read 를 합니다. | High |
 | MM-S2 | P2 | open loop | `keeper_skill_activation_ledger.ml:2091-2106,2229-2260`, `keeper_skill_activation_discovery.ml:160-305` | #39862 | `session_logs` 캐시를 버리지 않습니다. reader 는 요청마다 파일 전체를 다시 읽습니다. | High |
-| MM-S3 | P2 | residue | `~/me/.masc/traces/*/skill-activations.json` | #39862 | 아무도 읽지 않는 옛 snapshot 25개(9.6 MB)가 남아 있습니다. Python reader 는 #39881(open)이 고칩니다. | High |
+| MM-S3 | P2 | residue | `<base-path>/.masc/traces/*/skill-activations.json` | #39862 | 아무도 읽지 않는 옛 snapshot 25개(9.6 MB)가 남아 있습니다. Python reader 는 #39881(open)이 고칩니다. | High |
 | MM-S4 | P2 | wiring | `keeper_durable_store.ml:759-779` | #39862 | 새 event log 가 durable store registry 와 preflight 에 없습니다. 행 하나가 깨지면 그 세션의 `keeper_skill` 이 모두 실패합니다. | Medium |
 | MM-S5 | P2 | residue | `lib/skill_config/skill_source_config.ml:182-203,393-402` | #39285 | `resource-read-max-bytes` 호환 경로가 남아 있습니다(#39284 에서 추적). | High |
 | MM-S6 | P2 | string control | `keeper_skill_observability.ml:31,204,225,305,311`, `workspace_skill_publish.mli:38-62` | 주 이전 + #39517 | `kind : string` 을 `"composition"` 과 비교하고, 진단도 문자열로 적습니다. | High |

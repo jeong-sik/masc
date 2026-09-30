@@ -1,0 +1,11 @@
+{
+  "head": "fc5bb8afc5cfe2a25a74fa70afc3a2477cc04337",
+  "run": 36684106255,
+  "job": 109785888771,
+  "conclusion": "failure",
+  "raw_sha256": "62acf220cc9889b1732968301f45e1e97bb3a6defe3d0cff103e66b1d9b66cc9",
+  "activation_suite_cases": 444,
+  "activation_suite_files": 9,
+  "bundle_failure": "readCandleAccountRevision is not exported by candle-observation.ts",
+  "requested_9_feature_tests_reached": false
+}

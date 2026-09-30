@@ -4,7 +4,13 @@ These checkpoints name different source commits. They are not a single released 
 
 ## Current measured checkpoint
 
-[Latest scopes, exact heads/runs and retained raw logs](../evidence/2026-09-30-feature-current-checkpoint/README.md) supersede all pending observations below. Current Play, prune, rotation and Goal native runs succeeded. File-backed23-case source is published with new native CI queued; Dashboard inherited bundle failure and corrected fixture are separately recorded. The revised Candle microVM experiment was stopped after64HTTP429 refusals with167complete receipts/103grades; it is not a400-call PASS. No release/live data cut is claimed.
+[Measured follow-up and raw logs](../evidence/2026-09-30-feature-followup-checkpoint/README.md) and [CI-built Item browser fixture](../evidence/2026-09-30-dashboard-item-workspace-browser/README.md) supersede prior pending observations. File-backed f01 targeted Test36682552861 passed172 cases across10 suites. Item40190/9464 passed the recorded PR typecheck and the CI-preview browser scenario:8 screenshots,4 scoped reads,0 page errors; actual preview checkout8721 differs only in8 non-Dashboard/build-input paths. This is controlled fixture evidence, not an installed/live server.
+
+Dashboard40241/fc5 failed the production bundle guard on the missing readCandleAccountRevision export after9 activation suites/444 cases passed. Its9 requested feature files were not reached. A source repair restores the actual publication parent's revision contract; no built success is claimed for this candidate or Item40252/d2cb. Reader40256 and its index child repair FIFO stalls and intact-old-UUID Admin authority; separate current-head native gates are required.
+
+The revised Candle microVM experiment stopped after64HTTP429 refusals:167 validated completions,103 model grades,168 registrations with1 pending. Case19 yielded4 Epic grades and4 refusals, with12 planned trials missing. This is one posthoc human anchor and an incomplete experiment; accuracy remains null and calibration unperformed. No release/live Goal cut is claimed.
+
+[Earlier measured scopes and logs](../evidence/2026-09-30-feature-current-checkpoint/README.md) remain valid only for their named commits.
 
 ## Historical current-main checkpoint (superseded)
 
@@ -32,7 +38,7 @@ Names and declared versions alone are insufficient observation or mutation autho
 
 Python stdio workers, native host fixtures, terminal PTYs, container image contents/builds, and installed/live Keeper behavior are separate claims. The retained sources and logs demonstrate the first four only in their stated scopes. No live credential, controller, Goal, wallet, Keeper or runtime config was changed.
 
-Human Candle calibration remains incomplete: the operator's shared-foundation Epic label is one posthoc anchor, not a fully labelled20-Goal acceptance set. The prepared revised model experiment remains unmeasured through the original production adapter. The approved shared-Goal hard cut still needs fresh runtime data and a stopped-writer rollout.
+Human Candle calibration remains incomplete: the operator's shared-foundation Epic label is one posthoc anchor, not a fully labelled20-Goal acceptance set. The revised production-adapter experiment is partially measured as above; the full400-call comparison remains incomplete. The approved shared-Goal hard cut still needs fresh runtime data and a stopped-writer rollout.
 
 ## Earlier rotation source checkpoint (superseded)
 

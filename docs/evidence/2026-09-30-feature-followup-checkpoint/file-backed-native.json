@@ -1,0 +1,30 @@
+{
+  "head": "f01a7fd45d7cc0f8e3d17b492ffd27c0b5f477c1",
+  "run": 36682552861,
+  "raw_sha256": "881a26fa9a73a81a44c9a6cb66dac75dc5f4f61e20e5e86c265eaffc0e7f6c43",
+  "bytes": 69373,
+  "successes": [
+    "Test Successful in 2.676s. 23 tests run.",
+    "Test Successful in 2.168s. 16 tests run.",
+    "Test Successful in 0.030s. 7 tests run.",
+    "Test Successful in 1.561s. 12 tests run.",
+    "Test Successful in 0.661s. 3 tests run.",
+    "Test Successful in 0.075s. 64 tests run.",
+    "Test Successful in 0.016s. 12 tests run.",
+    "Test Successful in 0.065s. 14 tests run.",
+    "Test Successful in 0.011s. 4 tests run.",
+    "Test Successful in 10.087s. 17 tests run."
+  ],
+  "targeted": [
+    "[targeted] test/test_auth_file_backed_transaction: OK in 2s",
+    "[targeted] test/test_auth_token_rotation_transaction: OK in 3s",
+    "[targeted] test/test_auth_rotate_shared_tokens_10304: OK in 0s",
+    "[targeted] test/test_auth_token_prune_transaction: OK in 1s",
+    "[targeted] test/test_credential_expiry: OK in 0s",
+    "[targeted] test/test_auth: OK in 0s",
+    "[targeted] test/test_auth_login: OK in 0s",
+    "[targeted] test/test_auth_oauth: OK in 0s",
+    "[targeted] test/test_auth_credential_index_cache: OK in 0s",
+    "[targeted] test/test_play_credential_transaction: OK in 10s"
+  ]
+}

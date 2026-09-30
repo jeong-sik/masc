@@ -1,0 +1,5 @@
+{
+  "pr_head": "9464d7404c97b086d1b5cdc7af2c817e8f5d23cc",
+  "checkout_head": "8721039c55adf410df3eb08ac8366a63a8b3a65e",
+  "compare": "{\"ahead_by\":2,\"behind_by\":0,\"files\":[{\"additions\":1,\"deletions\":0,\"filename\":\"bin/dune\",\"status\":\"modified\"},{\"additions\":6,\"deletions\":0,\"filename\":\"bin/masc_tui_candle.ml\",\"status\":\"modified\"},{\"additions\":4,\"deletions\":0,\"filename\":\"bin/masc_tui_candle.mli\",\"status\":\"modified\"},{\"additions\":19,\"deletions\":14,\"filename\":\"bin/masc_tui_render.ml\",\"status\":\"modified\"},{\"additions\":13,\"deletions\":3,\"filename\":\"bin/masc_tui_render_prim.ml\",\"status\":\"modified\"},{\"additions\":2,\"deletions\":1,\"filename\":\"changelog.d/40039.md\",\"status\":\"modified\"},{\"additions\":1,\"deletions\":1,\"filename\":\"test/test_tui_account_login_pty.py\",\"status\":\"modified\"},{\"additions\":76,\"deletions\":1,\"filename\":\"test/test_tui_candle_currency_pty.py\",\"status\":\"modified\"}],\"status\":\"ahead\"}\n"
+}

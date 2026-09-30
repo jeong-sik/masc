@@ -1,0 +1,53 @@
+{
+  "analysis_sha256": "94471566d68e1f44276ad96360168370b39219f95bc902fce24e403ad5b8bb9d",
+  "human_accuracy": null,
+  "calibration_status": "not_performed",
+  "experiments": [
+    {
+      "name": "initial_dns_failure",
+      "planned_calls": 400,
+      "result_rows": 400,
+      "validated_completions": 400,
+      "registered": 400,
+      "completed": 400,
+      "pending_registrations": 0,
+      "integrity_errors": [],
+      "status_counts": {
+        "transport_unavailable": 400
+      },
+      "exact_400_structurally_complete": true,
+      "case_keys": [
+        "cases"
+      ]
+    },
+    {
+      "name": "public_dns_ca",
+      "planned_calls": 400,
+      "result_rows": 167,
+      "validated_completions": 167,
+      "registered": 168,
+      "completed": 167,
+      "pending_registrations": 1,
+      "integrity_errors": [],
+      "status_counts": {
+        "ok": 103,
+        "transport_unavailable": 64
+      },
+      "exact_400_structurally_complete": false,
+      "case_keys": [
+        "cases"
+      ]
+    }
+  ],
+  "scope": "Synthetic grade stage only; no live Goal/payout writes. Stopped corrected run exit137. No calibrated accuracy or complete400-call claim.",
+  "case19_anchor": {
+    "human_grade": "Epic",
+    "completed": 8,
+    "model_grades": {
+      "Epic": 4
+    },
+    "http429": 4,
+    "planned_missing": 12,
+    "accuracy_claim": false
+  }
+}

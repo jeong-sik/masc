@@ -6906,9 +6906,9 @@ def chat_steer_interaction(fixture: AtomicChatFixture, requests: HttpRequests) -
             if not wait_for_fixture_event(process, master_fd, output, fixture.interrupted, timeout=5):
                 raise AssertionError("Esc never reached its exact observed turn")
             send_and_wait(process, master_fd, output, b"new-course", composer_showing(b"new-course"))
-            send_and_wait(process, master_fd, output, b"\r", b"Queue (1 waiting")
-            send_and_wait(process, master_fd, output, b"one-more", composer_showing(b"one-more"))
             send_and_wait(process, master_fd, output, b"\r", b"Queue (2 waiting")
+            send_and_wait(process, master_fd, output, b"one-more", composer_showing(b"one-more"))
+            send_and_wait(process, master_fd, output, b"\r", b"Queue (3 waiting")
             if not wait_for_fixture_event(process, master_fd, output, fixture.old_poll_seen, timeout=10):
                 raise AssertionError("no stale observation arrived during pending Esc")
             read_available(master_fd, output)
@@ -6960,7 +6960,7 @@ def chat_working_target_interaction(fixture: AtomicChatFixture) -> Interaction:
             time.sleep(0.08)  # delimit the terminal's lone Escape before typing
             read_available(master_fd, output)
             send_and_wait(process, master_fd, output, b"after-stop", composer_showing(b"after-stop"))
-            send_and_wait(process, master_fd, output, b"\r", b"Queue (1 waiting")
+            send_and_wait(process, master_fd, output, b"\r", b"Queue (2 waiting")
             if len(fixture.interrupt_requests) != 1 or len(fixture.submitted) != 2:
                 raise AssertionError("double Esc duplicated control or released input before acknowledgement")
             fixture.release_interrupt.set()
@@ -7164,7 +7164,7 @@ def chat_reconcile_interaction(
             send_and_wait(
                 process, master_fd, output, b"held-next", composer_showing(b"held-next")
             )
-            send_and_wait(process, master_fd, output, b"\r", b"Queue (1 waiting")
+            send_and_wait(process, master_fd, output, b"\r", b"Queue (2 waiting")
             before_release = [
                 json.loads(body).get("message")
                 for path, body in requests

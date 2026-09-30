@@ -485,7 +485,7 @@ jobs:
             exit 0
           fi
           sudo apt-get update -qq
-          sudo apt-get install -y ttyd
+          sudo apt-get install -y ttyd fonts-noto-cjk
           python3 -m venv "$RUNNER_TEMP/studio-browser-venv"
           "$RUNNER_TEMP/studio-browser-venv/bin/pip" install playwright
           "$RUNNER_TEMP/studio-browser-venv/bin/playwright" install --with-deps chromium

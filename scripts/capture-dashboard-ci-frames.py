@@ -45,6 +45,8 @@ def main() -> None:
     parser.add_argument("--replay", type=Path, help=argparse.SUPPRESS)
     args = parser.parse_args()
     if args.replay is not None:
+        # ttyd forwards Enter only after the browser fixes terminal geometry.
+        sys.stdin.buffer.readline()
         sys.stdout.buffer.write(args.replay.read_bytes())
         sys.stdout.buffer.flush()
         signal.pause()
@@ -86,7 +88,7 @@ def main() -> None:
                 with socket.socket() as sock:
                     sock.bind(("127.0.0.1", 0))
                     port = sock.getsockname()[1]
-                command = [ttyd, "-i", "127.0.0.1", "-p", str(port),
+                command = [ttyd, "-i", "127.0.0.1", "-p", str(port), "-W",
                            "-t", "rendererType=dom", "-t", "fontSize=16",
                            "-t", "fontFamily=Menlo", "-t", "disableResizeOverlay=true",
                            "-T", "xterm-256color", sys.executable,
@@ -111,15 +113,39 @@ def main() -> None:
                         "width": columns * 10 + 24, "height": rows * 20 + 24})
                     page = context.new_page()
                     page.goto(f"http://127.0.0.1:{port}")
+                    page.wait_for_selector(".xterm-helper-textarea")
                     page.wait_for_function("window.term && window.term.buffer.active.getLine(0)")
                     page.evaluate("([cols, rows]) => window.term.resize(cols, rows)", [columns, rows])
-                    page.wait_for_function("document.querySelector('.xterm-screen').innerText.includes('MASC Dashboard')")
+                    page.wait_for_function(
+                        "([cols, rows]) => window.term.cols === cols && window.term.rows === rows",
+                        arg=[columns, rows],
+                    )
+                    page.locator(".xterm-helper-textarea").press("Enter")
+                    expected = [line.rstrip() for line in record["screen"].splitlines() if line.strip()]
+                    page.wait_for_function(
+                        """expected => {
+                          const buffer = window.term.buffer.active;
+                          const lines = Array.from({length: window.term.rows}, (_, i) =>
+                            buffer.getLine(i)?.translateToString(true) ?? '').filter(line => line.trim());
+                          return JSON.stringify(lines) === JSON.stringify(expected);
+                        }""",
+                        arg=expected,
+                    )
+                    observed = page.evaluate("""() => ({
+                      columns: window.term.cols, rows: window.term.rows,
+                      screen: Array.from({length: window.term.rows}, (_, i) =>
+                        window.term.buffer.active.getLine(i)?.translateToString(true) ?? '').join('\\n')
+                    })""")
+                    if (observed["columns"], observed["rows"]) != (columns, rows):
+                        raise RuntimeError("xterm geometry changed before screenshot capture")
                     page.locator(".xterm-screen").screenshot(path=str(args.out / f"{name}.png"))
                     evidence["frames"].append({
                         "name": name, "columns": columns, "rows": rows,
                         "frame_sha256": digest(raw),
                         "screenshot_sha256": digest((args.out / f"{name}.png").read_bytes()),
-                        "screen": record["screen"],
+                        "pty_screen": record["screen"],
+                        "observed_xterm_screen": observed["screen"],
+                        "actual_columns": observed["columns"], "actual_rows": observed["rows"],
                     })
                 finally:
                     if context is not None:

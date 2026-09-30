@@ -1157,6 +1157,7 @@ elif mode == "agy":
     send({"event":"result", "result":{"conversation_id":"paid", "status":"ERROR", "error":"paid failure",
         "response":"", "num_turns":1, "usage":{"input_tokens":11,"output_tokens":7,"cache_read_tokens":3,"thinking_tokens":0,"total_tokens":18}}})
 else:
+    admitted_effort = False
     def counts(i,o): return {"inputTokens":i,"cachedInputTokens":0,"outputTokens":o,"reasoningOutputTokens":0,"totalTokens":i+o}
     def usage(total,last):
         send({"method":"thread/tokenUsage/updated", "params":{"threadId":"thread-1","turnId":"turn-1",
@@ -1168,7 +1169,18 @@ else:
         if method=="initialize": result={"userAgent":"fixture"}
         elif method=="account/read": result={"account":{"type":"chatgpt","planType":"pro"},"requiresOpenaiAuth":True}
         elif method=="thread/start": result={"thread":{"id":"thread-1"},"model":"paid-fixture"}
-        elif method=="turn/start": result={"turn":{"id":"turn-1"}}
+        elif method=="model/list":
+            assert mode=="codex-effort" and req["params"]["includeHidden"] is True
+            admitted_effort = True
+            result={"data":[{"id":"paid-ui","model":"paid-fixture","displayName":"Paid fixture","isDefault":True,
+                "supportedReasoningEfforts":[{"reasoningEffort":"high","description":"High"}],
+                "defaultReasoningEffort":"high"}],"nextCursor":None}
+        elif method=="turn/start":
+            if mode=="codex-effort":
+                assert admitted_effort and req["params"]["effort"]=="high"
+                with open(os.path.join(os.path.dirname(__file__),"effort-wire.jsonl"),"a") as captured:
+                    captured.write(json.dumps(req["params"]["effort"])+"\n")
+            result={"turn":{"id":"turn-1"}}
         else: raise AssertionError(method)
         send({"id":req["id"],"result":result})
         if method=="turn/start":
@@ -1209,12 +1221,13 @@ is-non-interactive = true
 api-name = "paid-fixture"
 max-context = 4096
 tools-support = true
+%s
 [paid.fixture]
 [runtime]
 default = "paid.fixture"
 |} protocol cli (if mode="agy" then
     Printf.sprintf "timeout-s = 5.0\ncredentials = { type = \"file\", path = %S }" auth
-  else ""));
+  else "") (if mode="codex-effort" then "reasoning-effort = \"ultra\"" else ""));
       (match Runtime.init_default ~config_path with Ok () -> () | Error detail -> fail detail);
       let check_usage usage =
         check int (mode ^ " failed input") input_tokens usage.Fusion_types.input_tokens;
@@ -1227,9 +1240,16 @@ default = "paid.fixture"
          ~judge_model:"paid.fixture" ~judge_system_prompt:"Return synthesis" ~question:"Choose"
          ~panel:sample_panel ~web_tools:false ()) with
        | Error (_, usage) -> check_usage usage
-       | Ok _ -> fail "paid judge failure unexpectedly succeeded")))
+       | Ok _ -> fail "paid judge failure unexpectedly succeeded");
+      if mode="codex-effort" then (
+        let efforts = Fs_compat.load_file (Filename.concat root "effort-wire.jsonl")
+          |> String.split_on_char '\n' |> List.filter (fun row -> row <> "")
+          |> List.map (fun row -> Yojson.Safe.Util.to_string (Yojson.Safe.from_string row)) in
+        check (list string) "panel and judge carry configured effort through live admission"
+          ["high"; "high"] efforts)))
     ["claude", "claude-code", 16; "codex", "codex-app-server", 11;
-     "codex-fill", "codex-app-server", 11; "agy", "antigravity-cli", 14]
+     "codex-fill", "codex-app-server", 11; "codex-effort", "codex-app-server", 11;
+     "agy", "antigravity-cli", 14]
 ;;
 
 let test_muse_judge_parse_failure_retains_reported_usage () =

@@ -786,6 +786,12 @@ if "app-server" in args:
     tool = request["params"]["dynamicTools"][0]["name"]
     emit({"id": request["id"], "result": {"thread": {"id": "effort-thread"}, "model": model}})
     request = read()
+    if request["method"] == "model/list":
+        emit({"id": request["id"], "result": {"data": [{"id": model, "model": model,
+            "displayName": model, "isDefault": True, "defaultReasoningEffort": "medium",
+            "supportedReasoningEfforts": [{"reasoningEffort": effort, "description": effort}
+                for effort in ["low", "medium", "high", "xhigh", "max", "ultra"]]}], "nextCursor": None}})
+        request = read()
     assert request["method"] == "turn/start"
     capture.write_text(json.dumps({"effort": request["params"].get("effort"), "model": model}))
     emit({"id": request["id"], "result": {"turn": {"id": "effort-turn"}}})
@@ -916,6 +922,7 @@ default = "fixture.selected"
         check bool (protocol ^ " actual readiness tool consumed") true result.tool_roundtrip;
         check_capture (protocol ^ " readiness") expected model)
         [ "codex-app-server", "gpt-6.1-sol", Some "ultra", Some "ultra"
+        ; "codex-app-server", "gpt-future-fixture", Some "ultra", Some "ultra"
         ; "codex-app-server", "gpt-6.1-sol", None, None
         ; "claude-code", "claude-sonnet-5-5", Some "high", Some "high"
         ; "claude-code", "claude-sonnet-5-5", Some "minimal", Some "low"

@@ -36,6 +36,8 @@ let run ~mgr ~clock ~cwd ~directory ~account_home ~cli_path ~timeout_s =
     let context = Option.bind contexts (List.assoc_opt row.model) in
     `Assoc ["id", `String row.model; "label", `String row.display_name;
       "is_default", `Bool row.is_default;
+      "supported_reasoning_efforts", `List (List.map (fun effort -> `String effort) row.supported_reasoning_efforts);
+      "default_reasoning_effort", `String row.default_reasoning_effort;
       "context", (match context with Some value -> `Int value | None -> `Null)]) models in
   Ok (`Assoc ["schema", `String "masc.codex_model_refresh.v1";
     "source", `String (match contexts with Some _ -> "isolated_cli_cache" | None -> "cli_list_without_context_cache");

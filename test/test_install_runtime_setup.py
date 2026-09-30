@@ -635,11 +635,15 @@ class CodexExplicitRefresh(unittest.TestCase):
     def test_refresh_bypasses_cached_discovery_and_keeps_exact_context(self):
         source = dict(choice='codex', command='/owned/codex', endpoint='', api_key_env='', rows=[])
         receipt = dict(schema='masc.codex_model_refresh.v1', source='isolated_cli_cache',
-                       models=[dict(id='new-model', label='New model', context=272000, is_default=True)])
+                       models=[dict(id='new-model', label='New model', context=272000, is_default=True,
+                                    supported_reasoning_efforts=['low', 'ultra', 'future-effort'],
+                                    default_reasoning_effort='future-effort')])
         with patch.object(SETUP.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, json.dumps(receipt), '')) as run, \
                 patch.object(SETUP, 'catalog_models', return_value=[]):
             rows, origin = SETUP.source_models('/owned/masc', source, 10, refresh=True)
         self.assertEqual(rows[0]['context'], 272000)
+        self.assertEqual(rows[0]['supported_reasoning_efforts'], ['low', 'ultra', 'future-effort'])
+        self.assertEqual(rows[0]['default_reasoning_effort'], 'future-effort')
         self.assertEqual(run.call_args.args[0], ['/owned/masc', 'runtime-codex-models', '--cli-path', '/owned/codex'])
         self.assertIn('refreshed', origin)
 
@@ -675,8 +679,12 @@ class CodexExplicitRefresh(unittest.TestCase):
                       rows=[], account_home='/selected/home')
         with patch.object(SETUP, 'render', return_value=('codex.new-model', b'')) as renderer:
             _, selected = SETUP.resolve_model_spec(
-                source, dict(id='new-model', context=8192), 10)
+                source, dict(id='new-model', context=8192,
+                             supported_reasoning_efforts=['low', 'future-effort'],
+                             default_reasoning_effort='future-effort'), 10)
         self.assertEqual(selected['account_home'], '/selected/home')
+        self.assertNotIn('reasoning_effort', selected,
+                         'advertised client default stays informational, not an explicit runtime control')
         self.assertEqual(renderer.call_args.args[0]['account_home'], '/selected/home')
 
     def test_new_codex_model_spec_omits_undeclared_account_home(self):
@@ -693,6 +701,7 @@ class CodexExplicitRefresh(unittest.TestCase):
             ambient = home / '.codex'
             ambient.mkdir()
             (ambient / 'auth.json').write_text('{"fixture":"wrong-ambient"}')
+            ambient_before = {p.name: p.read_bytes() for p in ambient.iterdir()}
             original = home / 'selected-codex'
             original.mkdir()
             (original / 'auth.json').write_text('{"fixture":"private"}')
@@ -706,15 +715,23 @@ home = pathlib.Path(os.environ['CODEX_HOME'])
 assert home != pathlib.Path(os.environ['HOME']) / '.codex'
 assert json.loads((home / 'auth.json').read_text()) == {'fixture': 'private'}
 assert not (home / 'models_cache.json').exists()
+requests = pathlib.Path(sys.argv[0]).with_suffix('.requests.jsonl')
 for line in sys.stdin:
     request = json.loads(line)
+    with requests.open('a') as out:
+        out.write(json.dumps(request) + '\\n')
     method = request['method']
     if method == 'initialized': continue
     if method == 'initialize': result = {'userAgent':'fixture/1'}
     elif method == 'account/read': result = {'account':{'type':'apiKey'}, 'requiresOpenaiAuth':True}
     elif method == 'model/list':
         (home / 'models_cache.json').write_text(json.dumps({'models':[{'slug':'fresh-model','context_window':272000}]}))
-        result = {'data':[{'id':'ui-id','model':'fresh-model','displayName':'Fresh model','isDefault':True}], 'nextCursor':None}
+        result = {'data':[{'id':'ui-id','model':'fresh-model','displayName':'Fresh model','isDefault':True,
+            'supportedReasoningEfforts':[
+                {'reasoningEffort':'low', 'description':'Fast responses'},
+                {'reasoningEffort':'ultra', 'description':'Automatic task delegation'},
+                {'reasoningEffort':'future-effort', 'description':'New account-specific level'}],
+            'defaultReasoningEffort':'future-effort'}], 'nextCursor':None}
     else: raise AssertionError('unexpected operation ' + method)
     print(json.dumps({'id':request['id'],'result':result}), flush=True)
 ''')
@@ -726,7 +743,15 @@ for line in sys.stdin:
             self.assertEqual(receipt['source'], 'isolated_cli_cache')
             self.assertEqual(receipt['models'][0]['id'], 'fresh-model')
             self.assertEqual(receipt['models'][0]['context'], 272000)
+            self.assertEqual(receipt['models'][0]['supported_reasoning_efforts'],
+                             ['low', 'ultra', 'future-effort'])
+            self.assertEqual(receipt['models'][0]['default_reasoning_effort'], 'future-effort')
+            self.assertFalse(receipt['account_availability_verified'])
+            requests = [json.loads(line) for line in client.with_suffix('.requests.jsonl').read_text().splitlines()]
+            self.assertEqual([request['method'] for request in requests],
+                             ['initialize', 'initialized', 'account/read', 'model/list'])
             self.assertEqual(before, {p.name: p.read_bytes() for p in original.iterdir()})
+            self.assertEqual(ambient_before, {p.name: p.read_bytes() for p in ambient.iterdir()})
             self.assertNotIn('private', result.stdout)
 
 
@@ -1226,12 +1251,18 @@ class NamedCatalogSources(unittest.TestCase):
         ]
         with patch.object(SETUP, 'provider_catalog_models', return_value=catalog_rows), \
              patch.object(SETUP, 'native_discover_models', return_value=(
-                 [dict(id='anthropic/claude-opus-5', label='claude opus', context=99),
+                 [dict(id='anthropic/claude-opus-5', label='claude opus', context=99,
+                       supported_reasoning_efforts=['high', 'future-effort'],
+                       default_reasoning_effort='future-effort'),
                   dict(id='vendor/uncurated', label='uncurated', context=7)],
                  'Current account/server model list')):
             rows, origin = SETUP.source_models('binary', source, 1)
         self.assertEqual(rows[0]['id'], 'anthropic/claude-opus-5')
         self.assertEqual(rows[0]['context'], 99)
+        self.assertEqual(rows[0]['supported_reasoning_efforts'], ['high', 'future-effort'])
+        self.assertEqual(rows[0]['default_reasoning_effort'], 'future-effort')
+        self.assertEqual(rows[0]['label'], 'anthropic/claude-opus-5')
+        self.assertEqual(rows[0]['catalog']['default_reasoning_effort'], 'high')
         self.assertEqual(rows[0]['catalog'], catalog_rows[0])
         self.assertEqual(rows[1]['id'], 'vendor/uncurated')
         self.assertNotIn('catalog', rows[1])

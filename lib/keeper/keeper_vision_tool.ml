@@ -492,6 +492,7 @@ let official_failure_can_advance : Fusion_official_client.failure -> bool = func
   | Codex_failure error ->
     (match error with
      | Subscription_required _ | Spawn_failed _
+     | Reasoning_effort_admission_failed _
      | Timeout { turn_accepted = false; _ }
      (* A client that died during initialize, account/read or thread/start
         submitted no turn, so it owes the walk nothing and the declared media

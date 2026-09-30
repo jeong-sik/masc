@@ -27,6 +27,7 @@ it('selects multiple models and default by clicking, hides key, resumes only aft
   fireEvent.input(input, { target: { value: 'fixture-private-key' } })
   fireEvent.click(screen.getByText('모델 목록 확인'))
   await screen.findByLabelText('Model A')
+  expect(document.body.textContent).not.toContain('추론 노력')
   expect((screen.getByLabelText(/Unknown/) as HTMLInputElement).disabled).toBe(true)
   fireEvent.click(screen.getByLabelText('Model A')); fireEvent.click(screen.getByLabelText('Model B'))
   fireEvent.click(screen.getByText('선택한 모델 추가'))
@@ -167,14 +168,30 @@ it('prepares only the chosen model without a numeric input', async () => {
 it('uses native Codex discovery without endpoint or credential-path inputs', async () => {
   vi.mocked(post).mockImplementation(async path => path.endsWith('/accounts/select')
     ? { schema: 'masc.web_setup_account_selection.v1', account_selected: true, invocation_verified: false, account_ref: 'b'.repeat(64) }
-    : { models: [{ id: 'fresh-model', label: 'Fresh', context: 272000, tools: null }] })
+    : { models: [{ id: 'fresh-model', label: 'Fresh', context: 272000, tools: null,
+      supported_reasoning_efforts: ['low', 'high', 'ultra', 'adaptive-v2'], default_reasoning_effort: 'native-auto' }] })
   const cli = { ...inventory, integrations: [{ id: 'codex', display_name: 'Codex', protocol: 'codex-app-server', setup_support: 'new_connection' }] }
   render(html`<${RuntimeSetupPicker} inventory=${cli} onSaved=${vi.fn()} />`)
   fireEvent.change(screen.getByLabelText('공급자'), { target: { value: 'codex' } })
   fireEvent.click(screen.getByText('서버 계정 선택 후 모델 목록 확인')); await screen.findByLabelText('Fresh')
+  expect(screen.getByText('추론 노력 · 기본: native-auto · 지원: low, high, ultra, adaptive-v2')).toBeTruthy()
+  expect(screen.getAllByRole('combobox')).toHaveLength(1)
   expect(post).toHaveBeenCalledWith('/api/v1/setup/models', { integration_id: 'codex', account_ref: 'b'.repeat(64) })
   expect(screen.queryByLabelText('서버 API 주소')).toBeNull()
   expect(screen.queryByLabelText('새 연결 API 키')).toBeNull()
+})
+
+it('displays a native reported default when the supported effort list is empty', async () => {
+  vi.mocked(post).mockImplementation(async path => path.endsWith('/accounts/select')
+    ? { schema: 'masc.web_setup_account_selection.v1', account_selected: true, invocation_verified: false, account_ref: 'b'.repeat(64) }
+    : { models: [{ id: 'native-default', label: 'Native default', context: 272000, tools: null,
+      supported_reasoning_efforts: [], default_reasoning_effort: 'medium' }] })
+  const cli = { ...inventory, integrations: [{ id: 'codex', display_name: 'Codex', protocol: 'codex-app-server', setup_support: 'new_connection' }] }
+  render(html`<${RuntimeSetupPicker} inventory=${cli} onSaved=${vi.fn()} />`)
+  fireEvent.change(screen.getByLabelText('공급자'), { target: { value: 'codex' } })
+  fireEvent.click(screen.getByText('서버 계정 선택 후 모델 목록 확인'))
+  await screen.findByText('추론 노력 · 기본: medium · 지원: 보고된 선택지 없음')
+  expect((screen.getByLabelText('Native default') as HTMLInputElement).disabled).toBe(false)
 })
 
 it('imports an explicitly selected server account and keeps only its opaque reference through context and save', async () => {

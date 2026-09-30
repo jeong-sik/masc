@@ -158,26 +158,52 @@ let native_json ~binary args =
     (try Ok (Yojson.Safe.from_string body) with Yojson.Json_error _ -> Error Unsupported_connection)
   | Ok _ | Error _ -> Error Unsupported_connection
 let positive = function `Int n when n>0 -> Some n | _ -> None
-type client_model = { id : string; label : string; context : int option }
+type reasoning_efforts = { supported : string list; default : string }
+type client_model = { id : string; label : string; context : int option; reasoning_efforts : reasoning_efforts option }
+let client_reasoning_efforts row =
+  let effort = function `String value when value<>"" -> Ok value | _ -> Error Unsupported_connection in
+  match List.assoc_opt "supported_reasoning_efforts" row,List.assoc_opt "default_reasoning_effort" row with
+  | None,None -> Ok None
+  | Some (`List values),Some reported_default ->
+    let rec supported seen = function
+      | [] -> Ok []
+      | value::tail ->
+        let* value=effort value in
+        let* ()=if List.mem value seen then Error Unsupported_connection else Ok () in
+        let* tail=supported (value::seen) tail in Ok (value::tail) in
+    let* supported=supported [] values in
+    let* default=effort reported_default in
+    (* These are the client's open vocabulary. The official model schema
+       allows an empty supported list and does not require default membership. *)
+    Ok (Some {supported;default})
+  | None,Some _ | Some _,None | Some _,Some _ -> Error Unsupported_connection
 let client_models ~catalog json =
   let* root=match json with `Assoc fields -> Ok fields | _ -> Error Unsupported_connection in
   let* models=list (value "models" root) in
   let rec project seen = function
     | [] -> Ok []
     | (`Assoc row)::tail ->
+      let* ()=if List.length row=List.length (List.sort_uniq String.compare (List.map fst row))
+        then Ok () else Error Unsupported_connection in
       let* id=text (value "id" row) in
       let* ()=if List.mem id seen then Error Unsupported_connection else Ok () in
       let label=match value "label" row with `String label -> label | _ -> id in
       let context=value (if catalog then "max_context" else "context") row in
       let context=positive context in
+      let* reasoning_efforts=client_reasoning_efforts row in
       let* tail=project (id::seen) tail in
-      Ok ({id;label;context}::tail)
+      Ok ({id;label;context;reasoning_efforts}::tail)
     | _ -> Error Unsupported_connection in
   project [] models
 let client_models_json ~source models =
   let rows=List.map (fun model ->
     let context=match model.context with Some n -> `Int n | None -> `Null in
-    `Assoc ["id",`String model.id;"label",`String model.label;"context",context;"tools",`Null]) models in
+    let efforts=match model.reasoning_efforts with
+      | None -> []
+      | Some {supported;default} ->
+        ["supported_reasoning_efforts",`List (List.map (fun effort -> `String effort) supported);
+         "default_reasoning_effort",`String default] in
+    `Assoc (["id",`String model.id;"label",`String model.label;"context",context;"tools",`Null] @ efforts)) models in
   `Assoc ["source",`String source;"account_availability_verified",`Bool false;"models",`List rows]
 let project_client_models ~source ~catalog json =
   let* models=client_models ~catalog json in

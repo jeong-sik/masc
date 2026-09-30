@@ -1481,8 +1481,13 @@ def source_models(binary, source, timeout, refresh=False):
             discovered = next((item for item in observed if item['id'] == row['id']), None)
             context = (discovered['context'] if discovered and positive_integer(discovered.get('context'))
                        else row.get('max_context'))
-            rows.append(dict(id=row['id'], label=row.get('label') or row['id'],
-                             context=context, existing=None, catalog=row))
+            curated_model = dict(id=row['id'], label=row.get('label') or row['id'],
+                                 context=context, existing=None, catalog=row)
+            if discovered is not None:
+                for key in ('supported_reasoning_efforts', 'default_reasoning_effort'):
+                    if key in discovered:
+                        curated_model[key] = discovered[key]
+            rows.append(curated_model)
     # An account switch invalidates both membership and effective CLI context.
     declared_rows = [] if choice in OFFICIAL_CLIENTS and source.get('credential_replaced') else source['rows']
     for model in observed:

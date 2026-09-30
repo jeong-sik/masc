@@ -1,0 +1,13 @@
+--- grader-with-snapshot-guard
++++ grader-without-snapshot-guard
+@@ -191,9 +191,7 @@
+         if fact is None:
+             return self.refuse(request_id, "the deck changed or the question's fact is absent")
+         question_record, = evidence([question["fields"]["record"]])
+-        if (snapshot_reference(question["evidence"], "question")
+-                != fact["reference"]["evidence"][0]
+-                or question_record != fact["record"]):
++        if question_record != fact["record"]:
+             return self.refuse(request_id, "the deck changed since the question was asked")
+         if fact["field"] != question["fields"].get("field"):
+             return self.refuse(request_id, "the deck fact no longer has the question's field")

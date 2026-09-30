@@ -505,6 +505,19 @@ type msg_entry = {
   me_at: float;
 }
 
+(* Rows already read from one Keeper, with the paging authority supplied by
+   those reads. This is a session cache, not another persistent transcript. *)
+type keeper_chat_page = {
+  kcp_rows : msg_entry list;
+  kcp_history_error : string option;
+  kcp_history_dropped : int;
+  kcp_memory_error : string option;
+  kcp_memory_dropped : int;
+  kcp_older_cursor : float option;
+  kcp_older_exist : bool;
+  kcp_older_error : string option;
+}
+
 (* The Memory lane in summary mode says where the memory ended up.
 
    A failed Librarian pass is not drawn there: while passes keep failing the
@@ -6472,11 +6485,11 @@ type state = {
      Cleared when the turn settles; the settled value moves to
      [msg_settled_logs]. *)
   mutable msg_live: turn_log option;
-  (* The keeper's durable transcript as last loaded, for the keeper the pane is
-     showing. Replaced wholesale by a load rather than merged: the server holds
-     the record of what was said, and reconciling two copies of it row by row
-     needs an identity the two do not share. *)
+  (* The current Keeper's durable rows already read, including older pages.
+     Refresh merges by structural row identity. Inactive conversations keep
+     their reading and cursor in [msg_loaded_pages] until revisited. *)
   mutable msg_loaded: msg_entry list;
+  mutable msg_loaded_pages: (string * keeper_chat_page) list;
   mutable msg_loaded_keeper: string option;
   mutable msg_loaded_error: string option;
   mutable msg_loaded_dropped: int;
@@ -8482,6 +8495,7 @@ let create_state
   msg_recall_replaces = None;
   msg_live = None;
   msg_loaded = [];
+  msg_loaded_pages = [];
   msg_loaded_keeper = None;
   msg_loaded_error = None;
   msg_loaded_dropped = 0;
@@ -8710,6 +8724,51 @@ let resources_empty_note (list : Masc_tui_mcp.resource list option) =
   | None -> Some " (loading\xe2\x80\xa6)"
   | Some [] -> Some " (no resources)"
   | Some (_ :: _) -> None
+
+let restore_keeper_chat_page (state : state) keeper_name =
+  (match state.msg_loaded_keeper with
+   | None -> ()
+   | Some loaded_keeper ->
+       let page =
+         { kcp_rows = state.msg_loaded
+         ; kcp_history_error = state.msg_loaded_error
+         ; kcp_history_dropped = state.msg_loaded_dropped
+         ; kcp_memory_error = state.msg_memory_error
+         ; kcp_memory_dropped = state.msg_memory_dropped
+         ; kcp_older_cursor = state.msg_older_cursor
+         ; kcp_older_exist = state.msg_older_exist
+         ; kcp_older_error = state.msg_older_error
+         }
+       in
+       state.msg_loaded_pages <-
+         (loaded_keeper, page) :: List.remove_assoc loaded_keeper state.msg_loaded_pages);
+  (* Requests that belonged to the outgoing page cannot publish into a page
+     restored during A -> B -> A, even before the next GET starts. *)
+  state.msg_history_load_generation <- state.msg_history_load_generation + 1;
+  state.msg_history_inflight <- None;
+  state.msg_older_loading <- false;
+  match List.assoc_opt keeper_name state.msg_loaded_pages with
+  | Some page ->
+      state.msg_loaded <- page.kcp_rows;
+      state.msg_loaded_keeper <- Some keeper_name;
+      state.msg_loaded_error <- page.kcp_history_error;
+      state.msg_loaded_dropped <- page.kcp_history_dropped;
+      state.msg_memory_error <- page.kcp_memory_error;
+      state.msg_memory_dropped <- page.kcp_memory_dropped;
+      state.msg_older_cursor <- page.kcp_older_cursor;
+      state.msg_older_exist <- page.kcp_older_exist;
+      state.msg_older_error <- page.kcp_older_error
+  | None ->
+      state.msg_loaded <- [];
+      state.msg_loaded_keeper <- None;
+      state.msg_loaded_error <- None;
+      state.msg_loaded_dropped <- 0;
+      state.msg_memory_error <- None;
+      state.msg_memory_dropped <- 0;
+      state.msg_older_cursor <- None;
+      state.msg_older_exist <- false;
+      state.msg_older_error <- None
+;;
 
 let compute_chat_rows_for (state : state) keeper_name ~queued_request_ids =
   let loaded =

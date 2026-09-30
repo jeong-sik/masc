@@ -35,7 +35,6 @@ related: ["0091", "execute-subset-dispositions", "execute-boundary-is-the-sandbo
 | 항목 | 값 | 근거 |
 |---|---|---|
 | 최상위 파라미터 | `argv`, `pipeline`, `then`, `env`, `cwd`, `timeout_sec`, `stdin`, `stdout`, `stderr`, 셸 한 줄 필드, `shell` (11개) | `config/tools/tool_execute.toml` |
-| 스키마 크기 | 6,776 B, 중첩 7단, exec 단계 shape 이 top·pipeline·then·then.pipeline 에 네 번 | agent-core 스냅샷, `test_keeper_tool_schema_bytes` 주석 |
 | 설명문 | 1,362 B. "typed stdin/stdout/stderr 객체로 리다이렉트하고 pipeline 필드로 파이프하라" 고 가르침 | TOML `description` |
 | TOML | 515줄 중 312줄이 `pipeline`·`then` 파라미터 | 같은 파일 |
 | OCaml | `keeper_tool_execute_typed_input.ml` 976줄, pipeline/then/redirect 언급 99곳 | rg |
@@ -196,7 +195,7 @@ Codex 의 권한 승격 객체이고 명령 자체는 문자열이다. 샌드박
 
 | PR | 브랜치 | 내용 | 동작 변화 | 증명 |
 |---|---|---|---|---|
-| 1 | `execute-v2-schema` (main 기반) | TOML 파라미터 5개, 설명문 694 B, `check-execute-async-surface.sh` 문장 갱신, `subset_rewrite` 의 `Move_to_field Stdin` 조언 → `Unrepresentable`, `Json_schema_shared_defs` 삭제, 문서 3종 | `pipeline`/`then`/typed `stdin`/`env` 입력이 스키마 거절(이틀간 3건) | `test_execute_tool_toml_parity` 구조 핀(properties, oneOf required, 여섯 이름 부재, 설명문 ≤700 B), `test_keeper_tool_schema_bytes` 하락, `registry_integrity` 새 문장 핀 |
+| 1 | `execute-v2-schema` (main 기반) | TOML 파라미터 5개, 설명문 694 B, `check-execute-async-surface.sh` 문장 갱신, `subset_rewrite` 의 `Move_to_field Stdin` 조언 → `Unrepresentable`, `Json_schema_shared_defs` 삭제, 문서 3종 | `pipeline`/`then`/typed `stdin`/`env` 입력이 스키마 거절(이틀간 3건) | `test_execute_tool_toml_parity` 구조 핀(properties, oneOf required, 여섯 이름 부재), `registry_integrity` 새 문장 핀 |
 | 2 | `execute-typed-input-drops-then-and-env` (PR1 스택) | `typed_input` 에서 `then`/`conditional`/`env` 디코딩·lowering 삭제, 게스트 레인 typed env 거절과 remote_ssh GH 토큰 env 검사 삭제(도달 불가) | 없음(스키마가 이미 거절) | `test_keeper_tool_execute_typed_input`, `test_keeper_github_identity`, `test_keeper_tool_dispatch_runtime` |
 | 3a | `execute-typed-input-argv-or-script` (PR2 스택) | 리다이렉트: `input_source`/`output_sink`/`redirect_namespace`/`Redirect_*` 와 runtime 의 Docker Bound_mount 사전 거절 삭제 | 없음 | `test_keeper_tool_execute_typed_input` 리다이렉트 20건 삭제 |
 | 3b | 같은 브랜치 | 파이프라인: `program`/`parse_pipeline`, `Staged` → `Argv of string list`, `Execute_shell_ir.pipeline`, `tui_decode` 프리뷰 분기, docker_route typed e2e 8곳 삭제 | 없음 | `test_tui_decode`, `test_keeper_sandbox_docker_route`, `test_exec_dispatch*`, `test_exec_shell_command_gate` 불변 |

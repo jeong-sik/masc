@@ -45,7 +45,10 @@ def fixtures():
 
 def scan(process, fd, output, expected):
     """Page to the end, collecting actual terminal rows, not output history."""
-    h.press_and_settle(process, fd, output, b"\x1b[H")
+    # The first scan already starts at Home. The renderer does not repaint
+    # unchanged scroll state, so settle the key without requiring a new frame.
+    h.write_all(fd, output, b"\x1b[H")
+    h.drain_until_quiet(process, fd, output)
     seen = set()
     previous = None
     for _ in range(80):

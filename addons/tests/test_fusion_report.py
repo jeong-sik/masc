@@ -13,6 +13,11 @@ import unittest
 from test_fusion_results import RUN, call, detail, source
 
 
+def reply_limit(package):
+    manifest = Path(__file__).resolve().parents[1] / package / "lane.toml"
+    return tomllib.loads(manifest.read_text())["resources"]["max_reply_bytes"]
+
+
 def upstream(output, *, complete=True, sequence=1, output_id=None, selected_lanes=None):
     output = copy.deepcopy(output)
     # Runtime IDs/relations include the sequence; lanes use the instance only.
@@ -106,9 +111,8 @@ class FusionReport(unittest.TestCase):
                 self.assertNotIn("structuredContent", result)
 
     def test_full_body_fits_when_native_producer_wire_fits(self):
-        root = Path(__file__).resolve().parents[1]
-        producer_limit = tomllib.loads((root / "fusion-results/lane.toml").read_text())["resources"]["max_reply_bytes"]
-        report_limit = tomllib.loads((root / "fusion-report/lane.toml").read_text())["resources"]["max_reply_bytes"]
+        producer_limit = reply_limit("fusion-results")
+        report_limit = reply_limit("fusion-report")
         for atom in ("x", '"\\\n\t', "분석🙂"):
             # Select the largest actual producer MCP wire reply below its
             # declared resource boundary; escaping and UTF-8 count as bytes.
@@ -155,10 +159,10 @@ class FusionReport(unittest.TestCase):
             captured["incarnation"] = value["run"]["run_id"]
             captures.append(captured)
         producer_wire, output = wire("fusion-results", captures)
-        self.assertLessEqual(len(producer_wire), 4194304)
+        self.assertLessEqual(len(producer_wire), reply_limit("fusion-results"))
         payload, result = wire("fusion-report", [upstream(output["structuredContent"])])
         self.assertFalse(result["isError"])
-        self.assertLessEqual(len(payload), 4194304)
+        self.assertLessEqual(len(payload), reply_limit("fusion-report"))
         self.assertEqual(len(reports(result["structuredContent"])), 32)
         self.assertEqual(len(contexts(result["structuredContent"])), 1)
         for index, item in enumerate(reports(result["structuredContent"])):
@@ -166,8 +170,7 @@ class FusionReport(unittest.TestCase):
             self.assertTrue(item["fields"]["input_complete"])
 
     def test_unrepresentable_report_is_explicitly_refused_without_truncation(self):
-        root = Path(__file__).resolve().parents[1]
-        report_limit = tomllib.loads((root / "fusion-report/lane.toml").read_text())["resources"]["max_reply_bytes"]
+        report_limit = reply_limit("fusion-report")
         output = project(detail())
         # Exercise the report worker's output boundary with synthetic retained
         # evidence. A live producer now refuses this size before composition.
@@ -190,18 +193,18 @@ class FusionReport(unittest.TestCase):
             captured["incarnation"] = run_id
             captures.append(captured)
         producer_wire, output = wire("fusion-results", captures)
-        self.assertLessEqual(len(producer_wire), 4194304)
+        self.assertLessEqual(len(producer_wire), reply_limit("fusion-results"))
         captured = upstream(output["structuredContent"])
         captured["observations"][0]["producer"]["run_id"] = "world-" + "x" * 1000000
         blob = {"producer": captured["observations"][0]["producer"],
                 "output": captured["observations"][0]["output"]}
         encoded = json.dumps(blob, ensure_ascii=False, separators=(",", ":")).encode()
-        self.assertLessEqual(len(encoded), 4194304)
+        self.assertLessEqual(len(encoded), reply_limit("fusion-report"))
         digest = hashlib.sha256(encoded).hexdigest()
         captured["observations"][0]["evidence"] = [{"uri": "lane-evidence:" + digest, "sha256": digest}]
         payload, result = wire("fusion-report", [captured])
         self.assertFalse(result["isError"])
-        self.assertLessEqual(len(payload), 4194304)
+        self.assertLessEqual(len(payload), reply_limit("fusion-report"))
         result = result["structuredContent"]
         self.assertEqual(len(reports(result)), 500)
         context = contexts(result)

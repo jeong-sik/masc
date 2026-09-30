@@ -116,6 +116,8 @@ def run(binary: str, phase: str, captures: Path | None):
 
     def interact(process, fd, _slave, output, _base):
         try:
+            h.resize_and_wait(process, fd, output, rows=38, columns=120,
+                              needle=b"MASC Dashboard", controls=(h.FULL_REDRAW,))
             await_screen(process, fd, output,
                 lambda text: all(line in text for line in SUMMARY), "exact large currency summary")
             capture(output, "ready-overview")
@@ -177,7 +179,164 @@ def run(binary: str, phase: str, captures: Path | None):
 
     h.run_terminal_scenario(binary, description="Candle currency survives " + phase,
         interact=interact, http_fixtures=fixtures, http_requests=requests,
-        terminal_rows=38, terminal_cols=120)
+        terminal_cols=120)
+
+
+def currency_follows_workspace_authority(binary: str, captures: Path | None) -> None:
+    fixtures = h.keeper_runtime_http_fixtures(alpha_runtime_id="currency.authority")
+    original = copy.deepcopy(fixtures[ROSTER_PATH][1])
+    phases = {"current": "a-ready", "base": "", "hold": False}
+    lock = threading.Lock()
+    held_started = threading.Event()
+    release_held = threading.Event()
+    b_summary = (b"Candle issued: 1.000", b"Candle burned: 0.000", b"Candle circulating: 1.000")
+    fresh_summary = (b"Candle issued: 3.000", b"Candle burned: 0.000", b"Candle circulating: 3.000")
+
+    def prepare(base):
+        h.seed_row_budget_workspace(base)
+        with lock:
+            phases["base"] = str(Path(base).resolve())
+
+    def publish(phase):
+        with lock:
+            phases["current"] = phase
+
+    def health():
+        with lock:
+            phase, base = phases["current"], phases["base"]
+        if phase == "identity-error":
+            return h.RawHttpResponse(503, b'{"error":"identity deliberately unavailable"}', content_type="application/json")
+        effective = base if phase in ("a-ready", "a-fresh", "a-booting") else base + "-workspace-b"
+        _, payload = h.fleet_safety_fixture()
+        payload["version"] = phase
+        payload["paths"] = {"effective_base_path": effective,
+                            "effective_masc_root": effective + "/.masc"}
+        payload["startup"] = {"state_ready": phase not in ("a-booting", "b-booting")}
+        return h.RawHttpResponse(200, json.dumps(payload).encode(), content_type="application/json")
+
+    def roster():
+        with lock:
+            phase = phases["current"]
+            held = phases["hold"]
+            phases["hold"] = False
+        payload = copy.deepcopy(original)
+        amount = "3000" if phase == "a-fresh" else "1000"
+        payload["candle"] = dict(READY) if phase == "a-ready" else {
+            "status": "ready", "issued_milli": amount,
+            "burned_milli": "0", "circulating_milli": amount}
+        for row in payload["keepers"]:
+            row["candle_balance_milli"] = (
+                BALANCE_MILLI if phase == "a-ready" else amount) if row["name"] == "alpha" else "0"
+        if held:
+            held_started.set()
+            if not release_held.wait(timeout=30):
+                raise AssertionError("held authority roster was never released")
+        return 200, payload
+
+    fixtures["/health"] = health
+    fixtures["/health?full=1"] = health
+    fixtures[ROSTER_PATH] = roster
+
+    def interact(process, fd, _slave, output, _base):
+        h.resize_and_wait(process, fd, output, rows=50, columns=160,
+                          needle=b"MASC Dashboard", controls=(h.FULL_REDRAW,))
+        def seen(phase, predicate):
+            await_screen(process, fd, output, predicate, "currency authority " + phase)
+            if captures is not None:
+                (captures / ("authority-" + phase + ".txt")).write_bytes(screen(output))
+        def no_currency(text):
+            return b"Candle issued:" not in text and b"Candle burned:" not in text \
+                and b"Candle circulating:" not in text and b"Candle ready:" not in text
+        seen("a-ready", lambda text: all(line in text for line in SUMMARY))
+        publish("b-booting")
+        os.write(fd, b"r")
+        seen("b-booting", lambda text: b"booting" in text and no_currency(text))
+        h.send_and_wait(process, fd, output, b"?", b"MASC Cheat Sheet")
+        assert no_currency(screen(output)) and b"Candle details" not in screen(output)
+        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
+        publish("b-ready")
+        os.write(fd, b"r")
+        seen("b-ready", lambda text: all(line in text for line in b_summary)
+             and not any(line in text for line in SUMMARY))
+        h.send_and_wait(process, fd, output, b"?", b"Candle details")
+        assert all(line in screen(output) for line in b_summary)
+        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
+        publish("a-ready")
+        os.write(fd, b"r")
+        seen("a-returned", lambda text: all(line in text for line in SUMMARY))
+        publish("identity-error")
+        os.write(fd, b"r")
+        seen("identity-error", lambda text: b"MASC Dashboard" in text and no_currency(text))
+        h.send_and_wait(process, fd, output, b"?", b"MASC Cheat Sheet")
+        assert no_currency(screen(output)) and b"Candle details" not in screen(output)
+        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
+        publish("b-ready")
+        os.write(fd, b"r")
+        seen("recovered", lambda text: all(line in text for line in b_summary))
+        publish("a-ready")
+        os.write(fd, b"r")
+        seen("a-before-held", lambda text: all(line in text for line in SUMMARY))
+        h.send_and_wait(process, fd, output, b"A", b"MASC Activity")
+        # Activity asks for no roster. Entering Dashboard therefore launches
+        # a scoped roster request; its A response is frozen before the switch.
+        with lock:
+            phases["hold"] = True
+        try:
+            h.palette_go(process, fd, output, b"go Dashboard", b"MASC Dashboard")
+            assert h.wait_for_fixture_event(process, fd, output, held_started,
+                timeout=WAIT_SECONDS), "A scoped roster did not enter its held response"
+            publish("b-booting")
+            seen("held-b-booting", lambda text: b"booting" in text and no_currency(text))
+            publish("b-ready")
+            seen("held-b-ready", lambda text: b"[connected]" in text
+                 and b"workspace mismatch" in text and no_currency(text))
+            after_release = len(output)
+            release_held.set()
+            seen("held-recovered", lambda text: all(line in text for line in b_summary))
+            assert not any(line in h.CSI_RE.sub(b"", bytes(output[after_release:]))
+                           for line in SUMMARY), "late A roster restored foreign currency"
+        finally:
+            release_held.set()
+        for withdrawal in ("a-booting", "identity-error", "b-ready"):
+            publish("a-ready")
+            os.write(fd, b"r")
+            seen(withdrawal + "-before", lambda text: all(line in text for line in SUMMARY))
+            h.send_and_wait(process, fd, output, b"A", b"MASC Activity")
+            held_started.clear()
+            release_held.clear()
+            with lock:
+                phases["hold"] = True
+            try:
+                h.palette_go(process, fd, output, b"go Dashboard", b"MASC Dashboard")
+                assert h.wait_for_fixture_event(process, fd, output, held_started,
+                    timeout=WAIT_SECONDS), "old A roster did not enter its held response"
+                publish(withdrawal)
+                if withdrawal == "a-booting":
+                    predicate = lambda text: b"booting" in text and no_currency(text)
+                elif withdrawal == "identity-error":
+                    predicate = lambda text: b"MASC Dashboard" in text and no_currency(text)
+                else:
+                    predicate = lambda text: b"workspace mismatch" in text and no_currency(text)
+                seen(withdrawal + "-withdrawn", predicate)
+                publish("a-fresh")
+                seen(withdrawal + "-ready-again", lambda text: b"va-fresh" in text
+                     and b"[connected]" in text and b"workspace mismatch" not in text
+                     and no_currency(text))
+                after_release = len(output)
+                release_held.set()
+                # The scoped request stays in flight until its completion is
+                # applied. Fresh roster values therefore prove that the old
+                # completion was processed before the follow-up read finished.
+                seen(withdrawal + "-fresh", lambda text: all(line in text for line in fresh_summary))
+                assert not any(line in h.CSI_RE.sub(b"", bytes(output[after_release:]))
+                               for line in SUMMARY), "withdrawn A roster restored obsolete currency"
+            finally:
+                release_held.set()
+        os.write(fd, b"q")
+
+    h.run_terminal_scenario(binary, description="Candle amounts follow current workspace authority",
+        interact=interact, http_fixtures=fixtures, prepare_workspace=prepare,
+        refresh=0.5, terminal_cols=160)
 
 
 def short_overview_keeps_its_baseline(binary: str) -> None:
@@ -221,6 +380,8 @@ def short_overview_keeps_its_baseline(binary: str) -> None:
             fixtures[ROSTER_PATH] = (200, roster_payload)
 
         def interact(process, fd, _slave, output, _base):
+            h.resize_and_wait(process, fd, output, rows=38, columns=100,
+                              needle=b"MASC Dashboard", controls=(h.FULL_REDRAW,))
             await_screen(process, fd, output,
                 lambda text: b"attention-2" in text and b"Goals" in text,
                 "loaded baseline task and attention rows")
@@ -268,7 +429,7 @@ def short_overview_keeps_its_baseline(binary: str) -> None:
 
         h.run_terminal_scenario(binary, description="short Candle Overview keeps baseline " + phase,
             interact=interact, http_fixtures=fixtures,
-            prepare_workspace=h.seed_row_budget_workspace, terminal_rows=38, terminal_cols=100)
+            prepare_workspace=h.seed_row_budget_workspace, terminal_cols=100)
 
 
 if __name__ == "__main__":
@@ -284,5 +445,6 @@ if __name__ == "__main__":
         }, indent=2) + "\n")
     for phase in ("disabled", "malformed-supply", "malformed-balance", "off"):
         run(binary, phase, captures)
+    currency_follows_workspace_authority(binary, captures)
     short_overview_keeps_its_baseline(binary)
-    print("Candle currency TUI: PASS (8 real PTY scenarios)")
+    print("Candle currency TUI: PASS (9 real PTY scenarios)")

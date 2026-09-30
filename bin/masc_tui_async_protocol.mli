@@ -69,11 +69,6 @@ type preset_sink =
   | Preset_to_chat of string option
   | Preset_to_pane
 
-type identity_login_result =
-  | Login_started of { provider_id : string; label : string; url : string }
-  | Login_attached of string
-  | Login_failed of string
-
 (* The UI domain owns these refs. A posted tick is a mutation: closing its
    view invalidates presentation, never cancels or retries the request. Keep
    the pending request until its terminal mailbox result, even across reopen. *)
@@ -497,7 +492,7 @@ type async_msg =
       string * string * bool * (unit, string) result
       (** keeper, provider, the state the operator asked for, and whether
           the server took it. *)
-  | Identity_login_started of string * identity_login_result
+  | Identity_login_started of string * Masc_tui_identity_updates.identity_login_result
   | Identity_refreshed of string * (unit, string) result
   | Identity_app_saved of string * (int, string) result
       (** provider id, then how many scopes were recorded *)

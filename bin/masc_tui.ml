@@ -3643,7 +3643,7 @@ let launch_identity_login state ~mailbox ~keeper_name ~provider_id ~label =
           Masc_tui_http.post_keeper_oauth_login ~host ~port ~keeper_name
             ~provider_id
         with
-        | Error err -> Login_failed err
+        | Error err -> Masc_tui_identity_updates.Login_failed err
         | Ok json -> (
             match json with
             | `Assoc fields -> (
@@ -3655,7 +3655,7 @@ let launch_identity_login state ~mailbox ~keeper_name ~provider_id ~label =
                       | _ -> label ^ ": credentials attached."
                     in
                     enqueue_async mailbox (Identity_refreshed (keeper_name, Ok ()));
-                    Login_attached msg
+                    Masc_tui_identity_updates.Login_attached msg
                 | _ -> (
                     match List.assoc_opt "authorize_url" fields with
                     | Some (`String url) ->
@@ -3671,14 +3671,14 @@ let launch_identity_login state ~mailbox ~keeper_name ~provider_id ~label =
                            no opener. *)
                         (match Masc_tui_browser.open_url url with
                         | Ok _ | Error _ -> ());
-                        Login_started { provider_id; label; url }
+                        Masc_tui_identity_updates.Login_started { provider_id; label; url }
                     | Some _ | None ->
-                        Login_failed "the server answered without an authorize_url"))
+                        Masc_tui_identity_updates.Login_failed "the server answered without an authorize_url"))
             | _ ->
-                Login_failed "the server answered with something this cannot read")
+                Masc_tui_identity_updates.Login_failed "the server answered with something this cannot read")
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Login_failed (Printexc.to_string exn)
+      | exn -> Masc_tui_identity_updates.Login_failed (Printexc.to_string exn)
     in
     enqueue_async mailbox (Identity_login_started (keeper_name, result))
   in
@@ -3690,7 +3690,7 @@ let launch_identity_login state ~mailbox ~keeper_name ~provider_id ~label =
   | None ->
       enqueue_async mailbox
         (Identity_login_started
-           (keeper_name, Login_failed "Eio switch is unavailable"))
+           (keeper_name, Masc_tui_identity_updates.Login_failed "Eio switch is unavailable"))
 
 (* Ask every attached service again what tools it has. An operator action
    rather than a timer: a stale catalog is visible and fixable, while a timer
@@ -13072,105 +13072,21 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       Masc_tui_resources_updates.listed state result
   | Resource_read (uri, result) ->
       Masc_tui_resources_updates.read_done state ~uri result
-  | Github_identity_view_loaded (request, result) -> (
-      let keeper_name = request.drr_keeper in
-      let current = Masc_tui_types.finish_detail_read state request in
-      let still_selected =
-        match List.nth_opt state.keepers state.keeper_cursor with
-        | Some keeper -> String.equal keeper.k_name keeper_name
-        | None -> false
-      in
-      if current && still_selected then
-        match result with
-        | Ok lines ->
-            state.github_identity_view <- Some (keeper_name, lines);
-            state.github_identity_view_error <- None
-        | Error detail ->
-            state.github_identity_view_error <- Some detail)
+  | Github_identity_view_loaded (request, result) ->
+      Masc_tui_identity_updates.github_view_loaded state request result
   | Identity_switch_set (keeper_name, provider_id, enabled, result) ->
-      (match result with
-       | Ok () ->
-           report_action state "system"
-             (Printf.sprintf "%s: %s switched %s" keeper_name provider_id
-                (if enabled then "on" else "off"));
-           (* Re-read rather than patch what is on screen: the switch the
-              server just wrote is the answer. *)
-           launch_identity_view state ~mailbox keeper_name
-       | Error detail ->
-           state.identity_attempt_error <-
-             Some
-               ( Masc_tui_types.Notice_bad
-               , Printf.sprintf "switch %s: %s" provider_id detail ))
-  | Identity_providers_loaded (request, result) -> (
-      let keeper_name = request.drr_keeper in
-      let current = Masc_tui_types.finish_detail_read state request in
-      let still_selected =
-        match List.nth_opt state.keepers state.keeper_cursor with
-        | Some keeper -> String.equal keeper.k_name keeper_name
-        | None -> false
-      in
-      if current && still_selected then
-        match result with
-        | Ok providers ->
-            state.identity_view <- Some (keeper_name, providers);
-            state.identity_view_error <- None;
-            (* The login this TUI started has landed once the service it was
-               for reports tools. Clearing it is what stops the tick from
-               asking again -- a poll with no end condition is a poll that
-               runs for the life of the process. *)
-            (match state.identity_login with
-             | Some login
-               when Masc_tui_types.identity_login_landed ~providers ~login ->
-                 state.identity_login <- None
-             | Some _ | None -> ())
-        | Error detail ->
-            state.identity_view_error <- Some detail)
-  | Identity_login_started (keeper_name, result) -> (
-      match result with
-      | Login_started { provider_id; label; url } ->
-          state.identity_login <-
-            Some
-              { ils_keeper = keeper_name
-              ; ils_provider = provider_id
-              ; ils_label = label
-              ; ils_url = url
-              };
-          state.identity_attempt_error <- None
-      (* Shown on the tab rather than swallowed: the operator pressed a key
-         and has to learn that nothing is going to open. Beside the list
-         rather than instead of it -- one provider refusing is not a reason
-         to take the others off the screen, and the message that matters
-         most here is the one telling them what to do about it. *)
-      | Login_attached msg ->
-          state.identity_attempt_error <- Some (Masc_tui_types.Notice_ok, msg)
-      | Login_failed detail ->
-          state.identity_attempt_error <- Some (Masc_tui_types.Notice_bad, detail))
+      Masc_tui_identity_updates.switch_set state ~keeper_name ~provider_id ~enabled
+        ~report:(fun level detail -> report_action state level detail)
+        ~refresh:(fun keeper -> launch_identity_view state ~mailbox keeper) result
+  | Identity_providers_loaded (request, result) ->
+      Masc_tui_identity_updates.providers_loaded state request result
+  | Identity_login_started (keeper_name, result) ->
+      Masc_tui_identity_updates.login_started state ~keeper_name result
   | Identity_app_saved (provider_id, result) ->
-    state.identity_attempt_error <-
-      Some
-        (match result with
-         | Ok 0 ->
-           ( Masc_tui_types.Notice_ok
-           , Printf.sprintf
-               "%s: app recorded. No scopes given, so the service's own list \
-                is what will be asked for."
-               provider_id )
-         | Ok count ->
-           ( Masc_tui_types.Notice_ok
-           , Printf.sprintf "%s: app recorded, asking for %d scope%s."
-               provider_id count (if count = 1 then "" else "s") )
-         | Error detail ->
-           (Masc_tui_types.Notice_bad, Printf.sprintf "%s: %s" provider_id detail))
-  | Identity_refreshed (keeper_name, result) -> (
-      match result with
-      (* Re-read rather than patch what is on screen: the catalog the server
-         just wrote is the answer, and building a second copy of it here is
-         how the two come to disagree. *)
-      | Ok () ->
-          state.identity_view <- None;
-          state.identity_view_error <- None;
-          launch_identity_view state ~mailbox keeper_name
-      | Error detail -> state.identity_view_error <- Some detail)
+      Masc_tui_identity_updates.app_saved state ~provider_id result
+  | Identity_refreshed (keeper_name, result) ->
+      Masc_tui_identity_updates.refreshed state ~keeper_name
+        ~refresh:(fun keeper -> launch_identity_view state ~mailbox keeper) result
   | Account_login_event (view, generation, event) ->
       (match state.account_login with
        | Some current when current == view && view.generation = generation ->

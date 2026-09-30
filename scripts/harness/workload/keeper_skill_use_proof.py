@@ -21,11 +21,11 @@ from urllib.parse import quote, urlsplit, urlunsplit
 from urllib.request import Request
 
 import proof_http
+import skill_activation_events
 
 
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 GIT_COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
-LEDGER_SCHEMA = "masc.skill-activations/v5"
 DASHBOARD_SKILL_RECEIPTS_ROUTE = "#lab?section=tools"
 
 
@@ -435,19 +435,6 @@ def scoped_summaries(
     return results
 
 
-def ledger_revision(ledger: dict[str, Any]) -> str:
-    canonical = {
-        "workspace_key": string_field(ledger, "workspace_key", "skill ledger"),
-        "session_id": string_field(ledger, "session_id", "skill ledger"),
-        "activations": list_field(ledger, "activations", "skill ledger"),
-        "transition_rejections": list_field(
-            ledger, "transition_rejections", "skill ledger"
-        ),
-    }
-    payload = json.dumps(canonical, ensure_ascii=False, separators=(",", ":")).encode()
-    return digest_bytes(payload)
-
-
 def validate_proof(
     *,
     health: dict[str, Any],
@@ -519,14 +506,15 @@ def validate_proof(
     )
     ledger = object_field(projection, "ledger", "skill_activations")
     require(
-        ledger.get("schema") == LEDGER_SCHEMA,
-        f"Skill ledger schema is not {LEDGER_SCHEMA}",
+        ledger.get("schema") == skill_activation_events.LEDGER_SCHEMA,
+        f"Skill ledger schema is not {skill_activation_events.LEDGER_SCHEMA}",
     )
     require(
         durable_ledger == ledger, "Dashboard ledger does not equal the durable ledger"
     )
     require(
-        string_field(ledger, "revision", "skill ledger") == ledger_revision(ledger),
+        string_field(ledger, "revision", "skill ledger")
+        == skill_activation_events.ledger_revision(ledger),
         "Skill ledger revision does not match its canonical content",
     )
     activations = list_field(ledger, "activations", "skill ledger")
@@ -849,6 +837,22 @@ def capture_dashboard(
     }
 
 
+def read_durable_ledger(events_path: Path) -> tuple[dict[str, Any], bytes]:
+    try:
+        durable_raw = events_path.read_bytes()
+    except OSError as error:
+        raise ProofError(
+            f"cannot read durable Skill ledger {events_path}: {error}"
+        ) from error
+    try:
+        durable_ledger = skill_activation_events.fold_event_log(durable_raw)
+    except skill_activation_events.SkillLedgerError as error:
+        raise ProofError(f"durable Skill ledger {events_path}: {error}") from error
+    if durable_ledger is None:
+        raise ProofError(f"durable Skill ledger {events_path} has recorded nothing")
+    return durable_ledger, durable_raw
+
+
 def write_json(path: Path, value: Any, *, sort_keys: bool = True) -> bytes:
     payload = (
         json.dumps(value, indent=2, ensure_ascii=False, sort_keys=sort_keys) + "\n"
@@ -904,14 +908,10 @@ def main() -> int:
     effective_base_path = string_field(paths, "effective_base_path", "health.paths")
     effective_masc_root = string_field(paths, "effective_masc_root", "health.paths")
     masc_root = Path(effective_masc_root)
-    ledger_path = masc_root / "traces" / session_id / "skill-activations.json"
-    try:
-        durable_raw = ledger_path.read_bytes()
-    except OSError as error:
-        raise ProofError(
-            f"cannot read durable Skill ledger {ledger_path}: {error}"
-        ) from error
-    durable_ledger = decode_json(durable_raw, f"durable Skill ledger {ledger_path}")
+    events_path = (
+        masc_root / "traces" / session_id / skill_activation_events.EVENTS_FILENAME
+    )
+    durable_ledger, durable_raw = read_durable_ledger(events_path)
 
     proof = validate_proof(
         health=health,
@@ -932,7 +932,7 @@ def main() -> int:
     dashboard_file = write_json(
         args.out / "dashboard-tools.json", dashboard, sort_keys=False
     )
-    (args.out / "skill-activations.json").write_bytes(durable_raw)
+    (args.out / skill_activation_events.EVENTS_FILENAME).write_bytes(durable_raw)
     (args.out / "tui-build-evidence.json").write_bytes(tui_build_raw)
     copied_tui = args.out / "masc_tui.exe"
     copied_tui.write_bytes(tui_executable_raw)
@@ -1000,7 +1000,7 @@ def main() -> int:
         },
         "proof": proof,
         "durability": {
-            "ledger_path": str(ledger_path),
+            "ledger_path": str(events_path),
             "ledger_sha256": digest_bytes(durable_raw),
             "ledger_bytes": len(durable_raw),
             "dashboard_projection_equals_ledger": True,
@@ -1015,7 +1015,7 @@ def main() -> int:
                 "bytes": len(dashboard_file),
                 "sha256": digest_bytes(dashboard_file),
             },
-            "skill-activations.json": {
+            skill_activation_events.EVENTS_FILENAME: {
                 "bytes": len(durable_raw),
                 "sha256": digest_bytes(durable_raw),
             },
@@ -1062,6 +1062,6 @@ def main() -> int:
 if __name__ == "__main__":
     try:
         raise SystemExit(main())
-    except ProofError as error:
+    except (ProofError, skill_activation_events.SkillLedgerError) as error:
         print(f"keeper-skill-use-proof: {error}")
         raise SystemExit(1) from error

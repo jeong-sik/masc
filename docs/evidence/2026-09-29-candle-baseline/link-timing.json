@@ -1,0 +1,54 @@
+{
+  "collected_at": "2026-09-29T07:26:33+00:00",
+  "link_timing": {
+    "linked_tasks": 45,
+    "status_of_linked_tasks": {
+      "todo": 12,
+      "done": 9,
+      "cancelled": 17,
+      "in_progress": 5,
+      "awaiting_verification": 2
+    },
+    "task_created_before_its_goal": {
+      "n": 2,
+      "status": {
+        "in_progress": 1,
+        "todo": 1
+      }
+    },
+    "task_created_at_or_after_its_goal": 43,
+    "unresolved_link": 0
+  },
+  "set_task_goal_calls_by_keepers": {
+    "keeper_files_read": 77,
+    "total": 6,
+    "successes": 5,
+    "failures": 1,
+    "by_keeper": {
+      "analyst": {
+        "count": 3,
+        "successes": 3,
+        "failures": 0,
+        "last_used_at": "2026-09-11T18:26:04.271431+00:00"
+      },
+      "canary-10t-cdx-sol-r3-20260820": {
+        "count": 1,
+        "successes": 0,
+        "failures": 1,
+        "last_used_at": "2026-08-21T18:53:52.434442+00:00"
+      },
+      "canary-10t-cdx-sol-xhigh-r2-20260820": {
+        "count": 1,
+        "successes": 1,
+        "failures": 0,
+        "last_used_at": "2026-08-21T18:53:08.430014+00:00"
+      },
+      "wkbl-web-leader": {
+        "count": 1,
+        "successes": 1,
+        "failures": 0,
+        "last_used_at": "2026-09-28T06:33:34.468437+00:00"
+      }
+    }
+  }
+}

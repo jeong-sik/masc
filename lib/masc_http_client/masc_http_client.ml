@@ -189,11 +189,13 @@ let get_sync ?clock ?timeout_sec ?max_body_bytes ~url ~headers () =
 
     [idle_timeout_sec] is required rather than defaulted. A tolerable silence
     depends on the protocol being streamed — a keeper turn goes quiet for as
-    long as the tool it is running takes — and this module cannot know it. *)
-let post_stream ?retain_body ~clock ~idle_timeout_sec ~url ~headers ~body ~on_chunk () =
+    long as the tool it is running takes — and this module cannot know it.
+    [retention] is required for the same reason: only the caller knows
+    whether it decodes the whole body once the stream ends. *)
+let post_stream ~retention ~clock ~idle_timeout_sec ~url ~headers ~body ~on_chunk () =
   let headers = ensure_default_headers headers in
   with_pool @@ fun pool ->
-  Pool.request_streaming ?retain_body pool ~clock ~idle_timeout_sec ~method_:`POST ~url
+  Pool.request_streaming pool ~retention ~clock ~idle_timeout_sec ~method_:`POST ~url
     ~headers ~body ~on_chunk ()
 
 (** GET that hands each response body chunk to [on_chunk] as it arrives,
@@ -201,12 +203,14 @@ let post_stream ?retain_body ~clock ~idle_timeout_sec ~url ~headers ~body ~on_ch
     requests: the observer feed at [GET /mcp?sse_kind=observer]. Same
     contract as {!post_stream}: no wall-clock cap, [idle_timeout_sec] bounds
     silence, and the caller chooses that bound because only it knows how
-    long the stream it is reading is allowed to go quiet. *)
+    long the stream it is reading is allowed to go quiet. The body is not
+    kept: a subscription stays open for hours and [on_chunk] is its only
+    reader. *)
 let get_stream ~clock ~idle_timeout_sec ~url ~headers ?on_response ~on_chunk () =
   let headers = ensure_default_headers headers in
   with_pool @@ fun pool ->
-  Pool.request_streaming pool ~clock ~idle_timeout_sec ~method_:`GET ~url
-    ~headers ?on_response ~on_chunk ()
+  Pool.request_streaming pool ~retention:Pool.Discard_body ~clock ~idle_timeout_sec
+    ~method_:`GET ~url ~headers ?on_response ~on_chunk ()
 
 module For_testing = struct
   let with_request_timeout ~clock ~timeout_sec f =

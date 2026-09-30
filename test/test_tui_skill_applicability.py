@@ -90,9 +90,9 @@ def run_case(executable: str, row: dict[str, Any]) -> None:
         _base: str,
     ) -> None:
         h.resize_and_wait(
-            process, fd, output, rows=42, columns=180, needle=b"MASC Overview"
+            process, fd, output, rows=42, columns=180, needle=b"MASC Dashboard"
         )
-        h.send_and_wait(process, fd, output, b"2", b"MASC Keepers")
+        h.send_and_wait(process, fd, output, b"3", b"MASC Keepers")
         h.select_keeper_row(process, fd, output, keeper.encode())
         h.send_and_wait(process, fd, output, b"t", b"calls (1)")
         h.drain_until_quiet(process, fd, output)

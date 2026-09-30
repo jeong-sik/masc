@@ -7,6 +7,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+import skill_activation_event_log_fixture as log_fixture
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_PATH = (
@@ -28,6 +30,7 @@ def load_module():
 
 
 capture = load_module()
+events = capture.skill_activation_events
 HEAD = "a" * 40
 TREE = "b" * 40
 SKILL_ID = "call-skill-1"
@@ -37,7 +40,32 @@ INSTANCE = "018f1d5e-7b3c-7abc-8def-0123456789ab"
 def fixture(action_identity=None):
     identity = action_identity or {"kind": "call_id", "call_id": "call-action-1"}
     activation = {
+        "identity": {
+            "source_id": "workspace",
+            "package_id": "review",
+            "name": "review",
+        },
+        "content_revision": "c" * 64,
+        "snapshot_revision": "d" * 64,
+        "turn_ref": "trace-one#1",
+        "runtime_id": "runtime-one",
         "skill_tool_use_id": SKILL_ID,
+        "agent_core_turn": 1,
+        "invocation": {
+            "kind": "instruction",
+            "origin": {"kind": "session_instruction"},
+            "served_content": {"kind": "skill_body", "bytes": 12, "sha256": "e" * 64},
+        },
+        "delivery": {
+            "boundary": {
+                "kind": "official_client_result_handoff",
+                "agent_core_turn": 1,
+            },
+            "runtime_id": "runtime-one",
+            "delivered_at": "2026-08-27T00:00:00Z",
+            "content_bytes": 12,
+            "content_sha256": "e" * 64,
+        },
         "actions": [
             {
                 "identity": identity,
@@ -47,7 +75,17 @@ def fixture(action_identity=None):
                 "observed_at": "2026-08-27T00:00:00Z",
             }
         ],
+        "activated_at": "2026-08-27T00:00:00Z",
     }
+    ledger = {
+        "schema": "masc.skill-activations/v5",
+        "workspace_key": "f" * 64,
+        "session_id": "trace-one",
+        "revision": "",
+        "activations": [activation],
+        "transition_rejections": [],
+    }
+    ledger["revision"] = events.ledger_revision(ledger)
     dashboard = {
         "effective_keeper_surface": {
             "status": "available",
@@ -56,12 +94,7 @@ def fixture(action_identity=None):
         "skill_activations": {
             "status": "available",
             "keeper_name": "keeper-one",
-            "ledger": {
-                "schema": "masc.skill-activations/v5",
-                "session_id": "trace-one",
-                "revision": "b" * 64,
-                "activations": [activation],
-            },
+            "ledger": ledger,
         },
     }
     dashboard_payload = (
@@ -93,7 +126,7 @@ def fixture(action_identity=None):
         "proof": {
             "keeper": "keeper-one",
             "session_id": "trace-one",
-            "ledger_revision": "b" * 64,
+            "ledger_revision": ledger["revision"],
             "skill_tool_use_id": SKILL_ID,
             "actions": activation["actions"],
         },
@@ -105,6 +138,46 @@ def fixture(action_identity=None):
         },
     }
     return evidence, dashboard_payload, dashboard
+
+
+def write_producer_bundle(root, evidence, dashboard_payload, events_payload):
+    health = {
+        "health_detail": "full",
+        "build": {
+            "binary_commit": HEAD,
+            "binary_commit_source": "embedded",
+            "source_fingerprint": "e" * 64,
+            "executable_sha256": "f" * 64,
+            "executable_provenance_path": "/tmp/server.provenance.json",
+            "executable_provenance_sha256": "1" * 64,
+            "runtime_instance_id": INSTANCE,
+            "started_at": "2026-08-27T00:00:00Z",
+        },
+        "paths": {
+            "effective_base_path": "/workspace",
+            "effective_masc_root": "/workspace/.masc",
+        },
+    }
+    payloads = {
+        "health.json": (json.dumps(health) + "\n").encode(),
+        "dashboard-tools.json": dashboard_payload,
+        events.EVENTS_FILENAME: events_payload,
+        "tui-build-evidence.json": b"{}\n",
+        "masc_tui.exe": b"trusted-binary",
+    }
+    evidence["artifacts"] = {}
+    for name, payload in payloads.items():
+        (root / name).write_bytes(payload)
+        evidence["artifacts"][name] = {
+            "bytes": len(payload),
+            "sha256": capture.digest_bytes(payload),
+        }
+    (root / "dashboard-skill-use.png").write_bytes(b"png")
+    evidence["dashboard"] = {
+        "path": "dashboard-skill-use.png",
+        "bytes": 3,
+        "sha256": capture.digest_bytes(b"png"),
+    }
 
 
 class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
@@ -216,7 +289,7 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
         )
         self.assertEqual(
             page.wait_for_function.call_args_list[1].kwargs["arg"],
-            "MASC Overview",
+            "MASC Dashboard",
         )
         self.assertEqual(
             page.wait_for_function.call_args_list[1].kwargs["timeout"], 3000
@@ -390,22 +463,20 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
             )
         )
 
-    def test_tools_navigation_walks_to_config_and_hops(self):
-        # Tools is off the Tab ring: the walk stops at Config and presses
+    def test_tools_navigation_walks_to_system_and_hops(self):
+        # Tools is off the Tab ring: the walk stops at System and presses
         # [t], and arrival is the Tools screen text, not a strip token.
         class Page:
             def wait_for_timeout(self, _milliseconds):
                 pass
 
-        screens = iter(
-            [
-                "▸Overview Activity Config\n  MASC Overview",
-                "▸Overview Activity Config\n  MASC Overview",
-                "Overview ▸Activity Config\n  MASC Activity",
-                "Overview ▸Activity Config\n  MASC Activity",
-                "Overview Activity ▸Config\n  MASC Config",
-            ]
-        )
+        ring = ("Dashboard", "Work", "Keepers", "Usage", "Board", "Workspace", "System")
+        def frame(selected):
+            return " ".join(("▸" if item == selected else "") + item for item in ring)
+        frames = [frame(ring[0])]
+        for previous, next_surface in zip(ring, ring[1:]):
+            frames.extend((frame(previous), frame(next_surface)))
+        screens = iter(frames)
         with (
             mock.patch.object(capture, "screen_text", side_effect=screens),
             mock.patch.object(capture, "press") as press,
@@ -414,7 +485,7 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
             capture.goto_tools(Page(), 1.0)
 
         self.assertEqual(
-            [call.args[1] for call in press.call_args_list], ["Tab", "Tab", "t"]
+            [call.args[1] for call in press.call_args_list], ["Tab"] * 6 + ["t"]
         )
         wait_screen.assert_called_once()
 
@@ -425,9 +496,9 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
 
         screens = iter(
             [
-                "▸Overview Activity Board",
-                "Overview ▸Activity Board",
-                "▸Overview Activity Board",
+                "▸Dashboard Work Board",
+                "Dashboard ▸Work Board",
+                "▸Dashboard Work Board",
             ]
         )
         with (
@@ -444,9 +515,9 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
 
         screens = iter(
             [
-                "MASC Config / Tools  ▸surface | async | activations | usage | catalog",
-                "MASC Config / Tools   surface |▸async | activations | usage | catalog",
-                "MASC Config / Tools   surface | async |▸activations | usage | catalog",
+                "MASC System / Tools  ▸surface | async | activations | usage | catalog",
+                "MASC System / Tools   surface |▸async | activations | usage | catalog",
+                "MASC System / Tools   surface | async |▸activations | usage | catalog",
             ]
         )
         with (
@@ -465,9 +536,9 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
 
         screens = iter(
             [
-                "MASC Config / Tools  ▸surface | async | activations | usage | catalog",
-                "MASC Config / Tools   surface |▸async | activations | usage | catalog",
-                "MASC Config / Tools  ▸surface | async | activations | usage | catalog",
+                "MASC System / Tools  ▸surface | async | activations | usage | catalog",
+                "MASC System / Tools   surface |▸async | activations | usage | catalog",
+                "MASC System / Tools  ▸surface | async | activations | usage | catalog",
             ]
         )
         with (
@@ -480,7 +551,7 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
     def test_tools_pane_parser_keeps_an_unfamiliar_observed_pane(self):
         self.assertEqual(
             capture.selected_tools_pane_from_screen(
-                "MASC Config / Tools   surface |▸future | activations"
+                "MASC System / Tools   surface |▸future | activations"
             ),
             "future",
         )
@@ -525,13 +596,13 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
 
         top = "\n".join(
             [
-                "MASC Config / Tools 14:10:47 [connected]",
+                "MASC System / Tools 14:10:47 [connected]",
                 "Skill Use — keeper-one (8 receipts)",
                 "session=trace-one  ledger=abcdef0123456789",
                 "invoked=8 actions=8 invalid=0",
             ]
         )
-        middle = "MASC Config / Tools 14:10:47 [connected]\nolder receipts"
+        middle = "MASC System / Tools 14:10:47 [connected]\nolder receipts"
         activation = {
             "identity": {
                 "source_id": "source",
@@ -574,7 +645,7 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
         )
         receipt = "\n".join(
             [
-                "MASC Config / Tools 14:10:47 [connected]",
+                "MASC System / Tools 14:10:47 [connected]",
                 f"receipt_sha256={receipt_sha256}",
             ]
         )
@@ -616,13 +687,13 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
         )
         receipt = "\n".join(
             [
-                "MASC Config / Tools 14:10:47 [connected]",
+                "MASC System / Tools 14:10:47 [connected]",
                 f"receipt_sha256={receipt_sha256}",
             ]
         )
         top = "\n".join(
             [
-                "MASC Config / Tools 14:10:48 [connected]",
+                "MASC System / Tools 14:10:48 [connected]",
                 "Skill Use — keeper-one (8 receipts)",
                 f"session=trace-one  ledger={revision}",
             ]
@@ -662,10 +733,10 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
 
     def test_tools_surface_connection_rejects_disconnected(self):
         self.assertTrue(
-            capture.tools_surface_is_connected("MASC Config / Tools 14:10:47 [connected]")
+            capture.tools_surface_is_connected("MASC System / Tools 14:10:47 [connected]")
         )
         self.assertFalse(
-            capture.tools_surface_is_connected("MASC Config / Tools 14:10:48 [disconnected]")
+            capture.tools_surface_is_connected("MASC System / Tools 14:10:48 [disconnected]")
         )
 
     def test_tools_surface_waits_through_reconnecting(self):
@@ -675,8 +746,8 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
 
         screens = iter(
             [
-                "MASC Config / Tools 14:10:47 [reconnecting]",
-                "MASC Config / Tools 14:10:48 [connected]",
+                "MASC System / Tools 14:10:47 [reconnecting]",
+                "MASC System / Tools 14:10:48 [connected]",
             ]
         )
         with mock.patch.object(capture, "screen_text", side_effect=screens):
@@ -744,20 +815,15 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
             health_payload = (
                 json.dumps(health, indent=2, sort_keys=True) + "\n"
             ).encode()
-            ledger_payload = (
-                json.dumps(
-                    dashboard["skill_activations"]["ledger"],
-                    indent=2,
-                    sort_keys=True,
-                )
-                + "\n"
-            ).encode()
+            ledger_payload = log_fixture.event_log(
+                dashboard["skill_activations"]["ledger"]
+            )
             build_payload = b"{}\n"
             executable_payload = b"trusted-binary"
             payloads = {
                 "health.json": health_payload,
                 "dashboard-tools.json": dashboard_payload,
-                "skill-activations.json": ledger_payload,
+                events.EVENTS_FILENAME: ledger_payload,
                 "tui-build-evidence.json": build_payload,
                 "masc_tui.exe": executable_payload,
             }
@@ -783,11 +849,49 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
             with self.assertRaisesRegex(capture.CaptureError, "bundle is incomplete"):
                 capture.verify_producer_artifacts(evidence, root)
             (root / "INCOMPLETE").unlink()
-            (root / "skill-activations.json").write_bytes(b"changed")
+            (root / events.EVENTS_FILENAME).write_bytes(b"changed")
             with self.assertRaisesRegex(
                 capture.CaptureError, "artifact (byte|SHA) mismatch"
             ):
                 capture.verify_producer_artifacts(evidence, root)
+
+    def test_producer_event_log_must_fold_to_the_dashboard_ledger(self):
+        evidence, dashboard_payload, dashboard = fixture()
+        ledger = dashboard["skill_activations"]["ledger"]
+        without_action = copy.deepcopy(ledger)
+        without_action["activations"][0]["actions"] = []
+        cases = [
+            (
+                "a log of another ledger",
+                log_fixture.event_log(without_action),
+                "producer Dashboard ledger differs from durable ledger artifact",
+            ),
+            ("a log without a complete row", b"", "has recorded nothing"),
+        ]
+        for name, events_payload, message in cases:
+            with self.subTest(name), tempfile.TemporaryDirectory() as raw:
+                root = Path(raw)
+                write_producer_bundle(root, evidence, dashboard_payload, events_payload)
+                with self.assertRaisesRegex(capture.CaptureError, message):
+                    capture.verify_producer_artifacts(evidence, root)
+
+        refused = log_fixture.encode_rows(
+            [
+                log_fixture.header_row(ledger["workspace_key"], ledger["session_id"]),
+                log_fixture.delivery_row(
+                    SKILL_ID, ledger["activations"][0]["delivery"]
+                ),
+            ]
+        )
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            write_producer_bundle(root, evidence, dashboard_payload, refused)
+            with self.assertRaises(capture.CaptureError) as caught:
+                capture.verify_producer_artifacts(evidence, root)
+        self.assertIs(
+            caught.exception.__cause__.fault,
+            events.SkillLedgerFault.UNKNOWN_EVENT_ACTIVATION,
+        )
 
     def test_rejects_producer_artifact_subset(self):
         evidence, _, _ = fixture()
@@ -822,9 +926,9 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
             payloads = {
                 "health.json": (json.dumps(health) + "\n").encode(),
                 "dashboard-tools.json": dashboard_payload,
-                "skill-activations.json": (
-                    json.dumps(dashboard["skill_activations"]["ledger"]) + "\n"
-                ).encode(),
+                events.EVENTS_FILENAME: log_fixture.event_log(
+                    dashboard["skill_activations"]["ledger"]
+                ),
                 "tui-build-evidence.json": b"{}\n",
                 "masc_tui.exe": b"trusted-binary",
             }

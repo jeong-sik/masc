@@ -187,6 +187,7 @@ val answer_of_success : Agent_core.Exact_output.success -> Yojson.Safe.t
 
 val create
   :  ?cli_runner:Keeper_lane_cli_oneshot.runner
+  -> ?on_refusal:(refusal -> unit)
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> clock:_ Eio.Time.clock
   -> base_path:string
@@ -199,4 +200,9 @@ val create
     the next request. Production passes {!published_lane}. [base_path] is
     where an official client runs; [cli_runner] replaces the official-client
     edge in tests. An answer from a CLI slot carries no [usage]. The model
-    never raises: every refusal is a {!refusal} rendered as an rpc error. *)
+    renders every typed refusal as an rpc error. [on_refusal], when provided,
+    observes that same refusal once before rendering; it is not called for an
+    accepted answer and cannot change lane selection. Like [resolve_lane], it
+    is a trusted dependency whose exceptions (including cancellation) propagate.
+    Observers must project bounded typed facts before publishing diagnostics,
+    because a refusal can contain private provider bodies and messages. *)

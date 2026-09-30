@@ -3,6 +3,7 @@
 기준 `origin/main` 91c24caa05. 요약·기능 표·결정 목록은 [주간 변경 감사와 기능 표](2026-09-29-week-audit-and-feature-matrix.md)에 있다.
 id 접두어: `RT-` Runtime·Lane·Schedule, `MM-` Memory·Librarian·Skills·Context, `DM-` Board·Task·Goal·HITL·Candle·Play, `TU-` TUI·대시보드.
 "들어온 커밋"이 8439213b70 이면 이 감사용 clone 의 가장 오래된 커밋이라 실제 출처는 그 이전이다.
+152는 표 행 수이며 묶음 ID도 한 행으로 센다. MM-W6~W10은 보고된 묶음으로, 보존된 primary file:line 위치가 없어 확인된 개별 소스 결함으로 세지 않는다.
 
 ## Runtime · Lane · Schedule · 토큰
 
@@ -66,7 +67,7 @@ id 접두어: `RT-` Runtime·Lane·Schedule, `MM-` Memory·Librarian·Skills·Co
 | MM-S5 | P2 | residue | `lib/skill_config/skill_source_config.ml:182-203,393-402` | #39285 | `resource-read-max-bytes` 호환 경로가 남아 있습니다(#39284 에서 추적). | High |
 | MM-S6 | P2 | string control | `keeper_skill_observability.ml:31,204,225,305,311`, `workspace_skill_publish.mli:38-62` | 주 이전 + #39517 | `kind : string` 을 `"composition"` 과 비교하고, 진단도 문자열로 적습니다. | High |
 | MM-S7 | P2 | 잠재 | `keeper_run_tools_setup.ml:405-407`, `keeper_task_skill_turn.ml:33-60` | 주 이전(#31130) | Task 에 고정된 Skill 이 지워지거나 revision 이 바뀌면 그 Keeper 의 모든 턴이 막힙니다. | High(경로) |
-| MM-W6~W10 | P2 | residue / catch-all / 효율 | §3 참조 | #39800~#39865 | 문구 잔재, 문서와 다른 배선, 이름만 있는 variant, 묶음 끝 품질 저하 | Med |
+| MM-W6~W10 | P2 | residue / catch-all / 효율 | 위치 미확인(묶음 보고) | #39800~#39865 | 문구 잔재, 문서와 다른 배선, 이름만 있는 variant, 묶음 끝 품질 저하 | 보고됨 · 위치 미확인 |
 
 
 ## Board · Task · Goal · HITL · Candle · Portrait · Play

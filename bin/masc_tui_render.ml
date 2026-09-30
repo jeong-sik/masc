@@ -495,6 +495,14 @@ let task_detail_lines (state : state) ~cols (task : Masc_domain.task) =
   @ labeled_lines "creator" (match task.created_by with Some by -> by | None -> Masc_tui_theme.Glyph.no_value)
   @ labeled_lines "priority" (string_of_int task.priority)
   @ labeled_lines "cycles" (string_of_int task.cycle_count)
+  @ some_lines "predecessor" task.predecessor_task_id
+  @ some_lines "operation" task.execution_links.operation_id
+  @ some_lines "session" task.execution_links.session_id
+  @ some_lines "reclaim policy"
+      (Option.map Masc_domain.task_reclaim_policy_to_string task.reclaim_policy)
+  @ some_lines "do not reclaim" task.do_not_reclaim_reason
+  @ List.concat_map (fun skill ->
+      labeled_lines "skill" (Yojson.Safe.to_string (Skill_reference.to_yojson skill))) task.skills
   @ (if String.equal task.description "" then [] else labeled_lines "what" task.description)
   @ (match task.handoff_context with
      | None -> []
@@ -509,7 +517,9 @@ let task_detail_lines (state : state) ~cols (task : Masc_domain.task) =
      | Some contract ->
          (if contract.Masc_domain.strict then ["  contract strict"] else [])
          @ list_lines "done-when" contract.Masc_domain.completion_contract
-         @ list_lines "evidence" contract.Masc_domain.required_evidence)
+         @ list_lines "evidence" contract.Masc_domain.required_evidence
+         @ list_lines "inspection evidence" contract.Masc_domain.inspect_gate_evidence
+         @ list_lines "verification evidence" contract.Masc_domain.verify_gate_evidence)
   @ list_lines "file" task.files
   @ (task_history_lines state task.id
      |> List.concat_map (fun line ->

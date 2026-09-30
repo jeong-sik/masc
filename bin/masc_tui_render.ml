@@ -7222,6 +7222,43 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
     let selected_item =
       List.nth_opt Keeper_portrait_item.all state.item_cursor
     in
+    let account =
+      match state.item_account with
+      | Some (name, account) when String.equal name k.k_name -> Some account
+      | Some _ | None -> None
+    in
+    let milli value = Printf.sprintf "%d.%03d" (value / 1000) (value mod 1000) in
+    let account_line =
+      match account, state.item_account_error with
+      | Some (Item_account.Ready account), _ ->
+          "  Balance " ^ milli account.balance_milli ^ " Candle · preview only"
+      | Some Item_account.Off, _ -> "  Candle off · preview only"
+      | Some (Item_account.Disabled reason), _ ->
+          "  Candle disabled: " ^ Terminal_text.single_line reason
+      | None, Some detail ->
+          "  Account unavailable: " ^ Terminal_text.single_line detail
+      | None, None -> "  Loading Item account…"
+    in
+    let item_account_facts item =
+      match account with
+      | Some (Item_account.Ready account) ->
+          let owned =
+            List.exists (fun owned ->
+              String.equal (Keeper_portrait_item.id owned)
+                (Keeper_portrait_item.id item)) account.owned_items in
+          let price =
+            match List.find_opt (fun (entry : Item_account.entry) ->
+              String.equal (Keeper_portrait_item.id entry.item)
+                (Keeper_portrait_item.id item)) account.catalog with
+            | Some entry ->
+              (match entry.price with
+               | Item_account.Unpriced -> "unpriced"
+               | Item_account.Priced amount -> milli amount)
+            | None -> "catalog unavailable"
+          in
+          Some (price ^ (if owned then " owned" else ""))
+      | Some (Item_account.Off | Item_account.Disabled _) | None -> None
+    in
     let portrait =
       match state.detail_tab, portrait_reading with
       | Detail_info, Tui_decode.Ready equipment ->
@@ -7237,104 +7274,77 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
         | Detail_identity | Detail_channels | Detail_automation | Detail_runs), _ -> None
     in
 
+    let item_row cursor index item =
+      let worn =
+        match portrait_reading with
+        | Tui_decode.Unavailable _ -> false
+        | Tui_decode.Ready equipment ->
+            (match Keeper_portrait_item.in_slot equipment
+                     (Keeper_portrait_item.slot item) with
+             | None -> false
+             | Some equipped ->
+                 String.equal (Keeper_portrait_item.id equipped)
+                   (Keeper_portrait_item.id item))
+      in
+      let account_facts =
+        if inner < 90 then ""
+        else match item_account_facts item with
+          | Some facts -> "  " ^ facts
+          | None -> ""
+      in
+      Printf.sprintf "  %s %2d %-5s %s%s%s"
+        (if index = cursor then ">" else " ") (index + 1)
+        (Keeper_portrait_item.slot_id (Keeper_portrait_item.slot item))
+        (Keeper_portrait_item.id item) account_facts
+        (if worn then "  equipped" else "")
+    in
+    let portrait =
+      match state.detail_tab, portrait with
+      | Detail_items, Some band ->
+          let labels = List.mapi (item_row state.item_cursor) Keeper_portrait_item.all in
+          if List.exists (fun line -> Message_layout.display_width line > inner)
+               (Masc_tui_keeper_portrait.beside band labels)
+          then None else Some band
+      | _, portrait -> portrait
+    in
     let item_lines () =
       let items = Keeper_portrait_item.all in
       let count = List.length items in
       let cursor = max 0 (min (count - 1) state.item_cursor) in
-      let first = max 0 (min (cursor - 4) (count - 10)) in
-      let account =
-        match state.item_account with
-        | Some (name, account) when String.equal name k.k_name -> Some account
-        | Some _ | None -> None
-      in
-      let milli value = Printf.sprintf "%d.%03d" (value / 1000) (value mod 1000) in
-      let account_line =
-        match account, state.item_account_error with
-        | Some (Item_account.Ready account), _ ->
-            "  Balance " ^ milli account.balance_milli ^ " Candle · preview only"
-        | Some Item_account.Off, _ -> "  Candle off · preview only"
-        | Some (Item_account.Disabled reason), _ ->
-            "  Candle disabled: " ^ Terminal_text.single_line reason
-        | None, Some detail ->
-            "  Account unavailable: " ^ Terminal_text.single_line detail
-        | None, None -> "  Loading Item account…"
-      in
-      let item_account_facts item =
-        match account with
-        | Some (Item_account.Ready account) ->
-            let owned =
-              List.exists (fun owned ->
-                String.equal (Keeper_portrait_item.id owned)
-                  (Keeper_portrait_item.id item)) account.owned_items in
-            let price =
-              match List.find_opt (fun (entry : Item_account.entry) ->
-                String.equal (Keeper_portrait_item.id entry.item)
-                  (Keeper_portrait_item.id item)) account.catalog with
-              | Some entry ->
-                (match entry.price with
-                 | Item_account.Unpriced -> "unpriced"
-                 | Item_account.Priced amount -> milli amount)
-              | None -> "catalog unavailable"
-            in
-            Some (price ^ (if owned then " owned" else ""))
-        | Some (Item_account.Off | Item_account.Disabled _) | None -> None
-      in
+      let headline =
+        [ Printf.sprintf "  Items %d/%d · j/k to preview" (cursor + 1) count
+        ; account_line
+        ] in
+      let observation =
+        match portrait_reading with
+        | Tui_decode.Ready _ -> []
+        | Tui_decode.Unavailable reason ->
+            [ "  Portrait unavailable: " ^ Terminal_text.single_line reason ] in
+      let selected_facts =
+        match List.nth_opt items cursor with
+        | None -> []
+        | Some item ->
+            (match item_account_facts item with
+             | Some facts -> [ "  Selected: " ^ facts ]
+             | None -> []) in
+      let footer = [ "  Preview changes this picture only." ] in
+      let reserved = List.length headline + List.length selected_facts
+                     + List.length observation + List.length footer in
+      let visible = min count (max 1 (base_height - reserved)) in
+      let first = max 0 (min (cursor - (visible / 2)) (count - visible)) in
       let rows =
         items
         |> List.mapi (fun index item -> index, item)
         |> List.filter_map (fun (index, item) ->
-             if index < first || index >= first + 10 then None
-             else
-               let worn =
-                 match portrait_reading with
-                 | Tui_decode.Unavailable _ -> false
-                 | Tui_decode.Ready equipment ->
-                     (match Keeper_portrait_item.in_slot equipment
-                              (Keeper_portrait_item.slot item) with
-                      | None -> false
-                      | Some equipped ->
-                          String.equal (Keeper_portrait_item.id equipped)
-                            (Keeper_portrait_item.id item))
-               in
-               let account_facts =
-                 if inner < 90 then ""
-                 else match item_account_facts item with
-                   | Some facts -> "  " ^ facts
-                   | None -> ""
-               in
-               Some (Printf.sprintf "  %s %-2d %-5s %-20s%s%s"
-                 (if index = cursor then ">" else " ") (index + 1)
-                 (Keeper_portrait_item.slot_id (Keeper_portrait_item.slot item))
-                 (Keeper_portrait_item.id item)
-                 account_facts
-                 (if worn then " equipped" else "")))
-      in
-      let headline =
-        [ Printf.sprintf "  Items %d/%d · j/k to preview" (cursor + 1) count
-        ; account_line
-        ]
+             if index < first || index >= first + visible then None
+             else Some (item_row cursor index item))
       in
       let listing =
         match portrait with
         | Some band -> Masc_tui_keeper_portrait.beside band (headline @ rows)
         | None -> headline @ rows
       in
-      let observation =
-        match portrait_reading with
-        | Tui_decode.Ready _ -> []
-        | Tui_decode.Unavailable reason ->
-            [ "  Portrait unavailable: " ^ Terminal_text.single_line reason ]
-      in
-      let selected_facts =
-        match List.nth_opt items cursor with
-        | None -> []
-        | Some item ->
-          (match item_account_facts item with
-           | Some facts -> [ "  Selected: " ^ facts ]
-           | None -> [])
-      in
-      listing @ selected_facts @ observation
-      @ [ "  Preview changes this picture only." ]
+      listing @ selected_facts @ observation @ footer
     in
 
     (* Each tab projects only when selected. Retained data for the other

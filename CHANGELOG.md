@@ -12,6 +12,8 @@
 
 ### Added
 
+- Exercise real TCP paid Item purchases using a separately labeled synthetic credit, verifying exact debit, refusal without ledger mutation, and ownership/equipment after restart.
+
 - Verify Item ownership, wallet and purchased equipment survive an isolated native server restart, including duplicate purchase rejection in a new MCP session.
 
 - Capture the Item tab in the production dashboard served by an isolated native CI server after an authenticated free purchase and equipment change.

@@ -2,7 +2,7 @@
 
 No live instance is contacted. Login writes credentials inside the isolated
 workspace; its auth directory is removed on exit and excluded from evidence.
-Keeper metadata, empty ledger and catalog are synthetic inputs, not evidence
+Keeper metadata, catalog and the paid scenario credit are synthetic inputs, not evidence
 of lifecycle creation, a real payout or a model-driven purchase.
 Authenticated MCP calls exercise the real purchase and equipment ledger.
 """
@@ -48,6 +48,18 @@ for src, dst in [('runtime.toml', 'config/runtime.toml'),
     target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(fixtures / src, target)
     config_hashes[src] = hashlib.sha256(target.read_bytes()).hexdigest()
+# Seed a second Keeper and canonical synthetic credit before either process starts.
+# This is an Item spending fixture, not evidence of earning a Goal payout.
+paid_meta = json.loads((fixtures / 'keeper.json').read_text())
+paid_meta.update(name='item-paid-probe', trace_id='trace-item-paid-probe')
+(base / '.masc/keepers/item-paid-probe.json').write_text(json.dumps(paid_meta) + '\n')
+shutil.copyfile(fixtures / 'keeper.toml', base / '.masc/config/keepers/item-paid-probe.toml')
+ledger_path = base / '.masc/candle-ledger.jsonl'
+seed = (fixtures / 'paid-credit.jsonl').read_bytes()
+ledger_path.write_bytes(seed)
+ledger_path.chmod(0o600)
+(root / 'ledger-seed.jsonl').write_bytes(seed)
+config_hashes['paid-credit.jsonl'] = hashlib.sha256(seed).hexdigest()
 (base / '.masc/config/prompts').mkdir(exist_ok=True)
 atexit.register(shutil.rmtree, base / '.masc/auth', ignore_errors=True)
 with socket.socket() as sock:
@@ -70,6 +82,13 @@ keeper_login = subprocess.run([str(binary), 'login', '--base-path', str(base),
     '--role', 'worker', '--client-env', 'ITEM_PROBE_TOKEN', '--no-expiry', '--json'],
     env=env, capture_output=True, text=True, check=True)
 keeper_token = json.loads(keeper_login.stdout)['bearer_token']
+free_keeper_token = keeper_token
+paid_login = subprocess.run([str(binary), 'login', '--base-path', str(base),
+    '--host', '127.0.0.1', '--port', str(port), '--agent', 'item-paid-probe',
+    '--role', 'worker', '--client-env', 'ITEM_PAID_PROBE_TOKEN', '--no-expiry', '--json'],
+    env=env, capture_output=True, text=True, check=True)
+paid_keeper_token = json.loads(paid_login.stdout)['bearer_token']
+
 origin = f'http://127.0.0.1:{port}'
 records = []
 server_generation = 1
@@ -136,6 +155,14 @@ def tool(name, arguments, error_code=None, validation_reason=None):
         assert data['validation'] == 'agent_core_tool_middleware', data
         assert data['reason'] == validation_reason, data
     return data
+
+def initialize_keeper_session(auth_token):
+    global keeper_token
+    keeper_token = auth_token
+    rpc_session.clear()
+    rpc('initialize', {'protocolVersion': '2025-11-25', 'capabilities': {},
+                       'clientInfo': {'name': 'item-http-acceptance', 'version': '1'}})
+    rpc('notifications/initialized', {}, notification=True)
 
 def await_ready(server):
     deadline = time.monotonic() + 60
@@ -215,6 +242,34 @@ with (root / 'server.log').open('wb') as log:
             (dashboard / 'index.html').read_bytes()).hexdigest(), 'served index differs'
         # Leave the purchased accessory equipped for the restart proof.
         tool('keeper_candle_equip', {'slot': 'face', 'item': item})
+        initialize_keeper_session(paid_keeper_token)
+        paid_start = tool('keeper_candle_balance', {})
+        assert paid_start['keeper'] == 'item-paid-probe' and paid_start['balance_milli'] == '700', paid_start
+        assert paid_start['owned_items'] == [], paid_start
+        paid_original = tool('keeper_candle_equip', {'slot': 'head', 'item': 'default'})['equipment']
+        purchase_paid = tool('keeper_candle_purchase', {'item': 'crown'})
+        assert purchase_paid['amount_milli'] == '200', purchase_paid
+        assert purchase_paid['account']['balance_milli'] == '500', purchase_paid
+        assert purchase_paid['account']['owned_items'] == ['crown'], purchase_paid
+        before_refusals = ledger_path.read_bytes()
+        tool('keeper_candle_purchase', {'item': 'crown'}, 'already_owned')
+        tool('keeper_candle_purchase', {'item': 'medal'}, 'insufficient_balance')
+        assert ledger_path.read_bytes() == before_refusals, 'refused purchases changed the ledger'
+        paid_equipped = tool('keeper_candle_equip', {'slot': 'head', 'item': 'crown'})
+        assert paid_equipped['equipment']['head'] == 'crown', paid_equipped
+        for slot in ('face', 'neck', 'hand', 'base'):
+            assert paid_equipped['equipment'][slot] == paid_original[slot], paid_equipped
+        status, paid_body = request('/api/v1/keepers/item-paid-probe/items')
+        paid_account = json.loads(paid_body)
+        assert status == 200 and paid_account['balance_milli'] == '500', paid_account
+        assert paid_account['owned_items'] == ['crown'], paid_account
+        (root / 'paid-account.json').write_bytes(paid_body)
+        status, paid_png = request('/api/v1/keepers/item-paid-probe/portrait.png?size=96')
+        assert status == 200 and paid_png.startswith(b'\x89PNG\r\n\x1a\n'), status
+        (root / 'paid-portrait.png').write_bytes(paid_png)
+        ledger_before_restart = ledger_path.read_bytes()
+        (root / 'ledger-before-restart.jsonl').write_bytes(ledger_before_restart)
+
     finally:
         server.terminate()
         try:
@@ -239,10 +294,7 @@ with (root / 'server.log').open('ab') as log:
         assert status == 200 and persisted_png == equipped_png, 'restart lost purchased equipment'
         (root / 'portrait-restarted.png').write_bytes(persisted_png)
         # Sessions belong to a process; authenticate and initialize a fresh MCP session.
-        rpc_session.clear()
-        rpc('initialize', {'protocolVersion': '2025-11-25', 'capabilities': {},
-                           'clientInfo': {'name': 'item-http-restart', 'version': '1'}})
-        rpc('notifications/initialized', {}, notification=True)
+        initialize_keeper_session(free_keeper_token)
         persisted_wallet = tool('keeper_candle_balance', {})
         assert persisted_wallet['balance_milli'] == '0' and persisted_wallet['owned_items'] == [item], persisted_wallet
         tool('keeper_candle_purchase', {'item': item}, 'already_owned')
@@ -252,10 +304,34 @@ with (root / 'server.log').open('ab') as log:
         assert restored_after_restart['equipment'] == starting, restored_after_restart
         status, default_after_restart = request('/api/v1/keepers/item-runtime-probe/portrait.png?size=96')
         assert status == 200 and default_after_restart == png, 'default restore after restart differs'
+        initialize_keeper_session(paid_keeper_token)
+        paid_persisted = tool('keeper_candle_balance', {})
+        assert paid_persisted['balance_milli'] == '500' and paid_persisted['owned_items'] == ['crown'], paid_persisted
+        before_repeat_equipment = ledger_path.read_bytes()
+        repeated = tool('keeper_candle_equip', {'slot': 'head', 'item': 'crown'})
+        assert repeated['changed'] is False and repeated['equipment'] == paid_equipped['equipment'], repeated
+        assert ledger_path.read_bytes() == before_repeat_equipment, 'unchanged equipment appended a ledger event'
+        status, paid_restarted_body = request('/api/v1/keepers/item-paid-probe/items')
+        assert status == 200 and json.loads(paid_restarted_body) == paid_account
+        (root / 'paid-account-restarted.json').write_bytes(paid_restarted_body)
+        status, paid_restarted_png = request('/api/v1/keepers/item-paid-probe/portrait.png?size=96')
+        assert status == 200 and paid_restarted_png == paid_png, 'restart lost paid equipment'
+        before_refusals = ledger_path.read_bytes()
+        tool('keeper_candle_purchase', {'item': 'crown'}, 'already_owned')
+        tool('keeper_candle_purchase', {'item': 'medal'}, 'insufficient_balance')
+        assert ledger_path.read_bytes() == before_refusals, 'restart refusals changed the ledger'
+        final_ledger = ledger_path.read_bytes()
+        rows = [json.loads(line) for line in final_ledger.splitlines()]
+        assert [row for row in rows if row['kind'] == 'paid'] == [json.loads(seed)], 'synthetic credit changed'
+        paid_purchases = [row for row in rows if row['kind'] == 'purchased' and row['keeper'] == 'item-paid-probe']
+        assert len(paid_purchases) == 1 and paid_purchases[0]['item'] == 'crown' and paid_purchases[0]['amount_milli'] == 200, paid_purchases
+        (root / 'ledger-after-restart.jsonl').write_bytes(final_ledger)
         result = dict(source_sha=source, binary_sha256=hashlib.sha256(binary.read_bytes()).hexdigest(),
             fixture_sha256=config_hashes, dashboard_index_sha256=hashlib.sha256(index).hexdigest(),
-            scope='Isolated CI binary over real TCP HTTP; synthetic current-schema paused Keeper metadata, empty test ledger and configured catalog; authenticated Keeper MCP purchase/equipment calls and ledger-backed HTTP; no lifecycle creation, model-driven decision, paid purchase/payout or production rollout',
-            requests=records, tool_calls=tool_records, browser_captured=args.capture_browser, restart_verified=True, passed=True)
+            scope='Isolated CI binary over real TCP HTTP; synthetic current-schema paused Keeper metadata, synthetic 700-milli credit for separate paid Keeper and configured catalog; authenticated Keeper MCP purchase/equipment calls and ledger-backed HTTP; no lifecycle creation, model-driven decision, real earned payout or production rollout',
+            requests=records, tool_calls=tool_records, browser_captured=args.capture_browser, restart_verified=True, paid_transaction_verified=True,
+            synthetic_credit=True, ledger_before_restart_sha256=hashlib.sha256(ledger_before_restart).hexdigest(),
+            ledger_after_restart_sha256=hashlib.sha256(final_ledger).hexdigest(), passed=True)
         (root / 'http-evidence.json').write_text(json.dumps(result, indent=2) + '\n')
         print('Isolated Item HTTP acceptance: PASS')
     finally:

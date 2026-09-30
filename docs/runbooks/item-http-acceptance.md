@@ -28,11 +28,16 @@ session, repeat-purchase rejection, an unchanged repeated equipment selection,
 and restoration of the original default PNG after restart. The HTTP
 PASS receipt is written only after this restart check.
 
-Inputs are a synthetic paused Keeper in the current metadata schema, an empty
-ledger, and explicit test prices/payout policy. This proves real HTTP routing
+Inputs are two synthetic paused Keepers in the current metadata schema, one
+canonical synthetic Paid row granting 700 milli to the paid-test Keeper, and
+explicit test prices/payout policy. The free-test Keeper starts with zero.
+The paid Keeper buys crown for200 milli and must retain500 milli. Duplicate
+and insufficient purchases must leave the ledger byte-identical. After a
+process restart, paid ownership, balance and equipped PNG must remain; only
+one200-milli purchase event may exist. The original synthetic Paid row must
+remain unchanged. Seed and before/after ledger hashes are retained. This proves real HTTP routing
 with those inputs. It does not prove Keeper lifecycle creation, model-driven
-purchase/equipment decisions, a paid purchase or real payout, or production
-rollout.
+purchase/equipment decisions, a real earned payout, or production rollout.
 Additional browser fixture and TUI transition evidence comes from the separate dashboard and
 Test workflows.
 

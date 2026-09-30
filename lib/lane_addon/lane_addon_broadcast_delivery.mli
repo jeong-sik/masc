@@ -44,10 +44,15 @@ val complete : record -> bool
 type recovery = {pending:receipt list;settled_with_cleanup:receipt list}
 val recover : t -> (recovery, error) result
 (** Restart scan returns unfinished workspace commits and recipient obligations.
-    Malformed journals fail the authoritative scan; no record is discarded.
+    Every discovered journal is opened through the existing-only locked transaction.
+    Missing, nonregular or malformed journals fail the authoritative scan without
+    creating or replacing files; no record is discarded.
     Completed records with descriptor settlement failures are returned separately
     and never put back into the pending drain. *)
 
 module For_testing : sig
   val create : root:string -> io:Fs_compat.private_jsonl_transaction_io_for_testing -> t
+  val recover : t -> after_scan:(unit -> unit) -> (recovery, error) result
+  (** [after_scan] runs after journal names are captured, before any journal is
+      opened, so fixtures can exercise disappearance during restart recovery. *)
 end

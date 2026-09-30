@@ -15,9 +15,6 @@ let create ~root = {root;io=None}
 let transaction t path decide = match t.io with
   | None -> Fs_compat.update_private_file_durable_locked_result path decide
   | Some io -> Fs_compat.update_private_file_durable_locked_with_io_for_testing ~io path decide
-module For_testing = struct
-  let create ~root ~io = {root;io=Some io}
-end
 let valid_digest value = String.length value=64 && String.for_all
   (function '0'..'9' | 'a'..'f' -> true | _ -> false) value
 let validate (p : payload) =
@@ -209,16 +206,25 @@ let recipient_result t ~caller ~operation_id ~recipient state =
 let complete r = match r.workspace with
   | Uncommitted -> false
   | Committed _ -> List.for_all (function _,Accepted -> true | _,Pending _ -> false) r.recipients
-let recover t = protect (fun () ->
+let recover_after_scan t ~after_scan = protect (fun () ->
   let names = match Fs_compat.exact_path_kind t.root with
     | Fs_compat.Exact_missing -> []
     | _ -> Fs_compat.read_dir t.root |> List.sort String.compare in
+  after_scan ();
   List.fold_left (fun acc name ->
     let* recovery=acc in
     if not (Filename.check_suffix name ".jsonl") then Ok recovery else
     let filename=Filename.concat t.root name in
-    let outcome=transaction t filename
-      (fun bytes -> None,decode bytes) in
+    let decide_rows bytes = None,decode bytes in
+    let outcome=(match t.io with
+      | None -> Fs_compat.update_existing_private_file_durable_locked_result filename decide_rows
+      | Some io -> Fs_compat.update_existing_private_file_durable_locked_with_io_for_testing
+          ~io filename decide_rows)
+      |> map_transaction_outcome
+        ~value:(function
+          | None -> Error (Corrupt "discovered recovery journal is missing")
+          | Some result -> result)
+        ~error:(fun e -> Io_error (Fs_compat.private_jsonl_transaction_error_to_string e)) in
     let* record,settlement_error=match outcome with
       | Fs_compat.Private_file_succeeded result -> Result.map (fun r -> r,None) result
       | Fs_compat.Private_file_succeeded_with_cleanup_failure {value;cleanup_failure} ->
@@ -226,9 +232,9 @@ let recover t = protect (fun () ->
            | Ok r -> Ok (r,Some (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure))
            | Error primary -> Error (Settlement_failed {primary;
                cleanup=Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure}))
-      | Fs_compat.Private_file_failed e -> Error (Io_error (Fs_compat.durable_append_error_to_string e))
+      | Fs_compat.Private_file_failed e -> Error e
       | Fs_compat.Private_file_failed_with_cleanup_failure {error;cleanup_failure} ->
-          Error (Settlement_failed {primary=Io_error (Fs_compat.durable_append_error_to_string error);
+          Error (Settlement_failed {primary=error;
             cleanup=Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure}) in
     match record with
     | None -> (match settlement_error with None -> Ok recovery | Some detail -> Error (Io_error detail))
@@ -245,3 +251,9 @@ let recover t = protect (fun () ->
     (Ok {pending=[];settled_with_cleanup=[]}) names
   |> Result.map (fun recovery -> {pending=List.rev recovery.pending;
       settled_with_cleanup=List.rev recovery.settled_with_cleanup}))
+
+let recover t = recover_after_scan t ~after_scan:(fun () -> ())
+module For_testing = struct
+  let create ~root ~io = {root;io=Some io}
+  let recover = recover_after_scan
+end

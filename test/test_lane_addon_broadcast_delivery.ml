@@ -189,6 +189,10 @@ let test_regular_descriptor_boundary () = fixture (fun root ledger ->
   check bool "ledger refuses directory rather than acknowledging absence" true
     (match D.find ledger ~caller:payload.caller ~operation_id:operation with
      | Error (D.Io_error _) -> true | _ -> false);
+  check bool "recovery refuses a directory journal without replacing it" true
+    (match D.recover ledger with Error (D.Io_error _) -> true | _ -> false);
+  check bool "directory journal remains a directory" true
+    ((Unix.lstat filename).Unix.st_kind=Unix.S_DIR);
   Unix.rmdir filename;
   Unix.mkfifo filename 0o600;
   (* No writer is ever opened. A fixture child alarm bounds a regressed blocking
@@ -205,6 +209,8 @@ let test_regular_descriptor_boundary () = fixture (fun root ledger ->
       check bool "ledger refuses writerless FIFO without waiting" true
         (match D.find ledger ~caller:payload.caller ~operation_id:operation with
          | Error (D.Io_error _) -> true | _ -> false);
+      check bool "restart recovery refuses writerless FIFO without waiting" true
+        (match D.recover ledger with Error (D.Io_error _) -> true | _ -> false);
       let io : Fs_compat.private_jsonl_transaction_io_for_testing = {
         before_sync_parent=(fun _ -> ());
         close_fd=(fun fd -> Unix.close fd; raise (Sys_error "fixture nonregular close failure"))} in
@@ -228,7 +234,26 @@ let test_regular_descriptor_boundary () = fixture (fun root ledger ->
   Unix.rename preserved filename;
   check bool "refusals preserve original journal bytes and receipt" true
     (D.find ledger ~caller:payload.caller ~operation_id:operation=Ok (Some admitted)))
+let test_recovery_disappearance_and_torn_journal () = fixture (fun root ledger ->
+  ignore (require (D.admit ledger payload));
+  let filename=Sys.readdir root |> Array.to_list
+    |> List.find (fun name -> Filename.check_suffix name ".jsonl")
+    |> Filename.concat root in
+  let preserved=filename ^ ".preserved" in
+  check bool "disappearance after scan refuses authoritative recovery" true
+    (match D.For_testing.recover ledger
+       ~after_scan:(fun () -> Unix.rename filename preserved) with
+     | Error (D.Corrupt _) -> true | _ -> false);
+  check bool "recovery does not recreate the disappeared journal" false (Sys.file_exists filename);
+  Unix.rename preserved filename;
+  let channel=open_out_gen [Open_append;Open_binary] 0o600 filename in
+  output_string channel "torn"; close_out channel;
+  let before=Fs_compat.load_file filename in
+  check bool "torn journal refuses recovery without accepting its valid prefix" true
+    (match D.recover ledger with Error (D.Corrupt _) -> true | _ -> false);
+  check string "torn recovery evidence remains exact" before (Fs_compat.load_file filename))
 let () = run "Durable optional Lane Broadcast intentions" ["recovery",[
+  test_case "recovery disappearance and torn evidence" `Quick test_recovery_disappearance_and_torn_journal;
   test_case "unknown mutations leave no durable files" `Quick test_unknown_mutations_do_not_persist;
   test_case "regular descriptor and writerless FIFO boundary" `Quick test_regular_descriptor_boundary;
   test_case "status misses leave no durable files" `Quick test_status_misses_do_not_persist;

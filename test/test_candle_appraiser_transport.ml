@@ -410,8 +410,10 @@ let () =
             test_invalid_http_then_valid_successor_keeps_both_slots
         ; test_case "provider rejects unchanged request" `Quick
             (test_provider_refusal ~status:`Bad_request ~rejected:true)
-        ; test_case "provider refuses authorization" `Quick
-            (test_provider_refusal ~status:`Forbidden ~rejected:true)
+        ; test_case "provider authentication remains retryable" `Quick
+            (test_provider_refusal ~status:`Unauthorized ~rejected:false)
+        ; test_case "provider authorization remains retryable" `Quick
+            (test_provider_refusal ~status:`Forbidden ~rejected:false)
         ; test_case "provider payment rest remains retryable" `Quick
             (test_provider_refusal ~status:`Payment_required ~rejected:false)
         ; test_case "provider rate limit remains retryable" `Quick

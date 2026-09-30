@@ -9,15 +9,13 @@ const {
   flowState,
   flowLoading,
   shellAuthSummary,
-  authAccess,
 } = vi.hoisted(() => ({
   fetchPauseStatus: vi.fn().mockResolvedValue(undefined),
   pauseWorkspace: vi.fn().mockResolvedValue(undefined),
   resumeWorkspace: vi.fn().mockResolvedValue(undefined),
   flowState: { value: 'running' as 'running' | 'paused' | 'initializing' | 'unknown' },
   flowLoading: { value: false },
-  shellAuthSummary: { value: null },
-  authAccess: { allowed: true, reason: null as string | null },
+  shellAuthSummary: { value: null as { effective_role: 'worker' | 'admin' } | null },
 }))
 
 vi.mock('./flow-control/flow-control-state', () => ({
@@ -29,10 +27,6 @@ vi.mock('./flow-control/flow-control-state', () => ({
 }))
 
 vi.mock('../store', () => ({ shellAuthSummary }))
-
-vi.mock('../lib/dashboard-auth-access', () => ({
-  dashboardAuthAccess: () => authAccess,
-}))
 
 import { EmergencyStopControl } from './emergency-stop-control'
 
@@ -50,9 +44,7 @@ describe('EmergencyStopControl', () => {
     document.body.appendChild(container)
     flowState.value = 'running'
     flowLoading.value = false
-    shellAuthSummary.value = null
-    authAccess.allowed = true
-    authAccess.reason = null
+    shellAuthSummary.value = { effective_role: 'admin' }
   })
 
   afterEach(() => {
@@ -61,7 +53,7 @@ describe('EmergencyStopControl', () => {
     vi.clearAllMocks()
   })
 
-  it('renders an Emergency Stop button when running with worker access', async () => {
+  it('renders an Emergency Stop button when running with admin access', async () => {
     render(html`<${EmergencyStopControl} />`, container)
     await flushUi()
 
@@ -79,9 +71,8 @@ describe('EmergencyStopControl', () => {
     expect(pauseWorkspace).toHaveBeenCalledTimes(1)
   })
 
-  it('hides the Emergency Stop button when worker access is denied', async () => {
-    authAccess.allowed = false
-    authAccess.reason = 'viewer role cannot pause'
+  it('hides the Emergency Stop button for a worker', async () => {
+    shellAuthSummary.value = { effective_role: 'worker' }
     render(html`<${EmergencyStopControl} />`, container)
     await flushUi()
 
@@ -96,6 +87,15 @@ describe('EmergencyStopControl', () => {
     expect(container.textContent).toContain('Paused')
     expect(container.textContent).toContain('Resume')
     expect(container.querySelector('.emergency-stop-control')).toBeTruthy()
+  })
+
+  it('keeps the paused badge without a worker Resume control', async () => {
+    flowState.value = 'paused'
+    shellAuthSummary.value = { effective_role: 'worker' }
+    render(html`<${EmergencyStopControl} />`, container)
+    await flushUi()
+    expect(container.textContent).toContain('Paused')
+    expect(container.querySelector('button')).toBeNull()
   })
 
   it('resumes the namespace when Resume is clicked', async () => {

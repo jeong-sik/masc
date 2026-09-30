@@ -49,7 +49,7 @@ describe('flow-control-state', () => {
     mocks.namespaceTruthError.value = null
     mocks.serverStatus.value = null
     mocks.shellAuthSummary.value = {
-      effective_role: 'worker', auth_error_code: null, auth_error_detail: null,
+      effective_role: 'admin', auth_error_code: null, auth_error_detail: null,
     }
     flowState.value = 'unknown'
     flowLoading.value = false
@@ -58,6 +58,7 @@ describe('flow-control-state', () => {
     })
     mocks.confirmOperatorPendingAction.mockResolvedValue({ status: 'ok' })
     mocks.requestConfirm.mockResolvedValue(true)
+    mocks.callMcpTool.mockResolvedValue(JSON.stringify({ ok: true, initializing: false, paused: true }))
   })
   afterEach(() => { flowState.value = 'unknown' })
 
@@ -91,7 +92,8 @@ describe('flow-control-state', () => {
     ['namespace_pause', pauseWorkspace, false, true, 'Namespace paused.'],
   ] as const)('confirms %s then reads its result', async (action, run, before, after, message) => {
     snapshot(before)
-    mocks.refreshNamespaceTruth.mockImplementation(async () => snapshot(after))
+    mocks.refreshNamespaceTruth.mockImplementation(async () => snapshot(before))
+    mocks.callMcpTool.mockResolvedValue(JSON.stringify({ ok: true, initializing: false, paused: after }))
     await run()
     expect(mocks.dispatchOperatorAction).toHaveBeenCalledWith({
       actor: 'test-operator', action_type: action, target_type: 'workspace', payload: {},
@@ -99,7 +101,7 @@ describe('flow-control-state', () => {
     expect(mocks.requestConfirm).toHaveBeenCalledTimes(1)
     expect(mocks.confirmOperatorPendingAction).toHaveBeenCalledWith('test-operator', 'token-1', 'confirm')
     expect(mocks.refreshNamespaceTruth).toHaveBeenCalledWith({ force: true })
-    expect(mocks.callMcpTool).not.toHaveBeenCalled()
+    expect(mocks.callMcpTool).toHaveBeenCalledWith('masc_pause_status', {})
     expect(flowState.value).toBe(after ? 'paused' : 'running')
     expect(mocks.showToast).toHaveBeenCalledWith(message, 'success')
     expect(flowLoading.value).toBe(false)
@@ -125,6 +127,7 @@ describe('flow-control-state', () => {
   it('does not claim success when readback fails, even with stale running status', async () => {
     snapshot(true)
     mocks.serverStatus.value = { paused: false }
+    mocks.callMcpTool.mockRejectedValue(new Error('readback failed'))
     mocks.refreshNamespaceTruth.mockImplementation(async () => {
       mocks.namespaceTruth.value = null
       mocks.namespaceTruthError.value = 'readback failed'
@@ -163,15 +166,39 @@ describe('flow-control-state', () => {
     await first
   })
 
+  it.each([
+    { ok: true, initializing: false, paused: null },
+    { ok: true, initializing: true, paused: false },
+    { ok: false, initializing: false, paused: false },
+    { ok: true, initializing: false, any_pause_active: false },
+  ])('rejects unavailable Workspace readback %j', async readback => {
+    snapshot(false)
+    mocks.callMcpTool.mockResolvedValue(JSON.stringify(readback))
+    await resumeWorkspace()
+    expect(flowState.value).toBe('unknown')
+    expect(mocks.showToast).not.toHaveBeenCalledWith('Namespace resumed.', 'success')
+    expect(mocks.showToast).toHaveBeenCalledWith('Resume failed: Namespace pause readback is unavailable.', 'error')
+  })
+
   it('rejects a reader before creating a pending action', async () => {
     mocks.shellAuthSummary.value = { effective_role: 'reader' }
     await resumeWorkspace()
     expect(mocks.dispatchOperatorAction).not.toHaveBeenCalled()
     expect(mocks.callMcpTool).not.toHaveBeenCalled()
-    expect(mocks.showToast).toHaveBeenCalledWith('Current role is reader; worker role is required.', 'error', 6000)
+    expect(mocks.showToast).toHaveBeenCalledWith('Current role is reader; admin role is required.', 'error', 6000)
+  })
+
+  it.each([pauseWorkspace, resumeWorkspace])('rejects worker namespace actions before dispatch', async run => {
+    mocks.shellAuthSummary.value = { effective_role: 'worker' }
+    await run()
+    expect(mocks.dispatchOperatorAction).not.toHaveBeenCalled()
+    expect(mocks.requestConfirm).not.toHaveBeenCalled()
+    expect(mocks.confirmOperatorPendingAction).not.toHaveBeenCalled()
+    expect(mocks.showToast).toHaveBeenCalledWith('Current role is worker; admin role is required.', 'error', 6000)
   })
 
   it('rejects garbage collection for a worker', async () => {
+    mocks.shellAuthSummary.value = { effective_role: 'worker' }
     await runGarbageCollection()
     expect(mocks.callMcpTool).not.toHaveBeenCalled()
     expect(mocks.showToast).toHaveBeenCalledWith('Current role is worker; admin role is required.', 'error', 6000)

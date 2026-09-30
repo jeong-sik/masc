@@ -10,6 +10,7 @@ import { showToast } from '../common/toast'
 import { requestConfirm } from '../common/confirm-dialog'
 import { dashboardAuthAccess } from '../../lib/dashboard-auth-access'
 import { errorToString } from '../../lib/format-string'
+import { isRecord } from '../common/normalize'
 
 type FlowState = 'unknown' | 'initializing' | 'running' | 'paused'
 export const flowState = signal<FlowState>('unknown')
@@ -51,7 +52,7 @@ export async function fetchPauseStatus(): Promise<void> {
 async function changeNamespacePause(paused: boolean): Promise<void> {
   if (flowLoading.value) return
   const verb = paused ? 'Pause' : 'Resume'
-  const access = dashboardAuthAccess(shellAuthSummary.value, 'worker')
+  const access = dashboardAuthAccess(shellAuthSummary.value, 'admin')
   if (!access.allowed) {
     showToast(access.reason ?? `Missing permission to ${verb.toLowerCase()} the namespace.`, 'error', 6000)
     return
@@ -80,8 +81,17 @@ async function changeNamespacePause(paused: boolean): Promise<void> {
     }
     await refreshNamespaceTruth({ force: true })
     syncFlowStateFromDashboardSignals()
-    const expected: FlowState = paused ? 'paused' : 'running'
-    if (flowState.value === expected) {
+    // Project snapshots refresh asynchronously. Read the current Workspace
+    // pause state after confirmation rather than treating that projection as
+    // acknowledgement of this action.
+    flowState.value = 'unknown'
+    const observed: unknown = JSON.parse(await callMcpTool('masc_pause_status', {}))
+    if (!isRecord(observed) || observed.ok !== true || observed.initializing !== false
+      || typeof observed.paused !== 'boolean') {
+      throw new Error('Namespace pause readback is unavailable.')
+    }
+    flowState.value = observed.paused ? 'paused' : 'running'
+    if (observed.paused === paused) {
       showToast(paused ? 'Namespace paused.' : 'Namespace resumed.', 'success')
     } else {
       showToast(`${verb} sent; namespace state is ${flowState.value}.`, 'warning')

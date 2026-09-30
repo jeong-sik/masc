@@ -6,7 +6,7 @@
 // panel badge to 'Paused' without any extra wiring.
 //
 // Rendering contract:
-//   - running + worker access → red "Emergency Stop" button (confirm-gated)
+//   - running + admin access → red "Emergency Stop" button (confirm-gated)
 //   - paused                  → "Paused" badge (+ "Resume" button when allowed)
 //   - unknown / initializing  → nothing (keeps the header uncluttered)
 
@@ -30,7 +30,7 @@ export function EmergencyStopControl() {
 
   const state = flowState.value
   const loading = flowLoading.value
-  const access = dashboardAuthAccess(shellAuthSummary.value, 'worker')
+  const access = dashboardAuthAccess(shellAuthSummary.value, 'admin')
 
   if (state === 'paused') {
     return html`

@@ -11,3 +11,5 @@ The current expiry inventory rule is used directly, preserving malformed input a
 `changelog.d/40174.md` is a positive numeric placeholder with matching `#40174` citation; root must replace it with the prune PR number before publication. The expiry parent's `999999.md` placeholder is unchanged. Older Play/expiry source evidence remains historical to its own captured source; this folder pins the prune composition bytes only.
 
 Published as stacked PR #40174 over expiry parent 63cc46e9380102e8a39e46b14bd7b9358fcfad74. Native and required checks must cite its final public head; local placeholders were not published.
+
+The private retirement record label was subsequently renamed to `retiring_agent_name` after the root reviewed compiler failure in native run `36666974017` / job `109733612368`. `private-retirement-label-followup.json` captures the current two repaired source files, source checks and attribution to that primary job review. Earlier provenance remains historical to its captured bytes; local parsing does not establish that the compiler error is resolved. Public prune entry names are unchanged.

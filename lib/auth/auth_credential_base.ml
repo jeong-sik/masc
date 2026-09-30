@@ -642,7 +642,7 @@ let resolve_stored_credential config name = function
        | Stored_redirect _ | Unresolved_credential -> Ok None)
 ;;
 
-type credential_prune_retirement = { agent_name : string; uuid_target : string option }
+type credential_prune_retirement = { retiring_agent_name : string; uuid_target : string option }
 
 type credential_prune_snapshot =
   { credentials : (agent_credential * credential_prune_retirement) list
@@ -657,21 +657,21 @@ let credential_prune_authority config name stored (credential : agent_credential
     | Some target -> Ok target
     | None -> refused "credential UUID is not a store filename" in
   match stored, credential.id with
-  | Stored_credential _, None -> Ok { agent_name = name; uuid_target = None }
+  | Stored_credential _, None -> Ok { retiring_agent_name = name; uuid_target = None }
   | Stored_redirect target, Some id ->
     let* uuid = uuid_path id in
     if String.equal target uuid
-    then Ok { agent_name = name; uuid_target = Some target }
+    then Ok { retiring_agent_name = name; uuid_target = Some target }
     else refused "redirect target disagrees with the credential UUID"
   | Stored_credential _, Some id ->
     let* target = uuid_path id in
     let* present = credential_path_exists target in
-    if not present then Ok { agent_name = name; uuid_target = None }
+    if not present then Ok { retiring_agent_name = name; uuid_target = None }
     else
       let* target_record = read_stored_credential config name target in
       (match target_record with
        | Stored_credential current when current = credential ->
-         Ok { agent_name = name; uuid_target = Some target }
+         Ok { retiring_agent_name = name; uuid_target = Some target }
        | Stored_credential _ | Stored_redirect _ | Unresolved_credential ->
          refused "embedded UUID resolves to another credential")
   | Stored_redirect _, None -> refused "redirected credential has no UUID binding"
@@ -733,7 +733,7 @@ let credential_prune_snapshot_in_transaction (Credential_transaction config) =
          | Stored_redirect target ->
            let* present = credential_path_exists target in
            if present then current_orphans acc rest
-           else current_orphans ({ agent_name = name; uuid_target = None } :: acc) rest
+           else current_orphans ({ retiring_agent_name = name; uuid_target = None } :: acc) rest
          | Stored_credential _ | Unresolved_credential -> current_orphans acc rest)
   in
   let* orphaned_redirects = current_orphans [] orphans in
@@ -751,8 +751,8 @@ let retire_prune_credential_in_transaction (Credential_transaction config) retir
   try
     Fun.protect ~finally:(fun () -> !credential_cache_invalidator_ref config)
       (fun () ->
-        unlink_prune_path (credential_file config retirement.agent_name);
-        unlink_prune_path (raw_token_file config retirement.agent_name);
+        unlink_prune_path (credential_file config retirement.retiring_agent_name);
+        unlink_prune_path (raw_token_file config retirement.retiring_agent_name);
         Option.iter unlink_prune_path retirement.uuid_target;
         Ok ())
   with

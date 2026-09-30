@@ -723,7 +723,7 @@ let upsert_goal config ?id ?title ?metric ?target_value ?due_date
                     || not (Option.equal String.equal existing.metric next_goal.metric)
                     || not (Option.equal String.equal existing.target_value next_goal.target_value)
                   in
-                  upserted := Some (`updated existing.phase);
+                  upserted := Some (`updated existing);
                   let next_goal =
                     if not criterion_changed then next_goal
                     else

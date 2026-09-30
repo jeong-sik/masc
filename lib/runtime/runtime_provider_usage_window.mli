@@ -11,9 +11,10 @@
     time MASC heard it.
 
     It is an observation.  Routing, candidate ordering, admission and retry
-    do not read this table (a spent window read after an HTTP 403 rests its
-    scope through {!Runtime_provider_usage_read.read_after_account_refusal},
-    on {!Runtime_quota_window}, not here): codex-cli 0.156.0's protocol schema says clients must not
+    do not read this table (an HTTP 403 usage read can separately rest its
+    scope through {!Runtime_provider_usage_read.read_after_account_refusal}
+    on {!Runtime_quota_window}). Codex reads preserve the refusal observation
+    because the rejected bucket is not attributed: codex-cli 0.156.0's protocol schema says clients must not
     infer recovery from percentages or reset times, so no availability is
     derived from these numbers.  What the provider said is stored and shown
     as it was said.
@@ -199,8 +200,19 @@ val recording_since : float
 
 val record : scope:Runtime_quota_window.scope -> observed_at:float -> report -> unit
 (** Keep each window of [report] as the latest for
-    [(scope, limit_id, kind)].  An older [observed_at] than the one held does
-    not replace it.  A report with no windows changes nothing. *)
+    [(scope, limit_id, kind)]. An older or equal [observed_at] does not
+    replace the one held. A report with no windows changes nothing. *)
+
+val set_record_observer :
+  (scope:Runtime_quota_window.scope -> observed_at:float -> report -> unit) -> unit
+(** Install the server's durable observation sink. It receives accepted
+    provider reports after the in-memory table lock has been released. A sink
+    failure is logged and never changes the runtime's quota reading. *)
+
+val record_observer_failure_at : unit -> float option
+(** Time of the latest observation sink failure in this process. A later
+    success cannot fill that gap. Consumers compare it with the requested
+    window rather than marking unrelated windows incomplete. *)
 
 val state : scope:Runtime_quota_window.scope -> scope_state
 (** The windows held for [scope], ordered by limit then kind. *)

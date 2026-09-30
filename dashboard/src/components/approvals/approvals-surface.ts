@@ -168,7 +168,6 @@ function approvalWorkSummary(item: KeeperApprovalQueueItem): string | null {
   return joinUnique([
     item.task_id ? `task ${item.task_id}` : null,
     item.goal_id ? `goal ${item.goal_id}` : null,
-    ...(item.goal_ids ?? []).map(id => `goal ${id}`),
   ])
 }
 

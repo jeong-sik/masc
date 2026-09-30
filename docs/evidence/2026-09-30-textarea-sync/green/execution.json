@@ -1,0 +1,50 @@
+[
+  {
+    "name": "focused",
+    "command": [
+      "pnpm",
+      "exec",
+      "vitest",
+      "run",
+      "src/components/common/expandable-textarea.test.ts",
+      "src/components/keeper-config-panel.test.ts",
+      "--config",
+      "vitest.config.ts",
+      "--no-file-parallelism",
+      "--maxWorkers=1"
+    ],
+    "cwd": "dashboard",
+    "started": "2026-09-30T13:54:53.929046+00:00",
+    "finished": "2026-09-30T13:54:56.264150+00:00",
+    "exit": 0
+  },
+  {
+    "name": "typecheck",
+    "command": [
+      "pnpm",
+      "exec",
+      "tsc",
+      "--noEmit",
+      "--pretty",
+      "false"
+    ],
+    "cwd": "dashboard",
+    "started": "2026-09-30T13:54:56.264165+00:00",
+    "finished": "2026-09-30T13:55:12.711168+00:00",
+    "exit": 2
+  },
+  {
+    "name": "eslint",
+    "command": [
+      "pnpm",
+      "exec",
+      "eslint",
+      "src/components/common/expandable-textarea.ts",
+      "src/components/common/expandable-textarea.test.ts"
+    ],
+    "cwd": "dashboard",
+    "started": "2026-09-30T13:55:12.711181+00:00",
+    "finished": "2026-09-30T13:55:13.695312+00:00",
+    "exit": 0
+  }
+]

@@ -1,6 +1,7 @@
 (** Screen dispatch and shared rendering projections.
-    Board screens and the workspace Code viewport live in
-    {!Masc_tui_render_board} and {!Masc_tui_render_code}. *)
+    Board, Code and MCP resource screens live in
+    {!Masc_tui_render_board}, {!Masc_tui_render_code} and
+    {!Masc_tui_render_resources}. *)
 
 module Frame_presenter = Masc_tui_frame_presenter
 module Ask_projection = Masc_tui_ask_projection

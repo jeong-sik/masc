@@ -1,0 +1,1 @@
+- Integrate full Code history metadata and visible-row Enter ownership into the TUI stack, preserving memo navigation and adding active history help.

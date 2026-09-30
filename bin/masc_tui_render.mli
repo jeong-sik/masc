@@ -109,6 +109,11 @@ val code_pane_content_height : Masc_tui_types.state -> int
 val code_notes_viewport : Masc_tui_types.state -> int * int
 (** Wrapped memo row count and visible row count at the current file-pane
     width. Memo navigation and drawing use the same physical rows. *)
+val code_history_viewport : Masc_tui_types.state -> int * int
+(** Physical history row count and visible row budget at the file-pane width. *)
+val code_history_selected : Masc_tui_types.state -> Masc_tui_types.code_history_entry option
+(** The record owning the top visible row. Coverage and failure rows have no
+    record and cannot be opened by Enter. *)
 val config_content_height : Masc_tui_types.state -> int
 val context_inspector_viewport : Masc_tui_types.state -> int * int
 val context_inspector_detail_viewport : Masc_tui_types.state -> int * int

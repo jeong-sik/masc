@@ -315,7 +315,10 @@ def dashboard_usage_interaction(
     send_and_wait(process, master_fd, output, b"/telemetry", b"/telemetry")
     send_and_wait(process, master_fd, output, b"\r", b"MASC Usage / Telemetry")
     tab_until(process, master_fd, output, b"MASC Usage")
-    wait_for_output(process, master_fd, output, b"7 UTC days", start=output.rfind(b"MASC Usage"))
+    wait_for_output(
+        process, master_fd, output, b"7 UTC days",
+        start=output.rfind(b"MASC Usage"), timeout=10.0,
+    )
     os.write(master_fd, b"q")
 
 

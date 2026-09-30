@@ -112,7 +112,7 @@ def run_unapplied_installations(executable: str) -> None:
         # an installed worker's detail, so observe this overview's fetch instead.
         addon_start = len(output)
         _keyboard_harness.send_and_wait(process, fd, output, b"A", b"Lane Add-ons")
-        _keyboard_harness.wait_for_output(process, fd, output, b"Recorded observations",
+        _keyboard_harness.wait_for_output(process, fd, output, b"Lane Add-ons \xc2\xb7 2 declared",
                           start=addon_start, timeout=3.0)
         frame = _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"2 declared")
         reading = b"Lane Add-ons: 2 declared \xc2\xb7 0 active \xc2\xb7 2 config issues"

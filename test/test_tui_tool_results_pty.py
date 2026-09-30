@@ -58,7 +58,7 @@ def run(executable: str) -> None:
             before = _keyboard_harness.screen_text(bytes(output))
             if b"GATE_TAIL" in before or changes.calls:
                 raise AssertionError(f"results mode prematurely expanded details: {before!r}")
-            _keyboard_harness.send_and_wait(process, master_fd, output, b"\x02", b"KEEPERS")
+            _keyboard_harness.wait_for_output(process, master_fd, output, b"KEEPERS", start=0, timeout=3.0)
             _keyboard_harness.drain_until_quiet(process, master_fd, output)
             row = _keyboard_harness.screen_row_of(_keyboard_harness.screen_rows(bytes(output)), b"GATE_CLICK")
             if row < 0:

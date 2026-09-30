@@ -14,7 +14,12 @@ def run(executable, no_color=False):
     repositories["repositories"].append({**repositories["repositories"][0],
         "id":"next-repo", "name":"next-repo", "local_path":"workspace/next-repo",
         "resolved_local_path":"/srv/masc/workspace/next-repo"})
-    repositories["total"] = 2
+    repositories["repositories"].append({**repositories["repositories"][0],
+        "id":"failed-repo", "name":"failed-repo", "status":"error",
+        "error_message":"checkout unavailable: refresh credentials",
+        "local_path":"workspace/failed-repo",
+        "resolved_local_path":"/srv/masc/" + "long-identity-segment/" * 16 + "failed-repo"})
+    repositories["total"] = 3
     fixtures[h.REPOSITORIES_PATH] = (200, repositories)
     fixtures["/api/v1/runtime/params"] = (200, {"parameters": [
         {"key": "studio.enabled", "current": True, "default": False,
@@ -26,11 +31,13 @@ def run(executable, no_color=False):
     def interact(process, fd, _slave, output, _base):
         def key(value, needle):
             return h.send_and_wait(process, fd, output, value, needle)
-        def capture(name, rows, columns, needle):
+        def capture(name, rows, columns, needle, selected_name=None):
             h.resize_and_wait(process, fd, output, rows=rows, columns=columns+1,
                 needle=needle, controls=(h.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
             frame = h.resize_and_wait(process, fd, output, rows=rows, columns=columns,
                 needle=needle, controls=(h.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
+            if selected_name is not None and not h.keeper_row_selected(selected_name).search(frame):
+                raise AssertionError(f"selected repository {selected_name!r} vanished from its table")
             print("STUDIO_CAPTURE="+json.dumps({"name":name+("-no-color" if no_color else ""),
                 "rows":rows,"columns":columns,"provenance":"CI fixture PTY",
                 "frame_b64":base64.b64encode(frame).decode(),
@@ -48,9 +55,13 @@ def run(executable, no_color=False):
             for needle in (b"Path:",b"Stored as: workspace/masc",b"Keepers: alpha"):
                 if needle not in screen: raise AssertionError(f"Workspace omitted {needle!r}")
         key(b"j", b"next-repo")
-        selected = capture("workspace-short-selected",16,80,b"/srv/masc/workspace/next-repo")
+        selected = capture("workspace-short-selected",16,80,b"/srv/masc/workspace/next-repo", b"next-repo")
         if b"next-repo" not in selected:
             raise AssertionError("selected repository disappeared in short viewport")
+        key(b"j", b"checkout unavailable")
+        failed = capture("workspace-failed-short",16,80,b"checkout unavailable", b"failed-repo")
+        if b"Error: checkout unavailable" not in failed:
+            raise AssertionError("long selected context hid the actual failure reason")
         key(b":settings\r",b"studio.enabled")
         wide=capture("system-wide",32,160,b"Selected setting")
         for needle in (b"Current on",b"Default off",b"override",b"Enable the observed feature"):

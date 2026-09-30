@@ -93,3 +93,7 @@ identified the release-state, hook and opam-initialization findings in a source
 read. Source review still does not establish fresh-machine install success or
 actual runtime behavior. Main was integrated after the GitHub reviewer reported
 that the earlier green PR run failed freshness; the revised head needs new CI.
+
+The fix review identified inherited `MASC_CONFIG_DIR` as an escape from the
+launch example's separate config root. The example now clears that variable for
+the command and states that existing target-directory configuration still applies.

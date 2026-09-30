@@ -62,12 +62,13 @@ opam install ./masc.opam --deps-only --locked --with-test
 scripts/dune-local.sh build @default      # build
 scripts/dune-local.sh exec test/test_keeper_meta_json_config_toml_only.exe
 mkdir -p "$HOME/masc-dev"
-scripts/run-local.sh --target-dir "$HOME/masc-dev" --port 9234
+env -u MASC_CONFIG_DIR scripts/run-local.sh --target-dir "$HOME/masc-dev" --port 9234
 ```
 
 Use an unused port in the launch command; `9234` is an example. The local launcher
-uses the separate target directory for runtime/config state and does not seed
-checked-in Keeper manifests by default. Browser access additionally needs the
+clears an inherited `MASC_CONFIG_DIR` for this command so config resolves under
+the separate target directory. It does not seed checked-in Keeper manifests by
+default; existing configuration in the target directory still applies. Browser access additionally needs the
 dashboard build described in README.
 
 `scripts/dune-local.sh` wraps Dune for a machine where several agents build at

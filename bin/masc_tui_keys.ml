@@ -235,7 +235,7 @@ let global =
   [ b Meta "Tab / Shift-Tab" "next / previous surface"
   ; keepers_jump
   ; b Meta "r" "refresh the current surface"
-  ; b Meta "i" "focus the composer (message the shown keeper)"
+  ; b Meta "i" "focus the composer; on Dashboard, choose a Keeper"
   ; b Meta ":" "command palette"
   ; b Meta ";"
       "agenda: what is coming, and who is waiting on you; Enter opens a row"
@@ -371,7 +371,11 @@ let fusion_board_key = b Navigate "B" "Board evidence"
 
 let for_surface = function
   | Overview ->
-      [ b Navigate "m" "Usage" ~help:"account windows and Keeper usage"
+      [ b Navigate "j/k" "choose" ~help:"move between decision links and conversations"
+      ; b Navigate "Enter" "open" ~help:"open the selected destination; never approve"
+      ; b Navigate "p" "requests" ~help:"approvals and questions"
+      ; b Navigate ";" "agenda" ~help:"Goal confirmations and tasks waiting on you"
+      ; b Navigate "m" "Usage" ~help:"account windows and Keeper usage"
       ]
       @ listing_meta
   | Acting ->
@@ -1313,7 +1317,7 @@ let cancels_two_press ~input_seen ~key ~second_press =
    [K] and [B] answer in the detail as they do on the list (masc_tui.ml
    matches them under [Fusion_detail]); the footer left them out, and a body
    row said "K Keeper · B Board" in its own notation instead. *)
-let footer_hints_board_read ~focus_posts ~focus_comments
+let footer_hints_board_read ~focus_posts ~focus_comments ~full_history
     ~(layout : board_read_layout) =
   let pane_keys =
     match layout with
@@ -1339,6 +1343,13 @@ let footer_hints_board_read ~focus_posts ~focus_comments
      ; b Navigate "PgUp/PgDn" "page"
      ]
      @ pane_keys @ width_key
+     (* [o] goes after the pane and width keys. The fitter gives up the last
+        droppable hint first, so a key placed ahead of them pushes them off:
+        at 120 cells the split footer lost Ctrl-W:switch, and at 130
+        z:wide, to "o:all comments". Placed here it is the Navigate hint
+        dropped first, and up to 134 cells the row is the one drawn before
+        [o] existed. *)
+     @ [ b Navigate "o" (if full_history then "newest 20" else "all comments") ]
      @ [ board_vote_key
        ; board_reply_key
        ; board_copy_key

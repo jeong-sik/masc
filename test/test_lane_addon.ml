@@ -76,7 +76,7 @@ let make_backend ?observe_step () =
         else Ok connection
       end);
     image_ready = (fun ~package:_ -> Ok ());
-    acquire = (fun ~store:_ ~package:_ ~resolve_lane_output:_ ~binding:_ ->
+    acquire = (fun ~access:_ ~store:_ ~package:_ ~resolve_lane_output:_ ~binding:_ ->
       Ok (`List [`Assoc ["original_bytes", `String "captured source before rotation"]]));
     recover_stop = (fun ~instance_id ~container_id ~max_reply_bytes:_ ->
       match container_id with
@@ -361,10 +361,10 @@ let test_capture_cannot_rewrite_detach_failure () =
   let released, release = Eio.Promise.create () in
   let returned, return = Eio.Promise.create () in
   let captures = ref 0 in
-  let acquire ~store ~package ~resolve_lane_output ~binding =
+  let acquire ~access ~store ~package ~resolve_lane_output ~binding =
     incr captures;
     if !captures=2 then (Eio.Promise.resolve enter (); Eio.Promise.await released);
-    let result = Lane_addon_sources.acquire ~store ~package ~resolve_lane_output ~binding in
+    let result = Lane_addon_sources.acquire ~access ~store ~package ~resolve_lane_output ~binding in
     if !captures=2 then Eio.Promise.resolve return ();
     result in
   with_fixture ~acquire (fun env _sw config dir state ->
@@ -487,20 +487,150 @@ let test_activity_from_another_domain_reaches_the_owner () =
 let test_fusion_status_hint_wakes_only_its_bound_run () =
   with_fixture (fun env _sw config dir _state ->
     let watcher run_id =
-      unwrap (dispatch config Runtime.Attach [
+      Fusion_run_registry.register_running (Fusion_run_registry.global ()) ~run_id
+        ~keeper:"fixture-owner" ~preset:"default" ~roster:Fusion_types.preset_roster
+        ~topology:Fusion_types.Simple ~started_at:1.;
+      unwrap (Runtime.dispatch ~caller:"fixture-owner" ~config ~operation:Runtime.Attach (`Assoc [
         "manifest_path",`String (manifest dir "good");"run_id",`String "world";
         "binding",`Assoc ["sources",`List [`Assoc [
           "source_id",`String "fusion";"kind",`String "fusion_run";
-          "run_id",`String run_id]]]]) |> text "instance_id" in
+          "run_id",`String run_id]]]])) |> text "instance_id" in
     let one = watcher "fusion-one" and two = watcher "fusion-two" in
     let clock = Eio.Stdenv.clock env in
-    let seq id = int "observation_seq" (instance config id) in
+    let request caller operation fields = Runtime.dispatch ~caller ~config ~operation (`Assoc fields) in
+    let inspect_owned id = unwrap (request "fixture-owner" Runtime.Inspect ["instance_id",`String id])
+      |> member "instances" |> Yojson.Safe.Util.to_list |> List.hd in
+    let seq id = int "observation_seq" (inspect_owned id) in
     await clock (fun () -> seq one=1 && seq two=1);
+    let foreign = unwrap (request "another-keeper" Runtime.Inspect []) in
+    check Alcotest.int "foreign inspect enumerates no private instances" 0
+      (member "instances" foreign |> Yojson.Safe.Util.to_list |> List.length);
+    check Alcotest.int "foreign inspect exposes no private rows" 0
+      (member "rows" foreign |> Yojson.Safe.Util.to_list |> List.length);
+    let foreign_slice = unwrap (request "another-keeper" Runtime.Slice ["run_id",`String "world"]) in
+    check Alcotest.int "foreign retained slice exposes no private rows" 0
+      (member "rows" foreign_slice |> Yojson.Safe.Util.to_list |> List.length);
+    let denied operation fields =
+      match Lane_addon_runtime.dispatch ~caller:"another-keeper" ~config ~operation
+          (`Assoc (("instance_id",`String one)::fields)) with
+      | Error (Runtime.Request_rejected detail) ->
+          check string "private instance is denied before read or mutation"
+            "Lane instance is unavailable to this caller" detail
+      | Error (Runtime_failed detail) -> failf "access denial became runtime failure: %s" detail
+      | Ok _ -> fail "another Keeper read or mutated private evidence" in
+    List.iter (fun (operation,fields) -> denied operation fields)
+      [Runtime.Evidence,["row_ids",`List []]; Runtime.Observe,[]; Runtime.Detach,[];
+       Runtime.Act,["expected_incarnation",`String one;"request_id",`String "foreign";"action",`Assoc []];
+       Runtime.Action_status,["request_id",`String "foreign"]];
     Runtime.notify_fusion_run ~run_id:"fusion-one";
     await clock (fun () -> seq one=2);
     check Alcotest.int "another Fusion binding did not run" 1 (seq two);
-    List.iter (detach config) [one;two];
-    List.iter (fun id -> await_phase clock config id "detached") [one;two])
+    List.iter (fun id -> ignore (unwrap (request "fixture-owner" Runtime.Detach ["instance_id",`String id]))) [one;two];
+    List.iter (fun id -> await clock (fun () -> phase (inspect_owned id) = "detached")) [one;two];
+    Runtime.For_testing.reset ();
+    let owner_slice = unwrap (request "fixture-owner" Runtime.Slice ["run_id",`String "world"]) in
+    check bool "owner can read durable evidence after restart" true
+      (member "rows" owner_slice |> Yojson.Safe.Util.to_list <> []);
+    let foreign_slice = unwrap (request "another-keeper" Runtime.Slice ["run_id",`String "world"]) in
+    check Alcotest.int "durable ownership still hides private rows after restart" 0
+      (member "rows" foreign_slice |> Yojson.Safe.Util.to_list |> List.length))
+
+let test_private_fusion_reads_survive_retirement () = with_fixture (fun env _sw config dir _state ->
+  let owner = "private-owner" and foreign = "private-reader" in
+  let run_id = "private-fusion-" ^ Store.digest dir in
+  Fusion_run_registry.register_running (Fusion_run_registry.global ()) ~run_id
+    ~keeper:owner ~preset:"default" ~roster:Fusion_types.preset_roster
+    ~topology:Fusion_types.Simple ~started_at:1.;
+  let call caller operation fields = Runtime.dispatch ~caller ~config ~operation (`Assoc fields) in
+  let id = unwrap (call owner Runtime.Attach ["manifest_path",`String (manifest dir "good");
+    "run_id",`String "private-world";"binding",`Assoc ["sources",`List [`Assoc [
+      "source_id",`String "fusion";"kind",`String "fusion_run";"run_id",`String run_id]]]])
+    |> text "instance_id" in
+  let clock = Eio.Stdenv.clock env in
+  await clock (fun () -> int "observation_seq" (instance config id) = 1);
+  let view = unwrap (call owner Runtime.Inspect ["instance_id",`String id]) in
+  let row_id = member "rows" view |> Yojson.Safe.Util.to_list |> List.hd |> text "id" in
+  let denied operation fields = match call foreign operation fields with
+    | Error detail -> check string "uniform exact-instance denial" "Lane instance is unavailable to this caller" detail
+    | Ok _ -> fail "foreign Keeper accessed private instance" in
+  List.iter (fun operation -> denied operation ["instance_id",`String id])
+    [Runtime.Inspect;Runtime.Observe;Runtime.Detach;Runtime.Act;Runtime.Action_status];
+  denied Runtime.Evidence ["instance_id",`String id;"row_ids",`List [`String row_id]];
+  let public = unwrap (call foreign Runtime.Inspect []) in
+  check Alcotest.int "unfiltered inspection exposes no private instances" 0
+    (member "instances" public |> Yojson.Safe.Util.to_list |> List.length);
+  check Alcotest.int "unfiltered inspection exposes no private rows" 0
+    (member "rows" public |> Yojson.Safe.Util.to_list |> List.length);
+  check Alcotest.int "foreign range query excludes private observations" 0
+    (unwrap (call foreign Runtime.Slice []) |> member "rows" |> Yojson.Safe.Util.to_list |> List.length);
+  check bool "claimed owner with unauthenticated HTTP access is refused" true
+    (Result.is_error (Lane_addon_runtime.dispatch ~caller:owner ~access:Lane_addon_sources.Unauthenticated
+      ~config ~operation:Runtime.Inspect (`Assoc ["instance_id",`String id])));
+  ignore (unwrap (call owner Runtime.Evidence ["instance_id",`String id;"row_ids",`List [`String row_id]]));
+  ignore (unwrap (call owner Runtime.Detach ["instance_id",`String id]));
+  await_phase clock config id "detached";
+  Runtime.For_testing.reset ();
+  check Alcotest.int "owner can read durable rows after host manager restart" 1
+    (unwrap (call owner Runtime.Slice []) |> member "rows" |> Yojson.Safe.Util.to_list |> List.length);
+  denied Runtime.Inspect ["instance_id",`String id];
+  denied Runtime.Evidence ["instance_id",`String id;"row_ids",`List [`String row_id]];
+  check Alcotest.int "historical inspection excludes private bindings" 0
+    (unwrap (call foreign Runtime.Inspect []) |> member "instances" |> Yojson.Safe.Util.to_list |> List.length))
+
+let test_private_broadcast_retry_uses_saved_visibility () = with_fixture (fun env _ config dir _ ->
+  let owner = "private-broadcast-owner" in
+  ignore (Workspace.init config ~agent_name:(Some owner));
+  let run_id = "private-broadcast-" ^ Store.digest dir in
+  Fusion_run_registry.register_running (Fusion_run_registry.global ()) ~run_id
+    ~keeper:owner ~preset:"default" ~roster:Fusion_types.preset_roster
+    ~topology:Fusion_types.Simple ~started_at:1.;
+  let id = Runtime.dispatch ~caller:owner ~config ~operation:Runtime.Attach
+    (`Assoc ["manifest_path",`String (manifest dir "good");"run_id",`String "private-world";
+      "binding",`Assoc ["sources",`List [`Assoc ["source_id",`String "fusion";
+        "kind",`String "fusion_run";"run_id",`String run_id]]]]) |> unwrap |> text "instance_id" in
+  let clock = Eio.Stdenv.clock env in
+  await clock (fun () -> int "observation_seq" (instance config id) = 1);
+  let selected = Runtime.dispatch ~caller:owner ~config ~operation:Runtime.Inspect
+    (`Assoc ["instance_id",`String id]) |> unwrap |> member "rows"
+    |> Yojson.Safe.Util.to_list |> List.hd |> text "id" in
+  let args = `Assoc ["instance_id",`String id;"row_ids",`List [`String selected];
+    "broadcast",`Bool true;"request_id",`String "private-send"] in
+  let send caller access = Lane_addon_runtime.dispatch ~caller ~access ~config
+    ~operation:Runtime.Evidence args in
+  let original = send owner (Lane_addon_sources.Keeper owner)
+    |> Result.map_error Lane_addon_runtime.error_to_string |> unwrap in
+  check string "explicit private Broadcast commits" "committed"
+    (member "delivery" original |> text "status");
+  let store_root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
+  let store = Store.create ~root:store_root in
+  let broadcast_id = member "delivery" original |> member "receipt" |> text "request_id" in
+  let prepared = Store.load_broadcast store ~instance_id:id ~request_id:broadcast_id |> unwrap
+    |> (function Some value -> value | None -> fail "prepared Broadcast record missing") in
+  check string "prepared operation retains authoritative exact owner" owner
+    (prepared |> member "visibility" |> text "keeper");
+  ignore (Runtime.dispatch ~caller:owner ~config ~operation:Runtime.Detach
+    (`Assoc ["instance_id",`String id]) |> unwrap);
+  await_phase clock config id "detached";
+  unwrap (Store.remove_binding store ~instance_id:id);
+  remove_tree (Filename.concat store_root (Filename.concat "observations" (Store.digest id)));
+  Runtime.For_testing.reset ();
+  check bool "unverified claimed owner cannot retrieve cached private evidence" true
+    (Result.is_error (send owner Lane_addon_sources.Unauthenticated));
+  check bool "foreign caller cannot retrieve cached private evidence" true
+    (Result.is_error (send "foreign" (Lane_addon_sources.Keeper "foreign")));
+  check bool "access principal cannot impersonate saved caller" true
+    (Result.is_error (send owner (Lane_addon_sources.Keeper "foreign")));
+  let missing = `Assoc (List.remove_assoc "visibility" (Yojson.Safe.Util.to_assoc prepared)) in
+  unwrap (Store.save_broadcast store ~instance_id:id ~request_id:broadcast_id missing);
+  check bool "missing saved visibility fails closed without original binding" true
+    (Result.is_error (send owner (Lane_addon_sources.Keeper owner)));
+  unwrap (Store.save_broadcast store ~instance_id:id ~request_id:broadcast_id prepared);
+  let recovered = send owner (Lane_addon_sources.Keeper owner)
+    |> Result.map_error Lane_addon_runtime.error_to_string |> unwrap in
+  check bool "owner recovers exact committed receipt without original binding" true
+    (member "delivery" recovered = member "delivery" original);
+  check bool "owner recovers exact retained artifact" true
+    (member "keeper_artifact" recovered = member "keeper_artifact" original))
 
 let test_broadcast_retry_reconciles_receipt_during_slow_fanout () =
   with_fixture (fun env sw config dir _ ->
@@ -513,6 +643,25 @@ let test_broadcast_retry_reconciles_receipt_during_slow_fanout () =
       "broadcast",`Bool true;"request_id",`String "slow-send"] in
     let entered, mark_entered = Eio.Promise.create () in
     let release, mark_released = Eio.Promise.create () in
+    let before_commit, mark_before_commit = Eio.Promise.create () in
+    let allow_commit, mark_allow_commit = Eio.Promise.create () in
+    let retry_waiting, mark_retry_waiting = Eio.Promise.create () in
+    let cancelled_waiter, mark_cancelled_waiter = Eio.Promise.create () in
+    let waiter_context, mark_waiter_context = Eio.Promise.create () in
+    let waiters = ref 0 in
+    let writes = ref 0 in
+    let previous_write = Workspace_broadcast.For_testing.replace_write_json_commit
+      (fun config path json ->
+        incr writes;
+        if !writes=1 then (
+          Eio.Promise.resolve mark_before_commit ();
+          Eio.Promise.await allow_commit);
+        Workspace_utils.write_json_commit_result config path json) in
+    let previous_wait = Workspace_broadcast.For_testing.replace_on_exact_request_wait
+      (fun _request_id ->
+        incr waiters;
+        if !waiters=1 then Eio.Promise.resolve mark_cancelled_waiter ()
+        else if !waiters=2 then Eio.Promise.resolve mark_retry_waiting ()) in
     let fanouts = ref 0 in
     let previous = Workspace_broadcast.For_testing.replace_on_broadcast_mention (fun _delivery ->
       incr fanouts;
@@ -523,15 +672,38 @@ let test_broadcast_retry_reconciles_receipt_during_slow_fanout () =
     Fun.protect ~finally:(fun () ->
       let (_ : Workspace_broadcast.broadcast_delivery -> Workspace_broadcast.mention_delivery) =
         Workspace_broadcast.For_testing.replace_on_broadcast_mention previous in
+      let (_ : string -> unit) =
+        Workspace_broadcast.For_testing.replace_on_exact_request_wait previous_wait in
+      let (_ : Workspace_utils_backend_setup.config -> string -> Yojson.Safe.t ->
+        (Workspace_utils.write_json_commit, string) result) =
+        Workspace_broadcast.For_testing.replace_write_json_commit previous_write in
+      if not (Eio.Promise.is_resolved allow_commit) then Eio.Promise.resolve mark_allow_commit ();
       if not (Eio.Promise.is_resolved release) then Eio.Promise.resolve mark_released ()) (fun () ->
       let send () = Runtime.dispatch ~caller:"fixture-operator" ~config ~operation:Runtime.Evidence args |> unwrap in
       let first = Eio.Fiber.fork_promise ~sw send in
+      Eio.Promise.await before_commit;
+      let cancelled_retry = Eio.Fiber.fork_promise ~sw (fun () ->
+        Eio.Cancel.sub (fun context ->
+          Eio.Promise.resolve mark_waiter_context context;
+          send ())) in
+      Eio.Promise.await cancelled_waiter;
+      Eio.Cancel.cancel (Eio.Promise.await waiter_context) Exit;
+      (match Eio.Promise.await cancelled_retry with
+       | Error (Eio.Cancel.Cancelled _) -> ()
+       | Error error -> raise error
+       | Ok _ -> Alcotest.fail "cancelled precommit retry must propagate cancellation");
+      check bool "cancelled waiter leaves the original owner waiting" false (Eio.Promise.is_resolved first);
+      let retry = Eio.Fiber.fork_promise ~sw send in
+      Eio.Promise.await retry_waiting;
+      check bool "retry arrived before the authoritative row" false (Eio.Promise.is_resolved retry);
+      Eio.Promise.resolve mark_allow_commit ();
       Eio.Promise.await entered;
       (* A new observation changes entry_json while the original caller is
          blocked. Retry still has to return the originally published bundle. *)
       ignore (unwrap (dispatch config Runtime.Observe ["instance_id",`String id]));
       await clock (fun () -> int "observation_seq" (instance config id) = 2);
-      let replay = send () in
+      let replay = Eio.Promise.await_exn retry in
+      check Alcotest.int "precommit retry created only one authoritative message" 1 !writes;
       check bool "original request is still waiting for fleet delivery" false (Eio.Promise.is_resolved first);
       check string "retry recovers authoritative commit during slow fanout" "committed"
         (member "delivery" replay |> text "status");
@@ -542,8 +714,14 @@ let test_broadcast_retry_reconciles_receipt_during_slow_fanout () =
           ~from_agent:"fixture-operator" ~content:"independent message"));
       Eio.Promise.resolve mark_released ();
       let original = Eio.Promise.await_exn first in
+      let receipt_of result = member "delivery" result |> member "receipt" in
+      check string "active replay exposes unfinished fanout" "active"
+        (receipt_of replay |> text "fanout_state");
+      check string "completed original exposes handler settlement" "finished"
+        (receipt_of original |> text "fanout_state");
       check bool "replayed receipt has original request identity and sequence" true
-        (member "delivery" original = member "delivery" replay);
+        (text "request_id" (receipt_of original)=text "request_id" (receipt_of replay)
+         && int "seq" (receipt_of original)=int "seq" (receipt_of replay));
       check bool "retry preserves original selected artifact despite changing live metadata" true
         (member "keeper_artifact" original = member "keeper_artifact" replay);
       let receipt = member "delivery" replay |> member "receipt" in
@@ -571,7 +749,7 @@ let test_broadcast_retry_reconciles_receipt_during_slow_fanout () =
         (member "delivery" recovered = member "delivery" original);
       check bool "restart recovers the same exact artifact" true
         (member "keeper_artifact" recovered = member "keeper_artifact" original);
-      check Alcotest.int "recovery never fans out a duplicate" 3 !fanouts))
+      check Alcotest.int "idle recovery replays the same idempotent fleet projection" 4 !fanouts))
 
 let test_broadcast_failure_keeps_evidence_without_automatic_retry () =
   with_fixture (fun env _ config dir _ ->
@@ -622,10 +800,13 @@ let test_broadcast_failure_keeps_evidence_without_automatic_retry () =
     detach config id; await_phase clock config id "detached")
 
 let () = run "Lane Add-on runtime" ["optional extension", [
+  test_case "private Broadcast retry uses saved visibility after binding removal" `Quick
+    test_private_broadcast_retry_uses_saved_visibility;
   test_case "Broadcast retry reconciles the committed receipt during slow fanout" `Quick
     test_broadcast_retry_reconciles_receipt_during_slow_fanout;
   test_case "Broadcast failure retains evidence without automatic retry" `Quick
     test_broadcast_failure_keeps_evidence_without_automatic_retry;
+  test_case "Fusion read ownership survives retirement and restart" `Quick test_private_fusion_reads_survive_retirement;
   test_case "Fusion state hint wakes only the exact run binding" `Quick
     test_fusion_status_hint_wakes_only_its_bound_run;
   test_case "a human MSX press wakes machine watchers exactly once" `Quick

@@ -59,27 +59,9 @@ Eio 는 취소를 `Eio.Cancel.Cancelled` 예외로 전한다. 모든 예외를 �
   | exception ex -> Error (Printexc.to_string ex)
   ```
 
-- `lib/` 에서 CI 가 잡는 모양:
-  - `scripts/lint-cancel-guard.sh`: `with _ ->`, `with <이름> ->`, `| exception _ ->` 는 바로 위 세 줄
-    안에 `Eio.Cancel.Cancelled` 가 있거나, 여덟 줄 안에서 그 이름을 다시 `raise` 해야 한다.
-    예외 표시 `cancel-guard-ok: <이유>` 는 개수 상한이 있다.
-  - `scripts/ci/check-silent-failure-patterns.sh`: `try ignore (...)`, 앞줄에 로그 없는 `| _ -> ()`.
-  - `scripts/ci/check-wildcard-only-match.py`: 모든 가지가 `_` 뿐인 `match`.
+## 3. 변경 검증
 
-## 3. 결정론 게이트
-
-`scripts/ci/check-determinism-contract.sh` 는 `origin/main...HEAD` 의 `lib/` diff 에서 **새로 추가된**
-줄 중 아래 모양을 실패로 잡는다. 위아래 두 줄 안에 `DET-OK:` 나 `NDT-OK:` 이유 주석이 있으면 넘어간다.
-
-| 모양 | 대신 |
-|---|---|
-| `Option.value opt ~default:x` | `match opt with Some v -> v \| None -> x` |
-| `\| _ -> Some ...` | 생성자마다 가지를 적는다 |
-| `Unix.gettimeofday`, `Random.`, `Unix.times`, `Sys.time`, `Unix.getpid` | 경계에서 한 번 읽어 인자로 넘긴다 |
-
-- 게이트는 **커밋된 HEAD** 를 비교한다. 파일만 고치고 돌리면 옛 커밋의 줄을 본다. 커밋한 뒤 돌린다.
-- 실패 보고에 남의 파일 줄이 같이 찍혀도, 이 PR 의 실패는 `origin/main...HEAD:` 뒤에 적힌 줄이다.
-- 들여쓰기만 바뀌어 옮겨진 줄은 새 줄로 치지 않는다.
+소스 패턴이나 임의 개수 상한으로 구현을 제한하지 않는다. 타입 검사와 실제 동작 테스트로 변경을 검증하고, 로컬 빌드와 CI 실행 시점은 헌법의 실행 프로토콜을 따른다.
 
 ## 4. Mutex 고르기
 
@@ -126,10 +108,7 @@ use flow
 - `Fun.protect ~finally work`: `finally` 가 예외를 내면 `Fun.Finally_raised` 로 바뀌고 `work` 의 원래
   예외는 사라진다(`fun.mli`). 취소된 fiber 의 `finally` 에서 취소될 수 있는 Eio 연산을 부르면 그 연산이
   다시 `Cancelled` 를 내고, 원래 오류가 묻힌다.
-- 그래서 `lib/` 에서 `Fun.protect` 의 `~finally:` 안에 `Eio.`·`Fiber.`·`Promise.await`·
-  `Stream.take/add/close`·`Condition.await`·`Mutex.lock/use_/with_` 를 새로 쓰면
-  `scripts/ci/check-fun-protect-finally-guard.py` 가 실패시킨다. 막히거나 fiber 를 바꾸는 정리는
-  `Switch.on_release` 로 옮긴다. 순수 동기 정리(`close_in ic` 등)만 `Fun.protect` 에 둔다.
+- 막히거나 fiber를 바꾸는 정리는 `Switch.on_release`로 옮긴다. 순수 동기 정리(`close_in ic` 등)만 `Fun.protect`에 둔다.
 
 ## 7. 막히는 I/O 와 무거운 계산
 

@@ -37,7 +37,7 @@ let lines text =
 let rows_of_line ~max_cells line =
   match
     Message_layout.wrap_words ~max_cells
-      (Masc.Tui_decode.sanitize_terminal_text (drop_line_terminator line))
+      (Masc.Tui_terminal_text.sanitize_terminal_text (drop_line_terminator line))
   with
   (* [wrap_words] answers nothing for a line with no words. The break was
      written, so the blank row it asks for is drawn. *)

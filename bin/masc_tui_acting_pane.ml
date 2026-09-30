@@ -929,7 +929,7 @@ let call_detail_line ~cols ~now (tool : Acting.chunk_tool) part =
     let body =
       match preview with
       | Some text ->
-          { text = clip_cells (Reading.preview_line text) (max 0 (room - detail_label_cells))
+          { text = clip_cells (Masc.Tui_terminal_text.preview_line text) (max 0 (room - detail_label_cells))
           ; tone = Plain
           }
       | None -> { text = "not carried"; tone = Dim }

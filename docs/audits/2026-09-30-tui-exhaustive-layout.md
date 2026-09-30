@@ -45,7 +45,7 @@ Board PR check `36648042151` 및 Usage PR check `36648043868`의 edited-test 단
 | O02 | Agenda | 첫 actionable target으로 뛰어 위 예정 일정을 못 읽음 | [#40102](https://github.com/jeong-sik/masc/pull/40102), reading/following 구별·visible-only Enter |
 | O03/O04 | Answering | byte name 폭과 no-target scroll 부재; hidden Enter | [#40098](https://github.com/jeong-sik/masc/pull/40098), 셀 배정·page scroll·visible target; 테스트 dict 순회 오류도 수정 |
 | M01 | Memory 상세 | claim 최소30셀이 실제 폭 초과; provenance 잘림 | [#40103](https://github.com/jeong-sik/masc/pull/40103), 폭 중복 차감 제거·필드 wrap |
-| K01 | Keeper Info/Channels | 22셀 라벨 뒤 원문 값을 한 줄로 잘라 잃음 | 구현 필요 |
+| K01 | Keeper Info/Channels | 22셀 라벨 뒤 원문 값을 한 줄로 잘라 잃음 | [#40131](https://github.com/jeong-sik/masc/pull/40131), 필드 wrap 후 scroll 계산; 집중 실행 검증 대기 |
 | K02 | Keeper logs | 75셀 고정 표 뒤 cost/work/tools가 도달 불가 | 구현 필요 |
 | K03/S03 | Connectors/Clients | printf 최소 폭으로 긴 이름이 열을 밀고 channel/last seen 소실 | [#40118](https://github.com/jeong-sik/masc/pull/40118), 공유 Table.fit; 실행 검증 대기 |
 | K04 | Schedules 상세/목록 | recurrence/ID/digest/fence 원문 잘림, mandatory target 폭 과다 | 구현 필요 |
@@ -53,7 +53,8 @@ Board PR check `36648042151` 및 Usage PR check `36648043868`의 edited-test 단
 | K06 | Chat inflight row | 다른 Keeper 이름 뒤 interrupt 행동이 잘림 | 구현 필요 |
 | R02 | 기록된 diff | 세로 스크롤만 있어 긴 줄 뒤 차이가 도달 불가; shift 키가 file offset만 바꿈 | 실제 diff 수평 탐색 필요 |
 | S02 | Runtime 목록 | 77셀 고정 열이 route/probe/detail을 밀어냄 | 반응형 열 필요; Enter 상세 fallback 있음 |
-| W02/W03 | Task/Goal 상세 | title/owner/status/reason/ID 등 고정 metadata가 원문을 잃음 | 필드 wrap 및 행 예산 재설계 필요 |
+| W02 | Task 상세 | title/status/actor/reason/ID 등 고정 metadata가 원문을 잃음 | [#40133](https://github.com/jeong-sik/masc/pull/40133), 모든 metadata/history를 물리 행 스크롤에 포함; 집중 실행 검증 대기 |
+| W03 | Goal 상세 | title/owner/metric/due/priority 등 고정 metadata가 원문을 잃음 | 필드 wrap 및 행 예산 재설계 필요 |
 | W04 | 짧은 Goal 상세 | fixed13+timestamp3+linked8이 24행을 소모 | linked/body/footer 전체 행 배정 필요 |
 | W05/W06 | Review/Verdict 상세 | title/task/request/agent/gate/goal metric metadata 잘림 | 필드 wrap 필요 |
 | S04 | Runtime params | key/current/default 최소 폭, selected contract 도달 불가 | 표·선택 contract 재배치 필요 |

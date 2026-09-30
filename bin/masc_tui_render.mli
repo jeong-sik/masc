@@ -115,6 +115,9 @@ val code_history_selected : Masc_tui_types.state -> Masc_tui_types.code_history_
 (** The record owning the top visible row. Coverage and failure rows have no
     record and cannot be opened by Enter. *)
 val config_content_height : Masc_tui_types.state -> int
+val prompts_detail_viewport : Masc_tui_types.state -> int * int
+(** Wrapped selected prompt/asset row count and the detail's visible rows.
+    Page and edge keys use the same document and geometry as drawing. *)
 val context_inspector_viewport : Masc_tui_types.state -> int * int
 val context_inspector_detail_viewport : Masc_tui_types.state -> int * int
 val keeper_deletions_viewport : Masc_tui_types.state -> int * int

@@ -115,7 +115,7 @@ let property_description (input_schema : Yojson.Safe.t) name =
 
 (* The no-shell rule is stated where a model reaches for '|': once in the
    tool description, and once more on [argv] itself. Both ask for the rule,
-   not for a sentence -- #33528 cut the schema below its byte ceiling and
+   not for a sentence -- a description rewrite
    reworded both, and matching the old phrasing reported a wording change as
    a missing rule. "without a shell" is the rule's own words. *)
 let test_description_states_the_no_shell_rule () =

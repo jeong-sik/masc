@@ -25,7 +25,14 @@ def detail(status="completed", evidence_state="recorded"):
         run.update(decision="bounded preview", summary="summary")
     if status == "failed":
         run.update(error="provider unavailable", failure_code="provider_error")
-    post = {"id": "p-" + "a" * 32, "body": "Untrusted retained evidence text",
+    judge = {"status": "synthesized", "resolved_answer": "Untrusted retained evidence text",
+             "decision": "Answer", "synthesis": "Retained structured synthesis",
+             "consensus": [], "contradictions": [], "partial_coverage": [],
+             "unique_insights": [], "blind_spots": []}
+    if status == "failed":
+        judge = {"status": "failed", "failure_code": "provider_error", "error": "provider unavailable"}
+    post = {"id": "p-" + "a" * 32, "body": "Fusion deliberation headline",
+            "meta": {"judge": judge},
             "origin": {"source": "fusion", "fusion_run_id": RUN}}
     return {"generated_at": "2026-09-30T00:00:00Z", "run": run,
             "evidence": {"status": evidence_state,

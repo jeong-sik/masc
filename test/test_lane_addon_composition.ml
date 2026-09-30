@@ -523,10 +523,14 @@ let test_native_fusion_report_is_readable_after_detach () =
           ~preset:"default" ~roster:Fusion_types.preset_roster
           ~topology:Fusion_types.Simple ~started_at:1.;
         let body = "Measured alternative A preserves the original evidence." in
+        let synthesis : Fusion_types.judge_synthesis = {
+          consensus=[];contradictions=[];partial_coverage=[];unique_insights=[];
+          blind_spots=[];resolved_answer=body;decision=Fusion_types.Answer "Alternative A"} in
         let origin : Board.post_origin = {turn_ref=None; source=Some "fusion";
           fusion_run_id=Some run_id; fusion_producer=Some "fixture-producer"} in
         ignore (unwrap (Board_dispatch.create_post_once_by_fusion_run_id ~fusion_run_id:run_id
-          ~author:"fixture-producer" ~content:body ~meta_json:(`Assoc [])
+          ~author:"fixture-producer" ~content:"Fusion deliberation: Alternative A"
+          ~meta_json:(`Assoc ["judge",Fusion_sink.judge_meta (Ok synthesis)])
           ~post_kind:Board.System_post ~visibility:Board.Unlisted ~ttl_hours:0 ~origin ()
           |> Result.map_error Board.show_board_error));
         Fusion_run_registry.mark_completed registry ~run_id ~outcome:Fusion_run_registry.Succeeded;

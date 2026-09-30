@@ -2020,7 +2020,7 @@ let decode_play_mutation decode = function
 type async_msg =
   | Lane_package_preview_loaded of int * string * (Yojson.Safe.t, string) result
   | Keeper_queue_loaded of string * int option * Masc_tui_queue_inspection.action * (string list, string) result
-  | Lane_addons_loaded of int * (lane_addons_reply, lane_addons_failure) result
+  | Lane_addons_loaded of int * (string * string) option * (lane_addons_reply, lane_addons_failure) result
   | Lane_subscriptions_loaded of int * (Masc_tui_lane_subscriptions.snapshot,string) result
   | Lane_declaration_loaded of int * Masc_tui_lane_declaration.request * bool
       * (Masc_tui_lane_declaration.response, string) result
@@ -5162,7 +5162,7 @@ let launch_lane_subscriptions state ~mailbox request =
        | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
        | None -> enqueue_async mailbox (Lane_subscriptions_loaded (generation,Error "Eio switch unavailable")))
 
-let launch_lane_addons state ~mailbox request =
+let launch_lane_addons ?initial_detail state ~mailbox request =
   let module Addons = Masc_tui_lane_addons in
   let view = Option.value ~default:state.lane_addons_cached state.lane_addons in
   if view.loading then
@@ -5261,7 +5261,7 @@ let launch_lane_addons state ~mailbox request =
       let result = try perform () with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn -> Error (lane_addons_failure_for_request request (Printexc.to_string exn)) in
-      enqueue_async mailbox (Lane_addons_loaded (generation, result)); `Stop_daemon))
+      enqueue_async mailbox (Lane_addons_loaded (generation, initial_detail, result)); `Stop_daemon))
 
 let launch_browser_history state ~mailbox ~reload =
   match state.browser_history with
@@ -13403,9 +13403,13 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         if view.generation<>generation then view else
         {view with loading=false;subscription_panel=Option.map
           (fun panel -> Masc_tui_lane_subscriptions.loaded panel result) view.subscription_panel})
-  | Lane_addons_loaded (generation, result) ->
+  | Lane_addons_loaded (generation, initial_detail, result) ->
       map_lane_addons state (fun view ->
         if view.generation <> generation then view else
+        if Option.fold ~none:false ~some:(fun (id, incarnation) ->
+          view.screen <> Masc_tui_lane_addons.Detail (id, incarnation)) initial_detail
+        then {view with loading=false} else
+        let initialize_result = Option.is_some initial_detail && view.row_cursor < 0 in
         match result with
         | Error (`Inventory detail) ->
             {view with loading=false;error=None;snapshot_read_error=Some detail}
@@ -13417,6 +13421,9 @@ let apply_async_message state ~base_path ~http_refresh_inflight
             let view = match reply.lar_snapshot with
               | None -> view
               | Some snapshot -> Masc_tui_lane_addons.reconcile_snapshot view snapshot in
+            let view = match initialize_result, reply.lar_snapshot, reply.lar_diagnostic with
+              | true, Some _, None -> Masc_tui_lane_addons.select_initial_result view
+              | _ -> view in
             let snapshot_read_error = match reply.lar_inventory_read with
               | `Unchanged -> view.snapshot_read_error
               | `Read -> None
@@ -20102,7 +20109,16 @@ and is loaded on demand through keeper_skill.
                      | "esc" | "q" when view.screen<>Addons.Overview -> update {view with screen=Addons.Overview;focus=Addons.Instances;scroll=0}
                      | "esc" | "q" -> state.lane_addons_cached <- view; state.lane_addons <- None
                      | ("\r" | "\n" | "enter") when view.screen=Addons.Overview ->
-                         update (Addons.open_selected_instance view)
+                         if view.loading then update {view with scroll=0;
+                           error=lane_addons_input_failure "Wait for the current Lane read before opening a worker."}
+                         else (
+                         let next = Addons.open_selected_instance view in
+                         update next;
+                         (match view.overview_mode, Addons.selected_instance next with
+                          | Addons.Retained_runs, Some item ->
+                              launch_lane_addons ~initial_detail:(item.id,item.incarnation)
+                                state ~mailbox:async_messages (Addons.Slice ["run_id",item.run_id])
+                          | _ -> ()))
                      | "i" ->
                          if view.loading then update {view with error=lane_addons_input_failure "Wait for the current Lane request before opening installation."}
                          else (match Masc_tui_lane_installer.create () with

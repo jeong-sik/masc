@@ -12006,6 +12006,16 @@ type runtime_table_column =
 let runtime_table_cells ~cols ~mode ~lane ~lane_is_label ~candidate ~identity ~status ~detail =
   let lane_width, candidate_width, identity_width, status_width = runtime_column_widths cols in
   let inner_width = max 1 (framed_inner_width cols - 2) in
+  let candidate_heading =
+    match mode with Masc_tui_types.Runtime_lanes -> "CANDIDATE" | Runtime_all -> "RUNTIME"
+  in
+  (* Reserve the candidate heading's measured width before allocating status.
+     A fixed status width left only an ellipsis for every identity at30 cols. *)
+  let status_width =
+    min status_width
+      (max 1 (inner_width - Message_layout.display_width candidate_heading
+              - Masc_tui_table.cell_gap))
+  in
   let candidate_floor = min candidate_width (max 1 (inner_width - status_width - Masc_tui_table.cell_gap)) in
   let width = function
     | Runtime_lane_column -> lane_width
@@ -12027,8 +12037,7 @@ let runtime_table_cells ~cols ~mode ~lane ~lane_is_label ~candidate ~identity ~s
           (match mode with Masc_tui_types.Runtime_lanes -> "LANE" | Runtime_all -> "USED BY"),
           lane, (if lane_is_label then Masc_tui_table.Fold_tail else Fold_middle)
       | Runtime_candidate_column ->
-          (match mode with Masc_tui_types.Runtime_lanes -> "CANDIDATE" | Runtime_all -> "RUNTIME"),
-          candidate, Masc_tui_table.Fold_middle
+          candidate_heading, candidate, Masc_tui_table.Fold_middle
       | Runtime_identity_column -> "PROVIDER / MODEL", identity, Masc_tui_table.Fold_middle
       | Runtime_status_column -> "ROUTE / PROBE", status, Masc_tui_table.Fold_tail
       | Runtime_detail_column -> "DETAIL", detail, Masc_tui_table.Fold_tail in

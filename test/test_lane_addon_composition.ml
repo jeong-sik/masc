@@ -4,8 +4,8 @@ open Alcotest
 open Masc
 module Runtime = struct
   include Lane_addon_runtime
-  let dispatch ?caller ~config ~operation args =
-    Lane_addon_runtime.dispatch ?caller ~config ~operation args
+  let dispatch ?caller ?access ~config ~operation args =
+    Lane_addon_runtime.dispatch ?caller ?access ~config ~operation args
     |> Result.map_error Lane_addon_runtime.error_to_string
 end
 module Types = Lane_addon_types
@@ -582,7 +582,8 @@ let test_native_fusion_report_is_readable_after_detach () =
         Runtime.register_delivery_handler (fun ~config:_ ~caller ~keeper_name ~prompt ->
           delivery := Some (caller, keeper_name, prompt);
           Ok (`Assoc ["request_id",`String "fixture-request";"status",`String "deferred"]));
-        let frozen = Runtime.dispatch ~caller:"fixture-operator" ~config ~operation:Runtime.Evidence
+        let frozen = Runtime.dispatch ~caller:"fixture-operator" ~access:Lane_addon_sources.Operator_configuration
+          ~config ~operation:Runtime.Evidence
           (`Assoc ["instance_id",`String consumer;"row_ids",`List [`String (text "id" row)];
             "keeper_name",`String "fixture-keeper"]) |> unwrap in
         check string "delivery acceptance remains deferred, not read" "deferred"
@@ -593,7 +594,8 @@ let test_native_fusion_report_is_readable_after_detach () =
         let artifact = match Tool_output.decode_from_agent_core prompt with
           | Tool_output.Decoded artifact -> artifact
           | _ -> fail "delivery has no readable artifact marker" in
-        let broadcast = Runtime.dispatch ~caller:"fixture-operator" ~config ~operation:Runtime.Evidence
+        let broadcast = Runtime.dispatch ~caller:"fixture-operator" ~access:Lane_addon_sources.Operator_configuration
+          ~config ~operation:Runtime.Evidence
           (`Assoc ["instance_id",`String consumer;"row_ids",`List [`String (text "id" row)];
             "broadcast",`Bool true;"request_id",`String "composition-broadcast"]) |> unwrap in
         let broadcast_delivery = member "delivery" broadcast in
@@ -653,9 +655,92 @@ let test_native_fusion_report_is_readable_after_detach () =
         List.iter (fun (sha, expected) ->
           check string "Keeper artifact bytes survive Detach and Lane-store removal" expected (read sha)) retained)))
 
+let fusion_source run_id = Printf.sprintf
+  {|[{source_id="fusion",kind="fusion_run",run_id=%S}]|} run_id
+let register_private_run root owner =
+  let run_id = "privacy-" ^ Store.digest root in
+  Fusion_run_registry.register_running (Fusion_run_registry.global ()) ~run_id
+    ~keeper:owner ~preset:"default" ~roster:Fusion_types.preset_roster
+    ~topology:Fusion_types.Simple ~started_at:1.; run_id
+let test_private_visibility_crosses_declared_output_graph () = with_fixture (fun clock config root directory received _ ->
+  let owner = "fusion-owner" in
+  let run_id = register_private_run root owner in
+  let package = manifest root in
+  let source_path = declare directory package "z-private" (fusion_source run_id) in
+  ignore (declare directory package "a-consumer" (edge "z-private"));
+  ignore (declare directory package "b-consumer" (edge "a-consumer"));
+  reconcile config directory;
+  let ids = List.map (fun name -> active config name |> text "instance_id")
+    ["z-private";"a-consumer";"b-consumer"] in
+  List.iter (fun id -> await clock (fun () -> Option.is_some (completed received id))) (List.tl ids);
+  let view caller = Runtime.dispatch ~caller ~config ~operation:Runtime.Inspect (`Assoc []) |> unwrap in
+  check int "authoritative source owner sees all configured derivatives" 3 (view owner |> list "instances" |> List.length);
+  check int "foreign reader sees no private derivatives" 0 (view "foreign" |> list "instances" |> List.length);
+  check int "foreign inventory omits private declaration identity" 0
+    (view "foreign" |> member "configuration" |> list "declarations" |> List.length);
+  List.iter (fun id ->
+    let stored = view owner |> list "instances" |> List.find (fun row -> text "instance_id" row = id) in
+    check string "durable policy retains authoritative Fusion owner through graph" owner
+      (stored |> member "visibility" |> text "keeper")) ids;
+  let document caller access = Lane_addon_runtime.read_declaration ~caller ~access ~config
+    (`Assoc ["source_path",`String source_path]) in
+  check bool "owner can read own saved declaration" true
+    (Result.is_ok (document owner (Lane_addon_sources.Keeper owner)));
+  check bool "foreign declaration read is refused" true
+    (Result.is_error (document "foreign" (Lane_addon_sources.Keeper "foreign")));
+  let new_source = Printf.sprintf {|id="keeper-saved"
+run_id="world"
+manifest_path=%S
+[binding]
+sources=%s
+|} package (fusion_source run_id) in
+  let save caller access = Lane_addon_runtime.save_declaration ~caller ~access ~config
+    (`Assoc ["mode",`String "create";"file_name",`String "keeper-saved.toml";"source_text",`String new_source]) in
+  check bool "unverified attribution cannot save an owned-looking Fusion declaration" true
+    (Result.is_error (save owner Lane_addon_sources.Unauthenticated));
+  check bool "foreign Keeper cannot persist a private declaration" true
+    (Result.is_error (save "foreign" (Lane_addon_sources.Keeper "foreign")));
+  check bool "actual owner can save the configuration" true
+    (Result.is_ok (save owner (Lane_addon_sources.Keeper owner)));
+  reconcile config directory;
+  let saved = active config "keeper-saved" |> text "instance_id" in
+  check bool "operator reconciliation preserves saving Keeper read access" true
+    (Result.is_ok (Runtime.dispatch ~caller:owner ~config ~operation:Runtime.Inspect
+      (`Assoc ["instance_id",`String saved]))))
+
+let test_shared_consumer_refuses_new_private_producer () = with_fixture (fun clock config root directory received _ ->
+  let package = manifest root in
+  ignore (declare directory package "a-consumer" (edge "z-producer"));
+  ignore (declare directory package "z-producer" "[]");
+  reconcile config directory;
+  let consumer = active config "a-consumer" |> text "instance_id" in
+  await clock (fun () -> Option.is_some (completed received consumer));
+  let old = require_some "no initial shared producer" (completed received consumer) in
+  let old_instance = text "instance_id" (member "producer" old) in
+  let run_id = register_private_run root "new-private-owner" in
+  ignore (declare directory package "z-producer" (fusion_source run_id));
+  reconcile config directory;
+  await clock (fun () -> text "kind" (member "phase" (instance config old_instance)) = "detached");
+  reconcile config directory;
+  let replacement = active config "z-producer" |> text "instance_id" in
+  await clock (fun () -> Option.is_some (source received replacement));
+  Runtime.notify_fusion_run ~run_id;
+  ignore (Runtime.dispatch ~config ~operation:Runtime.Observe (`Assoc ["instance_id",`String consumer]) |> unwrap);
+  await clock (fun () -> match source received consumer with
+    | Some source -> member "complete" source = `Bool false && list "observations" source = []
+    | None -> false);
+  check string "consumer stays the exact original instance" consumer
+    (active config "a-consumer" |> text "instance_id");
+  check string "old shared input remains an immutable producer snapshot" old_instance
+    (text "instance_id" (member "producer" old));
+  check bool "ordinary consumer retains Shared visibility while refusing new private bytes" true
+    (member "visibility" (instance config consumer) = `Assoc ["kind",`String "shared"]))
+
 let () = run "TOML cross-Lane composition" ["world inputs",[
   test_case "native Fusion report crosses packages and remains Keeper-readable" `Quick
     test_native_fusion_report_is_readable_after_detach;
+  test_case "private visibility survives declared output graph" `Quick test_private_visibility_crosses_declared_output_graph;
+  test_case "shared consumer refuses replacement with private producer" `Quick test_shared_consumer_refuses_new_private_producer;
   test_case "native input history crosses worker and survives Detach" `Quick
     test_native_msx_history_crosses_worker_freeze_and_detach;
   test_case "named output feeds statistics and preserves mapping revisions" `Quick

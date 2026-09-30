@@ -7254,7 +7254,7 @@
 (test
  (name test_lane_addon)
  (modules test_lane_addon)
- (libraries masc_test_deps masc.server masc.msx_lane eio eio_main yojson unix))
+ (libraries masc_test_deps masc.fusion_core masc.server masc.msx_lane eio eio_main yojson unix))
 
 (test
  (name test_lane_addon_sources)
@@ -7350,7 +7350,7 @@
 (test
  (name test_lane_addon_declaration)
  (modules test_lane_addon_declaration)
- (libraries masc_test_deps eio eio_main yojson unix))
+ (libraries masc_test_deps masc.fusion_core eio eio_main yojson unix))
 
 (test
  (name test_lane_addon_composition)

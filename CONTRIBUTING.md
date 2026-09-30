@@ -1,15 +1,26 @@
 # Contributing to MASC
 
-MASC is a harness for running several coding agents against one repository:
-a workspace server over MCP, supervised Keepers, and a terminal UI, in one
-OCaml binary. This document is about changing this codebase, not about
-justifying its design.
+Start here when changing MASC. You can contribute documentation without an
+OCaml toolchain, report a reproducible problem, or change a feature with evidence.
 
-Coding agents that work on MASC read [`AGENTS.md`](AGENTS.md) and
-`docs/constitution.xml` first. For them the constitution's execution protocol
-replaces the local-build and CI-wait advice below.
+The [repository strategy and contributor workflow](docs/guides/CONTRIBUTOR-WORKFLOW.md)
+([한국어](docs/guides/CONTRIBUTOR-WORKFLOW.ko.md)) covers first contributions, AI
+sessions, Issue/Goal/Task/Board coordination, CI, review and handoff. Outside
+contributors can use a fork and public GitHub issues/PRs; private MASC access is
+not required to contribute.
 
-## Quick start
+| Who is doing the work? | Start and validation path |
+|---|---|
+| Human contributor | Read the workflow, choose an issue, use a separate branch/worktree; local focused checks are available below |
+| External AI coding session | Read [AGENTS.md](AGENTS.md) and the full [constitution](docs/constitution.xml) first; no local Dune builds or CI wait loops |
+| Keeper development lane | Read the task contract and lane instructions; local tests are allowed with a toolchain, while PR/targeted CI provides verification evidence |
+
+`execution_protocol` in the constitution owns coding-agent workflow where it
+overrides the local-build guidance here. Keeper runtime prompts are separate.
+
+## Local development for human contributors
+
+Install the [source prerequisites](README.md#from-source) first.
 
 ```bash
 git clone https://github.com/jeong-sik/masc.git
@@ -42,11 +53,11 @@ dumps, because those carry the environment.
 bin/
 ├── main_eio.ml                  server, CLI subcommands, and the hand-over to the TUI
 ├── main_stdio_eio.ml            stdio MCP entry point
-├── masc_tui.ml                  TUI entry point; masc_tui_*.ml are its modules (about 120 files)
+├── masc_tui.ml                  TUI entry point; masc_tui_*.ml are its modules
 ├── masc_exec_shim.ml            the shim a remote_ssh endpoint runs
 └── ...                          SSH bootstrap, browser host, cost and trace tools, probes
 
-lib/                             about 180 top-level modules and 147 directories, among them
+lib/                             subsystem modules and libraries
 ├── keeper/                      Keeper runtime, turn loop, tools, chat channels
 ├── server/                      HTTP routes, MCP transport, sidecars, gateways
 ├── workspace/                   tasks, claims, goals, board, verification
@@ -62,7 +73,7 @@ dashboard/                       TypeScript + Preact SPA
 config/                          seeds embedded into the binary: runtime.toml, prompts, tools/*.toml
 docs/                            manuals, runbooks, docs/spec, docs/rfc
 scripts/                         build, install, local operations; scripts/ci/ holds the lint suite
-test/                            Alcotest suites (about 1,200 files) and fixtures
+test/                            Alcotest suites, PTY scenarios and fixtures
 ```
 
 ## Code style
@@ -100,21 +111,20 @@ built binary.
 
 ## What CI runs
 
-On every pull request (`pr-check.yml`):
+Draft PRs skip the required jobs in [pr-check.yml](.github/workflows/pr-check.yml).
+Mark a reviewable PR ready for review to run the five required checks: dashboard
+typecheck, `dune build @check`, `dune build --profile release @check`, lint suite,
+and TLA model check. `PR required success` reports their aggregate result.
 
-- **lint**: about 40 scripts through `scripts/ci/run-lint-suite.sh
-  blocking-pr`, run to completion so every failure is listed at once. An
-  advisory set follows and is recorded, not enforced.
-- **check**: source text integrity, the RFC index,
-  `scripts/check-doc-truth.sh`, release and namespace fixtures,
-  `dune build @check`, then every suite the pull request's changes select,
-  within an 18-minute budget that names the suites it could not run
-  (`scripts/ci/run-edited-tests.sh`), and the suites that need no build.
-- **dashboard-types**: type-checks the SPA.
+The check job selects tests with `scripts/ci/run-edited-tests.sh`; read its output
+to learn what ran and what did not. The selected suite budget is controlled by the
+workflow, not this document. Green PR checks do not imply the full suite ran.
 
-The full test suite is `test.yml`, on a daily schedule and on dispatch, not
-per pull request. `release.yml` runs on a tag push and builds the published
-binaries. `ci.yml` is a dispatchable build.
+[test.yml](.github/workflows/test.yml) runs the behavioral suite on a schedule and
+supports full or targeted dispatch. [linux-x64-probe.yml](.github/workflows/linux-x64-probe.yml)
+produces a verification binary. [release.yml](.github/workflows/release.yml) owns
+tagged releases; its dispatch is reserved for tag/RC work. External coding agents
+request CI at finishing boundaries and continue useful work without watch/wait loops.
 
 ## Commits
 
@@ -132,9 +142,10 @@ chore: bump version to 0.34.0
 ## Pull requests
 
 1. Branch from `main` as `feat/<topic>`, `fix/<topic>`, or `docs/<topic>`.
-2. Write tests for new behaviour.
-3. Run the focused checks for what you changed through
-   `scripts/dune-local.sh`. CI owns the full-suite result.
+2. Verify the changed feature with appropriate behavior evidence. Documentation
+   changes need link/truth checks; add tests when they cover a concrete risk.
+3. Human contributors can run focused checks through `scripts/dune-local.sh`.
+   External coding agents use CI according to the constitution.
 4. Open a **draft** pull request linked to at least one issue. The template
    asks for `Summary`, `Product impact`, `Evidence`, `Direct evidence`,
    `Review evidence`, and `Linked issue`. Fill them, and leave the two
@@ -151,17 +162,15 @@ chore: bump version to 0.34.0
    the fragments and refuses a new bullet under `## [Unreleased]`; the release
    bump folds the fragments into `CHANGELOG.md`. Entries already under
    `## [Unreleased]` stay where they are.
-8. Pull requests are squash-merged. Never push to a branch whose pull request
-   has merged; open a new one.
-9. When the work is ready to verify, hand it over with typed evidence. Every
-   `evidence_refs` entry is `artifact:<producer-root-relative-path>` (a
-   producer-relative file opened and snapshotted on submission; the reviewer
-   reads that snapshot) or `note:<text>` (prose the reviewer reads but cannot
-   inspect); see RFC-0417. A PR URL, a commit, or a board post id inside a
-   `note:` is narrative until something opens it — pair it with an
-   `artifact:` entry, and never let a `note:` stand alone as completion
-   evidence. Submission moves the task to awaiting_verification; completion
-   requires the completion authority's verdict.
+8. Follow the [review and integration procedure](docs/guides/CONTRIBUTOR-WORKFLOW.md#5-review-and-integrate).
+   A current-head PASS and completed required checks are necessary; stale or
+   skipped checks do not authorize integration. Never push to a merged PR branch.
+9. When the work is ready to verify, hand it over with typed evidence.
+   `artifact:<producer-root-relative-path>` snapshots a bounded file at
+   submission; `note:<text>` carries narrative evidence. The current tool
+   schema also supports frozen `board:` and `fusion:` references. Public URLs in notes can be fetched by the verifier, but prose
+   alone is not a file snapshot. Save volatile evidence as an artifact. Submission
+   moves the task to awaiting_verification; completion requires the authority's verdict.
 
 ## Issues
 
@@ -246,8 +255,9 @@ shape.
 
 - Runtime state is filesystem-first under `<base-path>/.masc/`.
 - State files are JSON or JSONL where practical, so an operator can read them.
-- Nothing outside the binary is required to build, boot, or run a Keeper
-  turn. Graph and vector integrations exist for specific workflows only.
+- A binary install does not need the OCaml toolchain. Keeper turns still need
+  their model access and sandbox prerequisites. Graph and vector integrations
+  exist for specific workflows.
 - A change that stops reading a state file's existing rows is a hard cut. The
   code does not read or convert the old shape. The pull request's changelog
   fragment has a `### Fresh state required` entry that names the file and says

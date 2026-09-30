@@ -33,6 +33,10 @@ The MCP text content is a short summary; structuredContent carries the complete
 report. The worker checks the serialized UTF-8 reply against the manifest's
 declared envelope and explicitly refuses an oversized reply without truncating
 the analysis body or accepting incomplete output as a successful report.
+The results producer permits a 4 MiB reply. The report allocates 8 MiB for the
+full retained body plus Markdown and host provenance; both packages enforce
+their own manifest limits. Additional provenance can still exceed the report
+allocation and is refused explicitly.
 
 Native Fusion Board posts carry a short headline in `body`. Reports render that
 headline separately and read the analysis from canonical `meta.judge.resolved_answer`.

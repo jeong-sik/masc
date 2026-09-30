@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from enum import Enum
 import sys
+import tomllib
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -16,6 +17,16 @@ from protocol import (InvalidInput, Source, evidence, number, object_value,
 
 class RunState(Enum):
     RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class RunStage(Enum):
+    ACCEPTED = "accepted"
+    PANEL = "panel"
+    JUDGE = "judge"
+    COMPUTED = "computed"
+    RECORDING_EVIDENCE = "recording_evidence"
     COMPLETED = "completed"
     FAILED = "failed"
 
@@ -37,6 +48,38 @@ def state(enum, value, label):
         raise InvalidInput(f"Unknown {label}: {value!r}") from error
 
 
+def progress_count(progress: dict, key: str) -> int:
+    count = progress.get(key)
+    if isinstance(count, bool) or not isinstance(count, int) or count < 0:
+        raise InvalidInput(f"run.progress.{key} must be a nonnegative integer")
+    return count
+
+
+def validate_progress(run: dict, run_state: RunState) -> None:
+    stage = state(RunStage, run.get("stage"), "Fusion run stage")
+    if "progress" not in run:
+        raise InvalidInput("run.progress is required")
+    progress = run["progress"]
+    if run_state is not RunState.RUNNING:
+        expected = RunStage.COMPLETED if run_state is RunState.COMPLETED else RunStage.FAILED
+        if stage is not expected or progress is not None:
+            raise InvalidInput("Fusion status, stage and progress disagree")
+        return
+    if stage not in (RunStage.ACCEPTED, RunStage.PANEL, RunStage.JUDGE,
+                     RunStage.COMPUTED, RunStage.RECORDING_EVIDENCE):
+        raise InvalidInput("Running Fusion requires a running stage")
+    progress = object_value(progress, "run.progress")
+    if stage is RunStage.ACCEPTED:
+        return
+    expected = progress_count(progress, "panel_expected")
+    if stage is RunStage.PANEL:
+        return
+    answered = progress_count(progress, "panel_answered")
+    failed = progress_count(progress, "panel_failed")
+    if answered + failed != expected:
+        raise InvalidInput("Fusion answered + failed counts must equal panel_expected")
+
+
 def parse_detail(value: object) -> tuple[dict, RunState, EvidenceState, dict | None]:
     detail = object_value(value, "Fusion detail")
     string(detail.get("generated_at"), "generated_at")
@@ -49,6 +92,7 @@ def parse_detail(value: object) -> tuple[dict, RunState, EvidenceState, dict | N
     if started < 0:
         raise InvalidInput("run.started_at must be nonnegative")
     run_state = state(RunState, run.get("status"), "Fusion run status")
+    validate_progress(run, run_state)
     if run_state is RunState.RUNNING:
         if "finished_at" not in run or run["finished_at"] is not None:
             raise InvalidInput("Running Fusion has a finished_at")
@@ -59,6 +103,8 @@ def parse_detail(value: object) -> tuple[dict, RunState, EvidenceState, dict | N
     if run_state is RunState.FAILED:
         string(run.get("error"), "run.error")
         string(run.get("failure_code"), "run.failure_code")
+    elif "error" in run or "failure_code" in run:
+        raise InvalidInput("Only failed Fusion may supply failure fields")
     if ("decision" in run) != ("summary" in run):
         raise InvalidInput("Fusion decision preview and summary must appear together")
     if "decision" in run:
@@ -79,9 +125,14 @@ def parse_detail(value: object) -> tuple[dict, RunState, EvidenceState, dict | N
     if evidence_state is EvidenceState.RECORDED:
         post = object_value(post, "Fusion evidence.post")
         string(post.get("id"), "post.id")
+        if not isinstance(post.get("body"), str):
+            raise InvalidInput("Recorded Fusion evidence requires a string post.body")
         origin = object_value(post.get("origin"), "post.origin")
         if origin.get("source") != "fusion" or origin.get("fusion_run_id") != run["run_id"]:
             raise InvalidInput("Board post does not identify this exact Fusion run")
+        producer = string(origin.get("fusion_producer"), "post.origin.fusion_producer")
+        if not producer.strip() or producer != run["keeper"]:
+            raise InvalidInput("Board post does not identify this exact Fusion producer")
     elif post is not None:
         raise InvalidInput("Unrecorded Fusion evidence must have a null post")
     return run, run_state, evidence_state, post
@@ -154,4 +205,7 @@ def observe(binding: dict, sources: tuple[Source, ...]) -> dict:
 
 
 if __name__ == "__main__":
-    serve("masc-fusion-results", observe)
+    manifest = tomllib.loads(Path(__file__).with_name("lane.toml").read_text())
+    serve("masc-fusion-results", observe,
+          text_summary=lambda output: "Fusion status and retained Board evidence are available in structuredContent with exact run identity.",
+          max_reply_bytes=manifest["resources"]["max_reply_bytes"])

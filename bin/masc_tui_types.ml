@@ -5672,6 +5672,9 @@ type state = {
   mutable events: event list;
   mutable keepers: keeper list;
   mutable keepers_error: string option;
+  (* A refused creation remains editable, including malformed JSON. The
+     editor owns a temporary file, so the declaration must survive here. *)
+  mutable keeper_creation_draft: string option;
   (* The live roster reading, separate from the durable one above: it answers
      whether a keepalive fiber is running each keeper, which metadata on disk
      cannot. It is typed rather than a plain list because "the roster did not
@@ -8017,6 +8020,7 @@ let create_state
   events = [];
   keepers = [];
   keepers_error = None;
+  keeper_creation_draft = None;
   keeper_roster = Masc_tui_keeper_control.Roster_unobserved;
   keeper_roster_error = None;
   keeper_action_inflight = None;

@@ -1,11 +1,6 @@
 name: Apple keychain
 
 on:
-  pull_request:
-    paths:
-      - 'lib/apple_keychain/**'
-      - 'test/apple_keychain/**'
-      - '.github/workflows/apple-keychain.yml'
   workflow_dispatch:
 
 permissions:

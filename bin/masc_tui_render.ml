@@ -7253,7 +7253,10 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
       let items = Keeper_portrait_item.all in
       let count = List.length items in
       let cursor = max 0 (min (count - 1) state.item_cursor) in
-      let first = max 0 (min (cursor - 4) (count - 10)) in
+      let reserved = 2 + 1 +
+        (match portrait_reading with Tui_decode.Ready _ -> 0 | Tui_decode.Unavailable _ -> 1) in
+      let visible = min count (max 1 (base_height - reserved)) in
+      let first = max 0 (min (cursor - (visible / 2)) (count - visible)) in
       let account =
         match state.item_account with
         | Some (name, account) when String.equal name k.k_name -> Some account
@@ -7295,7 +7298,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
         items
         |> List.mapi (fun index item -> index, item)
         |> List.filter_map (fun (index, item) ->
-             if index < first || index >= first + 10 then None
+             if index < first || index >= first + visible then None
              else
                let worn =
                  match portrait_reading with
@@ -7314,7 +7317,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                    | Some facts -> "  " ^ facts
                    | None -> ""
                in
-               Some (Printf.sprintf "  %s %-2d %-5s %-20s%s%s"
+               Some (Printf.sprintf "  %s %2d %-5s %s%s%s"
                  (if index = cursor then ">" else " ") (index + 1)
                  (Keeper_portrait_item.slot_id (Keeper_portrait_item.slot item))
                  (Keeper_portrait_item.id item)
@@ -7328,7 +7331,10 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
       in
       let listing =
         match portrait with
-        | Some band -> Masc_tui_keeper_portrait.beside band (headline @ rows)
+        | Some band ->
+            let beside = Masc_tui_keeper_portrait.beside band (headline @ rows) in
+            if List.exists (fun line -> Message_layout.display_width line > inner) beside
+            then headline @ rows else beside
         | None -> headline @ rows
       in
       let observation =

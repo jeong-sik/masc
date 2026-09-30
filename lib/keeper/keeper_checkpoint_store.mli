@@ -50,13 +50,18 @@ type save_agent_core_relation = [ `Cold | `Forward | `Equal ]
     behind the known high watermark. It must not be treated as keeper
     turn failure, pause, or stop. *)
 type save_agent_core_outcome =
-  | Saved of { relation : save_agent_core_relation; turn_count : int }
+  | Saved of
+      { relation : save_agent_core_relation
+      ; turn_count : int
+      ; canonical_bytes : int option
+      }
   | Stale_noop of { incoming_turn_count : int; known_turn_count : int }
 
 (** Save [ckpt] in one locked disk-SSOT transaction. A missing [session_dir]
     is created by the durable writer, retaining the public create-first contract.
     [Saved] means payload, rename, and parent-directory fsync succeeded; history
-    is observed best effort.
+    is observed best effort. [canonical_bytes] comes from the file identity
+    already observed after the write; [None] means that observation failed.
 
     [history_retained] is how many past checkpoints to leave beside the
     canonical one; zero writes no history at all. The caller reads it from

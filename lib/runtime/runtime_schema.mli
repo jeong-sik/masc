@@ -265,7 +265,9 @@ type model_spec =
 (** Where the keeper starts evicting carried history and where it stops, in
     the provider's tokens of the whole request: prefix, carried atoms and
     tail together, as the provider's [input_tokens] reports it (RFC
-    keeper-context-window-in-tokens §10.2, §10.5). Parsed as a pair so the
+    keeper-context-window-in-tokens §10.2, §10.5). Proactive turn-boundary
+    eviction applies these marks only when no Librarian continuity is applied;
+    recovery after a provider refusal is a separate path. Parsed as a pair so the
     invariant [0 < low_water_tokens < high_water_tokens] holds by
     construction; [high_water_tokens <= max-context] is checked once the model
     is resolved ({!Runtime_config_validation.validate_runtime_context_marks}). *)
@@ -390,6 +392,11 @@ type typesafeai =
   { lane_enabled : bool
   ; destinations : typesafeai_destination * typesafeai_destination list
   ; board_attention : bool
+  ; board_attention_confidence_floor : float
+      (** [board_attention_confidence_floor]: Jev's relevant or not-relevant
+          answer settles a Board attention candidate when its confidence is at
+          least this value (0 to 1); below it the [board_attention_exact] lane
+          judges the candidate. *)
   ; absorb_gate : bool
   ; context_review : bool
   ; skill_applicability : bool
@@ -402,8 +409,8 @@ val typesafe_destination : typesafeai_destination
 
 val default_typesafeai : typesafeai
 (** What an absent [\[typesafeai\]] table means: the lane on when a key is
-    set, {!typesafe_destination} alone, Board attention on, the absorb gate
-    off. *)
+    set, {!typesafe_destination} alone, Board attention on with a 0.3
+    confidence floor, the absorb gate off. *)
 
 type config =
   { providers : provider list

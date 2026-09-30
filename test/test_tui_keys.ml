@@ -42,8 +42,6 @@ let enter_atom_count_exceptions =
     "Usage", 0
   ; (* A detail screen. Its tabs carry their own keys. *)
     "Keeper detail", 0
-  ; (* A roster with a cursor and nothing the cursor opens. *)
-    "System / Runtime / Clients", 0
   ; (* A scrolling reading, not a row list. *)
     "System / Tools", 0
   ; (* Two readings a Keeper detail drills into: [j/k] scrolls the text and

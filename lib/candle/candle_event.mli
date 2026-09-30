@@ -91,7 +91,7 @@ type t =
 
 val kind : body -> string
 (** The row's ["kind"]: [snapshot], [payout_owed], [candidates] or
-    [unattributed], [paid] or [payout_failed]. *)
+    [unattributed], [paid], [purchased] or [payout_failed]. *)
 
 val to_yojson : t -> Yojson.Safe.t
 val of_yojson : Yojson.Safe.t -> (t, string) result

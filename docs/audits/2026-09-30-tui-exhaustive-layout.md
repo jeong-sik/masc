@@ -34,6 +34,10 @@ Board PR check `36648042151` 및 Usage PR check `36648043868`의 edited-test 단
 
 후속 집중 실행에서 확인한 실패와 응답은 구별한다. Keeper `36659398897`은 이미 Home인 화면에서 새 출력을 기다렸고, `3308aef6b4`에서 no-op 검사를 보완했다. Clients `36659294011`은 접힌 이름에 `long-`를 기대했고, `8f1bd0ee90`에서 관측 열로 행을 찾고 접힌 이름을 따로 검사하도록 바꿨다. Task `36660324248`은 초기 durable Task 읽기 전에 동적 팔레트를 열었고, `be39f068a1`에서 같은 backlog projection의 준비 신호와 완료 frame을 기다린다. 보완된 시나리오의 통과를 아직 선언하지 않는다.
 
+Presets [집중 run 36662141540](https://github.com/jeong-sik/masc/actions/runs/36662141540)은 `f040b6f96679c2a3c46ad34fdf7a193a4e48d55e`에서 success로 완료했고, [원문 발췌](../evidence/tui-audit-2026-09-30/presets-targeted-pass.txt)에 checkout SHA·PTY PASS·unit OK가 있다. 40/60/80/120열, 짧은 창, 전체 값 복원, 정확한 페이지 overlap, 삽입 뒤 선택 identity, 응답 보류 중 읽기 유지, 실패 후 이전 내용, color/NO_COLOR fixture 범위를 검증한다. main `dc57509e2e5cb2b3086f5f4cf30142590a466b9a` 통합 뒤 `3128a81dda`는 [새 집중 run](https://github.com/jeong-sik/masc/actions/runs/36666351767)과 [probe](https://github.com/jeong-sik/masc/actions/runs/36666354114)를 요청했다. 이전 PASS가 새 head를 증명하지 않는다.
+
+Runtime picker [집중 run 36662423793](https://github.com/jeong-sik/masc/actions/runs/36662423793)은 `60444ae71d6a24bb0380c3a0584f5631e2295657`에서 success다. 원문·화면·최신 base 확인은 별도다. Goal `36662267831`은 timeline을 고치며 공용 `short_ts` 구현을 제거해 interface와 Task history 호출을 깨뜨렸고, `e38b210cd1`에서 구현을 복구했다. Params `36661078061`은 40열에서 사라지는 제목을 resize 준비 신호로 썼고, 같은 실제 화면의 footer가 문서 위치까지 잘랐다. `8c909157d1`에서 준비 신호와 별도 위치 행·행 예산을 함께 고쳤다. 두 응답의 실행 결과는 아직 확인하지 않았다.
+
 ## 수정과 남은 결함
 
 `PR`는 구현이 게시되었다는 뜻이다. 아래에 적힌 PR들의 현재 head·CI·리뷰·병합 상태는 작업 직전에 다시 확인한다.
@@ -50,9 +54,9 @@ Board PR check `36648042151` 및 Usage PR check `36648043868`의 edited-test 단
 | O03/O04 | Answering | byte name 폭과 no-target scroll 부재; hidden Enter | [#40098](https://github.com/jeong-sik/masc/pull/40098), 셀 배정·page scroll·visible target; 테스트 dict 순회 오류도 수정 |
 | M01 | Memory 상세 | claim 최소30셀이 실제 폭 초과; provenance 잘림 | [#40103](https://github.com/jeong-sik/masc/pull/40103), 폭 중복 차감 제거·필드 wrap |
 | K01 | Keeper Info/Channels | 22셀 라벨 뒤 원문 값을 한 줄로 잘라 잃음 | [#40131](https://github.com/jeong-sik/masc/pull/40131), 필드 wrap 후 scroll 계산; 집중 실행 검증 대기 |
-| K02 | Keeper logs | 75셀 고정 표 뒤 cost/work/tools가 도달 불가 | 구현 필요 |
+| K02 | Keeper logs | 75셀 고정 표 뒤 cost/work/tools가 도달 불가 | [#40160](https://github.com/jeong-sik/masc/pull/40160), 전체 필드를 물리 행 읽기로 투영·새 행 수와 key paging 공유; 집중 실행 검증 대기 |
 | K03/S03 | Connectors/Clients | printf 최소 폭으로 긴 이름이 열을 밀고 channel/last seen 소실 | [#40118](https://github.com/jeong-sik/masc/pull/40118), 공유 Table.fit; 실행 검증 대기 |
-| K04 | Schedules 상세/목록 | recurrence/ID/digest/fence 원문 잘림, mandatory target 폭 과다 | 구현 필요 |
+| K04 | Schedules 상세/목록 | recurrence/ID/digest/fence 원문 잘림, mandatory target 폭 과다 | [#40167](https://github.com/jeong-sik/masc/pull/40167), 전체 필드 스크롤·실제 페이지 높이·원래 due/target/recurrence 우선순위 보존; 집중 실행 검증 대기 |
 | K05 | Runtime picker | mandatory 24셀×2 + chrome이 작은 frame 초과 | [#40143](https://github.com/jeong-sik/masc/pull/40143), 실제 셀 폭으로 열 배정; 집중 실행 검증 대기 |
 | K06 | Chat inflight row | 다른 Keeper 이름 뒤 interrupt 행동이 잘림 | 구현 필요 |
 | R02 | 기록된 diff | 세로 스크롤만 있어 긴 줄 뒤 차이가 도달 불가; shift 키가 file offset만 바꿈 | 실제 diff 수평 탐색 필요 |

@@ -150,7 +150,11 @@
       "runtime_evidence": "pending",
       "finding_ids": [
         "K02"
-      ]
+      ],
+      "implementation_prs": [
+        40160
+      ],
+      "implementation_evidence": "source-reviewed repair; latest-head execution pending"
     },
     {
       "name": "render_keeper_message",
@@ -216,7 +220,7 @@
     {
       "name": "render_presets",
       "source_review": "reviewed with findings",
-      "runtime_evidence": "pending",
+      "runtime_evidence": "focused Linux PTY and unit success at f040b6f966; latest integrated3128a81dda and full state matrix pending",
       "finding_ids": [
         "S06",
         "S07"
@@ -306,7 +310,11 @@
       "runtime_evidence": "pending",
       "finding_ids": [
         "K04"
-      ]
+      ],
+      "implementation_prs": [
+        40167
+      ],
+      "implementation_evidence": "source-reviewed repair; latest-head execution pending"
     },
     {
       "name": "render_system_log_detail",

@@ -6,7 +6,9 @@
 
 ## 조사 범위와 수용 조건
 
-[기계 판독 목록](../evidence/tui-audit-2026-09-30/surface-inventory.json)은 surface dispatcher의 **48개 renderer**, 전역 overlay 12개, renderer 안에서 별도로 검증할 detail/form/tab을 기록한다. 단순히 상위 메뉴 7개를 열었다고 전수검증이 끝난 것으로 보지 않는다. account login·lane addons·About은 전역 분기에 포함하며 상세 검토와 실행은 아직 대기다. browser live/history는 Connectors 내부 모드로 분류한다. 후속 main `ff7f49c40cd09e36acd18e76df0c0c512f6a7eab`의 `frame_choice`는 Play card를 추가해 13분기이며, 그 추가 화면은 별도 미검증 항목으로 남긴다.
+[기계 판독 목록](../evidence/tui-audit-2026-09-30/surface-inventory.json)은 surface dispatcher의 **48개 renderer**, 전역 overlay 12개, renderer 안에서 별도로 검증할 detail/form/tab을 기록한다. 별도 `inline_dispatcher_surfaces`에는 Board pending-detail의 Absent/Loading/Failed 세 상태를 기록한다. 단순히 상위 메뉴 7개를 열었다고 전수검증이 끝난 것으로 보지 않는다. account login·lane addons·About은 전역 분기에 포함하며 상세 검토와 실행은 아직 대기다. browser live/history는 Connectors 내부 모드로 분류한다. 후속 main `ff7f49c40cd09e36acd18e76df0c0c512f6a7eab`의 `frame_choice`는 Play card를 추가해 13분기이며, 그 추가 화면은 별도 미검증 항목으로 남긴다.
+
+원본 감사 소스 `65562ff5f7567f9b3a3b2c2b466d556d368d85ba`의 `render_surface`는 Board_read가 Absent/Loading/Failed이고 matching cached post가 없을 때 `render_board_read`를 호출하지 않고 pending footer·미로딩/로딩/실패 본문을 직접 그린다(`bin/masc_tui_render.ml:16208-16222`). 이 분기는 함수 renderer 48개에 포함되지 않으므로 별도 inline 화면으로 검토한다. 세 상태의 좁은/넓은 폭·짧은 높이, 긴 post ID/실패 메시지, `r` 재시도·뒤로 이동, resize/Activity 예약, cached/Ready 본문으로의 전환은 아직 실행 미검증이다. 기존 Ready/cached Board 상세 캡처를 이 상태들의 증거로 세지 않는다.
 
 - 폭 60/80/120/160/240열과 짧은 18/24행, 일반 32/48행에서 핵심 대상·상태·주 행동이 보이고 접근 가능해야 한다. 더 작은 지원 폭은 compact frame 또는 해당 입력창의 정책도 확인한다.
 - 긴 한국어·ASCII 이름/ID/경로/JSON/소스 줄, 빈·읽는 중·읽기 실패·보존된 이전 값·여러 페이지를 다룬다. NO_COLOR와 focus 전환·리사이즈를 포함한다.

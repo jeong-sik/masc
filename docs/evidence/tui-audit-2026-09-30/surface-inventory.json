@@ -1,7 +1,7 @@
 {
   "source_head": "65562ff5f7567f9b3a3b2c2b466d556d368d85ba",
   "source": "bin/masc_tui_render.ml:render_surface",
-  "coverage_definition": "Every distinct renderer called by the surface dispatcher; does not count per-renderer tabs/forms or global overlays. No-defect source review is not executable proof.",
+  "coverage_definition": "Every distinct renderer called by the surface dispatcher plus separately inventoried inline dispatcher screens; per-renderer tabs/forms and global overlays are tracked separately. No-defect source review is not executable proof.",
   "renderers": [
     {
       "name": "render_acting",
@@ -510,7 +510,8 @@
     "Fusion list/detail/historical detail/launch",
     "Runtime exact-lane editor and runtime picker",
     "Browser addons/live/history",
-    "Connectors browser live/history (surface-local mode, not a global overlay)"
+    "Connectors browser live/history (surface-local mode, not a global overlay)",
+    "Board pending detail: Absent / Loading / Failed with no matching cached post; retry/loading/error chrome is inline in render_surface, distinct from render_board_read"
   ],
   "diff_access_audit": {
     "source_head": "c112b2030652a5a25360f5d5322f8dc6da99c598",
@@ -974,5 +975,26 @@
     "review": "system_audit and agenda_finish source PASS final head, no unresolved P0/P1/P2; P3 unused timestamp helper deferred",
     "validation": "OCaml syntax/Python AST/full base diff PASS; 5width color detail fixture and overflowing confirmation edge extension unexecuted",
     "execution": "not run under source-only policy"
-  }
+  },
+  "inline_dispatcher_surfaces": [
+    {
+      "name": "Board pending detail",
+      "source_head": "65562ff5f7567f9b3a3b2c2b466d556d368d85ba",
+      "source": "bin/masc_tui_render.ml:16208-16222 (render_surface Board_read)",
+      "condition": "Board_detail is Absent, Loading or Failed and state.board_posts has no matching post_id",
+      "states": [
+        "Absent: unloaded message and r retry hint",
+        "Loading: loading message",
+        "Failed: single-line failure detail with failure styling"
+      ],
+      "source_review": "dispatcher branch and footer_hints_board_pending identified; detailed layout/input review pending",
+      "runtime_evidence": "pending; ready/cached Board detail captures do not cover these states",
+      "required_evidence": [
+        "Absent, Loading and Failed without cached post at narrow/wide widths and short panes",
+        "retry r and back navigation preserve Board owner and use pending footer hints",
+        "long post ID and failure detail, resize and Activity reservation",
+        "matching cached post and later Ready response transition to render_board_read without stale pending chrome"
+      ]
+    }
+  ]
 }

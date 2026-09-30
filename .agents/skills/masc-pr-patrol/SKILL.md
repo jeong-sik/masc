@@ -43,6 +43,8 @@ REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
 
 ## 코드 리뷰와 CI 분리
 
+- `queue-ledger.sh`의 `review_state=needed`는 CI 대기와 별개인 리뷰 작업이다.
+  `waits_on=ci:*`여도 코드 리뷰를 진행한다. `waits_on=integration`은 병합 판정 대기다.
 - 코드와 계약을 읽어 판단이 가능하면 CI 상태와 별개로 APPROVE 또는 REQUEST_CHANGES를 남긴다.
   첫 줄은 `review: APPROVE|REQUEST_CHANGES head: <40자 sha> by: <Keeper 이름>`이다.
 - APPROVE에는 `approve-guard.sh`를 사용한다. `--check`는 리뷰 가능 여부를 확인하며

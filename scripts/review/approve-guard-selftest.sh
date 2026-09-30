@@ -123,6 +123,16 @@ case "$ep" in
   *) echo "fake gh: no fixture for $ep" >&2; exit 1 ;;
 esac
 [ -f "$d/$f.json" ] || { echo "fake gh: missing $f.json" >&2; exit 1; }
+if [ "$f" = reviews ]; then
+  n=$(cat "$d/review_reads" 2>/dev/null || echo 0); n=$((n+1)); echo "$n" > "$d/review_reads"
+  if [ "$n" = 2 ] && [ -f "$d/late_review_own_cr" ]; then
+    "$FAKE_JQ" -n '[{id:999,state:"CHANGES_REQUESTED",user:{login:"pangyo-preachers"},body:"Read this first"}]' > "$d/reviews.json"
+  fi
+  if [ "$n" = 2 ] && [ -f "$d/late_review_head" ]; then
+    "$FAKE_JQ" '.head.sha="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"' "$d/pull.json" > "$d/pull.next.json"
+    mv "$d/pull.next.json" "$d/pull.json"
+  fi
+fi
 if [ "$f" = checkruns ] && [ -f "$d/after_checks_verdict" ] && [ "$(cat "$d/main_reads" 2>/dev/null || echo 0)" -ge "${FAKE_LATE_PR_AFTER_MAIN_READS:-4}" ]; then
   # All CI still succeeds; a reviewer posts only while the final check read is
   # in flight, after the guard's earlier verdict read has already accepted PASS.
@@ -248,7 +258,7 @@ setup() { # setup <casedir>: default happy fixtures
   echo '[]' >"$d/comments.json"
   echo "{\"id\":777,\"state\":\"APPROVED\",\"commit_id\":\"$H\"}" >"$d/postresp.json"
   echo "{\"id\":777,\"state\":\"APPROVED\",\"commit_id\":\"$H\"}" >"$d/reviewget.json"
-  printf 'verdict: PASS head: %s run: 900 by: selftest-keeper\nLGTM, file:line evidence\n' "$H" >"$d/body.md"
+  printf 'review: APPROVE head: %s by: selftest-keeper\nLGTM, file:line evidence\n' "$H" >"$d/body.md"
 }
 
 run_case() { # run_case <name> <want_rc> <needle> <want_post 0|1> <casedir> [guard args...]
@@ -265,12 +275,26 @@ run_case() { # run_case <name> <want_rc> <needle> <want_post 0|1> <casedir> [gua
   fi
 }
 
+ci_case() { # same fixture assertions; success is CI receipt, never approval
+  local name="$1" want="$2" needle="$3" d="$5"; shift 5
+  local args=()
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --check|--integration-check) shift ;;
+      --body) shift 2 ;;
+      *) args+=("$1"); shift ;;
+    esac
+  done
+  [ "$want" != 0 ] || needle="INTEGRATION-CHECK PASS"
+  run_case "$name" "$want" "$needle" 0 "$d" --integration-check "${args[@]}"
+}
+
 
 for required_name in "lint suite" "dune build @check" "dune build --profile release @check" "dashboard typecheck" "TLA model check"; do
   d="$work/missing-required-$required_name"; setup "$d"
   "$JQ" --arg name "$required_name" '.jobs |= map(select(.name != $name))' "$d/prjobs.json" > "$d/next.json"
   mv "$d/next.json" "$d/prjobs.json"
-  run_case "missing-required-$required_name" 2 "required PR-check job '$required_name' missing" 0 "$d" --check --repo o/r --pr 5 --head "$H"
+  ci_case "missing-required-$required_name" 2 "required PR-check job '$required_name' missing" 0 "$d" --integration-check --repo o/r --pr 5 --head "$H" --integration-check
 done
 
 d="$work/happy"; setup "$d"
@@ -303,13 +327,13 @@ then pass=$((pass+1)); echo "ok   missing-option-values-terminate"
 else fail=$((fail+1)); echo "FAIL missing-option-values-terminate"; fi
 d="$work/happy-footer"; setup "$d"
 FAKE_DIR="$d" GUARD_GH="$work/gh" bash "$guard" --git-dir "$work/repo" --repo o/r --pr 5 --head "$H" --body "$d/body.md" >/dev/null 2>&1
-if jq -e --arg h "$H" '.event=="APPROVE" and .commit_id==$h and (.body|contains("run")) and (.body|contains("approve-guard: head"))' "$d/posted.json" >/dev/null; then pass=$((pass+1)); echo "ok   posted-payload"; else fail=$((fail+1)); echo "FAIL posted-payload"; cat "$d/posted.json"; fi
+if jq -e --arg h "$H" '.event=="APPROVE" and .commit_id==$h and (.body|contains("source review")) and (.body|contains("approve-guard: head"))' "$d/posted.json" >/dev/null; then pass=$((pass+1)); echo "ok   posted-payload"; else fail=$((fail+1)); echo "FAIL posted-payload"; cat "$d/posted.json"; fi
 
 d="$work/check"; setup "$d"
-run_case check-mode-no-write 0 "WOULD APPROVE #5" 0 "$d" --check --repo o/r --pr 5 --head "$H"
+run_case check-mode-no-write 0 "WOULD APPROVE #5" 0 "$d" --check --repo o/r --pr 5 --head "$H" --body "$d/body.md"
 # A commit response can paginate its files while repeating the same SHA.
 d="$work/paginated-main"; setup "$d"
-FAKE_PAGINATED_MAIN=1 run_case paginated-main-identity 0 "WOULD APPROVE #5" 0 "$d" --check --repo o/r --pr 5 --head "$H"
+FAKE_PAGINATED_MAIN=1 run_case paginated-main-identity 0 "WOULD APPROVE #5" 0 "$d" --check --repo o/r --pr 5 --head "$H" --body "$d/body.md"
 d="$work/sha41"; setup "$d"
 run_case sha-41-chars 2 "40 lowercase hex" 0 "$d" --repo o/r --pr 5 --head "${H}0" --body "$d/body.md"
 d="$work/emptybody"; setup "$d"; : >"$d/body.md"
@@ -319,38 +343,38 @@ run_case draft 2 "PR is Draft" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/b
 d="$work/moved"; setup "$d"; jq --arg h "$H2" '.head.sha=$h' "$d/pull.json" >"$d/p" && mv "$d/p" "$d/pull.json"
 run_case head-moved 2 "head moved" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
 d="$work/base"; setup "$d"; jq '.base.ref="feat/x"' "$d/pull.json" >"$d/p" && mv "$d/p" "$d/pull.json"
-run_case base-not-main 2 "not main" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+run_case stacked-base-source-approval 0 "review 777" 1 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
 d="$work/merged"; setup "$d"; jq '.state="closed"|.merged=true' "$d/pull.json" >"$d/p" && mv "$d/p" "$d/pull.json"
 run_case merged 2 "merged=true" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
 d="$work/pending"; setup "$d"; jq '.check_runs[1].status="in_progress"|.check_runs[1].conclusion=null' "$d/checkruns.json" >"$d/p" && mv "$d/p" "$d/checkruns.json"
-run_case check-pending 2 "lint suite' is in_progress/none" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+ci_case check-pending 2 "lint suite' is in_progress/none" 0 "$d" --repo o/r --pr 5 --head "$H" --integration-check
 d="$work/failed"; setup "$d"; jq '.check_runs[0].conclusion="failure"' "$d/checkruns.json" >"$d/p" && mv "$d/p" "$d/checkruns.json"
-run_case check-failed 2 "completed/failure" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+ci_case check-failed 2 "completed/failure" 0 "$d" --repo o/r --pr 5 --head "$H" --integration-check
 d="$work/cancelled"; setup "$d"; jq '.check_runs[0].conclusion="cancelled"' "$d/checkruns.json" >"$d/p" && mv "$d/p" "$d/checkruns.json"
-run_case check-cancelled 2 "completed/cancelled" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+ci_case check-cancelled 2 "completed/cancelled" 0 "$d" --repo o/r --pr 5 --head "$H" --integration-check
 d="$work/checksuperseded"; setup "$d"; echo '{"check_runs":[{"name":"dune build @check","status":"completed","conclusion":"skipped","id":11},{"name":"lint suite","status":"completed","conclusion":"skipped","id":12},{"name":"dune build @check","status":"completed","conclusion":"success","id":21},{"name":"lint suite","status":"completed","conclusion":"success","id":22}]}' >"$d/checkruns.json"
-run_case check-superseded-skipped-ignored 0 "review 777" 1 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+ci_case check-superseded-skipped-ignored 0 "review 777" 1 "$d" --repo o/r --pr 5 --head "$H" --integration-check
 d="$work/checknewestfails"; setup "$d"; echo '{"check_runs":[{"name":"dune build @check","status":"completed","conclusion":"success","id":11},{"name":"lint suite","status":"completed","conclusion":"success","id":12},{"name":"dune build @check","status":"completed","conclusion":"failure","id":21}]}' >"$d/checkruns.json"
-run_case check-newest-run-failed 2 "check-run 21" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+ci_case check-newest-run-failed 2 "check-run 21" 0 "$d" --repo o/r --pr 5 --head "$H" --integration-check
 d="$work/nochecks"; setup "$d"; echo '{"check_runs":[]}' >"$d/checkruns.json"
-run_case checks-empty 2 "empty is not green" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+ci_case checks-empty 2 "empty is not green" 0 "$d" --repo o/r --pr 5 --head "$H" --integration-check
 d="$work/wfqueued"; setup "$d"; echo '{"workflow_runs":[{"workflow_id":1,"run_number":10,"name":"PR Check","status":"completed","conclusion":"success","id":900},{"workflow_id":2,"run_number":3,"name":"Test","status":"queued","conclusion":null,"id":901}]}' >"$d/actions.json"
-run_case workflow-queued 2 "run 901 is queued/none" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+ci_case workflow-queued 2 "run 901 is queued/none" 0 "$d" --repo o/r --pr 5 --head "$H" --integration-check
 d="$work/wfsuperseded"; setup "$d"; echo '{"workflow_runs":[{"workflow_id":1,"run_number":11,"name":"PR Check","status":"completed","conclusion":"success","id":902},{"workflow_id":1,"run_number":10,"name":"PR Check","status":"completed","conclusion":"cancelled","id":900}]}' >"$d/actions.json"
 printf 'verdict: PASS head: %s run: 902 by: selftest-keeper\n' "$H" >"$d/body.md"
-run_case workflow-superseded-run-ignored 0 "review 777" 1 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+ci_case workflow-superseded-run-ignored 0 "review 777" 1 "$d" --repo o/r --pr 5 --head "$H" --integration-check
 d="$work/wfnewestfails"; setup "$d"; echo '{"workflow_runs":[{"workflow_id":1,"run_number":10,"name":"PR Check","status":"completed","conclusion":"success","id":900},{"workflow_id":1,"run_number":11,"name":"PR Check","status":"completed","conclusion":"failure","id":902}]}' >"$d/actions.json"
-run_case workflow-newest-run-failed 2 "run 902 is completed/failure" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+ci_case workflow-newest-run-failed 2 "run 902 is completed/failure" 0 "$d" --repo o/r --pr 5 --head "$H" --integration-check
 # A review's commit_id can be retargeted by GitHub after a main merge.
 # Only the immutable verdict and final guard footer identify what was reviewed.
 approved_review() { # id commit_id footer_head verdict_head
   local id="$1" commit="$2" footer="$3" verdict="$4" tick
   tick="$(printf '\x60')"
   "$JQ" -n --argjson id "$id" --arg commit "$commit" \
-    --arg body "verdict: PASS head: $verdict run: 900 by: selftest-keeper
+    --arg body "review: APPROVE head: $verdict by: selftest-keeper
 
 ---
-approve-guard: head $tick$footer$tick · 2 check-runs completed+success" \
+approve-guard: head $tick$footer$tick · source review by selftest-keeper · CI evaluated at merge" \
     '[{id:$id,user:{login:"pangyo-preachers"},state:"APPROVED",commit_id:$commit,body:$body,author_association:"COLLABORATOR"}]'
 }
 d="$work/dup"; setup "$d"; approved_review 42 "$H" "$H" "$H" >"$d/reviews.json"
@@ -358,7 +382,7 @@ run_case already-approved 0 "already APPROVED" 0 "$d" --repo o/r --pr 5 --head "
 d="$work/dupold"; setup "$d"; approved_review 42 "$H2" "$H2" "$H2" >"$d/reviews.json"
 run_case approved-older-head-still-posts 0 "review 777" 1 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
 d="$work/dup-retargeted"; setup "$d"; approved_review 42 "$H" "$H2" "$H2" >"$d/reviews.json"
-run_case retargeted-commit-would-approve 0 "WOULD APPROVE #5" 0 "$d" --check --repo o/r --pr 5 --head "$H"
+run_case retargeted-commit-would-approve 0 "WOULD APPROVE #5" 0 "$d" --check --repo o/r --pr 5 --head "$H" --body "$d/body.md"
 run_case retargeted-commit-posts 0 "review 777" 1 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
 d="$work/dup-old-commit"; setup "$d"; approved_review 42 "$H2" "$H" "$H" >"$d/reviews.json"
 run_case footer-head-deduplicates 0 "already APPROVED" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
@@ -391,13 +415,14 @@ run_case merge-page2-cr-refuses 2 "open CHANGES_REQUESTED from pangyo-preachers 
 d="$work/merge-cross-cr"; setup "$d"; "$JQ" '.user.login="jeong-sik"' "$d/pull.json" >"$d/p" && mv "$d/p" "$d/pull.json"
 approved_review 42 "$H" "$H" "$H" | "$JQ" '.[0].user.login="reviewer-a" | . + [{id:43,user:{login:"reviewer-b"},state:"CHANGES_REQUESTED",commit_id:$h}]' --arg h "$H" >"$d/reviews.json"; "$JQ" '.[0]' "$d/reviews.json" >"$d/reviewget.json"
 run_case merge-cross-user-cr-refuses 2 "open CHANGES_REQUESTED from reviewer-b (review 43) takes precedence" 0 "$d" --merge-check --repo o/r --pr 5 --head "$H"
-# ---- open change requests (leader, #38810): another account's CR refuses ----
+# ---- independent reviewers can approve while another account retains CR ----
 rv() { echo "{\"id\":$1,\"user\":{\"login\":\"$2\"},\"state\":\"$3\",\"commit_id\":\"$H2\"}"; }
 d="$work/cr-other"; setup "$d"; echo "[$(rv 50 jeong-sik CHANGES_REQUESTED)]" >"$d/reviews.json"
-run_case cr-other-account-refuses 2 "open CHANGES_REQUESTED from jeong-sik (review 50)" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
-run_case cr-other-account-refuses-check 2 "open CHANGES_REQUESTED from jeong-sik" 0 "$d" --check --repo o/r --pr 5 --head "$H"
+run_case cr-other-account-refuses 0 "review 777" 1 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+rm "$d/posted.json"
+run_case cr-other-account-refuses-check 0 "WOULD APPROVE" 0 "$d" --check --repo o/r --pr 5 --head "$H" --body "$d/body.md"
 d="$work/cr-comment"; setup "$d"; echo "[$(rv 50 jeong-sik CHANGES_REQUESTED),$(rv 60 jeong-sik COMMENTED)]" >"$d/reviews.json"
-run_case cr-not-lifted-by-later-comment 2 "review 50" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+run_case cr-not-lifted-by-later-comment 0 "review 777" 1 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
 d="$work/cr-lifted"; setup "$d"; echo "[$(rv 60 jeong-sik APPROVED),$(rv 50 jeong-sik CHANGES_REQUESTED)]" >"$d/reviews.json"
 run_case cr-lifted-by-later-approve 0 "review 777" 1 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
 d="$work/cr-dismissed"; setup "$d"; echo "[$(rv 50 jeong-sik DISMISSED)]" >"$d/reviews.json"
@@ -405,7 +430,7 @@ run_case cr-dismissed-does-not-block 0 "review 777" 1 "$d" --repo o/r --pr 5 --h
 # ---- this account's own CR (operator P2 on #38928): replaced only when named ----
 d="$work/cr-own"; setup "$d"; echo "[$(rv 50 pangyo-preachers CHANGES_REQUESTED)]" >"$d/reviews.json"
 run_case cr-own-refuses-unless-named 2 "pass --replace-own-cr 50" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
-run_case cr-own-refuses-unless-named-check 2 "pass --replace-own-cr 50" 0 "$d" --check --repo o/r --pr 5 --head "$H"
+run_case cr-own-refuses-unless-named-check 2 "pass --replace-own-cr 50" 0 "$d" --check --repo o/r --pr 5 --head "$H" --body "$d/body.md"
 d="$work/cr-own-named"; setup "$d"; echo "[$(rv 50 pangyo-preachers CHANGES_REQUESTED)]" >"$d/reviews.json"
 run_case cr-own-replaced-when-named 0 "review 777" 1 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md" --replace-own-cr 50
 if jq -e '.body|endswith(" · replaces own CHANGES_REQUESTED 50")' "$d/posted.json" >/dev/null 2>&1; then pass=$((pass+1)); echo "ok   cr-own-replaced-footer"; else fail=$((fail+1)); echo "FAIL cr-own-replaced-footer"; cat "$d/posted.json" 2>/dev/null; fi
@@ -414,32 +439,32 @@ run_case cr-own-named-wrong-id 2 "--replace-own-cr 51 does not name" 0 "$d" --re
 d="$work/cr-own-stale-flag"; setup "$d"; echo "[$(rv 60 pangyo-preachers APPROVED),$(rv 50 pangyo-preachers CHANGES_REQUESTED)]" >"$d/reviews.json"
 run_case cr-own-named-but-already-lifted 2 "--replace-own-cr 50 does not name" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md" --replace-own-cr 50
 d="$work/cr-own-plus-other"; setup "$d"; echo "[$(rv 50 pangyo-preachers CHANGES_REQUESTED),$(rv 52 jeong-sik CHANGES_REQUESTED)]" >"$d/reviews.json"
-run_case cr-own-named-other-still-refuses 2 "from jeong-sik (review 52)" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md" --replace-own-cr 50
+run_case cr-own-named-other-still-refuses 0 "review 777" 1 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md" --replace-own-cr 50
 d="$work/cr-flag-junk"; setup "$d"
 run_case replace-own-cr-not-digits 2 "must be a review id" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md" --replace-own-cr 5306112777x
-# ---- verdict line (#38975, 2026-09-26): the body's first line is the PASS the merge relies on ----
+# ---- literal head-bound source review header; integration PASS is separate ----
 # review 5325206074 carried `head: $(gh api ...)` from a quoted heredoc; the
 # APPROVE landed on the right commit, so only the body shows the missing head.
-d="$work/vl-unexpanded"; setup "$d"; printf 'verdict: PASS head: $(gh api repos/o/r/pulls/5 --jq .head.sha) run: 900 by: selftest-keeper\n' >"$d/body.md"
-run_case verdict-unexpanded-substitution 2 "not a literal verdict line" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+d="$work/vl-unexpanded"; setup "$d"; printf 'review: APPROVE head: $(gh api repos/o/r/pulls/5 --jq .head.sha) by: selftest-keeper\n' >"$d/body.md"
+run_case verdict-unexpanded-substitution 2 "not a literal review line" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
 d="$work/vl-missing"; setup "$d"; printf 'LGTM, file:line evidence\n' >"$d/body.md"
-run_case verdict-line-missing 2 "not a literal verdict line" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
-d="$work/vl-second-line"; setup "$d"; printf 'Looks good.\nverdict: PASS head: %s run: 900 by: selftest-keeper\n' "$H" >"$d/body.md"
-run_case verdict-line-not-first 2 "not a literal verdict line" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
-d="$work/vl-fail"; setup "$d"; printf 'verdict: FAIL head: %s run: 900 by: selftest-keeper\n' "$H" >"$d/body.md"
-run_case verdict-fail-is-not-approvable 2 "not a literal verdict line" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
-d="$work/vl-head"; setup "$d"; printf 'verdict: PASS head: %s run: 900 by: selftest-keeper\n' "$H2" >"$d/body.md"
-run_case verdict-head-not-this-head 2 "verdict line head $H2 is not --head $H" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
-d="$work/vl-run"; setup "$d"; printf 'verdict: PASS head: %s run: 123 by: selftest-keeper\n' "$H" >"$d/body.md"
-run_case verdict-run-not-on-head 2 "verdict line run 123 is not a workflow run on $H" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
-d="$work/vl-by"; setup "$d"; printf 'verdict: PASS head: %s run: 900 by: pangyo-preachers\n' "$H" >"$d/body.md"
+run_case verdict-line-missing 2 "not a literal review line" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+d="$work/vl-second-line"; setup "$d"; printf 'Looks good.\nreview: APPROVE head: %s by: selftest-keeper\n' "$H" >"$d/body.md"
+run_case verdict-line-not-first 2 "not a literal review line" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+d="$work/vl-fail"; setup "$d"; printf 'review: REQUEST_CHANGES head: %s by: selftest-keeper\n' "$H" >"$d/body.md"
+run_case verdict-fail-is-not-approvable 2 "not a literal review line" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+d="$work/vl-head"; setup "$d"; printf 'review: APPROVE head: %s by: selftest-keeper\n' "$H2" >"$d/body.md"
+run_case verdict-head-not-this-head 2 "review line head $H2 is not --head $H" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+d="$work/vl-run"; setup "$d"; printf 'review: APPROVE head: %s run: 123 by: selftest-keeper\n' "$H" >"$d/body.md"
+run_case verdict-run-not-on-head 2 "not a literal review line" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+d="$work/vl-by"; setup "$d"; printf 'review: APPROVE head: %s by: pangyo-preachers\n' "$H" >"$d/body.md"
 run_case verdict-by-is-account-login 2 "by: is the account login 'pangyo-preachers'" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
-d="$work/vl-crlf"; setup "$d"; printf 'verdict: PASS head: %s run: 900 by: selftest-keeper\r\nLGTM\r\n' "$H" >"$d/body.md"
+d="$work/vl-crlf"; setup "$d"; printf 'review: APPROVE head: %s by: selftest-keeper\r\nLGTM\r\n' "$H" >"$d/body.md"
 run_case verdict-line-crlf-accepted 0 "review 777" 1 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
 d="$work/readback"; setup "$d"; echo "{\"id\":777,\"state\":\"COMMENTED\",\"commit_id\":\"$H\"}" >"$d/reviewget.json"
 run_case readback-mismatch 1 "reads back as COMMENTED" 1 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
 d="$work/multi"; setup "$d"; jq '.draft=true|.base.ref="dev"' "$d/pull.json" >"$d/p" && mv "$d/p" "$d/pull.json"
-run_case reports-all-reasons 2 "not main" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+run_case draft-source-approval-refused 2 "PR is Draft" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
 
 # ---- Draft -> Ready: which run is "newest" (#39046, #39049, 2026-09-25) ----
 # A PR opened as Draft and marked Ready carries two suites on one SHA. On
@@ -448,24 +473,24 @@ run_case reports-all-reasons 2 "not main" 0 "$d" --repo o/r --pr 5 --head "$H" -
 # suite (97836272095) is older than the success suite (97836300496). Check-run
 # ids do not follow suite order; the suite id does.
 d="$work/draftsuite"; setup "$d"; echo '{"check_runs":[{"name":"dune build @check","status":"completed","conclusion":"skipped","id":30,"check_suite":{"id":1}},{"name":"lint suite","status":"completed","conclusion":"skipped","id":31,"check_suite":{"id":1}},{"name":"dune build @check","status":"completed","conclusion":"success","id":21,"check_suite":{"id":2}},{"name":"lint suite","status":"completed","conclusion":"success","id":22,"check_suite":{"id":2}}]}' >"$d/checkruns.json"
-run_case check-draft-suite-with-higher-id-ignored 0 "review 777" 1 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+ci_case check-draft-suite-with-higher-id-ignored 0 "review 777" 1 "$d" --repo o/r --pr 5 --head "$H" --integration-check
 # The same ordering must still refuse when the NEWER suite failed but its
 # check-run id is the lower one; an id-order guard approves this.
 d="$work/newsuitefails"; setup "$d"; echo '{"check_runs":[{"name":"dune build @check","status":"completed","conclusion":"success","id":30,"check_suite":{"id":1}},{"name":"lint suite","status":"completed","conclusion":"success","id":31,"check_suite":{"id":1}},{"name":"dune build @check","status":"completed","conclusion":"failure","id":21,"check_suite":{"id":2}},{"name":"lint suite","status":"completed","conclusion":"success","id":22,"check_suite":{"id":2}}]}' >"$d/checkruns.json"
-run_case check-newer-suite-failed-with-lower-id 2 "check-run 21" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+ci_case check-newer-suite-failed-with-lower-id 2 "check-run 21" 0 "$d" --repo o/r --pr 5 --head "$H" --integration-check
 # #39049: two PR check runs of one workflow started in the same second; the
 # concurrency group cancelled the higher-numbered one and the other passed.
 # The twin owned the newest check suite, and every check-run in it was skipped
 # (suite 97837801954 on #39049); those rows must not count either.
 d="$work/wfcancelledtwin"; setup "$d"; echo '{"workflow_runs":[{"workflow_id":1,"run_number":14708,"name":"PR Check","status":"completed","conclusion":"success","id":900,"check_suite_id":2},{"workflow_id":1,"run_number":14709,"name":"PR Check","status":"completed","conclusion":"cancelled","id":901,"check_suite_id":3}]}' >"$d/actions.json"
 echo '{"check_runs":[{"name":"dune build @check","status":"completed","conclusion":"success","id":40,"check_suite":{"id":2}},{"name":"lint suite","status":"completed","conclusion":"success","id":41,"check_suite":{"id":2}},{"name":"dune build @check","status":"completed","conclusion":"skipped","id":20,"check_suite":{"id":3}},{"name":"lint suite","status":"completed","conclusion":"skipped","id":21,"check_suite":{"id":3}}]}' >"$d/checkruns.json"
-run_case workflow-cancelled-twin-ignored 0 "review 777" 1 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+ci_case workflow-cancelled-twin-ignored 0 "review 777" 1 "$d" --repo o/r --pr 5 --head "$H" --integration-check
 # Cancelled only counts as noise when a run of that workflow reached a verdict.
 d="$work/wfallcancelled"; setup "$d"; echo '{"workflow_runs":[{"workflow_id":1,"run_number":10,"name":"PR Check","status":"completed","conclusion":"cancelled","id":900},{"workflow_id":1,"run_number":11,"name":"PR Check","status":"completed","conclusion":"cancelled","id":902}]}' >"$d/actions.json"
-run_case workflow-all-cancelled-refuses 2 "run 902 is completed/cancelled" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+ci_case workflow-all-cancelled-refuses 2 "run 902 is completed/cancelled" 0 "$d" --repo o/r --pr 5 --head "$H" --integration-check
 # A newer run still in progress outranks an older finished one.
 d="$work/wfnewerrunning"; setup "$d"; echo '{"workflow_runs":[{"workflow_id":1,"run_number":10,"name":"PR Check","status":"completed","conclusion":"success","id":900},{"workflow_id":1,"run_number":11,"name":"PR Check","status":"in_progress","conclusion":null,"id":902}]}' >"$d/actions.json"
-run_case workflow-newer-run-in-progress-refuses 2 "run 902 is in_progress/none" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+ci_case workflow-newer-run-in-progress-refuses 2 "run 902 is in_progress/none" 0 "$d" --repo o/r --pr 5 --head "$H" --integration-check
 
 
 # ---- Late Draft delivery must neither cancel nor shadow Ready evidence ----
@@ -491,18 +516,18 @@ race_setup() {
   }
 }
 mutate() { "$JQ" "$2" "$1" >"$1.tmp" && mv "$1.tmp" "$1"; }
-race_case() { run_case "$1" "$2" "$3" 0 "$d" --check --repo o/r --pr 5 --head "$H"; }
+race_case() { ci_case "$1" "$2" "$3" 0 "$d" --integration-check --repo o/r --pr 5 --head "$H" --integration-check; }
 d="$work/race-late"; race_setup "$d"
-race_case late-draft-does-not-shadow-ready 0 'WOULD APPROVE'
+race_case late-draft-does-not-shadow-ready 0 'INTEGRATION-CHECK PASS'
 d="$work/race-early"; race_setup "$d"; mutate "$d/actions.json" '.workflow_runs[1].run_number=9'
-race_case early-draft-does-not-shadow-ready 0 'WOULD APPROVE'
+race_case early-draft-does-not-shadow-ready 0 'INTEGRATION-CHECK PASS'
 d="$work/race-skipped-run"; race_setup "$d"; mutate "$d/actions.json" '.workflow_runs[1].conclusion="skipped"'
-race_case complete-skipped-draft-run 0 'WOULD APPROVE'
+race_case complete-skipped-draft-run 0 'INTEGRATION-CHECK PASS'
 d="$work/race-current-draft"; race_setup "$d"; mutate "$d/pull.json" '.draft=true'
 race_case current-draft-still-refused 2 'PR is Draft'
 d="$work/race-cancelled"; race_setup "$d"; mutate "$d/actions.json" '.workflow_runs[1].conclusion="cancelled"'
 mutate "$d/checkruns.json" '.check_runs |= map(select(.check_suite.id != 66 or .id == 200))'
-race_case cancelled-incomplete-draft-loses-to-ready 0 'WOULD APPROVE'
+race_case cancelled-incomplete-draft-loses-to-ready 0 'INTEGRATION-CHECK PASS'
 d="$work/race-only-cancelled"; race_setup "$d"; mutate "$d/actions.json" '.workflow_runs |= map(select(.id == 901) | .conclusion="cancelled")'
 race_case cancelled-draft-only-refused 2 'invalid Draft snapshot'
 for fault in missing duplicate extra success pending head run id name; do
@@ -554,7 +579,7 @@ for page in split extra duplicate; do
     split)
       "$JQ" '{jobs:.jobs[3:]}' "$d/jobs-901.json" >"$d/jobs-901-page2.json"
       mutate "$d/jobs-901.json" '.jobs |= .[0:3]'
-      race_case paginated-draft-six-accepted 0 'WOULD APPROVE' ;;
+      race_case paginated-draft-six-accepted 0 'INTEGRATION-CHECK PASS' ;;
     extra|duplicate)
       "$JQ" '{jobs:[.jobs[0]]}' "$d/jobs-901.json" >"$d/jobs-901-page2.json"
       if [ "$page" = extra ]; then mutate "$d/jobs-901-page2.json" '.jobs[0].name="extra"'; fi
@@ -565,14 +590,14 @@ done
 # including reruns; it must not synthesize a green set across different suites.
 d="$work/race-rerun"; race_setup "$d"
 mutate "$d/checkruns.json" '.check_runs += [(.check_runs[0] | .id=99 | .conclusion="failure")]'
-race_case earlier-failed-check-in-same-ready-suite 0 'WOULD APPROVE'
+race_case earlier-failed-check-in-same-ready-suite 0 'INTEGRATION-CHECK PASS'
 d="$work/race-rerun-failed"; race_setup "$d"
 mutate "$d/checkruns.json" '.check_runs += [(.check_runs[0] | .id=999 | .conclusion="failure")]'
 race_case latest-failed-check-in-ready-suite 2 'requires six successful checks'
 d="$work/race-transport"; race_setup "$d"
 FAKE_FAIL='*/jobs*' race_case draft-jobs-transport-is-infra-error 1 'gh api repos/o/r/actions/runs/901/jobs'
 d="$work/race-nojq"; race_setup "$d"
-PATH="$work/nojq:$PATH" race_case draft-selection-needs-no-standalone-jq 0 'WOULD APPROVE'
+PATH="$work/nojq:$PATH" race_case draft-selection-needs-no-standalone-jq 0 'INTEGRATION-CHECK PASS'
 
 
 # Captured API job names, IDs, run IDs and statuses; only head is rebound
@@ -586,9 +611,9 @@ captured_run=$("$JQ" -r '.jobs[0].run_id' "$captured")
 "$JQ" --arg h "$captured_head" '.head.sha=$h' "$d/pull.json" >"$d/p" && mv "$d/p" "$d/pull.json"
 "$JQ" --arg h "$captured_head" --argjson run "$captured_run" '.workflow_runs[].head_sha=$h | .workflow_runs[1].id=$run | .workflow_runs[1].conclusion="skipped"' "$d/actions.json" >"$d/p" && mv "$d/p" "$d/actions.json"
 "$JQ" --slurpfile captured "$captured" '.check_runs |= (map(select(.check_suite.id==55)) + [$captured[0].jobs[] | {name,status,conclusion,id,check_suite:{id:66}}])' "$d/checkruns.json" >"$d/p" && mv "$d/p" "$d/checkruns.json"
-run_case captured-api-draft-with-synthetic-ready 0 'WOULD APPROVE' 0 "$d" --check --repo o/r --pr 5 --head "$captured_head"
+ci_case captured-api-draft-with-synthetic-ready 0 'INTEGRATION-CHECK PASS' 0 "$d" --integration-check --repo o/r --pr 5 --head "$captured_head"
 mutate "$d/actions.json" '.workflow_runs |= .[1:]'
-run_case captured-api-draft-alone-not-green 2 'requires six successful checks' 0 "$d" --check --repo o/r --pr 5 --head "$captured_head"
+ci_case captured-api-draft-alone-not-green 2 'requires six successful checks' 0 "$d" --integration-check --repo o/r --pr 5 --head "$captured_head"
 # Even an older noncancelled malformed expression must refuse before generic
 # lost-suite filtering, including all-success markers and a changed else arm.
 for expression_fault in else-arm condition all-success wrapped wrapped-success; do
@@ -621,15 +646,15 @@ mkcase() { # mkcase <dir> <suite-event> <suite-path>
   echo '[]' >"$d/comments.json"
   echo "{\"id\":777,\"state\":\"APPROVED\",\"commit_id\":\"$H\"}" >"$d/postresp.json"
   echo "{\"id\":777,\"state\":\"APPROVED\",\"commit_id\":\"$H\"}" >"$d/reviewget.json"
-  printf 'verdict: PASS head: %s run: 900 by: selftest-keeper\nLGTM, file:line evidence\n' "$H" >"$d/body.md"
+  printf 'review: APPROVE head: %s by: selftest-keeper\nLGTM, file:line evidence\n' "$H" >"$d/body.md"
 }
 d="$work/dispatchskip"; mkcase "$d" pull_request ".github/workflows/pr-check.yml"
-out="$(FAKE_DIR="$d" GUARD_GH="$work/gh" bash "$guard" --git-dir "$work/repo" --repo o/r --pr 5 --head "$H" --body "$d/body.md" 2>&1)"; rc=$?
-if [ "$rc" = 0 ] && [ -f "$d/posted.json" ] && "$JQ" -e '.body|endswith(" · dispatch-only skipped: compare-tui")' "$d/posted.json" >/dev/null; then pass=$((pass+1)); echo "ok   dispatch-only-job-skipped-approves"; else fail=$((fail+1)); echo "FAIL dispatch-only-job-skipped-approves (rc=$rc)"; printf '%s\n' "$out" | sed 's/^/     /'; cat "$d/posted.json" 2>/dev/null; fi
+out="$(FAKE_DIR="$d" GUARD_GH="$work/gh" bash "$guard" --git-dir "$work/repo" --repo o/r --pr 5 --head "$H" --integration-check 2>&1)"; rc=$?
+if [ "$rc" = 0 ] && [ ! -f "$d/posted.json" ] && printf '%s' "$out" | grep -qF "dispatch-only skipped: compare-tui"; then pass=$((pass+1)); echo "ok   dispatch-only-job-skipped-passes-integration"; else fail=$((fail+1)); echo "FAIL dispatch-only-job-skipped-passes-integration (rc=$rc)"; printf '%s\n' "$out" | sed 's/^/     /'; cat "$d/posted.json" 2>/dev/null; fi
 d="$work/requiredskip"; mkcase "$d" pull_request ".github/workflows/other.yml"
-run_case required-job-skipped-refuses 2 "check 'compare-tui' is completed/skipped (check-run 61)" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+ci_case required-job-skipped-refuses 2 "check 'compare-tui' is completed/skipped (check-run 61)" 0 "$d" --repo o/r --pr 5 --head "$H" --integration-check
 d="$work/dispatchskip-dispatch-suite"; mkcase "$d" workflow_dispatch ".github/workflows/pr-check.yml"
-run_case dispatch-suite-skipped-still-refuses 2 "check 'compare-tui' is completed/skipped (check-run 61)" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+ci_case dispatch-suite-skipped-still-refuses 2 "check 'compare-tui' is completed/skipped (check-run 61)" 0 "$d" --repo o/r --pr 5 --head "$H" --integration-check
 
 # A stale/dirty checkout says the opposite of the candidate in both directions.
 # It must neither exempt a required skipped job nor veto a dispatch-only one.
@@ -641,21 +666,21 @@ jobs:
   compare-tui:
     if: ${{ false }}
 EOF
-for mode in write check; do
-  set --; [ "$mode" = check ] && set -- --check
+for mode in integration; do
+  set --
   d="$work/head-required-checkout-dispatch-$mode"; mkcase "$d" pull_request ".github/workflows/pr-check.yml"
   "$JQ" '.check_runs[1].name="required-test"' "$d/checkruns.json" > "$d/p"
   mv "$d/p" "$d/checkruns.json"
-  run_case "head-required-ignores-checkout-exemption-$mode" 2 "check 'required-test' is completed/skipped" 0 "$d" \
-    --repo o/r --pr 5 --head "$H" --body "$d/body.md" "$@"
+  ci_case "head-required-ignores-checkout-exemption-$mode" 2 "check 'required-test' is completed/skipped" 0 "$d" \
+    --repo o/r --pr 5 --head "$H" --integration-check "$@"
 done
 d="$work/head-dispatch-checkout-required"; mkcase "$d" pull_request ".github/workflows/pr-check.yml"
-run_case head-dispatch-ignores-checkout-refusal 0 "review 777" 1 "$d" \
-  --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+ci_case head-dispatch-ignores-checkout-refusal 0 "review 777" 1 "$d" \
+  --repo o/r --pr 5 --head "$H" --integration-check
 rm "$work/repo/.github/workflows/pr-check.yml"
 d="$work/head-dispatch-checkout-missing"; mkcase "$d" pull_request ".github/workflows/pr-check.yml"
-run_case head-dispatch-ignores-missing-working-file 0 "review 777" 1 "$d" \
-  --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+ci_case head-dispatch-ignores-missing-working-file 0 "review 777" 1 "$d" \
+  --repo o/r --pr 5 --head "$H" --integration-check
 cp "$work/original-workflow" "$work/repo/.github/workflows/pr-check.yml"
 # A normal main-only clone can read the exact head after an object fetch;
 # unavailable objects fail closed without consulting a plausible local file.
@@ -664,12 +689,12 @@ if git -C "$work/main-only" cat-file -e "$H^{commit}" 2>/dev/null; then
   echo "FAIL main-only fixture already has candidate"; fail=$((fail+1))
 fi
 d="$work/head-dispatch-fetch"; mkcase "$d" pull_request ".github/workflows/pr-check.yml"
-run_case head-workflow-fetches-missing-candidate 0 "review 777" 1 "$d" \
-  --repo o/r --pr 5 --head "$H" --body "$d/body.md" --git-dir "$work/main-only"
+ci_case head-workflow-fetches-missing-candidate 0 "review 777" 1 "$d" \
+  --repo o/r --pr 5 --head "$H" --integration-check --git-dir "$work/main-only"
 git init -q "$work/no-object"
 d="$work/head-workflow-unavailable"; mkcase "$d" pull_request ".github/workflows/pr-check.yml"
-run_case head-workflow-object-unavailable-no-post 1 "candidate workflow object unavailable" 0 "$d" \
-  --repo o/r --pr 5 --head "$H" --body "$d/body.md" --git-dir "$work/no-object"
+ci_case head-workflow-object-unavailable-no-post 1 "candidate workflow object unavailable" 0 "$d" \
+  --repo o/r --pr 5 --head "$H" --integration-check --git-dir "$work/no-object"
 
 # A token inside a negated/OR expression, step or comment does not prove a
 # dispatch-only job. These are different committed candidates, not dirty files.
@@ -691,11 +716,11 @@ PYCASE
   git -C "$work/repo" add .github/workflows/pr-check.yml
   git -C "$work/repo" commit -qm "candidate skip policy $policy"
   H="$(git -C "$work/repo" rev-parse HEAD)"; export FAKE_HEAD="$H"
-  for mode in write check; do
-    set --; [ "$mode" = check ] && set -- --check
+  for mode in integration; do
+    set --
     d="$work/skip-policy-$policy-$mode"; mkcase "$d" pull_request ".github/workflows/pr-check.yml"
-    run_case "skip-policy-$policy-refuses-$mode" 2 "check 'compare-tui' is completed/skipped" 0 "$d" \
-      --repo o/r --pr 5 --head "$H" --body "$d/body.md" "$@"
+    ci_case "skip-policy-$policy-refuses-$mode" 2 "check 'compare-tui' is completed/skipped" 0 "$d" \
+      --repo o/r --pr 5 --head "$H" --integration-check "$@"
   done
 done
 git -C "$work/repo" checkout -q pr
@@ -711,8 +736,8 @@ for release_conclusion in failure cancelled; do
   echo "{\"check_runs\":[{\"name\":\"dune build @check\",\"status\":\"completed\",\"conclusion\":\"success\",\"id\":60,\"check_suite\":{\"id\":55}},{\"name\":\"Validate manual Release ref\",\"status\":\"completed\",\"conclusion\":\"failure\",\"id\":61,\"check_suite\":{\"id\":66}}]}" >"$d/checkruns.json"
   echo '{"jobs":[{"id":61,"name":"Validate manual Release ref","status":"completed","conclusion":"failure","steps":[{"name":"Set up job","status":"completed","conclusion":"success"},{"name":"Refuse unsupported manual ref","status":"completed","conclusion":"failure"}]},{"id":62,"name":"release-body","status":"completed","conclusion":"skipped"},{"id":63,"name":"build","status":"completed","conclusion":"skipped"},{"id":64,"name":"release","status":"completed","conclusion":"skipped"}]}' >"$d/jobs.json"
   echo '[{"annotation_level":"failure","title":"MASC_RELEASE_REF_REJECTED","message":"Manual Release is limited to tags and release/v* branches."}]' >"$d/annotations.json"
-  out="$(FAKE_DIR="$d" GUARD_GH="$work/gh" bash "$guard" --repo o/r --pr 5 --head "$H" --body "$d/body.md" 2>&1)"; rc=$?
-  if [ "$rc" = 0 ] && [ -f "$d/posted.json" ] && "$JQ" -e '.body|contains("ignored refused manual Release dispatch run/suite:901/66")' "$d/posted.json" >/dev/null; then
+  out="$(FAKE_DIR="$d" GUARD_GH="$work/gh" bash "$guard" --repo o/r --pr 5 --head "$H" --integration-check 2>&1)"; rc=$?
+  if [ "$rc" = 0 ] && [ ! -f "$d/posted.json" ] && printf '%s' "$out" | grep -qF "ignored refused manual Release dispatch run/suite:901/66"; then
     pass=$((pass+1)); echo "ok   refused-manual-release-$release_conclusion-is-ignored-and-recorded"
   else
     fail=$((fail+1)); echo "FAIL refused-manual-release-$release_conclusion-is-ignored-and-recorded (rc=$rc)"; printf '%s\n' "$out" | sed 's/^/     /'
@@ -733,7 +758,7 @@ for fault in setup missing-marker; do
   else
     echo '[]' >"$d/annotations.json"
   fi
-  run_case "unrelated-manual-release-$fault-still-blocks" 2 "workflow 'Release' run 901 is completed/failure" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+  ci_case "unrelated-manual-release-$fault-still-blocks" 2 "workflow 'Release' run 901 is completed/failure" 0 "$d" --repo o/r --pr 5 --head "$H" --integration-check
 done
 
 # Red control: removing the marker predicate must turn the negative fixture
@@ -742,9 +767,9 @@ mkdir -p "$work/no-marker-review"
 cp "$here/approve-guard.sh" "$here/ci-checks.sh" "$here/ci-freshness.py" "$here/review-verdict.sh" "$here/pr-check-run-contract.sh" "$work/no-marker-review/"
 sed 's/\[ "$marker" = "1" \] || continue/: # red-control marker removed/' "$here/ci-checks.sh" >"$work/no-marker-review/ci-checks.sh"
 d="$work/manual-release-unrelated-missing-marker"
-out="$(FAKE_DIR="$d" GUARD_GH="$work/gh" bash "$work/no-marker-review/approve-guard.sh" --repo o/r --pr 5 --head "$H" --body "$d/body.md" 2>&1)"; rc=$?
-if [ "$rc" = 0 ] && [ -f "$d/posted.json" ]; then
-  pass=$((pass+1)); echo "ok   missing-marker-red-control-approves-only-with-predicate-removed"
+out="$(FAKE_DIR="$d" GUARD_GH="$work/gh" bash "$work/no-marker-review/approve-guard.sh" --repo o/r --pr 5 --head "$H" --integration-check 2>&1)"; rc=$?
+if [ "$rc" = 0 ] && [ ! -f "$d/posted.json" ]; then
+  pass=$((pass+1)); echo "ok   missing-marker-red-control-passes-only-with-predicate-removed"
 else
   fail=$((fail+1)); echo "FAIL missing-marker-red-control (rc=$rc)"; printf '%s\n' "$out" | sed 's/^/     /'
 fi
@@ -753,7 +778,7 @@ d="$work/manual-release-annotation-api-error"; setup "$d"
 cp "$work/manual-release-refused-failure/actions.json" "$d/actions.json"
 cp "$work/manual-release-refused-failure/checkruns.json" "$d/checkruns.json"
 cp "$work/manual-release-refused-failure/jobs.json" "$d/jobs.json"
-out="$(FAKE_FAIL='*/annotations*' FAKE_DIR="$d" GUARD_GH="$work/gh" bash "$guard" --repo o/r --pr 5 --head "$H" --body "$d/body.md" 2>&1)"; rc=$?
+out="$(FAKE_FAIL='*/annotations*' FAKE_DIR="$d" GUARD_GH="$work/gh" bash "$guard" --repo o/r --pr 5 --head "$H" --integration-check 2>&1)"; rc=$?
 if [ "$rc" = 1 ] && [ ! -f "$d/posted.json" ] && printf '%s' "$out" | grep -q 'annotations.*failed'; then
   pass=$((pass+1)); echo "ok   annotation-read-error-stops-without-approval"
 else
@@ -762,13 +787,13 @@ fi
 
 d="$work/manual-release-still-running"; setup "$d"
 echo '{"workflow_runs":[{"workflow_id":2,"run_number":1,"name":"Release","status":"in_progress","conclusion":null,"id":903,"check_suite_id":68,"event":"workflow_dispatch","path":".github/workflows/release.yml","head_branch":"feature/task-1786"}]}' >"$d/actions.json"
-run_case in-progress-manual-release-still-blocks 2 "workflow 'Release' run 903 is in_progress/none" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+ci_case in-progress-manual-release-still-blocks 2 "workflow 'Release' run 903 is in_progress/none" 0 "$d" --repo o/r --pr 5 --head "$H" --integration-check
 
 d="$work/manual-release-release-branch"; setup "$d"
 echo "{\"state\":\"open\",\"draft\":false,\"merged\":false,\"base\":{\"ref\":\"main\"},\"head\":{\"sha\":\"$H\",\"ref\":\"release/v0.42.1\"}}" >"$d/pull.json"
 echo '{"workflow_runs":[{"workflow_id":2,"run_number":1,"name":"Release","status":"completed","conclusion":"failure","id":902,"check_suite_id":67,"event":"workflow_dispatch","path":".github/workflows/release.yml","head_branch":"release/v0.42.1"}]}' >"$d/actions.json"
 echo '{"check_runs":[{"name":"Validate manual Release ref","status":"completed","conclusion":"failure","id":62,"check_suite":{"id":67}}]}' >"$d/checkruns.json"
-run_case release-ref-manual-release-failure-still-refuses 2 "workflow 'Release' run 902 is completed/failure" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+ci_case release-ref-manual-release-failure-still-refuses 2 "workflow 'Release' run 902 is completed/failure" 0 "$d" --repo o/r --pr 5 --head "$H" --integration-check
 
 # The SLOT queue ended with the green lane (2026-09-25); an old caller that
 # still passes --slot stops with an infra error instead of posting.
@@ -778,7 +803,7 @@ run_case old-slot-argument-stops 1 "unknown argument: --slot" 0 "$d" --repo o/r 
 # ---- lane without jq: the guard must still post (code-reviewer P1 on #38625) ----
 d="$work/nojq-case"; setup "$d"
 out="$(PATH="$work/nojq:$PATH" FAKE_DIR="$d" GUARD_GH="$work/gh" bash "$guard" --git-dir "$work/repo" --repo o/r --pr 5 --head "$H" --body "$d/body.md" 2>&1)"; rc=$?
-if [ "$rc" = 0 ] && [ -f "$d/posted.json" ] && "$JQ" -e --arg h "$H" '.event=="APPROVE" and .commit_id==$h and (.body|startswith("verdict: PASS head: "+$h)) and (.body|contains("approve-guard: head"))' "$d/posted.json" >/dev/null; then
+if [ "$rc" = 0 ] && [ -f "$d/posted.json" ] && "$JQ" -e --arg h "$H" '.event=="APPROVE" and .commit_id==$h and (.body|startswith("review: APPROVE head: "+$h)) and (.body|contains("approve-guard: head"))' "$d/posted.json" >/dev/null; then
   pass=$((pass+1)); echo "ok   no-jq-still-posts"
 else fail=$((fail+1)); echo "FAIL no-jq-still-posts (rc=$rc)"; printf '%s\n' "$out" | sed 's/^/     /'; fi
 
@@ -786,7 +811,7 @@ else fail=$((fail+1)); echo "FAIL no-jq-still-posts (rc=$rc)"; printf '%s\n' "$o
 d="$work/pullfail"; setup "$d"
 FAKE_FAIL='*/pulls/5' run_case gh-pull-fails 1 "gh api repos/o/r/pulls/5 failed" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
 d="$work/checkfail"; setup "$d"
-FAKE_FAIL='*/check-runs*' run_case gh-checkruns-fails 1 "check-runs?per_page=100 failed" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+FAKE_FAIL='*/check-runs*' ci_case gh-checkruns-fails 1 "check-runs?per_page=100 failed" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
 d="$work/userfail"; setup "$d"
 FAKE_FAIL='user' run_case gh-user-fails-no-post 1 "gh api user failed" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
 d="$work/userempty"; setup "$d"; echo '{"login":""}' >"$d/user.json"
@@ -805,6 +830,7 @@ merge_case() {
 }
 merge_setup() {
   setup "$1"
+  "$JQ" -n --arg h "$H" '[{created_at:"2026-01-01T00:41:00Z",author_association:"COLLABORATOR",body:("verdict: PASS head: "+$h+" run: 900 by: integration-keeper")}]' > "$1/comments.json"
   approved_review 888 "$H" "$H" "$H" | "$JQ" \
     'map(.user.login="reviewer" | .submitted_at="2026-01-01T00:40:00Z")' > "$1/reviews.json"
 }
@@ -816,7 +842,7 @@ for mode in write check; do
   set --; [ "$mode" = check ] && set -- --check
   for mutation in missing-footer retargeted author split-authority; do
     d="$work/merge-binding-$mutation-$mode"; merge_setup "$d"
-    "$JQ" '[.[] | {created_at:"2026-01-01T00:41:00Z",body,author_association}]' "$d/reviews.json" > "$d/comments.json"
+    : # merge_setup already provides separate integration PASS
     case "$mutation" in
       missing-footer) expression='map(.body |= split("\n")[0])' ;;
       retargeted) expression='map(.body |= gsub($head; $old))' ;;
@@ -848,7 +874,8 @@ for verdict in HOLD FAIL; do
       {id:2,created_at:"2026-01-01T00:50:00Z",author_association:"COLLABORATOR",
        body:("verdict: "+$state+" head: "+$h+" run: 900 by: keeper")} ]' > "$d/comments.json"
     merge_case "merge-edited-old-pass-keeps-$verdict-$mode" 2 0 "$d" "$@"
-    run_case "approval-edited-old-pass-keeps-$verdict-$mode" 2 "latest structured verdict is $verdict" 0 "$d" \
+    expected_post=1; expected_result="review 777"; [ "$mode" != check ] || { expected_post=0; expected_result="WOULD APPROVE"; }
+    run_case "approval-independent-of-integration-$verdict-$mode" 0 "$expected_result" "$expected_post" "$d" \
       --repo o/r --pr 5 --head "$H" --body "$d/body.md" "$@"
   done
 done
@@ -861,12 +888,6 @@ for verdict in HOLD FAIL; do
     echo "$verdict" > "$d/after_checks_verdict"
     merge_case "merge-$verdict-during-final-check-$mode" 2 0 "$d" "$@"
     [ -f "$d/verdict_arrived_during_checks" ] || { echo "FAIL late merge verdict was not injected"; fail=$((fail+1)); }
-    d="$work/approval-final-check-$verdict-$mode"; setup "$d"
-    echo "$verdict" > "$d/after_checks_verdict"
-    FAKE_LATE_PR_AFTER_MAIN_READS=2 run_case "approval-$verdict-during-final-check-$mode" 2 \
-      "latest structured verdict is $verdict" 0 "$d" --repo o/r --pr 5 --head "$H" \
-      --body "$d/body.md" "$@"
-    [ -f "$d/verdict_arrived_during_checks" ] || { echo "FAIL late approval verdict was not injected"; fail=$((fail+1)); }
   done
 done
 # A formal review can change during the final check read without a new
@@ -878,18 +899,6 @@ for review_mutation in new-cr dismiss-approval remove-footer; do
     echo "$review_mutation" > "$d/after_checks_review"
     merge_case "merge-$review_mutation-during-final-check-$mode" 2 0 "$d" "$@"
     [ -f "$d/review_arrived_during_checks" ] || { echo "FAIL late formal review was not injected"; fail=$((fail+1)); }
-  done
-done
-# The approval account must also re-read formal requests after final CI.
-# Bodies deliberately carry no structured verdict, including our shared account.
-for review_mutation in new-cr new-own-cr; do
-  for mode in write check; do
-    set --; [ "$mode" = check ] && set -- --check
-    d="$work/approval-final-review-$review_mutation-$mode"; setup "$d"
-    echo "$review_mutation" > "$d/after_checks_review"
-    FAKE_LATE_PR_AFTER_MAIN_READS=2 run_case "approval-$review_mutation-during-final-check-$mode" 2 "CHANGES_REQUESTED" 0 "$d" \
-      --repo o/r --pr 5 --head "$H" --body "$d/body.md" "$@"
-    [ -f "$d/review_arrived_during_checks" ] || { echo "FAIL late approval formal review was not injected"; fail=$((fail+1)); }
   done
 done
 # Every late change keeps the branch ref and old checks green. Only the live
@@ -905,17 +914,12 @@ for mutation in head draft closed base merged; do
   d="$work/merge-late-pr-$mutation"; merge_setup "$d"
   "$JQ" --arg h "$H2" "$expression" "$d/pull.json" > "$d/late_pull.json"
   merge_case "merge-late-pr-$mutation-no-write" 2 0 "$d"
-  d="$work/approval-late-pr-$mutation"; setup "$d"
-  "$JQ" --arg h "$H2" "$expression" "$d/pull.json" > "$d/late_pull.json"
-  FAKE_LATE_PR_AFTER_MAIN_READS=2 run_case "approval-late-pr-$mutation-no-post" 2 "REFUSED" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+
 done
 # Also move head after the final gate has begun reading green checks.
 d="$work/merge-pr-moves-during-checks"; merge_setup "$d"
 "$JQ" --arg h "$H2" '.head.sha=$h' "$d/pull.json" > "$d/after_checks_pull.json"
 merge_case merge-pr-moves-during-checks-no-write 2 0 "$d"
-d="$work/approval-pr-moves-during-checks"; setup "$d"
-"$JQ" --arg h "$H2" '.head.sha=$h' "$d/pull.json" > "$d/after_checks_pull.json"
-FAKE_LATE_PR_AFTER_MAIN_READS=2 run_case approval-pr-moves-during-checks-no-post 2 "head moved" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
 # Passing --git-dir must not depend on the caller already being in a repo.
 d="$work/merge-outside-repo"; merge_setup "$d"
 GUARD_REPO_ROOT= MERGE_CASE_CWD="$work" merge_case merge-explicit-git-dir-outside-repo 0 1 "$d"
@@ -975,7 +979,7 @@ done
 # All three repository participant classes can provide the formal approval.
 for authority in NONE CONTRIBUTOR UNKNOWN null OWNER MEMBER COLLABORATOR; do
   d="$work/merge-approval-$authority"; merge_setup "$d"
-  "$JQ" '[.[] | {created_at:"2026-01-01T00:41:00Z",body,author_association}]' "$d/reviews.json" > "$d/comments.json"
+  : # merge_setup already provides separate integration PASS
   "$JQ" --arg a "$authority" 'map(.author_association=(if $a=="null" then null else $a end))' "$d/reviews.json" > "$d/p"
   mv "$d/p" "$d/reviews.json"
   case "$authority" in
@@ -997,17 +1001,43 @@ d="$work/merge-no-approval"; setup "$d"
 "$JQ" -n --arg h "$H" '[{created_at:"2026-01-01T00:40:00Z",author_association:"COLLABORATOR",
  body:("verdict: PASS head: "+$h+" run: 900 by: keeper")}]' > "$d/comments.json"
 merge_case merge-no-approval 2 0 "$d"
-d="$work/approval-late-cr"; setup "$d"; touch "$d/late_cr"
-run_case approval-cr-arrives-during-freshness 2 "--replace-own-cr 999" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
-d="$work/approval-late-hold"; setup "$d"; touch "$d/late_approval_hold"
-run_case approval-hold-arrives-during-freshness 2 "latest structured verdict is HOLD" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
-for late_status in queued completed; do
-  d="$work/approval-late-workflow-$late_status"; setup "$d"
-  echo "$late_status" > "$d/late_workflow"
-  FAKE_LATE_AFTER_MAIN_READS=1 run_case "approval-later-$late_status-workflow-no-post" 2 "run 901 is $late_status" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+# Source review is independent of pending, failing, absent and unavailable CI.
+# Merge still refuses each state even with both independent approval and PASS.
+for ci_state in pending failed missing unavailable; do
+  d="$work/independent-$ci_state"; merge_setup "$d"
+  case "$ci_state" in
+    pending) "$JQ" '.check_runs[0].status="in_progress" | .check_runs[0].conclusion=null' "$d/checkruns.json" > "$d/p"; mv "$d/p" "$d/checkruns.json" ;;
+    failed) "$JQ" '.check_runs[0].conclusion="failure"' "$d/checkruns.json" > "$d/p"; mv "$d/p" "$d/checkruns.json" ;;
+    missing) echo '{"check_runs":[]}' > "$d/checkruns.json" ;;
+    unavailable) export FAKE_FAIL='*/check-runs*' ;;
+  esac
+  run_case "source-approve-with-$ci_state-CI" 0 "review 777" 1 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+  if grep -qE 'actions/runs|check-runs|commits/main' "$d/api_reads"; then
+    fail=$((fail+1)); echo "FAIL source-approval-read-CI-$ci_state"
+  else pass=$((pass+1)); echo "ok   source-approval-does-not-read-CI-$ci_state"; fi
+  expected_rc=2; [ "$ci_state" != unavailable ] || expected_rc=1
+  merge_case "merge-refuses-$ci_state-CI-despite-source-approval" "$expected_rc" 0 "$d" --check
+  unset FAKE_FAIL
 done
-d="$work/approval-late-check"; setup "$d"; touch "$d/late_check"
-FAKE_LATE_AFTER_MAIN_READS=1 run_case approval-later-failed-check-no-post 2 "check-run 99" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+d="$work/stacked-base-merge"; merge_setup "$d"
+"$JQ" '.base.ref="feature/parent"' "$d/pull.json" > "$d/p"; mv "$d/p" "$d/pull.json"
+merge_case stacked-base-blocks-merge 2 0 "$d" --check
+d="$work/approval-no-integration-pass"; merge_setup "$d"; echo '[]' > "$d/comments.json"
+merge_case source-approval-does-not-mint-integration-PASS 2 0 "$d" --check
+d="$work/source-refusal-after-pass"; merge_setup "$d"
+"$JQ" --arg h "$H" '. + [{created_at:"2026-01-01T00:55:00Z",author_association:"COLLABORATOR",body:("review: REQUEST_CHANGES head: "+$h+" by: keeper")}]' "$d/comments.json" > "$d/p"; mv "$d/p" "$d/comments.json"
+merge_case later-source-refusal-revokes-integration-PASS 2 0 "$d" --check
+for mutation in own-cr head; do
+  d="$work/source-race-$mutation"; setup "$d"
+  case "$mutation" in own-cr) touch "$d/late_review_own_cr"; needle="--replace-own-cr 999" ;; head) touch "$d/late_review_head"; needle="head moved" ;; esac
+  run_case "source-review-rechecks-$mutation-before-post" 2 "$needle" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+done
+d="$work/source-author"; setup "$d"; "$JQ" '.user.login="pangyo-preachers"' "$d/pull.json" > "$d/p"; mv "$d/p" "$d/pull.json"
+run_case author-cannot-source-approve 2 "cannot approve their own PR" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+d="$work/duplicate-dismissed-page-two"; setup "$d"; approved_review 42 "$H" "$H" "$H" > "$d/reviews.json"
+"$JQ" -n '[{id:99,state:"DISMISSED",user:{login:"pangyo-preachers"}}]' > "$d/reviews-page-2.json"
+run_case dismissed-latest-page-does-not-deduplicate 0 "review 777" 1 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+
 # Main now touches a PR file after the cited run; both write boundaries refuse.
 git -C "$work/repo" checkout -q main
 echo integration > "$work/repo/pr.ml"
@@ -1016,7 +1046,7 @@ GIT_AUTHOR_DATE=2026-01-01T01:00:00Z GIT_COMMITTER_DATE=2026-01-01T01:00:00Z git
 export FAKE_MAIN="$(git -C "$work/repo" rev-parse HEAD)"
 git -C "$work/repo" push -q origin main
 d="$work/stale-approval"; setup "$d"
-run_case stale-approval-no-post 2 '"status": "stale"' 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+run_case stale-CI-source-review-still-approves 0 "review 777" 1 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
 d="$work/stale-merge"; merge_setup "$d"
 merge_case stale-merge-no-write 2 0 "$d"
 

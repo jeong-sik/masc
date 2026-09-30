@@ -176,7 +176,16 @@ review: APPROVE|REQUEST_CHANGES head: <40-character-current-SHA> by: <Keeper-nam
 ```
 
 `APPROVE` goes through `scripts/review/approve-guard.sh`; its `--check` mode checks
-review eligibility, not CI. A reviewer clears their own change request when the
+review eligibility, not CI; it still requires `--body` with the real review
+header and evidence. For example, after setting `PR` and `HEAD_SHA` to the
+reviewed PR and commit:
+
+```bash
+bash scripts/review/approve-guard.sh --check --repo jeong-sik/masc \
+  --pr "$PR" --head "$HEAD_SHA" --body review.md
+```
+
+Remove `--check` to publish the approval. A reviewer clears their own change request when the
 corrected code resolves the finding. Green CI alone does not resolve a review.
 
 Integration has a separate decision line:

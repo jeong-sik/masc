@@ -11,8 +11,10 @@
 #   ci:<state>                the head's checks are not green (1)
 #   stale:<files>             main changed PR files after the head's checks started (3)
 #   dependency:<files>        shared check inputs changed after the run started
-#   review                    no PASS verdict line on the current head (2),
-#                             or no trusted formal approval on it yet
+#   integration               no current integration PASS on a countable run
+#   review                    no trusted formal source approval yet
+# review_state is independent of CI: needed/approved/unknown. Reviewers can
+# act on needed immediately, even when waits_on reports ci:* or stale:*.
 #   merge                     all five hold, plus a trusted formal approval
 #   unknown:<step>            a read failed; never treated as green (fail-closed)
 #
@@ -205,16 +207,16 @@ open_crs() {
 # Trusted formal approval on this head? -> yes/no. The merge guard refuses a
 # PR no participant APPROVED on its head, so a structured PASS alone must not
 # route to merge: the outstanding decision still belongs to a reviewer.
-formally_approved() { # pr head
+formally_approved() { # pr head author
   local footer_prefix approval_head_jq
   footer_prefix="$(printf 'approve-guard: head \x60%s\x60 · ' "$2")"
-  approval_head_jq="((.body // \"\" | split(\"\\n\") | first) | startswith(\"verdict: PASS head: ${2} run: \")) and ((.body // \"\" | split(\"\\n\") | map(select(length > 0)) | (last // \"\")) | startswith(\"${footer_prefix}\"))"
+  approval_head_jq="((.body // \"\" | split(\"\\n\") | (first // \"\")) | test(\"^(review: APPROVE head: ${2} by: [A-Za-z0-9._-]+|verdict: PASS head: ${2} run: [1-9][0-9]* by: [A-Za-z0-9._-]+)\\r?$\")) and ((.body // \"\" | split(\"\\n\") | map(select(length > 0)) | (last // \"\")) | startswith(\"${footer_prefix}\"))"
   "$GH" api --paginate "repos/$repo/pulls/$1/reviews" \
     --jq ".[] | select(.state==\"APPROVED\" or .state==\"CHANGES_REQUESTED\" or .state==\"DISMISSED\") | [.user.login, (.id|tostring), .state, (($approval_head_jq)|tostring), (.author_association//\"UNKNOWN\")] | @tsv" \
-  | awk -F'\t' '
+  | awk -F'\t' -v author="$3" '
       NF && (!($1 in id) || $2+0 > id[$1]) { id[$1]=$2+0; s[$1]=$3; bound[$1]=$4; a[$1]=$5 }
       END { for (u in s)
-        if (s[u]=="APPROVED" && bound[u]=="true" &&
+        if (u!=author && s[u]=="APPROVED" && bound[u]=="true" &&
             (a[u]=="OWNER" || a[u]=="MEMBER" || a[u]=="COLLABORATOR")) ok=1
         print (ok ? "yes" : "no") }'
   return "${PIPESTATUS[0]}"
@@ -233,13 +235,16 @@ run_counts() { # run head
 }
 
 heads=$(printf '%s\n' "$rows" | awk -F'\t' '{print $5"\t"$1}')
-[ "$fmt" = md ] && { printf '| PR | author | waits on | age h | checks | stale files | verdict |\n|---|---|---|---|---|---|---|\n'; }
-[ "$fmt" = tsv ] && printf 'pr\tauthor\twaits_on\tage_h\tchecks\tstale_files\tverdict\n'
+[ "$fmt" = md ] && { printf '| PR | author | waits on | age h | checks | stale files | verdict | review state |\n|---|---|---|---|---|---|---|---|\n'; }
+[ "$fmt" = tsv ] && printf 'pr\tauthor\twaits_on\tage_h\tchecks\tstale_files\tverdict\treview_state\n'
 
 printf '%s\n' "$rows" | while IFS=$'\t' read -r num author base head _branch checks started created files status_contexts; do
   [ -n "$num" ] || continue
   age=$(( (now - $(epoch "$created")) / 3600 ))
-  stale="-"; verdict="-"; dependencies=""
+  stale="-"; verdict="-"; dependencies=""; review_state=unknown
+  if approval=$(formally_approved "$num" "$head" "$author"); then
+    if [ "$approval" = yes ]; then review_state=approved; else review_state=needed; fi
+  fi
   if [ "$base" != main ]; then
     parent=$(awk -F'\t' -v b="$base" '$1==b{print $2}' <<<"$heads")
     waits="parent ${parent:+#$parent}${parent:-$base}"
@@ -263,15 +268,15 @@ printf '%s\n' "$rows" | while IFS=$'\t' read -r num author base head _branch che
     read -r vstate vrun vby <<<"$v"
     verdict="${vstate:--}"
     [ -z "${vby:-}" ] || [ "$vby" = - ] || verdict="$verdict by $vby"
-    if [ "${vstate:-}" != PASS ]; then waits="review"
+    if [ "${vstate:-}" != PASS ]; then waits="integration"
     elif ! ok=$(run_counts "$vrun" "$head"); then waits="unknown:run"
-    elif [ "$ok" != yes ]; then waits="review"; verdict="PASS run $vrun not countable"
+    elif [ "$ok" != yes ]; then waits="integration"; verdict="PASS run $vrun not countable"
     else
       freshness=$(GUARD_GH="$GH" python3 "$(dirname "$0")/ci-freshness.py" \
         --repo "$repo" --pr "$num" --head "$head" --run "$vrun" --git-dir "$gitdir" --format ledger) || freshness=$'unknown:freshness\t?'
       IFS=$'\t' read -r waits stale <<<"$freshness"
       if [ "$waits" = fresh ]; then
-        if ! ok=$(formally_approved "$num" "$head"); then waits="unknown:reviews"
+        if ! ok=$(formally_approved "$num" "$head" "$author"); then waits="unknown:reviews"
         elif [ "$ok" = yes ]; then waits="merge"
         else waits="review"
         fi
@@ -279,7 +284,7 @@ printf '%s\n' "$rows" | while IFS=$'\t' read -r num author base head _branch che
     fi
     fi
   fi
-  if [ "$fmt" = md ]; then printf '| #%s | %s | %s | %s | %s | %s | %s |\n' "$num" "$author" "$waits" "$age" "$checks" "$stale" "$verdict"
-  else printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$num" "$author" "$waits" "$age" "$checks" "$stale" "$verdict"; fi
+  if [ "$fmt" = md ]; then printf '| #%s | %s | %s | %s | %s | %s | %s | %s |\n' "$num" "$author" "$waits" "$age" "$checks" "$stale" "$verdict" "$review_state"
+  else printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$num" "$author" "$waits" "$age" "$checks" "$stale" "$verdict" "$review_state"; fi
 done
 echo "# main $main_sha" >&2

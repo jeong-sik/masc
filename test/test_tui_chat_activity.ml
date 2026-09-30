@@ -303,14 +303,16 @@ let test_foreign_stop_command_remains_complete () =
       let chat_cols = Masc_tui_roster_pane.content_cols
           ~hidden:state.roster_pane_hidden ~cols:terminal_cols in
       let rows = Tui.keeper_message_inflight_rows state ~chat_cols ~now:5. in
-      let command = List.filteri (fun index _ -> index < List.length rows - 1) rows
-          |> List.map (fun (_, line) -> String.trim line)
-          |> String.concat "" in
-      (* Word wrapping separates the slash command from the unbroken identity
-         at a word boundary; reconstruct its tokens across physical rows. *)
-      let reconstructed = String.concat "" (String.split_on_char ' ' command) in
+      let command_rows = List.filteri
+          (fun index _ -> index < List.length rows - 1) rows in
+      let command_lines = List.map (fun (_, line) -> String.trim line) command_rows in
+      let reconstructed = match command_lines with
+        | "/interrupt" :: rest -> "/interrupt " ^ String.concat "" rest
+        | lines -> String.concat "" lines in
       check string "the complete stop command precedes the status"
-        ("/interrupt" ^ keeper_name) reconstructed;
+        ("/interrupt " ^ keeper_name) reconstructed;
+      check bool "every physical command row is valid UTF-8" true
+        (List.for_all (fun (_, line) -> String.is_valid_utf_8 line) command_rows);
       check bool "all command rows fit the pane" true
         (List.for_all (fun (_, line) ->
           Masc_tui_message_layout.display_width line <=

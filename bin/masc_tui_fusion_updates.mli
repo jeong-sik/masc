@@ -1,6 +1,7 @@
 (** Apply Fusion responses on the UI state owner fiber. These operations mutate
-    state; they perform no transport, scheduling, terminal output or clock reads.
-    The caller supplies action reporting and the follow-up list refresh. *)
+    state and invoke caller-supplied reporting and follow-up refresh callbacks.
+    Transport and scheduling remain caller-owned; these operations perform no
+    terminal output or clock reads themselves. *)
 
 val runs_loaded :
   Masc_tui_types.state -> unit Masc_tui_fetched.request ->

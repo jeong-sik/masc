@@ -12,7 +12,7 @@ val read_done :
   Masc_tui_types.state -> uri:string ->
   (Masc_tui_mcp.resource_content list, string) result -> unit
 (** Only the pending URI consumes the response. Text keeps its line boundaries;
-    blob metadata is unchanged. A refused read retains the previous content. *)
+    blob payloads remain unchanged. A refused read retains the previous content. *)
 
 val open_selected :
   Masc_tui_types.state -> read:(uri:string -> unit) -> unit

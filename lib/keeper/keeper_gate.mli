@@ -114,8 +114,8 @@ type deferred_reason =
   | Mode_state_invalid of string
 
 type unavailable_reason =
-  | Queue_storage_unavailable of Keeper_approval_queue.storage_error
-  | Approval_grant_unavailable of Keeper_approval_queue.grant_error
+  | Queue_storage_unavailable of Keeper_approval_queue_result.storage_error
+  | Approval_grant_unavailable of Keeper_approval_queue_result.grant_error
   | Approval_grant_consumption_in_progress of string
 
 (** Every reason above says the approval machinery could not act, not that
@@ -171,7 +171,7 @@ type auto_judge_resume_report =
   ; finalized_ids : string list
   ; skipped_ids : string list
   ; failures : auto_judge_resume_failure list
-  ; queue_error : Keeper_approval_queue.storage_error option
+  ; queue_error : Keeper_approval_queue_result.storage_error option
   }
 
 (** Mutable only to serialize consumption inside one Keeper cycle. The durable
@@ -303,7 +303,7 @@ val decide_external_service :
     Completion refills only that owner's available slots. Decisive output without an exact
     attempt identity is retained pending and recorded as a recovery failure.
     Completed exact output is first idempotently strict-rewritten with the same
-    identity and summary; only [Keeper_approval_queue.Fsync_completed] permits
+    identity and summary; only [Keeper_approval_queue_result.Fsync_completed] permits
     Gate finalization. Visible unconfirmed or failed rewrites leave the approval
     pending and record a recovery failure. Dispatch-uncertain, released,
     released-recovery-required, restart-quarantined, and quarantined entries
@@ -400,8 +400,8 @@ module For_testing : sig
     plan_fingerprint:string ->
     request_body_sha256:string ->
     summary:Keeper_approval_queue_rules_types.hitl_context_summary ->
-    ( Keeper_approval_queue.exact_attempt_transition
-    , Keeper_approval_queue.exact_attempt_error )
+    ( Keeper_approval_queue_result.exact_attempt_transition
+    , Keeper_approval_queue_result.exact_attempt_error )
       result
 
   val auto_judge_entry_ready :

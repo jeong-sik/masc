@@ -75,6 +75,36 @@ def binary_hashes(log: str) -> set[str]:
     return result
 
 
+def terminal_layout(page) -> dict:
+    """Measure the actual terminal pixels and any clipping ancestors."""
+    return page.evaluate("""() => {
+        const screen = document.querySelector('.xterm-screen');
+        if (!screen) return {screen: null, viewport: {width: innerWidth, height: innerHeight}};
+        const rect = screen.getBoundingClientRect();
+        const clippedBy = [];
+        for (let ancestor = screen.parentElement; ancestor; ancestor = ancestor.parentElement) {
+            const style = getComputedStyle(ancestor);
+            const bounds = ancestor.getBoundingClientRect();
+            const clips = value => ['hidden', 'clip', 'auto', 'scroll'].includes(value);
+            if ((clips(style.overflowX) && (rect.left < bounds.left || rect.right > bounds.right))
+                || (clips(style.overflowY) && (rect.top < bounds.top || rect.bottom > bounds.bottom))) {
+                clippedBy.push({tag: ancestor.tagName, className: ancestor.className,
+                    overflowX: style.overflowX, overflowY: style.overflowY});
+            }
+        }
+        return {
+            viewport: {width: innerWidth, height: innerHeight},
+            screen: {left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom,
+                width: rect.width, height: rect.height, scrollWidth: screen.scrollWidth,
+                scrollHeight: screen.scrollHeight, clientWidth: screen.clientWidth,
+                clientHeight: screen.clientHeight},
+            font: {family: window.term?.options.fontFamily,
+                size: window.term?.options.fontSize, status: document.fonts.status},
+            clippedBy
+        };
+    }""")
+
+
 def preserve_failure(out: Path, name: str, record: dict, run: dict,
                      page, console: list[dict], error: Exception) -> None:
     """Save diagnostic artifacts; none of them constitute a verified frame."""
@@ -92,6 +122,7 @@ def preserve_failure(out: Path, name: str, record: dict, run: dict,
     report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
     if page is not None:
         diagnostics = [
+            ("terminal_layout", lambda: terminal_layout(page)),
             ("observed_xterm", lambda: page.evaluate("""() => {
                 const term = window.term;
                 return {
@@ -111,7 +142,7 @@ def preserve_failure(out: Path, name: str, record: dict, run: dict,
         for label, collect in diagnostics:
             try:
                 result = collect()
-                if label == "observed_xterm":
+                if label in ("observed_xterm", "terminal_layout"):
                     report[label] = result
             except Exception as diagnostic_error:
                 report["diagnostic_errors"].append({
@@ -177,7 +208,8 @@ def main() -> None:
                     port = sock.getsockname()[1]
                 command = [ttyd, "-i", "127.0.0.1", "-p", str(port), "-W",
                            "-t", "rendererType=dom", "-t", "fontSize=16",
-                           "-t", "fontFamily=Menlo", "-t", "disableResizeOverlay=true",
+                           "-t", "fontFamily=DejaVu Sans Mono, Liberation Mono, monospace",
+                           "-t", "disableResizeOverlay=true",
                            "-T", "xterm-256color", sys.executable,
                            str(Path(__file__).resolve()), "--replay", str(frame_path.resolve())]
                 process = subprocess.Popen(command, stdout=subprocess.DEVNULL,
@@ -198,8 +230,7 @@ def main() -> None:
                                 raise RuntimeError("ttyd did not open its replay port")
                             time.sleep(.05)
                     columns, rows = record["columns"], record["rows"]
-                    context = browser.new_context(viewport={
-                        "width": columns * 10 + 24, "height": rows * 20 + 24})
+                    context = browser.new_context()
                     page = context.new_page()
                     page.on("console", lambda message: console.append({
                         "event": "console", "type": message.type, "text": message.text}))
@@ -214,6 +245,18 @@ def main() -> None:
                             term.buffer.active.getLine(i)?.translateToString(true) ?? '')
                             .some(line => line === 'STUDIO_REPLAY_READY');
                     }""")
+                    page.evaluate("document.fonts.ready")
+                    page.evaluate("([cols, rows]) => window.term.resize(cols, rows)", [columns, rows])
+                    layout = terminal_layout(page)
+                    bounds = layout["screen"]
+                    # The initial viewport is only for connection startup.
+                    # Use measured pixels, retaining the terminal's margins.
+                    page.set_viewport_size({
+                        "width": int(bounds["right"] + max(1, bounds["left"]) + 1),
+                        "height": int(bounds["bottom"] + max(1, bounds["top"]) + 1),
+                    })
+                    # ttyd's FitAddon reacts to viewport changes. Restore the
+                    # recorded cells before releasing the replay bytes.
                     page.evaluate("([cols, rows]) => window.term.resize(cols, rows)", [columns, rows])
                     page.wait_for_function(
                         "([cols, rows]) => window.term.cols === cols && window.term.rows === rows",
@@ -235,6 +278,7 @@ def main() -> None:
                         }""",
                         arg=expected,
                     )
+                    page.evaluate("document.fonts.ready")
                     observed = page.evaluate("""() => ({
                       columns: window.term.cols, rows: window.term.rows,
                       screen: Array.from({length: window.term.rows}, (_, i) =>
@@ -242,6 +286,15 @@ def main() -> None:
                     })""")
                     if (observed["columns"], observed["rows"]) != (columns, rows):
                         raise RuntimeError("xterm geometry changed before screenshot capture")
+                    layout = terminal_layout(page)
+                    bounds, viewport = layout["screen"], layout["viewport"]
+                    if (bounds["left"] < 0 or bounds["top"] < 0
+                        or bounds["right"] > viewport["width"]
+                        or bounds["bottom"] > viewport["height"]
+                        or bounds["scrollWidth"] > bounds["clientWidth"]
+                        or bounds["scrollHeight"] > bounds["clientHeight"]
+                        or layout["clippedBy"]):
+                        raise RuntimeError("terminal pixels are clipped: " + json.dumps(layout))
                     page.locator(".xterm-screen").screenshot(path=str(args.out / f"{name}.png"))
                     evidence["frames"].append({
                         "name": name, "columns": columns, "rows": rows,
@@ -250,6 +303,7 @@ def main() -> None:
                         "pty_screen": record["screen"],
                         "observed_xterm_screen": observed["screen"],
                         "actual_columns": observed["columns"], "actual_rows": observed["rows"],
+                        "terminal_layout": layout,
                     })
                 except Exception as error:
                     try:

@@ -122,3 +122,11 @@ S05 구현 후속: [#40254](https://github.com/jeong-sik/masc/pull/40254)의 `c0
 Calls exact fields, Fusion list/detail/launch, Memory overview/list, Runtime detail, Resources, Approval detail, Themes, Models, lane run list/detail, Code file body는 조사한 소스 경로에서 새로운 확정 결함을 찾지 못했다. 상세 tab·input mode·empty/unread/failed/stale 상태와 NO_COLOR까지 실행한 전수 PASS를 뜻하지 않는다. [inventory](../evidence/tui-audit-2026-09-30/surface-inventory.json)의 미조사 상태는 남겨둔다.
 
 다음 단계는 (1) 남은 필드·표·행 예산·선택 문제 구현, (2) source-bound 수정 바이너리에서 전후 screenshot/PTY/로그 확보, (3) 각 현재 head의 PR checks와 targeted suite 원문 확인, (4) main 도착과 실제 설치/실행 바이너리 SHA 확인, (5) 전체 inventory completion audit다. 새 PR을 만들었다는 이유만으로 전체 목표를 완료 처리하지 않는다.
+
+### Focused Code-reader follow-up and Activity capture
+
+Recorded/working-tree diff head602762aec2 completed all24 new fixture combinations and the126/17/5 compiled cases in focused run36685060343. See `recorded-diff-targeted-pass.txt/.raw`. This does not prove refresh, patch-modal or installation.
+
+Memo run36683716774 failed from a fixture's fixed physical-column tree assumption; History run36685970463 failed before body checks because the narrow footer's mandatory labels needed34 cells. Their raw failure receipts remain separate from repaired-head requests36692603068 and36692381154. Unicode counter-derived boundaries, compact History actions, and concurrent literal-metadata fixes were integrated and independently reviewed. Execution of the repaired heads is pending.
+
+Activity probe36680543354 downloaded successfully after the long active transfer. All four SHA256SUMS entries passed and the executable reported c6677251ad98639c7cbc4390eecef7c690390caa. `workspace-activity-ci-list.png` and `workspace-activity-ci-context.png` show isolated100x30 color fixture PTYs from that CI binary. The context screenshot shows rows1-23/25; the earlier focused suite supplies page-navigation evidence. Provenance and limits are in `workspace-activity-ci-capture.json`. These are not installed or production captures.

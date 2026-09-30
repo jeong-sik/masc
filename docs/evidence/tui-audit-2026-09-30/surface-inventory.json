@@ -639,5 +639,25 @@
     "run": 36689755419,
     "probe": 36689759464,
     "scope": "source/static/independent reviews only; complete literal metadata and shared detail paging; focused10cases added, execution pending"
+  },
+  "code_reader_focused_followup": {
+    "memo": {
+      "failed_run": "36683716774",
+      "repair_head": "9bba366587728629efa61aa4ac14e419e3f60ee6",
+      "request": "36692603068",
+      "receipt": "code-memo-targeted-failure.txt"
+    },
+    "history": {
+      "failed_run": "36685970463",
+      "repair_head": "705d49c54d83d65f165708166abd08478220af55",
+      "request": "36692381154",
+      "receipt": "code-history-targeted-failure.txt"
+    },
+    "recorded_diff": {
+      "passed_run": "36685060343",
+      "head": "602762aec20b26045bbf7af3c462d7c7acc01d17",
+      "receipt": "recorded-diff-targeted-pass.txt"
+    },
+    "activity_capture": "workspace-activity-ci-capture.json"
   }
 }

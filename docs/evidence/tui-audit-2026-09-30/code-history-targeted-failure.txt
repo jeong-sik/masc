@@ -1,0 +1,6 @@
+Focused Test run: 36685970463
+Head: 1b907b070f95ec32d0ba35808b458c5a70a2fc95 (run metadata, not a raw checkout line)
+Raw: code-history-targeted-failure.raw
+SHA256: 9f1201033369c5801ca2355e1b5f455f307b9339f6260eed02adbe34bc58d792
+New history fixture failed on first30-column color footer assertion before reconstruction and selection. Source required34 cells for mandatory footer labels; raw has no screen dump. Existing repositories/key suites passed. Repaired head705d49c54d83d65f165708166abd08478220af55 requests36692381154/36692384590; source/static review only.
+No local Dune build.

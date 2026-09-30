@@ -115,6 +115,7 @@ def requests_are_navigation(executable):
 
 
 def automatic_gate_is_not_a_human_decision(executable):
+    requests = []
     fixtures, _items, _new = h.approval_selection_http_fixtures()
     operator_path = "/api/v1/operator?view=summary&include_messages=0&include_keepers=0"
     fixtures[operator_path] = h.approval_selection_snapshot([])
@@ -136,6 +137,10 @@ def automatic_gate_is_not_a_human_decision(executable):
         frame = capture(process, fd, output, "blocked-gate", b"appr-blocked", columns=100)
         assert b"appr-blocked" in frame
         assert b"appr-queued" not in frame and b"appr-judging" not in frame
+        select_destination(process, fd, output, b"appr-blocked")
+        h.send_and_wait(process, fd, output, b"\r", b"AUTO JUDGE BLOCKED")
+        assert_no_decision_posts(requests)
+        h.send_and_wait(process, fd, output, b"\x1b", b"Enter:open")
         # A separate explicit human handoff retains its own identity.
         gate[1]["approval_queue"].append(dict(template, id="appr-human", phase="human_required"))
         h.send_and_wait(process, fd, output, b"r", b"Approvals and questions: 2 need you")
@@ -149,7 +154,8 @@ def automatic_gate_is_not_a_human_decision(executable):
 
     h.run_terminal_scenario(executable, description="Home excludes automatic Gate work",
                             interact=interact, http_fixtures=fixtures,
-                            prepare_workspace=seed_goals)
+                            http_requests=requests, prepare_workspace=seed_goals)
+    assert_no_decision_posts(requests)
 
 
 def refresh_preserves_destination(executable):

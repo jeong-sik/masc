@@ -930,7 +930,9 @@ let overview_lines ~width view =
           configuration_summary active failed
           (if Option.is_some view.snapshot_read_error then " · STALE" else "") in
         let entries = overview_entries ~mode:view.overview_mode snapshot in
-        let window = max 0 (view.instance_cursor - 1) in
+        (* Keep the selected entry first: wrapped history/count context already
+           spends rows before the list in a narrow terminal. *)
+        let window = max 0 view.instance_cursor in
         let items = List.mapi (fun index item -> index,item) entries
           |> List.filter (fun (index,_) -> index >= window && index < window + 9) in
         let empty = match view.overview_mode, snapshot.configuration with
@@ -963,7 +965,7 @@ let overview_lines ~width view =
                 let group_header = match view.overview_mode with
                   | Current_installations -> []
                   | Retained_runs ->
-                      let previous = List.nth_opt entries (index-1) in
+                      let previous = if index=0 then None else List.nth_opt entries (index-1) in
                       let same_group = match previous with
                         | Some (`Instance previous) -> history_group previous=history_group item
                         | Some (`Declaration _) | None -> false in
@@ -991,8 +993,8 @@ let overview_lines ~width view =
                    else [])
                 @ [controls] @ detail) items
   in
-  List.concat_map wrap ([ overview_hints view; "" ]
-    @ diagnostic_lines view @ content @ action_lines view)
+  List.concat_map wrap (diagnostic_lines view @ content
+    @ [""; overview_hints view] @ action_lines view)
 
 let help_lines = [
   "Lane Add-ons keys · Esc:close";

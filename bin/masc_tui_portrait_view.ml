@@ -70,24 +70,28 @@ type placement = {
   image : Draw.image;
 }
 
-(* One placement per image: a second transfer under the same pair replaces
-   the picture instead of stacking a copy. *)
+(* One placement per image: a second transfer or put under the same pair
+   replaces the picture instead of stacking a copy. *)
 let placement_id = 1
 
 let save_cursor = "\0277"
 let restore_cursor = "\0278"
 
+let at_corner p bytes =
+  save_cursor
+  ^ Printf.sprintf "\027[%d;%dH" (p.row + 1) (p.column + 1)
+  ^ bytes ^ restore_cursor
+
 let placement_bytes p =
-  let transfer =
+  match
     Masc_tui_graphics.replace_rgba ~image_id:p.image_id ~placement_id ~data:p.image.Draw.rgba
       ~pixel_width:p.image.Draw.edge ~pixel_height:p.image.Draw.edge ~rows:p.box.rows
-  in
-  match transfer with
+  with
   | "" -> ""
-  | bytes ->
-      save_cursor
-      ^ Printf.sprintf "\027[%d;%dH" (p.row + 1) (p.column + 1)
-      ^ bytes ^ restore_cursor
+  | bytes -> at_corner p bytes
+
+let put_bytes p =
+  at_corner p (Masc_tui_graphics.put ~image_id:p.image_id ~placement_id ~rows:p.box.rows)
 
 let display = ref No_picture
 let set_display d = display := d
@@ -103,15 +107,41 @@ let begin_frame () = requested := []
 let request p =
   requested := p :: List.filter (fun q -> q.image_id <> p.image_id) !requested
 
-let same_picture a b =
-  a.row = b.row && a.column = b.column && a.box = b.box
-  && a.image.Draw.edge = b.image.Draw.edge
-  && String.equal a.image.Draw.rgba b.image.Draw.rgba
+type send =
+  | Keep
+  | Put
+  | Transmit
 
-let covers_a_rewritten_row ~rewritten p =
-  List.exists rewritten (List.init p.box.rows (fun offset -> p.row + offset))
+let same_pixels a b =
+  a.image.Draw.edge = b.image.Draw.edge && String.equal a.image.Draw.rgba b.image.Draw.rgba
 
-let flush ~rewritten ~write =
+let same_place a b = a.row = b.row && a.column = b.column && a.box = b.box
+
+let crosses rows p = List.exists (fun row -> row >= p.row && row < p.row + p.box.rows) rows
+
+(* The protocol (kitty graphics-protocol, "Interaction with other terminal
+   actions"): the clear screen escape clears every image, and "the other
+   commands to erase text must have no effect on graphics". Kitty and
+   Ghostty go further on a clear and free the pixels of an image left
+   without placements, so after one only a transfer brings it back. A row
+   erased and written again leaves Kitty and Ghostty's placement standing,
+   but WezTerm ties a placement to the cells it covered when placed and
+   text written over them takes those parts of the picture (wezterm #986);
+   a put restores them from the pixels it still holds, in a few dozen
+   bytes, and is a no-op replacement where nothing was taken. *)
+let send presented ~shown p =
+  match shown with
+  | None -> Transmit
+  | Some shown -> (
+      if not (same_pixels shown p) then Transmit
+      else
+        match presented with
+        | Masc_tui_frame_presenter.Presented Masc_tui_frame_presenter.Whole_screen -> Transmit
+        | Masc_tui_frame_presenter.Presented (Masc_tui_frame_presenter.Rows rows) ->
+            if same_place shown p && not (crosses rows p) then Keep else Put
+        | Masc_tui_frame_presenter.Unchanged -> if same_place shown p then Keep else Put)
+
+let flush presented ~write =
   let wanted = !requested in
   let shown_under image_id = List.find_opt (fun shown -> shown.image_id = image_id) !on_screen in
   List.iter
@@ -122,23 +152,23 @@ let flush ~rewritten ~write =
   on_screen :=
     List.filter_map
       (fun p ->
-        let unchanged =
-          match shown_under p.image_id with
-          | Some shown -> same_picture shown p
-          | None -> false
-        in
-        if unchanged && not (covers_a_rewritten_row ~rewritten p) then Some p
-        else
-          match placement_bytes p with
-          | "" ->
-              (* Nothing of this picture reached the terminal. An older one
-                 under the same id would stand where this one is not, so it
-                 comes down, and the next frame tries this one again. *)
-              Option.iter
-                (fun shown -> write (Masc_tui_graphics.delete_image ~image_id:shown.image_id))
-                (shown_under p.image_id);
-              None
-          | bytes ->
-              write bytes;
-              Some p)
+        let shown = shown_under p.image_id in
+        match send presented ~shown p with
+        | Keep -> Some p
+        | Put ->
+            write (put_bytes p);
+            Some p
+        | Transmit -> (
+            match placement_bytes p with
+            | "" ->
+                (* Nothing of this picture reached the terminal. An older one
+                   under the same id would stand where this one is not, so it
+                   comes down, and the next frame tries this one again. *)
+                Option.iter
+                  (fun shown -> write (Masc_tui_graphics.delete_image ~image_id:shown.image_id))
+                  shown;
+                None
+            | bytes ->
+                write bytes;
+                Some p))
       wanted

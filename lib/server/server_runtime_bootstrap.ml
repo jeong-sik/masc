@@ -305,8 +305,13 @@ let install_domain_pool_references domain_pool =
   Executor_pool_ref.set (Domain_pool.executor_pool domain_pool)
 ;;
 
+let publish_exact_output_registry_from_file ~config_path =
+  configure_exact_output_registry ~config_path ()
+;;
+
 module For_testing = struct
-  let configure_exact_output_registry = configure_exact_output_registry
+  let configure_exact_output_registry ?config_root () =
+    configure_exact_output_registry ?config_root ()
   let mandatory_exact_output_lane_violations = mandatory_exact_output_lane_violations
 
   let require_explicit_mandatory_exact_output_lanes =
@@ -863,6 +868,9 @@ let initialize_owner_state_blocking
       loop ()
     in
     loop ());
+  (* Initial owner preparation can checkpoint durable queue state, before
+     the shared runtime pool or Keeper lanes are activated. *)
+  Keeper_event_queue_snapshot_codec.install ~sw domain_mgr;
   let t0 = Eio.Time.now clock in
   Llm_metric_bridge.install ();
   Log.Server.info
@@ -1109,7 +1117,7 @@ let initialize_owner_state_blocking
   in
   install_domain_pool_references domain_pool;
   Log.Server.info
-    "Domain_pool created (%d domains) for dashboard/keeper compute"
+    "Domain_pool created (%d shared domains, 1 independent snapshot codec domain) for dashboard/keeper compute"
     (Domain_pool.domain_count domain_pool);
   { state; path_diagnostics; prepared_keeper_persistence; domain_pool }
 
@@ -1460,9 +1468,13 @@ let start_post_ready_owner_lanes
   Server_model_setup_resume.install ~sw
     ~base_path:(Mcp_server.workspace_config state).base_path
     ~resume:resume_model_configuration;
+  Candle_status.install_appraiser_check Server_candle_appraiser.available;
+  Candle_status.report_at_start ~base_path:(Mcp_server.workspace_config state).base_path;
   let start_authority () =
     start_completion_authority ~sw ~clock state;
     start_goal_verifier ~sw state;
+    Candle_payout_worker.start ~sw ~config:(Mcp_server.workspace_config state)
+      ~appraise:(Server_candle_appraiser.run ~base_path:(Mcp_server.workspace_config state).base_path);
     Server_workspace_memory_curator.start ~sw
       ~base_path:(Mcp_server.workspace_config state).base_path
   in

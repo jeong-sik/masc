@@ -118,6 +118,16 @@ type t =
   ; change : change
   }
 
+(** What one Librarian pass ({!apply_disposition}) did to the stored snapshot.
+    [Unchanged]: each fact after the pass serializes to the stored bytes, in
+    the same order, so the stored snapshot stays as it is: same revision,
+    bytes and [updated_at], no commit notification. The journal still gets the
+    pass's line, naming the kept revision. [Rewritten]: a new revision
+    replaced the snapshot. Explicit writes always write a revision. *)
+type commit_effect =
+  | Rewritten
+  | Unchanged
+
 (** Classified outcome of one snapshot read so callers can tell a decode
     rejection apart from a filesystem failure without matching on message
     text. [Undecodable] is the state the write-path quarantine recovers;
@@ -176,8 +186,10 @@ type librarian_failure_kind =
 
 val librarian_failure_kind_to_string : librarian_failure_kind -> string
 
-(** One decoded journal line. A committed pass carries the revision it wrote;
-    a failed pass has no revision, no source, and no change, so the two are
+(** One decoded journal line. A committed pass carries the revision current
+    after it: the one it wrote, or for an [Unchanged] commit the one it kept,
+    so consecutive lines can name the same revision. A failed pass has no
+    revision, no source, and no change, so the two are
     separate constructors rather than one record with optional fields — a
     reader cannot mistake a failure for revision 0. *)
 type journal_entry =
@@ -345,7 +357,11 @@ val committed_official_range
     for official-client input in the shared receipt sidecar. *)
 
 type disposition =
-  { snapshot : t  (** the committed snapshot *)
+  { snapshot : t
+        (** the current snapshot after the pass: the one written, or for an
+            [Unchanged] commit the stored one, whose [change] and
+            [updated_at] belong to the commit that wrote it *)
+  ; commit : commit_effect
   ; absorbed_applied : Keeper_memory_os_types.absorbed_statement list
         (** absorptions this commit applied: the source left the snapshot and
             its {!Keeper_memory_absorbed} row points into the target. In the
@@ -400,8 +416,10 @@ val apply_disposition
     even if the keeper re-observed it during the pass: the judgment was about
     the claim, and a re-observation does not answer it.
 
-    [on_committed] observes the successful snapshot replacement before any
-    later journal, receipt, unlock or notification can be interrupted. It runs
+    [on_committed] observes the settled pass before any later journal,
+    receipt, unlock or notification can be interrupted: the successful
+    snapshot replacement, or for an [Unchanged] commit the kept snapshot once
+    its range receipts are written. It runs
     once under the store locks and must only update caller-owned in-memory
     state: no I/O, yielding or exceptions. It is not a scheduling callback.
 
@@ -411,7 +429,9 @@ val apply_disposition
     kind retains its latest receipt per runtime scope. The store writes a prepared transaction receipt
     before replacing the snapshot and marks it committed afterwards. Recovery
     compares a prepared receipt with the exact snapshot SHA-256, so neither
-    side of a process interruption is guessed.
+    side of a process interruption is guessed. An [Unchanged] commit replaces
+    nothing, so its ranges are recorded committed at once, bound to the kept
+    snapshot's revision and SHA-256.
 
     An [absorbed] fact that is still current leaves the snapshot too, and its
     row is appended to {!Keeper_memory_absorbed} under the lock, after the next

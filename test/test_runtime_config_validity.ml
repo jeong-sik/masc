@@ -963,7 +963,7 @@ let test_deployment_agent_core_model_catalog_modality_priorities_resolve () =
    one that was accepted and dropped. *)
 let test_model_reasoning_effort_parses_into_the_typed_variant () =
   let config =
-    "[models.probe]\napi-name = \"probe\"\nreasoning-effort = \"xhigh\"\n"
+    "[models.probe]\napi-name = \"gpt-6.1-sol\"\nreasoning-effort = \"ultra\"\n"
   in
   match Runtime_toml.parse_string config with
   | Error _ -> fail "a model declaring a known reasoning-effort must parse"
@@ -972,10 +972,10 @@ let test_model_reasoning_effort_parses_into_the_typed_variant () =
      | [ model ] ->
        check
          bool
-         "reasoning-effort xhigh reaches the model spec as XHigh"
+         "reasoning-effort ultra reaches the model spec as Ultra"
          true
          (model.Runtime_schema.reasoning_effort
-          = Some Llm_provider.Reasoning_effort.XHigh)
+          = Some Llm_provider.Reasoning_effort.Ultra)
      | _ -> fail "exactly one model must parse")
 
 let test_model_reasoning_effort_rejects_unknown_value_at_load () =
@@ -1725,6 +1725,45 @@ let test_seed_catalog_decided_capability_keys_agree_with_the_catalog () =
       "%d seed declaration(s) disagree with the catalog and must be read, not removed: %s"
       (List.length disagreements)
       (String.concat "; " disagreements)
+
+let test_seed_codex_profiles_preserve_advertised_efforts () =
+  let module Effort = Llm_provider.Reasoning_effort in
+  with_deployment_agent_core_model_catalog @@ fun _catalog ->
+  let path = Filename.concat (repo_root ()) "config/runtime.toml" in
+  match load_list_text ~config_path:path with
+  | Error msg -> failf "repo runtime.toml should load: %s" msg
+  | Ok (runtimes, _, _, _, _) ->
+    let cases =
+      List.map
+        (fun effort ->
+           "codex-gpt-6-1-sol-" ^ Effort.to_string effort, "gpt-6.1-sol", effort)
+        [ Effort.Low; Effort.Medium; Effort.High; Effort.XHigh; Effort.Max; Effort.Ultra ]
+      @ [ "codex-gpt-6-astra-ultra", "gpt-6-astra", Effort.Ultra
+        ; "codex-gpt-6-sol-ultra", "gpt-6-sol", Effort.Ultra
+        ; "codex-gpt-5-6-sol-ultra", "gpt-5.6-sol", Effort.Ultra
+        ; "codex-gpt-5-6-terra-ultra", "gpt-5.6-terra", Effort.Ultra
+        ]
+    in
+    List.iter
+      (fun (profile, api_name, effort) ->
+         let runtime_id = "codex_subscription." ^ profile in
+         match find_runtime runtimes runtime_id with
+         | None -> failf "seed lacks selectable Codex profile %s" runtime_id
+         | Some runtime ->
+           check (option string) (runtime_id ^ " preserves configured effort")
+             (Some (Effort.to_string effort)) (Option.map Effort.to_string runtime.model.reasoning_effort);
+           (match runtime.model.capabilities with
+            | Some caps -> check (option bool) (runtime_id ^ " takes images")
+                (Some true) caps.supports_image_input
+            | None -> failf "seed profile %s has no image declaration" runtime_id);
+           match runtime.execution with
+           | Runtime_execution.Codex_app_server cfg ->
+             check (option string) (runtime_id ^ " selects the model") (Some api_name) cfg.model
+           | Runtime_execution.Agent_core _ | Runtime_execution.Claude_code _
+           | Runtime_execution.Antigravity_cli _ | Runtime_execution.Muse_serve _ ->
+             failf "seed profile %s is not a Codex app-server runtime" runtime_id)
+      cases
+;;
 
 let test_repo_runtime_toml_loads () =
   with_deployment_agent_core_model_catalog @@ fun _catalog ->
@@ -5739,7 +5778,8 @@ let typesafeai_table =
    \  { endpoint = \"http://127.0.0.1:9/judge\", model = \"jev-1.13\", api_key_env = \"TYPESAFEAI_API_KEY\" },\n\
    \  { endpoint = \"http://127.0.0.1:9/reserve\", model = \"~typesafe/jev-latest\", api_key_env = \"OPENROUTER_API_KEY\" },\n\
    ]\n\
-   board_attention = false\nabsorb_gate = true\ncontext_review = true\nskill_applicability = true\n\
+   board_attention = false\nboard_attention_confidence_floor = 0.45\n\
+   absorb_gate = true\ncontext_review = true\nskill_applicability = true\n\
    excluded_keepers = [\"kidsnote-slack-context-collector\", \"other\"]\n"
 ;;
 
@@ -5752,6 +5792,9 @@ let test_typesafeai_absent_is_the_default () =
     check bool "the vendor's own server alone" true
       (t.Runtime_schema.destinations = (Runtime_schema.typesafe_destination, []));
     check bool "the Board gate is on" true t.Runtime_schema.board_attention;
+    check (float 0.0) "the Board confidence floor is the default"
+      Runtime_schema.default_typesafeai.Runtime_schema.board_attention_confidence_floor
+      t.Runtime_schema.board_attention_confidence_floor;
     check bool "the absorb gate is off" false t.Runtime_schema.absorb_gate;
     check bool "Context review is off" false t.Runtime_schema.context_review;
     check bool "Skill applicability is off" false t.Runtime_schema.skill_applicability;
@@ -5775,6 +5818,8 @@ let test_typesafeai_reads_the_whole_table () =
        check string "second key variable" "OPENROUTER_API_KEY" second.Runtime_schema.api_key_env
      | _ -> failf "two destinations, in order; got %d after the first" (List.length rest));
     check bool "board_attention" false t.Runtime_schema.board_attention;
+    check (float 0.0) "board_attention_confidence_floor" 0.45
+      t.Runtime_schema.board_attention_confidence_floor;
     check bool "absorb gate enabled" true t.Runtime_schema.absorb_gate;
     check bool "Context review enabled" true t.Runtime_schema.context_review;
     check bool "Skill applicability enabled" true t.Runtime_schema.skill_applicability;
@@ -5819,6 +5864,16 @@ let test_typesafeai_refuses_a_stray_key () =
     "[typesafeai]\nabsorb = true\n" "unknown [typesafeai] key \"absorb\"";
   typesafeai_rejects ~what:"a sub-table where a switch is expected"
     "[typesafeai.absorb_gate]\nenabled = true\n" "absorb_gate must be a boolean"
+;;
+
+let test_typesafeai_refuses_a_confidence_floor_outside_0_to_1 () =
+  typesafeai_rejects ~what:"a floor above 1"
+    "[typesafeai]\nboard_attention_confidence_floor = 1.5\n" "must be a number from 0 to 1";
+  typesafeai_rejects ~what:"a negative floor"
+    "[typesafeai]\nboard_attention_confidence_floor = -0.1\n" "must be a number from 0 to 1";
+  typesafeai_rejects ~what:"a floor that is not a number"
+    "[typesafeai]\nboard_attention_confidence_floor = \"low\"\n"
+    "board_attention_confidence_floor must be a float"
 ;;
 
 let test_typesafeai_refuses_a_value_that_names_nothing () =
@@ -6032,6 +6087,8 @@ let () =
             test_model_rejects_unknown_key;
           test_case "repo runtime.toml loads through runtime parser" `Quick
             test_repo_runtime_toml_loads;
+          test_case "seed Codex profiles preserve advertised efforts" `Quick
+            test_seed_codex_profiles_preserve_advertised_efforts;
           test_case "seed capability keys the catalog row decides agree with it" `Quick
             test_seed_catalog_decided_capability_keys_agree_with_the_catalog;
           test_case "kimi-for-coding declares the reasoning it returns" `Quick
@@ -6278,6 +6335,8 @@ let () =
         ; test_case "reads destinations written as table headers" `Quick
             test_typesafeai_reads_destinations_written_as_table_headers
         ; test_case "refuses a stray key" `Quick test_typesafeai_refuses_a_stray_key
+        ; test_case "refuses a confidence floor outside 0 to 1" `Quick
+            test_typesafeai_refuses_a_confidence_floor_outside_0_to_1
         ; test_case "refuses a value that names nothing" `Quick
             test_typesafeai_refuses_a_value_that_names_nothing
         ] )

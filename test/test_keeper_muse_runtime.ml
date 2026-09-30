@@ -591,6 +591,10 @@ def acknowledge(disposition="started"):
     if disposition == "started":
         notify("turn/started", {"sessionId": SESSION, "turnId": turn_id,
                                 "commandId": turn_id})
+        if mode == "start" and "start_compaction" in FIXTURE:
+            item("item/completed", {"itemId": "compact-1", "kind": "compaction",
+                 "turnId": turn_id, "status": "completed", "revision": 1,
+                 "trigger": "auto", "outcome": FIXTURE["start_compaction"]})
         if "subscription_usage" in FIXTURE and not FIXTURE.get("suppress_turn_usage_notification"):
             notify("usage/changed", FIXTURE["subscription_usage"])
         # One session/tokenUsage per model call; null names no model.
@@ -789,7 +793,7 @@ type observed_run =
 
 (* [on_stream_event] sees each Keeper stream event as it is emitted;
    [on_transmitted] sees the transmission report after it is recorded. *)
-let run_turn_with ?goal_blocks ?(accepts_image_input = false) ?model ?account_home ?workspace_root ?hooks ?tools ?on_official_client_tool_boundary
+let run_turn_with ?composed_context ?goal_blocks ?(accepts_image_input = false) ?model ?account_home ?workspace_root ?hooks ?tools ?on_official_client_tool_boundary
     ?(admission_timeout_s = 20.) ?(idle_timeout_s = 20.)
     ?(on_stream_event = fun (_ : Agent_core.Types.sse_event) -> ())
     ?(on_transmitted = fun (_ : Keeper_official_client_host.transmitted_model_input) -> ())
@@ -811,6 +815,7 @@ let run_turn_with ?goal_blocks ?(accepts_image_input = false) ?model ?account_ho
   in
   let outcome =
     Keeper_muse_runtime.run
+      ?composed_context
       ~prompt_capacity:
         (Option.to_result ~none:Runtime_muse_prompt_capacity.No_window_declared
            (Runtime_inference.resolve_max_prompt_bytes ~runtime_id))
@@ -1870,6 +1875,53 @@ let test_hook_nudges_bind_the_session_but_carried_context_does_not () =
        |> String.split_on_char '\n' |> List.filter (fun line -> line <> "")))
 ;;
 
+let check_resume_recall_blocks ~compaction ~resend_after_start () =
+  let fixture = match compaction with
+    | None -> []
+    | Some outcome -> [ "start_compaction", `String outcome ] in
+  with_scripted_host ~fixture (fun ~base_path ->
+    let tool = masc_probe_tool (ref `Null) in
+    List.iteri (fun index recall ->
+      let composed = ref None in
+      let clock = Printf.sprintf "RECALL_CLOCK_%d" index in
+      let blocks =
+        [ Prompt_block_id.Memory_os_recall, recall
+        ; Prompt_block_id.Temporal_summary, clock
+        ; Prompt_block_id.Operator_note, "REPEATED_OPERATOR_NOTE" ] in
+      let carrier = String.concat "\n\n" (List.map snd blocks) in
+      let hooks = { Agent_core.Hooks.empty with before_turn_params = Some (fun _ ->
+        composed := Some { Keeper_official_client_host.carrier_sha256 =
+          Digestif.SHA256.(digest_string carrier |> to_hex); blocks };
+        Agent_core.Hooks.AdjustParams { Agent_core.Hooks.default_turn_params with
+          extra_system_context = Some carrier }) } in
+      let run = run_turn_with ~composed_context:(fun () -> !composed)
+        ~hooks ~base_path ~tool () in
+      (match run.outcome.result with
+       | Ok result -> check int "same session advances" (index + 1) result.turns
+       | Error error -> fail (Agent_core.Error.to_string error));
+      let mode = if index = 0 then "start" else "resume" in
+      let prompt = read_text (Filename.concat base_path (mode ^ "-prompt.txt")) in
+      check bool "recall appears initially, when revised, or after compaction"
+        (index = 0 || index = 2 || (resend_after_start && index = 1))
+        (String_util.contains_substring prompt recall);
+      check bool "current clock delivered" true (String_util.contains_substring prompt clock);
+      check bool "identical operator note remains an instruction" true
+        (String_util.contains_substring prompt "REPEATED_OPERATOR_NOTE"))
+      ["RECALL_REVISION_ONE"; "RECALL_REVISION_ONE"; "RECALL_REVISION_TWO"; "RECALL_REVISION_TWO"])
+;;
+
+let test_resume_deduplicates_recall_blocks () =
+  check_resume_recall_blocks ~compaction:None ~resend_after_start:false ()
+;;
+
+let test_resume_restores_recall_after_compaction () =
+  check_resume_recall_blocks ~compaction:(Some "compacted") ~resend_after_start:true ()
+;;
+
+let test_resume_keeps_recall_after_noop_compaction () =
+  check_resume_recall_blocks ~compaction:(Some "noop") ~resend_after_start:false ()
+;;
+
 let test_call_usage_survives_missing_terminal_aggregate () =
   let call = `Assoc
       [ "modelId", `String "muse-fixture-1"
@@ -2410,6 +2462,9 @@ let () =
     ; ( "account selection"
       , [ test_case "account switch starts fresh" `Quick test_account_selection_starts_a_fresh_vendor_session
         ; test_case "source relogin starts fresh, refresh survives" `Quick test_source_relogin_starts_fresh_and_preserves_vendor_refresh
+        ; test_case "recall blocks deduplicated on native resume" `Quick test_resume_deduplicates_recall_blocks
+        ; test_case "recall restored after host compaction" `Quick test_resume_restores_recall_after_compaction
+        ; test_case "noop compaction preserves held recall" `Quick test_resume_keeps_recall_after_noop_compaction
         ; test_case "hook nudge identity and carried context" `Quick test_hook_nudges_bind_the_session_but_carried_context_does_not
         ; test_case "per-call usage survives missing terminal aggregate" `Quick test_call_usage_survives_missing_terminal_aggregate
         ; test_case "effective system override starts fresh" `Quick test_effective_system_override_starts_fresh

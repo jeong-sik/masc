@@ -420,7 +420,10 @@ open Alcotest
    its 128,595 base was not re-measured after #39454 trimmed four board
    descriptions (about 67 to 98 bytes by replay), so the surface sits that
    far under this ceiling rather than exactly at it. *)
-let ceiling_bytes = 129_200
+(* PR #39987 run 36599468592 measured 129,395 bytes across 147 tools after
+   keeper_portrait_read gained the catalog and preview schema. The 195-byte
+   increase is the declared Item surface; pin the measured inventory. *)
+let ceiling_bytes = 129_395
 
 
 let schema_json (schema : Masc_domain.tool_schema) =

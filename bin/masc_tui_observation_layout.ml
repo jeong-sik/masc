@@ -174,6 +174,29 @@ let plain_log_row ~time entry =
   ^ Masc_tui_table.row
       (log_table_cells ~time (log_cells entry))
 
+let log_entry_rows ~width ~time (entry : Tui_decode.log_entry) =
+  let wrap text =
+    Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (width - 2))
+      (Tui_decode.sanitize_terminal_text text)
+    |> List.map (fun line -> "  " ^ line)
+  in
+  let cells = log_cells entry in
+  wrap
+    (Printf.sprintf "%s  %s  %s"
+       time
+       cells.kind cells.latency)
+  @ wrap ("Timestamp: " ^ entry.le_ts)
+  @ wrap ("Channel: " ^ log_channel_label entry.le_channel)
+  @ wrap ("Messages: " ^ cells.messages ^ "  In/out: " ^ cells.usage)
+  @ wrap ("Cost: " ^ (match entry.le_cost_usd with
+      | None -> "--"
+      | Some cost -> "$" ^ string_of_float cost))
+  @ (match entry.le_work_kind with
+     | None -> []
+     | Some work -> wrap ("Work: " ^ work))
+  @ List.concat_map (fun tool -> wrap ("Tool: " ^ tool)) entry.le_tools_used
+  @ [ "" ]
+
 let context_summary = function
   | Tui_decode.Context_observed
       { ratio = Some ratio;

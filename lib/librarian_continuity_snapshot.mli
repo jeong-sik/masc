@@ -32,9 +32,10 @@ type t = private
 type error =
   | Invalid_snapshot of string
   | Uncovered_history
-      (** No completed-turn boundary covers the history: the current
-          generation of this trace has no atom-bearing end line, or the
-          witnessed range does not begin at a restart. *)
+      (** No line of the current generation of this trace states where the
+          history ends: no end line carries an atom position and no
+          official-client turn started from it, or the witnessed range does
+          not begin at a restart. *)
   | Unmatched_history
       (** The current generation of this trace has atom-bearing end lines,
           and none of them matches the history in hand. Where that history

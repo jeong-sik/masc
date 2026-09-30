@@ -1,6 +1,7 @@
 module Candidate = Keeper_board_attention_candidate
 module Exact_flow = Keeper_board_attention_exact_flow
 module Partition = Keeper_board_attention_partition
+module Quarantine_pair = Keeper_board_attention_quarantine_pair
 module Wake = Keeper_board_attention_worker_wake
 
 type contention =
@@ -1433,9 +1434,14 @@ let process_claimed
             latest_partition
             consumed.judgment
         | Candidate.Suspended_quarantine _ ->
-          Error
-            ("Quarantined Board attention candidate became claimable: "
-             ^ candidate.candidate_id)))
+          blocked_step
+            ~now:(now ())
+            ~worker_epoch
+            ~base_path
+            partition
+            (Partition.Durable_partition_invariant
+               ("Quarantined Board attention candidate became claimable: "
+                ^ candidate.candidate_id))))
 ;;
 
 type ready_root_work =
@@ -1640,19 +1646,77 @@ let confirm_requeue_outcome
     Error ("partition target generation changed during requeue: " ^ detail)
 ;;
 
-let reconcile_quarantines ~now ~base_path ~keeper_name =
+(* A Ready partition that its candidate's quarantine contradicts is taken out
+   of Ready on its own, the way a failed run is: claimed under this worker's
+   epoch and blocked with a durable-invariant reason. Blocking it projects a
+   new quarantine at that Blocked generation onto the candidate, so the
+   operator requeue applies to it and the other partitions keep draining. *)
+let block_inconsistent_ready
+      ~now
+      ~worker_epoch
+      ~base_path
+      ~keeper_name
+      (partition : Partition.t)
+      (state : Candidate.quarantine_state)
+      inconsistency
+  =
+  let detail =
+    Printf.sprintf
+      "%s: quarantine=%s"
+      (Quarantine_pair.inconsistency_to_string inconsistency)
+      state.quarantine.quarantine_id
+  in
+  Log.Keeper.error
+    ~keeper_name
+    "Board attention quarantine contradicts its Ready partition; blocking that partition keeper=%s partition=%s candidate=%s detail=%s"
+    keeper_name
+    partition.partition_id
+    partition.candidate_id
+    detail;
+  let* claimed =
+    Partition.claim_ready_exact
+      ~now
+      ~worker_epoch
+      ~base_path
+      ~keeper_name
+      ~partition_id:partition.partition_id
+      ~generation:partition.generation
+  in
+  match claimed with
+  | Some running ->
+    let* (_ : step) =
+      blocked_step
+        ~now
+        ~worker_epoch
+        ~base_path
+        running
+        (Partition.Durable_partition_invariant detail)
+    in
+    Ok ()
+  | None ->
+    (* The row, or the ledger cursor, moved after this pass read it. The
+       drain claims a row that is still Ready: a quarantined or
+       requeue-requested candidate is blocked there the same way, and a
+       requeued one is judged under the operator's authorization. *)
+    Log.Keeper.warn
+      ~keeper_name
+      "Board attention Ready partition moved before process-start recovery could block it keeper=%s partition=%s"
+      keeper_name
+      partition.partition_id;
+    Ok ()
+;;
+
+let reconcile_quarantines ~now ~worker_epoch ~base_path ~keeper_name =
   (* The candidate store is read once and carried, not re-read per partition.
-     Only one branch below writes a candidate, and it re-reads for the rest;
-     every other branch leaves the store alone, so re-reading after them
-     re-parsed a ledger that had not moved.
+     Finishing a requeue and blocking a contradicted Ready row write a
+     candidate, and those branches re-read the store for the rest of the
+     pass. Projecting a Blocked row writes only that row's own candidate,
+     which no later iteration reads, so it carries the list on.
 
      Measured 2026-09-05 on this fleet: one keeper carries 1,219 partitions
      against 1,216 candidates, so the loop parsed a 27 MB ledger 1,219 times
      in a pass. That site allocated 2.1 GB in twenty-five seconds, the
-     largest single source in an otherwise idle server.
-
-     What each iteration sees is unchanged: after a write the next iteration
-     reads the store again, exactly as it did when every iteration read. *)
+     largest single source in an otherwise idle server. *)
   let* initial_candidates = Candidate.load_candidates ~base_path ~keeper_name in
   let* (_ : int) =
     Partition.ensure_roots ~base_path ~keeper_name initial_candidates
@@ -1665,9 +1729,8 @@ let reconcile_quarantines ~now ~base_path ~keeper_name =
         let* candidates = Candidate.load_candidates ~base_path ~keeper_name in
         loop candidates rest
       in
-      (* Shadowed so the branches below read the same as they did: the ones
-         that changed nothing carry the list on, and the one that wrote
-         re-binds this to the reloading form. *)
+      (* Shadowed so a branch that carries the list on calls [loop], and a
+         branch that must re-read calls or re-binds [loop_reloaded]. *)
       let loop rest = loop candidates rest in
       (match
          List.find_opt
@@ -1699,110 +1762,82 @@ let reconcile_quarantines ~now ~base_path ~keeper_name =
           | Partition.Ready | Partition.Running _ | Partition.Completed _
           | Partition.Settled _ | Partition.Abandoned _ -> loop rest)
        | Some candidate ->
-         (match partition.state, Candidate.status_view candidate.status with
-       | ( Partition.Blocked _
-         , (Candidate.Suspended_quarantine state
-           | Candidate.Requeued_resumable { quarantine = state; _ }) )
-         when String.equal
-                state.quarantine.partition_id
-                partition.partition_id
-              && Partition.Generation.equal
-                   state.quarantine.partition_generation
-                   partition.generation ->
-         (match state.phase with
-          | Candidate.Requeue_requested _ ->
-            let* (_ : Candidate.candidate) =
-              Candidate.finish_quarantine_requeue
-                ~base_path
-                ~candidate
-                ~partition_id:partition.partition_id
-                ~expected_quarantine_id:state.quarantine.quarantine_id
-                ~requeued_at:now
-            in
-            (* This branch wrote a candidate; the rest of the pass reads the
-               store again rather than the copy taken before it. *)
-            let loop rest = loop_reloaded rest in
-            let* (_ : Partition.exact_transition) =
-              let* outcome = Partition.requeue_blocked ~base_path ~partition in
-              confirm_requeue_outcome
-                ~base_path
-                ~keeper_name
-                ~partition
-                ~expected_quarantine_id:state.quarantine.quarantine_id
-                outcome
-            in
-            loop rest
-          | Candidate.Quarantined -> loop rest
-          | Candidate.Requeued _ ->
-            let* (_ : Partition.exact_transition) =
-              let* outcome = Partition.requeue_blocked ~base_path ~partition in
-              confirm_requeue_outcome
-                ~base_path
-                ~keeper_name
-                ~partition
-                ~expected_quarantine_id:state.quarantine.quarantine_id
-                outcome
-            in
-            loop rest)
-       | Partition.Blocked _, _ ->
-         let* () = quarantine_blocked_partition ~base_path partition in
-         loop rest
-       | ( Partition.Ready
-         , Candidate.Requeued_resumable
-             { quarantine = { quarantine; phase = Candidate.Requeued _ }; _ } )
-         when String.equal quarantine.partition_id partition.partition_id
-              && Partition.Generation.is_later
-                   ~previous:quarantine.partition_generation
-                   partition.generation ->
-         (* Authorization survives subsequent execution/deferral cycles. A
-            spent lane returns Running to Ready at a later generation, while
-            the candidate retains the original quarantine as evidence. *)
-         let* confirmation = Partition.confirm_ready ~base_path ~partition in
-         let* (_ : Partition.exact_transition) =
-           confirm_requeue_transition ~base_path confirmation
-         in
-         loop rest
-       | ( Partition.Ready
-         , (Candidate.Suspended_quarantine state
-           | Candidate.Requeued_resumable { quarantine = state; _ }) )
-         when String.equal
-                state.quarantine.partition_id
-                partition.partition_id
-              && Partition.Generation.is_direct_successor
-                   ~previous:state.quarantine.partition_generation
-                   partition.generation ->
-         (match state.phase with
-          | Candidate.Requeue_requested _ ->
-            Error
-              ("Ready partition preceded candidate requeue authorization: "
-               ^ partition.partition_id)
-          | Candidate.Quarantined ->
-            Error
-              ("Ready partition has an unacknowledged quarantine: "
-               ^ partition.partition_id)
-          | Candidate.Requeued _ ->
-            let* confirmation =
-              Partition.confirm_ready ~base_path ~partition
-            in
-            let* (_ : Partition.exact_transition) =
-              confirm_requeue_transition ~base_path confirmation
-            in
-            loop rest)
-       | ( Partition.Ready
-         , (Candidate.Suspended_quarantine state
-           | Candidate.Requeued_resumable { quarantine = state; _ }) )
-         when String.equal
-                state.quarantine.partition_id
-                partition.partition_id ->
-         Error
-           ("Ready partition is not the quarantined generation successor: "
-            ^ partition.partition_id)
-          | Partition.Ready, _
-          | Partition.Running _, _
-          | Partition.Completed _, _
-          | Partition.Settled _, _
-          | Partition.Abandoned _, _ ->
-            loop rest))
+         (match Candidate.status_view candidate.status with
+          | Candidate.Direct_resumable _ ->
+            (match partition.state with
+             | Partition.Blocked _ ->
+               let* () = quarantine_blocked_partition ~base_path partition in
+               loop rest
+             | Partition.Ready
+             | Partition.Running _
+             | Partition.Completed _
+             | Partition.Settled _
+             | Partition.Abandoned _ -> loop rest)
+          | Candidate.Suspended_quarantine state
+          | Candidate.Requeued_resumable { quarantine = state; _ } ->
+            (match Quarantine_pair.classify partition state with
+             | Quarantine_pair.Blocked_requeue_requested ->
+               let* (_ : Candidate.candidate) =
+                 Candidate.finish_quarantine_requeue
+                   ~base_path
+                   ~candidate
+                   ~partition_id:partition.partition_id
+                   ~expected_quarantine_id:state.quarantine.quarantine_id
+                   ~requeued_at:now
+               in
+               (* This branch wrote a candidate; the rest of the pass reads the
+                  store again rather than the copy taken before it. *)
+               let loop rest = loop_reloaded rest in
+               let* (_ : Partition.exact_transition) =
+                 let* outcome = Partition.requeue_blocked ~base_path ~partition in
+                 confirm_requeue_outcome
+                   ~base_path
+                   ~keeper_name
+                   ~partition
+                   ~expected_quarantine_id:state.quarantine.quarantine_id
+                   outcome
+               in
+               loop rest
+             | Quarantine_pair.Blocked_awaiting_request -> loop rest
+             | Quarantine_pair.Blocked_requeued ->
+               let* (_ : Partition.exact_transition) =
+                 let* outcome = Partition.requeue_blocked ~base_path ~partition in
+                 confirm_requeue_outcome
+                   ~base_path
+                   ~keeper_name
+                   ~partition
+                   ~expected_quarantine_id:state.quarantine.quarantine_id
+                   outcome
+               in
+               loop rest
+             | Quarantine_pair.Blocked_unrecorded ->
+               let* () = quarantine_blocked_partition ~base_path partition in
+               loop rest
+             | Quarantine_pair.Ready_requeued ->
+               (* Authorization survives subsequent execution/deferral cycles.
+                  A spent lane returns Running to Ready at a later generation,
+                  while the candidate retains the original quarantine as
+                  evidence. *)
+               let* confirmation = Partition.confirm_ready ~base_path ~partition in
+               let* (_ : Partition.exact_transition) =
+                 confirm_requeue_transition ~base_path confirmation
+               in
+               loop rest
+             | Quarantine_pair.Inconsistent inconsistency ->
+               let* () =
+                 block_inconsistent_ready
+                   ~now
+                   ~worker_epoch
+                   ~base_path
+                   ~keeper_name
+                   partition
+                   state
+                   inconsistency
+               in
+               loop_reloaded rest
+             | Quarantine_pair.Advanced_requeued
+             | Quarantine_pair.Advanced_without_requeue
+             | Quarantine_pair.Other_partition -> loop rest)))
   in
   loop initial_candidates partitions
 ;;
@@ -2291,7 +2326,7 @@ let run
                  ~keeper_name
              in
              let* () =
-               reconcile_quarantines ~now ~base_path ~keeper_name
+               reconcile_quarantines ~now ~worker_epoch ~base_path ~keeper_name
              in
              let* (_ : Keeper_registry.wakeup_outcome option) =
                replay_completed_owner_wake

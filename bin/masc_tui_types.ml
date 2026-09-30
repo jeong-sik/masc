@@ -10741,6 +10741,34 @@ let runtime_surface_listing_chrome ~cols state =
 (* The Runtime listing's bound. Its chrome depends on the terminal width, so
    the caller passes the width it drew at and the keys move through the same
    count the frame drew with. *)
+(* Enter/Right opens a listing row once. A detail has its own stable identity;
+   a refresh can reorder the hidden listing without changing that identity. *)
+let open_runtime_row_detail (state : state) =
+  match state.runtime_detail_target, state.runtime_surface with
+  | Some _, _ | None, None -> ()
+  | None, Some snapshot ->
+      let target =
+        match state.runtime_mode with
+        | Runtime_lanes ->
+            List.nth_opt snapshot.Tui_decode.rss_candidates state.runtime_cursor
+            |> Option.map (fun row ->
+                   Runtime_lane_candidate
+                     { lane_id = row.Tui_decode.rcr_lane_id
+                     ; runtime_id = row.rcr_runtime.ro_id
+                     })
+        | Runtime_all ->
+            List.nth_opt snapshot.Tui_decode.rss_resolved.rrs_runtimes
+              state.runtime_cursor
+            |> Option.map (fun runtime ->
+                   Runtime_catalog_entry { runtime_id = runtime.Tui_decode.ro_id })
+      in
+      Option.iter
+        (fun target ->
+          state.runtime_detail_target <- Some target;
+          state.runtime_detail_scroll <- 0)
+        target
+;;
+
 let runtime_scrolled ~cols (state : state) : scrolled option =
   if Option.is_some state.runtime_detail_target then None
   else

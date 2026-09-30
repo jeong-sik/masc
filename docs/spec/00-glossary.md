@@ -1834,22 +1834,26 @@ status: reference
   최상위 `{"tasks": [...]}` envelope 구조를 가지며(`archive_entries_of_json`),
   Goal의 Candle 기여도 정산(`RFC-goal-candle-ledger`) 및 사후 감사에서 백로그에 없는
   종결 Task를 읽는 단일 보존 출처(SSOT)로 동작한다. 새 Task 번호 채번(`next_task_number`) 시
-  백로그, 아카이브, 이벤트 원장 3개 소스의 최댓값에 1을 더해 이전 생애주기와의 ID 충돌(aliasing)을 방지한다.
+  백로그 활성 Task, 삭제 영수증(`task_deletion_receipts`), 아카이브, 이벤트 원장 4개 소스의
+  최댓값에 1을 더해 이전 생애주기와의 ID 충돌(aliasing)을 방지한다.
   아카이브 파일 읽기·쓰기는 `with_file_lock` 잠금 아래에서 수행되어 병행 접근 시 손실을 막으며,
-  `id` 필드가 없는 행이나 JSON 파싱 실패 행도 조용히 버리지 않고 보존한다.
+  아카이브 항목 삭제(`drop_archive_tasks`) 시 `id` 필드가 없는 항목은 조용히 버리지 않고 보존한다.
   → [Workspace_task_id](../../lib/workspace/workspace_task_id.mli) ·
   [Candle_tasks](../../lib/candle_runtime/candle_tasks.mli) ·
   [RFC-goal-candle-ledger](../rfc/RFC-goal-candle-ledger.md)
 
 **Task GC (태스크 가비지 컬렉션)**
 : 운영자가 보존 기한(`days: int`)을 명시하여 호출하는 백로그 정리 절차(`Workspace_gc.gc`,
-  MCP `masc_gc`). 보존 기한을 넘긴 종결 Task(`Done`, `Cancelled`)를 아카이브에 먼저 추가한 뒤
-  백로그에서 제거하고 백로그 버전을 1 올린다. 비종결 상태(`Todo`, `Claimed`, `InProgress`,
-  `AwaitingVerification`)는 판정 의무와 활성 생애주기를 보존하기 위해 아카이브 대상에서
-  원천 배제된다 — 특히 판정을 기다리는 의무인 `AwaitingVerification`은 완료 권위(Completion
-  Authority)가 실시간으로 판정을 내려야 하므로 백로그에 반드시 남아야 한다. 아카이브 내에
-  비종결 Task가 잔류하는 비정상 격리가 발견되면 백로그로 되돌리는 자가 치유(self-healing,
-  `read_orphaned_nonterminal_tasks` 및 `drop_archive_tasks`)를 함께 수행한다.
+  MCP `masc_gc`). 백로그 잠금 아래에서 보존 기한을 넘긴 종결 Task(`Done`, `Cancelled`)를
+  백로그에서 먼저 제거하고 버전을 올린 뒤, 백로그 잠금을 해제하고 아카이브 잠금 아래에서
+  아카이브에 추가(`append_archive_tasks`)한다. 두 파일 간 기록 시점 사이에 비원자적 구간이
+  존재하므로 크래시 복구 시 일시적으로 두 스토어 어디에도 없는 간극이 생길 수 있으나(`RFC-goal-candle-ledger`),
+  비종결 상태(`Todo`, `Claimed`, `InProgress`, `AwaitingVerification`)는 판정 의무와 활성
+  생애주기를 보존하기 위해 아카이브 대상에서 원천 배제된다 — 특히 판정을 기다리는 의무인
+  `AwaitingVerification`은 완료 권위(Completion Authority)가 실시간으로 판정을 내려야 하므로
+  백로그에 반드시 남아야 한다. 아카이브 내에 비종결 Task가 잔류하는 비정상 격리가 발견되면
+  백로그에 먼저 복원한 후 아카이브에서 제거하는 자가 치유(self-healing, `read_orphaned_nonterminal_tasks`
+  및 `drop_archive_tasks`)를 함께 수행하여 비종결 Task의 영구 유실을 방지한다.
   → [Workspace_gc](../../lib/workspace/workspace_gc.mli) ·
   [Workspace_task_id](../../lib/workspace/workspace_task_id.mli)
 

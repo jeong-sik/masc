@@ -26,7 +26,9 @@ refreshes and resize. Tab keeps the established top-level navigation.
 The wide layout contains two pairs of bordered cards and a Usage band, capped
 at 160 cells and centred. Its minimum width comes from two readable 48-cell
 panels and a two-cell gutter. Insufficient height switches to a compact layout
-that preserves headings and summaries and expands the selected card. Hidden
+that preserves headings and summaries and expands the selected card. Extremely
+short viewports switch to single-row cards and keep the selected destination
+inside the visible window. Hidden
 detail rows are counted and the complete source is reachable with Enter.
 
 Quota-report coverage is not account utilization. Task counts and their UTC
@@ -41,3 +43,13 @@ unread and failed data, wide and compact frames, Korean text, colour and
 NO_COLOR, keyboard navigation, refresh/resize selection, and return paths.
 Screenshots must identify source SHA and whether they are CI fixture PTY,
 installed binary or production. Existing user sessions stay undisturbed.
+
+## Replaying CI frames
+
+`test_tui_dashboard_studio_pty` records `STUDIO_CAPTURE` JSON with actual ANSI
+frames. After a targeted run finishes, save its raw logs and the output of
+`gh run view RUN --json headSha,status,conclusion,url,databaseId` locally.
+Run `scripts/capture-dashboard-ci-frames.py --log LOG --run-info RUN_JSON
+--expected-head SHA --out DIRECTORY` to replay those bytes in xterm and capture
+PNGs. The resulting manifest records both the producing run and whether the
+suite's PASS line exists; a captured frame alone is not a passing test.

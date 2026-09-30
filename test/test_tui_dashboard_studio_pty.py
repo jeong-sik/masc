@@ -40,6 +40,11 @@ def populated_fixtures():
 
 
 def capture(process, fd, output, *, name, rows, columns, needle):
+    # Always change geometry: reapplying the same size need not emit 2J.
+    h.resize_and_wait(
+        process, fd, output, rows=rows + 1, columns=columns + 1,
+        needle=needle, controls=(h.FULL_REDRAW,), final_cursor=b"\x1b[?25l",
+    )
     frame = h.resize_and_wait(
         process, fd, output, rows=rows, columns=columns,
         needle=needle, controls=(h.FULL_REDRAW,), final_cursor=b"\x1b[?25l",
@@ -55,6 +60,8 @@ def capture(process, fd, output, *, name, rows, columns, needle):
 
 
 def navigation(executable, *, no_color=False):
+    fixtures = populated_fixtures()
+    _, briefing = fixtures["/api/v1/dashboard/briefing"]
     def interact(process, fd, _slave, output, _base):
         h.wait_for_output(process, fd, output, b"provider unavailable", start=0, timeout=10)
         # Wait for the measured Goal source too: a heading can precede it.
@@ -75,10 +82,22 @@ def navigation(executable, *, no_color=False):
         for value in (b"Needs you", b"Work", b"Goals", b"Keepers", b"Usage", b"Current Done states"):
             if value not in compact:
                 raise AssertionError(f"compact Dashboard lost {value!r}: {compact!r}")
-        h.send_and_wait(process, fd, output, b"r", "› Work".encode())
+        briefing["attention_items"].append({
+            "kind": "keeper_attention", "severity": "info",
+            "summary": "refresh-generation-2", "target_type": "keeper", "target_id": "beta",
+        })
+        h.send_and_wait(process, fd, output, b"r", b"3 attention items")
+        refreshed = capture(process, fd, output, name="refreshed-work", rows=24, columns=80,
+                            needle="› Work".encode())
+        if "› Work".encode() not in refreshed:
+            raise AssertionError("refresh changed the selected Dashboard destination")
         h.send_and_wait(process, fd, output, b"\r", b"MASC Work")
         # Work's existing first Esc leaves task focus; its next Esc returns.
-        h.send_and_wait(process, fd, output, b"\x1b", h.FRAME_END)
+        start = len(output)
+        os.write(fd, b"\x1b")
+        h.wait_for_output(process, fd, output, h.FRAME_END, start=start, timeout=5)
+        if b"MASC Work" not in h.screen_text(bytes(output)):
+            raise AssertionError("first Esc did not retain Work after clearing task focus")
         h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
         h.send_and_wait(process, fd, output, b"j", "› Goals".encode())
         h.send_and_wait(process, fd, output, b"\r", b"MASC Work")
@@ -104,7 +123,7 @@ def navigation(executable, *, no_color=False):
 
     h.run_terminal_scenario(
         executable, description="Dashboard studio navigation" + (" NO_COLOR" if no_color else ""),
-        interact=interact, http_fixtures=populated_fixtures(),
+        interact=interact, http_fixtures=fixtures,
         terminal_cols=140, terminal_rows=42,
         extra_env={"NO_COLOR": "1"} if no_color else {},
     )

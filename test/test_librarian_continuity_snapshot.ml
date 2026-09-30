@@ -167,6 +167,32 @@ let test_official_client_start_state_is_the_covering_line () =
    | Ok _ | Error _ -> fail "another turn accepted as the covering line")
 ;;
 
+(* An earlier generation ended at the same atom and digest that the current
+   generation's official-client turn started from. Both lines state the same
+   position, and the end line comes first. The line that covers the checkpoint
+   is the current generation's start state: the earlier end line states a
+   position of a history that is gone. *)
+let test_earlier_generation_end_does_not_hide_the_current_start_state () =
+  let restarted = Ok { B.recorded_at = 1.5; event = B.History_restarted { trace_id } } in
+  let earlier = [1, boundary history] in
+  let current = [1, boundary history; 2, restarted; 3, official_client_turn history] in
+  let snapshot =
+    S.capture_checkpoint_prefix ~catch_up_end_atom:None ~trace_id ~lines:current ~messages:history
+      ~working_state:state ()
+    |> require in
+  check int "the current generation's start state is the covering line" 3 snapshot.end_boundary_line;
+  check int "the whole prefix is covered" 2 snapshot.end_atom;
+  check bool "covered atoms removed, pinned retained" true
+    ((restore ~lines:current history snapshot |> require).messages = [pinned]);
+  let before_restart =
+    S.capture_checkpoint_prefix ~catch_up_end_atom:None ~trace_id ~lines:earlier ~messages:history
+      ~working_state:state ()
+    |> require in
+  (match restore ~lines:current history before_restart with
+   | Error S.History_changed -> ()
+   | Ok _ | Error _ -> fail "a snapshot of the earlier generation restored after the restart")
+;;
+
 (* A rewrite from atom 0 carries where requests started when it began. The
    key is written only while the snapshot is short of it, so an ordinary
    snapshot keeps the shape it always had. *)
@@ -193,6 +219,7 @@ let test_catch_up_target_codec () =
 let () = run "offline continuity snapshot"
   ["pair", [test_case "captured partial prefix" `Quick test_captured_partial_prefix;
             test_case "official-client start state" `Quick test_official_client_start_state_is_the_covering_line;
+            test_case "earlier generation end vs current start state" `Quick test_earlier_generation_end_does_not_hide_the_current_start_state;
             test_case "append and complete prefix" `Quick test_restore_append_and_all_covered;
             test_case "source identities" `Quick test_identity_rejections;
             test_case "restart witness required" `Quick test_capture_requires_witness;

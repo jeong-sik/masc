@@ -183,6 +183,15 @@ let prefix_sha256 messages range =
   |> fun messages -> Digestif.SHA256.(digest_string (Yojson.Safe.to_string (`List messages)) |> to_hex)
 ;;
 
+(* Only the lines of the history's current generation can witness where it
+   stands. [witness_line] keeps an end line it saw before a restart, and a
+   digest does not say which generation an atom position belongs to, so an
+   earlier generation that ended at the same atom and digest would be chosen
+   over the start state this generation's official-client turn wrote. *)
+let generation_lines ~history_start_boundary_line lines =
+  List.filter (fun (line, _) -> line >= history_start_boundary_line) lines
+;;
+
 let capture_range ~origin ?end_atom ~catch_up_end_atom ~trace_id ~lines ~messages ~working_state range =
   let end_atom = Option.value end_atom ~default:range.R.end_atom in
   let catch_up_end_atom =
@@ -199,11 +208,11 @@ let capture_range ~origin ?end_atom ~catch_up_end_atom ~trace_id ~lines ~message
        the checkpoint's atoms end is the start state of a turn. *)
     match
       B.witness_line ~trace_id ~end_atom:range.end_atom
-        ~last_atom_digest:range.last_atom_digest lines
+        ~last_atom_digest:range.last_atom_digest
+        (generation_lines ~history_start_boundary_line:range.history_start_boundary_line lines)
     with
-    | Some (line, _recorded_at, turn_ref) when line >= range.history_start_boundary_line ->
-      Ok (line, turn_ref)
-    | Some _ | None -> Error Uncovered_history
+    | Some (line, _recorded_at, turn_ref) -> Ok (line, turn_ref)
+    | None -> Error Uncovered_history
   in
   validate
     { origin
@@ -240,7 +249,8 @@ let restore ~trace_id ~lines ~messages (snapshot : t) =
       match
         B.witness_line ~through:snapshot.end_boundary_line ~trace_id
           ~end_atom:snapshot.covering_end_atom
-          ~last_atom_digest:snapshot.covering_last_atom_digest lines
+          ~last_atom_digest:snapshot.covering_last_atom_digest
+          (generation_lines ~history_start_boundary_line:snapshot.history_start_boundary_line lines)
       with
       | Some (line, _recorded_at, turn_ref) ->
         line = snapshot.end_boundary_line && Ids.Turn_ref.equal turn_ref snapshot.end_turn_ref

@@ -1288,6 +1288,8 @@ async function doFetchExecution(): Promise<void> {
     const { fetchDashboardExecution } = await import('./api/dashboard-execution')
     const data = await fetchDashboardExecution({ force })
     if (isInitializingExecutionPayload(data)) {
+      if (requestGeneration !== executionHydrationRequestGeneration) return
+      acceptedExecutionWorkspace.value = null
       scheduleExecutionWarmRetry()
       return
     }
@@ -1295,6 +1297,7 @@ async function doFetchExecution(): Promise<void> {
     hydrateExecutionSnapshot(data, { requestGeneration })
   } catch (err) {
     console.warn('[Dashboard] execution fetch error:', err)
+    if (requestGeneration !== executionHydrationRequestGeneration) return
     executionError.value = errorMessageOr(err, 'Execution projection load failed')
     showToast('실행 데이터 로드 실패', 'error', 5000)
   } finally {

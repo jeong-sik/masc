@@ -87,10 +87,14 @@ def recovery_journey(executable, *, submit):
         # Save the editor locally, then try twice. Even a complete retained
         # answer must never arm/send while the authoritative read failed.
         h.send_and_wait(process, fd, output, b"\r", TEXT)
-        for _ in range(2):
-            h.send_and_wait(process, fd, output, b"\r",
-                            b"Question source unavailable; refresh before answering")
-            no_posts()
+        h.send_and_wait(process, fd, output, b"\r",
+                        b"Question source unavailable; refresh before answering")
+        no_posts()
+        os.write(fd, b"\r")
+        h.drain_until_quiet(process, fd, output)
+        # Repeated refusal may leave exactly the same visible screen.
+        assert b"Question source unavailable; refresh before answering" in h.screen_text(bytes(output))
+        no_posts()
         h.send_and_wait(process, fd, output, b"\x1b[D", b"Question 1/2")
         visible = reader_frame(process, fd, output, b"(o) c-yes")
         assert b"(o) c-yes" in visible and b"(o) c-no" not in visible, visible

@@ -264,7 +264,10 @@ def goal_opens_exact_detail(executable):
                              (b"[", b"goal-home-other")):
             h.send_and_wait(process, fd, output, key, b"metric-" + goal_id)
             # Redraw also exercises reconciliation after releasing the Home pin.
-            h.send_and_wait(process, fd, output, h.FULL_REDRAW, b"metric-" + goal_id)
+            for columns in (81, 80):
+                h.resize_and_wait(process, fd, output, rows=24, columns=columns,
+                                  needle=b"metric-" + goal_id,
+                                  controls=(h.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
             visible = h.screen_text(bytes(output))
             assert b"metric-" + goal_id in visible, visible
             for other_id in (b"goal-home-exact", b"goal-home-next", b"goal-home-other"):

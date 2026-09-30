@@ -89,19 +89,21 @@ def foreign_decision(executable, kind):
             h.send_and_wait(process, fd, output, b"y", REFUSAL)
         elif kind == "ask":
             h.send_and_wait(process, fd, output, b"1", b"(o) c-yes")
-            for _ in range(2):
-                h.send_and_wait(process, fd, output, b"\r", ASK_REFUSAL)
-                plain = h.screen_text(bytes(output))
-                assert b"(o) c-yes" in plain, "refusal lost the selected answer draft"
-                assert b"(o) c-no" not in plain, plain
-                home.assert_no_decision_posts(requests)
+            h.send_and_wait(process, fd, output, b"\r", ASK_REFUSAL)
+            os.write(fd, b"\r")
+            h.drain_until_quiet(process, fd, output)
+            plain = h.screen_text(bytes(output))
+            assert ASK_REFUSAL in plain, plain
+            assert b"(o) c-yes" in plain, "refusal lost the selected answer draft"
+            assert b"(o) c-no" not in plain, plain
+            home.assert_no_decision_posts(requests)
         else:
             h.send_and_wait(process, fd, output, b"y", REFUSAL)
-            if kind == "held":
-                h.send_and_wait(process, fd, output, b"n", REFUSAL)
-            else:
-                # Explicit retry must stop at identity before retry eligibility.
-                h.send_and_wait(process, fd, output, b"R", REFUSAL)
+            # A second refusal need not repaint an unchanged warning. Retry
+            # still must stop at identity before retry eligibility.
+            os.write(fd, b"n" if kind == "held" else b"R")
+            h.drain_until_quiet(process, fd, output)
+            assert REFUSAL in h.screen_text(bytes(output))
         home.assert_no_decision_posts(requests)
         h.send_and_wait(process, fd, output, b"\x1b", b"Enter:open")
         cards.assert_selected(output, label)

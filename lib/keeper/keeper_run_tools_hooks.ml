@@ -973,8 +973,8 @@ let assemble_hooks
                 (if not post_tool_round
                  then
                    let ordinary_recall =
-                     (* Memory OS recall — advisory block rendered from every
-                        persisted current fact in stored order. Source-bound
+                     (* Memory OS recall publishes every persisted current fact
+                        in a paged artifact and injects its retrieval index. Source-bound
                         facts are revalidated here; a changed source atomically
                         replaces its fact with an invalidation before the block
                         is rendered. On by default; MASC_KEEPER_MEMORY_OS_RECALL=0

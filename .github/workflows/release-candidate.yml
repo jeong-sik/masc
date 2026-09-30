@@ -22,7 +22,6 @@ jobs:
   validate:
     name: Release candidate ref
     runs-on: ubuntu-24.04
-    timeout-minutes: 2
     steps:
       - name: Require a release branch or tag
         run: |

@@ -1405,8 +1405,11 @@ let reconcile_configuration ~config ~directory = Eio_context.run_on_owner_domain
                  | Ok () ->
                      let owner = Some {id=d.id; source_path=d.source_path; revision=d.revision} in
                      let attached = let* visibility = desired_visibility [] d in
+                       let source_access = match visibility with
+                         | Keeper_only keeper -> Lane_addon_sources.Keeper keeper
+                         | Shared | Operator_only -> Lane_addon_sources.Operator_configuration in
                        attach_entry ~sw m ~run_id:d.run_id ~package:d.package ~binding:d.binding ~configuration:owner
-                         ~source_access:Lane_addon_sources.Operator_configuration ~visibility in
+                         ~source_access ~visibility in
                      match attached with
                      | Ok _ -> () | Error message -> add_issue ~id:d.id d.source_path message)
            | _ -> add_issue ~id:d.id d.source_path "multiple workers claim this configuration identity") snapshot.declarations

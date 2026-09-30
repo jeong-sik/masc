@@ -167,6 +167,13 @@ let dispatch ?access ~config ~caller ~operation args = protect (fun () -> Mutex.
       if expected<>actual then Error "subscription configuration revision conflict" else
       let* rows=get "subscriptions" (array decode) args in
       if List.length rows<>List.length (List.sort_uniq Stdlib.compare rows) then Error "duplicate subscription" else
+      let* rows = match access with
+        | Lane_addon_sources.Operator_configuration -> Ok rows
+        | Keeper keeper when String.equal keeper caller ->
+            if List.for_all (fun s -> String.equal s.keeper_name keeper) rows then
+              Ok (List.filter (fun s -> not (String.equal s.keeper_name keeper)) subscriptions @ rows)
+            else Error "Keeper saves may contain only the caller's subscriptions"
+        | Keeper _ | Unauthenticated -> Error "Authenticated subscription owner required" in
       let string s=Otoml.Printer.to_string (Otoml.TomlString s) in
       let bytes=if rows=[] then "subscriptions = []\n" else String.concat "\n" (List.map (fun s ->
         String.concat "\n" ["[[subscriptions]]";"keeper_name = " ^ string s.keeper_name;

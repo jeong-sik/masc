@@ -601,6 +601,23 @@ let post_json ~(host : string) ~(port : int) ~(path : string) ~(body : string) :
   | Error e -> Error e
   | Ok (status_code, body) -> decode_json ~allow_empty:true ~status_code ~body
 
+(* Durable side effects must keep the same credential across admission and
+   transport. In particular, a 401 cannot replay an unanswered Broadcast with
+   a newly adopted actor's bearer. Only its digest reaches the pending journal. *)
+type bound_credential = { bound_headers : (string * string) list; credential_identity : string }
+let bind_credential () =
+  let bound_headers = auth_headers () in
+  let encoded = `List (List.map (fun (name,value) -> `List [`String name;`String value]) bound_headers)
+    |> Yojson.Safe.to_string in
+  {bound_headers;credential_identity=Masc.Lane_addon_store.digest encoded}
+let post_json_bound ~credential ~host ~port ~path ~body =
+  let url = url_of ~host ~port ~path in
+  timed ~verb:"POST" ~path @@ fun () ->
+  match Masc_http_client.post_sync ?clock:(request_clock ())
+    ~timeout_sec:(request_timeout_sec ()) ~url ~headers:(json_headers credential.bound_headers) ~body () with
+  | Error detail -> Error (Masc.Tui_decode.http_transport_error ~verb:"POST" ~url ~detail)
+  | Ok (status_code,body) -> decode_json ~allow_empty:true ~status_code ~body
+
 (** Model discovery, preparation and serial verification own their completion.
     The login panel's request fiber still propagates cancellation on close or
     replacement. Omitting the pool deadline avoids misreporting a slow save as

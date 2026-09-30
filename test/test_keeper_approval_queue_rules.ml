@@ -256,6 +256,100 @@ let test_rule_without_expiry_matches_at_any_now () =
        | Rule_types.Rule_match_absent -> fail "rule without expiry did not match")
 ;;
 
+let persisted_rule_json (rule : Rule_types.approval_rule) =
+  match Keeper_rule_revision.prepare ~current:None
+    ~revision:("revision-" ^ rule.id) ~operation_id:("operation-" ^ rule.id)
+    ~presence:Keeper_rule_revision.Active rule with
+  | Error error -> fail error
+  | Ok intent -> Keeper_rule_revision.state_to_yojson intent.next
+;;
+
+let test_durable_rule_renewal_and_stale_replay () =
+  let base_path = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) (fun () ->
+    let input = `Assoc [ "request", `String "renewal" ] in
+    let prepare operation_id expires_at =
+      match Rules.prepare_rule_intent ~base_path ~keeper_name:"keeper"
+        ~tool_name:"external-effect" ~input ~operation_id
+        ~source_approval_id:operation_id ~expires_at () with
+      | Error error -> fail (Rule_types.rule_store_error_to_string error)
+      | Ok intent ->
+          (* The approval journal stores this exact value before application. *)
+          match Keeper_rule_revision.intent_of_yojson
+              (Keeper_rule_revision.intent_to_yojson intent) with
+          | Ok saved -> saved | Error error -> fail error in
+    let apply intent = match Rules.apply_rule_intent ~base_path intent with
+      | Ok result -> result | Error error -> fail (Rule_types.rule_store_error_to_string error) in
+    let applied = function Rules.Rule_applied rule -> rule
+      | _ -> fail "new intent should commit" in
+    let a = prepare "approval-a" 1000.0 in
+    let concurrent = prepare "approval-concurrent" 1500.0 in
+    ignore (applied (apply a));
+    (match apply concurrent with Rules.Rule_conflict _ -> ()
+      | _ -> fail "concurrent initial rule must conflict");
+    (match apply a with Rules.Rule_already_applied _ -> ()
+      | _ -> fail "reloaded intent must be idempotent after save");
+    let b = prepare "approval-b" 2000.0 in
+    let renewed = applied (apply b) in
+    (match find_at ~base_path ~input ~now:1500.0 with
+     | Rule_types.Rule_match_active matched -> check string "renewed grant" renewed.id matched.rule_id
+     | _ -> fail "renewed expiry did not authorize");
+    (match apply a with Rules.Rule_conflict _ -> ()
+      | _ -> fail "stale approval reverted renewal");
+    (match Rules.delete_rule ~base_path ~id:renewed.id () with
+     | Ok _ -> () | Error error -> fail (Rule_types.rule_store_error_to_string error));
+    (match apply b with Rules.Rule_conflict _ -> ()
+      | _ -> fail "stale approval resurrected deleted rule");
+    (match Rules.list_rules ~base_path () with
+     | Ok [] -> () | _ -> fail "deleted rule still listed");
+    let c = prepare "approval-c" 3000.0 in
+    let replacement = applied (apply c) in
+    (match apply a with Rules.Rule_conflict _ -> ()
+      | _ -> fail "old approval replaced post-deletion grant");
+    match Rules.list_rules ~base_path () with
+    | Ok [ rule ] ->
+        check string "replacement survives fresh store read" replacement.id rule.id;
+        check (option (float 0.0)) "requested expiry persisted" (Some 3000.0) rule.expires_at
+    | _ -> fail "exactly one active rule expected")
+;;
+
+let test_cross_identity_operation_collision_preserves_store () =
+  let base_path = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) (fun () ->
+    let first_input = `Assoc [ "request", `String "first" ] in
+    let second_input = `Assoc [ "request", `String "second" ] in
+    let prepare input =
+      match Rules.prepare_rule_intent ~base_path ~keeper_name:"keeper"
+        ~tool_name:"external-effect" ~input ~operation_id:"shared-approval" () with
+      | Ok intent -> intent
+      | Error error -> fail (Rule_types.rule_store_error_to_string error) in
+    let first = prepare first_input in
+    let second = prepare second_input in
+    let first_rule =
+      match Rules.apply_rule_intent ~base_path first with
+      | Ok (Rules.Rule_applied rule) -> rule
+      | Ok _ -> fail "first identity must commit"
+      | Error error -> fail (Rule_types.rule_store_error_to_string error) in
+    let path = AQ.For_testing.always_allowed_store_path ~base_path in
+    let before = In_channel.with_open_bin path In_channel.input_all in
+    (match Rules.apply_rule_intent ~base_path second with
+     | Error _ -> ()
+     | Ok _ -> fail "another identity cannot reuse a committed operation ID");
+    check string "collision leaves durable bytes unchanged" before
+      (In_channel.with_open_bin path In_channel.input_all);
+    (match Rules.list_rules ~base_path () with
+     | Ok [ rule ] -> check string "first rule remains readable" first_rule.id rule.id
+     | Ok _ -> fail "collision changed the stored rule set"
+     | Error error -> fail (Rule_types.rule_store_error_to_string error));
+    (match find ~base_path ~input:first_input with
+     | Rule_types.Rule_match_active matched ->
+         check string "first input still authorizes" first_rule.id matched.rule_id
+     | _ -> fail "collision damaged the first authorization");
+    match find ~base_path ~input:second_input with
+    | Rule_types.Rule_match_absent -> ()
+    | _ -> fail "rejected second identity must not authorize")
+;;
+
 let test_unknown_persisted_shape_is_reported_and_rejected () =
   let base_path = temp_dir () in
   Fun.protect
@@ -263,7 +357,7 @@ let test_unknown_persisted_shape_is_reported_and_rejected () =
     (fun () ->
        let input = `Assoc [ "request", `String "exact" ] in
        let rule, _ = upsert_exn ~base_path ~input in
-       let json = Rule_types.approval_rule_to_yojson rule in
+       let json = persisted_rule_json rule in
        let extended =
          match json with
          | `Assoc fields -> `Assoc (("classification", `String "legacy") :: fields)
@@ -310,8 +404,8 @@ let test_duplicate_persisted_rules_reject_whole_store () =
        write_rules
          ~base_path
          (`List
-             [ Rule_types.approval_rule_to_yojson first
-             ; Rule_types.approval_rule_to_yojson (with_rule_id first.id second)
+             [ persisted_rule_json first
+             ; persisted_rule_json (with_rule_id first.id second)
              ]);
        (match Rules.list_rules ~base_path () with
         | Ok _ -> fail "duplicate rule ids must fail the whole rules store"
@@ -323,8 +417,8 @@ let test_duplicate_persisted_rules_reject_whole_store () =
        write_rules
          ~base_path
          (`List
-             [ Rule_types.approval_rule_to_yojson first
-             ; Rule_types.approval_rule_to_yojson (with_rule_id "different-id" first)
+             [ persisted_rule_json first
+             ; persisted_rule_json (with_rule_id "different-id" first)
              ]);
        match Rules.list_rules ~base_path () with
        | Ok _ -> fail "duplicate exact identities must fail the whole rules store"
@@ -834,6 +928,10 @@ let () =
             "Gate consumes exact persisted rule"
             `Quick
             test_gate_allows_only_the_exact_persisted_rule
+        ; test_case "durable renewal and stale replay" `Quick
+            test_durable_rule_renewal_and_stale_replay
+        ; test_case "cross-identity operation collision preserves store" `Quick
+            test_cross_identity_operation_collision_preserves_store
         ; test_case
             "unexpired rule matches with injected now"
             `Quick

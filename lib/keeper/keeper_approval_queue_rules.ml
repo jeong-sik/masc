@@ -78,10 +78,9 @@ let nonempty_string_opt = function
   | _ -> None
 ;;
 
-let rule_identity_matches left right =
-  String.equal left.keeper_name right.keeper_name
-  && String.equal left.tool_name right.tool_name
-  && String.equal left.request_fingerprint right.request_fingerprint
+module Revision = Keeper_rule_revision
+
+let rule_identity_matches = Revision.identity_equal
 ;;
 
 let validate_unique_rules rules =
@@ -102,13 +101,28 @@ let validate_unique_rules rules =
   loop [] rules
 ;;
 
-let load_rules_unlocked ~base_path () =
+let validate_unique_rule_states states =
+  match validate_unique_rules (List.map (fun (state : Revision.state) -> state.rule) states) with
+  | Error _ as error -> error
+  | Ok _ ->
+      let rec loop seen = function
+        | [] -> Ok states
+        | (state : Revision.state) :: rest ->
+            if List.exists (fun (previous : Revision.state) ->
+              String.equal previous.revision state.revision
+              || String.equal previous.operation_id state.operation_id) seen
+            then Error "duplicate approval rule revision or operation ID"
+            else loop (state :: seen) rest
+      in loop [] states
+;;
+
+let load_rule_states_unlocked ~base_path () =
   let path = rules_path ~base_path () in
   let rec parse_entries index acc = function
     | [] ->
       let rules = List.rev acc in
-      (match validate_unique_rules rules with
-       | Ok _ as result -> result
+      (match validate_unique_rule_states rules with
+       | Ok _ -> Ok rules
        | Error reason ->
          report_rules_read_drop
            ~reason:Read_drop_reason.Invalid_payload
@@ -116,7 +130,7 @@ let load_rules_unlocked ~base_path () =
            ~detail:reason;
          Error { path; reason })
     | entry :: rest ->
-      (match approval_rule_of_yojson_with_error entry with
+      (match Revision.state_of_yojson entry with
        | Ok rule -> parse_entries (index + 1) (rule :: acc) rest
        | Error reason ->
          let detail =
@@ -166,17 +180,78 @@ let load_rules_unlocked ~base_path () =
     Error { path; reason }
 ;;
 
-let save_rules_unlocked ~base_path rules : (unit, rule_store_error) result =
+let save_rule_states_unlocked ~base_path rules : (unit, rule_store_error) result =
   let path = rules_path ~base_path () in
   try
     Fs_compat.mkdir_p (Filename.dirname path);
-    let json = `List (List.map approval_rule_to_yojson rules) in
+    let json = `List (List.map Revision.state_to_yojson rules) in
     (match Fs_compat.save_file_atomic path (Yojson.Safe.pretty_to_string json) with
      | Ok () -> Ok ()
      | Error reason -> Error { path; reason })
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn -> Error { path; reason = Printexc.to_string exn }
+;;
+
+let load_rules_unlocked ~base_path () =
+  Result.map (List.filter_map Revision.rule) (load_rule_states_unlocked ~base_path ())
+;;
+
+let current_rule_state states candidate =
+  List.find_opt (fun (state : Revision.state) -> rule_identity_matches state.rule candidate) states
+;;
+
+let prepare_rule_intent_unlocked ~base_path ~states ~operation_id candidate =
+  Revision.prepare ~current:(current_rule_state states candidate)
+    ~revision:(make_generated_id "rule_revision") ~operation_id
+    ~presence:Revision.Active candidate
+  |> Result.map_error (fun reason -> { path = rules_path ~base_path (); reason })
+;;
+
+(** Capture once before the approval decision is journaled. Applying or
+    retrying must reuse this intent; a conflict must never refresh it. *)
+let prepare_rule_intent ~base_path ~keeper_name ~tool_name ~input
+    ~operation_id ?created_by ?source_approval_id ?expires_at () =
+  with_rules_read_lock (fun () ->
+    match load_rule_states_unlocked ~base_path () with
+    | Error _ as error -> error
+    | Ok states ->
+        let candidate =
+          { id = make_generated_id "rule"; keeper_name; tool_name;
+            request_fingerprint = Keeper_approval_request_fingerprint.request_fingerprint input;
+            created_at = Unix.gettimeofday (); created_by; source_approval_id; expires_at } in
+        prepare_rule_intent_unlocked ~base_path ~states ~operation_id candidate)
+;;
+
+type rule_application =
+  | Rule_applied of approval_rule
+  | Rule_already_applied of approval_rule
+  | Rule_conflict of Revision.state option
+
+let apply_rule_intent_unlocked ~base_path ~states intent =
+  let current = current_rule_state states intent.Revision.next.rule in
+  match Revision.decide ~current intent with
+  | Revision.Conflict current -> Ok (Rule_conflict current)
+  | Revision.Already_applied state -> Ok (Rule_already_applied state.rule)
+  | Revision.Apply state ->
+      let updated = state :: List.filter (fun (previous : Revision.state) ->
+        not (rule_identity_matches previous.rule state.rule)) states in
+      (match validate_unique_rule_states updated with
+       | Error reason -> Error { path = rules_path ~base_path (); reason }
+       | Ok _ ->
+           match save_rule_states_unlocked ~base_path updated with
+           | Ok () -> Ok (Rule_applied state.rule)
+           | Error _ as error -> error)
+;;
+
+let apply_rule_intent ~base_path intent =
+  match intent.Revision.next.presence with
+  | Revision.Deleted -> Error { path = rules_path ~base_path ();
+                               reason = "approval intent cannot delete a rule" }
+  | Revision.Active -> with_rules_write_lock (fun () ->
+    match load_rule_states_unlocked ~base_path () with
+    | Error _ as error -> error
+    | Ok states -> apply_rule_intent_unlocked ~base_path ~states intent)
 ;;
 
 let list_rules ~base_path () =
@@ -193,67 +268,63 @@ let list_rules_dashboard_json ~base_path () =
     (list_rules ~base_path ())
 ;;
 
-let upsert_rule
-      ~base_path
-      ~keeper_name
-      ~tool_name
-      ~input
-      ?created_by
-      ?source_approval_id
-      ?expires_at
-      ()
-  =
+(** Ensure-only entrypoint for existing callers. Renewal uses a durable
+    prepared intent. This entrypoint cannot resurrect a deleted rule. *)
+let upsert_rule ~base_path ~keeper_name ~tool_name ~input ?created_by
+    ?source_approval_id ?expires_at () =
   with_rules_write_lock (fun () ->
-    match load_rules_unlocked ~base_path () with
+    match load_rule_states_unlocked ~base_path () with
     | Error _ as error -> error
-    | Ok rules ->
-      let request_fingerprint =
-        Keeper_approval_request_fingerprint.request_fingerprint input
-      in
-      let candidate =
-        { id = make_generated_id "rule"
-        ; keeper_name
-        ; tool_name
-        ; request_fingerprint
-        ; created_at = Unix.gettimeofday ()
-        ; created_by
-        ; source_approval_id
-        ; expires_at
-        }
-      in
-      (match List.find_opt (fun rule -> rule_identity_matches rule candidate) rules with
-       | Some existing -> Ok (existing, false)
-       | None ->
-         (match save_rules_unlocked ~base_path (candidate :: rules) with
-          | Ok () -> Ok (candidate, true)
-          | Error error ->
-            Otel_metric_store.inc_counter
-              Keeper_metrics.(to_string ApprovalQueueFailures)
-              ~labels:
-                [ "keeper", keeper_name
-                ; "site", Keeper_approval_queue_failure_site.(to_label Upsert_rule_save)
-                ]
-              ();
-            Log.Keeper.warn "upsert_rule: save failed: %s" (rule_store_error_to_string error);
-            Error error)))
+    | Ok states ->
+        let candidate =
+          { id = make_generated_id "rule"; keeper_name; tool_name;
+            request_fingerprint = Keeper_approval_request_fingerprint.request_fingerprint input;
+            created_at = Unix.gettimeofday (); created_by; source_approval_id; expires_at } in
+        match current_rule_state states candidate with
+        | Some { Revision.presence = Revision.Active; rule; _ } -> Ok (rule, false)
+        | Some { Revision.presence = Revision.Deleted; _ } ->
+            Error { path = rules_path ~base_path ();
+                    reason = "deleted rule requires a new approval intent" }
+        | None ->
+            let operation_id = Option.value source_approval_id
+                ~default:(make_generated_id "rule_operation") in
+            match prepare_rule_intent_unlocked ~base_path ~states ~operation_id candidate with
+            | Error _ as error -> error
+            | Ok intent ->
+                match apply_rule_intent_unlocked ~base_path ~states intent with
+                | Ok (Rule_applied rule) -> Ok (rule, true)
+                | Ok (Rule_already_applied rule) -> Ok (rule, false)
+                | Ok (Rule_conflict _) ->
+                    Error { path = rules_path ~base_path (); reason = "rule changed during creation" }
+                | Error error ->
+                    Otel_metric_store.inc_counter
+                      Keeper_metrics.(to_string ApprovalQueueFailures)
+                      ~labels:[ "keeper", keeper_name;
+                        "site", Keeper_approval_queue_failure_site.(to_label Upsert_rule_save) ] ();
+                    Error error)
 ;;
 
 let delete_rule ~base_path ~id () =
   with_rules_write_lock (fun () ->
-    match load_rules_unlocked ~base_path () with
+    match load_rule_states_unlocked ~base_path () with
     | Error _ as error -> error
-    | Ok rules ->
-      (match List.find_opt (fun rule -> String.equal rule.id id) rules with
-       | None ->
-         Error
-           { path = rules_path ~base_path ()
-           ; reason = Printf.sprintf "approval rule %s not found" id
-           }
-       | Some deleted ->
-         let remaining = List.filter (fun rule -> not (String.equal rule.id id)) rules in
-         (match save_rules_unlocked ~base_path remaining with
-          | Ok () -> Ok deleted
-          | Error _ as error -> error)))
+    | Ok states ->
+        match List.find_opt (fun (state : Revision.state) ->
+          state.presence = Revision.Active && String.equal state.rule.id id) states with
+        | None -> Error { path = rules_path ~base_path ();
+                          reason = Printf.sprintf "approval rule %s not found" id }
+        | Some state ->
+            match Revision.prepare ~current:(Some state)
+                ~revision:(make_generated_id "rule_revision")
+                ~operation_id:(make_generated_id "rule_delete")
+                ~presence:Revision.Deleted state.rule with
+            | Error reason -> Error { path = rules_path ~base_path (); reason }
+            | Ok intent ->
+                match apply_rule_intent_unlocked ~base_path ~states intent with
+                | Ok (Rule_applied rule | Rule_already_applied rule) -> Ok rule
+                | Ok (Rule_conflict _) ->
+                    Error { path = rules_path ~base_path (); reason = "rule changed during deletion" }
+                | Error _ as error -> error)
 ;;
 
 let find_matching_rule

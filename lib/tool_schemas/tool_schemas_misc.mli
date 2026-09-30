@@ -126,6 +126,9 @@ type misc_operation =
   | Misc_msx_peek
   | Misc_msx_ram_diff
   | Misc_portrait_read
+  | Misc_candle_balance
+  | Misc_candle_catalog
+  | Misc_candle_purchase
   | Misc_dos_load
   | Misc_dos_eject
   | Misc_dos_screen

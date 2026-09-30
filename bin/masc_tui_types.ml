@@ -5228,6 +5228,13 @@ module Verification_evidence_read = struct
     | Launch_failure of string
 end
 
+type message_draft = {
+  draft_text : string;
+  draft_attachments : Masc_tui_keeper_chat_projection.attachment list;
+  draft_references : Masc_tui_keeper_chat_projection.image_reference list;
+  draft_attachments_since : msg_anchor option;
+}
+
 type state = {
   mutable metrics_scroll: int;
   mutable metrics_section: metrics_section;
@@ -6441,7 +6448,9 @@ type state = {
   mutable msg_attachments_since: msg_anchor option;
   mutable msg_target_keeper_name: string option;
   mutable msg_return: keeper_chat_return;
-  mutable msg_drafts: (string * string) list;
+  (* The entire unsent payload belongs to its Keeper, including image-only
+     drafts. Restoring another target cannot inherit its staged media. *)
+  mutable msg_drafts: (string * message_draft) list;
   mutable msg_history: msg_entry list;
   (* How far back the arrows have walked through what this pane sent, and the
      draft they set aside to do it. [None] means the composer holds the

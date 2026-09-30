@@ -26934,6 +26934,16 @@ and is loaded on demand through keeper_skill.
                  (match acting_pane_chunk_projection state ~terminal_rows ~terminal_cols with
                   | None -> ()
                   | Some projection -> state.acting_chunk_projection <- Some projection);
+                 (match state.view, Masc_tui_render.frame_choice state ~terminal_rows with
+                  | Overview, `Surface ->
+                      let selected = home_selected_action state in
+                      if Option.is_none state.home_selected
+                         && home_initial_reading_ready state selected then
+                        state.home_selected <- selected;
+                      let budget = Masc_tui_render_prim.surface_chrome_budget state ~terminal_rows in
+                      let first, _ = home_decision_window state ~budget in
+                      state.home_decision_scroll <- first
+                  | _ -> ());
                  render state)
            in
            (* The frame is what the operator will act on next, so the scroll it

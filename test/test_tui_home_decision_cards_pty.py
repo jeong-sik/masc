@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import re
 import sys
+import threading
 
 import test_tui_home_journey_pty as home
 import test_tui_keyboard_input as h
@@ -44,6 +45,18 @@ def select_home(process, fd, output, label, *, destinations):
             os.write(fd, b"j")
             h.drain_until_quiet(process, fd, output)
     raise AssertionError(f"Home never selected {label!r}: {h.screen_text(bytes(output))!r}")
+
+
+def open_held_detail(process, fd, output, call_id, command):
+    # The exact authority is a labelled call row, independent of copies in
+    # args or question text. Finish the destination frame before checking it.
+    h.send_and_wait(process, fd, output, b"\r", call_id)
+    drawn = h.screen_rows(bytes(output))
+    assert any(re.fullmatch(rb"\s*call\s+" + re.escape(call_id) + rb"\s*", row)
+               for row in drawn.values()), drawn
+    assert any(re.fullmatch(rb"\s*args\s+" + re.escape(command) + rb"\s*", row)
+               for row in drawn.values()), drawn
+    return h.screen_text(bytes(output))
 
 
 def frame(process, fd, output, name):
@@ -113,8 +126,8 @@ def same_keeper_distinct_and_duplicate(executable):
         h.send_and_wait(process, fd, output, b"r", b"home-new-top-card")
         assert_selected(output, initial)
         select_home(process, fd, output, b"[call-home-b]", destinations=5)
-        detail = h.send_and_wait(process, fd, output, b"\r", b"call=call-home-b")
-        assert b"args=" in h.screen_text(detail), detail
+        open_held_detail(process, fd, output, b"call-home-b",
+                         b'{"command":"echo call-home-b"}')
         home.assert_no_decision_posts(requests)
         h.send_and_wait(process, fd, output, b"\x1b", b"Enter:open")
         assert_selected(output, b"[call-home-b]")
@@ -150,6 +163,93 @@ def failed_source_keeps_known_cards(executable):
         fixtures, interact, requests)
 
 
+def hidden_help_does_not_pin_unseen_request(executable):
+    rows = [held("call-hidden-b", "hidden-B-card")]
+    fixtures = fixtures_with_held(rows)
+    gate = copy.deepcopy(h.blocked_gate_detail_http_fixtures()[GATE_PATH])
+    gate[1]["approval_queue"] = []
+    fixtures[GATE_PATH] = gate
+    fixtures[h.KEEPER_ASKS_PATH] = (200, {"keeper": None, "open_count": 0, "asks": []})
+    release = threading.Event()
+    requested = threading.Event()
+
+    def held_read():
+        requested.set()
+        if not release.wait(30):
+            raise AssertionError("hidden Home request fixture was not released")
+        return 200, {"pending": copy.deepcopy(rows)}
+
+    fixtures[HELD_PATH] = held_read
+    requests = []
+
+    def interact(process, fd, _slave, output, _base):
+        try:
+            assert h.wait_for_fixture_event(process, fd, output, requested, timeout=10)
+            h.send_and_wait(process, fd, output, b"?", b"MASC Cheat Sheet")
+            release.set()
+            # This badge is computed from applied held-call rows, proving the
+            # snapshot crossed the mailbox while Help still owned the frame.
+            h.wait_for_output(process, fd, output, "Awaiting you·1".encode(),
+                              start=len(output), timeout=10)
+            assert b"MASC Cheat Sheet" in h.screen_text(bytes(output))
+            rows.insert(0, held("call-hidden-a", "hidden-A-card"))
+            h.wait_for_output(process, fd, output, "Awaiting you·2".encode(),
+                              start=len(output), timeout=10)
+            assert b"MASC Cheat Sheet" in h.screen_text(bytes(output))
+            h.send_and_wait(process, fd, output, b"\x1b", b"hidden-A-card")
+            assert_selected(output, b"[call-hidden-a]")
+            open_held_detail(process, fd, output, b"call-hidden-a",
+                             b'{"command":"echo call-hidden-a"}')
+            home.assert_no_decision_posts(requests)
+            os.write(fd, b"q")
+        finally:
+            release.set()
+
+    run(executable, "Home first-visible request is not pinned by a hidden Help frame",
+        fixtures, interact, requests, refresh=1.0)
+
+
+def each_failed_source_keeps_other_cards(executable):
+    cases = ((OPERATOR_PATH, b"confirm queue"), (HELD_PATH, b"held calls"),
+             (GATE_PATH, b"Gate queue"), (h.KEEPER_ASKS_PATH, b"questions"))
+    for failed_path, failed_label in cases:
+        fixtures = fixtures_with_held([held("call-partial", "retained-held-card")])
+        gate = copy.deepcopy(h.blocked_gate_detail_http_fixtures()[GATE_PATH])
+        gate[1]["approval_queue"][0].update(id="gate-partial", phase="human_required",
+                                            tool_name="retained-gate-card")
+        fixtures[GATE_PATH] = gate
+        fixtures[h.KEEPER_ASKS_PATH] = (200, {"keeper": None, "open_count": 0, "asks": []})
+        fixtures[failed_path] = (503, {"error": "isolated source failure"})
+        requests = []
+
+        def interact(process, fd, _slave, output, _base):
+            known = b"retained-gate-card" if failed_path == HELD_PATH else b"retained-held-card"
+            h.wait_for_output(process, fd, output, known, start=0, timeout=10)
+            note = b"Approvals and questions: " + failed_label + b" not fully read"
+            # Match the sole-source label through the end of its drawn row,
+            # so transient boot notes cannot satisfy the settled-source barrier.
+            settled = re.compile(re.escape(note) + rb"(?: |\x1b\[[0-9;]*m)*\x1b\[0m\x1b\[[0-9;]*H")
+            h.wait_for_output(process, fd, output, settled, start=0, timeout=10)
+            h.resize_and_wait(process, fd, output, rows=24, columns=81,
+                              needle=note, controls=(h.FULL_REDRAW,),
+                              final_cursor=b"\x1b[?25l")
+            for columns in (80, 140):
+                drawn = h.resize_and_wait(process, fd, output, rows=24, columns=columns,
+                                          needle=note, controls=(h.FULL_REDRAW,),
+                                          final_cursor=b"\x1b[?25l")
+                visible = h.screen_text(drawn)
+                assert known in visible and note in visible, visible
+                for _path, label in cases:
+                    if label != failed_label:
+                        assert label + b" not fully read" not in visible, visible
+                assert b"No decision is waiting" not in visible, visible
+            home.assert_no_decision_posts(requests)
+            os.write(fd, b"q")
+
+        run(executable, f"Home retains successful requests beside {failed_label.decode()} failure",
+            fixtures, interact, requests)
+
+
 def refresh_identity_and_deletion(executable):
     rows = [held("call-refresh-a", "refresh-card-A"), held("call-refresh-b", "refresh-card-B")]
     fixtures = fixtures_with_held(rows)
@@ -161,21 +261,24 @@ def refresh_identity_and_deletion(executable):
         rows.insert(0, held("call-inserted", "inserted-card"))
         h.send_and_wait(process, fd, output, b"r", b"inserted-card")
         assert_selected(output, b"refresh-card-B")
-        h.send_and_wait(process, fd, output, b"\r", b"call=call-refresh-b")
+        open_held_detail(process, fd, output, b"call-refresh-b",
+                         b'{"command":"echo call-refresh-b"}')
         # A second insertion while the detail is open exercises mailbox-drain
         # reconciliation, not just Home's selected-row reconciliation.
         rows.insert(0, held("call-detail-inserted", "detail-inserted-card"))
         rows[-1]["args"] = '{"command":"echo refreshed-call-refresh-b"}'
         h.send_and_wait(process, fd, output, b"r", b"refreshed-call-refresh-b")
         detail = h.screen_text(bytes(output))
-        assert b"call=call-refresh-b" in detail and b"args=" in detail, detail
+        assert re.search(rb"(?m)^\s*call\s+call-refresh-b\s*$", detail), detail
+        assert re.search(rb'(?m)^\s*args\s+\{"command":"echo refreshed-call-refresh-b"\}\s*$', detail), detail
         h.send_and_wait(process, fd, output, b"\x1b", b"Enter:open")
         rows[:] = [row for row in rows if row["tool_call_id"] != "call-refresh-b"]
         h.send_and_wait(process, fd, output, b"r", b"Selection changed")
         result = h.send_and_wait(process, fd, output, b"\r", b"Selection changed")
         assert b"MASC Approvals" not in h.screen_text(result), result
         select_home(process, fd, output, b"refresh-card-A", destinations=5)
-        h.send_and_wait(process, fd, output, b"\r", b"call=call-refresh-a")
+        open_held_detail(process, fd, output, b"call-refresh-a",
+                         b'{"command":"echo call-refresh-a"}')
         # Deleting the currently opened authority must eject its detail.
         rows[:] = [row for row in rows if row["tool_call_id"] != "call-refresh-a"]
         h.send_and_wait(process, fd, output, b"r", b"Selection changed")
@@ -217,7 +320,8 @@ def many_cards_keep_continuation(executable):
                 within_window = frame(process, fd, output, "many-requests-selected")
                 assert position.group() in within_window, within_window
         retained_position = position.group()
-        h.send_and_wait(process, fd, output, b"\r", b"call=call-window-29")
+        open_held_detail(process, fd, output, b"call-window-29",
+                         b'{"command":"echo call-window-29"}')
         h.send_and_wait(process, fd, output, b"\x1b", b"Enter:open")
         assert_selected(output, b"window-card-29")
         assert retained_position in frame(process, fd, output, "many-requests-return")
@@ -309,7 +413,8 @@ def question_identity_and_return(executable):
 if __name__ == "__main__":
     executable = os.path.abspath(sys.argv[1])
     for scenario in (same_keeper_distinct_and_duplicate, failed_source_keeps_known_cards,
+                     each_failed_source_keeps_other_cards, hidden_help_does_not_pin_unseen_request,
                      refresh_identity_and_deletion, many_cards_keep_continuation,
                      goal_opens_exact_detail, question_identity_and_return):
         scenario(executable)
-    print("Home decision cards PTY: PASS (6 scenarios)")
+    print("Home decision cards PTY: PASS (11 scenarios)")

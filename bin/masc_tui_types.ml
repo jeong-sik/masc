@@ -11219,6 +11219,34 @@ let home_selected_action state =
   | Some action ->
       if List.mem action actions then Some action else None
 
+(* Frame preparation pins only an authoritative initial reading; transient
+   boot destinations must remain free to settle. Drawing shares these pure
+   projections but does not store either selection or viewport state. *)
+let home_initial_reading_ready state selected =
+  match selected with
+  | Some (Home_request _ | Home_resume _ | Home_read_last _) -> true
+  | Some Home_approvals -> approvals_reading_current state
+  | Some (Home_choose_keeper | Home_create_keeper) ->
+      approvals_reading_current state && Option.is_some state.operator_stalled
+      && (match state.goals_to_confirm with Masc_tui_agenda.Read _ -> true | _ -> false)
+  | Some Home_agenda | None -> false
+
+let home_decision_window state ~budget =
+  let decisions = home_decision_rows state in
+  let continuation = home_continue_rows state in
+  let selected = home_selected_action state in
+  let warning_rows =
+    if Option.is_some state.home_selected && Option.is_none selected then 1 else 0
+  in
+  let capacity = max 0 (budget - List.length continuation - 2 - warning_rows) in
+  let first = max 0 (min state.home_decision_scroll (List.length decisions - capacity)) in
+  let first = match List.find_index (fun (action, _) -> Some action = selected) decisions with
+    | Some index when index < first -> index
+    | Some index when index >= first + capacity -> max 0 (index - capacity + 1)
+    | Some _ | None -> first
+  in
+  first, capacity
+
 let home_step state ~backwards =
   let actions = home_actions state in
   let current = home_selected_action state in

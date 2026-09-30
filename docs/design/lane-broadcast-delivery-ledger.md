@@ -31,6 +31,13 @@ with descriptor cleanup failures carry that evidence without inviting replay.
 A semantic refusal with a cleanup failure preserves both typed primary and
 cleanup evidence. Recovery returns completed records with cleanup failures in
 settled_with_cleanup, separately from pending delivery obligations.
+Recovery opens only an existing uniquely linked regular journal, using the same
+exclusive journal lock as admission. A durable pending marker whose journal is
+missing is corrupted evidence: recovery retains the marker and refuses the scan
+without creating a replacement journal. Only an existing empty journal can be a
+pre-admission crash boundary; its marker is retired while that journal is locked.
+Pending journal filenames must be exact lowercase SHA-256 identities.
+
 Callers offload blocking ledger operations through the existing host boundary.
 
 ## Runtime integration child

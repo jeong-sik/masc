@@ -829,7 +829,7 @@ let rewrite_task_cache_signal config ~msg_type ~task_cache_signal ~content =
 
 type fleet_delivery_mode = Immediate_fleet | Deferred_fleet
 
-let broadcast_with_mention ?trace_context ?request_id ~fleet_delivery ~msg_type ~audience
+let broadcast_with_mention ?trace_context ?request_id ?on_committed ~fleet_delivery ~msg_type ~audience
     config ~from_agent ~content ~pre_extract_mention ~deferred_by_predecessor =
   let started_at = Time_compat.now () in
   let observe final_msg_type =
@@ -922,6 +922,7 @@ let broadcast_with_mention ?trace_context ?request_id ~fleet_delivery ~msg_type 
              mention_delivery = Deferred Workspace_status_unavailable
            })
    | Ok { mirror_error } ->
+     Option.iter (fun notify -> notify ()) on_committed;
      Option.iter
        (fun message ->
           Log.Misc.warn
@@ -972,7 +973,7 @@ let broadcast_with_mention ?trace_context ?request_id ~fleet_delivery ~msg_type 
      observe stored_msg_type;
      Ok { delivery with mention_delivery })
 
-let broadcast_internal ?trace_context ?request_id ?(fleet_delivery=Immediate_fleet) ?(msg_type = "broadcast") ?task_cache_signal
+let broadcast_internal ?trace_context ?request_id ?on_committed ?(fleet_delivery=Immediate_fleet) ?(msg_type = "broadcast") ?task_cache_signal
       ~audience config ~from_agent ~content =
   ensure_initialized config;
   (* Preserve original content and extract mention tokens before any
@@ -986,7 +987,7 @@ let broadcast_internal ?trace_context ?request_id ?(fleet_delivery=Immediate_fle
   | Ok (content, msg_type) ->
     let run deferred_by_predecessor =
       broadcast_with_mention
-        ?trace_context ?request_id ~fleet_delivery
+        ?trace_context ?request_id ?on_committed ~fleet_delivery
         ~msg_type
         ~audience
         config
@@ -1017,35 +1018,56 @@ let broadcast_internal ?trace_context ?request_id ?(fleet_delivery=Immediate_fle
 let broadcast ?trace_context ?msg_type ?task_cache_signal ~audience config ~from_agent ~content =
   broadcast_internal ?trace_context ?msg_type ?task_cache_signal ~audience config ~from_agent ~content
 
-type exact_request_lock = { mutex : Cross_context_mutex.t; mutable users : int }
-let exact_request_locks = Hashtbl.create 16
-let exact_request_locks_mutex = Mutex.create ()
-let release_exact_request_lock key lease =
-  Mutex.protect exact_request_locks_mutex (fun () ->
-    lease.users <- lease.users - 1;
-    if lease.users=0 then Hashtbl.remove exact_request_locks key)
-let with_exact_request_lock config request_id f =
-  let key = masc_dir config, request_id in
-  let lease = Mutex.protect exact_request_locks_mutex (fun () ->
-    let lease = match Hashtbl.find_opt exact_request_locks key with
-      | Some lease -> lease
-      | None -> let lease = {mutex=Cross_context_mutex.create (); users=0} in
-          Hashtbl.add exact_request_locks key lease; lease in
-    lease.users <- lease.users + 1;
-    lease) in
-  Fun.protect ~finally:(fun () -> release_exact_request_lock key lease)
-    (fun () -> Cross_context_mutex.with_lock lease.mutex f)
-
-let reconcile_if_idle config request_id ~busy f =
-  let key = masc_dir config, request_id in
-  let lease = Mutex.protect exact_request_locks_mutex (fun () ->
-    if Hashtbl.mem exact_request_locks key then None
-    else let lease = {mutex=Cross_context_mutex.create ();users=1} in
-      Hashtbl.add exact_request_locks key lease; Some lease) in
-  match lease with
-  | None -> busy ()
-  | Some lease -> Fun.protect ~finally:(fun () -> release_exact_request_lock key lease)
-      (fun () -> Cross_context_mutex.with_lock lease.mutex f)
+(* The active operation owns message creation and fanout, but retries wait
+   only for the authoritative row (or for an attempt that ended without it).
+   A resolved promise also closes registration races across Eio domains; raw
+   threads wait on the same readiness under a synchronous condition variable. *)
+type exact_request_ready = Row_visible | Attempt_finished
+type exact_request_operation = {
+  ready : exact_request_ready Eio.Promise.t;
+  resolve_ready : exact_request_ready Eio.Promise.u;
+  ready_condition : Condition.t;
+  mutable readiness : exact_request_ready option;
+}
+type exact_request_admission =
+  | Own_request of exact_request_operation
+  | Active_request of exact_request_operation
+let exact_request_operations = Hashtbl.create 16
+let exact_request_operations_mutex = Mutex.create ()
+let on_exact_request_wait = Atomic.make (fun (_ : string) -> ())
+let signal_exact_request_locked operation readiness =
+    match operation.readiness with
+    | Some Row_visible | Some Attempt_finished -> ()
+    | None ->
+        operation.readiness <- Some readiness;
+        Eio.Promise.resolve operation.resolve_ready readiness;
+        Condition.broadcast operation.ready_condition
+let signal_exact_request operation readiness =
+  Mutex.protect exact_request_operations_mutex (fun () ->
+    signal_exact_request_locked operation readiness)
+let admit_exact_request key =
+  Mutex.protect exact_request_operations_mutex (fun () ->
+    match Hashtbl.find_opt exact_request_operations key with
+    | Some operation -> Active_request operation
+    | None ->
+        let ready, resolve_ready = Eio.Promise.create () in
+        let operation = {ready; resolve_ready;
+          ready_condition=Condition.create (); readiness=None} in
+        Hashtbl.add exact_request_operations key operation;
+        Own_request operation)
+let finish_exact_request key operation =
+  Mutex.protect exact_request_operations_mutex (fun () ->
+    Hashtbl.remove exact_request_operations key;
+    signal_exact_request_locked operation Attempt_finished)
+let await_exact_request request_id operation =
+  (Atomic.get on_exact_request_wait) request_id;
+  match Eio_guard.execution_context () with
+  | Eio_guard.Eio_fiber -> ignore (Eio.Promise.await operation.ready : exact_request_ready)
+  | Eio_guard.Non_eio ->
+      Mutex.protect exact_request_operations_mutex (fun () ->
+        while Option.is_none operation.readiness do
+          Condition.wait operation.ready_condition exact_request_operations_mutex
+        done)
 
 let validate_deferred_fleet_content content = match Mention.extract content with
   | Some _ -> Error (Broadcast_policy_rejected "deferred Fleet publication cannot carry a mention")
@@ -1105,21 +1127,41 @@ let broadcast_once ?(fleet_delivery=Immediate_fleet) ~request_id config ~from_ag
     match message.mention with
     | None -> run ()
     | Some _ -> Cross_context_mutex.with_lock mention_delivery_mutex run in
-  (* Read before waiting for the first caller: its message may already be
-     committed while its fleet transcript writes are still blocked. *)
-  let* existing = lookup () in
-  match existing with
-  | Some (message, delivery) -> (match fleet_delivery with
-      | Deferred_fleet -> Ok delivery
-      | Immediate_fleet -> reconcile_if_idle config request_id
-          ~busy:(fun () -> Ok delivery) (fun () -> replay message delivery))
-  | None -> with_exact_request_lock config request_id (fun () ->
-      let* existing = lookup () in
-      match existing with
-      | Some (message, delivery) -> replay message delivery
-      | None -> broadcast_internal ~request_id ~fleet_delivery ~audience config ~from_agent ~content)
+  let key = masc_dir config, request_id in
+  let own operation f =
+    Fun.protect ~finally:(fun () -> finish_exact_request key operation) f in
+  let rec send () =
+    let* existing = lookup () in
+    match existing with
+    | Some (message, delivery) ->
+        (match fleet_delivery with
+         | Deferred_fleet -> Ok delivery
+         | Immediate_fleet -> match admit_exact_request key with
+         | Active_request _ -> Ok delivery
+         | Own_request operation -> own operation (fun () ->
+             signal_exact_request operation Row_visible;
+             replay message delivery))
+    | None ->
+        (match admit_exact_request key with
+         | Active_request operation ->
+             await_exact_request request_id operation;
+             send ()
+         | Own_request operation -> own operation (fun () ->
+             (* Another process may have committed between our first read and
+                admission. Read again before creating any authoritative row. *)
+             let* existing = lookup () in
+             match existing with
+             | Some (message, delivery) ->
+                 signal_exact_request operation Row_visible;
+                 replay message delivery
+             | None -> broadcast_internal ~request_id ~fleet_delivery ~audience
+                 ~on_committed:(fun () -> signal_exact_request operation Row_visible)
+                 config ~from_agent ~content))
+  in
+  send ()
 
 module For_testing = struct
+  let replace_on_exact_request_wait handler = Atomic.exchange on_exact_request_wait handler
   let replace_on_broadcast_mention handler =
     Atomic.exchange on_broadcast_mention handler
 

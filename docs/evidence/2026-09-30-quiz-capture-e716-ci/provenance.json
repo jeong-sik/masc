@@ -1,0 +1,20 @@
+{
+  "source_commit": "e716f181773b6f61925f43771283a000c992e26a",
+  "native_test_run": 36657267038,
+  "image_test_run": 36657271661,
+  "native_suite_results": {
+    "test_lane_quiz_packages": "27 stdio tests PASS",
+    "test_lane_addon_sources": "9 native cases PASS",
+    "test_lane_addon_composition": "7 native cases PASS",
+    "test_lane_addon_declaration": "6 native cases PASS"
+  },
+  "package_python_tests": 75,
+  "scope": "CI native host with fixture worker transports and package image build; no installed runtime or live scores",
+  "production_source_hashes": {
+    "addons/quiz-grader/server.py": "fed6ac73ae511f6f11f4e79ae4d90abd260a563a294da57ed1a11c70b5083abf",
+    "addons/quiz-questions/server.py": "00f2c1075a16fb5c1dc947f828eab7b4c30ab25788de32596e8ef8b86a689083",
+    "addons/quiz-grader/lane.toml": "eea5dd6d1374877548a54568c0238242312efffd6767ccec69f8ddd535f8a3c1",
+    "addons/quiz-questions/lane.toml": "ed5a2fa26cfd8d80d7caab1994009e327e0d2a5f9562620f40ce8f1ab80ad588",
+    "addons/protocol.py": "694108235985e142c8b0885a34d5d6355b56e9ac2eec9fb9b2bcd44642549362"
+  }
+}

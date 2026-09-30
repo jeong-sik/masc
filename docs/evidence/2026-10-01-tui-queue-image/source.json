@@ -1,0 +1,15 @@
+{
+  "head": "cf6a0c37b52ce0a05ad4b717a4e98585c4cde131",
+  "worktree": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-keeper-snapshot-codec-pool",
+  "command": [
+    "opam",
+    "exec",
+    "--switch=5.5.1",
+    "--",
+    "scripts/dune-local.sh",
+    "build",
+    "bin/masc_tui.exe",
+    "test/test_tui_image_preview.exe"
+  ],
+  "scope": "User-authorized isolated TUI build and PTYs; no installation or production changes"
+}

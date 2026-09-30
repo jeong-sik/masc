@@ -289,6 +289,8 @@
 (executable
  (name stagehand_model_probe)
  (modules stagehand_model_probe)
+ (preprocess
+  (pps ppx_enumerate))
  (libraries masc masc.runtime masc.server masc.config masc_eio_context agent_core
   masc.agent_core.llm_provider masc.fs_compat
   cohttp cohttp-eio yojson unix eio eio_main))
@@ -494,7 +496,7 @@
  (name masc_tui_lane_addons)
  (wrapped false)
  (modules masc_tui_lane_addons)
- (libraries masc masc_tui_message_layout masc_tui_lane_declaration masc_tui_schema_form masc_tui_lane_installer masc_tui_lane_subscriptions masc_tui_theme yojson unix))
+ (libraries masc masc_tui_message_layout masc_tui_text_block masc_tui_lane_declaration masc_tui_schema_form masc_tui_lane_installer masc_tui_lane_subscriptions masc_tui_theme yojson unix))
 
 ;; The Fusion launch form: what it offers, what a submit means, what the
 ;; overlay says. Names Fusion_types for the topology sum, so it lists
@@ -533,6 +535,20 @@
  (wrapped false)
  (modules masc_tui_preset_text)
  (libraries masc masc_tui_fetched masc_tui_message_layout))
+
+;; The card an issued play invite is drawn as: pure, so a test reads the exact
+;; rows an operator sees. The QR is drawn by the portraits' half-block mosaic in
+;; two colours of its own.
+(library
+ (name masc_tui_play_card)
+ (wrapped false)
+ (modules masc_tui_play_card)
+ (libraries
+  masc
+  masc_tui_image_mosaic
+  masc_tui_terminal_palette
+  masc_tui_theme
+  qrc))
 
 (library
  (name masc_tui_mcp)
@@ -729,7 +745,8 @@
   masc.runtime
   masc.runtime_toml_namespace
   masc.toml_line_editor
-  masc.voice_config))
+  masc.voice_config
+  unix))
 
 (library
  (name masc_tui_theme_catalog)
@@ -820,12 +837,6 @@
  (preprocess
   (pps ppx_enumerate))
  (libraries base64 masc.masc_compression))
-
-(library
- (name masc_tui_play_qr)
- (wrapped false)
- (modules masc_tui_play_qr)
- (libraries qrc))
 
 (library
  (name masc_tui_link)
@@ -1344,7 +1355,7 @@
  (name masc_tui_types)
  (wrapped false)
  (modules masc_tui_types)
- (libraries masc_tui_config masc_tui_account_login digestif mtime.clock.os masc_tui_command masc_tui_pick_list masc_tui_esc_interrupt masc_tui_planning_detail
+ (libraries masc.keeper_registry masc_tui_config masc_tui_account_login digestif mtime.clock.os masc_tui_command masc_tui_play_card masc_tui_pick_list masc_tui_esc_interrupt masc_tui_planning_detail
   ;; [threshold_cols] is the width two panes need: the Board read layout is
   ;; decided here so the footer and the frame cannot disagree about it.
   masc_tui_roster_pane
@@ -1472,6 +1483,7 @@
  (modules masc_tui_render_tools)
  (libraries
   masc_tui_press
+  masc_tui_frame
   masc_tui_message_layout
   masc
   masc_types
@@ -1667,6 +1679,8 @@
   masc_tui_link_preview
   masc_tui_terminal_palette
   masc_tui_roster_pane
+  masc_tui_chat_portrait
+  masc_tui_portrait_view
   masc_tui_keeper_chat_queue
   masc_tui_answering
   masc_tui_esc_interrupt
@@ -1728,13 +1742,14 @@
  (modules
   masc_tui
   masc_tui_render
+  masc_tui_render_board
   masc_tui_loader
   masc_tui_http)
  (public_name masc-tui)
  (package masc)
  (libraries
-  masc_tui_play_qr
   masc_tui_account_login
+  masc_tui_play_card
   masc_tui_sgr_text
   masc_tui_emblem_screen
   masc_tui_keeper_portrait
@@ -1795,6 +1810,7 @@
   masc_tui_terminal_palette
   masc_tui_terminal_probe
   masc_tui_input_decoder
+  masc_tui_input_reader
   masc_tui_code_lexer
   masc_tui_memo
   masc_tui_span
@@ -2029,7 +2045,7 @@
  (name masc_tui_image_preview)
  (wrapped false)
  (modules masc_tui_image_preview)
- (libraries masc_tui_keeper_chat_projection masc_tui_image_ref masc.masc_tool_blob_store base64))
+ (libraries masc_tui_keeper_chat_projection masc_tui_image_ref masc.masc_tool_blob_store base64 digestif yojson))
 
 (library
  (name masc_tui_link_label)
@@ -2041,7 +2057,7 @@
  (name masc_tui_link_preview)
  (wrapped false)
  (modules masc_tui_link_preview)
- (libraries masc_tui_link_label masc_tui_lru masc_tui_message_layout masc_tui_theme uri))
+ (libraries masc masc_tui_link_label masc_tui_lru masc_tui_message_layout masc_tui_theme uri))
 
 (library
  (name masc_tui_image_mosaic)
@@ -2058,6 +2074,7 @@
  (modules masc_tui_portrait_view)
  (libraries
   masc.keeper_portrait
+  masc_tui_frame_presenter
   masc_tui_graphics
   masc_tui_image_mosaic
   masc_tui_terminal_palette))
@@ -2070,6 +2087,7 @@
  (modules masc_tui_emblem_screen)
  (libraries
   masc.keeper_portrait
+  masc_tui_keeper_portrait
   masc_tui_graphics
   masc_tui_message_layout
   masc_tui_portrait_view
@@ -2087,6 +2105,13 @@
   masc_tui_graphics
   masc_tui_portrait_view
   masc_tui_terminal_palette))
+
+(library
+ (name masc_tui_chat_portrait)
+ (wrapped false)
+ (modules masc_tui_chat_portrait)
+ (libraries masc_tui_keeper_portrait masc_tui_portrait_view
+  masc_tui_graphics masc_tui_terminal_palette masc_tui_ansi masc_tui_frame))
 
 ;; Decides, by magic bytes, whether a downloaded body may sit in the preview
 ;; image cache, and what a curl or ffmpeg exit status means. Kept apart from
@@ -2176,3 +2201,21 @@
   masc_tui_paste
   masc_tui_terminal_palette
   masc_tui_utf8_input))
+
+(library
+ (name masc_tui_input_reader)
+ (wrapped false)
+ (modules masc_tui_input_reader)
+ (libraries
+  masc
+  masc_core
+  masc_eio_context
+  masc_tui_input_decoder
+  masc_tui_terminal_probe
+  masc_tui_terminal_palette
+  masc_tui_render_schedule
+  masc_tui_paste
+  eio
+  eio.unix
+  unix
+  mtime.clock.os))

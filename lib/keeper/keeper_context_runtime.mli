@@ -68,7 +68,7 @@ type max_context_resolution =
   { requested_override : int option
   ; primary_budget : int
   ; runtime_budget : int
-  ; runtime_budget_source : Runtime.max_context_source
+  ; runtime_budget_source : Runtime_instance.max_context_source
     (** Where [runtime_budget] came from (capability catalog, runtime.toml
         override, or override clamped by capability). *)
   ; requested_context_window : int

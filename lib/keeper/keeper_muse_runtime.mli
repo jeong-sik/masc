@@ -38,6 +38,9 @@ type attempt_outcome =
 
 val run :
   ?official_task_reference:Keeper_official_task_reference.t ->
+  ?composed_context:(unit -> Keeper_official_client_host.composed_context option) ->
+  (* Read after hook assembly to name independently deduplicated context blocks.
+      [None] compares the complete carried context as one unit. *)
   accepts_image_input:bool ->
   ?required_native_posture:Runtime_native_tools.posture ->
   ?official_client_continuation:Keeper_semantic_execution.official_client_checkpoint ->
@@ -103,7 +106,7 @@ val run :
 
     Start carries canonical history; Resume reports the history held by the
     vendor session and sends the current goal and context. [prompt_capacity]
-    is the runtime's {!Runtime.muse_prompt_capacity}: it bounds the prepared
+    is the runtime's {!Runtime_instance.muse_prompt_capacity}: it bounds the prepared
     input, and an [Error] refuses the turn with its cause, because the host
     rewrites an oversized input instead of refusing it. No top-level runtime routing is
     exposed here. *)
@@ -157,7 +160,7 @@ module For_testing : sig
 
   val reserved_prompt_bytes : system_prompt:string -> goal:string -> int
   (** What the fixed sections of a start prompt charge against the prompt
-      ceiling ({!Runtime.muse_prompt_capacity}) before any history
+      ceiling ({!Runtime_instance.muse_prompt_capacity}) before any history
       message. *)
 
   val measure_model_input_message_bytes : Agent_core.Types.message -> int

@@ -5,6 +5,7 @@ let label : Lane_id.builtin -> string = function
   | Lane_id.Exact Standalone_lane.Workspace_curator -> "Workspace Curator"
   | Lane_id.Exact Standalone_lane.Verifier -> "Verifier"
   | Lane_id.Exact Standalone_lane.Browser_stagehand -> "Browser Stagehand"
+  | Lane_id.Exact Standalone_lane.Candle_appraiser -> "Candle Appraiser"
   | Lane_id.Browser Browser_lane.Lane_name.Live -> "Browser Lane (live)"
   | Lane_id.Browser Browser_lane.Lane_name.Automation -> "Browser Lane (automation)"
   | Lane_id.Browser Browser_lane.Lane_name.Stagehand -> "Browser Lane (stagehand)"
@@ -27,6 +28,8 @@ let purpose : Lane_id.builtin -> string = function
   | Lane_id.Exact Standalone_lane.Browser_stagehand ->
     "Answers structured model requests from the Stagehand browser lane; run records are not \
      retained yet."
+  | Lane_id.Exact Standalone_lane.Candle_appraiser ->
+    "Appraises a confirmed Goal payout grade, each candidate Task's relation to the Goal, and Keeper contribution weights."
   | Lane_id.Browser Browser_lane.Lane_name.Live ->
     "Reads and drives tabs in the operator's own browser, through the browser-lane extension \
      and host."
@@ -76,6 +79,9 @@ let lanes_of_misc_operation : Tool_schemas_misc.misc_operation -> Lane_id.builti
   | Tool_schemas_misc.Misc_keeper_waiting_inventory
   | Tool_schemas_misc.Misc_tool_help
   | Tool_schemas_misc.Misc_portrait_read
+  | Tool_schemas_misc.Misc_candle_balance
+  | Tool_schemas_misc.Misc_candle_catalog
+  | Tool_schemas_misc.Misc_candle_purchase
   | Tool_schemas_misc.Misc_web_fetch
   | Tool_schemas_misc.Misc_web_search -> []
   | Tool_schemas_misc.Misc_browser_tabs

@@ -1914,6 +1914,7 @@ let test_resume_prompt_sends_only_changed_blocks () =
     ; Prompt_block_id.Dynamic_context, List.nth texts 1
     ; Prompt_block_id.Temporal_summary, List.nth texts 2
     ; Prompt_block_id.Operator_note, List.nth texts 3
+    ; Prompt_block_id.Librarian_working_context, List.nth texts 4
     ]
   in
   let turn texts =
@@ -1945,23 +1946,30 @@ let test_resume_prompt_sends_only_changed_blocks () =
          }
          : Agent_core.Types.message)
   in
-  let composed_context, messages = turn [ "MEMORY"; "DYNAMIC"; "CLOCK 1"; "NOTE" ] in
+  let composed_context, messages = turn [ "MEMORY"; "DYNAMIC"; "CLOCK 1"; "NOTE"; "LIBRARIAN 1" ] in
   let held = Keeper_official_client_host.start_held_context ?composed_context messages in
-  check int "a start holds every block except the note" 3 (List.length held);
-  let composed_context, messages = turn [ "MEMORY"; "DYNAMIC"; "CLOCK 2"; "NOTE" ] in
+  check int "a start holds every block except the note" 4 (List.length held);
+  let composed_context, messages = turn [ "MEMORY"; "DYNAMIC"; "CLOCK 1"; "NOTE"; "LIBRARIAN 2" ] in
+  let librarian_delivery =
+    Keeper_official_client_host.resume_prompt ~goal:"GOAL" ~held ?composed_context messages
+  in
+  check string "a Librarian revision does not replay unchanged ordinary Recall"
+    (rendered_blocks [ "NOTE"; "LIBRARIAN 2" ] ^ "\n\nGOAL")
+    librarian_delivery.prompt;
+  let composed_context, messages = turn [ "MEMORY"; "DYNAMIC"; "CLOCK 2"; "NOTE"; "LIBRARIAN 1" ] in
   let delivery =
     Keeper_official_client_host.resume_prompt ~goal:"GOAL" ~held ?composed_context messages
   in
   check string "the changed clock and the note go; held blocks stay out"
     (rendered_blocks [ "CLOCK 2"; "NOTE" ] ^ "\n\nGOAL")
     delivery.prompt;
-  let composed_context, messages = turn [ "MEMORY 2"; "DYNAMIC"; "CLOCK 2"; "NOTE" ] in
+  let composed_context, messages = turn [ "MEMORY 2"; "DYNAMIC"; "CLOCK 2"; "NOTE"; "LIBRARIAN 1" ] in
   check string "the session now holds the clock it was sent"
     (rendered_blocks [ "MEMORY 2"; "NOTE" ] ^ "\n\nGOAL")
     (Keeper_official_client_host.resume_prompt
        ~goal:"GOAL" ~held:delivery.held_context ?composed_context messages)
       .prompt;
-  let _, messages = turn [ "MEMORY 2"; "DYNAMIC"; "CLOCK 2"; "NOTE" ] in
+  let _, messages = turn [ "MEMORY 2"; "DYNAMIC"; "CLOCK 2"; "NOTE"; "LIBRARIAN 1" ] in
   check bool "a carrier its assembly does not name is carried whole" true
     (String_util.contains_substring
        (Keeper_official_client_host.resume_prompt
@@ -2226,7 +2234,7 @@ let run_direct_attempt
                   let config =
                     match Runtime.get_runtime_by_id "claude.claude" with
                     | Some
-                        { Runtime.execution = Runtime_execution.Claude_code config
+                        { Runtime_instance.execution = Runtime_execution.Claude_code config
                         ; _
                         } ->
                       config

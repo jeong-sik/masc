@@ -326,7 +326,7 @@ let with_fixture_sequence ?capture_path first_lines second_lines f =
     (fun () -> f path)
 ;;
 
-let run_fixture ?account_home ?(worker_pool = false) ?isolated_home ?(dynamic_tools = []) ?thread_mode ?(history = [])
+let run_fixture ?account_home ?(worker_pool = false) ?isolated_home ?(dynamic_tools = []) ?reasoning_effort ?thread_mode ?(history = [])
     ?(developer_context = []) ?developer_instructions ?(cwd = "/tmp")
     ?(timeout_s = 2.0) ?admission_timeout_s ?(no_turn_deadline = false)
     ?on_thread_ready_delay_s ?on_turn_started_delay_s ?on_stream_event
@@ -372,6 +372,7 @@ let run_fixture ?account_home ?(worker_pool = false) ?isolated_home ?(dynamic_to
       ~clock
       ~cwd:Eio.Path.(Eio.Stdenv.fs env / cwd)
       ~dynamic_tools
+      ?reasoning_effort
       ?thread_mode
       ~history
       ~developer_context
@@ -683,8 +684,31 @@ let test_native_effect_before_overflow () =
          | Ok _ -> fail "overflow unexpectedly succeeded"))
       [ "commandExecution", true; "collabAgentToolCall", true;
         "imageGeneration", true; "futureToolItem", true;
-        "reasoning", false; "dynamicToolCall", false ])
+        "reasoning", false; "dynamicToolCall", false; "contextCompaction", false ])
     ["item/started"; "item/completed"]
+;;
+
+let test_completed_compaction_has_a_typed_event () =
+  let item method_ = Yojson.Safe.to_string (`Assoc
+    [ "method", `String method_; "params", `Assoc
+      [ "threadId", `String "thread-1"; "turnId", `String "turn-1"
+      ; "item", `Assoc ["type", `String "contextCompaction"; "id", `String "compact-1"] ] ]) in
+  let events = ref [] in
+  with_fixture
+    [ init_result; account_chatgpt; thread_result; turn_result
+    ; item "item/started"; item "item/completed"; item_completed; turn_completed ]
+    (fun path ->
+      match run_fixture ~on_stream_event:(fun event -> events := event :: !events) path with
+      | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+      | Ok _ ->
+        check int "only completion emits the compaction witness" 1
+          (List.length (List.filter (function
+            | Runtime_codex_app_server.Compaction_observed -> true
+            | _ -> false) !events));
+        check int "compaction is not classified as a native tool effect" 0
+          (List.length (List.filter (function
+            | Runtime_codex_app_server.Native_tool_started _ | Native_tool_finished _ -> true
+            | _ -> false) !events)))
 ;;
 
 let test_prompt_char_count () =
@@ -1194,7 +1218,8 @@ let test_prompt_transmission_boundary ?(worker_pool = false) () =
   let transmitted_prompt = String.make 65_536 '"' ^ "한글 👩‍💻\n\\marker" in
   Fun.protect ~finally:(fun () -> Sys.remove captured) (fun () ->
     with_fixture ~capture_path:captured lines (fun path ->
-      let result = run_fixture ~prompt:transmitted_prompt ~on_prompt_sent:report path in
+      let result = run_fixture ~prompt:transmitted_prompt ~on_prompt_sent:report
+        ~reasoning_effort:Llm_provider.Reasoning_effort.Ultra path in
       check bool "complete turn succeeds" true (Result.is_ok result);
       check int "complete write emits once" 1 !sent;
       let open Yojson.Safe.Util in
@@ -1205,7 +1230,9 @@ let test_prompt_transmission_boundary ?(worker_pool = false) () =
         |> List.find (fun json -> json |> member "method" = `String "turn/start") in
       let text = request |> member "params" |> member "input" |> to_list
         |> List.hd |> member "text" |> to_string in
-      check string "client received exact turn input" transmitted_prompt text));
+      check string "client received exact turn input" transmitted_prompt text;
+      check string "ultra reaches the Codex turn/start wire unchanged" "ultra"
+        (request |> member "params" |> member "effort" |> to_string)));
   with_fixture [ init_result; account_chatgpt; thread_result; turn_result; turn_failed ]
     (fun path ->
       (match run_fixture ~on_prompt_sent:report path with
@@ -1840,7 +1867,7 @@ let test_invalid_elicitation_keeps_protocol_error () =
       change "requestedSchema" (`Assoc ["type", `String "array"; "properties", `Assoc []]) ]
 ;;
 
-let test_native_read_disables_host_shell_argv () =
+let test_client_argv_carries_posture_and_sub_agent_overrides () =
   List.iter (fun native ->
     let argv_path = Filename.temp_file "codex-native-argv-" ".txt" in
     Fun.protect ~finally:(fun () -> Sys.remove argv_path) (fun () ->
@@ -1863,8 +1890,11 @@ let test_native_read_disables_host_shell_argv () =
          | Runtime_native_tools.Native_read ->
            ["-c"; "features.shell_tool=false"; "-c"; "features.unified_exec=false"]
          | Native_full -> []
-         | Native_none -> fail "none is not part of this fixture") in
-      check (list string) "same process receives posture-scoped config overrides" expected argv))
+         | Native_none -> fail "none is not part of this fixture") @
+        (* The model catalog picks the version when only features.multi_agent
+           is off, so the switch that counts is [agents] enabled. *)
+        ["-c"; "agents.enabled=false"; "-c"; "features.multi_agent_v2=false"] in
+      check (list string) "same process receives the posture-scoped and sub-agent config overrides" expected argv))
     [Runtime_native_tools.Native_read; Runtime_native_tools.Native_full]
 ;;
 
@@ -1956,7 +1986,7 @@ let test_usage_frames_report_the_thread_count_before_a_usage_limit_ends_the_turn
       fail "a counted frame was read as a fill"
     | Turn_started _ | Text_delta _ | Dynamic_tool_started _ | Dynamic_tool_finished _
     | Native_tool_started _ | Native_tool_finished _ | Elicitation_cancelled _
-    | Usage_windows_reported _ | Turn_finished _ -> ()
+    | Usage_windows_reported _ | Compaction_observed | Turn_finished _ -> ()
   in
   with_fixture
     [ init_result; account_chatgpt; thread_result; turn_result
@@ -2805,7 +2835,7 @@ let test_rate_limit_updates_are_reported_without_changing_the_turn () =
     | Runtime_codex_app_server.Usage_windows_reported report -> reports := report :: !reports
     | Turn_started _ | Text_delta _ | Dynamic_tool_started _ | Dynamic_tool_finished _
     | Native_tool_started _ | Native_tool_finished _ | Elicitation_cancelled _
-    | Usage_reported _ | Turn_finished _ -> ()
+    | Usage_reported _ | Compaction_observed | Turn_finished _ -> ()
   in
   with_fixture
     [ init_result; account_chatgpt; thread_result; turn_result; readable; unreadable
@@ -3524,7 +3554,7 @@ let test_production_turn_records_its_keeper_as_the_failure_recorder () =
         | Some runtime -> runtime | None -> fail "the Codex runtime resolves" in
       recorded_by :=
         (match Runtime_candidate_backpressure.candidate_backpressure
-                 ~now:(Unix.gettimeofday ()) ~candidate:runtime.Runtime.candidate_backpressure with
+                 ~now:(Unix.gettimeofday ()) ~candidate:runtime.Runtime_instance.candidate_backpressure with
          | Some
              { Runtime_candidate_backpressure.failed_attempt =
                  Some (Runtime_candidate_backpressure.Failed_attempt { recorded_by; _ })
@@ -6354,23 +6384,12 @@ let test_production_dynamic_context_reaches_codex_instruction_wire ~project () =
          |> member "text"
          |> to_string
        in
-       (* The production assembly appends the temporal summary into the same
-          envelope after the turn instructions, so the instructions are the
-          prefix of the wire text rather than the whole of it. *)
-       if
-         String.length wire_text < String.length expected_dynamic_context
-         || String.sub wire_text 0 (String.length expected_dynamic_context)
-            <> expected_dynamic_context
-       then
-         check string
-           "production turn instructions stay exact on the wire"
-           expected_dynamic_context
-           wire_text
-       else
-         check string
-           "production turn instructions stay exact on the wire"
-           expected_dynamic_context
-           (String.sub wire_text 0 (String.length expected_dynamic_context));
+       (* Stable memory availability precedes dynamic instructions. Assert the
+          complete instruction section survives exactly once, without assuming
+          it is the first section of the assembled carrier. *)
+       let sections = Astring.String.cuts ~sep:"\n\n" wire_text in
+       check int "production turn instructions stay exact and occur once"
+         1 (List.length (List.filter (String.equal expected_dynamic_context) sections));
        (match
           context_message
           |> member "metadata"
@@ -7009,8 +7028,8 @@ let () =
             test_elicitation_cancel_then_dynamic_tool
         ; test_case "MCP elicitation identity and form validation" `Quick
             test_invalid_elicitation_keeps_protocol_error
-        ; test_case "read posture disables native host shell only" `Quick
-            test_native_read_disables_host_shell_argv
+        ; test_case "read posture disables native host shell; no posture allows sub-agents" `Quick
+            test_client_argv_carries_posture_and_sub_agent_overrides
         ; test_case "failed turn keeps typed error fields" `Quick
             test_failed_turn_keeps_typed_error_fields
         ; test_case "failed turn uses official context error enum" `Quick
@@ -7188,6 +7207,8 @@ let () =
             test_context_error_records_prior_tool_effect
         ; test_case "read-only contract controls both overflow terminals" `Quick
             test_read_only_overflow_contract
+        ; test_case "completed compaction emits a typed witness" `Quick
+            test_completed_compaction_has_a_typed_event
         ; test_case "native effects remain fenced before overflow" `Quick
             test_native_effect_before_overflow
         ; test_case "developer context preserves authority and history" `Quick

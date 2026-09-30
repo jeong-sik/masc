@@ -184,7 +184,7 @@ let loopback_request_authority () =
   | Error `Malformed -> fail "failed to construct loopback request authority"
 ;;
 
-let dispatch_json ?(meth = "POST") ?token ~router ~path ~extra_headers ~body () =
+let dispatch_response ?(meth = "POST") ?token ~router ~path ~extra_headers ~body () =
   Server_request_authority.with_current
     (loopback_request_authority ())
     (fun () ->
@@ -254,9 +254,13 @@ let dispatch_json ?(meth = "POST") ?token ~router ~path ~extra_headers ~body () 
          else body_offset (index + 1)
        in
        let offset = body_offset 0 in
-       ( status
-       , Yojson.Safe.from_string
-           (String.sub raw offset (String.length raw - offset)) ))
+       status, String.sub raw offset (String.length raw - offset))
+;;
+
+let dispatch_json ?meth ?token ~router ~path ~extra_headers ~body () =
+  let status, body =
+    dispatch_response ?meth ?token ~router ~path ~extra_headers ~body () in
+  status, Yojson.Safe.from_string body
 ;;
 
 let with_authenticated_activity_router ~prefix ~agent_name f =
@@ -664,6 +668,141 @@ let test_board_write_routes_use_authenticated_actor () =
   check string "tokenless local actor comes from admitted auth resolver"
     "local-dashboard-actor"
     (Masc.Board.Agent_id.to_string local_post.author)
+;;
+
+(* The Board list page is one projection for both transports, kept with its
+   serialized bytes. A second read of an unchanged board takes the kept
+   bytes. The board write hook drops every [board:list:] entry, so the read
+   after it shows the write, and the route sends the page the projection
+   keeps. *)
+let page_titles (page : Yojson.Safe.t) =
+  match page with
+  | `Assoc fields ->
+    (match List.assoc_opt "posts" fields with
+     | Some (`List posts) ->
+       List.filter_map
+         (function
+           | `Assoc post ->
+             (match List.assoc_opt "title" post with
+              | Some (`String title) -> Some title
+              | Some _ | None -> None)
+           | _ -> None)
+         posts
+       |> List.sort String.compare
+     | Some _ | None -> fail "the page has no posts list")
+  | _ -> fail "the page is not an object"
+;;
+
+(* The route and the projection share one kept page. The prepared-payload hook
+   fires each time the cache fills an entry with serialized bytes, so the route
+   read counts one only when it fills the kept entry, and a later read that
+   reuses the entry counts none. Serializing again inside a response would not
+   reach the hook. The route reads as the token's agent, so the projection is
+   asked for the same reaction actor. This fixture clears the board event hook,
+   so the write is followed by the invalidation that hook performs. *)
+let test_board_list_route_and_projection_share_the_kept_page () =
+  with_authenticated_activity_router
+    ~prefix:"board-list-kept-"
+    ~agent_name:"list-reader"
+  @@ fun ~base_path ~config ~state:_ ~sw:_ ~clock:_ ~router ~token ->
+  with_board_store ~base_path
+  @@ fun () ->
+  let post title =
+    let status, _ =
+      dispatch_json ~router ~token ~path:"/api/v1/tools/masc_board_post"
+        ~extra_headers:[]
+        ~body:
+          (Yojson.Safe.to_string
+             (`Assoc [ "title", `String title; "body", `String "a post the list shows" ]))
+        ()
+    in
+    check int ("post accepted: " ^ title) 201 status
+  in
+  let path = "/api/v1/board?sort_by=recent" in
+  let page ?(reaction_actor = Some "list-reader") ?(target = path) () =
+    Server_board_list_http.payload ~config ~reaction_actor
+      (Httpun.Request.create `GET target)
+  in
+  let route_titles () =
+    let status, json =
+      dispatch_json ~meth:"GET" ~router ~token ~path ~extra_headers:[] ~body:"" ()
+    in
+    check int "the route answers" 200 status;
+    page_titles json
+  in
+  let prepared = ref 0 in
+  let counting f =
+    Dashboard_cache.For_testing.with_payload_prepared_hook (fun _ -> incr prepared) f
+  in
+  post "the first post";
+  Dashboard_cache.invalidate_all ();
+  check (list string) "a blank hearth is no filter" [ "the first post" ]
+    (page_titles (page ~target:(path ^ "&hearth=") ()).Dashboard_cache.json);
+  Dashboard_cache.invalidate_all ();
+  let titles = counting route_titles in
+  check (list string) "the route shows the post" [ "the first post" ] titles;
+  check int "the route serializes the page it keeps" 1 !prepared;
+  let kept = counting (fun () -> page ()) in
+  check int "the projection answers from the route's entry" 1 !prepared;
+  check (list string) "the projection holds the route's page" titles
+    (page_titles kept.Dashboard_cache.json);
+  ignore (counting route_titles);
+  check int "a second route read serializes nothing" 1 !prepared;
+  check bool "an unchanged board answers from the kept bytes" true
+    (kept.Dashboard_cache.raw_json == (page ()).Dashboard_cache.raw_json);
+  check bool "another reaction actor has its own entry" false
+    (kept.Dashboard_cache.raw_json
+     == (page ~reaction_actor:None ()).Dashboard_cache.raw_json);
+  check bool "another voter has its own entry" false
+    (kept.Dashboard_cache.raw_json
+     == (page ~target:(path ^ "&voter=someone-else") ()).Dashboard_cache.raw_json);
+  post "the second post";
+  Server_dashboard_http_core_cache.invalidate_board_projections ();
+  check (list string) "the read after the invalidation shows the write"
+    [ "the first post"; "the second post" ]
+    (page_titles (page ()).Dashboard_cache.json)
+;;
+
+let test_board_list_timeout_cannot_be_not_modified () =
+  with_authenticated_activity_router
+    ~prefix:"board-list-timeout-" ~agent_name:"timeout-reader"
+  @@ fun ~base_path ~config ~state:_ ~sw:_ ~clock:_ ~router ~token ->
+  with_board_store ~base_path @@ fun () ->
+  (* Publish a builder-produced result through the real cache API. This
+     exact route entry includes both the workspace and authenticated actor;
+     a key mismatch returns a normal Board page and fails the wire checks. *)
+  let actor = "timeout-reader" in
+  let key = Printf.sprintf
+    "board:list:%d:%s:-:recent:false:false:-:50:0:-:%d:%s"
+    (String.length config.Masc.Workspace.base_path) config.base_path
+    (String.length actor) actor in
+  let read ?etag () =
+    dispatch_response ~meth:"GET" ~router ~token
+      ~path:"/api/v1/board?sort_by=recent"
+      ~extra_headers:(match etag with None -> [] | Some value -> ["if-none-match", value])
+      ~body:"" () in
+  List.iter (fun detail ->
+    Dashboard_cache.invalidate_all ();
+    let envelope = `Assoc
+      ["error", `String Dashboard_cache.timeout_error_code; "message", `String detail] in
+    let payload = Dashboard_cache.get_or_compute_payload key ~ttl:3600.
+      (fun () -> envelope) in
+    check bool "the timeout is a computed builder result" true
+      (payload.origin = Dashboard_cache.Computed);
+    let status, body = read () in
+    check int "first timeout read is 504" 504 status;
+    check string "first timeout carries the cached bytes" payload.raw_json body;
+    let status, body = read ~etag:payload.etag () in
+    check int "matching timeout ETag remains 504" 504 status;
+    check string "matching timeout still carries its evidence" payload.raw_json body)
+    ["builder timeout"; String.make 9000 'x'];
+  Dashboard_cache.invalidate_all ();
+  let payload = Server_board_list_http.payload ~config ~reaction_actor:(Some actor)
+    (Httpun.Request.create `GET "/api/v1/board?sort_by=recent") in
+  let status, body = read ~etag:payload.etag () in
+  check int "a successful unchanged Board page is still 304" 304 status;
+  check string "304 carries no body" "" body;
+  Dashboard_cache.invalidate_all ()
 ;;
 
 let test_board_http_typed_attachments () =
@@ -1275,11 +1414,84 @@ let test_dashboard_dev_token_can_vote_as_credential_owner () =
       | Ok actor -> check string "dashboard credential owner" "dashboard" actor
       | Error error -> fail (Masc_domain.masc_error_to_string error))
 
+let test_board_detail_defaults_to_latest_comments_with_older_pages () =
+  with_authenticated_activity_router
+    ~prefix:"board-detail-pages-"
+    ~agent_name:"page-reader"
+  @@ fun ~base_path ~config:_ ~state:_ ~sw:_ ~clock:_ ~router ~token ->
+  with_board_store ~base_path
+  @@ fun () ->
+  let post =
+    match
+      Masc.Board_dispatch.create_post
+        ~author:"page-author" ~content:"pinned current state"
+        ~post_kind:Masc.Board.Human_post ()
+    with
+    | Ok post -> post
+    | Error error -> fail (Board_tool.board_error_to_string error)
+  in
+  let post_id = Masc.Board.Post_id.to_string post.id in
+  for n = 1 to 25 do
+    match
+      Masc.Board_dispatch.add_comment
+        ~post_id ~author:"page-author"
+        ~content:(Printf.sprintf "comment %02d" n) ()
+    with
+    | Ok _ -> ()
+    | Error error -> fail (Board_tool.board_error_to_string error)
+  done;
+  let read suffix =
+    dispatch_json ~meth:"GET" ~router ~token
+      ~path:("/api/v1/board/" ^ post_id ^ "?format=flat" ^ suffix)
+      ~extra_headers:[] ~body:"" ()
+  in
+  let open Yojson.Safe.Util in
+  let comments json = json |> member "comments" |> to_list in
+  let content comment = comment |> member "content" |> to_string in
+  let position json key =
+    json |> member "comment_page" |> member key |> to_int
+  in
+  let status, latest = read "" in
+  check int "default status" 200 status;
+  check string "post body travels with latest page" "pinned current state"
+    (latest |> member "body" |> to_string);
+  check int "default reads exactly 20" 20 (List.length (comments latest));
+  check string "first latest comment" "comment 06"
+    (content (List.hd (comments latest)));
+  check string "last latest comment" "comment 25"
+    (content (List.hd (List.rev (comments latest))));
+  check int "default page offset" 5 (position latest "offset");
+  check int "total comment count" 25 (position latest "total");
+  let status, oldest = read "&comment_offset=0" in
+  check int "oldest page status" 200 status;
+  check int "oldest page size" 20 (List.length (comments oldest));
+  check string "explicit zero reads oldest" "comment 01"
+    (content (List.hd (comments oldest)));
+  check int "forward offset" 20 (position oldest "next_offset");
+  let status, final_page = read "&comment_offset=20" in
+  check int "final page status" 200 status;
+  check int "final page size" 5 (List.length (comments final_page));
+  check string "final page starts at 21" "comment 21"
+    (content (List.hd (comments final_page)));
+  let status, empty_end = read "&comment_offset=25" in
+  check int "end offset is a page" 200 status;
+  check int "end offset has no comments" 0 (List.length (comments empty_end));
+  List.iter
+    (fun suffix ->
+      let status, _ = read suffix in
+      check int ("bad page rejected: " ^ suffix) 400 status)
+    [ "&comment_offset=26"; "&comment_offset=nope"; "&comment_limit=0" ]
+;;
+
 let () =
   run
     "board_rest_routes"
     [ ( "dashboard bridge"
       , [ test_case
+            "Board detail defaults to latest 20 and pages older comments"
+            `Quick
+            test_board_detail_defaults_to_latest_comments_with_older_pages
+        ; test_case
             "dashboard board tool routes registered"
             `Quick
             test_dashboard_board_routes_registered
@@ -1297,6 +1509,10 @@ let () =
             test_goal_transition_uses_authenticated_actor
         ; test_case "board write actors come from auth" `Quick
             test_board_write_routes_use_authenticated_actor
+        ; test_case "the Board list route and projection share the kept page" `Quick
+            test_board_list_route_and_projection_share_the_kept_page
+        ; test_case "a Board timeout cannot become a conditional 304" `Quick
+            test_board_list_timeout_cannot_be_not_modified
         ; test_case "HTTP Board attachments use typed input" `Quick
             test_board_http_typed_attachments
         ; test_case "sub-board owner comes from auth" `Quick

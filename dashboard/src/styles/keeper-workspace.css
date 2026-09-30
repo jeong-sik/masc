@@ -787,14 +787,10 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
 .kw-rail-toggle.right { right: calc(var(--kw-rail-w, 312px) - 10px); }
 .kw-grid[data-rail="closed"] .kw-rail-toggle.right { right: 2px; }
 
-/* Mobile conversation header (≤860px). The desktop header is a single flex row
- * [sigil | identity (flex:1) | actions (flex:none)]. At phone widths the five
- * action buttons consume the row and squeeze the flex:1 identity to width:0,
- * whose overflowing name + state pill then paint on top of the buttons. Fix:
- * let the header wrap, force the actions onto their own full-width row (so the
- * identity keeps real width and cannot collapse), and make that row a
- * horizontal scroll strip instead of overflowing. The "← 키퍼" back button
- * appears here as the pane-switch affordance. */
+/* Mobile conversation header (≤860px). Identity and actions wrap onto
+ * separate rows. Mobile commands live in a popover, so its action row keeps
+ * overflow visible and lets the menu extend below the header. The "← 키퍼"
+ * back button switches to the roster pane. */
 @media (max-width: 860px) {
   .kw-chat-head { flex-wrap: wrap; padding: 10px 14px; gap: 8px 10px; }
   .kw-chat-back { display: inline-flex; align-items: center; }
@@ -802,11 +798,8 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
   .kw-chat-actions {
     flex: 1 1 100%;
     flex-wrap: nowrap;
-    overflow-x: auto;
-    scrollbar-width: none;
-    -webkit-overflow-scrolling: touch;
+    overflow: visible;
   }
-  .kw-chat-actions::-webkit-scrollbar { display: none; }
   .kw-chat-actions > * { flex: none; }
   /* Reclaim vertical space for the transcript: tighter composer + insets. */
   .kw-composer-inner { padding: 0 14px; }
@@ -1122,8 +1115,7 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
   .v2-app[data-reading="true"] > .v2-shell-panel,
   .v2-app[data-reading="true"] .dashboard-status-tray,
   .v2-app[data-reading="true"] .dashboard-focus-mode-toggle,
-  .v2-app[data-reading="true"] .topbar-copilot,
-  .v2-app[data-reading="true"] .kw-chat-actions {
+  .v2-app[data-reading="true"] .topbar-copilot {
     display: none;
   }
 
@@ -1211,6 +1203,13 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
     align-items: start;
     max-width: none;
     gap: 0;
+  }
+
+  /* The runtime alert precedes the rail and section. Give it a full row
+   * rather than auto-placing it in the 56px navigation column. */
+  .kw-detail-alert-strip {
+    grid-column: 1 / -1;
+    min-width: 0;
   }
 
   .kw-detail-section-rail {
@@ -1308,6 +1307,11 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
   }
 
   .kw-chat-command-popover {
+    /* Measure the space below this anchor, including the clipping chat pane. */
+    max-height: max(0px, calc(var(--kw-command-available-height, 100dvh) - env(safe-area-inset-bottom, 0px)));
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    box-sizing: border-box;
     right: max(0px, env(safe-area-inset-right, 0px));
     max-width: calc(100vw - 28px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px));
   }

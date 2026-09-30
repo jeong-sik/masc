@@ -7,9 +7,11 @@ import test_tui_keyboard_input as h
 # The sources this scenario stands over. scripts/ci/run-edited-tests.sh runs
 # a suite when a pull request changes a path the suite names, so without this
 # a change to the closed-state drawing below reaches main with no scenario
-# run. Both the list row and the detail lines are built in masc_tui_render.ml;
+# run. Both the list row and the detail lines are built in masc_tui_render_board.ml;
 # the wire field is decoded in masc_tui_loader.ml.
 SOURCE_MODULES = (
+    "bin/masc_tui_render_board.ml",
+    "bin/masc_tui_render_board.mli",
     "bin/masc_tui_render.ml",
     "bin/masc_tui_loader.ml",
     "bin/masc_tui_types.ml",
@@ -40,7 +42,7 @@ def run(executable: str) -> None:
     open_post = h.board_selection_post("open", "Still going", "Other body")
     fixtures["/api/v1/board?sort_by=hot"] = (200, {"posts": [closed, open_post]})
     fixtures["/api/v1/board/post-closed?format=flat"] = (
-        200, {"post": closed, "comments": []})
+        200, h.board_detail_page(closed, []))
 
     def interact(process, fd, _slave, output, _base):
         h.wait_for_output(process, fd, output, b"Health: ", start=0, timeout=10)

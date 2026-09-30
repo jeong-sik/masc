@@ -231,6 +231,7 @@ type stream_event =
   | Dynamic_tool_finished of { call_id : string }
   | Native_tool_started of Runtime_native_tools.observation
   | Native_tool_finished of Runtime_native_tools.observation
+  | Compaction_observed
   | Elicitation_cancelled of
       { server_name : string
       ; mode : elicitation_mode
@@ -931,6 +932,7 @@ type item_kind =
   | Mcp_tool_call
   | Sleep
   | Model_item
+  | Compaction_item
   | Dynamic_tool_item
   | Unclassified_item of string
 
@@ -941,8 +943,8 @@ let item_kind_of_item ~stage item =
   | Some (`String "fileChange") -> Ok File_change
   | Some (`String "mcpToolCall") -> Ok Mcp_tool_call
   | Some (`String "sleep") -> Ok Sleep
-  | Some (`String ("userMessage" | "agentMessage" | "plan" | "reasoning"
-                  | "contextCompaction")) -> Ok Model_item
+  | Some (`String "contextCompaction") -> Ok Compaction_item
+  | Some (`String ("userMessage" | "agentMessage" | "plan" | "reasoning")) -> Ok Model_item
   | Some (`String "dynamicToolCall") -> Ok Dynamic_tool_item
   | Some (`String kind) -> Ok (Unclassified_item kind)
   | Some _ -> protocol_error stage "item type must be a string"
@@ -989,7 +991,7 @@ let tool_item_of_item ~stage item =
         ; origin = Runtime_native_tools.Mcp_wrapper
         })
   | Sleep -> tool_item ~observation:(fun _ -> None)
-  | Model_item | Dynamic_tool_item -> Ok None
+  | Model_item | Compaction_item | Dynamic_tool_item -> Ok None
   | Unclassified_item kind -> tool_item ~observation:(built_in kind)
 ;;
 
@@ -1464,6 +1466,11 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~tool_effect_attempted ~m
   | Notification { method_ = "item/completed"; params } ->
     let stage = "item/completed" in
     let* item = active_turn_item ~stage ~thread_id ~turn_id params in
+    let* kind = item_kind_of_item ~stage item in
+    (match kind with
+     | Compaction_item -> emit_stream_event on_stream_event Compaction_observed
+     | Command_execution | File_change | Mcp_tool_call | Sleep | Model_item
+     | Dynamic_tool_item | Unclassified_item _ -> ());
     let* tool_item = tool_item_of_item ~stage item in
     let open_tool_call_ids =
       match tool_item with
@@ -2041,6 +2048,24 @@ let terminate_spawned_process ~clock proc stdin_w =
           (Printexc.to_string exn))
 ;;
 
+(* A Codex sub-agent is a separate thread. Its item frames reach this
+   connection under another threadId, and [active_turn_item] ends the turn on
+   the first one. In the 12 rollouts of 2026-09-30 that hold a sub-agent spawn
+   matched to a failed turn, the turn ended that way within 20 seconds. MASC
+   records none of the child's frames, tool calls or token use, so no client
+   this module spawns may create one, whatever the posture.
+   Codex picks the version in this order: [features.multi_agent_v2] (V2), then
+   [agents] enabled=false (disabled), then the model catalog's own
+   multi_agent_version, then [features.multi_agent]. gpt-6.1-sol declares v2 in
+   the catalog, so [features.multi_agent=false] alone leaves its sub-agent tools
+   on: `codex debug prompt-input` (0.159.1) renders the same prompt with and
+   without it, and no sub-agent text once [agents.enabled=false] is set.
+   Upstream: codex-rs/core/src/config/mod.rs (multi_agent_version_for_model),
+   codex-rs/core/src/tools/spec_plan.rs (collab_tools_enabled). *)
+let sub_agent_overrides =
+  [ "-c"; "agents.enabled=false"; "-c"; "features.multi_agent_v2=false" ]
+;;
+
 (* A read posture keeps Codex's permissions read-only, but shell execution
    would still run in the host cwd rather than the Keeper's Docker sandbox.
    Supported app-server CLI overrides outrank inherited config. ShellTool=false
@@ -2058,6 +2083,7 @@ let client_argv (config : config) =
      | Runtime_native_tools.Native_read ->
        [ "-c"; "features.shell_tool=false"; "-c"; "features.unified_exec=false" ]
      | Runtime_native_tools.Native_full | Runtime_native_tools.Native_none -> [])
+  @ sub_agent_overrides
 ;;
 
 let with_spawned_client ~mgr ~clock ~cwd config run =
@@ -2412,9 +2438,18 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(thread_mode = Start) ~mgr
        turn.thread_id
        turn.turn_id
        turn.model
+   | Error (Stopped_by_host stop as stopped)
+     when not (Runtime_official_client_tool.host_stop_failed stop) ->
+     (* The Keeper settles this stop as a completed or yielded turn
+        ({!Keeper_official_client_host}). Logged as a failure it made 123
+        WARN lines on 2026-09-29 for turns that ended as designed. *)
+     Log.Runtime_agent.info
+       "Codex app-server turn stopped by host: %s"
+       (error_to_string stopped)
    | Error error ->
      Log.Runtime_agent.warn
-       "Codex app-server subscription turn failed (kind=%s)"
-       (error_kind error));
+       "Codex app-server subscription turn failed (kind=%s): %s"
+       (error_kind error)
+       (error_to_string error));
   result
 ;;

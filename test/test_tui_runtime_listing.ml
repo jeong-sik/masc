@@ -448,6 +448,68 @@ let test_search_follows_the_runtime_mode () =
   Alcotest.(check (option (list string))) "runtime detail has no list cursor" None
     (surface_row_texts state Runtime)
 
+(* Opening a detail, then receiving a reordered listing, must not turn an
+   Enter/Right press in the reader into a selection of the hidden cursor. *)
+let test_runtime_detail_keeps_its_owner () =
+  let snapshot ids =
+    let resolved : Masc.Tui_decode.runtime_resolved_snapshot =
+      { rrs_generated_at_iso = "fixture"; rrs_config_path = None;
+        rrs_default_runtime_id = None;
+        rrs_media_failover = []; rrs_media_failover_declared = [];
+        rrs_runtimes = List.map runtime ids;
+        rrs_lanes =
+          (match ids with
+           | [] -> []
+           | _ -> [{rrl_id = "lane"; rrl_runtime_ids = ids; rrl_declared = true}]) }
+    in
+    match Masc.Tui_decode.join_runtime_surface ~probe:None ~probe_error:None ~resolved with
+    | Ok snapshot -> snapshot
+    | Error detail -> Alcotest.fail detail
+  in
+  List.iter
+    (fun mode ->
+      let state = state () in
+      state.view <- Runtime;
+      state.runtime_mode <- mode;
+      state.runtime_surface <- Some (snapshot ["first"; "second"]);
+      state.runtime_cursor <- 1;
+      open_runtime_row_detail state;
+      let expected =
+        match mode with
+        | Runtime_lanes ->
+            Runtime_lane_candidate {lane_id = "lane"; runtime_id = "second"}
+        | Runtime_all -> Runtime_catalog_entry {runtime_id = "second"}
+      in
+      Alcotest.(check bool) "open captures the selected identity" true
+        (state.runtime_detail_target = Some expected);
+      state.runtime_detail_scroll <- 7;
+      state.runtime_surface <- Some (snapshot ["second"; "first"]);
+      open_runtime_row_detail state;
+      Alcotest.(check bool) "reordered hidden cursor cannot retarget a reader" true
+        (state.runtime_detail_target = Some expected);
+      expect "repeated open preserves reading position" 7 state.runtime_detail_scroll;
+      state.runtime_detail_target <- Some Runtime_routes;
+      open_runtime_row_detail state;
+      Alcotest.(check bool) "route document remains the active reading" true
+        (state.runtime_detail_target = Some Runtime_routes);
+      expect "route document preserves reading position" 7 state.runtime_detail_scroll;
+      state.runtime_detail_target <- None;
+      state.runtime_surface <- Some (snapshot []);
+      open_runtime_row_detail state;
+      Alcotest.(check bool) "empty listing does not invent a target" true
+        (state.runtime_detail_target = None);
+      state.runtime_surface <- Some (snapshot ["second"; "first"]);
+      open_runtime_row_detail state;
+      let expected =
+        match mode with
+        | Runtime_lanes -> Runtime_lane_candidate {lane_id = "lane"; runtime_id = "first"}
+        | Runtime_all -> Runtime_catalog_entry {runtime_id = "first"}
+      in
+      Alcotest.(check bool) "after returning to list the new selection opens" true
+        (state.runtime_detail_target = Some expected);
+      expect "new reading starts at top" 0 state.runtime_detail_scroll)
+    [Runtime_lanes; Runtime_all]
+
 (* Bindings of one model that differ only in reasoning effort share provider,
    model and context, so their ids are the only text that tells them apart.
    At a fixed 24-cell target column both ids below drew as
@@ -1330,6 +1392,8 @@ let () = Alcotest.run "runtime list geometry"
         test_every_row_fits_the_frame;
       Alcotest.test_case "narrow rows keep the quota warning" `Quick
         test_narrow_rows_keep_the_fact_that_is_said_nowhere_else;
+      Alcotest.test_case "runtime readers retain their owner after list refresh" `Quick
+        test_runtime_detail_keeps_its_owner;
       Alcotest.test_case "rate limit shows on model and lane rows" `Quick
         test_rate_limit_is_said_on_model_and_lane_rows;
       Alcotest.test_case "narrow target column tells the variants apart" `Quick

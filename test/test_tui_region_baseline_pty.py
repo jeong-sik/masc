@@ -120,7 +120,10 @@ def layout(top, title, rules, bottom, last, blank, windows=(), **pinned):
 # #39750 places the three Identity rows beside a twelve-row mosaic portrait.
 # The recorded CI frames from job 109222918530 retain the same 22-row viewport
 # and borders, with nine more content rows; see the evidence README's refresh.
-KEEPERS = layout("blank", 3, (4, 7, 28), None, 28, 17)
+# #40155 moves the live roster health summary out of the title to row 5.
+# PR-check 36682370981 job 109780442320's six recorded widths keep the
+# title/footer/body edges, with the list rule at 8 and sixteen blank rows.
+KEEPERS = layout("blank", 3, (4, 8, 28), None, 28, 16, health_row=5)
 BOARD = layout("blank", 3, (4, 7, 9), None, 13, 15)
 CONFIG = layout("blank", 3, (4, 9), None, 27, 1, last_source_line=18)
 # The compact candle leaves one more transparent mosaic row than the old
@@ -265,6 +268,18 @@ def interaction(served: region.ServedFixtures):
         if left:
             measured[(screen, columns)]["roster"] = region.measure_pane(
                 rows, left=0, right=left)
+        if screen == "keepers":
+            health_rows = [row for row in rows
+                           if region.body_row(rows, row, left=left, right=right).startswith("Health ")]
+            if health_rows != [5]:
+                raise AssertionError(f"{where}: Health must have its own row 5: {health_rows!r}")
+            health = region.body_row(rows, 5, left=left, right=right)
+            if health != "Health 1 healthy · 1 idle":
+                raise AssertionError(f"{where}: Health lost the exact fixture reading: {health!r}")
+            title = region.body_row(rows, 3, left=left, right=right)
+            if any(text in title for text in ("Health", "1 healthy", "1 idle")):
+                raise AssertionError(f"{where}: Health was repeated in the title")
+            measured[(screen, columns)]["health_row"] = 5
         if screen == "config":
             # The body ends on a source line whose number leads the row. A
             # height one off shows a line more or fewer, or the frame cuts.

@@ -6,6 +6,8 @@ contain the terminal output produced by the binary after real keyboard input.
 from __future__ import annotations
 
 import argparse
+import base64
+import hashlib
 import json
 import os
 import re
@@ -20,6 +22,8 @@ import test_tui_keyboard_input as terminal
 # masc_tui_lane_addons.ml's, and the palette row this types
 # ("go Lane Add-ons") masc_tui_types.ml's.
 SOURCE_MODULES = (
+    "bin/masc_tui.ml",
+    "bin/masc_tui_keys.ml",
     "bin/masc_tui_render.ml",
     "bin/masc_tui_lane_addons.ml",
     "bin/masc_tui_types.ml",
@@ -223,11 +227,19 @@ def run_navigation_consistency(executable: str) -> None:
         def key(value, needle):
             return terminal.send_and_wait(process, master, output, value, needle)
 
+        def capture(name, frame):
+            print("STUDIO_CAPTURE=" + json.dumps({
+                "name": name, "rows": 30, "columns": 100,
+                "provenance": "CI fixture PTY",
+                "frame_b64": base64.b64encode(frame).decode(),
+                "screen": terminal.screen_text(frame).decode(errors="replace")}), flush=True)
+
         terminal.wait_for_output(process, master, output, b"Health: ", start=0, timeout=10)
         for name in (b"Dashboard", b"Work", b"Keepers", b"Usage", b"Board", b"Workspace", b"System"):
             title = b"MASC " + name
             key(b":go " + name + b"\r", title)
-            key(b":", b"From " + name)
+            palette = key(b":", b"From " + name)
+            capture("palette-from-" + name.decode().lower(), palette)
             key(b"\x1b", title)
         key(b":go Dashboard\r", b"MASC Dashboard")
         initial = key(b":go ", b"type to filter")
@@ -245,11 +257,12 @@ def run_navigation_consistency(executable: str) -> None:
         key(b"zzzz_no_destination", b"No matching command")
         key(b"\r", b"MASC Dashboard")
         preview = key(b":def explicit_symbol", b"definition explicit_symbol")
+        capture("palette-code-question", preview)
         if b"Ask about this symbol" not in terminal.screen_text(preview):
             raise AssertionError("typed Code action has no execution preview")
         key(b"\r", b"hover, def and refs ask about the file open")
         key(b":go lane add-ons\r", b"World observer")
-        key(b":", b"From Lane Add-ons")
+        capture("palette-from-addons", key(b":", b"From Lane Add-ons"))
         key(b"\x1b", b"World observer")
         key(b":go Board\r", b"MASC Board")
         key(b":go Dashboard\r", b"MASC Dashboard")
@@ -257,7 +270,7 @@ def run_navigation_consistency(executable: str) -> None:
 
     terminal.run_terminal_scenario(executable,
         description="palette navigation preserves origin, clamps selection and escapes Add-ons",
-        interact=interact, http_fixtures=fixtures)
+        interact=interact, http_fixtures=fixtures, workspace="Navigation fixture")
     print("TUI navigation consistency: PASS")
 
 
@@ -268,4 +281,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
     main(os.path.abspath(args.executable), args.capture_dir)
     run_installation_detail(os.path.abspath(args.executable))
+    with open(args.executable, "rb") as binary:
+        print("STUDIO_BINARY_SHA256=" + hashlib.sha256(binary.read()).hexdigest(), flush=True)
     run_navigation_consistency(os.path.abspath(args.executable))

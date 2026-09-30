@@ -187,6 +187,12 @@ def fixtures() -> region.ServedFixtures:
     measured screen reports a read that failed."""
     served = h.keeper_runtime_http_fixtures()
     served.update(h.board_reference_http_fixtures())
+    # This baseline measures locally retained Keepers absent from the live
+    # roster; portrait authority is exercised by the dedicated roster tests.
+    served["/api/v1/gate/keepers?detailed=true"] = (
+        200, {"candle": {"status": "off"}, "count": 0, "total": 0,
+              "truncated": False, "keepers": []},
+    )
     served["/api/v1/board/hearths"] = (200, {"hearths": []})
     served["/api/v1/dashboard/gate"] = h.empty_gate_snapshot()
     served["/api/v1/dashboard/gate/keeper-settings"] = (200, {

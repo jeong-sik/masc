@@ -728,7 +728,11 @@ let credential_owned_uuid_target config name stored (credential : agent_credenti
   let refused detail = Error (System (System_error.ValidationError
       (Printf.sprintf "credential storage authority for %s: %s" name detail))) in
   let uuid_path id =
-    match redirect_target_file config (Credential_id.to_string id ^ ".json") with
+    let spelling = Credential_id.to_string id in
+    if spelling = "" || not (String.for_all
+        (function 'a' .. 'z' | '0' .. '9' | '-' -> true | _ -> false) spelling)
+    then refused "credential UUID must use canonical lowercase ASCII letters, digits and hyphens"
+    else match redirect_target_file config (spelling ^ ".json") with
     | Some target -> Ok target
     | None -> refused "credential UUID is not a store filename" in
   match stored, credential.id with
@@ -745,7 +749,13 @@ let credential_owned_uuid_target config name stored (credential : agent_credenti
     else
       let* target_record = read_stored_credential config name target in
       (match target_record with
-       | Stored_credential current when current = credential ->
+       | Stored_credential current
+         when String.equal current.agent_name credential.agent_name
+           && Option.equal Credential_id.equal current.id credential.id
+           && Option.equal Agent_id.equal current.agent_id credential.agent_id ->
+         (* The named direct record may still be old after a UUID payload
+            was published but replacing its stub failed. It is the same
+            owner, so a later admitted publisher can finish or replace it. *)
          Ok (Some target)
        | Stored_credential _ | Stored_redirect _ | Unresolved_credential ->
          refused "embedded UUID resolves to another credential")

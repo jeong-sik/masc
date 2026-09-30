@@ -265,19 +265,22 @@ let find_static_credential_by_token config ~token : (agent_credential, masc_erro
        require_live_credential ~now:(Time_compat.now ()) first)
 ;;
 
-let find_static_credential_in_transaction transaction ~token =
+let find_static_credential_in_index index ~token =
   let ( let* ) = Result.bind in
-  let* snapshot = credential_store_snapshot_in_transaction transaction in
   let token_hash = sha256_hash token in
-  let matches = List.filter_map (fun (_, (credential : agent_credential)) ->
-    if constant_time_string_equal credential.token token_hash then Some credential else None)
-      snapshot.current_credentials in
-  match matches with
-  | [] -> Error (Auth (Auth_error.InvalidToken "Token mismatch"))
-  | first :: rest ->
+  match Hashtbl.find_opt index token_hash with
+  | None | Some [] -> Error (Auth (Auth_error.InvalidToken "Token mismatch"))
+  | Some (first :: rest) ->
     let* () = check_credential_collisions
         ~token_hash_prefix:(token_hash_prefix_of token_hash) first rest in
     require_live_credential ~now:(Time_compat.now ()) first
+;;
+
+let find_static_credential_in_transaction transaction ~token =
+  let ( let* ) = Result.bind in
+  let* snapshot = credential_store_snapshot_in_transaction transaction in
+  let index = build_token_index (List.map snd snapshot.current_credentials) in
+  find_static_credential_in_index index ~token
 ;;
 
 (** Resolve either an OAuth access token or the existing static bearer.
@@ -393,13 +396,39 @@ let save_file_backed_raw_token_credential config ~agent_name ~role ~raw_token
   let ( let* ) = Result.bind in
   let* () = validate_raw_token raw_token in
   with_credential_transaction config (fun transaction ->
-    credential_read_result (fun () ->
+    let saved_bytes path =
+      let* present = credential_path_exists path in
+      if present then credential_read_result (fun () -> Some (read_text_file path))
+      else Ok None in
+    let raw_path = raw_token_file config agent_name in
+    let named_path = credential_file config agent_name in
+    let* previous_raw = saved_bytes raw_path in
+    let* previous_named = saved_bytes named_path in
+    match credential_read_result (fun () ->
       let auth_cfg = load_auth_config config in
       let cred = raw_token_credential ~agent_name ~role ~raw_token
           ~expires_at:(expires_at_for_auth_config auth_cfg) in
       persist_raw_token config ~agent_name raw_token;
       save_credential_in_transaction transaction cred;
-      cred))
+      cred) with
+    | Ok _ as saved -> saved
+    | Error error ->
+      (* Restore only when the exact named authority did not change. If the
+         new credential reached disk, its matching new raw token must remain. *)
+      (match saved_bytes named_path with
+       | Ok current_named when current_named = previous_named ->
+         (match credential_read_result (fun () ->
+            match previous_raw with
+            | Some raw -> save_private_text_file raw_path raw
+            | None -> remove_file_if_exists raw_path) with
+          | Ok () -> Error error
+          | Error restore_error -> Error (System (System_error.IoError
+              (Printf.sprintf "credential publication failed: %s; raw token restoration failed: %s"
+                 (masc_error_to_string error) (masc_error_to_string restore_error)))))
+       | Ok _ -> Error error
+       | Error observation_error -> Error (System (System_error.IoError
+           (Printf.sprintf "credential publication failed: %s; named publication is unreadable: %s"
+              (masc_error_to_string error) (masc_error_to_string observation_error))))))
   |> Result.join
 ;;
 

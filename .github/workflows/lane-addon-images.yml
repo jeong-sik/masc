@@ -1,10 +1,6 @@
 name: Lane Add-on package images
 on:
   workflow_dispatch: {}
-  pull_request:
-    paths:
-      - 'addons/**'
-      - '.github/workflows/lane-addon-images.yml'
 permissions:
   contents: read
 jobs:

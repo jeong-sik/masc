@@ -737,4 +737,3 @@ let render_code (state : state) =
     (footer_line state ~max_cells:cols
        ~hints:(Masc_tui_keys.footer_hints_code ~pane:code_pane));
   finish_surface state ~surface_key:"code" ~rows:terminal_rows ~cols buf
-

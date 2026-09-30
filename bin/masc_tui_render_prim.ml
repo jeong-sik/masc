@@ -1,8 +1,6 @@
-(** Rendering primitives shared across the surfaces.
-
-    Every value here is reached by at least 10 of the screen
-    renderers, and the set is closed: nothing in it refers back to a
-    single surface's code. That is what lets it compile before them. *)
+(** Drawing and layout primitives shared by screen renderers.
+    This module depends on shared state and presentation components,
+    without referring back to a surface renderer. *)
 
 open Masc_tui_types
 open Tui_decode

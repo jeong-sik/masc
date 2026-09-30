@@ -1,14 +1,6 @@
-(** Rendering primitives shared across every surface.
-
-    The set is computed, not curated, and the rule is now the whole rule: a
-    value that two or more screens reach belongs below both of them. It used
-    to be ten, which left the helpers shared by a handful of screens in the
-    godfile -- and those are exactly the ones that turn into a cycle the next
-    time a surface is lifted out. Six of them did, once. The rest are here
-    before they can.
-
-    31 values live in the implementation without appearing here. They are
-    the pieces the exported ones are built from, and no surface names them. *)
+(** Drawing and layout primitives shared by screen renderers.
+    This module depends on shared state and presentation components,
+    without referring back to a surface renderer. *)
 
 (* The same scope the implementation has, so the signatures read the way
    they are written there. *)

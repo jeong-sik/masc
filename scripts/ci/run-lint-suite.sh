@@ -64,6 +64,9 @@ run_self_test_when_changed() {
 }
 
 blocking_lints() {
+  run_self_test_when_changed "PR freshness preserves branch literals" \
+    ".github/workflows/pr-check.yml scripts/ci/test_pr_branch_env.py" \
+    python3 scripts/ci/test_pr_branch_env.py
   run_self_test_when_changed "PR check Draft/Ready approval contract" \
     ".github/workflows/pr-check.yml scripts/review/approve-guard.sh scripts/review/approve-guard-selftest.sh scripts/review/pr-check-run-contract.sh scripts/review/fixtures/pr-check-draft-jobs-39834.json" \
     bash scripts/review/approve-guard-selftest.sh --workflow .github/workflows/pr-check.yml

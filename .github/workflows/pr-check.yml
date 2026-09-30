@@ -115,9 +115,11 @@ jobs:
       # live in run-lint-suite.sh -- that takes a base sha and knows nothing
       # about the head branch or the payload.
       - name: PR run is not stale
+        env:
+          PR_HEAD_BRANCH: ${{ github.event.pull_request.head.ref }}
         run: |
           bash scripts/check-pr-sync.sh \
-            --head-branch "${{ github.event.pull_request.head.ref }}" \
+            --head-branch "$PR_HEAD_BRANCH" \
             --expected-head-sha "${{ github.event.pull_request.head.sha }}" \
             --pr-number "${{ github.event.pull_request.number }}"
 

@@ -155,6 +155,25 @@ let test_trace_failure_is_readable_without_hiding_roster () =
   check bool "selected keeper names its attribution failure" true
     (List.exists (fun line -> contains "missing trace identity" (text line)) selected.Pane.rows)
 
+let test_many_trace_failures_keep_navigation_and_full_reading () =
+  let failures = List.init 20 (fun index ->
+      Printf.sprintf "unbooted-%02d" index, Printf.sprintf "reason-%02d" index) in
+  let input = { fixture with trace_unavailable = failures } in
+  check (option string) "one bounded summary points to full reasons"
+    (Some "Trace unavailable: 20 Keepers · details in Keeper Info / Metadata")
+    (Pane.trace_unavailable_summary failures);
+  List.iter (fun (rows, cols) ->
+      let overview = Pane.lines ~rows ~cols ~scroll:0 input in
+      check int "pane stays inside its row budget" rows (List.length overview.Pane.rows);
+      check bool "failure summaries leave fleet navigation visible" true
+        (List.exists (function Pane.Target_keeper _ | Pane.Target_more -> true | _ -> false)
+           overview.Pane.targets);
+      List.iter (fun line -> check int "narrow rows stay fitted" cols (width line)) overview.Pane.rows)
+    [8, 42; 3, 30];
+  let reading = Pane.lines ~rows:8 ~cols:90 ~scroll:1 input in
+  check bool "full failure reasons stay scrollable" true
+    (List.exists (fun line -> contains "unbooted-01 · reason-01" (text line)) reading.Pane.rows)
+
 let test_clipped_header_preserves_spans_and_padding () =
   (* The count and the feed are two readings now, each carrying the
      separator that joins it to what is before: a live feed draws no words,
@@ -2310,6 +2329,8 @@ let () =
             test_the_header_names_what_it_left_out
         ; test_case "identity failure preserves roster navigation" `Quick
             test_trace_failure_is_readable_without_hiding_roster
+        ; test_case "many identity failures retain navigation and detail" `Quick
+            test_many_trace_failures_keep_navigation_and_full_reading
         ; test_case "an unread roster is not counted as none" `Quick
             test_an_unread_roster_is_not_counted_as_none
         ; test_case "only offline is dropped" `Quick

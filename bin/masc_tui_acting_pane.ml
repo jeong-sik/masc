@@ -395,6 +395,7 @@ type response_place =
 
 type logical_row =
   | Trace_unavailable of string * string
+  | Trace_unavailable_summary of string
   | Fleet_row of keeper * Acting.chunk option
   | Focus_header of string * Acting.chunk option * Reading.keeper_health_reading option
   | Approval_row of string
@@ -1373,6 +1374,14 @@ let window ~below ~scroll ~overview body =
    scope folds to. Split out of [fleet_lines] so the heading above them can
    be decided from what they are: the column names belong over rows that use
    the columns, and beside the roster there may be none. *)
+let trace_summary count = Printf.sprintf
+  "Trace unavailable: %d Keepers · details in Keeper Info / Metadata" count
+
+let trace_unavailable_summary unavailable =
+  match unavailable with
+  | [] -> None
+  | _ :: _ -> Some (trace_summary (List.length unavailable))
+
 let fleet_body input =
   let chunks = input.chunks in
   let newest = newest_chunk_by_keeper chunks in
@@ -1426,8 +1435,13 @@ let fleet_body input =
         | Whole_fleet, _ -> true)
     |> List.map (fun (name, reason) -> Trace_unavailable (name, reason)) in
   (notices @ body, fun ~below ->
-     let shown = List.filteri (fun index _ -> index < below) notices in
-     shown @ overview ~below:(max 0 (below - List.length shown)))
+     match notices with
+     | [] -> overview ~below
+     | _ :: _ when below <= 1 -> overview ~below
+     | [notice] -> notice :: overview ~below:(below - 1)
+     | _ :: _ :: _ ->
+         Trace_unavailable_summary (trace_summary (List.length notices))
+         :: overview ~below:(below - 1))
 
 let fleet_lines ~below ~scroll (body, overview) =
   window ~below ~scroll body ~overview:(fun () -> overview ~below)
@@ -1441,7 +1455,7 @@ let fleet_lines ~below ~scroll (body, overview) =
 let row_uses_the_columns = function
   | Fleet_row _ | Tool_row _ | Earlier_turn _ -> true
   | Focus_header _ | Approval_row _ | Calls_heading _ | Call_detail _ | Rule | More _
-  | Indicator _ | File_row _ | Formatted_status _ | Trace_unavailable _ -> false
+  | Indicator _ | File_row _ | Formatted_status _ | Trace_unavailable _ | Trace_unavailable_summary _ -> false
 
 (* ── Changes tab ───────────────────────────────────────────────────────── *)
 
@@ -1547,6 +1561,8 @@ let changes_lines ~cols ~below ~scroll input =
   window ~below ~scroll body ~overview:(fun () -> folded_rows ~below body)
 
 let materialize_row ~cols input = function
+  | Trace_unavailable_summary summary ->
+      fit_line ~cols (with_border [{text = summary; tone = Warn}]), Target_none
   | Trace_unavailable (name, reason) ->
       let notice = "Trace unavailable: " ^ name ^ " · " ^ reason in
       fit_line ~cols (with_border [{text = Terminal_text.single_line notice; tone = Warn}]), Target_none

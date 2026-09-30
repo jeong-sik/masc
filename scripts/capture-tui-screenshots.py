@@ -36,18 +36,20 @@ EXECUTABLE = WORKTREE / "_build/default/bin/masc_tui.exe"
 
 # (file stem, palette query, text the header must show once we land there)
 SURFACES: list[tuple[str, str, str]] = [
-    ("01-overview", "go overview", "MASC Overview"),
-    ("02-keepers", "go keepers", "MASC Keepers"),
+    ("01-keepers", "go keepers", "MASC Keepers"),
+    ("02-usage", "go usage", "MASC Usage"),
     ("03-lanes", "go lanes", "MASC Lanes"),
-    ("05-approvals", "go approvals", "MASC Approvals"),
-    ("06-activity", "go activity", "MASC Activity"),
+    ("04-approvals", "go approvals", "MASC Approvals"),
 ]
-# Board is deliberately absent. Its rows are free-text post titles written by
-# whoever posted them, and no name-and-path rule can promise a title carries
-# nothing that should stay private. Structural surfaces are safe to publish
-# because their cells are ids, states, and model names.
+# These screens contain operator-authored text that a name-and-path scrub
+# cannot certify for publication. The controlled PTY fixture captures
+# Dashboard and Work without live workspace prose.
 _UNCAPTURED = [
+    ("dashboard", "Goal titles and attention summaries are operator-authored"),
+    ("work", "Goal and Task titles are operator-authored"),
     ("board", "rows are operator-authored free text"),
+    ("activity", "event and log text can be operator-authored"),
+    ("system", "configuration values can contain private paths"),
 ]
 
 # Length-preserving placeholder: a terminal row is a grid, so a replacement that
@@ -71,10 +73,8 @@ REDACT_JS = r"""
 """
 
 
-# Task rows carry operator-authored prose, which is the same reason the Board is
-# not captured at all -- an id is safe to publish and a sentence someone wrote is
-# not. The Overview embeds that prose in its Tasks pane, so the frame that leads
-# the docs site was shipping real issue numbers and real titles.
+# Shared strips can still carry Task titles on structural screens. Mask those
+# rows even though the full Work screen is excluded from live captures.
 #
 # A row is drawn as ~25 spans, one per colour run, so a regex over text nodes
 # cannot see a title that crosses them. This rebuilds the row's text as one
@@ -187,8 +187,7 @@ ROW_REDACT_JS = r"""
 
 # Redaction edits the DOM, and the renderer owns the DOM: any frame the server
 # pushes after the edit redraws the row from the terminal buffer, where the real
-# text still lives. That race is why a Keepers frame -- whose rows tick every
-# second -- shipped real Keeper names while the quieter Overview did not.
+# text still lives. A Keepers frame can repaint while names are being masked.
 #
 # ttyd feeds the terminal by calling `term.write`. Stubbing it stops the buffer
 # from advancing, so the redacted DOM is the last thing drawn.
@@ -394,8 +393,12 @@ def main() -> int:
         "terminal": dims,
         "api_port": args.api_port,
         "keeper_names_redacted": len(names),
-        "task_titles_redacted": True,
+        "task_row_redaction_applied": True,
         "frames": saved,
+        "uncaptured": [
+            {"surface": surface, "reason": reason}
+            for surface, reason in _UNCAPTURED
+        ],
     }
     (args.out / "evidence.json").write_text(json.dumps(evidence, indent=2) + "\n", encoding="utf-8")
     print(f"wrote {args.out / 'evidence.json'}")

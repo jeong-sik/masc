@@ -285,6 +285,14 @@
   eio
   eio_main))
 
+;; Manual real-model Stagehand fixture evidence; no browser or Keeper loop.
+(executable
+ (name stagehand_model_probe)
+ (modules stagehand_model_probe)
+ (libraries masc masc.runtime masc.server masc.config masc_eio_context agent_core
+  masc.agent_core.llm_provider masc.fs_compat
+  cohttp cohttp-eio yojson unix eio eio_main))
+
 ;; Deployment preflight helper.  The shell gate delegates runtime lease
 ;; ownership and schedule signal decoding to the same OCaml authorities used
 ;; by the server instead of reimplementing either contract in shell.
@@ -365,6 +373,14 @@
  (wrapped false)
  (modules masc_tui_chart)
  (libraries masc_tui_theme masc_tui_message_layout))
+
+;; Usage's quota scope trend, built once per provider history answer so the
+;; frame draws rows rather than regrouping every point on every repaint.
+(library
+ (name masc_tui_usage_trend)
+ (wrapped false)
+ (modules masc_tui_usage_trend)
+ (libraries masc masc_tui_chart))
 
 (library
  (name masc_tui_ask_projection)
@@ -972,7 +988,7 @@
  (modules masc_tui_render_schedule)
  ; masc_tui_scroll so the keeper detail's clamp is the shared one rather than
  ; a second copy of the same arithmetic.
- (libraries masc_tui_layout masc_tui_message_layout masc_tui_scroll
+ (libraries masc_tui_message_layout masc_tui_scroll
   masc_tui_table masc_tui_theme))
 
 (library
@@ -1348,6 +1364,7 @@
   masc.browser_lane
   masc.sse_wire
   masc_tui_task_flow
+  masc_tui_usage_trend
   masc_tui_runtime_config_view
   masc_tui_runtime_account_form
   masc_tui_frame
@@ -1674,26 +1691,12 @@
   masc_tui_types
   unix))
 
-;; Exact Candle presentation shared by the Overview and Keeper info pane.
+;; Exact Candle presentation shared by Dashboard and Keeper info.
 (library
  (name masc_tui_candle)
  (wrapped false)
  (modules masc_tui_candle)
  (libraries masc.masc_candle))
-
-;; The Overview Team block's projection (RFC-0464): pure, so a test can read
-;; it without the renderer.
-(library
- (name masc_tui_overview_team)
- (wrapped false)
- (modules masc_tui_overview_team)
- (libraries masc masc_types masc_tui_types))
-
-(library
- (name masc_tui_overview_cache)
- (wrapped false)
- (modules masc_tui_overview_cache)
- (libraries masc masc_types masc_tui_types masc_tui_overview_team masc_tui_overview_tasks))
 
 ;; The Overview's GOALS section: whether the fleet's work moves any goal. A
 ;; library so a test can draw it from a fixture of the server's goal tree.
@@ -1727,29 +1730,6 @@
   masc_tui_message_layout
   unix))
 
-;; RFC-0465: the Overview's pull request reading, decoder and lines. A
-;; library so a test can decode the server's own encoder output.
-(library
- (name masc_tui_repository_pulls)
- (wrapped false)
- (modules masc_tui_repository_pulls)
- (libraries unix masc masc_tui_types masc_tui_ansi yojson))
-;; The Overview's spend reading (GET /api/v1/dashboard/keeper-costs),
-;; decoder and Team row tags. A library so a test can decode the server's
-;; own encoder output.
-(library
- (name masc_tui_keeper_spend)
- (wrapped false)
- (modules masc_tui_keeper_spend)
- (libraries
-  masc
-  masc.dashboard_utils
-  masc_tui_types
-  masc_tui_ansi
-  masc_tui_message_layout
-  yojson))
-
-
 (executable
  (name masc_tui)
  (modules
@@ -1771,8 +1751,7 @@
   masc_tui_hit
   masc_tui_press
   masc_tui_pick_list
-  masc_tui_repository_pulls
-  masc_tui_keeper_spend
+  masc_tui_usage_trend
   digestif
   masc.string_util
   masc.keeper_runtime
@@ -1801,8 +1780,6 @@
   masc.build_commit
   masc.sse_wire
   masc_tui_task_flow
-  masc_tui_overview_team
-  masc_tui_overview_cache
   masc_tui_overview_goals
   masc_tui_overview_providers
   masc.masc_tool_blob_store

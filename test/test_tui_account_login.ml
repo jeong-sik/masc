@@ -45,7 +45,7 @@ let account_and_default () =
   let unknown=Login.create "not-a-client" in
   check bool "unknown client refused" true (Result.is_error (Login.inventory unknown inventory));
   let t=Login.create "codex" in ok (Login.inventory t inventory);t.provider<-Some provider;t.account_ref<-Some account;
-  let body=Login.save_body t (model 0) in
+  let body=Login.save_body t [model 0] in
   let open Yojson.Safe.Util in
   check string "current default stays first" "primary" (body |> member "selection" |> to_list |> List.hd |> member "runtime_id" |> to_string);
   check (list string) "only declared fallback order is preserved" ["primary"; "fallback"] t.existing;
@@ -120,7 +120,7 @@ let viewport_and_receipt () =
   (* 12 cells wrap the notice over several rows; the cursor row still shows. *)
   List.iter (fun (width, cursor) -> t.cursor<-cursor;
     check bool "selected model visible in short viewport" true
-      (List.mem ("> model " ^ string_of_int cursor) (List.map Login.row_text (Login.visible_lines ~height:6 ~width t))))
+      (List.mem ("> [ ] model " ^ string_of_int cursor) (List.map Login.row_text (Login.visible_lines ~height:6 ~width t))))
     [80,0; 80,15; 80,29; 12,0; 12,15; 12,29];
   t.provider<-Some provider;t.login_id<-Some session;t.account_ref<-Some account;
   let receipt=`Assoc ["login_id",`String session;"integration_id",`String "codex";"invocation_verified",`Bool false;
@@ -159,7 +159,7 @@ let missing_model_context () =
   List.iter (fun client ->
     let t=Login.create "" in let unknown={ (model 0) with context=None } in
     t.provider<-Some {provider with client};t.phase<-Login.Models;t.models<-[unknown];
-    let action=Login.key t "\r" in
+    let action=Login.key t " " in
     match client with
     | Login.Antigravity -> check bool "native observation available" true (action=Login.Prepare unknown)
     | Login.Muse ->
@@ -169,8 +169,10 @@ let missing_model_context () =
       check bool "explicit documented limit requested" true (action=Login.Nothing && t.phase=Login.Documented_context unknown);
       check bool "empty context cannot save" true (Login.key t "\r"=Login.Nothing);
       Login.paste t "32768";
+      check bool "documented context returns to model selection" true
+        (Login.key t "\r"=Login.Nothing && t.phase=Login.Models);
       (match Login.key t "\r" with
-       | Login.Save selected -> check (option int) "operator documented value still goes through save verification" (Some 32768) selected.context
+       | Login.Save [selected] -> check (option int) "operator documented value still goes through save verification" (Some 32768) selected.context
        | _ -> fail "documented context did not reach verification"))
     [Login.Codex;Login.Claude;Login.Antigravity;Login.Muse]
 let named_default_identity () =
@@ -178,7 +180,7 @@ let named_default_identity () =
   let t=Login.create "codex" in
   ok (Login.inventory t (`Assoc (("default_runtime_id",`String "named-lane") :: fields)));
   t.provider<-Some provider;t.account_ref<-Some account;
-  let body=Login.save_body t (model 0) in
+  let body=Login.save_body t [model 0] in
   let open Yojson.Safe.Util in
   check string "named default remains an explicit lane identity" "named-lane" (body |> member "default_runtime_id" |> to_string);
   check bool "lane identity is not submitted as a concrete candidate" false
@@ -201,9 +203,9 @@ let pasted_credential_bytes () =
 let failed_save_refresh () =
   let t=Login.create "codex" in ok (Login.inventory t inventory);
   t.provider<-Some provider;t.account_ref<-Some account;t.login_id<-Some session;
-  t.models<-[model 0;model 1];t.cursor<-1;t.phase<-Login.Saving;
   let selected={ (model 1) with context=Some 65536 } in
-  Login.save_failed t selected "save refused";
+  t.models<-[model 0;selected];t.selected_models<-[selected.id];t.cursor<-1;t.phase<-Login.Saving;
+  Login.save_failed t "save refused";
   check bool "save failure leads with the request's own reason" true (String.starts_with ~prefix:"save refused" t.notice);
   check bool "save failure requests current configuration despite login receipt" true (Login.key t "r"=Login.Refresh_retry);
   Login.refresh_retry t (Error "network unavailable");
@@ -217,10 +219,10 @@ let failed_save_refresh () =
   check bool "refresh awaits deliberate retry on retained model" true (t.phase=Login.Models && t.cursor=1);
   check (option string) "refresh retains authenticated account" (Some account) t.account_ref;
   match Login.key t "\r" with
-  | Login.Save chosen ->
+  | Login.Save [chosen] ->
     check string "same model retained" selected.id chosen.id;
     check (option int) "documented context survives failed save" selected.context chosen.context;
-    let body=Login.save_body t chosen in
+    let body=Login.save_body t [chosen] in
     let open Yojson.Safe.Util in
     check string "retry uses new revision" "new-revision" (body |> member "revision" |> to_string);
     check string "retry preserves new default" "new-default" (body |> member "default_runtime_id" |> to_string);
@@ -484,7 +486,7 @@ let mentions text t = List.exists (fun row ->
 let a_long_reason_is_read_whole () =
   let t=Login.create "codex" in ok (Login.inventory t inventory);
   t.provider<-Some provider; t.models<-[model 0]; t.phase<-Login.Saving;
-  Login.save_failed t (model 0)
+  Login.save_failed t
     "HTTP 502: Runtime \"codex.gpt\" did not pass response and tool verification (rate_limited)";
   let drawn = List.map Login.row_text (Login.visible_lines ~height:12 ~width:40 t) in
   check bool "every row fits" true
@@ -531,8 +533,11 @@ let clients_then_accounts () =
    | _ -> fail "Enter on + 새 계정 did not start a new login");
   ignore (Login.key t "j");
   (match Login.key t "\r" with
-   | Login.Start {provider; existing = true} -> check string "an account logs in as itself" "codex_one" provider.id
-   | _ -> fail "Enter on an account did not start its login");
+   | Login.Select_existing provider -> check string "Enter opens the account without login" "codex_one" provider.id
+   | _ -> fail "Enter on an account did not select its existing credential");
+  (match Login.key t "e" with
+   | Login.Start {provider; existing = true} -> check string "e still explicitly reauthenticates" "codex_one" provider.id
+   | _ -> fail "e on an account did not start its login");
   (match Login.key t "n" with
    | Login.Start {provider; existing = false} -> check string "n adds a new account from any row" "codex" provider.id
    | _ -> fail "n did not start a new login");
@@ -608,7 +613,79 @@ let refused_removal () =
   check bool "an unknown change is refused" true
     (Result.is_error (Login.removal_preview t provider ~refused:None
       (removal_preview_json "removable" ["changes",`List [`Assoc ["kind",`String "mystery"]];"login_store",`Null])))
+let multi_model_selection () =
+  let t=Login.create "codex" in
+  ok (Login.inventory t inventory);
+  t.provider<-Some provider; t.account_ref<-Some account;
+  let catalog=`Assoc ["models",`List [
+    `Assoc ["id",`String "first";"label",`String "First";"context",`Int 32768;"tools",`Bool true;"bound",`Bool false];
+    `Assoc ["id",`String "blocked";"label",`String "Blocked";"context",`Int 32768;"tools",`Bool false;"bound",`Bool false];
+    `Assoc ["id",`String "second";"label",`String "Second";"context",`Int 65536;"tools",`Bool true;"bound",`Bool false]]] in
+  ok (Login.models t catalog);
+  check (list string) "usable models start selected in catalog order"
+    ["first";"second"] (List.map (fun (m:Login.model) -> m.id)
+      (List.filter (fun (m:Login.model) -> List.mem m.id t.selected_models) t.models));
+  check bool "unsupported model gives its reason" true (mentions "Blocked · 도구 호출 미지원" t);
+  (match Login.key t "\r" with
+   | Login.Save selected ->
+     check (list string) "Enter submits all selected models in screen order"
+       ["first";"second"] (List.map (fun (m:Login.model) -> m.id) selected);
+     let body=Login.save_body t selected in
+     let open Yojson.Safe.Util in
+     check (list string) "one connection carries both models in order" ["first";"second"]
+       (body |> member "connections" |> to_list |> List.hd |> member "models"
+        |> to_list |> List.map (fun row -> row |> member "id" |> to_string));
+     check bool "selection uses model indexes after existing defaults" true
+       (body |> member "selection" |> to_list =
+         [`Assoc ["runtime_id",`String "primary"];
+          `Assoc ["runtime_id",`String "fallback"];
+          `Assoc ["connection",`Int 0;"model",`Int 0];
+          `Assoc ["connection",`Int 0;"model",`Int 1]])
+   | _ -> fail "Enter did not submit both models");
+  t.cursor<-1; ignore (Login.key t " ");
+  check bool "unsupported model remains unselected" false (List.mem "blocked" t.selected_models);
+  ignore (Login.key t "a");
+  check (list string) "a clears all usable selections" [] t.selected_models;
+  ignore (Login.key t "a");
+  check (list string) "a restores both usable selections" ["first";"second"]
+    (List.map (fun (m:Login.model) -> m.id)
+       (List.filter (fun (m:Login.model) -> List.mem m.id t.selected_models) t.models));
+  t.cursor<-0; ignore (Login.key t " ");
+  check bool "Space toggles just the focused model" true
+    (t.selected_models=["second"])
+
+let already_bound_model_is_not_offered () =
+  let fields=match inventory with `Assoc fields ->
+    List.remove_assoc "runtimes" (List.remove_assoc "integrations" fields) | _ -> [] in
+  let integration id = `Assoc ["id",`String id;"display_name",`String "Codex account";
+    "protocol",`String "codex-app-server";"origin",`String "runtime_config"] in
+  let rows=`List [
+    `Assoc ["id",`String "primary"];
+    `Assoc ["id",`String "fallback"];
+    `Assoc ["id",`String "runtime-a";"provider_id",`String "codex_hA";"model",`String "first"];
+    `Assoc ["id",`String "runtime-b";"provider_id",`String "codex_hB";"model",`String "second"]] in
+  let inventory=`Assoc (("runtimes",rows)::("integrations",`List [integration "codex_hA";integration "codex_hB"])::fields) in
+  List.iter (fun selected_provider ->
+    let t=Login.create "codex" in
+    ok (Login.inventory t inventory);
+    check bool "invalid account selection is refused" true
+      (Result.is_error (Login.selected_account t selected_provider (`Assoc ["account_ref",`String "bad"])));
+    ok (Login.selected_account t selected_provider (`Assoc ["account_ref",`String account]));
+    check bool "selected account is reused without login" true
+      (t.account_ref=Some account && t.login_id=None && t.provider=Some selected_provider);
+    let catalog=`Assoc ["models",`List [
+      `Assoc ["id",`String "first";"context",`Int 32768;"tools",`Bool true;"bound",`Bool true];
+      `Assoc ["id",`String "second";"context",`Int 32768;"tools",`Bool true;"bound",`Bool true];
+      `Assoc ["id",`String "third";"context",`Int 32768;"tools",`Bool true;"bound",`Bool false]]] in
+    ok (Login.models t catalog);
+    check (list string) ("both bound models stay hidden from " ^ selected_provider.id)
+      ["third"] (List.map (fun (m:Login.model) -> m.id) t.models);
+    check (list string) "only the new model is selected" ["third"] t.selected_models)
+    [{provider with id="codex_hA"};{provider with id="codex_hB"}]
+
 let () = run "TUI account login" ["workflow",[
+  test_case "multi-model selection submits ordered models" `Quick multi_model_selection;
+  test_case "reopening excludes a bound model" `Quick already_bound_model_is_not_offered;
   test_case "pasted credentials preserve bytes and reject controls" `Quick pasted_credential_bytes;
   test_case "failed save refreshes revision and retains model" `Quick failed_save_refresh;
   test_case "a long reason is read whole" `Quick a_long_reason_is_read_whole;

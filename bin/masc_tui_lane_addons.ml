@@ -7,9 +7,11 @@ type instance = {
   source_path : string option; binding : Yojson.Safe.t; outputs : Row.output_ports;
   skills_directory : string option; incarnation : string; action_schema : Yojson.Safe.t option; binding_schema : Yojson.Safe.t option; display : Masc.Lane_addon_presentation.t;
 }
+type declaration_origin = Parsed_declaration | Issue_only
 type declaration = {
   source_path : string; installation_id : string option; desired : string option;
   applied : string option; instance_id : string option; issues : string list;
+  origin : declaration_origin;
 }
 type configuration = { directory : string; complete : bool; declarations : declaration list }
 type snapshot = { instances : instance list; output : Row.output; complete : bool option;
@@ -93,7 +95,7 @@ let configuration = function
         let* desired = get text "desired_revision" json in
         let* applied = optional "applied_revision" text json in
         let* instance_id = optional "instance_id" text json in
-        Ok {source_path;installation_id=Some installation_id;desired=Some desired;applied;instance_id;issues=[]})) "declarations" json in
+        Ok {source_path;installation_id=Some installation_id;desired=Some desired;applied;instance_id;issues=[];origin=Parsed_declaration})) "declarations" json in
       let* issues = get (array (fun json ->
         let* source_path = get text "source_path" json in
         let* installation_id = optional "id" text json in
@@ -101,7 +103,7 @@ let configuration = function
       let declarations = List.fold_left (fun declarations (path, id, message) ->
         if List.exists (fun (d : declaration) -> d.source_path = path) declarations
         then List.map (fun (d : declaration) -> if d.source_path = path then {d with issues=d.issues @ [message]} else d) declarations
-        else declarations @ [{source_path=path;installation_id=id;desired=None;applied=None;instance_id=None;issues=[message]}]) declarations issues in
+        else declarations @ [{source_path=path;installation_id=id;desired=None;applied=None;instance_id=None;issues=[message];origin=Issue_only}]) declarations issues in
       Ok (Some {directory;complete;declarations})
 let phase json =
   let* kind = get text "kind" json in
@@ -1358,25 +1360,49 @@ let lines ?(height=24) ?(failed_note = "") ~width view =
         | Overview -> overview_lines ~width view
         | Detail _ -> detail_lines ~width view)
 
-(* The Lanes surface drew a fixed sentence -- "No Add-ons installed. Press A
-   to inspect installed add-ons" -- with no state behind it, so it said so
-   whether or not any were installed and whether or not anything had read.
-   Nothing on that surface asks for Add-ons: [launch_lanes_load] fetches
-   standalone lanes only, so the honest answer there is that nobody has read
-   yet. The three answers are apart in the type; the row that draws them
-   chooses the words. *)
-type installed_reading =
+(* A TOML declaration may exist while no worker can run. Keep the file count,
+   live worker count, and failures separate on the Lanes surface. *)
+type reading_freshness = Current | Stale of string
+type installation_reading =
   | Not_read
-  | Nothing_installed
-  | Installed of int
+  | Observed of {
+      declared : int;
+      active : int;
+      failed_workers : int;
+      configuration_issues : int;
+      complete : bool;
+      freshness : reading_freshness;
+    }
 
-let installed view =
+let installation_reading view =
   match view.snapshot with
   | None -> Not_read
   | Some snapshot ->
     (match snapshot.configuration with
      | None -> Not_read
      | Some configuration ->
-       (match List.length configuration.declarations with
-        | 0 -> Nothing_installed
-        | count -> Installed count))
+       let active, failed_workers =
+         List.fold_left (fun (active, failed) (instance : instance) ->
+           match instance.phase with
+           | Row.Attached | Row.Observing -> active + 1, failed
+           | Row.Failed _ -> active, failed + 1
+           | Row.Detaching | Row.Detached -> active, failed)
+           (0, 0) snapshot.instances in
+       Observed {
+         (* Decoder also appends issue-only paths here when a TOML file could
+            not be parsed. Those are problems to show, not declarations. *)
+         declared = List.fold_left (fun count (declaration : declaration) ->
+           match declaration.origin with
+           | Parsed_declaration -> count + 1
+           | Issue_only -> count)
+           0 configuration.declarations;
+         active;
+         failed_workers;
+         configuration_issues = List.fold_left (fun count (declaration : declaration) ->
+           count + List.length declaration.issues)
+           0 configuration.declarations;
+         complete = configuration.complete;
+         freshness = (match view.snapshot_read_error with
+           | None -> Current
+           | Some detail -> Stale detail);
+       })

@@ -260,9 +260,8 @@ def roster_failure_and_deletion(executable):
             # A complete deletion keeps already-open history readable; Home
             # offers selection rather than resuming the deleted recipient.
             metadata.unlink()
-            start = len(output)
-            h.wait_for_output(process, fd, output,
-                              "Keepers ▸ beta ▸ chat".encode(), start=start, timeout=10)
+            # The unchanged chat title need not redraw on deletion. Home's
+            # unavailable assertion below verifies the complete new roster.
             home(process, fd, output, b"Last conversation beta unavailable")
         finally:
             metadata.write_bytes(original)

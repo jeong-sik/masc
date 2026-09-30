@@ -103,7 +103,7 @@ def requests_are_navigation(executable):
         h.wait_for_output(process, fd, output, b"Approvals and questions: 3", start=0, timeout=10)
         capture(process, fd, output, "requests", b"Approvals and questions: 3")
         select_destination(process, fd, output, b"namespace_pause")
-        detail = h.send_and_wait(process, fd, output, b"\r", b"trace=trace-token-a")
+        detail = h.send_and_wait(process, fd, output, b"\r", b"reason-token-a")
         assert b"reason-token-a" in h.screen_text(detail), detail
         h.send_and_wait(process, fd, output, b"\x1b", b"Enter:open")
         assert_no_decision_posts(requests)

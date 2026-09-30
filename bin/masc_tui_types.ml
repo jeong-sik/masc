@@ -11986,6 +11986,12 @@ let keeper_observed_interrupt_rows (state : state) =
    queue_length is only a snapshot and cannot supply the current count.
    In-flight entries are newest first,
    while the local queue already carries its dispatch order. *)
+type keeper_message_pending_delivery =
+  | Local_pending
+  | Awaiting_receipt
+  | Keeper_queued
+  | Rechecking_delivery
+
 let keeper_message_waiting_requests (state : state) ~keeper_name =
   let module Executions = Set.Make (String) in
   let remember_started executions log =
@@ -12020,19 +12026,22 @@ let keeper_message_waiting_requests (state : state) ~keeper_name =
               Masc_tui_keeper_chat_transcript.admission transcript with
         | Waiting, None
           when not (Masc_tui_keeper_chat_transcript.awaiting_continuation transcript) ->
-            (match entry.origin with
-             | Promoted_queue { intent; _ } -> Some (entry.sent_request, intent)
-             | Direct_submission -> None)
+            (match entry.phase, entry.origin with
+             | Turn_reconciling, (Promoted_queue _ | Direct_submission) ->
+                 Some (entry.sent_request, Rechecking_delivery)
+             | Turn_streaming, Promoted_queue _ ->
+                 Some (entry.sent_request, Awaiting_receipt)
+             | Turn_streaming, Direct_submission -> None)
         | Waiting, Some (Masc_tui_keeper_chat_live.Queued, _)
           when not (Masc_tui_keeper_chat_transcript.awaiting_continuation transcript) ->
-            let intent = match entry.origin with
-              | Direct_submission -> Masc_tui_keeper_chat_queue.Next
-              | Promoted_queue { intent; _ } -> intent in
-            Some (entry.sent_request, intent)
+            let delivery = match entry.phase with
+              | Turn_streaming -> Keeper_queued
+              | Turn_reconciling -> Rechecking_delivery in
+            Some (entry.sent_request, delivery)
         | Waiting, (None | Some _) | (Working | Stream_ended | Stream_failed _), _ -> None)
   in
   submitted @ List.map (fun (item : Masc_tui_keeper_chat_queue.item) ->
-    item.request, item.intent) local
+    item.request, Local_pending) local
 ;;
 
 let keeper_message_activity_rows (state : state) =
@@ -12072,7 +12081,14 @@ let keeper_message_activity_rows (state : state) =
     let waiting_count = List.length waiting_items in
     let local = Masc_tui_keeper_chat_queue.waiting_for_keeper
       state.msg_queued ~keeper_name in
-    let submitted_count = waiting_count - List.length local in
+    let awaiting_receipt, keeper_queued, rechecking =
+      List.fold_left (fun (awaiting, queued, rechecking) (_, delivery) ->
+        match delivery with
+        | Local_pending -> awaiting, queued, rechecking
+        | Awaiting_receipt -> awaiting + 1, queued, rechecking
+        | Keeper_queued -> awaiting, queued + 1, rechecking
+        | Rechecking_delivery -> awaiting, queued, rechecking + 1)
+        (0, 0, 0) waiting_items in
     let retained = List.exists (fun (name, _, intervention) ->
       name = keeper_name && match intervention with
       | Retained_after_stop -> true | Awaiting_control _ -> false)
@@ -12085,10 +12101,10 @@ let keeper_message_activity_rows (state : state) =
         (* Server-side edit/reorder changes the input independently of this
            session's request. Only local unsent input has an authoritative
            preview here; /queue reads the server's current contents/order. *)
-        let submitted_note = if submitted_count = 0 then "" else
-          Printf.sprintf " · %d submitted · /queue" submitted_count in
-        let local_note = match local with
-          | [] -> ""
+        let count_row count label =
+          if count = 0 then [] else [plain (Printf.sprintf "%d %s" count label)] in
+        let local_rows = match local with
+          | [] -> []
           | first :: _ ->
             let preview =
               Masc_tui_keeper_chat_projection.terminal_safe_text first.request.message
@@ -12097,11 +12113,20 @@ let keeper_message_activity_rows (state : state) =
             let intent_str = match first.intent with
               | Steer_after_interrupt -> " [steer]"
               | Next -> "" in
-            Printf.sprintf " · %sNEXT%s: \"%s\" · Ctrl-T:queue"
-              (if submitted_count = 0 then "" else "local ") intent_str preview in
+            [ { Masc_tui_answering.lead = "Local NEXT" ^ intent_str
+              ; rest = Printf.sprintf ": \"%s\"" preview
+              ; keys = "" } ] in
         let auto_tag = if state.user_input_priority_next then "auto-next:on" else "auto-next:off" in
-        [ plain (Printf.sprintf "Queue (%d waiting · %s)%s%s"
-            waiting_count auto_tag submitted_note local_note) ]
+        (* The renderer reserves [keys] before fitting [rest]. Keep the
+           aggregate, delivery evidence and local preview on separate rows;
+           the status budget counts this same projection. *)
+        [ { Masc_tui_answering.lead = Printf.sprintf "Queue (%d pending)" waiting_count
+          ; rest = " · " ^ auto_tag
+          ; keys = " · Ctrl-T:queue" } ]
+        @ count_row keeper_queued "queued at Keeper · /queue"
+        @ count_row awaiting_receipt "awaiting receipt"
+        @ count_row rechecking "rechecking delivery"
+        @ local_rows
     in
     activity @ (if retained then
       [plain "Input retained after Esc; /queue resume sends it"]

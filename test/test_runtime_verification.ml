@@ -240,12 +240,12 @@ streaming = true
     match config.Runtime_schema.bindings with
     | [] | _ :: _ :: _ -> fail "credential fixture declares one binding"
     | [ binding ] ->
-      (match Runtime.of_binding { config with providers } binding with
-       | Error reason -> fail (Runtime.string_of_drop_reason reason)
+      (match Runtime_instance.of_binding { config with providers } binding with
+       | Error reason -> fail (Runtime_config_error.string_of_drop_reason reason)
        | Ok runtime ->
          { runtime with
-           Runtime.provider =
-             { runtime.Runtime.provider with Runtime_schema.credentials = Some credential }
+           Runtime_instance.provider =
+             { runtime.Runtime_instance.provider with Runtime_schema.credentials = Some credential }
          })
   in
   let verify runtime =
@@ -418,9 +418,9 @@ streaming = true
       let runtime =
         match config.Runtime_schema.bindings with
         | [ binding ] ->
-          (match Runtime.of_binding config binding with
+          (match Runtime_instance.of_binding config binding with
            | Ok runtime -> runtime
-           | Error reason -> fail (Runtime.string_of_drop_reason reason))
+           | Error reason -> fail (Runtime_config_error.string_of_drop_reason reason))
         | [] | _ :: _ :: _ -> fail "silent endpoint fixture declares one binding"
       in
       f ~env ~sw ~runtime))
@@ -512,7 +512,7 @@ let test_a_silent_http_endpoint_ends_at_the_declared_timeout () =
 let test_a_queued_readiness_run_ends_at_the_declared_timeout () =
   with_silent_endpoint_runtime ~binding_keys:"max-concurrent = 1" @@ fun ~env ~sw ~runtime ->
   let provider_cfg =
-    match runtime.Runtime.execution with
+    match runtime.Runtime_instance.execution with
     | Runtime_execution.Agent_core provider_cfg -> provider_cfg
     | Runtime_execution.Antigravity_cli _
     | Runtime_execution.Claude_code _
@@ -748,6 +748,178 @@ let test_assigned_lane_selects_initial_target () =
     (select [] [ Runtime_lane.make ~id:"default.model" [ "chosen.model" ] ]);
   check (option string) "empty lane cannot claim a target" None
     (select [ "imp", "empty" ] [ Runtime_lane.make ~id:"empty" [] ])
+;;
+
+(* Both entry points spawn the real transport runner. The child captures the
+   effort and consumes the host's actual tool reply, so a successful probe at
+   the CLI default cannot stand in for the selected runtime's effort. *)
+let official_effort_fixture = {|#!/usr/bin/env python3
+import json
+from pathlib import Path
+import sys
+
+args = sys.argv[1:]
+if "auth" in args and "status" in args:
+    print(json.dumps({"loggedIn": True, "authMethod": "claude.ai", "apiProvider": "firstParty", "subscriptionType": "max"}))
+    sys.exit(0)
+
+def read():
+    return json.loads(sys.stdin.readline())
+
+def emit(frame):
+    print(json.dumps(frame), flush=True)
+
+capture = Path(sys.argv[0]).with_suffix(".json")
+if "app-server" in args:
+    request = read()
+    assert request["method"] == "initialize"
+    emit({"id": request["id"], "result": {"userAgent": "effort-fixture", "codexHome": "/tmp/codex",
+        "platformFamily": "unix", "platformOs": "linux"}})
+    assert read()["method"] == "initialized"
+    request = read()
+    assert request["method"] == "account/read"
+    emit({"id": request["id"], "result": {"account": {"type": "chatgpt", "email": "fixture@example.test",
+        "planType": "pro"}, "requiresOpenaiAuth": True}})
+    request = read()
+    assert request["method"] == "thread/start"
+    model = request["params"]["model"]
+    tool = request["params"]["dynamicTools"][0]["name"]
+    emit({"id": request["id"], "result": {"thread": {"id": "effort-thread"}, "model": model}})
+    request = read()
+    assert request["method"] == "turn/start"
+    capture.write_text(json.dumps({"effort": request["params"].get("effort"), "model": model}))
+    emit({"id": request["id"], "result": {"turn": {"id": "effort-turn"}}})
+    emit({"id": "effort-tool", "method": "item/tool/call", "params": {"threadId": "effort-thread",
+        "turnId": "effort-turn", "callId": "effort-call", "tool": tool, "arguments": {}}})
+    response = read()
+    assert response["result"]["success"]
+    text = response["result"]["contentItems"][0]["text"]
+    item = {"type": "agentMessage", "id": "effort-message", "text": text, "phase": "final_answer"}
+    emit({"method": "item/completed", "params": {"threadId": "effort-thread", "turnId": "effort-turn",
+        "completedAtMs": 1, "item": item}})
+    emit({"method": "turn/completed", "params": {"threadId": "effort-thread", "turn": {
+        "id": "effort-turn", "items": [item], "status": "completed"}}})
+else:
+    model = args[args.index("--model") + 1]
+    effort = args[args.index("--effort") + 1] if "--effort" in args else None
+    capture.write_text(json.dumps({"effort": effort, "model": model}))
+    session = next(arg.split("=", 1)[1] for arg in args if arg.startswith("--session-id="))
+    request = read()
+    emit({"type": "control_response", "response": {"subtype": "success",
+        "request_id": request["request_id"], "response": {}}})
+    assert read()["type"] == "user"
+    emit({"type": "system", "subtype": "init", "session_id": session})
+    def mcp(method, params, rpc_id):
+        message = {"jsonrpc": "2.0", "method": method, "params": params}
+        if rpc_id is not None:
+            message["id"] = rpc_id
+        emit({"type": "control_request", "request_id": "effort-" + method,
+            "request": {"subtype": "mcp_message", "server_name": "masc", "message": message}})
+        return read()["response"]["response"].get("mcp_response")
+    mcp("initialize", {"protocolVersion": "2025-11-25", "capabilities": {},
+        "clientInfo": {"name": "effort-fixture", "version": "1"}}, 1)
+    mcp("notifications/initialized", {}, None)
+    tool = mcp("tools/list", {}, 2)["result"]["tools"][0]["name"]
+    result = mcp("tools/call", {"name": tool, "arguments": {}}, 3)["result"]
+    assert not result.get("isError", False)
+    text = result["content"][0]["text"]
+    emit({"type": "assistant", "session_id": session, "uuid": "effort-assistant", "message": {
+        "role": "assistant", "model": model, "content": [{"type": "text", "text": text}]}})
+    emit({"type": "result", "subtype": "success", "is_error": False, "session_id": session,
+        "uuid": "effort-result", "result": text, "api_error_status": None})
+for line in sys.stdin:
+    pass
+|}
+;;
+
+let test_official_probes_preserve_selected_effort () =
+  let snapshot = Runtime.For_testing.snapshot () in
+  let eio_state = Eio_context.snapshot_state () in
+  Fun.protect
+    ~finally:(fun () ->
+      Runtime.For_testing.restore snapshot;
+      Eio_context.restore_state eio_state)
+    (fun () -> Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+      let directory = Filename.temp_dir "official-effort-probe-" "" |> Unix.realpath in
+      Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree directory);
+      Eio_context.set_env env;
+      let mgr = Posix_spawn_process_mgr.foreground_mgr ~clock:env#clock
+        ~grace_seconds:Process_eio.child_exit_grace_seconds in
+      let account_home = Filename.concat directory "account" in
+      Fs_compat.mkdir_p account_home;
+      Out_channel.with_open_bin (Filename.concat account_home "config.toml")
+        (fun out -> output_string out "");
+      let script = Filename.concat directory "official-fixture" in
+      Out_channel.with_open_bin script (fun out -> output_string out official_effort_fixture);
+      Unix.chmod script 0o700;
+      let runtime_path = Filename.concat directory "runtime.toml" in
+      let load_config ~protocol ~model ~effort =
+        let effort_field = match effort with
+          | None -> ""
+          | Some effort -> Printf.sprintf "reasoning-effort = %S\n" effort in
+        Out_channel.with_open_bin runtime_path (fun out ->
+          Printf.fprintf out {|
+[providers.fixture]
+protocol = %S
+command = %S
+account-home = %S
+is-non-interactive = true
+[models.selected]
+api-name = %S
+max-context = 272000
+tools-support = true
+turn-timeout-s = 15.0
+%s
+[fixture.selected]
+[runtime]
+default = "fixture.selected"
+|} protocol script account_home model effort_field);
+        match Runtime.init_default ~config_path:runtime_path with
+        | Ok () -> ()
+        | Error detail -> fail detail in
+      let check_capture label expected model =
+        let open Yojson.Safe.Util in
+        let capture = Yojson.Safe.from_file (script ^ ".json") in
+        check (option string) (label ^ " child received the selected effort") expected
+          (capture |> member "effort" |> to_string_option);
+        check string (label ^ " child received the selected model") model
+          (capture |> member "model" |> to_string) in
+      List.iter (fun (protocol, model, effort, expected) ->
+        load_config ~protocol ~model ~effort;
+        let selected = match Runtime.get_runtime_by_id "fixture.selected" with
+          | Some runtime -> runtime
+          | None -> fail "selected official fixture must resolve" in
+        let probe = Masc.Keeper_capability_probe.probe_official_client_invocation
+          ~mgr ~clock:env#clock ~fs:env#fs ~base_path:directory
+          ~now:(fun () -> Eio.Time.now env#clock) ~runtime_id:selected.id
+          ~tool:"masc_board_list" ~prompt:"Call masc_board_list once." () in
+        (match probe with
+         | Ok (Masc.Keeper_capability_probe.Tool_invoked _) -> ()
+         | Ok result -> fail (Masc.Keeper_capability_probe.invocation_to_string result)
+         | Error error -> fail (Masc.Keeper_capability_probe.invocation_error_to_string error));
+        check_capture (protocol ^ " capability probe") expected model;
+        (* A config refresh after selection cannot change this verification's
+           model or effort: it measures the captured runtime, like dispatch. *)
+        load_config ~protocol ~model ~effort:(Some "low");
+        (* The readiness command gives each run its own private directory;
+           Codex prepares its isolated home once inside that directory. *)
+        let private_dir =
+          Filename.temp_dir ~temp_dir:directory "readiness-" "" |> Unix.realpath in
+        let result = Verify.verify ~secure_random:env#secure_random ~sw ~net:env#net
+          ~mgr ~clock:env#clock ~cwd:Eio.Path.(env#fs / private_dir)
+          ~cwd_path:private_dir ~timeout_s:15. selected in
+        check (option string) (protocol ^ " actual readiness roundtrip") None
+          (Option.map (fun failure ->
+             match Verify.failure_detail failure with
+             | Some detail -> Verify.failure_code failure ^ ": " ^ detail
+             | None -> Verify.failure_code failure) result.failure);
+        check bool (protocol ^ " actual readiness tool consumed") true result.tool_roundtrip;
+        check_capture (protocol ^ " readiness") expected model)
+        [ "codex-app-server", "gpt-6.1-sol", Some "ultra", Some "ultra"
+        ; "codex-app-server", "gpt-6.1-sol", None, None
+        ; "claude-code", "claude-sonnet-5-5", Some "high", Some "high"
+        ; "claude-code", "claude-sonnet-5-5", Some "minimal", Some "low"
+        ])))
 ;;
 
 let test_codex_readiness_excludes_inherited_tools () =
@@ -1133,9 +1305,9 @@ tools-support = true
 |} script account_home) with
         | Ok config -> config | Error _ -> fail "Muse readiness binding must parse" in
       match config.Runtime_schema.bindings with
-      | [binding] -> (match Runtime.of_binding config binding with
+      | [binding] -> (match Runtime_instance.of_binding config binding with
           | Ok runtime -> runtime
-          | Error reason -> fail (Runtime.string_of_drop_reason reason))
+          | Error reason -> fail (Runtime_config_error.string_of_drop_reason reason))
       | [] | _ :: _ :: _ -> fail "one Muse readiness binding" in
     let check_case mode expected_failure =
       let script = Filename.concat directory mode in
@@ -1205,7 +1377,7 @@ tools-support = true
       check bool (mode ^ " rests the account only when the window is spent")
         (String.equal expected "quota_exhausted")
         (Runtime_quota_window.is_exhausted
-           ~scope:(Runtime.quota_scope_of_runtime selected) ~now:(Time_compat.now ()));
+           ~scope:(Runtime_instance.quota_scope_of_runtime selected) ~now:(Time_compat.now ()));
       Runtime_quota_window.reset_for_testing ();
       Unix.unlink script)
       ["muse-quota-spent", "quota_exhausted"; "muse-quota-open", "provider_rejected"];
@@ -1214,7 +1386,7 @@ tools-support = true
       let script = Filename.concat directory "muse-invalid-capacity" in
       write script muse_readiness_fixture; Unix.chmod script 0o700;
       let selected = runtime script in
-      let selected = {selected with Runtime.model = {selected.model with max_prompt_bytes}} in
+      let selected = {selected with Runtime_instance.model = {selected.model with max_prompt_bytes}} in
       let result = Verify.verify ~secure_random:env#secure_random ~sw ~net:env#net
         ~mgr ~clock:env#clock ~cwd:Eio.Path.(env#fs / directory)
         ~cwd_path:directory ~timeout_s:15. selected in
@@ -1341,6 +1513,8 @@ let () =
         ; test_case "Antigravity private MCP roundtrip" `Quick test_antigravity_private_tool_roundtrip
         ; test_case "Muse private MCP readiness" `Quick test_muse_private_tool_roundtrip
         ; test_case "Codex readiness excludes inherited tools" `Quick test_codex_readiness_excludes_inherited_tools
+        ; test_case "official probes preserve selected effort on the wire" `Quick
+            test_official_probes_preserve_selected_effort
         ; test_case "assigned lane selects initial target" `Quick test_assigned_lane_selects_initial_target
         ; test_case "actual tool-result roundtrip" `Quick test_roundtrip
         ; test_case "no tool cannot claim ready" `Quick test_no_tool_cannot_claim_success

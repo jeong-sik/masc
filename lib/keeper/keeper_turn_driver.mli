@@ -488,7 +488,7 @@ module For_testing : sig
     keeper_name:string ->
     assignment_id:string ->
     first_candidate_id:string ->
-    Runtime.t Runtime_agent.reroute_decision ->
+    Runtime_instance.t Runtime_agent.reroute_decision ->
     unit
   (** On [Reroute], logs a WARN naming the lane head, the lane candidate the
       image turn starts from, and [assignment_id]. Logs nothing otherwise (the
@@ -498,36 +498,36 @@ module For_testing : sig
     now:float ->
     walk:walk_start ->
     deferred_runtime_lane:deferred_runtime_lane option ->
-    first_candidate:Runtime.t ->
-    remaining_runtimes:Runtime.t list ->
-    Runtime.t list
+    first_candidate:Runtime_instance.t ->
+    remaining_runtimes:Runtime_instance.t list ->
+    Runtime_instance.t list
 
   val attempt_runtimes_for_turn :
-    media_walk:Runtime.t list ->
-    lane:Runtime.t list ->
-    Runtime.t list
+    media_walk:Runtime_instance.t list ->
+    lane:Runtime_instance.t list ->
+    Runtime_instance.t list
 
   val lane_modality_reroute_decision :
     checkpoint_messages:Agent_core.Types.message list ->
     initial_messages:Agent_core.Types.message list ->
     goal_blocks:Agent_core.Types.content_block list ->
-    first_candidate:Runtime.t ->
-    candidates:Runtime.t list ->
-    Runtime.t Runtime_agent.reroute_decision
+    first_candidate:Runtime_instance.t ->
+    candidates:Runtime_instance.t list ->
+    Runtime_instance.t Runtime_agent.reroute_decision
 
-  val dedupe_runtimes_preserve_order : Runtime.t list -> Runtime.t list
+  val dedupe_runtimes_preserve_order : Runtime_instance.t list -> Runtime_instance.t list
   val resolve_runtime_candidates :
     string list ->
-    (Runtime.t list, Agent_core.Error.t) result
+    (Runtime_instance.t list, Agent_core.Error.t) result
 
   val resolve_runtime_candidate_for_attempt :
     ?on_missing:(unit -> unit) ->
     string ->
-    (Runtime.t, Agent_core.Error.t) result
+    (Runtime_instance.t, Agent_core.Error.t) result
 
   val selected_runtime_result :
     ?official_client_settlement:Keeper_official_client_session_store.t ->
-    Runtime.t ->
+    Runtime_instance.t ->
     lane_attempt_index:int ->
     (Runtime_agent.run_result, Agent_core.Error.t) result ->
     (named_run_result, Agent_core.Error.t) result
@@ -550,7 +550,7 @@ module For_testing : sig
     initial_messages:Agent_core.Types.message list ->
     agent_core_checkpoint:Agent_core.Checkpoint.t option ->
     runtime_id:string ->
-    Runtime.t ->
+    Runtime_instance.t ->
     attempt_input
   (** The per-attempt RFC-0265 decision for one resolved candidate: unchanged
       when the runtime admits the turn's modalities, otherwise image readings/references

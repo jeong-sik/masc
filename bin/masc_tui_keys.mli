@@ -144,7 +144,7 @@ val footer_hints_approval_detail : string
     ("y / n"), the spelling {!Masc_tui_footer} pins, so a narrow row gives up
     the scroll before it gives up the answer. *)
 
-val footer_hints_voice_agent : unit -> string
+val footer_hints_voice_agent : ?saving:bool -> unit -> string
 (** The keeper-voice screen's own row: the keeper axis, the voice axis, the
     write and the way out. Its keys are not the Config pane's, so the row is
     the screen's rather than the pane's. *)
@@ -171,7 +171,10 @@ val footer_hints_work_tasks : string
 type code_pane =
   | Code_tree  (** the file list has focus *)
   | Code_file  (** a file is open and nothing covers it *)
-  | Code_overlay  (** history, diff or notes is drawn over the file *)
+  | Code_diff
+  | Code_overlay  (** diff is drawn over the file *)
+  | Code_notes  (** wrapped memo document is drawn over the file *)
+  | Code_history  (** complete history document is drawn over the file *)
 
 val footer_hints_code : pane:code_pane -> string
 (** The Code footer, narrowed to what [pane] answers.
@@ -289,6 +292,14 @@ val help_surfaces : (string * Masc_tui_types.surface) list
 (** One sheet section per surface family, and the surface it answers for. Read
     by the guard that checks a destination the palette offers by name is named
     that way on the sheet. *)
+
+val help_sections_for_state :
+  Masc_tui_types.state -> (string * (string * string) list) list
+(** Put the active nested reader's own keys first, ahead of surface reference
+    sections. This is the help sheet's state-aware entry point. *)
+
+val footer_hints_patch_review : unit -> string
+val footer_hints_runtime_detail : unit -> string
 
 val help_sections :
   ?current:Masc_tui_types.surface -> unit -> (string * (string * string) list) list

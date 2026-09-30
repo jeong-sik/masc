@@ -77,6 +77,10 @@ val is_absorb_gate_enabled : unit -> bool
 val is_excluded : keeper_id:string -> bool
 (** The keeper is named in [\[typesafeai\].excluded_keepers]. *)
 
+val board_attention_confidence_floor : unit -> float
+(** [\[typesafeai\].board_attention_confidence_floor]: the confidence at which
+    Jev's Board attention answer settles a candidate without the LLM lane. *)
+
 val unknown_excluded_keepers : known:string list -> string list
 (** The names in [\[typesafeai\].excluded_keepers] that are not in [known],
     the keepers of the base path: each excludes nobody and is reported at

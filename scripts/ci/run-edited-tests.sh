@@ -37,6 +37,7 @@ fi
 scope_tool="${repo_root}/scripts/ci/dune_suite_scope.py"
 stanza_reader="${repo_root}/scripts/ci/stanza_env.py"
 reference_tool="${repo_root}/scripts/ci/referencing_suites.py"
+linked_library_tool="${repo_root}/scripts/ci/linked_library_suites.py"
 
 python_suite_is_runnable() {
   local stem candidate_dir
@@ -544,9 +545,14 @@ STANZAS
       return 1
   fi
 
-  count=$(printf '%s\n' "${sources}" | wc -l | tr -d ' ')
+  count=0
+  if [ -n "${sources}" ]; then
+    count=$(printf '%s\n' "${sources}" | wc -l | tr -d ' ')
+  fi
   echo "test sources this pull request edits: ${count}"
-  printf '%s\n' "${sources}" | sed 's/^/  /'
+  if [ -n "${sources}" ]; then
+    printf '%s\n' "${sources}" | sed 's/^/  /'
+  fi
 
   # Preserve every attributed suite, including wide pull requests. The caller's
   # job timeout reports a real failure if execution cannot finish; list length
@@ -637,6 +643,34 @@ STANZAS
     printf '%s\n' "${stanza_suites}" | sed 's/^/  /'
     sources=$(printf '%s\n%s\n' "${sources}" "${stanza_suites}" \
       | grep -v '^[[:space:]]*$' | sort -u)
+  fi
+
+  # A selected test/*.ml can be a library module, not an executable. Follow
+  # its (modules ...) owner to the (test)/(tests) stanzas that link that
+  # library, including stanzas loaded from .inc files. Keep directly edited
+  # modules in the direct execution class after replacing them.
+  if ! linked_map=$(printf '%s\n' "${sources}" | python3 "${linked_library_tool}"); then
+    echo "linked_library_suites.py failed" >&2
+    exit 1
+  fi
+  if [ -n "${linked_map}" ]; then
+    expand_linked_sources() {
+      local source targets expanded=""
+      while IFS= read -r source; do
+        [ -n "${source}" ] || continue
+        targets=$(printf '%s\n' "${linked_map}" \
+          | awk -F "$(printf '\t')" -v path="${source}" '$1 == path { print $2 }')
+        [ -n "${targets}" ] || targets="${source}"
+        expanded=$(printf '%s\n%s\n' "${expanded}" "${targets}")
+      done <<LINK_SOURCES
+$1
+LINK_SOURCES
+      printf '%s\n' "${expanded}" | awk 'NF' | sort -u
+    }
+    echo "test library modules select linked executables:"
+    printf '%s\n' "${linked_map}" | cut -f 2 | sort -u | sed 's/^/  /'
+    sources=$(expand_linked_sources "${sources}")
+    direct_sources=$(expand_linked_sources "${direct_sources}")
   fi
 
   # Return no selection only when no input mapped to a runnable suite.
@@ -1049,6 +1083,25 @@ self_test() {
     fi
   }
 
+  check_source_count() {
+    local label="$1" want="$2" output
+    shift 2
+    changed=$(printf '%s\n' "$@")
+    if output=$(select_sources) && printf '%s\n' "${output}" \
+      | grep -Fxq "test sources this pull request edits: ${want}"; then
+      echo "ok   ${label}"
+    else
+      echo "FAIL ${label}: expected ${want} direct test sources"
+      failures=$((failures + 1))
+    fi
+  }
+  check_source_count "asset-only selection reports zero edited test sources" 0 \
+    config/prompts/foo.md
+  check_source_count "one directly edited test reports one source" 1 \
+    test/test_tui_graphics.ml
+  check_source_count "two directly edited tests report two sources" 2 \
+    test/test_tui_graphics.ml test/test_tui_board_composer.ml
+
   # The regression this mapping exists for: #34247 edited only this module and
   # ran no suite, so the escape it dropped went to main.
   check "a source edit selects the suites named after it" \
@@ -1278,6 +1331,9 @@ self_test() {
   check_direct "an edited suite stays direct before attribution expands selection" \
     "test/test_tui_keyboard_input.py" \
     "test/test_tui_keyboard_input.py"
+  check_direct "an edited test library module selects its linked executables" \
+    "test/test_keeper_tool_matrix.ml test/test_mcp_tool_matrix.ml test/test_mcp_tool_runtime_workspace_path.ml" \
+    "test/test_keeper_tool_matrix_cases.ml"
   # tui_browser names five suites, over the per-module cap, so the name
   # mapping attributes nothing to this interface. What is left is the
   # scenario that declares the path and the one suite whose stanza links the

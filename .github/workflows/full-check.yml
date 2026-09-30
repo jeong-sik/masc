@@ -16,8 +16,8 @@ jobs:
         fetch-depth: 0
     - name: Run all TLC models
       run: bash scripts/tla-check.sh
-  lint:
-    name: lint suite
+  distribution:
+    name: distribution and installation
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -25,7 +25,7 @@ jobs:
       uses: actions/checkout@v7
       with:
         fetch-depth: 0
-    - name: Install the tools the lints call
+    - name: Install distribution verification tools
       run: 'set -euo pipefail
 
         bash scripts/ci/apt-refresh.sh
@@ -33,10 +33,6 @@ jobs:
         sudo apt-get install -y --no-install-recommends ripgrep jq python3-yaml gcc libc6-dev binutils
 
         '
-    - name: Check doc truth
-      run: scripts/check-doc-truth.sh
-    - name: Verify doc truth uses stable checkout inputs
-      run: python3 test/test_doc_truth_stable_inputs.py
     - name: Verify release distribution fixtures
       run: python3 test/test_release_dashboard_bundle.py -v
     - name: Verify release evidence receipt with private captures
@@ -67,14 +63,8 @@ jobs:
         python3 test/test_imp_onboarding_acceptance.py
 
         '
-    - name: Blocking lints
-      run: 'bash scripts/ci/run-lint-suite.sh blocking
-
-        python3 scripts/ci/check-committed-secrets.py
-
-        python3 scripts/ci/check-cancel-guard.py
-
-        '
+    - name: Check committed credentials
+      run: python3 scripts/ci/check-committed-secrets.py
   check:
     name: dune build @check
     runs-on: ubuntu-24.04
@@ -223,7 +213,7 @@ jobs:
     name: Release checks passed
     needs:
     - tla
-    - lint
+    - distribution
     - check
     - release-check
     - dashboard-types

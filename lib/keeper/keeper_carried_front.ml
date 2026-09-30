@@ -52,7 +52,7 @@ let composer_of_execution = function
 ;;
 
 let composer_of_runtime = function
-  | Some (runtime : Runtime.t) -> composer_of_execution runtime.Runtime.execution
+  | Some (runtime : Runtime_instance.t) -> composer_of_execution runtime.Runtime_instance.execution
   | None -> Not_materialized
 ;;
 

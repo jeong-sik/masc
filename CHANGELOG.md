@@ -2,10 +2,6 @@
 
 ## [Unreleased]
 
-### Fixed
-
-- The TUI prompt registry and runtime assets expose complete keys, paths, template variables and failure explanations in their paged detail. Metadata stays literal, and Page/Home/End use the detail's actual wrapped rows (#40254).
-
 ## [0.49.0] - 2026-09-30
 
 ### Fresh state required

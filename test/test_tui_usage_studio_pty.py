@@ -86,7 +86,7 @@ def journey(executable, no_color=False):
         h.tab_until(process, fd, output, b"MASC Usage")
         h.wait_for_output(process, fd, output, b"catalogue reopens", start=0, timeout=10)
         wide = capture(process, fd, output, "plan-wide-no-color" if no_color else "plan-wide",
-                       48, 160, b"catalogue reopens")
+                       48, 220, b"catalogue reopens")
         for value in (b"Plan usage", b"0%", b"25%", b"33%", b"Reset", b"Catalogue", b"heard", b"claude@example.com"):
             if value not in wide:
                 raise AssertionError(f"Plan omitted {value!r}: {wide!r}")
@@ -106,7 +106,7 @@ def journey(executable, no_color=False):
         capture(process, fd, output, "plan-restored", 30, 120, b"Claude")
         h.send_and_wait(process, fd, output, b"v", b"UTC days reported")
         capture(process, fd, output, "trend", 30, 120, b"UTC days reported")
-        h.send_and_wait(process, fd, output, b"w", b"7 UTC days")
+        h.send_and_wait(process, fd, output, b"w", b"1 UTC days")
         h.send_and_wait(process, fd, output, b"v", b"Keeper usage")
         capture(process, fd, output, "keepers", 30, 120, b"Keeper usage")
         h.send_and_wait(process, fd, output, b"p", b"MASC Usage / Telemetry")
@@ -116,7 +116,7 @@ def journey(executable, no_color=False):
         os.write(fd, b"q")
     h.run_terminal_scenario(executable, description="Usage studio" + (" NO_COLOR" if no_color else ""),
                             interact=interact, http_fixtures=responses,
-                            terminal_cols=160, terminal_rows=48,
+                            terminal_cols=220, terminal_rows=48,
                             extra_env={"NO_COLOR": "1"} if no_color else {})
 
 

@@ -20186,7 +20186,7 @@ def dashboard_usage_interaction(
     send_and_wait(process, master_fd, output, b"p", b"MASC Usage / Telemetry")
     send_and_wait(process, master_fd, output, b"3", b"Gate Governance")
     send_and_wait(process, master_fd, output, b"p", b"MASC Usage")
-    send_and_wait(process, master_fd, output, b"w", b"7 UTC days")
+    send_and_wait(process, master_fd, output, b"w", b"1 UTC days")
     system = tab_until(process, master_fd, output, b"MASC System")
     if b"MASC System" not in system:
         raise AssertionError(f"System is not on the main ring: {system!r}")

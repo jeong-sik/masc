@@ -355,7 +355,7 @@ let test_account_emails_name_their_accounts () =
   check bool "an account with no drawn report has no email row" false
     (contains ~affix:"codex@example.com" text);
   let wide = read [ ("claude_code", "claude.with.long.address@example.com") ] in
-  let meters section = List.filter (contains ~affix:meter_open) (List.map plain section.lines) in
+  let meters (section : Providers.section) = List.filter (contains ~affix:meter_open) (List.map plain section.lines) in
   check (list string) "email metadata does not narrow window meters"
     (meters without) (meters wide);
   check (list string) "a failed read is said once, after the rows"

@@ -619,7 +619,7 @@ let tools_display_lines ?(cols = 80) (state : state) =
             in
             (match state.tools_skill_evidence with
              | Some (observed_key, json) when String.equal key observed_key ->
-              (match Tui_decode_skill_evidence.decode_skill_evidence json with
+              (match Masc.Tui_decode_skill_evidence.decode_skill_evidence json with
                | Error _ ->
                  [ Theme.bad (), "     Retained evidence response is malformed" ]
                | Ok evidence ->

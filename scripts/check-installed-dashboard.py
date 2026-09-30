@@ -13,9 +13,14 @@ import sys
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--binary", type=Path, required=True)
 parser.add_argument("--base-url", required=True)
+parser.add_argument("--expected-source", help="Require the installed and running source commit")
+parser.add_argument("--exercise-corruption", action="store_true",
+                    help="Corrupt and restore files; use only on an isolated install-smoke fixture")
 args = parser.parse_args()
 binary = args.binary.resolve(strict=True)
 receipt = json.loads((binary.parent / "release.json").read_text())
+if args.expected_source is not None and receipt["source_commit"] != args.expected_source:
+    raise SystemExit("installed receipt differs from expected source")
 files = {entry["path"]: entry for entry in receipt["files"]}
 
 
@@ -78,6 +83,17 @@ for relative in references.paths:
         raise SystemExit("served dashboard resource differs from installed bundle")
 if health["dashboard_surface"]["status"] != "ok":
     raise SystemExit("installed dashboard health is not ok; do not fabricate freshness")
+if not args.exercise_corruption:
+    print(json.dumps({
+        "scope": "Read-only installed binary, readiness and served dashboard binding; no Item behavior check",
+        "source_commit": receipt["source_commit"],
+        "binary_sha256": receipt["binary_sha256"],
+        "receipt_sha256": installed["receipt_sha256"],
+        "dashboard_index_sha256": hashlib.sha256(index).hexdigest(),
+        "referenced_assets_checked": len(references.paths),
+        "passed": True,
+    }, sort_keys=True))
+    raise SystemExit(0)
 # Deliberately corrupt only the isolated installed fixture. Every response must
 # fail closed even if a same-named unbound fallback is available in cwd.
 fixture = Path.cwd() / "assets/dashboard"

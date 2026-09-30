@@ -54,80 +54,6 @@ let file_change_ranges (change : Masc.Tui_decode.file_change) =
 (* The file pane's usable rows: the surface title, then the pane's top gap,
    title, divider, bottom gap, and the footer. One owner — the dispatch keeps
    the cursor visible against the same number the renderer draws with. *)
-(* The Code surface: one directory level on the left, the opened file on the
-   right. Entries come from the lazy /workspace/children route; the file is
-   lexed once at load (masc_tui_code_lexer) and drawn as styled spans.
-   fit_width measures cells past the SGR bytes and closes a cut style, so a
-   long row truncates without bleeding colour into the margin. *)
-(* The two-pane surfaces -- Code and Resources -- opened on their list pane's
-   header ("▸ /", "▸ Resources") with no row above it. Every other surface
-   opens on its name, the clock and the connection badge, and the badge is the
-   row that says the server has gone; on these two nothing did. The title row
-   sits above both panes, so each pane gives up one row to it. *)
-let pane_surface_title_rows = 1
-
-let pane_surface_title (state : state) ~name =
-  let now = Unix.localtime (Unix.gettimeofday ()) in
-  Printf.sprintf "%s  %02d:%02d:%02d  %s"
-    (screen_title (" MASC " ^ name))
-    now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec
-    (connection_badge state)
-
-(* The row between the strip and the title, then the title. Every other
-   surface draws that row first -- a gap on its own, the box's top edge beside
-   a roster -- and its title under it. The two pane surfaces drew the title
-   first and left the row to the pane, so alone on the surface the gap fell
-   between the title and the pane's own heading: the title sat one row higher
-   than on every other screen, and the heading read as a second, detached
-   block. Beside the other pane the list's box draws its top edge on that row,
-   so a split frame keeps it there. The row count is the same either way. *)
-let pane_surface_header buf cols (state : state) ~name ~split =
-  if not split then box_top buf cols;
-  box_line buf cols (pane_surface_title state ~name)
-
-let pane_surface_content_height ~rows =
-  max 1 (framed_content_height ~rows - pane_surface_title_rows)
-
-(* The file pane's usable rows: the surface title, then the pane's top gap,
-   title, divider, bottom gap, and the footer. One owner — the dispatch keeps
-   the cursor visible against the same number the renderer draws with. *)
-(* The Code surface: one directory level on the left, the opened file on the
-   right. Entries come from the lazy /workspace/children route; the file is
-   lexed once at load (masc_tui_code_lexer) and drawn as styled spans.
-   fit_width measures cells past the SGR bytes and closes a cut style, so a
-   long row truncates without bleeding colour into the margin. *)
-(* The two-pane surfaces -- Code and Resources -- opened on their list pane's
-   header ("▸ /", "▸ Resources") with no row above it. Every other surface
-   opens on its name, the clock and the connection badge, and the badge is the
-   row that says the server has gone; on these two nothing did. The title row
-   sits above both panes, so each pane gives up one row to it. *)
-let pane_surface_title_rows = 1
-
-let pane_surface_title (state : state) ~name =
-  let now = Unix.localtime (Unix.gettimeofday ()) in
-  Printf.sprintf "%s  %02d:%02d:%02d  %s"
-    (screen_title (" MASC " ^ name))
-    now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec
-    (connection_badge state)
-
-(* The row between the strip and the title, then the title. Every other
-   surface draws that row first -- a gap on its own, the box's top edge beside
-   a roster -- and its title under it. The two pane surfaces drew the title
-   first and left the row to the pane, so alone on the surface the gap fell
-   between the title and the pane's own heading: the title sat one row higher
-   than on every other screen, and the heading read as a second, detached
-   block. Beside the other pane the list's box draws its top edge on that row,
-   so a split frame keeps it there. The row count is the same either way. *)
-let pane_surface_header buf cols (state : state) ~name ~split =
-  if not split then box_top buf cols;
-  box_line buf cols (pane_surface_title state ~name)
-
-let pane_surface_content_height ~rows =
-  max 1 (framed_content_height ~rows - pane_surface_title_rows)
-
-(* The file pane's usable rows: the surface title, then the pane's top gap,
-   title, divider, bottom gap, and the footer. One owner — the dispatch keeps
-   the cursor visible against the same number the renderer draws with. *)
 let code_pane_content_height (state : state) =
   let terminal_rows, _ = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
@@ -434,7 +360,9 @@ let render_code (state : state) =
           in
           let base =
             if notes_showing then "notes: " ^ path
-            else if diff_showing then "diff vs HEAD: " ^ path
+            else if diff_showing then
+              Printf.sprintf "diff col %d vs HEAD: %s"
+                (state.code_diff_hscroll + 1) path
             else if history_showing then "history: " ^ path
             else path
           in
@@ -623,7 +551,8 @@ let render_code (state : state) =
                            | Gd_context -> Ansi.dim ^ text ^ Ansi.reset)
                      in
                      box_line pane_buf pane_cols
-                       (Ansi.dim ^ gutter ^ Ansi.reset ^ body)
+                       (Ansi.dim ^ gutter ^ Ansi.reset
+                        ^ Message_layout.drop_cells body state.code_diff_hscroll)
                  | None -> box_empty pane_buf pane_cols
                done)
      else if history_showing then
@@ -801,9 +730,7 @@ let render_code (state : state) =
     if state.code_focus_file <> Right_pane then Masc_tui_keys.Code_tree
     else if state.code_notes_open then Masc_tui_keys.Code_notes
     else if state.code_history_open then Masc_tui_keys.Code_history
-    else if
-      state.code_diff_open
-    then Masc_tui_keys.Code_overlay
+    else if state.code_diff_open then Masc_tui_keys.Code_diff
     else Masc_tui_keys.Code_file
   in
   Buffer.add_string buf

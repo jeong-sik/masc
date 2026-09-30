@@ -8,7 +8,7 @@ let candidate_tasks (w : Candle_payout.waiting) events =
   List.find_map (fun (event : E.t) -> match event.body with
     | E.Candidates c when c.goal_id = w.goal_id && c.request_id = w.request_id
         && c.verification_run_id = w.verification_run_id -> Some c.tasks
-    | E.Candidates _ | E.Snapshot _ | E.Payout_owed _ | E.Unattributed _ | E.Paid _ | E.Payout_failed _ -> None) events
+    | E.Candidates _ | E.Snapshot _ | E.Payout_owed _ | E.Unattributed _ | E.Paid _ | E.Purchased _ | E.Payout_failed _ -> None) events
 let call ~(appraise : A.runner) ~identity request =
   let* answer = appraise ~identity request in
   let* decision = A.decode request (A.decision_json answer.decision) |> Result.map_error (fun detail -> A.Invalid_response detail) in
@@ -93,7 +93,7 @@ let settle ~now ~appraise ~policy ~base_path events (waiting : Candle_payout.wai
         | E.Paid payment ->
           let* balance = Candle_balance.of_events events |> Result.map_error Candle_balance.error_to_string in
           Candle_balance.credit balance payment |> Result.map (fun _ -> ()) |> Result.map_error Candle_balance.error_to_string
-        | E.Unattributed _ | E.Payout_failed _ | E.Snapshot _ | E.Payout_owed _ | E.Candidates _ -> Ok () in
+        | E.Unattributed _ | E.Purchased _ | E.Payout_failed _ | E.Snapshot _ | E.Payout_owed _ | E.Candidates _ -> Ok () in
       Ok ([{E.at;body}], Settled waiting.goal_id)
     | Candle_payout.Waiting _ | Candle_payout.No_obligation | Candle_payout.Failed _ | Candle_payout.Settled -> Ok ([], Superseded waiting.goal_id))
   |> Result.map_error (function
@@ -112,7 +112,7 @@ let settle_one ~now ~appraise ~base_path (waiting : Candle_payout.waiting) =
         |> Result.map_error (fun e -> A.Transport_unavailable (Candle_ledger.read_error_to_string e)) in
       let events = Candle_ledger.events view in
       match Candle_payout.state ~goal_id:waiting.goal_id events with
-      | Candle_payout.Waiting current when current=waiting -> settle ~now ~appraise ~policy ~base_path events waiting
+      | Candle_payout.Waiting current when current=waiting -> settle ~now ~appraise ~policy:policy.payout ~base_path events waiting
       | Candle_payout.Waiting _ | Candle_payout.Failed _ | Candle_payout.No_obligation | Candle_payout.Settled -> Ok (Superseded waiting.goal_id) in
   match result () with
   | Ok outcome -> outcome

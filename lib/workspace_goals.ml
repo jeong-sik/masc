@@ -197,16 +197,49 @@ let emit_goal_event (ctx : context) ~goal_id ~event_type ~payload =
        ])
 ;;
 
+type goal_event_recording =
+  | Event_recorded
+  | Event_recording_failed of string
+
+(* The Goal write has committed. Each attempted append retains its own
+   outcome without reversing that committed write or swallowing cancellation. *)
+let record_committed_goal_event (ctx : context) ~goal_id ~event_type ~payload =
+  let recording =
+    try
+      emit_goal_event ctx ~goal_id ~event_type ~payload;
+      Event_recorded
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn ->
+      let detail = Printexc.to_string exn in
+      Log.Misc.error
+        "goal event recording failed after Goal commit goal_id=%s event_type=%s payload=%s detail=%s"
+        goal_id event_type (Yojson.Safe.to_string payload) detail;
+      Event_recording_failed detail
+  in
+  event_type, payload, recording
+;;
+
+let goal_event_recording_to_yojson (event_type, payload, recording) =
+  let fields =
+    match recording with
+    | Event_recorded -> [ "status", `String "recorded" ]
+    | Event_recording_failed detail ->
+      [ "status", `String "failed"; "error", `String detail; "payload", payload ]
+  in
+  `Assoc (("event_type", `String event_type) :: fields)
+;;
+
 (* An edit to a goal's due date or priority moves no phase, so no other row
    remembers the value it replaced, and a due date pushed back left no trace
    (#39878). One row per edit holds only the fields that changed, each as
    {from, to}. It records the edit and never refuses it. The edit is already
    stored when the row is appended, so a row that cannot be appended does not
-   fail the edit: the error log carries the goal and the payload.
+   fail the edit: the log and append receipt carry the goal and payload.
 
    The row is appended after the store's lock is released, so the file does not
    guarantee the order of two edits that overlap. *)
-let emit_goal_edit (ctx : context) ~(previous : Goal_store.goal) (goal : Goal_store.goal) =
+let record_goal_edit (ctx : context) ~(previous : Goal_store.goal) (goal : Goal_store.goal) =
   let change field ~from_json ~to_json = field, `Assoc [ "from", from_json; "to", to_json ] in
   let due_date =
     if Option.equal String.equal previous.due_date goal.due_date
@@ -225,17 +258,10 @@ let emit_goal_edit (ctx : context) ~(previous : Goal_store.goal) (goal : Goal_st
       [ change "priority" ~from_json:(`Int previous.priority) ~to_json:(`Int goal.priority) ]
   in
   match due_date @ priority with
-  | [] -> ()
+  | [] -> []
   | changes ->
     let payload = `Assoc (("actor", `String ctx.agent_name) :: changes) in
-    (try emit_goal_event ctx ~goal_id:goal.id ~event_type:"goal_edited" ~payload with
-     | Eio.Cancel.Cancelled _ as exn -> raise exn
-     | exn ->
-       Log.Misc.error
-         "goal edit not recorded after it was stored goal_id=%s payload=%s detail=%s"
-         goal.id
-         (Yojson.Safe.to_string payload)
-         (Printexc.to_string exn))
+    [ record_committed_goal_event ctx ~goal_id:goal.id ~event_type:"goal_edited" ~payload ]
 ;;
 
 (* RFC-0387 stage 2: wake the goal verifier lane after a durable
@@ -391,32 +417,38 @@ let handle_goal_upsert ~tool_name ~start_time (ctx : context) args : Tool_result
              beginning and emits no goal_created; an update that moves the phase
              records a goal_phase event, and one that changes the due date or
              priority records a goal_edited event. *)
-          (match action with
+          let event_recordings =
+            match action with
            | `created ->
-             emit_goal_event ctx ~goal_id:goal.id ~event_type:"goal_created"
-               ~payload:(Goal_store.goal_to_yojson goal)
+             [ record_committed_goal_event ctx ~goal_id:goal.id ~event_type:"goal_created"
+               ~payload:(Goal_store.goal_to_yojson goal) ]
            | `updated previous ->
              (* An edit to the success criterion takes a Verifying,
                 Awaiting_confirmation or Completed goal back to Executing
                 (Goal_store.upsert_goal). That is a phase move like any
                 other, so it enters the same ledger with the phase it left and
                 who moved it. *)
-             if previous.phase <> goal.phase then
-               emit_goal_event ctx ~goal_id:goal.id ~event_type:"goal_phase"
+             let phase_recordings =
+               if previous.phase <> goal.phase then
+               [ record_committed_goal_event ctx ~goal_id:goal.id ~event_type:"goal_phase"
                  ~payload:
                    (`Assoc
                       [ "phase", Goal_phase.to_yojson goal.phase
                       ; "previous_phase", Goal_phase.to_yojson previous.phase
                       ; "actor", `String ctx.agent_name
                       ; "cause", `String "criterion_edit"
-                      ]);
-             emit_goal_edit ctx ~previous goal);
+                      ]) ]
+               else []
+             in
+             phase_recordings @ record_goal_edit ctx ~previous goal
+          in
           ok_result
             ~tool_name
             ~start_time
             [ "action", `String action_name
             ; "goal_id", `String goal.id
             ; "goal", Goal_store.goal_to_yojson goal
+            ; "event_recordings", `List (List.map goal_event_recording_to_yojson event_recordings)
             ; ( "task_goal_id_example"
               , `String
                   (Printf.sprintf
@@ -618,28 +650,34 @@ let deliver_goal_owner_notice config ~(goal : Goal_store.goal) ~event ~content =
   match goal.Goal_store.owner with
   | Goal_store.Unknown_owner -> Ok ()
   | Goal_store.Owner owner ->
-    let delivery_key =
-      Keeper_chat_delivery_identity.Goal_notification
-        { goal_id = goal.Goal_store.id; owner; event }
-    in
-    let mentions =
-      match Keeper_identity.Keeper_id.of_string owner with
-      | Some keeper_id -> [ keeper_id ]
-      | None -> []
-    in
-    (match
-       Keeper_chat_store.append_user_message_once
-         ~base_dir:config.Workspace_utils_backend_setup.base_path
-         ~keeper_name:owner
-         ~delivery_key
-         ~content
-         ~surface:Surface_ref.Agent
-         ~speaker:goal_notice_speaker
-         ~extra_mentions:mentions
-         ()
-     with
-     | Ok _ -> Ok ()
-     | Error detail -> Error detail)
+    (match Keeper_producer_route.resolve ~config owner with
+     | Error detail ->
+       Error (Printf.sprintf "goal owner %S recipient lookup failed: %s" owner detail)
+     | Ok Keeper_producer_route.No_keeper ->
+       Error (Printf.sprintf "goal owner %S has no Keeper recipient" owner)
+     | Ok (Keeper_producer_route.Keeper keeper_name) ->
+       let delivery_key =
+         Keeper_chat_delivery_identity.Goal_notification
+           { goal_id = goal.Goal_store.id; owner; event }
+       in
+       let mentions =
+         match Keeper_identity.Keeper_id.of_string keeper_name with
+         | Some keeper_id -> [ keeper_id ]
+         | None -> []
+       in
+       (match
+          Keeper_chat_store.append_user_message_once
+            ~base_dir:config.Workspace_utils_backend_setup.base_path
+            ~keeper_name
+            ~delivery_key
+            ~content
+            ~surface:Surface_ref.Agent
+            ~speaker:goal_notice_speaker
+            ~extra_mentions:mentions
+            ()
+        with
+        | Ok _ -> Ok ()
+        | Error detail -> Error detail))
 ;;
 
 let mark_goal_notice config ~goal_id kind ~key =

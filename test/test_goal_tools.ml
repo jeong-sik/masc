@@ -467,6 +467,98 @@ let test_goal_creation_emits_an_event () =
   check int "editing a goal is not a second beginning" 1 (List.length (events ()))
 ;;
 
+let event_recordings receipt =
+  Yojson.Safe.Util.(receipt |> member "event_recordings" |> to_list)
+;;
+
+let check_event_recordings label expected receipt =
+  let actual = event_recordings receipt
+    |> List.map (fun row -> get_string_field row "event_type", get_string_field row "status") in
+  check (list (pair string string)) label expected actual
+;;
+
+let call_goal_tool config name args =
+  match Tool_workspace.dispatch (workspace_ctx config) ~name ~args:(`Assoc args) with
+  | Some result -> parse_json_result result
+  | None -> fail (name ^ " not handled")
+;;
+
+let test_goal_creation_survives_event_recording_failure () =
+  with_workspace @@ fun config ->
+  let path = Filename.concat (Workspace_utils.masc_dir config) "goal_events.jsonl" in
+  Unix.mkdir path 0o700;
+  let created = call_goal_tool config "masc_goal_upsert"
+      [ "title", `String "Committed owned Goal"; "metric", `String "artifacts"
+      ; "target_value", `String "1" ] in
+  check_event_recordings "the missing creation is explicit"
+    [ "goal_created", "failed" ] created;
+  let recording = List.hd (event_recordings created) in
+  check bool "the append error is retained" true
+    (String.length (get_string_field recording "error") > 0);
+  let goal_id = get_string_field created "goal_id" in
+  let payload = Yojson.Safe.Util.member "payload" recording in
+  check string "the failed creation retains its Goal id" goal_id (get_string_field payload "id");
+  check string "the failed creation retains its owner" "planner" (get_string_field payload "owner");
+  let listed = call_goal_tool config "masc_goal_list" []
+      |> Yojson.Safe.Util.member "goals" |> Yojson.Safe.Util.to_list in
+  (match listed with
+   | [ goal ] ->
+     check string "the Goal committed despite append failure" goal_id (get_string_field goal "id");
+     check string "the persisted owner is unchanged" "planner" (get_string_field goal "owner")
+   | _ -> fail "one committed Goal must remain readable");
+  check bool "the failed append did not overwrite its directory" true (Sys.is_directory path)
+;;
+
+let test_criterion_edit_reports_each_failed_event () =
+  with_workspace @@ fun config ->
+  let call = call_goal_tool config in
+  let created = call "masc_goal_upsert"
+      [ "title", `String "Revise an owned criterion"; "metric", `String "artifacts"
+      ; "target_value", `String "1" ] in
+  check_event_recordings "creation reports the append that completed"
+    [ "goal_created", "recorded" ] created;
+  let goal_id = get_string_field created "goal_id" in
+  ignore (call "masc_goal_transition"
+    [ "goal_id", `String goal_id; "action", `String "request_complete" ]);
+  let path = Filename.concat (Workspace_utils.masc_dir config) "goal_events.jsonl" in
+  let saved = path ^ ".before-failure" in
+  let before = Fs_compat.load_file path in
+  Fs_compat.invalidate_cached_writer path;
+  Unix.rename path saved;
+  Unix.mkdir path 0o700;
+  let updated = call "masc_goal_upsert"
+      [ "id", `String goal_id; "target_value", `String "2"
+      ; "due_date", `String "2099-01-01"; "priority", `Int 1 ] in
+  check_event_recordings "both independent missing appends are reported"
+    [ "goal_phase", "failed"; "goal_edited", "failed" ] updated;
+  List.iter (fun row ->
+    check bool "each failed append retains its error" true
+      (String.length (get_string_field row "error") > 0)) (event_recordings updated);
+  let phase = List.hd (event_recordings updated) |> Yojson.Safe.Util.member "payload" in
+  check string "the missing phase retains the old phase" "verifying" (get_string_field phase "previous_phase");
+  check string "the missing phase retains the committed phase" "executing" (get_string_field phase "phase");
+  check string "the missing phase retains its actor" "planner" (get_string_field phase "actor");
+  let edit = List.nth (event_recordings updated) 1 |> Yojson.Safe.Util.member "payload" in
+  check (testable Yojson.Safe.pp Yojson.Safe.equal) "the exact missing edit is retained"
+    (`Assoc [ "actor", `String "planner"
+            ; "due_date", `Assoc [ "from", `Null; "to", `String "2099-01-01" ]
+            ; "priority", `Assoc [ "from", `Int 3; "to", `Int 1 ] ]) edit;
+  let listed = call "masc_goal_list" [] |> Yojson.Safe.Util.member "goals" |> Yojson.Safe.Util.to_list in
+  (match listed with
+   | [ goal ] ->
+     check string "the criterion committed" "2" (get_string_field goal "target_value");
+     check string "the lifecycle committed" "executing" (get_string_field goal "phase");
+     check string "the owner is retained" "planner" (get_string_field goal "owner")
+   | _ -> fail "one committed Goal must remain readable");
+  check string "the prior history was not modified" before (Fs_compat.load_file saved);
+  Unix.rmdir path;
+  Unix.rename saved path;
+  let repeated = call "masc_goal_upsert"
+      [ "id", `String goal_id; "target_value", `String "2"
+      ; "due_date", `String "2099-01-01"; "priority", `Int 1 ] in
+  check_event_recordings "retry does not claim the missing events were later recorded" [] repeated
+;;
+
 (* A due date or priority edit moves no phase, so it records a row of its own
    with the value it replaced (#39878). Only the fields that changed are in it. *)
 let test_goal_due_date_and_priority_edits_are_recorded () =
@@ -592,7 +684,13 @@ let test_a_goal_edit_whose_row_cannot_be_appended_still_succeeds () =
       string
       "with the new due date"
       "2026-10-15"
-      (get_string_field (Yojson.Safe.Util.member "goal" json) "due_date")
+      (get_string_field (Yojson.Safe.Util.member "goal" json) "due_date");
+    check_event_recordings "the successful edit reports its missing event"
+      [ "goal_edited", "failed" ] json;
+    let payload = List.hd (event_recordings json) |> Yojson.Safe.Util.member "payload" in
+    check (testable Yojson.Safe.pp Yojson.Safe.equal) "the missing due edit retains its exact change"
+      (`Assoc [ "actor", `String "planner"
+              ; "due_date", `Assoc [ "from", `Null; "to", `String "2026-10-15" ] ]) payload
 ;;
 
 let test_goal_upsert_rejects_lifecycle_fields () =
@@ -962,6 +1060,10 @@ let () =
             "creating a goal emits an event"
             `Quick
             test_goal_creation_emits_an_event
+        ; test_case "committed creation retains its failed event receipt" `Quick
+            test_goal_creation_survives_event_recording_failure
+        ; test_case "criterion edit retains each independent failed event receipt" `Quick
+            test_criterion_edit_reports_each_failed_event
         ; test_case
             "due date and priority edits are recorded"
             `Quick

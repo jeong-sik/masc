@@ -20,7 +20,11 @@ val handle_goal_list
     create-or-update a goal record. Validates priority and rejects lifecycle
     fields, which belong to [masc_goal_transition]. Lifecycle field errors are
     reported via the dedicated
-    [goal_upsert_lifecycle_error] formatter. *)
+    [goal_upsert_lifecycle_error] formatter. Once the Goal write commits, an
+    event append failure does not reverse that success. [event_recordings]
+    reports each attempted creation, criterion-induced phase or due/priority
+    edit event as [recorded] or [failed]; failed entries retain the payload
+    and error. Cancellation still propagates. *)
 val handle_goal_upsert
   :  tool_name:string
   -> start_time:Tool_timing.started
@@ -154,7 +158,10 @@ val scan_overdue_goal_notifications :
     scan, never as a side effect of a list query. Idempotent: an already
     notified Goal is skipped by its marker, and a re-send reuses the delivery
     key, so the owner's transcript gains exactly one row per event. A Goal with
-    no recorded owner has no recipient and is skipped.
+    no recorded owner has no recipient and is skipped. A named owner is
+    resolved through the actual Keeper registry or canonical metadata before
+    append. An absent or unreadable recipient leaves the notice outstanding,
+    without creating an orphan transcript or writing a delivered marker.
 
     A Goal is past its due date once [now] is later than 23:59:59 UTC of that
     day ({!Goal_due}). The operator's time zone plays no part, and a value that

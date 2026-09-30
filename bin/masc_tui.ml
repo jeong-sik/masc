@@ -6184,6 +6184,14 @@ let task_detail_on_screen (state : state) =
   Masc_tui_task_selection.detail_row ~detail_id:state.task_detail_id
     ~tasks:state.tasks_domain
 
+(* A removed Goal renders the list, so its stale detail id owns no commands. *)
+let goal_detail_on_screen (state : state) =
+  match state.planning_mode, state.planning with
+  | Planning_detail goal_id, Some snapshot ->
+      List.find_opt (fun (goal : planning_goal) -> String.equal goal.pg_id goal_id)
+        snapshot.pl_goals
+  | Planning_list, _ | Planning_detail _, None -> None
+
 let row_list (state : state) : row_list option =
   (* The window follows a named row the same way it follows a step, through
      [surface_body_height] rather than [rows - sc_chrome]: a surface that
@@ -6531,7 +6539,9 @@ let reading_pane (state : state) : (int -> Masc_tui_types.clamped_scroll) option
        | Board_read _ | Board_list | Board_compose -> None)
   | Planning ->
       (match state.planning_mode with
-       | Planning_detail _ -> pane (fun v -> Planning_detail_scroll v)
+       | Planning_detail _ when Option.is_some (goal_detail_on_screen state) ->
+           pane (fun v -> Planning_detail_scroll v)
+       | Planning_detail _ -> None
        (* The id alone is not the screen: one that names a task the backlog
           dropped draws the list, and [row_list] owns that. *)
        | Planning_list
@@ -23602,6 +23612,11 @@ and is loaded on demand through keeper_skill.
                      in
                      state.repository_changes_cursor <- cursor;
                      state.repository_changes_scroll <- scroll)
+            | Planning when Option.is_some (goal_detail_on_screen state) ->
+                let count, height = Masc_tui_render.planning_detail_viewport state in
+                state.planning_scroll <-
+                  (if direction > 0 then Masc_tui_scroll.page_down ~count ~height
+                   else Masc_tui_scroll.page_up ~count ~height) state.planning_scroll
             | Code ->
                 move_list_by_rows state ~delta:(direction * page)
             | Board ->
@@ -25816,9 +25831,11 @@ and is loaded on demand through keeper_skill.
                           reenter_terminal ();
                           report_action state "system"
                             (Printf.sprintf "closed %s:%d" path line))))
-       | Some ("a" | "A") when state.view = Planning ->
+       | Some ("a" | "A") when state.view = Planning
+           && Option.is_some (goal_detail_on_screen state) ->
            handle_goal_confirmation_key state ~mailbox:async_messages
-       | Some "c" | Some "C" | Some "x" | Some "X" | Some "o" | Some "O" when state.view = Planning ->
+       | Some "c" | Some "C" | Some "x" | Some "X" | Some "o" | Some "O" when state.view = Planning
+           && Option.is_some (goal_detail_on_screen state) ->
            (* Goal lifecycle, detail only: the list keeps j/k/Enter and the
               letters stay navigation-free there. The first press arms, the
               same press submits; the server owns the phase rules. *)

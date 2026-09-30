@@ -125,6 +125,9 @@ val agenda_lines : Masc_tui_types.state -> Masc_tui_agenda.line list
     row the frame is not drawing. *)
 
 val agenda_viewport : Masc_tui_types.state -> int * int
+val planning_detail_viewport : Masc_tui_types.state -> int * int
+(** Physical row count and reader height of the current Goal detail,
+    including its pinned action rows and actual split-pane width. *)
 val answering_viewport : Masc_tui_types.state -> int * int
 (** Pure projection for the visible Recent pane, or [None] when it will not
     consume chunks. Dimensions are the raw terminal measurement. The loop

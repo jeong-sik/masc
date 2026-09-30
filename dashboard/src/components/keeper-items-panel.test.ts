@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen } from '@testing-library/preact'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/preact'
 import { html } from 'htm/preact'
 import type { Keeper } from '../types'
 import { EQUIPMENT_IDS } from '../api/schemas/keeper-portrait'
@@ -8,8 +8,14 @@ const fetchKeeperItems = vi.hoisted(() => vi.fn())
 vi.mock('../api/keeper-items', () => ({ fetchKeeperItems }))
 vi.mock('./keeper-portrait', () => ({ KeeperPortrait: () => html`<div data-testid="portrait" />` }))
 vi.mock('./keeper-badge', () => ({ KeeperBadge: () => html`<div />` }))
+vi.mock('../sse', () => ({ journal: { log: vi.fn() } }))
 
 import { KeeperItemsPanel } from './keeper-items-panel'
+import {
+  executionWorkspaceAuthority, hydrateExecutionSnapshot, invalidateExecutionSnapshotGeneration,
+  resetExecutionSnapshotGeneration, serverStatus,
+} from '../store'
+import { parseKeeperItems, type KeeperItemsReading } from '../api/schemas/keeper-items'
 
 const keeper = (name: string, head = 'crown') => ({ name, portrait: { state: 'ready', equipment: {
   face: 'bare_face', neck: 'bare_neck', head, hand: 'empty_hand', base: 'no_dish',
@@ -18,9 +24,129 @@ const catalog = Object.entries(EQUIPMENT_IDS).flatMap(([slot, ids]) =>
   ids.slice(1).map(id => ({ id, slot, price_status: id === 'crown' ? 'priced' : 'unpriced', ...(id === 'crown' ? { price_milli: '200' } : {}) })),
 )
 
+let fixtureEpoch = ''
+let fixtureEpochSequence = 0
+let fixtureGeneration = 0
+let fixtureConnectionGeneration = 0
+function observeWorkspace(root: unknown, includeRoot = true) {
+  expect(hydrateExecutionSnapshot({
+    execution_publication_epoch: fixtureEpoch,
+    execution_publication_generation: ++fixtureGeneration,
+    // Deliberately identical project label across distinct canonical roots.
+    status: { project: 'same-project', ...(includeRoot ? { workspace_root: root } : {}) },
+  } as Parameters<typeof hydrateExecutionSnapshot>[0], {
+    requestGeneration: fixtureConnectionGeneration,
+  })).toBe(true)
+}
+function pendingAccount() {
+  let resolve!: (account: KeeperItemsReading) => void
+  let reject!: (error: Error) => void
+  const promise = new Promise<KeeperItemsReading>((done, fail) => { resolve = done; reject = fail })
+  return { promise, resolve, reject }
+}
+function account(owned: string[], crownPrice: string) {
+  return parseKeeperItems({
+    status: 'ready', keeper: 'rondo', balance_milli: '800', owned_items: owned,
+    catalog: catalog.map(item => item.id === 'crown' ? { ...item, price_milli: crownPrice } : item),
+  }, 'rondo')
+}
+
+beforeEach(() => {
+  fixtureEpoch = `item-workspace-fixture-${++fixtureEpochSequence}`
+  fixtureGeneration = 0
+  expect(invalidateExecutionSnapshotGeneration(fixtureEpoch, 0)).toBe(true)
+  observeWorkspace('/fixture/workspace-a')
+})
+
 afterEach(() => { cleanup(); vi.resetAllMocks() })
 
 describe('Keeper Item tab', () => {
+  it('withdraws accounts across same-project A/B/A and refuses the first A read after returning', async () => {
+    const firstARefresh = pendingAccount()
+    const returningA = pendingAccount()
+    fetchKeeperItems.mockResolvedValueOnce(account(['crown'], '200'))
+      .mockReturnValueOnce(firstARefresh.promise)
+      .mockResolvedValueOnce(account(['crown', 'beanie'], '300'))
+      .mockReturnValueOnce(returningA.promise)
+    // The very same Keeper object, wallet and outfit survive both transitions.
+    const sameKeeper = { ...keeper('rondo'), candle_balance_milli: '800' }
+    render(html`<${KeeperItemsPanel} keeper=${sameKeeper} />`)
+    expect(await screen.findByText('보유 1 / 18개')).toBeTruthy()
+    const firstAuthority = executionWorkspaceAuthority.peek()
+    await act(async () => { observeWorkspace('/fixture/workspace-a') })
+    expect(executionWorkspaceAuthority.peek()).toBe(firstAuthority)
+    expect(fetchKeeperItems).toHaveBeenCalledTimes(1)
+    fireEvent.click(screen.getByRole('button', { name: '새로고침' }))
+    await waitFor(() => expect(fetchKeeperItems).toHaveBeenCalledTimes(2))
+    const heldSignal = fetchKeeperItems.mock.calls[1]?.[1]
+    if (!(heldSignal instanceof AbortSignal)) throw new Error('Held Item request requires an AbortSignal')
+    await act(async () => { observeWorkspace('/fixture/workspace-b') })
+    expect(await screen.findByText('보유 2 / 18개')).toBeTruthy()
+    expect(screen.getByText('0.300 Candle')).toBeTruthy()
+    expect(screen.queryByText('0.200 Candle')).toBeNull()
+    expect(heldSignal.aborted).toBe(true)
+    await act(async () => { observeWorkspace('/fixture/workspace-a') })
+    await waitFor(() => expect(fetchKeeperItems).toHaveBeenCalledTimes(4))
+    expect(executionWorkspaceAuthority.peek()).not.toBe(firstAuthority)
+    expect(screen.queryByText('보유 2 / 18개')).toBeNull()
+    expect(screen.queryByText('0.300 Candle')).toBeNull()
+    // Mock transport intentionally resolves despite AbortSignal: old A cannot
+    // become authoritative merely because the current tuple names A again.
+    await act(async () => { firstARefresh.resolve(account(['crown', 'beanie', 'book'], '900')) })
+    expect(screen.queryByText('보유 3 / 18개')).toBeNull()
+    expect(screen.getByRole('status').textContent).toBe('Item 계정 불러오는 중…')
+    await act(async () => { returningA.resolve(account(['crown', 'beanie', 'book', 'mug'], '400')) })
+    expect(await screen.findByText('보유 4 / 18개')).toBeTruthy()
+    expect(screen.getByText('0.400 Candle')).toBeTruthy()
+    expect(screen.getByText('0.800 Candle')).toBeTruthy()
+  })
+
+  it('does not admit retained display roots, stale failures or pre-reconnect requests', async () => {
+    const held = pendingAccount()
+    fetchKeeperItems.mockResolvedValueOnce(account(['crown'], '200'))
+      .mockReturnValueOnce(held.promise)
+      .mockResolvedValueOnce(account(['crown', 'beanie'], '300'))
+    render(html`<${KeeperItemsPanel} keeper=${keeper('rondo')} />`)
+    expect(await screen.findByText('보유 1 / 18개')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '새로고침' }))
+    await waitFor(() => expect(fetchKeeperItems).toHaveBeenCalledTimes(2))
+    await act(async () => {
+      observeWorkspace(undefined, false)
+      // Reject before effect cleanup can abort the old request. Live authority
+      // admission must discard this failure rather than display an old alert.
+      held.reject(new Error('old workspace ledger failure'))
+      await held.promise.catch(() => {})
+    })
+    expect(serverStatus.peek()?.workspace_root).toBe('/fixture/workspace-a')
+    expect(executionWorkspaceAuthority.peek()).toBeNull()
+    expect(screen.getByRole('status').textContent).toBe('현재 작업 공간을 확인하는 중…')
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.queryByText(/보유/)).toBeNull()
+    for (const root of [null, 42, '', '   ']) {
+      await act(async () => { observeWorkspace(root) })
+      expect(executionWorkspaceAuthority.peek()).toBeNull()
+      expect(fetchKeeperItems).toHaveBeenCalledTimes(2)
+    }
+    await act(async () => { observeWorkspace('/fixture/workspace-a') })
+    expect(await screen.findByText('보유 2 / 18개')).toBeTruthy()
+    const beforeReconnect = executionWorkspaceAuthority.peek()!
+    const staleConnectionGeneration = beforeReconnect.connectionGeneration
+    await act(async () => { resetExecutionSnapshotGeneration() })
+    expect(executionWorkspaceAuthority.peek()).toBeNull()
+    expect(screen.queryByText('보유 2 / 18개')).toBeNull()
+    expect(hydrateExecutionSnapshot({
+      execution_publication_epoch: fixtureEpoch,
+      execution_publication_generation: ++fixtureGeneration,
+      status: { workspace_root: '/fixture/workspace-a' },
+    }, { requestGeneration: staleConnectionGeneration })).toBe(false)
+    fixtureConnectionGeneration = staleConnectionGeneration + 1
+    fetchKeeperItems.mockResolvedValueOnce({ status: 'off', keeper: 'rondo' })
+    await act(async () => { observeWorkspace('/fixture/workspace-a') })
+    expect(executionWorkspaceAuthority.peek()).not.toBe(beforeReconnect)
+    expect(await screen.findByText('Candle 기능이 꺼져 있습니다.')).toBeTruthy()
+    expect(fetchKeeperItems).toHaveBeenCalledTimes(4)
+  })
+
   it('shows observed balance, prices, ownership and equipment', async () => {
     fetchKeeperItems.mockResolvedValue({ status: 'ready', keeper: 'rondo', balance_milli: '800', owned_items: ['crown'], catalog })
     render(html`<${KeeperItemsPanel} keeper=${keeper('rondo')} />`)

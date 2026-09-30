@@ -260,14 +260,6 @@ def portrait_as_pixels(binary: str) -> None:
     )
 
 
-ITEM_CATALOG = [
-    ("glasses", "face"), ("shades", "face"), ("eye_patch", "face"),
-    ("plaster", "face"), ("freckles", "face"), ("beard", "face"),
-    ("scarf", "neck"), ("bow_tie", "neck"), ("medal", "neck"),
-    ("bow", "head"), ("crown", "head"), ("beanie", "head"),
-    ("book", "hand"), ("mug", "hand"), ("quill", "hand"),
-    ("dish_gilt", "base"), ("dish_silver", "base"), ("dish_oak", "base"),
-]
 
 def item_tab_previews_accessories(binary: str) -> None:
     fixtures = h.keeper_runtime_http_fixtures()

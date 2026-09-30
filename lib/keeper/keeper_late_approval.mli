@@ -27,7 +27,7 @@
     - Only the exact call the operator was shown is matched: the identity is
       (keeper, tool, canonical-args fingerprint), the same fingerprint the
       durable approval rules use
-      ({!Keeper_approval_queue_rules.request_fingerprint}). Different
+      ({!Keeper_approval_request_fingerprint.request_fingerprint}). Different
       arguments miss and are asked about.
     - Deny is remembered exactly like approve: a remembered refusal spares
       the operator the same question twice too.

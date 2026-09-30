@@ -1859,7 +1859,7 @@ end
 type fusion_mode =
   | Fusion_list
   | Fusion_detail of string
-  | Fusion_historical_detail of Tui_decode.fusion_historical_evidence
+  | Fusion_historical_detail of Masc.Tui_decode_fusion.fusion_historical_evidence
 
 (** How many list reads a started run is waited for. The read that was
     already in flight when the run started cannot carry it, so one more is
@@ -2120,7 +2120,6 @@ type planning_goal = Tui_decode.planning_goal
   pg_id: string;
   pg_criterion_revision: string option;
   pg_title: string;
-  pg_owner: Goal_store.owner;
   pg_phase: Goal_phase.t;
   pg_priority: int;
   pg_due_date: string option;
@@ -6389,14 +6388,14 @@ type state = {
   (* The retained-run list. A failed refresh keeps the rows it had and says
      why beside them ([Masc_tui_fetched.Stale]), rather than a registry that
      could not be read drawing as an empty one. *)
-  mutable fusion_runs: (unit, Tui_decode.fusion_snapshot) Masc_tui_fetched.t;
+  mutable fusion_runs: (unit, Masc.Tui_decode_fusion.fusion_snapshot) Masc_tui_fetched.t;
   (* Why the launch form could not open. Not a reading of the run list, so it
      is not folded into that list's failure; the next list answer clears it. *)
   mutable fusion_launch_error: string option;
   mutable fusion_cursor: int;
   mutable fusion_scroll: int;
   mutable fusion_mode: fusion_mode;
-  mutable fusion_detail: Tui_decode.fusion_detail option;
+  mutable fusion_detail: Masc.Tui_decode_fusion.fusion_detail option;
   mutable fusion_detail_error: string option;
   (* A detail GET captures this generation. A late response for a run the
      operator already left cannot replace the exact run now on screen. *)
@@ -6405,8 +6404,8 @@ type state = {
      do not pile another GET on top of it; changing runs still starts a new
      request immediately, whose pair replaces this marker. *)
   mutable fusion_detail_inflight: (int * string) option;
-  mutable fusion_historical_detail: Tui_decode.fusion_historical_detail option;
-  mutable fusion_historical_inflight: (int * Tui_decode.fusion_historical_evidence) option;
+  mutable fusion_historical_detail: Masc.Tui_decode_fusion.fusion_historical_detail option;
+  mutable fusion_historical_inflight: (int * Masc.Tui_decode_fusion.fusion_historical_evidence) option;
   mutable fusion_launch: fusion_launch option;
   (* The read or the submit the form is waiting on. A key that closes the
      form bumps it, so the answer to a read the operator left cannot open
@@ -7622,9 +7621,9 @@ let detail_read_waiting state ~tab ~keeper =
 let selected_keeper (state : state) =
   List.nth_opt state.keepers state.keeper_cursor
 
-let fusion_snapshot_entries (snapshot : Tui_decode.fusion_snapshot) =
-  List.map (fun run -> Tui_decode.Fusion_retained_run run) snapshot.fus_runs
-  @ List.map (fun evidence -> Tui_decode.Fusion_historical_evidence evidence)
+let fusion_snapshot_entries (snapshot : Masc.Tui_decode_fusion.fusion_snapshot) =
+  List.map (fun run -> Masc.Tui_decode_fusion.Fusion_retained_run run) snapshot.fus_runs
+  @ List.map (fun evidence -> Masc.Tui_decode_fusion.Fusion_historical_evidence evidence)
       snapshot.fus_historical_evidence
 
 let fusion_runs_view (state : state) =
@@ -7643,8 +7642,8 @@ let fusion_list_entries (state : state) =
   | Some snapshot -> fusion_snapshot_entries snapshot
 
 let fusion_entry_identity = function
-  | Tui_decode.Fusion_retained_run run -> "run:" ^ run.fur_run_id
-  | Tui_decode.Fusion_historical_evidence evidence -> "board:" ^ evidence.fhe_post_id
+  | Masc.Tui_decode_fusion.Fusion_retained_run run -> "run:" ^ run.fur_run_id
+  | Masc.Tui_decode_fusion.Fusion_historical_evidence evidence -> "board:" ^ evidence.fhe_post_id
 
 let selected_fusion_entry state =
   List.nth_opt (fusion_list_entries state) state.fusion_cursor
@@ -7653,9 +7652,9 @@ let fusion_detail_entry_index state =
   fusion_list_entries state
   |> List.find_index (fun entry ->
       match state.fusion_mode, entry with
-      | Fusion_detail id, Tui_decode.Fusion_retained_run run ->
+      | Fusion_detail id, Masc.Tui_decode_fusion.Fusion_retained_run run ->
           String.equal id run.fur_run_id
-      | Fusion_historical_detail reference, Tui_decode.Fusion_historical_evidence candidate ->
+      | Fusion_historical_detail reference, Masc.Tui_decode_fusion.Fusion_historical_evidence candidate ->
           String.equal reference.fhe_post_id candidate.fhe_post_id
           && String.equal reference.fhe_run_id candidate.fhe_run_id
       | _ -> false)
@@ -7663,7 +7662,7 @@ let fusion_detail_entry_index state =
 let selected_keeper_runs (state : state) =
   match selected_keeper state, fusion_snapshot state with
   | Some keeper, Some snapshot ->
-      List.filter (fun (run : Tui_decode.fusion_run) ->
+      List.filter (fun (run : Masc.Tui_decode_fusion.fusion_run) ->
           String.equal run.fur_keeper keeper.k_name) snapshot.fus_runs
   | _ -> []
 
@@ -11745,13 +11744,13 @@ let surface_row_texts (state : state) : surface -> string list option =
                 (List.map
                    (fun entry ->
                      match entry with
-                     | Tui_decode.Fusion_retained_run run ->
-                         run.Tui_decode.fur_run_id ^ " "
-                         ^ run.Tui_decode.fur_keeper ^ " "
-                         ^ run.Tui_decode.fur_preset
-                     | Tui_decode.Fusion_historical_evidence evidence ->
-                         evidence.Tui_decode.fhe_post_id ^ " "
-                         ^ evidence.Tui_decode.fhe_title)
+                     | Masc.Tui_decode_fusion.Fusion_retained_run run ->
+                         run.Masc.Tui_decode_fusion.fur_run_id ^ " "
+                         ^ run.Masc.Tui_decode_fusion.fur_keeper ^ " "
+                         ^ run.Masc.Tui_decode_fusion.fur_preset
+                     | Masc.Tui_decode_fusion.Fusion_historical_evidence evidence ->
+                         evidence.Masc.Tui_decode_fusion.fhe_post_id ^ " "
+                         ^ evidence.Masc.Tui_decode_fusion.fhe_title)
                    entries)))
   | Changes when Option.is_some (opened_file_change state) -> None
   | Changes -> (

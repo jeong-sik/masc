@@ -185,15 +185,20 @@ def short_overview_keeps_its_baseline(binary: str) -> None:
     # Main gives its first rows to health and Goals and labels any overflow;
     # it no longer promises the old Overview's five-todo/attention floor.
     baseline = {}
-    def core_rows(visible):
+    def core_rows(output):
+        # Compare Dashboard body rows, preserving its Usage facts. The footer
+        # also says m:Usage, but its separately seeded HTTP port is not a body
+        # fact and differs between the off/disabled/error/ready scenarios.
+        end = output.rfind(h.FRAME_END)
+        assert end >= 0, "Dashboard projection has no complete frame"
+        rows = h.screen_rows(bytes(output[:end + len(h.FRAME_END)]))
+        footer = h.screen_row_of(rows, b"q:quit")
+        assert footer > 1 and b"Port:" in rows[footer], rows
         markers = (b"Goals", b"actual ", b"linked tasks", b"Work", b"Open:",
                    b"Usage", b"Needs you", b"attention-", b"rows not shown", b"row not shown")
-        # Each phase starts its own loopback server on an OS-assigned port.
-        # Keep comparing the entire footer and content; only its fixture
-        # address varies independently of the currency state.
-        return tuple(re.sub(rb"\bPort: \d+\b", b"Port: <fixture-port>", line)
-                     for line in visible.splitlines()
-                     if any(marker in line for marker in markers))
+        return tuple(line for row, line in sorted(rows.items())
+                     if 1 < row < footer
+                     and any(marker in line for marker in markers))
     for phase in ("off", "disabled", "error", "ready"):
         fixtures = h.row_budget_http_fixtures()
         roster_payload = copy.deepcopy(h.keeper_runtime_http_fixtures()[ROSTER_PATH][1])
@@ -236,7 +241,7 @@ def short_overview_keeps_its_baseline(binary: str) -> None:
                 for expected in (b"Health:", b"Goals", b"q:quit"):
                     assert expected in visible, (phase, height, expected, visible)
                 assert re.search(rb"\+\d+ rows? not shown", visible), visible
-                projected = core_rows(visible)
+                projected = core_rows(output)
                 if phase == "off":
                     baseline[height] = projected
                 else:

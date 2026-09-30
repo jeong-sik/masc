@@ -17,9 +17,9 @@ endpoint = "http://127.0.0.1:9/v1"
 exact-body-timeout-s = 1200.0
 
 [models.smoke]
-# Harness-local opaque runtime alias. The adjacent typed capability block is
-# the sole declaration used when no exact AGENT_CORE catalog row exists.
-api-name = "transport-harness-smoke"
+# Exact-output startup requires a model row in the embedded AGENT_CORE catalog.
+# The binding still uses the isolated loopback endpoint above; no model is called.
+api-name = "deepseek-v4-flash"
 max-context = 32768
 tools-support = true
 streaming = true

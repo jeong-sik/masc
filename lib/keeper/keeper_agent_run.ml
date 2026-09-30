@@ -2334,8 +2334,8 @@ let run_turn
                             them put Execute at 10,396 bytes against the
                             7,239 it sends, and ranked the surface by a
                             number nobody is charged for. masc never sets
-                            [strict], so what this records is exactly what
-                            test_keeper_tool_schema_bytes ratchets. *)
+                            [strict]; the record measures the schema bytes sent
+                            to the provider. *)
                          { Turn_record.name = tool.Agent_core.Tool.schema.name
                          ; schema_bytes =
                              Agent_core.Base.Tool.wire_bytes_of_schema

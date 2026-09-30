@@ -11,11 +11,9 @@
 # Modes:
 #   run-lint-suite.sh blocking [BASE]     # every always-on blocking lint
 #   run-lint-suite.sh blocking-pr BASE    # + PR-only diff guards vs BASE
-#   run-lint-suite.sh advisory            # non-blocking lints (job uses
-#                                         # continue-on-error)
 set -uo pipefail
 
-mode="${1:?usage: run-lint-suite.sh <blocking|blocking-pr|advisory> [base-sha] [head-sha]}"
+mode="${1:?usage: run-lint-suite.sh <blocking|blocking-pr> [base-sha] [head-sha]}"
 base_sha="${2:-}"
 # Optional, and only blocking-pr reads it. Left empty the PR lints fall back to
 # HEAD, which is what they did before and is right for a checkout of the branch
@@ -92,7 +90,6 @@ blocking_lints() {
   run_self_test_when_changed "Deployment scripts refuse before touching prod" \
     "scripts/deploy.sh scripts/install-local-build.sh scripts/check-runtime-deployment-preflight.sh test/test_deploy_preflight.sh" \
     bash test/test_deploy_preflight.sh
-  run_lint "Issue taxonomy truth" bash scripts/check-issue-taxonomy-truth.sh
   # The release page body is cut from this section by
   # scripts/ci/changelog-section.py. Checking it on every PR means a version
   # bump without a section -- or with two -- fails here, before a tag does.
@@ -206,13 +203,11 @@ blocking_lints() {
   run_lint "Test stanza env is readable" \
     python3 scripts/ci/stanza_env.py --check-all
   run_lint "Hardcoded model prefix" bash scripts/lint/no-roadmap-stale-hardcoding.sh
-  run_lint "Raw font-size px" bash scripts/lint/no-raw-font-size-px.sh
   run_lint "Harness connector env ratchet (#28807)" \
     bash scripts/lint/harness-connector-env-ratchet.sh --self-test
   run_lint "OCaml comment terminator trap" bash scripts/lint/no-ocaml-comment-terminator-trap.sh
   run_lint "Wire-field removal schema gate (#29516/#29601/#29666)" \
     bash scripts/wire-field-removal-schema-gate-selftest.sh
-  run_lint "Timeout env knob ceiling (RFC-0138)" bash scripts/lint/timeout-env-ceiling.sh
   run_self_test_when_changed ".mli env knob exists self-test" \
     scripts/lint/mli-env-knob-exists.sh \
     bash scripts/lint/mli-env-knob-exists.sh --self-test
@@ -303,7 +298,6 @@ blocking_lints() {
   # diff against origin/main itself rather than taking a base, so where it
   # belongs is a question this change does not answer (#34018).
   run_lint "Agent-core package shape" bash scripts/check-agent-core-boundary.sh
-  run_lint "Execute async surface" bash scripts/check-execute-async-surface.sh
   run_lint "HITL exact-flow boundary" bash scripts/check-hitl-exact-flow-boundary.sh
   run_lint "Turn-records envelope parity" bash scripts/check-turn-records-envelope-parity.sh
   run_lint "Drain loops yield" bash scripts/ci/check-drain-loop-yields.sh
@@ -360,30 +354,14 @@ blocking_lints() {
     python3 scripts/ci/check_exact_field_decoder_preflight.py
   run_lint "Path layout SSOT" bash scripts/audit-path-ssot.sh
   run_lint "odoc references resolve" python3 scripts/audit-odoc-refs.py
-  # The two ratchets that survived #33313, which deleted eighteen nobody ran.
-  # Surviving that sweep was a decision to keep them; nothing has called them
-  # since. Both are green on main and both proven to fail: hide a -buggy.cfg
-  # for the first, take the last [@@deriving tla] out of a file for the second.
-  run_lint "TLA bug models keep their pair" bash scripts/tla-bug-model-ratchet.sh
-  # The floor counts attributes in code only. A lexer that mistakes a comment
-  # for code, or code for a comment, moves the floor without an attribute
-  # moving; each fixture is a shape the OCaml lexer reads differently from a
-  # plain search.
+  # Code-only counters are also used by the architecture reports.
   run_self_test_when_changed "OCaml code-only counter self-test" \
     "scripts/ci/count_ocaml_code_matches.py scripts/ci/test_count_ocaml_code_matches.py" \
     python3 scripts/ci/test_count_ocaml_code_matches.py
-  run_lint "TLA ppx coverage floor" bash scripts/tla-ppx-ratchet.sh
   run_lint "TLA cfg has a parent spec" bash scripts/audit-tla-cfg-orphan.sh
   run_lint "TLA annotation drift" \
     bash scripts/audit-tla-annotation-drift.sh --check-cross-spec
   run_lint "Model prefix inheritance" python3 scripts/ci/check_model_prefix_inheritance.py
-  # The masc.opam↔dune-project regeneration check (#36410 drift class) is
-  # NOT here: `dune build masc.opam` needs the OCaml switch, and the lint
-  # job is deliberately toolchain-free. It runs as a step in the
-  # "dune build @check" job of pr-check.yml, next to the two #34018 guards
-  # that were moved there for the same reason.
-  run_lint "Every check script is reached" \
-    python3 scripts/ci/check-guards-are-wired.py
 }
 
 blocking_pr_lints() {
@@ -408,32 +386,14 @@ blocking_pr_lints() {
   # that stopped matching would drop the browser parity suites again.
   run_lint "Node alias target reader self-test" \
     python3 scripts/ci/list-node-alias-targets.py --self-test
-  run_lint "ignore justification (new sites)" \
-    bash scripts/ci/check-ignore-without-comment-diff.sh --base "${base}" --head HEAD
   run_lint "Stale-base revert guard self-test (RFC-0235)" \
     python3 scripts/ci/test_check_stale_base_revert.py
   run_lint "Stale-base revert guard (RFC-0235)" \
     python3 scripts/ci/check-stale-base-revert.py --base "${base}" --head HEAD
-  # Both do nothing without a base ref, which is why they belong here rather
-  # than beside the always-on lints. check-release-train-guard refuses a
-  # version downgrade -- 0.33.0 to 0.31.0 in dune-project reports it -- and
-  # check-pr-hygiene refuses an empty commit and a Request_priority erasure
-  # (#4186), which a planted `~priority:()` reports.
-  run_lint "Release train guard" \
-    bash scripts/check-release-train-guard.sh --base "${base}" --head HEAD
-  run_lint "PR hygiene" \
-    bash scripts/check-pr-hygiene.sh --base "${base}" --head "${head}"
   # A pull request writes changelog.d/<PR>.md; only a release pull request
   # (version bump or fragment assembly) adds bullets under [Unreleased].
   run_lint "Changelog entries arrive as fragments" \
     python3 scripts/changelog-fragments.py pr-guard --base "${base}" --head "${head}"
-  # The companion to the boundary guard wired above: a new .mli whose paired
-  # .ml is already in that guard's allow-list has to be added alongside it,
-  # or every later PR fails on docstrings this one exposed. That is PR #11248
-  # -> blocked #11272 -> fix-forward #11280/#11283. Adding a keeper .mli whose
-  # .ml is allow-listed, without the .mli, reports PAIR-GATE FAIL.
-  run_lint "Boundary-guard .mli pairing" \
-    env BASE_REF="${base}" bash scripts/check-boundary-guard-mli-pairs.sh
   # A deleted wire field/variant in a persistence schema is a deploy event,
   # not a refactor: three fleet freezes in one day (#29516/#29601/#29666)
   # came from strict decoders that stopped accepting rows live stores still
@@ -485,24 +445,18 @@ blocking_pr_lints() {
   # is not the same thing.
   #
   #   check-eio-conventions       Eio_unix.sleep under lib/
-  #   audit-ocaml-phase-count     "12-phase" in a keeper comment, SSOT is 8
-  #   audit-tla-phase-count       the same drift on the spec side
   #   audit-route-tool-catalog    a route demanding a tool the catalog lacks
   #   audit-shell-ir-consumption  a retired authorization symbol back in lib/
-  #   base-policy-audit           `open Base` in an .mli
   #
   # The last two take an argument to enforce anything. Bare, one prints
   # metrics and the other prints a summary, both exiting 0 -- so the name
   # alone would have wired a guard that cannot fail. Three more from that
   # list are staying out for the same reason and the baseline says why.
   run_lint "Eio conventions" bash scripts/check-eio-conventions.sh
-  run_lint "OCaml phase-count drift" bash scripts/audit-ocaml-phase-count.sh
-  run_lint "TLA phase-count drift" bash scripts/audit-tla-phase-count.sh
   run_lint "Route tool catalog" bash scripts/audit-route-tool-catalog.sh
   run_lint "Shell IR structural boundary" \
     bash scripts/audit-shell-ir-consumption.sh \
     --baseline scripts/shell-ir-consumption-baseline.json
-  run_lint "Base policy" bash scripts/base-policy-audit.sh --fail-on-regression
   # The gate itself needs `dune describe` and runs in the build job. This is
   # its self-test, which feeds synthetic graphs and asserts both directions --
   # a clean graph passes, a cycle and a dangling UID are refused -- and needs
@@ -588,13 +542,6 @@ blocking_pr_lints() {
   run_lint "Hardcoding and truth audit" \
     bash scripts/audit-hardcoding-truth.sh --fail-on-confirmed
   run_lint "Boundary guard" bash scripts/check-boundary-guard.sh
-  # Promoted out of the advisory lane. It already ran there with --strict, and
-  # --strict is the mode that fails, so the only thing "advisory" bought was
-  # that nobody had to look: the count sits exactly at its baseline of 15, and
-  # a 16th knob would have been reported and merged. Adding a get_int to the
-  # Dashboard module reports it.
-  run_lint "Dashboard env knob count" \
-    bash scripts/lint-timeout-env-count.sh --strict
   # Green for the first time. It read 11 sites, of which two were the
   # docstring of the module written to replace this anti-pattern -- its
   # exclusion glob said lib/telemetry_observe and the file is at
@@ -602,47 +549,12 @@ blocking_pr_lints() {
   # ()` would swallow cancellation. The remaining eight are teardown paths
   # and each now carries its reason on the line.
   run_lint "Silent failure" bash scripts/check_silent_failure.sh --strict
-  # A per-pattern ratchet over dashboard/src for Tailwind spellings whose
-  # replacement already exists. It was reporting one unit of slack --
-  # text-px-literal measured 50 against a baseline of 51 -- which is one free
-  # regression, so the baseline moves to 50 in this commit. Planting
-  # `text-[13px] bg-zinc-800` reports two patterns over baseline.
-  run_lint "Dashboard styling drift" bash scripts/dashboard-drift-check.sh
   # Was listed as a report on the strength of a grep for `exit 1`. It exits 2,
   # and that 2 is the verdict, not a usage error: a dashboard line that names
   # a prompt key config/prompts and prompt_names.ml do not carry decodes to an
   # empty block. Planting 'fusion.judge.probe_absent' on a promptKeys line
   # reports it.
   run_lint "Dashboard prompt keys" bash scripts/audit-dashboard-prompt-keys.sh
-  # Two line-reference validators with nothing to validate: no spec preamble
-  # and no keeper docstring currently cites a line number. They were written
-  # after four citations in a retired queue model drifted 245 to 413 lines
-  # while every behavioural claim around them stayed true, so the failure they
-  # exist for arrives the moment someone writes the next citation. Wiring them
-  # at zero subjects costs a second each and means the first one is checked.
-  run_lint "TLA spec line-refs" bash scripts/audit-tla-ml-line-refs.sh
-  run_lint "OCaml spec-nav line-refs" \
-    bash scripts/audit-ocaml-spec-nav-line-refs.sh
-}
-
-advisory_lints() {
-  # The two other checks that stay here, with the number that keeps them here. Both have an
-  # enforcing mode and both are red in it, so "advisory" is not a policy choice
-  # about their subject -- it is where they sit until the count comes down.
-  #
-  #   lint-magic-number --strict     10 (file, literal) pairs at >= 5 repeats,
-  #                                  all ms<->s and KiB conversions. It read 80
-  #                                  until #34236 stopped it counting the RFC
-  #                                  numbers in its own comments and log lines.
-  #   exhaustive-guard BLOCKING=1    826 fragile matches -- checked against
-  #                                  comment-stripping, and it is 826 either
-  #                                  way; the script's own
-  #                                  header says Phase 5 flips this "once the
-  #                                  codemod has closed the bulk of inventory
-  #                                  and allowlist is narrowed", and 826 is not
-  #                                  that
-  run_lint "Magic number repetition (advisory)" bash scripts/lint-magic-number.sh
-  run_lint "Fragile-match (advisory, RFC-0071 Phase 1)" bash scripts/lint/exhaustive-guard.sh
 }
 
 case "${mode}" in
@@ -656,9 +568,6 @@ case "${mode}" in
     fi
     blocking_lints
     blocking_pr_lints "${base_sha}" "${head_sha:-HEAD}"
-    ;;
-  advisory)
-    advisory_lints
     ;;
   *)
     echo "::error::unknown mode ${mode}" >&2

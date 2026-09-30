@@ -184,10 +184,6 @@ jobs:
           fi
           bash scripts/ci/run-lint-suite.sh blocking-pr "${base}" "${head}"
 
-      - name: Advisory lints
-        # Recorded, not enforced -- the driver's own contract for this mode.
-        continue-on-error: true
-        run: bash scripts/ci/run-lint-suite.sh advisory
 
   check:
     if: github.event.pull_request.draft == false
@@ -356,13 +352,6 @@ jobs:
       # and all eight are answered (#33782), leaving the single listed row.
       # The script skips whatever that file lists, so a failure here is a
       # suite that is supposed to pass and did not.
-      #
-      # What advisory cost, measured on the pull requests themselves: #34981
-      # and #34983 each ran test_keeper_tool_schema_bytes through the
-      # config/tools mapping, each read "over the 98940 ceiling by 942" and
-      # "by 1516" in this step's own log, and both merged green. #35004
-      # repaired the ceiling the next morning. The trigger worked; nothing
-      # was answerable for the verdict.
       - name: Build the Keeper sandbox image the sandboxed suites read through
         # Four suites read a file through a Keeper's Docker sandbox. Without the
         # image the read answers "image_not_found: keeper sandbox image

@@ -291,10 +291,10 @@ let record_usage_windows ~quota_scope report =
    ([turn_failure_to_provider_error]), and the router stops picking the
    account, so no later turn will report its windows either. The account
    can still say when it resets without a turn, so ask it once. The read
-   outlives this turn ({!Runtime_provider_usage_read.read_codex_in_background}),
+   outlives this turn ({!Runtime_provider_usage_read.read_codex_after_spent_usage_refusal}),
    and the refused turn returns without waiting on it. *)
 let read_usage_after_quota_refusal ~keeper_name ~quota_scope ~clock ~cwd config =
-  match Runtime_provider_usage_read.read_codex_in_background
+  match Runtime_provider_usage_read.read_codex_after_spent_usage_refusal
           ~clock ~cwd ~scope:quota_scope config with
   | Runtime_provider_usage_read.Started | Runtime_provider_usage_read.Already_reading -> ()
   | Runtime_provider_usage_read.No_root_switch ->

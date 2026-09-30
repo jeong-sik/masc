@@ -1,0 +1,34 @@
+{
+  "algorithm": "sha256",
+  "scope": "candidate source/evidence before local commit; manifest excludes itself",
+  "files": [
+    {
+      "path": "dashboard/src/api/schemas/candle-observation.ts",
+      "sha256": "726c78db19fe4c40fd188e81e4de4d6a309661d48e0eebcd1ad15b02c9649b93"
+    },
+    {
+      "path": "dashboard/src/api/schemas/keeper-items.ts",
+      "sha256": "aedf63974aede7b11388549fd896ce4eed786d890945840d3ed31336706b0a2b"
+    },
+    {
+      "path": "dashboard/src/api/keeper-items.test.ts",
+      "sha256": "ea2d10392aac053b62bc23ff7a13afce0bd696d58e9c1804cf0724fe579fda4a"
+    },
+    {
+      "path": "changelog.d/999994.md",
+      "sha256": "36f8ec968a2617b7e023f8862b74780122c577fc5b9b99c7debb3fcf2017191d"
+    },
+    {
+      "path": "docs/evidence/2026-09-30-dashboard-item-amount-source/README.md",
+      "sha256": "c47ea477a993a499065218a43b07409411fb15ee85338e494f0d5b1b2d3f3023"
+    },
+    {
+      "path": "docs/evidence/2026-09-30-dashboard-item-amount-source/composition.json",
+      "sha256": "8ea60199d6175faac89bb173bb71100e00575a64660f42692648d740f38b560e"
+    },
+    {
+      "path": "docs/evidence/2026-09-30-dashboard-item-amount-source/source-checks.json",
+      "sha256": "3e1c42c4c71d75d88deb269a34f4a88087eae74706986f04027364de9c47a2b8"
+    }
+  ]
+}

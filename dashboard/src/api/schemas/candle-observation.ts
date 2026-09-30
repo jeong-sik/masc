@@ -7,7 +7,8 @@ export type CandleObservation =
       readonly burned_milli: string; readonly circulating_milli: string }
 export type CandleReading = CandleObservation | { readonly status: 'unavailable'; readonly reason: string }
 
-function isCandleAmount(value: unknown): value is string {
+/** Canonical nonnegative millicandle wire amount, shared by observations and Item accounts. */
+export function isCandleAmount(value: unknown): value is string {
   return typeof value === 'string' && /^(0|[1-9][0-9]*)$/.exec(value)?.[0] === value
 }
 

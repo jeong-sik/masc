@@ -19,7 +19,13 @@ Fusion still owns panel/judge calls, durable async request identity, terminal
 settlement, Board projection and continuation delivery in the host.
 The package has no credentials or compute/action port.
 The exporter reads an already-acquired API response; it neither fetches
-the API nor updates a capture automatically.
+the API nor updates a file capture automatically.
+
+The native `fusion_run` source additionally reads an exact run from the host
+registry, retains its captured detail bytes and nudges matching observers when
+Fusion publishes a new state. It does not require manual snapshot export.
+Later independent Board card edits require explicit observation; the latest
+completed output is a frozen capture, not a live mirror of arbitrary Board edits.
 
 ## Composer
 
@@ -56,8 +62,8 @@ Broadcast delivery or Keeper reads. Broadcast/report blocks remain proposed role
 
 Docker/host installation, current-head CI and production model/worker behavior
 are separate evidence stages. None are claimed by the local stdio/browser checks.
-The next runtime work is an explicit completion-to-snapshot acquisition bridge,
-then the credential/runtime boundary for moving compute into isolation, and
+The native acquisition bridge is implemented with CI validation pending.
+The next runtime work is the credential/runtime boundary for moving compute into isolation, and
 durable Board/Broadcast/read integration. Generic composite/subflow execution
 is not introduced by this slice.
 

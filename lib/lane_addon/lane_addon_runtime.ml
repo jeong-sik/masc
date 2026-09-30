@@ -468,6 +468,13 @@ let notify_activity ~config ~activity = Eio_context.run_on_owner_domain (fun () 
       if e.running && not e.stopping
         && Lane_addon_sources.interested e.refresh_interest activity
       then wake ~request:Refresh_sources e) m.entries)
+let notify_fusion_run ~run_id = Eio_context.run_on_owner_domain (fun () ->
+  Hashtbl.iter (fun _ m ->
+    Hashtbl.iter (fun _ e ->
+      if e.running && not e.stopping
+        && Lane_addon_sources.interested e.refresh_interest
+             (Lane_addon_sources.Fusion_changed run_id)
+      then wake ~request:Refresh_sources e) m.entries) managers)
 let find m args = let* id = text args "instance_id" in
   match Hashtbl.find_opt m.entries id with Some e -> Ok e | None -> Error "unknown active instance"
 let historical m =

@@ -111,6 +111,10 @@ class Roster:
         with self.lock:
             self.phase = phase
 
+    def count(self):
+        with self.lock:
+            return len(self.calls)
+
     def hold_refresh(self, keeper: str) -> bytes:
         # A labelled scenario derivative of the native equipped receipt.
         # Only the decoder's displayed runtime_blocker_summary is marked;

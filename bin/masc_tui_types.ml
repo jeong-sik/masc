@@ -5425,10 +5425,9 @@ type state = {
      newest; the keys that move it re-fetch the exact provider input for the
      row they name, so every tab describes the turn the operator chose. *)
   mutable context_inspector_turn_back: int;
-  (* The roster beside a keeper surface costs the chat 30 columns for a
-     list the reader may already know. Hidden is a choice they make, not a
-     width the terminal forces, so it survives resizing. *)
-  mutable roster_pane_hidden: bool;
+  (* Chat shows its roster by default; other surfaces keep their columns.
+     An explicit Ctrl-B choice survives both navigation and resizing. *)
+  mutable roster_pane_preference: Masc_tui_roster_pane.preference;
   (* The Activity pane on the right edge costs a surface
      [Masc_tui_acting_pane.pane_cols] columns for the fleet's live feed, or
      [wide_pane_cols] wide. Same contract as the roster: narrow, wide or
@@ -6648,6 +6647,19 @@ type state = {
   refresh_interval: float;
 }
 
+let roster_pane_hidden (state : state) =
+  Masc_tui_roster_pane.effective_hidden state.roster_pane_preference
+    ~in_chat:(state.view = Keepers Keeper_message)
+
+(* Called at interaction and presentation boundaries with the surface width,
+   after reserving any Activity pane. Visibility preference survives a resize;
+   focus does not: an absent roster cannot keep arrows, Enter or the caret. *)
+let reconcile_keeper_message_focus (state : state) ~cols =
+  if state.view = Keepers Keeper_message
+     && not (Masc_tui_roster_pane.shown ~hidden:(roster_pane_hidden state) ~cols)
+  then state.keeper_message_focus <- Right_pane
+
+
 (* One selection shared by Tools actions, pinned heading and document. *)
 let tools_skill_profiles (state : state) =
   match state.tools_inventory with
@@ -6658,8 +6670,6 @@ let tools_skill_profiles (state : state) =
 
 let selected_tools_skill_profile (state : state) =
   List.nth_opt (tools_skill_profiles state) state.tools_skill_cursor
-
-
 
 (* Which field a typed character lands in.
 
@@ -7746,7 +7756,7 @@ let workspace_activity_context_lines state ~cols =
   let wrap label value =
     Masc_tui_message_layout.wrap_words
       ~max_cells:(max 1 (Masc_tui_frame.inner_width ~cols - 2))
-      (label ^ ": " ^ Tui_decode.sanitize_terminal_text value)
+      (label ^ ": " ^ Masc.Tui_terminal_text.sanitize_terminal_text value)
     |> List.map (fun line -> "  " ^ line) in
   match selected with
   | None -> wrap "Record" "No selected recorded change"
@@ -8075,13 +8085,9 @@ let create_state
   context_inspector_detail_scroll = 0;
   context_inspector_focus = Left_pane;
   context_inspector_turn_back = 0;
-  (* The roster comes when it is asked for. Ctrl-L's Activity pane already
-     answers "what is every keeper doing right now", and a name-only column
-     beside the chat repeated that answer while taking 34 of the
-     conversation's cells. Ctrl-B brings it back, and that press is the whole
-     cost of being wrong here -- whereas the column was drawn on every frame
-     whether or not anyone read it. *)
-  roster_pane_hidden = true;
+  (* Wide chat starts with its Keeper roster. Other surfaces keep their
+     full width until Ctrl-B records an explicit choice. *)
+  roster_pane_preference = Masc_tui_roster_pane.Auto;
   acting_pane_preference = Default_acting_pane;
   acting_pane_scroll = 0;
   acting_pane_cursor = None;
@@ -11262,7 +11268,7 @@ let home_request_of_approval = function
    reachable through their source reading, never offered as current requests. *)
 let home_decision_rows (state : state) =
   let reading = approvals_reading state in
-  let clean = Tui_decode.sanitize_terminal_text in
+  let clean = Masc.Tui_terminal_text.sanitize_terminal_text in
   let approval_rows =
     approval_items state
     |> List.filter_map (fun row ->
@@ -11283,7 +11289,7 @@ let home_decision_rows (state : state) =
   let questions =
     if list_is_read reading.questions then
       Option.value ~default:[] (approvals_open_questions state)
-      |> List.map (fun (row : Tui_decode.ask_row) ->
+      |> List.map (fun (row : Masc.Tui_decode_asks.ask_row) ->
           let why = match row.ar_context, row.ar_questions with
             | Some reason, _ -> reason
             | None, question :: _ -> question.aq_prompt
@@ -11376,7 +11382,7 @@ let reconcile_home_request_detail state =
                  (approval_items state))
         | Home_question ask_id ->
             Option.iter (fun index -> state.ask_cursor <- index)
-              (List.find_index (fun (row : Tui_decode.ask_row) -> row.ar_id = ask_id)
+              (List.find_index (fun (row : Masc.Tui_decode_asks.ask_row) -> row.ar_id = ask_id)
                  (Option.value ~default:[] (approvals_open_questions state)))
         | Home_goal_confirmation goal_id -> state.planning_mode <- Planning_detail goal_id
         | Home_operator_task task_id -> state.task_detail_id <- Some task_id
@@ -11400,12 +11406,12 @@ let home_continue_rows (state : state) =
     | Some (name, save_notice) when state.workspace_identity = Workspace_identity_match
                    && keeper_available_for_new_message state name ->
         [ Home_resume name,
-          "Continue with " ^ Tui_decode.sanitize_terminal_text name
+          "Continue with " ^ Masc.Tui_terminal_text.sanitize_terminal_text name
           ^ save_notice ]
     | Some (name, save_notice) when state.workspace_identity = Workspace_identity_match
                          && Option.is_some state.keepers_error ->
         [ Home_read_last name,
-          "Last conversation with " ^ Tui_decode.sanitize_terminal_text name
+          "Last conversation with " ^ Masc.Tui_terminal_text.sanitize_terminal_text name
           ^ save_notice
           ^ " · roster unavailable; read history" ]
     | Some _ | None -> []
@@ -11419,7 +11425,7 @@ let home_continue_rows (state : state) =
                "Create a Keeper · conversation history unavailable"
            | (No_chat_receipt | Recorded_chat _ | Session_chat _ | Unconfirmed_chat _), Some (name, _) ->
                "Create a Keeper · last conversation "
-               ^ Tui_decode.sanitize_terminal_text name ^ " unavailable"
+               ^ Masc.Tui_terminal_text.sanitize_terminal_text name ^ " unavailable"
            | (No_chat_receipt | Recorded_chat _ | Session_chat _ | Unconfirmed_chat _), None ->
                "Create a Keeper  · choose who will take the work") ]
     | _ ->
@@ -11430,7 +11436,7 @@ let home_continue_rows (state : state) =
                 | Unreadable_chat_receipt _, _ ->
                     "Conversation history unavailable · choose a Keeper"
                 | (No_chat_receipt | Recorded_chat _ | Session_chat _ | Unconfirmed_chat _), Some (name, _) ->
-                    "Last conversation " ^ Tui_decode.sanitize_terminal_text name
+                    "Last conversation " ^ Masc.Tui_terminal_text.sanitize_terminal_text name
                     ^ " unavailable · choose a Keeper"
                 | (No_chat_receipt | Recorded_chat _ | Session_chat _ | Unconfirmed_chat _), None ->
                     "Choose a Keeper  · start a conversation")
@@ -12278,7 +12284,7 @@ let keeper_message_command_window state ~terminal_rows ~terminal_cols =
      | Some menu ->
        let status_rows = keeper_message_status_rows state + 1 in
        let chat_cols = Masc_tui_roster_pane.content_cols
-           ~hidden:state.roster_pane_hidden ~cols:terminal_cols in
+           ~hidden:(roster_pane_hidden state) ~cols:terminal_cols in
        let history_rows = Masc_tui_message_layout.message_history_height
            ~terminal_rows ~status_rows in
        (* Keep three conversation rows plus a heading and input separator.

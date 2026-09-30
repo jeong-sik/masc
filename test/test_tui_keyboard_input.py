@@ -10005,9 +10005,12 @@ def message_origin_badge_interaction(
     draft_frame = send_and_wait(
         process, master_fd, output, b"draft-neutral", b"draft-neutral"
     )
-    if b"\x1b[96m  > \x1b[0mdraft-neutral" not in draft_frame:
+    # Restore only the foreground after the accented prompt. A full reset
+    # would erase the input surface background; accepting arbitrary SGR here
+    # could instead leave the draft tinted or clear its background with 49m.
+    if b"\x1b[96m  > \x1b[39mdraft-neutral" not in draft_frame:
         raise AssertionError(
-            f"chat composer did not limit accent to its prompt: {draft_frame!r}"
+            f"chat composer did not restore default foreground while preserving its background: {draft_frame!r}"
         )
     escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
     os.write(master_fd, b"q")
@@ -10191,10 +10194,9 @@ def keeper_message_switch_interaction(alpha_history: GatedHttpResponse) -> Inter
             composer_showing(b"alpha-draft"),
         )
 
-        # The roster is put away until it is asked for, so this scenario asks.
-        # Ctrl-B is refused below Masc_tui_roster_pane.threshold_cols, and the
-        # width above is chosen to clear it.
-        send_and_wait(process, master_fd, output, b"\x02", b"KEEPERS")
+        # Wide chat shows the roster by default. Leave that preference
+        # untouched while checking the selected Keeper and draft handoff.
+        wait_for_output(process, master_fd, output, b"KEEPERS", start=0, timeout=3.0)
 
         beta_start = len(output)
         # A drawn roster is an input pane: Left focuses it, Down moves its
@@ -20223,7 +20225,10 @@ def dashboard_usage_interaction(
     send_and_wait(process, master_fd, output, b"/telemetry", b"/telemetry")
     send_and_wait(process, master_fd, output, b"\r", b"MASC Usage / Telemetry")
     tab_until(process, master_fd, output, b"MASC Usage")
-    wait_for_output(process, master_fd, output, b"7 UTC days", start=output.rfind(b"MASC Usage"))
+    wait_for_output(
+        process, master_fd, output, b"7 UTC days",
+        start=output.rfind(b"MASC Usage"), timeout=10.0,
+    )
     os.write(master_fd, b"q")
 
 

@@ -12851,6 +12851,8 @@ let render_tools (state : state) =
   box_top buf cols;
   box_line buf cols header;
   box_line buf cols (" " ^ Render_tools.tools_pane_strip ~cols state);
+  box_line_styled buf cols ~style:Theme.selection
+    (Render_tools.tools_selection_line ~cols state);
   box_divider buf cols;
   (match state.tools_error with
    | None -> ()

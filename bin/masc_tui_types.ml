@@ -6618,6 +6618,19 @@ type state = {
   refresh_interval: float;
 }
 
+(* One selection shared by Tools actions, pinned heading and document. *)
+let tools_skill_profiles (state : state) =
+  match state.tools_inventory with
+  | Some { Tui_decode.ts_effective =
+             Some (Tui_decode.Effective_surface_available { ets_skill_profiles; _ }); _ } ->
+      ets_skill_profiles
+  | Some _ | None -> []
+
+let selected_tools_skill_profile (state : state) =
+  List.nth_opt (tools_skill_profiles state) state.tools_skill_cursor
+
+
+
 (* Which field a typed character lands in.
 
    Seven fields take letters. Paste named four of them and typing named all

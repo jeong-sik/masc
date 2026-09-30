@@ -17,6 +17,10 @@ val tools_pane_strip : cols:int -> state -> string
 (** The pane selector drawn in the surface header, with the active pane
     marked. *)
 
+val tools_selection_line : cols:int -> state -> string
+(** Pinned action target, sharing the exact selection used by Enter/edit.
+    The complete reference remains in the scrolling document. *)
+
 val tools_display_lines : ?cols:int -> state -> (string * string) list
 (** Every row the surface would draw, before scrolling narrows it, each as
     the style to draw it in paired with its text. The caller measures this

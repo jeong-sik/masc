@@ -16496,7 +16496,7 @@ let patch_modal_viewport (state : state) =
   let diff_opt =
     match state.patch_modal_diff with
     | Some (_, d) -> Some d
-    | None -> (match state.repository_changes_diff with Some (_, d) -> Some d | None -> None)
+    | None -> None
   in
   let total =
     match diff_opt with
@@ -16516,12 +16516,12 @@ let render_patch_modal (state : state) =
   let path_label =
     match state.patch_modal_path with
     | Some p -> p
-    | None -> (match state.repository_changes_diff_path with Some p -> p | None -> "Active Working Tree")
+    | None -> "Active Working Tree"
   in
   let diff_opt =
     match state.patch_modal_diff with
     | Some (_, d) -> Some d
-    | None -> (match state.repository_changes_diff with Some (_, d) -> Some d | None -> None)
+    | None -> None
   in
   let diff_rows =
     match diff_opt with
@@ -16545,10 +16545,13 @@ let render_patch_modal (state : state) =
       if total = 0 then
         c.push
           (Ansi.dim
-           ^ (match state.patch_modal_error, state.repository_changes_diff_error with
-              | Some e, _ | None, Some e ->
+           ^ (match state.patch_modal_error with
+              | Some e ->
                   Printf.sprintf "   (diff load error: %s)" (Terminal_text.single_line e)
-              | None, None -> "   (no pending patch diff loaded)")
+              | None ->
+                  (match diff_opt with
+                   | None -> "   (reading patch diff…)"
+                   | Some _ -> "   (no pending patch diff loaded)"))
            ^ Ansi.reset)
       else begin
         let width = framed_inner_width cols in

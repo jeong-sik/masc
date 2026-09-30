@@ -1709,7 +1709,7 @@ type async_msg =
       Masc.Tui_decode.repository_change_scope
       * (Masc.Tui_decode.repository_change_snapshot, string) result
   | Repository_changes_diff_loaded of
-      string * (Masc.Tui_decode.git_diff, string) result
+      repository_diff_request * (Masc.Tui_decode.git_diff, string) result
   (* Carries the keeper it was asked about. The surface can be pointed at a
      different keeper while a load is in flight, and an answer that did not
      say whose it was would be filed under whoever is selected when it
@@ -5112,7 +5112,19 @@ let launch_repository_changes_load state ~mailbox ~scope =
       | Tui_decode.Repository_change_repository repository_id ->
           Masc_tui_loader.load_repository_changes ~host ~port ~repository_id)
 
-let launch_repository_changes_diff_load state ~mailbox ~scope ~path =
+let launch_repository_changes_diff_load state ~mailbox ~reader ~scope ~path =
+  let generation =
+    match reader with
+    | Repository_diff_reader ->
+        state.repository_changes_diff_generation <- state.repository_changes_diff_generation + 1;
+        state.repository_changes_diff_generation
+    | Patch_diff_reader ->
+        state.patch_modal_generation <- state.patch_modal_generation + 1;
+        state.patch_modal_generation
+  in
+  let request =
+    { rdr_reader = reader; rdr_scope = scope; rdr_path = path; rdr_generation = generation }
+  in
   let host = server_peer_host in
   let port = state.port in
   let repo =
@@ -5122,7 +5134,7 @@ let launch_repository_changes_diff_load state ~mailbox ~scope ~path =
   in
   Masc_tui_async_read.launch
     ~deliver:(fun result ->
-      enqueue_async mailbox (Repository_changes_diff_loaded (path, result)))
+      enqueue_async mailbox (Repository_changes_diff_loaded (request, result)))
     (fun () ->
       Masc_tui_loader.load_git_diff ~host ~port ?repo ~keeper:None ~path
         ~base_ref:tree_diff_base_ref ())
@@ -5133,7 +5145,8 @@ let open_repository_change_diff state ~mailbox ~scope
   state.repository_changes_diff_error <- None;
   state.repository_changes_diff_path <- Some change.rc_path;
   state.repository_changes_diff_scroll <- 0;
-  launch_repository_changes_diff_load state ~mailbox ~scope ~path:change.rc_path
+  launch_repository_changes_diff_load state ~mailbox ~reader:Repository_diff_reader
+    ~scope ~path:change.rc_path
 
 let close_repository_changes_diff state =
   state.repository_changes_diff <- None;
@@ -5173,7 +5186,8 @@ let refresh_repository_changes state ~mailbox =
   | Some scope ->
       (match state.repository_changes_diff_path with
        | Some path ->
-           launch_repository_changes_diff_load state ~mailbox ~scope ~path
+           launch_repository_changes_diff_load state ~mailbox ~reader:Repository_diff_reader
+             ~scope ~path
        | None ->
            launch_repository_changes_load state ~mailbox ~scope)
 
@@ -9370,13 +9384,18 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       Buffer.clear state.msg_input;
       state.patch_modal_open <- true;
       state.patch_modal_scroll <- 0;
+      state.patch_modal_diff <- None;
+      state.patch_modal_error <- None;
       let target_path =
-        match state.repository_changes_diff_path with
-        | Some p -> p
-        | None -> "."
+        (* This command reads the project working tree. A repository-relative
+           path from another scope cannot identify a project file. *)
+        match state.repository_changes_scope, state.repository_changes_diff_path with
+        | Some Tui_decode.Repository_change_project, Some path -> path
+        | Some (Tui_decode.Repository_change_repository _), _ | None, _
+        | Some Tui_decode.Repository_change_project, None -> "."
       in
       state.patch_modal_path <- Some target_path;
-      launch_repository_changes_diff_load state ~mailbox
+      launch_repository_changes_diff_load state ~mailbox ~reader:Patch_diff_reader
         ~scope:Tui_decode.Repository_change_project ~path:target_path
   | Masc_tui_command.Open_usage ->
       Buffer.clear state.msg_input;
@@ -16069,25 +16088,35 @@ let apply_async_message state ~base_path ~http_refresh_inflight
              state.repository_changes_error <-
                Some "Git changes response belongs to a different workspace"
          | Error detail -> state.repository_changes_error <- Some detail)
-  | Repository_changes_diff_loaded (path, result) ->
-      if
-        state.repository_changes_open
-        && Option.equal String.equal state.repository_changes_diff_path (Some path)
-      then
-        (match result with
-         | Ok diff ->
-             state.repository_changes_diff <- Some (path, diff);
-             state.repository_changes_diff_error <- None
-         | Error detail -> state.repository_changes_diff_error <- Some detail);
-      if
-        state.patch_modal_open
-        && Option.equal String.equal state.patch_modal_path (Some path)
-      then
-        (match result with
-         | Ok diff ->
-             state.patch_modal_diff <- Some (path, diff);
-             state.patch_modal_error <- None
-         | Error detail -> state.patch_modal_error <- Some detail)
+  | Repository_changes_diff_loaded (request, result) ->
+      (* Each response belongs to one reader and one request incarnation, not
+         to every open pane that happens to name the same relative path. *)
+      (match request.rdr_reader with
+       | Repository_diff_reader ->
+           if state.repository_changes_open
+              && request.rdr_generation = state.repository_changes_diff_generation
+              && Option.equal repository_change_scope_equal
+                   state.repository_changes_scope (Some request.rdr_scope)
+              && Option.equal String.equal state.repository_changes_diff_path
+                   (Some request.rdr_path)
+           then
+             (match result with
+              | Ok diff ->
+                  state.repository_changes_diff <- Some (request.rdr_path, diff);
+                  state.repository_changes_diff_error <- None
+              | Error detail -> state.repository_changes_diff_error <- Some detail)
+       | Patch_diff_reader ->
+           if state.patch_modal_open
+              && request.rdr_generation = state.patch_modal_generation
+              && repository_change_scope_equal request.rdr_scope
+                   Tui_decode.Repository_change_project
+              && Option.equal String.equal state.patch_modal_path (Some request.rdr_path)
+           then
+             (match result with
+              | Ok diff ->
+                  state.patch_modal_diff <- Some (request.rdr_path, diff);
+                  state.patch_modal_error <- None
+              | Error detail -> state.patch_modal_error <- Some detail))
   | Keeper_chat_file_changes_loaded (generation, keeper_name, result) ->
       let still_current =
         generation = state.msg_file_changes_generation
@@ -20820,7 +20849,10 @@ and is loaded on demand through keeper_skill.
        | Some k when state.patch_modal_open ->
            let close () =
              state.patch_modal_open <- false;
-             state.patch_modal_scroll <- 0
+             state.patch_modal_scroll <- 0;
+             state.patch_modal_path <- None;
+             state.patch_modal_diff <- None;
+             state.patch_modal_error <- None
            in
            (match k with
             | "esc" | "q" | "Q" -> close ()

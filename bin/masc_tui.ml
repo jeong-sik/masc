@@ -8830,38 +8830,33 @@ let open_staged_image state ~notice attachment =
       | Error (`Msg detail) -> refuse detail
       | Ok data -> draw_image state ~refuse ~title data)
 
-(* Read the newest typed image in this Keeper's conversation. Display labels
-   are never parsed as paths. Keep the row identity for staging order. *)
-let newest_named_image state =
-  List.rev (image_conversation_rows state)
+(* Read in observation order before considering the historical timeline:
+   server and client timestamps need not share a clock. Display labels are
+   never parsed as paths. *)
+let newest_named_image rows =
+  List.rev rows
   |> List.find_map (fun entry ->
          match entry.me_image with
          | Masc_tui_image_preview.No_image -> None
-         | image -> Some (entry, image))
+         | image -> Some image)
 
 (* Only an image observed after staging can supersede the draft. A history
-   load alone supplies no such observation, even if it completed after paste. *)
-let named_vs_staged_order state ~named_entry =
+   load alone supplies no such observation, even if it completed after paste.
+   Select within those observations first: a future-clock history row must
+   not hide the eligible session image before this comparison takes place. *)
+let conversation_image state =
   let session = image_session_rows state in
-  let named_index =
-    List.find_mapi
-      (fun index entry ->
-        if same_msg_anchor (msg_anchor entry) named_entry then Some index
-        else None)
-      session
+  let observed =
+    match state.msg_attachments, state.msg_attachments_since with
+    | [], _ | _ :: _, None -> Some session
+    | _ :: _, Some since -> msg_entries_after_anchor session since
   in
-  match named_index with
-  | None -> Masc_tui_image_preview.Staged_is_newer
-  | Some named_index ->
-      match state.msg_attachments_since with
-      | None -> Masc_tui_image_preview.Named_is_newer
-      | Some since -> (
-          match msg_index_of_anchor session since with
-          | None -> Masc_tui_image_preview.Staged_is_newer
-          | Some staged_since_index ->
-              if named_index <= staged_since_index
-              then Masc_tui_image_preview.Staged_is_newer
-              else Masc_tui_image_preview.Named_is_newer)
+  match Option.bind observed newest_named_image with
+  | Some image -> image, Masc_tui_image_preview.Named_is_newer
+  | None ->
+      match newest_named_image (image_conversation_rows state) with
+      | Some image -> image, Masc_tui_image_preview.Staged_is_newer
+      | None -> Masc_tui_image_preview.No_image, Masc_tui_image_preview.Unordered
 
 (* Fetch retained wire bytes through the authenticated artifact endpoint. No
    local filename or reference-supplied URL is ever opened. The render fiber
@@ -8904,12 +8899,7 @@ let open_stored_image state ~mailbox ~notice ~name reference =
 
 let open_named_image state ~mailbox =
   let notice = chat_notice state ~keeper_name:state.msg_target_keeper_name in
-  let conversation, order =
-    match newest_named_image state with
-    | Some (named_entry, image) ->
-        image, named_vs_staged_order state ~named_entry
-    | None -> Masc_tui_image_preview.No_image, Masc_tui_image_preview.Unordered
-  in
+  let conversation, order = conversation_image state in
   match
     Masc_tui_image_preview.choose_preview ~conversation ~staged:state.msg_attachments ~order
   with

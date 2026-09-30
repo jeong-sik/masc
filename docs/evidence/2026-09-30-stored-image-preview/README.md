@@ -26,11 +26,14 @@ screen projection, and `before.png` renders that projection with Pillow;
 colours are illustrative. No production Keeper input or runtime setting was
 changed by this fixture.
 
-The patch discovers images in the Keeper's loaded and session timeline before
-presentation filters hide queued rows or rows drawn by turn logs. When an
-image cannot be proven newer than the staged draft from retained session
-observations, the draft wins. History loading alone cannot steal its preview.
-This conservative policy does not implement persistent arrival ordering.
+The patch selects the newest observed session image first, including queued
+rows. With a staged draft, only observations after its saved session anchor
+qualify. The loaded/session timeline supplies a fallback when no such image
+exists; its timestamps cannot hide a newer session candidate even when the
+server clock runs ahead. When an image cannot be proven newer than the staged
+draft from retained session observations, the draft wins. History loading
+alone cannot steal its preview. This conservative policy does not implement
+persistent arrival ordering.
 
 The authenticated artifact request and non-success refusal stay on the Eio
 fiber. Only successful JSON/base64 decoding moves to the system thread.
@@ -43,12 +46,15 @@ Validation:
 - Whole-main isolated typecheck: unavailable. Existing build CMIs made
   inconsistent assumptions over `Masc`; no dependencies were rebuilt.
 - Python scenario syntax and `git diff --check`: passed.
-- Independent source review found no remaining P0/P1/P2 after queue and
-  delayed-history findings were addressed. The Keeper `ocaml-agent-ic`
-  independently advised keeping HTTP refusal handling on the fiber.
+- The Keeper `ocaml-agent-ic` independently advised keeping HTTP refusal
+  handling on the fiber, then found that a future-clock loaded row could hide
+  an eligible session image. The follow-up selects the eligible session
+  candidate before falling back to the historical timeline. Independent review
+  of this follow-up is still pending.
 
 The registered PTY scenario covers successful retained bytes, HTTP refusal,
-malformed content, queued images and delayed history. Its cancellation case
-is a bounded negative observation, not proof that a late client mailbox
+malformed content, queued images and delayed history. Additional queued and
+delayed-history cases simulate a server clock one hour ahead of the client.
+The cancellation case is a bounded negative observation, not proof that a late client mailbox
 event was consumed. These scenarios have not run against a patched binary.
 No CI, local full build, installation or production success is claimed.

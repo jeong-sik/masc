@@ -10,18 +10,25 @@ import time
 import test_tui_keyboard_input as h
 
 SOURCE_MODULES = ("bin/masc_tui.ml", "bin/masc_tui_image_preview.ml")
-MODES = ("success", "refused", "malformed", "cancel", "queued", "delayed-history")
+MODES = ("success", "refused", "malformed", "cancel", "queued", "queued-clock-skew",
+         "delayed-history", "delayed-history-clock-skew")
 CHAT = "Keepers ▸ alpha ▸ chat".encode()
 STAGED_NAME = "newest.png"
 # A test observation window, not proof that the client handled its stale result.
 CANCELLATION_OBSERVATION_SECONDS = 1.0
+# An old server row sorts beyond newly typed client rows when the server
+# clock runs ahead. This offset changes fixture data only, never the host clock.
+HISTORY_CLOCK_SKEW_SECONDS = 3600
 
 
 def run(executable, *, mode, evidence_dir=None):
     fetched = threading.Event()
     released = threading.Event()
     response_ready = threading.Event()
-    queue = h.AtomicChatFixture(hold_first_acceptance=True) if mode == "queued" else None
+    queued = mode in ("queued", "queued-clock-skew")
+    delayed_history = mode in ("delayed-history", "delayed-history-clock-skew")
+    clock_skew = mode in ("queued-clock-skew", "delayed-history-clock-skew")
+    queue = h.AtomicChatFixture(hold_first_acceptance=True) if queued else None
     fixtures = queue.fixtures if queue is not None else {}
     history = h.GatedHttpResponse((200, []), hold_seconds=15)
     image = []
@@ -37,13 +44,13 @@ def run(executable, *, mode, evidence_dir=None):
         marker = f'[masc:blob sha256={sha} bytes={len(payload)} mime=text/plain preview="attachment payload"]'
         history.response = (200, [{
             "id": "retained-image", "role": "user", "content": "retained-image-ready",
-            "ts": time.time(), "attachments": [{
+            "ts": time.time() + (HISTORY_CLOCK_SKEW_SECONDS if clock_skew else 0), "attachments": [{
                 "id": "image-1", "type": "image", "name": "../../label-only.png",
                 "mime_type": "image/png", "data": marker,
             }],
         }])
         fixtures["/api/v1/keepers/alpha/chat/history"] = (
-            history if mode == "delayed-history" else history.response
+            history if delayed_history else history.response
         )
 
         def fetch():
@@ -106,8 +113,8 @@ def run(executable, *, mode, evidence_dir=None):
                 h.send_and_wait(process, fd, output, b"3", b"MASC Keepers")
                 h.select_keeper_row(process, fd, output, b"alpha")
                 h.send_and_wait(process, fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
-                h.send_and_wait(process, fd, output, b"m", CHAT if mode == "delayed-history" else b"retained-image-ready")
-                if mode == "delayed-history":
+                h.send_and_wait(process, fd, output, b"m", CHAT if delayed_history else b"retained-image-ready")
+                if delayed_history:
                     if not h.wait_for_fixture_event(process, fd, output, history.requested, timeout=5):
                         raise AssertionError("initial history load did not reach its gate")
                     stage(process, fd, output, base_path)
@@ -119,7 +126,7 @@ def run(executable, *, mode, evidence_dir=None):
 
             start = len(output)
             os.write(fd, b"\x0f")
-            if mode in ("queued", "delayed-history"):
+            if queued or delayed_history:
                 wait_for_image(process, fd, output, start=start, title=STAGED_NAME.encode())
                 if request_count:
                     raise AssertionError("Ctrl-O fetched an older saved image instead of the newer attachment")
@@ -164,7 +171,7 @@ def run(executable, *, mode, evidence_dir=None):
                 h.wait_for_output(process, fd, output, error, start=start, timeout=5)
                 h.send_and_wait(process, fd, output, b"still-alive", h.composer_showing(b"still-alive"))
                 h.send_and_wait(process, fd, output, b"\x15", h.composer_showing(b""))
-            if mode not in ("queued", "delayed-history") and len(request_count) != 1:
+            if not (queued or delayed_history) and len(request_count) != 1:
                 raise AssertionError("one preview made duplicate artifact requests")
             capture(output)
             h.escape_to_keeper_detail(process, fd, output, name=b"alpha")

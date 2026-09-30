@@ -22858,6 +22858,19 @@ and is loaded on demand through keeper_skill.
                 if Option.is_some (Masc_tui_fetched.current state.code_blame)
                 then state.code_blame <- Masc_tui_fetched.clear state.code_blame
                 else launch_code_blame_load state ~mailbox:async_messages ~path)
+       | Some ("pageup" | "pagedown" | "home" | "end" as move)
+         when state.view = Code && state.code_focus_file = Right_pane
+              && state.code_notes_open && not state.repository_changes_open ->
+           let count, height = Masc_tui_render.code_notes_viewport state in
+           let maximum = max 0 (count - height) in
+           let current = max 0 (min state.code_notes_scroll maximum) in
+           let page = Masc_tui_scroll.page_step ~height in
+           state.code_notes_scroll <-
+             (match move with
+              | "home" -> 0 | "end" -> maximum
+              | "pageup" -> max 0 (current - page)
+              | "pagedown" -> min maximum (current + page)
+              | _ -> current)
        | Some "m" when state.view = Code && state.code_focus_file = Right_pane
                        && Option.is_some (Masc_tui_fetched.current_key state.code_file) ->
            (* The memos in the open file: comments in the file's own syntax
@@ -23983,10 +23996,9 @@ and is loaded on demand through keeper_skill.
                   state.repository_changes_scroll <- scroll
                 else if state.code_focus_file = Right_pane then (
                   if state.code_notes_open then (
+                    let count, height = Masc_tui_render.code_notes_viewport state in
                     state.code_notes_scroll <-
-                      min
-                        (max 0 (List.length state.code_memos - 1))
-                        (state.code_notes_scroll + 1))
+                      Masc_tui_scroll.down ~count ~height state.code_notes_scroll)
                   else if state.code_diff_open then (
                     match Masc_tui_fetched.current state.code_diff with
                     | Some (_, Masc_tui_fetched.Ready diff) ->
@@ -24360,9 +24372,10 @@ and is loaded on demand through keeper_skill.
                   state.repository_changes_cursor <- cursor;
                   state.repository_changes_scroll <- scroll
                 else if state.code_focus_file = Right_pane then (
-                  if state.code_notes_open then
+                  if state.code_notes_open then (
+                    let count, height = Masc_tui_render.code_notes_viewport state in
                     state.code_notes_scroll <-
-                      max 0 (state.code_notes_scroll - 1)
+                      Masc_tui_scroll.up ~count ~height state.code_notes_scroll)
                   else if state.code_diff_open then
                     state.code_diff_scroll <-
                       max 0 (state.code_diff_scroll - 1)

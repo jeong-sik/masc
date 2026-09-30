@@ -7710,3 +7710,4 @@
 (include stanzas/test_tui_review_verdict_layout_pty.inc)
 (include stanzas/test_tui_runtime_list_layout_pty.inc)
 (include stanzas/test_tui_workspace_activity_layout_pty.inc)
+(include stanzas/test_tui_code_memo_layout_pty.inc)

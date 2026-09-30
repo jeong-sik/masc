@@ -213,6 +213,14 @@ let test_canonical_fifo_verification_and_index () =
       Unix.rename path target; Unix.mkfifo path 0o600; path, target) occupied_paths in
     check bool "public canonical read refuses a nonregular payload" true
       (Auth.load_credential base_path "first" = None);
+    let diagnostic = Auth.list_credential_results base_path in
+    List.iter (fun path ->
+      check bool "diagnostic listing reports occupied FIFO paths without opening them" true
+        (List.exists (function
+          | Error (Auth.Unreadable_credential {path=failed_path;_}) ->
+            String.equal path failed_path
+          | Error (Auth.Invalid_credential_expiry _) | Ok _ -> false) diagnostic))
+      occupied_paths;
     check bool "warm verification cannot use either unreadable canonical source" true
       (Result.is_error (Auth.verify_token base_path ~agent_name:"first" ~token));
     if named_fifo then (

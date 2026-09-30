@@ -639,11 +639,11 @@ let list_credential_results config =
        | _ -> unreadable path reason)
   in
   let read_json path =
-    try Ok (Yojson.Safe.from_string (read_text_file path)) with
-    | Sys_error reason | Yojson.Json_error reason -> unreadable path reason
-    | Unix.Unix_error (error, operation, argument) ->
-      unreadable path (Printf.sprintf "%s(%s): %s" operation argument (Unix.error_message error))
-    | Eio.Io _ as exn -> unreadable path (Printexc.to_string exn)
+    match read_regular_auth_file path with
+    | Error error -> unreadable path (masc_error_to_string error)
+    | Ok content ->
+      (try Ok (Yojson.Safe.from_string content) with
+       | Yojson.Json_error reason -> unreadable path reason)
   in
   let read path =
     let ( let* ) = Result.bind in

@@ -135,6 +135,73 @@ let forecast_success : Masc_tui_context_inspector.forecast =
       ]
   }
 
+let test_next_request_reasons_survive_80_and_140_columns () =
+  let forecast_with origin counted_tokens =
+    { forecast_success with
+      candidates =
+        List.map
+          (fun (candidate : Masc_tui_context_inspector.forecast_candidate) ->
+             { candidate with
+               marks = Some { high_water_tokens = 100_000; low_water_tokens = 70_000 }
+             ; history_atoms = 2718
+             ; carried =
+                 Some
+                   { first_atom = 2698
+                   ; kept_atoms = 20
+                   ; transmitted_bytes = 237_300
+                   ; origin
+                   ; counted_tokens
+                   }
+             })
+          forecast_success.candidates
+    }
+  in
+  let snapshot =
+    forecast_with
+      (Masc_tui_context_inspector.Carried_librarian_snapshot
+         { end_atom = 2698; boundary_line = 2215 })
+      None
+  in
+  let ledger =
+    forecast_with Masc_tui_context_inspector.Carried_from_ledger (Some 71_000)
+  in
+  let render cols forecast =
+    Masc_tui_render_prim.context_composition_lines ~cols ~turn_back:0
+      ~forecast:(Ok forecast) (selection (record ~wire:None ~scope:per_request ()))
+  in
+  List.iter
+    (fun cols ->
+       let snapshot_rows = render cols snapshot in
+       let ledger_rows = render cols ledger in
+       let label claim = Printf.sprintf "%d-column %s" cols claim in
+       Alcotest.(check bool) (label "snapshot explains both sides of the boundary")
+         true
+         (says
+            "History preview: send the newest 20 of 2718 original atoms, starting at #2698"
+            snapshot_rows
+          && says
+               "The earlier 2698 atoms are represented by the Librarian working state (Turn Boundary log row 2215 covering the captured prefix)."
+               snapshot_rows);
+       Alcotest.(check bool) (label "ledger names its different source") true
+         (says "History preview: send 20 of 2718 original atoms, starting at #2698"
+            ledger_rows
+          && says "front from this runtime's ledger" ledger_rows
+          && not (says "represented by the Librarian working state" ledger_rows));
+       List.iter
+         (fun rows ->
+            Alcotest.(check bool) (label "loaded setting names both keys") true
+              (says
+                 "Config / Runtime: this binding sets context-high-water-tokens to 100.0k tok and context-low-water-tokens to 70.0k tok."
+                 rows
+               && says "neither this forecast's size nor the model limit" rows);
+            Alcotest.(check bool) (label "setting has no cut mark") false
+              (says "…" rows))
+         [ snapshot_rows; ledger_rows ];
+       Alcotest.(check bool) (label "the ledger baseline is separate from settings") true
+         (says "Ledger baseline 71.0k tok; may retain an earlier usage sample or be adjusted after history eviction." ledger_rows
+          && not (says "Ledger baseline" snapshot_rows)))
+    [ 80; 140 ]
+
 let context_pane_lines ?(cols = 140)
     ?(tab = Masc_tui_context_inspector.Composition) reading =
   let state =
@@ -614,6 +681,8 @@ let () =
         ; Alcotest.test_case
             "attributed rows read at the attributed turn's ratio" `Quick
             test_attributed_rows_read_at_the_attributed_turns_ratio
+        ; Alcotest.test_case "next request reasons survive 80 and 140 columns" `Quick
+            test_next_request_reasons_survive_80_and_140_columns
         ; Alcotest.test_case "empty turn record keeps the next request forecast"
             `Quick test_empty_turn_record_keeps_forecast
         ; Alcotest.test_case "turn read error keeps the next request forecast"

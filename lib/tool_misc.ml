@@ -158,8 +158,8 @@ let dispatch ctx ~name ~args : Tool_result.result option =
   | None -> None
   | Some (Tool_schemas_misc.Misc_lane_declaration_read | Tool_schemas_misc.Misc_lane_declaration_save as operation) ->
       let result = match operation with
-        | Tool_schemas_misc.Misc_lane_declaration_read -> Lane_addon_runtime.read_declaration ~config:ctx.config args
-        | _ -> Lane_addon_runtime.save_declaration ~config:ctx.config args in
+        | Tool_schemas_misc.Misc_lane_declaration_read -> Lane_addon_runtime.read_declaration ~caller:ctx.agent_name ~config:ctx.config args
+        | _ -> Lane_addon_runtime.save_declaration ~caller:ctx.agent_name ~config:ctx.config args in
       Some (match result with
         | Ok data -> Tool_result.make_ok ~tool_name:name ~start_time:start ~data ()
         | Error error ->

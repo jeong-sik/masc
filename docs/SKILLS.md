@@ -193,13 +193,35 @@ name = "query"
 - input template 의 `kind` 는 `literal` / `output` / `param` / `object` / `array` 다.
 - `execution = "inline"` 은 결과를 그 자리에서 돌려주고, `"async"` 는 durable broker 로
   넘긴 뒤 `keeper_composition_status` / `keeper_composition_cancel` 로 조회·취소한다.
-- `defer_loading = true` 를 적으면 Agent Core 요청에 스키마를 싣지 않고
-  `keeper_tool_search` 목록에 이름만 올린다. 모델이 그 이름을 넘기면 그 턴에 스키마가 붙는다.
-  지연 목록은 description 첫 줄(80바이트까지)로 도구를 소개하므로, 첫 줄을 그 안에 드는
-  완결된 문장으로 쓴다. 이 선언은 Skill 블록에만 둔다. `config/tools/` 에 같은 이름의 파일을
-  만들어도 composition 에는 읽히지 않는다.
+- `defer_loading = true` 는 Agent Core 의 초기 호출 스키마에서 제외할 수 있는 선언이다.
+  사용 이력이나 아직 소비되지 않은 로드 영수증이 있으면 이미 로드된 상태로 시작할 수 있다.
+  `keeper_tool_search` 목록은 이름만 보여 주며, 정확한 이름을 넘기면 같은 Agent 의 다음
+  요청부터 스키마가 붙는다. 설명의 요약은 로드 응답에 실린다. 이 선언은 Skill 블록에만 둔다.
+  `config/tools/` 에 같은 이름의 파일을 만들어도 composition 에는 읽히지 않는다.
+  공식 클라이언트 레인은 전체 도구와 로드 선언을 전달받으며, 각 클라이언트의 로드 경로를 쓴다.
 - 노드가 실패하면 호출 전체가 실패하고 `cause` 에 그 노드가 실린다. 그 뒤 batch 는 돌지
   않는다. 성공하면 `actions` 에 노드마다 `node_id` 와 결과가 실린다.
+
+### 발견 → 로드 → 실행
+
+이름을 모르면 `keeper_capability_search` 로 작업에 맞는 이름과 설명을 검색한다.
+검색은 해당 턴의 고정된 카탈로그를 대상으로 하며, 도구를 로드하거나 실행하지 않는다.
+`availability` 와 설명을 읽고, 실행 가능한 결과의 `invocation_name` 을 사용한다.
+이름을 이미 알면 검색을 거치지 않아도 된다.
+
+검색식은 FTS5 문법이다. 하이픈이 있는 이름은 `"browser-navigate-read"` 처럼 쌍따옴표로
+감싼다. 대안을 찾을 때는 `browser OR screenshot` 처럼 쓴다. 의미 검색이나 자동 번역은
+하지 않으므로 결과가 없으면 작업에 맞는 다른 단어를 시도한다.
+
+Agent Core 에서 선택한 도구가 아직 호출 스키마에 없고 `keeper_tool_search` 목록에 있으면
+그 정확한 이름을 로드한다. 로드 성공 후 Composition 을 별도로 호출해야 노드가 실행된다.
+Instruction 은 검색 결과의 `reference.identity` 를 `keeper_skill` 의 `identity` 인자로
+넘겨 본문을 읽는다. revision 을 고정할 때는 `reference.content_revision` 을 선택 인자
+`content_revision` 으로 넘긴다. `reference` 라는 인자는 없다.
+inline Composition 은 호출 응답에서 노드별 결과를 확인한다. async 응답은 제출 영수증이며
+완료 증거가 아니다. 완료 알림을 받으면 영수증의 `request_id` 를 `keeper_composition_status` 에
+넘겨 완료 상태와 노드별 결과를 확인한다. status 스키마가 아직 없으면 먼저 로드한다.
+`defer_loading`, 비동기 실행, 노드의 `Deferred` 결과는 서로 다른 상태다.
 
 ### 합성 본문은 Keeper 에게 안 보인다
 

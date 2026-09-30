@@ -52,13 +52,17 @@ let with_recovered_ledger ~base_path = function
      | Not_recoverable reason -> Candle_config.Disabled { reason })
 ;;
 
-let current ~base_path =
+let configured ~base_path =
   match Candle_config.load ~base_path with
   | (Candle_config.Off | Candle_config.Disabled _) as answer -> answer
   | Candle_config.Enabled policy ->
     (match (Atomic.get appraiser_check) () with
      | Error reason -> Candle_config.Disabled { reason }
-     | Ok () -> with_recovered_ledger ~base_path (Candle_config.Enabled policy))
+     | Ok () -> Candle_config.Enabled policy)
+;;
+
+let current ~base_path =
+  with_recovered_ledger ~base_path (configured ~base_path)
 ;;
 
 let for_recording ~base_path =

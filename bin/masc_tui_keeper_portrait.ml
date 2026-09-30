@@ -39,7 +39,7 @@ let min_content_cols size = String.length indent + size.cols + min_fact_cols
    cache is about 3 MB -- and holds a roster walked end to end. *)
 let cache_capacity = 32
 
-type entry = { name : string; equipment_key : string; edge : int; picture : Draw.image }
+type entry = { name : string; equipment_key : string; edge : int; compact : bool; picture : Draw.image }
 
 (* Newest first. *)
 type cache = { mutable entries : entry list }
@@ -47,15 +47,21 @@ type cache = { mutable entries : entry list }
 let cache () = { entries = [] }
 let cached c = List.length c.entries
 
-let image c ~name ~equipment size =
+let image ?(compact = false) c ~name ~equipment size =
   let equipment_key = Keeper_portrait_equipment.key equipment in
   let edge = Draw.int_of_size size in
-  let same entry = String.equal entry.name name && String.equal entry.equipment_key equipment_key && entry.edge = edge in
+  let same entry = String.equal entry.name name && String.equal entry.equipment_key equipment_key && entry.edge = edge && Bool.equal entry.compact compact in
   let rest = List.filter (fun entry -> not (same entry)) c.entries in
   let entry =
     match List.find_opt same c.entries with
     | Some entry -> entry
-    | None -> { name; equipment_key; edge; picture = Draw.render (Look.body_of_name name) equipment size }
+    | None ->
+        let body = Look.body_of_name name in
+        let picture =
+          if compact then Draw.render_compact_posed body equipment Draw.still size
+          else Draw.render body equipment size
+        in
+        { name; equipment_key; edge; compact; picture }
   in
   c.entries <- List.filteri (fun index _ -> index < cache_capacity) (entry :: rest);
   entry.picture
@@ -75,7 +81,9 @@ let band c ~display ~project ~name ~equipment ~content_rows ~content_cols =
   | Some size ->
       View.fit display ~max_cols:size.cols ~max_rows:size.rows
       |> Option.map (fun box ->
-             let image = image c ~name ~equipment box.View.size in
+             let compact = match display with
+               | View.Mosaic -> true | View.Pixels _ | View.No_picture -> false in
+             let image = image ~compact c ~name ~equipment box.View.size in
              { display; box; image; lines = View.lines ~project display box image })
 
 let beside band facts =
@@ -117,6 +125,8 @@ let preview ~name ~equipment ~content_rows ~content_cols =
   | Some size ->
       View.fit display ~max_cols:size.cols ~max_rows:size.rows
       |> Option.map (fun box ->
-             let picture = image session_cache ~name ~equipment box.View.size in
+             let compact = match display with
+               | View.Mosaic -> true | View.Pixels _ | View.No_picture -> false in
+             let picture = image ~compact session_cache ~name ~equipment box.View.size in
              { display; box; image = picture
              ; lines = View.lines ~project:Masc_tui_terminal_palette.best_color display box picture })

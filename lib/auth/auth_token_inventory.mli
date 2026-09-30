@@ -24,6 +24,9 @@ val row : now:float -> raw_present:bool -> Types_auth.agent_credential -> string
     on disk at [.masc/auth/<agent>.token]. The store keeps only a SHA-256 of
     the token, so that file is the one place the bearer itself survives. *)
 
+val error_row : Auth.credential_listing_error -> string
+(** Display persisted corruption that the strict credential decoder rejects. *)
+
 val expired : now:float -> Types_auth.agent_credential list -> Types_auth.agent_credential list
 (** The credentials a prune may delete. Only expired ones: removing a
     credential that already authenticates nothing is garbage collection, not a

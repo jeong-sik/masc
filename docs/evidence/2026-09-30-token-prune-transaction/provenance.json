@@ -82,7 +82,7 @@
     "test/test_auth_token_prune_transaction.ml": "4cad0bcd4ff86af07b78b4e4a5f1b0a85169186c1d03fcd3c976d9aaeaf1c3a6",
     "test/dune": "2fc1a3ea245ef6682d2fb7e48df6c793b310bdbe7ce05b2b267801b19df8020f",
     "test/stanzas/test_auth_token_prune_transaction.inc": "cbe63938b5da55132817256c20bbdd9ef9a8beaf82d7332d24989799353f4820",
-    "changelog.d/999998.md": "dbca99214c566402fe6d54981623f77e9adc038d0ed3925dc2ab1c763e208267"
+    "changelog.d/40174.md": "831df8667601c01e30ed54c15d8a2c5382dcd73256538a55d42e70385be61c77"
   },
   "expiry_ssot_source_sha256": {
     "lib/types/types_auth.ml": "c3d8bd1e5995484f8ddd520a6b1a452556dc14ead31e3f8c7c3a5c34c9f35f7b",
@@ -115,6 +115,6 @@
     "exit_code": 0,
     "stdout": "8 changelog fragment(s) OK\n"
   },
-  "prune_changelog_placeholder": "changelog.d/999998.md with #999998 must become actual PR number before publication",
-  "published_expiry_parent": "63cc46e9380102e8a39e46b14bd7b9358fcfad74"
+  "published_expiry_parent": "63cc46e9380102e8a39e46b14bd7b9358fcfad74",
+  "pull_request": 40174
 }

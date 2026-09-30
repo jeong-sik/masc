@@ -8,4 +8,6 @@ The composed local parent is `219ff24a8ab705af76620af8039b614c3d5f81b1`: expiry 
 
 The current expiry inventory rule is used directly, preserving malformed input and the entire live expiry second. main's test/dune import, expiry include and prune include are all retained. This is a partial local source composition, not a complete current main tree or a published commit. Root owns publication and native CI.
 
-`changelog.d/999998.md` is a positive numeric placeholder with matching `#999998` citation; root must replace it with the prune PR number before publication. The expiry parent's `999999.md` placeholder is unchanged. Older Play/expiry source evidence remains historical to its own captured source; this folder pins the prune composition bytes only.
+`changelog.d/40174.md` is a positive numeric placeholder with matching `#40174` citation; root must replace it with the prune PR number before publication. The expiry parent's `999999.md` placeholder is unchanged. Older Play/expiry source evidence remains historical to its own captured source; this folder pins the prune composition bytes only.
+
+Published as stacked PR #40174 over expiry parent 63cc46e9380102e8a39e46b14bd7b9358fcfad74. Native and required checks must cite its final public head; local placeholders were not published.

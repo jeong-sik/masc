@@ -171,11 +171,50 @@ let test_a_refused_line_does_not_raise () =
     (Sys.is_directory path && Array.length (Sys.readdir path) = 0)
 ;;
 
+let test_persisted_message_preserves_reasoning_provenance () =
+  with_session @@ fun session ->
+  let source = match Types.Reasoning_source.create
+      ~provider_kind:Agent_core.Llm_provider.Provider_config.OpenAI_compat
+      ~provider_instance:(Types.Reasoning_source.provider_instance
+        ~base_url:"https://history.test" ~request_path:"/v1/chat/completions")
+      ~canonical_model_id:"history-fixture"
+      ~replay_contract:Agent_core.Llm_provider.Reasoning_replay_contract.
+        { replay_policy = No_replay
+        ; streaming = No_streaming_reasoning
+        ; output_wire = No_output_control
+        } with
+    | Ok source -> source | Error detail -> fail detail in
+  let metadata = Types.Reasoning_source.metadata source
+    @ [ "turn-origin", `Assoc [ "request", `String "fixture" ] ] in
+  let original = { (message ~role:Types.Assistant "answer") with metadata } in
+  History.persist_message ~keeper_name ~turn_ref ~source:"assistant" session original;
+  match lines_of (History.main_history_path ~session_dir:session.session_dir) with
+  | [ line ] ->
+      let json = Yojson.Safe.from_string line in
+      let restored = Masc.Keeper_context_core.message_of_json json in
+      check bool "all metadata survives actual history persistence" true
+        (Yojson.Safe.equal (`Assoc metadata) (`Assoc restored.metadata));
+      (match Types.Reasoning_source.classify restored.metadata with
+       | Present recovered -> check bool "No_replay source survives; it is not absent" true
+           (Types.Reasoning_source.equal source recovered)
+       | Absent | Invalid | Duplicate -> fail "reasoning source lost or changed");
+      let malformed = match json with
+        | `Assoc fields -> `Assoc (("metadata", `String "invalid")
+            :: List.remove_assoc "metadata" fields)
+        | _ -> fail "history object expected" in
+      check_raises "malformed metadata cannot silently become absent"
+        (Invalid_argument "keeper_context_core: invalid metadata")
+        (fun () -> ignore (Masc.Keeper_context_core.message_of_json malformed))
+  | _ -> fail "expected one persisted assistant message"
+;;
+
 let () =
   run
     "keeper_context_core_history"
     [ ( "lines"
-      , [ test_case "a turn's lines carry its turn_ref" `Quick
+      , [ test_case "history preserves reasoning provenance" `Quick
+            test_persisted_message_preserves_reasoning_provenance
+        ; test_case "a turn's lines carry its turn_ref" `Quick
             test_a_turns_lines_carry_its_turn_ref
         ; test_case "a tool observation names the call" `Quick
             test_a_tool_observation_names_the_call

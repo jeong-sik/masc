@@ -186,7 +186,7 @@ let runtime_state_fields_json (config : Workspace_utils.config) (meta : keeper_m
 
 type approval_queue_attention =
   | Approval_queue_ready of int
-  | Approval_queue_unavailable of Keeper_approval_queue.storage_error
+  | Approval_queue_unavailable of Keeper_approval_queue_result.storage_error
 
 let attention_fields_json_with_approval_queue
       (config : Workspace_utils.config)
@@ -232,9 +232,9 @@ let attention_fields_json_with_approval_queue
   let approval_queue_state, pending_approval_count =
     match approval_queue with
     | Approval_queue_ready count ->
-      Keeper_approval_queue.approval_queue_ready_state_json, `Int count
+      Keeper_approval_queue_result.approval_queue_ready_state_json, `Int count
     | Approval_queue_unavailable error ->
-      ( Keeper_approval_queue.approval_queue_unavailable_state_json error
+      ( Keeper_approval_queue_result.approval_queue_unavailable_state_json error
       , `Null )
   in
   [ "needs_attention", `Bool needs_attention

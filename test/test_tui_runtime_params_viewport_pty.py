@@ -69,7 +69,11 @@ def run(executable):
                 if last < total and first != prior_window[1]:
                     raise AssertionError(f"page lacks exact one-row overlap: {prior_window!r} -> {(first, last, total)!r}")
             prior_window = first, last, total
-            seen.update(token for token in tokens if token in screen)
+            # Exact JSON values split at terminal cells, including inside a
+            # marker. Join painted row padding before checking reachability;
+            # the one-row page overlap above keeps adjacent chunks together.
+            painted_text = b"".join(screen.split())
+            seen.update(token for token in tokens if token in painted_text)
             if seen == tokens:
                 h.write_all(fd, output, b"\x1b[5~")
                 h.drain_until_quiet(process, fd, output)

@@ -1,10 +1,10 @@
 {
-  "scope": "OCaml5.5.1 parsing only; no typecheck/build/native execution",
-  "source_commit": "ca0dba014899ef8a067eba608a30c2ce64efa980",
+  "scope": "OCaml 5.5.0 parsing only; no typecheck/build/native execution",
+  "source_commit": "a6938d8ac7a578ea97c1decf26851eeae45def3a",
   "results": [
     {
       "argv": [
-        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "/Users/dancer/.opam/5.5.0/bin/ocamlc",
         "-stop-after",
         "parsing",
         "lib/auth/auth_credential_base.ml"
@@ -15,7 +15,7 @@
     },
     {
       "argv": [
-        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "/Users/dancer/.opam/5.5.0/bin/ocamlc",
         "-stop-after",
         "parsing",
         "lib/auth/auth.ml"
@@ -26,7 +26,7 @@
     },
     {
       "argv": [
-        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "/Users/dancer/.opam/5.5.0/bin/ocamlc",
         "-stop-after",
         "parsing",
         "lib/auth/auth_login.ml"
@@ -37,7 +37,7 @@
     },
     {
       "argv": [
-        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "/Users/dancer/.opam/5.5.0/bin/ocamlc",
         "-stop-after",
         "parsing",
         "lib/auth/auth_oauth.ml"
@@ -48,7 +48,7 @@
     },
     {
       "argv": [
-        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "/Users/dancer/.opam/5.5.0/bin/ocamlc",
         "-stop-after",
         "parsing",
         "lib/auth/auth.mli"
@@ -59,7 +59,7 @@
     },
     {
       "argv": [
-        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "/Users/dancer/.opam/5.5.0/bin/ocamlc",
         "-stop-after",
         "parsing",
         "lib/auth/auth_login.mli"
@@ -70,7 +70,7 @@
     },
     {
       "argv": [
-        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "/Users/dancer/.opam/5.5.0/bin/ocamlc",
         "-stop-after",
         "parsing",
         "lib/auth/auth_oauth.mli"
@@ -81,7 +81,7 @@
     },
     {
       "argv": [
-        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "/Users/dancer/.opam/5.5.0/bin/ocamlc",
         "-stop-after",
         "parsing",
         "test/test_auth_regular_read_boundary.ml"

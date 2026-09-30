@@ -4,9 +4,9 @@ This is a source candidate. No local Dune build, typecheck, native test, browser
 
 ## Parent and scope
 
-This reader repair is #40256. Its initial published API head is `193fba3502ace69615893c739cbc59b3e301d93b` (tree `c8b7f558f1e924242bab0516005fd381ac725ec3`), based on the actual #40214 parent below. The local source commit `ca0dba014899ef8a067eba608a30c2ce64efa980` freezes the code and eight fixture cases; later fragment/provenance updates do not change that source.
+This reader repair is #40256. Current source commit `a6938d8ac7a578ea97c1decf26851eeae45def3a` (tree `e7159c770853af6c2379e7d1e727fb341727a1b5`) follows PR head `9048a4ac4eb03a27e6a5144e22ca14e9596e5222`. The descriptor-reader follow-up and nine authored fixture cases are frozen at that source commit; the following evidence-only commit regenerates the manifests and check records without changing code.
 
-Actual publication parent: `f01a7fd45d7cc0f8e3d17b492ffd27c0b5f477c1` (#40214). Exact local full-tree parent: `33980ad07aa717c5f68e7acc51dd5de6ec21e6b5`. The local parent/tree binding was supplied by the publishing root session; the exact local tree and changed file identities are retained in `composition.json`.
+The original publication and local-source provenance are retained under `initial_publication` in `composition.json`. They are historical records, not claims that later diagnostic and descriptor-reader changes preserved the original source bytes.
 
 This child repairs one family of file reads. A FIFO with no writer was opened by public bearer readers and configuration loading, and by related Auth/OAuth metadata readers. The configuration and OAuth cases can hold credential admission or the OAuth store lock while waiting for a writer that does not exist.
 
@@ -25,17 +25,17 @@ This child repairs one family of file reads. A FIFO with no writer was opened by
 
 ## Implementation
 
-The existing private typed I/O wrapper, lstat presence check and regular-file reader were moved before configuration loading. One `read_regular_auth_file` now owns the stat/file-kind/read sequence for these readers and the existing strict transaction readers. A present nonregular endpoint is refused before it is opened. Symlinks to regular files remain readable; dangling occupied paths cannot authorize mutation or become absent configuration.
+One `read_regular_auth_file` owns opening and reading for these readers and the strict transaction readers. It opens with `O_NONBLOCK` and `O_CLOEXEC`, checks that same descriptor with `fstat`, and reads only a regular descriptor. A FIFO replacement cannot wait for a writer. The post-read descriptor metadata and current path identity must agree before bytes are accepted. Symlinks to regular files remain readable; dangling occupied paths cannot authorize mutation or become absent configuration.
 
 Optional public readers map expected I/O/nonregular failures to their documented optional result. The uncached secret verifier maps them to `false`. Strict transaction readers retain their typed error. Eio cancellation is not among the caught I/O constructors and propagates. Login's persisted reader delegates to `Auth.load_raw_token`, sharing the existing path and read authority.
 
-OAuth already depends on `Auth_credential_base`, so sharing the private reader introduces no dependency cycle or public API. Its exact access-hash preflight uses the existing strict presence check: a genuinely absent token still skips the store lock; a present unreadable record does not fall through to static credentials. No OAuth store, lock, cache, lifecycle or publication mechanism was added.
+OAuth already depends on `Auth_credential_base`, so sharing the private reader introduces no dependency cycle or new OAuth API. The separate test-only open adapter exposes no process-wide hook. Its exact access-hash preflight uses the existing strict presence check: a genuinely absent token still skips the store lock; a present unreadable record does not fall through to static credentials. No OAuth store, lock, cache, lifecycle or publication mechanism was added.
 
 No credential role, lifetime, explicit replacement, pruning, mutation admission or cache policy changed. In particular, the index's handling of intact orphan UUID payloads is outside this reader repair. A named FIFO alone is not claimed to revoke an intact canonical payload.
 
 ## New feature regression source
 
-The separate `test_auth_regular_read_boundary` suite contains eight cases:
+The separate `test_auth_regular_read_boundary` suite contains nine cases:
 
 1. Public Auth and Login readers: absence, opaque exact bytes, regular symlink, dangling link, directory and blank content.
 2. Direct and symlinked FIFO bearer reads with no writer, followed by regular-file recovery.
@@ -45,13 +45,12 @@ The separate `test_auth_regular_read_boundary` suite contains eight cases:
 6. UUID (and optionally named) FIFO blocks no public verification, alias check or admitted cold index scan; unreadable authority is refused, raw counterpart is preserved, and the UUID owner recovers after repair/public cache invalidation.
 7. Initial Admin and hot internal/secret FIFO reads refuse without blocking; an ordinary Worker still authenticates, and repaired internal/recovery credentials work.
 8. OAuth-enabled access/family FIFOs produce a typed store error, preserve counterpart/bootstrap bytes, and leave store admission usable after repair.
+9. Deterministic replacements immediately before and after open: a new FIFO cannot block, and a pathname replacement cannot admit bytes from the retired descriptor. The original bytes remain intact and public readers recover after repair. The test-only injected open function exercises the production reader without a process-wide hook.
 
 FIFO cases fork before creating an Eio environment. Their child has a five-second fixture alarm so a blocking regression fails finitely. There is no FIFO writer, release sleep or production timeout. The parent owns and cleans the temporary workspace. This source is registered through its own stanza and `test/dune`; it does not edit the parent's file-backed regression suite.
 
 ## Verification and remaining evidence
 
-`parse-checks.json` records eight OCaml 5.5.1 parse-only checks; `source-checks.json` records six source gates. All exit 0. `composition.json` records public test symbol declarations, source identities and unchanged publisher/index policy files. `source-sha256.json` identifies the candidate source/evidence files.
+`parse-checks.json` records eight current-source OCaml parse-only checks; `source-checks.json` records six current-source gates. All exit 0. `composition.json` binds the current source/tree, fixture symbols and duplicate file hashes; `source-sha256.json` hashes the current source plus regenerated evidence files and excludes itself. These files identify exact bytes, not native execution or merge readiness.
 
-Required current-head native selectors include `test_auth_regular_read_boundary`, `test_auth_file_backed_transaction`, `test_auth`, `test_auth_login`, `test_auth_oauth`, `test_credential_index_cache`, `test_auth_token_rotation_transaction` and `test_auth_token_prune_transaction`.
-
-The eight new cases have not executed locally. Current-head required checks and targeted native evidence remain necessary. This document makes no pass, release, installed-binary or production claim.
+No Dune build/typecheck, native test, CI dispatch, container, installed-binary or production operation was performed.

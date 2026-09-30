@@ -1,24 +1,39 @@
 {
-  "actual_publication_parent": "f01a7fd45d7cc0f8e3d17b492ffd27c0b5f477c1",
-  "parent_pr": 40214,
-  "local_parent": "33980ad07aa717c5f68e7acc51dd5de6ec21e6b5",
-  "local_parent_tree": "6cb83c6163ed610ff9e39240ceee34d76fb1178a",
-  "parent_binding": "exact full-tree correspondence supplied by publishing root; no child network query",
-  "source_commit": "ca0dba014899ef8a067eba608a30c2ce64efa980",
-  "source_tree": "0dcedb75ea5c3965b087f2a4c29ba1012020f06d",
+  "schema_version": 2,
+  "pr": 40256,
   "branch": "fix/auth-regular-read-boundary-20260930",
+  "source_commit": "a6938d8ac7a578ea97c1decf26851eeae45def3a",
+  "source_tree": "e7159c770853af6c2379e7d1e727fb341727a1b5",
+  "source_parent": "9048a4ac4eb03a27e6a5144e22ca14e9596e5222",
+  "source_parent_tree": "65582b5c2097b887a681a793a1921dce5d037e7e",
+  "scope": "Current reader source and authored fixture, hashed from this exact committed source tree. Metadata files are regenerated in the following evidence-only commit.",
+  "initial_publication": {
+    "actual_publication_parent": "f01a7fd45d7cc0f8e3d17b492ffd27c0b5f477c1",
+    "parent_pr": 40214,
+    "local_parent": "33980ad07aa717c5f68e7acc51dd5de6ec21e6b5",
+    "local_parent_tree": "6cb83c6163ed610ff9e39240ceee34d76fb1178a",
+    "parent_binding": "exact full-tree correspondence supplied by publishing root; no child network query",
+    "source_commit": "ca0dba014899ef8a067eba608a30c2ce64efa980",
+    "source_tree": "0dcedb75ea5c3965b087f2a4c29ba1012020f06d",
+    "actual_initial_publication_head": "193fba3502ace69615893c739cbc59b3e301d93b",
+    "actual_initial_publication_tree": "c8b7f558f1e924242bab0516005fd381ac725ec3",
+    "original_source_fragment": {
+      "path": "changelog.d/999993.md",
+      "sha256": "8bc309830e4c4f4b4dbdf7a6a5d7282d3edb8ff982d4fa680c662b5f3da1f132"
+    }
+  },
   "changed_source": [
     {
       "path": "lib/auth/auth.ml",
-      "sha256": "7120e74999aa53287b8b8ab7509840fa08bd0fcf2e23d7dd9962f74cc36e2f57"
+      "sha256": "b1a15697ae070588f20cfda4aa170e65da3c0c8495736bef8584c71356b17120"
     },
     {
       "path": "lib/auth/auth.mli",
-      "sha256": "bd1cb8157dd291df61802f1d29d55f03bb12d1bd777c28a1fece0cdf7ab8a2c9"
+      "sha256": "f5cb798abe03f2f0fb31423b74aed7373beb7961ab2a6dee2b5d28fb0e5b4622"
     },
     {
       "path": "lib/auth/auth_credential_base.ml",
-      "sha256": "80830650d14c2c3ad4d558796f65d1f6b598f3ad283e0ca48f97e7d694fa35d7"
+      "sha256": "2e9fb4e2379b097b2938488aab7d13f898a1308e7392ba93e9631c4e9d3bfb28"
     },
     {
       "path": "lib/auth/auth_login.ml",
@@ -46,7 +61,7 @@
     },
     {
       "path": "test/test_auth_regular_read_boundary.ml",
-      "sha256": "09f5a628b9443f192bf1a16e6bc25b6daea8cd23ed69dc6445569b5b63609029"
+      "sha256": "34f65385b49d3d21e01cf5516974c3b197aa62fee8fb092f8ee587af64733778"
     }
   ],
   "public_fixture_symbols": [
@@ -54,139 +69,139 @@
       "symbol": "Auth.auth_config_file",
       "kind": "function",
       "interface": "lib/auth/auth.mli",
-      "line": 33
+      "line": 41
     },
     {
       "symbol": "Auth.auth_dir",
       "kind": "function",
       "interface": "lib/auth/auth.mli",
-      "line": 31
+      "line": 39
     },
     {
       "symbol": "Auth.check_permission",
       "kind": "function",
       "interface": "lib/auth/auth.mli",
-      "line": 389
+      "line": 410
     },
     {
       "symbol": "Auth.create_token",
       "kind": "function",
       "interface": "lib/auth/auth.mli",
-      "line": 352
+      "line": 373
     },
     {
       "symbol": "Auth.credential_file",
       "kind": "function",
       "interface": "lib/auth/auth.mli",
-      "line": 34
+      "line": 42
     },
     {
       "symbol": "Auth.ensure_credential_alias",
       "kind": "function",
       "interface": "lib/auth/auth.mli",
-      "line": 151
+      "line": 159
     },
     {
       "symbol": "Auth.find_credential_by_token",
       "kind": "function",
       "interface": "lib/auth/auth.mli",
-      "line": 231
+      "line": 252
     },
     {
       "symbol": "Auth.load_auth_config",
       "kind": "function",
       "interface": "lib/auth/auth.mli",
-      "line": 52
+      "line": 60
     },
     {
       "symbol": "Auth.load_credential",
       "kind": "function",
       "interface": "lib/auth/auth.mli",
-      "line": 85
+      "line": 93
     },
     {
       "symbol": "Auth.load_raw_token",
       "kind": "function",
       "interface": "lib/auth/auth.mli",
-      "line": 316
+      "line": 337
     },
     {
       "symbol": "Auth.raw_token_file",
       "kind": "function",
       "interface": "lib/auth/auth.mli",
-      "line": 165
+      "line": 173
     },
     {
       "symbol": "Auth.read_initial_admin",
       "kind": "function",
       "interface": "lib/auth/auth.mli",
-      "line": 447
+      "line": 468
     },
     {
       "symbol": "Auth.rotate_shared_tokens",
       "kind": "function",
       "interface": "lib/auth/auth.mli",
-      "line": 218
+      "line": 239
     },
     {
       "symbol": "Auth.rotated_agents",
       "kind": "public record field",
       "interface": "lib/auth/auth.mli",
-      "line": 213
+      "line": 234
     },
     {
       "symbol": "Auth.save_auth_config",
       "kind": "function",
       "interface": "lib/auth/auth.mli",
-      "line": 58
+      "line": 66
     },
     {
       "symbol": "Auth.save_credential",
       "kind": "function",
       "interface": "lib/auth/auth.mli",
-      "line": 147
+      "line": 155
     },
     {
       "symbol": "Auth.save_file_backed_raw_token_credential",
       "kind": "function",
       "interface": "lib/auth/auth.mli",
-      "line": 291
+      "line": 312
     },
     {
       "symbol": "Auth.save_private_text_file",
       "kind": "function",
       "interface": "lib/auth/auth.mli",
-      "line": 25
+      "line": 33
     },
     {
       "symbol": "Auth.sha256_hash",
       "kind": "function",
       "interface": "lib/auth/auth.mli",
-      "line": 21
+      "line": 29
     },
     {
       "symbol": "Auth.verify_internal_keeper_token",
       "kind": "function",
       "interface": "lib/auth/auth.mli",
-      "line": 324
+      "line": 345
     },
     {
       "symbol": "Auth.verify_token",
       "kind": "function",
       "interface": "lib/auth/auth.mli",
-      "line": 383
+      "line": 404
     },
     {
       "symbol": "Auth.verify_workspace_secret",
       "kind": "function",
       "interface": "lib/auth/auth.mli",
-      "line": 426
+      "line": 447
     },
     {
       "symbol": "Auth.workspace_secret_file",
       "kind": "function",
       "interface": "lib/auth/auth.mli",
-      "line": 32
+      "line": 40
     },
     {
       "symbol": "Auth_login.mint",
@@ -241,44 +256,50 @@
       "kind": "function",
       "interface": "lib/auth/auth_oauth.mli",
       "line": 138
+    },
+    {
+      "symbol": "Auth.Regular_read_for_testing.read_with_open",
+      "kind": "test-only function",
+      "interface": "lib/auth/auth.mli",
+      "line": 12
     }
   ],
-  "fixture_cases": 8,
-  "unchanged_policy_and_parent_tests": [
+  "fixture_cases": 9,
+  "policy_and_parent_tests": [
     {
       "path": "lib/auth/auth_credential_token.ml",
-      "sha256": "f91799c993237d0a80a524982047ded903f7e2551d64f5098bf99524fa01535b",
-      "equal_to_parent": true
+      "sha256": "24d484e717d3b4833f2a1df6ae9cbbc154c0a27e2be23a3a93aadb77ad1fd885",
+      "equal_to_source_parent": true
     },
     {
       "path": "lib/auth/auth_credential_token.mli",
-      "sha256": "e2c723bc8880cc56df8b58aeb3897ad0c5ffa357c46e16c2ec32d8a71f1991da",
-      "equal_to_parent": true
+      "sha256": "85d38d3e68111d7f3c211c71b5fd3b7cee1f574fd5ca6bd59758050c3b3335ce",
+      "equal_to_source_parent": true
     },
     {
       "path": "test/test_auth_file_backed_transaction.ml",
-      "sha256": "72b0216770ae5783e1d938209dc9226d6c6b2d00d4264fb30b6a185d05df3a0b",
-      "equal_to_parent": true
+      "sha256": "ba66fbef57e0368aa65acda40b3b494c458b150c8bdfac3a7d900011982869b0",
+      "equal_to_source_parent": true
     },
     {
       "path": "test/test_auth_token_rotation_transaction.ml",
-      "sha256": "805857b223ae3245055ff6e9108797822f6102299367b5f2ecdd08092501af1e",
-      "equal_to_parent": true
+      "sha256": "ad243d8b16dcf9eda851510ce13faab6d257bc40b9b0e76e4921edba9bbfc204",
+      "equal_to_source_parent": true
     },
     {
       "path": "test/test_auth_token_prune_transaction.ml",
-      "sha256": "4cad0bcd4ff86af07b78b4e4a5f1b0a85169186c1d03fcd3c976d9aaeaf1c3a6",
-      "equal_to_parent": true
+      "sha256": "caab767a2bb3e7bbf13c506c44ff0bbdc6ac2f30c086e0c395c654b3d5a510d3",
+      "equal_to_source_parent": true
     },
     {
       "path": "test/stanzas/test_auth_file_backed_transaction.inc",
       "sha256": "d7ce7e798ecb1ee61b344b4b066e1d5d173b39d0f660dd249d0ea1399d725b3c",
-      "equal_to_parent": true
+      "equal_to_source_parent": true
     },
     {
       "path": "lib/auth/dune",
       "sha256": "4e657a92c2d445933c4d51eccd9dbfd28196bb9e146ef65cc005753a4679dc63",
-      "equal_to_parent": true
+      "equal_to_source_parent": true
     }
   ],
   "reader_authority": "lib/auth/auth_credential_base.ml:read_regular_auth_file",
@@ -286,15 +307,8 @@
   "native_execution": "not performed",
   "typecheck_or_build": "not performed",
   "production_effects": "none",
-  "pr": 40256,
-  "actual_initial_publication_head": "193fba3502ace69615893c739cbc59b3e301d93b",
-  "actual_initial_publication_tree": "c8b7f558f1e924242bab0516005fd381ac725ec3",
-  "original_source_fragment": {
-    "path": "changelog.d/999993.md",
-    "sha256": "8bc309830e4c4f4b4dbdf7a6a5d7282d3edb8ff982d4fa680c662b5f3da1f132"
-  },
   "release_fragment": {
     "path": "changelog.d/40256.md",
-    "sha256": "430f9d17c0f7505afabe00a853305c2e3f7ba61310c5adc22c0f929f0c4c1aca"
+    "sha256": "4d08198ee8bd30ec2d7e5ae75b7a603533ac6990fb37ca0b031dabcefd9fcd03"
   }
 }

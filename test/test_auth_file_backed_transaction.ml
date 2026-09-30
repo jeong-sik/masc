@@ -208,6 +208,7 @@ let test_failed_admission_preserves_pair () = with_workspace @@ fun base_path ->
   check bool "admission failure precedes every pair write" true (snapshot paths = before)
 let test_partial_publication_reported () = with_workspace @@ fun base_path ->
   let _old = seed_keeper base_path in
+  let previous_raw = raw base_path "keeper" in
   let named = Auth.credential_file base_path "keeper" in
   let before = read named in
   let directory = Filename.dirname named in
@@ -215,14 +216,15 @@ let test_partial_publication_reported () = with_workspace @@ fun base_path ->
   Fun.protect ~finally:(fun () -> Unix.chmod directory 0o700) (fun () ->
     match set_admin base_path with
     | Error (D.System (D.System_error.IoError detail)) ->
-      check bool "failure reports already published raw token" true
-        (String_util.string_contains_substring ~needle:"raw token: published" detail);
+      check bool "failure reports restored raw token" true
+        (String_util.string_contains_substring ~needle:"raw token: not published" detail);
       check bool "failure reports unpublished credential" true
         (String_util.string_contains_substring ~needle:"credential: not published" detail)
     | Error error -> fail (D.masc_error_to_string error)
     | Ok _ -> fail "readable but unwritable credential directory must refuse successful publication");
   check bool "credential remained unchanged" true (read named = before);
-  check bool "raw publication was observed rather than rolled back" true (raw base_path "keeper" = supplied);
+  check bool "old recoverable raw token restored" true (raw base_path "keeper" = previous_raw);
+  check_pair base_path "keeper";
   check bool "partial pair is not claimed to authenticate" true
     (Result.is_error (Auth.verify_token base_path ~agent_name:"keeper" ~token:supplied))
 let test_opaque_bearer_and_name_roundtrip () = with_workspace @@ fun base_path ->
@@ -335,6 +337,12 @@ let test_regular_symlink_authority_remains_readable () = with_workspace @@ fun b
     Unix.rename path target; Unix.symlink target path)
     [ Auth.credential_file base_path "keeper"; Auth.raw_token_file base_path "keeper" ];
   let _issued_pair = auth_ok (ensure base_path) in
+  check_pair base_path "keeper";
+  let batch = auth_ok (Auth.ensure_keeper_credentials base_path ~agent_names:["keeper"]) in
+  List.iter (fun (_, issued) -> ignore (auth_ok issued)) batch;
+  let _admin = auth_ok (set_admin base_path) in
+  check_pair base_path "keeper";
+  let _login = auth_ok (login base_path) in
   check_pair base_path "keeper"
 
 type bootstrap_config = Missing_config | Disabled_config

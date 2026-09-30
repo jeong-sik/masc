@@ -1,22 +1,22 @@
 {
   "algorithm": "sha256",
-  "scope": "current candidate source/evidence after assigning40256 fragment; code and fixture source remain immutableca0dba014899ef8a067eba608a30c2ce64efa980; manifest excludes itself",
+  "scope": "Source files from a6938d8ac7a578ea97c1decf26851eeae45def3a plus regenerated evidence metadata in this evidence-only commit; manifest excludes itself.",
   "files": [
     {
       "path": "changelog.d/40256.md",
-      "sha256": "430f9d17c0f7505afabe00a853305c2e3f7ba61310c5adc22c0f929f0c4c1aca"
+      "sha256": "4d08198ee8bd30ec2d7e5ae75b7a603533ac6990fb37ca0b031dabcefd9fcd03"
     },
     {
       "path": "lib/auth/auth.ml",
-      "sha256": "7120e74999aa53287b8b8ab7509840fa08bd0fcf2e23d7dd9962f74cc36e2f57"
+      "sha256": "b1a15697ae070588f20cfda4aa170e65da3c0c8495736bef8584c71356b17120"
     },
     {
       "path": "lib/auth/auth.mli",
-      "sha256": "bd1cb8157dd291df61802f1d29d55f03bb12d1bd777c28a1fece0cdf7ab8a2c9"
+      "sha256": "f5cb798abe03f2f0fb31423b74aed7373beb7961ab2a6dee2b5d28fb0e5b4622"
     },
     {
       "path": "lib/auth/auth_credential_base.ml",
-      "sha256": "80830650d14c2c3ad4d558796f65d1f6b598f3ad283e0ca48f97e7d694fa35d7"
+      "sha256": "2e9fb4e2379b097b2938488aab7d13f898a1308e7392ba93e9631c4e9d3bfb28"
     },
     {
       "path": "lib/auth/auth_login.ml",
@@ -44,23 +44,24 @@
     },
     {
       "path": "test/test_auth_regular_read_boundary.ml",
-      "sha256": "09f5a628b9443f192bf1a16e6bc25b6daea8cd23ed69dc6445569b5b63609029"
+      "sha256": "34f65385b49d3d21e01cf5516974c3b197aa62fee8fb092f8ee587af64733778"
     },
     {
       "path": "docs/evidence/2026-09-30-auth-regular-read-source/README.md",
-      "sha256": "3b421338390b29334af9f1f5841983ec735cfcabc22088201fd90d86865e363f"
+      "sha256": "98dae40e0bf37a67b704c9812a989dbe825d38e5e71f599787fc9f3b63b17571"
     },
     {
       "path": "docs/evidence/2026-09-30-auth-regular-read-source/composition.json",
-      "sha256": "65eb6d7b1eff52fe41f73f63adfdeb968bdb9a55d3c9a385e1819ee3a828f01a"
+      "sha256": "7bfa091a31effe601203caa2c3f3c22413ae9853f566f18f52bffaff95af2dcf"
     },
     {
       "path": "docs/evidence/2026-09-30-auth-regular-read-source/parse-checks.json",
-      "sha256": "7d2f5907c996fd4e1fa45e9c9f1ce6ae48b09ce20d9a4f95ef9e28b44339a0b7"
+      "sha256": "8dd1446a15a73db159c572d9b8df1267d4e74e5b6563cbaa0fff43e05560b67e"
     },
     {
       "path": "docs/evidence/2026-09-30-auth-regular-read-source/source-checks.json",
-      "sha256": "e85e715613bfbd8d09d88008fa8bcd2235c37ff984e8c431cb3cb57cb2472584"
+      "sha256": "d7a24aeeea11185e9d17ab5065f23da5dc9f2122c6c38711318d8ffbd2bf8db3"
     }
-  ]
+  ],
+  "source_commit": "a6938d8ac7a578ea97c1decf26851eeae45def3a"
 }

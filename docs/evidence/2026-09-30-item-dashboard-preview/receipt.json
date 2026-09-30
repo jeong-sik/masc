@@ -10,5 +10,14 @@
   "typescript": "tsc --noEmit passed",
   "ocaml": "stop-after parsing passed; native build and router test not executed",
   "ci_dispatches": 0,
-  "screenshot": "Chromium launch refused: bootstrap_check_in KERN permission denied (1100)"
+  "screenshot": "Chromium launch refused: bootstrap_check_in KERN permission denied (1100)",
+  "followup_error_recovery": {
+    "source_parent": "758d271c4824e338106ec5e708abcd1e59114f2b",
+    "tests": 25,
+    "files": 2,
+    "duration_seconds": 3.89,
+    "result": "passed",
+    "typescript": "passed",
+    "scope": "Failed preview alert, return to observed portrait, unchanged wallet/ownership; frontend only"
+  }
 }

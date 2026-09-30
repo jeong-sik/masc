@@ -5,8 +5,10 @@ import type { Keeper } from '../types'
 import { EQUIPMENT_IDS } from '../api/schemas/keeper-portrait'
 
 const fetchKeeperItems = vi.hoisted(() => vi.fn())
+const portraitFailure = vi.hoisted(() => ({ value: false }))
 vi.mock('../api/keeper-items', () => ({ fetchKeeperItems }))
-vi.mock('./keeper-portrait', () => ({ KeeperPortrait: ({ previewItem }: { previewItem?: string }) => html`<div data-testid="portrait" data-preview=${previewItem ?? ''} />` }))
+vi.mock('./keeper-portrait', () => ({ KeeperPortrait: ({ previewItem, fallback }: { previewItem?: string; fallback: unknown }) => portraitFailure.value && previewItem
+  ? fallback : html`<div data-testid="portrait" data-preview=${previewItem ?? ''} />` }))
 vi.mock('./keeper-badge', () => ({ KeeperBadge: () => html`<div />` }))
 vi.mock('../sse', () => ({ journal: { log: vi.fn() } }))
 
@@ -58,9 +60,23 @@ beforeEach(() => {
   observeWorkspace('/fixture/workspace-a')
 })
 
-afterEach(() => { cleanup(); vi.resetAllMocks() })
+afterEach(() => { cleanup(); vi.resetAllMocks(); portraitFailure.value = false })
 
 describe('Keeper Item tab', () => {
+  it('reports a failed preview and lets the operator restore the observed portrait', async () => {
+    fetchKeeperItems.mockResolvedValue(account(['crown'], '200'))
+    render(html`<${KeeperItemsPanel} keeper=${keeper('rondo')} />`)
+    await screen.findByText('보유 1 / 18개')
+    portraitFailure.value = true
+    fireEvent.click(screen.getByRole('button', { name: 'beanie 미리보기' }))
+    expect(screen.getByRole('alert').textContent).toContain('미리보기 그림을 불러오지 못했습니다')
+    fireEvent.click(screen.getByRole('button', { name: '현재 착용 보기' }))
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.getByTestId('portrait').getAttribute('data-preview')).toBe('')
+    expect(screen.getByText('보유 1 / 18개')).toBeTruthy()
+    expect(screen.getByText('0.800 Candle')).toBeTruthy()
+  })
+
   it('previews an unowned item and restores the observed outfit without refetching the wallet', async () => {
     fetchKeeperItems.mockResolvedValue(account(['crown'], '200'))
     const observed = keeper('rondo')

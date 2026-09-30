@@ -22,7 +22,7 @@
 # (#29666: a per-store answer guarantees a fourth incident).
 #
 # How the gate works (diff-driven, house pattern of
-# check-boundary-guard-mli-pairs.sh):
+# other diff-driven guards):
 #   1. If the PR diff touches a protected persistence schema module (see
 #      PROTECTED below) with a REMOVED variant constructor (`| Foo ->` line
 #      deleted) or a REMOVED wire string label (`- let key = "x"` /

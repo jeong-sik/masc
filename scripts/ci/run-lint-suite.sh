@@ -283,20 +283,6 @@ blocking_lints() {
   run_lint "TUI graceful restart, one real cycle" bash scripts/test-tui-graceful-restart-e2e.sh
   run_lint "Feedback-loop metrics fixture" bash scripts/test-feedback-loop-metrics.sh
   run_lint "Stale-worktree cleanup keeps commits" bash scripts/test-cleanup-stale-worktrees.sh
-  # A guard nobody runs is a document. Twice a guard sat red on untouched main
-  # because nothing reached it -- the cancel-guard lint and
-  # check-tui-render-purity.sh -- and a sweep on 2026-09-07 found four more in
-  # the same state. This asks the question those answered too late: is every
-  # check script reached from something CI runs. It reads no diff base, so it
-  # belongs here rather than beside the PR-only guards.
-  # Ten guards this repository already wrote and no workflow reached. Each was
-  # run on untouched main on 2026-09-07 and passed, which is the cheapest
-  # moment to wire one: nothing to fix first, and the next time it goes red
-  # somebody sees it. Together they take about 10s of the job.
-  #
-  # check-boundary-guard-mli-pairs.sh is deliberately not here. It reads a
-  # diff against origin/main itself rather than taking a base, so where it
-  # belongs is a question this change does not answer (#34018).
   run_lint "Agent-core package shape" bash scripts/check-agent-core-boundary.sh
   run_lint "HITL exact-flow boundary" bash scripts/check-hitl-exact-flow-boundary.sh
   run_lint "Turn-records envelope parity" bash scripts/check-turn-records-envelope-parity.sh

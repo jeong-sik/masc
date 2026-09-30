@@ -28,7 +28,7 @@ type approvals_empty_queue =
 
 val operator_approval_items : Masc_tui_types.state -> Masc_tui_operator_projection.approval_item list
 val approval_items : Masc_tui_types.state -> approval_row list
-val approvals_open_questions : Masc_tui_types.state -> Masc.Tui_decode.ask_row list option
+val approvals_open_questions : Masc_tui_types.state -> Masc.Tui_decode_asks.ask_row list option
 (** [None] means no successful question snapshot has been observed. [Some []]
     means an observed snapshot has no open questions. *)
 val approvals_open_question_count : Masc_tui_types.state -> int

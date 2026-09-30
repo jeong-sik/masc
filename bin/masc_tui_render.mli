@@ -105,11 +105,26 @@ val render_tools :
   Masc_tui_types.state ->
   Frame_presenter.frame * Masc_tui_types.clamped_scroll option
 val code_pane_content_height : Masc_tui_types.state -> int
+val code_notes_viewport : Masc_tui_types.state -> int * int
+(** Wrapped memo row count and visible row count at the current file-pane
+    width. Memo navigation and drawing use the same physical rows. *)
+val code_history_viewport : Masc_tui_types.state -> int * int
+(** Physical history row count and visible row budget at the file-pane width. *)
+val code_history_selected : Masc_tui_types.state -> Masc_tui_types.code_history_entry option
+(** The record owning the top visible row. Coverage and failure rows have no
+    record and cannot be opened by Enter. *)
 val config_content_height : Masc_tui_types.state -> int
+val prompts_detail_viewport : Masc_tui_types.state -> int * int
+(** Wrapped selected prompt/asset row count and the detail's visible rows.
+    Page and edge keys use the same document and geometry as drawing. *)
 val context_inspector_viewport : Masc_tui_types.state -> int * int
 val context_inspector_detail_viewport : Masc_tui_types.state -> int * int
 val keeper_deletions_viewport : Masc_tui_types.state -> int * int
 val help_viewport : Masc_tui_types.state -> int * int
+val patch_modal_horizontal_limit : Masc_tui_types.state -> int
+(** Largest body-cell offset needed to read a patch line while keeping its
+    old/new line numbers and change marker fixed. *)
+
 val patch_modal_viewport : Masc_tui_types.state -> int * int
 (** The patch review overlay's diff-row count and the rows it shows, so the
     page keys move a window and the end key reaches the end. *)

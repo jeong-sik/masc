@@ -27,8 +27,8 @@ val min_content_cols : band_size -> int
 val cache_capacity : int
 (** How many rendered portraits a {!cache} keeps. *)
 
-(** Rendered portraits by Keeper name and pixel edge. Walking the roster
-    re-draws a Keeper already seen from here instead of the renderer. Holds
+(** Rendered portraits by Keeper name, pixel edge and drawing mode. Walking
+    the roster reuses a Keeper already seen instead of redrawing it. Holds
     at most {!cache_capacity}; the one used longest ago goes first. *)
 type cache
 
@@ -38,9 +38,11 @@ val cache : unit -> cache
 val cached : cache -> int
 (** How many portraits the cache holds. *)
 
-val image : cache -> name:string -> Keeper_portrait_draw.size -> Keeper_portrait_draw.image
+val image :
+  ?compact:bool -> cache -> name:string -> Keeper_portrait_draw.size -> Keeper_portrait_draw.image
 (** The Keeper's still portrait at that edge, from the cache when it is
-    there, rendered and kept when it is not. *)
+    there, rendered and kept when it is not. [compact] is the mosaic drawing;
+    placed pixel portraits use the full drawing. *)
 
 type band = private {
   display : Masc_tui_portrait_view.display;

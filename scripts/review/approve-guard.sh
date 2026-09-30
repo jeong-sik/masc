@@ -9,11 +9,11 @@
 set -u
 GH="${GUARD_GH:-gh}"
 here="$(cd "$(dirname "$0")" && pwd)"
-check_only=0; merge_check=0; integration_check=0; repo=""; pr=""; head=""; body=""; replace_cr=""; cited_run=""
+check_only=0; merge_check=0; integration_check=0; receipt_json=0; batch=""; repo=""; pr=""; head=""; body=""; replace_cr=""; cited_run=""
 gitdir="${GUARD_REPO_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null)}"
 while [ $# -gt 0 ]; do
   case "$1" in
-    --run|--git-dir|--repo|--pr|--head|--body|--replace-own-cr)
+    --run|--git-dir|--repo|--pr|--head|--body|--replace-own-cr|--batch)
       if [ $# -lt 2 ] || [ -z "${2-}" ] || [[ "${2-}" == --* ]]; then
         echo "approve-guard: $1 requires a value" >&2
         exit 1
@@ -23,6 +23,8 @@ while [ $# -gt 0 ]; do
     --check) check_only=1; shift ;;
     --merge-check) merge_check=1; shift ;;
     --integration-check) integration_check=1; shift ;;
+    --receipt-json) receipt_json=1; shift ;;
+    --batch) batch="${2-}"; shift 2 ;;
     --run) cited_run="${2-}"; shift 2 ;;
     --git-dir) gitdir="${2-}"; shift 2 ;;
     --repo) repo="${2-}"; shift 2 ;;
@@ -60,6 +62,7 @@ if [ -n "$replace_cr" ] && ! [[ "$replace_cr" =~ ^[1-9][0-9]*$ ]]; then
   refuse "--replace-own-cr must be a review id (digits), got '${replace_cr}'"
 fi
 v_by=""
+[ "$receipt_json" -eq 0 ] || [ "$merge_check" -eq 1 ] || refuse "--receipt-json requires --merge-check"
 [ $((check_only + merge_check + integration_check)) -le 1 ] || refuse "--check, --merge-check and --integration-check are separate modes"
 if [ "$merge_check" -eq 0 ] && [ "$integration_check" -eq 0 ]; then
   if [ -n "$body" ] && [ -s "$body" ]; then
@@ -76,6 +79,17 @@ if [ "$merge_check" -eq 0 ] && [ "$integration_check" -eq 0 ]; then
   fi
 fi
 [ ${#reasons[@]} -eq 0 ] || finish_refused
+
+# Freeze caller batch evidence once. Review writes can record this line;
+# validation against CI/main/member state belongs to integration and landing.
+batch_args=(); batch_line=""
+if [ -n "$batch" ]; then
+  batch_line=$(python3 -c 'import sys; from pathlib import Path; sys.path.insert(0, sys.argv[1]); from batch_evidence import parse; print(parse(Path(sys.argv[2]).read_text()).line)' "$here" "$batch") || exit 1
+  batch_copy=$(mktemp) || exit 1
+  trap 'rm -f "$batch_copy"' EXIT
+  printf '%s\n' "$batch_line" > "$batch_copy"
+  batch_args=(--batch "$batch_copy")
+fi
 
 # Immutable body and final receipt identify the approved head. Existing posted
 # integration verdict approvals remain review evidence only; new writes use
@@ -114,7 +128,12 @@ if [ "$merge_check" -eq 1 ]; then
   [ -n "$approvals" ] || { refuse "no non-author APPROVED review has this head in its review body and guard footer with trusted repository authority"; finish_refused; }
   latest_head="$(gh_json "repos/$repo/pulls/$pr" '.head.sha')" || exit 1
   [ "$latest_head" = "$head" ] || { refuse "head moved during merge check: PR head is $latest_head"; finish_refused; }
-  echo "MERGE-CHECK PASS #$pr head $head approvals:$approvals"
+  if [ "$receipt_json" -eq 1 ]; then
+    python3 -c 'import json, sys; print(json.dumps({"pr": int(sys.argv[1]), "head": sys.argv[2], "approval_ids": [int(value) for value in sys.argv[3].split()]}))' \
+      "$pr" "$head" "$approvals" || exit 1
+  else
+    echo "MERGE-CHECK PASS #$pr head $head approvals:$approvals"
+  fi
   exit 0
 fi
 
@@ -130,11 +149,22 @@ if [ "$integration_check" -eq 1 ]; then
   [[ "$v_run" =~ ^[1-9][0-9]*$ ]] || refuse "no explicit successful PR-check run for freshness"
   [ ${#reasons[@]} -eq 0 ] || finish_refused
   freshness=$(GUARD_GH="$GH" python3 "$here/ci-freshness.py" --repo "$repo" --pr "$pr" \
-    --head "$head" --run "$v_run" --git-dir "$gitdir")
+    --head "$head" --run "$v_run" --git-dir "$gitdir" ${batch_args[@]+"${batch_args[@]}"})
   fresh_rc=$?
-  [ "$fresh_rc" -ne 1 ] || exit 1
-  if [ "$fresh_rc" -ne 0 ]; then refuse "CI freshness: $freshness"; finish_refused; fi
+  if [ "$fresh_rc" -ne 0 ]; then
+    if [ -n "$batch" ]; then
+      printf '%s\n' "$freshness" >&2
+      exit "$fresh_rc"
+    fi
+    [ "$fresh_rc" -ne 1 ] || exit 1
+    refuse "CI freshness: $freshness"; finish_refused
+  fi
   check_current_ci || exit $?
+  if [ -n "$batch" ]; then
+    # Live main and all members may change during the final ordinary CI read.
+    GUARD_GH="$GH" python3 "$here/ci-freshness.py" --repo "$repo" --pr "$pr" \
+      --head "$head" --run "$v_run" --git-dir "$gitdir" ${batch_args[@]+"${batch_args[@]}"} >/dev/null || exit $?
+  fi
   echo "INTEGRATION-CHECK PASS #${pr} head ${head} run ${v_run} · dispatch-only skipped:${dispatch_skips} · ignored refused manual Release dispatch run/suite:${ignored_release_run_suites}"
   exit 0
 fi
@@ -183,7 +213,7 @@ if [ -n "$dup" ]; then echo "SKIP #${pr}: ${me} already APPROVED ${head} (review
 if [ "$check_only" -eq 1 ]; then echo "WOULD APPROVE #${pr} head ${head} (source review; CI evaluated at merge)"; exit 0; fi
 footer="$(printf '\n\n---\napprove-guard: head `%s` · source review by %s · CI evaluated at merge' "$head" "$v_by")"
 [ -z "$replaced" ] || footer="${footer} · replaces own CHANGES_REQUESTED ${replaced}"
-if ! resp="$({ cat "$body"; printf '%s' "$footer"; } | "$GH" api -X POST "repos/${repo}/pulls/${pr}/reviews" \
+if ! resp="$({ cat "$body"; [ -z "$batch_line" ] || printf '\n\n%s\n' "$batch_line"; printf '%s' "$footer"; } | "$GH" api -X POST "repos/${repo}/pulls/${pr}/reviews" \
     -f event=APPROVE -f "commit_id=${head}" -F body=@- \
     --jq '[(.id|tostring), .state, .commit_id] | @tsv' 2>&1)"; then
   echo "approve-guard: POST review failed: $resp" >&2; exit 1

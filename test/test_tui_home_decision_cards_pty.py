@@ -2,7 +2,10 @@
 
 Navigation only: no approval, confirmation or task mutation is authorized.
 """
+import base64
 import copy
+import itertools
+import json
 import os
 from pathlib import Path
 import re
@@ -17,6 +20,7 @@ SOURCE_MODULES = (
 OPERATOR_PATH = "/api/v1/operator?view=summary&include_messages=0&include_keepers=0"
 HELD_PATH = "/api/v1/keepers/tool-approvals"
 GATE_PATH = "/api/v1/dashboard/gate"
+FRAME_SEQUENCE = itertools.count(1)
 
 
 def selected(label):
@@ -42,7 +46,7 @@ def select_home(process, fd, output, label, *, destinations):
     raise AssertionError(f"Home never selected {label!r}: {h.screen_text(bytes(output))!r}")
 
 
-def frame(process, fd, output):
+def frame(process, fd, output, name):
     # Force a new full frame even when the previous viewport was also 80x24.
     h.resize_and_wait(process, fd, output, rows=24, columns=81,
                       needle=b"Enter:open", controls=(h.FULL_REDRAW,),
@@ -53,6 +57,10 @@ def frame(process, fd, output):
     rows = h.screen_rows(drawn)
     assert max(rows) <= 24, rows
     assert all(h.fixture_cell_width(row.decode()) <= 80 for row in rows.values()), rows
+    print("HOME_JOURNEY_FRAME " + json.dumps({
+        "name": f"{name}-{next(FRAME_SEQUENCE)}", "columns": 80, "rows": 24,
+        "encoding": "base64", "pty": base64.b64encode(drawn).decode(),
+    }))
     return h.screen_text(drawn)
 
 
@@ -87,7 +95,7 @@ def same_keeper_distinct_and_duplicate(executable):
 
     def interact(process, fd, _slave, output, _base):
         h.wait_for_output(process, fd, output, b"[call-home-b]", start=0, timeout=10)
-        visible = frame(process, fd, output)
+        visible = frame(process, fd, output, "distinct-authority-ids")
         assert visible.count(b"Held call") == 2, visible
         assert visible.count(b"same held reason") == 2, visible
         assert visible.count(b"[call-home-a]") == 1, visible
@@ -128,7 +136,7 @@ def failed_source_keeps_known_cards(executable):
     def interact(process, fd, _slave, output, _base):
         h.wait_for_output(process, fd, output, b"known-gate-card", start=0, timeout=10)
         h.wait_for_output(process, fd, output, b"confirm queue not fully read", start=0, timeout=10)
-        visible = frame(process, fd, output)
+        visible = frame(process, fd, output, "partial-source-success")
         for label in (b"known-held-card", b"known-gate-card", b"confirm queue not fully read"):
             assert label in visible, visible
         assert b"No decision is waiting" not in visible, visible
@@ -195,7 +203,7 @@ def many_cards_keep_continuation(executable):
         h.palette_go(process, fd, output, b"go dashboard", b"Continue with beta")
         for label in (b"window-card-00", b"window-card-29"):
             select_home(process, fd, output, label, destinations=33)
-            visible = frame(process, fd, output)
+            visible = frame(process, fd, output, "many-requests-initial")
             for required in (label, b"Continue with beta", b"New work", b"Enter:open"):
                 assert required in visible, visible
             position = re.search(rb"rows (\d+)-(\d+)/(\d+)", visible)
@@ -206,13 +214,13 @@ def many_cards_keep_continuation(executable):
             assert first <= index <= last, visible
             if index == 1:
                 h.send_and_wait(process, fd, output, b"j", selected(b"Held call"))
-                within_window = frame(process, fd, output)
+                within_window = frame(process, fd, output, "many-requests-selected")
                 assert position.group() in within_window, within_window
         retained_position = position.group()
         h.send_and_wait(process, fd, output, b"\r", b"call=call-window-29")
         h.send_and_wait(process, fd, output, b"\x1b", b"Enter:open")
         assert_selected(output, b"window-card-29")
-        assert retained_position in frame(process, fd, output)
+        assert retained_position in frame(process, fd, output, "many-requests-return")
         home.assert_no_decision_posts(requests)
         os.write(fd, b"q")
 
@@ -266,7 +274,7 @@ def question_identity_and_return(executable):
 
     def interact(process, fd, _slave, output, _base):
         h.wait_for_output(process, fd, output, b"other-question-card", start=0, timeout=10)
-        visible = frame(process, fd, output)
+        visible = frame(process, fd, output, "question-cards")
         assert visible.count(b"Question ") == 2, visible
         assert b"Approvals and questions: 2 need you" in visible, visible
         select_home(process, fd, output, b"other-question-card", destinations=4)

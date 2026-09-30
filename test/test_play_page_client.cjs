@@ -88,6 +88,31 @@ function fixture(reply) {
   };
 }
 
+for (const [name, refusal, control] of [
+  ['changed program', { code: 'program_changed', error: '게임이 바뀌었어요. 패드를 다시 확인해 주세요.' }, 'pad'],
+  ['denied handoff', { ok: false, message: '초대된 참여자에게만 넘길 수 있어요.' }, 'pass'],
+]) {
+  test(`a refused ${name} displays its explanation after refreshing the seat`, async () => {
+    let refused = false;
+    const page = fixture(({ url, method }) => {
+      if (method === 'POST') { refused = true; return response(refusal, 409); }
+      if (url === '/api/v1/play/seat') return response(seat);
+      if (url === '/api/v1/play/pad') return response(layout);
+      return response(frame);
+    });
+    await page.settle();
+    if (control === 'pad') page.padButton.handlers.click();
+    else {
+      page.get('pass-to').value = 'operator';
+      page.get('pass').handlers.click();
+    }
+    await page.settle();
+    assert.equal(refused, true, 'the input reaches the server');
+    assert.equal(page.get('status').textContent, refusal.message || refusal.error);
+    assert.match(page.get('turn').textContent, /내 차례/);
+  });
+}
+
 test('a failed seat read retries without a new move and restores playable controls', async () => {
   let seatReads = 0;
   const page = fixture(({ url, method }) => {

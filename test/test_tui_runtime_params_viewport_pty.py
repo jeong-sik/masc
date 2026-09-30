@@ -95,7 +95,7 @@ def run(executable):
         h.drain_until_quiet(process, fd, output)
         for rows, columns in ((24, 40), (20, 60), (28, 80)):
             h.resize_and_wait(process, fd, output, rows=rows, columns=columns,
-                              needle=b"MASC System", controls=(h.FULL_REDRAW,))
+                              needle=b"j/k selects", controls=(h.FULL_REDRAW,))
             scan(process, fd, output)
         # Scrolling the selected contract must not change the key Enter edits.
         settle(process, fd, output, b"\r")

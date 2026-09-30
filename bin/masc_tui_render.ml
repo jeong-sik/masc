@@ -14778,6 +14778,9 @@ let render_runtime_params (state : state) =
     | None -> box_empty buf cols
     | Some line -> box_line buf cols line
   done;
+  box_line_styled buf cols ~style:(Theme.recede ())
+    ("  " ^ Masc_tui_scroll.window_reading ~noun:"Detail" ~scroll
+       ~height:detail_height (List.length selected_lines));
   (match state.runtime_param_edit with
    | None -> ()
    | Some edit ->
@@ -14828,7 +14831,6 @@ let render_runtime_params (state : state) =
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ~position:(Masc_tui_scroll.window_text ~scroll ~height:detail_height (List.length selected_lines))
        ~hints:
          (match state.runtime_param_edit with
           | Some edit

@@ -9046,7 +9046,8 @@ let surface_body_rows (state : state) ~terminal_rows =
    the full-surface page is taller than this document and skips unread lines. *)
 let runtime_params_viewport (state : state) ~terminal_rows =
   let rows = surface_body_rows state ~terminal_rows in
-  let chrome = if Option.is_some state.runtime_param_edit then 10 else 7 in
+  (* The document position has its own row; hints cannot hide it at 40 cells. *)
+  let chrome = if Option.is_some state.runtime_param_edit then 11 else 8 in
   let content_height = max 1 (rows - chrome) in
   let list_height = min 8 (max 1 (content_height / 3)) in
   list_height, max 0 (content_height - list_height - 1)

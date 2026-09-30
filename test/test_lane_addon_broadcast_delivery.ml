@@ -61,12 +61,38 @@ let test_collision_and_unknown_states () = fixture (fun root ledger ->
   output_string channel "{\"event\":\"invented\"}\n"; close_out channel;
   check bool "unknown stored state refuses recovery rather than consuming evidence" true
     (match D.recover ledger with Error (D.Corrupt _) -> true | _ -> false))
+let test_status_misses_do_not_persist () = fixture (fun root ledger ->
+  let missing_root=Filename.concat root "not-created" in
+  let missing=D.create ~root:missing_root in
+  check bool "missing directory is a missing operation" true
+    (D.find missing ~caller:payload.caller ~operation_id:operation=Ok None);
+  check bool "lookup does not create directory" false (Sys.file_exists missing_root);
+  let admitted=require (D.admit ledger payload) in
+  let before=Sys.readdir root |> Array.to_list |> List.sort String.compare in
+  List.iter (fun id ->
+    let operation_id=require (D.Request_id.of_string id) in
+    check bool "unknown status is absent" true
+      (D.find ledger ~caller:payload.caller ~operation_id=Ok None))
+    ["never-admitted-1";"never-admitted-2";"never-admitted-3"];
+  check (list string) "misses add no journal or lock files" before
+    (Sys.readdir root |> Array.to_list |> List.sort String.compare);
+  check bool "admitted record is readable" true
+    (D.find ledger ~caller:payload.caller ~operation_id:operation=Ok (Some admitted));
+  let file=Filename.concat root (List.hd before) in
+  let channel=open_out_gen [Open_append;Open_binary] 0o600 file in
+  output_string channel "torn"; close_out channel;
+  check bool "torn tail remains a corruption, not a successful prefix" true
+    (match D.find ledger ~caller:payload.caller ~operation_id:operation with
+     | Error (D.Corrupt _) -> true | _ -> false))
 let test_primary_and_settlement_are_preserved () = fixture (fun root ledger ->
   let _admitted=require (D.admit ledger payload) in
   let io : Fs_compat.private_jsonl_transaction_io_for_testing = {
     before_sync_parent=(fun _ -> ());
     close_fd=(fun fd -> Unix.close fd; raise (Sys_error "fixture close settlement failed"))} in
   let faulty=D.For_testing.create ~root ~io in
+  check bool "status keeps a successful read and its close failure" true
+    (match D.find faulty ~caller:payload.caller ~operation_id:operation with
+     | Ok (Some {settlement_error=Some _;_}) -> true | _ -> false);
   check bool "primary collision survives descriptor cleanup failure" true
     (match D.admit faulty {payload with content="different"} with
      | Error (D.Settlement_failed {primary=D.Conflict;cleanup}) -> cleanup<>""
@@ -94,6 +120,7 @@ let test_primary_and_settlement_are_preserved () = fixture (fun root ledger ->
      | Error (D.Settlement_failed {primary=D.Corrupt _;cleanup}) -> cleanup<>""
      | _ -> false))
 let () = run "Durable optional Lane Broadcast intentions" ["recovery",[
+  test_case "status misses leave no durable files" `Quick test_status_misses_do_not_persist;
   test_case "primary and descriptor settlement outcomes" `Quick test_primary_and_settlement_are_preserved;
   test_case "reopened commit and partial recipient obligations" `Quick test_restart_and_partial_fanout;
   test_case "operation collisions and invalid recovery state" `Quick test_collision_and_unknown_states]]

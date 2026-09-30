@@ -3578,6 +3578,10 @@ let read_private_jsonl_rows_locked_result path =
   read_private_jsonl_rows_locked_with_io ~io:private_jsonl_transaction_unix_io path
 ;;
 
+let read_private_jsonl_rows_locked_with_io_for_testing ~io path =
+  read_private_jsonl_rows_locked_with_io ~io path
+;;
+
 let update_private_file_durable_locked_with_io ~io path decide =
   test_exec_home_guard ~op:"update_private_file_durable_locked" path;
   let dir = Filename.dirname path in

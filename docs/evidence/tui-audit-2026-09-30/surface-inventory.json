@@ -879,5 +879,24 @@
       "Types helper insertion has extra blank lines",
       "Render_tools introductory comment has stale exported-definition count"
     ]
+  },
+  "work_usage_integration_stack": {
+    "pr": 40331,
+    "base_pr": 40328,
+    "base_head": "2133cf01a38b9c10bf87f54051c4b3bce70be6b2",
+    "head": "f4ba0a43d3df621d2249e19fabdd8eaab7634354",
+    "imported_prs": [
+      40089,
+      40091
+    ],
+    "imported_heads": [
+      "6d669cec6cc5c2a8060a30869b5e1f8973db29bd",
+      "ddcc61139e1e1966db07a48eca303e4918128ce3"
+    ],
+    "imported_base": "ff7f49c40cd09e36acd18e76df0c0c512f6a7eab",
+    "scope": "bounded Task ID/owner/title preserving state and priority; typed compact status and middleIDfold fix30/40; Usagewrapbeforephysicalcount",
+    "review": "system_audit and agenda_finish source PASS exacthead, no unresolved P0/P1/P2; narrow fullstatusoverflow P2 repaired",
+    "validation": "OCaml syntax, two Python AST and fullbasediffcheck PASS; color-only importedfixtures unexecuted",
+    "execution": "not run under source-only policy"
   }
 }

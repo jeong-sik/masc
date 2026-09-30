@@ -33,6 +33,32 @@ class FailureEvidenceTest(unittest.TestCase):
         self.assertEqual(len(cleanup["children"]), count)
         self.assertTrue(all(c["reaped"] for c in cleanup["children"].values()))
 
+    def test_trace_header_reads_one_real_fibers_summary(self):
+        trace = (b"ready pid=123 started_at_unix=100.000000\n"
+                 b"window started_at_unix=100.000000 ended_at_unix=101.000000\n"
+                 b"pid=123 window_s=1.0 events=10 lost=0\n")
+        self.assertEqual(compare.trace_header("rtev_fibers", trace),
+                         {"events": 10, "lost": 0})
+
+    def test_trace_header_reads_one_real_watch_summary(self):
+        trace = (b"ready pid=123 started_at_unix=100.000000\n"
+                 b"window started_at_unix=100.000000 ended_at_unix=101.000000\n"
+                 b"pid=123 dir=/tmp/events window_s=1.0 backlog_drained=2 events=10 lost=0\n")
+        self.assertEqual(compare.trace_header("rtev_watch", trace),
+                         {"events": 10, "lost": 0})
+
+    def test_trace_header_rejects_missing_duplicate_and_bad_counts(self):
+        cases = (
+            b"ready pid=123 started_at_unix=100.000000\n",
+            b"pid=123 window_s=1.0 events=10 lost=0\n"
+            b"pid=123 window_s=1.0 events=10 lost=0\n",
+            b"pid=123 window_s=1.0 events=0 lost=0\n",
+            b"pid=123 window_s=1.0 events=10 lost=1\n",
+        )
+        for trace in cases:
+            with self.subTest(trace=trace), self.assertRaises(RuntimeError):
+                compare.trace_header("rtev_fibers", trace)
+
     def test_workload_exit_preserves_both_streams(self):
         binary = self.executable("measure", """
 import sys
@@ -64,7 +90,9 @@ from pathlib import Path
 import os, sys, time
 control = Path(os.environ['MASC_RTEV_CONTROL_DIR'])
 (control / 'ready').write_text(str(time.time()))
-print('events=5 lost=0', flush=True)
+print('ready pid=123 started_at_unix=100.000000', flush=True)
+print('window started_at_unix=100.000000 ended_at_unix=101.000000', flush=True)
+print('pid=123 window_s=1.0 events=5 lost=0', flush=True)
 print('{name} diagnostic', file=sys.stderr, flush=True)
 while not (control / 'stop').exists(): time.sleep(.01)
 (control / 'ended').write_text(str(time.time()))
@@ -75,7 +103,12 @@ sys.exit({code})
         self.assertEqual((self.output / "stdout.jsonl").read_text(), "partial measurement\n")
         self.assertEqual((self.output / "stderr.txt").read_text(), "pending workload\n")
         for name in ("rtev_fibers", "rtev_watch"):
-            self.assertEqual((self.output / f"{name}.txt").read_text(), "events=5 lost=0\n")
+            self.assertEqual(
+                (self.output / f"{name}.txt").read_text(),
+                "ready pid=123 started_at_unix=100.000000\n"
+                "window started_at_unix=100.000000 ended_at_unix=101.000000\n"
+                "pid=123 window_s=1.0 events=5 lost=0\n",
+            )
             self.assertEqual((self.output / f"{name}.stderr.txt").read_text(), f"{name} diagnostic\n")
         self.assert_reaped(3)
 

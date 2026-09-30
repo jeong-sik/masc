@@ -98,11 +98,15 @@ def wait_for(path: Path, process: subprocess.Popen[bytes], timeout: float) -> No
 
 
 def trace_header(name: str, body: bytes) -> dict[str, int]:
-    first = body.decode().splitlines()[0] if body else ""
-    match = re.search(r"events=([0-9]+) lost=([0-9]+)", first)
-    if match is None:
-        raise RuntimeError(f"{name} has no runtime-events header")
-    events, lost = map(int, match.groups())
+    summary = re.compile(
+        r"pid=[0-9]+ (?:dir=.+ )?window_s=[0-9]+\.[0-9]+ "
+        r"(?:backlog_drained=[0-9]+ )?events=([0-9]+) lost=([0-9]+)"
+    )
+    matches = [match for line in body.decode().splitlines()
+               if (match := summary.fullmatch(line)) is not None]
+    if len(matches) != 1:
+        raise RuntimeError(f"{name} has {len(matches)} runtime-events summaries")
+    events, lost = map(int, matches[0].groups())
     if events == 0 or lost != 0:
         raise RuntimeError(f"{name} has events={events} lost={lost}")
     return {"events": events, "lost": lost}

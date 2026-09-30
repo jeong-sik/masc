@@ -343,8 +343,8 @@ let test_registry_failure_reason_preserves_typed_configuration_error () =
        (Registry.failure_reason_to_string other)
    | None -> Alcotest.fail "expected unsupported-provider failure reason");
   let unavailable =
-    Runtime.dispatch_credential_error_to_core_error
-      (Runtime.Declared_credential_unavailable
+    Runtime_instance.dispatch_credential_error_to_core_error
+      (Runtime_instance.Declared_credential_unavailable
          { provider_id = "file-provider"
          ; carrier = Agent_core.Error.FileCredential
          })

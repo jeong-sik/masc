@@ -600,7 +600,7 @@ let test_remote_identity_failure_preserves_observed_controls () =
     match Decode.decode_keeper_runtime_list (`Assoc [
       "candle", `Assoc ["status", `String "off"]; "keepers", `List [row];
       "total", `Int 1; "truncated", `Bool false]) with
-    | Ok ([runtime], [], false, 1, _) -> runtime
+    | Ok ([runtime], [], false, 1) -> runtime
     | Ok _ -> Alcotest.fail "remote row was hidden"
     | Error reason -> Alcotest.fail reason
   in

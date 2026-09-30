@@ -56,7 +56,7 @@ module For_testing : sig
     read_pending:
       (base_path:string ->
       ( Keeper_approval_queue_rules_types.pending_approval list
-      , Keeper_approval_queue.storage_error )
+      , Keeper_approval_queue_result.storage_error )
       result) ->
     Workspace.config ->
     Yojson.Safe.t

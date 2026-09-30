@@ -92,7 +92,7 @@ let test_the_verdict_detail_reading_is_a_position_not_a_key () =
    Two rows reached for the title's helper from behind a label -- Overview drew
    "Pulse: (load failed)" and Lanes "Lane Add-ons: (not loaded)". That
    typechecks either way, so there was nothing to catch it but a screen. The
-   words themselves are pinned by scripts/check-ssot.sh; which of the two a row
+   words are supplied by the shared wording module; which of the two a row
    asks for is pinned here. *)
 let test_a_labelled_field_does_not_bracket_its_missing_reading () =
   let asks ~module_path ~binding_name ~callee =

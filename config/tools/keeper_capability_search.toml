@@ -1,8 +1,17 @@
 name = "keeper_capability_search"
 description = """
-Search the complete Tool and Skill capability inventory frozen for this Keeper \
-turn. SQLite FTS5 ranks lexical candidates with BM25. Results retain exact \
-typed capability identity and availability but never invoke a candidate."""
+Find a Tool or Skill for the task when you do not know its exact name. Search \
+the names and descriptions in this turn's frozen capability inventory. Inspect \
+each match's availability, description and invocation_name before choosing it. \
+For an Instruction Skill, pass reference.identity as keeper_skill identity; \
+optionally pass reference.content_revision as content_revision to pin the revision. \
+Do not pass a reference argument. A Composition Skill runs its declared sequence \
+through the returned invocation_name. An async call returns a submission receipt; \
+after the completion notification, read keeper_composition_status with its \
+request_id to verify completion and node results. Search does not load schemas or execute candidates. If a chosen \
+name is advertised by keeper_tool_search but absent from your callable tools, \
+load that exact name there before calling it. Unavailable candidates cannot be \
+invoked through this search."""
 additional_properties = false
 
 [[params]]
@@ -10,6 +19,7 @@ name = "query"
 type = "string"
 required = true
 description = """
-FTS5 query over exact capability name, description, and invocation name. No \
-substring, regex, stop-word, threshold, top-N, or intent-expansion heuristic \
-is added."""
+Search terms from the task, capability name or description, using FTS5 syntax. \
+Use OR for alternatives (for example: browser OR screenshot). Put a name with \
+punctuation inside double quotes (for example: "browser-navigate-read"). This \
+is lexical search; if there are no matches, try other relevant terms."""

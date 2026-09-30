@@ -37,12 +37,12 @@ val target_label : target -> string
 
 (** Every binding naming [keeper_name], across all transports, in snapshot
     order. *)
-val targets : keeper_name:string -> Masc.Tui_decode.connector list -> target list
+val targets : keeper_name:string -> Masc.Tui_decode_connectors.connector list -> target list
 
 (** Display names of the transports whose binding store the server could not
     read ([binding_store_read_ok = false]). Their bindings are unknown, so
     {!targets} cannot include them and the prompts say so. *)
-val unreadable_transports : Masc.Tui_decode.connector list -> string list
+val unreadable_transports : Masc.Tui_decode_connectors.connector list -> string list
 
 (** Reads a conditional-unbind reply by its HTTP status. [refusal] is the
     server's words, kept for a 404 and for any other non-success. *)

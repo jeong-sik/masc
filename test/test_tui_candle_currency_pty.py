@@ -188,7 +188,11 @@ def short_overview_keeps_its_baseline(binary: str) -> None:
     def core_rows(visible):
         markers = (b"Goals", b"actual ", b"linked tasks", b"Work", b"Open:",
                    b"Usage", b"Needs you", b"attention-", b"rows not shown", b"row not shown")
-        return tuple(line for line in visible.splitlines()
+        # Each phase starts its own loopback server on an OS-assigned port.
+        # Keep comparing the entire footer and content; only its fixture
+        # address varies independently of the currency state.
+        return tuple(re.sub(rb"\bPort: \d+\b", b"Port: <fixture-port>", line)
+                     for line in visible.splitlines()
                      if any(marker in line for marker in markers))
     for phase in ("off", "disabled", "error", "ready"):
         fixtures = h.row_budget_http_fixtures()

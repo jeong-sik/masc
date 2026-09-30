@@ -324,6 +324,9 @@ let max_context_of_runtime (rt : t) : int =
          rt.id)
 ;;
 
+(* Reads the scope frozen at materialization ({!of_binding}); no
+   environment access here, so a post-load env change cannot re-select the
+   credential alias out from under the recorded window. *)
 let quota_scope_of_runtime (rt : t) : Runtime_quota_window.scope =
   rt.quota_scope
 ;;

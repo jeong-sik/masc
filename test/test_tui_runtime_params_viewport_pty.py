@@ -1,6 +1,7 @@
 """Full parameter values/contracts remain reachable without moving selection."""
 import json
 import os
+import re
 import sys
 
 import test_tui_keyboard_input as h
@@ -12,6 +13,7 @@ SOURCE_MODULES = (
 TEXT_KEY = "00." + "segment." * 10 + "KEYEND"
 BOOL_KEY = "01.enabled"
 ZERO_KEY = "02.count"
+CONTRACT_ROWS = [f"contract-row-{index:02d}" for index in range(36)]
 
 
 def run(executable):
@@ -21,7 +23,8 @@ def run(executable):
         "parameters": [
             {"key": TEXT_KEY, "current": "현재값 " * 30 + " CURRENT-END",
              "default": "default segment " * 30 + " DEFAULT-END", "has_override": True,
-             "meta": {"value_type": "string", "description": "긴 설정 계약 " * 30 + " CONTRACT-END"}},
+             "meta": {"value_type": "string", "description": "긴 설정 계약 " * 30
+                      + "\n" + "\n".join(CONTRACT_ROWS) + "\nCONTRACT-END"}},
             {"key": BOOL_KEY, "current": False, "default": True, "has_override": True,
              "meta": {"value_type": "bool", "description": "Boolean value remains false"}},
             {"key": ZERO_KEY, "current": 0, "default": 7, "has_override": True,
@@ -41,12 +44,32 @@ def run(executable):
         h.write_all(fd, output, b"\x1b[H")
         h.drain_until_quiet(process, fd, output)
         tokens = {b"KEYEND", b"CURRENT-END", b"DEFAULT-END", b"CONTRACT-END", b"GROUP-END"}
+        tokens.update(row.encode() for row in CONTRACT_ROWS)
         seen = set()
         previous = None
+        prior_window = None
         for _ in range(90):
             screen = h.screen_text(bytes(output))
+            window = re.search(rb"\b(\d+)-(\d+)/(\d+)\b", screen)
+            if window is None:
+                raise AssertionError(f"detail window position missing: {screen!r}")
+            first, last, total = map(int, window.groups())
+            if prior_window is not None and first != prior_window[0]:
+                # A non-final page starts on the previous page's last row.
+                # At the final clamp the overlap can grow, but cannot vanish.
+                if first > prior_window[1]:
+                    raise AssertionError(f"page skipped rows: {prior_window!r} -> {(first, last, total)!r}")
+                if last < total and first != prior_window[1]:
+                    raise AssertionError(f"page lacks exact one-row overlap: {prior_window!r} -> {(first, last, total)!r}")
+            prior_window = first, last, total
             seen.update(token for token in tokens if token in screen)
             if seen == tokens:
+                h.write_all(fd, output, b"\x1b[5~")
+                h.drain_until_quiet(process, fd, output)
+                back = re.search(rb"\b(\d+)-(\d+)/(\d+)\b", h.screen_text(bytes(output)))
+                expected = max(1, first - (last - first))
+                if back is None or int(back.group(1)) != expected:
+                    raise AssertionError(f"PageUp did not use the actual detail height: {expected}, {back!r}")
                 return
             if screen == previous:
                 break
@@ -99,6 +122,55 @@ def run(executable):
                            interact=interact, http_fixtures=fixtures, http_requests=requests)
 
 
+def refresh_identity(executable):
+    requests = []
+    served = h.keeper_runtime_http_fixtures()
+    keys = ["param-a", "param-b", "param-c", "param-inserted"]
+    entries = {key: {"key": key, "current": index, "default": 0,
+                     "has_override": True, "meta": {"value_type": "int", "description": key}}
+               for index, key in enumerate(keys)}
+    orders = [keys[:3], [keys[2], keys[3], keys[0], keys[1]],
+              [keys[1], keys[0], keys[2], keys[3]]]
+    reads = [0]
+
+    def answer():
+        order = orders[min(reads[0], len(orders) - 1)]
+        reads[0] += 1
+        return 200, {"parameters": [entries[key] for key in order]}
+
+    served["/api/v1/runtime/params"] = answer
+    served["/api/v1/runtime/params/set"] = (200, {"ok": True})
+
+    def interact(process, fd, _slave, output, _base):
+        h.palette_go(process, fd, output, b"go system", b"MASC System")
+        h.press_and_settle(process, fd, output, b"p")
+        h.press_and_settle(process, fd, output, b"p")
+        h.wait_for_output(process, fd, output, b"param-a", start=0, timeout=15)
+        h.drain_until_quiet(process, fd, output)
+        for _ in range(2):
+            h.press_and_settle(process, fd, output, b"r")
+            h.drain_until_quiet(process, fd, output)
+            h.press_and_settle(process, fd, output, b"\r")
+            rows = h.screen_rows(bytes(output))
+            if not any(b"editing param-a" in row for row in rows.values()):
+                raise AssertionError(f"refresh changed the edit target: {rows!r}")
+            h.press_and_settle(process, fd, output, b"\x1b")
+        requests.clear()
+        h.press_and_settle(process, fd, output, b"\r")
+        os.write(fd, b"\r")
+        body = json.loads(h.wait_for_http_request(process, fd, output, requests,
+                                                 path="/api/v1/runtime/params/set"))
+        if body != {"param_key": "param-a", "value": 0}:
+            raise AssertionError(f"Enter after reorder applied to a different key: {body!r}")
+        h.drain_until_quiet(process, fd, output)
+        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
+        os.write(fd, b"q")
+
+    h.run_terminal_scenario(executable, description="Runtime params preserve key identity after refresh",
+                           interact=interact, http_fixtures=served, http_requests=requests)
+
+
 if __name__ == "__main__":
     run(os.path.abspath(sys.argv[1]))
+    refresh_identity(os.path.abspath(sys.argv[1]))
     print("Runtime parameter value/contract viewport: PASS")

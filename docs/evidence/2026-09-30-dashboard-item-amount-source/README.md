@@ -8,13 +8,13 @@ This child depends on #40241's strict Candle amount predicate. Its actual public
 
 The local checkout retains the partial Dashboard feature snapshot used by #40241. Overlay only this new child delta onto the actual publication parent. The local whole tree is not a complete publication baseline.
 
-## Defect and repair
+## Shared validation
 
-The lazy Item schema duplicated the former decimal regex with `.test()`. JavaScript's `$` can match before a final line terminator, so a balance or catalog price such as `200\n` could pass and reach decimal formatting with invalid bytes.
+The lazy Item schema duplicated the canonical decimal regex with `.test()`. Without multiline mode, that predicate already rejects LF, CR, CRLF, U+2028 and U+2029 suffixes. This change removes duplicated validation; it does not repair a line-terminator acceptance defect.
 
 The existing pure `isCandleAmount` predicate is now exported with its millicandle domain contract. The Item amount schema calls it through its existing Effect `Schema.filter` and retains the same explicit schema drift error. There is one canonical amount grammar; no parser facade, library, new module, formatting policy or wallet mutation was added.
 
-The public `parseKeeperItems` regression source checks LF, CR, CRLF and both Unicode line separators in the wallet and priced catalog. It also checks that explicit price `0` remains priced, a book remains unpriced, and large canonical balance/price strings survive exactly beyond machine integer ranges. Existing identity, catalog, malformed-value and ownership tests remain intact.
+The public `parseKeeperItems` tests preserve rejection of LF, CR, CRLF and both Unicode line separators in the wallet and priced catalog. These cases also pass with the previous predicate and are not evidence of a repaired defect. The tests also check that explicit price `0` remains priced, a book remains unpriced, and large canonical balance/price strings survive exactly beyond machine integer ranges. Existing identity, catalog, malformed-value and ownership tests remain intact.
 
 ## Verification scope
 

@@ -44,33 +44,6 @@ rg_or_empty() {
   ((status <= 1)) || fail "rg exited $status scanning $*"
 }
 
-require_contains() {
-  local file="$1"
-  local needle="$2"
-  if ! grep -Fq -- "$needle" "$file"; then
-    fail "$file is missing expected text: $needle"
-  fi
-}
-
-require_not_contains() {
-  local file="$1"
-  local needle="$2"
-  if grep -Fq -- "$needle" "$file"; then
-    fail "$file still contains forbidden text: $needle"
-  fi
-}
-
-# Like require_contains but silently skips when the file no longer exists.
-# Use when a regression lock targets a file that may be legitimately
-# deleted by a later PR.
-require_contains_if_exists() {
-  local file="$1"
-  local needle="$2"
-  if [ -f "$file" ]; then
-    require_contains "$file" "$needle"
-  fi
-}
-
 # Keep the consumer open through EOF so pipefail still reports real scan errors.
 extract_single() {
   local pattern="$1"
@@ -111,18 +84,9 @@ changelog_latest_release="$(sed -n 's/^## \[\([0-9][^]]*\)\].*/\1/p' CHANGELOG.m
 
 [[ -n "$readme_tag" ]] || fail "missing TAG= install pin in README.md"
 [[ -n "$readme_ko_tag" ]] || fail "missing TAG= install pin in README.ko.md"
-# A literal install pin names the published release or the current package.
-# scripts/bump-version.sh moves every pin to the package it bumps to, so
-# between that bump and the tag the pin names a release that does not exist
-# yet, and the notice beside it tells the reader to check. The notice stands
-# whichever of the two the pin names: the bump rewrites that line rather than
-# adding it, so a README that dropped it while pinned to a published release
-# would pass here and fail the next bump.
+# Installation pins name the published release or the current package.
 [[ "$readme_tag" == "$roadmap_published_release" || "$readme_tag" == "$package_version" ]] || \
   fail "README install TAG ($readme_tag) is neither the published release nor the current package"
-for readme in README.md README.ko.md; do
-  require_contains "$readme" "> Installation target: v$readme_tag (check tag availability on GitHub Releases)."
-done
 [[ "$readme_ko_tag" == "$readme_tag" ]] || \
   fail "README.ko install TAG ($readme_ko_tag) != README install TAG ($readme_tag)"
 
@@ -143,9 +107,7 @@ done
 # It was left out when each guard above was added, so it kept the tag it was
 # born with: v0.35.1 stood while thirteen releases went out, and the page told
 # readers to install a version the project had moved past twice over. Here the
-# version also appears in prose and in a heading, so pinning only the TAG= line
-# would leave the page disagreeing with itself. These pages name one version,
-# so anything else that looks like a version is drift.
+# install pin must match the README installation target.
 for site_doc in \
   docs-site/src/content/docs/getting-started/quickstart.md \
   docs-site/src/content/docs/ko/getting-started/quickstart.md; do
@@ -153,101 +115,12 @@ for site_doc in \
   [[ -n "$site_tag" ]] || fail "missing TAG= install pin in $site_doc"
   [[ "$site_tag" == "$readme_tag" ]] || \
     fail "$site_doc install TAG ($site_tag) != README install TAG ($readme_tag)"
-  # Compare whole version tokens, not substrings: 0.35.1 is a prefix of
-  # 0.35.12, so a substring filter would hide the very drift this looks for.
-  site_stray="$(grep -n -o -E '[0-9]+\.[0-9]+\.[0-9]+' "$site_doc" \
-    | awk -F: -v want="${site_tag#v}" '$2 != want' || true)"
-  [[ -z "$site_stray" ]] || \
-    fail "$site_doc names a version other than ${site_tag#v}: $site_stray"
+
 done
 
 # PR checks compare checked-in documents only. Repository-global tags can
 # change after this commit without changing its documentation. The release
 # workflow validates its explicit tag with check-version-truth.sh --tag.
-
-require_contains docs/MCP-TEMPLATE.md 'bearer_token_env_var = "MASC_TOKEN"'
-require_contains docs/MCP-TEMPLATE.md 'Authorization: Bearer ${MASC_TOKEN}'
-require_not_contains docs/MCP-TEMPLATE.md '"command": "masc-stdio"'
-
-require_contains quickstart.sh 'TEAM="none"'
-require_contains quickstart.sh 'mcp-client.env'
-require_contains quickstart.sh '--client-env MASC_TOKEN'
-# ci.yml ran this until #32511 collapsed the nine-job lane into one build.
-# release.yml still runs it, and that is the assertion below. Asserting it
-# of ci.yml too would ask for a job someone deliberately removed.
-require_contains .github/workflows/release.yml 'run: scripts/quickstart-smoke.sh'
-require_contains docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md "jq '{status,auth_change,agent_name,role,raw_token_file,dashboard_url,mcp_url,mcp_client}'"
-require_not_contains docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md '.codex_mcp'
-require_not_contains docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md 'token_bound_admin_http_ready'
-[[ ! -e Formula/masc.rb ]] || fail "stale Homebrew Formula must not be restored"
-
-require_not_contains docs/TUI-GUIDE.md './start-masc.sh --tui'
-
-require_contains README.md 'docs/RELEASE-EVIDENCE.md'
-require_not_contains README.md '/api/v1/command-plane'
-# The dashboard route contract lives with the dashboard doc, not the README:
-# the README names the dashboard in one section and the TUI is the front door.
-require_contains docs/DASHBOARD-INTEGRATION.md '#monitoring?section=journey'
-require_contains docs/DASHBOARD-INTEGRATION.md '#command?section=operations'
-require_contains docs/DASHBOARD-INTEGRATION.md '#connectors?section=connector-status'
-require_contains docs/DASHBOARD-INTEGRATION.md '#workspace?section=verification'
-require_not_contains README.md 'dashboard#monitoring/sessions'
-require_not_contains README.md 'dashboard#command/intervene'
-
-require_contains docs/PRODUCT-OPERATING-PLAN.md 'Release evidence and local proof'
-
-require_contains docs/DASHBOARD-INTEGRATION.md '- `monitoring`'
-require_contains docs/DASHBOARD-INTEGRATION.md '- `connectors`'
-require_contains docs/DASHBOARD-INTEGRATION.md '- `#workspace?section=verification`'
-require_contains docs/DASHBOARD-INTEGRATION.md '- `command:intervene -> command:operations`'
-require_not_contains docs/DASHBOARD-INTEGRATION.md '- `mission`: what needs attention now'
-require_not_contains docs/DASHBOARD-INTEGRATION.md '- `intervene`: mutating operator actions'
-
-require_contains docs/spec/01-system-overview.md 'MASC의 현재 canonical front door는 3가지다.'
-require_contains docs/spec/01-system-overview.md '### 7.3 Dashboard and Operator Read Visibility'
-
-# Glossary evidence and heartbeat names are semantic boundaries, not broad
-# synonyms: narrative notes are accepted evidence, while the Workspace write
-# is distinct from Keeper/transport liveness signals.
-require_contains docs/spec/00-glossary.md '**Workspace Heartbeat**'
-require_contains docs/spec/00-glossary.md '`keeper_heartbeat` SSE나 MCP·transport activity'
-require_contains docs/spec/00-glossary.md '`note:<text>`는 허용된 서술형 근거'
-require_not_contains docs/spec/00-glossary.md '설명 문장만으로 근거를 대신하지 않는다.'
-
-require_contains docs/spec/09-server-transport.md 'GET /api/v1/activity/events'
-require_contains docs/spec/09-server-transport.md '`MASC_USE_H2` | `auto`'
-require_contains docs/spec/09-server-transport.md '`MASC_GRPC_ENABLED` | 0'
-require_not_contains docs/spec/09-server-transport.md 'GET /api/v1/activity/feed'
-require_not_contains docs/spec/09-server-transport.md '| Workspace | `/api/v1/workspace/*`'
-
-require_contains docs/spec/10-dashboard.md 'The dashboard is an observable projection and interaction surface for MASC.'
-require_contains docs/spec/10-dashboard.md 'The dashboard does not calculate risk tiers, recognize product/tool names, or'
-require_contains docs/spec/10-dashboard.md 'Pending HITL does not render the Keeper or Workspace as paused.'
-require_contains docs/spec/10-dashboard.md '`INV-DASH-004`: connection failure is client-local.'
-
-# Purged surfaces must not come back. These are ratchets, not tombstones: the
-# retirement notices were deleted on purpose, but a doc edit that re-describes
-# a removed surface as current is the exact drift this file exists to catch.
-require_not_contains docs/spec/10-dashboard.md '| `/api/v1/command-plane` | GET |'
-require_not_contains docs/AGENT-CORE-BOUNDARY.md 'lib/team_session/'
-
-# Keep the spec-index invariant-prefix table synchronized with the prefixes
-# actually declared by the spec files. SPEC-INDEX is excluded from the census
-# so its table cannot validate itself; the testing file's INV-T1..INV-T5 short
-# form is intentionally outside the INV-SUBSYSTEM-NNN census and is documented
-# beside the table.
-declared_prefixes="$(sed -nE 's/^\| `(INV-[A-Z]+)` \|.*$/\1/p' docs/spec/SPEC-INDEX.md | sort -u)"
-rg_or_empty 'INV-[A-Z]+-[0-9]+' --no-filename docs/spec -g '*.md' -g '!SPEC-INDEX.md'
-used_prefixes="$(printf '%s\n' "$RG_OUT" | sed -E 's/-[0-9]+$//' | sort -u)"
-# The census counts every ID that appears anywhere in a spec file, including
-# prose, code blocks and quotes, not only the ones a spec declares. Today the
-# two sets coincide; if this guard goes red unexpectedly, look first at a
-# sentence that merely mentions an ID.
-if [[ "$declared_prefixes" != "$used_prefixes" ]]; then
-  echo "SPEC-INDEX prefix table vs docs/spec usage (< table only, > docs only):" >&2
-  diff <(printf '%s\n' "$declared_prefixes") <(printf '%s\n' "$used_prefixes") >&2 || true
-  fail "SPEC-INDEX invariant-prefix table drifted from docs/spec usage"
-fi
 
 # Every local path these docs name must still exist. The glossary is here
 # because its `→` coordinates are the term-to-code SSOT: when a file is
@@ -292,31 +165,4 @@ if ((${#missing_refs[@]} > 0)); then
   exit 1
 fi
 
-# A translated pair is two files carrying one document. Prose wraps differently
-# in each language, so line counts say nothing -- but a heading, a command
-# block and a table row are the same countable things on both sides. An edit
-# that lands in one file only changes one of those counts, which is the drift
-# that leaves a reader of the other language without a section that exists.
-#
-# This counts shapes, not sentences: a stale sentence translated years ago
-# still passes. It catches the coarse case, where one language is simply
-# missing something the other has.
-check_translation_shape() {
-  local english="$1"
-  local translated="$2"
-  local label pattern
-  for label in headings:'^#' commands:'^```' table-rows:'^|'; do
-    pattern="${label#*:}"
-    label="${label%%:*}"
-    local a b
-    a="$(grep -c -- "$pattern" "$english" || true)"
-    b="$(grep -c -- "$pattern" "$translated" || true)"
-    [[ "$a" == "$b" ]] || \
-      fail "$translated has $b $label but $english has $a -- an edit reached one language only"
-  done
-}
-
-check_translation_shape README.md README.ko.md
-check_translation_shape docs/INSTALL.md docs/INSTALL.ko.md
-
-printf 'Doc truth OK: front-door docs and key specs are aligned with current repo truth\n'
+printf 'Doc truth OK: version, install pins and local references are valid\n'

@@ -1,16 +1,13 @@
-# Release-evidence install smoke runtime config.
+# Isolated Item HTTP acceptance runtime config.
 #
-# Copied verbatim into the isolated base path by scripts/release-evidence.sh.
-# It lives here as a file, not as a heredoc inside that script, so
-# test_runtime_config_validity can check it against
-# Standalone_lane.required_ids. A heredoc is
-# invisible to the compiler and to every test, which is how the
-# hitl_auto_judge lane requirement added in #25671 reached main unnoticed and
-# failed every push for ~29 hours (#25663).
+# scripts/item-http-acceptance.py copies this fixture into its fresh base path.
+# Its runtime bindings use a catalog-known model so startup capability checks
+# can admit the native server and required exact-output lanes.
 #
-# Nothing here contacts a provider: every endpoint is an isolated dead port and
-# release-evidence.sh sets MASC_KEEPER_AUTONOMOUS_ENABLED=false. This fixture
-# only proves the installed binary boots and serves /health.
+# The provider endpoint is loopback port 9, with a synthetic inline credential.
+# The harness disables autonomous Keeper turns and the orchestrator; Item
+# balance, purchase and equipment requests do not call a model. This fixture
+# supports isolated server boot and TCP/MCP Item checks, not provider evidence.
 
 [runtime]
 # The default model id must be known to the AGENT_CORE capability catalog, or the
@@ -43,9 +40,9 @@ endpoint = "http://127.0.0.1:9/v1"
 # ever answered, so the value only has to be a valid deadline.
 exact-body-timeout-s = 1200.0
 
-# Synthetic authorization for the loopback model fixture. This smoke never
+# Synthetic authorization for the loopback provider fixture. This harness never
 # reaches Ollama Cloud, so inheriting that catalog row's environment credential
-# would make the hermetic first-turn proof depend on OLLAMA_CLOUD_API_KEY.
+# would make isolated Item boot depend on OLLAMA_CLOUD_API_KEY.
 [providers.ollama_cloud.credentials]
 type = "inline"
 value = "release-evidence-loopback"

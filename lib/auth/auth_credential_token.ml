@@ -265,6 +265,21 @@ let find_static_credential_by_token config ~token : (agent_credential, masc_erro
        require_live_credential ~now:(Time_compat.now ()) first)
 ;;
 
+let find_static_credential_in_transaction transaction ~token =
+  let ( let* ) = Result.bind in
+  let* snapshot = credential_store_snapshot_in_transaction transaction in
+  let token_hash = sha256_hash token in
+  let matches = List.filter_map (fun (_, (credential : agent_credential)) ->
+    if constant_time_string_equal credential.token token_hash then Some credential else None)
+      snapshot.current_credentials in
+  match matches with
+  | [] -> Error (Auth (Auth_error.InvalidToken "Token mismatch"))
+  | first :: rest ->
+    let* () = check_credential_collisions
+        ~token_hash_prefix:(token_hash_prefix_of token_hash) first rest in
+    require_live_credential ~now:(Time_compat.now ()) first
+;;
+
 (** Resolve either an OAuth access token or the existing static bearer.
     OAuth owns a token whenever its exact hash file exists, including expired
     or revoked records; those typed failures must not silently fall through to
@@ -375,23 +390,17 @@ let save_raw_token_credential_without_expiry config ~agent_name ~role ~raw_token
 let save_file_backed_raw_token_credential config ~agent_name ~role ~raw_token
   : (agent_credential, masc_error) result
   =
-  match save_raw_token_credential config ~agent_name ~role ~raw_token with
-  | Error _ as error -> error
-  | Ok cred ->
-    (try
-       persist_raw_token config ~agent_name raw_token;
-       Ok cred
-     with
-     | Eio.Cancel.Cancelled _ as e -> raise e
-     | exn ->
-       let msg =
-         Printf.sprintf
-           "Failed to save file-backed credential for %s: %s"
-           agent_name
-           (Printexc.to_string exn)
-       in
-       Log.Auth.error "%s" msg;
-       Error (System (System_error.IoError msg)))
+  let ( let* ) = Result.bind in
+  let* () = validate_raw_token raw_token in
+  with_credential_transaction config (fun transaction ->
+    credential_read_result (fun () ->
+      let auth_cfg = load_auth_config config in
+      let cred = raw_token_credential ~agent_name ~role ~raw_token
+          ~expires_at:(expires_at_for_auth_config auth_cfg) in
+      persist_raw_token config ~agent_name raw_token;
+      save_credential_in_transaction transaction cred;
+      cred))
+  |> Result.join
 ;;
 
 (* ============================================ *)
@@ -540,9 +549,7 @@ let rotate_shared_tokens_matching config ~include_agent =
           (Printf.sprintf "auth configuration %s: %s" file reason))) in
     let groups = List.fold_left
         (fun groups (stored, (cred : agent_credential)) ->
-          if not (include_agent cred.agent_name) then groups
-          else
-            let entries = match List.assoc_opt cred.token groups with
+          let entries = match List.assoc_opt cred.token groups with
               | Some entries -> entries
               | None -> [] in
             (cred.token, (stored, cred) :: entries) :: List.remove_assoc cred.token groups)
@@ -550,8 +557,14 @@ let rotate_shared_tokens_matching config ~include_agent =
     let groups = List.filter_map (fun (token_hash, entries) ->
       match entries with
       | [] | [ _ ] -> None
-      | xs -> Some (token_hash_prefix_of token_hash,
-          List.sort (fun (_, (a : agent_credential)) (_, b) -> String.compare a.agent_name b.agent_name) xs))
+      | xs ->
+        let selected = List.filter (fun (_, (credential : agent_credential)) ->
+          include_agent credential.agent_name) xs in
+        (match selected with
+         | [] -> None
+         | _ :: _ -> Some (token_hash_prefix_of token_hash,
+             List.sort (fun (_, (a : agent_credential)) (_, b) ->
+               String.compare a.agent_name b.agent_name) selected)))
         groups |> List.sort (fun (a, _) (b, _) -> String.compare a b) in
     (* Publication may replace a UUID file or remove a previous redirect target.
        Validate every selected write target before the first raw sidecar write. *)
@@ -566,6 +579,13 @@ let rotate_shared_tokens_matching config ~include_agent =
             if String.equal target (credential_file config credential.agent_name) then
               Error (System (System_error.ValidationError
                 (Printf.sprintf "cannot rotate %s: UUID payload and named redirect would share a path"
+                  credential.agent_name)))
+            else if List.exists (fun (_, (owner : agent_credential)) ->
+              not (String.equal owner.agent_name credential.agent_name)
+              && Option.equal Credential_id.equal owner.id credential.id)
+                snapshot.current_credentials then
+              Error (System (System_error.ValidationError
+                (Printf.sprintf "cannot rotate %s: another current owner has the same UUID"
                   credential.agent_name)))
             else if List.mem target targets then
               Error (System (System_error.ValidationError

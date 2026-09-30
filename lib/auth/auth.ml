@@ -11,51 +11,53 @@ include Auth_credential_token
 let ensure_keeper_credential config ~agent_name
   : (string * agent_credential, masc_error) result
   =
-  ignore (ensure_internal_keeper_token config);
-  let existing = load_credential config agent_name in
-  let create_fresh_keeper_token () =
-    let raw_token = generate_token () in
-    let id, agent_id =
-      match existing with
-      | Some cred ->
-        ( (match cred.id with
-           | Some id -> id
-           | None -> Credential_id.generate ())
-        , cred.agent_id )
-      | None -> Credential_id.generate (), None
-    in
-    let cred =
-      { id = Some id
-      ; agent_id
-      ; agent_name
-      ; token = sha256_hash raw_token
-      ; role = Worker
-      ; created_at = now_iso ()
-      ; expires_at = None
-      }
-    in
-    persist_raw_token config ~agent_name raw_token;
-    save_credential config cred;
-    raw_token, cred
-  in
-  let result =
-    try
-      match load_raw_token config ~agent_name with
-      | Some raw_token ->
-        (match verify_token config ~agent_name ~token:raw_token with
-         | Ok cred when String.equal cred.agent_name agent_name -> Ok (raw_token, cred)
-         | Ok _ | Error _ -> Ok (create_fresh_keeper_token ()))
-      | None -> Ok (create_fresh_keeper_token ())
-    with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn ->
-      let msg =
-        Printf.sprintf "Failed to save keeper credential: %s" (Printexc.to_string exn)
+  with_credential_transaction config (fun transaction ->
+    ignore (ensure_internal_keeper_token config);
+    let existing = load_credential config agent_name in
+    let create_fresh_keeper_token () =
+      let raw_token = generate_token () in
+      let id, agent_id =
+        match existing with
+        | Some cred ->
+          ( (match cred.id with
+             | Some id -> id
+             | None -> Credential_id.generate ())
+          , cred.agent_id )
+        | None -> Credential_id.generate (), None
       in
-      Log.Auth.error "%s" msg;
-      Error (System (System_error.IoError msg))
-  in
-  result
+      let cred =
+        { id = Some id
+        ; agent_id
+        ; agent_name
+        ; token = sha256_hash raw_token
+        ; role = Worker
+        ; created_at = now_iso ()
+        ; expires_at = None
+        }
+      in
+      persist_raw_token config ~agent_name raw_token;
+      save_credential_in_transaction transaction cred;
+      raw_token, cred
+    in
+    let result =
+      try
+        match load_raw_token config ~agent_name with
+        | Some raw_token ->
+          (match find_static_credential_in_transaction transaction ~token:raw_token with
+           | Ok cred when String.equal cred.agent_name agent_name -> Ok (raw_token, cred)
+           | Ok _ | Error (Auth _) -> Ok (create_fresh_keeper_token ())
+           | Error _ as error -> error)
+        | None -> Ok (create_fresh_keeper_token ())
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | exn ->
+        let msg =
+          Printf.sprintf "Failed to save keeper credential: %s" (Printexc.to_string exn)
+        in
+        Log.Auth.error "%s" msg;
+        Error (System (System_error.IoError msg))
+    in
+    result) |> Result.join
 ;;
 
 type credential_status =

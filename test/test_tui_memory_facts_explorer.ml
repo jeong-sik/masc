@@ -1,10 +1,9 @@
 open Alcotest
 module Cat = Masc.Keeper_memory_os_types
 module Types = Masc_tui_types
-module Decode = Masc.Tui_decode
 
 let make_fact ?(category = Cat.Fact) ?(origin = "chat") ?(first = 100.0)
-    ?(last = 200.0) ?(events = Decode.no_memory_fact_events) ~claim id : Decode.memory_fact =
+    ?(last = 200.0) ?(events = Masc.Tui_decode_memory_facts.no_memory_fact_events) ~claim id : Masc.Tui_decode_memory_facts.memory_fact =
   { mf_claim = claim
   ; mf_category = category
   ; mf_origin = origin
@@ -15,35 +14,35 @@ let make_fact ?(category = Cat.Fact) ?(origin = "chat") ?(first = 100.0)
   }
 
 let retrieved ~count ~days ~last ?(retracted = 0) ?(revised_from = []) () :
-  Decode.memory_fact_events =
-  { mfe_retrieval = Decode.Retrieved { count; distinct_days = days; last_at = last }
+  Masc.Tui_decode_memory_facts.memory_fact_events =
+  { mfe_retrieval = Masc.Tui_decode_memory_facts.Retrieved { count; distinct_days = days; last_at = last }
   ; mfe_retracted_count = retracted
   ; mfe_revised_from = revised_from
   }
 
-let make_source_fact ~path ~claim sha : Decode.memory_source_fact =
+let make_source_fact ~path ~claim sha : Masc.Tui_decode_memory_facts.memory_source_fact =
   { msf_claim = claim
   ; msf_first_seen = 150.0
   ; msf_path = path
   ; msf_sha256 = sha
   }
 
-let make_invalidation ~path ~reason ts : Decode.memory_invalidation =
+let make_invalidation ~path ~reason ts : Masc.Tui_decode_memory_facts.memory_invalidation =
   { mi_source_path = path
   ; mi_invalidated_at = ts
   ; mi_reason = reason
   }
 
 let make_snapshot ~ordinary_facts ~source_facts ~invalidations =
-  { Decode.mfs_keeper = "test_keeper"
+  { Masc.Tui_decode_memory_facts.mfs_keeper = "test_keeper"
   ; mfs_ordinary =
-      Decode.Memory_store_present
+      Masc.Tui_decode_memory_facts.Memory_store_present
         { mos_revision = 1
         ; mos_updated_at = 300.0
         ; mos_facts = ordinary_facts
         }
   ; mfs_source =
-      Decode.Memory_store_present
+      Masc.Tui_decode_memory_facts.Memory_store_present
         { mss_revision = 1
         ; mss_updated_at = 300.0
         ; mss_facts = source_facts
@@ -66,8 +65,8 @@ let category_filter_testable =
 
 (* The browser open on the snapshot's keeper, with its facts answered the way
    the answer handler settles them. *)
-let answer_memory_facts (state : Types.state) (snapshot : Decode.memory_fact_snapshot) =
-  let keeper = snapshot.Decode.mfs_keeper in
+let answer_memory_facts (state : Types.state) (snapshot : Masc.Tui_decode_memory_facts.memory_fact_snapshot) =
+  let keeper = snapshot.Masc.Tui_decode_memory_facts.mfs_keeper in
   state.Types.memory_facts_keeper <- Some keeper;
   match Masc_tui_fetched.start ~equal:String.equal state.Types.memory_facts ~key:keeper with
   | Masc_tui_fetched.Already_loading -> Alcotest.fail "fixture already loading"
@@ -229,9 +228,9 @@ let test_use_based_sorting () =
   let claims rows =
     List.map
       (function
-        | Types.Memory_row_fact f -> f.Decode.mf_claim
-        | Types.Memory_row_source_fact f -> f.Decode.msf_claim
-        | Types.Memory_row_invalidation f -> f.Decode.mi_reason)
+        | Types.Memory_row_fact f -> f.Masc.Tui_decode_memory_facts.mf_claim
+        | Types.Memory_row_source_fact f -> f.Masc.Tui_decode_memory_facts.msf_claim
+        | Types.Memory_row_invalidation f -> f.Masc.Tui_decode_memory_facts.mi_reason)
       rows
   in
   state.memory_facts_sort <- Types.Sort_last_retrieved;

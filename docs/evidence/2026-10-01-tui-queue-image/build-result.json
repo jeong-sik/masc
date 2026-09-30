@@ -1,0 +1,29 @@
+{
+  "head": "cf6a0c37b52ce0a05ad4b717a4e98585c4cde131",
+  "worktree": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-keeper-snapshot-codec-pool",
+  "command": [
+    "opam",
+    "exec",
+    "--switch=5.5.1",
+    "--",
+    "scripts/dune-local.sh",
+    "build",
+    "bin/masc_tui.exe",
+    "test/test_tui_image_preview.exe"
+  ],
+  "scope": "User-authorized isolated TUI build and PTYs; no installation or production changes",
+  "exit_code": 0,
+  "elapsed_seconds": 179.33,
+  "artifacts": [
+    {
+      "path": "_build/default/bin/masc_tui.exe",
+      "bytes": 83485024,
+      "sha256": "3a1b674315ebd4cb59649f7cbc453e1ab497ac4a314dc86ffc17180e3bd54699"
+    },
+    {
+      "path": "_build/default/test/test_tui_image_preview.exe",
+      "bytes": 6551560,
+      "sha256": "b34850c6918b9bdcddb7cb792e7700ca6ce88a343937b821d07c01c9d6b3043c"
+    }
+  ]
+}

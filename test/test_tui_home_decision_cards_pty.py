@@ -201,7 +201,7 @@ def hidden_help_does_not_pin_unseen_request(executable):
                               start=len(output), timeout=10)
             assert b"MASC Cheat Sheet" in h.screen_text(bytes(output))
             h.send_and_wait(process, fd, output, b"\x1b", b"hidden-A-card")
-            assert_selected(output, b"[call-hidden-a]")
+            assert_selected(output, b"hidden-A-card")
             open_held_detail(process, fd, output, b"call-hidden-a",
                              b'{"command":"echo call-hidden-a"}')
             home.assert_no_decision_posts(requests)
@@ -232,7 +232,7 @@ def each_failed_source_keeps_other_cards(executable):
             note = b"Approvals and questions: " + failed_label + b" not fully read"
             # Match the sole-source label through the end of its drawn row,
             # so transient boot notes cannot satisfy the settled-source barrier.
-            settled = re.compile(re.escape(note) + rb"(?: |\x1b\[[0-9;]*m)*\x1b\[0m\x1b\[[0-9;]*H")
+            settled = re.compile(re.escape(note) + rb"(?: |\x1b\[[0-9;]*m)*\x1b\[0m(?:\x1b\[[0-9;]*H|\x1b\[\?25l\x1b\[\?7h)")
             h.wait_for_output(process, fd, output, settled, start=0, timeout=10)
             h.resize_and_wait(process, fd, output, rows=24, columns=81,
                               needle=note, controls=(h.FULL_REDRAW,),

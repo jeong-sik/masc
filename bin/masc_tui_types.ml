@@ -5241,6 +5241,15 @@ module Verification_evidence_read = struct
     | Launch_failure of string
 end
 
+(* The server sends each invite's link once and keeps only its hash. Keep the
+   cards newest first in this TUI process so issuing another invite does not
+   erase the first person's only link. [shown_name] selects the card on screen;
+   [None] keeps all cards available for /play link without taking input. *)
+type play_invite =
+  { cards : Masc_tui_play_card.t list
+  ; shown_name : string option
+  }
+
 type state = {
   mutable metrics_scroll: int;
   mutable metrics_section: metrics_section;
@@ -5478,10 +5487,12 @@ type state = {
      [~who] on several calls), so there is no [msx_activity] here -- adding
      one before the server ever fills it would be a field nothing draws. *)
   mutable dos_activity: Masc_tui_machine_live.activity_entry list;
-  (* The server sends an invite bearer once. Keep the latest link only in
-     this TUI process so /play link can recover it after a pane switch or a
-     terminal without OSC 52; never persist it in workspace state. *)
-  mutable play_invite_link: (string * string) option;
+  (* Locally retained invite cards, newest first. The selected card remains
+     open until the operator closes it; the modal sweep leaves it alone. *)
+  mutable play_invite: play_invite;
+  mutable play_invite_scroll: int;
+  (* Serialize issue requests so their one-time answers arrive in order. *)
+  mutable play_invite_inflight: bool;
   (* The load menu (RFC-0439 §3.7): the human picks a game from the cartridge
      inventory to plug into the shared machine. It is an overlay on the MSX
      screen -- while [msx_menu_open] the keyboard drives the picker, not the
@@ -5918,6 +5929,7 @@ type state = {
   mutable board_posts: board_post list;
   mutable board_detail:
     (board_post * board_comment list) Masc_tui_board_detail.t;
+  mutable board_history_post_id: string option;
   mutable board_list_error: string option;
   mutable board_list_reading: board_list_reading;
   mutable board_cursor: int;
@@ -7799,6 +7811,55 @@ let supersede_context_inspector_load state stop =
   state.context_inspector_cancel <- stop
 ;;
 
+(* The invite card on screen, if there is one. *)
+let play_card_shown (state : state) =
+  match state.play_invite.shown_name with
+  | None -> None
+  | Some name ->
+    List.find_opt
+      (fun card -> String.equal (Masc_tui_play_card.name card) name)
+      state.play_invite.cards
+
+let play_invite_latest (state : state) =
+  match state.play_invite.cards with
+  | [] -> None
+  | card :: _ -> Some card
+
+let play_invite_find (state : state) name =
+  List.find_opt
+    (fun card -> String.equal (Masc_tui_play_card.name card) name)
+    state.play_invite.cards
+
+let play_invite_store current card =
+  let name = Masc_tui_play_card.name card in
+  { cards =
+      card
+      :: List.filter
+           (fun previous ->
+             not (String.equal (Masc_tui_play_card.name previous) name))
+           current.cards
+  ; shown_name = Some name
+  }
+
+(* Whether a card older than the newest is kept: what an issue notice points at
+   with /play link <name>. [play_invite_store] keeps one card per name, so a
+   name issued again on its own leaves nothing earlier. *)
+let play_invite_holds_earlier current =
+  match current.cards with
+  | _ :: _ :: _ -> true
+  | [] | [ _ ] -> false
+
+let play_invite_forget current name =
+  { cards =
+      List.filter
+        (fun card -> not (String.equal (Masc_tui_play_card.name card) name))
+        current.cards
+  ; shown_name =
+      (match current.shown_name with
+       | Some shown when String.equal shown name -> None
+       | Some _ | None -> current.shown_name)
+  }
+
 (* The overlays that take every key while they are open. Each answers its own
    keys and swallows the rest in its dispatch arm, so nothing drawn under it --
    the composer, a surface binding, a press on a row -- may act first. Every
@@ -7807,6 +7868,7 @@ let supersede_context_inspector_load state stop =
 let modal_owns_keys (state : state) =
   state.help_open || state.keeper_deletions_open || state.agenda_open
   || state.context_inspector_open || state.about_open
+  || Option.is_some (play_card_shown state)
 
 let close_context_inspector (state : state) =
   state.context_inspector_open <- false;
@@ -7823,8 +7885,10 @@ let close_agenda (state : state) =
   state.agenda_selected <- Masc_tui_agenda.Nowhere
 
 (* Every overlay [modal_owns_keys] names, closed the way its own Esc closes
-   it. The inspector and the agenda are only closed when open: closing stops
-   an inspector read in flight, and there is none to stop otherwise. *)
+   it, except the invite card: an unrelated event that clears the screen must
+   not take the only copy of a link with it. The inspector and the agenda are
+   only closed when open: closing stops an inspector read in flight, and there
+   is none to stop otherwise. *)
 let close_key_modals (state : state) =
   state.help_open <- false;
   state.help_scroll <- 0;
@@ -7939,7 +8003,9 @@ let create_state
   dos_live = Masc_tui_machine_live.Unread;
   dos_live_in_flight = None;
   dos_activity = [];
-  play_invite_link = None;
+  play_invite = { cards = []; shown_name = None };
+  play_invite_scroll = 0;
+  play_invite_inflight = false;
   msx_menu_open = false;
   msx_notice = None;
   msx_menu_mode = Boot_game;
@@ -8136,6 +8202,7 @@ let create_state
   pending_approval_action = None;
   board_posts = [];
   board_detail = Masc_tui_board_detail.initial;
+  board_history_post_id = None;
   board_list_error = None;
   board_list_reading = Board_list_unread;
   board_cursor = 0;
@@ -8906,6 +8973,7 @@ type clamped_scroll =
      the drawing instead, which is the one thing the renderer must not do. *)
   | Patch_modal_scroll of int
   | Link_modal_scroll of int
+  | Play_invite_scroll of int
   (* The voice pane and its wizard lay out lines out of two HTTP reads and the
      probe's answers, so their count exists only once the frame is drawn. Both
      drew every line into a fixed budget with no offset, and whatever fell past
@@ -8981,6 +9049,7 @@ let apply_clamped_scroll (state : state) = function
   | Approval_detail_scroll value -> state.approval_detail_scroll <- value
   | Patch_modal_scroll value -> state.patch_modal_scroll <- value
   | Link_modal_scroll value -> state.link_modal_scroll <- value
+  | Play_invite_scroll value -> state.play_invite_scroll <- value
   | Voice_scroll value -> state.config_scroll <- value
   | Preset_detail_scroll value -> state.config_scroll <- value
   | Keeper_list_scroll value -> state.keeper_list_scroll <- value

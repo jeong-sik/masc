@@ -442,7 +442,7 @@ status: reference
     `[typesafeai].board_attention_confidence_floor`(기본값 0.3) 이상이면 LLM 레인을 거치지 않고
     후보를 즉시 종단 확정한다. `not_relevant` 역시 신뢰도 충족 시 LLM 레인을 건너뛰고 직접 확정된다.
   - LLM 레인 이관: 신뢰도 미달(`Jev_low_confidence`), 명시적 불확실성(`Needs_review` / `Jev_uncertain`),
-    호출 실패(`Jev_failed`), 또는 비활성화(`Jev_off`·`Jev_cli_only`) 시에는 기존 GLM 레인으로 이관하여 재판정한다.
+    호출 실패(`Jev_failed`), 또는 비활성화(`Jev_off`·`Jev_cli_only`) 시에는 설정된 board_attention_exact 슬롯/CLI 경로로 이관하여 재판정한다.
   - 재큐 후보 우선 판정: 격리(Quarantine)에서 재투입된 후보(`Requeued_pending`)도 `ask_jev`의
     첫 번째 관문을 거쳐 대규모 복구 시의 LLM 큐 폭주를 방지한다(#40428).
   - 신뢰도 관측 가능성: 확정된 종단 로그 행에 실제 신뢰도가 보존되어 운영자가 임계값을 사후

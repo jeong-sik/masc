@@ -1,0 +1,29 @@
+{
+  "kind": "standalone typecheck using installed dependency CMIs; not native execution",
+  "results": [
+    {
+      "source": "bin/masc_tui_image_preview.mli",
+      "sha256": "360d6a1c44bdd05ac0dcbc8124b56649f8a650119159c0a011ee791a5f590abd",
+      "exit_code": 0,
+      "output": ""
+    },
+    {
+      "source": "bin/masc_tui_image_preview.ml",
+      "sha256": "199a3f4025a54c9232dcf8b2fd19c4ed9e130645c379f6ceb14123ded8cabfd9",
+      "exit_code": 0,
+      "output": ""
+    },
+    {
+      "source": "test/test_tui_image_preview.ml",
+      "sha256": "e83cdf8bae8dd58b1cd09e77710fae3054c2915acbec4fb336e5a60aac6647f0",
+      "exit_code": 0,
+      "output": ""
+    }
+  ],
+  "ocaml_version": "5.5.1",
+  "base_head": "7869281f2d3e124799f457af24f4635c1b550d7e",
+  "source_state": "Uncommitted artifact decoder and tests; file hashes identify the checked inputs.",
+  "validation_scope": "The interface was compiled; implementation and test used ocamlc -stop-after typing against existing repository and opam dependency interfaces. No link or test execution.",
+  "whole_application_checked": false,
+  "pty_executed": false
+}

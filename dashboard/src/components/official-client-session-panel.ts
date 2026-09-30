@@ -204,7 +204,7 @@ export function OfficialClientSessionPanel() {
                 </div>
                 <div class="mb-3 whitespace-pre-wrap break-words text-xs text-[var(--color-fg-secondary)]">${recovery.detail}</div>
                 <div class="flex flex-wrap gap-2">
-                  ${retryPreviousOffered(recovery.failure)
+                  ${recovery.previous_settlement !== null && retryPreviousOffered(recovery.failure)
                     ? html`<${ActionButton}
                     variant="warn"
                     size="sm"

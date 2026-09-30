@@ -6,4 +6,5 @@
   exact_output_fixture
   masc_candle
   masc_candle_store
-  masc_candle_runtime))
+  masc_candle_runtime
+  masc_candle_config))

@@ -2712,18 +2712,6 @@ let settle_tools_read state ~generation part =
          | _ -> Some { request with tri_pending = pending })
   | Some _ | None -> ()
 
-let tools_skill_profiles state =
-  match state.tools_inventory with
-  | Some
-      { Masc.Tui_decode_tools.ts_effective =
-          Some
-            (Masc.Tui_decode_tools.Effective_surface_available
-               { ets_skill_profiles; _ });
-        _ } ->
-    ets_skill_profiles
-  | Some _ | None -> []
-;;
-
 let normalize_tools_skill_cursor state =
   let count = List.length (tools_skill_profiles state) in
   if count = 0
@@ -2732,10 +2720,6 @@ let normalize_tools_skill_cursor state =
   then state.tools_skill_cursor <- count - 1
   else if state.tools_skill_cursor < 0
   then state.tools_skill_cursor <- 0
-;;
-
-let selected_tools_skill_profile state =
-  List.nth_opt (tools_skill_profiles state) state.tools_skill_cursor
 ;;
 
 let move_tools_skill_cursor state delta =
@@ -4579,7 +4563,19 @@ let launch_repository_changes_load state ~mailbox ~scope =
       | Tui_decode.Repository_change_repository repository_id ->
           Masc_tui_loader.load_repository_changes ~host ~port ~repository_id)
 
-let launch_repository_changes_diff_load state ~mailbox ~scope ~path =
+let launch_repository_changes_diff_load state ~mailbox ~reader ~scope ~path =
+  let generation =
+    match reader with
+    | Repository_diff_reader ->
+        state.repository_changes_diff_generation <- state.repository_changes_diff_generation + 1;
+        state.repository_changes_diff_generation
+    | Patch_diff_reader ->
+        state.patch_modal_generation <- state.patch_modal_generation + 1;
+        state.patch_modal_generation
+  in
+  let request =
+    { rdr_reader = reader; rdr_scope = scope; rdr_path = path; rdr_generation = generation }
+  in
   let host = server_peer_host in
   let port = state.port in
   let repo =
@@ -4589,7 +4585,7 @@ let launch_repository_changes_diff_load state ~mailbox ~scope ~path =
   in
   Masc_tui_async_read.launch
     ~deliver:(fun result ->
-      enqueue_async mailbox (Repository_changes_diff_loaded (path, result)))
+      enqueue_async mailbox (Repository_changes_diff_loaded (request, result)))
     (fun () ->
       Masc_tui_loader.load_git_diff ~host ~port ?repo ~keeper:None ~path
         ~base_ref:tree_diff_base_ref ())
@@ -4600,7 +4596,8 @@ let open_repository_change_diff state ~mailbox ~scope
   state.repository_changes_diff_error <- None;
   state.repository_changes_diff_path <- Some change.rc_path;
   state.repository_changes_diff_scroll <- 0;
-  launch_repository_changes_diff_load state ~mailbox ~scope ~path:change.rc_path
+  launch_repository_changes_diff_load state ~mailbox ~reader:Repository_diff_reader
+    ~scope ~path:change.rc_path
 
 let close_repository_changes_diff state =
   state.repository_changes_diff <- None;
@@ -4640,7 +4637,8 @@ let refresh_repository_changes state ~mailbox =
   | Some scope ->
       (match state.repository_changes_diff_path with
        | Some path ->
-           launch_repository_changes_diff_load state ~mailbox ~scope ~path
+           launch_repository_changes_diff_load state ~mailbox ~reader:Repository_diff_reader
+             ~scope ~path
        | None ->
            launch_repository_changes_load state ~mailbox ~scope)
 
@@ -8837,13 +8835,19 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       Buffer.clear state.msg_input;
       state.patch_modal_open <- true;
       state.patch_modal_scroll <- 0;
+      state.patch_modal_hscroll <- 0;
+      state.patch_modal_diff <- None;
+      state.patch_modal_error <- None;
       let target_path =
-        match state.repository_changes_diff_path with
-        | Some p -> p
-        | None -> "."
+        (* This command reads the project working tree. A repository-relative
+           path from another scope cannot identify a project file. *)
+        match state.repository_changes_scope, state.repository_changes_diff_path with
+        | Some Tui_decode.Repository_change_project, Some path -> path
+        | Some (Tui_decode.Repository_change_repository _), _ | None, _
+        | Some Tui_decode.Repository_change_project, None -> "."
       in
       state.patch_modal_path <- Some target_path;
-      launch_repository_changes_diff_load state ~mailbox
+      launch_repository_changes_diff_load state ~mailbox ~reader:Patch_diff_reader
         ~scope:Tui_decode.Repository_change_project ~path:target_path
   | Masc_tui_command.Open_usage ->
       Buffer.clear state.msg_input;
@@ -9490,12 +9494,12 @@ let apply_approvals_load state = function
    that read it (iTerm2, WezTerm, kitty) and is ignored elsewhere. Neither
    moves the cursor, so this writes out of band rather than through the frame.
    The banner names the Keeper so it says who is waiting. *)
-let notify_new_asks (snapshot : Tui_decode.asks_snapshot) arrived_ids =
+let notify_new_asks (snapshot : Masc.Tui_decode_asks.asks_snapshot) arrived_ids =
   let keeper_of id =
     List.find_opt
-      (fun (row : Tui_decode.ask_row) -> String.equal row.Tui_decode.ar_id id)
-      snapshot.Tui_decode.asn_rows
-    |> Option.map (fun (row : Tui_decode.ask_row) -> row.Tui_decode.ar_keeper)
+      (fun (row : Masc.Tui_decode_asks.ask_row) -> String.equal row.Masc.Tui_decode_asks.ar_id id)
+      snapshot.Masc.Tui_decode_asks.asn_rows
+    |> Option.map (fun (row : Masc.Tui_decode_asks.ask_row) -> row.Masc.Tui_decode_asks.ar_keeper)
   in
   let message =
     match List.filter_map keeper_of arrived_ids with
@@ -9524,7 +9528,7 @@ let apply_asks_load state = function
        | Ask_browsing -> ()
        | Ask_answering { aam_ask_id } ->
            (match List.find_index
-                    (fun (row : Tui_decode.ask_row) -> row.ar_id = aam_ask_id) next_rows with
+                    (fun (row : Tui_decode_asks.ask_row) -> row.ar_id = aam_ask_id) next_rows with
             | Some index -> state.ask_cursor <- index
             | None -> Masc_tui_home.clear_ask_answering state));
       state.asks_snapshot <- Some snapshot;
@@ -10705,14 +10709,14 @@ let selected_ask_row state =
   match state.ask_answer_mode with
   | Ask_browsing -> List.nth_opt (open_ask_rows state) state.ask_cursor
   | Ask_answering { aam_ask_id } ->
-      List.find_opt (fun (row : Tui_decode.ask_row) -> row.ar_id = aam_ask_id)
+      List.find_opt (fun (row : Tui_decode_asks.ask_row) -> row.ar_id = aam_ask_id)
         (open_ask_rows state)
 
 let selected_ask_question state =
   match selected_ask_row state with
   | None -> None
-  | Some (row : Tui_decode.ask_row) ->
-      List.nth_opt row.Tui_decode.ar_questions state.ask_question_cursor
+  | Some (row : Masc.Tui_decode_asks.ask_row) ->
+      List.nth_opt row.Masc.Tui_decode_asks.ar_questions state.ask_question_cursor
 
 (* Leaving the mode drops the draft. An answer half-written against a question
    the operator walked away from is not a thing to restore later; the Keeper
@@ -10722,14 +10726,14 @@ let leave_ask_answering state = Masc_tui_home.clear_ask_answering state
 let enter_ask_answering state =
   match selected_ask_row state with
   | None -> report_action state "system" "No question is waiting on you"
-  | Some (row : Tui_decode.ask_row) ->
+  | Some (row : Masc.Tui_decode_asks.ask_row) ->
       (* The answer flow is drawn by the approvals list. With an approval's
          detail open that surface is not on screen, so [a] used to set the mode
          and change nothing an operator could see -- the keypress landed and
          the questions stayed hidden. Close the detail, which is where the
          operator asked to go. *)
       state.approval_detail_open <- false;
-      state.ask_answer_mode <- Ask_answering { aam_ask_id = row.Tui_decode.ar_id };
+      state.ask_answer_mode <- Ask_answering { aam_ask_id = row.Masc.Tui_decode_asks.ar_id };
       state.ask_question_cursor <- 0;
       state.ask_question_scroll <- 0;
       state.ask_draft <- Some (Ask.draft_for state.ask_draft ~row);
@@ -10755,8 +10759,8 @@ let move_ask_cursor state delta =
          looking at, and [a] is the key that says they mean it. *)
       | Ask_browsing, _ -> ()
       | Ask_answering _, None -> ()
-      | Ask_answering _, Some (row : Tui_decode.ask_row) ->
-          state.ask_answer_mode <- Ask_answering { aam_ask_id = row.Tui_decode.ar_id };
+      | Ask_answering _, Some (row : Masc.Tui_decode_asks.ask_row) ->
+          state.ask_answer_mode <- Ask_answering { aam_ask_id = row.Masc.Tui_decode_asks.ar_id };
           state.ask_draft <- Some (Ask.draft_for state.ask_draft ~row)
     end
   end
@@ -10764,8 +10768,8 @@ let move_ask_cursor state delta =
 let move_ask_question_cursor state delta =
   match selected_ask_row state with
   | None -> ()
-  | Some (row : Tui_decode.ask_row) ->
-      let count = List.length row.Tui_decode.ar_questions in
+  | Some (row : Masc.Tui_decode_asks.ask_row) ->
+      let count = List.length row.Masc.Tui_decode_asks.ar_questions in
       if count > 0 then begin
         state.ask_question_cursor <-
           max 0 (min (count - 1) (state.ask_question_cursor + delta));
@@ -10785,8 +10789,8 @@ let with_ask_draft state f =
 let toggle_ask_choice state index =
   match selected_ask_question state with
   | None -> ()
-  | Some (question : Tui_decode.ask_question) -> (
-      match List.nth_opt question.Tui_decode.aq_choices index with
+  | Some (question : Masc.Tui_decode_asks.ask_question) -> (
+      match List.nth_opt question.Masc.Tui_decode_asks.aq_choices index with
       | None -> ()
       | Some choice ->
           with_ask_draft state (fun draft question ->
@@ -10807,7 +10811,7 @@ let toggle_ask_choice state index =
 let begin_ask_text_entry state =
   match (selected_ask_row state, selected_ask_question state) with
   | Some row, Some question ->
-      let slot = Ask.free_text_slot ~ask_id:row.Tui_decode.ar_id question in
+      let slot = Ask.free_text_slot ~ask_id:row.Masc.Tui_decode_asks.ar_id question in
       let existing =
         match Ask.response_for (Ask.draft_for state.ask_draft ~row) ~question with
         | Some (Ask.Draft_wrote text) -> text
@@ -10839,7 +10843,7 @@ let commit_ask_text_entry state =
       let ask_id = Ask.free_text_ask_id entry.ate_slot in
       (match
          List.find_opt
-           (fun (row : Tui_decode.ask_row) -> String.equal row.Tui_decode.ar_id ask_id)
+           (fun (row : Masc.Tui_decode_asks.ask_row) -> String.equal row.Masc.Tui_decode_asks.ar_id ask_id)
            (open_ask_rows state)
        with
        | Some row ->
@@ -10917,7 +10921,7 @@ let handle_ask_submit state ~mailbox =
   | None ->
   match selected_ask_row state with
   | None -> ()
-  | Some (row : Tui_decode.ask_row) -> (
+  | Some (row : Masc.Tui_decode_asks.ask_row) -> (
       let draft = Ask.draft_for state.ask_draft ~row in
       match Ask.readiness draft ~row with
       | Ask.Not_open ->
@@ -10930,12 +10934,12 @@ let handle_ask_submit state ~mailbox =
             (Printf.sprintf "Still unanswered: %s"
                (String.concat ", "
                   (List.map
-                     (fun (q : Tui_decode.ask_question) -> q.Tui_decode.aq_header)
+                     (fun (q : Masc.Tui_decode_asks.ask_question) -> q.Masc.Tui_decode_asks.aq_header)
                      questions)))
       | Ask.Ready answers -> (
           match
             Ask.gate_transition ~inflight:state.ask_submit_inflight
-              ~pending:state.pending_ask_submit ~ask_id:row.Tui_decode.ar_id
+              ~pending:state.pending_ask_submit ~ask_id:row.Masc.Tui_decode_asks.ar_id
           with
           | Ask.Ask_gate_blocked_inflight ->
               state.pending_ask_submit <- None;
@@ -10944,17 +10948,17 @@ let handle_ask_submit state ~mailbox =
               state.pending_ask_submit <- Some ask_id;
               report_action state "system"
                 (Printf.sprintf "Press enter again to answer %s"
-                   row.Tui_decode.ar_keeper)
+                   row.Masc.Tui_decode_asks.ar_keeper)
           | Ask.Ask_gate_submit ->
               (* Name the Keeper and what was chosen, not the ask's opaque id,
                  so the confirmation says which decision landed and as what. *)
               let answered_label =
                 match Ask.summarize_answer draft ~row with
-                | "" -> row.Tui_decode.ar_keeper
-                | chosen -> Printf.sprintf "%s: %s" row.Tui_decode.ar_keeper chosen
+                | "" -> row.Masc.Tui_decode_asks.ar_keeper
+                | chosen -> Printf.sprintf "%s: %s" row.Masc.Tui_decode_asks.ar_keeper chosen
               in
-              start_ask_answer state ~keeper_name:row.Tui_decode.ar_keeper
-                ~ask_id:row.Tui_decode.ar_id ~answered_label ~answers ~mailbox))
+              start_ask_answer state ~keeper_name:row.Masc.Tui_decode_asks.ar_keeper
+                ~ask_id:row.Masc.Tui_decode_asks.ar_id ~answered_label ~answers ~mailbox))
 
 (* Run one lifecycle action's steps against the server.
 
@@ -15200,25 +15204,35 @@ let apply_async_message state ~base_path ~http_refresh_inflight
              state.repository_changes_error <-
                Some "Git changes response belongs to a different workspace"
          | Error detail -> state.repository_changes_error <- Some detail)
-  | Repository_changes_diff_loaded (path, result) ->
-      if
-        state.repository_changes_open
-        && Option.equal String.equal state.repository_changes_diff_path (Some path)
-      then
-        (match result with
-         | Ok diff ->
-             state.repository_changes_diff <- Some (path, diff);
-             state.repository_changes_diff_error <- None
-         | Error detail -> state.repository_changes_diff_error <- Some detail);
-      if
-        state.patch_modal_open
-        && Option.equal String.equal state.patch_modal_path (Some path)
-      then
-        (match result with
-         | Ok diff ->
-             state.patch_modal_diff <- Some (path, diff);
-             state.patch_modal_error <- None
-         | Error detail -> state.patch_modal_error <- Some detail)
+  | Repository_changes_diff_loaded (request, result) ->
+      (* Each response belongs to one reader and one request incarnation, not
+         to every open pane that happens to name the same relative path. *)
+      (match request.rdr_reader with
+       | Repository_diff_reader ->
+           if state.repository_changes_open
+              && request.rdr_generation = state.repository_changes_diff_generation
+              && Option.equal repository_change_scope_equal
+                   state.repository_changes_scope (Some request.rdr_scope)
+              && Option.equal String.equal state.repository_changes_diff_path
+                   (Some request.rdr_path)
+           then
+             (match result with
+              | Ok diff ->
+                  state.repository_changes_diff <- Some (request.rdr_path, diff);
+                  state.repository_changes_diff_error <- None
+              | Error detail -> state.repository_changes_diff_error <- Some detail)
+       | Patch_diff_reader ->
+           if state.patch_modal_open
+              && request.rdr_generation = state.patch_modal_generation
+              && repository_change_scope_equal request.rdr_scope
+                   Tui_decode.Repository_change_project
+              && Option.equal String.equal state.patch_modal_path (Some request.rdr_path)
+           then
+             (match result with
+              | Ok diff ->
+                  state.patch_modal_diff <- Some (request.rdr_path, diff);
+                  state.patch_modal_error <- None
+              | Error detail -> state.patch_modal_error <- Some detail))
   | Keeper_chat_file_changes_loaded (generation, keeper_name, result) ->
       let still_current =
         generation = state.msg_file_changes_generation
@@ -18613,16 +18627,18 @@ and is loaded on demand through keeper_skill.
        (* The keeper-voice screen owns every key while it is open: it is drawn
           instead of the pane, so a key that fell through would act on a
           surface nobody is looking at. *)
-       | Some key when Option.is_some state.voice_agent_voices ->
+       | Some key
+         when Option.is_some state.voice_agent_voices && not state.help_open ->
            (match state.voice_agent_voices with
             | None -> ()
             | Some session ->
               let set updated = state.voice_agent_voices <- Some updated in
-              (* A save in flight takes nothing but the key that leaves. *)
-              if session.vas_saving && not (String.equal key "esc")
+              (* Help is read-only and may cover an in-flight save. *)
+              if session.vas_saving && not (String.equal key "esc" || String.equal key "?")
               then ()
               else (
                 match key with
+                | "?" -> state.help_open <- true; state.help_scroll <- 0
                 | "esc" ->
                     state.voice_agent_voices <- None;
                     state.config_scroll <- 0
@@ -19887,10 +19903,23 @@ and is loaded on demand through keeper_skill.
        | Some k when state.patch_modal_open ->
            let close () =
              state.patch_modal_open <- false;
-             state.patch_modal_scroll <- 0
+             state.patch_modal_scroll <- 0;
+             state.patch_modal_hscroll <- 0;
+             state.patch_modal_path <- None;
+             state.patch_modal_diff <- None;
+             state.patch_modal_error <- None
            in
            (match k with
+            | "?" -> state.help_open <- true; state.help_scroll <- 0
             | "esc" | "q" | "Q" -> close ()
+            | "shift-left" ->
+                let limit = Masc_tui_render.patch_modal_horizontal_limit state in
+                state.patch_modal_hscroll <-
+                  max 0 (min state.patch_modal_hscroll limit - 1)
+            | "shift-right" ->
+                let limit = Masc_tui_render.patch_modal_horizontal_limit state in
+                state.patch_modal_hscroll <-
+                  min limit (max 0 state.patch_modal_hscroll + 1)
             | "j" | "down" ->
                 state.patch_modal_scroll <- state.patch_modal_scroll + 1
             | "k" | "up" ->
@@ -20257,6 +20286,19 @@ and is loaded on demand through keeper_skill.
               own arm below. *)
            let terminal_rows, _ = get_terminal_size () in
            keeper_runtime_pick_key state ~mailbox:async_messages ~terminal_rows k
+       | Some ("home" | "end" as edge)
+         when state.view = Runtime && Option.is_some state.runtime_detail_target ->
+           state.runtime_detail_scroll <-
+             (if String.equal edge "home" then 0
+              else Masc_tui_types.clamped_scroll_end)
+       | Some "v"
+         when state.view = Runtime
+              && Option.is_none state.runtime_detail_target
+              && Option.is_none state.runtime_lane_pick
+              && Option.is_none state.slot_editor
+              && Option.is_none (Masc_tui_types.runtime_lane_prompt state) ->
+           state.runtime_detail_target <- Some Runtime_routes;
+           state.runtime_detail_scroll <- 0
        | Some "e" | Some "E"
          when state.view = Runtime
               && state.runtime_mode = Masc_tui_types.Runtime_lanes
@@ -20908,29 +20950,51 @@ and is loaded on demand through keeper_skill.
                      Masc_tui_board_requests.start_board_post_refresh state ~report_error:(add_event state "error") ~host:server_peer_host ~port:state.port
                        ~post_id:evidence.fe_post_id ~deliver:(enqueue_async async_messages))
             | _ -> report_action state "system" "Open a Fusion run to follow its Board evidence")
-       | Some ("h" | "H") when state.view = Repositories && not state.repository_changes_open ->
+       | Some ("h" | "H") when state.view = Repositories && not state.repository_changes_open && Option.is_none state.workspace_activity_repo ->
            (match state.repositories with
             | None -> ()
             | Some snapshot ->
                 Option.iter (fun (repo : Tui_decode.repository) ->
                   state.workspace_activity_repo <- Some repo.rp_id;
                   state.workspace_activity_cursor <- 0;
+                  state.workspace_activity_context_scroll <- None;
                   launch_workspace_activity state ~mailbox:async_messages ~repo_id:repo.rp_id)
                   (List.nth_opt snapshot.rs_repositories state.repositories_cursor))
-       | Some ("esc" | "left") when state.view = Repositories && Option.is_some state.workspace_activity_repo ->
-           state.workspace_activity_repo <- None
-       | Some ("r" | "R") when state.view = Repositories && Option.is_some state.workspace_activity_repo ->
+       | Some ("v" | "V") when state.view = Repositories && not state.repository_changes_open && Option.is_some state.workspace_activity_repo && Option.is_none state.workspace_activity_context_scroll ->
+           let _, _, selected = workspace_activity_selection state in
+           if Option.is_some selected then state.workspace_activity_context_scroll <- Some 0
+       | Some ("esc" | "left") when state.view = Repositories && not state.repository_changes_open && Option.is_some state.workspace_activity_context_scroll ->
+           state.workspace_activity_context_scroll <- None
+       | Some ("j" | "down" | "k" | "up" | "pageup" | "pagedown" | "home" | "end" | "g" | "G" as move)
+         when state.view = Repositories && not state.repository_changes_open && Option.is_some state.workspace_activity_repo
+              && Option.is_some state.workspace_activity_context_scroll ->
+           let terminal_rows, cols = get_terminal_size () in
+           let count = List.length (workspace_activity_context_lines state ~cols) in
+           let height = workspace_activity_context_height state ~surface_rows:(surface_body_rows state ~terminal_rows) in
+           let maximum = max 0 (count - height) in
+           let old = match state.workspace_activity_context_scroll with Some scroll -> max 0 (min maximum scroll) | None -> 0 in
+           let next = match move with
+             | "home" | "g" -> 0 | "end" | "G" -> maximum
+             | "j" | "down" -> old + 1 | "k" | "up" -> old - 1
+             | "pageup" -> old - Masc_tui_scroll.page_step ~height
+             | _ -> old + Masc_tui_scroll.page_step ~height in
+           state.workspace_activity_context_scroll <- Some (max 0 (min maximum next))
+       | Some ("esc" | "left") when state.view = Repositories && not state.repository_changes_open && Option.is_some state.workspace_activity_repo ->
+           state.workspace_activity_repo <- None;
+           state.workspace_activity_context_scroll <- None
+       | Some ("r" | "R") when state.view = Repositories && not state.repository_changes_open && Option.is_some state.workspace_activity_repo ->
            Option.iter (fun repo_id -> launch_workspace_activity state ~mailbox:async_messages ~repo_id)
              state.workspace_activity_repo
        | Some ("j" | "down" | "k" | "up" | "pageup" | "pagedown" as move)
-         when state.view = Repositories && Option.is_some state.workspace_activity_repo ->
+         when state.view = Repositories && not state.repository_changes_open && Option.is_some state.workspace_activity_repo ->
            let terminal_rows, _ = get_terminal_size () in
            let page = workspace_activity_page_rows ~surface_rows:(surface_body_rows state ~terminal_rows) in
            let delta = match move with "j" | "down" -> 1 | "k" | "up" -> -1 | "pageup" -> -page | _ -> page in
            state.workspace_activity_cursor <- max 0 (min (List.length (workspace_activity_rows state) - 1)
-             (state.workspace_activity_cursor + delta))
+             (state.workspace_activity_cursor + delta));
+           state.workspace_activity_context_scroll <- None
        | Some ("\r" | "\n" | "right")
-         when state.view = Repositories && Option.is_some state.workspace_activity_repo ->
+         when state.view = Repositories && not state.repository_changes_open && Option.is_some state.workspace_activity_repo ->
            let _, _, selected = workspace_activity_selection state in
            (match state.workspace_activity_repo, selected with
             | Some repo_id, Some (change, relative_path) ->
@@ -20939,7 +21003,7 @@ and is loaded on demand through keeper_skill.
                 launch_code_entries_load state ~mailbox:async_messages;
                 launch_code_file_load state ~mailbox:async_messages ~path
             | None, _ | _, None -> ())
-       | Some key when state.view = Repositories && Option.is_some state.workspace_activity_repo
+       | Some key when state.view = Repositories && not state.repository_changes_open && Option.is_some state.workspace_activity_repo
            && not (List.mem key ["tab"; "shift-tab"; "\t"; "q"; "?"; ":"]) -> ()
        | Some ("v" | "V")
          when state.view = Config && state.config_pane = Config_runtime ->
@@ -21487,7 +21551,7 @@ and is loaded on demand through keeper_skill.
                           state.approval_detail_scroll <- 0)
                  | Home_question ask_id ->
                      (match List.find_index
-                              (fun (row : Tui_decode.ask_row) -> row.ar_id = ask_id)
+                              (fun (row : Tui_decode_asks.ask_row) -> row.ar_id = ask_id)
                               (open_ask_rows state) with
                       | None -> report_action state "system" "Question changed; choose again"
                       | Some cursor ->
@@ -21989,6 +22053,19 @@ and is loaded on demand through keeper_skill.
                 if Option.is_some (Masc_tui_fetched.current state.code_blame)
                 then state.code_blame <- Masc_tui_fetched.clear state.code_blame
                 else launch_code_blame_load state ~mailbox:async_messages ~path)
+       | Some ("pageup" | "pagedown" | "home" | "end" as move)
+         when state.view = Code && state.code_focus_file = Right_pane
+              && state.code_notes_open && not state.repository_changes_open ->
+           let count, height = Masc_tui_render_code.code_notes_viewport state in
+           let maximum = max 0 (count - height) in
+           let current = max 0 (min state.code_notes_scroll maximum) in
+           let page = Masc_tui_scroll.page_step ~height in
+           state.code_notes_scroll <-
+             (match move with
+              | "home" -> 0 | "end" -> maximum
+              | "pageup" -> max 0 (current - page)
+              | "pagedown" -> min maximum (current + page)
+              | _ -> current)
        | Some "m" when state.view = Code && state.code_focus_file = Right_pane
                        && Option.is_some (Masc_tui_fetched.current_key state.code_file) ->
            (* The memos in the open file: comments in the file's own syntax
@@ -22023,6 +22100,19 @@ and is loaded on demand through keeper_skill.
                        launch_code_diff_load state ~mailbox:async_messages
                          ~path)
                 end)
+       | Some ("pageup" | "pagedown" | "home" | "end" as move)
+         when state.view = Code && state.code_focus_file = Right_pane
+              && state.code_history_open && not state.repository_changes_open ->
+           let count, height = Masc_tui_render_code.code_history_viewport state in
+           let current = Masc_tui_scroll.normalize ~count ~height:1 state.code_history_scroll in
+           let maximum = Masc_tui_scroll.maximum ~count ~height:1 in
+           let page = Masc_tui_scroll.page_step ~height in
+           state.code_history_scroll <-
+             (match move with
+              | "home" -> 0 | "end" -> maximum
+              | "pageup" -> max 0 (current - page)
+              | "pagedown" -> min maximum (current + page)
+              | _ -> current)
        | Some "H" when state.view = Code && state.code_focus_file = Right_pane ->
            (* History over the open file. The capital only: lowercase h/l
               choose panes, while shifted arrows pan the file. Same key closes
@@ -22034,6 +22124,7 @@ and is loaded on demand through keeper_skill.
                   state.code_history_open <- false
                 else begin
                   state.code_history_open <- true;
+                  state.code_history_scroll <- 0;
                   state.code_diff_open <- false;
                   state.code_notes_open <- false;
                   (* Already about this file in this scope -- loaded,
@@ -22296,6 +22387,17 @@ and is loaded on demand through keeper_skill.
            let target = if key = Some "end" then count - 1 else 0 in
            step_board_read state ~mailbox:async_messages
              ~delta:(target - state.board_cursor)
+       | Some ("pageup" | "pagedown" | "home" | "end" as move)
+         when state.view = Config && state.config_pane = Config_prompts
+              && not state.repository_changes_open ->
+           let count, height = Masc_tui_render.prompts_detail_viewport state in
+           state.config_scroll <-
+             (match move with
+              | "home" -> 0
+              | "end" -> Masc_tui_scroll.maximum ~count ~height
+              | "pageup" -> Masc_tui_scroll.page_up ~count ~height state.config_scroll
+              | "pagedown" -> Masc_tui_scroll.page_down ~count ~height state.config_scroll
+              | _ -> Masc_tui_scroll.normalize ~count ~height state.config_scroll)
        (* A reading pane before the list behind it: a detail that is open owns
           the scroll keys, and moving the list under it would leave the cursor
           somewhere the reader cannot see. The pane reports its own clamp, so
@@ -23114,10 +23216,9 @@ and is loaded on demand through keeper_skill.
                   state.repository_changes_scroll <- scroll
                 else if state.code_focus_file = Right_pane then (
                   if state.code_notes_open then (
+                    let count, height = Masc_tui_render_code.code_notes_viewport state in
                     state.code_notes_scroll <-
-                      min
-                        (max 0 (List.length state.code_memos - 1))
-                        (state.code_notes_scroll + 1))
+                      Masc_tui_scroll.down ~count ~height state.code_notes_scroll)
                   else if state.code_diff_open then (
                     match Masc_tui_fetched.current state.code_diff with
                     | Some (_, Masc_tui_fetched.Ready diff) ->
@@ -23128,14 +23229,9 @@ and is loaded on demand through keeper_skill.
                             (state.code_diff_scroll + 1)
                     | Some (_, _) | None -> ())
                   else if state.code_history_open then (
-                    match Masc_tui_fetched.current state.code_history with
-                    | Some (_, Masc_tui_fetched.Ready listing) ->
-                        state.code_history_scroll <-
-                          min
-                            (max 0 (List.length listing.chl_entries - 1))
-                            (state.code_history_scroll + 1)
-                    (* No listing to move a cursor through. *)
-                    | Some (_, _) | None -> ())
+                    let count, _ = Masc_tui_render_code.code_history_viewport state in
+                    state.code_history_scroll <-
+                      Masc_tui_scroll.down ~count ~height:1 state.code_history_scroll)
                   else
                     match Masc_tui_fetched.current state.code_file with
                     | Some (_, Masc_tui_fetched.Ready rows) ->
@@ -23491,15 +23587,17 @@ and is loaded on demand through keeper_skill.
                   state.repository_changes_cursor <- cursor;
                   state.repository_changes_scroll <- scroll
                 else if state.code_focus_file = Right_pane then (
-                  if state.code_notes_open then
+                  if state.code_notes_open then (
+                    let count, height = Masc_tui_render_code.code_notes_viewport state in
                     state.code_notes_scroll <-
-                      max 0 (state.code_notes_scroll - 1)
+                      Masc_tui_scroll.up ~count ~height state.code_notes_scroll)
                   else if state.code_diff_open then
                     state.code_diff_scroll <-
                       max 0 (state.code_diff_scroll - 1)
-                  else if state.code_history_open then
+                  else if state.code_history_open then (
+                    let count, _ = Masc_tui_render_code.code_history_viewport state in
                     state.code_history_scroll <-
-                      max 0 (state.code_history_scroll - 1)
+                      Masc_tui_scroll.up ~count ~height:1 state.code_history_scroll)
                   else
                     match Masc_tui_fetched.current state.code_file with
                     | Some (_, Masc_tui_fetched.Ready rows) ->
@@ -23855,17 +23953,16 @@ and is loaded on demand through keeper_skill.
                             open_repository_change_in_code state
                               ~mailbox:async_messages ~scope change)
                    | _ -> ())
-                else if state.code_history_open then (
+                else if state.code_history_open && state.code_focus_file = Right_pane then (
                   (* The top visible row is the selected one, the way the
                      Changes list treats its scroll. A commit answers with
                      its PR; a durable Keeper change jumps to its
                      producer-recorded line without claiming it was
                      committed. *)
                   match Masc_tui_fetched.current state.code_history with
-                  | Some (_, Masc_tui_fetched.Ready listing) -> (
+                  | Some (_, Masc_tui_fetched.Ready _) -> (
                       match
-                        List.nth_opt listing.chl_entries
-                          state.code_history_scroll
+                        Masc_tui_render_code.code_history_selected state
                       with
                       | None -> ()
                       | Some (Hist_keeper_change change) -> (
@@ -24122,34 +24219,7 @@ and is loaded on demand through keeper_skill.
                         state.view <- Code;
                         launch_code_entries_load state
                           ~mailbox:async_messages))
-            | Runtime ->
-                (match state.runtime_surface, state.runtime_mode with
-                 | Some snapshot, Runtime_lanes ->
-                     (match List.nth_opt snapshot.Masc.Tui_decode.rss_candidates
-                              state.runtime_cursor with
-                      | None -> ()
-                      | Some row ->
-                          state.runtime_detail_target <-
-                            Some
-                              (Runtime_lane_candidate
-                                 { lane_id = row.rcr_lane_id
-                                 ; runtime_id = row.rcr_runtime.ro_id
-                                 });
-                          state.runtime_detail_scroll <- 0)
-                 | Some snapshot, Runtime_all ->
-                     (match
-                        List.nth_opt
-                          snapshot.Masc.Tui_decode.rss_resolved.rrs_runtimes
-                          state.runtime_cursor
-                      with
-                      | None -> ()
-                      | Some runtime ->
-                          state.runtime_detail_target <-
-                            Some
-                              (Runtime_catalog_entry
-                                 { runtime_id = runtime.ro_id });
-                          state.runtime_detail_scroll <- 0)
-                 | None, _ -> ())
+            | Runtime -> Masc_tui_types.open_runtime_row_detail state
             | System_logs -> open_selected_system_log state
             | Keepers Keeper_detail | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message

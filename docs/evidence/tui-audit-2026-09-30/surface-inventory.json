@@ -853,13 +853,17 @@
       "P3 test/dune:7725 extra blank EOF"
     ]
   },
-  "prompts_integration_preparation": {
-    "branch": "fix/tui-prompts-integration-stack-20260930",
-    "head": "20871465e32ebdf5bd21f1d3433983fc70be25ec",
+  "prompts_integration_stack": {
+    "pr": 40327,
+    "base_pr": 40325,
     "base_head": "2961d59a3813071d9098774d302e52af0e83a9a2",
+    "head": "8a669cc634c30b33fba56a5420292c8360442a75",
     "imported_pr": 40254,
     "imported_head": "962a592aab93ffb3ddcdd6ec1a92a4f8a1bcca45",
-    "status": "local source integration prepared, not pushed or independently reviewed",
-    "validation": "syntax/AST only; fixture unexecuted"
+    "imported_base": "04256f2b1d46fe9d49f884215b2d6c0025defa3a",
+    "scope": "full registry/asset document and literal metadata/heldback/stale diagnostics, shared physical-row page/edges while preserving edits/read-only asset boundary",
+    "review": "system_audit and agenda_finish source PASS at exact head, no unresolved P0/P1/P2",
+    "validation": "three product ML/one MLI/existingkeys syntax, Python AST, fullbasediffcheck PASS; fixture10casesunexecuted",
+    "execution": "not run under source-only policy"
   }
 }

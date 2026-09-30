@@ -23,7 +23,29 @@ self_test_only=false
 [ "${1:-}" = "--self-test" ] && self_test_only=true
 
 usage="usage: run-edited-tests.sh <pr-number> --budget-seconds <seconds> | --self-test"
-if [ "${self_test_only}" = false ]; then
+select_only=false
+run_selection=false
+selection_file=""
+execution_file=""
+case "${1:-}" in
+  --select-only)
+    select_only=true
+    changed_file="${2:?${usage}}"
+    [ "${3:-}" = --body-file ] && [ "${5:-}" = --selection-file ] || exit 2
+    body_file="${4:?${usage}}"
+    selection_file="${6:?${usage}}"
+    ;;
+  --run-selection)
+    run_selection=true
+    selection_file="${2:?${usage}}"
+    [ "${3:-}" = --executed-file ] && [ "${5:-}" = --budget-seconds ] || exit 2
+    execution_file="${4:?${usage}}"
+    budget_seconds="${6:?${usage}}"
+    [[ "${budget_seconds}" =~ ^[1-9][0-9]*$ ]] || exit 2
+    ;;
+esac
+
+if [ "${self_test_only}" = false ] && [ "${select_only}" = false ] && [ "${run_selection}" = false ]; then
   pr_number="${1:?${usage}}"
   # The budget is the step's, and pr-check.yml sets the step's timeout-minutes
   # above it so this script, not the runner, ends a step that runs out.
@@ -654,6 +676,8 @@ STANZAS
   # Return no selection only when no input mapped to a runnable suite.
   if ! printf '%s\n' "${sources}" | grep -v '^[[:space:]]*$' > /dev/null; then
     echo "no suite left to run"
+    # ROLL combines all member ranges; an individual range may have no tests.
+    [ "${select_only}" = false ] || return 0
     return 1
   fi
 }
@@ -910,6 +934,7 @@ ENVS
         fi
         if [ "${status}" -eq 0 ]; then
           ran=$((ran + 1))
+          [ -z "${execution_file}" ] || printf '%s.ml\n' "${id}" >> "${execution_file}"
         elif [ "${status}" -eq 124 ] && [ "${limit}" -lt "${per_suite_timeout}" ]; then
           failed="${failed}${id} (stopped at the step budget after ${limit}s)\n"
         elif [ "${status}" -eq 124 ]; then
@@ -955,6 +980,7 @@ ENVS
       fi
       if [ "${status}" -eq 0 ]; then
         ran=$((ran + python_wave_count))
+        [ -z "${execution_file}" ] || printf '%s.py\n' "${python_ids[@]}" >> "${execution_file}"
       else
         local python_wave_index=0 reason_prefix=""
         [ "${python_wave_count}" -eq 1 ] || reason_prefix="dune-rule wave "
@@ -1588,6 +1614,31 @@ if [ "${self_test_only}" = true ]; then
   cd "${repo_root}"
   self_test
   exit $?
+fi
+
+# ROLL selection calls the production selector without an API or a run.
+if [ "${select_only}" = true ]; then
+  changed=$(cat "${changed_file}")
+  pr_body=$(cat "${body_file}")
+  sources=""
+  direct_sources=""
+  select_sources
+  python3 "${repo_root}/scripts/ci/roll_ci.py" selection \
+    --sources "${sources}" --direct "${direct_sources}" \
+    --named "$(named_suites "${pr_body}")" --output "${selection_file}"
+  exit $?
+fi
+
+# Only successful runs are appended here; selection, build and skip are not
+# execution receipts. The ROLL caller compares this file with its frozen union.
+if [ "${run_selection}" = true ]; then
+  sources=$(python3 -c 'import json,sys; print("\n".join(json.load(open(sys.argv[1]))["sources"]))' "${selection_file}")
+  direct_sources=$(python3 -c 'import json,sys; print("\n".join(json.load(open(sys.argv[1]))["direct_sources"]))' "${selection_file}")
+  : > "${execution_file}"
+  run_selected
+  echo "ran ${ran}, skipped ${skipped}"
+  [ -z "${failed}" ] || { printf 'suites that did not pass:\n  %b' "${failed}"; exit 1; }
+  exit 0
 fi
 
 # The changed-file list comes from the pull request API, not from git. This

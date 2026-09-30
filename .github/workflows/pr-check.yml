@@ -34,7 +34,38 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  scope:
+    if: github.event.pull_request.draft == false
+    name: PR inspection scope
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      base: ${{ steps.scope.outputs.base }}
+      roll: ${{ steps.scope.outputs.roll }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Verify ROLL scope and execution evidence
+        run: python3 scripts/ci/test_roll_ci.py
+      - name: Freeze inspection scope
+        id: scope
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/ci/roll_ci.py prepare --output roll-plan.json --github-output "$GITHUB_OUTPUT"
+      - name: Upload fixed ROLL plan
+        if: steps.scope.outputs.roll == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: roll-plan
+          path: roll-plan.json
+          if-no-files-found: error
+
   tla:
+    needs: scope
     if: github.event.pull_request.draft == false
     name: ${{ github.event.pull_request.draft == true && 'Draft snapshot / TLA model check' || 'TLA model check' }}
     runs-on: ubuntu-24.04
@@ -48,8 +79,8 @@ jobs:
       - name: Detect spec changes
         id: specs
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_SHA: ${{ needs.scope.outputs.base }}
+          HEAD_SHA: ${{ github.sha }}
         run: |
           if git diff --quiet "${BASE_SHA}" "${HEAD_SHA}" -- specs; then
             echo "changed=false" >> "${GITHUB_OUTPUT}"
@@ -87,6 +118,7 @@ jobs:
   # they run now. The diff guards need the base commit present, hence
   # fetch-depth: 0.
   lint:
+    needs: scope
     if: github.event.pull_request.draft == false
     name: ${{ github.event.pull_request.draft == true && 'Draft snapshot / lint suite' || 'lint suite' }}
     runs-on: ubuntu-24.04
@@ -177,11 +209,8 @@ jobs:
           # Taken only when the second parent is this pull request's head,
           # which is what makes the checkout the merge ref rather than a
           # branch that happens to end in a merge.
-          base="${{ github.event.pull_request.base.sha }}"
+          base="${{ needs.scope.outputs.base }}"
           head="${{ github.event.pull_request.head.sha }}"
-          if [ "$(git rev-parse -q --verify 'HEAD^2' || true)" = "${head}" ]; then
-            base="$(git rev-parse 'HEAD^1')"
-          fi
           bash scripts/ci/run-lint-suite.sh blocking-pr "${base}" "${head}"
 
       - name: Advisory lints
@@ -190,6 +219,7 @@ jobs:
         run: bash scripts/ci/run-lint-suite.sh advisory
 
   check:
+    needs: scope
     if: github.event.pull_request.draft == false
     name: ${{ github.event.pull_request.draft == true && 'Draft snapshot / dune build @check' || 'dune build @check' }}
     runs-on: ubuntu-24.04
@@ -332,7 +362,7 @@ jobs:
 
       - name: OCaml boundary ratchet
         env:
-          OCAML_BOUNDARY_BASE_REF: ${{ github.event.pull_request.base.sha }}
+          OCAML_BOUNDARY_BASE_REF: ${{ needs.scope.outputs.base }}
         run: |
           set -euo pipefail
           git fetch --depth=1 origin "$OCAML_BOUNDARY_BASE_REF"
@@ -392,6 +422,12 @@ jobs:
           docker build -t masc-sandbox-test:ci - < sandbox-images/base/Dockerfile
           docker image inspect masc-sandbox-test:ci --format '{{.Id}}'
 
+      - name: Download fixed ROLL plan
+        if: needs.scope.outputs.roll == 'true'
+        uses: actions/download-artifact@v7
+        with:
+          name: roll-plan
+
       - name: Run the tests this pull request edits
         # The script holds the budget: every suite it selects runs, and one the
         # budget does not reach is named and fails the step (RFC-0428, "넓힌
@@ -409,10 +445,23 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           DUNE_JOBS: "4"
           MASC_TEST_ALLOW_REAL_DOCKER: "1"
+          IS_ROLL: ${{ needs.scope.outputs.roll }}
         run: |
-          bash scripts/ci/run-edited-tests.sh \
-            "${{ github.event.pull_request.number }}" \
-            --budget-seconds 1800
+          if [ "$IS_ROLL" = true ]; then
+            python3 scripts/ci/roll_ci.py run --plan roll-plan.json \
+              --output roll-evidence.json --budget-seconds 1800
+          else
+            bash scripts/ci/run-edited-tests.sh \
+              "${{ github.event.pull_request.number }}" --budget-seconds 1800
+          fi
+
+      - name: Upload ROLL execution receipt
+        if: always() && needs.scope.outputs.roll == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: roll-evidence
+          path: roll-evidence.json
+          if-no-files-found: error
 
 
   # dashboard/ ships a `typecheck` script and no lane calls it.
@@ -434,6 +483,7 @@ jobs:
   # critical path, and as a job it runs beside it. The switch setup is the same
   # composite actions, so the duplication is five lines.
   release-check:
+    needs: scope
     if: github.event.pull_request.draft == false
     name: ${{ github.event.pull_request.draft == true && 'Draft snapshot / dune build --profile release @check' || 'dune build --profile release @check' }}
     runs-on: ubuntu-24.04
@@ -493,6 +543,7 @@ jobs:
   # load; RFC-0428 carries those numbers and the suite waits on that decision.
   # The type-check does not need to wait for it.
   dashboard-types:
+    needs: scope
     if: github.event.pull_request.draft == false
     name: ${{ github.event.pull_request.draft == true && 'Draft snapshot / dashboard typecheck' || 'dashboard typecheck' }}
     runs-on: ubuntu-24.04

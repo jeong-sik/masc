@@ -169,7 +169,10 @@ let interested sources activity = List.exists (function
       (match activity with
        | Fusion_changed changed -> String.equal run_id changed
        | Tool_completed | Machine_changed _ | Browser_changed -> false)
-  | Snapshot_file _ -> true
+  | Snapshot_file _ ->
+      (match activity with
+       | Fusion_changed _ -> false
+       | Tool_completed | Machine_changed _ | Browser_changed -> true)
   | Msx_capture _ -> activity=Machine_changed Machine_lane.Msx
   | Dos_capture _ -> activity=Machine_changed Machine_lane.Dos
   | Browser_document _ -> activity=Browser_changed

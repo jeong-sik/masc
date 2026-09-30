@@ -391,6 +391,13 @@ let test_fusion_binding_targets_only_exact_run () =
     (Sources.interested interest (Sources.Fusion_changed "run-two"));
   check bool "tool completions do not wake Fusion" false
     (Sources.interested interest Sources.Tool_completed);
+  let file_interest = require (Sources.refresh_interest (binding [`Assoc [
+    "source_id",`String "file";"kind",`String "snapshot_file";
+    "path",`String "/retained/snapshot.json"]])) in
+  check bool "Fusion updates do not wake unrelated file watchers" false
+    (Sources.interested file_interest (Sources.Fusion_changed "run-one"));
+  check bool "generic tool activity still refreshes files" true
+    (Sources.interested file_interest Sources.Tool_completed);
   let bad = `Assoc ["source_id",`String "fusion";"kind",`String "fusion_run";
     "run_id",`String "run-one";"path",`String "/guessed"] in
   check bool "unknown fields rejected" true

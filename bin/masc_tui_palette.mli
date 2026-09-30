@@ -31,6 +31,7 @@ val gate_lane_label : gate_lane -> string
 val gate_mode_label : Masc.Keeper_gate_mode.t -> string
 val code_cursor_line_symbols : Masc_tui_types.state -> string list
 val lsp_question_prefixes : (string * string) list
+val palette_typed_question : string -> (string * string option) option
 val palette_entries : Masc_tui_types.state -> (string * palette_action) list
 val palette_matches : Masc_tui_types.state -> (string * palette_action) list
 val palette_starts_with : needle:string -> string -> bool

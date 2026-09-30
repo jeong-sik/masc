@@ -253,10 +253,9 @@ let global =
   ; b Meta "&"
       "the MSX screen: the emulator core over the whole terminal (esc: back; \
        also `:` go MSX)"
-  ; b Meta roster_toggle_key "keeper roster beside the chat — put away until you ask"
-      ~help:"the Activity pane (Ctrl-L) answers the same question for every \
-             keeper, so the column starts hidden; this brings it back on a \
-             terminal wide enough to hold it"
+  ; b Meta roster_toggle_key "show or hide the Keeper roster"
+      ~help:"wide chats show the roster by default; this choice persists \
+             across navigation and resizing"
   ; b Meta "Ctrl-L"
       "the Activity pane, narrow, wide or hidden in turn: what every keeper is doing \
        right now, and on its Changes tab the selected keeper's files (press the header to switch)"
@@ -601,6 +600,7 @@ let for_surface = function
       @ row_list_jumps @ listing_meta
   | Clients ->
       [ b Navigate "j/k" "move" ~help:"move the roster cursor"
+      ; b Act "Enter" "detail" ~help:"read the client's full identity and observation"
         (* Two doors, one action: both call [goto_surface Runtime]. As two
            bindings the sheet printed the answer twice, one row under the
            other, and the second row's help differed from the first by a

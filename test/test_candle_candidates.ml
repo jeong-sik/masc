@@ -55,12 +55,13 @@ let enable base_path =
   Out_channel.with_open_bin path (fun oc -> Out_channel.output_string oc "")
 ;;
 
-let snapshot ?(goal_id = "goal-1") ?(request_id = "req-1") linked_task_ids : E.t =
+let snapshot ?(goal_id = "goal-1") ?(request_id = "req-1") ?(verification_run_id = "run-1") linked_task_ids : E.t =
   { at = at "2026-09-28T06:32:01Z"
   ; body =
       E.Snapshot
         { goal_id
         ; request_id
+        ; verification_run_id
         ; criterion_revision = "rev-1"
         ; passed_at = at "2026-09-28T06:32:00Z"
         ; goal_created_at = at "2026-09-20T01:00:00Z"
@@ -73,12 +74,13 @@ let snapshot ?(goal_id = "goal-1") ?(request_id = "req-1") linked_task_ids : E.t
   }
 ;;
 
-let owed ?(goal_id = "goal-1") ?(request_id = "req-1") () : E.t =
+let owed ?(goal_id = "goal-1") ?(request_id = "req-1") ?(verification_run_id = "run-1") () : E.t =
   { at = at "2026-09-29T05:00:01Z"
   ; body =
       E.Payout_owed
         { goal_id
         ; request_id
+        ; verification_run_id
         ; passed_at = at "2026-09-28T06:32:00Z"
         ; confirmed_at = at "2026-09-29T05:00:00Z"
         }
@@ -241,6 +243,7 @@ let test_a_missing_unattributed_is_written_on_the_next_pass () =
           E.Candidates
             { goal_id = "goal-1"
             ; request_id = "req-1"
+            ; verification_run_id = "run-1"
             ; tasks = []
             ; candidate_task_ids = []
             ; candidate_keepers = []
@@ -399,7 +402,7 @@ let test_a_payout_that_closed_while_the_tasks_were_read_is_left_alone () =
         seed
           base_path
           [ { E.at = at "2026-09-29T05:30:00Z"
-            ; body = E.Unattributed { goal_id; request_id = "req-1"; reason = E.No_candidates }
+            ; body = E.Unattributed { goal_id; request_id = "req-1"; verification_run_id = "run-1"; reason = E.No_candidates }
             }
           ];
         Ok (List.map (fun id -> id, done_by "keeper-a") task_ids))
@@ -430,6 +433,7 @@ let test_candidates_written_by_another_worker_meanwhile_are_not_repeated () =
                 E.Candidates
                   { goal_id
                   ; request_id = "req-1"
+                  ; verification_run_id = "run-1"
                   ; tasks = []
                   ; candidate_task_ids = []
                   ; candidate_keepers = [ "keeper-a" ]
@@ -464,6 +468,7 @@ let test_a_payout_closed_while_its_missing_unattributed_was_being_written_is_lef
           E.Candidates
             { goal_id = "goal-1"
             ; request_id = "req-1"
+            ; verification_run_id = "run-1"
             ; tasks = []
             ; candidate_task_ids = []
             ; candidate_keepers = []
@@ -476,7 +481,7 @@ let test_a_payout_closed_while_its_missing_unattributed_was_being_written_is_lef
       [ { E.at = at "2026-09-29T05:30:00Z"
         ; body =
             E.Unattributed
-              { goal_id = "goal-1"; request_id = "req-1"; reason = E.No_candidates }
+              { goal_id = "goal-1"; request_id = "req-1"; verification_run_id = "run-1"; reason = E.No_candidates }
         }
       ];
     clock
@@ -498,6 +503,7 @@ let test_a_payout_closed_while_its_missing_unattributed_was_being_written_is_lef
    replaces it while the Tasks are read, the rows written for the first are not
    this payout's. *)
 let test_a_payout_replaced_while_the_tasks_were_read_is_left_alone () =
+  List.iter (fun replacement ->
   with_base_path
   @@ fun base_path ->
   enable base_path;
@@ -505,7 +511,7 @@ let test_a_payout_replaced_while_the_tasks_were_read_is_left_alone () =
   let replacing =
     sources
       ~lookups:(fun ~goal_id:_ task_ids ->
-        seed base_path [ owed ~request_id:"req-2" () ];
+        seed base_path [ replacement ];
         Ok (List.map (fun id -> id, done_by "keeper-a") task_ids))
       ()
   in
@@ -515,6 +521,7 @@ let test_a_payout_replaced_while_the_tasks_were_read_is_left_alone () =
     [ Candle_candidates.Superseded { goal_id = "goal-1" } ]
     (drained ~sources:replacing base_path);
   check (list string) "no Candidates for the replaced payout" [ "snapshot"; "payout_owed"; "payout_owed" ] (kinds base_path)
+  ) [ owed ~request_id:"req-2" (); owed ~verification_run_id:"run-2" () ]
 ;;
 
 (* Nobody can be paid for a Goal that linked no Task, so its payout closes

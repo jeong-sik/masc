@@ -200,13 +200,13 @@ let all_keeper_names ~(config : Workspace.config) : string list =
    [\[runtime.lanes\]] table declares, and reporting only declared lanes would
    hide that lane's candidates from the document that is supposed to say what
    dispatch will do. *)
-let dispatchable_lanes ~(config : Workspace.config) (default : Runtime.t option)
+let dispatchable_lanes ~keeper_names (default : Runtime.t option)
   : (Runtime_lane.t * lane_origin) list
   =
   let declared = Runtime.lanes () in
   let seen = List.map Runtime_lane.id declared in
   let implicit =
-    all_keeper_names ~config
+    keeper_names
     |> List.filter_map (fun keeper -> snd (assignment_target default keeper))
     |> List.filter_map (fun id ->
       match Runtime.resolve_assignment id with
@@ -298,6 +298,7 @@ let usage_scope_json ~scope_label (scope, providers) : Yojson.Safe.t =
   in
   `Assoc
     [ "scope", `String (scope_label scope)
+    ; "scope_id", `String (Server_provider_usage_history.scope_id scope)
     ; ( "providers"
       , `List
           (List.map
@@ -316,6 +317,9 @@ let build_at ~now ~generated_at_iso ~(config : Workspace.config) : Yojson.Safe.t
      scope once, so it is not counted twice. *)
   let default, runtimes = Runtime.get_default_and_runtimes () in
   let scopes = usage_scopes (Option.to_list default @ runtimes) in
+  (* The keeper directory is listed once too: the lanes an assignment
+     implies and the assignment rows then name the same fleet. *)
+  let keeper_names = all_keeper_names ~config in
   (* This document can be read without authentication in non-strict mode.
      Keep account homes and credential-file paths in typed internal scopes;
      expose only response-local, consistent join keys. Every row below is
@@ -349,9 +353,8 @@ let build_at ~now ~generated_at_iso ~(config : Workspace.config) : Yojson.Safe.t
     ; "media_failover", Json_util.json_string_list (Runtime.media_failover ())
     ; ( "media_failover_declared"
       , Json_util.json_string_list (Runtime.declared_media_failover ()) )
-    ; "lanes", `List (List.map lane_json (dispatchable_lanes ~config default))
-    ; ( "assignments"
-      , `List (List.map (assignment_json default) (all_keeper_names ~config)) )
+    ; "lanes", `List (List.map lane_json (dispatchable_lanes ~keeper_names default))
+    ; "assignments", `List (List.map (assignment_json default) keeper_names)
     ; "provider_usage_windows_since", `Float Usage.recording_since
     ; ( "provider_usage_windows"
       , `List (List.map (usage_scope_json ~scope_label) scopes) )

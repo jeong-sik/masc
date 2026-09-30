@@ -22,6 +22,7 @@ type body =
   | Snapshot of
       { goal_id : string
       ; request_id : string
+      ; verification_run_id : string
       ; criterion_revision : string
       ; passed_at : Candle_time.t
       ; goal_created_at : Candle_time.t
@@ -34,12 +35,14 @@ type body =
   | Payout_owed of
       { goal_id : string
       ; request_id : string
+      ; verification_run_id : string
       ; passed_at : Candle_time.t
       ; confirmed_at : Candle_time.t
       }
   | Candidates of
       { goal_id : string
       ; request_id : string
+      ; verification_run_id : string
       ; tasks : (string * task_lookup) list
       ; candidate_task_ids : string list
       ; candidate_keepers : string list
@@ -47,6 +50,7 @@ type body =
   | Unattributed of
       { goal_id : string
       ; request_id : string
+      ; verification_run_id : string
       ; reason : unattributed_reason
       }
 
@@ -104,6 +108,7 @@ let body_fields : body -> (string * Yojson.Safe.t) list = function
   | Snapshot s ->
     [ "goal_id", `String s.goal_id
     ; "request_id", `String s.request_id
+    ; "verification_run_id", `String s.verification_run_id
     ; "criterion_revision", `String s.criterion_revision
     ; "passed_at", Candle_time.to_yojson s.passed_at
     ; "goal_created_at", Candle_time.to_yojson s.goal_created_at
@@ -116,12 +121,14 @@ let body_fields : body -> (string * Yojson.Safe.t) list = function
   | Payout_owed p ->
     [ "goal_id", `String p.goal_id
     ; "request_id", `String p.request_id
+    ; "verification_run_id", `String p.verification_run_id
     ; "passed_at", Candle_time.to_yojson p.passed_at
     ; "confirmed_at", Candle_time.to_yojson p.confirmed_at
     ]
   | Candidates c ->
     [ "goal_id", `String c.goal_id
     ; "request_id", `String c.request_id
+    ; "verification_run_id", `String c.verification_run_id
     ; ( "tasks"
       , `List (List.map (fun (task_id, lookup) -> `Assoc (lookup_fields task_id lookup)) c.tasks) )
     ; "candidate_task_ids", text_list c.candidate_task_ids
@@ -130,6 +137,7 @@ let body_fields : body -> (string * Yojson.Safe.t) list = function
   | Unattributed u ->
     [ "goal_id", `String u.goal_id
     ; "request_id", `String u.request_id
+    ; "verification_run_id", `String u.verification_run_id
     ; "reason", `String (unattributed_reason_text u.reason)
     ]
 ;;
@@ -145,6 +153,7 @@ let snapshot_of_fields ~context fields =
   let field key decode fields = Candle_json.field ~context key decode fields in
   let* goal_id, fields = field "goal_id" Candle_json.as_non_blank fields in
   let* request_id, fields = field "request_id" Candle_json.as_non_blank fields in
+  let* verification_run_id, fields = field "verification_run_id" Candle_json.as_non_blank fields in
   let* criterion_revision, fields =
     field "criterion_revision" Candle_json.as_non_blank fields
   in
@@ -168,6 +177,7 @@ let snapshot_of_fields ~context fields =
     (Snapshot
        { goal_id
        ; request_id
+       ; verification_run_id
        ; criterion_revision
        ; passed_at
        ; goal_created_at
@@ -183,10 +193,11 @@ let payout_owed_of_fields ~context fields =
   let field key decode fields = Candle_json.field ~context key decode fields in
   let* goal_id, fields = field "goal_id" Candle_json.as_non_blank fields in
   let* request_id, fields = field "request_id" Candle_json.as_non_blank fields in
+  let* verification_run_id, fields = field "verification_run_id" Candle_json.as_non_blank fields in
   let* passed_at, fields = field "passed_at" Candle_time.of_yojson fields in
   let* confirmed_at, fields = field "confirmed_at" Candle_time.of_yojson fields in
   let* () = Candle_json.finish ~context fields in
-  Ok (Payout_owed { goal_id; request_id; passed_at; confirmed_at })
+  Ok (Payout_owed { goal_id; request_id; verification_run_id; passed_at; confirmed_at })
 ;;
 
 let status_of_fields ~status ~completed_at =
@@ -236,6 +247,7 @@ let candidates_of_fields ~context fields =
   let field key decode fields = Candle_json.field ~context key decode fields in
   let* goal_id, fields = field "goal_id" Candle_json.as_non_blank fields in
   let* request_id, fields = field "request_id" Candle_json.as_non_blank fields in
+  let* verification_run_id, fields = field "verification_run_id" Candle_json.as_non_blank fields in
   let* tasks, fields = field "tasks" (Candle_json.as_list lookup_of_json) fields in
   let* candidate_task_ids, fields =
     field "candidate_task_ids" (Candle_json.as_list Candle_json.as_non_blank) fields
@@ -244,7 +256,7 @@ let candidates_of_fields ~context fields =
     field "candidate_keepers" (Candle_json.as_list Candle_json.as_non_blank) fields
   in
   let* () = Candle_json.finish ~context fields in
-  Ok (Candidates { goal_id; request_id; tasks; candidate_task_ids; candidate_keepers })
+  Ok (Candidates { goal_id; request_id; verification_run_id; tasks; candidate_task_ids; candidate_keepers })
 ;;
 
 let unattributed_reason_of_json json =
@@ -258,9 +270,10 @@ let unattributed_of_fields ~context fields =
   let field key decode fields = Candle_json.field ~context key decode fields in
   let* goal_id, fields = field "goal_id" Candle_json.as_non_blank fields in
   let* request_id, fields = field "request_id" Candle_json.as_non_blank fields in
+  let* verification_run_id, fields = field "verification_run_id" Candle_json.as_non_blank fields in
   let* reason, fields = field "reason" unattributed_reason_of_json fields in
   let* () = Candle_json.finish ~context fields in
-  Ok (Unattributed { goal_id; request_id; reason })
+  Ok (Unattributed { goal_id; request_id; verification_run_id; reason })
 ;;
 
 let of_yojson json =

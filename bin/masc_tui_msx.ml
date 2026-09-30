@@ -364,6 +364,20 @@ let last_surface () =
   match !retained with Some r -> r.pixels | None -> None
 ;;
 
+(* A disk game answers every numbered prompt with a number and Return, and a
+   typed number is fixed with Backspace, so both reach the machine. The decoder
+   names them "\r" and "\127" or "\b" as plain bytes, and "enter" and
+   "backspace" under the kitty keyboard protocol. *)
+let server_key = function
+  | " " -> Some "space"
+  | ("up" | "down" | "left" | "right") as direction -> Some direction
+  | "\r" | "\n" | "enter" -> Some "return"
+  | "\127" | "\b" | "backspace" -> Some "backspace"
+  | name when String.length name = 1 && Char.code name.[0] >= 33 && Char.code name.[0] < 127 ->
+      Some name
+  | _ -> None
+;;
+
 let consume ~(write : string -> unit) (state : Masc_tui_types.state) key =
   if String.equal key "esc" then begin
     invalidate ();

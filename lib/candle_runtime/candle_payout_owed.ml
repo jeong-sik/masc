@@ -11,7 +11,8 @@ let row ~at ~(goal : Goal_store.goal) ~(verdict : Goal_verification.verdict)
     { Candle_event.at
     ; body =
         Candle_event.Payout_owed
-          { goal_id = goal.id; request_id = verdict.request_id; passed_at; confirmed_at }
+          { goal_id = goal.id; request_id = verdict.request_id
+          ; verification_run_id = verdict.verification_run_id; passed_at; confirmed_at }
     }
 ;;
 
@@ -23,6 +24,7 @@ let write ~now (config : Workspace_utils_backend_setup.config) goal verdict conf
          Candle_payout.owed_pass
            ~goal_id:goal.Goal_store.id
            ~request_id:verdict.Goal_verification.request_id
+           ~verification_run_id:verdict.verification_run_id
            ~passed_at:verdict.recorded_at
            (Candle_ledger.events view)
        with

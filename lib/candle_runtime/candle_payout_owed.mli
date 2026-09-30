@@ -12,6 +12,10 @@
     confirmation is refused, which is the state a phase that could not be saved
     leaves.
 
+    The confirmed verifier run identifies its Snapshot. Two runs answering
+    the same request within one second are distinct even when their
+    [recorded_at] strings are equal.
+
     It writes nothing unless Candle is enabled. It also writes nothing when the
     pass has no [Snapshot], because Candle was not on when the Goal passed, and
     when the Goal already owes a payout ({!Candle_payout.owed_pass}). While

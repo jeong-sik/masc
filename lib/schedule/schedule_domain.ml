@@ -42,6 +42,10 @@ type recurrence =
 type payload =
   { kind : string
   ; body : Yojson.Safe.t
+  ; digest : string
+    (* [payload_digest], taken once when the payload is decoded: a decoded
+       payload is never changed, and every schedule runner tick reads the
+       digest of each stored schedule's payload. *)
   }
 
 type cancellation =
@@ -637,9 +641,8 @@ let cancellation_of_yojson = function
   | _ -> Error "expected cancellation object"
 ;;
 
-let payload_to_yojson payload =
-  `Assoc [ "kind", `String payload.kind; "body", payload.body ]
-;;
+let payload_json ~kind ~body = `Assoc [ "kind", `String kind; "body", body ]
+let payload_to_yojson payload = payload_json ~kind:payload.kind ~body:payload.body
 
 let payload_of_yojson = function
   | `Assoc fields ->
@@ -653,12 +656,12 @@ let payload_of_yojson = function
     let* kind = nonempty "payload.kind" kind in
     let* body = assoc_field "body" fields in
     (match body with
-     | `Assoc _ -> Ok { kind; body }
+     | `Assoc _ -> Ok { kind; body; digest = sha256_json (payload_json ~kind ~body) }
      | _ -> Error "payload.body must be a JSON object")
   | _ -> Error "payload must be a JSON object"
 ;;
 
-let payload_digest payload = payload |> payload_to_yojson |> sha256_json
+let payload_digest payload = payload.digest
 
 let seconds_per_day = 86400.0
 

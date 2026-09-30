@@ -18,8 +18,6 @@ module Http = Http_server_eio
 let invites_path = "/api/v1/play/invites"
 let invite_prefix = invites_path ^ "/"
 
-let error_json code message = `Assoc [ ("error", `String code); ("message", `String message) ]
-
 let decode_issue body =
   let ( let* ) = Result.bind in
   let* json =
@@ -49,7 +47,7 @@ let decode_issue body =
 
 let issue_response ~config ~body =
   match decode_issue body with
-  | Error message -> `Bad_request, error_json "invalid_request" message
+  | Error message -> `Bad_request, Server_refusal.json ~code:"invalid_request" message
   | Ok (name, hours) ->
     (match
        Play_invite.issue ~base_path:config.Workspace.base_path
@@ -65,30 +63,26 @@ let issue_response ~config ~body =
            ] )
      | Error (Play_invite.Not_ready gaps) ->
        ( `Conflict
-       , `Assoc
-           [ ("error", `String "not_ready")
-           ; ( "message"
-             , `String
-                 "an invite needs auth enabled with require_token, and MASC_HTTP_BASE_URL set" )
-           ; ( "missing"
-             , `List (List.map (fun gap -> `String (Play_invite.readiness_gap_to_string gap)) gaps) )
-           ] )
+       , Server_refusal.json ~code:"not_ready"
+           ~fields:
+             [ ( "missing"
+               , `List (List.map (fun gap -> `String (Play_invite.readiness_gap_to_string gap)) gaps) )
+             ]
+           "an invite needs auth enabled with require_token, and MASC_HTTP_BASE_URL set" )
      | Error (Play_invite.Name_taken by) ->
        ( `Conflict
-       , `Assoc
-           [ ("error", `String "name_taken")
-           ; ("message", `String "another participant already has this name")
-           ; ("taken_by", `String (Play_invite.taken_by_to_string by))
-           ] )
+       , Server_refusal.json ~code:"name_taken"
+           ~fields:[ ("taken_by", `String (Play_invite.taken_by_to_string by)) ]
+           "another participant already has this name" )
      | Error (Play_invite.Keeper_names_unreadable detail) ->
-       `Service_unavailable, error_json "keepers_unreadable" detail
+       `Service_unavailable, Server_refusal.json ~code:"keepers_unreadable" detail
      | Error (Play_invite.Hours_out_of_range hours) ->
        ( `Bad_request
-       , error_json "invalid_request"
+       , Server_refusal.json ~code:"invalid_request"
            (Printf.sprintf "hours must be between %d and %d, got %d"
               Masc_domain.min_token_expiry_hours Masc_domain.max_token_expiry_hours hours) )
      | Error (Play_invite.Credential_not_saved err) ->
-       `Internal_server_error, error_json "not_saved" (Masc_domain.masc_error_to_string err))
+       `Internal_server_error, Server_refusal.json ~code:"not_saved" (Masc_domain.masc_error_to_string err))
 
 let current_controller () =
   match Tool_misc_dos_lane.off_domain Dos_lane.screen with
@@ -134,17 +128,12 @@ let release_fields = function
 
 let revoke_response ~config ~by ~raw_name =
   match Play_invite.Name.of_string raw_name with
-  | Error message -> `Bad_request, error_json "invalid_request" message
+  | Error message -> `Bad_request, Server_refusal.json ~code:"invalid_request" message
   | Ok name ->
     let holder = Play_invite.Name.to_string name in
-    let no_such_invite () = `Not_found, error_json "no_such_invite" ("no invite is named " ^ raw_name) in
-    (match Play_invite.revoke ~base_path:config.Workspace.base_path ~name with
-     | Error (Play_invite.Not_an_invite role) ->
-       ( `Conflict
-       , error_json "not_an_invite"
-           (Printf.sprintf "%s is a %s credential, not an invite" raw_name
-              (Masc_domain.agent_role_to_string role)) )
-     | Ok Play_invite.Deleted ->
+    let no_such_invite () = `Not_found, Server_refusal.json ~code:"no_such_invite" ("no invite is named " ^ raw_name) in
+    let after_revoke = function
+     | Play_invite.Deleted ->
        ( `OK
        , `Assoc
            (("name", `String holder) :: ("revoked", `Bool true)
@@ -154,9 +143,9 @@ let revoke_response ~config ~by ~raw_name =
         fail; revoking again frees it then. A keeper's name is left alone:
         its controller is the keeper's, and [Keeper_dos_controller] decides
         when that one is let go. *)
-     | Ok Play_invite.Already_gone ->
+     | Play_invite.Already_gone ->
        (match Play_seat.keeper_names config with
-        | Error detail -> `Service_unavailable, error_json "keepers_unreadable" detail
+        | Error detail -> `Service_unavailable, Server_refusal.json ~code:"keepers_unreadable" detail
         | Ok keepers when Play_invite.is_keeper_name ~keepers name -> no_such_invite ()
         | Ok _ ->
           (match release_controller ~holder ~by with
@@ -165,11 +154,31 @@ let revoke_response ~config ~by ~raw_name =
              , `Assoc
                  (("name", `String holder) :: ("revoked", `Bool false) :: release_fields Released) )
            | Not_held -> no_such_invite ()
-           | Release_failed _ as failed ->
+           | Release_failed message as failed ->
              ( `Internal_server_error
-             , `Assoc
-                 (("error", `String "release_failed") :: ("name", `String holder)
-                  :: release_fields failed) ))))
+             , Server_refusal.json ~code:"release_failed"
+                 ~fields:(("name", `String holder) :: release_fields failed)
+                 (Printf.sprintf "%s holds the DOS controller and it could not be released: %s"
+                    holder message) )))
+    in
+    let revoked =
+      Play_invite.revoke ~base_path:config.Workspace.base_path ~name ~after_revoke
+      |> Tool_misc_dos_lane.after_announcing
+    in
+    (match revoked with
+     | Ok response -> response
+     | Error (Play_invite.Not_an_invite role) ->
+       ( `Conflict
+       , Server_refusal.json ~code:"not_an_invite"
+           (Printf.sprintf "%s is a %s credential, not an invite" raw_name
+              (Masc_domain.agent_role_to_string role)) )
+     | Error (Play_invite.Credential_not_deleted error) ->
+       `Service_unavailable,
+       Server_refusal.json ~code:"not_deleted" (Masc_domain.masc_error_to_string error))
+
+module For_testing = struct
+  let revoke_response = revoke_response
+end
 
 (* One issue or revoke at a time. The name check and the credential write are
    separate file operations that yield, so two requests for one name could
@@ -199,7 +208,7 @@ let add_routes router =
          (fun state by request reqd ->
            let status, json =
              match Server_utils.extract_path_param ~prefix:invite_prefix (Http.Request.path request) with
-             | None -> `Bad_request, error_json "invalid_request" "an invite name is required"
+             | None -> `Bad_request, Server_refusal.json ~code:"invalid_request" "an invite name is required"
              | Some raw_name ->
                one_at_a_time (fun () ->
                  revoke_response ~config:(Mcp_server.workspace_config state) ~by ~raw_name)

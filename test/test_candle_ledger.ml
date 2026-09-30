@@ -35,6 +35,7 @@ let snapshot ?(request_id = "req-1") goal_id : E.t =
       E.Snapshot
         { goal_id
         ; request_id
+        ; verification_run_id = "run-1"
         ; criterion_revision = "rev-1"
         ; passed_at = at "2026-09-28T06:32:00Z"
         ; goal_created_at = at "2026-09-20T01:00:00Z"

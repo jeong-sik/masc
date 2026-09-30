@@ -43,6 +43,8 @@ named logs below with `gzip -dc <name>.log.gz`.
 | Chromium A/B fixture | browser-run-2.json / browser-run-2.log, browser/receipt.json | exit 0 |
 | Python evidence runner lint and format | python-lint.json / .log, python-format.json / .log | exit 0 |
 | Python evidence runner strict type check | python-typecheck-checked.json / .log | exit 0; 1 file; 0 errors/warnings |
+| New changelog fragment | changelog-fragment.json / .log | exit 0; 1 fragment OK |
+| Whole changelog directory | changelog-full.json / .log | exit 1; 11 malformed inherited entries |
 
 Full Vitest ran from 2026-09-30T15:19:20.947982Z to
 2026-09-30T15:26:03.285341Z. The uncompressed full log has 158,813 bytes and SHA256
@@ -57,6 +59,14 @@ stubs. The package's public Node entry point passed with
 `{"typeCheckingMode":"strict","include":["docs/evidence/2026-09-30-namespace-resume/run.py"]}`.
 [근거] Named command receipts and complete logs above, 2026-09-30 UTC; High
 for these local executions. No PR CI result is asserted.
+
+The whole changelog check fails on 40282, 40293, 40296, 40301, 40304, 40306,
+40316, 40319, 40320, 40325 and 40327. These inherited files are unchanged in
+this PR; `git diff ae82a3b855cc5cb8c37a134ef01eebff35368bc3 HEAD --name-only
+-- changelog.d` lists only 40378.md. The same 11-file defect is tracked in
+[#40360](https://github.com/jeong-sik/masc/issues/40360). The 40378.md-only
+control uses the existing checker with `--dir` and passes. The global check
+must be repaired separately before claiming it passes.
 
 ## Browser result and limits
 

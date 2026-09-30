@@ -762,7 +762,87 @@ let detail_keeps_installation_ownership () =
   check bool "replacement cannot inherit old detail's evidence export" true
     (Result.is_error (UI.evidence_request refreshed))
 
+let declared_results_show_body_before_activity_and_keep_raw_evidence () =
+  let module P = Masc.Lane_addon_presentation in
+  let display = P.of_json (`Assoc ["description",`String "Read an analysis report";
+    "readings",`List [
+      `Assoc ["lane_id",`String "report";"path",`List [`String "body"];
+        "label",`String "Report";"format",`String "text"];
+      `Assoc ["lane_id",`String "report";"path",`List [`String "complete"];
+        "label",`String "Input complete";"format",`String "boolean"];
+      `Assoc ["lane_id",`String "report";"path",`List [`String "delivery"];
+        "label",`String "Delivery";"format",`String "text"]]]) |> ok in
+  let worker : UI.instance = {id="report-worker";incarnation="incarnation";run_id="project";
+    addon_id="custom";title="Project report";revision="1";phase=UI.Row.Attached;
+    observation_seq=1;rows_count=1;source_path=None;binding=`Assoc ["sources",`List []];
+    outputs=[];skills_directory=None;action_schema=None;binding_schema=None;display} in
+  let row : UI.Row.row = {id="report-row";lane_id="report-worker/report";kind=UI.Row.Value;
+    title="Useful analysis";observed_at=1.;subject_id="project";clock=None;actor=None;
+    fields=["body",`String "First finding\nSecond finding";"complete",`Bool false;
+      "delivery",`String "not attempted";"private_coordinate",`String "retained in raw"];
+    evidence=[];related_ids=[]} in
+  let snapshot : UI.snapshot = {instances=[worker];output={rows=[row];coverage=[]};
+    complete=None;configuration=None} in
+  let overview = {UI.initial with snapshot=Some snapshot} in
+  check bool "package purpose is visible before opening" true
+    (List.mem "    Read an analysis report" (UI.lines ~width:100 overview));
+  let detail = UI.open_selected_instance overview in
+  let lines = UI.lines ~width:100 detail in
+  check bool "body is multiline text, not escaped JSON" true
+    (List.mem "  Report: First finding" lines && List.mem "  Second finding" lines);
+  check bool "partial input and delivery remain distinct" true
+    (List.mem "  Input complete: false" lines && List.mem "  Delivery: not attempted" lines);
+  check bool "the visible report carries the selected marker" true
+    (List.mem "> Useful analysis" lines);
+  let index value = List.find_index (String.equal value) lines |> Option.get in
+  check bool "results precede the activity timeline" true
+    (index "  Second finding" < index "Activity timeline");
+  let raw_lines = UI.lines ~width:100 {detail with presentation=UI.Technical} in
+  check bool "raw coordinates remain under details with the JSON formatter's layout" true
+    (List.for_all (fun line -> List.mem line raw_lines)
+      (String.split_on_char '\n' (Yojson.Safe.pretty_to_string (`Assoc row.fields))));
+  let second = {row with id="second-report";title="Another analysis";observed_at=2.;
+    fields=["body",`String "Other first finding\nOther second finding";
+      "complete",`Bool true;"delivery",`String "not attempted"]} in
+  let two = {detail with snapshot=Some {snapshot with output={rows=[row;second];coverage=[]}}} in
+  let before = UI.lines ~width:100 two in
+  check bool "only the selected report expands its body" true
+    (List.mem "> Useful analysis" before && List.mem "  Another analysis" before
+     && not (List.mem "  Report: Other first finding" before));
+  let moved = UI.move_observation {two with scroll=7} 1 in
+  let after = UI.lines ~width:100 moved in
+  check int "selecting another report starts at its visible result" 0 moved.scroll;
+  check bool "actual activity navigation moves the expanded body and marker together" true
+    (List.mem "> Another analysis" after
+     && List.mem "  Report: Other first finding" after
+     && List.mem "  Other second finding" after
+     && not (List.mem "  Report: First finding" after));
+  check (option string) "the raw detail target is the visible selected report"
+    (Some second.id) (Option.map (fun (row : UI.Row.row) -> row.id) (UI.selected_row moved));
+  let moved_raw = UI.lines ~width:100 {moved with presentation=UI.Technical} in
+  check bool "D exposes the same report and excludes the previous one" true
+    (List.mem "Row second-report" moved_raw && not (List.mem "Row report-row" moved_raw));
+  let unselected = {two with row_cursor=(-1)} in
+  let unselected_lines = UI.lines ~width:100 unselected in
+  check bool "a vanished selection asks for explicit navigation without choosing a report" true
+    (List.mem "Choose a result with j/k." unselected_lines
+     && not (List.mem "> Useful analysis" unselected_lines)
+     && not (List.mem "  Report: First finding" unselected_lines));
+  check (option string) "j explicitly chooses a report from no selection" (Some row.id)
+    (Option.map (fun (row : UI.Row.row) -> row.id)
+      (UI.selected_row (UI.move_observation unselected 1)));
+  let missing = {row with fields=[]} in
+  let missing_detail = {detail with snapshot=Some {snapshot with output={rows=[missing];coverage=[]}}} in
+  check bool "missing declared data is explicitly unavailable" true
+    (List.mem "  Report: unavailable · field unavailable" (UI.lines ~width:100 missing_detail));
+  let foreign = {row with lane_id="report-worker/other"} in
+  check bool "readings are scoped to the exact declared Lane" true
+    (not (List.mem "  Report: First finding" (UI.lines ~width:100
+      {detail with snapshot=Some {snapshot with output={rows=[foreign];coverage=[]}}})))
+
 let () = run "TUI Lane package operations" ["operator scenarios",[
+  test_case "declared results show body before activity and preserve raw evidence" `Quick
+    declared_results_show_body_before_activity_and_keep_raw_evidence;
   test_case "detail keeps installation ownership for edit, navigation and export" `Quick detail_keeps_installation_ownership;
   test_case "refresh retains exact operator targets and exposes failure" `Quick refresh_preserves_operator_target;
   test_case "evidence export chooses a Keeper by name" `Quick evidence_export_chooses_a_keeper_by_name;

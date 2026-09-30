@@ -850,6 +850,21 @@ let reading_summary fields =
         Some (key ^ "=" ^ Yojson.Safe.to_string value)
     | _ -> None) |> String.concat " · "
 
+let result_lines (instance : instance) (row : Row.row) =
+  let module P = Masc.Lane_addon_presentation in
+  let readings = List.filter (fun (reading : P.reading) ->
+    String.equal row.lane_id (instance.id ^ "/" ^ reading.lane_id))
+    instance.display.readings in
+  match readings with
+  | [] ->
+      let summary = reading_summary row.fields in
+      if summary="" then [] else ["  " ^ summary]
+  | readings -> List.concat_map (fun (reading : P.reading) ->
+      let rendered = match P.render reading (`Assoc row.fields) with
+        | Ok text -> text
+        | Error detail -> reading.label ^ ": unavailable · " ^ detail in
+      String.split_on_char '\n' rendered |> List.map (fun line -> "  " ^ line)) readings
+
 let overview_lines ~width view =
   let wrap text = Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
     (Masc.Tui_decode.sanitize_terminal_text text) in
@@ -913,7 +928,9 @@ let overview_lines ~width view =
                         ("D:full · " ^ detail)
                       |> List.map (fun line -> "    " ^ line)
                   | _ -> [] in
-                [lead; controls] @ detail) items
+                [lead]
+                @ Option.to_list (Option.map (fun text -> "    " ^ text) item.display.description)
+                @ [controls] @ detail) items
   in
   List.concat_map wrap ([ overview_hints view; "" ]
     @ diagnostic_lines view @ content @ action_lines view)
@@ -921,7 +938,7 @@ let overview_lines ~width view =
 let help_lines = [
   "Lane Add-ons keys · Esc:close";
   "List: j/k select · Enter open · i install · n new TOML";
-  "Detail: 1 Activity · 2 Links · 3 Installation · 4 Records · Tab next";
+  "Detail: 1 Results · 2 Links · 3 Installation · 4 Records · Tab next";
   "Both: ?:help · Esc back · q back · r refresh · J/K scroll";
   "Actions: o observe/retry · d remove/cleanup · a advertised actions";
   "Actions: t check last request · D raw details · f flow";
@@ -940,20 +957,29 @@ let detail_lines ~width view =
       let tab focus label = if view.focus=focus then "[" ^ label ^ "]" else label in
       let header = item.title ^ " · " ^ phase_label item.phase in
       let tabs = String.concat "  " [
-        tab Timeline "1 Activity"; tab Connections "2 Links";
+        tab Timeline "1 Results"; tab Connections "2 Links";
         tab Configurations "3 Installation"; tab Rows "4 Records"] in
       let rows = List.map snd (rows_in_screen view snapshot) in
       let body = match view.focus with
       | Timeline | Instances ->
           if rows=[] then ["No observations yet. o:observe this Add-on."]
-          else ["Horizontal Lane timeline"]
+          else Option.to_list item.display.description
+            @ [""; "Results"]
+            @ (match selected_row view with
+               | None -> ["Choose a result with j/k."; ""]
+               | Some row ->
+                   ["> " ^ row.title; "  " ^ utc_stamp row.observed_at ^ " UTC"]
+                   @ result_lines item row @ [""])
+            @ (let other_rows = List.filter (fun (row : Row.row) ->
+                 match selected_row view with
+                 | None -> true
+                 | Some selected -> not (String.equal selected.id row.id)) rows in
+               if other_rows=[] then [] else
+                 ["Other results · j/k to select"]
+                 @ List.map (fun (row : Row.row) -> "  " ^ row.title) other_rows
+                 @ [""])
+            @ ["Activity timeline"]
             @ timeline_lines ~width ~instances:[item] ?selected:(selected_row view) rows
-            @ [""; "Observations"]
-            @ List.concat_map (fun (row : Row.row) ->
-                let summary = reading_summary row.fields in
-                [row.title ^ " · " ^ row.lane_id;
-                 "  " ^ utc_stamp row.observed_at ^ " UTC" ^
-                 (if summary="" then "" else " · " ^ summary)]) rows
             @ (if snapshot.output.coverage=[] then [] else [""; "Coverage for this slice"])
             @ List.map (fun (source : Row.coverage) ->
                 source.source_id ^ " · " ^ (if source.complete then "complete" else "PARTIAL") ^

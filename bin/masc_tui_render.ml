@@ -7285,10 +7285,6 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
       let items = Keeper_portrait_item.all in
       let count = List.length items in
       let cursor = max 0 (min (count - 1) state.item_cursor) in
-      let reserved = 2 + 1 +
-        (match portrait_reading with Tui_decode.Ready _ -> 0 | Tui_decode.Unavailable _ -> 1) in
-      let visible = min count (max 1 (base_height - reserved)) in
-      let first = max 0 (min (cursor - (visible / 2)) (count - visible)) in
       let item_account_facts item =
         match account with
         | Some (Item_account.Ready account) ->
@@ -7309,6 +7305,33 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
             Some (price ^ (if owned then " owned" else ""))
         | Some (Item_account.Off | Item_account.Disabled _) | None -> None
       in
+      let headline =
+        [ Printf.sprintf "  Items %d/%d · j/k to preview" (cursor + 1) count
+        ; account_line
+        ]
+      in
+      let observation =
+        match portrait_reading with
+        | Tui_decode.Ready _ -> []
+        | Tui_decode.Unavailable reason ->
+            [ "  Portrait unavailable: " ^ Terminal_text.single_line reason ]
+      in
+      let selected_facts =
+        match List.nth_opt items cursor with
+        | None -> []
+        | Some item ->
+          (match item_account_facts item with
+           | Some facts -> [ "  Selected: " ^ facts ]
+           | None -> [])
+      in
+      (* Reserve every emitted fixed row, including the selected account
+         facts. Otherwise a Ready account creates one unbudgeted row and the
+         overflow indicator hides the preview footer in a short pane. *)
+      let footer = [ "  Preview changes this picture only." ] in
+      let reserved = List.length headline + List.length selected_facts
+        + List.length observation + List.length footer in
+      let visible = min count (max 1 (base_height - reserved)) in
+      let first = max 0 (min (cursor - (visible / 2)) (count - visible)) in
       let rows =
         items
         |> List.mapi (fun index item -> index, item)
@@ -7339,32 +7362,12 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                  account_facts
                  (if worn then " equipped" else "")))
       in
-      let headline =
-        [ Printf.sprintf "  Items %d/%d · j/k to preview" (cursor + 1) count
-        ; account_line
-        ]
-      in
       let listing =
         match portrait with
         | Some band -> Masc_tui_keeper_portrait.beside band (headline @ rows)
         | None -> headline @ rows
       in
-      let observation =
-        match portrait_reading with
-        | Tui_decode.Ready _ -> []
-        | Tui_decode.Unavailable reason ->
-            [ "  Portrait unavailable: " ^ Terminal_text.single_line reason ]
-      in
-      let selected_facts =
-        match List.nth_opt items cursor with
-        | None -> []
-        | Some item ->
-          (match item_account_facts item with
-           | Some facts -> [ "  Selected: " ^ facts ]
-           | None -> [])
-      in
-      listing @ selected_facts @ observation
-      @ [ "  Preview changes this picture only." ]
+      listing @ selected_facts @ observation @ footer
     in
 
     (* Each tab projects only when selected. Retained data for the other

@@ -2,21 +2,6 @@
 
 ## [Unreleased]
 
-### Fixed
-
-- Use the catalog-known loopback release runtime in Item HTTP acceptance so the optional Candle appraiser lane can be published without provider credentials or calls.
-
-- Withdraw Item accounts and pending Keeper detail reads when the observed workspace identity changes, retaining monotonic request generations to reject delayed replies after returning to the workspace.
-
-### Added
-
-- Verify Item ownership, wallet and purchased equipment survive an isolated native server restart, including duplicate purchase rejection in a new MCP session.
-
-- Capture the Item tab in the production dashboard served by an isolated native CI server after an authenticated free purchase and equipment change.
-
-- Extend isolated Item HTTP acceptance through authenticated MCP free purchases and equipment, checking ledger ownership and changed/restored portrait bytes.
-- Optional Item HTTP acceptance in the manual Linux probe workflow, with source-matched native/dashboard artifacts and an isolated synthetic Keeper workspace.
-
 ## [0.49.0] - 2026-09-29
 
 ### Fresh state required

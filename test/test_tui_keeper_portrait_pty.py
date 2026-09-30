@@ -313,6 +313,7 @@ def item_tab_previews_accessories(binary: str) -> None:
         second = last_frame_rows(output)
         assert row_of(second, b"shades") > 0
         assert portrait_rows(second), "the selected accessory lost its picture"
+        assert row_of(second, b"Selected: 1.000") > 0
         assert row_of(second, b"Preview changes this picture only") > 0
         capture_item_screen(output, "shades-preview")
         # Read the current completed viewport after each navigation or resize.
@@ -321,7 +322,10 @@ def item_tab_previews_accessories(binary: str) -> None:
                           final_cursor=b"\x1b[?25l")
         h.send_and_wait(process, fd, output, b"\x1b[F", b"Items 18/18")
         h.drain_until_quiet(process, fd, output)
-        assert row_of(last_frame_rows(output), b"> 18 base  dish_oak") > 0
+        short_last = last_frame_rows(output)
+        assert row_of(short_last, b"> 18 base  dish_oak") > 0
+        assert row_of(short_last, b"Selected: 1.000") > 0
+        assert row_of(short_last, b"Preview changes this picture only") > 0
         h.send_and_wait(process, fd, output, b"\x1b[H", b"Items 1/18")
         h.drain_until_quiet(process, fd, output)
         assert row_of(last_frame_rows(output), b">  1 face  glasses") > 0

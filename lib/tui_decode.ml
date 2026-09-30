@@ -88,8 +88,13 @@ let keeper_phase_band : keeper_phase -> keeper_phase_band = function
 
 type keeper_activation_mode = Activation_manual | Activation_on_demand | Activation_autonomous
 
+type keeper_portrait = Keeper_portrait_equipment.reading =
+  | Ready of Keeper_portrait_look.equipment
+  | Unavailable of string
+
 type keeper_runtime = {
   kr_name : string;
+  kr_portrait : keeper_portrait;
   kr_health : keeper_health;
   kr_paused : bool;
   kr_next_action : Keeper_status_runtime.keeper_next_action_path option;
@@ -5880,6 +5885,7 @@ let decode_overview_goals json =
 
 let decode_keeper_runtime json =
   let* kr_name = required_string_field json "name" in
+  let* kr_portrait = Keeper_portrait_equipment.reading_of_json (member "portrait" json) in
   let* raw_health = required_string_field json "health" in
   let* kr_health =
     match keeper_health_of_string raw_health with
@@ -5931,6 +5937,7 @@ let decode_keeper_runtime json =
   in
   Ok
     { kr_name
+    ; kr_portrait
     ; kr_health
     ; kr_paused
     ; kr_next_action

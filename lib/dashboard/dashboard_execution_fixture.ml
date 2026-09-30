@@ -2,6 +2,8 @@ include Dashboard_execution_helpers
 
 let execution_smoke_fixture_json () =
   let generated_at = Masc_domain.now_iso () in
+  let portrait = Keeper_portrait_equipment.reading_to_json
+      (Keeper_portrait_equipment.Ready (Keeper_portrait_look.equipment_of_name "dm-keeper")) in
   let command_handoff =
     handoff_json
       ~surface:"command"
@@ -224,6 +226,7 @@ let execution_smoke_fixture_json () =
             `Assoc
               [
                 ("name", `String "dm-keeper");
+                ("portrait", portrait);
                 ("status", `String "active");
                 ("tone", `String "bad");
                 ("state", `String "critical");
@@ -380,6 +383,7 @@ let execution_smoke_fixture_json () =
             `Assoc
               [
                 ("name", `String "dm-keeper");
+                ("portrait", portrait);
                 ("status", `String "active");
                 ("turn_count", `Int 84);
                 ("context_ratio", `Float 0.91);

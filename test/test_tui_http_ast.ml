@@ -2759,6 +2759,9 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
         (* Hashes the name into the portrait's look; what it returns is
            pixels and cells, never the name's text. *)
       ; "Masc_tui_keeper_portrait.shown"
+        (* Item preview hashes the name by the same portrait path and returns
+           only pixels; no Keeper-name text reaches terminal cells. *)
+      ; "Masc_tui_keeper_portrait.preview"
       ]
     "keeper_detail_pane"
     [ "k_name"

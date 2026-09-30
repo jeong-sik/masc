@@ -1154,7 +1154,7 @@ self_test() {
   # grows; the tree guard is what it must never lose.
   # Expected suite and probe path share a line on purpose: a probe path alone
   # on its line reads as a scan-scope declaration to
-  # scripts/lint/guard-scan-targets-exist.sh, and these probes must not exist.
+  # the source tree, and these probes must not exist.
   check "an unreferenced bin/ source still selects the tree-reading suite" \
     "test/test_keeper_toml.ml" "bin/no_suite_names_this_probe.ml"
   check "an unreferenced packages/ source still selects the tree-reading suite" \

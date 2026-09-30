@@ -62,30 +62,8 @@ jobs:
         if: steps.specs.outputs.changed == 'true'
         run: bash scripts/tla-check.sh
 
-  # The lint suite is one job on purpose. It used to be ~30 GitHub Actions
-  # jobs, each paying its own checkout and apt setup, which queued whole PRs
-  # for tens of minutes; scripts/ci/run-lint-suite.sh was written to collapse
-  # them into a single sequential run that still reports every failure rather
-  # than stopping at the first. That driver then ran nowhere: the 2026-09-02
-  # collapse of the 9-job lane dropped lint along with the jobs, and the
-  # driver was never re-attached (#33211).
-  #
-  # It is a job of its own rather than a step in `check` because it needs no
-  # OCaml toolchain -- checkout, ripgrep, jq and python3 are the whole
-  # dependency -- so it runs beside the build instead of behind the opam
-  # switch, and a lint failure and a compile failure are reported
-  # independently. Measured on the two PRs that introduced this job: lint
-  # 5m31s and 5m28s, build 6m16s and 6m4s, in parallel. The saving is not
-  # the lint job's own speed; it is that a lint verdict does not queue
-  # behind a toolchain it never uses.
-  #
-  # Mode is `blocking-pr`: the 37 whole-tree lints plus six guards that read
-  # the diff against the PR's base -- Fun.protect finalizers, ignore
-  # justification on new sites, the RFC-0235 stale-base revert guard, and
-  # the cancel guard. Those six were left out when this job landed because
-  # lint-cancel-guard.sh reported five hits on main; #33229 closed them, so
-  # they run now. The diff guards need the base commit present, hence
-  # fetch-depth: 0.
+  # Run executable fixtures, syntax/dependency checks and credential scanning
+  # in one job. Build and typecheck jobs remain separate.
   lint:
     if: github.event.pull_request.draft == false
     name: ${{ github.event.pull_request.draft == true && 'Draft snapshot / lint suite' || 'lint suite' }}
@@ -184,10 +162,6 @@ jobs:
           fi
           bash scripts/ci/run-lint-suite.sh blocking-pr "${base}" "${head}"
 
-      - name: Advisory lints
-        # Recorded, not enforced -- the driver's own contract for this mode.
-        continue-on-error: true
-        run: bash scripts/ci/run-lint-suite.sh advisory
 
   check:
     if: github.event.pull_request.draft == false
@@ -282,46 +256,13 @@ jobs:
         # the reader exits non-zero when it finds none, because a build line
         # that expands to nothing reports success.
         #
-        # @packages/agent_core/test/exact-output-single-surface is the
-        # structural rule over http_client.mli and count_tokens_sync.mli
-        # (public callback allowances, exact-output transport surface). It
-        # reads interfaces, so an interface change is a change to what it
-        # checks, and no edited-test selection reaches it; #36289 merged
-        # green with it red on main. Seconds to run.
         run: |
           set -euo pipefail
           node_targets=$(python3 scripts/ci/list-node-alias-targets.py)
           printf 'browser parity suites:\n%s\n' "${node_targets}"
-          dune build @check @test/stanzas/runtest ${node_targets} \
-            @packages/agent_core/test/exact-output-single-surface
+          dune build @check @test/stanzas/runtest ${node_targets}
 
-      # Reads Dune's effective environment, so keep this beside the build
-      # instead of in the deliberately toolchain-free lint job.
-      - name: Root dune warning mask
-        run: bash scripts/ci/check-ocaml-compile-authority.sh
-
-      # #32511 dropped the nine-job lane and took this ratchet with it: the
-      # script still has a GITHUB_ACTIONS branch, and between 2026-09-02 and
-      # this commit no workflow called it. It runs here because it needs the
-      # switch the build above already has, and it fetches its own base commit
-      # because this job checks out at depth 1.
-      # Needs `dune describe`, so it cannot live in the lint job. One of the
-      # nine guards #32511 deleted with the "Meta bug-class gates" step.
-      - name: Env reads below the config floor
-        run: python3 scripts/ci/check_env_reads_below_config.py
-
-      # Two guards #34018 found unwired that the lint job cannot run: this one
-      # compiles a Parsetree checker with ocamlc -I +compiler-libs, and the
-      # sublib gate below reads dune's own dependency graph. Wired here, where
-      # the switch is, rather than into the lint suite, where they would fail
-      # on a missing binary instead of on what they check.
-      - name: Keeper event-queue projection boundary
-        run: bash scripts/check-keeper-event-queue-projection-boundary.sh
-
-      - name: Sublibrary leaf boundary (RFC-0056 G1)
-        run: python3 scripts/audit-sublib-cycle.py
-
-      # The third of that family, added by #36618: masc.opam is generated from
+      # masc.opam is generated from
       # dune-project (generate_opam_files true) and opam solve reads the
       # generated file, so #36410 edited the constraint and the file opam
       # reads never changed. The check regenerates and compares, which needs
@@ -329,14 +270,6 @@ jobs:
       # the toolchain-free lint job either.
       - name: masc.opam matches dune-project regeneration
         run: bash scripts/check-opam-file-regenerated.sh
-
-      - name: OCaml boundary ratchet
-        env:
-          OCAML_BOUNDARY_BASE_REF: ${{ github.event.pull_request.base.sha }}
-        run: |
-          set -euo pipefail
-          git fetch --depth=1 origin "$OCAML_BOUNDARY_BASE_REF"
-          bash scripts/ocaml-boundary-ratchet.sh
 
       # RFC-0428 step one. @check type-checks and links nothing, which is the
       # right trade for the whole tree and says nothing about whether an

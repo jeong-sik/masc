@@ -590,8 +590,13 @@ pointer = "/profile"
              = Skill_reference.to_yojson reference) matches);
       check bool "discovery does not load schema" false
         (Agent_core.Tool_set.mem name (Agent_core.Agent.tools agent));
-      ignore (execute "load" (find Keeper_identity_tool_search.tool_name)
-        (`Assoc ["names", `List [`String name]]));
+      (* Loading returns human-readable schema text, not JSON. Its typed
+         success must precede the same Agent's callable-schema assertion. *)
+      (match execute_raw "load" (find Keeper_identity_tool_search.tool_name)
+        (`Assoc ["names", `List [`String name]]) with
+       | Ok _ -> ()
+       | Error error ->
+           failf "real load handler failed: %s" error.Agent_core.Types.message);
       let loaded = find name in
       let before = Board_dispatch.list_posts () in
       let result = execute "run-composition" loaded (`Assoc ["query", `String "board"]) in

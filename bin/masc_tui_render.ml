@@ -2888,10 +2888,10 @@ let render_schedule_list (state : state) =
                 ^ Ansi.reset)
           | None -> ());
          (match state.schedule_cancel_error with
-          | Some err ->
+          | Some (schedule_id, err) ->
               c.push
                 ((Theme.bad ()) ^ "  "
-                ^ fit_width (Terminal_text.single_line err) (cols - 8)
+                ^ fit_width (Terminal_text.single_line (schedule_id ^ ": " ^ err)) (cols - 8)
                 ^ Ansi.reset)
           | None -> ())
        end))
@@ -2947,7 +2947,7 @@ let schedule_turn_rows
           let at =
             match value, recorded_at with
             | true, Some timestamp ->
-              " \xc2\xb7 " ^ Terminal_text.short_timestamp timestamp
+              " \xc2\xb7 " ^ timestamp
             | _, _ -> ""
           in
           field ~style:tone label ((if value then "yes" else "no") ^ at)
@@ -3069,14 +3069,25 @@ let schedule_detail_lines ~width ~freshness ~runner (row : schedule_row)
       ~(wake_history : schedule_wake_history option)
       ~(wake_history_error : (string * string) option) =
   let field ?(style = Ansi.reset) label value =
-    ( style
-    , Printf.sprintf "  %-14s %s" label (Terminal_text.single_line value) )
+    let prefix = Printf.sprintf "  %-14s " label in
+    let prefix_cells = Message_layout.display_width prefix in
+    let rows =
+      if width - prefix_cells >= width / 2 then
+        let values = Masc_tui_text_block.rows ~max_cells:(max 1 (width - prefix_cells)) value in
+        (match values with
+         | [] -> [prefix]
+         | values -> List.mapi (fun index line ->
+             (if index = 0 then prefix else String.make prefix_cells ' ') ^ line) values)
+      else
+        (if String.equal label "" then [] else ["  " ^ label])
+        @ Masc_tui_text_block.rows ~max_cells:width value in
+    style, String.concat "\n" rows
   in
   let optional value = Option.value ~default:Masc_tui_theme.Glyph.no_value value in
   let timestamp value =
     match value with
     | None -> Masc_tui_theme.Glyph.no_value
-    | Some iso -> Terminal_text.short_timestamp iso
+    | Some iso -> iso
   in
   let queue =
     match row.sch_queue_projection_status, row.sch_queue_pending_count with
@@ -3089,10 +3100,9 @@ let schedule_detail_lines ~width ~freshness ~runner (row : schedule_row)
     match row.sch_reaction_projection_status, row.sch_reaction_latest_at_iso with
     | None, None -> Masc_tui_theme.Glyph.no_value
     | Some status, None -> status
-    | None, Some at -> Terminal_text.short_timestamp at
+    | None, Some at -> at
     | Some status, Some at ->
-        Printf.sprintf "%s  %s" status
-          (Terminal_text.short_timestamp at)
+        Printf.sprintf "%s  %s" status at
   in
   let summary =
     Option.value ~default:"(no payload summary)" row.sch_payload_summary
@@ -3121,7 +3131,7 @@ let schedule_detail_lines ~width ~freshness ~runner (row : schedule_row)
   ; field "Requested by" row.sch_requested_by
   ; field "Scheduled by" row.sch_scheduled_by
   ; field "Requested"
-      (Terminal_text.short_timestamp row.sch_requested_at_iso)
+      row.sch_requested_at_iso
   ; field "Due" (timestamp row.sch_due_at_iso)
   ; field "Next due" (timestamp row.sch_next_due_at_iso)
   ; field "Expires" (timestamp row.sch_expires_at_iso)
@@ -3173,9 +3183,7 @@ let schedule_detail_lines ~width ~freshness ~runner (row : schedule_row)
          [ field ~style:(Theme.warn ()) "Held"
              (match Tui_decode.schedule_hold_reading ~freshness ~runner hold with
               | Tui_decode.Hold_current ->
-                  let due =
-                    Terminal_text.short_timestamp hold.Tui_decode.srh_due_at_iso
-                  in
+                  let due = Terminal_text.short_timestamp hold.Tui_decode.srh_due_at_iso in
                   (match hold.Tui_decode.srh_reason with
                    | Tui_decode.Hold_previous_wake_untaken ->
                        Render_schedule.schedule_hold_reading ~due
@@ -3191,6 +3199,7 @@ let schedule_detail_lines ~width ~freshness ~runner (row : schedule_row)
                        Render_schedule.schedule_fence_hold_as_of_reading
                          ~checked ~target ~fence_owner))
          ; field "Held id" hold.Tui_decode.srh_occurrence_id
+         ; field "Held due" hold.Tui_decode.srh_due_at_iso
          ])
   @ schedule_turn_rows ~field row
   @ (if keeper_wake then
@@ -3203,39 +3212,78 @@ let schedule_detail_lines ~width ~freshness ~runner (row : schedule_row)
        ]
      else [])
 
+let schedule_detail_content (state : state) ~cols ~runner (row : schedule_row) =
+  let width = max 1 (framed_inner_width cols) in
+  let wire text = String.concat "\n"
+      (List.map Terminal_text.single_line (String.split_on_char '\n' text)) in
+  let warnings =
+    (* The latest action refusal is the row the result handler reveals.
+       Source freshness still has its fixed summary outside this document. *)
+    (match state.schedule_cancel_error with
+     | Some (schedule_id, error) when String.equal schedule_id row.sch_schedule_id ->
+         [Theme.bad (), "Cancel error: " ^ wire error]
+     | Some _ | None -> [])
+    @ (match schedule_source_warning state with
+       | None -> [] | Some error -> [Theme.bad (), "Source: " ^ wire error])
+    @ (match state.schedule_cancel_armed with
+       | None -> [] | Some id -> [Theme.warn (), "Armed: cancel " ^ wire id ^ " -- press x again to submit"]) in
+  let fields = schedule_detail_lines ~width
+      ~freshness:(schedule_list_freshness state) ~runner row
+      ~wake_history:state.schedule_wake_history
+      ~wake_history_error:state.schedule_wake_history_error in
+  List.concat_map (fun (style, text) ->
+      String.split_on_char '\n' text |> List.concat_map (fun line ->
+        if Message_layout.display_width line <= width then [style, line]
+        else match Message_layout.wrap_words ~max_cells:width line with
+        | [] -> [style, ""]
+        | lines -> List.map (fun text -> style, text) lines))
+    (warnings @ fields)
+
+let schedule_detail_height ~rows ~warning_rows ~count =
+  Masc_tui_scroll.content_height ~rows ~chrome:(framed_chrome_rows + warning_rows) ~count
+    ~preview_keep:None ~overflow_takes_row:true
+
+let schedule_detail_viewport (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let cols = if cols < keeper_split_threshold_cols then cols else cols - keeper_roster_pane_cols in
+  let count = match state.schedule_detail_id, state.schedules with
+    | Some id, Some snapshot ->
+        (match List.find_opt (fun row -> String.equal row.sch_schedule_id id) snapshot.scs_rows with
+         | None -> 0
+         | Some row -> List.length (schedule_detail_content state ~cols ~runner:snapshot.scs_runner_status row))
+    | Some _, None | None, _ -> 0 in
+  let warning_rows = if Option.is_some (schedule_source_warning state) then 1 else 0 in
+  count, schedule_detail_height ~rows ~warning_rows ~count
+
 let schedule_detail_pane (state : state) ~rows ~cols ~runner (row : schedule_row) buf =
   box_top buf cols;
   box_line buf cols
     (Printf.sprintf "%s  %s[%s]%s"
-       (screen_title " MASC Keepers / Schedules \xe2\x96\xb8 details")
+       (screen_title " MASC Keepers / Schedules ▸ details")
        (schedule_status_color row.sch_status)
        (Terminal_text.single_line row.sch_status) Ansi.reset);
   box_divider buf cols;
-  let warning_rows =
-    match schedule_source_warning state with
+  (* Source freshness governs every evidence row, so it stays visible while
+     the reader moves. The complete warning also remains in the reader for
+     narrow viewports or a refusal longer than the fixed status summary. *)
+  let warning_rows = match schedule_source_warning state with
     | None -> 0
-    | Some err ->
-        box_line buf cols (data_unreliable_row ~cols err);
-        1
-  in
-  let lines =
-    schedule_detail_lines
-      ~width:(max 1 (framed_inner_width cols))
-      ~freshness:(schedule_list_freshness state) ~runner row
-      ~wake_history:state.schedule_wake_history
-      ~wake_history_error:state.schedule_wake_history_error
-  in
-  let content_height = max 1 (rows - 6 - warning_rows) in
-  let max_scroll = max 0 (List.length lines - content_height) in
-  let scroll = max 0 (min state.schedule_scroll max_scroll) in
-  let lines_window = Rows.of_list ~first:scroll ~height:content_height lines in
-  for index = 0 to content_height - 1 do
+    | Some error -> box_line buf cols (data_unreliable_row ~cols error); 1 in
+  let lines = schedule_detail_content state ~cols ~runner row in
+  let count = List.length lines in
+  let height = schedule_detail_height ~rows ~warning_rows ~count in
+  let scroll = Masc_tui_scroll.normalize ~count ~height state.schedule_scroll in
+  let lines_window = Rows.of_list ~first:scroll ~height lines in
+  for index = 0 to height - 1 do
     match Rows.at lines_window (scroll + index) with
     | Some (style, line) -> box_line_styled buf cols ~style line
     | None -> box_empty buf cols
   done;
+  Option.iter (box_line_styled buf cols ~style:(Theme.recede ()))
+    (Masc_tui_scroll.position_row ~scroll ~height count);
   box_bottom buf cols;
-  scroll, max_scroll
+  scroll, Masc_tui_scroll.maximum ~count ~height
 ;;
 
 (* The schedule list stays beside the schedule. Opening one used to hide the others, and the others
@@ -7320,92 +7368,38 @@ let render_keeper_logs (state : state) =
     box_line buf cols header;
     box_divider buf cols;
 
-    (* The names come from the same description as the readings, in the module
-       that owns the widths. Written here, they were eight numbers away from
-       the eight they named. *)
     box_line_styled buf cols ~style:(Theme.recede ())
-      Observation_layout.plain_log_header;
+      "  TIME  KIND  LATENCY · full facts below";
     box_divider buf cols;
 
-    (match state.log_error with
-      | None -> ()
-      | Some error ->
-          let style =
-            match error with
-            | Metrics_tail.Storage_error _ -> (Theme.bad ())
-            | Metrics_tail.Row_errors _ -> (Theme.warn ())
-          in
-          let diagnostic =
-            Keeper_chat.terminal_safe_text
-              (Metrics_tail.error_to_string error)
-          in
-          box_line_styled buf cols ~style
-            ("  " ^ diagnostic);
-          box_divider buf cols);
-
-    (* Content area *)
+    let log_rows = Masc_tui_types.keeper_log_rows state ~cols in
+    let row_count = List.length log_rows in
     let content_height =
-      Metrics_tail.content_height ~terminal_rows:rows ~error:state.log_error
+      Metrics_tail.content_height ~terminal_rows:rows ~error:None
     in
     let scroll =
-      Metrics_tail.normalize_scroll ~entry_count:total_entries ~content_height
-        state.log_scroll
+      Metrics_tail.normalize_scroll ~entry_count:row_count ~content_height
+        (if state.log_wrap_cols = Some cols then state.log_scroll else 0)
     in
-
-    if total_entries = 0 then begin
+    let visible = Rows.of_list ~first:scroll ~height:content_height log_rows in
+    for index = 0 to content_height - 1 do
+      if row_count = 0 && index = 0 then
+        box_line_styled buf cols ~style:(Theme.recede ())
+          ("  " ^ Metrics_tail.empty_message state.log_error)
+      else
+        match Rows.at visible (scroll + index) with
+        | Some (diagnostic, line) ->
+            let style = match diagnostic with
+              | None -> Ansi.reset
+              | Some (Metrics_tail.Storage_error _) -> Theme.bad ()
+              | Some (Metrics_tail.Row_errors _) -> Theme.warn () in
+            box_line_styled buf cols ~style line
+        | None -> box_empty buf cols
+    done;
+    if row_count > content_height then
       box_line_styled buf cols ~style:(Theme.recede ())
-        ("  " ^ Metrics_tail.empty_message state.log_error);
-      for _ = 1 to content_height - 1 do
-        box_empty buf cols
-      done
-    end else begin
-      let visible =
-        Metrics_tail.visible ~entries:state.log_entries ~content_height ~scroll
-      in
-      let drawn = ref 0 in
-      List.iter
-        (fun (e : Tui_decode.log_entry) ->
-          incr drawn;
-          let time_str = Terminal_text.clock_timestamp e.le_ts in
-          let tool_names = Terminal_text.single_lines e.le_tools_used in
-          let tools_str =
-            if List.length tool_names > 0 then
-              " "
-              ^ String.concat ","
-                  (List.filteri (fun i _ -> i < 2) tool_names)
-            else ""
-          in
-          let terminal_entry =
-            { e with
-              le_work_kind =
-                Terminal_text.optional_single_line e.le_work_kind
-            }
-          in
-          let line =
-            Observation_layout.plain_log_row ~time:time_str terminal_entry
-            ^ tools_str
-          in
-          box_line buf cols line)
-        visible;
-      for _ = !drawn to content_height - 1 do
-        box_empty buf cols
-      done
-    end;
-
-    (* Scroll indicator: the same "rows X-Y of Z" shape the tool-call pane
-       reads, so one glance answers both how far and how much is left -- a
-       bare "scroll N" said the offset but not the distance either way. *)
-    if total_entries > content_height then begin
-      (* Counted back from the newest, because that is the direction the rows
-         are drawn in: row 1 is the last thing that happened. A bare
-         "rows 1-20 of 300" read as the start of the file. *)
-      let indicator =
-        Printf.sprintf "newest %d-%d of %d" (scroll + 1)
-          (min total_entries (scroll + content_height))
-          total_entries
-      in
-      box_line_styled buf cols ~style:(Theme.recede ()) indicator
-    end;
+        (Printf.sprintf "newest rows %d-%d of %d" (scroll + 1)
+           (min row_count (scroll + content_height)) row_count);
 
     box_bottom buf cols;
 
@@ -7413,7 +7407,8 @@ let render_keeper_logs (state : state) =
       (footer_line state ~max_cells:cols
          ~hints:(Masc_tui_keys.footer_hints state.view));
 
-    finish_surface state ~surface_key:"keeper-logs" ~rows:terminal_rows
+    finish_surface state ~clamped:(Keeper_logs_scroll { scroll; cols })
+      ~surface_key:"keeper-logs" ~rows:terminal_rows
       ~cols buf
   end
 
@@ -8031,7 +8026,7 @@ let verification_detail_lines ~width
   ; field "Task" request.vr_task_id
   ; field "Title" request.vr_task_title
   ; field "Submitted by" request.vr_submitted_by
-  ; field "Created" request.vr_created_at
+  ; field "Created" (Terminal_text.short_timestamp request.vr_created_at)
   ; Ansi.dim, ""
   ]
   (* [Kind], [What is being judged] and [What moves it forward] stood here.
@@ -12742,8 +12737,12 @@ let render_runtime_pick (state : state) =
             in
             let target =
               Message_layout.fit_middle target_width columns.Masc_tui_types.rpc_target
+              |> fun text -> fit_width text target_width
             in
-            let route_col = fit_width columns.Masc_tui_types.rpc_route route_width in
+            let route_col =
+              Message_layout.fit_middle route_width columns.Masc_tui_types.rpc_route
+              |> fun text -> fit_width text route_width
+            in
             let facts =
               Masc_tui_types.runtime_pick_visible_facts ~cols item
               |> List.map (fun (fact : Masc_tui_types.runtime_pick_fact) ->
@@ -12754,10 +12753,9 @@ let render_runtime_pick (state : state) =
             in
             Printf.sprintf "%s%s  %s  %s" badge target route_col facts
           in
-          c.push
-            (if view.Masc_tui_pick_list.selected_row = Some row then
-               Ansi.reverse ^ ">" ^ Ansi.reset ^ " " ^ line
-             else "  " ^ line))
+          if view.Masc_tui_pick_list.selected_row = Some row then
+            c.push_selected ("> " ^ Masc_tui_theme.strip_sgr line)
+          else c.push ("  " ^ line))
         view.Masc_tui_pick_list.rows)
 
 (* The Resources surface: the MCP resource inventory on the left, the

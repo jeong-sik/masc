@@ -259,8 +259,9 @@ let apply_keeper_log_snapshot (state : state)
     (snapshot : Metrics_tail.snapshot) =
   state.log_entries <- snapshot.entries;
   state.log_error <- snapshot.error;
+  let _, cols = Masc_tui_render_prim.get_terminal_size () in
   state.log_scroll <-
-    min state.log_scroll (max 0 (List.length snapshot.entries - 1))
+    min state.log_scroll (max 0 (List.length (keeper_log_rows state ~cols) - 1))
 
 (** Load the newest physical metrics rows across months and rotations. *)
 let load_selected_keeper_logs (state : state) (base_path : string)

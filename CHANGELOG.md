@@ -40,6 +40,7 @@
 
 ### Changed
 
+- Installed-dashboard verification checks the running bundle without modifying files by default. Deliberate corruption checks require `--exercise-corruption` and an isolated installation. (#40228)
 - Stacked feature PRs use independent source review and manually requested focused checks. Release candidates require an explicitly dispatched full verification cycle. Version-tag pushes trigger the Release workflow only while that workflow is enabled; publication follows the operator-approved release path. A failed or timed-out check is never counted as passing (#40280, #40297, #40298).
 - The TUI now opens on a measured Dashboard, groups Goals and active Tasks
   under Work, and shows provider quota history, Keeper token and cost reports,
@@ -150,6 +151,7 @@
 - Refreshing a conversation now also recovers tool rows whose output read had failed; before, each row had to be retried on its own (#39948).
 - The TUI reads a Goal that is awaiting confirmation with a confirmation already recorded as confirmable, so `[a]` finishes it. Before, the decoder refused that state and the key sent no request. The state appears when the server's step after the confirmation refuses or the phase write fails (#39952).
 - Recover Play seat and frame reads after temporary failures, clear an ejected game's controls, and refresh participants when choosing a handoff. #39956
+- Keep Client observation ages and Connector reachability and channel readings visible in narrow tables. Enter on a Client opens its complete observations in a scrollable detail. (#40118)
 - Keep returned Keeper portrait PNG artifacts available after transient screen frames are evicted. #39957
 - Keep the whole equipped Keeper portrait, including short-body medals and the backdrop, inside the image with stable framing throughout animation. #39961
 - Recover the shared DOS controller after any non-Keeper holder's credential expires under enforced authentication, and omit expired operators from handoff targets. #39962

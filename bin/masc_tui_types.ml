@@ -6183,6 +6183,7 @@ type state = {
   mutable workspace_activity_repo: string option;
   mutable workspace_activity: (string, workspace_activity_read) Masc_tui_fetched.t;
   mutable workspace_activity_cursor: int;
+  mutable workspace_activity_context_scroll: int option;
   mutable memory_health: Tui_decode.memory_health_snapshot option;
   mutable memory_health_error: string option;
   mutable memory_health_inflight: bool;
@@ -7697,12 +7698,53 @@ let workspace_activity_selection state =
   let cursor = max 0 (min state.workspace_activity_cursor (List.length rows - 1)) in
   (rows, cursor, List.nth_opt rows cursor)
 
+let workspace_activity_context_lines state ~cols =
+  let _, _, selected = workspace_activity_selection state in
+  let wrap label value =
+    Masc_tui_message_layout.wrap_words
+      ~max_cells:(max 1 (Masc_tui_frame.inner_width ~cols - 2))
+      (label ^ ": " ^ Tui_decode.sanitize_terminal_text value)
+    |> List.map (fun line -> "  " ^ line) in
+  match selected with
+  | None -> wrap "Record" "No selected recorded change"
+  | Some (change, path) ->
+      let task_id = match change.Tui_decode.fc_task_id with None -> "unlinked" | Some id -> id in
+      let task_title = match change.fc_task_id with
+        | None -> "No Task recorded"
+        | Some id -> (match List.find_opt (fun (task : Tui_decode.task) -> String.equal task.id id) state.tasks with
+                     | None -> "Task reading unavailable" | Some task -> task.title) in
+      let kind = match change.fc_kind with
+        | Tui_decode.Fc_edited { replace_all; _ } -> if replace_all then "edit all" else "edit"
+        | Fc_written _ -> "write"
+        | Fc_inserted { line; _ } -> Printf.sprintf "insert at line %d" line
+        | Fc_materialized { sha256; bytes } -> Printf.sprintf "materialized %d bytes, SHA256 %s" bytes sha256 in
+      wrap "Repository" (match state.workspace_activity_repo with None -> "not selected" | Some id -> id)
+      @ wrap "Path" path
+      @ wrap "Keeper" change.fc_keeper
+      @ wrap "Task ID" task_id
+      @ wrap "Task title" task_title
+      @ wrap "At (epoch seconds)" (Printf.sprintf "%.6f" change.fc_at)
+      @ wrap "Turn" (match change.fc_turn with None -> "not recorded" | Some turn -> string_of_int turn)
+      @ wrap "Execution ID" (match change.fc_execution_id with None -> "not recorded" | Some id -> id)
+      @ wrap "Result" (if change.fc_succeeded then "succeeded" else "failed")
+      @ wrap "Change" kind
+
+let workspace_activity_context_height state ~surface_rows =
+  let stale = match state.workspace_activity_repo with
+    | None -> false
+    | Some repo_id -> (match Masc_tui_fetched.view_for ~equal:String.equal state.workspace_activity ~key:repo_id with
+                      | Masc_tui_fetched.Stale _ -> true | _ -> false) in
+  max 1 (surface_rows - Masc_tui_frame.chrome_rows - (if stale then 1 else 0))
+
 let apply_workspace_activity_read state request result =
+  let _, _, previous = workspace_activity_selection state in
   state.workspace_activity <-
     Masc_tui_fetched.complete ~equal:String.equal state.workspace_activity
       request result;
-  let _, cursor, _ = workspace_activity_selection state in
-  state.workspace_activity_cursor <- cursor
+  let rows, cursor, _ = workspace_activity_selection state in
+  let retained = Option.bind previous (fun selected -> List.find_index (fun row -> row = selected) rows) in
+  state.workspace_activity_cursor <- (match retained with Some index -> index | None -> cursor);
+  if Option.is_none retained then state.workspace_activity_context_scroll <- None
 
 let enter_keeper_code_file state ~keeper ~path =
   state.code_scope <- Code_scope_keeper keeper;
@@ -8356,6 +8398,7 @@ let create_state
   workspace_activity_repo = None;
   workspace_activity = Masc_tui_fetched.initial;
   workspace_activity_cursor = 0;
+  workspace_activity_context_scroll = None;
   memory_health = None;
   memory_health_error = None;
   memory_health_inflight = false;

@@ -6,7 +6,7 @@ val error_to_string : error -> string
 val register_delivery_handler :
   (config:Workspace.config -> caller:string -> keeper_name:string -> prompt:string ->
     (Yojson.Safe.t, string) result) -> unit
-val dispatch : ?caller:string -> config:Workspace.config -> operation:operation -> Yojson.Safe.t ->
+val dispatch : ?caller:string -> ?access:Lane_addon_sources.access -> config:Workspace.config -> operation:operation -> Yojson.Safe.t ->
   (Yojson.Safe.t, error) result
 (** No I/O and no package callback. Runs on the root-switch owner domain: a
     caller on another domain (the HTTP serving domain, a pool worker) is
@@ -17,6 +17,9 @@ val notify_activity : config:Workspace.config -> activity:Lane_addon_sources.act
 val notify_fusion_run : run_id:string -> unit
 (** Capture hints for exact-run bindings against the process-wide Fusion registry.
     No I/O or package callback; work is carried to the owner domain. *)
+val authorize_retained_read : access:Lane_addon_sources.access -> Yojson.Safe.t -> (unit, string) result
+(** Pure read authorization against the strict durable visibility codec. The
+    supplied access is host-owned; no request field can set it. *)
 
 type skill_export_owner = Declaration of string | Instance of string
 type skill_export = {
@@ -38,9 +41,9 @@ val register_skill_export_handler :
 val reconcile_configuration : config:Workspace.config -> directory:string ->
   (Yojson.Safe.t, string) result
 val configuration_directory : Workspace.config -> string
-val read_declaration : config:Workspace.config -> Yojson.Safe.t ->
+val read_declaration : ?caller:string -> ?access:Lane_addon_sources.access -> config:Workspace.config -> Yojson.Safe.t ->
   (Yojson.Safe.t, Lane_addon_declaration.error) result
-val save_declaration : config:Workspace.config -> Yojson.Safe.t ->
+val save_declaration : ?caller:string -> ?access:Lane_addon_sources.access -> config:Workspace.config -> Yojson.Safe.t ->
   (Yojson.Safe.t, Lane_addon_declaration.error) result
 (** HTTP and Keeper editors share the configuration serializer with reconcile
     and managed Detach. Saving bytes only nudges the existing maintenance owner;
@@ -62,7 +65,7 @@ module For_testing : sig
   type backend = {
     start : sw:Eio.Switch.t -> instance_id:string -> package:Lane_addon_types.package ->
       on_created:(connection -> unit) -> (connection, string) result;
-    acquire : store:Lane_addon_store.t -> package:Lane_addon_types.package ->
+    acquire : access:Lane_addon_sources.access -> store:Lane_addon_store.t -> package:Lane_addon_types.package ->
       resolve_lane_output:(installation_id:string -> (Lane_addon_sources.lane_output, string) result) ->
       binding:Yojson.Safe.t -> (Yojson.Safe.t, string) result;
     recover_stop : instance_id:string -> container_id:string option -> max_reply_bytes:int ->

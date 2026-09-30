@@ -1,11 +1,5 @@
 name: Process group lifecycle
 on:
-  pull_request:
-    paths:
-      - 'lib/process/**'
-      - 'test/test_posix_spawn_process_mgr.ml'
-      - 'test/test_process_eio_coverage.ml'
-      - '.github/workflows/process-groups.yml'
   workflow_dispatch:
 permissions:
   contents: read

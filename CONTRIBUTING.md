@@ -18,6 +18,25 @@ not required to contribute.
 `execution_protocol` in the constitution owns coding-agent workflow where it
 overrides the local-build guidance here. Keeper runtime prompts are separate.
 
+## Choose a contribution
+
+Start with a reproducible behavior gap, an incorrect instruction or a useful
+example. [The reliable-change roadmap](docs/RELIABLE-CHANGE-ROADMAP.md) describes
+current improvement goals; it is not a promise that every proposed feature fits.
+
+| What you found | Next step |
+|---|---|
+| Bug | Search issues and all PR states, reproduce on current source, then open/link an issue with expected and observed behavior |
+| Documentation gap | Identify the incorrect instruction and its source; a small docs PR is a useful first contribution |
+| New capability or architecture | Explain the user scenario and discuss the proposal in an issue before broad implementation |
+| Setup question | Use an inquiry issue with platform, version and redacted error output; do not assume it is a defect |
+
+See the workflow's [first contribution](docs/guides/CONTRIBUTOR-WORKFLOW.md#1-make-a-first-contribution)
+for fork setup and its [source map](docs/guides/CONTRIBUTOR-WORKFLOW.md#find-the-source-before-editing)
+for where to start reading. Use the issue taxonomy below when filing an issue.
+AI-assisted contributions are welcome; the author is responsible for understanding
+the result and distinguishing actual checks from generated claims.
+
 ## Local development for human contributors
 
 Install the [source prerequisites](README.md#from-source) first.

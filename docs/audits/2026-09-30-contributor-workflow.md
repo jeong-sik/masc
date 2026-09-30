@@ -32,3 +32,41 @@ review, not the completion authority’s verdict.
 Remaining verification: Task review acceptance, current-head PR checks,
 and eventual operator confirmation of the Goal. A plan posted on the Board and
 this audit do not complete either Task automatically.
+
+
+## Adversarial self-review and external comparison
+
+Reviewed on 2026-09-30. This review asks whether a contributor without repository
+write access or a private MASC session can follow the document. Findings below
+were addressed in both language guides; they remain self-review evidence.
+
+| Finding | Consequence | Revision |
+|---|---|---|
+| Fork instructions assumed an existing upstream remote | A new fork user could not follow the worktree commands as written | Added fork creation prerequisite, clone, upstream remote, fetch and push destination |
+| Search covered only open PRs | A merged fix or rejected approach could be proposed again | Added all-state issue/PR search and current-source search |
+| Procedures did not help choose a contribution or source area | A newcomer had to understand internal workflow before finding a small change | Added contribution routes, a source map and a first documentation patch path |
+| AI output responsibility was implicit | Generated claims or self-review could be mistaken for verification | Added author ownership and explicit checked/unverified evidence boundaries |
+| Review updates could become scattered comments | Reviewers had to reconstruct current scope and evidence | Added PR-body updates when scope, evidence or risks change |
+
+Primary comparison sources read on the review date:
+
+- [OpenClaw CONTRIBUTING](https://github.com/openclaw/openclaw/blob/main/CONTRIBUTING.md):
+  contribution routing, plain-language problem/impact, author responsibility and
+  keeping the PR body current informed the entrypoint and review guidance.
+- [Hermes CONTRIBUTING](https://github.com/NousResearch/hermes-agent/blob/main/CONTRIBUTING.md):
+  searching existing issues, all PR states and current source informed the search
+  step. Its capability placement discussion highlighted the need to state where
+  a change belongs; MASC's map follows its own current source layout.
+- [Hermes AGENTS](https://github.com/NousResearch/hermes-agent/blob/main/AGENTS.md):
+  area-specific reading routes informed the source map. MASC keeps its root
+  AGENTS thin and does not claim Hermes's scoped files or plugin architecture.
+
+These links track upstream main and may change. This comparison adopts navigation
+and evidence practices; MASC's constitution remains the policy authority. No
+external PR caps, plugin-only placement rules or testing policy were introduced.
+The fork commands were reviewed against Git semantics, not exercised with a real
+new contributor account. Local document checks and PR CI are recorded in the PR.
+
+A follow-up independent source review found no blocking issues in these revisions.
+Its translation clarification was applied. This does not provide a GitHub
+approval or a current-head CI verdict.

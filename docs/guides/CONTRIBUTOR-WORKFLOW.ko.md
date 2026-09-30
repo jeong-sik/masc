@@ -27,10 +27,21 @@ MASC의 변경을 문제 제기부터 검증된 결과까지 이어가는 절차
 필요하지 않습니다. 사실을 설명하는 문장을 바꾸기 전에 관련 소스와 매뉴얼을 읽으세요.
 코드를 변경한다면 [README 소스 설치](../../README.md#from-source)의 준비물을 확인합니다.
 
-기존 이슈를 고르거나 문제, 기대 결과, 확인 방법을 적습니다. 같은 작업이 진행 중인지
-이슈와 열린 PR부터 검색하세요. 쓰기 권한이 없는 기여자는 GitHub fork를 사용합니다.
-내 fork는 `origin`, `jeong-sik/masc`는 `upstream`으로 연결하고 upstream main을 기준으로
-시작합니다. 쓰기 권한이 있으면 origin main을 사용합니다. PR 대상은 `jeong-sik/masc:main`입니다.
+기존 이슈를 고르거나 문제, 기대 결과, 확인 방법을 적습니다. 이슈, 열린·닫힌 PR과
+현재 소스를 검색한 뒤 시작하세요.
+
+```bash
+gh issue list --repo jeong-sik/masc --state all --search "your topic"
+gh pr list --repo jeong-sik/masc --state all --search "your topic"
+rg "relevant_symbol" lib bin dashboard config docs
+```
+
+위 명령에는 GitHub CLI 인증과 ripgrep이 필요합니다. GitHub의 이슈·PR 검색과 에디터
+검색을 사용해도 됩니다. 작은 수정은 연결된 이슈에 재현 방법을 적습니다. 공개 계약이나
+넓은 구조를 바꾸려면 구현 전에 해당 이슈에서 논의하세요. 이미 해결하는 PR이 있으면
+그 변경의 리뷰를 도울 수 있습니다.
+
+쓰기 권한이 있다면 기존 clone에서 시작합니다.
 
 ```bash
 git fetch origin main
@@ -38,9 +49,44 @@ git worktree add -b docs/your-topic ../masc-your-topic origin/main
 cd ../masc-your-topic
 ```
 
-Fork에서는 위 두 명령의 `origin`을 `upstream`으로 바꿉니다. 아직 사용하지 않은 경로를
-고르세요. 실행 테스트는 별도 base path와 빈 포트를 사용합니다. 소스 체크아웃과 `.masc`가
-들어 있는 작업 공간은 다릅니다.
+쓰기 권한이 없다면 GitHub에서 fork를 먼저 만듭니다. `YOUR-LOGIN`을 자신의 GitHub
+계정으로 바꾸세요. 다음은 새 clone에서 시작하는 순서입니다.
+
+```bash
+git clone https://github.com/YOUR-LOGIN/masc.git
+cd masc
+git remote add upstream https://github.com/jeong-sik/masc.git
+git fetch upstream main
+git worktree add -b docs/your-topic ../masc-your-topic upstream/main
+cd ../masc-your-topic
+```
+
+기존 clone에서는 `git remote -v`로 확인하여 같은 remote를 중복 추가하지 않습니다.
+아직 사용하지 않은 경로를 고르세요. 실행 테스트는 별도 base path와 빈 포트를 사용합니다.
+소스 체크아웃과 `.masc`가 들어 있는 작업 공간은 다릅니다.
+
+첫 문서 수정은 사실을 설명하는 문장 하나부터 고쳐보세요. 번역이 있다면 함께 고칩니다.
+`bash scripts/check-doc-truth.sh`, `git diff --check`와 변경한 링크를 확인합니다.
+Commit 후 `git push -u origin docs/your-topic`으로 올리고 템플릿을 사용하여
+`jeong-sik/masc:main`으로 draft PR을 엽니다.
+[CONTRIBUTING](../../CONTRIBUTING.md#pull-requests)의 설명대로
+`changelog.d/<PR number>.md`를 추가하여 push한 뒤 ready로 전환합니다. 요약에는 잘못된
+안내, 수정 내용, 확인한 것을 적습니다. CI는 4절, fork 통합은 maintainer가 담당합니다.
+
+### 수정 전에 소스 찾기
+
+| 변경 | 먼저 읽을 내용 | 소스 / 검증 진입점 |
+|---|---|---|
+| 제품 문서 | [README](../../README.md), 연결된 매뉴얼 | `docs/`, `scripts/check-doc-truth.sh` |
+| Keeper 동작·지침 | [Keeper 매뉴얼](../KEEPER-USER-MANUAL.md), 헌법 | `lib/keeper/`, `config/prompts/keeper.md`, `test/` |
+| Goal·Task·Board·완료 | 헌법의 도메인 규칙 | `lib/workspace/`, `config/tools/`, `test/` |
+| Provider·레인 동작 | 관련 인터페이스와 설정 | `lib/runtime/`, `lib/runtime_model/`, `test/` |
+| TUI·브라우저 UI | 기존 상호작용과 payload 계약 | `bin/masc_tui*.ml`, `lib/tui_decode.ml`, `dashboard/`, `test/` |
+| CI·개발 정책 | 헌법의 execution protocol | `.github/workflows/`, `scripts/ci/`, `scripts/review/` |
+
+시작 위치를 안내하는 표이며 영향받는 파일 전체 목록은 아닙니다. 호출 경로와 테스트를
+따라가고 해당 영역에 적용되는 지침도 읽으세요. 계약 변경과 Keeper 런타임 프롬프트 변경은
+각각의 이유와 증거가 필요합니다.
 
 ## 2. AI 개발 세션 시작하기
 
@@ -56,6 +102,11 @@ Fork에서는 위 두 명령의 `origin`을 `upstream`으로 바꿉니다. 아�
 4. 다음 작업 단위로 넘어갈 때 이전 작업에 적대적 리뷰 에이전트를 붙입니다. 발견한 내용을
    직접 판단하고 대응합니다. 서브에이전트 리뷰가 곧 다른 모델의 리뷰나 GitHub 승인은 아닙니다.
 5. 인계할 때는 다음 행동과 그 근거를 남깁니다.
+
+AI를 활용한 기여도 환영합니다. 제출한 작성자는 diff를 이해하고 인증 정보와 비공개
+런타임 데이터를 보호하며 리뷰에 대응하고 증거를 정확하게 설명할 책임을 가집니다.
+무엇을 누가 또는 어떤 에이전트가 확인했고 무엇은 확인하지 못했는지 적으세요.
+생성된 결과와 셀프 리뷰만으로 런타임 동작이나 독립 승인을 증명할 수는 없습니다.
 
 Keeper 레인은 도구 체인이 있으면 로컬에서 빌드·테스트할 수 있습니다. 해당 결과가 현재
 PR head의 검사나 `test.yml` targeted run을 대신하지는 않습니다. 세션 권한, MCP 인증의
@@ -119,7 +170,8 @@ base, 시간 초과, 환경 준비 중 무엇이 원인인지 가려 같은 PR�
 
 리뷰어는 계약과 diff, 동작 증거, 현재 head의 완료된 PR-check run을 읽습니다. 지적마다
 수정하거나 소스로 설명하고, 문제가 해결된 스레드만 닫습니다. Push하면 head가 바뀌므로
-이전 PASS가 새 변경을 증명하지 않습니다. REQUEST_CHANGES를 남긴 리뷰어는 수정된
+이전 PASS가 새 변경을 증명하지 않습니다. 범위·증거·남은 위험이 바뀌면 PR 본문도
+갱신하여 리뷰어가 댓글 전체에서 결과를 조합하지 않아도 되게 합니다. REQUEST_CHANGES를 남긴 리뷰어는 수정된
 head의 필수 검사가 통과하면 자신의 변경 요청을 직접 해제합니다.
 
 MASC의 구조화된 판정 줄은 실제 값을 적습니다.

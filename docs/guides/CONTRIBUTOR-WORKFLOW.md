@@ -31,10 +31,20 @@ editing a factual claim. For code, use the source prerequisites in
 [README](../../README.md#from-source).
 
 Choose an existing issue or write down the problem, expected result and how it
-will be checked. Search existing issues and open PRs before starting duplicate work.
-People without write access can use a GitHub fork. Use `origin` for your fork and
-`upstream` for `jeong-sik/masc`; sync your branch from upstream main. Contributors
-with write access use origin main. Send the PR to `jeong-sik/masc:main`.
+will be checked. Search issues, open/closed PRs and current source before starting:
+
+```bash
+gh issue list --repo jeong-sik/masc --state all --search "your topic"
+gh pr list --repo jeong-sik/masc --state all --search "your topic"
+rg "relevant_symbol" lib bin dashboard config docs
+```
+
+These commands require GitHub CLI authentication and ripgrep. GitHub's issue/PR
+search and your editor's search work too. For a small fix, describe the reproduction
+in the linked issue. Discuss a new public contract or broad architecture change
+there before implementing it. If a PR already solves the problem, help review it.
+
+With repository write access, use your existing clone:
 
 ```bash
 git fetch origin main
@@ -42,9 +52,44 @@ git worktree add -b docs/your-topic ../masc-your-topic origin/main
 cd ../masc-your-topic
 ```
 
-For a fork, substitute `upstream` for `origin` in the two commands above.
+Without write access, create a fork on GitHub first. Replace `YOUR-LOGIN` with your
+GitHub account; the following starts from a new clone:
+
+```bash
+git clone https://github.com/YOUR-LOGIN/masc.git
+cd masc
+git remote add upstream https://github.com/jeong-sik/masc.git
+git fetch upstream main
+git worktree add -b docs/your-topic ../masc-your-topic upstream/main
+cd ../masc-your-topic
+```
+
+Use `git remote -v` to check an existing clone instead of adding a duplicate remote.
 Choose an unused directory. Keep runtime tests under a separate base path and
 use a free port; the checkout and the workspace containing `.masc` are different.
+
+For a first documentation patch, edit one factual claim and its translation where
+present, run `bash scripts/check-doc-truth.sh` and `git diff --check`, and check the
+changed links. Commit it, then `git push -u origin docs/your-topic`. Open a draft PR
+to `jeong-sik/masc:main` using the template. Add `changelog.d/<PR number>.md` as
+[CONTRIBUTING](../../CONTRIBUTING.md#pull-requests) describes, then push it before
+marking ready. A useful summary explains the incorrect instruction, the correction,
+and what was checked. Section 4 explains CI; maintainers handle fork integration.
+
+### Find the source before editing
+
+| Change | Read first | Source / verification entrypoints |
+|---|---|---|
+| Product documentation | [README](../../README.md), linked manual | `docs/`, `scripts/check-doc-truth.sh` |
+| Keeper behavior or instructions | [Keeper manual](../KEEPER-USER-MANUAL.md), constitution | `lib/keeper/`, `config/prompts/keeper.md`, `test/` |
+| Goal, Task, Board or completion | Constitution's domain rules | `lib/workspace/`, `config/tools/`, `test/` |
+| Provider or lane behavior | Relevant interfaces and configuration | `lib/runtime/`, `lib/runtime_model/`, `test/` |
+| TUI or browser UI | Existing interaction and payload contracts | `bin/masc_tui*.ml`, `lib/tui_decode.ml`, `dashboard/`, `test/` |
+| CI or development policy | Constitution's execution protocol | `.github/workflows/`, `scripts/ci/`, `scripts/review/` |
+
+This is a starting map, not a list of all affected files. Follow callers and tests,
+and read any applicable scoped instructions before changing their area. Contract
+changes and Keeper runtime prompt changes need separate reasoning and evidence.
 
 ## 2. Start an AI development session
 
@@ -63,6 +108,12 @@ Read [AGENTS.md](../../AGENTS.md) and the complete
    previous one. Review the findings yourself and address them. A subagent review
    is not automatically a cross-model review or a GitHub approval.
 5. Leave the next concrete action and evidence when handing off.
+
+AI-assisted contributions are welcome. The submitting author remains responsible
+for understanding the diff, protecting credentials and private runtime data,
+addressing reviews, and accurately describing the evidence. Identify what was
+checked, by whom or by which agent, and what remains unverified. Generated output
+and self-review alone do not establish runtime behavior or independent approval.
 
 Keeper lanes may build/test locally if their toolchain exists. Those results do
 not replace current-head PR checks or a targeted `test.yml` run. A session's
@@ -134,6 +185,8 @@ or a missing prerequisite. Avoid unrelated repairs inside the same PR.
 A reviewer reads the contract and diff, inspects behavior evidence and checks the
 current PR head's completed run. Address each actionable finding with a change
 or a source-backed explanation; resolve a thread only when its concern is handled.
+Update the PR description when the scope, evidence or remaining risks change;
+reviewers should not have to reconstruct the result from a comment chain.
 A push creates a new head, so an earlier PASS does not certify the new one.
 A reviewer who issued REQUEST_CHANGES must clear their own request once the
 corrected head’s required checks pass.

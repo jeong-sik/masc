@@ -1,6 +1,6 @@
 ---
 name: sangokushi-3
-description: "삼국지 III (Koei 1993, Korean) on the shared DOS machine: boot with KOEI.COM, the copy-protection code, the numbered prompts from main menu to the first ruler's turn, a 2-player hotseat, and ending a month. Apply a fact only when the visible prompt matches it."
+description: "삼국지 III (Koei 1993, Korean) on the shared DOS machine: boot with KOEI.COM, the copy-protection code, the numbered prompts from main menu to the first ruler's turn, going back and fixing a typed number, a 2-player hotseat, ending a month, going to war, placing officers (digits move, 0 places), battle commands, saving, the ending, and watching an all-AI game. Apply a fact only when the visible prompt matches it."
 ---
 
 # 삼국지 III
@@ -18,14 +18,42 @@ key; `enter` skips the opening.
 
 ## Copy protection
 
-A white box: `CODE:` / `INPUT CODE [孔李李]`, three red hanja. The code for
-`[孔李李]` was `10183`: `masc_dos_type` `10183`, then `enter`. If the box
-shows different hanja, the code is not known here — ask the operator rather
-than guessing, since a wrong code ends the program.
+A white box: `CODE:` / `INPUT CODE [孫李呂]`, three red hanja. The code for
+`[孫李呂]` is `10183`: `masc_dos_type` `10183`, then `enter`.
+
+Type the code only once the box is on the screen. After the key at the KOEI
+logo the screen can settle black for a moment; `masc_dos_step` until the box
+shows. Digits typed into that black screen move the question: in one run the
+box then asked `[馬李袁]`, the typed code was wrong, and the loader printed
+`MAIN.EXE : fatal error occurred.` and exited. If the box shows other hanja,
+the code is not known here — ask the operator rather than guessing, since a
+wrong code ends the program.
+
+## Keys depend on the visible prompt
+
+Use the screen-specific steps below. A `(range)?` label alone does not tell
+whether a digit needs `enter` or what an empty `enter` will do.
+
+- Number then `enter` was observed for ending a ruler's month, the war
+  destination, officer and unit-type choices, gold and food amounts, the
+  officer carrying food, and the save-slot number. Follow their named steps.
+- Empty `enter` closed the 군사 submenu and gold prompt in the observed run.
+  In the war officer list it returned to the command prompt while nobody was
+  sent yet; once an officer has a `*`, it ends the list and advances to gold.
+  At `어떻게 하겠습니까(1-3)` in the save menu, it returns to the command
+  prompt.
+- Battle-menu digits act immediately; a following `enter` backs out of the
+  menu just opened. During officer placement, `enter` does nothing and `0`
+  places the officer. Read those sections before sending another key.
+- `backspace` deletes the last typed digit (`55` became `5`).
+- `esc` does nothing. At eight prompts — command, submenu, officer list, gold,
+  battle menu, move direction, attack type, attack target — the screen stayed
+  the same.
+- At the command prompt `space` hides and shows the information panel. While
+  the panel is hidden, the next key only brings it back and is not typed; read
+  the screen before typing the command.
 
 ## From the title to the first turn
-
-Every prompt ends in `(range)?`; type the number, then `enter`.
 
 | Prompt | Observed choice |
 | --- | --- |
@@ -48,6 +76,59 @@ start of the prompt is whose turn it is.
 
 `0`, `enter` asks 이달의 명령을 끝내겠습니까(Y/N)?; `y` ends that ruler's month.
 The `sangokushi-3-end-month` composition does the three keys in one call.
+Every city the ruler commands takes its own turn in the same month, so the
+prompt comes back with the next city's number.
+
+## Going to war
+
+Observed 2026-09-29 in scenario 6 as 조예, from 17 하비 against 33 건업.
+
+1. `1` (군사), `enter`. In the list `4.전쟁` is red when no enemy city borders
+   this one; pick a border city instead.
+2. `4`, `enter` asks `어느 곳으로 쳐들어가겠습니까(1-68)?`; arrows on the map
+   mark the neighbours. Type the city number, `enter`.
+3. `누구를 보내겠습니까(1-N)?`: one officer per answer — the number, `enter`,
+   then the unit type `1.보병 2.기마 3.노궁 4.강노`, number, `enter`. A type
+   the city cannot field answers `그 부대는 안됩니다`. A sent officer gets a
+   `*`. Several officers can go; an empty `enter` ends the list.
+4. Gold, then food: the amount, `enter`. Then `처들어가겠습니까(Y/N)?`, `y`.
+
+## Placing officers for a battle
+
+Observed at 193년 7월 6 평원 (유비 defending against 원소) and at 235년 1월
+33 건업 (조예 attacking), both on 2026-09-29.
+
+- `<장수>를 배치해 주세요` places one officer at a time on the battle map.
+  The map is made of hexes, and a blinking cursor starts on a free one.
+- Move the cursor one hex per press with the digit keys: `8` up, `2` down,
+  `7` up-left, `9` up-right, `1` down-left, `3` down-right. Arrow keys, `4` and
+  `6` do nothing here.
+- `0` places the officer on the cursor's hex, and the prompt names the next
+  officer. A hex that is taken, walled, or outside the side's area refuses
+  `0` and the prompt stays; move one hex and press `0` again.
+- `enter` does nothing at this prompt. A screen that still asks after `enter`
+  is waiting for `0`, not frozen.
+- The attacker then answers `누가 군량을 가져 갑니까(1-N)?`: number, `enter`.
+
+## Battle commands
+
+`1.이동 2.공격 3.대기 4.계략 5.정보 6.퇴각 7.출진 8.위임 9.기능` and
+`<군주>님, <장수>에게 명령을(1-9)?`. Red items cannot be chosen.
+
+- A battle menu takes its digit alone, with no `enter`. An `enter` after it
+  backs out of the menu the digit opened.
+- `1` (이동) asks `어느 방향입니까?` with `남은 기동력`. Each digit moves one
+  hex in the directions above and spends mobility; at 0 the next officer's
+  menu comes up.
+- `2` (공격) opens `1.통상 2.일제 3.기습 4.화살 5.불화살 6.돌격 7.일기토`;
+  after the type, `어느 곳입니까?` takes a direction digit. An empty hex
+  answers `적은 없었습니다`.
+- `3` (대기) ends the officer's move; `<장수>의 기동력이 N가 되었습니다` waits
+  for any key.
+- `8` (위임) asks `전군위임합니다 해제할 수 없습니다만 좋겠습니까(Y/N)?`; `y`
+  hands every officer to the computer until the battle ends. Each
+  `<장수>의 전술` line still waits for a key (`space`). One delegated siege ran
+  from day 1 to day 10 and returned to the attacker city's command prompt.
 
 ## Hotseat
 
@@ -84,3 +165,24 @@ slot number, `enter`. The screen goes black while the game reads; call
 `masc_dos_step` until it settles, then `space`. After a server restart with
 no `autosave` to restore, this is the way back: boot, pass the copy
 protection, then `2`.
+
+## The ending
+
+In the observed unification on 2026-09-29, one ruler held every city and
+KOEI.COM entered the ending path by running `END.EXE`. That game-state end
+is separate from displaying the intended ending.
+
+`END.EXE` reads `ENDSTIL.DAT` first, and the observed `samguk3` program folder
+had no such file. The screen showed `END.EXE : file access failure.` and the
+machine exited. This was an ending-display failure; the intended ending was
+not shown and remains unverified. Report the unification and file-access
+failure separately.
+
+In the observed game where every ruler's clan died out, the KOEI copyright
+screen appeared and a key exited.
+
+## Watching an all-AI game
+
+`0` players starts a game with no human ruler: 표시군주 `n`, and the months run
+on `space`. Every AI war is shown on the battle map, and each `<장수>의 전술`
+line waits for a key.

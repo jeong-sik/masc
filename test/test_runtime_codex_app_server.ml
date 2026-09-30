@@ -684,8 +684,31 @@ let test_native_effect_before_overflow () =
          | Ok _ -> fail "overflow unexpectedly succeeded"))
       [ "commandExecution", true; "collabAgentToolCall", true;
         "imageGeneration", true; "futureToolItem", true;
-        "reasoning", false; "dynamicToolCall", false ])
+        "reasoning", false; "dynamicToolCall", false; "contextCompaction", false ])
     ["item/started"; "item/completed"]
+;;
+
+let test_completed_compaction_has_a_typed_event () =
+  let item method_ = Yojson.Safe.to_string (`Assoc
+    [ "method", `String method_; "params", `Assoc
+      [ "threadId", `String "thread-1"; "turnId", `String "turn-1"
+      ; "item", `Assoc ["type", `String "contextCompaction"; "id", `String "compact-1"] ] ]) in
+  let events = ref [] in
+  with_fixture
+    [ init_result; account_chatgpt; thread_result; turn_result
+    ; item "item/started"; item "item/completed"; item_completed; turn_completed ]
+    (fun path ->
+      match run_fixture ~on_stream_event:(fun event -> events := event :: !events) path with
+      | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+      | Ok _ ->
+        check int "only completion emits the compaction witness" 1
+          (List.length (List.filter (function
+            | Runtime_codex_app_server.Compaction_observed -> true
+            | _ -> false) !events));
+        check int "compaction is not classified as a native tool effect" 0
+          (List.length (List.filter (function
+            | Runtime_codex_app_server.Native_tool_started _ | Native_tool_finished _ -> true
+            | _ -> false) !events)))
 ;;
 
 let test_prompt_char_count () =
@@ -1960,7 +1983,7 @@ let test_usage_frames_report_the_thread_count_before_a_usage_limit_ends_the_turn
       fail "a counted frame was read as a fill"
     | Turn_started _ | Text_delta _ | Dynamic_tool_started _ | Dynamic_tool_finished _
     | Native_tool_started _ | Native_tool_finished _ | Elicitation_cancelled _
-    | Usage_windows_reported _ | Turn_finished _ -> ()
+    | Usage_windows_reported _ | Compaction_observed | Turn_finished _ -> ()
   in
   with_fixture
     [ init_result; account_chatgpt; thread_result; turn_result
@@ -2809,7 +2832,7 @@ let test_rate_limit_updates_are_reported_without_changing_the_turn () =
     | Runtime_codex_app_server.Usage_windows_reported report -> reports := report :: !reports
     | Turn_started _ | Text_delta _ | Dynamic_tool_started _ | Dynamic_tool_finished _
     | Native_tool_started _ | Native_tool_finished _ | Elicitation_cancelled _
-    | Usage_reported _ | Turn_finished _ -> ()
+    | Usage_reported _ | Compaction_observed | Turn_finished _ -> ()
   in
   with_fixture
     [ init_result; account_chatgpt; thread_result; turn_result; readable; unreadable
@@ -6358,23 +6381,12 @@ let test_production_dynamic_context_reaches_codex_instruction_wire ~project () =
          |> member "text"
          |> to_string
        in
-       (* The production assembly appends the temporal summary into the same
-          envelope after the turn instructions, so the instructions are the
-          prefix of the wire text rather than the whole of it. *)
-       if
-         String.length wire_text < String.length expected_dynamic_context
-         || String.sub wire_text 0 (String.length expected_dynamic_context)
-            <> expected_dynamic_context
-       then
-         check string
-           "production turn instructions stay exact on the wire"
-           expected_dynamic_context
-           wire_text
-       else
-         check string
-           "production turn instructions stay exact on the wire"
-           expected_dynamic_context
-           (String.sub wire_text 0 (String.length expected_dynamic_context));
+       (* Stable memory availability precedes dynamic instructions. Assert the
+          complete instruction section survives exactly once, without assuming
+          it is the first section of the assembled carrier. *)
+       let sections = Astring.String.cuts ~sep:"\n\n" wire_text in
+       check int "production turn instructions stay exact and occur once"
+         1 (List.length (List.filter (String.equal expected_dynamic_context) sections));
        (match
           context_message
           |> member "metadata"
@@ -7192,6 +7204,8 @@ let () =
             test_context_error_records_prior_tool_effect
         ; test_case "read-only contract controls both overflow terminals" `Quick
             test_read_only_overflow_contract
+        ; test_case "completed compaction emits a typed witness" `Quick
+            test_completed_compaction_has_a_typed_event
         ; test_case "native effects remain fenced before overflow" `Quick
             test_native_effect_before_overflow
         ; test_case "developer context preserves authority and history" `Quick

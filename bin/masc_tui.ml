@@ -11062,10 +11062,24 @@ let apply_http_scoped_surfaces state results =
    match reloads it, so a screen never shows rows from a workspace the server
    just stopped serving. *)
 let apply_server_identity_reading state reading =
-  state.server_identity <- Masc_tui_types.server_identity_of_refresh reading;
-  state.workspace_identity <-
+  let workspace_identity =
     Masc_tui_types.workspace_identity_of_refresh
-      ~local_base_path:state.local_base_path reading;
+      ~local_base_path:state.local_base_path reading
+  in
+  if state.workspace_identity <> workspace_identity then begin
+    (* Pending detail tokens belong to the workspace that launched them.
+       Keep the generation monotonic so an A -> B -> A return cannot admit
+       an old response after the operator opens a new detail read. *)
+    state.detail_reads <- [];
+    state.item_account <- None;
+    state.item_account_error <- None;
+    state.item_account_revision <- None;
+    (match state.view with
+     | Keepers Keeper_detail -> state.view <- Keepers Keeper_list
+     | _ -> ())
+  end;
+  state.server_identity <- Masc_tui_types.server_identity_of_refresh reading;
+  state.workspace_identity <- workspace_identity;
   match state.workspace_identity with
   | Masc_tui_types.Workspace_identity_mismatch _ -> clear_local_workspace state
   | Masc_tui_types.Workspace_identity_match ->
@@ -14327,7 +14341,9 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         | Ok account ->
             state.item_account <- Some (request.drr_keeper, account);
             state.item_account_error <- None
-        | Error detail -> state.item_account_error <- Some detail)
+        | Error detail ->
+            state.item_account <- None;
+            state.item_account_error <- Some detail)
   | Keeper_sandbox_view_loaded (request, result) -> (
       let keeper_name = request.drr_keeper in
       let current = Masc_tui_types.finish_detail_read state request in

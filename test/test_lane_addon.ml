@@ -557,11 +557,11 @@ let test_private_fusion_reads_survive_retirement () = with_fixture (fun env _sw 
     [Runtime.Inspect;Runtime.Observe;Runtime.Detach;Runtime.Act;Runtime.Action_status];
   denied Runtime.Evidence ["instance_id",`String id;"row_ids",`List [`String row_id]];
   let public = unwrap (call foreign Runtime.Inspect []) in
-  check int "unfiltered inspection exposes no private instances" 0
+  check Alcotest.int "unfiltered inspection exposes no private instances" 0
     (member "instances" public |> Yojson.Safe.Util.to_list |> List.length);
-  check int "unfiltered inspection exposes no private rows" 0
+  check Alcotest.int "unfiltered inspection exposes no private rows" 0
     (member "rows" public |> Yojson.Safe.Util.to_list |> List.length);
-  check int "foreign range query excludes private observations" 0
+  check Alcotest.int "foreign range query excludes private observations" 0
     (unwrap (call foreign Runtime.Slice []) |> member "rows" |> Yojson.Safe.Util.to_list |> List.length);
   check bool "claimed owner with unauthenticated HTTP access is refused" true
     (Result.is_error (Lane_addon_runtime.dispatch ~caller:owner ~access:Lane_addon_sources.Unauthenticated
@@ -570,11 +570,11 @@ let test_private_fusion_reads_survive_retirement () = with_fixture (fun env _sw 
   ignore (unwrap (call owner Runtime.Detach ["instance_id",`String id]));
   await_phase clock config id "detached";
   Runtime.For_testing.reset ();
-  check int "owner can read durable rows after host manager restart" 1
+  check Alcotest.int "owner can read durable rows after host manager restart" 1
     (unwrap (call owner Runtime.Slice []) |> member "rows" |> Yojson.Safe.Util.to_list |> List.length);
   denied Runtime.Inspect ["instance_id",`String id];
   denied Runtime.Evidence ["instance_id",`String id;"row_ids",`List [`String row_id]];
-  check int "historical inspection excludes private bindings" 0
+  check Alcotest.int "historical inspection excludes private bindings" 0
     (unwrap (call foreign Runtime.Inspect []) |> member "instances" |> Yojson.Safe.Util.to_list |> List.length))
 
 let test_private_broadcast_retry_uses_saved_visibility () = with_fixture (fun env _ config dir _ ->
@@ -643,6 +643,25 @@ let test_broadcast_retry_reconciles_receipt_during_slow_fanout () =
       "broadcast",`Bool true;"request_id",`String "slow-send"] in
     let entered, mark_entered = Eio.Promise.create () in
     let release, mark_released = Eio.Promise.create () in
+    let before_commit, mark_before_commit = Eio.Promise.create () in
+    let allow_commit, mark_allow_commit = Eio.Promise.create () in
+    let retry_waiting, mark_retry_waiting = Eio.Promise.create () in
+    let cancelled_waiter, mark_cancelled_waiter = Eio.Promise.create () in
+    let waiter_context, mark_waiter_context = Eio.Promise.create () in
+    let waiters = ref 0 in
+    let writes = ref 0 in
+    let previous_write = Workspace_broadcast.For_testing.replace_write_json_commit
+      (fun config path json ->
+        incr writes;
+        if !writes=1 then (
+          Eio.Promise.resolve mark_before_commit ();
+          Eio.Promise.await allow_commit);
+        Workspace_utils.write_json_commit_result config path json) in
+    let previous_wait = Workspace_broadcast.For_testing.replace_on_exact_request_wait
+      (fun _request_id ->
+        incr waiters;
+        if !waiters=1 then Eio.Promise.resolve mark_cancelled_waiter ()
+        else if !waiters=2 then Eio.Promise.resolve mark_retry_waiting ()) in
     let fanouts = ref 0 in
     let previous = Workspace_broadcast.For_testing.replace_on_broadcast_mention (fun _delivery ->
       incr fanouts;
@@ -653,15 +672,38 @@ let test_broadcast_retry_reconciles_receipt_during_slow_fanout () =
     Fun.protect ~finally:(fun () ->
       let (_ : Workspace_broadcast.broadcast_delivery -> Workspace_broadcast.mention_delivery) =
         Workspace_broadcast.For_testing.replace_on_broadcast_mention previous in
+      let (_ : string -> unit) =
+        Workspace_broadcast.For_testing.replace_on_exact_request_wait previous_wait in
+      let (_ : Workspace_utils_backend_setup.config -> string -> Yojson.Safe.t ->
+        (Workspace_utils.write_json_commit, string) result) =
+        Workspace_broadcast.For_testing.replace_write_json_commit previous_write in
+      if not (Eio.Promise.is_resolved allow_commit) then Eio.Promise.resolve mark_allow_commit ();
       if not (Eio.Promise.is_resolved release) then Eio.Promise.resolve mark_released ()) (fun () ->
       let send () = Runtime.dispatch ~caller:"fixture-operator" ~config ~operation:Runtime.Evidence args |> unwrap in
       let first = Eio.Fiber.fork_promise ~sw send in
+      Eio.Promise.await before_commit;
+      let cancelled_retry = Eio.Fiber.fork_promise ~sw (fun () ->
+        Eio.Cancel.sub (fun context ->
+          Eio.Promise.resolve mark_waiter_context context;
+          send ())) in
+      Eio.Promise.await cancelled_waiter;
+      Eio.Cancel.cancel (Eio.Promise.await waiter_context) Exit;
+      (match Eio.Promise.await cancelled_retry with
+       | Error (Eio.Cancel.Cancelled _) -> ()
+       | Error error -> raise error
+       | Ok _ -> Alcotest.fail "cancelled precommit retry must propagate cancellation");
+      check bool "cancelled waiter leaves the original owner waiting" false (Eio.Promise.is_resolved first);
+      let retry = Eio.Fiber.fork_promise ~sw send in
+      Eio.Promise.await retry_waiting;
+      check bool "retry arrived before the authoritative row" false (Eio.Promise.is_resolved retry);
+      Eio.Promise.resolve mark_allow_commit ();
       Eio.Promise.await entered;
       (* A new observation changes entry_json while the original caller is
          blocked. Retry still has to return the originally published bundle. *)
       ignore (unwrap (dispatch config Runtime.Observe ["instance_id",`String id]));
       await clock (fun () -> int "observation_seq" (instance config id) = 2);
-      let replay = send () in
+      let replay = Eio.Promise.await_exn retry in
+      check Alcotest.int "precommit retry created only one authoritative message" 1 !writes;
       check bool "original request is still waiting for fleet delivery" false (Eio.Promise.is_resolved first);
       check string "retry recovers authoritative commit during slow fanout" "committed"
         (member "delivery" replay |> text "status");

@@ -158,11 +158,16 @@ val broadcast_once :
     committed authoritative message returns its receipt without another message
     write. An idle retry replays the idempotent fleet projection to recover
     interrupted recipients; an active fanout returns its receipt immediately.
+    A retry that arrived before the primary row waits only for row readiness,
+    not fleet delivery; a failed or cancelled attempt wakes it to reread.
     Reusing
     an identity with different content or sender is rejected. This path always
     declares [Fleet_conversation]; callers cannot replay a different audience. *)
 
 module For_testing : sig
+  val replace_on_exact_request_wait : (string -> unit) -> (string -> unit)
+  (** Observe a retry about to wait for an active request's row readiness.
+      Test isolation only; no lock is held while the observer runs. *)
   (** Replace the handler and return the prior one. Test isolation only. *)
   val replace_on_broadcast_mention :
     (broadcast_delivery -> mention_delivery) ->

@@ -6,7 +6,7 @@ image = "masc-lane-fusion-report:0.1.0"
 command = ["python3", "server.py"]
 
 [world.outputs.report]
-lanes = ["fusion/report"]
+lanes = ["fusion/report-context", "fusion/report"]
 
 [resources]
 cpus = 0.5

@@ -1,0 +1,30 @@
+ Dashboard  Work  ▸Keepers  Usage  Board  Workspace  System
+
+   Keepers ▸ alpha ▸ chat
+ ──────────────────────────────────────────────────────────────────────────────────────────────────
+  ┄┄ 2026-09-30 · 23:00 ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+  ───┤   23:02 ◀ someone        ▎retained-image-ready
+                                ▎⎘ #1 ../../label-only.png · image/png
+             › LOCAL         │ Ctrl-O: no image in this conversation or the composer
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ ──────────────────────────────────────────────────────────────────────────────────────────────────
+    Activity unavailable: keeper turns load failed: HTTP 503: fixture endpoint unavailable
+    Memory load failed · /errors
+    >
+
+ alpha · - unread AUTO · gate: not loaded · —  Context unavailable · Ctrl-X
+  Enter:send  Ctrl-J:NL  Ctrl-R:reasoning  Ctrl-D:tools  Ctrl-N:journal  Esc:detail  …?

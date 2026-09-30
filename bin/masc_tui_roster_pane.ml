@@ -1,3 +1,11 @@
+type preference = Auto | Hidden | Shown
+
+let effective_hidden preference ~in_chat =
+  match preference with
+  | Auto -> not in_chat
+  | Hidden -> true
+  | Shown -> false
+
 let threshold_cols = 110
 (* A 30-cell pane left 23 cells for the name after the border, health mark,
    and spacing. That cut ordinary configured names such as
@@ -65,6 +73,10 @@ let shown ~hidden ~cols = (not hidden) && cols >= threshold_cols
 
 let toggle_hidden ~hidden ~cols =
   if cols < threshold_cols then None else Some (not hidden)
+
+let toggle_preference preference ~in_chat ~cols =
+  toggle_hidden ~hidden:(effective_hidden preference ~in_chat) ~cols
+  |> Option.map (fun hidden -> if hidden then Hidden else Shown)
 
 let content_cols ~hidden ~cols =
   if shown ~hidden ~cols then cols - pane_cols else cols

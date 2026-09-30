@@ -8,6 +8,7 @@
  (libraries
   masc
   masc.masc_candle_runtime
+  masc.masc_candle
   masc.keeper_portrait
   masc.masc_process
   masc.watched_work

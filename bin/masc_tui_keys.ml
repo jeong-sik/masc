@@ -1146,11 +1146,43 @@ let footer_hints_config ~pane =
 let voice_agent_bindings =
   [ b Navigate "j/k" "keeper"
   ; b Navigate "\xe2\x86\x90/\xe2\x86\x92" "voice"
+  ; b Navigate "PgUp/PgDn" "metadata page"
+  ; b Navigate "Home/End" "metadata edges"
+  ; b Meta "?" "help"
   ; b Act "Enter" "assign" ~help:"write this keeper's voice into voice.tts.agent_voices"
   ; b Act "Esc" "back" ~help:"leave the screen; nothing is written"
   ]
 
-let footer_hints_voice_agent () = hints_of_bindings voice_agent_bindings
+let patch_review_bindings =
+  [ b Navigate "Shift-Left / Shift-Right" "pan"
+      ~help:"move the diff text horizontally while file coordinates remain fixed"
+  ; b Navigate "j/k" "scroll"
+  ; b Navigate "PgUp/PgDn / d/u" "page"
+  ; b Navigate "Home/End / g/G" "edges"
+  ; b Act "e" "edit" ~help:"leave review and open the project file in your editor"
+  ; b Meta "?" "help"
+  ; b Meta "Esc/q" "close"
+  ]
+
+let runtime_detail_bindings =
+  [ b Navigate "j/k" "scroll"
+  ; b Navigate "PgUp/PgDn" "page"
+  ; b Navigate "Home/End" "edges"
+  ; b Act "Left / Esc" "list"
+  ; b Meta "r" "refresh"
+  ; b Meta "Tab" "next"
+  ; b Meta "?" "help"
+  ]
+
+let footer_hints_patch_review () = hints_of_bindings patch_review_bindings
+let footer_hints_runtime_detail () = hints_of_bindings runtime_detail_bindings
+
+let voice_agent_bindings_for_saving saving =
+  if saving then [ b Meta "?" "help"; b Act "Esc" "back" ]
+  else voice_agent_bindings
+
+let footer_hints_voice_agent ?(saving = false) () =
+  hints_of_bindings (voice_agent_bindings_for_saving saving)
 
 (* The account form on runtime.toml takes every key while it is open, so the
    pane's row -- [e], [r], [Tab], [q] -- would name keys that now type into a
@@ -1738,6 +1770,25 @@ let help_sections ?current () =
           ; ("Prompt marks", Masc_tui_config_mark.prompt_legend)
           ; ("Param marks", Masc_tui_config_mark.param_legend)
           ])
+
+let help_sections_for_state (state : state) =
+  let active =
+    if state.patch_modal_open then Some ("Patch review", patch_review_bindings)
+    else if Option.is_some state.voice_agent_voices then
+      let bindings =
+        match state.voice_agent_voices with
+        | Some session -> voice_agent_bindings_for_saving session.vas_saving
+        | None -> voice_agent_bindings
+      in
+      Some ("Keeper voices", bindings)
+    else if state.view = Runtime && Option.is_some state.runtime_detail_target then
+      Some ("Runtime detail", runtime_detail_bindings)
+    else None
+  in
+  match active with
+  | None -> help_sections ~current:state.view ()
+  | Some (title, bindings) ->
+      (title ^ here_marker, entries bindings) :: help_sections ()
 
 let footer_hints_browser_lane =
   hints_of_bindings

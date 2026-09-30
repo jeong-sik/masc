@@ -12300,7 +12300,7 @@ let render_runtime_detail (state : state) target =
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ~hints:"j/k:scroll  PgUp/PgDn:page  Home/End:edges  Left / Esc:list  r:refresh  Tab:next");
+       ~hints:(Masc_tui_keys.footer_hints_runtime_detail ()));
   finish_surface state ~clamped:(Runtime_detail_scroll scroll)
     ~surface_key:"runtime-detail" ~rows:terminal_rows ~cols buf
 
@@ -15955,7 +15955,7 @@ let render_voice_agent (state : state) (session : voice_agent_session) =
      voice_body_line_styled buf cols ~style:(Theme.warn ())
        ("  " ^ Terminal_text.single_line status));
   finish_voice_surface state ~terminal_rows ~cols ~head ~body:buf
-    ~hints:(Masc_tui_keys.footer_hints_voice_agent ())
+    ~hints:(Masc_tui_keys.footer_hints_voice_agent ~saving:session.vas_saving ())
 ;;
 
 let render_voice (state : state) =
@@ -16763,7 +16763,7 @@ let render_patch_modal (state : state) =
     ~title:
       (screen_title " MASC Patch review" ^ "  " ^ Ansi.bold
        ^ Terminal_text.single_line path_label ^ Ansi.reset)
-    ~hints:"Shift+←/→:pan  e:edit  j/k:scroll  d/u:page  g/G:edges  Esc/q:close"
+    ~hints:(Masc_tui_keys.footer_hints_patch_review ())
     ~body:(fun ~budget:_ c ->
       c.push_styled ~style:(Theme.recede ())
         (Printf.sprintf "  old / new · col %d/%d" (hscroll + 1) (limit + 1));

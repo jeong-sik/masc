@@ -19518,16 +19518,18 @@ and is loaded on demand through keeper_skill.
        (* The keeper-voice screen owns every key while it is open: it is drawn
           instead of the pane, so a key that fell through would act on a
           surface nobody is looking at. *)
-       | Some key when Option.is_some state.voice_agent_voices ->
+       | Some key
+         when Option.is_some state.voice_agent_voices && not state.help_open ->
            (match state.voice_agent_voices with
             | None -> ()
             | Some session ->
               let set updated = state.voice_agent_voices <- Some updated in
-              (* A save in flight takes nothing but the key that leaves. *)
-              if session.vas_saving && not (String.equal key "esc")
+              (* Help is read-only and may cover an in-flight save. *)
+              if session.vas_saving && not (String.equal key "esc" || String.equal key "?")
               then ()
               else (
                 match key with
+                | "?" -> state.help_open <- true; state.help_scroll <- 0
                 | "esc" ->
                     state.voice_agent_voices <- None;
                     state.config_scroll <- 0
@@ -20794,6 +20796,7 @@ and is loaded on demand through keeper_skill.
              state.patch_modal_error <- None
            in
            (match k with
+            | "?" -> state.help_open <- true; state.help_scroll <- 0
             | "esc" | "q" | "Q" -> close ()
             | "shift-left" ->
                 let limit = Masc_tui_render.patch_modal_horizontal_limit state in

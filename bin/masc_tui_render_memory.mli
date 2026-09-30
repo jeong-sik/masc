@@ -70,6 +70,8 @@ val facts_title :
 val memory_fact_age_label : float -> string
 val memory_fact_row_line : ?is_fleet:bool -> cols:int -> memory_fact_row -> string
 val memory_fact_detail_lines : cols:int -> memory_fact_row -> string list
+(** Full claim and provenance rows, wrapped to the frame of a [cols]-column
+    terminal. Each returned row occupies one scrollable display row. *)
 
 val memory_fleet_header_rows : cols:int -> state -> string list
 (** The Total, Ordinary and Librarian rows above the sort row, each wrapped to

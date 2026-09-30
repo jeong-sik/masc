@@ -3,6 +3,7 @@ import base64
 import hashlib
 import json
 import os
+import re
 import sys
 import test_tui_keyboard_input as h
 
@@ -41,7 +42,7 @@ def run(executable, no_color=False):
     def interact(process, fd, _slave, output, _base):
         def key(value, needle):
             return h.send_and_wait(process, fd, output, value, needle)
-        def capture(name, rows, columns, needle, selected_name=None):
+        def capture(name, rows, columns, needle, selected_name=None, *, raw=False):
             h.resize_and_wait(process, fd, output, rows=rows, columns=columns+1,
                 needle=needle, controls=(h.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
             frame = h.resize_and_wait(process, fd, output, rows=rows, columns=columns,
@@ -52,7 +53,7 @@ def run(executable, no_color=False):
                 "rows":rows,"columns":columns,"provenance":"CI fixture PTY",
                 "frame_b64":base64.b64encode(frame).decode(),
                 "screen":b"\n".join(h.screen_rows(frame).get(row, b"") for row in range(1, rows + 1)).decode(errors="replace")}),flush=True)
-            return h.screen_text(frame)
+            return frame if raw else h.screen_text(frame)
         h.wait_for_output(process,fd,output,b"Health: ",start=0,timeout=10)
         key(b":go Work\r",b"plan-alpha-29424")
         wide=capture("work-wide",36,160,b"Goals")
@@ -80,8 +81,10 @@ def run(executable, no_color=False):
         before=capture("workspace-page-start",24,80,b"/srv/masc/workspace/masc",b"masc")
         names=[b"masc",b"next-repo",b"failed-repo"]+[name.encode() for name in page_names]
         visible=sum(name in before for name in names)
-        paged=key(b"\x1b[6~",b"page-")
-        selected=[index for index,name in enumerate(names) if h.keeper_row_selected(name).search(paged)]
+        key(b"\x1b[6~",b"page-")
+        paged=capture("workspace-page-next",24,80,b"page-",raw=True)
+        selected=[index for index,name in enumerate(names)
+            if re.search(rb"\x1b\[7m *"+re.escape(name)+rb"(?= )",paged)]
         if len(selected)!=1 or not 0<selected[0]<=visible:
             raise AssertionError(f"Workspace page skipped undisplayed repositories: {selected}, visible={visible}")
         key(b":settings\r",b"studio.enabled")

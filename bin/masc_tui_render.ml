@@ -4303,8 +4303,19 @@ let schedule_detail_lines ~width ~freshness ~runner (row : schedule_row)
       ~(wake_history : schedule_wake_history option)
       ~(wake_history_error : (string * string) option) =
   let field ?(style = Ansi.reset) label value =
-    ( style
-    , Printf.sprintf "  %-14s %s" label (String.concat "\n" (List.map Terminal_text.single_line (String.split_on_char '\n' value))) )
+    let prefix = Printf.sprintf "  %-14s " label in
+    let prefix_cells = Message_layout.display_width prefix in
+    let rows =
+      if width - prefix_cells >= width / 2 then
+        let values = Masc_tui_text_block.rows ~max_cells:(max 1 (width - prefix_cells)) value in
+        (match values with
+         | [] -> [prefix]
+         | values -> List.mapi (fun index line ->
+             (if index = 0 then prefix else String.make prefix_cells ' ') ^ line) values)
+      else
+        (if String.equal label "" then [] else ["  " ^ label])
+        @ Masc_tui_text_block.rows ~max_cells:width value in
+    style, String.concat "\n" rows
   in
   let optional value = Option.value ~default:Masc_tui_theme.Glyph.no_value value in
   let timestamp value =
@@ -4406,9 +4417,7 @@ let schedule_detail_lines ~width ~freshness ~runner (row : schedule_row)
          [ field ~style:(Theme.warn ()) "Held"
              (match Tui_decode.schedule_hold_reading ~freshness ~runner hold with
               | Tui_decode.Hold_current ->
-                  let due =
-                    hold.Tui_decode.srh_due_at_iso
-                  in
+                  let due = Terminal_text.short_timestamp hold.Tui_decode.srh_due_at_iso in
                   (match hold.Tui_decode.srh_reason with
                    | Tui_decode.Hold_previous_wake_untaken ->
                        Render_schedule.schedule_hold_reading ~due
@@ -4424,6 +4433,7 @@ let schedule_detail_lines ~width ~freshness ~runner (row : schedule_row)
                        Render_schedule.schedule_fence_hold_as_of_reading
                          ~checked ~target ~fence_owner))
          ; field "Held id" hold.Tui_decode.srh_occurrence_id
+         ; field "Held due" hold.Tui_decode.srh_due_at_iso
          ])
   @ schedule_turn_rows ~field row
   @ (if keeper_wake then
@@ -4453,7 +4463,8 @@ let schedule_detail_content (state : state) ~cols ~runner (row : schedule_row) =
       ~wake_history_error:state.schedule_wake_history_error in
   List.concat_map (fun (style, text) ->
       String.split_on_char '\n' text |> List.concat_map (fun line ->
-        match Message_layout.wrap_words ~max_cells:width line with
+        if Message_layout.display_width line <= width then [style, line]
+        else match Message_layout.wrap_words ~max_cells:width line with
         | [] -> [style, ""]
         | lines -> List.map (fun text -> style, text) lines))
     (warnings @ fields)

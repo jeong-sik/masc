@@ -6,6 +6,8 @@ terminal answers the Kitty graphics query."""
 from __future__ import annotations
 
 import os
+import json
+import threading
 import re
 import sys
 from pathlib import Path
@@ -226,16 +228,17 @@ def portrait_as_pixels(binary: str) -> None:
     )
 
 
+ITEM_CATALOG = [
+    ("glasses", "face"), ("shades", "face"), ("eye_patch", "face"),
+    ("plaster", "face"), ("freckles", "face"), ("beard", "face"),
+    ("scarf", "neck"), ("bow_tie", "neck"), ("medal", "neck"),
+    ("bow", "head"), ("crown", "head"), ("beanie", "head"),
+    ("book", "hand"), ("mug", "hand"), ("quill", "hand"),
+    ("dish_gilt", "base"), ("dish_silver", "base"), ("dish_oak", "base"),
+]
+
 def item_tab_previews_accessories(binary: str) -> None:
     fixtures = h.keeper_runtime_http_fixtures()
-    catalog = [
-        ("glasses", "face"), ("shades", "face"), ("eye_patch", "face"),
-        ("plaster", "face"), ("freckles", "face"), ("beard", "face"),
-        ("scarf", "neck"), ("bow_tie", "neck"), ("medal", "neck"),
-        ("bow", "head"), ("crown", "head"), ("beanie", "head"),
-        ("book", "hand"), ("mug", "hand"), ("quill", "hand"),
-        ("dish_gilt", "base"), ("dish_silver", "base"), ("dish_oak", "base"),
-    ]
     fixtures["/api/v1/keepers/alpha/items"] = (
         200,
         {
@@ -245,7 +248,7 @@ def item_tab_previews_accessories(binary: str) -> None:
                 ({"id": item, "slot": slot, "price_status": "unpriced"}
                  if item == "dish_oak" else
                  {"id": item, "slot": slot, "price_status": "priced", "price_milli": "1000"})
-                for item, slot in catalog
+                for item, slot in ITEM_CATALOG
             ],
         },
     )
@@ -329,6 +332,90 @@ def item_account_failure_keeps_the_preview(binary: str) -> None:
     )
 
 
+def item_account_withdraws_unread_authority(binary: str) -> None:
+    fixtures = h.keeper_runtime_http_fixtures()
+    identity = {"base": "", "unread": False, "probes": 0}
+    held, release, served = threading.Event(), threading.Event(), threading.Event()
+    arm = [False]
+    balance = ["12500"]
+    account = {"status": "ready", "keeper": "alpha", "owned_items": [],
+               "catalog": [{"id": item, "slot": slot, "price_status": "unpriced"}
+                           for item, slot in ITEM_CATALOG]}
+
+    def health():
+        identity["probes"] += 1
+        value = ({"error": "identity unread"} if identity["unread"] else
+                 {"paths": {"effective_base_path": identity["base"],
+                            "effective_masc_root": os.path.join(identity["base"], ".masc")},
+                  "state_ready": True})
+        return h.RawHttpResponse(503 if identity["unread"] else 200,
+                                 json.dumps(value).encode(), content_type="application/json")
+
+    def items():
+        value = dict(account, balance_milli=balance[0])
+        if not arm[0]:
+            return 200, value
+        arm[0] = False
+        held.set()
+        if not release.wait(timeout=30):
+            return 504, {"error": "fixture release missing"}
+        def chunks():
+            yield json.dumps(value).encode()
+            served.set()
+        return h.StreamingHttpResponse(chunks)
+
+    fixtures["/health"] = health
+    fixtures["/api/v1/keepers/alpha/items"] = items
+
+    def frame(process, fd, output, predicate):
+        assert h.wait_for_fixture_state(process, fd, output,
+            lambda: predicate(b"\n".join(last_frame_rows(output).values())), timeout=10)
+
+    def recover(process, fd, output):
+        probes = identity["probes"]
+        identity["unread"] = False
+        # A subsequent serial full-refresh probe starts after the previous
+        # identity answer has been applied. This is a fixture barrier, not age.
+        assert h.wait_for_fixture_state(process, fd, output,
+            lambda: identity["probes"] >= probes + 2, timeout=10)
+
+    def interact(process, fd, _slave, output, _base):
+        try:
+            open_alpha_detail(process, fd, output)
+            h.resize_and_wait(process, fd, output, rows=SHORT_ROWS, columns=COLUMNS, needle=INFO_TAB)
+            h.send_and_wait(process, fd, output, b"]", b"Balance 12.500 Candle")
+            identity["unread"] = True
+            frame(process, fd, output, lambda text:
+                  b"Account unavailable:" in text and b"Balance 12.500 Candle" not in text)
+            recover(process, fd, output)
+            balance[0] = "13000"
+            h.send_and_wait(process, fd, output, b"r", b"Balance 13.000 Candle")
+            arm[0] = True
+            os.write(fd, b"r")
+            assert h.wait_for_fixture_state(process, fd, output, held.is_set, timeout=3)
+            identity["unread"] = True
+            frame(process, fd, output, lambda text: b"Account unavailable:" in text)
+            recover(process, fd, output)
+            balance[0] = "14000"
+            h.send_and_wait(process, fd, output, b"r", b"Balance 14.000 Candle")
+            start = len(output)
+            release.set()
+            assert h.wait_for_fixture_state(process, fd, output, served.is_set, timeout=3)
+            h.drain_until_quiet(process, fd, output)
+            text = b"\n".join(last_frame_rows(output).values())
+            assert b"Balance 14.000 Candle" in text
+            assert b"Balance 13.000 Candle" not in text
+            assert b"Balance 13.000 Candle" not in output[start:]
+            os.write(fd, b"q")
+        finally:
+            release.set()
+
+    h.run_terminal_scenario(binary, description="Item balances and pending reads lose unread workspace authority",
+                            interact=interact, http_fixtures=fixtures, terminal_cols=COLUMNS,
+                            prepare_workspace=lambda base: identity.update(base=str(Path(base).resolve())),
+                            refresh=0.2)
+
+
 if __name__ == "__main__":
     binary = str(Path(sys.argv[1]).resolve())
     portrait_follows_the_terminal_height(binary)
@@ -336,4 +423,5 @@ if __name__ == "__main__":
     portrait_as_pixels(binary)
     item_tab_previews_accessories(binary)
     item_account_failure_keeps_the_preview(binary)
-    print("tui keeper portrait: PASS (5 scenarios)")
+    item_account_withdraws_unread_authority(binary)
+    print("tui keeper portrait: PASS (6 scenarios)")

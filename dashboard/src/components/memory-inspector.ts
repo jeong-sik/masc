@@ -71,6 +71,7 @@ const PROMPT_BLOCK_META: Readonly<Record<TurnPromptBlockId, BlockMeta>> = {
   keeper_instructions: { lbl: 'Keeper 지침', color: 'var(--text-dim)', mem: false },
   dynamic_context: { lbl: '동적 컨텍스트', color: 'var(--volt)', mem: false },
   temporal_summary: { lbl: '시간 요약', color: 'var(--status-warn)', mem: false },
+  librarian_working_context: { lbl: 'Librarian 작업 맥락', color: 'var(--info)', mem: false },
   memory_os_recall: { lbl: '메모리 회상', color: 'var(--volt-strong)', mem: true },
   // RFC-0366: one operator sentence, rendered for one turn and then stamped
   // consumed. Not memory — it never reaches the recall block.
@@ -114,6 +115,7 @@ const INPUT_COMPONENT_META: Readonly<Record<TurnInputComponentId, BlockMeta>> = 
   'prompt.dynamic_context': PROMPT_BLOCK_META.dynamic_context,
   'prompt.temporal_summary': PROMPT_BLOCK_META.temporal_summary,
   'prompt.memory_os_recall': PROMPT_BLOCK_META.memory_os_recall,
+  'prompt.librarian_working_context': PROMPT_BLOCK_META.librarian_working_context,
   'prompt.operator_note': PROMPT_BLOCK_META.operator_note,
   'prompt.skill_compositions': PROMPT_BLOCK_META.skill_compositions,
   tool_schemas: { lbl: '도구 스키마', color: 'var(--status-warn)', mem: false },

@@ -1356,7 +1356,7 @@ def row_budget_http_fixtures() -> HttpFixtures:
         "/api/v1/board?sort_by=hot": (200, {"posts": [post]}),
         "/api/v1/board/post-1?format=flat": (
             200,
-            {"post": post, "comments": comments},
+            board_detail_page(post, comments),
         ),
     }
 
@@ -1857,6 +1857,27 @@ def board_selection_post(suffix: str, title: str, body: str) -> dict[str, object
     }
 
 
+def board_detail_page(
+    post: dict[str, object], comments: list[dict[str, object]],
+    *, offset: int | None = None, limit: int = 20,
+) -> dict[str, object]:
+    total = len(comments)
+    first = max(0, total - limit) if offset is None else offset
+    page = comments[first:first + limit]
+    next_offset = first + len(page) if first + len(page) < total else None
+    return {
+        "post": {**post, "comment_count": total},
+        "comments": page,
+        "comment_page": {
+            "offset": first,
+            "returned": len(page),
+            "total": total,
+            "has_more": next_offset is not None,
+            "next_offset": next_offset,
+        },
+    }
+
+
 def board_selection_http_fixtures() -> HttpFixtures:
     posts = [
         board_selection_post("a", "Alpha", "list-body-a"),
@@ -1872,11 +1893,11 @@ def board_selection_http_fixtures() -> HttpFixtures:
     fixtures["/api/v1/board?sort_by=hot"] = (200, {"posts": posts})
     fixtures["/api/v1/board/post-b?format=flat"] = (
         200,
-        {"post": bravo_detail, "comments": []},
+        board_detail_page(bravo_detail, []),
     )
     fixtures["/api/v1/board/post-c?format=flat"] = (
         200,
-        {"post": charlie_detail, "comments": []},
+        board_detail_page(charlie_detail, []),
     )
     return fixtures
 
@@ -1903,14 +1924,14 @@ def board_json_http_fixtures() -> HttpFixtures:
     fixtures["/api/v1/board?sort_by=hot"] = (200, {"posts": posts})
     fixtures["/api/v1/board/post-json?format=flat"] = (
         200,
-        {
-            "post": posts[0],
-            "comments": [board_detail_comment("json-comment", 'Evidence note: {"probe": true}')],
-        },
+        board_detail_page(
+            posts[0],
+            [board_detail_comment("json-comment", 'Evidence note: {"probe": true}')],
+        ),
     )
     fixtures["/api/v1/board/post-markdown?format=flat"] = (
         200,
-        {"post": posts[1], "comments": []},
+        board_detail_page(posts[1], []),
     )
     return fixtures
 
@@ -1933,12 +1954,10 @@ def board_detail_authority_http_fixtures() -> tuple[HttpFixtures, GatedHttpRespo
     fixtures["/api/v1/board?sort_by=hot"] = (200, {"posts": posts})
     fixtures["/api/v1/board/post-a?format=flat"] = (
         200,
-        {
-            "post": board_selection_post(
-                "a", "Alpha authoritative", "a-authoritative-detail"
-            ),
-            "comments": [board_detail_comment("comment-a", "a-only-comment")],
-        },
+        board_detail_page(
+            board_selection_post("a", "Alpha authoritative", "a-authoritative-detail"),
+            [board_detail_comment("comment-a", "a-only-comment")],
+        ),
     )
     late_list = GatedHttpResponse(
         (
@@ -1964,10 +1983,10 @@ def board_detail_isolation_http_fixtures() -> tuple[HttpFixtures, GatedHttpRespo
     fixtures["/api/v1/board?sort_by=hot"] = (200, {"posts": posts})
     fixtures["/api/v1/board/post-a?format=flat"] = (
         200,
-        {
-            "post": board_selection_post("a", "Alpha", "a-detail-body"),
-            "comments": [board_detail_comment("comment-a", "a-only-comment")],
-        },
+        board_detail_page(
+            board_selection_post("a", "Alpha", "a-detail-body"),
+            [board_detail_comment("comment-a", "a-only-comment")],
+        ),
     )
     b_failure = GatedHttpResponse((503, {"error": "b-detail-failed"}))
     fixtures["/api/v1/board/post-b?format=flat"] = b_failure
@@ -1983,25 +2002,22 @@ def board_paginated_detail_http_fixtures() -> tuple[HttpFixtures, GatedHttpRespo
     fixtures["/api/v1/board?sort_by=hot"] = (200, {"posts": posts})
     fixtures["/api/v1/board/post-a?format=flat"] = (
         200,
-        {
-            "post": board_selection_post("a", "Alpha", "a-recovered-detail"),
-            "comments": [],
-        },
+        board_detail_page(board_selection_post("a", "Alpha", "a-recovered-detail"), []),
     )
     fixtures["/api/v1/board/post-b?format=flat"] = (
         200,
-        {
-            "post": board_selection_post("b", "Bravo", "b-initial-detail"),
-            "comments": [board_detail_comment("comment-b", "b-initial-comment")],
-        },
+        board_detail_page(
+            board_selection_post("b", "Bravo", "b-initial-detail"),
+            [board_detail_comment("comment-b", "b-initial-comment")],
+        ),
     )
     late_b = GatedHttpResponse(
         (
             200,
-            {
-                "post": board_selection_post("b", "Bravo", "b-late-detail"),
-                "comments": [board_detail_comment("comment-b-late", "b-late-comment")],
-            },
+            board_detail_page(
+                board_selection_post("b", "Bravo", "b-late-detail"),
+                [board_detail_comment("comment-b-late", "b-late-comment")],
+            ),
         )
     )
     return fixtures, late_b
@@ -2129,7 +2145,6 @@ def run_terminal_scenario(
     confirm_exit: bytes = b"q",
     refresh: float = 60.0,
     terminal_cols: int = 100,
-    terminal_rows: int = 30,
     workspace: str = WORKSPACE_PAYLOAD,
     http_fixtures: HttpFixtures | None = None,
     http_requests: HttpRequests | None = None,
@@ -2151,7 +2166,7 @@ def run_terminal_scenario(
     output = PtyOutput()
     process: subprocess.Popen[bytes] | None = None
     try:
-        fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, struct.pack("HHHH", terminal_rows, terminal_cols, 0, 0))
+        fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, struct.pack("HHHH", 30, terminal_cols, 0, 0))
         os.set_blocking(master_fd, False)
         with tempfile.TemporaryDirectory(prefix="masc-tui-keyboard-") as base_path:
             with test_http_endpoint(
@@ -2171,6 +2186,9 @@ def run_terminal_scenario(
                 if prepare_workspace is not None:
                     prepare_workspace(base_path)
                 environment = os.environ.copy()
+                # The harness owns this temporary workspace. An inherited
+                # config override would read the caller's live TUI settings.
+                environment.pop("MASC_CONFIG_DIR", None)
                 environment.pop("LINES", None)
                 environment.pop("COLUMNS", None)
                 # Same reason as LINES/COLUMNS: the terminal the assertions
@@ -5225,7 +5243,7 @@ def board_reference_http_fixtures() -> HttpFixtures:
     for suffix, (title, body) in bodies.items():
         fixtures[f"/api/v1/board/post-{suffix}?format=flat"] = (
             200,
-            {"post": board_selection_post(suffix, title, body), "comments": []},
+            board_detail_page(board_selection_post(suffix, title, body), []),
         )
     return fixtures
 
@@ -9300,7 +9318,8 @@ def skills_usage_clarity_interaction(
         )
         rendered = CSI_RE.sub(b"", usage)
         expected = [
-            f"{1 if observed else 0} of 2 catalog Skills observed; {1 if observed else 2} without retained invocation".encode(),
+            f"{1 if observed else 0} of 2 catalog Skills observed".encode(),
+            f"{1 if observed else 2} without retained invocation".encode(),
             b"Scope: exact Skill revisions in current Keeper sessions",
             f"Activation ledgers loaded: {ledgers_loaded}; unavailable: {len(unavailable)}".encode(),
         ]
@@ -18149,7 +18168,7 @@ def run_board_list_footer_regression(executable: str) -> None:
             (503, {"error": "board-down"}) if state == "failed" else response
         )
         fixtures["/api/v1/board/post-69?format=flat"] = (
-            200, {"post": posts[-1], "comments": []})
+            200, board_detail_page(posts[-1], []))
         marker = {"populated": b"board-00", "empty": b"(no board posts)",
                   "unread": b"not loaded yet", "failed": b"board-down"}[state]
 

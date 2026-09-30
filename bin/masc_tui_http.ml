@@ -565,10 +565,22 @@ let http_delete ~(host : string) ~(port : int) ~(path : string) =
 let list_play_invites ~host ~port =
   get_json ~host ~port ~path:"/api/v1/play/invites"
 
+(* The play routes say why in [message]; the shared refusal reads only the
+   [error] code, which leaves the operator with "HTTP 409: not_ready". The
+   credential's own 401 and 403, and a body with no sentence in it, keep the
+   shared wording. *)
+let play_mutation_outcome = function
+  | Ok (status_code, body) as answer when status_code >= 400 && status_code < 500 ->
+    (match Masc.Tui_decode.play_invite_refusal ~status_code ~body with
+     | Some said -> Post_refused said
+     | None -> mutation_outcome answer)
+  | answer -> mutation_outcome answer
+
 let issue_play_invite ~host ~port ~name ~hours =
-  post_json_outcome ~host ~port ~path:"/api/v1/play/invites"
+  http_post ~headers:(auth_headers ()) ~host ~port ~path:"/api/v1/play/invites"
     ~body:(Yojson.Safe.to_string
       (`Assoc [ "name", `String name; "hours", `Int hours ]))
+  |> play_mutation_outcome
 
 type revoke_outcome = Revoke_absent | Revoke_other of post_outcome
 
@@ -582,7 +594,7 @@ let revoke_play_invite ~host ~port ~name =
       Revoke_absent
   | Ok (status_code, body) when status_code >= 500 ->
       Revoke_other (Post_unanswered (Masc.Tui_decode.play_revoke_http_error ~status_code ~body))
-  | answer -> Revoke_other (mutation_outcome answer)
+  | answer -> Revoke_other (play_mutation_outcome answer)
 
 let post_json ~(host : string) ~(port : int) ~(path : string) ~(body : string) : (Yojson.Safe.t, string) result =
   match http_post ~headers:(auth_headers ()) ~host ~port ~path ~body with
@@ -753,7 +765,7 @@ let post_keeper_chat_streaming ?(admission_intent = Masc_tui_keeper_chat_project
   in
   match
     with_credential_refresh_on ~refused:stream_refused @@ fun () ->
-    Masc_http_client.post_stream ~clock
+    Masc_http_client.post_stream ~retention:Masc_http_client.Pool.Keep_body ~clock
       ~idle_timeout_sec:keeper_chat_timeout_sec ~url
       ~headers:(json_headers (("Accept", "text/event-stream") :: auth_headers ()))
       ~body ~on_chunk ()
@@ -762,9 +774,9 @@ let post_keeper_chat_streaming ?(admission_intent = Masc_tui_keeper_chat_project
       Error (Masc_tui_keeper_chat_projection.Transport_error detail)
   | Ok (Masc_http_client.Pool.Buffered { status; body; _ }) ->
       Error (Masc_tui_keeper_chat_projection.Http_error { status; body })
-  | Ok (Masc_http_client.Pool.Streamed { response; _ }) ->
+  | Ok (Masc_http_client.Pool.Streamed { body; _ }) ->
       Masc_tui_keeper_chat_projection.decode_response_with_provenance ~request
-        response.Masc_http_client.Pool.body
+        body
       |> Result.map_error (fun error ->
              Masc_tui_keeper_chat_projection.Protocol_error error)
 
@@ -2211,12 +2223,21 @@ let post_board_comment ~(host : string) ~(port : int) ~(post_id : string)
   post_json ~host ~port ~path:"/api/v1/tools/masc_board_comment"
     ~body:(Yojson.Safe.to_string payload)
 
-(** Fetch /api/v1/board/<postId> (post detail + comments). *)
-let fetch_board_post ~(host : string) ~(port : int) ~(post_id : string) : (Yojson.Safe.t, string) result =
+(** Fetch /api/v1/board/<postId> with an explicit comment page when needed. *)
+let fetch_board_post ?comment_offset ?comment_limit ~(host : string)
+    ~(port : int) ~(post_id : string) () : (Yojson.Safe.t, string) result =
+  let page_query =
+    (match comment_offset with
+     | None -> ""
+     | Some offset -> Printf.sprintf "&comment_offset=%d" offset)
+    ^ (match comment_limit with
+       | None -> ""
+       | Some limit -> Printf.sprintf "&comment_limit=%d" limit)
+  in
   get_json ~host ~port
     ~path:
-      (Printf.sprintf "/api/v1/board/%s?format=flat"
-         (percent_encode_path_segment post_id))
+      (Printf.sprintf "/api/v1/board/%s?format=flat%s"
+         (percent_encode_path_segment post_id) page_query)
 
 (** Fetch /api/v1/dashboard/scheduled-automation (schedule list projection).
     The server sorts active-first by due time and caps rows at its own limit,
@@ -3105,7 +3126,8 @@ let post_keeper_github_login_streaming ~clock ~(host : string) ~(port : int)
   in
   match
     with_credential_refresh_on ~refused:stream_refused @@ fun () ->
-    Masc_http_client.post_stream ~clock ~idle_timeout_sec:900.0 ~url
+    Masc_http_client.post_stream ~retention:Masc_http_client.Pool.Discard_body ~clock
+      ~idle_timeout_sec:900.0 ~url
       ~headers:(json_headers (("Accept", "text/event-stream") :: auth_headers ()))
       ~body:"{}" ~on_chunk ()
   with
@@ -3376,7 +3398,8 @@ let browser_lane_action ~host ~port ~source operation =
 let post_setup_login_streaming ~clock ~host ~port ~body ~on_chunk =
   let url = url_of ~host ~port ~path:"/api/v1/setup/accounts/login" in
   match with_credential_refresh_on ~refused:stream_refused @@ fun () ->
-    Masc_http_client.post_stream ~retain_body:false ~clock ~idle_timeout_sec:Float.infinity ~url
+    Masc_http_client.post_stream ~retention:Masc_http_client.Pool.Discard_body ~clock
+      ~idle_timeout_sec:Float.infinity ~url
       ~headers:(json_headers (("Accept", "text/event-stream") :: auth_headers ()))
       ~body ~on_chunk () with
   | Error _ -> Error "Login stream unavailable; recheck the login status."

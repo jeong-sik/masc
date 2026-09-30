@@ -505,6 +505,19 @@ type msg_entry = {
   me_at: float;
 }
 
+(* Rows already read from one Keeper, with the paging authority supplied by
+   those reads. This is a session cache, not another persistent transcript. *)
+type keeper_chat_page = {
+  kcp_rows : msg_entry list;
+  kcp_history_error : string option;
+  kcp_history_dropped : int;
+  kcp_memory_error : string option;
+  kcp_memory_dropped : int;
+  kcp_older_cursor : float option;
+  kcp_older_exist : bool;
+  kcp_older_error : string option;
+}
+
 (* The Memory lane in summary mode says where the memory ended up.
 
    A failed Librarian pass is not drawn there: while passes keep failing the
@@ -5228,6 +5241,15 @@ module Verification_evidence_read = struct
     | Launch_failure of string
 end
 
+(* The server sends each invite's link once and keeps only its hash. Keep the
+   cards newest first in this TUI process so issuing another invite does not
+   erase the first person's only link. [shown_name] selects the card on screen;
+   [None] keeps all cards available for /play link without taking input. *)
+type play_invite =
+  { cards : Masc_tui_play_card.t list
+  ; shown_name : string option
+  }
+
 type state = {
   mutable metrics_scroll: int;
   mutable metrics_section: metrics_section;
@@ -5465,10 +5487,12 @@ type state = {
      [~who] on several calls), so there is no [msx_activity] here -- adding
      one before the server ever fills it would be a field nothing draws. *)
   mutable dos_activity: Masc_tui_machine_live.activity_entry list;
-  (* The server sends an invite bearer once. Keep the latest link only in
-     this TUI process so /play link can recover it after a pane switch or a
-     terminal without OSC 52; never persist it in workspace state. *)
-  mutable play_invite_link: (string * string) option;
+  (* Locally retained invite cards, newest first. The selected card remains
+     open until the operator closes it; the modal sweep leaves it alone. *)
+  mutable play_invite: play_invite;
+  mutable play_invite_scroll: int;
+  (* Serialize issue requests so their one-time answers arrive in order. *)
+  mutable play_invite_inflight: bool;
   (* The load menu (RFC-0439 §3.7): the human picks a game from the cartridge
      inventory to plug into the shared machine. It is an overlay on the MSX
      screen -- while [msx_menu_open] the keyboard drives the picker, not the
@@ -5905,6 +5929,7 @@ type state = {
   mutable board_posts: board_post list;
   mutable board_detail:
     (board_post * board_comment list) Masc_tui_board_detail.t;
+  mutable board_history_post_id: string option;
   mutable board_list_error: string option;
   mutable board_list_reading: board_list_reading;
   mutable board_cursor: int;
@@ -6463,11 +6488,11 @@ type state = {
      Cleared when the turn settles; the settled value moves to
      [msg_settled_logs]. *)
   mutable msg_live: turn_log option;
-  (* The keeper's durable transcript as last loaded, for the keeper the pane is
-     showing. Replaced wholesale by a load rather than merged: the server holds
-     the record of what was said, and reconciling two copies of it row by row
-     needs an identity the two do not share. *)
+  (* The current Keeper's durable rows already read, including older pages.
+     Refresh merges by structural row identity. Inactive conversations keep
+     their reading and cursor in [msg_loaded_pages] until revisited. *)
   mutable msg_loaded: msg_entry list;
+  mutable msg_loaded_pages: (string * keeper_chat_page) list;
   mutable msg_loaded_keeper: string option;
   mutable msg_loaded_error: string option;
   mutable msg_loaded_dropped: int;
@@ -7786,6 +7811,55 @@ let supersede_context_inspector_load state stop =
   state.context_inspector_cancel <- stop
 ;;
 
+(* The invite card on screen, if there is one. *)
+let play_card_shown (state : state) =
+  match state.play_invite.shown_name with
+  | None -> None
+  | Some name ->
+    List.find_opt
+      (fun card -> String.equal (Masc_tui_play_card.name card) name)
+      state.play_invite.cards
+
+let play_invite_latest (state : state) =
+  match state.play_invite.cards with
+  | [] -> None
+  | card :: _ -> Some card
+
+let play_invite_find (state : state) name =
+  List.find_opt
+    (fun card -> String.equal (Masc_tui_play_card.name card) name)
+    state.play_invite.cards
+
+let play_invite_store current card =
+  let name = Masc_tui_play_card.name card in
+  { cards =
+      card
+      :: List.filter
+           (fun previous ->
+             not (String.equal (Masc_tui_play_card.name previous) name))
+           current.cards
+  ; shown_name = Some name
+  }
+
+(* Whether a card older than the newest is kept: what an issue notice points at
+   with /play link <name>. [play_invite_store] keeps one card per name, so a
+   name issued again on its own leaves nothing earlier. *)
+let play_invite_holds_earlier current =
+  match current.cards with
+  | _ :: _ :: _ -> true
+  | [] | [ _ ] -> false
+
+let play_invite_forget current name =
+  { cards =
+      List.filter
+        (fun card -> not (String.equal (Masc_tui_play_card.name card) name))
+        current.cards
+  ; shown_name =
+      (match current.shown_name with
+       | Some shown when String.equal shown name -> None
+       | Some _ | None -> current.shown_name)
+  }
+
 (* The overlays that take every key while they are open. Each answers its own
    keys and swallows the rest in its dispatch arm, so nothing drawn under it --
    the composer, a surface binding, a press on a row -- may act first. Every
@@ -7794,6 +7868,7 @@ let supersede_context_inspector_load state stop =
 let modal_owns_keys (state : state) =
   state.help_open || state.keeper_deletions_open || state.agenda_open
   || state.context_inspector_open || state.about_open
+  || Option.is_some (play_card_shown state)
 
 let close_context_inspector (state : state) =
   state.context_inspector_open <- false;
@@ -7810,8 +7885,10 @@ let close_agenda (state : state) =
   state.agenda_selected <- Masc_tui_agenda.Nowhere
 
 (* Every overlay [modal_owns_keys] names, closed the way its own Esc closes
-   it. The inspector and the agenda are only closed when open: closing stops
-   an inspector read in flight, and there is none to stop otherwise. *)
+   it, except the invite card: an unrelated event that clears the screen must
+   not take the only copy of a link with it. The inspector and the agenda are
+   only closed when open: closing stops an inspector read in flight, and there
+   is none to stop otherwise. *)
 let close_key_modals (state : state) =
   state.help_open <- false;
   state.help_scroll <- 0;
@@ -7926,7 +8003,9 @@ let create_state
   dos_live = Masc_tui_machine_live.Unread;
   dos_live_in_flight = None;
   dos_activity = [];
-  play_invite_link = None;
+  play_invite = { cards = []; shown_name = None };
+  play_invite_scroll = 0;
+  play_invite_inflight = false;
   msx_menu_open = false;
   msx_notice = None;
   msx_menu_mode = Boot_game;
@@ -8123,6 +8202,7 @@ let create_state
   pending_approval_action = None;
   board_posts = [];
   board_detail = Masc_tui_board_detail.initial;
+  board_history_post_id = None;
   board_list_error = None;
   board_list_reading = Board_list_unread;
   board_cursor = 0;
@@ -8399,6 +8479,7 @@ let create_state
   msg_recall_replaces = None;
   msg_live = None;
   msg_loaded = [];
+  msg_loaded_pages = [];
   msg_loaded_keeper = None;
   msg_loaded_error = None;
   msg_loaded_dropped = 0;
@@ -8628,6 +8709,51 @@ let resources_empty_note (list : Masc_tui_mcp.resource list option) =
   | Some [] -> Some " (no resources)"
   | Some (_ :: _) -> None
 
+let restore_keeper_chat_page (state : state) keeper_name =
+  (match state.msg_loaded_keeper with
+   | None -> ()
+   | Some loaded_keeper ->
+       let page =
+         { kcp_rows = state.msg_loaded
+         ; kcp_history_error = state.msg_loaded_error
+         ; kcp_history_dropped = state.msg_loaded_dropped
+         ; kcp_memory_error = state.msg_memory_error
+         ; kcp_memory_dropped = state.msg_memory_dropped
+         ; kcp_older_cursor = state.msg_older_cursor
+         ; kcp_older_exist = state.msg_older_exist
+         ; kcp_older_error = state.msg_older_error
+         }
+       in
+       state.msg_loaded_pages <-
+         (loaded_keeper, page) :: List.remove_assoc loaded_keeper state.msg_loaded_pages);
+  (* Requests that belonged to the outgoing page cannot publish into a page
+     restored during A -> B -> A, even before the next GET starts. *)
+  state.msg_history_load_generation <- state.msg_history_load_generation + 1;
+  state.msg_history_inflight <- None;
+  state.msg_older_loading <- false;
+  match List.assoc_opt keeper_name state.msg_loaded_pages with
+  | Some page ->
+      state.msg_loaded <- page.kcp_rows;
+      state.msg_loaded_keeper <- Some keeper_name;
+      state.msg_loaded_error <- page.kcp_history_error;
+      state.msg_loaded_dropped <- page.kcp_history_dropped;
+      state.msg_memory_error <- page.kcp_memory_error;
+      state.msg_memory_dropped <- page.kcp_memory_dropped;
+      state.msg_older_cursor <- page.kcp_older_cursor;
+      state.msg_older_exist <- page.kcp_older_exist;
+      state.msg_older_error <- page.kcp_older_error
+  | None ->
+      state.msg_loaded <- [];
+      state.msg_loaded_keeper <- None;
+      state.msg_loaded_error <- None;
+      state.msg_loaded_dropped <- 0;
+      state.msg_memory_error <- None;
+      state.msg_memory_dropped <- 0;
+      state.msg_older_cursor <- None;
+      state.msg_older_exist <- false;
+      state.msg_older_error <- None
+;;
+
 let compute_chat_rows_for (state : state) keeper_name ~queued_request_ids =
   let loaded =
     match state.msg_loaded_keeper with
@@ -8848,6 +8974,7 @@ type clamped_scroll =
      the drawing instead, which is the one thing the renderer must not do. *)
   | Patch_modal_scroll of int
   | Link_modal_scroll of int
+  | Play_invite_scroll of int
   (* The voice pane and its wizard lay out lines out of two HTTP reads and the
      probe's answers, so their count exists only once the frame is drawn. Both
      drew every line into a fixed budget with no offset, and whatever fell past
@@ -8923,6 +9050,7 @@ let apply_clamped_scroll (state : state) = function
   | Approval_detail_scroll value -> state.approval_detail_scroll <- value
   | Patch_modal_scroll value -> state.patch_modal_scroll <- value
   | Link_modal_scroll value -> state.link_modal_scroll <- value
+  | Play_invite_scroll value -> state.play_invite_scroll <- value
   | Voice_scroll value -> state.config_scroll <- value
   | Keeper_list_scroll value -> state.keeper_list_scroll <- value
   | Context_inspector_scroll value -> state.context_inspector_scroll <- value

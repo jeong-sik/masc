@@ -193,6 +193,7 @@ val footer_hints_resources : detail_focus:bool -> string
 val footer_hints_board_read :
   focus_posts:bool ->
   focus_comments:bool ->
+  full_history:bool ->
   layout:Masc_tui_types.board_read_layout ->
   string
 (** The Board read footer. [focus_posts] is whether j/k moves the post list

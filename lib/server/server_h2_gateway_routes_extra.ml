@@ -59,57 +59,11 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config ~with_public_read
   | `GET, "/api/v1/board" ->
       with_public_read (fun () ->
       with_optional_board_reaction_actor (fun reaction_actor ->
-      let hearth = query_param httpun_request "hearth" in
-      let sort_by = board_sort_order_of_request httpun_request in
-      let exclude_system = bool_query_param httpun_request "exclude_system" ~default:false in
-      let exclude_automation =
-        bool_query_param httpun_request "exclude_automation" ~default:false
+      let payload =
+        Server_board_list_http.payload ?config ~reaction_actor
+          httpun_request
       in
-      let author_filter =
-        query_param httpun_request "author"
-        |> Option.map String.trim
-        |> Fun.flip Option.bind (fun s ->
-             if s = "" then None else Some (board_actor_author_for_write s))
-      in
-      let limit = int_query_param httpun_request "limit" ~default:50 |> clamp ~min_v:1 ~max_v:200 in
-      let offset = int_query_param httpun_request "offset" ~default:0 |> clamp ~min_v:0 ~max_v:5000 in
-      let base_fetch = board_fetch_limit ~exclude_system ~exclude_automation ~limit ~offset in
-      let voter = board_voter_query httpun_request in
-      let posts =
-        Board_dispatch.list_posts ?hearth ~sort_by ~exclude_system
-          ~exclude_automation ?author_filter ~limit:base_fetch ()
-      in
-      let karma_map = Board_dispatch.get_all_karma () in
-      let get_karma author =
-        Option.value ~default:0 (List.assoc_opt author karma_map)
-      in
-      let paged = posts |> drop offset |> take limit in
-      let reaction_rows =
-        board_reactions_batch
-          ~targets:
-            (List.map
-               (fun (p : Board.post) ->
-                  (Board.Reaction_post, Board.Post_id.to_string p.id))
-               paged)
-          ~voter:reaction_actor
-      in
-      let reactions_for = board_reactions_lookup reaction_rows in
-      let posts_json = List.map (fun (p : Board.post) ->
-        let author = Board.Agent_id.to_string p.author in
-        let post_id = Board.Post_id.to_string p.id in
-        let current_vote = board_current_vote_for_post ~voter ~post_id in
-        let reactions = reactions_for (Board.Reaction_post, post_id) in
-        board_post_dashboard_json ?current_vote ~reactions
-          ~author_karma:(get_karma author) p
-      ) paged in
-      let json = `Assoc [
-        ("posts", `List posts_json);
-        ("count", `Int (List.length posts_json));
-        ("limit", `Int limit);
-        ("offset", `Int offset);
-        ("sort_by", `String (board_sort_label sort_by));
-      ] in
-      h2_respond_json_value h2_reqd json ~extra_headers:cors));
+      h2_respond_cached_payload h2_reqd payload ~extra_headers:cors));
       true
 
   | `GET, "/api/v1/board/curation" ->
@@ -226,12 +180,21 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config ~with_public_read
           ~status:`Bad_request
           ~extra_headers:cors
       | Ok response_format ->
-        let voter = board_voter_query httpun_request in
-        let status, body =
-          board_post_detail_json ~voter
-            ~reaction_actor ~config ~response_format ~post_id
-        in
-        h2_respond_json h2_reqd body ~status ~extra_headers:cors));
+        (match
+           board_comment_request_of_query
+             ~offset:(query_param httpun_request "comment_offset")
+             ~limit:(query_param httpun_request "comment_limit")
+         with
+         | Error error ->
+           h2_respond_json_value h2_reqd error
+             ~status:`Bad_request ~extra_headers:cors
+         | Ok comment_request ->
+           let voter = board_voter_query httpun_request in
+           let status, body =
+             board_post_detail_json ~comment_request ~voter
+               ~reaction_actor ~config ~response_format ~post_id ()
+           in
+           h2_respond_json h2_reqd body ~status ~extra_headers:cors)));
       true
 
   | `GET, "/api/v1/karma" ->

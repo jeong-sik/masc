@@ -80,16 +80,30 @@ resize it; game input and turn changes go through the server's controller.
 ## Shared DOS play invites
 
 Select a Keeper chat to use the TUI composer. `/play invites` lists invites, `/play invite <name>
-<hours>` issues one, `/play link` reopens the last link issued in this TUI
-session, `/play qr` shows that link as a scannable terminal QR, and
-`/play revoke <name>` removes it. Issuance requires
+<hours>` issues one, `/play link` reopens the latest link issued in this TUI
+session, `/play link <name>` reopens an earlier link issued in this TUI
+session, and `/play revoke <name>` removes it. Issuance requires
 an admin operator credential, token-required authentication and
-`MASC_HTTP_BASE_URL`. The one-time link appears in a local TUI reply (it is
-not sent to the Keeper) and
-is sent through OSC 52 for copying; terminal clipboard support varies. The
-TUI keeps the last link only until it exits or that invite is revoked.
-The QR stays in this TUI process; if the chat pane is too small to display it
-without wrapping, the command asks for a wider or taller terminal.
+`MASC_HTTP_BASE_URL`. A refusal shows the server's own sentence and what it
+says is missing, for example when auth is off or `require_token` is false.
+
+The server shows the link once, so it goes on a card with a QR code and
+nowhere else: not the chat, not the footer, not the session log. `y` copies
+the link to the terminal clipboard through OSC 52; terminal clipboard support
+varies, and `Ctrl-T` still hands the mouse back so the link can be selected
+from the card. `Esc` or `q` closes the card. Enter does not, so an Enter
+pressed while the answer was on its way cannot dismiss it. `/play link` opens
+the card again. The TUI keeps issued cards until it exits or their invites
+are revoked. Only one invite request runs at a time: a `/play invite` sent
+before the answer to the last one has come back is refused, not queued.
+
+The QR is drawn only when all of it fits. A smaller window shows the link and
+the size the QR needs, because a cut QR scans as nothing. With `NO_COLOR` or
+on a terminal with fewer than 256 colours the card shows the link alone. A card
+taller than the window scrolls with `j`/`k`, the arrow keys or the mouse wheel,
+and `g`/`G` jump to its top and its end, so a long link can be read to its last
+byte.
+
 If the issue request has no trustworthy answer, inspect the invite list and
 revoke that name before retrying because the original link cannot be recovered.
 If revocation reports a controller release failure or an unknown outcome,
@@ -97,7 +111,9 @@ repeat `/play revoke <name>`: a second request can release a controller even
 after the invite credential was deleted.
 
 The invited person opens the link in a browser to watch and play the shared
-DOS machine. The TUI can also watch through `go DOS` or the `go MSX` menu's
+DOS machine. The link can also go to an AI agent (Claude Code, Codex, Hermes,
+OpenClaw, pi, ...): the page points it at `/play/agent.md`, which says how to
+join over MCP (`/mcp/play`) or plain HTTP with the token after `#`. The TUI can also watch through `go DOS` or the `go MSX` menu's
 `watch DOS machine` entry when a DOS machine is loaded.
 
 ## Options
@@ -1756,9 +1772,17 @@ Keeper's effective Tool surface, async requests, Skill activations, cross-Keeper
 Skill usage, and the registered Tool catalog. This keeps the Skill views from
 being buried below a long Tool list.
 
-The Skill Usage pane puts each Keeper on its own row under the skill, in
-columns: `TRIGGERED`, `DELIVERED`, `ACTIONS`, and when it last ran, in this
-terminal's zone like every other clock on the screen. If retained usage
+The Skill Usage pane opens with a summary box: observed catalog entries,
+distinct Keepers, and separate `TRIGGERED`, `DELIVERED`, and `ACTIONS` totals.
+These are observations from current Keeper sessions at exact Skill revisions,
+not lifetime totals or success rates. Missing ledgers make the totals partial
+and are called out beside the summary.
+
+Skill cards follow in descending invocation order. Each card shows its own
+totals and Keeper rows, with the last use in this terminal's timezone.
+Narrow terminals stack a Keeper's counts and last use below its name;
+wider terminals align them in columns. Source configuration and rejected or
+shadowed entries follow the usage cards. If retained usage
 coverage has no time, the row says `time unavailable`; it does not turn
 bounded evidence into a `never used` claim.
 

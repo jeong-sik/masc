@@ -574,7 +574,7 @@ let read_regular_credential_text path =
 
 (* Revocation admits only the payload's canonical name. Expiry need not decode,
    but an alias must not retire another owner's UUID and leave its raw bearer. *)
-let validate_revocation_owner config agent_name =
+let credential_revocation_targets config agent_name =
   let file = credential_file config agent_name in
   let refused detail = Error (System (System_error.ValidationError
       (Printf.sprintf "cannot revoke %s: %s" agent_name detail))) in
@@ -590,46 +590,65 @@ let validate_revocation_owner config agent_name =
         (Printf.sprintf "%s(%s): %s" operation argument (Unix.error_message error))))
     | Eio.Io _ as exn -> Error (System (System_error.IoError (Printexc.to_string exn))) in
   let ( let* ) = Result.bind in
+  let require_owner = function
+    | None -> Ok ()
+    | Some (`Assoc fields) ->
+      (match List.assoc_opt "agent_name" fields with
+       | Some (`String owner) when String.equal owner agent_name -> Ok ()
+       | Some (`String _) -> refused "requested name is an alias, not the canonical owner"
+       | _ -> refused "credential owner cannot be decoded")
+    | Some _ -> refused "credential owner cannot be decoded" in
   let* named = read_json file in
-  let* payload = match named with
+  let* redirect, payload = match named with
     | Some (`Assoc fields) ->
       (match List.assoc_opt "redirect_to" fields with
        | Some (`String target) ->
          (match redirect_target_file config target with
-          | Some path -> read_json path
+          | Some path -> let* payload = read_json path in Ok (Some path, payload)
           | None -> refused "invalid redirect target")
-       | _ -> Ok named)
-    | _ -> Ok named in
-  match payload with
-  | None -> Ok () (* Missing targets and dangling named symlinks can be unlinked. *)
-  | Some (`Assoc fields) ->
-    (match List.assoc_opt "agent_name" fields with
-     | Some (`String owner) when String.equal owner agent_name -> Ok ()
-     | Some (`String _) -> refused "requested name is an alias, not the canonical owner"
-     | _ -> refused "credential owner cannot be decoded")
-  | Some _ -> refused "credential owner cannot be decoded"
+       | _ -> Ok (None, named))
+    | _ -> Ok (None, named) in
+  let* () = require_owner payload in
+  (* Keep the embedded ID even when expiry or another unrelated field cannot
+     decode. Verify every payload owner before deleting any named/raw path. *)
+  let* uuid = match payload with
+    | Some (`Assoc fields) ->
+      (match List.assoc_opt "id" fields with
+       | None | Some `Null -> Ok None
+       | Some (`String id) ->
+         (match redirect_target_file config (id ^ ".json") with
+          | None -> refused "credential UUID is not a store filename"
+          | Some path ->
+            let* target = read_json path in
+            let* () = require_owner target in
+            let* () = match target with
+              | Some (`Assoc fields) ->
+                (match List.assoc_opt "id" fields with
+                 | Some (`String target_id) when String.equal id target_id -> Ok ()
+                 | _ -> refused "UUID payload does not carry its referenced ID")
+              | None -> Ok ()
+              | Some _ -> refused "UUID payload cannot be decoded" in
+            Ok (Some path))
+       | Some _ -> refused "credential UUID cannot be decoded")
+    | None -> Ok None
+    | Some _ -> refused "credential owner cannot be decoded" in
+  Ok (List.sort_uniq String.compare (List.filter_map Fun.id [redirect; uuid]))
+
 ;;
 
 (** Delete using the caller's admitted workspace. The public wrapper and
     multi-effect transactions share this implementation. *)
 let delete_credential_in_transaction (Credential_transaction config) agent_name =
   let ( let* ) = Result.bind in
-  let* () = validate_revocation_owner config agent_name in
+  let* targets = credential_revocation_targets config agent_name in
   try
     Fun.protect ~finally:(fun () -> !credential_cache_invalidator_ref config)
       (fun () ->
         let file = credential_file config agent_name in
         let raw_token = raw_token_file config agent_name in
-        let redirect_target = load_redirect_target config file in
-        let credential_target =
-          match load_credential config agent_name with
-          | Some { id = Some cid; _ } -> Some (credential_uuid_file config cid)
-          | _ -> None
-        in
         remove_file_if_exists file;
         remove_file_if_exists raw_token;
-        Option.iter remove_file_if_exists redirect_target;
-        Option.iter remove_file_if_exists credential_target;
+        List.iter remove_file_if_exists targets;
         Ok ())
   with
   | Sys_error detail -> Error (System (System_error.IoError detail))

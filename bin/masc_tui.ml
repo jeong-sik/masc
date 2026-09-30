@@ -19068,6 +19068,31 @@ and is loaded on demand through keeper_skill.
                   | _ -> ())
                | _ -> ())
             | _ -> ())
+       | Some k when Option.is_some state.client_detail ->
+           if k = "esc" then (
+             state.client_detail <- None;
+             state.client_detail_scroll <- 0)
+           else if not compact_viewport then (
+             let page = max 1 (surface_page_rows state - 1) in
+             let delta = match k with
+               | "j" | "down" -> 1 | "k" | "up" -> -1
+               | "pagedown" -> page | "pageup" -> -page | _ -> 0 in
+             match k with
+             | "g" | "home" -> state.client_detail_scroll <- 0
+             | "G" | "end" -> state.client_detail_scroll <- max_int
+             | _ -> state.client_detail_scroll <-
+                 (if delta > 0 then scroll_down_from state.client_detail_scroll ~by:delta
+                  else max 0 (state.client_detail_scroll + delta)))
+       | Some ("\r" | "\n" | "enter")
+         when state.view = Clients && not compact_viewport && not (modal_owns_keys state)
+              && not state.palette_open && not state.answering_open
+              && not state.patch_modal_open && not state.link_modal_open
+              && Option.is_none (text_input_target state ~compact_viewport) ->
+           (match state.clients_surface with
+            | None -> ()
+            | Some snapshot ->
+                state.client_detail <- List.nth_opt snapshot.Masc.Tui_decode.cls_clients state.clients_surface_cursor;
+                state.client_detail_scroll <- 0)
        | Some k when state.help_open && k = "h" ->
            (* Session toggle; the persistent form is [tui].hints_visible in
               runtime.toml, named on the help sheet itself. *)
@@ -22103,15 +22128,23 @@ and is loaded on demand through keeper_skill.
                         else max 0 (state.resource_scroll + (direction * page)))
                   | Left_pane ->
                       move_list_by_rows state ~delta:(direction * page))
-             (* No row list to page. Overview's two panes and Activity's ring
-                are built by the frame out of text the frame formats, so the
-                count a page needs does not exist at the keypress; Config's
-                five panes each carry a cursor of their own meaning. Activity
-                goes to the newest with g, Tools with Home and End. Left named
-                rather than folded into the arm above, so the day one of them
-                gains a row list this reads as a lie rather than as silence
-                (#35305). *)
-             | Overview | Acting | Config | Tools -> ())
+             | Tools ->
+                 (match scrolled_surface state Tools with
+                  | None -> ()
+                  | Some scrolled ->
+                      let height =
+                        surface_body_height ~rows:(surface_rows state) scrolled
+                      in
+                      state.tools_scroll <-
+                        (if direction > 0 then
+                           Masc_tui_scroll.page_down
+                             ~count:scrolled.sc_count ~height state.tools_scroll
+                         else
+                           Masc_tui_scroll.page_up
+                             ~count:scrolled.sc_count ~height state.tools_scroll))
+             (* Overview's two panes and Activity's ring have no counted row
+                list to page; Config's panes carry cursors of their own. *)
+             | Overview | Acting | Config -> ())
        (* On Config, s and t hop to Resources and Tools and r is the global
           refresh, so the pane takes u, twice, for the destructive restore.
           Its save key is n, answered inside the [n] dispatch below, which

@@ -4545,6 +4545,34 @@ let render_lane_run_detail (state : state) ~run_id =
    MCP client. One row per identity, sorted by name on the server, with the
    status dot, the type, the keeper a row is bound to when it is, and what
    task it holds. *)
+type client_table_column =
+  | Client_status_column | Client_name_column | Client_type_column
+  | Client_acting_for_column | Client_task_column | Client_last_seen_column
+
+let render_client_detail state (client : Masc.Tui_decode.client_row) =
+  let terminal_rows, cols = get_terminal_size () in
+  let width = max 1 (framed_inner_width cols - 2) in
+  let field label value =
+    ("  " ^ Ansi.bold ^ label ^ Ansi.reset)
+    :: (Message_layout.wrap_words ~max_cells:width (Terminal_text.single_line value)
+        |> List.map (fun line -> "  " ^ line))
+  in
+  let optional = function Some value -> value | None -> Masc_tui_theme.Glyph.no_value in
+  let lines = field "Name:" client.cr_name
+    @ field "Status:" (Masc.Tui_decode.client_status_to_string client.cr_status)
+    @ field "Type:" client.cr_agent_type
+    @ field "Acting for:" (optional client.cr_keeper_name)
+    @ field "Task:" (optional client.cr_current_task)
+    @ field "Last seen (as read):" client.cr_last_seen
+    @ field "Observation age:" (Masc_tui_wire_age.text ~now:(Unix.gettimeofday ()) client.cr_last_seen)
+  in
+  surface_chrome state ~terminal_rows ~cols ~surface_key:"client-detail"
+    ~frame:Chrome_overlay ~title:(screen_title " MASC Client Detail")
+    ~hints:"j/k:scroll  PgUp/PgDn:page  g/G:first/last  Esc:clients"
+    ~overflow:(Scrolled {scroll=state.client_detail_scroll;
+                        report=(fun scroll -> Client_detail_scroll scroll)})
+    ~body:(fun ~budget:_ c -> List.iter c.push lines)
+
 let render_clients (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
@@ -4581,6 +4609,15 @@ let render_clients (state : state) =
   (* Measured from the rows like the verification submitter column: a fixed
      width puts the columns after the longest name out of line with the
      rest, and session names are the column the eye scans by. *)
+  let table_width = max 0 (framed_inner_width cols - 2) in
+  let last_seen_width =
+    List.fold_left (fun widest (row : Masc.Tui_decode.client_row) ->
+      max widest (Message_layout.display_width (Masc_tui_wire_age.text ~now:now_s row.cr_last_seen)))
+      (Message_layout.display_width "LAST SEEN") clients
+    (* The table keeps its status and identity floor. Exact observations that
+       exceed this share are read in the selected client's scrollable detail. *)
+    |> min (max 9 (table_width - 9 - 16 - 2 * Masc_tui_table.cell_gap))
+  in
   let name_width =
     List.fold_left
       (fun widest (row : Masc.Tui_decode.client_row) ->
@@ -4589,19 +4626,48 @@ let render_clients (state : state) =
               (Terminal_text.single_line row.Masc.Tui_decode.cr_name)))
       16 clients
     |> min 24
+    (* A future or unreadable stamp is deliberately shown verbatim by the age
+       projection. Give its measured width priority over the identity floor,
+       rather than disguising a raw clock as a folded age. *)
+    |> min (max 1 (table_width - 9 - last_seen_width - 2 * Masc_tui_table.cell_gap))
   in
   (* The column carries a reading only where a client is bound to a Keeper
      under a name of its own. Where no row has one, its cells and header are
      seventeen blank columns, and the clock at the end of the row is what
      loses them: "last seen 01:4…" is not a time. *)
   let acting_for_drawn = Masc_tui_types.clients_act_for_others clients in
-  let acting_for_header =
-    if acting_for_drawn then Printf.sprintf "%-16s " "ACTING FOR" else ""
+  let column_width = function
+    | Client_status_column | Client_task_column -> 9
+    | Client_last_seen_column -> last_seen_width
+    | Client_name_column -> name_width
+    | Client_type_column -> 10
+    | Client_acting_for_column -> 16
   in
-  let col_hdr =
-    Printf.sprintf "  %-9s %-*s %-10s %s%-9s %s" "STATUS" name_width "NAME"
-      "TYPE" acting_for_header "TASK" "LAST SEEN"
+  let columns =
+    [ Client_status_column; Client_name_column; Client_type_column ]
+    @ (if acting_for_drawn then [ Client_acting_for_column ] else [])
+    @ [ Client_task_column; Client_last_seen_column ]
   in
+  (* Keep identity, state and the observation age. Bindings, implementation
+     type and task links yield in that order before the clock is cut. *)
+  let layout = Masc_tui_table.fit ~inner_width:table_width
+    ~width:column_width ~flex:Client_name_column
+    ~drop_order:[ Client_acting_for_column; Client_type_column; Client_task_column ] columns in
+  let cells ~status ~name ~agent_type ~keeper ~task ~last_seen =
+    List.map (fun column ->
+      let header, value = match column with
+        | Client_status_column -> "STATUS", status
+        | Client_name_column -> "NAME", name
+        | Client_type_column -> "TYPE", agent_type
+        | Client_acting_for_column -> "ACTING FOR", keeper
+        | Client_task_column -> "TASK", task
+        | Client_last_seen_column -> "LAST SEEN", last_seen
+      in
+      let width = if column = Client_name_column then layout.flex_width else column_width column in
+      Masc_tui_table.cell ~header ~width value) layout.shown
+  in
+  let col_hdr = "  " ^ Masc_tui_table.header_row
+    (cells ~status:"" ~name:"" ~agent_type:"" ~keeper:"" ~task:"" ~last_seen:"") in
   box_line_styled buf cols ~style:(Theme.recede ()) col_hdr;
   box_divider buf cols;
   (match state.clients_surface_error with
@@ -4617,9 +4683,10 @@ let render_clients (state : state) =
   let clients_window = Rows.of_list ~first:scroll ~height:content_height clients in
   if shown = 0 then begin
     let empty =
-      match state.clients_surface_error with
-      | Some _ -> page_failed_note
-      | None -> "  (nobody attached)"
+      match empty_page_of ~snapshot:state.clients_surface ~error:state.clients_surface_error with
+      | Page_failed -> page_failed_note
+      | Page_unread -> page_unread_note
+      | Page_empty -> "  (nobody attached)"
     in
     box_line_styled buf cols ~style:(Theme.recede ()) empty;
     for _ = 1 to content_height - 1 do
@@ -4653,11 +4720,8 @@ let render_clients (state : state) =
             | None -> Masc_tui_theme.Glyph.no_value
           in
           let line =
-            Printf.sprintf "  %-9s %s %-10s %s%-9s %s" status
-              (fit_width name name_width)
-              (fit_width (Terminal_text.single_line row.cr_agent_type) 10)
-              (if acting_for_drawn then fit_width keeper 16 ^ " " else "")
-              (fit_width task 9)
+            "  " ^ Masc_tui_table.row (cells ~status ~name
+              ~agent_type:(Terminal_text.single_line row.cr_agent_type) ~keeper ~task
               (* How long ago, not when. The cell drew the clock alone on
                  the reading that the header's clock gives it a distance,
                  which holds only while the two are the same day: a dashboard
@@ -4665,7 +4729,7 @@ let render_clients (state : state) =
                  header reading 09:31:39 on 2026-09-23, and the distance a
                  reader could take from that pointed two hours ahead. A span
                  carries its own day. *)
-              (Masc_tui_wire_age.text ~now:now_s row.cr_last_seen)
+              ~last_seen:(Masc_tui_wire_age.text ~now:now_s row.cr_last_seen))
           in
           (* Inactive rows stay in the roster -- "who left" is part of the
              reading -- but they recede, the way the empty-state rows do. *)
@@ -8662,6 +8726,10 @@ let render_browser_history (state : state) (history : Browser_history.t) =
       c.push_styled ~style:(Theme.recede ())
         (Printf.sprintf "  Text %d/%d" (if count=0 then 0 else scroll+1) count))
 
+type connector_table_column =
+  | Connector_name_column | Connector_configured_column
+  | Connector_reachable_column | Connector_status_column | Connector_channel_column
+
 let render_connectors (state : state) =
   match browser_lane_on_screen state, state.browser_history with
   | Some _, Some history -> render_browser_history state history
@@ -8674,6 +8742,33 @@ let render_connectors (state : state) =
     | Some s -> s.Masc.Tui_decode_connectors.cs_connectors
   in
   let shown = List.length connectors in
+  let column_width = function
+    | Connector_name_column -> 12
+    | Connector_configured_column -> 10
+    | Connector_reachable_column -> 9
+    | Connector_status_column -> 12
+    | Connector_channel_column -> 16
+  in
+  (* Configuration is secondary to whether this connector can be reached
+     and which channel it serves. Name is flexible; every other field keeps
+     its column even when another row has a long Unicode name. *)
+  let layout = Masc_tui_table.fit ~inner_width:(max 0 (framed_inner_width cols - 2))
+    ~width:column_width ~flex:Connector_name_column
+    ~drop_order:[ Connector_configured_column ]
+    [ Connector_name_column; Connector_configured_column; Connector_reachable_column;
+      Connector_status_column; Connector_channel_column ] in
+  let cells ~name ~configured ~reachable ~status ~channel =
+    List.map (fun column ->
+      let header, value = match column with
+        | Connector_name_column -> "CONNECTOR", name
+        | Connector_configured_column -> "CONFIGURED", configured
+        | Connector_reachable_column -> "REACHABLE", reachable
+        | Connector_status_column -> "STATUS", status
+        | Connector_channel_column -> "CHANNEL", channel
+      in
+      let width = if column = Connector_name_column then layout.flex_width else column_width column in
+      Masc_tui_table.cell ~header ~width value) layout.shown
+  in
   let now = Unix.localtime (Unix.gettimeofday ()) in
   let timestamp =
     Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
@@ -8701,8 +8796,8 @@ let render_connectors (state : state) =
     ~hints:"B:Browser Lane  j/k:scroll  b:bind  u:unbind  r:refresh  Esc:keeper"
     ~body:(fun ~budget c ->
       c.push_styled ~style:(Theme.recede ())
-        (Printf.sprintf "  %-16s %-11s %-11s %-10s %s" "CONNECTOR"
-           "CONFIGURED" "REACHABLE" "STATUS" "CHANNEL");
+        ("  " ^ Masc_tui_table.header_row
+          (cells ~name:"" ~configured:"" ~reachable:"" ~status:"" ~channel:""));
       c.push_divider ();
       (match state.connectors_error with
        | None -> ()
@@ -8737,13 +8832,13 @@ let render_connectors (state : state) =
               let open Masc.Tui_decode_connectors in
               let yes_no flag = if flag then "yes" else "no" in
               let line =
-                Printf.sprintf "  %-16s %-11s %-11s %-10s %s"
-                  (Terminal_text.single_line connector.cn_display_name)
-                  (yes_no connector.cn_available)
-                  (yes_no connector.cn_connected)
-                  (Terminal_text.single_line connector.cn_status)
-                  (Terminal_text.single_line_or ~default:Masc_tui_theme.Glyph.no_value
-                     connector.cn_channel)
+                "  " ^ Masc_tui_table.row (cells
+                  ~name:(Terminal_text.single_line connector.cn_display_name)
+                  ~configured:(yes_no connector.cn_available)
+                  ~reachable:(yes_no connector.cn_connected)
+                  ~status:(Terminal_text.single_line connector.cn_status)
+                  ~channel:(Terminal_text.single_line_or ~default:Masc_tui_theme.Glyph.no_value
+                     connector.cn_channel))
               in
               let style =
                 (* Set up and unreachable is the row to act on: it was
@@ -13136,7 +13231,9 @@ let frame_choice (state : state) ~terminal_rows =
       else if state.answering_open then `Answering
       else if state.patch_modal_open then `Patch
       else if state.link_modal_open then `Link
-      else `Surface
+      else match state.client_detail with
+        | Some client -> `Client_detail client
+        | None -> `Surface
 
 let render (state : state) =
   (* Marks number the targets of this frame alone. *)
@@ -13184,6 +13281,9 @@ let render (state : state) =
     let frame, clamped = render_patch_modal state in (frame, clamped, None, Overlay_drawn)
   | `Link ->
     let frame, clamped = render_link_preview_modal state in (frame, clamped, None, Overlay_drawn)
+  | `Client_detail client ->
+    let frame, clamped = render_client_detail state client in
+    (frame, clamped, None, Overlay_drawn)
   | `Surface ->
     let frame, clamped = render_surface state in
     let presented_approval =

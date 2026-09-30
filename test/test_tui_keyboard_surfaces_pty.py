@@ -11,6 +11,8 @@ SOURCE_MODULES = (
     "bin/masc_tui_render_prim.mli",
     "bin/masc_tui_render_code.ml",
     "bin/masc_tui_render_code.mli",
+    "lib/tui_terminal_text.ml",
+    "lib/tui_terminal_text.mli",
     "bin/masc_tui_render.ml",
     "bin/masc_tui_types.ml",
 )

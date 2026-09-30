@@ -1120,7 +1120,7 @@ let test_operator_approvals_use_current_contract () =
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_ansi.ml"
        ~binding_name:"single_line"
-       ~callee:"Masc.Tui_decode.sanitize_terminal_text");
+       ~callee:"Masc.Tui_terminal_text.sanitize_terminal_text");
   check int "approval payload uses its terminal projection" 1
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_render.ml"
@@ -1136,7 +1136,7 @@ let test_operator_approvals_use_current_contract () =
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_operator_projection.ml"
        ~binding_name:"approval_payload_for_terminal"
-       ~callee:"Masc.Tui_decode.sanitize_terminal_text");
+       ~callee:"Masc.Tui_terminal_text.sanitize_terminal_text");
   check int "approval renderer never serializes a raw payload" 0
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_render.ml"
@@ -2428,7 +2428,7 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
     ; "Terminal_text.clock_timestamp"
       (* Not a [Terminal_text] name, but it is a boundary crossing all the
          same: it serializes the approval payload and hands the result to
-         [Masc.Tui_decode.sanitize_terminal_text] before returning
+         [Masc.Tui_terminal_text.sanitize_terminal_text] before returning
          (masc_tui_operator_projection.ml). This list matches on the call
          site's spelling, so a wrapper that sanitizes internally has to be
          named here or the guard reads it as a raw access. *)
@@ -2442,7 +2442,7 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
     ; "Message_layout.wrap_body"
       (* Also not a [Terminal_text] name, and also a boundary: every answer it
          returns is either built from digits and the letters of a span, or is
-         the stamp put through [Masc.Tui_decode.sanitize_terminal_text]
+         the stamp put through [Masc.Tui_terminal_text.sanitize_terminal_text]
          (masc_tui_wire_age.ml, whose interface says so and whose suite pins
          it). It reads the stamp rather than drawing it, which is why it is a
          wrapper and not a [Terminal_text] call. *)
@@ -2689,7 +2689,7 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
      one helper. It splits the text on LF (not drawn) and escapes each line
      before it wraps. *)
   check_identifiers ~module_path:"bin/masc_tui_planning_detail.ml" ~binding:"wrapped"
-    ~callees:[ "Tui_decode.sanitize_terminal_text"; "String.split_on_char" ]
+    ~callees:[ "Masc.Tui_terminal_text.sanitize_terminal_text"; "String.split_on_char" ]
     [ "text"; "line" ];
   check int "the goal detail heads a stuck goal with the verifier's reason" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path
@@ -2802,18 +2802,18 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
          ~module_path:ansi_path ~binding_name:binding ~callees:[ callee ])
   in
   check_direct_result "single_line"
-    "Masc.Tui_decode.sanitize_terminal_text";
+    "Masc.Tui_terminal_text.sanitize_terminal_text";
   check_direct_result "optional_single_line" "Option.map";
   check_direct_result "single_line_or" "Option.value";
   check_direct_result "single_lines" "List.map";
   check_direct_result "short_timestamp"
-    "Masc.Tui_decode.short_timestamp_for_terminal";
+    "Masc.Tui_terminal_text.short_timestamp_for_terminal";
   check_direct_result "clock_timestamp"
-    "Masc.Tui_decode.clock_timestamp_for_terminal";
+    "Masc.Tui_terminal_text.clock_timestamp_for_terminal";
   check int "shared terminal boundary delegates to the typed sanitizer" 1
     (Ast_grep.count_calls_in_value_binding
        ~module_path:ansi_path ~binding_name:"single_line"
-       ~callee:"Masc.Tui_decode.sanitize_terminal_text");
+       ~callee:"Masc.Tui_terminal_text.sanitize_terminal_text");
   check int "optional boundary maps the sanitizer" 1
     (Ast_grep
      .count_applications_with_exact_positional_identifier_in_value_binding
@@ -2830,12 +2830,12 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
   check int "short timestamp delegates to slice-then-sanitize helper" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:ansi_path
        ~binding_name:"short_timestamp"
-       ~callee:"Masc.Tui_decode.short_timestamp_for_terminal");
+       ~callee:"Masc.Tui_terminal_text.short_timestamp_for_terminal");
   check int "clock timestamp delegates to slice-then-sanitize helper" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:ansi_path
        ~binding_name:"clock_timestamp"
-       ~callee:"Masc.Tui_decode.clock_timestamp_for_terminal");
-  let decode_path = "lib/tui_decode.ml" in
+       ~callee:"Masc.Tui_terminal_text.clock_timestamp_for_terminal");
+  let decode_path = "lib/tui_terminal_text.ml" in
   [ "short_timestamp_for_terminal"; "clock_timestamp_for_terminal" ]
   |> List.iter (fun binding ->
        check_binding decode_path binding;

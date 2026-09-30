@@ -16,8 +16,6 @@ module Http = Http_server_eio
 
 let pad_path = "/api/v1/play/pad"
 
-let error_json code message = `Assoc [ ("error", `String code); ("message", `String message) ]
-
 type loaded =
   | Layout of { saves_name : string; source : Play_pad.source; layout : Play_pad.layout }
   | Refused of Httpun.Status.t * Yojson.Safe.t
@@ -26,26 +24,23 @@ type loaded =
    lock, like every screen read. *)
 let current_layout ~config =
   match Tool_misc_dos_lane.off_domain Dos_lane.screen with
-  | Error Dos_lane.No_machine -> Refused (`Conflict, error_json "no_machine" "no DOS program is loaded")
+  | Error Dos_lane.No_machine -> Refused (`Conflict, Server_refusal.json ~code:"no_machine" "no DOS program is loaded")
   | Error
       (( Dos_lane.Invalid_request _ | Dos_lane.Unreadable _ | Dos_lane.Held_by _
        | Dos_lane.Guest_fault _ | Dos_lane.Unsaveable _ | Dos_lane.Checkpoint_refused _
        | Dos_lane.Other_program _ ) as err) ->
-    Refused (`Internal_server_error, error_json "screen_failed" (Dos_lane.error_to_string err))
+    Refused (`Internal_server_error, Server_refusal.json ~code:"screen_failed" (Dos_lane.error_to_string err))
   | Ok { Dos_lane.saves_name = None; _ } ->
-    Refused (`Conflict, error_json "no_machine" "no DOS program is loaded")
+    Refused (`Conflict, Server_refusal.json ~code:"no_machine" "no DOS program is loaded")
   | Ok { Dos_lane.saves_name = Some saves_name; _ } ->
     (match Play_pad.load ~base_path:config.Workspace.base_path ~saves_name with
      | Ok (Some (source, layout)) -> Layout { saves_name; source; layout }
      | Ok None ->
        Refused
          ( `Not_found
-         , `Assoc
-             [ ("error", `String "no_layout")
-             ; ("message", `String ("no pad layout for " ^ saves_name ^ "; the keyboard and text box still work"))
-             ; ("saves_name", `String saves_name)
-             ] )
-     | Error message -> Refused (`Internal_server_error, error_json "layout_invalid" message))
+         , Server_refusal.json ~code:"no_layout" ~fields:[ ("saves_name", `String saves_name) ]
+             ("no pad layout for " ^ saves_name ^ "; the keyboard and text box still work") )
+     | Error message -> Refused (`Internal_server_error, Server_refusal.json ~code:"layout_invalid" message))
 
 let layout_json ~saves_name ~source layout =
   `Assoc
@@ -96,26 +91,21 @@ let decode_press body =
    above has let the lock go and a load can land before the keys do. *)
 let press_response ~config ~who ~body =
   match decode_press body with
-  | Error message -> `Bad_request, error_json "invalid_request" message
+  | Error message -> `Bad_request, Server_refusal.json ~code:"invalid_request" message
   | Ok (button, read_for) ->
     (match current_layout ~config with
      | Refused (status, json) -> status, json
      | Layout { saves_name; layout; _ } ->
        if not (String.equal saves_name read_for) then
          ( `Conflict
-         , `Assoc
-             [ ("error", `String "program_changed")
-             ; ( "message"
-               , `String
-                   (Printf.sprintf "the pad was read for %s and %s is loaded now; nothing was pressed"
-                      read_for saves_name) )
-             ; ("saves_name", `String saves_name)
-             ] )
+         , Server_refusal.json ~code:"program_changed" ~fields:[ ("saves_name", `String saves_name) ]
+             (Printf.sprintf "the pad was read for %s and %s is loaded now; nothing was pressed"
+                read_for saves_name) )
        else
          (match Play_pad.binding layout button with
           | None ->
             ( `Bad_request
-            , error_json "unbound"
+            , Server_refusal.json ~code:"unbound"
                 (Printf.sprintf "%s does nothing in the %s layout" (Play_pad.button_to_string button) saves_name) )
           | Some { Play_pad.keys; _ } ->
             let status, json = Server_routes_http_routes_dos.press_into ~config ~who ~saves_name ~keys in

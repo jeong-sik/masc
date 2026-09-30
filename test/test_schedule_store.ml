@@ -1837,6 +1837,57 @@ let test_the_retention_window_is_the_callers_to_set () =
     (schedule_ids (read_state config))
 ;;
 
+(* A tick that marks nothing still forgets a schedule past the retention
+   when a newer one is not: whether the pass has anything to forget is
+   judged by the oldest finished schedule. *)
+let days_since_the_recent_wake = 1
+
+let test_a_quiet_tick_forgets_only_what_is_past_the_retention () =
+  with_workspace
+  @@ fun config ->
+  let anchor = Unix.gettimeofday () in
+  let finished_days_ago days = anchor -. days_to_seconds days in
+  let older = "wake-ten-days-back" and recent = "wake-one-day-back" in
+  List.iter
+    (fun schedule_id -> ignore (insert_ok config (make_request ~schedule_id ())))
+    [ older; recent ];
+  run_to_completion config ~schedule_id:older
+    ~finished_at:(finished_days_ago days_since_the_older_wake);
+  run_to_completion config ~schedule_id:recent
+    ~finished_at:(finished_days_ago days_since_the_recent_wake);
+  let now = Float.max (read_state config).updated_at (Unix.gettimeofday ()) +. 1.0 in
+  ignore
+    (store_ok "the quiet refresh"
+       (Schedule_store.refresh_due config ~now ~retention_days:narrow_window_days));
+  check (list string) "only the schedule past the retention is forgotten" [ recent ]
+    (schedule_ids (read_state config))
+;;
+
+(* A tick that expires a recurring schedule whose last wake is already past
+   the retention forgets it in that same tick: the pass judges the schedules
+   as the tick marked them, not as the ledger held them before. *)
+let test_a_schedule_expired_past_the_retention_is_forgotten_in_that_tick () =
+  with_workspace
+  @@ fun config ->
+  let anchor = Unix.gettimeofday () in
+  let schedule_id = "expires-after-an-old-wake" in
+  ignore
+    (insert_ok config
+       (make_request ~schedule_id ~expires_at:(anchor +. 1.0)
+          ~recurrence:(Interval { interval_sec = 60 }) ()));
+  run_to_completion config ~schedule_id
+    ~finished_at:(anchor -. days_to_seconds days_since_the_older_wake);
+  check (list string) "the finished run left the schedule waiting for its next time"
+    [ schedule_id ]
+    (schedule_ids (read_state config));
+  let now = Float.max (read_state config).updated_at (Unix.gettimeofday ()) +. 2.0 in
+  ignore
+    (store_ok "the expiring refresh"
+       (Schedule_store.refresh_due config ~now ~retention_days:narrow_window_days));
+  check (list string) "the schedule it expired is forgotten in that tick" []
+    (schedule_ids (read_state config))
+;;
+
 let () =
   run "Schedule_store"
     [
@@ -1868,6 +1919,10 @@ let () =
             test_the_retention_window_is_the_callers_to_set;
           test_case "a clock behind the ledger forgets nothing" `Quick
             test_a_clock_behind_the_ledger_forgets_nothing;
+          test_case "a quiet tick forgets only what is past the retention" `Quick
+            test_a_quiet_tick_forgets_only_what_is_past_the_retention;
+          test_case "a schedule expired past the retention is forgotten in that tick" `Quick
+            test_a_schedule_expired_past_the_retention_is_forgotten_in_that_tick;
           test_case "a mutation encodes the ledger once on the pool" `Quick
             test_a_mutation_encodes_the_ledger_once_on_the_pool;
           test_case "an unchanged ledger is decoded once" `Quick

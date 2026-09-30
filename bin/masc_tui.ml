@@ -1,11 +1,11 @@
 open Masc_tui_types
-open Masc_tui_input_reader
 open Masc_tui_ansi
 open Masc_tui_render
 open Masc_tui_render_prim
 open Masc_tui_press
 open Masc_tui_render_chat
 open Masc_tui_loader
+open Masc_tui_input_reader
 
 (* How long the pane waits on [gh pr view --web] before reporting it. The
    call is a lookup and a browser hand-off; a network that answers slower

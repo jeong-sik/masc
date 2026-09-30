@@ -207,6 +207,7 @@ let drawn_rows () =
       (fun (name, pane) -> (name, footer_hints_code ~pane))
       [ ("Code / tree", Code_tree); ("Code / file", Code_file)
       ; ("Code / overlays", Code_overlay); ("Code / history", Code_history)
+      ; ("Code / diff", Code_diff)
       ]
 
 let test_no_drawn_row_names_one_key_twice () =
@@ -3243,6 +3244,7 @@ let test_the_code_footer_names_the_keys_of_the_pane_it_draws () =
   let overlay =
     Masc_tui_keys.footer_hints_code ~pane:Masc_tui_keys.Code_overlay
   in
+  let diff = Masc_tui_keys.footer_hints_code ~pane:Masc_tui_keys.Code_diff in
   let history =
     Masc_tui_keys.footer_hints_code ~pane:Masc_tui_keys.Code_history
   in
@@ -3283,7 +3285,11 @@ let test_the_code_footer_names_the_keys_of_the_pane_it_draws () =
     (fun (label, hints) ->
        check Alcotest.bool (label ^ " has no commit to open") false
          (holds "Enter (history)" hints))
-    [ ("the tree", tree); ("an open file", file); ("diff or notes", overlay) ]
+    [ ("the tree", tree); ("an open file", file); ("the diff", diff); ("history", history); ("diff or notes", overlay) ];
+  check Alcotest.bool "diff prioritizes its visible pan keys" true
+    (String.starts_with ~prefix:"Shift-←/→:pan" diff);
+  check Alcotest.bool "overlay does not offer hidden file panning" false
+    (holds "Shift-Left" overlay)
 
 let test_code_asks_the_language_server_three_questions () =
   (* K hover, D definition, R references -- one family, one case each, and

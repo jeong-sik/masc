@@ -5248,6 +5248,13 @@ module Verification_evidence_read = struct
     | Launch_failure of string
 end
 
+type message_draft = {
+  draft_text : string;
+  draft_attachments : Masc_tui_keeper_chat_projection.attachment list;
+  draft_references : Masc_tui_keeper_chat_projection.image_reference list;
+  draft_attachments_since : msg_anchor option;
+}
+
 (* Home links identify destinations, never an inferred approval target. The
    approval/agenda screens still own the exact request and its decision. *)
 type home_request =
@@ -5737,6 +5744,9 @@ type state = {
   mutable events: event list;
   mutable keepers: keeper list;
   mutable keepers_error: string option;
+  (* A refused creation remains editable, including malformed JSON. The
+     editor owns a temporary file, so the declaration must survive here. *)
+  mutable keeper_creation_draft: string option;
   (* The live roster reading, separate from the durable one above: it answers
      whether a keepalive fiber is running each keeper, which metadata on disk
      cannot. It is typed rather than a plain list because "the roster did not
@@ -6334,6 +6344,8 @@ type state = {
   mutable code_diff: (string, Tui_decode.git_diff) Masc_tui_fetched.t;
   mutable code_diff_open: bool;
   mutable code_diff_scroll: int;
+  mutable code_diff_hscroll: int;
+  mutable code_diff_max_width: int;
   (* The file pane's notes view: m on an open file swaps the content for
      the memos written as comments in the file itself. Read off the rows
      once at load, like the width above: the memos change when the file
@@ -6513,7 +6525,9 @@ type state = {
   mutable msg_attachments_since: msg_anchor option;
   mutable msg_target_keeper_name: string option;
   mutable msg_return: keeper_chat_return;
-  mutable msg_drafts: (string * string) list;
+  (* The entire unsent payload belongs to its Keeper, including image-only
+     drafts. Restoring another target cannot inherit its staged media. *)
+  mutable msg_drafts: (string * message_draft) list;
   mutable msg_history: msg_entry list;
   (* How far back the arrows have walked through what this pane sent, and the
      draft they set aside to do it. [None] means the composer holds the
@@ -7821,6 +7835,8 @@ let enter_keeper_code_file state ~keeper ~path =
   state.code_diff <- Masc_tui_fetched.clear state.code_diff;
   state.code_diff_open <- false;
   state.code_diff_scroll <- 0;
+  state.code_diff_hscroll <- 0;
+  state.code_diff_max_width <- 0;
   state.code_memos <- [];
   state.code_notes_open <- false;
   state.code_notes_scroll <- 0;
@@ -7828,6 +7844,19 @@ let enter_keeper_code_file state ~keeper ~path =
   state.code_focus_file <- Right_pane;
   state.followed_from <- Some (state.view, None);
   state.view <- Code
+
+(* A visible overlay owns navigation; panning one must never move the
+   file hidden underneath it. History and notes currently have no pan axis. *)
+let pan_code_content (state : state) ~direction =
+  if state.repository_changes_open || state.code_history_open || state.code_notes_open then ()
+  else if state.code_diff_open then
+    state.code_diff_hscroll <-
+      max 0 (min (max 0 (state.code_diff_max_width - 1))
+        (state.code_diff_hscroll + direction))
+  else
+    state.code_file_hscroll <-
+      max 0 (min (max 0 (state.code_file_max_width - 1))
+        (state.code_file_hscroll + direction))
 
 let selected_standalone_lane (state : state) =
   match state.standalone_lanes with
@@ -8221,6 +8250,7 @@ let create_state
   events = [];
   keepers = [];
   keepers_error = None;
+  keeper_creation_draft = None;
   keeper_roster = Masc_tui_keeper_control.Roster_unobserved;
   keeper_roster_error = None;
   keeper_action_inflight = None;
@@ -8527,6 +8557,8 @@ let create_state
   code_diff = Masc_tui_fetched.initial;
   code_diff_open = false;
   code_diff_scroll = 0;
+  code_diff_hscroll = 0;
+  code_diff_max_width = 0;
   code_notes_open = false;
   code_notes_scroll = 0;
   code_blame = Masc_tui_fetched.initial;

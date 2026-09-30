@@ -1,11 +1,14 @@
 {
   "scope": "immutable local Reader parent plus own index authority source; no network/native/typecheck",
-  "local_parent": "af47f73fa32b5815cfc98346cc39c2d1213aba7d",
-  "local_parent_tree": "af0d0b59812c5c529d0c8174abac51d5f6b5f544",
+  "local_parent": "f510f860016d50e792a7b71865a7e9d66ded3b14",
+  "local_parent_tree": "1cd93a0ce54979756a329bef9945fc6ef61c84d2",
   "source_commit": "73b0f50f1d5fa457adcfad65b4ea3d6dd7635248",
   "own_manifest": [
-    "changelog.d/999994.md",
+    "changelog.d/40259.md",
     "docs/evidence/2026-09-30-credential-index-authority-source/README.md",
+    "docs/evidence/2026-09-30-credential-index-authority-source/composition.json",
+    "docs/evidence/2026-09-30-credential-index-authority-source/source-checks.json",
+    "docs/evidence/2026-09-30-credential-index-authority-source/source-sha256.json",
     "lib/auth/auth.mli",
     "lib/auth/auth_credential_base.ml",
     "lib/auth/auth_credential_token.ml",
@@ -179,5 +182,18 @@
   ],
   "prepared_case_count": 7,
   "native_execution": "not_run_locally",
-  "publication": "root_owned; no published head or CI result asserted"
+  "publication": {
+    "coordinates_source": "root supplied publication coordinates; child performed no API/network publication",
+    "parent_pr": 40256,
+    "parent_head": "46fb0eec8680e1dd0ded7ff341144972178320d2",
+    "parent_tree": "1cd93a0ce54979756a329bef9945fc6ef61c84d2",
+    "child_pr": 40259,
+    "initial_head": "25a83f6eaf87818b094f2f1e2ea373c1cdd9caa2",
+    "initial_tree": "74bafec231551e111deb7db099717fb0bc55bbca",
+    "assigned_fragment": "changelog.d/40259.md",
+    "native_and_ci_evidence": "not observed by this child; no repaired-head success claimed"
+  },
+  "original_source_parent": "af47f73fa32b5815cfc98346cc39c2d1213aba7d",
+  "original_source_parent_tree": "af0d0b59812c5c529d0c8174abac51d5f6b5f544",
+  "source_commit_scope": "Initial implementation/test commit. Final Reader parent and assignment updates change documentation/fragments only; production/test/registration bytes are preserved."
 }

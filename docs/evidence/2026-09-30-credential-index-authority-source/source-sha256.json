@@ -6,6 +6,6 @@
   "test/test_auth_credential_index_authority.ml": "8509ae0cfdfc8544e5badc3f30deff118ca592c98028eeeba07e2b128fc09ab2",
   "test/stanzas/test_auth_credential_index_authority.inc": "3c3d67abe499e5d36ce1d701fa4f495e448ac8840c95cb27840e7a7078e454b3",
   "test/dune": "87c137632af312eb6923addc40d26a585c68270ceb13feac61f88c040f71bd4d",
-  "changelog.d/999994.md": "b5dad51ca0b18ba05fb99b8c24e589f3b30a0c019c077b8ab75c913d166c4f30",
-  "docs/constitution.xml": "999dcb3cb0502239b41be1d1f10c7f8757b1467adfc817d2866d65064c5e212e"
+  "docs/constitution.xml": "999dcb3cb0502239b41be1d1f10c7f8757b1467adfc817d2866d65064c5e212e",
+  "changelog.d/40259.md": "5c46408cbc4022bdaffae4ba8e97b37ce8dc3e2340679b63b516e8c048aea8f5"
 }

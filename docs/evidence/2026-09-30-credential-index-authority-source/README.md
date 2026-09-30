@@ -2,11 +2,11 @@
 
 ## Source composition
 
-This child starts from immutable Reader parent `af47f73fa32b5815cfc98346cc39c2d1213aba7d`, tree `af0d0b59812c5c529d0c8174abac51d5f6b5f544`, obtained from the local Reader clone. The parent includes the file-backed publisher, HTTP bearer admission and regular-file read boundary. No Git network operation was used. The fragment `changelog.d/999994.md` is a publication placeholder.
+Implementation started from immutable Reader source parent `af47f73fa32b5815cfc98346cc39c2d1213aba7d`, tree `af0d0b59812c5c529d0c8174abac51d5f6b5f544`, obtained from the local Reader clone. The final local Reader parent is `f510f860016d50e792a7b71865a7e9d66ded3b14`, tree `1cd93a0ce54979756a329bef9945fc6ef61c84d2`. Its assignment update changes Reader documentation and its numbered fragment; production and tests are unchanged. No Git network operation was used. This child's assigned fragment is `changelog.d/40259.md`.
 
 Implementation and prepared regression commit: `73b0f50f1d5fa457adcfad65b4ea3d6dd7635248`. The subsequent evidence update changes this README and adds only `composition.json`, `source-checks.json` and `source-sha256.json`; source/interface, fixture and registration bytes are frozen at that commit.
 
-Root assigned the Reader parent [PR #40256](https://github.com/jeong-sik/masc/pull/40256). This publication coordinate was supplied by root; it does not replace the exact local parent identity above or provide an index native/CI result. Root will select the finalized Reader publication tree when overlaying this child.
+Root supplied the Reader [PR #40256](https://github.com/jeong-sik/masc/pull/40256) publication parent `46fb0eec8680e1dd0ded7ff341144972178320d2`, whose tree matches the final local Reader tree above. Root published this child as [PR #40259](https://github.com/jeong-sik/masc/pull/40259), initial head `25a83f6eaf87818b094f2f1e2ea373c1cdd9caa2`, tree `74bafec231551e111deb7db099717fb0bc55bbca`. These publication coordinates were supplied by root; this child performed no API/network publication. The assigned-fragment follow-up changes only that fragment and three evidence files, not production, fixtures or native registrations. No index native/CI result is asserted for either the initial publication or this follow-up.
 
 The own production delta changes the cold authentication index in `Auth_credential_base` and the rebuild result in `Auth_credential_token`, with documentation in their public interfaces. `test/dune` gains one additive include for the new seven-case fixture. Public `list_credentials`, direct UUID data lookup, token lifetime, role policy, credential publication, regular-file readers and OAuth behavior are preserved.
 

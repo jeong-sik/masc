@@ -16,7 +16,7 @@
 3. CLI login separately minted the credential and wrote the bearer file. It shared the pair-publication gap and duplicated the token path without `Auth.raw_token_file`'s filename encoding.
 4. A foreign UUID or owner redirect could be reused by ensure's fresh branch and overwrite another canonical credential. A direct self-UUID could make JSON publication overwrite the same path with its redirect and return an unreadable successful result.
 5. The supplied-token contract accepts opaque nonblank bytes. Both public file readers trimmed those bytes, so a successfully persisted surrounding-whitespace bearer failed authentication through file clients.
-6. Independent source review found a second CLI mutation route: missing/disabled auth config called the old Admin bootstrap publisher before the new target preflight. A malformed name or foreign-owner redirect could therefore be overwritten before the final paired publisher examined it.
+6. Independent source review found a second CLI mutation route: disabled auth config called the old Admin bootstrap publisher before the new target preflight. A malformed name or foreign-owner redirect could therefore be overwritten before the final paired publisher examined it. Missing config uses the current required-auth default and does not take that enable branch.
 
 Production callers are `Server_runtime_startup_credentials.sync_admin_token_env`, `sync_bootable_keeper_credentials`, and `Auth_login.mint`. File clients use the persisted reader in `main_eio.ml`, `masc_tui_http.ml`, and the CLI owner/model paths.
 
@@ -33,9 +33,9 @@ This is serialized publication, not a multi-file crash transaction. A later writ
 
 ## Prepared native feature regression
 
-`test/test_auth_file_backed_transaction.ml` registers 19 cases. Ten cases fix both orders of ensure/prune, Admin/ensure, file-backed publication/revoke, publication/shared rotation and CLI login/revoke using the existing real lock admission observer and waiter count. The remaining cases cover corrupt names, foreign UUIDs/redirects, self-UUID, directory/dangling raw material, failed admission, partial publication, opaque bytes/encoded names, missing or disabled Admin bootstrap against corrupt/foreign targets, and successful Admin bootstrap. The bootstrap refusal case includes all four config/corruption combinations.
+`test/test_auth_file_backed_transaction.ml` now registers 20 cases. Ten cases fix both orders of ensure/prune, Admin/ensure, file-backed publication/revoke, publication/shared rotation and CLI login/revoke using the existing real lock admission observer and waiter count. The remaining cases cover corrupt names, foreign UUIDs/redirects, self-UUID, directory/dangling raw material, failed admission, partial publication, opaque bytes/encoded names, missing or disabled Admin login against corrupt/foreign targets, successful disabled-config Admin bootstrap, and missing-config Admin login. The refusal case includes all four config/corruption combinations and explicitly sets `enabled = false` for its disabled branch. Missing config must report `Auth_already_required`, keep the required-auth default, create no config/secret/initial-Admin marker, and return a recoverable pair.
 
-The stanza is included from the current `test/dune` and explicitly lists its direct libraries. `native-source-contract.json` records the 19 labels and verifies every Auth function referenced by the regression against the current public interface. It is a source check, not OCaml typechecking or test execution.
+The stanza is included from the current `test/dune` and explicitly lists its direct libraries. `native-source-contract.json` records the 20 labels and verifies every Auth function referenced by the regression against the current public interface. It is a source check, not OCaml typechecking or test execution.
 
 Target selectors for the root agent's finishing CI run are `test_auth_file_backed_transaction`, `test_auth_token_rotation_transaction`, `test_auth_token_prune_transaction`, `test_auth`, `test_auth_login`, and `test_credential_index_cache`.
 
@@ -67,5 +67,17 @@ and a bounded child regression checks named and raw FIFO paths, counterpart
 and config preservation, recovery, and a regular-symlink positive case.
 The kind check refuses the observed nonregular target before open; it does
 not guarantee safety against an external writer replacing the path after stat.
-The suite now registers 22 cases. These added native cases have not been run
+That external follow-up registered 22 cases. These added native cases have not been run
 locally; parsing and source review do not establish native or CI success.
+
+## Native fixture failure and source repair
+
+The root supplied the successfully downloaded `ci-run-tests.log` artifact from targeted run `36676032252`, published head prefix `9b254`, for PR #40214. Reading that raw log confirms 18 of 19 file-backed cases passed; case 18 failed at line 278 because the fixture expected `Auth_enabled` after deleting config. The source default in `lib/types/types_auth.ml` is `enabled = true` and `require_token = true`, so missing config correctly reports `Auth_already_required`. The same mistaken use of `default_auth_config` meant the supposedly disabled corruption branch was still enabled.
+
+The fixture now persists an explicit disabled config for both the disabled refusal branch and successful bootstrap, and adds the missing-config Admin scenario described above. Production/default policy and the 19 existing scenario intents remain unchanged. The raw run also reports all 149 cases in the other nine selected suites successful; those results belong to that older published head, not the composed 23-case source.
+
+`native-fixture-repair.json` retains the raw artifact hash, exact failure excerpt, nine suite counts, current fixture hash and source-only checks. The composed 23-case suite has not been executed locally or observed in CI. No local typecheck, link or build was performed, and no successful result is claimed for the repaired head.
+
+## Composition freshness
+
+External API head `68069b3af2da03639225f7bac95dcb61fb54c324` (parent9b254) was imported exactly: local staged whole tree `dd6782bc547d40d1bb45827465ec4d7a8fa503fb` equals its GitData tree. The fixture repair was applied over it; both read-kind/HTTP boundary regressions and the disabled/missing configuration distinction remain. Production, changelog and test registration bytes are preserved from680; only test/evidence files change in this follow-up. The suite registers23 cases. New source hashes freeze this composition; earlier parse/native receipts remain historical. No native23-case result, typecheck or browser result is claimed.

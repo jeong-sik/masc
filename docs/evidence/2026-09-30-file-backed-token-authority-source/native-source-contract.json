@@ -19,9 +19,13 @@
     "directory and dangling raw token preserve authority",
     "failed admission precedes every pair write",
     "partial publication is observed and reported",
-    "opaque supplied bytes and encoded names reach file clients",
+    "opaque supplied bytes and encoded names reach file clients and HTTP auth",
+    "HTTP-unstable supplied and reused bearers preserve pair and config",
+    "FIFO authority refuses without waiting for a writer",
+    "regular symlink authority remains readable",
     "missing and disabled bootstrap refuse corrupt or foreign ownership",
-    "valid Admin bootstrap retains secret and recoverable pair"
+    "valid Admin bootstrap retains secret and recoverable pair",
+    "missing config Admin retains required default without bootstrap files"
   ],
   "public_auth_functions": [
     "auth_config_file",
@@ -45,5 +49,13 @@
   ],
   "missing_public_functions": [],
   "stanza": "test/stanzas/test_auth_file_backed_transaction.inc",
-  "test_dune_registration_present": true
+  "test_dune_registration_present": true,
+  "fixture_repair_parent": "126a50f4b134bb1ddcfb3974d341ec9b14150135",
+  "fixture_sha256": "72b0216770ae5783e1d938209dc9226d6c6b2d00d4264fb30b6a185d05df3a0b",
+  "prepared_case_count": 23,
+  "public_auth_record_fields": [
+    "rotated_agents"
+  ],
+  "code_head_scope": "Historical original19-case source; current fields freeze composed external680 plus disabled/missing repair23-case source, not execution.",
+  "composed_external_head": "68069b3af2da03639225f7bac95dcb61fb54c324"
 }

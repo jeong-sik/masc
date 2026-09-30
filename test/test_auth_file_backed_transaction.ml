@@ -295,7 +295,7 @@ let test_fifo_authority_refuses_without_blocking () =
   match Unix.fork () with
   | 0 ->
       Sys.set_signal Sys.sigalrm Sys.Signal_default;
-      ignore (Unix.alarm 5);
+      let _previous_alarm_seconds = Unix.alarm 5 in
       (try
          List.iter (fun raw_fifo -> with_workspace @@ fun base_path ->
            let _old = seed_keeper base_path in
@@ -311,7 +311,7 @@ let test_fifo_authority_refuses_without_blocking () =
              ((read other, read (Auth.auth_config_file base_path)) = before);
            check bool "occupied FIFO is preserved" true ((Unix.lstat occupied).Unix.st_kind = Unix.S_FIFO);
            Unix.unlink occupied;
-           ignore (auth_ok (ensure base_path));
+           let _issued_pair = auth_ok (ensure base_path) in
            check_pair base_path "keeper") [ false; true ];
          exit 0
        with
@@ -321,7 +321,7 @@ let test_fifo_authority_refuses_without_blocking () =
       let reaped = ref false in
       Fun.protect ~finally:(fun () -> if not !reaped then (
         (try Unix.kill pid Sys.sigkill with Unix.Unix_error (Unix.ESRCH, _, _) -> ());
-        ignore (Unix.waitpid [] pid))) (fun () ->
+        let _reaped_child = Unix.waitpid [] pid in ())) (fun () ->
           let _, status = Unix.waitpid [] pid in
           reaped := true;
           match status with Unix.WEXITED 0 -> ()
@@ -334,7 +334,7 @@ let test_regular_symlink_authority_remains_readable () = with_workspace @@ fun b
     let target = path ^ ".regular-target" in
     Unix.rename path target; Unix.symlink target path)
     [ Auth.credential_file base_path "keeper"; Auth.raw_token_file base_path "keeper" ];
-  ignore (auth_ok (ensure base_path));
+  let _issued_pair = auth_ok (ensure base_path) in
   check_pair base_path "keeper"
 
 type bootstrap_config = Missing_config | Disabled_config
@@ -354,7 +354,7 @@ let test_bootstrap_cannot_bypass_current_authority () =
        (Yojson.Safe.to_string (`Assoc [ "redirect_to", `String (D.Credential_id.to_string id ^ ".json") ])));
     (match config_state with
      | Missing_config -> Unix.unlink (Auth.auth_config_file base_path)
-     | Disabled_config -> Auth.save_auth_config base_path D.default_auth_config);
+     | Disabled_config -> Auth.save_auth_config base_path { D.default_auth_config with enabled = false });
     let paths = [ target; name; Auth.auth_config_file base_path; Auth.workspace_secret_file base_path ] in
     let before = List.map optional_bytes paths in
     rejected (Auth_login.mint ~base_path ~host:"127.0.0.1" ~port:8935
@@ -369,7 +369,7 @@ let test_bootstrap_cannot_bypass_current_authority () =
     [ Malformed_name; Foreign_redirect ]) [ Missing_config; Disabled_config ]
 
 let test_valid_admin_bootstrap_keeps_secret_and_pair () = with_workspace @@ fun base_path ->
-  Unix.unlink (Auth.auth_config_file base_path);
+  Auth.save_auth_config base_path { D.default_auth_config with enabled = false };
   let report = auth_ok (Auth_login.mint ~base_path ~host:"127.0.0.1" ~port:8935
       ~agent_name:"keeper" ~role:D.Admin ~token_env_var:"FILE_BACKED_FIXTURE_TOKEN"
       ~token_lifetime:Auth_login.Long_lived ()) in
@@ -380,6 +380,26 @@ let test_valid_admin_bootstrap_keeps_secret_and_pair () = with_workspace @@ fun 
   check bool "workspace-secret hash has the same config and file authority" true
     (cfg.workspace_secret_hash = Some (String.trim (read (Auth.workspace_secret_file base_path))));
   check bool "explicit no-expiry bootstrap honored" true ((current base_path "keeper").expires_at = None);
+  check_pair base_path "keeper"
+
+let test_missing_config_admin_keeps_required_default_and_pair () = with_workspace @@ fun base_path ->
+  Unix.unlink (Auth.auth_config_file base_path);
+  let report = auth_ok (Auth_login.mint ~base_path ~host:"127.0.0.1" ~port:8935
+      ~agent_name:"keeper" ~role:D.Admin ~token_env_var:"FILE_BACKED_FIXTURE_TOKEN"
+      ~token_lifetime:Auth_login.Long_lived ()) in
+  check bool "missing config uses already-required auth" true
+    (report.auth_change = Auth_login.Auth_already_required);
+  check bool "required default config remains authoritative" true
+    (Auth.load_auth_config base_path = D.default_auth_config);
+  check bool "login does not manufacture a config file" false
+    (Sys.file_exists (Auth.auth_config_file base_path));
+  check bool "login does not manufacture a workspace secret" false
+    (Sys.file_exists (Auth.workspace_secret_file base_path));
+  check (option string) "already-required default needs no bootstrap Admin marker" None
+    (Auth.read_initial_admin base_path);
+  check bool "requested Admin role is honored" true ((current base_path "keeper").role = D.Admin);
+  check bool "explicit no-expiry default login honored" true ((current base_path "keeper").expires_at = None);
+  check bool "report contains the recoverable bearer" true (raw base_path "keeper" = report.bearer_token);
   check_pair base_path "keeper"
 
 let () = run "auth_file_backed_transaction" [ "publication", [
@@ -405,4 +425,5 @@ let () = run "auth_file_backed_transaction" [ "publication", [
   test_case "regular symlink authority remains readable" `Quick test_regular_symlink_authority_remains_readable;
   test_case "missing and disabled bootstrap refuse corrupt or foreign ownership" `Quick test_bootstrap_cannot_bypass_current_authority;
   test_case "valid Admin bootstrap retains secret and recoverable pair" `Quick test_valid_admin_bootstrap_keeps_secret_and_pair;
+  test_case "missing config Admin retains required default without bootstrap files" `Quick test_missing_config_admin_keeps_required_default_and_pair;
 ] ]

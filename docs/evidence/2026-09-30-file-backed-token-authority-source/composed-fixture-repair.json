@@ -1,0 +1,21 @@
+{
+  "external_api_parent": "68069b3af2da03639225f7bac95dcb61fb54c324",
+  "external_tree": "dd6782bc547d40d1bb45827465ec4d7a8fa503fb",
+  "local_import_tree_equal": true,
+  "composed_prepared_cases": 23,
+  "parse_only_command": "ocamlc -stop-after parsing -impl test/test_auth_file_backed_transaction.ml",
+  "parse_only_exit": 0,
+  "diff_check_exit": 0,
+  "strict_ignore_fixture_exit": 0,
+  "no_local_typecheck_build_native": true,
+  "current_native_result": null,
+  "older_native_scope": "9b254 suite18/19 plus9other suites149cases; does not establish the external680 or23case composition",
+  "strict_ignore_initial_exit": 1,
+  "strict_ignore_initial_sites": [
+    298,
+    314,
+    324,
+    337
+  ],
+  "strict_ignore_repair": "Replace four inherited unannotated ignore sites with explicit named result bindings; no behavioral change. Final strict gate rerun exited0; parsing and diff check also exited0."
+}

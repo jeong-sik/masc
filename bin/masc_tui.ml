@@ -24747,7 +24747,7 @@ and is loaded on demand through keeper_skill.
                             open_repository_change_in_code state
                               ~mailbox:async_messages ~scope change)
                    | _ -> ())
-                else if state.code_history_open then (
+                else if state.code_history_open && state.code_focus_file = Right_pane then (
                   (* The top visible row is the selected one, the way the
                      Changes list treats its scroll. A commit answers with
                      its PR; a durable Keeper change jumps to its

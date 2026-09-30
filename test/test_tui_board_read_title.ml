@@ -101,7 +101,7 @@ let reads ~binding ~field =
 
 let test_a_paged_index_is_given_the_count_its_own_header_draws () =
   Alcotest.(check int) "the Board index asks the census" 1
-    (Ast_grep.count_calls_in_value_binding ~module_path:render
+    (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_render_board.ml"
        ~binding_name:"render_board_list" ~callee:"board_holding");
   Alcotest.(check int) "the Schedules index is given the request count" 1
     (reads ~binding:"render_schedule_detail" ~field:"scs_request_count");

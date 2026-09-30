@@ -738,5 +738,16 @@
     "review": "independent hostile and response source APPROVE exact recorded head, no unresolved P0/P1/P2; initial diagnostic-label P2 repaired",
     "validation": "syntax parsing and diff check only",
     "execution": "not run under source-only policy"
+  },
+  "diff_ownership_stack": {
+    "pr": 40296,
+    "base_pr": 40293,
+    "base_head": "e948ac6276beba010fbaf1189a10926d3e5af045",
+    "head": "1cd694ed077b02a141cb17c2558fbd8f0c966d9d",
+    "scope": "typed reader/scope/path/generation async diff ownership, independent patch cache/error and project-scope path selection",
+    "review": "independent hostile and response source APPROVE exact recorded head, no unresolved P0/P1/P2",
+    "validation": "syntax parsing and diff check only",
+    "execution": "not run under source-only policy",
+    "remaining": "patch horizontal tail reachability and runtime race scenarios"
   }
 }

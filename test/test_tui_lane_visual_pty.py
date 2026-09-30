@@ -150,7 +150,7 @@ def main(executable: str, captures: Path | None) -> None:
         timeline = key(b"1", b"Activity timeline")
         plain = terminal.CSI_RE.sub(b"", timeline)
         for needle in (b"browser", b"game", b"statistics", b"PARTIAL",
-                       b"2026-09-13", b"DOM captured", b"Frame advanced"):
+                       b"2026-09-14", b"DOM captured", b"Frame advanced"):
             if needle not in plain:
                 raise AssertionError(f"Activity timeline omitted {needle!r}")
         capture("05-activity-timeline-140", 32, 140)

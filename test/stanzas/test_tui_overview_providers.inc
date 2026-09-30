@@ -10,4 +10,5 @@
   masc_tui_ansi
   masc_tui_theme
   masc_tui_overview_providers
-  masc_tui_usage_trend))
+  masc_tui_usage_trend
+  masc_tui_message_layout))

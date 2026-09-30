@@ -1859,7 +1859,7 @@ end
 type fusion_mode =
   | Fusion_list
   | Fusion_detail of string
-  | Fusion_historical_detail of Tui_decode.fusion_historical_evidence
+  | Fusion_historical_detail of Masc.Tui_decode_fusion.fusion_historical_evidence
 
 (** How many list reads a started run is waited for. The read that was
     already in flight when the run started cannot carry it, so one more is
@@ -2120,7 +2120,6 @@ type planning_goal = Tui_decode.planning_goal
   pg_id: string;
   pg_criterion_revision: string option;
   pg_title: string;
-  pg_owner: Goal_store.owner;
   pg_phase: Goal_phase.t;
   pg_priority: int;
   pg_due_date: string option;
@@ -2792,13 +2791,14 @@ let identity_login_landed ~providers ~login =
       | Identity_declared _ | Identity_unreadable _ -> false)
     providers
 
-(** Where [Esc] returns after the chat pane was opened. Keeping only the three
-    legal destinations makes a new Keeper sub-view an explicit compiler error
+(** Where [Esc] returns after the chat pane was opened. Keeping only the legal
+    destinations makes a new Keeper sub-view an explicit compiler error
     instead of silently becoming the detail view. *)
 type keeper_chat_return =
   | Keeper_chat_return_list
   | Keeper_chat_return_detail
   | Keeper_chat_return_lanes
+  | Keeper_chat_return_home
 
 (** Where [Esc] returns after the Changes surface was opened. [f] opens it
     from the roster and from the detail, which name the same keeper through
@@ -2945,14 +2945,10 @@ let rec surface_needs ~keeper_pane_drawn surface =
   needs
 
 and surface_needs_of_surface : surface -> surface_needs = function
-  (* Dashboard summarizes quota coverage and reads the Goal tree. Usage reads
-     the same quota response for per-scope detail and recorded history. *)
+  (* Home reads decision sources. Work owns Goal evidence and Usage owns
+     provider reports; their detail payloads do not belong on this screen. *)
   | Overview ->
-      { nothing with
-        needs_transport = true
-      ; needs_runtime_quota = true
-      ; needs_overview_goals = true
-      }
+      { nothing with needs_operator_approvals = true; needs_asks = true }
   (* Its rows come from the acting store and the keeper list, neither of which
      is fetched here. *)
   | Acting -> nothing
@@ -5247,7 +5243,49 @@ module Verification_evidence_read = struct
     | Launch_failure of string
 end
 
+(* Home links identify destinations, never an inferred approval target. The
+   approval/agenda screens still own the exact request and its decision. *)
+type home_request =
+  | Home_held_call of { keeper : string; call_id : string }
+  | Home_gate_request of string
+  | Home_operator_request of string
+  | Home_question of string
+  | Home_goal_confirmation of string
+  | Home_operator_task of string
+
+type home_action =
+  | Home_approvals
+  | Home_request of home_request
+  | Home_agenda
+  | Home_resume of string
+  | Home_read_last of string
+  | Home_choose_keeper
+  | Home_create_keeper
+
+type acting_pane_preference =
+  | Default_acting_pane
+  | Chosen_acting_pane of Masc_tui_acting_pane.layout
+
+type home_chat_receipt =
+  | No_chat_receipt
+  | Recorded_chat of Keeper_id.Keeper_name.t
+  | Session_chat of { keeper : Keeper_id.Keeper_name.t; save_error : string }
+  | Unconfirmed_chat of { keeper : Keeper_id.Keeper_name.t; detail : string }
+  | Unreadable_chat_receipt of string
+(* The server sends each invite's link once and keeps only its hash. Keep the
+   cards newest first in this TUI process so issuing another invite does not
+   erase the first person's only link. [shown_name] selects the card on screen;
+   [None] keeps all cards available for /play link without taking input. *)
+type play_invite =
+  { cards : Masc_tui_play_card.t list
+  ; shown_name : string option
+  }
+
 type state = {
+  mutable home_selected : home_action option;
+  mutable home_decision_scroll : int;
+  mutable home_opened_request : home_request option;
+  mutable home_last_chat : home_chat_receipt;
   mutable metrics_scroll: int;
   mutable metrics_section: metrics_section;
   mutable usage_telemetry_open: bool;
@@ -5390,8 +5428,9 @@ type state = {
      [Masc_tui_acting_pane.pane_cols] columns for the fleet's live feed, or
      [wide_pane_cols] wide. Same contract as the roster: narrow, wide or
      hidden is the reader's choice and survives a resize; whether the
-     terminal holds it is the terminal's. *)
-  mutable acting_pane_layout: Masc_tui_acting_pane.layout;
+     terminal holds it is the terminal's. The default is resolved by surface:
+     Home keeps its destinations alone, while other surfaces start narrow. *)
+  mutable acting_pane_preference: acting_pane_preference;
   (* Rows scrolled into the pane's full list; zero is the overview. The
      renderer clamps it to what the list holds and a toggle resets it. *)
   mutable acting_pane_scroll: int;
@@ -5484,10 +5523,12 @@ type state = {
      [~who] on several calls), so there is no [msx_activity] here -- adding
      one before the server ever fills it would be a field nothing draws. *)
   mutable dos_activity: Masc_tui_machine_live.activity_entry list;
-  (* The server sends an invite bearer once. Keep the latest link only in
-     this TUI process so /play link can recover it after a pane switch or a
-     terminal without OSC 52; never persist it in workspace state. *)
-  mutable play_invite_link: (string * string) option;
+  (* Locally retained invite cards, newest first. The selected card remains
+     open until the operator closes it; the modal sweep leaves it alone. *)
+  mutable play_invite: play_invite;
+  mutable play_invite_scroll: int;
+  (* Serialize issue requests so their one-time answers arrive in order. *)
+  mutable play_invite_inflight: bool;
   (* The load menu (RFC-0439 §3.7): the human picks a game from the cartridge
      inventory to plug into the shared machine. It is an overlay on the MSX
      screen -- while [msx_menu_open] the keyboard drives the picker, not the
@@ -5928,6 +5969,7 @@ type state = {
   mutable board_posts: board_post list;
   mutable board_detail:
     (board_post * board_comment list) Masc_tui_board_detail.t;
+  mutable board_history_post_id: string option;
   mutable board_list_error: string option;
   mutable board_list_reading: board_list_reading;
   mutable board_cursor: int;
@@ -6355,14 +6397,14 @@ type state = {
   (* The retained-run list. A failed refresh keeps the rows it had and says
      why beside them ([Masc_tui_fetched.Stale]), rather than a registry that
      could not be read drawing as an empty one. *)
-  mutable fusion_runs: (unit, Tui_decode.fusion_snapshot) Masc_tui_fetched.t;
+  mutable fusion_runs: (unit, Masc.Tui_decode_fusion.fusion_snapshot) Masc_tui_fetched.t;
   (* Why the launch form could not open. Not a reading of the run list, so it
      is not folded into that list's failure; the next list answer clears it. *)
   mutable fusion_launch_error: string option;
   mutable fusion_cursor: int;
   mutable fusion_scroll: int;
   mutable fusion_mode: fusion_mode;
-  mutable fusion_detail: Tui_decode.fusion_detail option;
+  mutable fusion_detail: Masc.Tui_decode_fusion.fusion_detail option;
   mutable fusion_detail_error: string option;
   (* A detail GET captures this generation. A late response for a run the
      operator already left cannot replace the exact run now on screen. *)
@@ -6371,8 +6413,8 @@ type state = {
      do not pile another GET on top of it; changing runs still starts a new
      request immediately, whose pair replaces this marker. *)
   mutable fusion_detail_inflight: (int * string) option;
-  mutable fusion_historical_detail: Tui_decode.fusion_historical_detail option;
-  mutable fusion_historical_inflight: (int * Tui_decode.fusion_historical_evidence) option;
+  mutable fusion_historical_detail: Masc.Tui_decode_fusion.fusion_historical_detail option;
+  mutable fusion_historical_inflight: (int * Masc.Tui_decode_fusion.fusion_historical_evidence) option;
   mutable fusion_launch: fusion_launch option;
   (* The read or the submit the form is waiting on. A key that closes the
      form bumps it, so the answer to a read the operator left cannot open
@@ -7661,9 +7703,9 @@ let apply_keeper_schedules_read state request result =
     | Error err ->
         state.keeper_schedules_error <- Some (request.drr_keeper, err)
 
-let fusion_snapshot_entries (snapshot : Tui_decode.fusion_snapshot) =
-  List.map (fun run -> Tui_decode.Fusion_retained_run run) snapshot.fus_runs
-  @ List.map (fun evidence -> Tui_decode.Fusion_historical_evidence evidence)
+let fusion_snapshot_entries (snapshot : Masc.Tui_decode_fusion.fusion_snapshot) =
+  List.map (fun run -> Masc.Tui_decode_fusion.Fusion_retained_run run) snapshot.fus_runs
+  @ List.map (fun evidence -> Masc.Tui_decode_fusion.Fusion_historical_evidence evidence)
       snapshot.fus_historical_evidence
 
 let fusion_runs_view (state : state) =
@@ -7682,8 +7724,8 @@ let fusion_list_entries (state : state) =
   | Some snapshot -> fusion_snapshot_entries snapshot
 
 let fusion_entry_identity = function
-  | Tui_decode.Fusion_retained_run run -> "run:" ^ run.fur_run_id
-  | Tui_decode.Fusion_historical_evidence evidence -> "board:" ^ evidence.fhe_post_id
+  | Masc.Tui_decode_fusion.Fusion_retained_run run -> "run:" ^ run.fur_run_id
+  | Masc.Tui_decode_fusion.Fusion_historical_evidence evidence -> "board:" ^ evidence.fhe_post_id
 
 let selected_fusion_entry state =
   List.nth_opt (fusion_list_entries state) state.fusion_cursor
@@ -7692,9 +7734,9 @@ let fusion_detail_entry_index state =
   fusion_list_entries state
   |> List.find_index (fun entry ->
       match state.fusion_mode, entry with
-      | Fusion_detail id, Tui_decode.Fusion_retained_run run ->
+      | Fusion_detail id, Masc.Tui_decode_fusion.Fusion_retained_run run ->
           String.equal id run.fur_run_id
-      | Fusion_historical_detail reference, Tui_decode.Fusion_historical_evidence candidate ->
+      | Fusion_historical_detail reference, Masc.Tui_decode_fusion.Fusion_historical_evidence candidate ->
           String.equal reference.fhe_post_id candidate.fhe_post_id
           && String.equal reference.fhe_run_id candidate.fhe_run_id
       | _ -> false)
@@ -7702,7 +7744,7 @@ let fusion_detail_entry_index state =
 let selected_keeper_runs (state : state) =
   match selected_keeper state, fusion_snapshot state with
   | Some keeper, Some snapshot ->
-      List.filter (fun (run : Tui_decode.fusion_run) ->
+      List.filter (fun (run : Masc.Tui_decode_fusion.fusion_run) ->
           String.equal run.fur_keeper keeper.k_name) snapshot.fus_runs
   | _ -> []
 
@@ -7812,6 +7854,15 @@ let goal_action_armed_for (state : state) (goal_id : string) =
       Some armed_action
   | Some _ | None -> None
 
+(* A compact Home never grows a feed just because the terminal grew. An
+   explicit reader choice still applies on Home and survives surface changes. *)
+let acting_pane_layout (state : state) =
+  match state.acting_pane_preference with
+  | Chosen_acting_pane layout -> layout
+  | Default_acting_pane ->
+      if state.view = Overview then Masc_tui_acting_pane.Hidden
+      else Masc_tui_acting_pane.Narrow
+
 (** New Keeper messages require a complete roster observation. [state.keepers]
     may intentionally retain the previous complete roster while a detail or log
     view survives a transient metadata read failure, so membership alone is not
@@ -7881,6 +7932,55 @@ let supersede_context_inspector_load state stop =
   state.context_inspector_cancel <- stop
 ;;
 
+(* The invite card on screen, if there is one. *)
+let play_card_shown (state : state) =
+  match state.play_invite.shown_name with
+  | None -> None
+  | Some name ->
+    List.find_opt
+      (fun card -> String.equal (Masc_tui_play_card.name card) name)
+      state.play_invite.cards
+
+let play_invite_latest (state : state) =
+  match state.play_invite.cards with
+  | [] -> None
+  | card :: _ -> Some card
+
+let play_invite_find (state : state) name =
+  List.find_opt
+    (fun card -> String.equal (Masc_tui_play_card.name card) name)
+    state.play_invite.cards
+
+let play_invite_store current card =
+  let name = Masc_tui_play_card.name card in
+  { cards =
+      card
+      :: List.filter
+           (fun previous ->
+             not (String.equal (Masc_tui_play_card.name previous) name))
+           current.cards
+  ; shown_name = Some name
+  }
+
+(* Whether a card older than the newest is kept: what an issue notice points at
+   with /play link <name>. [play_invite_store] keeps one card per name, so a
+   name issued again on its own leaves nothing earlier. *)
+let play_invite_holds_earlier current =
+  match current.cards with
+  | _ :: _ :: _ -> true
+  | [] | [ _ ] -> false
+
+let play_invite_forget current name =
+  { cards =
+      List.filter
+        (fun card -> not (String.equal (Masc_tui_play_card.name card) name))
+        current.cards
+  ; shown_name =
+      (match current.shown_name with
+       | Some shown when String.equal shown name -> None
+       | Some _ | None -> current.shown_name)
+  }
+
 (* The overlays that take every key while they are open. Each answers its own
    keys and swallows the rest in its dispatch arm, so nothing drawn under it --
    the composer, a surface binding, a press on a row -- may act first. Every
@@ -7889,6 +7989,7 @@ let supersede_context_inspector_load state stop =
 let modal_owns_keys (state : state) =
   state.help_open || state.keeper_deletions_open || state.agenda_open
   || state.context_inspector_open || state.about_open
+  || Option.is_some (play_card_shown state)
 
 let close_context_inspector (state : state) =
   state.context_inspector_open <- false;
@@ -7905,8 +8006,10 @@ let close_agenda (state : state) =
   state.agenda_selected <- Masc_tui_agenda.Nowhere
 
 (* Every overlay [modal_owns_keys] names, closed the way its own Esc closes
-   it. The inspector and the agenda are only closed when open: closing stops
-   an inspector read in flight, and there is none to stop otherwise. *)
+   it, except the invite card: an unrelated event that clears the screen must
+   not take the only copy of a link with it. The inspector and the agenda are
+   only closed when open: closing stops an inspector read in flight, and there
+   is none to stop otherwise. *)
 let close_key_modals (state : state) =
   state.help_open <- false;
   state.help_scroll <- 0;
@@ -7925,6 +8028,10 @@ let create_state
     ()
   =
   {
+  home_selected = None;
+  home_decision_scroll = 0;
+  home_opened_request = None;
+  home_last_chat = No_chat_receipt;
   metrics_scroll = 0;
   metrics_section = Section_fleet;
   usage_telemetry_open = false;
@@ -7988,7 +8095,7 @@ let create_state
      cost of being wrong here -- whereas the column was drawn on every frame
      whether or not anyone read it. *)
   roster_pane_hidden = true;
-  acting_pane_layout = Masc_tui_acting_pane.Narrow;
+  acting_pane_preference = Default_acting_pane;
   acting_pane_scroll = 0;
   acting_pane_cursor = None;
   acting_pane_tab = Masc_tui_acting_pane.Tab_fleet;
@@ -8021,7 +8128,9 @@ let create_state
   dos_live = Masc_tui_machine_live.Unread;
   dos_live_in_flight = None;
   dos_activity = [];
-  play_invite_link = None;
+  play_invite = { cards = []; shown_name = None };
+  play_invite_scroll = 0;
+  play_invite_inflight = false;
   msx_menu_open = false;
   msx_notice = None;
   msx_menu_mode = Boot_game;
@@ -8220,6 +8329,7 @@ let create_state
   pending_approval_action = None;
   board_posts = [];
   board_detail = Masc_tui_board_detail.initial;
+  board_history_post_id = None;
   board_list_error = None;
   board_list_reading = Board_list_unread;
   board_cursor = 0;
@@ -8989,6 +9099,7 @@ type clamped_scroll =
      the drawing instead, which is the one thing the renderer must not do. *)
   | Patch_modal_scroll of int
   | Link_modal_scroll of int
+  | Play_invite_scroll of int
   (* The voice pane and its wizard lay out lines out of two HTTP reads and the
      probe's answers, so their count exists only once the frame is drawn. Both
      drew every line into a fixed budget with no offset, and whatever fell past
@@ -9063,6 +9174,7 @@ let apply_clamped_scroll (state : state) = function
   | Approval_detail_scroll value -> state.approval_detail_scroll <- value
   | Patch_modal_scroll value -> state.patch_modal_scroll <- value
   | Link_modal_scroll value -> state.link_modal_scroll <- value
+  | Play_invite_scroll value -> state.play_invite_scroll <- value
   | Voice_scroll value -> state.config_scroll <- value
   | Keeper_list_scroll value -> state.keeper_list_scroll <- value
   | Context_inspector_scroll value -> state.context_inspector_scroll <- value
@@ -11109,6 +11221,253 @@ let approvals_count_label (state : state) =
   if approvals_reading_current state then string_of_int on_screen
   else Printf.sprintf "%d?" on_screen
 
+let approval_item_needs_person = function
+  | Keeper_tool_row _ | Operator_row _ -> true
+  | Gate_row (pending : Tui_decode.gate_pending) ->
+      match pending.gp_phase with
+      | Gate_human_required -> true
+      | Gate_queued | Gate_judging | Gate_blocked -> false
+
+let approvals_human_pending (state : state) =
+  List.length (List.filter approval_item_needs_person (approval_items state))
+  + approvals_open_question_count state
+
+let home_request_of_approval = function
+  | Keeper_tool_row held ->
+      Home_held_call { keeper = held.Tui_decode.kta_keeper; call_id = held.kta_tool_call_id }
+  | Gate_row pending -> Home_gate_request pending.Tui_decode.gp_id
+  | Operator_row item -> Home_operator_request item.ap_token
+
+(* Current successes survive another source's failure. Stale snapshots are
+   reachable through their source reading, never offered as current requests. *)
+let home_decision_rows (state : state) =
+  let reading = approvals_reading state in
+  let clean = Tui_decode.sanitize_terminal_text in
+  let approval_rows =
+    approval_items state
+    |> List.filter_map (fun row ->
+      let current, who, why, kind, request_id = match row with
+        | Keeper_tool_row held ->
+            list_is_read reading.held_calls, held.kta_keeper, held.kta_question, "Held call", held.kta_tool_call_id
+        | Gate_row pending ->
+            list_is_read reading.gate_queue, pending.gp_keeper, pending.gp_display_tool, "Approval", pending.gp_id
+        | Operator_row item ->
+            list_is_read reading.confirm_queue, item.ap_actor, item.ap_summary, "Approval", item.ap_token
+      in
+      if current && approval_item_needs_person row then
+        Some (Home_request (home_request_of_approval row),
+              Printf.sprintf "%s · %s [%s] · %s" kind (clean who)
+                (String.trim (Masc_tui_message_layout.fit_middle 12 (clean request_id))) (clean why))
+      else None)
+  in
+  let questions =
+    if list_is_read reading.questions then
+      Option.value ~default:[] (approvals_open_questions state)
+      |> List.map (fun (row : Tui_decode.ask_row) ->
+          let why = match row.ar_context, row.ar_questions with
+            | Some reason, _ -> reason
+            | None, question :: _ -> question.aq_prompt
+            | None, [] -> "open question"
+          in
+          Home_request (Home_question row.ar_id),
+          Printf.sprintf "Question · %s [%s] · %s" (clean row.ar_keeper)
+            (String.trim (Masc_tui_message_layout.fit_middle 12 (clean row.ar_id))) (clean why))
+    else []
+  in
+  let source_notes =
+    approval_row_lists reading @ ["questions", reading.questions]
+    |> List.filter_map (fun (name, status) -> match status with
+        | List_read -> None
+        | List_not_read _ -> Some (name ^ " not fully read"))
+  in
+  let approvals =
+    let notes =
+      match state.approval_snapshot with
+      | Some snapshot when snapshot.aps_hidden_count > 0 ->
+          source_notes @ [Printf.sprintf "%d requests outside current filter" snapshot.aps_hidden_count]
+      | Some _ | None -> source_notes
+    in
+    match notes with
+    | [] ->
+        let count =
+          List.map fst (approval_rows @ questions) |> List.sort_uniq compare |> List.length
+        in
+        if count = 0 then []
+        else [Home_approvals, Printf.sprintf "Approvals and questions: %d need you · all requests" count]
+    | _ :: _ -> [Home_approvals, "Approvals and questions: " ^ String.concat "; " notes]
+  in
+  let goals = match state.goals_to_confirm with
+    | Masc_tui_agenda.Read rows ->
+        List.map (fun (row : Masc_tui_agenda.goal_to_confirm) ->
+          Home_request (Home_goal_confirmation row.goal_id),
+          Printf.sprintf "Confirm Goal · %s · %s" (clean row.goal_id) (clean row.title)) rows
+    | Not_read -> [Home_agenda, "Goal confirmations not read · inspect sources"]
+    | Read_failed _ -> [Home_agenda, "Goal confirmations unavailable · inspect sources"]
+  in
+  let tasks = match state.tasks_error, state.operator_stalled with
+    | Some _, _ -> [Home_agenda, "Operator tasks unavailable · inspect sources"]
+    | None, None -> [Home_agenda, "Operator tasks not read · inspect sources"]
+    | None, Some rows ->
+        List.map (fun (row : Masc_tui_agenda.stalled) ->
+          Home_request (Home_operator_task row.task_id),
+          Printf.sprintf "Operator task · %s · %s" (clean row.task_id) (clean row.what)) rows
+  in
+  (* Equality is kind plus authoritative request ID, never a Keeper/task
+     grouping key. Distinct calls belonging to one Keeper remain distinct. *)
+  List.fold_left (fun rows ((action, label) as row) ->
+    match List.assoc_opt action rows with
+    | None -> rows @ [row]
+    | Some previous when action = Home_agenda ->
+        List.map (fun (key, text) ->
+          if key = action then key, previous ^ "; " ^ label else key, text) rows
+    | Some _ -> rows) [] (approval_rows @ questions @ goals @ tasks @ approvals)
+
+let clear_ask_answering state =
+  state.ask_answer_mode <- Ask_browsing;
+  state.ask_draft <- None;
+  state.ask_text_entry <- None;
+  state.pending_ask_submit <- None
+
+let reconcile_home_request_detail state =
+  match state.home_opened_request with
+  | None -> ()
+  | Some request ->
+      let expected_surface = match request with
+        | Home_held_call _ | Home_gate_request _ | Home_operator_request _ | Home_question _ -> Approvals
+        | Home_goal_confirmation _ | Home_operator_task _ -> Planning
+      in
+      if state.view <> expected_surface then begin
+        state.home_opened_request <- None;
+        (match state.followed_from with
+         | Some (Overview, _) -> state.followed_from <- None
+         | Some _ | None -> ())
+      end else if not (List.mem_assoc (Home_request request) (home_decision_rows state)) then begin
+        (match request with Home_question _ -> clear_ask_answering state | _ -> ());
+        state.home_opened_request <- None;
+        state.approval_detail_open <- false;
+        state.pending_approval_action <- None;
+        state.followed_from <- None;
+        state.view <- Overview
+      end else
+        match request with
+        | Home_held_call _ | Home_gate_request _ | Home_operator_request _ ->
+            Option.iter (fun index -> state.approval_cursor <- index)
+              (List.find_index (fun row -> home_request_of_approval row = request)
+                 (approval_items state))
+        | Home_question ask_id ->
+            Option.iter (fun index -> state.ask_cursor <- index)
+              (List.find_index (fun (row : Tui_decode.ask_row) -> row.ar_id = ask_id)
+                 (Option.value ~default:[] (approvals_open_questions state)))
+        | Home_goal_confirmation goal_id -> state.planning_mode <- Planning_detail goal_id
+        | Home_operator_task task_id -> state.task_detail_id <- Some task_id
+
+let home_continue_rows (state : state) =
+  let last =
+    match state.home_last_chat, state.opening_mode with
+    | Recorded_chat name, _ -> Some (Keeper_id.Keeper_name.to_string name, "")
+    | Session_chat { keeper; _ }, _ ->
+        Some (Keeper_id.Keeper_name.to_string keeper, " · this session only")
+    | Unconfirmed_chat { keeper; _ }, _ ->
+        Some (Keeper_id.Keeper_name.to_string keeper, " · save durability unconfirmed")
+    | No_chat_receipt, Masc_tui_config.Last (Some name) ->
+        Some (Keeper_id.Keeper_name.to_string name, "")
+    | Unreadable_chat_receipt _, _
+    | No_chat_receipt, (Masc_tui_config.Last None | Masc_tui_config.Overview
+                       | Masc_tui_config.Keeper _) -> None
+  in
+  let resume =
+    match last with
+    | Some (name, save_notice) when state.workspace_identity = Workspace_identity_match
+                   && keeper_available_for_new_message state name ->
+        [ Home_resume name,
+          "Continue with " ^ Tui_decode.sanitize_terminal_text name
+          ^ save_notice ]
+    | Some (name, save_notice) when state.workspace_identity = Workspace_identity_match
+                         && Option.is_some state.keepers_error ->
+        [ Home_read_last name,
+          "Last conversation with " ^ Tui_decode.sanitize_terminal_text name
+          ^ save_notice
+          ^ " · roster unavailable; read history" ]
+    | Some _ | None -> []
+  in
+  let choose =
+    match state.workspace_identity, state.local_workspace, state.keepers_error, state.keepers with
+    | Workspace_identity_match, Local_workspace_read, None, [] ->
+        [ Home_create_keeper,
+          (match state.home_last_chat, last with
+           | Unreadable_chat_receipt _, _ ->
+               "Create a Keeper · conversation history unavailable"
+           | (No_chat_receipt | Recorded_chat _ | Session_chat _ | Unconfirmed_chat _), Some (name, _) ->
+               "Create a Keeper · last conversation "
+               ^ Tui_decode.sanitize_terminal_text name ^ " unavailable"
+           | (No_chat_receipt | Recorded_chat _ | Session_chat _ | Unconfirmed_chat _), None ->
+               "Create a Keeper  · choose who will take the work") ]
+    | _ ->
+        [ Home_choose_keeper,
+          (match resume with
+           | [] ->
+               (match state.home_last_chat, last with
+                | Unreadable_chat_receipt _, _ ->
+                    "Conversation history unavailable · choose a Keeper"
+                | (No_chat_receipt | Recorded_chat _ | Session_chat _ | Unconfirmed_chat _), Some (name, _) ->
+                    "Last conversation " ^ Tui_decode.sanitize_terminal_text name
+                    ^ " unavailable · choose a Keeper"
+                | (No_chat_receipt | Recorded_chat _ | Session_chat _ | Unconfirmed_chat _), None ->
+                    "Choose a Keeper  · start a conversation")
+           | _ :: _ -> "New work  · choose a Keeper") ]
+  in
+  resume @ choose
+
+let home_actions state =
+  List.map fst (home_decision_rows state @ home_continue_rows state)
+
+let home_selected_action state =
+  let actions = home_actions state in
+  match state.home_selected with
+  | None -> List.nth_opt actions 0
+  | Some action ->
+      if List.mem action actions then Some action else None
+
+(* Frame preparation pins only an authoritative initial reading; transient
+   boot destinations must remain free to settle. Drawing shares these pure
+   projections but does not store either selection or viewport state. *)
+let home_initial_reading_ready state selected =
+  match selected with
+  | Some (Home_request _ | Home_resume _ | Home_read_last _) -> true
+  | Some Home_approvals -> approvals_reading_current state
+  | Some (Home_choose_keeper | Home_create_keeper) ->
+      approvals_reading_current state && Option.is_some state.operator_stalled
+      && (match state.goals_to_confirm with Masc_tui_agenda.Read _ -> true | _ -> false)
+  | Some Home_agenda | None -> false
+
+let home_decision_window state ~budget =
+  let decisions = home_decision_rows state in
+  let continuation = home_continue_rows state in
+  let selected = home_selected_action state in
+  let warning_rows =
+    if Option.is_some state.home_selected && Option.is_none selected then 1 else 0
+  in
+  let capacity = max 0 (budget - List.length continuation - 2 - warning_rows) in
+  let first = max 0 (min state.home_decision_scroll (List.length decisions - capacity)) in
+  let first = match List.find_index (fun (action, _) -> Some action = selected) decisions with
+    | Some index when index < first -> index
+    | Some index when index >= first + capacity -> max 0 (index - capacity + 1)
+    | Some _ | None -> first
+  in
+  first, capacity
+
+let home_step state ~backwards =
+  let actions = home_actions state in
+  let current = home_selected_action state in
+  let index =
+    match List.find_index (fun action -> Some action = current) actions with
+    | None -> 0
+    | Some index ->
+        if backwards then max 0 (index - 1)
+        else min (List.length actions - 1) (index + 1)
+  in
+  state.home_selected <- List.nth_opt actions index
+
 (* One title clause per list that was not read, in the order the lists are
    drawn. A list with nothing read and nothing kept is "unread" whether or not
    a poll failed; the rows of a list read before and not since are "stale". *)
@@ -11468,13 +11827,13 @@ let surface_row_texts (state : state) : surface -> string list option =
                 (List.map
                    (fun entry ->
                      match entry with
-                     | Tui_decode.Fusion_retained_run run ->
-                         run.Tui_decode.fur_run_id ^ " "
-                         ^ run.Tui_decode.fur_keeper ^ " "
-                         ^ run.Tui_decode.fur_preset
-                     | Tui_decode.Fusion_historical_evidence evidence ->
-                         evidence.Tui_decode.fhe_post_id ^ " "
-                         ^ evidence.Tui_decode.fhe_title)
+                     | Masc.Tui_decode_fusion.Fusion_retained_run run ->
+                         run.Masc.Tui_decode_fusion.fur_run_id ^ " "
+                         ^ run.Masc.Tui_decode_fusion.fur_keeper ^ " "
+                         ^ run.Masc.Tui_decode_fusion.fur_preset
+                     | Masc.Tui_decode_fusion.Fusion_historical_evidence evidence ->
+                         evidence.Masc.Tui_decode_fusion.fhe_post_id ^ " "
+                         ^ evidence.Masc.Tui_decode_fusion.fhe_title)
                    entries)))
   | Changes when Option.is_some (opened_file_change state) -> None
   | Changes -> (

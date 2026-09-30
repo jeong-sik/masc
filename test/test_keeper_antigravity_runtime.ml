@@ -625,10 +625,10 @@ let test_keeper_projects_mcp_tool_and_settles () =
                          provider counts differ from the local ordinal, then
                          increments on later resumes. Fresh starts reset to 1.
                          The final control is a first resume, settled at 73. *)
-                      let run_context ?(hooks = hooks) ~goal (system_prompt, initial_messages) =
+                      let run_context ?official_client_composed_context ?(hooks = hooks) ~goal (system_prompt, initial_messages) =
                         match Keeper_turn_driver.run_named ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
                           ~runtime_id:"antigravity.gemini" ~keeper_name:"antigravity-fixture"
-                          ~base_path ~goal
+                          ~base_path ~goal ?official_client_composed_context
                           ~system_prompt ~tools:[tool] ~agent_core_tools:[tool]
                           ~initial_messages ~hooks ~context:(Agent_core.Context.create ())
                           ~sw ~net:(Eio.Stdenv.net env) () with
@@ -743,6 +743,32 @@ let test_keeper_projects_mcp_tool_and_settles () =
                       effective "SECOND_EFFECTIVE_INSTRUCTION" ~nudge:"changed correction" 73;
                       effective "SECOND_EFFECTIVE_INSTRUCTION" 1;
                       effective "SECOND_EFFECTIVE_INSTRUCTION" ~world:"changed live world" 73;
+                      List.iteri (fun index recall ->
+                        let composed = ref None in
+                        let clock = Printf.sprintf "ANTIGRAVITY_CLOCK_%d" index in
+                        let blocks =
+                          [ Prompt_block_id.Memory_os_recall, recall
+                          ; Prompt_block_id.Temporal_summary, clock
+                          ; Prompt_block_id.Operator_note, "REPEATED_OPERATOR_NOTE" ] in
+                        let carrier = String.concat "\n\n" (List.map snd blocks) in
+                        let hooks = { Agent_core.Hooks.empty with before_turn_params = Some (fun _ ->
+                          composed := Some { Keeper_official_client_host.carrier_sha256 =
+                            Digestif.SHA256.(digest_string carrier |> to_hex); blocks };
+                          Agent_core.Hooks.AdjustParams { Agent_core.Hooks.default_turn_params with
+                            extra_system_context = Some carrier }) } in
+                        ignore (run_context ~hooks
+                          ~official_client_composed_context:(fun () -> !composed)
+                          ~goal:"Observe recall delivery" ("recall fixture system", snd unchanged));
+                        let prompt = Fs_compat.load_file
+                          (Filename.concat base_path "antigravity-prompt.txt") in
+                        check bool "recall remains available without a compaction witness" true
+                          (String_util.contains_substring prompt recall);
+                        check bool "changing clock survives" true
+                          (String_util.contains_substring prompt clock);
+                        check bool "operator note deliberately repeats" true
+                          (String_util.contains_substring prompt "REPEATED_OPERATOR_NOTE"))
+                        ["RECALL_REVISION_ONE"; "RECALL_REVISION_ONE";
+                         "RECALL_REVISION_TWO"; "RECALL_REVISION_TWO"];
                       check int "restoring the ordinary system starts fresh" 1
                         (run_context ~goal:"Call masc_probe once" unchanged);
                       check int "control: unchanged context resumes the fresh session" 73
@@ -812,7 +838,7 @@ let test_keeper_projects_mcp_tool_and_settles () =
         | None -> fail "resumed Antigravity prompt was not captured"
       in
       check bool
-        "resume carries dynamic System context"
+        "resume carries dynamic System context without a compaction witness"
         true
         (String_util.contains_substring
            resumed_prompt

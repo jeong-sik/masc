@@ -53,6 +53,13 @@ type issued =
   ; link : string  (** [<public base>/play#<raw token>]; the only copy of the token *)
   }
 
+val play_path : string
+(** [/play]: the page a person opens the link in. *)
+
+val agent_guide_path : string
+(** [/play/agent.md]: how an agent that was handed the link joins, read
+    without a credential. The link's token is not in it. *)
+
 val issue :
   base_path:string ->
   public_base_url:string option ->

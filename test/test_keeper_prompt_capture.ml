@@ -189,6 +189,8 @@ let test_rarely_changing_blocks_come_first () =
       (Block_id.cache_rank a < Block_id.cache_rank b)
   in
   before Block_id.Memory_os_recall Block_id.Dynamic_context;
+  before Block_id.Memory_os_recall Block_id.Librarian_working_context;
+  before Block_id.Librarian_working_context Block_id.Dynamic_context;
   before Block_id.Memory_os_recall Block_id.Temporal_summary;
   before Block_id.Skill_compositions Block_id.Dynamic_context;
   before Block_id.Skill_compositions Block_id.Temporal_summary

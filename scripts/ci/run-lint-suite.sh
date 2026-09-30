@@ -68,13 +68,22 @@ blocking_lints() {
     ".github/workflows/pr-check.yml scripts/review/approve-guard.sh scripts/review/approve-guard-selftest.sh scripts/review/pr-check-run-contract.sh scripts/review/fixtures/pr-check-draft-jobs-39834.json" \
     bash scripts/review/approve-guard-selftest.sh --workflow .github/workflows/pr-check.yml
   run_self_test_when_changed "Review queue ledger readiness" \
-    "scripts/review/queue-ledger.sh scripts/review/test_queue_ledger.py scripts/review/ci-freshness.py scripts/review/review-verdict.sh scripts/review/pr-check-run-contract.sh scripts/review/fixtures/pr-check-draft-jobs-39834.json" \
+    "scripts/review/queue-ledger.sh scripts/review/test_queue_ledger.py scripts/review/ci-freshness.py scripts/review/batch_evidence.py scripts/review/review-verdict.sh scripts/review/pr-check-run-contract.sh scripts/review/fixtures/pr-check-draft-jobs-39834.json" \
     python3 scripts/review/test_queue_ledger.py
   run_self_test_when_changed "Review approval and merge boundary" \
-    "scripts/review/approve-guard.sh scripts/review/approve-guard-selftest.sh scripts/review/merge-guard.sh scripts/review/ci-checks.sh scripts/review/ci-freshness.py scripts/review/review-verdict.sh scripts/review/pr-check-run-contract.sh scripts/review/fixtures/pr-check-draft-jobs-39834.json" \
+    "scripts/review/approve-guard.sh scripts/review/approve-guard-selftest.sh scripts/review/merge-guard.sh scripts/review/ci-checks.sh scripts/review/ci-freshness.py scripts/review/batch_evidence.py scripts/review/review-verdict.sh scripts/review/pr-check-run-contract.sh scripts/review/fixtures/pr-check-draft-jobs-39834.json" \
     bash scripts/review/approve-guard-selftest.sh
+  run_self_test_when_changed "Combined-tree batch review evidence" \
+    "scripts/review/batch_evidence.py scripts/review/test_batch_evidence.py scripts/review/land-batch.sh scripts/review/ci-freshness.py scripts/review/ci-checks.sh scripts/review/review-verdict.sh scripts/review/approve-guard.sh scripts/review/merge-guard.sh" \
+    python3 scripts/review/test_batch_evidence.py
   run_lint "Installer terminal wizard" python3 test/test_installer_wizard.py
   run_lint "Installer upgrade configuration" python3 test/test_installer_upgrade.py
+  # The offline probe controls publish only the probe's typed control result
+  # and the categories the probe lists; a fake probe checks both without a
+  # build or a provider.
+  run_self_test_when_changed "Stagehand probe offline controls" \
+    "scripts/stagehand-probe-controls.py scripts/stagehand-probe-manifest.py scripts/test_stagehand_probe_controls.py" \
+    python3 scripts/test_stagehand_probe_controls.py
   run_self_test_when_changed "Stagehand extension installer" \
     "connectors/browser/install-stagehand-extension.sh test/test_install_stagehand_extension.sh" \
     bash test/test_install_stagehand_extension.sh

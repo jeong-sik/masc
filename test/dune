@@ -7637,3 +7637,5 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_chat_load_errors_pty)))
+
+(include stanzas/test_tui_keeper_logs_wrap_pty.inc)

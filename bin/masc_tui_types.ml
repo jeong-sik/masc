@@ -9039,6 +9039,27 @@ let surface_body_rows (state : state) ~terminal_rows =
      - agenda_chrome_rows state)
 ;;
 
+(* Count the rows after wrapping, shared by the reader and every movement key.
+   Entry order is newest first; facts inside each entry keep their reading order. *)
+let keeper_log_rows (state : state) ~cols =
+  let width = Masc_tui_frame.inner_width ~cols in
+  let diagnostics =
+    match state.log_error with
+    | None -> []
+    | Some error ->
+        Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (width - 2))
+          (Tui_decode.sanitize_terminal_text (Metrics_tail.error_to_string error))
+        |> List.map (fun line -> "  " ^ line)
+  in
+  let entries =
+    List.rev state.log_entries
+    |> List.concat_map (fun (entry : Tui_decode.log_entry) ->
+         Masc_tui_observation_layout.log_entry_rows ~width
+           ~time:(Tui_decode.clock_timestamp_for_terminal ~localtime:Unix.localtime entry.le_ts)
+           entry)
+  in
+  diagnostics @ entries
+
 (* The three layouts the Board read surface draws in. Both the pane split and
    the [z] key read this one answer: spelled as a pair of booleans it admitted
    a state no screen draws -- a split that is also wide -- and each reader

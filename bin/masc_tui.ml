@@ -458,7 +458,11 @@ let move_identity_cursor (state : state) ~delta =
 
 let keeper_log_content_height (state : state) =
   Metrics_tail.content_height ~terminal_rows:(surface_rows state)
-    ~error:state.log_error
+    ~error:None
+
+let keeper_log_row_count (state : state) =
+  let _, cols = get_terminal_size () in
+  List.length (Masc_tui_types.keeper_log_rows state ~cols)
 
 (* Bytes the terminal has delivered that the reader has not served yet.
 
@@ -23523,7 +23527,7 @@ and is loaded on demand through keeper_skill.
        | Some "end" when state.view = Keepers Keeper_logs ->
            state.log_scroll <-
              Metrics_tail.maximum_scroll
-               ~entry_count:(List.length state.log_entries)
+               ~entry_count:(keeper_log_row_count state)
                ~content_height:(keeper_log_content_height state)
        | Some "home" when state.view = Tools -> state.tools_scroll <- 0
        | Some "end" when state.view = Tools ->
@@ -23724,7 +23728,7 @@ and is loaded on demand through keeper_skill.
                rows. Rows are drawn newest first, so PageDown walks back in
                time. *)
             | Keepers Keeper_logs ->
-                let entry_count = List.length state.log_entries in
+                let entry_count = keeper_log_row_count state in
                 let content_height = keeper_log_content_height state in
                 state.log_scroll <-
                   (if direction > 0 then
@@ -24439,7 +24443,7 @@ and is loaded on demand through keeper_skill.
             | Keepers Keeper_logs ->
                 state.log_scroll <-
                   Metrics_tail.scroll_down
-                    ~entry_count:(List.length state.log_entries)
+                    ~entry_count:(keeper_log_row_count state)
                     ~content_height:(keeper_log_content_height state)
                     state.log_scroll
             | Keepers Keeper_calls ->
@@ -24804,7 +24808,7 @@ and is loaded on demand through keeper_skill.
             | Keepers Keeper_logs ->
                 state.log_scroll <-
                   Metrics_tail.scroll_up
-                    ~entry_count:(List.length state.log_entries)
+                    ~entry_count:(keeper_log_row_count state)
                     ~content_height:(keeper_log_content_height state)
                     state.log_scroll
             | Keepers Keeper_calls ->
@@ -25961,7 +25965,7 @@ and is loaded on demand through keeper_skill.
             | Some _ ->
                 state.log_scroll <-
                   Metrics_tail.maximum_scroll
-                    ~entry_count:(List.length state.log_entries)
+                    ~entry_count:(keeper_log_row_count state)
                     ~content_height:(keeper_log_content_height state);
                 state.view <- Keepers Keeper_logs
             | None -> ())

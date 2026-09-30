@@ -11,6 +11,8 @@ SOURCE_MODULES = (
     "bin/masc_tui_approvals_model.mli",
     "bin/masc_tui_surface_navigation.ml",
     "bin/masc_tui_surface_navigation.mli",
+    "lib/tui_terminal_text.ml",
+    "lib/tui_terminal_text.mli",
     "bin/masc_tui_render_chat.ml",
     "bin/masc_tui_message_layout.ml",
 )

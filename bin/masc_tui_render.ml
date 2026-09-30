@@ -4181,7 +4181,7 @@ let schedule_turn_rows
           let at =
             match value, recorded_at with
             | true, Some timestamp ->
-              " \xc2\xb7 " ^ Terminal_text.short_timestamp timestamp
+              " \xc2\xb7 " ^ timestamp
             | _, _ -> ""
           in
           field ~style:tone label ((if value then "yes" else "no") ^ at)
@@ -4304,13 +4304,13 @@ let schedule_detail_lines ~width ~freshness ~runner (row : schedule_row)
       ~(wake_history_error : (string * string) option) =
   let field ?(style = Ansi.reset) label value =
     ( style
-    , Printf.sprintf "  %-14s %s" label (Terminal_text.single_line value) )
+    , Printf.sprintf "  %-14s %s" label (String.concat "\n" (List.map Terminal_text.single_line (String.split_on_char '\n' value))) )
   in
   let optional value = Option.value ~default:Masc_tui_theme.Glyph.no_value value in
   let timestamp value =
     match value with
     | None -> Masc_tui_theme.Glyph.no_value
-    | Some iso -> Terminal_text.short_timestamp iso
+    | Some iso -> iso
   in
   let queue =
     match row.sch_queue_projection_status, row.sch_queue_pending_count with
@@ -4323,10 +4323,9 @@ let schedule_detail_lines ~width ~freshness ~runner (row : schedule_row)
     match row.sch_reaction_projection_status, row.sch_reaction_latest_at_iso with
     | None, None -> Masc_tui_theme.Glyph.no_value
     | Some status, None -> status
-    | None, Some at -> Terminal_text.short_timestamp at
+    | None, Some at -> at
     | Some status, Some at ->
-        Printf.sprintf "%s  %s" status
-          (Terminal_text.short_timestamp at)
+        Printf.sprintf "%s  %s" status at
   in
   let summary =
     Option.value ~default:"(no payload summary)" row.sch_payload_summary
@@ -4355,7 +4354,7 @@ let schedule_detail_lines ~width ~freshness ~runner (row : schedule_row)
   ; field "Requested by" row.sch_requested_by
   ; field "Scheduled by" row.sch_scheduled_by
   ; field "Requested"
-      (Terminal_text.short_timestamp row.sch_requested_at_iso)
+      row.sch_requested_at_iso
   ; field "Due" (timestamp row.sch_due_at_iso)
   ; field "Next due" (timestamp row.sch_next_due_at_iso)
   ; field "Expires" (timestamp row.sch_expires_at_iso)
@@ -4408,7 +4407,7 @@ let schedule_detail_lines ~width ~freshness ~runner (row : schedule_row)
              (match Tui_decode.schedule_hold_reading ~freshness ~runner hold with
               | Tui_decode.Hold_current ->
                   let due =
-                    Terminal_text.short_timestamp hold.Tui_decode.srh_due_at_iso
+                    hold.Tui_decode.srh_due_at_iso
                   in
                   (match hold.Tui_decode.srh_reason with
                    | Tui_decode.Hold_previous_wake_untaken ->
@@ -4437,39 +4436,66 @@ let schedule_detail_lines ~width ~freshness ~runner (row : schedule_row)
        ]
      else [])
 
+let schedule_detail_content (state : state) ~cols ~runner (row : schedule_row) =
+  let width = max 1 (framed_inner_width cols) in
+  let wire text = String.concat "\n"
+      (List.map Terminal_text.single_line (String.split_on_char '\n' text)) in
+  let warnings =
+    (match schedule_source_warning state with
+     | None -> [] | Some error -> [Theme.bad (), "Source: " ^ wire error])
+    @ (match state.schedule_cancel_armed with
+       | None -> [] | Some id -> [Theme.warn (), "Armed: cancel " ^ wire id ^ " -- press x again to submit"])
+    @ (match state.schedule_cancel_error with
+       | None -> [] | Some error -> [Theme.bad (), "Cancel error: " ^ wire error]) in
+  let fields = schedule_detail_lines ~width
+      ~freshness:(schedule_list_freshness state) ~runner row
+      ~wake_history:state.schedule_wake_history
+      ~wake_history_error:state.schedule_wake_history_error in
+  List.concat_map (fun (style, text) ->
+      String.split_on_char '\n' text |> List.concat_map (fun line ->
+        match Message_layout.wrap_words ~max_cells:width line with
+        | [] -> [style, ""]
+        | lines -> List.map (fun text -> style, text) lines))
+    (warnings @ fields)
+
+let schedule_detail_height ~rows ~count =
+  Masc_tui_scroll.content_height ~rows ~chrome:framed_chrome_rows ~count
+    ~preview_keep:None ~overflow_takes_row:true
+
+let schedule_detail_viewport (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let cols = if cols < keeper_split_threshold_cols then cols else cols - keeper_roster_pane_cols in
+  let count = match state.schedule_detail_id, state.schedules with
+    | Some id, Some snapshot ->
+        (match List.find_opt (fun row -> String.equal row.sch_schedule_id id) snapshot.scs_rows with
+         | None -> 0
+         | Some row -> List.length (schedule_detail_content state ~cols ~runner:snapshot.scs_runner_status row))
+    | Some _, None | None, _ -> 0 in
+  count, schedule_detail_height ~rows ~count
+
 let schedule_detail_pane (state : state) ~rows ~cols ~runner (row : schedule_row) buf =
   box_top buf cols;
   box_line buf cols
     (Printf.sprintf "%s  %s[%s]%s"
-       (screen_title " MASC Keepers / Schedules \xe2\x96\xb8 details")
+       (screen_title " MASC Keepers / Schedules ▸ details")
        (schedule_status_color row.sch_status)
        (Terminal_text.single_line row.sch_status) Ansi.reset);
   box_divider buf cols;
-  let warning_rows =
-    match schedule_source_warning state with
-    | None -> 0
-    | Some err ->
-        box_line buf cols (data_unreliable_row ~cols err);
-        1
-  in
-  let lines =
-    schedule_detail_lines
-      ~width:(max 1 (framed_inner_width cols))
-      ~freshness:(schedule_list_freshness state) ~runner row
-      ~wake_history:state.schedule_wake_history
-      ~wake_history_error:state.schedule_wake_history_error
-  in
-  let content_height = max 1 (rows - 6 - warning_rows) in
-  let max_scroll = max 0 (List.length lines - content_height) in
-  let scroll = max 0 (min state.schedule_scroll max_scroll) in
-  let lines_window = Rows.of_list ~first:scroll ~height:content_height lines in
-  for index = 0 to content_height - 1 do
+  let lines = schedule_detail_content state ~cols ~runner row in
+  let count = List.length lines in
+  let height = schedule_detail_height ~rows ~count in
+  let scroll = Masc_tui_scroll.normalize ~count ~height state.schedule_scroll in
+  let lines_window = Rows.of_list ~first:scroll ~height lines in
+  for index = 0 to height - 1 do
     match Rows.at lines_window (scroll + index) with
     | Some (style, line) -> box_line_styled buf cols ~style line
     | None -> box_empty buf cols
   done;
+  Option.iter (box_line_styled buf cols ~style:(Theme.recede ()))
+    (Masc_tui_scroll.position_row ~scroll ~height count);
   box_bottom buf cols;
-  scroll, max_scroll
+  scroll, Masc_tui_scroll.maximum ~count ~height
 ;;
 
 (* The schedule list stays beside the schedule. Opening one used to hide the others, and the others

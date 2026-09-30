@@ -6184,6 +6184,12 @@ let task_detail_on_screen (state : state) =
   Masc_tui_task_selection.detail_row ~detail_id:state.task_detail_id
     ~tasks:state.tasks_domain
 
+let schedule_detail_on_screen (state : state) =
+  match state.schedule_detail_id, state.schedules with
+  | Some id, Some snapshot ->
+      List.find_opt (fun row -> String.equal row.sch_schedule_id id) snapshot.scs_rows
+  | Some _, None | None, _ -> None
+
 let row_list (state : state) : row_list option =
   (* The window follows a named row the same way it follows a step, through
      [surface_body_height] rather than [rows - sc_chrome]: a surface that
@@ -6409,7 +6415,7 @@ let row_list (state : state) : row_list option =
         ~cursor:state.approval_cursor (fun index ->
           state.approval_cursor <- index)
   | Schedules ->
-      (match state.schedule_detail_id with
+      (match schedule_detail_on_screen state with
        | Some _ -> None
        | None ->
            let count =
@@ -6545,7 +6551,7 @@ let reading_pane (state : state) : (int -> Masc_tui_types.clamped_scroll) option
            pane (fun v -> Fusion_detail_scroll v)
        | Fusion_list -> None)
   | Schedules ->
-      if Option.is_some state.schedule_detail_id then
+      if Option.is_some (schedule_detail_on_screen state) then
         pane (fun v -> Schedule_detail_scroll v)
       else None
   | Verification ->
@@ -8881,13 +8887,12 @@ let selected_surface_reference state =
   | Board -> board ()
   | Planning -> planning ()
   | Schedules ->
-      (match state.schedule_detail_id, state.schedules with
-       | Some schedule_id, _ -> Some (Link.reference Schedule schedule_id)
-       | None, Some snapshot ->
-           Option.map
-             (fun row -> Link.reference Schedule row.sch_schedule_id)
-             (List.nth_opt snapshot.scs_rows state.schedule_cursor)
-       | None, None -> None)
+      (match schedule_detail_on_screen state with
+       | Some row -> Some (Link.reference Schedule row.sch_schedule_id)
+       | None ->
+           Option.bind state.schedules (fun snapshot ->
+             Option.map (fun row -> Link.reference Schedule row.sch_schedule_id)
+               (List.nth_opt snapshot.scs_rows state.schedule_cursor)))
   | Harness ->
       (match state.harness_detail with
        | Some (task_id, _) -> Some (Link.reference Task task_id)
@@ -12494,17 +12499,11 @@ let start_schedule_cancel state ~mailbox ~(schedule_id : string) =
   | None -> run_cancel ()
 
 let selected_schedule_row state =
-  let rows =
-    match state.schedules with
-    | None -> []
-    | Some snapshot -> snapshot.scs_rows
-  in
-  match state.schedule_detail_id with
-  | Some schedule_id ->
-      List.find_opt
-        (fun row -> String.equal row.sch_schedule_id schedule_id)
-        rows
-  | None -> List.nth_opt rows state.schedule_cursor
+  match schedule_detail_on_screen state with
+  | Some row -> Some row
+  | None ->
+      Option.bind state.schedules (fun snapshot ->
+        List.nth_opt snapshot.scs_rows state.schedule_cursor)
 
 (* The cancel key on the row under the cursor. Two presses, like the vote
    keys: the first names the schedule, the same press again sends it. The
@@ -22340,7 +22339,7 @@ and is loaded on demand through keeper_skill.
           mean something else, and on Changes and the Keeper detail tabs it
           already does. *)
        | Some (("[" | "]") as bracket)
-         when state.view = Schedules && Option.is_some state.schedule_detail_id ->
+         when state.view = Schedules && Option.is_some (schedule_detail_on_screen state) ->
            step_detail_cursor
              ~count:
                (match state.schedules with
@@ -23634,11 +23633,11 @@ and is loaded on demand through keeper_skill.
                      Masc_tui_types.scroll_down_from state.fusion_scroll ~by:page
                    else max 0 (state.fusion_scroll + (direction * page))))
             | Schedules ->
-                if Option.is_some state.schedule_detail_id then
+                if Option.is_some (schedule_detail_on_screen state) then
+                  let count, height = Masc_tui_render.schedule_detail_viewport state in
                   state.schedule_scroll <-
-                    (if direction > 0 then
-                     Masc_tui_types.scroll_down_from state.schedule_scroll ~by:page
-                   else max 0 (state.schedule_scroll + (direction * page)))
+                    (if direction > 0 then Masc_tui_scroll.page_down ~count ~height
+                     else Masc_tui_scroll.page_up ~count ~height) state.schedule_scroll
                 else
                   let count =
                     match state.schedules with
@@ -24531,7 +24530,7 @@ and is loaded on demand through keeper_skill.
                  | Fusion_detail _ | Fusion_historical_detail _ ->
                      state.fusion_scroll <- Masc_tui_types.scroll_down_from state.fusion_scroll ~by:1)
             | Schedules ->
-                if Option.is_some state.schedule_detail_id then
+                if Option.is_some (schedule_detail_on_screen state) then
                   state.schedule_scroll <- Masc_tui_types.scroll_down_from state.schedule_scroll ~by:1
                 else
                   let count =
@@ -24879,7 +24878,7 @@ and is loaded on demand through keeper_skill.
                      if state.fusion_scroll > 0 then
                        state.fusion_scroll <- state.fusion_scroll - 1)
             | Schedules ->
-                if Option.is_some state.schedule_detail_id then
+                if Option.is_some (schedule_detail_on_screen state) then
                   state.schedule_scroll <- max 0 (state.schedule_scroll - 1)
                 else if state.schedule_cursor > 0 then
                   state.schedule_cursor <- state.schedule_cursor - 1
@@ -25246,7 +25245,7 @@ and is loaded on demand through keeper_skill.
                       | None -> ())
                  | Board_read _ | Board_compose -> ())
             | Schedules ->
-                (match state.schedule_detail_id with
+                (match schedule_detail_on_screen state with
                  | None -> open_schedule_detail state ~mailbox:async_messages
                  | Some _ -> ())
             | Verification ->

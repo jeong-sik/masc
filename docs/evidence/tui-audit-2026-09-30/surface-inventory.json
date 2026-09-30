@@ -715,6 +715,17 @@
     "before_screenshot": "review-detail-before-browser.png",
     "ci_dispatch": "rejectedHTTP422; Test/probe manuallydisabled; PRchecksabsent",
     "ci_receipt": "review-verdict-ci-dispatch-rejected.txt",
-    "status": "source/static reviewed, repairedhead executable verification not started"
+    "status": "source/static reviewed, repairedhead executable verification not started",
+    "operator_decision": "source-only continuation; no further dispatch; stacked PR/source review policy, full CI at Release/Tag"
+  },
+  "voice_metadata_stack": {
+    "pr": 40282,
+    "base_pr": 40277,
+    "base_head": "ae678a798507e0f5633f180db0d2f5a9e9c67307",
+    "head": "c0a6283abddb3407e88b37005bac359e2e20db03",
+    "scope": "literal complete Voice metadata, pinned action owners and active wizard answer",
+    "review": "initial P2 repaired; independent re-review pending; ANSI continuation emphasis P3",
+    "validation": "syntax parsing and diff check only",
+    "execution": "not run under operator source-only policy"
   }
 }

@@ -1,0 +1,1 @@
+Integrate responsive Runtime list columns with the stacked route/status reader, active help and stable detail identity. Candidate identity and route/probe share the available pane width while auxiliary columns fold first.

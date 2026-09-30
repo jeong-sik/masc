@@ -76,6 +76,20 @@ function browserScene(args) {
     return tag === 'form' && (attribute(element,'aria-label') !== null
       || attribute(element,'aria-labelledby') !== null);
   };
+  // Only declared DOM semantics make a custom control actionable. A native
+  // label is itself an activation target, including a hidden radio's label.
+  const controlSelector = 'button,input:not([type=hidden]),textarea,select,summary,label,[contenteditable=true],[onclick],[role~=button],[role~=link],[role~=checkbox],[role~=radio],[role~=switch],[role~=menuitem],[role~=menuitemcheckbox],[role~=menuitemradio],[role~=tab],[role~=option],[role~=combobox]';
+  const labelledControl = element => {
+    const target=element.localName === 'label' ? element.control : null;
+    return target instanceof HTMLInputElement && ['checkbox','radio'].includes(target.type) ? target : null;
+  };
+  const disabledControl = element => {
+    const target = labelledControl(element) || element;
+    if (target.matches(':disabled')) return true;
+    for (let parent=target; parent; parent=parent.parentElement)
+      if (attribute(parent,'aria-disabled') === 'true') return true;
+    return false;
+  };
   const maxChars = args.maxChars;
   if (!Number.isSafeInteger(maxChars) || maxChars < 1 || maxChars > 100000)
     throw new Error('invalid_scene_max_chars');
@@ -264,16 +278,27 @@ function browserScene(args) {
     if (node.nodeType !== 1 || ['script','style','noscript','template'].includes(node.localName)
         || !rendered(node)) continue;
     const tag=node.localName;
-    const control=linkHref(node) !== null || node.matches('button,input:not([type=hidden]),textarea,select,[contenteditable=true],[role=button],[role=link]');
+    const control=linkHref(node) !== null || (node.matches(controlSelector)
+      && (tag !== 'label' || labelledControl(node) !== null));
     if (control && visible(node)) {
-      const label=node.getAttribute('aria-label') || node.getAttribute('placeholder') || node.innerText || svgVisibleText(node) || tag;
+      const labelledBy = (attribute(node,'aria-labelledby') || '').split(/\s+/).filter(Boolean)
+        .map(id => document.getElementById?.(id)?.textContent || '').join(' ').trim();
+      const nativeLabel = Array.from(node.labels || []).map(visibleText).filter(Boolean).join(' ');
+      const label=node.getAttribute('aria-label') || labelledBy || nativeLabel
+        || node.getAttribute('placeholder') || visibleText(node) || svgVisibleText(node) || tag;
       const input=node instanceof HTMLInputElement, textarea=node instanceof HTMLTextAreaElement;
+      const target=labelledControl(node) || node, disabled=disabledControl(node);
       const editable=(textarea || (input && ['text','search','email','url','tel','password','number'].includes(node.type)))
-        && !node.readOnly && !node.matches(':disabled');
+        && !node.readOnly && !disabled;
       describe('control',node,label,boxes(node.getClientRects(),node),{
         ...(linkHref(node) !== null ? {href:linkHref(node)} : {}),
-        controlType:input ? node.type : tag,disabled:node.matches(':disabled'),editable,
-        clickable:typeof node.click === 'function' && !node.matches(':disabled'),
+        controlType:input ? node.type : tag,disabled,editable,
+        role:attribute(node,'role'),
+        ...(target instanceof HTMLInputElement && ['checkbox','radio'].includes(target.type)
+          ? {checked:!!target.checked} : {}),
+        ...(['true','false','mixed'].includes(attribute(node,'aria-checked'))
+          ? {ariaChecked:attribute(node,'aria-checked')} : {}),
+        clickable:typeof node.click === 'function' && !disabled,
         headingLevel:headingLevel(node)});
       continue;
     }
@@ -492,7 +517,7 @@ async function pageElements(args) {
   const [page] = await browser.tabs.executeScript(tabId, {
     runAt: "document_end",
     code: '(' + (function () {
-const nodes = Array.from(document.querySelectorAll('a[href],button,input:not([type=hidden]),textarea,select,[contenteditable=true],[role=button],[role=link]'));
+const nodes = Array.from(document.querySelectorAll('a[href],button,input:not([type=hidden]),textarea,select,summary,label,[contenteditable=true],[onclick],[role~=button],[role~=link],[role~=checkbox],[role~=radio],[role~=switch],[role~=menuitem],[role~=menuitemcheckbox],[role~=menuitemradio],[role~=tab],[role~=option],[role~=combobox]'));
 function selector(el) {
   const parts=[];
   for (let node=el; node && node.nodeType===1; node=node.parentElement) {
@@ -502,11 +527,30 @@ function selector(el) {
   }
   return parts.join(' > ');
 }
-const visible = nodes.filter(el=>el.getClientRects().length && getComputedStyle(el).visibility!=='hidden');
+const visible = nodes.filter(el=>el.getClientRects().length && getComputedStyle(el).visibility!=='hidden'
+  && (el.localName!=='label' || (el.control?.localName==='input' && ['checkbox','radio'].includes(el.control.type))));
+function disabled(el) {
+  const target=(el.localName==='label' && el.control) || el;
+  if (target.matches(':disabled')) return true;
+  for (let parent=target;parent;parent=parent.parentElement)
+    if (parent.getAttribute('aria-disabled')==='true') return true;
+  return false;
+}
+function name(el) {
+  const labelledBy=(el.getAttribute('aria-labelledby') || '').split(/\s+/).filter(Boolean)
+    .map(id=>document.getElementById(id)?.textContent || '').join(' ').trim();
+  const labels=Array.from(el.labels || []).map(label=>label.innerText || '').filter(Boolean).join(' ');
+  return el.getAttribute('aria-label') || labelledBy || labels || el.getAttribute('placeholder') || '';
+}
 function observe(el) {
   const result = {selector:selector(el),tag:el.localName,
-    role:el.getAttribute('role'),type:el.getAttribute('type'),name:el.getAttribute('aria-label') || el.getAttribute('placeholder') || '',
-    text:(el.innerText || '').slice(0,500),href:el.href || null,disabled:el.matches(':disabled')};
+    role:el.getAttribute('role'),type:el.getAttribute('type'),name:name(el),
+    text:(el.innerText || '').slice(0,500),href:el.href || null,disabled:disabled(el)};
+  const target=(el.localName==='label' && el.control) || el;
+  if (target.localName==='input' && ['checkbox','radio'].includes(target.type))
+    result.checked=!!target.checked;
+  if (['true','false','mixed'].includes(el.getAttribute('aria-checked')))
+    result.ariaChecked=el.getAttribute('aria-checked');
   if (el.localName==='input') {
     // Read the normalized DOM type: missing/unknown types behave as text inputs.
     result.type=el.type;
@@ -716,7 +760,10 @@ function interactInPage(args) {
       element = elements[0];
     }
     if (!observable(element)) throw new Error("element_not_visible");
-    if (element.matches(":disabled")) throw new Error("element_disabled");
+    const activationTarget=(element.localName === 'label' && element.control) || element;
+    if (activationTarget.matches(":disabled")) throw new Error("element_disabled");
+    for (let parent=activationTarget; parent; parent=parent.parentElement)
+      if (parent.getAttribute?.('aria-disabled') === 'true') throw new Error("element_disabled");
     if (args.action === "click") {
       if (typeof element.click !== "function") throw new Error("element_not_clickable");
     effectStarted = true;
@@ -748,7 +795,6 @@ function interactInPage(args) {
     return {interactionFailure:{message:String(error?.message ?? error),effectStarted}};
   }
 }
-
 
 async function pageInteract(args, deadlineMs, signal) {
   if (args?.action === 'activate_tab') {

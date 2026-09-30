@@ -77,6 +77,20 @@ let runtime = {js|function browserScene(args) {
     return tag === 'form' && (attribute(element,'aria-label') !== null
       || attribute(element,'aria-labelledby') !== null);
   };
+  // Only declared DOM semantics make a custom control actionable. A native
+  // label is itself an activation target, including a hidden radio's label.
+  const controlSelector = 'button,input:not([type=hidden]),textarea,select,summary,label,[contenteditable=true],[onclick],[role~=button],[role~=link],[role~=checkbox],[role~=radio],[role~=switch],[role~=menuitem],[role~=menuitemcheckbox],[role~=menuitemradio],[role~=tab],[role~=option],[role~=combobox]';
+  const labelledControl = element => {
+    const target=element.localName === 'label' ? element.control : null;
+    return target instanceof HTMLInputElement && ['checkbox','radio'].includes(target.type) ? target : null;
+  };
+  const disabledControl = element => {
+    const target = labelledControl(element) || element;
+    if (target.matches(':disabled')) return true;
+    for (let parent=target; parent; parent=parent.parentElement)
+      if (attribute(parent,'aria-disabled') === 'true') return true;
+    return false;
+  };
   const maxChars = args.maxChars;
   if (!Number.isSafeInteger(maxChars) || maxChars < 1 || maxChars > 100000)
     throw new Error('invalid_scene_max_chars');
@@ -265,16 +279,27 @@ let runtime = {js|function browserScene(args) {
     if (node.nodeType !== 1 || ['script','style','noscript','template'].includes(node.localName)
         || !rendered(node)) continue;
     const tag=node.localName;
-    const control=linkHref(node) !== null || node.matches('button,input:not([type=hidden]),textarea,select,[contenteditable=true],[role=button],[role=link]');
+    const control=linkHref(node) !== null || (node.matches(controlSelector)
+      && (tag !== 'label' || labelledControl(node) !== null));
     if (control && visible(node)) {
-      const label=node.getAttribute('aria-label') || node.getAttribute('placeholder') || node.innerText || svgVisibleText(node) || tag;
+      const labelledBy = (attribute(node,'aria-labelledby') || '').split(/\s+/).filter(Boolean)
+        .map(id => document.getElementById?.(id)?.textContent || '').join(' ').trim();
+      const nativeLabel = Array.from(node.labels || []).map(visibleText).filter(Boolean).join(' ');
+      const label=node.getAttribute('aria-label') || labelledBy || nativeLabel
+        || node.getAttribute('placeholder') || visibleText(node) || svgVisibleText(node) || tag;
       const input=node instanceof HTMLInputElement, textarea=node instanceof HTMLTextAreaElement;
+      const target=labelledControl(node) || node, disabled=disabledControl(node);
       const editable=(textarea || (input && ['text','search','email','url','tel','password','number'].includes(node.type)))
-        && !node.readOnly && !node.matches(':disabled');
+        && !node.readOnly && !disabled;
       describe('control',node,label,boxes(node.getClientRects(),node),{
         ...(linkHref(node) !== null ? {href:linkHref(node)} : {}),
-        controlType:input ? node.type : tag,disabled:node.matches(':disabled'),editable,
-        clickable:typeof node.click === 'function' && !node.matches(':disabled'),
+        controlType:input ? node.type : tag,disabled,editable,
+        role:attribute(node,'role'),
+        ...(target instanceof HTMLInputElement && ['checkbox','radio'].includes(target.type)
+          ? {checked:!!target.checked} : {}),
+        ...(['true','false','mixed'].includes(attribute(node,'aria-checked'))
+          ? {ariaChecked:attribute(node,'aria-checked')} : {}),
+        clickable:typeof node.click === 'function' && !disabled,
         headingLevel:headingLevel(node)});
       continue;
     }

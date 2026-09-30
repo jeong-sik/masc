@@ -18,7 +18,7 @@ let text_cap requested =
 ;;
 
 let elements = {|
-const nodes = Array.from(document.querySelectorAll('a[href],button,input:not([type=hidden]),textarea,select,[contenteditable=true],[role=button],[role=link]'));
+const nodes = Array.from(document.querySelectorAll('a[href],button,input:not([type=hidden]),textarea,select,summary,label,[contenteditable=true],[onclick],[role~=button],[role~=link],[role~=checkbox],[role~=radio],[role~=switch],[role~=menuitem],[role~=menuitemcheckbox],[role~=menuitemradio],[role~=tab],[role~=option],[role~=combobox]'));
 function selector(el) {
   const parts=[];
   for (let node=el; node && node.nodeType===1; node=node.parentElement) {
@@ -28,11 +28,30 @@ function selector(el) {
   }
   return parts.join(' > ');
 }
-const visible = nodes.filter(el=>el.getClientRects().length && getComputedStyle(el).visibility!=='hidden');
+const visible = nodes.filter(el=>el.getClientRects().length && getComputedStyle(el).visibility!=='hidden'
+  && (el.localName!=='label' || (el.control?.localName==='input' && ['checkbox','radio'].includes(el.control.type))));
+function disabled(el) {
+  const target=(el.localName==='label' && el.control) || el;
+  if (target.matches(':disabled')) return true;
+  for (let parent=target;parent;parent=parent.parentElement)
+    if (parent.getAttribute('aria-disabled')==='true') return true;
+  return false;
+}
+function name(el) {
+  const labelledBy=(el.getAttribute('aria-labelledby') || '').split(/\s+/).filter(Boolean)
+    .map(id=>document.getElementById(id)?.textContent || '').join(' ').trim();
+  const labels=Array.from(el.labels || []).map(label=>label.innerText || '').filter(Boolean).join(' ');
+  return el.getAttribute('aria-label') || labelledBy || labels || el.getAttribute('placeholder') || '';
+}
 function observe(el) {
   const result = {selector:selector(el),tag:el.localName,
-    role:el.getAttribute('role'),type:el.getAttribute('type'),name:el.getAttribute('aria-label') || el.getAttribute('placeholder') || '',
-    text:(el.innerText || '').slice(0,500),href:el.href || null,disabled:el.matches(':disabled')};
+    role:el.getAttribute('role'),type:el.getAttribute('type'),name:name(el),
+    text:(el.innerText || '').slice(0,500),href:el.href || null,disabled:disabled(el)};
+  const target=(el.localName==='label' && el.control) || el;
+  if (target.localName==='input' && ['checkbox','radio'].includes(target.type))
+    result.checked=!!target.checked;
+  if (['true','false','mixed'].includes(el.getAttribute('aria-checked')))
+    result.ariaChecked=el.getAttribute('aria-checked');
   if (el.localName==='input') {
     // Read the normalized DOM type: missing/unknown types behave as text inputs.
     result.type=el.type;

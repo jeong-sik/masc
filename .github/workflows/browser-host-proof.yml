@@ -39,6 +39,7 @@ on:
       - 'test/stanzas/test_browser_bidi_peer.inc'
       - 'test/test_browser_activation.py'
       - 'test/test_browser_scene.py'
+      - 'test/fixtures/browser-form-controls.html'
       # The two sources the scene probe reads out of the tree and runs in a
       # real Gecko. Without them a change to the scene runtime reached the
       # extension and the driver without this workflow ever starting.

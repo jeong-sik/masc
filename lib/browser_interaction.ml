@@ -245,7 +245,10 @@ let script = {js|function interactInPage(args) {
       element = elements[0];
     }
     if (!observable(element)) throw new Error("element_not_visible");
-    if (element.matches(":disabled")) throw new Error("element_disabled");
+    const activationTarget=(element.localName === 'label' && element.control) || element;
+    if (activationTarget.matches(":disabled")) throw new Error("element_disabled");
+    for (let parent=activationTarget; parent; parent=parent.parentElement)
+      if (parent.getAttribute?.('aria-disabled') === 'true') throw new Error("element_disabled");
     if (args.action === "click") {
       if (typeof element.click !== "function") throw new Error("element_not_clickable");
     effectStarted = true;

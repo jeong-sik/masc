@@ -661,7 +661,7 @@ let tools_display_lines ?(cols = 80) (state : state) =
                          in
                          let keepers =
                            item.sea_owner_claims
-                           |> List.map (fun claim -> claim.seo_keeper)
+                           |> List.map (fun claim -> claim.Masc.Tui_decode_skill_evidence.seo_keeper)
                            |> String.concat ","
                          in
                          [ Ansi.bold,

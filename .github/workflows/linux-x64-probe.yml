@@ -74,7 +74,7 @@ jobs:
         if: always() && inputs.capture_item_http
         uses: actions/upload-artifact@v7
         with:
-          name: item-http-${{ github.sha }}
+          name: item-http-${{ github.sha }}-attempt-${{ github.run_attempt }}
           path: |
             ${{ runner.temp }}/item-http-evidence/http-evidence.json
             ${{ runner.temp }}/item-http-evidence/account.json

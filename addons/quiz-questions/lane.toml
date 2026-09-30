@@ -1,8 +1,8 @@
 id = "quiz-questions"
-revision = "0.1.0"
+revision = "0.1.2"
 title = "Questions asked from retained records"
 contributions = ["derive"]
-image = "masc-lane-quiz-questions:0.1.0"
+image = "masc-lane-quiz-questions:0.1.2"
 command = ["python3", "server.py"]
 
 [world.outputs.questions]

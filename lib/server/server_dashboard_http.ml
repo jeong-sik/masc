@@ -798,15 +798,18 @@ let dashboard_bootstrap_http_json
     (* Share the standalone /api/v1/dashboard/planning cache (same key + ttl) so
        a page that loads bootstrap and the planning panel computes the planning
        slice once. Previously bootstrap called the compute path directly,
-       bypassing Dashboard_cache and re-reading goals/backlog on every load. *)
+       bypassing Dashboard_cache and re-reading goals/backlog on every load.
+       The entry is filled as a payload, as the route fills it: a JSON-only
+       fill would leave the route's read to serialize it on the executor. *)
     slice "planning" (fun () ->
       let cache_key =
         Printf.sprintf "planning:%s" (Mcp_server.workspace_config state).base_path
       in
-      Dashboard_cache.get_or_compute cache_key
-        ~ttl:Server_dashboard_http_core_cache.standard_cache_ttl_s (fun () ->
-          Domain_pool_ref.submit_io_or_inline (fun () ->
-            dashboard_planning_http_json ~config:(Mcp_server.workspace_config state))))
+      (Dashboard_cache.get_or_compute_payload cache_key
+         ~ttl:Server_dashboard_http_core_cache.standard_cache_ttl_s (fun () ->
+           Domain_pool_ref.submit_io_or_inline (fun () ->
+             dashboard_planning_http_json ~config:(Mcp_server.workspace_config state))))
+        .json)
   in
   let namespace_truth =
     slice "namespace_truth" (fun () ->
@@ -849,7 +852,7 @@ let warm_dashboard_surfaces (state : Mcp_server.server_state) =
       let cache_key = Printf.sprintf "planning:%s" base_path in
       (* fire-and-forget: pre-warm planning cache *)
       ignore
-        (Dashboard_cache.get_or_compute cache_key
+        (Dashboard_cache.get_or_compute_payload cache_key
            ~ttl:Server_dashboard_http_core_cache.standard_cache_ttl_s (fun () ->
              Domain_pool_ref.submit_io_or_inline (fun () ->
                dashboard_planning_http_json ~config)));
@@ -863,7 +866,7 @@ let warm_dashboard_surfaces (state : Mcp_server.server_state) =
       let t_start = Time_compat.now () in
       (* fire-and-forget: pre-warm config cache *)
       ignore
-        (Dashboard_cache.get_or_compute "config_introspect"
+        (Dashboard_cache.get_or_compute_payload "config_introspect"
            ~ttl:Server_dashboard_http_core_cache.config_cache_ttl_s
            Env_config_introspect.to_json);
       Log.Dashboard.info "config surface pre-warmed (%.1fms)" ((Time_compat.now () -. t_start) *. 1000.0)
@@ -877,7 +880,7 @@ let warm_dashboard_surfaces (state : Mcp_server.server_state) =
       let cache_key = Printf.sprintf "keeper_memory_health:%s" base_path in
       (* fire-and-forget: pre-warm keeper-memory-health cache *)
       ignore
-        (Dashboard_cache.get_or_compute cache_key
+        (Dashboard_cache.get_or_compute_payload cache_key
            ~ttl:Server_dashboard_http_core_cache.standard_cache_ttl_s (fun () ->
              Domain_pool_ref.submit_io_or_inline (fun () ->
                Server_dashboard_http_keeper_memory_health.keeper_memory_health_http_json ~base_path)));

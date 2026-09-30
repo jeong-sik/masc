@@ -265,6 +265,61 @@ let test_unkeyed_output_is_not_replaced_by_a_role_match () =
     (Tui_types.transcript_replaces_session_output ~fresh:[memory] memory)
 ;;
 
+let test_keeper_revisit_restores_read_pages_and_paging_authority () =
+  let state = fresh_state () in
+  state.msg_loaded <-
+    [entry_at ~request_id:"alpha-old" 1.; entry_at ~request_id:"alpha-tail" 2.];
+  state.msg_older_cursor <- Some 1.;
+  state.msg_older_exist <- true;
+  state.msg_loaded_dropped <- 2;
+  state.msg_memory_dropped <- 1;
+  state.msg_older_error <- Some "older page temporarily unavailable";
+  state.msg_older_loading <- true;
+  let alpha_rows = state.msg_loaded in
+  let old_generation = state.msg_history_load_generation in
+  Tui_types.restore_keeper_chat_page state "beta";
+  Alcotest.(check int) "first visit has no rows from another Keeper" 0
+    (List.length (Tui_types.chat_rows_for state "beta"));
+  Alcotest.(check bool) "outgoing pagination request is not still loading" false
+    state.msg_older_loading;
+  state.msg_loaded_keeper <- Some "beta";
+  state.msg_loaded <- [entry_at ~keeper:"beta" 10.];
+  state.msg_older_cursor <- Some 10.;
+  state.msg_older_exist <- false;
+  Tui_types.restore_keeper_chat_page state "alpha";
+  Alcotest.(check bool) "revisit restores the entire page reading" true
+    (state.msg_loaded == alpha_rows);
+  Alcotest.(check (option (float 0.001))) "exact older cursor returns"
+    (Some 1.) state.msg_older_cursor;
+  Alcotest.(check bool) "previous paging availability returns" true state.msg_older_exist;
+  Alcotest.(check int) "unreadable history count stays attached to alpha" 2
+    state.msg_loaded_dropped;
+  Alcotest.(check int) "unreadable memory count stays attached to alpha" 1
+    state.msg_memory_dropped;
+  Alcotest.(check (option string)) "older page failure remains visible"
+    (Some "older page temporarily unavailable") state.msg_older_error;
+  Alcotest.(check bool) "late requests from the first alpha visit are invalid" true
+    (state.msg_history_load_generation > old_generation);
+  (* A failed refresh updates its failure notice and keeps the restored read.
+     Switching away again must preserve that same reading and its notice. *)
+  state.msg_loaded_error <- Some "server unavailable on revisit";
+  Tui_types.restore_keeper_chat_page state "beta";
+  Alcotest.(check (list string)) "beta keeps its own read" ["row at 10"]
+    (texts (Tui_types.chat_rows_for state "beta"));
+  Alcotest.(check bool) "beta's exhausted older window stays exhausted" false
+    state.msg_older_exist;
+  Tui_types.restore_keeper_chat_page state "alpha";
+  Alcotest.(check (list string)) "outage does not erase previously read older rows"
+    ["row at 1"; "row at 2"] (texts (Tui_types.chat_rows_for state "alpha"));
+  Alcotest.(check (option string)) "outage remains visible on that Keeper"
+    (Some "server unavailable on revisit") state.msg_loaded_error;
+  let fresh = [entry_at ~request_id:"alpha-tail" 2.; entry_at ~request_id:"alpha-new" 3.] in
+  state.msg_loaded <- Tui_types.merge_paged_history ~paged:state.msg_loaded ~fresh;
+  Alcotest.(check (list string)) "recovery merges new rows and retains older pages"
+    ["row at 1"; "row at 2"; "row at 3"]
+    (texts (Tui_types.chat_rows_for state "alpha"))
+;;
+
 let () =
   Alcotest.run
     "tui chat rows memo"
@@ -275,6 +330,8 @@ let () =
             test_refresh_preserves_output_until_its_replacement_arrives;
           Alcotest.test_case "unkeyed output requires row identity" `Quick
             test_unkeyed_output_is_not_replaced_by_a_role_match;
+          Alcotest.test_case "Keeper revisit preserves read pages through outage" `Quick
+            test_keeper_revisit_restores_read_pages_and_paging_authority;
           Alcotest.test_case "replaced loaded page is seen" `Quick
             test_replaced_loaded_page_is_seen;
           Alcotest.test_case "replaced session rows are seen" `Quick

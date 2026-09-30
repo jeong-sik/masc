@@ -932,85 +932,15 @@ let add_routes ~sw ~clock router =
            req
            reqd
            (fun reaction_actor ->
-         let hearth = query_param req "hearth" in
-         let sort_by = board_sort_order_of_request req in
-         let exclude_system = bool_query_param req "exclude_system" ~default:false in
-         let exclude_automation =
-           bool_query_param req "exclude_automation" ~default:false
-         in
-         let author_query =
-           query_param req "author"
-           |> Option.map String.trim
-           |> Fun.flip Option.bind (fun s -> if s = "" then None else Some s)
-         in
-         let author_filter =
-           Option.map board_actor_author_for_write author_query
-         in
-         let limit = int_query_param req "limit" ~default:50 |> clamp ~min_v:1 ~max_v:200 in
-         let offset = int_query_param req "offset" ~default:0 |> clamp ~min_v:0 ~max_v:5000 in
-         let base_fetch = board_fetch_limit ~exclude_system ~exclude_automation ~limit ~offset in
-         let voter = board_voter_query req in
-         let cache_key =
-           let cache_part = function
-             | Some value -> value
-             | None -> ""
-           in
-           Printf.sprintf "board:list:%s:%s:%s:%b:%b:%s:%d:%d:%s:%s"
-             config.base_path
-             (cache_part hearth)
-             (board_sort_label sort_by)
-             exclude_system exclude_automation
-             (cache_part author_query)
-             limit offset (cache_part voter) (cache_part reaction_actor)
-         in
-         let json =
-           Dashboard_cache.get_or_compute cache_key
-             ~ttl:Server_dashboard_http_core_cache.realtime_cache_ttl_s
-             (fun () ->
-                Domain_pool_ref.submit_io_or_inline (fun () ->
-                  let posts =
-                    Board_dispatch.list_posts ?hearth ~sort_by ~exclude_system
-                      ~exclude_automation ?author_filter ~limit:base_fetch ()
-                  in
-                  let karma_map = Board_dispatch.get_all_karma () in
-                  let get_karma author =
-                    match List.assoc_opt author karma_map with
-                    | Some karma -> karma
-                    | None -> 0
-                  in
-                  let paged = posts |> drop offset |> take limit in
-                  let reaction_rows =
-                    board_reactions_batch
-                      ~targets:
-                        (List.map
-                           (fun (p : Board.post) ->
-                              (Board.Reaction_post, Board.Post_id.to_string p.id))
-                           paged)
-                      ~voter:reaction_actor
-                  in
-                  let reactions_for = board_reactions_lookup reaction_rows in
-                  let posts_json =
-                    List.map
-                      (fun (p : Board.post) ->
-                         let author = Board.Agent_id.to_string p.author in
-                         let post_id = Board.Post_id.to_string p.id in
-                         let current_vote = board_current_vote_for_post ~voter ~post_id in
-                         let reactions = reactions_for (Board.Reaction_post, post_id) in
-                         board_post_dashboard_json
-                           ~reactions
-                           ?current_vote
-                           ~author_karma:(get_karma author) p)
-                      paged
-                  in
-                  `Assoc [
-                    ("posts", `List posts_json);
-                    ("count", `Int (List.length posts_json));
-                    ("limit", `Int limit);
-                    ("offset", `Int offset);
-                    ("sort_by", `String (board_sort_label sort_by));
-                  ]))
-         in
-         Http.Response.json_value json reqd)
+              let payload =
+                Server_board_list_http.payload ~config ~reaction_actor req
+              in
+              let status =
+                if Dashboard_cache.is_timeout_envelope payload.json
+                then `Gateway_timeout else `OK
+              in
+              Http.Response.json_lazy ~status ~request:req ~etag:payload.etag
+                (fun () -> payload.raw_json) reqd)
        ) request reqd)
 
   |> Http.Router.get "/api/v1/board/reactions/catalog" (fun request reqd ->

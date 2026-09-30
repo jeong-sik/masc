@@ -10,11 +10,12 @@ type expiry =
   | Never  (** No [expires_at] — minted with [--no-expiry]. *)
   | Valid_until of string  (** Expires, and has not yet. *)
   | Expired_at of string  (** The stamp has passed; the credential authenticates nothing. *)
+  | Invalid_expiry of string  (** Malformed expiry; denied by auth and excluded from prune. *)
 
 val classify : now:float -> Types_auth.agent_credential -> expiry
-(** An unparseable [expires_at] classifies as {!Valid_until}, not as expired: a
-    stamp nothing can read is not evidence a credential is dead, and reading it
-    as dead would let a prune delete a working token. *)
+(** Uses the credential domain's whole-second expiry rule, including timezone
+    offsets and fractional timestamps. Malformed values are explicit errors,
+    never live or eligible for automatic prune. *)
 
 val is_expired : expiry -> bool
 

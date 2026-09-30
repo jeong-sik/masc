@@ -61,5 +61,8 @@ val pads_dir : base_path:string -> string
 
 val load : base_path:string -> saves_name:string -> ((source * layout) option, string) result
 (** The layout for the program loaded under [saves_name]: the workspace file
-    when there is one, else the builtin one, else [None]. A workspace file
-    that does not parse is an error, not a reason to use the builtin. *)
+    when there is one, else the builtin one, else [None]. Only a genuinely
+    absent workspace path permits fallback. An unreadable path, dangling link,
+    non-regular file or malformed layout is an error. A symlink to a readable
+    regular file remains a workspace override. The opened descriptor is checked
+    before reading; a FIFO is never accepted as layout contents. *)

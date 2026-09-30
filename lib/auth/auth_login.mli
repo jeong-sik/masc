@@ -2,22 +2,21 @@
     [masc login].
 
     Single mint entry point ({!mint}) that:
-    1. Initialises the Mirage RNG idempotently.
+    1. Admits the current credential and raw-token ownership.
     2. Ensures the auth config has bearer auth required (creating
        it when absent, flipping [require_token] when not yet on).
-    3. Mints a bearer token via {!Auth.create_token} (or the
-       no-expiry variant when [~token_lifetime] is [`Long_lived]).
-    4. Persists the raw token to a per-agent file under
-       [<base_path>/.masc/auth/<agent_name>.token].
+    3. Mints a bearer and publishes its credential and raw token via
+       {!Auth.create_file_backed_login_token} under one credential transaction,
+       using the explicit token lifetime.
+    4. Uses {!Auth.raw_token_file} for the persisted token path.
     5. Renders dashboard / MCP URLs using URL-encoded query params.
     6. Returns a {!t} record carrying every field needed by the
        three render functions ({!to_yojson}, {!render_shell},
        {!render_text}).
 
-    All internal helpers (URL encoding, shell quoting, RNG init,
-    config-flip, token persistence) stay private — the four entry
-    points cover every documented [masc login] consumer (CLI,
-    JSON API, shell-export).
+    URL encoding and shell quoting stay private. Auth owns the admitted
+    configuration and token publication operation. These entry points serve
+    the documented [masc login] consumers (CLI, JSON API, shell-export).
 
     The server is client-agnostic: the caller (CLI / API consumer)
     supplies the env var name ([~token_env_var]) and the
@@ -27,7 +26,7 @@
 
 (** {1 Auth configuration change taxonomy} *)
 
-type auth_change =
+type auth_change = Auth.login_auth_change =
   | Auth_already_required
         (** Bearer auth was already enabled with [require_token]. *)
   | Auth_enabled
@@ -95,7 +94,9 @@ type t = {
 val read_persisted_token :
   base_path:string -> agent_name:string -> string option
 (** The bearer [masc login] persisted for [agent_name] in this workspace, or
-    [None] when the file is absent or empty. Token persistence is otherwise
+    [None] when the file is absent, nonregular, unreadable or blank. Nonblank
+    bearer bytes are preserved exactly; cancellation propagates. Reading and
+    path selection use {!Auth.load_raw_token}. Token persistence is otherwise
     private to this module; the reader is exposed because a local client
     should find its own credential where login wrote it rather than require
     the operator to re-export it into every shell. *)
@@ -127,9 +128,8 @@ val mint :
       decides.
 
     {2 Side effects}
-    - Initialises Mirage's default RNG on first call (idempotent
-      via an internal [Atomic.t] flag — safe across concurrent
-      invocations).
+    - Holds Auth credential admission across target validation, bootstrap
+      configuration and both token files.
     - Mutates the auth config under [base_path] to enable bearer
       auth + [require_token] when not already on. The reported
       {!auth_change} reflects which transition occurred.
@@ -138,11 +138,14 @@ val mint :
       permissions (delegated to {!Auth.save_private_text_file}).
 
     {2 Errors}
-    Returns [Error err] when {!Auth.create_token} fails (typically
+    Returns [Error err] when {!Auth.create_file_backed_login_token} fails (typically
     because [agent_name] does not match the auth-config schema or
     because the role is unauthorised at this base_path). The
     {!Masc_error.t} carries the operator-visible message that the
     CLI / API caller renders into the JSON-RPC error envelope.
+    Publication failures report the observed raw-token and credential state;
+    the operation does not claim to roll back partially written files or login
+    bootstrap config changes. Unreadable target ownership refuses before either.
 
     {2 base_path normalisation}
     [base_path] is normalised through

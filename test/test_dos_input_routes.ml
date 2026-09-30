@@ -4,6 +4,11 @@
 
 open Alcotest
 
+let seats ~base_path =
+  match Masc.Play_seat.participants ~base_path ~keepers:[] ~now:(Time_compat.now ()) with
+  | Ok names -> names
+  | Error error -> fail (Masc_domain.masc_error_to_string error)
+
 let remove_tree path =
   let rec go path =
     if (Unix.lstat path).Unix.st_kind = Unix.S_DIR then begin
@@ -225,7 +230,7 @@ let test_expired_credential_releases_controller_on_next_move role () =
                (status_of (post ~token:operator "/api/v1/dos/pass" {|{"to":"minsu"}|}))
            | Masc_domain.Worker ->
              check bool "a live Worker is not a handoff target" false
-               (List.mem "minsu" (Masc.Play_seat.participants ~base_path ~keepers:[] ~now:(Time_compat.now ())));
+               (List.mem "minsu" (seats ~base_path));
              check int "the operator frees the controller" 200
                (status_of (post ~token:operator "/api/v1/dos/pass" {|{}|}));
              check (option string) "the controller is free" None (controller ());
@@ -247,8 +252,11 @@ let test_expired_credential_releases_controller_on_next_move role () =
             | None -> fail "the fixed expiry did not parse"
           in
           let holder_left ~now =
-            Masc.Keeper_dos_controller.holder_left
-              ~config:(Masc.Mcp_server.workspace_config state) ~now "minsu"
+            match Auth.with_credential_transaction base_path (fun transaction ->
+              Masc.Keeper_dos_controller.holder_left ~transaction
+                ~config:(Masc.Mcp_server.workspace_config state) ~now "minsu") with
+            | Ok departure -> departure
+            | Error error -> fail (Masc_domain.masc_error_to_string error)
           in
           check bool "the holder is still eligible during its expiry second" true
             (Option.is_none (holder_left ~now:(expiry_second +. 0.5)));
@@ -262,7 +270,7 @@ let test_expired_credential_releases_controller_on_next_move role () =
           check int "the router rejects the expired bearer" 401
             (status_of (post ~token:holder_token "/api/v1/dos/step" {|{"steps":1,"until_ready":false}|}));
           check bool "the expired credential is absent from handoff targets" false
-            (List.mem "minsu" (Masc.Play_seat.participants ~base_path ~keepers:[] ~now:(Time_compat.now ())));
+            (List.mem "minsu" (seats ~base_path));
           check int "a stale handoff to the expired holder is refused" 400
             (status_of (post ~token:operator "/api/v1/dos/pass" {|{"to":"minsu"}|}));
           check (option string) "refusing the stale target leaves ownership unchanged"

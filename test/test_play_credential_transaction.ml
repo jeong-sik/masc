@@ -167,6 +167,107 @@ let renew_as_admin config = auth_ok
     (Auth.create_token_expiring_in config.Workspace.base_path
        ~agent_name:"player" ~role:Masc_domain.Admin ~hours:1)
 
+let issue config =
+  let name = match Play_invite.Name.of_string "player" with
+    | Ok name -> name | Error detail -> fail detail in
+  Play_invite.issue ~base_path:config.Workspace.base_path
+    ~public_base_url:(Some "https://play.example.test") ~keeper_names:(Ok []) ~name ~hours:1
+
+let test_renewal_before_issue_preserves_current_credential () =
+  with_machine @@ fun config old_token _ ->
+  Auth.delete_credential config.base_path "player";
+  ignore (Auth.find_static_credential_by_token config.base_path ~token:old_token);
+  let (admin_token, admin), invitation = interleave config
+      (fun () -> renew_as_admin config) (fun () -> issue config) in
+  (match invitation with
+   | Error (Play_invite.Name_taken Play_invite.Credential) -> ()
+   | Ok _ | Error _ -> fail "a queued invitation must refuse the newly published Admin name");
+  let current = auth_ok (Auth.find_static_credential_by_token config.base_path ~token:admin_token) in
+  check string "the Admin bearer, not a replacement Player, owns the name"
+    "admin" (Masc_domain.agent_role_to_string current.role);
+  check string "the exact published credential survives" admin.token current.token;
+  check (option string) "issue refusal does not release the turn" (Some "player") (controller ())
+
+let test_competing_issues_publish_only_one_invite () =
+  with_machine @@ fun config _ _ ->
+  Auth.delete_credential config.base_path "player";
+  let first, second = interleave config (fun () -> issue config) (fun () -> issue config) in
+  let issued = match first with
+    | Ok issued -> issued | Error _ -> fail "the admitted invitation must be published" in
+  (match second with
+   | Error (Play_invite.Name_taken Play_invite.Credential) -> ()
+   | Ok _ | Error _ -> fail "the second invitation must refuse the occupied name");
+  let token = match String.index_opt issued.link '#' with
+    | Some offset -> String.sub issued.link (offset + 1) (String.length issued.link - offset - 1)
+    | None -> fail "the invitation link must contain its bearer" in
+  check string "the first invite's bearer still authenticates" "player"
+    (auth_ok (Auth.find_static_credential_by_token config.base_path ~token)).agent_name
+
+let unreadable_name_fixtures =
+  [ "invalid JSON", (fun path -> Out_channel.with_open_text path (fun channel -> output_string channel "{"))
+  ; "missing redirect target", (fun path -> Out_channel.with_open_text path
+      (fun channel -> output_string channel {|{"redirect_to":"absent.json"}|}))
+  ; "dangling symlink", (fun path -> Unix.unlink path; Unix.symlink (path ^ ".absent") path)
+  ; "directory", (fun path -> Unix.unlink path; Unix.mkdir path 0o700)
+  ]
+
+let test_unreadable_revoke_preserves_effects () =
+  List.iter (fun (label, corrupt) ->
+    with_machine @@ fun config _ _ ->
+    let path = Auth.credential_file config.base_path "player" in
+    corrupt path;
+    let name = match Play_invite.Name.of_string "player" with
+      | Ok name -> name | Error detail -> fail detail in
+    let callback_ran = ref false in
+    (match Play_invite.revoke ~base_path:config.base_path ~name
+        ~after_revoke:(fun _ -> callback_ran := true) with
+     | Error Play_invite.Credential_unreadable -> ()
+     | Ok () | Error _ -> fail (label ^ ": an unreadable name must be refused"));
+    check bool (label ^ ": no callback") false !callback_ran;
+    let status, body = revoke config in
+    check_status `Service_unavailable (status, body);
+    check string (label ^ ": explicit route error") "credential_unreadable"
+      Yojson.Safe.Util.(member "code" body |> to_string);
+    check (option string) (label ^ ": the turn survives") (Some "player") (controller ());
+    ignore (Unix.lstat path)) unreadable_name_fixtures
+
+let test_unreadable_recovery_preserves_controller () =
+  List.iter (fun (label, corrupt) ->
+    with_machine @@ fun config _ _ ->
+    let path = Auth.credential_file config.base_path "player" in
+    corrupt path;
+    recovered (recover config);
+    check (option string) (label ^ ": recovery keeps the ambiguous holder")
+      (Some "player") (controller ());
+    (match Dos_lane.step ~who:"operator" ~steps:1 ~until_ready:false with
+     | Error (Dos_lane.Held_by _) -> ()
+     | Error error -> fail (Dos_lane.error_to_string error)
+     | Ok _ -> fail (label ^ ": another participant moved after ambiguous recovery"));
+    ignore (Unix.lstat path)) unreadable_name_fixtures
+
+let test_mismatched_revoke_preserves_effects () =
+  List.iter (fun role ->
+    with_machine @@ fun config _ credential ->
+    let path = Auth.credential_file config.base_path "player" in
+    let mismatched = { credential with agent_name = "other"; role } in
+    let json = Masc_domain.agent_credential_to_yojson mismatched |> Yojson.Safe.to_string in
+    Out_channel.with_open_text path (fun channel -> output_string channel json);
+    let name = match Play_invite.Name.of_string "player" with
+      | Ok name -> name | Error detail -> fail detail in
+    let callback_ran = ref false in
+    (match Play_invite.revoke ~base_path:config.base_path ~name
+        ~after_revoke:(fun _ -> callback_ran := true) with
+     | Error (Play_invite.Credential_identity_mismatch "other") -> ()
+     | Ok () | Error _ -> fail "a name resolving to another owner must be refused");
+    check bool "a mismatched identity invokes no callback" false !callback_ran;
+    let status, body = revoke config in
+    check_status `Service_unavailable (status, body);
+    check string "the route reports identity ambiguity" "credential_identity_mismatch"
+      Yojson.Safe.Util.(member "code" body |> to_string);
+    check string "the mismatched credential is not deleted" json (In_channel.with_open_text path In_channel.input_all);
+    check (option string) "the held turn is not released" (Some "player") (controller ()))
+    [ Masc_domain.Player; Masc_domain.Worker; Masc_domain.Admin ]
+
 let test_renewal_before_revoke_preserves_current_role () =
   List.iter (fun initially_present ->
     with_machine @@ fun config _ _ ->
@@ -337,6 +438,11 @@ let () =
       ; test_case "cold index publication cannot undo renewal" `Quick test_cold_index_cannot_restore_credentials_after_renewal
       ; test_case "a cancelled delete releases admission" `Quick test_cancelled_delete_leaves_credential_and_releases_admission
       ; test_case "renewal before revoke preserves the current role" `Quick test_renewal_before_revoke_preserves_current_role
+      ; test_case "renewal before issue preserves the current credential" `Quick test_renewal_before_issue_preserves_current_credential
+      ; test_case "competing issues publish one invitation" `Quick test_competing_issues_publish_only_one_invite
+      ; test_case "unreadable revoke preserves callbacks and controller" `Quick test_unreadable_revoke_preserves_effects
+      ; test_case "unreadable recovery preserves the controller" `Quick test_unreadable_recovery_preserves_controller
+      ; test_case "mismatched revoke preserves callbacks and controller" `Quick test_mismatched_revoke_preserves_effects
       ; test_case "revoke finishes before a renewed turn" `Quick test_revoke_before_renewal_finishes_its_controller_effect
       ; test_case "revoke callback excludes renewal after deletion" `Quick test_revoke_callback_holds_credential_admission
       ; test_case "revoke preserves a credentialless Keeper" `Quick test_revoke_preserves_a_credentialless_keeper

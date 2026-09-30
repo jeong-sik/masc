@@ -122,11 +122,33 @@ let test_list_marks_expiry () =
     let _ = Auth.create_token base_path ~agent_name:"codex" ~role:Masc_domain.Worker in
     let now = Unix.gettimeofday () in
     let listed at =
-      List.map (fun { I.invite_name; expired; _ } -> invite_name, expired) (I.list ~base_path ~now:at)
+      match I.list ~base_path ~now:at with
+      | Ok invites -> List.map (fun { I.invite_name; expired; _ } -> invite_name, expired) invites
+      | Error (I.Invalid_expiry (Masc_domain.Credential_expiry.Invalid_timestamp stamp)) -> fail ("invalid expiry: " ^ stamp)
+      | Error (I.Credentials_unavailable error) -> fail (Masc_domain.masc_error_to_string error)
     in
     check (list (pair string bool)) "only players, live" [ "minsu", false ] (listed now);
     check (list (pair string bool)) "expired two hours on" [ "minsu", true ]
       (listed (now +. (2. *. 3600.))))
+
+let test_unreadable_names_remain_occupied () =
+  with_workspace (fun base_path ->
+    ready base_path;
+    (* Create the store, then replace only this name's file. A corrupt file,
+       dangling link or directory is not permission to hand the name out. *)
+    ignore (Auth.create_token base_path ~agent_name:"minsu" ~role:Masc_domain.Player);
+    let path = Auth.credential_file base_path "minsu" in
+    Out_channel.with_open_text path (fun channel -> output_string channel "{");
+    refused "invalid JSON still owns the name" "name_taken credential" (issue base_path "minsu");
+    check string "the corrupt file stays untouched" "{" (In_channel.with_open_text path In_channel.input_all);
+    Unix.unlink path;
+    Unix.symlink (path ^ ".absent") path;
+    refused "a dangling symlink owns the name" "name_taken credential" (issue base_path "minsu");
+    check string "the dangling link stays untouched" (path ^ ".absent") (Unix.readlink path);
+    Unix.unlink path;
+    Unix.mkdir path 0o700;
+    refused "a directory owns the name" "name_taken credential" (issue base_path "minsu");
+    check bool "the directory stays untouched" true ((Unix.lstat path).Unix.st_kind = Unix.S_DIR))
 
 let test_revoke () =
   with_workspace (fun base_path ->
@@ -156,6 +178,7 @@ let () =
         ; test_case "a taken name, an unlisted fleet or a bad window is refused" `Quick
             test_a_taken_name_is_refused
         ; test_case "the list shows players and their expiry" `Quick test_list_marks_expiry
+        ; test_case "unreadable names remain occupied" `Quick test_unreadable_names_remain_occupied
         ; test_case "revoke deletes only an invite" `Quick test_revoke
         ] )
     ]

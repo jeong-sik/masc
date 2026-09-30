@@ -209,6 +209,41 @@ let is_file_component name =
   && String.equal (Filename.basename name) name
   && not (String.contains name '.')
 
+let workspace_file_error path detail =
+  Printf.sprintf "workspace pad layout %s: %s" path detail
+
+let read_regular_workspace_file path =
+  (* The path was regular when examined. NONBLOCK also avoids waiting for a
+     writer if it is replaced by a FIFO before open; fstat checks what was
+     actually opened, before any contents are read. *)
+  try
+    let fd = Unix.openfile path [Unix.O_RDONLY; Unix.O_NONBLOCK; Unix.O_CLOEXEC] 0 in
+    let channel = Unix.in_channel_of_descr fd in
+    Fun.protect ~finally:(fun () -> close_in_noerr channel) (fun () ->
+      match (Unix.fstat fd).Unix.st_kind with
+      | Unix.S_REG -> Ok (In_channel.input_all channel)
+      | Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK ->
+        Error (workspace_file_error path "not a regular file"))
+  with
+  | Unix.Unix_error (error, _, _) -> Error (workspace_file_error path (Unix.error_message error))
+  | Sys_error detail -> Error (workspace_file_error path detail)
+
+let workspace_contents path =
+  (* Failed stat is not absence. A dangling leaf link also gives ENOENT to
+     stat, but lstat still sees the explicitly supplied workspace override. *)
+  match Unix.stat path with
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
+    (match Unix.lstat path with
+     | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
+     | exception Unix.Unix_error (error, _, _) ->
+       Error (workspace_file_error path (Unix.error_message error))
+     | (_ : Unix.stats) -> Error (workspace_file_error path "link target does not exist"))
+  | exception Unix.Unix_error (error, _, _) ->
+    Error (workspace_file_error path (Unix.error_message error))
+  | {Unix.st_kind=Unix.S_REG;_} -> Result.map Option.some (read_regular_workspace_file path)
+  | {Unix.st_kind=Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK;_} ->
+    Error (workspace_file_error path "not a regular file")
+
 let load ~base_path ~saves_name =
   if not (is_file_component saves_name) then
     Error (Printf.sprintf "%S is not an inventory name" saves_name)
@@ -220,11 +255,10 @@ let load ~base_path ~saves_name =
                               (source_to_string source) saves_name message)
            (parse contents))
     in
-    if Sys.file_exists path then
-      match In_channel.with_open_bin path In_channel.input_all with
-      | contents -> parsed Workspace contents
-      | exception Sys_error message -> Error message
-    else
+    match workspace_contents path with
+    | Error message -> Error message
+    | Ok (Some contents) -> parsed Workspace contents
+    | Ok None ->
       match List.assoc_opt saves_name builtin_layouts with
       | Some contents -> parsed Builtin contents
       | None -> Ok None

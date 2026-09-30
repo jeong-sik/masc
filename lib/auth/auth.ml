@@ -11,9 +11,7 @@ include Auth_credential_token
 let ensure_keeper_credential config ~agent_name
   : (string * agent_credential, masc_error) result
   =
-  ignore (ensure_internal_keeper_token config);
-  let existing = load_credential config agent_name in
-  let create_fresh_keeper_token () =
+  let create_fresh_keeper_token transaction existing =
     let raw_token = generate_token () in
     let id, agent_id =
       match existing with
@@ -34,28 +32,30 @@ let ensure_keeper_credential config ~agent_name
       ; expires_at = None
       }
     in
-    persist_raw_token config ~agent_name raw_token;
-    save_credential config cred;
-    raw_token, cred
+    publish_file_backed_credential_in_transaction transaction cred ~raw_token
+    |> Result.map_error file_backed_publication_error
+    |> Result.map (fun () -> raw_token, cred)
   in
-  let result =
-    try
-      match load_raw_token config ~agent_name with
-      | Some raw_token ->
-        (match verify_token config ~agent_name ~token:raw_token with
-         | Ok cred when String.equal cred.agent_name agent_name -> Ok (raw_token, cred)
-         | Ok _ | Error _ -> Ok (create_fresh_keeper_token ()))
-      | None -> Ok (create_fresh_keeper_token ())
-    with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn ->
-      let msg =
-        Printf.sprintf "Failed to save keeper credential: %s" (Printexc.to_string exn)
-      in
-      Log.Auth.error "%s" msg;
-      Error (System (System_error.IoError msg))
-  in
-  result
+  with_credential_transaction config (fun transaction ->
+    let ( let* ) = Result.bind in
+    let* current = current_credential_in_transaction transaction agent_name in
+    let* raw = raw_token_in_transaction transaction agent_name in
+    let* () = match current, raw with
+      | Some credential, Some raw_token
+        when constant_time_string_equal credential.token (sha256_hash raw_token) ->
+          validate_file_backed_bearer raw_token
+      | Some _, Some _ | Some _, None | None, Some _ | None, None -> Ok () in
+    let* _internal = credential_read_result (fun () -> ensure_internal_keeper_token config) in
+    match current, raw with
+    | Some credential, Some raw_token
+      when constant_time_string_equal credential.token (sha256_hash raw_token) ->
+      (match require_live_credential ~now:(Time_compat.now ()) credential with
+       | Ok credential -> Ok (raw_token, credential)
+       | Error (Auth (Auth_error.TokenExpired _)) -> create_fresh_keeper_token transaction current
+       | Error _ as error -> error)
+    | Some _, Some _ | Some _, None | None, Some _ | None, None ->
+      create_fresh_keeper_token transaction current)
+  |> Result.join
 ;;
 
 type credential_status =
@@ -97,14 +97,9 @@ let verify_workspace_secret config ~cached_hash secret : bool =
   match cached_hash with
   | Some stored_hash -> constant_time_string_equal hash stored_hash
   | None ->
-    let file = workspace_secret_file config in
-    (try
-       if Sys.file_exists file
-       then constant_time_string_equal hash (String.trim (In_channel.with_open_text file In_channel.input_all))
-       else false
-     with
-     | Eio.Cancel.Cancelled _ as e -> raise e
-     | _ -> false)
+    (match read_regular_auth_file (workspace_secret_file config) with
+     | Error _ -> false
+     | Ok content -> constant_time_string_equal hash (String.trim content))
 ;;
 
 let check_permission config ~agent_name ~token ~permission : (unit, masc_error) result =
@@ -267,18 +262,6 @@ let authorize_tool_v2 config ~agent_name ~token ~tool_name : (unit, masc_error) 
 (* ============================================ *)
 (* Workspace secret                                  *)
 (* ============================================ *)
-
-(** Initialize workspace secret *)
-let init_workspace_secret config : string =
-  ensure_auth_dirs config;
-  let secret = generate_token () in
-  let hash = sha256_hash secret in
-  save_private_text_file (workspace_secret_file config) hash;
-  (* Update auth config with hash *)
-  let cfg = load_auth_config config in
-  save_auth_config config { cfg with workspace_secret_hash = Some hash };
-  secret (* Return raw secret to show user once *)
-;;
 
 (* [verify_workspace_secret] now lives earlier in this file, above
    [check_permission], since the bootstrap/recovery grace branch there

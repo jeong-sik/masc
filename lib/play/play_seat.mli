@@ -6,10 +6,13 @@ val keeper_names : Workspace.config -> (string list, string) result
     yet, sorted and deduplicated. A fleet that does not list is an [Error],
     not an empty fleet. *)
 
-val participants : base_path:string -> keepers:string list -> now:float -> string list
+val participants :
+  base_path:string -> keepers:string list -> now:float ->
+  (string list, Masc_domain.masc_error) result
 (** [keepers] plus unexpired operator ([Admin]) and invite ([Player])
     credentials, sorted and deduplicated. [Worker]
-    credentials are agents' MCP clients, not seats at the machine. *)
+    credentials are agents' MCP clients, not seats at the machine. Credentials
+    come from current named authority; unavailable storage returns [Error]. *)
 
 val hand_to : Workspace.config -> now:float -> (string list, string) result
 (** The names a pass may hand the controller to: {!participants} over

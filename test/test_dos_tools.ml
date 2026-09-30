@@ -701,9 +701,15 @@ let test_a_removed_keeper_lets_its_controller_go () =
      | Error e -> fail (Masc_domain.masc_error_to_string e));
     with_holder ~base_path Not_a_keeper "cao-cao" (fun () ->
       boot ~agent:"cao-cao" ~base_path "hello.com";
+      let departure =
+        match Auth.with_credential_transaction base_path (fun transaction ->
+          Keeper_dos_controller.holder_left ~transaction ~config
+            ~now:(Unix.gettimeofday ()) "cao-cao") with
+        | Ok departure -> departure
+        | Error error -> fail (Masc_domain.masc_error_to_string error)
+      in
       check bool "the next move cannot see that a removed Keeper left" true
-        (Option.is_none
-           (Keeper_dos_controller.holder_left ~config ~now:(Unix.gettimeofday ()) "cao-cao"));
+        (Option.is_none departure);
       check (result unit string) "removing a Keeper that holds nothing" (Ok ())
         (Keeper_dos_controller.release_retired ~keeper_name:"liu-bei" ~by:"operator");
       check (option string) "leaves the holder" (Some "cao-cao") (current_controller ());
@@ -720,7 +726,12 @@ let test_a_removed_keeper_lets_its_controller_go () =
 let test_a_holder_departs_with_its_credential () =
   with_workspace (fun base_path ->
     let config = Workspace.default_config base_path in
-    let departure name at = Keeper_dos_controller.holder_left ~config ~now:at name in
+    let departure name at =
+      match Auth.with_credential_transaction base_path (fun transaction ->
+        Keeper_dos_controller.holder_left ~transaction ~config ~now:at name) with
+      | Ok departure -> departure
+      | Error error -> fail (Masc_domain.masc_error_to_string error)
+    in
     let reason = function
       | None -> "still here"
       | Some Tool_misc_dos_lane.Keeper_stopped -> "keeper stopped"

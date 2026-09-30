@@ -338,6 +338,7 @@
   test_pool_dead_server_fd
   test_pool_address_selection
   test_pool_scope_failure
+  test_pool_stream_retention
   test_keeper_turn_disposition
   test_keeper_execution_receipt_observation_wire
   test_keeper_turn_terminal_disposition_field
@@ -699,6 +700,7 @@
   test_pool_dead_server_fd
   test_pool_address_selection
   test_pool_scope_failure
+  test_pool_stream_retention
   test_keeper_turn_disposition
   test_keeper_execution_receipt_observation_wire
   test_keeper_turn_terminal_disposition_field
@@ -2901,6 +2903,8 @@
 
 (include stanzas/test_prompt_registry_dune_fallback.inc)
 (include stanzas/test_provider_usage_windows.inc)
+
+(include stanzas/test_runtime_resolved_fleet.inc)
 
 (include stanzas/test_tui_overview_providers.inc)
 

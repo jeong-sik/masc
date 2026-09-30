@@ -207,6 +207,7 @@ let drawn_rows () =
       (fun (name, pane) -> (name, footer_hints_code ~pane))
       [ ("Code / tree", Code_tree); ("Code / file", Code_file)
       ; ("Code / overlays", Code_overlay); ("Code / history", Code_history)
+      ; ("Code / diff", Code_diff)
       ]
 
 let test_no_drawn_row_names_one_key_twice () =
@@ -2042,7 +2043,7 @@ let test_config_footer_names_child_hops () =
      meets, and [test_every_config_pane_answers_once] is what holds them to
      one answer each. *)
   check str "Config names its three off-ring children"
-    "j/k:select / scroll  p:next pane  A:activity  L:logs  PgUp/PgDn:page  Home/End:detail edges  v:read status  9:Runtime  s:resources  t:tools  e:edit  e / Enter:edit  E:advanced JSON  Enter:use  x:default / clear  f:filter  n:new  u:restore  i:input  a:fragments / voice / account  o:assets  Esc:back  r:reload  Tab:next  q:quit"
+    "j/k:select / scroll  p:next pane  A:activity  L:logs  PgUp/PgDn:page  Home/End:detail  v:read status  9:Runtime  s:resources  t:tools  e:edit  e / Enter:edit  E:advanced JSON  Enter:use  x:default / clear  f:filter  n:new  u:restore  i:input  a:fragments / voice / account  o:assets  Esc:back  r:reload  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Config);
   let hints = Masc_tui_keys.footer_hints Config in
   List.iter
@@ -3243,6 +3244,7 @@ let test_the_code_footer_names_the_keys_of_the_pane_it_draws () =
   let overlay =
     Masc_tui_keys.footer_hints_code ~pane:Masc_tui_keys.Code_overlay
   in
+  let diff = Masc_tui_keys.footer_hints_code ~pane:Masc_tui_keys.Code_diff in
   let history =
     Masc_tui_keys.footer_hints_code ~pane:Masc_tui_keys.Code_history
   in
@@ -3283,7 +3285,11 @@ let test_the_code_footer_names_the_keys_of_the_pane_it_draws () =
     (fun (label, hints) ->
        check Alcotest.bool (label ^ " has no commit to open") false
          (holds "Enter (history)" hints))
-    [ ("the tree", tree); ("an open file", file); ("diff or notes", overlay) ]
+    [ ("the tree", tree); ("an open file", file); ("the diff", diff); ("history", history); ("diff or notes", overlay) ];
+  check Alcotest.bool "diff prioritizes its visible pan keys" true
+    (String.starts_with ~prefix:"Shift-←/→:pan" diff);
+  check Alcotest.bool "overlay does not offer hidden file panning" false
+    (holds "Shift-Left" overlay)
 
 let test_code_asks_the_language_server_three_questions () =
   (* K hover, D definition, R references -- one family, one case each, and

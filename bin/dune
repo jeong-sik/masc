@@ -415,6 +415,8 @@
  (modules masc_tui_keeper_chat_projection)
  (libraries
   masc
+  masc.string_util
+  masc_tui_message_layout
   masc_tui_credential
   masc.keeper_chat_operations
   masc.masc_random_id

@@ -17,8 +17,10 @@ val load : 'a t -> string -> decode:(unit -> ('a, 'e) result) -> ('a, 'e) result
     file's current version is the one it was decoded from. Otherwise it runs
     [decode] and returns its result. The value is kept only when the file
     had the same version before and after [decode] ran and no {!forget} ran
-    on [cache] meanwhile, so a write that lands during a decode is never
-    kept, whether the version shows it or only the writer's [forget] does.
+    on [cache] meanwhile. A write the version shows is never kept under the
+    new version, and a write only the writer's [forget] shows is not kept
+    once that [forget] has run. When a [forget] stops the value from being
+    kept, an entry kept for another version of [path] is dropped as well.
     An error is returned as it is and not kept. A path that cannot be
     stat'ed is decoded every time. *)
 

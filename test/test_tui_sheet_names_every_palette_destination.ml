@@ -18,10 +18,10 @@ let state () =
 
 (* Every "go <name>" the palette offers that lands on a surface. *)
 let palette_destinations () =
-  Masc_tui_types.palette_entries (state ())
+  Masc_tui_palette.palette_entries (state ())
   |> List.filter_map (fun (label, action) ->
     match action with
-    | Masc_tui_types.Palette_goto surface
+    | Masc_tui_palette.Palette_goto surface
       when String.length label > 3 && String.sub label 0 3 = "go " ->
       Some (String.sub label 3 (String.length label - 3), surface)
     | _ -> None)

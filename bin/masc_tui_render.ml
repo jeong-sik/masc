@@ -1592,9 +1592,9 @@ let render_approvals (state : state) =
            "  %s[w] Workspace: %s  |  [e] Outside services: %s%s"
            (Theme.info ())
            (match Masc.Keeper_gate_mode.of_string modes.Tui_decode.glm_workspace with
-            | Some mode -> gate_mode_label mode | None -> "Unknown mode")
+            | Some mode -> Masc_tui_palette.gate_mode_label mode | None -> "Unknown mode")
            (match Masc.Keeper_gate_mode.of_string modes.Tui_decode.glm_external with
-            | Some mode -> gate_mode_label mode | None -> "Unknown mode")
+            | Some mode -> Masc_tui_palette.gate_mode_label mode | None -> "Unknown mode")
            Ansi.reset
      (* No prefix: [data_unreliable_row] already opens "(data unreliable: "
         and the loader's message already opens "gate load failed:", so a third
@@ -12730,7 +12730,8 @@ let render_runtime (state : state) =
 ;;
 
 let tools_scrolled state =
-  tools_scrolled_for_lines state (Render_tools.tools_display_lines state)
+  let _, cols = get_terminal_size () in
+  tools_scrolled_for_lines state (Render_tools.tools_display_lines ~cols state)
 ;;
 
 let render_tools (state : state) =
@@ -12757,7 +12758,7 @@ let render_tools (state : state) =
        box_line_styled buf cols ~style:(Theme.bad ())
          ("  " ^ Keeper_chat.terminal_safe_text detail);
        box_divider buf cols);
-  let display_lines = Render_tools.tools_display_lines state in
+  let display_lines = Render_tools.tools_display_lines ~cols state in
   let layout = tools_scrolled_for_lines state display_lines in
   let drawable = layout.sc_count in
   let content_height =
@@ -16518,7 +16519,7 @@ let help_viewport (state : state) =
    what is highlighted is what will run. *)
 let render_palette (state : state) =
   let terminal_rows, cols = get_terminal_size () in
-  let matches = Masc_tui_types.palette_matches state in
+  let matches = Masc_tui_palette.palette_matches state in
   let total = List.length matches in
   let cursor = max 0 (min state.palette_cursor (total - 1)) in
   (* A choice says which question, how many names and which line; the
@@ -16529,7 +16530,7 @@ let render_palette (state : state) =
        lower case, the way every other [key:label] item is. *)
     | Masc_tui_types.Palette_jump -> (" MASC Command palette", ":", "run")
     | Masc_tui_types.Palette_choice { choice_question; choice_line } ->
-        let names = List.length (Masc_tui_types.code_cursor_line_symbols state) in
+        let names = List.length (Masc_tui_palette.code_cursor_line_symbols state) in
         ( Printf.sprintf " %s \xc2\xb7 %d name%s on line %d" choice_question names
             (if names = 1 then "" else "s") choice_line
         , "filter:"

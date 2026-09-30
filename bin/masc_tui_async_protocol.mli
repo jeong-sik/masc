@@ -345,7 +345,7 @@ type async_msg =
       (** approval id, rearm outcome, and the action slot this explicit retry
           owns. The server accepts it only if every observed identity field
           still matches the blocked row. *)
-  | Gate_mode_set of gate_lane * string * (unit, string) result
+  | Gate_mode_set of Masc_tui_palette.gate_lane * string * (unit, string) result
       (** The external-services lane the operator asked for, and whether the
           server took it. *)
   | Surface_tool_approval_answered of

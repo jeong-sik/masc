@@ -288,13 +288,25 @@ def run_declared_report(executable: str, captures: Path | None) -> None:
     }
     captured["instances"] = [instance]
     captured["rows"] = [{**captured["rows"][0], "lane_id": instance["instance_id"] + "/report",
-        "title": "Retained analysis", "fields": {"body": "Useful finding\nNext agent action",
+        "title": "Retained analysis", "fields": {"body": "Useful finding\r\nNext agent action",
             "input_complete": False, "delivery_status": "not attempted"}}]
     captured["rows"].append({**captured["rows"][0], "id": instance["instance_id"] + "/1/second",
         "observed_at": captured["rows"][0]["observed_at"] + 1,
-        "title": "Second analysis", "fields": {"body": "Other finding\nSecond agent action",
+        "title": "Second analysis", "fields": {"body": "Other finding\r\nSecond agent action\rstandalone\r",
             "input_complete": True, "delivery_status": "not attempted"}})
-    instance["rows_count"] = 2
+    ordinary = {**captured["rows"][0], "id": instance["instance_id"] + "/1/ordinary",
+        "lane_id": instance["instance_id"] + "/grades", "observed_at": 0,
+        "title": "Ordinary grade", "fields": {"grade": "incorrect"}}
+    # Producer order differs from chronological navigation; initial opening
+    # must find the declared report after the ordinary observation.
+    first, second = captured["rows"]
+    captured["rows"] = [second, ordinary, first]
+    instance["rows_count"] = 3
+    for index in range(1, 7):
+        captured["instances"].append({**instance,
+            "instance_id": f"selection-worker-{index}", "title": f"Worker selection {index}",
+            "rows_count": 0, "package": {**instance["package"], "presentation": {
+                "description": f"Worker {index} purpose " * 40, "readings": []}}})
     fixtures["/api/v1/lane-addons"] = (200, captured)
     requests: terminal.HttpRequests = []
 
@@ -307,8 +319,8 @@ def run_declared_report(executable: str, captures: Path | None) -> None:
         for needle in (b"Report: Useful finding", b"Next agent action", b"Input complete: false"):
             if needle not in screen:
                 raise AssertionError(f"declared report omitted {needle!r}: {screen!r}")
-        if b"\\nNext agent action" in screen:
-            raise AssertionError("report body was displayed as escaped JSON")
+        if b"\\nNext agent action" in screen or b"\\x0D" in screen:
+            raise AssertionError("report body corrupted its line endings")
         print("TUI_CAPTURE declared-report " + repr(screen), flush=True)
         if captures is not None:
             captures.mkdir(parents=True, exist_ok=True)
@@ -317,9 +329,23 @@ def run_declared_report(executable: str, captures: Path | None) -> None:
         changed_screen = terminal.screen_text(terminal.frame_containing(changed, b"Report: Other finding"))
         if b"> Second analysis" not in changed_screen or b"Report: Useful finding" in changed_screen:
             raise AssertionError(f"report navigation hid the selected body: {changed_screen!r}")
+        if b"Second agent action\\x0Dstandalone\\x0D" not in changed_screen:
+            raise AssertionError(f"standalone carriage returns were hidden: {changed_screen!r}")
         terminal.send_and_wait(process, master, output, b"D", b"Raw details")
         terminal.send_and_wait(process, master, output, b"\x1b", b"Report: Other finding")
         terminal.send_and_wait(process, master, output, b"\x1b", b"Analysis report")
+        terminal.resize_and_wait(process, master, output, rows=18, columns=40,
+                                 needle=b"Analysis report", controls=(terminal.FULL_REDRAW,))
+        for index in range(1, 7):
+            terminal.press_and_settle(process, master, output, b"j")
+            selected_screen = terminal.screen_text(bytes(output))
+            marker = f"> Worker selection {index}".encode()
+            if marker not in selected_screen:
+                raise AssertionError(f"selected Add-on hidden behind earlier descriptions: {selected_screen!r}")
+        terminal.press_and_settle(process, master, output, b"JJJJJJJJJJ")
+        terminal.press_and_settle(process, master, output, b"k")
+        if b"> Worker selection 5" not in terminal.screen_text(bytes(output)):
+            raise AssertionError("selection did not reset the previous description scroll")
         terminal.send_and_wait(process, master, output, b"q", b"MASC Dashboard")
         os.write(master, b"q")
 

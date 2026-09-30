@@ -1799,6 +1799,10 @@ let start_keeper_loops_owned
         "board: Activity_graph.emit kind=%s failed: %s"
         activity_kind
         (Printexc.to_string exn));
+  (* An edit, pin, close, reopen, delete or thread change raises no event above,
+     and the cached pages still answer from before it. *)
+  Board_dispatch.set_board_write_hook
+    Server_dashboard_http_core_cache.invalidate_board_projections;
   (* Wire broadcast -> keeper delivery. An explicit mention commits a queue
      entry and wakes the named keeper. Every registered keeper then gets the
      same transcript row for its conversation window, with no mention stamp,

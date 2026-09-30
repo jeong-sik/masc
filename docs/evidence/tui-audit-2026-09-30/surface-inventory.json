@@ -822,5 +822,18 @@
     "review": "system_audit and agenda_finish source PASS at exact head, no unresolved P0/P1/P2",
     "validation": "three OCaml implementations/two interfaces syntax, Python AST, diff check; imported14-case fixture not executed",
     "execution": "not run under source-only policy"
+  },
+  "code_history_integration_stack": {
+    "pr": 40320,
+    "base_pr": 40319,
+    "base_head": "d4a43183c8aa12cf492c4ddcbe28d9254c39a129",
+    "head": "25e7d7fe1255ffaa5a9e1907939e658ce0bca0cf",
+    "imported_pr": 40247,
+    "imported_head": "bad6edd4cf70d11efaf8c48fb2161f95a96959c5",
+    "imported_base": "04256f2b1d46fe9d49f884215b2d6c0025defa3a",
+    "scope": "complete literal commit/Keeper history, physical-row Enter owner, final short record selectable, active history help/footer while preserving Memo; Enter history branch requires file-pane focus",
+    "review": "system_audit and agenda_finish source PASS exact head; constructor P1 and hidden History Enter P2 repaired; no unresolved P0/P1/P2",
+    "validation": "OCaml syntax of four product implementations/two interfaces/existing keys test, Python AST and diff checks; imported14-case fixture unexecuted",
+    "execution": "not run under source-only policy"
   }
 }

@@ -945,6 +945,36 @@ let set_composer_text (state : state) text =
   Buffer.clear state.msg_input;
   Buffer.add_string state.msg_input text
 
+let image_session_rows (state : state) =
+  match state.msg_target_keeper_name with
+  | None -> state.msg_history
+  | Some keeper_name ->
+      List.filter
+        (fun entry -> String.equal entry.me_keeper_name keeper_name)
+        state.msg_history
+
+(* Image discovery includes queued messages and rows drawn by held turn logs.
+   Those presentation filters must not remove an attachment from Ctrl-O. *)
+let image_conversation_rows (state : state) =
+  let loaded =
+    match state.msg_target_keeper_name, state.msg_loaded_keeper with
+    | Some keeper_name, Some loaded_keeper
+      when String.equal keeper_name loaded_keeper -> state.msg_loaded
+    | Some _, Some _ | Some _, None | None, _ -> []
+  in
+  chat_timeline ~loaded ~session:(image_session_rows state)
+    ~queued_request_ids:[] |> chat_timeline_rows
+
+(* Session rows record arrivals observed by this pane. Loading older history
+   after a paste is not evidence of a new arrival. When that ordering is no
+   longer available, prefer the image the operator still has in the draft. *)
+let note_attachment_staged (state : state) =
+  state.msg_attachments_since <-
+    (match List.rev (image_session_rows state) with
+     | newest :: _ -> Some (msg_anchor newest)
+     | [] -> None)
+;;
+
 (* The draft is put aside on the first step back and handed over on the way
    forward past the newest, so a walk through the history never costs what was
    already typed. *)
@@ -971,11 +1001,8 @@ let recall_land (state : state) entries at =
   in
   state.msg_attachments <- attachments;
   state.msg_references <- references;
-  state.msg_attachments_since <-
-    (if attachments = [] then None
-     else match List.rev state.msg_history with
-       | newest :: _ -> Some (msg_anchor newest)
-       | [] -> None)
+  if attachments = [] then state.msg_attachments_since <- None
+  else note_attachment_staged state
 
 let recall_older (state : state) =
   let sent = own_typed_messages state in
@@ -1028,19 +1055,6 @@ let forget_queued_history (state : state) (request : Keeper_chat.request) =
           (String.equal entry.me_request_id request.Keeper_chat.request_id
            && match entry.me_role with Message_user _ -> true | _ -> false))
       state.msg_history
-;;
-
-(* Staged images belong to the draft, so the batch and its recency marker move
-   together: staging marks the history row that was newest at that moment (or
-   [None] when the history was empty, which makes any row it later holds the
-   newer one), and clearing takes the marker with the batch. The anchor, not
-   the row's position, is what survives: transcript loads replace session rows
-   and paging rewrites the list, both of which move positions. *)
-let note_attachment_staged (state : state) =
-  state.msg_attachments_since <-
-    (match List.rev state.msg_history with
-     | newest :: _ -> Some (msg_anchor newest)
-     | [] -> None)
 ;;
 
 let clear_staged_attachments (state : state) =
@@ -8815,40 +8829,50 @@ let open_staged_image state ~notice attachment =
       | Error (`Msg detail) -> refuse detail
       | Ok data -> draw_image state ~refuse ~title data)
 
-(* Read the newest typed image in this Keeper's loaded conversation. Display
-   labels are never parsed as paths. The row index preserves staging order. *)
-let newest_named_image state =
-  let in_this_chat entry =
-    match state.msg_target_keeper_name with
-    | None -> true
-    | Some name -> String.equal entry.me_keeper_name name
-  in
-  let length = List.length state.msg_history in
-  List.rev state.msg_history
-  |> List.find_mapi (fun from_newest entry ->
-         if not (in_this_chat entry) then None
-         else
-           match entry.me_image with
-           | Masc_tui_image_preview.No_image -> None
-           | image -> Some (length - 1 - from_newest, image))
+(* Read in observation order before considering the historical timeline:
+   server and client timestamps need not share a clock. Display labels are
+   never parsed as paths. *)
+let newest_named_image rows =
+  List.rev rows
+  |> List.find_map (fun entry ->
+         match entry.me_image with
+         | Masc_tui_image_preview.No_image -> None
+         | image -> Some image)
 
-(* Both a named path and a staged attachment: which is newer. The marker left
-   by [note_attachment_staged] anchors the row that was newest when the newest
-   attachment entered the composer, so the naming row sitting at or behind it
-   means the paste came after the name. A marker that no longer matches any
-   row -- its row was since replaced by the transcript -- orders nothing, and
-   the named path keeps the key, which is the answer it gave before the marker
-   existed. *)
-let named_vs_staged_order state ~named_index =
-  match state.msg_attachments_since with
-  | None -> Masc_tui_image_preview.Named_is_newer
-  | Some since -> (
-    match msg_index_of_anchor state.msg_history since with
-    | None -> Masc_tui_image_preview.Unordered
-    | Some staged_since_index ->
-      if named_index <= staged_since_index
-      then Masc_tui_image_preview.Staged_is_newer
-      else Masc_tui_image_preview.Named_is_newer)
+let image_request_is_active state entry =
+  let matches request =
+    String.equal request.Keeper_chat.keeper_name entry.me_keeper_name
+    && String.equal request.request_id entry.me_request_id
+  in
+  (match Chat_queue.find state.msg_queued ~request_id:entry.me_request_id with
+   | Some item -> matches item.request
+   | None -> false)
+  || List.exists (fun (inflight : inflight) ->
+       matches inflight.sent_request
+       && match Masc_tui_keeper_chat_transcript.phase inflight.log.tl_transcript with
+          | Waiting | Working -> true
+          | Stream_ended | Stream_failed _ -> false)
+       state.msg_inflight
+
+(* Active local inputs precede loaded history even across clock skew. Once
+   settled, a local row follows the canonical timeline: a bounded history
+   response may omit that row forever while including newer images.
+   Only an image observed after staging can supersede the draft; a delayed
+   history load alone supplies no such observation. *)
+let conversation_image state =
+  let session = image_session_rows state in
+  let observed =
+    match state.msg_attachments, state.msg_attachments_since with
+    | [], _ -> Some (List.filter (image_request_is_active state) session)
+    | _ :: _, None -> Some session
+    | _ :: _, Some since -> msg_entries_after_anchor session since
+  in
+  match Option.bind observed newest_named_image with
+  | Some image -> image, Masc_tui_image_preview.Named_is_newer
+  | None ->
+      match newest_named_image (image_conversation_rows state) with
+      | Some image -> image, Masc_tui_image_preview.Staged_is_newer
+      | None -> Masc_tui_image_preview.No_image, Masc_tui_image_preview.Unordered
 
 (* Fetch retained wire bytes through the authenticated artifact endpoint. No
    local filename or reference-supplied URL is ever opened. The render fiber
@@ -8864,15 +8888,18 @@ let open_stored_image state ~mailbox ~notice ~name reference =
     let view = state.view in
     let run () =
       let result =
-        Eio_guard.run_in_systhread ~label:"tui-sent-image-bytes" (fun () ->
-          let response = Masc_tui_http.get_json ~host:server_peer_host ~port
-              ~path:("/api/v1/artifacts/" ^ reference.Tool_output.sha256) in
-          Result.bind response (function
-            | `Assoc fields ->
-                (match List.assoc_opt "content" fields with
-                 | Some (`String payload) -> Masc_tui_image_preview.decode_payload payload
-                 | Some _ | None -> Error "sent image response has no payload")
-            | _ -> Error "invalid sent image response"))
+        (* The authenticated HTTP client needs the fiber's Eio handlers.
+           Only JSON/base64 decoding belongs on a system thread. *)
+        match Masc_tui_http.http_get ~host:server_peer_host ~port
+            ~path:("/api/v1/artifacts/" ^ reference.Tool_output.sha256) with
+        | Error _ as error -> error
+        | Ok (status_code, body) when not (Tui_decode.is_success_http_status status_code) ->
+            (* Refusal wording reads the shared credential refresh state. *)
+            Error (Masc_tui_http.refusal ~status_code ~body)
+        | Ok (status_code, body) ->
+            Eio_guard.run_in_systhread ~label:"tui-sent-image-decode" (fun () ->
+              let response = Masc_tui_http.decode_json ~allow_empty:false ~status_code ~body in
+              Result.bind response (Masc_tui_image_preview.decode_artifact reference))
       in
       enqueue_async mailbox (Sent_image_ready { generation; view; keeper_name; name; result })
     in
@@ -8883,12 +8910,7 @@ let open_stored_image state ~mailbox ~notice ~name reference =
 
 let open_named_image state ~mailbox =
   let notice = chat_notice state ~keeper_name:state.msg_target_keeper_name in
-  let conversation, order =
-    match newest_named_image state with
-    | Some (named_index, image) ->
-        image, named_vs_staged_order state ~named_index
-    | None -> Masc_tui_image_preview.No_image, Masc_tui_image_preview.Unordered
-  in
+  let conversation, order = conversation_image state in
   match
     Masc_tui_image_preview.choose_preview ~conversation ~staged:state.msg_attachments ~order
   with

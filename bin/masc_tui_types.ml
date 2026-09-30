@@ -6503,10 +6503,10 @@ type state = {
   mutable msg_references: Masc_tui_keeper_chat_projection.image_reference list;
   (* Ctrl-O weighs a staged image against a .png the conversation named by
      which is newer, so the batch carries a recency marker: an anchor to the
-     history row that was newest when the newest attachment entered the
-     composer. [None] is a real answer -- staged while the history was empty,
-     so any row it holds now arrived later. Meaningful only while
-     [msg_attachments] is non-empty and reset when it clears. *)
+     session row that was newest when the newest attachment entered the
+     composer. [None] means staging preceded all observed session rows.
+     Loading historical rows alone does not supersede the draft. Meaningful
+     only while [msg_attachments] is non-empty and reset when it clears. *)
   mutable msg_attachments_since: msg_anchor option;
   mutable msg_target_keeper_name: string option;
   mutable msg_return: keeper_chat_return;

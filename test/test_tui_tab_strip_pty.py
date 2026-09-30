@@ -20,7 +20,7 @@ SOURCE_MODULES = (
 )
 
 TAB_NAMES = (
-    b"Info", b"Sandbox", b"Settings", b"Secrets", b"GitHub", b"Identity",
+    b"Info", b"Items", b"Sandbox", b"Settings", b"Secrets", b"GitHub", b"Identity",
     b"Channels", b"Automation", b"Runs",
 )
 
@@ -35,12 +35,12 @@ HELD_AFTER = b"\xe2\x80\xba"
 
 def run(executable: str) -> None:
     def interact(process, master_fd, _slave_fd, output, _base_path):
-        # A row the Keeper detail's nine tabs do not fit, so the strip cuts.
+        # A row the Keeper detail's ten tabs do not fit, so the strip cuts.
         h.resize_and_wait(process, master_fd, output, rows=38,
                           columns=h.STRIP_CUT_COLUMNS, needle=b"MASC Dashboard",
                           final_cursor=b"\x1b[?25l")
         h.drain_until_quiet(process, master_fd, output)
-        # Keeper detail: [ from Info wraps to Runs, the last of nine tabs. The
+        # Keeper detail: [ from Info wraps to Runs, the last of ten tabs. The
         # strip must cut its far end rather than the entry it marks.
         h.send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
         h.select_keeper_row(process, master_fd, output, b"alpha")
@@ -58,8 +58,7 @@ def run(executable: str) -> None:
         if HELD_AFTER in title:
             raise AssertionError(
                 f"Runs is the last tab and the strip claimed entries past it: {title!r}")
-        # The count says how many, which is the number of [ presses back to
-        # the first tab. Nine tabs, five drawn beside Runs, four held.
+        # The count accounts for every visible and held tab, including Items.
         held = int(title.split(HELD_BEFORE)[1].split(b" ")[0])
         drawn = len([name for name in TAB_NAMES if name in title])
         if held + drawn != len(TAB_NAMES):

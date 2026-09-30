@@ -1741,6 +1741,7 @@
   masc_tui_sgr_text
   masc_tui_emblem_screen
   masc_tui_keeper_portrait
+  masc.keeper_portrait
   masc_tui_portrait_view
   masc_tui_hit
   masc_tui_press

@@ -57,7 +57,16 @@ type keeper = {
           Absence is an unavailable observation, never a zero measurement. *)
 }
 
-val keeper_trace_id : keeper -> string option
+val keeper_trace_id : keeper -> (string, string) result
+(** Trace identity or the original metadata failure. *)
+
+type keeper_trace_projection = {
+  bindings : (string * string) list;
+  unavailable : (string * string) list;
+}
+(** Independently readable identities and named failures, in roster order.
+    Failed identities never supply a correlation binding. *)
+val keeper_trace_projection : keeper list -> keeper_trace_projection
 
 val escape_invisible : string -> string
 (** Draw bidi controls, zero-width characters and tag characters (U+061C,

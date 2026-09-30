@@ -181,6 +181,9 @@ type input = {
   keepers : keeper list option;
       (** [None] until this workspace's keeper files have been read: the header
           says the roster is not loaded rather than counting no keepers *)
+  trace_unavailable : (string * string) list;
+      (** Named identity failures in event attribution, independent of roster
+          completeness and lifecycle state. Fleet rows remain navigable. *)
   keepers_error : string option;
       (** A failed read makes the count unavailable. Retained rows remain
           usable for navigation; their presence does not prove a full count. *)

@@ -871,6 +871,7 @@ supports-image-input = true
 # attempt. The limit counts characters and the window counts bytes, which are
 # never fewer, so the window can only cut short of it.
 [providers.codex_subscription]
+model-set = "codex"
 display-name = "Codex ChatGPT Subscription"
 protocol = "codex-app-server"
 command = "codex"
@@ -1013,7 +1014,6 @@ reasoning-effort = "medium"
 [models.codex-gpt-5-6-sol-medium.capabilities]
 supports-image-input = true
 
-[codex_subscription.codex-gpt-5-6-sol-medium]
 
 [models.codex-gpt-5-6-sol-high]
 api-name = "gpt-5.6-sol"
@@ -1026,7 +1026,6 @@ reasoning-effort = "high"
 [models.codex-gpt-5-6-sol-high.capabilities]
 supports-image-input = true
 
-[codex_subscription.codex-gpt-5-6-sol-high]
 
 [models.codex-gpt-5-6-sol-xhigh]
 api-name = "gpt-5.6-sol"
@@ -1039,7 +1038,6 @@ reasoning-effort = "xhigh"
 [models.codex-gpt-5-6-sol-xhigh.capabilities]
 supports-image-input = true
 
-[codex_subscription.codex-gpt-5-6-sol-xhigh]
 
 [models.codex-gpt-5-6-sol-max]
 api-name = "gpt-5.6-sol"
@@ -1052,7 +1050,6 @@ reasoning-effort = "max"
 [models.codex-gpt-5-6-sol-max.capabilities]
 supports-image-input = true
 
-[codex_subscription.codex-gpt-5-6-sol-max]
 
 [models.codex-gpt-5-6-terra-low]
 api-name = "gpt-5.6-terra"
@@ -1065,7 +1062,6 @@ reasoning-effort = "low"
 [models.codex-gpt-5-6-terra-low.capabilities]
 supports-image-input = true
 
-[codex_subscription.codex-gpt-5-6-terra-low]
 
 [models.codex-gpt-5-6-terra-medium]
 api-name = "gpt-5.6-terra"
@@ -1078,7 +1074,6 @@ reasoning-effort = "medium"
 [models.codex-gpt-5-6-terra-medium.capabilities]
 supports-image-input = true
 
-[codex_subscription.codex-gpt-5-6-terra-medium]
 
 [models.codex-gpt-5-6-terra-high]
 api-name = "gpt-5.6-terra"
@@ -1091,7 +1086,6 @@ reasoning-effort = "high"
 [models.codex-gpt-5-6-terra-high.capabilities]
 supports-image-input = true
 
-[codex_subscription.codex-gpt-5-6-terra-high]
 
 [models.codex-gpt-5-6-terra-xhigh]
 api-name = "gpt-5.6-terra"
@@ -1104,7 +1098,6 @@ reasoning-effort = "xhigh"
 [models.codex-gpt-5-6-terra-xhigh.capabilities]
 supports-image-input = true
 
-[codex_subscription.codex-gpt-5-6-terra-xhigh]
 
 [models.codex-gpt-5-6-terra-max]
 api-name = "gpt-5.6-terra"
@@ -1117,7 +1110,6 @@ reasoning-effort = "max"
 [models.codex-gpt-5-6-terra-max.capabilities]
 supports-image-input = true
 
-[codex_subscription.codex-gpt-5-6-terra-max]
 
 [models.codex-gpt-6-astra-low]
 api-name = "gpt-6-astra"
@@ -1130,7 +1122,6 @@ reasoning-effort = "low"
 [models.codex-gpt-6-astra-low.capabilities]
 supports-image-input = true
 
-[codex_subscription.codex-gpt-6-astra-low]
 
 [models.codex-gpt-6-astra-medium]
 api-name = "gpt-6-astra"
@@ -1143,7 +1134,6 @@ reasoning-effort = "medium"
 [models.codex-gpt-6-astra-medium.capabilities]
 supports-image-input = true
 
-[codex_subscription.codex-gpt-6-astra-medium]
 
 [models.codex-gpt-6-astra-high]
 api-name = "gpt-6-astra"
@@ -1156,7 +1146,6 @@ reasoning-effort = "high"
 [models.codex-gpt-6-astra-high.capabilities]
 supports-image-input = true
 
-[codex_subscription.codex-gpt-6-astra-high]
 
 [models.codex-gpt-6-astra-xhigh]
 api-name = "gpt-6-astra"
@@ -1169,7 +1158,6 @@ reasoning-effort = "xhigh"
 [models.codex-gpt-6-astra-xhigh.capabilities]
 supports-image-input = true
 
-[codex_subscription.codex-gpt-6-astra-xhigh]
 
 [models.codex-gpt-6-astra-max]
 api-name = "gpt-6-astra"
@@ -1182,7 +1170,6 @@ reasoning-effort = "max"
 [models.codex-gpt-6-astra-max.capabilities]
 supports-image-input = true
 
-[codex_subscription.codex-gpt-6-astra-max]
 
 [models.codex-gpt-6-sol-low]
 api-name = "gpt-6-sol"
@@ -1195,7 +1182,6 @@ reasoning-effort = "low"
 [models.codex-gpt-6-sol-low.capabilities]
 supports-image-input = true
 
-[codex_subscription.codex-gpt-6-sol-low]
 
 [models.codex-gpt-6-sol-medium]
 api-name = "gpt-6-sol"
@@ -1208,7 +1194,6 @@ reasoning-effort = "medium"
 [models.codex-gpt-6-sol-medium.capabilities]
 supports-image-input = true
 
-[codex_subscription.codex-gpt-6-sol-medium]
 
 [models.codex-gpt-6-sol-high]
 api-name = "gpt-6-sol"
@@ -1221,7 +1206,6 @@ reasoning-effort = "high"
 [models.codex-gpt-6-sol-high.capabilities]
 supports-image-input = true
 
-[codex_subscription.codex-gpt-6-sol-high]
 
 [models.codex-gpt-6-sol-xhigh]
 api-name = "gpt-6-sol"
@@ -1234,7 +1218,6 @@ reasoning-effort = "xhigh"
 [models.codex-gpt-6-sol-xhigh.capabilities]
 supports-image-input = true
 
-[codex_subscription.codex-gpt-6-sol-xhigh]
 
 [models.codex-gpt-6-sol-max]
 api-name = "gpt-6-sol"
@@ -1247,7 +1230,6 @@ reasoning-effort = "max"
 [models.codex-gpt-6-sol-max.capabilities]
 supports-image-input = true
 
-[codex_subscription.codex-gpt-6-sol-max]
 
 [models.codex-gpt-6-luna-low]
 api-name = "gpt-6-luna"
@@ -1260,7 +1242,6 @@ reasoning-effort = "low"
 [models.codex-gpt-6-luna-low.capabilities]
 supports-image-input = true
 
-[codex_subscription.codex-gpt-6-luna-low]
 
 [models.codex-gpt-6-luna-medium]
 api-name = "gpt-6-luna"
@@ -1273,7 +1254,6 @@ reasoning-effort = "medium"
 [models.codex-gpt-6-luna-medium.capabilities]
 supports-image-input = true
 
-[codex_subscription.codex-gpt-6-luna-medium]
 
 [models.codex-gpt-6-luna-high]
 api-name = "gpt-6-luna"
@@ -1286,7 +1266,6 @@ reasoning-effort = "high"
 [models.codex-gpt-6-luna-high.capabilities]
 supports-image-input = true
 
-[codex_subscription.codex-gpt-6-luna-high]
 
 [models.codex-gpt-6-luna-xhigh]
 api-name = "gpt-6-luna"
@@ -1299,7 +1278,6 @@ reasoning-effort = "xhigh"
 [models.codex-gpt-6-luna-xhigh.capabilities]
 supports-image-input = true
 
-[codex_subscription.codex-gpt-6-luna-xhigh]
 
 [models.codex-gpt-6-luna-max]
 api-name = "gpt-6-luna"
@@ -1312,7 +1290,6 @@ reasoning-effort = "max"
 [models.codex-gpt-6-luna-max.capabilities]
 supports-image-input = true
 
-[codex_subscription.codex-gpt-6-luna-max]
 
 [models.codex-gpt-5-6-luna-low]
 api-name = "gpt-5.6-luna"
@@ -1325,7 +1302,6 @@ reasoning-effort = "low"
 [models.codex-gpt-5-6-luna-low.capabilities]
 supports-image-input = true
 
-[codex_subscription.codex-gpt-5-6-luna-low]
 
 [models.codex-gpt-5-6-luna-medium]
 api-name = "gpt-5.6-luna"
@@ -1338,7 +1314,6 @@ reasoning-effort = "medium"
 [models.codex-gpt-5-6-luna-medium.capabilities]
 supports-image-input = true
 
-[codex_subscription.codex-gpt-5-6-luna-medium]
 
 [models.codex-gpt-5-6-luna-high]
 api-name = "gpt-5.6-luna"
@@ -1351,7 +1326,6 @@ reasoning-effort = "high"
 [models.codex-gpt-5-6-luna-high.capabilities]
 supports-image-input = true
 
-[codex_subscription.codex-gpt-5-6-luna-high]
 
 [models.codex-gpt-5-6-luna-xhigh]
 api-name = "gpt-5.6-luna"
@@ -1364,7 +1338,6 @@ reasoning-effort = "xhigh"
 [models.codex-gpt-5-6-luna-xhigh.capabilities]
 supports-image-input = true
 
-[codex_subscription.codex-gpt-5-6-luna-xhigh]
 
 [models.codex-gpt-5-6-luna-max]
 api-name = "gpt-5.6-luna"
@@ -1377,7 +1350,6 @@ reasoning-effort = "max"
 [models.codex-gpt-5-6-luna-max.capabilities]
 supports-image-input = true
 
-[codex_subscription.codex-gpt-5-6-luna-max]
 
 [models.codex-gpt-5-5-low]
 api-name = "gpt-5.5"
@@ -1390,7 +1362,6 @@ reasoning-effort = "low"
 [models.codex-gpt-5-5-low.capabilities]
 supports-image-input = true
 
-[codex_subscription.codex-gpt-5-5-low]
 
 [models.codex-gpt-5-5-medium]
 api-name = "gpt-5.5"
@@ -1403,7 +1374,6 @@ reasoning-effort = "medium"
 [models.codex-gpt-5-5-medium.capabilities]
 supports-image-input = true
 
-[codex_subscription.codex-gpt-5-5-medium]
 
 [models.codex-gpt-5-5-high]
 api-name = "gpt-5.5"
@@ -1416,7 +1386,6 @@ reasoning-effort = "high"
 [models.codex-gpt-5-5-high.capabilities]
 supports-image-input = true
 
-[codex_subscription.codex-gpt-5-5-high]
 
 [models.codex-gpt-5-5-xhigh]
 api-name = "gpt-5.5"
@@ -1429,7 +1398,6 @@ reasoning-effort = "xhigh"
 [models.codex-gpt-5-5-xhigh.capabilities]
 supports-image-input = true
 
-[codex_subscription.codex-gpt-5-5-xhigh]
 
 # Antigravity is the one official client that needs a credentials table, and it
 # is a file reference rather than an environment variable: the CLI writes an
@@ -2844,3 +2812,51 @@ streaming = true
 reasoning-effort = "high"
 
 [openrouter.openrouter-free-lfm-2-5-2-6b]
+
+[model_sets.codex]
+models = [
+  "codex-gpt-5-6",
+  "codex-gpt-5-6-sol-medium",
+  "codex-gpt-5-6-sol-high",
+  "codex-gpt-5-6-sol-xhigh",
+  "codex-gpt-5-6-sol-max",
+  "codex-gpt-5-6-terra-low",
+  "codex-gpt-5-6-terra-medium",
+  "codex-gpt-5-6-terra-high",
+  "codex-gpt-5-6-terra-xhigh",
+  "codex-gpt-5-6-terra-max",
+  "codex-gpt-6-astra-low",
+  "codex-gpt-6-astra-medium",
+  "codex-gpt-6-astra-high",
+  "codex-gpt-6-astra-xhigh",
+  "codex-gpt-6-astra-max",
+  "codex-gpt-6-sol-low",
+  "codex-gpt-6-sol-medium",
+  "codex-gpt-6-sol-high",
+  "codex-gpt-6-sol-xhigh",
+  "codex-gpt-6-sol-max",
+  "codex-gpt-6-luna-low",
+  "codex-gpt-6-luna-medium",
+  "codex-gpt-6-luna-high",
+  "codex-gpt-6-luna-xhigh",
+  "codex-gpt-6-luna-max",
+  "codex-gpt-5-6-luna-low",
+  "codex-gpt-5-6-luna-medium",
+  "codex-gpt-5-6-luna-high",
+  "codex-gpt-5-6-luna-xhigh",
+  "codex-gpt-5-6-luna-max",
+  "codex-gpt-5-5-low",
+  "codex-gpt-5-5-medium",
+  "codex-gpt-5-5-high",
+  "codex-gpt-5-5-xhigh",
+  "codex-gpt-6-1-sol-low",
+  "codex-gpt-6-1-sol-medium",
+  "codex-gpt-6-1-sol-high",
+  "codex-gpt-6-1-sol-xhigh",
+  "codex-gpt-6-1-sol-max",
+  "codex-gpt-6-1-sol-ultra",
+  "codex-gpt-6-astra-ultra",
+  "codex-gpt-6-sol-ultra",
+  "codex-gpt-5-6-sol-ultra",
+  "codex-gpt-5-6-terra-ultra",
+]

@@ -1632,10 +1632,9 @@ class InstalledModelCatalog(unittest.TestCase):
         result=subprocess.run([BINARY,'runtime-model-info','gpt-5.6-luna','--provider','openai-responses'],
                               check=True,capture_output=True,text=True)
         self.assertEqual(json.loads(result.stdout)['max_context'],1050000)
-        unavailable=subprocess.run([BINARY,'runtime-model-info','gpt-5.6-luna','--client','codex'],
-                                   capture_output=True,text=True)
-        self.assertNotEqual(unavailable.returncode,0)
-        self.assertEqual(unavailable.stdout,'')
+        fallback=subprocess.run([BINARY,'runtime-model-info','gpt-5.6-luna','--client','codex'],
+                                check=True,capture_output=True,text=True)
+        self.assertEqual(json.loads(fallback.stdout)['max_context'],1050000)
         unknown=subprocess.run([BINARY,'runtime-model-info','gpt-unknown-fixture','--client','codex'],capture_output=True,text=True)
         self.assertNotEqual(unknown.returncode,0)
         self.assertEqual(unknown.stdout,'')

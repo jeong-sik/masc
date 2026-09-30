@@ -207,6 +207,24 @@ let test_a_fenced_answer_is_invalid_output_not_repaired () =
       failf "wrong failure class: %s" (Cli_oneshot.failure_to_string failure))
 ;;
 
+let test_observer_retains_rejected_raw_output () =
+  with_runtime (fun () ->
+    List.iter (fun text ->
+      let seen = ref [] in
+      let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ = Ok text in
+      let result = Cli_oneshot.walk ~runner ~observe:(fun event -> seen := event :: !seen)
+        ~base_dir:"/tmp" ~cli_slots:[official_client_runtime] ~system_prompt:"" ~requirement
+        ~prompt:"Judge this." ~validate:(fun _ -> Error "rejected by domain") ~on_failure:(fun _ -> ()) () in
+      check bool "response is still rejected" true (Result.is_error result);
+      match List.rev !seen with
+      | [Cli_oneshot.Dispatching dispatch; Cli_oneshot.Raw_response response] ->
+        check string "only admitted runtime dispatched" official_client_runtime dispatch.runtime_id;
+        check string "response names its own runtime" official_client_runtime response.runtime_id;
+        check string "raw output survives both syntax and semantic rejection" text response.text
+      | _ -> fail "dispatch and raw response observations missing")
+      ["not JSON"; {|{"verdict":"unrelated"}|}])
+;;
+
 let test_walk_advances_and_keeps_every_failure_in_order () =
   with_runtime (fun () ->
     let runner ~runtime_id ~system_prompt:_ ~output_schema:_ ~prompt:_ =
@@ -704,6 +722,7 @@ let () =
             "a fenced answer is invalid output, not repaired"
             `Quick
             test_a_fenced_answer_is_invalid_output_not_repaired
+        ; test_case "observer preserves rejected raw outputs with actual slots" `Quick test_observer_retains_rejected_raw_output
         ; test_case
             "walk advances and keeps every failure in order"
             `Quick

@@ -145,6 +145,10 @@ let refused_for_binding_rest = function
   | Invalid_domain_output _ -> false
 ;;
 
+type attempt_observation =
+  | Dispatching of { runtime_id : string }
+  | Raw_response of { runtime_id : string; text : string }
+
 type runner =
   runtime_id:string
   -> system_prompt:string
@@ -177,7 +181,7 @@ let prompt_with_schema ~requirement ~prompt =
    config; it stays a distinct, correctly-labeled case rather than folding
    back into [Not_an_official_client] for a caller that dispatches a
    [runtime_id] the loader never validated (e.g. a test-injected value). *)
-let run ?runner ~base_dir ~runtime_id ~system_prompt ~requirement ~prompt () =
+let run ?runner ?observe ~base_dir ~runtime_id ~system_prompt ~requirement ~prompt () =
   match Runtime.get_runtime_by_id runtime_id with
   | None -> Error (Unknown_runtime { runtime_id })
   | Some runtime ->
@@ -200,6 +204,7 @@ let run ?runner ~base_dir ~runtime_id ~system_prompt ~requirement ~prompt () =
        let prompt =
          prompt_with_schema ~requirement ~prompt
        in
+       Option.iter (fun f -> f (Dispatching {runtime_id})) observe;
        (match
           runner
             ~runtime_id
@@ -209,6 +214,7 @@ let run ?runner ~base_dir ~runtime_id ~system_prompt ~requirement ~prompt () =
         with
         | Error cause -> Error (Execution_failed { runtime_id; cause })
         | Ok answer ->
+          Option.iter (fun f -> f (Raw_response {runtime_id; text=answer})) observe;
           (* Strict on purpose: Agent Core parses a [Json_syntax_only] HTTP body
              with exactly [Yojson.Safe.from_string] and no repair, and a lane
              slot changes transport, not contract. *)
@@ -223,7 +229,7 @@ let order_slots slots =
     slots
 ;;
 
-let walk ?runner ~base_dir ~cli_slots ~system_prompt ~requirement ~prompt ~validate ~on_failure () =
+let walk ?runner ?observe ~base_dir ~cli_slots ~system_prompt ~requirement ~prompt ~validate ~on_failure () =
   let rec reject failures rest failure =
     on_failure failure;
     loop (failure :: failures) rest
@@ -231,7 +237,7 @@ let walk ?runner ~base_dir ~cli_slots ~system_prompt ~requirement ~prompt ~valid
     match order_slots slots with
     | [] -> Error (List.rev failures)
     | runtime_id :: rest ->
-      (match run ?runner ~base_dir ~runtime_id ~system_prompt ~requirement ~prompt () with
+      (match run ?runner ?observe ~base_dir ~runtime_id ~system_prompt ~requirement ~prompt () with
        | Ok value ->
          (match validate value with
           | Ok accepted -> Ok (runtime_id, accepted)

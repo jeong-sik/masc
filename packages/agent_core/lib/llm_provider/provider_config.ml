@@ -312,6 +312,7 @@ type reasoning_effort = Reasoning_effort.t =
   | High
   | XHigh
   | Max
+  | Ultra
 let reasoning_effort_to_string = Reasoning_effort.to_string
 let reasoning_effort_of_string = Reasoning_effort.of_string
 

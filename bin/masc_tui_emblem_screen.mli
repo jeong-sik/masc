@@ -20,7 +20,8 @@ val string_of_style : style -> string
 val next_style : style -> style
 
 type drawn =
-  | Moving  (** The last frame drew the candle, flickering and blinking. *)
+  | Moving  (** The /about arrival still has a frame to draw. *)
+  | Still  (** The /about arrival reached its final frame. *)
   | Absent  (** The last frame drew no candle. *)
 
 type laid_out = {
@@ -62,6 +63,34 @@ val body :
     {!style} the reader picked, and the stdout colour projection. Records what it drew for {!drawn}, and asks
     {!Masc_tui_portrait_view.request} for the placed picture. *)
 
+val final_frame : int
+(** Fourteen 150 ms steps: the finite /about arrival lasts 2.1 seconds. *)
+
+type about_laid_out = {
+  drawn : drawn;
+  lines : string list;
+  placements : Masc_tui_portrait_view.placement list;
+  visible_keepers : int;
+}
+
+val about_cached_frames : unit -> int
+(** At most 16 rendered candle frames, shared between visits to [/about]. *)
+
+val about_rows :
+  style:style -> cols:int -> rows:int -> caption:string list ->
+  frame:int -> keepers:string list ->
+  display:Masc_tui_portrait_view.display ->
+  project:(Masc_tui_terminal_palette.rgb -> Masc_tui_terminal_palette.projected_color option) ->
+  origin:int * int -> about_laid_out
+(** One finite arrival from the registered Keeper roster. Portraits retain
+    their roster identity in Kitty and mosaic displays; names that cannot fit
+    appear in the +N count. The answer is still after [final_frame]. *)
+
+val about_body :
+  cols:int -> rows:int -> caption:string list -> frame:int ->
+  keepers:string list -> origin:int * int -> string list
+(** {!about_rows} using the current terminal display and portrait placements. *)
+
 (** How many Keepers /about can say the workspace holds. *)
 type keeper_count =
   | Keepers_read of int  (** The roster was read; [0] is a known empty one. *)
@@ -83,5 +112,5 @@ val begin_frame : unit -> unit
     picture owns the terminal -- leaves {!Absent}. *)
 
 val drawn : unit -> drawn
-(** What the last frame drew. The main loop steps the candle only while this
-    is {!Moving}, so a screen without the candle stops repainting for it. *)
+(** What the last frame drew. The main loop steps only {!Moving} while /about
+    is open. {!Still} and a closed screen request no animation frames. *)

@@ -420,10 +420,10 @@ open Alcotest
    its 128,595 base was not re-measured after #39454 trimmed four board
    descriptions (about 67 to 98 bytes by replay), so the surface sits that
    far under this ceiling rather than exactly at it. *)
-(* PR #39987 run 36599468592 measured 129,395 bytes across 147 tools after
-   keeper_portrait_read gained the catalog and preview schema. The 195-byte
-   increase is the declared Item surface; pin the measured inventory. *)
-let ceiling_bytes = 129_395
+(* Candle balance, catalog and purchase let a Keeper inspect and spend its
+   earned currency. The observed 130,405-byte inventory at #40008 is 1,205
+   bytes over the previous ceiling; 130,800 preserves 395 bytes of slack. *)
+let ceiling_bytes = 130_800
 
 
 let schema_json (schema : Masc_domain.tool_schema) =
@@ -497,6 +497,9 @@ let all_surface_golden_names =
   ; "keeper_artifact_read"
   ; "keeper_artifact_transfer"
   ; "keeper_broadcast"
+  ; "keeper_candle_balance"
+  ; "keeper_candle_catalog"
+  ; "keeper_candle_purchase"
   ; "keeper_code_query"
   ; "keeper_context_status"
   ; "keeper_ide_annotate"

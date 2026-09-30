@@ -148,6 +148,11 @@ def creation_preserves_retained_queue(executable):
                 assert fixture.received == [], fixture.received
                 # Reading the queue after handoff proves the old request is
                 # still retained, rather than merely absent from POST logs.
+                # Queues belong to a Keeper: gamma's empty queue cannot
+                # attest to the retained request for alpha.
+                h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+                h.select_keeper_row(process, fd, output, b"alpha")
+                h.send_and_wait(process, fd, output, b"c", b"Esc:list")
                 h.send_and_wait(process, fd, output, b"/queue", h.composer_showing(b"/queue"))
                 queued = h.send_and_wait(process, fd, output, b"\r", b"Local unsent messages: 1")
                 assert b"keep-this-local" in h.screen_text(queued), queued

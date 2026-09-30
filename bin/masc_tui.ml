@@ -19965,7 +19965,7 @@ and is loaded on demand through keeper_skill.
             | Some session ->
               let set updated = state.voice_agent_voices <- Some updated in
               (* A save in flight takes nothing but the key that leaves. *)
-              if session.vas_saving && not (String.equal key "esc")
+              if (compact_viewport || session.vas_saving) && not (String.equal key "esc")
               then ()
               else (
                 match key with

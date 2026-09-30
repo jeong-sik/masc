@@ -15761,9 +15761,14 @@ let render_voice_wizard (state : state) (session : voice_wizard_session) =
    | Voice_wizard.Credential
    | Voice_wizard.Model
    | Voice_wizard.Voice ->
+     let caret = if Masc_tui_types.voice_wizard_is_sending session then "" else "▏" in
+     let input =
+       Message_layout.input_viewport
+         ~max_cells:(max 0 (framed_inner_width cols - 4 - Message_layout.display_width caret))
+         (Terminal_text.single_line session.vws_input)
+     in
      box_line buf cols
-       (Printf.sprintf "    %s%s%s%s" Ansi.bold session.vws_input Ansi.reset
-          (if Masc_tui_types.voice_wizard_is_sending session then "" else "▏")));
+       (Printf.sprintf "    %s%s%s%s" Ansi.bold input Ansi.reset caret));
   (* A local server that never asked for a key answers 200 only while nothing
      sends it one, so the blank is worth saying out loud rather than leaving as
      an empty line. *)
@@ -15813,51 +15818,69 @@ let render_voice_wizard (state : state) (session : voice_wizard_session) =
    reader has to keep apart. *)
 let render_voice_agent (state : state) (session : voice_agent_session) =
   let terminal_rows, cols = get_terminal_size () in
-  let head = Buffer.create 256 in
   let buf = Buffer.create 2048 in
-  let list_block label items cursor draw =
-    box_line buf cols (Printf.sprintf "  %s%s%s" Ansi.bold label Ansi.reset);
-    let count = List.length items in
-    if count = 0
-    then box_line buf cols (Printf.sprintf "    %s\xe2\x80\x94%s" Ansi.dim Ansi.reset)
-    else (
-      (* Every entry is laid out; [finish_voice_surface] takes the window and
-         reports where it is, so a list longer than the screen is scrolled
-         rather than cut at the fold. *)
-      List.iteri
-        (fun index item ->
-          box_line buf cols
-            (if index = cursor
-             then
-               Printf.sprintf "    %s%s %s%s" Ansi.bold Masc_tui_theme.Glyph.current_entry
-                 (draw item)
-                 Ansi.reset
-             else Printf.sprintf "    %s  %s%s" Ansi.dim (draw item) Ansi.reset))
-        items;
-      box_line buf cols
-        (Printf.sprintf "    %s%d of %d%s" Ansi.dim (cursor + 1) count Ansi.reset))
-  in
-  box_top head cols;
-  box_line head cols
+  box_top buf cols;
+  box_line buf cols
     (config_pane_title ~cols ~name:(screen_title " MASC Voice \xc2\xb7 keeper voices") state);
-  box_line buf cols "";
-  list_block "keeper  (j/k)" session.vas_agents session.vas_agent_cursor (fun agent ->
+  let height = max 0 (Masc_tui_types.surface_body_rows state ~terminal_rows - 4) in
+  let status =
+    match session.vas_status with
+    | None -> []
+    | Some status ->
+      Message_layout.wrap_words ~max_cells:(max 1 (framed_inner_width cols - 2))
+        (Terminal_text.single_line status)
+      |> List.filteri (fun index _ -> index < min 2 (max 0 (height - 7)))
+  in
+  let list_height = max 0 (height - 1 - List.length status) in
+  let keeper_height = list_height / 2 in
+  let voice_height = list_height - keeper_height in
+  (* Two independent windows follow their own selections. Scrolling the whole
+     document could hide either selected value while Enter still saved it. *)
+  let list_block ~height label items cursor draw =
+    let heading_rows = if height >= 2 then 1 else 0 in
+    let position_rows = if height >= 3 then 1 else 0 in
+    if heading_rows > 0 then
+      box_line buf cols (Printf.sprintf "  %s%s%s" Ansi.bold label Ansi.reset);
+    let count = List.length items in
+    let room = max 0 (height - heading_rows - position_rows) in
+    let first = max 0 (min (max 0 (count - room)) (cursor - room + 1)) in
+    let window = Rows.of_list ~first ~height:room items in
+    for offset = 0 to room - 1 do
+      let index = first + offset in
+      match Rows.at window index with
+      | None ->
+        if count = 0 && offset = 0
+        then box_line_styled buf cols ~style:Ansi.dim "    (none)"
+        else box_empty buf cols
+      | Some item ->
+        let text = Message_layout.fit_middle (max 1 (framed_inner_width cols - 6)) (draw item) in
+        let line =
+          "    " ^ (if index = cursor then Masc_tui_theme.Glyph.current_entry else " ")
+          ^ " " ^ text
+        in
+        if index = cursor then box_line_selected buf cols line
+        else box_line_styled buf cols ~style:Ansi.dim line
+    done;
+    if position_rows > 0 then
+      box_line_styled buf cols ~style:Ansi.dim
+        (if count = 0 then "    no selection"
+         else Printf.sprintf "    %d of %d" (cursor + 1) count)
+  in
+  list_block ~height:keeper_height "keeper  (j/k)" session.vas_agents session.vas_agent_cursor (fun agent ->
     Terminal_text.single_line agent);
-  box_line buf cols "";
-  list_block "voice  (left/right)" session.vas_voices session.vas_voice_cursor
+  box_divider buf cols;
+  list_block ~height:voice_height "voice  (left/right)" session.vas_voices session.vas_voice_cursor
     (fun (voice_id, label) ->
       if String.equal voice_id label
       then Terminal_text.single_line voice_id
       else Printf.sprintf "%s  %s%s%s" (Terminal_text.single_line label) Ansi.dim
              (Terminal_text.single_line voice_id) Ansi.reset);
-  (match session.vas_status with
-   | None -> ()
-   | Some status ->
-     box_line buf cols "";
-     box_line_styled buf cols ~style:(Theme.warn ())
-       (Printf.sprintf "  %s" (Terminal_text.single_line status)));
-  finish_voice_surface state ~terminal_rows ~cols ~head ~body:buf
-    ~hints:(Masc_tui_keys.footer_hints_voice_agent ())
+  List.iter (fun line -> box_line_styled buf cols ~style:(Theme.warn ()) ("  " ^ line)) status;
+  box_bottom buf cols;
+  Buffer.add_string buf
+    (footer_line state ~max_cells:cols ~hints:(Masc_tui_keys.footer_hints_voice_agent ()));
+  finish_surface state ~clamped:(Voice_scroll 0) ~surface_key:"voice-agent"
+    ~rows:terminal_rows ~cols buf
 ;;
 
 let render_voice (state : state) =

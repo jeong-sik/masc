@@ -15,11 +15,24 @@ until evidence is present. Multiple runs produce independent reports.
 The Markdown body contains copied Board evidence, treated as untrusted source
 text. It is not a new judge decision. Typed fields retain `run_status`,
 `input_complete`, producer configuration/package revisions and observation
-sequence, upstream rows and coverage, Board post id and host-owned output digest.
+sequence, exact upstream row coordinates and coverage, Board post id and the
+host-owned immutable output digest. The full upstream row payloads remain
+readable through that output evidence; the report keeps the analysis body once.
+One `fusion/report-context` row retains producer coordinates, whole input
+coverage and exact upstream row references for each observation. Each
+`fusion/report` row links that context through `related_ids`. The named `report`
+port includes both lanes, so selecting it preserves the evidence relationships
+without copying shared provenance into every run's report. Context rows carry
+metadata and have no analysis body; presentation reads the report lane only.
 A failed run with retained evidence can have complete input while its report
 still says failed. Missing evidence, unrelated rows, stale producers and running
 runs remain incomplete. Conflicting status/result rows and wrong-run evidence
 are rejected.
+
+The MCP text content is a short summary; structuredContent carries the complete
+report. The worker checks the serialized UTF-8 reply against the manifest's
+declared envelope and explicitly refuses an oversized reply without truncating
+the analysis body or accepting incomplete output as a successful report.
 
 The worker emits `delivery_status = "not_attempted"`. Use the existing host
 Evidence operation to freeze selected report rows and optionally send them to

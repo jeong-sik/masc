@@ -59,6 +59,8 @@ output means last captured, not a continuously synchronized copy of the Board.
 
 - Status rows preserve exact run ID, keeper, preset, topology, run lifecycle,
   failure code, timestamps and the API's evidence state.
+- The source incarnation must equal the detail's run ID. Pending evidence
+  requires a running run; absent evidence requires a terminal run.
 - Result rows exist only when a captured Board post has `origin.source=fusion`
   and `origin.fusion_run_id` equals the exact captured run.
   The supplied Board body is retained as data, never instructions.

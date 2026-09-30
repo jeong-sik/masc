@@ -81,3 +81,17 @@ lineage. The package keeps analysis completion, input completeness and delivery
 as separate states. Report generation is implemented; model computation inside
 an isolated Fusion package and graph-driven Broadcast execution remain follow-up
 work under issue #40183.
+
+The report port includes a shared input-context row and the individual reports
+that reference it. That context retains the whole input coverage, exact producer
+coordinates, compact upstream row references and the immutable host output
+digest. Full source rows remain readable through that digest. Each analysis body
+appears once; metadata is not multiplied by the number of reported runs. MCP
+structuredContent carries these rows, while text content summarizes the result.
+The final serialized reply must fit the package manifest's resource envelope;
+an oversized reply is refused without truncating analysis or accepting a report.
+
+Regenerate the fixture composition and preview with
+`python3 scripts/fusion-report-preview.py`. Browser receipts in
+`docs/evidence/fusion-report-20260930/preview-checks.json` identify the exact HTML
+and composition hashes, delivery label, lineage interaction and screenshots.

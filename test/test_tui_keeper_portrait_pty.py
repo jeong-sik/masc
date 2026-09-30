@@ -292,8 +292,18 @@ def portrait_as_pixels(binary: str) -> None:
     )
 
 
-def item_tab_previews_accessories(binary: str) -> None:
+def item_roster_fixtures():
     fixtures = h.keeper_runtime_http_fixtures()
+    roster = fixtures["/api/v1/gate/keepers?detailed=true"][1]
+    roster["candle"] = {"status": "ready", "issued_milli": "12500", "burned_milli": "0", "circulating_milli": "12500"}
+    for row in roster["keepers"]:
+        row["candle_balance_milli"] = "12500" if row["name"] == "alpha" else "0"
+        row["candle_account_revision"] = "a" * 64
+    return fixtures
+
+
+def item_tab_previews_accessories(binary: str) -> None:
+    fixtures = item_roster_fixtures()
     items = ItemWorkspaceFixture((
         200,
         {
@@ -368,7 +378,7 @@ def item_tab_previews_accessories(binary: str) -> None:
 
 
 def item_account_failure_keeps_the_preview(binary: str) -> None:
-    fixtures = h.keeper_runtime_http_fixtures()
+    fixtures = item_roster_fixtures()
     ready = {"status": "ready", "account_revision": "a" * 64, "keeper": "alpha", "balance_milli": "12500",
              "owned_items": ["glasses"], "catalog": [
                  ({"id": item, "slot": slot, "price_status": "priced", "price_milli": "1000"}
@@ -418,7 +428,7 @@ def item_account_failure_keeps_the_preview(binary: str) -> None:
 
 
 def item_account_follows_workspace_authority(binary: str) -> None:
-    fixtures = h.keeper_runtime_http_fixtures()
+    fixtures = item_roster_fixtures()
     ready = {"status": "ready", "account_revision": "a" * 64, "keeper": "alpha",
              "balance_milli": "12500", "owned_items": ["glasses"], "catalog": [
                  {"id": item, "slot": slot, "price_status": "priced", "price_milli": "1000"}
@@ -513,7 +523,7 @@ def item_account_follows_workspace_authority(binary: str) -> None:
 
 
 def item_account_refuses_an_unobserved_server_workspace(binary: str) -> None:
-    fixtures = h.keeper_runtime_http_fixtures()
+    fixtures = item_roster_fixtures()
     ready = {"status": "ready", "account_revision": "a" * 64, "keeper": "alpha",
              "balance_milli": "12500", "owned_items": [], "catalog": [
                  {"id": item, "slot": slot, "price_status": "unpriced"}
@@ -575,6 +585,61 @@ def item_account_refuses_an_unobserved_server_workspace(binary: str) -> None:
     )
 
 
+def item_account_requires_matching_roster_revision(binary: str) -> None:
+    fixtures = item_roster_fixtures()
+    roster = fixtures["/api/v1/gate/keepers?detailed=true"][1]
+    fixtures["/api/v1/gate/keepers?detailed=true"] = lambda: (200, roster)
+    ready = {"status": "ready", "account_revision": "a" * 64, "keeper": "alpha",
+             "balance_milli": "12500", "owned_items": ["glasses"], "catalog": [
+                 {"id": item, "slot": slot, "price_status": "unpriced"}
+                 for item, slot in ITEM_CATALOG]}
+    items = ItemWorkspaceFixture((200, ready))
+    fixtures["/api/v1/keepers/alpha/items"] = h.PathHttpResponse(items.read)
+
+    def await_frame(process, fd, output, needle):
+        assert h.wait_for_fixture_state(process, fd, output,
+            lambda: needle in b"\n".join(last_frame_rows(output).values()), timeout=10.0), last_frame_rows(output)
+
+    def interact(process, fd, _slave, output, _base):
+        open_alpha_detail(process, fd, output)
+        h.resize_and_wait(process, fd, output, rows=40, columns=200, needle=INFO_TAB)
+        h.send_and_wait(process, fd, output, b"]", "▸Items".encode())
+        await_frame(process, fd, output, b"Balance 12.500 Candle")
+        # The Item account changes first, while the current roster still owns
+        # revision A and its previous equipment. B cannot publish beside A.
+        items.response = 200, dict(ready, account_revision="b" * 64, balance_milli="13000")
+        os.write(fd, b"r")
+        await_frame(process, fd, output, b"Account unavailable:")
+        assert not any(b"Balance 13.000" in line or b"Balance 12.500" in line
+                       for line in last_frame_rows(output).values()), last_frame_rows(output)
+        # A newly observed roster owns B. Its visible runtime ID is a response
+        # barrier, rather than waiting for a timer or a tab header alone.
+        for row in roster["keepers"]:
+            row["candle_account_revision"] = "b" * 64
+            if row["name"] == "alpha":
+                row["runtime_id"] = "revision-b.current"
+                row["candle_balance_milli"] = "13000"
+        h.send_and_wait(process, fd, output, b"[", INFO_TAB)
+        await_frame(process, fd, output, b"revision-b.current")
+        h.send_and_wait(process, fd, output, b"]", "▸Items".encode())
+        await_frame(process, fd, output, b"Balance 13.000 Candle")
+        assert not any(b"Account unavailable:" in line for line in last_frame_rows(output).values())
+        # Turning Candle off cannot leave B's ready Item account alongside an
+        # off roster. The next current reading withdraws it before a new GET.
+        roster["candle"] = {"status": "off"}
+        for row in roster["keepers"]:
+            row["candle_balance_milli"] = None
+            row["candle_account_revision"] = None
+        await_frame(process, fd, output, b"Account unavailable:")
+        assert not any(b"Balance 13.000" in line for line in last_frame_rows(output).values())
+        os.write(fd, b"q")
+
+    h.run_terminal_scenario(binary,
+        description="Item account publishes only beside its matching current roster revision",
+        interact=interact, prepare_workspace=items.prepare, http_fixtures=fixtures,
+        refresh=0.5, terminal_cols=200)
+
+
 if __name__ == "__main__":
     binary = str(Path(sys.argv[1]).resolve())
     artifact_root = os.environ.get("RUNNER_TEMP")
@@ -590,8 +655,9 @@ if __name__ == "__main__":
     portrait_follows_the_terminal_height(binary)
     no_portrait_under_no_color(binary)
     portrait_as_pixels(binary)
+    item_account_requires_matching_roster_revision(binary)
     item_tab_previews_accessories(binary)
     item_account_failure_keeps_the_preview(binary)
     item_account_follows_workspace_authority(binary)
     item_account_refuses_an_unobserved_server_workspace(binary)
-    print("tui keeper portrait: PASS (7 scenarios)")
+    print("tui keeper portrait: PASS (8 scenarios)")

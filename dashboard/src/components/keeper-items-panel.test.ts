@@ -80,9 +80,10 @@ describe('Keeper Item tab', () => {
     await act(async () => { observeWorkspace('/fixture/workspace-a') })
     expect(executionWorkspaceAuthority.peek()).toBe(firstAuthority)
     expect(fetchKeeperItems).toHaveBeenCalledTimes(1)
+    expect(fetchKeeperItems.mock.calls[0]?.[1]).toBe('/fixture/workspace-a')
     fireEvent.click(screen.getByRole('button', { name: '새로고침' }))
     await waitFor(() => expect(fetchKeeperItems).toHaveBeenCalledTimes(2))
-    const heldSignal = fetchKeeperItems.mock.calls[1]?.[1]
+    const heldSignal = fetchKeeperItems.mock.calls[1]?.[2]
     if (!(heldSignal instanceof AbortSignal)) throw new Error('Held Item request requires an AbortSignal')
     await act(async () => { observeWorkspace('/fixture/workspace-b') })
     expect(await screen.findByText('보유 2 / 18개')).toBeTruthy()
@@ -284,7 +285,7 @@ describe('Keeper Item tab', () => {
     await screen.findByText('보유 1 / 18개')
     fireEvent.click(screen.getByRole('button', { name: '새로고침' }))
     await waitFor(() => expect(fetchKeeperItems).toHaveBeenCalledTimes(2))
-    const signal = fetchKeeperItems.mock.calls[1]?.[1]
+    const signal = fetchKeeperItems.mock.calls[1]?.[2]
     if (!(signal instanceof AbortSignal)) throw new Error('Expected old Item signal')
     refreshExecution.mockReturnValueOnce(execution)
     fireEvent.click(screen.getByRole('button', { name: '새로고침' }))

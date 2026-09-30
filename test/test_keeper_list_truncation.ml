@@ -451,6 +451,43 @@ let test_equipment_failure_and_repair_bypass_the_roster_cache () =
         check bool "repair is visible inside the same cached roster" true (portrait (read ()) = expected))
       (fun json -> check bool "Off uses server-selected starting equipment" true (portrait json = expected)))
 
+let test_gate_account_revision_uses_current_candle_reading () =
+  let assert_revision config json =
+    let candle = Candle_observe.read ~now:Time_compat.now ~base_path:config.Workspace.base_path in
+    match Yojson.Safe.Util.member "keepers" json with
+    | `List rows ->
+      List.iter (fun row ->
+        let name = Yojson.Safe.Util.(row |> member "name" |> to_string) in
+        let expected = match Candle_observe.account_revision candle ~keeper:name with
+          | None -> `Null | Some value -> `String value in
+        check bool "actual Gate tool producer emits the same immutable account revision" true
+          (Yojson.Safe.Util.member "candle_account_revision" row = expected);
+        match row with
+        | `Assoc fields -> check int "revision is emitted exactly once" 1
+            (List.length (List.filter (fun (key,_) -> key="candle_account_revision") fields))
+        | _ -> fail "Gate row is not an object") rows
+    | _ -> fail "Gate rows missing" in
+  keeper_list ~names:["alpha";"broken"] ~args:(`Assoc ["detailed",`Bool true])
+    ~before_list:(fun config ->
+      let path=Filename.concat (Config_dir_resolver.keepers_dir_for_base_path
+        ~base_path:config.Workspace.base_path) "broken.toml" in
+      Out_channel.with_open_bin path (fun channel -> output_string channel "invalid keeper TOML"))
+    ~after_list:(fun config read ->
+      assert_revision config (read ());
+      let path=Config_dir_resolver.candle_toml_path_for_base_path ~base_path:config.Workspace.base_path in
+      Out_channel.with_open_bin path (fun channel -> output_string channel "invalid Candle policy");
+      let disabled=read () in
+      assert_revision config disabled;
+      let rows=Yojson.Safe.Util.(disabled |> member "keepers" |> to_list) in
+      check bool "healthy and directory-error rows both receive a disabled revision" true
+        (List.for_all (fun row -> match Yojson.Safe.Util.member "candle_account_revision" row with
+          | `String value -> String.length value=64 | _ -> false) rows);
+      check bool "fixture includes the actual producer directory-error row" true
+        (List.exists (fun row -> Yojson.Safe.Util.member "status" row=`String "error") rows);
+      Sys.remove path;
+      assert_revision config (read ()))
+    (fun _ -> ())
+
 let () =
   run "keeper_list_truncation"
     [ ( "listing truth"
@@ -468,6 +505,7 @@ let () =
     ; ( "one axis per field"
       , [ test_case "row publishes phase, health and paused" `Quick
             test_detailed_row_carries_every_axis
+        ; test_case "Gate account revisions use the current Candle reading" `Quick test_gate_account_revision_uses_current_candle_reading
         ; test_case "equipment failure and repair bypass metadata cache" `Quick test_equipment_failure_and_repair_bypass_the_roster_cache
         ; test_case "health uses the health vocabulary" `Quick
             test_health_is_a_health_word_not_a_surface_word

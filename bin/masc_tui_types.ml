@@ -5681,7 +5681,7 @@ type state = {
   mutable config_scroll: int;
   mutable detail_tab: keeper_detail_tab;
   mutable item_cursor: int;
-  mutable item_account: (string * Masc_tui_keeper_items.t) option;
+  mutable item_account: (string * (string option * Masc_tui_keeper_items.t)) option;
   mutable item_account_error: string option;
   mutable keeper_run_cursor: int;
   mutable detail_reads: detail_read_request list;

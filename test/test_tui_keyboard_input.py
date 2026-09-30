@@ -7700,7 +7700,7 @@ def memory_facts_interaction() -> Interaction:
     return interact
 
 
-def memory_journal_fixture() -> HttpResponse:
+def memory_journal_fixture() -> tuple[int, dict[str, object]]:
     return (
         200,
         {
@@ -13303,7 +13303,7 @@ def code_lane_interaction(
         process, master_fd, output, b"d", LEXED_LET
     )
     diff_plain = CSI_RE.sub(b"", diff_frame).decode("utf-8")
-    for needle in ("diff vs HEAD: lib/a.ml", "let a = 1", "let x = 1"):
+    for needle in ("diff col 1 vs HEAD: lib/a.ml", "let a = 1", "let x = 1"):
         if needle not in diff_plain:
             raise AssertionError(
                 f"the diff view missed {needle!r}: {diff_plain!r}"

@@ -463,6 +463,11 @@ let test_goal_creation_emits_an_event () =
     (get_string_field (Yojson.Safe.Util.member "payload" event) "title");
   check string "creation records who acted" "planner"
     (get_string_field (Yojson.Safe.Util.member "payload" event) "actor");
+  let created_version = Yojson.Safe.Util.(event |> member "payload" |> member "store_version" |> to_int) in
+  let committed_version () = match Goal_store.load_source config with
+    | Goal_store.Available state -> state.version
+    | Goal_store.Uninitialized | Goal_store.Unavailable _ -> fail "upsert must commit a readable Goal state" in
+  check int "creation snapshot retains the exact committed revision" (committed_version ()) created_version;
   (match upsert ~agent_name:"editor"
        [ "id", `String goal_id; "title", `String "Renamed after the fact" ] with
    | Some result -> ignore (parse_json_result result)
@@ -480,7 +485,10 @@ let test_goal_creation_emits_an_event () =
      let payload = Yojson.Safe.Util.member "payload" updated_event in
      check string "the update keeps its own actor" "editor" (get_string_field payload "actor");
      check string "the update keeps the title as edited" "Renamed after the fact"
-       (get_string_field payload "title")
+       (get_string_field payload "title");
+     let version = Yojson.Safe.Util.(payload |> member "store_version" |> to_int) in
+     check int "updated snapshot retains its own committed revision" (committed_version ()) version;
+     check bool "update revision orders the snapshots independently of append" true (version > created_version)
    | _ -> fail "the edit must record exactly one separate update event")
 ;;
 

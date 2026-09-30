@@ -1,9 +1,11 @@
 module Row = Masc.Lane_addon_types
 module Document = Masc_tui_lane_declaration
 module Action = Masc.Lane_addon_action
+type runtime_presence = Live_entry | Retained_binding | Presence_unknown
 type instance = {
   id : string; run_id : string; addon_id : string; title : string;
-  revision : string; phase : Row.phase; observation_seq : int; rows_count : int;
+  revision : string; phase : Row.phase; runtime_presence : runtime_presence;
+  observation_seq : int; rows_count : int;
   installation_id : string option; source_path : string option; binding : Yojson.Safe.t; outputs : Row.output_ports;
   skills_directory : string option; incarnation : string; action_schema : Yojson.Safe.t option; binding_schema : Yojson.Safe.t option; display : Masc.Lane_addon_presentation.t;
 }
@@ -116,6 +118,15 @@ let phase json =
   | "detaching" -> Ok Row.Detaching | "detached" -> Ok Row.Detached
   | "failed" -> let* detail = get text "message" json in Ok (Row.Failed detail)
   | _ -> Error "unknown add-on phase"
+let runtime_presence json =
+  match field "runtime_presence" json with
+  | Error _ -> Ok Presence_unknown
+  | Ok (`String "live") -> Ok Live_entry
+  | Ok (`String "retained") -> Ok Retained_binding
+  | Ok _ -> Error "unknown runtime presence"
+let live_entry instance = match instance.runtime_presence with
+  | Live_entry -> true
+  | Retained_binding | Presence_unknown -> false
 let instance json =
   let* id = get text "instance_id" json in
   let* run_id = get text "run_id" json in
@@ -123,6 +134,7 @@ let instance json =
   let* title = get text "title" json in
   let* revision = get text "revision" json in
   let* phase = get phase "phase" json in
+  let* runtime_presence = runtime_presence json in
   let* observation_seq = get count "observation_seq" json in
   let* rows_count = get count "rows_count" json in
   let* owner = optional "configuration" (fun config ->
@@ -145,7 +157,7 @@ let instance json =
   let* display = match List.assoc_opt "presentation" package_fields with
     | None -> Ok Masc.Lane_addon_presentation.empty
     | Some value -> Masc.Lane_addon_presentation.of_json value in
-  Ok { id; run_id; addon_id; title; revision; phase; observation_seq; rows_count;
+  Ok { id; run_id; addon_id; title; revision; phase; runtime_presence; observation_seq; rows_count;
     installation_id;source_path;binding;outputs;skills_directory;incarnation;action_schema;binding_schema;display }
 let output json =
   let* rows = field "rows" json in
@@ -817,18 +829,19 @@ let instance_controls (instance : instance) = match instance.phase with
 let overview_hints view =
   if view.help_open then "Esc:close help"
   else if Option.is_some view.document_key then
-    "?:help  Esc:back  E:edit  s:save  l:reload  u/U:revision"
+    "?:help  Esc:back  E:edit  s:save  l:reload  u/U:revision  Colon:palette  A:command"
   else match view.screen with
   | Overview when view.presentation=Technical && view.focus=Configurations
       && Option.is_none view.document_key ->
       "?:help  Esc:back"
       ^ (if Option.is_some (selected_source_path view) then "  E:edit TOML" else "")
+      ^ "  Colon:palette  A:command"
       ^ (if view.loading then "  Reading …" else "  r:refresh")
   | Overview ->
-      "?:help  Esc:back  Enter:open  h:history/current  i:install  n:new  S:subs"
+      "?:help  Colon:palette  Esc:back  Enter:open  h:history/current  i:install  n:new  S:subs  A:command"
       ^ (if view.loading then "  Reading …" else "  r:refresh")
   | Detail _ ->
-      "?:help  Esc:back  1-4:section  Tab:next section  j/k:move  " ^
+      "?:help  Colon:palette  Esc:back  A:command  1-4:section  Tab:next section  j/k:move  " ^
       (match selected_instance view with None -> "" | Some instance -> instance_controls instance ^ "  ") ^
       "D:raw  J/K:scroll"
       ^ (if view.loading then "  Reading …" else "  r:refresh")
@@ -1024,7 +1037,8 @@ let help_lines = [
   "Installation: E edit · s save · l reload · u/U revision";
   "Links: S subscriptions · Left/Right lane";
   "Records: Space mark row · e export marked rows";
-  "Advanced: : command (including :act)";
+  "Navigation: : command palette · Esc returns to Lane Add-ons";
+  "Advanced: A command (including act)";
 ]
 
 let detail_lines ~width view =
@@ -1139,14 +1153,14 @@ let installation_name (instance : instance) =
   | Some id -> id
   | None -> instance.id
 
-let configured_producers ~identity ~run_id workers id =
-  List.filter (fun producer ->
-    identity producer=Some id && String.equal producer.run_id run_id) workers
+let configured_producers ~identity workers id =
+  List.filter (fun producer -> live_entry producer && identity producer=Some id) workers
 
 let resolve_flow_input ~identity ~run_id workers input =
-  match configured_producers ~identity ~run_id workers input.installation_id with
+  match configured_producers ~identity workers input.installation_id with
   | [] -> Producer_missing
   | _ :: _ :: _ -> Producer_ambiguous
+  | [producer] when not (String.equal producer.run_id run_id) -> Producer_missing
   | [producer] ->
       match input.output_id with
       | None -> Producer_available producer
@@ -1155,7 +1169,9 @@ let resolve_flow_input ~identity ~run_id workers input =
 
 let declared_layers ~identity workers =
   let nodes = List.map (fun worker ->
-    match flow_inputs worker.binding with
+    if not (live_entry worker) then
+      {worker;upstream=[];problems=["No live runtime entry; stored binding cannot supply output"]}
+    else match flow_inputs worker.binding with
     | Error detail -> {worker;upstream=[];problems=["Invalid source binding: " ^ detail]}
     | Ok dependencies ->
         let upstream, problems = List.fold_left (fun (upstream,problems) input ->
@@ -1232,7 +1248,7 @@ let flow_lines ?(embedded=false) view =
                     (if historical then " · stored binding; producer incarnation unknown"
                     else match resolve_flow_input ~identity ~run_id:instance.run_id workers input with
                       | Producer_available _ -> ""
-                      | Producer_ambiguous -> " · producer identity ambiguous in this run"
+                      | Producer_ambiguous -> " · producer identity ambiguous across live workers"
                       | Output_missing port -> " · producer output unavailable: " ^ port
                       | Producer_missing -> if complete then " · producer absent in this run"
                           else " · producer unresolved; inventory incomplete")]

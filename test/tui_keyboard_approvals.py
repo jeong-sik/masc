@@ -871,4 +871,3 @@ def verification_verdict_interaction(requests: HttpRequests) -> Interaction:
         os.write(master_fd, b"q")
 
     return interact
-

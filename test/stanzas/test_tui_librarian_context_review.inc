@@ -1,7 +1,9 @@
 (rule
  (alias runtest-test_tui_librarian_context_review)
- (deps test_tui_librarian_context_review.py
-  test_keeper_librarian_context_review.exe ../bin/masc_tui.exe
+ (deps
+  test_tui_librarian_context_review.py
+  test_keeper_librarian_context_review.exe
+  ../bin/masc_tui.exe
   (source_tree ../config/prompts)
   tui_keyboard_harness.py
   tui_keyboard_keepers.py

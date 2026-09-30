@@ -446,4 +446,3 @@ def run_project_changes_regression(executable: str) -> None:
         interact=project_changes_interaction,
         http_fixtures=fixtures,
     )
-

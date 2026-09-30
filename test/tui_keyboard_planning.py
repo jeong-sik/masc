@@ -583,4 +583,3 @@ def run_planning_review_regression(executable: str) -> None:
         interact=planning_activity_actor_interaction(),
         http_fixtures=planning_activity_http_fixtures(),
     )
-

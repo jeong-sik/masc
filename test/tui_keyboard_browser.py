@@ -627,4 +627,3 @@ def run_browser_screenshot_regression(executable: str) -> None:
             preload_input=GRAPHICS_SUPPORTED_REPLY)
     finally:
         release.set()
-

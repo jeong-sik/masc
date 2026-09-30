@@ -445,4 +445,3 @@ def run_schedule_source_status_regression(executable: str) -> None:
             description=f"Schedules source status: {'initial' if initial_error else 'refresh'}",
             interact=interact, http_fixtures=fixtures,
         )
-

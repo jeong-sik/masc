@@ -1,7 +1,9 @@
 (rule
  (alias runtest-test_tui_librarian_absorb_gate)
- (deps test_tui_librarian_absorb_gate.py
-  test_keeper_librarian_absorb_gate.exe test_keeper_librarian_cancellation.exe
+ (deps
+  test_tui_librarian_absorb_gate.py
+  test_keeper_librarian_absorb_gate.exe
+  test_keeper_librarian_cancellation.exe
   ../bin/masc_tui.exe
   (source_tree ../config/prompts)
   tui_keyboard_harness.py

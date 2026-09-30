@@ -260,4 +260,3 @@ def context_inspector_interaction() -> Interaction:
         os.write(master_fd, b"q")
 
     return interact
-

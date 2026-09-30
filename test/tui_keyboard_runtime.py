@@ -1001,4 +1001,3 @@ def run_prompts_refresh_failure_keeps_catalog_regression(executable: str) -> Non
         interact=interact,
         http_fixtures=fixtures,
     )
-

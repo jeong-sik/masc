@@ -825,4 +825,3 @@ def run_msx_palette_regression(executable: str) -> None:
         description="the palette opens the MSX screen by name",
         interact=interact,
     )
-

@@ -936,4 +936,3 @@ def run_keyboard_regression(executable: str, *, group: int | None = None) -> Non
             run()
     else:
         groups[group]()
-

@@ -953,4 +953,3 @@ def run_memory_journal_regression(executable: str) -> None:
         },
         refresh=0.5,
     )
-

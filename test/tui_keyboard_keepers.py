@@ -1103,6 +1103,10 @@ def standalone_lane_fixture(
             "changes; semantic verification is not performed.",
             False,
         ),
+        "candle_appraiser": (
+            "Appraises a confirmed Goal payout grade, each candidate Task's relation to the Goal, and Keeper contribution weights.",
+            False,
+        ),
         "verifier_exact": (
             "Reviews Task completion and Goal proof evidence.",
             False,
@@ -1182,6 +1186,7 @@ def standalone_lanes_response() -> HttpResponse:
                     "browser_stagehand_exact", "Browser Stagehand",
                     status="no_retained_observation", retained=0,
                 ),
+                standalone_lane_fixture("candle_appraiser", "Candle Appraiser"),
             ],
         },
     )
@@ -2253,8 +2258,9 @@ def run_tab_strip_keeps_current_entry_regression(executable: str) -> None:
 def run_activity_logs_tab_pane_regression(executable: str) -> None:
     """Dashboard, Work and Usage share the pane's 102-column surface floor.
 
-    At the narrow threshold they all retain the Recent pane. Activity's
-    Events and Logs readings suppress it, because they own that content.
+    Home stays compact by default. An explicit Ctrl-L choice opens the
+    Recent pane, whose 102-column surface boundary then persists on Work and
+    Usage. Activity Events and Logs suppress it because they own that content.
     """
 
     def pane_row(output: bytearray) -> int:
@@ -2268,8 +2274,13 @@ def run_activity_logs_tab_pane_regression(executable: str) -> None:
         resize_and_wait(process, master_fd, output, rows=38,
                         columns=ACTING_PANE_THRESHOLD_COLUMNS,
                         needle=b"MASC Dashboard", final_cursor=b"\x1b[?25l")
+        # Home starts without a feed. An explicit pane choice still applies
+        # on Home and survives the following surface switches.
+        drain_until_quiet(process, master_fd, output)
+        assert pane_row(output) < 0, screen_text(bytes(output))
+        send_and_wait(process, master_fd, output, b"\x0c", b"[Recent]")
         for title, ready, whole_row in (
-            (b"MASC Dashboard", b"D12 Goal", b"linked tasks 0/1 done"),
+            (b"MASC Dashboard", b"Continue", b"Choose a Keeper"),
             (b"MASC Work", b"D12 Goal", b"D12 Goal"),
             (b"MASC Usage", b"D12 provider", b"40%"),
         ):
@@ -2705,4 +2716,3 @@ def run_keeper_lanes_regression(executable: str) -> None:
         interact=lanes_press_selects_the_lane_under_the_pointer,
         http_fixtures=pointer_fixtures,
     )
-

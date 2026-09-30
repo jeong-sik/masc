@@ -3,20 +3,20 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Iterator
 import copy
 import hashlib
 import json
 import os
+from pathlib import Path
 import re
 import threading
-from collections.abc import Iterator
-from pathlib import Path
 from typing import Any
-
 import tui_keyboard_chat as _keyboard_chat
 import tui_keyboard_harness as _keyboard_harness
 import tui_keyboard_keepers as _keyboard_keepers
 import tui_keyboard_repositories as _keyboard_repositories
+
 
 SOURCE_MODULES = (
     "bin/masc_tui.ml",
@@ -390,6 +390,10 @@ def run(executable: str, scenario: str, evidence: Path | None) -> None:
             # Check the observable result after the palette command and Esc
             # instead of requiring a redundant intermediate Lanes frame.
             _keyboard_harness.send_and_wait(process, master, output, b":go lanes\r\x1b", b"MASC Dashboard")
+            # Home opens a Keeper chooser on i; select the command target
+            # explicitly before exercising the shared composer again.
+            _keyboard_harness.send_and_wait(process, master, output, b"3", b"MASC Keepers")
+            _keyboard_harness.select_keeper_row(process, master, output, b"alpha")
         if scenario == "theme-preview":
             _keyboard_harness.palette_go(process, master, output, b"go System / themes", b"MASC Themes")
             _keyboard_harness.wait_for_output(

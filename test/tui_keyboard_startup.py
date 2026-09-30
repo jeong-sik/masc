@@ -307,4 +307,3 @@ def run_first_install_credential_regression(executable: str) -> None:
         omit_operator_token=True,
         extra_env={"NO_COLOR": "1"},
     )
-

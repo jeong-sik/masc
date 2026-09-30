@@ -516,4 +516,3 @@ def run_tools_purpose_regression(executable: str) -> None:
 
     run_terminal_scenario(executable, description="Tools purposes distinguish visibility, receipts and usage",
                           interact=interact, http_fixtures=fixtures)
-

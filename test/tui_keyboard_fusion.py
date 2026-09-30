@@ -850,4 +850,3 @@ def run_fusion_history_regression(executable: str) -> None:
         executable, description="historical Fusion evidence inspection and refresh",
         interact=interact, http_fixtures=fixtures,
     )
-

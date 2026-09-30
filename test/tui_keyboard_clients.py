@@ -90,4 +90,3 @@ def clients_footer_interaction(
     # Esc drops the query and stays on Clients; the row goes back to the keys.
     send_and_wait(process, master_fd, output, b"\x1b", b"j/k:move")
     os.write(master_fd, b"q")
-

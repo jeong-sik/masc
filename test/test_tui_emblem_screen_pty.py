@@ -6,15 +6,15 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import zlib
+import struct
 import os
 import re
-import struct
 import sys
-import zlib
 from pathlib import Path
-
 import tui_keyboard_chat as _keyboard_chat
 import tui_keyboard_harness as _keyboard_harness
+
 
 # scripts/ci/run-edited-tests.sh runs this suite when a pull request changes a
 # path named here.
@@ -174,11 +174,12 @@ def mascot_transfers(wire: bytes) -> list[tuple[dict[bytes, bytes], bytes]]:
 
 def assert_working_overview(output: bytearray) -> bytes:
     screen = _keyboard_harness.screen_text(bytes(output))
-    for label in (b"MASC Dashboard", b"Goals", b"Work", b"Usage", b"Needs you"):
+    for label in (b"MASC Dashboard", b"Work:", b"Continue", b"Choose a Keeper"):
         assert label in screen, f"working Dashboard omitted {label!r}: {screen!r}"
+    assert (b"Needs your decision" in screen
+            or b"No decision is waiting on you." in screen), screen
     assert STARTUP_CAPTION not in screen, "startup branding replaced the work"
-    # Work's sparkline uses lower blocks, including U+2584. The candle's
-    # mosaic also paints upper half blocks, which the chart never emits.
+    # Home must remain usable without the startup candle's upper half blocks.
     assert b"\xe2\x96\x80" not in output, "startup drew a mosaic candle"
     assert not MASCOT_TRANSFER_HEAD.search(bytes(output)), "startup placed a mascot image"
     return screen
@@ -303,14 +304,11 @@ def about_screen_with_graphics(binary: str) -> None:
     fixtures = _keyboard_harness.keeper_runtime_http_fixtures()
 
     def interact(process, fd, _slave, output, _base):
-        # The composer writes to the keeper the roster cursor holds, and it
-        # holds none until the roster is read: an i that arrives first has
-        # nobody to write to and is dropped. Choose alpha first, as
-        # about_owns_the_keys does.
+        # Select a real Keeper before opening its message composer.
         _keyboard_harness.send_and_wait(process, fd, output, b"3", b"MASC Keepers")
         _keyboard_harness.select_keeper_row(process, fd, output, b"alpha")
-        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
-        _keyboard_harness.send_and_wait(process, fd, output, b"i", _keyboard_harness.COMPOSER_FOCUSED)
+        _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
+        _keyboard_harness.send_and_wait(process, fd, output, b"c", b"Esc:detail")
         start = len(output)
         _keyboard_harness.send_and_wait(process, fd, output, b"/about\r", ABOUT_CAPTION)
         _keyboard_harness.wait_for_output(process, fd, output, PLACEMENT, start=start, timeout=5.0)
@@ -345,11 +343,14 @@ def about_screen_with_graphics(binary: str) -> None:
         assert not candle_rows(output), "real pixels were drawn as a mosaic as well"
         # Esc closes /about and takes the picture down with it.
         start = len(output)
-        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", CHAT_TITLE)
         _keyboard_harness.wait_for_output(process, fd, output, MASCOT_DELETE, start=start, timeout=3.0)
         assert _keyboard_harness.drain_until_quiet(process, fd, output), "the screen kept moving after /about closed"
         after = bytes(output[output.find(MASCOT_DELETE, start):])
         assert not mascot_transfers(after), "the candle was placed again after /about closed"
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
         os.write(fd, b"q")
 
     _keyboard_harness.run_terminal_scenario(binary, description="/about places the candle as real pixels on a Kitty terminal",
@@ -363,11 +364,11 @@ def about_owns_the_keys(binary: str) -> None:
     requests: list = []
 
     def interact(process, fd, slave, output, _base):
-        # The composer writes to the keeper the roster cursor holds.
+        # Open the selected Keeper's message composer.
         _keyboard_harness.send_and_wait(process, fd, output, b"3", b"MASC Keepers")
         _keyboard_harness.select_keeper_row(process, fd, output, b"alpha")
-        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
-        _keyboard_harness.send_and_wait(process, fd, output, b"i", _keyboard_harness.COMPOSER_FOCUSED)
+        _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
+        _keyboard_harness.send_and_wait(process, fd, output, b"c", b"Esc:detail")
         _keyboard_harness.send_and_wait(process, fd, output, b"/about\r", ABOUT_CAPTION)
         # i would focus the composer, the text would be its draft and Enter
         # would send it -- under /about none of that may happen.
@@ -382,13 +383,16 @@ def about_owns_the_keys(binary: str) -> None:
         screen = _keyboard_harness.screen_text(bytes(output))
         assert ABOUT_CAPTION in screen, "a key typed under /about closed it: " + repr(screen)
         assert SWALLOWED_TEXT not in screen, "text typed under /about reached the composer"
-        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", CHAT_TITLE)
         assert _keyboard_harness.drain_until_quiet(process, fd, output), "the screen kept moving after /about closed"
         screen = _keyboard_harness.screen_text(bytes(output))
         assert ABOUT_CAPTION not in screen, "Esc left /about open"
         assert SWALLOWED_TEXT not in screen, "the swallowed text surfaced after /about closed"
         assert not any(CHAT_SEND_PATH in path for path, _ in requests), \
             "a message was sent while /about was open"
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
         os.write(fd, b"q")
 
     _keyboard_harness.run_terminal_scenario(binary, description="/about owns the keys until Esc",
@@ -421,8 +425,8 @@ def about_turns_the_candle(binary: str) -> None:
     def interact(process, fd, _slave, output, _base):
         _keyboard_harness.send_and_wait(process, fd, output, b"3", b"MASC Keepers")
         _keyboard_harness.select_keeper_row(process, fd, output, b"alpha")
-        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
-        _keyboard_harness.send_and_wait(process, fd, output, b"i", _keyboard_harness.COMPOSER_FOCUSED)
+        _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
+        _keyboard_harness.send_and_wait(process, fd, output, b"c", b"Esc:detail")
         start = len(output)
         _keyboard_harness.send_and_wait(process, fd, output, b"/about\r", ABOUT_CAPTION)
         assert b"c:candle" in _keyboard_harness.screen_text(bytes(output)), "/about does not say c turns the candle"
@@ -439,6 +443,9 @@ def about_turns_the_candle(binary: str) -> None:
         start = len(output)
         _keyboard_harness.write_all(fd, output, b"c")
         transfer_after(process, fd, output, start, is_painted, "painted")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", CHAT_TITLE)
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
         _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
         os.write(fd, b"q")
 

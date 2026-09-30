@@ -742,4 +742,3 @@ def run_code_memo_regression(executable: str) -> None:
         interact=code_memo_interaction,
         http_fixtures=code_memo_fixtures(),
     )
-

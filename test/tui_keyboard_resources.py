@@ -246,4 +246,3 @@ def run_resources_regression(executable: str) -> None:
         interact=resources_detail_interaction(),
         http_fixtures=resources_mcp_fixture(),
     )
-

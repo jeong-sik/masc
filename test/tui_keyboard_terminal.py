@@ -161,9 +161,9 @@ def assert_row_budgeted_surfaces(
     output: bytearray,
     _base_path: str,
 ) -> None:
-    # The Dashboard title is visible before its data, so the title alone
-    # does not say the briefing arrived; its first attention item does.
-    wait_for_output(process, master_fd, output, b"attention-1", start=0, timeout=10.0)
+    # Home is interactive while connecting. This fixture's health reading,
+    # rather than its early entry points, proves the briefing arrived.
+    wait_for_output(process, master_fd, output, b"Health: ok", start=0, timeout=10.0)
 
     overview = resize_and_wait(
         process,
@@ -175,35 +175,18 @@ def assert_row_budgeted_surfaces(
         controls=(FULL_REDRAW,),
         final_cursor=b"\x1b[?25l",
     )
-    # The compact Dashboard gives its first rows to health, measured Goals,
-    # and durable Work. Attention follows those sections when room permits.
-    for expected in (b"MASC Dashboard", b"Health:", b"Goals", b"q:quit"):
+    # Home keeps decision entry points and a conversation entry visible;
+    # generic incidents never become operator decisions by severity alone.
+    for expected in (b"MASC Dashboard", b"Health:", b"Continue", b"q:quit"):
         if expected not in overview:
             raise AssertionError(f"compact Dashboard omitted {expected!r}: {overview!r}")
-    if b"attention-4" in overview or b"attention-6" in overview:
-        raise AssertionError(f"compact Dashboard exceeded its attention limit: {overview!r}")
-    # Sixteen rows cannot hold "Needs you" under the sections above it, and
-    # the cut says how many rows it left out rather than drop them silently.
-    if re.search(rb"\+\d+ rows? not shown", overview) is None:
-        raise AssertionError(f"compact Dashboard hid its cut rows: {overview!r}")
-
     expanded = resize_and_wait(
-        process,
-        master_fd,
-        output,
-        rows=30,
-        columns=100,
-        # The title also renders before the briefing arrives. Inspect the
-        # expanded row budget only after its second attention row is visible.
-        needle=b"attention-2",
-        controls=(FULL_REDRAW,),
-        final_cursor=b"\x1b[?25l",
+        process, master_fd, output, rows=30, columns=100,
+        needle=b"Continue", controls=(FULL_REDRAW,), final_cursor=b"\x1b[?25l",
     )
-    for expected in (b"Work", b"Needs you", b"attention-1", b"attention-2"):
-        if expected not in expanded:
-            raise AssertionError(f"expanded Dashboard omitted {expected!r}: {expanded!r}")
-    if b"attention-3" in expanded:
-        raise AssertionError(f"Dashboard displayed more than two attention rows: {expanded!r}")
+    for forbidden in (b"attention-1", b"attention-2", b"linked tasks", b"scope windows in Usage"):
+        if forbidden in expanded:
+            raise AssertionError(f"Home repeated detail content: {expanded!r}")
     tab_until(process, master_fd, output, b"MASC Keepers")
     tab_until(process, master_fd, output, b"MASC Board")
     send_and_wait(process, master_fd, output, b"\r", b"comment-5")
@@ -349,4 +332,3 @@ def run_theme_scheme_regression(executable: str) -> None:
         description="picking a theme sends its colour codes",
         interact=interact,
     )
-

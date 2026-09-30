@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from tui_keyboard_harness import palette_go
+from tui_keyboard_harness import select_keeper_row
+
 import hashlib
 import json
 import os
@@ -103,7 +106,7 @@ def unread_keeper_counted_interaction() -> Interaction:
             process,
             master_fd,
             output,
-            b"Keepers: 1 listed (1 state unreadable)",
+            b"1 Keeper states unreadable",
             start=0,
             timeout=10.0,
         )
@@ -159,7 +162,7 @@ def unlisted_keepers_named_interaction() -> Interaction:
             process,
             master_fd,
             output,
-            b"(EACCES)",
+            b"Keepers unlisted: EACCES",
             start=0,
             timeout=10.0,
         )
@@ -206,10 +209,9 @@ def paused_apart_from_stopped_interaction() -> Interaction:
         output: bytearray,
         _base_path: str,
     ) -> None:
-        # The first screen counts listed Keepers without guessing state from
-        # recent tasks or folding paused/stopped into a synthetic idle count.
+        # Home no longer derives a fleet state summary from briefing rows.
         wait_for_output(
-            process, master_fd, output, b"Keepers: 5 listed", start=0, timeout=10.0
+            process, master_fd, output, b"Continue", start=0, timeout=10.0
         )
         frame = resize_and_wait(
             process, master_fd, output, rows=30, columns=120,
@@ -231,36 +233,16 @@ def attention_drawn_once_interaction() -> Interaction:
         output: bytearray,
         _base_path: str,
     ) -> None:
-        wait_for_output(
-            process,
-            master_fd,
-            output,
-            b"sangsu has external attention",
-            start=0,
-            timeout=10.0,
-        )
-        wait_for_output(
-            process, master_fd, output, b"analyst needs operator", start=0, timeout=3.0
-        )
-        # One full repaint to count rows in: the ordinary paints are row
-        # diffs, so counting in the raw stream would count repaints.
+        wait_for_output(process, master_fd, output, b"Continue", start=0, timeout=10.0)
         frame = resize_and_wait(
-            process,
-            master_fd,
-            output,
-            rows=30,
-            columns=99,
-            needle=b"sangsu has external attention",
-            controls=(FULL_REDRAW,),
-            final_cursor=b"\x1b[?25l",
+            process, master_fd, output, rows=30, columns=99, needle=b"Continue",
+            controls=(FULL_REDRAW,), final_cursor=b"\x1b[?25l",
         )
-        repeated = frame.count(b"sangsu has external attention")
-        if repeated != 1:
-            raise AssertionError(
-                f"an attention fact on two briefing lists drew {repeated} rows: {frame!r}"
-            )
-        if frame.count(b"analyst needs operator") != 1:
-            raise AssertionError(f"the distinct item vanished: {frame!r}")
+        # Incident text is not an authoritative operator request. Neither
+        # duplicated nor distinct briefing incidents enter Home's decisions.
+        for label in (b"sangsu has external attention", b"analyst needs operator"):
+            if label in frame:
+                raise AssertionError(f"Home projected an incident as a decision: {frame!r}")
 
         os.write(master_fd, b"q")
 
@@ -275,10 +257,12 @@ def dashboard_usage_interaction(
     _base_path: str,
 ) -> None:
     wait_for_output(process, master_fd, output, b"MASC Dashboard", start=0, timeout=30.0)
-    wait_for_output(process, master_fd, output, b"actual 3 (reported)", start=0, timeout=10.0)
+    wait_for_output(process, master_fd, output, b"Continue", start=0, timeout=10.0)
     dashboard = unwrapped(screen_text(bytes(output)))
-    if b"Goals" not in dashboard or b"Work" not in dashboard or b"linked tasks 0/1 done" not in dashboard:
-        raise AssertionError(f"Dashboard summary missing: {dashboard!r}")
+    if b"Work:" not in dashboard or b"Continue" not in dashboard:
+        raise AssertionError(f"Dashboard entry missing: {dashboard!r}")
+    if b"actual 3 (reported)" in dashboard or b"linked tasks 0/1 done" in dashboard:
+        raise AssertionError(f"Dashboard duplicated Work detail: {dashboard!r}")
     print("DASHBOARD_PTY_SCREEN=" + json.dumps(dashboard.decode("utf-8", errors="replace")), flush=True)
     send_and_wait(process, master_fd, output, b"\t", b"Fixture Goal")
     send_and_wait(process, master_fd, output, b"\r", b"Actual: 3 (reported)")
@@ -308,14 +292,30 @@ def dashboard_usage_interaction(
     send_and_wait(process, master_fd, output, b"p", b"MASC Usage")
     send_and_wait(process, master_fd, output, b"w", b"1 UTC days")
     send_and_wait(process, master_fd, output, b"w", b"7 UTC days")
+    # Leave from diagnostics: Home's Usage shortcut must still open accounts.
+    send_and_wait(process, master_fd, output, b"p", b"MASC Usage / Telemetry")
     system = tab_until(process, master_fd, output, b"MASC System")
     if b"MASC System" not in system:
         raise AssertionError(f"System is not on the main ring: {system!r}")
     send_and_wait(process, master_fd, output, b"A", b"MASC Activity")
     tab_until(process, master_fd, output, b"MASC Dashboard")
-    send_and_wait(process, master_fd, output, b"i", b"\xe2\x80\xba to alpha")
+    send_and_wait(process, master_fd, output, b"m", b"7 UTC days")
+    usage = screen_text(bytes(output))
+    if b"MASC Usage / Telemetry" in usage:
+        raise AssertionError(f"Home Usage shortcut resumed diagnostics: {usage!r}")
+    send_and_wait(process, master_fd, output, b"p", b"MASC Usage / Telemetry")
+    palette_go(process, master_fd, output, b"go Usage", b"7 UTC days")
+    send_and_wait(process, master_fd, output, b"p", b"MASC Usage / Telemetry")
+    palette_go(process, master_fd, output, b"go Keepers", b"MASC Keepers")
+    select_keeper_row(process, master_fd, output, b"alpha")
+    send_and_wait(process, master_fd, output, b"c", b"Esc:list")
     send_and_wait(process, master_fd, output, b"/cost", b"/cost")
-    send_and_wait(process, master_fd, output, b"\r", b"MASC Usage")
+    send_and_wait(process, master_fd, output, b"\r", b"7 UTC days")
+    send_and_wait(process, master_fd, output, b"i", b"to alpha")
+    send_and_wait(process, master_fd, output, b"/telemetry", b"/telemetry")
+    send_and_wait(process, master_fd, output, b"\r", b"MASC Usage / Telemetry")
+    tab_until(process, master_fd, output, b"MASC Usage")
+    wait_for_output(process, master_fd, output, b"7 UTC days", start=output.rfind(b"MASC Usage"))
     os.write(master_fd, b"q")
 
 
@@ -458,4 +458,3 @@ def run_dashboard_usage_regression(executable: str) -> None:
             ),
         },
     )
-

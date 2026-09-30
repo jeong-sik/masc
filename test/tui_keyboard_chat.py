@@ -2977,7 +2977,10 @@ def task_dispatch_interaction(requests: HttpRequests) -> Interaction:
             process, master_fd, output, b"feed: closed", start=0, timeout=10.0
         )
         tab_until(process, master_fd, output, b"MASC Dashboard")
-        send_and_wait(process, master_fd, output, b"i", b"\xe2\x80\xba to alpha")
+        send_and_wait(process, master_fd, output, b"i", b"MASC Keepers")
+        select_keeper_row(process, master_fd, output, b"alpha")
+        send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
+        send_and_wait(process, master_fd, output, b"c", b"Esc:detail")
         send_and_wait(process, master_fd, output, b"/task Lanes surface", b"/task Lanes surface")
         os.write(master_fd, b"\r")
         chat_body = wait_for_http_request(
@@ -3244,4 +3247,3 @@ def run_chat_clarity_regression(executable: str) -> None:
         },
         extra_env={"NO_COLOR": "1"},
     )
-

@@ -460,17 +460,12 @@ def board_detail_authority_interaction(
         try:
             open_loaded_board(process, master_fd, output, post_count=2)
             fixtures["/api/v1/board?sort_by=hot"] = late_list
-            # The Overview draws the new briefing's attention item, which is
-            # how the walk below knows the refresh reached it.
+            # Home retains the briefing's unreadable-source reason. Use it
+            # to observe the refresh without relying on removed incident cards.
             late_briefing = overview_event_briefing()
-            late_briefing["attention_queue"] = [
-                {
-                    "kind": "fixture_marker",
-                    "severity": "info",
-                    "summary": "late-list-applied",
-                    "target_type": "board",
-                }
-            ]
+            late_briefing["keepers_listing"] = {
+                "state": "unreadable", "detail": "late-list-applied"
+            }
             fixtures["/api/v1/dashboard/briefing"] = (200, late_briefing)
 
             read_available(master_fd, output)
@@ -694,4 +689,3 @@ def run_board_json_regression(executable: str) -> None:
         interact=board_json_interaction(),
         http_fixtures=board_json_http_fixtures(),
     )
-

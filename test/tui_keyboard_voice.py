@@ -663,4 +663,3 @@ def run_voice_scroll_regression(executable: str) -> None:
         interact=voice_scroll_interaction(),
         http_fixtures=voice_scroll_http_fixtures(),
     )
-

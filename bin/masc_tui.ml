@@ -26079,7 +26079,7 @@ and is loaded on demand through keeper_skill.
                        "Cannot open chat: These lanes have no Keeper; use Keepers")
             | Keepers (Keeper_list | Keeper_detail)
               when Option.fold ~none:false
-                ~some:(fun keeper -> keeper.k_origin = Tui_decode.Remote_keeper)
+                ~some:(fun (keeper : keeper) -> keeper.k_origin = Tui_decode.Remote_keeper)
                 (selected_keeper state) ->
               report_action state "error"
                 "Chat requires a matching workspace for attachments and pasted files"

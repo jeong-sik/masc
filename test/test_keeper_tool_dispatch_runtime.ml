@@ -5689,10 +5689,10 @@ let test_frozen_surface_direct_dispatch_accepts_included_exact_descriptor () =
 ;;
 
 (* Direct descriptor dispatch is the only route that can present a descriptor
-   the surface does not hold. A composition plan cannot: create canonicalizes
-   every descriptor through [find_id], indexes nodes by [keeper_model_names]
-   alone, and refuses a name with no model name as [Tool_off_keeper_surface]
-   before execution starts. *)
+   the surface does not hold. A composition plan cannot: create resolves every
+   descriptor by its registered id, indexes nodes by the registered
+   descriptor's [keeper_model_names] alone, and refuses a name with no model
+   name as [Tool_off_keeper_surface] before execution starts. *)
 let test_frozen_surface_rejects_same_id_counterfeit_descriptor () =
   with_exec_fixture "frozen-surface-counterfeit-descriptor"
   @@ fun ~config ~meta ~publication_recovery ~ctx_work ->

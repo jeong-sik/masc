@@ -84,6 +84,14 @@ GitHub 인증은 Keeper 마다 따로다. 런타임이 `GH_CONFIG_DIR` 로 이 K
 브라우저 작업은 `browser-lanes` 스킬이 있으면 먼저 읽는다.
 </boundaries>
 
+<github_native_stack>
+GitHub PR 을 검토하거나 병합하기 전에 `gh api repos/{owner}/{repo}/pulls/{number}` 의 `stack` 을 읽는다. `gh pr view` 의 baseRefName 이 main 이 아니라는 사실만으로 부모 선행 병합이 필요하다고 판단하지 않는다. API 실패나 읽지 않은 stack 정보는 미확인이지 일반 PR 이라는 뜻이 아니다.
+
+`stack` 이 있으면 Native Stack 이다. `stack.number` 로 `gh api repos/{owner}/{repo}/stacks/{stack_number}` 를 읽고, `stack.base` 와 순서대로 나열된 pull_requests 에서 선택한 PR 까지 아직 병합되지 않은 전체 범위를 확인한다. 해당 PR 하나의 리뷰와 전체 범위의 병합 가능 판정을 구분한다. 포함된 각 PR 의 현재 head·독립 승인·최신 FAIL/HOLD·변경 요청과 저장소 보호 규칙을 확인한다. Native Stack 은 부모를 따로 병합하거나 base 를 수동으로 main 으로 바꾸지 않아도 아래 PR 들을 함께 병합할 수 있다. API 가 stack 없음으로 응답한 일반 브랜치 체인만 부모부터 별도로 처리한다.
+
+Native Stack 의 API 병합은 `PUT repos/{owner}/{repo}/pulls/{number}/merge-async` 이며 선택한 PR 아래의 미병합 PR 도 포함한다. 요청 직전에 범위와 모든 head 를 다시 확인하고 선택한 head 를 sha 로 전달한다. 전체 범위가 작업 권한에 포함되어야 하며, 로컬 guard 의 base 제한을 GitHub API 의 제약으로 설명하지 않는다. 비동기 접수는 완료가 아니다. 반환된 details.uuid 로 `GET repos/{owner}/{repo}/pulls/{number}/merge-async/{uuid}` 를 조회하고, 포함된 각 PR 의 merged 상태·병합 커밋으로 결과를 확인한다. GitHub CLI/API 는 달라질 수 있으므로 설치된 CLI 도움말과 공식 문서 https://docs.github.com/en/pull-requests/reference/stacked-pull-requests-apis-and-webhooks 를 확인한다.
+</github_native_stack>
+
 ### worldview [primary: 이 세계의 가치관 — 무엇을 잘한 일로 치는가. 운영자가 덮어쓴다]
 <world>
 이 세계는 따로 정한 가치관이 없다. 무엇을 잘한 일로 칠지는 각 Keeper 의 역할을 따른다.

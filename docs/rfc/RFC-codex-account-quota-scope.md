@@ -57,14 +57,15 @@ Codex 가 한도를 매기는 단위는 홈이 아니라 **ChatGPT 계정**이�
 ### 한도 소진이 기록되고 읽히는 길
 
 - Codex turn 이 `usageLimitExceeded` 나 `sessionBudgetExceeded` 로 거절되면 둘 다 "사용량 소진" 으로 묶이고
-  (`lib/runtime/runtime_codex_app_server.ml:462-465`), `HardQuota { retry_after = None }` 가 된다 (`lib/keeper/keeper_codex_runtime.ml:498-507`).
+  (`lib/runtime/runtime_codex_app_server.ml:462-465`), `HardQuota { retry_after = None }` 가 된다 (`lib/keeper/keeper_codex_runtime.ml:503-510`).
 - turn driver 는 이를 `Hard_quota` 경로로 읽고, 리셋 시각이 없으니
   `Runtime_quota_window.note_observed_exhausted ~scope` 를 부른다 (`lib/keeper/keeper_turn_driver.ml:845-853`, `:913-915`).
   scope 는 dispatch 직전에 잡은 후보의 scope 다 (`:791`). 이 scope 를 주는 함수는 후보 순서에도 쓰인다 (`:594`, `:617-623`, `:715`).
 - 이 기록에는 끝나는 시각이 없다. 같은 scope 로 호출이 한 번 통과해야 지워진다 (`lib/runtime/runtime_quota_window.ml:36-50`, RFC-0433).
 - 후보 순서는 scope 가 소진인지 묻고, 소진이면 뒤로 보낸다 (`lib/keeper/keeper_turn_driver.ml:202-245`).
-- 거절 뒤에는 같은 홈으로 `account/rateLimits/read` 를 백그라운드에서 한 번 읽는다 (`lib/keeper/keeper_codex_runtime.ml:296-304`, `:1432-1436`).
-  이 결과는 운영자에게 보여 주는 사용량 표에만 들어간다.
+- 거절 뒤에는 같은 홈으로 `account/rateLimits/read` 를 백그라운드에서 한 번 읽는다 (`lib/keeper/keeper_codex_runtime.ml:296-308`, `:1436-1441`).
+  이 결과는 운영자에게 보여 주는 사용량 표에 들어간다. 거절은 `limit_id`를 주지 않으므로
+  읽기 결과의 버킷을 거절된 호출에 연결할 수 없다. 기존 `Observed`를 유지하고 리셋을 추론하지 않는다.
 
 ### 사용량 창이 기록되고 보이는 길
 
@@ -486,7 +487,7 @@ MASC 규칙은 "새 상태·필드·Gate 는 없을 때 durable truth 가 손상
 | Vision (`lib/keeper/keeper_vision_tool.ml:84-89`, `:540-543`, `:721-722`) | runtime scope | 순서는 scope 들. 기록은 HTTP execution 의 `load_time_scope` |
 | 사용량 읽기 시작·거절 뒤 (`lib/runtime/runtime_provider_usage_read.ml:58-80`, `:354-384`) | runtime scope 로 중복 제거, 그 scope 에 기록 | Codex 는 홈 단위로 읽고, 답한 계정으로 `observe` 하고 그 계정에 기록 |
 | 403 뒤 HTTP 읽기 (`read_runtime_after_account_refusal`, `:496`) | runtime scope | HTTP execution 의 `load_time_scope`. 동작은 같다 |
-| Codex turn 사용량 알림·거절 뒤 읽기 (`lib/keeper/keeper_codex_runtime.ml:285-304`, `:372-379`) | turn 시작 때 다시 계산한 홈 scope | `quota_write_owner` 의 첫 scope |
+| Codex turn 사용량 알림·거절 뒤 읽기 (`lib/keeper/keeper_codex_runtime.ml:285-308`, `:372-379`) | turn 시작 때 다시 계산한 홈 scope | `quota_write_owner` 의 첫 scope |
 | `/api/v1/runtime/resolved` (`lib/server/server_dashboard_runtime_resolved_json.ml:39-76`, `:233-305`) | runtime scope 로 묶음, runtime 줄에 scope 하나 | 스냅숏 한 번, 묶음별 소진·주인 종류, runtime 줄의 `usage_scope` |
 | TUI (`lib/tui_decode.mli:883-885`, `:2951-2960`, `bin/masc_tui_overview_providers.ml:200-215`, `bin/masc_tui_render_prim.ml:3011`, `bin/masc_tui_types.ml:10303`, `bin/masc_tui_render.ml:12354`) | runtime 줄의 `ro_quota_scope` 로 소진 조인 | 묶음의 소진 값을 읽는다. runtime 목록은 `quota_exhausted` 를 그대로 쓴다 |
 | dashboard (`dashboard/src/api/schemas/runtime-resolved.ts`, `dashboard/src/components/overview/runtime-stats.ts`) | 같음 | 새 필드 schema |

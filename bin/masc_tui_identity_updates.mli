@@ -1,11 +1,6 @@
 (** Apply Identity responses on the UI state owner fiber. Reporting and
     provider refresh effects are supplied by the caller. *)
 
-type identity_login_result =
-  | Login_started of { provider_id : string; label : string; url : string }
-  | Login_attached of string
-  | Login_failed of string
-
 val github_view_loaded :
   Masc_tui_types.state -> Masc_tui_types.detail_read_request ->
   (string list, string) result -> unit
@@ -19,12 +14,12 @@ val switch_set :
 
 val providers_loaded :
   Masc_tui_types.state -> Masc_tui_types.detail_read_request ->
-  (Masc_tui_types.identity_provider list, string) result -> unit
+  (Masc_tui_identity_model.identity_provider list, string) result -> unit
 (** Apply only a current selected-Keeper read; clear a tracked login only when
     the refreshed provider inventory proves it landed. *)
 
 val login_started :
-  Masc_tui_types.state -> keeper_name:string -> identity_login_result -> unit
+  Masc_tui_types.state -> keeper_name:string -> Masc_tui_identity_model.identity_login_result -> unit
 (** Keep the Keeper-stamped login or the existing attached/refusal notice. *)
 
 val app_saved :

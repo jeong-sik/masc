@@ -4763,7 +4763,7 @@ let secret_lines (state : state) (k : keeper) =
       |> Option.some
 
 (* The Identity tab's body. Numbering comes from
-   [Masc_tui_types.identity_connectable], which is also what the key handler
+   [Masc_tui_identity_model.identity_connectable], which is also what the key handler
    indexes, so the number on screen and the provider a keypress starts are
    the same list. *)
 let identity_lines (state : state) (k : keeper) ~cols providers =
@@ -4772,13 +4772,13 @@ let identity_lines (state : state) (k : keeper) ~cols providers =
      numbered the whole set while the keys acted on a subset would start the
      wrong service. *)
   let query = Option.value state.identity_filter ~default:"" in
-  let connectable = Masc_tui_types.identity_connectable ~query providers in
+  let connectable = Masc_tui_identity_model.identity_connectable ~query providers in
   let tools_of id =
     List.find_map
       (function
-        | Masc_tui_types.Identity_declared { idp_id; idp_tools; _ }
+        | Masc_tui_identity_model.Identity_declared { idp_id; idp_tools; _ }
           when String.equal idp_id id -> Some idp_tools
-        | Masc_tui_types.Identity_declared _ | Masc_tui_types.Identity_unreadable _ ->
+        | Masc_tui_identity_model.Identity_declared _ | Masc_tui_identity_model.Identity_unreadable _ ->
             None)
       providers
     |> Option.join
@@ -4790,9 +4790,9 @@ let identity_lines (state : state) (k : keeper) ~cols providers =
   let also_on id =
     List.find_map
       (function
-        | Masc_tui_types.Identity_declared { idp_id; idp_also_on; _ }
+        | Masc_tui_identity_model.Identity_declared { idp_id; idp_also_on; _ }
           when String.equal idp_id id -> Some idp_also_on
-        | Masc_tui_types.Identity_declared _ | Masc_tui_types.Identity_unreadable _
+        | Masc_tui_identity_model.Identity_declared _ | Masc_tui_identity_model.Identity_unreadable _
           -> None)
       providers
     |> Option.value ~default:[]
@@ -4802,12 +4802,12 @@ let identity_lines (state : state) (k : keeper) ~cols providers =
       (fun index (id, label) ->
         (* Attached-and-offering-nothing is a third state. Reading it as "not
            attached" would tell an operator to consent again for no reason.
-           The reading itself is [Masc_tui_types.identity_row_state], which
+           The reading itself is [Masc_tui_identity_model.identity_row_state], which
            is also what the summary above the list counts, so the line and
            the rows cannot disagree about what this Keeper holds. *)
         let row_state =
-          match Masc_tui_types.identity_row_state ~providers ~id with
-          | Masc_tui_types.Identity_not_attached ->
+          match Masc_tui_identity_model.identity_row_state ~providers ~id with
+          | Masc_tui_identity_model.Identity_not_attached ->
               Ansi.dim ^ "not attached" ^ Ansi.reset
           | Identity_attached_without_tools ->
               Ansi.dim ^ "attached, no tools" ^ Ansi.reset
@@ -4823,7 +4823,7 @@ let identity_lines (state : state) (k : keeper) ~cols providers =
            and the marker is what says which one enter would start. *)
         let here =
           index
-          = Masc_tui_types.identity_cursor_clamped ~query ~providers
+          = Masc_tui_identity_model.identity_cursor_clamped ~query ~providers
               state.identity_cursor
         in
         let marker = if here then Theme.ok () ^ ">" ^ Ansi.reset else " " in
@@ -4857,8 +4857,8 @@ let identity_lines (state : state) (k : keeper) ~cols providers =
   let rejected =
     List.filter_map
       (function
-        | Masc_tui_types.Identity_declared _ -> None
-        | Masc_tui_types.Identity_unreadable { idp_id; idp_problem } ->
+        | Masc_tui_identity_model.Identity_declared _ -> None
+        | Masc_tui_identity_model.Identity_unreadable { idp_id; idp_problem } ->
             Some
               (Printf.sprintf "  -  %s  %s%s%s"
                  (Terminal_text.single_line idp_id)
@@ -4902,7 +4902,7 @@ let identity_lines (state : state) (k : keeper) ~cols providers =
     Option.map fst state.identity_attempt_error
   in
   let attempt =
-    Masc_tui_types.identity_notice ~cols
+    Masc_tui_identity_model.identity_notice ~cols
       (Option.map
          (fun (kind, text) -> (kind, Terminal_text.single_line text))
          state.identity_attempt_error)
@@ -4913,8 +4913,8 @@ let identity_lines (state : state) (k : keeper) ~cols providers =
   let attempt =
     let body =
       match attempt_kind with
-      | Some Masc_tui_types.Notice_ok -> Theme.ok ()
-      | Some Masc_tui_types.Notice_bad | None -> Theme.bad ()
+      | Some Masc_tui_identity_model.Notice_ok -> Theme.ok ()
+      | Some Masc_tui_identity_model.Notice_bad | None -> Theme.bad ()
     in
     List.mapi
       (fun index line ->
@@ -4929,22 +4929,22 @@ let identity_lines (state : state) (k : keeper) ~cols providers =
   let filter_rows =
     List.map
       (fun line -> if line = "" then line else Theme.ok () ^ line ^ Ansi.reset)
-      (Masc_tui_types.identity_filter_rows ~providers state.identity_filter)
+      (Masc_tui_identity_model.identity_filter_rows ~providers state.identity_filter)
   in
   if numbered = [] && rejected = [] && state.identity_filter <> None then
-    Masc_tui_types.identity_preamble
-      ~summary:(Masc_tui_types.identity_summary ~providers ~query)
+    Masc_tui_identity_model.identity_preamble
+      ~summary:(Masc_tui_identity_model.identity_summary ~providers ~query)
       ~notice:
-        (attempt @ started @ Masc_tui_types.identity_app_form_rows state.identity_app_form
+        (attempt @ started @ Masc_tui_identity_model.identity_app_form_rows state.identity_app_form
         @ filter_rows)
     @ [ Ansi.dim ^ "  Nothing here matches. esc to see them all." ^ Ansi.reset ]
   else if numbered = [] && rejected = [] then
     [ Ansi.dim ^ "  Nothing is declared under config/identity/." ^ Ansi.reset ]
   else
-    Masc_tui_types.identity_preamble
-      ~summary:(Masc_tui_types.identity_summary ~providers ~query)
+    Masc_tui_identity_model.identity_preamble
+      ~summary:(Masc_tui_identity_model.identity_summary ~providers ~query)
       ~notice:
-        (attempt @ started @ Masc_tui_types.identity_app_form_rows state.identity_app_form
+        (attempt @ started @ Masc_tui_identity_model.identity_app_form_rows state.identity_app_form
         @ filter_rows)
     @ numbered @ rejected @ attached_tool_lines
 

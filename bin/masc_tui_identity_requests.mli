@@ -20,7 +20,7 @@ val launch_switch :
 val launch_app_save :
   Masc_tui_types.state -> host:string ->
   deliver:(Masc_tui_async_protocol.async_msg -> unit) ->
-  form:Masc_tui_types.identity_app_form -> unit
+  form:Masc_tui_identity_model.identity_app_form -> unit
 (** Capture all form fields before the daemon begins, then preserve the
     typed scope-count decode and the existing unreadable-reply error. *)
 

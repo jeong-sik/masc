@@ -421,13 +421,13 @@ let move_identity_cursor (state : state) ~delta =
   | Some (_, providers) ->
       let count =
         List.length
-          (Masc_tui_types.identity_connectable ~query:(identity_query state)
+          (Masc_tui_identity_model.identity_connectable ~query:(identity_query state)
              providers)
       in
       if count > 0 then begin
         let query = identity_query state in
         let cursor =
-          Masc_tui_types.identity_cursor_clamped ~query ~providers
+          Masc_tui_identity_model.identity_cursor_clamped ~query ~providers
             state.identity_cursor
         in
         let cursor = Masc_tui_scroll.cursor_move ~count ~delta cursor in
@@ -441,16 +441,16 @@ let move_identity_cursor (state : state) ~delta =
             state.detail_scroll <-
               Masc_tui_scroll.ensure_visible
                 ~cursor:
-                  (Masc_tui_types.identity_provider_line
+                  (Masc_tui_identity_model.identity_provider_line
                      ~summary:
-                       (Masc_tui_types.identity_summary ~providers ~query)
+                       (Masc_tui_identity_model.identity_summary ~providers ~query)
                      ~notice:
-                       (Masc_tui_types.identity_notice
+                       (Masc_tui_identity_model.identity_notice
                           ~cols:(identity_pane_columns state)
                           state.identity_attempt_error
-                       @ Masc_tui_types.identity_app_form_rows
+                       @ Masc_tui_identity_model.identity_app_form_rows
                            state.identity_app_form
-                       @ Masc_tui_types.identity_filter_rows ~providers
+                       @ Masc_tui_identity_model.identity_filter_rows ~providers
                            state.identity_filter)
                      ~index:cursor)
                 ~height state.detail_scroll
@@ -17401,7 +17401,7 @@ and is loaded on demand through keeper_skill.
                 state.lane_addons <- Some (Masc_tui_lane_addons.paste_action
                   ~text:paste.Masc_tui_paste.text view)
             | Some ({ draft = Some draft; _ } as view) ->
-                state.lane_addons <- Some { view with draft = Some (draft ^ Masc_tui_types.identity_field_paste paste.Masc_tui_paste.text) }
+                state.lane_addons <- Some { view with draft = Some (draft ^ Masc_tui_identity_model.identity_field_paste paste.Masc_tui_paste.text) }
             | Some _ | None -> ())
        | Some (Mouse_wheel _) | Some (Mouse_left_press _) | Some (Mouse_left_release _)
          when Option.is_some state.account_login -> ()
@@ -17424,7 +17424,7 @@ and is loaded on demand through keeper_skill.
              state.account_login
        | Some (Pasted paste) when Option.is_some text_target ->
            let text =
-             Masc_tui_types.identity_field_paste paste.Masc_tui_paste.text
+             Masc_tui_identity_model.identity_field_paste paste.Masc_tui_paste.text
            in
            (match text_target with
             | None -> ()
@@ -17499,21 +17499,21 @@ and is loaded on demand through keeper_skill.
                   (fun form ->
                     state.identity_app_form <-
                       Some
-                        (match form.Masc_tui_types.iaf_field with
-                         | Masc_tui_types.App_client_id ->
+                        (match form.Masc_tui_identity_model.iaf_field with
+                         | Masc_tui_identity_model.App_client_id ->
                            { form with
-                             Masc_tui_types.iaf_client_id =
-                               form.Masc_tui_types.iaf_client_id ^ text
+                             Masc_tui_identity_model.iaf_client_id =
+                               form.Masc_tui_identity_model.iaf_client_id ^ text
                            }
-                         | Masc_tui_types.App_client_secret ->
+                         | Masc_tui_identity_model.App_client_secret ->
                            { form with
-                             Masc_tui_types.iaf_client_secret =
-                               form.Masc_tui_types.iaf_client_secret ^ text
+                             Masc_tui_identity_model.iaf_client_secret =
+                               form.Masc_tui_identity_model.iaf_client_secret ^ text
                            }
-                         | Masc_tui_types.App_scopes ->
+                         | Masc_tui_identity_model.App_scopes ->
                            { form with
-                             Masc_tui_types.iaf_scopes =
-                               form.Masc_tui_types.iaf_scopes ^ text
+                             Masc_tui_identity_model.iaf_scopes =
+                               form.Masc_tui_identity_model.iaf_scopes ^ text
                            }))
                   state.identity_app_form
             | Some Text_identity_filter ->
@@ -19402,41 +19402,41 @@ and is loaded on demand through keeper_skill.
                let set text =
                  state.identity_app_form <-
                    Some
-                     (match form.Masc_tui_types.iaf_field with
-                      | Masc_tui_types.App_client_id ->
-                        { form with Masc_tui_types.iaf_client_id = text }
-                      | Masc_tui_types.App_client_secret ->
-                        { form with Masc_tui_types.iaf_client_secret = text }
-                      | Masc_tui_types.App_scopes ->
-                        { form with Masc_tui_types.iaf_scopes = text })
+                     (match form.Masc_tui_identity_model.iaf_field with
+                      | Masc_tui_identity_model.App_client_id ->
+                        { form with Masc_tui_identity_model.iaf_client_id = text }
+                      | Masc_tui_identity_model.App_client_secret ->
+                        { form with Masc_tui_identity_model.iaf_client_secret = text }
+                      | Masc_tui_identity_model.App_scopes ->
+                        { form with Masc_tui_identity_model.iaf_scopes = text })
                in
                let current =
-                 match form.Masc_tui_types.iaf_field with
-                 | Masc_tui_types.App_client_id -> form.Masc_tui_types.iaf_client_id
-                 | Masc_tui_types.App_client_secret ->
-                   form.Masc_tui_types.iaf_client_secret
-                 | Masc_tui_types.App_scopes -> form.Masc_tui_types.iaf_scopes
+                 match form.Masc_tui_identity_model.iaf_field with
+                 | Masc_tui_identity_model.App_client_id -> form.Masc_tui_identity_model.iaf_client_id
+                 | Masc_tui_identity_model.App_client_secret ->
+                   form.Masc_tui_identity_model.iaf_client_secret
+                 | Masc_tui_identity_model.App_scopes -> form.Masc_tui_identity_model.iaf_scopes
                in
                match k with
                | "esc" -> state.identity_app_form <- None
                | "\127" | "\b" ->
                  set (Masc_tui_message_layout.drop_last_utf8_scalar current)
                | "\r" | "\n" -> (
-                   match form.Masc_tui_types.iaf_field with
-                   | Masc_tui_types.App_client_id ->
+                   match form.Masc_tui_identity_model.iaf_field with
+                   | Masc_tui_identity_model.App_client_id ->
                      state.identity_app_form <-
                        Some
                          { form with
-                           Masc_tui_types.iaf_field =
-                             Masc_tui_types.App_client_secret
+                           Masc_tui_identity_model.iaf_field =
+                             Masc_tui_identity_model.App_client_secret
                          }
-                   | Masc_tui_types.App_client_secret ->
+                   | Masc_tui_identity_model.App_client_secret ->
                      state.identity_app_form <-
                        Some
                          { form with
-                           Masc_tui_types.iaf_field = Masc_tui_types.App_scopes
+                           Masc_tui_identity_model.iaf_field = Masc_tui_identity_model.App_scopes
                          }
-                   | Masc_tui_types.App_scopes ->
+                   | Masc_tui_identity_model.App_scopes ->
                      Masc_tui_identity_requests.launch_app_save state ~host:server_peer_host ~deliver:(fun message -> enqueue_async async_messages message)
                        ~form;
                      state.identity_app_form <- None)
@@ -19642,7 +19642,7 @@ and is loaded on demand through keeper_skill.
             | Some keeper, Some (stamp, providers)
               when String.equal stamp keeper.k_name -> (
                 match
-                  Masc_tui_types.identity_cursor_provider
+                  Masc_tui_identity_model.identity_cursor_provider
                     ~query:(identity_query state) ~providers
                     state.identity_cursor
                 with
@@ -19650,7 +19650,7 @@ and is loaded on demand through keeper_skill.
                     let row =
                       List.find_map
                         (function
-                          | Masc_tui_types.Identity_declared
+                          | Masc_tui_identity_model.Identity_declared
                               { idp_id
                               ; idp_tools
                               ; idp_enabled
@@ -19659,8 +19659,8 @@ and is loaded on demand through keeper_skill.
                               }
                             when String.equal idp_id provider_id ->
                               Some (idp_tools, idp_enabled, idp_switch_problem)
-                          | Masc_tui_types.Identity_declared _
-                          | Masc_tui_types.Identity_unreadable _ -> None)
+                          | Masc_tui_identity_model.Identity_declared _
+                          | Masc_tui_identity_model.Identity_unreadable _ -> None)
                         providers
                     in
                     match row with
@@ -19672,7 +19672,7 @@ and is loaded on demand through keeper_skill.
                     | Some (Some _, _, Some problem) ->
                         state.identity_attempt_error <-
                           Some
-                            ( Masc_tui_types.Notice_bad
+                            ( Masc_tui_identity_model.Notice_bad
                             , "switch store unreadable: " ^ problem )
                     | Some (None, _, _) | None ->
                         report_action state "system"
@@ -19687,7 +19687,7 @@ and is loaded on demand through keeper_skill.
            | Some keeper, Some (stamp, providers)
              when String.equal stamp keeper.k_name -> (
                match
-                 Masc_tui_types.identity_cursor_provider
+                 Masc_tui_identity_model.identity_cursor_provider
                    ~query:(identity_query state) ~providers
                    state.identity_cursor
                with
@@ -19695,9 +19695,9 @@ and is loaded on demand through keeper_skill.
                  state.identity_attempt_error <- None;
                  state.identity_app_form <-
                    Some
-                     { Masc_tui_types.iaf_provider = provider_id
+                     { Masc_tui_identity_model.iaf_provider = provider_id
                      ; iaf_label = label
-                     ; iaf_field = Masc_tui_types.App_client_id
+                     ; iaf_field = Masc_tui_identity_model.App_client_id
                      ; iaf_client_id = ""
                      ; iaf_client_secret = ""
                      ; iaf_scopes = ""
@@ -19734,7 +19734,7 @@ and is loaded on demand through keeper_skill.
                | Some keeper, Some (stamp, providers)
                  when String.equal stamp keeper.k_name -> (
                    match
-                     Masc_tui_types.identity_cursor_provider
+                     Masc_tui_identity_model.identity_cursor_provider
                        ~query:(identity_query state) ~providers
                        state.identity_cursor
                    with
@@ -20521,7 +20521,7 @@ and is loaded on demand through keeper_skill.
              when String.equal stamp keeper.k_name -> (
                match
                  List.nth_opt
-                   (Masc_tui_types.identity_connectable
+                   (Masc_tui_identity_model.identity_connectable
                       ~query:(identity_query state) providers)
                    wanted
                with
@@ -20544,10 +20544,10 @@ and is loaded on demand through keeper_skill.
                let attached =
                  List.filter_map
                    (function
-                     | Masc_tui_types.Identity_declared
+                     | Masc_tui_identity_model.Identity_declared
                          { idp_id; idp_tools = Some _; _ } -> Some idp_id
-                     | Masc_tui_types.Identity_declared _
-                     | Masc_tui_types.Identity_unreadable _ -> None)
+                     | Masc_tui_identity_model.Identity_declared _
+                     | Masc_tui_identity_model.Identity_unreadable _ -> None)
                    providers
                in
                if attached <> [] then
@@ -23121,7 +23121,7 @@ and is loaded on demand through keeper_skill.
            | Some keeper, Some (stamp, providers)
              when String.equal stamp keeper.k_name -> (
                match
-                 Masc_tui_types.identity_cursor_provider
+                 Masc_tui_identity_model.identity_cursor_provider
                    ~query:(identity_query state) ~providers
                    state.identity_cursor
                with

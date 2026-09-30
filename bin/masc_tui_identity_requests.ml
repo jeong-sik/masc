@@ -47,12 +47,12 @@ let launch_switch state ~host ~deliver ~keeper_name ~provider_id ~enabled =
 (* Recording an app the operator made. Answers on the same notice line a
    failed attempt uses -- what an operator wants after pressing save is one
    sentence saying whether it took, in the place they are already reading. *)
-let launch_app_save state ~host ~deliver ~(form : Masc_tui_types.identity_app_form) =
+let launch_app_save state ~host ~deliver ~(form : Masc_tui_identity_model.identity_app_form) =
   let port = state.port in
-  let provider_id = form.Masc_tui_types.iaf_provider in
-  let client_id = form.Masc_tui_types.iaf_client_id in
-  let client_secret = form.Masc_tui_types.iaf_client_secret in
-  let scopes = form.Masc_tui_types.iaf_scopes in
+  let provider_id = form.Masc_tui_identity_model.iaf_provider in
+  let client_id = form.Masc_tui_identity_model.iaf_client_id in
+  let client_secret = form.Masc_tui_identity_model.iaf_client_secret in
+  let scopes = form.Masc_tui_identity_model.iaf_scopes in
   let run () =
     let result =
       try
@@ -94,7 +94,7 @@ let launch_login state ~host ~deliver ~keeper_name ~provider_id ~label =
         match
           Masc_tui_http.post_keeper_oauth_login ~host ~port ~keeper_name ~provider_id
         with
-        | Error err -> Masc_tui_identity_updates.Login_failed err
+        | Error err -> Masc_tui_identity_model.Login_failed err
         | Ok json ->
           (match json with
            | `Assoc fields ->
@@ -106,7 +106,7 @@ let launch_login state ~host ~deliver ~keeper_name ~provider_id ~label =
                   | _ -> label ^ ": credentials attached."
                 in
                 deliver (Identity_refreshed (keeper_name, Ok ()));
-                Masc_tui_identity_updates.Login_attached msg
+                Masc_tui_identity_model.Login_attached msg
               | _ ->
                 (match List.assoc_opt "authorize_url" fields with
                  | Some (`String url) ->
@@ -122,16 +122,16 @@ let launch_login state ~host ~deliver ~keeper_name ~provider_id ~label =
                            no opener. *)
                    (match Masc_tui_browser.open_url url with
                     | Ok _ | Error _ -> ());
-                   Masc_tui_identity_updates.Login_started { provider_id; label; url }
+                   Masc_tui_identity_model.Login_started { provider_id; label; url }
                  | Some _ | None ->
-                   Masc_tui_identity_updates.Login_failed
+                   Masc_tui_identity_model.Login_failed
                      "the server answered without an authorize_url"))
            | _ ->
-             Masc_tui_identity_updates.Login_failed
+             Masc_tui_identity_model.Login_failed
                "the server answered with something this cannot read")
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Masc_tui_identity_updates.Login_failed (Printexc.to_string exn)
+      | exn -> Masc_tui_identity_model.Login_failed (Printexc.to_string exn)
     in
     deliver (Identity_login_started (keeper_name, result))
   in
@@ -143,7 +143,7 @@ let launch_login state ~host ~deliver ~keeper_name ~provider_id ~label =
   | None ->
     deliver
       (Identity_login_started
-         (keeper_name, Masc_tui_identity_updates.Login_failed "Eio switch is unavailable"))
+         (keeper_name, Masc_tui_identity_model.Login_failed "Eio switch is unavailable"))
 ;;
 
 (* Ask every attached service again what tools it has. An operator action

@@ -160,9 +160,9 @@ let test_the_identity_form_claims_before_its_filter () =
     (resolved state);
   state.Tui_types.identity_app_form <-
     Some
-      { Tui_types.iaf_provider = "github"
+      { Masc_tui_identity_model.iaf_provider = "github"
       ; iaf_label = "GitHub"
-      ; iaf_field = Tui_types.App_client_id
+      ; iaf_field = Masc_tui_identity_model.App_client_id
       ; iaf_client_id = ""
       ; iaf_client_secret = ""
       ; iaf_scopes = ""

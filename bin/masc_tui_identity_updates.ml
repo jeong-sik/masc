@@ -2,15 +2,6 @@
 
 open Masc_tui_types
 
-type identity_login_result =
-  | Login_started of
-      { provider_id : string
-      ; label : string
-      ; url : string
-      }
-  | Login_attached of string
-  | Login_failed of string
-
 let github_view_loaded (state : state) request result =
   let keeper_name = request.drr_keeper in
   let current = Masc_tui_types.finish_detail_read state request in
@@ -43,7 +34,7 @@ let switch_set (state : state) ~keeper_name ~provider_id ~enabled ~report ~refre
     refresh keeper_name
   | Error detail ->
     state.identity_attempt_error
-    <- Some (Masc_tui_types.Notice_bad, Printf.sprintf "switch %s: %s" provider_id detail)
+    <- Some (Masc_tui_identity_model.Notice_bad, Printf.sprintf "switch %s: %s" provider_id detail)
 ;;
 
 let providers_loaded (state : state) request result =
@@ -65,7 +56,7 @@ let providers_loaded (state : state) request result =
                asking again -- a poll with no end condition is a poll that
                runs for the life of the process. *)
       (match state.identity_login with
-       | Some login when Masc_tui_types.identity_login_landed ~providers ~login ->
+       | Some login when Masc_tui_identity_model.identity_login_landed ~providers ~login ->
          state.identity_login <- None
        | Some _ | None -> ())
     | Error detail -> state.identity_view_error <- Some detail)
@@ -73,7 +64,7 @@ let providers_loaded (state : state) request result =
 
 let login_started (state : state) ~keeper_name result =
   match result with
-  | Login_started { provider_id; label; url } ->
+  | Masc_tui_identity_model.Login_started { provider_id; label; url } ->
     state.identity_login
     <- Some
          { ils_keeper = keeper_name
@@ -87,10 +78,10 @@ let login_started (state : state) ~keeper_name result =
          rather than instead of it -- one provider refusing is not a reason
          to take the others off the screen, and the message that matters
          most here is the one telling them what to do about it. *)
-  | Login_attached msg ->
-    state.identity_attempt_error <- Some (Masc_tui_types.Notice_ok, msg)
-  | Login_failed detail ->
-    state.identity_attempt_error <- Some (Masc_tui_types.Notice_bad, detail)
+  | Masc_tui_identity_model.Login_attached msg ->
+    state.identity_attempt_error <- Some (Masc_tui_identity_model.Notice_ok, msg)
+  | Masc_tui_identity_model.Login_failed detail ->
+    state.identity_attempt_error <- Some (Masc_tui_identity_model.Notice_bad, detail)
 ;;
 
 let app_saved (state : state) ~provider_id result =
@@ -98,20 +89,20 @@ let app_saved (state : state) ~provider_id result =
   <- Some
        (match result with
         | Ok 0 ->
-          ( Masc_tui_types.Notice_ok
+          ( Masc_tui_identity_model.Notice_ok
           , Printf.sprintf
               "%s: app recorded. No scopes given, so the service's own list is what will \
                be asked for."
               provider_id )
         | Ok count ->
-          ( Masc_tui_types.Notice_ok
+          ( Masc_tui_identity_model.Notice_ok
           , Printf.sprintf
               "%s: app recorded, asking for %d scope%s."
               provider_id
               count
               (if count = 1 then "" else "s") )
         | Error detail ->
-          Masc_tui_types.Notice_bad, Printf.sprintf "%s: %s" provider_id detail)
+          Masc_tui_identity_model.Notice_bad, Printf.sprintf "%s: %s" provider_id detail)
 ;;
 
 let refreshed (state : state) ~keeper_name ~refresh result =

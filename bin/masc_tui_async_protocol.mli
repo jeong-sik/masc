@@ -487,12 +487,12 @@ type async_msg =
       string * (Masc_tui_mcp.resource_content list, string) result
   | Github_identity_view_loaded of Masc_tui_types.detail_read_request * (string list, string) result
   | Identity_providers_loaded of
-      Masc_tui_types.detail_read_request * (Masc_tui_types.identity_provider list, string) result
+      Masc_tui_types.detail_read_request * (Masc_tui_identity_model.identity_provider list, string) result
   | Identity_switch_set of
       string * string * bool * (unit, string) result
       (** keeper, provider, the state the operator asked for, and whether
           the server took it. *)
-  | Identity_login_started of string * Masc_tui_identity_updates.identity_login_result
+  | Identity_login_started of string * Masc_tui_identity_model.identity_login_result
   | Identity_refreshed of string * (unit, string) result
   | Identity_app_saved of string * (int, string) result
       (** provider id, then how many scopes were recorded *)

@@ -74,7 +74,7 @@ let test_the_still_portrait_the_name_draws () =
   let shown = Option.get (band ~display:pixels ()) in
   let body = Look.body_of_name alpha and equipment = Look.bare in
   let drawn = Draw.render body equipment shown.Portrait.box.View.size in
-  check bool "placed pixels keep the full portrait" true
+  check bool "placed pixels keep the full portrait with server equipment" true
     (String.equal drawn.Draw.rgba shown.Portrait.image.Draw.rgba);
   let mosaic = Option.get (band ()) in
   let compact = Draw.render_compact_posed body equipment Draw.still mosaic.Portrait.box.View.size in
@@ -189,6 +189,10 @@ let test_equipment_change_replaces_same_keeper_pixels () =
   check string "server equipment determines actual pixels" expected.Draw.rgba second.Portrait.image.Draw.rgba;
   let unchanged = Option.get (band ~cache ~display:pixels ~equipment:equipped ()) in
   check bool "unchanged equipment reuses the cache" true (second.Portrait.image == unchanged.Portrait.image);
+  let mosaic = Option.get (band ~cache ~equipment:equipped ()) in
+  let compact = Draw.render_compact_posed (Look.body_of_name alpha) equipped Draw.still mosaic.Portrait.box.View.size in
+  check string "mosaic keeps the server equipment in compact pixels"
+    compact.Draw.rgba mosaic.Portrait.image.Draw.rgba;
   let placement band = Option.get (Portrait.placement band ~scroll:0
     ~visible_rows:band.Portrait.box.View.rows ~origin:(4,2)) in
   ignore (frame []);

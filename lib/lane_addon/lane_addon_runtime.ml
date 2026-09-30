@@ -21,7 +21,7 @@ type connection = {
   container_id : string;
 }
 type backend = {
-  start : sw:Eio.Switch.t -> instance_id:string -> package:package ->
+  start : sw:Eio.Switch.t -> instance_id:string -> package:package -> binding:Yojson.Safe.t ->
     on_created:(connection -> unit) -> (connection, string) result;
   acquire : access:Lane_addon_sources.access -> store:Lane_addon_store.t -> package:package ->
     resolve_lane_output:(installation_id:string -> (Lane_addon_sources.lane_output, string) result) ->
@@ -82,6 +82,8 @@ let fleet_backend = ref None
 let register_fleet_backend backend = fleet_backend := Some backend
 let delivery_handler = ref None
 let register_delivery_handler handler = delivery_handler := Some handler
+let sampling_factory = ref None
+let register_sampling_factory factory = sampling_factory := Some factory
 let text fields key = match List.assoc_opt key fields with
   | Some (`String value) when String.trim value <> "" -> Ok value
   | _ -> Error (key ^ " requires a non-blank string")
@@ -593,7 +595,7 @@ let run ~sw backend m e =
           (match persist m e with Ok () -> () | Error message ->
             e.stopping <- true; e.phase <- Failed message);
           if e.stopping then stop_entry ~sw ~backend m e in
-        match backend.start ~sw:worker_sw ~instance_id:e.instance_id ~package:e.package ~on_created:created with
+        match backend.start ~sw:worker_sw ~instance_id:e.instance_id ~package:e.package ~binding:e.binding ~on_created:created with
         | Error message ->
             publish_resource Lane_addon_resource_events.Acquire_failed e
               (Option.map (fun c -> c.container_id) e.connection) (Some message);
@@ -678,7 +680,14 @@ let backend ~store () = match !override with
        adding a second timeout with the same meaning. *)
     let control_timeout_sec = Env_config_runtime.Sidecar.control_command_timeout_sec in
     {
-      start = (fun ~sw ~instance_id ~package ~on_created ->
+      start = (fun ~sw ~instance_id ~package ~binding ~on_created ->
+        let* sampling_handler = match package.model_access with
+          | Model_disabled -> Ok None
+          | Host_sampling ->
+              let* factory = match !sampling_factory with Some factory -> Ok factory
+                | None -> Error "host sampling runtime is unavailable" in
+              factory ~sw ~store ~instance_id ~package ~binding
+              |> Result.map Option.some in
         let wrap worker = {
           container_id = Lane_addon_worker.container_id worker;
           action_schema = (fun () -> Lane_addon_worker.action_schema worker);
@@ -692,7 +701,7 @@ let backend ~store () = match !override with
         | Some clock ->
             Lane_addon_worker.start ~sw ~clock ~control_timeout_sec
               ~mgr:Posix_spawn_process_mgr.mgr ~instance_id ~package
-              ~on_created:(fun worker -> on_created (wrap worker)) ~artifact_store:store ()
+              ~on_created:(fun worker -> on_created (wrap worker)) ~artifact_store:store ?sampling_handler ()
             |> Result.map wrap |> Result.map_error Lane_addon_worker.error_to_string);
       acquire = Lane_addon_sources.acquire;
       image_ready = (fun ~package ->
@@ -1841,7 +1850,7 @@ module For_testing = struct
     container_id : string;
   }
   type nonrec backend = backend = {
-    start : sw:Eio.Switch.t -> instance_id:string -> package:package ->
+    start : sw:Eio.Switch.t -> instance_id:string -> package:package -> binding:Yojson.Safe.t ->
       on_created:(connection -> unit) -> (connection, string) result;
     acquire : access:Lane_addon_sources.access -> store:Lane_addon_store.t -> package:package ->
       resolve_lane_output:(installation_id:string -> (Lane_addon_sources.lane_output, string) result) ->

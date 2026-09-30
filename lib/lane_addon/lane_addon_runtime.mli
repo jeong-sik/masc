@@ -6,6 +6,13 @@ val error_to_string : error -> string
 val register_delivery_handler :
   (config:Workspace.config -> caller:string -> keeper_name:string -> prompt:string ->
     (Yojson.Safe.t, string) result) -> unit
+val register_sampling_factory :
+  (sw:Eio.Switch.t -> store:Lane_addon_store.t -> instance_id:string ->
+    package:Lane_addon_types.package -> binding:Yojson.Safe.t ->
+    (Lane_addon_sampling.t, string) result) -> unit
+(** Server-owned sampling boundary, registered before configuration maintenance.
+    Called once per model-capable worker with its exact validated installation
+    binding and lifetime switch. Disabled packages do not request a callback. *)
 type fleet_backend = {
   snapshot : config:Workspace.config -> caller:string -> access:Lane_addon_sources.access -> (Lane_addon_broadcast_delivery.sender_authority * string list,string) result;
   project : config:Workspace.config -> sender_authority:Lane_addon_broadcast_delivery.sender_authority -> delivery:Workspace_broadcast.broadcast_delivery ->
@@ -91,7 +98,7 @@ module For_testing : sig
     container_id : string;
   }
   type backend = {
-    start : sw:Eio.Switch.t -> instance_id:string -> package:Lane_addon_types.package ->
+    start : sw:Eio.Switch.t -> instance_id:string -> package:Lane_addon_types.package -> binding:Yojson.Safe.t ->
       on_created:(connection -> unit) -> (connection, string) result;
     acquire : access:Lane_addon_sources.access -> store:Lane_addon_store.t -> package:Lane_addon_types.package ->
       resolve_lane_output:(installation_id:string -> (Lane_addon_sources.lane_output, string) result) ->

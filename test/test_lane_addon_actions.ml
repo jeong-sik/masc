@@ -37,7 +37,7 @@ type outcome = Confirm | Refuse | Unknown | Lost_reply
 type fixture = {config:Workspace.config; root:string; calls:int ref; observes:int ref;
   outcome:outcome ref; barrier:unit Eio.Promise.t option ref}
 let backend fixture : Runtime.For_testing.backend = {
-  start=(fun ~sw:_ ~instance_id ~(package:Types.package) ~on_created ->
+  start=(fun ~sw:_ ~instance_id ~(package:Types.package) ~binding:_ ~on_created ->
     let connection : Runtime.For_testing.connection = {
       container_id=Store.digest instance_id;
       action_schema=(fun () -> Option.map (fun _ -> schema) package.action_tool);

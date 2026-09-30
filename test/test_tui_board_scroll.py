@@ -8,8 +8,10 @@ import test_tui_keyboard_input as h
 # The sources this scenario stands over. scripts/ci/run-edited-tests.sh runs
 # a suite when a pull request changes a path the suite names, so without
 # this a change to the drawn text below reaches main with no scenario run.
-# The surface this scrolls ("MASC Board") is titled in masc_tui_render.ml.
+# The surface this scrolls ("MASC Board") is titled in masc_tui_render_board.ml.
 SOURCE_MODULES = (
+    "bin/masc_tui_render_board.ml",
+    "bin/masc_tui_render_board.mli",
     "bin/masc_tui_render.ml",
     "bin/masc_tui_layout.ml",
 )
@@ -33,13 +35,17 @@ def run(executable: str) -> None:
         for i in range(128)]
     fixtures["/api/v1/board?sort_by=hot"] = (200, {"posts": [post]})
     detail_path = "/api/v1/board/post-scroll?format=flat"
-    fixtures[detail_path] = (200, {"post": post, "comments": comments})
+    fixtures[detail_path] = (200, h.board_detail_page(post, comments))
+    for offset in (0, 100):
+        fixtures[f"{detail_path}&comment_offset={offset}&comment_limit=100"] = (
+            200, h.board_detail_page(post, comments, offset=offset, limit=100))
 
     def interact(process, fd, _slave, output, _base):
         h.wait_for_output(process, fd, output, b"Health: ", start=0, timeout=10)
         h.palette_go(process, fd, output, b"go board", b"MASC Board")
         h.wait_for_output(process, fd, output, ONE_POST_LISTED, start=0, timeout=10)
-        h.send_and_wait(process, fd, output, b"\r", b"Comment 000")
+        h.send_and_wait(process, fd, output, b"\r", b"Showing 20 of 128 comments")
+        h.send_and_wait(process, fd, output, b"o", b"Comment 000")
         h.read_available(fd, output)
         start = len(output)
         # Same input stream as a terminal wheel burst followed by Escape.
@@ -58,9 +64,13 @@ def run(executable: str) -> None:
                           start=h.end_of_needle(output, list_header, start), timeout=3)
         changed = [dict(c) for c in comments]
         changed[0]["content"] = "Live edit is visible"
-        edited_detail = h.SequencedHttpResponse([(200, {"post": post, "comments": changed})])
+        edited_detail = h.SequencedHttpResponse(
+            [(200, h.board_detail_page(post, changed))])
         fixtures[detail_path] = edited_detail
-        h.send_and_wait(process, fd, output, b"\r", b"Live edit is visible")
+        fixtures[f"{detail_path}&comment_offset=0&comment_limit=100"] = (
+            200, h.board_detail_page(post, changed, offset=0, limit=100))
+        h.send_and_wait(process, fd, output, b"\r", b"Showing 20 of 128 comments")
+        h.send_and_wait(process, fd, output, b"o", b"Live edit is visible")
         if edited_detail.served < 1:
             raise AssertionError("edited Board detail was not fetched from HTTP")
         os.write(fd, b"q")
@@ -102,7 +112,8 @@ def run_side_by_side(executable: str) -> None:
                 for i in range(3)]
     post["comment_count"] = len(comments)
     fixtures["/api/v1/board?sort_by=hot"] = (200, {"posts": [post]})
-    fixtures["/api/v1/board/post-side?format=flat"] = (200, {"post": post, "comments": comments})
+    fixtures["/api/v1/board/post-side?format=flat"] = (
+        200, h.board_detail_page(post, comments))
 
     def comment_row(output: bytearray) -> tuple[int, bytes]:
         rows = h.screen_rows(bytes(output))
@@ -166,7 +177,7 @@ def run_window_names_what_it_counts(executable: str) -> None:
     post["comment_count"] = len(comments)
     fixtures["/api/v1/board?sort_by=hot"] = (200, {"posts": [post]})
     fixtures["/api/v1/board/post-rows?format=flat"] = (
-        200, {"post": post, "comments": comments})
+        200, h.board_detail_page(post, comments))
 
     def interact(process, fd, _slave, output, _base):
         h.wait_for_output(process, fd, output, b"Health: ", start=0, timeout=10)
@@ -225,7 +236,7 @@ def run_independent_windows(executable: str) -> None:
     post["comment_count"] = 1
     fixtures["/api/v1/board?sort_by=hot"] = (200, {"posts": [post]})
     fixtures["/api/v1/board/post-independent?format=flat"] = (
-        200, {"post": post, "comments": [comment]})
+        200, h.board_detail_page(post, [comment]))
 
     def comment_width(output: bytearray, columns: int) -> int:
         rows = h.screen_rows(bytes(output))
@@ -293,7 +304,7 @@ def run_full_width_comments(executable: str) -> None:
     post["comment_count"] = len(comments)
     fixtures["/api/v1/board?sort_by=hot"] = (200, {"posts": [post]})
     fixtures["/api/v1/board/post-width?format=flat"] = (
-        200, {"post": post, "comments": comments})
+        200, h.board_detail_page(post, comments))
 
     def interact(process, fd, _slave, output, _base):
         h.wait_for_output(process, fd, output, b"Health: ", start=0, timeout=10)

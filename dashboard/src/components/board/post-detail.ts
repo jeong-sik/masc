@@ -26,8 +26,11 @@ import {
 } from '../../lib/board-utils'
 import {
   detailComments,
+  detailCommentPage,
   detailLoading,
+  detailLoadingOlder,
   detailPostId,
+  loadOlderPostComments,
   commentText,
   commentSubmitting,
   replyingTo,
@@ -378,10 +381,18 @@ export function CommentThread({
   comments,
   postId,
   focusedCommentId = null,
+  totalCount = comments.length,
+  olderCount = 0,
+  loadingOlder = false,
+  onLoadOlder,
 }: {
   comments: BoardComment[]
   postId: string
   focusedCommentId?: string | null
+  totalCount?: number
+  olderCount?: number
+  loadingOlder?: boolean
+  onLoadOlder?: () => void
 }) {
   const query = useSignal('')
   const [expanded, setExpanded] = useState(false)
@@ -397,7 +408,7 @@ export function CommentThread({
     [filteredChildrenMap],
   )
 
-  if (comments.length === 0) return html`<${EmptyState} message="아직 댓글이 없습니다" compact />`
+  if (totalCount === 0) return html`<${EmptyState} message="아직 댓글이 없습니다" compact />`
 
   const isFiltering = query.value.trim() !== ''
   const hiddenCount = filteredRoots.length - INITIAL_SHOW
@@ -409,7 +420,7 @@ export function CommentThread({
   return html`
     <div class="flex flex-col gap-2">
       <div class="flex items-center gap-2 mb-1">
-        <div class="text-2xs text-[var(--color-fg-muted)]">댓글 ${comments.length}개${isFiltering ? ` · 일치 ${filteredRoots.length}` : ''}</div>
+        <div class="text-2xs text-[var(--color-fg-muted)]">댓글 ${totalCount}개${isFiltering ? ` · 불러온 댓글 중 일치 ${filteredRoots.length}` : ''}</div>
         <${TextInput}
           type="search"
           value=${query.value}
@@ -419,6 +430,14 @@ export function CommentThread({
           class="bd-comment-filter ml-auto min-w-35 max-w-55 flex-1 !px-2 !py-1 !text-2xs"
         />
       </div>
+      ${olderCount > 0 && onLoadOlder ? html`
+        <${ActionButton}
+          variant="subtle"
+          size="sm"
+          disabled=${loadingOlder}
+          onClick=${() => { setExpanded(true); onLoadOlder() }}
+        >${loadingOlder ? '이전 댓글 불러오는 중...' : `이전 댓글 ${olderCount}개 불러오기`}<//>
+      ` : null}
       ${isFiltering && filteredRoots.length === 0 ? html`
         <${EmptyState} message=${`"${query.value.trim()}" 일치하는 댓글 없음`} compact />
       ` : null}
@@ -522,11 +541,13 @@ export function CommentForm({ postId }: { postId: string }) {
 
 // ── Post detail view ───────────────────────────────────────────────
 export function PostDetail({ post }: { post: BoardPost }) {
+  const focusedCommentId = cleanCommentRouteParam((route.value.params as Record<string, string | undefined>).comment)
   useEffect(() => {
-    if (detailPostId.value !== post.id) {
-      loadPostDetail(post.id)
+    if (detailPostId.value !== post.id
+      || (focusedCommentId && !detailComments.value.some(comment => comment.id === focusedCommentId))) {
+      void loadPostDetail(post.id, focusedCommentId)
     }
-  }, [post.id])
+  }, [post.id, focusedCommentId])
 
   const handleVote = async (dir: 'up' | 'down') => {
     try {
@@ -546,7 +567,6 @@ export function PostDetail({ post }: { post: BoardPost }) {
   const postVoteLabel = `${post.votes} votes`
   const postVoteAria = `게시글 점수 ${post.votes}`
   const auditLabel = postVisibilityAuditLabel(post)
-  const focusedCommentId = cleanCommentRouteParam((route.value.params as Record<string, string | undefined>).comment)
 
   // RFC-0233 §7: a board post minted from a keeper turn carries origin.turn_ref.
   // When present, surface a "턴" affordance that opens the originating turn in
@@ -692,7 +712,15 @@ export function PostDetail({ post }: { post: BoardPost }) {
           ` : null}
           ${detailLoading.value
             ? html`<${LoadingState}>댓글 불러오는 중...<//>`
-            : html`<${CommentThread} comments=${detailComments.value} postId=${post.id} focusedCommentId=${focusedCommentId} />`}
+            : html`<${CommentThread}
+                comments=${detailComments.value}
+                postId=${post.id}
+                focusedCommentId=${focusedCommentId}
+                totalCount=${detailCommentPage.value.total}
+                olderCount=${detailCommentPage.value.offset}
+                loadingOlder=${detailLoadingOlder.value}
+                onLoadOlder=${() => loadOlderPostComments(post.id)}
+              />`}
           <${CommentForm} postId=${post.id} />
         <//>
       </div>

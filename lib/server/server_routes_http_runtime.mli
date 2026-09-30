@@ -347,13 +347,23 @@ val readiness_handler : Httpun.Request.t -> Httpun.Reqd.t -> unit
 
 (** {1 Board} *)
 
+val board_comment_request_of_query :
+  offset:string option ->
+  limit:string option ->
+  (Board.Comment_page.request, Yojson.Safe.t) result
+(** Parse [comment_offset] and [comment_limit] from an HTTP query. An absent
+    offset reads the newest comments; explicit offset zero reads the oldest.
+    Invalid or out-of-bounds values return a JSON 400 body. *)
+
 val board_post_detail_json :
+  ?comment_request:Board.Comment_page.request ->
   config:Workspace.config option ->
   voter:string option ->
   reaction_actor:string option ->
   response_format:Server_board_post_response_format.t ->
   post_id:string ->
-  [> `OK | `Not_found ] * string
+  unit ->
+  [> `OK | `Not_found | `Bad_request ] * string
 (** [board_post_detail_json ~voter ~reaction_actor ~response_format ~post_id] returns
     [(status, json_string)] for [GET /api/v1/board/<post_id>].
     When [voter] is supplied, post/comment rows include vote state for
@@ -368,18 +378,22 @@ val board_post_detail_json :
 
     | Format | Shape |
     |---|---|
-    | {!Server_board_post_response_format.Flat} | post fields + [comments] sibling |
-    | {!Server_board_post_response_format.Nested} | [{"post": ..., "comments": [...]}] |
+    | {!Server_board_post_response_format.Flat} | post fields + [comments] and [comment_page] siblings |
+    | {!Server_board_post_response_format.Nested} | [{"post": ..., "comments": [...], "comment_page": {...}}] |
+
+    [comment_page] carries offset, returned, total and next_offset. By default
+    the page ends at the newest comment and contains at most 20; an explicit
+    [comment_offset] begins at that oldest-first position.
 
     {2 Status / body}
 
     | Outcome | Status | Body |
     |---|---|---|
     | Post missing | [404 Not Found] | [{"error":"Post not found: <id>"}] |
+    | Offset past total | [400 Bad Request] | error and code |
     | Found | [200 OK] | per response_format |
 
-    Comment fetch errors (rare) silently degrade to empty
-    comment list rather than failing the whole response. *)
+    The post and its comments are read together under the Board store lock. *)
 
 val board_sub_board_detail_prefix : string
 (** Path prefix of [GET /api/v1/board/sub-boards/<id_or_slug>]. Both the

@@ -1,0 +1,66 @@
+name: Apple keychain
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: apple-keychain-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native:
+    name: macOS keychain without prompts
+    runs-on: macos-14
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: ./.github/actions/setup-ocaml-toolchain
+      - name: Install focused build dependency
+        run: opam install dune --yes
+      - name: Build native keychain regression
+        id: build
+        run: opam exec -- dune build test/apple_keychain/test_apple_keychain.exe
+      - name: Exercise disposable keychains and reject authentication prompts
+        run: |
+          python3 - <<'PY'
+          import datetime
+          import json
+          import subprocess
+
+          started = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+          test = subprocess.Popen(['_build/default/test/apple_keychain/test_apple_keychain.exe'])
+          try:
+              code = test.wait(timeout=60)
+          except subprocess.TimeoutExpired:
+              test.kill()
+              test.wait()
+              raise SystemExit('FAIL: native keychain call stalled, possibly on authentication UI')
+          logs = subprocess.check_output([
+              '/usr/bin/log', 'show', '--start', started, '--style', 'ndjson', '--info',
+              '--predicate', 'process == "securityd" AND eventMessage CONTAINS "displaying keychain prompt for"'
+          ], text=True, timeout=30)
+          prompts = []
+          for line in logs.splitlines():
+              if not line.startswith('{'):
+                  continue
+              event = json.loads(line)
+              message = event.get('eventMessage', '')
+              if f'({test.pid})' in message:
+                  prompts.append(event['timestamp'])
+          print(json.dumps({'pid': test.pid, 'exit_code': code, 'keychain_prompt_events': prompts}))
+          if code != 0 or prompts:
+              raise SystemExit('FAIL: native keychain regression')
+          PY
+      - name: Upload native regression executable
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: apple-keychain-${{ github.event.pull_request.head.sha || github.sha }}
+          path: _build/default/test/apple_keychain/test_apple_keychain.exe
+          if-no-files-found: error
+          retention-days: 7

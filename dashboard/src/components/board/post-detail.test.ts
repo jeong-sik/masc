@@ -76,8 +76,11 @@ vi.mock('../common/input', () => ({
 
 vi.mock('./board-state', () => ({
   detailComments: { value: [] },
+  detailCommentPage: { value: { offset: 0, total: 0 } },
   detailLoading: { value: false },
+  detailLoadingOlder: { value: false },
   detailPostId: { value: null },
+  loadOlderPostComments: vi.fn(),
   commentText: { value: '' },
   commentSubmitting: { value: false },
   replyingTo: { value: null },
@@ -119,7 +122,7 @@ import {
   countCommentDescendants,
   filterCommentTree,
 } from './post-detail'
-import { detailComments } from './board-state'
+import { detailCommentPage, detailComments } from './board-state'
 import { requestBoardContextInference, toggleReaction, voteComment, votePost } from '../../api/board'
 import type { BoardComment } from '../../types/core'
 
@@ -128,9 +131,25 @@ afterEach(() => {
   vi.clearAllMocks()
   routerMock.route.value = { params: {} }
   detailComments.value = []
+  detailCommentPage.value = { offset: 0, total: 0 }
 })
 
 describe('CommentThread', () => {
+  it('shows the total and loads older server pages', () => {
+    const onLoadOlder = vi.fn()
+    const comments = [
+      { id: 'c25', post_id: 'post-1', parent_id: null, author: 'agent', content: 'latest', created_at: '2026-04-02T00:00:00Z' },
+    ] as any
+    render(h(CommentThread, {
+      comments, postId: 'post-1', totalCount: 25, olderCount: 24, onLoadOlder,
+    }))
+
+    expect(screen.getByText('댓글 25개')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '이전 댓글 24개 불러오기' }))
+    expect(onLoadOlder).toHaveBeenCalledOnce()
+    expect(screen.getByText('latest')).toBeInTheDocument()
+  })
+
   it('renders nested replies beyond one level', () => {
     const comments = [
       { id: 'c1', post_id: 'post-1', parent_id: null, author: 'root-agent', content: 'root comment', created_at: '2026-04-02T00:00:00Z' },
@@ -754,6 +773,7 @@ describe('PostDetail', () => {
       post_kind: 'direct',
       comments: [],
     } as any
+    detailCommentPage.value = { offset: 0, total: 1 }
     detailComments.value = [
       {
         id: 'comment-1',

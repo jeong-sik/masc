@@ -67,9 +67,6 @@ on:
       eio_backend:
         type: string
         default: ""
-  schedule:
-    # 17:43 UTC = 02:43 KST, off-peak for both GitHub runners and the team.
-    - cron: "43 17 * * *"
   workflow_dispatch:
     inputs:
       suite:
@@ -176,8 +173,6 @@ jobs:
         # The reader's own fixtures, under this runner's awk and python3,
         # before any toolchain work: a header it cannot attribute or a
         # suite it cannot find at the deadline is a wrong verdict later.
-        # scripts/ci/run-lint-suite.sh also runs this, but nothing runs
-        # that script.
         run: bash scripts/ci-run-test-suite.sh --self-test
 
       - name: Setup OCaml toolchain
@@ -211,6 +206,7 @@ jobs:
         run: corepack enable && corepack prepare pnpm@10.31.0 --activate
 
       - name: Test
+        id: tests
         env:
           # Public runners give four CPUs; use all four for the build
           # and the suite.
@@ -382,11 +378,14 @@ jobs:
           fi
           log "[targeted] EIO_BACKEND=${EIO_BACKEND:-<unset>} timeout=${TARGET_SUITE_TIMEOUT_SEC}s per suite"
           status="${resolution_status}"
+          # Stream fixture records directly to tee: buffered Dune output can
+          # truncate a successful suite mid-JSON. Keep actions serial so their
+          # evidence records cannot interleave.
           for suite in ${aliases[@]+"${aliases[@]}"}; do
             log "[targeted] ${suite}: start $(date -u +%Y-%m-%dT%H:%M:%SZ) (dune alias)"
             started=$(date +%s)
             rc=0
-            timeout -s TERM -k "${TARGET_SUITE_KILL_GRACE_SEC}" "${TARGET_SUITE_TIMEOUT_SEC}"               opam exec -- dune build --root . "@runtest-${suite}" 2>&1 | tee -a "${CI_TEST_LOG_FILE}" || rc=$?
+            timeout -s TERM -k "${TARGET_SUITE_KILL_GRACE_SEC}" "${TARGET_SUITE_TIMEOUT_SEC}"               opam exec -- dune build --root . --no-buffer -j 1 "@runtest-${suite}" 2>&1 | tee -a "${CI_TEST_LOG_FILE}" || rc=$?
             elapsed=$(( $(date +%s) - started ))
             case "${rc}" in
               0)   log "[targeted] ${suite}: OK in ${elapsed}s" ;;
@@ -474,6 +473,51 @@ jobs:
           name: candle-equipped-portrait
           path: ${{ runner.temp }}/candle-equipped-portrait/
           if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Capture Navigation fixture PTY screenshots
+        if: ${{ !cancelled() && contains(inputs.suite, 'test_tui_lane_visual_pty') }}
+        env:
+          STUDIO_SOURCE_SHA: ${{ github.sha }}
+          STUDIO_RUN_ID: ${{ github.run_id }}
+          STUDIO_TEST_OUTCOME: ${{ steps.tests.outcome }}
+          STUDIO_OUT: ${{ runner.temp }}/navigation-studio
+          STUDIO_LOG: ${{ runner.temp }}/ci-run-tests.log
+        run: |
+          set -euo pipefail
+          if ! rg -q 'STUDIO_CAPTURE=' "$STUDIO_LOG"; then
+            echo "No Navigation PTY frames were produced; capture remains unproven."
+            exit 1
+          fi
+          sudo apt-get update -qq
+          sudo apt-get install -y ttyd fonts-noto-cjk
+          python3 -m venv "$RUNNER_TEMP/studio-browser-venv"
+          "$RUNNER_TEMP/studio-browser-venv/bin/pip" install playwright
+          "$RUNNER_TEMP/studio-browser-venv/bin/playwright" install --with-deps chromium
+          python3 - <<'PYINFO'
+          import json, os
+          from pathlib import Path
+          info = {
+              "headSha": os.environ["STUDIO_SOURCE_SHA"],
+              "databaseId": os.environ["STUDIO_RUN_ID"],
+              "url": "https://github.com/jeong-sik/masc/actions/runs/" + os.environ["STUDIO_RUN_ID"],
+              "status": "in_progress_at_capture",
+              "test_step_outcome": os.environ["STUDIO_TEST_OUTCOME"],
+          }
+          Path(os.environ["RUNNER_TEMP"], "studio-run.json").write_text(json.dumps(info))
+          PYINFO
+          "$RUNNER_TEMP/studio-browser-venv/bin/python" scripts/capture-tui-ci-frames.py \
+            --log "$STUDIO_LOG" --run-info "$RUNNER_TEMP/studio-run.json" \
+            --expected-head "$STUDIO_SOURCE_SHA" --out "$STUDIO_OUT" \
+            --suite-pass-marker "TUI navigation consistency: PASS"
+
+      - name: Upload Navigation fixture PTY screenshots
+        if: ${{ always() && contains(inputs.suite, 'test_tui_lane_visual_pty') }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: navigation-studio-${{ github.sha }}
+          path: ${{ runner.temp }}/navigation-studio/
+          if-no-files-found: warn
           retention-days: 14
 
       - name: Upload the full Dune suite log

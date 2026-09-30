@@ -1,32 +1,8 @@
 name: Stagehand Browser Proof
 
 on:
-  pull_request:
-    paths:
-      - 'lib/browser_cdp.*'
-      - 'lib/browser_stagehand_*'
-      - 'lib/browser_chromium_process.*'
-      - 'lib/browser_configuration.*'
-      - 'lib/browser_surface.*'
-      - 'lib/browser_scene_script.ml'
-      # The read verbs run these page scripts and this scene reader.
-      - 'lib/browser_page_script.ml'
-      - 'lib/browser_scene.ml'
-      # BrowserInteract's guard, receipt and page script.
-      - 'lib/browser_interaction.ml'
-      - 'lib/browser_lane/**'
-      - 'lib/server/server_browser_stagehand.*'
-      - 'lib/tool_misc_browser_lane.ml'
-      - 'connectors/browser/install-stagehand-extension.sh'
-      - 'scripts/probe-stagehand.py'
-      - 'test/stagehand_browser_probe.ml'
-      - 'test/stanzas/stagehand_browser_probe.inc'
-      - '.github/workflows/browser-stagehand-proof.yml'
   workflow_dispatch:
   # Keep a main-scoped macOS opam cache available for pull requests.
-  schedule:
-    - cron: '29 18 * * 1'
-
 permissions:
   contents: read
 

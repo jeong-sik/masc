@@ -1,5 +1,7 @@
 (** Eager Candle tools for the current Keeper. [keeper_name] is supplied by
-    the Keeper turn or the authenticated credential owner, never arguments. *)
+    the Keeper turn or the authenticated credential owner, never arguments.
+    Monetary result fields are canonical decimal strings, so a tool consumer
+    can keep the full OCaml wallet range without JSON number rounding. *)
 
 type operation =
   | Balance

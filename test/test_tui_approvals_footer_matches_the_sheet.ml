@@ -57,28 +57,28 @@ let ask_id = "ask-1"
 let with_one_answerable_ask state =
   state.Masc_tui_types.asks_snapshot <-
     Some
-      { Masc.Tui_decode.asn_keeper = None
+      { Masc.Tui_decode_asks.asn_keeper = None
       ; asn_open_count = 1
       ; asn_rows =
-          [ { Masc.Tui_decode.ar_keeper = "jazz-developer"
+          [ { Masc.Tui_decode_asks.ar_keeper = "jazz-developer"
             ; ar_id = ask_id
             ; ar_asked_at = 0.0
             ; ar_context = None
             ; ar_questions =
-                [ { Masc.Tui_decode.aq_id = "q1"
+                [ { Masc.Tui_decode_asks.aq_id = "q1"
                   ; aq_header = "post or wait"
                   ; aq_prompt = "post the comment as is?"
-                  ; aq_mode = Masc.Tui_decode.Ask_single
-                  ; aq_free_text = Masc.Tui_decode.Ask_choices_only
+                  ; aq_mode = Masc.Tui_decode_asks.Ask_single
+                  ; aq_free_text = Masc.Tui_decode_asks.Ask_choices_only
                   ; aq_choices =
-                      [ { Masc.Tui_decode.ac_id = "post_as_is"
+                      [ { Masc.Tui_decode_asks.ac_id = "post_as_is"
                         ; ac_label = "post as is"
                         ; ac_description = None
                         }
                       ]
                   }
                 ]
-            ; ar_resolution = Masc.Tui_decode.Ask_open
+            ; ar_resolution = Masc.Tui_decode_asks.Ask_open
             }
           ]
       };

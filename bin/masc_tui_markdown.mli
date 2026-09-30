@@ -24,9 +24,6 @@ type palette = {
       (** [~~struck~~]. Two tildes, never one: a single [~] is a home
           directory or an approximation far more often than it is a marker. *)
   code : span;
-  code_qr : span;
-      (** Fixed dark modules on a light page for [```qr] rows. The QR's quiet
-          zone must be painted too, independent of the terminal theme. *)
   heading : int -> span;
       (** The codes for a heading of the given level, 1 for [#] through 6.
           A function rather than one span because the level is the only thing

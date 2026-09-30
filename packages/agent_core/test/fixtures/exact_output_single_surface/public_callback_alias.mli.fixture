@@ -1,3 +1,0 @@
-type dispatch_hook = unit -> unit
-
-val measure : request:string -> dispatch_hook:dispatch_hook -> unit

@@ -445,12 +445,8 @@ let install () =
     ) in
     Subscriptions.push_event_to_sessions payload);
 
-  (* Two addressees, resolved from the same commit and neither substituting for
-     the other: the Goal owner learns that a Goal's linked Tasks are all
-     terminal, and the Task's author learns that work it filed was cancelled.
-     The Goal path reaches no one for a Task with no Goal link, which on the
-     reference workspace was every Task. Author delivery runs first so its
-     typed failure is not masked by the Goal path's [Not_ready]. *)
+  (* Tell the Task's author that the work they filed was cancelled.
+     The Task's Goal links do not determine this recipient. *)
   let deliver_task_cancellation config ~agent_name ~task_id =
     match
       Keeper_task_cancellation_wake.notify_author

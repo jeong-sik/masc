@@ -131,8 +131,11 @@ CONFIG = layout("blank", 3, (4, 9), None, 27, 1, last_source_line=18)
 DETAIL = layout("blank", 3, (4,), None, 27, 6, ("1-22/46",))
 DETAIL_BESIDE_ROSTER = layout("border", 3, (4, 28), 28, 28, 0, ("1-22/46",),
                               roster={"top": 2, "bottom": 28})
+# #39883 reserves rows below the roster for the chat Keeper's portrait.
+# Only the left roster border moves. The right composer stays at row 27,
+# column 39, so its blank-row count remains 19 (see the evidence README).
 CHAT_BESIDE_ROSTER = layout("blank", 3, (4, 26), None, 29, 19,
-                            roster={"top": 2, "bottom": 27})
+                            roster={"top": 2, "bottom": 13})
 CHAT = layout("blank", 3, (4, 26), None, 29, 19)
 # At 157 the folded Gate argument fits one row instead of two.
 CHAT_ONE_ROW_GATE = layout("blank", 3, (4, 26), None, 29, 20)

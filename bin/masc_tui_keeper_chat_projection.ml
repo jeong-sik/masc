@@ -271,7 +271,7 @@ let terminal_safe_text ?(preserve_newlines = false) text =
     end
   in
   loop 0;
-  Masc.Tui_decode.escape_invisible (Buffer.contents output)
+  Masc.Tui_terminal_text.escape_invisible (Buffer.contents output)
 
 let bounded value =
   if String.length value <= 240 then value

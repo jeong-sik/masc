@@ -1,7 +1,6 @@
 open Alcotest
 
 module Prim = Masc_tui_render_prim
-module Decode = Masc.Tui_decode
 
 let state status stage = Prim.fusion_run_state_text ~status ~stage
 
@@ -14,11 +13,11 @@ let test_a_failed_run_says_how_it_failed () =
         (Printf.sprintf "the %s run names its code" code)
         code
         (state
-           (Decode.Fusion_failed
+           (Masc.Tui_decode_fusion.Fusion_failed
               { frs_failure_code = code
               ; frs_error = "the full sentence stays on the selected line"
               })
-           Decode.Fusion_stage_failed))
+           Masc.Tui_decode_fusion.Fusion_stage_failed))
     [ "timeout"; "provider_error"; "panels_unavailable" ]
 
 (* A code is drawn on one line whatever the wire carried: a raw newline in
@@ -27,20 +26,20 @@ let test_a_code_is_one_line () =
   check bool "no raw newline reaches the table" false
     (String.contains
        (state
-          (Decode.Fusion_failed
+          (Masc.Tui_decode_fusion.Fusion_failed
              { frs_failure_code = "provider_error\n"; frs_error = "" })
-          Decode.Fusion_stage_failed)
+          Masc.Tui_decode_fusion.Fusion_stage_failed)
        '\n')
 
 let test_a_running_run_says_its_stage () =
   check string "the judge stage with its panel counts" "judge(2/1)"
-    (state Decode.Fusion_running
-       (Decode.Fusion_stage_judge
+    (state Masc.Tui_decode_fusion.Fusion_running
+       (Masc.Tui_decode_fusion.Fusion_stage_judge
           { frs_expected = 3; frs_answered = 2; frs_failed = 1 }))
 
 let test_a_completed_run_says_completed () =
   check string "completed" "completed"
-    (state Decode.Fusion_completed Decode.Fusion_stage_completed)
+    (state Masc.Tui_decode_fusion.Fusion_completed Masc.Tui_decode_fusion.Fusion_stage_completed)
 
 let () =
   run "tui fusion state"

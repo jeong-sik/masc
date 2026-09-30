@@ -77,8 +77,11 @@ import {
   CONTENT_CATEGORIES,
   detailPost,
   detailLoading,
+  detailLoadingOlder,
   detailPostId,
   detailComments,
+  detailCommentPage,
+  loadOlderPostComments,
   deletingPostId,
   selectedPostIds,
   loadPostDetail,
@@ -700,7 +703,14 @@ function BdThreadDetail({
         </div>
         ${detailLoading.value
           ? html`<${LoadingState} title="댓글 불러오는 중…" />`
-          : html`<${CommentThread} comments=${detailComments.value} postId=${post.id} />`}
+          : html`<${CommentThread}
+              comments=${detailComments.value}
+              postId=${post.id}
+              totalCount=${detailCommentPage.value.total}
+              olderCount=${detailCommentPage.value.offset}
+              loadingOlder=${detailLoadingOlder.value}
+              onLoadOlder=${() => loadOlderPostComments(post.id)}
+            />`}
         <${CommentForm} postId=${post.id} />
       </div>
     </aside>

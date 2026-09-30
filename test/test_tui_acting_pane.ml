@@ -1057,6 +1057,12 @@ let test_hidden_rows_do_not_allocate_text_layout () =
       over_budget = 0; malformed = 0; refresh_failed = None } } in
   let measure rows input =
     ignore (Sys.opaque_identity (Pane.lines ~rows ~cols ~scroll:0 input));
+    (* The warm-up laid these texts out in this frame, and a text laid out
+       again in the same frame takes the pieces it kept. Two frames on, the
+       measured call splits every text it lays out, as a frame that meets
+       the rows for the first time does. *)
+    Masc_tui_message_layout.begin_frame ();
+    Masc_tui_message_layout.begin_frame ();
     let before = Gc.allocated_bytes () in
     let result = Sys.opaque_identity (Pane.lines ~rows ~cols ~scroll:0 input) in
     let allocated = Gc.allocated_bytes () -. before in

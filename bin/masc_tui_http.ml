@@ -514,7 +514,7 @@ let fetch_machine_live ~(host : string) ~(port : int)
           | Error _ as error -> error
           | Ok json -> Masc_tui_machine_live.decode source json)
   in
-  Result.map_error Masc.Tui_decode.sanitize_terminal_text result
+  Result.map_error Masc.Tui_terminal_text.sanitize_terminal_text result
 
 (** POST a JSON body and parse the JSON response. *)
 let post_json_with_timeout ~timeout_sec ~(host : string) ~(port : int)
@@ -565,10 +565,22 @@ let http_delete ~(host : string) ~(port : int) ~(path : string) =
 let list_play_invites ~host ~port =
   get_json ~host ~port ~path:"/api/v1/play/invites"
 
+(* The play routes say why in [message]; the shared refusal reads only the
+   [error] code, which leaves the operator with "HTTP 409: not_ready". The
+   credential's own 401 and 403, and a body with no sentence in it, keep the
+   shared wording. *)
+let play_mutation_outcome = function
+  | Ok (status_code, body) as answer when status_code >= 400 && status_code < 500 ->
+    (match Masc.Tui_decode.play_invite_refusal ~status_code ~body with
+     | Some said -> Post_refused said
+     | None -> mutation_outcome answer)
+  | answer -> mutation_outcome answer
+
 let issue_play_invite ~host ~port ~name ~hours =
-  post_json_outcome ~host ~port ~path:"/api/v1/play/invites"
+  http_post ~headers:(auth_headers ()) ~host ~port ~path:"/api/v1/play/invites"
     ~body:(Yojson.Safe.to_string
       (`Assoc [ "name", `String name; "hours", `Int hours ]))
+  |> play_mutation_outcome
 
 type revoke_outcome = Revoke_absent | Revoke_other of post_outcome
 
@@ -582,7 +594,7 @@ let revoke_play_invite ~host ~port ~name =
       Revoke_absent
   | Ok (status_code, body) when status_code >= 500 ->
       Revoke_other (Post_unanswered (Masc.Tui_decode.play_revoke_http_error ~status_code ~body))
-  | answer -> Revoke_other (mutation_outcome answer)
+  | answer -> Revoke_other (play_mutation_outcome answer)
 
 let post_json ~(host : string) ~(port : int) ~(path : string) ~(body : string) : (Yojson.Safe.t, string) result =
   match http_post ~headers:(auth_headers ()) ~host ~port ~path ~body with
@@ -1788,7 +1800,7 @@ let set_runtime_lane_slots ~(host : string) ~(port : int) ~(lane : string)
       | (first : Runtime_toml.parse_error) :: _ ->
         Printf.sprintf "runtime.toml parse error at %s: %s"
           first.path first.message
-        |> Masc.Tui_decode.sanitize_terminal_text) in
+        |> Masc.Tui_terminal_text.sanitize_terminal_text) in
   let* current = match List.find_opt
       (fun (decl : Runtime_schema.lane_decl) -> String.equal decl.id lane)
       config.Runtime_schema.lane_decls with
@@ -2211,12 +2223,21 @@ let post_board_comment ~(host : string) ~(port : int) ~(post_id : string)
   post_json ~host ~port ~path:"/api/v1/tools/masc_board_comment"
     ~body:(Yojson.Safe.to_string payload)
 
-(** Fetch /api/v1/board/<postId> (post detail + comments). *)
-let fetch_board_post ~(host : string) ~(port : int) ~(post_id : string) : (Yojson.Safe.t, string) result =
+(** Fetch /api/v1/board/<postId> with an explicit comment page when needed. *)
+let fetch_board_post ?comment_offset ?comment_limit ~(host : string)
+    ~(port : int) ~(post_id : string) () : (Yojson.Safe.t, string) result =
+  let page_query =
+    (match comment_offset with
+     | None -> ""
+     | Some offset -> Printf.sprintf "&comment_offset=%d" offset)
+    ^ (match comment_limit with
+       | None -> ""
+       | Some limit -> Printf.sprintf "&comment_limit=%d" limit)
+  in
   get_json ~host ~port
     ~path:
-      (Printf.sprintf "/api/v1/board/%s?format=flat"
-         (percent_encode_path_segment post_id))
+      (Printf.sprintf "/api/v1/board/%s?format=flat%s"
+         (percent_encode_path_segment post_id) page_query)
 
 (** Fetch /api/v1/dashboard/scheduled-automation (schedule list projection).
     The server sorts active-first by due time and caps rows at its own limit,
@@ -3176,7 +3197,7 @@ let fetch_git_diff ?repo ~(host : string) ~(port : int)
     {!submit_keeper_ask_answer} takes ids back, so nothing on this side ever
     matches a choice by its wording. *)
 let fetch_keeper_asks ?keeper_name ~(host : string) ~(port : int) () :
-    (Masc.Tui_decode.asks_snapshot, string) result =
+    (Masc.Tui_decode_asks.asks_snapshot, string) result =
   (* No keeper named means the whole fleet. An operator opening this surface
      does not know which Keeper is stuck yet, and asking them to pick a name
      first is asking them to guess. *)
@@ -3199,7 +3220,7 @@ let fetch_keeper_asks ?keeper_name ~(host : string) ~(port : int) () :
       Error (refusal ~status_code:status ~body)
   | Ok (_, body) -> (
       match Yojson.Safe.from_string body with
-      | json -> Masc.Tui_decode.decode_asks_snapshot json
+      | json -> Masc.Tui_decode_asks.decode_asks_snapshot json
       | exception Yojson.Json_error detail -> Error ("asks were not JSON: " ^ detail))
 
 (** Answer one question of one ask ([POST /api/v1/keepers/ask-answer]).

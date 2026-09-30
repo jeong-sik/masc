@@ -974,6 +974,7 @@ describe('fetchBoardPost', () => {
         ],
         supported_reaction_emojis: ['👍', '🚀'],
       },
+      comment_page: { offset: 26, returned: 1, total: 27, has_more: false, next_offset: null },
       comments: [
         {
           id: 'comment-1',
@@ -998,7 +999,7 @@ describe('fetchBoardPost', () => {
         },
       ],
     }
-    const fetchMock = vi.fn().mockResolvedValue(
+    const fetchMock = vi.fn().mockImplementation(async () =>
       new Response(JSON.stringify(rawResponse), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -1036,9 +1037,24 @@ describe('fetchBoardPost', () => {
       },
     ])
     expect(result.supported_reaction_emojis).toEqual(['👍', '🚀'])
+    expect(result.commentPage).toEqual({ offset: 26, total: 27 })
     const [url] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(url).toContain('format=flat')
     expect(url).toContain('voter=')
+    expect(url).not.toContain('comment_offset=')
+
+    await fetchBoardPost('post-1', 6, 20)
+    const [olderUrl] = fetchMock.mock.calls[1] as [string, RequestInit]
+    expect(olderUrl).toContain('comment_offset=6')
+    expect(olderUrl).toContain('comment_limit=20')
+  })
+
+  it('rejects missing page metadata instead of calling a partial thread complete', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ post: { id: 'post-1', body: 'Body' }, comments: [] }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    )))
+    await expect(fetchBoardPost('post-1')).rejects.toThrow('invalid comment page')
   })
 })
 

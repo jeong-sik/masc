@@ -8,11 +8,12 @@ type t =
   | High
   | XHigh
   | Max
+  | Ultra
 
-let all = [ None_; Minimal; Low; Medium; High; XHigh; Max ]
+let all = [ None_; Minimal; Low; Medium; High; XHigh; Max; Ultra ]
 
 (* Ordinal position on the canonical effort ladder. The variant declaration
-   order already encodes the ladder (None_ < Minimal < ... < Max); this
+   order already encodes the ladder (None_ < Minimal < ... < Ultra); this
    explicit map makes the order nameable and keeps [compare] total so a future
    variant addition surfaces as a non-exhaustive match instead of a silent
    misorder. *)
@@ -24,6 +25,7 @@ let rank = function
   | High -> 4
   | XHigh -> 5
   | Max -> 6
+  | Ultra -> 7
 ;;
 
 let compare a b = Int.compare (rank a) (rank b)
@@ -36,6 +38,7 @@ let to_string = function
   | High -> "high"
   | XHigh -> "xhigh"
   | Max -> "max"
+  | Ultra -> "ultra"
 ;;
 
 let pp formatter effort = Format.pp_print_string formatter (to_string effort)

@@ -17,6 +17,13 @@ type host_stop =
       ; outcome : terminal_boundary_outcome
       }
 
+let host_stop_failed = function
+  | Terminal_tool_boundary { outcome = Terminal_failed _; _ } -> true
+  | Terminal_tool_boundary
+      { outcome = Terminal_completed | Durable_stimulus_deferred; _ }
+  | Repeated_tool_call _ -> false
+;;
+
 type dynamic_tool_result =
   { success : bool
   ; content : string

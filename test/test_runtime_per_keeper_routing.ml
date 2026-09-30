@@ -27,7 +27,7 @@ let set_runtime_lane_candidates ?runtime_config_path ?expected_source_revision
    rendered once here instead of at every call below. *)
 let load_list_text ~config_path =
   Runtime.load_list ~config_path
-  |> Result.map_error (Runtime.to_diagnostic_text ~config_path)
+  |> Result.map_error (Runtime_config_error.to_diagnostic_text ~config_path)
 ;;
 
 module J = Yojson.Safe.Util
@@ -1818,14 +1818,14 @@ tools-support = true
         (String.concat "; " (List.map (fun e -> e.Runtime_toml.message) errors))
     | Ok config ->
       let binding = List.hd config.Runtime_schema.bindings in
-      (match Runtime.of_binding config binding with
+      (match Runtime_instance.of_binding config binding with
        | Error reason -> Alcotest.failf "relative inherited home dropped runtime: %s"
-           (Runtime.string_of_drop_reason reason)
+           (Runtime_config_error.string_of_drop_reason reason)
        | Ok runtime ->
          let expected = Filename.concat (Sys.getcwd ()) "relative-claude-account" in
          Alcotest.(check string) "runtime quota uses the selected child home"
            ("official:claude-code:home:" ^ expected)
-           (Runtime_quota_window.scope_to_string (Runtime.quota_scope_of_runtime runtime))));
+           (Runtime_quota_window.scope_to_string (Runtime_instance.quota_scope_of_runtime runtime))));
   Masc_test_deps.with_process_env "HOME" (Some "") (fun () ->
     Masc_test_deps.with_process_env "CODEX_HOME" (Some "") (fun () ->
       match Runtime_toml.parse_string
@@ -1854,17 +1854,17 @@ tools-support = true
           | Some b -> b
           | None -> Alcotest.fail ("missing binding " ^ id)
         in
-        (match Runtime.of_binding config (binding "codex") with
-            | Error (Runtime.Execution_unbuildable reason) ->
+        (match Runtime_instance.of_binding config (binding "codex") with
+            | Error (Runtime_config_error.Execution_unbuildable reason) ->
               Alcotest.(check bool) "selected account needs a real home" true
                 (String_util.contains_substring reason "account-home")
             | Error _ | Ok _ ->
               Alcotest.fail "selected official client without HOME gained a shared scope");
-        (match Runtime.of_binding config (binding "http") with
+        (match Runtime_instance.of_binding config (binding "http") with
          | Ok _ -> ()
          | Error reason ->
            Alcotest.failf "unrelated HTTP binding was rejected: %s"
-             (Runtime.string_of_drop_reason reason))))
+             (Runtime_config_error.string_of_drop_reason reason))))
 ;;
 
 (* The base file, loaded, with the official clients and [lane] written after
@@ -2294,13 +2294,13 @@ let test_get_runtime_by_id_resolves_and_fails_fast () =
       "known id resolves to its runtime"
       (Some "openai.gpt")
       (Option.map
-         (fun (rt : Runtime.t) -> rt.Runtime.id)
+         (fun (rt : Runtime_instance.t) -> rt.Runtime_instance.id)
          (Runtime.get_runtime_by_id "openai.gpt"));
     Alcotest.(check (option string))
       "unknown id resolves to None (driver fails fast, no default substitution)"
       None
       (Option.map
-         (fun (rt : Runtime.t) -> rt.Runtime.id)
+         (fun (rt : Runtime_instance.t) -> rt.Runtime_instance.id)
          (Runtime.get_runtime_by_id "bogus.binding")))
 ;;
 
@@ -2313,10 +2313,10 @@ let test_get_runtime_by_id_resolves_and_fails_fast () =
 
 let provider_base_url_of_runtime_id runtime_id =
   match Runtime.get_runtime_by_id runtime_id with
-  | Some { Runtime.execution = Runtime_execution.Agent_core provider_config; _ } ->
+  | Some { Runtime_instance.execution = Runtime_execution.Agent_core provider_config; _ } ->
     provider_config.Llm_provider.Provider_config.base_url
   | Some rt ->
-    Alcotest.failf "fixture runtime %s is not agent_core" rt.Runtime.id
+    Alcotest.failf "fixture runtime %s is not agent_core" rt.Runtime_instance.id
   | None -> Alcotest.failf "fixture runtime %s missing from catalog" runtime_id
 ;;
 
@@ -2502,11 +2502,11 @@ let test_runtime_budget_source_survives_to_status_json () =
         (Keeper_context_runtime.max_context_resolution_error_to_string error)
     | Ok resolution ->
       (match resolution.Keeper_context_runtime.runtime_budget_source with
-       | Runtime.Override -> ()
-       | (Runtime.Capability | Runtime.Override_clamped_by_capability) as other ->
+       | Runtime_instance.Override -> ()
+       | (Runtime_instance.Capability | Runtime_instance.Override_clamped_by_capability) as other ->
          Alcotest.failf
            "expected the runtime.toml override source, got %s"
-           (Runtime.max_context_source_to_string other));
+           (Runtime_instance.max_context_source_to_string other));
       let json =
         Keeper_context_runtime.context_budget_json_of_resolution
           ~runtime_id:"openai.gpt"
@@ -3101,23 +3101,127 @@ let test_seed_of_thinking_support_gate_contract () =
 ;;
 
 let test_max_output_tokens_accessor_projects_catalog () =
+  let max_output_tokens id =
+    Option.bind (Runtime.get_runtime_by_id id) Runtime_instance.max_output_tokens_of_runtime
+  in
   with_runtime_thinking (fun () ->
     Alcotest.(check (option int))
       "explicitly declared catalog ceiling is projected verbatim"
       (Some 200000)
-      (Runtime.max_output_tokens_of_runtime_id "ollama_cloud.bigout");
+      (max_output_tokens "ollama_cloud.bigout");
     Alcotest.(check (option int))
       "catalog row projects its declared max_output_tokens"
       (Some 65536)
-      (Runtime.max_output_tokens_of_runtime_id "ollama_cloud.thinkdefault");
+      (max_output_tokens "ollama_cloud.thinkdefault");
     Alcotest.(check (option int))
       "reasoning runtime whose model is absent from the catalog projects None"
       None
-      (Runtime.max_output_tokens_of_runtime_id "ollama_cloud.think");
+      (max_output_tokens "ollama_cloud.think");
     Alcotest.(check (option int))
       "unknown runtime id projects None (no capability record)"
       None
-      (Runtime.max_output_tokens_of_runtime_id "bogus.binding"))
+      (max_output_tokens "bogus.binding"))
+;;
+
+(* Three bindings of the fixture catalog's provider that differ in output
+   ceiling and declared effort. The default declares both, so its row is
+   checked against values that are not null. *)
+let runtime_config_resolved_rows =
+  {|
+[runtime]
+default = "ollama_cloud.effortful"
+
+[providers.ollama_cloud]
+display-name = "Ollama Cloud"
+protocol = "openai-compatible-http"
+endpoint = "https://ollama.example/v1"
+
+[models.effortful]
+api-name = "qwen36-35b-a3b-mtp"
+max-context = 128000
+tools-support = true
+thinking-support = true
+reasoning-effort = "high"
+streaming = true
+
+[models.bigout]
+api-name = "reasoning-big-out"
+max-context = 1000000
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.think]
+api-name = "think"
+max-context = 128000
+tools-support = true
+thinking-support = true
+streaming = true
+
+[ollama_cloud.effortful]
+is-default = true
+max-concurrent = 1
+
+[ollama_cloud.bigout]
+max-concurrent = 1
+
+[ollama_cloud.think]
+max-concurrent = 1
+|}
+;;
+
+let test_resolved_rows_carry_their_own_binding () =
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
+  with_temp_dir "runtime-resolved-rows" @@ fun dir ->
+  (* [Workspace.default_config] points the process at [dir], and the config
+     directory resolver keeps what it found there. Both go back after this
+     case, because [dir] is removed. *)
+  Masc_test_deps.with_process_env Env_config_core.base_path_env_key (Some dir)
+  @@ fun () ->
+  Fun.protect
+    ~finally:(fun () ->
+      Runtime.For_testing.restore runtime_snapshot;
+      Config_dir_resolver.reset ())
+    (fun () ->
+      with_model_catalog_content runtime_thinking_model_catalog @@ fun () ->
+      let path = Filename.concat dir "runtime.toml" in
+      write_file path runtime_config_resolved_rows;
+      (match Runtime.init_default ~config_path:path with
+       | Ok () -> ()
+       | Error msg -> Alcotest.failf "runtime init_default failed: %s" msg);
+      let json =
+        Server_dashboard_runtime_resolved_json.build
+          ~generated_at_iso:"2026-09-30T00:00:00Z"
+          ~config:(Workspace.default_config dir)
+      in
+      let row id =
+        match
+          List.find_opt
+            (fun row -> String.equal (row |> J.member "id" |> J.to_string) id)
+            (json |> J.member "runtimes" |> J.to_list)
+        with
+        | Some row -> row
+        | None -> Alcotest.failf "no resolved row for %s" id
+      in
+      let fields row =
+        ( Yojson.Safe.to_string (J.member "max_output_tokens" row)
+        , Yojson.Safe.to_string (J.member "declared_reasoning_effort" row) )
+      in
+      Alcotest.(check (list (triple string string string)))
+        "each row's ceiling and declared effort come from its own binding"
+        [ "ollama_cloud.effortful", "65536", {|"high"|}
+        ; "ollama_cloud.bigout", "200000", "null"
+        ; "ollama_cloud.think", "null", "null"
+        ]
+        (List.map
+           (fun id ->
+              let ceiling, effort = fields (row id) in
+              id, ceiling, effort)
+           [ "ollama_cloud.effortful"; "ollama_cloud.bigout"; "ollama_cloud.think" ]);
+      Alcotest.(check (pair string string))
+        "the default runtime's row carries its own binding"
+        ("65536", {|"high"|})
+        (fields (J.member "default_runtime" json)))
 ;;
 
 let test_max_context_accessor_clamps_to_provider_cap () =
@@ -3144,7 +3248,7 @@ let test_agent_core_provider_config_carries_effective_context_window () =
   with_runtime_thinking (fun () ->
     let provider_config_of runtime_id =
       match Runtime.get_runtime_by_id runtime_id with
-      | Some (rt : Runtime.t) ->
+      | Some (rt : Runtime_instance.t) ->
         (match rt.execution with
          | Runtime_execution.Agent_core config -> config
          | Runtime_execution.Codex_app_server _
@@ -3223,7 +3327,7 @@ let test_max_context_of_uncatalogued_model_keeps_runtime_declaration () =
         Alcotest.(check string)
           "source is the runtime.toml override, not a preset clamp"
           "override"
-          (Runtime.max_context_source_to_string source))
+          (Runtime_instance.max_context_source_to_string source))
 ;;
 
 let test_historical_qwen36_context_overflow_fixture_replays_provider_cap () =
@@ -3630,7 +3734,7 @@ let load_lane_config content =
   write_file path content;
   match Runtime.load_list ~config_path:path with
   | Ok loaded -> Ok loaded
-  | Error failure -> Error (Runtime.to_diagnostic_text ~config_path:path failure)
+  | Error failure -> Error (Runtime_config_error.to_diagnostic_text ~config_path:path failure)
 ;;
 
 let lane_named lanes name =
@@ -3746,15 +3850,15 @@ let test_a_cli_slot_naming_a_client_without_an_output_schema_channel_is_refused 
   write_file path config;
   match Runtime.load_list ~config_path:path with
   | Error
-      (Runtime.Exact_lane_cli_slot_unservable
+      (Runtime_config_error.Exact_lane_cli_slot_unservable
         { lane_id = "librarian_exact"
         ; slot_id
         ; provider_id = "muse_code"
-        ; reason = Runtime.Client_without_output_schema
+        ; reason = Runtime_config_error.Client_without_output_schema
         }) -> Alcotest.(check string) "the offending entry" muse_serve_runtime_id slot_id
   | Error failure ->
     Alcotest.failf "refused for another reason: %s"
-      (Runtime.to_diagnostic_text ~config_path:path failure)
+      (Runtime_config_error.to_diagnostic_text ~config_path:path failure)
   | Ok _ -> Alcotest.failf "a %s entry naming Muse Code loaded" field)
     ["cli_slots"; "slots"]
 ;;
@@ -4050,9 +4154,13 @@ let () =
         ] )
     ; ( "runtime token capacity projection"
       , [ Alcotest.test_case
-            "max_output_tokens_of_runtime_id projects catalog ceiling"
+            "max_output_tokens_of_runtime projects catalog ceiling"
             `Quick
             test_max_output_tokens_accessor_projects_catalog
+        ; Alcotest.test_case
+            "resolved rows carry their own binding"
+            `Quick
+            test_resolved_rows_carry_their_own_binding
         ; Alcotest.test_case
             "max_context_of_runtime_id clamps runtime TOML to provider cap"
             `Quick

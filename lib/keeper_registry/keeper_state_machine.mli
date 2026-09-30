@@ -3,9 +3,7 @@
     This module defines the keeper lifecycle as a pure state machine.
     All functions are deterministic: no I/O, no clock reads, no mutable state.
 
-    Single Source of Truth (SSOT) is the [type phase] declaration below;
-    spec doc counts are
-    cross-checked by [scripts/audit-tla-phase-count.sh] (R-H-1.c #14874).
+    Single Source of Truth (SSOT) is the [type phase] declaration below.
 
     Architecture:
     - Layer 3 (NonDet Shell): the caller supplies wall-clock and event inputs

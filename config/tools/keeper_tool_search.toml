@@ -7,6 +7,10 @@ callable from your next message in this same turn, and the answer says what \
 each one does. A name below that is not already among your tools is not \
 callable until you pass it here; a call to it before then is refused.
 
+If you do not know which name fits the task, keeper_capability_search can find \
+Tools and Skills by name and description. This loader only loads the requested \
+schemas; call the chosen tool separately to execute it.
+
 Tools that can be loaded:"""
 
 [[params]]

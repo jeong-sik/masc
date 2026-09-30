@@ -10,6 +10,8 @@ from pathlib import Path
 import test_tui_keyboard_input as h
 
 SOURCE_MODULES = (
+    "bin/masc_tui_input_reader.ml",
+    "bin/masc_tui_input_reader.mli",
     "bin/masc_tui.ml",
     "bin/masc_tui_paste.ml",
     "bin/masc_tui_paste.mli",

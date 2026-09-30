@@ -71,6 +71,12 @@ let start state ~post_id =
 
 let clear state = { state with status = Status_absent }
 
+let is_ready state ~post_id =
+  match state.status with
+  | Status_ready (request, _) -> String.equal request.post_id post_id
+  | Status_absent | Status_loading _ | Status_refreshing _ | Status_failed _ ->
+      false
+
 let complete state request result =
   if not (is_current state request) then state
   else

@@ -1,28 +1,12 @@
-(** Rendering surface of the TUI.
-
-    이 모듈은 16,743 줄에 최상위 정의가 337 개다. 그중 실제로 밖에서 쓰이는 것은
-    아래 23 개뿐이고, 나머지 314 개는 내부 함수인데 인터페이스가 없어 전부 공개
-    상태였다. 그래서 이 파일을 여는 사람은 매번 337 개를 다 마주쳤다.
-
-    이 인터페이스는 손으로 고른 목록이 아니다. dune 이 이 모듈에 쓰는 ocamlc
-    명령을 그대로 잡아 [-i] 로 추론 시그니처 876 줄을 받은 뒤, 소비자
-    (bin/masc_tui.ml, test/test_tui_agenda.ml)가 실제로 참조하는 이름만 남겼다.
-    [open Masc_tui_render] 때문에 한정 없이 쓰는 것도 있어서, 한정 참조 11 개와
-    한정 없는 참조 13 개의 합집합(중복 1)으로 잡았다.
-
-    숨긴 314 개 중 하나라도 밖에서 쓰였다면 [dune build @check] 가 깨진다. 즉 이
-    목록은 추정이 아니라 컴파일러가 검증한 값이다.
-
-    이 파일은 동작을 바꾸지 않는다. 다음 단계인 도메인 단위 분할(fusion 16,
-    planning 13, board 10 ...)의 지도로 쓰려고 먼저 둔다 — 314 개는 어디로 옮겨도
-    외부 계약이 깨지지 않는다. *)
+(** Screen dispatch and shared rendering projections.
+    Board list, composer and read screens are owned by
+    {!Masc_tui_render_board}. *)
 
 module Frame_presenter = Masc_tui_frame_presenter
 module Ask_projection = Masc_tui_ask_projection
 module Ask_layout = Masc_tui_ask_layout
 module Board_detail = Masc_tui_board_detail
 module Magnitude = Masc_tui_magnitude
-module Board_comment_thread = Masc_tui_board_comment_thread
 module Message_layout = Masc_tui_message_layout
 module Tool_detail = Masc_tui_tool_detail
 module Retained_view = Masc_tui_retained_view
@@ -59,6 +43,10 @@ val set_table_frame : bool -> unit
     press or a wheel notch between frames is answered from what was on
     screen, which is this, not from what the next frame would draw. *)
 val acting_pane_drawn_cols : unit -> int
+
+val acting_pane_columns : Masc_tui_types.state -> terminal_cols:int -> int
+(** The current Activity pane reservation at this terminal width, usable
+    before a frame is built when reconciling interaction bounds. *)
 
 val acting_pane_suppressed : Masc_tui_types.state -> bool
 (** Whether this frame draws no Activity pane whatever the reader chose: a
@@ -106,11 +94,26 @@ val render_tools :
   Masc_tui_types.state ->
   Frame_presenter.frame * Masc_tui_types.clamped_scroll option
 val code_pane_content_height : Masc_tui_types.state -> int
+val code_notes_viewport : Masc_tui_types.state -> int * int
+(** Wrapped memo row count and visible row count at the current file-pane
+    width. Memo navigation and drawing use the same physical rows. *)
+val code_history_viewport : Masc_tui_types.state -> int * int
+(** Physical history row count and visible row budget at the file-pane width. *)
+val code_history_selected : Masc_tui_types.state -> Masc_tui_types.code_history_entry option
+(** The record owning the top visible row. Coverage and failure rows have no
+    record and cannot be opened by Enter. *)
 val config_content_height : Masc_tui_types.state -> int
+val prompts_detail_viewport : Masc_tui_types.state -> int * int
+(** Wrapped selected prompt/asset row count and the detail's visible rows.
+    Page and edge keys use the same document and geometry as drawing. *)
 val context_inspector_viewport : Masc_tui_types.state -> int * int
 val context_inspector_detail_viewport : Masc_tui_types.state -> int * int
 val keeper_deletions_viewport : Masc_tui_types.state -> int * int
 val help_viewport : Masc_tui_types.state -> int * int
+val patch_modal_horizontal_limit : Masc_tui_types.state -> int
+(** Largest body-cell offset needed to read a patch line while keeping its
+    old/new line numbers and change marker fixed. *)
+
 val patch_modal_viewport : Masc_tui_types.state -> int * int
 (** The patch review overlay's diff-row count and the rows it shows, so the
     page keys move a window and the end key reaches the end. *)
@@ -125,6 +128,8 @@ val agenda_lines : Masc_tui_types.state -> Masc_tui_agenda.line list
     row the frame is not drawing. *)
 
 val agenda_viewport : Masc_tui_types.state -> int * int
+val presets_viewport : Masc_tui_types.state -> int * int
+(** Wrapped detail row count and height below the Presets selection list. *)
 val answering_viewport : Masc_tui_types.state -> int * int
 (** Pure projection for the visible Recent pane, or [None] when it will not
     consume chunks. Dimensions are the raw terminal measurement. The loop
@@ -132,6 +137,17 @@ val answering_viewport : Masc_tui_types.state -> int * int
 val acting_pane_chunk_projection :
   Masc_tui_types.state -> terminal_rows:int -> terminal_cols:int ->
   Masc_tui_acting.chunk_projection option
+
+val frame_choice :
+  Masc_tui_types.state -> terminal_rows:int ->
+  [ `Too_small of int
+  | `Play_card of Masc_tui_play_card.t
+  | `Account_login of Masc_tui_account_login.t
+  | `Lane_addons of Masc_tui_lane_addons.t
+  | `About | `Palette | `Context | `Keeper_deletions | `Help
+  | `Agenda | `Answering | `Patch | `Link
+  | `Client_detail of Masc.Tui_decode.client_row | `Surface ]
+(** The visible surface or overlay, also used before preparing Home focus. *)
 
 val render :
   Masc_tui_types.state ->
@@ -157,3 +173,6 @@ val runtime_config_status_scroll_limit :
   Masc_tui_types.state -> terminal_rows:int -> cols:int -> int
 
 val browser_history_scroll_limit : Masc_tui_types.state -> terminal_rows:int -> cols:int -> Masc_tui_types.Browser_history.t -> int
+
+val schedule_detail_viewport : Masc_tui_types.state -> int * int
+(** Physical-row count and height of the current Schedule evidence reader. *)

@@ -110,7 +110,7 @@ related: ["0439", "machine-spectating-goes-through-lanes"]
 
 ### 2.4 초대 발급과 회수
 
-- 발급은 `CanAdmin` 만 한다. `POST /api/v1/play/invites {name, hours}` 와 TUI `/play invite <이름> [시간]`.
+- 발급은 `CanAdmin` 만 한다. `POST /api/v1/play/invites {name, hours}` 와 TUI `/play invite <이름> <시간>`.
   - `Auth.create_token_expiring_in ~role:Player ~hours` 로 만든다. 기한 없는 초대는 두지 않는다.
   - 발급은 다음 조건에서만 한다. 조건이 안 맞으면 거절하고 무엇이 빠졌는지 말한다.
     - `MASC_HTTP_BASE_URL` 이 있다.
@@ -124,7 +124,21 @@ related: ["0439", "machine-spectating-goes-through-lanes"]
     credential 이름은 생성된 별명이나 keeper 전송 별칭(`Auth_nickname`)으로 읽혀 다른 이름에
     묶일 수 있다. 이 문법이면 `Common.safe_filename` 이 이름을 바꾸지 않아, 이름 하나가 credential
     파일 하나에 대응한다.
-  - 답: `{name, expires_at, link: "<base>/play#<raw token>"}`. TUI 는 링크와 QR 을 찍는다.
+  - 답: `{name, expires_at, link: "<base>/play#<raw token>"}`. TUI 는 링크와 QR 을 카드에 띄운다.
+    - 링크는 이 카드가 유일한 사본이라 채팅 행, 푸터, 세션 로그에는 넣지 않는다. `Esc` 나 `q` 로
+      닫고 `/play link` 로 다시 연다. `y` 는 링크를 터미널 클립보드로 복사한다. 자동으로
+      복사하지는 않는다. Enter 는 카드를 닫지 않는다. 명령을 보내고 답이 오기 전에 Enter 를 한 번
+      더 눌러도 카드는 열린 채로 남는다.
+    - 카드는 이름별로 이 TUI 프로세스 메모리에만 둔다. 초대를 또 발급해도 앞 카드는 남는다.
+      `/play link` 는 가장 최근 카드를, `/play link <이름>` 은 그 이름의 카드를 연다. TUI 를
+      끝내거나 그 초대를 `/play revoke` 하면 지운다. 살아 있는 초대 이름은 서버에서 하나뿐이라
+      이름 하나에 카드도 하나다.
+    - 링크가 카드 높이보다 길면 `j`/`k`(화살표 포함)로 한 줄씩 넘기고 `g`/`G` 로 처음과 끝으로
+      간다. OSC 52 를 못 쓰는 터미널에서도 링크를 끝까지 읽고 옮길 수 있어야 한다.
+    - QR 은 창에 통째로 들어갈 때만 그린다. 잘린 QR 은 읽히지 않으므로 좁으면 그리지 않고
+      필요한 칸과 줄 수를 알린다. 색을 못 그리는 터미널은 링크만 보여 준다.
+    - 발급 요청은 한 번에 하나만 보낸다. 앞 요청의 답이 오기 전에 보낸 다음 발급 명령은 거절하고
+      답을 기다리라고 알린다. 대기열에 넣지 않는다.
   - raw token 은 이 답에서 한 번만 나온다. 서버에는 SHA-256 만 남는다.
 - 회수는 `CanAdmin` 만 한다. `DELETE /api/v1/play/invites/<이름>` 와 TUI `/play revoke <이름>`.
   - `Auth.delete_credential` 로 지운다.

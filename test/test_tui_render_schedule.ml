@@ -872,10 +872,11 @@ let workspace_overflowing =
    was allocated for rather than falling short of it or spilling past it. *)
 let test_workspace_path_takes_the_remainder () =
   for inner_width = 20 to 300 do
-    let path_width = Schedule.workspace_path_width ~inner_width in
+    let layout = Schedule.workspace_layout ~inner_width in
+    let path_width = layout.Masc_tui_table.flex_width in
     let drawn =
       Masc_tui_message_layout.display_width
-        (Schedule.workspace_header_row ~path_width)
+        (Schedule.workspace_header_row ~layout)
     in
     if path_width > Schedule.workspace_minimum_path_width then
       check int
@@ -890,15 +891,18 @@ let test_workspace_path_takes_the_remainder () =
 
 (* The defect that stood here: a header and a row carrying the same widths in
    two format strings. *)
+
 let test_workspace_header_and_row_share_their_offsets () =
   for inner_width = 60 to 240 do
-    let path_width = Schedule.workspace_path_width ~inner_width in
-    let header = Schedule.workspace_header_row ~path_width in
-    let row = Schedule.workspace_row ~path_width workspace_probe in
+    let layout = Schedule.workspace_layout ~inner_width in
+    let header = Schedule.workspace_header_row ~layout in
+    let row = Schedule.workspace_row ~layout workspace_probe in
     check_left_cell "NAME" "N" ~header ~row ~inner_width;
-    check_left_cell "BRANCH" "B" ~header ~row ~inner_width;
+    (if List.mem Schedule.Workspace_branch layout.Masc_tui_table.shown then
+       check_left_cell "BRANCH" "B" ~header ~row ~inner_width);
     check_left_cell "STATUS" "S" ~header ~row ~inner_width;
-    check_left_cell "SYNC" "Y" ~header ~row ~inner_width;
+    (if List.mem Schedule.Workspace_sync layout.Masc_tui_table.shown then
+       check_left_cell "SYNC" "Y" ~header ~row ~inner_width);
     check_left_cell "PATH" "P" ~header ~row ~inner_width
   done
 
@@ -906,17 +910,17 @@ let test_workspace_header_and_row_share_their_offsets () =
    longer than the frame: none of it may move a column. *)
 let test_workspace_row_width_does_not_depend_on_its_readings () =
   for inner_width = 60 to 240 do
-    let path_width = Schedule.workspace_path_width ~inner_width in
+    let layout = Schedule.workspace_layout ~inner_width in
     let width text = Masc_tui_message_layout.display_width text in
-    let header = width (Schedule.workspace_header_row ~path_width) in
+    let header = width (Schedule.workspace_header_row ~layout) in
     check int
       (Printf.sprintf "inner %d: a short row" inner_width)
       header
-      (width (Schedule.workspace_row ~path_width workspace_probe));
+      (width (Schedule.workspace_row ~layout workspace_probe));
     check int
       (Printf.sprintf "inner %d: an overflowing row" inner_width)
       header
-      (width (Schedule.workspace_row ~path_width workspace_overflowing))
+      (width (Schedule.workspace_row ~layout workspace_overflowing))
   done
 
 (* System log columns.
@@ -1135,15 +1139,9 @@ let test_the_delivery_column_holds_the_words_on_the_page () =
 let test_schedule_recurrence_takes_the_remainder () =
   for inner_width = 20 to 300 do
     let layout = schedule_short_page ~inner_width in
-    let recurrence_width = schedule_recurrence_cells layout in
-    if recurrence_width > Schedule.schedule_minimum_recurrence_width then
-      check int
-        (Printf.sprintf "inner %d is fully allocated" inner_width)
-        inner_width (schedule_header_width layout)
-    else
-      check int
-        (Printf.sprintf "inner %d keeps the floor" inner_width)
-        Schedule.schedule_minimum_recurrence_width recurrence_width
+    check int (Printf.sprintf "inner %d is fully allocated" inner_width)
+      inner_width (schedule_header_width layout);
+    check bool "the recurrence has a reading" true (schedule_recurrence_cells layout > 0)
   done
 
 (* Six names above the rows, and none of them left inside a row. *)
@@ -1167,11 +1165,9 @@ let test_schedule_names_its_columns_once () =
    gives 74 and a 100-column one 94; 96 is the body at the width where the
    Activity pane opens beside it, 102 cells less the same six.
 
-   A short page needs 85 cells for every column: 12 + 19 + 16 + 9 + 12 and
-   the recurrence's floor of 12, with five gaps. At 74 the delivery goes and
-   the rest need 72. A long page needs 117; the delivery and the wake go at
-   94 (86 left), only the delivery beside the pane (96 exactly), and the
-   state too at 74 (73 left). *)
+   Long target names are bounded before optional columns are dropped. The
+   recurrence keeps its room and the due time stays visible alongside the target
+   even at a narrow terminal. *)
 let test_the_schedule_at_the_widths_it_is_read_at () =
   let without columns =
     List.filter (fun column -> not (List.mem column columns))
@@ -1207,23 +1203,22 @@ let test_the_schedule_at_the_widths_it_is_read_at () =
     ; ( "long page, 80 columns"
       , schedule_long_page ~inner_width:74
       , 74
-      , without Schedule.[ Schedule_delivery; Schedule_wake; Schedule_status ]
-      , 13 )
+      , without Schedule.[ Schedule_delivery; Schedule_wake ]
+      , 16 )
     ; ( "long page, 100 columns"
       , schedule_long_page ~inner_width:94
       , 94
-      , without Schedule.[ Schedule_delivery; Schedule_wake ]
-      , 20 )
+      , without Schedule.[ Schedule_delivery ]
+      , 19 )
     ; ( "long page, beside the Activity pane"
       , schedule_long_page ~inner_width:96
       , 96
       , without Schedule.[ Schedule_delivery ]
-      , 12 )
+      , 20 )
     ]
 
-(* Narrower still, the columns go in the order the list declares. Each width
-   sits inside the range where exactly that many have gone on a short page:
-   72 to 84 for the delivery, 62 to 71 for the wake, 49 to 61 for the state. *)
+(* At narrow widths the optional delivery, wake and state readings give way
+   while due time, target and recurrence remain on the same row. *)
 let test_a_narrow_schedule_gives_up_columns_in_its_order () =
   let at inner_width = schedule_shown (schedule_short_page ~inner_width) in
   check bool "at 80 the delivery goes first" true
@@ -1239,16 +1234,13 @@ let test_a_narrow_schedule_gives_up_columns_in_its_order () =
     (at 66
     = Schedule.
         [ Schedule_status; Schedule_due; Schedule_target; Schedule_recurrence ]);
-  check bool "at 55 the state goes last" true
+  check bool "at 55 the state gives way, retaining due time" true
     (at 55 = Schedule.[ Schedule_due; Schedule_target; Schedule_recurrence ]);
   let narrowest = schedule_short_page ~inner_width:20 in
-  check bool "the due time, the target and the recurrence never go" true
+  check bool "due time, target and recurrence stay together" true
     (schedule_shown narrowest
-    = Schedule.[ Schedule_due; Schedule_target; Schedule_recurrence ]);
-  check int "the recurrence stays at its floor"
-    Schedule.schedule_minimum_recurrence_width
-    (schedule_recurrence_cells narrowest);
-  check int "the row is wider than the space, as the frame's cut expects" 49
+     = Schedule.[ Schedule_due; Schedule_target; Schedule_recurrence ]);
+  check int "even the narrowest summary fits its allocation" 20
     (schedule_header_width narrowest)
 
 (* The reading the probe puts in each column. Every schedule column is
@@ -1273,7 +1265,7 @@ let schedule_cells =
     ]
 
 let test_schedule_columns_hold_their_offsets () =
-  for inner_width = fitted_narrowest_swept_width to 240 do
+  for inner_width = 24 to 240 do
     List.iter
       (fun layout ->
         let header = Schedule.schedule_header_row ~layout in
@@ -1288,15 +1280,15 @@ let test_schedule_columns_hold_their_offsets () =
    column. *)
 let test_system_log_colour_costs_no_cells () =
   for inner_width = 60 to 240 do
-    let message_width = Schedule.system_log_message_width ~inner_width in
+    let layout = Schedule.system_log_layout ~inner_width in
     let width text = Masc_tui_message_layout.display_width text in
-    let header = width (Schedule.system_log_header_row ~message_width) in
+    let header = width (Schedule.system_log_header_row ~layout) in
     let plain =
-      Schedule.system_log_row ~message_width ~level_style:""
+      Schedule.system_log_row ~layout ~level_style:""
         ~styles:Schedule.system_log_plain_styles system_log_probe
     in
     let dressed =
-      Schedule.system_log_row ~message_width ~level_style:"\027[33m"
+      Schedule.system_log_row ~layout ~level_style:"\027[33m"
         ~styles:system_log_dressed system_log_probe
     in
     check int
@@ -1309,7 +1301,7 @@ let test_system_log_colour_costs_no_cells () =
       (Printf.sprintf "inner %d: an overflowing dressed row" inner_width)
       header
       (width
-         (Schedule.system_log_row ~message_width ~level_style:"\027[31m"
+         (Schedule.system_log_row ~layout ~level_style:"\027[31m"
             ~styles:system_log_dressed system_log_overflowing))
   done
 
@@ -1317,10 +1309,11 @@ let test_system_log_colour_costs_no_cells () =
    says nothing worth the row it costs. *)
 let test_system_log_message_takes_the_remainder () =
   for inner_width = 20 to 300 do
-    let message_width = Schedule.system_log_message_width ~inner_width in
+    let layout = Schedule.system_log_layout ~inner_width in
+    let message_width = layout.Masc_tui_table.flex_width in
     let drawn =
       Masc_tui_message_layout.display_width
-        (Schedule.system_log_header_row ~message_width)
+        (Schedule.system_log_header_row ~layout)
     in
     if message_width > Schedule.system_log_minimum_message_width then
       check int
@@ -1336,19 +1329,56 @@ let test_system_log_message_takes_the_remainder () =
 (* The offsets the two format strings could disagree about. *)
 let test_system_log_header_and_row_share_their_offsets () =
   for inner_width = 60 to 240 do
-    let message_width = Schedule.system_log_message_width ~inner_width in
-    let header = Schedule.system_log_header_row ~message_width in
+    let layout = Schedule.system_log_layout ~inner_width in
+    let header = Schedule.system_log_header_row ~layout in
     let row =
-      Schedule.system_log_row ~message_width ~level_style:""
+      Schedule.system_log_row ~layout ~level_style:""
         ~styles:Schedule.system_log_plain_styles system_log_probe
     in
     check_left_cell "TIME" "T" ~header ~row ~inner_width;
     check_left_cell "LEVEL" "L" ~header ~row ~inner_width;
-    check_left_cell "MODULE" "M" ~header ~row ~inner_width;
-    check_left_cell "KEEPER" "K" ~header ~row ~inner_width;
-    check_left_cell "CATEGORY" "C" ~header ~row ~inner_width;
+    (if List.mem Schedule.Log_module layout.Masc_tui_table.shown then
+       check_left_cell "MODULE" "M" ~header ~row ~inner_width);
+    (if List.mem Schedule.Log_keeper layout.Masc_tui_table.shown then
+       check_left_cell "KEEPER" "K" ~header ~row ~inner_width);
+    (if List.mem Schedule.Log_category layout.Masc_tui_table.shown then
+       check_left_cell "CATEGORY" "C" ~header ~row ~inner_width);
     check_left_cell "MESSAGE" "G" ~header ~row ~inner_width
   done
+
+let test_narrow_repository_and_log_tables () =
+  List.iter
+    (fun inner_width ->
+      let workspace = Schedule.workspace_layout ~inner_width in
+      let logs = Schedule.system_log_layout ~inner_width in
+      let repository = Schedule.workspace_row ~layout:workspace
+          { workspace_probe with wrow_path = "/repo/example" } in
+      let entry = Schedule.system_log_row ~layout:logs ~level_style:""
+          ~styles:Schedule.system_log_plain_styles
+          { system_log_probe with slog_message = "failure details" } in
+      let width = Masc_tui_message_layout.display_width in
+      check int "repository fits the viewport" inner_width (width repository);
+      check int "log entry fits the viewport" inner_width (width entry);
+      List.iter
+        (fun column -> check bool "repository context stays visible" true
+            (List.mem column workspace.Masc_tui_table.shown))
+        Schedule.[ Workspace_name; Workspace_status; Workspace_path ];
+      List.iter
+        (fun column -> check bool "log context stays visible" true
+            (List.mem column logs.Masc_tui_table.shown))
+        Schedule.[ Log_time; Log_level; Log_message ];
+      Printf.printf "repository %d columns: %s\n%!" inner_width repository;
+      check bool "repository path keeps its root and distinguishing basename" true
+        (holds "/" repository && holds "example" repository);
+      if inner_width = 40 then
+        check bool "a folded path is visibly abbreviated" true
+          (holds "…" repository)
+      else
+        check bool "the complete short path remains visible when it fits" true
+          (holds "/repo/example" repository);
+      check bool "log message reaches the screen" true
+        (holds "failure" entry))
+    [ 40; 56; 74; 100; 160 ]
 
 (* Lane run and file change columns.
 
@@ -1543,10 +1573,10 @@ let test_headers_fit_their_columns () =
             (Schedule.allocate_memory_columns ~inner_width) )
       ; ( "workspace"
         , Schedule.workspace_header_row
-            ~path_width:(Schedule.workspace_path_width ~inner_width) )
+            ~layout:(Schedule.workspace_layout ~inner_width) )
       ; ( "system log"
         , Schedule.system_log_header_row
-            ~message_width:(Schedule.system_log_message_width ~inner_width) )
+            ~layout:(Schedule.system_log_layout ~inner_width) )
       ; ( "lane run"
         , Schedule.lane_run_header_row ~identity_header:"ACTOR"
             ~layout:(Schedule.lane_run_layout ~inner_width) )
@@ -2355,7 +2385,7 @@ let test_every_sentence_column_gives_way_at_its_tail () =
     harness_layout.Masc_tui_table.flex_width;
   let rows =
     [ ( "system log"
-      , Schedule.system_log_row ~message_width:prose_width ~level_style:""
+      , Schedule.system_log_row ~layout:(Schedule.system_log_layout ~inner_width:(prose_width + 57)) ~level_style:""
           ~styles:Schedule.system_log_plain_styles
           { system_log_probe with slog_message = sentence } )
     ; ( "verification"
@@ -2599,6 +2629,8 @@ let () =
             test_memory_columns_drop_from_the_right
         ; test_case "memory name width never shrinks" `Quick
             test_memory_name_width_never_shrinks_as_the_terminal_grows
+        ; test_case "narrow repositories and logs keep their primary text" `Quick
+            test_narrow_repository_and_log_tables
         ; test_case "workspace path takes the remainder" `Quick
             test_workspace_path_takes_the_remainder
         ; test_case "workspace header and row share their offsets" `Quick

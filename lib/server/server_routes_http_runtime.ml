@@ -1497,9 +1497,49 @@ let readiness_handler _request reqd =
          ])
       reqd
 
-let board_post_detail_json ~config ~voter
-    ~reaction_actor ~response_format ~post_id =
-  match Board_dispatch.get_post ~post_id with
+let board_comment_request_of_query ~offset ~limit =
+  let ( let* ) = Result.bind in
+  let integer_field name = function
+    | None -> Ok None
+    | Some raw ->
+      (match int_of_string_opt raw with
+       | Some value -> Ok (Some value)
+       | None -> Error (Printf.sprintf "%s must be an integer" name))
+  in
+  let error message =
+    `Assoc
+      [ "error", `String message
+      ; "code", `String "invalid_board_comment_page"
+      ]
+  in
+  let parsed =
+    let* offset = integer_field "comment_offset" offset in
+    let* limit = integer_field "comment_limit" limit in
+    let fields =
+      List.filter_map Fun.id
+        [ Option.map (fun value -> "comment_offset", `Int value) offset
+        ; Option.map (fun value -> "comment_limit", `Int value) limit
+        ]
+    in
+    match Board.Comment_page.request_of_args (`Assoc fields) with
+    | Ok request -> Ok request
+    | Error detail ->
+      Error (Board.Comment_page.request_error_to_string detail)
+  in
+  Result.map_error error parsed
+;;
+
+let default_board_comment_request =
+  match board_comment_request_of_query ~offset:None ~limit:None with
+  | Ok request -> request
+  | Error detail ->
+    invalid_arg
+      ("Board comment page default is invalid: " ^ Yojson.Safe.to_string detail)
+;;
+
+let board_post_detail_json ?(comment_request = default_board_comment_request) ~config ~voter
+    ~reaction_actor ~response_format ~post_id () =
+  match Board_dispatch.get_post_and_comments ~post_id with
   | Error err ->
       (* Render a human-readable message (e.g. "Post not found: <id>") via the
          shared Board_tool.board_error_to_string, matching the 404 contract in
@@ -1509,53 +1549,79 @@ let board_post_detail_json ~config ~voter
          the public HTTP body. *)
       (`Not_found, Printf.sprintf {|{"error":"%s"}|}
          (String.escaped (Board_tool.board_error_to_string err)))
-  | Ok post ->
+  | Ok (post, comments) ->
       let author = Board.Agent_id.to_string post.author in
       let author_karma = Board_dispatch.get_agent_karma ~agent_name:author in
-      let comments =
-        match Board_dispatch.get_comments ~post_id with
-        | Ok cs -> cs
-        | Error err ->
-            Log.Server.warn "board_post_detail: get_comments failed for %s: %s"
-              post_id (Board_types.show_board_error err);
-            []
-      in
-      let current_vote = board_current_vote_for_post ~voter ~post_id in
-      let reaction_targets =
-        (Board.Reaction_post, post_id)
-        :: List.map
-             (fun (comment : Board.comment) ->
-                (Board.Reaction_comment, Board.Comment_id.to_string comment.id))
-             comments
-      in
-      let reaction_rows =
-        board_reactions_batch ~targets:reaction_targets ~voter:reaction_actor
-      in
-      let reactions_for = board_reactions_lookup reaction_rows in
-      let reactions = reactions_for (Board.Reaction_post, post_id) in
-      let post_json =
-        board_post_dashboard_json ?current_vote
-          ~reactions ~author_karma post
-      in
-      let comments_json =
-        `List (List.map (fun (comment : Board.comment) ->
-          let comment_id = Board.Comment_id.to_string comment.id in
-          let current_vote = board_current_vote_for_comment ~voter ~comment_id in
-          let reactions = reactions_for (Board.Reaction_comment, comment_id) in
-          board_comment_dashboard_json
-            ?current_vote ~reactions comment
-        ) comments)
-      in
-      let json =
-        match response_format with
-        | Server_board_post_response_format.Flat ->
-          (match post_json with
-           | `Assoc fields -> `Assoc (fields @ [ ("comments", comments_json) ])
-           | _ -> `Assoc [ ("post", post_json); ("comments", comments_json) ])
-        | Server_board_post_response_format.Nested ->
-          `Assoc [ ("post", post_json); ("comments", comments_json) ]
-      in
-      (`OK, Yojson.Safe.to_string json)
+      match
+        Board.Comment_page.select
+          ~comment_id_of:(fun (comment : Board.comment) ->
+            Some (Board.Comment_id.to_string comment.id))
+          comment_request comments
+      with
+      | Board.Comment_page.Offset_out_of_range { requested; total } ->
+        ( `Bad_request
+        , Yojson.Safe.to_string
+            (`Assoc
+               [ "error", `String
+                   (Printf.sprintf
+                      "comment_offset %d is past the end of a thread with %d comments"
+                      requested total)
+               ; "code", `String "invalid_board_comment_page"
+               ]) )
+      | Board.Comment_page.Comment_not_found { comment_id; _ } ->
+        ( `Bad_request
+        , Yojson.Safe.to_string
+            (`Assoc
+               [ "error", `String
+                   (Printf.sprintf "comment %s is not in this thread"
+                      (Board.Comment_id.to_string comment_id))
+               ; "code", `String "invalid_board_comment_page"
+               ]) )
+      | Board.Comment_page.Page page ->
+        let comments = page.items in
+        let comment_page_json =
+          Board.Comment_page.Position.to_yojson
+            (Board.Comment_page.Position.of_page page)
+        in
+        let current_vote = board_current_vote_for_post ~voter ~post_id in
+        let reaction_targets =
+          (Board.Reaction_post, post_id)
+          :: List.map
+               (fun (comment : Board.comment) ->
+                  (Board.Reaction_comment, Board.Comment_id.to_string comment.id))
+               comments
+        in
+        let reaction_rows =
+          board_reactions_batch ~targets:reaction_targets ~voter:reaction_actor
+        in
+        let reactions_for = board_reactions_lookup reaction_rows in
+        let reactions = reactions_for (Board.Reaction_post, post_id) in
+        let post_json =
+          board_post_dashboard_json ?current_vote
+            ~reactions ~author_karma post
+        in
+        let comments_json =
+          `List (List.map (fun (comment : Board.comment) ->
+            let comment_id = Board.Comment_id.to_string comment.id in
+            let current_vote = board_current_vote_for_comment ~voter ~comment_id in
+            let reactions = reactions_for (Board.Reaction_comment, comment_id) in
+            board_comment_dashboard_json
+              ?current_vote ~reactions comment
+          ) comments)
+        in
+        let page_fields =
+          [ "comments", comments_json; "comment_page", comment_page_json ]
+        in
+        let json =
+          match response_format with
+          | Server_board_post_response_format.Flat ->
+            (match post_json with
+             | `Assoc fields -> `Assoc (fields @ page_fields)
+             | _ -> `Assoc (("post", post_json) :: page_fields))
+          | Server_board_post_response_format.Nested ->
+            `Assoc (("post", post_json) :: page_fields)
+        in
+        (`OK, Yojson.Safe.to_string json)
 
 let board_sub_board_detail_prefix = "/api/v1/board/sub-boards/"
 

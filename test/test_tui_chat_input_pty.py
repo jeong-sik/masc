@@ -8,6 +8,8 @@ import test_tui_keyboard_input as keyboard
 
 # The edited-test selector reads these exact source paths.
 SOURCE_MODULES = (
+    "bin/masc_tui_input_reader.ml",
+    "bin/masc_tui_input_reader.mli",
     "bin/masc_tui.ml",
     "bin/masc_tui_composer.ml",
     "bin/masc_tui_input_decoder.ml",

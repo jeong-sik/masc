@@ -42,79 +42,6 @@ type keeper = {
   k_updated_at : string;
 }
 
-val escape_invisible : string -> string
-(** Draw bidi controls, zero-width characters and tag characters (U+061C,
-    U+200B-U+200F, U+202A-U+202E, U+2066-U+2069, U+FEFF, U+E0000-U+E007F) as
-    their own escape text: [\uXXXX] inside the basic plane and [\UXXXXXXXX]
-    above it, since the tag block needs five digits. A terminal draws them as
-    nothing, so without this the glyphs an operator reads can differ from the
-    bytes an approval hash covers (Trojan Source, CVE-2021-42574; spelling
-    ASCII in tag characters is the same trick without the bidi). Two
-    exceptions are characters a reader can see the effect of, and each is
-    admitted by its neighbours rather than by a list: a zero-width joiner
-    between two pictographs (UAX #29 GB11), and a subdivision flag -- U+1F3F4,
-    three to seven tag characters in the lowercase-and-digit shape UTS #51
-    gives a subdivision code, then the terminator U+E007F -- which is kept
-    whole or escaped whole. Tag characters outside that shape are drawn even
-    behind a flag: the wider grammar spells sentences, and a flag is all a
-    reader would see of them. {!sanitize_terminal_text} and the Keeper chat
-    boundary both route through here, so the rule lives in one place. *)
-
-val sanitize_terminal_text : string -> string
-(** Escape C0, DEL, raw C1 bytes, UTF-8 encoded C1 code points, malformed
-    UTF-8 bytes, and the invisible code points {!escape_invisible} names, so
-    external values form one printable terminal row. Call at the terminal
-    rendering boundary; decoded records intentionally retain their raw typed
-    value for non-terminal consumers. *)
-
-val sanitize_terminal_lines : string -> string
-(** [sanitize_terminal_lines text] keeps each LF of [text] as a line break and
-    puts every line between them through {!sanitize_terminal_text}, so each
-    other control byte -- a tab, a carriage return, an ESC -- is drawn as its
-    visible escape rather than sent to the terminal or folded into a space.
-    For a text read whole, where a reader must see what the bytes are. *)
-
-val preview_line : string -> string
-(** One row of a multi-line text for a list cell: each line break (LF, CR LF,
-    or a lone CR) becomes the one-cell return mark U+23CE, a tab becomes a
-    space, and everything else goes through {!sanitize_terminal_text}. Where
-    that function is the boundary for values that must not carry control
-    bytes, this one is for text whose breaks are content: a file's edit, a
-    tool call's arguments. *)
-
-val short_timestamp_of_unix_for_terminal :
-  localtime:(float -> Unix.tm) -> float -> string
-(** [YYYY-MM-DD HH:MM:SS] of a Unix time in the zone [localtime] converts to.
-    The same shape {!short_timestamp_for_terminal} draws, for a time the wire
-    carries as a number. *)
-
-val short_timestamp_for_terminal :
-  localtime:(float -> Unix.tm) -> string -> string
-(** [YYYY-MM-DD HH:MM:SS] of an RFC 3339 timestamp in the zone [localtime]
-    converts to, then sanitized. A timestamp the codec cannot read keeps at most
-    its first 19 source bytes; slicing before the terminal boundary ensures a
-    split UTF-8 scalar cannot recreate a raw C1 byte. Empty timestamps render as
-    [(never)]. *)
-
-val clock_timestamp_of_unix_for_terminal :
-  localtime:(float -> Unix.tm) -> float -> string
-(** [HH:MM:SS] of a Unix time in the zone [localtime] converts to. The same
-    shape {!clock_timestamp_for_terminal} draws, for a time the wire carries
-    as a number rather than an RFC 3339 string -- the pairing
-    {!short_timestamp_of_unix_for_terminal} already is for
-    {!short_timestamp_for_terminal}. Always digits and colons, so unlike its
-    string-input sibling this need not sanitize its own output. *)
-
-val clock_timestamp_for_terminal :
-  localtime:(float -> Unix.tm) -> string -> string
-(** The [HH:MM:SS] clock of an RFC 3339 timestamp in the zone [localtime]
-    converts to - [Unix.localtime] on a screen, [Unix.gmtime] or a fixed
-    offset in a test - then sanitized. A timestamp the codec cannot read
-    keeps the conventional eight-byte slice, so the result is still one
-    clock-shaped row fragment; the final sanitizer makes arbitrary external
-    bytes safe even when the slice splits UTF-8. *)
-
-
 (** Where a goal stands with the completion judge.
 
     The phase says [executing] both for a goal nobody has reviewed and for one
@@ -149,7 +76,6 @@ type planning_goal = {
   pg_id : string;
   pg_criterion_revision : string option;
   pg_title : string;
-  pg_owner : Goal_store.owner;
   pg_phase : Goal_phase.t;
   pg_priority : int;
   pg_due_date : string option;
@@ -1228,87 +1154,6 @@ type memory_health_snapshot = {
   mhs_starving_keepers : int;
 }
 
-(** Whether a search has ever returned the fact. The count, the number of
-    distinct UTC days and the last clock come from one list of retrieval
-    times on the server, so they are all absent or all present; the decoder
-    rejects a row where they disagree. *)
-type memory_fact_retrieval =
-  | Never_retrieved
-  | Retrieved of { count : int; distinct_days : int; last_at : float }
-
-(** What the keeper did with one fact, as the server projected it from the
-    memory-events sidecar (RFC-0418): whether and how a search returned it,
-    how often it was retracted, and which dropped facts it continues. No
-    strength or score; the numbers are the record. *)
-type memory_fact_events = {
-  mfe_retrieval : memory_fact_retrieval;
-  mfe_retracted_count : int;
-  mfe_revised_from : string list;
-}
-
-(** A fact nothing has used yet: never retrieved, no retractions, no
-    predecessors. Fixtures start here. *)
-val no_memory_fact_events : memory_fact_events
-
-(** One remembered fact from a keeper's ordinary Memory OS store. The
-    category and origin are the server's closed taxonomy, carried as the
-    strings it spelled them in: this side renders and groups them by exact
-    equality and never classifies on its own. *)
-type memory_fact = {
-  mf_claim : string;
-  mf_category : Keeper_memory_os_types.category;
-  mf_origin : string;
-  mf_first_seen : float;
-  mf_last_seen : float;
-  mf_memory_id : string;
-  mf_events : memory_fact_events;
-}
-
-(** A fact bound to a file: it holds only while the file at [msf_path] still
-    hashes to [msf_sha256]. *)
-type memory_source_fact = {
-  msf_claim : string;
-  msf_first_seen : float;
-  msf_path : string;
-  msf_sha256 : string;
-}
-
-(** A source-bound fact the store dropped, and the server's reason string. *)
-type memory_invalidation = {
-  mi_source_path : string;
-  mi_invalidated_at : float;
-  mi_reason : string;
-}
-
-(** One store's reading. The server answers each store independently --
-    a read error, no snapshot yet, or the snapshot -- so one failing store
-    never blanks the other, and this side keeps the three states apart
-    instead of collapsing them into an empty list. *)
-type 'a memory_store_reading =
-  | Memory_store_read_error of string
-  | Memory_store_absent
-  | Memory_store_present of 'a
-
-type memory_ordinary_store = {
-  mos_revision : int;
-  mos_updated_at : float;
-  mos_facts : memory_fact list;
-}
-
-type memory_source_store = {
-  mss_revision : int;
-  mss_updated_at : float;
-  mss_facts : memory_source_fact list;
-  mss_invalidations : memory_invalidation list;
-}
-
-type memory_fact_snapshot = {
-  mfs_keeper : string;
-  mfs_ordinary : memory_ordinary_store memory_store_reading;
-  mfs_source : memory_source_store memory_store_reading;
-  mfs_events_read_error : string option;
-}
-
 (** One verdict the harness recorded: which gate ran on which task, what it
     decided, and which evaluator decided it. *)
 type harness_verdict = {
@@ -1751,303 +1596,6 @@ val decode_keeper_secret_projections :
     without a [secret_projection] object is skipped rather than rejected:
     the endpoint serves several screens and a Keeper the producer has not
     projected yet is absence, not a malformed reading. *)
-
-(** Closed lifecycle vocabulary emitted by the Fusion run registry. A failed
-    run carries the registry's typed failure fields rather than flattening
-    them into a display string. *)
-type fusion_run_status =
-  | Fusion_running
-  | Fusion_completed
-  | Fusion_failed of {
-      frs_failure_code : string;
-      frs_error : string;
-    }
-
-val fusion_run_status_to_string : fusion_run_status -> string
-
-(** Typed live computation stage. Panel counts are producer facts; completed
-    and failed are terminal stage/status pairs rather than inferred progress. *)
-type fusion_run_stage =
-  | Fusion_stage_accepted
-  | Fusion_stage_panel of { frs_expected : int }
-  | Fusion_stage_judge of
-      { frs_expected : int
-      ; frs_answered : int
-      ; frs_failed : int
-      }
-  | Fusion_stage_computed of
-      { frs_expected : int
-      ; frs_answered : int
-      ; frs_failed : int
-      }
-  | Fusion_stage_recording_evidence of
-      { frs_expected : int
-      ; frs_answered : int
-      ; frs_failed : int
-      }
-  | Fusion_stage_completed
-  | Fusion_stage_failed
-
-val fusion_run_stage_to_string : fusion_run_stage -> string
-
-type fusion_run = {
-  fur_run_id : string;
-  fur_keeper : string;
-  fur_preset : string;
-  fur_topology : Fusion_types.fusion_topology;
-  fur_started_at : float;
-  fur_finished_at : float option;
-  fur_status : fusion_run_status;
-  fur_stage : fusion_run_stage;
-  (** Process-local stage for running rows, or the exact terminal stage. *)
-  fur_decision : string option;
-  fur_summary : string option;
-  (** Bounded semantic terminal preview. Both fields are present together only
-      for successes written by the current producer; legacy success rows have
-      neither. *)
-}
-
-type fusion_replay =
-  | Fusion_not_replayed
-  | Fusion_log_absent
-  | Fusion_replayed of
-      { malformed_lines : int; dropped_running : int; incomplete : bool }
-
-type fusion_historical_evidence = {
-  fhe_run_id : string;
-  fhe_post_id : string;
-  fhe_title : string;
-  fhe_created_at : float;
-}
-
-type fusion_list_entry =
-  | Fusion_retained_run of fusion_run
-  | Fusion_historical_evidence of fusion_historical_evidence
-
-type fusion_snapshot = {
-  fus_generated_at : string;
-  fus_runs : fusion_run list;
-  fus_replay : fusion_replay;
-  fus_historical_evidence : fusion_historical_evidence list;
-}
-
-type fusion_panel_answer = {
-  fpa_model : string;
-  fpa_answer : string;
-  fpa_input_tokens : int;
-  fpa_output_tokens : int;
-}
-
-type fusion_panel_failure = {
-  fpf_model : string;
-  fpf_reason_code : string;
-  fpf_reason_detail : string;
-}
-
-type fusion_panel_result =
-  | Fusion_panel_answered of fusion_panel_answer
-  | Fusion_panel_failed of fusion_panel_failure
-
-type fusion_judge =
-  | Fusion_judge_synthesized of {
-      fj_decision : string;
-      fj_resolved_answer : string;
-      fj_reason : string;
-    }
-  | Fusion_judge_failed of {
-      fj_failure_code : string;
-      fj_error : string;
-    }
-
-(** RFC-0284 judge-node roles, as the server's judge_role_projection writes
-    them. Closed on purpose: an untaught role fails its node's decode. *)
-type fusion_judge_role = Fusion_types.judge_role_kind =
-  | Judge_single
-  | Judge_refine
-  | Judge_first
-  | Judge_meta
-  | Judge_stage_meta
-  | Judge_final_meta
-
-type fusion_judge_node_outcome =
-  | Judge_node_synthesized of {
-      fjno_decision : string;
-      fjno_resolved_answer : string;
-      fjno_synthesis : string;
-      fjno_input_tokens : int;
-      fjno_output_tokens : int;
-    }
-  | Judge_node_failed of {
-      fjno_failure_code : string;
-      fjno_error : string;
-      fjno_input_tokens : int;
-      fjno_output_tokens : int;
-      fjno_elapsed_s : float option;
-      fjno_timed_out : bool;
-    }
-
-(** One executed judge of the deliberation: role is the topology position,
-    identity names the lens (a first-pass judge) or the stage. *)
-type fusion_judge_node = {
-  fjn_role : fusion_judge_role;
-  fjn_identity : string;
-  fjn_outcome : fusion_judge_node_outcome;
-}
-
-(** A tool-trace actor's phase. A judge actor carries the same closed role
-    sum as a judge node; the server writes both from one projection. *)
-type fusion_tool_phase =
-  | Fusion_tool_panel
-  | Fusion_tool_judge of fusion_judge_role
-
-type fusion_tool_actor =
-  { fta_phase : fusion_tool_phase
-  ; fta_identity : string
-  }
-
-val fusion_judge_role_label : fusion_judge_role -> string
-(** The label the server projects a role under, for drawing the role
-    beside an actor. *)
-
-type fusion_tool_preview =
-  { ftp_text : string
-  ; ftp_bytes : int
-  ; ftp_truncated : bool
-  }
-
-type fusion_tool_completion =
-  | Fusion_tool_succeeded of fusion_tool_preview
-  | Fusion_tool_failed of
-      { ftc_output : fusion_tool_preview
-      ; ftc_recoverable : bool
-      ; ftc_error_class : string option
-      }
-
-type fusion_tool_event =
-  | Fusion_tool_called of
-      { fte_actor : fusion_tool_actor
-      ; fte_agent_name : string
-      ; fte_tool_use_id : string
-      ; fte_turn : int
-      ; fte_planned_index : int
-      ; fte_tool_name : string
-      ; fte_input : fusion_tool_preview
-      }
-  | Fusion_tool_completed of
-      { fte_actor : fusion_tool_actor
-      ; fte_agent_name : string
-      ; fte_tool_use_id : string
-      ; fte_turn : int
-      ; fte_planned_index : int
-      ; fte_tool_name : string
-      ; fte_completion : fusion_tool_completion
-      }
-
-type fusion_tool_gap =
-  { ftg_actor : fusion_tool_actor
-  ; ftg_reason : string
-  }
-
-type fusion_tool_trace =
-  { ftt_complete : bool
-  ; ftt_observed_actors : fusion_tool_actor list
-  ; ftt_dropped_events : int
-  ; ftt_gaps : fusion_tool_gap list
-  ; ftt_events : fusion_tool_event list
-  }
-
-(** One seat's route through its candidates (the sink's [seat_routes] array):
-    who was tried, who answered. A panel seat is its panelist id; a judge seat
-    is its topology role and identity, read back through the same closed role
-    set the tool actors use. *)
-type fusion_seat =
-  | Fusion_panel_seat of string
-  | Fusion_judge_seat of { fs_role : fusion_judge_role; fs_identity : string }
-
-type fusion_seat_attempt =
-  { fsa_runtime : string
-  ; fsa_code : string
-  ; fsa_detail : string
-  }
-
-type fusion_seat_route =
-  { fsr_seat : fusion_seat
-  ; fsr_route : string
-  ; fsr_answered_by : string option
-        (** [None]: every candidate failed, or the route did not resolve. *)
-  ; fsr_failed_attempts : fusion_seat_attempt list
-  }
-
-type fusion_evidence = {
-  fe_post_id : string;
-  fe_title : string;
-  fe_question : string;
-  fe_panel : fusion_panel_result list;
-  fe_judge : fusion_judge;
-  fe_judges : fusion_judge_node list;
-  fe_tool_trace : fusion_tool_trace;
-  fe_seat_routes : fusion_seat_route list option;
-      (** [None] when the post's meta carries no [seat_routes] key, which is
-          how a post written before seats were recorded reads; the detail
-          draws no block for it. An empty list is a post that carries the key
-          with no seat in it. *)
-}
-
-type fusion_evidence_status =
-  | Fusion_evidence_recorded
-  | Fusion_evidence_pending
-  | Fusion_evidence_absent
-
-type fusion_detail = {
-  fud_generated_at : string;
-  fud_run : fusion_run;
-  fud_evidence_status : fusion_evidence_status;
-  fud_evidence : fusion_evidence option;
-}
-
-type fusion_historical_detail = {
-  fhd_reference : fusion_historical_evidence;
-  fhd_author : string;
-  fhd_title : string;
-  fhd_body : string;
-  fhd_observations : ((int * int) option * float option, string) result;
-  fhd_evidence : (fusion_evidence, string) result;
-}
-
-val decode_fusion_historical_detail :
-  reference:fusion_historical_evidence -> Yojson.Safe.t ->
-  (fusion_historical_detail, string) result
-(** Read an exact Board original independently of registry lifecycle. Source
-    identity is required; a malformed evidence payload remains an explicit
-    error beside the preserved original. *)
-
-val decode_fusion_snapshot : Yojson.Safe.t -> (fusion_snapshot, string) result
-(** Decode the retained registry list from
-    [GET /api/v1/dashboard/fusion-runs]. The published count must equal the
-    decoded row count; unknown lifecycle labels reject the reading. *)
-
-val decode_fusion_detail : Yojson.Safe.t -> (fusion_detail, string) result
-(** Decode one exact run/evidence projection. [recorded] requires a Board post
-    whose typed origin is exactly [source=fusion] and whose [fusion_run_id]
-    matches the registry row. [pending] and [absent] require [post:null], and
-    only a running row may be pending. Panel array order is retained. *)
-
-(** What the Fusion launch form offers, read from
-    [GET /api/v1/runtime/config/fusion]: whether Fusion is enabled, the preset
-    names, and the preset the tool applies when the request names none. *)
-type fusion_launch_options =
-  { flo_enabled : bool
-  ; flo_default_preset : string
-  ; flo_presets : string list
-  }
-
-val decode_fusion_launch_options :
-  Yojson.Safe.t -> (fusion_launch_options, string) result
-
-val decode_fusion_launch_receipt : Yojson.Safe.t -> (string, string) result
-(** The [run_id] a 2xx answer to [POST /api/v1/keepers/<keeper>/fusion]
-    carries. A refusal is a 4xx and is reported by the transport, so a 2xx
-    body with [ok:false] is an unknown shape, not a refusal. *)
 
 (** One tool call a keeper is holding for an operator's answer, from
     [GET /api/v1/keepers/tool-approvals]. [kta_asked_at] is the server
@@ -2913,129 +2461,6 @@ val decode_runtime_resolved_snapshot :
 (** What each provider account said about its own usage windows, as
     [GET /api/v1/runtime/resolved] carries it. The server keeps these values
     as reported and derives no availability from them. *)
-type provider_usage_window_kind =
-  | Window_five_hour
-  | Window_seven_day
-  | Window_duration_minutes of int
-      (** A window length the server has no name for. *)
-  | Window_provider_label of string
-      (** A label the provider gave the window, kept as written. *)
-
-(** The usage in the unit the provider reported it in. Not clamped. *)
-type provider_usage_utilization =
-  | Utilization_fraction of float  (** [0.67] is 67 %. *)
-  | Utilization_percent of int
-
-(** What a window limits, as the server's decoder classified it from the
-    provider's own shape. *)
-type provider_usage_window_role =
-  | Role_gates_model_calls
-      (** Spending it refuses model calls on the account. *)
-  | Role_counts_other_use
-      (** It counts something a model call does not need, e.g. Z.AI's
-          TIME_LIMIT (MCP and tool calls). *)
-  | Role_unclassified_limit
-      (** A limit the server's decoder does not know. *)
-
-type provider_usage_window = {
-  puw_limit_id : string option;
-  puw_kind : provider_usage_window_kind;
-  puw_role : provider_usage_window_role;
-  puw_utilization : provider_usage_utilization;
-  puw_resets_at : float option;  (** Epoch seconds, as reported. *)
-  puw_observed_at : float;  (** When the server heard this report. *)
-}
-
-(** A reported account holds at least one window; an account that has not
-    reported since the server started holds none. *)
-type provider_usage_state =
-  | Account_not_reported_since_start
-  | Account_reported of provider_usage_window * provider_usage_window list
-
-(** A provider table that bills to the account. *)
-type provider_usage_provider = {
-  pup_id : string;  (** The [providers.<id>] key. *)
-  pup_display_name : string;
-      (** The table's [display-name]; the id when the table names none. *)
-}
-
-type provider_usage_account = {
-  pua_scope : string;  (** The quota scope, as [quota_scope] on runtime rows. *)
-  pua_scope_id : string;
-      (** The server's opaque id for the scope, the one its usage history
-          points carry as [scope_id]. Compared, never recomputed. *)
-  pua_providers : provider_usage_provider list;
-  pua_state : provider_usage_state;
-}
-
-type provider_usage_windows = {
-  puws_since : float;  (** Server process start: the table's first moment. *)
-  puws_accounts : provider_usage_account list;
-}
-
-type provider_usage_history_point = {
-  puhp_scope_id : string;
-  puhp_kind : string;
-  puhp_limit_id : string option;
-  puhp_unit : provider_usage_utilization;
-  puhp_observed_at : float;
-}
-
-type provider_usage_history = {
-  puh_days : int;
-  puh_generated_at : float;
-  puh_unreadable_reports : int;
-      (** Stored reports in the window the server could not read and left
-          out. A gap they leave is unknown, not a quiet day. *)
-  puh_points : provider_usage_history_point list;
-}
-
-val decode_provider_usage_history :
-  Yojson.Safe.t -> (provider_usage_history, string) result
-
-val decode_provider_usage_windows :
-  Yojson.Safe.t -> (provider_usage_windows, string) result
-(** Strict decoder for the [provider_usage_windows_since] and
-    [provider_usage_windows] members of [GET /api/v1/runtime/resolved]. An
-    unknown [state], window [kind], window [role] or utilization [unit] is an
-    error, as is a reported account without windows or an unreported one with
-    windows. *)
-
-type keeper_usage_coverage =
-  | Keeper_usage_complete
-  | Keeper_usage_partial of int
-  | Keeper_usage_failed of string
-
-type keeper_usage_row = {
-  kur_name : string;
-  kur_turn_samples : int;
-  kur_tokens : int option;
-  kur_cost_usd : float option;
-  kur_tokens_reported : int;
-  kur_tokens_missing : int;
-  kur_cost_reported : int;
-  kur_cost_missing : int;
-  kur_coverage : keeper_usage_coverage;
-}
-
-type keeper_usage_freshness =
-  | Keeper_usage_fresh
-  | Keeper_usage_stale of { age_s : float; last_error : string option }
-
-type keeper_usage_window =
-  | Keeper_usage_loading
-  | Keeper_usage_window of {
-      kuw_generated_at : float;
-      kuw_window_minutes : int;
-      kuw_rows : keeper_usage_row list;
-      kuw_freshness : keeper_usage_freshness;
-    }
-
-val decode_keeper_usage_window :
-  Yojson.Safe.t -> (keeper_usage_window, string) result
-(** Decode the coverage-bearing [/api/v1/dashboard/keeper-costs] projection.
-    A null sum stays absent, and a loading placeholder never reads as zero. *)
-
 val decode_runtime_surface_snapshot :
   probe_json:Yojson.Safe.t ->
   resolved_json:Yojson.Safe.t ->
@@ -3065,26 +2490,6 @@ val decode_memory_health_snapshot :
 (** Decode the fleet memory-health snapshot served at
     [/api/v1/dashboard/keeper-memory-health]. Every consumed field is
     required: a keeper the server left out is invisible here, not defaulted. *)
-
-val decode_memory_fact_snapshot :
-  Yojson.Safe.t -> (memory_fact_snapshot, string) result
-(** Decode one keeper's fact listing served at
-    [/api/v1/keepers/:name/memory-facts]. Each store object is read by which
-    field it carries -- [read_error], [present]:false, or [present]:true with
-    its rows -- and any other shape is a decode error, not an empty store.
-    [mfs_events_read_error] keeps a sidecar read failure distinct from an empty
-    event history. *)
-
-val merge_keeper_memory_facts :
-  now:float ->
-  (string * (memory_fact_snapshot, string) result) list ->
-  memory_fact_snapshot * string option
-(** Merge per-keeper fact listings into the "all keepers" view ([mfs_keeper =
-    "*"]). Each fact is tagged with its keeper. The second value names every
-    keeper that could not be read -- a failed load, or a store answering
-    [Memory_store_read_error] -- as ["N of M keepers not read: ..."]; [None]
-    when all were read. [Memory_store_absent] is a keeper with no memory yet,
-    not a failure. *)
 
 val decode_harness_snapshot :
   Yojson.Safe.t -> (harness_snapshot, string) result
@@ -3158,9 +2563,6 @@ type overview_goal_measurement =
 type overview_goal = {
   og_id : string;
   og_title : string;
-  og_owner : Goal_store.owner;
-      (** Who owns the Goal (#39571). [Unknown_owner] when the payload carries
-          no owner member, as a response written before the field did. *)
   og_completion : string option;
       (** The Goal's current completion state from the verification ledger
           ([proof_refuted], [proof_proven], [proof_pending], [idle],
@@ -3280,24 +2682,10 @@ type x10_mouse =
     the bytes either way. *)
 val x10_mouse_report :
   button:char -> column:char -> row:char -> x10_mouse option
-val required_string_field : Yojson.Safe.t -> string -> (string, string) result
-val optional_string_field :
-  Yojson.Safe.t -> string -> (string option, string) result
-val required_int_field : Yojson.Safe.t -> string -> (int, string) result
 val required_display_any_field :
   Yojson.Safe.t -> string list -> (string, string) result
 val optional_body_field : Yojson.Safe.t -> (string, string) result
 val required_body_field : Yojson.Safe.t -> (string, string) result
-val required_list_field :
-  Yojson.Safe.t -> string -> (Yojson.Safe.t list, string) result
-val optional_list_field :
-  Yojson.Safe.t -> string -> (Yojson.Safe.t list, string) result
-val required_object_field :
-  Yojson.Safe.t -> string -> (Yojson.Safe.t, string) result
-val optional_object_field :
-  Yojson.Safe.t -> string -> (Yojson.Safe.t option, string) result
-val decode_list :
-  string -> (Yojson.Safe.t -> ('a, string) result) -> Yojson.Safe.t list -> ('a list, string) result
 val bounded_parent_depth :
   ?max_depth:int ->
   id_of:('a -> string) ->
@@ -3514,69 +2902,6 @@ type lsp_answer =
 
 val decode_lsp_answer : Yojson.Safe.t -> (lsp_answer, string) result
 
-(** {1 Questions a Keeper put to the operator}
-
-    Decoded from [GET /api/v1/keepers/asks]. The rows carry choice ids
-    alongside labels and the answer POST takes ids back, so a surface built on
-    these types never matches on label text: rewording a choice cannot orphan
-    an answer already recorded. *)
-
-type ask_choice = {
-  ac_id : string;  (** what an answer names; never the label *)
-  ac_label : string;
-  ac_description : string option;
-}
-
-type ask_mode =
-  | Ask_single
-  | Ask_multi
-
-type ask_free_text =
-  | Ask_free_text_allowed of { aft_hint : string option }
-  | Ask_choices_only
-
-type ask_question = {
-  aq_id : string;
-  aq_header : string;  (** two or three words; what a narrow row shows *)
-  aq_prompt : string;
-  aq_mode : ask_mode;
-  aq_free_text : ask_free_text;
-  aq_choices : ask_choice list;
-}
-
-type ask_resolution =
-  | Ask_open
-  | Ask_answered of {
-      aa_answered_at : float;
-      aa_question_ids : string list;
-    }
-  | Ask_withdrawn of {
-      aw_reason : string;
-      aw_withdrawn_at : float;
-    }
-
-type ask_row = {
-  ar_keeper : string;
-  ar_id : string;
-  ar_asked_at : float;
-  ar_context : string option;
-      (** why the Keeper is asking, in its own words. A row that hides this
-          reads as a decision with no stakes. *)
-  ar_questions : ask_question list;
-  ar_resolution : ask_resolution;
-}
-
-type asks_snapshot = {
-  asn_keeper : string option;
-  asn_open_count : int;  (** the server's count, not [List.length asn_rows] *)
-  asn_rows : ask_row list;
-}
-
-val decode_asks_snapshot : Yojson.Safe.t -> (asks_snapshot, string) result
-(** A row whose mode or free-text shape is unknown fails the decode rather
-    than defaulting: a surface that guessed would offer the operator a control
-    the server will refuse. *)
-
 type goal_timeline_event = {
   gt_ts : string;
   gt_kind : string;
@@ -3643,55 +2968,6 @@ type verification_evidence =
 
 val decode_verification_evidence :
   Yojson.Safe.t -> (verification_evidence, string) result
-
-(** Strict hard-cut decoder for [/api/v1/skills/evidence]. The endpoint's
-    current projection is explicitly incomplete; missing or weakened coverage
-    fields are rejected instead of becoming zeroes in the terminal. *)
-type skill_evidence_status =
-  | Skill_evidence_observed
-  | Skill_evidence_not_observed_in_retained_coverage
-
-type skill_evidence_composition_scope =
-  | Skill_evidence_exact_reference_latest_completed
-  | Skill_evidence_composition_unavailable
-
-type skill_evidence_coverage =
-  { sec_composition_scope : skill_evidence_composition_scope
-  ; sec_composition_records_read : int
-  ; sec_composition_unavailable : string list
-  ; sec_activation_scope : string
-  ; sec_activation_sessions_inspected : int
-  ; sec_activation_ledgers_loaded : int
-  ; sec_activation_gap_count : int
-  ; sec_activation_owner_gap_count : int
-  }
-
-type skill_evidence_owner_claim =
-  { seo_keeper : string
-  ; seo_source : string
-  }
-
-type skill_evidence_activation_item =
-  { sea_trace_id : string
-  ; sea_owner_status : string
-  ; sea_owner_claims : skill_evidence_owner_claim list
-  ; sea_owner_gap_count : int
-  ; sea_activation : Yojson.Safe.t
-  }
-
-type skill_evidence_activation =
-  | Skill_evidence_most_recent_observed of skill_evidence_activation_item
-  | Skill_evidence_most_recent_observed_timestamp_tie of
-      skill_evidence_activation_item list
-
-type skill_evidence =
-  { se_status : skill_evidence_status
-  ; se_activation : skill_evidence_activation option
-  ; se_composition : Yojson.Safe.t option
-  ; se_coverage : skill_evidence_coverage
-  }
-
-val decode_skill_evidence : Yojson.Safe.t -> (skill_evidence, string) result
 
 val runtime_context_source_label : runtime_context_source -> string
 val runtime_reasoning_effort_label : Llm_provider.Reasoning_effort.t -> string
@@ -3859,3 +3135,11 @@ val play_invite_absent_body : string -> bool
 
 val play_revoke_http_error : status_code:int -> body:string -> string
 (** Preserve the release failure detail from the revoke endpoint's 500 reply. *)
+
+val play_invite_refusal : status_code:int -> body:string -> string option
+(** The sentence for a client refusal the play routes answered with
+    [{error, message}]: ["HTTP 409: <message>"], then in parentheses what the
+    body says is missing and who holds the name. Every part is made
+    terminal-safe. [None] for a 401 or 403, which are about the credential the
+    client sent and are worded where that is known, for a status that is not a
+    4xx, and for a body with no [message] to read. *)

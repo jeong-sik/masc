@@ -152,16 +152,21 @@ type workspace_row_values = {
 }
 (** One repository row's readings, already rendered as text. *)
 
-val workspace_path_width : inner_width:int -> int
-(** Cells the path may occupy: what the named columns leave, never below
-    {!workspace_minimum_path_width}. Computed from the column widths rather
-    than from a constant kept in step with them by hand. *)
+type workspace_column =
+  | Workspace_name
+  | Workspace_branch
+  | Workspace_status
+  | Workspace_sync
+  | Workspace_path
 
-val workspace_header_row : path_width:int -> string
-val workspace_row : path_width:int -> workspace_row_values -> string
-(** The header and one row, laid out on the same columns. This screen used to
-    print one format string in two places; a column can no longer exist in the
-    header at a width the rows do not use. *)
+val workspace_layout : inner_width:int -> workspace_column Masc_tui_table.layout
+(** Keep repository, status and path. Fold sync and then branch as the
+    viewport narrows; path receives the remaining cells. *)
+
+val workspace_header_row : layout:workspace_column Masc_tui_table.layout -> string
+val workspace_row :
+  layout:workspace_column Masc_tui_table.layout -> workspace_row_values -> string
+(** Header and rows share the measured column allocation. *)
 
 (** {1 System log columns} *)
 
@@ -189,21 +194,23 @@ val system_log_plain_styles : system_log_styles
 (** No dress at all, for a caller drawing an undressed row and for the tests
     that check a dressed row measures the same. *)
 
-val system_log_message_width : inner_width:int -> int
-(** Cells the message may occupy: what the named columns leave, never below
-    {!system_log_minimum_message_width}. *)
+type system_log_column =
+  | Log_time
+  | Log_level
+  | Log_module
+  | Log_keeper
+  | Log_category
+  | Log_message
 
-val system_log_header_row : message_width:int -> string
+val system_log_layout : inner_width:int -> system_log_column Masc_tui_table.layout
+(** Keep time, level and message. Fold category, keeper and module in that
+    order when they would squeeze the message below its readable floor. *)
 
+val system_log_header_row : layout:system_log_column Masc_tui_table.layout -> string
 val system_log_row :
-  styles:system_log_styles ->
-  level_style:string ->
-  message_width:int ->
-  system_log_row_values ->
-  string
-(** One entry, laid out on the same columns as {!system_log_header_row}. The
-    widths used to live in two format strings, the row's threaded between five
-    escape sequences where nothing could compare them with the header's. *)
+  styles:system_log_styles -> level_style:string ->
+  layout:system_log_column Masc_tui_table.layout -> system_log_row_values -> string
+(** Header and styled rows share the measured column allocation. *)
 
 (** {1 Task Review columns} *)
 
@@ -273,6 +280,7 @@ type schedule_column =
     the widths the columns were fitted with. *)
 type schedule_layout = private {
   sl_columns : schedule_column Masc_tui_table.layout;
+  sl_due_width : int;
   sl_target_width : int;
   sl_wake_width : int;
   sl_delivery_width : int;
@@ -286,9 +294,10 @@ val schedule_layout :
   schedule_layout
 (** The columns the list draws in [inner_width], given the target, wake and
     delivery widths measured from the page. When the row is narrow the
-    delivery goes first, then the wake and the state; the due time, the
-    target and the recurrence stay, and the recurrence takes what the others
-    leave, never below {!schedule_minimum_recurrence_width}. *)
+    delivery goes first, then the wake and state. Due time, target and
+    recurrence stay; target names are bounded before fitting so one long name
+    cannot consume the recurrence. Very narrow tables shrink those primary
+    widths and the detail carries their full readings. *)
 
 val schedule_header_row : layout:schedule_layout -> string
 

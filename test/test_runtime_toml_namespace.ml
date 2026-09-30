@@ -129,6 +129,155 @@ let test_each_table_has_one_spelling () =
   Alcotest.(check bool) "another name is no table" true (Ns.of_key "codex_second" = None);
   Alcotest.(check string) "a path under a table" "runtime.lanes" (Ns.(path Runtime) "lanes")
 
+let shared_model = {|[models.sol]
+api-name = "gpt-6.1-sol"
+max-context = 272000
+tools-support = true
+streaming = true
+reasoning-effort = "high"
+|}
+
+let shared_providers = {|[providers.first]
+protocol = "codex-app-server"
+command = "codex"
+is-non-interactive = true
+account-home = "/tmp/codex-first"
+model-set = "codex"
+[providers.second]
+protocol = "codex-app-server"
+command = "codex"
+is-non-interactive = true
+account-home = "/tmp/codex-second"
+model-set = "codex"
+|}
+
+let parse_config text =
+  match Runtime_toml.parse_string text with
+  | Ok config -> config
+  | Error errors -> Alcotest.failf "configuration refused: %s"
+      (String.concat "; " (List.map (fun (e : Runtime_toml.parse_error) ->
+         e.path ^ ": " ^ e.message) errors))
+
+let test_one_model_serves_two_accounts () =
+  let config = parse_config
+    (shared_model ^ shared_providers ^ {|[model_sets.codex]
+models = ["sol"]
+[runtime]
+default = "first.sol"
+[runtime.assignments]
+worker = "second.sol"
+|}) in
+  Alcotest.(check int) "the model is declared once" 1 (List.length config.models);
+  Alcotest.(check (list string)) "both accounts share its model id"
+    ["first.sol"; "second.sol"]
+    (List.sort String.compare (List.map Runtime_schema.binding_key config.bindings));
+  Alcotest.(check (list (option string))) "the account homes stay separate"
+    [Some "/tmp/codex-first"; Some "/tmp/codex-second"]
+    (List.map (fun (p : Runtime_schema.provider) -> p.account_home) config.providers);
+  Alcotest.(check bool) "the shared declaration carries High" true
+    ((List.hd config.models).reasoning_effort = Some Llm_provider.Reasoning_effort.High);
+  Alcotest.(check (option string)) "assignment resolves the second binding"
+    (Some "second.sol") (List.assoc_opt "worker" config.keeper_assignments)
+
+let test_a_model_added_to_the_set_reaches_every_account () =
+  let config = parse_config
+    (shared_model ^ shared_providers ^ {|[models.next]
+api-name = "future-sol"
+max-context = 272000
+[model_sets.codex]
+models = ["sol", "next"]
+|}) in
+  Alcotest.(check (list string)) "one list addition generates both new bindings"
+    ["first.next"; "first.sol"; "second.next"; "second.sol"]
+    (List.sort String.compare (List.map Runtime_schema.binding_key config.bindings))
+
+let test_generated_bindings_materialize_and_route () =
+  let text = shared_providers ^ {|[models.sol]
+api-name = "gpt-6-sol"
+max-context = 272000
+tools-support = true
+streaming = true
+reasoning-effort = "high"
+[models.disabled]
+api-name = "gpt-6-sol"
+max-context = 272000
+[model_sets.codex]
+models = ["sol", "disabled"]
+[first.disabled]
+enabled = false
+[second.disabled]
+enabled = false
+[runtime]
+default = "first.sol"
+[runtime.assignments]
+worker = "second.sol"
+|} in
+  let path = Filename.temp_file "shared-model-runtime-" ".toml" in
+  Fun.protect ~finally:(fun () -> Sys.remove path) (fun () ->
+    Out_channel.with_open_bin path (fun channel -> output_string channel text);
+    match Runtime.load_list ~config_path:path with
+    | Error failure -> Alcotest.fail (Runtime_config_error.to_diagnostic_text ~config_path:path failure)
+    | Ok (runtimes, default, assignments, _, _) ->
+      Alcotest.(check (list string)) "only the two enabled bindings materialize"
+        ["first.sol"; "second.sol"]
+        (List.sort String.compare (List.map (fun (r : Runtime_instance.t) -> r.id) runtimes));
+      Alcotest.(check string) "generated default resolves" "first.sol" default.id;
+      Alcotest.(check (option string)) "generated assignment resolves"
+        (Some "second.sol") (List.assoc_opt "worker" assignments);
+      List.iter (fun (id, expected_home) ->
+        let runtime = List.find (fun (r : Runtime_instance.t) -> r.id = id) runtimes in
+        match runtime.execution with
+        | Runtime_execution.Codex_app_server client ->
+          Alcotest.(check (option string)) (id ^ " account home")
+            (Some expected_home) client.account_home
+        | _ -> Alcotest.fail "generated binding changed execution protocol")
+        [ "first.sol", "/tmp/codex-first"; "second.sol", "/tmp/codex-second" ])
+
+let test_explicit_binding_overrides_a_set_default () =
+  let config = parse_config
+    (shared_model ^ shared_providers ^ {|[model_sets.codex]
+models = ["sol"]
+[second.sol]
+enabled = false
+max-concurrent = 2
+|}) in
+  Alcotest.(check int) "the override does not create a duplicate" 2
+    (List.length config.bindings);
+  let second = List.find (fun (b : Runtime_schema.binding) -> b.provider_id = "second")
+      config.bindings in
+  Alcotest.(check bool) "disable is preserved" false second.enabled;
+  Alcotest.(check (option int)) "binding-only policy is preserved" (Some 2)
+    second.max_concurrent
+
+let test_invalid_model_sets_are_refused () =
+  List.iter
+    (fun (path, text) ->
+       match Runtime_toml.parse_string text with
+       | Ok _ -> Alcotest.failf "invalid set at %s was accepted" path
+       | Error errors -> Alcotest.(check bool) path true (refused_at path errors))
+    [ "providers.first.model-set", shared_model ^ shared_providers
+    ; "providers.first.model-set", shared_model ^ {|[providers.first]
+protocol = "codex-app-server"
+command = "codex"
+model-set = 1
+|}
+    ; "model_sets.codex.models", shared_model ^ {|[model_sets.codex]
+models = ["missing"]
+|}
+    ; "model_sets.codex.models", shared_model ^ {|[model_sets.codex]
+models = ["sol", "sol"]
+|}
+    ; "model_sets.codex.models", {|[model_sets.codex]
+models = 1
+|}
+    ; "model_sets.codex.model", {|[model_sets.codex]
+model = ["sol"]
+|}
+    ; "model_sets.codex", {|[model_sets]
+codex = "sol"
+|}
+    ]
+
 let () =
   Alcotest.run "runtime_toml_namespace"
     [ ( "namespaces"
@@ -144,5 +293,15 @@ let () =
             test_model_and_endpoint_ids_may_share_a_table_name
         ; Alcotest.test_case "each table has one spelling" `Quick
             test_each_table_has_one_spelling
+        ; Alcotest.test_case "one shared model serves two accounts" `Quick
+            test_one_model_serves_two_accounts
+        ; Alcotest.test_case "a model list addition reaches every account" `Quick
+            test_a_model_added_to_the_set_reaches_every_account
+        ; Alcotest.test_case "generated bindings materialize and route" `Quick
+            test_generated_bindings_materialize_and_route
+        ; Alcotest.test_case "explicit binding overrides a set default" `Quick
+            test_explicit_binding_overrides_a_set_default
+        ; Alcotest.test_case "invalid model sets are refused" `Quick
+            test_invalid_model_sets_are_refused
         ] )
     ]

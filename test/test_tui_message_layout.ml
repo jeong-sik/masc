@@ -156,20 +156,30 @@ let test_grapheme_count_counts_clusters_not_scalars () =
 let test_column_layout_observations () =
   let ascii = String.init 120 (fun i -> Char.chr (Char.code 'a' + i mod 26)) in
   let iterations = 2_000 in
+  (* A non-ASCII text laid out again within a frame takes the pieces the frame
+     kept, so each operation is observed twice: split afresh, with two frames
+     begun before every call, and laid out before in the same frame. *)
   let observe case operation text apply =
-    ignore (Sys.opaque_identity (apply (Sys.opaque_identity text)));
-    let allocated_before = Gc.allocated_bytes () in
-    let started = Sys.time () in
-    for _ = 1 to iterations do
-      ignore (Sys.opaque_identity (apply (Sys.opaque_identity text)))
-    done;
-    let elapsed = Sys.time () -. started in
-    let allocated = Gc.allocated_bytes () -. allocated_before in
-    Printf.printf
-      "layout observation case=%s operation=%s iterations=%d input_bytes=%d cpu_us/op=%.3f allocated_bytes/op=%.1f (includes harness)\n%!"
-      case operation iterations (String.length text)
-      (elapsed *. 1_000_000. /. float_of_int iterations)
-      (allocated /. float_of_int iterations)
+    let observe_as layout before_each =
+      ignore (Sys.opaque_identity (apply (Sys.opaque_identity text)));
+      let allocated_before = Gc.allocated_bytes () in
+      let started = Sys.time () in
+      for _ = 1 to iterations do
+        before_each ();
+        ignore (Sys.opaque_identity (apply (Sys.opaque_identity text)))
+      done;
+      let elapsed = Sys.time () -. started in
+      let allocated = Gc.allocated_bytes () -. allocated_before in
+      Printf.printf
+        "layout observation case=%s operation=%s layout=%s iterations=%d input_bytes=%d cpu_us/op=%.3f allocated_bytes/op=%.1f (includes harness)\n%!"
+        case operation layout iterations (String.length text)
+        (elapsed *. 1_000_000. /. float_of_int iterations)
+        (allocated /. float_of_int iterations)
+    in
+    observe_as "split" (fun () ->
+        Layout.begin_frame ();
+        Layout.begin_frame ());
+    observe_as "laid_out_before" ignore
   in
   List.iter
     (fun (case, text) ->
@@ -854,6 +864,17 @@ let test_an_unterminated_escape_absorbs_the_space_after_it () =
     (Layout.display_width "\x1B[" + Layout.display_width " words");
   check int "a terminated escape leaves the space alone" 6
     (Layout.display_width "\x1B[0m words")
+
+let test_styled_rows_remain_readable_independently () =
+  check (list string) "error color survives a viewport starting on a continuation"
+    [ "\027[31mfirst\027[0m"; "\027[31msecond\027[0m" ]
+    (Layout.wrap_styled_words ~max_cells:6 "\027[31mfirst second\027[0m");
+  check (list string) "reset prevents coloring subsequent plain text"
+    [ "\027[31mfirst\027[0m"; "second" ]
+    (Layout.wrap_styled_words ~max_cells:6 "\027[31mfirst\027[0m second");
+  check (list string) "uncolored text acquires no terminal controls"
+    [ "first"; "second" ]
+    (Layout.wrap_styled_words ~max_cells:6 "first second")
 
 (* Rows carrying an escape are measured whole rather than word by word, so
    they get their own case. The two texts below differ only in whether the
@@ -2897,9 +2918,97 @@ let test_no_rung_outgrows_its_column () =
     [ 0; 999; 1_000; 73_877; 999_949; 999_950; 1_048_576; 99_994_999
     ; 99_995_000; 999_949_999; 999_950_000 ]
 
+(* Laying out a text again, in the same frame or in a later one, gives what
+   laying it out the first time gave. Two texts of one byte length ("가a" and
+   "a" + U+0301 + "b"), or where one starts with the other, keep their own
+   widths. The widths are the ones the cluster fixtures above state. *)
+let test_a_text_laid_out_again_keeps_its_layout () =
+  let texts =
+    [ ("\xea\xb0\x80a", 3)
+    ; ("a\xcc\x81b", 2)
+    ; ("\xed\x95\x9c\xea\xb5\xad", 4)
+    ; ("\xed\x95\x9c\xea\xb5\xad\xec\x96\xb4", 6)
+    ; ("\027[31m\xed\x95\x9c\027[0m", 2)
+    ; ("A1\xef\xb8\x8f\xe2\x83\xa3Z", 4)
+    ]
+  in
+  let lay_out_all label =
+    List.iter
+      (fun (text, cells) ->
+        check int (label ^ ": width of " ^ String.escaped text) cells
+          (Layout.display_width text);
+        check int (label ^ ": fitted width of " ^ String.escaped text) (cells + 1)
+          (Layout.display_width (Layout.fit_width text (cells + 1))))
+      texts
+  in
+  lay_out_all "first frame";
+  lay_out_all "the same frame again";
+  Layout.begin_frame ();
+  lay_out_all "the next frame";
+  Layout.begin_frame ();
+  Layout.begin_frame ();
+  lay_out_all "two frames without them"
+
+(* Where a layout's pieces came from shows in what it allocates: splitting a
+   text allocates its pieces, and taking them from a frame's table does not.
+   On 2026-09-30 splitting this text allocated 93,776 bytes and taking its
+   pieces 192. *)
+let test_a_text_is_split_again_after_a_frame_without_it () =
+  let text = String.concat "" (List.init 400 (fun _ -> "\xed\x95\x9c")) in
+  let allocated () =
+    let before = Gc.allocated_bytes () in
+    ignore (Sys.opaque_identity (Layout.display_width (Sys.opaque_identity text)));
+    Gc.allocated_bytes () -. before
+  in
+  Layout.begin_frame ();
+  Layout.begin_frame ();
+  let split = allocated () in
+  let taken bytes = bytes *. 10. < split in
+  let split_again bytes = bytes *. 2. > split in
+  Layout.begin_frame ();
+  let next_frame = allocated () in
+  Layout.begin_frame ();
+  let frame_after = allocated () in
+  Layout.begin_frame ();
+  Layout.begin_frame ();
+  let after_a_frame_without_it = allocated () in
+  check bool
+    (Printf.sprintf "the next frame takes the pieces (%.0f of %.0f bytes)" next_frame split)
+    true (taken next_frame);
+  check bool
+    (Printf.sprintf "so does the frame after it (%.0f of %.0f bytes)" frame_after split)
+    true (taken frame_after);
+  check bool
+    (Printf.sprintf "a frame without the text lets it go (%.0f of %.0f bytes)"
+       after_a_frame_without_it split)
+    true (split_again after_a_frame_without_it)
+
+(* An ASCII text is split each time and never kept, escapes included. *)
+let test_an_ascii_text_is_not_kept () =
+  let text = "\027[31m" ^ String.make 400 'a' ^ "\027[0m" in
+  let allocated () =
+    let before = Gc.allocated_bytes () in
+    ignore (Sys.opaque_identity (Layout.take_cells (Sys.opaque_identity text) 200));
+    Gc.allocated_bytes () -. before
+  in
+  Layout.begin_frame ();
+  Layout.begin_frame ();
+  let first = allocated () in
+  let again = allocated () in
+  check bool
+    (Printf.sprintf "laying it out again allocates the same (%.0f then %.0f bytes)" first again)
+    true (Float.equal first again)
+
 let () =
   run "tui_message_layout"
     [
+      ( "layout across frames"
+      , [ test_case "a text laid out again keeps its layout" `Quick
+            test_a_text_laid_out_again_keeps_its_layout
+        ; test_case "a text is split again after a frame without it" `Quick
+            test_a_text_is_split_again_after_a_frame_without_it
+        ; test_case "an ASCII text is not kept" `Quick test_an_ascii_text_is_not_kept
+        ] );
       ( "clause packing"
       , [ test_case "a row ends where a clause ends" `Quick
             test_a_row_ends_where_a_clause_ends
@@ -2992,6 +3101,8 @@ let () =
             test_history_never_splits_grapheme_clusters
         ; test_case "an unterminated escape absorbs the space after it" `Quick
             test_an_unterminated_escape_absorbs_the_space_after_it
+        ; test_case "styled rows remain readable independently" `Quick
+            test_styled_rows_remain_readable_independently
         ; test_case "a row carrying an escape wraps by its real width" `Quick
             test_a_row_carrying_an_escape_wraps_by_its_real_width
         ; test_case "a body keeps the breaks its author wrote" `Quick

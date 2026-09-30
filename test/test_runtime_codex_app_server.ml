@@ -326,7 +326,7 @@ let with_fixture_sequence ?capture_path first_lines second_lines f =
     (fun () -> f path)
 ;;
 
-let run_fixture ?account_home ?(worker_pool = false) ?isolated_home ?(dynamic_tools = []) ?thread_mode ?(history = [])
+let run_fixture ?account_home ?(worker_pool = false) ?isolated_home ?(dynamic_tools = []) ?reasoning_effort ?thread_mode ?(history = [])
     ?(developer_context = []) ?developer_instructions ?(cwd = "/tmp")
     ?(timeout_s = 2.0) ?admission_timeout_s ?(no_turn_deadline = false)
     ?on_thread_ready_delay_s ?on_turn_started_delay_s ?on_stream_event
@@ -372,6 +372,7 @@ let run_fixture ?account_home ?(worker_pool = false) ?isolated_home ?(dynamic_to
       ~clock
       ~cwd:Eio.Path.(Eio.Stdenv.fs env / cwd)
       ~dynamic_tools
+      ?reasoning_effort
       ?thread_mode
       ~history
       ~developer_context
@@ -1217,7 +1218,8 @@ let test_prompt_transmission_boundary ?(worker_pool = false) () =
   let transmitted_prompt = String.make 65_536 '"' ^ "한글 👩‍💻\n\\marker" in
   Fun.protect ~finally:(fun () -> Sys.remove captured) (fun () ->
     with_fixture ~capture_path:captured lines (fun path ->
-      let result = run_fixture ~prompt:transmitted_prompt ~on_prompt_sent:report path in
+      let result = run_fixture ~prompt:transmitted_prompt ~on_prompt_sent:report
+        ~reasoning_effort:Llm_provider.Reasoning_effort.Ultra path in
       check bool "complete turn succeeds" true (Result.is_ok result);
       check int "complete write emits once" 1 !sent;
       let open Yojson.Safe.Util in
@@ -1228,7 +1230,9 @@ let test_prompt_transmission_boundary ?(worker_pool = false) () =
         |> List.find (fun json -> json |> member "method" = `String "turn/start") in
       let text = request |> member "params" |> member "input" |> to_list
         |> List.hd |> member "text" |> to_string in
-      check string "client received exact turn input" transmitted_prompt text));
+      check string "client received exact turn input" transmitted_prompt text;
+      check string "ultra reaches the Codex turn/start wire unchanged" "ultra"
+        (request |> member "params" |> member "effort" |> to_string)));
   with_fixture [ init_result; account_chatgpt; thread_result; turn_result; turn_failed ]
     (fun path ->
       (match run_fixture ~on_prompt_sent:report path with
@@ -1863,7 +1867,7 @@ let test_invalid_elicitation_keeps_protocol_error () =
       change "requestedSchema" (`Assoc ["type", `String "array"; "properties", `Assoc []]) ]
 ;;
 
-let test_native_read_disables_host_shell_argv () =
+let test_client_argv_carries_posture_and_sub_agent_overrides () =
   List.iter (fun native ->
     let argv_path = Filename.temp_file "codex-native-argv-" ".txt" in
     Fun.protect ~finally:(fun () -> Sys.remove argv_path) (fun () ->
@@ -1886,8 +1890,11 @@ let test_native_read_disables_host_shell_argv () =
          | Runtime_native_tools.Native_read ->
            ["-c"; "features.shell_tool=false"; "-c"; "features.unified_exec=false"]
          | Native_full -> []
-         | Native_none -> fail "none is not part of this fixture") in
-      check (list string) "same process receives posture-scoped config overrides" expected argv))
+         | Native_none -> fail "none is not part of this fixture") @
+        (* The model catalog picks the version when only features.multi_agent
+           is off, so the switch that counts is [agents] enabled. *)
+        ["-c"; "agents.enabled=false"; "-c"; "features.multi_agent_v2=false"] in
+      check (list string) "same process receives the posture-scoped and sub-agent config overrides" expected argv))
     [Runtime_native_tools.Native_read; Runtime_native_tools.Native_full]
 ;;
 
@@ -3547,7 +3554,7 @@ let test_production_turn_records_its_keeper_as_the_failure_recorder () =
         | Some runtime -> runtime | None -> fail "the Codex runtime resolves" in
       recorded_by :=
         (match Runtime_candidate_backpressure.candidate_backpressure
-                 ~now:(Unix.gettimeofday ()) ~candidate:runtime.Runtime.candidate_backpressure with
+                 ~now:(Unix.gettimeofday ()) ~candidate:runtime.Runtime_instance.candidate_backpressure with
          | Some
              { Runtime_candidate_backpressure.failed_attempt =
                  Some (Runtime_candidate_backpressure.Failed_attempt { recorded_by; _ })
@@ -7021,8 +7028,8 @@ let () =
             test_elicitation_cancel_then_dynamic_tool
         ; test_case "MCP elicitation identity and form validation" `Quick
             test_invalid_elicitation_keeps_protocol_error
-        ; test_case "read posture disables native host shell only" `Quick
-            test_native_read_disables_host_shell_argv
+        ; test_case "read posture disables native host shell; no posture allows sub-agents" `Quick
+            test_client_argv_carries_posture_and_sub_agent_overrides
         ; test_case "failed turn keeps typed error fields" `Quick
             test_failed_turn_keeps_typed_error_fields
         ; test_case "failed turn uses official context error enum" `Quick

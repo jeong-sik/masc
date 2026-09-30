@@ -1,0 +1,48 @@
+ ▸Dashboard  Work  Keepers  Usage  Board  Workspace  System
+                                                                                                        │[Recent] Changes · 2 keepers · feed closed: MCP initial
+   MASC Dashboard  [workspace\x1B]8;;https://attacker.invalid\x07owned]  01:24:08  HTTP [connected]     │                   state     tool        calls  new tok
+ ────────────────────────────────────────────────────────────────────────────────────────────────────── │- alpha            no events                           
+   Health: ok                                                                                           │- beta             no events                           
+   Work: 0 currently done in the last 24h · details in Work                                             │───────────────────────────────────────────────────────
+                                                                                                        │alpha · no events on this feed yet                     
+   Needs your decision                                                                                                                                          
+    Approvals and questions: not fully read  · inspect sources                                                                                                  
+                                                                                                                                                                
+   Continue                                                                                                                                                     
+    Choose a Keeper  · start a conversation                                                                                                                     
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+  j/k:choose  Enter:open  p:requests  ;:agenda  m:Usage  r:refresh  Tab:next  q:quit  | Port: 32885                                                             
+ Choose a Keeper before writing · i:choose                                                                                                                      

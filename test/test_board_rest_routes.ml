@@ -1414,11 +1414,84 @@ let test_dashboard_dev_token_can_vote_as_credential_owner () =
       | Ok actor -> check string "dashboard credential owner" "dashboard" actor
       | Error error -> fail (Masc_domain.masc_error_to_string error))
 
+let test_board_detail_defaults_to_latest_comments_with_older_pages () =
+  with_authenticated_activity_router
+    ~prefix:"board-detail-pages-"
+    ~agent_name:"page-reader"
+  @@ fun ~base_path ~config:_ ~state:_ ~sw:_ ~clock:_ ~router ~token ->
+  with_board_store ~base_path
+  @@ fun () ->
+  let post =
+    match
+      Masc.Board_dispatch.create_post
+        ~author:"page-author" ~content:"pinned current state"
+        ~post_kind:Masc.Board.Human_post ()
+    with
+    | Ok post -> post
+    | Error error -> fail (Board_tool.board_error_to_string error)
+  in
+  let post_id = Masc.Board.Post_id.to_string post.id in
+  for n = 1 to 25 do
+    match
+      Masc.Board_dispatch.add_comment
+        ~post_id ~author:"page-author"
+        ~content:(Printf.sprintf "comment %02d" n) ()
+    with
+    | Ok _ -> ()
+    | Error error -> fail (Board_tool.board_error_to_string error)
+  done;
+  let read suffix =
+    dispatch_json ~meth:"GET" ~router ~token
+      ~path:("/api/v1/board/" ^ post_id ^ "?format=flat" ^ suffix)
+      ~extra_headers:[] ~body:"" ()
+  in
+  let open Yojson.Safe.Util in
+  let comments json = json |> member "comments" |> to_list in
+  let content comment = comment |> member "content" |> to_string in
+  let position json key =
+    json |> member "comment_page" |> member key |> to_int
+  in
+  let status, latest = read "" in
+  check int "default status" 200 status;
+  check string "post body travels with latest page" "pinned current state"
+    (latest |> member "body" |> to_string);
+  check int "default reads exactly 20" 20 (List.length (comments latest));
+  check string "first latest comment" "comment 06"
+    (content (List.hd (comments latest)));
+  check string "last latest comment" "comment 25"
+    (content (List.hd (List.rev (comments latest))));
+  check int "default page offset" 5 (position latest "offset");
+  check int "total comment count" 25 (position latest "total");
+  let status, oldest = read "&comment_offset=0" in
+  check int "oldest page status" 200 status;
+  check int "oldest page size" 20 (List.length (comments oldest));
+  check string "explicit zero reads oldest" "comment 01"
+    (content (List.hd (comments oldest)));
+  check int "forward offset" 20 (position oldest "next_offset");
+  let status, final_page = read "&comment_offset=20" in
+  check int "final page status" 200 status;
+  check int "final page size" 5 (List.length (comments final_page));
+  check string "final page starts at 21" "comment 21"
+    (content (List.hd (comments final_page)));
+  let status, empty_end = read "&comment_offset=25" in
+  check int "end offset is a page" 200 status;
+  check int "end offset has no comments" 0 (List.length (comments empty_end));
+  List.iter
+    (fun suffix ->
+      let status, _ = read suffix in
+      check int ("bad page rejected: " ^ suffix) 400 status)
+    [ "&comment_offset=26"; "&comment_offset=nope"; "&comment_limit=0" ]
+;;
+
 let () =
   run
     "board_rest_routes"
     [ ( "dashboard bridge"
       , [ test_case
+            "Board detail defaults to latest 20 and pages older comments"
+            `Quick
+            test_board_detail_defaults_to_latest_comments_with_older_pages
+        ; test_case
             "dashboard board tool routes registered"
             `Quick
             test_dashboard_board_routes_registered

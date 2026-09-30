@@ -173,9 +173,12 @@ type row = {
   action : row_action;
 }
 
+(* A byte below 0x80 is a whole UTF-8 scalar. *)
+let ascii_byte byte = Char.code byte < 0x80
+
 let utf8_scalar_byte_length first =
   let byte = Char.code first in
-  if byte < 0x80 then Some 1
+  if ascii_byte first then Some 1
   else if byte >= 0xC2 && byte <= 0xDF then Some 2
   else if byte >= 0xE0 && byte <= 0xEF then Some 3
   else if byte >= 0xF0 && byte <= 0xF4 then Some 4
@@ -481,7 +484,7 @@ let grapheme_pieces text start_offset end_offset reversed =
     !pieces
   end
 
-let display_pieces text =
+let segment_display_pieces text =
   let length = String.length text in
   (* Only an escape can open a sequence, so the scan jumps to the next escape
      rather than asking at every byte of every rendered line. *)
@@ -511,6 +514,54 @@ let display_pieces text =
           :: reversed)
   in
   loop 0 []
+
+(* The pieces of each non-ASCII text laid out in this frame or the one before
+   it. Most of a frame is text the previous frame drew, and splitting
+   non-ASCII text into grapheme clusters is most of what laying it out costs:
+   on 2026-09-30 a TUI with no input spent 14% of its busy samples in the
+   segmenter while it redrew every 150 ms for a running turn. Pieces depend on
+   the text alone, so a text drawn again takes the pieces it had last time.
+
+   An ASCII text, escapes included, is split again each time. Its printable
+   runs skip the segmenter, and keeping it costs more than splitting it: on
+   2026-09-30 [take_cells] of a 9-byte row took 0.10 us split and 0.14 us
+   kept. The pieces of a kept text stay until [begin_frame] has run twice
+   without a layout of it; 1,000 texts of 40 Hangul syllables kept 1.6 MB.
+   Layout runs on the UI fiber, like [row_counts_memo] below, so the tables
+   take no lock. *)
+(* A sizing hint for one frame's texts, not a bound. *)
+let texts_per_frame = 1024
+let pieces_this_frame : (string, display_piece list) Hashtbl.t ref =
+  ref (Hashtbl.create texts_per_frame)
+let pieces_last_frame : (string, display_piece list) Hashtbl.t ref =
+  ref (Hashtbl.create texts_per_frame)
+
+let begin_frame () =
+  let finished = !pieces_this_frame in
+  pieces_this_frame := !pieces_last_frame;
+  Hashtbl.clear !pieces_this_frame;
+  pieces_last_frame := finished
+
+(* Top level, so the scan allocates no closure on each layout. *)
+let rec ascii_from text offset =
+  offset >= String.length text
+  || (ascii_byte text.[offset] && ascii_from text (offset + 1))
+
+let ascii_text text = ascii_from text 0
+
+let display_pieces text =
+  if ascii_text text then segment_display_pieces text
+  else
+    match Hashtbl.find_opt !pieces_this_frame text with
+    | Some pieces -> pieces
+    | None ->
+        let pieces =
+          match Hashtbl.find_opt !pieces_last_frame text with
+          | Some pieces -> pieces
+          | None -> segment_display_pieces text
+        in
+        Hashtbl.replace !pieces_this_frame text pieces;
+        pieces
 
 let pieces_width pieces =
   List.fold_left (fun width piece -> width + piece.cell_width) 0 pieces
@@ -1232,6 +1283,23 @@ let wrap_words ~max_cells text =
   in
   loop [] (String.split_on_char ' ' text)
 
+let wrap_styled_words ~max_cells text =
+  let _, rows =
+    List.fold_left (fun (style, rows) row ->
+      let next_style =
+        List.fold_left (fun style piece ->
+          if piece.ansi && row.[piece.end_offset - 1] = 'm' then
+            let sgr = String.sub row piece.start_offset
+                (piece.end_offset - piece.start_offset) in
+            if sgr = "\027[0m" || sgr = "\027[m" then "" else style ^ sgr
+          else style) style (display_pieces row)
+      in
+      let reset = if String.equal next_style "" then "" else "\027[0m" in
+      next_style, (style ^ row ^ reset) :: rows)
+      ("", []) (wrap_words ~max_cells text)
+  in
+  List.rev rows
+
 let clause_separator = " \xc2\xb7 "
 
 (* A header row of this shape is a list of clauses joined by [clause_separator],
@@ -1548,13 +1616,6 @@ let min_body_cells = 4
    is taken from, so one cell of difference wrapped the live body differently
    from the rows it was about to join. *)
 let chat_clock_column = 5
-
-let local_body_cells ~pane_cells ~inner_width =
-  let gutter =
-    turn_rail_cells + chat_clock_column + 1
-    + chat_role_label_width ~pane_cells
-  in
-  Int.max 0 (inner_width - 2 - gutter)
 
 let pad_clock text =
   let cells = display_width text in

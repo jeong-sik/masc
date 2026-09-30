@@ -1,0 +1,94 @@
+{
+  "scope": "OCaml5.5.1 parsing only; no typecheck/build/native execution",
+  "source_commit": "ca0dba014899ef8a067eba608a30c2ce64efa980",
+  "results": [
+    {
+      "argv": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "lib/auth/auth_credential_base.ml"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "lib/auth/auth.ml"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "lib/auth/auth_login.ml"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "lib/auth/auth_oauth.ml"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "lib/auth/auth.mli"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "lib/auth/auth_login.mli"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "lib/auth/auth_oauth.mli"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "test/test_auth_regular_read_boundary.ml"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    }
+  ]
+}

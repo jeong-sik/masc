@@ -94,8 +94,9 @@ type t = {
 val read_persisted_token :
   base_path:string -> agent_name:string -> string option
 (** The bearer [masc login] persisted for [agent_name] in this workspace, or
-    [None] when the file is absent or blank. Nonblank bearer bytes are preserved
-    exactly. The path comes from {!Auth.raw_token_file}. Token persistence is otherwise
+    [None] when the file is absent, nonregular, unreadable or blank. Nonblank
+    bearer bytes are preserved exactly; cancellation propagates. Reading and
+    path selection use {!Auth.load_raw_token}. Token persistence is otherwise
     private to this module; the reader is exposed because a local client
     should find its own credential where login wrote it rather than require
     the operator to re-export it into every shell. *)

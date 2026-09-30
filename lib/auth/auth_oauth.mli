@@ -131,7 +131,9 @@ val find_access_credential :
     projection consumed by all MASC permission gates. [Ok None] means the
     token is not owned by the OAuth store; callers may try static bearer
     resolution. An owned OAuth token is accepted only inside
-    [with_expected_resource] with an exact resource match. *)
+    [with_expected_resource] with an exact resource match. Present unreadable
+    or nonregular records return a store error rather than static fallback;
+    symlinks to regular records are accepted and cancellation propagates. *)
 
 val with_expected_resource : string -> (unit -> 'a) -> 'a
 (** Bind the exact admitted MCP resource for credential verification in the

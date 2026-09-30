@@ -64,6 +64,42 @@ let chmod path perm = run_blocking_io (fun () -> Unix.chmod path perm)
 let read_dir path = run_blocking_io (fun () -> Sys.readdir path)
 let remove_file path = run_blocking_io (fun () -> Sys.remove path)
 
+(* Shared file authority for config, raw bearers and canonical credential reads.
+   Expected I/O errors become typed results; Eio cancellation propagates. *)
+let credential_read_result f =
+  try Ok (f ()) with
+  | Sys_error detail -> Error (System (System_error.IoError detail))
+  | Unix.Unix_error (error, operation, argument) ->
+    Error (System (System_error.IoError
+      (Printf.sprintf "%s(%s): %s" operation argument (Unix.error_message error))))
+  | Eio.Io _ as exn -> Error (System (System_error.IoError (Printexc.to_string exn)))
+;;
+
+let credential_path_exists file =
+  try
+    let _stat = run_blocking_io (fun () -> Unix.lstat file) in
+    Ok true
+  with
+  | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok false
+  | Unix.Unix_error (error, operation, argument) ->
+    Error (System (System_error.IoError
+      (Printf.sprintf "%s(%s): %s" operation argument (Unix.error_message error))))
+  | Sys_error detail -> Error (System (System_error.IoError detail))
+  | Eio.Io _ as exn -> Error (System (System_error.IoError (Printexc.to_string exn)))
+;;
+
+let read_regular_auth_file path =
+  let ( let* ) = Result.bind in
+  (* [stat] preserves symlinks to regular files, while a dangling link is
+     an I/O refusal rather than permission to replace its occupied path. *)
+  let* stat = credential_read_result (fun () -> stat_file path) in
+  match stat.Unix.st_kind with
+  | Unix.S_REG -> credential_read_result (fun () -> read_text_file path)
+  | Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK ->
+      Error (System (System_error.ValidationError
+        (Printf.sprintf "auth path is not a regular file: %s" path)))
+;;
+
 (** Ensure auth directories exist *)
 let ensure_auth_dirs config =
   let auth = auth_dir config in
@@ -88,15 +124,11 @@ let save_private_text_file path content =
 ;;
 
 let load_internal_keeper_token_hash config =
-  let file = internal_keeper_token_hash_file config in
-  if file_exists file
-  then (
-    try
-      let hash = String.trim (read_text_file file) in
-      if hash = "" then None else Some hash
-    with
-    | Sys_error _ -> None)
-  else None
+  match read_regular_auth_file (internal_keeper_token_hash_file config) with
+  | Error _ -> None
+  | Ok content ->
+    let hash = String.trim content in
+    if hash = "" then None else Some hash
 ;;
 
 let save_internal_keeper_token_hash config ~raw_token =
@@ -134,15 +166,11 @@ let ensure_internal_keeper_token config =
 
 (** Read the initial admin agent name, if set. *)
 let read_initial_admin config : string option =
-  let file = initial_admin_file config in
-  if file_exists file
-  then (
-    try
-      let name = String.trim (read_text_file file) in
-      if name = "" then None else Some name
-    with
-    | Sys_error _ -> None)
-  else None
+  match read_regular_auth_file (initial_admin_file config) with
+  | Error _ -> None
+  | Ok content ->
+    let name = String.trim content in
+    if name = "" then None else Some name
 ;;
 
 (* ============================================ *)
@@ -171,36 +199,27 @@ let raise_auth_config_error ~file reason =
   raise (Auth_config_error { file; reason })
 ;;
 
-(* HIGH-RISK-UNREVIEWED: every authenticated request calls this. The stat runs
-   on a system thread, so a filesystem that takes seconds to answer holds the
-   calling fiber rather than the scheduler every other request shares. Which
-   answers load, default, or raise is the same as a stat on the fiber. *)
-(** Load auth config *)
+(* HIGH-RISK-UNREVIEWED: authenticated requests use this configuration.
+   Metadata checks run on system threads through the shared Auth reader,
+   allowing other fibers to proceed while the filesystem answers. *)
+(** Load auth config. Only an absent path selects the secure default;
+    occupied unreadable/nonregular paths refuse before any open or mutation. *)
 let load_auth_config config : auth_config =
   let file = auth_config_file config in
-  match
-    try Some (stat_file file) with
-    | Unix.Unix_error (Unix.ENOENT, _, _) -> None
-    | Unix.Unix_error (error, function_name, argument) ->
-      raise_auth_config_error
-        ~file
-        (Printf.sprintf
-           "%s(%s): %s"
-           function_name
-           argument
-           (Unix.error_message error))
-  with
-  | None -> default_auth_config
-  | Some _ ->
-    (try
-       let content = read_text_file file in
-       let json = Yojson.Safe.from_string content in
-       match auth_config_of_yojson json with
-       | Ok parsed -> parsed
-       | Error msg -> raise_auth_config_error ~file msg
-     with
-     | Sys_error msg -> raise_auth_config_error ~file msg
-     | Yojson.Json_error msg -> raise_auth_config_error ~file msg)
+  match credential_path_exists file with
+  | Error error -> raise_auth_config_error ~file (masc_error_to_string error)
+  | Ok false -> default_auth_config
+  | Ok true ->
+    (match read_regular_auth_file file with
+     | Error error -> raise_auth_config_error ~file (masc_error_to_string error)
+     | Ok content ->
+       (try
+          let json = Yojson.Safe.from_string content in
+          match auth_config_of_yojson json with
+          | Ok parsed -> parsed
+          | Error msg -> raise_auth_config_error ~file msg
+        with
+        | Yojson.Json_error msg -> raise_auth_config_error ~file msg))
 ;;
 
 (** Save auth config *)
@@ -252,16 +271,12 @@ let credential_of_json agent_name json : agent_credential option =
 
 (* One credential file at [path]: [None] when it is absent, cannot be read,
    or does not decode. *)
-let load_credential_from_path_raw config agent_name path : agent_credential option =
-  if file_exists path
-  then (
-    try
-      let content = read_text_file path in
-      let json = Yojson.Safe.from_string content in
-      credential_of_json agent_name json
-    with
-    | Sys_error _ | Yojson.Json_error _ -> None)
-  else None
+let load_credential_from_path_raw _config agent_name path : agent_credential option =
+  match read_regular_auth_file path with
+  | Error _ -> None
+  | Ok content ->
+    (try credential_of_json agent_name (Yojson.Safe.from_string content) with
+     | Yojson.Json_error _ -> None)
 ;;
 
 let credential_uuid_file config cid =
@@ -275,18 +290,18 @@ let redirect_target_file config target =
 ;;
 
 let load_redirect_target config path =
-  if not (file_exists path)
-  then None
-  else (
-    try
-      match Yojson.Safe.from_string (read_text_file path) with
-      | `Assoc fields ->
-        (match List.assoc_opt "redirect_to" fields with
-         | Some (`String target) -> redirect_target_file config target
-         | _ -> None)
-      | _ -> None
-    with
-    | Sys_error _ | Yojson.Json_error _ -> None)
+  match read_regular_auth_file path with
+  | Error _ -> None
+  | Ok content ->
+    (try
+       match Yojson.Safe.from_string content with
+       | `Assoc fields ->
+         (match List.assoc_opt "redirect_to" fields with
+          | Some (`String target) -> redirect_target_file config target
+          | _ -> None)
+       | _ -> None
+     with
+     | Yojson.Json_error _ -> None)
 ;;
 
 let remove_file_if_exists path = if file_exists path then remove_file path
@@ -297,29 +312,24 @@ let remove_file_if_exists path = if file_exists path then remove_file path
    to the owner ([Auth_credential_token.verify_token_owner_alias]), not this
    lookup. *)
 let load_credential config agent_name : agent_credential option =
-  let file = credential_file config agent_name in
-  if not (file_exists file)
-  then None
-  else (
-    try
-      let content = read_text_file file in
-      let json = Yojson.Safe.from_string content in
-      (* Redirect stub: { "redirect_to": "<uuid>.json" } — single
-         [List.assoc_opt] walk replaces the [mem_assoc + assoc] pair
-         (two passes, second raises [Not_found]). *)
-      match json with
-      | `Assoc fields ->
-        (match List.assoc_opt "redirect_to" fields with
-         | Some (`String target) ->
-           (match redirect_target_file config target with
-            | Some redirect_path ->
-              load_credential_from_path_raw config agent_name redirect_path
-            | None -> None)
-         | Some _ -> None
-         | None -> credential_of_json agent_name json)
-      | _ -> credential_of_json agent_name json
-    with
-    | Sys_error _ | Yojson.Json_error _ -> None)
+  match read_regular_auth_file (credential_file config agent_name) with
+  | Error _ -> None
+  | Ok content ->
+    (try
+       let json = Yojson.Safe.from_string content in
+       match json with
+       | `Assoc fields ->
+         (match List.assoc_opt "redirect_to" fields with
+          | Some (`String target) ->
+            (match redirect_target_file config target with
+             | Some redirect_path ->
+               load_credential_from_path_raw config agent_name redirect_path
+             | None -> None)
+          | Some _ -> None
+          | None -> credential_of_json agent_name json)
+       | _ -> credential_of_json agent_name json
+     with
+     | Yojson.Json_error _ -> None)
 ;;
 
 type load_credential_error =
@@ -397,18 +407,7 @@ let with_credential_transaction config f =
       Ok value
 ;;
 
-let credential_path_exists file =
-  try
-    let _stat = run_blocking_io (fun () -> Unix.lstat file) in
-    Ok true
-  with
-  | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok false
-  | Unix.Unix_error (error, operation, argument) ->
-    Error (System (System_error.IoError
-      (Printf.sprintf "%s(%s): %s" operation argument (Unix.error_message error))))
-  | Sys_error detail -> Error (System (System_error.IoError detail))
-  | Eio.Io _ as exn -> Error (System (System_error.IoError (Printexc.to_string exn)))
-;;
+
 
 let credential_exists_in_transaction (Credential_transaction config) agent_name =
   credential_path_exists (credential_file config agent_name)
@@ -533,15 +532,9 @@ let ensure_credential_alias config ~canonical_name ~alias_name : (unit, masc_err
 ;;
 
 let load_raw_token config ~agent_name =
-  let file = raw_token_file config agent_name in
-  if file_exists file
-  then (
-    try
-      let raw = read_text_file file in
-      if String.trim raw = "" then None else Some raw
-    with
-    | Sys_error _ -> None)
-  else None
+  match read_regular_auth_file (raw_token_file config agent_name) with
+  | Error _ -> None
+  | Ok raw -> if String.trim raw = "" then None else Some raw
 ;;
 
 let persist_raw_token config ~agent_name raw_token =
@@ -617,14 +610,7 @@ type stored_credential =
   | Stored_redirect of string
   | Unresolved_credential
 
-let credential_read_result f =
-  try Ok (f ()) with
-  | Sys_error detail -> Error (System (System_error.IoError detail))
-  | Unix.Unix_error (error, operation, argument) ->
-    Error (System (System_error.IoError
-      (Printf.sprintf "%s(%s): %s" operation argument (Unix.error_message error))))
-  | Eio.Io _ as exn -> Error (System (System_error.IoError (Printexc.to_string exn)))
-;;
+
 
 (* File-backed bearers must survive HTTP header construction and extraction
    without changing the bytes that were hashed. Direct token APIs retain
@@ -636,21 +622,11 @@ let validate_file_backed_bearer raw_token =
   else Ok ()
 ;;
 
-let read_regular_credential_file path =
-  let ( let* ) = Result.bind in
-  (* [stat] preserves symlinks to regular files, while a dangling link is
-     an I/O refusal rather than permission to replace its occupied path. *)
-  let* stat = credential_read_result (fun () -> stat_file path) in
-  match stat.Unix.st_kind with
-  | Unix.S_REG -> credential_read_result (fun () -> read_text_file path)
-  | Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK ->
-      Error (System (System_error.ValidationError
-        (Printf.sprintf "credential path is not a regular file: %s" path)))
-;;
+
 
 let read_stored_credential config name path =
   let ( let* ) = Result.bind in
-  let* content = read_regular_credential_file path in
+  let* content = read_regular_auth_file path in
   match Yojson.Safe.from_string content with
   | exception Yojson.Json_error _ -> Ok Unresolved_credential
   | `Assoc [ "redirect_to", `String target ] ->
@@ -744,7 +720,7 @@ let raw_token_in_transaction (Credential_transaction config) name =
   let* present = credential_path_exists path in
   if not present then Ok None
   else
-    let* raw = read_regular_credential_file path in
+    let* raw = read_regular_auth_file path in
     (* Empty readable material can be replaced. An opaque bearer that is not
        blank retains its exact bytes, matching the supplied-token contract. *)
     if String.trim raw = "" then Ok None else Ok (Some raw)
@@ -795,7 +771,7 @@ let observe_credential_publication config (expected : agent_credential) =
     let* present = credential_path_exists path in
     if not present then Ok false
     else
-      let* raw = read_regular_credential_file path in
+      let* raw = read_regular_auth_file path in
       Ok (String.equal (sha256_hash raw) expected.token)) in
   let credential = observe (fun () ->
     let path = credential_file config expected.agent_name in

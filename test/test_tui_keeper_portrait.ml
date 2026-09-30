@@ -214,28 +214,39 @@ let test_observed_items_remain_visible_in_the_info_mosaic () =
       (bare.Portrait.lines = equipped.Portrait.lines);
     equipped
   in
+  let check_accessory_pixels label equipment equipped =
+    let without_accessories =
+      Draw.For_testing.render_in_frame_of body Look.bare ~frame_of:equipment
+        Draw.still equipped.Portrait.box.View.size
+    in
+    check bool (label ^ ": accessory changes pixels within the same frame") false
+      (String.equal without_accessories.Draw.rgba equipped.Portrait.image.Draw.rgba);
+    let without_accessory_cells =
+      View.lines ~project View.Mosaic equipped.Portrait.box without_accessories
+    in
+    check bool (label ^ ": accessory remains visible in terminal cells") false
+      (without_accessory_cells = equipped.Portrait.lines)
+  in
   List.iter
     (fun item ->
       let equipment = Keeper_portrait_item.preview item Look.bare in
       let label = Keeper_portrait_item.id item in
       let equipped = check_equipment label equipment in
-      let expected =
-        match Keeper_portrait_item.slot item with
-        | Keeper_portrait_item.Base ->
+      match Keeper_portrait_item.slot item with
+      | Keeper_portrait_item.Base ->
+          let expected =
             Draw.render_compact_posed body equipment Draw.still equipped.Portrait.box.View.size
-        | Keeper_portrait_item.Face | Keeper_portrait_item.Neck
-        | Keeper_portrait_item.Head | Keeper_portrait_item.Hand ->
-            Draw.render body equipment equipped.Portrait.box.View.size
-      in
-      check string (label ^ ": the observed accessory determines the pixels")
-        expected.Draw.rgba equipped.Portrait.image.Draw.rgba)
+          in
+          check string (label ^ ": keeps the compact body and dish")
+            expected.Draw.rgba equipped.Portrait.image.Draw.rgba
+      | Keeper_portrait_item.Face | Keeper_portrait_item.Neck
+      | Keeper_portrait_item.Head | Keeper_portrait_item.Hand ->
+          check_accessory_pixels label equipment equipped)
     Keeper_portrait_item.all;
   let outfit = { Look.bare with face = Look.Glasses; neck = Look.Scarf;
                   head = Look.Crown; hand = Look.Book } in
   let equipped = check_equipment "complete outfit" outfit in
-  let expected = Draw.render body outfit equipped.Portrait.box.View.size in
-  check string "the full observed outfit stays visible together"
-    expected.Draw.rgba equipped.Portrait.image.Draw.rgba;
+  check_accessory_pixels "complete outfit" outfit equipped;
   let restored = Option.get (band ~cache ()) in
   check bool "removing the outfit restores the cached compact body" true
     (restored.Portrait.image == bare.Portrait.image)

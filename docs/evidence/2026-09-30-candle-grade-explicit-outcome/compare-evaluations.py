@@ -13,6 +13,18 @@ def require(condition, detail):
         raise ValueError(detail)
 
 
+def expected_input(case):
+    data = case['input']
+    if case['stage'] != 'weights':
+        return data
+    return {
+        'goal': data['goal'],
+        'tasks': [{'title': task['title'], 'assignee': task['keeper']} for task in data['tasks']],
+        'keepers': data['keepers'],
+        'weight_max': data['weight_max'],
+    }
+
+
 def load_run(directory):
     plan = json.loads((directory / "plan.json").read_text())
     cases_raw = (directory / "cases.json").read_bytes()
@@ -30,6 +42,30 @@ def load_run(directory):
     require(metadata["plan"] == plan, "Evidence validation failed: metadata['plan'] == plan")
     require(metadata["build"]["commit"] == plan["source_commit"], "Evidence validation failed: metadata['build']['commit'] == plan['source_commit']")
     require(json.loads((directory / "exit.json").read_text())["exit_code"] == 0, "Evidence validation failed: json.loads((directory / 'exit.json').read_text())['exit_code'] == 0")
+    prompt_bodies = {}
+    for name, digest in plan['prompt_sha256'].items():
+        frozen = (directory/'prompts'/name).read_bytes()
+        require(hashlib.sha256(frozen).hexdigest() == digest, 'frozen prompt hash mismatch')
+        text = frozen.decode('utf-8')
+        require(text.startswith('---\n') and '\n---\n' in text, 'frozen prompt frontmatter missing')
+        prompt_bodies[name] = text.split('\n---\n', 1)[1]
+    for row in rows:
+        case = cases[row['case_id']]
+        payload = row['receipt']['input']['payload']
+        require(payload['stage'] == case['stage'] and payload['goal_id'] == case['id'],
+                'receipt input stage or case identity mismatch')
+        require(payload['request_id'] == f"eval-{case['id']}-{row['trial']}",
+                'receipt request identity mismatch')
+        require(payload['actual_input'] == expected_input(case),
+                'receipt actual input disagrees with frozen case')
+        prompt = payload['prompt']
+        require(prompt['source'] == 'file' and prompt['key'] == 'candle_appraiser_' + case['stage'],
+                'receipt prompt source or stage mismatch')
+        require(prompt['effective_template'] == prompt_bodies[prompt['key'] + '.md'],
+                'receipt effective template disagrees with frozen prompt')
+        encoded = json.dumps(payload['actual_input'], ensure_ascii=False, separators=(',', ':'))
+        require(prompt['rendered'] == prompt['effective_template'].replace('{{appraisal_input}}', encoded),
+                'receipt rendered prompt disagrees with frozen template and input')
     summaries = {}
     for case_id, case in cases.items():
         selected = [row for row in rows if row["case_id"] == case_id]

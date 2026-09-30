@@ -12,6 +12,23 @@ def require(condition, detail):
         raise ValueError(detail)
 
 
+def validate_result(row, runtime_id):
+    receipt = row['receipt']
+    if row['status'] == 'ok':
+        require(receipt['status'] == 'succeeded' and receipt['selected_slot'] == runtime_id,
+                'successful result classification or slot mismatch')
+        require(receipt['output']['result'] == row['answer'], 'successful answer mismatch')
+    else:
+        require(row['status'] in {'invalid_response', 'transport_unavailable'}, 'unknown result status')
+        code = {'invalid_response': 'candle_appraisal_rejected',
+                'transport_unavailable': 'candle_appraisal_unavailable'}[row['status']]
+        require(receipt['status'] == 'failed' and receipt['code'] == code,
+                'failed result classification mismatch')
+        require(isinstance(row['answer'], str) and receipt['detail'] == row['answer']
+                and receipt['output']['result'] == {'error': row['answer']},
+                'failed answer mismatch')
+
+
 def sha(raw):
     return hashlib.sha256(raw).hexdigest()
 
@@ -91,12 +108,7 @@ def main():
         prompt_hashes[case['id']].add(sha(prompt['rendered'].encode()))
         input_hashes[case['id']].add(sha(encoded_input.encode()))
         require(receipt['output']['semantic_verification'] == 'not_performed', "Evidence validation failed: receipt['output']['semantic_verification'] == 'not_performed'")
-        if row['status'] == 'ok':
-            require(receipt['status'] == 'succeeded', "Evidence validation failed: receipt['status'] == 'succeeded'")
-            require(receipt['selected_slot'] == plan['runtime_id'], "Evidence validation failed: receipt['selected_slot'] == plan['runtime_id']")
-            require(receipt['output']['result'] == row['answer'], "Evidence validation failed: receipt['output']['result'] == row['answer']")
-        else:
-            require(receipt['status'] == 'failed', "Evidence validation failed: receipt['status'] == 'failed'")
+        validate_result(row, plan['runtime_id'])
         dispatch = [attempt for attempt in receipt['output']['attempts'] if attempt['kind'] == 'dispatch']
         require(len(dispatch) == 1, 'Evidence validation failed: len(dispatch) == 1')
         require(dispatch[0]['slot'] == plan['runtime_id'], "Evidence validation failed: dispatch[0]['slot'] == plan['runtime_id']")

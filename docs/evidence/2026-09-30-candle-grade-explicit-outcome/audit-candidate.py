@@ -56,6 +56,14 @@ def main():
     require(metadata['build']['commit_source'] == 'embedded', "audit check failed: metadata['build']['commit_source'] == 'embedded'")
     require(metadata['build']['commit'] == plan['source_commit'], "audit check failed: metadata['build']['commit'] == plan['source_commit']")
     require(metadata['build']['binary_commit'] == plan['source_commit'], "audit check failed: metadata['build']['binary_commit'] == plan['source_commit']")
+    verification = json.loads((args.evidence/'artifact-verification.json').read_text())
+    require(verification['source_commit'] == plan['source_commit'], 'CI artifact source commit mismatch')
+    executable = Path(metadata['build']['executable_path']).name
+    require(executable == 'candle_appraiser_eval_cli.exe', 'unexpected evaluation executable')
+    artifacts = [entry for entry in verification['files'] if entry['file'] == executable]
+    require(len(artifacts) == 1, 'CI artifact must identify exactly one evaluation executable')
+    require(metadata['build']['executable_sha256'] == artifacts[0]['sha256'],
+            'evaluation executable hash disagrees with CI artifact verification')
     corpus = (args.workspace/'cases.json').read_bytes()
     require(sha(corpus) == plan['cases_sha256'], "audit check failed: sha(corpus) == plan['cases_sha256']")
     require(sha((args.workspace/'.masc/config/runtime.toml').read_bytes()) == plan['runtime_config_sha256'], "audit check failed: sha((args.workspace/'.masc/config/runtime.toml').read_bytes()) == plan['runtime_config_sha256']")

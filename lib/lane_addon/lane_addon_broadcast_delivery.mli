@@ -49,7 +49,7 @@ val recover : t -> (recovery, error) result
     retired after terminal journal commit. Full journals remain addressable for
     exact replay and audit; completed history is not reread on every pulse.
     Pending filenames must be exact lowercase SHA-256 journal identities.
-    Missing or malformed pending journals fail the authoritative scan without
+    Missing, nonregular or malformed pending journals fail the authoritative scan without
     creating a replacement journal or discarding the marker. An existing empty
     pre-admission journal may retire its marker under the exclusive journal lock.
     Completed records with descriptor settlement failures are returned separately
@@ -57,4 +57,7 @@ val recover : t -> (recovery, error) result
 
 module For_testing : sig
   val create : root:string -> io:Fs_compat.private_jsonl_transaction_io_for_testing -> t
+  val recover : t -> after_scan:(unit -> unit) -> (recovery, error) result
+  (** [after_scan] runs after journal names are captured, before any journal is
+      opened, so fixtures can exercise disappearance during restart recovery. *)
 end

@@ -19,9 +19,6 @@ let transaction t path decide = match t.io with
 let existing_transaction t path decide = match t.io with
   | None -> Fs_compat.update_existing_private_file_durable_locked_result path decide
   | Some io -> Fs_compat.update_existing_private_file_durable_locked_with_io_for_testing ~io path decide
-module For_testing = struct
-  let create ~root ~io = {root;io=Some io}
-end
 let valid_digest value = String.length value=64 && String.for_all
   (function '0'..'9' | 'a'..'f' -> true | _ -> false) value
 let validate (p : payload) =
@@ -243,10 +240,11 @@ let recipient_result t ~caller ~operation_id ~recipient state =
           "state",`String status;"error",error] in
         let* next=transition r event |> Result.map_error (fun _ -> Conflict) in
         if next=r then Ok (None,r) else Ok (Some event,next))
-let recover t = protect (fun () ->
+let recover_after_scan t ~after_scan = protect (fun () ->
   let names = match Fs_compat.exact_path_kind (pending_dir t) with
     | Fs_compat.Exact_missing -> []
     | _ -> Fs_compat.read_dir (pending_dir t) |> List.sort String.compare in
+  after_scan ();
   List.fold_left (fun acc name ->
     let* recovery=acc in
     if not (Filename.check_suffix name ".jsonl") then Ok recovery else
@@ -293,3 +291,9 @@ let recover t = protect (fun () ->
     (Ok {pending=[];settled_with_cleanup=[]}) names
   |> Result.map (fun recovery -> {pending=List.rev recovery.pending;
       settled_with_cleanup=List.rev recovery.settled_with_cleanup}))
+
+let recover t = recover_after_scan t ~after_scan:(fun () -> ())
+module For_testing = struct
+  let create ~root ~io = {root;io=Some io}
+  let recover = recover_after_scan
+end

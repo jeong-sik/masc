@@ -1,14 +1,16 @@
 # Home journey acceptance
 
 2026-09-30. Integration PR #40176 targets main. The Home product source head
-is `2f507d79d65946d168d118f0bf07893738a65b6b`, incorporating main
+is `f8f46d5f4005c1832b06fa5036aad1674fe26ef9` after the declaration-only
+creation collision fix #40292, incorporating main
 `0c37b5c28586cb812799c872aad99fffe67ee809`. Validation follow-up #40284
 is stacked directly on #40176; this documentation follow-up is above #40284.
 The integrated source includes #39817/#40113/#40130/#40137/#40152 and
-creation/drafts #40120/#40116. Current-head run 36698729943 was cancelled:
+creation/drafts #40120/#40116. Previous-head run 36698729943 at
+`2f507d79d65946d168d118f0bf07893738a65b6b` was cancelled:
 TLA and Dashboard typechecking succeeded, Dune and lint did not complete, and
 the aggregate required-success job failed. This is not build success.
-This checklist records acceptance work, not a runtime or merge verdict.
+No new-head CI was requested. This checklist records acceptance work, not a runtime or merge verdict.
 
 The combined source covers Home request identities and partial readings, saved
 explicit conversations independent of startup, complete per-Keeper drafts, and

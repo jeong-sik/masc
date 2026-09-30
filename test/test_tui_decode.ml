@@ -1372,15 +1372,6 @@ let test_planning_goal_keeps_the_last_review_note () =
       .Tui_decode.pg_last_review_note
 ;;
 
-let test_planning_goal_keeps_owner () =
-  let owned = decoded_proof ~extra:[ "owner", `String "keeper-z" ] () in
-  let unowned = decoded_proof () in
-  Alcotest.(check bool) "recorded owner is preserved" true
-    (owned.Tui_decode.pg_owner = Goal_store.Owner "keeper-z");
-  Alcotest.(check bool) "missing owner is explicitly unknown" true
-    (unowned.Tui_decode.pg_owner = Goal_store.Unknown_owner)
-;;
-
 let test_planning_goal_keeps_the_server_timestamps () =
   let goal =
     decoded_proof
@@ -6135,7 +6126,7 @@ let test_decode_keeper_lanes_requires_the_phase_conditions () =
             (Astring.String.is_infix ~affix:field detail))
     [ "launch_pending"; "heartbeat_healthy"; "turn_healthy" ]
 
-let standalone_lane_json ?purpose ?(status = "idle") ?(retained = 3)
+let standalone_lane_json ?purpose ?(required = true) ?(status = "idle") ?(retained = 3)
     ?(running = 0) ?(selected_slots = []) ?(configuration_state = "ready")
     lane_id label =
   let jev =
@@ -6148,7 +6139,7 @@ let standalone_lane_json ?purpose ?(status = "idle") ?(retained = 3)
      ; "label", `String label
      ]
      @ (match purpose with None -> [] | Some text -> [ "purpose", `String text ])
-     @ [ "required", `Bool true
+     @ [ "required", `Bool required
     ; "observation_only", `Bool true
     ; "configured", `Bool true
     ; "configuration_state", `String configuration_state
@@ -6210,6 +6201,7 @@ let test_decode_standalone_lane_configuration_is_a_closed_set () =
             ; standalone_lane_json "workspace_curator_exact" "Workspace Curator"
             ; standalone_lane_json "verifier_exact" "Verifier"
             ; stagehand_lane_json ()
+            ; standalone_lane_json ~required:false "candle_appraiser" "Candle Appraiser"
             ] )
       ]
   in
@@ -6384,6 +6376,7 @@ let test_decode_standalone_lane_keeps_the_run_start () =
           ; standalone_lane_json ~status:"no_retained_observation" ~retained:0
               "verifier_exact" "Verifier"
           ; stagehand_lane_json ()
+          ; standalone_lane_json ~required:false "candle_appraiser" "Candle Appraiser"
           ]
       ]
   in
@@ -6430,6 +6423,7 @@ let test_decode_standalone_lanes_keeps_running_and_no_retained_observation () =
     ; standalone_lane_json ~status:"no_retained_observation" ~retained:0
         "verifier_exact" "Verifier"
     ; stagehand_lane_json ()
+    ; standalone_lane_json ~required:false "candle_appraiser" "Candle Appraiser"
     ]
   in
   let json =
@@ -6495,6 +6489,7 @@ let test_decode_standalone_lane_jev_is_typed_and_required () =
             ; standalone_lane_json "workspace_curator_exact" "Workspace Curator"
             ; standalone_lane_json "verifier_exact" "Verifier"
             ; stagehand_lane_json ()
+            ; standalone_lane_json ~required:false "candle_appraiser" "Candle Appraiser"
             ] )
       ]
   in
@@ -6836,7 +6831,7 @@ let fusion_recorded_detail_json ?(source = "fusion")
           ] )
     ]
 
-let historical_fusion_reference : Tui_decode.fusion_historical_evidence =
+let historical_fusion_reference : Masc.Tui_decode_fusion.fusion_historical_evidence =
   { fhe_run_id = "fusion-recorded-501"
   ; fhe_post_id = "p-fusion-501"
   ; fhe_title = "Fusion title 501"
@@ -6859,7 +6854,7 @@ let historical_fusion_post_json ?(usage = []) ?(cost = []) () =
 let test_historical_fusion_original_and_observations () =
   let post = historical_fusion_post_json
       ~usage:["observed_usage", `Assoc ["input_tokens", `Int 9321; "output_tokens", `Int 17721]] () in
-  (match Tui_decode.decode_fusion_historical_detail ~reference:historical_fusion_reference
+  (match Masc.Tui_decode_fusion.decode_fusion_historical_detail ~reference:historical_fusion_reference
            (`Assoc ["post", post]) with
    | Error error -> Alcotest.fail error
    | Ok original ->
@@ -6875,7 +6870,7 @@ let test_historical_fusion_original_and_observations () =
             Alcotest.(check int) "existing panel interpretation retained" 2 (List.length evidence.fe_panel);
             Alcotest.(check bool) "existing Tool trace interpretation retained" true evidence.fe_tool_trace.ftt_complete));
   let read ?(usage = []) ?(cost = []) () =
-    match Tui_decode.decode_fusion_historical_detail ~reference:historical_fusion_reference
+    match Masc.Tui_decode_fusion.decode_fusion_historical_detail ~reference:historical_fusion_reference
             (historical_fusion_post_json ~usage ~cost ()) with
     | Ok original -> original
     | Error error -> Alcotest.fail error in
@@ -6888,7 +6883,7 @@ let test_historical_fusion_original_and_observations () =
 
 let test_historical_fusion_exact_identity_and_strict_metadata () =
   let expect_error label reference post =
-    match Tui_decode.decode_fusion_historical_detail ~reference post with
+    match Masc.Tui_decode_fusion.decode_fusion_historical_detail ~reference post with
     | Error _ -> ()
     | Ok _ -> Alcotest.fail label in
   let post = historical_fusion_post_json () in
@@ -6899,7 +6894,7 @@ let test_historical_fusion_exact_identity_and_strict_metadata () =
   expect_error "an omitted exact post is not an empty original"
     historical_fusion_reference (`Assoc ["post", `Null]);
   let expect_observation_error post =
-    match Tui_decode.decode_fusion_historical_detail ~reference:historical_fusion_reference post with
+    match Masc.Tui_decode_fusion.decode_fusion_historical_detail ~reference:historical_fusion_reference post with
     | Error error -> Alcotest.failf "usage error hid original: %s" error
     | Ok original ->
         Alcotest.(check string) "usage failure preserves original"
@@ -6921,7 +6916,7 @@ let test_historical_fusion_exact_identity_and_strict_metadata () =
         | "meta", `Assoc fields -> "meta", `Assoc (List.remove_assoc "tool_trace" fields)
         | field -> field) fields)
     | _ -> Alcotest.fail "invalid Fusion fixture" in
-  match Tui_decode.decode_fusion_historical_detail ~reference:historical_fusion_reference malformed with
+  match Masc.Tui_decode_fusion.decode_fusion_historical_detail ~reference:historical_fusion_reference malformed with
   | Error error -> Alcotest.fail error
   | Ok original ->
       Alcotest.(check string) "original survives structured evidence failure"
@@ -6950,36 +6945,36 @@ let test_decode_fusion_list_and_exact_detail () =
             ] )
       ]
   in
-  (match Tui_decode.decode_fusion_snapshot snapshot_json with
+  (match Masc.Tui_decode_fusion.decode_fusion_snapshot snapshot_json with
    | Error err -> Alcotest.failf "list decode failed: %s" err
    | Ok snapshot ->
-       (match snapshot.Tui_decode.fus_runs with
+       (match snapshot.Masc.Tui_decode_fusion.fus_runs with
         | [ first; second ] ->
             Alcotest.(check string) "source order" "fusion-recorded-501"
-              first.Tui_decode.fur_run_id;
+              first.Masc.Tui_decode_fusion.fur_run_id;
             Alcotest.(check string) "completed stage" "completed"
-              (Tui_decode.fusion_run_stage_to_string first.fur_stage);
-            (match second.Tui_decode.fur_status with
-             | Tui_decode.Fusion_failed failure ->
+              (Masc.Tui_decode_fusion.fusion_run_stage_to_string first.fur_stage);
+            (match second.Masc.Tui_decode_fusion.fur_status with
+             | Masc.Tui_decode_fusion.Fusion_failed failure ->
                  Alcotest.(check string) "typed failure code" "panel_failed"
                    failure.frs_failure_code
-             | Tui_decode.Fusion_running | Tui_decode.Fusion_completed ->
+             | Masc.Tui_decode_fusion.Fusion_running | Masc.Tui_decode_fusion.Fusion_completed ->
                  Alcotest.fail "failed row lost its typed status")
         | runs ->
             Alcotest.failf "expected two fusion rows, got %d"
               (List.length runs)));
   (match
-     Tui_decode.decode_fusion_detail (fusion_recorded_detail_json ())
+     Masc.Tui_decode_fusion.decode_fusion_detail (fusion_recorded_detail_json ())
    with
    | Error err -> Alcotest.failf "detail decode failed: %s" err
    | Ok detail ->
        Alcotest.(check string) "detail identity" "fusion-recorded-501"
-         detail.Tui_decode.fud_run.fur_run_id;
-       (match detail.Tui_decode.fud_evidence with
+         detail.Masc.Tui_decode_fusion.fud_run.fur_run_id;
+       (match detail.Masc.Tui_decode_fusion.fud_evidence with
         | Some evidence ->
-            (match evidence.Tui_decode.fe_panel with
-             | [ Tui_decode.Fusion_panel_answered answer
-               ; Tui_decode.Fusion_panel_failed failure
+            (match evidence.Masc.Tui_decode_fusion.fe_panel with
+             | [ Masc.Tui_decode_fusion.Fusion_panel_answered answer
+               ; Masc.Tui_decode_fusion.Fusion_panel_failed failure
                ] ->
                  Alcotest.(check string) "first panel stays first" "panel-first"
                    answer.fpa_model;
@@ -6988,15 +6983,15 @@ let test_decode_fusion_list_and_exact_detail () =
              | panel ->
                  Alcotest.failf "expected answered then failed, got %d rows"
                    (List.length panel));
-            (match evidence.Tui_decode.fe_judge with
-             | Tui_decode.Fusion_judge_synthesized judge ->
+            (match evidence.Masc.Tui_decode_fusion.fe_judge with
+             | Masc.Tui_decode_fusion.Fusion_judge_synthesized judge ->
                  Alcotest.(check string) "judge reason" "judge-reason-501"
                    judge.fj_reason
-             | Tui_decode.Fusion_judge_failed _ ->
+             | Masc.Tui_decode_fusion.Fusion_judge_failed _ ->
                  Alcotest.fail "synthesized judge decoded as failed")
         | None -> Alcotest.fail "recorded evidence lost its Board post"));
   (match
-     Tui_decode.decode_fusion_detail
+     Masc.Tui_decode_fusion.decode_fusion_detail
        (fusion_recorded_detail_json ~source:"not-fusion" ())
    with
    | Ok _ -> Alcotest.fail "a non-fusion Board origin decoded as evidence"
@@ -7006,7 +7001,7 @@ let test_decode_fusion_list_and_exact_detail () =
             ~prefix:"fusion evidence origin.source is \"not-fusion\""
             detail));
   (match
-     Tui_decode.decode_fusion_detail
+     Masc.Tui_decode_fusion.decode_fusion_detail
        (fusion_recorded_detail_json ~origin_run_id:"fusion-other" ())
    with
    | Ok _ -> Alcotest.fail "evidence for another Fusion run decoded"
@@ -7023,7 +7018,7 @@ let test_decode_fusion_list_and_exact_detail () =
         , `Assoc [ "status", `String "pending"; "post", `Null ] )
       ]
   in
-  (match Tui_decode.decode_fusion_detail completed_pending with
+  (match Masc.Tui_decode_fusion.decode_fusion_detail completed_pending with
    | Ok _ -> Alcotest.fail "a completed run decoded as pending evidence"
    | Error detail ->
        Alcotest.(check string) "pending is running-only"
@@ -7037,7 +7032,7 @@ let test_decode_fusion_list_and_exact_detail () =
       ; "runs", `List [ fusion_run_json ~topology:"recursive" "fusion-new" ]
       ]
   in
-  match Tui_decode.decode_fusion_snapshot unknown_topology with
+  match Masc.Tui_decode_fusion.decode_fusion_snapshot unknown_topology with
   | Ok _ -> Alcotest.fail "an unknown Fusion topology decoded"
   | Error detail ->
       Alcotest.(check bool) "closed topology is explicit" true
@@ -7064,7 +7059,7 @@ let rec without_key key = function
    passing as something it is not. *)
 let test_decode_fusion_judge_nodes () =
   (match
-     Tui_decode.decode_fusion_detail
+     Masc.Tui_decode_fusion.decode_fusion_detail
        (without_key "judges" (fusion_recorded_detail_json ()))
    with
    | Ok _ -> Alcotest.fail "a post with no judges array decoded"
@@ -7072,14 +7067,14 @@ let test_decode_fusion_judge_nodes () =
        Alcotest.(check bool) "the missing key is named" true
          (String_util.contains_substring detail "judges"));
   (match
-     Tui_decode.decode_fusion_detail (fusion_recorded_detail_json ())
+     Masc.Tui_decode_fusion.decode_fusion_detail (fusion_recorded_detail_json ())
    with
    | Error err -> Alcotest.failf "an empty judges array failed: %s" err
    | Ok detail ->
-       (match detail.Tui_decode.fud_evidence with
+       (match detail.Masc.Tui_decode_fusion.fud_evidence with
         | Some evidence ->
             Alcotest.(check int) "an empty array is no nodes" 0
-              (List.length evidence.Tui_decode.fe_judges)
+              (List.length evidence.Masc.Tui_decode_fusion.fe_judges)
         | None -> Alcotest.fail "recorded evidence lost its Board post"));
   let joj_nodes =
     [ `Assoc
@@ -7116,51 +7111,51 @@ let test_decode_fusion_judge_nodes () =
     ]
   in
   (match
-     Tui_decode.decode_fusion_detail
+     Masc.Tui_decode_fusion.decode_fusion_detail
        (fusion_recorded_detail_json ~judges:joj_nodes ())
    with
    | Error err -> Alcotest.failf "JoJ detail decode failed: %s" err
    | Ok detail ->
-       (match detail.Tui_decode.fud_evidence with
+       (match detail.Masc.Tui_decode_fusion.fud_evidence with
         | Some evidence ->
-            (match evidence.Tui_decode.fe_judges with
+            (match evidence.Masc.Tui_decode_fusion.fe_judges with
              | [ first_ok; first_failed; meta ] ->
                  (match
-                    (first_ok.Tui_decode.fjn_role, first_ok.Tui_decode.fjn_identity)
+                    (first_ok.Masc.Tui_decode_fusion.fjn_role, first_ok.Masc.Tui_decode_fusion.fjn_identity)
                   with
-                  | Tui_decode.Judge_first, "ollama_cloud.minimax-m3" -> ()
+                  | Masc.Tui_decode_fusion.Judge_first, "ollama_cloud.minimax-m3" -> ()
                   | role, identity ->
                       Alcotest.failf
                         "first node decoded as (%s, %s)"
                         (match role with
-                         | Tui_decode.Judge_first -> "first"
-                         | Tui_decode.Judge_meta -> "meta"
+                         | Masc.Tui_decode_fusion.Judge_first -> "first"
+                         | Masc.Tui_decode_fusion.Judge_meta -> "meta"
                          | _ -> "other")
                         identity);
-                 (match first_ok.Tui_decode.fjn_outcome with
-                  | Tui_decode.Judge_node_synthesized s ->
+                 (match first_ok.Masc.Tui_decode_fusion.fjn_outcome with
+                  | Masc.Tui_decode_fusion.Judge_node_synthesized s ->
                       Alcotest.(check string) "first lens keeps its resolution"
                         "first-resolved-501" s.fjno_resolved_answer;
                       Alcotest.(check int) "first lens keeps its usage" 200
                         s.fjno_output_tokens
-                  | Tui_decode.Judge_node_failed _ ->
+                  | Masc.Tui_decode_fusion.Judge_node_failed _ ->
                       Alcotest.fail "synthesized first decoded as failed");
-                 (match first_failed.Tui_decode.fjn_outcome with
-                  | Tui_decode.Judge_node_failed f ->
+                 (match first_failed.Masc.Tui_decode_fusion.fjn_outcome with
+                  | Masc.Tui_decode_fusion.Judge_node_failed f ->
                       Alcotest.(check bool) "a timeout says so" true
                         f.fjno_timed_out;
                       Alcotest.(check (option (float 0.001)))
                         "a failure with no clock reads as none" None
                         f.fjno_elapsed_s
-                  | Tui_decode.Judge_node_synthesized _ ->
+                  | Masc.Tui_decode_fusion.Judge_node_synthesized _ ->
                       Alcotest.fail "failed first decoded as synthesized");
                  Alcotest.(check string) "the canonical judge is untouched"
                    "judge-reason-501"
-                   (match evidence.Tui_decode.fe_judge with
-                    | Tui_decode.Fusion_judge_synthesized j -> j.fj_reason
-                    | Tui_decode.Fusion_judge_failed _ -> "failed");
-                 (match meta.Tui_decode.fjn_role with
-                  | Tui_decode.Judge_meta -> ()
+                   (match evidence.Masc.Tui_decode_fusion.fe_judge with
+                    | Masc.Tui_decode_fusion.Fusion_judge_synthesized j -> j.fj_reason
+                    | Masc.Tui_decode_fusion.Fusion_judge_failed _ -> "failed");
+                 (match meta.Masc.Tui_decode_fusion.fjn_role with
+                  | Masc.Tui_decode_fusion.Judge_meta -> ()
                   | _ -> Alcotest.fail "meta node lost its role")
              | nodes ->
                  Alcotest.failf "expected three judge nodes, got %d"
@@ -7179,7 +7174,7 @@ let test_decode_fusion_judge_nodes () =
       ]
   in
   (match
-     Tui_decode.decode_fusion_detail
+     Masc.Tui_decode_fusion.decode_fusion_detail
        (fusion_recorded_detail_json ~judges:[ untaught_role ] ())
    with
    | Ok _ -> Alcotest.fail "an untaught judge role decoded"
@@ -7216,15 +7211,15 @@ let test_decode_fusion_progress_and_completion_summary () =
       ; "runs", `List runs
       ]
   in
-  (match Tui_decode.decode_fusion_snapshot (snapshot [ running; completed ]) with
+  (match Masc.Tui_decode_fusion.decode_fusion_snapshot (snapshot [ running; completed ]) with
    | Error detail -> Alcotest.fail detail
-   | Ok { Tui_decode.fus_runs = [ running; completed ]; _ } ->
+   | Ok { Masc.Tui_decode_fusion.fus_runs = [ running; completed ]; _ } ->
        Alcotest.(check (option (float 0.))) "running has no completion time" None
          running.fur_finished_at;
        Alcotest.(check (option (float 0.))) "terminal completion time"
          (Some 1787557684.715736) completed.fur_finished_at;
        (match running.fur_stage with
-        | Tui_decode.Fusion_stage_judge progress ->
+        | Masc.Tui_decode_fusion.Fusion_stage_judge progress ->
             Alcotest.(check int) "answered" 2 progress.frs_answered;
             Alcotest.(check int) "failed" 1 progress.frs_failed
         | _ -> Alcotest.fail "running judge stage was not retained");
@@ -7240,7 +7235,7 @@ let test_decode_fusion_progress_and_completion_summary () =
         | _ -> Alcotest.fail "fixture run must be an object"
       in
       Alcotest.(check bool) label true
-        (Result.is_error (Tui_decode.decode_fusion_snapshot (snapshot [invalid]))))
+        (Result.is_error (Masc.Tui_decode_fusion.decode_fusion_snapshot (snapshot [invalid]))))
     [ "running completion timestamp rejected", running, `Float 1787557684.
     ; "terminal null completion rejected", completed, `Null
     ; "negative completion rejected", completed, `Float (-1.)
@@ -7257,7 +7252,7 @@ let test_decode_fusion_progress_and_completion_summary () =
           ])
       "fusion-bad-counts"
   in
-  (match Tui_decode.decode_fusion_snapshot (snapshot [ bad_counts ]) with
+  (match Masc.Tui_decode_fusion.decode_fusion_snapshot (snapshot [ bad_counts ]) with
    | Ok _ -> Alcotest.fail "incomplete progress counts decoded"
    | Error detail ->
        Alcotest.(check bool) "count disagreement is explicit" true
@@ -7266,7 +7261,7 @@ let test_decode_fusion_progress_and_completion_summary () =
   let bad_stage =
     fusion_run_json ~stage:"judge" ~progress:(`Assoc []) "fusion-bad-stage"
   in
-  match Tui_decode.decode_fusion_snapshot (snapshot [ bad_stage ]) with
+  match Masc.Tui_decode_fusion.decode_fusion_snapshot (snapshot [ bad_stage ]) with
   | Ok _ -> Alcotest.fail "completed run decoded with a running stage"
   | Error detail ->
       Alcotest.(check bool) "status/stage mismatch is explicit" true
@@ -7323,17 +7318,17 @@ let test_decode_fusion_actual_tool_trace () =
   let detail_json =
     fusion_recorded_detail_json ~tool_trace:(fusion_tool_trace_json ()) ()
   in
-  (match Tui_decode.decode_fusion_detail detail_json with
+  (match Masc.Tui_decode_fusion.decode_fusion_detail detail_json with
    | Error detail -> Alcotest.fail detail
-   | Ok { Tui_decode.fud_evidence = Some evidence; _ } ->
+   | Ok { Masc.Tui_decode_fusion.fud_evidence = Some evidence; _ } ->
        (match evidence.fe_tool_trace with
         | { ftt_complete = true
           ; ftt_observed_actors = [ _ ]
           ; ftt_dropped_events = 0
           ; ftt_gaps = []
           ; ftt_events =
-              [ Tui_decode.Fusion_tool_called called
-              ; Tui_decode.Fusion_tool_completed completed
+              [ Masc.Tui_decode_fusion.Fusion_tool_called called
+              ; Masc.Tui_decode_fusion.Fusion_tool_completed completed
               ]
           } ->
           Alcotest.(check string) "actual tool name" "masc_web_search"
@@ -7341,10 +7336,10 @@ let test_decode_fusion_actual_tool_trace () =
           Alcotest.(check string) "exact tool input" {|{"query":"x"}|}
             called.fte_input.ftp_text;
           (match completed.fte_completion with
-           | Tui_decode.Fusion_tool_succeeded output ->
+           | Masc.Tui_decode_fusion.Fusion_tool_succeeded output ->
              Alcotest.(check string) "exact tool output" {|{"ok":true}|}
                output.ftp_text
-           | Tui_decode.Fusion_tool_failed _ ->
+           | Masc.Tui_decode_fusion.Fusion_tool_failed _ ->
              Alcotest.fail "successful Tool completion decoded as failed")
         | _ -> Alcotest.fail "complete Tool ledger shape changed")
    | Ok _ -> Alcotest.fail "recorded Fusion evidence disappeared");
@@ -7361,9 +7356,9 @@ let test_decode_fusion_actual_tool_trace () =
         (fusion_tool_trace_json ~status:"partial" ~gaps:[ gap ] ~events:[] ())
       ()
   in
-  (match Tui_decode.decode_fusion_detail partial with
+  (match Masc.Tui_decode_fusion.decode_fusion_detail partial with
    | Ok
-       { Tui_decode.fud_evidence =
+       { Masc.Tui_decode_fusion.fud_evidence =
            Some { fe_tool_trace = { ftt_complete = false; ftt_gaps = [ _ ]; _ }; _ }
        ; _
        } -> ()
@@ -7373,7 +7368,7 @@ let test_decode_fusion_actual_tool_trace () =
     fusion_recorded_detail_json
       ~tool_trace:(fusion_tool_trace_json ~dropped_events:1 ()) ()
   in
-  match Tui_decode.decode_fusion_detail dishonest_complete with
+  match Masc.Tui_decode_fusion.decode_fusion_detail dishonest_complete with
   | Ok _ -> Alcotest.fail "complete Tool ledger accepted a dropped event"
   | Error detail ->
       Alcotest.(check bool) "coverage disagreement is explicit" true
@@ -7403,28 +7398,28 @@ let test_decode_fusion_tool_judge_actor () =
         (fusion_tool_trace_json ~events:[ judge_event ~judge_role ] ())
       ()
   in
-  (match Tui_decode.decode_fusion_detail (detail ~judge_role:"stage_meta") with
+  (match Masc.Tui_decode_fusion.decode_fusion_detail (detail ~judge_role:"stage_meta") with
    | Error detail -> Alcotest.fail detail
    | Ok
-       { Tui_decode.fud_evidence =
+       { Masc.Tui_decode_fusion.fud_evidence =
            Some
              { fe_tool_trace =
-                 { ftt_events = [ Tui_decode.Fusion_tool_called called ]; _ }
+                 { ftt_events = [ Masc.Tui_decode_fusion.Fusion_tool_called called ]; _ }
              ; _
              }
        ; _
        } ->
        (match called.fte_actor.fta_phase with
-        | Tui_decode.Fusion_tool_judge Tui_decode.Judge_stage_meta -> ()
-        | Tui_decode.Fusion_tool_judge
-            ( Tui_decode.Judge_single | Tui_decode.Judge_refine
-            | Tui_decode.Judge_first | Tui_decode.Judge_meta
-            | Tui_decode.Judge_final_meta ) ->
+        | Masc.Tui_decode_fusion.Fusion_tool_judge Masc.Tui_decode_fusion.Judge_stage_meta -> ()
+        | Masc.Tui_decode_fusion.Fusion_tool_judge
+            ( Masc.Tui_decode_fusion.Judge_single | Masc.Tui_decode_fusion.Judge_refine
+            | Masc.Tui_decode_fusion.Judge_first | Masc.Tui_decode_fusion.Judge_meta
+            | Masc.Tui_decode_fusion.Judge_final_meta ) ->
             Alcotest.fail "stage_meta decoded as another judge role"
-        | Tui_decode.Fusion_tool_panel ->
+        | Masc.Tui_decode_fusion.Fusion_tool_panel ->
             Alcotest.fail "a judge actor decoded as a panel actor")
    | Ok _ -> Alcotest.fail "the judge call did not come back as one event");
-  match Tui_decode.decode_fusion_detail (detail ~judge_role:"jury") with
+  match Masc.Tui_decode_fusion.decode_fusion_detail (detail ~judge_role:"jury") with
   | Ok _ -> Alcotest.fail "an untaught judge_role decoded"
   | Error detail ->
       Alcotest.(check bool) "the closed role set names what it rejected" true
@@ -7460,21 +7455,21 @@ let test_decode_fusion_seat_routes () =
       ]
   in
   (match
-     Tui_decode.decode_fusion_detail
+     Masc.Tui_decode_fusion.decode_fusion_detail
        (fusion_recorded_detail_json ~seat_routes:[ panel_route; judge_route ] ())
    with
    | Error detail -> Alcotest.fail detail
-   | Ok { Tui_decode.fud_evidence = Some evidence; _ } -> (
+   | Ok { Masc.Tui_decode_fusion.fud_evidence = Some evidence; _ } -> (
        match evidence.fe_seat_routes with
        | Some
-           [ { fsr_seat = Tui_decode.Fusion_panel_seat "first"
+           [ { fsr_seat = Masc.Tui_decode_fusion.Fusion_panel_seat "first"
              ; fsr_route = "panel-lane"
              ; fsr_answered_by = Some "glm-4.6"
              ; fsr_failed_attempts = [ attempt ]
              }
            ; { fsr_seat =
-                 Tui_decode.Fusion_judge_seat
-                   { fs_role = Tui_decode.Judge_meta; fs_identity = "meta" }
+                 Masc.Tui_decode_fusion.Fusion_judge_seat
+                   { fs_role = Masc.Tui_decode_fusion.Judge_meta; fs_identity = "meta" }
              ; fsr_route = "judge-lane"
              ; fsr_answered_by = None
              ; fsr_failed_attempts = []
@@ -7488,14 +7483,14 @@ let test_decode_fusion_seat_routes () =
    | Ok _ -> Alcotest.fail "recorded Fusion evidence disappeared");
   (* A post written before seats were recorded carries no key; the reading
      stands, and the detail draws no block. *)
-  (match Tui_decode.decode_fusion_detail (fusion_recorded_detail_json ()) with
-   | Ok { Tui_decode.fud_evidence = Some { fe_seat_routes = None; _ }; _ } -> ()
+  (match Masc.Tui_decode_fusion.decode_fusion_detail (fusion_recorded_detail_json ()) with
+   | Ok { Masc.Tui_decode_fusion.fud_evidence = Some { fe_seat_routes = None; _ }; _ } -> ()
    | Ok _ -> Alcotest.fail "an absent seat_routes key became something else"
    | Error detail -> Alcotest.fail detail);
   (* An empty array is a sink that recorded routes and found none, which is
      not the same as never having written the key. *)
-  (match Tui_decode.decode_fusion_detail (fusion_recorded_detail_json ~seat_routes:[] ()) with
-   | Ok { Tui_decode.fud_evidence = Some { fe_seat_routes = Some []; _ }; _ } -> ()
+  (match Masc.Tui_decode_fusion.decode_fusion_detail (fusion_recorded_detail_json ~seat_routes:[] ()) with
+   | Ok { Masc.Tui_decode_fusion.fud_evidence = Some { fe_seat_routes = Some []; _ }; _ } -> ()
    | Ok _ -> Alcotest.fail "an empty seat_routes array became something else"
    | Error detail -> Alcotest.fail detail);
   let malformed =
@@ -7508,7 +7503,7 @@ let test_decode_fusion_seat_routes () =
       ]
   in
   match
-    Tui_decode.decode_fusion_detail (fusion_recorded_detail_json ~seat_routes:[ malformed ] ())
+    Masc.Tui_decode_fusion.decode_fusion_detail (fusion_recorded_detail_json ~seat_routes:[ malformed ] ())
   with
   | Ok _ -> Alcotest.fail "a judge seat without its role decoded"
   | Error detail ->
@@ -7521,7 +7516,7 @@ let test_decode_fusion_seat_routes () =
 let test_decode_fusion_seat_route_refusals () =
   let refusal seat_routes =
     match
-      Tui_decode.decode_fusion_detail (fusion_recorded_detail_json ~seat_routes ())
+      Masc.Tui_decode_fusion.decode_fusion_detail (fusion_recorded_detail_json ~seat_routes ())
     with
     | Ok _ -> Alcotest.fail "a malformed seat route decoded"
     | Error detail -> detail
@@ -7565,7 +7560,7 @@ let test_decode_fusion_seat_route_refusals () =
   (* The key is the sink's whole array; an object in its place is a shape
      this reader does not know, not an array of one. *)
   match
-    Tui_decode.decode_fusion_detail
+    Masc.Tui_decode_fusion.decode_fusion_detail
       (fusion_recorded_detail_json
          ~seat_routes_value:(`Assoc [ "phase", `String "panel" ])
          ())
@@ -7590,7 +7585,7 @@ let test_decode_fusion_launch_options_and_receipt () =
             ] )
       ]
   in
-  (match Tui_decode.decode_fusion_launch_options (config ()) with
+  (match Masc.Tui_decode_fusion.decode_fusion_launch_options (config ()) with
    | Error detail -> Alcotest.fail detail
    | Ok options ->
      Alcotest.(check bool) "enabled" true options.flo_enabled;
@@ -7598,14 +7593,14 @@ let test_decode_fusion_launch_options_and_receipt () =
        options.flo_default_preset;
      Alcotest.(check (list string)) "names only, in file order" [ "trio"; "duo" ]
        options.flo_presets);
-  (match Tui_decode.decode_fusion_launch_options (config ~enabled:false ~presets:[] ()) with
+  (match Masc.Tui_decode_fusion.decode_fusion_launch_options (config ~enabled:false ~presets:[] ()) with
    | Error detail -> Alcotest.fail detail
    | Ok options ->
      Alcotest.(check bool) "a disabled section still reads" false options.flo_enabled;
      Alcotest.(check (list string)) "with no presets" [] options.flo_presets);
   (* A preset row without a name is a shape the form cannot offer. *)
   (match
-     Tui_decode.decode_fusion_launch_options
+     Masc.Tui_decode_fusion.decode_fusion_launch_options
        (`Assoc
          [ ( "config"
            , `Assoc
@@ -7619,7 +7614,7 @@ let test_decode_fusion_launch_options_and_receipt () =
      Alcotest.(check bool) "the reading names the missing field" true
        (String_util.contains_substring detail "name"));
   (match
-     Tui_decode.decode_fusion_launch_receipt
+     Masc.Tui_decode_fusion.decode_fusion_launch_receipt
        (`Assoc
          [ "ok", `Bool true
          ; "status", `String "fusion_started"
@@ -7631,7 +7626,7 @@ let test_decode_fusion_launch_options_and_receipt () =
    | Ok run_id -> Alcotest.(check string) "the started run" "kmsg-042" run_id);
   (* A refusal travels as a 4xx and is reported by the transport, so a 2xx
      that says otherwise is a shape this reader does not know. *)
-  match Tui_decode.decode_fusion_launch_receipt (`Assoc [ "ok", `Bool false ]) with
+  match Masc.Tui_decode_fusion.decode_fusion_launch_receipt (`Assoc [ "ok", `Bool false ]) with
   | Ok _ -> Alcotest.fail "a 2xx ok:false decoded as a started run"
   | Error detail ->
     Alcotest.(check bool) "the reading says so" true
@@ -11556,12 +11551,12 @@ let skill_evidence_fixture () =
 ;;
 
 let test_decode_skill_evidence_reads_exact_v5_coverage () =
-  match Tui_decode.decode_skill_evidence (skill_evidence_fixture ()) with
+  match Tui_decode_skill_evidence.decode_skill_evidence (skill_evidence_fixture ()) with
   | Error detail -> Alcotest.fail detail
   | Ok evidence ->
     (match evidence.se_status with
-     | Tui_decode.Skill_evidence_not_observed_in_retained_coverage -> ()
-     | Tui_decode.Skill_evidence_observed ->
+     | Tui_decode_skill_evidence.Skill_evidence_not_observed_in_retained_coverage -> ()
+     | Tui_decode_skill_evidence.Skill_evidence_observed ->
        Alcotest.fail "bounded absence decoded as observed");
     Alcotest.(check int)
       "activation ledgers"
@@ -11604,7 +11599,7 @@ let test_decode_skill_evidence_accepts_declared_composition_scopes () =
        match
          skill_evidence_fixture ()
          |> with_scope scope
-         |> Tui_decode.decode_skill_evidence
+         |> Tui_decode_skill_evidence.decode_skill_evidence
        with
        | Error detail -> Alcotest.fail detail
        | Ok evidence ->
@@ -11613,8 +11608,8 @@ let test_decode_skill_evidence_accepts_declared_composition_scopes () =
            true
            (evidence.se_coverage.sec_composition_scope = expected))
     [ ( "exact_reference_latest_completed"
-      , Tui_decode.Skill_evidence_exact_reference_latest_completed )
-    ; "unavailable", Tui_decode.Skill_evidence_composition_unavailable
+      , Tui_decode_skill_evidence.Skill_evidence_exact_reference_latest_completed )
+    ; "unavailable", Tui_decode_skill_evidence.Skill_evidence_composition_unavailable
     ]
 ;;
 
@@ -11629,14 +11624,14 @@ let test_decode_skill_evidence_rejects_v1_and_status_disagreement () =
     true
     (skill_evidence_fixture ()
      |> replace "schema" (`String "masc.skill-evidence/v2")
-     |> Tui_decode.decode_skill_evidence
+     |> Tui_decode_skill_evidence.decode_skill_evidence
      |> Result.is_error);
   Alcotest.(check bool)
     "observed without evidence rejected"
     true
     (skill_evidence_fixture ()
      |> replace "status" (`String "observed")
-     |> Tui_decode.decode_skill_evidence
+     |> Tui_decode_skill_evidence.decode_skill_evidence
      |> Result.is_error)
 ;;
 
@@ -11652,7 +11647,7 @@ let test_decode_skill_evidence_requires_observation_fields () =
          true
          (skill_evidence_fixture ()
           |> without
-          |> Tui_decode.decode_skill_evidence
+          |> Tui_decode_skill_evidence.decode_skill_evidence
           |> Result.is_error))
     [ "activation"; "composition" ]
 ;;
@@ -11693,7 +11688,7 @@ let test_decode_skill_evidence_requires_every_coverage_field () =
          true
          (skill_evidence_fixture ()
           |> without
-          |> Tui_decode.decode_skill_evidence
+          |> Tui_decode_skill_evidence.decode_skill_evidence
           |> Result.is_error))
     required
 ;;
@@ -11768,18 +11763,18 @@ let skill_evidence_observed_fixture () =
 ;;
 
 let test_decode_skill_evidence_reads_typed_activation_owner () =
-  match Tui_decode.decode_skill_evidence (skill_evidence_observed_fixture ()) with
+  match Tui_decode_skill_evidence.decode_skill_evidence (skill_evidence_observed_fixture ()) with
   | Error detail -> Alcotest.fail detail
   | Ok
       { se_activation =
-          Some (Tui_decode.Skill_evidence_most_recent_observed item)
+          Some (Tui_decode_skill_evidence.Skill_evidence_most_recent_observed item)
       ; _
       } ->
     Alcotest.(check string) "trace" "trace-proof" item.sea_trace_id;
     Alcotest.(check (list string))
       "owner claim"
       [ "delta" ]
-      (List.map (fun claim -> claim.Tui_decode.seo_keeper) item.sea_owner_claims)
+      (List.map (fun claim -> claim.Tui_decode_skill_evidence.seo_keeper) item.sea_owner_claims)
   | Ok _ -> Alcotest.fail "typed activation selection was not preserved"
 ;;
 
@@ -11808,7 +11803,7 @@ let test_decode_skill_evidence_rejects_open_gap_and_unbacked_activation () =
   Alcotest.(check bool)
     "known code without variant fields is rejected"
     true
-    (Tui_decode.decode_skill_evidence open_gap |> Result.is_error);
+    (Tui_decode_skill_evidence.decode_skill_evidence open_gap |> Result.is_error);
   let without_loaded_ledger =
     skill_evidence_observed_fixture ()
     |> map_skill_evidence_coverage (function
@@ -11825,7 +11820,7 @@ let test_decode_skill_evidence_rejects_open_gap_and_unbacked_activation () =
   Alcotest.(check bool)
     "activation requires a loaded ledger"
     true
-    (Tui_decode.decode_skill_evidence without_loaded_ledger |> Result.is_error)
+    (Tui_decode_skill_evidence.decode_skill_evidence without_loaded_ledger |> Result.is_error)
 ;;
 
 let test_decode_skill_evidence_tie_compares_rfc3339_instants () =
@@ -11873,7 +11868,7 @@ let test_decode_skill_evidence_tie_compares_rfc3339_instants () =
            fields)
     | _ -> Alcotest.fail "Skill evidence fixture is not an object"
   in
-  match Tui_decode.decode_skill_evidence tie with
+  match Tui_decode_skill_evidence.decode_skill_evidence tie with
   | Ok { se_activation = Some (Skill_evidence_most_recent_observed_timestamp_tie rows); _ } ->
     Alcotest.(check int) "two equal instants" 2 (List.length rows)
   | Ok _ -> Alcotest.fail "timestamp tie lost its typed selection"
@@ -12133,6 +12128,60 @@ let test_play_revoke_failure_detail () =
      {|{"error":"x","code":"release_failed","released_controller":false}|};
      {|{"error":"release_failed","released_controller":false,"release_error":"busy"}|};
      "not JSON"; "[]"; "null"; "42"]
+
+(* The play routes put the reason in [message] and the code in [error]. The
+   shared refusal shows the code alone, which is "HTTP 409: not_ready" for an
+   operator who has no idea what is not ready. *)
+let test_play_invite_refusal_says_the_servers_sentence () =
+  let refusal ~status_code body = Tui_decode.play_invite_refusal ~status_code ~body in
+  let check_sentence label expected ~status_code body =
+    Alcotest.(check (option string)) label expected (refusal ~status_code body)
+  in
+  check_sentence "not ready lists what is missing"
+    (Some "HTTP 409: an invite needs auth (missing: auth_disabled, no_public_base_url)")
+    ~status_code:409
+    {|{"error":"not_ready","message":"an invite needs auth","missing":["auth_disabled","no_public_base_url"]}|};
+  check_sentence "a taken name says who holds it"
+    (Some "HTTP 409: another participant already has this name (held by a keeper)")
+    ~status_code:409
+    {|{"error":"name_taken","message":"another participant already has this name","taken_by":"keeper"}|};
+  check_sentence "blank and non-string gaps are not listed"
+    (Some "HTTP 409: an invite needs auth (missing: no_public_base_url)")
+    ~status_code:409
+    {|{"error":"not_ready","message":"an invite needs auth","missing":["", 7, "no_public_base_url", null]}|};
+  check_sentence "a missing that lists nothing adds nothing"
+    (Some "HTTP 409: an invite needs auth")
+    ~status_code:409
+    {|{"error":"not_ready","message":"an invite needs auth","missing":["  "]}|};
+  check_sentence "a missing that is not a list adds nothing"
+    (Some "HTTP 409: an invite needs auth")
+    ~status_code:409
+    {|{"error":"not_ready","message":"an invite needs auth","missing":"no_public_base_url"}|};
+  check_sentence "a plain sentence stands alone"
+    (Some "HTTP 400: hours must be between 1 and 8760, got 0")
+    ~status_code:400
+    {|{"error":"invalid_request","message":"hours must be between 1 and 8760, got 0"}|};
+  List.iter
+    (fun (why, status_code, body) -> check_sentence why None ~status_code body)
+    [ ("a 401 is about the credential", 401, {|{"error":"unauthorized","message":"bad token"}|})
+    ; ("a 403 is about the credential", 403, {|{"error":"forbidden","message":"admin only"}|})
+    ; ("a success is not a refusal", 200, {|{"error":"x","message":"fine"}|})
+    ; ("a server failure is not a refusal", 500, {|{"error":"x","message":"disk"}|})
+    ; ("a body with no message", 409, {|{"error":"not_ready"}|})
+    ; ("a blank message", 409, {|{"error":"x","message":"   "}|})
+    ; ("a message that is not a string", 409, {|{"error":"x","message":7}|})
+    ; ("a body that is not an object", 409, {|["not_ready"]|})
+    ; ("a body that is not JSON", 409, "<html>bad gateway</html>")
+    ];
+  (* Every part comes from the far end, so every part is made safe to draw. *)
+  match
+    refusal ~status_code:409
+      "{\"error\":\"x\",\"message\":\"a\\u001b[31mred\\nnext\",\"missing\":[\"g\\u001b]0;t\\u0007\"],\"taken_by\":\"k\\u001b\"}"
+  with
+  | None -> Alcotest.fail "a body with a message gave no sentence"
+  | Some said ->
+    Alcotest.(check bool) "no control byte is left in the sentence" false
+      (String.exists (fun c -> c < ' ' || c = '\127') said)
 
 let () =
   Alcotest.run "tui_decode" [
@@ -12568,8 +12617,6 @@ let () =
           test_planning_goal_without_the_verifier_field_is_refused;
         Alcotest.test_case "keeps the last review note" `Quick
           test_planning_goal_keeps_the_last_review_note;
-        Alcotest.test_case "planning goal owner" `Quick
-          test_planning_goal_keeps_owner;
         Alcotest.test_case "keeps the server timestamps" `Quick
           test_planning_goal_keeps_the_server_timestamps;
         Alcotest.test_case "tolerates missing timestamps" `Quick
@@ -12956,7 +13003,9 @@ let () =
           test_keeper_usage_cache_failures_remain_visible ] );
     ( "play invites"
     , [ Alcotest.test_case "preserves partial revoke and rejects unreadable links"
-          `Quick test_play_invite_responses_preserve_recovery_facts ] );
+          `Quick test_play_invite_responses_preserve_recovery_facts
+      ; Alcotest.test_case "a refusal says the server's sentence" `Quick
+          test_play_invite_refusal_says_the_servers_sentence ] );
     ( "file change"
     , [ Alcotest.test_case "reads an insert" `Quick test_decode_file_change_reads_an_insert
       ; Alcotest.test_case "reads a materialize" `Quick

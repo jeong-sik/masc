@@ -1453,14 +1453,7 @@ let record_keepalive_stage_timing = Keeper_heartbeat_loop_snapshot_timing.record
    specs/keeper-state-machine/KeeperHeartbeat.tla (Cycle 7 / Tier B1,
    PR #11408).
 
-   The spec preamble cites this module by function name
-   ([run_heartbeat_loop]); it used to carry a line number but iter 64
-   N-2.a removed it — function names are stable, line numbers drift, and
-   spec-preamble line refs are now guarded by
-   scripts/audit-tla-ml-line-refs.sh (iter 64 N-2.c).  This comment is
-   the authoritative reverse-direction citation; the OCaml-docstring
-   side is guarded by scripts/audit-ocaml-spec-nav-line-refs.sh
-   (iter 72 R-1.a).
+   The spec preamble cites [run_heartbeat_loop] by function name.
 
    Action mapping (TLA+ -> OCaml):
      WakeupSignal     external code sets [wakeup] Atomic to true

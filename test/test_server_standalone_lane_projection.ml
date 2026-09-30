@@ -195,8 +195,8 @@ let test_snapshot_names_every_lane_and_keeps_observed_truth () =
      |> Yojson.Safe.Util.member "observation_only"
      |> Yojson.Safe.Util.to_bool);
   check int
-    "six fixed lanes"
-    6
+    "one row for every standalone lane"
+    (List.length Standalone_lane.all)
     (json |> Yojson.Safe.Util.member "lanes" |> Yojson.Safe.Util.to_list |> List.length);
   let status lane_id =
     lane_by_id json lane_id
@@ -786,7 +786,7 @@ let check_no_keeper_skill_evidence ~label = function
 ;;
 
 let test_every_retained_run_kind_projects_skill_evidence () =
-  [ Exact.Librarian; Exact.Hitl_auto_judge; Exact.Board_attention; Exact.Workspace_curator ]
+  [ Exact.Librarian; Exact.Hitl_auto_judge; Exact.Board_attention; Exact.Workspace_curator; Exact.Candle_appraiser ]
   |> List.iteri (fun index lane ->
     let run_id = Printf.sprintf "exact-skill-%d" index in
     let run = exact_run ~run_id ~lane ~started_at:100. ~status:Exact.Running in

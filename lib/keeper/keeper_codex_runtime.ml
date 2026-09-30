@@ -1411,6 +1411,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
                 (Llm_provider.Reasoning_effort.to_string admitted)
             | _ -> ());
            Option.iter (fun active ->
+             (* See Host.observe_raw_trace: it already logs trace errors without changing admission. *)
              ignore (Host.observe_raw_trace ~keeper_name ~stage:Host.Reasoning_effort (fun () ->
                Agent_core.Raw_trace.record_hook_invoked active
                  ~hook_name:"codex_reasoning_effort" ~hook_decision:"admitted"

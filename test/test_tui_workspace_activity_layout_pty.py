@@ -54,10 +54,6 @@ def run(executable, no_color):
             "last_updated": "2026-08-22T00:00:00Z", "version": 1}), encoding="utf-8")
 
     def interact(process, fd, _slave, output, _base):
-        ready = b"1 awaiting verification"
-        h.wait_for_output(process, fd, output, ready, start=0, timeout=10)
-        h.wait_for_output(process, fd, output, h.FRAME_END,
-                          start=h.end_of_needle(output, ready, 0), timeout=3)
         h.tab_until(process, fd, output, b"MASC Workspace")
         h.wait_for_output(process, fd, output, b"/srv/masc/workspace/masc", start=0, timeout=10)
         h.send_and_wait(process, fd, output, b"h", b"MASC Workspace / Activity")

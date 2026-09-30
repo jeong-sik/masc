@@ -23636,6 +23636,18 @@ and is loaded on demand through keeper_skill.
                               state.lane_runs_scroll)
                  | Lanes_overview ->
                      move_list_by_rows state ~delta:(direction * page))
+             | Tools ->
+                 let scrolled = Masc_tui_render.tools_scrolled state in
+                 let height =
+                   surface_body_height ~rows:(surface_rows state) scrolled
+                 in
+                 state.tools_scroll <-
+                   (if direction > 0 then
+                      Masc_tui_scroll.page_down ~count:scrolled.sc_count ~height
+                        state.tools_scroll
+                    else
+                      Masc_tui_scroll.page_up ~count:scrolled.sc_count ~height
+                        state.tools_scroll)
              | Metrics ->
                  (* Saturating, like every other clamped scroll: the frame
                     reports the row it drew and until it has, the stored value
@@ -23672,11 +23684,10 @@ and is loaded on demand through keeper_skill.
                 are built by the frame out of text the frame formats, so the
                 count a page needs does not exist at the keypress; Config's
                 five panes each carry a cursor of their own meaning. Activity
-                goes to the newest with g, Tools with Home and End. Left named
-                rather than folded into the arm above, so the day one of them
-                gains a row list this reads as a lie rather than as silence
-                (#35305). *)
-             | Overview | Acting | Config | Tools -> ())
+                goes to the newest with g. Left named rather than folded
+                into the arm above, so the day one of them gains a row list
+                this reads as a lie rather than as silence (#35305). *)
+             | Overview | Acting | Config -> ())
        (* On Config, s and t hop to Resources and Tools and r is the global
           refresh, so the pane takes u, twice, for the destructive restore.
           Its save key is n, answered inside the [n] dispatch below, which

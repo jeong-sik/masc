@@ -8874,7 +8874,7 @@ let verification_detail_lines ~width
   ; field "Task" request.vr_task_id
   ; field "Title" request.vr_task_title
   ; field "Submitted by" request.vr_submitted_by
-  ; field "Created" request.vr_created_at
+  ; field "Created" (Terminal_text.short_timestamp request.vr_created_at)
   ; Ansi.dim, ""
   ]
   (* [Kind], [What is being judged] and [What moves it forward] stood here.
@@ -9026,7 +9026,7 @@ let verification_detail_pane (state : state) ~rows ~cols request buf =
       (fit_width ("  " ^ Terminal_text.single_line err) (cols - 4)))
     state.verification_verdict_error;
   box_line_styled buf cols ~style:(Theme.warn ())
-    "  a twice:approve x:reject";
+    "  a twice:approve x:reject with reason";
   box_bottom buf cols;
   (* A position, not a key: handed to the footer's position slot as the
      Verdicts detail does, so narrow widths drop key items before it. *)

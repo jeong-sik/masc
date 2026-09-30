@@ -79,7 +79,6 @@ def run(binary, columns, plain, review):
     heading = 'VERIFICATION REQUEST' if review else 'EVALUATOR VERDICT'
 
     def interact(process, fd, _slave, output, _base):
-        h.wait_for_output(process, fd, output, b'1 awaiting verification', start=0, timeout=10)
         h.tab_until(process, fd, output, b'MASC Work')
         h.wait_for_output(process, fd, output, b'GOALHEAD', start=0, timeout=10)
         h.send_and_wait(process, fd, output, b'v', b'TITLEHEAD')

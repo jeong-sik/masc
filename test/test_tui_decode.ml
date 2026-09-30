@@ -11556,12 +11556,12 @@ let skill_evidence_fixture () =
 ;;
 
 let test_decode_skill_evidence_reads_exact_v5_coverage () =
-  match Tui_decode.decode_skill_evidence (skill_evidence_fixture ()) with
+  match Tui_decode_skill_evidence.decode_skill_evidence (skill_evidence_fixture ()) with
   | Error detail -> Alcotest.fail detail
   | Ok evidence ->
     (match evidence.se_status with
-     | Tui_decode.Skill_evidence_not_observed_in_retained_coverage -> ()
-     | Tui_decode.Skill_evidence_observed ->
+     | Tui_decode_skill_evidence.Skill_evidence_not_observed_in_retained_coverage -> ()
+     | Tui_decode_skill_evidence.Skill_evidence_observed ->
        Alcotest.fail "bounded absence decoded as observed");
     Alcotest.(check int)
       "activation ledgers"
@@ -11604,7 +11604,7 @@ let test_decode_skill_evidence_accepts_declared_composition_scopes () =
        match
          skill_evidence_fixture ()
          |> with_scope scope
-         |> Tui_decode.decode_skill_evidence
+         |> Tui_decode_skill_evidence.decode_skill_evidence
        with
        | Error detail -> Alcotest.fail detail
        | Ok evidence ->
@@ -11613,8 +11613,8 @@ let test_decode_skill_evidence_accepts_declared_composition_scopes () =
            true
            (evidence.se_coverage.sec_composition_scope = expected))
     [ ( "exact_reference_latest_completed"
-      , Tui_decode.Skill_evidence_exact_reference_latest_completed )
-    ; "unavailable", Tui_decode.Skill_evidence_composition_unavailable
+      , Tui_decode_skill_evidence.Skill_evidence_exact_reference_latest_completed )
+    ; "unavailable", Tui_decode_skill_evidence.Skill_evidence_composition_unavailable
     ]
 ;;
 
@@ -11629,14 +11629,14 @@ let test_decode_skill_evidence_rejects_v1_and_status_disagreement () =
     true
     (skill_evidence_fixture ()
      |> replace "schema" (`String "masc.skill-evidence/v2")
-     |> Tui_decode.decode_skill_evidence
+     |> Tui_decode_skill_evidence.decode_skill_evidence
      |> Result.is_error);
   Alcotest.(check bool)
     "observed without evidence rejected"
     true
     (skill_evidence_fixture ()
      |> replace "status" (`String "observed")
-     |> Tui_decode.decode_skill_evidence
+     |> Tui_decode_skill_evidence.decode_skill_evidence
      |> Result.is_error)
 ;;
 
@@ -11652,7 +11652,7 @@ let test_decode_skill_evidence_requires_observation_fields () =
          true
          (skill_evidence_fixture ()
           |> without
-          |> Tui_decode.decode_skill_evidence
+          |> Tui_decode_skill_evidence.decode_skill_evidence
           |> Result.is_error))
     [ "activation"; "composition" ]
 ;;
@@ -11693,7 +11693,7 @@ let test_decode_skill_evidence_requires_every_coverage_field () =
          true
          (skill_evidence_fixture ()
           |> without
-          |> Tui_decode.decode_skill_evidence
+          |> Tui_decode_skill_evidence.decode_skill_evidence
           |> Result.is_error))
     required
 ;;
@@ -11768,18 +11768,18 @@ let skill_evidence_observed_fixture () =
 ;;
 
 let test_decode_skill_evidence_reads_typed_activation_owner () =
-  match Tui_decode.decode_skill_evidence (skill_evidence_observed_fixture ()) with
+  match Tui_decode_skill_evidence.decode_skill_evidence (skill_evidence_observed_fixture ()) with
   | Error detail -> Alcotest.fail detail
   | Ok
       { se_activation =
-          Some (Tui_decode.Skill_evidence_most_recent_observed item)
+          Some (Tui_decode_skill_evidence.Skill_evidence_most_recent_observed item)
       ; _
       } ->
     Alcotest.(check string) "trace" "trace-proof" item.sea_trace_id;
     Alcotest.(check (list string))
       "owner claim"
       [ "delta" ]
-      (List.map (fun claim -> claim.Tui_decode.seo_keeper) item.sea_owner_claims)
+      (List.map (fun claim -> claim.Tui_decode_skill_evidence.seo_keeper) item.sea_owner_claims)
   | Ok _ -> Alcotest.fail "typed activation selection was not preserved"
 ;;
 
@@ -11808,7 +11808,7 @@ let test_decode_skill_evidence_rejects_open_gap_and_unbacked_activation () =
   Alcotest.(check bool)
     "known code without variant fields is rejected"
     true
-    (Tui_decode.decode_skill_evidence open_gap |> Result.is_error);
+    (Tui_decode_skill_evidence.decode_skill_evidence open_gap |> Result.is_error);
   let without_loaded_ledger =
     skill_evidence_observed_fixture ()
     |> map_skill_evidence_coverage (function
@@ -11825,7 +11825,7 @@ let test_decode_skill_evidence_rejects_open_gap_and_unbacked_activation () =
   Alcotest.(check bool)
     "activation requires a loaded ledger"
     true
-    (Tui_decode.decode_skill_evidence without_loaded_ledger |> Result.is_error)
+    (Tui_decode_skill_evidence.decode_skill_evidence without_loaded_ledger |> Result.is_error)
 ;;
 
 let test_decode_skill_evidence_tie_compares_rfc3339_instants () =
@@ -11873,7 +11873,7 @@ let test_decode_skill_evidence_tie_compares_rfc3339_instants () =
            fields)
     | _ -> Alcotest.fail "Skill evidence fixture is not an object"
   in
-  match Tui_decode.decode_skill_evidence tie with
+  match Tui_decode_skill_evidence.decode_skill_evidence tie with
   | Ok { se_activation = Some (Skill_evidence_most_recent_observed_timestamp_tie rows); _ } ->
     Alcotest.(check int) "two equal instants" 2 (List.length rows)
   | Ok _ -> Alcotest.fail "timestamp tie lost its typed selection"

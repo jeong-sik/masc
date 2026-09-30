@@ -114,7 +114,9 @@ def automatic_gate_is_not_a_human_decision(executable):
         # The same read becomes actionable only with the typed human handoff.
         gate[1]["approval_queue"].append(dict(template, id="appr-human", phase="human_required"))
         h.send_and_wait(process, fd, output, b"r", b"Approvals and questions: 1 need you")
-        frame = capture(process, fd, output, "mixed-gate", b"3 automatic")
+        # Change the width so capture receives a full redraw after refresh;
+        # requesting the current 80x24 size does not produce another frame.
+        frame = capture(process, fd, output, "mixed-gate", b"3 automatic", columns=120)
         assert b"Approvals and questions: 1 need you" in frame
         assert b"3 automatic" in frame
         os.write(fd, b"q")

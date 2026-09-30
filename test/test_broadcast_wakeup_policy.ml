@@ -34,6 +34,7 @@ let delivery ~target ~request_id ~seq ~content : Workspace_broadcast.broadcast_d
   ; mention = Some target
   ; msg_type = "broadcast"
   ; mention_delivery = Workspace_broadcast.Pending
+  ; fanout_state = Workspace_broadcast.Fanout_active
   ; audience = Workspace_broadcast.Fleet_conversation
   }
 ;;
@@ -338,6 +339,7 @@ let fleet_delivery ~request_id ~from_agent ~content
   ; mention = None
   ; msg_type = "broadcast"
   ; mention_delivery = Workspace_broadcast.Passive
+  ; fanout_state = Workspace_broadcast.Fanout_active
   ; audience = Workspace_broadcast.Fleet_conversation
   }
 ;;
@@ -424,6 +426,57 @@ let test_broadcast_retry_recovers_interrupted_fleet_projection () =
       check int "missed recipient is recovered exactly once" 1 (rows "beta")
     done;
     check int "each idle retry safely reconciles the retained projection" 3 !attempts)
+;;
+
+let test_active_retry_survives_cancelled_partial_fanout () =
+  with_workspace @@ fun config ->
+  Eio.Switch.run @@ fun sw ->
+  List.iter (persist_meta config) ["alpha";"beta"];
+  let request_id="wmsg-" ^ String.make 32 'e' in
+  let entered, mark_entered=Eio.Promise.create () in
+  let release, mark_release=Eio.Promise.create () in
+  let owner_context, mark_owner_context=Eio.Promise.create () in
+  let attempts=ref 0 in
+  let previous=Workspace_broadcast.For_testing.replace_on_broadcast_mention (fun delivery ->
+    incr attempts;
+    Broadcast_wakeup.project_workspace_message_to_fleet ~base_path:config.base_path
+      ~registered_keepers:(fun () -> if !attempts=1 then ["alpha","alpha"]
+        else ["alpha","alpha";"beta","beta"]) delivery;
+    if !attempts=1 then (
+      Eio.Promise.resolve mark_entered ();
+      Eio.Promise.await release);
+    Workspace_broadcast.Passive) in
+  Fun.protect ~finally:(fun () ->
+    let (_ : Workspace_broadcast.broadcast_delivery -> Workspace_broadcast.mention_delivery) =
+      Workspace_broadcast.For_testing.replace_on_broadcast_mention previous in
+    if not (Eio.Promise.is_resolved release) then Eio.Promise.resolve mark_release ()) (fun () ->
+    let send () = Workspace_broadcast.broadcast_once ~request_id config
+      ~from_agent:"external-agent" ~content:"retained evidence" in
+    let owner=Eio.Fiber.fork_promise ~sw (fun () -> Eio.Cancel.sub (fun context ->
+      Eio.Promise.resolve mark_owner_context context; send ())) in
+    Eio.Promise.await entered;
+    let active=match send () with Ok receipt -> receipt
+      | Error error -> fail (Workspace_broadcast.broadcast_error_to_string error) in
+    check bool "active retry returns row without waiting for fanout" true
+      (active.fanout_state=Workspace_broadcast.Fanout_active);
+    check bool "original fanout is still active" false (Eio.Promise.is_resolved owner);
+    check int "active retry launches no second fanout" 1 !attempts;
+    let rows name=count_delivery_rows ~base_path:config.base_path ~keeper_name:name ~request_id in
+    check int "first recipient already has exact transcript row" 1 (rows "alpha");
+    check int "later recipient remains missing before cancellation" 0 (rows "beta");
+    Eio.Cancel.cancel (Eio.Promise.await owner_context) Exit;
+    (match Eio.Promise.await owner with
+     | Error (Eio.Cancel.Cancelled _) -> ()
+     | Error error -> raise error
+     | Ok _ -> fail "partial fanout owner cancellation must propagate");
+    let recovered=match send () with Ok receipt -> receipt
+      | Error error -> fail (Workspace_broadcast.broadcast_error_to_string error) in
+    check bool "idle retry finishes its projection invocation" true
+      (recovered.fanout_state=Workspace_broadcast.Fanout_finished);
+    check string "recovery uses retained request identity" active.request_id recovered.request_id;
+    check int "recovery uses original committed sequence" active.seq recovered.seq;
+    check int "accepted recipient is never duplicated" 1 (rows "alpha");
+    check int "cancelled remaining recipient is recovered exactly once" 1 (rows "beta"))
 ;;
 
 type first_write_end = Reject_first_write | Cancel_first_write
@@ -776,6 +829,8 @@ let () =
             test_fleet_projection_adds_no_queue_entry
         ; test_case "Broadcast retry recovers interrupted fleet projection" `Quick
             test_broadcast_retry_recovers_interrupted_fleet_projection
+        ; test_case "active retry survives cancelled partial fanout" `Quick
+            test_active_retry_survives_cancelled_partial_fanout
         ; test_case "primary refusal wakes a precommit Broadcast retry" `Quick
             test_primary_refusal_wakes_precommit_retry
         ; test_case "cancelled primary wakes a precommit Broadcast retry" `Quick

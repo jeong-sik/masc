@@ -81,10 +81,14 @@ let acknowledge ~path ~scope ~request receipt =
   | Some (selected,id),Some delivery ->
       (match field "status" delivery,field "request_id" delivery with
        | Some (`String "committed"),Some (`String received) when String.equal received id ->
-           transact ~path (fun pending ->
-             if List.assoc_opt (scope,selected) pending=Some id
-             then Some (event "acknowledged" scope selected id),Ok ()
-             else None,Ok ())
+           (match Option.bind (field "receipt" delivery) (field "fanout_state") with
+            | Some (`String ("not_started" | "active")) -> Ok ()
+            | Some (`String "finished") ->
+                transact ~path (fun pending ->
+                  if List.assoc_opt (scope,selected) pending=Some id
+                  then Some (event "acknowledged" scope selected id),Ok ()
+                  else None,Ok ())
+            | Some _ | None -> Error "Broadcast receipt has no valid fanout settlement")
        | Some (`String "committed"),_ -> Error "Broadcast receipt identity does not match the pending request"
        | _ -> Ok ())
   | _ -> Ok ()

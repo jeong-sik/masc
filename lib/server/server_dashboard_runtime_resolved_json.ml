@@ -78,7 +78,7 @@ let runtime_resolution_json ~now ~scope_label (rt : Runtime_instance.t) : Yojson
     ; "exact_slot_group", string_opt_json exact_slot_group
     ; "effective_max_context", `Int effective_max_context
     ; "max_context_source", `String (Runtime_instance.max_context_source_to_string source)
-    ; "max_output_tokens", int_opt_json (Runtime.max_output_tokens_of_runtime_id rt.id)
+    ; "max_output_tokens", int_opt_json (Runtime.max_output_tokens_of_runtime rt)
       (* The effort this binding declares. Bindings of one model that differ
          only in effort share provider, model and context, so without it the
          picker draws them as identical rows. [null] is an unset effort, not
@@ -92,7 +92,7 @@ let runtime_resolution_json ~now ~scope_label (rt : Runtime_instance.t) : Yojson
          accepted set. The key says which of the two it is; surfacing the
          other belongs to the detail view, which has room to say both. *)
     ; ( "declared_reasoning_effort"
-      , match Runtime.reasoning_effort_of_runtime_id rt.id with
+      , match rt.model.reasoning_effort with
         | Some effort -> `String (Llm_provider.Reasoning_effort.to_string effort)
         | None -> `Null )
     ; "is_local", `Bool (Runtime_instance.is_local_runtime rt)

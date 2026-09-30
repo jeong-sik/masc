@@ -1,0 +1,4 @@
+name = "keeper_candle_catalog"
+description = "List portrait accessories and their current prices in milli-Candle (1000 milli-Candle = 1 Candle). An unpriced item cannot be bought."
+additional_properties = false
+defer_loading = false

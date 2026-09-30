@@ -120,7 +120,7 @@ let with_workspace ~response_kind f =
       ; private_home = false
       ; allowed_paths = [] });
   (match Keeper_approval_queue.install_persistence ~base_path with
-   | Ok _ -> () | Error error -> fail (Keeper_approval_queue.install_error_to_string error));
+   | Ok _ -> () | Error error -> fail (Masc.Keeper_approval_queue_result.install_error_to_string error));
   (match Keeper_gate_mode.set config ~actor:"fixture" Keeper_gate_mode.Auto_judge with
    | Ok _ -> () | Error error -> fail error);
   let bin_dir = Filename.concat base_path "bin" in

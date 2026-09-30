@@ -207,7 +207,7 @@ type 'target reroute_decision = private
   | No_capable_runtime of { required : string list }
 (** Outcome of the pre-dispatch modality decision. ['target] is what a [Reroute]
     names: a runtime id for the capability-level decision, an already-resolved
-    [Runtime.t] for the keeper-dispatch decision. The type is [private]: other
+    [Runtime_instance.t] for the keeper-dispatch decision. The type is [private]: other
     modules match on these values but cannot build them, so every [Reroute] in
     the system came from a decision function in this module, which selects the
     target from a candidate set the assigned runtime was removed from. A reroute
@@ -239,7 +239,7 @@ val content_blocks_for_run :
     gating on a later text-only follow-up. *)
 
 val input_capabilities_of_runtime :
-  Runtime.t -> Llm_provider.Capabilities.capabilities
+  Runtime_instance.t -> Llm_provider.Capabilities.capabilities
 (** Effective input capabilities of a materialized runtime: provider caps overlaid
     with the model's declarations, constrained by the execution transport.
     Used by reroute, candidate projection, and image delegation. *)
@@ -251,9 +251,9 @@ val caps_admit_required_modalities :
     individual capability booleans. *)
 
 val media_candidates_of :
-  runtimes:Runtime.t list ->
+  runtimes:Runtime_instance.t list ->
   media_failover:string list ->
-  Runtime.t list
+  Runtime_instance.t list
 (** The vision runtimes, pure over their inputs: [media_failover] resolved
     against [runtimes] in declared order (ids that resolve to nothing are
     skipped). Ids are unique; the first occurrence wins. No capability or
@@ -261,18 +261,18 @@ val media_candidates_of :
     [input_capabilities_of_runtime]. An empty [media_failover] has no
     candidates. *)
 
-val media_candidates : unit -> Runtime.t list
+val media_candidates : unit -> Runtime_instance.t list
 (** [media_candidates_of] over the loaded runtime state
     ([Runtime.runtimes_and_media_failover]). The vision tool and the image
     readings made for a runtime that cannot take the image read this set. A
     keeper turn does not: its image reroute stays inside its lane. *)
 
 val media_walk :
-  candidates:Runtime.t list ->
+  candidates:Runtime_instance.t list ->
   ?checkpoint_messages:Agent_core.Types.message list ->
   ?initial_messages:Agent_core.Types.message list ->
   Agent_core.Types.content_block list ->
-  Runtime.t list
+  Runtime_instance.t list
 (** RFC-0440 walk for a run that carries media: the [candidates] whose effective
     input capabilities admit every modality the run requires (goal blocks plus
     the checkpoint and initial history), in [candidates] order. [[]] when the
@@ -280,22 +280,22 @@ val media_walk :
     order. *)
 
 val decide_modality_reroute_for_runtime_candidates :
-  assigned:Runtime.t ->
-  candidates:Runtime.t list ->
+  assigned:Runtime_instance.t ->
+  candidates:Runtime_instance.t list ->
   ?checkpoint_messages:Agent_core.Types.message list ->
   ?initial_messages:Agent_core.Types.message list ->
   Agent_core.Types.content_block list ->
-  Runtime.t reroute_decision
+  Runtime_instance.t reroute_decision
 (** Keeper-dispatch variant over an explicit candidate list. Preserves the
     caller-provided candidate order; the keeper driver passes its lane's
     candidates, so a reroute never leaves the lane. Removes [assigned] from [candidates] before
-    selecting, and returns the selected [Runtime.t] itself rather than its id, so
+    selecting, and returns the selected [Runtime_instance.t] itself rather than its id, so
     the caller dispatches to the runtime the decision picked without a second
     lookup. Required modalities are read from [blocks] together with
     [checkpoint_messages] and [initial_messages], so media already in a resumed
     checkpoint counts. *)
 
-val runtime_accepts_image_input : runtime:Runtime.t -> bool
+val runtime_accepts_image_input : runtime:Runtime_instance.t -> bool
 (** Image admission from the selected materialized runtime, without rereading
     a mutable registry. Includes model and execution transport capabilities. *)
 

@@ -1006,9 +1006,17 @@ let save_message_draft state =
           state.msg_drafts
       in
       let text = Buffer.contents state.msg_input in
+      let draft =
+        { draft_text = text
+        ; draft_attachments = state.msg_attachments
+        ; draft_references = state.msg_references
+        ; draft_attachments_since = state.msg_attachments_since
+        }
+      in
       state.msg_drafts <-
-        if String.equal text "" then other_drafts
-        else (keeper_name, text) :: other_drafts
+        if String.equal text "" && draft.draft_attachments = []
+           && draft.draft_references = [] then other_drafts
+        else (keeper_name, draft) :: other_drafts
 
 let recovered_paste_send_locked_for state keeper_name =
   match keeper_name with
@@ -1282,8 +1290,16 @@ let open_message_for_keeper ?(return_to = Keeper_chat_return_detail) state
   state.msg_return <- return_to;
   state.keeper_message_focus <- Right_pane;
   Buffer.clear state.msg_input;
-  List.assoc_opt keeper_name state.msg_drafts
-  |> Option.iter (Buffer.add_string state.msg_input);
+  (match List.assoc_opt keeper_name state.msg_drafts with
+   | None ->
+       state.msg_attachments <- [];
+       state.msg_references <- [];
+       state.msg_attachments_since <- None
+   | Some draft ->
+       Buffer.add_string state.msg_input draft.draft_text;
+       state.msg_attachments <- draft.draft_attachments;
+       state.msg_references <- draft.draft_references;
+       state.msg_attachments_since <- draft.draft_attachments_since);
   drain_queue ()
 
 (* Leaving puts the draft away, and a line held only for that compose
@@ -1317,15 +1333,18 @@ let clear_current_message_draft state =
 let consume_dispatched_message_draft state request =
   state.msg_drafts <-
     List.filter
-      (fun (keeper_name, text) ->
+      (fun (keeper_name, draft) ->
         not
           (String.equal keeper_name request.Keeper_chat.keeper_name
-           && String.equal text request.message))
+           && String.equal draft.draft_text request.message
+           && draft.draft_attachments = request.attachments
+           && draft.draft_references = request.references))
       state.msg_drafts;
   match state.msg_target_keeper_name with
   | Some keeper_name
     when String.equal keeper_name request.Keeper_chat.keeper_name
          && String.equal (Buffer.contents state.msg_input) request.message
+         && state.msg_attachments = [] && state.msg_references = []
          && not (recovered_paste_send_locked state) ->
       clear_current_message_draft state
   | Some _ | None -> save_message_draft state
@@ -18905,6 +18924,7 @@ and is loaded on demand through keeper_skill.
                  load_local_workspace_if_safe state base_path;
                  open_message_for_keeper ~return_to
                    state declared_name ~drain_queue:(fun () -> ());
+                 set_msg_scroll state 0;
                  state.view <- Keepers Keeper_message;
                  launch_keeper_history_load state ~mailbox:async_messages
                    ~keeper_name:declared_name;

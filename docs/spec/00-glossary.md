@@ -1501,9 +1501,11 @@ status: reference
   - 사용처 한정: Candle로 살 수 있는 것은 초상화 장신구(**Keeper Portrait**의 장비 아이템)뿐이다.
     도구, 스킬, 모델, 런타임 예산 등 다른 자원은 구매할 수 없다(헌법 불변식). 상점 구매와 착용 반영은
     RFC 단계적 구현에 따르며, 현재 원장 스키마에는 포함되지 않는다.
-  - 잔액 감쇠: 헌법에 따라 잔액은 시간이 지남에 따라 지수적으로 감소하며, 반감기는 설정(`half_life`)이 정한다.
-    원장에 기록된 과거 사실은 지워지지 않고 잔액만 시점 기준으로 계산된다. 이는 화폐 가치의 감쇠이며,
-    `no_wall_clock_death` 불변식의 유일한 명시적 예외다(Task·Goal·Board 상태는 만료시키지 않는다).
+  - 잔액 감쇠 규범: 헌법(`<candle>`, `no_wall_clock_death` 예외)은 잔액의 지수 감쇠를 요구한다.
+    현재 빌드의 잔액(`Candle_balance.of_events`)은 `Paid` 사실의 누적이며 시간 감쇠를 적용하지 않고,
+    반감기 설정 키는 아직 없다(RFC의 `HalfLifeSet` 이벤트 및 반감기 설정 계획).
+    원장에 기록된 과거 사실은 지워지지 않는 불변식을 유지하며, 이는 `no_wall_clock_death` 불변식의
+    유일한 명시적 예외 요구다(Task·Goal·Board 상태는 만료시키지 않는다).
   → [Candle_event](../../lib/candle/candle_event.mli) ·
   [Candle_balance](../../lib/candle/candle_balance.mli) ·
   [Candle_ledger](../../lib/candle_store/candle_ledger.mli) ·

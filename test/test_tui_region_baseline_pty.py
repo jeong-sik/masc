@@ -275,7 +275,8 @@ def interaction(served: region.ServedFixtures):
             body = "\n".join(region.body_row(rows, row, left=left, right=right)
                              for row in range(3, region.TERMINAL_ROWS - 1))
             for text in ("Identity", "Name: alpha", "Paused: no",
-                         "Portrait: unavailable: absent from live roster"):
+                         "Portrait: unavailable: absent from live roster",
+                         "Current failure", "Board attention", "Gate"):
                 if text not in body:
                     raise AssertionError(f"{where}: Info omitted {text!r}: {body!r}")
         if screen == "config":

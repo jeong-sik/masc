@@ -1867,7 +1867,7 @@ let test_invalid_elicitation_keeps_protocol_error () =
       change "requestedSchema" (`Assoc ["type", `String "array"; "properties", `Assoc []]) ]
 ;;
 
-let test_native_read_disables_host_shell_argv () =
+let test_client_argv_carries_posture_and_sub_agent_overrides () =
   List.iter (fun native ->
     let argv_path = Filename.temp_file "codex-native-argv-" ".txt" in
     Fun.protect ~finally:(fun () -> Sys.remove argv_path) (fun () ->
@@ -1890,8 +1890,11 @@ let test_native_read_disables_host_shell_argv () =
          | Runtime_native_tools.Native_read ->
            ["-c"; "features.shell_tool=false"; "-c"; "features.unified_exec=false"]
          | Native_full -> []
-         | Native_none -> fail "none is not part of this fixture") in
-      check (list string) "same process receives posture-scoped config overrides" expected argv))
+         | Native_none -> fail "none is not part of this fixture") @
+        (* The model catalog picks the version when only features.multi_agent
+           is off, so the switch that counts is [agents] enabled. *)
+        ["-c"; "agents.enabled=false"; "-c"; "features.multi_agent_v2=false"] in
+      check (list string) "same process receives the posture-scoped and sub-agent config overrides" expected argv))
     [Runtime_native_tools.Native_read; Runtime_native_tools.Native_full]
 ;;
 
@@ -3551,7 +3554,7 @@ let test_production_turn_records_its_keeper_as_the_failure_recorder () =
         | Some runtime -> runtime | None -> fail "the Codex runtime resolves" in
       recorded_by :=
         (match Runtime_candidate_backpressure.candidate_backpressure
-                 ~now:(Unix.gettimeofday ()) ~candidate:runtime.Runtime.candidate_backpressure with
+                 ~now:(Unix.gettimeofday ()) ~candidate:runtime.Runtime_instance.candidate_backpressure with
          | Some
              { Runtime_candidate_backpressure.failed_attempt =
                  Some (Runtime_candidate_backpressure.Failed_attempt { recorded_by; _ })
@@ -7025,8 +7028,8 @@ let () =
             test_elicitation_cancel_then_dynamic_tool
         ; test_case "MCP elicitation identity and form validation" `Quick
             test_invalid_elicitation_keeps_protocol_error
-        ; test_case "read posture disables native host shell only" `Quick
-            test_native_read_disables_host_shell_argv
+        ; test_case "read posture disables native host shell; no posture allows sub-agents" `Quick
+            test_client_argv_carries_posture_and_sub_agent_overrides
         ; test_case "failed turn keeps typed error fields" `Quick
             test_failed_turn_keeps_typed_error_fields
         ; test_case "failed turn uses official context error enum" `Quick

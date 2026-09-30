@@ -104,6 +104,32 @@ let test_claude_cli_snap_admits_minimal_as_low () =
     [ Effort.None_; Effort.Low; Effort.Medium; Effort.High; Effort.XHigh; Effort.Max ]
 ;;
 
+let test_claude_uncatalogued_ultra_is_admitted_before_argv () =
+  let requested = Map.clamp_reasoning_effort_to_catalog
+    ~model_id:(Some "masc-test-no-such-model") ~requested:(Some Effort.Ultra) in
+  Alcotest.(check string) "catalog miss retains Ultra for adapter admission"
+    "ultra" (label requested);
+  let command effort = Runtime_claude_code.command ~system_prompt_file:None
+    (Runtime_claude_code.default_config ~cwd:"/tmp") ~dynamic_tools:[]
+    ~reasoning_effort:effort ~session_mode:Runtime_claude_code.Start
+    ~session_id:"11111111-1111-4111-8111-111111111111" in
+  (match command requested with
+   | Error (Runtime_claude_code.Invalid_config _) -> ()
+   | Error error -> Alcotest.fail (Runtime_claude_code.error_to_string error)
+   | Ok _ -> Alcotest.fail "unadmitted Ultra must never reach Claude CLI argv");
+  let admitted = Option.map Runtime_claude_code.cli_admitted_reasoning_effort requested in
+  Alcotest.(check string) "Claude's CLI admission maps Ultra to Max" "max" (label admitted);
+  let argv = match command admitted with
+    | Ok argv -> argv
+    | Error error -> Alcotest.fail (Runtime_claude_code.error_to_string error) in
+  let rec effort_flag = function
+    | "--effort" :: value :: _ -> Some value
+    | _ :: rest -> effort_flag rest
+    | [] -> None in
+  Alcotest.(check (option string)) "admitted command sends the supported CLI effort"
+    (Some "max") (effort_flag argv)
+;;
+
 let test_codex_models_preserve_advertised_ultra () =
   List.iter
     (fun model_id ->
@@ -126,6 +152,8 @@ let () =
             "catalog clamp applies to anthropic rows"
             `Quick
             test_catalog_clamp_applies_to_anthropic_rows
+        ; Alcotest.test_case "uncatalogued Claude Ultra is admitted before argv" `Quick
+            test_claude_uncatalogued_ultra_is_admitted_before_argv
         ; Alcotest.test_case
             "claude cli snap admits minimal as low"
             `Quick

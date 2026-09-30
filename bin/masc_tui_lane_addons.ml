@@ -313,6 +313,11 @@ let selected_instance view = Option.bind view.snapshot (fun snapshot ->
            Option.bind declaration.instance_id (fun id ->
              List.find_opt (fun (instance : instance) -> instance.id=id) snapshot.instances))
        | Connections | Instances -> at_cursor snapshot.instances view.instance_cursor))
+let ordered_rows view snapshot =
+  rows_in_screen view snapshot
+  |> List.stable_sort (fun (_, (a : Row.row)) (_, (b : Row.row)) ->
+    let time = Float.compare a.observed_at b.observed_at in
+    if time=0 then String.compare a.id b.id else time)
 let open_selected_instance view =
   match view.snapshot with
   | None -> view
@@ -324,8 +329,15 @@ let open_selected_instance view =
       | Some (`Instance item) ->
           let next = {view with screen=Detail (item.id,item.incarnation); focus=Timeline;
             scroll=0; selected=[]; document_key=None} in
-          let row_cursor = match rows_in_screen next snapshot with
-            | (index, _) :: _ -> index | [] -> -1 in
+          let rows = ordered_rows next snapshot in
+          let declared = List.find_opt (fun (_, (row : Row.row)) ->
+            List.exists (fun (reading : Masc.Lane_addon_presentation.reading) ->
+              String.equal row.lane_id (item.id ^ "/" ^ reading.lane_id))
+              item.display.readings) rows in
+          let row_cursor = match declared, rows with
+            | Some (index, _), _ -> index
+            | None, (index, _) :: _ -> index
+            | None, [] -> -1 in
           {next with row_cursor}
       | None -> view
 let evidence_target view =
@@ -514,11 +526,6 @@ let action_lines view = match view.last_action with
               "  requester " ^ receipt.requester ^ " · executor " ^ Option.value ~default:"unknown" receipt.executor]
               @ (match receipt.detail with None -> [] | Some detail -> ["  " ^ detail])
               @ (match receipt.result with None -> [] | Some result -> String.split_on_char '\n' (Yojson.Safe.pretty_to_string result)))
-let ordered_rows view snapshot =
-  rows_in_screen view snapshot
-  |> List.stable_sort (fun (_, (a : Row.row)) (_, (b : Row.row)) ->
-    let time = Float.compare a.observed_at b.observed_at in
-    if time=0 then String.compare a.id b.id else time)
 let move_observation view delta =
   match view.snapshot with
   | None -> view
@@ -535,7 +542,7 @@ let move_record view delta =
   match view.snapshot with
   | None -> view
   | Some snapshot ->
-      let rows = rows_in_screen view snapshot in
+      let rows = ordered_rows view snapshot in
       let rec find position = function
         | [] -> -1
         | (index, _) :: rest -> if index=view.row_cursor then position else find (position+1) rest in
@@ -660,7 +667,7 @@ let technical_lines ?(height=24) ?(failed_note = "") ~width view =
     Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
       (Masc.Tui_terminal_text.sanitize_terminal_text text) in
   let raw_row (row : Row.row) =
-    [row.title; "Row " ^ row.id;
+    [row.title; "Row " ^ row.id; "Lane " ^ row.lane_id;
      "Observed " ^ utc_stamp row.observed_at ^ " UTC";
      "Subject " ^ row.subject_id]
     @ Option.to_list (Option.map (fun actor -> "Actor " ^ actor) row.actor)
@@ -764,18 +771,19 @@ let instance_controls (instance : instance) = match instance.phase with
 let overview_hints view =
   if view.help_open then "Esc:close help"
   else if Option.is_some view.document_key then
-    "?:help  Esc:back  E:edit  s:save  l:reload  u/U:revision"
+    "?:help  Esc:back  E:edit  s:save  l:reload  u/U:revision  Colon:palette  A:command"
   else match view.screen with
   | Overview when view.presentation=Technical && view.focus=Configurations
       && Option.is_none view.document_key ->
       "?:help  Esc:back"
       ^ (if Option.is_some (selected_source_path view) then "  E:edit TOML" else "")
+      ^ "  Colon:palette  A:command"
       ^ (if view.loading then "  Reading …" else "  r:refresh")
   | Overview ->
-      "?:help  Esc:back  Enter:open  i:install  n:new  S:subs"
+      "?:help  Colon:palette  Esc:back  Enter:open  i:install  n:new  S:subs  A:command"
       ^ (if view.loading then "  Reading …" else "  r:refresh")
   | Detail _ ->
-      "?:help  Esc:back  1-4:section  Tab:next section  j/k:move  " ^
+      "?:help  Colon:palette  Esc:back  A:command  1-4:section  Tab:next section  j/k:move  " ^
       (match selected_instance view with None -> "" | Some instance -> instance_controls instance ^ "  ") ^
       "D:raw  J/K:scroll"
       ^ (if view.loading then "  Reading …" else "  r:refresh")
@@ -850,6 +858,22 @@ let reading_summary fields =
         Some (key ^ "=" ^ Yojson.Safe.to_string value)
     | _ -> None) |> String.concat " · "
 
+let result_lines (instance : instance) (row : Row.row) =
+  let module P = Masc.Lane_addon_presentation in
+  let readings = List.filter (fun (reading : P.reading) ->
+    String.equal row.lane_id (instance.id ^ "/" ^ reading.lane_id))
+    instance.display.readings in
+  match readings with
+  | [] ->
+      let summary = reading_summary row.fields in
+      if summary="" then [] else ["  " ^ summary]
+  | readings -> List.concat_map (fun (reading : P.reading) ->
+      let rendered = match P.render reading (`Assoc row.fields) with
+        | Ok text -> text
+        | Error detail -> reading.label ^ ": unavailable · " ^ detail in
+      Masc_tui_text_block.lines rendered
+      |> List.map (fun line -> "  " ^ line)) readings
+
 let overview_lines ~width view =
   let wrap text = Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
     (Masc.Tui_terminal_text.sanitize_terminal_text text) in
@@ -878,7 +902,7 @@ let overview_lines ~width view =
           configuration_summary active failed
           (if Option.is_some view.snapshot_read_error then " · STALE" else "") in
         let entries = overview_entries snapshot in
-        let window = max 0 (view.instance_cursor - 4) in
+        let window = max 0 (view.instance_cursor - 1) in
         let items = List.mapi (fun index item -> index,item) entries
           |> List.filter (fun (index,_) -> index >= window && index < window + 9) in
         let empty = match snapshot.configuration with
@@ -913,7 +937,11 @@ let overview_lines ~width view =
                         ("D:full · " ^ detail)
                       |> List.map (fun line -> "    " ^ line)
                   | _ -> [] in
-                [lead; controls] @ detail) items
+                [lead]
+                @ (if index=view.instance_cursor then
+                     Option.to_list (Option.map (fun text -> "    " ^ text) item.display.description)
+                   else [])
+                @ [controls] @ detail) items
   in
   List.concat_map wrap ([ overview_hints view; "" ]
     @ diagnostic_lines view @ content @ action_lines view)
@@ -921,14 +949,15 @@ let overview_lines ~width view =
 let help_lines = [
   "Lane Add-ons keys · Esc:close";
   "List: j/k select · Enter open · i install · n new TOML";
-  "Detail: 1 Activity · 2 Links · 3 Installation · 4 Records · Tab next";
+  "Detail: 1 Results · 2 Links · 3 Installation · 4 Records · Tab next";
   "Both: ?:help · Esc back · q back · r refresh · J/K scroll";
   "Actions: o observe/retry · d remove/cleanup · a advertised actions";
   "Actions: t check last request · D raw details · f flow";
   "Installation: E edit · s save · l reload · u/U revision";
   "Links: S subscriptions · Left/Right lane";
   "Records: Space mark row · e export marked rows";
-  "Advanced: : command (including :act)";
+  "Navigation: : command palette · Esc returns to Lane Add-ons";
+  "Advanced: A command (including act)";
 ]
 
 let detail_lines ~width view =
@@ -940,20 +969,30 @@ let detail_lines ~width view =
       let tab focus label = if view.focus=focus then "[" ^ label ^ "]" else label in
       let header = item.title ^ " · " ^ phase_label item.phase in
       let tabs = String.concat "  " [
-        tab Timeline "1 Activity"; tab Connections "2 Links";
+        tab Timeline "1 Results"; tab Connections "2 Links";
         tab Configurations "3 Installation"; tab Rows "4 Records"] in
-      let rows = List.map snd (rows_in_screen view snapshot) in
+      let rows = List.map snd (ordered_rows view snapshot) in
+      let selected = selected_row view in
       let body = match view.focus with
       | Timeline | Instances ->
           if rows=[] then ["No observations yet. o:observe this Add-on."]
-          else ["Horizontal Lane timeline"]
-            @ timeline_lines ~width ~instances:[item] ?selected:(selected_row view) rows
-            @ [""; "Observations"]
-            @ List.concat_map (fun (row : Row.row) ->
-                let summary = reading_summary row.fields in
-                [row.title ^ " · " ^ row.lane_id;
-                 "  " ^ utc_stamp row.observed_at ^ " UTC" ^
-                 (if summary="" then "" else " · " ^ summary)]) rows
+          else Option.to_list item.display.description
+            @ [""; "Results"]
+            @ (match selected with
+               | None -> ["Choose a result with j/k."; ""]
+               | Some row ->
+                   ["> " ^ row.title; "  Lane " ^ row.lane_id; "  " ^ utc_stamp row.observed_at ^ " UTC"]
+                   @ result_lines item row @ [""])
+            @ (let other_rows = List.filter (fun (row : Row.row) ->
+                 match selected with
+                 | None -> true
+                 | Some selected -> not (String.equal selected.id row.id)) rows in
+               if other_rows=[] then [] else
+                 ["Other results · j/k to select"]
+                 @ List.map (fun (row : Row.row) -> "  " ^ row.title) other_rows
+                 @ [""])
+            @ ["Activity timeline"]
+            @ timeline_lines ~width ~instances:[item] ?selected rows
             @ (if snapshot.output.coverage=[] then [] else [""; "Coverage for this slice"])
             @ List.map (fun (source : Row.coverage) ->
                 source.source_id ^ " · " ^ (if source.complete then "complete" else "PARTIAL") ^
@@ -988,7 +1027,7 @@ let detail_lines ~width view =
           if rows=[] then ["No observations yet."]
           else List.concat_map (fun (row : Row.row) ->
             [(if Option.fold ~none:false ~some:(fun (selected : Row.row) -> selected.id = row.id)
-                 (selected_row view) then "> " else "  ")
+                 selected then "> " else "  ")
              ^ (if List.mem row.id view.selected then "[selected] " else "") ^ row.title;
              "Row " ^ row.id;
              Yojson.Safe.pretty_to_string (`Assoc row.fields)]

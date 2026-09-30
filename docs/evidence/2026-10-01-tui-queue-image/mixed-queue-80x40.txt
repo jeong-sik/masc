@@ -1,0 +1,40 @@
+ Dashboard  Work  ▸Keepers  Usage  Board  Workspace  System
+
+   Keepers ▸ alpha ▸ chat                                                       
+ ────────────────────────────────────────────────────────────────────────────── 
+  ┄┄ 2026-10-01 · 01:00 ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄  
+       01:10 ▶ YOU          queued-one                                          
+             ▶ YOU          queued-two                                          
+             ○ STATUS     │ Update accepted; stopping the observed turn before  
+                          │ continuing                                          
+             ○ STATUS     │ Update accepted; stopping the observed turn before  
+                          │ continuing                                          
+             ▶ YOU          NEXT 1                                              
+                            local-three                                         
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+ ────────────────────────────────────────────────────────────────────────────── 
+    (waiting to start tui-01..a5bfd4e658e8 · 4s…)                               
+    ◒ autonomous · 5s · waiting for cooperative settl… · Esc stops it · /queue  
+    Latest output: Atomic fixture ready                                         
+    Queue (3 pending) · auto-next:off · Ctrl-T:queue                            
+    2 queued at Keeper · /queue                                                 
+    Local NEXT: "local-three"                                                   
+    History load failed · /errors                                               
+    Memory load failed · /errors                                                
+    ○ WAITING TO START · queued · 2 messages in the keeper's queue · 3s         
+    >                                                                           
+                                                                                
+ alpha · - unread AUTO · gate: not loaded · —  Context unavailable · Ctrl-X     
+  Input retained; waiting for …  Enter:send (1 local)  Esc:stop current turn  …?

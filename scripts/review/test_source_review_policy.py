@@ -11,19 +11,38 @@ HERE = Path(__file__).resolve().parent
 HEAD = 'a' * 40
 OTHER = 'b' * 40
 FAKE = r'''#!/usr/bin/env python3
-import json, os, pathlib, subprocess, sys
+import json, os, pathlib, re, subprocess, sys
 state = json.loads(pathlib.Path(os.environ['REVIEW_FIXTURE']).read_text())
 args = sys.argv[1:]
 endpoint = next((a for a in args if a.startswith('repos/') or a == 'user'), '')
 log = pathlib.Path(os.environ['REVIEW_CALLS'])
-with log.open('a') as f: f.write(('POST ' if '-X' in args and args[args.index('-X')+1]=='POST' else '') + endpoint + '\n')
+with log.open('a') as f: f.write((args[args.index('-X')+1]+' ' if '-X' in args else '') + endpoint + '\n')
+fixture = state
+match = re.search(r'/(?:pulls|issues)/(\d+)', endpoint)
+number = int(match.group(1)) if match else 1
+state = dict(state, **state.get('prs', {}).get(str(number), {}))
 head = state['head']
+if '/actions/runs?' in endpoint:
+    state = next((dict(fixture, **item) for item in fixture.get('prs',{}).values() if item['head'] in endpoint), state)
+    head = state['head']
 if args[:2] == ['pr','list']:
     data = [{'number':1,'author':{'login':'writer'},'baseRefName':state.get('base','stack/parent'),'headRefOid':head,'headRefName':state.get('branch','stack/change'),'isDraft':False},{'number':2,'author':{'login':'parent-writer'},'baseRefName':'main','headRefOid':'d'*40,'headRefName':'stack/parent','isDraft':True}]
-elif endpoint.endswith('/pulls/1'):
+elif re.search(r'/pulls/\d+$', endpoint):
     count = log.read_text().splitlines().count(endpoint)
     current = state.get('moved', head) if count >= state.get('move_after', 100000) else head
-    data = {'state':'open','draft':False,'merged':False,'user':{'login':state.get('author','writer')},'base':{'ref':state.get('base','stack/parent'),'sha':'c'*40},'head':{'sha':current,'ref':state.get('branch','stack/change')}}
+    data = {'state':state.get('pr_state','open'),'draft':state.get('draft',False),'merged':state.get('merged',False),'user':{'login':state.get('author','writer')},'base':{'ref':state.get('base','stack/parent'),'sha':'c'*40},'head':{'sha':current,'ref':state.get('branch','stack/change')}}
+    if count >= state.get('base_move_after', 100000): data['base']['sha'] = 'f'*40
+    if fixture.get('native'):
+        members = fixture.get('members', [2,1,3])
+        data['stack'] = {'id':99,'number':10,'position':members.index(number)+1,'size':len(members),'base':{'ref':fixture.get('stack_base','main'),'sha':'c'*40}}
+elif endpoint.endswith('/stacks/10'):
+    members = fixture.get('members', [2,1,3])
+    if fixture.get('membership_moves') and log.read_text().splitlines().count(endpoint) > 1:
+        members = [1,2,3]
+    data = {'id':99,'number':10,'base':{'ref':fixture.get('stack_base','main')},'pull_requests':[]}
+    for n in members:
+        item = dict(fixture, **fixture.get('prs',{}).get(str(n),{}))
+        data['pull_requests'].append({'number':n,'state':item.get('pr_state','open'),'head':{'sha':item['head']}})
 elif endpoint == 'user': data = {'login':'reviewer'}
 elif '/actions/runs?' in endpoint:
     reads = sum('/actions/runs?' in row for row in log.read_text().splitlines())
@@ -53,7 +72,7 @@ elif '/reviews/' in endpoint:
     rid = int(endpoint.rsplit('/',1)[1])
     data = state.get('posted') if rid == 99 else next(r for r in state.get('reviews',[]) if r['id']==rid)
 elif endpoint.endswith('/merge-async'):
-    print(json.dumps({'merged':True})); sys.exit(0)
+    print(json.dumps({'status':'pending','details':{'uuid':'fixture-request'}})); sys.exit(0)
 else:
     print('Unexpected API ' + endpoint, file=sys.stderr); sys.exit(3)
 query = args[args.index('--jq')+1]
@@ -216,5 +235,118 @@ class SourceReviewPolicy(unittest.TestCase):
         self.state.update(branch='release/v1',reviews=[self.review(run=True)])
         self.assert_ok(self.invoke('merge-guard.sh','--check','--run','42'))
         self.assertIn('/actions/',self.calls.read_text())
+
+
+    def native_stack(self):
+        lower_review = self.review()
+        lower_review['body'] = lower_review['body'].replace(HEAD, OTHER)
+        self.state.update(native=True,base='stack/parent',reviews=[self.review()],
+                          prs={'2':{'head':OTHER,'base':'main','branch':'stack/parent','reviews':[lower_review]},
+                               '3':{'head':'d'*40,'base':'stack/change','branch':'stack/upper','reviews':[],'draft':True}})
+
+    def test_native_middle_admits_lower_and_selected_without_upper_review(self):
+        self.native_stack()
+        result = self.invoke('merge-guard.sh','--check')
+        self.assert_ok(result)
+        self.assertIn('WOULD MERGE #2, #1 through #1', result.stdout)
+        calls = self.calls.read_text()
+        self.assertIn('/pulls/2/reviews', calls)
+        self.assertNotIn('/pulls/3/reviews', calls)
+        self.assertNotIn('PUT ', calls)
+        self.assertNotIn('POST ', calls)
+        self.assertNotIn('/actions/', calls)
+
+    def test_native_lower_blockers_prevent_write(self):
+        for change in ({'reviews':[]}, {'reviews':[self.review(state='CHANGES_REQUESTED')]},
+                       {'draft':True}, {'comments':[{'created_at':'2026-10-01T00:00:00Z',
+                           'body':f'verdict: HOLD head: {OTHER} by: independent','author_association':'MEMBER'}]}):
+            with self.subTest(change=change):
+                self.native_stack()
+                self.state['prs']['2'].update(change)
+                result = self.invoke('merge-guard.sh')
+                self.assertEqual(result.returncode,2,result.stdout+result.stderr)
+                self.assertNotIn('PUT ', self.calls.read_text())
+
+    def test_native_lower_head_drift_prevents_write(self):
+        self.native_stack()
+        self.state['prs']['2'].update(moved='e'*40,move_after=8)
+        result = self.invoke('merge-guard.sh')
+        self.assertEqual(result.returncode,2,result.stdout+result.stderr)
+        self.assertNotIn('PUT ', self.calls.read_text())
+
+    def test_native_lower_base_drift_prevents_write(self):
+        self.native_stack()
+        self.state['prs']['2']['base_move_after'] = 8
+        result = self.invoke('merge-guard.sh')
+        self.assertEqual(result.returncode,2,result.stdout+result.stderr)
+        self.assertNotIn('PUT ', self.calls.read_text())
+
+    def test_native_lower_release_requires_its_own_ci(self):
+        self.native_stack()
+        review = self.review(run=True)
+        review['body'] = review['body'].replace(HEAD, OTHER)
+        self.state['prs']['2'].update(branch='release/v1',ci='failure',reviews=[review])
+        result = self.invoke('merge-guard.sh')
+        self.assertEqual(result.returncode,2,result.stdout+result.stderr)
+        self.assertIn('/actions/runs?', self.calls.read_text())
+        self.assertNotIn('PUT ', self.calls.read_text())
+
+    def test_native_custom_base_and_merged_lower_member(self):
+        self.native_stack()
+        self.state['stack_base'] = 'trunk'
+        self.state['prs']['2'].update(base='trunk',pr_state='closed',merged=True,reviews=[])
+        result = self.invoke('merge-guard.sh','--check')
+        self.assert_ok(result)
+        self.assertIn('WOULD MERGE #1 through #1', result.stdout)
+        self.assertNotIn('/pulls/2/reviews', self.calls.read_text())
+
+    def test_native_closed_unmerged_lower_member_prevents_write(self):
+        for args in (('--check',), ()):
+            with self.subTest(args=args):
+                self.native_stack()
+                self.state['prs']['2'].update(pr_state='closed', merged=False, reviews=[])
+                result = self.invoke('merge-guard.sh', *args)
+                self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                self.assertIn('#2 is closed without merging', result.stderr)
+                self.assertNotIn('WOULD MERGE', result.stdout)
+                calls = self.calls.read_text()
+                self.assertNotIn('PUT ', calls)
+                self.assertNotIn('POST ', calls)
+
+    def test_native_closed_unmerged_upper_member_is_outside_scope(self):
+        self.native_stack()
+        self.state['prs']['3'].update(pr_state='closed', merged=False)
+        result = self.invoke('merge-guard.sh', '--check')
+        self.assert_ok(result)
+        self.assertIn('WOULD MERGE #2, #1 through #1', result.stdout)
+        calls = self.calls.read_text()
+        self.assertNotIn('/pulls/3', calls)
+        self.assertNotIn('PUT ', calls)
+        self.assertNotIn('POST ', calls)
+
+    def test_native_membership_drift_prevents_write(self):
+        self.native_stack()
+        self.state['membership_moves'] = True
+        result = self.invoke('merge-guard.sh')
+        self.assertEqual(result.returncode,2,result.stdout+result.stderr)
+        self.assertNotIn('PUT ', self.calls.read_text())
+
+    def test_native_async_acceptance_is_receipt_not_completion(self):
+        self.native_stack()
+        result = self.invoke('merge-guard.sh')
+        self.assert_ok(result)
+        self.assertIn('ASYNC MERGE RECEIPT for #2, #1', result.stdout)
+        self.assertIn('fixture-request', result.stdout)
+        self.assertIn('PUT repos/team/repo/pulls/1/merge-async', self.calls.read_text())
+        self.assertNotIn('PUT repos/team/repo/pulls/2', self.calls.read_text())
+
+    def test_native_queue_reports_scope_not_parent_wait(self):
+        self.native_stack()
+        self.fixture.write_text(json.dumps(self.state))
+        result = subprocess.run(['bash',str(HERE/'queue-ledger.sh'),'--repo','team/repo'],
+                                env=self.env,text=True,capture_output=True)
+        self.assert_ok(result)
+        self.assertIn('merge native stack through #1', result.stdout)
+        self.assertNotIn('parent #2', result.stdout)
 
 if __name__=='__main__': unittest.main()

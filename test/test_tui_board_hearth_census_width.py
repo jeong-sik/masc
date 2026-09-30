@@ -8,6 +8,8 @@ import test_tui_keyboard_input as h
 # acting pane draw nothing the scenario waits for; the boundary widths below
 # are built from the frame's margin and the pane's narrow width.
 SOURCE_MODULES = (
+    "bin/masc_tui_render_board.ml",
+    "bin/masc_tui_render_board.mli",
     "bin/masc_tui_render.ml",
     "bin/masc_tui_frame.ml",
     "bin/masc_tui_acting_pane.ml",

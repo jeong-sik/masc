@@ -170,6 +170,12 @@ let test_many_trace_failures_keep_navigation_and_full_reading () =
            overview.Pane.targets);
       List.iter (fun line -> check int "narrow rows stay fitted" cols (width line)) overview.Pane.rows)
     [8, 42; 3, 30];
+  let compact = Pane.lines ~rows:3 ~cols:30 ~scroll:0 input in
+  let compact_scrolled = Pane.lines ~rows:3 ~cols:30 ~scroll:1 input in
+  check int "folding preserves the full body's scroll range"
+    compact.Pane.scroll_max compact_scrolled.Pane.scroll_max;
+  check bool "one-row viewport still scrolls through failures" true
+    (List.exists (fun line -> contains "Trace unavailable:" (text line)) compact_scrolled.Pane.rows);
   let reading = Pane.lines ~rows:8 ~cols:90 ~scroll:1 input in
   check bool "full failure reasons stay scrollable" true
     (List.exists (fun line -> contains "unbooted-01 · reason-01" (text line)) reading.Pane.rows)

@@ -35,7 +35,7 @@ def run(executable):
             end = output.rfind(h.FRAME_END)
             rows = h.screen_rows(bytes(output[:end + len(h.FRAME_END)]))
             for task_id, status in ((b"1]", b"todo"),
-                                    (b"2]", b"verify" if width == 30 else b"awaiting_verification")):
+                                    (b"2]", b"verify" if width <= 40 else b"awaiting_verification")):
                 row = rows[h.screen_row_of(rows, task_id)]
                 if status not in row or b"!" not in row:
                     raise AssertionError(f"state or priority lost at {width} columns: {row!r}")

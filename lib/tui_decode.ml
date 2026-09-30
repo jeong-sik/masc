@@ -12331,3 +12331,40 @@ let play_revoke_http_error ~status_code ~body =
   | Ok detail -> Printf.sprintf "%s (HTTP %d: controller release failed)"
       (Tui_terminal_text.sanitize_terminal_text detail) status_code
   | Error _ -> http_status_error ~status_code ~body
+
+(* The play routes refuse with [{error: <code>, message: <sentence>}] and add
+   what is missing ([missing]) or who holds the name ([taken_by]) as a further
+   field. [http_status_error] reads only [error], which is the code, and would
+   leave the operator with "HTTP 409: not_ready". A refusal about the
+   credential (401, 403) is worded where the credential is known, a status
+   that is not a client refusal is not a refusal, and a body with no sentence
+   in it has nothing to add, so all three answer [None]. *)
+let play_invite_refusal ~status_code ~body =
+  if status_code < 400 || status_code >= 500 || status_code = 401 || status_code = 403
+  then None
+  else (
+    match Yojson.Safe.from_string body with
+    | exception Yojson.Json_error _ -> None
+    | `Assoc fields ->
+      let text_of = function
+        | `String value when String.trim value <> "" ->
+          Some (sanitize_terminal_text (String.trim value))
+        | `String _ | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _ ->
+          None
+      in
+      let text field = Option.bind (List.assoc_opt field fields) text_of in
+      let gaps =
+        match List.assoc_opt "missing" fields with
+        | Some (`List gaps) -> List.filter_map text_of gaps
+        | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _) | None -> []
+      in
+      Option.map
+        (fun sentence ->
+          let details =
+            (if gaps = [] then [] else [ "missing: " ^ String.concat ", " gaps ])
+            @ Option.to_list (Option.map (fun holder -> "held by a " ^ holder) (text "taken_by"))
+          in
+          Printf.sprintf "HTTP %d: %s%s" status_code sentence
+            (if details = [] then "" else " (" ^ String.concat "; " details ^ ")"))
+        (text "message")
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None)

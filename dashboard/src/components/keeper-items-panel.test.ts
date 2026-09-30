@@ -15,6 +15,7 @@ import {
   executionWorkspaceAuthority, hydrateExecutionSnapshot, invalidateExecutionSnapshotGeneration,
   resetExecutionSnapshotGeneration, serverStatus,
 } from '../store'
+import { setStoredToken, clearStoredToken } from '../api/core'
 import { parseKeeperItems, type KeeperItemsReading } from '../api/schemas/keeper-items'
 
 const keeper = (name: string, head = 'crown') => ({ name, portrait: { state: 'ready', equipment: {
@@ -58,7 +59,7 @@ beforeEach(() => {
   observeWorkspace('/fixture/workspace-a')
 })
 
-afterEach(() => { cleanup(); vi.resetAllMocks() })
+afterEach(() => { cleanup(); clearStoredToken(); vi.resetAllMocks() })
 
 describe('Keeper Item tab', () => {
   it('withdraws accounts across same-project A/B/A and refuses the first A read after returning', async () => {
@@ -145,6 +146,42 @@ describe('Keeper Item tab', () => {
     expect(executionWorkspaceAuthority.peek()).not.toBe(beforeReconnect)
     expect(await screen.findByText('Candle 기능이 꺼져 있습니다.')).toBeTruthy()
     expect(fetchKeeperItems).toHaveBeenCalledTimes(4)
+  })
+
+  it('withdraws old accounts and rejects old-token replies without a WebSocket', async () => {
+    const oldTokenRead = pendingAccount()
+    const loggedOutRead = pendingAccount()
+    const replacementRead = pendingAccount()
+    setStoredToken('fixture-token-a')
+    fetchKeeperItems.mockResolvedValueOnce(account(['crown'], '200'))
+      .mockReturnValueOnce(oldTokenRead.promise)
+      .mockReturnValueOnce(loggedOutRead.promise)
+      .mockReturnValueOnce(replacementRead.promise)
+    render(html`<${KeeperItemsPanel} keeper=${keeper('rondo')} />`)
+    expect(await screen.findByText('보유 1 / 18개')).toBeTruthy()
+    const workspace = executionWorkspaceAuthority.peek()
+    fireEvent.click(screen.getByRole('button', { name: '새로고침' }))
+    await waitFor(() => expect(fetchKeeperItems).toHaveBeenCalledTimes(2))
+    await act(async () => {
+      clearStoredToken()
+      // Resolve before effect cleanup: token admission must reject this reply.
+      oldTokenRead.resolve(account(['crown', 'beanie', 'book'], '900'))
+      await oldTokenRead.promise
+    })
+    await waitFor(() => expect(fetchKeeperItems).toHaveBeenCalledTimes(3))
+    expect(executionWorkspaceAuthority.peek()).toBe(workspace)
+    expect(screen.queryByText(/보유/)).toBeNull()
+    expect(screen.queryByText('0.800 Candle')).toBeNull()
+    await act(async () => { setStoredToken('fixture-token-b') })
+    await waitFor(() => expect(fetchKeeperItems).toHaveBeenCalledTimes(4))
+    await act(async () => {
+      loggedOutRead.reject(new Error('previous credential failure'))
+      await loggedOutRead.promise.catch(() => {})
+    })
+    expect(screen.queryByRole('alert')).toBeNull()
+    await act(async () => { replacementRead.resolve(account(['book'], '400')) })
+    expect(await screen.findByText('0.400 Candle')).toBeTruthy()
+    expect(screen.queryByText('0.900 Candle')).toBeNull()
   })
 
   it('shows observed balance, prices, ownership and equipment', async () => {

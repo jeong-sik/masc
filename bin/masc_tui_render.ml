@@ -14954,6 +14954,126 @@ let prompt_catalog_status_row prompts =
   | Masc_tui_fetched.Failed detail -> Some (Theme.bad (), Terminal_text.single_line detail)
 ;;
 
+let prompts_detail_layout state ~rows ~error_rows =
+  let fixed_rows = if state.prompts_show_runtime_assets then 9 else 8 in
+  let combined = max 1 (rows - fixed_rows - error_rows) in
+  let list_height = min 8 (combined / 3) in
+  (list_height, max 1 (combined - list_height))
+
+let prompts_detail_lines (state : state) ~cols =
+  let prompts = Masc_tui_fetched.view_for ~equal:Unit.equal state.prompts ~key:() in
+  let wrap text =
+    Message_layout.wrap_body ~max_cells:(max 1 (cols - 6))
+      ~sanitize:Terminal_text.single_line text
+  in
+  let body text =
+    Message_layout.wrap_body ~markdown:document_markdown
+      ~max_cells:(max 1 (cols - 6)) ~sanitize:Terminal_text.single_line text
+  in
+  let field name text = name ^ ": " ^ Terminal_text.single_line text in
+  let status = match prompt_catalog_status_row prompts with
+    | None -> [] | Some (_, text) -> wrap text
+  in
+  let document = match Masc_tui_fetched.value prompts with
+    | None -> wrap "선택한 프롬프트가 없습니다"
+    | Some snapshot when state.prompts_show_runtime_assets ->
+        let assets = snapshot.Tui_decode.ps_runtime_assets in
+        let selected = List.nth_opt assets
+            (max 0 (min state.prompts_cursor (List.length assets - 1))) in
+        (match selected with
+         | None -> wrap "런타임 프롬프트 자산이 없습니다"
+         | Some asset ->
+             wrap "이 자산은 registry override·편집 대상이 아닙니다"
+             @ body asset.pra_value
+             @ List.concat_map wrap
+                 [field "자산" asset.pra_path;
+                  field "소스" (if asset.pra_file_exists then "런타임 파일" else "누락");
+                  field "파일" asset.pra_file_path])
+    | Some snapshot ->
+        let rows = Tui_decode.prompt_rows_for_operator
+            ~show_fragments:state.prompts_show_fragments snapshot in
+        let selected = List.nth_opt rows
+            (max 0 (min state.prompts_cursor (List.length rows - 1))) in
+        (match selected with
+         | None -> wrap "선택한 프롬프트가 없습니다"
+         | Some row ->
+             let notices =
+               match List.find_opt
+                       (fun (entry : Tui_decode.held_back_override) ->
+                         String.equal entry.hbo_key row.pr_key)
+                       snapshot.ps_held_back with
+               | None -> []
+               | Some entry ->
+                   List.concat_map wrap
+                     [Printf.sprintf "⊘ 적용 안 됨 · 저장된 오버라이드 %d바이트가 그대로 있습니다" entry.hbo_bytes;
+                      entry.hbo_reason;
+                      "그 변수를 빼고 같은 키를 다시 저장하면 적용됩니다"]
+             in
+             let moved = if row.pr_override_default_moved then
+                 wrap "△ 기본 프롬프트가 이 오버라이드를 쓴 뒤에 바뀌었습니다 · 오버라이드는 그대로 적용 중이니 현재 기본값과 한 번 대조하세요"
+               else []
+             in
+             let actual_input =
+               if not (String.equal row.pr_category "librarian") then []
+               else if state.prompts_librarian_input_loading
+                       && not (Option.exists
+                            (fun (key, _) -> String.equal key row.pr_key)
+                            state.prompts_librarian_input) then
+                 ["최근 실제 Librarian 입력"; "(Admin 실행 상세를 불러오는 중...)"]
+               else match state.prompts_librarian_input_error with
+                 | Some detail -> ["최근 실제 Librarian 입력"; "불러올 수 없음: " ^ Terminal_text.single_line detail]
+                 | None ->
+                     (match state.prompts_librarian_input with
+                      | Some (key, lines) when String.equal key row.pr_key -> lines @ [""]
+                      | Some _ | None -> [])
+             in
+             let source = match row.pr_source with
+               | Tui_decode.Prompt_override -> "override 사용 · MD는 기본값"
+               | Tui_decode.Prompt_file -> "MD 파일 사용"
+               | Tui_decode.Prompt_missing -> "없음"
+             in
+             let contract =
+               if String.equal row.pr_category "librarian" then
+                 wrap "입력: Keeper 지침 | 현재 기억 | 제한된 대화 | 상대 관측 | 사실 최대 바이트"
+               else []
+             in
+             notices @ moved @ List.concat_map wrap actual_input
+             @ wrap "유효 템플릿 본문" @ body row.pr_effective
+             @ List.concat_map wrap
+                 [field "키" row.pr_key; field "소스" source;
+                  field "파일" row.pr_file_path; field "분류" row.pr_category;
+                  field "설명" row.pr_description;
+                  field "템플릿 변수" (match row.pr_template_variables with
+                    | [] -> "없음" | variables -> String.concat " | " variables);
+                  field "읽기" (match row.pr_operator_surface with
+                    | Tui_decode.Prompt_primary -> "주 프롬프트"
+                    | Tui_decode.Prompt_fragment -> "내부 조각")]
+             @ contract)
+  in
+  status @ document
+
+let prompts_detail_viewport (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let prompts = Masc_tui_fetched.view_for ~equal:Unit.equal state.prompts ~key:() in
+  let error_rows = if Option.is_some (prompt_catalog_status_row prompts) then 1 else 0 in
+  let _, height = prompts_detail_layout state ~rows ~error_rows in
+  (List.length (prompts_detail_lines state ~cols), height)
+
+let render_prompts_detail state buf ~cols ~height =
+  let rendered = prompts_detail_lines state ~cols in
+  let total = List.length rendered in
+  let scroll = Masc_tui_scroll.normalize ~count:total ~height state.config_scroll in
+  box_line_styled buf cols ~style:(Theme.recede ())
+    (Printf.sprintf "  Detail [%d-%d/%d]" (scroll + 1)
+       (min total (scroll + height)) total);
+  let window = Rows.of_list ~first:scroll ~height rendered in
+  for index = 0 to height - 1 do
+    match Rows.at window (scroll + index) with
+    | Some line -> box_line buf cols ("  " ^ line)
+    | None -> box_empty buf cols
+  done
+
 let render_prompt_registry (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
@@ -15030,15 +15150,7 @@ let render_prompt_registry (state : state) =
      "still reading" and "nothing here". *)
   let status_row = prompt_catalog_status_row prompts in
   let error_rows = if Option.is_some status_row then 1 else 0 in
-  let notice_rows = match selected with
-    | None -> 0
-    | Some row ->
-        (if Option.is_some (held_back_for row.Tui_decode.pr_key) then 3 else 0)
-        + (if row.pr_override_default_moved then 1 else 0)
-  in
-  let combined_height = max 2 (rows - 9 - error_rows - notice_rows) in
-  let list_height = min 8 (max 1 (combined_height / 3)) in
-  let detail_height = max 1 (combined_height - list_height) in
+  let list_height, detail_height = prompts_detail_layout state ~rows ~error_rows in
   let first = if cursor < list_height then 0 else cursor - list_height + 1 in
   (match status_row with
    | Some (style, text) ->
@@ -15062,32 +15174,9 @@ let render_prompt_registry (state : state) =
           | false, Tui_decode.Prompt_file -> glyph
           | false, Tui_decode.Prompt_missing -> (Theme.bad ()) ^ glyph ^ Ansi.reset
         in
-        let category =
-          match row.Tui_decode.pr_category with
-          | "keeper" -> "키퍼"
-          | "librarian" -> "기억"
-          | "verification" -> "검증"
-          | "judge" -> "판정"
-          | "general" -> "일반"
-          | category -> Terminal_text.single_line category
-        in
-        let surface =
-          match row.Tui_decode.pr_operator_surface with
-          | Tui_decode.Prompt_primary -> ""
-          | Tui_decode.Prompt_fragment -> "조각"
-        in
-        let label =
-          Printf.sprintf "%s %-4s %-4s %s  %s"
-            mark
-            (fit_width category 4)
-            surface
-            (fit_width (Terminal_text.single_line row.Tui_decode.pr_key) 30)
-            (Ansi.dim
-             ^ fit_width
-                 (Terminal_text.single_line row.Tui_decode.pr_description)
-                 (max 4 (cols - 52))
-             ^ Ansi.reset)
-        in
+        let label = mark ^ " "
+            ^ Message_layout.fit_middle (max 1 (cols - 7))
+                (Terminal_text.single_line row.Tui_decode.pr_key) in
         if index = cursor then
           box_line buf cols (Theme.selection ^ " " ^ label ^ Ansi.reset)
         else box_line buf cols (" " ^ label)
@@ -15097,92 +15186,12 @@ let render_prompt_registry (state : state) =
     box_empty buf cols
   done;
   box_divider buf cols;
-  (match selected with
-   | None ->
-       box_line_styled buf cols ~style:(Theme.recede ()) "  선택한 프롬프트가 없습니다";
-       box_line_styled buf cols ~style:(Theme.recede ()) "  입력 계약을 표시할 수 없습니다";
-       box_divider buf cols;
-       for _ = 1 to detail_height do
-         box_empty buf cols
-       done
-   | Some row ->
-       let source =
-         match row.Tui_decode.pr_source with
-         | Tui_decode.Prompt_override -> "override 사용 · MD는 기본값"
-         | Tui_decode.Prompt_file -> "MD 파일 사용"
-         | Tui_decode.Prompt_missing -> "없음"
-       in
-       box_line buf cols
-         (Printf.sprintf "  선택: %s \xc2\xb7 %s \xc2\xb7 %s"
-            (Terminal_text.single_line row.pr_key)
-            (Terminal_text.single_line source)
-            (Terminal_text.single_line row.pr_file_path));
-       (* Two facts an operator needs and cannot get anywhere else: the
-          override is still on disk, and re-saving it is what puts it back in
-          force. Without the second line the mark says something is wrong and
-          leaves the reader with no move. *)
-       (match held_back_for row.Tui_decode.pr_key with
-        | None -> ()
-        | Some entry ->
-          box_line buf cols
-            (Printf.sprintf "  %s\xe2\x8a\x98 적용 안 됨%s  저장된 오버라이드 %d바이트가 그대로 있습니다"
-               (Theme.bad ()) Ansi.reset entry.Tui_decode.hbo_bytes);
-          box_line_styled buf cols ~style:(Theme.recede ())
-            ("  " ^ Terminal_text.single_line entry.Tui_decode.hbo_reason);
-          box_line_styled buf cols ~style:(Theme.recede ())
-            "  그 변수를 빼고 같은 키를 다시 저장하면 적용됩니다");
-       (* The override applies. This line says only that the shipped text it
-          replaced has changed since it was written, so the reader knows to
-          compare the two once rather than discovering a new default months
-          later. *)
-       if row.Tui_decode.pr_override_default_moved then
-         box_line_styled buf cols ~style:(Theme.warn ())
-           "  \xe2\x96\xb3 기본 프롬프트가 이 오버라이드를 쓴 뒤에 바뀌었습니다 \xc2\xb7 오버라이드는 그대로 적용 중이니 현재 기본값과 한 번 대조하세요";
-       let input_contract =
-         if String.equal row.pr_category "librarian" then
-           "입력: Keeper 지침 | 현재 기억 | 제한된 대화 | 상대 관측 | 사실 최대 바이트"
-         else
-           match row.pr_template_variables with
-           | [] -> "템플릿 입력: 없음"
-           | variables -> "템플릿 입력: " ^ String.concat " | " variables
-       in
-       box_line_styled buf cols ~style:(Theme.recede ()) ("  " ^ input_contract);
-       box_divider buf cols;
-       let body_width = max 1 (cols - 6) in
-       let effective_lines =
-         Message_layout.wrap_body ~markdown:document_markdown
-           ~max_cells:body_width ~sanitize:Terminal_text.single_line
-           row.pr_effective
-       in
-       let actual_input_lines =
-         if not (String.equal row.pr_category "librarian") then []
-         else if state.prompts_librarian_input_loading
-                 && not (Option.exists
-                      (fun (key, _) -> String.equal key row.pr_key)
-                      state.prompts_librarian_input) then
-           [ "최근 실제 Librarian 입력"; "(Admin 실행 상세를 불러오는 중...)"; "" ]
-         else
-           match state.prompts_librarian_input_error with
-           | Some detail ->
-               [ "최근 실제 Librarian 입력"
-               ; "불러올 수 없음: " ^ Terminal_text.single_line detail
-               ; ""
-               ]
-           | None ->
-               (match state.prompts_librarian_input with
-                | Some (key, lines) when String.equal key row.pr_key ->
-                    lines @ [ "" ]
-                | Some _ | None -> [])
-       in
-       let rendered = actual_input_lines @ ("유효 템플릿 본문" :: effective_lines) in
-       let max_scroll = max 0 (List.length rendered - detail_height) in
-       let scroll = max 0 (min state.config_scroll max_scroll) in
-       let rendered_window = Rows.of_list ~first:scroll ~height:detail_height rendered in
-       for index = 0 to detail_height - 1 do
-         match Rows.at rendered_window (scroll + index) with
-         | Some line -> box_line buf cols ("  " ^ line)
-         | None -> box_empty buf cols
-       done);
+  box_line_styled buf cols ~style:(Theme.recede ())
+    ("  " ^ Message_layout.fit_middle (max 1 (cols - 6))
+       (match selected with
+        | None -> "선택 없음"
+        | Some row -> Terminal_text.single_line row.Tui_decode.pr_key));
+  render_prompts_detail state buf ~cols ~height:detail_height;
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
@@ -15223,9 +15232,7 @@ let render_runtime_prompt_assets (state : state) =
      "still reading" and "nothing here". *)
   let status_row = prompt_catalog_status_row prompts in
   let error_rows = if Option.is_some status_row then 1 else 0 in
-  let combined_height = max 2 (rows - 10 - error_rows) in
-  let list_height = min 8 (max 1 (combined_height / 3)) in
-  let detail_height = max 1 (combined_height - list_height) in
+  let list_height, detail_height = prompts_detail_layout state ~rows ~error_rows in
   let first = if cursor < list_height then 0 else cursor - list_height + 1 in
   (match status_row with
    | Some (style, text) ->
@@ -15237,14 +15244,9 @@ let render_runtime_prompt_assets (state : state) =
        if index >= first && index < first + list_height then begin
          incr drawn;
          let mark = if asset.pra_file_exists then " " else (Theme.bad ()) ^ "!" ^ Ansi.reset in
-         let line =
-           Printf.sprintf "%s %-32s %s"
-             mark
-             (fit_width (Terminal_text.single_line asset.pra_path) 32)
-             (Ansi.dim
-             ^ (if asset.pra_file_exists then "런타임 파일" else "동기화 후 누락")
-              ^ Ansi.reset)
-         in
+         let line = mark ^ " "
+             ^ Message_layout.fit_middle (max 1 (cols - 7))
+                 (Terminal_text.single_line asset.pra_path) in
          if index = cursor then box_line buf cols (Theme.selection ^ " " ^ line ^ Ansi.reset)
          else box_line buf cols (" " ^ line)
        end)
@@ -15253,36 +15255,12 @@ let render_runtime_prompt_assets (state : state) =
     box_empty buf cols
   done;
   box_divider buf cols;
-  (match selected with
-   | None ->
-     box_line_styled buf cols ~style:(Theme.recede ()) "  런타임 프롬프트 자산이 없습니다";
-     box_line_styled buf cols ~style:(Theme.recede ())
-       "  서버가 오래되었거나 배포 자산을 아직 동기화하지 않았을 수 있습니다";
-     box_divider buf cols;
-     for _ = 1 to detail_height do box_empty buf cols done
-   | Some asset ->
-     let source = if asset.pra_file_exists then "런타임 파일" else "누락" in
-     box_line buf cols
-       (Printf.sprintf "  읽기 전용 자산  %s · %s · %s"
-          (Terminal_text.single_line asset.pra_path)
-          source
-          (Terminal_text.single_line asset.pra_file_path));
-     box_line_styled buf cols ~style:(Theme.recede ())
-       "  이 자산은 registry override·편집 대상이 아닙니다";
-     box_divider buf cols;
-     let body_width = max 1 (cols - 6) in
-     let rendered =
-       Message_layout.wrap_body ~markdown:document_markdown
-         ~max_cells:body_width ~sanitize:Terminal_text.single_line asset.pra_value
-     in
-     let max_scroll = max 0 (List.length rendered - detail_height) in
-     let scroll = max 0 (min state.config_scroll max_scroll) in
-     let rendered_window = Rows.of_list ~first:scroll ~height:detail_height rendered in
-     for index = 0 to detail_height - 1 do
-       match Rows.at rendered_window (scroll + index) with
-       | Some line -> box_line buf cols ("  " ^ line)
-       | None -> box_empty buf cols
-     done);
+  box_line_styled buf cols ~style:(Theme.recede ())
+    ("  " ^ Message_layout.fit_middle (max 1 (cols - 6))
+       (match selected with
+        | None -> "선택 없음"
+        | Some asset -> Terminal_text.single_line asset.Tui_decode.pra_path));
+  render_prompts_detail state buf ~cols ~height:detail_height;
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols

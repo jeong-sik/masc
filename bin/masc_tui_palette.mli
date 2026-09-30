@@ -36,3 +36,5 @@ val palette_entries : Masc_tui_types.state -> (string * palette_action) list
 val palette_matches : Masc_tui_types.state -> (string * palette_action) list
 val palette_starts_with : needle:string -> string -> bool
 val palette_subsequence : needle:string -> string -> bool
+
+val palette_typed_question : string -> (string * string option) option

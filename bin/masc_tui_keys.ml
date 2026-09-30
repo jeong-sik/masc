@@ -1244,7 +1244,9 @@ let footer_hints_code ~pane =
     | Code_diff ->
         let pan, others = List.partition
             (fun b -> String.equal b.key "Shift-Left / Shift-Right") visible in
-        pan @ others
+        List.map (fun b -> { b with key = "Shift-←/→" }) pan
+        @ List.map (fun b ->
+            if String.equal b.key "Left / Esc" then { b with key = "Esc" } else b) others
     | Code_tree | Code_file | Code_overlay -> visible in
   visible
   |> List.map (fun b ->

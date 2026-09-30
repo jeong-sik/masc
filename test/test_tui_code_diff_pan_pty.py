@@ -39,7 +39,8 @@ def run(executable, no_color):
             h.drain_until_quiet(process, fd, output)
             initial = screen(output)
             assert "REMOVETAIL" not in initial, initial
-            assert "Shift-Left / Shift-Right" in initial, initial
+            assert "Shift-←/→:pan" in initial, initial
+            assert "Esc:back" in initial, initial
             # Added CJK text is lexed from the file. Pan by display cells and
             # keep both file coordinates and change markers at their origins.
             h.send_and_wait(process, fd, output, RIGHT * 70, b"diff col 71 vs HEAD")

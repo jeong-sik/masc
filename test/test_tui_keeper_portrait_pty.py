@@ -287,6 +287,7 @@ def item_tab_previews_accessories(binary: str) -> None:
         assert row_of(second, b"shades") > 0
         assert portrait_rows(second), "the selected accessory lost its picture"
         assert row_of(second, b"Preview changes this picture only") > 0
+        capture_item_screen(output, "shades-preview")
         # Read the current completed viewport after each navigation or resize.
         h.resize_and_wait(process, fd, output, rows=18, columns=COLUMNS,
                           needle=b"Items 2/18", controls=(h.FULL_REDRAW,),
@@ -316,7 +317,6 @@ def item_tab_previews_accessories(binary: str) -> None:
         assert row_of(narrow, b"> 18 base  dish_oak") > 0, "resize lost the last accessory name"
         assert row_of(narrow, b"Selected: unpriced") > 0, "narrow Items hid the authoritative price"
         assert not portrait_rows(narrow), "narrow Items pane retained a portrait beside clipped names"
-        capture_item_screen(output, "shades-preview")
         os.write(fd, b"q")
 
     h.run_terminal_scenario(

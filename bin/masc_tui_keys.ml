@@ -49,6 +49,9 @@ let config_bindings =
              and presets, and moves the selection a page on models and themes",
       Some [ Config_runtime; Config_models; Config_prompts; Config_presets
            ; Config_themes; Config_voice ]
+  ; b Navigate "Home/End" "detail edges"
+      ~help:"on prompts, the first or last wrapped row of the selected registry or asset document",
+      Some [ Config_prompts ]
   ; b Navigate "v" "read status"
       ~help:"runtime.toml: source revision, validation issues, and application/restart details",
       Some [ Config_runtime ]
@@ -137,6 +140,9 @@ let runtime_keys =
   ; Every_reading
       (b Act "Right / Enter" "detail"
          ~help:"show the full runtime, lane, dispatch, and probe fields")
+  ; Every_reading
+      (b Act "v" "routes / status"
+         ~help:"read complete default and media routes, boot admission and probe diagnostics")
   ; Reading_walk
   ; Every_reading
       (b Navigate "c" "clients"
@@ -235,7 +241,7 @@ let global =
   [ b Meta "Tab / Shift-Tab" "next / previous surface"
   ; keepers_jump
   ; b Meta "r" "refresh the current surface"
-  ; b Meta "i" "focus the composer (message the shown keeper)"
+  ; b Meta "i" "focus the composer; on Dashboard, choose a Keeper"
   ; b Meta ":" "command palette"
   ; b Meta ";"
       "agenda: what is coming, and who is waiting on you; Enter opens a row"
@@ -371,7 +377,11 @@ let fusion_board_key = b Navigate "B" "Board evidence"
 
 let for_surface = function
   | Overview ->
-      [ b Navigate "m" "Usage" ~help:"account windows and Keeper usage"
+      [ b Navigate "j/k" "choose" ~help:"move between decision links and conversations"
+      ; b Navigate "Enter" "open" ~help:"open the selected destination; never approve"
+      ; b Navigate "p" "requests" ~help:"approvals and questions"
+      ; b Navigate ";" "agenda" ~help:"Goal confirmations and tasks waiting on you"
+      ; b Navigate "m" "Usage" ~help:"account windows and Keeper usage"
       ]
       @ listing_meta
   | Acting ->
@@ -1143,11 +1153,43 @@ let footer_hints_config ~pane =
 let voice_agent_bindings =
   [ b Navigate "j/k" "keeper"
   ; b Navigate "\xe2\x86\x90/\xe2\x86\x92" "voice"
+  ; b Navigate "PgUp/PgDn" "metadata page"
+  ; b Navigate "Home/End" "metadata edges"
+  ; b Meta "?" "help"
   ; b Act "Enter" "assign" ~help:"write this keeper's voice into voice.tts.agent_voices"
   ; b Act "Esc" "back" ~help:"leave the screen; nothing is written"
   ]
 
-let footer_hints_voice_agent () = hints_of_bindings voice_agent_bindings
+let patch_review_bindings =
+  [ b Navigate "Shift+←/→" "pan"
+      ~help:"Shift-Left / Shift-Right moves diff text horizontally while file coordinates remain fixed"
+  ; b Navigate "j/k" "scroll"
+  ; b Navigate "PgUp/PgDn / d/u" "page"
+  ; b Navigate "Home/End / g/G" "edges"
+  ; b Act "e" "edit" ~help:"leave review and open the project file in your editor"
+  ; b Meta "?" "help"
+  ; b Meta "Esc" "close" ~help:"Esc, q or Q closes the patch reader"
+  ]
+
+let runtime_detail_bindings =
+  [ b Navigate "j/k" "scroll"
+  ; b Navigate "PgUp/PgDn" "page"
+  ; b Navigate "Home/End" "edges"
+  ; b Act "Left / Esc" "list"
+  ; b Meta "r" "refresh"
+  ; b Meta "Tab" "next"
+  ; b Meta "?" "help"
+  ]
+
+let footer_hints_patch_review () = hints_of_bindings patch_review_bindings
+let footer_hints_runtime_detail () = hints_of_bindings runtime_detail_bindings
+
+let voice_agent_bindings_for_saving saving =
+  if saving then [ b Meta "?" "help"; b Act "Esc" "back" ]
+  else voice_agent_bindings
+
+let footer_hints_voice_agent ?(saving = false) () =
+  hints_of_bindings (voice_agent_bindings_for_saving saving)
 
 (* The account form on runtime.toml takes every key while it is open, so the
    pane's row -- [e], [r], [Tab], [q] -- would name keys that now type into a
@@ -1213,7 +1255,28 @@ let footer_hints_work_tasks = hints_of_bindings work_tasks_bindings
 type code_pane =
   | Code_tree  (** the file list has focus *)
   | Code_file  (** a file is open and nothing covers it *)
-  | Code_overlay  (** history, diff or notes is drawn over the file *)
+  | Code_overlay  (** diff is drawn over the file *)
+  | Code_notes  (** wrapped memo document is drawn over the file *)
+  | Code_history  (** complete history document is drawn over the file *)
+
+let code_notes_bindings =
+  [ b Navigate "j/k" "scroll"
+  ; b Navigate "PgUp/PgDn" "page"
+  ; b Navigate "Home/End" "edges"
+  ; b Act "m" "close"
+  ; b Navigate "Esc" "back"
+  ; b Meta "?" "help"
+  ]
+
+let code_history_bindings =
+  [ b Navigate "j/k" "scroll"
+  ; b Navigate "PgUp/PgDn" "page"
+  ; b Navigate "Home/End" "edges"
+  ; b Act "Enter" "open" ~help:"open the record owning the first visible row; metadata and failure rows have no target"
+  ; b Act "H" "close"
+  ; b Navigate "Esc" "back"
+  ; b Meta "?" "help"
+  ]
 
 let footer_hints_code ~pane =
   let file_keys =
@@ -1228,7 +1291,8 @@ let footer_hints_code ~pane =
     match pane with
     | Code_tree -> overlay_keys @ file_keys
     | Code_file -> overlay_keys
-    | Code_overlay ->
+    | Code_overlay | Code_notes -> "Right / Enter" :: overlay_keys @ file_keys
+    | Code_history ->
         (* [Right / Enter] names the tree and file panes' open. With the
            history overlay up, the one arm behind Right and Enter takes the
            overlay's branch instead, so the row drew two items holding the
@@ -1242,6 +1306,11 @@ let footer_hints_code ~pane =
          { b with label = (match pane with Code_tree -> "move" | _ -> "scroll") }
        else b)
   |> hints_of_bindings
+  |> fun hints ->
+      match pane with
+      | Code_notes -> hints_of_bindings code_notes_bindings
+      | Code_history -> hints_of_bindings code_history_bindings
+      | Code_tree | Code_file | Code_overlay -> hints
 
 (* The Runtime footer is the table's, with the two keys that depend on the
    reading on screen: [p] names where it goes from here, and [e] exists only on
@@ -1308,7 +1377,7 @@ let cancels_two_press ~input_seen ~key ~second_press =
    [K] and [B] answer in the detail as they do on the list (masc_tui.ml
    matches them under [Fusion_detail]); the footer left them out, and a body
    row said "K Keeper · B Board" in its own notation instead. *)
-let footer_hints_board_read ~focus_posts ~focus_comments
+let footer_hints_board_read ~focus_posts ~focus_comments ~full_history
     ~(layout : board_read_layout) =
   let pane_keys =
     match layout with
@@ -1334,6 +1403,13 @@ let footer_hints_board_read ~focus_posts ~focus_comments
      ; b Navigate "PgUp/PgDn" "page"
      ]
      @ pane_keys @ width_key
+     (* [o] goes after the pane and width keys. The fitter gives up the last
+        droppable hint first, so a key placed ahead of them pushes them off:
+        at 120 cells the split footer lost Ctrl-W:switch, and at 130
+        z:wide, to "o:all comments". Placed here it is the Navigate hint
+        dropped first, and up to 134 cells the row is the one drawn before
+        [o] existed. *)
+     @ [ b Navigate "o" (if full_history then "newest 20" else "all comments") ]
      @ [ board_vote_key
        ; board_reply_key
        ; board_copy_key
@@ -1728,6 +1804,46 @@ let help_sections ?current () =
           ; ("Prompt marks", Masc_tui_config_mark.prompt_legend)
           ; ("Param marks", Masc_tui_config_mark.param_legend)
           ])
+
+let workspace_activity_bindings ~context =
+  [ b Navigate "j/k" (if context then "scroll" else "select")
+  ; b Navigate "PgUp/PgDn" "page"
+  ; b Act "Enter / Right" "file" ~help:"open the selected recorded file in Code"
+  ; b Act "r / R" "refresh"
+  ; b Navigate "Esc / Left" (if context then "list" else "repositories")
+  ; b Navigate "?" "help"
+  ] @ (if context then [b Navigate "Home/End / g/G" "edges"]
+       else [b Navigate "v / V" "context" ~help:"read the selected record's full path, Task and execution metadata"])
+
+let help_sections_for_state (state : state) =
+  let active =
+    if state.patch_modal_open then Some ("Patch review", patch_review_bindings)
+    else if Option.is_some state.voice_agent_voices then
+      let bindings =
+        match state.voice_agent_voices with
+        | Some session -> voice_agent_bindings_for_saving session.vas_saving
+        | None -> voice_agent_bindings
+      in
+      Some ("Keeper voices", bindings)
+    else if state.view = Runtime && Option.is_some state.runtime_detail_target then
+      Some ("Runtime detail", runtime_detail_bindings)
+    else if state.view = Code && state.code_focus_file = Right_pane
+            && state.code_history_open && not state.repository_changes_open then
+      Some ("Code history", code_history_bindings)
+    else if state.view = Code && state.code_focus_file = Right_pane
+            && state.code_notes_open && not state.repository_changes_open then
+      Some ("Code memos", code_notes_bindings)
+    else if state.view = Repositories && not state.repository_changes_open
+            && Option.is_some state.workspace_activity_repo then
+      let context = Option.is_some state.workspace_activity_context_scroll in
+      Some ((if context then "Activity context" else "Workspace Activity"),
+            workspace_activity_bindings ~context)
+    else None
+  in
+  match active with
+  | None -> help_sections ~current:state.view ()
+  | Some (title, bindings) ->
+      (title ^ here_marker, entries bindings) :: help_sections ()
 
 let footer_hints_browser_lane =
   hints_of_bindings

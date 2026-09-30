@@ -6,6 +6,7 @@
 
 open Masc_tui_types
 open Tui_decode
+open Masc.Tui_decode_fusion
 open Masc_tui_ansi
 open Masc_tui_press
 
@@ -669,7 +670,9 @@ let slash_hint_text ~restore draft =
   | spans -> Some (String.concat "" (List.map paint spans))
 
 let composer_line state ~cols =
-  match browser_lane_on_screen state with
+  if state.view = Overview && not state.composer_focused then
+    Theme.recede () ^ fit_width " Choose a Keeper before writing · i:choose" cols ^ Ansi.reset
+  else match browser_lane_on_screen state with
   (* The page reader owns the keys here, so there is no composer to draw. The
      row it would take stays empty: the title already names the lane, its
      source and its browser, and a second copy down here is a state the reader
@@ -1740,7 +1743,7 @@ let data_unreliable_close = ")"
 
 
 let data_unreliable_row ~cols err =
-  let err = Tui_decode.sanitize_terminal_text err in
+  let err = Masc.Tui_terminal_text.sanitize_terminal_text err in
   let room =
     max 8
       (framed_inner_width cols
@@ -1851,8 +1854,8 @@ let selected_ask_question (state : state) =
   | Some snapshot -> (
       match List.nth_opt (Ask_projection.open_rows snapshot) state.ask_cursor with
       | None -> None
-      | Some (row : Masc.Tui_decode.ask_row) ->
-          List.nth_opt row.Masc.Tui_decode.ar_questions state.ask_question_cursor)
+      | Some (row : Masc.Tui_decode_asks.ask_row) ->
+          List.nth_opt row.Masc.Tui_decode_asks.ar_questions state.ask_question_cursor)
 
 
 let draw_ask_text_entry buf cols ~draft ~question (entry : ask_text_entry) =
@@ -1874,8 +1877,8 @@ let draw_ask_text_entry buf cols ~draft ~question (entry : ask_text_entry) =
    choices and their marks, whatever the draft holds, and the free-text line.
    Lifted out of the panel so the panel can draw a question into a buffer of
    its own and ask how tall it came out before deciding to spend those rows. *)
-let draw_ask_question buf cols (state : state) ~(row : Masc.Tui_decode.ask_row)
-    ~draft ~(question : Masc.Tui_decode.ask_question) ~answering
+let draw_ask_question buf cols (state : state) ~(row : Masc.Tui_decode_asks.ask_row)
+    ~draft ~(question : Masc.Tui_decode_asks.ask_question) ~answering
     ~selected_question =
   (* The caret is the only thing saying where the cursor is: which question
      [a] opens while browsing, and which one the digits land on while
@@ -1885,11 +1888,11 @@ let draw_ask_question buf cols (state : state) ~(row : Masc.Tui_decode.ask_row)
     ~head:
       (Printf.sprintf " %s%s%s%s%s  " caret
          (if selected_question then Ansi.bold else "")
-         (fit_width (Terminal_text.single_line row.Masc.Tui_decode.ar_keeper) 16)
+         (fit_width (Terminal_text.single_line row.Masc.Tui_decode_asks.ar_keeper) 16)
          (if selected_question then Ansi.reset else "")
          Ansi.reset)
     ~style:(if selected_question then Ansi.bold else "")
-    question.Masc.Tui_decode.aq_prompt;
+    question.Masc.Tui_decode_asks.aq_prompt;
   let chosen =
     match Ask_projection.response_for draft ~question with
     | Some (Ask_projection.Draft_chose ids) -> ids
@@ -1898,19 +1901,19 @@ let draw_ask_question buf cols (state : state) ~(row : Masc.Tui_decode.ask_row)
     | None -> []
   in
   List.iteri
-    (fun choice_index (choice : Masc.Tui_decode.ask_choice) ->
+    (fun choice_index (choice : Masc.Tui_decode_asks.ask_choice) ->
       let picked =
-        List.exists (String.equal choice.Masc.Tui_decode.ac_id) chosen
+        List.exists (String.equal choice.Masc.Tui_decode_asks.ac_id) chosen
       in
       (* One mark shape per mode: a round one where only one answer fits, a
          square one where several do. The operator should not have to read the
          header to know whether picking a second choice replaces the first. *)
       let mark =
-        match (question.Masc.Tui_decode.aq_mode, picked) with
-        | Masc.Tui_decode.Ask_single, true -> "(o)"
-        | Masc.Tui_decode.Ask_single, false -> "( )"
-        | Masc.Tui_decode.Ask_multi, true -> "[x]"
-        | Masc.Tui_decode.Ask_multi, false -> "[ ]"
+        match (question.Masc.Tui_decode_asks.aq_mode, picked) with
+        | Masc.Tui_decode_asks.Ask_single, true -> "(o)"
+        | Masc.Tui_decode_asks.Ask_single, false -> "( )"
+        | Masc.Tui_decode_asks.Ask_multi, true -> "[x]"
+        | Masc.Tui_decode_asks.Ask_multi, false -> "[ ]"
       in
       (* Numbers only where they do something: the digits answer the question
          under the caret, and only once the operator is answering it. A number
@@ -1925,15 +1928,15 @@ let draw_ask_question buf cols (state : state) ~(row : Masc.Tui_decode.ask_row)
         ~head:
           (Printf.sprintf "    %s %s %s%s%s  " position mark
              (if picked then Ansi.bold else Ansi.dim)
-             (Terminal_text.single_line choice.Masc.Tui_decode.ac_id)
+             (Terminal_text.single_line choice.Masc.Tui_decode_asks.ac_id)
              Ansi.reset)
         ~style:(if picked then Ansi.bold ^ Theme.ok () else Theme.info ())
-        choice.Masc.Tui_decode.ac_label;
+        choice.Masc.Tui_decode_asks.ac_label;
       (* What picking this commits to. The wire carries it, the dashboard
          draws it under the label, and this pane dropped it -- so the operator
          answering from the terminal weighed a label where the one answering
          from a browser weighed a label and its consequence. *)
-      match choice.Masc.Tui_decode.ac_description with
+      match choice.Masc.Tui_decode_asks.ac_description with
       | None -> ()
       | Some description ->
         (* Not [single_line] here: the field is a block and the escaping is
@@ -1943,7 +1946,7 @@ let draw_ask_question buf cols (state : state) ~(row : Masc.Tui_decode.ask_row)
           ~head:"          "
           ~style:Ansi.dim
           description)
-    question.Masc.Tui_decode.aq_choices;
+    question.Masc.Tui_decode_asks.aq_choices;
   (* What the operator has put down so far, in the two shapes a list of
      choices cannot show. *)
   (match Ask_projection.response_for draft ~question with
@@ -1954,7 +1957,7 @@ let draw_ask_question buf cols (state : state) ~(row : Masc.Tui_decode.ask_row)
    | Some Ask_projection.Draft_skipped ->
        box_line buf cols (Printf.sprintf "      %sskipped%s" Ansi.dim Ansi.reset)
    | Some (Ask_projection.Draft_chose _) | None -> ());
-  let ask_id = row.Masc.Tui_decode.ar_id in
+  let ask_id = row.Masc.Tui_decode_asks.ar_id in
   let slot = Ask_projection.free_text_slot ~ask_id question in
   let aft_hint = Ask_projection.free_text_hint slot in
   (
@@ -1969,7 +1972,7 @@ let draw_ask_question buf cols (state : state) ~(row : Masc.Tui_decode.ask_row)
           when String.equal (Ask_projection.free_text_ask_id entry.ate_slot) ask_id
                && String.equal
                     (Ask_projection.free_text_question_id entry.ate_slot)
-                    question.Masc.Tui_decode.aq_id ->
+                    question.Masc.Tui_decode_asks.aq_id ->
             Some entry
         | Some _ | None -> None
       in
@@ -1987,7 +1990,7 @@ let draw_ask_question buf cols (state : state) ~(row : Masc.Tui_decode.ask_row)
               | None -> "[t] "
           in
           let label =
-            if question.Masc.Tui_decode.aq_choices = [] then "Write your answer"
+            if question.Masc.Tui_decode_asks.aq_choices = [] then "Write your answer"
             else "Other: write your own answer"
           in
           box_line buf cols
@@ -1998,8 +2001,8 @@ let draw_ask_question buf cols (state : state) ~(row : Masc.Tui_decode.ask_row)
 
 (* The reason is what separates a decision that matters from one that does
    not, so it is drawn, not hidden behind a detail view. *)
-let draw_ask_context buf cols ~(row : Masc.Tui_decode.ask_row) =
-  match row.Masc.Tui_decode.ar_context with
+let draw_ask_context buf cols ~(row : Masc.Tui_decode_asks.ask_row) =
+  match row.Masc.Tui_decode_asks.ar_context with
   | None -> ()
   | Some context ->
       box_wrapped_field buf cols
@@ -2032,8 +2035,8 @@ let question_hints (state : state) =
                let question = selected_ask_question state in
                let has_choices =
                  match question with
-                 | Some (q : Masc.Tui_decode.ask_question) ->
-                     q.Masc.Tui_decode.aq_choices <> []
+                 | Some (q : Masc.Tui_decode_asks.ask_question) ->
+                     q.Masc.Tui_decode_asks.aq_choices <> []
                  | None -> false
                in
                let takes_text = Option.is_some question in

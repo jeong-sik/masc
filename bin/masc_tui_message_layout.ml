@@ -1228,6 +1228,40 @@ let split_cells ~max_cells text =
     in
     loop 0 0 0 [] (display_pieces text)
 
+let split_styled_cells ~max_cells text =
+  (* Replaying the preceding SGR commands restores the exact style at a
+     continuation. Each physical row resets it before other chrome draws.
+     Cell splitting preserves padding, meter blanks and grapheme boundaries. *)
+  let rec wrap start stop cells last_space rows = function
+    | [] -> List.rev (String.sub text start (stop - start) :: rows)
+    | piece :: rest
+        when piece.ansi || cells = 0 || cells + piece.cell_width <= max_cells ->
+        let last_space =
+          if not piece.ansi && piece.end_offset = piece.start_offset + 1
+             && Char.equal text.[piece.start_offset] ' '
+          then Some (piece.end_offset, rest) else last_space in
+        wrap start piece.end_offset (cells + piece.cell_width) last_space rows rest
+    | piece :: rest ->
+        (match last_space with
+         | Some (boundary, following) ->
+             (* Only the word after the last space is revisited, rather than
+                tokenizing and allocating the entire remaining suffix. *)
+             wrap boundary boundary 0 None
+               (String.sub text start (boundary - start) :: rows) following
+         | None ->
+             wrap piece.start_offset piece.end_offset piece.cell_width None
+               (String.sub text start (stop - start) :: rows) rest) in
+  let styles = ref [] in
+  wrap 0 0 0 None [] (display_pieces text) |> List.map (fun chunk ->
+    let inherited = String.concat "" (List.rev !styles) in
+    List.iter (fun piece ->
+      if piece.ansi && Char.equal chunk.[piece.end_offset - 1] 'm' then (
+        let command = String.sub chunk piece.start_offset (piece.end_offset - piece.start_offset) in
+        if String.equal command "\027[0m" || String.equal command "\027[m"
+        then styles := [] else styles := command :: !styles)) (display_pieces chunk);
+    inherited ^ chunk ^ (if String.equal inherited "" && not (String.contains chunk '\027')
+      then "" else "\027[0m"))
+
 (* A row is built by adding each word's own width to the row so far. That
    holds while no escape is left open across the join: an escape missing its
    final byte swallows the space after it, so the row and its parts disagree

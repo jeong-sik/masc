@@ -775,7 +775,8 @@ let forget_recall (state : state) =
   state.msg_recall_at <- None;
   state.msg_recall_draft <- ("", [], [], None)
 
-let open_message_for_keeper ?(return_to = Keeper_chat_return_detail) state
+let open_message_for_keeper ?(return_to = Keeper_chat_return_detail)
+    ?(remember_home_chat = true) state
     keeper_name ~drain_queue =
   (* The paste goes back into the draft before the draft is put away. A spill
      lives with the composer; a saved draft has to stand on its own, and a
@@ -799,25 +800,25 @@ let open_message_for_keeper ?(return_to = Keeper_chat_return_detail) state
   end;
   state.msg_target_keeper_name <- Some keeper_name;
   state.opening_notice <- None;
-  (match state.opening_mode with
-   | Masc_tui_config.Last previous ->
+  (if remember_home_chat then
        (match Keeper_id.Keeper_name.of_string keeper_name with
         | Error reason ->
             add_event state "error" ("Could not remember chat target: " ^ reason)
         | Ok target ->
-            let changed =
-              match previous with
-              | Some previous -> not (Keeper_id.Keeper_name.equal previous target)
-              | None -> true
-            in
-            if changed then
-              (match Masc_tui_config.set_opening_keeper
-                       ~base_path:state.local_base_path target with
-               | Ok () -> state.opening_mode <- Masc_tui_config.Last (Some target)
-               | Error reason ->
-                   add_event state "error"
-                     ("Could not remember chat target: " ^ reason)))
-   | Masc_tui_config.Overview | Masc_tui_config.Keeper _ -> ());
+            (* Another TUI may have visited a different Keeper or changed the
+               startup choice since this state was loaded. Record every explicit
+               visit against the current text under the shared config lock. *)
+            (match Masc_tui_config.record_chat_visit
+                     ~base_path:state.local_base_path target with
+             | Ok Runtime.Durable ->
+                 state.home_last_chat <- Recorded_chat target
+             | Ok (Runtime.Durability_unconfirmed { detail }) ->
+                 state.home_last_chat <- Unconfirmed_chat { keeper = target; detail };
+                 add_event state "error" ("Conversation saved; durability unconfirmed: " ^ detail)
+             | Error reason ->
+                 state.home_last_chat <- Session_chat { keeper = target; save_error = reason };
+                 add_event state "error"
+                   ("Conversation remembered only in this session: " ^ reason))));
   state.msg_live <- live_for_keeper state keeper_name;
   state.msg_return <- return_to;
   state.keeper_message_focus <- Right_pane;
@@ -840,6 +841,7 @@ let leave_keeper_message state ~drain_queue =
   in
   state.view <-
     (match state.msg_return, target_registered with
+     | Keeper_chat_return_home, _ -> Overview
      | Keeper_chat_return_lanes, _ -> Lanes
      | Keeper_chat_return_detail, true -> Keepers Keeper_detail
      | Keeper_chat_return_list, _ | Keeper_chat_return_detail, false ->
@@ -1468,7 +1470,7 @@ type http_scoped_surface_results = {
   (* [None] on surfaces that do not draw them. Each is read by one surface, and
      leaving it out keeps whatever that surface last observed rather than
      dropping it. *)
-  http_asks: (Tui_decode.asks_snapshot, string) result option;
+  http_asks: (Masc.Tui_decode_asks.asks_snapshot, string) result option;
   http_board: (board_post list, string) result option;
   (* The board's hearth census rides with its listing: the two are read for
      one surface and a cycle keyed on a census the listing has outgrown walks
@@ -1625,7 +1627,7 @@ type async_msg =
   | Ask_answer_done of
       string
       * (Yojson.Safe.t, string) result
-      * (Tui_decode.asks_snapshot, string) result
+      * (Masc.Tui_decode_asks.asks_snapshot, string) result
   | Keeper_chat_dispatch_started of
       Keeper_chat.request * bool * bool Eio.Promise.u
   | Keeper_chat_done of
@@ -1682,16 +1684,16 @@ type async_msg =
   | Verification_loaded of (Masc.Tui_decode.verification_snapshot, string) result
   | Harness_loaded of (Masc.Tui_decode.harness_snapshot, string) result
   | Fusion_runs_loaded of
-      unit Masc_tui_fetched.request * (Masc.Tui_decode.fusion_snapshot, string) result
+      unit Masc_tui_fetched.request * (Masc.Tui_decode_fusion.fusion_snapshot, string) result
   | Fusion_detail_loaded of
-      int * string * (Masc.Tui_decode.fusion_detail, string) result
+      int * string * (Masc.Tui_decode_fusion.fusion_detail, string) result
   | Fusion_historical_detail_loaded of
-      int * Masc.Tui_decode.fusion_historical_evidence
-      * (Masc.Tui_decode.fusion_historical_detail, string) result
+      int * Masc.Tui_decode_fusion.fusion_historical_evidence
+      * (Masc.Tui_decode_fusion.fusion_historical_detail, string) result
   (* Both carry the launch generation: the answer to a read or a submit the
      operator already left must not open or close a form they are not in. *)
   | Fusion_launch_options_loaded of
-      int * (Masc.Tui_decode.fusion_launch_options, string) result
+      int * (Masc.Tui_decode_fusion.fusion_launch_options, string) result
   | Fusion_launched of int * (string, string) result
   | Repositories_loaded of (Masc.Tui_decode.repository_snapshot, string) result
   | Workspace_activity_loaded of string Masc_tui_fetched.request * (workspace_activity_read, string) result
@@ -3988,7 +3990,7 @@ let launch_github_login state ~mailbox keeper_name =
                          Some [ payload ]
                    else None)
             |> List.concat
-            |> List.map Masc.Tui_decode.sanitize_terminal_text
+            |> List.map Masc.Tui_terminal_text.sanitize_terminal_text
             |> List.filter (fun line -> String.trim line <> "")
           in
           if lines <> [] then
@@ -4083,7 +4085,7 @@ let launch_preset_call state ~mailbox ~call ~wrap =
 let forget_play_invite state ~name =
   state.play_invite <-
     Masc_tui_types.play_invite_forget state.play_invite
-      (Tui_decode.sanitize_terminal_text name)
+      (Masc.Tui_terminal_text.sanitize_terminal_text name)
 
 let launch_presets_load state ~mailbox =
   state.presets_error <- None;
@@ -6308,10 +6310,12 @@ let enter_theme_filter state filter =
    a load the other performs. Surfaces not listed refresh on the periodic
    cadence ([surface_needs]); the ones here are snapshots that would
    otherwise read as empty until the next tick. *)
-let goto_surface state ~mailbox (destination : surface) =
+let goto_surface ?(from_reference = false) state ~mailbox (destination : surface) =
   (* The browser reader owns Connectors; refocusing it keeps the reader.
      The transport-list palette hides it explicitly before arriving here.
      Repository changes can overlay any surface, so every jump closes them. *)
+  state.home_opened_request <- None;
+  if not from_reference then state.followed_from <- None;
   leave_browser_lane_for_surface state destination;
   if state.repository_changes_open then close_repository_changes state;
   (match state.view with
@@ -6384,6 +6388,10 @@ let goto_surface state ~mailbox (destination : surface) =
    | Resources -> launch_resources_list state ~mailbox
    | Code -> launch_code_entries_load state ~mailbox
    | Metrics ->
+       (* Usage is the top-level account reading. Explicit telemetry entry
+          opts into diagnostics after navigation, rather than inheriting it. *)
+       state.usage_telemetry_open <- false;
+       state.metrics_scroll <- 0;
        launch_memory_health_load state ~mailbox;
        launch_keeper_tool_approvals_load ~intent:Snapshot_read.Refresh state ~mailbox;
        launch_gate_snapshot_load ~intent:Snapshot_read.Refresh state ~mailbox;
@@ -8449,8 +8457,8 @@ let selected_surface_reference state =
        | Fusion_list, Some _ ->
            Option.map
              (function
-               | Tui_decode.Fusion_retained_run run -> Link.reference Fusion_run run.fur_run_id
-               | Tui_decode.Fusion_historical_evidence evidence ->
+               | Masc.Tui_decode_fusion.Fusion_retained_run run -> Link.reference Fusion_run run.fur_run_id
+               | Masc.Tui_decode_fusion.Fusion_historical_evidence evidence ->
                    Link.reference Board_post evidence.fhe_post_id)
              (selected_fusion_entry state)
        | Fusion_list, None -> None)
@@ -8991,14 +8999,14 @@ let toggle_acting_pane (state : state) =
     Error "Activity pane is not drawn over this surface; preference unchanged"
   else
   match
-    Masc_tui_acting_pane.next_layout ~layout:state.acting_pane_layout ~cols
+    Masc_tui_acting_pane.next_layout ~layout:(acting_pane_layout state) ~cols
   with
   | None ->
       Error
         (Printf.sprintf "Activity pane needs %d columns; preference unchanged"
            Masc_tui_acting_pane.threshold_cols)
   | Some layout ->
-      state.acting_pane_layout <- layout;
+      state.acting_pane_preference <- Chosen_acting_pane layout;
       state.acting_pane_scroll <- 0;
       state.acting_pane_cursor <- None;
       Ok layout
@@ -9008,15 +9016,20 @@ let toggle_acting_pane (state : state) =
    reader after a later resize, the same rule the toggle follows. *)
 let show_acting_pane_tab (state : state) tab =
   let _rows, cols = Masc_tui_ansi.get_terminal_size () in
-  if Masc_tui_acting_pane.drawn_cols ~layout:Masc_tui_acting_pane.Narrow ~cols = 0 then
+  if Masc_tui_render.acting_pane_suppressed state then
+    Error "Activity pane is not drawn over this surface; preference unchanged"
+  else if Masc_tui_acting_pane.drawn_cols ~layout:Masc_tui_acting_pane.Narrow ~cols = 0 then
     Error
       (Printf.sprintf "Activity pane needs %d columns; preference unchanged"
          Masc_tui_acting_pane.threshold_cols)
   else begin
-    (match state.acting_pane_layout with
+    let layout =
+      match acting_pane_layout state with
      | Masc_tui_acting_pane.Hidden ->
-         state.acting_pane_layout <- Masc_tui_acting_pane.Narrow
-     | Masc_tui_acting_pane.Narrow | Masc_tui_acting_pane.Wide -> ());
+         Masc_tui_acting_pane.Narrow
+      | (Masc_tui_acting_pane.Narrow | Masc_tui_acting_pane.Wide) as layout -> layout
+    in
+    state.acting_pane_preference <- Chosen_acting_pane layout;
     state.acting_pane_tab <- tab;
     state.acting_pane_scroll <- 0;
     Ok ()
@@ -9486,7 +9499,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
         notice ~kind:Notice_failure
           "Activity pane is not drawn over this surface; nothing to scroll"
       else if
-        Masc_tui_acting_pane.drawn_cols ~layout:state.acting_pane_layout ~cols = 0
+        Masc_tui_acting_pane.drawn_cols ~layout:(acting_pane_layout state) ~cols = 0
       then
         notice ~kind:Notice_failure
           "Activity pane is not shown; Ctrl-L or /activity shows it"
@@ -9515,7 +9528,8 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
            state.lane_addons <- Some { view with error = lane_addons_input_failure detail })
   | Masc_tui_command.Open_metrics ->
       Buffer.clear state.msg_input;
-      goto_surface state ~mailbox Metrics
+      goto_surface state ~mailbox Metrics;
+      state.usage_telemetry_open <- true
   | Masc_tui_command.Account_login requested ->
       Buffer.clear state.msg_input;
       let view = Masc_tui_account_login.create requested in
@@ -9786,7 +9800,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       (* The cards carry names made safe to draw, so the name typed is
          compared in the same form. *)
       let requested_name =
-        Option.map Tui_decode.sanitize_terminal_text requested_name
+        Option.map Masc.Tui_terminal_text.sanitize_terminal_text requested_name
       in
       (let card =
          match requested_name with
@@ -10013,12 +10027,12 @@ let apply_approvals_load state = function
    that read it (iTerm2, WezTerm, kitty) and is ignored elsewhere. Neither
    moves the cursor, so this writes out of band rather than through the frame.
    The banner names the Keeper so it says who is waiting. *)
-let notify_new_asks (snapshot : Tui_decode.asks_snapshot) arrived_ids =
+let notify_new_asks (snapshot : Masc.Tui_decode_asks.asks_snapshot) arrived_ids =
   let keeper_of id =
     List.find_opt
-      (fun (row : Tui_decode.ask_row) -> String.equal row.Tui_decode.ar_id id)
-      snapshot.Tui_decode.asn_rows
-    |> Option.map (fun (row : Tui_decode.ask_row) -> row.Tui_decode.ar_keeper)
+      (fun (row : Masc.Tui_decode_asks.ask_row) -> String.equal row.Masc.Tui_decode_asks.ar_id id)
+      snapshot.Masc.Tui_decode_asks.asn_rows
+    |> Option.map (fun (row : Masc.Tui_decode_asks.ask_row) -> row.Masc.Tui_decode_asks.ar_keeper)
   in
   let message =
     match List.filter_map keeper_of arrived_ids with
@@ -10037,6 +10051,19 @@ let apply_asks_load state = function
       let arrived =
         Ask.newly_opened_ask_ids ~previous:state.asks_snapshot ~current:snapshot
       in
+      let current_rows =
+        Option.fold ~none:[] ~some:Ask.open_rows state.asks_snapshot
+      in
+      let next_rows = Ask.open_rows snapshot in
+      state.ask_cursor <- Ask.reconcile_cursor ~current_rows
+        ~cursor:state.ask_cursor ~next_rows;
+      (match state.ask_answer_mode with
+       | Ask_browsing -> ()
+       | Ask_answering { aam_ask_id } ->
+           (match List.find_index
+                    (fun (row : Tui_decode.ask_row) -> row.ar_id = aam_ask_id) next_rows with
+            | Some index -> state.ask_cursor <- index
+            | None -> clear_ask_answering state));
       state.asks_snapshot <- Some snapshot;
       state.asks_error <- None;
       (* Silent while the operator is on the Approvals surface -- the panel is
@@ -10279,12 +10306,12 @@ let apply_planning_load state = function
 let apply_fusion_runs_load state request = function
   | Ok snapshot ->
       let keeper_run_id =
-        Option.map (fun (_, run) -> run.Tui_decode.fur_run_id)
+        Option.map (fun (_, run) -> run.Masc.Tui_decode_fusion.fur_run_id)
           (selected_keeper_run state)
       in
       let current_selected_id =
         match state.fusion_mode with
-        | Fusion_historical_detail reference -> Some (fusion_entry_identity (Tui_decode.Fusion_historical_evidence reference))
+        | Fusion_historical_detail reference -> Some (fusion_entry_identity (Masc.Tui_decode_fusion.Fusion_historical_evidence reference))
         | Fusion_detail run_id -> Some ("run:" ^ run_id)
         | Fusion_list -> Option.map fusion_entry_identity (selected_fusion_entry state)
       in
@@ -10307,7 +10334,7 @@ let apply_fusion_runs_load state request = function
       let keeper_runs = selected_keeper_runs state in
       state.keeper_run_cursor <-
         Option.bind keeper_run_id (fun id ->
-          List.find_index (fun run -> String.equal run.Tui_decode.fur_run_id id) keeper_runs)
+          List.find_index (fun run -> String.equal run.Masc.Tui_decode_fusion.fur_run_id id) keeper_runs)
         |> Option.value ~default:(max 0 (min state.keeper_run_cursor (List.length keeper_runs - 1)));
       state.fusion_launch_error <- None;
       (* A run the form just started is selected the first time the list
@@ -10317,9 +10344,9 @@ let apply_fusion_runs_load state request = function
            match
              fusion_snapshot_entries snapshot
              |> List.find_index (function
-                  | Tui_decode.Fusion_retained_run run ->
+                  | Masc.Tui_decode_fusion.Fusion_retained_run run ->
                       String.equal run.fur_run_id started.fls_run_id
-                  | Tui_decode.Fusion_historical_evidence _ -> false)
+                  | Masc.Tui_decode_fusion.Fusion_historical_evidence _ -> false)
            with
            | Some cursor ->
                state.fusion_cursor <- cursor;
@@ -10363,14 +10390,14 @@ let apply_fusion_detail_load state generation run_id result =
     | Fusion_historical_detail _ | Fusion_list -> false
   then
     match result with
-    | Ok detail when String.equal detail.Tui_decode.fud_run.fur_run_id run_id ->
+    | Ok detail when String.equal detail.Masc.Tui_decode_fusion.fud_run.fur_run_id run_id ->
         state.fusion_detail <- Some detail;
         state.fusion_detail_error <- None
     | Ok detail ->
         state.fusion_detail_error <-
           Some
             (Printf.sprintf "fusion detail returned run %s for request %s"
-               detail.Tui_decode.fud_run.fur_run_id run_id)
+               detail.Masc.Tui_decode_fusion.fud_run.fur_run_id run_id)
     | Error detail -> state.fusion_detail_error <- Some detail
 
 let apply_fusion_historical_detail_load state generation reference result =
@@ -10380,7 +10407,7 @@ let apply_fusion_historical_detail_load state generation reference result =
          | Fusion_list | Fusion_detail _ -> false)
   then
     match result with
-    | Ok detail when detail.Tui_decode.fhd_reference = reference ->
+    | Ok detail when detail.Masc.Tui_decode_fusion.fhd_reference = reference ->
         state.fusion_historical_detail <- Some detail;
         state.fusion_detail_error <- None
     | Ok _ ->
@@ -11427,34 +11454,35 @@ let open_ask_rows state =
   | Some snapshot ->
       Ask.open_rows snapshot
 
-let selected_ask_row state = List.nth_opt (open_ask_rows state) state.ask_cursor
+let selected_ask_row state =
+  match state.ask_answer_mode with
+  | Ask_browsing -> List.nth_opt (open_ask_rows state) state.ask_cursor
+  | Ask_answering { aam_ask_id } ->
+      List.find_opt (fun (row : Tui_decode.ask_row) -> row.ar_id = aam_ask_id)
+        (open_ask_rows state)
 
 let selected_ask_question state =
   match selected_ask_row state with
   | None -> None
-  | Some (row : Tui_decode.ask_row) ->
-      List.nth_opt row.Tui_decode.ar_questions state.ask_question_cursor
+  | Some (row : Masc.Tui_decode_asks.ask_row) ->
+      List.nth_opt row.Masc.Tui_decode_asks.ar_questions state.ask_question_cursor
 
 (* Leaving the mode drops the draft. An answer half-written against a question
    the operator walked away from is not a thing to restore later; the Keeper
    is still waiting either way, and the row says so. *)
-let leave_ask_answering state =
-  state.ask_answer_mode <- Ask_browsing;
-  state.ask_draft <- None;
-  state.ask_text_entry <- None;
-  state.pending_ask_submit <- None
+let leave_ask_answering state = clear_ask_answering state
 
 let enter_ask_answering state =
   match selected_ask_row state with
   | None -> report_action state "system" "No question is waiting on you"
-  | Some (row : Tui_decode.ask_row) ->
+  | Some (row : Masc.Tui_decode_asks.ask_row) ->
       (* The answer flow is drawn by the approvals list. With an approval's
          detail open that surface is not on screen, so [a] used to set the mode
          and change nothing an operator could see -- the keypress landed and
          the questions stayed hidden. Close the detail, which is where the
          operator asked to go. *)
       state.approval_detail_open <- false;
-      state.ask_answer_mode <- Ask_answering { aam_ask_id = row.Tui_decode.ar_id };
+      state.ask_answer_mode <- Ask_answering { aam_ask_id = row.Masc.Tui_decode_asks.ar_id };
       state.ask_question_cursor <- 0;
       state.ask_question_scroll <- 0;
       state.ask_draft <- Some (Ask.draft_for state.ask_draft ~row);
@@ -11480,8 +11508,8 @@ let move_ask_cursor state delta =
          looking at, and [a] is the key that says they mean it. *)
       | Ask_browsing, _ -> ()
       | Ask_answering _, None -> ()
-      | Ask_answering _, Some (row : Tui_decode.ask_row) ->
-          state.ask_answer_mode <- Ask_answering { aam_ask_id = row.Tui_decode.ar_id };
+      | Ask_answering _, Some (row : Masc.Tui_decode_asks.ask_row) ->
+          state.ask_answer_mode <- Ask_answering { aam_ask_id = row.Masc.Tui_decode_asks.ar_id };
           state.ask_draft <- Some (Ask.draft_for state.ask_draft ~row)
     end
   end
@@ -11489,8 +11517,8 @@ let move_ask_cursor state delta =
 let move_ask_question_cursor state delta =
   match selected_ask_row state with
   | None -> ()
-  | Some (row : Tui_decode.ask_row) ->
-      let count = List.length row.Tui_decode.ar_questions in
+  | Some (row : Masc.Tui_decode_asks.ask_row) ->
+      let count = List.length row.Masc.Tui_decode_asks.ar_questions in
       if count > 0 then begin
         state.ask_question_cursor <-
           max 0 (min (count - 1) (state.ask_question_cursor + delta));
@@ -11510,8 +11538,8 @@ let with_ask_draft state f =
 let toggle_ask_choice state index =
   match selected_ask_question state with
   | None -> ()
-  | Some (question : Tui_decode.ask_question) -> (
-      match List.nth_opt question.Tui_decode.aq_choices index with
+  | Some (question : Masc.Tui_decode_asks.ask_question) -> (
+      match List.nth_opt question.Masc.Tui_decode_asks.aq_choices index with
       | None -> ()
       | Some choice ->
           with_ask_draft state (fun draft question ->
@@ -11532,7 +11560,7 @@ let toggle_ask_choice state index =
 let begin_ask_text_entry state =
   match (selected_ask_row state, selected_ask_question state) with
   | Some row, Some question ->
-      let slot = Ask.free_text_slot ~ask_id:row.Tui_decode.ar_id question in
+      let slot = Ask.free_text_slot ~ask_id:row.Masc.Tui_decode_asks.ar_id question in
       let existing =
         match Ask.response_for (Ask.draft_for state.ask_draft ~row) ~question with
         | Some (Ask.Draft_wrote text) -> text
@@ -11564,7 +11592,7 @@ let commit_ask_text_entry state =
       let ask_id = Ask.free_text_ask_id entry.ate_slot in
       (match
          List.find_opt
-           (fun (row : Tui_decode.ask_row) -> String.equal row.Tui_decode.ar_id ask_id)
+           (fun (row : Masc.Tui_decode_asks.ask_row) -> String.equal row.Masc.Tui_decode_asks.ar_id ask_id)
            (open_ask_rows state)
        with
        | Some row ->
@@ -11637,9 +11665,12 @@ let start_ask_answer state ~keeper_name ~ask_id ~answered_label ~answers ~mailbo
       apply_ask_answer_completion state answered_label result asks
 
 let handle_ask_submit state ~mailbox =
+  match state.asks_error with
+  | Some _ -> report_action state "error" "Question source unavailable; refresh before answering"
+  | None ->
   match selected_ask_row state with
   | None -> ()
-  | Some (row : Tui_decode.ask_row) -> (
+  | Some (row : Masc.Tui_decode_asks.ask_row) -> (
       let draft = Ask.draft_for state.ask_draft ~row in
       match Ask.readiness draft ~row with
       | Ask.Not_open ->
@@ -11652,12 +11683,12 @@ let handle_ask_submit state ~mailbox =
             (Printf.sprintf "Still unanswered: %s"
                (String.concat ", "
                   (List.map
-                     (fun (q : Tui_decode.ask_question) -> q.Tui_decode.aq_header)
+                     (fun (q : Masc.Tui_decode_asks.ask_question) -> q.Masc.Tui_decode_asks.aq_header)
                      questions)))
       | Ask.Ready answers -> (
           match
             Ask.gate_transition ~inflight:state.ask_submit_inflight
-              ~pending:state.pending_ask_submit ~ask_id:row.Tui_decode.ar_id
+              ~pending:state.pending_ask_submit ~ask_id:row.Masc.Tui_decode_asks.ar_id
           with
           | Ask.Ask_gate_blocked_inflight ->
               state.pending_ask_submit <- None;
@@ -11666,17 +11697,17 @@ let handle_ask_submit state ~mailbox =
               state.pending_ask_submit <- Some ask_id;
               report_action state "system"
                 (Printf.sprintf "Press enter again to answer %s"
-                   row.Tui_decode.ar_keeper)
+                   row.Masc.Tui_decode_asks.ar_keeper)
           | Ask.Ask_gate_submit ->
               (* Name the Keeper and what was chosen, not the ask's opaque id,
                  so the confirmation says which decision landed and as what. *)
               let answered_label =
                 match Ask.summarize_answer draft ~row with
-                | "" -> row.Tui_decode.ar_keeper
-                | chosen -> Printf.sprintf "%s: %s" row.Tui_decode.ar_keeper chosen
+                | "" -> row.Masc.Tui_decode_asks.ar_keeper
+                | chosen -> Printf.sprintf "%s: %s" row.Masc.Tui_decode_asks.ar_keeper chosen
               in
-              start_ask_answer state ~keeper_name:row.Tui_decode.ar_keeper
-                ~ask_id:row.Tui_decode.ar_id ~answered_label ~answers ~mailbox))
+              start_ask_answer state ~keeper_name:row.Masc.Tui_decode_asks.ar_keeper
+                ~ask_id:row.Masc.Tui_decode_asks.ar_id ~answered_label ~answers ~mailbox))
 
 (* Run one lifecycle action's steps against the server.
 
@@ -11810,6 +11841,11 @@ let split_board_draft (text : string) : string * string =
    action: the compose pane must keep accepting keys while the request is
    out, and the outcome lands in the same mailbox everything else does. *)
 let start_board_post state ~mailbox ~(title : string) ~(body : string) ?hearth () =
+  if state.workspace_identity <> Workspace_identity_match then begin
+    let detail = "Cannot write to Board: workspace identity is unverified; draft retained" in
+    state.board_post_error <- Some detail;
+    report_action state "error" detail
+  end else begin
   state.board_post_error <- None;
   state.board_post_inflight <- true;
   report_action state "system" "posting to Board";
@@ -11830,6 +11866,7 @@ let start_board_post state ~mailbox ~(title : string) ~(body : string) ?hearth (
   match Eio_context.get_switch_opt () with
   | Some sw -> Eio.Fiber.fork ~sw run_post
   | None -> run_post ()
+  end
 
 
 (* Request a goal lifecycle change through the tools route. Runs in a fiber
@@ -11943,6 +11980,11 @@ let handle_goal_action_key state ~mailbox ~(action : Goal_phase.Public_action.t)
    the other board writes; the route stamps the author. *)
 let start_board_comment state ~mailbox ~(post_id : string)
     ~(content : string) =
+  if state.workspace_identity <> Workspace_identity_match then begin
+    let detail = "Cannot write to Board: workspace identity is unverified; draft retained" in
+    state.board_post_error <- Some detail;
+    report_action state "error" detail
+  end else begin
   state.board_post_error <- None;
   state.board_post_inflight <- true;
   report_action state "system" "commenting on Board";
@@ -11961,10 +12003,16 @@ let start_board_comment state ~mailbox ~(post_id : string)
   match Eio_context.get_switch_opt () with
   | Some sw -> Eio.Fiber.fork ~sw run_comment
   | None -> run_comment ()
+  end
 
 (* Send a vote through the tools route. The voter is stamped by the route,
    so the payload says only which post and which way. *)
 let start_board_vote state ~mailbox ~(post_id : string) ~(up : bool) =
+  if state.workspace_identity <> Workspace_identity_match then begin
+    let detail = "Cannot write to Board: workspace identity is unverified; draft retained" in
+    state.board_post_error <- Some detail;
+    report_action state "error" detail
+  end else begin
   report_action state "system"
     (Printf.sprintf "voting %s on %s" (if up then "up" else "down") post_id);
   let host = server_peer_host in
@@ -11980,6 +12028,7 @@ let start_board_vote state ~mailbox ~(post_id : string) ~(up : bool) =
   match Eio_context.get_switch_opt () with
   | Some sw -> Eio.Fiber.fork ~sw run_vote
   | None -> run_vote ()
+  end
 
 (* The vote keys on the list row under the cursor. Two presses: the first
    names the post and direction, the same press again sends it. The post id
@@ -12184,13 +12233,13 @@ let open_harness_detail state =
 let open_fusion_detail state ~mailbox =
   match selected_fusion_entry state with
   | None -> ()
-  | Some (Tui_decode.Fusion_historical_evidence evidence) ->
+  | Some (Masc.Tui_decode_fusion.Fusion_historical_evidence evidence) ->
       state.fusion_mode <- Fusion_historical_detail evidence;
       state.fusion_scroll <- 0;
       state.fusion_historical_detail <- None;
       state.fusion_detail_error <- None;
       launch_fusion_historical_detail_load state ~mailbox ~reference:evidence
-  | Some (Tui_decode.Fusion_retained_run run) ->
+  | Some (Masc.Tui_decode_fusion.Fusion_retained_run run) ->
       state.fusion_mode <- Fusion_detail run.fur_run_id;
       state.fusion_scroll <- 0;
       state.fusion_detail <- None;
@@ -12540,7 +12589,7 @@ let rearm_continuous_capture state ~mailbox ~keeper =
 ;;
 
 let handle_composer_key state ~base_path ~mailbox key =
-  if state.workspace_identity <> Masc_tui_types.Workspace_identity_match
+  if state.view = Overview || state.workspace_identity <> Masc_tui_types.Workspace_identity_match
      || Option.is_some (browser_lane_on_screen state)
   then false
   else
@@ -13253,6 +13302,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                     ^ " (Keeper not found). Showing Dashboard.")
                else (
                  open_message_for_keeper
+                   ~remember_home_chat:false
                    ~return_to:Keeper_chat_return_list state keeper_name
                    ~drain_queue:(fun () ->
                      drain_queued_message state ~base_path ~mailbox);
@@ -13266,7 +13316,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
          short-lived and every other surface would fetch rows it never
          shows. *)
       (match state.view with
-       | Approvals -> launch_keeper_tool_approvals_load state ~mailbox
+       | Overview | Approvals -> launch_keeper_tool_approvals_load state ~mailbox
        | Keepers _ -> launch_keeper_tool_modes_load state ~mailbox
        | _ -> ());
       open_observer_if_due state ~retry_closed:false
@@ -13567,7 +13617,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       http_scoped_refresh_inflight := false;
       apply_http_scoped_surfaces state results;
       (match state.view with
-       | Approvals -> launch_keeper_tool_approvals_load state ~mailbox
+       | Overview | Approvals -> launch_keeper_tool_approvals_load state ~mailbox
        | Keepers _ -> launch_keeper_tool_modes_load state ~mailbox
        | _ -> ());
       start_scoped_refresh_followup state ~host:(server_peer_host)
@@ -14137,7 +14187,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
               (String.concat "\n" lines)
             |> List.map
                  (List.map (fun (text, kind) ->
-                      (Masc.Tui_decode.sanitize_terminal_text text, kind)))
+                      (Masc.Tui_terminal_text.sanitize_terminal_text text, kind)))
           in
           state.runtime_config_view <- Some
              { rcv_path = path; rcv_rows = rows; rcv_metadata = metadata };
@@ -14195,7 +14245,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
             Masc_tui_code_lexer.rows_of_source ~language content
             |> List.map
                  (List.map (fun (text, kind) ->
-                      (Masc.Tui_decode.sanitize_terminal_text text, kind)))
+                      (Masc.Tui_terminal_text.sanitize_terminal_text text, kind)))
           in
           (* [rows] stays a list for the memo scan and the width fold just
              below, both of which read it once front to back. The pane keeps
@@ -14263,7 +14313,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
              Some
                (match text with
                 | Some t ->
-                    symbol ^ ": " ^ Masc.Tui_decode.sanitize_terminal_text t
+                    symbol ^ ": " ^ Masc.Tui_terminal_text.sanitize_terminal_text t
                 | None -> symbol ^ ": the server has nothing to say here")
        | Ok (Masc.Tui_decode.Lsp_locations []) ->
            state.code_lsp_note <-
@@ -14336,16 +14386,16 @@ let apply_async_message state ~base_path ~http_refresh_inflight
             List.map
               (fun (resource : Masc_tui_mcp.resource) ->
                 { resource with
-                  uri = Masc.Tui_decode.sanitize_terminal_text resource.uri
-                ; name = Masc.Tui_decode.sanitize_terminal_text resource.name
+                  uri = Masc.Tui_terminal_text.sanitize_terminal_text resource.uri
+                ; name = Masc.Tui_terminal_text.sanitize_terminal_text resource.name
                 ; title =
-                    Option.map Masc.Tui_decode.sanitize_terminal_text
+                    Option.map Masc.Tui_terminal_text.sanitize_terminal_text
                       resource.title
                 ; description =
-                    Option.map Masc.Tui_decode.sanitize_terminal_text
+                    Option.map Masc.Tui_terminal_text.sanitize_terminal_text
                       resource.description
                 ; mime_type =
-                    Option.map Masc.Tui_decode.sanitize_terminal_text
+                    Option.map Masc.Tui_terminal_text.sanitize_terminal_text
                       resource.mime_type
                 })
               rows
@@ -14386,17 +14436,17 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            | Ok contents ->
                let sanitize_document text =
                  String.split_on_char '\n' text
-                 |> List.map Masc.Tui_decode.sanitize_terminal_text
+                 |> List.map Masc.Tui_terminal_text.sanitize_terminal_text
                  |> String.concat "\n"
                in
                let contents =
                  List.map
                    (fun (content : Masc_tui_mcp.resource_content) ->
                      { Masc_tui_mcp.rc_uri =
-                         Option.map Masc.Tui_decode.sanitize_terminal_text
+                         Option.map Masc.Tui_terminal_text.sanitize_terminal_text
                            content.rc_uri
                      ; rc_mime_type =
-                         Option.map Masc.Tui_decode.sanitize_terminal_text
+                         Option.map Masc.Tui_terminal_text.sanitize_terminal_text
                            content.rc_mime_type
                      ; rc_kind =
                          (match content.rc_kind with
@@ -14612,7 +14662,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
              Some
                ( keeper_name
                , Masc_tui_github_identity.view_lines
-                   ~sanitize:Masc.Tui_decode.sanitize_terminal_text json );
+                   ~sanitize:Masc.Tui_terminal_text.sanitize_terminal_text json );
            state.github_identity_view_error <- None
        | Error detail ->
            report_action state "error" (keeper_name ^ ": github token save: " ^ detail);
@@ -16309,8 +16359,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                    looking at; without one, the roster's own cursor does. *)
                 let keeper =
                   match selected_fusion_entry state with
-                  | Some (Tui_decode.Fusion_retained_run run) -> Some run.fur_keeper
-                  | Some (Tui_decode.Fusion_historical_evidence _) | None ->
+                  | Some (Masc.Tui_decode_fusion.Fusion_retained_run run) -> Some run.fur_keeper
+                  | Some (Masc.Tui_decode_fusion.Fusion_historical_evidence _) | None ->
                       Option.map (fun (k : keeper) -> k.k_name) (selected_keeper state)
                 in
                 (match Masc_tui_fusion_launch.open_form ~keepers ~keeper ~options with
@@ -16438,7 +16488,9 @@ let drain_async_messages state ~base_path ~http_refresh_inflight
     ~frame_presenter ~render_schedule mailbox =
   let rec loop changed =
     match Eio.Stream.take_nonblocking mailbox with
-    | None -> changed
+    | None ->
+        reconcile_home_request_detail state;
+        changed
     | Some { ready_at_ns; message = msg } ->
         let waited_ns = Int64.sub (Mtime_clock.elapsed_ns ()) ready_at_ns in
         if Int64.compare waited_ns Masc_tui_http.slow_report_ns >= 0 then
@@ -16686,6 +16738,12 @@ let main
      Theme_choice.apply returns false for a name no scheme carries, and the
      [when] guard then leaves theme_choice unset. *)
   let tui_settings = Masc_tui_config.load ~base_path in
+  (match tui_settings.last_chat_keeper with
+   | Ok None -> ()
+   | Ok (Some keeper) -> state.home_last_chat <- Recorded_chat keeper
+   | Error reason ->
+       state.home_last_chat <- Unreadable_chat_receipt reason;
+       add_event state "error" reason);
   (match tui_settings.opening with
    | Ok Masc_tui_config.Overview -> ()
    | Ok (Masc_tui_config.Last None as opening) ->
@@ -20175,7 +20233,12 @@ and is loaded on demand through keeper_skill.
                   | Ask_browsing -> false)
               && not (modal_owns_keys state) ->
            (match k with
-            | "esc" -> leave_ask_answering state
+            | "esc" ->
+                leave_ask_answering state;
+                (match state.home_opened_request with
+                 | Some (Home_question _) ->
+                     goto_surface state ~mailbox:async_messages Overview
+                 | Some _ | None -> ())
             | "left" | "up" | "k" -> move_ask_question_cursor state (-1)
             | "right" | "down" | "j" -> move_ask_question_cursor state 1
             | "pageup" | "pagedown" | "wheel-up" | "wheel-down" ->
@@ -20195,8 +20258,8 @@ and is loaded on demand through keeper_skill.
             | "end" ->
                 state.ask_question_scroll <-
                   Masc_tui_render.ask_question_scroll_limit state
-            | "[" -> move_ask_cursor state (-1)
-            | "]" -> move_ask_cursor state 1
+            | "[" -> state.home_opened_request <- None; move_ask_cursor state (-1)
+            | "]" -> state.home_opened_request <- None; move_ask_cursor state 1
             | "s" | "S" -> skip_ask_question state
             | "c" | "C" -> clear_ask_question state
             (* Ahead of the digit arm below, which takes every one-character
@@ -21743,7 +21806,7 @@ and is loaded on demand through keeper_skill.
             | None -> ()
             | Some (_, run) ->
                 state.followed_from <- Some (state.view, None);
-                goto_surface state ~mailbox:async_messages Fusion;
+                goto_surface ~from_reference:true state ~mailbox:async_messages Fusion;
                 state.fusion_mode <- Fusion_detail run.fur_run_id;
                 state.fusion_scroll <- 0;
                 state.fusion_detail <- None;
@@ -21754,19 +21817,19 @@ and is loaded on demand through keeper_skill.
        | Some "K" when state.view = Fusion
            && (match state.fusion_mode, selected_fusion_entry state with
                | Fusion_historical_detail _, _
-               | Fusion_list, Some (Tui_decode.Fusion_historical_evidence _) -> true
+               | Fusion_list, Some (Masc.Tui_decode_fusion.Fusion_historical_evidence _) -> true
                | _ -> false) ->
            report_action state "system" "Historical Board evidence has no retained caller identity"
        | Some "K" when state.view = Fusion ->
            let run = match state.fusion_mode, fusion_snapshot state with
              | Fusion_detail id, Some snapshot -> List.find_opt
-                 (fun (run : Tui_decode.fusion_run) -> String.equal run.fur_run_id id) snapshot.fus_runs
+                 (fun (run : Masc.Tui_decode_fusion.fusion_run) -> String.equal run.fur_run_id id) snapshot.fus_runs
              | Fusion_list, Some _ ->
                  (match selected_fusion_entry state with
-                  | Some (Tui_decode.Fusion_retained_run run) -> Some run
-                  | Some (Tui_decode.Fusion_historical_evidence _) | None -> None)
+                  | Some (Masc.Tui_decode_fusion.Fusion_retained_run run) -> Some run
+                  | Some (Masc.Tui_decode_fusion.Fusion_historical_evidence _) | None -> None)
              | Fusion_historical_detail _, _ | _, None -> None in
-           (match Option.bind run (fun (run : Tui_decode.fusion_run) ->
+           (match Option.bind run (fun (run : Masc.Tui_decode_fusion.fusion_run) ->
               List.find_index (fun (k : keeper) -> String.equal k.k_name run.fur_keeper) state.keepers) with
             | None -> report_action state "system" "The calling Keeper is not in the current roster"
             | Some index ->
@@ -21775,25 +21838,25 @@ and is loaded on demand through keeper_skill.
                 Option.iter (open_keeper_detail state ~base_path ~mailbox:async_messages) (selected_keeper state);
                 state.detail_tab <- Detail_runs;
                 state.keeper_run_cursor <-
-                  Option.bind run (fun (run : Tui_decode.fusion_run) ->
-                    List.find_index (fun (candidate : Tui_decode.fusion_run) ->
+                  Option.bind run (fun (run : Masc.Tui_decode_fusion.fusion_run) ->
+                    List.find_index (fun (candidate : Masc.Tui_decode_fusion.fusion_run) ->
                       String.equal candidate.fur_run_id run.fur_run_id)
                       (selected_keeper_runs state))
                   |> Option.value ~default:0)
        | Some "B" when state.view = Fusion
            && state.fusion_mode = Fusion_list ->
            (match selected_fusion_entry state with
-            | Some (Tui_decode.Fusion_historical_evidence reference) ->
+            | Some (Masc.Tui_decode_fusion.Fusion_historical_evidence reference) ->
                 state.followed_from <- Some (state.view, None);
                 state.board_mode <- Board_read reference.fhe_post_id;
                 state.board_scroll <- 0;
                 state.board_comment_scroll <- 0;
                 state.board_comments_focused <- false;
                 state.board_focus <- Right_pane;
-                goto_surface state ~mailbox:async_messages Board;
+                goto_surface ~from_reference:true state ~mailbox:async_messages Board;
                 start_board_post_refresh state ~host:server_peer_host ~port:state.port
                   ~post_id:reference.fhe_post_id ~mailbox:async_messages
-            | Some (Tui_decode.Fusion_retained_run _) | None ->
+            | Some (Masc.Tui_decode_fusion.Fusion_retained_run _) | None ->
                 report_action state "system" "Open a Fusion run to follow its Board evidence")
        | Some "B" when state.view = Fusion ->
            (match state.fusion_mode, state.fusion_detail with
@@ -21804,7 +21867,7 @@ and is loaded on demand through keeper_skill.
                 state.board_comment_scroll <- 0;
                 state.board_comments_focused <- false;
                 state.board_focus <- Right_pane;
-                goto_surface state ~mailbox:async_messages Board;
+                goto_surface ~from_reference:true state ~mailbox:async_messages Board;
                 start_board_post_refresh state ~host:server_peer_host ~port:state.port
                   ~post_id:reference.fhe_post_id ~mailbox:async_messages
             | Fusion_detail id, Some detail when id = detail.fud_run.fur_run_id ->
@@ -21817,7 +21880,7 @@ and is loaded on demand through keeper_skill.
                      state.board_comment_scroll <- 0;
                      state.board_comments_focused <- false;
                      state.board_focus <- Right_pane;
-                     goto_surface state ~mailbox:async_messages Board;
+                     goto_surface ~from_reference:true state ~mailbox:async_messages Board;
                      start_board_post_refresh state ~host:server_peer_host ~port:state.port
                        ~post_id:evidence.fe_post_id ~mailbox:async_messages)
             | _ -> report_action state "system" "Open a Fusion run to follow its Board evidence")
@@ -21974,6 +22037,7 @@ and is loaded on demand through keeper_skill.
               && (match state.planning_mode with
                   | Planning_detail _ -> true
                   | Planning_list -> false) ->
+           state.home_opened_request <- None;
            step_detail_cursor
              ~count:
                (match state.planning with
@@ -22009,6 +22073,7 @@ and is loaded on demand through keeper_skill.
           cursor -- so stepping is the cursor move, and the pane follows. *)
        | Some (("[" | "]") as bracket)
          when state.view = Approvals && state.approval_detail_open ->
+           state.home_opened_request <- None;
            step_detail_cursor ~count:(List.length (approval_items state))
              ~cursor:state.approval_cursor
              ~delta:(if bracket = "]" then 1 else -1)
@@ -22389,6 +22454,83 @@ and is loaded on demand through keeper_skill.
            goto_surface state ~mailbox:async_messages Acting
        | Some ("l" | "L") when state.view = Acting ->
            goto_surface state ~mailbox:async_messages System_logs
+       | Some ("j" | "down" | "k" | "up" as key) when state.view = Overview ->
+           home_step state ~backwards:(key = "k" || key = "up")
+       | Some "p" when state.view = Overview ->
+           goto_surface state ~mailbox:async_messages Approvals
+       | Some ("\r" | "\n" | "enter") when state.view = Overview ->
+           (match home_selected_action state with
+            | None -> report_action state "system" "Selection changed; choose again"
+            | Some action ->
+              state.home_selected <- Some action;
+              (match action with
+            | Home_approvals ->
+                goto_surface state ~mailbox:async_messages Approvals
+            | Home_request request ->
+                let navigate destination =
+                  goto_surface ~from_reference:true state ~mailbox:async_messages destination;
+                  state.followed_from <- Some (Overview, None);
+                  state.home_opened_request <- Some request
+                in
+                (match request with
+                 | Home_held_call _ | Home_gate_request _ | Home_operator_request _ ->
+                     (match List.find_index
+                              (fun row -> home_request_of_approval row = request)
+                              (approval_items state) with
+                      | None -> report_action state "system" "Request changed; choose again"
+                      | Some cursor ->
+                          navigate Approvals;
+                          state.approval_cursor <- cursor;
+                          state.approval_detail_open <- true;
+                          state.approval_detail_scroll <- 0)
+                 | Home_question ask_id ->
+                     (match List.find_index
+                              (fun (row : Tui_decode.ask_row) -> row.ar_id = ask_id)
+                              (open_ask_rows state) with
+                      | None -> report_action state "system" "Question changed; choose again"
+                      | Some cursor ->
+                          navigate Approvals;
+                          state.ask_cursor <- cursor;
+                          enter_ask_answering state)
+                 | Home_goal_confirmation goal_id ->
+                     (match state.planning_filter with
+                      | Planning_filter_all | Planning_filter_active -> ()
+                      | Planning_filter_completed | Planning_filter_dropped ->
+                          state.planning_filter <- Planning_filter_active);
+                     navigate Planning;
+                     state.planning_mode <- Planning_detail goal_id;
+                     state.planning_scroll <- 0;
+                     state.goal_timeline <- None;
+                     launch_goal_timeline_load state ~mailbox:async_messages goal_id
+                 | Home_operator_task task_id ->
+                     navigate Planning;
+                     state.planning_mode <- Planning_list;
+                     state.task_detail_id <- Some task_id;
+                     state.task_detail_scroll <- 0;
+                     state.task_history <- None;
+                     state.task_focus <- Masc_tui_overview_tasks.land_on state.tasks ~task_id;
+                     launch_task_history_load state ~mailbox:async_messages task_id)
+            | Home_agenda ->
+                state.agenda_open <- true;
+                state.agenda_scroll <- 0;
+                state.agenda_selected <-
+                  Masc_tui_agenda.step (Masc_tui_render.agenda_lines state)
+                    ~selected:Masc_tui_agenda.Nowhere Masc_tui_agenda.Next
+            | Home_resume keeper_name ->
+                open_message_for_keeper ~return_to:Keeper_chat_return_home state
+                  keeper_name ~drain_queue:(fun () ->
+                    drain_queued_message state ~base_path ~mailbox:async_messages);
+                launch_keeper_history_load state ~mailbox:async_messages ~keeper_name;
+                state.view <- Keepers Keeper_message
+            | Home_read_last keeper_name ->
+                open_message_for_keeper ~remember_home_chat:false
+                  ~return_to:Keeper_chat_return_home state keeper_name
+                  ~drain_queue:(fun () -> ());
+                launch_keeper_history_load state ~mailbox:async_messages ~keeper_name;
+                state.view <- Keepers Keeper_message
+            | Home_choose_keeper ->
+                goto_surface state ~mailbox:async_messages (Keepers Keeper_list)
+            | Home_create_keeper -> handle_keeper_create ()))
         | Some ("m" | "M") when state.view = Overview ->
             goto_surface state ~mailbox:async_messages Metrics
         | Some ("p" | "P") when state.view = Metrics ->
@@ -22633,6 +22775,8 @@ and is loaded on demand through keeper_skill.
            state.agenda_selected <-
              Masc_tui_agenda.step (Masc_tui_render.agenda_lines state)
                ~selected:Masc_tui_agenda.Nowhere Masc_tui_agenda.Next
+       | Some "i" when state.view = Overview ->
+           goto_surface state ~mailbox:async_messages (Keepers Keeper_list)
        | Some "i"
          when (not message_mode)
               && (match state.msg_target_keeper_name with
@@ -23054,7 +23198,7 @@ and is loaded on demand through keeper_skill.
                 (* Recorded before the move, so the way back is where the
                    operator actually was rather than where they land. *)
                 state.followed_from <- Some (state.view, None);
-                goto_surface state ~mailbox:async_messages destination;
+                goto_surface ~from_reference:true state ~mailbox:async_messages destination;
                 (* Landing on the surface is half the move. Every one of
                    these already has a "this one is open" state, and without
                    setting it the operator arrives at the top of a list and
@@ -26431,6 +26575,16 @@ and is loaded on demand through keeper_skill.
                  (match acting_pane_chunk_projection state ~terminal_rows ~terminal_cols with
                   | None -> ()
                   | Some projection -> state.acting_chunk_projection <- Some projection);
+                 (match state.view, Masc_tui_render.frame_choice state ~terminal_rows with
+                  | Overview, `Surface ->
+                      let selected = home_selected_action state in
+                      if Option.is_none state.home_selected
+                         && home_initial_reading_ready state selected then
+                        state.home_selected <- selected;
+                      let budget = Masc_tui_render_prim.surface_chrome_budget state ~terminal_rows in
+                      let first, _ = home_decision_window state ~budget in
+                      state.home_decision_scroll <- first
+                  | _ -> ());
                  render state)
            in
            (* The frame is what the operator will act on next, so the scroll it

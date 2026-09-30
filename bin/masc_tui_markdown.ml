@@ -7,7 +7,6 @@ type palette = {
   emphasis : span;
   strike : span;
   code : span;
-  code_qr : span;
   heading : int -> span;
   quote : span;
   link_text : span;
@@ -50,7 +49,6 @@ let plain_palette =
   ; emphasis = ("", "")
   ; strike = ("", "")
   ; code = ("", "")
-  ; code_qr = ("", "")
   ; heading = (fun _ -> ("", ""))
   ; quote = ("", "")
   ; link_text = ("", "")
@@ -690,14 +688,6 @@ let code_rows palette ~width line =
     Layout.split_cells ~max_cells:body_width line
     |> List.map (fun chunk -> opening ^ gutter ^ chunk ^ closing)
 
-(* A QR is a graphic: its space modules, including the quiet zone, need a
-   fixed light background. The normal code gutter and coloured foreground
-   would alter its geometry and reverse contrast on dark terminals. *)
-let qr_rows palette ~width line =
-  let opening, closing = palette.code_qr in
-  Layout.split_cells ~max_cells:width line
-  |> List.map (fun chunk -> opening ^ chunk ^ closing)
-
 (* {1 Tables} *)
 
 (* A table is the one block form that cannot be decided one line at a time. A
@@ -1011,13 +1001,10 @@ let render_streaming ~palette ~width text =
      of rows it has not reached yet. *)
   let emit_fence ~closed language lexer rev_body =
     let body = List.rev rev_body in
-    (match language with
-     | Some "qr" -> ()
-     | Some language -> emit_all [ code_header palette ~width language ]
-     | None -> ());
+    Option.iter
+      (fun language -> emit_all [ code_header palette ~width language ])
+      language;
     (match language, lexer with
-     | Some "qr", _ ->
-         List.iter (fun line -> emit_all (qr_rows palette ~width line)) body
      | Some "mermaid", _ -> (
          (* Drawn, not lexed: the rows come back the width the code rows
             have inside the gutter. A diagram this module cannot draw shows
@@ -1034,10 +1021,8 @@ let render_streaming ~palette ~width text =
               (fun pieces -> emit_all (styled_code_rows palette ~width pieces))
      | _, None ->
          List.iter (fun line -> emit_all (code_rows palette ~width line)) body);
-    if closed then
-      match language with
-      | Some "qr" | None -> ()
-      | Some _ -> emit_all [ code_footer palette ~width ]
+    if closed && Option.is_some language then
+      emit_all [ code_footer palette ~width ]
   in
   let rec walk fence rev_body = function
     | [] -> (

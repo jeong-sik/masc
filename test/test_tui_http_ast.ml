@@ -1355,9 +1355,9 @@ let test_tui_current_projection_wiring () =
      = 1);
   check bool "metrics diagnostics are terminal-safe before rendering" true
     (Ast_grep.count_calls_in_value_binding
-       ~module_path:"bin/masc_tui_render.ml"
-       ~binding_name:"render_keeper_logs"
-       ~callee:"Keeper_chat.terminal_safe_text"
+       ~module_path:"bin/masc_tui_types.ml"
+       ~binding_name:"keeper_log_rows"
+       ~callee:"Masc.Tui_terminal_text.sanitize_terminal_text"
      >= 1);
   check bool "log input uses viewport-bounded scrolling" true
     (Ast_grep.count_calls_across_files
@@ -1422,8 +1422,8 @@ let test_tui_current_projection_wiring () =
        ~callee:"Observation_layout.context_header_item" ~label:"max_cells");
   check bool "log diagnostics remain operator-visible" true
     (Ast_grep.count_calls_in_value_binding
-       ~module_path:"bin/masc_tui_render.ml"
-       ~binding_name:"render_keeper_logs"
+       ~module_path:"bin/masc_tui_types.ml"
+       ~binding_name:"keeper_log_rows"
        ~callee:"Metrics_tail.error_to_string"
      = 1);
   check bool "log empty copy distinguishes typed outcomes" true
@@ -2759,6 +2759,9 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
         (* Hashes the name into the portrait's look; what it returns is
            pixels and cells, never the name's text. *)
       ; "Masc_tui_keeper_portrait.shown"
+        (* Item preview hashes the name by the same portrait path and returns
+           only pixels; no Keeper-name text reaches terminal cells. *)
+      ; "Masc_tui_keeper_portrait.preview"
       ]
     "keeper_detail_pane"
     [ "k_name"
@@ -2770,8 +2773,30 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
     ; "k_created_at"
     ; "k_updated_at"
     ];
-  check_fields "render_keeper_logs"
-    [ "k_name"; "le_ts"; "le_tools_used"; "le_work_kind" ];
+  check_fields "render_keeper_logs" [ "k_name" ];
+  check_fields ~module_path:"bin/masc_tui_types.ml"
+    ~non_rendering_calls:[ "Tui_decode.clock_timestamp_for_terminal" ]
+    "keeper_log_rows" [ "le_ts" ];
+  (* The entry projector owns the full timestamp and every tool/work fact.
+     [wrap] sanitizes the final text, including values assembled in lambdas. *)
+  check_fields ~module_path:"bin/masc_tui_observation_layout.ml"
+    ~non_rendering_calls:[ "wrap"; "List.concat_map" ]
+    "log_entry_rows" [ "le_ts"; "le_tools_used" ];
+  check int "log work-kind option is read once before its value is wrapped" 1
+    (Ast_grep.count_field_accesses_outside_calls_in_value_binding
+       ~module_path:"bin/masc_tui_observation_layout.ml"
+       ~binding_name:"log_entry_rows" ~callees:[] ~fields:[ "le_work_kind" ]);
+  check_identifiers ~module_path:"bin/masc_tui_observation_layout.ml"
+    ~binding:"log_entry_rows"
+    ~callees:[ "Masc.Tui_terminal_text.sanitize_terminal_text" ] [ "text" ];
+  check_identifiers ~module_path:"bin/masc_tui_observation_layout.ml"
+    ~binding:"log_entry_rows" ~callees:[ "wrap" ] [ "tool"; "work" ];
+  check int "logs render the shared row projection" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:render_path
+       ~binding_name:"render_keeper_logs" ~callee:"Masc_tui_types.keeper_log_rows");
+  check int "log rows render full entry facts through the observation projection" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_types.ml"
+       ~binding_name:"keeper_log_rows" ~callee:"Masc_tui_observation_layout.log_entry_rows");
   (* The Info tab's Board-attention rows are drawn from wire strings -- a
      partition id, a Keeper name on a ledger error, the server's own words on
      a failed read -- so the module that builds them is held to the same
@@ -2854,9 +2879,9 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path
        ~binding_name:"render_keeper_logs" ~callee:"String.sub");
   check int "log renderer uses the safe clock projection once" 1
-    (Ast_grep.count_calls_in_value_binding ~module_path:render_path
-       ~binding_name:"render_keeper_logs"
-       ~callee:"Terminal_text.clock_timestamp");
+    (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_types.ml"
+       ~binding_name:"keeper_log_rows"
+       ~callee:"Tui_decode.clock_timestamp_for_terminal");
   (* Seven: two observation timestamps in Live Context, the last turn, the
      oldest row a partial Last 24h window reached, the created / updated pair,
      and the Automation row's request clock. Each one arrives from a keeper

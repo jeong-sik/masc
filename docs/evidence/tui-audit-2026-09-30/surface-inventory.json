@@ -727,5 +727,15 @@
     "review": "independent hostile and response source APPROVE exact recorded head; no unresolved P0/P1/P2; ANSI continuation emphasis P3",
     "validation": "syntax parsing and diff check only",
     "execution": "not run under operator source-only policy"
+  },
+  "runtime_routes_stack": {
+    "pr": 40293,
+    "base_pr": 40282,
+    "base_head": "c0a6283abddb3407e88b37005bac359e2e20db03",
+    "head": "e948ac6276beba010fbaf1189a10926d3e5af045",
+    "scope": "complete read-only route/status document, independent of row availability; full diagnostic and narrow-label wrapping",
+    "review": "independent hostile and response source APPROVE exact recorded head, no unresolved P0/P1/P2; initial diagnostic-label P2 repaired",
+    "validation": "syntax parsing and diff check only",
+    "execution": "not run under source-only policy"
   }
 }

@@ -9454,14 +9454,14 @@ let toggle_acting_pane (state : state) =
     Error "Activity pane is not drawn over this surface; preference unchanged"
   else
   match
-    Masc_tui_acting_pane.next_layout ~layout:state.acting_pane_layout ~cols
+    Masc_tui_acting_pane.next_layout ~layout:(acting_pane_layout state) ~cols
   with
   | None ->
       Error
         (Printf.sprintf "Activity pane needs %d columns; preference unchanged"
            Masc_tui_acting_pane.threshold_cols)
   | Some layout ->
-      state.acting_pane_layout <- layout;
+      state.acting_pane_preference <- Chosen_acting_pane layout;
       state.acting_pane_scroll <- 0;
       state.acting_pane_cursor <- None;
       Ok layout
@@ -9471,15 +9471,20 @@ let toggle_acting_pane (state : state) =
    reader after a later resize, the same rule the toggle follows. *)
 let show_acting_pane_tab (state : state) tab =
   let _rows, cols = Masc_tui_ansi.get_terminal_size () in
-  if Masc_tui_acting_pane.drawn_cols ~layout:Masc_tui_acting_pane.Narrow ~cols = 0 then
+  if Masc_tui_render.acting_pane_suppressed state then
+    Error "Activity pane is not drawn over this surface; preference unchanged"
+  else if Masc_tui_acting_pane.drawn_cols ~layout:Masc_tui_acting_pane.Narrow ~cols = 0 then
     Error
       (Printf.sprintf "Activity pane needs %d columns; preference unchanged"
          Masc_tui_acting_pane.threshold_cols)
   else begin
-    (match state.acting_pane_layout with
+    let layout =
+      match acting_pane_layout state with
      | Masc_tui_acting_pane.Hidden ->
-         state.acting_pane_layout <- Masc_tui_acting_pane.Narrow
-     | Masc_tui_acting_pane.Narrow | Masc_tui_acting_pane.Wide -> ());
+         Masc_tui_acting_pane.Narrow
+      | (Masc_tui_acting_pane.Narrow | Masc_tui_acting_pane.Wide) as layout -> layout
+    in
+    state.acting_pane_preference <- Chosen_acting_pane layout;
     state.acting_pane_tab <- tab;
     state.acting_pane_scroll <- 0;
     Ok ()
@@ -9943,7 +9948,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
         notice ~kind:Notice_failure
           "Activity pane is not drawn over this surface; nothing to scroll"
       else if
-        Masc_tui_acting_pane.drawn_cols ~layout:state.acting_pane_layout ~cols = 0
+        Masc_tui_acting_pane.drawn_cols ~layout:(acting_pane_layout state) ~cols = 0
       then
         notice ~kind:Notice_failure
           "Activity pane is not shown; Ctrl-L or /activity shows it"

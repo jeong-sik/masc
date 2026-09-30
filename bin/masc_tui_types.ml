@@ -5234,6 +5234,10 @@ type home_action =
   | Home_choose_keeper
   | Home_create_keeper
 
+type acting_pane_preference =
+  | Default_acting_pane
+  | Chosen_acting_pane of Masc_tui_acting_pane.layout
+
 type state = {
   mutable home_selected : home_action option;
   mutable home_last_chat : string option;
@@ -5379,8 +5383,9 @@ type state = {
      [Masc_tui_acting_pane.pane_cols] columns for the fleet's live feed, or
      [wide_pane_cols] wide. Same contract as the roster: narrow, wide or
      hidden is the reader's choice and survives a resize; whether the
-     terminal holds it is the terminal's. *)
-  mutable acting_pane_layout: Masc_tui_acting_pane.layout;
+     terminal holds it is the terminal's. The default is resolved by surface:
+     Home keeps its destinations alone, while other surfaces start narrow. *)
+  mutable acting_pane_preference: acting_pane_preference;
   (* Rows scrolled into the pane's full list; zero is the overview. The
      renderer clamps it to what the list holds and a toggle resets it. *)
   mutable acting_pane_scroll: int;
@@ -7725,6 +7730,15 @@ let goal_action_armed_for (state : state) (goal_id : string) =
       Some armed_action
   | Some _ | None -> None
 
+(* A compact Home never grows a feed just because the terminal grew. An
+   explicit reader choice still applies on Home and survives surface changes. *)
+let acting_pane_layout (state : state) =
+  match state.acting_pane_preference with
+  | Chosen_acting_pane layout -> layout
+  | Default_acting_pane ->
+      if state.view = Overview then Masc_tui_acting_pane.Hidden
+      else Masc_tui_acting_pane.Narrow
+
 (** New Keeper messages require a complete roster observation. [state.keepers]
     may intentionally retain the previous complete roster while a detail or log
     view survives a transient metadata read failure, so membership alone is not
@@ -7903,7 +7917,7 @@ let create_state
      cost of being wrong here -- whereas the column was drawn on every frame
      whether or not anyone read it. *)
   roster_pane_hidden = true;
-  acting_pane_layout = Masc_tui_acting_pane.Narrow;
+  acting_pane_preference = Default_acting_pane;
   acting_pane_scroll = 0;
   acting_pane_cursor = None;
   acting_pane_tab = Masc_tui_acting_pane.Tab_fleet;

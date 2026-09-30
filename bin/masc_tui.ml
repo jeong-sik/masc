@@ -2527,7 +2527,7 @@ let fork_workspace_job state ~sw run =
     Option.iter (fun context -> Eio.Cancel.cancel context Workspace_withdrawn) !context
   in
   state.workspace_cancellations <- (token, cancel) :: state.workspace_cancellations;
-  Eio.Fiber.fork_daemon ~sw (fun () ->
+  match Eio.Fiber.fork_daemon ~sw (fun () ->
     Fun.protect
       ~finally:(fun () ->
         context := None;
@@ -2539,7 +2539,13 @@ let fork_workspace_job state ~sw run =
             context := Some cancellation;
             if not !withdrawn && authority = state.workspace_authority then run ())
         with Eio.Cancel.Cancelled Workspace_withdrawn -> ());
-    `Stop_daemon)
+    `Stop_daemon) with
+  | () -> ()
+  | exception exn ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    state.workspace_cancellations <-
+      List.filter (fun (held, _) -> held != token) state.workspace_cancellations;
+    Printexc.raise_with_backtrace exn backtrace
 
 (* Wire the web-link-preview background fetcher. On the first cache miss for a
    URL, Masc_tui_link_preview renders the synthesized card immediately and calls
@@ -5139,6 +5145,9 @@ let launch_identity_refresh state ~mailbox ~keeper_name ~provider_ids =
         (Identity_refreshed (keeper_name, Error "Eio switch is unavailable"))
 
 let launch_connectors_load state ~mailbox =
+  let enqueue_async = workspace_enqueue state in
+  let authority = state.workspace_authority in
+  let identity = state.server_identity in
   if state.connectors_inflight then ()
   else begin
     state.connectors_inflight <- true;
@@ -5149,7 +5158,12 @@ let launch_connectors_load state ~mailbox =
       ~on_not_run:(fun () -> state.connectors_inflight <- false)
       ~deliver:(fun result ->
         enqueue_async mailbox (Connectors_loaded result))
-      (fun () -> Masc_tui_loader.load_connectors ~host ~port)
+      (fun () ->
+        let ( let* ) = Result.bind in
+        let* () = check_workspace_request state ~mailbox ~authority ~identity ~host ~port () in
+        let* snapshot = Masc_tui_loader.load_connectors ~host ~port in
+        let* () = check_workspace_request state ~mailbox ~authority ~identity ~host ~port () in
+        Ok snapshot)
   end
 
 (* A binding write changed what the server holds. A load already in flight
@@ -5164,6 +5178,9 @@ let reload_connectors_after_write state ~mailbox =
    binding's answer is its own line, so a partial success cannot read as a
    whole one. *)
 let launch_connector_unbind_all state ~mailbox ~keeper_name targets =
+  let enqueue_async = workspace_enqueue state in
+  let authority = state.workspace_authority in
+  let identity = state.server_identity in
   if state.connector_unbind_all_inflight then
     report_action state "error" "unbind all: the previous one is still running"
   else begin
@@ -5175,7 +5192,10 @@ let launch_connector_unbind_all state ~mailbox ~keeper_name targets =
         List.map
           (fun target ->
              let outcome =
-               try Masc_tui_http.post_connector_unbind_owned ~host ~port target
+               try
+                 match check_workspace_request state ~mailbox ~authority ~identity ~host ~port () with
+                 | Error detail -> Masc_tui_connector_unbind.Failed detail
+                 | Ok () -> Masc_tui_http.post_connector_unbind_owned ~host ~port target
                with
                | Eio.Cancel.Cancelled _ as exn -> raise exn
                | exn -> Masc_tui_connector_unbind.Failed (Printexc.to_string exn)
@@ -5191,14 +5211,13 @@ let launch_connector_unbind_all state ~mailbox ~keeper_name targets =
     in
     match Eio_context.get_switch_opt () with
     | Some sw ->
-        Masc_tui_fork_guard.launch ~sw
-          ~on_sync_failure:(fun detail ->
-              enqueue_async mailbox
-                (Connector_unbind_all_done
-                   { keeper_name; results = not_sent detail }))
-          (fun () ->
-            run ();
-            `Stop_daemon)
+        (match fork_workspace_job state ~sw run with
+         | () -> ()
+         | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+         | exception exn ->
+           enqueue_async mailbox
+             (Connector_unbind_all_done
+                { keeper_name; results = not_sent (Printexc.to_string exn) }))
     | None ->
         enqueue_async mailbox
           (Connector_unbind_all_done
@@ -11349,6 +11368,18 @@ let withdraw_keeper_workspace_presentation state ~previous =
   state.keeper_exact_lane_firsts <- [];
   state.keeper_gate_settings_unread <- Some "Workspace authority changed; not read yet";
   state.board_quarantine_requeue_inflight <- None;
+  state.connectors <- None;
+  state.connectors_error <- None;
+  state.connectors_inflight <- false;
+  state.connectors_reload_after_inflight <- false;
+  state.connectors_scroll <- 0;
+  state.connectors_cursor <- 0;
+  state.connectors_binding_cursor <- 0;
+  state.connector_unbind_armed <- None;
+  state.connector_unbind_all_armed <- None;
+  state.connector_unbind_all_inflight <- false;
+  state.connector_unbind_offer_pending <- [];
+  state.connector_unbind_offer <- None;
   state.schedules_read <- Snapshot_read.invalidate state.schedules_read;
   state.schedules <- None;
   state.schedules_error <- None;
@@ -18198,6 +18229,9 @@ let main
      target cannot disagree. *)
   let handle_connector_form ?fixed_channel_id ~action ~connector
       ~required_fields ~stem ~post () =
+    let authority = state.workspace_authority in
+    let identity = state.server_identity in
+    let host = server_peer_host and port = state.port in
     match Masc_tui_editor.editor_command () with
     | None ->
       report_action state "error"
@@ -18232,7 +18266,12 @@ let main
                   report_action state "error"
                     (action ^ ": channel_id must remain the selected binding")
               | Some _ | None -> (
-                  match post ~connector ~json with
+                  let result =
+                    let ( let* ) = Result.bind in
+                    let* () = check_workspace_request state ~mailbox:async_messages
+                      ~authority ~identity ~host ~port () in
+                    post ~connector ~json in
+                  match result with
                   | Ok _ ->
                       state.connector_unbind_armed <- None;
                       report_action state "system"
@@ -18276,6 +18315,8 @@ let main
           ()
   in
   let handle_connector_unbind () =
+    let authority = state.workspace_authority in
+    let identity = state.server_identity in
     let host = server_peer_host in
     let port = state.port in
     match selected_connector () with
@@ -18310,7 +18351,10 @@ let main
                   in
                   if state.connector_unbind_armed = Some exact then begin
                     state.connector_unbind_armed <- None;
-                    match
+                    let result =
+                      let ( let* ) = Result.bind in
+                      let* () = check_workspace_request state ~mailbox:async_messages
+                        ~authority ~identity ~host ~port () in
                       Masc_tui_http.post_connector_unbind ~host ~port
                         ~connector:selected.cn_id
                         ~body_json:
@@ -18318,8 +18362,8 @@ let main
                              (`Assoc
                                [ "channel_id", `String binding.cb_channel_id
                                ; "keeper_name", `String binding.cb_keeper_name
-                               ]))
-                    with
+                               ])) in
+                    match result with
                     | Ok _ ->
                       report_action state "system"
                         ("unbind: removed " ^ label);

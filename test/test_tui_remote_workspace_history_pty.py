@@ -951,6 +951,88 @@ def github_workspace_withdrawal(binary: str) -> None:
         http_requests=posts, refresh=0.5, terminal_rows=45, terminal_cols=300)
 
 
+def connector_workspace_withdrawal(binary: str) -> None:
+    """Same IDs cannot transfer confirmation or a held two-request write."""
+    fixtures = h.connector_unbind_all_fixtures()
+    wire = WorkspaceWire(fixtures[ROSTER_PATH][1])
+    base_connectors = fixtures[h.CONNECTORS_PATH]
+    submitted = []
+    held = threading.Event()
+    released = threading.Event()
+    returned = threading.Event()
+    def connectors():
+        _, payload = base_connectors()
+        with wire.lock:
+            phase = wire.phase
+        payload["connectors"][0]["display_name"] = phase + "-Discord"
+        return 200, payload
+    def unbind(body):
+        with wire.lock:
+            phase = wire.phase
+            submitted.append((phase, json.loads(body)))
+        if phase == "b" and len(submitted) == 1:
+            held.set()
+            assert released.wait(timeout=30), "held connector POST not released"
+            returned.set()
+        return 200, {"ok": True}
+    fixtures.update({ROSTER_PATH: wire.roster, "/health": wire.health,
+        "/health?full=1": wire.health, h.CONNECTORS_PATH: connectors,
+        h.CONNECTOR_UNBIND_PATH: h.RequestHttpResponse(unbind)})
+    def interact(process, fd, _slave, output, _base):
+        def await_screen(predicate, label):
+            assert h.wait_for_fixture_state(process, fd, output,
+                lambda: predicate(screen(output)), timeout=WAIT_SECONDS), label
+        def open_channels(marker):
+            title_rows = [row for row, text in h.screen_rows(bytes(output)).items()
+                          if b"Info" in text and b"Channels" in text]
+            assert len(title_rows) == 1, h.screen_rows(bytes(output))
+            h.press_label_on_screen(process, fd, output, b"Channels", row=title_rows[0], needle=marker)
+            await_screen(lambda text: marker in text and b"333 (name unknown)" in text,
+                         "fresh connector targets are not visible")
+        try:
+            h.tab_until(process, fd, output, b"MASC Keepers")
+            h.select_keeper_row(process, fd, output, b"alpha")
+            h.send_and_wait(process, fd, output, b"\r", b"Total Turns:")
+            open_channels(b"a-Discord")
+            h.send_and_wait(process, fd, output, b"U", b"unbind all armed: press U again")
+            assert submitted == [], submitted
+            wire.publish("b")
+            await_screen(lambda text: b"MISMATCH local " in text and b"a-Discord" not in text,
+                         "workspace B did not withdraw A's connector projection")
+            h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+            await_screen(lambda text: b"b.current" in text, "B roster not ready")
+            h.select_keeper_row(process, fd, output, b"alpha")
+            h.send_and_wait(process, fd, output, b"\r", b"Channels")
+            open_channels(b"b-Discord")
+            h.send_and_wait(process, fd, output, b"U", b"unbind all armed: press U again")
+            assert submitted == [], "A's arm authorized B's first press"
+            os.write(fd, b"U")
+            assert h.wait_for_fixture_event(process, fd, output, held, timeout=WAIT_SECONDS)
+            wire.publish("a-returned")
+            await_screen(lambda text: b"MISMATCH" not in text and b"b-Discord" not in text,
+                         "returning authority did not retire the held connector write")
+            released.set()
+            assert h.wait_for_fixture_event(process, fd, output, returned, timeout=WAIT_SECONDS)
+            h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+            await_screen(lambda text: b"a.returned" in text, "returned roster not ready")
+            h.select_keeper_row(process, fd, output, b"alpha")
+            h.send_and_wait(process, fd, output, b"\r", b"Channels")
+            open_channels(b"a-returned-Discord")
+            # A current successful read is the client response barrier. Only
+            # B's already-admitted first request may exist; no successor POST.
+            assert len(submitted) == 1 and submitted[0][0] == "b", submitted
+            assert submitted[0][1] == {"channel_id": "111", "keeper_name": "alpha"}, submitted
+            h.send_and_wait(process, fd, output, b"U", b"unbind all armed: press U again")
+            assert len(submitted) == 1, "stale completion armed or dispatched on returned A"
+            os.write(fd, b"q")
+        finally:
+            released.set()
+    h.run_terminal_scenario(binary,
+        description="workspace switch withdraws connector arms and held sequential writes with reused IDs",
+        interact=interact, prepare_workspace=wire.prepare, http_fixtures=fixtures,
+        refresh=0.5, terminal_rows=45, terminal_cols=300)
+
+
 if __name__ == "__main__":
     binary = str(Path(sys.argv[1]).resolve())
     artifact_root = os.environ.get("RUNNER_TEMP")
@@ -962,6 +1044,7 @@ if __name__ == "__main__":
             "binary_sha256": hashlib.sha256(Path(binary).read_bytes()).hexdigest(),
             "scenario_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
         }, indent=2) + "\n")
+    connector_workspace_withdrawal(binary)
     bundle_identity_during_read(binary)
     settings_editor_workspace_change(binary)
     ask_workspace_withdrawal(binary)

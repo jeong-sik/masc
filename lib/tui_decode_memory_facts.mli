@@ -100,4 +100,3 @@ val merge_keeper_memory_facts :
     [Memory_store_read_error] -- as ["N of M keepers not read: ..."]; [None]
     when all were read. [Memory_store_absent] is a keeper with no memory yet,
     not a failure. *)
-

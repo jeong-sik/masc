@@ -48,8 +48,8 @@ DECK = [
 ANSWER = {f["id"]: f["answer"] for f in DECK}
 
 
-def deck_source(observations, incarnation="deck-2026-09-23", complete=True):
-    source = {"source_id": "deck", "incarnation": incarnation, "cursor": None,
+def deck_source(observations, incarnation="deck-2026-09-23", complete=True, source_id="deck"):
+    source = {"source_id": source_id, "incarnation": incarnation, "cursor": None,
               "complete": complete, "detail": None, "observations": copy.deepcopy(observations)}
     retained_bytes = json.dumps(source, ensure_ascii=False, separators=(",", ":")).encode()
     digest = hashlib.sha256(retained_bytes).hexdigest()
@@ -370,6 +370,98 @@ class Grader(unittest.TestCase):
         body = results[1]["structuredContent"]
         self.assertEqual(body["status"], "failed_before_effect")
         self.assertIn("deck changed", body["result"]["reason"])
+
+    def test_rotating_bytes_with_the_same_incarnation_refuses_then_recovers(self):
+        subject = "f-live-path"
+        choice = self.wrong_choice(subject)
+        facts = copy.deepcopy(DECK)
+        changed = next(fact for fact in facts if fact["id"] == subject)
+        changed["answer"] = choice
+        changed["record"]["sha256"] = hashlib.sha256(
+            ("updated retained record: " + choice).encode()).hexdigest()
+        source = deck_source(facts)
+        original = deck_source(DECK)
+        self.assertEqual(source["source_id"], original["source_id"])
+        self.assertEqual(source["incarnation"], original["incarnation"])
+        self.assertNotEqual(source["snapshot_evidence"], original["snapshot_evidence"])
+        fresh = ask([source])["structuredContent"]
+        fresh_observe = ("lane_observe", {"context": CONTEXT, "binding": {},
+                         "sources": [as_lane_output(fresh), source]})
+        fresh_reply = self.answer("fresh", subject, choice)
+        fresh_reply[1]["action"]["question_id"] = next(
+            row["fields"]["question_id"] for row in fresh["rows"] if row["subject_id"] == subject)
+        results = run("quiz-grader", [self.observe(source),
+                                      self.answer("stale", subject, choice),
+                                      fresh_observe, fresh_reply])
+        refused = results[1]["structuredContent"]
+        self.assertEqual(refused["status"], "failed_before_effect")
+        self.assertNotIn("correct", refused["result"])
+        self.assertFalse(any(row["lane_id"] == "quiz/grades" for row in refused["output"]["rows"]))
+        score = next(row for row in refused["output"]["rows"] if row["lane_id"] == "quiz/score")
+        self.assertEqual((score["fields"]["answered"], score["fields"]["correct"]), (0, 0))
+        accepted = results[3]["structuredContent"]
+        self.assertEqual(accepted["status"], "confirmed")
+        self.assertTrue(accepted["result"]["correct"])
+        grades = [row for row in accepted["output"]["rows"] if row["lane_id"] == "quiz/grades"]
+        self.assertEqual(len(grades), 1)
+        self.assertEqual(grades[0]["fields"]["answer_fact"]["evidence"], [source["snapshot_evidence"]])
+        self.assertEqual(grades[0]["evidence"], [changed["record"]])
+
+    def test_an_answerer_can_grade_a_new_capture_without_rewriting_the_old_grade(self):
+        subject = "f-live-path"
+        facts = copy.deepcopy(DECK)
+        changed = next(fact for fact in facts if fact["id"] == subject)
+        changed["answer"] = self.wrong_choice(subject)
+        changed["record"]["sha256"] = hashlib.sha256(
+            ("replacement retained record: " + changed["answer"]).encode()).hexdigest()
+        source = deck_source(facts)
+        fresh = ask([source])["structuredContent"]
+        fresh_question = next(row for row in fresh["rows"] if row["subject_id"] == subject)
+        fresh_observe = ("lane_observe", {"context": CONTEXT, "binding": {},
+                         "sources": [as_lane_output(fresh), source]})
+        fresh_reply = self.answer("new-capture", subject, changed["answer"])
+        fresh_reply[1]["action"]["question_id"] = fresh_question["fields"]["question_id"]
+        results = run("quiz-grader", [self.observe(),
+                                      self.answer("old-capture", subject, ANSWER[subject]),
+                                      fresh_observe, fresh_reply])
+        first = results[1]["structuredContent"]
+        accepted = results[3]["structuredContent"]
+        self.assertEqual(first["status"], "confirmed")
+        self.assertEqual(accepted["status"], "confirmed")
+        self.assertTrue(accepted["result"]["correct"])
+        old_grade = next(row for row in first["output"]["rows"] if row["lane_id"] == "quiz/grades")
+        grades = [row for row in accepted["output"]["rows"] if row["lane_id"] == "quiz/grades"]
+        self.assertEqual(len(grades), 2)
+        self.assertEqual(grades[0], old_grade)
+        self.assertEqual(grades[0]["fields"]["answerer_claimed"], grades[1]["fields"]["answerer_claimed"])
+        self.assertNotEqual(fresh_question["fields"]["question_id"], self.by_subject[subject]["fields"]["question_id"])
+        self.assertNotEqual(fresh_question["id"], self.by_subject[subject]["id"])
+        self.assertNotEqual(grades[0]["fields"]["answer_fact"]["evidence"],
+                            grades[1]["fields"]["answer_fact"]["evidence"])
+        self.assertEqual(grades[1]["fields"]["answer_fact"]["evidence"], [source["snapshot_evidence"]])
+        score = next(row for row in accepted["output"]["rows"] if row["lane_id"] == "quiz/score")
+        self.assertEqual((score["fields"]["answered"], score["fields"]["correct"]), (2, 2))
+
+    def test_equal_fact_ids_from_another_source_do_not_answer_this_question(self):
+        facts = copy.deepcopy(DECK)
+        choice = self.wrong_choice("f-live-path")
+        next(fact for fact in facts if fact["id"] == "f-live-path")["answer"] = choice
+        other = deck_source(facts, source_id="another-deck")
+        results = run("quiz-grader", [self.observe(other),
+                                      self.answer("other-source", "f-live-path", choice)])
+        body = results[1]["structuredContent"]
+        self.assertEqual(body["status"], "failed_before_effect")
+        self.assertNotIn("correct", body["result"])
+        self.assertFalse(any(row["lane_id"] == "quiz/grades" for row in body["output"]["rows"]))
+
+    def test_question_without_immutable_snapshot_digest_is_not_observed(self):
+        self.questions["rows"][0]["evidence"][0]["sha256"] = None
+        results = run("quiz-grader", [self.observe(),
+                                      self.answer("missing-snapshot", "f-live-path", "lane-smith")])
+        self.assertTrue(results[0]["isError"])
+        self.assertEqual(results[1]["structuredContent"]["status"], "failed_before_effect")
+        self.assertFalse(any(row["lane_id"] == "quiz/grades"
+                             for row in results[1]["structuredContent"]["output"]["rows"]))
 
     def test_no_questions_observed_means_no_grade(self):
         results = run("quiz-grader", [self.answer("r1", "f-live-path", "lane-smith")])

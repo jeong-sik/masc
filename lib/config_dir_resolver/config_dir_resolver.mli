@@ -47,6 +47,8 @@ type inputs = {
     Documented in [docs/TOML-RELOAD-MATRIX.md]. *)
 val runtime_toml_filename : string
 
+val candle_toml_filename : string
+
 val inputs_from_env : unit -> inputs
 (** Snapshot current environment (cwd, executable, env vars). *)
 
@@ -125,6 +127,11 @@ val runtime_toml_path_for_base_path : base_path:string -> string
 (** Canonical [runtime.toml] path for an explicit workspace, honoring the same
     config-root override and base-path rules as {!resolve_for_base_path}. The
     file need not exist. *)
+
+val candle_toml_path_for_base_path : base_path:string -> string
+(** Canonical [candle.toml] path for an explicit workspace, under the same
+    config root as {!runtime_toml_path_for_base_path}. The file need not exist:
+    no file means the Candle reward currency is off. *)
 
 val keeper_toml_path_for_base_path : base_path:string -> string -> string
 (** Base-path-scoped variant of {!keeper_toml_path}. The file need not exist. *)

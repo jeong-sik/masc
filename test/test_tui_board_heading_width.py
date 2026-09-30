@@ -134,11 +134,12 @@ def run_primary_list_studio(executable: str, no_color: bool = False) -> None:
         h.resize_and_wait(process, fd, output, rows=32, columns=140,
                           needle=b"  Health  ", controls=(h.FULL_REDRAW,),
                           final_cursor=b"\x1b[?25l")
-        key(b":go Board\r", b"Selected post \xc2\xb7 " + title.encode())
-        capture("board-wide", 32, 140, b"Selected post \xc2\xb7 " + title.encode())
-        key(b"j", b"Selected post \xc2\xb7 " + next_title.encode())
-        narrow = capture("board-narrow", 24, 80, b"Selected post \xc2\xb7 " + next_title.encode())
-        if h.screen_row_of(narrow, next_title.encode()) < 0:
+        key(b":go Board\r", title.encode())
+        capture("board-wide", 32, 140, title.encode())
+        key(b"j", next_title.encode())
+        narrow = capture("board-narrow", 24, 80, next_title.encode())
+        preview_row = h.screen_row_of(narrow, b"Selected post")
+        if preview_row < 0 or next_title.encode() not in narrow[preview_row]:
             raise AssertionError("Board selected title vanished at 80 columns")
         key(b":go Dashboard\r", b"MASC Dashboard")
         os.write(fd, b"q")

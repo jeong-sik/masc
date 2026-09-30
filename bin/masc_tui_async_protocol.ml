@@ -15,7 +15,7 @@ type http_scoped_surface_results = {
   (* [None] on surfaces that do not draw them. Each is read by one surface, and
      leaving it out keeps whatever that surface last observed rather than
      dropping it. *)
-  http_asks: (Masc.Tui_decode.asks_snapshot, string) result option;
+  http_asks: (Masc.Tui_decode_asks.asks_snapshot, string) result option;
   http_board: (board_post list, string) result option;
   (* The board's hearth census rides with its listing: the two are read for
      one surface and a cycle keyed on a census the listing has outgrown walks
@@ -162,7 +162,7 @@ type async_msg =
   | Ask_answer_done of
       string
       * (Yojson.Safe.t, string) result
-      * (Masc.Tui_decode.asks_snapshot, string) result
+      * (Masc.Tui_decode_asks.asks_snapshot, string) result
   | Keeper_chat_dispatch_started of
       Masc_tui_keeper_chat_projection.request * bool * bool Eio.Promise.u
   | Keeper_chat_done of
@@ -244,7 +244,7 @@ type async_msg =
       Masc.Tui_decode.repository_change_scope
       * (Masc.Tui_decode.repository_change_snapshot, string) result
   | Repository_changes_diff_loaded of
-      string * (Masc.Tui_decode.git_diff, string) result
+      repository_diff_request * (Masc.Tui_decode.git_diff, string) result
   (* Carries the keeper it was asked about. The surface can be pointed at a
      different keeper while a load is in flight, and an answer that did not
      say whose it was would be filed under whoever is selected when it

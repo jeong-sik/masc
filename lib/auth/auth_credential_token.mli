@@ -56,6 +56,12 @@ val find_static_credential_by_token :
     after a cache rebuild; standalone UUID payloads are data, not independent
     bearer authority. *)
 
+val find_static_credential_in_transaction :
+  Auth_credential_base.credential_transaction -> token:string ->
+  (agent_credential, masc_error) result
+(** Reads all current owners under the caller's transaction, without consulting
+    the request cache or acquiring the transaction again. *)
+
 val resolve_agent_from_token :
   string -> token:string -> (string, masc_error) result
 

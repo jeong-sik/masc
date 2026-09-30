@@ -402,7 +402,21 @@ let test_missing_config_admin_keeps_required_default_and_pair () = with_workspac
   check bool "report contains the recoverable bearer" true (raw base_path "keeper" = report.bearer_token);
   check_pair base_path "keeper"
 
+let test_keeper_reuse_repairs_unselected_collision () = with_workspace @@ fun base_path ->
+  seed_shared base_path;
+  let other_before = current base_path "other" in
+  let token, credential = auth_ok (ensure base_path) in
+  check bool "keeper remints its ambiguous bearer" false (String.equal token (raw base_path "other"));
+  check bool "unselected owner is preserved" true (current base_path "other" = other_before);
+  check bool "returned credential is current" true (current base_path "keeper" = credential);
+  List.iter (check_pair base_path) [ "keeper"; "other" ];
+  let request = Httpun.Request.create
+      ~headers:(Httpun.Headers.of_list [ "Authorization", "Bearer " ^ token ]) `POST "/mcp" in
+  check (option string) "repaired keeper bearer reaches HTTP actor resolution"
+    (Some "keeper") (Server_auth.dashboard_actor_for_request ~base_path request)
+
 let () = run "auth_file_backed_transaction" [ "publication", [
+  test_case "keeper reuse repairs a bearer shared with an unselected owner" `Quick test_keeper_reuse_repairs_unselected_collision;
   test_case "prune then ensure recreates a recoverable pair" `Quick test_prune_then_ensure;
   test_case "ensure then prune preserves live pair and UUID" `Quick test_ensure_then_prune;
   test_case "Admin then ensure reuses current role and identity" `Quick test_admin_then_ensure;

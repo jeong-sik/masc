@@ -124,7 +124,7 @@ let test_list_marks_expiry () =
     let listed at =
       match I.list ~base_path ~now:at with
       | Ok invites -> List.map (fun { I.invite_name; expired; _ } -> invite_name, expired) invites
-      | Error (Masc_domain.Credential_expiry.Invalid_timestamp stamp) -> fail ("invalid expiry: " ^ stamp)
+      | Error error -> fail (Auth.credential_listing_error_to_string error)
     in
     check (list (pair string bool)) "only players, live" [ "minsu", false ] (listed now);
     check (list (pair string bool)) "expired two hours on" [ "minsu", true ]

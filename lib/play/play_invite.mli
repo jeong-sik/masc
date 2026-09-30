@@ -94,9 +94,9 @@ val expired :
 
 val list :
   base_path:string -> now:float ->
-  (invite list, Masc_domain.Credential_expiry.error) result
+  (invite list, Auth.credential_listing_error) result
 (** Every [Player] credential, expired ones included, by name. An invalid
-    expiry returns [Error] rather than fabricating an expired row. *)
+    expiry or unreadable stored record returns [Error] rather than omitting it. *)
 
 type revoked =
   | Deleted  (** the invite's credential was there and is gone *)

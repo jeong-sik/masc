@@ -640,7 +640,13 @@ let create_post_with_audience
     if ttl_hours < 0
     then Error (Validation_error "ttl_hours must be non-negative")
     else
-    let hearth = Option.map (fun h -> String.lowercase_ascii (String.trim h)) hearth in
+    let hearth =
+      match hearth with
+      | None -> None
+      | Some h ->
+        let normalized = String.lowercase_ascii (String.trim h) in
+        if String.equal normalized "" then None else Some normalized
+    in
     let expires_at =
       let now = Time_compat.now () in
       if ttl_hours = 0

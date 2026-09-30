@@ -4647,12 +4647,12 @@ let test_a_current_row_without_refusal_kind_is_refused () =
               | _ -> key, value))
            snapshot
        in
-       (match AQ.validate_pending_snapshot ~base_path with_stripped_entry with
+       (match Masc.Keeper_approval_queue_codec.validate_pending_snapshot ~base_path with_stripped_entry with
         | Ok () -> Alcotest.fail "a current entry without refusal_kind was accepted"
         | Error reason ->
           Alcotest.(check bool) "the refusal names the field" true
             (String_util.contains_substring reason "refusal_kind"));
-       (match AQ.validate_pending_snapshot ~base_path snapshot with
+       (match Masc.Keeper_approval_queue_codec.validate_pending_snapshot ~base_path snapshot with
         | Ok () -> ()
         | Error reason -> Alcotest.failf "the untouched snapshot was refused: %s" reason);
        let generation = Yojson.Safe.Util.(member "generation" snapshot |> to_int) in

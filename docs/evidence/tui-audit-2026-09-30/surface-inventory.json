@@ -898,5 +898,20 @@
     "review": "system_audit and agenda_finish source PASS exacthead, no unresolved P0/P1/P2; narrow fullstatusoverflow P2 repaired",
     "validation": "OCaml syntax, two Python AST and fullbasediffcheck PASS; color-only importedfixtures unexecuted",
     "execution": "not run under source-only policy"
+  },
+  "dashboard_goal_stack": {
+    "pr": 40333,
+    "base_pr": 40331,
+    "base_head": "f4ba0a43d3df621d2249e19fabdd8eaab7634354",
+    "head": "f808a2992eefbe519bd0ca103188656639f01480",
+    "reference_pr": 40095,
+    "reference_pr_state": "closed, unmerged",
+    "reference_head": "7baf1e4d594019644288704dcd7cc93f78fe5bae",
+    "reference_base": "179544426ada771d76ccdf262760b3f1f80bb766",
+    "scope": "bounded Goal title preview followed by complete actual/target/linked-task clauses wrapped at actualFramewidth; physicalrowsfeedDashboardbudget",
+    "review": "system_audit and agenda_finish source PASS exacthead, no unresolved P0/P1/P2",
+    "validation": "OCaml syntax/Python AST/fullbasediffcheck PASS; adapted5widthcolorfixture40rowsunexecuted",
+    "execution": "not run under source-only policy",
+    "remaining": "short-pane summary omissions persist visibly; wholeDashboard states/sections require releaseverification"
   }
 }

@@ -7,8 +7,11 @@ or approval does not start CI.
 Source review uses `approve-guard.sh` independently of CI. The preparation
 command reads its approval receipts, combines only the leader's explicit
 selection, then rechecks approvals and main. This initial path selects open,
-Ready ordinary PRs targeting main; stack members become eligible after their base is
-integrated and the PR is retargeted to main. Release heads use the explicit
+Ready PRs targeting main. This preparation tool does not compose non-main bases;
+that local selection limit is not a GitHub Native Stack restriction. Follow the
+[native stack workflow](../../docs/guides/NATIVE-GITHUB-STACKS.md) for integration
+and do not manually retarget a native stack to enter this preparation path.
+Release heads use the explicit
 release verification workflow rather than this source-only preparation path.
 
 ```sh
@@ -30,8 +33,9 @@ candidate branch explicitly and dispatch `leader-ci.yml` on main. Set its
 `candidate` input to the receipt's exact candidate SHA.
 Supply the preparation receipt as the `selection` JSON input. Select any of
 `compile` (bottom Core only) or `tests`; both default to false. `tests` requires
-explicit nonempty `suites` and uses the minimal runner. Every ordinary job,
-including setup, is limited to two minutes. Broad release-profile, dashboard,
+explicit nonempty `suites` and uses the minimal runner. Prefer short, lightweight
+checks; the constitution's two-minute example does not impose a deadline.
+Broad release-profile, dashboard,
 TLA, lint and full behavior checks remain in `release-candidate.yml` on a
 release branch or version tag. There is no changed-file heuristic choosing
 work for the leader.

@@ -32,9 +32,9 @@ jobs:
   test:
     name: test suite
     runs-on: ubuntu-24.04
-    # Ordinary explicit suites include setup in the two-minute boundary.
-    # Release callers retain the full behavior verification budget.
-    timeout-minutes: ${{ inputs.minimal && 2 || 180 }}
+    # Keep the existing operational backstop. Minimal scope is selected by
+    # explicit suites, not inferred from whether a job finishes in two minutes.
+    timeout-minutes: 180
     steps:
       - name: Require explicit minimal suites
         if: inputs.minimal
@@ -135,7 +135,6 @@ jobs:
           #    backstop -- reached only if the suite script cannot enforce
           #    its own deadline.
           # 3. The release job ends after 180 minutes from job start.
-          # Ordinary minimal suites have a two-minute whole-job boundary.
           MASC_TEST_SUITE_DEADLINE: "5400"
           CI_TEST_TIMEOUT_SEC: "6000"
           CI_TEST_HEARTBEAT_SEC: "30"

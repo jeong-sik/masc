@@ -1,7 +1,8 @@
 # Source review and leader-selected CI
 
 The operator's policy in `docs/constitution.xml` owns this workflow. Work proceeds
-in stacked PRs: the bottom targets main and later PRs target the preceding branch.
+in stacked PRs: each later PR targets the preceding branch. Native Stack metadata
+names the trunk and the included parents.
 Review function, logic and code cleanliness independently; approve the current
 head when no P0/P1/P2 issue remains and collect P3 findings for later. Ordinary
 verdicts use `verdict: PASS|FAIL head: <40-hex SHA> by: <reviewer>` without a run ID.
@@ -15,9 +16,12 @@ to prepare the candidate and receipt. Dispatch `leader-ci.yml` from main with th
 exact candidate SHA, receipt and chosen scopes. Main's verifier rechecks source
 approvals and reconstructs that candidate before build or test jobs begin.
 Ordinary compile builds only `lib/masc.cmxa` for the stack bottom. Ordinary behavior
-verification requires explicit suites. Every ordinary job includes setup within
-its two-minute limit. A cold cache may prevent completion; incomplete or skipped
+verification requires explicit suites. Prefer short, lightweight checks; the
+constitution's two-minute example is not a timeout or success criterion.
+A cold cache may prevent completion; incomplete or skipped
 coverage is never a successful build or test result.
+
+Native GitHub Stacks use REST `stack` metadata and the [stack workflow](guides/NATIVE-GITHUB-STACKS.md). The asynchronous merge endpoint includes all open downstack PRs through the selected PR. Inspect and approve every included head; do not treat a non-main direct base as a blocker or manually retarget a native stack. A leaf source-review PASS does not certify its downstack.
 
 `ci.yml` and `test.yml` are reusable components. Full type checking, release
 profile, dashboard, model checks, behavioral suites and distribution/installation

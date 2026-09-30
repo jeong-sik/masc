@@ -10068,6 +10068,10 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
             | Move_to_end _ -> notice ~kind:Notice_failure "Local input is already joined in submission order"
             | Inspect | Pause | Resume | Cancel_event _ | Prioritize_event _ -> assert false)
          | None -> launch_keeper_queue state ~mailbox ~keeper_name action)
+  | Masc_tui_command.Run_next
+    when state.workspace_identity <> Workspace_identity_match ->
+      notice ~kind:Notice_failure
+        "Cannot run next: workspace identity is unverified · queued input retained"
   | Masc_tui_command.Run_next ->
       Buffer.clear state.msg_input;
       (match state.msg_target_keeper_name with

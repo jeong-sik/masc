@@ -11,7 +11,8 @@ TUI runs. This source predates full creation/draft integration and the request-I
 padding correction. It does not prove the current integrated head.
 
 Visual inspection confirms individual requests and continuation in the same
-80-column body, and no automatic Recent pane. The final composer row appears
-partly clipped in the replay image; the raw bytes/text retain it. Consequently
-these PNGs are incomplete visual acceptance evidence. Current-head complete
-screenshots and installed/runtime inspection remain required.
+80-column body, and no automatic Recent pane. The replay helper was corrected to include ttyd terminal padding and wait for font
+initialization. The final composer row is fully visible in the corrected PNGs;
+raw PTY bytes and decoded text remain identical. Capture geometry is recorded
+per frame in the manifest. These historical frames still do not establish
+current-head behavior or installed/runtime acceptance.

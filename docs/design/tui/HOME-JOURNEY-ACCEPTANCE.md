@@ -1,10 +1,11 @@
 # Home journey acceptance
 
-2026-09-30. Integration PR #40176, source head
-`e19835974415bf7f4143c8ead5f82fc51f93081e`, stacks on #40152 (individual
-requests), #40137 (conversation receipts), #40130 (layout) and the original
-#39817. It also integrates #40120 and its #40116 complete-draft dependency.
-This checklist records remaining acceptance work, not a runtime or merge verdict.
+2026-09-30. Integration PR #40176 targets main and incorporates main commit
+`c112b2030652a5a25360f5d5322f8dc6da99c598`. The integrated source includes
+#39817/#40113/#40130/#40137/#40152 and creation/drafts #40120/#40116.
+Targeted run [36670914903](https://github.com/jeong-sik/masc/actions/runs/36670914903)
+was requested for `e3b9b019c1b72185053247deb238ec2aded4d618`; its outcome is
+unproven here. This checklist records acceptance work, not a runtime or merge verdict.
 
 The combined source covers Home request identities and partial readings, saved
 explicit conversations independent of startup, complete per-Keeper drafts, and
@@ -28,7 +29,7 @@ execution and visual evidence remain required for that combined behavior.
 | Created Keeper is selected for the first assignment | Named chat handoff with no-op queue drainer and typed Home return | Combined-head explicit first-assignment wire target, response and Home return |
 | Remembered target remains visible during roster failure | `Home_read_last`, existing unavailable-recipient send authority | Combined-head roster failure history, no POST, complete deletion re-selection |
 | Short-height Home reserves continuation and new work | Budgeted request window with retained continuation and short fallback | Combined-head 17-row Home and 24-row composer acceptance |
-| Wider Home does not add default panels | CI replay frames 03, 06, 09, 12 show the automatic Recent pane at 160 columns | Suppress automatic extra Home panels while preserving explicit operator choices |
+| Wider Home does not add default panels | Default/Chosen pane state; layout fixture and historical 5924 frames omit automatic Recent | Current-head visual proof and explicit choice/resize PTY pass |
 | Overview startup remembers a last conversation across restarts | Typed receipt and `[tui].last_chat_keeper` Runtime locked writes | Combined-head same-workspace restart in Overview/Keeper/Last, save/read failures and deletion |
 | All sources retain their distinct decision identity | `home_request`, `home_decision_rows`, `reconcile_home_request_detail` | Current-head individual request, duplicate, same-Keeper distinct calls, partial-source failure and detail-refresh PTY results |
 | Acceptance sizes and color-independent actions | `test_tui_home_viewports_pty.py`: 80×24, 120×32, 160×48, normal and NO_COLOR | Targeted run 36654334047 passed at `45c065b875`; raw CI frame replay and screenshots are recorded below |
@@ -68,9 +69,8 @@ in normal and NO_COLOR modes. The remaining checklist rows stay open.
 Run 36664548724 at `5924e6846516bb9bc97bbdf96b5a2abdd3a39294` passed
 Home layout (2 scenarios) and viewport (4 scenarios, 12 frames), but the overall
 run failed in request-label/detail assertions and unchanged-title redraw waits.
-Those observations are limited to that pre-integration head. Current integration
-run 36667431835 targets the seven Home/creation/draft suites; its result must be
-read against its exact head before any acceptance claim.
+Those observations are limited to that pre-integration head. Later runs and their results must be read against their exact head before any
+acceptance claim. The current requested run is listed at the top.
 
 Remaining deliverables include Task-card detail acceptance, connection-loss and
 draft-during-notification cases, accepted-but-not-applied decisions, current-head
@@ -85,3 +85,26 @@ mismatched; confirmation bindings are cleared. These additions await executable 
 Run 36668937812 at cc4da7d7a2f89ce493d06128168692f9c5896e20 passed
 decision receipts (2), creation (4), and complete drafts (2), but failed card
 detail assertions and deletion refresh observation. It does not establish current-head acceptance.
+
+## Delivery evidence still open
+
+The integration is not ready to merge until the current head passes all five
+required PR checks, the relevant targeted suites, and live main freshness.
+The Usage family `test_tui_keyboard_input-dashboard-usage` must be included in
+final verification; passing Home navigation alone does not prove its independent
+Telemetry/Usage behavior. A CI probe artifact must identify its source SHA and
+checksums before installed or runtime observations can be attributed to this change.
+No local build, historical screenshot, or HTML prototype closes those gates.
+
+Human timing requires an operator performing the same first-assignment, resume,
+and decision tasks before and after the change. Record the binary SHA, workspace
+state, key count, elapsed time, and outcome for each observation. Automated fixture
+key counts can describe a route but cannot replace this measurement.
+
+The 5924 historical replay has been recaptured with corrected terminal padding
+and measured CSS bounds. All twelve raw PTY/text records are unchanged; the last
+composer row is fully visible. This closes the replay clipping defect, not
+current-head visual acceptance. Local queue identity recovery now has a separate
+fixture suite, `test_tui_home_queue_identity_pty`, covering unread settlement,
+rejected `/steer` and `/run-next`, and explicit recovery with the saved request ID.
+Its executable result remains pending.

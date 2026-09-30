@@ -98,7 +98,7 @@ let render ~width ~height ~selected ~palette ~quiet cards =
           let chosen = card.section = selected in
           let marker = if chosen then "› " else "  " in
           let style = if chosen then Theme.Sgr.reverse else quiet in
-          style ^ Text.fit_width (marker ^ label card.section ^ " · " ^ card.summary) width
+          style ^ Text.fit_width (marker ^ card.title ^ " · " ^ card.summary) width
           ^ Theme.Sgr.reset)
         cards
     in

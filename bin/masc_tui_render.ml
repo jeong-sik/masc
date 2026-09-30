@@ -216,41 +216,6 @@ let attention_severity_label = function
   | Attention_warning -> "warn"
   | Attention_info -> "info"
 
-let attention_severity_color = function
-  | Attention_critical | Attention_bad -> (Theme.bad ())
-  | Attention_warning -> (Theme.warn ())
-  | Attention_info -> (Theme.info ())
-
-(* The badge column, measured from the vocabulary rather than chosen for it.
-   Fitting the label to a fixed five cells did two things: it cut the longest
-   level, and it padded the shorter ones inside their own brackets, which drew
-   [bad  ] and [warn ] -- a gap before a closing bracket reads as a typo, not
-   as a column. Taking the width from the labels means a level added or
-   renamed later widens the column instead of being cut by it.
-
-   Critical and bad share a colour (see above), so the word is the only thing
-   that tells those two rows apart. That is the reason the word may not be
-   cut, and the reason this is measured instead of assumed. *)
-let attention_severity_badge_cells =
-  let bracket_cells = 2 in
-  bracket_cells
-  + List.fold_left
-      (fun widest severity ->
-        max widest
-          (Message_layout.display_width (attention_severity_label severity)))
-      0
-      [ Attention_critical; Attention_bad; Attention_warning; Attention_info ]
-
-(* [level] in its colour, padded to the column outside the colour so a theme
-   that paints a background does not paint the gap. *)
-let attention_severity_badge severity =
-  let drawn = "[" ^ attention_severity_label severity ^ "]" in
-  attention_severity_color severity
-  ^ drawn ^ Ansi.reset
-  ^ String.make
-      (max 0 (attention_severity_badge_cells - Message_layout.display_width drawn))
-      ' '
-
 (* Blame reaches further back than the two surfaces [keeper_lane_idle_text]
    serves. A line untouched since a repository's first year is ordinary, and
    "3684d" is not a reading anyone converts in their head. Weeks and years

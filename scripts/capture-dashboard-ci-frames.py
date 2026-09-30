@@ -45,7 +45,8 @@ def main() -> None:
     parser.add_argument("--replay", type=Path, help=argparse.SUPPRESS)
     args = parser.parse_args()
     if args.replay is not None:
-        os.write(sys.stdout.fileno(), args.replay.read_bytes())
+        sys.stdout.buffer.write(args.replay.read_bytes())
+        sys.stdout.buffer.flush()
         signal.pause()
         return
     if None in (args.log, args.run_info, args.expected_head, args.out):
@@ -85,8 +86,10 @@ def main() -> None:
                 with socket.socket() as sock:
                     sock.bind(("127.0.0.1", 0))
                     port = sock.getsockname()[1]
-                command = [ttyd, "-i", "127.0.0.1", "-p", str(port), "-t", "fontSize=16",
-                           "-t", "disableResizeOverlay=true", sys.executable,
+                command = [ttyd, "-i", "127.0.0.1", "-p", str(port),
+                           "-t", "rendererType=dom", "-t", "fontSize=16",
+                           "-t", "fontFamily=Menlo", "-t", "disableResizeOverlay=true",
+                           "-T", "xterm-256color", sys.executable,
                            str(Path(__file__).resolve()), "--replay", str(frame_path.resolve())]
                 process = subprocess.Popen(command, stdout=subprocess.DEVNULL,
                                            stderr=subprocess.PIPE)

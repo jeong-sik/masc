@@ -779,5 +779,18 @@
     "review": "system_audit and agenda_finish source PASS exact head, no unresolved P0/P1/P2; P3 listing-bound comment placement retained for batch",
     "validation": "syntax parsing and diff check only; functional state scenario added to existing suite, not executed",
     "execution": "not run under source-only policy"
+  },
+  "runtime_layout_integration_stack": {
+    "pr": 40309,
+    "base_pr": 40306,
+    "base_head": "d6fa21c5e4787ca8dde09e6ca3a7beb578b808c1",
+    "head": "5b005ee6d8c1d2706a0e3847f936cf749eef41b5",
+    "imported_pr": 40220,
+    "imported_head": "230e53edfda0db7f787668a2d13b5cf0f008f9e7",
+    "imported_base": "86751f610442e4d82992ebc54bf9eb8ba45ef6d2",
+    "scope": "responsive list plus existing routes/help/stable identity; measured candidate heading reserve fixes30col P2",
+    "review": "system_audit and agenda_finish source PASS at exact recorded head, no unresolved P0/P1/P2, initial30col candidateellipsis P2 repaired",
+    "validation": "syntax/AST/diff checks only; imported refined fixture unexecuted",
+    "execution": "not run under source-only policy"
   }
 }

@@ -316,7 +316,9 @@ let pending_entry_of_yojson ~base_path json =
     let* tool_name = required_string ~surface "tool_name" fields in
     let* input_hash = required_string ~surface "input_hash" fields in
     let* input = required_member ~surface "input" fields in
-    let expected_hash = request_fingerprint input in
+    let expected_hash =
+      Keeper_approval_request_fingerprint.request_fingerprint input
+    in
     let* () =
       if String.equal input_hash expected_hash
       then Ok ()

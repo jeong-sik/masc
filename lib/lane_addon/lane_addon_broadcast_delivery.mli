@@ -6,7 +6,9 @@ module Request_id = Keeper_chat_delivery_identity.Request_id
 type t
 type recipient_state = Pending of string option | Accepted
 type workspace_state = Uncommitted | Committed of int
+type sender_authority = Keeper_sender | External_sender
 type payload = {
+  sender_authority : sender_authority;
   caller : string;
   operation_id : Request_id.t;
   artifact_sha256 : string;
@@ -39,8 +41,10 @@ val recipient_result : t -> caller:string -> operation_id:Request_id.t ->
 val complete : record -> bool
 type recovery = {pending:receipt list;settled_with_cleanup:receipt list}
 val recover : t -> (recovery, error) result
-(** Restart scan returns unfinished workspace commits and recipient obligations.
-    Malformed journals fail the authoritative scan; no record is discarded.
+(** Restart scans only durable pending markers, created before admission and
+    retired after terminal journal commit. Full journals remain addressable for
+    exact replay and audit; completed history is not reread on every pulse.
+    Malformed pending journals fail the authoritative scan; no record is discarded.
     Completed records with descriptor settlement failures are returned separately
     and never put back into the pending drain. *)
 

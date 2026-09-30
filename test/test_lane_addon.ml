@@ -127,8 +127,8 @@ let with_fixture ?acquire ?observe_step f =
           Eio_context.with_test_env ~sw ~net:(Eio.Stdenv.net env)
             ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env) (fun () ->
               Runtime.For_testing.reset ();
-              Runtime.register_fleet_backend {snapshot=(fun ~config:_ ~caller:_ -> Ok []);
-                project=(fun ~config:_ ~delivery:_ ~recipient:_ -> Error "empty fixture fleet has no recipient")};
+              Runtime.register_fleet_backend {snapshot=(fun ~config:_ ~caller:_ -> Ok (Masc.Lane_addon_broadcast_delivery.External_sender,[]));
+                project=(fun ~config:_ ~sender_authority:_ ~delivery:_ ~recipient:_ -> Error "empty fixture fleet has no recipient")};
               let state, backend = make_backend ?observe_step () in
               let backend = match acquire with None -> backend | Some acquire -> {backend with acquire} in
               Runtime.For_testing.with_backend backend (fun () ->
@@ -618,7 +618,7 @@ let test_private_broadcast_retry_uses_saved_visibility () = with_fixture (fun en
   Runtime.For_testing.reset ();
   Runtime.register_fleet_backend {
     snapshot=(fun ~config:_ ~caller:_ -> fail "cached private retry must retain its accepted audience");
-    project=(fun ~config:_ ~delivery:_ ~recipient:_ -> Error "private retry does not inline projection")};
+    project=(fun ~config:_ ~sender_authority:_ ~delivery:_ ~recipient:_ -> Error "private retry does not inline projection")};
   check bool "unverified claimed owner cannot retrieve cached private evidence" true
     (Result.is_error (send owner Lane_addon_sources.Unauthenticated));
   check bool "foreign caller cannot retrieve cached private evidence" true
@@ -650,10 +650,13 @@ let test_broadcast_retry_reconciles_receipt_during_slow_fanout () =
     let release, mark_released = Eio.Promise.create () in
     let failed = ref true and block = ref true in
     let roster = ref ["keeper-a";"keeper-b"] in
+    let sender_authority=ref Masc.Lane_addon_broadcast_delivery.Keeper_sender in
+    let projected_authorities=ref [] in
     let calls = ref [] and immediate_calls = ref 0 in
     let install () = Runtime.register_fleet_backend {
-      snapshot=(fun ~config:_ ~caller:_ -> Ok !roster);
-      project=(fun ~config:_ ~delivery ~recipient ->
+      snapshot=(fun ~config:_ ~caller:_ -> Ok (!sender_authority,!roster));
+      project=(fun ~config:_ ~sender_authority ~delivery ~recipient ->
+        projected_authorities:=sender_authority::!projected_authorities;
         calls := (recipient,delivery.Workspace_broadcast.request_id)::!calls;
         if recipient="keeper-a" && !block then (
           Eio.Promise.resolve mark_entered (); Eio.Promise.await release);
@@ -698,7 +701,7 @@ let test_broadcast_retry_reconciles_receipt_during_slow_fanout () =
       let store_root=Filename.concat (Workspace.masc_dir config) "lane-addons" in
       unwrap (Store.remove_binding (Store.create ~root:store_root) ~instance_id:id);
       remove_tree (Filename.concat store_root (Filename.concat "observations" (Store.digest id)));
-      Runtime.For_testing.reset (); roster:=["keeper-a";"keeper-b";"new-keeper"]; failed:=false; install ();
+      Runtime.For_testing.reset (); sender_authority:=Masc.Lane_addon_broadcast_delivery.External_sender; roster:=["keeper-a";"keeper-b";"new-keeper"]; failed:=false; install ();
       let recovered=send () in
       check bool "restart reconciles receipt after original source disappears" true
         (member "delivery" recovered = member "delivery" original);
@@ -712,7 +715,9 @@ let test_broadcast_retry_reconciles_receipt_during_slow_fanout () =
       check bool "all recipient attempts share one authoritative message identity" true
         (List.for_all (fun (_,id) -> id=request_id) !calls);
       unwrap (Runtime.recover_fleet ~config);
-      check Alcotest.int "completed drain launches no further recipient work" 3 (List.length !calls)))
+      check Alcotest.int "completed drain launches no further recipient work" 3 (List.length !calls);
+      check bool "sender authority survives restart and registry change" true
+        (List.for_all ((=) Masc.Lane_addon_broadcast_delivery.Keeper_sender) !projected_authorities)))
 
 let test_broadcast_pending_commit_recovers_same_identity () =
   with_fixture (fun env _ config dir _ ->
@@ -755,7 +760,7 @@ let test_broadcast_pending_commit_recovers_same_identity () =
     let projections = ref [] in
     Runtime.register_fleet_backend {
       snapshot=(fun ~config:_ ~caller:_ -> fail "recovery must retain the admitted empty audience");
-      project=(fun ~config:_ ~delivery:_ ~recipient -> projections:=recipient::!projections; Ok ())};
+      project=(fun ~config:_ ~sender_authority:_ ~delivery:_ ~recipient -> projections:=recipient::!projections; Ok ())};
     unwrap (Runtime.recover_fleet ~config);
     let recovered = Runtime.dispatch ~caller:"fixture-operator" ~config ~operation:Runtime.Evidence
       (`Assoc (args @ send_id @ ["broadcast",`Bool true])) |> unwrap in

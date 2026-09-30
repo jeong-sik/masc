@@ -72,8 +72,8 @@ type manager = { store : Lane_addon_store.t; entries : (string, entry) Hashtbl.t
 let managers : (string, manager) Hashtbl.t = Hashtbl.create 4
 let override : backend option ref = ref None
 type fleet_backend = {
-  snapshot : config:Workspace.config -> caller:string -> (string list,string) result;
-  project : config:Workspace.config -> delivery:Workspace_broadcast.broadcast_delivery ->
+  snapshot : config:Workspace.config -> caller:string -> (Lane_addon_broadcast_delivery.sender_authority * string list,string) result;
+  project : config:Workspace.config -> sender_authority:Lane_addon_broadcast_delivery.sender_authority -> delivery:Workspace_broadcast.broadcast_delivery ->
     recipient:string -> (unit,string) result;
 }
 let fleet_backend = ref None
@@ -984,10 +984,10 @@ let admit_fleet m ~config ~caller ~request_id evidence =
   let* operation_id=Fleet_ledger.Request_id.of_string request_id in
   let ledger=fleet_store m in
   let* previous=offload (fun () -> Fleet_ledger.find ledger ~caller ~operation_id) |> fleet_result in
-  let* recipients=match previous with
-    | Some receipt -> Ok receipt.record.payload.recipients
+  let* sender_authority,recipients=match previous with
+    | Some receipt -> Ok (receipt.record.payload.sender_authority,receipt.record.payload.recipients)
     | None -> backend.snapshot ~config ~caller in
-  let payload : Fleet_ledger.payload = {caller;operation_id;artifact_sha256;content;recipients} in
+  let payload : Fleet_ledger.payload = {sender_authority;caller;operation_id;artifact_sha256;content;recipients} in
   let* receipt=offload (fun () -> Fleet_ledger.admit ledger payload) |> fleet_result in
   observe_fleet_settlement receipt;
   Ok receipt.record
@@ -1032,7 +1032,7 @@ let recover_fleet ~config = Eio_context.run_on_owner_domain (fun () ->
           List.iter (fun (recipient,state) -> match state with
             | Fleet_ledger.Accepted -> ()
             | Pending _ ->
-                let result=try backend.project ~config ~delivery ~recipient with
+                let result=try backend.project ~config ~sender_authority:record.payload.sender_authority ~delivery ~recipient with
                   | Eio.Cancel.Cancelled _ as e -> raise e
                   | exn -> Error (Printexc.to_string exn) in
                 let next=match result with Ok () -> Fleet_ledger.Accepted

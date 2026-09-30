@@ -371,15 +371,22 @@ let mention_transcript_settled = function
   | Workspace_broadcast.Deferred _
   | Workspace_broadcast.Rejected _ -> false
 
-let append_workspace_message_to_recipient ~base_path ~is_registered_keeper
+let append_workspace_message_to_recipient ~base_path ~sender_authority
     (delivery : Workspace_broadcast.broadcast_delivery) ~keeper_name =
   let open Result.Syntax in
   let* request_id=Keeper_chat_delivery_identity.Request_id.of_string delivery.request_id in
   let delivery_key=Keeper_chat_delivery_identity.Workspace_message request_id in
-  let speaker=workspace_message_speaker ~is_registered_keeper ~from_agent:delivery.from_agent in
-  match Keeper_chat_store.append_user_message_once ~base_dir:base_path ~keeper_name ~delivery_key
-    ~content:delivery.content ~surface:Surface_ref.Broadcast ~external_message_id:delivery.request_id
-    ~speaker () with
+  let speaker : Keeper_chat_store.speaker = {
+    speaker_id=Some delivery.from_agent;speaker_name=Some delivery.from_agent;
+    speaker_authority=(match sender_authority with
+      | Lane_addon_broadcast_delivery.Keeper_sender -> Keeper_chat_store.Keeper
+      | External_sender -> Keeper_chat_store.External)} in
+  let appended=Eio_unix.run_in_systhread (fun () ->
+    Keeper_chat_store.append_user_message_once ~base_dir:base_path ~keeper_name ~delivery_key
+      ~content:delivery.content ~surface:Surface_ref.Broadcast ~external_message_id:delivery.request_id
+      ~speaker ()) in
+  (* Notify only after returning to the owner domain from transcript I/O. *)
+  match appended with
   | Error detail -> Error detail
   | Ok (Keeper_chat_store.Already_present _) -> Ok ()
   | Ok (Keeper_chat_store.Appended _) ->
@@ -1876,13 +1883,16 @@ let start_keeper_loops_owned
       let registered=Keeper_registry.all ~base_path:config.Workspace.base_path () in
       let same name=String.equal (String.lowercase_ascii (String.trim name))
         (String.lowercase_ascii (String.trim caller)) in
-      Ok (List.filter_map (fun (entry : Keeper_registry.registry_entry) ->
+      let sender_authority=match Keeper_identity.Keeper_id.of_string caller with
+        | Some _ when List.exists (fun (entry : Keeper_registry.registry_entry) -> entry.name=caller) registered ->
+            Lane_addon_broadcast_delivery.Keeper_sender
+        | Some _ | None -> Lane_addon_broadcast_delivery.External_sender in
+      Ok (sender_authority,List.filter_map (fun (entry : Keeper_registry.registry_entry) ->
         if same entry.name then None else Some entry.name) registered
         |> List.sort_uniq String.compare));
-    project=(fun ~config ~delivery ~recipient ->
+    project=(fun ~config ~sender_authority ~delivery ~recipient ->
       append_workspace_message_to_recipient ~base_path:config.Workspace.base_path
-        ~is_registered_keeper:(Keeper_registry.is_registered ~base_path:config.base_path)
-        delivery ~keeper_name:recipient);
+        ~sender_authority delivery ~keeper_name:recipient);
   };
   Workspace_broadcast.set_on_broadcast_mention broadcast_mention_handler;
   install_workspace_message_mutation_invalidation

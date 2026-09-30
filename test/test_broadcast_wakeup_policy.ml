@@ -685,14 +685,14 @@ let test_durable_fleet_recipient_projection_is_idempotent () =
   let message=fleet_delivery ~request_id ~from_agent:"external-operator"
     ~content:"Retained artifact marker; reading remains separately observed" in
   let append ()=Broadcast_wakeup.append_workspace_message_to_recipient
-    ~base_path:config.base_path ~is_registered_keeper:(fun _ -> false) message ~keeper_name:"beta" in
+    ~base_path:config.base_path ~sender_authority:Masc.Lane_addon_broadcast_delivery.External_sender message ~keeper_name:"beta" in
   check bool "actual durable recipient append succeeds" true (Result.is_ok (append ()));
   check bool "same workspace message retry is accepted idempotently" true (Result.is_ok (append ()));
   check int "repeated recipient attempt stores one transcript row" 1
     (count_delivery_rows ~base_path:config.base_path ~keeper_name:"beta" ~request_id);
   check bool "invalid recipient does not become accepted" true
     (Result.is_error (Broadcast_wakeup.append_workspace_message_to_recipient
-      ~base_path:config.base_path ~is_registered_keeper:(fun _ -> false) message ~keeper_name:"../outside"))
+      ~base_path:config.base_path ~sender_authority:Masc.Lane_addon_broadcast_delivery.External_sender message ~keeper_name:"../outside"))
 ;;
 
 let () =

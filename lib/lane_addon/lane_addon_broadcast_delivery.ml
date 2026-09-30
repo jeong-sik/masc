@@ -3,7 +3,8 @@ let ( let* ) = Result.bind
 type t = {root : string; io : Fs_compat.private_jsonl_transaction_io_for_testing option}
 type recipient_state = Pending of string option | Accepted
 type workspace_state = Uncommitted | Committed of int
-type payload = {caller:string;operation_id:Request_id.t;artifact_sha256:string;
+type sender_authority = Keeper_sender | External_sender
+type payload = {sender_authority:sender_authority;caller:string;operation_id:Request_id.t;artifact_sha256:string;
                 content:string;recipients:string list}
 type record = {payload:payload;workspace_request_id:Request_id.t;
                workspace:workspace_state;recipients:(string * recipient_state) list}
@@ -36,14 +37,18 @@ let exact keys = function
   | _ -> Error (Corrupt "unknown, duplicate or missing event field")
 let text fields key = match List.assoc key fields with
   | `String s -> Ok s | _ -> Error (Corrupt (key ^ " must be text"))
-let event_payload p = `Assoc ["event",`String "admitted";"caller",`String p.caller;
+let authority_json = function Keeper_sender -> `String "keeper" | External_sender -> `String "external"
+let event_payload p = `Assoc ["event",`String "admitted";"sender_authority",authority_json p.sender_authority;"caller",`String p.caller;
   "operation_id",`String (Request_id.to_string p.operation_id);
   "artifact_sha256",`String p.artifact_sha256;"content",`String p.content;
   "recipients",`List (List.map (fun v -> `String v) p.recipients)]
 let initial json =
-  let* f = exact ["event";"caller";"operation_id";"artifact_sha256";"content";"recipients"] json in
+  let* f = exact ["event";"sender_authority";"caller";"operation_id";"artifact_sha256";"content";"recipients"] json in
   let* event = text f "event" in
   if event<>"admitted" then Error (Corrupt "first event must admit a delivery") else
+  let* sender_authority=match List.assoc "sender_authority" f with
+    | `String "keeper" -> Ok Keeper_sender | `String "external" -> Ok External_sender
+    | _ -> Error (Corrupt "unknown sender authority") in
   let* caller = text f "caller" in let* operation = text f "operation_id" in
   let* operation_id = Request_id.of_string operation |> Result.map_error (fun e -> Corrupt e) in
   let* artifact_sha256 = text f "artifact_sha256" in let* content = text f "content" in
@@ -51,7 +56,7 @@ let initial json =
     | `List names -> List.fold_right (fun value acc -> let* rest=acc in match value with
         | `String name -> Ok (name::rest) | _ -> Error (Corrupt "recipient must be text")) names (Ok [])
     | _ -> Error (Corrupt "recipients must be a list") in
-  let payload = {caller;operation_id;artifact_sha256;content;recipients} in
+  let payload = {sender_authority;caller;operation_id;artifact_sha256;content;recipients} in
   let* () = validate payload |> Result.map_error (function Invalid_input e -> Corrupt e | e -> e) in
   let* workspace_request_id = request_id payload in
   Ok {payload;workspace_request_id;workspace=Uncommitted;
@@ -97,10 +102,34 @@ let protect f = try f () with
   | Sys_error e -> Error (Io_error e)
   | Unix.Unix_error (e,call,arg) -> Error (Io_error (call ^ " " ^ arg ^ ": " ^ Unix.error_message e))
   | Yojson.Json_error e -> Error (Corrupt e)
+let complete r = match r.workspace with
+  | Uncommitted -> false
+  | Committed _ -> List.for_all (function _,Accepted -> true | _,Pending _ -> false) r.recipients
+let pending_dir t = Filename.concat t.root "pending"
+let marker t filename = Filename.concat (pending_dir t) (Filename.basename filename)
+let sync_directory directory =
+  let fd=Unix.openfile directory [Unix.O_RDONLY;Unix.O_CLOEXEC] 0 in
+  Fun.protect ~finally:(fun () -> Unix.close fd) (fun () -> Unix.fsync fd)
+let ensure_pending t filename =
+  Fs_compat.save_file_atomic_strict (marker t filename) ""
+  |> Result.map_error (fun detail -> Io_error detail)
+let remove_marker t filename = protect (fun () ->
+  (try Unix.unlink (marker t filename) with Unix.Unix_error (Unix.ENOENT,_,_) -> ());
+  sync_directory (pending_dir t); Ok ())
+let settle_marker t filename receipt =
+  if not (complete receipt.record) then receipt else
+  match remove_marker t filename with
+  | Ok () -> receipt
+  | Error error ->
+      let detail=match error with Io_error detail -> detail | _ -> "pending index cleanup failed" in
+      {receipt with settlement_error=Some (match receipt.settlement_error with
+        | None -> detail | Some previous -> previous ^ "; " ^ detail)}
 let transact t ~caller ~operation_id decide =
   if String.trim caller="" then Error (Invalid_input "authenticated caller is required") else protect (fun () ->
-  Fs_compat.mkdir_p t.root;
-  let outcome = transaction t (path t caller operation_id)
+  Fs_compat.mkdir_p (pending_dir t);
+  sync_directory t.root;
+  let filename=path t caller operation_id in
+  let outcome = transaction t filename
     (fun bytes -> match decode bytes with
       | Error e -> None,Error e
       | Ok existing ->
@@ -110,8 +139,15 @@ let transact t ~caller ~operation_id decide =
             | _ -> decide existing in
           match checked with
           | Error e -> None,Error e
-          | Ok (event,record) -> Option.map (fun json -> Yojson.Safe.to_string json ^ "\n") event,Ok record) in
-  match outcome with
+          | Ok (event,record) ->
+              (* The discoverability marker is durable before any new pending
+                 intention is appended. A crash can leave an empty marker,
+                 never an admitted intention without its recovery index. *)
+              let indexed=if complete record then Ok () else ensure_pending t filename in
+              (match indexed with
+               | Error error -> None,Error error
+               | Ok () -> Option.map (fun json -> Yojson.Safe.to_string json ^ "\n") event,Ok record)) in
+  let result=match outcome with
   | Fs_compat.Private_file_succeeded result -> Result.map (fun r -> {record=r;settlement_error=None}) result
   | Fs_compat.Private_file_succeeded_with_cleanup_failure {value;cleanup_failure} ->
       let detail=Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure in
@@ -120,7 +156,10 @@ let transact t ~caller ~operation_id decide =
   | Fs_compat.Private_file_failed e -> Error (Io_error (Fs_compat.durable_append_error_to_string e))
   | Fs_compat.Private_file_failed_with_cleanup_failure {error;cleanup_failure} ->
       Error (Settlement_failed {primary=Io_error (Fs_compat.durable_append_error_to_string error);
-        cleanup=Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure}))
+        cleanup=Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure}) in
+  (* Completion is durable before retirement. A crash before unlink merely
+     leaves a completed marker for the next recovery pass to retire. *)
+  Result.map (settle_marker t filename) result)
 let admit t payload =
   let* ()=validate payload in
   transact t ~caller:payload.caller ~operation_id:payload.operation_id (function
@@ -179,19 +218,24 @@ let recipient_result t ~caller ~operation_id ~recipient state =
           "state",`String status;"error",error] in
         let* next=transition r event |> Result.map_error (fun _ -> Conflict) in
         if next=r then Ok (None,r) else Ok (Some event,next))
-let complete r = match r.workspace with
-  | Uncommitted -> false
-  | Committed _ -> List.for_all (function _,Accepted -> true | _,Pending _ -> false) r.recipients
 let recover t = protect (fun () ->
-  let names = match Fs_compat.exact_path_kind t.root with
+  let names = match Fs_compat.exact_path_kind (pending_dir t) with
     | Fs_compat.Exact_missing -> []
-    | _ -> Fs_compat.read_dir t.root |> List.sort String.compare in
+    | _ -> Fs_compat.read_dir (pending_dir t) |> List.sort String.compare in
   List.fold_left (fun acc name ->
     let* recovery=acc in
     if not (Filename.check_suffix name ".jsonl") then Ok recovery else
     let filename=Filename.concat t.root name in
     let outcome=transaction t filename
-      (fun bytes -> None,decode bytes) in
+      (fun bytes ->
+        let decoded=decode bytes in
+        (* Marker creation may precede a failed admission. Remove that empty
+           marker while still holding the journal lock, so a concurrent admit
+           must create its own marker after this cleanup. *)
+        let decoded=match decoded with
+          | Ok None -> Result.map (fun () -> None) (remove_marker t filename)
+          | Ok (Some _) | Error _ -> decoded in
+        None,decoded) in
     let* record,settlement_error=match outcome with
       | Fs_compat.Private_file_succeeded result -> Result.map (fun r -> r,None) result
       | Fs_compat.Private_file_succeeded_with_cleanup_failure {value;cleanup_failure} ->
@@ -210,7 +254,8 @@ let recover t = protect (fun () ->
         (match settlement_error with None -> Error primary
          | Some cleanup -> Error (Settlement_failed {primary;cleanup}))
     | Some record ->
-        let receipt={record;settlement_error} in
+        let receipt=settle_marker t filename {record;settlement_error} in
+        let settlement_error=receipt.settlement_error in
         if complete record then (match settlement_error with
           | None -> Ok recovery
           | Some _ -> Ok {recovery with settled_with_cleanup=receipt::recovery.settled_with_cleanup})

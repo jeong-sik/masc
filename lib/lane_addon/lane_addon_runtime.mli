@@ -7,8 +7,8 @@ val register_delivery_handler :
   (config:Workspace.config -> caller:string -> keeper_name:string -> prompt:string ->
     (Yojson.Safe.t, string) result) -> unit
 type fleet_backend = {
-  snapshot : config:Workspace.config -> caller:string -> (string list,string) result;
-  project : config:Workspace.config -> delivery:Workspace_broadcast.broadcast_delivery ->
+  snapshot : config:Workspace.config -> caller:string -> (Lane_addon_broadcast_delivery.sender_authority * string list,string) result;
+  project : config:Workspace.config -> sender_authority:Lane_addon_broadcast_delivery.sender_authority -> delivery:Workspace_broadcast.broadcast_delivery ->
     recipient:string -> (unit,string) result;
 }
 val register_fleet_backend : fleet_backend -> unit

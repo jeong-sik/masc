@@ -128,7 +128,7 @@ let chat_activity ?(frame = -1) ?(stop_keys = "") ~now ~keeper_name ~error ~text
     let text = match preview with
       | Some _ when text_tail_drawn -> []
       | Some preview when String.trim preview.Tui_decode.ktp_text_tail <> "" ->
-        [{ lead = ""; rest = "Latest output: " ^ Tui_decode.sanitize_terminal_text preview.ktp_text_tail; keys = "" }]
+        [{ lead = ""; rest = "Latest output: " ^ Masc.Tui_terminal_text.sanitize_terminal_text preview.ktp_text_tail; keys = "" }]
       | Some _ | None -> []
     in
     (* "Current chat_operation turn · 14m43s · …" went: the mark says a turn
@@ -143,7 +143,7 @@ let chat_activity ?(frame = -1) ?(stop_keys = "") ~now ~keeper_name ~error ~text
     stale
     @ [ { lead = Printf.sprintf "%s %s%s · %s" mark observed (lane_word lane)
                    (elapsed_text ~now started_at_unix)
-        ; rest = " · " ^ Tui_decode.sanitize_terminal_text status
+        ; rest = " · " ^ Masc.Tui_terminal_text.sanitize_terminal_text status
         ; keys = stop_keys
         } ]
     @ text

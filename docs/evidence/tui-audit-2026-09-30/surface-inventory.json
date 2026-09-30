@@ -166,7 +166,7 @@
       "implementation_prs": [
         40186
       ],
-      "implementation_evidence": "K06 full foreign stop command wrapped and physically counted; source review only; execution pending"
+      "implementation_evidence": "K06 source-reviewed at b1b7dcfa0152d545731355a7663927dfd32eb16f; targeted 36669995389 failed compiling undeclared direct test dependencies, all three declared and independently reviewed; run36674712037 queued; runtime and screenshots pending"
     },
     {
       "name": "render_lanes",
@@ -276,7 +276,8 @@
       "runtime_evidence": "pending",
       "finding_ids": [
         "S02"
-      ]
+      ],
+      "followup_source_evidence": "86751f610442e4d82992ebc54bf9eb8ba45ef6d2 still uses 10/20/20/22 widths below120; PR40177 a5ff52d4f6cf83a11830a5254025110a0ec0aa79 does not repair this listing; source-only"
     },
     {
       "name": "render_runtime_detail",
@@ -392,7 +393,8 @@
       "runtime_evidence": "pending",
       "finding_ids": [
         "R03"
-      ]
+      ],
+      "followup_source_evidence": "86751f610442e4d82992ebc54bf9eb8ba45ef6d2 still has date16/keeper18/task16 before path and one-row selected metadata; PR40177 does not repair this reader; source-only"
     }
   ],
   "global_overlays": [
@@ -526,5 +528,12 @@
     "source_head": "893ca15b5b",
     "focused_run": 36673794831,
     "status": "source review and static checks only; focused execution and actual modal PTY pending"
+  },
+  "tables_targeted_evidence": {
+    "head": "560667e1a2860e23a6773d7c31cd1d2e72e9c1f7",
+    "run": 36670468008,
+    "job": 109744166515,
+    "receipt": "tables-targeted-pass.txt",
+    "scope": "compiled unit suite, 96 tests success; raw checkout and printed narrow table rows verified; not PTY, required checks or installed binary proof"
   }
 }

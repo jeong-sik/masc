@@ -1,0 +1,21 @@
+Run: https://github.com/jeong-sik/masc/actions/runs/36670468008
+Head: 560667e1a2860e23a6773d7c31cd1d2e72e9c1f7
+Job: 109744166515
+Raw job log SHA256: 18573b39280acf50149bc837b45447973f2f05dec580152d7039bf60383d0a53
+Scope: compiled render_schedule unit suite; not PTY screenshot, required PR checks or installation proof.
+
+2026-09-30T05:20:44.1608576Z 560667e1a2860e23a6773d7c31cd1d2e72e9c1f7
+2026-09-30T05:20:45.5614823Z 560667e1a2860e23a6773d7c31cd1d2e72e9c1f7
+2026-09-30T05:25:18.9550052Z repository 40 columns: N                  S         /re…example
+2026-09-30T05:25:18.9551992Z repository 56 columns: N                  B            S         /repo/example 
+2026-09-30T05:25:18.9554009Z repository 74 columns: N                  B            S         Y      /repo/example            
+2026-09-30T05:25:18.9556158Z repository 100 columns: N                  B            S         Y      /repo/example                                      
+2026-09-30T05:25:18.9558527Z repository 160 columns: N                  B            S         Y      /repo/example                                                                                                  
+2026-09-30T05:25:18.9559403Z   [OK]          render scheduling         37   narrow repositories and logs k...
+2026-09-30T05:25:18.9597061Z   [OK]          render scheduling         38   workspace path takes the remai...
+2026-09-30T05:25:18.9731743Z   [OK]          render scheduling         39   workspace header and row share...
+2026-09-30T05:25:18.9773512Z   [OK]          render scheduling         40   workspace row width ignores it...
+2026-09-30T05:25:18.9844107Z   [OK]          render scheduling         41   system log colour costs no cells.
+2026-09-30T05:25:19.0688382Z   [OK]          render scheduling         52   system log message takes the r...
+2026-09-30T05:25:19.0838158Z   [OK]          render scheduling         53   system log header and row shar...
+2026-09-30T05:25:19.2958839Z Test Successful in 0.185s. 96 tests run.

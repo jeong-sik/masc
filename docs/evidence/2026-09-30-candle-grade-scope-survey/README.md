@@ -6,7 +6,7 @@ The CI executable embeds source `4fae8f4e3fef99a0b23871dd6bfc58a0250df43f` (SHA2
 
 `exit.json` records exit0 at2026-09-29T18:46:22Z. The provenance auditor independently re-read all400 receipts and their800 durable registry events/payloads. It verified fixed actual inputs, identical rendered prompts per case, one dispatch per run,400 unique run IDs, available input/output payloads and matching registered/completed records. Assistant proposed grades and human labels were not model inputs. No live Goal, Task, ledger or Paid state was written.
 
-The original `human-reference-*` IDs name assistant-created synthetic cases. They do not make this a human gold corpus. The existing human-grades sheet remains blank. Case04 repeats the CSV example used in the earlier experiment; this is not a fully unseen validation set.
+The original `human-reference-*` IDs name assistant-created synthetic cases. They do not make this a human gold corpus. The human-grades sheet was blank during this measurement; the subsequently supplied case 19 operator anchor is recorded separately in docs/testing/candle-appraiser-calibration-proposal. Case04 repeats the CSV example used in the earlier experiment; this is not a fully unseen validation set.
 
 | Case | Frozen Goal title | Observed distribution |
 |---|---|---|

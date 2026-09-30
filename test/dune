@@ -126,6 +126,11 @@
  (modules test_keeper_vision_official_client)
  (libraries masc_test_deps))
 
+(executable
+ (name vision_artifact_measure)
+ (modules vision_artifact_measure)
+ (libraries masc_test_deps))
+
 (test
  (name test_verifier_official_client)
  (modules test_verifier_official_client)
@@ -1596,14 +1601,6 @@
  (name test_goal_timeline_projection)
  (modules test_goal_timeline_projection)
  (libraries masc_test_deps))
-
-; #39571: owner-directed Goal notices — a refuted verdict and an overdue due
-; date each owe the Goal's owner one idempotent Pending Message.
-
-(test
- (name test_goal_owner_notification)
- (modules test_goal_owner_notification)
- (libraries masc_test_deps ptime))
 
 ; Goal_due: the one reading of a Goal's due date (the day it names, the UTC
 ; instant it falls due, the UTC days left).
@@ -7252,7 +7249,6 @@
  (name test_lane_addon_worker)
  (modules test_lane_addon_worker)
  (libraries masc masc_random_id alcotest eio eio_main yojson unix))
-(include stanzas/test_runtime_model_discovery.inc)
 
 (include stanzas/test_bedrock_sdk.inc)
 (test
@@ -7710,6 +7706,8 @@
  (name runtest)
  (deps (alias runtest-test_tui_chat_load_errors_pty)))
 
+(include stanzas/test_candle_baseline_collector.inc)
+
 (rule
  (alias runtest-test_tui_home_journey_pty)
  (deps test_tui_home_journey_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
@@ -7779,3 +7777,21 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_preset_viewport_pty)))
+
+(include stanzas/test_tui_review_verdict_layout_pty.inc)
+(include stanzas/test_tui_runtime_list_layout_pty.inc)
+(include stanzas/test_tui_workspace_activity_layout_pty.inc)
+(include stanzas/test_tui_code_memo_layout_pty.inc)
+(include stanzas/test_tui_code_history_layout_pty.inc)
+
+(rule
+ (alias runtest-test_tui_tools_layout_pty)
+ (deps test_tui_tools_layout_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_tools_layout_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_tools_layout_pty)))
+
+(include stanzas/test_tui_prompts_layout_pty.inc)

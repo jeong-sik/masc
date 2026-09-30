@@ -1762,10 +1762,21 @@ type runtime_lane_list_freshness =
   | Lane_list_read
   | Lane_list_unread of string
 
-(** Stable identity of the Runtime row opened for detail. The cursor is only a
-    position and can move to another runtime after refresh; detail stays bound
+(** Identity of an asynchronous diff read, including its destination. *)
+type repository_diff_reader = Repository_diff_reader | Patch_diff_reader
+
+type repository_diff_request =
+  { rdr_reader : repository_diff_reader
+  ; rdr_scope : Tui_decode.repository_change_scope
+  ; rdr_path : string
+  ; rdr_generation : int
+  }
+
+(** Runtime detail is either the workspace route/status document or a stable
+    row identity. A row cursor can move after refresh; its detail remains bound
     to the exact lane/runtime pair the operator opened. *)
 type runtime_detail_target =
+  | Runtime_routes
   | Runtime_lane_candidate of { lane_id : string; runtime_id : string }
   | Runtime_catalog_entry of { runtime_id : string }
 
@@ -1859,7 +1870,7 @@ end
 type fusion_mode =
   | Fusion_list
   | Fusion_detail of string
-  | Fusion_historical_detail of Tui_decode.fusion_historical_evidence
+  | Fusion_historical_detail of Masc.Tui_decode_fusion.fusion_historical_evidence
 
 (** How many list reads a started run is waited for. The read that was
     already in flight when the run started cannot carry it, so one more is
@@ -2120,7 +2131,6 @@ type planning_goal = Tui_decode.planning_goal
   pg_id: string;
   pg_criterion_revision: string option;
   pg_title: string;
-  pg_owner: Goal_store.owner;
   pg_phase: Goal_phase.t;
   pg_priority: int;
   pg_due_date: string option;
@@ -5861,7 +5871,7 @@ type state = {
   (* Questions Keepers put to a human, drawn beside the approvals. [None]
      means nothing has been read yet, which is not the same as a fleet with
      no open questions. *)
-  mutable asks_snapshot: Masc.Tui_decode.asks_snapshot option;
+  mutable asks_snapshot: Masc.Tui_decode_asks.asks_snapshot option;
   mutable asks_error: string option;
   (* Answering happens in its own mode. The surface's own keys are spoken for
      -- arrows walk the approval queue, y and n decide it -- and a question
@@ -6203,6 +6213,7 @@ type state = {
   mutable workspace_activity_repo: string option;
   mutable workspace_activity: (string, workspace_activity_read) Masc_tui_fetched.t;
   mutable workspace_activity_cursor: int;
+  mutable workspace_activity_context_scroll: int option;
   mutable memory_health: Tui_decode.memory_health_snapshot option;
   mutable memory_health_error: string option;
   mutable memory_health_inflight: bool;
@@ -6239,6 +6250,7 @@ type state = {
   mutable repository_changes_scroll: int;
   mutable repository_changes_cursor: int;
   mutable repository_changes_diff: (string * Tui_decode.git_diff) option;
+  mutable repository_changes_diff_generation: int;
   mutable repository_changes_diff_error: string option;
   mutable repository_changes_diff_path: string option;
   mutable repository_changes_diff_scroll: int;
@@ -6247,8 +6259,10 @@ type state = {
      in $EDITOR. *)
   mutable patch_modal_open: bool;
   mutable patch_modal_scroll: int;
+  mutable patch_modal_hscroll: int;
   mutable patch_modal_path: string option;
   mutable patch_modal_diff: (string * Tui_decode.git_diff) option;
+  mutable patch_modal_generation: int;
   mutable patch_modal_error: string option;
   (* Web Link Preview and Rich Embed modal & settings *)
   mutable link_modal_open: bool;
@@ -6310,7 +6324,7 @@ type state = {
   mutable code_history:
     (code_workspace_scope * string, code_history_listing) Masc_tui_fetched.t;
   mutable code_history_open: bool;
-  mutable code_history_scroll: int;
+  mutable code_history_scroll: int;  (** Physical wrapped rows; Enter resolves the visible row owner. *)
   (* The file pane's diff view: d on an open file swaps the content for what
      the working tree holds against HEAD, keyed the same way. One overlay at
      a time -- opening this closes the history and vice versa. *)
@@ -6389,14 +6403,14 @@ type state = {
   (* The retained-run list. A failed refresh keeps the rows it had and says
      why beside them ([Masc_tui_fetched.Stale]), rather than a registry that
      could not be read drawing as an empty one. *)
-  mutable fusion_runs: (unit, Tui_decode.fusion_snapshot) Masc_tui_fetched.t;
+  mutable fusion_runs: (unit, Masc.Tui_decode_fusion.fusion_snapshot) Masc_tui_fetched.t;
   (* Why the launch form could not open. Not a reading of the run list, so it
      is not folded into that list's failure; the next list answer clears it. *)
   mutable fusion_launch_error: string option;
   mutable fusion_cursor: int;
   mutable fusion_scroll: int;
   mutable fusion_mode: fusion_mode;
-  mutable fusion_detail: Tui_decode.fusion_detail option;
+  mutable fusion_detail: Masc.Tui_decode_fusion.fusion_detail option;
   mutable fusion_detail_error: string option;
   (* A detail GET captures this generation. A late response for a run the
      operator already left cannot replace the exact run now on screen. *)
@@ -6405,8 +6419,8 @@ type state = {
      do not pile another GET on top of it; changing runs still starts a new
      request immediately, whose pair replaces this marker. *)
   mutable fusion_detail_inflight: (int * string) option;
-  mutable fusion_historical_detail: Tui_decode.fusion_historical_detail option;
-  mutable fusion_historical_inflight: (int * Tui_decode.fusion_historical_evidence) option;
+  mutable fusion_historical_detail: Masc.Tui_decode_fusion.fusion_historical_detail option;
+  mutable fusion_historical_inflight: (int * Masc.Tui_decode_fusion.fusion_historical_evidence) option;
   mutable fusion_launch: fusion_launch option;
   (* The read or the submit the form is waiting on. A key that closes the
      form bumps it, so the answer to a read the operator left cannot open
@@ -6633,6 +6647,19 @@ type state = {
   port: int;
   refresh_interval: float;
 }
+
+(* One selection shared by Tools actions, pinned heading and document. *)
+let tools_skill_profiles (state : state) =
+  match state.tools_inventory with
+  | Some { Tui_decode.ts_effective =
+             Some (Tui_decode.Effective_surface_available { ets_skill_profiles; _ }); _ } ->
+      ets_skill_profiles
+  | Some _ | None -> []
+
+let selected_tools_skill_profile (state : state) =
+  List.nth_opt (tools_skill_profiles state) state.tools_skill_cursor
+
+
 
 (* Which field a typed character lands in.
 
@@ -7622,9 +7649,9 @@ let detail_read_waiting state ~tab ~keeper =
 let selected_keeper (state : state) =
   List.nth_opt state.keepers state.keeper_cursor
 
-let fusion_snapshot_entries (snapshot : Tui_decode.fusion_snapshot) =
-  List.map (fun run -> Tui_decode.Fusion_retained_run run) snapshot.fus_runs
-  @ List.map (fun evidence -> Tui_decode.Fusion_historical_evidence evidence)
+let fusion_snapshot_entries (snapshot : Masc.Tui_decode_fusion.fusion_snapshot) =
+  List.map (fun run -> Masc.Tui_decode_fusion.Fusion_retained_run run) snapshot.fus_runs
+  @ List.map (fun evidence -> Masc.Tui_decode_fusion.Fusion_historical_evidence evidence)
       snapshot.fus_historical_evidence
 
 let fusion_runs_view (state : state) =
@@ -7643,8 +7670,8 @@ let fusion_list_entries (state : state) =
   | Some snapshot -> fusion_snapshot_entries snapshot
 
 let fusion_entry_identity = function
-  | Tui_decode.Fusion_retained_run run -> "run:" ^ run.fur_run_id
-  | Tui_decode.Fusion_historical_evidence evidence -> "board:" ^ evidence.fhe_post_id
+  | Masc.Tui_decode_fusion.Fusion_retained_run run -> "run:" ^ run.fur_run_id
+  | Masc.Tui_decode_fusion.Fusion_historical_evidence evidence -> "board:" ^ evidence.fhe_post_id
 
 let selected_fusion_entry state =
   List.nth_opt (fusion_list_entries state) state.fusion_cursor
@@ -7653,9 +7680,9 @@ let fusion_detail_entry_index state =
   fusion_list_entries state
   |> List.find_index (fun entry ->
       match state.fusion_mode, entry with
-      | Fusion_detail id, Tui_decode.Fusion_retained_run run ->
+      | Fusion_detail id, Masc.Tui_decode_fusion.Fusion_retained_run run ->
           String.equal id run.fur_run_id
-      | Fusion_historical_detail reference, Tui_decode.Fusion_historical_evidence candidate ->
+      | Fusion_historical_detail reference, Masc.Tui_decode_fusion.Fusion_historical_evidence candidate ->
           String.equal reference.fhe_post_id candidate.fhe_post_id
           && String.equal reference.fhe_run_id candidate.fhe_run_id
       | _ -> false)
@@ -7663,7 +7690,7 @@ let fusion_detail_entry_index state =
 let selected_keeper_runs (state : state) =
   match selected_keeper state, fusion_snapshot state with
   | Some keeper, Some snapshot ->
-      List.filter (fun (run : Tui_decode.fusion_run) ->
+      List.filter (fun (run : Masc.Tui_decode_fusion.fusion_run) ->
           String.equal run.fur_keeper keeper.k_name) snapshot.fus_runs
   | _ -> []
 
@@ -7714,12 +7741,53 @@ let workspace_activity_selection state =
   let cursor = max 0 (min state.workspace_activity_cursor (List.length rows - 1)) in
   (rows, cursor, List.nth_opt rows cursor)
 
+let workspace_activity_context_lines state ~cols =
+  let _, _, selected = workspace_activity_selection state in
+  let wrap label value =
+    Masc_tui_message_layout.wrap_words
+      ~max_cells:(max 1 (Masc_tui_frame.inner_width ~cols - 2))
+      (label ^ ": " ^ Masc.Tui_terminal_text.sanitize_terminal_text value)
+    |> List.map (fun line -> "  " ^ line) in
+  match selected with
+  | None -> wrap "Record" "No selected recorded change"
+  | Some (change, path) ->
+      let task_id = match change.Tui_decode.fc_task_id with None -> "unlinked" | Some id -> id in
+      let task_title = match change.fc_task_id with
+        | None -> "No Task recorded"
+        | Some id -> (match List.find_opt (fun (task : Tui_decode.task) -> String.equal task.id id) state.tasks with
+                     | None -> "Task reading unavailable" | Some task -> task.title) in
+      let kind = match change.fc_kind with
+        | Tui_decode.Fc_edited { replace_all; _ } -> if replace_all then "edit all" else "edit"
+        | Fc_written _ -> "write"
+        | Fc_inserted { line; _ } -> Printf.sprintf "insert at line %d" line
+        | Fc_materialized { sha256; bytes } -> Printf.sprintf "materialized %d bytes, SHA256 %s" bytes sha256 in
+      wrap "Repository" (match state.workspace_activity_repo with None -> "not selected" | Some id -> id)
+      @ wrap "Path" path
+      @ wrap "Keeper" change.fc_keeper
+      @ wrap "Task ID" task_id
+      @ wrap "Task title" task_title
+      @ wrap "At (epoch seconds)" (Printf.sprintf "%.6f" change.fc_at)
+      @ wrap "Turn" (match change.fc_turn with None -> "not recorded" | Some turn -> string_of_int turn)
+      @ wrap "Execution ID" (match change.fc_execution_id with None -> "not recorded" | Some id -> id)
+      @ wrap "Result" (if change.fc_succeeded then "succeeded" else "failed")
+      @ wrap "Change" kind
+
+let workspace_activity_context_height state ~surface_rows =
+  let stale = match state.workspace_activity_repo with
+    | None -> false
+    | Some repo_id -> (match Masc_tui_fetched.view_for ~equal:String.equal state.workspace_activity ~key:repo_id with
+                      | Masc_tui_fetched.Stale _ -> true | _ -> false) in
+  max 1 (surface_rows - Masc_tui_frame.chrome_rows - (if stale then 1 else 0))
+
 let apply_workspace_activity_read state request result =
+  let _, _, previous = workspace_activity_selection state in
   state.workspace_activity <-
     Masc_tui_fetched.complete ~equal:String.equal state.workspace_activity
       request result;
-  let _, cursor, _ = workspace_activity_selection state in
-  state.workspace_activity_cursor <- cursor
+  let rows, cursor, _ = workspace_activity_selection state in
+  let retained = Option.bind previous (fun selected -> List.find_index (fun row -> row = selected) rows) in
+  state.workspace_activity_cursor <- (match retained with Some index -> index | None -> cursor);
+  if Option.is_none retained then state.workspace_activity_context_scroll <- None
 
 let enter_keeper_code_file state ~keeper ~path =
   state.code_scope <- Code_scope_keeper keeper;
@@ -8386,6 +8454,7 @@ let create_state
   workspace_activity_repo = None;
   workspace_activity = Masc_tui_fetched.initial;
   workspace_activity_cursor = 0;
+  workspace_activity_context_scroll = None;
   memory_health = None;
   memory_health_error = None;
   memory_health_inflight = false;
@@ -8407,14 +8476,17 @@ let create_state
   repository_changes_scroll = 0;
   repository_changes_cursor = 0;
   repository_changes_diff = None;
+  repository_changes_diff_generation = 0;
   repository_changes_diff_error = None;
   repository_changes_diff_path = None;
   repository_changes_diff_scroll = 0;
   repository_changes_return_chat = false;
   patch_modal_open = false;
   patch_modal_scroll = 0;
+  patch_modal_hscroll = 0;
   patch_modal_path = None;
   patch_modal_diff = None;
+  patch_modal_generation = 0;
   patch_modal_error = None;
   link_modal_open = false;
   link_modal_scroll = 0;
@@ -9015,7 +9087,7 @@ type clamped_scroll =
      is knowable at the keypress, which steps by one or jumps to 9999 and lets
      the frame say where that landed. They wrote the answer back from inside
      the drawing instead, which is the one thing the renderer must not do. *)
-  | Patch_modal_scroll of int
+  | Patch_modal_scroll of int * int
   | Link_modal_scroll of int
   | Play_invite_scroll of int
   (* The voice pane and its wizard lay out lines out of two HTTP reads and the
@@ -9091,7 +9163,9 @@ let apply_clamped_scroll (state : state) = function
   | Resource_scroll value -> state.resource_scroll <- value
   | Metrics_scroll value -> state.metrics_scroll <- value
   | Approval_detail_scroll value -> state.approval_detail_scroll <- value
-  | Patch_modal_scroll value -> state.patch_modal_scroll <- value
+  | Patch_modal_scroll (vertical, horizontal) ->
+      state.patch_modal_scroll <- vertical;
+      state.patch_modal_hscroll <- horizontal
   | Link_modal_scroll value -> state.link_modal_scroll <- value
   | Play_invite_scroll value -> state.play_invite_scroll <- value
   | Voice_scroll value -> state.config_scroll <- value
@@ -9762,7 +9836,7 @@ let runtime_picker_page = 3
    safe here, and the text the typed filter matches: the operator filters by
    exactly what they read. *)
 let runtime_picker_label (runtime : Tui_decode.runtime_option) =
-  Tui_decode.sanitize_terminal_text
+  Masc.Tui_terminal_text.sanitize_terminal_text
     (Printf.sprintf "%s   %s / %s" runtime.Tui_decode.ro_id
        runtime.Tui_decode.ro_provider runtime.Tui_decode.ro_model)
 
@@ -10507,7 +10581,7 @@ type runtime_pick_columns = {
 }
 
 let runtime_pick_columns item =
-  let single_line = Tui_decode.sanitize_terminal_text in
+  let single_line = Masc.Tui_terminal_text.sanitize_terminal_text in
   match item with
   | Pick_lane (lane, _) ->
       (* A lane's route is its candidates by model, the provider prefix
@@ -10624,7 +10698,7 @@ let runtime_pick_column_widths ~cols items =
       (fun longest item ->
         max longest
           (Masc_tui_message_layout.display_width
-             (Tui_decode.sanitize_terminal_text (runtime_pick_item_id item))))
+             (Masc.Tui_terminal_text.sanitize_terminal_text (runtime_pick_item_id item))))
       0 items
   in
   (* The columns divide what is left after the facts. The earlier budget
@@ -10686,7 +10760,7 @@ let aggregate_keeper_stats (keepers : Tui_decode.keeper list) =
    its own qualifier -- "2 probe-only" counts runtimes the probe reached and
    the config does not name, so a row ending at "2" claims something else. *)
 let runtime_authority_rows ~cols (state : state) : string list =
-  let single_line = Tui_decode.sanitize_terminal_text in
+  let single_line = Masc.Tui_terminal_text.sanitize_terminal_text in
   let clauses =
     match state.runtime_surface with
     | None ->
@@ -10768,6 +10842,34 @@ let runtime_surface_listing_chrome ~cols state =
 (* The Runtime listing's bound. Its chrome depends on the terminal width, so
    the caller passes the width it drew at and the keys move through the same
    count the frame drew with. *)
+(* Enter/Right opens a listing row once. A detail has its own stable identity;
+   a refresh can reorder the hidden listing without changing that identity. *)
+let open_runtime_row_detail (state : state) =
+  match state.runtime_detail_target, state.runtime_surface with
+  | Some _, _ | None, None -> ()
+  | None, Some snapshot ->
+      let target =
+        match state.runtime_mode with
+        | Runtime_lanes ->
+            List.nth_opt snapshot.Tui_decode.rss_candidates state.runtime_cursor
+            |> Option.map (fun row ->
+                   Runtime_lane_candidate
+                     { lane_id = row.Tui_decode.rcr_lane_id
+                     ; runtime_id = row.rcr_runtime.ro_id
+                     })
+        | Runtime_all ->
+            List.nth_opt snapshot.Tui_decode.rss_resolved.rrs_runtimes
+              state.runtime_cursor
+            |> Option.map (fun runtime ->
+                   Runtime_catalog_entry { runtime_id = runtime.Tui_decode.ro_id })
+      in
+      Option.iter
+        (fun target ->
+          state.runtime_detail_target <- Some target;
+          state.runtime_detail_scroll <- 0)
+        target
+;;
+
 let runtime_scrolled ~cols (state : state) : scrolled option =
   if Option.is_some state.runtime_detail_target then None
   else
@@ -11023,8 +11125,8 @@ let approvals_open_question_count (state : state) =
   match approvals_open_questions state with
   | Some rows ->
       List.fold_left
-        (fun total (row : Tui_decode.ask_row) ->
-          total + List.length row.Tui_decode.ar_questions)
+        (fun total (row : Masc.Tui_decode_asks.ask_row) ->
+          total + List.length row.Masc.Tui_decode_asks.ar_questions)
         0 rows
   | None -> 0
 
@@ -11162,7 +11264,7 @@ let home_request_of_approval = function
    reachable through their source reading, never offered as current requests. *)
 let home_decision_rows (state : state) =
   let reading = approvals_reading state in
-  let clean = Tui_decode.sanitize_terminal_text in
+  let clean = Masc.Tui_terminal_text.sanitize_terminal_text in
   let approval_rows =
     approval_items state
     |> List.filter_map (fun row ->
@@ -11183,7 +11285,7 @@ let home_decision_rows (state : state) =
   let questions =
     if list_is_read reading.questions then
       Option.value ~default:[] (approvals_open_questions state)
-      |> List.map (fun (row : Tui_decode.ask_row) ->
+      |> List.map (fun (row : Masc.Tui_decode_asks.ask_row) ->
           let why = match row.ar_context, row.ar_questions with
             | Some reason, _ -> reason
             | None, question :: _ -> question.aq_prompt
@@ -11276,7 +11378,7 @@ let reconcile_home_request_detail state =
                  (approval_items state))
         | Home_question ask_id ->
             Option.iter (fun index -> state.ask_cursor <- index)
-              (List.find_index (fun (row : Tui_decode.ask_row) -> row.ar_id = ask_id)
+              (List.find_index (fun (row : Masc.Tui_decode_asks.ask_row) -> row.ar_id = ask_id)
                  (Option.value ~default:[] (approvals_open_questions state)))
         | Home_goal_confirmation goal_id -> state.planning_mode <- Planning_detail goal_id
         | Home_operator_task task_id -> state.task_detail_id <- Some task_id
@@ -11300,12 +11402,12 @@ let home_continue_rows (state : state) =
     | Some (name, save_notice) when state.workspace_identity = Workspace_identity_match
                    && keeper_available_for_new_message state name ->
         [ Home_resume name,
-          "Continue with " ^ Tui_decode.sanitize_terminal_text name
+          "Continue with " ^ Masc.Tui_terminal_text.sanitize_terminal_text name
           ^ save_notice ]
     | Some (name, save_notice) when state.workspace_identity = Workspace_identity_match
                          && Option.is_some state.keepers_error ->
         [ Home_read_last name,
-          "Last conversation with " ^ Tui_decode.sanitize_terminal_text name
+          "Last conversation with " ^ Masc.Tui_terminal_text.sanitize_terminal_text name
           ^ save_notice
           ^ " · roster unavailable; read history" ]
     | Some _ | None -> []
@@ -11319,7 +11421,7 @@ let home_continue_rows (state : state) =
                "Create a Keeper · conversation history unavailable"
            | (No_chat_receipt | Recorded_chat _ | Session_chat _ | Unconfirmed_chat _), Some (name, _) ->
                "Create a Keeper · last conversation "
-               ^ Tui_decode.sanitize_terminal_text name ^ " unavailable"
+               ^ Masc.Tui_terminal_text.sanitize_terminal_text name ^ " unavailable"
            | (No_chat_receipt | Recorded_chat _ | Session_chat _ | Unconfirmed_chat _), None ->
                "Create a Keeper  · choose who will take the work") ]
     | _ ->
@@ -11330,7 +11432,7 @@ let home_continue_rows (state : state) =
                 | Unreadable_chat_receipt _, _ ->
                     "Conversation history unavailable · choose a Keeper"
                 | (No_chat_receipt | Recorded_chat _ | Session_chat _ | Unconfirmed_chat _), Some (name, _) ->
-                    "Last conversation " ^ Tui_decode.sanitize_terminal_text name
+                    "Last conversation " ^ Masc.Tui_terminal_text.sanitize_terminal_text name
                     ^ " unavailable · choose a Keeper"
                 | (No_chat_receipt | Recorded_chat _ | Session_chat _ | Unconfirmed_chat _), None ->
                     "Choose a Keeper  · start a conversation")
@@ -11747,13 +11849,13 @@ let surface_row_texts (state : state) : surface -> string list option =
                 (List.map
                    (fun entry ->
                      match entry with
-                     | Tui_decode.Fusion_retained_run run ->
-                         run.Tui_decode.fur_run_id ^ " "
-                         ^ run.Tui_decode.fur_keeper ^ " "
-                         ^ run.Tui_decode.fur_preset
-                     | Tui_decode.Fusion_historical_evidence evidence ->
-                         evidence.Tui_decode.fhe_post_id ^ " "
-                         ^ evidence.Tui_decode.fhe_title)
+                     | Masc.Tui_decode_fusion.Fusion_retained_run run ->
+                         run.Masc.Tui_decode_fusion.fur_run_id ^ " "
+                         ^ run.Masc.Tui_decode_fusion.fur_keeper ^ " "
+                         ^ run.Masc.Tui_decode_fusion.fur_preset
+                     | Masc.Tui_decode_fusion.Fusion_historical_evidence evidence ->
+                         evidence.Masc.Tui_decode_fusion.fhe_post_id ^ " "
+                         ^ evidence.Masc.Tui_decode_fusion.fhe_title)
                    entries)))
   | Changes when Option.is_some (opened_file_change state) -> None
   | Changes -> (

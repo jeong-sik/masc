@@ -1,4 +1,4 @@
-import { keeperEquipmentKey, type KeeperPortraitReading } from '../api/schemas/keeper-portrait'
+import { keeperEquipmentKey, type KeeperPortraitReading } from '../lib/keeper-portrait'
 // Keeper portrait: the name's body wearing the server-observed equipment.
 //
 // GET /api/v1/keepers/:name/portrait.png?size=N is authorised like the

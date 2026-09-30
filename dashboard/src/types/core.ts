@@ -1,4 +1,4 @@
-import type { KeeperPortraitReading } from '../api/schemas/keeper-portrait'
+import type { KeeperPortraitReading } from '../lib/keeper-portrait'
 import type { KeeperActivationMode } from '../lib/keeper-activation-mode'
 // MASC Dashboard — Core entity types (Agent, Task, Message, Board, Keeper)
 

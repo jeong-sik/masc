@@ -21587,7 +21587,6 @@ and is loaded on demand through keeper_skill.
                      state.runtime_lane_pick <- None))
        | Some k
          when state.view = Keepers Keeper_runtime_pick
-              && (not compact_viewport || String.equal k "esc")
               && (Option.is_some (keeper_runtime_picker_action state.runtime_pick_list k)
                   || text_input_target state ~compact_viewport
                      = Some Text_keeper_runtime_picker_filter) ->
@@ -25535,7 +25534,7 @@ and is loaded on demand through keeper_skill.
            launch_runtime_catalog_load state ~mailbox:async_messages;
            state.view <- Keepers Keeper_runtime_pick
        | Some "d" | Some "D"
-         when state.view = Keepers Keeper_runtime_pick && not compact_viewport ->
+         when state.view = Keepers Keeper_runtime_pick ->
            (match state.runtime_pick_keeper with
             | Some keeper_name ->
                 launch_runtime_assignment_set state ~mailbox:async_messages

@@ -2,6 +2,7 @@
 import json
 import os
 import sys
+import unicodedata
 
 import test_tui_keyboard_input as h
 
@@ -28,12 +29,17 @@ def run(executable):
     })
     served["/api/v1/runtime/config/assignment"] = (200, {"ok": True})
 
-    def selected(output, runtime, model):
+    def selected(output, runtime, model, columns):
         rows = h.screen_rows(bytes(output))
         found = [row for row in rows.values() if b"> [MODEL]" in row]
         if len(found) != 1:
             raise AssertionError(f"picker selection is not visible: {rows!r}")
         row = found[0]
+        cells = sum(0 if unicodedata.combining(character)
+                    else 2 if unicodedata.east_asian_width(character) in ("W", "F") else 1
+                    for character in row.decode("utf-8"))
+        if cells > columns:
+            raise AssertionError(f"selected row exceeds {columns} columns ({cells} cells): {row!r}")
         for part in (runtime, model, b"quota"):
             if part not in row:
                 raise AssertionError(f"selected row lost {part!r}: {row!r}")
@@ -48,13 +54,13 @@ def run(executable):
                               needle=b"runtime", controls=(h.FULL_REDRAW,))
             h.write_all(fd, output, b"\x1b[F")
             h.drain_until_quiet(process, fd, output)
-            selected(output, b"R31", b"M31")
+            selected(output, b"R31", b"M31", columns)
             h.write_all(fd, output, b"\x1b[H")
             h.drain_until_quiet(process, fd, output)
-            selected(output, b"R00", b"M00")
+            selected(output, b"R00", b"M00", columns)
             h.write_all(fd, output, b"\x1b[F")
             h.drain_until_quiet(process, fd, output)
-            selected(output, b"R31", b"M31")
+            selected(output, b"R31", b"M31", columns)
         # The compact frame hides the picker. Neither assignment nor default
         # reset is allowed until the selected row is back on screen.
         h.resize_and_wait(process, fd, output, rows=10, columns=80,
@@ -65,7 +71,7 @@ def run(executable):
             raise AssertionError("a hidden picker accepted an assignment/default reset")
         h.resize_and_wait(process, fd, output, rows=24, columns=40,
                           needle=b"R31", controls=(h.FULL_REDRAW,))
-        selected(output, b"R31", b"M31")
+        selected(output, b"R31", b"M31", 40)
         os.write(fd, b"\r")
         body = json.loads(h.wait_for_http_request(process, fd, output, requests,
                                                  path="/api/v1/runtime/config/assignment"))

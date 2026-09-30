@@ -1,7 +1,6 @@
 (* The card an issued play invite is drawn as. See the interface for why the
    link is handled as a credential. *)
 
-module D = Masc.Tui_decode
 module Palette = Masc_tui_terminal_palette
 
 (* The blank margin a QR needs on every side to be found (ISO/IEC 18004). *)
@@ -77,8 +76,8 @@ let make ~project ~name ~expires_at ~link =
   if is_plain_http_url link
   then
     Ok
-      { name = D.sanitize_terminal_text name
-      ; expires_at = D.sanitize_terminal_text expires_at
+      { name = Masc.Tui_terminal_text.sanitize_terminal_text name
+      ; expires_at = Masc.Tui_terminal_text.sanitize_terminal_text expires_at
       ; link
       ; qr = qr_of ~project link
       }

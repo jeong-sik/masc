@@ -117,8 +117,8 @@ let empty_goal_history_entry =
    but its callers walk the current forest and so never ask about a goal that
    left.
 
-   [opened_at] and [title] come from the [goal_created] row, so a goal opened
-   before that row existed reports null rather than a guessed time. [closed_at]
+   [opened_at] comes from [goal_created], and [title] from the latest creation
+   or update. A goal without a creation row reports no guessed opening. [closed_at]
    is filled only when the last phase reached is terminal -- a goal that left the
    list without one is a gap, and dating it would invent an outcome. A negative
    [lifetime_hours] is reported as measured rather than clamped: out-of-order
@@ -150,10 +150,16 @@ let unlisted_goal_history_of_rows ~listed ~rows ~malformed_lines =
             { current with
               gh_opened_at = ts;
               gh_title = Json_util.get_string payload "title" }
+          | Some "goal_updated" ->
+            { current with gh_title = Json_util.get_string payload "title" }
           | Some "goal_phase" ->
             { current with
               gh_last_phase = Json_util.get_string payload "phase";
               gh_last_phase_at = ts }
+          | Some "goal_edited" ->
+            (* A due date or priority edit changes neither when the goal opened
+               nor the phase it reached. *)
+            current
           | Some other ->
             note_unrecognised other;
             current
@@ -263,7 +269,6 @@ let rec tree_node_to_json ?(events_for_goal = fun _ -> [])
     [
       ("id", `String goal.id);
       ("title", `String goal.title);
-      ("owner", Goal_store.owner_to_yojson goal.owner);
       ("criterion_revision", `String goal.criterion_revision);
       ("verification", verification_for_goal goal);
       ("measurement", measurement_for_goal goal);

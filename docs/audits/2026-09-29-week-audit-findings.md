@@ -189,4 +189,3 @@ id 접두어: `RT-` Runtime·Lane·Schedule, `MM-` Memory·Librarian·Skills·Co
 웹 전용 P2(요약): `gate/connectors`가 `guild_id`를 요구해 Slack·iMessage 기록을 버립니다(`schemas/gate-connectors.ts:56` ↔ `channel_gate_binding_store.ml:259`). 웹 memory-health는 Keeper 행 하나가 깨지면 전체를 버립니다(`dashboard-misc.ts:611-620`). 사용량 퍼센트를 웹은 `Math.trunc`(28%), TUI는 반올림(29%)합니다(`runtime-stats.ts:36` ↔ `masc_tui_overview_providers.ml:97-104`). 웹 runtime-resolved는 `rate_limited`/`quota_*`를 버려 #39815의 상태가 웹에 안 보입니다.
 
 ---
-

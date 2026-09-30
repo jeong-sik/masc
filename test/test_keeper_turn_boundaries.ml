@@ -801,6 +801,53 @@ let test_the_line_that_states_a_position () =
     (stated (record ~trace_id:"other" at))
 ;;
 
+(* Atoms an Agent-Core candidate saved in a turn that then failed, or that an
+   official client answered, have no end line: that turn wrote
+   [No_atom_history]. The next turn's start state names where they end, and
+   is the witness for that position. On 2026-09-28 pr-updater's Librarian
+   stopped at atom 15803 while every later turn started from 15839, because
+   only end lines counted. *)
+let test_a_start_state_witnesses_a_position_no_turn_ended_at () =
+  let ended_at_two = Boundaries.Atom_history { end_atom = 2; last_atom_digest = "d2" } in
+  let from_five = Boundaries.Continued_history_from { start_atom = 5; start_atom_digest = "d5" } in
+  let witness lines ~end_atom ~digest =
+    Option.map
+      (fun (line, _recorded_at, _turn_ref) -> line)
+      (Boundaries.witness_line ~trace_id:"trace" ~end_atom ~last_atom_digest:digest lines)
+  in
+  let official_after_a_failed_save =
+    [ 1, Ok (record ~turn:1 ended_at_two)
+    ; 2, Ok (record ~turn:2 ~history_at_start:from_five Boundaries.No_atom_history)
+    ; 3, Ok (record ~turn:3 ~history_at_start:from_five Boundaries.No_atom_history)
+    ]
+  in
+  check (option int) "the first turn that started from it witnesses it" (Some 2)
+    (witness official_after_a_failed_save ~end_atom:5 ~digest:"d5");
+  check (option int) "an end line still witnesses its own position" (Some 1)
+    (witness official_after_a_failed_save ~end_atom:2 ~digest:"d2");
+  check (option int) "another digest at the same count is another position" None
+    (witness official_after_a_failed_save ~end_atom:5 ~digest:"other");
+  let restarted_after =
+    [ 1, Ok (record ~turn:1 ~history_at_start:from_five Boundaries.No_atom_history)
+    ; 2, Ok (history_restarted ())
+    ]
+  in
+  check (option int) "a start state before a restart names a history that is gone" None
+    (witness restarted_after ~end_atom:5 ~digest:"d5");
+  let later_turn_ended_there =
+    official_after_a_failed_save
+    @ [ 4, Ok (record ~turn:4 (Boundaries.Atom_history { end_atom = 5; last_atom_digest = "d5" })) ]
+  in
+  check (option int) "a line that ended at the position is preferred" (Some 4)
+    (witness later_turn_ended_there ~end_atom:5 ~digest:"d5");
+  check (option (pair int string)) "a fresh start states no start position" None
+    (Option.map
+       (fun (_turn_ref, atom, digest) -> atom, digest)
+       (Boundaries.start_position_stated
+          ~trace_id:"trace"
+          (record ~history_at_start:Boundaries.Fresh_history ended_at_two)))
+;;
+
 let () =
   run
     "keeper_turn_boundaries"
@@ -823,6 +870,8 @@ let () =
             test_a_turn_without_a_saved_checkpoint
         ; test_case "the line that states a position" `Quick
             test_the_line_that_states_a_position
+        ; test_case "a start state witnesses a position no turn ended at" `Quick
+            test_a_start_state_witnesses_a_position_no_turn_ended_at
         ] )
     ; ( "store"
       , [ test_case "appended lines read back in order" `Quick

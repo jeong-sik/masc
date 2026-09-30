@@ -79,9 +79,9 @@ def run(executable: str) -> None:
         # Wide enough for the Activity side pane, which the reading covers.
         h.resize_and_wait(process, master_fd, output, rows=38,
                           columns=h.ACTING_PANE_NARROW_TERMINAL_COLUMNS,
-                          needle=b"MASC Overview", final_cursor=b"\x1b[?25l")
+                          needle=b"MASC Dashboard", final_cursor=b"\x1b[?25l")
         h.drain_until_quiet(process, master_fd, output)
-        h.tab_until(process, master_fd, output, b"MASC Memory")
+        h.palette_go(process, master_fd, output, b"go Memory", b"MASC Memory")
         h.wait_for_output(process, master_fd, output, b"Total 3 facts",
                           start=0, timeout=5.0)
         h.send_and_wait(process, master_fd, output, b"\r",

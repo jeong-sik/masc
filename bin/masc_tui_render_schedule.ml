@@ -128,179 +128,6 @@ module Viewport = struct
   let requires_compact_frame ~rows = rows < minimum_fixed_chrome_rows
 end
 
-type overview_allocation = {
-  intro_rows : int;
-  attention_rows : int;
-  goal_rows : int;
-  team_rows : int;
-  providers_rows : int;
-  task_error_rows : int;
-  task_rows : int;
-  spacing_rows : int;
-  filler_rows : int;
-}
-
-(* Rows the Attention panel may take. A reader scans this panel for what needs
-   attention now; past six rows the title counts what did not fit. *)
-let overview_panel_row_cap = 6
-
-(* Header, summary, dividers, panel and task titles, and footer. Add
-   quiet rows one at a time as the viewport grows past 23 rows, so neither
-   boundary takes a content row from a block. *)
-let overview_fixed_rows = 10
-let overview_max_spacing_rows = 2
-let overview_compact_rows = 23
-
-(* The Team block's title row and the divider under it. *)
-let overview_team_chrome_rows = 2
-
-(* The blank row under Goals. Its title is one of its rows. *)
-let overview_goal_chrome_rows = 1
-
-(* The Plan usage title and the blank row under it. *)
-let overview_providers_chrome_rows = 2
-
-(* A block's first row: the Attention panel's first item or its empty note,
-   the GOALS headline, the first stuck Keeper. Without it the block does not
-   say what it is for; the rest of what it counts its title already says. *)
-let overview_leading_rows = 1
-
-(* The Tasks block's first held task and the backlog line beside it: the
-   task says what is held, the backlog line says how much waits and for how
-   long. *)
-let overview_task_floor_rows = 2
-
-(* A block drawn with its chrome costs its rows and the chrome; a block of no
-   rows costs nothing. *)
-let with_chrome ~chrome rows = if rows > 0 then rows + chrome else 0
-
-(* The rows of a block the allocator gave [given] to, chrome taken off. A
-   block that cannot fit one row under its chrome is not drawn, and its rows
-   stay blank: handing them to the blocks below would take them back the
-   moment the block fits, and those blocks would shrink as the terminal grew
-   (#38911). *)
-let drawn_under_chrome ~chrome given = if given > chrome then given - chrome else 0
-
-let allocate_overview ~terminal_rows ~intro_count ~attention_count ~goal_count
-    ~team_count ~team_stuck ~providers_count ~task_count ~has_task_error =
-  let spacing_rows =
-    min overview_max_spacing_rows (max 0 (terminal_rows - overview_compact_rows))
-  in
-  let available = max 0 (terminal_rows - overview_fixed_rows - spacing_rows) in
-  let desired_panel_rows = max 1 attention_count in
-  let desired_task_error_rows = if has_task_error then 1 else 0 in
-  let desired_task_rows =
-    if task_count <= 0 then if has_task_error then 0 else 1 else task_count
-  in
-  (* The panel keeps its six-row ceiling. #29696 removed it so a tall window
-     would not waste rows, but the rows it wasted were the frame's, not the
-     panel's -- the filler below fixes that -- and letting the panel grow
-     changed how a contended viewport is shared, which cost the backlog rows
-     the Overview scenarios pin. Growth here bought nothing the filler does not
-     already give and broke what the cap was holding. *)
-  let desired_panel_rows = min overview_panel_row_cap desired_panel_rows in
-  (* Every block is first paid the rows it cannot give up, and only then do
-     the blocks grow, in the same order, so a block above can never take the
-     rows a block below needs to say what it is for.
-
-     The panel is the alert surface and is served first. GOALS answers
-     whether the fleet's work moves any goal and keeps its headline; its
-     rows are cut from the bottom, so the headline is the last to go.
-     Providers is served before Team, in the order it is drawn: a shut
-     provider account is the reason a Keeper in Team is stuck, and exhausted
-     accounts sort first inside the section, so the rows it keeps are the
-     ones that explain Team. Team is drawn whole or not at all -- a title and
-     a divider with no row between them would be chrome that says nothing --
-     and keeps its first stuck Keeper, which is the row that says someone
-     needs the operator; its title counts the rest. *)
-  let module Layout = Masc_tui_layout in
-  let intro = { Layout.floor = 0; want = max 0 intro_count } in
-  let attention =
-    { Layout.floor = min desired_panel_rows overview_leading_rows
-    ; want = desired_panel_rows
-    }
-  in
-  let goals =
-    { Layout.floor =
-        with_chrome ~chrome:overview_goal_chrome_rows
-          (min goal_count overview_leading_rows)
-    ; want = with_chrome ~chrome:overview_goal_chrome_rows goal_count
-    }
-  in
-  let providers =
-    { Layout.floor = 0
-    ; want = with_chrome ~chrome:overview_providers_chrome_rows providers_count
-    }
-  in
-  let team =
-    { Layout.floor =
-        (if team_stuck then
-           with_chrome ~chrome:overview_team_chrome_rows
-             (min team_count overview_leading_rows)
-         else 0)
-    ; want = with_chrome ~chrome:overview_team_chrome_rows team_count
-    }
-  in
-  let tasks =
-    { Layout.floor =
-        desired_task_error_rows
-        + min desired_task_rows overview_task_floor_rows
-    ; want = desired_task_error_rows + desired_task_rows
-    }
-  in
-  match
-    Layout.allocate ~budget:available
-      [ attention; goals; intro; providers; team; tasks ]
-  with
-  | { Layout.rows =
-        [ attention_rows; goal_given; intro_rows; providers_given; team_given; task_block_rows ]
-    ; filler
-    } ->
-      let goal_rows =
-        drawn_under_chrome ~chrome:overview_goal_chrome_rows goal_given
-      in
-      let providers_rows =
-        drawn_under_chrome ~chrome:overview_providers_chrome_rows providers_given
-      in
-      let team_rows =
-        drawn_under_chrome ~chrome:overview_team_chrome_rows team_given
-      in
-      let undrawn =
-        goal_given
-        - with_chrome ~chrome:overview_goal_chrome_rows goal_rows
-        + providers_given
-        - with_chrome ~chrome:overview_providers_chrome_rows providers_rows
-        + team_given
-        - with_chrome ~chrome:overview_team_chrome_rows team_rows
-      in
-      let task_error_rows = min desired_task_error_rows task_block_rows in
-      { intro_rows
-      ; attention_rows
-      ; goal_rows
-      ; team_rows
-      ; providers_rows
-      ; task_error_rows
-      ; task_rows = task_block_rows - task_error_rows
-      ; spacing_rows
-      ; filler_rows = filler + undrawn
-      }
-  | _ -> invalid_arg "allocate_overview: one count per block"
-
-(* Detail lines under the Team block (a repository's pull requests) are worth
-   drawing but not worth a backlog row: they take only rows that would
-   otherwise be blank. *)
-let spend_spare_rows_on_team (allocation : overview_allocation) ~extra =
-  let chrome =
-    if allocation.team_rows > 0 then 0 else overview_team_chrome_rows
-  in
-  let rows = min (max 0 extra) (max 0 (allocation.filler_rows - chrome)) in
-  if rows = 0 then allocation
-  else
-    { allocation with
-      team_rows = allocation.team_rows + rows
-    ; filler_rows = allocation.filler_rows - rows - chrome
-    }
-
 (* Keeper roster columns.
 
    Cell widths, not text. Every width here is a plain-text budget the renderer
@@ -545,10 +372,7 @@ let workspace_branch_width = 12
 let workspace_status_width = 9
 let workspace_sync_width = 6
 
-(* A path is the one reading here with no widest form; it takes what the named
-   columns leave. Below this it is folded so hard that neither end identifies
-   the repository, and the screen is better off dropping cells from the frame
-   than showing a path nobody can place. *)
+(* A path keeps a readable floor while auxiliary columns give way. *)
 let workspace_minimum_path_width = 8
 
 type workspace_row_values = {
@@ -567,27 +391,46 @@ let workspace_no_values =
   ; wrow_path = ""
   }
 
-let workspace_cells ~path_width values =
-  [ Table.cell ~header:"NAME" ~width:workspace_name_width values.wrow_name
-  ; Table.cell ~header:"BRANCH" ~width:workspace_branch_width values.wrow_branch
-  ; Table.cell ~header:"STATUS" ~width:workspace_status_width values.wrow_status
-  ; Table.cell ~header:"SYNC" ~width:workspace_sync_width values.wrow_sync
-  ; Table.cell ~header:"PATH" ~width:path_width values.wrow_path
-  ]
+type workspace_column =
+  | Workspace_name
+  | Workspace_branch
+  | Workspace_status
+  | Workspace_sync
+  | Workspace_path
 
-let workspace_path_width ~inner_width =
-  let named =
-    Table.used_width
-      (workspace_cells ~path_width:0 workspace_no_values)
-  in
-  max workspace_minimum_path_width (inner_width - named)
+let workspace_column_width = function
+  | Workspace_name -> workspace_name_width
+  | Workspace_branch -> workspace_branch_width
+  | Workspace_status -> workspace_status_width
+  | Workspace_sync -> workspace_sync_width
+  | Workspace_path -> workspace_minimum_path_width
 
-let workspace_header_row ~path_width =
-  Table.header_row
-    (workspace_cells ~path_width workspace_no_values)
+let workspace_layout ~inner_width =
+  Table.fit ~inner_width ~width:workspace_column_width ~flex:Workspace_path
+    ~drop_order:[ Workspace_sync; Workspace_branch ]
+    [ Workspace_name; Workspace_branch; Workspace_status; Workspace_sync;
+      Workspace_path ]
 
-let workspace_row ~path_width values =
-  Table.row (workspace_cells ~path_width values)
+let workspace_cells ~(layout : workspace_column Table.layout) values =
+  List.map
+    (function
+      | Workspace_name ->
+          Table.cell ~header:"NAME" ~width:workspace_name_width values.wrow_name
+      | Workspace_branch ->
+          Table.cell ~header:"BRANCH" ~width:workspace_branch_width values.wrow_branch
+      | Workspace_status ->
+          Table.cell ~header:"STATUS" ~width:workspace_status_width values.wrow_status
+      | Workspace_sync ->
+          Table.cell ~header:"SYNC" ~width:workspace_sync_width values.wrow_sync
+      | Workspace_path ->
+          Table.cell ~header:"PATH" ~width:layout.Table.flex_width values.wrow_path)
+    layout.Table.shown
+
+let workspace_header_row ~layout =
+  Table.header_row (workspace_cells ~layout workspace_no_values)
+
+let workspace_row ~layout values =
+  Table.row (workspace_cells ~layout values)
 
 (* System log columns.
 
@@ -646,36 +489,56 @@ let system_log_no_values =
   ; slog_message = ""
   }
 
+type system_log_column =
+  | Log_time
+  | Log_level
+  | Log_module
+  | Log_keeper
+  | Log_category
+  | Log_message
+
+let system_log_column_width = function
+  | Log_time -> system_log_time_width
+  | Log_level -> system_log_level_width
+  | Log_module -> system_log_module_width
+  | Log_keeper -> system_log_keeper_width
+  | Log_category -> system_log_category_width
+  | Log_message -> system_log_minimum_message_width
+
+let system_log_layout ~inner_width =
+  Table.fit ~inner_width ~width:system_log_column_width ~flex:Log_message
+    ~drop_order:[ Log_category; Log_keeper; Log_module ]
+    [ Log_time; Log_level; Log_module; Log_keeper; Log_category; Log_message ]
+
 let system_log_cells ?(styles = system_log_plain_styles) ?(level_style = "")
-    ~message_width values =
-  [ Table.cell ~style:styles.slog_time_style ~header:"TIME"
-      ~width:system_log_time_width values.slog_time
-  ; Table.cell ~style:level_style ~header:"LEVEL"
-      ~width:system_log_level_width values.slog_level
-  ; Table.cell ~style:styles.slog_module_style ~header:"MODULE"
-      ~width:system_log_module_width values.slog_module
-  ; Table.cell ~style:styles.slog_keeper_style ~header:"KEEPER"
-      ~width:system_log_keeper_width values.slog_keeper
-  ; Table.cell ~style:styles.slog_category_style ~header:"CATEGORY"
-      ~width:system_log_category_width values.slog_category
-  ; Table.cell ~fold:Table.Fold_tail ~header:"MESSAGE" ~width:message_width
-      values.slog_message
-  ]
+    ~(layout : system_log_column Table.layout) values =
+  List.map
+    (function
+      | Log_time ->
+          Table.cell ~style:styles.slog_time_style ~header:"TIME"
+            ~width:system_log_time_width values.slog_time
+      | Log_level ->
+          Table.cell ~style:level_style ~header:"LEVEL"
+            ~width:system_log_level_width values.slog_level
+      | Log_module ->
+          Table.cell ~style:styles.slog_module_style ~header:"MODULE"
+            ~width:system_log_module_width values.slog_module
+      | Log_keeper ->
+          Table.cell ~style:styles.slog_keeper_style ~header:"KEEPER"
+            ~width:system_log_keeper_width values.slog_keeper
+      | Log_category ->
+          Table.cell ~style:styles.slog_category_style ~header:"CATEGORY"
+            ~width:system_log_category_width values.slog_category
+      | Log_message ->
+          Table.cell ~fold:Table.Fold_tail ~header:"MESSAGE"
+            ~width:layout.Table.flex_width values.slog_message)
+    layout.Table.shown
 
-let system_log_message_width ~inner_width =
-  let named =
-    Table.used_width
-      (system_log_cells ~message_width:0 system_log_no_values)
-  in
-  max system_log_minimum_message_width (inner_width - named)
+let system_log_header_row ~layout =
+  Table.header_row (system_log_cells ~layout system_log_no_values)
 
-let system_log_header_row ~message_width =
-  Table.header_row
-    (system_log_cells ~message_width system_log_no_values)
-
-let system_log_row ~styles ~level_style ~message_width values =
-  Table.row
-    (system_log_cells ~styles ~level_style ~message_width values)
+let system_log_row ~styles ~level_style ~layout values =
+  Table.row (system_log_cells ~styles ~level_style ~layout values)
 
 (* Task Review columns.
 

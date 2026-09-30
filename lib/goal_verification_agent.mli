@@ -41,7 +41,11 @@ module For_testing : sig
   type deferral =
     | Review_not_bound of { detail : string }
     | Proof_lookup_unavailable of { detail : string }
-    | Not_reviewed of { gate : string; detail : string }
+    | Not_reviewed of
+        { gate : string
+        ; detail : string
+        ; evaluator_runtime : string option
+        }
     | Verdict_without_reason
     | Commit_refused of { detail : string }
 

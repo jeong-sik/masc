@@ -96,6 +96,7 @@ let mcp_full = "mcp.full"
 let mcp_managed_agent = "mcp.managed_agent"
 let mcp_operator_remote = "mcp.operator_remote"
 let mcp_seat = "mcp.seat"
+let play_agent_guide = "play.agent_guide"
 
 (* MCP tool_help prompt body — one slot per assembly piece in
    config/prompts/mcp.tool_help.md, rendered by Mcp_prompt_surface when a
@@ -682,3 +683,9 @@ let agent_core_agent_tool_prompt_param_description =
 ;;
 let keeper_context_workspace_memory_available = "keeper.context.workspace_memory.available"
 let keeper_context_workspace_memory_unavailable = "keeper.context.workspace_memory.unavailable"
+
+let candle_appraiser_grade = "candle_appraiser_grade"
+
+let candle_appraiser_relation = "candle_appraiser_relation"
+
+let candle_appraiser_weights = "candle_appraiser_weights"

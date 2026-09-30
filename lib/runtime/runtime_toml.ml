@@ -3,7 +3,7 @@
     Re-homed from the deleted [Runtime_declarative_parser]. Parses RFC-0058
     layers 1-3 plus [[runtime].default] into a self-standing
     {!Runtime_schema.config}. Reserved top-level namespaces: providers,
-    models, runtime, web_search, exec (the [\[exec.ssh.endpoints.*\]] SSH
+    models, model_sets, runtime, web_search, exec (the [\[exec.ssh.endpoints.*\]] SSH
     endpoint registry, Phase 1 SSH lane spec §4.2). Dropped routing namespaces
     system, routes, and profiles are rejected rather than ignored. A top-level
     table whose name [\[providers\]] declares carries that provider's model
@@ -2174,9 +2174,15 @@ let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml
     Result.map (Option.value ~default) (typed_find kind path tbl key getter)
   in
   (* [max-concurrent] is an explicit operator override, not a required binding
-     property. Absence means "no static client-side cap"; provider pressure is
-     handled by the global provider HTTP gate, live health/backoff, and any
-     provider-reported throttling.
+     property. Absence means "no static client-side cap", and it also means no
+     endpoint admission at all: [Provider_admission] holds a FIFO permit only
+     for a binding that declares this key, so an undeclared binding dispatches
+     straight out. What remains for it is live health/backoff and whatever the
+     provider itself refuses with (e.g. HTTP 429): this side stops sending
+     only once the other side says no.
+
+     Whether HTTP bindings should be required to declare it is open; the
+     measurements are on #25401.
 
      An explicit non-positive value is a configuration error: 0 was historically
      used as an omission sentinel, and negative values are meaningless. Reject
@@ -2375,6 +2381,60 @@ let declared_provider_ids (toml : Otoml.t) : string list =
   | Some _ | None -> []
 ;;
 
+(* Sets are source-level declarations, expanded into the same typed bindings
+   as explicit tables. The runtime has one provider × model resolution path;
+   account homes, credentials, quotas and overrides still belong to providers
+   and bindings rather than being copied into model specifications. *)
+let parse_model_sets (toml : Otoml.t)
+  : ((string * string list) list, parse_error list) result
+  =
+  let namespace = Ns.(key Model_sets) in
+  let declared_models =
+    match Otoml.find_opt toml Fun.id [ Ns.(key Models) ] with
+    | Some (Otoml.TomlTable entries | Otoml.TomlInlineTable entries) ->
+      List.map fst entries
+    | Some _ | None -> []
+  in
+  let parse_set (id, tbl) =
+    let path = Ns.(path Model_sets) id in
+    if not (is_toml_table tbl)
+    then Error (error path "model set must be a TOML table")
+    else (
+      let unknown =
+        List.concat_map
+          (fun (key, _) ->
+             if String.equal key "models" then []
+             else error (path ^ "." ^ key) "unknown model set key; expected models")
+          (Otoml.get_table tbl)
+      in
+      match typed_find "an array of strings" path tbl "models"
+              (Otoml.get_array Otoml.get_string) with
+      | Error errors -> Error (unknown @ errors)
+      | Ok None -> Error (unknown @ error (path ^ ".models") "models is required")
+      | Ok (Some models) ->
+        let references =
+          List.concat_map
+            (fun model ->
+               if List.mem model declared_models then []
+               else error (path ^ ".models") (Printf.sprintf "unknown model %S" model))
+            models
+        in
+        let duplicates =
+          if List.length models = List.length (List.sort_uniq String.compare models)
+          then []
+          else error (path ^ ".models") "model ids must not repeat"
+        in
+        match unknown @ references @ duplicates with
+        | [] -> Ok (id, models)
+        | errors -> Error errors)
+  in
+  match Otoml.find_opt toml Fun.id [ namespace ] with
+  | None -> Ok []
+  | Some (Otoml.TomlTable entries | Otoml.TomlInlineTable entries) ->
+    partition_results (List.map parse_set entries)
+  | Some _ -> Error (error namespace "model_sets must be a TOML table")
+;;
+
 let parse_bindings (toml : Otoml.t)
   : (Runtime_schema.binding list, parse_error list) result
   =
@@ -2396,12 +2456,44 @@ let parse_bindings (toml : Otoml.t)
         (not (is_reserved name)) && is_toml_table value && List.mem name declared)
       top_entries
   in
-  Result.map
-    List.concat
-    (partition_results
-       (List.map
-          (fun (provider_id, tbl) -> parse_provider_table provider_id tbl)
-          provider_tables))
+  let ( let* ) = Result.bind in
+  let* sets = parse_model_sets toml in
+  let* explicit =
+    Result.map List.concat
+      (partition_results
+         (List.map
+            (fun (provider_id, tbl) -> parse_provider_table provider_id tbl)
+            provider_tables))
+  in
+  let provider_set_bindings provider_id =
+    let path = Ns.(path Providers) provider_id in
+    match Otoml.find_opt toml Fun.id [ Ns.(key Providers); provider_id ] with
+    | None -> Ok []
+    | Some tbl when is_toml_table tbl ->
+      (match typed_find "a string" path tbl "model-set" Otoml.get_string with
+       | Error errors -> Error errors
+       | Ok None -> Ok []
+       | Ok (Some name) ->
+         (match List.assoc_opt name sets with
+          | None ->
+            Error (error (path ^ ".model-set") (Printf.sprintf "unknown model set %S" name))
+          | Some models ->
+            let missing =
+              List.filter
+                (fun model_id ->
+                   not (List.exists (fun (binding : Runtime_schema.binding) ->
+                     String.equal binding.provider_id provider_id
+                     && String.equal binding.model_id model_id) explicit))
+                models
+            in
+            partition_results
+              (List.map
+                 (fun model_id -> parse_binding_fields provider_id model_id (Otoml.TomlTable []))
+                 missing)))
+    | Some _ -> Ok [] (* parse_providers reports the malformed provider. *)
+  in
+  let* generated = partition_results (List.map provider_set_bindings declared) in
+  Ok (explicit @ List.concat generated)
 ;;
 
 (* --- Top-level parse --- *)

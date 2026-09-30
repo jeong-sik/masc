@@ -62,6 +62,24 @@ let test_summary_names_the_actor () =
     (field "summary" json)
 ;;
 
+let test_mutation_summary_names_each_actor () =
+  List.iter
+    (fun (kind, actor, verb) ->
+      let projected =
+        DGT.goal_event_timeline_json
+          (`Assoc
+             [ "ts", `String "2026-09-29T12:00:00Z"
+             ; "goal_id", `String "goal-shared"
+             ; "event_type", `String kind
+             ; "payload", `Assoc [ "actor", `String actor; "title", `String "Shared goal" ]
+             ])
+      in
+      check (option string) "the action names its actor"
+        (Some (verb ^ " by " ^ actor ^ ": Shared goal")) (field "summary" projected);
+      check (option string) "the event kind survives" (Some kind) (field "kind" projected))
+    [ "goal_created", "creator", "created"; "goal_updated", "reviewer", "updated" ]
+;;
+
 let test_severity_follows_the_phase () =
   let severity_of phase =
     field
@@ -108,6 +126,117 @@ let test_missing_payload_fields_are_marked () =
     (field "summary" json)
 ;;
 
+(* A due date or priority edit writes [goal_edited] with only the fields it
+   changed, each as {from, to} (#39878). *)
+let goal_edited_event payload =
+  `Assoc
+    [ "ts", `String "2026-09-29T10:00:00Z"
+    ; "goal_id", `String "goal-1"
+    ; "event_type", `String "goal_edited"
+    ; "payload", payload
+    ]
+;;
+
+let edit_change ~from_json ~to_json = `Assoc [ "from", from_json; "to", to_json ]
+
+let test_an_edit_event_shows_what_it_replaced () =
+  let summary_of payload =
+    field "summary" (DGT.goal_event_timeline_json (goal_edited_event payload))
+  in
+  let json =
+    DGT.goal_event_timeline_json
+      (goal_edited_event
+         (`Assoc
+            [ "actor", `String "alpha"
+            ; ( "due_date"
+              , edit_change ~from_json:(`String "2026-09-23") ~to_json:(`String "2026-10-15") )
+            ; "priority", edit_change ~from_json:(`Int 3) ~to_json:(`Int 1)
+            ]))
+  in
+  check (option string) "kind is the event type" (Some "goal_edited") (field "kind" json);
+  check (option string) "title" (Some "Goal Edit") (field "title" json);
+  check (option string) "severity" (Some "ok") (field "severity" json);
+  check
+    (option string)
+    "both fields and the editor"
+    (Some "due_date 2026-09-23 -> 2026-10-15, priority 3 -> 1 by alpha")
+    (field "summary" json);
+  check
+    (option string)
+    "a due date that was not set"
+    (Some "due_date (none) -> 2026-10-15 by alpha")
+    (summary_of
+       (`Assoc
+          [ "actor", `String "alpha"
+          ; "due_date", edit_change ~from_json:`Null ~to_json:(`String "2026-10-15")
+          ]));
+  check
+    (option string)
+    "a payload with no changed field is marked"
+    (Some "<missing payload.due_date and payload.priority> by <missing payload.actor>")
+    (summary_of (`Assoc []));
+  check
+    (option string)
+    "a field that is present but unreadable is marked"
+    (Some "priority <missing payload.priority.from> -> 1 by alpha")
+    (summary_of
+       (`Assoc
+          [ "actor", `String "alpha"
+          ; "priority", `Assoc [ "to", `Int 1 ]
+          ]))
+;;
+
+(* A row this build cannot read is marked in the summary and is `warn`, so the
+   marker is not the only sign of it. The producer writes objects and nothing
+   else, so these rows come from a damaged file or from another writer. *)
+let test_an_edit_row_that_cannot_be_read_is_marked_and_warned () =
+  let read payload =
+    let json = DGT.goal_event_timeline_json (goal_edited_event payload) in
+    field "summary" json, field "severity" json
+  in
+  let summary_and_severity = pair (option string) (option string) in
+  let priority_moved = edit_change ~from_json:(`Int 3) ~to_json:(`Int 1) in
+  check
+    summary_and_severity
+    "a field that is not an object"
+    (Some "due_date <unreadable payload.due_date>, priority 3 -> 1 by a", Some "warn")
+    (read
+       (`Assoc
+          [ "actor", `String "a"
+          ; "due_date", `String "2026-10-15"
+          ; "priority", priority_moved
+          ]));
+  check
+    summary_and_severity
+    "a value that is neither text, a number nor null"
+    (Some "priority <unreadable payload.priority.from> -> 1 by a", Some "warn")
+    (read
+       (`Assoc
+          [ "actor", `String "a"
+          ; "priority", edit_change ~from_json:(`Bool true) ~to_json:(`Int 1)
+          ]));
+  check
+    summary_and_severity
+    "a key that is missing"
+    (Some "priority <missing payload.priority.from> -> 1 by a", Some "warn")
+    (read (`Assoc [ "actor", `String "a"; "priority", `Assoc [ "to", `Int 1 ] ]));
+  check
+    summary_and_severity
+    "no changed field"
+    (Some "<missing payload.due_date and payload.priority> by a", Some "warn")
+    (read (`Assoc [ "actor", `String "a" ]));
+  check
+    summary_and_severity
+    "no editor"
+    (Some "priority 3 -> 1 by <missing payload.actor>", Some "warn")
+    (read (`Assoc [ "priority", priority_moved ]));
+  check
+    summary_and_severity
+    "a row that reads whole is not flagged"
+    (Some "priority 3 -> 1 by a", Some "ok")
+    (read (`Assoc [ "actor", `String "a"; "priority", priority_moved ]))
+;;
+
 let test_unknown_event_type_keeps_its_token () =
   let json =
     DGT.goal_event_timeline_json
@@ -130,7 +259,6 @@ let test_unknown_event_type_keeps_its_token () =
 
 let goal : Goal_store.goal =
   { id = "goal-1"
-  ; owner = Goal_store.Unknown_owner
   ; criterion_revision = "fixture-goal-1"
   ; title = "Goal One"
   ; metric = None
@@ -140,8 +268,6 @@ let goal : Goal_store.goal =
   ; phase = Goal_phase.Executing
   ; last_review_note = None
   ; last_review_at = None
-  ; notified_refuted_key = None
-  ; notified_overdue_key = None
   ; created_at = "2026-08-01T00:00:00Z"
   ; updated_at = "2026-08-21T00:00:00Z"
   }
@@ -375,6 +501,9 @@ let test_unlisted_history_reconstructs_a_departed_goal () =
     [ history_row ~ts:"2026-09-10T00:00:00Z" ~goal_id:"goal-gone"
         ~event_type:"goal_created"
         (`Assoc [ "title", `String "Shipped and gone" ])
+    ; history_row ~ts:"2026-09-10T03:00:00Z" ~goal_id:"goal-gone"
+        ~event_type:"goal_updated"
+        (`Assoc [ "title", `String "Reviewed and shipped"; "actor", `String "reviewer" ])
     ; history_row ~ts:"2026-09-10T06:00:00Z" ~goal_id:"goal-gone"
         ~event_type:"goal_phase"
         (live_phase_payload ~phase:"completed" ~actor:"alpha")
@@ -390,7 +519,7 @@ let test_unlisted_history_reconstructs_a_departed_goal () =
   check int "a goal the store still lists is not history" 1 (List.length rows_out);
   let row = List.hd rows_out in
   check (option string) "the goal is named" (Some "goal-gone") (field "goal_id" row);
-  check (option string) "the title outlived the store" (Some "Shipped and gone")
+  check (option string) "the updated title outlived the store" (Some "Reviewed and shipped")
     (field "title" row);
   check (option string) "opening comes from the creation row"
     (Some "2026-09-10T00:00:00Z") (field "opened_at" row);
@@ -400,6 +529,39 @@ let test_unlisted_history_reconstructs_a_departed_goal () =
     (field "final_phase" row);
   check (float 0.001) "lifetime spans the two rows" 6.0
     (Yojson.Safe.Util.member "lifetime_hours" row |> Yojson.Safe.Util.to_float)
+;;
+
+(* A due date or priority edit changes neither when the goal opened nor the
+   phase it reached, and it is a type this reader knows, so it is not listed as
+   one it could not read. *)
+let test_unlisted_history_knows_the_edit_event () =
+  let rows =
+    [ history_row ~ts:"2026-09-10T00:00:00Z" ~goal_id:"goal-gone"
+        ~event_type:"goal_created"
+        (`Assoc [ "title", `String "Edited then gone" ])
+    ; history_row ~ts:"2026-09-10T03:00:00Z" ~goal_id:"goal-gone"
+        ~event_type:"goal_edited"
+        (`Assoc
+           [ "actor", `String "alpha"
+           ; "priority", edit_change ~from_json:(`Int 3) ~to_json:(`Int 1)
+           ])
+    ; history_row ~ts:"2026-09-10T06:00:00Z" ~goal_id:"goal-gone"
+        ~event_type:"goal_phase"
+        (live_phase_payload ~phase:"completed" ~actor:"alpha")
+    ]
+  in
+  let json = DG.unlisted_goal_history_of_rows ~listed:[] ~rows ~malformed_lines:0 in
+  check (list string) "the edit event is recognised" []
+    (coverage json "unrecognised_event_types"
+     |> Yojson.Safe.Util.to_list
+     |> List.map Yojson.Safe.Util.to_string);
+  match unlisted json with
+  | [ row ] ->
+    check (option string) "opening still comes from the creation row"
+      (Some "2026-09-10T00:00:00Z") (field "opened_at" row);
+    check (option string) "the final phase still comes from the phase row"
+      (Some "completed") (field "final_phase" row)
+  | rows_out -> fail (Printf.sprintf "expected one goal, got %d" (List.length rows_out))
 ;;
 
 let test_unlisted_history_does_not_invent_an_outcome () =
@@ -461,9 +623,18 @@ let () =
     [ ( "normalizer"
       , [ test_case "phase event shape" `Quick test_normalizes_a_phase_event
         ; test_case "summary names the actor" `Quick test_summary_names_the_actor
+        ; test_case "creation and update actors" `Quick test_mutation_summary_names_each_actor
         ; test_case "severity follows the phase" `Quick test_severity_follows_the_phase
         ; test_case "unparseable phase is not ok" `Quick test_unparseable_phase_is_not_ok
         ; test_case "missing fields are marked" `Quick test_missing_payload_fields_are_marked
+        ; test_case
+            "an edit event shows what it replaced"
+            `Quick
+            test_an_edit_event_shows_what_it_replaced
+        ; test_case
+            "an edit row that cannot be read is marked and warned"
+            `Quick
+            test_an_edit_row_that_cannot_be_read_is_marked_and_warned
         ; test_case
             "unknown event type keeps its token"
             `Quick
@@ -482,6 +653,8 @@ let () =
     ; ( "unlisted history"
       , [ test_case "a departed goal is reconstructed" `Quick
             test_unlisted_history_reconstructs_a_departed_goal
+        ; test_case "the edit event is recognised" `Quick
+            test_unlisted_history_knows_the_edit_event
         ; test_case "no outcome is invented" `Quick
             test_unlisted_history_does_not_invent_an_outcome
         ; test_case "what it could not read is reported" `Quick

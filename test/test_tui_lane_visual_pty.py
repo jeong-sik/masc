@@ -19,6 +19,8 @@ import test_tui_keyboard_input as terminal
 # masc_tui_lane_addons.ml's, and the palette row this types
 # ("go Lane Add-ons") masc_tui_types.ml's.
 SOURCE_MODULES = (
+    "lib/tui_terminal_text.ml",
+    "lib/tui_terminal_text.mli",
     "bin/masc_tui_render.ml",
     "bin/masc_tui_lane_addons.ml",
     "bin/masc_tui_types.ml",
@@ -140,9 +142,12 @@ def main(executable: str, captures: Path | None) -> None:
         os.write(master, b"jjj")
         if not terminal.drain_until_quiet(process, master, output):
             raise AssertionError("Records did not settle after moving selection")
-        technical = key(b"D", b"Rows")
-        if b"outside-current-slice" not in technical:
-            raise AssertionError("raw Records lost declared relations")
+        technical = key(b"D", b"Raw details")
+        raw_screen = screen(technical, b"Raw details")
+        if b"outside-current-slice" not in raw_screen:
+            raise AssertionError("raw Records lost the selected row's declared relations")
+        if b"3 TOML" in raw_screen or b"4 Workers" in raw_screen or b"5 Rows" in raw_screen:
+            raise AssertionError("raw detail reopened the retired five-tab screen")
         key(b"\x1b", b"4 Records")
         timeline = key(b"1", b"Horizontal Lane timeline")
         plain = terminal.CSI_RE.sub(b"", timeline)
@@ -167,7 +172,7 @@ def main(executable: str, captures: Path | None) -> None:
         if addon_writes:
             raise AssertionError(f"browsing or hidden detach sent mutation: {addon_writes!r}")
         key(b"q", b"MASC Lanes")
-        key(b"\x1b", b"MASC Overview")
+        key(b"\x1b", b"MASC Dashboard")
         os.write(master, b"q")
 
     terminal.run_terminal_scenario(executable, description="Lane visual workspace",
@@ -203,7 +208,7 @@ def run_installation_detail(executable: str) -> None:
         returned = terminal.send_and_wait(process, master, output, b"\x1b", b"> broken")
         if b"1 declared" not in terminal.screen_text(returned):
             raise AssertionError("Esc did not return to the same Installation list")
-        terminal.send_and_wait(process, master, output, b"q", b"MASC Overview")
+        terminal.send_and_wait(process, master, output, b"q", b"MASC Dashboard")
         os.write(master, b"q")
 
     terminal.run_terminal_scenario(executable,

@@ -30,19 +30,8 @@ val parse_goal_phase : string option -> Goal_phase.t option
 
 (** {1 Goal record} *)
 
-type owner =
-  | Owner of string
-  | Unknown_owner
-      (** Who owns a Goal (#39571). A row written before the owner field
-          existed decodes to [Unknown_owner] — an explicit value, never an
-          empty string. *)
-
-val owner_to_yojson : owner -> Yojson.Safe.t
-val owner_of_yojson : Yojson.Safe.t -> (owner, string) result
-
 type goal = {
   id : string;
-  owner : owner;
   criterion_revision : string;
   title : string;
   metric : string option;
@@ -52,19 +41,11 @@ type goal = {
   phase : Goal_phase.t;
   last_review_note : string option;
   last_review_at : string option;
-  notified_refuted_key : string option;
-      (** The dedup key of the last owner notice sent for a refuted verdict
-          (#39571). Written only after the notice row is durably committed, so
-          a crash between the two re-sends and the idempotent append keeps the
-          owner's transcript at one row. [None] before any notice. *)
-  notified_overdue_key : string option;
-      (** The dedup key of the last owner notice sent for an overdue Goal
-          (#39571). Same write-after-commit ordering as
-          {!notified_refuted_key}. *)
   created_at : string;
   updated_at : string;
 }
-(** A single goal entry. [priority] is clamped to [1..5] on every write. *)
+(** A workspace-shared goal. Creation and transition actors are event
+    provenance. [priority] is clamped to [1..5] on every write. *)
 
 type criterion = Criterion of {
   revision : string;
@@ -273,15 +254,15 @@ val upsert_goal :
   ?target_value:string ->
   ?due_date:string ->
   ?priority:int ->
-  ?owner:string ->
   unit ->
-  (goal * [ `created | `updated of Goal_phase.t ], write_error) result
+  (goal * [ `created | `updated of goal ], write_error) result
 (** Creates a new goal when [id] is omitted (mints [goal-<ms>-<4 hex digits>]
     internally), updates the matched row otherwise. Returns the resolved goal
-    paired with [`created], or [`updated previous_phase] carrying the phase
-    the row held before this write: an edit to the title, [metric] or
-    [target_value] moves a [Verifying], [Awaiting_confirmation] or [Completed]
-    goal back to [Executing], and the caller records that move.
+    paired with [`created], or [`updated previous] carrying the row as it was
+    before this write, read inside the write lock. The caller records what
+    changed. An edit to the title, [metric] or [target_value] moves a
+    [Verifying], [Awaiting_confirmation] or [Completed] goal back to
+    [Executing]. An edit to [due_date] or [priority] moves no phase.
 
     {!Rejected}:
     - [title] required for new goals (omit / empty string on a new goal id).

@@ -418,8 +418,8 @@ let test_every_seed_client_takes_a_second_account () =
   in
   let t = parsed seed in
   let shared_models =
-    Otoml.find (toml_of seed) Otoml.get_array [ "model_sets"; "codex"; "models" ]
-    |> List.map Otoml.get_string
+    Otoml.find (toml_of seed) (Otoml.get_array Otoml.get_string)
+      [ "model_sets"; "codex"; "models" ]
     |> List.sort String.compare
   in
   let configured_codex_models =

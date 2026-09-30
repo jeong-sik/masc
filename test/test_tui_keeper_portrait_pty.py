@@ -396,9 +396,12 @@ def item_account_follows_roster_revision(binary: str) -> None:
                     **({"price_milli": "0"} if item == "glasses" else {})}
                    for item, slot in ITEM_CATALOG]}
     calls = []
+    failure = {"active": False}
 
     def read_account():
         calls.append(copy.deepcopy(account))
+        if failure["active"]:
+            return 503, {"error": "transient Item read failure"}
         return 200, copy.deepcopy(account)
 
     fixtures["/api/v1/keepers/alpha/items"] = read_account
@@ -434,6 +437,23 @@ def item_account_follows_roster_revision(binary: str) -> None:
         h.drain_until_quiet(process, fd, output)
         assert len(calls) == 3, f"unchanged roster revisions reread the account: {len(calls)}"
         assert all(reading["balance_milli"] == "12500" for reading in calls)
+        # The owner of an accepted failure must retire its observed revision.
+        # Keep the same roster revision and account, then recover via ordinary
+        # cadence without another key or tab transition.
+        failure["active"] = True
+        os.write(fd, b"r")
+        await_text(process, fd, output, b"Account unavailable")
+        failure["active"] = False
+        await_text(process, fd, output, b"0.001 owned")
+        assert b"Account unavailable" not in b"\n".join(last_frame_rows(output).values())
+        settled_calls = len(calls)
+        previous_polls = len(roster_polls)
+        assert h.wait_for_fixture_state(process, fd, output,
+            lambda: len(roster_polls) > previous_polls, timeout=10.0), \
+            "ordinary roster cadence stopped after Item read recovery"
+        h.drain_until_quiet(process, fd, output)
+        assert len(calls) == settled_calls, "healthy unchanged revision kept retrying"
+        capture_item_screen(output, "automatic-transient-recovery")
         os.write(fd, b"q")
 
     h.run_terminal_scenario(binary,

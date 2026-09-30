@@ -55,6 +55,7 @@ module Flow = struct
   }
 
   let initial = { latest = 0; action = None }
+  let invalidate state = { latest = state.latest + 1; action = None }
   let action_inflight state = Option.is_some state.action
 
   (* A listing observes the press generation; it never advances it. Two
@@ -63,7 +64,8 @@ module Flow = struct
      (#37461, #37609 review): a stance fetch (gen=N) racing an unrelated
      background poll's own [reserve_refresh] call (gen=N+1) made the stance
      answer's [is_current] check false even though no press had ever
-     opened. Only [begin_action] moves the generation now, which is the one
+     opened. [begin_action] and [invalidate] move the generation: a press or a
+     workspace withdrawal supersedes outstanding reads. A press is the one
      event a listing needs to be superseded by -- including a press that
      opens and closes between this call and the reader checking
      [is_current], which a dispatch-time-only [action_inflight] check

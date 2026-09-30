@@ -7385,8 +7385,14 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
         [ section_line "Identity"
         ; row_line "Name:" (Terminal_text.single_line k.k_name)
         ; row_line "Paused:"
-            (if k.k_paused then (Theme.warn ()) ^ "yes" ^ Ansi.reset
-             else Ansi.dim ^ "no" ^ Ansi.reset)
+            (match k.k_origin, (keeper_reading state k).Keeper_control.liveness with
+             | Tui_decode.Remote_keeper,
+                 (Keeper_control.Invalid _ | Unobserved | Absent) ->
+                 Ansi.dim ^ "not observed" ^ Ansi.reset
+             | (Tui_decode.Persisted_keeper | Declared_keeper _), _
+             | Remote_keeper, Keeper_control.Present _ ->
+                 if k.k_paused then (Theme.warn ()) ^ "yes" ^ Ansi.reset
+                 else Ansi.dim ^ "no" ^ Ansi.reset)
         ]
         @ (let amount = match (keeper_reading state k).Keeper_control.liveness with
             | Keeper_control.Present runtime -> runtime.kr_candle_balance_milli

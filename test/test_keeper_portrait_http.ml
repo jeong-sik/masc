@@ -557,6 +557,52 @@ beanie = 200
          (before.kr_phase = row.kr_phase && before.kr_health = row.kr_health && before.kr_keepalive_running = row.kr_keepalive_running)
      | _ -> fail "currency failure hid the healthy Keeper");
     check string "portrait read does not truncate damaged ledger" corrupt (ledger_bytes ());
+    (* Exercise the actual masc_keeper_list producer, not the separate
+       Dashboard projection cache. All calls reuse its metadata cache while
+       the authoritative ledger/catalog changes independently. *)
+    Fs_compat.save_file (Candle_ledger.path ~base_path) stable;
+    let original_policy = Fs_compat.load_file policy_path in
+    Fs_compat.save_file policy_path (original_policy ^ "glasses = 0\n");
+    Masc_test_deps.with_process_env "MASC_KEEPER_LIST_CACHE_TTL_S" (Some "120")
+    (fun () ->
+      Keeper_tool_surface.For_testing.reset_keeper_list_cache ();
+      let gate_row () =
+        let json = match !Keeper_dispatch_ref.dispatch ~config ~agent_name:"observer"
+          ~publication_recovery_provider:Masc_test_deps.non_runtime_publication_recovery_provider
+          ~name:"masc_keeper_list" ~args:(`Assoc ["detailed", `Bool true]) () with
+          | Some result -> Yojson.Safe.from_string (Tool_result.message result)
+          | None -> fail "public Keeper roster not registered" in
+        match Yojson.Safe.Util.(json |> member "keepers" |> to_list) with
+        | [row] -> json, row
+        | _ -> fail "gate producer lost its actual Keeper" in
+      let revision (json, _) =
+        let rows, errors, _, _, _ = require_ok Fun.id
+          (Tui_decode.decode_keeper_runtime_list json) in
+        check int "gate row remains valid" 0 (List.length errors);
+        match rows with
+        | [row] -> (match require_ok Fun.id row.Tui_decode.kr_candle_account_revision with
+            | Some revision -> revision
+            | None -> fail "gate producer omitted the Item account revision")
+        | _ -> fail "gate row not decoded" in
+      let before_free = gate_row () in
+      let before_revision = revision before_free in
+      let glasses = match Keeper_portrait_item.of_id "glasses" with
+        | Some item -> item | None -> fail "glasses missing from canonical catalog" in
+      ignore (require_ok Candle_shop.error_to_string
+        (Candle_shop.purchase ~now:(fun () -> 1790640000.) ~base_path ~keeper:owner ~item:glasses));
+      let after_free = gate_row () in
+      let free_revision = revision after_free in
+      check bool "gate revision follows free ownership" false (before_revision = free_revision);
+      Fs_compat.save_file policy_path (original_policy ^ "glasses = 1\n");
+      let after_price = gate_row () in
+      check bool "gate revision follows catalog price alone" false (free_revision = revision after_price);
+      List.iter (fun field ->
+        check bool ("free purchase and price leave " ^ field ^ " unchanged") true
+          (Yojson.Safe.Util.member field (snd before_free) = Yojson.Safe.Util.member field (snd after_free)
+           && Yojson.Safe.Util.member field (snd before_free) = Yojson.Safe.Util.member field (snd after_price)))
+        ["portrait"; "candle_balance_milli"];
+      let repeated = gate_row () in
+      check string "unchanged gate reading has a stable revision" (revision after_price) (revision repeated));
     (match Sys.getenv_opt "RUNNER_TEMP" with
      | None -> ()
      | Some root ->

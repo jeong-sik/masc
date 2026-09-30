@@ -202,6 +202,33 @@ let test_equipment_change_replaces_same_keeper_pixels () =
   check string "unavailable snapshot removes the old picture"
     (Masc_tui_graphics.delete_image ~image_id) (frame [])
 
+let test_item_mosaic_preview_changes_with_selected_accessory () =
+  let previous = View.current_display () in
+  Fun.protect ~finally:(fun () -> View.set_display previous) (fun () ->
+    View.set_display View.Mosaic;
+    let preview equipment = Option.get (Portrait.preview ~name:alpha ~equipment
+      ~content_rows:(mosaic_size.Portrait.rows + 2)
+      ~content_cols:(mosaic_size.Portrait.cols + 4)) in
+    let glasses = {Look.bare with face=Look.Glasses} in
+    let shades = {Look.bare with face=Look.Shades} in
+    let first = preview glasses and second = preview shades in
+    check bool "selecting shades changes the glasses preview" false
+      (String.equal first.Portrait.image.Draw.rgba second.Portrait.image.Draw.rgba);
+    let mosaic shown = View.lines ~project View.Mosaic shown.Portrait.box shown.Portrait.image in
+    check bool "the projected Mosaic cells show the selection change" false
+      (mosaic first = mosaic second);
+    check bool "returning to glasses restores its cached preview" true
+      ((preview glasses).Portrait.image == first.Portrait.image);
+    let info = Option.get (Portrait.shown ~name:alpha ~equipment:glasses
+      ~content_rows:(Portrait.min_content_rows mosaic_size)
+      ~content_cols:(Portrait.min_content_cols mosaic_size)) in
+    check bool "Item preview does not replace the compact Info picture" false
+      (String.equal info.Portrait.image.Draw.rgba first.Portrait.image.Draw.rgba);
+    View.set_display View.No_picture;
+    check bool "No_picture still suppresses Item preview" true
+      (Option.is_none (Portrait.preview ~name:alpha ~equipment:shades
+        ~content_rows:100 ~content_cols:100)))
+
 let () =
   run "tui_keeper_portrait"
     [ ( "band"
@@ -220,5 +247,7 @@ let () =
             test_the_picture_leaves_with_the_detail
         ] )
     ; ("cache", [ test_case "the cache is bounded" `Quick test_the_cache_is_bounded;
-        test_case "equipment replaces same Keeper pixels" `Quick test_equipment_change_replaces_same_keeper_pixels ])
+        test_case "equipment replaces same Keeper pixels" `Quick test_equipment_change_replaces_same_keeper_pixels;
+        test_case "Item Mosaic selection changes its accessory preview" `Quick
+          test_item_mosaic_preview_changes_with_selected_accessory ])
     ]

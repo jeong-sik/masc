@@ -1067,9 +1067,9 @@ let acting_pane_input (state : state) : Masc_tui_acting_pane.input =
     }
   in
   let keepers =
-    match state.local_workspace with
-    | Local_workspace_unread -> None
-    | Local_workspace_read -> Some (List.map pane_keeper state.keepers)
+    match keeper_rows_page state ~error:state.keepers_error with
+    | Page_unread -> None
+    | Page_empty | Page_failed -> Some (List.map pane_keeper state.keepers)
   in
   let feed =
     match state.observer with

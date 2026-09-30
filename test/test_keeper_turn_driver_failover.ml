@@ -3304,6 +3304,7 @@ let read_usage_with ~fetch runtime_id =
 let outcome_label : Usage_read.account_refusal_outcome -> string = function
   | Read (Spent_until _) -> "read: spent until"
   | Read Spent_without_reset -> "read: spent without reset"
+  | Read (Spent_in_several_limits _) -> "read: spent in several limits"
   | Read No_window_spent -> "read: no window spent"
   | Read_failed _ -> "read failed"
   | Read_raised name -> "raised " ^ name

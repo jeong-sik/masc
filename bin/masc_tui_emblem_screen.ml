@@ -222,9 +222,8 @@ let about_rows ~style ~cols ~rows ~caption ~frame ~keepers
   in
   let keeper_label (name, _) = Masc.Tui_terminal_text.sanitize_terminal_text name in
   let rec choose chosen used = function
-    | keeper :: rest when List.length chosen < max_portraits ->
-        let wrapped = Masc_tui_message_layout.wrap_words ~max_cells:(max 1 cols)
-          (keeper_label keeper) in
+    | ((name, _) as keeper) :: rest when List.length chosen < max_portraits ->
+        let wrapped = Masc_tui_message_layout.wrap_words ~max_cells:(max 1 cols) (keeper_label keeper) in
         let overflow_rows = if rest = [] then 0 else 1 in
         if used + List.length wrapped + overflow_rows <= name_budget then
           choose (keeper :: chosen) (used + List.length wrapped) rest
@@ -266,16 +265,18 @@ let about_rows ~style ~cols ~rows ~caption ~frame ~keepers
         in
         let portraits =
           List.mapi
-            (fun index (name, equipment) ->
-              Option.map (fun equipment ->
-              let far = List.nth spread index in
-              let near = List.nth gathered index in
-              let left = far + ((near - far) * proximity / 7) in
-              { left;
-                image_id = about_keeper_image_id index;
-                box;
-                image = Masc_tui_keeper_portrait.image about_portraits ~name ~equipment box.View.size;
-                lines = [] }) equipment)
+            (fun index (name, portrait) ->
+              match portrait with
+              | Keeper_portrait_equipment.Unavailable _ -> None
+              | Keeper_portrait_equipment.Ready equipment ->
+                  let far = List.nth spread index in
+                  let near = List.nth gathered index in
+                  let left = far + ((near - far) * proximity / 7) in
+                  Some { left;
+                    image_id = about_keeper_image_id index;
+                    box;
+                    image = Masc_tui_keeper_portrait.image about_portraits ~name ~equipment box.View.size;
+                    lines = [] })
             visible
           |> List.filter_map Fun.id
         in
@@ -299,9 +300,8 @@ let about_rows ~style ~cols ~rows ~caption ~frame ~keepers
   in
   let names =
     List.concat_map
-      (fun keeper -> Masc_tui_message_layout.wrap_words ~max_cells:(max 1 cols)
-        (keeper_label keeper))
-      visible
+      (Masc_tui_message_layout.wrap_words ~max_cells:(max 1 cols))
+      (List.map keeper_label visible)
     |> List.map (centred ~cols)
   in
   let overflow =

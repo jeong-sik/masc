@@ -235,12 +235,18 @@ let test_a_body_asks_for_its_picture () =
 
 let about ~cols ~frame display =
   Screen.about_rows ~style:Screen.Painted ~cols ~rows:24 ~caption
-    ~frame ~keepers:(List.map (fun name -> name, Some Keeper_portrait_look.bare)
+    ~frame ~keepers:(List.map (fun name ->
+      name, Keeper_portrait_equipment.Ready Keeper_portrait_look.bare)
       ["fixture-alpha"; "fixture-bravo"; "fixture-charlie"; "fixture-delta"; "extra"])
     ~display ~project ~origin
 
 let test_about_observed_outfit_and_unavailable_names () =
-  let scene keepers = Screen.about_rows ~style:Screen.Painted ~cols:76 ~rows:24
+  let scene keepers =
+    let keepers = List.map (fun (name, equipment) -> name,
+      match equipment with
+      | Some value -> Keeper_portrait_equipment.Ready value
+      | None -> Keeper_portrait_equipment.Unavailable "fixture not observed") keepers in
+    Screen.about_rows ~style:Screen.Painted ~cols:76 ~rows:24
     ~caption ~frame:Screen.final_frame ~keepers ~display:pixels ~project ~origin in
   let name = "fixture-alpha" in
   let equipment = { Keeper_portrait_look.bare with face = Keeper_portrait_look.Glasses } in
@@ -273,6 +279,16 @@ let test_about_observed_outfit_and_unavailable_names () =
     actual.View.image.Draw.rgba
 
 let test_the_arrival_gathers_then_stops () =
+  let unavailable = Screen.about_rows ~style:Screen.Painted ~cols:76 ~rows:24
+    ~caption ~frame:Screen.final_frame
+    ~keepers:["fixture-alpha", Keeper_portrait_equipment.Unavailable "not observed"]
+    ~display:pixels ~project ~origin in
+  check (list int) "unobserved equipment keeps only the mascot placement"
+    [Masc_tui_graphics.image_id Masc_tui_graphics.Mascot]
+    (List.map (fun p -> p.View.image_id) unavailable.Screen.placements);
+  check bool "unobserved equipment retains the registered name" true
+    (List.exists (fun line -> String.equal (trimmed line) "fixture-alpha")
+       unavailable.Screen.lines);
   let at_start = about ~cols:76 ~frame:0 pixels in
   let gathered = about ~cols:76 ~frame:7 pixels in
   let finished = about ~cols:76 ~frame:Screen.final_frame pixels in

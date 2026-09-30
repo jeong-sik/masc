@@ -2,8 +2,6 @@
     [current] owns the existing first-use recovery; [current_view] never repairs
     or truncates a ledger. A failed policy publication disables the view. *)
 
-val configured : base_path:string -> Candle_config.t
-
 type prepared = private {
   events : Candle_event.t list;
   policy_events : Candle_event.t list;
@@ -32,6 +30,11 @@ val current_view : now:(unit -> float) -> base_path:string -> (view, error) resu
 (** One immutable current view. Configuration and trusted clock are observed
     again on each CAS attempt. The desired half-life is published before the
     returned amounts are accepted; failure returns no usable balance. *)
+
+val configured : base_path:string -> Candle_config.t
+(** Current configuration and appraiser availability only. Does not recover,
+    truncate or otherwise change the ledger. Read and purchase surfaces use
+    this before their authoritative ledger read. *)
 
 val current : base_path:string -> Candle_config.t
 (** Goal control availability and first-use recovery only. A live writer lock

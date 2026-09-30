@@ -259,7 +259,7 @@ let apply_keeper_log_snapshot (state : state)
     (snapshot : Metrics_tail.snapshot) =
   state.log_entries <- snapshot.entries;
   state.log_error <- snapshot.error;
-  let _, cols = Masc_tui_ansi.get_terminal_size () in
+  let _, cols = Masc_tui_render_prim.get_terminal_size () in
   state.log_scroll <-
     min state.log_scroll (max 0 (List.length (keeper_log_rows state ~cols) - 1))
 

@@ -1,4 +1,3 @@
-open Keeper_approval_queue
 open Keeper_approval_queue_result
 open Keeper_approval_queue_rules_types
 

@@ -3951,7 +3951,7 @@ let test_current_snapshot_rejects_unbound_available_summary () =
        let original = read_pending_snapshot_bytes ~base_path in
        AQ.For_testing.reset_runtime_state ();
        (match AQ.install_persistence ~base_path with
-        | Error (AQ.Install_storage_failed _) -> ()
+        | Error (Masc.Keeper_approval_queue_result.Install_storage_failed _) -> ()
         | Ok _ ->
           Alcotest.fail
             "current snapshot installed Exact_unbound with an available summary");
@@ -4373,7 +4373,7 @@ let test_malformed_snapshot_fails_install_and_is_observed () =
        in
        (match AQ.install_persistence ~base_path with
         | Ok _ -> Alcotest.fail "malformed snapshot must not install"
-       | Error (AQ.Install_storage_failed _) -> ()
+       | Error (Masc.Keeper_approval_queue_result.Install_storage_failed _) -> ()
         );
        Alcotest.(check bool)
          "failed install leaves workspace unavailable"
@@ -4503,7 +4503,7 @@ let test_unsupported_version_snapshot_requires_runtime_reset () =
        (match AQ.install_persistence ~base_path with
         | Ok _ -> Alcotest.fail "unsupported version must fail install"
         | Error
-            (AQ.Install_storage_failed
+            (Masc.Keeper_approval_queue_result.Install_storage_failed
               { reason =
                   "gate_pending.version 8 is unsupported (current 11); reset \
                    runtime state before restarting MASC"
@@ -4612,7 +4612,7 @@ let test_v10_store_requires_runtime_reset_before_rows_are_read () =
        match AQ.install_persistence ~base_path with
        | Ok _ -> Alcotest.fail "a v10 store must fail install"
        | Error
-           (AQ.Install_storage_failed
+           (Masc.Keeper_approval_queue_result.Install_storage_failed
              { reason =
                  "gate_pending.version 10 is unsupported (current 11); reset \
                   runtime state before restarting MASC"

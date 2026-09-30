@@ -16,10 +16,16 @@ type delivery_key =
   | Fusion_run of Request_id.t
   | Workspace_message of Request_id.t
   | Approval_lifecycle of Request_id.t
+  | Goal_notification of { goal_id : string; owner : string; event : string }
 
 (** [Workspace_message] identifies one producer-minted workspace broadcast.
     It lets a mentioned Keeper append that exact broadcast to its durable
-    transcript once without treating the broadcast as a chat operation. *)
+    transcript once without treating the broadcast as a chat operation.
+
+    [Goal_notification] preserves the exact identity of a persisted Goal
+    notice. Its recipient and event belong to that transcript row, not to
+    the current shared Goal state. Reading, indexing and rewriting a durable
+    transcript must retain this identity even when no producer emits it. *)
 
 type transcript_slot =
   | Accepted_user

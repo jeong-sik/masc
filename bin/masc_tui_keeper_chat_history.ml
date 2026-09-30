@@ -433,23 +433,23 @@ let autonomous_turn_id_of_fields fields =
   | Some _ | None -> None
 
 let turn_id_of_fields fields =
+  let recorded_turn_id () =
+    match string_field fields "turn_ref" with
+    | Some _ as turn_ref -> turn_ref
+    | None -> autonomous_turn_id_of_fields fields
+  in
   match Delivery_identity.delivery_provenance_of_fields fields with
   | Ok (Some provenance) ->
-      let request_id =
-        match provenance.Delivery_identity.delivery_key with
+      (match provenance.Delivery_identity.delivery_key with
         | Delivery_identity.Operation_native {operation_id=request_id; _}
         | Delivery_identity.Operation_checkpoint {operation_id=request_id; _}
         | Delivery_identity.Operation request_id
         | Delivery_identity.Fusion_run request_id
         | Delivery_identity.Workspace_message request_id
         | Delivery_identity.Approval_lifecycle request_id ->
-            request_id
-      in
-      Some (Delivery_identity.Request_id.to_string request_id)
-  | Ok None | Error _ -> (
-      match string_field fields "turn_ref" with
-      | Some _ as turn_ref -> turn_ref
-      | None -> autonomous_turn_id_of_fields fields)
+            Some (Delivery_identity.Request_id.to_string request_id)
+        | Delivery_identity.Goal_notification _ -> recorded_turn_id ())
+  | Ok None | Error _ -> recorded_turn_id ()
 
 (* The operation a direct turn ran as, and nothing else: an autonomous turn's
    [turn_ref] and the other delivery keys are turn identity ([turn_id]) but
@@ -471,7 +471,8 @@ let operation_id_of_fields fields =
       (Some
          { Delivery_identity.delivery_key =
              ( Delivery_identity.Fusion_run _ | Delivery_identity.Workspace_message _
-             | Delivery_identity.Approval_lifecycle _ )
+             | Delivery_identity.Approval_lifecycle _
+             | Delivery_identity.Goal_notification _ )
          ; _
          }) ->
       None

@@ -2639,6 +2639,93 @@ let operation_delivery_key value =
   | Ok request_id -> Keeper_chat_delivery_identity.Operation request_id
   | Error detail -> Alcotest.fail detail
 
+let persisted_goal_notice ~owner =
+  Yojson.Safe.to_string
+    (`Assoc
+       [ "id", `String "recorded-goal-notice"
+       ; "role", `String "user"
+       ; "content", `String "A Goal verdict was recorded"
+       ; "ts", `Float 1.0
+       ; "delivery_key", `Assoc
+           [ "kind", `String "goal_notification"
+           ; "goal_id", `String "goal-recorded"
+           ; "owner", `String owner
+           ; "event", `String "refuted:request-recorded"
+           ]
+       ; "transcript_slot", `Assoc [ "kind", `String "accepted_user" ]
+       ]) ^ "\n"
+;;
+
+let test_persisted_goal_notice_keeps_chat_deliverable () =
+  let base_dir = temp_base_path "keeper-chat-persisted-goal-notice" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-with-goal-notice" in
+      let path = chat_path ~base_dir ~keeper_name in
+      let existing = persisted_goal_notice ~owner:keeper_name in
+      write_file path existing;
+      let delivery_key = operation_delivery_key "kmsg-after-recorded-notice" in
+      let append () =
+        K.append_user_message_once ~base_dir ~keeper_name ~delivery_key
+          ~content:"What is the current plan?" ()
+      in
+      let row_id =
+        match append () with
+        | Ok (K.Appended id) -> id
+        | Ok (K.Already_present _) -> Alcotest.fail "new question already existed"
+        | Error detail -> Alcotest.failf "recorded notice blocked question: %s" detail
+      in
+      let after_question = read_file path in
+      Alcotest.(check string) "stored notice is preserved byte for byte" existing
+        (String.sub after_question 0 (String.length existing));
+      (match append () with
+       | Ok (K.Already_present id) ->
+         Alcotest.(check string) "retry identifies the same question" row_id id
+       | Ok (K.Appended _) -> Alcotest.fail "question was appended twice"
+       | Error detail -> Alcotest.fail detail);
+      Alcotest.(check string) "retry leaves the transcript unchanged"
+        after_question (read_file path);
+      (match K.append_assistant_message_once ~base_dir ~keeper_name ~delivery_key
+               ~content:"The current plan is recorded." () with
+       | Ok (K.Appended _) -> ()
+       | Ok (K.Already_present _) -> Alcotest.fail "new reply already existed"
+       | Error detail -> Alcotest.failf "recorded notice blocked reply: %s" detail);
+      let messages = K.load ~base_dir ~keeper_name in
+      Alcotest.(check (list string)) "history, question and reply remain readable"
+        [ "A Goal verdict was recorded"; "What is the current plan?"
+        ; "The current plan is recorded." ]
+        (List.map (fun message -> message.K.content) messages);
+      match messages with
+      | notice :: _ ->
+        (match notice.K.delivery_provenance with
+         | Some { delivery_key = Keeper_chat_delivery_identity.Goal_notification
+                    { goal_id; owner; event }; transcript_slot = Accepted_user } ->
+           Alcotest.(check (triple string string string)) "notice identity retained"
+             ("goal-recorded", keeper_name, "refuted:request-recorded")
+             (goal_id, owner, event)
+         | _ -> Alcotest.fail "recorded notice lost its delivery identity")
+      | [] -> Alcotest.fail "transcript disappeared")
+;;
+
+let test_invalid_goal_notice_still_blocks_append_once () =
+  let base_dir = temp_base_path "keeper-chat-invalid-goal-notice" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-with-invalid-notice" in
+      let path = chat_path ~base_dir ~keeper_name in
+      let existing = persisted_goal_notice ~owner:"" in
+      write_file path existing;
+      (match K.append_user_message_once ~base_dir ~keeper_name
+               ~delivery_key:(operation_delivery_key "kmsg-after-invalid-notice")
+               ~content:"must not append" () with
+       | Error _ -> ()
+       | Ok _ -> Alcotest.fail "invalid notice identity was silently accepted");
+      Alcotest.(check string) "invalid history remains unchanged" existing
+        (read_file path))
+;;
+
 let persisted_provenance_row ~id ~role ~content ~delivery_key ~transcript_slot
     ?execution_id ?tool_call_name () =
   let provenance : Keeper_chat_delivery_identity.delivery_provenance =
@@ -3700,6 +3787,10 @@ let () =
             test_half_provenance_reads_none;
           Alcotest.test_case "half a provenance pair blocks append-once"
             `Quick test_half_provenance_blocks_append_once;
+          Alcotest.test_case "persisted Goal notice keeps chat deliverable"
+            `Quick test_persisted_goal_notice_keeps_chat_deliverable;
+          Alcotest.test_case "invalid Goal notice blocks append-once"
+            `Quick test_invalid_goal_notice_still_blocks_append_once;
           Alcotest.test_case "duplicate provenance poisons its delivery key"
             `Quick test_duplicate_provenance_poisons_whole_delivery_key;
           Alcotest.test_case "duplicate tool ordinal poisons its delivery key"

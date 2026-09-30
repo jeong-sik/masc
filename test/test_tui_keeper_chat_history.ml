@@ -675,16 +675,21 @@ let test_rows_carry_the_operation_id_only_for_direct_turns () =
          ; row ~role:"user"
              ~delivery_key:(`Assoc [ "kind", `String "fusion_run"; "request_id", `String "fr-1" ])
              ~transcript_slot:(transcript_slot "accepted_user") "from a fusion run"
+         ; row ~role:"user"
+             ~delivery_key:(`Assoc [ "kind", `String "goal_notification"
+               ; "goal_id", `String "goal-1"; "owner", `String "keeper-a"
+               ; "event", `String "refuted:request-1" ])
+             ~transcript_slot:(transcript_slot "accepted_user") "recorded Goal notice"
          ])
   in
   check (list (option string))
     "every row of the direct turn carries it; autonomous and other keys do not"
     [ Some "tui-turn-42"; Some "tui-turn-42"; Some "tui-turn-42"; Some "tui-turn-42"
-    ; None; None; None ]
+    ; None; None; None; None ]
     (List.map (fun row -> row.History.operation_id) decoded.History.rows);
   check (list (option string)) "turn identity is unchanged beside it"
     [ Some "tui-turn-42"; Some "tui-turn-42"; Some "tui-turn-42"; None
-    ; Some "trace-1#54"; Some "trace-1#54"; Some "fr-1" ]
+    ; Some "trace-1#54"; Some "trace-1#54"; Some "fr-1"; None ]
     (List.map (fun row -> row.History.turn_id) decoded.History.rows)
 ;;
 

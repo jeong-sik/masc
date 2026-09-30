@@ -23,6 +23,8 @@ SOURCE_MODULES = (
     'bin/masc_tui_message_layout.ml',
     'bin/masc_tui_code_updates.ml',
     'bin/masc_tui_code_updates.mli',
+    'bin/masc_tui_code_requests.ml',
+    'bin/masc_tui_code_requests.mli',
 )
 
 if __name__ == "__main__":

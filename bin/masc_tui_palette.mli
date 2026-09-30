@@ -28,6 +28,7 @@ type palette_action =
   | Palette_lsp of string * string
 
 val gate_lane_label : gate_lane -> string
+val gate_mode_label : Masc.Keeper_gate_mode.t -> string
 val code_cursor_line_symbols : Masc_tui_types.state -> string list
 val lsp_question_prefixes : (string * string) list
 val palette_entries : Masc_tui_types.state -> (string * palette_action) list

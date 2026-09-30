@@ -99,6 +99,8 @@ let clamped_scroll_now (state : state) = function
   | Schedule_detail_scroll _ -> Schedule_detail_scroll state.schedule_scroll
   | Keeper_detail _ -> Keeper_detail state.detail_scroll
   | Keeper_calls _ -> Keeper_calls state.keeper_calls_scroll
+  | Keeper_logs_scroll { cols; _ } ->
+      Keeper_logs_scroll { scroll = state.log_scroll; cols }
   | Acting _ -> Acting state.acting_scroll
   | Acting_selection _ ->
       Acting_selection (state.acting_scroll, state.acting_cursor)
@@ -188,6 +190,8 @@ let reader_after_wheel (reader : clamped_scroll)
   (* Some Keeper detail tabs and the calls view move a row cursor on [j]; the
      notch keeps reaching them as that key. *)
   | Keeper_detail _ | Keeper_calls _ -> None
+  (* Logs use their own bounded Metrics_tail movement through the key path. *)
+  | Keeper_logs_scroll _ -> None
   (* List scrolls: the notch moves the list's cursor as the arrow does. *)
   | Acting _ | Acting_selection _ | Keeper_list_scroll _ -> None
   (* Resources has panes of its own that [h] and [l] move between. *)

@@ -6179,6 +6179,7 @@ let reading_pane (state : state) : (int -> Masc_tui_types.clamped_scroll) option
   (* The voice pane is lines the frame lays out; its wizard takes its own keys
      while open. *)
   | Config when state.config_pane = Config_voice -> pane (fun v -> Voice_scroll v)
+  | Config when state.config_pane = Config_presets -> pane (fun v -> Preset_detail_scroll v)
   (* Surfaces whose whole body is a row list, which [row_list] answers for,
      and the two panes that own every key while they are open. *)
   | Keepers Keeper_detail | Keepers Keeper_list | Keepers Keeper_logs
@@ -13947,15 +13948,28 @@ let apply_async_message state ~base_path ~http_refresh_inflight
        | Preset_to_chat target, Error detail ->
            chat_notice state ~keeper_name:target ~kind:Notice_failure detail
        | Preset_to_pane, Ok snapshot ->
+           let selected_name = selected_preset_for_state state
+               |> Option.map (fun row -> row.Tui_decode.pm_name) in
+           let cursor = match Option.bind selected_name (fun name ->
+               List.find_mapi (fun index row ->
+                 if String.equal row.Tui_decode.pm_name name then Some index else None)
+                 snapshot.Tui_decode.pss_presets) with
+             | Some index -> index
+             | None -> max 0 (min state.presets_cursor
+                 (List.length snapshot.Tui_decode.pss_presets - 1))
+           in
+           let next_name = List.nth_opt snapshot.Tui_decode.pss_presets cursor
+               |> Option.map (fun row -> row.Tui_decode.pm_name) in
+           if not (Option.equal String.equal selected_name next_name) then begin
+             state.config_scroll <- 0;
+             state.preset_restore_armed <- None
+           end;
            state.presets_snapshot <- Some snapshot;
            state.presets_error <- None;
-           state.presets_cursor <-
-             max 0
-               (min state.presets_cursor
-                  (List.length snapshot.Tui_decode.pss_presets - 1));
-           (* The listing just changed, so whatever the cursor now points at
-              is a fresh question. *)
-           state.preset_detail <- Masc_tui_fetched.clear state.preset_detail;
+           state.presets_cursor <- cursor;
+           (* Ask again while retaining the keyed reading. Clearing it first
+              shortens the document to its loading rows and clamps a reader
+              at its end to a different place before the answer arrives. *)
            ensure_preset_detail state ~mailbox
        | Preset_to_pane, Error detail -> state.presets_error <- Some detail)
   | Preset_contents_shown (sink, result) ->
@@ -23605,8 +23619,11 @@ and is loaded on demand through keeper_skill.
                the key reached only prompts: a preset longer than its pane
                showed its first screen and nothing past it. *)
             | Config
-              when state.config_pane = Config_prompts
-                   || state.config_pane = Config_presets ->
+              when state.config_pane = Config_presets ->
+                let count, height = Masc_tui_render.presets_viewport state in
+                let move = if direction > 0 then Masc_tui_scroll.page_down else Masc_tui_scroll.page_up in
+                state.config_scroll <- move ~count ~height state.config_scroll
+            | Config when state.config_pane = Config_prompts ->
                 state.config_scroll <-
                   max 0 (state.config_scroll + (direction * page))
             | Config when state.config_pane = Config_voice ->

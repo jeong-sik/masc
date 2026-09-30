@@ -350,7 +350,7 @@ let project_entry snapshot (entry : Skill_catalog_snapshot.entry) =
     })
 ;;
 
-let project_entry_or_fallback snapshot (entry : Skill_catalog_snapshot.entry) =
+let entry_projection_of snapshot (entry : Skill_catalog_snapshot.entry) =
   match project_entry snapshot entry with
   | Ok skill -> Projected skill
   | Error diagnostic when composition_projection_failed diagnostic ->
@@ -362,44 +362,105 @@ let project_entry_or_fallback snapshot (entry : Skill_catalog_snapshot.entry) =
   | Error error -> Entry_unavailable error
 ;;
 
-let project_entries snapshot entries =
-  entries
+(* One snapshot entry as every projection of the snapshot uses it: its
+   projection, whether it is effective, and the advisory diagnostics a
+   projected instruction skill's body earns. An instruction whose fence info
+   string only normalizes to the composition fence stays a projected
+   instruction; the advisory tells the author why no composition tool
+   appeared. *)
+type projected_entry =
+  { snapshot_entry : Skill_catalog_snapshot.entry
+  ; projection : entry_projection
+  ; effective : bool
+  ; advisories : projection_diagnostic list
+  }
+
+let projected_entry_of snapshot (entry : Skill_catalog_snapshot.entry) =
+  let projection = entry_projection_of snapshot entry in
+  let advisories =
+    match projection with
+    | Projected ({ surface = Instruction; _ } as skill) ->
+      composition_info_near_misses skill.body
+      |> List.map (fun info ->
+        { identity = entry.identity
+        ; error = Composition_info_near_miss { skill = skill.name; info }
+        })
+    | Projected { surface = Composition _; _ } | Frozen_instruction _ | Entry_unavailable _
+      -> []
+  in
+  let effective =
+    Skill_catalog_snapshot.effective_entries snapshot
+    |> List.exists (fun (effective : Skill_catalog_snapshot.entry) ->
+      Skill_reference.equal_identity effective.identity entry.identity)
+  in
+  { snapshot_entry = entry; projection; effective; advisories }
+;;
+
+(* A published snapshot is never changed: publishing replaces it with a new
+   value. Projecting an entry reads only the snapshot and the fixed tool
+   descriptor table, so one snapshot always projects to the same entries.
+   Keeper turns, the skill inventory and the skills route project the
+   current snapshot several times between two publications, so its entries
+   are projected once and kept with the snapshot they came from. One
+   snapshot is kept: asking about another one (a second workspace, a turn
+   still on the previous publication) projects that one and replaces it.
+   Composition plans are then shared by those callers; a plan's outputs are
+   bound to the run that produced them as well as to the plan, so sharing one
+   keeps runs apart. *)
+type projected_snapshot =
+  { snapshot : Skill_catalog_snapshot.t
+  ; entries : projected_entry list
+  }
+
+let last_projected_snapshot : projected_snapshot option Atomic.t = Atomic.make None
+
+let projected_entries snapshot =
+  match Atomic.get last_projected_snapshot with
+  | Some projected when projected.snapshot == snapshot -> projected.entries
+  | Some _ | None ->
+    let entries =
+      List.map (projected_entry_of snapshot) (Skill_catalog_snapshot.entries snapshot)
+    in
+    Atomic.set last_projected_snapshot (Some { snapshot; entries });
+    entries
+;;
+
+(* An entry resolved from [snapshot] is one of its entries, so its kept
+   projection answers. An entry from elsewhere is projected on the spot. *)
+let project_entry_or_fallback snapshot (entry : Skill_catalog_snapshot.entry) =
+  match
+    List.find_opt
+      (fun (projected : projected_entry) -> projected.snapshot_entry == entry)
+      (projected_entries snapshot)
+  with
+  | Some projected -> projected.projection
+  | None -> entry_projection_of snapshot entry
+;;
+
+let catalog_of_projected_entries projected_entries =
+  projected_entries
   |> List.fold_left
-       (fun (catalog, diagnostics) (entry : Skill_catalog_snapshot.entry) ->
-          match project_entry_or_fallback snapshot entry with
-          | Projected skill ->
-            let diagnostics =
-              match skill.surface with
-              | Composition _ -> diagnostics
-              | Instruction ->
-                (* Advisory only: the entry stays a projected instruction
-                   skill; the diagnostic tells the author why no composition
-                   tool appeared. *)
-                List.fold_left
-                  (fun diagnostics info ->
-                     { identity = entry.identity
-                     ; error =
-                         Composition_info_near_miss { skill = skill.name; info }
-                     }
-                     :: diagnostics)
-                  diagnostics
-                  (composition_info_near_misses skill.body)
-            in
-            skill :: catalog, diagnostics
+       (fun (catalog, diagnostics)
+         { snapshot_entry; projection; effective = _; advisories } ->
+          match projection with
+          | Projected skill -> skill :: catalog, List.rev_append advisories diagnostics
           | Frozen_instruction { skill; diagnostic } ->
-            skill :: catalog, { identity = entry.identity; error = diagnostic } :: diagnostics
+            ( skill :: catalog
+            , { identity = snapshot_entry.identity; error = diagnostic } :: diagnostics )
           | Entry_unavailable error ->
-            catalog, { identity = entry.identity; error } :: diagnostics)
+            catalog, { identity = snapshot_entry.identity; error } :: diagnostics)
        ([], [])
   |> fun (catalog, diagnostics) -> List.rev catalog, List.rev diagnostics
 ;;
 
 let of_snapshot snapshot =
-  project_entries snapshot (Skill_catalog_snapshot.effective_entries snapshot)
+  projected_entries snapshot
+  |> List.filter (fun (projected : projected_entry) -> projected.effective)
+  |> catalog_of_projected_entries
 ;;
 
 let all_entries_of_snapshot snapshot =
-  project_entries snapshot (Skill_catalog_snapshot.entries snapshot)
+  catalog_of_projected_entries (projected_entries snapshot)
 ;;
 
 let same_exact_reference (left : skill) (right : skill) =

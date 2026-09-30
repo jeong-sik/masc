@@ -111,6 +111,10 @@ val context_inspector_viewport : Masc_tui_types.state -> int * int
 val context_inspector_detail_viewport : Masc_tui_types.state -> int * int
 val keeper_deletions_viewport : Masc_tui_types.state -> int * int
 val help_viewport : Masc_tui_types.state -> int * int
+val patch_modal_horizontal_limit : Masc_tui_types.state -> int
+(** Largest body-cell offset needed to read a patch line while keeping its
+    old/new line numbers and change marker fixed. *)
+
 val patch_modal_viewport : Masc_tui_types.state -> int * int
 (** The patch review overlay's diff-row count and the rows it shows, so the
     page keys move a window and the end key reaches the end. *)

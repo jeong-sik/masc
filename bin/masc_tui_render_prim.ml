@@ -122,7 +122,7 @@ let clamped_scroll_now (state : state) = function
   | Resource_scroll _ -> Resource_scroll state.resource_scroll
   | Metrics_scroll _ -> Metrics_scroll state.metrics_scroll
   | Approval_detail_scroll _ -> Approval_detail_scroll state.approval_detail_scroll
-  | Patch_modal_scroll _ -> Patch_modal_scroll state.patch_modal_scroll
+  | Patch_modal_scroll _ -> Patch_modal_scroll (state.patch_modal_scroll, state.patch_modal_hscroll)
   | Link_modal_scroll _ -> Link_modal_scroll state.link_modal_scroll
   | Play_invite_scroll _ -> Play_invite_scroll state.play_invite_scroll
   | Voice_scroll _ -> Voice_scroll state.config_scroll
@@ -165,7 +165,8 @@ let reader_after_wheel (reader : clamped_scroll)
       Some (Repository_changes_diff_scroll (step value))
   | Metrics_scroll value -> Some (Metrics_scroll (step value))
   | Approval_detail_scroll value -> Some (Approval_detail_scroll (step value))
-  | Patch_modal_scroll value -> Some (Patch_modal_scroll (step value))
+  | Patch_modal_scroll (vertical, horizontal) ->
+      Some (Patch_modal_scroll (step vertical, horizontal))
   | Link_modal_scroll value -> Some (Link_modal_scroll (step value))
   | Play_invite_scroll value -> Some (Play_invite_scroll (step value))
   | Voice_scroll value -> Some (Voice_scroll (step value))
@@ -2919,19 +2920,26 @@ let build_change_context_lines (change_ctx : change_context) : string list =
   | None, None -> []
 
 
-let tree_diff_row_span ~width (row : Masc.Tui_decode.git_diff_row) =
-  let background, marker =
+let tree_diff_gutter (row : Masc.Tui_decode.git_diff_row) =
+  let marker =
     match row.Masc.Tui_decode.gdr_kind with
-    | Masc.Tui_decode.Gd_removed -> (Span.bg Theme.Syntax.diff_removed_bg, "-")
-    | Masc.Tui_decode.Gd_added -> (Span.bg Theme.Syntax.diff_added_bg, "+")
-    | Masc.Tui_decode.Gd_context -> (Span.plain, " ")
+    | Masc.Tui_decode.Gd_removed -> "-"
+    | Masc.Tui_decode.Gd_added -> "+"
+    | Masc.Tui_decode.Gd_context -> " "
   in
-  let gutter =
-    Printf.sprintf "%s %s %s "
-      (Diff.line_number_cell row.Masc.Tui_decode.gdr_old_line)
-      (Diff.line_number_cell row.Masc.Tui_decode.gdr_new_line)
-      marker
+  Printf.sprintf "%s %s %s "
+    (Diff.line_number_cell row.Masc.Tui_decode.gdr_old_line)
+    (Diff.line_number_cell row.Masc.Tui_decode.gdr_new_line) marker
+;;
+
+let tree_diff_row_span ?(hscroll = 0) ~width (row : Masc.Tui_decode.git_diff_row) =
+  let background =
+    match row.Masc.Tui_decode.gdr_kind with
+    | Masc.Tui_decode.Gd_removed -> Span.bg Theme.Syntax.diff_removed_bg
+    | Masc.Tui_decode.Gd_added -> Span.bg Theme.Syntax.diff_added_bg
+    | Masc.Tui_decode.Gd_context -> Span.plain
   in
+  let gutter = tree_diff_gutter row in
   let text_style =
     match row.Masc.Tui_decode.gdr_kind with
     | Masc.Tui_decode.Gd_context -> Span.combine background (Span.weight Ansi.dim)
@@ -2941,7 +2949,8 @@ let tree_diff_row_span ~width (row : Masc.Tui_decode.git_diff_row) =
     Span.concat
       [ Span.text (Span.combine background (Span.weight Ansi.dim)) gutter
       ; Span.text text_style
-          (Terminal_text.single_line row.Masc.Tui_decode.gdr_text)
+          (Message_layout.drop_cells
+             (Terminal_text.single_line row.Masc.Tui_decode.gdr_text) hscroll)
       ]
   in
   Span.pad_to width background (Span.truncate width composed)

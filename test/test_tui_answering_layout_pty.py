@@ -26,6 +26,7 @@ def run(executable):
         "schema": "masc.keeper_turns.v1",
         "keepers": [{"keeper_name": name, "status": "ok", "turn": {
             "lane": "chat_operation", "started_at_unix": started,
+            "interrupt_token": "answering-fixture-token",
             "preview": {"status_text": "PREVIEW working", "text_tail": "visible output",
                         "updated_at_unix": started, "last_tool": None},
         }} for name in names],
@@ -84,6 +85,7 @@ def run(executable):
             "schema": "masc.keeper_turns.v1",
             "keepers": [{"keeper_name": name, "status": "ok", "turn": {
                 "lane": "chat_operation", "started_at_unix": started,
+                "interrupt_token": "answering-fixture-token",
                 "preview": {"status_text": "PREVIEW " + name,
                             "text_tail": "visible output", "updated_at_unix": started,
                             "last_tool": None},

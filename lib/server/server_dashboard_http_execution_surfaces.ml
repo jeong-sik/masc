@@ -772,11 +772,11 @@ let refresh_execution_default_light_http_body ~config =
     ~prepare:Http_response_payload.prepare ~config ()
 ;;
 
-(* Observe equipment after cached response preparation, outside the publication
+(* Observe the ledger after cached response preparation, outside the publication
    lock, so a completed purchase/equip is not replaced by an older snapshot. *)
 let prepare_execution_snapshot_broadcast ~config () =
   refresh_execution_default_light_http_body ~config
-  |> Dashboard_projection_cache.with_current_keeper_portraits ~config
+  |> Dashboard_projection_cache.with_current_keeper_observations ~config
 ;;
 
 type execution_read =
@@ -1372,7 +1372,7 @@ let execution_cached_http_representation ~(config : Workspace.config)
       | Empty | Preparing _ | Ready _ -> None) in
     (match selected with
      | Some (json, representation)
-       when Dashboard_projection_cache.with_current_keeper_portraits ~config json = json ->
+       when Dashboard_projection_cache.with_current_keeper_observations ~config json = json ->
        Some representation
      | Some _ | None -> None)
   | _ -> None
@@ -1681,7 +1681,7 @@ let dashboard_execution_http_response ~sw ~clock context =
   match context.parameters.fixture with
   | Some _ -> response
   | None ->
-    let refresh = Dashboard_projection_cache.with_current_keeper_portraits ~config:context.config in
+    let refresh = Dashboard_projection_cache.with_current_keeper_observations ~config:context.config in
     match response with
     | Execution_json json -> Execution_json (refresh json)
     | Execution_payload payload ->

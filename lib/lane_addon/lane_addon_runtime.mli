@@ -40,7 +40,7 @@ val reconcile_configuration : config:Workspace.config -> directory:string ->
 val configuration_directory : Workspace.config -> string
 val read_declaration : config:Workspace.config -> Yojson.Safe.t ->
   (Yojson.Safe.t, Lane_addon_declaration.error) result
-val save_declaration : config:Workspace.config -> Yojson.Safe.t ->
+val save_declaration : ?caller:string -> config:Workspace.config -> Yojson.Safe.t ->
   (Yojson.Safe.t, Lane_addon_declaration.error) result
 (** HTTP and Keeper editors share the configuration serializer with reconcile
     and managed Detach. Saving bytes only nudges the existing maintenance owner;
@@ -62,7 +62,7 @@ module For_testing : sig
   type backend = {
     start : sw:Eio.Switch.t -> instance_id:string -> package:Lane_addon_types.package ->
       on_created:(connection -> unit) -> (connection, string) result;
-    acquire : store:Lane_addon_store.t -> package:Lane_addon_types.package ->
+    acquire : access:Lane_addon_sources.access -> store:Lane_addon_store.t -> package:Lane_addon_types.package ->
       resolve_lane_output:(installation_id:string -> (Lane_addon_sources.lane_output, string) result) ->
       binding:Yojson.Safe.t -> (Yojson.Safe.t, string) result;
     recover_stop : instance_id:string -> container_id:string option -> max_reply_bytes:int ->

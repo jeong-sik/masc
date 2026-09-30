@@ -76,7 +76,7 @@ let make_backend ?observe_step () =
         else Ok connection
       end);
     image_ready = (fun ~package:_ -> Ok ());
-    acquire = (fun ~store:_ ~package:_ ~resolve_lane_output:_ ~binding:_ ->
+    acquire = (fun ~access:_ ~store:_ ~package:_ ~resolve_lane_output:_ ~binding:_ ->
       Ok (`List [`Assoc ["original_bytes", `String "captured source before rotation"]]));
     recover_stop = (fun ~instance_id ~container_id ~max_reply_bytes:_ ->
       match container_id with
@@ -361,10 +361,10 @@ let test_capture_cannot_rewrite_detach_failure () =
   let released, release = Eio.Promise.create () in
   let returned, return = Eio.Promise.create () in
   let captures = ref 0 in
-  let acquire ~store ~package ~resolve_lane_output ~binding =
+  let acquire ~access ~store ~package ~resolve_lane_output ~binding =
     incr captures;
     if !captures=2 then (Eio.Promise.resolve enter (); Eio.Promise.await released);
-    let result = Lane_addon_sources.acquire ~store ~package ~resolve_lane_output ~binding in
+    let result = Lane_addon_sources.acquire ~access ~store ~package ~resolve_lane_output ~binding in
     if !captures=2 then Eio.Promise.resolve return ();
     result in
   with_fixture ~acquire (fun env _sw config dir state ->
@@ -487,11 +487,14 @@ let test_activity_from_another_domain_reaches_the_owner () =
 let test_fusion_status_hint_wakes_only_its_bound_run () =
   with_fixture (fun env _sw config dir _state ->
     let watcher run_id =
-      unwrap (dispatch config Runtime.Attach [
+      Fusion_run_registry.register_running (Fusion_run_registry.global ()) ~run_id
+        ~keeper:"fixture-owner" ~preset:"default" ~roster:Fusion_types.preset_roster
+        ~topology:Fusion_types.Simple ~started_at:1.;
+      unwrap (Runtime.dispatch ~caller:"fixture-owner" ~config ~operation:Runtime.Attach (`Assoc [
         "manifest_path",`String (manifest dir "good");"run_id",`String "world";
         "binding",`Assoc ["sources",`List [`Assoc [
           "source_id",`String "fusion";"kind",`String "fusion_run";
-          "run_id",`String run_id]]]]) |> text "instance_id" in
+          "run_id",`String run_id]]]])) |> text "instance_id" in
     let one = watcher "fusion-one" and two = watcher "fusion-two" in
     let clock = Eio.Stdenv.clock env in
     let seq id = int "observation_seq" (instance config id) in

@@ -81,8 +81,11 @@ def fixtures_for_readers():
 
 def exercise(process, fd, output, *, reader, columns, no_color):
     recorded = reader == "recorded"
-    h.resize_and_wait(process, fd, output, rows=24, columns=columns,
-                      needle=b"REMOVEHEAD", final_cursor=b"\x1b[?25l")
+    # An unchanged PTY size produces no SIGWINCH frame. The reader entry
+    # already waited for its body; validate that frame at the existing size.
+    if os.get_terminal_size(fd) != os.terminal_size((columns, 24)):
+        h.resize_and_wait(process, fd, output, rows=24, columns=columns,
+                          needle=b"REMOVEHEAD", final_cursor=b"\x1b[?25l")
     h.drain_until_quiet(process, fd, output)
     painted = h.screen_rows(bytes(output))
     assert max(painted) <= 24, (reader, columns, max(painted))

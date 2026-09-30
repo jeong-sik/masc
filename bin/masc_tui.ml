@@ -10059,7 +10059,7 @@ let apply_asks_load state = function
            (match List.find_index
                     (fun (row : Tui_decode.ask_row) -> row.ar_id = aam_ask_id) next_rows with
             | Some index -> state.ask_cursor <- index
-            | None -> Masc_tui_home_model.clear_ask_answering state));
+            | None -> Masc_tui_home.clear_ask_answering state));
       state.asks_snapshot <- Some snapshot;
       state.asks_error <- None;
       (* Silent while the operator is on the Approvals surface -- the panel is
@@ -11466,7 +11466,7 @@ let selected_ask_question state =
 (* Leaving the mode drops the draft. An answer half-written against a question
    the operator walked away from is not a thing to restore later; the Keeper
    is still waiting either way, and the row says so. *)
-let leave_ask_answering state = Masc_tui_home_model.clear_ask_answering state
+let leave_ask_answering state = Masc_tui_home.clear_ask_answering state
 
 let enter_ask_answering state =
   match selected_ask_row state with
@@ -16457,7 +16457,7 @@ let drain_async_messages state ~base_path ~http_refresh_inflight
   let rec loop changed =
     match Eio.Stream.take_nonblocking mailbox with
     | None ->
-        Masc_tui_home_model.reconcile_home_request_detail state;
+        Masc_tui_home.reconcile_home_request_detail state;
         changed
     | Some { ready_at_ns; message = msg } ->
         let waited_ns = Int64.sub (Mtime_clock.elapsed_ns ()) ready_at_ns in
@@ -22372,11 +22372,11 @@ and is loaded on demand through keeper_skill.
        | Some ("l" | "L") when state.view = Acting ->
            goto_surface state ~mailbox:async_messages System_logs
        | Some ("j" | "down" | "k" | "up" as key) when state.view = Overview ->
-           Masc_tui_home_model.home_step state ~backwards:(key = "k" || key = "up")
+           Masc_tui_home.home_step state ~backwards:(key = "k" || key = "up")
        | Some "p" when state.view = Overview ->
            goto_surface state ~mailbox:async_messages Approvals
        | Some ("\r" | "\n" | "enter") when state.view = Overview ->
-           (match Masc_tui_home_model.home_selected_action state with
+           (match Masc_tui_home.home_selected_action state with
             | None -> report_action state "system" "Selection changed; choose again"
             | Some action ->
               state.home_selected <- Some action;
@@ -22392,7 +22392,7 @@ and is loaded on demand through keeper_skill.
                 (match request with
                  | Home_held_call _ | Home_gate_request _ | Home_operator_request _ ->
                      (match List.find_index
-                              (fun row -> Masc_tui_home_model.home_request_of_approval row = request)
+                              (fun row -> Masc_tui_home.home_request_of_approval row = request)
                               (Masc_tui_approvals_model.approval_items state) with
                       | None -> report_action state "system" "Request changed; choose again"
                       | Some cursor ->
@@ -26478,12 +26478,12 @@ and is loaded on demand through keeper_skill.
                   | Some projection -> state.acting_chunk_projection <- Some projection);
                  (match state.view, Masc_tui_render.frame_choice state ~terminal_rows with
                   | Overview, `Surface ->
-                      let selected = Masc_tui_home_model.home_selected_action state in
+                      let selected = Masc_tui_home.home_selected_action state in
                       if Option.is_none state.home_selected
-                         && Masc_tui_home_model.home_initial_reading_ready state selected then
+                         && Masc_tui_home.home_initial_reading_ready state selected then
                         state.home_selected <- selected;
                       let budget = Masc_tui_render_prim.surface_chrome_budget state ~terminal_rows in
-                      let first, _ = Masc_tui_home_model.home_decision_window state ~budget in
+                      let first, _ = Masc_tui_home.home_decision_window state ~budget in
                       state.home_decision_scroll <- first
                   | _ -> ());
                  render state)

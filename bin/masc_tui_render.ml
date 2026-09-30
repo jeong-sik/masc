@@ -8991,6 +8991,15 @@ let render_verification_list (state : state) =
        ~hints:(Masc_tui_keys.footer_hints ~detail_open:false state.view));
   finish_surface state ~surface_key:"verification" ~rows:terminal_rows ~cols buf
 
+(* Complete judgement metadata is a physical document. Rows that fit keep
+   their field alignment; longer rows remain literal and reachable by scroll. *)
+let judgement_detail_rows ~width lines =
+  List.concat_map
+    (fun (style, text) ->
+       if Message_layout.display_width text <= width then [style, text]
+       else Message_layout.wrap_words ~max_cells:(max 1 width) text
+            |> List.map (fun row -> style, row)) lines
+
 let verification_detail_lines ~width
     (request : Masc.Tui_decode.verification_request) =
   let field label value =
@@ -8999,7 +9008,7 @@ let verification_detail_lines ~width
   in
   let wrapped_block label text =
     (Ansi.bold, "  " ^ label)
-    :: (Message_layout.wrap_body ~markdown:document_markdown
+    :: (Message_layout.wrap_body
           ~max_cells:(max 1 (width - 4))
           ~sanitize:Keeper_chat.terminal_safe_text text
         |> List.map (fun line -> Ansi.reset, "    " ^ line))
@@ -9021,10 +9030,7 @@ let verification_detail_lines ~width
   ; field "Task" request.vr_task_id
   ; field "Title" request.vr_task_title
   ; field "Submitted by" request.vr_submitted_by
-    (* In the terminal's zone, like every other Created on a detail. This
-       one printed the server's RFC 3339 text, offset and all, under a header
-       clock in local time. *)
-  ; field "Created" (Terminal_text.short_timestamp request.vr_created_at)
+  ; field "Created" request.vr_created_at
   ; Ansi.dim, ""
   ]
   (* [Kind], [What is being judged] and [What moves it forward] stood here.
@@ -9132,10 +9138,6 @@ let verification_detail_pane (state : state) ~rows ~cols request buf =
        (Terminal_text.single_line request.Masc.Tui_decode.vr_task_id));
   box_divider buf cols;
   let width = max 1 (framed_inner_width cols) in
-  let lines =
-    verification_detail_lines ~width request
-    @ verification_evidence_lines state ~width request.Masc.Tui_decode.vr_task_id
-  in
   let armed_note =
     match state.verification_verdict_armed with
     | Some (task_id, request_id)
@@ -9145,6 +9147,15 @@ let verification_detail_pane (state : state) ~rows ~cols request buf =
           (Terminal_text.single_line task_id)
           (Terminal_text.single_line request_id))
     | Some _ | None -> None
+  in
+  let lines =
+    verification_detail_lines ~width request
+    @ verification_evidence_lines state ~width request.Masc.Tui_decode.vr_task_id
+    @ (match armed_note with None -> [] | Some note -> [Theme.warn (), note])
+    @ (match state.verification_verdict_error with
+       | None -> []
+       | Some detail -> [Theme.bad (), "  Verdict action failed: " ^ Terminal_text.single_line detail])
+    |> judgement_detail_rows ~width
   in
   (* Top, title, divider, bottom and footer: the five rows the Task Review
      sidebar beside this pane also subtracts. Six left this pane one body row
@@ -9171,7 +9182,7 @@ let verification_detail_pane (state : state) ~rows ~cols request buf =
       (fit_width ("  " ^ Terminal_text.single_line err) (cols - 4)))
     state.verification_verdict_error;
   box_line_styled buf cols ~style:(Theme.warn ())
-    "  a twice: approve; x: reject with reason";
+    "  a twice:approve x:reject";
   box_bottom buf cols;
   (* A position, not a key: handed to the footer's position slot as the
      Verdicts detail does, so narrow widths drop key items before it. *)
@@ -9571,7 +9582,7 @@ let harness_goal_lines (state : state) (verdict : Masc.Tui_decode.harness_verdic
              (* Linked to a goal this snapshot does not carry -- terminal, or
                 simply not in the page that was fetched. Named rather than
                 dropped: the link is a fact even when the goal is not here. *)
-             [ Ansi.reset, Printf.sprintf "  %-12s %s" "Goal" id
+             [ Ansi.reset, Printf.sprintf "  %-12s %s" "Goal" (Terminal_text.single_line id)
              ; Ansi.dim, Printf.sprintf "  %-12s %s" "" (Link.reference Goal id)
              ]
            | Some goal ->
@@ -9585,7 +9596,7 @@ let harness_goal_lines (state : state) (verdict : Masc.Tui_decode.harness_verdic
              [ Ansi.reset,
                Printf.sprintf "  %-12s %s" "Goal"
                  (Terminal_text.single_line goal.pg_title)
-             ; Ansi.reset, Printf.sprintf "  %-12s %s" "Aim" aim
+             ; Ansi.reset, Printf.sprintf "  %-12s %s" "Aim" (Terminal_text.single_line aim)
              ; Ansi.dim, Printf.sprintf "  %-12s %s" "" (Link.reference Goal id)
              ])
          goal_ids
@@ -9598,7 +9609,7 @@ let harness_detail_lines ~width (verdict : Masc.Tui_decode.harness_verdict) =
   in
   let wrapped label text =
     (Ansi.bold, "  " ^ label)
-    :: (Message_layout.wrap_body ~markdown:document_markdown
+    :: (Message_layout.wrap_body
           ~max_cells:(max 1 (width - 6))
           ~sanitize:Keeper_chat.terminal_safe_text text
         |> List.map (fun line -> Ansi.reset, "    " ^ line))
@@ -9656,6 +9667,7 @@ let harness_detail_pane (state : state) ~rows ~cols verdict buf =
     @ (match harness_goal_lines state verdict with
        | [] -> []
        | goal_lines -> (Ansi.dim, "") :: goal_lines)
+    |> judgement_detail_rows ~width:(max 1 (framed_inner_width cols))
   in
   let content_height = max 1 (rows - 5) in
   let max_scroll = max 0 (List.length lines - content_height) in

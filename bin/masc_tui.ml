@@ -14199,7 +14199,8 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
          no held-call listing, no observer. The scoped follow-up is left
          queued on purpose -- draining it now would send surface loads to the
          booting server -- and the first non-booting completion drains it. *)
-      apply_server_booting state ~identity ~approval_ticket
+      apply_server_booting state ~identity ~approval_ticket;
+      refresh_visible_item_account state ~mailbox
   | Http_refresh_done (Refresh_surfaces results) ->
       http_refresh_inflight := false;
       state.http_refresh_started_ns <- None;

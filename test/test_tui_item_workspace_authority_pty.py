@@ -47,6 +47,19 @@ class ItemWire(authority.WorkspaceWire):
         super().__init__(roster)
         self.account_state = "ready"
         self.roster_unavailable = False
+        self.booting = False
+
+    def set_booting(self, booting):
+        with self.lock:
+            self.booting = booting
+
+    def health(self):
+        response = super().health()
+        payload = json.loads(response.body)
+        with self.lock:
+            booting = self.booting
+        payload["startup"] = {"state_ready": not booting}
+        return h.RawHttpResponse(200, json.dumps(payload).encode(), content_type="application/json")
 
     def set_roster_unavailable(self, unavailable):
         with self.lock:
@@ -196,6 +209,14 @@ def run(binary, captures):
             wire.set_roster_unavailable(False)
             wait(lambda text: b"Balance 3.250 Candle" in text,
                  "same-revision roster recovery did not reload the account")
+            wire.set_booting(True)
+            wait(lambda text: b"Item account revision" in text,
+                 "booting same-workspace server retained Item facts")
+            assert b"Balance " not in visible() and b"owned" not in visible()
+            capture("a-booting")
+            wire.set_booting(False)
+            wait(lambda text: b"Balance 3.250 Candle" in text,
+                 "ready server did not re-read Item account after boot")
             assert not [p for p, _ in posts if p.startswith("/api/v1/keepers/")], \
                 "read-only Item navigation submitted Keeper work"
             os.write(fd, b"q")

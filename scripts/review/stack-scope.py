@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Read the native merge scope and freeze identities; never mutate GitHub.
 
-The REST stack order, not branch names, defines downstack membership. Closed
-members remain in the membership snapshot but are not admitted for merging.
+The REST stack order, not branch names, defines downstack membership. Already
+merged members remain in the snapshot; closed unmerged prerequisites block it.
 """
 import json
 import os
@@ -58,6 +58,8 @@ def snapshot(repo, selected, expected_head):
         current = row if member['number'] == selected else get(f"repos/{repo}/pulls/{member['number']}")
         require(current['state'] == member['state'] and current['head']['sha'] == member['head']['sha'],
                 f"#{member['number']} changed while reading stack")
+        require(current['state'] != 'closed' or current['merged'] is True,
+                f"#{member['number']} is closed without merging and blocks the selected stack")
         expected_stack = dict(stack, position=position)
         require(current.get('stack') == expected_stack, f"#{member['number']} stack identity changed")
         scope.append({'number': member['number'], 'identity': identity(current)})

@@ -4665,7 +4665,19 @@ let launch_keeper_config_view state ~mailbox keeper_name =
       enqueue_async mailbox (Keeper_config_view_loaded (request, result)))
     (fun () -> Masc_tui_loader.load_keeper_config_view ~host ~port ~keeper_name)
 
+let item_account_revision state keeper_name =
+  let rows = match state.keeper_roster with
+    | Keeper_control.Roster_unobserved -> []
+    | Keeper_control.Roster_complete rows -> rows
+    | Keeper_control.Roster_partial { observed; _ }
+    | Keeper_control.Roster_invalid { observed; _ } -> observed
+  in
+  List.find_opt (fun (row : Tui_decode.keeper_runtime) ->
+    String.equal row.kr_name keeper_name) rows
+  |> Option.map (fun row -> keeper_name, row.Tui_decode.kr_candle_account_revision)
+
 let launch_keeper_items state ~mailbox keeper_name =
+  state.item_account_revision <- item_account_revision state keeper_name;
   let request = mark_detail_read_started state ~tab:Detail_items ~keeper:keeper_name in
   let host = server_peer_host in
   let port = state.port in
@@ -4678,6 +4690,19 @@ let launch_keeper_items state ~mailbox keeper_name =
       let ( let* ) = Result.bind in
       let* json = Masc_tui_http.get_json ~host ~port ~path in
       Masc_tui_keeper_items.decode ~keeper_name json)
+
+let refresh_visible_item_account state ~mailbox =
+  match state.view, state.detail_tab, selected_keeper state with
+  | Keepers Keeper_detail, Detail_items, Some keeper ->
+      (match item_account_revision state keeper.k_name with
+       | Some revision when state.item_account_revision <> Some revision ->
+           (* A new observation supersedes any older request. Repeated roster
+              ticks with the same revision leave an in-flight read alone. *)
+           state.item_account <- None;
+           state.item_account_error <- None;
+           launch_keeper_items state ~mailbox keeper.k_name
+       | Some _ | None -> ())
+  | _ -> ()
 
 let launch_keeper_sandbox_view state ~mailbox keeper_name =
   let request = mark_detail_read_started state ~tab:Detail_sandbox ~keeper:keeper_name in
@@ -13736,6 +13761,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       http_refresh_inflight := false;
       state.http_refresh_started_ns <- None;
       apply_http_surfaces state results;
+      refresh_visible_item_account state ~mailbox;
       (* The local roster is trustworthy only after a workspace-matched read.
          Resolve the boot choice once; a key the operator pressed meanwhile
          takes precedence over the saved choice. *)
@@ -14081,6 +14107,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
   | Http_scoped_refresh_done results ->
       http_scoped_refresh_inflight := false;
       apply_http_scoped_surfaces state results;
+      refresh_visible_item_account state ~mailbox;
       (match state.view with
        | Approvals -> launch_keeper_tool_approvals_load state ~mailbox
        | Keepers _ -> launch_keeper_tool_modes_load state ~mailbox

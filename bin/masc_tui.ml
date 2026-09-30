@@ -19393,7 +19393,8 @@ and is loaded on demand through keeper_skill.
            (* Scrolling reads the exact proof; leaving it invalidates pending
               reads as well as an already displayed confirmation binding. *)
            if cancelled [ "a"; "A"; "j"; "k"; "up"; "down";
-                          "pageup"; "pagedown"; "wheel-up"; "wheel-down" ] then
+                          "pageup"; "pagedown"; "home"; "end";
+                          "wheel-up"; "wheel-down" ] then
              (match state.goal_confirmation with
               | Goal_confirmation.Inspecting read ->
                   state.goal_confirmation <- Goal_confirmation.Inspecting

@@ -119,6 +119,20 @@ def run(executable: str, *, replace_proof: bool) -> None:
         )
         if read_count != 1 or posted:
             raise AssertionError("first key must read the proof without posting")
+        # Reader edges retain the inspected binding. The subsequent single
+        # confirmation key must still POST it, without another GET.
+        for edge in (b"\x1b[F", b"\x1b[H"):
+            start = len(output)
+            h.write_all(master_fd, output, edge)
+            h.wait_for_output(process, master_fd, output, h.FRAME_END,
+                              start=start, timeout=3.0)
+        h.drain_until_quiet(process, master_fd, output)
+        end = output.rfind(h.FRAME_END)
+        complete = bytes(output[:end + len(h.FRAME_END)])
+        if b"CONFIRM THIS PROOF" not in h.screen_text(complete):
+            raise AssertionError("reader edges discarded the inspected proof")
+        if read_count != 1 or posted:
+            raise AssertionError("reader edges must not reread or post the proof")
         if replace_proof:
             verdict["verification_run_id"] = "run-2"
         needle = (

@@ -20,6 +20,7 @@ import tui_keyboard_harness as _keyboard_harness
 # scripts/ci/run-edited-tests.sh runs this suite when a pull request changes a
 # path named here.
 SOURCE_MODULES = (
+    "bin/masc_tui_config.ml",
     "bin/masc_tui_input_reader.ml",
     "bin/masc_tui_input_reader.mli",
     "bin/masc_tui.ml",
@@ -485,6 +486,10 @@ def about_arrival_frames(binary: str, columns: int, *, reduced_motion: bool) -> 
         _keyboard_harness.send_and_wait(process, fd, output, b"3", b"MASC Keepers")
         _keyboard_harness.select_keeper_row(process, fd, output, b"alpha")
         _keyboard_harness.send_and_wait(process, fd, output, b"c", CHAT_TITLE)
+        _keyboard_harness.resize_and_wait(
+            process, fd, output, rows=32, columns=columns, needle=CHAT_TITLE,
+            controls=(_keyboard_harness.FULL_REDRAW,), final_cursor=b"\x1b[?25l",
+        )
         start = len(output)
         _keyboard_harness.send_and_wait(process, fd, output, b"/about\r", ABOUT_CAPTION)
         assert _keyboard_harness.drain_until_quiet(process, fd, output, cap=4.5), \
@@ -533,7 +538,6 @@ def about_arrival_frames(binary: str, columns: int, *, reduced_motion: bool) -> 
             http_fixtures=fixtures,
             prepare_workspace=prepare,
             terminal_cols=columns,
-            terminal_rows=32,
             extra_env={"MASC_TUI_FRAME_TIMING": str(timing)},
         )
         assert timing.is_file(), "/about frame timing report was not written at exit"

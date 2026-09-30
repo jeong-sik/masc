@@ -2466,6 +2466,7 @@ type keeper_mode =
     case a tab earns (unrelated content would want its own surface). *)
 type keeper_detail_tab =
   | Detail_info
+  | Detail_items
   | Detail_sandbox
   | Detail_instructions
   | Detail_secrets
@@ -2476,11 +2477,12 @@ type keeper_detail_tab =
   | Detail_runs
 
 let keeper_detail_tabs =
-  [ Detail_info; Detail_sandbox; Detail_instructions; Detail_secrets; Detail_github
+  [ Detail_info; Detail_items; Detail_sandbox; Detail_instructions; Detail_secrets; Detail_github
   ; Detail_identity; Detail_channels; Detail_automation; Detail_runs ]
 
 let keeper_detail_tab_label = function
   | Detail_info -> "Info"
+  | Detail_items -> "Items"
   | Detail_sandbox -> "Sandbox"
   | Detail_instructions -> "Settings"
   | Detail_secrets -> "Secrets"
@@ -5505,6 +5507,7 @@ type state = {
      drew the candle (Masc_tui_emblem_screen.drawn) and puts it back to [-1]
      when none did, so a screen without it stops repainting. *)
   mutable emblem_frame: int;
+  mutable about_reduce_motion: bool;
   (* /about: the candle over the surface, with the theme and the keeper count.
      Modal, like the help sheet; Esc closes it. *)
   mutable about_open: bool;
@@ -5705,6 +5708,9 @@ type state = {
   mutable runtime_config_cursor: int;
   mutable config_scroll: int;
   mutable detail_tab: keeper_detail_tab;
+  mutable item_cursor: int;
+  mutable item_account: (string * Masc_tui_keeper_items.t) option;
+  mutable item_account_error: string option;
   mutable keeper_run_cursor: int;
   mutable detail_reads: detail_read_request list;
   mutable detail_read_generation: int;
@@ -8136,6 +8142,7 @@ let create_state
   roster_marquee_frame = 0;
   activity_frame = -1;
   emblem_frame = -1;
+  about_reduce_motion = false;
   about_open = false;
   keeper_detail_focus = Right_pane;
   keeper_message_focus = Right_pane;
@@ -8222,6 +8229,9 @@ let create_state
   runtime_config_cursor = 0;
   config_scroll = 0;
   detail_tab = Detail_info;
+  item_cursor = 0;
+  item_account = None;
+  item_account_error = None;
   keeper_run_cursor = 0;
   detail_reads = [];
   detail_read_generation = 0;

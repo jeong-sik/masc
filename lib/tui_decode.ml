@@ -44,7 +44,20 @@ type keeper = {
 }
 
 let keeper_trace_id keeper =
-  Result.to_option keeper.k_identity |> Option.map (fun identity -> identity.k_trace_id)
+  Result.map (fun identity -> identity.k_trace_id) keeper.k_identity
+
+type keeper_trace_projection = {
+  bindings : (string * string) list;
+  unavailable : (string * string) list;
+}
+
+let keeper_trace_projection keepers =
+  let bindings, unavailable = List.fold_left (fun (bindings, unavailable) keeper ->
+      match keeper_trace_id keeper with
+      | Ok trace -> (keeper.k_name, trace) :: bindings, unavailable
+      | Error reason -> bindings, (keeper.k_name, reason) :: unavailable)
+      ([], []) keepers in
+  { bindings = List.rev bindings; unavailable = List.rev unavailable }
 
 (* One row of GET /api/v1/gate/keepers. That route is [masc_keeper_list], which
    renders [status] through [Keeper_status_runtime.keeper_surface_status] — the

@@ -99,6 +99,7 @@ let fixture_entries =
 let fixture : Pane.input =
   { Pane.now
   ; tab = Pane.Tab_fleet
+  ; trace_unavailable = []
   ; keepers_error = None
   ; scope = Pane.Whole_fleet
   ; feed = Pane.Feed_live 1_234
@@ -138,6 +139,21 @@ let span_values (line : Pane.line) =
       | Pane.Ok -> "ok" | Pane.Warn -> "warn" | Pane.Bad -> "bad" | Pane.Info -> "info"
     in
     span.text, tone) line
+
+let test_trace_failure_is_readable_without_hiding_roster () =
+  let input = { fixture with trace_unavailable = ["tester", "missing trace identity"] } in
+  let drawn = Pane.lines ~rows:20 ~cols:90 ~scroll:0 input in
+  let texts = List.map text drawn.Pane.rows in
+  check bool "identity error is named" true
+    (List.exists (contains "Trace unavailable: tester · missing trace identity") texts);
+  check bool "independent roster count remains observed" true
+    (List.exists (contains "4 keepers") texts);
+  check bool "keeper navigation remains available" true
+    (List.exists (function Pane.Target_keeper "tester" -> true | _ -> false) drawn.Pane.targets);
+  let selected = Pane.lines ~rows:20 ~cols:90 ~scroll:0
+    {input with scope = Pane.Selected_only; selected = Some "tester"} in
+  check bool "selected keeper names its attribution failure" true
+    (List.exists (fun line -> contains "missing trace identity" (text line)) selected.Pane.rows)
 
 let test_clipped_header_preserves_spans_and_padding () =
   (* The count and the feed are two readings now, each carrying the
@@ -2292,6 +2308,8 @@ let () =
             test_offline_keepers_do_not_draw
         ; test_case "the header names what it left out" `Quick
             test_the_header_names_what_it_left_out
+        ; test_case "identity failure preserves roster navigation" `Quick
+            test_trace_failure_is_readable_without_hiding_roster
         ; test_case "an unread roster is not counted as none" `Quick
             test_an_unread_roster_is_not_counted_as_none
         ; test_case "only offline is dropped" `Quick

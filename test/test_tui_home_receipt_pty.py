@@ -51,6 +51,10 @@ def fixtures():
 
 
 def home(process, fd, output, needle):
+    h.read_available(fd, output)
+    current = h.screen_text(bytes(output))
+    if b"MASC Dashboard" in current and needle in current:
+        return bytes(output)
     return h.palette_go(process, fd, output, b"go dashboard", needle)
 
 

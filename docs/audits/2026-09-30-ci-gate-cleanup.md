@@ -2,7 +2,7 @@
 
 범위: `.github/workflows/*.yml` 전체 실행 진입점, 통합 lint 드라이버의 모든 검사 호출, 삭제 검사에 연결된 테스트·기준값·Makefile 참조. 전체 제품 테스트 1,670개 각각의 의미를 전수 검증했다는 주장은 하지 않는다.
 
-판단 기준: 구체적인 빌드·설치·요청·데이터 손상과 연결된 검사는 유지한다. 설명 길이·파일 개수·주석 문구·줄번호·CSS 표기·빈 커밋·검사 강제 연결을 제품 실패로 취급하는 검사는 삭제한다. 이름에 ratchet/gate가 있다는 이유만으로 삭제하지 않는다.
+판단 기준: 구체적인 빌드·설치·요청·데이터 손상과 연결된 검사는 유지한다. 설명 길이·파일 개수·주석 문구·줄번호·CSS 표기·빈 커밋·검사 강제 연결을 제품 실패로 취급하는 검사는 삭제한다. 검사 스크립트 19개와 기준값 파일 9개를 삭제했다. 이름에 ratchet/gate가 있다는 이유만으로 삭제하지 않는다.
 
 ## 삭제한 검사
 
@@ -33,9 +33,7 @@
 | `test_execute_tool_toml_parity`: description | 800바이트 상한 및 세 문구 고정 삭제. argv/command 입력 구조 검사는 유지 |
 | `test_keeper_tool_surface_schema`: golden | 정확한 tool 이름 집합 고정 삭제. provider가 거절하는 items 없는 배열 검사는 유지 |
 | `test_keeper_tool_definition_source`: first line | summary 잘림 여부로 모든 도구 문장 수정을 차단하는 검사 삭제. 출처 해소 검사는 유지 |
-
 | `scripts/check-execute-async-surface.sh` | Execute 런북·설명·테스트 함수 이름 고정; 입력 구조 검사가 이미 별도로 존재 |
-
 | `scripts/check-boundary-guard-mli-pairs.sh` | 새 .mli에 내용 위반이 없어도 grep scanner allowlist 유지 요구 |
 
 ## 워크플로 전체 진입점
@@ -232,5 +230,5 @@
 - 셸 문법, YAML 파싱, 변경한 Python 구문 및 diff whitespace 확인.
 - Dune test 모듈·스크립트 연결 검사와 test 함수 등록 검사.
 - 버전·설치 문서 검증과 SSOT 검사 통과. isolated checkout doc/version fixture 4개 통과.
-- edited-test selector self-test는 진단 중. 통과로 기록하지 않음.
+- 커밋된 격리 체크아웃에서 edited-test selector self-test 전체 통과. 커밋 전 삭제된 tracked 파일을 읽던 진단 실패는 실제 CI checkout에서는 재현되지 않음.
 - 로컬 Dune 빌드를 하지 않는다. remote CI 결과를 받기 전 compile/runtime 통과를 주장하지 않는다.

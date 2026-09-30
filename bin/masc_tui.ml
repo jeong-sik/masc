@@ -9374,9 +9374,12 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       state.patch_modal_diff <- None;
       state.patch_modal_error <- None;
       let target_path =
-        match state.repository_changes_diff_path with
-        | Some p -> p
-        | None -> "."
+        (* This command reads the project working tree. A repository-relative
+           path from another scope cannot identify a project file. *)
+        match state.repository_changes_scope, state.repository_changes_diff_path with
+        | Some Tui_decode.Repository_change_project, Some path -> path
+        | Some (Tui_decode.Repository_change_repository _), _ | None, _
+        | Some Tui_decode.Repository_change_project, None -> "."
       in
       state.patch_modal_path <- Some target_path;
       launch_repository_changes_diff_load state ~mailbox ~reader:Patch_diff_reader

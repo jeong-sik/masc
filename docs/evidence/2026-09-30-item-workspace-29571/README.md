@@ -2,8 +2,8 @@
 
 Tested source `29571dc38684434139f1baeb054e0d885599a72f`.
 [Test run 36666820232](https://github.com/jeong-sik/masc/actions/runs/36666820232)
-completed its selected Test step successfully. The overall workflow was still
-running its remaining checks when these artifacts were downloaded.
+completed successfully, including its selected Test step and remaining checks.
+The raw artifacts below are from that same source and run.
 
 The raw suite log proves seven portrait/Item PTY scenarios, the tab strip PTY
 and 54 Keeper control cases passed. The retained frame and full PTY stream

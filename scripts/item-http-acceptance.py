@@ -121,13 +121,14 @@ def rpc(method, params, notification=False):
 def tool(name, arguments, error_code=None, validation_reason=None):
     result = rpc('tools/call', {'name': name, 'arguments': arguments})
     failed = result.get('isError', False)
-    data = result['structuredContent']
-    # Persist real response data before checking the expected rejection contract.
+    # Persist the raw tool response before reading any expected response field.
     # Candle handler and protocol schema middleware expose different typed fields.
     entry = {'server_generation': server_generation, 'name': name,
-             'arguments': arguments, 'is_error': failed, 'data': data}
+             'arguments': arguments, 'is_error': failed,
+             'result': result, 'data': result.get('structuredContent')}
     tool_records.append(entry)
     (root / 'tool-calls.json').write_text(json.dumps(tool_records, indent=2) + '\n')
+    data = result['structuredContent']
     assert failed == (error_code is not None or validation_reason is not None), result
     if error_code is not None:
         assert data['error_code'] == error_code, data

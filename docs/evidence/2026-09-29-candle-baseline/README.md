@@ -32,6 +32,21 @@ python3 collect.py --base <MASC_BASE_PATH> > baseline-<날짜>.json
 후보는 Goal 에 연결된 done Task 중 끝난 시각이 Goal 생성 시각보다 늦고 담당자에게 keeper 설정 파일이
 있는 것의 담당자예요.
 
+## 연결이 일어나는 방식
+
+Task 와 Goal 의 연결에는 시각이 없어서 `collect_link_timing.py` 가 두 가지로 어림해요.
+
+```
+python3 collect_link_timing.py --base <MASC_BASE_PATH> > link-timing-<날짜>.json
+```
+
+| 항목 | 왜 보나요 |
+|---|---|
+| 연결된 Task 중 Goal 보다 먼저 만들어진 수와 그 상태 | 먼저 만들어진 Task 의 연결은 Task 를 만든 뒤에 한 일이에요 |
+| keeper 가 `masc_task_set_goal` 을 부른 횟수 | 이미 있는 Task 를 나중에 붙이는 길은 이 도구 하나예요. 대시보드로 운영자가 붙인 횟수는 없어요 |
+
+`link-timing.json` 은 2026-09-29T07:26Z 의 값이에요. `baseline.json` 보다 늦게 재서 Goal 과 연결 수가 달라요.
+
 ## 읽는 법
 
 - `baseline.json` 은 2026-09-29T05:59Z 의 라이브 값이에요. 표본이 Goal 18개와 완료 3건이라 작아요.

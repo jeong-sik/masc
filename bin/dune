@@ -1474,6 +1474,7 @@
  (modules masc_tui_render_tools)
  (libraries
   masc_tui_press
+  masc_tui_frame
   masc_tui_message_layout
   masc
   masc_types

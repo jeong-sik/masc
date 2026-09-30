@@ -26336,12 +26336,14 @@ and is loaded on demand through keeper_skill.
               again from that frame. *)
            Masc_tui_emblem_screen.begin_frame ();
            Masc_tui_portrait_view.begin_frame ();
+           Masc_tui_message_layout.begin_frame ();
            Masc_tui_portrait_view.flush ~rewritten:(fun _ -> false) ~write:write_to_terminal
        | Render_schedule.Render ->
            let frame, clamped, approval, presses =
              Masc_tui_frame_timing.time_tagged Masc_tui_frame_timing.Build
                ~tag:(fun (frame, _, _, _) -> frame.Frame_presenter.surface_key)
                (fun () ->
+                 Masc_tui_message_layout.begin_frame ();
                  (* Event folding is frame preparation, so its cost belongs
                     inside Build timing even though only the loop stores it. *)
                  let terminal_rows, terminal_cols = Masc_tui_ansi.get_terminal_size () in

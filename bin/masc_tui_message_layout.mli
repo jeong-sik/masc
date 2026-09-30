@@ -385,6 +385,12 @@ val drop_last_utf8_word : string -> string
     Alt+Backspace in a chat draft. The separator before the word stays, so two
     presses walk two words. Empty or invalid text is preserved. *)
 
+val begin_frame : unit -> unit
+(** Marks the start of a frame. Laying out a non-ASCII text reuses the pieces
+    this frame or the previous one got for the same text; a text the previous
+    frame did not lay out is split again. The TUI calls it once per frame, a
+    frame that draws a picture included. *)
+
 val display_width : string -> int
 (** Approximate the display cells of a terminal that draws extended grapheme
     clusters as indivisible layout pieces. Renderer-owned ANSI CSI and

@@ -8,6 +8,7 @@ import { signal } from '@preact/signals'
 import type { Keeper } from '../types'
 import { KeeperItemsPanel } from '../components/keeper-items-panel'
 import { KeeperDetailSection, KeeperDetailSectionRail, activeKeeperDetailSection } from '../components/keeper-detail-shell'
+import { hydrateExecutionSnapshot } from '../store'
 
 const keeper = signal({
   name: 'rondo',
@@ -21,11 +22,26 @@ const keeper = signal({
 declare global {
   interface Window {
     updateKeeperItemsFixture: (revision: string) => void
+    updateKeeperItemsWorkspaceFixture: (workspaceRoot: string | null) => void
   }
 }
 window.updateKeeperItemsFixture = revision => {
   keeper.value = { ...keeper.value, candle_account_revision: revision }
 }
+
+// Test-only publication sequence: this isolated browser fixture has no HTTP/SSE
+// bootstrap. Workspace transitions use the real store admission path while
+// the Keeper, wallet, outfit and project label remain unchanged.
+let fixturePublicationGeneration = 0
+window.updateKeeperItemsWorkspaceFixture = workspaceRoot => {
+  const accepted = hydrateExecutionSnapshot({
+    execution_publication_epoch: 'keeper-items-browser-fixture',
+    execution_publication_generation: ++fixturePublicationGeneration,
+    status: { ...(workspaceRoot === null ? {} : { workspace_root: workspaceRoot }), project: 'keeper-items-fixture' },
+  })
+  if (!accepted) throw new Error('Item browser fixture workspace observation refused')
+}
+window.updateKeeperItemsWorkspaceFixture('/fixture/keeper-items')
 
 activeKeeperDetailSection.value = 'keeper-items'
 const root = document.getElementById('app')

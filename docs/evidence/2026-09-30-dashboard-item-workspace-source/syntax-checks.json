@@ -1,0 +1,81 @@
+{
+  "node_version": "v26.3.0",
+  "scope": "source parse and whitespace only; no tests or builds",
+  "checks": [
+    {
+      "command": [
+        "node",
+        "--experimental-strip-types",
+        "--check",
+        "dashboard/src/store.ts"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "node",
+        "--experimental-strip-types",
+        "--check",
+        "dashboard/src/components/keeper-items-panel.ts"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "node",
+        "--experimental-strip-types",
+        "--check",
+        "dashboard/src/components/keeper-items-panel.test.ts"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "node",
+        "--experimental-strip-types",
+        "--check",
+        "dashboard/src/demo/keeper-items-fixture.ts"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "node",
+        "--experimental-strip-types",
+        "--check",
+        "dashboard/vite.preview.config.ts"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "node",
+        "--check",
+        "dashboard/e2e/keeper-items-workspace.mjs"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    }
+  ]
+}

@@ -76,6 +76,11 @@ val with_credential_transaction :
     keeps its result if lock cleanup fails, with the cleanup failure logged.
     Body exceptions propagate after release. *)
 
+val credential_exists_in_transaction :
+  credential_transaction -> string -> (bool, masc_error) result
+(** Check the name file under the caller's admission. Only ENOENT is missing;
+    a dangling redirect, symlink or unreadable file still occupies the name. *)
+
 val load_credential : string -> string -> agent_credential option
 (** [load_credential config agent_name] reads [agent_name]'s own credential
     file, following its redirect stub to the id-named file. [None] when the
@@ -348,6 +353,17 @@ val create_token_expiring_in :
     that outlives the workspace's operator-session window but should still lose
     its bearer eventually. A window outside 1..8760 hours comes back as an
     error rather than an exception. *)
+
+type create_token_error =
+  | Credential_name_taken
+  | Credential_not_created of masc_error
+
+val create_token_expiring_in_if_absent :
+  string -> agent_name:string -> role:agent_role -> hours:int ->
+  (string * agent_credential, create_token_error) result
+(** Create only: check the name file, publish and invalidate the token cache
+    in one credential transaction. Existing names, including unreadable files,
+    are refused without overwriting them. *)
 
 val verify_token :
   string -> agent_name:string -> token:string ->

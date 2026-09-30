@@ -247,8 +247,11 @@ let test_expired_credential_releases_controller_on_next_move role () =
             | None -> fail "the fixed expiry did not parse"
           in
           let holder_left ~now =
-            Masc.Keeper_dos_controller.holder_left
-              ~config:(Masc.Mcp_server.workspace_config state) ~now "minsu"
+            match Auth.with_credential_transaction base_path (fun transaction ->
+              Masc.Keeper_dos_controller.holder_left ~transaction
+                ~config:(Masc.Mcp_server.workspace_config state) ~now "minsu") with
+            | Ok departure -> departure
+            | Error error -> fail (Masc_domain.masc_error_to_string error)
           in
           check bool "the holder is still eligible during its expiry second" true
             (Option.is_none (holder_left ~now:(expiry_second +. 0.5)));

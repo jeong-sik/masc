@@ -1,0 +1,24 @@
+{
+  "base_commit": "68295be51f33c85f95e97695e56e2a82791dae6a",
+  "branch": "fix/play-invite-authority-20260930",
+  "native_tests_executed": false,
+  "ci_executed": false,
+  "source_sha256": {
+    "lib/auth/auth.mli": "2a0a09a2f4459ce901e819ec6d939a0db0425b025978126dc556621de58b506d",
+    "lib/auth/auth_credential_base.ml": "89fa8f1e13f446dcf983f4512de0e9c56724aeead4ab30316b68092a1bc0c80c",
+    "lib/auth/auth_credential_token.ml": "95685243c3da05a636e076a137d0533ebe61566ccbd9cfd891fc0e4334357dce",
+    "lib/auth/auth_credential_token.mli": "e45c275428cfb245aad93da900c432472b8e812a354383065a05537654763202",
+    "lib/play/play_invite.ml": "839f1baf574c26eb4e08432536051ceef75e9ea7ee3a97ddfe937e9512782e75",
+    "lib/play/play_invite.mli": "fb2db13a67acfba0de7d22bb8085e4bf676dcc7d9aaaa4596b4db9456184205b",
+    "lib/server/server_routes_http_routes_play.ml": "5b87a04d98726a73ac505b7e64a6c45df1b9fba66338e67ff125aa37bc37c667",
+    "test/test_play_credential_transaction.ml": "096b868c452ed52ff0b4fabd063383fdd33c64f64f64231281be5cd6356fe8ee",
+    "test/test_play_invite.ml": "0c396afae9396cb6c5d11bead9dfd8e5cd35e70f1f9bcae0bfe344ab7a539f4a",
+    "lib/keeper/keeper_dos_controller.ml": "4e6965b0707242574b34604a37543cc70aaf8a4d8505ff2b4b6357d38a40d449",
+    "lib/keeper/keeper_dos_controller.mli": "5fbd79f124dc5c8ae713a07712e4cf52fb3166602effb891d2a0ee383ddd3afe",
+    "test/test_dos_input_routes.ml": "d9370ac207f6e84211238d63f6fcbf60a4a6bf9b326a0e2f0aa205015aa8c865",
+    "test/test_dos_tools.ml": "72e3b83e43830a80f4a8e998015da6d03249cb47007aef91cefaac0f1a2f9f34",
+    "CHANGELOG.md": "b283114837afdad31db7aa2b41f8adad1e3658be14c967436f5f4e9b11290f03",
+    "docs/rfc/RFC-play-link-for-the-shared-machine.md": "43d084ca283b7a1c8ac4b6f19877dbbe89919681840797e560ed3b4f69da11da",
+    "test/stanzas/test_play_credential_transaction.inc": "d9db5f195b1c7ebed79bba76485707f79c5d0dda36f48f97425c031d70c1285c"
+  }
+}

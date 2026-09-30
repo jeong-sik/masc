@@ -90,6 +90,16 @@ val create_token_expiring_in :
 
 (** {1 Shared-token rotation} *)
 
+type create_token_error =
+  | Credential_name_taken
+  | Credential_not_created of masc_error
+
+val create_token_expiring_in_if_absent :
+  string -> agent_name:string -> role:agent_role -> hours:int ->
+  (string * agent_credential, create_token_error) result
+(** Check name-file absence and publish under the same credential transaction.
+    Existing names are refused even when their credential cannot be read. *)
+
 type rotation_outcome = {
   token_hash_prefix : string;
   rotated_agents : (string * (unit, masc_error) result) list;

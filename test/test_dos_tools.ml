@@ -696,7 +696,12 @@ let test_a_stopped_holders_controller_is_let_go () =
 let test_a_holder_departs_with_its_credential () =
   with_workspace (fun base_path ->
     let config = Workspace.default_config base_path in
-    let departure name at = Keeper_dos_controller.holder_left ~config ~now:at name in
+    let departure name at =
+      match Auth.with_credential_transaction base_path (fun transaction ->
+        Keeper_dos_controller.holder_left ~transaction ~config ~now:at name) with
+      | Ok departure -> departure
+      | Error error -> fail (Masc_domain.masc_error_to_string error)
+    in
     let reason = function
       | None -> "still here"
       | Some Tool_misc_dos_lane.Keeper_stopped -> "keeper stopped"

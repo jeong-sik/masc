@@ -302,5 +302,15 @@
     "candle-remote-tui-portrait",
     "suite-runner-log",
     "tui-remote-workspace-history"
-  ]
+  ],
+  "following_test_only_repair_result": {
+    "run_id": 36649996584,
+    "head": "3d28845eab3b024690b6f25d94ec885274a196a0",
+    "workflow_conclusion": "success",
+    "suites_ok": 2,
+    "suites_failed": 0,
+    "raw_log_sha256": "f9cbe9da3c286bf26030c394e3c4ffe03c7436db73288735830af6343051b769",
+    "production_source_changed": false,
+    "currency_pr_concurrent_head_preserved": "5731d33c10349b461ae8a4e20f362984f432b6fe"
+  }
 }

@@ -186,7 +186,8 @@ let test_persisted_message_preserves_reasoning_provenance () =
     | Ok source -> source | Error detail -> fail detail in
   let metadata = Types.Reasoning_source.metadata source
     @ [ "turn-origin", `Assoc [ "request", `String "fixture" ] ] in
-  let original = { (message ~role:Types.Assistant "answer") with metadata } in
+  let original = { (message ~role:Types.Assistant "answer") with metadata;
+    content = [ Types.Thinking { content = "reasoning"; signature = None }; Types.Text "answer" ] } in
   History.persist_message ~keeper_name ~turn_ref ~source:"assistant" session original;
   match lines_of (History.main_history_path ~session_dir:session.session_dir) with
   | [ line ] ->
@@ -198,6 +199,27 @@ let test_persisted_message_preserves_reasoning_provenance () =
        | Present recovered -> check bool "No_replay source survives; it is not absent" true
            (Types.Reasoning_source.equal source recovered)
        | Absent | Invalid | Duplicate -> fail "reasoning source lost or changed");
+      let module Provider = Agent_core.Llm_provider in
+      let replay_capability : Provider.Reasoning_dialect.replay_capability =
+        { target = source
+        ; contract = Provider.Reasoning_replay_contract.
+            { replay_policy = No_replay; streaming = No_streaming_reasoning;
+              output_wire = No_output_control }
+        ; rotation = Provider.Reasoning_replay_contract.Require_identical_source
+        } in
+      (match Provider.Reasoning_history_projection.project
+          ~assistant_has_payload:(fun content -> content <> [])
+          ~reasoning_block_supported:(function
+            | Types.Thinking _ | Types.ReasoningDetails _ | Types.RedactedThinking _ -> true
+            | Types.Text _ | Types.ToolUse _ | Types.ToolResult _ | Types.Image _
+            | Types.Document _ | Types.Audio _ -> false)
+          ~replay_capability [ restored ] with
+       | Error error -> fail (Provider.Reasoning_history_projection.error_to_string error)
+       | Ok projected ->
+           match projected.reasoning_replay_drops with
+           | [ { reason = Provider.Reasoning_history_projection.Replay_policy_excluded
+                    Provider.Reasoning_replay_contract.No_replay; _ } ] -> ()
+           | _ -> fail "restored reasoning must be excluded by policy, not missing provenance");
       let malformed = match json with
         | `Assoc fields -> `Assoc (("metadata", `String "invalid")
             :: List.remove_assoc "metadata" fields)

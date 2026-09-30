@@ -134,6 +134,11 @@ let test_invite_routes () =
         let again = call ~token:operator "POST" invites ~body:issue_body in
         check int "the same name again is a conflict" 409 (status_of again);
         check string "because a credential has it" "credential" (string_member "taken_by" (body_of again));
+        (* Server_refusal: [code] is what a client branches on, [error] the
+           sentence a person reads. *)
+        check string "named by its code" "name_taken" (string_member "code" (body_of again));
+        check string "and said in a sentence" "another participant already has this name"
+          (string_member "error" (body_of again));
         List.iter
           (fun (body, what) ->
             check int what 400 (status_of (call ~token:operator "POST" invites ~body)))
@@ -171,8 +176,10 @@ let test_invite_routes () =
             check (option string) "nobody holds the controller" None (controller ()));
         check bool "the revoked bearer stops resolving" true
           (Result.is_error (Auth.find_credential_by_token base_path ~token:player));
-        check int "revoking it again finds nothing" 404
-          (status_of (call ~token:operator "DELETE" (invites ^ "/minsu")));
+        let gone = call ~token:operator "DELETE" (invites ^ "/minsu") in
+        check int "revoking it again finds nothing" 404 (status_of gone);
+        check string "the code the TUI reads as already gone" "no_such_invite"
+          (string_member "code" (body_of gone));
         (* A request the invitee sent before the delete can take the freed
            controller after it. Revoking again frees it. *)
         let dir = Filename.temp_dir "play-invite-retake-" "" in

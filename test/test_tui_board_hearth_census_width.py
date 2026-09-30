@@ -26,7 +26,7 @@ CUT = b"\xe2\x80\xa6"
 # drop the ones that do not fit and still end on the total.
 #
 # One name arrives with a control byte in it. The row draws the byte as the
-# four-cell escape "\x07" (Tui_decode.sanitize_terminal_text), so on screen
+# four-cell escape "\x07" (Masc.Tui_terminal_text.sanitize_terminal_text), so on screen
 # that name takes eight cells, and measured as it arrived it takes four.
 HEARTHS = [
     ("verification", 91),
@@ -162,7 +162,7 @@ def run(executable: str) -> None:
                 raise AssertionError(
                     f"at {inner} inner cells the row dropped a hearth without "
                     f"saying {note!r}: {span!r}")
-        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Overview")
+        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
         os.write(fd, b"q")
 
     h.run_terminal_scenario(executable, description="board hearth census width",

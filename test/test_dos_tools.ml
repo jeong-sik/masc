@@ -689,8 +689,32 @@ let test_a_stopped_holders_controller_is_let_go () =
     ]
 ;;
 
-(* RFC play-link-for-the-shared-machine §2.8: a holder whose invite ran out
-   has left. Where every request carries a credential, a holder that is not a
+(* A Keeper removed for good leaves no registry entry and no meta, only its
+   own credential, which has no expiry. The next move reads that like an agent
+   coming back, so the shutdown that removes it lets the controller go. *)
+let test_a_removed_keeper_lets_its_controller_go () =
+  with_workspace (fun base_path ->
+    let config = Workspace.default_config base_path in
+    install_program ~base_path "hello.com" hello_com;
+    (match Auth.create_token base_path ~agent_name:"cao-cao" ~role:Masc_domain.Worker with
+     | Ok _ -> ()
+     | Error e -> fail (Masc_domain.masc_error_to_string e));
+    with_holder ~base_path Not_a_keeper "cao-cao" (fun () ->
+      boot ~agent:"cao-cao" ~base_path "hello.com";
+      check bool "the next move cannot see that a removed Keeper left" true
+        (Option.is_none
+           (Keeper_dos_controller.holder_left ~config ~now:(Unix.gettimeofday ()) "cao-cao"));
+      check (result unit string) "removing a Keeper that holds nothing" (Ok ())
+        (Keeper_dos_controller.release_retired ~keeper_name:"liu-bei" ~by:"operator");
+      check (option string) "leaves the holder" (Some "cao-cao") (current_controller ());
+      check (result unit string) "removing the holder" (Ok ())
+        (Keeper_dos_controller.release_retired ~keeper_name:"cao-cao" ~by:"operator");
+      check (option string) "frees the controller" None (current_controller ());
+      check bool "and the next Keeper moves" true (keeper_press ~base_path "liu-bei" "a")))
+;;
+
+(* RFC play-link-for-the-shared-machine §2.8: under enforced auth, a holder
+   whose credential ran out has left. A holder that is not a
    Keeper has also left when no credential carries its name. Where requests
    need no token a name may be self-declared, and it keeps the controller. *)
 let test_a_holder_departs_with_its_credential () =
@@ -700,7 +724,7 @@ let test_a_holder_departs_with_its_credential () =
     let reason = function
       | None -> "still here"
       | Some Tool_misc_dos_lane.Keeper_stopped -> "keeper stopped"
-      | Some Tool_misc_dos_lane.Player_expired -> "invite expired"
+      | Some Tool_misc_dos_lane.Credential_expired -> "credential expired"
       | Some Tool_misc_dos_lane.No_credential -> "no credential"
     in
     let token name role =
@@ -708,16 +732,22 @@ let test_a_holder_departs_with_its_credential () =
       | Ok _ -> ()
       | Error e -> fail (Masc_domain.masc_error_to_string e)
     in
-    (match
-       Auth.create_token_expiring_in base_path ~agent_name:"minsu" ~role:Masc_domain.Player ~hours:1
-     with
-     | Ok _ -> ()
-     | Error e -> fail (Masc_domain.masc_error_to_string e));
+    List.iter (fun (agent_name, role) ->
+      match Auth.create_token_expiring_in base_path ~agent_name ~role ~hours:1 with
+      | Ok _ -> ()
+      | Error e -> fail (Masc_domain.masc_error_to_string e))
+      [ "minsu", Masc_domain.Player; "visiting-operator", Masc_domain.Admin;
+        "running-operator", Masc_domain.Admin ];
     token "operator" Masc_domain.Admin;
     token "codex" Masc_domain.Worker;
     let now = Unix.gettimeofday () and later = Unix.gettimeofday () +. (2. *. 3600.) in
     check string "a live invite stays" "still here" (reason (departure "minsu" now));
-    check string "an invite past its time has left" "invite expired" (reason (departure "minsu" later));
+    check string "an invite past its time has left" "credential expired" (reason (departure "minsu" later));
+    check string "an operator whose credential expired has left" "credential expired"
+      (reason (departure "visiting-operator" later));
+    with_holder ~base_path Running "running-operator" (fun () ->
+      check string "a running Keeper retains ownership despite its expired external credential"
+        "still here" (reason (departure "running-operator" later)));
     check string "an operator stays" "still here" (reason (departure "operator" later));
     check string "an agent's credential stays" "still here" (reason (departure "codex" later));
     check string "a name no credential carries has left" "no credential" (reason (departure "ghost" now));
@@ -729,15 +759,19 @@ let test_a_holder_departs_with_its_credential () =
       { Masc_domain.default_auth_config with enabled = true; require_token = false };
     check string "where a request needs no token a name may be self-declared, so it stays"
       "still here" (reason (departure "ghost" now));
+    check string "an expired operator can still act in self-declared mode" "still here"
+      (reason (departure "visiting-operator" later));
     Auth.save_auth_config base_path { Masc_domain.default_auth_config with enabled = false };
     check string "without auth it stays too" "still here" (reason (departure "ghost" now));
-    check string "an invite past its time has left either way: its bearer cannot act"
-      "invite expired" (reason (departure "minsu" later));
+    check string "without auth an expired bearer does not establish that the holder left"
+      "still here" (reason (departure "minsu" later));
     Out_channel.with_open_bin
       (Filename.concat (Filename.concat (Filename.concat base_path ".masc") "auth") "config.json")
       (fun oc -> output_string oc "{ not json");
     check string "an unreadable auth config says nothing, so the holder stays" "still here"
       (reason (departure "ghost" now));
+    check string "expiry with unreadable auth config does not release the holder" "still here"
+      (reason (departure "visiting-operator" later));
     let config = Workspace.default_config base_path in
     (match
        Keeper_dos_controller.before_call ~config ~who:"minsu" ~name:"masc_dos_pass"
@@ -1411,6 +1445,8 @@ let () =
             test_a_pass_to_an_impossible_name_is_refused
         ; test_case "stopped holder is let go" `Quick
             test_a_stopped_holders_controller_is_let_go
+        ; test_case "a removed Keeper lets its controller go" `Quick
+            test_a_removed_keeper_lets_its_controller_go
         ; test_case "a Keeper passes only to someone at the machine" `Quick
             test_a_keeper_passes_only_to_someone_at_the_machine
         ; test_case "a holder departs with its credential" `Quick

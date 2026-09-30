@@ -104,6 +104,10 @@ val mcp_managed_agent : string
 val mcp_operator_remote : string
 val mcp_seat : string
 
+(** [GET /play/agent.md]: how an agent handed an invite link joins the seat.
+    Variables: [mcp_url], [seat_url], [screen_url], [moves]. *)
+val play_agent_guide : string
+
 (** MCP [tool_help] prompt body pieces, rendered at [prompts/get] time.
     One slot per assembly piece in [config/prompts/mcp.tool_help.md];
     variables per slot: [focus_row] — [focus]; [tool_section] — [name],
@@ -425,3 +429,9 @@ val agent_core_handoff_prompt_param_description : string
 val agent_core_agent_tool_prompt_param_description : string
 val keeper_context_workspace_memory_available : string
 val keeper_context_workspace_memory_unavailable : string
+
+val candle_appraiser_grade : string
+
+val candle_appraiser_relation : string
+
+val candle_appraiser_weights : string

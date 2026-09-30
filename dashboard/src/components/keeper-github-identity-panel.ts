@@ -134,7 +134,7 @@ export function KeeperGithubIdentityPanel({
         <fieldset class="flex flex-col gap-1" aria-label="GitHub 로그인 권한">
           <legend class="text-3xs text-[var(--color-fg-muted)]">로그인할 때 추가로 받을 권한 (기본 repo, read:org, gist)</legend>
           ${KEEPER_GITHUB_LOGIN_SCOPES.map(({ scope, note }) => html`
-            <label key=${scope} class="flex items-center gap-2 text-2xs">
+            <label key=${scope} class="v2-mobile-operator-target flex items-center gap-2 text-2xs">
               <input
                 type="checkbox"
                 checked=${scopes.includes(scope)}

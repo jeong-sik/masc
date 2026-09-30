@@ -1,8 +1,9 @@
 """Questioner and grader over real stdio. No Docker image, host, or Keeper is exercised.
 
-`host_deck` imitates what the host does to a snapshot file before a worker sees
+`deck_source` imitates what the host does to a snapshot file before a worker sees
 it (lane_addon_sources.ml snapshot_file): each observation's evidence starts with
 the host's own copy of the deck, `lane-evidence:<sha256>`.
+`retained_output` applies the host's row namespace before composing the two workers.
 """
 from __future__ import annotations
 
@@ -12,6 +13,7 @@ import json
 from pathlib import Path
 import subprocess
 import sys
+import tomllib
 import unittest
 
 ADDONS = Path(__file__).resolve().parents[1]
@@ -46,9 +48,16 @@ DECK = [
 ANSWER = {f["id"]: f["answer"] for f in DECK}
 
 
-def deck_source(observations, incarnation="deck-2026-09-23", complete=True):
-    return {"source_id": "deck", "incarnation": incarnation, "cursor": None,
-            "complete": complete, "detail": None, "observations": copy.deepcopy(observations)}
+def deck_source(observations, incarnation="deck-2026-09-23", complete=True, source_id="deck"):
+    source = {"source_id": source_id, "incarnation": incarnation, "cursor": None,
+              "complete": complete, "detail": None, "observations": copy.deepcopy(observations)}
+    retained_bytes = json.dumps(source, ensure_ascii=False, separators=(",", ":")).encode()
+    digest = hashlib.sha256(retained_bytes).hexdigest()
+    reference = {"uri": "lane-evidence:" + digest, "sha256": digest}
+    for observation in source["observations"]:
+        observation["evidence"].insert(0, reference)
+    source["snapshot_evidence"] = reference
+    return source
 
 
 def run(package, calls):
@@ -66,13 +75,34 @@ def ask(sources):
     return run("quiz-questions", [("lane_observe", {"binding": {"sources": []}, "sources": sources})])[0]
 
 
+def retained_output(output, instance_id, sequence):
+    retained = copy.deepcopy(output)
+    prefix = f"{instance_id}/{sequence}/"
+    for row in retained["rows"]:
+        row["id"] = prefix + row["id"]
+        row["lane_id"] = instance_id + "/" + row["lane_id"]
+        row["related_ids"] = [prefix + ident for ident in row["related_ids"]]
+    return retained
+
+
 def as_lane_output(questions_output):
-    return {"source_id": "questions", "incarnation": "questioner-1", "cursor": None,
+    producer = {"installation_id": "quiz-questions", "instance_id": "questioner-1",
+                "run_id": "quiz-test", "configuration_revision": "config-1",
+                "package_revision": "0.1.0", "observation_seq": 1,
+                "output_id": "questions", "output_selection": {"lanes": ["quiz/questions"]},
+                "coverage_scope": "whole_producer"}
+    output = retained_output(questions_output, "questioner-1", 1)
+    retained_bytes = json.dumps({"producer": producer, "output": output},
+                                ensure_ascii=False, separators=(",", ":")).encode()
+    digest = hashlib.sha256(retained_bytes).hexdigest()
+    reference = {"uri": "lane-evidence:" + digest, "sha256": digest}
+    return {"source_id": "questions", "incarnation": "questioner-1", "cursor": "1",
             "complete": True, "detail": None, "observations": [{
                 "id": "questioner-1/output/1", "kind": "lane_output", "observed_at": 1790175100,
-                "actor": None, "evidence": [HOST_COPY],
-                "producer": {"installation_id": "quiz-questions"},
-                "output": questions_output}]}
+                "actor": None, "evidence": [reference], "producer": producer,
+                "producer_status": {"source_id": "questioner-1", "incarnation": "questioner-1",
+                                    "cursor": "1", "complete": True, "detail": None},
+                "output": output}]}
 
 
 class Questioner(unittest.TestCase):
@@ -161,7 +191,10 @@ class Grader(unittest.TestCase):
         self.assertFalse(wrong["result"]["correct"])
         grades = [r for r in wrong["output"]["rows"] if r["lane_id"] == "quiz/grades"]
         self.assertEqual([g["fields"]["correct"] for g in grades], [True, False])
-        self.assertEqual(grades[1]["fields"]["answer"], "code-reviewer")
+        self.assertEqual(grades[1]["fields"]["answer_fact"]["id"], "f-tick")
+        question = self.by_subject["f-tick"]
+        self.assertEqual(question["fields"]["choices"][grades[1]["fields"]["choice_index"]],
+                         self.wrong_choice("f-tick"))
         # The grade cites the deck's record exactly as the deck carries it (code-reviewer c-16c77fe9).
         self.assertEqual(grades[1]["evidence"], [next(f["record"] for f in DECK if f["id"] == "f-tick")])
         score = next(r for r in wrong["output"]["rows"] if r["lane_id"] == "quiz/score")
@@ -175,6 +208,112 @@ class Grader(unittest.TestCase):
                                       self.answer("r1", "f-truncate", self.wrong_choice("f-truncate"),
                                                   answerer="quiz-grader")])
         self.assertFalse(results[1]["structuredContent"]["result"]["correct"])
+
+    def test_claimed_answerer_does_not_become_the_observed_actor(self):
+        result = run("quiz-grader", [self.observe(),
+                                    self.answer("r1", "f-live-path", "lane-smith",
+                                                answerer="claimed-operator")])[1]["structuredContent"]
+        grade = next(row for row in result["output"]["rows"] if row["lane_id"] == "quiz/grades")
+        self.assertEqual(result["status"], "confirmed")
+        self.assertIsNone(grade["actor"])
+        self.assertEqual(grade["fields"]["answerer_claimed"], "claimed-operator")
+
+    def test_question_provenance_survives_both_worker_namespaces(self):
+        result = run("quiz-grader", [self.observe(),
+                                    self.answer("r1", "f-live-path", "lane-smith")])[1]["structuredContent"]
+        upstream = as_lane_output(self.questions)["observations"][0]
+        question = next(row for row in upstream["output"]["rows"] if row["subject_id"] == "f-live-path")
+        retained = retained_output(result["output"], CONTEXT["instance_id"], 2)
+        grade = next(row for row in retained["rows"] if row["lane_id"] == "grader-1/quiz/grades")
+        score = next(row for row in retained["rows"] if row["lane_id"] == "grader-1/quiz/score")
+        self.assertEqual(grade["related_ids"], [])
+        self.assertEqual(grade["fields"]["question_row"], {
+            "id": question["id"], "lane_id": question["lane_id"],
+            "producer": upstream["producer"], "evidence": upstream["evidence"],
+        })
+        self.assertTrue(question["id"].startswith("questioner-1/1/"))
+        self.assertEqual(score["related_ids"], [grade["id"]])
+        row_ids = {row["id"] for row in retained["rows"]}
+        self.assertNotIn(question["id"], row_ids)
+        self.assertTrue(all(ident in row_ids for row in retained["rows"] for ident in row["related_ids"]))
+
+    def grade_large_deck(self, deck, choice):
+        with (ADDONS / "quiz-grader/lane.toml").open("rb") as stream:
+            max_reply_bytes = tomllib.load(stream)["resources"]["max_reply_bytes"]
+        source = deck_source(deck)
+        asked = ask([source])
+        self.assertFalse(asked["isError"])
+        self.assertLess(len(json.dumps(asked, ensure_ascii=False).encode()), max_reply_bytes)
+        supplied = as_lane_output(asked["structuredContent"])
+        upstream = supplied["observations"][0]
+        question = next(row for row in upstream["output"]["rows"]
+                        if row["subject_id"] == deck[0]["id"])
+        observed = ("lane_observe", {"context": CONTEXT, "binding": {}, "sources": [supplied, source]})
+        calls = [observed] + [("lane_act", {
+            "context": CONTEXT, "request_id": f"r{index}", "action": {
+                "kind": "answer", "question_id": question["fields"]["question_id"],
+                "choice": choice, "answerer": f"player-{index}"}}) for index in range(5)]
+        # A subsequent observation and a replay must stay readable after all five effects.
+        calls += [observed, calls[1]]
+        for _, arguments in calls:
+            self.assertLess(len(json.dumps(arguments, ensure_ascii=False).encode()), max_reply_bytes)
+        replies = run("quiz-grader", calls)
+        for index, reply in enumerate(replies):
+            self.assertFalse(reply["isError"])
+            wire = {"jsonrpc": "2.0", "id": index + 1, "result": reply}
+            self.assertLess(len(json.dumps(wire, ensure_ascii=False).encode()), max_reply_bytes,
+                            f"reply {index + 1} must fit after applying the action")
+        for reply in replies[1:6]:
+            self.assertEqual(reply["structuredContent"]["status"], "confirmed")
+        self.assertEqual(replies[1], replies[-1])
+        output = replies[6]["structuredContent"]
+        self.assertEqual(replies[5]["structuredContent"]["output"], output)
+        grades = [row for row in output["rows"] if row["lane_id"] == "quiz/grades"]
+        score = next(row["fields"] for row in output["rows"] if row["lane_id"] == "quiz/score")
+        correct = choice == deck[0]["answer"]
+        self.assertEqual((score["answered"], score["correct"]), (5, 5 if correct else 0))
+        self.assertEqual(len(grades), 5)
+        return grades, question, source
+
+    def test_long_subject_stays_referenced_for_multiple_answerers(self):
+        small = copy.deepcopy(DECK[:2])
+        large = copy.deepcopy(small)
+        large[0]["subject"] = "s" * (1024 * 1024)
+        small_grades, _, _ = self.grade_large_deck(small, small[0]["answer"])
+        large_grades, question, _ = self.grade_large_deck(large, large[0]["answer"])
+        for small_grade, large_grade in zip(small_grades, large_grades):
+            for part in ("title", "fields", "evidence"):
+                self.assertEqual(len(json.dumps(small_grade[part])), len(json.dumps(large_grade[part])),
+                                 "growing a subject must not grow each grade")
+            self.assertEqual(large_grade["fields"]["question_row"]["id"], question["id"])
+            self.assertEqual(large_grade["related_ids"], [])
+
+    def test_selected_long_choices_stay_referenced_for_multiple_answerers(self):
+        for selected_fact in (0, 1):
+            with self.subTest(correct=selected_fact == 0):
+                small = copy.deepcopy(DECK[:2])
+                large = copy.deepcopy(small)
+                large[0]["subject"] = "s" * (1024 * 1024)
+                large[selected_fact]["answer"] = "c" * (256 * 1024)
+                small_grades, _, _ = self.grade_large_deck(small, small[selected_fact]["answer"])
+                large_grades, question, source = self.grade_large_deck(large, large[selected_fact]["answer"])
+                for small_grade, grade in zip(small_grades, large_grades):
+                    for part in ("title", "fields", "evidence"):
+                        self.assertEqual(len(json.dumps(small_grade[part])), len(json.dumps(grade[part])),
+                                         "growing selected choice or answer must not grow each grade")
+                    fields = grade["fields"]
+                    self.assertEqual(question["fields"]["choices"][fields["choice_index"]],
+                                     large[selected_fact]["answer"])
+                    answer_fact = fields["answer_fact"]
+                    self.assertEqual(answer_fact, {
+                        "source_id": source["source_id"], "incarnation": source["incarnation"],
+                        "cursor": source["cursor"], "id": large[0]["id"],
+                        "evidence": [source["snapshot_evidence"]],
+                    })
+                    self.assertEqual(next(item["answer"] for item in source["observations"]
+                                          if item["id"] == answer_fact["id"]), large[0]["answer"])
+                    self.assertNotIn("choice", fields)
+                    self.assertNotIn("answer", fields)
 
     def test_repeated_request_returns_the_same_grade_once(self):
         results = run("quiz-grader", [self.observe(),
@@ -231,6 +370,99 @@ class Grader(unittest.TestCase):
         body = results[1]["structuredContent"]
         self.assertEqual(body["status"], "failed_before_effect")
         self.assertIn("deck changed", body["result"]["reason"])
+
+    def test_rotating_bytes_with_the_same_incarnation_refuses_then_recovers(self):
+        subject = "f-live-path"
+        choice = self.wrong_choice(subject)
+        facts = copy.deepcopy(DECK)
+        changed = next(fact for fact in facts if fact["id"] == subject)
+        changed["answer"] = choice
+        # The captured answer changes inside the same cited record. Record
+        # equality cannot substitute for equality of the captured deck bytes.
+        self.assertEqual(changed["record"], next(fact["record"] for fact in DECK if fact["id"] == subject))
+        source = deck_source(facts)
+        original = deck_source(DECK)
+        self.assertEqual(source["source_id"], original["source_id"])
+        self.assertEqual(source["incarnation"], original["incarnation"])
+        self.assertNotEqual(source["snapshot_evidence"], original["snapshot_evidence"])
+        fresh = ask([source])["structuredContent"]
+        fresh_observe = ("lane_observe", {"context": CONTEXT, "binding": {},
+                         "sources": [as_lane_output(fresh), source]})
+        fresh_reply = self.answer("fresh", subject, choice)
+        fresh_reply[1]["action"]["question_id"] = next(
+            row["fields"]["question_id"] for row in fresh["rows"] if row["subject_id"] == subject)
+        results = run("quiz-grader", [self.observe(source),
+                                      self.answer("stale", subject, choice),
+                                      fresh_observe, fresh_reply])
+        refused = results[1]["structuredContent"]
+        self.assertEqual(refused["status"], "failed_before_effect")
+        self.assertNotIn("correct", refused["result"])
+        self.assertFalse(any(row["lane_id"] == "quiz/grades" for row in refused["output"]["rows"]))
+        score = next(row for row in refused["output"]["rows"] if row["lane_id"] == "quiz/score")
+        self.assertEqual((score["fields"]["answered"], score["fields"]["correct"]), (0, 0))
+        accepted = results[3]["structuredContent"]
+        self.assertEqual(accepted["status"], "confirmed")
+        self.assertTrue(accepted["result"]["correct"])
+        grades = [row for row in accepted["output"]["rows"] if row["lane_id"] == "quiz/grades"]
+        self.assertEqual(len(grades), 1)
+        self.assertEqual(grades[0]["fields"]["answer_fact"]["evidence"], [source["snapshot_evidence"]])
+        self.assertEqual(grades[0]["evidence"], [changed["record"]])
+
+    def test_an_answerer_can_grade_a_new_capture_without_rewriting_the_old_grade(self):
+        subject = "f-live-path"
+        facts = copy.deepcopy(DECK)
+        changed = next(fact for fact in facts if fact["id"] == subject)
+        changed["answer"] = self.wrong_choice(subject)
+        changed["record"]["sha256"] = hashlib.sha256(
+            ("replacement retained record: " + changed["answer"]).encode()).hexdigest()
+        source = deck_source(facts)
+        fresh = ask([source])["structuredContent"]
+        fresh_question = next(row for row in fresh["rows"] if row["subject_id"] == subject)
+        fresh_observe = ("lane_observe", {"context": CONTEXT, "binding": {},
+                         "sources": [as_lane_output(fresh), source]})
+        fresh_reply = self.answer("new-capture", subject, changed["answer"])
+        fresh_reply[1]["action"]["question_id"] = fresh_question["fields"]["question_id"]
+        results = run("quiz-grader", [self.observe(),
+                                      self.answer("old-capture", subject, ANSWER[subject]),
+                                      fresh_observe, fresh_reply])
+        first = results[1]["structuredContent"]
+        accepted = results[3]["structuredContent"]
+        self.assertEqual(first["status"], "confirmed")
+        self.assertEqual(accepted["status"], "confirmed")
+        self.assertTrue(accepted["result"]["correct"])
+        old_grade = next(row for row in first["output"]["rows"] if row["lane_id"] == "quiz/grades")
+        grades = [row for row in accepted["output"]["rows"] if row["lane_id"] == "quiz/grades"]
+        self.assertEqual(len(grades), 2)
+        self.assertEqual(grades[0], old_grade)
+        self.assertEqual(grades[0]["fields"]["answerer_claimed"], grades[1]["fields"]["answerer_claimed"])
+        self.assertNotEqual(fresh_question["fields"]["question_id"], self.by_subject[subject]["fields"]["question_id"])
+        self.assertNotEqual(fresh_question["id"], self.by_subject[subject]["id"])
+        self.assertNotEqual(grades[0]["fields"]["answer_fact"]["evidence"],
+                            grades[1]["fields"]["answer_fact"]["evidence"])
+        self.assertEqual(grades[1]["fields"]["answer_fact"]["evidence"], [source["snapshot_evidence"]])
+        score = next(row for row in accepted["output"]["rows"] if row["lane_id"] == "quiz/score")
+        self.assertEqual((score["fields"]["answered"], score["fields"]["correct"]), (2, 2))
+
+    def test_equal_fact_ids_from_another_source_do_not_answer_this_question(self):
+        facts = copy.deepcopy(DECK)
+        choice = self.wrong_choice("f-live-path")
+        next(fact for fact in facts if fact["id"] == "f-live-path")["answer"] = choice
+        other = deck_source(facts, source_id="another-deck")
+        results = run("quiz-grader", [self.observe(other),
+                                      self.answer("other-source", "f-live-path", choice)])
+        body = results[1]["structuredContent"]
+        self.assertEqual(body["status"], "failed_before_effect")
+        self.assertNotIn("correct", body["result"])
+        self.assertFalse(any(row["lane_id"] == "quiz/grades" for row in body["output"]["rows"]))
+
+    def test_question_without_immutable_snapshot_digest_is_not_observed(self):
+        self.questions["rows"][0]["evidence"][0]["sha256"] = None
+        results = run("quiz-grader", [self.observe(),
+                                      self.answer("missing-snapshot", "f-live-path", "lane-smith")])
+        self.assertTrue(results[0]["isError"])
+        self.assertEqual(results[1]["structuredContent"]["status"], "failed_before_effect")
+        self.assertFalse(any(row["lane_id"] == "quiz/grades"
+                             for row in results[1]["structuredContent"]["output"]["rows"]))
 
     def test_no_questions_observed_means_no_grade(self):
         results = run("quiz-grader", [self.answer("r1", "f-live-path", "lane-smith")])

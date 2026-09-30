@@ -40,11 +40,16 @@ def run(executable: str) -> None:
     open_post = h.board_selection_post("open", "Still going", "Other body")
     fixtures["/api/v1/board?sort_by=hot"] = (200, {"posts": [closed, open_post]})
     fixtures["/api/v1/board/post-closed?format=flat"] = (
-        200, {"post": closed, "comments": []})
+        200, h.board_detail_page(closed, []))
 
     def interact(process, fd, _slave, output, _base):
         h.wait_for_output(process, fd, output, b"Health: ", start=0, timeout=10)
         h.palette_go(process, fd, output, b"go board", b"MASC Board")
+        # The Board title renders before its list fetch lands ("(not
+        # loaded)" is a real state), so wait for list content instead of
+        # reading the first frame after the title.
+        h.wait_for_output(process, fd, output, b"Still going", start=0,
+                          timeout=10.0)
         h.read_available(fd, output)
         rows = h.screen_rows(bytes(output))
         closed_row = h.screen_row_of(rows, b"Wrapped up thread")

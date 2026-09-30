@@ -218,6 +218,34 @@ describe('normalizeKeeperApprovalQueueItem', () => {
     expect(normalizeKeeperApprovalQueueItem({ id: '1', keeper_name: 'k' })).toBeNull()
   })
 
+  // The server writes exactly these members for a pending row without its
+  // input (Keeper_approval_queue.pending_entry_json_fields). A stale member
+  // left in the allowed list made every live row a violation.
+  const serverPendingRow = {
+    id: 'q-live',
+    keeper_name: 'janitor',
+    tool_name: 'shell_exec',
+    input_hash: 'c'.repeat(64),
+    sequence: 1,
+    requested_at: 1_776_427_200,
+    waiting_s: 4,
+    turn_id: 12,
+    task_id: null,
+    goal_id: null,
+    summary_status: 'not_requested',
+    exact_attempt: { state: 'unbound' },
+    summary_attempt_disposition: { code: 'ready' },
+    phase: 'queued',
+  }
+
+  it('accepts the pending row the server writes', () => {
+    expect(normalizeKeeperApprovalQueueItem(serverPendingRow)?.id).toBe('q-live')
+  })
+
+  it('refuses a pending row with a member the server does not write', () => {
+    expect(normalizeKeeperApprovalQueueItem({ ...serverPendingRow, goal_ids: [] })).toBeNull()
+  })
+
   it('extracts all fields', () => {
     const result = normalizeKeeperApprovalQueueItem({
       id: 'q-1',
@@ -230,7 +258,6 @@ describe('normalizeKeeperApprovalQueueItem', () => {
       turn_id: null,
       task_id: null,
       goal_id: null,
-      goal_ids: [],
       input: { cmd: 'ls' },
       input_preview: 'ls -la',
       phase: 'queued',
@@ -260,7 +287,6 @@ describe('normalizeKeeperApprovalQueueItem', () => {
       turn_id: null,
       task_id: null,
       goal_id: null,
-      goal_ids: [],
       summary_status: 'not_requested',
       exact_attempt: { state: 'unbound' },
       summary_attempt_disposition: { code: 'ready' },
@@ -285,7 +311,6 @@ describe('normalizeKeeperApprovalQueueItem', () => {
     turn_id: null,
     task_id: null,
     goal_id: null,
-    goal_ids: [],
     phase: 'queued' as const,
     exact_attempt: { state: 'unbound' },
     summary_attempt_disposition: { code: 'ready' },
@@ -949,6 +974,7 @@ describe('fetchBoardPost', () => {
         ],
         supported_reaction_emojis: ['👍', '🚀'],
       },
+      comment_page: { offset: 26, returned: 1, total: 27, has_more: false, next_offset: null },
       comments: [
         {
           id: 'comment-1',
@@ -973,7 +999,7 @@ describe('fetchBoardPost', () => {
         },
       ],
     }
-    const fetchMock = vi.fn().mockResolvedValue(
+    const fetchMock = vi.fn().mockImplementation(async () =>
       new Response(JSON.stringify(rawResponse), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -1011,9 +1037,24 @@ describe('fetchBoardPost', () => {
       },
     ])
     expect(result.supported_reaction_emojis).toEqual(['👍', '🚀'])
+    expect(result.commentPage).toEqual({ offset: 26, total: 27 })
     const [url] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(url).toContain('format=flat')
     expect(url).toContain('voter=')
+    expect(url).not.toContain('comment_offset=')
+
+    await fetchBoardPost('post-1', 6, 20)
+    const [olderUrl] = fetchMock.mock.calls[1] as [string, RequestInit]
+    expect(olderUrl).toContain('comment_offset=6')
+    expect(olderUrl).toContain('comment_limit=20')
+  })
+
+  it('rejects missing page metadata instead of calling a partial thread complete', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ post: { id: 'post-1', body: 'Body' }, comments: [] }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    )))
+    await expect(fetchBoardPost('post-1')).rejects.toThrow('invalid comment page')
   })
 })
 

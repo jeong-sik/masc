@@ -101,35 +101,23 @@ status: reference
 : 같은 MASC 상태에 접근하고 관찰하는 사용자 표면. TUI, MCP, Dashboard처럼 서로 다른
   입구를 가리키며, 각 표면은 독립 상태를 소유하지 않는다.
 
-**Goals 블록 (Overview Goals)**
-: TUI Overview 최상단에서 fleet의 활성 작업이 목표를 실제로 진전시키고 있는지를
-  보여주는 자리(`Masc_tui_overview_goals`). 요약 줄 바로 아래, Attention 패널 앞에
-  그려진다. 순서는 Goals, Attention, Team이다(그 사이에 Providers 구획이 있다). 헤드라인은 전체 활성 태스크(진행 중이거나 검증 대기 중인 Task) 중 그려진
-  목표에 연결된 태스크 수 비율을 표시하고, 아직 일이 진행 중인 단계(`Executing`·
-  `Verifying`·`Awaiting_confirmation`)의 Goal마다 우선순위(낮은 숫자 우선) 및 마감일
-  순으로 한 줄씩 그린다(#38386).
-  - 각 행: 목표 제목, 연결 태스크 대비 완료 태스크 바(`done/linked task bar`), 정체
-    시간(`stagnation_seconds` — 연결 태스크 갱신·승인 요청·Keeper 영수증·runtime trust
-    이벤트·Goal 메타데이터 중 가장 최근 관측 활동 시각부터 지난 시간. Team 블록의 `Idle`
-    과 다른 값이다: `Idle` 은 Keeper 의 작업 배정 상태이고 이 값은 Goal 의 마지막 관측
-    활동 이후 지난 시간이다), UTC 날짜 기준 마감 카운트다운(기한은 그날 23:59:59 UTC,
-    `D-N due countdown`).
-  - 관측 권위: 목표가 자체 지표(`metric`·`target`)를 가지고 있어도 측정값이 보고되지
-    않으면 지어내지 않고, 진행 바는 순수하게 연결된 태스크의 완료 수만 측정한다.
-    보고된 측정값은 **Goal Measurement**다.
-  - 빈 상태: 활성 목표가 없거나 읽기 실패 시 헤드라인이 그 상태를 명시적으로 표시하며,
-    표시 예산(`rows`)을 초과하면 하단부터 생략하고 헤드라인에 그려진 목표 수를 남긴다.
-  → [Masc_tui_overview_goals](../../bin/masc_tui_overview_goals.mli)
+**Dashboard Goals**
+: TUI 첫 화면에서 Goal의 기록된 측정값과 연결된 Task 완료 수를 별도로 요약한다.
+  Goal의 실제 값은 동일한 Goal ID·기준 개정·지표·목표를 가진 관측 기록에서만 읽는다.
+  Task 개수나 제목을 Goal의 실제 값으로 환산하지 않는다. 각 Goal의 자세한 근거는
+  Work에서 연다.
+  Goal의 정체 시간(`stagnation_seconds`)은 연결 Task 갱신·승인 요청·Keeper 영수증·
+  runtime trust 이벤트·Goal 메타데이터 중 가장 최근에 관측된 활동 이후 지난 시간이다.
+  Keeper의 작업 배정 상태와는 별개이며, Goal의 실제 측정값으로 환산하지 않는다.
+  → [측정 중심 TUI 구성](../rfc/RFC-tui-measured-operator-home.md),
+  [Masc_tui_overview_goals](../../bin/masc_tui_overview_goals.mli)
 
 **Fleet (Keeper fleet)**
-: 한 워크스페이스에 등록된 Keeper 묶음. 화면과 코드에서 "fleet" 은 이 뜻 하나로만 쓴다 —
-  `fleet ok` 상태 줄과 fleet scan, Keeper Fleet Blocker, "held outside the fleet" 가 모두
-  이 묶음을 말한다. 상태 줄의 `running N/M` 에서 M 은 부팅할 Keeper 수라서 일시정지된
-  Keeper 는 들어가지 않는다. Overview 의 Team 블록은 이 묶음을 Keeper 한 명당 한 줄로
-  보여 준다. Activity 패널의 `Recent` 탭(`Tab_fleet`, 명령 `/activity fleet`)은 이 중
-  오프라인이 아닌 Keeper 를 최근에 움직인 순서로 한 줄씩 싣고, 커서가 놓인 Keeper 의 최근
-  도구 호출을 그 아래에 붙인다. 이미지를 대신 읽는 런타임 목록(`[runtime].media_failover`)은
-  Keeper 가 아니므로 fleet 이라 부르지 않고 vision runtimes 라고 부른다.
+: 한 워크스페이스에 등록된 Keeper 묶음. `fleet ok` 상태 줄과 fleet scan은 이 묶음을
+  가리킨다. 상태 줄의 `running N/M`에서 M은 부팅할 Keeper 수여서 일시정지된 Keeper는
+  들어가지 않는다. Keeper 목록은 Keepers에서, 각 Keeper의 최근 활동과 도구 호출은
+  System 아래 Activity의 `Recent` 탭(`/activity fleet`)에서 확인한다. 이미지를 대신
+  읽는 런타임 목록(`[runtime].media_failover`)은 Keeper가 아니므로 vision runtimes라고 부른다.
 
 **Keeper Census (키퍼 명부 조사)**
 : 워크스페이스의 Keeper 이름을 `.masc/keepers/` 안의 영속 JSON 메타데이터에서 열거하는 기본 목록 읽기
@@ -141,39 +129,24 @@ status: reference
   [Server_routes_http_runtime_health_fleet](../../lib/server/server_routes_http_runtime_health_fleet.mli),
   [Pause_status_backend](../../lib/pause_status_backend.mli)
 
-**Team 블록 (Overview Team)**
-: TUI Overview 에서 fleet 을 Keeper 한 명당 한 줄로 보여 주며 "누가 무엇을 하고 누가 막혔나" 에 답하는
-  자리. briefing 의 `keeper_briefs` 와 backlog 를 합쳐 그린다. 줄은 네 무리로 나뉜다 —
-  막힘(Failing·Crashed, 또는 phase 없이 info 가 아닌 Attention 이 가리키는 Keeper),
-  일하는 중(Running·Draining·Restarting 이고 Claimed·InProgress Task 를 잡음),
-  쉬는 중(`Idle` — 살아 있으며 Claimed·InProgress Task 를 맡지 않음),
-  멈춤(brief 의 `paused` 가 true 이거나 Paused·Stopped·Offline, 한 줄로 모음). 순서는
-  점수가 아니라 이 무리와 이름이다. 막힌 줄의 설명은 그 Keeper 를 `Attention_keeper` 로
-  가리키는 info 가 아닌 첫 Attention 문장을 그대로 싣는다. Keeper 가 아닌
-  담당자(MCP client 등)가 잡은 Task 는 "held outside the fleet" 한 줄로 센다.
-  `/cost` 로 켜면 Keeper 줄마다 최근 24시간 비용·토큰을, 제목에 합계를 싣는다
-  (`/api/v1/dashboard/keeper-costs`). 모르는 비용은 `$0.00` 으로 그리지 않는다. 기본은
-  꺼져 있고, 꺼져 있으면 읽지도 않는다.
-  → [Masc_tui_overview_team](../../bin/masc_tui_overview_team.mli),
-  [Masc_tui_keeper_spend](../../bin/masc_tui_keeper_spend.ml), RFC-0464
+**Usage**
+: provider quota 창·보고 이력은 scope별로, Keeper 토큰·비용은 기록 여부와 함께
+  보여주는 TUI 화면. `/cost`는 이 화면으로 이동한다. 값이 보고되지 않은 날이나
+  Keeper의 비용을 0으로 추정하지 않는다. Keeper 상태와 작업 목록은 각각 Keepers와
+  Work에서 본다.
+  → [측정 중심 TUI 구성](../rfc/RFC-tui-measured-operator-home.md)
 
-**Attention (Overview Attention 패널)**
-: briefing 의 `incidents` 와 `attention_queue` 를 합친 목록. 운영자가 봐야 할 조건 하나가
-  한 줄이다. 화면에 그려진 Team 줄이 문장으로 싣는 항목(막힌 Keeper 줄 하나에 항목 하나)은
-  Team 줄에만 두고, 나머지는 모두 Attention 패널에 남긴다. 살아 있는 Keeper 에 관한 항목,
-  같은 Keeper 의 둘째 항목, 화면이 짧아 잘린 Team 줄의 항목, parked 줄의 Keeper 항목이
-  여기에 든다. 패널 제목은 Team 줄로 옮긴 수를 `+N on Team` 으로 적는다. Task 소유권
-  문제만 모은 Operator Attention 과는 다른 목록이다.
+**Attention (Dashboard)**
+: 운영자가 처리해야 하는 사건을 요약한다. 자세한 Keeper 상태는 Keepers에서,
+  Task·승인·질문은 Work에서 확인한다. Dashboard는 같은 행을 다시 나열하지 않는다.
 
 **닫힌 quota 창 (Shut Quota Window)**
 : provider 계정이나 자격 증명 하나가 사용 한도에 걸려 요청을 받지 않는 상태. 런타임
   카탈로그(`/api/v1/runtime/resolved`)는 런타임마다 `quota_exhausted`·`quota_resets_at`·
-  `quota_scope` 를 싣는데, 같은 계정을 쓰는 런타임은 같은 `quota_scope`(예:
-  `provider:claude_code`)를 공유한다. Team 블록은 창을 scope 마다 한 번만, 그 뒤에 선
-  런타임 수와 다시 열리는 시각으로 적는다. 남은 사용량은 provider 가 알려주지 않으므로
-  퍼센트로 말하지 않는다.
+  `quota_scope` 를 싣는다. Usage는 서로 다른 scope를 합치지 않고, provider가 보고한
+  사용률·관측 시각·재개 시각을 그대로 표시한다. 보고가 없으면 사용률을 추정하지 않는다.
   → [Runtime_quota_window](../../lib/runtime/runtime_quota_window.ml),
-  [Masc_tui_overview_team](../../bin/masc_tui_overview_team.mli)
+  [Masc_tui_overview_providers](../../bin/masc_tui_overview_providers.ml)
 
 **Runtime Rate Limit (런타임 속도 제한 관측)**
 : 한 런타임 후보가 받은 429 또는 제공자 속도 제한을 그 후보의 프로세스 로컬 셀에
@@ -307,6 +280,29 @@ status: reference
   → [Keeper_run_context.prepare_run_context](../../lib/keeper/keeper_run_context.mli),
   [Keeper_unified_prompt](../../lib/keeper/keeper_unified_prompt.mli),
   [Keeper_prompt](../../lib/keeper/keeper_prompt.mli)
+
+**Keeper Portrait (Keeper 초상화)**
+: Keeper의 고유 시각 표현인 양초 임프(candle imp). 몸체(`body`)와 장비(`equipment`)의
+  두 층위로 구성된다. 몸체는 왁스 색상(`wax`: Ivory·Peach·Mint·Lavender·Sky·Butter·Rose·Charcoal 8종),
+  불꽃(`flame`: Ember·Azure·Jade·Violet·Pink·Gold 6종), 뿔 모양(`horn_style`: Nub·Long·One·Ram 4종),
+  뿔 색상(`horn_colour`: Crimson·Soot·Brass·Bone·Blossom 5종), 눈(`eyes`: Bean·Dot·Happy·Sleepy·Sparkle·Wink 6종),
+  입(`mouth`: W·Smile·O·Flat·Fang 5종), 볼터치(`blush`), 흘러내린 왁스(`drips`: 0~3개), 둥근 배경
+  색상(`backdrop_hue`)으로 이루어지며, Keeper 이름의 도메인 분리 SHA-256과 SplitMix64 난수
+  생성기로부터 결정론적으로 도출된다. 저장소에 별도 저장할 필요 없이 동일한 이름은 항상 동일한 몸체를
+  갖는다. 장비는 5개 슬롯으로 양초가 착용하는 아이템이다 — `face`(Bare_face·Glasses·Shades·Eye_patch·
+  Plaster·Freckles·Beard 7종), `neck`(Bare_neck·Scarf·Bow_tie·Medal 4종), `head`(Bare_head·Bow·
+  Crown·Beanie 4종), `hand`(Empty_hand·Book·Mug·Quill 4종), `base`(No_dish·Dish of Gilt/Silver/Oak 4종).
+  시작 장비는 이름의 별도 해시로 정해져 몸체와 독립적이다. MASC 자체의 고유 양초인 `mascot`은
+  TUI 시작 화면과 `/about`에 표시된다(Ivory 왁스, Ember 불꽃, Long Crimson 뿔, Bean 눈, "w" 입,
+  Blush, Gilt 접시, 무착용). MCP 도구 `keeper_portrait_read`는 PNG 아티팩트와 시작 장비,
+  액세서리 카탈로그를 반환하며 `preview_item`으로 장착 권한 변경 없이 임시 미리보기가 가능하다.
+  TUI에서는 상단 바 축약 캔들, 모자이크 카드, 엠블럼 화면에 렌더된다. 시작 화면과 `/about`의
+  마스코트 표시 스타일은 2D 초상화인 `painted`와 3D 점묘 양초인 `dotted`가 있다.
+  → [Keeper_portrait_look](../../lib/keeper_portrait/keeper_portrait_look.mli) ·
+  [Keeper_portrait_item](../../lib/keeper_portrait/keeper_portrait_item.mli) ·
+  [Keeper_portrait_draw](../../lib/keeper_portrait/keeper_portrait_draw.mli) ·
+  [Keeper_portrait_solid](../../lib/keeper_portrait/keeper_portrait_solid.mli) ·
+  [TUI candle styles](../TUI-GUIDE.md)
 
 **Ask (질문)**
 : Keeper가 운영자에게 묻는 durable 질문 묶음. `masc_ask`가 만들고,
@@ -738,7 +734,11 @@ status: reference
     `usage-read`를 선언했으면 Keeper turn walk가 해당 endpoint를 한 번 읽는다(#38975).
     그 보고에서 모델 호출을 막는 창이 한도까지 소진된 경우에만 별도
     `Runtime_quota_window` 증거로 기록하고, 이후 후보 순서가 그 증거를 읽어 해당 scope를
-    뒤로 둔다. Muse의 모델 오류 뒤 `usage/read`는 선택된 계정의 소진 창을 확인해
+    뒤로 둔다. Codex turn 이 사용량 소진(`usageLimitExceeded`)으로 거절되면 같은 계정의
+    `account/rateLimits/read` 를 한 번 읽어 표를 갱신한다. 거절된 호출의 `limit_id`를
+    식별할 수 없으므로 단일 버킷도 휴식 시각으로 쓰지 않고 기존 `Observed`를 유지한다(#39997).
+    HTTP 403 뒤 읽기는 과거 리셋으로 거절 증거를 지우지 않는다.
+    Muse의 모델 오류 뒤 `usage/read`는 선택된 계정의 소진 창을 확인해
     `Runtime_quota_window`에만 기록한다(#39810). 이 읽기는 사용량 관측값을 이 표에
     추가하지 않고 실패한 turn도 재전송하지 않는다. 소진율이나 리셋 시각만으로 일반
     가용성을 추론하는 것은 아니다.
@@ -1052,12 +1052,20 @@ status: reference
   쥔 참가자만 기계의 시간을 움직인다. 다른 참가자의 시간 이동 요청은 거절되지만
   화면은 볼 수 있다.
   `masc_dos_pass`로 Keeper에게 넘기면 보드 글이 그 Keeper를 @멘션해 깨운다.
+  모든 요청이 자격증명을 실어야 하는 환경(인증 켜짐·토큰 필수)에서는 기계 앞에
+  앉은 이름(`Play_seat.hand_to`가 돌려주는 Keeper·운영자·만료되지 않은 초대)에게만
+  넘길 수 있고, 다른 이름은 아무 일도 일어나기 전에 거절된다. 그 목록을 읽지 못하면
+  `Seats_unknown`으로 거절한다. 이름을 스스로 적을 수 있는 환경에는 목록이 없어
+  넘김이 그대로 통과한다.
   쥔 Keeper가 일시정지되거나 정지하면 다음 움직임 전에 풀리고, 만료된 `Player`
-  초대의 조종권도 풀린다. 충돌 뒤 자동 재시작을 기다리거나 막 켜지는 중인 Keeper는
-  그대로 쥔다. 조종권의 이름은 차례 기록이며 권한 증명이 아니다. `Player` 권한은
-  별도 자격증명으로 검사한다.
+  초대의 조종권도 풀린다. 모든 요청이 자격증명을 실어야 하는 환경에서는 Keeper가
+  아니면서 자격증명 파일이 없는 이름(회수된 초대)의 조종권도 풀린다. 자격증명
+  파일을 읽지 못한 경우는 없는 것으로 보지 않고 그대로 쥔다. 충돌 뒤 자동 재시작을
+  기다리거나 막 켜지는 중인 Keeper는 그대로 쥔다. 조종권의 이름은 차례 기록이며
+  권한 증명이 아니다. `Player` 권한은 별도 자격증명으로 검사한다.
   → [Dos_lane.pass](../../lib/dos_lane/dos_lane.mli) ·
   [Play_seat.participants](../../lib/play/play_seat.mli) ·
+  [Play_seat.hand_to](../../lib/play/play_seat.mli) ·
   [Keeper_dos_controller.holder_left](../../lib/keeper/keeper_dos_controller.mli)
 
 **Shared DOS Play Invite (공유 DOS 플레이 초대)**
@@ -1065,8 +1073,10 @@ status: reference
   공유 DOS 기계를 보고 조작한다. 초대 이름은 입력과
   조종권의 `who`로 기록되며 Keeper 이름과 겹칠 수 없다. 회수는 자격증명을 지우고
   그 이름이 쥔 조종권의 해제를 시도한다. 해제에 실패하거나 결과가 불명확하면 같은
-  이름으로 다시 회수할 수 있다.
+  이름으로 다시 회수할 수 있다. 링크는 AI 에이전트에게 넘겨도 된다. 에이전트는
+  `/play/agent.md`(에이전트 안내)를 읽고 MCP(`/mcp/play`)나 HTTP 로 같은 자리에 앉는다.
   → [Play_invite](../../lib/play/play_invite.mli) ·
+  [Server_routes_http_routes_play_guide](../../lib/server/server_routes_http_routes_play_guide.mli) ·
   [TUI play invites](../TUI-GUIDE.md)
 
 **기계 체크포인트 (Machine Checkpoint)**
@@ -1165,6 +1175,21 @@ status: reference
   [Dos_lane.recent_activity](../../lib/dos_lane/dos_lane.mli),
   [Masc_tui_machine_live.activity_of](../../bin/masc_tui_machine_live.mli),
   [Masc_tui_msx.shows_sidebar](../../bin/masc_tui_msx.mli)
+
+**Agent Core Hook**
+: Agent 실행의 정해진 시점에 호스트가 등록한 동기 판단 콜백. `hook_event`
+  (BeforeTurn·BeforeTurnParams·AfterTurn·PreToolUse·PostToolUse·PostToolUseFailure·
+  OnStop·OnError·OnToolError) 하나를 받아 `hook_decision`
+  (Continue·AdjustParams·ElicitInput·ElicitToolApproval·Nudge·HookFailed·Block)을
+  돌려주는 함수다(`type hook = hook_event -> hook_decision`). `Block`은
+  PreToolUse에서만 정당하고, 호스트는 그 도구를 실행하지 않고 `is_error=true`
+  결과를 낸다. Hook은 **호스트 프로세스 안의 호출 지점**일 뿐이라 설치·격리
+  worker가 아니고, 출력 행·근거 보존·`lane_output` 연결 같은 Add-on 계약을 갖지
+  않는다. 판단 하나를 사건 시점에 부르는 것만 보면 Lane Add-on의 판단 모듈과 같은
+  메커니즘이므로, 'Hook과 다르다'는 주장은 그런 계약이 필요해지는 지점부터만
+  성립한다. **Keeper hook**(매 turn 턴별 문맥을 조립해 얹는 관행)과는 다른 층의
+  용어다.
+  → [Hooks_agent_core](../../packages/agent_core/lib/base/hooks.mli)
 
 **Lane Add-on**
 : 기존 MASC 원장과 실행 환경 위에 붙는 선택적 관측·관계 레이어. MSX Lane의 머신,

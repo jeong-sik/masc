@@ -284,6 +284,28 @@ let test_save_load_auth_config_in_eio_runtime () =
         check bool "enabled persisted in eio" true loaded.enabled;
         check bool "require_token persisted in eio" true loaded.require_token))
 
+(* With no config file, the stat's ENOENT is the whole load: nothing else in it
+   suspends. A fiber beside the load runs before the load returns only when
+   the stat hands the scheduler back while it waits. *)
+let test_load_auth_config_yields_while_it_stats () =
+  let dir = setup_test_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_workspace dir)
+    (fun () ->
+      with_eio_runtime (fun () ->
+        let beside_ran = ref false in
+        let beside_ran_before_return = ref false in
+        let loaded = ref None in
+        Eio.Fiber.both
+          (fun () ->
+            loaded := Some (Auth.load_auth_config dir);
+            beside_ran_before_return := !beside_ran)
+          (fun () -> beside_ran := true);
+        check bool "a missing file loads the default" true
+          (!loaded = Some Masc_domain.default_auth_config);
+        check bool "the fiber beside the load ran while it waited" true
+          !beside_ran_before_return))
+
 let test_auth_config_saved_private () =
   let dir = setup_test_workspace () in
   Fun.protect
@@ -1366,6 +1388,8 @@ let () =
         test_load_auth_config_rejects_malformed_file;
       test_case "save/load config in Eio runtime" `Quick
         test_save_load_auth_config_in_eio_runtime;
+      test_case "load yields while it stats" `Quick
+        test_load_auth_config_yields_while_it_stats;
       test_case "auth config saved private" `Quick
         test_auth_config_saved_private;
     ];

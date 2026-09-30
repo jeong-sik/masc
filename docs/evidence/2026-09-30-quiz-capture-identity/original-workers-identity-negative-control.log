@@ -1,0 +1,17 @@
+F
+======================================================================
+FAIL: test_an_answerer_can_grade_a_new_capture_without_rewriting_the_old_grade (__main__.Grader.test_an_answerer_can_grade_a_new_capture_without_rewriting_the_old_grade)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/masc-quiz-identity-negative-5yelzlfk/addons/tests/test_quiz_lane.py", line 430, in test_an_answerer_can_grade_a_new_capture_without_rewriting_the_old_grade
+    self.assertEqual(accepted["status"], "confirmed")
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'failed_before_effect' != 'confirmed'
+- failed_before_effect
++ confirmed
+
+
+----------------------------------------------------------------------
+Ran 1 test in 0.154s
+
+FAILED (failures=1)

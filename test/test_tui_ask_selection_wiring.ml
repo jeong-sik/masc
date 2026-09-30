@@ -38,31 +38,11 @@ let test_the_ask_list_can_be_walked_before_answering () =
     (Ast_grep.count_calls ~module_path:executable ~callee:"move_ask_cursor")
 ;;
 
-(* A key the footer offers and the surface does not answer is worse than no
-   key: the operator presses it and reads the silence as a broken pane.
-
-   The label is asserted through the one name both footers read, not by
-   pinning either sentence. [ and ] call the same function in both modes --
-   they walk the asks -- and this surface used to call that "question" while
-   browsing and "ask" while answering: one key, two names, on one screen.
-   Pinning the sentences would have frozen that; naming it once is what makes
-   the two unable to disagree. *)
-let test_the_two_modes_give_the_walk_one_name () =
-  Alcotest.(check int) "the browsing footer and the answering one share a name"
-    1
-    (Ast_grep.count_exact_string_literals_in_value_binding ~module_path:render_prim
-       ~binding_name:"question_hints" ~needle:"[/]:ask");
-  Alcotest.(check int)
-    "and no second spelling survives beside it" 0
-    (Ast_grep.count_exact_string_literals_in_value_binding ~module_path:render_prim
-       ~binding_name:"question_hints" ~needle:"[/]:question")
-;;
-
 (* [ and ] name the container a surface walks: asks, keepers, posts, or
    retained browser observations. Count the declared vocabulary so a new
    reader does not look like a second spelling of an existing container. *)
 let test_the_bracket_keys_keep_one_vocabulary () =
-  let names = [ "[/]:ask"; "[/]:observation" ] in
+  let names = [ "[/]:observation" ] in
   List.iter
     (fun name ->
        Alcotest.(check int) (name ^ " is the name one surface uses") 1
@@ -160,9 +140,14 @@ let test_the_editor_opens_saves_and_abandons () =
 (* Leaving the answering mode drops the typing the way it drops the draft. An
    editor left open would take the next surface's keys. *)
 let test_leaving_the_mode_closes_the_editor () =
-  Alcotest.(check int) "the editor is cleared with the draft" 1
-    (Ast_grep.count_field_clears_to_none ~module_path:executable
-       ~binding_name:"leave_ask_answering" ~field_name:"ask_text_entry")
+  Alcotest.(check int) "leaving delegates to the shared answering cleanup" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:executable
+       ~binding_name:"leave_ask_answering" ~callee:"clear_ask_answering");
+  List.iter (fun field_name ->
+    Alcotest.(check int) (field_name ^ " is cleared by that cleanup") 1
+      (Ast_grep.count_field_clears_to_none ~module_path:"bin/masc_tui_types.ml"
+         ~binding_name:"clear_ask_answering" ~field_name))
+    ["ask_text_entry"; "ask_draft"; "pending_ask_submit"]
 ;;
 
 (* The typing arm has to come before the answering arm. That arm reads every
@@ -196,17 +181,6 @@ let test_typing_outranks_the_choice_digits () =
         true (typing < digits)
   | None, _ -> Alcotest.fail "no arm guards on an open editor"
   | Some _, None -> Alcotest.fail "no arm picks a choice by position"
-;;
-
-(* The footer names the text key for the selected question; digit choice keys
-   are only offered when that question has choices. *)
-let test_the_footer_names_the_editor_key () =
-  Alcotest.(check int) "the write key is named once" 1
-    (Ast_grep.count_exact_string_literals_in_value_binding ~module_path:render_prim
-       ~binding_name:"question_hints" ~needle:"t:write  ");
-  Alcotest.(check int) "and the digits keep their own label" 1
-    (Ast_grep.count_exact_string_literals_in_value_binding ~module_path:render_prim
-       ~binding_name:"question_hints" ~needle:"1-9:pick  ")
 ;;
 
 (* The panel is the last block the Approvals surface writes, and
@@ -257,8 +231,6 @@ let () =
     [ ( "selection"
       , [ Alcotest.test_case "the list can be walked before answering" `Quick
             test_the_ask_list_can_be_walked_before_answering
-        ; Alcotest.test_case "the two modes give the walk one name" `Quick
-            test_the_two_modes_give_the_walk_one_name
         ; Alcotest.test_case "the bracket keys keep one vocabulary" `Quick
             test_the_bracket_keys_keep_one_vocabulary
         ; Alcotest.test_case "the caret reads the cursor the keys move" `Quick
@@ -273,8 +245,6 @@ let () =
             test_leaving_the_mode_closes_the_editor
         ; Alcotest.test_case "typing outranks the choice digits" `Quick
             test_typing_outranks_the_choice_digits
-        ; Alcotest.test_case "the footer names the editor key" `Quick
-            test_the_footer_names_the_editor_key
         ] )
     ; ( "budget"
       , [ Alcotest.test_case "the panel draws against a budget" `Quick

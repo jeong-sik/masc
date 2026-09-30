@@ -1127,7 +1127,7 @@ let pending_approval_read_error error =
   ; due_at = None
   ; next_action = "reset_runtime_state"
   ; detail =
-      Keeper_approval_queue.approval_queue_unavailable_state_json error
+      Keeper_approval_queue_result.approval_queue_unavailable_state_json error
   }
 ;;
 
@@ -1143,13 +1143,13 @@ let dashboard_json_with_pending_reader_scoped ?keeper_name ~read_pending config 
     | Ok (entries, pending_approval_store_read_errors) ->
       ( entries
       , (match pending_approval_store_read_errors with
-         | [] -> Keeper_approval_queue.approval_queue_ready_state_json
+         | [] -> Keeper_approval_queue_result.approval_queue_ready_state_json
          | first :: _ ->
-           Keeper_approval_queue.approval_queue_unavailable_state_json first)
+           Keeper_approval_queue_result.approval_queue_unavailable_state_json first)
       , List.map pending_approval_read_error pending_approval_store_read_errors )
     | Error error ->
       ( []
-      , Keeper_approval_queue.approval_queue_unavailable_state_json error
+      , Keeper_approval_queue_result.approval_queue_unavailable_state_json error
       , [ pending_approval_read_error error ] )
   in
   let fusion_runs = Fusion_run_registry.list_runs (Fusion_run_registry.global ()) in

@@ -148,7 +148,7 @@ let test_escaped_shell_advice_is_in_what_the_model_reads () =
       (match Keeper_approval_queue.install_persistence ~base_path:base with
        | Ok _ -> ()
        | Error error ->
-         Alcotest.fail (Keeper_approval_queue.install_error_to_string error));
+         Alcotest.fail (Masc.Keeper_approval_queue_result.install_error_to_string error));
       install_always_allow_gate ~base;
       (* [;] used to be the construct this test reached for; RFC-0391 put it
          in Shell_ir.connector, so a backtick substitution stands in ([$( )]
@@ -237,7 +237,7 @@ let test_a_backgrounded_child_still_holds_the_call () =
       (match Keeper_approval_queue.install_persistence ~base_path:base with
        | Ok _ -> ()
        | Error error ->
-         Alcotest.fail (Keeper_approval_queue.install_error_to_string error));
+         Alcotest.fail (Masc.Keeper_approval_queue_result.install_error_to_string error));
       install_always_allow_gate ~base;
       let execution =
         run_execute ~config ~meta ~argv:[ "sh"; "-c"; "sleep 1 &" ]

@@ -238,20 +238,17 @@ function providerIds(document: TomlDocument): string[] {
   return [...document.declaredProviderIds]
 }
 
-// The scalar keys of the table at [path], however the text declares them:
+// The key/value nodes of the table at [path], however the text declares them:
 // its own [header], dotted keys under a parent table or at the top level, or
-// an inline table. Built without a prototype, so any key name is kept.
-function tableValues(document: TomlDocument, path: readonly string[]): Record<string, TomlScalar> {
-  const values: Record<string, TomlScalar> = Object.create(null)
+// an inline table. A Map keeps every key name, including __proto__.
+function tableEntries(document: TomlDocument, path: readonly string[]): Map<string, AST.TOMLKeyValue> {
+  const entriesByKey = new Map<string, AST.TOMLKeyValue>()
   const visit = (base: readonly string[], entries: readonly AST.TOMLKeyValue[]) => {
     for (const entry of entries) {
       const full = [...base, ...getStaticTOMLValue(entry.key)]
       const key = full[full.length - 1]
       if (full.length === path.length + 1 && key !== undefined && samePath(full.slice(0, -1), path)) {
-        const value = getStaticTOMLValue(entry.value)
-        if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
-          values[key] = value
-        }
+        entriesByKey.set(key, entry)
       } else if (
         entry.value.type === 'TOMLInlineTable'
         && full.length <= path.length
@@ -265,7 +262,26 @@ function tableValues(document: TomlDocument, path: readonly string[]): Record<st
   for (const section of document.sections) {
     if (section.kind === 'standard') visit(section.path, section.entries)
   }
+  return entriesByKey
+}
+
+function tableValues(document: TomlDocument, path: readonly string[]): Record<string, TomlScalar> {
+  const values: Record<string, TomlScalar> = Object.create(null)
+  for (const [key, entry] of tableEntries(document, path)) {
+    const value = getStaticTOMLValue(entry.value)
+    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+      values[key] = value
+    }
+  }
   return values
+}
+
+function modelSetModels(document: TomlDocument, name: string): string[] {
+  const entry = tableEntries(document, ['model_sets', name]).get('models')
+  if (!entry) return []
+  const value = getStaticTOMLValue(entry.value)
+  return Array.isArray(value) && value.every((id): id is string => typeof id === 'string')
+    ? value : []
 }
 
 function modelIds(document: TomlDocument): string[] {
@@ -314,26 +330,19 @@ export function declaredRuntimeLaneIds(sourceText: string): string[] {
   return [...declaredRuntimeLanes(sourceText).keys()]
 }
 
-// A binding is a [<provider>.<model>] table whose provider is declared and is
+// A binding is a <provider>.<model> table whose provider is declared and is
 // not a name another reader owns, the rule the server's loader uses. Every
 // other two-segment table ([fusion.presets], [voice.tts],
 // [runtime.assignments]) belongs to another reader.
-function bindingSections(
+function bindingEntries(
   document: TomlDocument,
   reservedProviderIds: readonly string[],
-): Array<{ providerId: string; modelId: string; section: string }> {
-  return document.sections.flatMap(section => {
-    const [providerId, modelId] = section.path
-    if (
-      section.kind !== 'standard'
-      || section.path.length !== 2
-      || providerId === undefined
-      || modelId === undefined
-      || !document.declaredProviderIds.has(providerId)
-      || reservedProviderIds.includes(providerId)
-    ) return []
-    return [{ providerId, modelId, section: section.name }]
-  })
+): Array<{ providerId: string; modelId: string }> {
+  return providerIds(document).flatMap(providerId =>
+    reservedProviderIds.includes(providerId)
+      ? []
+      : [...declaredKeysUnder(document.rootEntries, document.sections, [providerId])]
+        .map(modelId => ({ providerId, modelId })))
 }
 
 function providerFromDocument(document: TomlDocument, id: string): RuntimeTomlProvider {
@@ -406,9 +415,9 @@ function modelFromDocument(document: TomlDocument, id: string): RuntimeTomlModel
 
 function bindingFromDocument(
   document: TomlDocument,
-  entry: { providerId: string; modelId: string; section: string },
+  entry: { providerId: string; modelId: string },
 ): RuntimeTomlBinding {
-  const values = sectionValues(document, entry.section)
+  const values = tableValues(document, [entry.providerId, entry.modelId])
   return {
     id: `${entry.providerId}.${entry.modelId}`,
     providerId: entry.providerId,
@@ -448,7 +457,22 @@ export function parseRuntimeTomlEnvironment(
   )
   const providers = providerIds(document).map(id => providerFromDocument(document, id))
   const models = modelIds(document).map(id => modelFromDocument(document, id))
-  const bindings = bindingSections(document, reservedProviderIds).map(entry => bindingFromDocument(document, entry))
+  const bindings = bindingEntries(document, reservedProviderIds).map(entry => bindingFromDocument(document, entry))
+  // Match the loader's explicit-first expansion. A disabled override still
+  // owns its provider/model pair and prevents regeneration from the set.
+  const explicitIds = new Set(bindings.map(binding => binding.id))
+  for (const provider of providers) {
+    if (reservedProviderIds.includes(provider.id)) continue
+    const set = asString(tableValues(document, ['providers', provider.id])['model-set'])
+    if (!set) continue
+    for (const modelId of modelSetModels(document, set)) {
+      const id = `${provider.id}.${modelId}`
+      if (!explicitIds.has(id)) {
+        bindings.push(bindingFromDocument(document, { providerId: provider.id, modelId }))
+        explicitIds.add(id)
+      }
+    }
+  }
   const warnings: string[] = []
   if (providers.length === 0) warnings.push('providers.* section not found')
   if (models.length === 0) warnings.push('models.* section not found')
@@ -624,7 +648,7 @@ export function cascadeDeleteProvider(
   const declaredLanes = declaredKeysUnder(nextDocument.rootEntries, nextDocument.sections, ['runtime', 'lanes'])
   const routesToDeleted = (runtimeId: string) => !declaredLanes.has(runtimeId)
     && splitRuntimeId(runtimeId)?.providerId === providerId
-  const remainingBindings = parseRuntimeTomlEnvironment(next, reservedProviderIds).bindings.map(binding => binding.id)
+  const remainingBindings = enabledRuntimeIds(parseRuntimeTomlEnvironment(next, reservedProviderIds))
   
   if (typeof runtimeValues.default === 'string' && routesToDeleted(runtimeValues.default)) {
     const fallback = remainingBindings[0]

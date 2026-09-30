@@ -45,7 +45,80 @@ max-concurrent = 4
 keep-alive = "10m"
 `
 
+const sharedModelSetSource = `[runtime]
+default = "codex.sol"
+[providers.codex]
+protocol = "codex-app-server"
+command = "codex"
+model-set = "codex_models"
+[providers.codex_second]
+protocol = "codex-app-server"
+command = "codex"
+account-home = "/home/op/.codex-second"
+model-set = "codex_models"
+[models.sol]
+api-name = "gpt-6.1-sol"
+[models.astra]
+api-name = "gpt-6-astra"
+[model_sets.codex_models]
+models = ["sol", "astra"]
+`
+
 describe('runtime TOML dashboard editing helpers', () => {
+  it('projects shared model sets for each account without explicit binding tables', () => {
+    const environment = parseRuntimeTomlEnvironment(sharedModelSetSource, runtimeReservedProviderIdsFixture)
+    expect(environment.bindings.map(binding => binding.id)).toEqual([
+      'codex.sol', 'codex.astra', 'codex_second.sol', 'codex_second.astra',
+    ])
+    expect(enabledRuntimeIds(environment)).toEqual(environment.bindings.map(binding => binding.id))
+    expect(environment.warnings).toEqual([])
+    expect(environment.models).toHaveLength(2)
+    expect(environment.providers[1]?.accountHome).toBe('/home/op/.codex-second')
+  })
+
+  it('writes disabled and concurrency overrides for generated bindings while keeping the shared set', () => {
+    const disabled = setRuntimeTomlBindingField(sharedModelSetSource, 'codex.sol', 'enabled', false)
+    const edited = setRuntimeTomlBindingField(disabled, 'codex_second.astra', 'max-concurrent', 3)
+    const environment = parseRuntimeTomlEnvironment(edited, runtimeReservedProviderIdsFixture)
+    expect(environment.bindings).toHaveLength(4)
+    expect(environment.bindings.find(binding => binding.id === 'codex.sol')).toMatchObject({ enabled: false })
+    expect(environment.bindings.find(binding => binding.id === 'codex_second.astra')).toMatchObject({ maxConcurrent: 3 })
+    expect(environment.bindings.find(binding => binding.id === 'codex_second.sol')).toMatchObject({ enabled: true, maxConcurrent: null })
+    expect(enabledRuntimeIds(environment)).not.toContain('codex.sol')
+    expect(getStaticTOMLValue(parseTOML(edited))).toMatchObject({
+      model_sets: { codex_models: { models: ['sol', 'astra'] } },
+      providers: { codex: { 'model-set': 'codex_models' }, codex_second: { 'model-set': 'codex_models' } },
+    })
+  })
+
+  it('reads model-set references and explicit disabled overrides declared inline', () => {
+    const source = `providers = { p = { protocol = "codex-app-server", "model-set" = "shared" } }
+model_sets = { shared = { models = ["sol", "astra"] } }
+p = { sol = { enabled = false, "max-concurrent" = 2 } }
+[models.sol]
+[models.astra]
+`
+    const environment = parseRuntimeTomlEnvironment(source, runtimeReservedProviderIdsFixture)
+    expect(environment.bindings).toHaveLength(2)
+    expect(environment.bindings.find(binding => binding.id === 'p.sol')).toMatchObject({ enabled: false, maxConcurrent: 2 })
+    expect(enabledRuntimeIds(environment)).toEqual(['p.astra'])
+  })
+
+  it('retargets a deleted account default to an enabled generated binding', () => {
+    const disabledFallback = setRuntimeTomlBindingField(sharedModelSetSource, 'codex_second.sol', 'enabled', false)
+    const edited = cascadeDeleteProvider(disabledFallback, 'codex', runtimeReservedProviderIdsFixture)
+    const environment = parseRuntimeTomlEnvironment(edited, runtimeReservedProviderIdsFixture)
+    expect(environment.providers.map(provider => provider.id)).toEqual(['codex_second'])
+    expect(environment.defaultRuntimeId).toBe('codex_second.astra')
+    expect(enabledRuntimeIds(environment)).toEqual(['codex_second.astra'])
+    expect(getStaticTOMLValue(parseTOML(edited))).toMatchObject({ model_sets: { codex_models: { models: ['sol', 'astra'] } } })
+  })
+
+  it('preserves a remaining generated default when deleting another shared-set account', () => {
+    const edited = cascadeDeleteProvider(sharedModelSetSource, 'codex_second', runtimeReservedProviderIdsFixture)
+    expect(parseRuntimeTomlEnvironment(edited, runtimeReservedProviderIdsFixture).defaultRuntimeId).toBe('codex.sol')
+  })
+
   it('edits a quoted provider table in place', () => {
     for (const quote of ['"', "'"]) {
       const header = `providers.${quote}runpod_mtp${quote}`

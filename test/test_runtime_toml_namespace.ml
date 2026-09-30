@@ -191,6 +191,48 @@ models = ["sol", "next"]
     ["first.next"; "first.sol"; "second.next"; "second.sol"]
     (List.sort String.compare (List.map Runtime_schema.binding_key config.bindings))
 
+let test_generated_bindings_materialize_and_route () =
+  let text = shared_providers ^ {|[models.sol]
+api-name = "gpt-6-sol"
+max-context = 272000
+tools-support = true
+streaming = true
+reasoning-effort = "high"
+[models.disabled]
+api-name = "gpt-6-sol"
+max-context = 272000
+[model_sets.codex]
+models = ["sol", "disabled"]
+[first.disabled]
+enabled = false
+[second.disabled]
+enabled = false
+[runtime]
+default = "first.sol"
+[runtime.assignments]
+worker = "second.sol"
+|} in
+  let path = Filename.temp_file "shared-model-runtime-" ".toml" in
+  Fun.protect ~finally:(fun () -> Sys.remove path) (fun () ->
+    Out_channel.with_open_bin path (fun channel -> output_string channel text);
+    match Runtime.load_list ~config_path:path with
+    | Error failure -> Alcotest.fail (Runtime.to_diagnostic_text ~config_path:path failure)
+    | Ok (runtimes, default, assignments, _, _) ->
+      Alcotest.(check (list string)) "only the two enabled bindings materialize"
+        ["first.sol"; "second.sol"]
+        (List.sort String.compare (List.map (fun (r : Runtime.t) -> r.id) runtimes));
+      Alcotest.(check string) "generated default resolves" "first.sol" default.id;
+      Alcotest.(check (option string)) "generated assignment resolves"
+        (Some "second.sol") (List.assoc_opt "worker" assignments);
+      List.iter (fun (id, expected_home) ->
+        let runtime = List.find (fun (r : Runtime.t) -> r.id = id) runtimes in
+        match runtime.execution with
+        | Runtime_execution.Codex_app_server client ->
+          Alcotest.(check (option string)) (id ^ " account home")
+            (Some expected_home) client.account_home
+        | _ -> Alcotest.fail "generated binding changed execution protocol")
+        [ "first.sol", "/tmp/codex-first"; "second.sol", "/tmp/codex-second" ])
+
 let test_explicit_binding_overrides_a_set_default () =
   let config = parse_config
     (shared_model ^ shared_providers ^ {|[model_sets.codex]
@@ -255,6 +297,8 @@ let () =
             test_one_model_serves_two_accounts
         ; Alcotest.test_case "a model list addition reaches every account" `Quick
             test_a_model_added_to_the_set_reaches_every_account
+        ; Alcotest.test_case "generated bindings materialize and route" `Quick
+            test_generated_bindings_materialize_and_route
         ; Alcotest.test_case "explicit binding overrides a set default" `Quick
             test_explicit_binding_overrides_a_set_default
         ; Alcotest.test_case "invalid model sets are refused" `Quick

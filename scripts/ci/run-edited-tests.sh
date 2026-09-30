@@ -166,11 +166,6 @@ CANDIDATES
   # and within a day five MSX tools were added over it -- change_disk at 278
   # bytes, press at 745. The guard was green on main the whole time because
   # nothing ran it.
-  # The ceiling on what every turn carries is the same shape again: #34409
-  # grew the model-visible schemas by 664 bytes and the ratchet failed that
-  # night, because the pull request edited config/tools and nothing else.
-  # The file says growth "has to be argued for in the PR that causes it",
-  # which needs the PR to be told.
   tools_changed=$( { printf '%s\n' "${changed}" \
     | grep -E '^config/tools/' || [ $? -eq 1 ]; } | head -1)
   #
@@ -180,16 +175,9 @@ CANDIDATES
   # editing twelve of those files and nothing else; the suite went red on
   # keeper_tools_list and stayed red until #36773.
   tool_definition_guards="test/test_keeper_tool_definition_source.ml
-test/test_keeper_tool_schema_bytes.ml
+test/test_keeper_tool_surface_schema.ml
 test/test_tool_loading_declarations.ml
 test/test_tools_coverage.ml"
-
-  # The per-description bound, one axis in from the whole-surface ceiling.
-  # test_tools_coverage reads Masc.Config.raw_all_tool_schemas -- the embedded
-  # config/tools set -- and bounds each description at max_description_chars.
-  # Nightly 34384710653 failed it on masc_browser_interact at 1,634 chars
-  # against a 1,080 limit, and the pull request that grew it edited no
-  # test/*.ml.
 
   # config/prompts is the same shape a third time. Every keeper turn is built
   # from the assembled system prompt, and test_keeper_system_prompt_blocks
@@ -1166,7 +1154,7 @@ self_test() {
   # grows; the tree guard is what it must never lose.
   # Expected suite and probe path share a line on purpose: a probe path alone
   # on its line reads as a scan-scope declaration to
-  # scripts/lint/guard-scan-targets-exist.sh, and these probes must not exist.
+  # the source tree, and these probes must not exist.
   check "an unreferenced bin/ source still selects the tree-reading suite" \
     "test/test_keeper_toml.ml" "bin/no_suite_names_this_probe.ml"
   check "an unreferenced packages/ source still selects the tree-reading suite" \
@@ -1210,7 +1198,7 @@ self_test() {
     test/test_wide_13.ml
 
   check "thirteen edited suites retain both themselves and asset guards" \
-    "test/test_keeper_toml.ml test/test_keeper_tool_definition_source.ml test/test_keeper_tool_schema_bytes.ml test/test_managed_assets_sync_from_binary.ml test/test_tool_loading_declarations.ml test/test_tools_coverage.ml ${wide_sources}" \
+    "test/test_keeper_toml.ml test/test_keeper_tool_definition_source.ml test/test_keeper_tool_surface_schema.ml test/test_managed_assets_sync_from_binary.ml test/test_tool_loading_declarations.ml test/test_tools_coverage.ml ${wide_sources}" \
     test/test_wide_01.ml test/test_wide_02.ml test/test_wide_03.ml \
     test/test_wide_04.ml test/test_wide_05.ml test/test_wide_06.ml \
     test/test_wide_07.ml test/test_wide_08.ml test/test_wide_09.ml \
@@ -1218,7 +1206,7 @@ self_test() {
     test/test_wide_13.ml config/tools/foo.toml
 
   check "a tool definition reaches every guard over it" \
-    "test/test_keeper_tool_definition_source.ml test/test_keeper_tool_schema_bytes.ml test/test_managed_assets_sync_from_binary.ml test/test_tool_loading_declarations.ml test/test_tools_coverage.ml" \
+    "test/test_keeper_tool_definition_source.ml test/test_keeper_tool_surface_schema.ml test/test_managed_assets_sync_from_binary.ml test/test_tool_loading_declarations.ml test/test_tools_coverage.ml" \
     "config/tools/foo.toml"
   # The three regressions the module and file-name rules exist for, with the
   # source files each pull request changed.

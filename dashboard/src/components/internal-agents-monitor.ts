@@ -33,6 +33,7 @@ type Filter =
   | 'all'
   | 'librarian'
   | 'workspace-curator'
+  | 'candle-appraiser'
   | 'auto-judge'
   | 'board-attention'
   | 'verification'
@@ -117,6 +118,7 @@ const FILTERS: Array<{ id: Filter; label: string }> = [
   { id: 'all', label: 'All' },
   { id: 'librarian', label: 'Librarian' },
   { id: 'workspace-curator', label: 'Workspace Curator' },
+  { id: 'candle-appraiser', label: 'Candle Appraiser' },
   { id: 'auto-judge', label: 'Auto Judge' },
   { id: 'board-attention', label: 'Board Attention' },
   { id: 'verification', label: 'Verification' },
@@ -130,7 +132,7 @@ function sourceForKind(kind: Exclude<Filter, 'all'>): RunSource {
   switch (kind) {
     case 'verification': return 'verification'
     case 'fusion': return 'fusion'
-    case 'librarian': case 'workspace-curator': case 'auto-judge': case 'board-attention': return 'exact'
+    case 'librarian': case 'workspace-curator': case 'candle-appraiser': case 'auto-judge': case 'board-attention': return 'exact'
   }
 }
 
@@ -165,6 +167,7 @@ function laneLabel(row: Row): string {
   switch (row.run.lane) {
     case 'librarian_exact': return 'Librarian'
     case 'workspace_curator_exact': return 'Workspace Curator'
+    case 'candle_appraiser': return 'Candle Appraiser'
     case 'hitl_auto_judge': return 'Auto Judge'
     case 'board_attention_exact': return 'Board Attention'
   }
@@ -222,6 +225,7 @@ function rowKind(row: Row): Exclude<Filter, 'all'> {
   switch (row.run.lane) {
     case 'librarian_exact': return 'librarian'
     case 'workspace_curator_exact': return 'workspace-curator'
+    case 'candle_appraiser': return 'candle-appraiser'
     case 'hitl_auto_judge': return 'auto-judge'
     case 'board_attention_exact': return 'board-attention'
     default: {
@@ -445,6 +449,8 @@ function exactRunContractNote(lane: ExactLaneRunRecord['lane']) {
   switch (lane) {
     case 'workspace_curator_exact':
       return '이 실행은 기록된 workspace inventory와 curator prompt를 사용합니다. 의미 검증이나 Keeper 기억 승격을 수행하지 않습니다.'
+    case 'candle_appraiser':
+      return '이 실행은 확정된 Goal의 지급 등급, 후보 Task별 관련성, Keeper의 기여 가중치를 판단합니다. 지급 금액은 설정과 Candle 원장이 정합니다.'
     case 'librarian_exact':
       return '이 exact 실행은 immutable Librarian input만 사용하며 외부 research/RAW 입력을 받지 않습니다.'
     case 'hitl_auto_judge':
@@ -508,7 +514,9 @@ function ExactRunDetail({ runId }: { runId: string }) {
             ${exactAnswerSource(run)}
              ${run.lane === 'workspace_curator_exact'
                ? html` · Workspace <code>${run.actor}</code> · model-proposed; semantic verification not performed`
-               : html` · <a class="text-[var(--color-accent)] hover:underline" href=${keeperHref(run.actor)}>Keeper 전체 evidence 열기 →</a>`}
+               : run.lane === 'candle_appraiser'
+                 ? html` · Workspace <code>${run.actor}</code>`
+                 : html` · <a class="text-[var(--color-accent)] hover:underline" href=${keeperHref(run.actor)}>Keeper 전체 evidence 열기 →</a>`}
           </p>
           ${run.lane === 'hitl_auto_judge' && run.code === 'exact_source_resolved'
             ? html`<p class="ia-note">승인 항목이 판정 기록 전에 해결됐습니다. 이전 실행 단계에 오류가 있었는지는 이 과거 기록만으로 확정할 수 없습니다.</p>`
@@ -649,7 +657,8 @@ function recordedOwner(row: Row): string {
 }
 
 function hasKeeperOwner(row: Row): boolean {
-  return !(row.source === 'exact' && row.run.lane === 'workspace_curator_exact')
+  return !(row.source === 'exact'
+    && (row.run.lane === 'workspace_curator_exact' || row.run.lane === 'candle_appraiser'))
 }
 
 function resolvedOwner(row: Row, roster: readonly KeeperIdentity[]): string {

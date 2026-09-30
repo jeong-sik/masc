@@ -4,8 +4,8 @@
     stopped picking. Codex, HTTP and Antigravity reads record provider reports
     in [Runtime_provider_usage_window] for the operator projection. Routing
     and admission do not read that observation table. An HTTP account read
-    after a 403 ({!read_after_account_refusal}) can also rest a spent scope on
-    {!Runtime_quota_window}. A Muse [usage/read] after a model error records
+    after a 403 ({!read_after_account_refusal}) can also rest a
+    spent scope on {!Runtime_quota_window}. A Muse [usage/read] after a model error records
     only provider-stated exhaustion there, not a usage-window report.
 
     Codex answers [account/rateLimits/read] after account admission, with no
@@ -29,7 +29,8 @@ val read_codex :
   scope:Runtime_quota_window.scope ->
   Runtime_execution.codex_app_server ->
   (unit, string) result
-(** Read one Codex account and record its windows under [scope]. *)
+(** Read one Codex account and record its windows under [scope]. The answer
+    rests nothing: this is the start read ({!read_all}). *)
 
 val read_muse :
   mgr:_ Eio.Process.mgr ->
@@ -126,15 +127,17 @@ type background =
   | No_root_switch  (** No server root switch is installed (outside a server). *)
   | Scheduling_failed  (** The root owner could not schedule the read. *)
 
-val read_codex_in_background :
+val read_codex_after_spent_usage_refusal :
   clock:_ Eio.Time.clock ->
   cwd:Eio.Fs.dir_ty Eio.Path.t ->
   scope:Runtime_quota_window.scope ->
   Runtime_execution.codex_app_server ->
   background
-(** {!read_codex} in a fiber on the server's root switch, so it outlives the
-    turn that asked for it, with at most one read per scope at a time. Its
-    failure is logged. *)
+(** Refresh the operator projection after a spent-usage refusal. Neither the
+    refusal nor this account-wide read attributes a metered limit_id to the
+    rejected call. Preserve the turn's existing observation, including when
+    only one bucket is reported; no reset is inferred. Runs on the server's
+    root switch, with at most one read per scope. Read failures are logged. *)
 
 val read_muse_in_background :
   clock:_ Eio.Time.clock ->
@@ -155,17 +158,23 @@ module For_testing : sig
   (** Exercise the claim and fork boundary without a running server. *)
 end
 
-(** What the usage endpoint said after the provider refused the account with
-    HTTP 403. Only windows whose role is
+(** What a usage read said after the provider refused the account: an HTTP
+    403 ({!read_after_account_refusal}). Only windows whose role is
     {!Runtime_provider_usage_window.Gates_model_calls} count. *)
 type account_refusal_read =
   | Spent_until of float
-      (** A gating window's used count reached its limit; the latest stated
-          reset among the spent gating windows, Unix epoch seconds. *)
+      (** The spent gating windows all belong to one limit; the latest
+          stated reset among them, Unix epoch seconds. *)
   | Spent_without_reset  (** A spent gating window states no reset. *)
+  | Spent_in_several_limits of string option list
+      (** Spent gating windows belong to more than one limit (their limit
+          ids, sorted; [None] for a window that names none). A refusal does
+          not name the limit that refused it, so no reset is the rest: the
+          scope keeps the refusal's observation, as [Spent_without_reset]. *)
   | No_window_spent
-      (** Every gating window has headroom: the refusal is not a spent quota
-          (a blocked client, a suspended account), and nothing rests. *)
+      (** Every gating window has headroom, and the read rests nothing.
+          After a 403 the refusal is not a spent quota (a blocked client, a
+          suspended account). *)
 
 val account_refusal_read_of_report :
   Runtime_provider_usage_window.report -> account_refusal_read
@@ -185,8 +194,10 @@ val read_after_account_refusal :
     {!Runtime_quota_window} when a gating window is spent: [Spent_until t]
     is {!Runtime_quota_window.note_exhausted} until [t],
     [Spent_without_reset] is {!Runtime_quota_window.note_observed_exhausted}.
-    This is the only read whose answer the walk order sees; the startup read
-    ({!read_all}) stays an operator projection. A failed read rests nothing. *)
+    A [t] not after the answer's arrival names no rest and is returned and
+    recorded as [Spent_without_reset].
+    This read affects the walk order; the startup read ({!read_all}) stays an operator
+    projection. A failed read rests nothing. *)
 
 val http_read_of_runtime : Runtime.t -> http_read option
 (** The runtime's HTTP usage read when its provider declares [usage-read]. *)
@@ -211,6 +222,6 @@ val read_runtime_after_account_refusal :
   account_refusal_outcome
 (** {!read_after_account_refusal} for [rt]'s materialized scope, in the
     caller's fiber, at most one per scope at a time (shared with
-    {!read_codex_in_background}). [fetch] defaults to one GET on the
+    {!read_codex_after_spent_usage_refusal}). [fetch] defaults to one GET on the
     process's Eio net and clock. The outcome is logged without the body or
     the key, and returned. *)

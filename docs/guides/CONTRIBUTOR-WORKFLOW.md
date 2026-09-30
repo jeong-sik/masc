@@ -24,15 +24,14 @@ From a problem to a reviewed change, with evidence and a clear handoff.
 flowchart LR
     A["Problem and issue"] --> B["Change on a separate branch"]
     B --> C["Draft PR"]
-    C --> D["Ready · CI · review"]
+    C --> D["Independent source review"]
     D --> E["Integrate into main"]
 ```
 
 ## Repository strategy
 
-- `main` is the integration branch. Start independent changes from current main.
-- Give one PR one concrete outcome. Split genuinely dependent work into stacked
-  PRs; start independent changes in separate branches from main.
+- Work in stacked PRs. The bottom PR targets `main`; each later PR targets the
+  preceding branch. Give each PR one concrete outcome and land the stack bottom first.
 - Keep concurrent changes in separate worktrees. Task claims coordinate who is
   doing the work; they do not lock files or authorize editing another checkout.
 - Document the feature where readers look for it. README introduces the product,
@@ -95,8 +94,8 @@ use a free port; the checkout and the workspace containing `.masc` are different
 ### Your first documentation PR
 
 For a first documentation patch, edit one factual claim and its translation where
-present, run `bash scripts/check-doc-truth.sh` and `git diff --check`, and check the
-changed links. Commit it, then `git push -u origin docs/your-topic`. Open a draft PR
+present, check claims and changed links against source, and use `git diff --check`.
+Commit it, then `git push -u origin docs/your-topic`. Open a draft PR
 to `jeong-sik/masc:main` using the template. Add `changelog.d/<PR number>.md` as
 [CONTRIBUTING](../../CONTRIBUTING.md#pull-requests) describes, then push it before
 marking ready. A useful summary explains the incorrect instruction, the correction,
@@ -106,7 +105,7 @@ and what was checked. Section 4 explains CI; maintainers handle fork integration
 
 | Change | Read first | Source / verification entrypoints |
 |---|---|---|
-| Product documentation | [README](../../README.md), linked manual | `docs/`, `scripts/check-doc-truth.sh` |
+| Product documentation | [README](../../README.md), linked manual | `docs/`, source for changed claims and links |
 | Keeper behavior or instructions | [Keeper manual](../KEEPER-USER-MANUAL.md), constitution | `lib/keeper/`, `config/prompts/keeper.md`, `test/` |
 | Goal, Task, Board or completion | Constitution's domain rules | `lib/workspace/`, `config/tools/`, `test/` |
 | Provider or lane behavior | Relevant interfaces and configuration | `lib/runtime/`, `lib/runtime_model/`, `test/` |
@@ -127,9 +126,9 @@ Read [AGENTS.md](../../AGENTS.md) and the complete
 2. Record the requested outcome, scope and required evidence. Read the actual
    source, current review comments and failing logs instead of relying on summaries.
 3. Implement a bounded change. External coding sessions do not run local Dune
-   builds; request CI at a finishing boundary. Use
-   [linux-x64-probe](../../.github/workflows/linux-x64-probe.yml) when a test binary
-   is needed. Release dispatch is for tag/RC work.
+   builds. Ordinary stacks use source review. Request a development check only
+   for a concrete need and keep it within two minutes; full CI belongs to the
+   Release/Tag boundary. Do not watch or poll CI.
 4. When moving to the next work unit, assign an adversarial review agent to the
    previous one. Review the findings yourself and address them. A subagent review
    is not automatically a cross-model review or a GitHub approval.
@@ -145,11 +144,11 @@ and self-review alone do not establish runtime behavior or independent approval.
 build in pre-commit. An external coding session following the no-local-build
 rule uses `git -c core.hooksPath=/dev/null commit -m "your message"` for that
 commit. This disables hooks for that command only, not future pushes: keep the
-pre-push trace-leak guard active and obtain the required CI checks. Do not
+pre-push trace-leak guard active and obtain independent source review. Do not
 change the clone's persistent hook configuration to avoid a build.
 
 Keeper lanes may build/test locally if their toolchain exists. Those results do
-not replace current-head PR checks or a targeted `test.yml` run. A session's
+not replace independent source review or full Release/Tag CI. A session's
 permissions, an MCP bearer identity and a Keeper's name are separate identities.
 Do not reuse a shared Task owner to release another session's work.
 
@@ -183,88 +182,69 @@ can follow the relationship. Treat a Board plan as a plan until it has evidence.
 
 ## 4. Validate and request CI
 
-Pick checks from the changed behavior and its risks. Documentation work can run
-`bash scripts/check-doc-truth.sh` and `git diff --check` without building OCaml.
-This script covers front-door documents and selected specs; it does not validate
-all contributor-guide claims or every new link. Check changed file links, anchors
-and commands separately. It requires Bash, ripgrep and standard shell utilities.
-Human contributors can run focused local checks; external coding-agent sessions
-follow section 2.
+Choose evidence from the changed behavior and its concrete risks. For documentation,
+read the source behind changed claims and check file links, anchors and commands.
+`git diff --check` identifies whitespace errors; it does not establish behavior.
+Human contributors can run focused local checks; external coding sessions follow
+section 2. Prose wording, historical counts and source-style inventories are not
+approval gates.
 
 Open a draft using [scripts/pr-open.sh](../../scripts/pr-open.sh) or GitHub's fork
 PR flow. Fill the [PR template](../../.github/pull_request_template.md), including
-an issue link. Draft PRs skip the required PR-check jobs. When the diff and evidence
-are ready, mark it ready for review to start required checks.
+an issue link. Mark the PR ready when its diff and evidence are ready for review.
+PR creation, pushes and ready transitions do not automatically start CI.
 
-[pr-check.yml](../../.github/workflows/pr-check.yml) requires:
+[pr-check.yml](../../.github/workflows/pr-check.yml) provides explicit source,
+configuration and credential checks within two minutes.
+[ci.yml](../../.github/workflows/ci.yml) builds only Core for the bottom PR,
+also within two minutes. Request these only when needed. A cold dependency cache
+may prevent completion in that window; an incomplete run is not build evidence.
 
-- dashboard typecheck;
-- `dune build @check`, including selected tests;
-- `dune build --profile release @check`;
-- lint suite;
-- TLA model check.
+There is no PR, general push or scheduled CI. At `release/vX.Y.Z`, explicitly
+request [release-candidate.yml](../../.github/workflows/release-candidate.yml)
+for full builds, type checks, behavior tests and installation verification on
+that head. Tag publication also requires full checks and tests. See the
+[CI and review workflow](../CI-REVIEW-WORKFLOW.md) for the authoritative procedure.
 
-The TLA job executes TLC only when `specs/` changes. A successful job that skips
-that step does not prove a model-check run. The workflow also reports the aggregate
-`PR required success`. Selection is not a full behavior suite: inspect which tests
-the run actually executed.
-[test.yml](../../.github/workflows/test.yml) provides scheduled/full runs and a
-`workflow_dispatch` `suite` input for targeted verification, for example:
-
-```bash
-gh workflow run test.yml --repo jeong-sik/masc --ref your-branch \
-  -f suite=test_keeper_meta_json_config_toml_only
-```
-
-Dispatch requires repository permission. Fork contributors can ask a maintainer
-for the appropriate run. External agents do not watch/wait/poll CI; continue the
-next contextual work unit and read results at a work boundary. When a check fails,
-read the raw failure and determine whether it is your diff, the base, a timeout,
-or a missing prerequisite. Avoid unrelated repairs inside the same PR.
+Dispatch requires repository permission; fork contributors can ask a maintainer
+for an appropriate run. Continue useful work instead of watching or polling CI.
+At a work boundary, read actual results and distinguish failures in the diff,
+base or environment. Keep unrelated repairs in their own stack.
 
 ## 5. Review and integrate
 
-A reviewer reads the contract and current-head diff, then records an independent
-code judgment. Approve or request changes when the reviewed evidence supports it;
-CI need not have started or completed. State unverified behavior rather than
-claiming a run that has not happened. Address each finding with a change or a
-source-backed explanation; resolve a thread only when its concern is handled.
+Review the contract and current-head diff from independent function, logic and
+code-cleanliness perspectives. Approve when no P0/P1/P2 issue remains and collect
+P3 findings for later. Ordinary review needs no CI run. State unverified behavior;
+do not claim checks that were not run. Address each finding with a change or a
+source-backed explanation and resolve a thread only when its concern is handled.
 Update the PR description when scope, evidence or remaining risks change.
 
-A push creates a new head, so an earlier review does not certify new changes.
-The reviewer clears their own REQUEST_CHANGES once the corrected code resolves
-their findings, independently of CI. Green CI alone does not resolve a finding.
+A push creates a new head, so earlier review does not certify new changes.
+Reviewers clear their own REQUEST_CHANGES when the corrected code resolves their
+findings. A green CI run alone does not resolve a finding.
 
-The code-review first line uses actual values:
+The ordinary source-review verdict uses actual values:
 
 ```text
-review: APPROVE|REQUEST_CHANGES head: <40-character-current-SHA> by: <Keeper-name>
+verdict: PASS|FAIL head: <40-character-current-SHA> by: <Keeper-name>
 ```
 
 Use [approve-guard.sh](../../scripts/review/approve-guard.sh) for APPROVE; its
-`--check` mode checks review eligibility. The author or a session that pushed
-the PR cannot independently approve it. Code approval does not declare CI success
-or permission to merge.
+`--check` mode checks review eligibility. Publishing an approval requires
+`--body` with the verdict and evidence. An author or a session that pushed the PR cannot independently
+approve it. Release verdicts additionally cite `run: <full-CI-run-id>` for
+completed full verification of the same head. These are formats, not decisions;
+replace placeholders and alternatives with actual values.
 
-Integration has its own decision line:
-
-```text
-verdict: PASS|FAIL head: <40-character-current-SHA> run: <PR-check-run-id> by: <Keeper-name>
-```
-
-These lines show formats, not decisions. Never publish alternatives or placeholders
-as actual values. An integration PASS cites the current head's completed successful
-PR-check run. Check main freshness: overlapping changes to PR files or shared
-validation inputs require integrating main and a fresh run. Read current reviews
-and comments again before integration, including later blocking decisions.
-
-Keepers handle merge. The constitution provides a limited exception for an
-operator-launched external session using `jeong-sik`: all five current-head checks
-must be completed and successful, and the read-only
-[merge-guard](../../scripts/review/merge-guard.sh) must say `WOULD MERGE` with the
-current head and run. Only then can that session use `gh pr merge --match-head-commit`.
-External coding sessions do not use `--auto`, `--admin`, or the guard's merge mode.
-Fork contributors hand integration to the maintainer; the same evidence rules apply.
+Read current reviews and comments again before integration. Outstanding blocking
+reviews and later FAIL/HOLD decisions prevent integration. Land stacks bottom
+first and review changes to both base and head before landing. Use
+[merge-guard](../../scripts/review/merge-guard.sh) and the current
+[CI and review workflow](../CI-REVIEW-WORKFLOW.md) for admission. Ordinary stacks
+use source review; release heads require completed full CI. Fork contributors
+hand integration to a maintainer. Source approval does not claim unobserved
+build success or runtime behavior.
 
 Verify the merged commit and PR state before cleanup. Remove only the finished
 worktree and branch after confirming they contain no unsubmitted work. Never push

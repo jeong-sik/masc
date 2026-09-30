@@ -23,15 +23,14 @@
 flowchart LR
     A["문제와 이슈"] --> B["별도 브랜치에서 수정"]
     B --> C["Draft PR"]
-    C --> D["Ready · CI · 리뷰"]
+    C --> D["독립 소스 리뷰"]
     D --> E["Main 통합"]
 ```
 
 ## 기본 저장소 전략
 
-- `main`은 통합 브랜치입니다. 독립적인 변경은 최신 main에서 시작합니다.
-- PR 하나에는 구체적인 결과 하나를 담습니다. 실제 의존성이 있는 변경은 stacked PR로,
-  독립적인 변경은 main 기반의 별도 브랜치로 나눕니다.
+- Stacked PR로 작업합니다. 맨 아래 PR은 `main`을, 이후 PR은 직전 브랜치를 대상으로 합니다.
+  PR 하나에는 구체적인 결과 하나를 담고 스택 아래부터 통합합니다.
 - 동시 작업은 별도 worktree로 격리합니다. Task claim은 담당을 조율하며 파일을 잠그거나
   다른 체크아웃을 수정할 권한을 주지는 않습니다.
 - README는 제품 소개, CONTRIBUTING은 개발 시작, 매뉴얼은 사용법, 명세는 인터페이스,
@@ -92,7 +91,7 @@ cd ../masc-your-topic
 ### 첫 문서 PR
 
 첫 문서 수정은 사실을 설명하는 문장 하나부터 고쳐보세요. 번역이 있다면 함께 고칩니다.
-`bash scripts/check-doc-truth.sh`, `git diff --check`와 변경한 링크를 확인합니다.
+변경한 주장과 링크를 소스로 확인하고 `git diff --check`로 공백 오류를 확인합니다.
 Commit 후 `git push -u origin docs/your-topic`으로 올리고 템플릿을 사용하여
 `jeong-sik/masc:main`으로 draft PR을 엽니다.
 [CONTRIBUTING](../../CONTRIBUTING.md#pull-requests)의 설명대로
@@ -103,7 +102,7 @@ Commit 후 `git push -u origin docs/your-topic`으로 올리고 템플릿을 사
 
 | 변경 | 먼저 읽을 내용 | 소스 / 검증 진입점 |
 |---|---|---|
-| 제품 문서 | [README](../../README.md), 연결된 매뉴얼 | `docs/`, `scripts/check-doc-truth.sh` |
+| 제품 문서 | [README](../../README.md), 연결된 매뉴얼 | `docs/`, 변경한 주장과 링크의 소스 |
 | Keeper 동작·지침 | [Keeper 매뉴얼](../KEEPER-USER-MANUAL.md), 헌법 | `lib/keeper/`, `config/prompts/keeper.md`, `test/` |
 | Goal·Task·Board·완료 | 헌법의 도메인 규칙 | `lib/workspace/`, `config/tools/`, `test/` |
 | Provider·레인 동작 | 관련 인터페이스와 설정 | `lib/runtime/`, `lib/runtime_model/`, `test/` |
@@ -122,9 +121,9 @@ Commit 후 `git push -u origin docs/your-topic`으로 올리고 템플릿을 사
 1. 체크아웃, 브랜치, 기존 변경, 최신 main을 확인합니다. 사용 중인 공유 체크아웃에는
    별도 worktree를 사용하고 기존 작업을 보존합니다.
 2. 요청한 결과, 범위와 증거 조건을 적습니다. 실제 소스, 현재 리뷰와 실패 로그를 읽습니다.
-3. 범위를 정한 변경을 구현합니다. 외부 코딩 세션은 로컬 Dune 빌드를 하지 않고 마무리
-   경계에서 CI를 요청합니다. 확인할 바이너리가 필요하면
-   [linux-x64-probe](../../.github/workflows/linux-x64-probe.yml)를 사용합니다. Release dispatch는 태그·RC 작업에 씁니다.
+3. 범위를 정한 변경을 구현합니다. 외부 코딩 세션은 로컬 Dune 빌드를 하지 않습니다.
+   일반 스택은 소스 리뷰로 판단합니다. 구체적인 필요가 있을 때만 2분 이내의 개발 검사를
+   요청하고 전체 CI는 Release/Tag 경계에서 실행합니다. CI를 기다리거나 반복 조회하지 않습니다.
 4. 다음 작업 단위로 넘어갈 때 이전 작업에 적대적 리뷰 에이전트를 붙입니다. 발견한 내용을
    직접 판단하고 대응합니다. 서브에이전트 리뷰가 곧 다른 모델의 리뷰나 GitHub 승인은 아닙니다.
 5. 인계할 때는 다음 행동과 그 근거를 남깁니다.
@@ -138,10 +137,10 @@ AI를 활용한 기여도 환영합니다. 제출한 작성자는 diff를 이해
 Dune 빌드를 실행합니다. 로컬 빌드를 하지 않는 외부 코딩 세션은 해당 commit에
 `git -c core.hooksPath=/dev/null commit -m "your message"`를 사용합니다. 이 명령에서만
 hook을 끄며 이후 push에는 적용되지 않습니다. pre-push의 trace 유출 검사는 유지하고
-필수 CI 검사를 받으세요. 빌드를 피하려고 clone의 영구 hook 설정을 바꾸지는 않습니다.
+독립 소스 리뷰를 받으세요. 빌드를 피하려고 clone의 영구 hook 설정을 바꾸지는 않습니다.
 
-Keeper 레인은 도구 체인이 있으면 로컬에서 빌드·테스트할 수 있습니다. 해당 결과가 현재
-PR head의 검사나 `test.yml` targeted run을 대신하지는 않습니다. 세션 권한, MCP 인증의
+Keeper 레인은 도구 체인이 있으면 로컬에서 빌드·테스트할 수 있습니다. 해당 결과가 독립
+소스 리뷰나 Release/Tag 전체 CI를 대신하지는 않습니다. 세션 권한, MCP 인증의
 에이전트 이름, Keeper 이름은 별개입니다. 공용 Task 소유자 이름으로 다른 세션의 작업을 해제하지 마세요.
 
 ## 3. 작업 조율하기
@@ -171,79 +170,60 @@ GitHub Issue·PR은 공개 변경을 추적합니다. MASC는 공유 목표와 �
 
 ## 4. 검증하고 CI 요청하기
 
-변경한 동작과 위험에 맞는 검사를 고릅니다. 문서는 OCaml 빌드 없이
-`bash scripts/check-doc-truth.sh`, `git diff --check`와 새 링크·앵커 검사를 실행할 수
-있습니다. 이 스크립트는 진입 문서와 일부 명세를 검사하며 기여 안내의 모든 주장이나 새
-링크 전체를 검증하지는 않습니다. 변경한 링크·앵커·명령은 별도로 확인하세요.
-Bash, ripgrep과 기본 shell 유틸리티가 필요합니다. 사람은 로컬 focused 검사를 사용할 수
-있고 외부 코딩 세션은 2절을 따릅니다.
+변경한 동작과 구체적인 위험에 맞는 증거를 고릅니다. 문서는 변경한 주장의 소스를 읽고
+링크·앵커·명령을 확인합니다. `git diff --check`는 공백 오류를 찾지만 동작을 증명하지
+않습니다. 사람은 로컬 focused 검사를 사용할 수 있고 외부 코딩 세션은 2절을 따릅니다.
+문구, 과거 개수와 소스 스타일 목록은 승인 조건이 아닙니다.
 
 [scripts/pr-open.sh](../../scripts/pr-open.sh) 또는 GitHub fork PR 흐름으로 초안을 엽니다.
 [PR 템플릿](../../.github/pull_request_template.md)을 채우고 이슈를 연결합니다.
-초안 PR은 필수 PR-check job을 건너뜁니다. diff와 증거가 준비되면 ready for review로
-바꾸어 검사를 시작합니다.
+diff와 증거가 준비되면 ready for review로 바꿉니다. PR 생성, push와 ready 전환은
+CI를 자동으로 시작하지 않습니다.
 
-[pr-check.yml](../../.github/workflows/pr-check.yml)의 필수 검사는 다음과 같습니다.
+[pr-check.yml](../../.github/workflows/pr-check.yml)은 소스·설정 문법과 credential 검사를
+명시적 요청으로 2분 이내에 실행합니다. [ci.yml](../../.github/workflows/ci.yml)은 스택
+맨 아래 PR의 Core만 2분 이내에 빌드합니다. 필요할 때만 요청하세요. 의존성 캐시가
+준비되지 않으면 제한 안에 끝나지 않을 수 있으며, 미완료 실행은 빌드 성공 증거가 아닙니다.
 
-- dashboard typecheck;
-- `dune build @check`와 선택된 테스트;
-- `dune build --profile release @check`;
-- lint suite;
-- TLA model check.
+PR, 일반 push와 정기 CI는 없습니다. `release/vX.Y.Z`에서는
+[release-candidate.yml](../../.github/workflows/release-candidate.yml)을 명시적으로 요청하여
+같은 head의 전체 빌드·타입 검사·동작 테스트·설치 검증을 실행합니다. 태그 발행에도 전체
+검사와 테스트가 필요합니다. 정확한 절차는 [CI와 리뷰 안내](../CI-REVIEW-WORKFLOW.md)를 따릅니다.
 
-TLA job은 `specs/` 변경이 있을 때만 TLC를 실행합니다. 이 단계가 생략된 job의 성공은
-모델 검사 실행을 증명하지 않습니다. `PR required success`는 종합 결과입니다. 선택된 테스트가 전체 동작 테스트는 아니므로
-실제로 무엇을 실행했는지 로그에서 확인하세요. [test.yml](../../.github/workflows/test.yml)은
-정기·전체 실행과 `suite` 입력을 받는 targeted dispatch를 제공합니다.
-
-```bash
-gh workflow run test.yml --repo jeong-sik/masc --ref your-branch \
-  -f suite=test_keeper_meta_json_config_toml_only
-```
-
-Dispatch에는 저장소 권한이 필요합니다. Fork 기여자는 maintainer에게 필요한 실행을
-요청할 수 있습니다. 외부 에이전트는 CI를 watch하거나 기다리며 반복 조회하지 않습니다.
-다음 맥락의 작업을 진행하고 경계에서 결과를 확인합니다. 실패하면 원문에서 내 diff,
-base, 시간 초과, 환경 준비 중 무엇이 원인인지 가려 같은 PR에 무관한 수정을 섞지 않습니다.
+Dispatch에는 저장소 권한이 필요하며 fork 기여자는 maintainer에게 필요한 실행을 요청할 수
+있습니다. CI를 기다리거나 반복 조회하지 않고 다음 작업을 진행합니다. 작업 경계에서 실제
+결과를 확인하고 diff, base와 환경 실패를 구분하세요. 무관한 수정은 별도 스택에서 처리합니다.
 
 ## 5. 리뷰하고 통합하기
 
-리뷰어는 계약과 현재 head의 diff를 읽고 독립적인 코드 판단을 남깁니다. 검토한 증거로
-판단할 수 있으면 Approve나 변경 요청을 내며 CI 시작·완료를 기다리지 않습니다.
-실행하지 않은 검사는 실행했다고 쓰지 않고 미확인 동작을 명시합니다. 지적마다 수정하거나
-소스로 설명하고, 문제가 해결된 스레드만 닫습니다. 범위·증거·남은 위험이 바뀌면 PR 본문도 갱신합니다.
+리뷰어는 계약과 현재 head의 diff를 기능·논리·코드 청결도 관점에서 독립적으로 검토합니다.
+P0/P1/P2가 없으면 승인하고 P3는 모아서 나중에 처리합니다. 일반 리뷰에는 CI run이 필요하지
+않습니다. 실행하지 않은 검사를 실행했다고 쓰지 않고 미확인 동작을 명시합니다. 지적마다
+수정하거나 소스로 설명하고 문제가 해결된 스레드만 닫습니다. 범위·증거·남은 위험이 바뀌면
+PR 본문도 갱신합니다.
 
 Push하면 head가 바뀌므로 이전 리뷰가 새 변경을 증명하지 않습니다. REQUEST_CHANGES를
-남긴 리뷰어는 수정된 코드가 자신의 지적을 해결했으면 CI와 별개로 변경 요청을 해제합니다.
-CI 통과만으로 리뷰 지적이 해결되지는 않습니다.
+남긴 리뷰어는 수정된 코드가 자신의 지적을 해결했으면 변경 요청을 해제합니다. CI 통과만으로
+리뷰 지적이 해결되지는 않습니다.
 
-코드 리뷰 첫 줄은 실제 값을 적습니다.
+일반 소스 리뷰 판정에는 실제 값을 적습니다.
 
 ```text
-review: APPROVE|REQUEST_CHANGES head: <40-character-current-SHA> by: <Keeper-name>
+verdict: PASS|FAIL head: <40-character-current-SHA> by: <Keeper-name>
 ```
 
 APPROVE에는 [approve-guard.sh](../../scripts/review/approve-guard.sh)를 사용합니다.
-`--check`는 리뷰 가능 여부를 검사합니다. 작성하거나 push한 세션은 그 PR을 독립 승인할
-수 없습니다. 코드 승인은 CI 성공이나 병합 허가를 선언하지 않습니다.
+`--check`는 리뷰 가능 여부를 검사합니다. 실제 승인을 게시할 때는 판정과 증거가 담긴
+`--body`가 필요합니다. 작성하거나 push한 세션은 그 PR을 독립 승인할 수 없습니다. Release 판정에는 같은 head의 완료된 전체
+검증을 가리키는 `run: <full-CI-run-id>`를 추가합니다. 위는 형식이며 판정이 아닙니다.
+선택지와 placeholder를 실제 값으로 바꾸세요.
 
-병합에는 별도의 판정 줄을 사용합니다.
-
-```text
-verdict: PASS|FAIL head: <40-character-current-SHA> run: <PR-check-run-id> by: <Keeper-name>
-```
-
-위는 형식이며 판정이 아닙니다. 선택지나 placeholder를 실제 값으로 게시하지 마세요.
-병합 PASS는 현재 head의 완료된 성공 PR-check run을 가리킵니다. 최신 main이 PR 파일이나
-공용 검사 입력을 바꿨으면 main을 반영하고 새 run을 받습니다. 병합 전에 현재 리뷰와 댓글을
-다시 읽고 이후의 차단 판단까지 확인합니다.
-
-병합은 Keeper가 담당합니다. 헌법은 운영자가 띄운 외부 세션 중 `jeong-sik` 계정을 사용하는
-경우에만 제한된 예외를 둡니다. 현재 head의 필수 검사 5개가 모두 완료·성공하고, 같은 head와
-run을 지정한 [merge-guard](../../scripts/review/merge-guard.sh)의 읽기 전용 검사가
-`WOULD MERGE`를 내야 합니다. 그때만 `gh pr merge --match-head-commit`을 사용할 수 있습니다.
-외부 코딩 세션은 `--auto`, `--admin`, guard의 병합 모드를 사용하지 않습니다.
-Fork 기여자는 maintainer에게 통합을 맡기며 같은 증거 기준이 적용됩니다.
+병합 전에 현재 리뷰와 댓글을 다시 읽습니다. 미해결 차단 리뷰나 이후의 FAIL/HOLD 판정이
+있으면 통합하지 않습니다. 스택 아래부터 통합하며 base와 head의 변경을 검토한 뒤 진행합니다.
+통합 조건은 [merge-guard](../../scripts/review/merge-guard.sh)와 현재
+[CI·리뷰 안내](../CI-REVIEW-WORKFLOW.md)를 따릅니다. 일반 스택은 소스 리뷰,
+Release head는 완료된 전체 CI가 필요합니다. Fork 기여자는 maintainer에게 통합을 맡깁니다.
+소스 승인을 관측하지 않은 빌드·런타임 동작의 성공으로 기록하지 않습니다.
 
 정리 전에 병합된 커밋과 PR 상태를 확인합니다. 제출하지 않은 작업이 없는지 확인한 뒤
 끝난 worktree와 브랜치만 정리합니다. 병합된 PR 브랜치에는 다시 push하지 않고 새 PR을 엽니다.

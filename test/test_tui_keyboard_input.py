@@ -1627,6 +1627,7 @@ def keeper_runtime_http_fixtures(
                     "activation_mode": "autonomous",
                     "runtime_id": alpha_runtime_id,
                     "runtime_blocker_summary": None,
+                    "portrait": {"state": "ready", "equipment": {"face": "bare_face", "neck": "bare_neck", "head": "bare_head", "hand": "empty_hand", "base": "no_dish"}},
                 },
                 {
                     "runtime_class": "keeper",
@@ -1640,6 +1641,7 @@ def keeper_runtime_http_fixtures(
                     "activation_mode": "on_demand",
                     "runtime_id": beta_runtime_id,
                     "runtime_blocker_summary": None,
+                    "portrait": {"state": "ready", "equipment": {"face": "bare_face", "neck": "bare_neck", "head": "bare_head", "hand": "empty_hand", "base": "no_dish"}},
                 },
             ],
         },
@@ -14321,7 +14323,8 @@ def schedule_detail_interaction() -> Interaction:
             b"masc://keepers/alpha",
             b"schedule-stimulus-proof-701",
             b"schedule-occurrence-proof-701",
-            b"2026-08-25 09:30:20",
+            b"Turn started",
+            b"2026-08-25T09:30:20Z",
             b"Turn finished",
             b"WORK RESULT",
             b"bounded by its start and finish rows",
@@ -14331,6 +14334,10 @@ def schedule_detail_interaction() -> Interaction:
                 raise AssertionError(
                     f"Schedule turn/result page omitted {needle!r}: {result_plain!r}"
                 )
+        result_rows = screen_rows(result_page)
+        if not any(b"Turn started" in row and b"2026-08-25T09:30:20Z" in row
+                   for row in result_rows.values()):
+            raise AssertionError(f"Turn started row lost its exact ISO fixture timestamp: {result_rows!r}")
         returned = send_and_wait(process, master_fd, output, b"\x1b[D", b"j/k:move")
         returned_plain = CSI_RE.sub(b"", returned)
         for needle in (b"schedule-proof-701", b"status:running", b"queue:matched_pending/2 pending"):

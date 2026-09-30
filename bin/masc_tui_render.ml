@@ -35,6 +35,7 @@ module Markdown_cache = Masc_tui_markdown_render_cache
 module Composer = Masc_tui_composer
 module Composer_projection = Masc_tui_composer_projection
 module Keeper_control = Masc_tui_keeper_control
+module Item_account = Masc_tui_keeper_items
 module Task_selection = Masc_tui_task_selection
 module Overview_tasks = Masc_tui_overview_tasks
 module Tool_tree = Masc_tui_tool_tree
@@ -2871,10 +2872,10 @@ let render_schedule_list (state : state) =
                 ^ Ansi.reset)
           | None -> ());
          (match state.schedule_cancel_error with
-          | Some err ->
+          | Some (schedule_id, err) ->
               c.push
                 ((Theme.bad ()) ^ "  "
-                ^ fit_width (Terminal_text.single_line err) (cols - 8)
+                ^ fit_width (Terminal_text.single_line (schedule_id ^ ": " ^ err)) (cols - 8)
                 ^ Ansi.reset)
           | None -> ())
        end))
@@ -2930,7 +2931,7 @@ let schedule_turn_rows
           let at =
             match value, recorded_at with
             | true, Some timestamp ->
-              " \xc2\xb7 " ^ Terminal_text.short_timestamp timestamp
+              " \xc2\xb7 " ^ timestamp
             | _, _ -> ""
           in
           field ~style:tone label ((if value then "yes" else "no") ^ at)
@@ -3052,14 +3053,25 @@ let schedule_detail_lines ~width ~freshness ~runner (row : schedule_row)
       ~(wake_history : schedule_wake_history option)
       ~(wake_history_error : (string * string) option) =
   let field ?(style = Ansi.reset) label value =
-    ( style
-    , Printf.sprintf "  %-14s %s" label (Terminal_text.single_line value) )
+    let prefix = Printf.sprintf "  %-14s " label in
+    let prefix_cells = Message_layout.display_width prefix in
+    let rows =
+      if width - prefix_cells >= width / 2 then
+        let values = Masc_tui_text_block.rows ~max_cells:(max 1 (width - prefix_cells)) value in
+        (match values with
+         | [] -> [prefix]
+         | values -> List.mapi (fun index line ->
+             (if index = 0 then prefix else String.make prefix_cells ' ') ^ line) values)
+      else
+        (if String.equal label "" then [] else ["  " ^ label])
+        @ Masc_tui_text_block.rows ~max_cells:width value in
+    style, String.concat "\n" rows
   in
   let optional value = Option.value ~default:Masc_tui_theme.Glyph.no_value value in
   let timestamp value =
     match value with
     | None -> Masc_tui_theme.Glyph.no_value
-    | Some iso -> Terminal_text.short_timestamp iso
+    | Some iso -> iso
   in
   let queue =
     match row.sch_queue_projection_status, row.sch_queue_pending_count with
@@ -3072,10 +3084,9 @@ let schedule_detail_lines ~width ~freshness ~runner (row : schedule_row)
     match row.sch_reaction_projection_status, row.sch_reaction_latest_at_iso with
     | None, None -> Masc_tui_theme.Glyph.no_value
     | Some status, None -> status
-    | None, Some at -> Terminal_text.short_timestamp at
+    | None, Some at -> at
     | Some status, Some at ->
-        Printf.sprintf "%s  %s" status
-          (Terminal_text.short_timestamp at)
+        Printf.sprintf "%s  %s" status at
   in
   let summary =
     Option.value ~default:"(no payload summary)" row.sch_payload_summary
@@ -3104,7 +3115,7 @@ let schedule_detail_lines ~width ~freshness ~runner (row : schedule_row)
   ; field "Requested by" row.sch_requested_by
   ; field "Scheduled by" row.sch_scheduled_by
   ; field "Requested"
-      (Terminal_text.short_timestamp row.sch_requested_at_iso)
+      row.sch_requested_at_iso
   ; field "Due" (timestamp row.sch_due_at_iso)
   ; field "Next due" (timestamp row.sch_next_due_at_iso)
   ; field "Expires" (timestamp row.sch_expires_at_iso)
@@ -3156,9 +3167,7 @@ let schedule_detail_lines ~width ~freshness ~runner (row : schedule_row)
          [ field ~style:(Theme.warn ()) "Held"
              (match Tui_decode.schedule_hold_reading ~freshness ~runner hold with
               | Tui_decode.Hold_current ->
-                  let due =
-                    Terminal_text.short_timestamp hold.Tui_decode.srh_due_at_iso
-                  in
+                  let due = Terminal_text.short_timestamp hold.Tui_decode.srh_due_at_iso in
                   (match hold.Tui_decode.srh_reason with
                    | Tui_decode.Hold_previous_wake_untaken ->
                        Render_schedule.schedule_hold_reading ~due
@@ -3174,6 +3183,7 @@ let schedule_detail_lines ~width ~freshness ~runner (row : schedule_row)
                        Render_schedule.schedule_fence_hold_as_of_reading
                          ~checked ~target ~fence_owner))
          ; field "Held id" hold.Tui_decode.srh_occurrence_id
+         ; field "Held due" hold.Tui_decode.srh_due_at_iso
          ])
   @ schedule_turn_rows ~field row
   @ (if keeper_wake then
@@ -3186,39 +3196,78 @@ let schedule_detail_lines ~width ~freshness ~runner (row : schedule_row)
        ]
      else [])
 
+let schedule_detail_content (state : state) ~cols ~runner (row : schedule_row) =
+  let width = max 1 (framed_inner_width cols) in
+  let wire text = String.concat "\n"
+      (List.map Terminal_text.single_line (String.split_on_char '\n' text)) in
+  let warnings =
+    (* The latest action refusal is the row the result handler reveals.
+       Source freshness still has its fixed summary outside this document. *)
+    (match state.schedule_cancel_error with
+     | Some (schedule_id, error) when String.equal schedule_id row.sch_schedule_id ->
+         [Theme.bad (), "Cancel error: " ^ wire error]
+     | Some _ | None -> [])
+    @ (match schedule_source_warning state with
+       | None -> [] | Some error -> [Theme.bad (), "Source: " ^ wire error])
+    @ (match state.schedule_cancel_armed with
+       | None -> [] | Some id -> [Theme.warn (), "Armed: cancel " ^ wire id ^ " -- press x again to submit"]) in
+  let fields = schedule_detail_lines ~width
+      ~freshness:(schedule_list_freshness state) ~runner row
+      ~wake_history:state.schedule_wake_history
+      ~wake_history_error:state.schedule_wake_history_error in
+  List.concat_map (fun (style, text) ->
+      String.split_on_char '\n' text |> List.concat_map (fun line ->
+        if Message_layout.display_width line <= width then [style, line]
+        else match Message_layout.wrap_words ~max_cells:width line with
+        | [] -> [style, ""]
+        | lines -> List.map (fun text -> style, text) lines))
+    (warnings @ fields)
+
+let schedule_detail_height ~rows ~warning_rows ~count =
+  Masc_tui_scroll.content_height ~rows ~chrome:(framed_chrome_rows + warning_rows) ~count
+    ~preview_keep:None ~overflow_takes_row:true
+
+let schedule_detail_viewport (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let cols = if cols < keeper_split_threshold_cols then cols else cols - keeper_roster_pane_cols in
+  let count = match state.schedule_detail_id, state.schedules with
+    | Some id, Some snapshot ->
+        (match List.find_opt (fun row -> String.equal row.sch_schedule_id id) snapshot.scs_rows with
+         | None -> 0
+         | Some row -> List.length (schedule_detail_content state ~cols ~runner:snapshot.scs_runner_status row))
+    | Some _, None | None, _ -> 0 in
+  let warning_rows = if Option.is_some (schedule_source_warning state) then 1 else 0 in
+  count, schedule_detail_height ~rows ~warning_rows ~count
+
 let schedule_detail_pane (state : state) ~rows ~cols ~runner (row : schedule_row) buf =
   box_top buf cols;
   box_line buf cols
     (Printf.sprintf "%s  %s[%s]%s"
-       (screen_title " MASC Keepers / Schedules \xe2\x96\xb8 details")
+       (screen_title " MASC Keepers / Schedules ▸ details")
        (schedule_status_color row.sch_status)
        (Terminal_text.single_line row.sch_status) Ansi.reset);
   box_divider buf cols;
-  let warning_rows =
-    match schedule_source_warning state with
+  (* Source freshness governs every evidence row, so it stays visible while
+     the reader moves. The complete warning also remains in the reader for
+     narrow viewports or a refusal longer than the fixed status summary. *)
+  let warning_rows = match schedule_source_warning state with
     | None -> 0
-    | Some err ->
-        box_line buf cols (data_unreliable_row ~cols err);
-        1
-  in
-  let lines =
-    schedule_detail_lines
-      ~width:(max 1 (framed_inner_width cols))
-      ~freshness:(schedule_list_freshness state) ~runner row
-      ~wake_history:state.schedule_wake_history
-      ~wake_history_error:state.schedule_wake_history_error
-  in
-  let content_height = max 1 (rows - 6 - warning_rows) in
-  let max_scroll = max 0 (List.length lines - content_height) in
-  let scroll = max 0 (min state.schedule_scroll max_scroll) in
-  let lines_window = Rows.of_list ~first:scroll ~height:content_height lines in
-  for index = 0 to content_height - 1 do
+    | Some error -> box_line buf cols (data_unreliable_row ~cols error); 1 in
+  let lines = schedule_detail_content state ~cols ~runner row in
+  let count = List.length lines in
+  let height = schedule_detail_height ~rows ~warning_rows ~count in
+  let scroll = Masc_tui_scroll.normalize ~count ~height state.schedule_scroll in
+  let lines_window = Rows.of_list ~first:scroll ~height lines in
+  for index = 0 to height - 1 do
     match Rows.at lines_window (scroll + index) with
     | Some (style, line) -> box_line_styled buf cols ~style line
     | None -> box_empty buf cols
   done;
+  Option.iter (box_line_styled buf cols ~style:(Theme.recede ()))
+    (Masc_tui_scroll.position_row ~scroll ~height count);
   box_bottom buf cols;
-  scroll, max_scroll
+  scroll, Masc_tui_scroll.maximum ~count ~height
 ;;
 
 (* The schedule list stays beside the schedule. Opening one used to hide the others, and the others
@@ -6029,14 +6078,139 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
     (* The content rows under the title and divider, before an overflow
        indicator takes one of them. *)
     let base_height = max 0 (rows - framed_chrome_rows) in
-    (* The Keeper's own portrait opens Info, its Identity facts beside it,
-       where the pane is tall and wide enough to keep its facts in sight.
-       The name only picks the drawing; it is never drawn as text. *)
+    (* Info shows the current outfit; Items changes only the drawing for its
+       selected preview. Both use the server's observed equipment. *)
+    let portrait_reading = match (keeper_reading state k).Keeper_control.liveness with
+      | Keeper_control.Present runtime -> runtime.kr_portrait
+      | Keeper_control.Unobserved -> Tui_decode.Unavailable "not yet read"
+      | Keeper_control.Absent -> Tui_decode.Unavailable "absent from live roster"
+      | Keeper_control.Invalid detail -> Tui_decode.Unavailable detail in
+    let selected_item =
+      List.nth_opt Keeper_portrait_item.all state.item_cursor
+    in
+    let account =
+      match state.item_account with
+      | Some (name, account) when String.equal name k.k_name -> Some account
+      | Some _ | None -> None
+    in
+    let milli value = Printf.sprintf "%d.%03d" (value / 1000) (value mod 1000) in
+    let account_line =
+      match account, state.item_account_error with
+      | Some (Item_account.Ready account), _ ->
+          "  Balance " ^ milli account.balance_milli ^ " Candle · preview only"
+      | Some Item_account.Off, _ -> "  Candle off · preview only"
+      | Some (Item_account.Disabled reason), _ ->
+          "  Candle disabled: " ^ Terminal_text.single_line reason
+      | None, Some detail ->
+          "  Account unavailable: " ^ Terminal_text.single_line detail
+      | None, None -> "  Loading Item account…"
+    in
+    let item_account_facts item =
+      match account with
+      | Some (Item_account.Ready account) ->
+          let owned =
+            List.exists (fun owned ->
+              String.equal (Keeper_portrait_item.id owned)
+                (Keeper_portrait_item.id item)) account.owned_items in
+          let price =
+            match List.find_opt (fun (entry : Item_account.entry) ->
+              String.equal (Keeper_portrait_item.id entry.item)
+                (Keeper_portrait_item.id item)) account.catalog with
+            | Some entry ->
+              (match entry.price with
+               | Item_account.Unpriced -> "unpriced"
+               | Item_account.Priced amount -> milli amount)
+            | None -> "catalog unavailable"
+          in
+          Some (price ^ (if owned then " owned" else ""))
+      | Some (Item_account.Off | Item_account.Disabled _) | None -> None
+    in
     let portrait =
-      if state.detail_tab = Detail_info then
-        Masc_tui_keeper_portrait.shown ~name:k.k_name ~content_rows:base_height
-          ~content_cols:inner
-      else None
+      match state.detail_tab, portrait_reading with
+      | Detail_info, Tui_decode.Ready equipment ->
+          Masc_tui_keeper_portrait.shown ~name:k.k_name ~equipment
+            ~content_rows:base_height ~content_cols:inner
+      | Detail_items, Tui_decode.Ready equipment ->
+          Option.bind selected_item (fun item ->
+            Masc_tui_keeper_portrait.preview ~name:k.k_name
+              ~equipment:(Keeper_portrait_item.preview item equipment)
+              ~content_rows:base_height ~content_cols:inner)
+      | (Detail_info | Detail_items), Tui_decode.Unavailable _
+      | (Detail_sandbox | Detail_instructions | Detail_secrets | Detail_github
+        | Detail_identity | Detail_channels | Detail_automation | Detail_runs), _ -> None
+    in
+
+    let item_row cursor index item =
+      let worn =
+        match portrait_reading with
+        | Tui_decode.Unavailable _ -> false
+        | Tui_decode.Ready equipment ->
+            (match Keeper_portrait_item.in_slot equipment
+                     (Keeper_portrait_item.slot item) with
+             | None -> false
+             | Some equipped ->
+                 String.equal (Keeper_portrait_item.id equipped)
+                   (Keeper_portrait_item.id item))
+      in
+      let account_facts =
+        if inner < 90 then ""
+        else match item_account_facts item with
+          | Some facts -> "  " ^ facts
+          | None -> ""
+      in
+      Printf.sprintf "  %s %2d %-5s %s%s%s"
+        (if index = cursor then ">" else " ") (index + 1)
+        (Keeper_portrait_item.slot_id (Keeper_portrait_item.slot item))
+        (Keeper_portrait_item.id item) account_facts
+        (if worn then "  equipped" else "")
+    in
+    let portrait =
+      match state.detail_tab, portrait with
+      | Detail_items, Some band ->
+          let labels = List.mapi (item_row state.item_cursor) Keeper_portrait_item.all in
+          if List.exists (fun line -> Message_layout.display_width line > inner)
+               (Masc_tui_keeper_portrait.beside band labels)
+          then None else Some band
+      | _, portrait -> portrait
+    in
+    let item_lines () =
+      let items = Keeper_portrait_item.all in
+      let count = List.length items in
+      let cursor = max 0 (min (count - 1) state.item_cursor) in
+      let headline =
+        [ Printf.sprintf "  Items %d/%d · j/k to preview" (cursor + 1) count
+        ; account_line
+        ] in
+      let observation =
+        match portrait_reading with
+        | Tui_decode.Ready _ -> []
+        | Tui_decode.Unavailable reason ->
+            [ "  Portrait unavailable: " ^ Terminal_text.single_line reason ] in
+      let selected_facts =
+        match List.nth_opt items cursor with
+        | None -> []
+        | Some item ->
+            (match item_account_facts item with
+             | Some facts -> [ "  Selected: " ^ facts ]
+             | None -> []) in
+      let footer = [ "  Preview changes this picture only." ] in
+      let reserved = List.length headline + List.length selected_facts
+                     + List.length observation + List.length footer in
+      let visible = min count (max 1 (base_height - reserved)) in
+      let first = max 0 (min (cursor - (visible / 2)) (count - visible)) in
+      let rows =
+        items
+        |> List.mapi (fun index item -> index, item)
+        |> List.filter_map (fun (index, item) ->
+             if index < first || index >= first + visible then None
+             else Some (item_row cursor index item))
+      in
+      let listing =
+        match portrait with
+        | Some band -> Masc_tui_keeper_portrait.beside band (headline @ rows)
+        | None -> headline @ rows
+      in
+      listing @ selected_facts @ observation @ footer
     in
     (* A long value takes the width below its label, rather than the few
        cells a fixed label column leaves beside it. These are actual display
@@ -6086,6 +6260,9 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
         (match portrait with
          | Some band -> Masc_tui_keeper_portrait.beside band identity
          | None -> identity);
+      (match portrait_reading with
+       | Tui_decode.Ready _ -> ()
+       | Tui_decode.Unavailable reason -> add_row "Portrait:" ("unavailable: " ^ Terminal_text.single_line reason));
       add_empty ();
 
       (* The live roster owns this reading, including its absence after a
@@ -6840,6 +7017,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
     let all_lines =
       match state.detail_tab with
       | Detail_info -> info_lines ()
+      | Detail_items -> item_lines ()
       | Detail_sandbox ->
           let width = max 24 (cols - 8) in
           let status =
@@ -6970,7 +7148,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
        opens with a section called "Identity", which is also the name of
        another tab, so a reader with no mark had a wrong guess waiting.
 
-       Drawn through [tab_strip] with the row's width: nine tabs are wider
+       Drawn through [tab_strip] with the row's width: ten tabs are wider
        than the row beside the roster pane, and cut from the right the mark
        on Runs was the part that went. *)
     let before =
@@ -7156,92 +7334,38 @@ let render_keeper_logs (state : state) =
     box_line buf cols header;
     box_divider buf cols;
 
-    (* The names come from the same description as the readings, in the module
-       that owns the widths. Written here, they were eight numbers away from
-       the eight they named. *)
     box_line_styled buf cols ~style:(Theme.recede ())
-      Observation_layout.plain_log_header;
+      "  TIME  KIND  LATENCY · full facts below";
     box_divider buf cols;
 
-    (match state.log_error with
-      | None -> ()
-      | Some error ->
-          let style =
-            match error with
-            | Metrics_tail.Storage_error _ -> (Theme.bad ())
-            | Metrics_tail.Row_errors _ -> (Theme.warn ())
-          in
-          let diagnostic =
-            Keeper_chat.terminal_safe_text
-              (Metrics_tail.error_to_string error)
-          in
-          box_line_styled buf cols ~style
-            ("  " ^ diagnostic);
-          box_divider buf cols);
-
-    (* Content area *)
+    let log_rows = Masc_tui_types.keeper_log_rows state ~cols in
+    let row_count = List.length log_rows in
     let content_height =
-      Metrics_tail.content_height ~terminal_rows:rows ~error:state.log_error
+      Metrics_tail.content_height ~terminal_rows:rows ~error:None
     in
     let scroll =
-      Metrics_tail.normalize_scroll ~entry_count:total_entries ~content_height
-        state.log_scroll
+      Metrics_tail.normalize_scroll ~entry_count:row_count ~content_height
+        (if state.log_wrap_cols = Some cols then state.log_scroll else 0)
     in
-
-    if total_entries = 0 then begin
+    let visible = Rows.of_list ~first:scroll ~height:content_height log_rows in
+    for index = 0 to content_height - 1 do
+      if row_count = 0 && index = 0 then
+        box_line_styled buf cols ~style:(Theme.recede ())
+          ("  " ^ Metrics_tail.empty_message state.log_error)
+      else
+        match Rows.at visible (scroll + index) with
+        | Some (diagnostic, line) ->
+            let style = match diagnostic with
+              | None -> Ansi.reset
+              | Some (Metrics_tail.Storage_error _) -> Theme.bad ()
+              | Some (Metrics_tail.Row_errors _) -> Theme.warn () in
+            box_line_styled buf cols ~style line
+        | None -> box_empty buf cols
+    done;
+    if row_count > content_height then
       box_line_styled buf cols ~style:(Theme.recede ())
-        ("  " ^ Metrics_tail.empty_message state.log_error);
-      for _ = 1 to content_height - 1 do
-        box_empty buf cols
-      done
-    end else begin
-      let visible =
-        Metrics_tail.visible ~entries:state.log_entries ~content_height ~scroll
-      in
-      let drawn = ref 0 in
-      List.iter
-        (fun (e : Tui_decode.log_entry) ->
-          incr drawn;
-          let time_str = Terminal_text.clock_timestamp e.le_ts in
-          let tool_names = Terminal_text.single_lines e.le_tools_used in
-          let tools_str =
-            if List.length tool_names > 0 then
-              " "
-              ^ String.concat ","
-                  (List.filteri (fun i _ -> i < 2) tool_names)
-            else ""
-          in
-          let terminal_entry =
-            { e with
-              le_work_kind =
-                Terminal_text.optional_single_line e.le_work_kind
-            }
-          in
-          let line =
-            Observation_layout.plain_log_row ~time:time_str terminal_entry
-            ^ tools_str
-          in
-          box_line buf cols line)
-        visible;
-      for _ = !drawn to content_height - 1 do
-        box_empty buf cols
-      done
-    end;
-
-    (* Scroll indicator: the same "rows X-Y of Z" shape the tool-call pane
-       reads, so one glance answers both how far and how much is left -- a
-       bare "scroll N" said the offset but not the distance either way. *)
-    if total_entries > content_height then begin
-      (* Counted back from the newest, because that is the direction the rows
-         are drawn in: row 1 is the last thing that happened. A bare
-         "rows 1-20 of 300" read as the start of the file. *)
-      let indicator =
-        Printf.sprintf "newest %d-%d of %d" (scroll + 1)
-          (min total_entries (scroll + content_height))
-          total_entries
-      in
-      box_line_styled buf cols ~style:(Theme.recede ()) indicator
-    end;
+        (Printf.sprintf "newest rows %d-%d of %d" (scroll + 1)
+           (min row_count (scroll + content_height)) row_count);
 
     box_bottom buf cols;
 
@@ -7249,7 +7373,8 @@ let render_keeper_logs (state : state) =
       (footer_line state ~max_cells:cols
          ~hints:(Masc_tui_keys.footer_hints state.view));
 
-    finish_surface state ~surface_key:"keeper-logs" ~rows:terminal_rows
+    finish_surface state ~clamped:(Keeper_logs_scroll { scroll; cols })
+      ~surface_key:"keeper-logs" ~rows:terminal_rows
       ~cols buf
   end
 
@@ -12603,8 +12728,12 @@ let render_runtime_pick (state : state) =
             in
             let target =
               Message_layout.fit_middle target_width columns.Masc_tui_types.rpc_target
+              |> fun text -> fit_width text target_width
             in
-            let route_col = fit_width columns.Masc_tui_types.rpc_route route_width in
+            let route_col =
+              Message_layout.fit_middle route_width columns.Masc_tui_types.rpc_route
+              |> fun text -> fit_width text route_width
+            in
             let facts =
               Masc_tui_types.runtime_pick_visible_facts ~cols item
               |> List.map (fun (fact : Masc_tui_types.runtime_pick_fact) ->
@@ -12615,10 +12744,9 @@ let render_runtime_pick (state : state) =
             in
             Printf.sprintf "%s%s  %s  %s" badge target route_col facts
           in
-          c.push
-            (if view.Masc_tui_pick_list.selected_row = Some row then
-               Ansi.reverse ^ ">" ^ Ansi.reset ^ " " ^ line
-             else "  " ^ line))
+          if view.Masc_tui_pick_list.selected_row = Some row then
+            c.push_selected ("> " ^ Masc_tui_theme.strip_sgr line)
+          else c.push ("  " ^ line))
         view.Masc_tui_pick_list.rows)
 
 (* The Resources surface: the MCP resource inventory on the left, the
@@ -15191,7 +15319,14 @@ let render_about (state : state) =
         ~keepers:(match keepers with
           | Masc_tui_emblem_screen.Keepers_read _ ->
               List.map (fun (keeper : Tui_decode.keeper) ->
-                Terminal_text.single_line keeper.k_name) state.keepers
+                let portrait =
+                  match Keeper_control.liveness_of_roster state.keeper_roster keeper.k_name with
+                  | Keeper_control.Present runtime -> runtime.kr_portrait
+                  | Keeper_control.Unobserved | Keeper_control.Absent
+                  | Keeper_control.Invalid _ ->
+                      Keeper_portrait_equipment.Unavailable "Keeper equipment not observed"
+                in
+                Terminal_text.single_line keeper.k_name, portrait) state.keepers
           | Masc_tui_emblem_screen.Keepers_unreadable
           | Masc_tui_emblem_screen.Keepers_unread -> [])
         ~caption:

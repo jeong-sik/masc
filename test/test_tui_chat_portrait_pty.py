@@ -227,7 +227,7 @@ def frames_beside(output: bytes, portrait_rows: set[int]) -> int:
 
 
 def open_chat(process, fd, output) -> None:
-    h.send_and_wait(process, fd, output, b"2", b"MASC Keepers")
+    h.tab_until(process, fd, output, b"MASC Keepers")
     h.select_keeper_row(process, fd, output, b"alpha")
     h.send_and_wait(process, fd, output, b"c", chat_title(b"alpha"))
     h.drain_until_quiet(process, fd, output)

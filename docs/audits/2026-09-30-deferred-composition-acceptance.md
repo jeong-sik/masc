@@ -55,7 +55,7 @@ handler, executor and evidence store. Its real read-only nodes first search the
 capability inventory, then read the lane profile and search an isolated Board
 using that profile. A malformed FTS query fails the first node and prevents both
 dependent nodes from running. No leaf service stub is needed. These are the
-fixture's assertions; native execution is still pending. Such a fixture cannot prove autonomous model choice,
+fixture's assertions, now verified by the native run below. Such a fixture cannot prove autonomous model choice,
 provider transport behavior, token savings or the quality of a real task result.
 
 ## Findings before the joined test
@@ -83,21 +83,21 @@ do not establish spontaneous discovery and selection.
 - Component suite CI: [36598237622](https://github.com/jeong-sik/masc/actions/runs/36598237622),
   head `0e3348dea76ddef7ee4779c43b9e66f0e068cb77`; all six targeted component suites passed (91 tests).
   This baseline predates the joined fixture.
-- Joined fixture: first native CI [36599722466](https://github.com/jeong-sik/masc/actions/runs/36599722466)
-  failed during compilation: `Skill_reference` was not visible to the test.
-  Its direct `masc.skill_reference` dependency is now declared. The remaining
-  new modules were checked against direct dependencies and `masc_test_deps`
-  re-exports. The next native run [36601156316](https://github.com/jeong-sik/masc/actions/runs/36601156316)
-  compiled the fixture, then rejected its TOML because `compositions.0.params.0`
-  lacked the required `description`. That description is now supplied, and
-  the complete fixture was checked against the catalog parser's required and
-  allowed fields. The newly corrected candidate remains pending native CI.
-  The next run [36646271028](https://github.com/jeong-sik/masc/actions/runs/36646271028)
-  passed discovery, then the real loader refused to read current work scope
-  because the fixture had not installed its Keeper owner inventory. The
-  retained-Agent fixture now persists its metadata and installs a real owner
-  under its Eio switch. Native verification of this correction is pending.
-  No joined execution pass is claimed.
+- Joined fixture: [36653388520](https://github.com/jeong-sik/masc/actions/runs/36653388520)
+  succeeded at head `7be5ba4ed79146ea95310aad155c899eda5d4f5d`.
+  The suite ran all 14 cases. Its joined case confirmed schema absence,
+  exact discovery, discovery without loading, successful loading into the
+  retained Agent, actual node execution and producer-to-consumer binding.
+  It found the seeded Board post and matched returned settlements to durable
+  evidence with the exact reference and parent invocation. An invalid FTS
+  query produced durable failure with only the first node settled and both
+  dependent dispatches prevented. The Board post count remained unchanged.
+  The fixture uses real Keeper metadata ownership and the tool-call audit
+  store. It accepts the loader's text response and reads large results through
+  the official output codec and integrity-checked blob store. These boundaries
+  are verified through production handlers in an isolated deterministic
+  workspace. This targeted Test run is separate from required PR-check
+  approval, main freshness and deployment evidence.
 - Current production execution: not established by this audit.
 - Unprompted model selection and independently checked task outcome: not measured.
 

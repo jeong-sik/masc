@@ -116,6 +116,8 @@ def run(binary: str, phase: str, captures: Path | None):
 
     def interact(process, fd, _slave, output, _base):
         try:
+            h.resize_and_wait(process, fd, output, rows=38, columns=120,
+                              needle=b"MASC Dashboard", controls=(h.FULL_REDRAW,))
             await_screen(process, fd, output,
                 lambda text: all(line in text for line in SUMMARY), "exact large currency summary")
             capture(output, "ready-overview")
@@ -177,11 +179,10 @@ def run(binary: str, phase: str, captures: Path | None):
 
     h.run_terminal_scenario(binary, description="Candle currency survives " + phase,
         interact=interact, http_fixtures=fixtures, http_requests=requests,
-        terminal_rows=38, terminal_cols=120)
+        terminal_cols=120)
 
 
-
-def currency_follows_workspace_authority(binary: str, captures: Path | None, *, return_to_a: bool = False) -> None:
+def currency_follows_workspace_authority(binary: str, captures: Path | None) -> None:
     fixtures = h.keeper_runtime_http_fixtures(alpha_runtime_id="currency.authority")
     original = copy.deepcopy(fixtures[ROSTER_PATH][1])
     phases = {"current": "a-ready", "base": "", "hold": False}
@@ -189,6 +190,7 @@ def currency_follows_workspace_authority(binary: str, captures: Path | None, *, 
     held_started = threading.Event()
     release_held = threading.Event()
     b_summary = (b"Candle issued: 1.000", b"Candle burned: 0.000", b"Candle circulating: 1.000")
+    fresh_summary = (b"Candle issued: 3.000", b"Candle burned: 0.000", b"Candle circulating: 3.000")
 
     def prepare(base):
         h.seed_row_budget_workspace(base)
@@ -204,11 +206,12 @@ def currency_follows_workspace_authority(binary: str, captures: Path | None, *, 
             phase, base = phases["current"], phases["base"]
         if phase == "identity-error":
             return h.RawHttpResponse(503, b'{"error":"identity deliberately unavailable"}', content_type="application/json")
-        effective = base if phase in ("a-ready", "a-current") else base + "-workspace-b"
+        effective = base if phase in ("a-ready", "a-fresh", "a-booting") else base + "-workspace-b"
         _, payload = h.fleet_safety_fixture()
+        payload["version"] = phase
         payload["paths"] = {"effective_base_path": effective,
                             "effective_masc_root": effective + "/.masc"}
-        payload["startup"] = {"state_ready": phase != "b-booting"}
+        payload["startup"] = {"state_ready": phase not in ("a-booting", "b-booting")}
         return h.RawHttpResponse(200, json.dumps(payload).encode(), content_type="application/json")
 
     def roster():
@@ -217,12 +220,13 @@ def currency_follows_workspace_authority(binary: str, captures: Path | None, *, 
             held = phases["hold"]
             phases["hold"] = False
         payload = copy.deepcopy(original)
+        amount = "3000" if phase == "a-fresh" else "1000"
         payload["candle"] = dict(READY) if phase == "a-ready" else {
-            "status": "ready", "issued_milli": "1000",
-            "burned_milli": "0", "circulating_milli": "1000"}
+            "status": "ready", "issued_milli": amount,
+            "burned_milli": "0", "circulating_milli": amount}
         for row in payload["keepers"]:
             row["candle_balance_milli"] = (
-                BALANCE_MILLI if phase == "a-ready" else "1000") if row["name"] == "alpha" else "0"
+                BALANCE_MILLI if phase == "a-ready" else amount) if row["name"] == "alpha" else "0"
         if held:
             held_started.set()
             if not release_held.wait(timeout=30):
@@ -234,11 +238,12 @@ def currency_follows_workspace_authority(binary: str, captures: Path | None, *, 
     fixtures[ROSTER_PATH] = roster
 
     def interact(process, fd, _slave, output, _base):
+        h.resize_and_wait(process, fd, output, rows=50, columns=160,
+                          needle=b"MASC Dashboard", controls=(h.FULL_REDRAW,))
         def seen(phase, predicate):
             await_screen(process, fd, output, predicate, "currency authority " + phase)
             if captures is not None:
-                prefix = "authority-aba-" if return_to_a else "authority-"
-                (captures / (prefix + phase + ".txt")).write_bytes(screen(output))
+                (captures / ("authority-" + phase + ".txt")).write_bytes(screen(output))
         def no_currency(text):
             return b"Candle issued:" not in text and b"Candle burned:" not in text \
                 and b"Candle circulating:" not in text and b"Candle ready:" not in text
@@ -285,13 +290,6 @@ def currency_follows_workspace_authority(binary: str, captures: Path | None, *, 
             publish("b-ready")
             seen("held-b-ready", lambda text: b"[connected]" in text
                  and b"workspace mismatch" in text and no_currency(text))
-            if return_to_a:
-                # The paths now equal the held response's original A, but its
-                # authority was withdrawn at B. This isolates incarnation
-                # admission from merely comparing the final path strings.
-                publish("a-current")
-                seen("held-a-current", lambda text: b"[connected]" in text
-                     and b"workspace mismatch" not in text and no_currency(text))
             after_release = len(output)
             release_held.set()
             seen("held-recovered", lambda text: all(line in text for line in b_summary))
@@ -299,11 +297,46 @@ def currency_follows_workspace_authority(binary: str, captures: Path | None, *, 
                            for line in SUMMARY), "late A roster restored foreign currency"
         finally:
             release_held.set()
+        for withdrawal in ("a-booting", "identity-error", "b-ready"):
+            publish("a-ready")
+            os.write(fd, b"r")
+            seen(withdrawal + "-before", lambda text: all(line in text for line in SUMMARY))
+            h.send_and_wait(process, fd, output, b"A", b"MASC Activity")
+            held_started.clear()
+            release_held.clear()
+            with lock:
+                phases["hold"] = True
+            try:
+                h.palette_go(process, fd, output, b"go Dashboard", b"MASC Dashboard")
+                assert h.wait_for_fixture_event(process, fd, output, held_started,
+                    timeout=WAIT_SECONDS), "old A roster did not enter its held response"
+                publish(withdrawal)
+                if withdrawal == "a-booting":
+                    predicate = lambda text: b"booting" in text and no_currency(text)
+                elif withdrawal == "identity-error":
+                    predicate = lambda text: b"MASC Dashboard" in text and no_currency(text)
+                else:
+                    predicate = lambda text: b"workspace mismatch" in text and no_currency(text)
+                seen(withdrawal + "-withdrawn", predicate)
+                publish("a-fresh")
+                seen(withdrawal + "-ready-again", lambda text: b"va-fresh" in text
+                     and b"[connected]" in text and b"workspace mismatch" not in text
+                     and no_currency(text))
+                after_release = len(output)
+                release_held.set()
+                # The scoped request stays in flight until its completion is
+                # applied. Fresh roster values therefore prove that the old
+                # completion was processed before the follow-up read finished.
+                seen(withdrawal + "-fresh", lambda text: all(line in text for line in fresh_summary))
+                assert not any(line in h.CSI_RE.sub(b"", bytes(output[after_release:]))
+                               for line in SUMMARY), "withdrawn A roster restored obsolete currency"
+            finally:
+                release_held.set()
         os.write(fd, b"q")
 
-    h.run_terminal_scenario(binary, description="Candle amounts follow current workspace authority" + (" across A/B/A" if return_to_a else ""),
+    h.run_terminal_scenario(binary, description="Candle amounts follow current workspace authority",
         interact=interact, http_fixtures=fixtures, prepare_workspace=prepare,
-        refresh=0.5, terminal_rows=50, terminal_cols=160)
+        refresh=0.5, terminal_cols=160)
 
 
 def short_overview_keeps_its_baseline(binary: str) -> None:
@@ -347,6 +380,8 @@ def short_overview_keeps_its_baseline(binary: str) -> None:
             fixtures[ROSTER_PATH] = (200, roster_payload)
 
         def interact(process, fd, _slave, output, _base):
+            h.resize_and_wait(process, fd, output, rows=38, columns=100,
+                              needle=b"MASC Dashboard", controls=(h.FULL_REDRAW,))
             await_screen(process, fd, output,
                 lambda text: b"attention-2" in text and b"Goals" in text,
                 "loaded baseline task and attention rows")
@@ -394,7 +429,7 @@ def short_overview_keeps_its_baseline(binary: str) -> None:
 
         h.run_terminal_scenario(binary, description="short Candle Overview keeps baseline " + phase,
             interact=interact, http_fixtures=fixtures,
-            prepare_workspace=h.seed_row_budget_workspace, terminal_rows=38, terminal_cols=100)
+            prepare_workspace=h.seed_row_budget_workspace, terminal_cols=100)
 
 
 if __name__ == "__main__":
@@ -411,6 +446,5 @@ if __name__ == "__main__":
     for phase in ("disabled", "malformed-supply", "malformed-balance", "off"):
         run(binary, phase, captures)
     currency_follows_workspace_authority(binary, captures)
-    currency_follows_workspace_authority(binary, captures, return_to_a=True)
     short_overview_keeps_its_baseline(binary)
-    print("Candle currency TUI: PASS (10 real PTY scenarios)")
+    print("Candle currency TUI: PASS (9 real PTY scenarios)")

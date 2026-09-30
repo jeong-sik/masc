@@ -22,9 +22,10 @@ let keeper_names_in dir =
 
 let () =
   let out = ref "keeper-portraits.png" and edge = ref default_edge and dir = ref None and names = ref [] in
-  let at = ref None in
+  let at = ref None and compact = ref false in
   Arg.parse
     [
+      ("--compact", Arg.Set compact, "draw the small terminal mosaic design");
       ("--out", Arg.Set_string out, "FILE  where to write the PNG");
       ("--size", Arg.Set_int edge, "PX  portrait edge in pixels");
       ("--keepers-dir", Arg.String (fun d -> dir := Some d), "DIR  draw every KEEPER.toml found here");
@@ -42,8 +43,9 @@ let () =
       exit 2
   | _ :: _, Some size ->
       let e = Keeper_portrait_draw.int_of_size size in
-      let rows = (List.length names + per_row - 1) / per_row in
-      let width = e * per_row and height = e * rows in
+      let columns = min per_row (List.length names) in
+      let rows = (List.length names + columns - 1) / columns in
+      let width = e * columns and height = e * rows in
       let pr, pg, pb = page in
       let rgb = Bytes.create (width * height * 3) in
       for i = 0 to (width * height) - 1 do
@@ -58,11 +60,15 @@ let () =
             | Some milliseconds -> Keeper_portrait_draw.pose_at ~milliseconds
             | None -> Keeper_portrait_draw.still
           in
+          let draw =
+            if !compact then Keeper_portrait_draw.render_compact_posed
+            else Keeper_portrait_draw.render_posed
+          in
           let img =
-            Keeper_portrait_draw.render_posed (Keeper_portrait_look.body_of_name name)
+            draw (Keeper_portrait_look.body_of_name name)
               (Keeper_portrait_look.equipment_of_name name) pose size
           in
-          let ox = n mod per_row * e and oy = n / per_row * e in
+          let ox = n mod columns * e and oy = n / columns * e in
           for y = 0 to e - 1 do
             for x = 0 to e - 1 do
               let c, a = Keeper_portrait_draw.pixel img ~x ~y in

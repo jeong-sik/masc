@@ -23,6 +23,14 @@ val before_move :
     A failed credential-lock admission returns [Error] without releasing or
     moving the machine. Keeper phase changes are governed by the Keeper registry. *)
 
+val release_retired : keeper_name:string -> by:string -> (unit, string) result
+(** Lets go of the controller [keeper_name] holds when its Keeper is removed
+    for good, and tells the board as {!before_move} would for a stopped
+    Keeper. {!holder_left} cannot see this departure: with the meta gone, the
+    Keeper's own credential has no expiry and reads like an agent that is
+    coming back. [Ok ()] also when it holds nothing or no machine is loaded;
+    [Error] names a machine that could not be read. *)
+
 (** Why a call was stopped before it reached the machine. *)
 type call_refusal =
   | Refused of string  (** the call cannot run as asked; the caller can fix it *)

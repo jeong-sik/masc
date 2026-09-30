@@ -21,12 +21,13 @@ from urllib.parse import quote, urlsplit, urlunsplit
 from urllib.request import Request
 
 import proof_http
+import skill_activation_events
 
 
 REQUIRED_PRODUCER_ARTIFACTS = {
     "health.json",
     "dashboard-tools.json",
-    "skill-activations.json",
+    skill_activation_events.EVENTS_FILENAME,
     "tui-build-evidence.json",
     "masc_tui.exe",
 }
@@ -357,10 +358,15 @@ def verify_producer_artifacts(
         (root / "dashboard-tools.json").read_bytes(),
         "producer dashboard-tools.json",
     )
-    ledger = decode_object(
-        (root / "skill-activations.json").read_bytes(),
-        "producer skill-activations.json",
-    )
+    events_name = skill_activation_events.EVENTS_FILENAME
+    try:
+        ledger = skill_activation_events.fold_event_log(
+            (root / events_name).read_bytes()
+        )
+    except skill_activation_events.SkillLedgerError as error:
+        raise CaptureError(f"producer {events_name}: {error}") from error
+    if ledger is None:
+        raise CaptureError(f"producer {events_name} has recorded nothing")
     projection = object_field(dashboard, "skill_activations", "producer dashboard")
     require(
         projection.get("ledger") == ledger,

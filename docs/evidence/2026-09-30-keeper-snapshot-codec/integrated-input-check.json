@@ -1,0 +1,39 @@
+{
+  "kind": "source correspondence after parent image and Queue integration, not a new execution",
+  "executed_run_id": "4NEEPAOJ",
+  "input_files": [
+    {
+      "path": "lib/keeper_runtime/keeper_event_queue_snapshot_codec.ml",
+      "sha256": "9639c64bcb1136513202b6a7620843a6a60575d932a8a23c7104a5c28f35208e",
+      "matches_executed_input": true
+    },
+    {
+      "path": "lib/keeper_runtime/keeper_event_queue_snapshot_codec.mli",
+      "sha256": "2141939d1aa19f5d3b8da9c0540bac3d25d567a88976be0c6074d3ae669349f5",
+      "matches_executed_input": true
+    },
+    {
+      "path": "lib/keeper_runtime/keeper_event_queue_persistence.ml",
+      "sha256": "fb41df1b00d7a34a770a357278fa7009d585e3120f1a82031e7d04fce9d5ccf7",
+      "matches_executed_input": true
+    },
+    {
+      "path": "lib/keeper_runtime/keeper_event_queue_persistence.mli",
+      "sha256": "cfa6e3490d771491a3e1aa50146b99a14763fa56a5675b489f34f64cfe856a18",
+      "matches_executed_input": true
+    },
+    {
+      "path": "test/test_keeper_event_queue_codec_pool.ml",
+      "sha256": "f871408749ef01f49d24b5504684e71b91b410b333e04cbb011bf1b98a1a7ac9",
+      "matches_executed_input": true
+    }
+  ],
+  "test_dune": {
+    "whole_file_matches_executed_input": false,
+    "target_stanza_matches_executed_input": true,
+    "target_stanza_sha256": "dfd989e032b5993fcdb814eabf33bc9a3026f933be99af387e79afd7f3a44271",
+    "difference": "Unrelated test_tui_image_preview gains a direct digestif dependency."
+  },
+  "new_test_run": false,
+  "full_application_or_runtime_verified": false
+}

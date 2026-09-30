@@ -60,11 +60,13 @@ output means last captured, not a continuously synchronized copy of the Board.
 - The named `result` port includes both status and result lanes so its related
   status row and recorded failure cause stay available to downstream consumers.
 - Status rows preserve exact run ID, keeper, preset, topology, run lifecycle,
-  failure code, timestamps and the API's evidence state.
+  failure code, timestamps and the API's evidence state. Status, stage and progress
+  must agree with the host wire contract, including exact nonnegative panel counts.
 - The source incarnation must equal the detail's run ID. Pending evidence
   requires a running run; absent evidence requires a terminal run.
 - Result rows exist only when a captured Board post has `origin.source=fusion`
-  and `origin.fusion_run_id` equals the exact captured run.
+  and `origin.fusion_run_id` equals the exact captured run, the immutable
+  `fusion_producer` equals its Keeper, and the recorded body is a string.
   The supplied Board body is retained as data, never instructions.
 - Decision text from the run registry is explicitly a **decision preview**.
   It is not the complete typed judge decision or proof of execution.
@@ -77,6 +79,12 @@ output means last captured, not a continuously synchronized copy of the Board.
   a snapshot's exporter is not substituted for a model or judge.
 - These are frozen captures. No automatic Fusion completion notification,
   refresh of an API response, Keeper read, or delivery success is inferred.
+
+The MCP text content is a compact summary; complete rows and Board body appear
+once in `structuredContent`. The actual UTF-8 JSON-RPC response, including its
+newline, must fit the existing manifest reply envelope. An oversized response
+returns an explicit bounded error with no accepted output; source bytes are never
+trimmed. The container includes the same manifest used for this check.
 
 ## Validation boundary
 

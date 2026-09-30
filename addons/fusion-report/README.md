@@ -33,6 +33,17 @@ The MCP text content is a short summary; structuredContent carries the complete
 report. The worker checks the serialized UTF-8 reply against the manifest's
 declared envelope and explicitly refuses an oversized reply without truncating
 the analysis body or accepting incomplete output as a successful report.
+The results producer permits a 4 MiB reply. The report allocates 8 MiB for the
+full retained body plus Markdown and host provenance; both packages enforce
+their own manifest limits. Additional provenance can still exceed the report
+allocation and is refused explicitly.
+
+Native Fusion Board posts carry a short headline in `body`. Reports render that
+headline separately and read the analysis from canonical `meta.judge.resolved_answer`.
+The canonical judge states are `synthesized` and `failed`; missing or malformed
+judge metadata is refused. Structured synthesis remains in the retained original
+source, reachable through the report context's immutable output digest. Run failure,
+judge failure, incomplete input and delivery remain separate observations.
 
 The worker emits `delivery_status = "not_attempted"`. Use the existing host
 Evidence operation to freeze selected report rows and optionally send them to

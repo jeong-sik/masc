@@ -1,0 +1,3 @@
+[33mASSERT[0m the failed switch terminated and propagated shutdown
+[33mASSERT[0m cancelled update leaves prior revision
+[33mASSERT[0m released cancelled codec can encode again

@@ -140,7 +140,7 @@ type composer =
 
 val composer_of_execution : Runtime_execution.t -> composer
 
-val composer_of_runtime : Runtime.t option -> composer
+val composer_of_runtime : Runtime_instance.t option -> composer
 (** {!composer_of_execution} of a materialized runtime, {!Not_materialized}
     of [None]. Used to classify the forecast's current lane; historical
     response observations do not depend on the current catalog. *)

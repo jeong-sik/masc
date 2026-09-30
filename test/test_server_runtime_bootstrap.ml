@@ -358,7 +358,7 @@ let write_config_root_keeper_toml ?(autoboot_enabled = true) config_root name =
 
 let fixture_runtime_id () =
   match Runtime.get_default_runtime () with
-  | Some runtime -> Runtime.id_of_binding runtime.binding
+  | Some runtime -> Runtime_instance.id_of_binding runtime.binding
   | None -> "test.runtime"
 
 let write_basepath_keeper_toml base_path name =

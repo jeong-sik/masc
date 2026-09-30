@@ -231,13 +231,13 @@ type pending_approval_projection =
     entries : Yojson.Safe.t list option;
     count : int option;
     state : Yojson.Safe.t;
-    error : Keeper_approval_queue.storage_error option;
+    error : Keeper_approval_queue_result.storage_error option;
   }
 
 let pending_approval_projection_with_reader
     ~(read_pending :
        base_path:string ->
-       (Yojson.Safe.t list, Keeper_approval_queue.storage_error) result)
+       (Yojson.Safe.t list, Keeper_approval_queue_result.storage_error) result)
     ~base_path ~keeper_name =
   match
     Keeper_runtime_trust_timeline.pending_approval_json_with_reader
@@ -247,7 +247,7 @@ let pending_approval_projection_with_reader
       {
         entries = Some entries;
         count = Some (List.length entries);
-        state = Keeper_approval_queue.approval_queue_ready_state_json;
+        state = Keeper_approval_queue_result.approval_queue_ready_state_json;
         error = None;
       }
   | Error error ->
@@ -255,7 +255,7 @@ let pending_approval_projection_with_reader
         entries = None;
         count = None;
         state =
-          Keeper_approval_queue.approval_queue_unavailable_state_json error;
+          Keeper_approval_queue_result.approval_queue_unavailable_state_json error;
         error = Some error;
       }
 
@@ -524,7 +524,7 @@ let approval_queue_unavailable_timeline_event ~observed_at_unix
     pending_approval_projection =
   match pending_approval_projection.error with
   | None -> None
-  | Some (error : Keeper_approval_queue.storage_error) ->
+  | Some (error : Keeper_approval_queue_result.storage_error) ->
       let ts_unix = observed_at_unix in
       Some
         (`Assoc
@@ -534,13 +534,13 @@ let approval_queue_unavailable_timeline_event ~observed_at_unix
             ("kind", `String "approval_queue_unavailable");
             ( "title",
               `String
-                Keeper_approval_queue.approval_queue_unavailable_title );
+                Keeper_approval_queue_result.approval_queue_unavailable_title );
             ( "summary",
               `String
                 (Printf.sprintf "%s: %s" error.path error.reason) );
             ( "severity",
               `String
-                Keeper_approval_queue.approval_queue_unavailable_severity );
+                Keeper_approval_queue_result.approval_queue_unavailable_severity );
             ("task_id", `Null);
             ("goal_ids", `List []);
             ("next_human_action", `String "runtime reset required");
@@ -693,7 +693,7 @@ type raw_snapshot =
 let collect_raw_observations_with_pending_reader
     ~(read_pending :
        base_path:string ->
-       (Yojson.Safe.t list, Keeper_approval_queue.storage_error) result)
+       (Yojson.Safe.t list, Keeper_approval_queue_result.storage_error) result)
     ~approval_audit_limit ~(config : Workspace.config) ~(meta : keeper_meta) =
   let latest_decision = latest_decision_json ~config ~keeper_name:meta.name in
   let latest_tool_call = latest_tool_call_json ~keeper_name:meta.name in
@@ -896,7 +896,7 @@ let causal_timeline_json ~observed_at_unix ~recent_tool_call_rows
 let collect_raw_snapshot_with_pending_reader
     ~(read_pending :
        base_path:string ->
-       (Yojson.Safe.t list, Keeper_approval_queue.storage_error) result)
+       (Yojson.Safe.t list, Keeper_approval_queue_result.storage_error) result)
     ~(config : Workspace.config) ~(meta : keeper_meta) =
   let registry_entry =
     Keeper_registry.get ~base_path:config.base_path meta.name
@@ -1054,7 +1054,7 @@ let snapshot_json_of_raw ~(meta : keeper_meta) (raw : raw_snapshot) =
 let snapshot_json_inner_with_pending_reader
     ~(read_pending :
        base_path:string ->
-       (Yojson.Safe.t list, Keeper_approval_queue.storage_error) result)
+       (Yojson.Safe.t list, Keeper_approval_queue_result.storage_error) result)
     ~(config : Workspace.config) ~(meta : keeper_meta) =
   collect_raw_snapshot_with_pending_reader ~read_pending ~config ~meta
   |> snapshot_json_of_raw ~meta

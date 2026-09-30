@@ -2614,6 +2614,21 @@ output_per_million = 12.0
 cache_write_multiplier = 1.25
 cache_read_multiplier = 0.1
 
+# Responses supports none through max for GPT-6 Sol. Keep this endpoint's
+# ladder separate from the bare Codex row, which advertises ultra.
+# https://developers.openai.com/api/docs/models/gpt-6-sol
+[[models]]
+id_prefix = "gpt-6-sol"
+base = "openai_chat_extended"
+provider_name = "openai-responses"
+max_context_tokens = 1050000
+max_output_tokens = 128000
+accepted_reasoning_efforts = ["none", "low", "medium", "high", "xhigh", "max"]
+input_per_million = 2.0
+output_per_million = 10.0
+cache_write_multiplier = 1.25
+cache_read_multiplier = 0.1
+
 [[models]]
 id_prefix = "gpt-6-astra"
 base = "openai_chat_extended"

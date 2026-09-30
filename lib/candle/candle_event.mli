@@ -77,6 +77,11 @@ type body =
       ; reason : unattributed_reason
       }
   | Paid of Candle_payment.t
+  | Purchased of
+      { keeper : string
+      ; item : Keeper_portrait_item.t
+      ; amount_milli : int
+      }
   | Payout_failed of { goal_id : string; request_id : string; verification_run_id : string; due_date : string }
 
 type t =
@@ -86,7 +91,7 @@ type t =
 
 val kind : body -> string
 (** The row's ["kind"]: [snapshot], [payout_owed], [candidates] or
-    [unattributed], [paid] or [payout_failed]. *)
+    [unattributed], [paid], [purchased] or [payout_failed]. *)
 
 val to_yojson : t -> Yojson.Safe.t
 val of_yojson : Yojson.Safe.t -> (t, string) result

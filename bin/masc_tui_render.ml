@@ -7105,8 +7105,7 @@ let identity_lines (state : state) (k : keeper) ~cols providers =
       providers
   in
   let started =
-    match state.identity_login with
-    | Some login when String.equal login.ils_keeper k.k_name ->
+    List.concat_map (fun (login : Masc_tui_types.identity_login_started) ->
         (* Wrapped, not truncated. The URL is about nine hundred characters
            and a pane cuts it at its own width; a cut URL cannot be selected
            or copied, so the login stopped there. The TUI opens it as well --
@@ -7126,7 +7125,7 @@ let identity_lines (state : state) (k : keeper) ~cols providers =
         @ [ Ansi.dim
             ^ "  Nothing is written to this keeper until you come back."
             ^ Ansi.reset ]
-    | Some _ | None -> []
+    ) (Masc_tui_types.identity_logins_for_keeper state k.k_name)
   in
   (* What one attempt answered. Wrapped, because the message that matters
      most here is the long one: a provider that registers no client says what

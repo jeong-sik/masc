@@ -48,16 +48,23 @@ def run(executable: str) -> None:
     comments = [h.board_detail_comment(f"comment-{i}", f"Comment {i:03d}")
                 for i in range(COMMENTS)]
     fixtures["/api/v1/board?sort_by=hot"] = (200, {"posts": [post]})
-    fixtures["/api/v1/board/post-ends?format=flat"] = (
-        200, {"post": post, "comments": comments})
+    detail_path = "/api/v1/board/post-ends?format=flat"
+    fixtures[detail_path] = (200, h.board_detail_page(post, comments))
+    for offset in range(0, COMMENTS, 100):
+        fixtures[f"{detail_path}&comment_offset={offset}&comment_limit=100"] = (
+            200, h.board_detail_page(post, comments, offset=offset, limit=100))
 
     def interact(process, fd, _slave, output, _base):
         h.wait_for_output(process, fd, output, b"Health: ", start=0, timeout=15)
         h.palette_go(process, fd, output, b"go board", b"MASC Board")
         h.wait_for_output(process, fd, output, board_listing(1), start=0, timeout=15)
-        # The reading opens on the post body, so the first comment is what is
-        # on screen and the last one is not.
-        h.send_and_wait(process, fd, output, b"\r", b"Comment 000")
+        # The ordinary read contains only the newest twenty. This scenario
+        # exercises the ends of the complete thread, requested explicitly.
+        recent = h.send_and_wait(
+            process, fd, output, b"\r", b"Showing 20 of 300 comments")
+        if b"Comment 000" in recent:
+            raise AssertionError("the default Board read fetched the oldest comment")
+        h.send_and_wait(process, fd, output, b"o", b"Comment 000")
         # The post and comments now have independent windows. Focus comments
         # before using End, so the key names the thread rather than the post.
         h.send_and_wait(process, fd, output, b"b", b"> Comments")
@@ -100,7 +107,7 @@ def run_list_pane(executable: str) -> None:
     fixtures["/api/v1/board?sort_by=hot"] = (200, {"posts": posts})
     for post in posts:
         fixtures[f"/api/v1/board/{post['id']}?format=flat"] = (
-            200, {"post": post, "comments": []})
+            200, h.board_detail_page(post, []))
 
     def interact(process, fd, _slave, output, _base):
         h.wait_for_output(process, fd, output, b"Health: ", start=0, timeout=15)

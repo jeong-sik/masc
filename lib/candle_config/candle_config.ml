@@ -1,8 +1,19 @@
 (* See candle_config.mli. *)
 
-type t =
+type payout_policy = {
+  trivial_milli : int; small_milli : int; medium_milli : int;
+  large_milli : int; epic_milli : int;
+  weight_max : int; deduction_rate : int; deduction_floor : int;
+}
+
+let grade_amount_milli policy = function
+ | Candle_grade.Trivial -> policy.trivial_milli
+ | Small -> policy.small_milli | Medium -> policy.medium_milli
+ | Large -> policy.large_milli | Epic -> policy.epic_milli
+
+ type t =
   | Off
-  | Enabled
+  | Enabled of payout_policy
   | Disabled of { reason : string }
 
 let table_fields = function
@@ -12,19 +23,59 @@ let table_fields = function
   | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTableArray _ -> None
 ;;
 
+let ( let* ) = Result.bind
+
+let exact_table context allowed value =
+  match table_fields value with
+  | None -> Error (context ^ " must be a table")
+  | Some fields ->
+    match List.find_opt (fun (key, _) -> not (List.mem key allowed)) fields with
+    | Some (key, _) -> Error (context ^ " has unknown key " ^ key)
+    | None -> Ok fields
+
+let required context fields key =
+  match List.assoc_opt key fields with
+  | None -> Error (context ^ "." ^ key ^ " is required")
+  | Some value -> Ok value
+
+let integer context fields key low high =
+  let* value = required context fields key in
+  match value with
+  | Otoml.TomlInteger n when n >= low && n <= high -> Ok n
+  | Otoml.TomlInteger _ | Otoml.TomlString _ | Otoml.TomlFloat _
+  | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _
+  | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _ | Otoml.TomlArray _
+  | Otoml.TomlTableArray _ | Otoml.TomlTable _ | Otoml.TomlInlineTable _ ->
+    Error (Printf.sprintf "%s.%s must be an integer in %d..%d" context key low high)
+
+let policy_of_toml toml =
+  let* root = exact_table "candle.toml" ["payout"] toml in
+  let* payout = required "candle.toml" root "payout" in
+  let* fields = exact_table "payout"
+      ["grades_milli"; "weight_max"; "deduction_rate"; "deduction_floor"] payout in
+  let* weight_max = integer "payout" fields "weight_max" 1 max_int in
+  let* deduction_rate = integer "payout" fields "deduction_rate" 0 1000 in
+  let* deduction_floor = integer "payout" fields "deduction_floor" 0 1000 in
+  let* grades = required "payout" fields "grades_milli" in
+  let* grades = exact_table "payout.grades_milli"
+      (List.map Candle_grade.to_string Candle_grade.all) grades in
+  let amount grade = integer "payout.grades_milli" grades (Candle_grade.to_string grade)
+      0 (min (max_int / weight_max) (max_int / 1000)) in
+  let* trivial_milli = amount Candle_grade.Trivial in
+  let* small_milli = amount Candle_grade.Small in
+  let* medium_milli = amount Candle_grade.Medium in
+  let* large_milli = amount Candle_grade.Large in
+  let* epic_milli = amount Candle_grade.Epic in
+  Ok {trivial_milli; small_milli; medium_milli; large_milli; epic_milli;
+      weight_max; deduction_rate; deduction_floor}
+
 let of_toml_string text =
   match Otoml.Parser.from_string_result text with
-  | Error message ->
-    Disabled { reason = Printf.sprintf "candle.toml is not valid TOML: %s" message }
+  | Error message -> Disabled { reason = "candle.toml is not valid TOML: " ^ message }
   | Ok toml ->
-    (match table_fields toml with
-     | None -> Disabled { reason = "candle.toml is not a table" }
-     | Some [] -> Enabled
-     | Some ((key, _) :: _) ->
-       Disabled
-         { reason =
-             Printf.sprintf "candle.toml has the key %S, which this build does not know" key
-         })
+    match policy_of_toml toml with
+    | Ok policy -> Enabled policy
+    | Error reason -> Disabled { reason }
 ;;
 
 let could_not_be_examined error =
@@ -68,6 +119,6 @@ let load ~base_path =
 
 let to_string = function
   | Off -> "candle off (no candle.toml)"
-  | Enabled -> "candle enabled"
+  | Enabled _ -> "candle enabled"
   | Disabled { reason } -> Printf.sprintf "candle disabled: %s" reason
 ;;

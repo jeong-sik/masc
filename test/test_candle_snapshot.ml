@@ -125,7 +125,17 @@ let candle_toml config =
 ;;
 
 let ledger_path config = Candle_ledger.path ~base_path:(base_path_of config)
-let enable_candle config = write_file (candle_toml config) ""
+let enable_candle config = write_file (candle_toml config) {|[payout]
+weight_max = 10
+deduction_rate = 10
+deduction_floor = 200
+[payout.grades_milli]
+trivial = 1000
+small = 2000
+medium = 3000
+large = 4000
+epic = 5000
+|}
 let clock = 1_790_000_000.
 
 let ledger_events config =
@@ -214,11 +224,12 @@ let test_no_candle_toml_writes_nothing () =
 ;;
 
 let test_a_candle_toml_that_does_not_read_writes_nothing_and_does_not_refuse () =
-  with_workspace
-  @@ fun config ->
-  write_file (candle_toml config) "half_life_hours = 72\n";
-  is_ok "record" (record config);
-  no_ledger "disabled" config
+  List.iter (fun text ->
+    with_workspace @@ fun config ->
+    write_file (candle_toml config) text;
+    is_ok "record" (record config);
+    no_ledger "disabled" config)
+    [""; "[payout]\nweight_max = 10\n"; "half_life_hours = 72\n"]
 ;;
 
 let test_the_snapshot_holds_what_the_goal_held () =
@@ -350,7 +361,7 @@ let test_a_ledger_that_cannot_be_opened_disables_candle_instead_of_refusing () =
     true
     (match Candle_status.current ~base_path:(base_path_of config) with
      | Candle_config.Disabled _ -> true
-     | Candle_config.Off | Candle_config.Enabled -> false);
+     | Candle_config.Off | Candle_config.Enabled _ -> false);
   check bool "the directory was left alone" true (Sys.is_directory (ledger_path config));
   Unix.rmdir (ledger_path config);
   is_ok "record after the repair" (record config);
@@ -390,7 +401,7 @@ let test_a_pass_while_another_process_holds_the_ledger_lock_is_refused () =
          bool
          "candle stays enabled"
          true
-         (Candle_status.current ~base_path:(base_path_of config) = Candle_config.Enabled);
+         (match Candle_status.current ~base_path:(base_path_of config) with Candle_config.Enabled _ -> true | Off | Disabled _ -> false);
        (match record config with
         | Ok () -> fail "a pass went through a ledger another process is writing"
         | Error detail ->

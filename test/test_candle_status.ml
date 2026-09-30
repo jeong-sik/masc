@@ -49,7 +49,17 @@ let candle_toml base_path =
   path
 ;;
 
-let enable base_path = write_file (candle_toml base_path) ""
+let enable base_path = write_file (candle_toml base_path) {|[payout]
+weight_max = 10
+deduction_rate = 10
+deduction_floor = 200
+[payout.grades_milli]
+trivial = 1000
+small = 2000
+medium = 3000
+large = 4000
+epic = 5000
+|}
 
 let row : Candle_event.t =
   let time text = Result.get_ok (Candle_time.of_rfc3339 text) in
@@ -71,13 +81,13 @@ let row : Candle_event.t =
 ;;
 
 let is_enabled = function
-  | Candle_config.Enabled -> true
+  | Candle_config.Enabled _ -> true
   | Candle_config.Off | Candle_config.Disabled _ -> false
 ;;
 
 let reason = function
   | Candle_config.Disabled { reason } -> reason
-  | Candle_config.Off | Candle_config.Enabled -> fail "expected a disabled answer"
+  | Candle_config.Off | Candle_config.Enabled _ -> fail "expected a disabled answer"
 ;;
 
 let test_no_candle_toml_is_off_and_touches_nothing () =
@@ -102,7 +112,7 @@ let test_the_answer_follows_candle_toml_on_every_call () =
   check bool "disabled" true
     (match Candle_status.current ~base_path with
      | Candle_config.Disabled _ -> true
-     | Candle_config.Off | Candle_config.Enabled -> false);
+     | Candle_config.Off | Candle_config.Enabled _ -> false);
   Sys.remove (candle_toml base_path);
   check bool "off again" true (Candle_status.current ~base_path = Candle_config.Off)
 ;;

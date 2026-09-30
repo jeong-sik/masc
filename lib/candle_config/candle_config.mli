@@ -7,15 +7,23 @@
     on. An operator adds keys only after the build that reads them is
     deployed, because an older build refuses the key it does not know. *)
 
+type payout_policy = private {
+  trivial_milli : int; small_milli : int; medium_milli : int;
+  large_milli : int; epic_milli : int;
+  weight_max : int; deduction_rate : int; deduction_floor : int;
+}
+
+val grade_amount_milli : payout_policy -> Candle_grade.t -> int
+
 type t =
   | Off  (** There is no [candle.toml]. Nothing is recorded, paid or sold. *)
-  | Enabled
+  | Enabled of payout_policy
   | Disabled of { reason : string }
       (** The file is there and does not read. Nothing is recorded, paid or
           sold, and the reason is for the operator to see. *)
 
 val of_toml_string : string -> t
-(** The content of a [candle.toml]. A file with no key at all is [Enabled]. *)
+(** The content of a [candle.toml]. All payout fields and all five grade amounts must be present. No defaults. *)
 
 val load_file : path:string -> t
 (** [Off] when [path] does not exist. Anything else that stops it from being

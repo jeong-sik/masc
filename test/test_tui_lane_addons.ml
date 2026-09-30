@@ -101,7 +101,7 @@ let configuration_and_ports () =
     "instances":[{"instance_id":"actual-1","run_id":"world","addon_id":"custom","title":"Custom layer",
       "revision":"package-1","phase":{"kind":"attached"},"observation_seq":2,"rows_count":0,
       "incarnation":"actual-1","action_schema":null,
-      "configuration":{"source_path":"/config/lane-addons/custom.toml"},
+      "configuration":{"id":"custom","source_path":"/config/lane-addons/custom.toml"},
       "binding":{"sources":[{"kind":"lane_output","id":"input","installation_id":"upstream","output_id":"frames"}]},
       "package":{"outputs":{"metrics":{"lanes":["speed"]},"all":{"all_lanes":true}},"skills_directory":"skills"}}],
     "configuration":{"directory":"/config/lane-addons","complete":false,
@@ -114,6 +114,8 @@ let configuration_and_ports () =
     "rows":[],"coverage":[]
   }|} in
   let snapshot = UI.decode json |> ok in
+  check (option string) "decode retains the worker's applied configuration owner" (Some "custom")
+    (List.hd snapshot.instances).installation_id;
   let overview = {UI.initial with snapshot=Some snapshot} in
   let empty = {snapshot with instances=[];
     configuration=Some {directory="/config/lane-addons";complete=true;declarations=[]}} in
@@ -276,7 +278,7 @@ let guided_actions () =
     }}|} in
   let instance : UI.instance = {id="worker";incarnation="worker";run_id="run";
     addon_id="arbitrary-package";title="Useful observer";revision="1";phase=UI.Row.Attached;
-    observation_seq=1;rows_count=0;source_path=None;binding=`Assoc [];outputs=[];
+    observation_seq=1;rows_count=0;installation_id=None;source_path=None;binding=`Assoc [];outputs=[];
     skills_directory=None;action_schema=Some schema; binding_schema=None; display=Masc.Lane_addon_presentation.empty} in
   let snapshot : UI.snapshot = {instances=[instance];configuration=None;
     output={rows=[];coverage=[]};complete=Some true} in
@@ -410,10 +412,10 @@ let guided_actions () =
 let context_flow_uses_declared_connections () =
   let producer : UI.instance = {id="source-worker";incarnation="source-worker";run_id="project";
     addon_id="any-source";title="Project observer";revision="1";phase=UI.Row.Attached;
-    observation_seq=1;rows_count=0;source_path=Some "/config/project-observer.toml";binding=`Assoc ["sources",`List []];
+    observation_seq=1;rows_count=0;installation_id=Some "project-observer";source_path=Some "/config/project-observer.toml";binding=`Assoc ["sources",`List []];
     outputs=["events",UI.Row.All_lanes];skills_directory=None;action_schema=None; binding_schema=None; display=Masc.Lane_addon_presentation.empty} in
   let consumer = {producer with id="metric-worker";incarnation="metric-worker";title="Project metric";
-    source_path=Some "/config/project-metric.toml";
+    installation_id=Some "project-metric";source_path=Some "/config/project-metric.toml";
     binding=Yojson.Safe.from_string {|{"sources":[{"source_id":"input","kind":"lane_output",
       "installation_id":"project-observer","output_id":"events","selection":"latest_completed"}]}|}} in
   let declaration installation_id instance_id : UI.declaration =
@@ -427,6 +429,13 @@ let context_flow_uses_declared_connections () =
   let view = {UI.initial with focus=UI.Connections;presentation=UI.Flow;snapshot=Some snapshot} in
   check bool "flow exposes the selected action target" true
     (List.mem "Action target: Project observer · source-worker" (UI.lines ~width:160 view));
+  let links = UI.lines ~width:160 {view with presentation=UI.Summary;
+    screen=UI.Detail (producer.id,producer.incarnation);focus=UI.Connections} in
+  check bool "embedded Links advertises the first f press accurately" true
+    (List.mem "f:open full flow  D:technical details  J/K:scroll" links
+     && not (List.mem "f:back to observations  D:technical details  J/K:scroll" links));
+  check bool "full Flow keeps its actual return action" true
+    (List.mem "f:back to observations  D:technical details  J/K:scroll" (UI.lines ~width:160 view));
   let moved = UI.lines ~width:160 {view with instance_cursor=1} in
   check bool "flow target follows instance selection" true
     (List.mem "Action target: Project metric · metric-worker" moved
@@ -580,7 +589,7 @@ let evidence_export_chooses_a_keeper_by_name () =
     fields=[];evidence=[];related_ids=[]} in
   let worker id : UI.instance = {id;incarnation=id;run_id="project";
     addon_id="fixture";title="Observed value changes";revision="1";phase=UI.Row.Attached;
-    observation_seq=1;rows_count=1;source_path=None;binding=`Assoc ["sources",`List []];
+    observation_seq=1;rows_count=1;installation_id=None;source_path=None;binding=`Assoc ["sources",`List []];
     outputs=[];skills_directory=None;action_schema=None;binding_schema=None;
     display=Masc.Lane_addon_presentation.empty} in
   let snapshot : UI.snapshot = {instances=[worker "worker";worker "other"];
@@ -634,7 +643,7 @@ let refresh_preserves_operator_target () =
     fields=[];evidence=[];related_ids=[]} in
   let worker id : UI.instance = {id;incarnation=id;run_id="project";
     addon_id="fixture";title=id;revision="1";phase=UI.Row.Attached;
-    observation_seq=1;rows_count=1;source_path=None;binding=`Assoc ["sources",`List []];
+    observation_seq=1;rows_count=1;installation_id=None;source_path=None;binding=`Assoc ["sources",`List []];
     outputs=[];skills_directory=None;action_schema=None;binding_schema=None;
     display=Masc.Lane_addon_presentation.empty} in
   let declaration id : UI.declaration = {source_path=id ^ ".toml";
@@ -700,7 +709,7 @@ let refresh_preserves_operator_target () =
 let detail_keeps_installation_ownership () =
   let worker id : UI.instance = {id;incarnation=id ^ "-run";run_id="project";
     addon_id="fixture";title=id;revision="1";phase=UI.Row.Attached;
-    observation_seq=1;rows_count=2;source_path=Some ("/config/" ^ id ^ ".toml");
+    observation_seq=1;rows_count=2;installation_id=Some id;source_path=Some ("/config/" ^ id ^ ".toml");
     binding=`Assoc ["sources",`List []];outputs=[];skills_directory=None;
     action_schema=None;binding_schema=None;display=Masc.Lane_addon_presentation.empty} in
   let declaration id : UI.declaration = {source_path="/config/" ^ id ^ ".toml";
@@ -782,7 +791,7 @@ let declared_results_show_body_before_activity_and_keep_raw_evidence () =
         "label",`String "Delivery";"format",`String "text"]]]) |> ok in
   let worker : UI.instance = {id="report-worker";incarnation="incarnation";run_id="project";
     addon_id="custom";title="Project report";revision="1";phase=UI.Row.Attached;
-    observation_seq=1;rows_count=1;source_path=None;binding=`Assoc ["sources",`List []];
+    observation_seq=1;rows_count=1;installation_id=None;source_path=None;binding=`Assoc ["sources",`List []];
     outputs=[];skills_directory=None;action_schema=None;binding_schema=None;display} in
   let row : UI.Row.row = {id="report-row";lane_id="report-worker/report";kind=UI.Row.Value;
     title="Useful analysis";observed_at=1.;subject_id="project";clock=None;actor=None;
@@ -927,7 +936,7 @@ let declared_results_show_body_before_activity_and_keep_raw_evidence () =
 let current_installations_and_grouped_history_keep_exact_targets () =
   let worker id run addon phase source_path : UI.instance = {
     id;incarnation=id;run_id=run;addon_id=addon;title="Repeated title";
-    revision="1";phase;observation_seq=1;rows_count=1;source_path;
+    revision="1";phase;observation_seq=1;rows_count=1;installation_id=Option.map (fun _ -> addon) source_path;source_path;
     binding=`Assoc ["sources",`List []];outputs=[];skills_directory=None;
     action_schema=None;binding_schema=None;display=Masc.Lane_addon_presentation.empty} in
   let old = worker "old-a" "project" "analysis" UI.Row.Detached (Some "/config/a.toml") in
@@ -1015,7 +1024,7 @@ let declared_layers_use_exact_configured_owners () =
       "selection",`String "latest_completed"]) upstream)] in
   let worker id upstream : UI.instance = {id="worker-" ^ id;incarnation="worker-" ^ id;
     run_id="project";addon_id="fixture";title=id;revision="1";phase=UI.Row.Attached;
-    observation_seq=1;rows_count=0;source_path=Some ("/config/" ^ id ^ ".toml");
+    observation_seq=1;rows_count=0;installation_id=Some id;source_path=Some ("/config/" ^ id ^ ".toml");
     binding=binding upstream;outputs=[];skills_directory=None;action_schema=None;
     binding_schema=None;display=Masc.Lane_addon_presentation.empty} in
   let declaration id (item : UI.instance) : UI.declaration = {
@@ -1049,16 +1058,17 @@ let declared_layers_use_exact_configured_owners () =
     check bool (label ^ " cannot supply the consumer's configured upstream") true
       (List.mem "Layer unavailable: consumer" graph && not (List.mem "  [consumer]" graph)) in
   let consumer_declaration = declaration "consumer" consumer in
-  assert_unplaced "missing installation" producer [consumer_declaration] consumer;
-  assert_unplaced "wrong source path" {producer with source_path=Some "/other/a.toml"}
+  assert_unplaced "missing applied installation" {producer with installation_id=None} [consumer_declaration] consumer;
+  assert_unplaced "wrong applied installation" {producer with installation_id=Some "other"}
     [declaration "a" producer;consumer_declaration] consumer;
   assert_unplaced "another run" {producer with run_id="other-project"}
     [declaration "a" producer;consumer_declaration] consumer;
-  let manual = {producer with id="manual-uuid";source_path=None} in
+  let manual = {producer with id="manual-uuid";installation_id=None;source_path=None} in
   let uuid_consumer = {consumer with binding=binding [manual.id]} in
   assert_unplaced "manual worker UUID" manual [consumer_declaration] uuid_consumer;
-  assert_unplaced "ambiguous declarations for one worker" producer
-    [declaration "a" producer;declaration "a" producer;consumer_declaration] consumer;
+  check bool "declaration ambiguity does not erase an exact applied worker owner" true
+    (List.mem "  a -> consumer" (lines [producer;consumer]
+      [declaration "a" producer;declaration "a" producer;consumer_declaration]));
   let named_consumer port = {consumer with binding=`Assoc ["sources",`List [
     `Assoc ["source_id",`String "analysis-input";"kind",`String "lane_output";
       "installation_id",`String "a";"output_id",`String port;
@@ -1078,8 +1088,9 @@ let declared_layers_use_exact_configured_owners () =
      && List.mem "  a -> consumer · producer output unavailable: missing-port" unknown_port
      && not (List.mem "  a -> consumer" unknown_port));
   let duplicate = {producer with id="worker-a-two";incarnation="worker-a-two"} in
+  let ambiguous_declaration = {(declaration "a" producer) with instance_id=None} in
   let ambiguous = lines [producer;duplicate;consumer]
-    [declaration "a" producer;declaration "a" duplicate;consumer_declaration] in
+    [ambiguous_declaration;consumer_declaration] in
   check bool "duplicate current producer identity is qualified in the flat wiring list" true
     (List.mem "  a -> consumer · producer identity ambiguous in this run" ambiguous
      && List.mem "Layer unavailable: consumer" ambiguous);

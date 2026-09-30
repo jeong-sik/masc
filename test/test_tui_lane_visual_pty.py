@@ -228,7 +228,7 @@ def run_declared_layers(executable: str, captures: Path | None) -> None:
         owner = "layer-" + name
         path = "/fixture/lane-addons/" + name + ".toml"
         workers.append({**template, "instance_id": owner, "incarnation": owner, "title": name,
-            "configuration": {"source_path": path}, "rows_count": 0,
+            "configuration": {"id": name, "source_path": path}, "rows_count": 0,
             "package": {"outputs": {"events": {"all_lanes": True}}, "skills_directory": None},
             "binding": {"sources": [{"source_id": "from-" + producer, "kind": "lane_output",
                 "installation_id": producer, "output_id": "events", "selection": "latest_completed"}
@@ -274,14 +274,14 @@ def run_grouped_history(executable: str, captures: Path | None) -> None:
     captured = snapshot()
     active = captured["instances"][0]
     active["title"] = "Current reporter"
-    active["configuration"] = {"source_path": "/fixture/lane-addons/report.toml"}
+    active["configuration"] = {"id": "report", "source_path": "/fixture/lane-addons/report.toml"}
     old_runs = []
     old_rows = []
     for index in range(9):
         owner = f"retained-{index}"
         old_runs.append({**active, "instance_id": owner, "incarnation": owner,
             "title": "Repeated counters", "run_id": f"retained world/{index}", "phase": {"kind": "detached"},
-            "configuration": {"source_path": "/fixture/lane-addons/" + ("a.toml" if index % 2 == 0 else "b.toml")}})
+            "configuration": {"id": "a" if index % 2 == 0 else "b", "source_path": "/fixture/lane-addons/" + ("a.toml" if index % 2 == 0 else "b.toml")}})
         old_rows.append({**captured["rows"][0], "id": owner + "/1/result", "lane_id": owner + "/browser",
             "title": "Preserved old result", "subject_id": f"retained world/{index}", "fields": {"old_run": owner}})
     captured["instances"] = [old_runs[0], active, *old_runs[1:]]

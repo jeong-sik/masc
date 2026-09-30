@@ -4,7 +4,7 @@ module Action = Masc.Lane_addon_action
 type instance = {
   id : string; run_id : string; addon_id : string; title : string;
   revision : string; phase : Row.phase; observation_seq : int; rows_count : int;
-  source_path : string option; binding : Yojson.Safe.t; outputs : Row.output_ports;
+  installation_id : string option; source_path : string option; binding : Yojson.Safe.t; outputs : Row.output_ports;
   skills_directory : string option; incarnation : string; action_schema : Yojson.Safe.t option; binding_schema : Yojson.Safe.t option; display : Masc.Lane_addon_presentation.t;
 }
 type declaration_origin = Parsed_declaration | Issue_only
@@ -125,7 +125,12 @@ let instance json =
   let* phase = get phase "phase" json in
   let* observation_seq = get count "observation_seq" json in
   let* rows_count = get count "rows_count" json in
-  let* source_path = optional "configuration" (fun config -> get text "source_path" config) json in
+  let* owner = optional "configuration" (fun config ->
+    let* installation_id = get text "id" config in
+    let* source_path = get text "source_path" config in
+    Ok (installation_id, source_path)) json in
+  let installation_id = Option.map fst owner in
+  let source_path = Option.map snd owner in
   let* binding = field "binding" json in
   let* package = field "package" json in
   let* outputs = get output_ports "outputs" package in
@@ -141,7 +146,7 @@ let instance json =
     | None -> Ok Masc.Lane_addon_presentation.empty
     | Some value -> Masc.Lane_addon_presentation.of_json value in
   Ok { id; run_id; addon_id; title; revision; phase; observation_seq; rows_count;
-    source_path;binding;outputs;skills_directory;incarnation;action_schema;binding_schema;display }
+    installation_id;source_path;binding;outputs;skills_directory;incarnation;action_schema;binding_schema;display }
 let output json =
   let* rows = field "rows" json in
   let* coverage = field "coverage" json in
@@ -1125,14 +1130,10 @@ let flow_inputs binding =
     | S.Lane_output {id;installation_id;output_id} -> Some {source_id=id;installation_id;output_id}
     | S.Snapshot_file _ | S.Msx_capture _ | S.Dos_capture _ | S.Browser_document _ -> None) sources)
 
-let installation_identity declarations (instance : instance) =
-  match List.filter (fun (d : declaration) ->
-    d.instance_id=Some instance.id && Some d.source_path=instance.source_path) declarations with
-  | [{installation_id=Some id;_}] -> Some id
-  | [] | [_] | _ :: _ :: _ -> None
+let installation_identity (instance : instance) = instance.installation_id
 
-let installation_name declarations (instance : instance) =
-  match installation_identity declarations instance with
+let installation_name (instance : instance) =
+  match installation_identity instance with
   | Some id -> id
   | None -> instance.id
 
@@ -1172,7 +1173,7 @@ let declared_layers ~identity workers =
         (ready :: layers) waiting in
   place [] [] nodes
 
-let flow_lines view =
+let flow_lines ?(embedded=false) view =
   (match selected_instance view with
    | None -> ["No selected Add-on action target"]
    | Some instance -> ["Action target: " ^ instance.title ^ " · " ^ instance.id])
@@ -1191,8 +1192,8 @@ let flow_lines view =
      | None -> ["Connections unavailable: no snapshot read yet"]
      | Some snapshot ->
          let declarations = Option.fold ~none:[] ~some:(fun c -> c.declarations) snapshot.configuration in
-         let name = installation_name declarations in
-         let identity = installation_identity declarations in
+         let name = installation_name in
+         let identity = installation_identity in
          let historical = match selected_instance view with
            | Some instance when retained instance -> true
            | Some _ | None -> view.overview_mode=Retained_runs in
@@ -1239,7 +1240,8 @@ let flow_lines view =
            @ List.map (fun (port,selection) -> "  output " ^ port ^ " -> " ^ (match selection with Row.All_lanes -> "all supplied lanes" | Row.Selected_lanes lanes -> String.concat ", " lanes)) instance.outputs) workers)
   @ [""; "Result -> retained evidence -> explicit Keeper delivery -> agent use";
      "Delivery acceptance and agent reading are separate recorded stages.";
-     "f:back to observations  D:technical details  J/K:scroll"]
+     (if embedded then "f:open full flow  D:technical details  J/K:scroll"
+      else "f:back to observations  D:technical details  J/K:scroll")]
 
 let lines ?(height=24) ?(failed_note = "") ~width view =
   match view.installer with
@@ -1289,7 +1291,7 @@ let lines ?(height=24) ?(failed_note = "") ~width view =
         | Overview -> overview_lines ~width view
         | Detail _ -> detail_lines ~width view
             @ (match view.focus with
-               | Connections -> [""] @ (flow_lines view |> List.concat_map (fun line ->
+               | Connections -> [""] @ (flow_lines ~embedded:true view |> List.concat_map (fun line ->
                    Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
                      (Masc.Tui_decode.sanitize_terminal_text line)))
                | Timeline | Configurations | Instances | Rows -> []))

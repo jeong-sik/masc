@@ -19044,7 +19044,7 @@ and is loaded on demand through keeper_skill.
         | Ok _ when state.workspace_identity <> Workspace_identity_match ->
             refuse "Cannot create: workspace identity is unverified; declaration retained"
         | Ok declared_name when
-            List.exists (fun keeper -> String.equal keeper.k_name declared_name)
+            List.exists (fun (keeper : Tui_decode.keeper) -> String.equal keeper.k_name declared_name)
               state.keepers ->
             refuse (declared_name ^ ": Keeper already exists; creation did not reconfigure it. Choose a new name.")
         | Ok declared_name ->

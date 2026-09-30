@@ -157,7 +157,7 @@ val run_with_images
   :  ?on_usage:(Fusion_types.usage -> unit)
   -> images:image_input list
   -> base_dir:string
-  -> runtime:Runtime.t
+  -> runtime:Runtime_instance.t
   -> system_prompt:string
   -> ?timeout_s:float
   -> ?output_schema:Yojson.Safe.t

@@ -10,7 +10,7 @@
   mcp_protocol
   mcp_protocol.eio
   yojson
-  ; Tui_decode asks it which scalars are pictographs, so the terminal
+  ; Tui_terminal_text asks it which scalars are pictographs, so the terminal
   ; sanitizer keeps the ZWJ that holds an emoji together (UAX #29 GB11).
   ; Already in this library's link closure through masc.agent_core.
   uucp
@@ -194,6 +194,9 @@
   masc_random_id
   masc_workspace
   masc_goal
+  masc_candle
+  masc_candle_config
+  masc_candle_runtime
   masc_turn
   masc.masc_tool_dispatch
   masc.masc_tool_surface

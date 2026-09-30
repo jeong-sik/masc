@@ -106,7 +106,7 @@ let seed_of_thinking_support ?(preserve_thinking = None) (thinking_support : boo
 let for_runtime ~name =
   match Runtime.get_runtime_by_id name with
   | Some runtime ->
-    (match Runtime_execution.checkpoint_owner runtime.Runtime.execution with
+    (match Runtime_execution.checkpoint_owner runtime.Runtime_instance.execution with
      | Runtime_execution.Official_client ->
        seed_of_thinking_support None
      | Runtime_execution.Masc_agent_core ->

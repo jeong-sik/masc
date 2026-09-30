@@ -18,6 +18,7 @@
 type t =
   | Providers  (** the provider catalogue *)
   | Models  (** model declarations *)
+  | Model_sets  (** shared model lists referenced by providers *)
   | Runtime  (** default runtime, lanes, assignments *)
   | Exec  (** SSH execution endpoints *)
   | Egress  (** per-keeper egress allowances *)

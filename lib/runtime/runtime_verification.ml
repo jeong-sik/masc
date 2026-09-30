@@ -588,7 +588,7 @@ let muse_account_spent ~mgr ~clock ~cwd ~scope config =
       | Ok () -> exhausted ()
       | Error _ -> false)
 
-let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtime : Runtime.t) =
+let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtime : Runtime_instance.t) =
   let run (tool : Runtime_official_client_tool.dynamic_tool) ~prompt =
     if not runtime.model.tools_support
     then Error (Unavailable Tools_not_declared)
@@ -606,11 +606,12 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
           |> Option.map (function
             | Llm_provider.Reasoning_effort.None_ -> Runtime_muse_msp.Effort_none
             | Minimal -> Effort_minimal | Low -> Effort_low | Medium -> Effort_medium
-            | High -> Effort_high | XHigh -> Effort_xhigh | Max -> Effort_max) in
+            | High -> Effort_high | XHigh -> Effort_xhigh | Max -> Effort_max
+            | Ultra -> Effort_ultra) in
         (match Runtime_verification_muse.run ~secure_random ~net ~mgr ~clock ~cwd
            ~directory:cwd_path ~account_home:execution.account_home
-           ~quota_scope:(Runtime.quota_scope_of_runtime runtime) ~config
-           ~prompt_capacity:(Runtime.muse_prompt_capacity runtime) ~reasoning_effort ~tool ~prompt with
+           ~quota_scope:(Runtime_instance.quota_scope_of_runtime runtime) ~config
+           ~prompt_capacity:(Runtime_instance.muse_prompt_capacity runtime) ~reasoning_effort ~tool ~prompt with
          | Ok result ->
            (* Every call the host reported for the verification turn must have
               run on the configured model. One on another model fails, and so
@@ -662,7 +663,7 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
               usage/read says whether a subscription window is spent. *)
            let detail = Runtime_muse_serve.error_to_string error in
            if muse_account_spent ~mgr ~clock ~cwd
-                ~scope:(Runtime.quota_scope_of_runtime runtime) config
+                ~scope:(Runtime_instance.quota_scope_of_runtime runtime) config
            then Error (Quota_exhausted detail)
            else Error (Provider_rejected detail)
          | Error (Client_error error) ->
@@ -687,16 +688,16 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
            Error (Provider_rejected (Runtime_antigravity.error_to_string err)))
       | Runtime_execution.Agent_core provider_cfg ->
         (match
-           Runtime.validate_dispatch_credential ~provider_config:provider_cfg runtime
+           Runtime_instance.validate_dispatch_credential ~provider_config:provider_cfg runtime
          with
-         | Error (Runtime.Required_env_credential_missing _ as error) ->
+         | Error (Runtime_instance.Required_env_credential_missing _ as error) ->
            Error
              (Unavailable
-                (Missing_credential (Runtime.dispatch_credential_error_to_string error)))
-         | Error (Runtime.Declared_credential_unavailable _ as error) ->
+                (Missing_credential (Runtime_instance.dispatch_credential_error_to_string error)))
+         | Error (Runtime_instance.Declared_credential_unavailable _ as error) ->
            Error
              (Unavailable
-                (Invalid_credential (Runtime.dispatch_credential_error_to_string error)))
+                (Invalid_credential (Runtime_instance.dispatch_credential_error_to_string error)))
          | Ok () ->
            let seed =
              Runtime_inference.seed_of_thinking_support
@@ -782,9 +783,15 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
           ; timeout_s = Some timeout_s
           }
         in
+        let reasoning_effort =
+          Runtime_inference.clamp_reasoning_effort_to_catalog
+            ~model_id:execution.model ~requested:runtime.model.reasoning_effort
+          |> Option.map Runtime_claude_code.cli_admitted_reasoning_effort
+        in
         (match
            Runtime_claude_code.run_turn
              ~dynamic_tools:[ tool ]
+             ?reasoning_effort
              ~mgr
              ~clock
              ~cwd
@@ -832,9 +839,14 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
           ; timeout_s = Some timeout_s
           }
         in
+        let reasoning_effort =
+          Runtime_inference.clamp_reasoning_effort_to_catalog
+            ~model_id:execution.model ~requested:runtime.model.reasoning_effort
+        in
         (match
            Runtime_codex_app_server.run_turn
              ~dynamic_tools:[ tool ]
+             ?reasoning_effort
              ~mgr
              ~clock
              ~cwd

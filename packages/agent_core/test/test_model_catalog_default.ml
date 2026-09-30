@@ -45,6 +45,8 @@ let subscription_model_rows =
   ; "gpt-5.6-luna", "gpt-5.6"
   ; "gpt-5.5", "gpt-5.5"
   ; "gpt-6-sol", "gpt-6-sol"
+  ; "gpt-6.1-sol", "gpt-6.1-sol"
+  ; "gpt-6-astra", "gpt-6-astra"
   ; "gpt-6-luna", "gpt-6-luna"
   ; "gpt-5.3-codex-spark", "gpt-5.3-codex-spark"
   ; "gemini-3.7-flash-high", "gemini-3.7-flash"
@@ -141,14 +143,16 @@ let subscription_model_efforts =
   ; Some "openai-responses", "gpt-5.6-sol", [ "none"; "low"; "medium"; "high"; "xhigh"; "max" ]
   ; Some "openai-responses", "gpt-5.6-terra", [ "none"; "low"; "medium"; "high"; "xhigh"; "max" ]
   ; Some "openai-responses", "gpt-5.6-luna", [ "none"; "low"; "medium"; "high"; "xhigh"; "max" ]
+  ; Some "openai-responses", "gpt-6-sol", [ "none"; "low"; "medium"; "high"; "xhigh"; "max" ]
+  ; Some "openai-responses", "gpt-6-astra", [ "low"; "medium"; "high"; "xhigh"; "max" ]
   ; None, "gpt-5.3-codex-spark", [ "none"; "minimal"; "low"; "medium"; "high"; "xhigh" ]
     (* The codex lane clamps a binding's effort to the bare row
        (Keeper_official_client_host.clamp_reasoning_effort_to_catalog). Without
        "max" here a codex max binding went out as xhigh, and gpt-5.5 fell to the
-       "gpt-5" row, which sent xhigh as high. The codex CLI lists low..max for
-       sol and terra and low..xhigh for gpt-5.5 (models_cache.json, 2026-09-22). *)
-  ; None, "gpt-5.6-sol", [ "none"; "minimal"; "low"; "medium"; "high"; "xhigh"; "max" ]
-  ; None, "gpt-5.6-terra", [ "none"; "minimal"; "low"; "medium"; "high"; "xhigh"; "max" ]
+       "gpt-5" row, which sent xhigh as high. The Codex cache (2026-09-30)
+       now lists low..ultra for Sol and Terra; gpt-5.5 keeps low..xhigh. *)
+  ; None, "gpt-5.6-sol", [ "none"; "minimal"; "low"; "medium"; "high"; "xhigh"; "max"; "ultra" ]
+  ; None, "gpt-5.6-terra", [ "none"; "minimal"; "low"; "medium"; "high"; "xhigh"; "max"; "ultra" ]
   ; None, "gpt-5.5", [ "low"; "medium"; "high"; "xhigh" ]
     (* Probed on /v1/responses 2026-09-23: sol and luna answer 400 for
        "minimal" with "Supported values are: 'none', 'low', 'medium', 'high',
@@ -156,7 +160,9 @@ let subscription_model_efforts =
        effort parameter set (checked 2026-09-23), as the other Claude rows. *)
   ; None, "claude-opus-5-5", [ "low"; "medium"; "high"; "xhigh"; "max" ]
   ; None, "claude-sonnet-5-5", [ "low"; "medium"; "high"; "xhigh"; "max" ]
-  ; None, "gpt-6-sol", [ "none"; "low"; "medium"; "high"; "xhigh"; "max" ]
+  ; None, "gpt-6-sol", [ "none"; "low"; "medium"; "high"; "xhigh"; "max"; "ultra" ]
+  ; None, "gpt-6.1-sol", [ "low"; "medium"; "high"; "xhigh"; "max"; "ultra" ]
+  ; None, "gpt-6-astra", [ "low"; "medium"; "high"; "xhigh"; "max"; "ultra" ]
   ; None, "gpt-6-luna", [ "none"; "low"; "medium"; "high"; "xhigh"; "max" ]
   ; None, "gemini-3.7-flash-high", [ "low"; "medium"; "high" ]
   ; None, "gemini-3.6-flash-high", [ "minimal"; "low"; "medium"; "high" ]
@@ -184,6 +190,29 @@ let test_subscription_models_admit_their_reasoning_efforts () =
            (Some expected)
            entry.accepted_reasoning_efforts)
     subscription_model_efforts
+;;
+
+let test_responses_sol_rejects_codex_only_ultra () =
+  let module Config = Llm_provider.Provider_config in
+  let module Effort = Llm_provider.Reasoning_effort in
+  let catalog = Model_catalog_test_support.load_repo_model_catalog ~suite:"Responses Sol effort" in
+  with_clean_model_catalog_override (fun () ->
+    Model_catalog.set_global catalog;
+    let config effort = Config.make ~kind:OpenAI_compat
+      ~provider_id:"openai-responses" ~model_id:"gpt-6-sol"
+      ~base_url:"https://api.openai.com/v1" ~reasoning_effort:effort () in
+    check bool "Responses Sol accepts its maximum supported effort" true
+      (Result.is_ok (Config.validate_reasoning_effort_request_typed (config Effort.Max)));
+    (match Config.validate_reasoning_effort_request_typed (config Effort.Ultra) with
+     | Error (Config.Unsupported_reasoning_effort { effort = Effort.Ultra; accepted; _ }) ->
+         check bool "Responses Sol refusal retains Max in the admitted ladder" true
+           (List.mem Effort.Max accepted);
+         check bool "Responses Sol does not admit Codex Ultra" false
+           (List.mem Effort.Ultra accepted)
+     | Error rejection -> fail (Config.reasoning_effort_request_rejection_to_message rejection)
+     | Ok () -> fail "Responses Sol must refuse Ultra before provider dispatch");
+    check (option int) "scoped Sol keeps the full context window"
+      (Some 1050000) (Config.context_window (config Effort.Max)))
 ;;
 
 (* Cache pricing the fleet's Anthropic rows have to carry: [Pricing.estimate_cost]
@@ -952,6 +981,8 @@ let () =
             "subscription models admit their reasoning efforts"
             `Quick
             test_subscription_models_admit_their_reasoning_efforts
+        ; test_case "Responses Sol rejects Codex-only Ultra" `Quick
+            test_responses_sol_rejects_codex_only_ultra
         ; test_case
             "glm vision rows reach a runtime lookup"
             `Quick

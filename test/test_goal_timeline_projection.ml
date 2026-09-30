@@ -62,6 +62,24 @@ let test_summary_names_the_actor () =
     (field "summary" json)
 ;;
 
+let test_mutation_summary_names_each_actor () =
+  List.iter
+    (fun (kind, actor, verb) ->
+      let projected =
+        DGT.goal_event_timeline_json
+          (`Assoc
+             [ "ts", `String "2026-09-29T12:00:00Z"
+             ; "goal_id", `String "goal-shared"
+             ; "event_type", `String kind
+             ; "payload", `Assoc [ "actor", `String actor; "title", `String "Shared goal" ]
+             ])
+      in
+      check (option string) "the action names its actor"
+        (Some (verb ^ " by " ^ actor ^ ": Shared goal")) (field "summary" projected);
+      check (option string) "the event kind survives" (Some kind) (field "kind" projected))
+    [ "goal_created", "creator", "created"; "goal_updated", "reviewer", "updated" ]
+;;
+
 let test_severity_follows_the_phase () =
   let severity_of phase =
     field
@@ -241,7 +259,6 @@ let test_unknown_event_type_keeps_its_token () =
 
 let goal : Goal_store.goal =
   { id = "goal-1"
-  ; owner = Goal_store.Unknown_owner
   ; criterion_revision = "fixture-goal-1"
   ; title = "Goal One"
   ; metric = None
@@ -251,8 +268,6 @@ let goal : Goal_store.goal =
   ; phase = Goal_phase.Executing
   ; last_review_note = None
   ; last_review_at = None
-  ; notified_refuted_key = None
-  ; notified_overdue_key = None
   ; created_at = "2026-08-01T00:00:00Z"
   ; updated_at = "2026-08-21T00:00:00Z"
   }
@@ -485,13 +500,16 @@ let test_unlisted_history_reconstructs_a_departed_goal () =
   let rows =
     [ history_row ~ts:"2026-09-10T00:00:00Z" ~goal_id:"goal-gone"
         ~event_type:"goal_created"
-        (`Assoc [ "title", `String "Shipped and gone" ])
+        (`Assoc [ "store_version", `Int 1; "title", `String "Shipped and gone" ])
+    ; history_row ~ts:"2026-09-10T03:00:00Z" ~goal_id:"goal-gone"
+        ~event_type:"goal_updated"
+        (`Assoc [ "store_version", `Int 2; "title", `String "Reviewed and shipped"; "actor", `String "reviewer" ])
     ; history_row ~ts:"2026-09-10T06:00:00Z" ~goal_id:"goal-gone"
         ~event_type:"goal_phase"
         (live_phase_payload ~phase:"completed" ~actor:"alpha")
       (* A goal the store still lists is already on every goal surface. *)
     ; history_row ~goal_id:"goal-listed" ~event_type:"goal_created"
-        (`Assoc [ "title", `String "Still here" ])
+        (`Assoc [ "store_version", `Int 1; "title", `String "Still here" ])
     ]
   in
   let json =
@@ -501,7 +519,7 @@ let test_unlisted_history_reconstructs_a_departed_goal () =
   check int "a goal the store still lists is not history" 1 (List.length rows_out);
   let row = List.hd rows_out in
   check (option string) "the goal is named" (Some "goal-gone") (field "goal_id" row);
-  check (option string) "the title outlived the store" (Some "Shipped and gone")
+  check (option string) "the updated title outlived the store" (Some "Reviewed and shipped")
     (field "title" row);
   check (option string) "opening comes from the creation row"
     (Some "2026-09-10T00:00:00Z") (field "opened_at" row);
@@ -520,7 +538,7 @@ let test_unlisted_history_knows_the_edit_event () =
   let rows =
     [ history_row ~ts:"2026-09-10T00:00:00Z" ~goal_id:"goal-gone"
         ~event_type:"goal_created"
-        (`Assoc [ "title", `String "Edited then gone" ])
+        (`Assoc [ "store_version", `Int 1; "title", `String "Edited then gone" ])
     ; history_row ~ts:"2026-09-10T03:00:00Z" ~goal_id:"goal-gone"
         ~event_type:"goal_edited"
         (`Assoc
@@ -582,7 +600,7 @@ let test_unlisted_history_reports_what_it_could_not_read () =
     [ `Assoc [ "ts", `String "2026-09-01T00:00:00Z"; "event_type", `String "goal_phase" ]
     ; history_row ~goal_id:"goal-x" ~event_type:"goal_retired_somehow" (`Assoc [])
     ; history_row ~goal_id:"goal-x" ~event_type:"goal_created"
-        (`Assoc [ "title", `String "X" ])
+        (`Assoc [ "store_version", `Int 1; "title", `String "X" ])
     ]
   in
   let json = DG.unlisted_goal_history_of_rows ~listed:[] ~rows ~malformed_lines:3 in
@@ -599,12 +617,58 @@ let test_unlisted_history_reports_what_it_could_not_read () =
     (List.length (unlisted json))
 ;;
 
+let snapshot_row version title =
+  history_row ~goal_id:"goal-gone" ~event_type:"goal_updated"
+    (`Assoc ["store_version", `Int version; "title", `String title;
+      "updated_at", `String "2026-09-10T00:00:00Z"])
+
+let test_snapshot_titles_follow_commits_not_append_or_time () =
+  let created = history_row ~goal_id:"goal-gone" ~event_type:"goal_created"
+    (`Assoc ["store_version", `Int 1; "title", `String "created"] ) in
+  List.iter (fun rows ->
+    let json = DG.unlisted_goal_history_of_rows ~listed:[] ~rows ~malformed_lines:0 in
+    let row = List.hd (unlisted json) in
+    check (option string) "last committed title wins even with tied timestamps"
+      (Some "last update") (field "title" row);
+    check (option string) "the title has committed ordering" (Some "committed") (field "title_ordering" row))
+    [[created; snapshot_row 3 "last update"; snapshot_row 2 "first update"];
+     [snapshot_row 2 "first update"; snapshot_row 3 "last update"; created]]
+;;
+
+let test_snapshot_ordering_refuses_unknown_and_conflicting_witnesses () =
+  List.iter (fun payload ->
+    let unknown = history_row ~goal_id:"goal-gone" ~event_type:"goal_updated" payload in
+    let json = DG.unlisted_goal_history_of_rows ~listed:[]
+      ~rows:[unknown; snapshot_row 2 "known"] ~malformed_lines:0 in
+    let row = List.hd (unlisted json) in
+    check (option string) "unknown order cannot claim a latest title" None (field "title" row);
+    check (option string) "unknown snapshot ordering is visible" (Some "unknown") (field "title_ordering" row);
+    check int "the unordered snapshot is counted" 1
+      (coverage json "unordered_snapshot_rows" |> Yojson.Safe.Util.to_int))
+    [`Assoc ["title", `String "missing version"];
+     `Assoc ["store_version", `Int 0; "title", `String "zero"];
+     `Assoc ["store_version", `String "3"; "title", `String "string version"];
+     `Assoc ["store_version", `Int 3; "store_version", `Int 4; "title", `String "duplicate"]];
+  List.iter (fun rows ->
+    let row = DG.unlisted_goal_history_of_rows ~listed:[] ~rows ~malformed_lines:0 |> unlisted |> List.hd in
+    check (option string) "conflicting same-commit titles have no guessed winner" None (field "title" row);
+    check (option string) "conflicting latest version is visible" (Some "conflicting") (field "title_ordering" row))
+    [[snapshot_row 2 "left"; snapshot_row 2 "right"];
+     [snapshot_row 2 "right"; snapshot_row 2 "left"]];
+  let row = DG.unlisted_goal_history_of_rows ~listed:[]
+    ~rows:[snapshot_row 2 "left"; snapshot_row 2 "right"; snapshot_row 3 "later"; snapshot_row 2 "left"]
+    ~malformed_lines:0 |> unlisted |> List.hd in
+  check (option string) "a later committed version resolves earlier ambiguity"
+    (Some "later") (field "title" row)
+;;
+
 let () =
   run
     "goal timeline projection"
     [ ( "normalizer"
       , [ test_case "phase event shape" `Quick test_normalizes_a_phase_event
         ; test_case "summary names the actor" `Quick test_summary_names_the_actor
+        ; test_case "creation and update actors" `Quick test_mutation_summary_names_each_actor
         ; test_case "severity follows the phase" `Quick test_severity_follows_the_phase
         ; test_case "unparseable phase is not ok" `Quick test_unparseable_phase_is_not_ok
         ; test_case "missing fields are marked" `Quick test_missing_payload_fields_are_marked
@@ -632,7 +696,9 @@ let () =
         ; test_case "empty without events" `Quick test_tree_field_is_empty_without_events
         ] )
     ; ( "unlisted history"
-      , [ test_case "a departed goal is reconstructed" `Quick
+      , [ test_case "snapshot titles follow commit order" `Quick test_snapshot_titles_follow_commits_not_append_or_time
+        ; test_case "unknown and conflicting snapshot witnesses are explicit" `Quick test_snapshot_ordering_refuses_unknown_and_conflicting_witnesses
+        ; test_case "a departed goal is reconstructed" `Quick
             test_unlisted_history_reconstructs_a_departed_goal
         ; test_case "the edit event is recognised" `Quick
             test_unlisted_history_knows_the_edit_event

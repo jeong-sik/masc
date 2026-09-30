@@ -1,0 +1,40 @@
+ Dashboard  Work  ▸Keepers  Usage  Board  Workspace  System
+┌────────────────────────────────┐
+│  KEEPERS           Ctrl-B HIDE │   Keepers ▸ alpha ▸ chat                                                             
+├────────────────────────────────┤ ──────────────────────────────────────────────────────────────────────────────────── 
+│  - alpha                       │  ┄┄ 2026-10-01 · 01:00 ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄  
+│  - beta                        │     ╭ 01:10 ▶ YOU           accepted-before-cut                                      
+│                                │     │       ○ STATUS      │ Update accepted; stopping the observed turn before       
+│                                │     │                     │ continuing                                               
+│                                │     │       ○             │ Keeper chat stream ended after acceptance but before a   
+│                                │     │                     │ terminal event; reconciling exact request                
+│                                │     │                     │ tui-01a0f314-dbc5-7000-8056-2df10802596a before NEXT     
+│                                │     │       ○             │ Update accepted; stopping the observed turn before       
+│                                │     ╰                     │ continuing                                               
+│                                │             ▶ YOU           NEXT 1                                                   
+│                                │                             held-local-next                                          
+│                                │                                                                                      
+│                                │                                                                                      
+│                                │                                                                                      
+│                                │                                                                                      
+│                                │                                                                                      
+│                                │                                                                                      
+│                                │                                                                                      
+└────────────────────────────────┘                                                                                      
+   대화 · alpha                                                                                                         
+              ▄▄▄▄▄▄                                                                                                    
+          ▄▀▀▀▀▀▀▀▀▀▀▀▀▄                                                                                                
+        ▄▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▄                                                                                              
+       ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀                                                                                             
+      ▄▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▄                                                                                            
+      ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀                                                                                            
+      ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀       ──────────────────────────────────────────────────────────────────────────────────── 
+      ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀          Queue (1 pending) · auto-next:off · Ctrl-T:queue                                  
+       ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀           Local NEXT: "held-local-next"                                                     
+        ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀            History load failed · /errors                                                     
+          ▀▀▀▀▀▀▀▀▀▀▀▀▀▀              Memory load failed · /errors                                                      
+              ▀▀▀▀▀▀                  ◑ IN PROGRESS · working · 0s                                                      
+                                      >                                                                                 
+                                                                                                                        
+ alpha · - unread AUTO · gate: not loaded · —  Context unavailable · Ctrl-X                                             
+  Input retained; waiting for the stop or resume acknowledgement  Enter:send (1 local)  Esc:stop current turn  …?

@@ -253,7 +253,7 @@ let exact_output_resolver_snapshot (catalog : Runtime.exact_output_catalog) =
    derivation ([Runtime.exact_output_resolver_catalog]). A mandatory lane empty
    for any other reason is still required and still stops publication. *)
 let exact_output_excused_lane_ids (catalog : Runtime.exact_output_catalog) =
-  catalog.Runtime.catalog_exact_slots.Runtime.emptied_lane_ids
+  catalog.Runtime.catalog_exact_slots.Runtime_config_error.emptied_lane_ids
 ;;
 
 let exact_output_registry_refused detail =
@@ -868,6 +868,9 @@ let initialize_owner_state_blocking
       loop ()
     in
     loop ());
+  (* Initial owner preparation can checkpoint durable queue state, before
+     the shared runtime pool or Keeper lanes are activated. *)
+  Keeper_event_queue_snapshot_codec.install ~sw domain_mgr;
   let t0 = Eio.Time.now clock in
   Llm_metric_bridge.install ();
   Log.Server.info
@@ -1114,7 +1117,7 @@ let initialize_owner_state_blocking
   in
   install_domain_pool_references domain_pool;
   Log.Server.info
-    "Domain_pool created (%d domains) for dashboard/keeper compute"
+    "Domain_pool created (%d shared domains, 1 independent snapshot codec domain) for dashboard/keeper compute"
     (Domain_pool.domain_count domain_pool);
   { state; path_diagnostics; prepared_keeper_persistence; domain_pool }
 
@@ -1465,9 +1468,13 @@ let start_post_ready_owner_lanes
   Server_model_setup_resume.install ~sw
     ~base_path:(Mcp_server.workspace_config state).base_path
     ~resume:resume_model_configuration;
+  Candle_status.install_appraiser_check Server_candle_appraiser.available;
+  Candle_status.report_at_start ~base_path:(Mcp_server.workspace_config state).base_path;
   let start_authority () =
     start_completion_authority ~sw ~clock state;
     start_goal_verifier ~sw state;
+    Candle_payout_worker.start ~sw ~config:(Mcp_server.workspace_config state)
+      ~appraise:(Server_candle_appraiser.run ~base_path:(Mcp_server.workspace_config state).base_path);
     Server_workspace_memory_curator.start ~sw
       ~base_path:(Mcp_server.workspace_config state).base_path
   in
@@ -1494,7 +1501,7 @@ let install_keeper_gate_persistence state =
     Log.Server.error
       "keeper_gate: durable queue install failed base_path=%s error=%s"
       base_path
-      (Keeper_approval_queue.install_error_to_string error)
+      (Keeper_approval_queue_result.install_error_to_string error)
   | Ok report ->
     Log.Server.info
       "keeper_gate: installed durable queue base_path=%s pending=%d replayed=%d replay_failed=%d retired=%d"
@@ -1509,16 +1516,16 @@ let install_keeper_gate_persistence state =
        Log.Server.warn
          "keeper_gate: spent deliveries kept after a failed store write base_path=%s error=%s"
          base_path
-         (Keeper_approval_queue.storage_error_to_string error));
+         (Keeper_approval_queue_result.storage_error_to_string error));
     (match report.replay_projection_error with
      | None -> ()
      | Some error ->
        Log.Server.error
          "keeper_gate: derived replay projection unavailable; authorization queue remains ready base_path=%s error=%s"
          base_path
-         (Keeper_approval_queue.storage_error_to_string error));
+         (Keeper_approval_queue_result.storage_error_to_string error));
     List.iter
-      (fun (failure : Keeper_approval_queue.delivery_replay_failure) ->
+      (fun (failure : Keeper_approval_queue_result.delivery_replay_failure) ->
          Log.Server.error
            "keeper_gate: durable delivery replay failed approval=%s error=%s"
            failure.approval_id
@@ -1529,7 +1536,7 @@ let install_keeper_gate_persistence state =
      | Some error ->
        Log.Server.error
          "keeper_gate: Auto Judge recovery queue unavailable error=%s"
-         (Keeper_approval_queue.storage_error_to_string error)
+         (Keeper_approval_queue_result.storage_error_to_string error)
      | None -> ());
     Log.Server.info
       "keeper_gate: recovered Auto Judge work requested=%d started=%d finalized=%d skipped=%d failed=%d"

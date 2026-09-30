@@ -24,8 +24,8 @@ let text ~now last_seen =
         (* A stamp ahead of this clock. Drawing a span would say how long ago
            something that has not happened yet happened, so the text stands
            as it came and the reader can see which clock is wrong. *)
-        | None -> Masc.Tui_decode.sanitize_terminal_text last_seen
+        | None -> Masc.Tui_terminal_text.sanitize_terminal_text last_seen
         | Some age -> age)
     (* A stamp this build cannot read is shown as it arrived rather than as
        an age it did not measure. *)
-    | None -> Masc.Tui_decode.sanitize_terminal_text last_seen
+    | None -> Masc.Tui_terminal_text.sanitize_terminal_text last_seen

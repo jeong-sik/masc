@@ -168,6 +168,17 @@ let approvals_count_label (state : state) =
   if approvals_reading_current state then string_of_int on_screen
   else Printf.sprintf "%d?" on_screen
 
+let approval_item_needs_person = function
+  | Keeper_tool_row _ | Operator_row _ -> true
+  | Gate_row (pending : Tui_decode.gate_pending) ->
+      match pending.gp_phase with
+      | Gate_human_required -> true
+      | Gate_queued | Gate_judging | Gate_blocked -> false
+
+let approvals_human_pending (state : state) =
+  List.length (List.filter approval_item_needs_person (approval_items state))
+  + approvals_open_question_count state
+
 (* One title clause per list that was not read, in the order the lists are
    drawn. A list with nothing read and nothing kept is "unread" whether or not
    a poll failed; the rows of a list read before and not since are "stale". *)

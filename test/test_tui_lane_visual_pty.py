@@ -21,6 +21,8 @@ import test_tui_keyboard_input as terminal
 # ("go Lane Add-ons") masc_tui_types.ml's.
 SOURCE_MODULES = (
     "bin/masc_tui.ml",
+    "lib/tui_terminal_text.ml",
+    "lib/tui_terminal_text.mli",
     "bin/masc_tui_render.ml",
     "bin/masc_tui_lane_addons.ml",
     "bin/masc_tui_types.ml",

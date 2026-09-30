@@ -25,7 +25,7 @@ let config = {
 }
 let pending = null
 const posts = [], errors = [], snapshots = []
-let vite, browser, page
+let vite, browser
 const send = (res, data) => { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(data)) }
 const receipt = { scope: 'Real KeeperConfigPanel source in Chromium with isolated synthetic API; not installed server acceptance.', passed: false }
 try {
@@ -62,24 +62,7 @@ try {
   await vite.listen()
   const origin = `http://127.0.0.1:${vite.httpServer.address().port}`
   browser = await chromium.launch({ args: ['--no-sandbox'] })
-  page = await browser.newPage({ viewport: { width: 1280, height: 1000 } })
-  await page.addInitScript(() => {
-    window.promptTrace = []
-    let previous
-    const record = kind => {
-      const value = document.querySelector('textarea[aria-label="지시사항"]')?.value
-      window.promptTrace.push({ kind, time: performance.now(), value })
-    }
-    for (const kind of ['input', 'blur']) document.addEventListener(kind, event => {
-      if (event.target.matches('textarea[aria-label="지시사항"]')) record(kind)
-    }, true)
-    const frame = () => {
-      const value = document.querySelector('textarea[aria-label="지시사항"]')?.value
-      if (value !== previous) { record('frame'); previous = value }
-      requestAnimationFrame(frame)
-    }
-    requestAnimationFrame(frame)
-  })
+  const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } })
   page.on('pageerror', error => errors.push(error.message))
   await page.route('**/*', route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort())
   const settle = async () => {
@@ -132,15 +115,8 @@ try {
   await capture('runtime-unsaved-preserved')
   assert.deepEqual(errors, [])
   receipt.passed = true
-} catch(error) {
-  receipt.error = error.stack ?? String(error); process.exitCode = 1
-  if (page) {
-    receipt.failure = await page.evaluate(() => ({ text: document.querySelector('.kcf')?.textContent, promptTrace: window.promptTrace, inputs: Array.from(document.querySelectorAll('textarea')).map(el => ({ label: el.getAttribute('aria-label'), value: el.value })) }))
-    await page.screenshot({ path: resolve(output, 'failure.png') })
-  }
-}
+} catch(error) { receipt.error = error.stack ?? String(error); process.exitCode = 1 }
 finally {
-  if (page) receipt.promptTrace = await page.evaluate(() => window.promptTrace)
   if (pending) pending.res.end('{}')
   await browser?.close(); await vite?.close()
   await writeFile(resolve(output, 'receipt.json'), JSON.stringify({ ...receipt, posts, snapshots, errors }, null, 2) + '\n')

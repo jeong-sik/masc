@@ -134,6 +134,12 @@ AI를 활용한 기여도 환영합니다. 제출한 작성자는 diff를 이해
 무엇을 누가 또는 어떤 에이전트가 확인했고 무엇은 확인하지 못했는지 적으세요.
 생성된 결과와 셀프 리뷰만으로 런타임 동작이나 독립 승인을 증명할 수는 없습니다.
 
+**Commit 경계.** `.githooks`가 활성화되어 있으면 코드 commit의 pre-commit이 로컬
+Dune 빌드를 실행합니다. 로컬 빌드를 하지 않는 외부 코딩 세션은 해당 commit에
+`git -c core.hooksPath=/dev/null commit -m "your message"`를 사용합니다. 이 명령에서만
+hook을 끄며 이후 push에는 적용되지 않습니다. pre-push의 trace 유출 검사는 유지하고
+필수 CI 검사를 받으세요. 빌드를 피하려고 clone의 영구 hook 설정을 바꾸지는 않습니다.
+
 Keeper 레인은 도구 체인이 있으면 로컬에서 빌드·테스트할 수 있습니다. 해당 결과가 현재
 PR head의 검사나 `test.yml` targeted run을 대신하지는 않습니다. 세션 권한, MCP 인증의
 에이전트 이름, Keeper 이름은 별개입니다. 공용 Task 소유자 이름으로 다른 세션의 작업을 해제하지 마세요.
@@ -152,8 +158,12 @@ GitHub Issue·PR은 공개 변경을 추적합니다. MASC는 공유 목표와 �
 
 외부 기여자에게 MASC 참여는 선택 사항입니다. 공개 이슈와 PR은 운영자의 비공개 작업
 공간에 접근하지 않아도 이해할 수 있어야 합니다. Goal에 속하는 작업은 Goal을 먼저
-만들고 Task 생성 시 `goal_id`로 연결합니다. 독립 Task도 정상이며 나중에 Goal에 연결할 수 있습니다. 시작 전에 claim하고 다른 사람이 맡았다면 논의하거나 다른 작업을
-고릅니다. 실패하거나 인계할 때는 요약, 증거와 다음 행동을 적어 release합니다.
+만들고 Task 생성 시 `goal_id`로 연결합니다. 독립 Task도 정상이며 나중에 Goal에 연결할 수 있습니다.
+구현 전에 `claim`, 이어서 `start`를 사용합니다. 다른 사람이 맡았다면 논의하거나 다른 작업을
+고릅니다. 자신의 `Claimed`·`InProgress` Task를 인계할 때는 요약, 증거와 다음 행동을 적어
+`release`합니다. `AwaitingVerification`은 release할 수 없으므로 검증을 유지하고 인계
+기록을 남깁니다. 자신의 Task를 포기한다면 검증 대기 중에도 사유와 함께 `cancel`할 수
+있습니다. 취소는 완료로 계산하지 않습니다.
 
 현재 세션이 제공하는 `masc_goal_upsert`, `masc_add_task`, `masc_transition`,
 `masc_board_post` 스키마를 사용하세요. 이 문서는 변하는 도구 payload를 다시 정의하지
@@ -163,7 +173,10 @@ GitHub Issue·PR은 공개 변경을 추적합니다. MASC는 공유 목표와 �
 
 변경한 동작과 위험에 맞는 검사를 고릅니다. 문서는 OCaml 빌드 없이
 `bash scripts/check-doc-truth.sh`, `git diff --check`와 새 링크·앵커 검사를 실행할 수
-있습니다. 사람은 로컬 focused 검사를 사용할 수 있고 외부 코딩 세션은 2절을 따릅니다.
+있습니다. 이 스크립트는 진입 문서와 일부 명세를 검사하며 기여 안내의 모든 주장이나 새
+링크 전체를 검증하지는 않습니다. 변경한 링크·앵커·명령은 별도로 확인하세요.
+Bash, ripgrep과 기본 shell 유틸리티가 필요합니다. 사람은 로컬 focused 검사를 사용할 수
+있고 외부 코딩 세션은 2절을 따릅니다.
 
 [scripts/pr-open.sh](../../scripts/pr-open.sh) 또는 GitHub fork PR 흐름으로 초안을 엽니다.
 [PR 템플릿](../../.github/pull_request_template.md)을 채우고 이슈를 연결합니다.
@@ -178,7 +191,8 @@ GitHub Issue·PR은 공개 변경을 추적합니다. MASC는 공유 목표와 �
 - lint suite;
 - TLA model check.
 
-`PR required success`는 종합 결과입니다. 선택된 테스트가 전체 동작 테스트는 아니므로
+TLA job은 `specs/` 변경이 있을 때만 TLC를 실행합니다. 이 단계가 생략된 job의 성공은
+모델 검사 실행을 증명하지 않습니다. `PR required success`는 종합 결과입니다. 선택된 테스트가 전체 동작 테스트는 아니므로
 실제로 무엇을 실행했는지 로그에서 확인하세요. [test.yml](../../.github/workflows/test.yml)은
 정기·전체 실행과 `suite` 입력을 받는 targeted dispatch를 제공합니다.
 

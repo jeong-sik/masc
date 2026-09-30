@@ -70,3 +70,26 @@ new contributor account. Local document checks and PR CI are recorded in the PR.
 A follow-up independent source review found no blocking issues in these revisions.
 Its translation clarification was applied. This does not provide a GitHub
 approval or a current-head CI verdict.
+
+
+## Second factual review after presentation changes
+
+The earlier layout and link checks were insufficient to certify executable
+procedures. A second source read found the following defects and ambiguities:
+
+| Finding | Source | Correction |
+|---|---|---|
+| Human setup ran an Alcotest suite without installing test dependencies | `masc.opam` / `masc.opam.locked`: Alcotest and QCheck have `with-test` filters | Added `--with-test` to contributor dependency installation |
+| Fresh opam installation was not initialized | README's source setup includes `opam init --bare` | Added the missing initialization step |
+| Release guard was described as unwired | `scripts/ci/run-lint-suite.sh` invokes it in blocking-pr mode | Corrected the release section |
+| Unqualified Task release advice fails after verification submission | `workspace_task_lifecycle.ml`: release rejects AwaitingVerification | Documented claim/start, eligible release states, pending verification handoff and reasoned cancellation |
+| A code commit can violate the external session's no-build rule through a configured hook | `.githooks/pre-commit` invokes `dune build --root .` for code | Documented a commit-only hook override, preserving the normal pre-push guard and CI requirement |
+| Green TLA job was liable to be mistaken for an executed model check | `pr-check.yml` executes TLC only for changed `specs/` | Documented step-level evidence requirement |
+| Human launch example used the shared-runtime script and implicit port | `scripts/run-local.sh` explicitly provides a separate target/config root | Used the local launcher with a separate directory and an example port that must be unused |
+| Generic doc-truth success could be mistaken for review of the new guide | `scripts/check-doc-truth.sh` has a bounded document list and assertions | Stated the check's scope and separate link/command review |
+
+English/Korean guide changes were checked together. An independent reviewer
+identified the release-state, hook and opam-initialization findings in a source
+read. Source review still does not establish fresh-machine install success or
+actual runtime behavior. Main was integrated after the GitHub reviewer reported
+that the earlier green PR run failed freshness; the revised head needs new CI.

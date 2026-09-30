@@ -141,6 +141,13 @@ addressing reviews, and accurately describing the evidence. Identify what was
 checked, by whom or by which agent, and what remains unverified. Generated output
 and self-review alone do not establish runtime behavior or independent approval.
 
+**Commit boundary.** If `.githooks` is active, code commits run a local Dune
+build in pre-commit. An external coding session following the no-local-build
+rule uses `git -c core.hooksPath=/dev/null commit -m "your message"` for that
+commit. This disables hooks for that command only, not future pushes: keep the
+pre-push trace-leak guard active and obtain the required CI checks. Do not
+change the clone's persistent hook configuration to avoid a build.
+
 Keeper lanes may build/test locally if their toolchain exists. Those results do
 not replace current-head PR checks or a targeted `test.yml` run. A session's
 permissions, an MCP bearer identity and a Keeper's name are separate identities.
@@ -162,8 +169,12 @@ MASC participation is optional for an outside contributor. A public issue and PR
 must be understandable without access to an operator's private workspace.
 For goal-linked MASC work, create the Goal before its Tasks and pass `goal_id`
 explicitly. Standalone Tasks are valid and can be linked to a Goal later.
-Claim before starting. If another owner holds work, discuss or choose another
-Task. On failure or handoff, release with a summary, evidence and next step.
+Use `claim`, then `start` before implementation. If another owner holds work,
+discuss or choose another Task. For your `Claimed` or `InProgress` Task, a handoff
+uses `release` with a summary, evidence and next step. `AwaitingVerification`
+cannot be released; leave its verification pending and record the handoff. If
+abandoning a Task you own, `cancel` ends it with a reason, including while awaiting
+verification. Cancellation does not count as completion.
 
 Use the live session's tool schemas: `masc_goal_upsert`, `masc_add_task`,
 `masc_transition` and `masc_board_post`. Tool schemas change; this guide does not
@@ -174,8 +185,11 @@ can follow the relationship. Treat a Board plan as a plan until it has evidence.
 
 Pick checks from the changed behavior and its risks. Documentation work can run
 `bash scripts/check-doc-truth.sh` and `git diff --check` without building OCaml.
-Check new file links and anchors too. Human contributors can run focused local
-checks; external coding-agent sessions follow section 2.
+This script covers front-door documents and selected specs; it does not validate
+all contributor-guide claims or every new link. Check changed file links, anchors
+and commands separately. It requires Bash, ripgrep and standard shell utilities.
+Human contributors can run focused local checks; external coding-agent sessions
+follow section 2.
 
 Open a draft using [scripts/pr-open.sh](../../scripts/pr-open.sh) or GitHub's fork
 PR flow. Fill the [PR template](../../.github/pull_request_template.md), including
@@ -190,8 +204,10 @@ are ready, mark it ready for review to start required checks.
 - lint suite;
 - TLA model check.
 
-The workflow also reports the aggregate `PR required success`. Selection is not
-a full behavior suite: inspect which tests the run actually executed.
+The TLA job executes TLC only when `specs/` changes. A successful job that skips
+that step does not prove a model-check run. The workflow also reports the aggregate
+`PR required success`. Selection is not a full behavior suite: inspect which tests
+the run actually executed.
 [test.yml](../../.github/workflows/test.yml) provides scheduled/full runs and a
 `workflow_dispatch` `suite` input for targeted verification, for example:
 

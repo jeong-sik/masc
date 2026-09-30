@@ -53,15 +53,22 @@ git clone https://github.com/jeong-sik/masc.git
 cd masc
 git config core.hooksPath .githooks       # pre-commit and pre-push guards
 
+opam init --bare                         # initialize a fresh opam installation
 opam switch create . ocaml-base-compiler.5.5.1 --no-install
 eval "$(opam env)"
 scripts/opam-pin-external-deps.sh         # pin external OCaml dependencies
-opam install ./masc.opam --deps-only --locked
+opam install ./masc.opam --deps-only --locked --with-test
 
 scripts/dune-local.sh build @default      # build
 scripts/dune-local.sh exec test/test_keeper_meta_json_config_toml_only.exe
-./start-masc.sh --http --base-path "$HOME/masc-dev"   # server from the checkout
+mkdir -p "$HOME/masc-dev"
+scripts/run-local.sh --target-dir "$HOME/masc-dev" --port 9234
 ```
+
+Use an unused port in the launch command; `9234` is an example. The local launcher
+uses the separate target directory for runtime/config state and does not seed
+checked-in Keeper manifests by default. Browser access additionally needs the
+dashboard build described in README.
 
 `scripts/dune-local.sh` wraps Dune for a machine where several agents build at
 once: it serializes Dune inside one worktree, defaults concurrency to
@@ -71,7 +78,10 @@ running it.
 
 The hooks: `pre-commit` skips the `dune build` type-check for a commit that
 only touches docs and assets; `pre-push` refuses a push that adds Dune trace
-dumps, because those carry the environment.
+dumps, because those carry the environment. Code commits invoke a local Dune
+build through pre-commit. External AI sessions must use the
+[commit boundary procedure](docs/guides/CONTRIBUTOR-WORKFLOW.md#2-start-an-ai-development-session)
+when these hooks are active.
 
 ## Where things are
 
@@ -140,7 +150,9 @@ built binary.
 Draft PRs skip the required jobs in [pr-check.yml](.github/workflows/pr-check.yml).
 Mark a reviewable PR ready for review to run the five required checks: dashboard
 typecheck, `dune build @check`, `dune build --profile release @check`, lint suite,
-and TLA model check. `PR required success` reports their aggregate result.
+and TLA model check. The TLA job runs TLC only when `specs/` changes; its green
+result alone does not mean models were executed. `PR required success` reports
+their aggregate result.
 
 The check job selects tests with `scripts/ci/run-edited-tests.sh`; read its output
 to learn what ran and what did not. The selected suite budget is controlled by the
@@ -191,7 +203,7 @@ chore: bump version to 0.34.0
 8. Follow the [review and integration procedure](docs/guides/CONTRIBUTOR-WORKFLOW.md#5-review-and-integrate).
    A current-head PASS and completed required checks are necessary; stale or
    skipped checks do not authorize integration. Never push to a merged PR branch.
-9. When the work is ready to verify, hand it over with typed evidence.
+9. For work tracked by a MASC Task, submit typed evidence when ready to verify.
    `artifact:<producer-root-relative-path>` snapshots a bounded file at
    submission; `note:<text>` carries narrative evidence. The current tool
    schema also supports frozen `board:` and `fusion:` references. Public URLs in notes can be fetched by the verifier, but prose
@@ -257,8 +269,8 @@ reproduce, expected versus actual behaviour, and the relevant log
   one: after merging `0.33.0`, tag `v0.33.0` before opening `0.34.0`.
 - Run `bash scripts/check-version-truth.sh` and `bash scripts/check-doc-truth.sh`
   before a release review; the tag workflow runs the former and CI runs the
-  latter. `check-release-train-guard.sh` is not wired into CI yet
-  (`scripts/ci/guards-not-wired.txt`).
+  latter. `scripts/ci/run-lint-suite.sh` runs
+  `check-release-train-guard.sh` in `blocking-pr` mode when a base ref is available.
 - `scripts/bump-version.sh` runs `python3 scripts/changelog-fragments.py
   assemble`, which folds `changelog.d/*.md` into `## [Unreleased]` and
   deletes them; move those entries into the version section before tagging.

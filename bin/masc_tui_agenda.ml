@@ -108,7 +108,7 @@ let same_day (a : Unix.tm) (b : Unix.tm) =
   a.Unix.tm_year = b.Unix.tm_year && a.Unix.tm_yday = b.Unix.tm_yday
 ;;
 
-(* [Tui_terminal_text.clock_timestamp_for_terminal] answers HH:MM:SS and this strip
+(* [Masc.Tui_terminal_text.clock_timestamp_for_terminal] answers HH:MM:SS and this strip
    has one line to spend, so the seconds go. A wake the codec cannot read
    keeps its own text: a row that says nothing readable is still a row that
    says something is scheduled. *)

@@ -10667,7 +10667,7 @@ let render_fusion_launch (state : state) ~(form : Masc_tui_fusion_launch.t optio
     List.concat_map
       (fun line ->
         Message_layout.split_cells ~max_cells:(max 1 (width - 2))
-          (Tui_terminal_text.sanitize_terminal_text line))
+          (Masc.Tui_terminal_text.sanitize_terminal_text line))
       text
     |> List.map (fun line -> "  " ^ line)
   in

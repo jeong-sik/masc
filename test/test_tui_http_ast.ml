@@ -2676,7 +2676,7 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
      one helper. It splits the text on LF (not drawn) and escapes each line
      before it wraps. *)
   check_identifiers ~module_path:"bin/masc_tui_planning_detail.ml" ~binding:"wrapped"
-    ~callees:[ "Tui_terminal_text.sanitize_terminal_text"; "String.split_on_char" ]
+    ~callees:[ "Masc.Tui_terminal_text.sanitize_terminal_text"; "String.split_on_char" ]
     [ "text"; "line" ];
   check int "the goal detail heads a stuck goal with the verifier's reason" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path

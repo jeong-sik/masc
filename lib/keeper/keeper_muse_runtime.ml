@@ -513,14 +513,9 @@ let capacity_bounded_model_input_projection ~capacity_bytes ~system_prompt ~goal
          source_projection)
 ;;
 
-let prompt_for_turn ~is_resume ~goal (prepared : Host.prepared_turn) =
+let prompt_for_turn ?composed_context ~held ~is_resume ~goal (prepared : Host.prepared_turn) =
   if is_resume
-  then
-    (* The host session already holds the system prompt and the seeded
-       history. The hook context is turn-local, so its typed carrier goes
-       out again; nothing is recorded as held on this lane, so every carried
-       context is sent. *)
-    Ok (Host.resume_prompt ~goal ~held:[] prepared.messages).Host.prompt
+  then Ok (Host.resume_prompt ~goal ~held ?composed_context prepared.messages).Host.prompt
   else
     let* history = render_messages prepared.messages in
     Ok
@@ -811,7 +806,7 @@ let phase_name : Session_store.phase -> string = function
   | Session_store.Settled _ -> "Settled"
 ;;
 
-let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_session_settled
+let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled
     ~required_native_posture ~official_client_continuation ~runtime_id ~keeper_name
     ~prompt_capacity ~configured_reasoning_effort ~turn_timeout_s ~quota_scope
     ~on_model_input_window_observation ~carried_front_seed ~librarian_front ~on_carried_front
@@ -927,7 +922,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
        model is not continued under a new one. Without the root a resumed
        session kept working where it started. *)
     (* Hook nudges are ordinary history seeded only on Start. Carried context
-       is sent on every Resume and must not invalidate the durable session. *)
+       is reconciled separately against the acknowledged delivery frontier. *)
     let canonical_messages = List.filter
       (fun message -> not (Host.is_carried_on_resume message)) prepared.messages in
     let snapshot =
@@ -1085,7 +1080,15 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
         observe_transport_uncertain ();
         Printexc.raise_with_backtrace exn backtrace
     in
-    let* prompt = prompt_for_turn ~is_resume ~goal prepared in
+    let composed_context = Option.bind composed_context (fun read -> read ()) in
+    let held = Session_store.held_context_for_resume claim_plan ~expected:stored_session in
+    let held_context =
+      if is_resume
+      then (Host.resume_prompt ~goal ~held ?composed_context prepared.messages).held_context
+      else Host.start_held_context ?composed_context prepared.messages
+    in
+    let context_frontier = { context_frontier with held_context } in
+    let* prompt = prompt_for_turn ?composed_context ~held ~is_resume ~goal prepared in
     let* () =
       if String.length prompt <= capacity_bytes
       then Ok ()
@@ -1194,6 +1197,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
         Error error
     in
     let session_state = ref claimed_session in
+    let settled_held_context = ref held_context in
     let recovery_failure = ref Session_store.Transport_interrupted in
     let update_session label transition =
       match transition !session_state with
@@ -1380,7 +1384,8 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
       in
       recovery_failure := Session_store.State_persistence_failed;
       let* settled =
-        Session_store.settle
+        Session_store.settle_holding
+          ~held_context:!settled_held_context
           ~base_path
           ~keeper_name
           ~expected:!session_state
@@ -1489,10 +1494,18 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
                          observed_turn := Option.map
                              (fun (turn : observed_turn) -> { turn with model })
                              !observed_turn
+                       | Serve.Compaction_observed compaction ->
+                         (* A rewritten or unreported context cannot certify
+                            the exact blocks delivered before compaction. *)
+                         (match compaction.Msp.outcome with
+                          | Some (Msp.Compaction_noop | Msp.Compaction_failed
+                                 | Msp.Compaction_cancelled) -> ()
+                          | Some (Msp.Compaction_compacted
+                                 | Msp.Unrecognized_compaction_outcome _)
+                          | None -> settled_held_context := [])
                        | Serve.Turn_started _ | Serve.Text_delta _ | Serve.Text_completed _
                        | Serve.Native_tool_started _ | Serve.Native_tool_finished _
                        | Serve.Approval_decided _ | Serve.Subscription_usage_observed _
-                       | Serve.Compaction_observed _
                        | Serve.Usage_reported _ | Serve.Turn_finished _ -> ());
                       stream.on_serve_event event)
                     ~mgr:process_mgr
@@ -1631,7 +1644,8 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
           in
           recovery_failure := Session_store.State_persistence_failed;
           let* () =
-            Session_store.settle
+            Session_store.settle_holding
+              ~held_context:!settled_held_context
               ~base_path
               ~keeper_name
               ~expected:!session_state
@@ -1717,7 +1731,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
                  recovery_detail)))
 ;;
 
-let run ?official_task_reference ~accepts_image_input ?required_native_posture
+let run ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture
     ?official_client_continuation ~runtime_id ~prompt_capacity ~configured_reasoning_effort
     ~turn_timeout_s ~quota_scope ~keeper_name ~pre_tool_rejects ~base_path ~workspace_root ?native_workspace_context ~goal
     ~goal_blocks ~system_prompt ~tools
@@ -1750,6 +1764,7 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture
     Host.with_run_lifecycle_events ~event_bus ~keeper_name (fun () ->
       run_without_lifecycle
         ~official_task_reference
+        ~composed_context
         ~accepts_image_input
         ~on_session_settled
         ~required_native_posture
@@ -1878,7 +1893,7 @@ module For_testing = struct
     let prepared : Host.prepared_turn =
       { messages; system_prompt; tools = []; reasoning_effort = None }
     in
-    prompt_for_turn ~is_resume:false ~goal prepared
+    prompt_for_turn ~held:[] ~is_resume:false ~goal prepared
   ;;
 
   let reserved_prompt_bytes = reserved_prompt_bytes

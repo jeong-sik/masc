@@ -1,0 +1,10 @@
+{
+  "head": "379a90db85b9a8969f68b2c160eb622c7e620db5",
+  "run_id": 36610580606,
+  "test_step": "failure",
+  "raw_log_sha256": "9ea167d06fc357df70923186cb822b17826ca9f26b2ef1dde5594c268d3a2ea3",
+  "failure": "test/test_candle_goal_flow.ml:254 unbound module Candle_config",
+  "selected_suites": 7,
+  "behavior_cases_executed": 0,
+  "fix": "57d584cbbc6b61841b1072054faa7a5031b79020 adds direct masc_candle_config stanza dependency"
+}

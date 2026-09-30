@@ -8636,12 +8636,12 @@ let render_system_logs (state : state) =
   box_line buf cols header;
   box_divider buf cols;
   (* The message takes what the named columns leave, asked of the columns. *)
-  let message_width =
-    Render_schedule.system_log_message_width
+  let log_layout =
+    Render_schedule.system_log_layout
       ~inner_width:(max 1 (framed_inner_width cols - 2))
   in
   let col_hdr =
-    "  " ^ Render_schedule.system_log_header_row ~message_width
+    "  " ^ Render_schedule.system_log_header_row ~layout:log_layout
   in
   box_line_styled buf cols ~style:(Theme.recede ()) col_hdr;
   box_divider buf cols;
@@ -8700,7 +8700,7 @@ let render_system_logs (state : state) =
              module name used to push every column right of it out of line. *)
           let line =
             "  "
-            ^ Render_schedule.system_log_row ~message_width ~level_style
+            ^ Render_schedule.system_log_row ~layout:log_layout ~level_style
                 ~styles:
                   { Render_schedule.slog_time_style = Ansi.dim
                   ; slog_module_style =
@@ -10808,12 +10808,12 @@ let render_repository_list (state : state) =
     ~body:(fun ~budget c ->
       (* The path takes what the named columns leave, asked of the columns
          rather than of a constant standing in for their total. *)
-      let path_width =
-        Render_schedule.workspace_path_width
+      let repository_layout =
+        Render_schedule.workspace_layout
           ~inner_width:(max 1 (framed_inner_width cols - 2))
       in
       c.push_styled ~style:(Theme.recede ())
-        ("  " ^ Render_schedule.workspace_header_row ~path_width);
+        ("  " ^ Render_schedule.workspace_header_row ~layout:repository_layout);
       c.push_divider ();
       (match state.repositories_error with
        | None -> ()
@@ -10859,7 +10859,7 @@ let render_repository_list (state : state) =
               let open Masc.Tui_decode in
               let line =
                 "  "
-                ^ Render_schedule.workspace_row ~path_width
+                ^ Render_schedule.workspace_row ~layout:repository_layout
                     { Render_schedule.wrow_name =
                         Terminal_text.single_line r.rp_name
                     ; wrow_branch =

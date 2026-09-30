@@ -1,5 +1,5 @@
-import { readKeeperPortrait } from './api/schemas/keeper-portrait'
-import { readCandleAccountRevision, readCandleBalance } from './api/schemas/candle-observation'
+import { readKeeperPortrait } from './lib/keeper-portrait'
+import { readCandleAccountRevision, readCandleBalance } from './lib/candle-observation'
 import { parseKeeperActivationMode } from './lib/keeper-activation-mode'
 import type {
   CtxAttribution,

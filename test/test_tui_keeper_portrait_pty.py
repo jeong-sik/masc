@@ -396,16 +396,22 @@ def item_account_withdraws_unread_authority(binary: str) -> None:
             identity["unread"] = True
             frame(process, fd, output, lambda text: b"Account unavailable:" in text)
             recover(process, fd, output)
-            balance[0] = "14000"
-            h.send_and_wait(process, fd, output, b"r", b"Balance 14.000 Candle")
+            # Release before any new Item read: otherwise the new read's
+            # generation alone would supersede this response and hide a
+            # missing authority-boundary invalidation.
             start = len(output)
             release.set()
             assert h.wait_for_fixture_state(process, fd, output, served.is_set, timeout=3)
-            h.drain_until_quiet(process, fd, output)
+            probes = identity["probes"]
+            assert h.wait_for_fixture_state(process, fd, output,
+                lambda: identity["probes"] >= probes + 2, timeout=10)
+            assert h.drain_until_quiet(process, fd, output), "late response did not settle"
             text = b"\n".join(last_frame_rows(output).values())
-            assert b"Balance 14.000 Candle" in text
+            assert b"Account unavailable:" in text
             assert b"Balance 13.000 Candle" not in text
             assert b"Balance 13.000 Candle" not in output[start:]
+            balance[0] = "14000"
+            h.send_and_wait(process, fd, output, b"r", b"Balance 14.000 Candle")
             os.write(fd, b"q")
         finally:
             release.set()

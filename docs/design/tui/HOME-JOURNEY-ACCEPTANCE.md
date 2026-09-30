@@ -28,9 +28,10 @@ Home journey work, rather than being treated as completed requirements.
 | Created Keeper is selected for the first assignment | Creation currently reports success only | Refresh roster and hand off to the named composer |
 | Remembered target remains visible during roster failure | Resume currently requires a successful roster read | Last-record presentation with unavailable status and safe send authority |
 | Short-height Home reserves continuation and new work | Renderer currently ignores its body budget | Height-aware layout and short-height PTY acceptance |
+| Wider Home does not add default panels | CI replay frames 03, 06, 09, 12 show the automatic Recent pane at 160 columns | Suppress automatic extra Home panels while preserving explicit operator choices |
 | Overview startup remembers a last conversation across restarts | `home_last_chat` is session-only | Independent durable navigation receipt and restart/deletion verification |
 | All sources retain their distinct decision identity | Home currently aggregates destinations | Individual request projection with kind + authoritative request ID; duplicate and same-task cases |
-| Acceptance sizes and color-independent actions | `test_tui_home_viewports_pty.py`: 80×24, 120×32, 160×48, normal and NO_COLOR | Execute new suite; inspect its 12 complete PTY frames |
+| Acceptance sizes and color-independent actions | `test_tui_home_viewports_pty.py`: 80×24, 120×32, 160×48, normal and NO_COLOR | Targeted run 36654334047 passed at `45c065b875`; raw CI frame replay and screenshots are recorded below |
 | Large queues preserve continuation and reach every request | Home aggregates queue; details own their paging | Overflow journey through details and back with selection restored |
 | Accepted decisions distinguish receipt from application | Existing detail actions | Accepted-but-not-applied fixture and fresh-read verification |
 | Usage entry is independent of prior Telemetry visit | Existing Usage keyboard scenario | Current-head targeted suite and rendered Usage evidence |
@@ -54,3 +55,17 @@ gh workflow run test.yml --ref <branch> -f suite=test_tui_home_viewports_pty
 No local Dune build is needed. Current-head required PR checks, focused test
 results, binary provenance, fixture screenshots and production observations
 must remain separate evidence. A passing viewport suite closes only its row.
+
+## Current viewport evidence
+
+[CI fixture frame evidence](../../evidence/tui-home-journey-20260930/README.md)
+records twelve raw frames and their Chromium/xterm replay screenshots from
+source/test head `45c065b875c550e7109e59d86d3d2c31de9422da`. This includes the
+reviewed Home source above with the viewport assertions added. The passing
+targeted run establishes the two fixture states at the three specified sizes
+in normal and NO_COLOR modes. The remaining checklist rows stay open.
+
+Follow-up implementations submitted for review: #40116 binds full drafts to
+their Keeper; #40120 preserves creation declarations and opens the confirmed
+target for explicit first assignment. Their scoped runtime results and Home
+integration are still required; submission is not completion evidence.

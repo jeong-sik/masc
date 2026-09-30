@@ -30,7 +30,9 @@ let equipment observation ~keeper = match observation with
   | Ready { balance; _ } -> Ok (Candle_balance.equipment balance ~keeper)
 
 let account_revision observation ~keeper = match observation with
-  | Off | Disabled _ -> None
+  | Off -> None
+  | Disabled reason ->
+    Some (Digestif.SHA256.(digest_string ("disabled\000" ^ reason) |> to_hex))
   | Ready { policy; balance } ->
     let owned = Candle_balance.owned balance ~keeper
       |> List.map (fun item -> `String (Keeper_portrait_item.id item)) in
@@ -44,4 +46,4 @@ let account_revision observation ~keeper = match observation with
       `List owned;
       `List catalog;
     ] in
-    Some (Digestif.SHA256.(digest_string (Yojson.Safe.to_string account) |> to_hex))
+    Some (Digestif.SHA256.(digest_string ("ready\000" ^ Yojson.Safe.to_string account) |> to_hex))

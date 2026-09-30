@@ -410,9 +410,10 @@ let guided_actions () =
 let context_flow_uses_declared_connections () =
   let producer : UI.instance = {id="source-worker";incarnation="source-worker";run_id="project";
     addon_id="any-source";title="Project observer";revision="1";phase=UI.Row.Attached;
-    observation_seq=1;rows_count=0;source_path=None;binding=`Assoc ["sources",`List []];
+    observation_seq=1;rows_count=0;source_path=Some "/config/project-observer.toml";binding=`Assoc ["sources",`List []];
     outputs=["events",UI.Row.All_lanes];skills_directory=None;action_schema=None; binding_schema=None; display=Masc.Lane_addon_presentation.empty} in
   let consumer = {producer with id="metric-worker";incarnation="metric-worker";title="Project metric";
+    source_path=Some "/config/project-metric.toml";
     binding=Yojson.Safe.from_string {|{"sources":[{"source_id":"input","kind":"lane_output",
       "installation_id":"project-observer","output_id":"events","selection":"latest_completed"}]}|}} in
   let declaration installation_id instance_id : UI.declaration =
@@ -903,7 +904,91 @@ let current_installations_and_grouped_history_keep_exact_targets () =
   check bool "detail ignores history toggle and stays pinned" true
     (UI.toggle_history opened = opened)
 
+let declared_layers_use_exact_configured_owners () =
+  let binding upstream = `Assoc ["sources",`List (List.mapi (fun index id ->
+    `Assoc ["source_id",`String ("input-" ^ string_of_int index);
+      "kind",`String "lane_output";"installation_id",`String id;
+      "selection",`String "latest_completed"]) upstream)] in
+  let worker id upstream : UI.instance = {id="worker-" ^ id;incarnation="worker-" ^ id;
+    run_id="project";addon_id="fixture";title=id;revision="1";phase=UI.Row.Attached;
+    observation_seq=1;rows_count=0;source_path=Some ("/config/" ^ id ^ ".toml");
+    binding=binding upstream;outputs=[];skills_directory=None;action_schema=None;
+    binding_schema=None;display=Masc.Lane_addon_presentation.empty} in
+  let declaration id (item : UI.instance) : UI.declaration = {
+    source_path="/config/" ^ id ^ ".toml";installation_id=Some id;
+    instance_id=Some item.id;desired=Some "1";applied=Some "1";issues=[];
+    origin=UI.Parsed_declaration} in
+  let roots = [worker "a" [];worker "b" []] in
+  let branches = [worker "c" ["a"];worker "d" ["a";"b"]] in
+  let joined = worker "e" ["c";"d"] in
+  let configured = roots @ branches @ [joined] in
+  let declarations = List.map (fun (item : UI.instance) -> declaration item.title item) configured in
+  let snapshot instances declarations : UI.snapshot = {instances;
+    configuration=Some {directory="/config";complete=true;declarations};
+    output={rows=[];coverage=[]};complete=None} in
+  let view instances declarations = {UI.initial with presentation=UI.Flow;
+    snapshot=Some (snapshot instances declarations)} in
+  let lines instances declarations = UI.lines ~width:200 (view instances declarations) in
+  let graph = lines configured declarations in
+  List.iter (fun text -> check bool "fan-out and join retain their exact horizontal and vertical layers"
+    true (List.mem text graph)) ["Layer 0";"  [a]  |  [b]";
+      "Layer 1";"  [c]  |  [d]";"Layer 2";"  [e]"];
+  let cycle = [worker "a" ["b"];worker "b" ["a"]] in
+  let cyclic = lines cycle (List.map (fun (item : UI.instance) -> declaration item.title item) cycle) in
+  check bool "a dependency cycle never receives an execution layer" true
+    (not (List.mem "Layer 0" cyclic)
+     && List.mem "Layer unavailable: a" cyclic && List.mem "Layer unavailable: b" cyclic);
+  let producer = worker "a" [] in
+  let consumer = worker "consumer" ["a"] in
+  let assert_unplaced label producer declarations consumer =
+    let graph = lines [producer;consumer] declarations in
+    check bool (label ^ " cannot supply the consumer's configured upstream") true
+      (List.mem "Layer unavailable: consumer" graph && not (List.mem "  [consumer]" graph)) in
+  let consumer_declaration = declaration "consumer" consumer in
+  assert_unplaced "missing installation" producer [consumer_declaration] consumer;
+  assert_unplaced "wrong source path" {producer with source_path=Some "/other/a.toml"}
+    [declaration "a" producer;consumer_declaration] consumer;
+  assert_unplaced "another run" {producer with run_id="other-project"}
+    [declaration "a" producer;consumer_declaration] consumer;
+  let manual = {producer with id="manual-uuid";source_path=None} in
+  let uuid_consumer = {consumer with binding=binding [manual.id]} in
+  assert_unplaced "manual worker UUID" manual [consumer_declaration] uuid_consumer;
+  assert_unplaced "ambiguous declarations for one worker" producer
+    [declaration "a" producer;declaration "a" producer;consumer_declaration] consumer;
+  let named_consumer port = {consumer with binding=`Assoc ["sources",`List [
+    `Assoc ["source_id",`String "analysis-input";"kind",`String "lane_output";
+      "installation_id",`String "a";"output_id",`String port;
+      "selection",`String "latest_completed"]]]} in
+  let advertised = {producer with outputs=["events",UI.Row.All_lanes]} in
+  let known_port = lines [advertised;named_consumer "events"]
+    [declaration "a" advertised;consumer_declaration] in
+  check bool "a declared advertised port connects the consumer layer and preserves its source selection" true
+    (List.mem "Layer 1" known_port && List.mem "  [consumer]" known_port
+     && List.mem "  a -> consumer" known_port
+     && List.mem "    Input analysis-input: a/events" known_port);
+  let unknown_port = lines [advertised;named_consumer "missing-port"]
+    [declaration "a" advertised;consumer_declaration] in
+  check bool "an unknown output port cannot receive a layer or an unqualified available arrow" true
+    (List.mem "Layer unavailable: consumer" unknown_port
+     && List.mem "  Producer output unavailable: a/missing-port" unknown_port
+     && List.mem "  a -> consumer · producer output unavailable: missing-port" unknown_port
+     && not (List.mem "  a -> consumer" unknown_port));
+  let duplicate = {producer with id="worker-a-two";incarnation="worker-a-two"} in
+  let ambiguous = lines [producer;duplicate;consumer]
+    [declaration "a" producer;declaration "a" duplicate;consumer_declaration] in
+  check bool "duplicate current producer identity is qualified in the flat wiring list" true
+    (List.mem "  a -> consumer · producer identity ambiguous in this run" ambiguous
+     && List.mem "Layer unavailable: consumer" ambiguous);
+  let retired = {producer with phase=UI.Row.Detached} in
+  let history = UI.lines ~width:200
+    {(view [retired] [declaration "a" retired]) with overview_mode=UI.Retained_runs} in
+  check bool "stored retired wiring is never presented as a current layer" true
+    (List.mem "Stored bindings · producer incarnations are not reconstructed as current layers" history
+     && not (List.mem "Layer 0" history))
+
 let () = run "TUI Lane package operations" ["operator scenarios",[
+  test_case "declared layers use exact configured owners" `Quick
+    declared_layers_use_exact_configured_owners;
   test_case "current installations and grouped retained runs preserve exact targets" `Quick
     current_installations_and_grouped_history_keep_exact_targets;
   test_case "declared results show body before activity and preserve raw evidence" `Quick

@@ -1073,17 +1073,80 @@ let rec action_fields prefix = function
       action_fields (if prefix="" then key else prefix ^ "." ^ key) value) fields
   | value -> [prefix ^ ": " ^ Yojson.Safe.to_string value]
 
+type flow_node = {
+  worker : instance;
+  upstream : string list;
+  problems : string list;
+}
+
+type flow_input = { source_id : string; installation_id : string; output_id : string option }
+type flow_resolution =
+  | Producer_available of instance
+  | Producer_missing
+  | Producer_ambiguous
+  | Output_missing of string
+
+let flow_inputs binding =
+  let module S = Masc.Lane_addon_sources in
+  let* sources = S.parse binding in
+  Ok (List.filter_map (function
+    | S.Lane_output {id;installation_id;output_id} -> Some {source_id=id;installation_id;output_id}
+    | S.Snapshot_file _ | S.Msx_capture _ | S.Dos_capture _ | S.Browser_document _ -> None) sources)
+
+let installation_identity declarations (instance : instance) =
+  match List.filter (fun (d : declaration) ->
+    d.instance_id=Some instance.id && Some d.source_path=instance.source_path) declarations with
+  | [{installation_id=Some id;_}] -> Some id
+  | [] | [_] | _ :: _ :: _ -> None
+
+let installation_name declarations (instance : instance) =
+  match installation_identity declarations instance with
+  | Some id -> id
+  | None -> instance.id
+
+let configured_producers ~identity ~run_id workers id =
+  List.filter (fun producer ->
+    identity producer=Some id && String.equal producer.run_id run_id) workers
+
+let resolve_flow_input ~identity ~run_id workers input =
+  match configured_producers ~identity ~run_id workers input.installation_id with
+  | [] -> Producer_missing
+  | _ :: _ :: _ -> Producer_ambiguous
+  | [producer] ->
+      match input.output_id with
+      | None -> Producer_available producer
+      | Some port -> if List.mem_assoc port producer.outputs then Producer_available producer
+          else Output_missing port
+
+let declared_layers ~identity workers =
+  let nodes = List.map (fun worker ->
+    match flow_inputs worker.binding with
+    | Error detail -> {worker;upstream=[];problems=["Invalid source binding: " ^ detail]}
+    | Ok dependencies ->
+        let upstream, problems = List.fold_left (fun (upstream,problems) input ->
+          match resolve_flow_input ~identity ~run_id:worker.run_id workers input with
+          | Producer_available producer -> producer.id :: upstream, problems
+          | Producer_missing -> upstream, ("Producer unresolved in this run: " ^ input.installation_id) :: problems
+          | Producer_ambiguous -> upstream, ("Producer identity is ambiguous: " ^ input.installation_id) :: problems
+          | Output_missing port -> upstream, ("Producer output unavailable: " ^ input.installation_id ^ "/" ^ port) :: problems)
+          ([],[]) dependencies in
+        {worker;upstream;problems}) workers in
+  let rec place placed layers remaining =
+    let ready, waiting = List.partition (fun node ->
+      node.problems=[] && List.for_all (fun id -> List.mem id placed) node.upstream) remaining in
+    match ready with
+    | [] -> List.rev layers, waiting
+    | ready -> place (List.map (fun node -> node.worker.id) ready @ placed)
+        (ready :: layers) waiting in
+  place [] [] nodes
+
 let flow_lines view =
   (match selected_instance view with
    | None -> ["No selected Add-on action target"]
    | Some instance -> ["Action target: " ^ instance.title ^ " · " ^ instance.id])
-  @ ["Project context flow (architecture; not an execution receipt)";
-     "Project request -> Keeper turn -> tools / code / tests -> retained evidence";
-     "Keeper history -> Librarian -> committed memory; tools may commit source-bound memory";
-     "Committed memories -> Workspace Curator -> attributed shared proposal";
-     "Next Keeper turn sees proposal reference -> keeper_workspace_memory_read -> sources";
-     "Shared proposal is model-proposed; tests and review establish project correctness.";
-     ""; "Installed Add-on connections (last received snapshot)"]
+  @ ["Declared Add-on layers · last received snapshot";
+     "Same layer: independent dependencies. Downward: declared upstream -> consumer.";
+     "Layer placement describes wiring; execution and delivery need their own receipts."]
   @ (match view.error with
      | None -> []
      | Some ((Detail_read_failure _ | Request_failure _ | Input_failure _) as diagnostic) ->
@@ -1096,23 +1159,54 @@ let flow_lines view =
      | None -> ["Connections unavailable: no snapshot read yet"]
      | Some snapshot ->
          let declarations = Option.fold ~none:[] ~some:(fun c -> c.declarations) snapshot.configuration in
-         let name instance = match List.find_opt (fun (d : declaration) -> d.instance_id=Some instance.id) declarations with
-           | Some {installation_id=Some id;_} -> id | _ -> instance.id in
+         let name = installation_name declarations in
+         let identity = installation_identity declarations in
+         let historical = match selected_instance view with
+           | Some instance when retained instance -> true
+           | Some _ | None -> view.overview_mode=Retained_runs in
+         let workers = if historical then
+             (match detail_instance view snapshot with
+              | Some instance -> [instance]
+              | None -> List.filter retained snapshot.instances)
+           else List.filter (fun instance -> not (retained instance)) snapshot.instances in
          let complete = Option.fold ~none:false ~some:(fun (c : configuration) -> c.complete) snapshot.configuration in
          let notices = (if complete then [] else ["Installation inventory incomplete; dependency identities may be unresolved"])
            @ List.concat_map (fun (d : declaration) -> List.map (fun issue -> d.source_path ^ ": " ^ issue) d.issues) declarations in
-         notices @ List.concat_map (fun instance ->
+         let layers, unresolved = if historical then [], [] else declared_layers ~identity workers in
+         let layer_lines = if historical then
+             ["Stored bindings · producer incarnations are not reconstructed as current layers"]
+           else List.concat (List.mapi (fun index nodes ->
+             [(if index=0 then "" else "    ↓"); "Layer " ^ string_of_int index;
+              "  " ^ String.concat "  |  " (List.map (fun node -> "[" ^ name node.worker ^ "]") nodes)]) layers)
+             @ List.concat_map (fun node ->
+                 ["Layer unavailable: " ^ name node.worker]
+                 @ (match node.problems with
+                    | [] -> ["  Cyclic or unresolved upstream dependency"]
+                    | problems -> List.map (fun detail -> "  " ^ detail) problems)) unresolved in
+         notices @ layer_lines
+         @ (if workers=[] then ["No current workers to place. Review installation issues or install an Add-on."] else [])
+         @ [""; "Declared inputs and outputs"]
+         @ List.concat_map (fun instance ->
            let target = name instance in
            [(if Some instance.id = Option.map (fun i -> i.id) (selected_instance view) then "> " else "  ") ^ target ^ " · " ^ instance.title ^ " · " ^ phase_label instance.phase]
-           @ (match Masc.Lane_addon_sources.dependencies instance.binding with
+           @ (match flow_inputs instance.binding with
               | Error detail -> ["  Invalid source binding: " ^ detail]
               | Ok [] -> ["  No upstream Add-on dependency (D shows external/owned source binding)"]
-              | Ok upstream -> List.map (fun id ->
-                  let available = List.exists (fun candidate -> String.equal (name candidate) id && String.equal candidate.run_id instance.run_id) snapshot.instances in
-                  "  " ^ id ^ " -> " ^ target ^ (if available then "" else if complete then " · producer absent in this run" else " · producer unresolved; inventory incomplete")) upstream)
-           @ List.map (fun (port,selection) -> "  output " ^ port ^ " -> " ^ (match selection with Row.All_lanes -> "all supplied lanes" | Row.Selected_lanes lanes -> String.concat ", " lanes)) instance.outputs) snapshot.instances)
-  @ [""; "Add-on observation -> retained rows/evidence -> explicit selection and use";
-     "An installed observer does not automatically fix code or complete a task.";
+              | Ok upstream -> List.concat_map (fun input ->
+                  ["  " ^ input.installation_id ^ " -> " ^ target ^
+                    (if historical then " · stored binding; producer incarnation unknown"
+                    else match resolve_flow_input ~identity ~run_id:instance.run_id workers input with
+                      | Producer_available _ -> ""
+                      | Producer_ambiguous -> " · producer identity ambiguous in this run"
+                      | Output_missing port -> " · producer output unavailable: " ^ port
+                      | Producer_missing -> if complete then " · producer absent in this run"
+                          else " · producer unresolved; inventory incomplete")]
+                  @ (match input.output_id with
+                    | None -> []
+                    | Some port -> ["    Input " ^ input.source_id ^ ": " ^ input.installation_id ^ "/" ^ port])) upstream)
+           @ List.map (fun (port,selection) -> "  output " ^ port ^ " -> " ^ (match selection with Row.All_lanes -> "all supplied lanes" | Row.Selected_lanes lanes -> String.concat ", " lanes)) instance.outputs) workers)
+  @ [""; "Result -> retained evidence -> explicit Keeper delivery -> agent use";
+     "Delivery acceptance and agent reading are separate recorded stages.";
      "f:back to observations  D:technical details  J/K:scroll"]
 
 let lines ?(height=24) ?(failed_note = "") ~width view =
@@ -1161,7 +1255,12 @@ let lines ?(height=24) ?(failed_note = "") ~width view =
       then technical_lines ~height ~failed_note ~width view
       else (match view.screen with
         | Overview -> overview_lines ~width view
-        | Detail _ -> detail_lines ~width view)
+        | Detail _ -> detail_lines ~width view
+            @ (match view.focus with
+               | Connections -> [""] @ (flow_lines view |> List.concat_map (fun line ->
+                   Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
+                     (Masc.Tui_decode.sanitize_terminal_text line)))
+               | Timeline | Configurations | Instances | Rows -> []))
 
 (* A TOML declaration may exist while no worker can run. Keep the file count,
    live worker count, and failures separate on the Lanes surface. *)

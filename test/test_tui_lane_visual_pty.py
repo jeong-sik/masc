@@ -217,6 +217,56 @@ def run_installation_detail(executable: str) -> None:
     print("Lane Add-on Installation detail: PASS")
 
 
+def run_declared_layers(executable: str, captures: Path | None) -> None:
+    fixtures = terminal.overview_event_http_fixtures()
+    captured = snapshot()
+    template = captured["instances"][0]
+    workers, declarations = [], []
+    for name, upstream in (("a", []), ("b", []), ("c", ["a"]), ("d", ["a", "b"]), ("e", ["c", "d"])):
+        owner = "layer-" + name
+        path = "/fixture/lane-addons/" + name + ".toml"
+        workers.append({**template, "instance_id": owner, "incarnation": owner, "title": name,
+            "configuration": {"source_path": path}, "rows_count": 0,
+            "package": {"outputs": {"events": {"all_lanes": True}}, "skills_directory": None},
+            "binding": {"sources": [{"source_id": "from-" + producer, "kind": "lane_output",
+                "installation_id": producer, "output_id": "events", "selection": "latest_completed"}
+                for producer in upstream]}})
+        declarations.append({"id": name, "source_path": path, "instance_id": owner,
+            "desired_revision": "1", "applied_revision": "1"})
+    captured["instances"], captured["rows"] = workers, []
+    captured["configuration"]["declarations"] = declarations
+    fixtures["/api/v1/lane-addons"] = (200, captured)
+    requests: terminal.HttpRequests = []
+
+    def interact(process, master, _slave, output, _base):
+        terminal.wait_for_output(process, master, output, b"Health: ", start=0, timeout=10)
+        terminal.send_and_wait(process, master, output, b":go lane add-ons\r", b"5 declared")
+        terminal.send_and_wait(process, master, output, b"\r", b"No observations yet")
+        terminal.resize_and_wait(process, master, output, rows=48, columns=140,
+            needle=b"No observations yet", controls=(terminal.FULL_REDRAW,))
+        layers = terminal.send_and_wait(process, master, output, b"2", b"Layer 2")
+        screen = terminal.screen_text(terminal.frame_containing(layers, b"Layer 2"))
+        for needle in (b"[a]  |  [b]", b"[c]  |  [d]", b"[e]", b"own receipts"):
+            if needle not in screen:
+                raise AssertionError(f"fan-out/join layers omitted {needle!r}: {screen!r}")
+        if b"Librarian" in screen or b"Workspace Curator" in screen:
+            raise AssertionError("connection view substituted general architecture for declared wiring")
+        print("TUI_CAPTURE declared-layers " + repr(screen), flush=True)
+        if captures is not None:
+            captures.mkdir(parents=True, exist_ok=True)
+            (captures / "09-declared-layers.pty").write_bytes(bytes(output))
+        terminal.send_and_wait(process, master, output, b"1", b"No observations yet")
+        terminal.send_and_wait(process, master, output, b"\x1b", b"5 declared")
+        terminal.send_and_wait(process, master, output, b"q", b"MASC Dashboard")
+        os.write(master, b"q")
+
+    terminal.run_terminal_scenario(executable, description="declared parallel layers and joined output",
+        interact=interact, http_fixtures=fixtures, http_requests=requests)
+    if any(path.startswith("/api/v1/lane-addons") for path, _ in requests):
+        raise AssertionError("layer browsing sent a write")
+    print("Lane declared parallel layers / joined output / truthful scope: PASS")
+
+
 def run_grouped_history(executable: str, captures: Path | None) -> None:
     fixtures = terminal.overview_event_http_fixtures()
     captured = snapshot()
@@ -339,3 +389,4 @@ if __name__ == "__main__":
     run_installation_detail(os.path.abspath(args.executable))
     run_declared_report(os.path.abspath(args.executable), args.capture_dir)
     run_grouped_history(os.path.abspath(args.executable), args.capture_dir)
+    run_declared_layers(os.path.abspath(args.executable), args.capture_dir)

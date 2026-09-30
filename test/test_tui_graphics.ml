@@ -340,6 +340,26 @@ let test_rgba_png_replaces_under_its_identity () =
 ;;
 
 
+(* A put names pixels the terminal already holds under the id: nothing to
+   decode travels, and the same image and placement ids replace that
+   placement rather than add a second one. *)
+let test_a_put_places_held_pixels_without_sending_them () =
+  match bodies (Masc_tui_graphics.put ~image_id:41 ~placement_id:1 ~rows:4) with
+  | [ body ] ->
+      check bool "no payload" false (String.contains body ';');
+      let keys = String.split_on_char ',' body in
+      let says key = List.exists (String.equal key) keys in
+      check bool "puts" true (says "a=p");
+      check bool "under the caller's image id" true (says "i=41");
+      check bool "and placement id" true (says "p=1");
+      check bool "the cursor stays where it was" true (says "C=1");
+      check bool "as many rows as asked" true (says "r=4");
+      check bool "and the terminal does not answer" true (says "q=2");
+      check bool "no format: there are no pixels to decode" false
+        (List.exists (String.starts_with ~prefix:"f=") keys)
+  | escapes -> failf "a put is one escape, got %d" (List.length escapes)
+;;
+
 let test_image_fits_terminal_geometry () =
   let fit = Masc_tui_graphics.fit_rows ~cell_pixels:(Some (10, 20)) in
   check int "wide viewport fits narrow terminal width" 10
@@ -394,6 +414,8 @@ let () =
             test_raw_rgb_refuses_a_frame_that_contradicts_itself
         ; test_case "raw RGBA replaces under its identity" `Quick
             test_rgba_png_replaces_under_its_identity
+        ; test_case "a put places held pixels without sending them" `Quick
+            test_a_put_places_held_pixels_without_sending_them
         ] )
     ; ( "tmux"
       , [ test_case "passthrough doubles every escape" `Quick

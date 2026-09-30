@@ -56,6 +56,13 @@ it to the test stanza, all three cases passed: Alcotest run `4NEEPAOJ`,
 the original assertion logs. `targeted-run.json` records the starting commit,
 the one uncommitted build-input correction, source hashes and binary hash.
 
+After integrating the parent's image repair and Queue reconnect scenario,
+`integrated-input-check.json` confirms that the five recorded codec,
+persistence and test source files still match the executed inputs. The whole
+`test/dune` file has changed in an unrelated image-test dependency stanza;
+the codec test stanza remains byte-identical. This correspondence check is
+not a new test run or proof of all application dependencies.
+
 This executed real persistence update/read calls and the codec, using isolated
 temporary workspaces. It did not execute the complete recovery sweep,
 transfer/reaction projection or live server. The reduced reproduction in the

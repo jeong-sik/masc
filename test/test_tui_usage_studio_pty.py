@@ -95,7 +95,7 @@ def journey(executable, no_color=False):
         h.tab_until(process, fd, output, b"MASC Usage")
         h.wait_for_output(process, fd, output, b"catalogue reopens", start=0, timeout=10)
         wide = capture(process, fd, output, "plan-wide-no-color" if no_color else "plan-wide",
-                       48, 220, b"catalogue reopens")
+                       48, 220, b"claude@example.com")
         for value in (b"Plan usage", b"Used 0%", b"Used 25%", b"Used 33%", b"Reset",
                       b"Last report", b"Model call limit", b"Other use", b"does not block model calls",
                       b"Unclassified limit", b"Catalogue", b"heard", b"claude@example.com"):

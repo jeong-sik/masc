@@ -33,6 +33,12 @@ type host_stop =
     authority for terminal effect completion/failure; this value carries only
     the transport stop reason. *)
 
+val host_stop_failed : host_stop -> bool
+(** [true] only for a terminal tool whose effect failed. A repeated tool call
+    and a terminal tool that completed or deferred to a durable stimulus end
+    the turn on purpose, and the Keeper settles them as completed or yielded
+    turns, so a transport logs them as stops rather than failures. *)
+
 type dynamic_tool_result =
   { success : bool
   ; content : string

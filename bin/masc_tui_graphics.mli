@@ -37,6 +37,8 @@ type image =
   | Msx_screen  (** the MSX spectator screen *)
   | Mascot  (** MASC's candle on [/about] *)
   | Keeper_portrait  (** a Keeper's own portrait at the head of its detail *)
+  | About_keeper_1 | About_keeper_2 | About_keeper_3 | About_keeper_4
+      (** The four bounded Keeper placements on [/about]. *)
 [@@deriving enumerate]
 
 val image_id : image -> int
@@ -103,6 +105,15 @@ val replace_rgba : image_id:int -> placement_id:int -> data:string
     transparent surround needs no guess at the page colour. The pixels travel
     as an RGBA PNG ([f=100]), without Kitty transport compression. [""] when [data] is empty or not
     [pixel_width * pixel_height * 4] bytes long. *)
+
+val put : image_id:int -> placement_id:int -> rows:int -> string
+(** Place, at the cursor and [rows] cells tall, the pixels the terminal
+    already holds under [image_id], without sending them again: [a=p], a few
+    dozen bytes. The protocol says a second placement under the same image
+    and placement ids replaces the first, so this also moves or restores a
+    placement {!replace_rgba} made. It needs the pixels to still be there:
+    a clear screen ([ESC [2J]) frees an image whose placements it took, in
+    Kitty and in Ghostty, and [q=2] means a missing image is not reported. *)
 
 val delete_image : image_id:int -> string
 (** Delete this image's placements and free its stored pixels. *)

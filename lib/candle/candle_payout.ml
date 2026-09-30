@@ -189,14 +189,17 @@ let validate_settlement (waiting : waiting) events body =
   let* tasks, ids, keepers = match candidates with
     | None -> Error "settlement requires durable Candidates" | Some c -> Ok c in
   let* () =
-    if List.exists (fun id ->
-      not (List.mem id pass.linked_task_ids)
-      || (match List.assoc_opt id tasks with
-          | None -> true
-          | Some task -> not (is_candidate ~goal_created_at:pass.goal_created_at
-              ~confirmed_at:waiting.confirmed_at task))) ids
-    then Error "candidate Task is not linked and completed within the confirmed window"
-    else Ok () in
+    let observed_ids = List.map fst tasks in
+    if List.length observed_ids <> List.length (List.sort_uniq String.compare observed_ids)
+       || List.sort String.compare observed_ids <> List.sort String.compare pass.linked_task_ids
+    then Error "durable task observations must cover every Snapshot-linked task exactly once"
+    else
+      let eligible_ids = List.filter_map (fun (id, task) ->
+        if is_candidate ~goal_created_at:pass.goal_created_at
+            ~confirmed_at:waiting.confirmed_at task then Some id else None) tasks in
+      if List.sort String.compare ids <> List.sort String.compare eligible_ids
+      then Error "durable candidate tasks must equal the complete eligible Snapshot subset"
+      else Ok () in
   let recipients relations =
     let actual = List.map (fun (r : Candle_appraisal.task_relation) -> r.task_id) relations in
     if List.length actual <> List.length (List.sort_uniq String.compare actual)

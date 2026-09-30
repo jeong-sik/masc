@@ -12,9 +12,12 @@ import {
 } from './gate-keepers'
 
 const currentWire = {
+  candle: { status: 'off' },
   count: 1,
   keepers: [{
     runtime_class: 'keeper',
+    candle_balance_milli: null,
+    portrait: { state: 'unavailable', reason: 'fixture portrait unavailable' },
     name: 'planner',
     meta: {
       name: 'planner',

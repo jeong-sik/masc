@@ -18,8 +18,14 @@ ASSET_BODY = "ASSETBODYHEAD " + "한글 asset text " * 15 + "ASSETBODYTAIL"
 WINDOW = re.compile(r"Detail \[(\d+)-(\d+)/(\d+)\]")
 
 
+def completed(output):
+    end = output.rfind(h.FRAME_END)
+    assert end >= 0, "No completed redraw"
+    return bytes(output[:end + len(h.FRAME_END)])
+
+
 def window(output, columns):
-    rows = h.screen_rows(bytes(output))
+    rows = h.screen_rows(completed(output))
     position, match = next((row, WINDOW.search(text.decode("utf-8")))
         for row, text in sorted(rows.items()) if WINDOW.search(text.decode("utf-8")))
     first, last, total = map(int, match.groups())
@@ -70,9 +76,13 @@ def run(executable, columns, no_color):
         else:
             raise AssertionError("prompts pane not reached")
         h.wait_for_output(process, fd, output, b"KEYTAIL", start=0, timeout=10)
+        h.read_available(fd, output)
+        start = len(output)
         h.resize_and_wait(process, fd, output, rows=18, columns=columns,
                           needle=b"KEYTAIL", controls=(h.FULL_REDRAW,))
-        assert "Esc:back" in h.screen_text(bytes(output)).decode("utf-8")
+        h.wait_for_output(process, fd, output, h.FRAME_END,
+                          start=h.end_of_needle(output, b"KEYTAIL", start), timeout=3)
+        assert "Esc:back" in h.screen_text(completed(output)).decode("utf-8")
         initial_total, text = collect(process, fd, output, columns)
         for field in (KEY, FILE, "템플릿변수:"+VARIABLE, BODY, REASON, "DESCRIPTIONTAIL", "다시 저장하면"):
             assert "".join(field.split()) in text, (columns, field, text)
@@ -91,7 +101,7 @@ def run(executable, columns, no_color):
         h.send_and_wait(process, fd, output, b"\x1b[H", b"Detail [1-")
         h.send_and_wait(process, fd, output, b"j", b"SECOND-PROMPT-BODY")
         assert window(output, columns)[0] == 1
-        assert "BODYHEAD" not in h.screen_text(bytes(output)).decode("utf-8")
+        assert "BODYHEAD" not in h.screen_text(completed(output)).decode("utf-8")
         _, secondary = collect(process, fd, output, columns)
         assert "템플릿변수:"+VARIABLE in secondary, (columns, secondary)
         h.send_and_wait(process, fd, output, b"k", f"/{initial_total}]".encode())
@@ -102,7 +112,7 @@ def run(executable, columns, no_color):
         h.send_and_wait(process, fd, output, b"\x1b[H", b"Detail [1-")
         h.send_and_wait(process, fd, output, b"j", b"SECOND-ASSET-BODY")
         assert window(output, columns)[0] == 1
-        assert "ASSETBODYHEAD" not in h.screen_text(bytes(output)).decode("utf-8")
+        assert "ASSETBODYHEAD" not in h.screen_text(completed(output)).decode("utf-8")
         os.write(fd, b"q")
 
     h.run_terminal_scenario(executable,

@@ -16,23 +16,10 @@ type delivery_key =
   | Fusion_run of Request_id.t
   | Workspace_message of Request_id.t
   | Approval_lifecycle of Request_id.t
-  | Goal_notification of
-      { goal_id : string
-      ; owner : string
-      ; event : string
-      }
 
 (** [Workspace_message] identifies one producer-minted workspace broadcast.
     It lets a mentioned Keeper append that exact broadcast to its durable
-    transcript once without treating the broadcast as a chat operation.
-
-    [Goal_notification] identifies one owner-directed Goal notice. The
-    triple is the dedup key: [goal_id] and [owner] scope it to the Goal and
-    its recipient, and [event] names the one event (a refuted verdict's
-    request id, or an overdue due date). A repeated scan, a retry after a
-    failed send, or a restart all reuse the same key, so the owner's
-    transcript gains exactly one row per event; a new verdict or a changed
-    owner produces a different key and therefore a new notice. *)
+    transcript once without treating the broadcast as a chat operation. *)
 
 type transcript_slot =
   | Accepted_user

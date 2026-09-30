@@ -410,6 +410,10 @@ to that Goal's current criterion revision. The screen says `not recorded`,
 linked Tasks marked done is a separate fact; it never becomes the Goal's
 measured value.
 
+Goals are shared across the workspace. Open Work → Goals for the metric,
+proof, and activity. Creation, edits, and phase changes name the caller in
+their activity events.
+
 Work shows current Task statuses and a 14-day UTC plot of Tasks *currently*
 done by their completion date. Its coverage line names backlog, Goal-link,
 and archive read failures. The quota line on Dashboard is only a count of

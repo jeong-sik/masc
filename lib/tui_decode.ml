@@ -12528,7 +12528,7 @@ let decode_play_invite_revoked json =
 let play_invite_absent_body body =
   match Yojson.Safe.from_string body with
   | `Assoc fields ->
-      (match List.assoc_opt "error" fields with
+      (match List.assoc_opt "code" fields with
        | Some (`String "no_such_invite") -> true
        | _ -> false)
   | _ -> false
@@ -12538,10 +12538,10 @@ let play_revoke_http_error ~status_code ~body =
   let failure =
     match Yojson.Safe.from_string body with
     | json ->
-        let* error = required_string_field json "error" in
+        let* code = required_string_field json "code" in
         let* detail = required_nonempty_string_field json "release_error" in
         let* released = required_bool_field json "released_controller" in
-        if status_code = 500 && error = "release_failed" && not released
+        if status_code = 500 && code = "release_failed" && not released
         then Ok detail else Error "not a controller release failure"
     | exception Yojson.Json_error detail -> Error detail in
   match failure with

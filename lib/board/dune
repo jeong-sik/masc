@@ -16,6 +16,7 @@
   board_dispatch
   board_metrics_hooks
   board_paths
+  board_snapshot_rows
   board_sort
   board_sub_board_json
   board_vote_key

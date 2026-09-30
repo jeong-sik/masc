@@ -765,6 +765,8 @@ type store = {
   mutable dirty_comments: bool;                            (** Deferred flush flag *)
   dirty_post_ids: (string, unit) Hashtbl.t;                 (** Deferred post snapshots *)
   dirty_comment_ids: (string, unit) Hashtbl.t;              (** Deferred comment snapshots *)
+  post_rows: (string, post * string) Hashtbl.t;             (** See .mli *)
+  comment_rows: (string, comment * string) Hashtbl.t;       (** See .mli *)
   mutable last_flush: float;
   flusher_inbox: flusher_msg Eio.Stream.t;                               (** Last deferred flush time *)
   sub_boards: (string, sub_board) Hashtbl.t;               (** sub_board_id -> sub_board *)

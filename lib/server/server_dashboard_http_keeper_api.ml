@@ -1036,8 +1036,8 @@ let handle_keeper_get_subroutes state req request reqd =
       let cache_key =
         keeper_file_changes_cache_key ~masc_root ~keeper_name:name ~window_hours
       in
-      let json =
-        Dashboard_cache.get_or_compute
+      let payload =
+        Dashboard_cache.get_or_compute_payload
           cache_key
           ~ttl:keeper_file_changes_cache_ttl_s
           (fun () ->
@@ -1076,7 +1076,7 @@ let handle_keeper_get_subroutes state req request reqd =
                 ; ("malformed", `Int tally.Keeper_tool_call_file_change.malformed)
                 ]))
       in
-      Http.Response.json_value ~status:`OK ~compress:true ~request:req json reqd
+      Server_cached_read_http.respond ~request:req reqd payload
   else if ends_with keeper_suffix_paused_work then
     Server_dashboard_http_keeper_paused_work.handle_get state req reqd
   else if ends_with keeper_suffix_runtime_trace then
@@ -1141,8 +1141,8 @@ let handle_keeper_get_subroutes state req request reqd =
       let cache_key =
         Printf.sprintf "keeper:tool-stats:%s:%s:%d" masc_root name window_hours
       in
-      let json =
-        Dashboard_cache.get_or_compute cache_key ~ttl:standard_cache_ttl_s (fun () ->
+      let payload =
+        Dashboard_cache.get_or_compute_payload cache_key ~ttl:standard_cache_ttl_s (fun () ->
           Domain_pool_ref.submit_io_or_inline (fun () ->
             let since =
               Time_compat.now ()
@@ -1217,7 +1217,7 @@ let handle_keeper_get_subroutes state req request reqd =
               ("timeline", `List (List.map Trajectory.hourly_bucket_to_json timeline));
             ]))
       in
-      Http.Response.json_value ~compress:true ~request:req json reqd
+      Server_cached_read_http.respond ~request:req reqd payload
   else if ends_with "/tool-calls" then
     let name = extract_name "/tool-calls" in
     if String.length name = 0 then
@@ -2056,8 +2056,8 @@ let handle_keeper_get_subroutes state req request reqd =
              include_thinking
              tail_scan_lines
          in
-         let json =
-           Dashboard_cache.get_or_compute cache_key ~ttl:keeper_hot_path_cache_ttl_s (fun () ->
+         let payload =
+           Dashboard_cache.get_or_compute_payload cache_key ~ttl:keeper_hot_path_cache_ttl_s (fun () ->
              Domain_pool_ref.submit_io_or_inline (fun () ->
                let masc_root = Workspace.masc_root_dir config in
                let trajectory_lines =
@@ -2089,7 +2089,7 @@ let handle_keeper_get_subroutes state req request reqd =
                    (Trajectory.trajectory_line_to_json ~result_max_len) recent));
                ]))
          in
-         Http.Response.json_value ~compress:true ~request:req json reqd)
+         Server_cached_read_http.respond ~request:req reqd payload)
   else if ends_with "/transitions" then
     let name = extract_name "/transitions" in
     if String.length name = 0 then

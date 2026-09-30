@@ -14817,10 +14817,12 @@ let render_runtime_params (state : state) =
        else draft
      in
      box_divider buf cols;
-     box_line buf cols
-       (row_with_field ~cols
-          ~lead:(Printf.sprintf "  %s%s%s " Ansi.bold field_label Ansi.reset)
-          ~field:draft ~tail:"");
+     let runtime_param_edit_row =
+       row_with_field ~cols
+         ~lead:(Printf.sprintf "  %s%s%s " Ansi.bold field_label Ansi.reset)
+         ~field:draft ~tail:""
+     in
+     box_line buf cols runtime_param_edit_row;
      box_line_styled buf cols ~style:(Theme.recede ())
        (Printf.sprintf "  editing %s · %s"
           (Terminal_text.single_line edit.rpe_key)

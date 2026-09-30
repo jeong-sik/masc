@@ -8,15 +8,14 @@
 
 open Alcotest
 module Prim = Masc_tui_render_prim
-module Decode = Masc.Tui_decode
 
-let row context : Decode.ask_row =
+let row context : Masc.Tui_decode_asks.ask_row =
   { ar_keeper = "asker"
   ; ar_id = "ask-1"
   ; ar_asked_at = 1.0
   ; ar_context = Some context
   ; ar_questions = []
-  ; ar_resolution = Decode.Ask_open
+  ; ar_resolution = Masc.Tui_decode_asks.Ask_open
   }
 
 let drawn context =

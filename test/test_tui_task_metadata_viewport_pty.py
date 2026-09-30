@@ -125,7 +125,20 @@ def run(executable):
                     print("TASK_METADATA_VIEWPORT " + json.dumps({"status": status, "width": width,
                           "window": [start, end, count], "screen": screen(output).decode("utf-8", "replace")}), flush=True)
                     h.send_and_wait(process, fd, output, b"\x1b[H", b"TITLEHEAD")
-            h.send_and_wait(process, fd, output, b"\x1b", b"MASC Work")
+                if status == "awaiting_verification":
+                    h.send_and_wait(process, fd, output, b"\x1b", b"MASC Work")
+                    h.palette_go(process, fd, output, ("task " + TASK_ID).encode(), b"TITLEHEAD")
+            # A stale detail ID survives a task leaving the durable backlog,
+            # but the visible Work list owns keys after that refresh.
+            marker.unlink()
+            backlog = Path(base) / ".masc" / "tasks" / "backlog.json"
+            backlog.write_text(json.dumps({"tasks": [], "last_updated": STAMP, "version": 1}), encoding="utf-8")
+            h.send_and_wait(process, fd, output, b"r", b"MASC Work")
+            os.write(fd, b"x")
+            h.drain_until_quiet(process, fd, output)
+            assert not marker.exists(), "a hidden task accepted cancellation after removal"
+            assert not any(b"masc_transition" in body for _, body in requests), requests
+            assert b"MASC Work" in screen(output) and b"MASC Task" not in screen(output), screen(output)
             os.write(fd, b"q")
 
         h.run_terminal_scenario(executable, description="Task metadata and terminal evidence are fully scrollable",

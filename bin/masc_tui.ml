@@ -18087,9 +18087,10 @@ let main
      empty reason leaves the task untouched. The server's FSM decides
      whether the task is still cancellable. *)
   let handle_task_cancel () =
-    match state.task_detail_id with
+    match task_detail_on_screen state with
     | None -> ()
-    | Some task_id -> (
+    | Some (task : Masc_domain.task) -> (
+        let task_id = task.id in
         match Masc_tui_editor.editor_command () with
         | None ->
             report_action state "error"
@@ -25896,7 +25897,9 @@ and is loaded on demand through keeper_skill.
            state.system_logs_scroll <- 0;
            state.system_logs_cursor <- 0
        | Some "x" | Some "X"
-         when state.view = Planning && state.task_detail_id <> None ->
+         when state.view = Planning && state.planning_mode = Planning_list
+              && Masc_tui_overview_tasks.is_focused state.task_focus
+              && Option.is_some (task_detail_on_screen state) ->
            (* Cancel wants a reason, and $EDITOR is the form we already
               have; the editor itself is the confirmation step. *)
            handle_task_cancel ()

@@ -176,6 +176,7 @@ def reports(source: Source, observation: dict, *, recognized: bool):
                 raise InvalidInput("Fusion status and result Board evidence disagree")
         complete = (base_complete and not skipped and status is not RunState.RUNNING
                     and post is not None
+                    and (status is not RunState.FAILED or status_row is not None)
                     and all(item[0]["fields"]["input_complete"] for item in group.values()))
         # A failed run can have complete evidence. Completeness never means success.
         heading = {RunState.RUNNING: "분석 진행 중", RunState.COMPLETED: "분석 완료",

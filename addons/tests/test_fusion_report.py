@@ -274,6 +274,14 @@ class FusionReport(unittest.TestCase):
         self.assertIn("provider_error", fields["body"])
         self.assertIn("분석 실패", fields["body"])
 
+    def test_failed_result_without_status_remains_incomplete(self):
+        output = project(detail("failed", "recorded"))
+        output["rows"] = [item for item in output["rows"] if item["lane_id"] == "fusion/result"]
+        report = call("fusion-report", [upstream(output)])["structuredContent"]
+        self.assertEqual(reports(report)[0]["fields"]["run_status"], "failed")
+        self.assertFalse(reports(report)[0]["fields"]["input_complete"])
+        self.assertFalse(report["coverage"][0]["complete"])
+
     def test_running_missing_and_stale_producer_are_partial(self):
         for value in (detail("running", "pending"), detail("completed", "absent")):
             report = call("fusion-report", [upstream(project(value))])["structuredContent"]

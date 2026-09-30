@@ -63,7 +63,7 @@ let test_collision_and_unknown_states () = fixture (fun root ledger ->
     (match D.recover ledger with Error (D.Corrupt _) -> true | _ -> false))
 let test_primary_and_settlement_are_preserved () = fixture (fun root ledger ->
   let _admitted=require (D.admit ledger payload) in
-  let io : Masc.Fs_compat.private_jsonl_transaction_io_for_testing = {
+  let io : Fs_compat.private_jsonl_transaction_io_for_testing = {
     before_sync_parent=(fun _ -> ());
     close_fd=(fun fd -> Unix.close fd; raise (Sys_error "fixture close settlement failed"))} in
   let faulty=D.For_testing.create ~root ~io in

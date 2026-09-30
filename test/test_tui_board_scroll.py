@@ -33,13 +33,17 @@ def run(executable: str) -> None:
         for i in range(128)]
     fixtures["/api/v1/board?sort_by=hot"] = (200, {"posts": [post]})
     detail_path = "/api/v1/board/post-scroll?format=flat"
-    fixtures[detail_path] = (200, {"post": post, "comments": comments})
+    fixtures[detail_path] = (200, h.board_detail_page(post, comments))
+    for offset in (0, 100):
+        fixtures[f"{detail_path}&comment_offset={offset}&comment_limit=100"] = (
+            200, h.board_detail_page(post, comments, offset=offset, limit=100))
 
     def interact(process, fd, _slave, output, _base):
         h.wait_for_output(process, fd, output, b"Health: ", start=0, timeout=10)
         h.palette_go(process, fd, output, b"go board", b"MASC Board")
         h.wait_for_output(process, fd, output, ONE_POST_LISTED, start=0, timeout=10)
-        h.send_and_wait(process, fd, output, b"\r", b"Comment 000")
+        h.send_and_wait(process, fd, output, b"\r", b"Showing 20 of 128 comments")
+        h.send_and_wait(process, fd, output, b"o", b"Comment 000")
         h.read_available(fd, output)
         start = len(output)
         # Same input stream as a terminal wheel burst followed by Escape.
@@ -58,9 +62,13 @@ def run(executable: str) -> None:
                           start=h.end_of_needle(output, list_header, start), timeout=3)
         changed = [dict(c) for c in comments]
         changed[0]["content"] = "Live edit is visible"
-        edited_detail = h.SequencedHttpResponse([(200, {"post": post, "comments": changed})])
+        edited_detail = h.SequencedHttpResponse(
+            [(200, h.board_detail_page(post, changed))])
         fixtures[detail_path] = edited_detail
-        h.send_and_wait(process, fd, output, b"\r", b"Live edit is visible")
+        fixtures[f"{detail_path}&comment_offset=0&comment_limit=100"] = (
+            200, h.board_detail_page(post, changed, offset=0, limit=100))
+        h.send_and_wait(process, fd, output, b"\r", b"Showing 20 of 128 comments")
+        h.send_and_wait(process, fd, output, b"o", b"Live edit is visible")
         if edited_detail.served < 1:
             raise AssertionError("edited Board detail was not fetched from HTTP")
         os.write(fd, b"q")
@@ -102,7 +110,8 @@ def run_side_by_side(executable: str) -> None:
                 for i in range(3)]
     post["comment_count"] = len(comments)
     fixtures["/api/v1/board?sort_by=hot"] = (200, {"posts": [post]})
-    fixtures["/api/v1/board/post-side?format=flat"] = (200, {"post": post, "comments": comments})
+    fixtures["/api/v1/board/post-side?format=flat"] = (
+        200, h.board_detail_page(post, comments))
 
     def comment_row(output: bytearray) -> tuple[int, bytes]:
         rows = h.screen_rows(bytes(output))
@@ -166,7 +175,7 @@ def run_window_names_what_it_counts(executable: str) -> None:
     post["comment_count"] = len(comments)
     fixtures["/api/v1/board?sort_by=hot"] = (200, {"posts": [post]})
     fixtures["/api/v1/board/post-rows?format=flat"] = (
-        200, {"post": post, "comments": comments})
+        200, h.board_detail_page(post, comments))
 
     def interact(process, fd, _slave, output, _base):
         h.wait_for_output(process, fd, output, b"Health: ", start=0, timeout=10)
@@ -225,7 +234,7 @@ def run_independent_windows(executable: str) -> None:
     post["comment_count"] = 1
     fixtures["/api/v1/board?sort_by=hot"] = (200, {"posts": [post]})
     fixtures["/api/v1/board/post-independent?format=flat"] = (
-        200, {"post": post, "comments": [comment]})
+        200, h.board_detail_page(post, [comment]))
 
     def comment_width(output: bytearray, columns: int) -> int:
         rows = h.screen_rows(bytes(output))
@@ -276,7 +285,54 @@ def run_independent_windows(executable: str) -> None:
         interact=interact, http_fixtures=fixtures)
 
 
+def run_full_width_comments(executable: str) -> None:
+    """Metadata must not determine paragraph, Korean or code-block width."""
+    fixtures = h.overview_event_http_fixtures()
+    post = h.board_selection_post("width", "Comment body width", "Body beside thread")
+    paragraph = "Full width continuation stays readable"
+    korean = "댓글 본문은 넓은 영역을 사용합니다"
+    code = "document.documentElement.scrollWidth"
+    comments = [
+        dict(h.board_detail_comment("width-root", f"{paragraph}\n{paragraph}"),
+             author="wkbl-layout-reviewer-with-long-name"),
+        dict(h.board_detail_comment("width-child", f"{korean}\n```js\n{code}\n```"),
+             parent_id="width-root", author="wkbl-layout-reviewer-with-long-name"),
+        h.board_detail_comment("width-short", "OK"),
+    ]
+    post["comment_count"] = len(comments)
+    fixtures["/api/v1/board?sort_by=hot"] = (200, {"posts": [post]})
+    fixtures["/api/v1/board/post-width?format=flat"] = (
+        200, h.board_detail_page(post, comments))
+
+    def interact(process, fd, _slave, output, _base):
+        h.wait_for_output(process, fd, output, b"Health: ", start=0, timeout=10)
+        h.palette_go(process, fd, output, b"go board", b"MASC Board")
+        h.wait_for_output(process, fd, output, ONE_POST_LISTED, start=0, timeout=10)
+        h.send_and_wait(process, fd, output, b"\r", paragraph.encode())
+        for columns in (240, 270, 100):
+            h.resize_and_wait(process, fd, output, rows=48, columns=columns,
+                              needle=paragraph.encode(), controls=(h.FULL_REDRAW,))
+            screen = h.screen_text(bytes(output))
+            for expected in (paragraph, korean, code):
+                if expected.encode() not in screen:
+                    raise AssertionError(
+                        f"{columns} columns: comment body wrapped to metadata remainder: "
+                        + screen.decode("utf-8", "replace"))
+            if columns == 270:
+                rows = h.screen_rows(bytes(output))
+                short_row = h.screen_row_of(rows, b"OK")
+                if short_row < 0 or b"@detail-author" not in rows[short_row]:
+                    raise AssertionError("a short reply no longer joins its metadata")
+        os.write(fd, b"q")
+
+    h.run_terminal_scenario(
+        executable, description="Board paragraphs use the full comment column",
+        interact=interact, http_fixtures=fixtures)
+
+
 if __name__ == "__main__":
+    run_full_width_comments(os.path.abspath(sys.argv[1]))
+    print("Board full width comments: PASS")
     run_independent_windows(os.path.abspath(sys.argv[1]))
     print("Board independent windows: PASS")
     run(os.path.abspath(sys.argv[1]))

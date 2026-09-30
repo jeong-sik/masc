@@ -3849,8 +3849,16 @@ val decode_play_invites : Yojson.Safe.t -> (play_invite_row list, string) result
 val decode_play_invite_issued : Yojson.Safe.t -> (play_invite_issued, string) result
 val decode_play_invite_revoked : Yojson.Safe.t -> (play_invite_revoked, string) result
 val play_invite_absent_body : string -> bool
-(** True only for the revoke route's [no_such_invite] JSON error code.
+(** True only for the revoke route's [no_such_invite] refusal [code].
     A malformed body or another refusal cannot prove the invite absent. *)
 
 val play_revoke_http_error : status_code:int -> body:string -> string
 (** Preserve the release failure detail from the revoke endpoint's 500 reply. *)
+
+val play_invite_refusal : status_code:int -> body:string -> string option
+(** The sentence for a client refusal the play routes answered with
+    [{error, message}]: ["HTTP 409: <message>"], then in parentheses what the
+    body says is missing and who holds the name. Every part is made
+    terminal-safe. [None] for a 401 or 403, which are about the credential the
+    client sent and are worded where that is known, for a status that is not a
+    4xx, and for a body with no [message] to read. *)

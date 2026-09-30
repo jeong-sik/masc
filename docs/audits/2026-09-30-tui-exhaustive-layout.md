@@ -22,7 +22,11 @@
 - [좁은 Usage 기준](../evidence/tui-audit-2026-09-30/baseline/usage-80.png)
 - [좁은 System 기준](../evidence/tui-audit-2026-09-30/baseline/system-80.png)
 
-Board 최신 수정 head `40ebc2634e418770ca10eb7065a561cd5c6005a1`의 [집중 Linux PTY run 36647966652](https://github.com/jeong-sik/masc/actions/runs/36647966652)은 success다. [probe 36648531190](https://github.com/jeong-sik/masc/actions/runs/36648531190)도 success이며 source SHA가 같은 artifact가 생성됐다. 수정 바이너리 화면·전체 필수 체크·병합·운영 반영은 별도 확인 대상이다.
+Board 최신 수정 head `40ebc2634e418770ca10eb7065a561cd5c6005a1`의 [집중 Linux PTY run 36647966652](https://github.com/jeong-sik/masc/actions/runs/36647966652)은 success다. [probe 36648531190](https://github.com/jeong-sik/masc/actions/runs/36648531190) artifact의 SHA256SUMS 네 파일을 확인했고, TUI의 `--build-commit`도 같은 head다.
+
+같은 fixture 작성자 `wkbl-reader`, 같은 실측 **242×41**에서 [수정 전](../evidence/tui-audit-2026-09-30/board-comparison-before/board-detail-240.png)은 댓글 본문을 작성자 옆의 작은 잔여 폭으로 감싼다. [수정 후](../evidence/tui-audit-2026-09-30/board-comparison-after/board-detail-240.png)는 댓글 영역 전체 폭으로 감싼다. 기준 native 바이너리와 수정 Linux CI 바이너리를 각각 임시 fixture PTY에서 실행했다. 후자는 Docker Ubuntu 22.04에서 실행하며, 전용 proxy container의 loopback을 host fixture HTTP로 연결했다. 운영 서버·활성 사용자 세션의 캡처가 아니다. [재현 방법과 provenance](../evidence/tui-audit-2026-09-30/board-comparison.md)를 함께 보관한다.
+
+Board PR check `36648042151` 및 Usage PR check `36648043868`의 edited-test 단계는 각각 89/91개 실행 뒤 같은 네 alias를 미통과로 나열했다. 실제 AssertionError는 account_login_pty에서 키 `2`를 보내 Keepers를 기다리는 fixture다. 다른 세 alias(account_login_removal_pty, activity_title_dot_belongs_to_the_strip, approval_detail_scroll_pty)는 PASS를 출력했지만, `run-edited-tests.sh`가 공유 Dune wave의 exit 1 뒤 전체 그룹을 미검증으로 분류했다. 이 결과는 전체 필수 체크 성공이 아니며, fixture 원인 대조와 수정이 남아 있다. 병합·운영 반영도 별도 확인 대상이다.
 
 팔레트 새 PTY 시나리오는 기준 바이너리에서 40열의 입력 tail/caret 손실을 재현했다. 이 실패는 수정 전 재현 증거이며 수정 후 통과 증거가 아니다.
 
@@ -32,7 +36,7 @@ Board 최신 수정 head `40ebc2634e418770ca10eb7065a561cd5c6005a1`의 [집중 L
 
 | ID | 영역 | 원인과 필요한 동작 | 현재 처리 |
 |---|---|---|---|
-| B01 | Board 댓글 | 작성자 옆 잔여 폭으로 여러 줄을 감싼 뒤 아래 행에 그대로 사용 | [#40088](https://github.com/jeong-sik/masc/pull/40088), focused PTY success; 수정 화면·도착 미확인 |
+| B01 | Board 댓글 | 작성자 옆 잔여 폭으로 여러 줄을 감싼 뒤 아래 행에 그대로 사용 | [#40088](https://github.com/jeong-sik/masc/pull/40088), focused PTY success; 같은 크기 전후 화면 확인, 도착 미확인 |
 | W01 | Work 목록 | 긴 제목/담당자가 상태·우선순위를 밀어냄 | [#40089](https://github.com/jeong-sik/masc/pull/40089), 폭 배정·긴 owner 리뷰 반례 반영 |
 | U01 | Usage | 한 줄에 130셀 이상, cost/coverage 도달 불가 | [#40091](https://github.com/jeong-sik/masc/pull/40091), wrap 후 scroll 계산 |
 | S01/R01 | 로그/Workspace 표 | 고정 보조 열이 메시지/경로를 밀어냄 | [#40094](https://github.com/jeong-sik/masc/pull/40094), Table.fit 보조 열 접기 |

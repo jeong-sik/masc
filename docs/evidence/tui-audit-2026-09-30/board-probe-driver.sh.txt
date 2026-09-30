@@ -1,0 +1,38 @@
+#!/bin/sh
+set -eu
+probe_dir=/tmp/tui-board-probe-40ebc263
+case "${1:-}" in
+  --build-commit|--version|--help)
+    exec docker run --rm --platform linux/amd64 --network none -v "$probe_dir:/probe:ro" ubuntu:22.04 /probe/masc_tui.exe "$@"
+    ;;
+esac
+fixture_base=
+fixture_port=
+previous=
+for argument do
+  if [ "$previous" = '--base-path' ]; then fixture_base=$argument; fi
+  if [ "$previous" = '--port' ]; then fixture_port=$argument; fi
+  previous=$argument
+done
+if [ -z "$fixture_base" ] || [ -z "$fixture_port" ]; then
+  echo 'fixture --base-path and --port are required' >&2
+  exit 2
+fi
+proxy_container=$(docker run -d --rm --entrypoint python3 \
+  -v /tmp/tui-fixture-proxy.py:/fixture-proxy.py:ro \
+  masc-test-tool-matrix:fixture /fixture-proxy.py "$fixture_port")
+cleanup() { docker rm -f "$proxy_container" >/dev/null 2>&1 || true; }
+trap cleanup EXIT HUP INT TERM
+docker exec "$proxy_container" python3 -c 'import socket,sys,time
+for attempt in range(100):
+    try:
+        socket.create_connection(("127.0.0.1",int(sys.argv[1])),timeout=.2).close();break
+    except OSError:
+        time.sleep(.1)
+else:
+    raise SystemExit("fixture proxy did not listen")' "$fixture_port"
+docker run --rm -it --platform linux/amd64 --network "container:$proxy_container" \
+  -v "$probe_dir:/probe:ro" -v "$fixture_base:$fixture_base" \
+  -e MASC_TOKEN -e MASC_TUI_FORCE_COLOR -e TERM -e MASC_TUI_SYNC \
+  -e NO_PROXY -e no_proxy -w "$fixture_base" \
+  ubuntu:22.04 /probe/masc_tui.exe "$@"

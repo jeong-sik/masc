@@ -1,4 +1,5 @@
 """Capture isolated synthetic fixture screens; never open an operator session."""
+import argparse
 import hashlib
 import importlib.util
 import json
@@ -10,14 +11,24 @@ import tempfile
 from playwright.sync_api import sync_playwright
 
 ROOT = Path(__file__).resolve().parents[1]
-OUT = ROOT / 'docs/evidence/tui-audit-2026-09-30/baseline'
+parser=argparse.ArgumentParser()
+parser.add_argument('executable')
+parser.add_argument('--out',default='docs/evidence/tui-audit-2026-09-30/baseline')
+parser.add_argument('--provenance',default='baseline_binary_fixture_PTY')
+parser.add_argument('--binary-file')
+parser.add_argument('--board-only',action='store_true')
+parser.add_argument('--author',default='wkbl-layout-reviewer-with-long-name')
+args=parser.parse_args()
+OUT = ROOT / args.out
 sys.path.insert(0, str(ROOT / 'test'))
 import test_tui_keyboard_input as h
 spec = importlib.util.spec_from_file_location('capture', ROOT / 'scripts/capture-tui-screenshots.py')
 c = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(c)
-c.EXECUTABLE = Path(sys.argv[1]).resolve()
+c.EXECUTABLE = Path(args.executable).resolve()
 start_hash = hashlib.sha256(c.EXECUTABLE.read_bytes()).hexdigest()
+binary_path = Path(args.binary_file or args.executable).resolve()
+binary_hash = hashlib.sha256(binary_path.read_bytes()).hexdigest()
 commit = subprocess.check_output([str(c.EXECUTABLE), '--build-commit'], text=True).strip()
 OUT.mkdir(parents=True, exist_ok=True)
 os.environ['MASC_TOKEN'] = 'masc-tui-keyboard-regression-token'
@@ -29,7 +40,7 @@ fixtures[h.REPOSITORIES_PATH] = h.repositories_fixture()
 post = h.board_selection_post('layout', '댓글 폭 기준 화면', '본문과 댓글의 독립적인 폭을 확인합니다.\n' * 8)
 comments = [dict(h.board_detail_comment('layout-comment',
             '긴 댓글 본문은 작성자 옆의 좁은 잔여 폭이 아닌 댓글 영역 전체를 사용해야 합니다.\n' * 10),
-            author='wkbl-layout-reviewer-with-long-name')]
+            author=args.author)]
 post['comment_count'] = 1
 fixtures['/api/v1/board?sort_by=hot'] = (200, {'posts': [post]})
 fixtures['/api/v1/board/post-layout?format=flat'] = (200, {'post': post, 'comments': comments})
@@ -38,12 +49,12 @@ results = []
 def shot(page, stem):
     page.wait_for_timeout(200)
     text = page.evaluate("""() => {const b=window.term.buffer.active;return Array.from({length:window.term.rows},(_,i)=>b.getLine(b.viewportY+i)?.translateToString(true)||'').join('\\n');}""")
-    (OUT / (stem + '.txt')).write_text(text)
+    (OUT / (stem + '.txt')).write_text("\n".join(line.rstrip() for line in text.splitlines()) + "\n")
     page.locator('.xterm-screen').screenshot(path=str(OUT / (stem + '.png')))
     dims = page.evaluate('() => ({columns: window.term.cols, rows: window.term.rows})')
-    results.append({'stem': stem, 'terminal': dims, 'provenance': 'baseline_binary_fixture_PTY'})
-    (OUT / 'manifest.json').write_text(json.dumps({'binary_commit':commit,'binary_sha256':start_hash,
-        'captures':results,'complete':False,'limitations':['Synthetic fixture data','Baseline before fixes','Missing fixture API returns HTTP503','Terminal dimensions are measured, not filename values']},ensure_ascii=False,indent=2)+'\n')
+    results.append({'stem': stem, 'terminal': dims, 'provenance': args.provenance})
+    (OUT / 'manifest.json').write_text(json.dumps({'binary_commit':commit,'driver_sha256':start_hash,'binary_sha256':binary_hash,
+        'captures':results,'complete':False,'limitations':['Synthetic fixture data','Provenance must be interpreted per capture and binary commit','Missing fixture API returns HTTP503','Terminal dimensions are measured, not filename values']},ensure_ascii=False,indent=2)+'\n')
     print(json.dumps(results[-1]), flush=True)
 
 surfaces = [('dashboard','go Dashboard','MASC Dashboard'),('work','go Work','MASC Work'),
@@ -59,18 +70,24 @@ with tempfile.TemporaryDirectory(prefix='masc-tui-audit-fixture-') as base:
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
             with c.ttyd_session(browser, Path(base), port, 120, 38, 'tui-audit-fixture') as page:
-                for width in (80,120,240):
+                for width in ((240,) if args.board_only else (80,120,240)):
                     page.set_viewport_size({'width':int(width*8.5)+24,'height':38*17+24})
-                    for name,query,needle in surfaces:
+                    for name,query,needle in ([('board','go Board','MASC Board')] if args.board_only else surfaces):
                         if not c.goto_surface(page,query,needle):
                             raise AssertionError((query,c.screen_text(page)))
                         shot(page,f'{name}-{width}')
                     if not c.goto_surface(page,'go Board','MASC Board'):
                         raise AssertionError('Board unavailable')
                     page.keyboard.press('Enter')
-                    page.wait_for_timeout(700)
+                    page.wait_for_function("""() => {
+                        const b = window.term.buffer.active;
+                        const text = Array.from({length: window.term.rows}, (_, i) =>
+                            b.getLine(b.viewportY + i)?.translateToString(true) || '').join('\\n');
+                        return text.includes('Comments (1)') && text.includes('긴 댓글 본문은');
+                    }""", timeout=15000)
                     shot(page,f'board-detail-{width}')
             browser.close()
 assert hashlib.sha256(c.EXECUTABLE.read_bytes()).hexdigest() == start_hash
-(OUT / 'manifest.json').write_text(json.dumps({'binary_commit':commit,'binary_sha256':start_hash,
-    'captures':results,'complete':True,'limitations':['Synthetic fixture data','Baseline before fixes','Missing fixture API returns HTTP503','Terminal dimensions are measured, not filename values']},ensure_ascii=False,indent=2)+'\n')
+assert hashlib.sha256(binary_path.read_bytes()).hexdigest() == binary_hash
+(OUT / 'manifest.json').write_text(json.dumps({'binary_commit':commit,'driver_sha256':start_hash,'binary_sha256':binary_hash,
+    'captures':results,'complete':True,'limitations':['Synthetic fixture data','Provenance must be interpreted per capture and binary commit','Missing fixture API returns HTTP503','Terminal dimensions are measured, not filename values']},ensure_ascii=False,indent=2)+'\n')

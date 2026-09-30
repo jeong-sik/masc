@@ -1,0 +1,30 @@
+{
+  "binary_commit": "40ebc2634e418770ca10eb7065a561cd5c6005a1",
+  "driver_sha256": "731af4d1aca09bd7be4c86cf5bdb525a1ad477c072cb88effa0133f5a5fa8dd9",
+  "binary_sha256": "60f681e0321af93e26ca87c335df6056388471ad0b8d5b5cc8d3bb59decc0ef1",
+  "captures": [
+    {
+      "stem": "board-240",
+      "terminal": {
+        "columns": 242,
+        "rows": 41
+      },
+      "provenance": "ci_binary_Docker_fixture_PTY"
+    },
+    {
+      "stem": "board-detail-240",
+      "terminal": {
+        "columns": 242,
+        "rows": 41
+      },
+      "provenance": "ci_binary_Docker_fixture_PTY"
+    }
+  ],
+  "complete": true,
+  "limitations": [
+    "Synthetic fixture data",
+    "Provenance must be interpreted per capture and binary commit",
+    "Missing fixture API returns HTTP503",
+    "Terminal dimensions are measured, not filename values"
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "binary_commit": "65562ff5f7567f9b3a3b2c2b466d556d368d85ba",
+  "driver_sha256": "198037a1354a3e565f5ec7d474e1b2579fa637a5b3d31fae2e8ca124633e765f",
+  "binary_sha256": "198037a1354a3e565f5ec7d474e1b2579fa637a5b3d31fae2e8ca124633e765f",
+  "captures": [
+    {
+      "stem": "board-240",
+      "terminal": {
+        "columns": 242,
+        "rows": 41
+      },
+      "provenance": "baseline_binary_fixture_PTY"
+    },
+    {
+      "stem": "board-detail-240",
+      "terminal": {
+        "columns": 242,
+        "rows": 41
+      },
+      "provenance": "baseline_binary_fixture_PTY"
+    }
+  ],
+  "complete": true,
+  "limitations": [
+    "Synthetic fixture data",
+    "Provenance must be interpreted per capture and binary commit",
+    "Missing fixture API returns HTTP503",
+    "Terminal dimensions are measured, not filename values"
+  ]
+}

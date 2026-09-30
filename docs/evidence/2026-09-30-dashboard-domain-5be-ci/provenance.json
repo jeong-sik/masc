@@ -1,0 +1,29 @@
+{
+  "scope": "measured evidence for exact CI source 5be only, plus supplied historical actual946 import audit",
+  "source_head": "5be8d8fc35164915a3507898ce6fde117f379bb6",
+  "github_run_id": 36689441702,
+  "github_job_id": 109802893661,
+  "job_name": "Build and package dashboard",
+  "run_url": "https://github.com/jeong-sik/masc/actions/runs/36689441702",
+  "job_url": "https://github.com/jeong-sik/masc/actions/runs/36689441702/job/109802893661",
+  "coordinate_source": "run/head/job supplied by root; head and run also appear in the supplied raw checkout/artifact log; no API fetch by child",
+  "browser_artifact_id": 11086562332,
+  "browser_artifact_upload_digest_from_log": "5b91a374e71e8f15970af114a13f588dfd10f6ac0865aafb362dfab7de7cf124",
+  "artifact_zip_digest_scope": "raw job reports uploaded zip digest; downloaded zip itself was not supplied for independent verification",
+  "raw_log_source_path": "/tmp/masc-domain-5be-browser/ci-job.log",
+  "raw_log_sha256": "8fbab5eb12ffe76302cc309db4eab554a23def24ccf24acc402072cf9ffb6472",
+  "raw_log_bytes": 165538,
+  "raw_log_stored_as": "ci-job.log.gz",
+  "browser_manifest_source_path": "/tmp/masc-domain-5be-browser/manifest.json",
+  "browser_manifest_sha256": "6b830c08662cc20025c9b6008a1a8382dc09e53c73fc638a98d634114af67ed4",
+  "input_import_audit_sha256": {
+    "actual-946-dashboard-source-inventory.json": "28f98662e65537b89a1333e3a7eacdfa13917620f6d2930bbcdddd59c2232fc6",
+    "actual946-vs-local-source-delta.json": "26d9a5a8fc962c6a4ee2eee5613bbb32410733f2f74fe66eddfa7ea08dc69701",
+    "actual946-diverged-import-mentions.json": "7323f6837efa6eb63a878f61a19ee82dced7119e551eb26469ee2483458ff85b"
+  },
+  "local_operations": "read/copy/hash/PNG-header inspection/JSON-log parsing/deterministic gzip only",
+  "newer_6e_source": "not covered",
+  "live_ledger_or_production": "not covered",
+  "whole_current_pr_required_checks": "not established by this supplied job bundle",
+  "publication": "root owned docs-only follow-up; child did not publish"
+}

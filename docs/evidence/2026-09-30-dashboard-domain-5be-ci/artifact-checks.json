@@ -1,0 +1,250 @@
+{
+  "scope": "validation of supplied CI/browser/import artifacts; no test, browser, native or build execution by child",
+  "test_groups": [
+    {
+      "group": "activation",
+      "selected_files": [
+        "src/components/keeper-config-panel.test.ts",
+        "src/api/dashboard-keeper-config.test.ts",
+        "src/api/dashboard.test.ts",
+        "src/api/gate-keepers.test.ts",
+        "src/api/schemas/gate-keepers.test.ts",
+        "src/store-normalizers.test.ts",
+        "src/components/fleet-health-panel.test.ts",
+        "src/components/tool-monitor/tool-monitor-operations.test.ts",
+        "src/components/tool-monitor/tool-monitor-reactivity.test.ts"
+      ],
+      "file_results": [
+        {
+          "path": "src/api/dashboard.test.ts",
+          "passed_tests": 233
+        },
+        {
+          "path": "src/components/keeper-config-panel.test.ts",
+          "passed_tests": 115
+        },
+        {
+          "path": "src/store-normalizers.test.ts",
+          "passed_tests": 28
+        },
+        {
+          "path": "src/components/fleet-health-panel.test.ts",
+          "passed_tests": 16
+        },
+        {
+          "path": "src/api/dashboard-keeper-config.test.ts",
+          "passed_tests": 15
+        },
+        {
+          "path": "src/api/schemas/gate-keepers.test.ts",
+          "passed_tests": 20
+        },
+        {
+          "path": "src/components/tool-monitor/tool-monitor-operations.test.ts",
+          "passed_tests": 5
+        },
+        {
+          "path": "src/components/tool-monitor/tool-monitor-reactivity.test.ts",
+          "passed_tests": 6
+        },
+        {
+          "path": "src/api/gate-keepers.test.ts",
+          "passed_tests": 6
+        }
+      ],
+      "passed_files": 9,
+      "passed_tests": 444,
+      "selector_log_line": 258,
+      "summary_lines": [
+        "2026-09-30T08:54:36.0980788Z  Test Files  9 passed (9)",
+        "2026-09-30T08:54:36.0982708Z       Tests  444 passed (444)"
+      ]
+    },
+    {
+      "group": "production_bundle_contract",
+      "selected_files": [
+        "src/dashboard-bundle-preload.test.ts"
+      ],
+      "file_results": [
+        {
+          "path": "src/dashboard-bundle-preload.test.ts",
+          "passed_tests": 3
+        }
+      ],
+      "passed_files": 1,
+      "passed_tests": 3,
+      "selector_log_line": 284,
+      "summary_lines": [
+        "2026-09-30T08:55:19.5195679Z  Test Files  1 passed (1)",
+        "2026-09-30T08:55:19.5196813Z       Tests  3 passed (3)"
+      ]
+    },
+    {
+      "group": "requested",
+      "selected_files": [
+        "src/api/schemas/candle-observation.test.ts",
+        "src/api/schemas/keeper-portrait.test.ts",
+        "src/api/schemas/gate-keepers.test.ts",
+        "src/api/gate-keepers.test.ts",
+        "src/keeper-store-normalize.test.ts",
+        "src/components/candle-economy.test.ts",
+        "src/components/keeper-portrait.test.ts",
+        "src/components/keeper-items-panel.test.ts",
+        "src/store-normalizers.test.ts"
+      ],
+      "file_results": [
+        {
+          "path": "src/api/schemas/gate-keepers.test.ts",
+          "passed_tests": 20
+        },
+        {
+          "path": "src/store-normalizers.test.ts",
+          "passed_tests": 28
+        },
+        {
+          "path": "src/keeper-store-normalize.test.ts",
+          "passed_tests": 46
+        },
+        {
+          "path": "src/api/schemas/candle-observation.test.ts",
+          "passed_tests": 6
+        },
+        {
+          "path": "src/components/keeper-portrait.test.ts",
+          "passed_tests": 11
+        },
+        {
+          "path": "src/api/gate-keepers.test.ts",
+          "passed_tests": 6
+        },
+        {
+          "path": "src/components/keeper-items-panel.test.ts",
+          "passed_tests": 10
+        },
+        {
+          "path": "src/components/candle-economy.test.ts",
+          "passed_tests": 2
+        },
+        {
+          "path": "src/api/schemas/keeper-portrait.test.ts",
+          "passed_tests": 4
+        }
+      ],
+      "passed_files": 9,
+      "passed_tests": 133,
+      "selector_log_line": 301,
+      "summary_lines": [
+        "2026-09-30T08:55:25.0216845Z  Test Files  9 passed (9)",
+        "2026-09-30T08:55:25.0218009Z       Tests  133 passed (133)"
+      ]
+    }
+  ],
+  "repeated_between_activation_and_requested": [
+    "src/api/gate-keepers.test.ts",
+    "src/api/schemas/gate-keepers.test.ts",
+    "src/store-normalizers.test.ts"
+  ],
+  "aggregate_unique_test_count": "not asserted; repeated suites prevent treating the group sum as a unique test total",
+  "browser": {
+    "source_sha": "5be8d8fc35164915a3507898ce6fde117f379bb6",
+    "scope": "production Item component in a controlled browser fixture; synthetic account and roster revisions",
+    "browser_version": "149.0.7827.55",
+    "synthetic_account_requests": 5,
+    "intentional_failed_requests": 1,
+    "page_errors_recorded": 0,
+    "screenshots": [
+      {
+        "path": "keeper-items-desktop.png",
+        "sha256": "f4774216c46af16705688321535d24b08d7bbef6f6a2c0684c6bb2c15dcbda99",
+        "bytes": 63717,
+        "width": 1280,
+        "height": 1079,
+        "manifest_hash_matches": true
+      },
+      {
+        "path": "keeper-items-mobile.png",
+        "sha256": "e47fa89f302c0a7a9f352629bbfc1bc2d7ed38ecd5cec0a3a59fbfd47f1a61e3",
+        "bytes": 56301,
+        "width": 360,
+        "height": 1280,
+        "manifest_hash_matches": true
+      },
+      {
+        "path": "keeper-items-loading.png",
+        "sha256": "a5c04f1d9d85850b133bb4d881766ce147c258a6f4f9e443882fdd809816e57e",
+        "bytes": 38233,
+        "width": 1280,
+        "height": 900,
+        "manifest_hash_matches": true
+      },
+      {
+        "path": "keeper-items-free-purchase.png",
+        "sha256": "6a5c6190d87c7ec8613f11bb831a4482259bc3cf82670d54209c8ae20801ea8e",
+        "bytes": 64271,
+        "width": 1280,
+        "height": 1079,
+        "manifest_hash_matches": true
+      },
+      {
+        "path": "keeper-items-price-change.png",
+        "sha256": "4ca261a163489f7564d2cc5d1129f1c21b08bb5aa14da034379c49fa0d858a1a",
+        "bytes": 64282,
+        "width": 1280,
+        "height": 1079,
+        "manifest_hash_matches": true
+      },
+      {
+        "path": "keeper-items-unavailable.png",
+        "sha256": "fcd2c58e0f7572094545ab46177bcf131be3b6384f1e1ebe6e072f9b5c4cf276",
+        "bytes": 45179,
+        "width": 1280,
+        "height": 900,
+        "manifest_hash_matches": true
+      },
+      {
+        "path": "keeper-items-recovered.png",
+        "sha256": "768551e4a4f2065ed6f084f260a11c88797801ae7443eddcf514b8e09e7fad6c",
+        "bytes": 64712,
+        "width": 1280,
+        "height": 1127,
+        "manifest_hash_matches": true
+      }
+    ],
+    "raw_log_pass_line": "2026-09-30T08:56:03.4492758Z Item tab browser evidence: PASS (7 screens, 5 account reads)",
+    "readiness_retries": {
+      "scope": "before browser evidence; two connection failures appear in supplied raw log",
+      "connection_failure_lines": [
+        "2026-09-30T08:55:53.8414829Z curl: (7) Failed to connect to 127.0.0.1 port 5197 after 0 ms: Couldn't connect to server",
+        "2026-09-30T08:55:54.8427900Z curl: (7) Failed to connect to 127.0.0.1 port 5197 after 0 ms: Couldn't connect to server"
+      ]
+    }
+  },
+  "import_audit": {
+    "scope": "Full nontruncated supplied actual946 dashboard/src inventory versus immutable local a215894; every local source Git blob was independently crosschecked. Textual import mentions are not a global import-graph proof.",
+    "remote_tree": "dcfeba9af2326899e8cfd54c284a845dd3ebf6ea",
+    "local_commit": "a215894",
+    "inventory_source_blobs": 1593,
+    "differing_source_blobs": 22,
+    "same_source_blobs_per_supplied_comparison": 1571,
+    "delta_receipt_and_inventory_paths_and_blob_ids_match": true,
+    "mention_receipt_paths_and_blob_ids_match_delta": true,
+    "mention_pattern": "candle-observation|keeper-portrait|Candle.*Schema|KeeperEquipmentSchema|KeeperPortraitSchema",
+    "mention_receipts_with_matches": [
+      "dashboard/src/api/schemas/candle-observation.test.ts",
+      "dashboard/src/api/schemas/candle-observation.ts",
+      "dashboard/src/keeper-store-normalize.ts",
+      "dashboard/src/types/core.ts"
+    ],
+    "local_inventory_independently_verified": true,
+    "local_inventory_repository": "/tmp/masc-dashboard-item-current-stack-20260930",
+    "local_full_commit": "a215894965a620af1ba80d6c464eb6e082e4e423"
+  },
+  "raw_log_compression": {
+    "gzip_mtime": 0,
+    "uncompressed_bytes": 165538,
+    "compressed_bytes": 28189,
+    "sha256": "8fbab5eb12ffe76302cc309db4eab554a23def24ccf24acc402072cf9ffb6472",
+    "gzip_sha256": "b241a8294201423084fd2d8c080b14eb7865953ea3695f7d934b12ee5e33995e",
+    "lossless_roundtrip": true
+  }
+}

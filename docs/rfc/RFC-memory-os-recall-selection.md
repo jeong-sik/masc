@@ -52,6 +52,19 @@ Expired { memory_id=F05; rule_key=F05; condition=Any_of(E-C);     receipt_ref=<v
 
 C03/C05의 모델은 답하기 전에 `recall_fact(F04)`/`recall_fact(F05)`를 호출해 반환된 명제를 각각 ‘ORCHID freeze remains active’/‘temporary label rule ends’라는 본문 구절 및 ID와 대조하고, 같은 응답의 만료 판정·영수증을 확인해야 한다. 이는 픽스처의 기존 본문 구절을 식별하는 예시이며 원문 전체가 모델에 자동 전송된다는 뜻은 아니다. 영수증이 없거나 불독가면 만료로 단정하지 않고 `Validity_unknown`으로 보류한다. 표식도 위 선택 순서의 원자적 항목으로 용량에 넣으며, 필요한 표식이 넘치면 조용히 버리지 않고 `Budget_overrun`과 대상 ID를 남긴다. 따라서 만료를 확인한 경우와 근거가 처음부터 없는 경우가 모델 입력에서 구별된다.
 
+현재 Task/Goal/자극에 연결돼 본문을 선택한 **활성 조건부 fact**에는 조건을 판정할 때 사용한 사건 상태도 함께 보낸다. 사건별 typed 영수증은 소유 저장소·객체 ID·관측 revision·`Terminal`/`Nonterminal` 상태와 조회 주소를 검증해 해당 fact ID에 결합한다. `Nonterminal`은 terminal 사건이 없다는 추측이 아니라, projection을 만들 때 권위 저장소에서 현재 미종결 상태를 읽고 그 revision을 고정한 상태 조회 영수증이어야 한다. 그 뒤 상태가 바뀌었거나 같은 snapshot에 묶을 수 없으면 `Validity_unknown`으로 보류한다. 모델에 보이는 짧은 `Active_condition` 표식은 그 fact의 조건식과 판정에 사용한 사건 키·상태·영수증 주소를 담는다. 본문과 표식은 한 원자적 항목으로 예산에 넣고, 둘 중 하나만 싣지 않는다. 영수증 불독가·객체 불일치·상태 미확인은 `Nonterminal`로 바꾸지 않고 `Validity_unknown`으로 보류한다. 모델은 사건 상태를 질문의 산문이나 fact 본문에서 추측하지 않는다.
+
+고정 픽스처의 C02/C04에서 아래는 **모델 입력**에 함께 도착해야 하는 활성 본문과 표식의 예다. `receipt_ref`는 실행 시 검증된 해당 사건의 영수증 주소로 치환한다. F04/F05의 본문은 픽스처의 실제 fact에서 선택된 원문이며, 여기 적은 줄은 그 내용의 새 요약을 생성하라는 지시가 아니다.
+
+```text
+C02: F04 body=<selected verified F04 text>
+     Active_condition { memory_id=F04; condition=All_of(E-A,E-B); events=[E-A:Terminal@<verified-E-A-receipt>, E-B:Nonterminal@<verified-E-B-receipt>]; validity=Active }
+C04: F05 body=<selected verified F05 text>
+     Active_condition { memory_id=F05; condition=Any_of(E-C); events=[E-C:Nonterminal@<verified-E-C-receipt>]; validity=Active }
+```
+
+따라서 C02는 E-A 종결만으로 만료하지 않고 E-B 미종결 영수증을 확인한 뒤 `No; E-B remains nonterminal.`을, C04는 E-C 미종결 영수증을 확인한 뒤 `Yes; E-C nonterminal.`을 답할 수 있다. 이 표식은 현재 구현의 출력 주장이 아니라 제안된 전송 계약이다.
+
 용량은 구성된 provider 요청의 남은 입력 예산에서 산출하며 상한값 자체는 동일 입력 실측 후 설정한다. 필수 상시 본문이나 한 우선순위의 원자적 묶음이 용량을 넘으면 그 묶음의 일부를 조용히 싣지 않는다. `Budget_overrun`을 반환하고 대상 ID·필요 바이트·가용 바이트를 운영자 영수증에 남긴다. 모델에는 작은 고정형 상태 머리줄과 조회 도구 주소를 전달한다. 긴 제외 목록은 프롬프트에 모두 쓰지 않고 별도 결정 영수증에 보존한다. 주소 목록도 예산을 넘으면 첫 페이지와 다음 페이지 토큰만 보인다. 주소를 눌러 원문을 읽을 때는 기존 `keeper_memory_search`/읽기 권한과 source 재검증을 다시 적용한다.
 
 제안 결과 타입은 다음처럼 닫는다.
@@ -81,7 +94,7 @@ Task/Goal 조회가 실패하면 해당 링크 후보는 보류하고 검증된 
 
 ## §5 관측과 평가 게이트
 
-매 projection은 `receipt_id`, 입력 snapshot revision/해시, 정책 버전, 포함·제외 ID와 이유, 유효 조건 판정, source 검증 결과, 예산, 모델에 실제 보낸 블록 해시를 남긴다. 모델에는 상태 코드·포함 건수·생략 건수·조회 수단과 §3의 연결된 만료 표식을 짧게 보인다. 운영자는 영수증에서 개별 제외 이유와 표식의 근거 사건을 읽는다. 정보 누락과 검색 실패를 구별할 수 있도록 실제 `keeper_memory_search` 호출도 센다. C03/C05는 고정 입력·정답을 유지한 채 모델에 보낸 표식 바이트, `recall_fact`의 실제 호출·반환 ID·검증된 명제 구절·terminal 영수증 조회, 답변을 각각 기록해 만료 확인이 실제 답에 도달했는지 판정한다. `recall_fact`는 이 RFC의 제안 조회 계약이며, 현행 `keeper_memory_search`가 그 응답을 이미 제공한다는 주장은 아니다. 구현 전 shadow가 이 조회를 제공하지 못하면 C03/C05를 통과로 세지 않는다.
+매 projection은 `receipt_id`, 입력 snapshot revision/해시, 정책 버전, 포함·제외 ID와 이유, 유효 조건 판정, source 검증 결과, 예산, 모델에 실제 보낸 블록 해시를 남긴다. 모델에는 상태 코드·포함 건수·생략 건수·조회 수단과 §3의 연결된 만료 표식을 짧게 보인다. 운영자는 영수증에서 개별 제외 이유와 표식의 근거 사건을 읽는다. 정보 누락과 검색 실패를 구별할 수 있도록 실제 `keeper_memory_search` 호출도 센다. C02/C04는 고정 입력·정답을 유지한 채 활성 fact 본문과 `Active_condition`의 실제 전송 바이트, E-A/E-B/E-C 사건 상태 영수증의 소유 저장소·객체 ID·revision 검증 결과, 각 영수증의 모델 도착 여부와 답변을 기록한다. 미종결 영수증 없이 고정 정답을 맞힌 경우는 근거를 전달한 성공으로 세지 않는다. C03/C05는 고정 입력·정답을 유지한 채 모델에 보낸 표식 바이트, `recall_fact`의 실제 호출·반환 ID·검증된 명제 구절·terminal 영수증 조회, 답변을 각각 기록해 만료 확인이 실제 답에 도달했는지 판정한다. `recall_fact`는 이 RFC의 제안 조회 계약이며, 현행 `keeper_memory_search`가 그 응답을 이미 제공한다는 주장은 아니다. 구현 전 shadow가 이 조회를 제공하지 못하면 C03/C05를 통과로 세지 않는다.
 
 평가는 운영 원본 기억을 복제하지 않은 격리 fact 스냅숏과 고정 턴 자극으로 현재 전량 주입과 후보 선택을 같은 입력에 shadow 재생한다. `test/test_keeper_memory_os_current.ml`의 `with_temp_keepers`/typed fact/replace가 픽스처 시작점이며, 테스트 파일의 존재 자체를 실행 성공으로 세지 않는다. 필수 질문은 현재 Task 권한, Goal 상태, 뒤집힌 PR 상태, 만료된 HOLD, source 변경·불독가, ordinary 읽기 오류, 선택 오류, 예산 초과, 근거 없을 때 기권을 포함한다.
 

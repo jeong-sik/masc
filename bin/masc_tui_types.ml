@@ -8812,6 +8812,7 @@ type clamped_scroll =
   | Harness_detail_scroll of int
   | Fusion_detail_scroll of int
   | Runtime_detail_scroll of int
+  | Runtime_params_scroll of int
   | System_log_detail_scroll of int
   | Planning_detail_scroll of int
   | Lane_run_detail_scroll of { scroll : int; content_height : int }
@@ -8908,6 +8909,7 @@ let apply_clamped_scroll (state : state) = function
   | Harness_detail_scroll value -> state.harness_detail_scroll <- value
   | Fusion_detail_scroll value -> state.fusion_scroll <- value
   | Runtime_detail_scroll value -> state.runtime_detail_scroll <- value
+  | Runtime_params_scroll value -> state.config_scroll <- value
   | System_log_detail_scroll value -> state.system_logs_detail_scroll <- value
   | Planning_detail_scroll value -> state.planning_scroll <- value
   | Lane_run_detail_scroll { scroll; content_height } ->

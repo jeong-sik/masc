@@ -6597,6 +6597,7 @@ let reading_pane (state : state) : (int -> Masc_tui_types.clamped_scroll) option
   (* The voice pane is lines the frame lays out; its wizard takes its own keys
      while open. *)
   | Config when state.config_pane = Config_voice -> pane (fun v -> Voice_scroll v)
+  | Config when state.config_pane = Config_params -> pane (fun v -> Runtime_params_scroll v)
   (* Surfaces whose whole body is a row list, which [row_list] answers for,
      and the two panes that own every key while they are open. *)
   | Keepers Keeper_detail | Keepers Keeper_list | Keepers Keeper_logs
@@ -23684,6 +23685,11 @@ and is loaded on demand through keeper_skill.
                    || state.config_pane = Config_presets ->
                 state.config_scroll <-
                   max 0 (state.config_scroll + (direction * page))
+            | Config when state.config_pane = Config_params ->
+                state.config_scroll <-
+                  (if direction > 0 then
+                     Masc_tui_types.scroll_down_from state.config_scroll ~by:page
+                   else max 0 (state.config_scroll + (direction * page)))
             | Config when state.config_pane = Config_voice ->
                 state.config_scroll <-
                   (if direction > 0 then
@@ -24470,6 +24476,7 @@ and is loaded on demand through keeper_skill.
                   min
                     (max 0 (List.length state.runtime_params - 1))
                     (state.runtime_params_cursor + 1);
+                state.config_scroll <- 0;
                 state.runtime_params_notice <- None
             | Approvals when state.approval_detail_open ->
                 (* End writes a row past the end and the frame reports the
@@ -24833,6 +24840,7 @@ and is loaded on demand through keeper_skill.
             | Config when state.config_pane = Config_params ->
                 state.runtime_params_cursor <-
                   max 0 (state.runtime_params_cursor - 1);
+                state.config_scroll <- 0;
                 state.runtime_params_notice <- None
             | Approvals when state.approval_detail_open ->
                 state.approval_detail_scroll <-

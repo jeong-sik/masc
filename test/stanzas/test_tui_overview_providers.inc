@@ -9,4 +9,5 @@
   masc_tui_types
   masc_tui_ansi
   masc_tui_theme
-  masc_tui_overview_providers))
+  masc_tui_overview_providers
+  masc_tui_usage_trend))

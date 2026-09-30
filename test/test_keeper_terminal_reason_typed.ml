@@ -2821,7 +2821,7 @@ let () =
            (Llm_provider.Retry.RateLimited
               { retry_after = None; message = "slow down" })))
        .Keeper_request_failure_core.message
-     = "Rate limited: slow down")
+     = "Rate limited: slow down (retry_after: none)")
 ;;
 
 (* masc#38417: on every decision row [runtime_id] is the keeper's lane and

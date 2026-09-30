@@ -31,6 +31,8 @@
 - Share one model list across provider accounts through `model_sets` and provider `model-set` references, keeping explicit binding overrides and account identities separate. #40096
 - Remember explicitly visited Home conversations across restarts independently of startup preferences, distinguish failed or uncertain saves, and preserve named history while Keeper roster reads are unavailable. #40137
 - Show individual Home decisions by request identity, keep successful source readings during partial failures, preserve exact detail and return context across refresh, and retain continuation beside long request lists. #40152
+- Runtime v opens complete default and ordered media route metadata, boot admission differences and read/action/probe diagnostics in a scrollable read-only detail, including when no candidate exists. (#40293)
+- Patch review supports Shift+Left/Right to pan long lines while old/new coordinates and diff markers stay fixed. Horizontal position is visible and clamps to actual content and pane width, resetting on reopen. (#40301)
 
 ### Changed
 
@@ -92,6 +94,14 @@
 - TUI Home now prioritizes operator decisions and explicit conversation destinations, with detail kept in Work and Usage. Unread sources stay visible, automatic Gate work is excluded from human decisions, and chat return and selection survive refresh. (#39817)
 - Keep Plan Usage directly reachable through its top-level tab, Home `m`, `go Usage` and `/cost`; `/metrics` and `/telemetry` explicitly open diagnostics. (#39817)
 - `/play invite` shows the invite link and a QR code on a card instead of a chat row, and copies the link only when `y` is pressed. The TUI keeps every card it issued by name until it exits or the invite is revoked: `/play link` reopens the newest and `/play link <name>` an earlier one. A link longer than the card scrolls with `j`/`k`, the arrow keys or the mouse wheel. A refused invite or revoke shows the server's message and what it says is missing, not only the error code (#39877).
+- Voice metadata wraps to the available pane width. Keeper and voice selectors stay visible while their complete identities scroll below; setup keeps the active input and caret visible while full input, draft and probe details remain readable. (#40282)
+- Patch review and Keeper voice assignment can open help without losing their reader state. Help starts with the active nested reader controls, and patch/Runtime detail footers use the same binding tables. Voice assignment also names metadata paging and edges. (#40304)
+- Integrate responsive Workspace Activity rows and full selected-record Context into the TUI stack; preserve reader ownership and show active Activity help. (#40316)
+- Integrate complete literal Code memo reading and physical-row navigation into the TUI stack, with shared active memo help/footer bindings. (#40319)
+- Integrate full Code history metadata and visible-row Enter ownership into the TUI stack, preserving memo navigation and adding active history help. (#40320)
+- Keep Enter owned by the focused file tree when History remains open in the other pane. (#40320)
+- Integrate complete Tools metadata, revision and timestamp reading plus composition dependencies into the TUI stack, using physical rows for display and navigation. (#40325)
+- Integrate complete Prompt registry and runtime asset detail documents with physical-row paging and edge navigation into the TUI stack. (#40327)
 
 ### Removed
 
@@ -208,6 +218,22 @@
 - Keep Home's Recent pane closed by default on wide terminals while preserving explicit pane choices, and prioritize decision and continuation destinations on short Home frames. #40130
 - Prepare Home selection and request-window state before rendering, retaining ready-source focus and pure drawing. (#40152)
 - Keep mobile Keeper commands visible and scroll the menu within the actual space below its anchor, including short landscape screens; give runtime alerts the full detail row (#40224).
+- Separate head-bound source approvals from ordinary CI, while retaining independent review and current formal change-request state for integration (#40144).
+- Use the current formal review state for source change requests, so resolving or dismissing one does not leave a historical integration failure (#40144).
+- Keep Runtime candidate identities and route/probe status visible in narrow lists by sharing measured header/data columns and dropping auxiliary fields first. (#40220)
+- Fit Workspace Activity file identities and outcomes into narrow listings and provide a fully scrollable selected-record context reader. (#40230)
+- Code memos wrap their complete author and literal text at the current file-pane width, preserve Markdown punctuation, and scroll by physical rows after resize (#40240).
+- The TUI Code history wraps complete commit and Keeper metadata, exposes file/scope and action notes, and resolves Enter from the record owning the first visible row. Every record remains selectable even when the document fits the pane (#40247). History preserves literal metadata symbols, and diff/notes footers omit the unsupported Enter action.
+- Tools wraps complete paths, diagnostics and provenance at the frame width, preserves literal revisions and recorded timestamps, and exposes composition nodes and dependencies in usage cards (#40263).
+- Review and Verdict details wrap complete metadata, evidence references and goal metrics at the pane width, preserve literal reasons and recorded creation timestamps, and retain full armed/action-error details in the scrolling document (#40277).
+- Repository diff responses are tied to reader, repository scope, file and request generation. Patch review keeps its own data and errors rather than showing a cached diff from another reader. (#40296)
+- Runtime Enter/Right only opens a row from the listing. Open row and route/status readers retain their identity and scroll position even when refresh reorders the hidden listing. (#40306)
+- Integrate responsive Runtime list columns with the stacked route/status reader, active help and stable detail identity. Candidate identity and route/probe share the available pane width while auxiliary columns fold first. (#40309)
+- Keep the selected Tools Skill visible above every tab and show its complete source, package and revision in the document; display and Enter/edit share the same typed selection. (#40328)
+
+### Documentation
+
+- Add repository strategy and English/Korean contributor workflows for people, external AI sessions and Keeper lanes; align CONTRIBUTING with current CI and review procedures. #40109
 
 ### Internal
 
@@ -224,6 +250,10 @@
 - `Candle_config` reads `candle.toml` and answers whether the Candle reward currency is on: no file is off, a file with no key is enabled, and a path that cannot be examined or read, a file that is not TOML, or holds a key this build does not know is disabled with a reason. The server keeps running in every case (#39928).
 - Move shared TUI JSON field readers into Tui_decode_fields and direct consumers to their owning module (#40104).
 - Move Fusion wire types and decoding into Tui_decode_fusion and update transport, rendering and test consumers (#40105).
+- CI selects directly linked test executables when an edited test source belongs to an explicitly declared Dune library, including included stanzas, while preserving direct-test priority (#39904).
+- Add paired CI measurements and raw trace receipts for vision artifact storage and load (#39990).
+- Move terminal escaping, text previews and timestamp presentation into Tui_terminal_text with direct callers (#40097).
+- Move operator question types and decoding into Tui_decode_asks and isolate the server's pure question projection (#40100).
 
 ### Performance
 

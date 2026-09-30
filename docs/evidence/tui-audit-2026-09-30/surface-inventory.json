@@ -769,5 +769,15 @@
     "review": "system_audit and agenda_finish source PASS at exact recorded head; no unresolved P0/P1/P2; narrow pan/exit/omission-marker P2 repaired",
     "validation": "syntax parsing of four implementations and key interface, diff check only",
     "execution": "not run under source-only policy"
+  },
+  "runtime_reader_owner_stack": {
+    "pr": 40306,
+    "base_pr": 40304,
+    "base_head": "080c6e12fa9f75faab19075ad9d831da9bc7d372",
+    "head": "d6fa21c5e4787ca8dde09e6ca3a7beb578b808c1",
+    "scope": "stable row/route detail identity and scroll under repeated Enter/Right after hidden listing refresh",
+    "review": "system_audit and agenda_finish source PASS exact head, no unresolved P0/P1/P2; P3 listing-bound comment placement retained for batch",
+    "validation": "syntax parsing and diff check only; functional state scenario added to existing suite, not executed",
+    "execution": "not run under source-only policy"
   }
 }

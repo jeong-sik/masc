@@ -117,3 +117,9 @@ or live runtime experiment was performed. Required finishing validation includes
 The raw main patch is base64-encoded in main-test-dune-patch.json to preserve context bytes without trailing-whitespace lines. The parent route fixture uses the code discriminant in published parent 6714e7eaf75403046b69aed4d3aec55c09c01271; parent-fixture-parse.json records the additional syntax check.
 
 Published as stacked PR #40171. The assigned changelog fragment is changelog.d/40171.md; native and required checks must cite the final public head.
+
+## Complete current main composition (expiry)
+
+This feature was extracted from its own local parent `dd52508a32` to source `8d6c3e9063`, then applied to complete current main `c112b2030652a5a25360f5d5322f8dc6da99c598` with immediate feature parent `c95f5df97d0614732c67144d7e5d5673c7dc6229`. Parent fixes were retained through three-way application, and the native registration was added without importing the old partial-main test/dune overlay. `current-main-composition.json` records the exact parent delta manifest, current source hashes and source checks. Retired Keeper API/implementation and every current-main test registration are preserved. Earlier provenance remains historical to its captured source.
+
+This layer's syntax parsing, production ignore lint, changed-line ignore gate, whitespace and determinism checks pass. The additional test-inclusive scan is retained with its actual exit code and output, including any inherited fixture debt. No local typecheck, Dune, native test, runtime, network or CI was performed; root owns publication and finishing-boundary native validation.

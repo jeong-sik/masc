@@ -24,6 +24,7 @@ type config =
   ; account_home : string option
   ; isolated_home : string option
   ; model : string option
+  ; context_window : int option
   ; developer_instructions : string option
   ; native : Runtime_native_tools.posture
   ; admission_timeout_s : float
@@ -50,6 +51,7 @@ let default_config () =
   ; account_home = None
   ; isolated_home = None
   ; model = None
+  ; context_window = None
   ; developer_instructions = None
   ; native = Runtime_native_tools.codex_default
   ; admission_timeout_s = default_timeout_s
@@ -2074,6 +2076,9 @@ let sub_agent_overrides =
    Upstream: codex-rs/core/src/tools/spec_plan.rs (register_shell_tools). *)
 let client_argv (config : config) =
   [ config.cli_path; "app-server"; "--stdio" ]
+  @ (match config.context_window with
+     | None -> []
+     | Some tokens -> [ "-c"; Printf.sprintf "model_context_window=%d" tokens ])
   @ (match config.isolated_home with
      | None -> []
      | Some home ->
@@ -2242,6 +2247,8 @@ let native_cwd cwd =
 let validate_process_config config =
   if String.trim config.cli_path = ""
   then Error (Invalid_config "cli_path must not be empty")
+  else if Option.fold ~none:false ~some:(fun tokens -> tokens <= 0) config.context_window
+  then Error (Invalid_config "context_window must be positive")
   else if Option.is_some config.account_home && Option.is_some config.isolated_home
   then Error (Invalid_config "account_home and isolated_home cannot both be selected")
   else if (match config.account_home with

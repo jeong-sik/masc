@@ -1080,6 +1080,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
       ; account_home = config.account_home
       ; isolated_home = None
       ; model = config.model
+      ; context_window = Runtime.max_context_of_runtime_id runtime_id
       ; native = native_posture
       ; developer_instructions
       ; admission_timeout_s = config.timeout_s

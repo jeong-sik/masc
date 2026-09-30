@@ -122,6 +122,7 @@ let codex_config ~runtime_id ~system_prompt ~override_s ~output_schema
   ; account_home = execution.account_home
   ; isolated_home = None
   ; model = execution.model
+  ; context_window = Runtime.max_context_of_runtime_id runtime_id
   ; native = Runtime_native_tools.codex_default
   ; developer_instructions = system_prompt
   ; admission_timeout_s = execution.timeout_s

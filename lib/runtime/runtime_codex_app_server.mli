@@ -26,6 +26,9 @@ type config =
     (** Verification-only private CODEX_HOME prepared with projected auth and
         provider configuration. Its safe CLI overrides apply only here. *)
   ; model : string option
+  ; context_window : int option
+    (** Resolved MASC model window, passed to the actual client on both start
+        and resume. [None] preserves the selected account's Codex setting. *)
   ; developer_instructions : string option
   ; native : Runtime_native_tools.posture
     (** Built-in tool posture (RFC-0390): [Native_read] maps to the

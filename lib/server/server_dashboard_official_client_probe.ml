@@ -118,6 +118,7 @@ let probe_codex ~mgr ~clock ~process_cwd ~runtime_id ~model
     ; account_home = config.account_home
     ; isolated_home = None
     ; model = config.model
+    ; context_window = Runtime.max_context_of_runtime_id runtime_id
     ; native = Runtime_native_tools.codex_default
     ; developer_instructions = None
     ; admission_timeout_s = Float.min max_probe_timeout_s config.timeout_s

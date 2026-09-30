@@ -16518,7 +16518,7 @@ let help_viewport (state : state) =
    what is highlighted is what will run. *)
 let render_palette (state : state) =
   let terminal_rows, cols = get_terminal_size () in
-  let matches = Masc_tui_types.palette_matches state in
+  let matches = Masc_tui_palette.palette_matches state in
   let total = List.length matches in
   let cursor = max 0 (min state.palette_cursor (total - 1)) in
   (* A choice says which question, how many names and which line; the
@@ -16529,7 +16529,7 @@ let render_palette (state : state) =
        lower case, the way every other [key:label] item is. *)
     | Masc_tui_types.Palette_jump -> (" MASC Command palette", ":", "run")
     | Masc_tui_types.Palette_choice { choice_question; choice_line } ->
-        let names = List.length (Masc_tui_types.code_cursor_line_symbols state) in
+        let names = List.length (Masc_tui_palette.code_cursor_line_symbols state) in
         ( Printf.sprintf " %s \xc2\xb7 %d name%s on line %d" choice_question names
             (if names = 1 then "" else "s") choice_line
         , "filter:"

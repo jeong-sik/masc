@@ -7,8 +7,9 @@ or approval does not start CI.
 Source review uses `approve-guard.sh` independently of CI. The preparation
 command reads its approval receipts, combines only the leader's explicit
 selection, then rechecks approvals and main. This initial path selects open,
-Ready PRs targeting main; stack members become eligible after their base is
-integrated and the PR is retargeted to main.
+Ready ordinary PRs targeting main; stack members become eligible after their base is
+integrated and the PR is retargeted to main. Release heads use the explicit
+release verification workflow rather than this source-only preparation path.
 
 ```sh
 python3 scripts/review/prepare-approved-batch.py \
@@ -54,8 +55,8 @@ workflow states remain disabled until these definitions are integrated;
 reenabling an old automatic definition would violate this policy.
 
 The result describes the combined candidate and the selected coverage. It is
-not a PR-check run for each member and does not authorize merge. Existing
-`ci-freshness.py` / `merge-guard.sh` consumers require PR-check evidence and
-will refuse this new receipt; their merge integration is separate. Source
-approval remains independent of compilation and test results. No daily
-schedule is introduced.
+not an individual member's check and does not authorize merge. Ordinary
+review guards require current independent source approval; Release admission
+requires its own current-head full verification. A combined result cannot
+replace either authority. Source approval remains independent of compilation
+and test results. No daily schedule is introduced.

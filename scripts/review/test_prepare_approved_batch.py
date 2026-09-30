@@ -9,7 +9,10 @@ import sys
 import unittest
 from unittest.mock import patch
 
-import test_batch_evidence as fixtures
+fixture_spec = importlib.util.spec_from_file_location(
+    "approved_selection_fixture", Path(__file__).with_name("approved-selection-test-fixture.py"))
+fixtures = importlib.util.module_from_spec(fixture_spec)
+fixture_spec.loader.exec_module(fixtures)
 
 spec = importlib.util.spec_from_file_location(
     "prepare_approved_batch", Path(__file__).with_name("prepare-approved-batch.py"))
@@ -18,17 +21,17 @@ sys.modules[spec.name] = P
 spec.loader.exec_module(P)
 
 
-class ApprovedBatchTest(unittest.TestCase):
+class ApprovedSelectionTest(unittest.TestCase):
     def setUp(self):
-        self.fixture = fixtures.BatchEvidenceTest()
+        self.fixture = fixtures.ApprovedSelectionFixture()
         self.fixture.setUp()
         self.addCleanup(self.fixture.doCleanups)
         self.fixture.approvals()
         for pr, head in self.fixture.heads.items():
             self.fixture.get(f"pulls/{pr}")["base"]["sha"] = self.fixture.base
             row = self.fixture.get(f"pulls/{pr}/reviews?per_page=100")[0]
-            row["body"] = (f"review: APPROVE head: {head} by: reviewer\n\n"
-                           f"approve-guard: head `{head}` · source review by reviewer · CI evaluated at merge")
+            row["body"] = (f"verdict: PASS head: {head} by: reviewer\n\n"
+                           f"approve-guard: head `{head}` · source review")
             self.fixture.put(f"pulls/{pr}/reviews/{row['id']}", row)
         # CI evidence is deliberately absent. A source approval read must not
         # ask for it, and the fake gh refuses endpoints not present here.
@@ -42,8 +45,8 @@ class ApprovedBatchTest(unittest.TestCase):
     def prepare(self, selected=None, approve=P.source_approval):
         selected = selected or tuple(P.Member(pr, head)
                                      for pr, head in self.fixture.heads.items())
-        with patch.object(fixtures.F, "api", self.fixture.api):
-            return P.prepare(fixtures.F, repo="o/r", leader="leader", selected=selected,
+        with patch.object(P, "api", self.fixture.api):
+            return P.prepare(P, repo="o/r", leader="leader", selected=selected,
                              git_dir=str(self.fixture.repo), gh=str(self.fixture.fake),
                              approve=approve)
 
@@ -57,6 +60,55 @@ class ApprovedBatchTest(unittest.TestCase):
         calls = (self.fixture.root / "requests.jsonl").read_text()
         self.assertNotIn("/actions/", calls)
         self.assertNotIn("/check-runs", calls)
+
+    def test_unselected_source_never_enters_candidate(self):
+        receipt = self.prepare((P.Member(1, self.fixture.heads[1]),))
+        self.assertEqual(self.fixture.git("show", receipt["candidate"] + ":lib/one.ml"), "let one = 1")
+        absent = subprocess.run(["git", "-C", str(self.fixture.repo), "cat-file", "-e",
+                                 receipt["candidate"] + ":lib/two.ml"], capture_output=True)
+        self.assertNotEqual(absent.returncode, 0)
+
+    def test_revoked_approval_after_composition_refuses_candidate(self):
+        calls = []
+        def approve(repo, selected, *, gh):
+            calls.append(selected.pr)
+            if calls == [1, 2, 1]:
+                self.fixture.put("pulls/1/reviews?per_page=100", [])
+                self.save()
+            return P.source_approval(repo, selected, gh=gh)
+        with self.assertRaises(P.Rejected):
+            self.prepare(approve=approve)
+
+    def test_moving_main_after_composition_refuses_candidate(self):
+        calls = []
+        def approve(repo, selected, *, gh):
+            calls.append(selected.pr)
+            if calls == [1, 2, 1]:
+                self.fixture.data["repos/o/r/commits/main"]["sha"] = self.fixture.heads[1]
+            return P.source_approval(repo, selected, gh=gh)
+        with self.assertRaises(P.Rejected) as error:
+            self.prepare(approve=approve)
+        self.assertEqual(error.exception.reason, P.Reason.MAIN_MOVED)
+
+    def test_base_retarget_after_composition_refuses_candidate(self):
+        calls = []
+        def approve(repo, selected, *, gh):
+            calls.append(selected.pr)
+            if calls == [1, 2, 1]:
+                self.fixture.get("pulls/1")["base"]["ref"] = "stack/unselected"
+                self.save()
+            return P.source_approval(repo, selected, gh=gh)
+        with self.assertRaises(P.Rejected) as error:
+            self.prepare(approve=approve)
+        self.assertEqual(error.exception.reason, P.Reason.SELECTION_CHANGED)
+
+    def test_release_head_does_not_trigger_ci_reads_from_preparation(self):
+        self.fixture.get("pulls/1")["head"]["ref"] = "release/v1.2.3"
+        self.save()
+        with self.assertRaises(P.Rejected) as error:
+            self.prepare()
+        self.assertEqual(error.exception.reason, P.Reason.INVALID_SELECTION)
+        self.assertNotIn("/actions/", (self.fixture.root / "requests.jsonl").read_text())
 
     def test_unapproved_member_cannot_enter_combined_tree(self):
         self.fixture.put("pulls/2/reviews?per_page=100", [])

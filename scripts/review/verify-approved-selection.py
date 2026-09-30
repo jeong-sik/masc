@@ -17,7 +17,6 @@ def module(name, file):
 
 
 P = module("prepare_approved_selection", "prepare-approved-batch.py")
-F = module("approved_selection_freshness", "ci-freshness.py")
 
 
 def verify(receipt, *, repo, candidate, git_dir, gh, prepare=P.prepare):
@@ -25,7 +24,7 @@ def verify(receipt, *, repo, candidate, git_dir, gh, prepare=P.prepare):
             or receipt.get("repo") != repo or receipt.get("candidate") != candidate):
         raise P.Rejected(P.Reason.INVALID_SELECTION)
     selected = tuple(P.member(str(m["pr"]) + "@" + m["head"]) for m in receipt["members"])
-    current = prepare(F, repo=repo, leader=receipt["leader"], selected=selected,
+    current = prepare(P, repo=repo, leader=receipt["leader"], selected=selected,
                       git_dir=git_dir, gh=gh)
     if any(receipt.get(key) != current[key] for key in ("base", "candidate", "tree")):
         raise P.Rejected(P.Reason.INVALID_SELECTION)
@@ -49,14 +48,10 @@ def main():
                           git_dir=args.git_dir, gh=os.environ.get("GUARD_GH", "gh"))
         print(json.dumps(verified, sort_keys=True))
         return 0
-    except P.Refusal as error:
-        unavailable = int(error.code) == 1
-        print(json.dumps({"status": "unavailable" if unavailable else "refused", "reason": str(error)}))
-        return 1 if unavailable else 2
     except (P.Rejected, argparse.ArgumentTypeError) as error:
         print(json.dumps({"status": "refused", "reason": str(error)}))
         return 2
-    except (OSError, ValueError, KeyError, TypeError, AttributeError, P.SourceUnavailable, F.Unavailable):
+    except (OSError, ValueError, KeyError, TypeError, AttributeError, P.SourceUnavailable):
         print(json.dumps({"status": "unavailable", "reason": "evidence_read_failed"}))
         return 1
 

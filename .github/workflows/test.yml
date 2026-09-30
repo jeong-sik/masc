@@ -82,8 +82,6 @@ jobs:
         # The reader's own fixtures, under this runner's awk and python3,
         # before any toolchain work: a header it cannot attribute or a
         # suite it cannot find at the deadline is a wrong verdict later.
-        # scripts/ci/run-lint-suite.sh also runs this, but nothing runs
-        # that script.
         run: bash scripts/ci-run-test-suite.sh --self-test
 
       - name: Setup OCaml toolchain

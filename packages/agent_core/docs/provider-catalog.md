@@ -245,6 +245,7 @@ Accepted `accepted_reasoning_efforts` values are:
 - `high`
 - `xhigh`
 - `max`
+- `ultra`
 
 Accepted `modality_priority` values are:
 

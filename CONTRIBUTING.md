@@ -159,44 +159,6 @@ chore: bump version to 0.34.0
    evidence. Submission moves the task to awaiting_verification; completion
    requires the completion authority's verdict.
 
-## Review decisions and integration
-
-Code review and CI answer separate questions. A reviewer can approve the current
-head, or request changes with concrete findings, before CI starts or finishes.
-An author or a session that pushed the PR cannot independently approve it.
-
-Use this first line for a code review, followed by the reviewed scope and evidence:
-
-```text
-review: APPROVE|REQUEST_CHANGES head: <40-character-current-SHA> by: <Keeper-name>
-```
-
-`APPROVE` goes through `scripts/review/approve-guard.sh`; its `--check` mode checks
-review eligibility, not CI; it still requires `--body` with the real review
-header and evidence. For example, after setting `PR` and `HEAD_SHA` to the
-reviewed PR and commit:
-
-```bash
-bash scripts/review/approve-guard.sh --check --repo jeong-sik/masc \
-  --pr "$PR" --head "$HEAD_SHA" --body review.md
-```
-
-Remove `--check` to publish the approval. A reviewer clears their own change request when the
-corrected code resolves the finding. Green CI alone does not resolve a review.
-
-Integration has a separate decision line:
-
-```text
-verdict: PASS|FAIL head: <40-character-current-SHA> run: <PR-check-run-id> by: <Keeper-name>
-```
-
-These lines show formats; replace the alternatives and placeholders with actual
-values. A code approval does not grant an integration PASS. Merge still requires
-successful current-head required CI, main freshness, an independent approval
-bound to that head, and no outstanding change requests or later blocking decision.
-Keepers use `scripts/review/merge-guard.sh`; external sessions follow the limited
-merge exception in the constitution. Re-review new changes after the head moves.
-
 ## Issues
 
 Issue classification comes from a `masc-triage` block in the issue body, and

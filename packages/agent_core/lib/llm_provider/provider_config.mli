@@ -308,6 +308,7 @@ type reasoning_effort = Reasoning_effort.t =
   | High
   | XHigh
   | Max
+  | Ultra
 
 val reasoning_effort_to_string : reasoning_effort -> string
 val reasoning_effort_of_string : string -> reasoning_effort option

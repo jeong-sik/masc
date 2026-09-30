@@ -2,6 +2,8 @@
 """Approval-to-CI transition fixtures with actual source guards and Git trees."""
 import importlib.util
 import json
+import os
+import subprocess
 from pathlib import Path
 import sys
 import unittest
@@ -17,7 +19,7 @@ spec.loader.exec_module(V)
 
 class SelectionTest(unittest.TestCase):
     def setUp(self):
-        self.preparation = preparation.ApprovedBatchTest()
+        self.preparation = preparation.ApprovedSelectionTest()
         self.preparation.setUp()
         self.addCleanup(self.preparation.doCleanups)
         self.receipt = self.preparation.prepare()
@@ -32,6 +34,38 @@ class SelectionTest(unittest.TestCase):
 
     def test_exact_candidate_can_enter_ci(self):
         self.assertEqual(self.verify()['candidate'], self.receipt['candidate'])
+
+    def run_cli(self):
+        selection = self.preparation.fixture.root / 'selection.json'
+        selection.write_text(json.dumps(self.receipt))
+        return subprocess.run(
+            [sys.executable, V.__file__, '--selection', str(selection),
+             '--repo', 'o/r', '--candidate', self.receipt['candidate'],
+             '--git-dir', str(self.preparation.fixture.repo)],
+            text=True, capture_output=True,
+            env=os.environ | {'GUARD_GH': str(self.preparation.fixture.fake)})
+
+    def test_cli_rechecks_actual_guard_without_deleted_dependencies(self):
+        result = self.run_cli()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(json.loads(result.stdout)['candidate'], self.receipt['candidate'])
+        calls = (self.preparation.fixture.root / 'requests.jsonl').read_text()
+        self.assertNotIn('/actions/', calls)
+        self.assertNotIn('/check-runs', calls)
+
+    def test_cli_revoked_approval_is_a_typed_refusal(self):
+        self.preparation.fixture.put('pulls/1/reviews?per_page=100', [])
+        self.preparation.save()
+        result = self.run_cli()
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertEqual(json.loads(result.stdout)['status'], 'refused')
+
+    def test_cli_unavailable_authority_is_not_a_refusal(self):
+        del self.preparation.fixture.data['repos/o/r/commits/main']
+        self.preparation.save()
+        result = self.run_cli()
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertEqual(json.loads(result.stdout)['status'], 'unavailable')
 
     def test_different_dispatch_commit_is_refused(self):
         with self.assertRaises(V.P.Rejected):

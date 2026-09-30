@@ -687,14 +687,7 @@ let list_credentials config : agent_credential list =
   else []
 ;;
 
-let credential_read_result f =
-  try Ok (f ()) with
-  | Sys_error detail -> Error (System (System_error.IoError detail))
-  | Unix.Unix_error (error, operation, argument) ->
-    Error (System (System_error.IoError
-      (Printf.sprintf "%s(%s): %s" operation argument (Unix.error_message error))))
-  | Eio.Io _ as exn -> Error (System (System_error.IoError (Printexc.to_string exn)))
-;;
+
 
 let read_owned_credential_text config path =
   let ( let* ) = Result.bind in

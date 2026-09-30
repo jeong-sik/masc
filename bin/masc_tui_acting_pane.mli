@@ -340,3 +340,7 @@ val legend : cols:int -> string
 
 val age_text : now:float -> float -> string
 (** How long ago, in the feed's own duration shape ([12.4s], [2m05s]). *)
+
+val trace_unavailable_summary : (string * string) list -> string option
+(** One summary row; complete reasons remain in each Keeper's scrollable
+    Info / Metadata reading and in the pane's scrollable failure rows. *)

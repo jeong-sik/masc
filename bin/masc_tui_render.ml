@@ -7624,7 +7624,11 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
        | Ok identity ->
          add_row "Created:" (Terminal_text.short_timestamp identity.k_created_at);
          add_row "Updated:" (Terminal_text.short_timestamp identity.k_updated_at)
-       | Error reason -> add_row "Metadata:" (Terminal_text.single_line reason));
+       | Error reason ->
+           Message_layout.wrap_words ~max_cells:(max 1 (inner - 26))
+             (Terminal_text.single_line reason)
+           |> List.iteri (fun index line ->
+                add_row (if index = 0 then "Metadata:" else "") line));
 
       List.rev !lines
     in
@@ -13273,12 +13277,9 @@ let render_acting (state : state) =
     ("  " ^ Terminal_text.single_line (observer_replay_description state.observer_replay));
   box_line_styled buf cols ~style:(Theme.recede ())
     ("  " ^ Acting.filter_explanation state.acting_filter);
-  List.iter (fun (name, reason) ->
-      let notice = "Trace attribution unavailable for " ^ name ^ ": " ^ reason in
-      Message_layout.wrap_words ~max_cells:(max 1 (cols - 4))
-        (Terminal_text.single_line notice)
-      |> List.iter (fun line -> box_line_styled buf cols ~style:(Theme.warn ()) ("  " ^ line)))
-    trace_reading.unavailable;
+  (match Masc_tui_acting_pane.trace_unavailable_summary trace_reading.unavailable with
+   | None -> ()
+   | Some summary -> box_line_styled buf cols ~style:(Theme.warn ()) ("  " ^ summary));
   box_divider buf cols;
   (* Measured over every row the filter keeps, not the page on screen, so the
      columns do not move while a reader scrolls. Only the two named columns

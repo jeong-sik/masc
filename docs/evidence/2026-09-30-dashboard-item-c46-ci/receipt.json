@@ -1,0 +1,22 @@
+{
+  "head": "c46b7e4968b40d03e6da5c31bd411bc84bad5101",
+  "run": 36692039890,
+  "job": 109811260074,
+  "raw_sha256": "dfbe8b253b553e6ed6e4ecacc05812d643e25262d3a9ed33b004664848468ea7",
+  "test_groups": [
+    "Tests  444 passed (444)",
+    "Tests  3 passed (3)",
+    "Tests  20 passed (20)"
+  ],
+  "requested_selectors": [
+    "src/api/keeper-items.test.ts",
+    "src/api/schemas/candle-observation.test.ts",
+    "src/components/keeper-items-panel.test.ts",
+    "src/components/keeper-items-workspace.test.ts"
+  ],
+  "missing_selector_confirmed_404": "src/components/keeper-items-workspace.test.ts",
+  "actually_selected_files": 3,
+  "actually_selected_tests": 20,
+  "browser_result": "PASS (7 screens,5 account reads); synthetic fixture",
+  "current_reconciled_child_covered": false
+}

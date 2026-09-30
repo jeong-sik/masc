@@ -1,0 +1,38 @@
+{
+  "scope": "Source/CI checkpoint; separate commits, no integrated release or live changes",
+  "heads": {
+    "reader_40256": "46fb0eec8680e1dd0ded7ff341144972178320d2",
+    "index_40259_bound_alias": "c5cbf1f1b50ecd0b30756d0aac5a1a2d92e311dd",
+    "domain_40241": "49aae5c7c32bf338792b95d55a98a1db1d86ef69",
+    "item_40252": "9de74933202fb9cf714ac4d36f3bad4ba482fdf1",
+    "requested_files_40272": "c571b3f8f07d6fbcbb6da412d7459f97ac4dcdda"
+  },
+  "measured": {
+    "reader_run": 36692465819,
+    "reader_cases": 180,
+    "reader_suites": 11,
+    "older_index_head": "b59611088f5c420ec24a78a417b58bf1e6eac444",
+    "older_index_run": 36693281529,
+    "older_index_cases": 180,
+    "older_index_suites": 11,
+    "older_index_did_not_cover_bound_alias_uuid_permission": true,
+    "old_item_head": "c46b7e4968b40d03e6da5c31bd411bc84bad5101",
+    "old_item_run": 36692039890,
+    "old_item_requested": 4,
+    "old_item_actually_executed_files": 3,
+    "old_item_actually_executed_cases": 20
+  },
+  "current_requests": {
+    "domain_run": 36695381272,
+    "item_run": 36696322333,
+    "guard_pr_check": 36698535468,
+    "guard_dashboard_dispatch": "rejected_HTTP422_disabled_manually",
+    "bound_alias_test_dispatch": "rejected_HTTP422_disabled_manually"
+  },
+  "workflow_state_observed": {
+    "dashboard-artifact.yml": "disabled_manually",
+    "test.yml": "HTTP422 disabled workflow; new dispatch refused"
+  },
+  "calibration": "partial167 completions103grades64HTTP429; no full400 or accuracy; onlycase19humanEpic",
+  "goal_hard_cut": "approvedpolicy; unapplied, requirestoppedwriters/freshdata"
+}

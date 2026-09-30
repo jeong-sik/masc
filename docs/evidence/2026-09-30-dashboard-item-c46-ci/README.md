@@ -1,0 +1,3 @@
+# Item amount: historical c46 measured scope
+
+Artifact36692039890 at c46b7e4968b40d03e6da5c31bd411bc84bad5101 completed success. The raw log records9 activation suites/444 tests, bundle3 tests and **3 executed selected files/20 tests**. Requested input named4 files; nonexistent keeper-items-workspace.test.ts was ignored by Vitest, with404 independently confirmed through the exact c46 contents API. This does not prove the absent scenario. Browser reports7 screens/5 synthetic reads. No new9de/49aae composition, whole-feature release or live claim. A separate narrow CI driver change validates existence before Vitest. Groups overlap; no unique sum asserted.

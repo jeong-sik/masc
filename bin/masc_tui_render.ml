@@ -16245,9 +16245,16 @@ let render_about (state : state) =
   surface_chrome ~overflow:Fits ~frame:Chrome_overlay state ~terminal_rows ~cols
     ~surface_key:"about" ~title:(screen_title " MASC") ~hints:"c:candle  Esc:close"
     ~body:(fun ~budget c ->
-      Masc_tui_emblem_screen.body
+      Masc_tui_emblem_screen.about_body
         ~cols:(framed_inner_width cols) ~rows:budget
         ~origin:(c.next_origin ())
+        ~frame:state.emblem_frame
+        ~keepers:(match keepers with
+          | Masc_tui_emblem_screen.Keepers_read _ ->
+              List.map (fun (keeper : Tui_decode.keeper) ->
+                Terminal_text.single_line keeper.k_name) state.keepers
+          | Masc_tui_emblem_screen.Keepers_unreadable
+          | Masc_tui_emblem_screen.Keepers_unread -> [])
         ~caption:
           [ Masc_tui_theme.tone Masc_tui_theme.Accent
             ^ "MASC \xc2\xb7 Multi-Agent Shared Context" ^ Ansi.reset
@@ -16255,7 +16262,6 @@ let render_about (state : state) =
             ^ Masc_tui_emblem_screen.about_facts ~theme keepers
             ^ Ansi.reset
           ]
-        ~elapsed:(Masc_tui_types.motion_elapsed_seconds state.emblem_frame)
       |> List.iter c.push)
 
 let render_surface (state : state) =

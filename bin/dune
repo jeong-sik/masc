@@ -2106,6 +2106,7 @@
  (modules masc_tui_emblem_screen)
  (libraries
   masc.keeper_portrait
+  masc_tui_keeper_portrait
   masc_tui_graphics
   masc_tui_message_layout
   masc_tui_portrait_view

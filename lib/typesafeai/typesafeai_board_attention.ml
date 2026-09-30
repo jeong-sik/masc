@@ -19,8 +19,9 @@ type judged =
 
 let ( let* ) = Result.bind
 
-(* The explicit uncertainty choice delegates to the full lane. Confidence
-   remains evidence and never chooses a control-flow branch. *)
+(* The explicit uncertainty choice delegates to the full lane. A decided
+   answer's confidence goes back to the caller, which sends a decision below
+   its settle floor to the full lane as well. *)
 let relevance_choices =
   Typesafeai_types.choice_set
     ~options:(List.map (fun decision -> Settled decision) Judgment.all_of_decision @ [Uncertain])

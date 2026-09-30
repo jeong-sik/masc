@@ -8,6 +8,27 @@
     The ledger records what happened. It does not compute. A kind is added by
     the change that first writes it, together with the readers that need it. *)
 
+type task_status =
+  | Todo
+  | Claimed
+  | In_progress
+  | Awaiting_verification
+  | Done of { completed_at : Candle_time.t }
+      (** When the Task was completed. Only a done Task has one. *)
+  | Cancelled
+(** A Task's status as the backlog spells it. *)
+
+type task_lookup =
+  | Found of
+      { title : string
+      ; assignee : string option
+            (** Who did or is doing the work, as the Task's status names them. *)
+      ; status : task_status
+      }
+  | Deleted  (** Neither store has the Task, and the Goal no longer links it. *)
+(** What reading one linked Task found. A Task that could not be read has no row
+    here: nothing is written until every linked Task reads. *)
+
 type body =
   | Snapshot of
       { goal_id : string
@@ -24,6 +45,12 @@ type body =
       ; target_value : string option
       ; linked_task_ids : string list  (** The Tasks linked to the Goal when it passed. *)
       }
+  | Payout_owed of
+      { goal_id : string
+      ; request_id : string  (** The verification request the operator confirmed. *)
+      ; passed_at : Candle_time.t  (** When that request's passing result was made. *)
+      ; confirmed_at : Candle_time.t  (** When the operator confirmed it. *)
+      }
 
 type t =
   { at : Candle_time.t
@@ -31,7 +58,7 @@ type t =
   }
 
 val kind : body -> string
-(** The row's ["kind"]: [snapshot]. *)
+(** The row's ["kind"]: [snapshot] or [payout_owed]. *)
 
 val to_yojson : t -> Yojson.Safe.t
 val of_yojson : Yojson.Safe.t -> (t, string) result

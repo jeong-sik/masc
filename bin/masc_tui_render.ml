@@ -261,17 +261,20 @@ let task_line ~cols (task : task) =
     Printf.sprintf " %s(%s%s)%s %s" status_color status owner Ansi.reset
       (priority_indicator task.priority)
   in
-  (* State stays explicit, using a compact label when the full word leaves
-     no room for the identifier and title. Priority is kept. Remaining cells are shared
-     by the identifier, owner and title; each identifier gets at most a third
-     before the title takes the remainder. This bounds long owner names too.
-     Goal links appear only when the full title leaves room; detail keeps all
-     identifiers. The frame and leading space consume five cells. *)
+  (* Preserve the Task number before spending cells on its owner and title.
+     The canonical prefix may yield on narrow screens, but its digits do not
+     share a truncation budget with unrelated fields. *)
   let available = max 0 (framed_inner_width cols - 1) in
+  let id = Terminal_text.single_line task.id in
+  let short_id =
+    if String.starts_with ~prefix:"task-" id then
+      let digits = String.sub id 5 (String.length id - 5) in
+      if digits <> "" && String.for_all (fun c -> c >= '0' && c <= '9') digits then digits else id
+    else id in
   let status =
     let required = Message_layout.display_width (prefix "")
       + Message_layout.display_width (suffix status "")
-      + Message_layout.display_width "ID" + Message_layout.display_width "Task" in
+      + Message_layout.display_width id + Message_layout.display_width "Task" in
     if required <= available then status
     else match task.status with
       | Masc_domain.Todo -> "todo"
@@ -283,11 +286,13 @@ let task_line ~cols (task : task) =
   in
   let fixed_chrome = Message_layout.display_width (prefix "")
     + Message_layout.display_width (suffix status "") in
-  let share = max 0 (available - fixed_chrome) / 3 in
-  let id = Terminal_text.single_line task.id in
-  let id = Message_layout.fit_middle (min share (Message_layout.display_width id)) id in
+  let fields = max 0 (available - fixed_chrome) in
+  let id = if Message_layout.display_width id + Message_layout.display_width "Task" <= fields
+    then id else short_id in
+  let id = Message_layout.fit_middle (min fields (Message_layout.display_width id)) id in
+  let remainder = max 0 (fields - Message_layout.display_width id) in
   let assignee =
-    fit_width assignee (min share (Message_layout.display_width assignee))
+    fit_width assignee (min (remainder / 2) (Message_layout.display_width assignee))
   in
   let prefix = prefix id in
   let suffix = suffix status assignee in
@@ -13397,10 +13402,17 @@ let usage_lines ~cols (state : state) =
   List.concat_map
     (fun line ->
       if String.equal line "" then [ "" ]
+      else if Message_layout.display_width line <= framed_inner_width cols then [line]
       else
-        Message_layout.wrap_words ~max_cells:(max 1 (cols - 7)) line
-        |> List.mapi (fun index text ->
-             if index = 0 then text else "   " ^ text))
+        let rec leading index =
+          if index < String.length line && Char.equal line.[index] ' '
+          then leading (index + 1) else index in
+        let indent_cells = leading 0 in
+        let indent = String.make indent_cells ' ' in
+        let body = String.sub line indent_cells (String.length line - indent_cells) in
+        Message_layout.split_styled_cells
+          ~max_cells:(max 1 (framed_inner_width cols - indent_cells)) body
+        |> List.map (fun text -> indent ^ text))
     lines
 
 let render_metrics (state : state) =

@@ -8,6 +8,15 @@ import test_tui_keyboard_input as h
 SOURCE_MODULES = ("bin/masc_tui_render.ml",)
 
 
+def prepare_colliding_ids(base_path):
+    prepare(base_path)
+    path = Path(base_path) / ".masc" / "tasks" / "backlog.json"
+    payload = json.loads(path.read_text())
+    original = payload["tasks"][1]
+    payload["tasks"] = [dict(original, id=task_id) for task_id in ("task-1862", "task-1962")]
+    path.write_text(json.dumps(payload))
+
+
 def prepare(base_path):
     h.seed_row_budget_workspace(base_path)
     path = Path(base_path) / ".masc" / "tasks" / "backlog.json"
@@ -47,8 +56,29 @@ def run(executable):
         os.write(master_fd, b"q")
 
     h.run_terminal_scenario(executable, description="Work task rows preserve state on resize",
-                            interact=interact, prepare_workspace=prepare,
-                            terminal_rows=32)
+                            interact=interact, prepare_workspace=prepare)
+
+    def distinguish(process, master_fd, _slave_fd, output, _base_path):
+        h.palette_go(process, master_fd, output, b"go Work", b"MASC Work")
+        h.send_and_wait(process, master_fd, output, b"t", b"MASC Work / Tasks")
+        h.wait_for_output(process, master_fd, output, b"1862]", start=0, timeout=10)
+        for width in (30, 40):
+            frame = h.resize_and_wait(process, master_fd, output, rows=32, columns=width,
+                                      needle=b"1962]", final_cursor=b"\x1b[?25l")
+            rows = h.screen_rows(frame)
+            for task_id in (b"1862]", b"1962]"):
+                row = rows[h.screen_row_of(rows, task_id)]
+                if b"verify" not in row or b"!" not in row:
+                    raise AssertionError(f"Task number or state lost: {row!r}")
+            h.send_and_wait(process, master_fd, output, b"\r", b"task-1862")
+            h.send_and_wait(process, master_fd, output, b"\x1b", b"MASC Work / Tasks")
+            h.send_and_wait(process, master_fd, output, b"j\r", b"task-1962")
+            h.send_and_wait(process, master_fd, output, b"\x1b", b"MASC Work / Tasks")
+            h.send_and_wait(process, master_fd, output, b"k", b"1862]")
+        os.write(master_fd, b"q")
+
+    h.run_terminal_scenario(executable, description="Work distinguishes same-suffix Task numbers and opens each",
+                            interact=distinguish, prepare_workspace=prepare_colliding_ids)
 
 
 if __name__ == "__main__":

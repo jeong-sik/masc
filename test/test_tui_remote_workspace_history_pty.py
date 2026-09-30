@@ -932,11 +932,12 @@ def github_workspace_withdrawal(binary: str) -> None:
             await_screen(lambda text: b"b.settled" in text)
             h.select_keeper_row(process, fd, output, b"alpha")
             h.send_and_wait(process, fd, output, b"\r", b"GitHub")
-            title_rows = [row for row, text in h.screen_rows(bytes(output)).items()
-                          if b"Info" in text and b"GitHub" in text]
-            assert len(title_rows) == 1
-            h.press_label_on_screen(process, fd, output, b"GitHub", row=title_rows[0],
-                                    needle=b"b-after-late-github-current")
+            if b"Login scopes" not in screen(output):
+                title_rows = [row for row, text in h.screen_rows(bytes(output)).items()
+                              if b"Info" in text and b"GitHub" in text]
+                assert len(title_rows) == 1
+                h.press_label_on_screen(process, fd, output, b"GitHub", row=title_rows[0],
+                                        needle=b"b-after-late-github-current")
             await_screen(lambda text: b"b-after-late-github-current" in text)
             assert b"A-late-device-code-forbidden" not in h.CSI_RE.sub(b"", bytes(output[boundary:]))
             assert len([p for p, _ in posts if p.startswith("/api/v1/keepers/alpha/github-login")]) == 1

@@ -502,6 +502,77 @@ let test_fusion_status_hint_wakes_only_its_bound_run () =
     List.iter (detach config) [one;two];
     List.iter (fun id -> await_phase clock config id "detached") [one;two])
 
+let test_broadcast_retry_reconciles_receipt_during_slow_fanout () =
+  with_fixture (fun env sw config dir _ ->
+    ignore (Workspace.init config ~agent_name:(Some "fixture-operator"));
+    let clock = Eio.Stdenv.clock env in
+    let id = attach config dir "good" in
+    await clock (fun () -> int "observation_seq" (instance config id) = 1);
+    let selected = inspect config |> member "rows" |> Yojson.Safe.Util.to_list |> List.hd |> text "id" in
+    let args = `Assoc ["instance_id",`String id;"row_ids",`List [`String selected];
+      "broadcast",`Bool true;"request_id",`String "slow-send"] in
+    let entered, mark_entered = Eio.Promise.create () in
+    let release, mark_released = Eio.Promise.create () in
+    let fanouts = ref 0 in
+    let previous = Workspace_broadcast.For_testing.replace_on_broadcast_mention (fun _delivery ->
+      incr fanouts;
+      if !fanouts=1 then (
+        Eio.Promise.resolve mark_entered ();
+        Eio.Promise.await release);
+      Workspace_broadcast.Passive) in
+    Fun.protect ~finally:(fun () ->
+      let (_ : Workspace_broadcast.broadcast_delivery -> Workspace_broadcast.mention_delivery) =
+        Workspace_broadcast.For_testing.replace_on_broadcast_mention previous in
+      if not (Eio.Promise.is_resolved release) then Eio.Promise.resolve mark_released ()) (fun () ->
+      let send () = Runtime.dispatch ~caller:"fixture-operator" ~config ~operation:Runtime.Evidence args |> unwrap in
+      let first = Eio.Fiber.fork_promise ~sw send in
+      Eio.Promise.await entered;
+      (* A new observation changes entry_json while the original caller is
+         blocked. Retry still has to return the originally published bundle. *)
+      ignore (unwrap (dispatch config Runtime.Observe ["instance_id",`String id]));
+      await clock (fun () -> int "observation_seq" (instance config id) = 2);
+      let replay = send () in
+      check bool "original request is still waiting for fleet delivery" false (Eio.Promise.is_resolved first);
+      check string "retry recovers authoritative commit during slow fanout" "committed"
+        (member "delivery" replay |> text "status");
+      check Alcotest.int "retry never starts another fleet fanout" 1 !fanouts;
+      check bool "a slow fanout does not block a different Broadcast identity" true
+        (Result.is_ok (Workspace_broadcast.broadcast_once config
+          ~request_id:("wmsg-" ^ String.make 32 'b')
+          ~from_agent:"fixture-operator" ~content:"independent message"));
+      Eio.Promise.resolve mark_released ();
+      let original = Eio.Promise.await_exn first in
+      check bool "replayed receipt has original request identity and sequence" true
+        (member "delivery" original = member "delivery" replay);
+      check bool "retry preserves original selected artifact despite changing live metadata" true
+        (member "keeper_artifact" original = member "keeper_artifact" replay);
+      let receipt = member "delivery" replay |> member "receipt" in
+      check bool "same request cannot be reused for different message content" true
+        (Result.is_error (Workspace_broadcast.broadcast_once config
+          ~request_id:(text "request_id" receipt)
+          ~from_agent:"fixture-operator" ~content:"different content"));
+      let next_args = match args with `Assoc fields ->
+        `Assoc (("request_id",`String "deliberate-new-send") :: List.remove_assoc "request_id" fields)
+        | _ -> assert false in
+      let deliberate = Runtime.dispatch ~caller:"fixture-operator" ~config ~operation:Runtime.Evidence next_args |> unwrap in
+      check bool "new deliberate send of the same rows gets another receipt" true
+        (member "delivery" deliberate |> member "receipt" |> text "request_id"
+          <> text "request_id" receipt);
+      check Alcotest.int "new deliberate send still reaches the fleet" 3 !fanouts;
+      (* Remove all in-memory Lane state after detaching. The retry must find
+         both the prepared artifact and committed message on durable storage. *)
+      detach config id; await_phase clock config id "detached";
+      let store_root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
+      unwrap (Store.remove_binding (Store.create ~root:store_root) ~instance_id:id);
+      remove_tree (Filename.concat store_root (Filename.concat "observations" (Store.digest id)));
+      Runtime.For_testing.reset ();
+      let recovered = send () in
+      check bool "restart recovers receipt after source rows and binding disappear" true
+        (member "delivery" recovered = member "delivery" original);
+      check bool "restart recovers the same exact artifact" true
+        (member "keeper_artifact" recovered = member "keeper_artifact" original);
+      check Alcotest.int "recovery never fans out a duplicate" 3 !fanouts))
+
 let test_broadcast_failure_keeps_evidence_without_automatic_retry () =
   with_fixture (fun env _ config dir _ ->
     ignore (Workspace.init config ~agent_name:(Some "fixture-operator"));
@@ -510,6 +581,7 @@ let test_broadcast_failure_keeps_evidence_without_automatic_retry () =
     await clock (fun () -> int "observation_seq" (instance config id) = 1);
     let selected = inspect config |> member "rows" |> Yojson.Safe.Util.to_list |> List.hd |> text "id" in
     let args = ["instance_id",`String id;"row_ids",`List [`String selected]] in
+    let send_id = ["request_id",`String "failed-send"] in
     let attempts = ref 0 in
     let previous = Workspace_broadcast.For_testing.replace_write_json_commit
       (fun _ _ _ -> incr attempts; Error "fixture authoritative write rejected") in
@@ -524,12 +596,12 @@ let test_broadcast_failure_keeps_evidence_without_automatic_retry () =
         check bool "nonboolean Broadcast is refused" true
           (Result.is_error (Runtime.dispatch ~caller:"fixture-operator" ~config ~operation:Runtime.Evidence
             (`Assoc (args @ ["broadcast",`String "true"]))));
-        let unauthenticated = dispatch config Runtime.Evidence (args @ ["broadcast",`Bool true]) |> unwrap in
+        let unauthenticated = dispatch config Runtime.Evidence (args @ send_id @ ["broadcast",`Bool true]) |> unwrap in
         check string "sharing requires an authenticated caller" "failed"
           (member "delivery" unauthenticated |> text "status");
         check Alcotest.int "invalid requests never reach Broadcast" 0 !attempts;
         Runtime.dispatch ~caller:"fixture-operator" ~config ~operation:Runtime.Evidence
-          (`Assoc (args @ ["broadcast",`Bool true])) |> unwrap) in
+          (`Assoc (args @ send_id @ ["broadcast",`Bool true])) |> unwrap) in
     check string "failed authoritative publication remains a failed delivery" "failed"
       (member "delivery" result |> text "status");
     let evidence = member "evidence" result in
@@ -550,6 +622,8 @@ let test_broadcast_failure_keeps_evidence_without_automatic_retry () =
     detach config id; await_phase clock config id "detached")
 
 let () = run "Lane Add-on runtime" ["optional extension", [
+  test_case "Broadcast retry reconciles the committed receipt during slow fanout" `Quick
+    test_broadcast_retry_reconciles_receipt_during_slow_fanout;
   test_case "Broadcast failure retains evidence without automatic retry" `Quick
     test_broadcast_failure_keeps_evidence_without_automatic_retry;
   test_case "Fusion state hint wakes only the exact run binding" `Quick

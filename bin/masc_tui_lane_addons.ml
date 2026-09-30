@@ -41,12 +41,13 @@ type diagnostic =
    optional message the Keeper may use, defer or ignore. *)
 type evidence_prompt = {
   evidence : Yojson.Safe.t; owner_title : string; row_count : int;
-  keepers : string list; choice : int;
+  keepers : string list; choice : int; broadcast_request_id : string;
 }
 type t = {
   installer : Masc_tui_lane_installer.t option;
   subscription_panel : Masc_tui_lane_subscriptions.t option;
   evidence_prompt : evidence_prompt option;
+  pending_broadcasts : (Yojson.Safe.t * string) list;
   presentation : presentation; screen : screen; overview_mode : overview_mode; help_open : bool;
   action_menu : action_menu option;
   snapshot : snapshot option; loading : bool; error : diagnostic option;
@@ -56,7 +57,7 @@ type t = {
   draft : string option; naming : bool; configuration_cursor : int;
   documents : Document.session list; document_key : string option; editor_ready : bool; last_action : action_request option; action_receipt : Action.receipt option;
 }
-let initial = { installer=None;subscription_panel=None;evidence_prompt=None; presentation=Summary; screen=Overview; overview_mode=Current_installations; help_open=false; action_menu=None; snapshot = None; loading = false; error = None; snapshot_read_error=None; receipt = None;
+let initial = { installer=None;subscription_panel=None;evidence_prompt=None; pending_broadcasts=[]; presentation=Summary; screen=Overview; overview_mode=Current_installations; help_open=false; action_menu=None; snapshot = None; loading = false; error = None; snapshot_read_error=None; receipt = None;
   generation = 0; instance_cursor = 0; row_cursor = 0; selected = []; scroll = 0;
   focus = Instances; draft = None; naming = false; configuration_cursor = 0;
   documents = []; document_key = None; editor_ready = false; last_action=None;action_receipt=None }
@@ -377,14 +378,16 @@ let evidence_target view =
   let* owners=owners view.selected in
   match List.sort_uniq (fun (a : instance) (b : instance) -> String.compare a.id b.id) owners with
   | [owner] -> Ok (owner, `Assoc ["instance_id",`String owner.id;
-      "row_ids",`List (List.map (fun id -> `String id) view.selected)])
+      "row_ids",`List (List.sort String.compare view.selected |> List.map (fun id -> `String id))])
   | _ -> Error "Selected evidence spans multiple instances; select one owner at a time"
 let evidence_request view =
   let* _, evidence = evidence_target view in Ok (Evidence evidence)
-let open_evidence ~keepers view =
+let open_evidence ~request_id ~keepers view =
   let* owner, evidence = evidence_target view in
+  let broadcast_request_id = match List.find_opt (fun (previous,_) -> Yojson.Safe.equal previous evidence) view.pending_broadcasts with
+    | Some (_, id) -> id | None -> request_id in
   Ok {view with evidence_prompt=Some {evidence;owner_title=owner.title;
-    row_count=List.length view.selected;keepers=List.sort_uniq String.compare keepers;choice=0};
+    row_count=List.length view.selected;keepers=List.sort_uniq String.compare keepers;choice=0;broadcast_request_id};
     error=None;scroll=0}
 let move_evidence view delta = match view.evidence_prompt with
   | None -> view
@@ -397,11 +400,21 @@ let submit_evidence view = match view.evidence_prompt with
   | Some prompt ->
       let fields = match prompt.evidence with `Assoc fields -> fields | _ -> [] in
       let request = if prompt.choice=List.length prompt.keepers + 1
-        then `Assoc (fields @ ["broadcast",`Bool true])
+        then `Assoc (fields @ ["broadcast",`Bool true;"request_id",`String prompt.broadcast_request_id])
         else match evidence_keeper prompt with
           | None -> prompt.evidence
           | Some keeper -> `Assoc (fields @ ["keeper_name",`String keeper]) in
-      Ok ({view with evidence_prompt=None}, Evidence request)
+      let pending_broadcasts = if prompt.choice=List.length prompt.keepers + 1 then
+        (prompt.evidence,prompt.broadcast_request_id) :: List.filter
+          (fun (_,id) -> not (String.equal id prompt.broadcast_request_id)) view.pending_broadcasts
+        else view.pending_broadcasts in
+      Ok ({view with evidence_prompt=None;pending_broadcasts}, Evidence request)
+let acknowledge_broadcast view receipt =
+  match get (field "request_id") "delivery" receipt, get (field "status") "delivery" receipt with
+  | Ok (`String request_id), Ok (`String "committed") ->
+      {view with pending_broadcasts=List.filter
+        (fun (_,id) -> not (String.equal id request_id)) view.pending_broadcasts}
+  | _ -> view
 let evidence_lines prompt =
   let choice index label = (if prompt.choice=index then "> " else "  ") ^ label in
   [Printf.sprintf "Preserve %d marked row%s from %s" prompt.row_count

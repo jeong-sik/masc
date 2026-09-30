@@ -229,11 +229,16 @@ def broadcast_export(executable: str, captures: Path | None) -> None:
     def share(body: bytes) -> tuple[int, dict]:
         request = json.loads(body)
         expected = {'instance_id': owner, 'row_ids': [selected], 'broadcast': True}
+        request_id = request.get('request_id')
+        if not isinstance(request_id, str) or not request_id:
+            raise AssertionError('Broadcast requires a retained request identity')
+        expected['request_id'] = request_id
         if request != expected:
             raise AssertionError(f'Broadcast changed selected evidence: {request!r}')
         accepted.append(request)
         return 200, {'evidence': {'sha256': 'f' * 64}, 'row_count': 1,
                      'delivery': {'destination': 'broadcast', 'status': 'committed',
+                                  'request_id': request_id,
                                   'receipt': {'request_id': 'fixture-broadcast', 'seq': 7}}}
 
     fixtures['/api/v1/lane-addons/evidence'] = terminal.RequestHttpResponse(share)

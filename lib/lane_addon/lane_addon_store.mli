@@ -21,6 +21,10 @@ val remove_binding : t -> instance_id:string -> (unit, string) result
 (** Removes one binding record. A missing record is already removed. *)
 val save_action : t -> instance_id:string -> request_id:string -> Yojson.Safe.t -> (unit, string) result
 val load_action : t -> instance_id:string -> request_id:string -> (Yojson.Safe.t option, string) result
+val save_broadcast : t -> instance_id:string -> request_id:string -> Yojson.Safe.t -> (unit, string) result
+val load_broadcast : t -> instance_id:string -> request_id:string -> (Yojson.Safe.t option, string) result
+(** Retain the exact published evidence before sending its idempotent Broadcast.
+    Repeated sends read that original artifact, not a changing live binding. *)
 val bindings : t -> (Yojson.Safe.t list, string) result
 val append_observation : t -> instance_id:string -> seq:int ->
   sources:Yojson.Safe.t -> Lane_addon_types.output -> (unit, string) result

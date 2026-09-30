@@ -827,7 +827,7 @@ let rewrite_task_cache_signal config ~msg_type ~task_cache_signal ~content =
         Error (Broadcast_dependency_unavailable detail))
 ;;
 
-let broadcast_with_mention ?trace_context ~msg_type ~audience
+let broadcast_with_mention ?trace_context ?request_id ~msg_type ~audience
     config ~from_agent ~content ~pre_extract_mention ~deferred_by_predecessor =
   let started_at = Time_compat.now () in
   let observe final_msg_type =
@@ -839,7 +839,9 @@ let broadcast_with_mention ?trace_context ~msg_type ~audience
   ensure_initialized config;
 
   let seq = Workspace_state.next_seq config in
-  let request_id = Random_id.prefixed ~prefix:"wmsg-" ~bytes:16 in
+  let request_id = match request_id with
+    | Some request_id -> request_id
+    | None -> Random_id.prefixed ~prefix:"wmsg-" ~bytes:16 in
   let mention = pre_extract_mention in
   (* Stored as written. This used to HTML-escape the content, so a message
      containing a double quote was persisted as [&quot;] and every consumer
@@ -967,7 +969,7 @@ let broadcast_with_mention ?trace_context ~msg_type ~audience
      observe stored_msg_type;
      Ok { delivery with mention_delivery })
 
-let broadcast ?trace_context ?(msg_type = "broadcast") ?task_cache_signal
+let broadcast_internal ?trace_context ?request_id ?(msg_type = "broadcast") ?task_cache_signal
       ~audience config ~from_agent ~content =
   ensure_initialized config;
   (* Preserve original content and extract mention tokens before any
@@ -981,7 +983,7 @@ let broadcast ?trace_context ?(msg_type = "broadcast") ?task_cache_signal
   | Ok (content, msg_type) ->
     let run deferred_by_predecessor =
       broadcast_with_mention
-        ?trace_context
+        ?trace_context ?request_id
         ~msg_type
         ~audience
         config
@@ -1008,6 +1010,69 @@ let broadcast ?trace_context ?(msg_type = "broadcast") ?task_cache_signal
              else None
          in
          run deferred_by_predecessor))
+
+let broadcast ?trace_context ?msg_type ?task_cache_signal ~audience config ~from_agent ~content =
+  broadcast_internal ?trace_context ?msg_type ?task_cache_signal ~audience config ~from_agent ~content
+
+type exact_request_lock = { mutex : Cross_context_mutex.t; mutable users : int }
+let exact_request_locks = Hashtbl.create 16
+let exact_request_locks_mutex = Mutex.create ()
+let with_exact_request_lock config request_id f =
+  let key = masc_dir config, request_id in
+  let lease = Mutex.protect exact_request_locks_mutex (fun () ->
+    let lease = match Hashtbl.find_opt exact_request_locks key with
+      | Some lease -> lease
+      | None -> let lease = {mutex=Cross_context_mutex.create (); users=0} in
+          Hashtbl.add exact_request_locks key lease; lease in
+    lease.users <- lease.users + 1;
+    lease) in
+  Fun.protect ~finally:(fun () -> Mutex.protect exact_request_locks_mutex (fun () ->
+    lease.users <- lease.users - 1;
+    if lease.users=0 then Hashtbl.remove exact_request_locks key))
+    (fun () -> Cross_context_mutex.with_lock lease.mutex f)
+
+let broadcast_once ~request_id config ~from_agent ~content =
+  ensure_initialized config;
+  let audience = Fleet_conversation in
+  let open Result.Syntax in
+  let* () = match current_request_id_of_filename (request_id ^ ".json") with
+    | Some _ -> Ok ()
+    | None -> Error (Broadcast_policy_rejected "invalid Broadcast request identity") in
+  let lookup () =
+    let* names = authoritative_directory_names config (messages_dir config)
+      |> Result.map_error (fun detail -> Broadcast_dependency_unavailable detail) in
+    let suffix = "_" ^ request_id ^ "_broadcast.json" in
+    match List.filter (fun name -> Filename.check_suffix name suffix) names with
+    | [] -> Ok None
+    | [name] ->
+        let* message = match read_committed_message config (Filename.concat (messages_dir config) name) with
+          | Committed_message message -> Ok message
+          | Committed_message_absent -> Error (Broadcast_dependency_unavailable "committed Broadcast row disappeared")
+          | Committed_message_unavailable detail | Committed_message_corrupt detail ->
+              Error (Broadcast_dependency_unavailable detail) in
+        if not (String.equal message.request_id request_id
+          && String.equal message.from_agent from_agent
+          && String.equal message.content content
+          && String.equal message.msg_type "broadcast") then
+          Error (Broadcast_policy_rejected "Broadcast request identity already names different content")
+        else
+          let delivery = delivery_of_message ~audience message in
+          let mention_delivery = match message.mention_delivery with
+            | Mention_passive -> Passive | Mention_pending -> Pending
+            | Mention_accepted -> Already_accepted
+            | Mention_rejected -> Rejected Invalid_request in
+          Ok (Some {delivery with mention_delivery})
+    | _ -> Error (Broadcast_dependency_unavailable "multiple committed messages share one request identity") in
+  (* Read before waiting for the first caller: its message may already be
+     committed while its fleet transcript writes are still blocked. *)
+  let* existing = lookup () in
+  match existing with
+  | Some delivery -> Ok delivery
+  | None -> with_exact_request_lock config request_id (fun () ->
+      let* existing = lookup () in
+      match existing with
+      | Some delivery -> Ok delivery
+      | None -> broadcast_internal ~request_id ~audience config ~from_agent ~content)
 
 module For_testing = struct
   let replace_on_broadcast_mention handler =

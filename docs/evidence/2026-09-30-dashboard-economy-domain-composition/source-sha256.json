@@ -1,0 +1,12 @@
+{
+  "source_commit": "292a406d98e127818af5f5e24bb1acd329692032",
+  "files": {
+    "dashboard/src/api/schemas/candle-observation.test.ts": "13b4f2b6899f85aa7be3704c5e9cdad93f8a05ae09c60f48b83e9a7c07faa56b",
+    "dashboard/src/api/schemas/candle-observation.ts": "27d37d9c57c7dc6fb6822123687a72106bbe0b8ac090975301538617aac7cdf8",
+    "dashboard/src/api/schemas/gate-keepers.test.ts": "d3af842764fc8b7750dc701bcdbdcda69c78c7c4f2b7c4fbb0253fe5a230fd00",
+    "dashboard/src/api/schemas/keeper-portrait.test.ts": "884536548d573e4641c7a25256d5ac1a738b43be2e12f9e3da846c38af71bdb2",
+    "dashboard/src/api/schemas/keeper-portrait.ts": "1021b0c09893abeed7397fe92c38cbb9f07d9f8b42094dc8fe632777f1117f5d",
+    "dashboard/src/lib/candle-observation.ts": "cc2ca5cce82bae506a7b9bcfeffbcab278c2ca58bcae2b45441ebbc4fdf8d40d",
+    "dashboard/src/lib/keeper-portrait.ts": "665354d9e5839837ab93c4a7c190c43a01cef39a4602c7231be584253131021f"
+  }
+}

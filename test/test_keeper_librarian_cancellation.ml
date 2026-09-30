@@ -262,7 +262,9 @@ let test_cancel ?(observer_checks = true) ~base_path ~registry stage () =
      let current = match Current.read_for_keepers_dir ~keepers_dir ~keeper_id |> require with
        | Some current -> current
        | None -> Alcotest.fail "successor lost current Memory" in
-     Alcotest.(check int) "each committed pass advances Memory once" (seeded.revision + if commits_memory then 2 else 1)
+     (* After a committed first pass, the successor finds its merged claims
+        already stored and its absorbed sources gone, so it keeps the snapshot. *)
+     Alcotest.(check int) "Memory advances once across both passes" (seeded.revision + 1)
        current.revision;
      Alcotest.(check (list string)) "the successful pass retains both merged claims"
        [ "Friday is the beta service's deployment day."

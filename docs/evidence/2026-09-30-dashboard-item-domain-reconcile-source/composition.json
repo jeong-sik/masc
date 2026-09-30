@@ -1,0 +1,112 @@
+{
+  "scope": "source-only dependent Item import reconciliation; local checkout is a partial source composition, not the full publication tree",
+  "pr": 40252,
+  "actual_publication_parent": {
+    "head": "49aae5c7c32bf338792b95d55a98a1db1d86ef69",
+    "tree": "560ff5754b66879bee211bab8341dec0377084dd",
+    "source": "provided and verified by root; no network fetch by child"
+  },
+  "local_domain_parent": "fd5e471b6f37743b89482286323ddec0b9f88da2",
+  "local_c46_snapshot_baseline": "f4be1de4b9d73166ee67b0048677ccee85e3a591",
+  "own_production_delta": "Only import isCandleAmount from ../../lib/candle-observation instead of ./candle-observation; all remaining Item schema bytes unchanged",
+  "c46_schema_input_git_blob": "f4245e80bc9ad5034cd60d2eb787a9981c6a0327",
+  "candidate_schema": {
+    "git_blob": "1e3eb0b94aaacceff9bfb68319c6b6f7b916fa31",
+    "sha256": "c2439198a4c82159476a44ae0fe0fc408bbb0f4332def1c1b6fcfdf8a6fc853a",
+    "bytes": 2381
+  },
+  "preserved_c46_test_and_historical_receipts": {
+    "dashboard/src/api/keeper-items.test.ts": {
+      "git_blob": "98e0008cce8f9cae2d3104073f0dba13bd1bba6b",
+      "sha256": "ea2d10392aac053b62bc23ff7a13afce0bd696d58e9c1804cf0724fe579fda4a",
+      "bytes": 3980
+    },
+    "docs/evidence/2026-09-30-dashboard-item-amount-source/README.md": {
+      "git_blob": "3ab9cbce62b5ae844168815299bf8a7a253e048f",
+      "sha256": "fb0f9ccfcce73c97dacb2c75bd03419c2dfce3b89850251545c387c8b2c416bf",
+      "bytes": 4199
+    },
+    "docs/evidence/2026-09-30-dashboard-item-amount-source/composition.json": {
+      "git_blob": "708ffcfdfc4c38f6a5595422e2b9c2d98cd20652",
+      "sha256": "8ea60199d6175faac89bb173bb71100e00575a64660f42692648d740f38b560e",
+      "bytes": 4679
+    },
+    "docs/evidence/2026-09-30-dashboard-item-amount-source/source-checks.json": {
+      "git_blob": "85d54ec42f5ed27a9f57136239bee1e3e8fa1962",
+      "sha256": "3e1c42c4c71d75d88deb269a34f4a88087eae74706986f04027364de9c47a2b8",
+      "bytes": 1176
+    },
+    "docs/evidence/2026-09-30-dashboard-item-amount-source/source-sha256.json": {
+      "git_blob": "2614b908732bf4c19e58ef250de937301a5c981d",
+      "sha256": "98e29cf741a4142381781acd2d15a650a9da56e0cde3029d5b15a1f8ad33def2",
+      "bytes": 1280
+    }
+  },
+  "historical_receipt_source": "README and public parser tests match supplied exact c46 API JSON; three original historical receipts match immutable local Item e295 and are preserved as historical receipts, not refreshed validation claims",
+  "preserved_domain_parent_code_and_tests": {
+    "dashboard/src/api/schemas/candle-observation.test.ts": {
+      "git_blob": "469f89068295b7a63d648087876e64163b1be262",
+      "sha256": "13b4f2b6899f85aa7be3704c5e9cdad93f8a05ae09c60f48b83e9a7c07faa56b",
+      "bytes": 6879
+    },
+    "dashboard/src/api/schemas/candle-observation.ts": {
+      "git_blob": "5d8bc2f19173e6885099dc06d26c587175d4dfd4",
+      "sha256": "27d37d9c57c7dc6fb6822123687a72106bbe0b8ac090975301538617aac7cdf8",
+      "bytes": 599
+    },
+    "dashboard/src/api/schemas/gate-keepers.test.ts": {
+      "git_blob": "aeef156e02702a5019cd570a267c5a15c4516a8d",
+      "sha256": "d3af842764fc8b7750dc701bcdbdcda69c78c7c4f2b7c4fbb0253fe5a230fd00",
+      "bytes": 9292
+    },
+    "dashboard/src/api/schemas/keeper-portrait.test.ts": {
+      "git_blob": "84da33973ffb3841ad532650c859415a258f95cd",
+      "sha256": "884536548d573e4641c7a25256d5ac1a738b43be2e12f9e3da846c38af71bdb2",
+      "bytes": 4786
+    },
+    "dashboard/src/api/schemas/keeper-portrait.ts": {
+      "git_blob": "e3d3fc8b29dcb140d6462d81496114013e724d0b",
+      "sha256": "1021b0c09893abeed7397fe92c38cbb9f07d9f8b42094dc8fe632777f1117f5d",
+      "bytes": 429
+    },
+    "dashboard/src/lib/candle-observation.ts": {
+      "git_blob": "1f72c67000292d5e03f90575710119c7faaf5a46",
+      "sha256": "cc2ca5cce82bae506a7b9bcfeffbcab278c2ca58bcae2b45441ebbc4fdf8d40d",
+      "bytes": 4298
+    },
+    "dashboard/src/lib/keeper-portrait.ts": {
+      "git_blob": "d220c4ae71841f8ef08d38bf8787b225fe4c3b3d",
+      "sha256": "665354d9e5839837ab93c4a7c190c43a01cef39a4602c7231be584253131021f",
+      "bytes": 2793
+    }
+  },
+  "parent_source_code_commit": "292a406d98e127818af5f5e24bb1acd329692032",
+  "static_checks": {
+    "one_import_only": true,
+    "parent_seven_files_byte_identical": true,
+    "public_parser_test_byte_identical": true,
+    "historical_four_docs_unchanged": true,
+    "node_version": "v26.3.0",
+    "syntax_command": "node --experimental-strip-types --check dashboard/src/api/schemas/keeper-items.ts",
+    "syntax_exit": 0,
+    "syntax_stdout": "",
+    "syntax_stderr": "",
+    "syntax_scope": "parse only; no module resolution/typecheck/test/build/browser execution",
+    "git_diff_check_exit": 0
+  },
+  "not_performed": [
+    "network",
+    "typecheck",
+    "build",
+    "Vitest",
+    "browser",
+    "native tests"
+  ],
+  "required_current_head_ci_selectors": [
+    "src/api/keeper-items.test.ts",
+    "src/api/schemas/candle-observation.test.ts",
+    "src/components/keeper-items-panel.test.ts",
+    "src/dashboard-bundle-preload.test.ts"
+  ],
+  "publication_contract": "Root overlays own Item schema, unchanged c46 parser test and historical docs, assigned fragment and new receipt onto full actual new domain parent tree; no Candle API/lib production file is a child publication delta."
+}

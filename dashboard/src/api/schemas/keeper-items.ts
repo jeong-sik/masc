@@ -1,5 +1,5 @@
 import { Either, Schema } from 'effect'
-import { isCandleAmount } from './candle-observation'
+import { isCandleAmount } from '../../lib/candle-observation'
 import { EQUIPMENT_IDS } from './keeper-portrait'
 
 const slots = ['face', 'neck', 'head', 'hand', 'base'] as const

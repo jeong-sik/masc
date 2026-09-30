@@ -536,17 +536,6 @@ let render_overview (state : state) =
      [approvals_count_label] also decides the "?" tail from the same per-list
      readings the Approvals title uses. *)
   let approval_count = Masc_tui_types.approvals_count_label state in
-  let candle_lines =
-    Masc_tui_candle.summary_lines state.candle_observation
-    |> List.concat_map (fun line ->
-         Message_layout.wrap_words ~max_cells:(max 1 (cols - 4))
-           (Terminal_text.single_line line))
-    |> List.map (fun line -> "  " ^ line)
-  in
-  let header_lines =
-    [ health; "" ] @ candle_lines
-    @ (match candle_lines with [] -> [] | _ :: _ -> [ "" ])
-  in
   let attention = dashboard_attention state in
   let attention_lines =
     (* An unread or failed overview is not an empty one: its count would
@@ -629,13 +618,29 @@ let render_overview (state : state) =
           let notice = dashboard_opening_notice_lines state in
           let guide = dashboard_first_use_lines state in
           let guide =
-            if List.length notice + List.length header_lines
-               + List.length guide + List.length summary
+            if List.length notice + 2 + List.length guide + List.length summary
                <= budget
             then guide
             else []
           in
-          notice @ header_lines @ guide @ summary)
+          (* Currency uses only rows left by the current Dashboard. Its
+             full block is atomic; a crowded screen retains the baseline
+             and names the global, scrollable details route in Health. *)
+          let candle =
+            Masc_tui_candle.summary_lines state.candle_observation
+            |> List.concat_map (fun line ->
+                 Message_layout.wrap_words ~max_cells:(max 1 (cols - 4))
+                   (Terminal_text.single_line line))
+            |> List.map (fun line -> " " ^ line)
+          in
+          let baseline_rows = List.length notice + 2 + List.length guide + List.length summary in
+          let candle = if baseline_rows + List.length candle <= budget then candle else [] in
+          let health =
+            match candle, Masc_tui_candle.compact_status state.candle_observation with
+            | [], Some status -> " " ^ status ^ " · " ^ health
+            | _ -> health
+          in
+          notice @ [ health ] @ candle @ [ "" ] @ guide @ summary)
       |> List.iter c.push)
 
 (* One task's event history, appended after the detail body so it rides the
@@ -2699,56 +2704,43 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
                      created_at
                      Ansi.reset
                  in
-                 (* [heading] must itself fit before content can join it on
-                    the same row: a narrow column can be too narrow for the
-                    author chip and date alone, and wrapping content to
-                    whatever a negative or near-zero remainder leaves is not
-                    wrapping -- it is clipping with extra steps (p-7784d032
-                    follow-up: a wide-column approximation of the heading's
-                    width left almost no room for content once the column
-                    narrowed). When the heading claims the column on its own,
-                    content gets its own row wrapped to the width left after
-                    its thread rail instead of the sliver the heading did not
-                    use. *)
+                 (* Wrap for the rows that will draw the body. Only a whole
+                    single-line reply that fits beside the metadata joins it;
+                    paragraphs below the heading use the entire comment pane. *)
                  let inner_width = framed_inner_width comment_wrap_cols in
                  let heading_width = Message_layout.display_width heading in
                  let joined_budget = inner_width - heading_width - 2 in
-                 if joined_budget >= 8 then
-                   match
-                     Message_layout.wrap_body ~markdown:board_document_markdown
-                       ~max_cells:joined_budget
-                       ~sanitize:Terminal_text.single_line c.bc_content
-                   with
-                   | [] -> [ heading ^ "  " ^ Ansi.dim ^ "\xc2\xb7" ^ Ansi.reset ]
-                   | [ line ] -> [ heading ^ "  " ^ line ]
-                   | lines ->
-                       heading
-                       :: List.map
-                            (fun line -> "  " ^ rail ^ "  " ^ line) lines
-                 else
-                   let identity =
-                     Printf.sprintf "  %s%s@%s%s%s" rail
-                       (Masc_tui_theme.tone Masc_tui_theme.Accent)
-                       author Ansi.reset author_role
-                   in
-                   let timestamp =
-                     Printf.sprintf "  %s%s%s%s" rail Ansi.dim created_at
-                       Ansi.reset
-                   in
-                   let content_prefix = "  " ^ rail ^ "  " in
-                   let content_width =
-                     max 1
-                       (inner_width
-                       - Message_layout.display_width content_prefix)
-                   in
-                   let lines =
-                     Message_layout.wrap_body
-                       ~markdown:board_document_markdown
-                       ~max_cells:content_width
-                       ~sanitize:Terminal_text.single_line c.bc_content
-                   in
-                   identity :: timestamp
-                   :: List.map (fun line -> content_prefix ^ line) lines))
+                 let content_prefix = "  " ^ rail ^ "  " in
+                 let content_width =
+                   max 1
+                     (inner_width - Message_layout.display_width content_prefix)
+                 in
+                 let lines =
+                   Message_layout.wrap_body
+                     ~markdown:board_document_markdown
+                     ~max_cells:content_width
+                     ~sanitize:Terminal_text.single_line c.bc_content
+                 in
+                 match lines with
+                 | [ line ] when Message_layout.display_width line <= joined_budget ->
+                     [ heading ^ "  " ^ line ]
+                 | lines ->
+                     let metadata =
+                       if heading_width <= inner_width then [ heading ]
+                       else
+                         let identity =
+                           Printf.sprintf "  %s%s@%s%s%s" rail
+                             (Masc_tui_theme.tone Masc_tui_theme.Accent)
+                             author Ansi.reset author_role
+                         in
+                         let timestamp =
+                           Printf.sprintf "  %s%s%s%s" rail Ansi.dim created_at
+                             Ansi.reset
+                         in
+                         [ identity; timestamp ]
+                     in
+                     metadata
+                     @ List.map (fun line -> content_prefix ^ line) lines))
       in
       (body_lines, detail_lines))
   in
@@ -3492,6 +3484,11 @@ let planning_detail_pane (state : state)
     Ansi.bold
     (fit_width (Terminal_text.single_line goal.pg_title) (cols - 6))
     Ansi.reset);
+  box_line buf cols
+    ("  Owner:   "
+     ^ (match goal.pg_owner with
+        | Goal_store.Owner name -> Terminal_text.single_line name
+        | Goal_store.Unknown_owner -> "unknown"));
   let prio_color =
     match goal.pg_priority with
     | 1 -> (Theme.bad ()) ^ Ansi.bold
@@ -7234,6 +7231,43 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
     let selected_item =
       List.nth_opt Keeper_portrait_item.all state.item_cursor
     in
+    let account =
+      match state.item_account with
+      | Some (name, account) when String.equal name k.k_name -> Some account
+      | Some _ | None -> None
+    in
+    let milli value = Printf.sprintf "%d.%03d" (value / 1000) (value mod 1000) in
+    let account_line =
+      match account, state.item_account_error with
+      | Some (Item_account.Ready account), _ ->
+          "  Balance " ^ milli account.balance_milli ^ " Candle · preview only"
+      | Some Item_account.Off, _ -> "  Candle off · preview only"
+      | Some (Item_account.Disabled reason), _ ->
+          "  Candle disabled: " ^ Terminal_text.single_line reason
+      | None, Some detail ->
+          "  Account unavailable: " ^ Terminal_text.single_line detail
+      | None, None -> "  Loading Item account…"
+    in
+    let item_account_facts item =
+      match account with
+      | Some (Item_account.Ready account) ->
+          let owned =
+            List.exists (fun owned ->
+              String.equal (Keeper_portrait_item.id owned)
+                (Keeper_portrait_item.id item)) account.owned_items in
+          let price =
+            match List.find_opt (fun (entry : Item_account.entry) ->
+              String.equal (Keeper_portrait_item.id entry.item)
+                (Keeper_portrait_item.id item)) account.catalog with
+            | Some entry ->
+              (match entry.price with
+               | Item_account.Unpriced -> "unpriced"
+               | Item_account.Priced amount -> milli amount)
+            | None -> "catalog unavailable"
+          in
+          Some (price ^ (if owned then " owned" else ""))
+      | Some (Item_account.Off | Item_account.Disabled _) | None -> None
+    in
     let portrait =
       match state.detail_tab, portrait_reading with
       | Detail_info, Tui_decode.Ready equipment ->
@@ -7249,104 +7283,77 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
         | Detail_identity | Detail_channels | Detail_automation | Detail_runs), _ -> None
     in
 
+    let item_row cursor index item =
+      let worn =
+        match portrait_reading with
+        | Tui_decode.Unavailable _ -> false
+        | Tui_decode.Ready equipment ->
+            (match Keeper_portrait_item.in_slot equipment
+                     (Keeper_portrait_item.slot item) with
+             | None -> false
+             | Some equipped ->
+                 String.equal (Keeper_portrait_item.id equipped)
+                   (Keeper_portrait_item.id item))
+      in
+      let account_facts =
+        if inner < 90 then ""
+        else match item_account_facts item with
+          | Some facts -> "  " ^ facts
+          | None -> ""
+      in
+      Printf.sprintf "  %s %2d %-5s %s%s%s"
+        (if index = cursor then ">" else " ") (index + 1)
+        (Keeper_portrait_item.slot_id (Keeper_portrait_item.slot item))
+        (Keeper_portrait_item.id item) account_facts
+        (if worn then "  equipped" else "")
+    in
+    let portrait =
+      match state.detail_tab, portrait with
+      | Detail_items, Some band ->
+          let labels = List.mapi (item_row state.item_cursor) Keeper_portrait_item.all in
+          if List.exists (fun line -> Message_layout.display_width line > inner)
+               (Masc_tui_keeper_portrait.beside band labels)
+          then None else Some band
+      | _, portrait -> portrait
+    in
     let item_lines () =
       let items = Keeper_portrait_item.all in
       let count = List.length items in
       let cursor = max 0 (min (count - 1) state.item_cursor) in
-      let first = max 0 (min (cursor - 4) (count - 10)) in
-      let account =
-        match state.item_account with
-        | Some (name, account) when String.equal name k.k_name -> Some account
-        | Some _ | None -> None
-      in
-      let milli value = Printf.sprintf "%d.%03d" (value / 1000) (value mod 1000) in
-      let account_line =
-        match account, state.item_account_error with
-        | Some (Item_account.Ready account), _ ->
-            "  Balance " ^ milli account.balance_milli ^ " Candle · preview only"
-        | Some Item_account.Off, _ -> "  Candle off · preview only"
-        | Some (Item_account.Disabled reason), _ ->
-            "  Candle disabled: " ^ Terminal_text.single_line reason
-        | None, Some detail ->
-            "  Account unavailable: " ^ Terminal_text.single_line detail
-        | None, None -> "  Loading Item account…"
-      in
-      let item_account_facts item =
-        match account with
-        | Some (Item_account.Ready account) ->
-            let owned =
-              List.exists (fun owned ->
-                String.equal (Keeper_portrait_item.id owned)
-                  (Keeper_portrait_item.id item)) account.owned_items in
-            let price =
-              match List.find_opt (fun (entry : Item_account.entry) ->
-                String.equal (Keeper_portrait_item.id entry.item)
-                  (Keeper_portrait_item.id item)) account.catalog with
-              | Some entry ->
-                (match entry.price with
-                 | Item_account.Unpriced -> "unpriced"
-                 | Item_account.Priced amount -> milli amount)
-              | None -> "catalog unavailable"
-            in
-            Some (price ^ (if owned then " owned" else ""))
-        | Some (Item_account.Off | Item_account.Disabled _) | None -> None
-      in
+      let headline =
+        [ Printf.sprintf "  Items %d/%d · j/k to preview" (cursor + 1) count
+        ; account_line
+        ] in
+      let observation =
+        match portrait_reading with
+        | Tui_decode.Ready _ -> []
+        | Tui_decode.Unavailable reason ->
+            [ "  Portrait unavailable: " ^ Terminal_text.single_line reason ] in
+      let selected_facts =
+        match List.nth_opt items cursor with
+        | None -> []
+        | Some item ->
+            (match item_account_facts item with
+             | Some facts -> [ "  Selected: " ^ facts ]
+             | None -> []) in
+      let footer = [ "  Preview changes this picture only." ] in
+      let reserved = List.length headline + List.length selected_facts
+                     + List.length observation + List.length footer in
+      let visible = min count (max 1 (base_height - reserved)) in
+      let first = max 0 (min (cursor - (visible / 2)) (count - visible)) in
       let rows =
         items
         |> List.mapi (fun index item -> index, item)
         |> List.filter_map (fun (index, item) ->
-             if index < first || index >= first + 10 then None
-             else
-               let worn =
-                 match portrait_reading with
-                 | Tui_decode.Unavailable _ -> false
-                 | Tui_decode.Ready equipment ->
-                     (match Keeper_portrait_item.in_slot equipment
-                              (Keeper_portrait_item.slot item) with
-                      | None -> false
-                      | Some equipped ->
-                          String.equal (Keeper_portrait_item.id equipped)
-                            (Keeper_portrait_item.id item))
-               in
-               let account_facts =
-                 if inner < 90 then ""
-                 else match item_account_facts item with
-                   | Some facts -> "  " ^ facts
-                   | None -> ""
-               in
-               Some (Printf.sprintf "  %s %-2d %-5s %-20s%s%s"
-                 (if index = cursor then ">" else " ") (index + 1)
-                 (Keeper_portrait_item.slot_id (Keeper_portrait_item.slot item))
-                 (Keeper_portrait_item.id item)
-                 account_facts
-                 (if worn then " equipped" else "")))
-      in
-      let headline =
-        [ Printf.sprintf "  Items %d/%d · j/k to preview" (cursor + 1) count
-        ; account_line
-        ]
+             if index < first || index >= first + visible then None
+             else Some (item_row cursor index item))
       in
       let listing =
         match portrait with
         | Some band -> Masc_tui_keeper_portrait.beside band (headline @ rows)
         | None -> headline @ rows
       in
-      let observation =
-        match portrait_reading with
-        | Tui_decode.Ready _ -> []
-        | Tui_decode.Unavailable reason ->
-            [ "  Portrait unavailable: " ^ Terminal_text.single_line reason ]
-      in
-      let selected_facts =
-        match List.nth_opt items cursor with
-        | None -> []
-        | Some item ->
-          (match item_account_facts item with
-           | Some facts -> [ "  Selected: " ^ facts ]
-           | None -> [])
-      in
-      listing @ selected_facts @ observation
-      @ [ "  Preview changes this picture only." ]
+      listing @ selected_facts @ observation @ footer
     in
 
     (* Each tab projects only when selected. Retained data for the other
@@ -7389,6 +7396,18 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
        | Tui_decode.Ready _ -> ()
        | Tui_decode.Unavailable reason -> add_row "Portrait:" ("unavailable: " ^ Terminal_text.single_line reason));
       add_empty ();
+      (* The short Overview names only the reading's state. Info retains
+         every diagnostic and exact supply amount, wrapped and scrollable. *)
+      let candle_lines = Masc_tui_candle.summary_lines state.candle_observation in
+      if candle_lines <> [] then (
+        add_section "Candle details";
+        List.iter
+          (fun line ->
+            Message_layout.wrap_words ~max_cells:(max 1 (inner - 2))
+              (Terminal_text.single_line line)
+            |> List.iter (fun line -> add_line ("  " ^ line)))
+          candle_lines;
+        add_empty ());
 
       (* The live roster owns this reading, including its absence after a
          successful turn. Neither historical last_error nor the last outcome
@@ -12864,7 +12883,8 @@ let render_runtime (state : state) =
 ;;
 
 let tools_scrolled state =
-  tools_scrolled_for_lines state (Render_tools.tools_display_lines state)
+  let _, cols = get_terminal_size () in
+  tools_scrolled_for_lines state (Render_tools.tools_display_lines ~cols state)
 ;;
 
 let render_tools (state : state) =
@@ -12891,7 +12911,7 @@ let render_tools (state : state) =
        box_line_styled buf cols ~style:(Theme.bad ())
          ("  " ^ Keeper_chat.terminal_safe_text detail);
        box_divider buf cols);
-  let display_lines = Render_tools.tools_display_lines state in
+  let display_lines = Render_tools.tools_display_lines ~cols state in
   let layout = tools_scrolled_for_lines state display_lines in
   let drawable = layout.sc_count in
   let content_height =

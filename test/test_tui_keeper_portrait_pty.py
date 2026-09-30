@@ -262,7 +262,9 @@ def item_tab_previews_accessories(binary: str) -> None:
             "status": "ready", "keeper": "alpha", "balance_milli": "12500",
             "owned_items": ["glasses"],
             "catalog": [
-                {"id": item, "slot": slot, "price_status": "priced", "price_milli": "1000"}
+                ({"id": item, "slot": slot, "price_status": "unpriced"}
+                 if item == "dish_oak" else
+                 {"id": item, "slot": slot, "price_status": "priced", "price_milli": "1000"})
                 for item, slot in ITEM_CATALOG
             ],
         },
@@ -286,6 +288,35 @@ def item_tab_previews_accessories(binary: str) -> None:
         assert portrait_rows(second), "the selected accessory lost its picture"
         assert row_of(second, b"Preview changes this picture only") > 0
         capture_item_screen(output, "shades-preview")
+        # Read the current completed viewport after each navigation or resize.
+        h.resize_and_wait(process, fd, output, rows=18, columns=COLUMNS,
+                          needle=b"Items 2/18", controls=(h.FULL_REDRAW,),
+                          final_cursor=b"\x1b[?25l")
+        h.send_and_wait(process, fd, output, b"\x1b[F", b"Items 18/18")
+        h.drain_until_quiet(process, fd, output)
+        assert row_of(last_frame_rows(output), b"> 18 base  dish_oak") > 0
+        assert row_of(last_frame_rows(output), b"Selected: unpriced") > 0
+        h.send_and_wait(process, fd, output, b"\x1b[H", b"Items 1/18")
+        h.drain_until_quiet(process, fd, output)
+        assert row_of(last_frame_rows(output), b">  1 face  glasses") > 0
+        h.send_and_wait(process, fd, output, b"\x1b[6~", b"Items ")
+        h.drain_until_quiet(process, fd, output)
+        paged = last_frame_rows(output)
+        selected = [text for text in paged.values()
+                    if re.search(rb">\s+\d+\s+(face|neck|head|hand|base)\s+", text)]
+        assert len(selected) == 1, f"PageDown lost the selected item: {paged!r}"
+        assert b">  1 face  glasses" not in selected[0], "PageDown did not move the item selection"
+        h.send_and_wait(process, fd, output, b"\x1b[5~", b"Items 1/18")
+        h.drain_until_quiet(process, fd, output)
+        assert row_of(last_frame_rows(output), b">  1 face  glasses") > 0
+        h.send_and_wait(process, fd, output, b"\x1b[F", b"Items 18/18")
+        h.resize_and_wait(process, fd, output, rows=24, columns=50,
+                          needle=b"Items 18/18", controls=(h.FULL_REDRAW,),
+                          final_cursor=b"\x1b[?25l")
+        narrow = last_frame_rows(output)
+        assert row_of(narrow, b"> 18 base  dish_oak") > 0, "resize lost the last accessory name"
+        assert row_of(narrow, b"Selected: unpriced") > 0, "narrow Items hid the authoritative price"
+        assert not portrait_rows(narrow), "narrow Items pane retained a portrait beside clipped names"
         os.write(fd, b"q")
 
     h.run_terminal_scenario(

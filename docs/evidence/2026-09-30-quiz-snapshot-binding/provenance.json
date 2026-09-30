@@ -1,0 +1,32 @@
+{
+  "scope": "Python package workers over real stdio; host-shaped synthetic sources; no Docker, OCaml build, native host, Keeper or live state mutation",
+  "source_base": "2eb083ee7f209ccf0f20b51749bdace09ded3af1",
+  "checked_at": "2026-09-30T01:31:40.876169+00:00",
+  "python": "Python 3.14.4",
+  "positive": {
+    "command": [
+      "python3",
+      "-B",
+      "addons/tests/test_quiz_lane.py"
+    ],
+    "exit_code": 0,
+    "tests": 26
+  },
+  "negative_control": {
+    "original_grader_commit": "2eb083ee7f209ccf0f20b51749bdace09ded3af1",
+    "tests": [
+      "Grader.test_rotating_bytes_with_the_same_incarnation_refuses_then_recovers",
+      "Grader.test_equal_fact_ids_from_another_source_do_not_answer_this_question",
+      "Grader.test_question_without_immutable_snapshot_digest_is_not_observed"
+    ],
+    "exit_code": 1,
+    "failures": 3
+  },
+  "source_sha256": {
+    "addons/quiz-grader/server.py": "fed6ac73ae511f6f11f4e79ae4d90abd260a563a294da57ed1a11c70b5083abf",
+    "addons/quiz-grader/lane.toml": "eea5dd6d1374877548a54568c0238242312efffd6767ccec69f8ddd535f8a3c1",
+    "addons/quiz-questions/server.py": "700017a72c7418c06d01c7b7ac1623027738c7dc5d7a31e2afc208e788525d68",
+    "addons/protocol.py": "9a9c662e4a0b30c633dd4bc754714480391dac7e3499902dcfb39cf702c2f2c2",
+    "addons/tests/test_quiz_lane.py": "f38320599be15da1e45ebbc97d1761869fc01a439cf584432e33126c57fe6bbf"
+  }
+}

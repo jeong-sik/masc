@@ -97,7 +97,9 @@ repeat `/play revoke <name>`: a second request can release a controller even
 after the invite credential was deleted.
 
 The invited person opens the link in a browser to watch and play the shared
-DOS machine. The TUI can also watch through `go DOS` or the `go MSX` menu's
+DOS machine. The link can also go to an AI agent (Claude Code, Codex, Hermes,
+OpenClaw, pi, ...): the page points it at `/play/agent.md`, which says how to
+join over MCP (`/mcp/play`) or plain HTTP with the token after `#`. The TUI can also watch through `go DOS` or the `go MSX` menu's
 `watch DOS machine` entry when a DOS machine is loaded.
 
 ## Options
@@ -379,10 +381,6 @@ active Goals, Task flow, quota coverage, and up to two operator attention
 items. It leaves individual Keeper rows, Task rows, provider meters, and logs
 to their own destinations. The Recent activity pane stays hidden on this
 screen even in a wide terminal.
-
-Goals are shared across the workspace. Open Planning → Goals for the metric,
-proof, and activity. Creation, edits, and phase changes name the caller in
-their activity events.
 
 For a Goal, `actual` comes only from an explicitly recorded measurement bound
 to that Goal's current criterion revision. The screen says `not recorded`,
@@ -1772,9 +1770,17 @@ Keeper's effective Tool surface, async requests, Skill activations, cross-Keeper
 Skill usage, and the registered Tool catalog. This keeps the Skill views from
 being buried below a long Tool list.
 
-The Skill Usage pane puts each Keeper on its own row under the skill, in
-columns: `TRIGGERED`, `DELIVERED`, `ACTIONS`, and when it last ran, in this
-terminal's zone like every other clock on the screen. If retained usage
+The Skill Usage pane opens with a summary box: observed catalog entries,
+distinct Keepers, and separate `TRIGGERED`, `DELIVERED`, and `ACTIONS` totals.
+These are observations from current Keeper sessions at exact Skill revisions,
+not lifetime totals or success rates. Missing ledgers make the totals partial
+and are called out beside the summary.
+
+Skill cards follow in descending invocation order. Each card shows its own
+totals and Keeper rows, with the last use in this terminal's timezone.
+Narrow terminals stack a Keeper's counts and last use below its name;
+wider terminals align them in columns. Source configuration and rejected or
+shadowed entries follow the usage cards. If retained usage
 coverage has no time, the row says `time unavailable`; it does not turn
 bounded evidence into a `never used` claim.
 

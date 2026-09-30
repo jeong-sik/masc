@@ -19,9 +19,13 @@ let test_play_invite_responses_preserve_recovery_facts () =
     (Result.is_error (Tui_decode.decode_play_invite_issued
       (json {|{"name":"old","expires_at":"tomorrow"}|})));
   Alcotest.(check bool) "authoritative absence" true
-    (Tui_decode.play_invite_absent_body {|{"error":"no_such_invite"}|});
+    (Tui_decode.play_invite_absent_body
+       {|{"error":"no invite is named old","code":"no_such_invite"}|});
   Alcotest.(check bool) "another refusal is not absence" false
-    (Tui_decode.play_invite_absent_body {|{"error":"not_an_invite"}|})
+    (Tui_decode.play_invite_absent_body
+       {|{"error":"old is a worker credential, not an invite","code":"not_an_invite"}|});
+  Alcotest.(check bool) "a sentence is never read as the code" false
+    (Tui_decode.play_invite_absent_body {|{"error":"no_such_invite"}|})
 
 (* The saved-app reply's scope count picks the TUI notice: 0 says the
    service's own list will be asked for. A reply without [scopes] used to
@@ -1366,6 +1370,15 @@ let test_planning_goal_keeps_the_last_review_note () =
     (Some "blocked on the platform gap")
     (decoded_proof ~last_review_note:"blocked on the platform gap" ())
       .Tui_decode.pg_last_review_note
+;;
+
+let test_planning_goal_keeps_owner () =
+  let owned = decoded_proof ~extra:[ "owner", `String "keeper-z" ] () in
+  let unowned = decoded_proof () in
+  Alcotest.(check bool) "recorded owner is preserved" true
+    (owned.Tui_decode.pg_owner = Goal_store.Owner "keeper-z");
+  Alcotest.(check bool) "missing owner is explicitly unknown" true
+    (unowned.Tui_decode.pg_owner = Goal_store.Unknown_owner)
 ;;
 
 let test_planning_goal_keeps_the_server_timestamps () =
@@ -12110,16 +12123,20 @@ let test_play_revoke_failure_detail () =
   Alcotest.(check string) "500 preserves actual controller failure"
     "controller busy (HTTP 500: controller release failed)"
     (Tui_decode.play_revoke_http_error ~status_code:500
-      ~body:{|{"error":"release_failed","name":"guest1","released_controller":false,"release_error":"controller busy"}|});
-  Alcotest.(check string) "other failures retain their own reason" "HTTP 503: keepers_unreadable"
-    (Tui_decode.play_revoke_http_error ~status_code:503 ~body:{|{"error":"keepers_unreadable"}|});
+      ~body:{|{"error":"guest1 holds the DOS controller and it could not be released: controller busy","code":"release_failed","name":"guest1","released_controller":false,"release_error":"controller busy"}|});
+  Alcotest.(check string) "other failures show the server's sentence, not its code"
+    "HTTP 503: no keepers dir"
+    (Tui_decode.play_revoke_http_error ~status_code:503
+       ~body:{|{"error":"no keepers dir","code":"keepers_unreadable"}|});
   List.iter (fun body ->
     Alcotest.(check string) "malformed release details use ordinary HTTP error projection"
       (Tui_decode.http_status_error ~status_code:500 ~body)
       (Tui_decode.play_revoke_http_error ~status_code:500 ~body))
-    [{|{"error":"release_failed","released_controller":false,"release_error":42}|};
-     {|{"error":"release_failed","released_controller":true,"release_error":"busy"}|};
-     {|{"error":"release_failed","released_controller":false}|}; "not JSON"; "[]"; "null"; "42"]
+    [{|{"error":"x","code":"release_failed","released_controller":false,"release_error":42}|};
+     {|{"error":"x","code":"release_failed","released_controller":true,"release_error":"busy"}|};
+     {|{"error":"x","code":"release_failed","released_controller":false}|};
+     {|{"error":"release_failed","released_controller":false,"release_error":"busy"}|};
+     "not JSON"; "[]"; "null"; "42"]
 
 let () =
   Alcotest.run "tui_decode" [
@@ -12555,6 +12572,8 @@ let () =
           test_planning_goal_without_the_verifier_field_is_refused;
         Alcotest.test_case "keeps the last review note" `Quick
           test_planning_goal_keeps_the_last_review_note;
+        Alcotest.test_case "planning goal owner" `Quick
+          test_planning_goal_keeps_owner;
         Alcotest.test_case "keeps the server timestamps" `Quick
           test_planning_goal_keeps_the_server_timestamps;
         Alcotest.test_case "tolerates missing timestamps" `Quick

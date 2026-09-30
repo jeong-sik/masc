@@ -84,24 +84,6 @@ let test_status_misses_do_not_persist () = fixture (fun root ledger ->
   check bool "torn tail remains a corruption, not a successful prefix" true
     (match D.find ledger ~caller:payload.caller ~operation_id:operation with
      | Error (D.Corrupt _) -> true | _ -> false))
-let test_unknown_mutations_do_not_persist () = fixture (fun root ledger ->
-  let check_missing ledger operation_id =
-    check bool "unknown commit retains typed refusal" true
-      (D.commit ledger ~caller:payload.caller ~operation_id ~seq:7=Error D.Unknown_operation);
-    check bool "unknown recipient result retains typed refusal" true
-      (D.recipient_result ledger ~caller:payload.caller ~operation_id
-        ~recipient:"keeper-a" D.Accepted=Error D.Unknown_operation) in
-  let missing_root=Filename.concat root "not-created" in
-  check_missing (D.create ~root:missing_root) operation;
-  check bool "mutation misses do not create directory" false (Sys.file_exists missing_root);
-  let _admitted=require (D.admit ledger payload) in
-  let before=Sys.readdir root |> Array.to_list |> List.sort String.compare in
-  List.iter (fun id -> check_missing ledger (require (D.Request_id.of_string id)))
-    ["never-committed-1";"never-committed-2";"never-committed-3"];
-  check (list string) "mutation misses leave no empty journals" before
-    (Sys.readdir root |> Array.to_list |> List.sort String.compare);
-  let committed=require (D.commit ledger ~caller:payload.caller ~operation_id:operation ~seq:7) in
-  check bool "existing admitted operation still mutates" true (committed.record.workspace=D.Committed 7))
 let test_primary_and_settlement_are_preserved () = fixture (fun root ledger ->
   let _admitted=require (D.admit ledger payload) in
   let io : Fs_compat.private_jsonl_transaction_io_for_testing = {
@@ -116,6 +98,19 @@ let test_primary_and_settlement_are_preserved () = fixture (fun root ledger ->
      | Error (D.Settlement_failed {primary=D.Conflict;cleanup}) -> cleanup<>""
      | _ -> false);
   let _committed=require (D.commit ledger ~caller:payload.caller ~operation_id:operation ~seq:7) in
+  check bool "existing-only commit preserves acknowledged close failure" true
+    (match D.commit faulty ~caller:payload.caller ~operation_id:operation ~seq:7 with
+     | Ok {record;settlement_error=Some _} -> record.workspace=D.Committed 7
+     | _ -> false);
+  check bool "existing-only contradictory commit retains semantic and close failures" true
+    (match D.commit faulty ~caller:payload.caller ~operation_id:operation ~seq:8 with
+     | Error (D.Settlement_failed {primary=D.Conflict;cleanup}) -> cleanup<>""
+     | _ -> false);
+  check bool "existing-only recipient mutation retains semantic and close failures" true
+    (match D.recipient_result faulty ~caller:payload.caller ~operation_id:operation
+       ~recipient:"not-admitted" D.Accepted with
+     | Error (D.Settlement_failed {primary=D.Conflict;cleanup}) -> cleanup<>""
+     | _ -> false);
   List.iter (fun recipient -> ignore (require (D.recipient_result ledger
     ~caller:payload.caller ~operation_id:operation ~recipient D.Accepted))) payload.recipients;
   let recovered=require (D.recover faulty) in
@@ -131,14 +126,102 @@ let test_primary_and_settlement_are_preserved () = fixture (fun root ledger ->
     (match D.recover faulty with
      | Error (D.Settlement_failed {primary=D.Corrupt _;cleanup}) -> cleanup<>""
      | _ -> false);
+  check bool "existing-only mutations retain corrupt state and descriptor failure" true
+    (match D.commit faulty ~caller:payload.caller ~operation_id:operation ~seq:7 with
+     | Error (D.Settlement_failed {primary=D.Corrupt _;cleanup}) -> cleanup<>""
+     | _ -> false);
   let channel=open_out_bin (Filename.concat root file) in
   output_string channel "{\n"; close_out channel;
   check bool "malformed JSON and descriptor failure remain typed recovery evidence" true
     (match D.recover faulty with
      | Error (D.Settlement_failed {primary=D.Corrupt _;cleanup}) -> cleanup<>""
      | _ -> false))
+let test_unknown_mutations_do_not_persist () = fixture (fun root ledger ->
+  let check_unknown ledger operation_id =
+    check bool "unknown commit is refused" true
+      (D.commit ledger ~caller:payload.caller ~operation_id ~seq:7=Error D.Unknown_operation);
+    check bool "unknown recipient mutation is refused" true
+      (D.recipient_result ledger ~caller:payload.caller ~operation_id
+         ~recipient:"keeper-a" D.Accepted=Error D.Unknown_operation) in
+  let missing_root=Filename.concat root "not-created" in
+  check_unknown (D.create ~root:missing_root) operation;
+  check bool "unknown mutations create no directory" false (Sys.file_exists missing_root);
+  ignore (require (D.admit ledger payload));
+  let before=Sys.readdir root |> Array.to_list |> List.sort String.compare in
+  List.iter (fun id -> check_unknown ledger (require (D.Request_id.of_string id)))
+    ["unknown-mutation-1";"unknown-mutation-2"];
+  check (list string) "unknown mutations create no journals or locks" before
+    (Sys.readdir root |> Array.to_list |> List.sort String.compare);
+  check bool "admitted operation is readable before disappearance" true
+    (match D.find ledger ~caller:payload.caller ~operation_id:operation with
+     | Ok (Some _) -> true | _ -> false);
+  let journal=List.find (fun name -> Filename.check_suffix name ".jsonl") before in
+  Unix.unlink (Filename.concat root journal);
+  let after=Sys.readdir root |> Array.to_list |> List.sort String.compare in
+  check_unknown ledger operation;
+  check (list string) "mutation after successful lookup never recreates removed journal" after
+    (Sys.readdir root |> Array.to_list |> List.sort String.compare))
+let test_regular_descriptor_boundary () = fixture (fun root ledger ->
+  let admitted=require (D.admit ledger payload) in
+  let name=Sys.readdir root |> Array.to_list
+    |> List.find (fun name -> Filename.check_suffix name ".jsonl") in
+  let filename=Filename.concat root name in
+  let preserved=filename ^ ".preserved" in
+  Unix.rename filename preserved;
+  Unix.symlink preserved filename;
+  check bool "regular symlink preserves exact admitted receipt" true
+    (D.find ledger ~caller:payload.caller ~operation_id:operation=Ok (Some admitted));
+  Unix.unlink filename;
+  Unix.mkdir filename 0o700;
+  check bool "directory is a typed nonregular descriptor" true
+    (match Fs_compat.read_private_jsonl_rows_locked_result filename with
+     | Fs_compat.Private_file_failed (Fs_compat.Private_jsonl_rows.Non_regular_file Unix.S_DIR) -> true
+     | _ -> false);
+  check bool "ledger refuses directory rather than acknowledging absence" true
+    (match D.find ledger ~caller:payload.caller ~operation_id:operation with
+     | Error (D.Io_error _) -> true | _ -> false);
+  Unix.rmdir filename;
+  Unix.mkfifo filename 0o600;
+  (* No writer is ever opened. A fixture child alarm bounds a regressed blocking
+     open without imposing any timeout on the product reader. *)
+  let pid=Unix.fork () in
+  if pid=0 then (
+    Sys.set_signal Sys.sigalrm Sys.Signal_default;
+    ignore (Unix.alarm 5);
+    try
+      check bool "writerless FIFO is a typed nonregular descriptor" true
+        (match Fs_compat.read_private_jsonl_rows_locked_result filename with
+         | Fs_compat.Private_file_failed (Fs_compat.Private_jsonl_rows.Non_regular_file Unix.S_FIFO) -> true
+         | _ -> false);
+      check bool "ledger refuses writerless FIFO without waiting" true
+        (match D.find ledger ~caller:payload.caller ~operation_id:operation with
+         | Error (D.Io_error _) -> true | _ -> false);
+      let io : Fs_compat.private_jsonl_transaction_io_for_testing = {
+        before_sync_parent=(fun _ -> ());
+        close_fd=(fun fd -> Unix.close fd; raise (Sys_error "fixture nonregular close failure"))} in
+      check bool "descriptor kind and close failure both survive" true
+        (match Fs_compat.read_private_jsonl_rows_locked_with_io_for_testing ~io filename with
+         | Fs_compat.Private_file_failed_with_cleanup_failure
+             {error=Fs_compat.Private_jsonl_rows.Non_regular_file Unix.S_FIFO;cleanup_failure} ->
+           Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure<>""
+         | _ -> false);
+      check bool "ledger retains primary refusal and cleanup failure" true
+        (match D.find (D.For_testing.create ~root ~io)
+           ~caller:payload.caller ~operation_id:operation with
+         | Error (D.Settlement_failed {primary=D.Io_error _;cleanup}) -> cleanup<>""
+         | _ -> false);
+      exit 0
+    with exn -> prerr_endline (Printexc.to_string exn); exit 1);
+  let _,status=Unix.waitpid [] pid in
+  check bool "FIFO child finishes successfully without a writer" true (status=Unix.WEXITED 0);
+  check bool "refused FIFO remains unchanged" true ((Unix.lstat filename).Unix.st_kind=Unix.S_FIFO);
+  Unix.unlink filename;
+  Unix.rename preserved filename;
+  check bool "refusals preserve original journal bytes and receipt" true
+    (D.find ledger ~caller:payload.caller ~operation_id:operation=Ok (Some admitted)))
 let () = run "Durable optional Lane Broadcast intentions" ["recovery",[
   test_case "unknown mutations leave no durable files" `Quick test_unknown_mutations_do_not_persist;
+  test_case "regular descriptor and writerless FIFO boundary" `Quick test_regular_descriptor_boundary;
   test_case "status misses leave no durable files" `Quick test_status_misses_do_not_persist;
   test_case "primary and descriptor settlement outcomes" `Quick test_primary_and_settlement_are_preserved;
   test_case "reopened commit and partial recipient obligations" `Quick test_restart_and_partial_fanout;

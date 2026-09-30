@@ -426,6 +426,74 @@ let test_broadcast_retry_recovers_interrupted_fleet_projection () =
     check int "each idle retry safely reconciles the retained projection" 3 !attempts)
 ;;
 
+type first_write_end = Reject_first_write | Cancel_first_write
+
+let retry_after_uncommitted_attempt first_write_end =
+  with_workspace @@ fun config ->
+  Eio.Switch.run @@ fun sw ->
+  let request_id = "wmsg-" ^ String.make 32 'd' in
+  let before_commit, mark_before_commit = Eio.Promise.create () in
+  let allow_first, mark_allow_first = Eio.Promise.create () in
+  let retry_waiting, mark_retry_waiting = Eio.Promise.create () in
+  let first_context, mark_first_context = Eio.Promise.create () in
+  let writes = ref 0 and fanouts = ref 0 in
+  let previous_write = Workspace_broadcast.For_testing.replace_write_json_commit
+    (fun config path json ->
+      incr writes;
+      if !writes=1 then (
+        Eio.Promise.resolve mark_before_commit ();
+        Eio.Promise.await allow_first;
+        Error "fixture primary row refused")
+      else Workspace_utils.write_json_commit_result config path json) in
+  let previous_wait = Workspace_broadcast.For_testing.replace_on_exact_request_wait
+    (fun _request_id ->
+      if not (Eio.Promise.is_resolved retry_waiting) then
+        Eio.Promise.resolve mark_retry_waiting ()) in
+  let previous_fanout = Workspace_broadcast.For_testing.replace_on_broadcast_mention
+    (fun _ -> incr fanouts; Workspace_broadcast.Passive) in
+  Fun.protect ~finally:(fun () ->
+    let (_ : Workspace_utils_backend_setup.config -> string -> Yojson.Safe.t ->
+        (Workspace_utils.write_json_commit, string) result) =
+      Workspace_broadcast.For_testing.replace_write_json_commit previous_write in
+    let (_ : string -> unit) =
+      Workspace_broadcast.For_testing.replace_on_exact_request_wait previous_wait in
+    let (_ : Workspace_broadcast.broadcast_delivery -> Workspace_broadcast.mention_delivery) =
+      Workspace_broadcast.For_testing.replace_on_broadcast_mention previous_fanout in
+    if not (Eio.Promise.is_resolved allow_first) then Eio.Promise.resolve mark_allow_first ()) (fun () ->
+    let send () = Workspace_broadcast.broadcast_once ~request_id config
+      ~from_agent:"external-agent" ~content:"retained evidence" in
+    let first = Eio.Fiber.fork_promise ~sw (fun () ->
+      Eio.Cancel.sub (fun context -> Eio.Promise.resolve mark_first_context context; send ())) in
+    Eio.Promise.await before_commit;
+    let retry = Eio.Fiber.fork_promise ~sw send in
+    Eio.Promise.await retry_waiting;
+    check bool "retry reached the precommit wait" false (Eio.Promise.is_resolved retry);
+    (match first_write_end with
+     | Reject_first_write -> Eio.Promise.resolve mark_allow_first ()
+     | Cancel_first_write -> Eio.Cancel.cancel (Eio.Promise.await first_context) Exit);
+    (match first_write_end, Eio.Promise.await first with
+     | Reject_first_write, Ok (Error (Workspace_broadcast.Broadcast_not_persisted _)) -> ()
+     | Cancel_first_write, Error (Eio.Cancel.Cancelled _) -> ()
+     | _, Error error -> raise error
+     | _ -> fail "uncommitted attempt must retain its failure or cancellation");
+    let receipt = match Eio.Promise.await_exn retry with
+      | Ok receipt -> receipt
+      | Error error -> fail (Workspace_broadcast.broadcast_error_to_string error) in
+    check string "waiting retry keeps the exact request identity" request_id receipt.request_id;
+    check int "failed primary attempt was followed by one real commit" 2 !writes;
+    check int "only the committed attempt reaches fleet projection" 1 !fanouts;
+    let replay = match send () with
+      | Ok receipt -> receipt
+      | Error error -> fail (Workspace_broadcast.broadcast_error_to_string error) in
+    check int "idle replay keeps the authoritative sequence" receipt.seq replay.seq;
+    check int "idle replay never creates another message" 2 !writes)
+;;
+
+let test_primary_refusal_wakes_precommit_retry () =
+  retry_after_uncommitted_attempt Reject_first_write
+let test_cancelled_primary_wakes_precommit_retry () =
+  retry_after_uncommitted_attempt Cancel_first_write
+
 (* The named target's row is written by the mention path with its mention ids.
    The fanout runs afterwards over the same delivery key, so it must find that
    row already present and leave the stamp — not overwrite it with an
@@ -708,6 +776,10 @@ let () =
             test_fleet_projection_adds_no_queue_entry
         ; test_case "Broadcast retry recovers interrupted fleet projection" `Quick
             test_broadcast_retry_recovers_interrupted_fleet_projection
+        ; test_case "primary refusal wakes a precommit Broadcast retry" `Quick
+            test_primary_refusal_wakes_precommit_retry
+        ; test_case "cancelled primary wakes a precommit Broadcast retry" `Quick
+            test_cancelled_primary_wakes_precommit_retry
         ; test_case "fleet projection preserves the mention row" `Quick
             test_fleet_projection_preserves_the_mention_row
         ; test_case "a Keeper's broadcast is Keeper speech" `Quick

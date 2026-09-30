@@ -31,6 +31,8 @@ val admit : t -> payload -> (receipt, error) result
 (** Repeating the exact operation returns its existing identity and recipient
     snapshot. A later fleet roster never changes the admitted recipients. *)
 val find : t -> caller:string -> operation_id:Request_id.t -> (receipt option, error) result
+(** Mutations only open an existing admitted journal. Missing operations return
+    [Unknown_operation] without creating a directory, journal or lock file. *)
 val commit : t -> caller:string -> operation_id:Request_id.t -> seq:int -> (receipt, error) result
 val recipient_result : t -> caller:string -> operation_id:Request_id.t ->
   recipient:string -> recipient_state -> (receipt, error) result

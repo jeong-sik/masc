@@ -1076,7 +1076,9 @@ module Private_jsonl_rows : sig
                   that never completed. *)
         }
 
-  type error = Io_failed of exn
+  type error =
+    | Non_regular_file of Unix.file_kind
+    | Io_failed of exn
 
   val error_to_string : error -> string
 end
@@ -1091,7 +1093,9 @@ end
     systhread when the caller is an Eio fiber. The complete rows come back
     as bytes; a torn tail is reported by offset, never returned. Unlike
     {!read_private_jsonl_slice_locked_result}, a missing file is its own
-    value, not the empty stream. *)
+    value, not the empty stream. The descriptor is opened nonblocking and
+    verified as a regular file before locking or reading. Symlinks to regular
+    files remain supported; other descriptor kinds are {!Private_jsonl_rows.Non_regular_file}. *)
 val read_private_jsonl_rows_locked_result :
   string ->
   ( Private_jsonl_rows.t
@@ -1298,6 +1302,28 @@ val update_private_file_durable_locked_result :
   string ->
   (string -> string option * 'a) ->
   ('a, durable_append_error) private_file_transaction_outcome
+
+(** Existing-only sibling of {!update_private_file_durable_locked_result}.
+    Returns [None] without calling [decide] when the journal is absent; never
+    creates its parent directory, journal, or a lock file. Existing journals
+    must be uniquely linked regular files, with the path still bound to the
+    opened descriptor after acquiring the same exclusive journal lock used by
+    the creating updater. Reads and appends retain that lock through [decide].
+    [Some value] preserves the callback result, including a semantic [Error].
+    Append/rollback and descriptor-settlement failures remain typed. Setup and
+    read failures also remain typed; [decide] exceptions propagate. As with the
+    creating updater, [decide] runs in a system thread and must avoid Eio effects. *)
+val update_existing_private_file_durable_locked_result :
+  string ->
+  (string -> string option * 'a) ->
+  ('a option, private_jsonl_transaction_error) private_file_transaction_outcome
+
+(** Existing-only transaction with injected descriptor settlement. *)
+val update_existing_private_file_durable_locked_with_io_for_testing :
+  io:private_jsonl_transaction_io_for_testing ->
+  string ->
+  (string -> string option * 'a) ->
+  ('a option, private_jsonl_transaction_error) private_file_transaction_outcome
 
 (** [rewrite_private_file_durable_locked_result path decide] is the whole-file
     replacement sibling of {!update_private_file_durable_locked_result}. It takes

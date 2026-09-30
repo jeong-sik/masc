@@ -7882,15 +7882,17 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                    | [] -> []
                    | mappings ->
                        [ ""; Ansi.bold ^ "  Known ID ↔ names" ^ Ansi.reset ]
-                       @ List.map
+                       @ List.concat_map
                            (fun (mapping : Tui_decode.connector_name_mapping) ->
-                              Printf.sprintf "    %-7s %s ↔ %s"
+                              Printf.sprintf "%-7s %s ↔ %s"
                                 (match mapping.cnm_kind with
                                  | Tui_decode.Connector_channel_name -> "channel"
                                  | Connector_person_name -> "person"
                                  | Connector_server_name -> "server")
                                 (Terminal_text.single_line mapping.cnm_id)
-                                (Terminal_text.single_line mapping.cnm_name))
+                                (Terminal_text.single_line mapping.cnm_name)
+                              |> Message_layout.wrap_styled_words ~max_cells:(max 1 (inner - 4))
+                              |> List.map (fun line -> "    " ^ line))
                            mappings)
                 @ [ ""
                   ; Ansi.dim

@@ -6,7 +6,8 @@ import sys
 
 import test_tui_keyboard_input as h
 
-SOURCE_MODULES = ("bin/masc_tui_render.ml",)
+SOURCE_MODULES = ("bin/masc_tui_render.ml", "bin/masc_tui_message_layout.ml",
+                  "bin/masc_tui_message_layout.mli")
 TASK = "task-" + "segment-" * 11 + "END"
 STATUS_PATH = "/runtime/" + "deep-directory/" * 14 + " STATUS-PATH-END"
 STORE_PATH = "/runtime/" + "한글경로/" * 18 + " STORE-PATH-END"
@@ -37,8 +38,9 @@ def fixtures():
     })
     served[h.CONNECTOR_NAMES_PATH] = (200, {
         "connector_id": "discord", "kind": "channel", "mapping_scope": "workspace",
-        "path": "connector_names/discord/channel", "total": 1, "has_more": False,
-        "mappings": [{"id": "111", "name": "한글 채널 " + "긴이름 " * 20 + " CHANNEL-END"}],
+        "path": "connector_names/discord/channel", "total": 2, "has_more": False,
+        "mappings": [{"id": "111", "name": "한글 채널 " + "긴이름 " * 20 + " CHANNEL-END"},
+                     {"id": "222", "name": "unbound " + "긴이름 " * 20 + " UNBOUND-MAPPING-END"}],
     })
     return served
 
@@ -83,7 +85,7 @@ def run(executable):
             h.resize_and_wait(process, fd, output, rows=26, columns=columns,
                               needle=b"Keepers", controls=(h.FULL_REDRAW,))
             scan(process, fd, output, (b"STATUS-PATH-END", b"STORE-PATH-END",
-                                      b"ENDPOINT-END", b"ERROR-END", b"CHANNEL-END"))
+                                      b"ENDPOINT-END", b"ERROR-END", b"CHANNEL-END", b"UNBOUND-MAPPING-END"))
         h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
         os.write(fd, b"q")
 

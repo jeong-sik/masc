@@ -1,18 +1,15 @@
 # Home journey acceptance
 
-2026-09-30. Implementation under review: PR #39817, source head
-`6ac4da4e23d3a1a66422c76e89ebad102dbcf5f3`. Parent #38801 merged on
-2026-09-29. This checklist records remaining acceptance work; it is not a
-runtime-success or merge verdict.
+2026-09-30. Integration PR #40176, source head
+`e19835974415bf7f4143c8ead5f82fc51f93081e`, stacks on #40152 (individual
+requests), #40137 (conversation receipts), #40130 (layout) and the original
+#39817. It also integrates #40120 and its #40116 complete-draft dependency.
+This checklist records remaining acceptance work, not a runtime or merge verdict.
 
-The decision-card stack on #40137 replaces aggregate-only Home navigation with
-kind-and-request-ID rows, preserves successful sources during another source's
-failure, and windows requests while retaining continuation. Exact readers retain
-a Home return origin and request identity across asynchronous refresh. These are
-source changes under validation, not rendered or runtime acceptance evidence.
-The independent creation and complete-draft PRs still require whole-feature
-integration. Receipt restart fixtures now run both binaries through the same
-terminal-owning shell; their latest execution remains pending.
+The combined source covers Home request identities and partial readings, saved
+explicit conversations independent of startup, complete per-Keeper drafts, and
+creation recovery through a confirmed named composer returning Home. Current-head
+execution and visual evidence remain required for that combined behavior.
 
 | Required behavior | Current source or test | Evidence still required |
 |---|---|---|
@@ -26,17 +23,17 @@ terminal-owning shell; their latest execution remains pending.
 | Removed selection requires reselection | `home_selected_action`; refresh scenario | Current-head pass; deleted Keeper resume case |
 | Fixed startup Keeper is not a last-chat receipt | `remember_home_chat`; `opening_boot_frames` | Current-head Overview PTY pass |
 | Home chat returns with draft intact | `Keeper_chat_return_home`; `unknown_and_resume` | Current-head PTY pass; draft during incoming notification |
-| Text, attachments and references stay bound to their recipient | `save_message_draft` currently saves only text | Preserve complete per-Keeper drafts and verify A→B→A wire payloads |
-| Creation failures retain input and malformed JSON is recoverable | Creation handler parses without an exception branch and restarts from a stem | Guard parsing, retain declarations, verify malformed/failed/success retry |
-| Created Keeper is selected for the first assignment | Creation currently reports success only | Refresh roster and hand off to the named composer |
-| Remembered target remains visible during roster failure | Resume currently requires a successful roster read | Last-record presentation with unavailable status and safe send authority |
-| Short-height Home reserves continuation and new work | Renderer currently ignores its body budget | Height-aware layout and short-height PTY acceptance |
+| Text, attachments and references stay bound to their recipient | `message_draft`, complete save/restore in `open_message_for_keeper` | Combined-head `test_tui_keeper_draft_payload_pty` A→B→A wire results |
+| Creation failures retain input and malformed JSON is recoverable | `keeper_creation_draft`, guarded JSON/name parsing and receipt validation | Combined-head malformed/refused/success retries from Home and Keeper list |
+| Created Keeper is selected for the first assignment | Named chat handoff with no-op queue drainer and typed Home return | Combined-head explicit first-assignment wire target, response and Home return |
+| Remembered target remains visible during roster failure | `Home_read_last`, existing unavailable-recipient send authority | Combined-head roster failure history, no POST, complete deletion re-selection |
+| Short-height Home reserves continuation and new work | Budgeted request window with retained continuation and short fallback | Combined-head 17-row Home and 24-row composer acceptance |
 | Wider Home does not add default panels | CI replay frames 03, 06, 09, 12 show the automatic Recent pane at 160 columns | Suppress automatic extra Home panels while preserving explicit operator choices |
-| Overview startup remembers a last conversation across restarts | `home_last_chat` is session-only | Independent durable navigation receipt and restart/deletion verification |
+| Overview startup remembers a last conversation across restarts | Typed receipt and `[tui].last_chat_keeper` Runtime locked writes | Combined-head same-workspace restart in Overview/Keeper/Last, save/read failures and deletion |
 | All sources retain their distinct decision identity | `home_request`, `home_decision_rows`, `reconcile_home_request_detail` | Current-head individual request, duplicate, same-Keeper distinct calls, partial-source failure and detail-refresh PTY results |
 | Acceptance sizes and color-independent actions | `test_tui_home_viewports_pty.py`: 80×24, 120×32, 160×48, normal and NO_COLOR | Targeted run 36654334047 passed at `45c065b875`; raw CI frame replay and screenshots are recorded below |
 | Large queues preserve continuation and reach every request | Retained `home_decision_scroll` and request viewport in `render_overview` | Overflow journey at acceptance sizes and detail return with selection/window retained |
-| Accepted decisions distinguish receipt from application | Existing detail actions | Accepted-but-not-applied fixture and fresh-read verification |
+| Accepted decisions distinguish receipt from application | Typed Completed/Deferred/Execution_failed outcomes | Home-origin accepted-but-not-applied fixture and fresh-read verification |
 | Usage entry is independent of prior Telemetry visit | Existing Usage keyboard scenario | Current-head targeted suite and rendered Usage evidence |
 | Improved time to first action | No user timing measurement here | Same-task before/after operator observation; do not infer speed from layout |
 
@@ -68,7 +65,14 @@ reviewed Home source above with the viewport assertions added. The passing
 targeted run establishes the two fixture states at the three specified sizes
 in normal and NO_COLOR modes. The remaining checklist rows stay open.
 
-Follow-up implementations submitted for review: #40116 binds full drafts to
-their Keeper; #40120 preserves creation declarations and opens the confirmed
-target for explicit first assignment. Their scoped runtime results and Home
-integration are still required; submission is not completion evidence.
+Run 36664548724 at `5924e6846516bb9bc97bbdf96b5a2abdd3a39294` passed
+Home layout (2 scenarios) and viewport (4 scenarios, 12 frames), but the overall
+run failed in request-label/detail assertions and unchanged-title redraw waits.
+Those observations are limited to that pre-integration head. Current integration
+run 36667431835 targets the seven Home/creation/draft suites; its result must be
+read against its exact head before any acceptance claim.
+
+Remaining deliverables include Task-card detail acceptance, connection-loss and
+draft-during-notification cases, accepted-but-not-applied decisions, current-head
+screenshots, required merge checks and freshness, installation/runtime inspection,
+and same-task before/after operator timing. No timing improvement is claimed.

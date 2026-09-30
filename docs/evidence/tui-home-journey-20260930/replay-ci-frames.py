@@ -20,7 +20,11 @@ OUT, LOG, SOURCE_SHA, RUN_ID = args.out, args.log, args.source_sha, args.run_id
 records = []
 for line in LOG.read_text().splitlines():
     if 'HOME_JOURNEY_FRAME ' in line:
-        records.append(json.loads(line.split('HOME_JOURNEY_FRAME ', 1)[1]))
+        record = json.loads(line.split('HOME_JOURNEY_FRAME ', 1)[1])
+        # Combined CI also emits creation/layout/request frames. This artifact
+        # proves only the viewport suite's explicitly marked color variants.
+        if 'no_color' in record and record['name'] in ('unread', 'requests'):
+            records.append(record)
 assert len(records) == 12, len(records)
 assert 'Home viewport PTY: PASS (4 scenarios, 12 frames)' in LOG.read_text()
 OUT.mkdir(parents=True, exist_ok=True)

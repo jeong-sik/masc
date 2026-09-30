@@ -23569,6 +23569,12 @@ and is loaded on demand through keeper_skill.
            let page = surface_page_rows state in
            let direction = if key = Some "pagedown" then 1 else -1 in
            (match state.view with
+            | Planning when state.planning_mode = Planning_list
+                            && Masc_tui_overview_tasks.is_focused state.task_focus
+                            && Option.is_some (task_detail_on_screen state) ->
+                let count, height = Masc_tui_render.task_detail_viewport state in
+                let move = if direction > 0 then Masc_tui_scroll.page_down else Masc_tui_scroll.page_up in
+                state.task_detail_scroll <- move ~count ~height state.task_detail_scroll
             (* Applying a scheme used to live on the page keys, where the
                footer never said it was and where PageDown is a scroll
                everywhere else; it answers to Enter. Emptying the arm left the
@@ -25818,7 +25824,9 @@ and is loaded on demand through keeper_skill.
                             (Printf.sprintf "closed %s:%d" path line))))
        | Some ("a" | "A") when state.view = Planning ->
            handle_goal_confirmation_key state ~mailbox:async_messages
-       | Some "c" | Some "C" | Some "x" | Some "X" | Some "o" | Some "O" when state.view = Planning ->
+       | Some "c" | Some "C" | Some "x" | Some "X" | Some "o" | Some "O"
+         when state.view = Planning
+              && (match state.planning_mode with Planning_detail _ -> true | Planning_list -> false) ->
            (* Goal lifecycle, detail only: the list keeps j/k/Enter and the
               letters stay navigation-free there. The first press arms, the
               same press submits; the server owns the phase rules. *)

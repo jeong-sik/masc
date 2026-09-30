@@ -2,6 +2,14 @@
 
 The operator assigned Epic to the common transactional storage/backup/restore foundation across several product domains. The candidate prompt applies this rule generally and preserves the distinction from a bounded capability or technology-only change.
 
+The template is now retained here as `candle_appraiser_grade.md`, outside the
+runtime prompt directory. `config/prompts/candle_appraiser_grade.md` retains
+the previous runtime template from the appraisal base. The proposed shared
+foundation policy has not been executed or calibrated and cannot affect payouts
+through this PR. The preparation record below is historical; any revised
+candidate needs a new isolated plan and prompt hashes. Activating a candidate
+remains a separate change supported by the required human calibration.
+
 Prepared: the same 20 synthetic Goal inputs, 20 trials each, 400 planned calls, the same CI executable from `4fae8f4e3fef99a0b23871dd6bfc58a0250df43f`, runtime `glm-coding.glm-5.3-flash`, provider limits and single-slot/no-fallback policy. Only the Grade template changes. The unchanged corpus includes small scope controls, medium feature descriptions and broad system outcomes. Labels and operator notes are excluded from model inputs.
 
 Execution has not started. The current session cannot access the Docker socket used by the existing isolated Linux executable. The prepared fixture is separate from the completed survey; its output directory must also be new. There is no replacement direct-client result or human accuracy score.

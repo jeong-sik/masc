@@ -67,12 +67,14 @@ let dotted_size display (box : View.box) =
 
 type picture_key =
   | Painted_at of Draw.size * Draw.pose
+  | Compact_at of Draw.size * Draw.pose
   | Dotted_at of Draw.size * int
 
 let key_of style display box moment =
-  match style with
-  | Painted -> Painted_at (box.View.size, pose_of moment)
-  | Dotted -> Dotted_at (dotted_size display box, sway_milliseconds_of moment)
+  match style, display with
+  | Painted, View.Mosaic -> Compact_at (box.View.size, pose_of moment)
+  | Painted, (View.Pixels _ | View.No_picture) -> Painted_at (box.View.size, pose_of moment)
+  | Dotted, _ -> Dotted_at (dotted_size display box, sway_milliseconds_of moment)
 
 (* The last picture rendered. A frame that is repainted for something else
    -- the clock, a key -- asks for the picture it already drew, and the
@@ -88,6 +90,9 @@ let render key =
         | Painted_at (size, pose) ->
             let body, equipment = Keeper_portrait_look.mascot in
             Draw.render_posed body equipment pose size
+        | Compact_at (size, pose) ->
+            let body, equipment = Keeper_portrait_look.mascot in
+            Draw.render_compact_posed body equipment pose size
         | Dotted_at (size, milliseconds) -> Keeper_portrait_solid.mascot ~milliseconds size
       in
       last_render := Some (key, image);

@@ -923,6 +923,25 @@ let complete_cleanup
                ~keeper_name:operation.keeper_name
                "keeper removed but its sandbox container was not: %s"
                detail);
+          (* A Keeper whose meta stays is let go by the next move, which reads
+             it as stopped. One removed for good leaves only its credential,
+             which reads like an agent coming back, so the controller it holds
+             is freed here. Logged rather than blocking, like the teardown
+             above. *)
+          (match meta_disposition_of_cleanup_reason operation.cleanup_intent.reason with
+           | Retain_operator_pause -> ()
+           | Remove_meta ->
+             (match
+                Keeper_dos_controller.release_retired
+                  ~keeper_name:operation.keeper_name
+                  ~by:operation.actor
+              with
+              | Ok () -> ()
+              | Error detail ->
+                Log.Keeper.warn
+                  ~keeper_name:operation.keeper_name
+                  "keeper removed but the DOS controller it held was not released: %s"
+                  detail));
           finish registry_unregistered))
 ;;
 

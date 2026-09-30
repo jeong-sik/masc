@@ -1,5 +1,5 @@
-(* The Overview's Providers section. See the .mli for what it draws and what
-   it refuses to guess. *)
+(* The Usage surface's Plan usage section. See the .mli for what it draws and
+   what it refuses to guess. *)
 
 module Tui_decode = Masc.Tui_decode
 module Types = Masc_tui_types
@@ -8,9 +8,6 @@ open Masc_tui_ansi
 type section = {
   title : string;
   lines : string list;
-  account_count : int;
-  account_row_counts : int list;
-  note_lines : string list;
 }
 
 let cells_of = Masc_tui_message_layout.display_width
@@ -172,11 +169,23 @@ let heard_text ~now observed_at =
 
 (* ---- accounts ----------------------------------------------------------- *)
 
-(* The operator's own [display-name] for each provider billed to the account.
-   A scope no configured provider names any more has only its scope id. *)
-let account_name (account : Tui_decode.provider_usage_account) =
+(* The server names the scope's id on the row, the same id its history
+   points carry; hashing it again here would be a second definition that
+   could drift from the first. *)
+let scope_id (account : Tui_decode.provider_usage_account) =
+  account.pua_scope_id
+
+(* The id's leading cells, enough to tell scopes apart on one screen. *)
+let scope_id_cells = 8
+
+let scope_name (account : Tui_decode.provider_usage_account) =
+  let id = scope_id account in
+  let id =
+    Terminal_text.single_line
+      (String.sub id 0 (min scope_id_cells (String.length id)))
+  in
   match account.pua_providers with
-  | [] -> Terminal_text.single_line account.pua_scope
+  | [] -> "scope " ^ id
   | providers ->
       Terminal_text.single_line
         (String.concat ", "
@@ -184,6 +193,7 @@ let account_name (account : Tui_decode.provider_usage_account) =
               (fun (provider : Tui_decode.provider_usage_provider) ->
                 provider.pup_display_name)
               providers))
+      ^ " · " ^ id
 
 (* The runtime catalogue's own [quota_exhausted], joined by quota scope,
    with the reopen time the catalogue states for it. That time is the
@@ -282,7 +292,7 @@ let account_rank observed (account : Tui_decode.provider_usage_account) =
    a generic setup name, which told the operator neither which account it was
    nor anything about it. *)
 let account_rows ~now (observed, (account : Tui_decode.provider_usage_account)) =
-  let name = account_name account in
+  let name = scope_name account in
   let tag = exhausted_tag ~now observed in
   match account.pua_state, tag with
   | Tui_decode.Account_not_reported_since_start, None -> []
@@ -455,9 +465,6 @@ let section ~(providers : Types.overview_providers_reading) ~runtimes ~account_e
             [ Printf.sprintf " %susage data unavailable: %s%s" (Theme.warn ())
                 (Terminal_text.single_line reason) Ansi.reset
             ]
-        ; account_count = 0
-        ; account_row_counts = []
-        ; note_lines = []
         }
   | Types.Providers_read { Tui_decode.puws_since = _; puws_accounts } ->
       let ordered =
@@ -467,12 +474,9 @@ let section ~(providers : Types.overview_providers_reading) ~runtimes ~account_e
           puws_accounts
         |> List.stable_sort (fun (oa, a) (ob, b) ->
                match Int.compare (account_rank oa a) (account_rank ob b) with
-               | 0 -> String.compare (account_name a) (account_name b)
+               | 0 -> String.compare (scope_name a) (scope_name b)
                | order -> order)
       in
-      (* Accounts that draw no row are left out of the counts too, so the
-         budget's "n more" never counts an account the section would not
-         show. *)
       let accounts =
         List.filter_map
           (fun ((_, account) as entry) ->
@@ -482,13 +486,12 @@ let section ~(providers : Types.overview_providers_reading) ~runtimes ~account_e
           ordered
       in
       let name_w = widest name_cells (List.concat_map snd accounts) in
-      let drawn =
-        List.map
+      let rows =
+        List.concat_map
           (fun (account, rows) ->
             place_email ~name_w (account_email ~account_emails account) rows)
           accounts
       in
-      let rows = List.concat drawn in
       (* Without the runtime rows the exhausted tag cannot be drawn; the
          section says so instead of drawing every account untagged. *)
       let runtimes_note =
@@ -499,8 +502,8 @@ let section ~(providers : Types.overview_providers_reading) ~runtimes ~account_e
             ]
         | Types.Quota_unread | Types.Quota_read _ -> []
       in
-      (* Without the inventory the rows are drawn with no email, and the
-         section says why rather than implying the accounts have none. *)
+      (* Without the account email reading the rows are drawn with no email.
+         The section says why rather than implying the accounts have none. *)
       let emails_note =
         match (account_emails : Types.overview_account_emails_reading) with
         | Types.Account_emails_failed reason ->
@@ -519,44 +522,9 @@ let section ~(providers : Types.overview_providers_reading) ~runtimes ~account_e
           Some
             { title = title_text ()
             ; lines = [ " no usage data" ]
-            ; account_count = 0
-            ; account_row_counts = []
-            ; note_lines = []
             }
       | _ :: _ ->
           Some
             { title = title_text ()
             ; lines = draw_rows ~now ~width rows @ notes
-            ; account_count = List.length drawn
-            ; account_row_counts = List.map List.length drawn
-            ; note_lines = notes
             }
-
-type visible = {
-  lines : string list;
-  shown_accounts : int;
-  hidden_accounts : int;
-  hidden_notes : int;
-}
-
-let visible_rows section ~rows =
-  let rows = max 0 rows in
-  let take n xs = List.filteri (fun index _ -> index < n) xs in
-  if section.account_count = 0 then
-    { lines = take rows section.lines; shown_accounts = 0; hidden_accounts = 0
-    ; hidden_notes = max 0 (List.length section.lines - rows) }
-  else
-    let rec fit cap shown used = function
-      | count :: rest when used + count <= cap ->
-          fit cap (shown + 1) (used + count) rest
-      | _ -> (shown, used)
-    in
-    let cap =
-      if List.length section.lines > rows then max 0 (rows - 1) else rows
-    in
-    let shown_accounts, account_rows = fit cap 0 0 section.account_row_counts in
-    let note_rows = min (List.length section.note_lines) (cap - account_rows) in
-    { lines = take account_rows section.lines @ take note_rows section.note_lines
-    ; shown_accounts
-    ; hidden_accounts = section.account_count - shown_accounts
-    ; hidden_notes = List.length section.note_lines - note_rows }

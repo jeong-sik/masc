@@ -136,14 +136,14 @@ let test_revoke () =
       | Ok issued -> token_of_link issued.I.link
       | Error err -> failf "not issued: %s" (issue_error_to_string err)
     in
-    check bool "revoked" true (I.revoke ~base_path ~name:(name "minsu") = Ok I.Deleted);
+    check bool "revoked" true (I.revoke ~base_path ~name:(name "minsu") ~after_revoke:Fun.id = Ok I.Deleted);
     check bool "the bearer stops resolving" true
       (Result.is_error (Auth.find_credential_by_token base_path ~token));
     check bool "a second revoke finds it gone" true
-      (I.revoke ~base_path ~name:(name "minsu") = Ok I.Already_gone);
+      (I.revoke ~base_path ~name:(name "minsu") ~after_revoke:Fun.id = Ok I.Already_gone);
     let _ = Auth.create_token base_path ~agent_name:"codex" ~role:Masc_domain.Worker in
     check bool "a worker's credential is not an invite" true
-      (I.revoke ~base_path ~name:(name "codex") = Error (I.Not_an_invite Masc_domain.Worker));
+      (I.revoke ~base_path ~name:(name "codex") ~after_revoke:Fun.id = Error (I.Not_an_invite Masc_domain.Worker));
     check bool "and stays" true (Option.is_some (Auth.load_credential base_path "codex")))
 
 let () =

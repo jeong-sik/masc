@@ -43,6 +43,19 @@ let board_document_source body =
 let board_document_markdown ~width body =
   document_markdown ~width (board_document_source body)
 
+(* Who wrote it, in one column. 1561 of this workspace's 2171 posts are system
+   posts and 588 are automation; the 22 a person wrote are what an operator is
+   scanning for, so those are the ones that get a mark. *)
+(* The widths now live beside their column names in [Render_schedule], which
+   is the one place the header and the rows both read. The age column is sized
+   for the widest [span_text] draws, "99d23h": a board's oldest live threads are
+   days old, so the day tier is the one it holds. *)
+
+(* Four cells of lead sit ahead of the mark on the header and on every row, so
+   the table gets what the frame leaves less those four. Summing the widths and
+   their gaps by hand is what the column description replaced: the sum was
+   written once for the rows and once for the header, and the two drifted until
+   REPLIES sat past the right edge whatever the title was sized to. *)
 let board_table_lead = 4
 
 let board_layout ~cols =
@@ -802,10 +815,11 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
               Masc_tui_frame_timing.time_stage ~name:"board.thread.order"
                 (fun () -> Board_comment_thread.order comments)
             in
-            Masc_tui_frame_timing.time_stage ~name:"board.thread.rows_wrap"
-              (fun () ->
-                ordered
-                |> List.concat_map
+            let comment_lines =
+              Masc_tui_frame_timing.time_stage ~name:"board.thread.rows_wrap"
+                (fun () ->
+                  ordered
+                  |> List.concat_map
               (fun (depth, c) ->
                  let rail =
                    if depth <= 0 then ""
@@ -871,6 +885,15 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
                      in
                      metadata
                      @ List.map (fun line -> content_prefix ^ line) lines))
+            in
+            if List.length comments < post.bp_comment_count then
+              Printf.sprintf "  Showing %d of %d comments (o: all comments)"
+                (List.length comments) post.bp_comment_count
+              :: comment_lines
+            else
+              (* The post header already counts the complete thread. Keep
+                 the small comment viewport for its actual comment rows. *)
+              comment_lines
       in
       (body_lines, detail_lines))
   in
@@ -998,7 +1021,9 @@ let render_board_read (state : state) (list_post : board_post) =
       ~hints:
         (Masc_tui_keys.footer_hints_board_read
            ~focus_posts:(state.board_focus = Left_pane)
-           ~focus_comments:state.board_comments_focused ~layout)
+           ~focus_comments:state.board_comments_focused
+           ~full_history:(state.board_history_post_id = Some list_post.bp_id)
+           ~layout)
   in
   Masc_tui_frame_timing.finish_stage ~name:"board.render_prep" prep_started;
   match layout with

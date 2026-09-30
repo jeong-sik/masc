@@ -762,36 +762,37 @@ let test_recent_projection_is_prepared_inside_frame_build () =
 
 let test_user_message_background_has_one_render_snapshot () =
   let main_path = "bin/masc_tui.ml" in
+  let input_path = "bin/masc_tui_input_reader.ml" in
   (* Every binding this test still reaches for is drawn by the chat surface,
      which is its own file. *)
   let chat_path = "bin/masc_tui_render_chat.ml" in
   let ansi_path = "bin/masc_tui_ansi.ml" in
   check int "late palette publication clears its callback before use" 1
-    (Ast_grep.count_field_clears_to_none ~module_path:main_path
+    (Ast_grep.count_field_clears_to_none ~module_path:input_path
        ~binding_name:"take_late_palette_publisher"
        ~field_name:"late_palette_publisher");
   check int "late palette helper gates on its one-shot publisher" 1
     (Ast_grep.count_field_accesses_outside_calls_in_value_binding
-       ~module_path:main_path ~binding_name:"publish_late_terminal_palette"
+       ~module_path:input_path ~binding_name:"publish_late_terminal_palette"
        ~callees:[] ~fields:[ "late_palette_publisher" ]);
   check int "late palette helper reads the O(1) decoder palette" 1
-    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+    (Ast_grep.count_calls_in_value_binding ~module_path:input_path
        ~binding_name:"publish_late_terminal_palette"
        ~callee:"Masc_tui_terminal_probe.palette");
   check int "late palette helper consumes the one-shot publisher" 1
-    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+    (Ast_grep.count_calls_in_value_binding ~module_path:input_path
        ~binding_name:"publish_late_terminal_palette"
        ~callee:"take_late_palette_publisher");
   check int "input checks publication after next and before probe removal" 3
-    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+    (Ast_grep.count_calls_in_value_binding ~module_path:input_path
        ~binding_name:"take_input_byte"
        ~callee:"publish_late_terminal_palette");
   check int "late publication updates the palette authority" 1
-    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+    (Ast_grep.count_calls_in_value_binding ~module_path:input_path
        ~binding_name:"install_late_palette_publisher"
        ~callee:"Masc_tui_terminal_palette.set_current");
   check int "late publication requests one full repaint" 1
-    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+    (Ast_grep.count_calls_in_value_binding ~module_path:input_path
        ~binding_name:"install_late_palette_publisher"
        ~callee:"request_full_repaint");
   check int "startup has one conditional late publisher installation" 1
@@ -1734,24 +1735,25 @@ let test_planning_refresh_reconciles_navigation_identity () =
 
 let test_render_loop_uses_monotonic_dirty_schedule () =
   let main_path = "bin/masc_tui.ml" in
+  let input_path = "bin/masc_tui_input_reader.ml" in
   check int "the render loop queries buffered and terminal-ready input" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"main" ~callee:"input_reader_has_ready_input");
   check int "readiness includes the reader's buffered input" 1
-    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+    (Ast_grep.count_calls_in_value_binding ~module_path:input_path
        ~binding_name:"input_reader_has_ready_input"
        ~callee:"input_reader_has_pending_bytes");
   check int "readiness includes bytes waiting in the terminal" 1
-    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+    (Ast_grep.count_calls_in_value_binding ~module_path:input_path
        ~binding_name:"input_reader_has_ready_input" ~callee:"terminal_has_bytes");
   check int "queued input includes the terminal probe replay" 1
-    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+    (Ast_grep.count_calls_in_value_binding ~module_path:input_path
        ~binding_name:"input_reader_has_pending_bytes"
        ~callee:"Masc_tui_terminal_probe.has_replay");
   (* A character the decoder holds is awaiting bytes that have not arrived;
      it is not input ready to act on, so it must not postpone a frame. *)
   check int "an incomplete character does not postpone a frame" 0
-    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+    (Ast_grep.count_calls_in_value_binding ~module_path:input_path
        ~binding_name:"input_reader_has_pending_bytes"
        ~callee:"Masc_tui_input_decoder.pending");
   check bool "main loop reads a monotonic clock" true
@@ -1813,7 +1815,7 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
      input owns the deadline, and EINTR has to come back as a retry rather
      than as end of input. *)
   check bool "interrupted input uses the deadline-aware retry contract" true
-    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+    (Ast_grep.count_calls_in_value_binding ~module_path:input_path
        ~binding_name:"refill_input_reader"
        ~callee:"Render_schedule.Input_wait.await"
      = 1);

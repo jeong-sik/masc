@@ -48,7 +48,7 @@ related: ["#36687", "#25052", "RFC-memory-os-bounded-context-and-librarian-curat
 
 ### Resume에서 유지되는 projection identity
 
-`receipt_id`는 매 결정의 운영자 기록을 구분하며 모델에 자동 주입하는 `Memory_os_recall` 본문·상태 envelope·조회 URL에는 들어가지 않는다. 그 블록에는 `projection_ref`만 쓴다. 이는 fact/metadata 및 사건 증거의 의미 revision·내용 해시, 선택 결과·실패 코드, 렌더/정렬 규약, 용량 정책과 전송 본문을 canonical하게 묶은 content address다. fresh invocation ID, 관측 wall time, 매 턴 재발급되는 조회 receipt ID는 제외한다. 동일 원천 revision의 사건 영수증은 동일한 content-addressed 참조를 사용한다. 원래 사건 상태나 근거 revision이 바뀌면 새 projection_ref가 생긴다.
+`receipt_id`는 매 결정의 운영자 기록을 구분하며 모델에 자동 주입하는 `Memory_os_recall` 본문·상태 envelope·조회 URL에는 들어가지 않는다. 그 블록에는 `projection_ref`만 쓴다. 이는 fact/metadata 및 사건 증거의 의미 revision·내용 해시, 선택 결과·실패 코드, 렌더/정렬 규약, 용량 정책과 projection_ref 자체를 제외한 전송 본문을 canonical하게 묶은 content address다. fresh invocation ID, 관측 wall time, 매 턴 재발급되는 조회 receipt ID는 제외한다. 동일 원천 revision의 사건 영수증은 동일한 content-addressed 참조를 사용한다. 원래 사건 상태나 근거 revision이 바뀌면 새 projection_ref가 생긴다.
 
 운영자 원장은 매 턴 receipt_id → projection_ref와 실제 전송/보존 여부를 따로 기록한다. `recall_projection(projection_ref)`는 권한 검사 후 그 불변 projection 설명을 조회하며 조회 자체가 held 블록을 다시 조립하지 않는다. fresh receipt 전달이 필요한 도구 응답/운영자 UI는 별도이며 이를 새 Recall 본문으로 붙이지 않는다. 공식 클라이언트의 raw-text hash 기반 carried-block 중복 제거는 그대로 두고, 같은 입력에서 본문과 envelope 전체를 byte-identical하게 유지한다. known/unobserved/Budget_overrun 모두 이 규칙을 따른다. 특히 매 턴 회수한 동일 snapshot·동일 조건에서 두 번 resume할 때 fresh receipt_id는 달라도 Memory_os_recall의 전송 바이트/digest가 같고 두 번째 전체 블록이 append되지 않는 fixture를 요구한다. 조건 revision이나 source 바이트가 바뀌었을 때만 변경된 블록을 전달한다.
 

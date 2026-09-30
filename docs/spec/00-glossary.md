@@ -434,6 +434,23 @@ status: reference
       격리 수가 화면에서 축소 왜곡되지 않게 한다.
   → [Keeper_board_attention_candidate](../../lib/keeper/keeper_board_attention_candidate.mli) · [Keeper_board_attention_quarantine_command](../../lib/keeper/keeper_board_attention_quarantine_command.mli) · [Masc_tui_board_quarantine](../../bin/masc_tui_board_quarantine.mli)
 
+**Jev (TypeSafe AI System One 판정 어댑터)**
+: Board Attention Candidate의 관련성을 비자기회귀 System One 1회 요청으로 신속 판정하는
+  TypeSafe AI 어댑터(`Typesafeai_board_attention`). 신뢰도 조건을 충족한 후보를 직접 확정하여
+  `board_attention_exact`의 LLM 판정 요청을 줄인다(#40413·#40420·#40428).
+  - 양방향 직접 확정(`Jev_decided`): `relevant` 또는 `not_relevant` 판정 신뢰도가
+    `[typesafeai].board_attention_confidence_floor`(기본값 0.3) 이상이면 LLM 레인을 거치지 않고
+    후보를 즉시 종단 확정한다. `not_relevant` 역시 신뢰도 충족 시 LLM 레인을 건너뛰고 직접 확정된다.
+  - LLM 레인 이관: 신뢰도 미달(`Jev_low_confidence`), 명시적 불확실성(`Needs_review` / `Jev_uncertain`),
+    호출 실패(`Jev_failed`), 또는 비활성화(`Jev_off`·`Jev_cli_only`) 시에는 설정된 board_attention_exact 슬롯/CLI 경로로 이관하여 재판정한다.
+  - 재큐 후보 우선 판정: 격리(Quarantine)에서 재투입된 후보(`Requeued_pending`)도 `ask_jev`의
+    첫 번째 관문을 거치며, 재큐 후보에도 같은 직접 확정 조건을 적용한다(#40428).
+  - 신뢰도 관측 가능성: 확정된 종단 로그 행에 실제 신뢰도가 보존되어 운영자가 임계값을 사후
+    재조정할 수 있는 정량적 근거를 제공한다(#40420).
+  → [Typesafeai_board_attention](../../lib/typesafeai/typesafeai_board_attention.mli) ·
+  [Keeper_board_attention_exact_flow](../../lib/keeper/keeper_board_attention_exact_flow.ml) ·
+  [config/runtime.toml](../../config/runtime.toml)
+
 **Keeper Cycle**
 : 현재 상태와 event를 관찰하고 Keeper turn 실행 여부를 결정하는 서버 loop의
   한 회차. 모든 cycle이 모델 호출을 실행하지는 않는다.
@@ -1491,18 +1508,18 @@ status: reference
   부동소수점 단위를 쓰지 않는다.
   - 원장(`candle-ledger.jsonl`): `<base-path>/.masc/candle-ledger.jsonl`에 한 줄씩 이벤트를
     덧붙이는 전용 원장. 각 행은 `kind`·`at`과 해당 종류의 필드를 담은 닫힌 JSON 객체다. 현재 원장에
-    기록되는 사건은 6종(`Snapshot`·`Payout_owed`·`Candidates`·`Unattributed`·`Paid`·`Payout_failed`)이며,
-    잔액은 파일에 누적 값을 따로 적지 않고 원장의 `Paid` 사실을 순서대로 재생하여 계산한다. 헌법·승인·도구 호출 원장이나
+    기록되는 사건은 7종(`Snapshot`·`Payout_owed`·`Candidates`·`Unattributed`·`Paid`·`Purchased`·`Payout_failed`)이며,
+    잔액과 소유권은 파일에 누적 값을 따로 적지 않고 `Paid` 지급과 `Purchased` 구매를 순서대로 재생하여 계산한다. 구매 한 행은 차감과 소유권 부여를 함께 기록한다. 헌법·승인·도구 호출 원장이나
     `goal_verifications.json`(검증 원장)과 다른 별개 원장이다.
   - 발행과 지급: Goal이 검증기를 통과(`Snapshot`)하고 사람의 확정(`Confirm_completion`)으로
     `Completed`가 되면 지급 의무(`Payout_owed`)가 생긴다. 백그라운드 지급 일꾼이 기여 Task와 Keeper를
     선별(`Candidates`)해 모델 감정을 거쳐 `Paid` 이벤트 한 줄로 지급을 기록한다. 분배는 한 줄에 원자적으로 적히므로
     일부 Keeper만 지급되는 불완전 상태가 없다. 기여자가 없으면 `Unattributed`, 오류 시 `Payout_failed`를 남긴다.
   - 사용처 한정: Candle로 살 수 있는 것은 초상화 장신구(**Keeper Portrait**의 장비 아이템)뿐이다.
-    도구, 스킬, 모델, 런타임 예산 등 다른 자원은 구매할 수 없다(헌법 불변식). 상점 구매와 착용 반영은
-    RFC 단계적 구현에 따르며, 현재 원장 스키마에는 포함되지 않는다.
+    도구, 스킬, 모델, 런타임 예산 등 다른 자원은 구매할 수 없다(헌법 불변식). 상점 구매는
+    `Purchased`로 기록하며, 착용 반영은 후속 장착 스택에서 제공한다.
   - 잔액 감쇠 규범: 헌법(`<candle>`, `no_wall_clock_death` 예외)은 잔액의 지수 감쇠를 요구한다.
-    현재 빌드의 잔액(`Candle_balance.of_events`)은 `Paid` 사실의 누적이며 시간 감쇠를 적용하지 않고,
+    현재 빌드의 잔액(`Candle_balance.of_events`)은 지급과 구매를 재생하며 시간 감쇠를 적용하지 않고,
     반감기 설정 키는 아직 없다(RFC의 `HalfLifeSet` 이벤트 및 반감기 설정 계획).
     원장에 기록된 과거 사실은 지워지지 않는 불변식을 유지하며, 이는 `no_wall_clock_death` 불변식의
     유일한 명시적 예외 요구다(Task·Goal·Board 상태는 만료시키지 않는다).
@@ -1828,6 +1845,37 @@ status: reference
 : 에이전트 기록의 `current_task`, Keeper meta 의 `current_task_id`, planning 의 current
   task. 기준은 backlog 이고 이 셋은 거기서 다시 계산되는 표시다.
 
+**Task Archive (태스크 아카이브 / tasks-archive.json)**
+: 백로그(`tasks/backlog.json`)에서 종결 상태(`Done`, `Cancelled`)로 보존 기간(`days`)을
+  경과한 Task를 영속 보존하기 위해 이동 격리하는 단일 아카이브 파일(`.masc/tasks-archive.json`).
+  최상위 `{"tasks": [...]}` envelope 구조를 가지며(`archive_entries_of_json`),
+  Goal의 Candle 기여도 정산(`RFC-goal-candle-ledger`) 및 사후 감사에서 백로그에 없는
+  종결 Task를 읽는 단일 보존 출처(SSOT)로 동작한다. 새 Task 번호 채번(`next_task_number`) 시
+  백로그 활성 Task, 삭제 영수증(`task_deletion_receipts`), 아카이브, 이벤트 원장 4개 소스의
+  최댓값에 1을 더해 이전 생애주기와의 ID 충돌(aliasing)을 방지한다.
+  아카이브 변경 트랜잭션인 추가(`append_archive_tasks`의 읽기·병합·쓰기) 및 삭제(`drop_archive_tasks`)는
+  `with_file_lock` 잠금 아래에서 수행되어 병행 변경 시 손실을 막으며(단순 조회인 `read_archive_entries`
+  및 Candle 정산 조회는 잠금 없이 읽음), 아카이브 항목 삭제(`drop_archive_tasks`) 시 `id` 필드가 없는
+  항목은 조용히 버리지 않고 보존한다.
+  → [Workspace_task_id](../../lib/workspace/workspace_task_id.mli) ·
+  [Candle_tasks](../../lib/candle_runtime/candle_tasks.mli) ·
+  [RFC-goal-candle-ledger](../rfc/RFC-goal-candle-ledger.md)
+
+**Task GC (태스크 가비지 컬렉션)**
+: 운영자가 보존 기한(`days: int`)을 명시하여 호출하는 백로그 정리 절차(`Workspace_gc.gc`,
+  MCP `masc_gc`). 백로그 잠금 아래에서 보존 기한을 넘긴 종결 Task(`Done`, `Cancelled`)를
+  백로그에서 먼저 제거하고 버전을 올린 뒤, 백로그 잠금을 해제하고 아카이브 잠금 아래에서
+  아카이브에 추가(`append_archive_tasks`)한다. 두 파일 간 기록 시점 사이에 비원자적 구간이
+  존재하므로 크래시 복구 시 일시적으로 두 스토어 어디에도 없는 간극이 생길 수 있으나(`RFC-goal-candle-ledger`),
+  비종결 상태(`Todo`, `Claimed`, `InProgress`, `AwaitingVerification`)는 판정 의무와 활성
+  생애주기를 보존하기 위해 아카이브 대상에서 원천 배제된다 — 특히 판정을 기다리는 의무인
+  `AwaitingVerification`은 완료 권위(Completion Authority)가 실시간으로 판정을 내려야 하므로
+  백로그에 반드시 남아야 한다. 아카이브 내에 비종결 Task가 잔류하는 비정상 격리가 발견되면
+  백로그에 먼저 복원한 후 아카이브에서 제거하는 자가 치유(self-healing, `read_orphaned_nonterminal_tasks`
+  및 `drop_archive_tasks`)를 함께 수행하여 비종결 Task의 영구 유실을 방지한다.
+  → [Workspace_gc](../../lib/workspace/workspace_gc.mli) ·
+  [Workspace_task_id](../../lib/workspace/workspace_task_id.mli)
+
 ## Skills
 
 **Skill**
@@ -2045,9 +2093,11 @@ status: reference
   - 브랜치 계층: 스택의 가장 바닥(bottom) PR만 `main`을 base로 삼고, 그 위의 상위 PR들은 각자
     직전 스택 브랜치를 base로 지정한다. 기능(피처) 개발 스택과 CI·인프라 개선 스택은 섞지 않고
     각자의 독립 스택으로 분리해 진행한다.
-  - 전진과 리베이스: 스택 바닥 PR이 `main`에 병합(squash merge)되면, 바로 위 상위 PR의 base를
-    `main`으로 변경하고 직전 브랜치와의 델타를 리베이스한다. 베이스나 head가 바뀌면 변경된 내용을
-    다시 독립 검토한다.
+  - Native Stack: REST PR의 `stack`과 Stacks API가 구성·순서·최종 base의 근거다.
+    선택한 PR까지의 미병합 하위 PR은 비동기 병합 API로 함께 병합할 수 있다. 부모 미병합이나
+    non-main base만으로 차단하거나 수동 retarget하지 않는다. 전체 포함 범위를 리뷰한다.
+    Native Stack이 아닌 브랜치 체인은 부모부터 처리한다. base나 head가 바뀌면 다시 검토한다.
+    → [Native GitHub Stack 절차](../guides/NATIVE-GITHUB-STACKS.md)
   - 검증과 승인(2026-09-30 운영 정책): 일반 스택(Ordinary stack)은 CI 실행 여부나 대기에
     묶이지 않고, 현재 head에 대한 다각도 소스 검토(기능·논리·코드 청결도)를 통해 P0·P1·P2 결함이
     없으면 즉시 승인(Approve)한다. 판정 줄은 `verdict: PASS head: <40-hex SHA> by: <reviewer>`
@@ -2497,6 +2547,19 @@ status: reference
 : Keeper 하나가 오래 들고 가는 기억(Fact)을 저장하고 다시 꺼내 주는 곳.
   operator config의 Keeper 이름에 묶인다. cluster 사이에서 무엇을 같이 쓰는지는
   **Cluster** 항목에 적었다.
+
+**Memory OS Recall (기억 회상 / 전송 투영)**
+: 매 턴 실행 시 저장된 Memory OS 사실(일반 사실 및 소스 바인딩 사실)을 모델의 프롬프트 문맥으로 주입(projection)하는 전송 메커니즘.
+  `render_if_enabled`가 호출되어 각 스토어의 상태(`Present`, `Authoritatively empty / Absent`, `Unavailable`)를 투영하며, 회상 비활성화 시 안정적 중지 마커(`disabled`)를 방출한다.
+  현행 구현([`keeper_memory_os_recall.mli`](../../lib/keeper/keeper_memory_os_recall.mli))은 절단(truncate), 임의 순위화(rank), 부분 주입(partially inject)을 금지하고 current fact 전량을 전송한다. 소스 바인딩 사실(`source-bound fact`)은 주입 직전 대상 파일의 정확한 바이트를 재검증하며, 변경·삭제가 입증된 소스는 이전 주장 대신 타입화된 무효화(`typed invalidation`)를 기여한다. 반면 읽기 실패·접근 불능 소스는 기존 주장을 `verified=false`인 미검증 상태(`keep_unverified`)로 보존하여 모델에 전달하며, 소스 스토어 장애 시에도 읽기 가능한 일반 사실(`ordinary fact`)은 보존하여 전달한다.
+  유계 작업연계 투영 제안 규약(Draft [`RFC-memory-os-recall-selection`](../../docs/rfc/RFC-memory-os-recall-selection.md))은 현행 전량 주입 계약을 개정하여 작업 중심의 유계 투영(Bounded Task-linked Projection with Explicit Omission)을 도입하는 목표 아키텍처다:
+  - **보존과 전송의 분리**: 저장소는 모든 current fact를 영구 보존하며, 전송 예산이나 링크 미부합으로 누락된 fact를 저장 사실의 삭제·철회·부정으로 해석하지 않는다.
+  - **상시 블록(`Standing`)**: Keeper 정체성, 지속 선호, 권한 경계, 현재 Task/Goal 주소만 포함하며, 넓은 분류(`category=constraint`)만으로 상시 승격하지 않는다.
+  - **후보 선정(`Candidate`)**: 현재 턴의 Task(`Task of task_id`), Goal(`Goal of goal_id`), 자극(`Stimulus of stimulus_id`)과 타입화 링크(`typed link`)가 확인된 사실만 후보가 되며, 비연결 사실에 최신순·문자열 유사도 점수를 임의 적용하지 않는다.
+  - **조건부 유효성과 만료(`Validity & Expiry`)**: 유효성(`Unconditional | Conditional of condition`)은 사건 증거가 확인되었을 때만 만료(`Expired`)하며, 상태를 읽지 못했을 때는 유효나 만료로 단정하지 않고 미확인(`Unknown`)으로 다룬다.
+  - **적용 권한 고정과 철회(`Recall Scope & Withdrawal`)**: 모든 정상 투영은 `Recall_scope = Current_projection_only`를 선언하여 과거 턴 Recall projection의 본문과 조건이 현재 턴의 근거가 아님을 확정한다. 용량 정책 위반(`Invalid_capacity_policy`)이나 예산 초과(`Budget_overrun`) 시에는 과거 적용 권한을 즉시 끝내는 고정 제어 블록(`Recall_withdrawn`)을 발행한다.
+  - **식별자 및 원자적 번들**: 식별자는 `Ordinary { keeper_id; memory_id } | Source_bound { keeper_id; claim_id }`의 닫힌 형태를 따르고, 일반·소스·메타데이터 3대 스냅샷은 불변 번들(`Recall_snapshot_bundle`)과 CAS 매니페스트로 원자적 출판 경계를 유지한다.
+  → [Keeper_memory_os_recall](../../lib/keeper/keeper_memory_os_recall.mli) · [keeper_memory_source_current](../../lib/keeper/keeper_memory_source_current.ml) · [RFC-memory-os-recall-selection](../../docs/rfc/RFC-memory-os-recall-selection.md)
 
 **Workspace Memory Ledger (작업공간 기억 원장)**
 : Workspace Curator가 변경된 Keeper 사실을 기존 주장·충돌에 합류시키거나 새 항목을 만들고, 제외 이유를 기록한 원장. 다른 Keeper의 가까운 사실은 판정 맥락이고 선택된 변경 사실만 분류한다. 원장은 Keeper Memory OS를 바꾸지 않으며, 모델 분류가 의미 검증이나 사실 승격을 뜻하지 않는다. Keeper는 주장·충돌 목록을 본 뒤 ID별로 현재 원문 상태를 읽는다. 스토어를 읽지 못한 사실은 사라진 사실로 단정하지 않는다.

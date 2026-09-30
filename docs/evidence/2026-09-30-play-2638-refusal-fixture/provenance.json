@@ -1,0 +1,14 @@
+{
+  "head": "2638b8bb35a6fc14b29407000d53f0e3c68bfc95",
+  "run": 36665136571,
+  "test_step": "failure",
+  "resolved_native_suites": 9,
+  "passed_native_suites": 8,
+  "failed_native_suites": 1,
+  "unresolved_requests": [
+    "test_credential_index_cache",
+    "tui_play_invites_pty"
+  ],
+  "raw_sha256": "f4998e968f539c67e6cc46596c305d1b18d8df804d9afd30baa087dbfa1f041f",
+  "raw_bytes": 116805
+}

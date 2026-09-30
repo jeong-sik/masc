@@ -1,0 +1,3 @@
+# Play refreshed-source failure evidence
+
+Head2638b8bb35a6fc14b29407000d53f0e3c68bfc95, Test36665136571, Test step failed. Nine native requests resolved: eight suites passed and play_credential_transaction failed two assertions expecting error to carry the discriminant; Server_refusal places it in code. Two requests did not resolve because their names omitted auth/test prefixes. Head6714 fixes the two assertions; subsequent requests use test_auth_credential_index_cache and test_tui_play_invites_pty. Their results are pending. This failed run does not validate the corrected head or any installed runtime.

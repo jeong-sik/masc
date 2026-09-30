@@ -23,10 +23,13 @@ from urllib.request import Request
 import keeper_skill_use_proof as proof
 import proof_http
 import produce_natural_keeper_skill_proof as natural_producer
+import skill_activation_events
 
 
 JOIN_SCHEMA = "masc.natural-keeper-skill-ledger-join/v2"
 HISTORICAL_PROJECTION_SCHEMA = "masc.dashboard.skill-activations/v1"
+DURABLE_EVENTS_BEFORE = "durable-skill-activation-events-before.jsonl"
+DURABLE_EVENTS_AFTER = "durable-skill-activation-events-after.jsonl"
 
 
 class JoinError(RuntimeError):
@@ -432,13 +435,13 @@ def validate_dashboard_ledger(
     require(projection.get("keeper_name") == keeper, "Skill ledger Keeper differs")
     ledger = required_object(projection, "ledger", "Skill ledger projection")
     require(
-        ledger.get("schema") == proof.LEDGER_SCHEMA,
+        ledger.get("schema") == skill_activation_events.LEDGER_SCHEMA,
         "Skill ledger schema is unsupported",
     )
     require(ledger == durable_ledger, "Dashboard ledger differs from durable ledger")
     require(
         required_string(ledger, "revision", "Skill ledger")
-        == proof.ledger_revision(ledger),
+        == skill_activation_events.ledger_revision(ledger),
         "Skill ledger revision differs from canonical content",
     )
     activations = required_list(ledger, "activations", "Skill ledger")
@@ -587,7 +590,7 @@ def validate_effective_keeper_surface(
 
 def validate_durable_ledger(ledger: dict[str, Any], *, trace_id: str) -> dict[str, Any]:
     require(
-        ledger.get("schema") == proof.LEDGER_SCHEMA,
+        ledger.get("schema") == skill_activation_events.LEDGER_SCHEMA,
         "durable Skill ledger schema is unsupported",
     )
     require(
@@ -596,7 +599,7 @@ def validate_durable_ledger(ledger: dict[str, Any], *, trace_id: str) -> dict[st
     )
     require(
         required_string(ledger, "revision", "durable Skill ledger")
-        == proof.ledger_revision(ledger),
+        == skill_activation_events.ledger_revision(ledger),
         "durable Skill ledger revision differs from canonical content",
     )
     activations = required_list(ledger, "activations", "durable Skill ledger")
@@ -789,15 +792,12 @@ def validate_join(
     )
     require(after_identity == before_identity, "server restarted during ledger join")
     durable = validate_durable_ledger(durable_ledger, trace_id=producer["trace_id"])
-    try:
-        decoded_durable = proof.decode_json(
-            durable_ledger_raw, "durable Skill ledger bytes before join"
-        )
-        decoded_durable_after = proof.decode_json(
-            durable_ledger_after_raw, "durable Skill ledger bytes after join"
-        )
-    except proof.ProofError as error:
-        raise JoinError(str(error)) from error
+    decoded_durable = fold_durable_ledger(
+        durable_ledger_raw, "durable Skill ledger bytes before join"
+    )
+    decoded_durable_after = fold_durable_ledger(
+        durable_ledger_after_raw, "durable Skill ledger bytes after join"
+    )
     require(
         decoded_durable == durable_ledger,
         "durable Skill ledger object differs from its bytes before join",
@@ -905,6 +905,13 @@ def validate_join(
     }
 
 
+def fold_durable_ledger(raw: bytes, context: str) -> dict[str, Any] | None:
+    try:
+        return skill_activation_events.fold_event_log(raw)
+    except skill_activation_events.SkillLedgerError as error:
+        raise JoinError(f"{context}: {error}") from error
+
+
 def read_durable_ledger(
     *, effective_masc_root: str, session_id: str
 ) -> tuple[dict[str, Any], bytes, Path]:
@@ -916,10 +923,10 @@ def read_durable_ledger(
         session_id not in (".", ".."), "Skill session id is not a valid path component"
     )
     traces_root = (Path(effective_masc_root) / "traces").resolve(strict=True)
-    ledger_path = traces_root / session_id / "skill-activations.json"
-    require(not ledger_path.is_symlink(), "durable Skill ledger must not be a symlink")
+    events_path = traces_root / session_id / skill_activation_events.EVENTS_FILENAME
+    require(not events_path.is_symlink(), "durable Skill ledger must not be a symlink")
     try:
-        resolved = ledger_path.resolve(strict=True)
+        resolved = events_path.resolve(strict=True)
         require(
             resolved.parent.parent == traces_root,
             "durable Skill ledger escapes traces root",
@@ -931,10 +938,10 @@ def read_durable_ledger(
         raw = resolved.read_bytes()
     except OSError as error:
         raise JoinError(f"cannot read durable Skill ledger: {error}") from error
-    try:
-        return proof.decode_json(raw, f"durable Skill ledger {resolved}"), raw, resolved
-    except proof.ProofError as error:
-        raise JoinError(str(error)) from error
+    ledger = fold_durable_ledger(raw, f"durable Skill ledger {resolved}")
+    if ledger is None:
+        raise JoinError(f"durable Skill ledger {resolved} has recorded nothing")
+    return ledger, raw, resolved
 
 
 def write_json(path: Path, value: Any) -> bytes:
@@ -1061,8 +1068,8 @@ def main() -> int:
             "dashboard-tools-after.json": dashboard_after_raw,
             "historical-skill-activations-before.json": historical_raw,
             "historical-skill-activations-after.json": historical_after_raw,
-            "durable-skill-activations-before.json": durable_raw,
-            "durable-skill-activations-after.json": durable_after_raw,
+            DURABLE_EVENTS_BEFORE: durable_raw,
+            DURABLE_EVENTS_AFTER: durable_after_raw,
             "source-before.json": (
                 json.dumps(source_before, indent=2, sort_keys=True) + "\n"
             ).encode(),
@@ -1106,6 +1113,7 @@ def main() -> int:
     except (
         JoinError,
         proof.ProofError,
+        skill_activation_events.SkillLedgerError,
         FileExistsError,
         FileNotFoundError,
         subprocess.CalledProcessError,

@@ -123,7 +123,9 @@ def layout(top, title, rules, bottom, last, blank, windows=(), **pinned):
 KEEPERS = layout("blank", 3, (4, 7, 28), None, 28, 17)
 BOARD = layout("blank", 3, (4, 7, 9), None, 13, 15)
 CONFIG = layout("blank", 3, (4, 9), None, 27, 1, last_source_line=18)
-DETAIL = layout("blank", 3, (4,), None, 27, 4, ("1-22/46",))
+# The compact candle leaves one more transparent mosaic row than the old
+# portrait; the title, rule, last content row and 22-row viewport do not move.
+DETAIL = layout("blank", 3, (4,), None, 27, 5, ("1-22/46",))
 DETAIL_BESIDE_ROSTER = layout("border", 3, (4, 28), 28, 28, 0, ("1-22/46",),
                               roster={"top": 2, "bottom": 28})
 CHAT_BESIDE_ROSTER = layout("blank", 3, (4, 26), None, 29, 19,
@@ -193,7 +195,7 @@ def fixtures() -> region.ServedFixtures:
     served[h.SCHEDULES_PATH] = (200, {
         "status": "ok", "schedule_runner": h.SCHEDULE_RUNNER_OK,
         "schedule_store_read_error": None, "request_count": 0,
-        "truncated": False, "fsm": {"next_due_at_iso": None}, "requests": [],
+        "truncated": False, "fsm": {"next_due_at": None}, "requests": [],
     })
     served[h.KEEPER_LANES_PATH] = h.keeper_lanes_response([])
     served["/api/v1/keepers/turns"] = (200, {

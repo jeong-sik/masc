@@ -93,15 +93,16 @@ let config_load_failure_diagnostic ~detail =
      Fix the configuration above or move the file aside. Run masc runtime-verify <RUNTIME_ID> to re-check a model connection afterwards."
     detail
 
-let load_exact_output_lane_declarations ?config_root () =
+let load_exact_output_lane_declarations ?config_path ?config_root () =
   let runtime_config_path =
-    match config_root with
-    | Some config_root ->
+    match config_path, config_root with
+    | Some path, _ -> Some path
+    | None, Some config_root ->
       let path =
         Filename.concat config_root Config_dir_resolver.runtime_toml_filename
       in
       if Sys.file_exists path then Some path else None
-    | None -> Runtime.config_path ()
+    | None, None -> Runtime.config_path ()
   in
   match runtime_config_path with
   | None ->
@@ -227,9 +228,9 @@ let warn_browser_stagehand_slots registry =
 (* The lanes runtime.toml declares, refused when a mandatory one is unusable,
    and the catalog the loaded runtimes give them. Boot publishes from these;
    the deployment preflight only asks whether it could. *)
-let exact_output_lanes_and_catalog ?config_root () =
+let exact_output_lanes_and_catalog ?config_path ?config_root () =
   let config_path, lanes =
-    load_exact_output_lane_declarations ?config_root ()
+    load_exact_output_lane_declarations ?config_path ?config_root ()
   in
   require_explicit_mandatory_exact_output_lanes ~config_path lanes;
   let runtimes, (_ : string list) = Runtime.runtimes_and_media_failover () in
@@ -259,8 +260,8 @@ let exact_output_registry_refused detail =
   Env_config_core.Config_error ("exact-output resolver-and-lane registry: " ^ detail)
 ;;
 
-let configure_exact_output_registry ?config_root () =
-  let lanes, catalog = exact_output_lanes_and_catalog ?config_root () in
+let configure_exact_output_registry ?config_path ?config_root () =
+  let lanes, catalog = exact_output_lanes_and_catalog ?config_path ?config_root () in
   (* Logged before the registry is published, so it is said even when
      publication fails. *)
   Runtime.warn_exact_slot_degradation catalog.Runtime.catalog_exact_slots;
@@ -304,8 +305,13 @@ let install_domain_pool_references domain_pool =
   Executor_pool_ref.set (Domain_pool.executor_pool domain_pool)
 ;;
 
+let publish_exact_output_registry_from_file ~config_path =
+  configure_exact_output_registry ~config_path ()
+;;
+
 module For_testing = struct
-  let configure_exact_output_registry = configure_exact_output_registry
+  let configure_exact_output_registry ?config_root () =
+    configure_exact_output_registry ?config_root ()
   let mandatory_exact_output_lane_violations = mandatory_exact_output_lane_violations
 
   let require_explicit_mandatory_exact_output_lanes =

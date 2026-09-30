@@ -21,8 +21,9 @@ val handle_goal_list
     fields, which belong to [masc_goal_transition]. Lifecycle field errors are
     reported via the dedicated
     [goal_upsert_lifecycle_error] formatter. A committed write remains successful
-    if a subsequent event append fails. [event_recordings] reports each snapshot
-    and criterion-induced phase event as [recorded] or [failed]; a failed entry
+    if a subsequent event append fails. [event_recordings] reports each snapshot,
+    criterion-induced phase event and exact due-date/priority edit event as
+    [recorded] or [failed]; a failed entry
     carries the attempted payload and error. Cancellation still propagates. *)
 val handle_goal_upsert
   :  tool_name:string

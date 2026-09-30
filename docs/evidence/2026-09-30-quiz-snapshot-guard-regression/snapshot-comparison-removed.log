@@ -1,0 +1,17 @@
+F
+======================================================================
+FAIL: test_rotating_bytes_with_the_same_incarnation_refuses_then_recovers (__main__.Grader.test_rotating_bytes_with_the_same_incarnation_refuses_then_recovers)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/masc-quiz-snapshot-guard-mutant-f3moe_5v/addons/tests/test_quiz_lane.py", line 398, in test_rotating_bytes_with_the_same_incarnation_refuses_then_recovers
+    self.assertEqual(refused["status"], "failed_before_effect")
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'confirmed' != 'failed_before_effect'
+- confirmed
++ failed_before_effect
+
+
+----------------------------------------------------------------------
+Ran 1 test in 0.132s
+
+FAILED (failures=1)

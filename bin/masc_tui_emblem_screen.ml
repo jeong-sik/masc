@@ -3,6 +3,7 @@ module Draw = Keeper_portrait_draw
 
 type drawn =
   | Moving
+  | Still
   | Absent
 
 type laid_out = {
@@ -154,6 +155,176 @@ let rows ~style ~cols ~rows ~caption ~elapsed ~display ~project ~origin:(origin_
   in
   { drawn = (match picture with Some _ -> Moving | None -> Absent); lines; placement }
 
+(* The 150 ms motion step shared with the TUI reaches this frame after
+   2.1 seconds. It is a terminal state: no later frame asks for a repaint. *)
+let final_frame = 14
+
+(* Only the candle changes pose during the arrival. Keeper portraits already
+   use their 32-entry still-image cache; these sixteen entries cap the candle
+   at 16 * 512 * 512 * 4 = 16,777,216 RGBA bytes in the largest dotted mode.
+   The ordinary candle renderer still keeps only its last picture. *)
+let about_frame_capacity = 16
+let about_frame_cache : (picture_key * Draw.image) list ref = ref []
+let about_cached_frames () = List.length !about_frame_cache
+
+let render_about key =
+  match List.assoc_opt key !about_frame_cache with
+  | Some image -> image
+  | None ->
+      let image = render key in
+      about_frame_cache :=
+        (key, image) :: !about_frame_cache
+        |> List.filteri (fun index _ -> index < about_frame_capacity);
+      image
+
+type about_laid_out = {
+  drawn : drawn;
+  lines : string list;
+  placements : View.placement list;
+  visible_keepers : int;
+}
+
+type scene_piece = {
+  left : int;
+  image_id : int;
+  box : View.box;
+  image : Draw.image;
+  lines : string list;
+}
+
+let about_keeper_image_id = function
+  | 0 -> Masc_tui_graphics.image_id Masc_tui_graphics.About_keeper_1
+  | 1 -> Masc_tui_graphics.image_id Masc_tui_graphics.About_keeper_2
+  | 2 -> Masc_tui_graphics.image_id Masc_tui_graphics.About_keeper_3
+  | _ -> Masc_tui_graphics.image_id Masc_tui_graphics.About_keeper_4
+
+(* Newest portrait by name and edge, with the existing 32-entry bound. At the
+   largest pixel box here (160 square), this holds at most 3,276,800 RGBA
+   bytes. The scene does not cache a frame for every animation tick. *)
+let about_portraits = Masc_tui_keeper_portrait.cache ()
+
+let about_rows ~style ~cols ~rows ~caption ~frame ~keepers
+    ~display ~project ~origin:(origin_row, origin_col) =
+  let picture_box =
+    View.fit display ~max_cols:16 ~max_rows:(min 8 (max 0 (rows - List.length caption - 2)))
+  in
+  let picture_rows = match picture_box with Some box -> box.View.rows | None -> 0 in
+  let max_portraits =
+    match picture_box with
+    | Some box when cols >= 5 * box.View.cols -> 4
+    | Some box when cols >= 3 * box.View.cols -> 2
+    | Some _ -> 0
+    | None -> 4
+  in
+  let name_budget =
+    max 0 (rows - picture_rows - List.length caption - (if picture_rows > 0 then 2 else 1))
+  in
+  let rec choose chosen used = function
+    | name :: rest when List.length chosen < max_portraits ->
+        let wrapped = Masc_tui_message_layout.wrap_words ~max_cells:(max 1 cols) name in
+        let overflow_rows = if rest = [] then 0 else 1 in
+        if used + List.length wrapped + overflow_rows <= name_budget then
+          choose (name :: chosen) (used + List.length wrapped) rest
+        else List.rev chosen
+    | _ -> List.rev chosen
+  in
+  let visible = choose [] 0 keepers in
+  let visible_count = List.length visible in
+  let hidden_count = max 0 (List.length keepers - visible_count) in
+  let frame = max 0 (min final_frame frame) in
+  let proximity =
+    if frame <= 7 then frame else if frame < final_frame then final_frame - frame else 0
+  in
+  let pieces =
+    match picture_box with
+    | None -> []
+    | Some box ->
+        let edge = box.View.cols in
+        let centre = (cols - edge) / 2 in
+        let candle =
+          { left = centre;
+            image_id = Masc_tui_graphics.image_id Masc_tui_graphics.Mascot;
+            box;
+            image = render_about (key_of style display box
+              (if frame = final_frame then Held else At (frame * 150)));
+            lines = [] }
+        in
+        let spread, gathered =
+          match visible_count with
+          | 0 -> ([], [])
+          | 1 -> ([0], [centre - edge])
+          | 2 -> ([0; cols - edge], [centre - edge; centre + edge])
+          | 3 ->
+              ([0; edge; cols - edge],
+               [centre - (2 * edge); centre - edge; centre + edge])
+          | _ ->
+              ([0; edge; cols - (2 * edge); cols - edge],
+               [centre - (2 * edge); centre - edge; centre + edge; centre + (2 * edge)])
+        in
+        let portraits =
+          List.mapi
+            (fun index name ->
+              let far = List.nth spread index in
+              let near = List.nth gathered index in
+              let left = far + ((near - far) * proximity / 7) in
+              { left;
+                image_id = about_keeper_image_id index;
+                box;
+                image = Masc_tui_keeper_portrait.image about_portraits ~name box.View.size;
+                lines = [] })
+            visible
+        in
+        List.map
+          (fun piece ->
+            { piece with lines = View.lines ~project display piece.box piece.image })
+          (candle :: portraits)
+  in
+  let pieces = List.sort (fun a b -> Int.compare a.left b.left) pieces in
+  let picture_lines =
+    List.init picture_rows (fun row ->
+      let rec gather column = function
+        | [] -> ""
+        | piece :: rest ->
+            let left = max column piece.left in
+            String.make (left - column) ' '
+            ^ List.nth piece.lines row
+            ^ gather (left + piece.box.View.cols) rest
+      in
+      gather 0 pieces)
+  in
+  let names =
+    List.concat_map
+      (Masc_tui_message_layout.wrap_words ~max_cells:(max 1 cols))
+      visible
+    |> List.map (centred ~cols)
+  in
+  let overflow =
+    if hidden_count = 0 then []
+    else [centred ~cols (Printf.sprintf "+%d more Keepers" hidden_count)]
+  in
+  let gap = if picture_lines = [] then [] else [""] in
+  let block = picture_lines @ gap @ names @ overflow @ List.map (centred ~cols) caption in
+  let top = max 0 ((rows - List.length block) / 2) in
+  let lines =
+    List.filteri (fun index _ -> index < max 0 rows)
+      (List.init top (fun _ -> "") @ block)
+  in
+  let placements =
+    match display with
+    | View.Pixels _ ->
+        List.map
+          (fun piece ->
+            { View.image_id = piece.image_id;
+              row = origin_row + top;
+              column = origin_col + piece.left;
+              box = piece.box;
+              image = piece.image })
+          pieces
+    | View.Mosaic | View.No_picture -> []
+  in
+  { drawn = (if pieces = [] then Absent else if frame = final_frame then Still else Moving);
+    lines; placements; visible_keepers = visible_count }
+
 type keeper_count =
   | Keepers_read of int
   | Keepers_unreadable
@@ -182,4 +353,14 @@ let body ~cols ~rows:height ~caption ~elapsed ~origin =
   in
   last_drawn := laid_out.drawn;
   Option.iter View.request laid_out.placement;
+  laid_out.lines
+
+let about_body ~cols ~rows:height ~caption ~frame ~keepers ~origin =
+  let laid_out =
+    about_rows ~style:!chosen_style ~cols ~rows:height ~caption ~frame
+      ~keepers ~display:(View.current_display ())
+      ~project:Masc_tui_terminal_palette.best_color ~origin
+  in
+  last_drawn := laid_out.drawn;
+  List.iter View.request laid_out.placements;
   laid_out.lines

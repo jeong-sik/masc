@@ -996,19 +996,36 @@ let parse_args () =
   , reasoning_visibility
   , tool_visibility )
 
-let save_message_draft state =
+let save_message_draft ?workspace state =
   match state.msg_target_keeper_name with
   | None -> ()
   | Some keeper_name ->
-      let other_drafts =
-        List.filter
-          (fun (name, _) -> not (String.equal name keeper_name))
-          state.msg_drafts
-      in
-      let text = Buffer.contents state.msg_input in
+      let workspace = match workspace with
+        | Some workspace -> workspace
+        | None -> state.workspace_identity in
+      let key = workspace, keeper_name in
+      let others = List.remove_assoc key state.msg_drafts in
+      let draft = { kcd_text = Buffer.contents state.msg_input;
+        kcd_attachments = state.msg_attachments;
+        kcd_references = state.msg_references;
+        kcd_since = state.msg_attachments_since } in
       state.msg_drafts <-
-        if String.equal text "" then other_drafts
-        else (keeper_name, text) :: other_drafts
+        if String.equal draft.kcd_text "" && draft.kcd_attachments = []
+           && draft.kcd_references = [] then others
+        else (key, draft) :: others
+
+let restore_message_draft state keeper_name =
+  Buffer.clear state.msg_input;
+  state.msg_attachments <- [];
+  state.msg_references <- [];
+  state.msg_attachments_since <- None;
+  match List.assoc_opt (state.workspace_identity, keeper_name) state.msg_drafts with
+  | None -> ()
+  | Some draft ->
+      Buffer.add_string state.msg_input draft.kcd_text;
+      state.msg_attachments <- draft.kcd_attachments;
+      state.msg_references <- draft.kcd_references;
+      state.msg_attachments_since <- draft.kcd_since
 
 let recovered_paste_send_locked_for state keeper_name =
   match keeper_name with
@@ -1290,9 +1307,7 @@ let open_message_for_keeper ?(return_to = Keeper_chat_return_detail) state
   state.msg_live <- live_for_keeper state keeper_name;
   state.msg_return <- return_to;
   state.keeper_message_focus <- Right_pane;
-  Buffer.clear state.msg_input;
-  List.assoc_opt keeper_name state.msg_drafts
-  |> Option.iter (Buffer.add_string state.msg_input);
+  restore_message_draft state keeper_name;
   drain_queue ()
 
 (* Leaving puts the draft away, and a line held only for that compose
@@ -1326,10 +1341,11 @@ let clear_current_message_draft state =
 let consume_dispatched_message_draft state request =
   state.msg_drafts <-
     List.filter
-      (fun (keeper_name, text) ->
+      (fun ((workspace, keeper_name), draft) ->
         not
-          (String.equal keeper_name request.Keeper_chat.keeper_name
-           && String.equal text request.message))
+          (workspace = state.workspace_identity
+           && String.equal keeper_name request.Keeper_chat.keeper_name
+           && String.equal draft.kcd_text request.message))
       state.msg_drafts;
   match state.msg_target_keeper_name with
   | Some keeper_name
@@ -2035,6 +2051,7 @@ let decode_play_mutation decode = function
   | Masc_tui_http.Post_unanswered detail -> Play_unanswered detail
 
 type async_msg =
+  | Workspace_scoped of workspace_authority * async_msg
   | Lane_package_preview_loaded of int * string * (Yojson.Safe.t, string) result
   | Keeper_queue_loaded of string * int option * Masc_tui_queue_inspection.action * (string list, string) result
   | Lane_addons_loaded of int * (lane_addons_reply, lane_addons_failure) result
@@ -2074,9 +2091,9 @@ type async_msg =
   | Voice_failed of { keeper : string; error : string }
   | Http_refresh_done of http_refresh_outcome
   | Http_refresh_failed of string * Approval.Listing_order.ticket option
-  | Http_scoped_refresh_done of http_scoped_surface_results
+  | Http_scoped_refresh_done of workspace_authority * http_scoped_surface_results
   | Http_scoped_refresh_failed of
-      string * Approval.Listing_order.ticket option
+      workspace_authority * string * Approval.Listing_order.ticket option
   | Board_post_refresh_done of
       Board_detail.request * (board_post * board_comment list, string) result
   | Approval_decision_done of
@@ -2474,6 +2491,40 @@ let enqueue_async mailbox msg =
   Eio.Stream.add mailbox
     { ready_at_ns = Mtime_clock.elapsed_ns (); message = msg }
 
+(* Capture authority at dispatch. Keeper-name equality cannot authorize a
+   reply after the server changed workspace, including A -> B -> A. *)
+let workspace_enqueue state =
+  let authority = state.workspace_authority in
+  fun mailbox message -> enqueue_async mailbox (Workspace_scoped (authority, message))
+
+(* Retire the cancellation context synchronously at the authority boundary,
+   including while a request is connecting. Completion stamps also reject a
+   reply already queued before withdrawal; admitted server effects remain. *)
+let fork_workspace_job state ~sw run =
+  let exception Workspace_withdrawn in
+  let authority = state.workspace_authority in
+  let context = ref None in
+  let withdrawn = ref false in
+  let token = ref () in
+  let cancel () =
+    withdrawn := true;
+    Option.iter (fun context -> Eio.Cancel.cancel context Workspace_withdrawn) !context
+  in
+  state.workspace_cancellations <- (token, cancel) :: state.workspace_cancellations;
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+    Fun.protect
+      ~finally:(fun () ->
+        context := None;
+        state.workspace_cancellations <-
+          List.filter (fun (held, _) -> held != token) state.workspace_cancellations)
+      (fun () ->
+        try
+          Eio.Cancel.sub (fun cancellation ->
+            context := Some cancellation;
+            if not !withdrawn && authority = state.workspace_authority then run ())
+        with Eio.Cancel.Cancelled Workspace_withdrawn -> ());
+    `Stop_daemon)
+
 (* Wire the web-link-preview background fetcher. On the first cache miss for a
    URL, Masc_tui_link_preview renders the synthesized card immediately and calls
    this hook; the fetched <title>/og:* then replace that entry in the shared
@@ -2587,14 +2638,14 @@ let append_user_history_once ~submitted_at state
       (Message_user (Sent_by_operator { surface = None }))
       request.message
 
-let enqueue_dispatch_ack mailbox make_message =
+let enqueue_dispatch_ack ~enqueue mailbox make_message =
   let acknowledged, acknowledge = Eio.Promise.create () in
-  enqueue_async mailbox (make_message acknowledge);
+  enqueue mailbox (make_message acknowledge);
   Eio.Promise.await acknowledged
 
-let enqueue_dispatch_start mailbox request was_replay =
+let enqueue_dispatch_start ~enqueue mailbox request was_replay =
   let acknowledged, acknowledge = Eio.Promise.create () in
-  enqueue_async mailbox
+  enqueue mailbox
     (Keeper_chat_dispatch_started (request, was_replay, acknowledge));
   Eio.Promise.await acknowledged
 
@@ -2759,7 +2810,8 @@ let start_masc_server_here ~base_path ~host ~port ~note ~on_ready =
    id-less acceptance, which would inherit that seq while the leftover bytes
    glued onto the next chunk -- so each (re)connect starts a fresh one and
    asks the server to resume from the log's last seq instead. *)
-let post_keeper_chat_watching ~control_generation ~admission_intent ~mailbox ~port ~log request =
+let post_keeper_chat_watching ~enqueue ~control_generation ~admission_intent ~mailbox ~port ~log request =
+  let enqueue_async = enqueue in
   let host = server_peer_host in
   match Eio_context.get_clock_opt () with
   | None ->
@@ -2884,6 +2936,8 @@ let settle_live_turn state (request : Keeper_chat.request) =
    of a pane's transcript. *)
 let launch_surface_tool_approval state ~mailbox ~keeper_name ~tool_call_id
     ~allow =
+  let enqueue_async = workspace_enqueue state in
+  let authority = state.workspace_authority in
   (* Answering a held tool call mutates server state over one round trip, like
      the Gate and operator-confirm decisions beside it. Take the same
      single-action slot so the header shows [submitting] at once and a repeat
@@ -2899,7 +2953,8 @@ let launch_surface_tool_approval state ~mailbox ~keeper_name ~tool_call_id
       let run () =
         let result =
           try
-            Masc_tui_http.post_keeper_tool_approval ~host ~port ~keeper_name
+            if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
+            else Masc_tui_http.post_keeper_tool_approval ~host ~port ~keeper_name
               ~tool_call_id ~allow
           with
           | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -2911,9 +2966,7 @@ let launch_surface_tool_approval state ~mailbox ~keeper_name ~tool_call_id
       in
       match Eio_context.get_switch_opt () with
       | Some sw ->
-          Eio.Fiber.fork_daemon ~sw (fun () ->
-              run ();
-              `Stop_daemon)
+          fork_workspace_job state ~sw run
       | None ->
           enqueue_async mailbox
             (Surface_tool_approval_answered
@@ -2927,6 +2980,7 @@ let launch_surface_tool_approval state ~mailbox ~keeper_name ~tool_call_id
    same reason every loader runs on one: a slow server costs the refresh, not
    the keypress. *)
 let launch_keeper_tool_approvals_load ?(intent = Snapshot_read.Poll) state ~mailbox =
+  let enqueue_async = workspace_enqueue state in
   let read, request = Snapshot_read.start ~intent state.keeper_tool_approvals_read in
   state.keeper_tool_approvals_read <- read;
   match request with
@@ -3419,6 +3473,7 @@ let launch_dos_live_poll (state : Masc_tui_types.state) ~mailbox =
 ;;
 
 let launch_keeper_turns_load state ~mailbox =
+  let enqueue_async = workspace_enqueue state in
   if state.keeper_turns_inflight then ()
   else begin
     state.keeper_turns_inflight <- true;
@@ -3434,6 +3489,7 @@ let launch_keeper_turns_load state ~mailbox =
   end
 
 let launch_gate_snapshot_load ?(intent = Snapshot_read.Poll) state ~mailbox =
+  let enqueue_async = workspace_enqueue state in
   let read, request = Snapshot_read.start ~intent state.gate_snapshot_read in
   state.gate_snapshot_read <- read;
   match request with
@@ -3450,6 +3506,8 @@ let launch_gate_snapshot_load ?(intent = Snapshot_read.Poll) state ~mailbox =
    labeled option, because a trailing [?reason] here is unerasable
    (warning 16). *)
 let launch_gate_resolve state ~mailbox ~approval_id ~approve ~reason =
+  let enqueue_async = workspace_enqueue state in
+  let authority = state.workspace_authority in
   (* A Gate decision mutates durable server state over one round trip. Take the
      same single-action slot the operator-confirm path takes, so the header
      draws [submitting] the instant the key lands and a second press during the
@@ -3465,7 +3523,8 @@ let launch_gate_resolve state ~mailbox ~approval_id ~approve ~reason =
       let run () =
         let result =
           try
-            Masc_tui_http.post_dashboard_gate_resolve ~host ~port ~approval_id
+            if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
+            else Masc_tui_http.post_dashboard_gate_resolve ~host ~port ~approval_id
               ~approve ~reason
           with
           | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -3476,9 +3535,7 @@ let launch_gate_resolve state ~mailbox ~approval_id ~approve ~reason =
       in
       match Eio_context.get_switch_opt () with
       | Some sw ->
-          Eio.Fiber.fork_daemon ~sw (fun () ->
-              run ();
-              `Stop_daemon)
+          fork_workspace_job state ~sw run
       | None ->
           enqueue_async mailbox
             (Gate_approval_resolved
@@ -3488,6 +3545,8 @@ let launch_gate_resolve state ~mailbox ~approval_id ~approve ~reason =
                  generation )))
 
 let launch_gate_auto_judge_retry state ~mailbox (pending : Tui_decode.gate_pending) =
+  let enqueue_async = workspace_enqueue state in
+  let authority = state.workspace_authority in
   match pending.gp_retry_request with
   | None ->
       report_action state "system"
@@ -3502,7 +3561,10 @@ let launch_gate_auto_judge_retry state ~mailbox (pending : Tui_decode.gate_pendi
           let port = state.port in
           let run () =
             let result =
-              try Masc_tui_http.post_dashboard_gate_retry ~host ~port ~request with
+              try
+                if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
+                else Masc_tui_http.post_dashboard_gate_retry ~host ~port ~request
+              with
               | Eio.Cancel.Cancelled _ as exn -> raise exn
               | exn -> Error (Printexc.to_string exn)
             in
@@ -3511,9 +3573,7 @@ let launch_gate_auto_judge_retry state ~mailbox (pending : Tui_decode.gate_pendi
           in
           match Eio_context.get_switch_opt () with
           | Some sw ->
-              Eio.Fiber.fork_daemon ~sw (fun () ->
-                  run ();
-                  `Stop_daemon)
+              fork_workspace_job state ~sw run
           | None ->
               enqueue_async mailbox
                 (Gate_auto_judge_retried
@@ -3522,12 +3582,15 @@ let launch_gate_auto_judge_retry state ~mailbox (pending : Tui_decode.gate_pendi
                      generation )))
 
 let launch_gate_mode_set state ~mailbox ~lane ~mode =
+  let enqueue_async = workspace_enqueue state in
+  let authority = state.workspace_authority in
   let host = server_peer_host in
   let port = state.port in
   let run () =
     let result =
       try
-        (match lane with
+        if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
+        else (match lane with
          | Workspace_gate -> Masc_tui_http.post_dashboard_gate_workspace_mode ~host ~port ~mode
          | External_gate -> Masc_tui_http.post_dashboard_gate_external_mode ~host ~port ~mode)
       with
@@ -3538,14 +3601,14 @@ let launch_gate_mode_set state ~mailbox ~lane ~mode =
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
+      fork_workspace_job state ~sw run
   | None ->
       enqueue_async mailbox
         (Gate_mode_set (lane, mode, Error "Eio switch is unavailable"))
 
 let launch_keeper_tool_modes_load state ~mailbox =
+  let enqueue_async = workspace_enqueue state in
+  let authority = state.workspace_authority in
   (* Declines while the operator's own press is still in flight: the answer
      on the way back would be the stance from before it. This checks the
      press slot directly rather than reserving a shared refresh generation
@@ -3565,7 +3628,9 @@ let launch_keeper_tool_modes_load state ~mailbox =
     let port = state.port in
     let run () =
       let result =
-        try Masc_tui_loader.load_keeper_tool_approval_modes ~host ~port with
+        try
+          if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
+          else Masc_tui_loader.load_keeper_tool_approval_modes ~host ~port with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn -> Error (Printexc.to_string exn)
       in
@@ -3575,7 +3640,9 @@ let launch_keeper_tool_modes_load state ~mailbox =
          two different moments beside each other. No generation guard: this
          listing has no operator press to be superseded by. *)
       let settings =
-        try Masc_tui_loader.load_keeper_gate_settings ~host ~port with
+        try
+          if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
+          else Masc_tui_loader.load_keeper_gate_settings ~host ~port with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn -> Error (Printexc.to_string exn)
       in
@@ -3583,14 +3650,14 @@ let launch_keeper_tool_modes_load state ~mailbox =
     in
     (match Eio_context.get_switch_opt () with
      | Some sw ->
-         Eio.Fiber.fork_daemon ~sw (fun () ->
-             run ();
-             `Stop_daemon)
+         fork_workspace_job state ~sw run
      | None ->
          enqueue_async mailbox
            (Keeper_tool_modes_loaded (Error "Eio switch is unavailable", ticket)))
 
 let launch_keeper_tool_mode_set state ~mailbox ~keeper_name ~mode =
+  let enqueue_async = workspace_enqueue state in
+  let authority = state.workspace_authority in
   (* [begin_action] takes the newest generation, so a stance listing already
      on the wire stops being current and cannot put the old answer back on
      top of this press. It also refuses a second press while one is open. *)
@@ -3606,7 +3673,8 @@ let launch_keeper_tool_mode_set state ~mailbox ~keeper_name ~mode =
       let run () =
         let result =
           try
-            Masc_tui_http.post_keeper_tool_approval_mode ~host ~port
+            if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
+            else Masc_tui_http.post_keeper_tool_approval_mode ~host ~port
               ~keeper_name ~mode
           with
           | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -3617,9 +3685,7 @@ let launch_keeper_tool_mode_set state ~mailbox ~keeper_name ~mode =
       in
       match Eio_context.get_switch_opt () with
       | Some sw ->
-          Eio.Fiber.fork_daemon ~sw (fun () ->
-              run ();
-              `Stop_daemon)
+          fork_workspace_job state ~sw run
       | None ->
           enqueue_async mailbox
             (Keeper_tool_mode_set
@@ -3630,13 +3696,16 @@ let launch_keeper_tool_mode_set state ~mailbox ~keeper_name ~mode =
 
 let launch_keeper_approval state ~mailbox (request : Keeper_chat.request)
     ~tool_call_id ~allow =
+  let enqueue_async = workspace_enqueue state in
+  let authority = state.workspace_authority in
   let host = server_peer_host in
   let port = state.port in
   let keeper_name = request.Keeper_chat.keeper_name in
   let run () =
     let result =
       try
-        Masc_tui_http.post_keeper_tool_approval ~host ~port ~keeper_name
+        if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
+        else Masc_tui_http.post_keeper_tool_approval ~host ~port ~keeper_name
           ~tool_call_id ~allow
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -3647,9 +3716,7 @@ let launch_keeper_approval state ~mailbox (request : Keeper_chat.request)
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
+      fork_workspace_job state ~sw run
   | None ->
       enqueue_async mailbox
         (Keeper_chat_approval_answered
@@ -3757,6 +3824,7 @@ let cycle_tools_keeper state ~mailbox ~delta =
 ;;
 
 let launch_schedule_wake_history_load state ~mailbox ~schedule_id =
+  let enqueue_async = workspace_enqueue state in
   match state.schedule_wake_history_inflight with
   | Some inflight when String.equal inflight schedule_id -> ()
   | Some _ | None ->
@@ -3781,6 +3849,7 @@ let launch_schedule_wake_history_load state ~mailbox ~schedule_id =
              (Schedule_wake_history_loaded
                 (schedule_id, Error "Eio switch is unavailable")))
 let launch_keeper_schedules_load state ~mailbox ~keeper_name =
+  let enqueue_async = workspace_enqueue state in
   match state.keeper_schedules_inflight with
   | Some inflight when String.equal inflight keeper_name -> ()
   | Some _ | None ->
@@ -3800,6 +3869,7 @@ let launch_keeper_schedules_load state ~mailbox ~keeper_name =
           Masc_tui_loader.load_schedules_for_target ~host ~port ~payload_target)
 
 let launch_schedules_load ?(intent = Snapshot_read.Poll) state ~mailbox =
+  let enqueue_async = workspace_enqueue state in
   let read, request = Snapshot_read.start ~intent state.schedules_read in
   state.schedules_read <- read;
   match request with
@@ -3816,6 +3886,7 @@ let launch_schedules_load ?(intent = Snapshot_read.Poll) state ~mailbox =
    applied to is named in the message so a load that returns after the
    operator moved to another keeper is discarded, not drawn under it. *)
 let launch_keeper_calls_load ?(force = false) state ~mailbox keeper_name =
+  let enqueue_async = workspace_enqueue state in
   let same_scope =
     Option.equal String.equal state.keeper_calls_keeper (Some keeper_name)
   in
@@ -3940,6 +4011,8 @@ let launch_verification_evidence_load state ~mailbox task_id =
    opens its own session: a human-cadence browser does not earn a held
    connection, and a stale session id would be a second failure mode. *)
 let launch_keeper_deletions state ~mailbox ?retry () =
+  let enqueue_async = workspace_enqueue state in
+  let authority = state.workspace_authority in
   if not state.keeper_deletions_loading then (
     state.keeper_deletions_loading <- true;
     state.keeper_deletions_generation <- state.keeper_deletions_generation + 1;
@@ -3949,9 +4022,17 @@ let launch_keeper_deletions state ~mailbox ?retry () =
       let result =
         try
           let ( let* ) = Result.bind in
+          let check_authority () =
+            if authority = state.workspace_authority then Ok ()
+            else Error "Workspace authority withdrawn" in
+          let* () = check_authority () in
           let* () = match retry with
             | None -> Ok ()
             | Some (row : Keeper_control.deletion_row) ->
+              let* () = match state.workspace_identity with
+                | Workspace_identity_unread ->
+                  Error "Workspace identity has not been read; deletion retry unavailable"
+                | Workspace_identity_match | Workspace_identity_mismatch _ -> Ok () in
               let keeper_name = Keeper_control.deletion_keeper_name row in
               let operation_id = Masc.Keeper_shutdown_types.Operation_id.to_string (Keeper_control.deletion_operation_id row) in
               let body = Yojson.Safe.to_string (`Assoc ["keeper_name", `String keeper_name;
@@ -3959,6 +4040,7 @@ let launch_keeper_deletions state ~mailbox ?retry () =
               let path = match row.operation with
                 | Keeper_control.Runtime_shutdown _ -> "/api/v1/dashboard/keepers/deletions/retry"
                 | Configuration_removal _ -> "/api/v1/dashboard/keepers/configuration-deletions/retry" in
+              let* () = check_authority () in
               let* status, body = Masc_tui_http.http_post ~headers:(Masc_tui_http.auth_headers ())
                 ~host ~port ~path ~body in
               (match Keeper_control.classify_purge_response ~keeper_name ~status ~body with
@@ -3966,6 +4048,7 @@ let launch_keeper_deletions state ~mailbox ?retry () =
                | Rejected { detail; _ } | Paused_owner_conflict detail -> Error detail
                | _ -> Error "deletion retry response did not identify the requested operation")
           in
+          let* () = check_authority () in
           let* json = Masc_tui_http.get_json ~host ~port
             ~path:"/api/v1/dashboard/keepers/deletions" in
           Keeper_control.decode_deletion_inventory json
@@ -3975,7 +4058,7 @@ let launch_keeper_deletions state ~mailbox ?retry () =
       enqueue_async mailbox (Keeper_deletions_loaded (generation, result))
     in
     match Eio_context.get_switch_opt () with
-    | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
+    | Some sw -> fork_workspace_job state ~sw run
     | None -> enqueue_async mailbox (Keeper_deletions_loaded
         (generation, Error "Eio switch is unavailable")))
 
@@ -4049,6 +4132,7 @@ let code_scope_axes_of = function
 let code_scope_axes state = code_scope_axes_of state.code_scope
 
 let launch_code_entries_load state ~mailbox =
+  let enqueue_async = workspace_enqueue state in
   (* Read here, not inside the daemon. The daemon runs later, and the scope it
      read then was whichever one was current by then -- so a request made in
      one scope could be sent under another. *)
@@ -4075,6 +4159,7 @@ let launch_code_entries_load state ~mailbox =
             ~path:dir ()))
 
 let launch_code_file_load state ~mailbox ~path =
+  let enqueue_async = workspace_enqueue state in
   match Masc_tui_fetched.start ~equal:String.equal state.code_file ~key:path with
   | Masc_tui_fetched.Already_loading -> ()
   | Masc_tui_fetched.Started (next, request) ->
@@ -4112,6 +4197,7 @@ let code_history_entry_at_ms = function
     change.fc_at *. 1000.
 
 let launch_code_history_load state ~mailbox ~path =
+  let enqueue_async = workspace_enqueue state in
   let scope = state.code_scope in
   match
     Masc_tui_fetched.start ~equal:code_scope_path_equal state.code_history
@@ -4193,6 +4279,7 @@ let launch_code_history_load state ~mailbox ~path =
           Ok { chl_entries; chl_activity_note })
 
 let launch_code_diff_load state ~mailbox ~path =
+  let enqueue_async = workspace_enqueue state in
   match Masc_tui_fetched.start ~equal:String.equal state.code_diff ~key:path with
   | Masc_tui_fetched.Already_loading -> ()
   | Masc_tui_fetched.Started (next, request) ->
@@ -4238,6 +4325,7 @@ let pr_number_of_subject subject =
    describes the checkout on screen rather than whichever one the server
    would default to. *)
 let launch_code_blame_load state ~mailbox ~path =
+  let enqueue_async = workspace_enqueue state in
   match Masc_tui_fetched.start ~equal:String.equal state.code_blame ~key:path with
   | Masc_tui_fetched.Already_loading -> ()
   | Masc_tui_fetched.Started (next, request) ->
@@ -4663,6 +4751,7 @@ let mark_detail_read_started state ~tab ~keeper =
     ~now_ns:(Mtime_clock.elapsed_ns ())
 
 let launch_keeper_config_view state ~mailbox keeper_name =
+  let enqueue_async = workspace_enqueue state in
   let request = mark_detail_read_started state ~tab:Detail_instructions ~keeper:keeper_name in
   let host = server_peer_host in
   let port = state.port in
@@ -4672,6 +4761,7 @@ let launch_keeper_config_view state ~mailbox keeper_name =
     (fun () -> Masc_tui_loader.load_keeper_config_view ~host ~port ~keeper_name)
 
 let launch_keeper_sandbox_view state ~mailbox keeper_name =
+  let enqueue_async = workspace_enqueue state in
   let request = mark_detail_read_started state ~tab:Detail_sandbox ~keeper:keeper_name in
   let host = server_peer_host in
   let port = state.port in
@@ -4681,6 +4771,7 @@ let launch_keeper_sandbox_view state ~mailbox keeper_name =
     (fun () -> Masc_tui_loader.load_keeper_sandbox_view ~host ~port ~keeper_name)
 
 let launch_keeper_sandbox_logs state ~mailbox keeper_name =
+  let enqueue_async = workspace_enqueue state in
   let host = server_peer_host in
   let port = state.port in
   state.keeper_sandbox_logs_generation <- state.keeper_sandbox_logs_generation + 1;
@@ -4717,6 +4808,7 @@ let launch_keeper_sandbox_logs state ~mailbox keeper_name =
    read already in flight for this Keeper, so the tab asks once per visit; a
    read for a Keeper already on screen keeps its rows up while it runs. *)
 let launch_keeper_board_quarantines state ~mailbox keeper_name =
+  let enqueue_async = workspace_enqueue state in
   match
     Masc_tui_fetched.start ~equal:String.equal state.keeper_board_quarantines
       ~key:keeper_name
@@ -4749,6 +4841,8 @@ let launch_keeper_board_quarantines state ~mailbox keeper_name =
 (* Q acknowledges the oldest partition through its exact quarantine CAS. *)
 let launch_board_quarantine_requeue state ~mailbox ~keeper_name
     (item : Masc.Keeper_board_attention_quarantine_command.inventory_item) =
+  let enqueue_async = workspace_enqueue state in
+  let authority = state.workspace_authority in
   let partition_id = item.Masc.Keeper_board_attention_quarantine_command.partition_id in
   state.board_quarantine_requeue_inflight <- Some partition_id;
   let host = server_peer_host in
@@ -4757,7 +4851,8 @@ let launch_board_quarantine_requeue state ~mailbox ~keeper_name
   let run () =
     let outcome =
       try
-        Masc_tui_http.post_board_quarantine_requeue ~host ~port ~keeper_name
+        if authority <> state.workspace_authority then Masc_tui_http.Post_unanswered "Workspace authority withdrawn"
+        else Masc_tui_http.post_board_quarantine_requeue ~host ~port ~keeper_name
           ~partition_id ~request
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -4768,9 +4863,7 @@ let launch_board_quarantine_requeue state ~mailbox ~keeper_name
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
-    Eio.Fiber.fork_daemon ~sw (fun () ->
-      run ();
-      `Stop_daemon)
+    fork_workspace_job state ~sw run
   | None ->
     enqueue_async mailbox
       (Board_quarantine_requeued
@@ -4783,6 +4876,8 @@ let launch_board_quarantine_requeue state ~mailbox ~keeper_name
    remain visible: a stale or unanswered request does not silently count as
    recovered, and later candidates are still attempted. *)
 let launch_board_quarantines_bulk_requeue state ~mailbox ~keeper_name items =
+  let enqueue_async = workspace_enqueue state in
+  let authority = state.workspace_authority in
   report_action state "system"
     (Printf.sprintf "Board requeue %s: 0/%d attempted"
        (Terminal_text.single_line keeper_name) (List.length items));
@@ -4795,7 +4890,9 @@ let launch_board_quarantines_bulk_requeue state ~mailbox ~keeper_name items =
       Masc_tui_board_quarantine.requeue_all
         ~send:(fun ~partition_id ~request ->
           try
-            Masc_tui_http.post_board_quarantine_requeue
+            if authority <> state.workspace_authority then
+              Masc_tui_http.Post_unanswered "Workspace authority withdrawn"
+            else Masc_tui_http.post_board_quarantine_requeue
               ~host ~port ~keeper_name ~partition_id ~request
           with
           | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -4819,9 +4916,7 @@ let launch_board_quarantines_bulk_requeue state ~mailbox ~keeper_name items =
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
-    Eio.Fiber.fork_daemon ~sw (fun () ->
-      run ();
-      `Stop_daemon)
+    fork_workspace_job state ~sw run
   | None ->
     enqueue_async mailbox
       (Board_quarantines_bulk_requeued
@@ -4833,6 +4928,7 @@ let launch_board_quarantines_bulk_requeue state ~mailbox ~keeper_name items =
              items ))
 
 let launch_github_identity_view state ~mailbox keeper_name =
+  let enqueue_async = workspace_enqueue state in
   let request = mark_detail_read_started state ~tab:Detail_github ~keeper:keeper_name in
   let host = server_peer_host in
   let port = state.port in
@@ -4844,6 +4940,7 @@ let launch_github_identity_view state ~mailbox keeper_name =
         ~keeper_name)
 
 let launch_identity_view state ~mailbox keeper_name =
+  let enqueue_async = workspace_enqueue state in
   let request = mark_detail_read_started state ~tab:Detail_identity ~keeper:keeper_name in
   let host = server_peer_host in
   let port = state.port in
@@ -4855,12 +4952,15 @@ let launch_identity_view state ~mailbox keeper_name =
 (* Throw or clear one attached service's switch. Off keeps the token and
    catalog; the keeper's turns stop being handed that provider's tools. *)
 let launch_identity_switch state ~mailbox ~keeper_name ~provider_id ~enabled =
+  let enqueue_async = workspace_enqueue state in
+  let authority = state.workspace_authority in
   let host = server_peer_host in
   let port = state.port in
   let run () =
     let result =
       try
-        Masc_tui_http.post_identity_switch ~host ~port ~keeper_name
+        if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
+        else Masc_tui_http.post_identity_switch ~host ~port ~keeper_name
           ~provider_id ~enabled
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -4871,9 +4971,7 @@ let launch_identity_switch state ~mailbox ~keeper_name ~provider_id ~enabled =
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
+      fork_workspace_job state ~sw run
   | None ->
       enqueue_async mailbox
         (Identity_switch_set
@@ -4886,6 +4984,8 @@ let launch_identity_switch state ~mailbox ~keeper_name ~provider_id ~enabled =
    sentence saying whether it took, in the place they are already reading. *)
 let launch_identity_app_save state ~mailbox
       ~(form : Masc_tui_types.identity_app_form) =
+  let enqueue_async = workspace_enqueue state in
+  let authority = state.workspace_authority in
   let host = server_peer_host in
   let port = state.port in
   let provider_id = form.Masc_tui_types.iaf_provider in
@@ -4896,7 +4996,8 @@ let launch_identity_app_save state ~mailbox
     let result =
       try
         match
-          Masc_tui_http.post_keeper_oauth_client ~host ~port ~provider_id
+          if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
+          else Masc_tui_http.post_keeper_oauth_client ~host ~port ~provider_id
             ~client_id ~client_secret ~scopes
         with
         | Error err -> Error err
@@ -4912,21 +5013,22 @@ let launch_identity_app_save state ~mailbox
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
-    Eio.Fiber.fork_daemon ~sw (fun () ->
-      run ();
-      `Stop_daemon)
+    fork_workspace_job state ~sw run
   | None ->
     enqueue_async mailbox
       (Identity_app_saved (provider_id, Error "Eio switch is unavailable"))
 
 let launch_identity_login state ~mailbox ~keeper_name ~provider_id ~label =
+  let enqueue_async = workspace_enqueue state in
+  let authority = state.workspace_authority in
   let host = server_peer_host in
   let port = state.port in
   let run () =
     let result =
       try
         match
-          Masc_tui_http.post_keeper_oauth_login ~host ~port ~keeper_name
+          if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
+          else Masc_tui_http.post_keeper_oauth_login ~host ~port ~keeper_name
             ~provider_id
         with
         | Error err -> Login_failed err
@@ -4955,8 +5057,9 @@ let launch_identity_login state ~mailbox ~keeper_name ~provider_id ~label =
                            operator cannot select what is not on screen. It is
                            still printed below, wrapped, for the machine that has
                            no opener. *)
-                        (match Masc_tui_browser.open_url url with
-                        | Ok _ | Error _ -> ());
+                        (if authority = state.workspace_authority then
+                           match Masc_tui_browser.open_url url with
+                           | Ok _ | Error _ -> ());
                         Login_started { provider_id; label; url }
                     | Some _ | None ->
                         Login_failed "the server answered without an authorize_url"))
@@ -4970,9 +5073,7 @@ let launch_identity_login state ~mailbox ~keeper_name ~provider_id ~label =
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
+      fork_workspace_job state ~sw run
   | None ->
       enqueue_async mailbox
         (Identity_login_started
@@ -4982,6 +5083,8 @@ let launch_identity_login state ~mailbox ~keeper_name ~provider_id ~label =
    rather than a timer: a stale catalog is visible and fixable, while a timer
    is a network call nobody asked for. *)
 let launch_identity_refresh state ~mailbox ~keeper_name ~provider_ids =
+  let enqueue_async = workspace_enqueue state in
+  let authority = state.workspace_authority in
   let host = server_peer_host in
   let port = state.port in
   let run () =
@@ -4993,7 +5096,8 @@ let launch_identity_refresh state ~mailbox ~keeper_name ~provider_ids =
             | Error _ as err -> err
             | Ok () -> (
                 match
-                  Masc_tui_http.post_keeper_identity_refresh ~host ~port
+                  if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
+                  else Masc_tui_http.post_keeper_identity_refresh ~host ~port
                     ~keeper_name ~provider_id
                 with
                 | Ok _ -> Ok ()
@@ -5007,9 +5111,7 @@ let launch_identity_refresh state ~mailbox ~keeper_name ~provider_ids =
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
+      fork_workspace_job state ~sw run
   | None ->
       enqueue_async mailbox
         (Identity_refreshed (keeper_name, Error "Eio switch is unavailable"))
@@ -5693,6 +5795,7 @@ let change_bundle_relative_path (change : Masc.Tui_decode.file_change) =
 let changes_window_hours = 24.0
 
 let launch_workspace_activity state ~mailbox ~repo_id =
+  let enqueue_async = workspace_enqueue state in
   match Masc_tui_fetched.start ~equal:String.equal state.workspace_activity ~key:repo_id with
   | Masc_tui_fetched.Already_loading -> ()
   | Masc_tui_fetched.Started (next, request) ->
@@ -5732,6 +5835,7 @@ let launch_workspace_activity state ~mailbox ~repo_id =
       | None -> enqueue_async mailbox (Workspace_activity_loaded (request, Error "Eio switch is unavailable"))
 
 let launch_file_changes_load state ~mailbox ~keeper_name =
+  let enqueue_async = workspace_enqueue state in
   let host = server_peer_host in
   let port = state.port in
   Masc_tui_async_read.launch
@@ -5745,6 +5849,7 @@ let launch_file_changes_load state ~mailbox ~keeper_name =
    the fetch helper, so a request already in flight is not repeated and an
    answer for another keeper is dropped on arrival. *)
 let launch_acting_pane_changes_load state ~mailbox ~keeper_name =
+  let enqueue_async = workspace_enqueue state in
   match
     Masc_tui_fetched.start ~equal:String.equal state.acting_pane_changes
       ~key:keeper_name
@@ -5794,6 +5899,7 @@ let ensure_acting_pane_changes state ~mailbox =
 
 let launch_keeper_chat_file_changes_load ?(force = false) state ~mailbox
     ~keeper_name =
+  let enqueue_async = workspace_enqueue state in
   if state.msg_tool_visibility <> Tools_full then ()
   else begin
     if
@@ -5891,6 +5997,7 @@ let cycle_changes_keeper state ~mailbox ~delta =
    than a branch point: the question the surface answers is "did this survive
    into the tree", and a merge base would answer a different one. *)
 let launch_git_diff_load state ~mailbox ~keeper ~path =
+  let enqueue_async = workspace_enqueue state in
   let host = server_peer_host in
   let port = state.port in
   Masc_tui_async_read.launch
@@ -6018,6 +6125,7 @@ let start_fusion_run state ~mailbox ~(request : Masc_tui_fusion_launch.request) 
       enqueue_async mailbox (Fusion_launched (generation, Error "Eio switch is unavailable"))
 
 let launch_keeper_lanes_load state ~mailbox =
+  let enqueue_async = workspace_enqueue state in
   if state.keeper_lanes_inflight then ()
   else begin
     state.keeper_lanes_inflight <- true;
@@ -6874,6 +6982,7 @@ let cycle_surface state ~mailbox ~backwards =
   end
 
 let launch_keeper_older_page state ~mailbox ~keeper_name ~before =
+  let enqueue_async = workspace_enqueue state in
   let host = server_peer_host in
   let port = state.port in
   let generation = state.msg_history_load_generation in
@@ -6902,6 +7011,9 @@ let launch_keeper_older_page state ~mailbox ~keeper_name ~before =
 
 let launch_keeper_history_load ?(load_file_changes = true) ?(force = false) state ~mailbox
     ~keeper_name =
+  let enqueue_async = workspace_enqueue state in
+  let authority = state.workspace_authority in
+  if keeper_available_for_new_message state keeper_name then begin
   let already_inflight =
     match state.msg_history_inflight with
     | Some (_, inflight_keeper) when String.equal inflight_keeper keeper_name -> true
@@ -6917,14 +7029,18 @@ let launch_keeper_history_load ?(load_file_changes = true) ?(force = false) stat
     state.msg_history_inflight <- Some (generation, keeper_name);
     let run () =
       let history_result =
-        try Masc_tui_http.fetch_keeper_chat_history ~host ~port ~keeper_name with
+        try
+          if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
+          else Masc_tui_http.fetch_keeper_chat_history ~host ~port ~keeper_name with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn -> Error (Printexc.to_string exn)
       in
       let memory_result =
         (* Keep the subject attached to exception details, as the other
            failures of this read already do. *)
-        try Masc_tui_http.fetch_keeper_memory_journal ~host ~port ~keeper_name with
+        try
+          if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
+          else Masc_tui_http.fetch_keeper_memory_journal ~host ~port ~keeper_name with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn -> Error ("memory journal: " ^ Printexc.to_string exn)
       in
@@ -6934,9 +7050,7 @@ let launch_keeper_history_load ?(load_file_changes = true) ?(force = false) stat
     in
     (match Eio_context.get_switch_opt () with
      | Some sw ->
-         Eio.Fiber.fork_daemon ~sw (fun () ->
-             run ();
-             `Stop_daemon)
+         fork_workspace_job state ~sw run
      | None ->
          (match state.msg_history_inflight with
           | Some (g, k) when g = generation && String.equal k keeper_name ->
@@ -6953,11 +7067,24 @@ let launch_keeper_history_load ?(load_file_changes = true) ?(force = false) stat
     if load_file_changes then
       launch_keeper_chat_tool_details_load state ~mailbox ~keeper_name
   end
+  end
+
+
+let enter_keeper_chat ?(return_to = Keeper_chat_return_detail) state
+    ~mailbox ~keeper_name ~drain_queue =
+  if keeper_available_for_new_message state keeper_name then begin
+    open_message_for_keeper ~return_to state keeper_name ~drain_queue;
+    launch_keeper_history_load state ~mailbox ~keeper_name;
+    state.view <- Keepers Keeper_message
+  end else
+    report_action state "error"
+      "Chat requires a matching workspace and a current Keeper roster"
 
 (* Copy reads the stored reply again, before the display layer scrubs control
    bytes or wraps lines. A separate read leaves the visible history cache and
    its pagination untouched. *)
 let launch_keeper_chat_copy state ~mailbox ~keeper_name =
+  let enqueue_async = workspace_enqueue state in
   state.msg_copy_generation <- state.msg_copy_generation + 1;
   let generation = state.msg_copy_generation in
   let host = server_peer_host in
@@ -6983,6 +7110,7 @@ let launch_keeper_chat_copy state ~mailbox ~keeper_name =
    meanwhile added. Failures are typed by the fetch and decided in the
    handler, not here. *)
 let launch_keeper_chat_journal_loads state ~mailbox ~keeper_name targets =
+  let enqueue_async = workspace_enqueue state in
   let host = server_peer_host in
   let port = state.port in
   let run (operation_id, started_at, since_seq) =
@@ -7018,6 +7146,7 @@ let launch_keeper_chat_journal_loads state ~mailbox ~keeper_name targets =
       ()
 
 let launch_context_inspector_load state ~mailbox ~keeper_name =
+  let enqueue_async = workspace_enqueue state in
   let host = server_peer_host in
   let port = state.port in
   supersede_context_inspector_load state None;
@@ -7429,6 +7558,8 @@ let msg_entries_of_history_rows state keeper_name rows =
 ;;
 
 let launch_keeper_interrupt state ~mailbox (request : Keeper_chat.request) =
+  let enqueue_async = workspace_enqueue state in
+  let authority = state.workspace_authority in
   let expected_control_token = List.assoc_opt request.keeper_name state.keeper_chat_control_tokens in
   let generation = begin_keeper_chat_control state request.keeper_name in
   let on_control_token token = enqueue_async mailbox
@@ -7443,7 +7574,8 @@ let launch_keeper_interrupt state ~mailbox (request : Keeper_chat.request) =
   let run () =
     let result =
       try
-        Masc_tui_http.post_keeper_turn_interrupt ~expected_control_token ~on_control_token ~host ~port ~keeper_name
+        if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
+        else Masc_tui_http.post_keeper_turn_interrupt ~expected_control_token ~on_control_token ~host ~port ~keeper_name
           ~request_id
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -7453,14 +7585,14 @@ let launch_keeper_interrupt state ~mailbox (request : Keeper_chat.request) =
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
+      fork_workspace_job state ~sw run
   | None ->
       enqueue_async mailbox
         (Keeper_chat_interrupt_done (request, generation, Error "Eio switch is unavailable"))
 
 let launch_keeper_observed_interrupt state ~mailbox ~keeper_name ~started_at ~interrupt_token =
+  let enqueue_async = workspace_enqueue state in
+  let authority = state.workspace_authority in
   match keeper_observed_interrupt state keeper_name started_at with
   | Some _ -> false
   | None ->
@@ -7473,8 +7605,10 @@ let launch_keeper_observed_interrupt state ~mailbox ~keeper_name ~started_at ~in
       List.filter (fun old -> old.oi_keeper <> keeper_name) state.keeper_observed_interrupts;
     let run () =
       let result =
-        try Masc_tui_http.post_keeper_observed_turn_interrupt ~on_control_token ~host:server_peer_host
-          ~port:state.port ~keeper_name ~interrupt_token
+        try
+          if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
+          else Masc_tui_http.post_keeper_observed_turn_interrupt ~on_control_token ~host:server_peer_host
+            ~port:state.port ~keeper_name ~interrupt_token
         with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn -> Error (Printexc.to_string exn)
@@ -7482,7 +7616,7 @@ let launch_keeper_observed_interrupt state ~mailbox ~keeper_name ~started_at ~in
       enqueue_async mailbox (Keeper_observed_interrupt_done (keeper_name, interrupt_token, generation, result))
     in
     (match Eio_context.get_switch_opt () with
-     | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
+     | Some sw -> fork_workspace_job state ~sw run
      | None -> enqueue_async mailbox
          (Keeper_observed_interrupt_done (keeper_name, interrupt_token, generation, Error "Eio switch is unavailable")));
     true
@@ -7555,6 +7689,8 @@ let add_auto_priority_request state (request : Keeper_chat.request) =
 ;;
 
 let launch_keeper_run_next ?(automatic = false) state ~mailbox request =
+  let enqueue_async = workspace_enqueue state in
+  let authority = state.workspace_authority in
   if List.exists (fun (inflight : Keeper_chat.request) ->
        String.equal inflight.keeper_name request.Keeper_chat.keeper_name)
        state.keeper_run_next_inflight then ()
@@ -7574,13 +7710,18 @@ let launch_keeper_run_next ?(automatic = false) state ~mailbox request =
           (List.assoc_opt keeper_name state.keeper_auto_priority_requests)))
       else None in
     let run () =
-      let result = try Masc_tui_http.post_keeper_run_next ?priority_predecessors ~host:server_peer_host
-        ~port:state.port ~keeper_name ~request_id ()
-        with Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Error (Printexc.to_string exn) in
+      let result =
+        try
+          if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
+          else Masc_tui_http.post_keeper_run_next ?priority_predecessors ~host:server_peer_host
+            ~port:state.port ~keeper_name ~request_id ()
+        with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> Error (Printexc.to_string exn)
+      in
       enqueue_async mailbox (Keeper_run_next_done (request, result)) in
     match Eio_context.get_switch_opt () with
-    | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
+    | Some sw -> fork_workspace_job state ~sw run
     | None -> enqueue_async mailbox (Keeper_run_next_done (request, Error "Eio switch is unavailable"))
   end
 ;;
@@ -7752,6 +7893,7 @@ let handle_slot_edit state ~mailbox edit =
             Error "the slot editor built a write its target does not take")
 
 let launch_runtime_catalog_load state ~mailbox =
+  let enqueue_async = workspace_enqueue state in
   let host = server_peer_host in
   let port = state.port in
   Masc_tui_async_read.launch
@@ -7805,6 +7947,8 @@ let close_keeper_runtime_pick state =
   state.view <- Keepers Keeper_list
 
 let launch_runtime_assignment_set state ~mailbox ~keeper_name ~runtime_id =
+  let enqueue_async = workspace_enqueue state in
+  let authority = state.workspace_authority in
   let host = server_peer_host in
   let port = state.port in
   let run () =
@@ -7819,7 +7963,8 @@ let launch_runtime_assignment_set state ~mailbox ~keeper_name ~runtime_id =
              Masc_tui_keeper_config.expected_runtime_assignment_revision json
            with
            | Ok expected_assignment_revision ->
-             Masc_tui_http.post_runtime_assignment ~host ~port ~keeper_name
+             if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
+             else Masc_tui_http.post_runtime_assignment ~host ~port ~keeper_name
                ~runtime_id ~expected_assignment_revision
            | Error detail -> Error detail)
       with
@@ -7831,9 +7976,7 @@ let launch_runtime_assignment_set state ~mailbox ~keeper_name ~runtime_id =
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
+      fork_workspace_job state ~sw run
   | None ->
       enqueue_async mailbox
         (Runtime_assignment_set
@@ -7915,6 +8058,8 @@ let take_pending_attachments state =
 ;;
 
 let launch_keeper_request ?promoted ?(admission_intent = Keeper_chat.Queue_only) state ~mailbox request =
+  let enqueue_async = workspace_enqueue state in
+  if keeper_available_for_new_message state request.Keeper_chat.keeper_name then begin
   state.keeper_interactive_waiting <- List.filter (fun (_, id, _) ->
     id <> request.Keeper_chat.request_id) state.keeper_interactive_waiting;
   let control_generation = match admission_intent with
@@ -7956,29 +8101,28 @@ let launch_keeper_request ?promoted ?(admission_intent = Keeper_chat.Queue_only)
       state.msg_target_keeper_name
   then state.msg_live <- Some log;
   let run () =
-    if enqueue_dispatch_start mailbox request false
+    if enqueue_dispatch_start ~enqueue:enqueue_async mailbox request false
     then begin
       let result =
         try
-          post_keeper_chat_watching ~control_generation ~admission_intent ~mailbox ~port:state.port ~log:log.tl_log
+          post_keeper_chat_watching ~enqueue:enqueue_async ~control_generation ~admission_intent ~mailbox ~port:state.port ~log:log.tl_log
             request
         with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn -> Error (Keeper_chat.Transport_error (Printexc.to_string exn))
       in
-      enqueue_dispatch_ack mailbox (fun acknowledge ->
+      enqueue_dispatch_ack ~enqueue:enqueue_async mailbox (fun acknowledge ->
         Keeper_chat_done (request, false, result, acknowledge))
     end
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
+      fork_workspace_job state ~sw run
   | None ->
       enqueue_async mailbox
         (Keeper_chat_dispatch_blocked
            (request, "Eio switch is unavailable"))
+  end
 
 (* The joined line keeps the request identity the history row already carries,
    so the row is rewritten rather than duplicated. [append_user_history_once]
@@ -8068,7 +8212,8 @@ let queue_keeper_steer state ~causal_parent_request_id request =
 ;;
 
 let launch_waiting_keeper_input state ~mailbox ~keeper_name =
-  if not (List.mem_assoc keeper_name state.keeper_chat_control_pending) then begin
+  if keeper_available_for_new_message state keeper_name
+     && not (List.mem_assoc keeper_name state.keeper_chat_control_pending) then begin
     (* Every Enter send, including one without a control token, waits for the
        previous server acceptance. Concurrent HTTP fibers may otherwise reach
        the durable queue in the opposite order. *)
@@ -8327,7 +8472,8 @@ let drain_queued_message state ~base_path ~mailbox =
   let rec next () =
     match
       Chat_queue.take_first_sendable state.msg_queued ~sendable:(fun keeper_name ->
-        Option.is_none (inflight_for state keeper_name)
+        keeper_available_for_new_message state keeper_name
+        && Option.is_none (inflight_for state keeper_name)
         && not (List.mem_assoc keeper_name state.keeper_chat_control_pending)
         && not (List.exists (fun (name, _, _) -> String.equal name keeper_name)
           state.keeper_interactive_waiting)
@@ -8511,6 +8657,15 @@ let chat_notice state ~keeper_name ~kind text =
             } ]
 
 let launch_keeper_queue state ~mailbox ~keeper_name action =
+  let enqueue_async = workspace_enqueue state in
+  let authority = state.workspace_authority in
+  let check_authority () =
+    if authority = state.workspace_authority then Ok ()
+    else Error "Workspace changed; the remaining queue requests were not sent" in
+  let get_json ~host ~port ~path =
+    Result.bind (check_authority ()) (fun () -> Masc_tui_http.get_json ~host ~port ~path) in
+  let post_json ~host ~port ~path ~body =
+    Result.bind (check_authority ()) (fun () -> Masc_tui_http.post_json ~host ~port ~path ~body) in
   let module Inbox = Masc_tui_queue_inspection in
   if List.mem keeper_name state.keeper_queue_inflight then
     chat_notice state ~keeper_name:(Some keeper_name) ~kind:Notice_reply
@@ -8531,6 +8686,7 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
          Printf.sprintf "  %s\n    %s" item.request.request_id item.request.message) pending in
   let perform () =
     let ( let* ) = Result.bind in
+    let* () = check_authority () in
     let* receipt = match action with
       | Inbox.Inspect -> Ok []
       | Inbox.Pause | Inbox.Resume ->
@@ -8551,7 +8707,7 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
           | Inbox.Prioritize_event (_, _, urgency) ->
             ("action", `String "reprioritize") :: ("urgency", `String (Keeper_event_queue.urgency_to_string urgency)) :: fields
           | Inspect | Pause | Resume | Cancel _ | Move_to_end _ | Edit _ -> assert false in
-        let* _ = Masc_tui_http.post_json ~host ~port ~path:(root ^ "/events/operator")
+        let* _ = post_json ~host ~port ~path:(root ^ "/events/operator")
           ~body:(Yojson.Safe.to_string (`Assoc fields)) in
         Ok ["Server confirmed event update: " ^ reference]
       | Inbox.Cancel id | Inbox.Move_to_end id | Inbox.Edit (id, _) ->
@@ -8560,19 +8716,19 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
           | Inbox.Cancel _ -> Ok ("cancel", `Assoc [])
           | Inbox.Move_to_end _ -> Ok ("move-to-end", `Assoc [])
           | Inbox.Edit (_, message) ->
-            let* operation = Masc_tui_http.get_json ~host ~port ~path in
+            let* operation = get_json ~host ~port ~path in
             let* input = Inbox.edited_input ~message operation in
             Ok ("edit", `Assoc ["input", input])
           | Inbox.Inspect | Inbox.Pause | Inbox.Resume | Inbox.Cancel_event _ | Inbox.Prioritize_event _ -> assert false in
-        let* _ = Masc_tui_http.post_json ~host ~port ~path:(path ^ "/" ^ suffix)
+        let* _ = post_json ~host ~port ~path:(path ^ "/" ^ suffix)
           ~body:(Yojson.Safe.to_string body) in
         Ok ["Server confirmed " ^ suffix ^ ": " ^ id] in
     (* Keep each failed read visible beside any successful mutation receipt. *)
-    let waiting = Masc_tui_http.get_json ~host ~port ~path:(root ^ "/waiting-inventory")
+    let waiting = get_json ~host ~port ~path:(root ^ "/waiting-inventory")
       |> fun result -> Result.bind result (Inbox.waiting_lines ~now:(Unix.gettimeofday ())) in
     let rec read_messages after_sequence reversed_pages =
       let suffix = Option.fold ~none:"" ~some:(fun value -> "&after_sequence=" ^ value) after_sequence in
-      let* page = Masc_tui_http.get_json ~host ~port ~path:(root ^ "/chat/operations?state=queued" ^ suffix) in
+      let* page = get_json ~host ~port ~path:(root ^ "/chat/operations?state=queued" ^ suffix) in
       let* next = Inbox.next_sequence page in
       match next, after_sequence with
       | Some next, Some previous when Int64.of_string next <= Int64.of_string previous ->
@@ -8594,7 +8750,7 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
   chat_notice state ~keeper_name:(Some keeper_name) ~kind:Notice_reply
     (String.concat "\n" (local_lines () @ ["Reading server queue…"]));
   match Eio_context.get_switch_opt () with
-  | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
+  | Some sw -> fork_workspace_job state ~sw run
   | None -> enqueue_async mailbox (Keeper_queue_loaded (keeper_name, control_generation, action, Error "Eio switch is unavailable"))
   end
 ;;
@@ -10696,18 +10852,24 @@ let apply_remote_keeper_rows state =
   match state.workspace_identity with
   | Workspace_identity_match | Workspace_identity_unread -> ()
   | Workspace_identity_mismatch _ ->
-    let observed, error = match state.keeper_roster with
+    let keepers, error = match state.keeper_roster with
       | Keeper_control.Roster_unobserved -> [],
         Some (Option.value state.keeper_roster_error ~default:"Remote Keeper roster not observed")
-      | Keeper_control.Roster_complete rows -> rows, None
-      | Keeper_control.Roster_partial { observed; total } -> observed,
+      | Keeper_control.Roster_complete rows -> List.map Tui_decode.keeper_of_runtime rows, None
+      | Keeper_control.Roster_partial { observed; total } -> List.map Tui_decode.keeper_of_runtime observed,
         Some (Printf.sprintf "Remote Keeper roster is partial (%d of %d)"
           (List.length observed) total)
-      | Keeper_control.Roster_invalid { observed; errors; complete = _ } -> observed,
+      | Keeper_control.Roster_invalid { observed; errors; complete = _ } ->
+        List.map Tui_decode.keeper_of_runtime observed @
+        List.filter_map (fun (name, reason) ->
+          if List.exists (fun (row : Tui_decode.keeper_runtime) ->
+              String.equal name row.kr_name) observed then None
+          else Some { Tui_decode.k_origin = Remote_keeper; k_name = name;
+            k_paused = false; k_identity = Error reason; k_activity = None }) errors,
         Some (String.concat "; " (List.map (fun (name, reason) -> name ^ ": " ^ reason) errors))
     in
     replace_keeper_rows ~preserve_on_error:false state
-      ~keepers:(List.map Tui_decode.keeper_of_runtime observed) ~error;
+      ~keepers ~error;
     apply_keeper_log_snapshot state
       { entries = []; error = Some Metrics_tail.Remote_workspace }
 
@@ -11060,21 +11222,172 @@ let apply_http_scoped_surfaces state results =
    workspace follows the reading in the same step: a mismatch clears it, a
    match reloads it, so a screen never shows rows from a workspace the server
    just stopped serving. *)
-let withdraw_keeper_workspace_presentation state =
+let withdraw_keeper_workspace_presentation state ~previous =
   state.msg_loaded_pages <- [];
   let draft = materialise_spilled_paste state (Buffer.contents state.msg_input) in
   Buffer.clear state.msg_input;
   Buffer.add_string state.msg_input draft;
-  save_message_draft state;
+  save_message_draft ~workspace:previous state;
   Buffer.clear state.msg_input;
+  state.msg_attachments <- [];
+  state.msg_references <- [];
+  state.msg_attachments_since <- None;
   forget_recall state;
   clear_keeper_history_projection state;
   reset_message_file_changes state None;
+  (* Submitted server work is not undone here. Unsent admissions and automatic
+     continuations lose authorization at this boundary. *)
+  if not (Chat_queue.is_empty state.msg_queued) then begin
+    state.suspended_keeper_inputs <- (previous, state.msg_queued) ::
+      List.remove_assoc previous state.suspended_keeper_inputs;
+    report_action state "system"
+      "Workspace changed: unsent Keeper inputs retained for their original workspace; resume there to send"
+  end;
+  state.msg_queued <- Chat_queue.empty;
+  state.keeper_interactive_waiting <- [];
+  state.keeper_chat_control_tokens <- [];
+  state.keeper_chat_control_pending <- [];
+  state.keeper_queue_inflight <- [];
+  state.keeper_run_next_pending <- [];
+  state.keeper_run_next_ready <- [];
+  state.keeper_run_next_inflight <- [];
+  state.keeper_auto_priority_pending <- [];
+  state.keeper_auto_priority_requests <- [];
+  state.msg_inflight <- [];
+  release_composer_for_browser_reader state;
+  close_context_inspector state;
+  state.context_inspector_generation <- state.context_inspector_generation + 1;
+  state.context_inspector_keeper <- None;
+  state.context_inspector_reading <- None;
+  state.context_inspector_read_at <- None;
+  state.context_inspector_loading <- false;
+  (* Withdraw owners as well as callbacks: a stale completion must neither
+     retain an old pending slot nor release a successor workspace's slot. *)
+  state.keeper_turns_inflight <- false;
+  state.keeper_turns <- [];
+  state.keeper_turns_error <- None;
+  state.keeper_turn_finishes <- [];
+  state.keeper_turns_observed_at <- None;
+  state.keeper_observed_interrupts <- [];
+  state.keeper_lanes_inflight <- false;
+  state.lanes <- None;
+  state.lanes_error <- None;
+  state.keeper_secrets <- [];
+  state.keeper_deletions_loading <- false;
+  state.keeper_deletions_open <- false;
+  state.keeper_deletions_generation <- state.keeper_deletions_generation + 1;
+  state.keeper_deletions <- None;
+  state.keeper_tool_approvals_read <- Snapshot_read.invalidate state.keeper_tool_approvals_read;
+  state.keeper_tool_approvals <- [];
+  state.keeper_tool_approvals_error <- None;
+  state.keeper_tool_approvals_observed <- false;
+  state.gate_snapshot_read <- Snapshot_read.invalidate state.gate_snapshot_read;
+  state.gate_pending <- [];
+  state.gate_modes <- None;
+  state.gate_queue_unavailable <- None;
+  state.gate_rules <- [];
+  state.gate_rules_unavailable <- None;
+  state.gate_error <- None;
+  state.gate_snapshot_observed <- false;
+  state.approval_flow <- Approval.Flow.invalidate state.approval_flow;
+  state.pending_approval_action <- None;
+  state.approval_snapshot <- None;
+  state.approvals_error <- None;
+  state.approval_detail_open <- false;
+  state.runtime_pick_keeper <- None;
+  state.runtime_pick_list <- Masc_tui_pick_list.closed;
+  state.runtime_catalog <- [];
+  state.runtime_catalog_error <- None;
+  state.runtime_assignments <- [];
+  state.runtime_lanes <- [];
+  state.keeper_yolo_names <- [];
+  state.keeper_tool_modes_observed <- false;
+  state.keeper_tool_modes_error <- None;
+  state.keeper_gate_modes <- [];
+  state.keeper_exact_lane_firsts <- [];
+  state.keeper_gate_settings_unread <- Some "Workspace authority changed; not read yet";
+  state.board_quarantine_requeue_inflight <- None;
+  state.schedules_read <- Snapshot_read.invalidate state.schedules_read;
+  state.schedules <- None;
+  state.schedules_error <- None;
+  state.schedule_detail_id <- None;
+  state.schedule_cancel_armed <- None;
+  state.schedule_cancel_error <- None;
+  state.schedule_wake_history <- None;
+  state.schedule_wake_history_error <- None;
+  state.schedule_wake_history_inflight <- None;
+  state.observer <- Observer_off;
+  state.mcp_session <- None;
+  state.observer_cursor <- None;
+  state.observer_replay <- Observer_replay_unobserved;
+  state.acting <- [];
+  state.acting_dropped <- 0;
+  state.acting_undecodable <- 0;
+  state.acting_undecodable_last <- None;
+  state.acting_scroll <- 0;
+  state.acting_unseen <- 0;
+  state.acting_cursor <- 0;
+  state.acting_detail <- None;
+  state.acting_detail_scroll <- 0;
+  state.acting_pane_cursor <- None;
+  state.acting_pane_expanded <- [];
+  state.acting_chunk_projection <- None;
+  state.detail_reads <- [];
+  state.detail_read_generation <- state.detail_read_generation + 1;
+  state.keeper_calls_generation <- state.keeper_calls_generation + 1;
+  state.keeper_calls <- None;
+  state.keeper_calls_error <- None;
+  state.keeper_calls_keeper <- None;
+  state.keeper_calls_loading <- false;
+  state.keeper_calls_refresh_pending <- false;
+  state.keeper_sandbox_view <- None;
+  state.keeper_sandbox_view_error <- None;
+  state.keeper_sandbox_logs <- None;
+  state.keeper_sandbox_logs_error <- None;
+  state.keeper_sandbox_logs_generation <- state.keeper_sandbox_logs_generation + 1;
+  state.keeper_sandbox_logs_inflight <- None;
+  state.keeper_config_view <- None;
+  state.keeper_config_view_error <- None;
+  state.keeper_schedules <- None;
+  state.keeper_schedules_error <- None;
+  state.keeper_schedules_inflight <- None;
+  state.keeper_usage <- Keeper_usage_unread;
+  state.github_identity_view <- None;
+  state.github_identity_view_error <- None;
+  state.identity_view <- None;
+  state.identity_view_error <- None;
+  state.identity_login <- None;
+  state.identity_app_form <- None;
+  state.identity_attempt_error <- None;
+  state.github_token_input <- None;
+  state.github_token_save_status <- None;
+  state.keeper_board_quarantines <- Masc_tui_fetched.clear state.keeper_board_quarantines;
+  state.acting_pane_changes <- Masc_tui_fetched.clear state.acting_pane_changes;
+  state.acting_pane_changes_at <- None;
+  state.workspace_activity <- Masc_tui_fetched.clear state.workspace_activity;
+  state.changes_keeper <- None;
+  state.changes <- None;
+  state.changes_error <- None;
+  state.changes_tree_diff <- None;
+  state.changes_tree_diff_error <- None;
+  state.changes_tree_diff_path <- None;
+  state.code_listing <- Masc_tui_fetched.clear state.code_listing;
+  state.code_file <- Masc_tui_fetched.clear state.code_file;
+  state.code_history <- Masc_tui_fetched.clear state.code_history;
+  state.code_diff <- Masc_tui_fetched.clear state.code_diff;
+  state.code_blame <- Masc_tui_fetched.clear state.code_blame;
+  state.code_memos <- [];
+  state.code_jump_back <- [];
+  state.code_history_open <- false;
+  state.code_diff_open <- false;
+  state.code_notes_open <- false;
+  state.keeper_action_serial <- state.keeper_action_serial + 1;
+  state.keeper_action_inflight <- None;
   state.msg_target_keeper_name <- None;
   state.msg_live <- None;
   state.composer_focused <- false;
   (match state.view with
-   | Keepers Keeper_message ->
+   | Keepers (Keeper_message | Keeper_runtime_pick) ->
      state.view <- Keepers Keeper_list;
      set_msg_scroll state 0
    | _ -> ())
@@ -11092,8 +11405,16 @@ let apply_server_identity_reading state reading =
     | _ -> false
   in
   if not same_workspace then begin
+    let Workspace_authority generation = state.workspace_authority in
+    state.workspace_authority <- Workspace_authority (generation + 1);
+    let cancellations = state.workspace_cancellations in
+    state.workspace_cancellations <- [];
+    List.iter (fun (_, cancel) -> cancel ()) cancellations;
     state.keeper_action_pending <- None;
-    withdraw_keeper_workspace_presentation state
+    (* A failed local reload may retain only rows from that same authority. *)
+    state.keepers <- [];
+    state.keepers_error <- None;
+    withdraw_keeper_workspace_presentation state ~previous
   end;
   match state.workspace_identity with
   | Masc_tui_types.Workspace_identity_mismatch current ->
@@ -11110,13 +11431,21 @@ let apply_server_identity_reading state reading =
       state.keeper_roster_error <- None
     end
   | Masc_tui_types.Workspace_identity_match ->
-    load_from_masc_dir state state.local_base_path
+    load_from_masc_dir state state.local_base_path;
+    (match List.assoc_opt Workspace_identity_match state.suspended_keeper_inputs with
+     | None -> ()
+     | Some queue ->
+       state.suspended_keeper_inputs <- List.remove_assoc Workspace_identity_match
+         state.suspended_keeper_inputs;
+       state.msg_queued <- queue;
+       state.keeper_interactive_waiting <- List.map (fun (item : Chat_queue.item) ->
+         item.request.keeper_name, item.request.request_id, Retained_after_stop)
+         (Chat_queue.waiting queue);
+       report_action state "system"
+         "Retained inputs restored for this workspace; resume a Keeper to send them")
   | Masc_tui_types.Workspace_identity_unread ->
-    (match previous with
-     | Workspace_identity_mismatch _ ->
-       clear_local_workspace state;
-       state.keeper_roster <- Keeper_control.Roster_unobserved
-     | Workspace_identity_match | Workspace_identity_unread -> ());
+    clear_local_workspace state;
+    state.keeper_roster <- Keeper_control.Roster_unobserved;
     apply_keeper_log_snapshot state
       { entries = []; error = Some Metrics_tail.Workspace_unconfirmed }
 
@@ -11478,6 +11807,7 @@ let handle_lanes_overview_click state ~base_path:_ ~mailbox ~terminal_rows ~row 
    through the mailbox; the render fiber owns all state. The fiber ends with
    the stream, and whether to open another is the main loop's decision. *)
 let launch_observer state ~host ~port ~mailbox =
+  let enqueue_async = workspace_enqueue state in
   let exception Reconnect_without_cursor in
   state.observer <- Observer_opening;
   let session = state.mcp_session in
@@ -11542,9 +11872,7 @@ let launch_observer state ~host ~port ~mailbox =
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
+      fork_workspace_job state ~sw run
   | None -> enqueue_async mailbox
       (Observer_closed (Error (Masc_tui_http.Transport_failed "Eio switch is unavailable")))
 
@@ -11562,6 +11890,9 @@ let launch_observer state ~host ~port ~mailbox =
    fetch -- so walking the surfaces retried a refused feed once per surface and
    filled the eleven-entry event panel with its own refusals. *)
 let open_observer_if_due state ~retry_closed ~host ~port ~mailbox =
+  match state.workspace_identity with
+  | Workspace_identity_unread -> ()
+  | Workspace_identity_match | Workspace_identity_mismatch _ ->
   match (state.connection_status, state.observer) with
   | (Connected | Degraded), Observer_off ->
       launch_observer state ~host ~port ~mailbox
@@ -11708,6 +12039,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
 
 let start_http_scoped_refresh state ~host ~port ~refresh_inflight ~mailbox
     ~(needs : Masc_tui_types.surface_needs) =
+  let authority = state.workspace_authority in
   if not !refresh_inflight then begin
     refresh_inflight := true;
     let approval_ticket =
@@ -11726,7 +12058,7 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight ~mailbox
       try
         enqueue_async mailbox
           (Http_scoped_refresh_done
-             (load_http_scoped_surfaces ~host ~port
+             (authority, load_http_scoped_surfaces ~host ~port
                 ~approval_ticket ~board_sort:state.board_sort
                 ~board_hearth:state.board_hearth
                 ~provider_history_days:state.provider_history_days
@@ -11739,7 +12071,7 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight ~mailbox
       | exn ->
         enqueue_async mailbox
           (Http_scoped_refresh_failed
-             ( Printf.sprintf "HTTP surface refresh failed: %s"
+             ( authority, Printf.sprintf "HTTP surface refresh failed: %s"
                  (Printexc.to_string exn)
              , approval_ticket ))
     in
@@ -11912,6 +12244,8 @@ let apply_approval_decision_completion state generation approval decision result
     apply_approval_decision_result state approval decision approvals result
 
 let start_approval_decision state approval decision ~mailbox =
+  let enqueue_async = workspace_enqueue state in
+  let authority = state.workspace_authority in
   match Approval.Flow.begin_action state.approval_flow with
   | Error `Already_inflight ->
       state.pending_approval_action <- None;
@@ -11931,7 +12265,9 @@ let start_approval_decision state approval decision ~mailbox =
         | exn -> Error (Printexc.to_string exn)
       in
       let approvals =
-        try load_approvals ~host ~port with
+        try
+          if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
+          else load_approvals ~host ~port with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn -> Error ("approvals reload failed: " ^ Printexc.to_string exn)
       in
@@ -11939,7 +12275,7 @@ let start_approval_decision state approval decision ~mailbox =
         (Approval_decision_done (approval, decision, result, generation, approvals))
     in
     match Eio_context.get_switch_opt () with
-    | Some sw -> Eio.Fiber.fork ~sw run_action
+    | Some sw -> fork_workspace_job state ~sw run_action
     | None ->
         let result =
           try
@@ -11948,7 +12284,9 @@ let start_approval_decision state approval decision ~mailbox =
           with exn -> Error (Printexc.to_string exn)
         in
         let approvals =
-          try load_approvals ~host ~port with
+          try
+          if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
+          else load_approvals ~host ~port with
           | exn -> Error ("approvals reload failed: " ^ Printexc.to_string exn)
         in
         apply_approval_decision_completion state generation approval decision
@@ -12243,7 +12581,7 @@ let handle_ask_submit state ~mailbox =
    conflict on an action that names a recovery continues into it instead of
    surfacing as a failure. Recovery runs once — a conflict raised by the
    recovery itself is the operator's to read. *)
-let run_keeper_action_steps ~host ~port ~keeper_name ~operator_operation_id
+let run_keeper_action_steps ~authority_current ~host ~port ~keeper_name ~operator_operation_id
     action =
   let perform = function
     | Keeper_control.Lifecycle lifecycle_action ->
@@ -12266,6 +12604,8 @@ let run_keeper_action_steps ~host ~port ~keeper_name ~operator_operation_id
             Error
               (Printf.sprintf "%s has no request to send"
                  (Keeper_control.action_label action)))
+    | _ :: _ when not (authority_current ()) ->
+        Error "Workspace changed; the remaining lifecycle steps were not sent"
     | step :: rest -> (
         match perform step with
         | Error transport -> Error transport
@@ -12323,6 +12663,13 @@ let apply_keeper_action_result state ~base_path keeper_name action result =
   load_local_workspace_if_safe state base_path
 
 let start_keeper_action state ~base_path:_ ~mailbox keeper_name action =
+  match state.workspace_identity with
+  | Workspace_identity_unread ->
+      report_action state "error" "Workspace identity has not been read; action unavailable"
+  | Workspace_identity_match | Workspace_identity_mismatch _ ->
+  let enqueue_async = workspace_enqueue state in
+  let authority = state.workspace_authority in
+  let authority_current () = authority = state.workspace_authority in
   let serial = state.keeper_action_serial + 1 in
   state.keeper_action_serial <- serial;
   state.keeper_action_inflight <- Some (keeper_name, action);
@@ -12337,7 +12684,7 @@ let start_keeper_action state ~base_path:_ ~mailbox keeper_name action =
   let run_action () =
     let result =
       try
-        run_keeper_action_steps ~host ~port ~keeper_name
+        run_keeper_action_steps ~authority_current ~host ~port ~keeper_name
           ~operator_operation_id action
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -12346,11 +12693,11 @@ let start_keeper_action state ~base_path:_ ~mailbox keeper_name action =
     enqueue_async mailbox (Keeper_action_done (keeper_name, action, result))
   in
   match Eio_context.get_switch_opt () with
-  | Some sw -> Eio.Fiber.fork ~sw run_action
+  | Some sw -> fork_workspace_job state ~sw run_action
   | None ->
       let result =
         try
-          run_keeper_action_steps ~host ~port ~keeper_name
+          run_keeper_action_steps ~authority_current ~host ~port ~keeper_name
             ~operator_operation_id action
         with exn -> Error (Printexc.to_string exn)
       in
@@ -12565,6 +12912,11 @@ let handle_board_vote_key state ~mailbox ~(up : bool) =
    the other writes; the server's store rules decide whether the row is still
    cancellable, so the TUI does not pre-guess from the status column. *)
 let start_schedule_cancel state ~mailbox ~(schedule_id : string) =
+  match state.workspace_identity with
+  | Workspace_identity_unread ->
+      report_action state "error" "Workspace identity has not been read; action unavailable"
+  | Workspace_identity_match | Workspace_identity_mismatch _ ->
+  let enqueue_async = workspace_enqueue state in
   state.schedule_cancel_error <- None;
   report_action state "system"
     (Printf.sprintf "cancelling schedule %s" schedule_id);
@@ -12579,7 +12931,7 @@ let start_schedule_cancel state ~mailbox ~(schedule_id : string) =
     enqueue_async mailbox (Schedule_cancel_done result)
   in
   match Eio_context.get_switch_opt () with
-  | Some sw -> Eio.Fiber.fork ~sw run_cancel
+  | Some sw -> fork_workspace_job state ~sw run_cancel
   | None -> run_cancel ()
 
 let selected_schedule_row state =
@@ -12960,6 +13312,10 @@ let no_keeper_under_cursor = "no keeper under the cursor; r to reload the roster
    that names an action the reading does not offer says why instead of sending
    a request the server would refuse. *)
 let handle_keeper_action state ~base_path ~mailbox action =
+  match state.workspace_identity with
+  | Workspace_identity_unread ->
+      report_action state "error" "Workspace identity has not been read; action unavailable"
+  | Workspace_identity_match | Workspace_identity_mismatch _ ->
   match selected_keeper state with
   | None ->
     (* A keypress with nothing under the cursor said nothing at all, which
@@ -13465,9 +13821,19 @@ let react_to_server_contact state ~base_path ~host ~port ~http_refresh_inflight
     end
   end
 
-let apply_async_message state ~base_path ~http_refresh_inflight
+let rec apply_async_message state ~base_path ~http_refresh_inflight
     ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox =
   function
+  | Workspace_scoped (authority, message) ->
+      if authority = state.workspace_authority then
+        apply_async_message state ~base_path ~http_refresh_inflight
+          ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox message
+      else (match message with
+        | Keeper_chat_dispatch_started (_, _, acknowledge) ->
+          ignore (Eio.Promise.try_resolve acknowledge false)
+        | Keeper_chat_done (_, _, _, acknowledge) ->
+          ignore (Eio.Promise.try_resolve acknowledge ())
+        | _ -> ())
   | Lane_package_preview_loaded (generation,path,result) ->
       map_lane_addons state (fun view ->
         if view.generation<>generation then view else
@@ -14117,9 +14483,10 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         ~port:state.port ~refresh_inflight:http_refresh_inflight
         ~scoped_refresh_inflight:http_scoped_refresh_inflight
         ~scoped_refresh_followup ~mailbox
-  | Http_scoped_refresh_done results ->
+  | Http_scoped_refresh_done (authority, results) ->
       http_scoped_refresh_inflight := false;
-      apply_http_scoped_surfaces state results;
+      if authority = state.workspace_authority then
+        apply_http_scoped_surfaces state results;
       (match state.view with
        | Approvals -> launch_keeper_tool_approvals_load state ~mailbox
        | Keepers _ -> launch_keeper_tool_modes_load state ~mailbox
@@ -14128,9 +14495,9 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         ~port:state.port ~refresh_inflight:http_refresh_inflight
         ~scoped_refresh_inflight:http_scoped_refresh_inflight
         ~scoped_refresh_followup ~mailbox
-  | Http_scoped_refresh_failed (err, approval_ticket) ->
+  | Http_scoped_refresh_failed (authority, err, approval_ticket) ->
       http_scoped_refresh_inflight := false;
-      Option.iter
+      if authority = state.workspace_authority then Option.iter
         (fun ao_ticket ->
            apply_approval_observation state
              { ao_ticket; ao_result = Error err })
@@ -14138,7 +14505,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       (* A scoped surface read cannot establish that the server disappeared:
          only the full refresh owns /health and connection status. Keep the
          last observed connection and expose the failed dataset read. *)
-      add_event state "error" err;
+      if authority = state.workspace_authority then add_event state "error" err;
       start_scoped_refresh_followup state ~host:(server_peer_host)
         ~port:state.port ~refresh_inflight:http_refresh_inflight
         ~scoped_refresh_inflight:http_scoped_refresh_inflight
@@ -21220,14 +21587,9 @@ and is loaded on demand through keeper_skill.
                 (match List.nth_opt lines state.answering_cursor with
                  | Some { Masc_tui_answering.target = Some keeper_name; _ } ->
                      close ();
-                     open_message_for_keeper
-                       ~return_to:Keeper_chat_return_list state keeper_name
-                       ~drain_queue:(fun () ->
-                         drain_queued_message state ~base_path
-                           ~mailbox:async_messages);
-                     launch_keeper_history_load state
-                       ~mailbox:async_messages ~keeper_name;
-                     state.view <- Keepers Keeper_message
+                     enter_keeper_chat ~return_to:Keeper_chat_return_list state ~mailbox:async_messages
+                       ~keeper_name ~drain_queue:(fun () ->
+                         drain_queued_message state ~base_path ~mailbox:async_messages)
                  | Some _ | None -> ())
             | _ -> ())
        | Some k when state.link_modal_open ->
@@ -21487,14 +21849,9 @@ and is loaded on demand through keeper_skill.
                      state.runtime_params_notice <- None;
                      goto_surface state ~mailbox:async_messages Config
                  | Some (_, Masc_tui_types.Palette_chat keeper_name) ->
-                     open_message_for_keeper
-                       ~return_to:Keeper_chat_return_list state keeper_name
-                       ~drain_queue:(fun () ->
-                         drain_queued_message state ~base_path
-                           ~mailbox:async_messages);
-                     launch_keeper_history_load state
-                       ~mailbox:async_messages ~keeper_name;
-                     state.view <- Keepers Keeper_message
+                     enter_keeper_chat ~return_to:Keeper_chat_return_list state ~mailbox:async_messages
+                       ~keeper_name ~drain_queue:(fun () ->
+                         drain_queued_message state ~base_path ~mailbox:async_messages)
                  | Some (_, Masc_tui_types.Palette_task task_id) ->
                      (* The palette lands where Enter on the task list would:
                         Overview with the task's detail open and the cursor
@@ -23149,10 +23506,9 @@ and is loaded on demand through keeper_skill.
            in
            Option.iter
              (fun keeper_name ->
-                open_message_for_keeper ~return_to:state.msg_return state keeper_name
-                  ~drain_queue:(fun () -> drain_queued_message state ~base_path ~mailbox:async_messages);
-                launch_keeper_history_load state ~mailbox:async_messages ~keeper_name;
-                state.view <- Keepers Keeper_message)
+                enter_keeper_chat ~return_to:state.msg_return state ~mailbox:async_messages
+                       ~keeper_name ~drain_queue:(fun () ->
+                         drain_queued_message state ~base_path ~mailbox:async_messages))
              target
        | Some "@" ->
            state.answering_open <- true;

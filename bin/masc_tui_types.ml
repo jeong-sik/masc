@@ -13,6 +13,8 @@ module Snapshot_read : sig
 
   val idle : t
   val start : intent:intent -> t -> t * request option
+  val invalidate : t -> t
+  (** Retire a pending owner without reusing its request number. *)
   val settle : t -> request -> t option
 end = struct
   type request = int
@@ -20,6 +22,8 @@ end = struct
   type intent = Poll | Refresh
 
   let idle = { next = 0; pending = None }
+
+  let invalidate state = { state with pending = None }
 
   let start ~intent state =
     match intent, state.pending with
@@ -86,6 +90,8 @@ let server_is_booting
   | Ok { Tui_decode.sid_state_ready = Some false; _ } -> true
   | Ok { Tui_decode.sid_state_ready = Some true | None; _ } | Error _ -> false
 ;;
+
+type workspace_authority = Workspace_authority of int
 
 type workspace_identity =
   | Workspace_identity_unread
@@ -5242,6 +5248,13 @@ module Verification_evidence_read = struct
     | Launch_failure of string
 end
 
+type keeper_composer_draft = {
+  kcd_text : string;
+  kcd_attachments : Masc_tui_keeper_chat_projection.attachment list;
+  kcd_references : Masc_tui_keeper_chat_projection.image_reference list;
+  kcd_since : msg_anchor option;
+}
+
 type state = {
   mutable metrics_scroll: int;
   mutable metrics_section: metrics_section;
@@ -5441,6 +5454,9 @@ type state = {
   mutable server_identity: Tui_decode.server_identity option;
   local_base_path: string;
   mutable workspace_identity: workspace_identity;
+  mutable workspace_authority: workspace_authority;
+  mutable suspended_keeper_inputs: (workspace_identity * Masc_tui_keeper_chat_queue.t) list;
+  mutable workspace_cancellations: (unit ref * (unit -> unit)) list;
   mutable help_scroll: int;
   (* An image the operator asked to see, drawn over the whole terminal rather
      than into a frame. A picture does not live in a row: the terminal keeps
@@ -6456,7 +6472,7 @@ type state = {
   mutable msg_attachments_since: msg_anchor option;
   mutable msg_target_keeper_name: string option;
   mutable msg_return: keeper_chat_return;
-  mutable msg_drafts: (string * string) list;
+  mutable msg_drafts: ((workspace_identity * string) * keeper_composer_draft) list;
   mutable msg_history: msg_entry list;
   (* How far back the arrows have walked through what this pane sent, and the
      draft they set aside to do it. [None] means the composer holds the
@@ -7929,6 +7945,9 @@ let create_state
   keeper_message_focus = Right_pane;
   server_identity = None;
   local_base_path;
+  workspace_authority = Workspace_authority 0;
+  workspace_cancellations = [];
+  suspended_keeper_inputs = [];
   workspace_identity =
     (if String.equal local_base_path ""
      then Workspace_identity_match

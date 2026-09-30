@@ -110,8 +110,65 @@ def creation_journey(executable, *, wrong_receipt):
         )
 
 
+def creation_preserves_retained_queue(executable):
+    fixture = h.AtomicChatFixture()
+    workspace = {}
+
+    def prepare(base):
+        workspace["base"] = base
+
+    def create(_body):
+        path = Path(workspace["base"], ".masc", "keepers", "gamma.json")
+        path.write_text(json.dumps(h.keeper_metadata("gamma")), encoding="utf-8")
+        return 200, {"ok": True, "action": "up", "name": "gamma"}
+
+    fixture.fixtures[CREATE_PATH] = h.RequestHttpResponse(create)
+    fixture.fixtures["/api/v1/keepers/gamma/chat/history"] = (200, [])
+    with tempfile.TemporaryDirectory(prefix="masc-create-queued-editor-") as directory:
+        editor = Path(directory, "editor.py")
+        editor.write_text(
+            "from pathlib import Path\nimport sys\n"
+            f"Path(sys.argv[1]).write_text({DECLARATION!r})\n",
+            encoding="utf-8",
+        )
+
+        def interact(process, fd, _slave, output, _base):
+            try:
+                h.open_atomic_chat(process, fd, output)
+                os.write(fd, b"\x1b")
+                assert h.wait_for_fixture_event(process, fd, output, fixture.interrupted, timeout=5)
+                h.send_and_wait(process, fd, output, b"keep-this-local", h.composer_showing(b"keep-this-local"))
+                h.send_and_wait(process, fd, output, b"\r", b"Queue (1 waiting")
+                h.send_and_wait(process, fd, output, b"\x1b", b"Input retained after Esc")
+                fixture.release_interrupt.set()
+                h.wait_for_output(process, fd, output, b"Interrupt received", start=0, timeout=10)
+                h.escape_to_keeper_detail(process, fd, output, name=b"alpha")
+                h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+                h.send_and_wait(process, fd, output, b"a", b"declaration accepted")
+                assert fixture.received == [], fixture.received
+                # Reading the queue after handoff proves the old request is
+                # still retained, rather than merely absent from POST logs.
+                h.send_and_wait(process, fd, output, b"/queue", h.composer_showing(b"/queue"))
+                queued = h.send_and_wait(process, fd, output, b"\r", b"Local unsent messages: 1")
+                assert b"keep-this-local" in h.screen_text(queued), queued
+                assert fixture.received == [], fixture.received
+                h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+                os.write(fd, b"q")
+            finally:
+                fixture.release_interrupt.set()
+                fixture.release.set()
+
+        h.run_terminal_scenario(
+            executable, description="Keeper creation preserves retained queue",
+            interact=interact, http_fixtures=fixture.fixtures,
+            prepare_workspace=prepare,
+            extra_env={"EDITOR": f"{shlex.quote(sys.executable)} {shlex.quote(str(editor))}"},
+        )
+
+
 if __name__ == "__main__":
     executable = os.path.abspath(sys.argv[1])
     creation_journey(executable, wrong_receipt=False)
     creation_journey(executable, wrong_receipt=True)
-    print("Keeper create journey PTY: PASS (2 scenarios)")
+    creation_preserves_retained_queue(executable)
+    print("Keeper create journey PTY: PASS (3 scenarios)")

@@ -1726,6 +1726,45 @@ let test_seed_catalog_decided_capability_keys_agree_with_the_catalog () =
       (List.length disagreements)
       (String.concat "; " disagreements)
 
+let test_seed_codex_profiles_preserve_advertised_efforts () =
+  let module Effort = Llm_provider.Reasoning_effort in
+  with_deployment_agent_core_model_catalog @@ fun _catalog ->
+  let path = Filename.concat (repo_root ()) "config/runtime.toml" in
+  match load_list_text ~config_path:path with
+  | Error msg -> failf "repo runtime.toml should load: %s" msg
+  | Ok (runtimes, _, _, _, _) ->
+    let cases =
+      List.map
+        (fun effort ->
+           "codex-gpt-6-1-sol-" ^ Effort.to_string effort, "gpt-6.1-sol", effort)
+        [ Effort.Low; Effort.Medium; Effort.High; Effort.XHigh; Effort.Max; Effort.Ultra ]
+      @ [ "codex-gpt-6-astra-ultra", "gpt-6-astra", Effort.Ultra
+        ; "codex-gpt-6-sol-ultra", "gpt-6-sol", Effort.Ultra
+        ; "codex-gpt-5-6-sol-ultra", "gpt-5.6-sol", Effort.Ultra
+        ; "codex-gpt-5-6-terra-ultra", "gpt-5.6-terra", Effort.Ultra
+        ]
+    in
+    List.iter
+      (fun (profile, api_name, effort) ->
+         let runtime_id = "codex_subscription." ^ profile in
+         match find_runtime runtimes runtime_id with
+         | None -> failf "seed lacks selectable Codex profile %s" runtime_id
+         | Some runtime ->
+           check (option string) (runtime_id ^ " preserves configured effort")
+             (Some (Effort.to_string effort)) (Option.map Effort.to_string runtime.model.reasoning_effort);
+           (match runtime.model.capabilities with
+            | Some caps -> check (option bool) (runtime_id ^ " takes images")
+                (Some true) caps.supports_image_input
+            | None -> failf "seed profile %s has no image declaration" runtime_id);
+           match runtime.execution with
+           | Runtime_execution.Codex_app_server cfg ->
+             check (option string) (runtime_id ^ " selects the model") (Some api_name) cfg.model
+           | Runtime_execution.Agent_core _ | Runtime_execution.Claude_code _
+           | Runtime_execution.Antigravity_cli _ | Runtime_execution.Muse_serve _ ->
+             failf "seed profile %s is not a Codex app-server runtime" runtime_id)
+      cases
+;;
+
 let test_repo_runtime_toml_loads () =
   with_deployment_agent_core_model_catalog @@ fun _catalog ->
   let path = Filename.concat (repo_root ()) "config/runtime.toml" in
@@ -6032,6 +6071,8 @@ let () =
             test_model_rejects_unknown_key;
           test_case "repo runtime.toml loads through runtime parser" `Quick
             test_repo_runtime_toml_loads;
+          test_case "seed Codex profiles preserve advertised efforts" `Quick
+            test_seed_codex_profiles_preserve_advertised_efforts;
           test_case "seed capability keys the catalog row decides agree with it" `Quick
             test_seed_catalog_decided_capability_keys_agree_with_the_catalog;
           test_case "kimi-for-coding declares the reasoning it returns" `Quick

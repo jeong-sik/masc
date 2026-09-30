@@ -1,6 +1,8 @@
 import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
 import { fetchKeeperItems, type KeeperItemsReading } from '../api/keeper-items'
+import { currentStoredTokenRevision } from '../api/core'
+import { storedTokenRevision } from '../api/token-revision'
 import { keeperEquipmentKey, type KeeperEquipment } from '../api/schemas/keeper-portrait'
 import { KeeperPortrait } from './keeper-portrait'
 import { KeeperBadge } from './keeper-badge'
@@ -25,10 +27,11 @@ function candle(milli: string): string {
 
 export function KeeperItemsPanel({ keeper }: { keeper: Keeper }) {
   const authority = executionWorkspaceAuthority.value
+  const authRevision = storedTokenRevision.value
   const [revision, setRevision] = useState(0)
   const equipmentKey = keeper.portrait?.state === 'ready'
     ? keeperEquipmentKey(keeper.portrait.equipment) : null
-  const identity = JSON.stringify([keeper.name, equipmentKey, revision])
+  const identity = JSON.stringify([keeper.name, equipmentKey, revision, authRevision])
   const [reading, setReading] = useState<Reading>({ kind: 'loading', identity })
 
   useEffect(() => {
@@ -37,13 +40,14 @@ export function KeeperItemsPanel({ keeper }: { keeper: Keeper }) {
     const controller = new AbortController()
     const currentRequest = () => !controller.signal.aborted
       && executionWorkspaceAuthority.peek() === authority
+      && currentStoredTokenRevision() === authRevision
     fetchKeeperItems(keeper.name, controller.signal)
       .then(value => { if (currentRequest()) setReading({ kind: 'loaded', identity, authority, value }) })
       .catch(error => {
         if (currentRequest()) setReading({ kind: 'error', identity, authority, message: error instanceof Error ? error.message : 'Item 계정을 읽지 못했습니다' })
       })
     return () => controller.abort()
-  }, [identity, authority])
+  }, [identity, authority, authRevision])
 
   const current = reading.identity === identity
     && (reading.kind === 'loading' || reading.authority === authority)

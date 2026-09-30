@@ -1465,6 +1465,7 @@ let start_post_ready_owner_lanes
   Server_model_setup_resume.install ~sw
     ~base_path:(Mcp_server.workspace_config state).base_path
     ~resume:resume_model_configuration;
+  Candle_status.report_at_start ~base_path:(Mcp_server.workspace_config state).base_path;
   let start_authority () =
     start_completion_authority ~sw ~clock state;
     start_goal_verifier ~sw state;

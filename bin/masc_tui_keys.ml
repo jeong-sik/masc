@@ -1731,7 +1731,7 @@ let help_sections ?current () =
 
 let footer_hints_browser_lane =
   hints_of_bindings
-    [ b Navigate "b" "browser"
+    [ b Navigate "b" "choose browser"
     ; b Navigate "l / a / c" "live / automation / stagehand"
     ; b Navigate "[ / ]" "tab"
     ; b Navigate "j/k" "text"

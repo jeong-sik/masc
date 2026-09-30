@@ -15,7 +15,8 @@ including a transcript awaiting delivery. An existing Keeper draft is preserved.
 
 | Key | Action |
 | --- | --- |
-| `l` / `a` / `c` | Live / automation / stagehand browser |
+| `b` | Choose a connected Firefox/Zen, Stagehand Chromium, or independent automation browser with arrows and Enter |
+| `l` / `a` / `c` | Shortcuts for live / automation / stagehand browser |
 | `[` / `]` | Previous / next tab and read its page |
 | `1` … `9` | Select the corresponding observed tab directly when it is listed |
 | `j` / `k`, arrows | Scroll page text |
@@ -30,7 +31,12 @@ including a transcript awaiting delivery. An existing Keeper draft is preserved.
 | Ctrl-^ / Esc / Left | Hide the reader and return to the previous surface |
 
 Browser belongs to Config. Its title shows the source and latest HTTP request
-status. Coordinator connectivity and workspace warnings are labeled separately.
+status. The browser picker explains which choices use the existing login and
+which have separate sessions. The current browser is marked; choosing it again
+retains the current tab and scroll. Switching to a different browser clears old
+page references. Server browser choices remain available even when no native
+browser is connected; after selecting one, use `o` to open its session if needed.
+Coordinator connectivity and workspace warnings are labeled separately.
 Reads show latency, tab count, selected title, URL, character count and truncation.
 A failed or pending refresh retains content labeled as a previous read. Switching
 source clears that content; generation-stamped replies reject earlier requests.

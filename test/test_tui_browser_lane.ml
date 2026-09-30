@@ -321,9 +321,38 @@ let test_scoped_refresh_failure_retains_read_intent () =
   expect "next cadence follows resolved map instead of expired scope"
     (cadence_operation resolved=Some (Scene_refresh {tab_id=2;scene_view=Browser_lane.Regions;scope=None}))
 
+let test_unified_browser_picker () =
+  expect "server browsers stay selectable without native clients"
+    (browser_choices (create ()) = [Stagehand_browser; Automation_browser]);
+  let current = { (loaded ()) with scroll = 8; client_picker = Some 0 } in
+  let same = choose_browser (Connected_browser firefox) current in
+  expect "choosing current browser retains tab and scroll"
+    (same = { current with client_picker = None });
+  let stagehand = choose_browser Stagehand_browser current in
+  expect "switching to Stagehand withdraws native tab and document"
+    (stagehand.source = Stagehand && stagehand.selected_client = None
+     && stagehand.selected_tab = None && stagehand.scene = None && stagehand.reading = None);
+  let independent = choose_browser Automation_browser current in
+  let waiting = { independent with scroll = 7; selected_tab = Some 3;
+    load = Loading (90, Discover Choose_client) } in
+  let discovered, read = accept_clients ~generation:90 (Ok [firefox]) waiting in
+  expect "opening picker on server source does not switch to singleton live client"
+    (not read && discovered.source = Automation && discovered.selected_tab = Some 3
+     && discovered.scroll = 7 && discovered.client_picker = Some 0);
+  let failed, read = accept_clients ~generation:90 (Error "offline") waiting in
+  expect "failed native discovery retains server tab"
+    (not read && failed.source = Automation && failed.selected_tab = Some 3 && failed.scroll = 7);
+  let live = choose_browser (Connected_browser zen) discovered in
+  expect "explicit live selection routes back to chosen connection"
+    (live.source = Live && live.selected_client = Some zen && live.selected_tab = None
+     && request_body live = `Assoc ["lane", `String "live"; "clientId", `String zen.client_id]);
+  expect "stale discovery cannot overwrite explicit selection"
+    (accept_clients ~generation:90 (Ok [firefox]) live = (live, false))
+
 let () =
   List.iter (fun (name, test) -> test (); Printf.printf "PASS %s\n%!" name)
-    ["raw refresh scroll identity", test_raw_refresh_scroll_identity;
+    ["unified browser picker", test_unified_browser_picker;
+     "raw refresh scroll identity", test_raw_refresh_scroll_identity;
      "scoped refresh failure and region recovery", test_scoped_refresh_failure_retains_read_intent;
      "visual pointer navigation", test_visual_pointer_navigation;
      "visual scroll ownership", test_visual_scroll_ownership;

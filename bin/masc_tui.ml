@@ -21882,13 +21882,16 @@ and is loaded on demand through keeper_skill.
                  | "j" | "down" | "k" | "up" ->
                      let delta = if key = "j" || key = "down" then 1 else -1 in
                      state.browser_lane <- Some { view with client_picker = Some
-                       (max 0 (min (List.length (listed_clients view) - 1) (cursor + delta))) }
+                       (max 0 (min (List.length (browser_choices view) - 1) (cursor + delta))) }
                  | "\r" | "\n" | "enter" when not (busy view) ->
-                     (match List.nth_opt (listed_clients view) cursor with
+                     (match List.nth_opt (browser_choices view) cursor with
                       | None -> ()
-                      | Some client ->
-                          state.browser_lane <- Some (choose_client client view);
-                          launch_browser_lane state ~mailbox:async_messages Read)
+                      | Some choice ->
+                          state.browser_lane <- Some (choose_browser choice view);
+                          if not (browser_choice_selected view choice) then
+                            (match choice with
+                             | Connected_browser _ -> launch_browser_lane state ~mailbox:async_messages Read
+                             | Stagehand_browser | Automation_browser -> refresh_browser_lane state ~mailbox:async_messages))
                  | _ -> ()))
        | Some key when String.length key = 1 && Char.code key.[0] = 15
                        && Option.is_none (browser_history_on_screen state)
@@ -22013,7 +22016,7 @@ and is loaded on demand through keeper_skill.
                  | "l" -> switch_to Live
                  | "a" -> switch_to Automation
                  | "c" -> switch_to Stagehand
-                 | "b" when view.source = Live && not (busy view) ->
+                 | "b" when not (busy view) ->
                      state.browser_lane <- Some { view with client_picker = Some 0 };
                      launch_browser_lane state ~mailbox:async_messages (Discover Choose_client)
                  | "[" | "]" when not (busy view) ->

@@ -5,7 +5,10 @@
     by {!Lane_addon_sampling} before/after the provider boundary.
 
     Native Agent Core completions carry the requested output limit and
-    temperature into the provider request. Temperature support remains owned
+    temperature into the provider request unless the model declares a fixed
+    operator temperature. Thinking-only responses are empty text completions
+    and continue to the next declared candidate, retaining their stop reason.
+    Temperature support remains owned
     by the model's capability/codec contract; this does not promise that a
     reasoning model applies it. Stop sequences and sampling tools are refused explicitly.
     Official-client adapters currently cannot accept the required per-request

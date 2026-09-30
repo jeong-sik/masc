@@ -81,14 +81,22 @@ let native_attempt ~sw ~net ~runtime_id (params : S.create_message_params) =
     | [provider] -> Ok provider
     | [] | _ :: _ :: _ -> Error (Runtime_unavailable "runtime did not resolve one exact provider binding") in
   let config = {provider with Llm_provider.Provider_config.max_tokens=Some params.max_tokens;
-    temperature=(match params.temperature with Some value -> Some value | None -> provider.temperature);
+    temperature=(match params.temperature with
+      | Some value -> Some (Runtime_inference.resolve_temperature ~runtime_id ~fallback:(fun () -> value))
+      | None -> (match Runtime.temperature_of_runtime_id runtime_id with
+          | Some value -> Some value | None -> provider.temperature));
     system_prompt=(match params.system_prompt with Some prompt -> Some prompt | None -> provider.system_prompt)} in
   let* clock = Eio_context.get_clock () |> Result.map_error (fun detail -> Runtime_unavailable detail) in
   let body_timeout_s = Runtime_inference.resolve_turn_timeout_s ~runtime_id in
   let* response = Llm_provider.Complete.complete ~sw ~net ~clock ~config
     ~messages:(native_messages params) ?body_timeout_s ()
     |> Result.map_error (fun error -> Provider_error error) in
-  Ok {S.role=S.Assistant;content=S.Text {type_="text";text=L.text_of_response response};
+  let text = L.visible_text_of_response response in
+  let* () = if String.trim text = "" then
+      Error (Provider_error (Llm_provider.Http_client.empty_completion_error
+        ~stop_reason:response.stop_reason))
+    else Ok () in
+  Ok {S.role=S.Assistant;content=S.Text {type_="text";text};
     model=response.model;stop_reason=sampling_stop_reason response.stop_reason;
     _meta=Some (`Assoc ["masc.lane_provider",`Assoc ["stop_reason",
       `String (L.stop_reason_to_string response.stop_reason)]])}
@@ -110,8 +118,15 @@ let invoke ~sw ~net ~route ~request:_ params =
         "attempts",`List (List.rev failures)]))
     | runtime_id :: rest ->
         match attempt ~sw ~net ~runtime_id params with
-        | Error failure -> walk (`Assoc ["runtime_id",`String runtime_id;
-            "error",`String (failure_detail failure)] :: failures) rest
+        | Error failure ->
+            let stop = match failure with
+              | Provider_error (Llm_provider.Http_client.ProviderFailure
+                  {kind=Empty_completion {stop_reason};message=_}) ->
+                  ["provider_stop_reason", `String (L.stop_reason_to_string stop_reason)]
+              | Runtime_unavailable _ | Unsupported_controls _ | Invalid_request _
+              | Provider_error _ -> [] in
+            walk (`Assoc (["runtime_id",`String runtime_id;
+              "error",`String (failure_detail failure)] @ stop) :: failures) rest
         | Ok answer ->
             let metadata = match answer.S._meta with
               | Some (`Assoc fields) -> fields

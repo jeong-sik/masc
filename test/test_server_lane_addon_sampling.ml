@@ -16,7 +16,7 @@ let params : S.create_message_params = {
   temperature=Some 0.25;max_tokens=37;stop_sequences=None;metadata=None;
   tools=None;tool_choice=None;_meta=None}
 
-let test_actual_http_route_and_durable_sampling () =
+let test_actual_http_route_and_durable_sampling ?(thinking_only_primary=false) ?fixed_temperature ?(omit_temperature=false) () =
   Masc_test_deps.with_process_env Env_config_core.base_path_env_key None @@ fun () ->
   Masc_test_deps.with_process_env Env_config_core.config_dir_env_key None @@ fun () ->
   Eio_main.run @@ fun env ->
@@ -54,7 +54,10 @@ let test_actual_http_route_and_durable_sampling () =
       (text "route" (List.hd captures));
     requests := (Cohttp.Request.resource request,body) :: !requests;
     if String.starts_with ~prefix:"/primary/" (Cohttp.Request.resource request) then
-      Cohttp_eio.Server.respond_string ~status:`Bad_request
+      if thinking_only_primary then
+        Cohttp_eio.Server.respond_string ~status:`OK
+          ~body:{|{"id":"thinking-only","model":"actual-primary-model","choices":[{"index":0,"message":{"role":"assistant","content":"","reasoning_content":"Provider reasoning without an answer."},"finish_reason":"length"}],"usage":{"prompt_tokens":9,"completion_tokens":37,"total_tokens":46}}|} ()
+      else Cohttp_eio.Server.respond_string ~status:`Bad_request
         ~body:{|{"error":{"message":"synthetic primary unavailable"}}|} ()
     else Cohttp_eio.Server.respond_string ~status:`OK
       ~body:{|{"id":"actual-response","model":"actual-secondary-model","choices":[{"index":0,"message":{"role":"assistant","content":"The image comparison is retained."},"finish_reason":"stop"}],"usage":{"prompt_tokens":9,"completion_tokens":6,"total_tokens":15}}|} () in
@@ -83,13 +86,14 @@ protocol="openai-compatible-http"
 endpoint="http://127.0.0.1:%d/secondary"
 [models.sample]
 api-name="sampling-fixture"
-max-context=200000
+%smax-context=200000
 tools-support=false
 streaming=false
 [primary.sample]
 is-default=true
 [secondary.sample]
-|} port port);
+|} port port (match fixed_temperature with
+    | Some value -> Printf.sprintf "temperature=%g\n" value | None -> ""));
   require (Runtime.init_default ~config_path:runtime_path);
   let manifest = Filename.concat root "lane.toml" in
   write manifest {|id="sampling-proof"
@@ -112,9 +116,12 @@ max_reply_bytes=4194304
     ~config ~net:env#net ~sw ~store ~instance_id:"installed-analysis-worker" ~package
     ~binding:(`Assoc ["model_route",`String route]) in
   let handler = require (create "analysis") in
-  let answer = require (handler params) in
+  let request_params = if omit_temperature then {params with temperature=None} else params in
+  let answer = require (handler request_params) in
   check string "route fallback returns the actual responding model, not its configured alias"
     "actual-secondary-model" answer.model;
+  check string "only visible assistant text becomes an answer" "The image comparison is retained."
+    (match answer.content with S.Text {text;_} -> text | S.Image _ -> fail "unexpected image answer");
   check (option string) "provider stop reason maps to MCP vocabulary" (Some "endTurn") answer.stop_reason;
   let sent_requests = List.rev !requests in
   check int "primary failure walks only the declared secondary" 2 (List.length sent_requests);
@@ -122,7 +129,8 @@ max_reply_bytes=4194304
     ["/primary/v1/chat/completions";"/secondary/v1/chat/completions"] (List.map fst sent_requests);
   List.iter (fun (_,body) ->
     check int "requested provider output limit is serialized" 37 Yojson.Safe.Util.(member "max_tokens" body |> to_int);
-    check (float 0.) "requested temperature reaches the provider request" 0.25
+    check (float 0.) "operator temperature wins; undeclared models use the request"
+      (match fixed_temperature with Some value -> value | None -> 0.25)
       Yojson.Safe.Util.(member "temperature" body |> to_float);
     let messages = member "messages" body |> Yojson.Safe.Util.to_list in
     check string "system prompt reaches HTTP" "Return only the measured comparison"
@@ -147,6 +155,9 @@ max_reply_bytes=4194304
   check int "failed primary attempt is retained" 1 (member "failed_attempts" host |> Yojson.Safe.Util.to_list |> List.length);
   check string "failed attempt identifies the primary configured runtime" "primary.sample"
     (member "failed_attempts" host |> Yojson.Safe.Util.to_list |> List.hd |> text "runtime_id");
+  if thinking_only_primary then
+    check string "thinking-only failure preserves its exact provider stop reason" "max_tokens"
+      (member "failed_attempts" host |> Yojson.Safe.Util.to_list |> List.hd |> text "provider_stop_reason");
   check bool "unknown route is rejected before HTTP" true (Result.is_error (create "unconfigured"));
   check bool "missing binding route cannot use the host default" true
     (Result.is_error (Server_lane_addon_sampling.create_handler ~config ~net:env#net ~sw ~store
@@ -164,4 +175,8 @@ max_reply_bytes=4194304
 
 let () = run "Server Lane sampling HTTP composition" ["host boundary",[
   test_case "installed route, serialized request, fallback and durable outcome" `Quick
-    test_actual_http_route_and_durable_sampling]]
+    (fun () -> test_actual_http_route_and_durable_sampling ());
+  test_case "thinking-only maxTokens falls back and fixed model temperature wins" `Quick
+    (test_actual_http_route_and_durable_sampling ~thinking_only_primary:true ~fixed_temperature:0.75);
+  test_case "fixed model temperature survives an omitted request value" `Quick
+    (test_actual_http_route_and_durable_sampling ~fixed_temperature:0.75 ~omit_temperature:true)]]

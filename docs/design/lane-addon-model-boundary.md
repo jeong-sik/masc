@@ -112,8 +112,10 @@ or unknown route fails worker startup before container creation. The example
 names are illustrative, not installed routes.
 
 Native Agent Core requests use the runtime's inference-seeded provider binding,
-requested output limit, supplied temperature/system prompt, and text/image
-messages. Unsupported stop sequences and sampling tools are refused. A passed
+requested output limit, supplied system prompt, and text/image messages. A
+model-declared operator temperature wins; otherwise the request value is used.
+Thinking-only responses are empty at this text boundary and continue to the next
+declared candidate while retaining the provider stop reason. Unsupported stop sequences and sampling tools are refused. A passed
 temperature is not a guarantee that the selected model applies it. Standard MCP
 stop reasons are projected explicitly; other provider stop details remain in
 metadata. No provider credential/configuration enters the package payload.
@@ -126,7 +128,8 @@ explicit support gap, not a provider-free completion claim.
 
 The authored server integration scenario uses a loopback HTTP provider fixture.
 It checks the serialized system/text/image input, output limit and temperature,
-primary failure followed by the declared secondary, actual response identity,
+HTTP refusal or thinking-only maxTokens followed by the declared secondary,
+fixed model temperature overriding a supplied or omitted request value, actual response identity,
 request retention before HTTP, terminal references, and rejection without I/O.
 It invokes the same production handler assembly used by server registration.
 Native execution remains pending CI. It does not establish live provider calls,

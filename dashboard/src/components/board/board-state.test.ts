@@ -604,6 +604,19 @@ describe('focused detail continuity', () => {
     expect(fetchBoardPost).toHaveBeenCalledTimes(5)
   })
 
+  it('clears retained focus for an ordinary reopen of the same post', async () => {
+    vi.mocked(fetchBoardPost).mockImplementation(async (_id, offset) => ({
+      ...makePost({ id: 'reopened-post' }),
+      comments: offset === 0 ? [{ id: 'parent', parent_id: null }] : [{ id: 'reply', parent_id: 'parent' }],
+      commentPage: { offset: offset === 0 ? 0 : 20, total: 21 },
+    } as any))
+    await loadPostDetail('reopened-post', 'reply')
+    await loadPostDetail('reopened-post', null)
+    expect(fetchBoardPost).toHaveBeenCalledTimes(3)
+    expect(detailComments.value.map(comment => comment.id)).toEqual(['reply'])
+    expect(showToast).not.toHaveBeenCalled()
+  })
+
   it('keeps the successfully read post and pages when later ancestor paging fails', async () => {
     vi.mocked(fetchBoardPost)
       .mockResolvedValueOnce({ ...makePost({ id: 'partial-post' }), comments: [{ id: 'reply', parent_id: 'parent' }],

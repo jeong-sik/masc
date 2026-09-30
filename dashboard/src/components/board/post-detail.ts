@@ -1,4 +1,5 @@
 import { html } from 'htm/preact'
+import { focusedCommentNeedsAncestors } from './comment-context'
 import { useEffect, useMemo, useState } from 'preact/hooks'
 import { useSignal } from '@preact/signals'
 import { ActionButton } from '../common/button'
@@ -545,7 +546,9 @@ export function PostDetail({ post }: { post: BoardPost }) {
   const focusedCommentId = cleanCommentRouteParam((route.value.params as Record<string, string | undefined>).comment)
   useEffect(() => {
     if (detailPostId.value !== post.id
-      || detailFocusedCommentId.value !== focusedCommentId) {
+      || detailFocusedCommentId.value !== focusedCommentId
+      || (focusedCommentId && !detailLoading.value && detailCommentPage.value.offset > 0
+        && focusedCommentNeedsAncestors(detailComments.value, focusedCommentId))) {
       void loadPostDetail(post.id, focusedCommentId)
     }
   }, [post.id, focusedCommentId])

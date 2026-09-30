@@ -369,7 +369,7 @@ function PostCard({ post, reactions, supportedEmojis, reactionsArriving = false 
 
   const openPost = () => {
     selectedBoardPostId.value = post.id
-    void loadPostDetail(post.id)
+    void loadPostDetail(post.id, null)
   }
   const handlePostKeyDown = (event: KeyboardEvent) => {
     if (event.key !== 'Enter' && event.key !== ' ') return

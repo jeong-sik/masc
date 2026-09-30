@@ -182,6 +182,12 @@ let body ~width proof last_review_note =
        | [] -> [ { tone = Quiet; text = "no verdict on the ledger" } ]
        | rows -> { tone = Quiet; text = "no verdict on the ledger" } :: rows)
 
+(* Shared with Task history; Goal activity uses the full source timestamp. *)
+let short_ts ts =
+  if String.length ts >= 16 then
+    String.sub ts 5 5 ^ " " ^ String.sub ts 11 5
+  else ts
+
 let severity_tone = function
   | "ok" -> Quiet
   | "warn" -> Waiting

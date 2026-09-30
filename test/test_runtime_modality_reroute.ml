@@ -11,7 +11,7 @@ open Alcotest
    rendered once here instead of at every call below. *)
 let load_list_text ~config_path =
   Runtime.load_list ~config_path
-  |> Result.map_error (Runtime.to_diagnostic_text ~config_path)
+  |> Result.map_error (Runtime_config_error.to_diagnostic_text ~config_path)
 ;;
 
 
@@ -693,7 +693,7 @@ supports-multimodal-inputs = true
       | Ok (_, runtime, _, _, _) -> runtime
       | Error error -> fail error
     in
-    let runtime id execution = { native with Runtime.id; execution } in
+    let runtime id execution = { native with Runtime_instance.id; execution } in
     let antigravity =
       runtime "antigravity.vision"
         (Runtime_execution.Antigravity_cli
@@ -715,7 +715,7 @@ supports-multimodal-inputs = true
              ~assigned:antigravity ~candidates:[ claude; native ] [ image ] with
      | Runtime_agent.Reroute { target; _ } ->
        check string "text-only transport reroutes to actual image carrier"
-         "claude.vision" target.Runtime.id
+         "claude.vision" target.Runtime_instance.id
      | _ -> fail "advertised vision model cannot make Antigravity transport carry pixels");
     let text_caps =
       { (Option.get native.model.capabilities) with
@@ -729,7 +729,7 @@ supports-multimodal-inputs = true
              ~assigned:text ~candidates:[ antigravity; codex ] [ image ] with
      | Runtime_agent.Reroute { target; _ } ->
        check string "unavailable image transport skipped as reroute candidate"
-         "codex.vision" target.Runtime.id
+         "codex.vision" target.Runtime_instance.id
      | _ -> fail "the image must reach a capable transport");
     List.iter
       (fun runtime ->
@@ -773,8 +773,8 @@ supports-image-input = true
       | Ok (_, runtime, _, _, _) -> runtime
       | Error error -> fail error
     in
-    let vision id = { native with Runtime.id } in
-    let ids = List.map (fun (runtime : Runtime.t) -> runtime.Runtime.id) in
+    let vision id = { native with Runtime_instance.id } in
+    let ids = List.map (fun (runtime : Runtime_instance.t) -> runtime.Runtime_instance.id) in
     let runtimes = [ vision "fixture.a"; vision "fixture.b"; vision "fixture.c" ] in
     check (list string)
       "declared order; an unresolved id is skipped; a repeat counts once"
@@ -815,17 +815,17 @@ supports-image-input = true
       | Ok (_, runtime, _, _, _) -> runtime
       | Error error -> fail error
     in
-    let vision id = { native with Runtime.id } in
+    let vision id = { native with Runtime_instance.id } in
     let text id =
       { native with
-        Runtime.id
-      ; model = { native.Runtime.model with Runtime_schema.capabilities = None }
+        Runtime_instance.id
+      ; model = { native.Runtime_instance.model with Runtime_schema.capabilities = None }
       }
     in
     let candidates =
       [ text "fixture.t1"; vision "fixture.a"; text "fixture.t2"; vision "fixture.b" ]
     in
-    let ids = List.map (fun (runtime : Runtime.t) -> runtime.Runtime.id) in
+    let ids = List.map (fun (runtime : Runtime_instance.t) -> runtime.Runtime_instance.id) in
     let image =
       Agent_core.Types.image_block ~media_type:"image/png" ~data:"abc" ()
     in

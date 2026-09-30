@@ -129,7 +129,7 @@ let test_rate_limit_lifecycle_reaches_the_tui () =
     | Some runtime -> runtime
     | None -> fail "fixture runtime missing"
   in
-  let candidate = runtime.Runtime.candidate_backpressure in
+  let candidate = runtime.Runtime_instance.candidate_backpressure in
   let project ~now =
     let json =
       Server_dashboard_runtime_resolved_json.build_at ~now

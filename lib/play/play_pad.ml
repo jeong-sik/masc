@@ -134,16 +134,27 @@ let pads_dir ~base_path =
 
 (* 삼국지 III, from the prompts the sangokushi-3 Skill observed: numbered
    prompts answered with a number and enter, Y/N questions, and "press any
-   key". Numbers and names go through the page's text box, not the pad. At
-   the command prompt, 0 then enter asks whether to end the month. *)
+   key". Numbers and names go through the page's text box, not the pad.
+
+   The battle map is made of hexes, and its cursor moves on the digit keys:
+   8 up, 2 down, 7 up-left, 9 up-right, 1 down-left, 3 down-right. The arrow
+   keys, 4 and 6 do nothing there, so the pad sends digits: the D-pad for the
+   four upper and vertical hexes, the shoulders for the two lower diagonals.
+   Placing an officer before a battle takes 0, not enter, so Select sends 0
+   alone. At the command prompt, 0 then enter asks whether to end the month.
+
+   Esc does nothing anywhere in the game. Enter on an empty prompt goes back
+   one menu, and Backspace deletes the last typed digit, so East sends
+   Backspace. A battle menu takes its digit alone; an enter after it goes back
+   out of the menu the digit opened. *)
 let samguk3 =
   {toml|[BTN_SOUTH]
 keys = ["return"]
-label = "결정"
+label = "결정·뒤로"
 
 [BTN_EAST]
-keys = ["esc"]
-label = "취소"
+keys = ["backspace"]
+label = "지우기"
 
 [BTN_NORTH]
 keys = ["y"]
@@ -154,28 +165,36 @@ keys = ["n"]
 label = "아니오 (N)"
 
 [BTN_DPAD_UP]
-keys = ["up"]
-label = "위"
+keys = ["8"]
+label = "위 (8)"
 
 [BTN_DPAD_DOWN]
-keys = ["down"]
-label = "아래"
+keys = ["2"]
+label = "아래 (2)"
 
 [BTN_DPAD_LEFT]
-keys = ["left"]
-label = "왼쪽"
+keys = ["7"]
+label = "왼쪽 위 (7)"
 
 [BTN_DPAD_RIGHT]
-keys = ["right"]
-label = "오른쪽"
+keys = ["9"]
+label = "오른쪽 위 (9)"
+
+[BTN_TL]
+keys = ["1"]
+label = "왼쪽 아래 (1)"
+
+[BTN_TR]
+keys = ["3"]
+label = "오른쪽 아래 (3)"
 
 [BTN_START]
 keys = ["space"]
 label = "아무 키"
 
 [BTN_SELECT]
-keys = ["0", "return"]
-label = "이달 명령 끝내기 묻기 (0, 결정)"
+keys = ["0"]
+label = "0 입력 (배치)"
 |toml}
 
 (* Keyed by the saves name, the inventory name the sangokushi-3 Skill loads

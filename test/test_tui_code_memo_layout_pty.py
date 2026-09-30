@@ -6,21 +6,21 @@ import unicodedata
 import test_tui_keyboard_input as h
 
 SOURCE_MODULES = (
-    'bin/masc_tui.ml',
-    'bin/masc_tui_render.ml',
-    'bin/masc_tui_keys.ml',
-    'bin/masc_tui_scroll.ml',
-    'bin/masc_tui_roster_pane.ml',
-    'bin/masc_tui_acting_pane.ml',
-    'bin/masc_tui_render_prim.ml',
-    'bin/masc_tui_message_layout.ml',
-    'lib/ide_memo/ide_memo.ml',
-    'bin/masc_tui_render_code.ml',
-    'bin/masc_tui_render_code.mli',
-    'bin/masc_tui_code_updates.ml',
-    'bin/masc_tui_code_updates.mli',
-    'bin/masc_tui_code_requests.ml',
-    'bin/masc_tui_code_requests.mli',
+    "bin/masc_tui.ml",
+    "bin/masc_tui_render.ml",
+    "bin/masc_tui_keys.ml",
+    "bin/masc_tui_scroll.ml",
+    "bin/masc_tui_roster_pane.ml",
+    "bin/masc_tui_acting_pane.ml",
+    "bin/masc_tui_render_prim.ml",
+    "bin/masc_tui_message_layout.ml",
+    "lib/ide_memo/ide_memo.ml",
+    "bin/masc_tui_render_code.ml",
+    "bin/masc_tui_render_code.mli",
+    "bin/masc_tui_code_updates.ml",
+    "bin/masc_tui_code_updates.mli",
+    "bin/masc_tui_code_requests.ml",
+    "bin/masc_tui_code_requests.mli",
 )
 AUTHOR = "author-" + "a" * 120 + "AUTHORTAIL"
 BODY = "MEMOHEAD " + "한글 memo evidence " * 80 + "MEMOTAIL"

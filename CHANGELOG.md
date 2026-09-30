@@ -118,7 +118,7 @@
 - A verification request whose row cannot be built, such as one whose creation time `gmtime` cannot represent, is listed as unreadable with the reason instead of failing the whole listing with a 500. The summary counts it as unreadable, and the awaiting-operator view names it as unresolved, as it already did for a request the schema cannot read (#39938).
 - The builtin 삼국지3 pad sends the digit keys the battle map's hex cursor moves on (D-pad 8, 2, 7, 9; shoulders 1, 3) instead of arrow keys the game ignores, and Select sends 0, which places an officer before a battle (#39942).
 - East on the builtin 삼국지3 pad sends Backspace, which deletes a typed digit. It sent Esc, which does nothing anywhere in the game; Enter on an empty prompt goes back, so South is labelled 결정·뒤로 (#39942).
-- The DOS core is ocaml-dos 1d51834: EXEC of a truncated MZ child fails instead of raising, an unsupported instruction stops with IP still on it, and separate opens of one file share its bytes so closing one no longer overwrites another's writes (#39944).
+- The DOS core now fails EXEC of a truncated MZ child instead of raising, stops an unsupported instruction with IP still on it, and shares bytes across separate opens of one file so closing one no longer overwrites another's writes (#39944).
 - The MSX core is ocaml-msx 052f50b, which reverts ocaml-msx #41: that change served BIOS ENASLT (0x0024) as a vector whose slot change is undone on return, so a Sangokushi II disk warm-boot drew only black (#39944).
 - Approvals shows the keys that work in each question mode, with the same ask navigation and decision labels as Help (#39945).
 - Refreshing a conversation now also recovers tool rows whose output read had failed; before, each row had to be retried on its own (#39948).

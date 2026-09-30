@@ -52,7 +52,7 @@
     {
       "name": "render_clients",
       "source_review": "reviewed with findings",
-      "runtime_evidence": "pending",
+      "runtime_evidence": "focused fixture PTY PASS at 8f1bd0ee90, run 36663560222; full state matrix, later heads and installed binary pending",
       "finding_ids": [
         "S03"
       ],
@@ -85,7 +85,7 @@
     {
       "name": "render_connectors",
       "source_review": "reviewed with findings",
-      "runtime_evidence": "pending",
+      "runtime_evidence": "focused fixture PTY PASS at 8f1bd0ee90, run 36663560222; full state matrix, later heads and installed binary pending",
       "finding_ids": [
         "K03"
       ],
@@ -147,7 +147,7 @@
     {
       "name": "render_keeper_logs",
       "source_review": "reviewed with findings",
-      "runtime_evidence": "pending",
+      "runtime_evidence": "focused fixture PTY PASS at 8241076261, run 36665480126; full state matrix, later heads and installed binary pending",
       "finding_ids": [
         "K02"
       ],
@@ -162,7 +162,11 @@
       "runtime_evidence": "pending",
       "finding_ids": [
         "K06"
-      ]
+      ],
+      "implementation_prs": [
+        40186
+      ],
+      "implementation_evidence": "K06 full foreign stop command wrapped and physically counted; source review only; execution pending"
     },
     {
       "name": "render_lanes",
@@ -220,7 +224,7 @@
     {
       "name": "render_presets",
       "source_review": "reviewed with findings",
-      "runtime_evidence": "focused Linux PTY and unit success at f040b6f966; latest integrated3128a81dda and full state matrix pending",
+      "runtime_evidence": "focused fixture PTY PASS at 3128a81dda, run 36666351767; full state matrix, later heads and installed binary pending",
       "finding_ids": [
         "S06",
         "S07"
@@ -283,7 +287,7 @@
     {
       "name": "render_runtime_params",
       "source_review": "reviewed with findings",
-      "runtime_evidence": "pending",
+      "runtime_evidence": "focused fixture PTY PASS at 8c909157d1, run 36665989084; full state matrix, later heads and installed binary pending",
       "finding_ids": [
         "S04"
       ],
@@ -333,7 +337,7 @@
     {
       "name": "render_task_detail",
       "source_review": "reviewed with findings",
-      "runtime_evidence": "pending",
+      "runtime_evidence": "focused fixture PTY PASS at be39f068a1, run 36663470167; full state matrix, later heads and installed binary pending",
       "finding_ids": [
         "W02"
       ],

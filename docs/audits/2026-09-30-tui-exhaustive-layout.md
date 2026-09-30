@@ -38,6 +38,10 @@ Presets [집중 run 36662141540](https://github.com/jeong-sik/masc/actions/runs/
 
 Runtime picker [집중 run 36662423793](https://github.com/jeong-sik/masc/actions/runs/36662423793)은 `60444ae71d6a24bb0380c3a0584f5631e2295657`에서 success다. 원문·화면·최신 base 확인은 별도다. Goal `36662267831`은 timeline을 고치며 공용 `short_ts` 구현을 제거해 interface와 Task history 호출을 깨뜨렸고, `e38b210cd1`에서 구현을 복구했다. Params `36661078061`은 40열에서 사라지는 제목을 resize 준비 신호로 썼고, 같은 실제 화면의 footer가 문서 위치까지 잘랐다. `8c909157d1`에서 준비 신호와 별도 위치 행·행 예산을 함께 고쳤다. 두 응답의 실행 결과는 아직 확인하지 않았다.
 
+추가 확인: [집중 실행 원문 발췌](../evidence/tui-audit-2026-09-30/focused-passes-20260930.txt)에 각 checkout SHA와 실제 PTY PASS가 있다. Task `be39f068a1`, Keeper Info/Channels `3308aef6b4`, Clients/Connectors `8f1bd0ee90`, Goal `e38b210cd1`, Params `8c909157d1`, Keeper logs `8241076261`, main 통합 Presets `3128a81dda`의 해당 집중 실행은 success다. 이전 문단의 “미확인”은 당시 관측 상태이며 이 기록으로 갱신한다. 전체 상태 행렬·최신 main 겹침·필수 PR 검사·설치 바이너리 확인은 별도다.
+
+Schedules `504b176078`의 새 viewport, hold, delivery는 PASS였으나 기존 source-status 시나리오가 실패했다. 이전 조회 유지 경고가 본문 스크롤 밖으로 사라진 실제 회귀이며, `f088db60a2`에서 고정 경고 행과 전체 오류 읽기·공유 높이를 함께 복구했다. [수정 실행36668855707](https://github.com/jeong-sik/masc/actions/runs/36668855707)은 요청 후 미확인이다.
+
 ## 수정과 남은 결함
 
 `PR`는 구현이 게시되었다는 뜻이다. 아래에 적힌 PR들의 현재 head·CI·리뷰·병합 상태는 작업 직전에 다시 확인한다.
@@ -58,7 +62,7 @@ Runtime picker [집중 run 36662423793](https://github.com/jeong-sik/masc/action
 | K03/S03 | Connectors/Clients | printf 최소 폭으로 긴 이름이 열을 밀고 channel/last seen 소실 | [#40118](https://github.com/jeong-sik/masc/pull/40118), 공유 Table.fit; 실행 검증 대기 |
 | K04 | Schedules 상세/목록 | recurrence/ID/digest/fence 원문 잘림, mandatory target 폭 과다 | [#40167](https://github.com/jeong-sik/masc/pull/40167), 전체 필드 스크롤·실제 페이지 높이·원래 due/target/recurrence 우선순위 보존; 집중 실행 검증 대기 |
 | K05 | Runtime picker | mandatory 24셀×2 + chrome이 작은 frame 초과 | [#40143](https://github.com/jeong-sik/masc/pull/40143), 실제 셀 폭으로 열 배정; 집중 실행 검증 대기 |
-| K06 | Chat inflight row | 다른 Keeper 이름 뒤 interrupt 행동이 잘림 | 구현 필요 |
+| K06 | Chat inflight row | 다른 Keeper 이름 뒤 interrupt 행동이 잘림 | [#40186](https://github.com/jeong-sik/masc/pull/40186), 전체 중단 명령을 먼저 wrap·공유 물리 행 예산; 실행 검증 대기 |
 | R02 | 기록된 diff | 세로 스크롤만 있어 긴 줄 뒤 차이가 도달 불가; shift 키가 file offset만 바꿈 | 실제 diff 수평 탐색 필요 |
 | S02 | Runtime 목록 | 77셀 고정 열이 route/probe/detail을 밀어냄 | 반응형 열 필요; Enter 상세 fallback 있음 |
 | W02 | Task 상세 | title/status/actor/reason/ID 등 고정 metadata가 원문을 잃음 | [#40133](https://github.com/jeong-sik/masc/pull/40133), 모든 metadata/history를 물리 행 스크롤에 포함; 집중 실행 검증 대기 |

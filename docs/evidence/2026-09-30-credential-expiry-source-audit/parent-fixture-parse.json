@@ -1,0 +1,6 @@
+{
+  "compiler": "5.5.1",
+  "command": "ocamlc -stop-after parsing -impl test/test_play_credential_transaction.ml",
+  "exit": 0,
+  "output": ""
+}

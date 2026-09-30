@@ -682,10 +682,9 @@ let live_bootstrap_allows
   | None -> false
   | Some credential ->
     let not_expired =
-      match credential.expires_at with
-      | None -> true
-      | Some expires_at ->
-        String.compare (iso8601_of_unix_seconds (now ())) expires_at <= 0
+      match Credential_expiry.parse credential.expires_at with
+      | Error (Credential_expiry.Invalid_timestamp _) -> false
+      | Ok expiry -> not (Credential_expiry.is_expired ~now:(now ()) expiry)
     in
     not_expired
     && constant_time_string_equal (token_hash credential.token) bootstrap_token_hash

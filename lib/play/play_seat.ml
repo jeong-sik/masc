@@ -11,7 +11,12 @@ let participants ~base_path ~keepers ~now =
   let seated (cred : Masc_domain.agent_credential) =
     match cred.role with
     | Masc_domain.Admin | Masc_domain.Player ->
-      if Play_invite.expired ~now cred then None else Some cred.agent_name
+      (match Play_invite.expired ~now cred with
+       | Ok false -> Some cred.agent_name
+       | Ok true -> None
+       | Error (Masc_domain.Credential_expiry.Invalid_timestamp stamp) ->
+         Log.Auth.warn "Play seat cannot read credential expiry for %s: %S" cred.agent_name stamp;
+         None)
     | Masc_domain.Worker -> None
   in
   List.sort_uniq String.compare

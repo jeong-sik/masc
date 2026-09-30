@@ -13,17 +13,10 @@
     [409 {code: "name_taken", taken_by}]. One issue or revoke runs at a time,
     so two requests for one name cannot both be issued.
 
-    Listing refuses an invalid expiry projection with
-    [503 {code: "invalid_credential_expiry"}], rather than inventing an
-    expired invite row.
-
     Revoking deletes the [Player] credential and frees the DOS controller the
     name still holds: [200 {name, revoked: true, released_controller}]. A name
     that is another role's credential answers [409 {code: "not_an_invite"}]
-    and changes nothing. A present credential that cannot be read or resolves
-    to another owner answers [503] with [code: "credential_unreadable"] or
-    [code: "credential_identity_mismatch"], preserving the controller.
-    A name with no credential and no keeper that holds
+    and changes nothing. A name with no credential and no keeper that holds
     the controller -- taken back by a request sent before the delete, or kept
     by a release that failed -- is freed:
     [200 {name, revoked: false, released_controller: true}]. Otherwise it

@@ -33,11 +33,12 @@ let test_future_stamp_is_live () =
   check bool "a future stamp is live" false
     (Inv.is_expired (Inv.classify ~now (cred ~expires_at:"2027-01-01T00:00:00Z" "new")))
 
-(* An expiry nothing can parse is not evidence the credential is dead. Reading
-   it as dead would let a prune delete a bearer that still works. *)
+(* Malformed input is reported explicitly and retained for operator repair. *)
 let test_unreadable_stamp_is_not_expired () =
   check bool "unparseable expiry survives a prune" false
-    (Inv.is_expired (Inv.classify ~now (cred ~expires_at:"whenever" "odd")))
+    (Inv.is_expired (Inv.classify ~now (cred ~expires_at:"whenever" "odd")));
+  check bool "unparseable expiry is explicitly invalid" true
+    (Inv.classify ~now (cred ~expires_at:"whenever" "odd") = Inv.Invalid_expiry "whenever")
 
 let test_prune_takes_only_expired () =
   let creds =

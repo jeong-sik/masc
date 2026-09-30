@@ -32,8 +32,14 @@ def from_cell(text, boundary):
     return ""
 
 
+def completed(output):
+    end = output.rfind(h.FRAME_END)
+    assert end >= 0, "No completed redraw"
+    return bytes(output[:end + len(h.FRAME_END)])
+
+
 def window(output, columns):
-    rows = h.screen_rows(bytes(output))
+    rows = h.screen_rows(completed(output))
     position, match = next((row, WINDOW.search(text.decode("utf-8")))
         for row, text in sorted(rows.items()) if WINDOW.search(text.decode("utf-8")))
     first, last, total = map(int, match.groups())
@@ -105,10 +111,14 @@ def run(executable, columns, no_color, short=False):
     def interact(process, fd, _slave, output, _base):
         h.palette_go(process, fd, output, b"go code", b"[draft]")
         h.send_and_wait(process, fd, output, b"\r", b"local lock = 1")
+        h.read_available(fd, output)
+        start = len(output)
         h.resize_and_wait(process, fd, output, rows=40 if short else 18, columns=columns,
                           needle=b"local lock = 1", controls=(h.FULL_REDRAW,))
+        h.wait_for_output(process, fd, output, h.FRAME_END,
+                          start=h.end_of_needle(output, b"local lock = 1", start), timeout=3)
         h.send_and_wait(process, fd, output, b"H", b"Commit: abc1234")
-        screen = h.screen_text(bytes(output)).decode("utf-8")
+        screen = h.screen_text(completed(output)).decode("utf-8")
         assert "Esc:back" in screen, (columns, no_color, screen)
         if short:
             first, last, total, _ = window(output, columns)

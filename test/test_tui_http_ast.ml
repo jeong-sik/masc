@@ -1343,7 +1343,7 @@ let test_tui_current_projection_wiring () =
   check bool "metadata refresh reconciles the selected log identity" true
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_loader.ml"
-       ~binding_name:"load_from_masc_dir"
+       ~binding_name:"replace_keeper_rows"
        ~callee:"Metrics_tail.reconcile_selection"
      = 1);
   check bool "metrics diagnostics are terminal-safe before rendering" true
@@ -1584,11 +1584,9 @@ let test_server_identity_is_revalidated_on_every_refresh () =
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"apply_http_surfaces"
        ~callee:"apply_server_identity_reading");
-  (* The clearing is [state.server_identity <- None], a write. Counting
-     reads of the field found none and called a working path broken. *)
-  check int "a failed refresh clears current identity" 1
-    (Ast_grep.count_field_clears_to_none ~module_path:main_path
-       ~binding_name:"apply_async_message" ~field_name:"server_identity")
+  check int "a failed refresh withdraws identity through its owner" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"apply_async_message" ~callee:"apply_server_identity_reading")
 ;;
 
 let test_scoped_surface_refresh_does_not_own_connection_status () =

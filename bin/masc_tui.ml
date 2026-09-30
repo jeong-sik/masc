@@ -1211,7 +1211,7 @@ let reset_message_file_changes state keeper_name =
      alpha. Identity plus this generation is the cache authority. *)
   state.msg_file_changes_generation <- state.msg_file_changes_generation + 1;
   state.msg_file_changes <- None;
-  state.msg_file_changes_keeper <- Some keeper_name;
+  state.msg_file_changes_keeper <- keeper_name;
   state.msg_file_change_index <- Masc_tui_keeper_chat_diff.empty;
   state.msg_file_changes_loading <- false;
   state.msg_file_changes_refresh_pending <- false;
@@ -1226,6 +1226,23 @@ let forget_recall (state : state) =
   state.msg_recall_at <- None;
   state.msg_recall_draft <- ("", [], [], None)
 
+let clear_keeper_history_projection state =
+  state.msg_history_load_generation <- state.msg_history_load_generation + 1;
+  state.msg_history_inflight <- None;
+  state.msg_copy_generation <- state.msg_copy_generation + 1;
+    (* These readings belong to one conversation. Clear them at the shared
+       target boundary before its replacement request can finish. *)
+    state.msg_loaded <- [];
+    state.msg_loaded_keeper <- None;
+    state.msg_loaded_error <- None;
+    state.msg_loaded_dropped <- 0;
+    state.msg_memory_error <- None;
+    state.msg_memory_dropped <- 0;
+    state.msg_older_cursor <- None;
+    state.msg_older_exist <- false;
+    state.msg_older_loading <- false;
+    state.msg_older_error <- None
+
 let open_message_for_keeper ?(return_to = Keeper_chat_return_detail) state
     keeper_name ~drain_queue =
   (* The paste goes back into the draft before the draft is put away. A spill
@@ -1239,11 +1256,12 @@ let open_message_for_keeper ?(return_to = Keeper_chat_return_detail) state
   (* Re-entering the same Keeper is a fresh reading too: another process may
      have written files while this pane was elsewhere. Compact mode still
      performs no GET; it only invalidates this presentation cache. *)
-  reset_message_file_changes state keeper_name;
+  reset_message_file_changes state (Some keeper_name);
   (* Recall is a walk through one Keeper's messages. A Down on the new
      Keeper must not restore the previous Keeper's draft or image payload. *)
   forget_recall state;
   if state.msg_target_keeper_name <> Some keeper_name then begin
+    state.msg_copy_generation <- state.msg_copy_generation + 1;
     (* A failed refresh after revisiting must retain the pages already read
        for this Keeper, including their exact paging cursor. *)
     restore_keeper_chat_page state keeper_name;
@@ -5823,7 +5841,7 @@ let launch_keeper_chat_file_changes_load ?(force = false) state ~mailbox
       not
         (Option.equal String.equal state.msg_file_changes_keeper
            (Some keeper_name))
-    then reset_message_file_changes state keeper_name;
+    then reset_message_file_changes state (Some keeper_name);
     if state.msg_file_changes_loading then
       if force then state.msg_file_changes_refresh_pending <- true else ()
     else if
@@ -8208,7 +8226,8 @@ let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
     | None -> state.msg_target_keeper_name
   with
   | None -> report_action state "error" "Cannot send: no Keeper is selected"
-  | Some _ when Option.is_some state.keepers_error ->
+  | Some target when Option.is_some state.keepers_error
+                     && not (keeper_available_for_new_message state target) ->
       report_action state "error"
         "Cannot send while the Keeper roster is unavailable"
   | Some target when not (keeper_available_for_new_message state target) ->
@@ -10714,7 +10733,27 @@ let apply_overview_goals_load state = function
   | Ok goals -> state.overview_goals <- Goals_read goals
   | Error err -> state.overview_goals <- Goals_failed err
 
-let apply_keeper_roster_load state = function
+let apply_remote_keeper_rows state =
+  match state.workspace_identity with
+  | Workspace_identity_match | Workspace_identity_unread -> ()
+  | Workspace_identity_mismatch _ ->
+    let observed, error = match state.keeper_roster with
+      | Keeper_control.Roster_unobserved -> [],
+        Some (Option.value state.keeper_roster_error ~default:"Remote Keeper roster not observed")
+      | Keeper_control.Roster_complete rows -> rows, None
+      | Keeper_control.Roster_partial { observed; total } -> observed,
+        Some (Printf.sprintf "Remote Keeper roster is partial (%d of %d)"
+          (List.length observed) total)
+      | Keeper_control.Roster_invalid { observed; errors; complete = _ } -> observed,
+        Some (String.concat "; " (List.map (fun (name, reason) -> name ^ ": " ^ reason) errors))
+    in
+    replace_keeper_rows ~preserve_on_error:false state
+      ~keepers:(List.map Tui_decode.keeper_of_runtime observed) ~error;
+    apply_keeper_log_snapshot state
+      { entries = []; error = Some Metrics_tail.Remote_workspace }
+
+let apply_keeper_roster_load state result =
+  (match result with
   | Ok (roster, candle) ->
       state.candle_observation <- Some candle;
       state.keeper_roster <- roster;
@@ -10733,7 +10772,8 @@ let apply_keeper_roster_load state = function
         ~set_error:(fun value -> state.keeper_roster_error <- value)
         (Keeper_control.roster_failure_message
            ~credential_sent:(Masc_tui_http.operator_token_present ())
-           failure)
+           failure));
+  apply_remote_keeper_rows state
 
 let apply_planning_load state = function
   | Ok planning ->
@@ -11061,22 +11101,74 @@ let apply_http_scoped_surfaces state results =
    workspace follows the reading in the same step: a mismatch clears it, a
    match reloads it, so a screen never shows rows from a workspace the server
    just stopped serving. *)
+let withdraw_keeper_workspace_presentation state =
+  state.msg_loaded_pages <- [];
+  let draft = materialise_spilled_paste state (Buffer.contents state.msg_input) in
+  Buffer.clear state.msg_input;
+  Buffer.add_string state.msg_input draft;
+  save_message_draft state;
+  Buffer.clear state.msg_input;
+  forget_recall state;
+  clear_keeper_history_projection state;
+  reset_message_file_changes state None;
+  state.msg_target_keeper_name <- None;
+  state.msg_live <- None;
+  state.composer_focused <- false;
+  (match state.view with
+   | Keepers Keeper_message ->
+     state.view <- Keepers Keeper_list;
+     set_msg_scroll state 0
+   | _ -> ())
+
 let apply_server_identity_reading state reading =
+  let previous = state.workspace_identity in
   state.server_identity <- Masc_tui_types.server_identity_of_refresh reading;
   state.workspace_identity <-
     Masc_tui_types.workspace_identity_of_refresh
       ~local_base_path:state.local_base_path reading;
+  let same_workspace = match previous, state.workspace_identity with
+    | Workspace_identity_match, Workspace_identity_match -> true
+    | Workspace_identity_mismatch prior, Workspace_identity_mismatch current ->
+      String.equal prior.server_base_path current.server_base_path
+    | _ -> false
+  in
+  if not same_workspace then begin
+    state.keeper_action_pending <- None;
+    withdraw_keeper_workspace_presentation state
+  end;
   match state.workspace_identity with
-  | Masc_tui_types.Workspace_identity_mismatch _ -> clear_local_workspace state
+  | Masc_tui_types.Workspace_identity_mismatch current ->
+    let same_remote = match previous with
+      | Workspace_identity_mismatch prior ->
+        String.equal prior.server_base_path current.server_base_path
+      | Workspace_identity_match | Workspace_identity_unread -> false
+    in
+    clear_local_workspace ~keep_keeper_rows:same_remote state;
+    apply_keeper_log_snapshot state
+      { entries = []; error = Some Metrics_tail.Remote_workspace };
+    if not same_remote then begin
+      state.keeper_roster <- Keeper_control.Roster_unobserved;
+      state.keeper_roster_error <- None
+    end
   | Masc_tui_types.Workspace_identity_match ->
     load_from_masc_dir state state.local_base_path
-  | Masc_tui_types.Workspace_identity_unread -> ()
+  | Masc_tui_types.Workspace_identity_unread ->
+    (match previous with
+     | Workspace_identity_mismatch _ ->
+       clear_local_workspace state;
+       state.keeper_roster <- Keeper_control.Roster_unobserved
+     | Workspace_identity_match | Workspace_identity_unread -> ());
+    apply_keeper_log_snapshot state
+      { entries = []; error = Some Metrics_tail.Workspace_unconfirmed }
 
 let apply_http_surfaces state results =
+  (* Establish the workspace before projecting HTTP rows. A confirmed remote
+     identity withdraws local files but does not erase that same response's
+     public Keeper list. *)
+  apply_server_identity_reading state results.http_server_identity;
   apply_overview_load state results.http_overview;
   Option.iter (apply_approval_observation state) results.http_approvals;
   apply_http_scoped_surfaces state results.http_scoped;
-  apply_server_identity_reading state results.http_server_identity;
   let reached result =
     Result.map (fun _ -> ()) result |> Result.map_error (fun _ -> ())
   in
@@ -11100,6 +11192,8 @@ let apply_server_booting state ~identity ~approval_ticket =
      surface was asked. The approvals panel is told why its rows are stale,
      as a failed refresh tells it; nothing else changes. *)
   apply_server_identity_reading state identity;
+  apply_keeper_roster_load state
+    (Error (Keeper_control.Roster_unreachable "server booting"));
   Option.iter
     (fun ao_ticket ->
        apply_approval_observation state
@@ -11131,8 +11225,12 @@ let load_keeper_logs_if_safe state base_path limit keeper =
   match state.workspace_identity with
   | Masc_tui_types.Workspace_identity_match ->
     load_selected_keeper_logs state base_path limit keeper
-  | Masc_tui_types.Workspace_identity_unread
-  | Masc_tui_types.Workspace_identity_mismatch _ -> ()
+  | Masc_tui_types.Workspace_identity_unread ->
+    apply_keeper_log_snapshot state
+      { entries = []; error = Some Metrics_tail.Workspace_unconfirmed }
+  | Masc_tui_types.Workspace_identity_mismatch _ ->
+    apply_keeper_log_snapshot state
+      { entries = []; error = Some Metrics_tail.Remote_workspace }
 ;;
 
 (* What a detail tab reads on the way in, for the Keeper it is opened on.
@@ -13139,7 +13237,7 @@ let handle_composer_key state ~base_path ~mailbox key =
            if state.view <> Keepers Keeper_message then begin
              match state.msg_target_keeper_name with
              | Some keeper_name ->
-                 reset_message_file_changes state keeper_name;
+                 reset_message_file_changes state (Some keeper_name);
                  launch_keeper_history_load state ~mailbox ~keeper_name
              | None -> ()
            end;
@@ -13166,7 +13264,7 @@ let handle_composer_key state ~base_path ~mailbox key =
            if state.view <> Keepers Keeper_message then begin
              match state.msg_target_keeper_name with
              | Some keeper_name ->
-                 reset_message_file_changes state keeper_name;
+                 reset_message_file_changes state (Some keeper_name);
                  launch_keeper_history_load state ~mailbox ~keeper_name
              | None -> ()
            end;
@@ -13822,11 +13920,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight
          roster's trace ids resolve it. *)
       let pane_changes_keeper = acting_pane_changes_keeper state in
       let pane_keeper_acted = ref false in
-      let traces =
-        List.map
-          (fun (keeper : keeper) -> (keeper.k_name, keeper.k_trace_id))
-          state.keepers
-      in
+      let trace_reading = Tui_decode.keeper_trace_projection state.keepers in
+      let traces = trace_reading.bindings in
       let acted_by_pane_keeper event =
         match pane_changes_keeper with
         | None -> false
@@ -14059,7 +14154,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            apply_approval_observation state
              { ao_ticket; ao_result = Error err })
       approval_ticket;
-      state.server_identity <- None;
+      apply_server_identity_reading state (Error err);
       state.connection_status <- Masc_tui_types.Disconnected;
       add_event state "error" err;
       react_to_server_contact state ~base_path ~host:server_peer_host
@@ -26064,9 +26159,18 @@ and is loaded on demand through keeper_skill.
                  | Lanes_overview ->
                      show_lanes_action_error state
                        "Cannot open chat: These lanes have no Keeper; use Keepers")
+            | Keepers (Keeper_list | Keeper_detail)
+              when Option.fold ~none:false
+                ~some:(fun (keeper : Tui_decode.keeper) ->
+                  keeper.k_origin = Tui_decode.Remote_keeper)
+                (selected_keeper state) ->
+              report_action state "error"
+                "Chat requires a matching workspace for attachments and pasted files"
             | Keepers Keeper_list
-              when Option.is_none state.keepers_error
-                   && state.keeper_cursor < List.length state.keepers ->
+              when Option.fold ~none:false
+                     ~some:(fun (keeper : Tui_decode.keeper) ->
+                       keeper_available_for_new_message state keeper.k_name)
+                     (selected_keeper state) ->
                 let keeper = List.nth state.keepers state.keeper_cursor in
                 open_message_for_keeper ~return_to:Keeper_chat_return_list state
                   keeper.k_name ~drain_queue:(fun () ->
@@ -26076,8 +26180,10 @@ and is loaded on demand through keeper_skill.
                   ~keeper_name:keeper.k_name;
                 state.view <- Keepers Keeper_message
             | Keepers Keeper_detail
-              when Option.is_none state.keepers_error
-                   && state.keeper_cursor < List.length state.keepers ->
+              when Option.fold ~none:false
+                     ~some:(fun (keeper : Tui_decode.keeper) ->
+                       keeper_available_for_new_message state keeper.k_name)
+                     (selected_keeper state) ->
                 let keeper = List.nth state.keepers state.keeper_cursor in
                 open_message_for_keeper ~return_to:Keeper_chat_return_detail
                   state keeper.k_name ~drain_queue:(fun () ->

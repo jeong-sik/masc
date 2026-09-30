@@ -815,20 +815,15 @@ let test_a_request_to_another_keeper_does_not_pin_this_pane () =
     | Keeper_selection.Switch_to _ -> true
   in
   let roster_row name : Tui_types.keeper =
-    { k_origin = Masc.Tui_decode.Persisted_keeper; k_name = name
-    ; k_trace_id = "trace-" ^ name
-    ; k_paused = false
-    ; k_current_task_id = None
-    ; k_total_turns = 0
-    ; k_total_tokens = 0
-    ; k_total_cost_usd = 0.0
-    ; k_last_turn_ts = ""
-    ; k_last_proactive_outcome = None
-    ; k_created_at = "2026-09-07T00:00:00Z"
-    ; k_updated_at = "2026-09-07T00:00:00Z"
-    }
+    { k_origin = Masc.Tui_decode.Persisted_keeper
+  ; k_name = name
+  ; k_paused = false
+  ; k_identity = Ok { k_trace_id = "trace-" ^ name; k_created_at = "2026-09-07T00:00:00Z"; k_updated_at = "2026-09-07T00:00:00Z" }
+  ; k_activity = Some { k_current_task_id = None; k_total_turns = 0; k_total_tokens = 0; k_total_cost_usd = 0.0; k_last_turn_ts = ""; k_last_proactive_outcome = None }
+  }
   in
   state.keepers <- [ roster_row "alpha"; roster_row "beta" ];
+  state.workspace_identity <- Tui_types.Workspace_identity_match;
   state.msg_target_keeper_name <- Some "alpha";
   check bool "with nothing in flight the pane can switch" true (has_target ());
   state.msg_inflight <- [ entry "beta" ];

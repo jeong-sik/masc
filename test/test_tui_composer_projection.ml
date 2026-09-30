@@ -5,21 +5,17 @@ module Projection = Masc_tui_composer_projection
 module Tui_types = Masc_tui_types
 
 let keeper : Tui_types.keeper =
-  { k_origin = Masc.Tui_decode.Persisted_keeper; k_name = "analyst"
-  ; k_trace_id = "trace-current"
+  { k_origin = Masc.Tui_decode.Persisted_keeper
+  ; k_name = "analyst"
   ; k_paused = false
-  ; k_current_task_id = None
-  ; k_total_turns = 0
-  ; k_total_tokens = 0
-  ; k_total_cost_usd = 0.0
-  ; k_last_turn_ts = ""
-  ; k_last_proactive_outcome = None
-  ; k_created_at = "2026-08-25T00:00:00Z"
-  ; k_updated_at = "2026-08-25T00:00:00Z"
+  ; k_identity = Ok { k_trace_id = "trace-current"; k_created_at = "2026-08-25T00:00:00Z"; k_updated_at = "2026-08-25T00:00:00Z" }
+  ; k_activity = Some { k_current_task_id = None; k_total_turns = 0; k_total_tokens = 0; k_total_cost_usd = 0.0; k_last_turn_ts = ""; k_last_proactive_outcome = None }
   }
 
 let state () =
-  Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 () in
+  state.workspace_identity <- Tui_types.Workspace_identity_match;
+  state
 
 let target_testable =
   testable
@@ -71,6 +67,22 @@ let test_focus_and_draft_are_projected_together () =
   let focused = Projection.of_state state in
   check focus_testable "focused" Composer.Focused focused.focus;
   check string "draft" "draft for analyst" focused.draft
+
+let test_workspace_loss_withdraws_queued_message_target () =
+  let state = state () in
+  state.keepers <- [ keeper ];
+  state.workspace_identity <- Tui_types.Workspace_identity_unread;
+  check bool "retained local metadata cannot authorize a queued send" false
+    (Tui_types.keeper_available_for_new_message state keeper.k_name);
+  state.workspace_identity <- Tui_types.Workspace_identity_mismatch
+    { local_base_path = "/client"; server_base_path = "/server" };
+  state.keepers <- [{ keeper with k_origin = Masc.Tui_decode.Remote_keeper; k_activity = None }];
+  check target_testable "remote observation does not advertise file access"
+    (Composer.Unreachable { keeper = "analyst";
+      reason = "chat needs the server workspace for attachments and pasted files" })
+    (Projection.of_state state).target;
+  check bool "unobserved remote usage is not zero" true
+    (Option.is_none (Tui_types.aggregate_keeper_stats state.keepers))
 
 let count_complete_composer_records module_path =
   let count = ref 0 in
@@ -219,6 +231,8 @@ let () =
             test_unread_roster_keeps_the_selected_name
         ; test_case "focus and draft" `Quick
             test_focus_and_draft_are_projected_together
+        ; test_case "workspace loss withdraws queued message target" `Quick
+            test_workspace_loss_withdraws_queued_message_target
         ; test_case "one structural owner" `Quick
             test_state_projection_has_one_structural_owner
         ; test_case "the composer row says what a slash word is" `Quick

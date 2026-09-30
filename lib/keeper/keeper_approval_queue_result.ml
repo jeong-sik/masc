@@ -1,5 +1,4 @@
 open Keeper_approval_queue_rules_types
-open Keeper_approval_queue_rules
 
 type storage_error =
   { path : string

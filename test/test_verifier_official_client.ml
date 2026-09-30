@@ -338,7 +338,7 @@ let test_failed_review_leaves_no_failed_attempt_mark () =
     | Some runtime -> runtime | None -> fail "the verifier slot resolves" in
   let failed_attempt =
     match Runtime_candidate_backpressure.candidate_backpressure
-      ~now:(Unix.gettimeofday ()) ~candidate:runtime.Runtime.candidate_backpressure with
+      ~now:(Unix.gettimeofday ()) ~candidate:runtime.Runtime_instance.candidate_backpressure with
     | Some { Runtime_candidate_backpressure.failed_attempt; rate_limit = _ } -> failed_attempt
     | None -> None
   in

@@ -71,9 +71,9 @@ let dashboard_json ~base_path ~limit ~window_minutes =
         ~base_path
     with
     | Ok items ->
-      `List items, Keeper_approval_queue.approval_queue_ready_state_json
+      `List items, Keeper_approval_queue_result.approval_queue_ready_state_json
     | Error error ->
-      `Null, Keeper_approval_queue.approval_queue_unavailable_state_json error
+      `Null, Keeper_approval_queue_result.approval_queue_unavailable_state_json error
   in
   (* NDT-OK: HTTP observation boundary; captured once for the pure projection,
      matching [Dashboard_gate_metrics.gate_tool_events_json]. *)

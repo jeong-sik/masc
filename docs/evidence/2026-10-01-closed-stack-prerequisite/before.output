@@ -1,0 +1,30 @@
+FF
+======================================================================
+FAIL: test_native_closed_unmerged_lower_member_prevents_write (__main__.SourceReviewPolicy.test_native_closed_unmerged_lower_member_prevents_write) (args=('--check',))
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-closed-stack-prerequisite/scripts/review/test_source_review_policy.py", line 309, in test_native_closed_unmerged_lower_member_prevents_write
+    self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 0 != 2 : MERGE-CHECK PASS #1 head aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa approvals: 12
+MERGE-CHECK PASS #1 head aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa approvals: 12
+WOULD MERGE #1 through #1 head aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa native_stack=true
+
+
+======================================================================
+FAIL: test_native_closed_unmerged_lower_member_prevents_write (__main__.SourceReviewPolicy.test_native_closed_unmerged_lower_member_prevents_write) (args=())
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-closed-stack-prerequisite/scripts/review/test_source_review_policy.py", line 309, in test_native_closed_unmerged_lower_member_prevents_write
+    self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 0 != 2 : MERGE-CHECK PASS #1 head aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa approvals: 12
+MERGE-CHECK PASS #1 head aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa approvals: 12
+ASYNC MERGE RECEIPT for #1 (acceptance is not completion):
+{"status": "pending", "details": {"uuid": "fixture-request"}}
+
+
+----------------------------------------------------------------------
+Ran 1 test in 27.247s
+
+FAILED (failures=2)

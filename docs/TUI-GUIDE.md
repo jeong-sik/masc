@@ -2015,7 +2015,7 @@ Per surface:
 | `e` | Schedules | Modify the selected active schedule atomically |
 | `x` | Schedules | Cancel the selected schedule (armed: same key again sends) |
 | `e` | Keeper list or detail | Edit the selected keeper's settings in `$EDITOR` (JSON patch; only the fields you keep in the file are sent). Exit 0 sends, any other exit changes nothing |
-| `a` | Keeper list or detail | Create a keeper: a declaration stub opens in `$EDITOR`; the `name` field in the file names the new keeper |
+| `a` | Keeper list or detail | Create a keeper in `$EDITOR`. Malformed or refused declarations remain available for another `a` in this session. A confirmed response opens that Keeper's composer; writing and sending the first request is a separate action |
 | Left / `Esc` | any structural detail or logs view | Back one level; Left never interrupts chat |
 | `Enter` | Message | Send |
 | `Ctrl-G` | Message | Switch to the next Keeper while no turn is in flight |

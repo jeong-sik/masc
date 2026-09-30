@@ -1537,7 +1537,28 @@ let default_board_comment_request =
       ("Board comment page default is invalid: " ^ Yojson.Safe.to_string detail)
 ;;
 
-let board_post_detail_json ?(comment_request = default_board_comment_request) ~config ~voter
+(* Resolve every displayed reply's ancestry in the already-read thread. The
+   companion context may include rows outside the numeric page; the original
+   comments/page contract stays unchanged for clients that only page rows. *)
+let board_comment_context ~focused_comment comments selected =
+  let by_id = Hashtbl.create (List.length comments) in
+  List.iter (fun (comment : Board.comment) ->
+    Hashtbl.replace by_id (Board.Comment_id.to_string comment.id) comment) comments;
+  let included = Hashtbl.create (List.length selected) in
+  let rec include_id id =
+    if not (Hashtbl.mem included id) then begin
+      Hashtbl.add included id ();
+      match Hashtbl.find_opt by_id id with
+      | None -> ()
+      | Some comment -> Option.iter
+          (fun parent -> include_id (Board.Comment_id.to_string parent)) comment.parent_id
+    end in
+  List.iter (fun (comment : Board.comment) -> include_id (Board.Comment_id.to_string comment.id)) selected;
+  Option.iter include_id focused_comment;
+  List.filter (fun (comment : Board.comment) ->
+    Hashtbl.mem included (Board.Comment_id.to_string comment.id)) comments
+
+let board_post_detail_json ?(comment_request = default_board_comment_request) ?focused_comment ~config ~voter
     ~reaction_actor ~response_format ~post_id () =
   match Board_dispatch.get_post_and_comments ~post_id with
   | Error err ->
@@ -1550,6 +1571,12 @@ let board_post_detail_json ?(comment_request = default_board_comment_request) ~c
       (`Not_found, Printf.sprintf {|{"error":"%s"}|}
          (String.escaped (Board_tool.board_error_to_string err)))
   | Ok (post, comments) ->
+      let comment_positions = Hashtbl.create (List.length comments) in
+      List.iteri (fun offset (comment : Board.comment) ->
+        Hashtbl.replace comment_positions (Board.Comment_id.to_string comment.id) offset) comments;
+      let comment_revision =
+        `List (List.map Board.comment_to_yojson comments)
+        |> Yojson.Safe.to_string |> Digestif.SHA256.digest_string |> Digestif.SHA256.to_hex in
       let author = Board.Agent_id.to_string post.author in
       let author_karma = Board_dispatch.get_agent_karma ~agent_name:author in
       match
@@ -1578,6 +1605,7 @@ let board_post_detail_json ?(comment_request = default_board_comment_request) ~c
                ; "code", `String "invalid_board_comment_page"
                ]) )
       | Board.Comment_page.Page page ->
+        let context_comments = board_comment_context ~focused_comment comments page.items in
         let comments = page.items in
         let comment_page_json =
           Board.Comment_page.Position.to_yojson
@@ -1589,7 +1617,7 @@ let board_post_detail_json ?(comment_request = default_board_comment_request) ~c
           :: List.map
                (fun (comment : Board.comment) ->
                   (Board.Reaction_comment, Board.Comment_id.to_string comment.id))
-               comments
+               context_comments
         in
         let reaction_rows =
           board_reactions_batch ~targets:reaction_targets ~voter:reaction_actor
@@ -1600,17 +1628,22 @@ let board_post_detail_json ?(comment_request = default_board_comment_request) ~c
           board_post_dashboard_json ?current_vote
             ~reactions ~author_karma post
         in
-        let comments_json =
-          `List (List.map (fun (comment : Board.comment) ->
-            let comment_id = Board.Comment_id.to_string comment.id in
-            let current_vote = board_current_vote_for_comment ~voter ~comment_id in
-            let reactions = reactions_for (Board.Reaction_comment, comment_id) in
-            board_comment_dashboard_json
-              ?current_vote ~reactions comment
-          ) comments)
-        in
+        let comment_json (comment : Board.comment) =
+          let comment_id = Board.Comment_id.to_string comment.id in
+          let current_vote = board_current_vote_for_comment ~voter ~comment_id in
+          let reactions = reactions_for (Board.Reaction_comment, comment_id) in
+          board_comment_dashboard_json ?current_vote ~reactions comment in
+        let context_comment_json (comment : Board.comment) =
+          match comment_json comment with
+          | `Assoc fields -> `Assoc
+              (("thread_offset", `Int (Hashtbl.find comment_positions
+                  (Board.Comment_id.to_string comment.id))) :: fields)
+          | json -> json in
         let page_fields =
-          [ "comments", comments_json; "comment_page", comment_page_json ]
+          [ "comments", `List (List.map comment_json comments);
+            "comment_page", comment_page_json;
+            "comment_context", `List (List.map context_comment_json context_comments);
+            "comment_revision", `String comment_revision ]
         in
         let json =
           match response_format with

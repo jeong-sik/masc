@@ -417,13 +417,17 @@ let opening_cases =
             | Ok target -> target
             | Error reason -> Alcotest.fail reason
           in
-          (match Config.set_opening_keeper ~base_path target with
-           | Ok () -> ()
+          (match Config.record_chat_visit ~base_path target with
+           | Ok (Runtime.Durable | Runtime.Durability_unconfirmed _) -> ()
            | Error reason -> Alcotest.fail reason);
           (match (Config.load ~base_path).opening with
            | Ok (Config.Last (Some saved)) ->
                Alcotest.(check string) "saved target" "alpha" (name saved)
            | _ -> Alcotest.fail "saved target was not read");
+          (match (Config.load ~base_path).last_chat_keeper with
+           | Ok (Some saved) ->
+               Alcotest.(check string) "conversation receipt" "alpha" (name saved)
+           | _ -> Alcotest.fail "conversation receipt was not read");
           check_opt "runtime default survives" (Some "local.sample")
             (Toml.toml_string_opt
                (doc_of (In_channel.with_open_bin path In_channel.input_all))
@@ -434,6 +438,17 @@ let opening_cases =
         | _ -> Alcotest.fail "unknown opening was silently ignored")
   ]
 
+let reduce_motion_cases =
+  [ Alcotest.test_case "reduce motion starts at the final about frame" `Quick
+      (fun () ->
+        check_lift "enabled" (Some true)
+          (Config.reduce_motion_of_doc (doc_of "[tui]\nreduce_motion = true\n"));
+        check_lift "disabled" (Some false)
+          (Config.reduce_motion_of_doc (doc_of "[tui]\nreduce_motion = false\n"));
+        check_lift "absent" None
+          (Config.reduce_motion_of_doc (doc_of "[tui]\ntheme = \"dusk\"\n")))
+  ]
+
 let () =
   Alcotest.run "tui_config"
     [ ("board_sort", board_sort_cases)
@@ -441,6 +456,7 @@ let () =
     ; ("theme_of_doc", cases)
     ; ("table_frame_of_doc", frame_cases)
     ; ( "lift_colours", lift_cases )
+    ; ("reduce_motion", reduce_motion_cases)
     ; ("hints_visible_of_doc", hints_cases)
     ; ("coalesce_queued_input", coalesce_cases)
     ; ("send_on_stop", send_on_stop_cases)

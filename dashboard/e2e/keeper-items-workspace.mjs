@@ -128,7 +128,7 @@ try {
   if (requests.length !== 4) throw new Error(`Expected four scoped account reads, got ${requests.length}`)
   if (errors.length) throw new Error(`Browser fixture errors: ${errors.join(' | ')}`)
   await writeFile(`${artifactDir}/workspace-manifest.json`, JSON.stringify({
-    scope: 'CI preview Item component in a controlled workspace fixture; synthetic account responses, not production',
+    scope: 'Item component in a controlled workspace fixture; synthetic account responses, not production',
     source_sha: process.env.GITHUB_SHA ?? null, fixture_url: fixtureUrl, browser_version: browser.version(),
     fixed: { keeper: 'rondo', balance_milli: '800', head: 'crown', project: 'keeper-items-fixture' },
     transitions, requests, failures, captures, errors,

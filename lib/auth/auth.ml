@@ -40,6 +40,11 @@ let ensure_keeper_credential config ~agent_name
     let ( let* ) = Result.bind in
     let* current = current_credential_in_transaction transaction agent_name in
     let* raw = raw_token_in_transaction transaction agent_name in
+    let* () = match current, raw with
+      | Some credential, Some raw_token
+        when constant_time_string_equal credential.token (sha256_hash raw_token) ->
+          validate_file_backed_bearer raw_token
+      | Some _, Some _ | Some _, None | None, Some _ | None, None -> Ok () in
     let* _internal = credential_read_result (fun () -> ensure_internal_keeper_token config) in
     match current, raw with
     | Some credential, Some raw_token

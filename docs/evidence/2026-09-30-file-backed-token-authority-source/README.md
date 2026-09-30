@@ -46,3 +46,26 @@ Target selectors for the root agent's finishing CI run are `test_auth_file_backe
 `final-source-checks.json` retains source-only checks at code head `d1535576e0d3e3141a4b878bf6e170ef46d64ade`: OCaml 5.5.1 parsing for eight source/interface files, diff whitespace, deterministic boundary, finalizer, cancellation and wildcard-match gates all exited zero. The compiler stopped after parsing; it did not typecheck, link or execute the regression. `source-sha256.json` freezes source bytes, the registration and required contract.
 
 No local Dune build, native test, CLI/server runtime exercise, CI completion, deployment or production observation was performed by this child. Parent rotation CI or source review is not a successful native result for this new publisher feature. This bundle contains no release or approval verdict.
+
+## HTTP and file-kind follow-up
+
+The source-only receipts and hashes above freeze the earlier code, before
+review identified that surrounding-whitespace bearers survive local hashing
+but change in HTTP header construction/extraction. They are historical source
+receipts, not validation of the follow-up below.
+
+File-backed publication now refuses whitespace and ASCII control bytes before
+effects. Matching Keeper pairs refuse reuse with those bytes before internal
+token initialization; accepted bytes remain exact. Direct opaque-token APIs
+are unchanged. The accepted file-client case also invokes production HTTP
+bearer extraction and MCP authentication; refusal cases compare pair/config
+bytes and preserve a legacy matching pair rather than silently reminting it.
+
+Admission reads also require regular credential/raw targets before opening
+(the stat follows a regular-file symlink). A FIFO with no writer is refused,
+and a bounded child regression checks named and raw FIFO paths, counterpart
+and config preservation, recovery, and a regular-symlink positive case.
+The kind check refuses the observed nonregular target before open; it does
+not guarantee safety against an external writer replacing the path after stat.
+The suite now registers 22 cases. These added native cases have not been run
+locally; parsing and source review do not establish native or CI success.

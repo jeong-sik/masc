@@ -227,17 +227,115 @@ let test_partial_publication_reported () = with_workspace @@ fun base_path ->
     (Result.is_error (Auth.verify_token base_path ~agent_name:"keeper" ~token:supplied))
 let test_opaque_bearer_and_name_roundtrip () = with_workspace @@ fun base_path ->
   let agent_name = "Agent +&" in
-  let supplied = "  opaque-file-backed-fixture\t" in
+  let supplied = "opaque-file+backed~fixture/==" in
   let credential = auth_ok (Auth.save_file_backed_raw_token_credential base_path ~agent_name ~role:D.Admin ~raw_token:supplied) in
   check bool "Auth reader preserves supplied opaque bytes" true (Auth.load_raw_token base_path ~agent_name = Some supplied);
   check bool "login file client preserves supplied opaque bytes" true
     (Auth_login.read_persisted_token ~base_path ~agent_name = Some supplied);
   let verified = auth_ok (Auth.verify_token base_path ~agent_name ~token:supplied) in
   check bool "opaque file client authenticates the current record" true (verified = credential);
+  let request = Httpun.Request.create
+      ~headers:(Httpun.Headers.of_list [ "Authorization", "Bearer " ^ supplied ])
+      `POST "/mcp" in
+  check (option string) "production HTTP bearer parsing resolves the exact file-backed owner"
+    (Some agent_name) (Server_auth.dashboard_actor_for_request ~base_path request);
+  let request_authority =
+    match Server_request_authority.of_host_port ~host:"127.0.0.1" ~port:8935 with
+    | Ok authority -> authority
+    | Error `Malformed -> fail "fixture loopback request authority is malformed" in
+  (match Server_auth.verify_mcp_auth_for_authority ~base_path ~request_authority request with
+   | Ok None -> () (* Authorization succeeded; identity was checked above. *)
+   | Ok (Some _) -> fail "unexpected MCP authorization result"
+   | Error error -> fail (D.masc_error_to_string error));
   let report = auth_ok (Auth_login.mint ~base_path ~host:"127.0.0.1" ~port:8935 ~agent_name ~role:D.Worker
       ~token_env_var:"FILE_BACKED_FIXTURE_TOKEN" ~token_lifetime:Auth_login.Long_lived ()) in
   check bool "login report names Auth's encoded path" true (report.raw_token_file = Auth.raw_token_file base_path agent_name);
   check_pair base_path agent_name
+
+let test_unstable_bearers_refuse_without_effects () =
+  List.iter (fun supplied -> with_workspace @@ fun base_path ->
+    let _old = seed_keeper base_path in
+    let paths = [ Auth.credential_file base_path "keeper";
+      Auth.raw_token_file base_path "keeper"; Auth.auth_config_file base_path;
+      Auth.workspace_secret_file base_path ] in
+    let snapshot () = List.map (fun path ->
+      if Sys.file_exists path then Some (read path) else None) paths in
+    let before = snapshot () in
+    (match Auth.save_file_backed_raw_token_credential base_path ~agent_name:"keeper"
+        ~role:D.Admin ~raw_token:supplied with
+     | Error (D.Auth (D.Auth_error.InvalidToken _)) -> ()
+     | Error error -> fail (D.masc_error_to_string error)
+     | Ok _ -> fail "HTTP-unstable bearer was published");
+    check bool "refused supplied bearer leaves pair and config exact" true (snapshot () = before))
+    [ " leading"; "trailing "; "with space"; "with\ttab"; "with\rCR";
+      "with\nLF"; "with\000NUL"; "with\127DEL" ];
+  List.iter (fun supplied -> with_workspace @@ fun base_path ->
+    (* Direct token APIs keep their opaque contract. Seed a legacy matching
+       file pair to exercise Ensure's separate reuse admission boundary. *)
+    let _credential = auth_ok (Auth.save_raw_token_credential base_path
+        ~agent_name:"keeper" ~role:D.Admin ~raw_token:supplied) in
+    Auth.save_private_text_file (Auth.raw_token_file base_path "keeper") supplied;
+    let paths = [ Auth.credential_file base_path "keeper";
+      Auth.raw_token_file base_path "keeper"; Auth.auth_config_file base_path;
+      Auth.workspace_secret_file base_path;
+      Filename.concat (Auth.auth_dir base_path) "internal_keeper.token.hash" ] in
+    let snapshot () = List.map (fun path ->
+      if Sys.file_exists path then Some (read path) else None) paths in
+    let before = snapshot () in
+    (match ensure base_path with
+     | Error (D.Auth (D.Auth_error.InvalidToken _)) -> ()
+     | Error error -> fail (D.masc_error_to_string error)
+     | Ok _ -> fail "Ensure reused an HTTP-unstable matching bearer");
+    check bool "reuse refusal neither normalizes pair nor bootstraps config/internal token"
+      true (snapshot () = before)) [ " leading"; "trailing\t"; "with\nLF" ]
+
+let test_fifo_authority_refuses_without_blocking () =
+  (* Fork outside an Eio environment. The bounded child proves actual Auth
+     calls refuse a FIFO with no writer; an older blocking open fails finitely. *)
+  match Unix.fork () with
+  | 0 ->
+      Sys.set_signal Sys.sigalrm Sys.Signal_default;
+      ignore (Unix.alarm 5);
+      (try
+         List.iter (fun raw_fifo -> with_workspace @@ fun base_path ->
+           let _old = seed_keeper base_path in
+           let named = Auth.credential_file base_path "keeper" in
+           let raw_path = Auth.raw_token_file base_path "keeper" in
+           let occupied = if raw_fifo then raw_path else named in
+           let other = if raw_fifo then named else raw_path in
+           let before = read other, read (Auth.auth_config_file base_path) in
+           Unix.unlink occupied;
+           Unix.mkfifo occupied 0o600;
+           rejected (ensure base_path); rejected (set_admin base_path); rejected (login base_path);
+           check bool "FIFO refusal preserves pair counterpart and config" true
+             ((read other, read (Auth.auth_config_file base_path)) = before);
+           check bool "occupied FIFO is preserved" true ((Unix.lstat occupied).Unix.st_kind = Unix.S_FIFO);
+           Unix.unlink occupied;
+           ignore (auth_ok (ensure base_path));
+           check_pair base_path "keeper") [ false; true ];
+         exit 0
+       with
+       | Eio.Cancel.Cancelled _ as exn -> raise exn
+       | exn -> prerr_endline (Printexc.to_string exn); exit 2)
+  | pid ->
+      let reaped = ref false in
+      Fun.protect ~finally:(fun () -> if not !reaped then (
+        (try Unix.kill pid Sys.sigkill with Unix.Unix_error (Unix.ESRCH, _, _) -> ());
+        ignore (Unix.waitpid [] pid))) (fun () ->
+          let _, status = Unix.waitpid [] pid in
+          reaped := true;
+          match status with Unix.WEXITED 0 -> ()
+          | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
+              fail "FIFO authority must refuse without waiting for a writer")
+
+let test_regular_symlink_authority_remains_readable () = with_workspace @@ fun base_path ->
+  let _old = seed_keeper base_path in
+  List.iter (fun path ->
+    let target = path ^ ".regular-target" in
+    Unix.rename path target; Unix.symlink target path)
+    [ Auth.credential_file base_path "keeper"; Auth.raw_token_file base_path "keeper" ];
+  ignore (auth_ok (ensure base_path));
+  check_pair base_path "keeper"
 
 type bootstrap_config = Missing_config | Disabled_config
 type bootstrap_corruption = Malformed_name | Foreign_redirect
@@ -301,7 +399,10 @@ let () = run "auth_file_backed_transaction" [ "publication", [
   test_case "directory and dangling raw token preserve authority" `Quick test_unreadable_raw_preserved;
   test_case "failed admission precedes every pair write" `Quick test_failed_admission_preserves_pair;
   test_case "partial publication is observed and reported" `Quick test_partial_publication_reported;
-  test_case "opaque supplied bytes and encoded names reach file clients" `Quick test_opaque_bearer_and_name_roundtrip;
+  test_case "opaque supplied bytes and encoded names reach file clients and HTTP auth" `Quick test_opaque_bearer_and_name_roundtrip;
+  test_case "HTTP-unstable supplied and reused bearers preserve pair and config" `Quick test_unstable_bearers_refuse_without_effects;
+  test_case "FIFO authority refuses without waiting for a writer" `Quick test_fifo_authority_refuses_without_blocking;
+  test_case "regular symlink authority remains readable" `Quick test_regular_symlink_authority_remains_readable;
   test_case "missing and disabled bootstrap refuse corrupt or foreign ownership" `Quick test_bootstrap_cannot_bypass_current_authority;
   test_case "valid Admin bootstrap retains secret and recoverable pair" `Quick test_valid_admin_bootstrap_keeps_secret_and_pair;
 ] ]

@@ -388,6 +388,7 @@ let publish_requested_file_backed_token config ~agent_name ~role ~lifetime ~raw_
 let save_file_backed_raw_token_credential config ~agent_name ~role ~raw_token =
   let ( let* ) = Result.bind in
   let* () = validate_raw_token raw_token in
+  let* () = validate_file_backed_bearer raw_token in
   publish_requested_file_backed_token config ~agent_name ~role ~raw_token ~lifetime:Config_expiry
 ;;
 

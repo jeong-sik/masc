@@ -293,6 +293,8 @@ val save_file_backed_raw_token_credential :
     ~raw_token] persists both the hashed credential and its private raw token
     file under one credential transaction. Refuses unreadable current ownership
     before writes and reports observed partial publication on write failure.
+    Rejects whitespace and ASCII control bytes before effects; accepted bearer
+    bytes are not normalized. Direct raw-token APIs are unchanged.
     Use only for local operator credentials whose bearer must remain available
     to file-based clients after process restart. *)
 
@@ -330,6 +332,8 @@ val ensure_keeper_credential :
     reads, reuse or recreation, and publication share one transaction. True
     absence permits recreation; unreadable or foreign ownership does not.
     Readable stale raw tokens are replaced using the existing Keeper policy.
+    A matching pair with whitespace or ASCII control bytes refuses reuse before
+    effects; it is not silently normalized or replaced.
     Errors describe observed partial publication when a write fails. The internal
     keeper MCP token remains separate and is only used for the
     [x-masc-internal-token] trust path. *)

@@ -626,9 +626,31 @@ let credential_read_result f =
   | Eio.Io _ as exn -> Error (System (System_error.IoError (Printexc.to_string exn)))
 ;;
 
+(* File-backed bearers must survive HTTP header construction and extraction
+   without changing the bytes that were hashed. Direct token APIs retain
+   their separate opaque-token contract. *)
+let validate_file_backed_bearer raw_token =
+  if raw_token = "" || String.exists (fun c -> Char.code c <= 0x20 || Char.code c = 0x7f) raw_token
+  then Error (Auth (Auth_error.InvalidToken
+    "File-backed bearer must not contain whitespace or ASCII control bytes"))
+  else Ok ()
+;;
+
+let read_regular_credential_file path =
+  let ( let* ) = Result.bind in
+  (* [stat] preserves symlinks to regular files, while a dangling link is
+     an I/O refusal rather than permission to replace its occupied path. *)
+  let* stat = credential_read_result (fun () -> stat_file path) in
+  match stat.Unix.st_kind with
+  | Unix.S_REG -> credential_read_result (fun () -> read_text_file path)
+  | Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK ->
+      Error (System (System_error.ValidationError
+        (Printf.sprintf "credential path is not a regular file: %s" path)))
+;;
+
 let read_stored_credential config name path =
   let ( let* ) = Result.bind in
-  let* content = credential_read_result (fun () -> read_text_file path) in
+  let* content = read_regular_credential_file path in
   match Yojson.Safe.from_string content with
   | exception Yojson.Json_error _ -> Ok Unresolved_credential
   | `Assoc [ "redirect_to", `String target ] ->
@@ -722,7 +744,7 @@ let raw_token_in_transaction (Credential_transaction config) name =
   let* present = credential_path_exists path in
   if not present then Ok None
   else
-    let* raw = credential_read_result (fun () -> read_text_file path) in
+    let* raw = read_regular_credential_file path in
     (* Empty readable material can be replaced. An opaque bearer that is not
        blank retains its exact bytes, matching the supplied-token contract. *)
     if String.trim raw = "" then Ok None else Ok (Some raw)
@@ -773,7 +795,7 @@ let observe_credential_publication config (expected : agent_credential) =
     let* present = credential_path_exists path in
     if not present then Ok false
     else
-      let* raw = credential_read_result (fun () -> read_text_file path) in
+      let* raw = read_regular_credential_file path in
       Ok (String.equal (sha256_hash raw) expected.token)) in
   let credential = observe (fun () ->
     let path = credential_file config expected.agent_name in

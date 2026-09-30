@@ -1,0 +1,35 @@
+{
+  "sources": {
+    "expiry": "63cc46e9380102e8a39e46b14bd7b9358fcfad74",
+    "play": "6714e7eaf75403046b69aed4d3aec55c09c01271",
+    "prune_failure": "b5f401cbf540c1461408bd1d5885fabc5b0b2d85"
+  },
+  "runs": {
+    "expiry_resolved": 36666481145,
+    "expiry_cache_pty": 36666741795,
+    "play_transaction": 36666093985,
+    "prune_failure": 36666974017
+  },
+  "logs": [
+    {
+      "file": "expiry-resolved-native.log.gz",
+      "raw_sha256": "5b3e250df73e15b88a40e5a7626eb5316794b00cfb633b60868c1eab3124f101",
+      "raw_bytes": 146776
+    },
+    {
+      "file": "expiry-cache-pty-native.log.gz",
+      "raw_sha256": "d97924bfa8a822c3d79fc0a4d3b6cbfa9660fa45d33c4b0c6270a5532a5ea719",
+      "raw_bytes": 1297
+    },
+    {
+      "file": "play-transaction-native.log.gz",
+      "raw_sha256": "ad0c9e238c4ba9fdcfb76b57608eb0cf132eeef085db31c245364e0a0c47c09d",
+      "raw_bytes": 19141
+    },
+    {
+      "file": "prune-failed-job.log.gz",
+      "raw_sha256": "16b4437e48f927d3700a236e82eeed478e405823c1ea3f3e5f3dfa68242296e5",
+      "raw_bytes": 32581
+    }
+  ]
+}

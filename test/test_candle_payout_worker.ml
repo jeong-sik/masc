@@ -120,7 +120,17 @@ let enable_candle (config : Workspace.config) =
     inside config (Config_dir_resolver.candle_toml_path_for_base_path ~base_path:config.base_path)
   in
   mkdir_p (Filename.dirname path);
-  Out_channel.with_open_bin path (fun oc -> Out_channel.output_string oc "")
+  Out_channel.with_open_bin path (fun oc -> Out_channel.output_string oc {|[payout]
+weight_max = 10
+deduction_rate = 10
+deduction_floor = 200
+[payout.grades_milli]
+trivial = 1000
+small = 2000
+medium = 3000
+large = 4000
+epic = 5000
+|})
 ;;
 
 (* A Goal whose pass the operator confirmed. It was created 2026-09-20, and the

@@ -1,3 +1,16 @@
+let valid_text = {|[payout]
+weight_max = 10
+deduction_rate = 10
+deduction_floor = 200
+[payout.grades_milli]
+trivial = 1000
+small = 2000
+medium = 3000
+large = 4000
+epic = 5000
+|}
+let enabled = Candle_config.of_toml_string valid_text
+
 (** candle.toml (RFC-goal-candle-ledger 3.9): off, on, or off with a reason. *)
 
 let pp ppf value = Format.pp_print_string ppf (Candle_config.to_string value)
@@ -5,7 +18,7 @@ let config = Alcotest.testable pp ( = )
 
 let disabled_reason = function
   | Candle_config.Disabled { reason } -> reason
-  | Candle_config.Off | Candle_config.Enabled ->
+  | Candle_config.Off | Candle_config.Enabled _ ->
     Alcotest.fail "expected a disabled config"
 ;;
 
@@ -16,13 +29,43 @@ let contains ~affix text =
   scan 0
 ;;
 
-let test_no_key_is_enabled () =
-  Alcotest.check config "an empty file" Candle_config.Enabled (Candle_config.of_toml_string "");
-  Alcotest.check
-    config
-    "comments and blank lines"
-    Candle_config.Enabled
-    (Candle_config.of_toml_string "# Candle is on.\n\n  # nothing else yet\n")
+let test_explicit_policy () =
+  ignore (disabled_reason (Candle_config.of_toml_string ""));
+  match enabled with
+  | Candle_config.Enabled policy ->
+    List.iter2 (fun grade expected -> Alcotest.(check int) (Candle_grade.to_string grade)
+      expected (Candle_config.grade_amount_milli policy grade))
+      Candle_grade.all [1000;2000;3000;4000;5000]
+  | Off | Disabled _ -> Alcotest.fail "complete payout policy was rejected"
+;;
+
+let test_policy_boundaries () =
+  let text ~weight ~amount = Printf.sprintf
+    "[payout]\nweight_max = %d\ndeduction_rate = 0\ndeduction_floor = 1000\n[payout.grades_milli]\ntrivial = %d\nsmall = 0\nmedium = 0\nlarge = 0\nepic = 0\n" weight amount in
+  List.iter (fun weight ->
+    let limit = min (max_int / weight) (max_int / 1000) in
+    (match Candle_config.of_toml_string (text ~weight ~amount:limit) with
+     | Enabled policy -> Alcotest.(check int) "largest safe amount" limit policy.trivial_milli
+     | Off | Disabled _ -> Alcotest.fail "safe arithmetic boundary rejected");
+    ignore (disabled_reason (Candle_config.of_toml_string (text ~weight ~amount:(limit + 1)))))
+    [1; 1000; 1001; max_int];
+  ignore (disabled_reason (Candle_config.of_toml_string (text ~weight:0 ~amount:1)));
+  ignore (disabled_reason (Candle_config.of_toml_string (text ~weight:1 ~amount:(-1))));
+  let lines = String.split_on_char '\n' valid_text in
+  List.iter (fun key ->
+    let missing = List.filter (fun line -> not (String.starts_with ~prefix:(key ^ " =") line)) lines in
+    ignore (disabled_reason (Candle_config.of_toml_string (String.concat "\n" missing)));
+    List.iter (fun value ->
+      let changed = List.map (fun line -> if String.starts_with ~prefix:(key ^ " =") line
+          then key ^ " = " ^ value else line) lines in
+      ignore (disabled_reason (Candle_config.of_toml_string (String.concat "\n" changed))))
+      ["true"; "1.5"; "\"10\""])
+    ["weight_max"; "deduction_rate"; "deduction_floor"; "trivial"; "small"; "medium"; "large"; "epic"];
+  List.iter (fun key -> List.iter (fun value ->
+    let changed = List.map (fun line -> if String.starts_with ~prefix:(key ^ " =") line
+        then key ^ " = " ^ value else line) lines in
+    ignore (disabled_reason (Candle_config.of_toml_string (String.concat "\n" changed)))) ["-1"; "1001"])
+    ["deduction_rate"; "deduction_floor"]
 ;;
 
 let test_a_key_this_build_does_not_know_disables () =
@@ -60,8 +103,8 @@ let test_no_file_is_off () =
 let test_a_file_is_read_every_time () =
   with_dir (fun dir ->
     let path = Filename.concat dir "candle.toml" in
-    Out_channel.with_open_bin path (fun oc -> Out_channel.output_string oc "");
-    Alcotest.check config "empty" Candle_config.Enabled (Candle_config.load_file ~path);
+    Out_channel.with_open_bin path (fun oc -> Out_channel.output_string oc valid_text);
+    Alcotest.check config "valid" enabled (Candle_config.load_file ~path);
     Out_channel.with_open_bin path (fun oc -> Out_channel.output_string oc "surprise = true\n");
     ignore (disabled_reason (Candle_config.load_file ~path));
     Sys.remove path;
@@ -126,7 +169,8 @@ let () =
   Alcotest.run
     "candle_config"
     [ ( "content"
-      , [ Alcotest.test_case "no key is enabled" `Quick test_no_key_is_enabled
+      , [ Alcotest.test_case "arithmetic and required-field boundaries" `Quick test_policy_boundaries
+        ; Alcotest.test_case "explicit policy is required" `Quick test_explicit_policy
         ; Alcotest.test_case "a key this build does not know disables" `Quick
             test_a_key_this_build_does_not_know_disables
         ; Alcotest.test_case "text that is not TOML disables" `Quick

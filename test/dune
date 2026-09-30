@@ -2547,6 +2547,7 @@
 
 (include stanzas/test_candle_event.inc)
 (include stanzas/test_candle_time.inc)
+(include stanzas/test_candle_math.inc)
 (include stanzas/test_candle_ledger.inc)
 (include stanzas/test_candle_stamp.inc)
 (include stanzas/test_candle_status.inc)

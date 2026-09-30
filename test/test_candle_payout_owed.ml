@@ -107,7 +107,17 @@ let candle_toml config =
 ;;
 
 let ledger_path config = Candle_ledger.path ~base_path:(base_path_of config)
-let enable_candle config = write_file (candle_toml config) ""
+let enable_candle config = write_file (candle_toml config) {|[payout]
+weight_max = 10
+deduction_rate = 10
+deduction_floor = 200
+[payout.grades_milli]
+trivial = 1000
+small = 2000
+medium = 3000
+large = 4000
+epic = 5000
+|}
 let clock = 1_790_000_000.
 
 let ledger_events config =

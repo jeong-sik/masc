@@ -58,7 +58,7 @@ let record ~now (config : Workspace_utils_backend_setup.config) goal verdict =
       goal.Goal_store.id
       reason;
     Ok ()
-  | Candle_config.Enabled ->
+  | Candle_config.Enabled _ ->
     Result.map_error
       (fun detail -> "candle snapshot: " ^ detail)
       (write ~now config goal verdict)

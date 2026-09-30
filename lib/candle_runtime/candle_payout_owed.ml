@@ -45,7 +45,7 @@ let record ~now (config : Workspace_utils_backend_setup.config) goal verdict con
       verdict.Goal_verification.request_id
       reason;
     Ok ()
-  | Candle_config.Enabled ->
+  | Candle_config.Enabled _ ->
     (match
        Result.map_error
          (fun detail -> "candle payout owed: " ^ detail)

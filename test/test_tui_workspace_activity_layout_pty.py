@@ -14,12 +14,18 @@ EXECUTION = "exec-" + "e" * 110 + "EXECTAIL"
 WINDOW = re.compile(r"Context \[(\d+)-(\d+)/(\d+)\]")
 
 
+def completed(output):
+    end = output.rfind(h.FRAME_END)
+    assert end >= 0, "No completed redraw"
+    return bytes(output[:end + len(h.FRAME_END)])
+
+
 def visible(output):
-    return h.screen_text(bytes(output)).decode("utf-8", errors="strict")
+    return h.screen_text(completed(output)).decode("utf-8", errors="strict")
 
 
 def context(output):
-    rows = h.screen_rows(bytes(output))
+    rows = h.screen_rows(completed(output))
     title_row, match = next((row, WINDOW.search(text.decode("utf-8", errors="strict")))
         for row, text in sorted(rows.items()) if WINDOW.search(text.decode("utf-8", errors="strict")))
     first, last, total = map(int, match.groups())
@@ -57,8 +63,11 @@ def run(executable, no_color):
         h.send_and_wait(process, fd, output, b"h", b"MASC Workspace / Activity")
         h.wait_for_output(process, fd, output, b"Z.ml", start=0, timeout=10)
         for columns in (30, 40, 60, 80, 120):
+            start = len(output)
             h.resize_and_wait(process, fd, output, rows=18, columns=columns,
                               needle=b"FILE", controls=(h.FULL_REDRAW,))
+            h.wait_for_output(process, fd, output, h.FRAME_END,
+                              start=h.end_of_needle(output, b"FILE", start), timeout=3)
             screen = visible(output)
             selected_rows = [row for row in screen.splitlines() if "failed" in row and "Z.ml" in row]
             assert len(selected_rows) == 1, (columns, screen)

@@ -4848,6 +4848,60 @@ def open_loaded_planning(
     palette_go(process, master_fd, output, b"go Work", b"plan-alpha-29424")
 
 
+def planning_footer_dispatch_interaction(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    _slave_fd: int,
+    output: bytearray,
+    _base_path: str,
+) -> None:
+    open_loaded_planning(process, master_fd, output)
+    resize_and_wait(
+        process, master_fd, output, rows=32, columns=360,
+        needle=b"plan-alpha-29424", controls=(FULL_REDRAW,),
+        final_cursor=b"\x1b[?25l",
+    )
+
+    def footer() -> bytes:
+        rows = [row for row in screen_rows(bytes(output)).values()
+                if b"j/k:move" in row]
+        if len(rows) != 1:
+            raise AssertionError(f"Planning drew {len(rows)} footer rows")
+        return rows[0]
+
+    list_footer = footer()
+    for hint in (b"Right / Enter:detail", b"f:filter", b"s:sort"):
+        if hint not in list_footer:
+            raise AssertionError(f"Planning list omitted {hint!r}: {list_footer!r}")
+    if b"[ / ]:previous / next" in list_footer:
+        raise AssertionError(f"Planning list offered detail-only navigation: {list_footer!r}")
+
+    send_and_wait(
+        process, master_fd, output, b"\r", b"masc://planning/goal-a-29424"
+    )
+    detail_footer = footer()
+    if b"[ / ]:previous / next" not in detail_footer:
+        raise AssertionError(f"Planning detail omitted goal navigation: {detail_footer!r}")
+    if b"Right / Enter:detail" in detail_footer:
+        raise AssertionError(f"Planning detail offered list-only open: {detail_footer!r}")
+    send_and_wait(
+        process, master_fd, output, b"]", b"masc://planning/goal-b-29424"
+    )
+    if b"[ / ]:previous / next" not in footer():
+        raise AssertionError("Planning detail step lost its footer")
+    send_and_wait(
+        process, master_fd, output, b"\x1b[D", b"Right / Enter:detail"
+    )
+    if b"[ / ]:previous / next" in footer():
+        raise AssertionError("Planning list retained the detail-only hint")
+    send_and_wait(
+        process, master_fd, output, b"f", b"filter:completed"
+    )
+    if b"f:filter" not in footer():
+        raise AssertionError("Planning list filter lost its footer")
+    os.write(master_fd, b"q")
+
+
 def planning_reorder_identity_interaction(fixtures: HttpFixtures) -> Interaction:
     def interact(
         process: subprocess.Popen[bytes],
@@ -6906,9 +6960,9 @@ def chat_steer_interaction(fixture: AtomicChatFixture, requests: HttpRequests) -
             if not wait_for_fixture_event(process, master_fd, output, fixture.interrupted, timeout=5):
                 raise AssertionError("Esc never reached its exact observed turn")
             send_and_wait(process, master_fd, output, b"new-course", composer_showing(b"new-course"))
-            send_and_wait(process, master_fd, output, b"\r", b"Queue (1 waiting")
+            send_and_wait(process, master_fd, output, b"\r", b"Queue (2 pending")
             send_and_wait(process, master_fd, output, b"one-more", composer_showing(b"one-more"))
-            send_and_wait(process, master_fd, output, b"\r", b"Queue (2 waiting")
+            send_and_wait(process, master_fd, output, b"\r", b"Queue (3 pending")
             if not wait_for_fixture_event(process, master_fd, output, fixture.old_poll_seen, timeout=10):
                 raise AssertionError("no stale observation arrived during pending Esc")
             read_available(master_fd, output)
@@ -6960,7 +7014,7 @@ def chat_working_target_interaction(fixture: AtomicChatFixture) -> Interaction:
             time.sleep(0.08)  # delimit the terminal's lone Escape before typing
             read_available(master_fd, output)
             send_and_wait(process, master_fd, output, b"after-stop", composer_showing(b"after-stop"))
-            send_and_wait(process, master_fd, output, b"\r", b"Queue (1 waiting")
+            send_and_wait(process, master_fd, output, b"\r", b"Queue (2 pending")
             if len(fixture.interrupt_requests) != 1 or len(fixture.submitted) != 2:
                 raise AssertionError("double Esc duplicated control or released input before acknowledgement")
             fixture.release_interrupt.set()
@@ -7008,7 +7062,7 @@ def quit_names_waiting_messages_interaction(fixture: AtomicChatFixture) -> Inter
             if not wait_for_fixture_event(process, master_fd, output, fixture.interrupted, timeout=5):
                 raise AssertionError("Esc acknowledgement was not gated")
             send_and_wait(process, master_fd, output, b"waiting-line", composer_showing(b"waiting-line"))
-            send_and_wait(process, master_fd, output, b"\r", b"Queue (1 waiting")
+            send_and_wait(process, master_fd, output, b"\r", b"Queue (1 pending")
             if fixture.received:
                 raise AssertionError("pending control input was already sent to the server")
             escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
@@ -7046,7 +7100,7 @@ def chat_retained_stop_interaction(fixture: AtomicChatFixture) -> Interaction:
             if not wait_for_fixture_event(process, master_fd, output, fixture.interrupted, timeout=5):
                 raise AssertionError("initial stop never reached the server")
             send_and_wait(process, master_fd, output, b"retained-original", composer_showing(b"retained-original"))
-            send_and_wait(process, master_fd, output, b"\r", b"Queue (1 waiting")
+            send_and_wait(process, master_fd, output, b"\r", b"Queue (1 pending")
             send_and_wait(process, master_fd, output, b"\x1b", b"Input retained after Esc")
             if fixture.received:
                 raise AssertionError(f"second Esc dispatched retained input: {fixture.received!r}")
@@ -7164,7 +7218,11 @@ def chat_reconcile_interaction(
             send_and_wait(
                 process, master_fd, output, b"held-next", composer_showing(b"held-next")
             )
-            send_and_wait(process, master_fd, output, b"\r", b"Queue (1 waiting")
+            send_and_wait(process, master_fd, output, b"\r", b"Queue (2 pending")
+            completed = output.rfind(FRAME_END) + len(FRAME_END)
+            pending_screen = screen_text(bytes(output[:completed]))
+            if b"1 rechecking delivery" not in pending_screen or b"queued at Keeper" in pending_screen:
+                raise AssertionError("unknown admission was presented as confirmed queued: " + repr(pending_screen))
             before_release = [
                 json.loads(body).get("message")
                 for path, body in requests
@@ -10005,9 +10063,12 @@ def message_origin_badge_interaction(
     draft_frame = send_and_wait(
         process, master_fd, output, b"draft-neutral", b"draft-neutral"
     )
-    if b"\x1b[96m  > \x1b[0mdraft-neutral" not in draft_frame:
+    # Restore only the foreground after the accented prompt. A full reset
+    # would erase the input surface background; accepting arbitrary SGR here
+    # could instead leave the draft tinted or clear its background with 49m.
+    if b"\x1b[96m  > \x1b[39mdraft-neutral" not in draft_frame:
         raise AssertionError(
-            f"chat composer did not limit accent to its prompt: {draft_frame!r}"
+            f"chat composer did not restore default foreground while preserving its background: {draft_frame!r}"
         )
     escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
     os.write(master_fd, b"q")
@@ -10191,10 +10252,9 @@ def keeper_message_switch_interaction(alpha_history: GatedHttpResponse) -> Inter
             composer_showing(b"alpha-draft"),
         )
 
-        # The roster is put away until it is asked for, so this scenario asks.
-        # Ctrl-B is refused below Masc_tui_roster_pane.threshold_cols, and the
-        # width above is chosen to clear it.
-        send_and_wait(process, master_fd, output, b"\x02", b"KEEPERS")
+        # Wide chat shows the roster by default. Leave that preference
+        # untouched while checking the selected Keeper and draft handoff.
+        wait_for_output(process, master_fd, output, b"KEEPERS", start=0, timeout=3.0)
 
         beta_start = len(output)
         # A drawn roster is an input pane: Left focuses it, Down moves its
@@ -16605,6 +16665,12 @@ def run_first_install_credential_regression(executable: str) -> None:
 def run_planning_review_regression(executable: str) -> None:
     run_terminal_scenario(
         executable,
+        description="Planning footer follows list and detail dispatch",
+        interact=planning_footer_dispatch_interaction,
+        http_fixtures=planning_selection_http_fixtures(),
+    )
+    run_terminal_scenario(
+        executable,
         description="Planning preserves selected goals and footer across resize",
         interact=planning_resize_budget_interaction,
         http_fixtures=planning_selection_http_fixtures(),
@@ -17916,7 +17982,7 @@ def run_mermaid_chat_regression(executable: str) -> None:
 # RFC-0429 §1.3 and §4. The second recorded change carries
 # "let b = 2\nlet c = 3", and the Changes list has one line per row to say it
 # in. Printing the newline writes the rest of the row wherever the terminal's
-# cursor lands; Tui_decode.preview_line projects it to one cell instead.
+# cursor lands; Masc.Tui_terminal_text.preview_line projects it to one cell instead.
 #
 # This is its own lane rather than an assertion inside the default keyboard
 # regression: that lane stops before reaching the Changes surface, at the exit
@@ -20223,7 +20289,10 @@ def dashboard_usage_interaction(
     send_and_wait(process, master_fd, output, b"/telemetry", b"/telemetry")
     send_and_wait(process, master_fd, output, b"\r", b"MASC Usage / Telemetry")
     tab_until(process, master_fd, output, b"MASC Usage")
-    wait_for_output(process, master_fd, output, b"7 UTC days", start=output.rfind(b"MASC Usage"))
+    wait_for_output(
+        process, master_fd, output, b"7 UTC days",
+        start=output.rfind(b"MASC Usage"), timeout=10.0,
+    )
     os.write(master_fd, b"q")
 
 

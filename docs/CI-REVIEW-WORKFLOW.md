@@ -19,6 +19,8 @@ verification requires explicit suites. Every ordinary job includes setup within
 its two-minute limit. A cold cache may prevent completion; incomplete or skipped
 coverage is never a successful build or test result.
 
+Native GitHub Stacks use REST `stack` metadata and the [stack workflow](guides/NATIVE-GITHUB-STACKS.md). The asynchronous merge endpoint includes all open downstack PRs through the selected PR. Inspect and approve every included head; do not treat a non-main direct base as a blocker or manually retarget a native stack. A leaf source-review PASS does not certify its downstack.
+
 `ci.yml` and `test.yml` are reusable components. Full type checking, release
 profile, dashboard, model checks, behavioral suites and distribution/installation
 verification belong to `release-candidate.yml` at Release/Tag. Release publication

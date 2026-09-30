@@ -3204,9 +3204,10 @@ let render_planning_list (state : state) =
        let summary_cards =
          studio_pair ~width:summary_width
            (fun width -> studio_panel ~width ~title:"Goals · measured outcomes"
-              ~lines:[planning_rollup_row ~cols:width p.pl_rollup])
+              ~lines:(Message_layout.wrap_words ~max_cells:(max 1 (width - 4))
+                (planning_rollup_row ~cols:width p.pl_rollup)))
            (fun width -> studio_panel ~width ~title:"Tasks · current backlog"
-              ~lines:[backlog])
+              ~lines:(Message_layout.wrap_words ~max_cells:(max 1 (width - 4)) backlog))
        in
        let summary_card_rows = List.length summary_cards in
        let cards_fit =
@@ -10734,10 +10735,10 @@ let repository_context_lines ~width (repo : Masc.Tui_decode.repository) =
     | None -> []
     | Some reason -> wrap "Error" reason
   in
-  wrap "Path" repo.rp_resolved_local_path
+  failure
+  @ wrap "Path" repo.rp_resolved_local_path
   @ stored_path
   @ wrap "Keepers" keepers
-  @ failure
 
 let render_workspace_activity (state : state) repo_id =
   let terminal_rows, cols = get_terminal_size () in
@@ -10812,24 +10813,19 @@ let repository_studio_geometry (state : state) ~cols ~budget ~cursor =
       in
       let detail_minimum = Message_layout.display_width "Keepers: none assigned" + 4 in
       let split = width >= named_width + detail_minimum + 2 && budget >= 8 in
-      let detail_width = if split then max detail_minimum (width / 3) else width in
+      let detail_width = if split then min (width - named_width - 2) (max detail_minimum (width / 3)) else width in
       let list_width = if split then width - detail_width - 2 else width in
       let selected = List.nth_opt repos cursor in
       let context_lines = match selected with
         | None -> []
-        | Some repo ->
-            let lines = repository_context_lines ~width:(detail_width - 4) repo in
-            (match Masc.Tui_decode.repository_status_reason repo.rp_status with
-             | None -> lines
-             | Some reason ->
-                 ("Error: " ^ Terminal_text.single_line reason) :: lines) in
+        | Some repo -> repository_context_lines ~width:(detail_width - 4) repo in
       let detail_title = match selected with
         | None -> "Selected repository"
         | Some repo -> Terminal_text.single_line repo.rp_name in
       let errors = match state.repositories_error with
         | None -> []
         | Some detail -> [Theme.bad () ^ Terminal_text.single_line detail ^ Ansi.reset] in
-      let context_budget = max 0 (if split then budget - 2 else budget - 6) in
+      let context_budget = max 0 (if split then budget - 2 else budget - 6 - List.length errors) in
       let truncated = List.length context_lines > context_budget in
       let visible_context =
         List.take (max 0 (context_budget - if truncated then 1 else 0)) context_lines in

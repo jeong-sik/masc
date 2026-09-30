@@ -32,7 +32,7 @@
     "whole_file_matches_executed_input": false,
     "target_stanza_matches_executed_input": true,
     "target_stanza_sha256": "dfd989e032b5993fcdb814eabf33bc9a3026f933be99af387e79afd7f3a44271",
-    "difference": "Unrelated test_tui_image_preview gains direct digestif and yojson dependencies."
+    "difference": "Unrelated test_tui_image_preview gains a direct digestif dependency."
   },
   "new_test_run": false,
   "full_application_or_runtime_verified": false

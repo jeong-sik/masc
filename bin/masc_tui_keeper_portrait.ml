@@ -39,7 +39,7 @@ let min_content_cols size = String.length indent + size.cols + min_fact_cols
    cache is about 3 MB -- and holds a roster walked end to end. *)
 let cache_capacity = 32
 
-type entry = { name : string; edge : int; picture : Draw.image }
+type entry = { name : string; edge : int; compact : bool; picture : Draw.image }
 
 (* Newest first. *)
 type cache = { mutable entries : entry list }
@@ -47,14 +47,22 @@ type cache = { mutable entries : entry list }
 let cache () = { entries = [] }
 let cached c = List.length c.entries
 
-let image c ~name size =
+let image ?(compact = false) c ~name size =
   let edge = Draw.int_of_size size in
-  let same entry = String.equal entry.name name && entry.edge = edge in
+  let same entry =
+    String.equal entry.name name && entry.edge = edge && Bool.equal entry.compact compact
+  in
   let rest = List.filter (fun entry -> not (same entry)) c.entries in
   let entry =
     match List.find_opt same c.entries with
     | Some entry -> entry
-    | None -> { name; edge; picture = Draw.render (Look.body_of_name name) (Look.equipment_of_name name) size }
+    | None ->
+        let body = Look.body_of_name name and equipment = Look.equipment_of_name name in
+        let picture =
+          if compact then Draw.render_compact_posed body equipment Draw.still size
+          else Draw.render body equipment size
+        in
+        { name; edge; compact; picture }
   in
   c.entries <- List.filteri (fun index _ -> index < cache_capacity) (entry :: rest);
   entry.picture
@@ -74,7 +82,10 @@ let band c ~display ~project ~name ~content_rows ~content_cols =
   | Some size ->
       View.fit display ~max_cols:size.cols ~max_rows:size.rows
       |> Option.map (fun box ->
-             let image = image c ~name box.View.size in
+             let compact =
+               match display with View.Mosaic -> true | View.Pixels _ | View.No_picture -> false
+             in
+             let image = image ~compact c ~name box.View.size in
              { display; box; image; lines = View.lines ~project display box image })
 
 let beside band facts =

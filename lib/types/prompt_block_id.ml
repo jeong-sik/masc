@@ -3,6 +3,7 @@ type t =
   | Dynamic_context
   | Temporal_summary
   | Memory_os_recall
+  | Librarian_working_context
   | Operator_note
   | Skill_compositions
 
@@ -11,11 +12,12 @@ let equal a b =
   | Keeper_instructions, Keeper_instructions
   | Dynamic_context, Dynamic_context
   | Temporal_summary, Temporal_summary
+  | Librarian_working_context, Librarian_working_context
   | Memory_os_recall, Memory_os_recall
   | Operator_note, Operator_note
   | Skill_compositions, Skill_compositions -> true
   | ( Keeper_instructions | Dynamic_context | Temporal_summary | Memory_os_recall
-    | Operator_note | Skill_compositions )
+    | Librarian_working_context | Operator_note | Skill_compositions )
   , _ -> false
 
 let to_string = function
@@ -23,6 +25,7 @@ let to_string = function
   | Dynamic_context -> "dynamic_context"
   | Temporal_summary -> "temporal_summary"
   | Memory_os_recall -> "memory_os_recall"
+  | Librarian_working_context -> "librarian_working_context"
   | Operator_note -> "operator_note"
   | Skill_compositions -> "skill_compositions"
 
@@ -31,6 +34,7 @@ let of_string = function
   | "dynamic_context" -> Ok Dynamic_context
   | "temporal_summary" -> Ok Temporal_summary
   | "memory_os_recall" -> Ok Memory_os_recall
+  | "librarian_working_context" -> Ok Librarian_working_context
   | "operator_note" -> Ok Operator_note
   | "skill_compositions" -> Ok Skill_compositions
   | name -> Error (Printf.sprintf "unknown prompt block id %S" name)
@@ -40,6 +44,7 @@ let all_known =
   ; Dynamic_context
   ; Temporal_summary
   ; Memory_os_recall
+  ; Librarian_working_context
   ; Operator_note
   ; Skill_compositions
   ]
@@ -51,12 +56,15 @@ let all_known =
 let cache_rank = function
   | Keeper_instructions -> 0
   | Skill_compositions -> 1
+  (* The split retains their prior assembly position: ordinary facts first,
+     then the independently versioned Librarian index. *)
   | Memory_os_recall -> 2
-  | Dynamic_context -> 3
-  | Temporal_summary -> 4
+  | Librarian_working_context -> 3
+  | Dynamic_context -> 4
+  | Temporal_summary -> 5
   (* An operator speaking mid-turn is the newest thing in the assembly and the
      only block that rides a post-tool round; it stays last on both counts. *)
-  | Operator_note -> 5
+  | Operator_note -> 6
 ;;
 
 (* See the mli. [Keeper_instructions] never enters the extra-context
@@ -65,7 +73,8 @@ let cache_rank = function
    re-broadcast, and the exhaustive match keeps a new constructor from
    inheriting either class silently. *)
 let injected_on_post_tool_round = function
-  | Dynamic_context | Temporal_summary | Memory_os_recall | Skill_compositions -> false
+  | Dynamic_context | Temporal_summary | Memory_os_recall | Librarian_working_context
+  | Skill_compositions -> false
   | Keeper_instructions | Operator_note -> true
 ;;
 
@@ -74,6 +83,6 @@ let injected_on_post_tool_round = function
    the system prompt it recorded at its first launch. *)
 let resent_when_held = function
   | Keeper_instructions | Dynamic_context | Temporal_summary | Memory_os_recall
-  | Skill_compositions -> false
+  | Librarian_working_context | Skill_compositions -> false
   | Operator_note -> true
 ;;

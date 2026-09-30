@@ -6135,7 +6135,7 @@ let test_decode_keeper_lanes_requires_the_phase_conditions () =
             (Astring.String.is_infix ~affix:field detail))
     [ "launch_pending"; "heartbeat_healthy"; "turn_healthy" ]
 
-let standalone_lane_json ?purpose ?(status = "idle") ?(retained = 3)
+let standalone_lane_json ?purpose ?(required = true) ?(status = "idle") ?(retained = 3)
     ?(running = 0) ?(selected_slots = []) ?(configuration_state = "ready")
     lane_id label =
   let jev =
@@ -6148,7 +6148,7 @@ let standalone_lane_json ?purpose ?(status = "idle") ?(retained = 3)
      ; "label", `String label
      ]
      @ (match purpose with None -> [] | Some text -> [ "purpose", `String text ])
-     @ [ "required", `Bool true
+     @ [ "required", `Bool required
     ; "observation_only", `Bool true
     ; "configured", `Bool true
     ; "configuration_state", `String configuration_state
@@ -6210,6 +6210,7 @@ let test_decode_standalone_lane_configuration_is_a_closed_set () =
             ; standalone_lane_json "workspace_curator_exact" "Workspace Curator"
             ; standalone_lane_json "verifier_exact" "Verifier"
             ; stagehand_lane_json ()
+            ; standalone_lane_json ~required:false "candle_appraiser" "Candle Appraiser"
             ] )
       ]
   in
@@ -6384,6 +6385,7 @@ let test_decode_standalone_lane_keeps_the_run_start () =
           ; standalone_lane_json ~status:"no_retained_observation" ~retained:0
               "verifier_exact" "Verifier"
           ; stagehand_lane_json ()
+          ; standalone_lane_json ~required:false "candle_appraiser" "Candle Appraiser"
           ]
       ]
   in
@@ -6430,6 +6432,7 @@ let test_decode_standalone_lanes_keeps_running_and_no_retained_observation () =
     ; standalone_lane_json ~status:"no_retained_observation" ~retained:0
         "verifier_exact" "Verifier"
     ; stagehand_lane_json ()
+    ; standalone_lane_json ~required:false "candle_appraiser" "Candle Appraiser"
     ]
   in
   let json =
@@ -6495,6 +6498,7 @@ let test_decode_standalone_lane_jev_is_typed_and_required () =
             ; standalone_lane_json "workspace_curator_exact" "Workspace Curator"
             ; standalone_lane_json "verifier_exact" "Verifier"
             ; stagehand_lane_json ()
+            ; standalone_lane_json ~required:false "candle_appraiser" "Candle Appraiser"
             ] )
       ]
   in
@@ -12134,6 +12138,60 @@ let test_play_revoke_failure_detail () =
      {|{"error":"release_failed","released_controller":false,"release_error":"busy"}|};
      "not JSON"; "[]"; "null"; "42"]
 
+(* The play routes put the reason in [message] and the code in [error]. The
+   shared refusal shows the code alone, which is "HTTP 409: not_ready" for an
+   operator who has no idea what is not ready. *)
+let test_play_invite_refusal_says_the_servers_sentence () =
+  let refusal ~status_code body = Tui_decode.play_invite_refusal ~status_code ~body in
+  let check_sentence label expected ~status_code body =
+    Alcotest.(check (option string)) label expected (refusal ~status_code body)
+  in
+  check_sentence "not ready lists what is missing"
+    (Some "HTTP 409: an invite needs auth (missing: auth_disabled, no_public_base_url)")
+    ~status_code:409
+    {|{"error":"not_ready","message":"an invite needs auth","missing":["auth_disabled","no_public_base_url"]}|};
+  check_sentence "a taken name says who holds it"
+    (Some "HTTP 409: another participant already has this name (held by a keeper)")
+    ~status_code:409
+    {|{"error":"name_taken","message":"another participant already has this name","taken_by":"keeper"}|};
+  check_sentence "blank and non-string gaps are not listed"
+    (Some "HTTP 409: an invite needs auth (missing: no_public_base_url)")
+    ~status_code:409
+    {|{"error":"not_ready","message":"an invite needs auth","missing":["", 7, "no_public_base_url", null]}|};
+  check_sentence "a missing that lists nothing adds nothing"
+    (Some "HTTP 409: an invite needs auth")
+    ~status_code:409
+    {|{"error":"not_ready","message":"an invite needs auth","missing":["  "]}|};
+  check_sentence "a missing that is not a list adds nothing"
+    (Some "HTTP 409: an invite needs auth")
+    ~status_code:409
+    {|{"error":"not_ready","message":"an invite needs auth","missing":"no_public_base_url"}|};
+  check_sentence "a plain sentence stands alone"
+    (Some "HTTP 400: hours must be between 1 and 8760, got 0")
+    ~status_code:400
+    {|{"error":"invalid_request","message":"hours must be between 1 and 8760, got 0"}|};
+  List.iter
+    (fun (why, status_code, body) -> check_sentence why None ~status_code body)
+    [ ("a 401 is about the credential", 401, {|{"error":"unauthorized","message":"bad token"}|})
+    ; ("a 403 is about the credential", 403, {|{"error":"forbidden","message":"admin only"}|})
+    ; ("a success is not a refusal", 200, {|{"error":"x","message":"fine"}|})
+    ; ("a server failure is not a refusal", 500, {|{"error":"x","message":"disk"}|})
+    ; ("a body with no message", 409, {|{"error":"not_ready"}|})
+    ; ("a blank message", 409, {|{"error":"x","message":"   "}|})
+    ; ("a message that is not a string", 409, {|{"error":"x","message":7}|})
+    ; ("a body that is not an object", 409, {|["not_ready"]|})
+    ; ("a body that is not JSON", 409, "<html>bad gateway</html>")
+    ];
+  (* Every part comes from the far end, so every part is made safe to draw. *)
+  match
+    refusal ~status_code:409
+      "{\"error\":\"x\",\"message\":\"a\\u001b[31mred\\nnext\",\"missing\":[\"g\\u001b]0;t\\u0007\"],\"taken_by\":\"k\\u001b\"}"
+  with
+  | None -> Alcotest.fail "a body with a message gave no sentence"
+  | Some said ->
+    Alcotest.(check bool) "no control byte is left in the sentence" false
+      (String.exists (fun c -> c < ' ' || c = '\127') said)
+
 let () =
   Alcotest.run "tui_decode" [
     ("play revoke failure", [Alcotest.test_case "preserves controller failure detail" `Quick test_play_revoke_failure_detail]);
@@ -12956,7 +13014,9 @@ let () =
           test_keeper_usage_cache_failures_remain_visible ] );
     ( "play invites"
     , [ Alcotest.test_case "preserves partial revoke and rejects unreadable links"
-          `Quick test_play_invite_responses_preserve_recovery_facts ] );
+          `Quick test_play_invite_responses_preserve_recovery_facts
+      ; Alcotest.test_case "a refusal says the server's sentence" `Quick
+          test_play_invite_refusal_says_the_servers_sentence ] );
     ( "file change"
     , [ Alcotest.test_case "reads an insert" `Quick test_decode_file_change_reads_an_insert
       ; Alcotest.test_case "reads a materialize" `Quick

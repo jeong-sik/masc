@@ -1,0 +1,160 @@
+{
+  "source_sha": "c112b2030652a5a25360f5d5322f8dc6da99c598",
+  "input_json_sha256": "c47aaafb43eda06ab5b6bbe30a3bedc1048bab54038c5dd02f30461ae7c5dd27",
+  "evidence_kind": "Chromium/xterm replay of installed c112 binary in isolated fixture PTY; not current Home CI, production or human timing",
+  "frames": [
+    {
+      "name": "installed-baseline-80x24",
+      "columns": 80,
+      "rows": 24,
+      "encoding": "base64",
+      "raw_sha256": "df850d7418a51bd641de290417006d2b76447b266b58a99056b665b751b96a42",
+      "stem": "01-installed-baseline-80x24-80x24-color",
+      "observed_terminal": {
+        "columns": 80,
+        "rows": 24
+      },
+      "capture_geometry": {
+        "screen": {
+          "x": 15,
+          "y": 5,
+          "width": 674,
+          "height": 384,
+          "top": 5,
+          "right": 689,
+          "bottom": 389,
+          "left": 15
+        },
+        "final_row": {
+          "x": 15,
+          "y": 373,
+          "width": 674,
+          "height": 16,
+          "top": 373,
+          "right": 689,
+          "bottom": 389,
+          "left": 15
+        },
+        "viewport": {
+          "x": 10,
+          "y": 0,
+          "width": 684,
+          "height": 394,
+          "top": 0,
+          "right": 694,
+          "bottom": 394,
+          "left": 10
+        },
+        "dom_rows": 24,
+        "clip": {
+          "x": 15,
+          "y": 5,
+          "width": 674,
+          "height": 384
+        }
+      }
+    },
+    {
+      "name": "installed-baseline-120x32",
+      "columns": 120,
+      "rows": 32,
+      "encoding": "base64",
+      "raw_sha256": "e649397d26c13d70cb8167dfe3b3a638f9bd8cc1b7f513fafc1fa8c79ca2c784",
+      "stem": "02-installed-baseline-120x32-120x32-color",
+      "observed_terminal": {
+        "columns": 120,
+        "rows": 32
+      },
+      "capture_geometry": {
+        "screen": {
+          "x": 16,
+          "y": 5,
+          "width": 1011,
+          "height": 512,
+          "top": 5,
+          "right": 1027,
+          "bottom": 517,
+          "left": 16
+        },
+        "final_row": {
+          "x": 16,
+          "y": 501,
+          "width": 1011,
+          "height": 16,
+          "top": 501,
+          "right": 1027,
+          "bottom": 517,
+          "left": 16
+        },
+        "viewport": {
+          "x": 11,
+          "y": 0,
+          "width": 1022,
+          "height": 522,
+          "top": 0,
+          "right": 1033,
+          "bottom": 522,
+          "left": 11
+        },
+        "dom_rows": 32,
+        "clip": {
+          "x": 16,
+          "y": 5,
+          "width": 1011,
+          "height": 512
+        }
+      }
+    },
+    {
+      "name": "installed-baseline-160x48",
+      "columns": 160,
+      "rows": 48,
+      "encoding": "base64",
+      "raw_sha256": "92acf2f45062ea700cb611f4c68c2575db56d2cfebadc7799a36acb4f6ca78fc",
+      "stem": "03-installed-baseline-160x48-160x48-color",
+      "observed_terminal": {
+        "columns": 160,
+        "rows": 48
+      },
+      "capture_geometry": {
+        "screen": {
+          "x": 17.5,
+          "y": 5,
+          "width": 1349,
+          "height": 768,
+          "top": 5,
+          "right": 1366.5,
+          "bottom": 773,
+          "left": 17.5
+        },
+        "final_row": {
+          "x": 17.5,
+          "y": 757,
+          "width": 1349,
+          "height": 16,
+          "top": 757,
+          "right": 1366.5,
+          "bottom": 773,
+          "left": 17.5
+        },
+        "viewport": {
+          "x": 12.5,
+          "y": 0,
+          "width": 1359,
+          "height": 778,
+          "top": 0,
+          "right": 1371.5,
+          "bottom": 778,
+          "left": 12.5
+        },
+        "dom_rows": 48,
+        "clip": {
+          "x": 17,
+          "y": 5,
+          "width": 1350,
+          "height": 768
+        }
+      }
+    }
+  ]
+}

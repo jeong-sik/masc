@@ -161,21 +161,21 @@ def refresh_identity_and_deletion(executable):
         rows.insert(0, held("call-inserted", "inserted-card"))
         h.send_and_wait(process, fd, output, b"r", b"inserted-card")
         assert_selected(output, b"refresh-card-B")
-        h.send_and_wait(process, fd, output, b"\r", b"call=call-refresh-b")
+        h.send_and_wait(process, fd, output, b"\r", b"call-refresh-b")
         # A second insertion while the detail is open exercises mailbox-drain
         # reconciliation, not just Home's selected-row reconciliation.
         rows.insert(0, held("call-detail-inserted", "detail-inserted-card"))
         rows[-1]["args"] = '{"command":"echo refreshed-call-refresh-b"}'
         h.send_and_wait(process, fd, output, b"r", b"refreshed-call-refresh-b")
         detail = h.screen_text(bytes(output))
-        assert b"call=call-refresh-b" in detail and b"args=" in detail, detail
+        assert b"call-refresh-b" in detail and b"echo refreshed-call-refresh-b" in detail, detail
         h.send_and_wait(process, fd, output, b"\x1b", b"Enter:open")
         rows[:] = [row for row in rows if row["tool_call_id"] != "call-refresh-b"]
         h.send_and_wait(process, fd, output, b"r", b"Selection changed")
         result = h.send_and_wait(process, fd, output, b"\r", b"Selection changed")
         assert b"MASC Approvals" not in h.screen_text(result), result
         select_home(process, fd, output, b"refresh-card-A", destinations=5)
-        h.send_and_wait(process, fd, output, b"\r", b"call=call-refresh-a")
+        h.send_and_wait(process, fd, output, b"\r", b"call-refresh-a")
         # Deleting the currently opened authority must eject its detail.
         rows[:] = [row for row in rows if row["tool_call_id"] != "call-refresh-a"]
         h.send_and_wait(process, fd, output, b"r", b"Selection changed")
@@ -217,7 +217,7 @@ def many_cards_keep_continuation(executable):
                 within_window = frame(process, fd, output, "many-requests-selected")
                 assert position.group() in within_window, within_window
         retained_position = position.group()
-        h.send_and_wait(process, fd, output, b"\r", b"call=call-window-29")
+        h.send_and_wait(process, fd, output, b"\r", b"call-window-29")
         h.send_and_wait(process, fd, output, b"\x1b", b"Enter:open")
         assert_selected(output, b"window-card-29")
         assert retained_position in frame(process, fd, output, "many-requests-return")

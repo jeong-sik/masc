@@ -108,3 +108,14 @@ current-head visual acceptance. Local queue identity recovery now has a separate
 fixture suite, `test_tui_home_queue_identity_pty`, covering unread settlement,
 rejected `/steer` and `/run-next`, and explicit recovery with the saved request ID.
 Its executable result remains pending.
+
+Installed baseline identity and three isolated fixture frames are retained in
+[baseline evidence](../../evidence/tui-home-installed-baseline-20260930/README.md).
+The installed macOS arm64 binary is 0.49.0 at c112b203, before integration.
+It is not a current-head runtime proof. A native manual probe is being prepared
+for candidate verification without local builds or replacing active sessions.
+
+The card detail fixture now uses visible call identity and command content in
+all refresh/window cases; private `call=`/`args=` trace strings are not display
+contracts. A dedicated overflow suite covers 64 distinct requests at each
+acceptance size; its runtime and duration remain unproven until targeted CI.

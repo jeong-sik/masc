@@ -1,0 +1,24 @@
+ ▸Dashboard  Work  Keepers  Usage  Board  Workspace  System
+
+   MASC Dashboard  [workspace\x1B]8;;https://attacker.invalid\x07owned]  14:1…  
+ ────────────────────────────────────────────────────────────────────────────── 
+   Health: ok · Keepers: 0 listed · individual state in Keepers                 
+                                                                                
+   Goals · 0 active · metric and linked tasks are separate                      
+     No active Goal                                                             
+                                                                                
+   Work  · 24h: 0 created · 0 currently done · 0 currently cancelled            
+     Open: 0 working · 0 awaiting verification · 0 claimed · 0 todo             
+     Currently done by UTC day (14 days): ▁▁▁▁▁▁▁▁▁▁▁▁▁▁                        
+                                                                                
+   Usage · 0/0 quota scopes reported since server start                         
+     0 runtime quota blocks observed · scope windows in Usage                   
+                                                                                
+   Needs you · 0 attention items · 0? approvals (p in Work)                     
+     Nothing needs attention.                                                   
+                                                                                
+                                                                                
+                                                                                
+
+  m:Usage  r:refresh  Tab:next  q:quit  | Port: 54777
+ › to alpha   (i to write)                                                      

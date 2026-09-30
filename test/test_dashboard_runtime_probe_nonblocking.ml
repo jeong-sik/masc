@@ -332,7 +332,7 @@ let fanout_runtimes () =
     | Ok runtime -> runtime
     | Error reason ->
       failf "expected fan-out runtime to materialize: %s"
-        (Runtime.string_of_drop_reason reason)
+        (Runtime_config_error.string_of_drop_reason reason)
   in
   [ materialize binding_a; materialize binding_b ]
 

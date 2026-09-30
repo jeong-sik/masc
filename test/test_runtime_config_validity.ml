@@ -5,7 +5,7 @@ open Masc
    rendered once here instead of at every call below. *)
 let load_list_text ~config_path =
   Runtime.load_list ~config_path
-  |> Result.map_error (Runtime.to_diagnostic_text ~config_path)
+  |> Result.map_error (Runtime_config_error.to_diagnostic_text ~config_path)
 ;;
 
 
@@ -2157,7 +2157,7 @@ let test_release_evidence_fixture_lanes_resolve_without_environment_credentials 
       | Error reason ->
         failf
           "release-evidence smoke default runtime must materialize: %s"
-          (Runtime.string_of_drop_reason reason)
+          (Runtime_config_error.string_of_drop_reason reason)
     in
     let provider_config = agent_core_provider_config runtime in
     check bool "synthetic credential reaches dispatch" false
@@ -3258,9 +3258,9 @@ let test_runtime_toml_rejects_a_table_inside_a_binding () =
 
 let test_runtime_context_marks_failure_renders_both_numbers () =
   let text =
-    Runtime.to_diagnostic_text
+    Runtime_config_error.to_diagnostic_text
       ~config_path:"runtime.toml"
-      (Runtime.Context_marks_exceed_max_context
+      (Runtime_config_error.Context_marks_exceed_max_context
          { runtime_id = "local.sample"; high_water_tokens = 2_048; max_context = 1_024 })
   in
   let mentions needle =
@@ -3299,7 +3299,7 @@ let test_runtime_refuses_context_marks_above_max_context () =
        | Error _ -> fail "local.sample should materialize")
   in
   (match Runtime.validate_runtime_context_marks [ materialize ~high:2_048 ~low:300 ] with
-   | Error (Runtime.Context_marks_exceed_max_context { high_water_tokens; max_context; _ }) ->
+   | Error (Runtime_config_error.Context_marks_exceed_max_context { high_water_tokens; max_context; _ }) ->
      check int "the mark" 2_048 high_water_tokens;
      check int "the model's context" 1_024 max_context
    | Error _ -> fail "expected the marks failure"
@@ -3798,7 +3798,7 @@ let gaps_after_boot_load content =
 
 let gap_triples gaps =
   List.map
-    (fun (gap : Runtime.exact_slot_body_deadline_gap) ->
+    (fun (gap : Runtime_config_error.exact_slot_body_deadline_gap) ->
        Printf.sprintf "%s/%s/%s" gap.lane_id gap.slot_id gap.provider_id)
     gaps
 ;;
@@ -3957,7 +3957,7 @@ let test_catalog_and_gap_degradation_name_both_reasons () =
     ; unavailable_assignments = []
     }
   in
-  let exact_slots : Runtime.exact_slot_degradation =
+  let exact_slots : Runtime_config_error.exact_slot_degradation =
     { gaps = [ { lane_id = "librarian_exact"; slot_id = "local.sample"; provider_id = "local" } ]
     ; emptied_lane_ids = [ "librarian_exact" ]
     }
@@ -4143,12 +4143,12 @@ let test_of_binding_reports_an_undeclared_provider () =
   in
   match Runtime.of_binding cfg binding with
   | Ok _ -> fail "binding with an undeclared provider must not materialize"
-  | Error (Runtime.Provider_not_declared id) ->
+  | Error (Runtime_config_error.Provider_not_declared id) ->
     check string "reports the provider it could not find" "absent" id
   | Error other ->
     failf
       "expected Provider_not_declared, got %s"
-      (Runtime.string_of_drop_reason other)
+      (Runtime_config_error.string_of_drop_reason other)
 ;;
 
 let test_runtime_toml_rejects_non_boolean_enabled () =

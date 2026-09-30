@@ -253,7 +253,7 @@ let exact_output_resolver_snapshot (catalog : Runtime.exact_output_catalog) =
    derivation ([Runtime.exact_output_resolver_catalog]). A mandatory lane empty
    for any other reason is still required and still stops publication. *)
 let exact_output_excused_lane_ids (catalog : Runtime.exact_output_catalog) =
-  catalog.Runtime.catalog_exact_slots.Runtime.emptied_lane_ids
+  catalog.Runtime.catalog_exact_slots.Runtime_config_error.emptied_lane_ids
 ;;
 
 let exact_output_registry_refused detail =

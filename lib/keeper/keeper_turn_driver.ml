@@ -250,7 +250,7 @@ let quota_ordered_runtime_ids ~now ~walk runtime_ids =
   let resolved = List.map (fun id -> id, Runtime.get_runtime_by_id id) runtime_ids in
   let resolvable, unresolvable = List.partition (fun (_, rt) -> Option.is_some rt) resolved in
   let ordered = demote_unavailable_candidates ~now ~walk
-    ~quota_scope_of:(fun (_, rt) -> Option.map Runtime.quota_scope_of_runtime rt)
+    ~quota_scope_of:(fun (_, rt) -> Option.map Runtime_instance.quota_scope_of_runtime rt)
     ~candidate_backpressure_of:(fun (_, rt) ->
       Option.map (fun (rt : Runtime_instance.t) -> rt.candidate_backpressure) rt)
     resolvable in
@@ -328,7 +328,7 @@ let path_rest ~now runtime_id =
           , promotes )
     in
     let quota_rest =
-      let scope = Runtime.quota_scope_of_runtime runtime in
+      let scope = Runtime_instance.quota_scope_of_runtime runtime in
       match Runtime_quota_window.active_until ~scope ~now with
       | Some resets_at -> Some (resets_at, true)
       | None ->
@@ -1244,7 +1244,7 @@ let modality_reroute_candidates ~now ~walk ~deferred_runtime_lane ~first_candida
          ~now
          ~walk
          ~quota_scope_of:(fun (runtime : Runtime_instance.t) ->
-           Some (Runtime.quota_scope_of_runtime runtime))
+           Some (Runtime_instance.quota_scope_of_runtime runtime))
          ~candidate_backpressure_of:(fun (runtime : Runtime_instance.t) ->
            Some runtime.Runtime_instance.candidate_backpressure)
 
@@ -2142,7 +2142,7 @@ let run_named
       | Resolved_runtime runtime -> runtime.Runtime_instance.id
       | Missing_runtime runtime_id -> runtime_id)
     ~quota_scope_of:(function
-      | Resolved_runtime runtime -> Some (Runtime.quota_scope_of_runtime runtime)
+      | Resolved_runtime runtime -> Some (Runtime_instance.quota_scope_of_runtime runtime)
       | Missing_runtime _ -> None)
     ~candidate_backpressure_of:(function
       | Resolved_runtime runtime -> Some runtime.Runtime_instance.candidate_backpressure

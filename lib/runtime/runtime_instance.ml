@@ -323,3 +323,7 @@ let max_context_of_runtime (rt : t) : int =
           fallback — RFC-0206 §2.1)"
          rt.id)
 ;;
+
+let quota_scope_of_runtime (rt : t) : Runtime_quota_window.scope =
+  rt.quota_scope
+;;

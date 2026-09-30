@@ -962,7 +962,7 @@ let test_vision_candidates_follow_quota_window () =
       let now = Unix.gettimeofday () in
       let scope id =
         match Runtime.get_runtime_by_id id with
-        | Some rt -> Runtime.quota_scope_of_runtime rt
+        | Some rt -> Runtime_instance.quota_scope_of_runtime rt
         | None -> failwith ("missing runtime " ^ id)
       in
       assert (Vt.vision_runtime_ids ~now = [ "p1.vision-a"; "p2.vision-b" ]);
@@ -982,7 +982,7 @@ let test_vision_402_marks_the_account_exhausted_and_moves_on () =
         let handle = store_image meta "\x89PNG\r\n\x1a\nraw" in
         let scope id =
           match Runtime.get_runtime_by_id id with
-          | Some rt -> Runtime.quota_scope_of_runtime rt
+          | Some rt -> Runtime_instance.quota_scope_of_runtime rt
           | None -> failwith ("missing runtime " ^ id)
         in
         let calls = ref 0 in

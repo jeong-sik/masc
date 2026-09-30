@@ -329,7 +329,7 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
   (* Capture ownership with the execution before any subprocess yields. A
      runtime catalog reload may change the credential alias under this id. *)
   let execution = runtime.Runtime_instance.execution in
-  let quota_scope = Runtime.quota_scope_of_runtime runtime in
+  let quota_scope = Runtime_instance.quota_scope_of_runtime runtime in
   let succeeded (text : response) =
     on_usage text.usage;
     Runtime_quota_window.note_succeeded ~scope:quota_scope;

@@ -86,7 +86,7 @@ let vision_runtime_candidates ~now =
      same predicate as the Keeper media reroute. *)
   Runtime_agent.media_candidates ()
   |> Runtime_quota_window.demote_order ~now ~quota_scope_of:(fun (rt : Runtime_instance.t) ->
-       Some (Runtime.quota_scope_of_runtime rt))
+       Some (Runtime_instance.quota_scope_of_runtime rt))
   |> List.filter_map (fun (rt : Runtime_instance.t) ->
        let caps = Runtime_agent.input_capabilities_of_runtime rt in
        if not (Runtime_agent.caps_admit_required_modalities caps [ "image" ])
@@ -547,7 +547,7 @@ let official_failure_effect : Fusion_official_client.failure -> Tool_result.fail
 let note_candidate_account ~(runtime : Runtime_instance.t) = function
   | Llm_provider.Http_client.HttpError { code = 402; _ } ->
     Runtime_quota_window.note_observed_exhausted
-      ~scope:(Runtime.quota_scope_of_runtime runtime)
+      ~scope:(Runtime_instance.quota_scope_of_runtime runtime)
   | Llm_provider.Http_client.HttpError _
   | Llm_provider.Http_client.NetworkError _
   | Llm_provider.Http_client.TimeoutError _
@@ -726,7 +726,7 @@ let run_candidates_outcome
                 })
        | Ok response ->
             Runtime_quota_window.note_succeeded
-              ~scope:(Runtime.quota_scope_of_runtime rt);
+              ~scope:(Runtime_instance.quota_scope_of_runtime rt);
             (match
                outcome_of_response ~runtime_id ~requested_model:config.model_id response
              with

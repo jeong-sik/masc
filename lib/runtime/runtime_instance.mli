@@ -109,3 +109,8 @@ val prompt_capacity_bytes : t -> int option
 val capabilities_for_runtime : t -> Llm_provider.Capabilities.capabilities option
 val is_local_provider : provider -> bool
 val partition_bindings : config -> binding list -> t list * (string * drop_reason) list
+
+val quota_scope_of_runtime : t -> Runtime_quota_window.scope
+(** Non-secret quota-scope identity derived from this resolved runtime
+    snapshot.  Use this form across a provider call so a concurrent catalog
+    reload cannot rebind the response to a different credential account. *)

@@ -2029,7 +2029,7 @@ let test_lane_media_reroute_walks_past_exhausted_candidate () =
       let lanevision = runtime "lanevision.vision_model" in
       let backupvision = runtime "backupvision.vision_model" in
       Runtime_quota_window.note_observed_exhausted
-        ~scope:(Runtime.quota_scope_of_runtime lanevision);
+        ~scope:(Runtime_instance.quota_scope_of_runtime lanevision);
       let candidates =
         Driver.For_testing.modality_reroute_candidates ~walk:(Driver.Fresh_walk_by test_recorder)
           ~now:(Unix.gettimeofday ())
@@ -2131,7 +2131,7 @@ let test_media_turn_starts_from_the_live_walk_head () =
       let text_only = runtime "primary.text_model" in
       let backupvision = runtime "backupvision.vision_model" in
       Runtime_quota_window.note_observed_exhausted
-        ~scope:(Runtime.quota_scope_of_runtime assigned);
+        ~scope:(Runtime_instance.quota_scope_of_runtime assigned);
       let image_block =
         Agent_core.Types.Image
           { media_type = "image/png"
@@ -3411,7 +3411,7 @@ let test_a_403_without_usage_read_rests_nothing () =
 let test_the_read_after_a_403_skips_and_contains_its_failures () =
   with_refusal_lane ~toml:runtime_toml_quota_lane_with_usage_read (fun () ->
     let refused = Option.get (Runtime.get_runtime_by_id "other.test_model") in
-    let scope = Runtime.quota_scope_of_runtime refused in
+    let scope = Runtime_instance.quota_scope_of_runtime refused in
     let read ?fetch () = outcome_label (Usage_read.read_runtime_after_account_refusal ?fetch refused) in
     Alcotest.(check string) "outside a server there is no net or clock to read with"
       "skipped: no net or clock" (read ());
@@ -3817,7 +3817,7 @@ let test_rate_limit_candidate_survives_unchanged_reload_only () =
     let attempt runtime reload =
       let result = Driver.For_testing.attempt_runtime_candidates ~walk_owner:(Driver.Fleet_keeper_turn test_recorder)
         ~runtime_id:"quota_lane" ~runtime_id_of:(fun (rt : Runtime_instance.t) -> rt.id)
-        ~quota_scope_of:(fun rt -> Some (Runtime.quota_scope_of_runtime rt))
+        ~quota_scope_of:(fun rt -> Some (Runtime_instance.quota_scope_of_runtime rt))
         ~candidate_backpressure_of:(fun (rt : Runtime_instance.t) -> Some rt.candidate_backpressure)
         ~candidate_dispatchable:(fun _ -> true)
         ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
@@ -4142,7 +4142,7 @@ let test_rate_limit_credential_rotation_under_same_reference () =
         let old = Option.get (Runtime.get_runtime_by_id "shared_a.test_model") in
         let result = Driver.For_testing.attempt_runtime_candidates ~walk_owner:(Driver.Fleet_keeper_turn test_recorder)
           ~runtime_id:"quota_lane" ~runtime_id_of:(fun (rt : Runtime_instance.t) -> rt.id)
-          ~quota_scope_of:(fun rt -> Some (Runtime.quota_scope_of_runtime rt))
+          ~quota_scope_of:(fun rt -> Some (Runtime_instance.quota_scope_of_runtime rt))
           ~candidate_backpressure_of:(fun (rt : Runtime_instance.t) -> Some rt.candidate_backpressure)
           ~candidate_dispatchable:(fun _ -> true)
           ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
@@ -4217,13 +4217,13 @@ let test_attempt_quota_scope_survives_runtime_reload () =
          let attempted_runtime =
            Option.get (Runtime.get_runtime_by_id "shared_a.test_model")
          in
-         let attempted_scope = Runtime.quota_scope_of_runtime attempted_runtime in
+         let attempted_scope = Runtime_instance.quota_scope_of_runtime attempted_runtime in
          let result =
            Driver.For_testing.attempt_runtime_candidates ~walk_owner:(Driver.Fleet_keeper_turn test_recorder)
              ~runtime_id:"quota_lane"
              ~runtime_id_of:(fun (runtime : Runtime_instance.t) -> runtime.id)
              ~quota_scope_of:(fun runtime ->
-               Some (Runtime.quota_scope_of_runtime runtime))
+               Some (Runtime_instance.quota_scope_of_runtime runtime))
              ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
              ~run_attempt:(fun ~idx:_ ~runtime_id:_ _candidate ->
                reload_runtime_config

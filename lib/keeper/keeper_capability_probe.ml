@@ -668,7 +668,7 @@ let probe_muse_invocation ~net ~secure_random ~mgr ~clock ~fs ~base_path ~now
               | Llm_provider.Reasoning_effort.None_ -> Runtime_muse_msp.Effort_none
               | Minimal -> Effort_minimal | Low -> Effort_low | Medium -> Effort_medium
               | High -> Effort_high | XHigh -> Effort_xhigh | Max -> Effort_max) in
-          let quota_scope = Runtime.quota_scope_of_runtime runtime in
+          let quota_scope = Runtime_instance.quota_scope_of_runtime runtime in
           let started = now () in
           (match Runtime_verification_muse.run ~secure_random ~net ~mgr ~clock
               ~cwd:Eio.Path.(fs / base_path) ~directory:base_path ~account_home:exec.account_home ~quota_scope

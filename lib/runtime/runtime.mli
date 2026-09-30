@@ -707,11 +707,6 @@ val turn_timeout_s_of_runtime_id : string -> float option
     {!Runtime_inference.resolve_turn_timeout_s}. *)
 
 
-val quota_scope_of_runtime : t -> Runtime_quota_window.scope
-(** Non-secret quota-scope identity derived from this resolved runtime
-    snapshot.  Use this form across a provider call so a concurrent catalog
-    reload cannot rebind the response to a different credential account. *)
-
 val quota_scope_of_runtime_id : string -> Runtime_quota_window.scope option
 (** Non-secret quota-scope identity of the runtime's provider
     ({!Runtime_quota_window.scope_of_credential}): rows sharing one

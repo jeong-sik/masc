@@ -58,7 +58,7 @@ let runtime_resolution_json ~now ~scope_label (rt : Runtime_instance.t) : Yojson
      rejection that claimed no reset -- the next success on the scope clears
      it. A numeric "remaining" is not honest: providers do not expose it,
      and the window's own contract is these two facts. *)
-  let quota_scope = Runtime.quota_scope_of_runtime rt in
+  let quota_scope = Runtime_instance.quota_scope_of_runtime rt in
   let quota_exhausted = Runtime_quota_window.is_exhausted ~scope:quota_scope ~now in
   let quota_resets_at = Runtime_quota_window.active_until ~scope:quota_scope ~now in
   let quota_scope_label = scope_label quota_scope in
@@ -275,7 +275,7 @@ let usage_scopes (runtimes : Runtime_instance.t list) =
   in
   let configured =
     List.fold_left
-      (fun groups (rt : Runtime_instance.t) -> add groups (Runtime.quota_scope_of_runtime rt) rt.provider)
+      (fun groups (rt : Runtime_instance.t) -> add groups (Runtime_instance.quota_scope_of_runtime rt) rt.provider)
       []
       runtimes
   in

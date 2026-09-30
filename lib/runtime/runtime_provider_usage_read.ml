@@ -58,7 +58,7 @@ let how_of_runtime (rt : Runtime_instance.t) =
 let readable_scopes () =
   List.fold_left
     (fun acc (rt : Runtime_instance.t) ->
-      let scope = Runtime.quota_scope_of_runtime rt in
+      let scope = Runtime_instance.quota_scope_of_runtime rt in
       if List.exists (fun r -> Runtime_quota_window.scope_equal r.scope scope) acc
       then acc
       else (
@@ -636,7 +636,7 @@ let fetch_of_context () =
 ;;
 
 let read_runtime_after_account_refusal ?fetch (rt : Runtime_instance.t) =
-  let scope = Runtime.quota_scope_of_runtime rt in
+  let scope = Runtime_instance.quota_scope_of_runtime rt in
   let outcome =
     match http_read_of_runtime rt with
     | None -> Skipped No_usage_read

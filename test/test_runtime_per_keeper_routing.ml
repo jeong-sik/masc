@@ -1821,7 +1821,7 @@ tools-support = true
          let expected = Filename.concat (Sys.getcwd ()) "relative-claude-account" in
          Alcotest.(check string) "runtime quota uses the selected child home"
            ("official:claude-code:home:" ^ expected)
-           (Runtime_quota_window.scope_to_string (Runtime.quota_scope_of_runtime runtime))));
+           (Runtime_quota_window.scope_to_string (Runtime_instance.quota_scope_of_runtime runtime))));
   Masc_test_deps.with_process_env "HOME" (Some "") (fun () ->
     Masc_test_deps.with_process_env "CODEX_HOME" (Some "") (fun () ->
       match Runtime_toml.parse_string

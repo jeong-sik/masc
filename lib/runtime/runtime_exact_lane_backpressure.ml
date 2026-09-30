@@ -27,7 +27,7 @@ let resting ~now slot_id =
   | Some (runtime : Runtime_instance.t) ->
     let quota_exhausted =
       Runtime_quota_window.is_exhausted
-        ~scope:(Runtime.quota_scope_of_runtime runtime)
+        ~scope:(Runtime_instance.quota_scope_of_runtime runtime)
         ~now
     in
     let rate_limited =

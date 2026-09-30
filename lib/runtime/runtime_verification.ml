@@ -609,7 +609,7 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
             | High -> Effort_high | XHigh -> Effort_xhigh | Max -> Effort_max) in
         (match Runtime_verification_muse.run ~secure_random ~net ~mgr ~clock ~cwd
            ~directory:cwd_path ~account_home:execution.account_home
-           ~quota_scope:(Runtime.quota_scope_of_runtime runtime) ~config
+           ~quota_scope:(Runtime_instance.quota_scope_of_runtime runtime) ~config
            ~prompt_capacity:(Runtime_instance.muse_prompt_capacity runtime) ~reasoning_effort ~tool ~prompt with
          | Ok result ->
            (* Every call the host reported for the verification turn must have
@@ -662,7 +662,7 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
               usage/read says whether a subscription window is spent. *)
            let detail = Runtime_muse_serve.error_to_string error in
            if muse_account_spent ~mgr ~clock ~cwd
-                ~scope:(Runtime.quota_scope_of_runtime runtime) config
+                ~scope:(Runtime_instance.quota_scope_of_runtime runtime) config
            then Error (Quota_exhausted detail)
            else Error (Provider_rejected detail)
          | Error (Client_error error) ->

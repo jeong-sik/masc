@@ -1205,7 +1205,7 @@ tools-support = true
       check bool (mode ^ " rests the account only when the window is spent")
         (String.equal expected "quota_exhausted")
         (Runtime_quota_window.is_exhausted
-           ~scope:(Runtime.quota_scope_of_runtime selected) ~now:(Time_compat.now ()));
+           ~scope:(Runtime_instance.quota_scope_of_runtime selected) ~now:(Time_compat.now ()));
       Runtime_quota_window.reset_for_testing ();
       Unix.unlink script)
       ["muse-quota-spent", "quota_exhausted"; "muse-quota-open", "provider_rejected"];

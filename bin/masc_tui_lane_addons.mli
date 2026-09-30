@@ -120,10 +120,10 @@ val open_evidence : keepers:string list -> t -> (t, string) result
 val move_evidence : t -> int -> t
 val submit_evidence : t -> (t * request, string) result
 (** Close the choice and build the exact request: the frozen bundle alone, or
-    with [keeper_name] when a Keeper was chosen. *)
+    with [keeper_name] for one Keeper or [broadcast=true] for workspace sharing. *)
 val evidence_receipt_lines : Yojson.Safe.t -> string list
 (** What an evidence receipt says in one or two readable lines: rows frozen
-    and, separately, whether the optional Keeper delivery succeeded. Empty for
+    and, separately, whether optional Keeper delivery or Broadcast committed. Empty for
     receipts of other operations. *)
 
 val status_text : t -> string

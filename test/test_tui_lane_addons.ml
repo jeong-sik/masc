@@ -602,12 +602,16 @@ let evidence_export_chooses_a_keeper_by_name () =
   let _, request = UI.submit_evidence moved |> ok in
   check bool "the second choice names the second keeper" true
     (request = UI.Evidence (`Assoc (bundle @ ["keeper_name",`String "researcher"])));
-  check int "the choice stops at the last keeper" 2 (Option.get (UI.move_evidence moved 5).evidence_prompt).choice;
+  let broadcast = UI.move_evidence moved 5 in
+  check int "the choice stops at Broadcast" 3 (Option.get broadcast.evidence_prompt).choice;
+  let _, request = UI.submit_evidence broadcast |> ok in
+  check bool "Broadcast shares the same selected evidence with no Keeper target" true
+    (request = UI.Evidence (`Assoc (bundle @ ["broadcast",`Bool true])));
   check int "the choice stops at preserve only" 0 (Option.get (UI.move_evidence moved (-5)).evidence_prompt).choice;
   let alone = UI.open_evidence ~keepers:[] view |> ok in
-  check bool "without a roster the prompt says so" true
-    (List.mem "No workspace Keeper is in the roster; preserve only." (UI.lines ~width:100 alone));
-  check int "without a roster the choice cannot move" 0 (Option.get (UI.move_evidence alone 1).evidence_prompt).choice;
+  check bool "Broadcast remains available without a roster" true
+    (List.mem "  Preserve and share the reference via Broadcast" (UI.lines ~width:100 alone));
+  check int "without a roster Broadcast is the next choice" 1 (Option.get (UI.move_evidence alone 1).evidence_prompt).choice;
   check bool "rows of two owners are refused before any request" true
     (Result.is_error (UI.open_evidence ~keepers:["imp"] {view with selected=["chosen";"foreign"]}));
   check bool "nothing marked opens nothing" true
@@ -620,8 +624,39 @@ let evidence_export_chooses_a_keeper_by_name () =
     (UI.evidence_receipt_lines (`Assoc ["evidence",evidence;"row_count",`Int 1;
       "delivery",`Assoc ["status",`String "failed";"error",`String "keeper not found: imp"]]));
   check (list string) "a receipt without delivery says so"
-    ["Evidence preserved: 2 rows · sha256 abc";"Not sent to a Keeper."]
+    ["Evidence preserved: 2 rows · sha256 abc";"Not shared."]
     (UI.evidence_receipt_lines (`Assoc ["evidence",evidence;"row_count",`Int 2]));
+  check (list string) "Broadcast publication is not a read receipt"
+    ["Evidence preserved: 2 rows · sha256 abc";"Broadcast committed · Keeper reads and actions are unverified"]
+    (UI.evidence_receipt_lines (`Assoc ["evidence",evidence;"row_count",`Int 2;
+      "delivery",`Assoc ["destination",`String "broadcast";"status",`String "committed"]]));
+  let broadcast_receipt = `Assoc ["evidence",evidence;"row_count",`Int 2;
+    "delivery",`Assoc ["destination",`String "broadcast";"status",`String "committed"]] in
+  let detail = {(UI.open_selected_instance view) with focus=UI.Rows;
+    receipt=Some broadcast_receipt} in
+  let summary_lines = UI.lines ~width:100 detail in
+  check bool "normal Summary visibly confirms the last evidence operation" true
+    (List.mem "Last evidence receipt" summary_lines
+     && List.mem "Evidence preserved: 2 rows · sha256 abc" summary_lines
+     && List.mem "Broadcast committed · Keeper reads and actions are unverified" summary_lines);
+  let position value = List.find_index (String.equal value) summary_lines |> Option.get in
+  check bool "receipt confirmation precedes potentially long record content" true
+    (position "Last evidence receipt" < position "Row chosen");
+  let another_worker = {view with instance_cursor=1;receipt=Some broadcast_receipt} in
+  check bool "navigation retains an explicitly past receipt without assigning it to another worker" true
+    (List.mem "Last evidence receipt" (UI.lines ~width:100 another_worker)
+     && Option.map (fun (item : UI.instance) -> item.id) (UI.selected_instance another_worker)=Some "other");
+  let unsafe_receipt = `Assoc ["evidence",evidence;"row_count",`Int 2;
+    "delivery",`Assoc ["destination",`String "broadcast";"status",`String "failed";
+      "error",`String ("observer\027[2J" ^ String.make 120 'x')]] in
+  let narrow = UI.lines ~width:40 {detail with receipt=Some unsafe_receipt} in
+  check bool "Summary receipt wraps and escapes external terminal controls" true
+    (List.for_all (fun line -> not (String.contains line '\027')
+      && Masc_tui_message_layout.display_width line <= 40) narrow);
+  check (list string) "uncertain sharing requests verification before resending"
+    ["Evidence preserved: 2 rows · sha256 abc";"Broadcast outcome unknown · evidence preserved; verify before resending"]
+    (UI.evidence_receipt_lines (`Assoc ["evidence",evidence;"row_count",`Int 2;
+      "delivery",`Assoc ["destination",`String "broadcast";"status",`String "outcome_unknown"]]));
   check (list string) "other receipts add nothing" [] (UI.evidence_receipt_lines (`Assoc ["instance_id",`String "x"]))
 
 let refresh_preserves_operator_target () =

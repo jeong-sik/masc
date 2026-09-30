@@ -367,10 +367,17 @@ let durable_delivery_status = function
   | Rejected _ -> Mention_rejected
 
 let notify_workspace_message_mutation config message =
-  (Atomic.get Workspace_hooks.on_workspace_message_mutation_fn)
-    config
-    ~request_id:message.Masc_domain.request_id
-    ~mention_delivery:message.mention_delivery
+  try
+    (Atomic.get Workspace_hooks.on_workspace_message_mutation_fn)
+      config
+      ~request_id:message.Masc_domain.request_id
+      ~mention_delivery:message.mention_delivery
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+      Log.Misc.warn
+        "workspace message mutation observer failed after commit request_id=%s seq=%d: %s"
+        message.Masc_domain.request_id message.seq (Printexc.to_string exn)
 
 let persist_delivery_status config message mention_delivery =
   let status = durable_delivery_status mention_delivery in

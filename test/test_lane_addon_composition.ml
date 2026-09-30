@@ -512,6 +512,7 @@ let test_native_fusion_report_is_readable_after_detach () =
       let reset_board () = Board_dispatch.reset_for_test (); Board.reset_global_for_test () in
       reset_board ();
       Fun.protect ~finally:reset_board (fun () ->
+        ignore (Workspace.init config ~agent_name:(Some "fixture-operator"));
         let registry = Fusion_run_registry.global () in
         let run_id = "fusion-chain-" ^ Store.digest root in
         Fusion_run_registry.register_running registry ~run_id ~keeper:"fixture-producer"
@@ -567,6 +568,24 @@ let test_native_fusion_report_is_readable_after_detach () =
         let artifact = match Tool_output.decode_from_agent_core prompt with
           | Tool_output.Decoded artifact -> artifact
           | _ -> fail "delivery has no readable artifact marker" in
+        let broadcast = Runtime.dispatch ~caller:"fixture-operator" ~config ~operation:Runtime.Evidence
+          (`Assoc ["instance_id",`String consumer;"row_ids",`List [`String (text "id" row)];
+            "broadcast",`Bool true]) |> unwrap in
+        let broadcast_delivery = member "delivery" broadcast in
+        check string "explicit Broadcast commits independently of Keeper acceptance" "committed"
+          (text "status" broadcast_delivery);
+        let receipt = member "receipt" broadcast_delivery in
+        let path = Filename.concat (Workspace_utils_paths_backend.messages_dir config)
+          (Printf.sprintf "%09d_%s_%s_broadcast.json"
+            (member "seq" receipt |> Yojson.Safe.Util.to_int)
+            (Common.safe_filename (text "from_agent" receipt)) (text "request_id" receipt)) in
+        let committed = In_channel.with_open_bin path In_channel.input_all |> Yojson.Safe.from_string in
+        check string "durable Broadcast request matches the returned receipt"
+          (text "request_id" receipt) (text "request_id" committed);
+        check string "Broadcast content is the frozen artifact marker, not untrusted body"
+          prompt (text "content" committed);
+        check bool "Broadcast and Keeper delivery publish identical immutable evidence" true
+          (member "keeper_artifact" frozen = member "keeper_artifact" broadcast);
         let read sha =
           let buffer = Buffer.create 1024 in
           let rec pages offset =

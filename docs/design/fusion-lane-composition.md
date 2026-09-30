@@ -98,3 +98,27 @@ or using the report. No Docker isolation, credential separation, Broadcast
 publication, or production Keeper action is established by this scenario.
 Its native execution remains pending targeted CI. The 14 Fusion Python MCP
 package scenarios passed on the integration checkout.
+
+## Explicit report sharing
+
+The host Evidence operation accepts `broadcast=true` as an explicit alternative
+to a single `keeper_name`. The TUI export menu offers workspace sharing after
+the named Keeper choices and defaults to preservation only. Enter submits;
+selection and cancellation do not publish a message.
+
+The host publishes the selected immutable evidence as Keeper-readable artifacts
+and sends the exact artifact marker through the existing workspace Broadcast
+authority with `Fleet_conversation` audience. Report bodies remain inside the
+retained artifacts, so untrusted text cannot introduce message mentions.
+The receipt carries the committed message's request ID and sequence. A failed
+publication preserves evidence; an unexpected recipient exception has an
+unknown outcome and never triggers automatic resend. Non-cancellation failures
+in the postcommit observation hook are logged without discarding the receipt.
+
+The native composition scenario checks the actual isolated workspace message
+row against its receipt and the same artifact sent to the selected Keeper.
+A separate failure scenario checks rejected writes, caller requirements, invalid
+destinations, retained evidence, and absence of automatic resend. The PTY
+scenario checks selection, cancellation, explicit submission and visible receipt
+using controlled HTTP data. All native/PTY execution remains pending current-head
+CI; no live fleet Broadcast or model use is claimed.

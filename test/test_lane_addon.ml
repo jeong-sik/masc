@@ -502,7 +502,53 @@ let test_fusion_status_hint_wakes_only_its_bound_run () =
     List.iter (detach config) [one;two];
     List.iter (fun id -> await_phase clock config id "detached") [one;two])
 
+let test_broadcast_failure_keeps_evidence_without_automatic_retry () =
+  with_fixture (fun env _ config dir _ ->
+    ignore (Workspace.init config ~agent_name:(Some "fixture-operator"));
+    let clock = Eio.Stdenv.clock env in
+    let id = attach config dir "good" in
+    await clock (fun () -> int "observation_seq" (instance config id) = 1);
+    let selected = inspect config |> member "rows" |> Yojson.Safe.Util.to_list |> List.hd |> text "id" in
+    let args = ["instance_id",`String id;"row_ids",`List [`String selected]] in
+    let attempts = ref 0 in
+    let previous = Workspace_broadcast.For_testing.replace_write_json_commit
+      (fun _ _ _ -> incr attempts; Error "fixture authoritative write rejected") in
+    let result = Fun.protect ~finally:(fun () ->
+      ignore (Workspace_broadcast.For_testing.replace_write_json_commit previous)) (fun () ->
+        check bool "two destinations are refused before publication" true
+          (Result.is_error (Runtime.dispatch ~caller:"fixture-operator" ~config ~operation:Runtime.Evidence
+            (`Assoc (args @ ["broadcast",`Bool true;"keeper_name",`String "someone"]))));
+        check bool "nonboolean Broadcast is refused" true
+          (Result.is_error (Runtime.dispatch ~caller:"fixture-operator" ~config ~operation:Runtime.Evidence
+            (`Assoc (args @ ["broadcast",`String "true"]))));
+        let unauthenticated = dispatch config Runtime.Evidence (args @ ["broadcast",`Bool true]) |> unwrap in
+        check string "sharing requires an authenticated caller" "failed"
+          (member "delivery" unauthenticated |> text "status");
+        check int "invalid requests never reach Broadcast" 0 !attempts;
+        Runtime.dispatch ~caller:"fixture-operator" ~config ~operation:Runtime.Evidence
+          (`Assoc (args @ ["broadcast",`Bool true])) |> unwrap) in
+    check string "failed authoritative publication remains a failed delivery" "failed"
+      (member "delivery" result |> text "status");
+    let evidence = member "evidence" result in
+    check bool "failed Broadcast retains the exact selected evidence" true
+      (Sys.file_exists (text "path" evidence));
+    check int "one explicit request attempts one message write" 1 !attempts;
+    ignore (unwrap (dispatch config Runtime.Inspect []));
+    ignore (unwrap (dispatch config Runtime.Evidence args));
+    check int "inspection and preservation never rebroadcast" 1 !attempts;
+    Runtime.register_delivery_handler (fun ~config:_ ~caller:_ ~keeper_name:_ ~prompt:_ ->
+      failwith "fixture recipient raised after accepting");
+    let uncertain = Runtime.dispatch ~caller:"fixture-operator" ~config ~operation:Runtime.Evidence
+      (`Assoc (args @ ["keeper_name",`String "fixture-recipient"])) |> unwrap in
+    check string "a recipient exception is uncertain, not a proven rejection" "outcome_unknown"
+      (member "delivery" uncertain |> text "status");
+    check bool "uncertain delivery preserves evidence" true
+      (Sys.file_exists (member "evidence" uncertain |> text "path"));
+    detach config id; await_phase clock config id "detached")
+
 let () = run "Lane Add-on runtime" ["optional extension", [
+  test_case "Broadcast failure retains evidence without automatic retry" `Quick
+    test_broadcast_failure_keeps_evidence_without_automatic_retry;
   test_case "Fusion state hint wakes only the exact run binding" `Quick
     test_fusion_status_hint_wakes_only_its_bound_run;
   test_case "a human MSX press wakes machine watchers exactly once" `Quick

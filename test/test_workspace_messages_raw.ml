@@ -20,6 +20,35 @@ let with_test_env f =
     Unix.rmdir tmp_dir;
     raise e
 
+let test_postcommit_observer_failure_keeps_durable_receipt () =
+  with_test_env (fun config ->
+    let previous = Atomic.get Workspace_hooks.on_workspace_message_mutation_fn in
+    let observed = ref [] in
+    Fun.protect ~finally:(fun () ->
+      Atomic.set Workspace_hooks.on_workspace_message_mutation_fn previous)
+      (fun () ->
+        Atomic.set Workspace_hooks.on_workspace_message_mutation_fn
+          (fun _config ~request_id ~mention_delivery:_ ->
+            observed := request_id :: !observed;
+            failwith "injected postcommit observation failure");
+        let content = "The committed report remains available despite observer failure" in
+        let receipt = match Workspace.broadcast ~audience:Workspace_broadcast.System_record
+            config ~from_agent:"claude" ~content with
+          | Ok receipt -> receipt
+          | Error error -> Alcotest.failf "committed Broadcast lost its receipt: %s"
+              (Workspace_broadcast.broadcast_error_to_string error) in
+        let persisted = Workspace.get_all_messages_raw config ~since_seq:0
+          |> List.filter (fun (message : Masc_domain.message) -> message.content=content) in
+        match persisted with
+        | [message] ->
+            Alcotest.(check string) "receipt request id identifies the committed row"
+              message.request_id receipt.request_id;
+            Alcotest.(check int) "receipt sequence identifies the committed row"
+              message.seq receipt.seq;
+            Alcotest.(check (list string)) "postcommit observer actually raised for that row"
+              [receipt.request_id] !observed
+        | _ -> Alcotest.fail "expected exactly one durable Broadcast despite the raised observer"))
+
 let test_get_messages_raw_limit_and_order () =
   with_test_env (fun config ->
     let _ = Workspace.broadcast ~audience:Workspace_broadcast.System_record config ~from_agent:"claude" ~content:"Message 1" in
@@ -470,6 +499,8 @@ let test_get_messages_matching_limit_bounds_matches () =
 let () =
   Alcotest.run "Workspace raw message regression" [
     ("messages_raw", [
+      Alcotest.test_case "postcommit observer failure preserves durable receipt" `Quick
+        test_postcommit_observer_failure_keeps_durable_receipt;
       Alcotest.test_case "limit and newest-first ordering" `Quick
         test_get_messages_raw_limit_and_order;
       Alcotest.test_case "since_seq filters older history" `Quick

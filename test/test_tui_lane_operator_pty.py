@@ -205,6 +205,66 @@ def guided_install(executable: str, captures: Path | None) -> None:
     print('Package preview / schema fields / review / explicit declaration save: PASS')
 
 
+def broadcast_export(executable: str, captures: Path | None) -> None:
+    data = snapshot()
+    data['instances'] = data['instances'][:1]
+    data['rows'] = data['rows'][:1]
+    data['instances'][0]['rows_count'] = 1
+    owner = data['instances'][0]['instance_id']
+    selected = data['rows'][0]['id']
+    fixtures = terminal.overview_event_http_fixtures()
+    fixtures['/api/v1/lane-addons'] = (200, data)
+    status, roster = fixtures['/api/v1/gate/keepers?detailed=true']
+    fixtures['/api/v1/gate/keepers?detailed=true'] = (status, {**roster, 'keepers': []})
+    accepted: list[dict] = []
+    requests: terminal.HttpRequests = []
+
+    def share(body: bytes) -> tuple[int, dict]:
+        request = json.loads(body)
+        expected = {'instance_id': owner, 'row_ids': [selected], 'broadcast': True}
+        if request != expected:
+            raise AssertionError(f'Broadcast changed selected evidence: {request!r}')
+        accepted.append(request)
+        return 200, {'evidence': {'sha256': 'f' * 64}, 'row_count': 1,
+                     'delivery': {'destination': 'broadcast', 'status': 'committed',
+                                  'receipt': {'request_id': 'fixture-broadcast', 'seq': 7}}}
+
+    fixtures['/api/v1/lane-addons/evidence'] = terminal.RequestHttpResponse(share)
+
+    def interact(process, master, _slave, output, _base):
+        def key(value: bytes, needle: bytes) -> bytes:
+            return terminal.send_and_wait(process, master, output, value, needle)
+        key(b':go lane add-ons\r', b'World observer')
+        key(b'\r', b'DOM captured')
+        key(b'4', b'DOM captured')
+        key(b' ', b'[selected]')
+        key(b'e', b'> Preserve only')
+        key(b'j', b'> Preserve and share the reference via Broadcast')
+        if accepted:
+            raise AssertionError('Selecting Broadcast published before Enter')
+        key(b'\x1b', b'DOM captured')
+        if accepted:
+            raise AssertionError('Cancelling export published a Broadcast')
+        key(b'e', b'> Preserve only')
+        key(b'j', b'> Preserve and share the reference via Broadcast')
+        frame = key(b'\r', b'Broadcast committed')
+        if b'Keeper reads and actions are unverified' not in terminal.CSI_RE.sub(b'', frame):
+            raise AssertionError('Broadcast receipt claimed or hid Keeper-use status')
+        if len(accepted) != 1:
+            raise AssertionError('Explicit export did not submit exactly once')
+        if captures is not None:
+            captures.mkdir(parents=True, exist_ok=True)
+            (captures / 'broadcast-export.pty').write_bytes(bytes(output))
+            (captures / 'broadcast-export-request.json').write_text(json.dumps(accepted, indent=2))
+        key(b'q', b'World observer')
+        key(b'q', b'MASC Dashboard')
+        os.write(master, b'q')
+
+    terminal.run_terminal_scenario(executable, description='Explicit Lane evidence Broadcast',
+        interact=interact, http_fixtures=fixtures, http_requests=requests)
+    print('Selected evidence / explicit Broadcast / cancelled draft / committed receipt: PASS')
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('executable')
@@ -212,3 +272,4 @@ if __name__ == '__main__':
     args = parser.parse_args()
     main(os.path.abspath(args.executable), args.capture_dir)
     guided_install(os.path.abspath(args.executable), args.capture_dir)
+    broadcast_export(os.path.abspath(args.executable), args.capture_dir)

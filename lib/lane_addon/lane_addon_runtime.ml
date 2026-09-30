@@ -2,6 +2,9 @@ open Lane_addon_types
 let ( let* ) = Result.bind
 type operation = Attach | Inspect | Observe | Detach | Slice | Evidence | Act | Action_status
 type error = Request_rejected of string | Runtime_failed of string
+type evidence_destination = Preserve_only | To_keeper of string | To_broadcast
+type evidence_delivery = Delivery_receipt of Yojson.Safe.t | Delivery_failed of string
+  | Delivery_outcome_unknown of string
 let error_to_string = function Request_rejected detail | Runtime_failed detail -> detail
 let request_result result = Result.map_error (fun detail -> Request_rejected detail) result
 let runtime_result result = Result.map_error (fun detail -> Runtime_failed detail) result
@@ -831,7 +834,7 @@ let dispatch ?caller ~config ~operation json = Eio_context.run_on_owner_domain (
     | Inspect -> ["instance_id"]
     | Observe | Detach -> ["instance_id"]
     | Slice -> ["run_id"; "lane_id"; "since"; "until"]
-    | Evidence -> ["instance_id"; "row_ids"; "keeper_name"]
+    | Evidence -> ["instance_id"; "row_ids"; "keeper_name"; "broadcast"]
     | Act -> ["instance_id"; "expected_incarnation"; "request_id"; "action"]
     | Action_status -> ["instance_id"; "request_id"] in
   let names = List.map fst args in
@@ -848,6 +851,15 @@ let dispatch ?caller ~config ~operation json = Eio_context.run_on_owner_domain (
       runtime_result (snapshot m ?instance_id ())
   | Slice -> slice m args
   | Evidence ->
+      let* broadcast = match List.assoc_opt "broadcast" args with
+        | None | Some (`Bool false) -> Ok false
+        | Some (`Bool true) -> Ok true
+        | Some _ -> Error (Request_rejected "broadcast requires a boolean") in
+      let* destination = match broadcast, List.assoc_opt "keeper_name" args with
+        | true, Some _ -> Error (Request_rejected "choose Broadcast or one Keeper, not both")
+        | true, None -> Ok To_broadcast
+        | false, None -> Ok Preserve_only
+        | false, Some _ -> request_result (text args "keeper_name") |> Result.map (fun name -> To_keeper name) in
       let* id = request_result (text args "instance_id") in
       let* binding = match Hashtbl.find_opt m.entries id with
         | Some e -> Ok (entry_json e)
@@ -858,29 +870,44 @@ let dispatch ?caller ~config ~operation json = Eio_context.run_on_owner_domain (
               | _ -> Error (Request_rejected "row_ids must contain strings")) (Ok []) values
         | _ -> Error (Request_rejected "row_ids requires an array") in
       let* frozen = runtime_result (offload (fun () -> Lane_addon_store.freeze m.store ~instance_id:id ~binding ~row_ids:ids)) in
-      (match List.assoc_opt "keeper_name" args with
-       | None -> Ok frozen
-       | Some _ ->
+      (match destination with
+       | Preserve_only -> Ok frozen
+       | To_keeper _ | To_broadcast ->
+           let destination_name = match destination with
+             | To_keeper _ -> "keeper" | To_broadcast -> "broadcast" | Preserve_only -> "preserve" in
            let deliver () =
-             let* keeper_name = text args "keeper_name" in
              let* caller = match caller with
                | Some value when String.trim value <> "" -> Ok value
                | _ -> Error "evidence delivery requires an authenticated caller" in
-             let* handler = match !delivery_handler with
-               | Some handler -> Ok handler | None -> Error "Keeper evidence delivery is unavailable" in
              let* evidence = offload (fun () -> Lane_addon_store.publish_for_keeper
                ~base_path:config.base_path m.store frozen) in
              let* fields = object_ evidence in let* prompt = text fields "message" in
-             let receipt = try handler ~config ~caller ~keeper_name ~prompt with
+             let receipt = try (match destination with
+               | To_keeper keeper_name ->
+                   let* handler = match !delivery_handler with
+                     | Some handler -> Ok handler | None -> Error "Keeper evidence delivery is unavailable" in
+                   handler ~config ~caller ~keeper_name ~prompt
+               | To_broadcast ->
+                   Workspace_broadcast.broadcast ~audience:Workspace_broadcast.Fleet_conversation
+                     config ~from_agent:caller ~content:prompt
+                   |> Result.map Workspace_broadcast.broadcast_delivery_to_yojson
+                   |> Result.map_error Workspace_broadcast.broadcast_error_to_string
+               | Preserve_only -> Error "evidence preservation has no delivery destination")
+                 |> (function Ok receipt -> Delivery_receipt receipt | Error detail -> Delivery_failed detail) with
                | Eio.Cancel.Cancelled _ as exn -> raise exn
-               | exn -> Error (Printexc.to_string exn) in
+               | exn -> Delivery_outcome_unknown (Printexc.to_string exn) in
              Ok (evidence, receipt)
            in
            let published, receipt = match deliver () with
-             | Ok result -> result | Error message -> frozen, Error message in
+             | Ok result -> result | Error message -> frozen, Delivery_failed message in
            let delivery = match receipt with
-             | Ok receipt -> `Assoc ["status", `String "accepted"; "receipt", receipt]
-             | Error message -> `Assoc ["status", `String "failed"; "error", `String message] in
+             | Delivery_receipt receipt -> `Assoc ["destination",`String destination_name;
+                 "status", `String (match destination with To_broadcast -> "committed"
+                   | To_keeper _ | Preserve_only -> "accepted"); "receipt", receipt]
+             | Delivery_failed message -> `Assoc ["destination",`String destination_name;
+                 "status", `String "failed"; "error", `String message]
+             | Delivery_outcome_unknown message -> `Assoc ["destination",`String destination_name;
+                 "status",`String "outcome_unknown";"error",`String message] in
            let* fields = runtime_result (object_ published) in Ok (`Assoc (("delivery", delivery) :: fields)))
   | Attach ->
       let* path = request_result (text args "manifest_path") in let* run_id = request_result (text args "run_id") in

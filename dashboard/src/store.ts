@@ -142,6 +142,8 @@ export const serverStatus = signal<ServerStatus | null>(null)
 // tile labelled 전체 작업, most visibly for cancellations, which leave the
 // window and then appear nowhere. Null when the payload omits the count.
 export const executionTaskTotal = signal<number | null>(null)
+// Invalidates asynchronous account reads when workspace/publication authority changes.
+export const executionWorkspaceRevision = signal(0)
 export const executionLoaded = signal(false)
 export const executionLoading = signal(false)
 export const executionError = signal<string | null>(null)
@@ -1084,6 +1086,7 @@ export function invalidateExecutionSnapshotGeneration(
     return true
   }
   if (executionPublicationEpoch !== epoch) {
+    executionWorkspaceRevision.value += 1
     const previousEpoch = executionPublicationEpoch ?? executionReconnectPreviousEpoch
     if (previousEpoch !== null && previousEpoch !== epoch) {
       retireExecutionPublicationEpoch(previousEpoch)
@@ -1101,6 +1104,7 @@ export function invalidateExecutionSnapshotGeneration(
 }
 
 export function resetExecutionSnapshotGeneration(): void {
+  executionWorkspaceRevision.value += 1
   executionReconnectPreviousEpoch = executionPublicationEpoch
   executionPublicationEpoch = null
   executionPublicationGenerationWatermark = -1
@@ -1152,6 +1156,7 @@ export function hydrateExecutionSnapshot(
   }
   if (identity !== null) {
     if (executionPublicationEpoch === null) {
+      executionWorkspaceRevision.value += 1
       if (
         executionReconnectPreviousEpoch !== null
         && executionReconnectPreviousEpoch !== identity.epoch
@@ -1178,6 +1183,7 @@ export function hydrateExecutionSnapshot(
     && normalizedStatus?.project != null
     && previousProject !== normalizedStatus.project
   if (workspaceChanged) {
+    executionWorkspaceRevision.value += 1
     // cancelDashboardWorkspaceMessagesRefresh() releases
     // workspaceMessagesDurableAuthority itself.
     cancelDashboardWorkspaceMessagesRefresh()

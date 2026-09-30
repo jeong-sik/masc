@@ -1,15 +1,20 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen } from '@testing-library/preact'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/preact'
 import { html } from 'htm/preact'
 import type { Keeper } from '../types'
 import { EQUIPMENT_IDS } from '../api/schemas/keeper-portrait'
 
 const fetchKeeperItems = vi.hoisted(() => vi.fn())
 vi.mock('../api/keeper-items', () => ({ fetchKeeperItems }))
+vi.mock('../store', async () => {
+  const { signal } = await import('@preact/signals')
+  return { executionWorkspaceRevision: signal(0), serverStatus: signal(null) }
+})
 vi.mock('./keeper-portrait', () => ({ KeeperPortrait: () => html`<div data-testid="portrait" />` }))
 vi.mock('./keeper-badge', () => ({ KeeperBadge: () => html`<div />` }))
 
 import { KeeperItemsPanel } from './keeper-items-panel'
+import { executionWorkspaceRevision, serverStatus } from '../store'
 
 const keeper = (name: string, head = 'crown') => ({ name, portrait: { state: 'ready', equipment: {
   face: 'bare_face', neck: 'bare_neck', head, hand: 'empty_hand', base: 'no_dish',
@@ -18,7 +23,7 @@ const catalog = Object.entries(EQUIPMENT_IDS).flatMap(([slot, ids]) =>
   ids.slice(1).map(id => ({ id, slot, price_status: id === 'crown' ? 'priced' : 'unpriced', ...(id === 'crown' ? { price_milli: '200' } : {}) })),
 )
 
-afterEach(() => { cleanup(); vi.resetAllMocks() })
+afterEach(() => { cleanup(); vi.resetAllMocks(); executionWorkspaceRevision.value = 0; serverStatus.value = null })
 
 describe('Keeper Item tab', () => {
   it('shows observed balance, prices, ownership and equipment', async () => {
@@ -102,4 +107,41 @@ describe('Keeper Item tab', () => {
     expect(await screen.findByText('0.300 Candle')).toBeTruthy()
     expect(fetchKeeperItems).toHaveBeenCalledTimes(2)
   })
+  it('rejects an old workspace response for an otherwise identical Keeper', async () => {
+    let finishOld!: (value: unknown) => void
+    fetchKeeperItems.mockImplementationOnce(() => new Promise(resolve => { finishOld = resolve }))
+      .mockResolvedValueOnce({ status: 'off', keeper: 'rondo' })
+    serverStatus.value = { project: 'A' }
+    const unchanged = keeper('rondo')
+    const view = render(html`<${KeeperItemsPanel} keeper=${unchanged} />`)
+    await act(async () => {})
+    await act(async () => {
+      serverStatus.value = { project: 'B' }
+      executionWorkspaceRevision.value += 1
+      view.rerender(html`<${KeeperItemsPanel} keeper=${unchanged} />`)
+    })
+    expect(await screen.findByText('Candle 기능이 꺼져 있습니다.')).toBeTruthy()
+    await act(async () => {
+      finishOld({ status: 'ready', keeper: 'rondo', balance_milli: '800', owned_items: ['crown'], catalog })
+    })
+    expect(screen.queryByText('0.800 Candle')).toBeNull()
+    expect(screen.getByText('Candle 기능이 꺼져 있습니다.')).toBeTruthy()
+    expect(fetchKeeperItems).toHaveBeenCalledTimes(2)
+  })
+
+  it('invalidates the same project when its publication authority changes', async () => {
+    fetchKeeperItems.mockResolvedValueOnce({ status: 'ready', keeper: 'rondo', balance_milli: '800', owned_items: [], catalog })
+      .mockResolvedValueOnce({ status: 'off', keeper: 'rondo' })
+    serverStatus.value = { project: 'A' }
+    const unchanged = keeper('rondo')
+    const view = render(html`<${KeeperItemsPanel} keeper=${unchanged} />`)
+    expect(await screen.findByText('0.800 Candle')).toBeTruthy()
+    await act(async () => {
+      executionWorkspaceRevision.value += 1
+      view.rerender(html`<${KeeperItemsPanel} keeper=${unchanged} />`)
+    })
+    expect(screen.queryByText('0.800 Candle')).toBeNull()
+    expect(await screen.findByText('Candle 기능이 꺼져 있습니다.')).toBeTruthy()
+  })
+
 })

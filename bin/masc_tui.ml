@@ -4799,7 +4799,14 @@ let refresh_visible_item_account state ~mailbox =
            state.item_account <- None;
            state.item_account_error <- None;
            launch_keeper_items state ~mailbox keeper.k_name
-       | Some _ | None -> ())
+       | Some _ -> ()
+       | None ->
+           state.item_account <- None;
+           state.item_account_revision <- None;
+           state.item_account_error <- Some "Item account revision is not observed in the current Keeper roster";
+           state.detail_reads <- List.filter (fun request ->
+             request.drr_tab <> Detail_items || not (String.equal request.drr_keeper keeper.k_name))
+             state.detail_reads)
   | _ -> ()
 
 let launch_keeper_sandbox_view state ~mailbox keeper_name =

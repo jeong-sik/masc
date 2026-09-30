@@ -5,6 +5,7 @@ import { keeperEquipmentKey, type KeeperEquipment } from '../api/schemas/keeper-
 import { KeeperPortrait } from './keeper-portrait'
 import { KeeperBadge } from './keeper-badge'
 import type { Keeper } from '../types'
+import { executionWorkspaceRevision, serverStatus } from '../store'
 
 type Reading =
   | { kind: 'loading'; identity: string }
@@ -26,16 +27,21 @@ export function KeeperItemsPanel({ keeper }: { keeper: Keeper }) {
   const [revision, setRevision] = useState(0)
   const equipmentKey = keeper.portrait?.state === 'ready'
     ? keeperEquipmentKey(keeper.portrait.equipment) : null
-  const identity = JSON.stringify([keeper.name, equipmentKey, keeper.candle_balance_milli, keeper.candle_account_revision, revision])
+  const workspaceRevision = executionWorkspaceRevision.value
+  const project = serverStatus.value?.project ?? null
+  const identity = JSON.stringify([workspaceRevision, project, keeper.name, equipmentKey, keeper.candle_balance_milli, keeper.candle_account_revision, revision])
   const [reading, setReading] = useState<Reading>({ kind: 'loading', identity })
 
   useEffect(() => {
     const controller = new AbortController()
     setReading({ kind: 'loading', identity })
+    const currentAuthority = () => !controller.signal.aborted
+      && executionWorkspaceRevision.value === workspaceRevision
+      && (serverStatus.value?.project ?? null) === project
     fetchKeeperItems(keeper.name, controller.signal)
-      .then(value => { if (!controller.signal.aborted) setReading({ kind: 'loaded', identity, value }) })
+      .then(value => { if (currentAuthority()) setReading({ kind: 'loaded', identity, value }) })
       .catch(error => {
-        if (!controller.signal.aborted) setReading({ kind: 'error', identity, message: error instanceof Error ? error.message : 'Item 계정을 읽지 못했습니다' })
+        if (currentAuthority()) setReading({ kind: 'error', identity, message: error instanceof Error ? error.message : 'Item 계정을 읽지 못했습니다' })
       })
     return () => controller.abort()
   }, [identity])

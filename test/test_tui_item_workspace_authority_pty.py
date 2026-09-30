@@ -46,6 +46,18 @@ class ItemWire(authority.WorkspaceWire):
     def __init__(self, roster):
         super().__init__(roster)
         self.account_state = "ready"
+        self.roster_unavailable = False
+
+    def set_roster_unavailable(self, unavailable):
+        with self.lock:
+            self.roster_unavailable = unavailable
+
+    def roster(self):
+        with self.lock:
+            unavailable = self.roster_unavailable
+        if unavailable:
+            return 503, {"error": "current roster unavailable"}
+        return super().roster()
 
     def change_account(self, state):
         assert state in ("ready", "failed", "off")
@@ -176,6 +188,14 @@ def run(binary, captures):
             assert b"99.999" not in h.CSI_RE.sub(b"", bytes(output[after_b:])), \
                 "late A Item money was rendered after the workspace boundary"
             capture("a-current-after-return")
+            wire.set_roster_unavailable(True)
+            wait(lambda text: b"Item account revision" in text,
+                 "an unavailable roster retained monetary facts")
+            assert b"Balance " not in visible() and b"owned" not in visible()
+            capture("a-revision-unavailable")
+            wire.set_roster_unavailable(False)
+            wait(lambda text: b"Balance 3.250 Candle" in text,
+                 "same-revision roster recovery did not reload the account")
             assert not [p for p, _ in posts if p.startswith("/api/v1/keepers/")], \
                 "read-only Item navigation submitted Keeper work"
             os.write(fd, b"q")

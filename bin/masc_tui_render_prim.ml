@@ -2920,7 +2920,7 @@ let build_change_context_lines (change_ctx : change_context) : string list =
   | None, None -> []
 
 
-let tree_diff_row_span ~width (row : Masc.Tui_decode.git_diff_row) =
+let tree_diff_row_span ?(hscroll = 0) ~width (row : Masc.Tui_decode.git_diff_row) =
   let background, marker =
     match row.Masc.Tui_decode.gdr_kind with
     | Masc.Tui_decode.Gd_removed -> (Span.bg Theme.Syntax.diff_removed_bg, "-")
@@ -2942,7 +2942,8 @@ let tree_diff_row_span ~width (row : Masc.Tui_decode.git_diff_row) =
     Span.concat
       [ Span.text (Span.combine background (Span.weight Ansi.dim)) gutter
       ; Span.text text_style
-          (Terminal_text.single_line row.Masc.Tui_decode.gdr_text)
+          (Message_layout.drop_cells
+             (Terminal_text.single_line row.Masc.Tui_decode.gdr_text) hscroll)
       ]
   in
   Span.pad_to width background (Span.truncate width composed)
@@ -2960,6 +2961,7 @@ type diff_surface =
   ; ds_diff : Masc.Tui_decode.git_diff option  (** [None] until the tree is read *)
   ; ds_error : string option
   ; ds_scroll : int  (** the stored scroll, clamped here and reported back *)
+  ; ds_hscroll : int  (** body offset in display cells; gutters remain fixed *)
   ; ds_unchanged : string  (** the empty line when the tree reports no change *)
   ; ds_esc_hint : string  (** what esc does on this surface *)
   ; ds_footer_hints : string
@@ -3000,7 +3002,7 @@ let render_diff_surface (state : state) (ds : diff_surface) =
       box_divider buf cols)
     ds.ds_context_lines;
   box_line_styled buf cols ~style:(Theme.recede ())
-    "  old   new     what the working tree holds, against its last commit";
+    (Printf.sprintf "  col %d · old / new · working tree vs HEAD" (ds.ds_hscroll + 1));
   box_divider buf cols;
   (match ds.ds_error with
    | None -> ()
@@ -3042,7 +3044,7 @@ let render_diff_surface (state : state) (ds : diff_surface) =
       match Rows.at diff_rows_window (i + scroll) with
       | None -> box_empty buf cols
       | Some row ->
-          box_line_span buf cols (tree_diff_row_span ~width:(framed_inner_width cols) row)
+          box_line_span buf cols (tree_diff_row_span ~hscroll:ds.ds_hscroll ~width:(framed_inner_width cols) row)
     done;
   (* The status line carries the esc hint at every count, so it is one of
      the fixed chrome rows above and the reading needs no row of its own. *)
@@ -3070,6 +3072,7 @@ let render_repository_changes_diff (state : state) ~path =
          | Some _ | None -> None)
     ; ds_error = state.repository_changes_diff_error
     ; ds_scroll = state.repository_changes_diff_scroll
+    ; ds_hscroll = state.repository_changes_diff_hscroll
     ; ds_unchanged = "  (this file matches its last commit, or is untracked)"
     ; ds_esc_hint = "esc back to files"
     ; ds_footer_hints = Masc_tui_keys.footer_hints_git_diff

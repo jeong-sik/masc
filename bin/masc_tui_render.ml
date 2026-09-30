@@ -11161,7 +11161,7 @@ let change_result_badge (change : Masc.Tui_decode.file_change) =
    weight, and the text's own colour. Concatenating them would let the
    gutter's reset close the background, and the line would lose its colour
    from the marker onward -- the fault [Masc_tui_span] exists for. *)
-let diff_row_span ~width (row : Diff.row) =
+let diff_row_span ?(hscroll = 0) ~width (row : Diff.row) =
   let background, marker, text =
     match row with
     | Diff.Removed line -> (Span.bg Theme.Syntax.diff_removed_bg, "-", line)
@@ -11179,7 +11179,7 @@ let diff_row_span ~width (row : Diff.row) =
   let composed =
     Span.concat
       [ Span.text (Span.combine background (Span.weight Ansi.bold)) (marker ^ " ")
-      ; Span.text text_style (Terminal_text.single_line text)
+      ; Span.text text_style (Message_layout.drop_cells (Terminal_text.single_line text) hscroll)
       ]
   in
   (* Padded to the full width with the row's own background: colour that stops
@@ -11208,7 +11208,7 @@ let render_changes_diff (state : state) (change : Masc.Tui_decode.file_change) =
   let header =
     detail_heading ~cols ~lead:(Lead_text (screen_title " MASC Change" ^ " "))
       ~id:(change_row_address change)
-      ~after:(Printf.sprintf "  -%d +%d" removed added)
+      ~after:(Printf.sprintf "  col %d -%d +%d" (state.changes_diff_hscroll + 1) removed added)
       ~tail:(connection_badge state)
   in
   box_top buf cols;
@@ -11271,7 +11271,7 @@ let render_changes_diff (state : state) (change : Masc.Tui_decode.file_change) =
     for i = 0 to content_height - 1 do
       match Rows.at diff_rows_window (i + scroll) with
       | None -> box_empty buf cols
-      | Some row -> box_line_span buf cols (diff_row_span ~width:(framed_inner_width cols) row)
+      | Some row -> box_line_span buf cols (diff_row_span ~hscroll:state.changes_diff_hscroll ~width:(framed_inner_width cols) row)
     done;
   Option.iter
     (box_line_styled buf cols ~style:(Theme.recede ()))
@@ -11279,7 +11279,7 @@ let render_changes_diff (state : state) (change : Masc.Tui_decode.file_change) =
        ~hint:"esc closes" total);
   box_bottom buf cols;
   Buffer.add_string buf
-    (footer_line state ~max_cells:cols ~hints:"j/k:scroll  Left / Esc:back  o:open in editor  q:quit");
+    (footer_line state ~max_cells:cols ~hints:"Shift-Left / Shift-Right:pan  j/k:scroll  Left / Esc:back  o:open in editor  q:quit");
   finish_surface state ~clamped:(Changes_diff_scroll scroll)
     ~surface_key:"changes" ~rows:terminal_rows ~cols buf
 
@@ -11494,9 +11494,10 @@ let render_changes_tree_diff (state : state)
     ; ds_diff = state.changes_tree_diff
     ; ds_error = state.changes_tree_diff_error
     ; ds_scroll = state.changes_diff_scroll
+    ; ds_hscroll = state.changes_diff_hscroll
     ; ds_unchanged = "  (this file matches its last commit)"
     ; ds_esc_hint = "esc closes"
-    ; ds_footer_hints = "j/k:scroll  Left / Esc:back  o:open in editor  q:quit"
+    ; ds_footer_hints = "Shift-Left / Shift-Right:pan  j/k:scroll  Left / Esc:back  o:open in editor  q:quit"
     ; ds_surface_key = "changes"
     ; ds_clamped = (fun scroll -> Changes_diff_scroll scroll)
     }

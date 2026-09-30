@@ -67,6 +67,7 @@ type diff_surface =
   ; ds_diff : Masc.Tui_decode.git_diff option  (** [None] until the tree is read *)
   ; ds_error : string option
   ; ds_scroll : int  (** the stored scroll, clamped here and reported back *)
+  ; ds_hscroll : int  (** body offset in display cells; gutters remain fixed *)
   ; ds_unchanged : string  (** the empty line when the tree reports no change *)
   ; ds_esc_hint : string  (** what esc does on this surface *)
   ; ds_footer_hints : string
@@ -515,7 +516,7 @@ val resolve_change_context :
 
 val build_change_context_lines : change_context -> string list
 
-val tree_diff_row_span : width:int -> Masc.Tui_decode.git_diff_row -> Span.t
+val tree_diff_row_span : ?hscroll:int -> width:int -> Masc.Tui_decode.git_diff_row -> Span.t
 
 val render_diff_surface :
   Masc_tui_types.state ->

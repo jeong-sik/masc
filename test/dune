@@ -3683,11 +3683,13 @@
  (name test_tui_chat_queue_wiring)
  (modules test_tui_chat_queue_wiring)
  (libraries masc_tui_link_preview masc_tui_image_preview
+  masc_tui_answering
   alcotest
   ast_grep
   astring
   masc
   masc.masc_types
+  masc_tui_answering
   masc_tui_footer
   masc_tui_interrupt_signal
   masc_tui_esc_interrupt

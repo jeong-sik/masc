@@ -2786,13 +2786,14 @@ let identity_login_landed ~providers ~login =
       | Identity_declared _ | Identity_unreadable _ -> false)
     providers
 
-(** Where [Esc] returns after the chat pane was opened. Keeping only the three
-    legal destinations makes a new Keeper sub-view an explicit compiler error
+(** Where [Esc] returns after the chat pane was opened. Keeping only the legal
+    destinations makes a new Keeper sub-view an explicit compiler error
     instead of silently becoming the detail view. *)
 type keeper_chat_return =
   | Keeper_chat_return_list
   | Keeper_chat_return_detail
   | Keeper_chat_return_lanes
+  | Keeper_chat_return_home
 
 (** Where [Esc] returns after the Changes surface was opened. [f] opens it
     from the roster and from the detail, which name the same keeper through
@@ -2939,14 +2940,10 @@ let rec surface_needs ~keeper_pane_drawn surface =
   needs
 
 and surface_needs_of_surface : surface -> surface_needs = function
-  (* Dashboard summarizes quota coverage and reads the Goal tree. Usage reads
-     the same quota response for per-scope detail and recorded history. *)
+  (* Home reads decision sources. Work owns Goal evidence and Usage owns
+     provider reports; their detail payloads do not belong on this screen. *)
   | Overview ->
-      { nothing with
-        needs_transport = true
-      ; needs_runtime_quota = true
-      ; needs_overview_goals = true
-      }
+      { nothing with needs_operator_approvals = true; needs_asks = true }
   (* Its rows come from the acting store and the keeper list, neither of which
      is fetched here. *)
   | Acting -> nothing
@@ -5241,6 +5238,35 @@ module Verification_evidence_read = struct
     | Launch_failure of string
 end
 
+(* Home links identify destinations, never an inferred approval target. The
+   approval/agenda screens still own the exact request and its decision. *)
+type home_request =
+  | Home_held_call of { keeper : string; call_id : string }
+  | Home_gate_request of string
+  | Home_operator_request of string
+  | Home_question of string
+  | Home_goal_confirmation of string
+  | Home_operator_task of string
+
+type home_action =
+  | Home_approvals
+  | Home_request of home_request
+  | Home_agenda
+  | Home_resume of string
+  | Home_read_last of string
+  | Home_choose_keeper
+  | Home_create_keeper
+
+type acting_pane_preference =
+  | Default_acting_pane
+  | Chosen_acting_pane of Masc_tui_acting_pane.layout
+
+type home_chat_receipt =
+  | No_chat_receipt
+  | Recorded_chat of Keeper_id.Keeper_name.t
+  | Session_chat of { keeper : Keeper_id.Keeper_name.t; save_error : string }
+  | Unconfirmed_chat of { keeper : Keeper_id.Keeper_name.t; detail : string }
+  | Unreadable_chat_receipt of string
 (* The server sends each invite's link once and keeps only its hash. Keep the
    cards newest first in this TUI process so issuing another invite does not
    erase the first person's only link. [shown_name] selects the card on screen;
@@ -5251,6 +5277,10 @@ type play_invite =
   }
 
 type state = {
+  mutable home_selected : home_action option;
+  mutable home_decision_scroll : int;
+  mutable home_opened_request : home_request option;
+  mutable home_last_chat : home_chat_receipt;
   mutable metrics_scroll: int;
   mutable metrics_section: metrics_section;
   mutable usage_telemetry_open: bool;
@@ -5393,8 +5423,9 @@ type state = {
      [Masc_tui_acting_pane.pane_cols] columns for the fleet's live feed, or
      [wide_pane_cols] wide. Same contract as the roster: narrow, wide or
      hidden is the reader's choice and survives a resize; whether the
-     terminal holds it is the terminal's. *)
-  mutable acting_pane_layout: Masc_tui_acting_pane.layout;
+     terminal holds it is the terminal's. The default is resolved by surface:
+     Home keeps its destinations alone, while other surfaces start narrow. *)
+  mutable acting_pane_preference: acting_pane_preference;
   (* Rows scrolled into the pane's full list; zero is the overview. The
      renderer clamps it to what the list holds and a toggle resets it. *)
   mutable acting_pane_scroll: int;
@@ -7742,6 +7773,15 @@ let goal_action_armed_for (state : state) (goal_id : string) =
       Some armed_action
   | Some _ | None -> None
 
+(* A compact Home never grows a feed just because the terminal grew. An
+   explicit reader choice still applies on Home and survives surface changes. *)
+let acting_pane_layout (state : state) =
+  match state.acting_pane_preference with
+  | Chosen_acting_pane layout -> layout
+  | Default_acting_pane ->
+      if state.view = Overview then Masc_tui_acting_pane.Hidden
+      else Masc_tui_acting_pane.Narrow
+
 (** New Keeper messages require a complete roster observation. [state.keepers]
     may intentionally retain the previous complete roster while a detail or log
     view survives a transient metadata read failure, so membership alone is not
@@ -7907,6 +7947,10 @@ let create_state
     ()
   =
   {
+  home_selected = None;
+  home_decision_scroll = 0;
+  home_opened_request = None;
+  home_last_chat = No_chat_receipt;
   metrics_scroll = 0;
   metrics_section = Section_fleet;
   usage_telemetry_open = false;
@@ -7970,7 +8014,7 @@ let create_state
      cost of being wrong here -- whereas the column was drawn on every frame
      whether or not anyone read it. *)
   roster_pane_hidden = true;
-  acting_pane_layout = Masc_tui_acting_pane.Narrow;
+  acting_pane_preference = Default_acting_pane;
   acting_pane_scroll = 0;
   acting_pane_cursor = None;
   acting_pane_tab = Masc_tui_acting_pane.Tab_fleet;
@@ -10923,6 +10967,12 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
 let scrolled_surface (state : state) (surface : surface) : scrolled option =
   scrolled_surface_rows state surface
 ;;
+
+let clear_ask_answering state =
+  state.ask_answer_mode <- Ask_browsing;
+  state.ask_draft <- None;
+  state.ask_text_entry <- None;
+  state.pending_ask_submit <- None
 
 (* The text a "/" search reads for each row: the identifiers an operator
    would type, not the drawn bytes. [Some texts] means the surface is

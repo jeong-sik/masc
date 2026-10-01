@@ -2029,6 +2029,7 @@
  (name test_dashboard_http_core)
  (modules test_dashboard_http_core)
  (libraries
+  masc.masc_candle
   masc.masc_candle_runtime
   masc.masc_candle_store
   masc.keeper_portrait
@@ -4331,7 +4332,7 @@
 (test
  (name test_tui_keeper_control)
  (modules test_tui_keeper_control)
- (libraries
+ (libraries masc.masc_candle
   alcotest
   masc.keeper_portrait
   masc
@@ -7223,6 +7224,7 @@
 (include stanzas/test_tui_emblem_screen.inc)
 (include stanzas/test_tui_portrait_view.inc)
 (include stanzas/test_tui_keeper_portrait.inc)
+(include stanzas/test_tui_candle.inc)
 (include stanzas/test_tui_chat_portrait.inc)
 (include stanzas/test_tui_emblem_state.inc)
 (include stanzas/test_tui_link_label.inc)
@@ -9654,3 +9656,5 @@
  (deps (alias runtest-test_tool_quality_live_plan)))
 
 (include stanzas/test_candle_purchase_flow.inc)
+
+(include stanzas/test_tui_candle_currency_pty.inc)

@@ -46,7 +46,8 @@ type 'error update_error =
   | Read_failed of read_error
   | Refused of 'error  (** The caller's [decide] returned [Error]. Nothing was written. *)
   | Event_unwritable of string
-      (** An event would not read back. Nothing was written. *)
+      (** An event would not read back, or a new [Paid] row does not satisfy
+          the current payout arithmetic. Nothing was written. *)
   | Write_failed of
       { path : string
       ; detail : string
@@ -73,4 +74,6 @@ val update :
     whether to ask again later.
 
     An empty event list writes nothing. Any other failure, an unreadable file
-    or a write that failed, is returned and not retried. *)
+    or a write that failed, is returned and not retried. New [Paid] rows pass
+    {!Candle_payment.validate_for_append}; reading existing rows never invokes
+    that check or changes their recorded allocations. *)

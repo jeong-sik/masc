@@ -1338,6 +1338,13 @@ def row_budget_http_fixtures() -> HttpFixtures:
         for index in range(1, 6)
     ]
     return {
+        # This layout scenario has no currency. Answer the Overview's roster
+        # read so an unrelated fixture failure does not consume a body row.
+        "/api/v1/gate/keepers?detailed=true": (
+            200,
+            {"candle": {"status": "off"}, "count": 0, "total": 0,
+             "truncated": False, "keepers": []},
+        ),
         "/api/v1/dashboard/transport-health": transport_health_fixture(),
         "/api/v1/dashboard/briefing": (
             200,
@@ -1536,6 +1543,13 @@ def with_workspace_identity(
 def overview_event_http_fixtures() -> HttpFixtures:
     return {
         "/health?full=1": fleet_safety_fixture(),
+        # The Overview reads the roster for its Candle observation even when
+        # the Keeper pane is hidden. An unrelated scenario has no currency.
+        "/api/v1/gate/keepers?detailed=true": (
+            200,
+            {"candle": {"status": "off"}, "count": 0, "total": 0,
+             "truncated": False, "keepers": []},
+        ),
         "/api/v1/dashboard/transport-health": transport_health_fixture(),
         "/api/v1/dashboard/briefing": (200, overview_event_briefing()),
         "/api/v1/operator?view=summary&include_messages=0&include_keepers=0": (
@@ -1608,6 +1622,7 @@ def keeper_runtime_http_fixtures(
     fixtures["/api/v1/gate/keepers?detailed=true"] = (
         200,
         {
+            "candle": {"status": "off"},
             "count": 2,
             "total": 2,
             "truncated": False,
@@ -1624,6 +1639,7 @@ def keeper_runtime_http_fixtures(
                     "activation_mode": "autonomous",
                     "runtime_id": alpha_runtime_id,
                     "runtime_blocker_summary": None,
+                    "candle_balance_milli": None,
                     "portrait": {"state": "ready", "equipment": {"face": "bare_face", "neck": "bare_neck", "head": "bare_head", "hand": "empty_hand", "base": "no_dish"}},
                 },
                 {
@@ -1638,6 +1654,7 @@ def keeper_runtime_http_fixtures(
                     "activation_mode": "on_demand",
                     "runtime_id": beta_runtime_id,
                     "runtime_blocker_summary": None,
+                    "candle_balance_milli": None,
                     "portrait": {"state": "ready", "equipment": {"face": "bare_face", "neck": "bare_neck", "head": "bare_head", "hand": "empty_hand", "base": "no_dish"}},
                 },
             ],

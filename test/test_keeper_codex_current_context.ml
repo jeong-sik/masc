@@ -18,6 +18,8 @@ import json, sys, os
 if '--masc-warmup' in sys.argv:
     sys.exit(0)
 capture = %S
+with open(capture+'.argv', 'a') as out:
+    out.write(json.dumps(sys.argv[1:])+'\n')
 reject_context = %s
 overflow_resume = %s
 hold_first_resume = %s
@@ -79,7 +81,7 @@ for line in sys.stdin:
   Unix.chmod command 0o700;
   command, capture
 
-let with_fixture ?(worker_pool = false) ?(reject_context = false) ?(overflow_resume = false) ?(hold_first_resume = false) ?(compact_resume = false) ?(compact_item = false) ?max_prompt_bytes test =
+let with_fixture ?(worker_pool = false) ?(reject_context = false) ?(overflow_resume = false) ?(hold_first_resume = false) ?(compact_resume = false) ?(compact_item = false) ?max_prompt_bytes ?catalog_context_window test =
   Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
   let previous_pool = Domain_pool_ref.get () in
   Eio.Switch.on_release sw (fun () ->
@@ -104,25 +106,31 @@ let with_fixture ?(worker_pool = false) ?(reject_context = false) ?(overflow_res
   Eio.Switch.on_release sw (fun () -> Runtime.For_testing.restore saved; Fs_compat.remove_tree root);
   let command, capture = fixture root ~reject_context ~overflow_resume ~hold_first_resume ~compact_resume ~compact_item in
   let config_path = Filename.concat root "runtime.toml" in
-  write config_path (Printf.sprintf {|
+  let write_catalog max_context =
+    write config_path (Printf.sprintf {|
 [providers.codex]
 protocol = "codex-app-server"
 command = %S
 is-non-interactive = true
 [models.context]
 api-name = "context-fixture"
-max-context = 400000
+max-context = %d
 %s[codex.context]
 [runtime]
 default = "codex.context"
-|} command
+|} command max_context
     (match max_prompt_bytes with
      | None -> ""
-     | Some bytes -> Printf.sprintf "max-prompt-bytes = %d\n" bytes));
+     | Some bytes -> Printf.sprintf "max-prompt-bytes = %d\n" bytes)) in
+  write_catalog 400000;
   Runtime.init_default ~config_path |> require;
-  let config = match Runtime.get_runtime_by_id "codex.context" with
-    | Some {execution=Runtime_execution.Codex_app_server config;_} -> config
-    | Some _ | None -> fail "fixture runtime missing" in
+  let runtime = Runtime.get_runtime_by_id "codex.context" |> Option.get in
+  let config = match runtime.execution with
+    | Runtime_execution.Codex_app_server config -> config
+    | _ -> fail "fixture runtime missing" in
+  Option.iter (fun window ->
+    write_catalog window;
+    Runtime.init_default ~config_path |> require) catalog_context_window;
   let reports = ref [] in
   let run ?official_task_reference ?model_input_projection ?prompt_blocks
       ?carried_front_seed ?librarian_front ?on_model_input_window_observation
@@ -142,9 +150,10 @@ default = "codex.context"
         Agent_core.Hooks.AdjustParams {current_params with extra_system_context=Some world}
       | _ -> Agent_core.Hooks.Continue) } in
     Keeper_codex_runtime.run
+      ~context_window:(Some (Runtime_instance.max_context_of_runtime runtime))
       ~composed_context:(fun () -> !composed_context)
         ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input
-          ~runtime:(Runtime.get_runtime_by_id "codex.context" |> Option.get)) ~runtime_id:"codex.context" ~keeper_name:"context-fixture"
+          ~runtime) ~runtime_id:"codex.context" ~keeper_name:"context-fixture"
       ~turn_start
       ?carried_front_seed ?librarian_front
       ?on_model_input_window_observation
@@ -163,6 +172,24 @@ let read_requests path = In_channel.with_open_bin path In_channel.input_lines
 let successful attempt = match attempt.Keeper_codex_runtime.result with
   | Ok _ -> ()
   | Error error -> fail (Agent_core.Error.to_string error)
+
+let test_captured_context_window_survives_catalog_reload () =
+  with_fixture ~catalog_context_window:800000 @@ fun ~run ~capture ~reports:_ ->
+  check (option int) "catalog was reloaded" (Some 800000)
+    (Runtime.max_context_of_runtime_id "codex.context");
+  successful (run ~instructions:"Follow the current context." ~world:"First turn" ());
+  successful (run ~instructions:"Follow the current context." ~world:"Next turn" ());
+  let invocations = In_channel.with_open_bin (capture ^ ".argv") In_channel.input_lines in
+  check int "fresh and resumed processes" 2 (List.length invocations);
+  List.iter (fun line ->
+    let argv = Yojson.Safe.from_string line |> items |> List.map text in
+    check bool "selected snapshot window reaches the process" true
+      (List.mem "model_context_window=400000" argv);
+    check bool "reloaded window does not reach the selected process" false
+      (List.mem "model_context_window=800000" argv)) invocations;
+  let methods = read_requests capture |> List.map (fun request -> request |> member "method" |> text) in
+  check bool "fresh thread started" true (List.mem "thread/start" methods);
+  check bool "existing thread resumed" true (List.mem "thread/resume" methods)
 
 let test_operator_interrupt_preserves_previous_native_settlement () =
   with_fixture ~hold_first_resume:true @@ fun ~run ~capture ~reports:_ ->
@@ -993,6 +1020,7 @@ let test_declared_limit_above_history_changes_nothing () =
 
 
 let () = run "Keeper current Codex context" ["native requests",[
+  test_case "selected context window survives catalog reload on start and resume" `Quick test_captured_context_window_survives_catalog_reload;
   test_case "compaction item invalidates recall without usage estimate" `Quick test_compaction_item_invalidates_recall_without_usage_estimate;
   test_case "compaction invalidates recall despite later request usage" `Quick test_compaction_receipt_survives_later_request_usage;
   test_case "resume delivers only changed blocks and pending operator note" `Quick test_resume_deduplicates_context_blocks;

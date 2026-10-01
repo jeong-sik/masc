@@ -76,6 +76,7 @@ type runtime_attempt =
   ; lane_attempt_index : int
   ; checkpoint_owner : Runtime_execution.checkpoint_owner
   ; tool_result_inline_ceiling_bytes : int
+  ; tool_surface_enabled : bool
   ; usage_report : Runtime_execution.usage_report
   }
 
@@ -2276,6 +2277,7 @@ let run_named
                  Runtime_execution.checkpoint_owner runtime.Runtime_instance.execution
              ; tool_result_inline_ceiling_bytes =
                  Runtime_execution.tool_result_inline_ceiling_bytes runtime.Runtime_instance.execution
+             ; tool_surface_enabled = surface_enabled
              ; usage_report = Runtime_execution.usage_report runtime.Runtime_instance.execution
              })
         on_runtime_attempt;
@@ -2400,6 +2402,7 @@ let run_named
               on_request_attribution
           in
           Keeper_codex_runtime.run
+            ~context_window:(Some (Runtime_instance.max_context_of_runtime runtime))
             ?composed_context:official_client_composed_context
             ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input ~runtime)
             ?required_native_posture

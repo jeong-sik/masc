@@ -64,3 +64,39 @@ the remaining accounts.
 Repository seeds are copied only for new workspaces. Existing installations
 must apply the model-set declarations through the runtime configuration API
 after deploying a binary that understands them.
+
+## Choosing the context window
+
+In the dashboard runtime editor, open **Models**, enter a positive context token
+count, or use the **500K** / **1M** presets. Select
+**Save** at the top to persist the change. The model's `max-context` applies to
+every provider binding that shares that model declaration.
+
+With the Codex context propagation change in [#40472](https://github.com/jeong-sik/masc/pull/40472), MASC passes this value as Codex's
+`model_context_window` on each new client process, including Keeper, Fusion,
+verification and connection probes. This explicit runtime value takes precedence
+over an inherited Codex home configuration; an existing `max-context = 272000`
+therefore requests 272,000 until you edit it. Running turns retain their process
+configuration. MASC does not change `model_auto_compact_token_limit`.
+
+This is a requested window, not proof of provider capacity. Codex's reported
+`modelContextWindow` remains the observed effective value. The API model context
+specification and the subscription client's available context can differ;
+selecting 1M does not establish that every account or model supports it.
+See the [Codex configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference)
+and the [GPT-6.1 Sol API model specification](https://developers.openai.com/api/docs/models/gpt-6.1-sol).
+
+### Requested versus reported context
+
+The model editor labels `max-context` as a **request**. A preset or profile name
+is not a capacity measurement. After a turn, the turn inspector and memory
+inspector show the configured window alongside the client's same-turn report.
+If that report is absent, the UI says it is unmeasured; it does not multiply the
+request by a fixed percentage or borrow another account's observation.
+
+Occupancy uses the reported window when present. The configured window is a
+clearly labelled fallback, and cumulative/turn-total usage is not treated as
+per-request occupancy. Counts exceeding the selected window remain unavailable
+instead of being clamped to a plausible percentage. These are observations of
+the recorded turn, not guarantees about the next request or maximum accepted
+prompt size. Saved request values are not rewritten from observations.

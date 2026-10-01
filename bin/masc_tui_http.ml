@@ -1581,8 +1581,8 @@ let post_keeper_tool_approval ~(expected_workspace : Tui_decode.server_identity)
     (tool_approval_answer, string) result =
   let expected_fields =
     [ ("expected_workspace", `Assoc
-         [ ("base_path", `String expected_workspace.sid_base_path)
-         ; ("masc_root", `String expected_workspace.sid_masc_root) ]) ]
+         [ ("base_path", `String (Masc_tui_types.canonical_path expected_workspace.sid_base_path))
+         ; ("masc_root", `String (Masc_tui_types.canonical_path expected_workspace.sid_masc_root)) ]) ]
   in
   let body =
     Yojson.Safe.to_string

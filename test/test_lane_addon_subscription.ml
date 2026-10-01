@@ -89,10 +89,22 @@ let keeper_save_preserves_hidden_subscriptions () = with_workspace (fun config -
     (Result.is_error (save Lane_addon_sources.Unauthenticated "researcher" []));
   check bool "access/caller disagreement refuses save" true
     (Result.is_error (save (Lane_addon_sources.Keeper "other") "researcher" []));
+  let edit_run run = function
+    | `Assoc fields -> `Assoc (("run_id",`String run) :: List.remove_assoc "run_id" fields)
+    | _ -> assert false in
+  let edited = edit_run "study-edited" subscription in
+  ignore (save (Lane_addon_sources.Keeper "researcher") "researcher" [edited] |> ok);
+  let other_view = inspect "other" in
+  check bool "A edit preserves B's filtered subscription" true
+    (member "subscriptions" other_view = `List [other]);
+  let edited_other = edit_run "study-other-edited" other in
+  ignore (save (Lane_addon_sources.Keeper "other") "other" [edited_other] |> ok);
+  check bool "B edit preserves A's filtered subscription" true
+    (member "subscriptions" (inspect "researcher") = `List [edited]);
   ignore (save (Lane_addon_sources.Keeper "researcher") "researcher" [] |> ok);
   let all = operator_call config (`Assoc ["operation",`String "inspect"]) |> ok in
   check bool "removing own rows preserves every hidden foreign row" true
-    (member "subscriptions" all = `List [other]);
+    (member "subscriptions" all = `List [edited_other]);
   ignore (operator_call config (`Assoc ["operation",`String "save";
     "expected_source_revision",member "source_revision" all;"subscriptions",`List []]) |> ok);
   check int "explicit operator can still replace the complete configuration" 0

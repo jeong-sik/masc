@@ -2131,7 +2131,7 @@ let keeper_message_layout_entries ?messages (state : state) ~keeper_name
    result, and it settles when the turn ends.
 
    [needle] is trimmed by its caller and case-folded inside
-   {!Masc_tui_types.palette_contains}, which keeps case folding out of a
+   {!Masc_tui_pick_list.lowercase_contains}, which keeps case folding out of a
    module whose one rule about [String.lowercase_ascii] is that it does not
    appear here.
 
@@ -2161,7 +2161,7 @@ let keeper_message_find_scroll (state : state) ~keeper_name ~needle ~older_than 
       |> List.mapi (fun index (entry : Message_layout.entry) -> (index, entry))
       |> List.rev
       |> List.find_opt (fun (_, (entry : Message_layout.entry)) ->
-             Masc_tui_types.palette_contains ~needle entry.body)
+             Masc_tui_pick_list.lowercase_contains ~needle entry.body)
     in
     match matched with
     | None -> None
@@ -2257,7 +2257,7 @@ let render_keeper_message (state : state) =
     in
     let command_window = keeper_message_command_window state ~terminal_rows:rows ~terminal_cols:cols in
     let command_rows = match command_window with None -> 0 | Some (_, entries) -> 2 + List.length entries in
-    let status_rows = keeper_message_status_rows state + command_rows in
+    let status_rows = keeper_message_status_rows state ~terminal_cols:cols + command_rows in
     let support_status_rows =
       keeper_message_support_status_rows state ~status_rows
     in
@@ -3032,85 +3032,12 @@ let render_keeper_message (state : state) =
     box_divider chat_buf chat_cols;
 
     (* Input line *)
-    (* This keeper's own turn first, then any other keeper's — talking here
-       does not stop those, so the pane says they are going. *)
-    (* One clock read for the whole group so two rows drawn in the same frame
-       cannot report ages a tick apart. The age says how long the turn has
-       been going, which is what separates slow from stuck: a keeper turn
-       running minutes is ordinary here, and without it these rows look the
-       same at three seconds and at thirteen minutes. It changes the text of
-       a row, never how many there are, so the row budget is untouched. *)
-    let now = Unix.gettimeofday () in
-    let sending_age group =
-      match Message_layout.age_text ~now ~since:group.Masc_tui_types.representative.sent_at with
-      | None -> ""
-      | Some age -> " · " ^ age
-    in
-    let batch_label group =
-      if group.Masc_tui_types.count = 1 then ""
-      else Printf.sprintf "%d messages in one turn · " group.count
-    in
-    let group_activity group =
-      if group.Masc_tui_types.reconciling_count > 0 then
-        if group.count = 1 then "reconciling"
-        else Printf.sprintf "reconciling %d stream(s)" group.reconciling_count
-      else
-        let transcript = group.representative.log.tl_transcript in
-        if Keeper_chat_transcript.awaiting_continuation transcript then
-          "awaiting continuation"
-        else
-          match Keeper_chat_transcript.phase transcript with
-          | Keeper_chat_transcript.Waiting -> "waiting to start"
-          | Keeper_chat_transcript.Working -> "running"
-          | Keeper_chat_transcript.Stream_ended -> "finishing"
-          | Keeper_chat_transcript.Stream_failed _ -> "failed"
-    in
-    (* The request the live transcript is already drawing says everything this
-       row would: its phase, its age, and the tools it is in. Drawing both put
-       a second age and an opaque request id above the ACTIVE TURN line, and
-       three ages in one frame read as a stuck screen. The row stays for every
-       request the transcript is not covering — a second message sent to the
-       same keeper still has to be visible.
-
-       [keeper_message_inflight_drawn] is where that choice lives, because the
-       row budget has to make the same one. While the choice was written only
-       here, the budget reserved a row for the request the transcript covers
-       and the status area gained a blank line (#37741). *)
-    (match
-       List.partition
-         (fun group -> String.equal group.Masc_tui_types.representative.sent_request.keeper_name keeper_name)
-         (Masc_tui_types.keeper_message_inflight_drawn state)
-     with
-     | mine, others ->
-         List.iter
-           (fun group ->
-             let entry = group.Masc_tui_types.representative in
-             box_line_styled chat_buf chat_cols ~style:(Theme.warn ())
-               (Printf.sprintf "  (%s%s %s%s…)" (batch_label group) (group_activity group)
-                  (Keeper_chat.compact_request_id
-                     (Masc_tui_types.turn_log_execution_id entry.log))
-                  (sending_age group)))
-           mine;
-         List.iter
-           (fun group ->
-             let entry = group.Masc_tui_types.representative in
-             (* The row names the way to stop it. Esc and /interrupt both
-                read [msg_live], which is this pane's turn and not this one,
-                and the key that would put that keeper on screen is refused
-                while any request is in flight -- so an operator reading
-                this row had no key at all (#33852). *)
-             box_line_styled chat_buf chat_cols ~style:(Theme.recede ())
-               (Printf.sprintf "  (%s: %s%s %s%s -- /interrupt %s)"
-                  (Keeper_chat.terminal_safe_text
-                     entry.sent_request.keeper_name)
-                  (batch_label group)
-                  (group_activity group)
-                  (Keeper_chat.compact_request_id
-                     (Masc_tui_types.turn_log_execution_id entry.log))
-                  (sending_age group)
-                  (Keeper_chat.terminal_safe_text
-                     entry.sent_request.keeper_name)))
-           others);
+    List.iter
+      (fun (mine, line) ->
+        box_line_styled chat_buf chat_cols
+          ~style:(if mine then Theme.warn () else Theme.recede ()) line)
+      (Masc_tui_types.keeper_message_inflight_rows state ~chat_cols
+         ~now:(Unix.gettimeofday ()));
     (* The lead -- the mark, the lane, the age -- in the status colour; the
        detail after it receded. Drawn whole in the status colour, five rows of
        band read as five warnings and none stood out. *)
@@ -3118,18 +3045,30 @@ let render_keeper_message (state : state) =
        long preview status loses its tail rather than the keys after it. *)
     List.iter
       (fun (row : Masc_tui_answering.chat_activity_row) ->
-        let room =
-          framed_inner_width chat_cols - 2
-          - Message_layout.display_width row.lead
-          - Message_layout.display_width row.keys
-        in
+        let keys = match state.msg_tool_visibility, state.msg_live with
+          | (Tools_compact | Tools_results), Some live
+            when state.msg_target_keeper_name = Some (Masc_tui_types.turn_log_keeper_name live)
+              && Masc_tui_types.keeper_message_folded_status_count state live.tl_transcript
+                   ~now:(Unix.gettimeofday ()) > 0 ->
+              row.keys ^ " · " ^ Masc_tui_keys.expand_turn_label
+          | (Tools_full | Tools_compact | Tools_results), _ -> row.keys in
+        let lead_room = max 0 (framed_inner_width chat_cols - 2
+          - Message_layout.display_width keys) in
+        let lead =
+          if Message_layout.display_width row.lead <= lead_room then row.lead
+          else fit_width row.lead lead_room in
+        let room = lead_room - Message_layout.display_width lead in
         let rest =
           if Message_layout.display_width row.rest <= room then row.rest
           else fit_width row.rest (max 0 room)
         in
         box_line chat_buf chat_cols
-          (Printf.sprintf "  %s%s%s%s%s%s%s" (Theme.warn ()) row.lead Ansi.reset
-             (Theme.recede ()) rest row.keys Ansi.reset))
+          (Printf.sprintf "  %s%s%s%s%s%s%s"
+             (match state.msg_tool_visibility with Tools_full -> Theme.warn ()
+              | Tools_compact | Tools_results ->
+                  if Masc_tui_types.keeper_message_activity_needs_attention state
+                  then Theme.warn () else Theme.recede ()) lead Ansi.reset
+             (Theme.recede ()) rest keys Ansi.reset))
       (Masc_tui_types.keeper_message_activity_rows state);
     List.iter (fun text -> box_line_styled chat_buf chat_cols ~style:(Theme.warn ()) ("  " ^ text))
       (Masc_tui_types.keeper_observed_interrupt_rows state);
@@ -3234,7 +3173,9 @@ let render_keeper_message (state : state) =
             is holding them up. Only while there is something to queue. *)
          let queue_hint =
            if Buffer.length state.msg_input > 0 then
-             " · Enter queues your line; it sends when this turn ends"
+             (match send_disposition state ~keeper_name with
+              | Updates _ -> " · Enter:send update; Ctrl-T:queue"
+              | Sends -> " · Enter:send")
            else ""
          in
          (* The gate and the prompt describe the same held call. Drawn apart,
@@ -3468,9 +3409,11 @@ let render_keeper_message (state : state) =
             match pending_count with
             | 0 -> "Enter:send update"
             | waiting ->
-                Printf.sprintf
-                  "Enter:send update (%d local)  Ctrl-T:queue  Ctrl-K:cancel  Ctrl-P:edit"
-                  waiting)
+                if state.msg_tool_visibility = Tools_full then
+                  Printf.sprintf
+                    "Enter:send update (%d local)  Ctrl-T:queue  Ctrl-K:cancel  Ctrl-P:edit"
+                    waiting
+                else "Enter:send update  Ctrl-T:queue  Ctrl-K:cancel  Ctrl-P:edit")
       in
       match disposition with
       | Updates _ -> queue_hint ()
@@ -3633,11 +3576,21 @@ let render_keeper_message (state : state) =
       let left_buf = Buffer.create 1024 in
       let pane_rows = count_frame_lines chat_buf in
       let portrait =
-        match Keeper_control.liveness_of_roster state.keeper_roster keeper_name with
-        | Keeper_control.Present runtime ->
-            Masc_tui_chat_portrait.shown ~name:keeper_name ~portrait:runtime.kr_portrait
-              ~rows:pane_rows ~cols:keeper_roster_pane_cols
-        | Keeper_control.Unobserved | Keeper_control.Absent | Keeper_control.Invalid _ -> None
+        match List.find_opt
+          (fun (keeper : keeper) -> String.equal keeper.k_name keeper_name)
+          state.keepers with
+        | None -> None
+        | Some keeper ->
+          (match (keeper_reading state keeper).Keeper_control.liveness with
+           | Keeper_control.Present runtime ->
+             (match runtime.kr_portrait with
+              | Tui_decode.Ready equipment ->
+                Masc_tui_chat_portrait.shown ~name:keeper_name
+                  ~portrait:(Keeper_portrait_equipment.Ready equipment)
+                  ~rows:pane_rows ~cols:keeper_roster_pane_cols
+              | Tui_decode.Unavailable _ -> None)
+           | Keeper_control.Unobserved | Keeper_control.Absent
+           | Keeper_control.Invalid _ -> None)
       in
       let roster_rows = match portrait with
         | None -> pane_rows

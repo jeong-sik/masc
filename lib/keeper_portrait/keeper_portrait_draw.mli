@@ -42,7 +42,7 @@ val render : Keeper_portrait_look.body -> Keeper_portrait_look.equipment -> size
 
 (** {2 Motion}
 
-    For animated uses such as the TUI splash. There is no clock in here: the
+    For animated uses such as the /about candle. There is no clock in here: the
     caller says where in time it is, and the same pose always gives the same
     bytes. *)
 

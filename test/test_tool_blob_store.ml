@@ -777,6 +777,42 @@ let test_a_durable_put_does_not_let_a_later_put_skip_its_write () =
       Alcotest.(check (option string)) "and the bytes are the same" (Some payload)
         (fetch_ok store ~sha256:reference.O.sha256))
 
+let test_durable_reuse_revalidates_without_rewriting () =
+  with_temp_dir (fun dir ->
+      let store = B.create ~base_path:dir in
+      let payload = "current memory projection" in
+      let reference = B.put_durable_reuse store ~bytes:payload ~mime:"text/plain" in
+      let path = blob_path store reference.O.sha256 in
+      let inode = (Unix.stat path).Unix.st_ino in
+      ignore (B.put_durable_reuse store ~bytes:payload ~mime:"text/plain" : O.artifact_ref);
+      Alcotest.(check int) "unchanged recall is not rewritten" inode (Unix.stat path).Unix.st_ino;
+      Fs_compat.save_file path "corrupt recall";
+      ignore (B.put_durable_reuse store ~bytes:payload ~mime:"text/plain" : O.artifact_ref);
+      Alcotest.(check (option string)) "corrupt recall is repaired" (Some payload)
+        (fetch_ok store ~sha256:reference.O.sha256);
+      Unix.unlink path;
+      ignore (B.put store ~bytes:payload ~mime:"text/plain" : O.t);
+      let ordinary_inode = (Unix.stat path).Unix.st_ino in
+      ignore (B.put_durable_reuse store ~bytes:payload ~mime:"text/plain" : O.artifact_ref);
+      Alcotest.(check bool) "ordinary replacement cannot inherit strict evidence" true
+        (ordinary_inode <> (Unix.stat path).Unix.st_ino);
+      Unix.unlink path;
+      ignore (B.put_durable_reuse store ~bytes:payload ~mime:"text/plain" : O.artifact_ref);
+      Alcotest.(check (option string)) "collected recall is republished" (Some payload)
+        (fetch_ok store ~sha256:reference.O.sha256))
+
+let test_ordinary_put_does_not_establish_durable_reuse () =
+  with_temp_dir (fun dir ->
+      let store = B.create ~base_path:dir in
+      let payload = "not yet strictly published" in
+      let reference = match B.put store ~bytes:payload ~mime:"text/plain" with
+        | O.Stored reference -> reference | _ -> Alcotest.fail "expected stored reference" in
+      let path = blob_path store reference.O.sha256 in
+      let inode = (Unix.stat path).Unix.st_ino in
+      ignore (B.put_durable_reuse store ~bytes:payload ~mime:"text/plain" : O.artifact_ref);
+      Alcotest.(check bool) "first strict publication does write" true
+        (inode <> (Unix.stat path).Unix.st_ino))
+
 let test_sharding_layout () =
   with_temp_dir (fun dir ->
       let store = B.create ~base_path:dir in
@@ -2187,6 +2223,10 @@ let () =
         ] );
       ( "atomicity",
         [
+          Alcotest.test_case "durable recall reuse and repair" `Quick
+            test_durable_reuse_revalidates_without_rewriting;
+          Alcotest.test_case "ordinary put is not durable reuse evidence" `Quick
+            test_ordinary_put_does_not_establish_durable_reuse;
           Alcotest.test_case "repeated put no dup" `Quick
             test_repeated_put_no_dup;
           Alcotest.test_case "spaced mime is refused at construction" `Quick

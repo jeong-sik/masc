@@ -22,10 +22,14 @@ before landing the child. See the [Native GitHub Stacks guide](../../docs/guides
 `merge-guard.sh --check --repo O/R --pr N --head SHA` checks each included
 PR's current head, independent trusted head-bound approval and latest blocking
 reviews or structured decision. It rechecks stack membership and included
-head/base identities before admission. It does not call Actions for an ordinary
-head. External coding agents use this read-only check before submitting a native
+head/base identities before admission. Check output names the validated
+merge target: a native stack can land into another feature branch, whose PR
+is outside this stack scope. That is not main integration. It does not call Actions
+for an ordinary head. External coding agents use this read-only check before submitting a native
 stack via `PUT /repos/O/R/pulls/N/merge-async`; for a non-native PR, use
-`gh pr merge --match-head-commit SHA`. The asynchronous receipt is acceptance,
+`gh pr merge --match-head-commit SHA`. The asynchronous receipt labels only the preflight target, since GitHub accepts
+only the selected head SHA as a precondition; its accepted destination remains
+unconfirmed until the result is read. The receipt is acceptance,
 not completion: confirm the result and each included PR's merged state before
 reporting success. The guide above documents the request and its SHA boundary.
 
@@ -40,3 +44,19 @@ native stack scope admission or non-native parent waits. It reads full CI
 evidence only for release heads.
 `python3 scripts/review/test_source_review_policy.py` exercises live-boundary
 controls in an isolated fake-GitHub fixture.
+
+## Preparing an approved candidate
+
+`prepare-approved-batch.py` combines explicitly selected, directly main-based
+ordinary heads without dispatching CI. In addition to current-head source
+approval, it requires the approval's `review-scope` receipt stamped by
+`approve-guard.sh`: reviewed base ref/SHA and native stack identity/position.
+Retargeting or changing the diff boundary requires a fresh independent review;
+unrelated main advancement with the same merge-base does not. Older approvals
+without this receipt need reapproval before candidate composition. This does
+not add a CI requirement or change ordinary merge admission.
+
+Missing Git objects are fetched from the API-resolved `--repo` repository,
+independently of the checkout's origin. Receipt publication includes flush and
+close in its rollback boundary. On failure it removes the incomplete receipt
+and deletes only a candidate ref still pointing to the commit it created.

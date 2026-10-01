@@ -1,6 +1,37 @@
 open Alcotest
 open Masc
 
+(* Test funding is a complete historical payout, not an orphan mint. *)
+let funding_rows (at : Candle_time.t) (payment : Candle_payment.t) : Candle_event.t list =
+  let identity = payment.identity in
+  let keeper = match payment.allocations with
+    | [allocation] -> allocation.Candle_payment.keeper
+    | _ -> Alcotest.fail "funding fixture expects one Keeper" in
+  let task_ids = List.map (fun (r : Candle_appraisal.task_relation) -> r.task_id) payment.relations in
+  [ {Candle_event.at;body=Candle_event.Half_life_set Candle_decay.Off}
+  ; {Candle_event.at;body=Candle_event.Snapshot
+      {goal_id=identity.goal_id;request_id=identity.request_id;
+       verification_run_id=identity.verification_run_id;criterion_revision="funding-proof";
+       passed_at=at;goal_created_at=(match Candle_time.of_rfc3339 "1970-01-01T00:00:00Z" with
+         | Ok value -> value | Error detail -> Alcotest.fail detail);
+       due_date=None;title="Completed funding fixture";metric=Some "completed";
+       target_value=Some "1";linked_task_ids=task_ids}}
+  ; {Candle_event.at;body=Candle_event.Payout_owed
+      {goal_id=identity.goal_id;request_id=identity.request_id;
+       verification_run_id=identity.verification_run_id;passed_at=at;confirmed_at=at}}
+  ; {Candle_event.at;body=Candle_event.Candidates
+      {goal_id=identity.goal_id;request_id=identity.request_id;
+       verification_run_id=identity.verification_run_id;
+       tasks=List.map (fun id -> id, Candle_event.Found
+         {title="Completed contribution";assignee=Some keeper;
+          status=Candle_event.Done {completed_at=at}}) task_ids;
+       candidate_task_ids=task_ids;candidate_keepers=[keeper];
+       candidate_task_keepers=List.map (fun id -> id, Some keeper) task_ids}}
+  ; {Candle_event.at;body=Candle_event.Paid payment}
+  ]
+;;
+
+
 module Http = Http_server_eio
 module Api = Server_dashboard_http_keeper_portrait
 module Items_api = Server_dashboard_http_keeper_items
@@ -28,17 +59,20 @@ let roomy_budget = 64 * 1024 * 1024
 
 (* A fresh cache per call, so every answer below draws unless it says otherwise. *)
 let answer ?(cache = Api.Cache.create ~byte_budget:roomy_budget) ?(build = a_build)
-    ?(holds_tag = holds_nothing) ?equipment ~name ~size ~keeper_present () =
+    ?(holds_tag = holds_nothing) ?equipment ?(preview = None) ?expected_equipment ~name ~size ~keeper_present () =
   let equipment = match equipment with
     | Some read -> read
     | None -> (fun () -> Ok (Keeper_portrait_look.equipment_of_name name)) in
-  Api.answer ~cache ~build ~name ~size ~keeper_present ~equipment ~holds_tag
+  Api.answer ~cache ~build ~name ~size ~preview ~expected_equipment:(Option.map (fun value -> Ok value) expected_equipment) ~keeper_present ~equipment ~holds_tag
 
 let describe = function
   | Api.Png _ -> "Png"
   | Api.Not_modified tag -> "Not_modified " ^ tag
   | Api.Invalid_name -> "Invalid_name"
   | Api.Invalid_size raw -> "Invalid_size " ^ raw
+  | Api.Invalid_preview raw -> "Invalid_preview " ^ raw
+  | Api.Invalid_equipment detail -> "Invalid_equipment " ^ detail
+  | Api.Equipment_changed -> "Equipment_changed"
   | Api.Unknown_keeper -> "Unknown_keeper"
   | Api.Lookup_failed message -> "Lookup_failed " ^ message
   | Api.Encode_failed message -> "Encode_failed " ^ message
@@ -180,6 +214,86 @@ let test_equipment_wire_and_cache () =
   | Api.Lookup_failed message -> check string "authority error kept" "ledger unavailable" message
   | other -> fail ("authority failure must not serve stale cached portrait: " ^ describe other)
 
+let test_expected_equipment_precedes_tags_and_cache () =
+  let original = Keeper_portrait_look.bare in
+  let crown = match Keeper_portrait_item.of_id "crown" with Some item -> item | None -> fail "crown missing" in
+  let changed = Keeper_portrait_item.preview crown original in
+  let cache = Api.Cache.create ~byte_budget:roomy_budget in
+  let reads = ref 0 in
+  let equipment () = incr reads; Ok changed in
+  (match answer ~cache ~expected_equipment:original ~equipment ~holds_tag:(fun _ -> fail "mismatch asked for a tag")
+      ~name:keeper ~size:None ~keeper_present:present () with
+   | Api.Equipment_changed -> ()
+   | other -> fail ("expected snapshot mismatch: " ^ describe other));
+  check int "one authoritative equipment read" 1 !reads;
+  check int "mismatch cached no PNG" 0 (Api.Cache.length cache);
+  (* Previewing the same changed slot must not hide a stale observed outfit. *)
+  (match answer ~cache ~preview:(Some "crown") ~expected_equipment:original ~equipment
+      ~holds_tag:(fun _ -> fail "preview mismatch asked for a tag")
+      ~name:keeper ~size:None ~keeper_present:present () with
+   | Api.Equipment_changed -> ()
+   | other -> fail ("preview bypassed equipment authority: " ^ describe other));
+  check int "preview compares the unmodified current equipment" 2 !reads;
+  check int "preview mismatch cached no PNG" 0 (Api.Cache.length cache);
+  (match Api.answer ~preview:None ~cache ~build:a_build ~expected_equipment:(Some (Error "bad codec"))
+      ~name:keeper ~size:None ~keeper_present:never_asked ~equipment ~holds_tag:holds_nothing with
+   | Api.Invalid_equipment _ -> ()
+   | other -> fail ("invalid expected equipment: " ^ describe other));
+  check int "malformed expectation read no equipment" 2 !reads
+
+let test_account_revision_binds_facts_not_decay_clock () =
+  let at0 = require_ok Fun.id (Candle_time.of_rfc3339 "2026-09-29T00:00:00Z") in
+  let at1 = require_ok Fun.id (Candle_time.of_rfc3339 "2026-09-29T00:00:01Z") in
+  let payment name owner = require_ok Fun.id (Candle_payment.make
+    ~identity:{goal_id=name;request_id=name ^ "-request";verification_run_id=name ^ "-run"}
+    ~grade:Candle_grade.Trivial ~total_milli:1000
+    ~grade_trace:{run_id="grade";slot_id="appraiser"}
+    ~relations:[{task_id="task";relation=Candle_appraisal.Related;trace={run_id="relation";slot_id="appraiser"}}]
+    ~weights_trace:{run_id="weights";slot_id="appraiser"}
+    ~weight_max:1 ~deduction_rate:0 ~deduction_floor:1000 ~overdue_hours:0 ~weights:[owner,1]) in
+  let policy = match Candle_config.of_toml_string {|half_life = 1
+[payout]
+weight_max = 1
+deduction_rate = 0
+deduction_floor = 1000
+[payout.grades_milli]
+trivial = 1000
+small = 1000
+medium = 1000
+large = 1000
+epic = 1000
+[shop.prices_milli]
+crown = 0
+|} with
+    | Candle_config.Enabled policy -> policy
+    | config -> fail (Candle_config.to_string config) in
+  let events = funding_rows at0 (payment "own-credit" keeper) |> List.map (fun (event : Candle_event.t) ->
+    match event.body with Candle_event.Half_life_set _ -> {event with body=Half_life_set (Candle_decay.Hours 1)}
+    | _ -> event) in
+  let project at events = require_ok Candle_balance.error_to_string (Candle_balance.of_events ~at events) in
+  let revision ?(policy=policy) at events =
+    Candle_observe.ready_account_revision ~events ~policy ~balance:(project at events) ~keeper in
+  check int "funded at initial instant" 1000 (Candle_balance.balance (project at0 events) ~keeper);
+  check int "natural one-second decay remains observable" 999 (Candle_balance.balance (project at1 events) ~keeper);
+  let initial = revision at0 events in
+  check string "pure decay does not invalidate durable account revision" initial (revision at1 events);
+  let other = funding_rows at1 (payment "other-credit" "other-keeper") |> List.filter (fun (event : Candle_event.t) ->
+    match event.body with Candle_event.Half_life_set _ -> false | _ -> true) in
+  check string "unrelated preparation and payment do not invalidate this account" initial (revision at1 (events @ other));
+  let own = funding_rows at1 (payment "next-own-credit" keeper) |> List.filter (fun (event : Candle_event.t) ->
+    match event.body with Candle_event.Half_life_set _ -> false | _ -> true) in
+  check bool "relevant new credit invalidates the old revision" false (initial = revision at1 (events @ own));
+  let crown = match Keeper_portrait_item.of_id "crown" with Some item -> item | None -> fail "crown missing" in
+  let bought = events @ [{Candle_event.at=at1;body=Purchased {keeper;item=crown;amount_milli=0}}] in
+  check bool "free purchase invalidates despite no debit" false (initial = revision at1 bought);
+  let equipped = bought @ [{Candle_event.at=at1;body=Equipped {keeper;slot=Keeper_portrait_item.Head;choice=Item crown}}] in
+  check bool "equipment fact invalidates unchanged money/ownership" false (revision at1 bought = revision at1 equipped);
+  let other_equipped = events @ other @ [{Candle_event.at=at1;body=Purchased {keeper="other-keeper";item=crown;amount_milli=0}};
+    {Candle_event.at=at1;body=Equipped {keeper="other-keeper";slot=Keeper_portrait_item.Head;choice=Item crown}}] in
+  check string "unrelated purchase/equipment do not invalidate this account" initial (revision at1 other_equipped);
+  let boundary = events @ [{Candle_event.at=at1;body=Half_life_set (Candle_decay.Hours 2)}] in
+  check bool "durable policy boundary invalidates" false (initial = revision at1 boundary)
+
 (* ---- the real router, over an in-memory HTTP/1.1 connection ---- *)
 
 let rec remove_tree path =
@@ -209,7 +323,9 @@ let with_router f =
         (Masc_test_deps.meta_of_json_fixture (`Assoc [ "name", `String keeper ])) in
       require_ok Fun.id (Keeper_meta_store.replace_snapshot config meta);
       let router = Server_routes_http_routes_dashboard.add_routes ~sw
-        ~clock:(Eio.Stdenv.clock env) (Http.Router.create ()) in
+        ~clock:(Eio.Stdenv.clock env) (Http.Router.create ())
+        |> Server_routes_http_routes_channel_gate.add_routes ~sw
+          ~clock:(Eio.Stdenv.clock env) in
       f ~config router)
 
 type reply = { status : int; headers : (string * string) list; body : string }
@@ -255,9 +371,13 @@ let header reply name =
   | Some value -> value
   | None -> fail ("missing header " ^ name)
 
-let path ?size name =
-  "/api/v1/keepers/" ^ name ^ "/portrait.png"
-  ^ match size with None -> "" | Some size -> "?size=" ^ size
+let path ?size ?expected_equipment name =
+  let query = (match size with None -> [] | Some value -> ["size", [value]])
+    @ (match expected_equipment with None -> [] | Some value -> ["expected_equipment", [value]]) in
+  Uri.to_string (Uri.make ~path:("/api/v1/keepers/" ^ name ^ "/portrait.png") ~query ())
+
+let bound_path ?size equipment name =
+  path ?size ~expected_equipment:(Yojson.Safe.to_string (Keeper_portrait_equipment.to_json equipment)) name
 
 let item_path name = "/api/v1/keepers/" ^ name ^ "/items"
 
@@ -266,6 +386,34 @@ let item_account reply =
   require_ok Fun.id
     (Masc_tui_keeper_items.decode ~keeper_name:keeper
        (Yojson.Safe.from_string reply.body))
+  |> snd
+
+let test_router_preview_is_read_only () =
+  with_router (fun ~config router ->
+    let current = get ~router (path ~size:"72" keeper) in
+    let equipment () = require_ok Fun.id
+      (Candle_equipment.current ~base_path:config.Workspace.base_path ~keeper) in
+    let before = equipment () in
+    let preview_id = match before.Keeper_portrait_look.face with
+      | Keeper_portrait_look.Glasses -> "shades"
+      | _ -> "glasses" in
+    let preview_path = path ~size:"72" keeper ^ "&preview=" ^ preview_id in
+    let preview = get ~router preview_path in
+    check int "preview served" 200 preview.status;
+    let item = match Keeper_portrait_item.of_id preview_id with
+      | Some item -> item | None -> fail "preview item missing from catalog" in
+    let expected = answer ~equipment:(fun () -> Ok (Keeper_portrait_item.preview item before))
+        ~name:keeper ~size:(Some "72") ~keeper_present:present () |> expect_png in
+    check string "only the selected slot changes the picture" expected preview.body;
+    check bool "preview changes actual pixels" false (String.equal current.body preview.body);
+    check string "equipment unchanged" (Keeper_portrait_equipment.key before)
+      (Keeper_portrait_equipment.key (equipment ()));
+    check int "unknown item rejected" 400
+      (get ~router (path ~size:"72" keeper ^ "&preview=unknown-item")).status;
+    let cached = get ~router ~if_none_match:(header preview "etag") preview_path in
+    check int "preview revalidates" 304 cached.status;
+    check string "current picture preserved" current.body
+      (get ~router (path ~size:"72" keeper)).body)
 
 let test_router_serves_png_with_a_strong_tag () =
   with_router (fun ~config:_ router ->
@@ -298,7 +446,12 @@ let test_router_refusals () =
     check int "unknown keeper" 404 (get ~router (path "portrait-http-nobody")).status;
     check int "size out of range" 400 (get ~router (path ~size:"4096" keeper)).status;
     check int "size not a number" 400 (get ~router (path ~size:"big" keeper)).status;
-    check int "malformed name" 400 (get ~router (path "Not_A_Keeper!")).status)
+    check int "malformed name" 400 (get ~router (path "Not_A_Keeper!")).status;
+    List.iter (fun raw ->
+      check int "malformed expected equipment is not an unbound read" 400
+        (get ~router (path ~expected_equipment:raw keeper)).status)
+      ["{partial"; "null"; {|{"head":"crown"}|};
+       {|{"face":"bare_face","neck":"bare_neck","head":"crown","hand":"empty_hand","base":"no_dish","extra":true}|}])
 
 let token_for config ~agent_name role =
   match Auth.create_token config.Workspace.base_path ~agent_name ~role with
@@ -308,6 +461,61 @@ let token_for config ~agent_name role =
 (* Once HTTP auth is strict the portrait is a read like any other: no token is
    a 401, a token that may read state is a 200, a token that may only play a
    shared machine is refused. *)
+let test_gate_account_revision_uses_current_candle_reading () =
+  with_router (fun ~config router ->
+    Auth.save_auth_config config.Workspace.base_path
+      { Masc_domain.default_auth_config with enabled = true; require_token = true };
+    let operator = token_for config ~agent_name:"gate-operator" Masc_domain.Admin in
+    let worker = token_for config ~agent_name:"gate-worker" Masc_domain.Worker in
+    let read ?(token=operator) () =
+      let response = get ~router ~token "/api/v1/gate/keepers?detailed=true" in
+      check int "authorized Gate discovery succeeds" 200 response.status;
+      Yojson.Safe.from_string response.body in
+    let broken = require_ok Fun.id
+      (Masc_test_deps.meta_of_json_fixture (`Assoc ["name", `String "broken"])) in
+    require_ok Fun.id (Keeper_meta_store.replace_snapshot config broken);
+    let broken_path = Filename.concat (Config_dir_resolver.keepers_dir_for_base_path
+      ~base_path:config.base_path) "broken.toml" in
+    Fs_compat.mkdir_p (Filename.dirname broken_path);
+    Out_channel.with_open_bin broken_path (fun oc -> output_string oc "invalid keeper TOML");
+    Keeper_tool_surface.For_testing.reset_keeper_list_cache ();
+    let assert_revision json =
+      let candle = Candle_observe.read ~now:Time_compat.now ~base_path:config.base_path in
+      let rows = Yojson.Safe.Util.(json |> member "keepers" |> to_list) in
+      List.iter (fun row ->
+        let name = Yojson.Safe.Util.(row |> member "name" |> to_string) in
+        let expected = Json_util.option_to_yojson (fun value -> `String value)
+          (Candle_observe.account_revision candle ~keeper:name) in
+        check bool "HTTP operator roster revision matches its current observation" true
+          (Yojson.Safe.Util.member "candle_account_revision" row = expected);
+        match row with
+        | `Assoc fields -> check int "revision appears once" 1
+            (List.length (List.filter (fun (key,_) -> key="candle_account_revision") fields))
+        | _ -> fail "Gate row is not an object") rows;
+      rows in
+    ignore (assert_revision (read ()));
+    let policy = Config_dir_resolver.candle_toml_path_for_base_path ~base_path:config.base_path in
+    Fs_compat.mkdir_p (Filename.dirname policy);
+    Out_channel.with_open_bin policy (fun oc -> output_string oc "invalid Candle policy");
+    let disabled = read () in
+    let rows = assert_revision disabled in
+    check bool "directory-error row retains operator account revision" true
+      (List.exists (fun row -> Yojson.Safe.Util.member "status" row = `String "error") rows);
+    let item = get ~router ~token:operator (item_path keeper) in
+    check int "disabled Item response succeeds" 200 item.status;
+    let item_revision = Yojson.Safe.Util.member "account_revision" (Yojson.Safe.from_string item.body) in
+    let keeper_row = List.find (fun row -> Yojson.Safe.Util.member "name" row = `String keeper) rows in
+    check bool "disabled Item and roster share account authority" true
+      (item_revision = Yojson.Safe.Util.member "candle_account_revision" keeper_row);
+    let shared = read ~token:worker () in
+    check bool "Worker discovery omits currency" true (Json_util.assoc_member_opt "candle" shared = None);
+    List.iter (fun row ->
+      check bool "Worker discovery omits balance" true (Json_util.assoc_member_opt "candle_balance_milli" row = None);
+      check bool "Worker discovery omits account revision" true (Json_util.assoc_member_opt "candle_account_revision" row = None))
+      Yojson.Safe.Util.(shared |> member "keepers" |> to_list);
+    Sys.remove policy;
+    ignore (assert_revision (read ())))
+
 let test_router_strict_auth_needs_a_read_token () =
   with_router (fun ~config router ->
     Auth.save_auth_config config.Workspace.base_path
@@ -325,8 +533,25 @@ let test_router_strict_auth_needs_a_read_token () =
     check int "a player's token" 403 (get ~router ~token:player url).status;
     let items = item_path keeper in
     check int "Item account rejects anonymous" 401 (get ~router items).status;
-    check bool "reader sees explicit Candle off" true
-      (item_account (get ~router ~token:reader items) = Masc_tui_keeper_items.Off);
+    let off = get ~router ~token:reader items in
+    let expected_workspace = Server_base_path_diagnostics.detect
+      ~effective_base_path:config.Workspace.base_path ~effective_masc_root:(Workspace.masc_dir config) () in
+    let roster_bound workspace = "/api/v1/gate/keepers?detailed=true&expected_workspace="
+      ^ Uri.pct_encode ~component:`Query_value workspace in
+    check int "roster refuses changed workspace before dispatch" 409
+      (get ~router ~token:reader (roster_bound (expected_workspace.effective_base_path ^ "/other"))).status;
+    check int "roster refuses blank workspace authority" 400
+      (get ~router ~token:reader (roster_bound " ")).status;
+    let bound suffix = items ^ "?expected_workspace=" ^ Uri.pct_encode ~component:`Query_value suffix in
+    check int "matching health workspace binding admits the current account" 200
+      (get ~router ~token:reader (bound expected_workspace.effective_base_path)).status;
+    check int "a different served workspace is refused before its account is read" 409
+      (get ~router ~token:reader (bound (expected_workspace.effective_base_path ^ "/another-workspace"))).status;
+    check int "blank workspace binding is malformed" 400
+      (get ~router ~token:reader (bound " ")).status;
+    check bool "reader sees explicit Candle off" true (item_account off = Masc_tui_keeper_items.Off);
+    check bool "Off has explicit null revision" true
+      (Yojson.Safe.Util.member "account_revision" (Yojson.Safe.from_string off.body) = `Null);
     check int "Item account rejects player" 403
       (get ~router ~token:player items).status;
     check int "Item account refuses an unknown Keeper" 404
@@ -338,7 +563,12 @@ let test_router_strict_auth_needs_a_read_token () =
         ~base_path:config.Workspace.base_path in
     Fs_compat.mkdir_p (Filename.dirname candle_path);
     Fs_compat.save_file candle_path "[shop]\nprices_milli = \"bad\"\n";
-    (match item_account (get ~router ~token:reader items) with
+    let disabled = get ~router ~token:reader items in
+    let observed_revision = Candle_observe.account_revision
+      (Candle_observe.read ~now:Time_compat.now ~base_path:config.Workspace.base_path) ~keeper in
+    check (option string) "stable Disabled revision agrees with the actual roster helper"
+      observed_revision (Some Yojson.Safe.Util.(Yojson.Safe.from_string disabled.body |> member "account_revision" |> to_string));
+    (match item_account disabled with
      | Masc_tui_keeper_items.Disabled reason ->
        check bool "disabled names a reason" true (String.length reason > 0)
      | Masc_tui_keeper_items.Off | Masc_tui_keeper_items.Ready _ ->
@@ -395,7 +625,8 @@ max-concurrent = 1
     let policy_path = Config_dir_resolver.candle_toml_path_for_base_path ~base_path in
     if not (String.starts_with ~prefix:base_path policy_path) then fail "policy escaped fixture";
     Fs_compat.mkdir_p (Filename.dirname policy_path);
-    Fs_compat.save_file policy_path {|[payout]
+    let policy_text price = Printf.sprintf {|half_life = "off"
+[payout]
 weight_max = 1
 deduction_rate = 0
 deduction_floor = 1000
@@ -406,9 +637,10 @@ medium = 1000
 large = 1000
 epic = 1000
 [shop.prices_milli]
-crown = 200
-beanie = 200
-|};
+crown = %d
+beanie = %d
+|} price price in
+    Fs_compat.save_file policy_path (policy_text 200);
     let owner = require_ok Fun.id (Keeper_id.Keeper_name.of_string keeper) in
     let at = require_ok Fun.id (Candle_time.of_rfc3339 "2026-09-29T00:00:00Z") in
     let payment = require_ok Fun.id (Candle_payment.make
@@ -419,7 +651,7 @@ beanie = 200
       ~weights_trace:{run_id="weights";slot_id="appraiser"}
       ~weight_max:1 ~deduction_rate:0 ~deduction_floor:1000 ~overdue_hours:0 ~weights:[keeper,1]) in
     require_ok (Candle_ledger.update_error_to_string Fun.id)
-      (Candle_ledger.update ~base_path (fun _ -> Ok ([{Candle_event.at;body=Candle_event.Paid payment}], ())));
+      (Candle_ledger.update ~base_path (fun _ -> Ok (funding_rows at payment, ())));
     let starting = Keeper_portrait_look.equipment_of_name keeper in
     let id = match starting.head with Keeper_portrait_look.Crown -> "beanie"
       | Keeper_portrait_look.Bare_head | Keeper_portrait_look.Bow | Keeper_portrait_look.Beanie -> "crown" in
@@ -434,13 +666,52 @@ beanie = 200
     let initial = ledger_bytes () in
     (match call id with Tool_result.Completed _ -> fail "equipped without purchase" | _ -> ());
     check string "refusal did not mutate ledger" initial (ledger_bytes ());
+    check int "expected equipment does not authorize an unowned outfit" 409
+      (get ~router (bound_path ~size:"96" expected keeper)).status;
+    check string "bound refusal does not equip or append" initial (ledger_bytes ());
     let before = get ~router (path ~size:"96" keeper) in
     check int "starting portrait" 200 before.status;
     let reader = token_for config ~agent_name:"portrait-item-reader" Masc_domain.Worker in
     let credited = get ~router ~token:reader (item_path keeper) in
     let credited_json = Yojson.Safe.from_string credited.body in
+    check (option string) "ready HTTP account is bound to the actual roster revision"
+      (Candle_observe.account_revision (Candle_observe.read ~now:Time_compat.now ~base_path) ~keeper)
+      (Some Yojson.Safe.Util.(credited_json |> member "account_revision" |> to_string));
+    let fields = match credited_json with `Assoc fields -> fields | _ -> fail "Item object" in
+    List.iter (fun json ->
+      match Masc_tui_keeper_items.decode ~keeper_name:keeper json with
+      | Error _ -> () | Ok _ -> fail "TUI accepted missing or malformed account revision")
+      [`Assoc (List.remove_assoc "account_revision" fields);
+       `Assoc (("account_revision", `Null) :: List.remove_assoc "account_revision" fields);
+       `Assoc (("account_revision", `String (String.make 64 'A')) :: List.remove_assoc "account_revision" fields)];
     check string "Item balance is an exact decimal string" "1000"
       Yojson.Safe.Util.(credited_json |> member "balance_milli" |> to_string);
+    let original_revision = Yojson.Safe.Util.(credited_json |> member "account_revision" |> to_string) in
+    Fs_compat.save_file policy_path (policy_text 400);
+    let changed_json = Yojson.Safe.from_string (get ~router ~token:reader (item_path keeper)).body in
+    let changed_revision = Yojson.Safe.Util.(changed_json |> member "account_revision" |> to_string) in
+    check bool "price B changes actual response revision" false (original_revision = changed_revision);
+    let changed_reading = require_ok Fun.id (Masc_tui_keeper_items.decode ~keeper_name:keeper changed_json) in
+    check bool "TUI refuses price B beside the retained price A roster" true
+      (Result.is_error (Masc_tui_keeper_items.match_revision
+        ~expected_revision:(Ok (Some original_revision)) changed_reading));
+    check bool "TUI accepts price B only with its matching observed roster revision" true
+      (Result.is_ok (Masc_tui_keeper_items.match_revision
+        ~expected_revision:(Ok (Some changed_revision)) changed_reading));
+    check bool "an unobserved roster cannot authorize an otherwise valid Item body" true
+      (Result.is_error (Masc_tui_keeper_items.match_revision
+        ~expected_revision:(Error "roster unavailable") changed_reading));
+    check (option string) "price B response uses the same current roster view identity"
+      (Candle_observe.account_revision (Candle_observe.read ~now:Time_compat.now ~base_path) ~keeper)
+      (Some changed_revision);
+    let changed_catalog = Yojson.Safe.Util.(changed_json |> member "catalog" |> to_list) in
+    let changed_price = List.find (fun entry -> Yojson.Safe.Util.(entry |> member "id" |> to_string) = id) changed_catalog in
+    check string "price B body is not mislabeled A" "400"
+      Yojson.Safe.Util.(changed_price |> member "price_milli" |> to_string);
+    Fs_compat.save_file policy_path (policy_text 200);
+    let restored_json = Yojson.Safe.from_string (get ~router ~token:reader (item_path keeper)).body in
+    check string "price A after B restores only A revision" original_revision
+      Yojson.Safe.Util.(restored_json |> member "account_revision" |> to_string);
     let catalog_json = Yojson.Safe.Util.(credited_json |> member "catalog" |> to_list) in
     let priced = List.find (fun entry ->
       Yojson.Safe.Util.(entry |> member "id" |> to_string) = id) catalog_json in
@@ -452,7 +723,7 @@ beanie = 200
       | _ -> fail "Item account response is not an object" in
     (match Masc_tui_keeper_items.decode ~keeper_name:keeper
         (with_balance (`String (string_of_int max_int))) with
-     | Ok (Masc_tui_keeper_items.Ready account) ->
+     | Ok (_, Masc_tui_keeper_items.Ready account) ->
        check int "Item decoder keeps the full OCaml wallet range" max_int account.balance_milli
      | Ok _ | Error _ -> fail "Item decoder lost a valid large wallet");
     List.iter (fun amount ->
@@ -500,38 +771,74 @@ beanie = 200
     let after = get ~router ~if_none_match:(header before "etag") (path ~size:"96" keeper) in
     check int "old tag does not conceal equipped item" 200 after.status;
     check bool "actual HTTP PNG changed" false (before.body = after.body);
+    let refused = get ~router ~if_none_match:"*" (bound_path ~size:"96" starting keeper) in
+    check int "pending A read refuses current B even with a held tag" 409 refused.status;
+    check bool "mismatch publishes no PNG" false (String.starts_with ~prefix:png_signature refused.body);
+    let bound = get ~router (bound_path ~size:"96" expected keeper) in
+    check int "matching equipment publishes current B" 200 bound.status;
+    check string "bound and unbound B share actual PNG" after.body bound.body;
+    check int "matching equipment preserves 304" 304
+      (get ~router ~if_none_match:(header bound "etag") (bound_path ~size:"96" expected keeper)).status;
     let stable = ledger_bytes () in
     let same = accepted (call id) in
     check bool "same choice is a no-op" false Yojson.Safe.Util.(same |> member "changed" |> to_bool);
     check string "same choice does not append" stable (ledger_bytes ());
     Keeper_tool_surface.For_testing.reset_keeper_list_cache ();
-    let roster = match !Keeper_dispatch_ref.dispatch ~config ~agent_name:"observer"
-      ~publication_recovery_provider:Masc_test_deps.non_runtime_publication_recovery_provider
-      ~name:"masc_keeper_list" ~args:(`Assoc ["detailed", `Bool true]) () with
-      | Some result -> Yojson.Safe.from_string (Tool_result.message result)
-      | None -> fail "public Keeper roster not registered" in
-    let runtime_rows, errors, _, _ = require_ok Fun.id (Tui_decode.decode_keeper_runtime_list roster) in
+    let operator = token_for config ~agent_name:"portrait-roster-operator" Masc_domain.Admin in
+    let public_roster () =
+      let auth = Auth.load_auth_config base_path in
+      Fun.protect ~finally:(fun () -> Auth.save_auth_config base_path auth) (fun () ->
+        Auth.save_auth_config base_path {auth with enabled=true; require_token=true};
+        let response = get ~router ~token:operator "/api/v1/gate/keepers?detailed=true" in
+        check int "operator roster succeeds" 200 response.status;
+        Yojson.Safe.from_string response.body) in
+    let runtime_rows, errors, _, _, candle = require_ok Fun.id (Tui_decode.decode_keeper_runtime_list (public_roster ())) in
     check int "public roster has no metadata error rows" 0 (List.length errors);
+    (match require_ok Fun.id candle with
+     | Candle_observation.Ready supply ->
+       check string "actual paid amount is issued" "1000" supply.issued_milli;
+       check string "purchase burns only its price" "200" supply.burned_milli;
+       check string "equipping leaves circulating amount unchanged" "800" supply.circulating_milli
+     | Candle_observation.Off | Candle_observation.Disabled _ -> fail "paid ledger observation unavailable");
     let reading = match runtime_rows with
-      | [row] -> row.Tui_decode.kr_portrait
+      | [row] ->
+        check (option string) "remote wallet comes from the same ledger reading" (Some "800") row.Tui_decode.kr_candle_balance_milli;
+        row.Tui_decode.kr_portrait
       | _ -> fail "expected one healthy decoded Keeper runtime row" in
     check bool "public roster and real TUI decoder preserve equipped input" true
       (reading = Keeper_portrait_equipment.Ready expected);
     check bool "restart-style replay preserves current equipment" true
-      (require_ok Fun.id (Candle_equipment.current ~base_path ~keeper) = expected);
+      (require_ok Fun.id (Candle_equipment.current ~now:Time_compat.now ~base_path ~keeper) = expected);
     ignore (accepted (call "default"));
     check string "Default restores exact starting PNG" before.body (get ~router (path ~size:"96" keeper)).body;
-    let account = require_ok Candle_shop.error_to_string (Candle_shop.account ~base_path ~keeper:owner) in
+    let restored = get ~router (bound_path ~size:"96" starting keeper) in
+    check int "A after B after A accepts only matching A" 200 restored.status;
+    check string "restored bound A is never the B PNG" before.body restored.body;
+    let account = require_ok Candle_shop.error_to_string (Candle_shop.account ~now:Time_compat.now ~base_path ~keeper:owner) in
     check int "equipping spends no Candle" 800 account.balance_milli;
     check bool "reset preserves purchase ownership" true (List.mem item account.owned_items);
     Fs_compat.append_file (Candle_ledger.path ~base_path) "{partial";
     let corrupt = ledger_bytes () in
     check int "unreadable ledger refuses a cached portrait" 503 (get ~router (path ~size:"96" keeper)).status;
+    check int "unreadable authority refuses a bound cached portrait" 503
+      (get ~router (bound_path ~size:"96" starting keeper)).status;
     check int "unreadable ledger refuses an Item account" 503
       (get ~router ~token:reader (item_path keeper)).status;
     (match dashboard_portrait () with
      | Keeper_portrait_equipment.Unavailable _ -> ()
      | Keeper_portrait_equipment.Ready _ -> fail "dashboard hid unreadable authority with cached gear");
+    let damaged_rows, errors, _, _, damaged_candle = require_ok Fun.id
+      (Tui_decode.decode_keeper_runtime_list (public_roster ())) in
+    check int "currency failure does not invent a Keeper metadata error" 0 (List.length errors);
+    (match require_ok Fun.id damaged_candle with
+     | Candle_observation.Disabled {reason} -> check bool "ledger error is observable" true (String.length reason > 0)
+     | Candle_observation.Off | Candle_observation.Ready _ -> fail "damaged ledger concealed its failure");
+    (match runtime_rows, damaged_rows with
+     | [before], [row] ->
+       check (option string) "damaged ledger withdraws prior balance" None row.Tui_decode.kr_candle_balance_milli;
+       check bool "Keeper lifecycle reading survives currency failure" true
+         (before.kr_phase = row.kr_phase && before.kr_health = row.kr_health && before.kr_keepalive_running = row.kr_keepalive_running)
+     | _ -> fail "currency failure hid the healthy Keeper");
     check string "portrait read does not truncate damaged ledger" corrupt (ledger_bytes ());
     (match Sys.getenv_opt "RUNNER_TEMP" with
      | None -> ()
@@ -564,10 +871,14 @@ let () =
       ; test_case "tags follow build, name and size" `Quick test_tags_follow_build_name_and_size
       ; test_case "unscoped tags follow the bytes" `Quick test_unscoped_tags_follow_the_bytes
       ; test_case "cache stays within its byte budget" `Quick test_cache_keeps_drawings_within_its_budget
-      ; test_case "equipment wire changes actual PNG and cache identity" `Quick test_equipment_wire_and_cache ]
+      ; test_case "equipment wire changes actual PNG and cache identity" `Quick test_equipment_wire_and_cache
+      ; test_case "expected equipment is checked once before tags/cache" `Quick test_expected_equipment_precedes_tags_and_cache
+      ; test_case "account identity binds facts, not natural decay" `Quick test_account_revision_binds_facts_not_decay_clock ]
     ; "router",
-      [ test_case "PNG with a strong tag and 304" `Quick test_router_serves_png_with_a_strong_tag
+      [ test_case "preview preserves current equipment" `Quick test_router_preview_is_read_only
+      ; test_case "PNG with a strong tag and 304" `Quick test_router_serves_png_with_a_strong_tag
       ; test_case "400 and 404" `Quick test_router_refusals
+      ; test_case "Gate operator revisions bypass shared metadata cache" `Quick test_gate_account_revision_uses_current_candle_reading
       ; test_case "strict auth needs a read token" `Quick test_router_strict_auth_needs_a_read_token
       ; test_case "GET leaves keeper metadata untouched" `Quick test_router_leaves_keeper_metadata_untouched
       ; test_case "purchase equip reset and remote portrait share one ledger" `Quick test_purchase_equip_and_remote_portrait ] ]

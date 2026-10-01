@@ -71,6 +71,12 @@ val terminal_effect_boundary_decision
     envelope. *)
 
 module For_testing : sig
+  val finalize_turn_surface :
+    response_text:string ->
+    stop_reason:Runtime_agent.stop_reason ->
+    Keeper_tools_agent_core.terminal_effect_state ->
+    (Keeper_turn_outcome.t * Keeper_tool_execution.terminal_effect_receipt option,
+     Agent_core.Error.t) result
   val native_tool_boundary :
     keeper_name:string ->
     repetition_execution:Keeper_repetition_scope.Execution.t option ->
@@ -238,9 +244,15 @@ end
     @param on_event Optional event callback
     @param trajectory_acc Optional trajectory accumulator for recording
     @param shared_context Optional shared AGENT_CORE context for cross-turn state
-    @param event_bus Optional MASC event bus *)
+    @param event_bus Optional MASC event bus
+    @param event_scope Producer scope shared with a turn subscriber. Omission
+      creates a fresh scope for this execution.
+    @param observation_token Captured registry observation ownership. Omission
+      disables observation updates; it never adopts a currently active turn. *)
 val run_turn
-  :  config:Workspace.config
+  : ?event_scope:Keeper_turn_scope.t
+  -> ?observation_token:Keeper_turn_observation_token.t
+  -> config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
   -> publication_recovery:
        Keeper_publication_recovery_availability.turn_context

@@ -18,6 +18,8 @@ import sys
 import test_tui_keyboard_input as h
 
 SOURCE_MODULES = (
+    "bin/masc_tui_palette.ml",
+    "bin/masc_tui_palette.mli",
     "bin/masc_tui.ml",
     "bin/masc_tui_types.ml",
     "bin/masc_tui_render.ml",

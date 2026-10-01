@@ -324,9 +324,9 @@ val abandon :
     out to be alive and [Resumable_pending]. A root that is already
     [Abandoned] is returned unchanged. *)
 
-module For_testing : sig
-  val path : base_path:string -> keeper_name:string -> string
-end
+val ledger_path : base_path:string -> keeper_name:string -> string
+(** The Keeper's partition ledger file. A Keeper purge removes it with the
+    Keeper, so a later Keeper of the same name starts without its roots. *)
 
 val heap_root : (Obj.t -> 'a) -> 'a
 (** Run [walk] on this module's retained state, under the lock that guards

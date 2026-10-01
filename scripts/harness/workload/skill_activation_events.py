@@ -84,6 +84,7 @@ class SkillLedgerError(RuntimeError):
         location = "" if row is None else f"row {row}: "
         super().__init__(f"{location}{fault.value}: {detail}")
         self.fault = fault
+        self.detail = detail
         self.row = row
 
 
@@ -141,7 +142,7 @@ class _Cell:
 
     ``activation`` is the object the folded ledger holds; a delivery replaces
     its ``delivery`` value and an action is appended to ``actions``, the list
-    that object holds, so its fields keep the order of the recorded row.
+    that object holds, so its validated fields keep the server serializer order.
     """
 
     activation: JsonObject
@@ -217,13 +218,18 @@ def _object(value: JsonValue, what: str, row: int) -> JsonObject:
 
 
 def _exact_object(
-    value: JsonValue, fields: frozenset[str], what: str, row: int
+    value: JsonValue, fields: tuple[str, ...], what: str, row: int
 ) -> JsonObject:
     candidate = _object(value, what, row)
-    if candidate.keys() != fields:
+    if candidate.keys() != frozenset(fields):
         raise _malformed(
             f"{what} holds fields {sorted(candidate)}, not {sorted(fields)}", row
         )
+    # The typed server serializers have a fixed field order. Rebuild only
+    # validated objects in that order; never reorder events or array values.
+    ordered = [(key, candidate[key]) for key in fields]
+    candidate.clear()
+    candidate.update(ordered)
     return candidate
 
 
@@ -371,7 +377,7 @@ def _turn_ref(value: JsonObject, name: str, session: str, row: int,
 
 
 def _identity(value: JsonValue, row: int) -> None:
-    identity = _exact_object(value, frozenset({"source_id", "package_id", "name"}),
+    identity = _exact_object(value, ("source_id", "package_id", "name",),
                              "identity", row)
     _portable(identity, "source_id", "identity", row)
     package = _string(identity, "package_id", "identity", row)
@@ -391,12 +397,12 @@ def _invocation(value: JsonValue, row: int) -> None:
     if kind not in ("instruction", "composition"):
         raise _malformed("unknown invocation kind", row)
     payload = "served_content" if kind == "instruction" else "tool_name"
-    _exact_object(invocation, frozenset({"kind", "origin", payload}), "invocation", row)
+    _exact_object(invocation, ("kind", "origin", payload,), "invocation", row)
     origin = _object(invocation["origin"], "origin", row)
     if origin.get("kind") == f"session_{kind}":
-        _exact_object(origin, frozenset({"kind"}), "origin", row)
+        _exact_object(origin, ("kind",), "origin", row)
     elif origin.get("kind") == f"task_{kind}":
-        _exact_object(origin, frozenset({"kind", "task_ids"}), "origin", row)
+        _exact_object(origin, ("kind", "task_ids",), "origin", row)
         ids = origin["task_ids"]
         if (not isinstance(ids, list) or not ids
                 or any(not isinstance(task, str) or len(task) > 128
@@ -411,24 +417,23 @@ def _invocation(value: JsonValue, row: int) -> None:
     served = _object(invocation["served_content"], "served_content", row)
     match served.get("kind"):
         case "skill_body":
-            fields = {"kind", "bytes", "sha256"}
+            fields = ("kind", "bytes", "sha256")
         case "skill_resource":
-            fields = {"kind", "relative_path", "bytes", "sha256"}
+            fields = ("kind", "relative_path", "bytes", "sha256")
             path = _string(served, "relative_path", "served_content", row)
             if ("\\" in path or "\0" in path
                     or any(part in ("", ".", "..") for part in path.split("/"))):
                 raise _malformed("served_content.relative_path is not a Skill resource path", row)
         case _:
             raise _malformed("unknown served_content kind", row)
-    _exact_object(served, frozenset(fields), "served_content", row)
+    _exact_object(served, fields, "served_content", row)
     _natural(served, "bytes", "served_content", row)
     _digest(served, "sha256", "served_content", row)
 
 
 def _delivery(value: JsonValue, row: int) -> tuple[JsonObject, _BoundaryKind, int]:
-    delivery = _exact_object(value, frozenset({"boundary", "runtime_id", "delivered_at",
-                                             "content_bytes", "content_sha256"}), "delivery", row)
-    boundary = _exact_object(delivery["boundary"], frozenset({"kind", "agent_core_turn"}),
+    delivery = _exact_object(value, ("boundary", "runtime_id", "delivered_at", "content_bytes", "content_sha256",), "delivery", row)
+    boundary = _exact_object(delivery["boundary"], ("kind", "agent_core_turn",),
                              "delivery.boundary", row)
     try:
         kind = _BoundaryKind(boundary["kind"])
@@ -446,10 +451,10 @@ def _action_identity(value: JsonValue, row: int) -> JsonObject:
     identity = _object(value, "action.identity", row)
     match identity.get("kind"):
         case "call_id":
-            _exact_object(identity, frozenset({"kind", "call_id"}), "action.identity", row)
+            _exact_object(identity, ("kind", "call_id",), "action.identity", row)
             _nonblank(identity, "call_id", "action.identity", row)
         case "provider_step":
-            _exact_object(identity, frozenset({"kind", "conversation_id", "step_index"}),
+            _exact_object(identity, ("kind", "conversation_id", "step_index",),
                           "action.identity", row)
             _nonblank(identity, "conversation_id", "action.identity", row)
             _natural(identity, "step_index", "action.identity", row)
@@ -459,8 +464,7 @@ def _action_identity(value: JsonValue, row: int) -> JsonObject:
 
 
 def _action(value: JsonValue, row: int) -> JsonObject:
-    action = _exact_object(value, frozenset({"identity", "tool_name", "runtime_id",
-                                           "agent_core_turn", "observed_at"}), "action", row)
+    action = _exact_object(value, ("identity", "tool_name", "runtime_id", "agent_core_turn", "observed_at",), "action", row)
     _action_identity(action["identity"], row)
     _portable(action, "tool_name", "action", row)
     _nonblank(action, "runtime_id", "action", row)
@@ -470,10 +474,7 @@ def _action(value: JsonValue, row: int) -> JsonObject:
 
 
 def _parse_activation(event: JsonObject, row: int, session: str) -> _ActivationRecorded:
-    activation = _exact_object(event["activation"], frozenset({
-        "identity", "content_revision", "snapshot_revision", "turn_ref", "runtime_id",
-        "skill_tool_use_id", "agent_core_turn", "invocation", "delivery", "actions",
-        "activated_at"}), "activation", row)
+    activation = _exact_object(event["activation"], ("identity", "content_revision", "snapshot_revision", "turn_ref", "runtime_id", "skill_tool_use_id", "agent_core_turn", "invocation", "delivery", "actions", "activated_at",), "activation", row)
     _identity(activation["identity"], row)
     _digest(activation, "content_revision", "activation", row)
     _digest(activation, "snapshot_revision", "activation", row)
@@ -510,7 +511,7 @@ def _parse_activation(event: JsonObject, row: int, session: str) -> _ActivationR
 
 
 def _parse_delivery(value: JsonValue, row: int) -> _DeliveryObserved:
-    entry = _exact_object(value, frozenset({"skill_tool_use_id", "delivery"}),
+    entry = _exact_object(value, ("skill_tool_use_id", "delivery",),
                           "delivery observation", row)
     delivery, boundary, turn = _delivery(entry["delivery"], row)
     return _DeliveryObserved(
@@ -530,21 +531,21 @@ def _parse_action(event: JsonObject, row: int) -> _ActionObserved:
 
 def _parse_rejection(event: JsonObject, row: int, session: str) -> _TransitionRejected:
     rejection = _object(event["rejection"], "rejection", row)
-    fields = {"kind", "skill_tool_use_id", "activation_turn_ref", "observed_turn_ref",
-              "observed_agent_core_turn", "observed_at"}
+    fields = ("kind", "skill_tool_use_id", "activation_turn_ref", "observed_turn_ref")
     match rejection.get("kind"):
         case "delivery_order":
-            fields.add("activation_agent_core_turn")
+            fields += ("activation_agent_core_turn",)
             _natural(rejection, "activation_agent_core_turn", "rejection", row)
         case "delivery_conflict":
             pass
         case "action_before_delivery":
-            fields.update({"action_identity", "tool_name"})
+            fields += ("action_identity", "tool_name")
             _action_identity(rejection.get("action_identity"), row)
             _portable(rejection, "tool_name", "rejection", row)
         case _:
             raise _malformed("unknown rejection kind", row)
-    _exact_object(rejection, frozenset(fields), "rejection", row)
+    fields += ("observed_agent_core_turn", "observed_at")
+    _exact_object(rejection, fields, "rejection", row)
     tool_id = _nonblank(rejection, "skill_tool_use_id", "rejection", row)
     _turn_ref(rejection, "activation_turn_ref", session, row)
     _turn_ref(rejection, "observed_turn_ref", session, row)
@@ -559,10 +560,10 @@ def _parse_event(value: JsonValue, row: int, session: str) -> _Event:
     kind = event.get("kind")
     match kind:
         case "activation_recorded":
-            fields = frozenset({"kind", "activation"})
+            fields = ("kind", "activation",)
             return _parse_activation(_exact_object(event, fields, kind, row), row, session)
         case "deliveries_observed":
-            fields = frozenset({"kind", "deliveries"})
+            fields = ("kind", "deliveries",)
             entries = _exact_object(event, fields, kind, row)["deliveries"]
             if not isinstance(entries, list):
                 raise _malformed("deliveries_observed.deliveries is not an array", row)
@@ -570,10 +571,10 @@ def _parse_event(value: JsonValue, row: int, session: str) -> _Event:
                 tuple(_parse_delivery(entry, row) for entry in entries)
             )
         case "action_observed":
-            fields = frozenset({"kind", "skill_tool_use_ids", "action"})
+            fields = ("kind", "skill_tool_use_ids", "action",)
             return _parse_action(_exact_object(event, fields, kind, row), row)
         case "transition_rejected":
-            fields = frozenset({"kind", "rejection"})
+            fields = ("kind", "rejection",)
             return _parse_rejection(_exact_object(event, fields, kind, row), row, session)
         case _:
             raise SkillLedgerError(
@@ -714,6 +715,47 @@ def _revision(
     activations: list[JsonValue],
     transition_rejections: list[JsonValue],
 ) -> str:
+    # Projection callers also supply decoded JSON, potentially in any object
+    # order. Validate and canonicalize copies just like the event reader.
+    activations = copy.deepcopy(activations)
+    transition_rejections = copy.deepcopy(transition_rejections)
+    try:
+        parsed_activations = [
+            _parse_activation({"activation": activation}, 0, session_id)
+            for activation in activations
+        ]
+        # Match of_projection_yojson: validate every activation first, then
+        # enforce the ledger-wide call identity before decoding rejections.
+        by_call = {}
+        for activation in parsed_activations:
+            if activation.skill_tool_use_id in by_call:
+                raise SkillLedgerError(
+                    SkillLedgerFault.DUPLICATE_SKILL_TOOL_USE_ID,
+                    f"duplicate activation {activation.skill_tool_use_id!r}",
+                )
+            by_call[activation.skill_tool_use_id] = activation
+        parsed_rejections = [
+            _parse_rejection({"rejection": rejection}, 0, session_id)
+            for rejection in transition_rejections
+        ]
+        for rejection in parsed_rejections:
+            activation = by_call.get(rejection.skill_tool_use_id)
+            if activation is None:
+                raise SkillLedgerError(
+                    SkillLedgerFault.ORPHAN_TRANSITION_REJECTION,
+                    f"no activation {rejection.skill_tool_use_id!r}",
+                )
+            if activation.turn_ref != rejection.activation_turn_ref:
+                raise SkillLedgerError(
+                    SkillLedgerFault.TRANSITION_REJECTION_ACTIVATION_MISMATCH,
+                    f"rejection for {rejection.skill_tool_use_id!r} names a different activation turn",
+                )
+    except SkillLedgerError as error:
+        # These values come from a projection, with no event-log row.
+        # Shape refusals are ledger faults; specific invariant codes remain.
+        fault = (SkillLedgerFault.MALFORMED_LEDGER
+                 if error.fault is SkillLedgerFault.MALFORMED_EVENT else error.fault)
+        raise SkillLedgerError(fault, error.detail) from error
     canonical: JsonObject = {
         "workspace_key": workspace_key,
         "session_id": session_id,
@@ -777,8 +819,8 @@ def fold_event_log(raw: bytes) -> JsonObject | None:
     Returns None when the log is empty: the session has recorded nothing.
     Bytes with no newline at all are refused: the server creates a log with
     its header and first event in one atomic step, so its first row is always
-    complete. Activations keep the order they were recorded in and each keeps
-    the field order of its recorded row. Raises SkillLedgerError for a row the
+    complete. Activations keep the order they were recorded in; object fields use
+    the typed server serializer order. Raises SkillLedgerError for a row the
     server's rules refuse, and for a ledger whose strings are not Unicode text.
     """
     if raw != b"" and b"\n" not in raw:

@@ -90,8 +90,14 @@ let current_controller () =
   | Error _ -> None
 
 let list_json ~config =
-  let controller = current_controller () in
-  `Assoc
+  match Play_invite.list ~base_path:config.Workspace.base_path ~now:(Time_compat.now ()) with
+  | Error (Play_invite.Credentials_unavailable error) ->
+    `Service_unavailable, Server_refusal.json ~code:"credentials_unreadable" (Masc_domain.masc_error_to_string error)
+  | Error (Play_invite.Invalid_expiry (Masc_domain.Credential_expiry.Invalid_timestamp stamp)) ->
+    `Service_unavailable, Server_refusal.json ~code:"invalid_credential_expiry" ("invalid credential expiry: " ^ stamp)
+  | Ok invites ->
+    let controller = current_controller () in
+    `OK, `Assoc
     [ ( "invites"
       , `List
           (List.map
@@ -102,7 +108,7 @@ let list_json ~config =
                  ; ("expired", `Bool expired)
                  ; ("holds_controller", `Bool (controller = Some invite_name))
                  ])
-             (Play_invite.list ~base_path:config.Workspace.base_path ~now:(Time_compat.now ()))) )
+             invites))
     ]
 
 type release =
@@ -174,16 +180,20 @@ let revoke_response ~config ~by ~raw_name =
               (Masc_domain.agent_role_to_string role)) )
      | Error (Play_invite.Credential_not_deleted error) ->
        `Service_unavailable,
-       Server_refusal.json ~code:"not_deleted" (Masc_domain.masc_error_to_string error))
+       Server_refusal.json ~code:"not_deleted" (Masc_domain.masc_error_to_string error)
+     | Error Play_invite.Credential_unreadable ->
+       `Service_unavailable, Server_refusal.json ~code:"credential_unreadable"
+         ("the credential for " ^ raw_name ^ " could not be read")
+     | Error (Play_invite.Credential_identity_mismatch owner) ->
+       `Service_unavailable, Server_refusal.json ~code:"credential_identity_mismatch"
+         (Printf.sprintf "the credential for %s resolves to %s" raw_name owner))
 
 module For_testing = struct
   let revoke_response = revoke_response
 end
 
-(* One issue or revoke at a time. The name check and the credential write are
-   separate file operations that yield, so two requests for one name could
-   both pass the check, and the second would overwrite the first's
-   credential. *)
+(* Serialize invite routes. Auth's credential transaction owns the name-file
+   check and publication, also excluding credential writers outside these routes. *)
 let invites_lock = Eio.Mutex.create ()
 let one_at_a_time f = Eio.Mutex.use_rw ~protect:true invites_lock f
 
@@ -200,8 +210,8 @@ let add_routes router =
   |> Http.Router.get invites_path (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
          (fun state _by request reqd ->
-           respond_json_value_with_cors request reqd
-             (list_json ~config:(Mcp_server.workspace_config state)))
+           let status, json = list_json ~config:(Mcp_server.workspace_config state) in
+           respond_json_value_with_cors ~status request reqd json)
          request reqd)
   |> Http.Router.prefix_delete invite_prefix (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin

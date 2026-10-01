@@ -154,7 +154,8 @@ let load_active_tasks (base_path : string) :
     * Masc_domain.task list
     * string option
     * Masc_tui_task_flow.t option
-    * Masc_tui_agenda.stalled list option =
+    * Masc_tui_agenda.stalled Masc_tui_agenda.reading
+    * task_goal_links_reading =
   let config = Workspace_core.default_config base_path in
   let path = Workspace_backlog.backlog_path config in
   match Workspace_backlog.read_backlog_observation_with_source_r config with
@@ -165,7 +166,8 @@ let load_active_tasks (base_path : string) :
       , []
       , Some reason
       , None
-      , None )
+      , Masc_tui_agenda.Read_failed reason
+      , Goal_links_not_read )
   | Ok observation ->
       let recovery_error =
         match observation.recovered_from with
@@ -174,23 +176,22 @@ let load_active_tasks (base_path : string) :
             report path recovery.primary_error;
             Some ("task backlog recovered from backup: " ^ recovery.primary_error)
       in
-      (* The backlog says what the tasks are; the goal-task registry says what
-         they serve. A task record carries no goal on purpose -- the registry
-         is the source of truth -- so reading only the backlog is what left
-         every task on this screen unable to name its goal.
-
-         A registry that cannot be read leaves the links empty rather than
-         failing the whole load: the tasks are still worth showing, and the
-         reason is reported beside them rather than as an absence of links. *)
-      let goals_for_task, goal_link_error =
-        match Workspace_goal_index.read_goal_task_links_r config with
-        | Error err -> (fun _ -> []), Some ("goal links unavailable: " ^ err)
+      (* Goal links are supplemental to tasks, but only a successful primary
+         registry read can establish their presence or absence. *)
+      let goal_task_links =
+        match Workspace_goal_index.read_goal_task_links_authoritative_r config with
+        | Error err ->
+            let reason = "goal links unavailable: " ^ err in
+            Goal_links_read_failed reason
         | Ok goal_task_links ->
-          let index =
-            Workspace_goal_index.build_task_goal_index ~goal_task_links ()
-          in
-          ( (fun task_id -> Workspace_goal_index.goals_for_task index ~task_id)
-          , None )
+            Goal_links_read
+              (Workspace_goal_index.build_task_goal_index ~goal_task_links ())
+      in
+      let goals_for_task =
+        match goal_task_links with
+        | Goal_links_read index ->
+            fun task_id -> Workspace_goal_index.goals_for_task index ~task_id
+        | Goal_links_not_read | Goal_links_read_failed _ -> fun _ -> []
       in
       let archived, archive_error =
         match read_archived_tasks config with
@@ -209,7 +210,7 @@ let load_active_tasks (base_path : string) :
              observation.observed_backlog.tasks)
       , observation.observed_backlog.tasks
       , (match List.filter_map Fun.id
-                 [ recovery_error; goal_link_error; archive_error ] with
+                 [ recovery_error; archive_error ] with
          | [] -> None
          | errors -> Some (String.concat " · " errors))
       , Some (Masc_tui_task_flow.of_tasks ~now:(Unix.gettimeofday ()) ~archived
@@ -218,15 +219,19 @@ let load_active_tasks (base_path : string) :
          assignee has a Keeper queue reads the registry and the meta store, and
          a frame that touches the filesystem per row is a frame that stutters.
          Same rows, same load, same answer the rejection delivery computes. *)
-      , Some
-          (Masc.Operator_task_attention.project ~config
-             observation.observed_backlog.tasks
-           |> List.map (fun item ->
-                { Masc_tui_agenda.task_id =
-                    Masc.Operator_task_attention.task_id item
-                ; what = Masc.Operator_task_attention.summary item
-                ; since_iso = Masc.Operator_task_attention.waiting_since item
-                })) )
+      , (match recovery_error with
+         | Some reason -> Masc_tui_agenda.Read_failed reason
+         | None ->
+             Masc_tui_agenda.Read
+               (Masc.Operator_task_attention.project ~config
+                  observation.observed_backlog.tasks
+                |> List.map (fun item ->
+                     { Masc_tui_agenda.task_id =
+                         Masc.Operator_task_attention.task_id item
+                     ; what = Masc.Operator_task_attention.summary item
+                     ; since_iso = Masc.Operator_task_attention.waiting_since item
+                     })))
+      , goal_task_links )
 
 (* The Goals the verifier proved, each waiting on the operator's confirmation.
    Read from the goal store the way the tasks above are read from the backlog,
@@ -345,10 +350,11 @@ let load_from_masc_dir (state : state) (base_path : string) =
   (* Load tasks from their single durable source. The domain rows land first:
      a detail view open across this refresh keeps its row even when the task
      just turned terminal, because the projection below drops exactly those. *)
-  let rows, tasks_domain, tasks_error, task_flow, operator_stalled =
+  let rows, tasks_domain, tasks_error, task_flow, operator_stalled, goal_task_links =
     load_active_tasks base_path
   in
   state.tasks_domain <- tasks_domain;
+  state.goal_task_links <- goal_task_links;
   state.task_reading <- rows;
   state.tasks <-
     (match rows with
@@ -503,10 +509,11 @@ let clear_local_workspace (state : state) =
   state.agents <- [];
   state.tasks <- [];
   state.tasks_domain <- [];
+  state.goal_task_links <- Goal_links_not_read;
   state.task_focus <- Masc_tui_overview_tasks.No_task_focus;
   state.task_reading <- Masc_tui_overview_tasks.Rows_unread;
   state.task_flow <- None;
-  state.operator_stalled <- None;
+  state.operator_stalled <- Masc_tui_agenda.Not_read;
   state.goals_to_confirm <- Masc_tui_agenda.Not_read;
   state.tasks_error <- None;
   state.keepers <- [];
@@ -1164,7 +1171,7 @@ let load_board_list ~(host : string) ~(port : int)
 (** The ordinary Board read uses the newest twenty. The reader can request
     the complete history explicitly; that read walks bounded REST pages. *)
 let load_board_post ?(full_history = false) ~(host : string) ~(port : int)
-    ~(post_id : string) () : (board_post * board_comment list, string) result =
+    ~(post_id : string) () : (board_post * board_comment list * string option, string) result =
   let read_page offset =
     let* json =
       Masc_tui_frame_timing.time_stage ~name:"board.http_json"
@@ -1178,17 +1185,22 @@ let load_board_post ?(full_history = false) ~(host : string) ~(port : int)
     in
     Masc_tui_frame_timing.time_stage ~name:"board.model_decode"
       (fun () ->
-        let* comments_json = Masc.Tui_decode_fields.optional_list_field json "comments" in
+        let* comments_json = Masc.Tui_decode_fields.required_list_field json
+          (if full_history then "comments" else "comment_context") in
         let* comments = decode_board_comments comments_json in
+        let* revision = Masc.Tui_decode_fields.required_string_field json "comment_revision" in
+        let* () = if String.length revision=64 && String.for_all
+            (function '0'..'9' | 'a'..'f' -> true | _ -> false) revision
+          then Ok () else Error "board detail comment revision is malformed" in
         let* page = Masc.Tui_decode_fields.required_object_field json "comment_page" in
         let* actual_offset = Masc.Tui_decode_fields.required_int_field page "offset" in
         let* total = Masc.Tui_decode_fields.required_int_field page "total" in
         match offset with
         | Some expected when actual_offset <> expected ->
             Error "board detail returned a different comment offset"
-        | None | Some _ -> Ok (json, comments, actual_offset, total))
+        | None | Some _ -> Ok (json, comments, actual_offset, total, revision))
   in
-  let* (first_json, first_comments, first_offset, total) =
+  let* (first_json, first_comments, first_offset, total, revision) =
     read_page (if full_history then Some 0 else None)
   in
   let post_json =
@@ -1201,9 +1213,11 @@ let load_board_post ?(full_history = false) ~(host : string) ~(port : int)
       (fun () -> decode_board_post ~require_body:true post_json)
   in
   let rec read_remaining offset total reversed =
-    if offset >= total then Ok (post, List.rev reversed)
+    if offset >= total then Ok (post, List.rev reversed, None)
     else
-      let* (_, comments, _, total) = read_page (Some offset) in
+      let* (_, comments, _, page_total, page_revision) = read_page (Some offset) in
+      let* () = if page_revision=revision && page_total=total then Ok ()
+        else Error "Board comment thread changed during full history read; refresh to read one snapshot" in
       let next_offset = offset + List.length comments in
       if next_offset <= offset then
         Error "board detail comment page did not advance"
@@ -1212,7 +1226,22 @@ let load_board_post ?(full_history = false) ~(host : string) ~(port : int)
   if full_history then
     read_remaining (first_offset + List.length first_comments) total
       (List.rev first_comments)
-  else Ok (post, first_comments)
+  else
+    let* page_json = Masc.Tui_decode_fields.required_list_field first_json "comments" in
+    let* page_comments = decode_board_comments page_json in
+    let* () =
+      if List.for_all (fun page_comment ->
+          List.exists (fun context_comment ->
+            String.equal page_comment.bc_id context_comment.bc_id) first_comments)
+          page_comments then Ok ()
+      else Error "Board comment context is missing a page comment"
+    in
+    let landing =
+      if List.length first_comments = List.length page_comments then None
+      else match List.rev page_comments with
+        | [] -> None
+        | comment :: _ -> Some comment.bc_id in
+    Ok (post, first_comments, landing)
 
 (** Load the actor-scoped pending confirmation envelope from the operator
     surface. Missing or malformed envelopes remain explicit errors. *)
@@ -1280,7 +1309,7 @@ let load_provider_usage_history ~(host : string) ~(port : int) ~(days : int) =
 
 type runtime_surface_load = {
   rsl_resolved : Tui_decode.runtime_resolved_snapshot;
-  rsl_probe : (Tui_decode.runtime_probe_snapshot, string) result;
+  rsl_probe : (Masc.Tui_decode_runtime_probe.runtime_probe_snapshot, string) result;
 }
 
 (** Load the Runtime operator surface from its identity projection and optional
@@ -1309,7 +1338,7 @@ let load_runtime_surface ~(host : string) ~(port : int) ~(force : bool) :
              match probe_result with
              | Error detail -> Error ("runtime probe load failed: " ^ detail)
              | Ok probe_json ->
-                 (match Tui_decode.decode_runtime_probe_snapshot probe_json with
+                 (match Masc.Tui_decode_runtime_probe.decode_runtime_probe_snapshot probe_json with
                   | Ok probe -> Ok probe
                   | Error detail ->
                       Error ("runtime probe decode failed: " ^ detail))
@@ -1402,39 +1431,6 @@ let keeper_liveness_of_briefs briefs =
       | _ -> { counts with klc_unreadable = counts.klc_unreadable + 1 })
     empty briefs
 
-(* One Team row per brief. A row with no name is not a Keeper anyone can act
-   on and is left out; the liveness counts above still count it. A phase or a
-   turn age this build cannot read stays visible as such on its own row
-   rather than failing the whole snapshot for one Keeper. *)
-let overview_keeper_rows_of_briefs briefs =
-  List.filter_map
-    (fun brief ->
-      match Yojson.Safe.Util.member "name" brief with
-      | `String name when String.trim name <> "" ->
-          let okp_phase =
-            match Yojson.Safe.Util.member "phase" brief with
-            | `Null -> Keeper_phase_absent
-            | `String word -> (
-                match Tui_decode.keeper_phase_of_string word with
-                | Some phase -> Keeper_phase phase
-                | None -> Keeper_phase_unreadable word)
-            | other -> Keeper_phase_unreadable (Yojson.Safe.to_string other)
-          in
-          let okp_last_turn_ago_s =
-            match Yojson.Safe.Util.member "last_turn_ago_s" brief with
-            | `Float seconds -> Some seconds
-            | `Int seconds -> Some (float_of_int seconds)
-            | _ -> None
-          in
-          let okp_paused =
-            match Yojson.Safe.Util.member "paused" brief with
-            | `Bool paused -> Some paused
-            | _ -> None
-          in
-          Some { okp_name = name; okp_phase; okp_last_turn_ago_s; okp_paused }
-      | _ -> None)
-    briefs
-
 (* Plan usage on Usage names each account's email. The route needs Admin,
    and a read that fails is said beside the section rather than drawn as
    accounts without an email. The section names the failure, so the reason is
@@ -1502,25 +1498,6 @@ let load_overview ~(host : string) ~(port : int) :
         let counts = keeper_liveness_of_briefs keeper_briefs in
         { counts with klc_unreadable = counts.klc_unreadable + n_unread }
       in
-      (* An unread Keeper gets a Team row too, so the block and the count
-         name the same fleet; its phase is the reason the row was not read. *)
-      let ov_keeper_rows =
-        overview_keeper_rows_of_briefs keeper_briefs
-        @ List.map
-            (fun (unread : Keeper_snapshot_unread.t) ->
-              let reason =
-                match unread.reason with
-                | Keeper_snapshot_unread.Meta_read_failed detail ->
-                    "metadata unread: " ^ detail
-                | Keeper_snapshot_unread.Row_raised detail -> "row raised: " ^ detail
-              in
-              { okp_name = unread.name
-              ; okp_phase = Keeper_phase_unreadable reason
-              ; okp_last_turn_ago_s = None
-              ; okp_paused = None
-              })
-            keepers_unread
-      in
       let ov_mcp_agents = List.length agent_briefs in
       let* ov_generated_at = Masc.Tui_decode_fields.required_string_field json "generated_at" in
       Ok
@@ -1529,7 +1506,6 @@ let load_overview ~(host : string) ~(port : int) :
           ov_keepers;
           ov_keeper_listing;
           ov_keeper_liveness;
-          ov_keeper_rows;
           ov_mcp_agents;
           (* The briefing projects one fact onto two lists: an incident is
              also queued for operator attention, as the same JSON row. On the
@@ -1863,10 +1839,10 @@ let load_fleet_safety ~(host : string) ~(port : int) :
     rather than dropped: a clamped list cannot answer whether a keeper the TUI
     knows from disk has a running fiber, and the lifecycle actions depend on
     that answer. *)
-let load_keeper_roster ~(host : string) ~(port : int) :
-    (Masc_tui_keeper_control.roster, Masc_tui_keeper_control.roster_failure)
+let load_keeper_roster ~(host : string) ~(port : int) ~expected_workspace :
+    (Masc_tui_keeper_control.roster * (Candle_observation.t, string) result, Masc_tui_keeper_control.roster_failure)
     result =
-  match fetch_keeper_runtimes ~host ~port with
+  match fetch_keeper_runtimes ~host ~port ~expected_workspace with
   | Error transport ->
       Error (Masc_tui_keeper_control.Roster_unreachable transport)
   | Ok (status, body) when not (Tui_decode.is_success_http_status status) ->
@@ -1879,8 +1855,8 @@ let load_keeper_roster ~(host : string) ~(port : int) :
           match Tui_decode.decode_keeper_runtime_list json with
           | Error detail ->
               Error (Masc_tui_keeper_control.Roster_malformed detail)
-          | Ok (rows, errors, truncated, total) ->
-              Ok (Masc_tui_keeper_control.roster_of_reading ~errors ~rows ~truncated ~total)))
+          | Ok (rows, errors, truncated, total, candle) ->
+              Ok (Masc_tui_keeper_control.roster_of_reading ~errors ~rows ~truncated ~total, candle)))
 
 (* Every line these views hand the renderer goes through the terminal
    sanitizer: a CR, a tab, or a stray OSC in fetched text is data to show

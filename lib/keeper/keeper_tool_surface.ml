@@ -92,7 +92,7 @@ let keeper_list_body ~(config : Workspace.config) args : tool_result =
   in
   (* Equipment bypasses the metadata TTL; one immutable ledger read serves
      all rows, including failures, for this response. *)
-  let equipment = Candle_equipment.reader ~base_path:config.base_path () in
+  let equipment = Candle_equipment.reader ~now:Time_compat.now ~base_path:config.base_path () in
   let row = function
     | `Assoc fields as json ->
       let portrait = match Json_util.assoc_string_opt "name" json with
@@ -100,7 +100,9 @@ let keeper_list_body ~(config : Workspace.config) args : tool_result =
             | Ok value -> Keeper_portrait_equipment.Ready value
             | Error reason -> Keeper_portrait_equipment.Unavailable reason)
         | None -> Keeper_portrait_equipment.Unavailable "Keeper name unavailable" in
-      `Assoc (("portrait", Keeper_portrait_equipment.reading_to_json portrait) :: List.remove_assoc "portrait" fields)
+      `Assoc (("portrait", Keeper_portrait_equipment.reading_to_json portrait)
+        :: List.remove_assoc "candle_account_revision"
+          (List.remove_assoc "candle_balance_milli" (List.remove_assoc "portrait" fields)))
     | json -> json in
   let data = match data with
     | `Assoc fields -> `Assoc (List.map (fun (key, value) ->

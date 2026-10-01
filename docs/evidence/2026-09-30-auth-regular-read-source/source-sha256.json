@@ -1,0 +1,67 @@
+{
+  "algorithm": "sha256",
+  "scope": "Source files from a6938d8ac7a578ea97c1decf26851eeae45def3a plus regenerated evidence metadata in this evidence-only commit; manifest excludes itself.",
+  "files": [
+    {
+      "path": "changelog.d/40256.md",
+      "sha256": "4d08198ee8bd30ec2d7e5ae75b7a603533ac6990fb37ca0b031dabcefd9fcd03"
+    },
+    {
+      "path": "lib/auth/auth.ml",
+      "sha256": "b1a15697ae070588f20cfda4aa170e65da3c0c8495736bef8584c71356b17120"
+    },
+    {
+      "path": "lib/auth/auth.mli",
+      "sha256": "f5cb798abe03f2f0fb31423b74aed7373beb7961ab2a6dee2b5d28fb0e5b4622"
+    },
+    {
+      "path": "lib/auth/auth_credential_base.ml",
+      "sha256": "2e9fb4e2379b097b2938488aab7d13f898a1308e7392ba93e9631c4e9d3bfb28"
+    },
+    {
+      "path": "lib/auth/auth_login.ml",
+      "sha256": "5456acdd9b175bcb0f94259fce16ff688d1e6950527f41d1a6baccb52e6380d5"
+    },
+    {
+      "path": "lib/auth/auth_login.mli",
+      "sha256": "e6142ad25b3558b9f4e5356143938a4a783622b9a9563605ae69018d3f4a883f"
+    },
+    {
+      "path": "lib/auth/auth_oauth.ml",
+      "sha256": "06b8a3adbeee81d79ec7f50f2ae66257815ca0e8daefc5b97376f43c3bf02634"
+    },
+    {
+      "path": "lib/auth/auth_oauth.mli",
+      "sha256": "0fd7917ee870d82ae2018303388d1c35bcc94ba5088fdfdd0298ba040f949695"
+    },
+    {
+      "path": "test/dune",
+      "sha256": "38bc9cf3eb9e81c6f1f3be56acd32fb29d5ba22fd39f70a881caf001557fc252"
+    },
+    {
+      "path": "test/stanzas/test_auth_regular_read_boundary.inc",
+      "sha256": "f4ed1b499db52db5565daa30ca773c95c92eaf7fba51b9df8f2075a674d0dca5"
+    },
+    {
+      "path": "test/test_auth_regular_read_boundary.ml",
+      "sha256": "34f65385b49d3d21e01cf5516974c3b197aa62fee8fb092f8ee587af64733778"
+    },
+    {
+      "path": "docs/evidence/2026-09-30-auth-regular-read-source/README.md",
+      "sha256": "98dae40e0bf37a67b704c9812a989dbe825d38e5e71f599787fc9f3b63b17571"
+    },
+    {
+      "path": "docs/evidence/2026-09-30-auth-regular-read-source/composition.json",
+      "sha256": "7bfa091a31effe601203caa2c3f3c22413ae9853f566f18f52bffaff95af2dcf"
+    },
+    {
+      "path": "docs/evidence/2026-09-30-auth-regular-read-source/parse-checks.json",
+      "sha256": "8dd1446a15a73db159c572d9b8df1267d4e74e5b6563cbaa0fff43e05560b67e"
+    },
+    {
+      "path": "docs/evidence/2026-09-30-auth-regular-read-source/source-checks.json",
+      "sha256": "d7a24aeeea11185e9d17ab5065f23da5dc9f2122c6c38711318d8ffbd2bf8db3"
+    }
+  ],
+  "source_commit": "a6938d8ac7a578ea97c1decf26851eeae45def3a"
+}

@@ -235,9 +235,6 @@ let claude_stream_callback ~keeper_name ~quota_scope ~raw_trace_run ~turn_count 
             (Hashtbl.find_opt tool_indexes call_id)
         | Runtime_claude_code.Native_tool_started observation ->
           Option.iter
-            (Keeper_turn_preview.note_tool ~keeper_name ~now:(Time_compat.now ()))
-            observation.tool_name;
-          Option.iter
             (fun observe -> Runtime_native_tools.observe_exact_action ~official_turn:turn_count ~observe observation)
             on_native_action;
           Host.record_raw_native_tool
@@ -258,9 +255,6 @@ let claude_stream_callback ~keeper_name ~quota_scope ~raw_trace_run ~turn_count 
                ; tool_name = observation.tool_name
                })
         | Runtime_claude_code.Native_tool_finished observation ->
-          Option.iter
-            (Keeper_turn_preview.note_tool ~keeper_name ~now:(Time_compat.now ()))
-            observation.tool_name;
           Host.record_raw_native_tool
             ~keeper_name
             ~raw_trace_run

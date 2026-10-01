@@ -956,9 +956,14 @@ let flush_dirty store =
   let posts_jsonl, comments_jsonl, vote_log, reactions_jsonl =
     with_lock store (fun () ->
       let had_dirty = store.dirty_posts || store.dirty_comments in
-      let posts_jsonl = if had_dirty then Some (posts_jsonl_snapshot store) else None in
+      (* Each primary table owns its dirty flag. Comment creation and
+         removal mark both tables because they also change reply_count.
+         Votes/reactions retain the shared cycle below, including retry. *)
+      let posts_jsonl =
+        if store.dirty_posts then Some (posts_jsonl_snapshot store) else None
+      in
       let comments_jsonl =
-        if had_dirty then Some (comments_jsonl_snapshot store) else None
+        if store.dirty_comments then Some (comments_jsonl_snapshot store) else None
       in
       let vote_log =
         if had_dirty && Result.is_ok store.votes_load_result

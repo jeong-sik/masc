@@ -248,7 +248,7 @@ ITEM_CATALOG = [
 ]
 
 def item_tab_previews_accessories(binary: str) -> None:
-    fixtures = h.keeper_runtime_http_fixtures()
+    fixtures = _keyboard_harness.keeper_runtime_http_fixtures()
     fixtures["/api/v1/keepers/alpha/items"] = (
         200,
         {
@@ -265,44 +265,44 @@ def item_tab_previews_accessories(binary: str) -> None:
 
     def interact(process, fd, _slave, output, _base):
         open_alpha_detail(process, fd, output)
-        h.resize_and_wait(process, fd, output, rows=SHORT_ROWS, columns=COLUMNS, needle=INFO_TAB)
-        h.send_and_wait(process, fd, output, b"]", "▸Items".encode())
-        h.wait_for_output(process, fd, output, b"Balance 12.500 Candle", start=0, timeout=3.0)
-        h.drain_until_quiet(process, fd, output)
+        _keyboard_harness.resize_and_wait(process, fd, output, rows=SHORT_ROWS, columns=COLUMNS, needle=INFO_TAB)
+        _keyboard_harness.send_and_wait(process, fd, output, b"]", "▸Items".encode())
+        _keyboard_harness.wait_for_output(process, fd, output, b"Balance 12.500 Candle", start=0, timeout=3.0)
+        _keyboard_harness.drain_until_quiet(process, fd, output)
         first = last_frame_rows(output)
         assert row_of(first, b"Items 1/18") > 0
         assert b"owned" in first[row_of(first, b"glasses")]
         assert portrait_rows(first), "the Item preview has no picture at 100x24"
-        h.send_and_wait(process, fd, output, b"j", b"Items 2/18")
-        h.drain_until_quiet(process, fd, output)
+        _keyboard_harness.send_and_wait(process, fd, output, b"j", b"Items 2/18")
+        _keyboard_harness.drain_until_quiet(process, fd, output)
         second = last_frame_rows(output)
         assert row_of(second, b"shades") > 0
         assert portrait_rows(second), "the selected accessory lost its picture"
         assert row_of(second, b"Preview changes this picture only") > 0
         # Read the current completed viewport after each navigation or resize.
-        h.resize_and_wait(process, fd, output, rows=18, columns=COLUMNS,
-                          needle=b"Items 2/18", controls=(h.FULL_REDRAW,),
+        _keyboard_harness.resize_and_wait(process, fd, output, rows=18, columns=COLUMNS,
+                          needle=b"Items 2/18", controls=(_keyboard_harness.FULL_REDRAW,),
                           final_cursor=b"\x1b[?25l")
-        h.send_and_wait(process, fd, output, b"\x1b[F", b"Items 18/18")
-        h.drain_until_quiet(process, fd, output)
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b[F", b"Items 18/18")
+        _keyboard_harness.drain_until_quiet(process, fd, output)
         assert row_of(last_frame_rows(output), b"> 18 base  dish_oak") > 0
         assert row_of(last_frame_rows(output), b"Selected: unpriced") > 0
-        h.send_and_wait(process, fd, output, b"\x1b[H", b"Items 1/18")
-        h.drain_until_quiet(process, fd, output)
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b[H", b"Items 1/18")
+        _keyboard_harness.drain_until_quiet(process, fd, output)
         assert row_of(last_frame_rows(output), b">  1 face  glasses") > 0
-        h.send_and_wait(process, fd, output, b"\x1b[6~", b"Items ")
-        h.drain_until_quiet(process, fd, output)
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b[6~", b"Items ")
+        _keyboard_harness.drain_until_quiet(process, fd, output)
         paged = last_frame_rows(output)
         selected = [text for text in paged.values()
                     if re.search(rb">\s+\d+\s+(face|neck|head|hand|base)\s+", text)]
         assert len(selected) == 1, f"PageDown lost the selected item: {paged!r}"
         assert b">  1 face  glasses" not in selected[0], "PageDown did not move the item selection"
-        h.send_and_wait(process, fd, output, b"\x1b[5~", b"Items 1/18")
-        h.drain_until_quiet(process, fd, output)
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b[5~", b"Items 1/18")
+        _keyboard_harness.drain_until_quiet(process, fd, output)
         assert row_of(last_frame_rows(output), b">  1 face  glasses") > 0
-        h.send_and_wait(process, fd, output, b"\x1b[F", b"Items 18/18")
-        h.resize_and_wait(process, fd, output, rows=24, columns=50,
-                          needle=b"Items 18/18", controls=(h.FULL_REDRAW,),
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b[F", b"Items 18/18")
+        _keyboard_harness.resize_and_wait(process, fd, output, rows=24, columns=50,
+                          needle=b"Items 18/18", controls=(_keyboard_harness.FULL_REDRAW,),
                           final_cursor=b"\x1b[?25l")
         narrow = last_frame_rows(output)
         assert row_of(narrow, b"> 18 base  dish_oak") > 0, "resize lost the last accessory name"
@@ -310,7 +310,7 @@ def item_tab_previews_accessories(binary: str) -> None:
         assert not portrait_rows(narrow), "narrow Items pane retained a portrait beside clipped names"
         os.write(fd, b"q")
 
-    h.run_terminal_scenario(
+    _keyboard_harness.run_terminal_scenario(
         binary,
         description="the Keeper Items tab browses accessories and previews them at 100x24",
         interact=interact,
@@ -320,20 +320,20 @@ def item_tab_previews_accessories(binary: str) -> None:
 
 
 def item_account_failure_keeps_the_preview(binary: str) -> None:
-    fixtures = h.keeper_runtime_http_fixtures()
+    fixtures = _keyboard_harness.keeper_runtime_http_fixtures()
     fixtures["/api/v1/keepers/alpha/items"] = (503, {"error": "ledger unreadable"})
 
     def interact(process, fd, _slave, output, _base):
         open_alpha_detail(process, fd, output)
-        h.resize_and_wait(process, fd, output, rows=SHORT_ROWS, columns=COLUMNS, needle=INFO_TAB)
-        h.send_and_wait(process, fd, output, b"]", b"Account unavailable:")
-        h.drain_until_quiet(process, fd, output)
+        _keyboard_harness.resize_and_wait(process, fd, output, rows=SHORT_ROWS, columns=COLUMNS, needle=INFO_TAB)
+        _keyboard_harness.send_and_wait(process, fd, output, b"]", b"Account unavailable:")
+        _keyboard_harness.drain_until_quiet(process, fd, output)
         rows = last_frame_rows(output)
         assert row_of(rows, b"Items 1/18") > 0
         assert portrait_rows(rows), "an account read failure hid the separate portrait preview"
         os.write(fd, b"q")
 
-    h.run_terminal_scenario(
+    _keyboard_harness.run_terminal_scenario(
         binary,
         description="an unreadable Item account stays visible without hiding the preview",
         interact=interact,
@@ -343,7 +343,7 @@ def item_account_failure_keeps_the_preview(binary: str) -> None:
 
 
 def item_account_withdraws_unread_authority(binary: str) -> None:
-    fixtures = h.keeper_runtime_http_fixtures()
+    fixtures = _keyboard_harness.keeper_runtime_http_fixtures()
     identity = {"base": "", "unread": False, "probes": 0}
     held, release, served = threading.Event(), threading.Event(), threading.Event()
     arm = [False]
@@ -358,7 +358,7 @@ def item_account_withdraws_unread_authority(binary: str) -> None:
                  {"paths": {"effective_base_path": identity["base"],
                             "effective_masc_root": os.path.join(identity["base"], ".masc")},
                   "state_ready": True})
-        return h.RawHttpResponse(503 if identity["unread"] else 200,
+        return _keyboard_harness.RawHttpResponse(503 if identity["unread"] else 200,
                                  json.dumps(value).encode(), content_type="application/json")
 
     def items():
@@ -372,13 +372,13 @@ def item_account_withdraws_unread_authority(binary: str) -> None:
         def chunks():
             yield json.dumps(value).encode()
             served.set()
-        return h.StreamingHttpResponse(chunks)
+        return _keyboard_harness.StreamingHttpResponse(chunks)
 
     fixtures["/health"] = health
     fixtures["/api/v1/keepers/alpha/items"] = items
 
     def frame(process, fd, output, predicate):
-        assert h.wait_for_fixture_state(process, fd, output,
+        assert _keyboard_harness.wait_for_fixture_state(process, fd, output,
             lambda: predicate(b"\n".join(last_frame_rows(output).values())), timeout=10)
 
     def recover(process, fd, output):
@@ -386,23 +386,23 @@ def item_account_withdraws_unread_authority(binary: str) -> None:
         identity["unread"] = False
         # A subsequent serial full-refresh probe starts after the previous
         # identity answer has been applied. This is a fixture barrier, not age.
-        assert h.wait_for_fixture_state(process, fd, output,
+        assert _keyboard_harness.wait_for_fixture_state(process, fd, output,
             lambda: identity["probes"] >= probes + 2, timeout=10)
 
     def interact(process, fd, _slave, output, _base):
         try:
             open_alpha_detail(process, fd, output)
-            h.resize_and_wait(process, fd, output, rows=SHORT_ROWS, columns=COLUMNS, needle=INFO_TAB)
-            h.send_and_wait(process, fd, output, b"]", b"Balance 12.500 Candle")
+            _keyboard_harness.resize_and_wait(process, fd, output, rows=SHORT_ROWS, columns=COLUMNS, needle=INFO_TAB)
+            _keyboard_harness.send_and_wait(process, fd, output, b"]", b"Balance 12.500 Candle")
             identity["unread"] = True
             frame(process, fd, output, lambda text:
                   b"Account unavailable:" in text and b"Balance 12.500 Candle" not in text)
             recover(process, fd, output)
             balance[0] = "13000"
-            h.send_and_wait(process, fd, output, b"r", b"Balance 13.000 Candle")
+            _keyboard_harness.send_and_wait(process, fd, output, b"r", b"Balance 13.000 Candle")
             arm[0] = True
             os.write(fd, b"r")
-            assert h.wait_for_fixture_state(process, fd, output, held.is_set, timeout=3)
+            assert _keyboard_harness.wait_for_fixture_state(process, fd, output, held.is_set, timeout=3)
             identity["unread"] = True
             frame(process, fd, output, lambda text: b"Account unavailable:" in text)
             recover(process, fd, output)
@@ -411,22 +411,22 @@ def item_account_withdraws_unread_authority(binary: str) -> None:
             # missing authority-boundary invalidation.
             start = len(output)
             release.set()
-            assert h.wait_for_fixture_state(process, fd, output, served.is_set, timeout=3)
+            assert _keyboard_harness.wait_for_fixture_state(process, fd, output, served.is_set, timeout=3)
             probes = identity["probes"]
-            assert h.wait_for_fixture_state(process, fd, output,
+            assert _keyboard_harness.wait_for_fixture_state(process, fd, output,
                 lambda: identity["probes"] >= probes + 2, timeout=10)
-            assert h.drain_until_quiet(process, fd, output), "late response did not settle"
+            assert _keyboard_harness.drain_until_quiet(process, fd, output), "late response did not settle"
             text = b"\n".join(last_frame_rows(output).values())
             assert b"Account unavailable:" in text
             assert b"Balance 13.000 Candle" not in text
             assert b"Balance 13.000 Candle" not in output[start:]
             balance[0] = "14000"
-            h.send_and_wait(process, fd, output, b"r", b"Balance 14.000 Candle")
+            _keyboard_harness.send_and_wait(process, fd, output, b"r", b"Balance 14.000 Candle")
             os.write(fd, b"q")
         finally:
             release.set()
 
-    h.run_terminal_scenario(binary, description="Item balances and pending reads lose unread workspace authority",
+    _keyboard_harness.run_terminal_scenario(binary, description="Item balances and pending reads lose unread workspace authority",
                             interact=interact, http_fixtures=fixtures, terminal_cols=COLUMNS,
                             prepare_workspace=lambda base: identity.update(base=str(Path(base).resolve())),
                             refresh=0.2)

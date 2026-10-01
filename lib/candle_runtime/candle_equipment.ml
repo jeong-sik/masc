@@ -5,6 +5,16 @@ let reader ~now ~base_path () =
 
 let current ~now ~base_path ~keeper = reader ~now ~base_path () ~keeper
 
+(* Portrait browsing needs recorded ownership, not payout availability or a
+   newly appended policy fact. Replay only the immutable ledger read. *)
+let read_persisted ~now ~base_path ~keeper =
+  let* ledger = Candle_ledger.read ~base_path
+    |> Result.map_error Candle_ledger.read_error_to_string in
+  let* at = Candle_stamp.at ~now in
+  let* balance = Candle_balance.of_events ~at (Candle_ledger.events ledger)
+    |> Result.map_error Candle_balance.error_to_string in
+  Ok (Candle_balance.equipment balance ~keeper)
+
 type receipt = { equipment : Keeper_portrait_look.equipment; changed : bool }
 
 type error = Unavailable of string | Invalid_ledger of Candle_balance.error | Refused of Candle_balance.error

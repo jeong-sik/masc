@@ -1,4 +1,4 @@
-(** [GET /api/v1/keepers/:name/portrait.png?size=N]: a Keeper's candle-imp
+(** [GET /api/v1/keepers/:name/portrait.png?size=N&preview=ITEM]: a Keeper's candle-imp
     portrait (lib/keeper_portrait) as a PNG with straight alpha.
 
     A plain read of the Keeper, authorised like its other plain reads: open
@@ -14,7 +14,8 @@
     without a drawing. [Cache-Control: no-cache] makes the browser keep the
     file and revalidate it. A new binary gives new tags, so a change to the
     drawing is never served under an old one. Drawn images are kept in a
-    small cache bounded by bytes. *)
+    small cache bounded by bytes. [preview] optionally replaces one slot in
+    the drawing with a catalog accessory; it never buys or persists equipment. *)
 
 val route : string -> string option
 (** The Keeper name when the path is exactly
@@ -51,6 +52,7 @@ type answer =
   | Invalid_size of string
       (** [size] is not a whole number of pixels in the renderer's range: 400.
           Out-of-range sizes are refused, not clamped. *)
+  | Invalid_preview of string (** Unknown accessory id: 400. *)
   | Unknown_keeper  (** No Keeper by that name here: 404. *)
   | Lookup_failed of string  (** The Keeper store could not be read: 503. *)
   | Encode_failed of string  (** The PNG encoder refused the image: 500. *)
@@ -64,11 +66,12 @@ val answer :
   build:build ->
   name:string ->
   size:string option ->
+  preview:string option ->
   keeper_present:(unit -> (bool, string) result) ->
   equipment:(unit -> (Keeper_portrait_look.equipment, string) result) ->
   holds_tag:(string -> bool) ->
   answer
-(** Decides the response. Checks run in this order: name syntax, size,
+(** Decides the response. Checks run in this order: name syntax, size, preview id,
     Keeper presence, current equipment, the request's tag, drawing. [keeper_present] runs only
     for a well-formed request; with an {!Executable} build, a request whose
     [holds_tag] accepts the tag is answered before any drawing or cache read. *)

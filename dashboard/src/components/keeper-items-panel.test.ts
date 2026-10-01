@@ -5,10 +5,12 @@ import type { Keeper } from '../types'
 import { EQUIPMENT_IDS } from '../api/schemas/keeper-portrait'
 
 const fetchKeeperItems = vi.hoisted(() => vi.fn())
+const portraitFailure = vi.hoisted(() => ({ value: false }))
 const fetchDashboardExecution = vi.hoisted(() => vi.fn())
 vi.mock('../api/dashboard-execution', () => ({ fetchDashboardExecution }))
 vi.mock('../api/keeper-items', () => ({ fetchKeeperItems }))
-vi.mock('./keeper-portrait', () => ({ KeeperPortrait: () => html`<div data-testid="portrait" />` }))
+vi.mock('./keeper-portrait', () => ({ KeeperPortrait: ({ previewItem, fallback }: { previewItem?: string; fallback: unknown }) => portraitFailure.value && previewItem
+  ? fallback : html`<div data-testid="portrait" data-preview=${previewItem ?? ''} />` }))
 vi.mock('./keeper-badge', () => ({ KeeperBadge: () => html`<div />` }))
 vi.mock('../sse', () => ({ journal: { log: vi.fn() } }))
 
@@ -61,9 +63,52 @@ beforeEach(() => {
   observeWorkspace('/fixture/workspace-a')
 })
 
-afterEach(() => { cleanup(); clearStoredToken(); vi.resetAllMocks(); vi.clearAllTimers(); vi.useRealTimers() })
+afterEach(() => { cleanup(); clearStoredToken(); vi.resetAllMocks(); vi.clearAllTimers(); vi.useRealTimers(); portraitFailure.value = false })
 
 describe('Keeper Item tab', () => {
+  it('reports a failed preview and lets the operator restore the observed portrait', async () => {
+    fetchKeeperItems.mockResolvedValue(account(['crown'], '200'))
+    render(html`<${KeeperItemsPanel} keeper=${keeper('rondo')} />`)
+    await screen.findByText('보유 1 / 18개')
+    portraitFailure.value = true
+    fireEvent.click(screen.getByRole('button', { name: 'beanie 미리보기' }))
+    expect(screen.getByRole('alert').textContent).toContain('미리보기 그림을 불러오지 못했습니다')
+    fireEvent.click(screen.getByRole('button', { name: '현재 착용 보기' }))
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.getByTestId('portrait').getAttribute('data-preview')).toBe('')
+    expect(screen.getByText('보유 1 / 18개')).toBeTruthy()
+    expect(screen.getByText('0.800 Candle')).toBeTruthy()
+  })
+
+  it('previews an unowned item and restores the observed outfit without refetching the wallet', async () => {
+    fetchKeeperItems.mockResolvedValue(account(['crown'], '200'))
+    const observed = keeper('rondo')
+    render(html`<${KeeperItemsPanel} keeper=${observed} />`)
+    await screen.findByText('보유 1 / 18개')
+    fireEvent.click(screen.getByRole('button', { name: 'beanie 미리보기' }))
+    expect(screen.getByTestId('portrait').getAttribute('data-preview')).toBe('beanie')
+    expect(screen.getByText('미리보기 · beanie')).toBeTruthy()
+    expect(screen.getByText('착용 중')).toBeTruthy()
+    expect(observed.portrait?.state === 'ready' && observed.portrait.equipment.head).toBe('crown')
+    fireEvent.click(screen.getByRole('button', { name: '현재 착용 보기' }))
+    expect(screen.getByTestId('portrait').getAttribute('data-preview')).toBe('')
+    expect(fetchKeeperItems).toHaveBeenCalledTimes(1)
+  })
+
+  it('withdraws a preview when the workspace account changes and requires an observed portrait', async () => {
+    fetchKeeperItems.mockResolvedValue(account(['crown'], '200'))
+    const view = render(html`<${KeeperItemsPanel} keeper=${keeper('rondo')} />`)
+    await screen.findByText('보유 1 / 18개')
+    fireEvent.click(screen.getByRole('button', { name: 'beanie 미리보기' }))
+    await act(async () => { observeWorkspace('/fixture/workspace-b') })
+    await screen.findByText('보유 1 / 18개')
+    expect(screen.queryByText('미리보기 · beanie')).toBeNull()
+    expect(screen.getByTestId('portrait').getAttribute('data-preview')).toBe('')
+    view.rerender(html`<${KeeperItemsPanel} keeper=${{ ...keeper('rondo'), portrait: { state: 'unavailable', reason: 'ledger unavailable' } }} />`)
+    await screen.findByText('보유 1 / 18개')
+    expect(screen.getByRole('button', { name: 'beanie 미리보기' })).toHaveProperty('disabled', true)
+  })
+
   it('shows the server request reason without an internal endpoint and supports missing detail', async () => {
     fetchKeeperItems.mockRejectedValueOnce(new ApiRequestError({ method: 'GET', path: '/api/v1/keepers/rondo/items', status: 503, detail: 'ledger unreadable' }))
       .mockRejectedValueOnce(new ApiRequestError({ method: 'GET', path: '/api/v1/keepers/rondo/items', status: 503 }))

@@ -168,6 +168,26 @@ class SkillActivationEventsTest(unittest.TestCase):
             folded["revision"], hashlib.sha256(canonical.encode()).hexdigest()
         )
 
+    def test_field_order_permutations_match_shared_server_revision(self):
+        expected = json.loads((REPO_ROOT / "test/fixtures/skill-ledger-revision.json").read_text())
+        def reverse_objects(value):
+            if isinstance(value, dict):
+                return {key: reverse_objects(child) for key, child in reversed(list(value.items()))}
+            if isinstance(value, list):
+                return [reverse_objects(child) for child in value]
+            return value
+        permuted = reverse_objects(expected)
+        before = copy.deepcopy(permuted)
+        self.assertEqual(events.ledger_revision(permuted), expected["revision"])
+        self.assertEqual(permuted, before)
+        raw = log_fixture.event_log(permuted)
+        folded = events.fold_event_log(raw)
+        self.assertEqual(folded["revision"], expected["revision"])
+        self.assertEqual(json.dumps(folded, ensure_ascii=False), json.dumps(expected, ensure_ascii=False))
+        reordered = copy.deepcopy(expected)
+        reordered["activations"].reverse()
+        self.assertNotEqual(events.ledger_revision(reordered), expected["revision"])
+
     def test_the_row_still_being_appended_is_left_out(self):
         expected = ledger()
         raw = log_fixture.event_log(expected) + b'{"kind":"activation_rec'
@@ -431,14 +451,11 @@ class SkillActivationEventsTest(unittest.TestCase):
     # revision hashes the escaped form.
     def test_revision_escapes_del_as_the_server_does(self):
         value = ledger()
-        value["activations"] = [{"skill_tool_use_id": "call-\x7f"}]
+        value["activations"] = [activation("call-\x7f", 7)]
         value["transition_rejections"] = []
-        canonical = (
-            '{"workspace_key":"' + value["workspace_key"] + '","session_id":"'
-            + value["session_id"] + '",'
-            '"activations":[{"skill_tool_use_id":"call-\\u007f"}],'
-            '"transition_rejections":[]}'
-        )
+        canonical = json.dumps({key: value[key] for key in
+            ("workspace_key", "session_id", "activations", "transition_rejections")},
+            ensure_ascii=False, separators=(",", ":")).replace("\x7f", "\\u007f")
 
         self.assertEqual(
             events.ledger_revision(value), hashlib.sha256(canonical.encode()).hexdigest()

@@ -629,9 +629,10 @@ let test_scheduling_handoff_preserves_active_protocol () =
 
 let test_scheduling_handoff_wakes_idle_before_first_tool () =
   let capture_path = Filename.temp_file "codex-idle-handoff-" ".jsonl" in
+  let progress, signal_progress = Eio.Promise.create () in
   Fun.protect ~finally:(fun () -> Sys.remove capture_path) (fun () ->
     with_fixture [init_result; account_chatgpt; thread_result; turn_result;
-      item_completed; turn_completed] (fun path ->
+      agent_message_delta; item_completed; turn_completed] (fun path ->
       let original = In_channel.with_open_bin path In_channel.input_all in
       let terminal = "printf '%s\\n' " ^ shell_quote item_completed in
       let wait_for_steer =
@@ -643,7 +644,20 @@ let test_scheduling_handoff_wakes_idle_before_first_tool () =
           if line = terminal then [wait_for_steer; line] else [line])
         |> String.concat "\n" in
       Out_channel.with_open_bin path (fun out -> output_string out instrumented);
-      match run_fixture ~await_handoff:(fun () -> true) path with
+      let on_stream_event = function
+        | Runtime_codex_app_server.Text_delta _ ->
+          Eio.Promise.resolve signal_progress ()
+        | _ -> ()
+      in
+      let await_handoff () =
+        Eio.Promise.await progress;
+        (* Let the consumer enter its next receive. The fixture emits no more
+           provider frames until it receives the scheduling notice, so a
+           progress-boundary-only queue check cannot complete this turn. *)
+        Eio.Fiber.yield ();
+        true
+      in
+      match run_fixture ~on_stream_event ~await_handoff path with
       | Error error -> fail (Runtime_codex_app_server.error_to_string error)
       | Ok result ->
         check int "no tool required to wake idle turn" 0 result.dynamic_tool_calls;

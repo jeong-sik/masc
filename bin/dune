@@ -1789,6 +1789,7 @@
   masc_tui
   masc_tui_render
   masc_tui_render_approvals
+  masc_tui_render_code
   masc_tui_render_board
   masc_tui_loader
   masc_tui_http)

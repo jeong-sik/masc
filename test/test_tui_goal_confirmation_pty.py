@@ -116,7 +116,7 @@ def run(executable: str, *, replace_proof: bool) -> None:
             process,
             master_fd,
             output,
-            rows=50,
+            rows=24,
             columns=160,
             needle=b"MASC Dashboard",
             final_cursor=b"\x1b[?25l",

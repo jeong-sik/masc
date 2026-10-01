@@ -2676,7 +2676,7 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
        ~binding_name:"planning_detail_lines" ~callee:"Masc_tui_text_block.rows" >= 1);
   check_identifiers ~module_path:"bin/masc_tui_text_block.ml"
     ~binding:"rows_of_line"
-    ~callees:[ "Masc.Tui_decode.sanitize_terminal_text" ] [ "line" ];
+    ~callees:[ "Masc.Tui_terminal_text.sanitize_terminal_text" ] [ "line" ];
   check_fields ~non_rendering_calls:[ "String.equal" ] "render_planning_detail"
     [ "pg_id" ];
   (* The verifier's reason for skipping a Verifying goal comes off the wire

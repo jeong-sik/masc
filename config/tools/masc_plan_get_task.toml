@@ -3,5 +3,5 @@ title = "Get Current Task"
 description = """
 Get the task_id you're currently working on (session-scoped). Use when \
 resuming work after a context switch or verifying your current assignment. \
-Set via masc_plan_set_task. Auto-cleared on session end."""
+Auto-cleared on session end."""
 additional_properties = false

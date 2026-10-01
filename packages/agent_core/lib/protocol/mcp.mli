@@ -77,7 +77,9 @@ val convert_tools
 type t
 
 (** Optional host-owned model access. The subprocess sends standard MCP
-    sampling requests; the host chooses credentials and model policy. *)
+    sampling requests; the host chooses credentials and model policy.
+    Ordinary callback exceptions become protocol errors so the connection can
+    serve subsequent requests. Eio cancellation propagates to the caller. *)
 type sampling_handler = Mcp_protocol.Sampling.create_message_params ->
   (Mcp_protocol.Sampling.create_message_result, string) result
 

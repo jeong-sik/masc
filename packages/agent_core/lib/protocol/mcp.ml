@@ -78,7 +78,12 @@ let connect ~sw ~(mgr : _ Eio.Process.mgr) ~command ~args ?env
     let client = Sdk_client.create ~transport () in
     let client = match sampling_handler with
       | None -> client
-      | Some handler -> Sdk_client.on_sampling handler client in
+      | Some handler ->
+          let guarded_handler params =
+            try handler params with
+            | Eio.Cancel.Cancelled _ as exn -> raise exn
+            | exn -> Error (Printexc.to_string exn) in
+          Sdk_client.on_sampling guarded_handler client in
     let kill () =
       try Eio.Process.signal proc Sys.sigterm with
       | Unix.Unix_error _ | Eio.Io _ | Sys_error _ -> ()

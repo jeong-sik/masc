@@ -61,6 +61,20 @@ let retryable_execution = function
   | Exact.Response_body_deadline_exceeded -> true
   | Exact.Incomplete_output | Exact.Missing_output | Exact.Ambiguous_output _
   | Exact.Unexpected_output_content | Exact.Invalid_json_output -> false
+let terminal_error ~rejected ~retryable cause =
+  let detail = flow_failure cause in
+  match cause with
+  | Exact.Flow_attempt_already_started _ | Exact.Flow_attempt_start_failed _
+  | Exact.Flow_measurement_start_failed _ | Exact.Flow_before_measurement_dispatch_callback_failed _
+  | Exact.Flow_measurement_terminal_callback_failed _ | Exact.Flow_before_dispatch_callback_failed _
+  | Exact.Flow_before_advance_callback_failed _ ->
+      (* Stopping this flow does not prove that a later payout attempt will
+         fail. Do not turn bookkeeping failures into permanent refusals. *)
+      A.Transport_unavailable detail
+  | Exact.Flow_exact_execution_failed _ | Exact.Flow_candidates_exhausted _ ->
+      if rejected then A.Invalid_response detail
+      else if retryable then A.Transport_unavailable detail
+      else A.Execution_rejected detail
 let execute_http ~observe ~resolved ~request ~prompt ~requirement =
   let rejected = ref false in
   let retryable = ref true in
@@ -68,10 +82,6 @@ let execute_http ~observe ~resolved ~request ~prompt ~requirement =
     if invalid_output error.Exact.cause then rejected := true;
     if not (retryable_execution error.cause) then retryable := false;
     observe (Http_failure {slot=candidate.visit.identity.candidate_id;error}) in
-  let classify ~can_retry detail =
-    if !rejected then A.Invalid_response detail
-    else if can_retry then A.Transport_unavailable detail
-    else A.Execution_rejected detail in
   let rec candidates = function
     | [] -> Ok []
     | (slot : Runtime_exact_output_registry.selected_slot) :: rest ->
@@ -111,18 +121,10 @@ let execute_http ~observe ~resolved ~request ~prompt ~requirement =
           | Exact.Flow_attempt_already_started _ | Exact.Flow_attempt_start_failed _ | Exact.Flow_measurement_start_failed _
           | Exact.Flow_before_measurement_dispatch_callback_failed _ | Exact.Flow_measurement_terminal_callback_failed _
           | Exact.Flow_before_dispatch_callback_failed _ | Exact.Flow_before_advance_callback_failed _ | Exact.Flow_candidates_exhausted _ -> ());
-         let detail = flow_failure cause in
+         let error = terminal_error ~rejected:!rejected ~retryable:!retryable cause in
          (match Exact.flow_execution_terminal_kind cause with
-          | Exact.Advanceable_candidates_exhausted ->
-            let can_retry = match cause with
-              | Exact.Flow_exact_execution_failed _ -> !retryable
-              | Exact.Flow_attempt_already_started _ | Exact.Flow_attempt_start_failed _
-              | Exact.Flow_measurement_start_failed _ | Exact.Flow_before_measurement_dispatch_callback_failed _
-              | Exact.Flow_measurement_terminal_callback_failed _ | Exact.Flow_before_dispatch_callback_failed _
-              | Exact.Flow_before_advance_callback_failed _ | Exact.Flow_candidates_exhausted _ -> false in
-            Error (Advanceable (classify ~can_retry detail))
-          | Exact.Non_advanceable_terminal ->
-            Error (Terminal (classify ~can_retry:false detail)))
+          | Exact.Advanceable_candidates_exhausted -> Error (Advanceable error)
+          | Exact.Non_advanceable_terminal -> Error (Terminal error))
        | Error (Exact.Flow_semantic_candidates_exhausted {rejections;_}) ->
          Error (Advanceable (A.Invalid_response (String.concat "; " (List.map (fun r -> r.Exact.rejection) (rejections.first :: rejections.rest))))))
     | _ -> Error (Terminal (A.Transport_unavailable "appraiser execution context unavailable"))
@@ -329,6 +331,7 @@ let run_with ~base_path ~execute ~identity request =
   | exn -> fail (A.Transport_unavailable (Printexc.to_string exn))
 let run ~base_path = run_with ~base_path ~execute:(execute ~cli_runner:None ~base_path)
 module For_testing = struct
+  let terminal_error = terminal_error
   let run_declared ~base_path ~cli_runner = run_with ~base_path ~execute:(execute ~cli_runner:(Some cli_runner) ~base_path)
   let run ~base_path ~execute = run_with ~base_path
     ~execute:(fun ~observe:_ ~request ~prompt -> execute ~request ~prompt)

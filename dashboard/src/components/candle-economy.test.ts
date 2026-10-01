@@ -56,6 +56,31 @@ describe('Candle existing screen consumers', () => {
     expect(screen.getByTestId('keeper-candle-balance').textContent).not.toContain('9007199254740.993')
   })
 
+  it('ignores a held warm-up reply after a newer pushed execution snapshot', async () => {
+    vi.useFakeTimers()
+    observe(ready, '1000')
+    render(html`<${View} />`)
+    let release!: (value: unknown) => void
+    fetchDashboardExecution.mockReturnValue(new Promise(resolve => { release = resolve }))
+    let pending!: Promise<void>
+    await act(async () => {
+      pending = refreshExecution({ force: true })
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    expect(fetchDashboardExecution).toHaveBeenCalledTimes(1)
+    await act(async () => { observe(ready, '2000') })
+    const authority = executionWorkspaceAuthority.peek()
+    await act(async () => {
+      release({ status: { project: 'initializing' } })
+      await pending
+    })
+    expect(executionWorkspaceAuthority.peek()).toBe(authority)
+    expect(screen.getByTestId('keeper-candle-balance').textContent).toBe('잔액 2.000 Candle')
+    expect(candleObservation.peek().status).toBe('ready')
+    await act(async () => { await vi.advanceTimersByTimeAsync(4_000) })
+    expect(fetchDashboardExecution).toHaveBeenCalledTimes(1)
+  })
+
   it('withdraws both summary and Keeper wallet through reconnect warm-up', async () => {
     observe(ready, '9007199254740993')
     render(html`<${View} />`)

@@ -1,3 +1,7 @@
+## Publication-order follow-up
+
+The current source additionally rejects a held warm-up reply after a newer accepted execution publication. `publication-guard-receipt.json` binds the current store and both test sources to the retained `publication-guard-tests.log`. This follow-up runs component/store tests only; browser screenshots below remain historical evidence for their recorded source.
+
 # Item execution warm-up withdrawal
 
 ## Integrated parent check

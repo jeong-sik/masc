@@ -1,0 +1,13 @@
+
+ RUN  v4.1.5 /private/tmp/masc-codex-review-20261001-current/tui-wt-40466-mid/dashboard
+
+(node:89317) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:89316) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+ Test Files  2 passed (2)
+      Tests  24 passed (24)
+   Start at  20:09:37
+   Duration  2.83s (transform 828ms, setup 1.30s, import 2.24s, tests 266ms, environment 1.21s)
+

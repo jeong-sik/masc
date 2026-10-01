@@ -1292,13 +1292,17 @@ async function doFetchExecution(): Promise<void> {
   const force = nextExecutionForce
   nextExecutionForce = false
   const requestGeneration = executionSnapshotRequestGeneration()
+  const requestEpoch = executionPublicationEpoch
+  const requestWatermark = executionPublicationGenerationWatermark
   executionLoading.value = true
   executionError.value = null
   try {
     const { fetchDashboardExecution } = await import('./api/dashboard-execution')
     const data = await fetchDashboardExecution({ force })
     if (isInitializingExecutionPayload(data)) {
-      if (requestGeneration !== executionHydrationRequestGeneration) return
+      if (requestGeneration !== executionHydrationRequestGeneration
+        || requestEpoch !== executionPublicationEpoch
+        || requestWatermark !== executionPublicationGenerationWatermark) return
       withdrawExecutionWorkspaceAuthority()
       scheduleExecutionWarmRetry()
       return

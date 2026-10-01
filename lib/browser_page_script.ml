@@ -44,7 +44,8 @@ const visible = nodes.filter(el=>observable(el)
   && (!el.getAttribute('role') || actionRoles.has(effectiveRole(el))
     || ['a','button','input','textarea','select','summary','label'].includes(el.localName)
     || el.getAttribute('onclick') !== null || el.getAttribute('contenteditable') === 'true')
-  && (el.localName!=='label' || (el.control?.localName==='input' && ['checkbox','radio'].includes(el.control.type) && !observable(el.control))));
+  && (el.localName!=='label' || el.hasAttribute('onclick') || actionRoles.has(effectiveRole(el))
+    || (el.control?.localName==='input' && ['checkbox','radio'].includes(el.control.type) && !observable(el.control))));
 function disabled(el) {
   const target=(el.localName==='label' && el.control) || el;
   if (target.matches(':disabled')) return true;
@@ -67,8 +68,10 @@ function observe(el) {
   if (target.localName==='input' && ['checkbox','radio'].includes(target.type))
     result.checked=!!target.checked;
   if (target.localName==='input' && target.type==='checkbox') result.indeterminate=!!target.indeterminate;
-  if (['true','false','mixed'].includes(el.getAttribute('aria-checked')))
-    result.ariaChecked=el.getAttribute('aria-checked');
+  const checkedRole=effectiveRole(el), checked=el.getAttribute('aria-checked');
+  if (['checkbox','menuitemcheckbox','radio','menuitemradio','switch'].includes(checkedRole)
+      && ['true','false','mixed'].includes(checked))
+    result.ariaChecked=checked==='mixed' && !['checkbox','menuitemcheckbox'].includes(checkedRole) ? 'false' : checked;
   if (['tab','option','row','treeitem','gridcell'].includes(effectiveRole(el))
       && ['true','false'].includes(el.getAttribute('aria-selected')))
     result.ariaSelected=el.getAttribute('aria-selected');

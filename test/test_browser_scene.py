@@ -323,6 +323,20 @@ try:
  <label><input id="visible-check" type="checkbox">Visible agree</label>
  <label><input id="visible-radio" type="radio" style="display:inline-block">Visible choice</label>
  <main id="delegated" onclick="this.dataset.clicked='yes'"><h2>Delegated heading</h2><p>Delegated paragraph</p><img alt="Delegated raster" style="width:40px;height:40px" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=="></main>
+ <label id="explicit-label" onclick="this.dataset.clicked='yes'">Explicit label action</label>
+ <input id="visible-explicit" type="checkbox"><label id="associated-action" for="visible-explicit" onclick="this.dataset.clicked='yes'">Associated label action</label>
+ <button id="collapsed">Save   the
+ draft</button><button id="transformed" style="text-transform:uppercase">Save draft</button>
+ <button id="preserved" style="white-space:pre">Save   the
+ draft</button>
+ <button id="transparent">Visible opacity<span style="opacity:0">OPACITY_SECRET</span></button>
+ <button id="clipped" style="overflow:hidden;width:180px">Visible clipped<span style="display:block;margin-left:10000px">CLIPPED_SECRET</span></button>
+ <div role="checkbox" aria-checked="mixed">Mixed checkbox</div>
+ <div role="menuitemcheckbox" aria-checked="mixed">Mixed menu checkbox</div>
+ <div role="radio" aria-checked="mixed">Mixed radio</div>
+ <div role="menuitemradio" aria-checked="mixed">Mixed menu radio</div>
+ <div role="switch" aria-checked="mixed">Mixed switch</div>
+ <button aria-checked="mixed">Unsupported checked button</button>
  <input id="native-mixed" type="checkbox" style="display:none"><label for="native-mixed">Native mixed</label>
  <div role="tab" aria-selected="false" onclick="this.setAttribute('aria-selected','true')">Selectable tab</div>
  <div role="option" aria-selected="true">Selected option</div>
@@ -330,6 +344,21 @@ try:
  <div role="future-role button">Fallback button</div>`;
  document.querySelector('#native-mixed').indeterminate=true;""")
  semantics=observe()
+ for element_id in ['collapsed','transformed','preserved']:
+  expected=js("return document.getElementById(arguments[0]).innerText.trim();",[element_id])
+  check('scene uses browser rendered whitespace/transform: '+element_id,control(semantics,expected)['text']==expected)
+ check('opacity-zero control descendants remain excluded','OPACITY_SECRET' not in json.dumps(semantics))
+ check('clipped control descendants remain excluded','CLIPPED_SECRET' not in json.dumps(semantics))
+ for label in ['Mixed checkbox','Mixed menu checkbox']:
+  check('mixed checkbox role retained: '+label,control(semantics,label)['ariaChecked']=='mixed')
+ for label in ['Mixed radio','Mixed menu radio','Mixed switch']:
+  check('binary role mixed normalizes false: '+label,control(semantics,label)['ariaChecked']=='false')
+ check('unsupported role does not report checked','ariaChecked' not in control(semantics,'Unsupported checked button'))
+ for label,element_id in [('Explicit label action','explicit-label'),('Associated label action','associated-action')]:
+  targets=[node for node in semantics['nodes'] if node['kind']=='control' and node['tag']=='label' and node['text']==label]
+  check('explicit label has one observed activation target: '+label,len(targets)==1)
+  act(semantics,targets[0],action='click')
+  check('explicit label onclick remains actionable: '+label,js("return document.getElementById(arguments[0]).dataset.clicked;",[element_id])=='yes')
  check('control labels preserve br separators and filter hidden descendants',control(semantics,'Save\ndraft')['text']=='Save\ndraft')
  check('adjacent blocks insert one rendered newline',control(semantics,'Store\ndraft')['text']==js("return document.querySelector('#blocks').innerText;"))
  check('adjacent table cells insert one rendered tab',control(semantics,'Left\tRight')['text']==js("return document.querySelector('#cells').innerText;"))
@@ -348,6 +377,11 @@ try:
  check('effective heading role is not a fallback button',any(n['kind']=='text' and n['text']=='First role heading' and n['headingLevel']==2 for n in semantics['nodes']) and not any(n['kind']=='control' and n['text']=='First role heading' for n in semantics['nodes']))
  check('unknown leading role permits supported button fallback',control(semantics,'Fallback button')['role']=='button')
  form_elements=js(elements_script)
+ for label in ['Explicit label action','Associated label action']:
+  check('elements preserves explicit label action: '+label,any(n['tag']=='label' and n['text']==label for n in form_elements['elements']))
+ for label,expected in [('Mixed checkbox','mixed'),('Mixed menu checkbox','mixed'),('Mixed radio','false'),('Mixed menu radio','false'),('Mixed switch','false')]:
+  check('elements role-specific checked state: '+label,next(n for n in form_elements['elements'] if n['text']==label)['ariaChecked']==expected)
+ check('elements omits unsupported checked state','ariaChecked' not in next(n for n in form_elements['elements'] if n['text']=='Unsupported checked button'))
  for label in ['Visible agree','Visible choice']:
   observed=[n for n in form_elements['elements'] if n.get('tag')=='input' and n.get('name')==label]
   check('visible native choice has exactly one elements target: '+label,len(observed)==1 and observed[0]['tag']=='input')

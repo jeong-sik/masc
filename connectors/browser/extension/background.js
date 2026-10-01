@@ -100,12 +100,19 @@ function browserScene(args) {
   const nativeControlSelector = 'button,input:not([type=hidden]),textarea,select,summary,[contenteditable=true]';
   const controlSelector = nativeControlSelector + ',label,[onclick],[role]';
   const isControl = element => linkHref(element) !== null
+    || element.hasAttribute('onclick') || actionRoles.has(effectiveRole(element))
     || (element.localName === 'label' ? (() => {
         const target=labelledControl(element);
         return target !== null && !(visible(target) && boxes(target.getClientRects(),target).length);
       })()
-      : element.matches(nativeControlSelector) || element.hasAttribute('onclick')
-        || actionRoles.has(effectiveRole(element)));
+      : element.matches(nativeControlSelector));
+  // WAI-ARIA mixed is supported by checkbox/menuitemcheckbox only.
+  const checkedState = element => {
+    const role=effectiveRole(element), value=attribute(element,'aria-checked');
+    if (!['checkbox','menuitemcheckbox','radio','menuitemradio','switch'].includes(role)
+        || !['true','false','mixed'].includes(value)) return undefined;
+    return value === 'mixed' && !['checkbox','menuitemcheckbox'].includes(role) ? 'false' : value;
+  };
   const disabledControl = element => {
     const target = labelledControl(element) || element;
     if (target.matches(':disabled')) return true;
@@ -160,6 +167,25 @@ function browserScene(args) {
       .filter(r => r.width>0 && r.height>0);
   };
   const visibleText = element => {
+    // innerText is the browser's whitespace/text-transform authority. Use it
+    // only when every painted text fragment is admitted by the scene geometry.
+    // innerText alone includes opacity-zero and clipped descendants; those
+    // retain the filtered traversal below rather than exposing hidden content.
+    const admitted=document.createTreeWalker(element,NodeFilter.SHOW_TEXT);
+    let complete=true;
+    while (admitted.nextNode()) {
+      const child=admitted.currentNode, parent=child.parentElement;
+      if (!parent || !child.textContent.trim()) continue;
+      let displayed=true, opaque=true;
+      for (let ancestor=parent;ancestor;ancestor=ancestor.parentElement) {
+        if (css(ancestor).display === 'none') displayed=false;
+        if (Number(css(ancestor).opacity) === 0) opaque=false;
+      }
+      if (!displayed || css(parent).visibility !== 'visible') continue;
+      const range=document.createRange(); range.selectNodeContents(child);
+      if (!opaque || !boxes(range.getClientRects(),parent).length) {complete=false;break;}
+    }
+    if (complete && typeof element.innerText === 'string') return element.innerText.trim();
     const pending=Array.from(element.childNodes || []).reverse(), parts=[];
     let separator=null;
     const append = text => {
@@ -337,8 +363,7 @@ function browserScene(args) {
         role:effectiveRole(node),
         ...(target instanceof HTMLInputElement && ['checkbox','radio'].includes(target.type)
           ? {checked:!!target.checked,...(target.type === 'checkbox' ? {indeterminate:!!target.indeterminate} : {})} : {}),
-        ...(['true','false','mixed'].includes(attribute(node,'aria-checked'))
-          ? {ariaChecked:attribute(node,'aria-checked')} : {}),
+        ...(checkedState(node) !== undefined ? {ariaChecked:checkedState(node)} : {}),
         ...(['tab','option','row','treeitem','gridcell'].includes(effectiveRole(node))
           && ['true','false'].includes(attribute(node,'aria-selected'))
           ? {ariaSelected:attribute(node,'aria-selected')} : {}),
@@ -603,7 +628,8 @@ const visible = nodes.filter(el=>observable(el)
   && (!el.getAttribute('role') || actionRoles.has(effectiveRole(el))
     || ['a','button','input','textarea','select','summary','label'].includes(el.localName)
     || el.getAttribute('onclick') !== null || el.getAttribute('contenteditable') === 'true')
-  && (el.localName!=='label' || (el.control?.localName==='input' && ['checkbox','radio'].includes(el.control.type) && !observable(el.control))));
+  && (el.localName!=='label' || el.hasAttribute('onclick') || actionRoles.has(effectiveRole(el))
+    || (el.control?.localName==='input' && ['checkbox','radio'].includes(el.control.type) && !observable(el.control))));
 function disabled(el) {
   const target=(el.localName==='label' && el.control) || el;
   if (target.matches(':disabled')) return true;
@@ -626,8 +652,10 @@ function observe(el) {
   if (target.localName==='input' && ['checkbox','radio'].includes(target.type))
     result.checked=!!target.checked;
   if (target.localName==='input' && target.type==='checkbox') result.indeterminate=!!target.indeterminate;
-  if (['true','false','mixed'].includes(el.getAttribute('aria-checked')))
-    result.ariaChecked=el.getAttribute('aria-checked');
+  const checkedRole=effectiveRole(el), checked=el.getAttribute('aria-checked');
+  if (['checkbox','menuitemcheckbox','radio','menuitemradio','switch'].includes(checkedRole)
+      && ['true','false','mixed'].includes(checked))
+    result.ariaChecked=checked==='mixed' && !['checkbox','menuitemcheckbox'].includes(checkedRole) ? 'false' : checked;
   if (['tab','option','row','treeitem','gridcell'].includes(effectiveRole(el))
       && ['true','false'].includes(el.getAttribute('aria-selected')))
     result.ariaSelected=el.getAttribute('aria-selected');

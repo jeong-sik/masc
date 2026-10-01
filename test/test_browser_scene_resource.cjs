@@ -12,9 +12,24 @@ assert.ok(readFileSync(path.join(root, 'connectors/browser/extension/background.
 const limit = 1024 * 1024;
 const rect = {x:0, y:0, width:10, height:10, right:10, bottom:10};
 
+// The DOM seam preserves SHOW_TEXT source order without mutating nodes.
+const NodeFilter = {SHOW_TEXT:4};
+function createTreeWalker(root, whatToShow) {
+  assert.equal(whatToShow, NodeFilter.SHOW_TEXT);
+  const pending=Array.from(root.childNodes || []).reverse();
+  return {currentNode:root, nextNode() {
+    while (pending.length) {
+      const node=pending.pop();
+      if (node.nodeType===3) {this.currentNode=node;return true;}
+      for (let i=(node.childNodes || []).length-1;i>=0;i--) pending.push(node.childNodes[i]);
+    }
+    return false;
+  }};
+}
+
 function fixture({extraNodes = () => [], extraGlobals = {}} = {}) {
   const document = {title:'ordinary HTTP page', documentElement:{}, body:{childNodes:[]},
-    baseURI:'http://example.test/path'};
+    baseURI:'http://example.test/path', createTreeWalker};
   const style = {display:'block', visibility:'visible', opacity:'1', color:'rgb(0, 0, 0)',
     fontSize:'16px', fontWeight:'400', whiteSpace:'normal'};
   const link = {nodeType:1, localName:'a', innerText:'A', parentElement:null,
@@ -24,7 +39,7 @@ function fixture({extraNodes = () => [], extraGlobals = {}} = {}) {
   link.href='http://example.test/observed';
   document.body.childNodes.push(link);
   for (const node of extraNodes(document)) document.body.childNodes.push(node);
-  const context = vm.createContext({document, window:{}, ...extraGlobals,
+  const context = vm.createContext({document, NodeFilter, window:{}, ...extraGlobals,
     location:{href:'http://example.test/path?identity=exact#fragment'},
     innerWidth:800, innerHeight:600, scrollX:0, scrollY:0,
     getComputedStyle:() => style, HTMLInputElement:class {}, HTMLTextAreaElement:class {},
@@ -121,10 +136,11 @@ console.log('scene resources: shared-script parity, insecure-context identity, o
 // by test_browser_scene.py, independently of this offline execution seam.
 const textWalk = source.split('  const visibleText = element => {')[1].split('  const regionLabel =')[0];
 const textContext = vm.createContext({
-  css: node => ({display:node.display || 'inline'}),
+  NodeFilter,
+  css: node => ({display:node.hidden ? 'none' : node.display || 'inline',visibility:'visible',opacity:'1'}),
   visible: node => !node.hidden, rendered: node => !node.hidden,
   boxes: rects => rects,
-  document:{createRange:() => ({selectNodeContents(){},getClientRects:() => [rect]})},
+  document:{createTreeWalker,createRange:() => ({selectNodeContents(){},getClientRects:() => [rect]})},
 });
 vm.runInContext('const visibleText = element => {' + textWalk, textContext);
 function element(tag, display, children) {

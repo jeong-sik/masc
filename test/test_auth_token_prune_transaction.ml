@@ -44,7 +44,7 @@ let await_waiter base_path completed =
       | None -> Eio.Fiber.yield (); wait () in
   wait ()
 
-let interleave base_path first second =
+let interleave ?(while_waiting = fun () -> ()) base_path first second =
   let admitted, signal_admitted = Eio.Promise.create () in
   let continue, signal_continue = Eio.Promise.create () in
   let first_done, signal_first_done = Eio.Promise.create () in
@@ -68,6 +68,7 @@ let interleave base_path first second =
       await_first ();
       Eio.Fiber.fork ~sw (fun () -> Eio.Promise.resolve signal_second_done (second ()));
       await_waiter base_path second_done;
+      while_waiting ();
       Eio.Promise.resolve signal_continue ();
       Eio.Promise.await first_done, Eio.Promise.await second_done)
 
@@ -326,10 +327,52 @@ let test_partial_delete_is_failed_and_later_entries_continue () =
    | [ { Prune.agent_name = "aaa"; reason = Prune.Expired; outcome = Prune.Failed _ };
        { Prune.agent_name = "bbb"; reason = Prune.Expired; outcome = Prune.Retired } ] -> ()
    | _ -> fail "partial deletion must report Failed and a later successful retirement separately");
-  check bool "the failed entry did remove its name before the sidecar failure" false
+  check bool "failed cleanup retains canonical retry authority" true
     (Sys.file_exists (Auth.credential_file base_path "aaa"));
   check bool "the unremoved sidecar is retained" true (Sys.file_exists raw);
-  check bool "the later entry is removed" false (Sys.file_exists (Auth.credential_file base_path "bbb"))
+  check bool "the later entry is removed" false (Sys.file_exists (Auth.credential_file base_path "bbb"));
+  Unix.rmdir raw;
+  (match auth_ok (prune base_path) with
+   | [{ Prune.agent_name = "aaa"; reason = Prune.Expired; outcome = Prune.Retired }] -> ()
+   | _ -> fail "repairing the sidecar problem must let the next prune finish cleanup")
+
+let test_absent_preview_creates_nothing () =
+  with_workspace @@ fun base_path ->
+  let absent = Filename.concat base_path "untouched-workspace" in
+  check (list string) "absent preview is empty" []
+    (names (auth_ok (prune ~mode:Prune.Preview absent)));
+  check bool "preview does not create the workspace or auth lock" false (Sys.file_exists absent)
+
+let test_expired_uuid_retires_validated_aliases () =
+  with_workspace @@ fun base_path ->
+  let _, credential = auth_ok (Auth.ensure_keeper_credential base_path ~agent_name:"keeper-canonical") in
+  Auth.save_credential base_path { credential with expires_at = Some expired };
+  List.iter (fun alias_name -> auth_ok (Auth.ensure_credential_alias base_path
+      ~canonical_name:"keeper-canonical" ~alias_name)) ["keeper-short"; "keeper-other"];
+  (match auth_ok (prune base_path) with
+   | [{ Prune.agent_name = "keeper-canonical"; reason = Prune.Expired; outcome = Prune.Retired }] -> ()
+   | _ -> fail "the canonical credential and aliases must retire in one entry");
+  List.iter (fun name -> check bool "validated alias was removed in the same prune" false
+      (Sys.file_exists (Auth.credential_file base_path name)))
+    ["keeper-canonical"; "keeper-short"; "keeper-other"];
+  check (list string) "no orphan remains for a second prune" [] (names (auth_ok (prune base_path)))
+
+let test_raw_publication_waits_for_prune () =
+  with_workspace @@ fun base_path ->
+  let old_token, credential = auth_ok (Auth.ensure_keeper_credential base_path ~agent_name:"keeper") in
+  Auth.save_credential base_path { credential with expires_at = Some expired };
+  let result, renewed = interleave base_path
+      ~while_waiting:(fun () -> check (option string)
+        "a publisher waiting for prune cannot replace its sidecar" (Some old_token)
+        (Auth.load_raw_token base_path ~agent_name:"keeper"))
+      (fun () -> prune base_path)
+      (fun () -> Auth.ensure_keeper_credential base_path ~agent_name:"keeper") in
+  let _retired = auth_ok result in
+  let token, _ = auth_ok renewed in
+  check (option string) "the successful publisher retains its new bearer" (Some token)
+    (Auth.load_raw_token base_path ~agent_name:"keeper");
+  let current = auth_ok (Auth.verify_token base_path ~agent_name:"keeper" ~token) in
+  check string "new credential still authenticates" "keeper" current.agent_name
 
 let test_failed_admission_preserves_every_file () =
   with_workspace @@ fun base_path ->
@@ -347,6 +390,9 @@ let () =
       ; test_case "orphan replacement before prune preserves its bearer" `Quick test_orphan_renewal_before_prune
       ; test_case "prune finishes before the later renewal" `Quick test_prune_before_renewal
       ; test_case "preview preserves exact files" `Quick test_preview_preserves_files
+      ; test_case "absent preview creates no directories or lock" `Quick test_absent_preview_creates_nothing
+      ; test_case "expired UUID removes its validated aliases once" `Quick test_expired_uuid_retires_validated_aliases
+      ; test_case "raw publication waits for prune admission" `Quick test_raw_publication_waits_for_prune
       ; test_case "UUID cleanup invalidates cached credentials" `Quick test_uuid_cleanup_and_cache
       ; test_case "read failure aborts the plan before deletion" `Quick test_read_failure_aborts_before_any_delete
       ; test_case "FIFO refusal releases publishers and regular reads still retire" `Quick test_fifo_refusal_releases_publishers

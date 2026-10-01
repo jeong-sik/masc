@@ -273,9 +273,14 @@ let terminal_safe_text ?(preserve_newlines = false) text =
   loop 0;
   Masc.Tui_terminal_text.escape_invisible (Buffer.contents output)
 
-let bounded value =
-  if String.length value <= 240 then value
-  else String.sub value 0 240 ^ "..."
+let http_error_preview_max_bytes = 240
+
+let bounded_http_error_body value =
+  (* This is a byte-bounded HTTP body preview, not a terminal column. The
+     suffix participates in the existing preview budget. *)
+  String_util.utf8_safe ~max_bytes:http_error_preview_max_bytes
+    ~suffix:Masc_tui_message_layout.cut_mark value
+  |> String_util.to_string
 
 let stream_error_to_string = function
   | Malformed_event detail -> "invalid Keeper chat stream: " ^ detail
@@ -351,7 +356,7 @@ let error_to_string = function
          twice and pushed the one useful part, the cause, to the far end. *)
       "Keeper chat transport: " ^ detail
   | Http_error { status; body } ->
-      Printf.sprintf "Keeper chat HTTP %d: %s" status (bounded (String.trim body))
+      Printf.sprintf "Keeper chat HTTP %d: %s" status (bounded_http_error_body (String.trim body))
   | Protocol_error { stream_error; _ } -> stream_error_to_string stream_error
 
 (* What the operator reads while the TUI re-POSTs an operation whose outcome it

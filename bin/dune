@@ -1486,6 +1486,13 @@
 ; this same stanza -- which is why the file split out in #3808 grew back to
 ; 16.5k lines. A library makes per-surface modules possible at all.
 (library
+ (name masc_tui_palette)
+ (wrapped false)
+ (modules masc_tui_palette)
+ (libraries masc_tui_fetched masc_tui_types masc_tui_pick_list masc_tui_rows
+  masc_tui_message_layout masc_tui_code_lexer masc.keeper_contract masc))
+
+(library
  (name masc_tui_render_tools)
  (wrapped false)
  (modules masc_tui_render_tools)
@@ -1675,6 +1682,7 @@
  (wrapped false)
  (modules masc_tui_render_chat)
  (libraries
+  masc_tui_pick_list
   masc_tui_render_prim
   masc_tui_composer
   masc_tui_ansi
@@ -1756,6 +1764,7 @@
  (public_name masc-tui)
  (package masc)
  (libraries
+  masc_tui_palette
   masc_tui_account_login
   masc_tui_play_card
   masc_tui_sgr_text

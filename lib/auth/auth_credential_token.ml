@@ -571,12 +571,16 @@ let rotate_shared_tokens_matching config ~include_agent =
              List.sort (fun (_, (a : agent_credential)) (_, b) ->
                String.compare a.agent_name b.agent_name) selected)))
         groups |> List.sort (fun (a, _) (b, _) -> String.compare a b) in
-    (* Publication may replace a UUID file or remove a previous redirect target.
-       Validate every selected write target before the first raw sidecar write. *)
+    (* Even an unselected legacy owner can name the selected UUID on a
+       case-insensitive store. Enforce the canonical UUID/ownership contract
+       for every current owner before any selected publisher writes. *)
+    let* () = List.fold_left (fun checked (stored, credential) ->
+      let* () = checked in
+      let* _target = credential_owned_uuid_target config credential.agent_name stored credential in
+      Ok ()) (Ok ()) snapshot.current_credentials in
     let rec validate targets = function
       | [] -> Ok ()
-      | (stored, credential) :: rest ->
-        let* _owned_uuid = credential_owned_uuid_target config credential.agent_name stored credential in
+      | (_stored, credential) :: rest ->
         let* targets = match credential.id with
           | None -> Ok targets
           | Some id ->

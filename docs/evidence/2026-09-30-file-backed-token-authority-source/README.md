@@ -1,3 +1,16 @@
+## Frozen source refresh
+
+The manifest and top-level native source contract describe source commit
+`710b0ba62193ab1515e682fa6757e74614defd4f`. All 12 SHA-256 entries were regenerated from
+`git show <source_commit>:<path>`; the committed suite registers 24 cases.
+Every referenced public Auth function was checked against its `.mli`, and the
+Dune include was checked as source. Six affected OCaml files parsed successfully.
+No native suite, typecheck, build or CI was executed for this refresh.
+The original source contract is retained under `initial_source_contract`.
+Earlier prose and receipts below describe their dated compositions; their
+19/20/22/23-case counts are historical, not the current inventory. Later stack
+merges do not change the immutable source commit named by this receipt.
+
 # File-backed credential publication authority
 
 ## Provenance

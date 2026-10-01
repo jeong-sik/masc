@@ -1082,9 +1082,10 @@ let both_resting left right =
 ;;
 
 (* A lane waits only when every slot it walked refused for its account's
-   standing: an HTTP rate limit, quota, full capacity or payment refusal
-   (AGENT_CORE's [Every_binding_resting]), then every CLI slot's typed quota
-   or usage-limit refusal. Anything else can be about this input, and a
+   standing: an HTTP rate limit, quota, full capacity or payment refusal, or a
+   network failure before the request was dispatched (AGENT_CORE's
+   [Every_binding_resting]), then every CLI slot's typed quota or usage-limit
+   refusal. Anything else can be about this input, and a
    waiting root is claimed first again (Ready roots are claimed oldest
    first), so one input no slot can take would hold every newer candidate of
    this Keeper behind it. Those stay Blocked and quarantined. *)

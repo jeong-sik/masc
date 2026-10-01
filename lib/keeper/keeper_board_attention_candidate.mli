@@ -247,6 +247,10 @@ val candidate_id_of_signal :
     bodies on distinct comments remain distinct. Exported so test fixtures
     derive ids from this function instead of copying the formula. *)
 
+val board_interests : candidate -> (string list, string) result
+(** The Keeper's normalized Board interests from the validated
+    [keeper_context], the same list [keeper_role] projects. *)
+
 val judgment_request : candidate -> (Yojson.Safe.t, string) result
 (** The judgment request as the run record carries it: the exact current
     [candidate_id] and [signal], plus a [keeper_role] projection containing
@@ -311,6 +315,11 @@ val load_candidates_with_rejections
     rows remain on disk across writes: an undecodable row can carry a pending
     obligation that the current decoder cannot reconstruct. Compaction resumes
     only after an explicit repair leaves a fully readable ledger. *)
+
+val ledger_path : base_path:string -> keeper_name:string -> string
+(** The Keeper's candidate ledger file. A Keeper purge removes it with the
+    Keeper, so a later Keeper of the same name starts without its candidates
+    or quarantines. *)
 
 val record : base_path:string -> candidate -> record_result
 (** Validate the complete current candidate invariant before changing the

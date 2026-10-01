@@ -2444,7 +2444,7 @@ let start_masc_server_here ~base_path ~host ~port ~note ~on_ready =
    id-less acceptance, which would inherit that seq while the leftover bytes
    glued onto the next chunk -- so each (re)connect starts a fresh one and
    asks the server to resume from the log's last seq instead. *)
-let post_keeper_chat_watching ~enqueue ~control_generation ~admission_intent ~mailbox ~port ~log request =
+let post_keeper_chat_watching ~check_workspace ~enqueue ~control_generation ~admission_intent ~mailbox ~port ~log request =
   let enqueue_async = enqueue in
   let host = server_peer_host in
   match Eio_context.get_clock_opt () with
@@ -2453,7 +2453,9 @@ let post_keeper_chat_watching ~enqueue ~control_generation ~admission_intent ~ma
         (Keeper_chat_stream_unavailable
            ( request
            , "sending without a live view: no Eio clock to bound the stream" ));
-      Masc_tui_http.post_keeper_chat ~admission_intent ~host ~port request
+      Result.bind (Result.map_error (fun detail -> Keeper_chat.Transport_error detail)
+        (check_workspace ()))
+        (fun () -> Masc_tui_http.post_keeper_chat ~admission_intent ~host ~port request)
   | Some clock ->
       (* After the highest seq this watcher has handed to the mailbox. The
          log is folded by the main loop, so at the moment of a re-POST it may
@@ -2496,8 +2498,10 @@ let post_keeper_chat_watching ~enqueue ~control_generation ~admission_intent ~ma
                 (Keeper_chat_stream_deltas (request, deltas))
         in
         let result =
-          Masc_tui_http.post_keeper_chat_streaming ~admission_intent ~clock ~host ~port ~on_chunk
-            ~since_seq request
+          Result.bind (Result.map_error (fun detail -> Keeper_chat.Transport_error detail)
+            (check_workspace ()))
+            (fun () -> Masc_tui_http.post_keeper_chat_streaming ~admission_intent ~clock ~host ~port ~on_chunk
+              ~since_seq request)
         in
         match result with
         | Ok (Keeper_chat.Turn_completed { turn_outcome = Keeper_chat.Continuation_checkpoint; _ }) ->
@@ -7679,6 +7683,11 @@ let take_pending_attachments state =
 ;;
 
 let launch_keeper_request ?promoted ?(admission_intent = Keeper_chat.Queue_only) state ~mailbox request =
+  let authority = state.workspace_authority in
+  let identity = state.server_identity in
+  let port = state.port in
+  let check_workspace () = check_workspace_request state ~mailbox ~authority ~identity
+      ~host:server_peer_host ~port () in
   let enqueue_async = workspace_enqueue state in
   if keeper_available_for_new_message state request.Keeper_chat.keeper_name then begin
   state.keeper_interactive_waiting <- List.filter (fun (_, id, _) ->
@@ -7726,7 +7735,7 @@ let launch_keeper_request ?promoted ?(admission_intent = Keeper_chat.Queue_only)
     then begin
       let result =
         try
-          post_keeper_chat_watching ~enqueue:enqueue_async ~control_generation ~admission_intent ~mailbox ~port:state.port ~log:log.tl_log
+          post_keeper_chat_watching ~check_workspace ~enqueue:enqueue_async ~control_generation ~admission_intent ~mailbox ~port ~log:log.tl_log
             request
         with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -12501,7 +12510,7 @@ let start_keeper_action state ~base_path:_ ~mailbox keeper_name action =
   | Workspace_identity_match | Workspace_identity_mismatch _ ->
   let enqueue_async = workspace_enqueue state in
   let authority = state.workspace_authority in
-  let authority_current () = authority = state.workspace_authority in
+  let identity = state.server_identity in
   let serial = state.keeper_action_serial + 1 in
   state.keeper_action_serial <- serial;
   state.keeper_action_inflight <- Some (keeper_name, action);
@@ -12510,6 +12519,9 @@ let start_keeper_action state ~base_path:_ ~mailbox keeper_name action =
     (Printf.sprintf "%s %s" (Keeper_control.action_gerund action) keeper_name);
   let host = server_peer_host in
   let port = state.port in
+  let authority_current () =
+    Result.is_ok (check_workspace_request state ~mailbox ~authority ~identity ~host ~port ())
+  in
   let operator_operation_id =
     Keeper_control.mint_operation_id ~keeper:keeper_name ~serial
   in

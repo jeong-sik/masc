@@ -19,6 +19,8 @@ SOURCE_MODULES = (
     "bin/masc_tui_render_code.mli",
     "bin/masc_tui_code_results.ml",
     "bin/masc_tui_code_results.mli",
+    "bin/masc_tui_code_requests.ml",
+    "bin/masc_tui_code_requests.mli",
 )
 AUTHOR = "author-" + "a" * 120 + "AUTHORTAIL"
 BODY = "MEMOHEAD " + "한글 memo evidence " * 80 + "MEMOTAIL"

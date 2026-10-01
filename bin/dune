@@ -1829,6 +1829,7 @@
   masc_tui
   masc_tui_async_protocol
   masc_tui_board_requests
+  masc_tui_code_requests
   masc_tui_render
   masc_tui_render_board
   masc_tui_render_code

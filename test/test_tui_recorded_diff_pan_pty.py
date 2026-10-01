@@ -7,7 +7,8 @@ import urllib.parse
 
 import test_tui_keyboard_input as h
 
-SOURCE_MODULES = ("bin/masc_tui.ml", "bin/masc_tui_render.ml",
+SOURCE_MODULES = ("bin/masc_tui_code_requests.ml", "bin/masc_tui_code_requests.mli",
+                  "bin/masc_tui.ml", "bin/masc_tui_render.ml",
                   "bin/masc_tui_render_prim.ml", "bin/masc_tui_types.ml",
                   "bin/masc_tui_code_results.ml", "bin/masc_tui_code_results.mli")
 RIGHT = b"\x1b[1;2C"

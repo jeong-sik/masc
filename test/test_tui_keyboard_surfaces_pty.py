@@ -7,6 +7,8 @@ import time
 import test_tui_keyboard_input as keyboard
 
 SOURCE_MODULES = (
+    "bin/masc_tui_code_requests.ml",
+    "bin/masc_tui_code_requests.mli",
     "bin/masc_tui_render_fusion.ml",
     "bin/masc_tui_render_fusion.mli",
     "bin/masc_tui_fusion_model.ml",

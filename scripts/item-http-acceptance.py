@@ -122,6 +122,7 @@ for src, dst in fixture_paths:
     target.write_bytes(verified_inputs[f'test/fixtures/item-http/{src}'])
     config_hashes[src] = hashlib.sha256(target.read_bytes()).hexdigest()
 # Seed a second Keeper and canonical synthetic credit before either process starts.
+# The seed includes synthetic policy, Snapshot, obligation and candidate provenance.
 # This is an Item spending fixture, not evidence of earning a Goal payout.
 paid_meta = json.loads(verified_inputs['test/fixtures/item-http/keeper.json'])
 paid_meta.update(name='item-paid-probe', trace_id='trace-item-paid-probe')
@@ -131,7 +132,8 @@ ledger_path = base / '.masc/candle-ledger.jsonl'
 free_seed = ledger_path.read_bytes()
 seed = verified_inputs['test/fixtures/item-http/paid-credit.jsonl']
 seeded_ledger = free_seed + seed
-seeded_payments = [json.loads(line) for line in seeded_ledger.splitlines()]
+seeded_events = [json.loads(line) for line in seeded_ledger.splitlines()]
+seeded_payments = [event for event in seeded_events if event['kind'] == 'paid']
 ledger_path.write_bytes(seeded_ledger)
 ledger_path.chmod(0o600)
 (root / 'ledger-seed.jsonl').write_bytes(seeded_ledger)
@@ -425,7 +427,7 @@ with (root / 'server.log').open('wb') as log:
         require(paid_start['keeper'] == 'item-paid-probe' and paid_start['balance_milli'] == '700', paid_start)
         require(paid_start['owned_items'] == [], paid_start)
         paid_original = tool('keeper_candle_equip', {'slot': 'head', 'item': 'default'})['equipment']
-        status, paid_before_png = request('/api/v1/keepers/item-paid-probe/portrait.png?size=96')
+        status, paid_before_png, _ = request('/api/v1/keepers/item-paid-probe/portrait.png?size=96')
         require(status == 200, status)
         validate_portrait(paid_before_png, 96)
         (root / 'paid-portrait-before.png').write_bytes(paid_before_png)
@@ -441,12 +443,12 @@ with (root / 'server.log').open('wb') as log:
         require(paid_equipped['equipment']['head'] == 'crown', paid_equipped)
         for slot in ('face', 'neck', 'hand', 'base'):
             require(paid_equipped['equipment'][slot] == paid_original[slot], paid_equipped)
-        status, paid_body = request('/api/v1/keepers/item-paid-probe/items')
+        status, paid_body, _ = request('/api/v1/keepers/item-paid-probe/items')
         paid_account = json.loads(paid_body)
         require(status == 200 and paid_account['balance_milli'] == '500', paid_account)
         require(paid_account['owned_items'] == ['crown'], paid_account)
         (root / 'paid-account.json').write_bytes(paid_body)
-        status, paid_png = request('/api/v1/keepers/item-paid-probe/portrait.png?size=96')
+        status, paid_png, _ = request('/api/v1/keepers/item-paid-probe/portrait.png?size=96')
         require(status == 200, status)
         validate_portrait(paid_png, 96)
         require(paid_png != paid_before_png, 'paid crown did not change the served portrait')
@@ -465,11 +467,11 @@ origin = f'http://127.0.0.1:{port}'
 with (root / 'server.log').open('ab') as log:
     try:
         start_ready(log)
-        status, persisted_body = request(path)
+        status, persisted_body, _ = request(path)
         persisted = json.loads(persisted_body)
         require(status == 200 and persisted == account_after, ('restart lost Item account', persisted))
         (root / 'account-restarted.json').write_bytes(persisted_body)
-        status, persisted_png = request('/api/v1/keepers/item-runtime-probe/portrait.png?size=96')
+        status, persisted_png, _ = request('/api/v1/keepers/item-runtime-probe/portrait.png?size=96')
         require(status == 200 and persisted_png == equipped_png, 'restart lost purchased equipment')
         (root / 'portrait-restarted.png').write_bytes(persisted_png)
         # Sessions belong to a process; authenticate and initialize a fresh MCP session.
@@ -481,7 +483,7 @@ with (root / 'server.log').open('ab') as log:
         require(unchanged['changed'] is False and unchanged['equipment'] == equipped['equipment'], unchanged)
         restored_after_restart = tool('keeper_candle_equip', {'slot': 'face', 'item': 'default'})
         require(restored_after_restart['equipment'] == starting, restored_after_restart)
-        status, default_after_restart = request('/api/v1/keepers/item-runtime-probe/portrait.png?size=96')
+        status, default_after_restart, _ = request('/api/v1/keepers/item-runtime-probe/portrait.png?size=96')
         require(status == 200 and default_after_restart == png, 'default restore after restart differs')
         initialize_keeper_session(paid_keeper_token)
         paid_persisted = tool('keeper_candle_balance', {})
@@ -490,10 +492,10 @@ with (root / 'server.log').open('ab') as log:
         repeated = tool('keeper_candle_equip', {'slot': 'head', 'item': 'crown'})
         require(repeated['changed'] is False and repeated['equipment'] == paid_equipped['equipment'], repeated)
         require(ledger_path.read_bytes() == before_repeat_equipment, 'unchanged equipment appended a ledger event')
-        status, paid_restarted_body = request('/api/v1/keepers/item-paid-probe/items')
+        status, paid_restarted_body, _ = request('/api/v1/keepers/item-paid-probe/items')
         require(status == 200 and json.loads(paid_restarted_body) == paid_account, ('paid account response after restart', status, json.loads(paid_restarted_body)))
         (root / 'paid-account-restarted.json').write_bytes(paid_restarted_body)
-        status, paid_restarted_png = request('/api/v1/keepers/item-paid-probe/portrait.png?size=96')
+        status, paid_restarted_png, _ = request('/api/v1/keepers/item-paid-probe/portrait.png?size=96')
         require(status == 200 and paid_restarted_png == paid_png, 'restart lost paid equipment')
         before_refusals = ledger_path.read_bytes()
         tool('keeper_candle_purchase', {'item': 'crown'}, 'already_owned')
@@ -501,6 +503,7 @@ with (root / 'server.log').open('ab') as log:
         require(ledger_path.read_bytes() == before_refusals, 'restart refusals changed the ledger')
         final_ledger = ledger_path.read_bytes()
         require(final_ledger.startswith(ledger_before_restart), 'restart rewrote prior ledger history')
+        require(final_ledger.startswith(seeded_ledger), 'Item calls rewrote synthetic seed provenance')
         rows = [json.loads(line) for line in final_ledger.splitlines()]
         require([row for row in rows if row['kind'] == 'paid'] == seeded_payments, 'synthetic credits changed')
         paid_purchases = [row for row in rows if row['kind'] == 'purchased' and row['keeper'] == 'item-paid-probe']

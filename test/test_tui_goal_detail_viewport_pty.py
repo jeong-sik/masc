@@ -117,8 +117,8 @@ def run(executable):
         assert not posted, posted
         h.send_and_wait(process, fd, output, b"c", b"fixture intentionally refuses transition")
         assert posted == [{"goal_id": GOAL_ID, "action": "request_complete"}], posted
-        # Refresh removes the visible Goal while the detail id remains in
-        # state. No hidden lifecycle or proof-confirmation command may run.
+        # Refresh removes the Goal and reconciles the detail back to list mode.
+        # This checks list-mode behavior, not the inconsistent-detail guard.
         fixtures[h.PLANNING_PATH] = h.planning_snapshot([])
         h.send_and_wait(process, fd, output, b"r", b"(no goals)")
         h.drain_until_quiet(process, fd, output)

@@ -19,7 +19,49 @@ Fusion still owns panel/judge calls, durable async request identity, terminal
 settlement, Board projection and continuation delivery in the host.
 The package has no credentials or compute/action port.
 The exporter reads an already-acquired API response; it neither fetches
-the API nor updates a capture automatically.
+the API nor updates a file capture automatically.
+
+The native `fusion_run` source additionally reads an exact run from the host
+registry, retains its captured detail bytes and nudges matching observers when
+Fusion publishes a new state. It does not require manual snapshot export.
+Later independent Board card edits require explicit observation; the latest
+completed output is a frozen capture, not a live mirror of arbitrary Board edits.
+
+## Native source ownership
+
+Native `fusion_run` captures are visible to the authoritative registry Keeper
+and to the operator. HTTP access uses verified operator or agent credentials;
+local actor attribution and player credentials cannot grant private source access.
+Unknown and foreign run identities receive the same acquisition denial.
+
+Every retained binding records a strict read visibility: shared, operator, or one
+exact Keeper. Missing or unknown visibility fails closed. Inspect, Slice, evidence,
+actions, lifecycle operations and subscription reads/acknowledgments apply that
+policy after detach or restart as well as while a worker is live. Ordinary sources
+remain shared. Configured native Fusion sources preserve their registry owner even
+when the operator performs reconciliation. Derived `lane_output` consumers inherit
+all upstream restrictions; mixed Keeper owners require operator access.
+
+A consumer's retained visibility stays fixed for its incarnation. If an upstream
+replacement becomes more private, acquisition refuses the new bytes until the
+consumer is reattached with compatible visibility. Existing shared captures remain
+readable under their original policy. Configuration inventory and declaration
+editing apply source ownership before returning sensitive entries or current bytes.
+Authenticated Keeper saves also retain document ownership separately from the
+referenced run. Initial admission records the exact prior/proposed source digests
+before writing; only a durable matching write establishes stable repair authority.
+The owner can then read and repair malformed TOML or replace a run that has left
+the registry. Proposed bindings still require current source authorization.
+Ownership remains attached to the canonical workspace and document path; submitted
+TOML cannot transfer it. Reconciliation also records the verified Keeper owner of
+operator-created private declarations; exact-revision retained visibility can
+establish that owner after its Fusion run leaves the registry. Corrupt ownership
+records require operator repair.
+
+The native regression fixtures cover direct and historical access, unverified
+attribution, private graph propagation, subscription cursor preservation and an
+upstream shared-to-private replacement. These are pending native execution; this
+change does not claim current-head CI or production validation.
 
 ## Composer
 
@@ -56,8 +98,8 @@ Broadcast delivery or Keeper reads. Broadcast/report blocks remain proposed role
 
 Docker/host installation, current-head CI and production model/worker behavior
 are separate evidence stages. None are claimed by the local stdio/browser checks.
-The next runtime work is an explicit completion-to-snapshot acquisition bridge,
-then the credential/runtime boundary for moving compute into isolation, and
+The native acquisition bridge is implemented with CI validation pending.
+The next runtime work is the credential/runtime boundary for moving compute into isolation, and
 durable Board/Broadcast/read integration. Generic composite/subflow execution
 is not introduced by this slice.
 

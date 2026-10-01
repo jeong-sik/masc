@@ -1894,9 +1894,23 @@ def board_detail_page(
     first = max(0, total - limit) if offset is None else offset
     page = comments[first:first + limit]
     next_offset = first + len(page) if first + len(page) < total else None
+    by_id = {comment["id"]: comment for comment in comments}
+    context_ids = set()
+    for comment in page:
+        current = comment
+        while current["id"] not in context_ids:
+            context_ids.add(current["id"])
+            parent = by_id.get(current.get("parent_id"))
+            if parent is None:
+                break
+            current = parent
     return {
         "post": {**post, "comment_count": total},
         "comments": page,
+        "comment_context": [comment for comment in comments if comment["id"] in context_ids],
+        "comment_revision": hashlib.sha256(json.dumps(
+            [[comment["id"], comment.get("parent_id")] for comment in comments],
+            ensure_ascii=False, separators=(",", ":")).encode()).hexdigest(),
         "comment_page": {
             "offset": first,
             "returned": len(page),
@@ -7134,7 +7148,7 @@ def chat_retained_stop_interaction(fixture: AtomicChatFixture) -> Interaction:
                 raise AssertionError("initial stop never reached the server")
             send_and_wait(process, master_fd, output, b"retained-original", composer_showing(b"retained-original"))
             send_and_wait(process, master_fd, output, b"\r", "내 메시지 1건 대기".encode())
-            send_and_wait(process, master_fd, output, b"\x1b", b"Input retained after Esc")
+            send_and_wait(process, master_fd, output, b"\x1b", "중단 뒤 보관 중".encode())
             if fixture.received:
                 raise AssertionError(f"second Esc dispatched retained input: {fixture.received!r}")
             fixture.release_interrupt.set()

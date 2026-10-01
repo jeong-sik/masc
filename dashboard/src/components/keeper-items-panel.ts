@@ -1,8 +1,8 @@
+import { storedTokenRevision } from '../api/token-revision'
 import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
 import { fetchKeeperItems, type KeeperItemsReading } from '../api/keeper-items'
 import { ApiRequestError, currentStoredTokenRevision } from '../api/core'
-import { storedTokenRevision } from '../api/token-revision'
 import { keeperEquipmentKey, type KeeperEquipment } from '../lib/keeper-portrait'
 import { KeeperPortrait } from './keeper-portrait'
 import { KeeperBadge } from './keeper-badge'
@@ -44,6 +44,7 @@ export function KeeperItemsPanel({ keeper }: { keeper: Keeper }) {
   const refreshKind = currentRefresh?.kind ?? 'idle'
   const identity = JSON.stringify([observation, revision])
   const [reading, setReading] = useState<Reading>({ kind: 'loading', identity })
+  const [preview, setPreview] = useState<{ reading: Reading; itemId: string } | null>(null)
 
   useEffect(() => {
     setReading({ kind: 'loading', identity })
@@ -94,6 +95,8 @@ export function KeeperItemsPanel({ keeper }: { keeper: Keeper }) {
     setRefresh(current => current === pending ? { kind: 'idle' } : current)
   }
   const account = current.kind === 'loaded' && current.value.status === 'ready' ? current.value : null
+  const previewItem = account && preview?.reading === current && keeper.portrait?.state === 'ready'
+    ? preview.itemId : undefined
   return html`
     <div class="flex flex-wrap items-center justify-between gap-3">
       <p class="m-0 text-xs text-[var(--color-fg-muted)]">Keeper가 직접 구매하고 착용한 결과를 보여 줍니다.</p>
@@ -106,8 +109,13 @@ export function KeeperItemsPanel({ keeper }: { keeper: Keeper }) {
     ${current.kind === 'loaded' && current.value.status === 'disabled' ? html`<p role="alert">Candle 설정을 사용할 수 없습니다: ${current.value.reason}</p>` : null}
     ${account ? html`
       <div class="flex flex-wrap items-center gap-5 rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] p-4">
-        <${KeeperPortrait} name=${keeper.name} reading=${keeper.portrait ?? { state: 'unavailable', reason: '초상화 관측 없음' }} sizePx=${112} fallback=${html`<${KeeperBadge} id=${keeper.name} size="lg" variant="sigil" />`} />
+        <${KeeperPortrait} name=${keeper.name} reading=${keeper.portrait ?? { state: 'unavailable', reason: '초상화 관측 없음' }} previewItem=${previewItem} sizePx=${112} fallback=${previewItem
+          ? html`<p role="alert" class="m-0 text-xs text-[var(--color-fg-muted)]">미리보기 그림을 불러오지 못했습니다. 현재 착용 보기로 돌아가 다시 선택해주세요.</p>`
+          : html`<${KeeperBadge} id=${keeper.name} size="lg" variant="sigil" />`} />
         <div>
+          <p role="status" class="m-0 mb-2 text-xs">${previewItem ? `미리보기 · ${previewItem}` : '현재 착용 모습'}</p>
+          ${previewItem ? html`<button type="button" class="mb-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] px-3 py-1.5 text-xs" onClick=${() => setPreview(null)}>현재 착용 보기</button>
+            <p class="m-0 mb-2 text-xs text-[var(--color-fg-muted)]">미리보기는 그림만 바꿉니다. 구매하거나 착용하지 않습니다.</p>` : null}
           <div class="text-xs text-[var(--color-fg-muted)]">현재 잔액</div>
           <div class="text-xl font-semibold tabular-nums text-[var(--color-fg-primary)]">${candle(account.balance_milli)}</div>
           <div class="mt-1 text-xs text-[var(--color-fg-muted)]">보유 ${account.owned_items.length} / ${account.catalog.length}개</div>
@@ -123,6 +131,7 @@ export function KeeperItemsPanel({ keeper }: { keeper: Keeper }) {
                 const equipped = keeper.portrait?.state === 'ready' && keeper.portrait.equipment[slot] === item.id
                 return html`<li class="flex flex-wrap items-center justify-between gap-2 border-t border-[var(--color-border-divider)] py-2 text-xs">
                   <span class="font-mono text-[var(--color-fg-primary)]">${item.id}</span>
+                  <button type="button" aria-label=${`${item.id} 미리보기`} aria-pressed=${previewItem === item.id} disabled=${keeper.portrait?.state !== 'ready'} class="rounded-[var(--r-1)] border border-[var(--color-border-default)] px-2 py-1 disabled:opacity-50" onClick=${() => setPreview({ reading: current, itemId: item.id })}>미리보기</button>
                   <span class="flex items-center gap-2 text-[var(--color-fg-muted)]">
                     ${equipped ? html`<span class="font-semibold text-[var(--color-accent-fg)]">착용 중</span>` : owned ? html`<span>보유</span>` : null}
                     <span class="tabular-nums">${item.price_status === 'unpriced' ? '가격 미설정' : candle(item.price_milli)}</span>

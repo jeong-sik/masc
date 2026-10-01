@@ -1234,6 +1234,7 @@ let add_routes ~sw ~clock router =
                         let voter = board_voter_query req in
                         let status, body =
                           board_post_detail_json ~comment_request
+                            ?focused_comment:(query_param req "comment_focus")
                             ~voter ~reaction_actor ~config:(Some config)
                             ~response_format ~post_id ()
                         in

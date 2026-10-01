@@ -503,7 +503,10 @@ class RuntimeSetupAdapter(unittest.TestCase):
 
     def test_ctrl_c_in_the_picker_cancels_without_a_traceback(self):
         master, slave = pty.openpty()
-        program = ('import importlib.util,json; s=importlib.util.spec_from_file_location("setup",' +
+        # CI can start Python with SIGINT ignored; this child models a foreground terminal.
+        program = ('import importlib.util,json,signal; '
+                   'signal.signal(signal.SIGINT, signal.default_int_handler); '
+                   's=importlib.util.spec_from_file_location("setup",' +
                    repr(str(ROOT / 'scripts/install-runtime-setup.py')) +
                    '); m=importlib.util.module_from_spec(s); s.loader.exec_module(m);\n'
                    'try:\n'
@@ -535,6 +538,8 @@ class RuntimeSetupAdapter(unittest.TestCase):
             self.assertNotIn(b'Traceback', terminal + output)
         finally:
             process.kill()
+            process.wait()
+            process.stdout.close()
             os.close(master)
             os.close(slave)
 

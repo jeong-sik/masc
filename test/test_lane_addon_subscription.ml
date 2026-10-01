@@ -27,7 +27,7 @@ let call config caller args =
 let operator_call config args = S.handle ~access:Lane_addon_sources.Operator_configuration ~config ~caller:"operator" args
 let save config = operator_call config (`Assoc ["operation",`String "save";"subscriptions",`List [subscription]]) |> ok
 let store config = Store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons")
-let producer ?(phase=T.phase_to_json T.Attached) ?(visibility=`Assoc ["kind",`String "shared"]) store id seq = Store.save_binding store ~instance_id:id
+let producer ?(visibility=`Assoc ["kind",`String "shared"]) ?(phase=T.phase_to_json T.Attached) store id seq = Store.save_binding store ~instance_id:id
   (`Assoc ["visibility",visibility;"instance_id",`String id;"run_id",`String "study";"configuration",`Assoc ["id",`String "documents"];
     "phase",phase;"observation_seq",`Int seq;
     "package",`Assoc ["outputs",`Assoc ["changes",`Assoc ["lanes",`List [`String "changes"]]];
@@ -155,6 +155,9 @@ let hidden_and_absent_producers_have_identical_notices () = with_workspace (fun 
   let visibility = `Assoc ["kind", `String "keeper"; "keeper", `String "foreign"] in
   producer ~visibility retained "private-a" 1;
   check bool "private producer is indistinguishable from absence" true (notice () = absent);
+  producer ~visibility ~phase:(`Assoc ["kind", `String "invalid-private-phase"])
+    retained "private-a" 1;
+  check bool "private lifecycle errors do not reveal the producer" true (notice () = absent);
   producer ~visibility retained "private-b" 1;
   check bool "multiple private producers do not expose their count" true (notice () = absent))
 
@@ -306,8 +309,7 @@ let cursor_publication_requires_durable_visibility () = with_workspace (fun conf
           Fun.protect ~finally:(fun () -> Unix.close fd) (fun () -> Unix.fsync fd))
       ~sync_parent:(fun path -> raise (Unix.Unix_error (Unix.EIO,"fsync",path))) path bytes in
   let fault_call ~replace_cursor_file ~sync_parent operation = S.For_testing.handle
-    ~access:(Lane_addon_sources.Keeper "researcher")
-    ~replace_cursor_file ~sync_file:Unix.fsync ~sync_parent ~config ~caller:"researcher" operation in
+    ~access:(Lane_addon_sources.Keeper "researcher") ~replace_cursor_file ~sync_file:Unix.fsync ~sync_parent ~config ~caller:"researcher" operation in
   let ack_args=`Assoc (("operation",`String "acknowledge")::("receipt",first_receipt)::selection) in
   check bool "before-rename acknowledgement is rejected" true
     (Result.is_error (fault_call ~replace_cursor_file:(staged ~before:true) ~sync_parent:Unix.fsync ack_args));

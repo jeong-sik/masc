@@ -1,5 +1,6 @@
 import { Either, Schema } from 'effect'
 import { EQUIPMENT_IDS } from './keeper-portrait'
+import { CandleAccountDigestSchema } from './candle-observation'
 
 const slots = ['face', 'neck', 'head', 'hand', 'base'] as const
 const itemSlot = new Map<string, typeof slots[number]>(
@@ -19,6 +20,7 @@ const CatalogEntrySchema = Schema.Union(
 
 const ReadySchema = Schema.Struct({
   status: Schema.Literal('ready'),
+  account_revision: CandleAccountDigestSchema,
   keeper: Schema.NonEmptyString,
   balance_milli: AmountSchema,
   owned_items: Schema.Array(ItemIdSchema),
@@ -32,8 +34,8 @@ const ReadySchema = Schema.Struct({
 }))
 
 export const KeeperItemsSchema = Schema.Union(
-  Schema.Struct({ status: Schema.Literal('off'), keeper: Schema.NonEmptyString }),
-  Schema.Struct({ status: Schema.Literal('disabled'), keeper: Schema.NonEmptyString,
+  Schema.Struct({ status: Schema.Literal('off'), keeper: Schema.NonEmptyString, account_revision: Schema.Null }),
+  Schema.Struct({ status: Schema.Literal('disabled'), keeper: Schema.NonEmptyString, account_revision: CandleAccountDigestSchema,
     reason: Schema.String.pipe(Schema.filter(value => value.trim().length > 0 || 'disabled reason is empty')) }),
   ReadySchema,
 )

@@ -10,6 +10,7 @@ type account = {
   catalog : entry list;
 }
 type t = Off | Disabled of string | Ready of account
+type observation = { revision : string option; account : t }
 
 let exact_keys expected fields =
   List.sort String.compare (List.map fst fields)
@@ -103,22 +104,32 @@ let decode ~keeper_name json =
   let* fields =
     object_fields ~context:"Item account"
       ~keys:(match status with
-        | "off" -> [ "status"; "keeper" ]
-        | "disabled" -> [ "status"; "keeper"; "reason" ]
+        | "off" -> [ "status"; "keeper"; "account_revision" ]
+        | "disabled" -> [ "status"; "keeper"; "reason"; "account_revision" ]
         | "ready" ->
-          [ "status"; "keeper"; "balance_milli"; "owned_items"; "catalog" ]
+          [ "status"; "keeper"; "balance_milli"; "owned_items"; "catalog"; "account_revision" ]
         | _ -> [])
       json
   in
+  let* revision_json = field "account_revision" fields in
+  let* revision = match status, revision_json with
+    | "off", `Null -> Ok None
+    | ("ready" | "disabled"), `String digest
+      when String.length digest = 64
+        && String.for_all (function '0' .. '9' | 'a' .. 'f' -> true | _ -> false) digest ->
+        Ok (Some digest)
+    | _ -> Error "Item account revision is missing, malformed, or disagrees with its status"
+  in
+  let observed account = { revision; account } in
   let* reported_keeper = string "keeper" fields in
   if not (String.equal keeper_name reported_keeper)
   then Error "Item account belongs to another Keeper"
   else
     match status with
-    | "off" -> Ok Off
+    | "off" -> Ok (observed Off)
     | "disabled" ->
       let* reason = string "reason" fields in
-      Ok (Disabled reason)
+      Ok (observed (Disabled reason))
     | "ready" ->
       let* balance_milli = nonnegative_amount "balance_milli" fields in
       let* owned_json = field "owned_items" fields in
@@ -133,5 +144,5 @@ let decode ~keeper_name json =
       then Error "Item catalog is incomplete"
       else if not (List.for_all (fun item -> List.mem (Item.id item) (ids catalog_items)) owned_items)
       then Error "owned Item is absent from catalog"
-      else Ok (Ready { balance_milli; owned_items; catalog })
+      else Ok (observed (Ready { balance_milli; owned_items; catalog }))
     | _ -> Error ("unknown Item account status " ^ status)

@@ -263,9 +263,9 @@ let item_path name = "/api/v1/keepers/" ^ name ^ "/items"
 
 let item_account reply =
   check int "Item account HTTP response" 200 reply.status;
-  require_ok Fun.id
+  (require_ok Fun.id
     (Masc_tui_keeper_items.decode ~keeper_name:keeper
-       (Yojson.Safe.from_string reply.body))
+       (Yojson.Safe.from_string reply.body))).account
 
 let test_router_serves_png_with_a_strong_tag () =
   with_router (fun ~config:_ router ->
@@ -451,6 +451,40 @@ beanie = 200
     let credited_json = Yojson.Safe.from_string credited.body in
     check string "Item balance is an exact decimal string" "1000"
       Yojson.Safe.Util.(credited_json |> member "balance_milli" |> to_string);
+    let credited_observation = require_ok Fun.id
+      (Masc_tui_keeper_items.decode ~keeper_name:keeper credited_json) in
+    let roster_revision = match Yojson.Safe.Util.(before_roster |> member "keepers" |> to_list) with
+      | [row] -> Yojson.Safe.Util.(row |> member "candle_account_revision" |> to_string)
+      | _ -> fail "expected one Keeper in the credited roster" in
+    check (option string) "Item response and roster identify the same account snapshot"
+      (Some roster_revision) credited_observation.revision;
+    List.iter (fun revision ->
+      let changed = match credited_json with
+        | `Assoc fields -> `Assoc (("account_revision", revision) :: List.remove_assoc "account_revision" fields)
+        | _ -> fail "expected Item object" in
+      check bool "Item wire refuses malformed or absent ready revision" true
+        (Result.is_error (Masc_tui_keeper_items.decode ~keeper_name:keeper changed)))
+      [`Null; `Int 1; `String ""; `String (String.make 64 'A')];
+    let without_revision = match credited_json with
+      | `Assoc fields -> `Assoc (List.remove_assoc "account_revision" fields)
+      | _ -> fail "expected Item object" in
+    check bool "Item wire requires a revision member" true
+      (Result.is_error (Masc_tui_keeper_items.decode ~keeper_name:keeper without_revision));
+    List.iter (fun replacement ->
+      let malformed_roster = match before_roster with
+        | `Assoc fields ->
+          let keepers = Yojson.Safe.Util.(before_roster |> member "keepers" |> to_list)
+            |> List.map (function
+              | `Assoc row -> `Assoc (replacement @ List.remove_assoc "candle_account_revision" row)
+              | _ -> fail "expected Keeper object") in
+          `Assoc (("keepers", `List keepers) :: List.remove_assoc "keepers" fields)
+        | _ -> fail "expected roster object" in
+      let rows, _, _, _, _ = require_ok Fun.id (Tui_decode.decode_keeper_runtime_list malformed_roster) in
+      match rows with
+      | [row] -> check bool "missing/malformed/Off revision withdraws ready Item authority" true
+          (Result.is_error row.Tui_decode.kr_candle_account_revision)
+      | _ -> fail "revision error must preserve the Keeper row")
+      [[]; ["candle_account_revision", `Null]; ["candle_account_revision", `String "bad"]];
     let catalog_json = Yojson.Safe.Util.(credited_json |> member "catalog" |> to_list) in
     let priced = List.find (fun entry ->
       Yojson.Safe.Util.(entry |> member "id" |> to_string) = id) catalog_json in
@@ -462,7 +496,7 @@ beanie = 200
       | _ -> fail "Item account response is not an object" in
     (match Masc_tui_keeper_items.decode ~keeper_name:keeper
         (with_balance (`String (string_of_int max_int))) with
-     | Ok (Masc_tui_keeper_items.Ready account) ->
+     | Ok { Masc_tui_keeper_items.account = Ready account; _ } ->
        check int "Item decoder keeps the full OCaml wallet range" max_int account.balance_milli
      | Ok _ | Error _ -> fail "Item decoder lost a valid large wallet");
     List.iter (fun amount ->
@@ -603,7 +637,24 @@ beanie = 200
       let after_free = gate_row () in
       let free_revision = revision after_free in
       check bool "gate revision follows free ownership" false (before_revision = free_revision);
+      let captured = require_ok Candle_shop.error_to_string
+        (Candle_shop.observe_account ~base_path ~keeper:owner) in
+      check (option string) "captured account and cached roster use one revision projection"
+        (Some free_revision) (Candle_shop.account_revision captured);
       Fs_compat.save_file policy_path (original_policy ^ "glasses = 1\n");
+      let changed_account = require_ok Candle_shop.error_to_string
+        (Candle_shop.observe_account ~base_path ~keeper:owner) in
+      check bool "new account captures the new policy" false
+        (Candle_shop.account_revision captured = Candle_shop.account_revision changed_account);
+      check (option string) "captured revision does not reread the edited policy"
+        (Some free_revision) (Candle_shop.account_revision captured);
+      (match captured with
+       | Candle_shop.Account_ready (_, catalog) ->
+         let entry = List.find (fun (entry : Candle_shop.catalog_entry) ->
+           entry.item = glasses) catalog in
+         check bool "captured facts keep the price witnessed by their revision" true
+           (entry.price = Candle_config.Priced 0)
+       | _ -> fail "captured ready account changed its state");
       let after_price = gate_row () in
       check bool "gate revision follows catalog price alone" false (free_revision = revision after_price);
       List.iter (fun field ->

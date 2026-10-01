@@ -4392,9 +4392,12 @@ let item_account_revision state keeper_name =
 
 let launch_keeper_items state ~mailbox keeper_name =
   if not (item_authority_ready state) then withdraw_keeper_items_reading state
-  else begin
+  else match item_account_revision state keeper_name with
+  | None -> withdraw_keeper_items_reading state
+  | Some (_, Error _) -> withdraw_keeper_items_reading state
+  | Some ((_, Ok expected_revision) as revision) -> begin
   let enqueue_async = workspace_enqueue state in
-  state.item_account_revision <- item_account_revision state keeper_name;
+  state.item_account_revision <- Some revision;
   let request = mark_detail_read_started state ~tab:Detail_items ~keeper:keeper_name in
   let host = server_peer_host in
   let port = state.port in
@@ -4406,7 +4409,10 @@ let launch_keeper_items state ~mailbox keeper_name =
         ^ Masc_tui_http.percent_encode_path_segment keeper_name ^ "/items" in
       let ( let* ) = Result.bind in
       let* json = Masc_tui_http.get_json ~host ~port ~path in
-      Masc_tui_keeper_items.decode ~keeper_name json)
+      let* observation = Masc_tui_keeper_items.decode ~keeper_name json in
+      if Option.equal String.equal observation.revision expected_revision
+      then Ok observation.account
+      else Error "Item response revision differs from the observed Keeper account; waiting for a fresh roster read")
   end
 
 let refresh_visible_item_account state ~mailbox =

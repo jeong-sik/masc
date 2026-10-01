@@ -5,12 +5,12 @@ import { parseKeeperItems } from './keeper-items'
 const catalog = Object.entries(EQUIPMENT_IDS).flatMap(([slot, ids]) =>
   ids.slice(1).map(id => ({ id, slot, price_status: id === 'crown' ? 'priced' : 'unpriced', ...(id === 'crown' ? { price_milli: '200' } : {}) })),
 )
-const ready = { status: 'ready', keeper: 'rondo', balance_milli: '800', owned_items: ['crown'], catalog }
+const ready = { status: 'ready', account_revision: 'a'.repeat(64), keeper: 'rondo', balance_milli: '800', owned_items: ['crown'], catalog }
 
 describe('Keeper Item account wire', () => {
   it('decodes all three states and keeps unpriced separate from zero', () => {
-    expect(parseKeeperItems({ status: 'off', keeper: 'rondo' }, 'rondo').status).toBe('off')
-    expect(parseKeeperItems({ status: 'disabled', keeper: 'rondo', reason: 'bad policy' }, 'rondo').status).toBe('disabled')
+    expect(parseKeeperItems({ status: 'off', account_revision: null, keeper: 'rondo' }, 'rondo').status).toBe('off')
+    expect(parseKeeperItems({ status: 'disabled', account_revision: 'a'.repeat(64), keeper: 'rondo', reason: 'bad policy' }, 'rondo').status).toBe('disabled')
     const parsed = parseKeeperItems(ready, 'rondo')
     expect(parsed.status).toBe('ready')
     if (parsed.status !== 'ready') throw new Error('Expected ready account')
@@ -30,6 +30,15 @@ describe('Keeper Item account wire', () => {
     expect(() => parseKeeperItems({ ...ready, balance_milli: '0800' }, 'rondo')).toThrow()
     expect(parseKeeperItems({ ...ready, balance_milli: '9007199254740993' }, 'rondo')).toMatchObject({ balance_milli: '9007199254740993' })
     expect(() => parseKeeperItems({ ...ready, extra: true }, 'rondo')).toThrow()
-    expect(() => parseKeeperItems({ status: 'disabled', keeper: 'rondo', reason: ' ' }, 'rondo')).toThrow()
+    expect(() => parseKeeperItems({ status: 'disabled', account_revision: 'a'.repeat(64), keeper: 'rondo', reason: ' ' }, 'rondo')).toThrow()
   })
+  it('requires a canonical revision matching the observed status', () => {
+    for (const invalid of [undefined, null, '', 'A'.repeat(64), 'a'.repeat(63), 1]) {
+      expect(() => parseKeeperItems({ ...ready, account_revision: invalid }, 'rondo')).toThrow()
+    }
+    expect(() => parseKeeperItems({ status: 'off', keeper: 'rondo' }, 'rondo')).toThrow()
+    expect(() => parseKeeperItems({ status: 'off', account_revision: 'a'.repeat(64), keeper: 'rondo' }, 'rondo')).toThrow()
+    expect(() => parseKeeperItems({ status: 'disabled', account_revision: null, keeper: 'rondo', reason: 'unread' }, 'rondo')).toThrow()
+  })
+
 })

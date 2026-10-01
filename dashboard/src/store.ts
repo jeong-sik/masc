@@ -144,6 +144,8 @@ export const serverStatus = signal<ServerStatus | null>(null)
 export const executionTaskTotal = signal<number | null>(null)
 // Invalidates asynchronous account reads when workspace/publication authority changes.
 export const executionWorkspaceRevision = signal(0)
+// Accepted roster observations drive retries without changing workspace identity.
+export const keeperRosterObservationRevision = signal(0)
 export const executionLoaded = signal(false)
 export const executionLoading = signal(false)
 export const executionError = signal<string | null>(null)
@@ -1212,6 +1214,7 @@ export function hydrateExecutionSnapshot(
   }
   candleObservation.value = readCandleRosterObservation(data.candle, data.keepers)
   keepers.value = reconcileKeepers(keepers.value, normalizeKeepers(data.keepers))
+  keeperRosterObservationRevision.value += 1
   const normalizedWorkerBriefs = (Array.isArray(data.worker_support_briefs) ? data.worker_support_briefs : Array.isArray(data.worker_briefs) ? data.worker_briefs : [])
     .map(normalizeExecutionWorkerSupportBrief)
     .filter((row): row is DashboardExecutionWorkerSupportBrief => row !== null)

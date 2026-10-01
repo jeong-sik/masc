@@ -4,9 +4,10 @@ export const CandleAmountSchema = Schema.String.pipe(
   Schema.filter(value => /^(0|[1-9][0-9]*)$/.test(value)),
 )
 export const CandleBalanceSchema = Schema.NullOr(CandleAmountSchema)
-export const CandleAccountRevisionSchema = Schema.NullOr(Schema.String.pipe(
+export const CandleAccountDigestSchema = Schema.String.pipe(
   Schema.filter(value => /^[0-9a-f]{64}$/.test(value)),
-))
+)
+export const CandleAccountRevisionSchema = Schema.NullOr(CandleAccountDigestSchema)
 export const CandleObservationSchema = Schema.Union(
   Schema.Struct({ status: Schema.Literal('off') }),
   Schema.Struct({ status: Schema.Literal('disabled'), reason: Schema.String.pipe(Schema.filter(value => value.trim().length > 0)) }),

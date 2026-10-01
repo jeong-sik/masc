@@ -262,12 +262,23 @@ def portrait_as_pixels(binary: str) -> None:
     )
 
 
-def item_tab_previews_accessories(binary: str) -> None:
+def item_ready_fixtures():
     fixtures = h.keeper_runtime_http_fixtures()
+    roster = fixtures["/api/v1/gate/keepers?detailed=true"][1]
+    roster["candle"] = {"status": "ready", "issued_milli": "12500",
+                        "burned_milli": "0", "circulating_milli": "12500"}
+    for row in roster["keepers"]:
+        row["candle_account_revision"] = "a" * 64
+        row["candle_balance_milli"] = "12500" if row["name"] == "alpha" else "0"
+    return fixtures
+
+
+def item_tab_previews_accessories(binary: str) -> None:
+    fixtures = item_ready_fixtures()
     fixtures["/api/v1/keepers/alpha/items"] = (
         200,
         {
-            "status": "ready", "keeper": "alpha", "balance_milli": "12500",
+            "status": "ready", "account_revision": "a" * 64, "keeper": "alpha", "balance_milli": "12500",
             "owned_items": ["glasses"],
             "catalog": [
                 ({"id": item, "slot": slot, "price_status": "unpriced"}
@@ -337,8 +348,8 @@ def item_tab_previews_accessories(binary: str) -> None:
 
 
 def item_account_failure_keeps_the_preview(binary: str) -> None:
-    fixtures = h.keeper_runtime_http_fixtures()
-    ready = {"status": "ready", "keeper": "alpha", "balance_milli": "12500",
+    fixtures = item_ready_fixtures()
+    ready = {"status": "ready", "account_revision": "a" * 64, "keeper": "alpha", "balance_milli": "12500",
              "owned_items": [], "catalog": [
                  {"id": item, "slot": slot, "price_status": "unpriced"}
                  for item, slot in ITEM_CATALOG]}
@@ -381,7 +392,7 @@ def item_account_failure_keeps_the_preview(binary: str) -> None:
     )
 
 def item_account_follows_roster_revision(binary: str) -> None:
-    fixtures = h.keeper_runtime_http_fixtures()
+    fixtures = item_ready_fixtures()
     roster_path = "/api/v1/gate/keepers?detailed=true"
     roster = copy.deepcopy(fixtures[roster_path][1])
     roster_polls = []
@@ -395,7 +406,7 @@ def item_account_follows_roster_revision(binary: str) -> None:
         return 200, copy.deepcopy(roster)
 
     fixtures[roster_path] = read_roster
-    account = {"status": "ready", "keeper": "alpha", "balance_milli": "12500",
+    account = {"status": "ready", "account_revision": "a" * 64, "keeper": "alpha", "balance_milli": "12500",
                "owned_items": [], "catalog": [
                    {"id": item, "slot": slot,
                     "price_status": "priced" if item == "glasses" else "unpriced",
@@ -418,6 +429,7 @@ def item_account_follows_roster_revision(binary: str) -> None:
             f"automatic Item refresh never drew {needle!r}: {last_frame_rows(output)!r}"
 
     def publish_revision(value):
+        account["account_revision"] = value * 64
         for row in roster["keepers"]:
             if row["name"] == "alpha":
                 row["candle_account_revision"] = value * 64
@@ -460,6 +472,16 @@ def item_account_follows_roster_revision(binary: str) -> None:
         h.drain_until_quiet(process, fd, output)
         assert len(calls) == settled_calls, "healthy unchanged revision kept retrying"
         capture_item_screen(output, "automatic-transient-recovery")
+        # The roster can stay at R2 while the Item read observes intermediate R3.
+        # The response itself must identify R3 and be rejected before rendering.
+        account["account_revision"] = "d" * 64
+        account["balance_milli"] = "99999"
+        os.write(fd, b"r")
+        await_text(process, fd, output, b"Item response revision differs")
+        assert b"99.999" not in b"\n".join(last_frame_rows(output).values())
+        account["account_revision"] = "c" * 64
+        account["balance_milli"] = "12500"
+        await_text(process, fd, output, b"Balance 12.500 Candle")
         os.write(fd, b"q")
 
     h.run_terminal_scenario(binary,
@@ -470,12 +492,12 @@ def item_account_follows_roster_revision(binary: str) -> None:
 
 
 def item_account_withdraws_unread_authority(binary: str) -> None:
-    fixtures = h.keeper_runtime_http_fixtures()
+    fixtures = item_ready_fixtures()
     identity = {"base": "", "unread": False, "probes": 0}
     held, release, served = threading.Event(), threading.Event(), threading.Event()
     arm = [False]
     balance = ["12500"]
-    account = {"status": "ready", "keeper": "alpha", "owned_items": [],
+    account = {"status": "ready", "account_revision": "a" * 64, "keeper": "alpha", "owned_items": [],
                "catalog": [{"id": item, "slot": slot, "price_status": "unpriced"}
                            for item, slot in ITEM_CATALOG]}
 

@@ -5,7 +5,8 @@ import { keeperEquipmentKey, type KeeperEquipment } from '../api/schemas/keeper-
 import { KeeperPortrait } from './keeper-portrait'
 import { KeeperBadge } from './keeper-badge'
 import type { Keeper } from '../types'
-import { executionWorkspaceRevision, serverStatus } from '../store'
+import { executionWorkspaceRevision, keeperRosterObservationRevision, serverStatus } from '../store'
+import { readCandleAccountRevision } from '../api/schemas/candle-observation'
 
 type Reading =
   | { kind: 'loading'; identity: string }
@@ -27,33 +28,52 @@ export function KeeperItemsPanel({ keeper }: { keeper: Keeper }) {
   const [revision, setRevision] = useState(0)
   const equipmentKey = keeper.portrait?.state === 'ready'
     ? keeperEquipmentKey(keeper.portrait.equipment) : null
+  const rosterObservation = keeperRosterObservationRevision.value
+  const accountRevision = readCandleAccountRevision(keeper.candle_account_revision)
+  const revisionObserved = accountRevision !== undefined
   const workspaceRevision = executionWorkspaceRevision.value
   const project = serverStatus.value?.project ?? null
-  const identity = JSON.stringify([workspaceRevision, project, keeper.name, equipmentKey, keeper.candle_balance_milli, keeper.candle_account_revision, revision])
+  const identity = JSON.stringify([workspaceRevision, project, keeper.name, equipmentKey, keeper.candle_balance_milli, accountRevision, revisionObserved, revision])
   const [reading, setReading] = useState<Reading>({ kind: 'loading', identity })
 
   useEffect(() => {
-    const controller = new AbortController()
     setReading({ kind: 'loading', identity })
+    if (!revisionObserved) return
+    const controller = new AbortController()
     const currentAuthority = () => !controller.signal.aborted
       && executionWorkspaceRevision.value === workspaceRevision
       && (serverStatus.value?.project ?? null) === project
     fetchKeeperItems(keeper.name, controller.signal)
-      .then(value => { if (currentAuthority()) setReading({ kind: 'loaded', identity, value }) })
+      .then(value => {
+        if (!currentAuthority()) return
+        if (value.account_revision !== accountRevision) {
+          throw new Error('Item 계정 관측이 변경되었습니다. 다음 Keeper 관측에서 다시 읽습니다.')
+        }
+        setReading({ kind: 'loaded', identity, value })
+      })
       .catch(error => {
         if (currentAuthority()) setReading({ kind: 'error', identity, message: error instanceof Error ? error.message : 'Item 계정을 읽지 못했습니다' })
       })
     return () => controller.abort()
   }, [identity])
 
-  const current = reading.identity === identity ? reading : { kind: 'loading' as const, identity }
+  // Retry a settled failure only when another accepted roster observation arrives.
+  // Reading state changes alone must neither spin nor abort a pending request.
+  useEffect(() => {
+    if (revisionObserved && reading.kind === 'error' && reading.identity === identity) {
+      setRevision(value => value + 1)
+    }
+  }, [rosterObservation])
+
+  const current = revisionObserved && reading.identity === identity ? reading : { kind: 'loading' as const, identity }
   const account = current.kind === 'loaded' && current.value.status === 'ready' ? current.value : null
   return html`
     <div class="flex flex-wrap items-center justify-between gap-3">
       <p class="m-0 text-xs text-[var(--color-fg-muted)]">Keeper가 직접 구매하고 착용한 결과를 보여 줍니다.</p>
       <button type="button" class="rounded-[var(--r-1)] border border-[var(--color-border-default)] px-3 py-1.5 text-xs text-[var(--color-fg-primary)] hover:bg-[var(--color-bg-hover)]" onClick=${() => setRevision(value => value + 1)}>새로고침</button>
     </div>
-    ${current.kind === 'loading' ? html`<p role="status">Item 계정 불러오는 중…</p>` : null}
+    ${!revisionObserved ? html`<p role="status">현재 Keeper의 Item 계정 관측을 확인하는 중…</p>`
+      : current.kind === 'loading' ? html`<p role="status">Item 계정 불러오는 중…</p>` : null}
     ${current.kind === 'error' ? html`<p role="alert">Item 계정을 읽지 못했습니다: ${current.message}</p>` : null}
     ${current.kind === 'loaded' && current.value.status === 'off' ? html`<p role="status">Candle 기능이 꺼져 있습니다.</p>` : null}
     ${current.kind === 'loaded' && current.value.status === 'disabled' ? html`<p role="alert">Candle 설정을 사용할 수 없습니다: ${current.value.reason}</p>` : null}

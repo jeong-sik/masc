@@ -12,6 +12,11 @@ type catalog_entry =
   ; price : Candle_config.price
   }
 
+type account_observation =
+  | Account_off
+  | Account_disabled of string
+  | Account_ready of account * catalog_entry list
+
 type receipt =
   { account : account
   ; item : Keeper_portrait_item.t
@@ -47,3 +52,13 @@ val purchase
   -> keeper:Keeper_id.Keeper_name.t
   -> item:Keeper_portrait_item.t
   -> (receipt, error) result
+
+(** One immutable policy and ledger reading for account facts, catalog and revision. *)
+val observe_account : base_path:string -> keeper:Keeper_id.Keeper_name.t ->
+  (account_observation, error) result
+
+(** Project the same observation already used by a roster response, without IO. *)
+val account_observation_of_balance : policy:Candle_config.policy -> balance:Candle_balance.t ->
+  keeper:string -> account_observation
+
+val account_revision : account_observation -> string option

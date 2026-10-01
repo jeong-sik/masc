@@ -28,8 +28,7 @@ let catalog_entry_json (entry : Candle_shop.catalog_entry) =
      ] @ price)
 ;;
 
-let ready_json (account : Candle_shop.account) catalog =
-  `Assoc
+let ready_fields (account : Candle_shop.account) catalog =
     [ "status", `String "ready"
     ; "keeper", `String account.keeper
     ; "balance_milli", `String (string_of_int account.balance_milli)
@@ -53,23 +52,19 @@ let handle_get state request reqd name =
      | Error detail -> respond ~status:`Service_unavailable (error_json detail)
      | Ok false -> respond ~status:`Not_found (error_json "Keeper not found")
      | Ok true ->
-       match Candle_status.configured ~base_path with
-       | Candle_config.Off ->
-         respond (`Assoc [ "status", `String "off"; "keeper", `String name ])
-       | Candle_config.Disabled { reason } ->
-         respond (`Assoc
-           [ "status", `String "disabled"
-           ; "keeper", `String name
-           ; "reason", `String reason ])
-       | Candle_config.Enabled _ ->
-         (match Candle_shop.account ~base_path ~keeper with
-          | Error error ->
-            respond ~status:`Service_unavailable
-              (error_json (Candle_shop.error_to_string error))
-          | Ok account ->
-            match Candle_shop.catalog ~base_path with
-            | Ok catalog -> respond (ready_json account catalog)
-            | Error error ->
-              respond ~status:`Service_unavailable
-                (error_json (Candle_shop.error_to_string error))))
+       match Candle_shop.observe_account ~base_path ~keeper with
+       | Error error ->
+         respond ~status:`Service_unavailable
+           (error_json (Candle_shop.error_to_string error))
+       | Ok observation ->
+         let fields = match observation with
+           | Candle_shop.Account_off -> [ "status", `String "off"; "keeper", `String name ]
+           | Candle_shop.Account_disabled reason ->
+             [ "status", `String "disabled"; "keeper", `String name; "reason", `String reason ]
+           | Candle_shop.Account_ready (account, catalog) ->
+             ready_fields account catalog
+         in
+         let revision = match Candle_shop.account_revision observation with
+           | None -> `Null | Some revision -> `String revision in
+         respond (`Assoc (("account_revision", revision) :: fields)))
 ;;

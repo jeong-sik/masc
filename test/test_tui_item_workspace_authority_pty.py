@@ -31,9 +31,9 @@ CATALOG = (
 )
 
 
-def account(balance: str, owned: str, price: str):
+def account(balance: str, owned: str, price: str, revision: str):
     return 200, {
-        "status": "ready", "keeper": "alpha", "balance_milli": balance,
+        "status": "ready", "account_revision": revision * 64, "keeper": "alpha", "balance_milli": balance,
         "owned_items": [owned],
         "catalog": [
             {"id": item, "slot": slot, "price_status": "priced", "price_milli": price}
@@ -48,6 +48,7 @@ class ItemWire(authority.WorkspaceWire):
         self.account_state = "ready"
         self.roster_unavailable = False
         self.malformed_revision = False
+        self.missing_revision = False
         self.booting = False
 
     def set_booting(self, booting):
@@ -70,16 +71,29 @@ class ItemWire(authority.WorkspaceWire):
         with self.lock:
             self.malformed_revision = malformed
 
+    def set_missing_revision(self, missing):
+        with self.lock:
+            self.missing_revision = missing
+
     def roster(self):
         with self.lock:
             unavailable = self.roster_unavailable
             malformed = self.malformed_revision
+            missing = self.missing_revision
+            state, phase = self.account_state, self.phase
         if unavailable:
             return 503, {"error": "current roster unavailable"}
         status, payload = super().roster()
-        if malformed:
-            for row in payload["keepers"]:
-                if row["name"] == "alpha":
+        revision = "a" if phase == "a" else "c" if phase == "a-returned" else "b"
+        payload["candle"] = ({"status": "off"} if state == "off" else
+            {"status": "ready", "issued_milli": "12500", "burned_milli": "0", "circulating_milli": "12500"})
+        for row in payload["keepers"]:
+            row["candle_account_revision"] = None if state == "off" else revision * 64
+            row["candle_balance_milli"] = None if state == "off" else "12500"
+            if row["name"] == "alpha":
+                if missing:
+                    row.pop("candle_account_revision")
+                elif malformed:
                     row["candle_account_revision"] = {"unexpected": "object"}
         return status, payload
 
@@ -105,16 +119,16 @@ class ItemWire(authority.WorkspaceWire):
             if not self.release_held.wait(timeout=30.0):
                 return 504, {"error": "held Item read timed out"}
             self.held_returned.set()
-            return account("99999", "glasses", "99999")
+            return account("99999", "glasses", "99999", "a")
         if state == "failed":
             return 503, {"error": "current Item ledger unreadable"}
         if state == "off":
-            return 200, {"status": "off", "keeper": "alpha"}
+            return 200, {"status": "off", "account_revision": None, "keeper": "alpha"}
         if phase == "a":
-            return account("12500", "glasses", "1000")
+            return account("12500", "glasses", "1000", "a")
         if phase == "a-returned":
-            return account("3250", "quill", "1750")
-        return account("7500", "crown", "2000")
+            return account("3250", "quill", "1750", "c")
+        return account("7500", "crown", "2000", "b")
 
 
 def run(binary, captures):
@@ -220,6 +234,13 @@ def run(binary, captures):
             wire.set_roster_unavailable(False)
             wait(lambda text: b"Balance 3.250 Candle" in text,
                  "same-revision roster recovery did not reload the account")
+            wire.set_missing_revision(True)
+            wait(lambda text: b"Item account revision" in text,
+                 "missing revision retained Item monetary facts")
+            assert b"Balance " not in visible() and b"owned" not in visible()
+            wire.set_missing_revision(False)
+            wait(lambda text: b"Balance 3.250 Candle" in text,
+                 "restored revision did not reload Item facts")
             wire.set_malformed_revision(True)
             wait(lambda text: b"Item account revision" in text,
                  "malformed revision retained Item monetary facts")

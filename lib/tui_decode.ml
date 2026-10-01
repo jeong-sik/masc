@@ -5935,17 +5935,23 @@ let decode_keeper_roster_identity ~name json =
     Error "Keeper brief identity fields must not be empty"
   else Ok { k_trace_id; k_created_at; k_updated_at }
 
-let decode_keeper_runtime ~candle_balance_milli json =
+let decode_keeper_runtime ~candle ~candle_balance_milli json =
   let* kr_name = required_string_field json "name" in
   let* kr_portrait = Keeper_portrait_equipment.reading_of_json (member "portrait" json) in
   let kr_candle_account_revision =
-    match member "candle_account_revision" json with
-    | `Null -> Ok None
-    | `String digest when String.length digest = 64
-        && String.for_all (function '0' .. '9' | 'a' .. 'f' -> true | _ -> false) digest ->
-        Ok (Some digest)
-    | `String _ | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _ ->
-        Error "Item account revision is not a lowercase SHA-256 digest"
+    let* revision = match Json_util.assoc_member_opt "candle_account_revision" json with
+      | None -> Error "Item account revision is missing from the Keeper roster"
+      | Some `Null -> Ok None
+      | Some (`String digest) when String.length digest = 64
+          && String.for_all (function '0' .. '9' | 'a' .. 'f' -> true | _ -> false) digest ->
+          Ok (Some digest)
+      | Some _ -> Error "Item account revision is not a lowercase SHA-256 digest"
+    in
+    match candle, revision with
+    | Ok Candle_observation.Off, None
+    | Ok (Candle_observation.Ready _ | Candle_observation.Disabled _), Some _ -> Ok revision
+    | Error detail, _ -> Error detail
+    | Ok _, _ -> Error "Item account revision disagrees with the Candle envelope"
   in
   let* raw_health = required_string_field json "health" in
   let* kr_health =
@@ -6052,7 +6058,7 @@ let decode_keeper_runtime_list json =
           | `Null -> Ok "Keeper metadata unavailable; the server supplied no error detail"
           | bad -> field_type_error "message" "a string or null" bad in
         Ok (Error (name, detail))
-    | `Null -> Result.map (fun row -> Ok row) (decode_keeper_runtime ~candle_balance_milli json)
+    | `Null -> Result.map (fun row -> Ok row) (decode_keeper_runtime ~candle ~candle_balance_milli json)
     | error ->
         let* name = required_string_field json "name" in
         (* The row and the nested error name the same keeper on the wire:

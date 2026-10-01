@@ -220,7 +220,12 @@ def interaction(served: region.ServedFixtures):
         if left:
             measured[(screen, columns)]["roster"] = region.measure_pane(
                 rows, left=0, right=left)
+        if screen == "keeper-detail-roster":
+            measured[(screen, columns)]["body_pane"] = region.measure_pane(
+                rows, left=left, right=right)
         if screen in ("keeper-detail", "keeper-detail-roster"):
+            if not measured[(screen, columns)]["windows"]:
+                raise AssertionError(f"{where}: overflowing Info pane has no scroll-window indicator")
             body = "\n".join(region.body_row(rows, row, left=left, right=right)
                              for row in range(3, region.TERMINAL_ROWS - 1))
             for text in ("Identity", "Name: alpha", "Paused: no", "Current failure",

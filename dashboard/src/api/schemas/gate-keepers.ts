@@ -1,4 +1,3 @@
-import { CandleBalanceSchema, CandleObservationSchema, type CandleObservation } from './candle-observation'
 import { KeeperPortraitSchema } from './keeper-portrait'
 import { KEEPER_ACTIVATION_MODES } from '../../lib/keeper-activation-mode'
 import { Data, Effect, ParseResult, Schema } from 'effect'
@@ -15,9 +14,11 @@ const KeeperMetaWireSchema = Schema.Struct({
 // lib/keeper/keeper_tool_surface_ops.ml. RFC-0393 removed the agent_name
 // echo key; phase/health/paused/next_action ride the same row.
 const GateKeeperWireSchema = Schema.Struct({
-  candle_balance_milli: CandleBalanceSchema,
-  portrait: KeeperPortraitSchema,
   runtime_class: Schema.Literal('keeper'),
+  portrait: KeeperPortraitSchema,
+  // Monetary observations do not determine Keeper lifecycle actions. The
+  // execution consumer validates them together with their Candle envelope.
+  candle_balance_milli: Schema.Unknown,
   name: Schema.NonEmptyString,
   meta: KeeperMetaWireSchema,
   status: Schema.NonEmptyString,
@@ -43,10 +44,10 @@ const GateKeeperDirectoryIssueWireSchema = Schema.Struct({
 })
 
 const GateKeeperIssueBaseWireSchema = Schema.Struct({
-  candle_balance_milli: CandleBalanceSchema,
-  portrait: KeeperPortraitSchema,
   status: Schema.Literal('error'),
   runtime_class: Schema.Literal('keeper'),
+  portrait: KeeperPortraitSchema,
+  candle_balance_milli: Schema.Unknown,
   name: Schema.NonEmptyString,
   keepalive_running: Schema.Boolean,
   effective_meta_error: GateKeeperDirectoryIssueWireSchema,
@@ -78,7 +79,7 @@ const GateKeeperEntryWireSchema = Schema.Union(
 )
 
 const GateKeepersWireSchema = Schema.Struct({
-  candle: CandleObservationSchema,
+  candle: Schema.Unknown,
   count: Schema.NonNegativeInt,
   keepers: Schema.Array(GateKeeperEntryWireSchema),
   // Listing truth: `total` counts keepers known before `limit` was applied, so
@@ -106,13 +107,6 @@ function gateKeepersInvariantIssues(data: GateKeepersWire) {
       path: ['count'],
       message: 'must equal keepers.length',
     })
-  }
-
-  for (const [index, keeper] of data.keepers.entries()) {
-    if (data.candle.status === 'ready' ? keeper.candle_balance_milli === null : keeper.candle_balance_milli !== null) {
-      issues.push({ path: ['keepers', index, 'candle_balance_milli'],
-        message: 'must agree with the Candle observation availability' })
-    }
   }
 
   const seenNames = new Set<string>()
@@ -176,7 +170,6 @@ export interface KeeperListing {
 }
 
 export interface GateKeepersData {
-  readonly candle: CandleObservation
   readonly keepers: readonly GateKeeper[]
   readonly directoryIssues: readonly GateKeeperDirectoryIssue[]
   readonly listing: KeeperListing
@@ -232,7 +225,6 @@ function toGateKeepersData(wire: GateKeepersWire): GateKeepersData {
   }
 
   return {
-    candle: wire.candle,
     keepers,
     directoryIssues,
     listing: {

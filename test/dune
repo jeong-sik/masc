@@ -8033,6 +8033,18 @@
 (include stanzas/test_play_current_credential_authority.inc)
 
 (rule
+ (alias runtest-test_prepare_keeper_collaboration)
+ (deps
+  test_prepare_keeper_collaboration.py
+  ../scripts/prepare-keeper-collaboration.py
+  ../scripts/prepare-fusion-decision-live.py)
+ (action (run python3 %{dep:test_prepare_keeper_collaboration.py})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_prepare_keeper_collaboration)))
+
+(rule
  (alias runtest-test_keeper_continuity_admission)
  (deps
   test_keeper_continuity_admission.py

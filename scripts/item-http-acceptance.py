@@ -397,7 +397,8 @@ with (root / 'server.log').open('wb') as log:
         require(paid_start['owned_items'] == [], paid_start)
         paid_original = tool('keeper_candle_equip', {'slot': 'head', 'item': 'default'})['equipment']
         status, paid_before_png = request('/api/v1/keepers/item-paid-probe/portrait.png?size=96')
-        require(status == 200 and paid_before_png.startswith(b'\x89PNG\r\n\x1a\n'), status)
+        require(status == 200, status)
+        validate_portrait(paid_before_png, 96)
         (root / 'paid-portrait-before.png').write_bytes(paid_before_png)
         purchase_paid = tool('keeper_candle_purchase', {'item': 'crown'})
         require(purchase_paid['amount_milli'] == '200', purchase_paid)
@@ -417,7 +418,8 @@ with (root / 'server.log').open('wb') as log:
         require(paid_account['owned_items'] == ['crown'], paid_account)
         (root / 'paid-account.json').write_bytes(paid_body)
         status, paid_png = request('/api/v1/keepers/item-paid-probe/portrait.png?size=96')
-        require(status == 200 and paid_png.startswith(b'\x89PNG\r\n\x1a\n'), status)
+        require(status == 200, status)
+        validate_portrait(paid_png, 96)
         require(paid_png != paid_before_png, 'paid crown did not change the served portrait')
         (root / 'paid-portrait.png').write_bytes(paid_png)
         ledger_before_restart = ledger_path.read_bytes()
@@ -469,6 +471,7 @@ with (root / 'server.log').open('ab') as log:
         tool('keeper_candle_purchase', {'item': 'medal'}, 'insufficient_balance')
         require(ledger_path.read_bytes() == before_refusals, 'restart refusals changed the ledger')
         final_ledger = ledger_path.read_bytes()
+        require(final_ledger.startswith(ledger_before_restart), 'restart rewrote prior ledger history')
         rows = [json.loads(line) for line in final_ledger.splitlines()]
         require([row for row in rows if row['kind'] == 'paid'] == seeded_payments, 'synthetic credits changed')
         paid_purchases = [row for row in rows if row['kind'] == 'purchased' and row['keeper'] == 'item-paid-probe']

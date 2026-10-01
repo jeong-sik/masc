@@ -15,7 +15,21 @@ import test_tui_keyboard_input as h
 
 # The sources this scenario stands over. scripts/ci/run-edited-tests.sh runs a
 # suite when a pull request changes a path the suite names.
-SOURCE_MODULES = ('bin/masc_tui.ml', 'bin/masc_tui_render.ml', 'bin/masc_tui_types.ml', 'bin/masc_tui_keys.ml', 'bin/masc_tui_http.ml', 'lib/server/server_standalone_lane_projection.ml', 'lib/tui_decode.ml', 'lib/tui_decode_runtime_probe.ml', 'lib/tui_decode_runtime_probe.mli')
+SOURCE_MODULES = (
+    "bin/masc_tui.ml",
+    "bin/masc_tui_render.ml",
+    "bin/masc_tui_types.ml",
+    "bin/masc_tui_keys.ml",
+    "bin/masc_tui_http.ml",
+    "lib/server/server_standalone_lane_projection.ml",
+    "lib/tui_decode.ml",
+    "lib/tui_decode_runtime_probe.ml",
+    "lib/tui_decode_runtime_probe.mli",
+    "lib/runtime/runtime.ml",
+    "lib/runtime/runtime.mli",
+    "lib/runtime/runtime_config_text.ml",
+    "lib/runtime/runtime_config_text.mli",
+)
 
 ROUTING_PATH = "/api/v1/runtime/config/routing"
 # Its name carries an [a] and an [e]: while the name field is open those are
@@ -76,8 +90,8 @@ FUSION_SEATS = {"primary": ["[fusion.presets.trio].judge"]}
 
 def in_use_refusal(lane_id: str, keepers: list[str]) -> str:
     """The sentence Runtime.remove_runtime_lane answers for a lane keepers are
-    assigned to or Fusion seats name (route_reference_to_string in
-    lib/runtime/runtime.ml): assignments first, then seats."""
+    assigned to or Fusion seats name (Runtime_config_text.route_reference_to_string
+    in lib/runtime/runtime_config_text.ml): assignments first, then seats."""
     sites = ", ".join(
         [f"[runtime.assignments].{keeper}" for keeper in keepers]
         + FUSION_SEATS.get(lane_id, [])

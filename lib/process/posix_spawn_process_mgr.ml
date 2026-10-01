@@ -47,7 +47,7 @@ let signal t signal =
       match t.group with
       | None -> Unix.kill t.pid signal
       | Some { phase = Reaping; _ } -> ()
-      | Some owner ->
+      | Some ({ phase = Running | Terminating _ | Killed; _ } as owner) ->
         kill_group t signal;
         if signal = Sys.sigkill then owner.phase <- Killed
         else if signal = Sys.sigterm then

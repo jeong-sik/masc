@@ -70,20 +70,25 @@ def run(executable, no_color=False):
         wide=capture("work-wide",36,160,b"Goals")
         for needle in ("Goals · measured outcomes".encode(),"Tasks · Backlog:".encode(),
                 b"done=15", b"cancelled=16"):
-            if needle not in wide: raise AssertionError(f"Work omitted {needle!r}")
+            if needle not in wide:
+                raise AssertionError(f"Work omitted {needle!r}")
         medium=capture("work-medium",24,120,b"plan-alpha-29424")
         for needle in (b"Backlog:", b"done=15", b"cancelled=16"):
-            if needle not in medium: raise AssertionError(f"Work omitted {needle!r} at 120 columns")
+            if needle not in medium:
+                raise AssertionError(f"Work omitted {needle!r} at 120 columns")
         narrow=capture("work-narrow",24,80,b"plan-alpha-29424")
         for needle in (b"Goals:", b"Backlog:", b"done=15", b"cancelled=16"):
-            if needle not in narrow: raise AssertionError(f"Narrow Work omitted {needle!r}")
+            if needle not in narrow:
+                raise AssertionError(f"Narrow Work omitted {needle!r}")
         for heading in ("Goals · measured outcomes".encode(), "Tasks · Backlog:".encode()):
-            if heading in narrow: raise AssertionError("Narrow Work retained wide summary cards")
+            if heading in narrow:
+                raise AssertionError("Narrow Work retained wide summary cards")
         key(b":go Workspace\r",b"/srv/masc/workspace/masc")
         for name,rows,cols in (("workspace-wide",32,160),("workspace-narrow",24,80)):
             screen=capture(name,rows,cols,b"Keepers: alpha")
             for needle in (b"Path:",b"Stored as: workspace/masc",b"Keepers: alpha"):
-                if needle not in screen: raise AssertionError(f"Workspace omitted {needle!r}")
+                if needle not in screen:
+                    raise AssertionError(f"Workspace omitted {needle!r}")
         key(b"j", b"next-repo")
         selected = capture("workspace-short-selected",16,80,b"/srv/masc/workspace/next-repo", b"next-repo")
         if b"next-repo" not in selected:
@@ -123,7 +128,8 @@ def run(executable, no_color=False):
         key(b":settings\r",b"studio.enabled")
         wide=capture("system-wide",32,160,b"Selected setting")
         for needle in (b"Current", b"true", b"Default", b"false"):
-            if needle not in wide: raise AssertionError(f"System omitted {needle!r}")
+            if needle not in wide:
+                raise AssertionError(f"System omitted {needle!r}")
 
         def read_selected(expected):
             # The same selected document becomes pageable in a short terminal.

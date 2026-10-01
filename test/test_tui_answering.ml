@@ -434,17 +434,17 @@ let test_chat_shows_background_work_and_uncertainty () =
     [ running ~preview ~lane:Tui_decode.Turn_lane_autonomous ~started:900. "echo"
     ; running ~lane:Tui_decode.Turn_lane_maintenance ~started:950. "other" ] in
   let text rows = List.map Masc_tui_answering.chat_activity_row_text rows in
-  let activity ?(error = None) ?(text_tail_drawn = false) keeper_name rows =
-    Masc_tui_answering.chat_activity ~now:1000. ~keeper_name ~error ~text_tail_drawn rows
+  let activity ?(error = None) keeper_name rows =
+    Masc_tui_answering.chat_activity ~now:1000. ~keeper_name ~error rows
   in
   let lines = activity "echo" rows in
-  Alcotest.(check int) "running status and latest output" 2 (List.length lines);
+  Alcotest.(check int) "only running status in the band" 1 (List.length lines);
   let joined = String.concat "\n" (text lines) in
   List.iter (fun expected -> Alcotest.(check bool) expected true
     (Astring.String.is_infix ~affix:expected joined))
-    ["autonomous"; "glm"; "Execute"; "401"; "editing the report"; "last activity 50s ago"];
+    ["autonomous"; "glm"; "Execute"; "401"; "last activity 50s ago"];
   (* The lead is what the status colour paints: the mark, the lane, the age.
-     The model, the tool and the tail are detail and recede. *)
+     The model and the tool are detail and recede. *)
   (match lines with
    | status :: _ ->
      Alcotest.(check bool) "the lead names the lane and the age" true
@@ -466,9 +466,8 @@ let test_chat_shows_background_work_and_uncertainty () =
     (Astring.String.is_infix ~affix:"last observed autonomous" (String.concat "\n" stale));
   Alcotest.(check (list string)) "idle has no stale running preview" []
     (text (activity "echo" [row "echo" Tui_decode.Keeper_turn_idle]));
-  (* The pane drawing the same text keeps the status line and drops the
-     tail: the sentence is on screen once, above. *)
-  let drawn = activity ~text_tail_drawn:true "echo" rows in
+  (* Output belongs to the conversation regardless of its live source. *)
+  let drawn = activity "echo" rows in
   Alcotest.(check int) "status line alone when the pane draws the text" 1
     (List.length drawn);
   Alcotest.(check bool) "the tail is not said twice" false

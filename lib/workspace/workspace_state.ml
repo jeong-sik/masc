@@ -88,6 +88,23 @@ let write_state config state =
   let json = workspace_state_to_yojson state in
   write_json config (state_path config) json
 
+type state_read_error =
+  | State_document_error of Workspace_utils_ops.json_doc_error
+  | State_decode_error of string
+
+let state_read_error_to_string = function
+  | State_document_error error -> json_doc_error_to_string error
+  | State_decode_error detail -> "invalid workspace state: " ^ detail
+
+let read_state_strict config =
+  match read_json_doc config (state_path config) with
+  | Error error -> Error (State_document_error error)
+  | Ok None -> Ok None
+  | Ok (Some json) ->
+      workspace_state_of_yojson json
+      |> Result.map Option.some
+      |> Result.map_error (fun detail -> State_decode_error detail)
+
 let read_state config =
   let json = read_json config (state_path config) in
   match workspace_state_of_yojson json with

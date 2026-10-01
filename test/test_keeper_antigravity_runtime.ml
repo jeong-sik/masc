@@ -1693,7 +1693,7 @@ let snapshot_of ~messages ~end_atom ~working_state =
         { Keeper_turn_boundaries.recorded_at = 1.
         ; event =
             Keeper_turn_boundaries.Turn_ended
-              { turn_ref = Ids.Turn_ref.make ~trace_id:"trace-1" ~absolute_turn:1
+              { task_context = Masc.Keeper_turn_task_context.No_task; turn_ref = Ids.Turn_ref.make ~trace_id:"trace-1" ~absolute_turn:1
               ; history_at_start = Keeper_turn_boundaries.Fresh_history
               ; position
               }

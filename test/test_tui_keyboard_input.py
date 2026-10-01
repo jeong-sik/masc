@@ -2219,6 +2219,8 @@ def run_terminal_scenario(
         )
         os.set_blocking(master_fd, False)
         with tempfile.TemporaryDirectory(prefix="masc-tui-keyboard-") as base_path:
+            # Health and route fixtures must publish the same workspace identity.
+            base_path = os.path.realpath(base_path)
             with test_http_endpoint(
                 with_workspace_identity(http_fixtures, base_path), http_requests
             ) as (
@@ -20607,19 +20609,17 @@ def dashboard_usage_interaction(
     usage = tab_until(process, master_fd, output, b"MASC Usage")
     if b"MASC Usage" not in usage:
         raise AssertionError(f"Usage is not on the main ring: {usage!r}")
-    wait_for_output(
-        process, master_fd, output, b"UTC days reported", start=0, timeout=10.0
-    )
+    wait_for_output(process, master_fd, output, b"Plan usage", start=0, timeout=10.0)
+    send_and_wait(process, master_fd, output, b"v", b"UTC days reported")
     plain = unwrapped(screen_text(bytes(output)))
-    if b"UTC days reported" not in plain or b"Keeper usage" not in plain:
-        raise AssertionError(f"Usage evidence and coverage missing: {plain!r}")
     for scope_prefix in (
         hashlib.md5(b"provider:fixture").hexdigest()[:8].encode(),
         hashlib.md5(b"provider:fixture-alt").hexdigest()[:8].encode(),
     ):
         if scope_prefix not in plain:
-            raise AssertionError(f"Usage merged or hid quota scope {scope_prefix!r}: {plain!r}")
+            raise AssertionError(f"Usage merged quota scope {scope_prefix!r}: {plain!r}")
     print("USAGE_PTY_SCREEN=" + json.dumps(plain.decode("utf-8", errors="replace")), flush=True)
+    send_and_wait(process, master_fd, output, b"v", b"Keeper usage")
     send_and_wait(process, master_fd, output, b"p", b"MASC Usage / Telemetry")
     send_and_wait(process, master_fd, output, b"3", b"Gate Governance")
     send_and_wait(process, master_fd, output, b"p", b"MASC Usage")

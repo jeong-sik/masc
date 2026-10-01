@@ -16,19 +16,21 @@ class CaptureOwnership(unittest.TestCase):
         surface = {"suite": "test_tui_surface_studio_pty", "name": "workspace", "screen": "surface"}
         navigation = {"suite": "test_tui_lane_visual_pty", "name": "workspace", "screen": "navigation"}
         primary = {"suite": "test_tui_board_heading_width", "name": "workspace", "screen": "primary"}
+        usage = {"suite": "test_tui_usage_studio_pty", "name": "workspace", "screen": "usage"}
         unscoped = {"name": "workspace", "screen": "manual"}
         def record(value):
             return "STUDIO_CAPTURE=" + json.dumps(value)
         log = "\n".join([record(surface),
             "tests\trun\t2026-10-01T00:00:00Z " + record(navigation),
-            record(primary), record(unscoped),
+            record(primary), record(usage), record(unscoped),
             "tests\trun\t2026-10-01T00:00:00Z echo '" + record(surface) + "'",
             "tui surface studio PTY: PASS", "TUI navigation consistency: PASS"])
         self.assertEqual([surface], capture.captures(log, "test_tui_surface_studio_pty"))
         self.assertEqual([navigation], capture.captures(log, "test_tui_lane_visual_pty"))
         self.assertEqual([primary], capture.captures(log, "test_tui_board_heading_width"))
+        self.assertEqual([usage], capture.captures(log, "test_tui_usage_studio_pty"))
         self.assertEqual([], capture.captures(log, "different_suite"))
-        self.assertEqual([surface, navigation, primary, unscoped], capture.captures(log))
+        self.assertEqual([surface, navigation, primary, usage, unscoped], capture.captures(log))
 
     def test_unscoped_manual_capture_remains_available_without_selector(self):
         frame = {"name": "manual-workspace", "screen": "a manually recorded frame"}

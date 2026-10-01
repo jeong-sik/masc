@@ -33,7 +33,7 @@ export function FlowControlPanel() {
   const isPaused = state === 'paused'
   const isRunning = state === 'running'
   const isInitializing = state === 'initializing'
-  const mutationAccess = dashboardAuthAccess(shellAuthSummary.value, 'worker')
+  const mutationAccess = dashboardAuthAccess(shellAuthSummary.value, 'admin')
   const maintenanceAccess = dashboardAuthAccess(shellAuthSummary.value, 'admin')
   const inferenceInflight = operatorSnapshot.value?.inference_inflight ?? null
   return html`
@@ -51,7 +51,7 @@ export function FlowControlPanel() {
       ` : null}
       ${mutationAccess.allowed ? null : html`
         <p class="mb-3 text-2xs text-[var(--color-status-warn)]">
-          Control blocked: ${mutationAccess.reason ?? 'worker role is required.'}
+          Control blocked: ${mutationAccess.reason ?? 'admin role is required.'}
         </p>
       `}
       <div class="flex flex-wrap gap-2">

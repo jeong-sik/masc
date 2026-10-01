@@ -13,7 +13,6 @@ import base64
 from datetime import datetime
 import hashlib
 import json
-import os
 from pathlib import Path
 import shutil
 import signal
@@ -21,7 +20,6 @@ import socket
 import string
 import subprocess
 import sys
-import tempfile
 import time
 import traceback
 
@@ -184,7 +182,7 @@ def main() -> None:
         return
     if None in (args.log, args.run_info, args.expected_head, args.out):
         parser.error("--log, --run-info, --expected-head and --out are required")
-    from playwright.sync_api import sync_playwright
+    from playwright.sync_api import ViewportSize, sync_playwright
 
     ttyd = shutil.which("ttyd")
     if ttyd is None:
@@ -235,6 +233,7 @@ def main() -> None:
                     deadline = time.monotonic() + 10
                     while True:
                         if process.poll() is not None:
+                            assert process.stderr is not None
                             raise RuntimeError(process.stderr.read().decode())
                         try:
                             with socket.create_connection(("127.0.0.1", port), timeout=.2):
@@ -265,7 +264,7 @@ def main() -> None:
                     bounds = layout["screen"]
                     # The initial viewport is only for connection startup.
                     # Use measured pixels, retaining the terminal's margins.
-                    viewport_size = {
+                    viewport_size: ViewportSize = {
                         "width": int(bounds["right"] + max(1, bounds["left"])
                                      + layout["native_scrollbar_width"] + 1),
                         "height": int(bounds["bottom"] + max(1, bounds["top"]) + 1),

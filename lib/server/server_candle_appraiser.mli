@@ -1,6 +1,10 @@
 (** Optional workspace lane. Availability is installed into Candle_status by
     server startup; each grade/relation/weights request has its own exact run. *)
 val available : unit -> (unit, string) result
+val declaration_change_probe : unit -> (unit -> bool)
+(** Seed before starting the payout worker. Reports changed usable Candle lane
+    declarations only; missing/busy publication retains the previous declaration.
+    Same-slot provider, credential and prompt changes are not observed. *)
 val run : base_path:string -> Candle_appraisal.runner
 module For_testing : sig
   val retryable_execution : Agent_core.Exact_output.execution_error_cause -> bool

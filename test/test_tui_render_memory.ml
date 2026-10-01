@@ -1580,8 +1580,8 @@ let test_memory_search_uses_the_filter_text_and_query () =
     let rows = Types.memory_fact_rows state in
     check int "filter row count" expected (List.length rows);
     check (option int) "marker agrees with filter" (Some expected)
-      (Types.surface_search_count state Types.Memory ~query);
-    let texts = Option.get (Types.surface_row_texts state Types.Memory) in
+      (Masc_tui_surface_search.surface_search_count state Types.Memory ~query);
+    let texts = Option.get (Masc_tui_surface_search.surface_row_texts state Types.Memory) in
     let effective = Types.surface_search_query Types.Memory query in
     check int "cursor matcher reaches every filtered row" expected
       (List.length (List.filter (Masc_tui_pick_list.lowercase_contains ~needle:effective) texts))
@@ -1598,7 +1598,7 @@ let test_memory_search_uses_the_filter_text_and_query () =
   check int "blank Memory query still shows all rows" 3
     (List.length (Types.memory_fact_rows state));
   check (option int) "blank query has no matches to jump" (Some 0)
-    (Types.surface_search_count state Types.Memory ~query:"   ");
+    (Masc_tui_surface_search.surface_search_count state Types.Memory ~query:"   ");
   check string "other surfaces retain literal whitespace" "  deploy fact  "
     (Types.surface_search_query Types.Board "  deploy fact  ")
 ;;
@@ -1934,7 +1934,7 @@ let test_render_memory_overflow_selection () =
   let layout = Render_memory.memory_overview_scrolled ~cols:100 ~budget state in
   check int "filter bounds the cursor to the one visible keeper" 1 layout.sc_count;
   check (option (list string)) "search names the same filtered row"
-    (Some ["keeper-4 read-error"]) (Types.surface_row_texts state Types.Memory);
+    (Some ["keeper-4 read-error"]) (Masc_tui_surface_search.surface_row_texts state Types.Memory);
   (* A refresh/filter can change the body before another keypress. *)
   assert_selected_visible ()
 ;;

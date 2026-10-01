@@ -1468,10 +1468,23 @@
  (libraries masc_tui_types masc_tui_approvals_model))
 
 (library
+ (name masc_tui_fusion_model)
+ (wrapped false)
+ (modules masc_tui_fusion_model)
+ (libraries masc_tui_types masc_tui_fetched masc))
+
+(library
+ (name masc_tui_surface_search)
+ (wrapped false)
+ (modules masc_tui_surface_search)
+ (libraries masc_tui_types masc_tui_fusion_model masc_tui_fetched masc_tui_pick_list
+  masc_tui_context_inspector masc_tui_overview_tasks masc_tui_mcp masc))
+
+(library
  (name masc_tui_fusion_updates)
  (wrapped false)
  (modules masc_tui_fusion_updates)
- (libraries masc_tui_types masc_tui_fetched masc_tui_fusion_launch masc))
+ (libraries masc_tui_fusion_model masc_tui_types masc_tui_fetched masc_tui_fusion_launch masc))
 
 (library
  (name masc_tui_approval_authority)
@@ -1653,7 +1666,7 @@
  (name masc_tui_render_prim)
  (wrapped false)
  (modules masc_tui_render_prim)
- (libraries masc_tui_approvals_model masc_tui_surface_navigation
+ (libraries masc_tui_surface_search masc_tui_approvals_model masc_tui_surface_navigation
   masc_tui_candle
   masc_tui_frame_timing
   masc_tui_next_request_band
@@ -1811,7 +1824,7 @@
   masc_tui_http)
  (public_name masc-tui)
  (package masc)
- (libraries masc_tui_fusion_updates masc_tui_home masc_tui_approvals_model masc_tui_surface_navigation
+ (libraries masc_tui_surface_search masc_tui_fusion_model masc_tui_fusion_updates masc_tui_home masc_tui_approvals_model masc_tui_surface_navigation
   masc_tui_palette
   masc_tui_candle
   masc.masc_candle

@@ -1347,7 +1347,7 @@ let footer_hints_resources ~detail_focus =
      focused. *)
   |> List.filter (answers_in_state ~detail_open:detail_focus)
   (* The row search needs a cursor to land on, and with the text focused
-     there is none -- [surface_row_texts] says so too. Dropped here rather
+     there is none -- [Masc_tui_surface_search.surface_row_texts] says so too. Dropped here rather
      than listed and silent. *)
   |> List.filter (fun binding ->
          (not detail_focus)

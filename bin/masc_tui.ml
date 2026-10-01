@@ -5325,7 +5325,7 @@ let row_list (state : state) : row_list option =
   in
   let of_counted f = Option.bind (counted ()) f in
   (* The Git changes overlay before the surface it is drawn over, the way
-     [surface_row_texts] answers it: it draws over Keepers as well as
+     [Masc_tui_surface_search.surface_row_texts] answers it: it draws over Keepers as well as
      Repositories and Code, and an arm per surface left the Keepers host
      naming the roster cursor while the overlay was the list on screen. A key
      that landed there moved a cursor nobody could see. The diff replaces the
@@ -5527,13 +5527,13 @@ let row_list (state : state) : row_list option =
       (match state.fusion_mode with
        | Fusion_detail _ | Fusion_historical_detail _ -> None
        | Fusion_list ->
-           windowed ~count:(List.length (fusion_list_entries state))
+           windowed ~count:(List.length (Masc_tui_fusion_model.fusion_list_entries state))
              ~cursor:state.fusion_cursor (fun index ->
                state.fusion_cursor <- index))
   (* The list pane draws its window around the cursor rather than holding a
      scroll of its own, so a landing is on screen the moment the cursor names
      it. With the text focused j/k scrolls the reading instead and there is no
-     row to land on -- the same condition [surface_row_texts] reads. *)
+     row to land on -- the same condition [Masc_tui_surface_search.surface_row_texts] reads. *)
   | Resources ->
       (match state.resource_focus, state.resources_list with
        | Right_pane, _ | _, None -> None
@@ -5563,7 +5563,7 @@ let row_list (state : state) : row_list option =
      the scroll to it. An edge jump has to name a run for the same reason. *)
   | Keepers Keeper_detail
     when state.detail_tab = Detail_runs && not state.context_inspector_open ->
-      let runs = List.length (selected_keeper_runs state) in
+      let runs = List.length (Masc_tui_fusion_model.selected_keeper_runs state) in
       windowed ~count:runs ~cursor:state.keeper_run_cursor (fun index ->
         state.keeper_run_cursor <- index;
         state.detail_scroll <- index)
@@ -5716,7 +5716,7 @@ let reading_pane (state : state) : (int -> Masc_tui_types.clamped_scroll) option
 (* Move the active surface's row cursor to the next row whose search text
    contains [query], scanning from [after] and wrapping; [backwards] walks
    the other way. A miss moves nothing. The searched list is the one
-   [surface_row_texts] answers -- the same list the row cursor names -- and
+   [Masc_tui_surface_search.surface_row_texts] answers -- the same list the row cursor names -- and
    the window follows the landing so the match is visible. *)
 let search_row_cursor state = Option.map (fun r -> r.rl_cursor) (row_list state)
 
@@ -5749,7 +5749,7 @@ let show_lanes_action_error state detail =
 
 let search_jump ?(backwards = false) state ~query ~after =
   let query = surface_search_query state.view query in
-  match surface_row_texts state state.view with
+  match Masc_tui_surface_search.surface_row_texts state state.view with
   | None -> ()
   | Some texts ->
       (* Into an array before the scan, not walked per index. The scan visits
@@ -8008,7 +8008,7 @@ let selected_surface_reference state =
                  (List.nth_opt snapshot.Tui_decode.hs_verdicts
                     state.harness_cursor)))
   | Fusion ->
-      (match state.fusion_mode, fusion_snapshot state with
+      (match state.fusion_mode, Masc_tui_fusion_model.fusion_snapshot state with
        | Fusion_historical_detail reference, _ -> Some (Link.reference Board_post reference.fhe_post_id)
        | Fusion_detail run_id, _ -> Some (Link.reference Fusion_run run_id)
        | Fusion_list, Some _ ->
@@ -8017,7 +8017,7 @@ let selected_surface_reference state =
                | Masc.Tui_decode_fusion.Fusion_retained_run run -> Link.reference Fusion_run run.fur_run_id
                | Masc.Tui_decode_fusion.Fusion_historical_evidence evidence ->
                    Link.reference Board_post evidence.fhe_post_id)
-             (selected_fusion_entry state)
+             (Masc_tui_fusion_model.selected_fusion_entry state)
        | Fusion_list, None -> None)
   (* Dashboard has no row cursor. Task references belong to Work. *)
   | Overview -> None
@@ -11734,7 +11734,7 @@ let open_harness_detail state =
            state.harness_cursor)
 
 let open_fusion_detail state ~mailbox =
-  match selected_fusion_entry state with
+  match Masc_tui_fusion_model.selected_fusion_entry state with
   | None -> ()
   | Some (Masc.Tui_decode_fusion.Fusion_historical_evidence evidence) ->
       state.fusion_mode <- Fusion_historical_detail evidence;
@@ -21269,7 +21269,7 @@ and is loaded on demand through keeper_skill.
               && not (Masc_tui_roster_pane.arrows_go_left
                 ~hidden:(roster_pane_hidden state) ~cols:terminal_columns
                 ~preferring_left:(state.keeper_detail_focus = Left_pane)) ->
-           let count = List.length (selected_keeper_runs state) in
+           let count = List.length (Masc_tui_fusion_model.selected_keeper_runs state) in
            let delta = if move = "j" || move = "down" then 1 else -1 in
            state.keeper_run_cursor <- max 0 (min (count - 1) (state.keeper_run_cursor + delta));
            state.detail_scroll <- state.keeper_run_cursor
@@ -21278,7 +21278,7 @@ and is loaded on demand through keeper_skill.
               && not (Masc_tui_roster_pane.arrows_go_left
                 ~hidden:(roster_pane_hidden state) ~cols:terminal_columns
                 ~preferring_left:(state.keeper_detail_focus = Left_pane)) ->
-           (match selected_keeper_run state with
+           (match Masc_tui_fusion_model.selected_keeper_run state with
             | None -> ()
             | Some (_, run) ->
                 state.followed_from <- Some (state.view, None);
@@ -21291,17 +21291,17 @@ and is loaded on demand through keeper_skill.
        | Some "a" when state.view = Fusion && state.fusion_mode = Fusion_list ->
            launch_fusion_launch_options_load state ~mailbox:async_messages
        | Some "K" when state.view = Fusion
-           && (match state.fusion_mode, selected_fusion_entry state with
+           && (match state.fusion_mode, Masc_tui_fusion_model.selected_fusion_entry state with
                | Fusion_historical_detail _, _
                | Fusion_list, Some (Masc.Tui_decode_fusion.Fusion_historical_evidence _) -> true
                | _ -> false) ->
            report_action state "system" "Historical Board evidence has no retained caller identity"
        | Some "K" when state.view = Fusion ->
-           let run = match state.fusion_mode, fusion_snapshot state with
+           let run = match state.fusion_mode, Masc_tui_fusion_model.fusion_snapshot state with
              | Fusion_detail id, Some snapshot -> List.find_opt
                  (fun (run : Masc.Tui_decode_fusion.fusion_run) -> String.equal run.fur_run_id id) snapshot.fus_runs
              | Fusion_list, Some _ ->
-                 (match selected_fusion_entry state with
+                 (match Masc_tui_fusion_model.selected_fusion_entry state with
                   | Some (Masc.Tui_decode_fusion.Fusion_retained_run run) -> Some run
                   | Some (Masc.Tui_decode_fusion.Fusion_historical_evidence _) | None -> None)
              | Fusion_historical_detail _, _ | _, None -> None in
@@ -21317,11 +21317,11 @@ and is loaded on demand through keeper_skill.
                   Option.bind run (fun (run : Masc.Tui_decode_fusion.fusion_run) ->
                     List.find_index (fun (candidate : Masc.Tui_decode_fusion.fusion_run) ->
                       String.equal candidate.fur_run_id run.fur_run_id)
-                      (selected_keeper_runs state))
+                      (Masc_tui_fusion_model.selected_keeper_runs state))
                   |> Option.value ~default:0)
        | Some "B" when state.view = Fusion
            && state.fusion_mode = Fusion_list ->
-           (match selected_fusion_entry state with
+           (match Masc_tui_fusion_model.selected_fusion_entry state with
             | Some (Masc.Tui_decode_fusion.Fusion_historical_evidence reference) ->
                 state.followed_from <- Some (state.view, None);
                 state.board_mode <- Board_read reference.fhe_post_id;
@@ -21445,7 +21445,7 @@ and is loaded on demand through keeper_skill.
                 state.runtime_config_status_scroll <-
                   max 0 (min limit (min limit state.runtime_config_status_scroll + delta)))
        | Some "/"
-         when Option.is_some (surface_row_texts state state.view) ->
+         when Option.is_some (Masc_tui_surface_search.surface_row_texts state state.view) ->
            state.search <- Some ""
        | Some (("[" | "]") as bracket)
          when state.view = Keepers Keeper_detail ->
@@ -21532,7 +21532,7 @@ and is loaded on demand through keeper_skill.
               && (match state.fusion_mode with
                   | Fusion_detail _ | Fusion_historical_detail _ -> true
                   | Fusion_list -> false) ->
-           (match fusion_detail_entry_index state with
+           (match Masc_tui_fusion_model.fusion_detail_entry_index state with
             | None ->
                 state.fusion_mode <- Fusion_list;
                 state.fusion_scroll <- 0;
@@ -21540,7 +21540,7 @@ and is loaded on demand through keeper_skill.
                 state.fusion_detail_generation <- state.fusion_detail_generation + 1
             | Some cursor ->
                 step_detail_cursor
-                  ~count:(List.length (fusion_list_entries state))
+                  ~count:(List.length (Masc_tui_fusion_model.fusion_list_entries state))
                   ~cursor
                   ~delta:(if bracket = "]" then 1 else -1)
                   ~set_cursor:(fun n -> state.fusion_cursor <- n)
@@ -22766,7 +22766,7 @@ and is loaded on demand through keeper_skill.
             | Connectors | Runtime | Config | Resources | Tools | System_logs ->
                 if
                   state.search_last <> ""
-                  && Option.is_some (surface_row_texts state state.view)
+                  && Option.is_some (Masc_tui_surface_search.surface_row_texts state state.view)
                 then
                   let after =
                     Option.value (search_row_cursor state) ~default:0
@@ -22899,7 +22899,7 @@ and is loaded on demand through keeper_skill.
                 (match state.fusion_mode with
                  | Fusion_list ->
                      let count =
-                       List.length (fusion_list_entries state)
+                       List.length (Masc_tui_fusion_model.fusion_list_entries state)
                      in
                      state.fusion_cursor <-
                        max 0
@@ -23833,7 +23833,7 @@ and is loaded on demand through keeper_skill.
                 (match state.fusion_mode with
                  | Fusion_list ->
                      let count =
-                       List.length (fusion_list_entries state)
+                       List.length (Masc_tui_fusion_model.fusion_list_entries state)
                      in
                      if state.fusion_cursor < count - 1 then
                        state.fusion_cursor <- state.fusion_cursor + 1

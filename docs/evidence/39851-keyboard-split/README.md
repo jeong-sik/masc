@@ -16,7 +16,7 @@ Run from the repository root:
 python3 scripts/verify-tui-keyboard-split.py --before-ref ccef0a8dab4d54e64853f0a73216d268a07d89a5 --output /tmp/keyboard-current-source-delta.json
 ```
 
-On reviewed source `0e7b81cff94733928eee427f908590526dba0e2b` plus this verifier correction, this command **exits 1**, because the current scenarios have evolved after the extraction. The retained `current-source-delta.json` records 373 prior definitions versus 380 current definitions: zero missing, seven added and 19 changed bodies; one removed and two added module statements; scenario listings also differ. Each current input file is bound by SHA256. These differences require source review and are not certified as a mechanical-equivalence pass. The earlier claim that the current tree reproduces a zero-difference 373-definition proof is withdrawn.
+On reviewed source `2adca7b9c5166272eeadf2bb183033277f10afb5` plus this verifier correction, this command **exits 1**, because the current scenarios have evolved after the extraction. The retained `current-source-delta.json` records 373 prior definitions versus 380 current definitions: zero missing, seven added and 22 changed bodies; one removed and two added module statements; scenario listings also differ. Each current input file is bound by SHA256. These differences require source review and are not certified as a mechanical-equivalence pass. The earlier claim that the current tree reproduces a zero-difference 373-definition proof is withdrawn.
 
 ## Historical receipts
 

@@ -1,18 +1,18 @@
 {
-  "source_base": "0e7b81cff94733928eee427f908590526dba0e2b",
+  "source_base": "2adca7b9c5166272eeadf2bb183033277f10afb5",
   "working_tree_delta": "module-state inventory and regressions; tracked consumer exports and full import closure",
   "command": "python3 -m unittest test_verify_tui_keyboard_split test_tui_keyboard_scenario_selection test_tui_fixture_shutdown test_tui_keeper_row_selection test_tui_stall_observation test_tui_artifact_comparison",
   "cwd": "test",
   "exit_code": 0,
   "tests": 41,
-  "duration_seconds": 1.346,
+  "duration_seconds": 1.78,
   "scope": "actual local Python tests; capture terminal boundaries mocked; no native/Dune/CI",
   "source_sha256": {
     "scripts/verify-tui-keyboard-split.py": "55cf0a6cc5beea6631021340179a524116590be5f6f35648a80ea84abf91fd71",
     "test/test_verify_tui_keyboard_split.py": "ef21aefb673ca184108dd6f228a75ad45c2809e812889482eb04e287a03b9794",
     "test/test_tui_keyboard_scenario_selection.py": "b113997c041abbb7d512b48f207a2e7efb3b00812b3a92e56ee5f54e9b5c8fc4",
     "test/test_tui_keyboard_input.py": "d0a7216e55ccbbade5c4029e584d21fdc6f9dd065eab0f975819080a9adb44af",
-    "test/dune": "4bb7dd7138327d47213398fa7e11317cd8ee78391a178ffb9a3dc50d15cbb02e"
+    "test/dune": "ee622979beb2d5e9e6615a5e3be12b1f2d9721efdc63bd416e37d8a71cebb58a"
   },
   "equivalence_command_exit_code": 1,
   "equivalence_scope": "expected refusal to certify a changed current split; details in current-source-delta.json"

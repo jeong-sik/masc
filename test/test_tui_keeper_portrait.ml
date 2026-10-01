@@ -190,9 +190,9 @@ let test_equipment_change_replaces_same_keeper_pixels () =
   let unchanged = Option.get (band ~cache ~display:pixels ~equipment:equipped ()) in
   check bool "unchanged equipment reuses the cache" true (second.Portrait.image == unchanged.Portrait.image);
   let mosaic = Option.get (band ~cache ~equipment:equipped ()) in
-  let compact = Draw.render_compact_posed (Look.body_of_name alpha) equipped Draw.still mosaic.Portrait.box.View.size in
-  check string "mosaic keeps the server equipment in compact pixels"
-    compact.Draw.rgba mosaic.Portrait.image.Draw.rgba;
+  let expected_mosaic = Draw.render (Look.body_of_name alpha) equipped mosaic.Portrait.box.View.size in
+  check string "mosaic keeps the server equipment in full accessory pixels"
+    expected_mosaic.Draw.rgba mosaic.Portrait.image.Draw.rgba;
   let placement band = Option.get (Portrait.placement band ~scroll:0
     ~visible_rows:band.Portrait.box.View.rows ~origin:(4,2)) in
   ignore (frame []);
@@ -211,6 +211,14 @@ let test_item_mosaic_preview_changes_with_selected_accessory () =
       ~content_cols:(mosaic_size.Portrait.cols + 4)) in
     let glasses = {Look.bare with face=Look.Glasses} in
     let shades = {Look.bare with face=Look.Shades} in
+    let info () = Option.get (Portrait.shown ~name:alpha ~equipment:glasses
+      ~content_rows:(Portrait.min_content_rows mosaic_size)
+      ~content_cols:(Portrait.min_content_cols mosaic_size)) in
+    let observed_info = info () in
+    let expected_info = Draw.render (Look.body_of_name alpha) glasses
+      observed_info.Portrait.box.View.size in
+    check string "Info draws the observed glasses with the accessory renderer"
+      expected_info.Draw.rgba observed_info.Portrait.image.Draw.rgba;
     let first = preview glasses and second = preview shades in
     check bool "selecting shades changes the glasses preview" false
       (String.equal first.Portrait.image.Draw.rgba second.Portrait.image.Draw.rgba);
@@ -219,11 +227,15 @@ let test_item_mosaic_preview_changes_with_selected_accessory () =
       (mosaic first = mosaic second);
     check bool "returning to glasses restores its cached preview" true
       ((preview glasses).Portrait.image == first.Portrait.image);
-    let info = Option.get (Portrait.shown ~name:alpha ~equipment:glasses
-      ~content_rows:(Portrait.min_content_rows mosaic_size)
-      ~content_cols:(Portrait.min_content_cols mosaic_size)) in
-    check bool "Item preview does not replace the compact Info picture" false
-      (String.equal info.Portrait.image.Draw.rgba first.Portrait.image.Draw.rgba);
+    check string "Info and the same observed glasses draw the same pixels"
+      observed_info.Portrait.image.Draw.rgba first.Portrait.image.Draw.rgba;
+    let retained_info = info () in
+    check bool "selecting a preview does not replace the observed Info cache entry" true
+      (retained_info.Portrait.image == observed_info.Portrait.image);
+    check string "selecting shades leaves observed Info equipment unchanged"
+      observed_info.Portrait.image.Draw.rgba retained_info.Portrait.image.Draw.rgba;
+    check bool "the shades preview differs from observed glasses" false
+      (String.equal second.Portrait.image.Draw.rgba retained_info.Portrait.image.Draw.rgba);
     View.set_display View.No_picture;
     check bool "No_picture still suppresses Item preview" true
       (Option.is_none (Portrait.preview ~name:alpha ~equipment:shades

@@ -135,8 +135,9 @@ let preview ~name ~equipment ~content_rows ~content_cols =
   | Some size ->
       View.fit display ~max_cols:size.cols ~max_rows:size.rows
       |> Option.map (fun box ->
-             (* Item selection previews accessories. The compact Info face
-                omits those slots, so previews use the full equipped drawing. *)
+             (* Item selection previews the chosen equipment. Info also uses
+                the full drawing when its observed equipment has accessories;
+                selecting a preview leaves that observed equipment unchanged. *)
              let picture = image session_cache ~name ~equipment box.View.size in
              { display; box; image = picture
              ; lines = View.lines ~project:Masc_tui_terminal_palette.best_color display box picture })

@@ -1655,7 +1655,7 @@ type async_msg =
   | Http_scoped_refresh_failed of
       string * Approval.Listing_order.ticket option
   | Board_post_refresh_done of
-      Board_detail.request * (board_post * board_comment list, string) result
+      Board_detail.request * (board_post * board_comment list * string option, string) result
   | Approval_decision_done of
       approval_item
       * approval_decision
@@ -6084,7 +6084,7 @@ let row_list (state : state) : row_list option =
      page keys reach them through here, which is what makes these arms live
      rather than a landing nobody calls. *)
   | Approvals ->
-      windowed ~count:(List.length (approval_items state))
+      windowed ~count:(List.length (Masc_tui_approvals_model.approval_items state))
         ~cursor:state.approval_cursor (fun index ->
           state.approval_cursor <- index)
   | Schedules ->
@@ -6542,12 +6542,12 @@ let goto_surface ?(from_reference = false) state ~mailbox (destination : surface
    call this; so does board compose when its handler declines the key, so
    "Tab falls through" stays true while composing. *)
 let cycle_surface state ~mailbox ~backwards =
-  let ring = Masc_tui_types.visible_surface_ring state in
+  let ring = Masc_tui_surface_navigation.visible_surface_ring state in
   let count = List.length ring in
   if count > 0 then begin
     let step = if backwards then count - 1 else 1 in
     let index =
-      (Masc_tui_types.visible_surface_ring_index state state.view + step) mod count
+      (Masc_tui_surface_navigation.visible_surface_ring_index state state.view + step) mod count
     in
     goto_surface state ~mailbox (fst (List.nth ring index))
   end
@@ -8523,9 +8523,9 @@ let follow_target (kind : Link.kind) (id : string) =
 ;;
 
 let approval_row_reference = function
-  | Keeper_tool_row ask -> Some (Link.reference Keeper ask.kta_keeper)
-  | Gate_row pending -> Some (Link.reference Keeper pending.Tui_decode.gp_keeper)
-  | Operator_row item ->
+  | Masc_tui_approvals_model.Keeper_tool_row ask -> Some (Link.reference Keeper ask.kta_keeper)
+  | Masc_tui_approvals_model.Gate_row pending -> Some (Link.reference Keeper pending.Tui_decode.gp_keeper)
+  | Masc_tui_approvals_model.Operator_row item ->
       Option.bind item.ap_target_id (fun target_id ->
           match
             Masc.Operator_action_constants.target_type_of_string
@@ -8620,7 +8620,7 @@ let selected_surface_reference state =
          Workspace target, or one this build does not know, points at no
          surface and gets no reference. *)
       Option.bind
-        (List.nth_opt (approval_items state) state.approval_cursor)
+        (List.nth_opt (Masc_tui_approvals_model.approval_items state) state.approval_cursor)
         approval_row_reference
   | Acting | Metrics
   | Memory | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools
@@ -10141,7 +10141,7 @@ let apply_approvals_load state = function
         else
           keeper_prefix
           + Approval.reconcile_cursor
-              ~current_items:(operator_approval_items state)
+              ~current_items:(Masc_tui_approvals_model.operator_approval_items state)
               ~cursor:operator_cursor ~next_items:snapshot.aps_items
       in
       state.approval_snapshot <- Some snapshot;
@@ -10208,7 +10208,7 @@ let apply_asks_load state = function
            (match List.find_index
                     (fun (row : Masc.Tui_decode_asks.ask_row) -> row.ar_id = aam_ask_id) next_rows with
             | Some index -> state.ask_cursor <- index
-            | None -> clear_ask_answering state));
+            | None -> Masc_tui_home.clear_ask_answering state));
       state.asks_snapshot <- Some snapshot;
       state.asks_error <- None;
       (* Silent while the operator is on the Approvals surface -- the panel is
@@ -10266,6 +10266,7 @@ let leave_board_detail state =
   state.board_focus <- Right_pane;
   state.board_scroll <- 0;
   state.board_comment_scroll <- 0;
+  state.board_comment_landing <- None;
   state.board_comments_focused <- false;
   state.board_history_post_id <- None;
   state.board_detail <- Board_detail.clear state.board_detail
@@ -11494,10 +11495,15 @@ let apply_board_post_load state request result =
       if state.view <> Board then
         add_event state "error" err
     in
+    let initial_read =
+      match Board_detail.view_for state.board_detail ~post_id with
+      | Board_detail.Loading | Board_detail.Failed _ -> true
+      | Board_detail.Absent | Board_detail.Ready _ -> false in
     match result with
-    | Ok (post, comments) when String.equal post.bp_id post_id ->
+    | Ok (post, comments, landing) when String.equal post.bp_id post_id ->
         state.board_detail <-
-          Board_detail.complete state.board_detail request (Ok (post, comments));
+          Board_detail.complete state.board_detail request (Ok (post, comments, landing));
+        if initial_read then state.board_comment_landing <- landing;
         (* A detail response enriches one list row; it does not rank the list.
            Moving the completed post to the front made rapid j/k navigation
            snap back to row zero as asynchronous responses arrived. *)
@@ -11506,7 +11512,7 @@ let apply_board_post_load state request result =
             (fun current ->
               if String.equal current.bp_id post_id then post else current)
             state.board_posts
-    | Ok (post, _) ->
+    | Ok (post, _, _) ->
         fail
           (Printf.sprintf
              "response ID mismatch: expected %s, received %s"
@@ -11514,9 +11520,8 @@ let apply_board_post_load state request result =
     | Error err -> fail err
 
 let start_board_post_refresh state ~host ~port ~post_id ~mailbox =
-  (match Board_detail.view_for state.board_detail ~post_id with
-   | Board_detail.Absent -> state.board_history_post_id <- None
-   | Board_detail.Loading | Board_detail.Ready _ | Board_detail.Failed _ -> ());
+  if state.board_history_post_id <> Some post_id then
+    state.board_history_post_id <- None;
   match Board_detail.start state.board_detail ~post_id with
   | Board_detail.Already_loading -> ()
   | Board_detail.Started (detail, request) ->
@@ -11543,10 +11548,12 @@ let start_board_post_refresh state ~host ~port ~post_id ~mailbox =
 
 let open_board_post state ~mailbox ~focus (post : board_post) =
   state.board_mode <- Board_read post.bp_id;
+  state.board_detail <- Board_detail.clear state.board_detail;
   state.board_history_post_id <- None;
   state.board_focus <- focus;
   state.board_scroll <- 0;
   state.board_comment_scroll <- 0;
+  state.board_comment_landing <- None;
   state.board_comments_focused <- false;
   start_board_post_refresh state ~host:server_peer_host
     ~port:state.port ~post_id:post.bp_id ~mailbox
@@ -11707,7 +11714,7 @@ let selected_ask_question state =
 (* Leaving the mode drops the draft. An answer half-written against a question
    the operator walked away from is not a thing to restore later; the Keeper
    is still waiting either way, and the row says so. *)
-let leave_ask_answering state = clear_ask_answering state
+let leave_ask_answering state = Masc_tui_home.clear_ask_answering state
 
 let enter_ask_answering state =
   match selected_ask_row state with
@@ -15149,7 +15156,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            state.keeper_tool_approvals <- held;
            state.keeper_tool_approvals_error <- None;
            state.keeper_tool_approvals_observed <- true;
-           let count = List.length (approval_items state) in
+           let count = List.length (Masc_tui_approvals_model.approval_items state) in
            if state.approval_cursor >= count then
              state.approval_cursor <- max 0 (count - 1)
        | Error detail -> state.keeper_tool_approvals_error <- Some detail)
@@ -15334,7 +15341,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            state.gate_rules_unavailable <- snapshot.Tui_decode.gs_rules_unavailable;
            state.gate_error <- None;
            state.gate_snapshot_observed <- true;
-           let count = List.length (approval_items state) in
+           let count = List.length (Masc_tui_approvals_model.approval_items state) in
            if state.approval_cursor >= count then
              state.approval_cursor <- max 0 (count - 1)
        | Error detail -> state.gate_error <- Some detail)
@@ -15360,7 +15367,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                (fun (pending : Tui_decode.gate_pending) ->
                  not (String.equal pending.Tui_decode.gp_id approval_id))
                state.gate_pending;
-           let count = List.length (approval_items state) in
+           let count = List.length (Masc_tui_approvals_model.approval_items state) in
            if state.approval_cursor >= count then
              state.approval_cursor <- max 0 (count - 1);
            launch_gate_snapshot_load ~intent:Snapshot_read.Refresh state ~mailbox
@@ -15474,7 +15481,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           (fun (held : Tui_decode.keeper_tool_approval) ->
             not (String.equal held.kta_tool_call_id tool_call_id))
           state.keeper_tool_approvals;
-      let count = List.length (approval_items state) in
+      let count = List.length (Masc_tui_approvals_model.approval_items state) in
       if state.approval_cursor >= count then
         state.approval_cursor <- max 0 (count - 1);
       report_action state
@@ -16647,7 +16654,7 @@ let drain_async_messages state ~base_path ~http_refresh_inflight
   let rec loop changed =
     match Eio.Stream.take_nonblocking mailbox with
     | None ->
-        reconcile_home_request_detail state;
+        Masc_tui_home.reconcile_home_request_detail state;
         changed
     | Some { ready_at_ns; message = msg } ->
         let waited_ns = Int64.sub (Mtime_clock.elapsed_ns ()) ready_at_ns in
@@ -17224,20 +17231,20 @@ let main
   let answer_presented_approval decision =
     match
       Approval_authority.resolve ~presented:!presented_approval
-        ~current:(approval_items state) decision
+        ~current:(Masc_tui_approvals_model.approval_items state) decision
     with
-    | Some { Approval_authority.row = Operator_row approval; decision } ->
+    | Some { Approval_authority.row = Masc_tui_approvals_model.Operator_row approval; decision } ->
         handle_approval_decision state approval decision
           ~mailbox:async_messages
-    | Some { Approval_authority.row = Keeper_tool_row held; decision } ->
+    | Some { Approval_authority.row = Masc_tui_approvals_model.Keeper_tool_row held; decision } ->
         launch_surface_tool_approval state ~mailbox:async_messages
           ~keeper_name:held.kta_keeper
           ~tool_call_id:held.kta_tool_call_id
           ~allow:(match decision with Confirm -> true | Deny -> false)
-    | Some { Approval_authority.row = Gate_row pending; decision = Confirm } ->
+    | Some { Approval_authority.row = Masc_tui_approvals_model.Gate_row pending; decision = Confirm } ->
         launch_gate_resolve state ~mailbox:async_messages
           ~approval_id:pending.Tui_decode.gp_id ~approve:true ~reason:None
-    | Some { Approval_authority.row = Gate_row pending; decision = Deny } ->
+    | Some { Approval_authority.row = Masc_tui_approvals_model.Gate_row pending; decision = Deny } ->
         reject_gate_approval pending
     | None ->
         report_action state "system"
@@ -20478,11 +20485,11 @@ and is loaded on demand through keeper_skill.
             | "right" | "down" | "j" -> move_ask_question_cursor state 1
             | "pageup" | "pagedown" | "wheel-up" | "wheel-down" ->
                 let delta = match k with
-                  | "pageup" -> -(Masc_tui_render.ask_question_page_size state)
-                  | "pagedown" -> Masc_tui_render.ask_question_page_size state
+                  | "pageup" -> -(Masc_tui_render_approvals.ask_question_page_size state)
+                  | "pagedown" -> Masc_tui_render_approvals.ask_question_page_size state
                   | "wheel-up" -> -1 | _ -> 1 in
                 state.ask_question_scroll <- max 0
-                  (min (Masc_tui_render.ask_question_scroll_limit state)
+                  (min (Masc_tui_render_approvals.ask_question_scroll_limit state)
                      (state.ask_question_scroll + delta))
             (* This arm takes every key while a question is open, so the
                surface Home and End below never reach it -- and reaching it
@@ -20492,7 +20499,7 @@ and is loaded on demand through keeper_skill.
             | "home" -> state.ask_question_scroll <- 0
             | "end" ->
                 state.ask_question_scroll <-
-                  Masc_tui_render.ask_question_scroll_limit state
+                  Masc_tui_render_approvals.ask_question_scroll_limit state
             | "[" -> state.home_opened_request <- None; move_ask_cursor state (-1)
             | "]" -> state.home_opened_request <- None; move_ask_cursor state 1
             | "s" | "S" -> skip_ask_question state
@@ -22122,8 +22129,11 @@ and is loaded on demand through keeper_skill.
             | Some (Masc.Tui_decode_fusion.Fusion_historical_evidence reference) ->
                 state.followed_from <- Some (state.view, None);
                 state.board_mode <- Board_read reference.fhe_post_id;
+                state.board_history_post_id <- None;
+                state.board_detail <- Board_detail.clear state.board_detail;
                 state.board_scroll <- 0;
                 state.board_comment_scroll <- 0;
+                state.board_comment_landing <- None;
                 state.board_comments_focused <- false;
                 state.board_focus <- Right_pane;
                 goto_surface ~from_reference:true state ~mailbox:async_messages Board;
@@ -22136,8 +22146,11 @@ and is loaded on demand through keeper_skill.
             | Fusion_historical_detail reference, _ ->
                 state.followed_from <- Some (state.view, None);
                 state.board_mode <- Board_read reference.fhe_post_id;
+                state.board_history_post_id <- None;
+                state.board_detail <- Board_detail.clear state.board_detail;
                 state.board_scroll <- 0;
                 state.board_comment_scroll <- 0;
+                state.board_comment_landing <- None;
                 state.board_comments_focused <- false;
                 state.board_focus <- Right_pane;
                 goto_surface ~from_reference:true state ~mailbox:async_messages Board;
@@ -22149,8 +22162,11 @@ and is loaded on demand through keeper_skill.
                  | Some evidence ->
                      state.followed_from <- Some (state.view, Some id);
                      state.board_mode <- Board_read evidence.fe_post_id;
+                     state.board_history_post_id <- None;
+                     state.board_detail <- Board_detail.clear state.board_detail;
                      state.board_scroll <- 0;
                      state.board_comment_scroll <- 0;
+                     state.board_comment_landing <- None;
                      state.board_comments_focused <- false;
                      state.board_focus <- Right_pane;
                      goto_surface ~from_reference:true state ~mailbox:async_messages Board;
@@ -22347,7 +22363,7 @@ and is loaded on demand through keeper_skill.
        | Some (("[" | "]") as bracket)
          when state.view = Approvals && state.approval_detail_open ->
            state.home_opened_request <- None;
-           step_detail_cursor ~count:(List.length (approval_items state))
+           step_detail_cursor ~count:(List.length (Masc_tui_approvals_model.approval_items state))
              ~cursor:state.approval_cursor
              ~delta:(if bracket = "]" then 1 else -1)
              ~set_cursor:(fun n -> state.approval_cursor <- n)
@@ -22550,11 +22566,11 @@ and is loaded on demand through keeper_skill.
        | Some "R" when state.view = Approvals ->
            (match
               Approval_authority.resolve ~presented:!presented_approval
-                ~current:(approval_items state) Confirm
+                ~current:(Masc_tui_approvals_model.approval_items state) Confirm
             with
-            | Some { Approval_authority.row = Gate_row pending; _ } ->
+            | Some { Approval_authority.row = Masc_tui_approvals_model.Gate_row pending; _ } ->
                 launch_gate_auto_judge_retry state ~mailbox:async_messages pending
-            | Some { Approval_authority.row = (Operator_row _ | Keeper_tool_row _); _ }
+            | Some { Approval_authority.row = (Masc_tui_approvals_model.Operator_row _ | Masc_tui_approvals_model.Keeper_tool_row _); _ }
             | None ->
                 report_action state "system"
                   "Approval list changed; review the updated row before retrying")
@@ -22727,11 +22743,11 @@ and is loaded on demand through keeper_skill.
        | Some ("l" | "L") when state.view = Acting ->
            goto_surface state ~mailbox:async_messages System_logs
        | Some ("j" | "down" | "k" | "up" as key) when state.view = Overview ->
-           home_step state ~backwards:(key = "k" || key = "up")
+           Masc_tui_home.home_step state ~backwards:(key = "k" || key = "up")
        | Some ("p" | "P") when state.view = Overview ->
            goto_surface state ~mailbox:async_messages Approvals
        | Some ("\r" | "\n" | "enter") when state.view = Overview ->
-           (match home_selected_action state with
+           (match Masc_tui_home.home_selected_action state with
             | None -> report_action state "system" "Selection changed; choose again"
             | Some action ->
               state.home_selected <- Some action;
@@ -22747,8 +22763,8 @@ and is loaded on demand through keeper_skill.
                 (match request with
                  | Home_held_call _ | Home_gate_request _ | Home_operator_request _ ->
                      (match List.find_index
-                              (fun row -> home_request_of_approval row = request)
-                              (approval_items state) with
+                              (fun row -> Masc_tui_home.home_request_of_approval row = request)
+                              (Masc_tui_approvals_model.approval_items state) with
                       | None -> report_action state "system" "Request changed; choose again"
                       | Some cursor ->
                           navigate Approvals;
@@ -23107,11 +23123,11 @@ and is loaded on demand through keeper_skill.
                   state.board_comments_focused <- false
                 end else
                   (match Board_detail.view_for state.board_detail ~post_id with
-                   | Board_detail.Ready (_, _ :: _) ->
+                   | Board_detail.Ready (_, _ :: _, _) ->
                        state.board_comments_focused <-
                          not state.board_comments_focused
                    | Board_detail.Absent | Board_detail.Loading
-                   | Board_detail.Ready (_, []) | Board_detail.Failed _ -> ())
+                   | Board_detail.Ready (_, [], _) | Board_detail.Failed _ -> ())
             | Board_list | Board_compose -> ())
        | Some ":" ->
            state.palette_open <- true;
@@ -23352,14 +23368,21 @@ and is loaded on demand through keeper_skill.
        | Some "o" when state.view = Board ->
            (match state.board_mode with
             | Board_read post_id
-              when Board_detail.is_ready state.board_detail ~post_id ->
+              when Board_detail.is_ready state.board_detail ~post_id
+                   || (state.board_history_post_id = Some post_id
+                       && match Board_detail.view_for state.board_detail ~post_id with
+                      | Board_detail.Failed _ -> true
+                      | Board_detail.Absent | Board_detail.Loading
+                      | Board_detail.Ready _ -> false) ->
                 state.board_history_post_id <-
                   (if state.board_history_post_id = Some post_id then None
                    else Some post_id);
-                (* [o] swaps the comment list, so both windows start again
-                   from the top, as they do when a post is opened. *)
+                (* A mode swap owns a fresh request generation. History starts
+                   at its first row; newest-page reads can resolve a page anchor. *)
                 state.board_scroll <- 0;
                 state.board_comment_scroll <- 0;
+                state.board_comment_landing <- None;
+                state.board_detail <- Board_detail.clear state.board_detail;
                 start_board_post_refresh state ~host ~port ~post_id
                   ~mailbox:async_messages
             | Board_list | Board_compose | Board_read _ -> ());
@@ -24585,7 +24608,7 @@ and is loaded on demand through keeper_skill.
                 state.approval_detail_scroll <-
                   Masc_tui_types.scroll_down_from state.approval_detail_scroll ~by:1
             | Approvals ->
-                let count = List.length (approval_items state) in
+                let count = List.length (Masc_tui_approvals_model.approval_items state) in
                 if state.approval_cursor < count - 1 then begin
                   state.pending_approval_action <- None;
                   state.approval_cursor <- state.approval_cursor + 1
@@ -25347,7 +25370,7 @@ and is loaded on demand through keeper_skill.
             | Approvals ->
                 (* The list draws the ask on one row; this is where the whole
                    thing is readable before [y] answers it. *)
-                if List.length (approval_items state) > 0 then begin
+                if List.length (Masc_tui_approvals_model.approval_items state) > 0 then begin
                   state.approval_detail_open <- true;
                   state.approval_detail_scroll <- 0
                 end
@@ -26904,14 +26927,14 @@ and is loaded on demand through keeper_skill.
                   | Some projection -> state.acting_chunk_projection <- Some projection);
                  (match state.view, Masc_tui_render.frame_choice state ~terminal_rows with
                   | Overview, `Surface ->
-                      let selected = home_selected_action state in
+                      let selected = Masc_tui_home.home_selected_action state in
                       if Option.is_none state.home_selected
-                         && home_initial_reading_ready state selected then
+                         && Masc_tui_home.home_initial_reading_ready state selected then
                         state.home_selected <- selected;
                       (* The persistent requests link owns the first body row. *)
                       let budget = max 0
                           (Masc_tui_render_prim.surface_chrome_budget state ~terminal_rows - 1) in
-                      let first, _ = home_decision_window state ~budget in
+                      let first, _ = Masc_tui_home.home_decision_window state ~budget in
                       state.home_decision_scroll <- first
                   | _ -> ());
                  render state)

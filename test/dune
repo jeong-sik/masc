@@ -3695,6 +3695,7 @@
  (modules test_tui_chat_queue_wiring)
  (libraries masc_tui_link_preview masc_tui_image_preview
   masc_tui_answering
+  masc_tui_keys
   alcotest
   ast_grep
   astring
@@ -3751,7 +3752,7 @@
 (test
  (name test_tui_text_input_target)
  (modules test_tui_text_input_target)
- (libraries
+ (libraries masc_tui_surface_navigation
   alcotest
   fmt
   masc
@@ -4144,6 +4145,9 @@
  (deps
   %{workspace_root}/bin/masc_tui.ml
   %{workspace_root}/bin/masc_tui_render.ml
+  %{workspace_root}/bin/masc_tui_render_prim.ml
+  %{workspace_root}/bin/masc_tui_render_chat.ml
+  %{workspace_root}/bin/masc_tui_render_approvals.ml
   %{workspace_root}/bin/masc_tui_render_tools.ml
   %{workspace_root}/bin/masc_tui_types.ml)
  (libraries
@@ -4278,7 +4282,7 @@
 (test
  (name test_tui_approval_authority)
  (modules test_tui_approval_authority)
- (libraries alcotest masc_tui_approval_authority masc_tui_types))
+ (libraries masc_tui_approvals_model alcotest masc_tui_approval_authority masc_tui_types))
 
 (test
  (name test_tui_terminal_profile)
@@ -5785,7 +5789,7 @@
  ; vocabulary is read through Ast_grep. The source is a dep: without it the
  ; test reads a cached verdict and stays green while the row it measures has
  ; gone back to being joined by hand.
- (deps %{workspace_root}/bin/masc_tui_render.ml)
+ (deps %{workspace_root}/bin/masc_tui_render_approvals.ml)
  (libraries alcotest ast_grep masc_tui_frame masc_tui_message_layout))
 
 (test

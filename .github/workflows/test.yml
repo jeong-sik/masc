@@ -405,6 +405,15 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+      - name: Upload Keeper Items terminal evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: keeper-items-tui
+          path: ${{ runner.temp }}/keeper-items-tui/
+          if-no-files-found: ignore
+          retention-days: 14
+
       - name: Capture Navigation fixture PTY screenshots
         if: ${{ !cancelled() && contains(inputs.suite, 'test_tui_lane_visual_pty') }}
         env:

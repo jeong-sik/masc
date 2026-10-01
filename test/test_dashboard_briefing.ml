@@ -131,6 +131,29 @@ let test_dashboard_briefing_projection () =
       let open Yojson.Safe.Util in
       let attention_queue = json |> member "attention_queue" |> to_list in
       let summary = json |> member "summary" in
+      let compact_summary =
+        match Briefing_compactors.compact_briefing_summary_json json with
+        | Ok value -> value
+        | Error detail -> failf "actual briefing projection rejected: %s" detail
+      in
+      let incidents = json |> member "incidents" |> to_list in
+      check bool "fixture has real attention" true (incidents <> []);
+      check int "actual incidents reach section summary" (List.length incidents)
+        (compact_summary |> member "incident_count" |> to_int);
+      check int "actual recommendations reach section summary"
+        (List.length (json |> member "recommended_actions" |> to_list))
+        (compact_summary |> member "recommended_action_count" |> to_int);
+      let _, sections =
+        Briefing_sections.build_briefing_sections
+          ~briefing_summary_json:compact_summary ~agents:[]
+          ~recent_messages:[] ~metadata_gaps:[]
+      in
+      let watch =
+        List.find (fun section -> section |> member "id" = `String "watch") sections
+      in
+      let watch_status = watch |> member "status" in
+      check bool "actual attention cannot become an all-clear briefing" true
+        (watch_status = `String "watch" || watch_status = `String "risk");
       let agent_briefs = json |> member "agent_briefs" |> to_list in
       let internal_signals = json |> member "internal_signals" |> to_list in
       let alpha_brief =
@@ -1117,11 +1140,36 @@ let test_worker_support_tracks_each_exact_assignee_across_renders () =
   check bool "an empty fleet has no worker briefs" true
     (render ~tasks ~agents:[] = [])
 
+let test_attention_read_failures_reach_briefing () =
+  List.iter (fun broken_meta ->
+    let dir = test_dir () in
+    Fun.protect ~finally:(fun () -> cleanup_dir dir) (fun () ->
+      with_test_env @@ fun ~clock ~sw ->
+      let config = Workspace_utils.default_config dir in
+      ignore (Lib.Workspace.init config ~agent_name:(Some "fixture-root"));
+      let keepers = Lib.Workspace.keepers_runtime_dir config in
+      if Sys.file_exists keepers then cleanup_dir keepers;
+      if broken_meta then (
+        Fs_compat.mkdir_p keepers;
+        Fs_compat.save_file
+          (Lib.Keeper_types_profile.keeper_meta_path config "broken") "not json")
+      else Fs_compat.save_file keepers "not a directory";
+      Dashboard_cache.invalidate_all ();
+      Dashboard_projection_cache.invalidate_snapshot_json ~config;
+      let json = Dashboard_briefing.json ~actor:"attention-read-fixture"
+        ~config ~sw ~clock ~proc_mgr:None () in
+      match Yojson.Safe.Util.member "attention_read_error" json with
+      | `String detail when String.length detail > 0 -> ()
+      | _ -> fail "keeper read failure was projected as zero observed incidents"))
+    [false; true]
+
 let () =
   Alcotest.run "Dashboard Mission"
     [
       ( "read_model",
         [
+          Alcotest.test_case "keeper attention read errors reach briefing" `Quick
+            test_attention_read_failures_reach_briefing;
           Alcotest.test_case "latest_message_to tolerates empty agent name"
             `Quick test_latest_message_to_empty_name_safe;
           Alcotest.test_case "latest_message_to requires a real mention"

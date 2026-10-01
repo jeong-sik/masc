@@ -238,9 +238,61 @@ let test_compact_agent_status_serialises_lowercase () =
 let _ = string_of
 let _ = int_of
 
+let test_attention_read_failure_is_not_empty () =
+  let fields =
+    [ "attention_read_error", `Null;
+      "summary", `Assoc [ "workspace_health", `String "ok" ];
+      "incidents", `List [];
+      "recommended_actions", `List [] ]
+  in
+  let read fields = C.compact_briefing_summary_json (`Assoc fields) in
+  (match read fields with
+  | Error detail -> failwith detail
+  | Ok summary ->
+      assert (Yojson.Safe.Util.member "incident_count" summary = `Int 0);
+      assert (Yojson.Safe.Util.member "recommended_action_count" summary = `Int 0));
+  let replace key value = (key, value) :: List.remove_assoc key fields in
+  List.iter
+    (fun invalid ->
+      match read invalid with
+      | Error _ -> ()
+      | Ok _ -> failwith "unavailable attention was accepted as empty")
+    [ replace "attention_read_error" (`String "digest store unreadable");
+      List.remove_assoc "attention_read_error" fields;
+      replace "attention_read_error" (`Bool false);
+      List.remove_assoc "incidents" fields;
+      replace "incidents" `Null;
+      List.remove_assoc "recommended_actions" fields;
+      replace "recommended_actions" (`Assoc []);
+      (* The judgment writer accepts {}, and the digest preserves it in a list. *)
+      replace "recommended_actions" (`List [`Assoc []]);
+      replace "recommended_actions" (`List [`Assoc ["action_type", `String "inspect";
+        "target_type", `String "keeper"; "reason", `String ""]]);
+      replace "recommended_actions" (`List [`String "pause"]);
+      replace "recommended_actions" (`List [`Assoc [ "action_type", `String "namespace_pause";
+        "target_type", `String "workspace"; "reason", `String "\u{00A0}" ]]);
+      replace "recommended_actions" (`List [`Assoc [ "action_type", `String "namespace_pause";
+        "target_type", `String "workspace"; "reason", `String "\u{FEFF}" ]]);
+      replace "recommended_actions" (`List [`Assoc [ "action_type", `String "namespace_pause";
+        "target_type", `String "workspace"; "reason", `String "review"; "reason", `Null ]]);
+      replace "recommended_actions" (`List [`Assoc [ "action_type", `String "pause";
+        "target_type", `String "workspace"; "reason", `String " " ]]);
+      replace "summary" (`Assoc []);
+      replace "incidents" (`List [`Assoc []]) ];
+  let valid_action = `Assoc ["action_type", `String "inspect";
+    "target_type", `String "keeper"; "reason", `String "review recent failure"] in
+  (match read (replace "recommended_actions" (`List [valid_action])) with
+   | Error detail -> failwith detail
+   | Ok summary ->
+     assert (Yojson.Safe.Util.member "recommended_action_count" summary = `Int 1));
+  (match read (replace "recommended_actions" (`List [valid_action; `Assoc []])) with
+   | Error _ -> ()
+   | Ok _ -> failwith "mixed malformed actions were counted as observable recommendations")
+
 (* ── runner ───────────────────────────────────────────────── *)
 
 let () =
+  test_attention_read_failure_is_not_empty ();
   test_compact_keeper_strict_keys ();
   test_compact_keeper_max_len_truncation ();
   test_compact_keeper_missing_scalars_are_null ();

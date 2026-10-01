@@ -110,6 +110,11 @@ export function normalizeMission(raw: unknown): DashboardMissionResponse {
       .filter((item): item is OperatorRecommendedAction => item !== null),
     command_focus: normalizeCommandFocus(root.command_focus),
     operator_targets: normalizeTargets(root.operator_targets),
+    attention_read_error: root.attention_read_error === null
+      ? null
+      : typeof root.attention_read_error === 'string' && root.attention_read_error.trim() !== ''
+        ? root.attention_read_error
+        : 'Attention unavailable: response is missing a valid attention_read_error field.',
     attention_queue: extractArray(root.attention_queue)
       .map(normalizeAttentionQueueItem)
       .filter((item): item is DashboardMissionAttentionQueueItem => item !== null),

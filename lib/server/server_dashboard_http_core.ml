@@ -72,6 +72,7 @@ let mission_cache =
         ; "recommended_actions", `List []
         ; "command_focus", `Assoc []
         ; "operator_targets", `Assoc []
+        ; "attention_read_error", `String "Attention has not been observed yet."
         ; "attention_queue", `List []
         ; "agent_briefs", `List []
         ; "keeper_briefs", `List []
@@ -202,21 +203,9 @@ let dashboard_briefing_sections_http_json ~state ~sw ~clock request =
       ~proc_mgr:state.Mcp_server.proc_mgr
       ()
   in
-  if force
-  then with_dashboard_timeout ~clock compute
-  else (
-    let cache_key =
-      dashboard_cache_key
-        (Mcp_server.workspace_config state)
-        "mission_briefing"
-        (Option.value ~default:"" actor)
-    in
-    Dashboard_cache.get_or_compute_with_timeout
-      cache_key
-      ~ttl:deep_surface_cache_ttl_s
-      ~clock
-      ~timeout_sec:dashboard_briefing_timeout_s
-      compute)
+  (* Sections owns its async cache and publishes recovery there. Caching its
+     pending envelope again would hide that recovery from ordinary polls. *)
+  with_dashboard_timeout ~clock compute
 ;;
 
 let dashboard_shell_status_json =

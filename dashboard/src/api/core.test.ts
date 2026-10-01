@@ -675,7 +675,7 @@ describe('get bootstrap warm-up mapping', () => {
     expect(data.task_backlog?.todo).toBe(0)
   })
 
-  it('maps briefing not-initialized 5xx to empty briefing payload', async () => {
+  it('marks attention unobserved in a not-initialized briefing payload', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response('{"error":"not initialized"}', {
         status: 500,
@@ -688,12 +688,14 @@ describe('get bootstrap warm-up mapping', () => {
       generated_at?: string
       summary?: { workspace_health?: string }
       incidents?: unknown[]
+      attention_read_error?: string | null
       command_focus?: Record<string, unknown>
       operator_targets?: { keepers?: unknown[] }
     }>('/api/v1/dashboard/briefing')
 
     expect(data.generated_at).toBeDefined()
     expect(data.summary?.workspace_health).toBe('initializing')
+    expect(data.attention_read_error).toBe('Attention has not been observed yet.')
     expect(data.incidents).toEqual([])
     expect(data.command_focus).toEqual({})
     expect(data.operator_targets?.keepers).toEqual([])

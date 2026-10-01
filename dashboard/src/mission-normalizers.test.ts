@@ -9,6 +9,31 @@ import {
 // ================================================================
 
 describe('normalizeMission', () => {
+  it('preserves an attention read failure even when the queue is empty', () => {
+    const result = normalizeMission({
+      attention_queue: [],
+      attention_read_error: 'Keeper attention store could not be read',
+    })
+    expect(result.attention_queue).toEqual([])
+    expect(result.attention_read_error).toBe('Keeper attention store could not be read')
+  })
+
+  it('keeps an explicitly healthy empty attention queue distinguishable', () => {
+    const result = normalizeMission({ attention_queue: [], attention_read_error: null })
+    expect(result.attention_queue).toEqual([])
+    expect(result.attention_read_error).toBeNull()
+  })
+
+  it.each([undefined, '', '  ', false, 0, {}, []])(
+    'reports unavailable for a missing or malformed attention status: %j',
+    attention_read_error => {
+      const result = normalizeMission({ attention_queue: [], attention_read_error })
+      expect(result.attention_read_error).toBe(
+        'Attention unavailable: response is missing a valid attention_read_error field.',
+      )
+    },
+  )
+
   it('returns safe defaults for null', () => {
     const result = normalizeMission(null)
     expect(result.generated_at).toBeUndefined()

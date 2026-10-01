@@ -3293,20 +3293,13 @@ let add_routes ~sw ~clock router =
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/briefing/sections" (fun request reqd ->
        with_public_read (fun state req reqd ->
-         if Server_utils.bool_query_param req "force" ~default:false then
-           Http.Response.json_value ~compress:true ~request:req
-             (Domain_pool_ref.submit_io_or_inline (fun () ->
-                dashboard_briefing_sections_http_json ~state ~sw ~clock req))
-             reqd
-         else
-           let cache_key =
-             Server_dashboard_http_core_cache.dashboard_query_cache_key
-               (Mcp_server.workspace_config state)
-               "mission_briefing"
-               [ ("actor", dashboard_actor_cache_segment state req) ]
-           in
-           respond_cached_read ~request:req ~reqd ~cache_key ~ttl:live_cache_ttl_s
-             (fun () -> dashboard_briefing_sections_http_json ~state ~sw ~clock req)
+         (* The sections owner already caches successful data and coordinates
+            refresh. Read that owner on every poll, including after a failure. *)
+         let json = Domain_pool_ref.submit_io_or_inline (fun () ->
+           dashboard_briefing_sections_http_json ~state ~sw ~clock req) in
+         let status = if Dashboard_cache.is_timeout_envelope json then
+           `Gateway_timeout else `OK in
+         Http.Response.json_value ~status ~compress:true ~request:req json reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/tool-quality" (fun request reqd ->
        with_public_read (fun _state req reqd ->

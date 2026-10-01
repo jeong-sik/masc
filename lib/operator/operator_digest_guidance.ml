@@ -51,6 +51,35 @@ let judgment_recommendation_summary_json actions =
       ("authoritative", `Bool true);
     ]
 
+(* Judgment records retain the decision as written. The public action
+   projection uses the operator vocabulary consumed by Mission and Briefing.
+   Translate the existing judgment's workspace-pause spelling at this boundary;
+   leave malformed objects intact so an observation cannot turn them into an
+   apparent absence of recommendations. *)
+let project_recommended_action = function
+  | `Assoc fields as raw ->
+      (match Json_util.reject_unknown_fields ~surface:"recommended action"
+               ~allowed:(List.map fst fields) fields with
+      | Error _ -> raw
+      | Ok () ->
+      match List.assoc_opt "action_type" fields, List.assoc_opt "action_kind" fields with
+      | None, Some (`String "pause_workspace") ->
+          let action = Operator_action_catalog.Namespace_pause in
+          let fields = List.remove_assoc "action_kind" fields in
+          let fields = List.remove_assoc "confirm_required" fields in
+          let fields =
+            match List.assoc_opt "suggested_payload" fields,
+                  List.assoc_opt "payload_preview" fields with
+            | None, Some (`Assoc _ as payload) -> ("suggested_payload", payload) :: fields
+            | _ -> fields
+          in
+          `Assoc
+            (("action_type", `String (Operator_action_catalog.to_string action))
+             :: ("confirm_required", `Bool true)
+             :: List.remove_assoc "payload_preview" fields)
+      | _ -> raw)
+  | raw -> raw
+
 (* Only an operator judgment — an LLM's own recorded decision — may carry a
    recommended action. The read-model fallback used to synthesise one in
    OCaml (action_type="keeper_probe", reason="Inspect pending external
@@ -62,7 +91,7 @@ let active_guidance ~config ~target_type ~target_id ~fallback_observation_summar
   | Some judgment_json ->
       let recommended_actions =
         match Json_util.get_object judgment_json "recommended_action" with
-        | Some value -> [ value ]
+        | Some value -> [ project_recommended_action value ]
         | None -> []
       in
       let recommendation_summary =

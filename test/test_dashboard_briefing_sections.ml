@@ -83,6 +83,67 @@ let iso_of_unix ts =
     (tm.Unix.tm_mon + 1)
     tm.Unix.tm_mday tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
 
+let test_cache_is_scoped_to_workspace_and_actor () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_a = temp_dir () and base_b = temp_dir () in
+  Fun.protect ~finally:(fun () -> Briefing.reset_cache (); cleanup_dir base_a; cleanup_dir base_b)
+    (fun () ->
+      Briefing.reset_cache ();
+      let config_a = Workspace.default_config base_a in
+      let config_b = Workspace.default_config base_b in
+      let seed config actor marker =
+        Briefing.seed_cache ~config ~actor ~cached_at:(Unix.gettimeofday ())
+          (`Assoc ["status", `String "ok"; "marker", `String marker]) in
+      seed config_a "alice" "A/alice";
+      seed config_a "bob" "A/bob";
+      seed config_b "alice" "B/alice";
+      List.iter (fun (config, actor, expected) ->
+        let result = Dashboard_briefing_sections.json ~config ~actor ~sw
+            ~clock:(Eio.Stdenv.clock env) ~proc_mgr:None () in
+        check_string_field result "marker" expected)
+        [config_a, "alice", "A/alice"; config_a, "bob", "A/bob";
+         config_b, "alice", "B/alice"])
+
+let test_cluster_cache_partition_and_capacity () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> Briefing.reset_cache (); cleanup_dir base)
+    (fun () ->
+      Briefing.reset_cache ();
+      let config = Workspace.default_config base in
+      let clustered = { config with backend_config =
+        { config.backend_config with cluster_name = "briefing-test" } } in
+      let seed config marker = Briefing.seed_cache ~config
+        ~cached_at:(Unix.gettimeofday ()) (`Assoc ["marker", `String marker]) in
+      seed config "default"; seed clustered "cluster";
+      List.iter (fun (config, marker) ->
+        let json = Dashboard_briefing_sections.json ~config ~sw
+          ~clock:(Eio.Stdenv.clock env) ~proc_mgr:None () in
+        check_string_field json "marker" marker)
+        [config, "default"; clustered, "cluster"];
+      for i = 1 to Env_config.Cache.max_entries + 1 do
+        Briefing.seed_cache ~config ~actor:(string_of_int i) (`Assoc [])
+      done;
+      check bool "actor cache bounded" true
+        (Briefing.cache_count () <= Env_config.Cache.max_entries))
+
+let test_cold_follower_does_not_compute () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> Briefing.reset_cache (); cleanup_dir base)
+    (fun () ->
+      Briefing.reset_cache ();
+      let config = Workspace.default_config base in
+      Briefing.with_refresh_in_flight ~config (fun () ->
+        let json = Dashboard_briefing_sections.json ~config ~sw
+          ~clock:(Eio.Stdenv.clock env) ~proc_mgr:None () in
+        check_string_field json "status" "pending";
+        check bool "existing refresh retained" true
+          (Yojson.Safe.Util.(json |> member "refreshing" |> to_bool))))
+
 let test_briefing_cold_call_returns_pending () =
   (* After #2094, cold calls (no cache) return "pending" and trigger async refresh.
      This avoids blocking the dashboard on cold-start computation. *)
@@ -148,7 +209,7 @@ let test_force_refresh_with_cached_result_returns_stale_cached_payload () =
       Briefing.reset_cache ();
       let config = Workspace.default_config base_path in
       ignore (Workspace.init config ~agent_name:None);
-      Briefing.seed_cache
+      Briefing.seed_cache ~config
         ~cached_at:(Unix.gettimeofday ())
         (`Assoc
           [
@@ -384,10 +445,15 @@ let test_build_briefing_sections_watch_evidence_uses_namespace_wording () =
   | _ -> fail "expected watch evidence list"
 
 let () =
+  test_cache_is_scoped_to_workspace_and_actor ();
   run "Dashboard Mission Briefing"
     [
       ( "deterministic",
         [
+          test_case "cluster partition and bounded actor owners" `Quick
+            test_cluster_cache_partition_and_capacity;
+          test_case "cold follower reuses refresh" `Quick
+            test_cold_follower_does_not_compute;
           test_case "cold call returns pending" `Quick
             test_briefing_cold_call_returns_pending;
           test_case "force refresh without cache returns pending" `Quick

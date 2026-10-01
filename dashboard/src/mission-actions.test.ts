@@ -24,6 +24,7 @@ const missionPayload = {
     available_actions: [],
   },
   attention_queue: [],
+  attention_read_error: null,
   agent_briefs: [
     {
       agent_name: 'agent-1',
@@ -49,6 +50,7 @@ const initializingMissionPayload = {
   command_focus: {},
   operator_targets: {},
   attention_queue: [],
+  attention_read_error: null,
   agent_briefs: [],
   keeper_briefs: [],
   internal_signals: [],
@@ -60,6 +62,34 @@ afterEach(() => {
 })
 
 describe('refreshMissionSnapshot', () => {
+  it('publishes failed attention reads during initialization and clears the error on recovery', async () => {
+    apiMocks.fetchDashboardMission
+      .mockResolvedValueOnce(missionPayload)
+      .mockResolvedValueOnce({
+        ...initializingMissionPayload,
+        attention_read_error: 'Attention store unavailable',
+      })
+      .mockResolvedValueOnce(missionPayload)
+
+    const missionActions = await import('./mission-actions')
+    const missionStore = await import('./mission-store')
+    await missionActions.refreshMissionSnapshot({ force: true })
+    expect(missionStore.missionError.value).toBeNull()
+    expect(missionStore.missionSnapshot.value?.summary.workspace_health).toBe('ok')
+
+    await missionActions.refreshMissionSnapshot({ force: true })
+    expect(missionStore.missionError.value).toBe('Attention store unavailable')
+    expect(missionStore.missionSnapshot.value?.attention_read_error).toBe('Attention store unavailable')
+    expect(missionStore.missionSnapshot.value?.summary.workspace_health).toBe('initializing')
+    expect(missionStore.missionSnapshot.value?.generated_at).toBe(initializingMissionPayload.generated_at)
+
+    await missionActions.refreshMissionSnapshot({ force: true })
+    expect(missionStore.missionError.value).toBeNull()
+    expect(missionStore.missionSnapshot.value?.attention_read_error).toBeNull()
+    expect(missionStore.missionSnapshot.value?.summary.workspace_health).toBe('ok')
+    expect(missionStore.missionSnapshot.value?.keeper_briefs).toHaveLength(1)
+  })
+
   it('requests the mission endpoint without extra query flags', async () => {
     apiMocks.fetchDashboardMission.mockResolvedValue(missionPayload)
 

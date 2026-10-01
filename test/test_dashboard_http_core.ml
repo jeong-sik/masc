@@ -456,6 +456,29 @@ let with_test_env f =
           Server_request_authority.with_current request_authority (fun () ->
             f ~env ~sw ~config)))
 
+let test_briefing_http_observes_owner_recovery_on_next_poll () =
+  with_test_env @@ fun ~env ~sw ~config ->
+  let state = Lib.Mcp_server_eio.For_testing.create_state ~base_path:config.base_path () in
+  let pending = `Assoc [ "status", `String "pending"; "sections", `List [] ] in
+  let recovered_sections = `List [`Assoc [ "id", `String "watch"; "summary", `String "Recovered attention." ]] in
+  let recovered = `Assoc [ "status", `String "ok"; "sections", recovered_sections ] in
+  (* These publications use the same owner cache that the asynchronous refresh
+     updates. Both requests are ordinary polls, with the same actor and URL. *)
+  Fun.protect ~finally:Dashboard_briefing_sections.For_test.reset_cache (fun () ->
+    Dashboard_briefing_sections.For_test.seed_cache ~config
+      ~cached_at:(Unix.gettimeofday ()) ~last_error:"attention unavailable" pending;
+    let poll () = Server_dashboard_http_core.dashboard_briefing_sections_http_json
+      ~state ~sw ~clock:env#clock (request "/api/v1/dashboard/briefing/sections") in
+    check bool "first poll pending" true
+      (Yojson.Safe.Util.member "status" (poll ()) = `String "pending");
+    Dashboard_briefing_sections.For_test.seed_cache ~config
+      ~cached_at:(Unix.gettimeofday ()) recovered;
+    let fresh = poll () in
+    check bool "next ordinary poll sees recovered sections" true
+      (Yojson.Safe.Util.member "sections" fresh = recovered_sections);
+    check bool "next poll clears old error" true
+      (Yojson.Safe.Util.member "last_error" fresh = `Null))
+
 let test_event_operator_uses_exact_source_refs_across_unrelated_enqueues () =
   with_test_env @@ fun ~env:_ ~sw ~config ->
   let require_ok label = function
@@ -7193,7 +7216,9 @@ let () =
             test_composite_blocked_uses_terminal_contract_not_observational_metadata;
         ] );
       ( "dashboard behavior contracts",
-        [ test_case "board close route rejects wrong typed decisions" `Quick
+        [ test_case "briefing HTTP observes owner recovery on next poll" `Quick
+            test_briefing_http_observes_owner_recovery_on_next_poll;
+          test_case "board close route rejects wrong typed decisions" `Quick
             test_board_close_route_rejects_wrong_typed_decisions_without_closing;
           test_case "Skill evidence joins activation and composition" `Quick
             test_skill_evidence_joins_activation_and_composition;

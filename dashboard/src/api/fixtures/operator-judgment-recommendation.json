@@ -1,0 +1,109 @@
+{
+  "digest": {
+    "recommended_actions": [
+      {
+        "action_type": "namespace_pause",
+        "confirm_required": true,
+        "suggested_payload": {
+          "reason": "manual review"
+        },
+        "resolved_tool": "masc_operator_confirm",
+        "target_type": "workspace",
+        "target_id": null,
+        "reason": "operator judge requires manual gate"
+      }
+    ],
+    "judgment_owner": "operator_keeper",
+    "authoritative_judgment_available": true,
+    "judgment": {
+      "recommended_action": {
+        "action_kind": "pause_workspace",
+        "resolved_tool": "masc_operator_confirm",
+        "target_type": "workspace",
+        "target_id": null,
+        "reason": "operator judge requires manual gate",
+        "payload_preview": {
+          "reason": "manual review"
+        }
+      }
+    },
+    "active_guidance_layer": "judgment",
+    "active_summary": {
+      "summary": null,
+      "confidence": null,
+      "provenance": "judgment",
+      "authoritative": true,
+      "surface": null,
+      "fresh_until": null,
+      "keeper_name": null,
+      "fallback_used": null,
+      "disagreement_with_truth": null
+    },
+    "active_recommended_actions": [
+      {
+        "action_type": "namespace_pause",
+        "confirm_required": true,
+        "suggested_payload": {
+          "reason": "manual review"
+        },
+        "resolved_tool": "masc_operator_confirm",
+        "target_type": "workspace",
+        "target_id": null,
+        "reason": "operator judge requires manual gate"
+      }
+    ],
+    "active_recommendation_summary": {
+      "count": 1,
+      "top_action": {
+        "action_type": "namespace_pause",
+        "confirm_required": true,
+        "suggested_payload": {
+          "reason": "manual review"
+        },
+        "resolved_tool": "masc_operator_confirm",
+        "target_type": "workspace",
+        "target_id": null,
+        "reason": "operator judge requires manual gate"
+      },
+      "provenance": "judgment",
+      "authoritative": true
+    }
+  },
+  "mission": {
+    "attention_read_error": null,
+    "recommended_actions": [
+      {
+        "action_type": "namespace_pause",
+        "confirm_required": true,
+        "suggested_payload": {
+          "reason": "manual review"
+        },
+        "resolved_tool": "masc_operator_confirm",
+        "target_type": "workspace",
+        "target_id": null,
+        "reason": "operator judge requires manual gate"
+      }
+    ],
+    "summary": {
+      "workspace_health": "ok",
+      "top_action": {
+        "action_type": "namespace_pause",
+        "confirm_required": true,
+        "suggested_payload": {
+          "reason": "manual review"
+        },
+        "resolved_tool": "masc_operator_confirm",
+        "target_type": "workspace",
+        "target_id": null,
+        "reason": "operator judge requires manual gate"
+      }
+    },
+    "incidents": []
+  },
+  "briefing": {
+    "workspace_health": "ok",
+    "incident_count": 0,
+    "recommended_action_count": 1,
+    "top_attention_summary": null
+  }
+}

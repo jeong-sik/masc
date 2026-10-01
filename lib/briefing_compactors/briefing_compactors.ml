@@ -35,3 +35,89 @@ let compact_agent_json (agent : Masc_domain.agent) =
       ("last_seen", `String agent.last_seen);
       ("capabilities", `List (List.map (fun item -> `String item) (take 2 agent.capabilities)));
     ]
+
+(* ECMAScript WhiteSpace and LineTerminator code points: the browser's
+   asString uses String.trim before deciding whether an action is displayable.
+   https://tc39.es/ecma262/multipage/ecmascript-language-lexical-grammar.html#sec-white-space *)
+let action_string_is_displayable value =
+  let rec has_content offset =
+    if offset >= String.length value then false
+    else
+      let decoded = String.get_utf_8_uchar value offset in
+      match Uchar.to_int (Uchar.utf_decode_uchar decoded) with
+      | 0x0009 | 0x000A | 0x000B | 0x000C | 0x000D | 0x0020 | 0x00A0
+      | 0x1680 | 0x2000 | 0x2001 | 0x2002 | 0x2003 | 0x2004 | 0x2005
+      | 0x2006 | 0x2007 | 0x2008 | 0x2009 | 0x200A | 0x2028 | 0x2029
+      | 0x202F | 0x205F | 0x3000 | 0xFEFF ->
+          has_content (offset + Uchar.utf_decode_length decoded)
+      | _ -> true
+  in
+  has_content 0
+
+let compact_briefing_summary_json briefing =
+  let ( let* ) = Result.bind in
+  let field name =
+    match briefing with
+    | `Assoc fields ->
+        (match List.assoc_opt name fields with
+        | Some value -> Ok value
+        | None -> Error ("briefing missing " ^ name))
+    | _ -> Error "briefing must be an object"
+  in
+  let* read_error = field "attention_read_error" in
+  let* () =
+    match read_error with
+    | `Null -> Ok ()
+    | `String detail -> Error ("briefing attention unavailable: " ^ detail)
+    | _ -> Error "briefing attention_read_error must be null or a string"
+  in
+  let list name =
+    let* value = field name in
+    match value with
+    | `List items -> Ok items
+    | _ -> Error ("briefing " ^ name ^ " must be a list")
+  in
+  let* incidents = list "incidents" in
+  let* actions = list "recommended_actions" in
+  let* () =
+    List.fold_left
+      (fun result action ->
+        let* () = result in
+        match action with
+        | `Assoc fields ->
+            let* () =
+              Json_util.reject_unknown_fields ~surface:"briefing recommended action"
+                ~allowed:(List.map fst fields) fields
+            in
+            List.fold_left
+              (fun result name ->
+                let* () = result in
+                match List.assoc_opt name fields with
+                | Some (`String value) when action_string_is_displayable value -> Ok ()
+                | _ ->
+                    Error ("briefing recommended action." ^ name
+                           ^ " must be a nonempty string"))
+              (Ok ()) [ "action_type"; "target_type"; "reason" ]
+        | _ -> Error "briefing recommended action must be an object")
+      (Ok ()) actions
+  in
+  let* summary = field "summary" in
+  let* health =
+    match member_assoc "workspace_health" summary with
+    | `String _ as value -> Ok value
+    | _ -> Error "briefing summary.workspace_health must be a string"
+  in
+  let* top_attention_summary =
+    match incidents with
+    | [] -> Ok `Null
+    | first :: _ ->
+        (match member_assoc "summary" first with
+        | `String value -> Ok (`String (compact_text value))
+        | _ -> Error "briefing incident.summary must be a string")
+  in
+  Ok
+    (`Assoc
+      [ "workspace_health", health;
+        "incident_count", `Int (List.length incidents);
+        "recommended_action_count", `Int (List.length actions);
+        "top_attention_summary", top_attention_summary ])

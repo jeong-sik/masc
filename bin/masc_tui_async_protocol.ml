@@ -152,7 +152,7 @@ type async_msg =
   | Http_scoped_refresh_failed of
       string * Masc_tui_operator_projection.Listing_order.ticket option
   | Board_post_refresh_done of
-      Masc_tui_board_detail.request * (board_post * board_comment list, string) result
+      Masc_tui_board_detail.request * (board_post * board_comment list * string option, string) result
   | Approval_decision_done of
       approval_item
       * approval_decision

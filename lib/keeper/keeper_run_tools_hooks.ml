@@ -559,6 +559,7 @@ let assemble_hooks
            Log.Keeper.warn "Official native Skill action observer raised keeper=%s runtime=%s official_turn=%d tool=%s error=%s"
              meta.name runtime_id official_turn tool_name (Printexc.to_string exn))
     in
+    let active_tool_surface_enabled = ref false in
     let usage_attempt = ref None in
     let usage_report_of_attempt = ref None in
     let client_reported_in_attempt = ref false in
@@ -576,6 +577,7 @@ let assemble_hooks
           reading_name
     in
     let on_runtime_attempt (attempt : Keeper_turn_driver.runtime_attempt) =
+      active_tool_surface_enabled := attempt.tool_surface_enabled;
       usage_attempt := Some (attempt.routing_run_id, attempt.runtime_id, attempt.lane_attempt_index);
       usage_report_of_attempt := Some attempt.usage_report;
       client_reported_in_attempt := false;
@@ -947,6 +949,17 @@ let assemble_hooks
                     ~current_tool_choice:current_params.tool_choice
                     ()
                 in
+                let recall_tool_available name =
+                  !active_tool_surface_enabled
+                  && (match current_params.tool_choice with
+                      | Some Agent_core.Types.None_ -> false
+                      | None | Some (Agent_core.Types.Auto | Agent_core.Types.Any | Agent_core.Types.Tool _) -> true)
+                  && List.mem name schema_filter
+                  && List.exists (fun (tool : Agent_core.Tool.t) ->
+                       String.equal tool.schema.name name)
+                       (Keeper_agent_tool_surface.on_the_wire
+                          ~agent_cell:turn_agent_cell ~built:built_tools)
+                in
                 let dynamic_context =
                   match dynamic_context_for_tools with
                   | Some project when not post_tool_round ->
@@ -965,16 +978,16 @@ let assemble_hooks
                 let working_context_recall = if not post_tool_round
                  then
                    Domain_pool_ref.submit_io_or_inline (fun () ->
-                     Keeper_librarian_context_recall.render
+                     Keeper_librarian_context_recall.render ~base_path:config.base_path
                        ~artifact_reader_available:
-                         (List.mem Keeper_runtime_schemas_toml.artifact_read.name schema_filter)
+                         (recall_tool_available Keeper_runtime_schemas_toml.artifact_read.name)
                        ~keepers_dir:memory_os_keepers_dir ~keeper_name:meta.name ())
                  else None in
                 (if not post_tool_round
                  then
                    let ordinary_recall =
-                     (* Memory OS recall — advisory block rendered from every
-                        persisted current fact in stored order. Source-bound
+                     (* Memory OS recall publishes every persisted current fact
+                        in a paged artifact and injects its retrieval index. Source-bound
                         facts are revalidated here; a changed source atomically
                         replaces its fact with an invalidation before the block
                         is rendered. On by default; MASC_KEEPER_MEMORY_OS_RECALL=0
@@ -988,6 +1001,9 @@ let assemble_hooks
                         file instead of starving the main Eio domain. *)
                      Domain_pool_ref.submit_io_or_inline (fun () ->
                        Keeper_memory_os_recall.render_if_enabled
+                         ~memory_search_available:(recall_tool_available "keeper_memory_search")
+                         ~artifact_reader_available:
+                           (recall_tool_available Keeper_runtime_schemas_toml.artifact_read.name)
                          ~config
                          ~meta
                          ~keepers_dir:memory_os_keepers_dir

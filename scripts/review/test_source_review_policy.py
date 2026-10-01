@@ -101,7 +101,7 @@ class SourceReviewPolicy(unittest.TestCase):
 
     def review(self, state='APPROVED', author='reviewer', verdict='PASS', run=False):
         line = f'verdict: {verdict} head: {HEAD}' + (' run: 42' if run else '') + ' by: independent'
-        return {'id':12,'state':state,'body':line+f'\n\n---\napprove-guard: head `{HEAD}` · source review',
+        return {'id':12,'state':state,'body':line+'\n\n---\nreview-scope: '+json.dumps({'base_ref':self.state.get('base','main'),'base_sha':'c'*40,'stack':None},separators=(',',':'))+f'\napprove-guard: head `{HEAD}` · source review',
                 'user':{'login':author},'author_association':'MEMBER','submitted_at':'2026-09-30T00:00:00Z'}
 
     def invoke(self, script, *args):
@@ -126,6 +126,9 @@ class SourceReviewPolicy(unittest.TestCase):
         self.assert_ok(self.invoke('approve-guard.sh','--body',str(body)))
         posted=json.loads(self.fixture.read_text())['posted']
         self.assertEqual(posted['commit_id'],HEAD)
+        scope = next(line.removeprefix('review-scope: ') for line in posted['body'].splitlines()
+                     if line.startswith('review-scope: '))
+        self.assertEqual(json.loads(scope), {'base_ref':'stack/parent','base_sha':'c'*40,'stack':None})
         self.assertNotIn('/actions/',self.calls.read_text())
 
     def test_same_head_approval_is_idempotent_but_new_hold_refuses(self):
@@ -140,6 +143,15 @@ class SourceReviewPolicy(unittest.TestCase):
         self.assertEqual(self.invoke('approve-guard.sh','--body',str(body)).returncode,2)
         self.assertNotIn('POST ',self.calls.read_text())
         self.assertNotIn('/actions/',self.calls.read_text())
+
+    def test_retargeted_same_head_can_receive_fresh_scoped_approval(self):
+        self.state['reviews']=[self.review()]
+        self.state['base']='stack/new-parent'
+        body=self.root/'body'
+        body.write_text(f'verdict: PASS head: {HEAD} by: independent\nReviewed the changed diff.')
+        self.assert_ok(self.invoke('approve-guard.sh','--body',str(body)))
+        posted=json.loads(self.fixture.read_text())['posted']
+        self.assertIn('"base_ref":"stack/new-parent"', posted['body'])
 
     def test_head_movement_refuses(self):
         self.state.update(reviews=[self.review()],moved=OTHER,move_after=2)

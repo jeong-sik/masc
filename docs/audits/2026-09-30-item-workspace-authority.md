@@ -50,4 +50,18 @@ same-revision Item retry, preview handling and parent integration. The retained
 run does not validate those changes. At `6190ce0cc59facefd1bad136f928c56e7319231e`,
 those paths were reviewed in source but the new native assertions had not run;
 the Test workflow was manually disabled. This documentation correction adds no
-native execution evidence. Current-head native validation remains outstanding.
+native execution evidence.
+
+The later functional integration `5ceef366cbfdd9f0e6e9244e7c6394be73be2b74`
+also carries endpoint authority checks and Item roster isolation. No native run
+for that head is recorded here. The archived `f404` binary, its nine-suite
+results, and their hashes remain historical; they do not validate any later
+functional head. The earlier disabled-workflow observation is historical too,
+not a statement about the workflow's current availability.
+
+Under the current [execution protocol](../constitution.xml), ordinary stacked
+PRs require independent review of their current heads and resolution of P0–P2
+findings. Absence of a new CI run does not itself block their review or merge.
+This audit supplies neither that independent verdict nor new runtime proof.
+Release/Tag publication still requires completed full verification of its
+selected release head; the archived run cannot substitute for it.

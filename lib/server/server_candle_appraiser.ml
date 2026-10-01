@@ -52,7 +52,8 @@ let retryable_execution = function
        (match retry_after with Some seconds -> Float.is_finite seconds && seconds > 0. | None -> false)
      | Agent_core.Llm_provider.Http_client.ProviderFailure
          {kind=(Agent_core.Llm_provider.Http_client.Capacity_exhausted _
-               | Agent_core.Llm_provider.Http_client.Provider_interrupted);_} -> true
+               | Agent_core.Llm_provider.Http_client.Provider_interrupted
+               | Agent_core.Llm_provider.Http_client.Provider_reported_error _);_} -> true
      | (Agent_core.Llm_provider.Http_client.HttpError _
        | Agent_core.Llm_provider.Http_client.NetworkError _
        | Agent_core.Llm_provider.Http_client.TimeoutError _
@@ -80,19 +81,19 @@ let terminal_error ~rejected ~retryable cause =
          fail. Do not turn bookkeeping failures into permanent refusals. *)
       A.Transport_unavailable detail
   | Exact.Flow_candidates_exhausted {rejection;_} ->
-      if rejected then A.Invalid_response detail
-      else if retryable && retryable_candidate rejection then A.Transport_unavailable detail
+      if retryable || retryable_candidate rejection then A.Transport_unavailable detail
+      else if rejected then A.Invalid_response detail
       else A.Execution_rejected detail
   | Exact.Flow_exact_execution_failed _ ->
-      if rejected then A.Invalid_response detail
-      else if retryable then A.Transport_unavailable detail
+      if retryable then A.Transport_unavailable detail
+      else if rejected then A.Invalid_response detail
       else A.Execution_rejected detail
 let execute_http ~observe ~resolved ~request ~prompt ~requirement =
   let rejected = ref false in
-  let retryable = ref true in
+  let retryable = ref false in
   let failed (candidate : Exact.flow_attempt_receipt) (error : Exact.execution_error) =
     if invalid_output error.Exact.cause then rejected := true;
-    if not (retryable_execution error.cause) then retryable := false;
+    if retryable_execution error.cause then retryable := true;
     observe (Http_failure {slot=candidate.visit.identity.candidate_id;error}) in
   let rec candidates = function
     | [] -> Ok []
@@ -124,7 +125,7 @@ let execute_http ~observe ~resolved ~request ~prompt ~requirement =
         ~before_dispatch:(fun (attempt : Exact.flow_attempt_receipt) -> observe (Dispatch attempt.visit.identity.candidate_id); Ok ()) ~before_advance:(fun ~failed:failure ~next:_ ->
           (match failure with Exact.Flow_candidate_execution_failed f -> failed f.candidate f.cause
            | Exact.Flow_candidate_rejected rejection ->
-             if not (retryable_candidate rejection) then retryable := false); Ok ()) ~validate attempt in
+             if retryable_candidate rejection then retryable := true); Ok ()) ~validate attempt in
       Runtime_exact_lane_backpressure.observe flow;
       (match flow with
        | Ok success -> Ok (success.accepted, (Exact.flow_success_candidate success.transport_success).visit.identity.candidate_id)
@@ -139,7 +140,8 @@ let execute_http ~observe ~resolved ~request ~prompt ~requirement =
           | Exact.Advanceable_candidates_exhausted -> Error (Advanceable error)
           | Exact.Non_advanceable_terminal -> Error (Terminal error))
        | Error (Exact.Flow_semantic_candidates_exhausted {rejections;_}) ->
-         Error (Advanceable (A.Invalid_response (String.concat "; " (List.map (fun r -> r.Exact.rejection) (rejections.first :: rejections.rest))))))
+         let detail = String.concat "; " (List.map (fun r -> r.Exact.rejection) (rejections.first :: rejections.rest)) in
+         Error (Advanceable (if !retryable then A.Transport_unavailable detail else A.Invalid_response detail)))
     | _ -> Error (Terminal (A.Transport_unavailable "appraiser execution context unavailable"))
 (* Retain recovery for transport failures and causes that do not prove a
    permanent refusal. Only typed request/configuration refusals wait for a
@@ -240,17 +242,15 @@ let retryable_cli_failure = function
      | Fusion_official_client.Muse_failure error -> retryable_muse_error error)
 let cli_error failures =
   let detail = String.concat "; " (List.map Keeper_lane_cli_oneshot.failure_to_string failures) in
-  if List.exists (function
+  if List.exists retryable_cli_failure failures then A.Transport_unavailable detail
+  else if List.exists (function
       | Keeper_lane_cli_oneshot.Invalid_json_output _ | Keeper_lane_cli_oneshot.Invalid_domain_output _ -> true
       | Keeper_lane_cli_oneshot.Unknown_runtime _ | Keeper_lane_cli_oneshot.Not_an_official_client _
       | Keeper_lane_cli_oneshot.Execution_failed _ -> false) failures
   then A.Invalid_response detail
   else match failures with
     | [] -> A.Execution_rejected "candle_appraiser CLI walk produced no execution evidence"
-    | _ :: _ ->
-      if List.for_all retryable_cli_failure failures
-      then A.Transport_unavailable detail
-      else A.Execution_rejected detail
+    | _ :: _ -> A.Execution_rejected detail
 let execute ~cli_runner ~base_path ~observe ~request ~prompt =
   let* resolved = resolve () |> Result.map_error (fun s -> A.Transport_unavailable s) in
   let requirement = Exact.make_output_requirement ~schema:(A.schema request) ~minimum_guarantee:Exact.Json_syntax in
@@ -276,11 +276,12 @@ let execute ~cli_runner ~base_path ~observe ~request ~prompt =
       |> Result.map_error (fun failures ->
         let error = cli_error failures in
         match previous, error with
-        | Advanceable (A.Invalid_response prior),
-            (A.Transport_unavailable detail | A.Execution_rejected detail) ->
+        | Advanceable (A.Transport_unavailable prior),
+            (A.Transport_unavailable detail | A.Execution_rejected detail | A.Invalid_response detail)
+        | Advanceable (A.Execution_rejected prior | A.Invalid_response prior), A.Transport_unavailable detail ->
+          A.Transport_unavailable (prior ^ "; " ^ detail)
+        | Advanceable (A.Invalid_response prior), A.Execution_rejected detail ->
           A.Invalid_response (prior ^ "; " ^ detail)
-        | Advanceable (A.Execution_rejected prior), A.Transport_unavailable detail ->
-          A.Execution_rejected (prior ^ "; " ^ detail)
         | (No_http_slot | Advanceable _ | Terminal _),
             (A.Transport_unavailable _ | A.Invalid_response _ | A.Execution_rejected _) -> error)
 let run_with ~base_path ~execute ~identity request =

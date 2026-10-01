@@ -8908,7 +8908,7 @@ let runtime_probe_badge = function
       style ^ label ^ Ansi.reset
 
 let runtime_route_probe_badge state runtime probe =
-  runtime_route_badge state runtime ^ " / " ^ runtime_probe_badge probe
+  runtime_route_badge state runtime, runtime_probe_badge probe
 
 let runtime_probe_detail = function
   | None -> []
@@ -8944,7 +8944,7 @@ type runtime_table_column =
   | Runtime_status_column
   | Runtime_detail_column
 
-let runtime_table_cells ~cols ~mode ~lane ~lane_is_label ~candidate ~identity ~status ~detail =
+let runtime_table_cells ~cols ~mode ~lane ~lane_is_label ~candidate ~identity ~status:(route, probe) ~detail =
   let lane_width, candidate_width, identity_width, status_width = runtime_column_widths cols in
   let inner_width = max 1 (framed_inner_width cols - 2) in
   let candidate_heading =
@@ -8956,6 +8956,17 @@ let runtime_table_cells ~cols ~mode ~lane ~lane_is_label ~candidate ~identity ~s
     min status_width
       (max 1 (inner_width - Message_layout.display_width candidate_heading
               - Masc_tui_table.cell_gap))
+  in
+  (* Keep both independent readings visible when the status column folds.
+     Folding their concatenation would let a long route hide the probe. *)
+  let separator = " / " in
+  let available = max 0 (status_width - Message_layout.display_width separator) in
+  let probe_width = min (Message_layout.display_width probe) (available / 2) in
+  let route_width = min (Message_layout.display_width route) (available - probe_width) in
+  let probe_width = available - route_width in
+  let status =
+    Message_layout.fit_middle route_width route ^ separator
+    ^ Message_layout.fit_width probe probe_width
   in
   let candidate_floor = min candidate_width (max 1 (inner_width - status_width - Masc_tui_table.cell_gap)) in
   let width = function
@@ -9476,7 +9487,7 @@ let render_runtime (state : state) =
   let table_cells = runtime_table_cells ~cols ~mode:state.runtime_mode in
   c.push_styled ~style:(Theme.recede ())
     ("  " ^ Masc_tui_table.header_row
-      (table_cells ~lane:"" ~lane_is_label:false ~candidate:"" ~identity:"" ~status:"" ~detail:""));
+      (table_cells ~lane:"" ~lane_is_label:false ~candidate:"" ~identity:"" ~status:("", "") ~detail:""));
   c.push_divider ();
   (match state.runtime_surface_error with
    | None -> ()

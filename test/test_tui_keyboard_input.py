@@ -13896,8 +13896,8 @@ def runtime_surface_interaction(
                 "primary",
                 "1/2 runtime-a",
                 "Resolved A / model-a",
-                "ready / reachable",
-                "CLI not probed",
+                "usa…nknown / reachable",
+                "usa…nknown / CLI not …",
                 # The lane fact says why this candidate is the one the lane
                 # walks: head, fallback #n, or single candidate.
                 "fallback #1",
@@ -13915,6 +13915,10 @@ def runtime_surface_interaction(
                     raise AssertionError(
                         f"Runtime did not draw {needle!r}: {stale_plain!r}"
                     )
+            runtime_rows = screen_text(bytes(output[:stale_frame_end])).decode("utf-8").splitlines()
+            if not any("2/2 runtime-b" in row and "usa…nknown / CLI not …" in row
+                       for row in runtime_rows):
+                raise AssertionError("Runtime fallback lost its independent skipped probe")
             if "Probe label must not render" in stale_plain:
                 raise AssertionError(
                     f"Runtime used probe identity instead of resolved SSOT: {stale_plain!r}"
@@ -14024,7 +14028,7 @@ def runtime_surface_interaction(
                 raise AssertionError("Runtime catalog did not keep the selected runtime")
             if b"Runtime lanes (3 lanes, 5 slots)" not in all_list:
                 raise AssertionError("Runtime catalog counted runtimes as lane slots")
-            if b"ready / reachable" not in all_list:
+            if "usa…nknown / reachable".encode() not in all_list:
                 raise AssertionError("Runtime catalog omitted independent probe status")
             catalog_detail = send_and_wait(
                 process,

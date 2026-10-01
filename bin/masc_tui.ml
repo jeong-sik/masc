@@ -11294,6 +11294,10 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.identity_view <- None;
   state.identity_view_error <- None;
   state.identity_logins <- [];
+  (* Re-running a workspace keeps it, so consent presented here must die with
+     it — including the held login-completion expectation, which is a token
+     the tick polls on and must never survive into the rerun's successor. *)
+  state.identity_login_expectations <- [];
   state.identity_login_requests <- [];
   state.identity_app_form <- None;
   state.identity_attempt_error <- None;
@@ -11999,6 +12003,33 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
              (Masc_tui_types.pending_detail_read state ~tab:Detail_identity
                 ~keeper:keeper.k_name) ->
            launch_identity_view state ~mailbox keeper.k_name
+       | Some _ | None -> ());
+    (* A login whose consent display was cleared by a transient authority
+       loss is not gone: the workspace admitted it and is still expected to
+       answer [attached]. Once the same workspace is readable again, open a
+       fresh provider read — the fresh answer retires the expectation when
+       the login has landed, and nothing else can. The expectation carries no
+       consent URL, so recovering cannot resurrect what was withdrawn; only
+       the workspace that admitted the login reopens its own poll. *)
+    (if
+       (not was_booting)
+       && state.view = Keepers Keeper_detail
+       && state.detail_tab = Detail_identity
+     then
+       match selected_keeper state with
+       | Some keeper when Option.is_none
+             (Masc_tui_types.pending_detail_read state ~tab:Detail_identity
+                ~keeper:keeper.k_name) ->
+           let recoverable expectation =
+             Option.is_some state.server_identity
+             && Masc_tui_types.identity_expectation_workspace_matches
+                  ~origin:expectation.Masc_tui_types.ile_origin state
+           in
+           if
+             List.exists recoverable
+               (Masc_tui_types.identity_expectations_for_keeper state
+                  keeper.k_name)
+           then launch_identity_view state ~mailbox keeper.k_name
        | Some _ | None -> ());
     (* Held tool calls ride every tick, not just the Approvals surface: the
        strip's Approvals badge is drawn from every surface, and a stale count
@@ -15374,7 +15405,13 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
       let current = Masc_tui_types.finish_detail_read state request in
       if current then
         (match result with
-         | Ok providers -> retire_identity_logins state ~keeper_name ~providers
+         | Ok providers ->
+             retire_identity_logins state ~keeper_name ~providers;
+             (* The displayed read is also the completion evidence: a provider
+                whose service now reports tools no longer needs its held
+                expectation, so it retires with the consent it stood for. *)
+             Masc_tui_types.forget_identity_login_expectations state
+               ~keeper_name ~providers
          | Error _ -> ());
       if current && keeper_detail_target_matches state keeper_name then
         match result with
@@ -15391,6 +15428,19 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
              remember_identity_login state
                { ils_keeper = keeper_name; ils_provider = provider_id
                ; ils_label = label; ils_url = url };
+             (* Hold only the login-completion expectation: the workspace this
+                login was admitted into and who is waiting. No consent URL is
+                kept here, so a transient authority loss can clear the display
+                without losing the fact that this workspace still owes this
+                Keeper/provider an [attached] answer. The recovery tick opens
+                the provider read for the same workspace, and that fresh read
+                retires the expectation when the login has landed. *)
+             (match state.server_identity with
+              | Some origin ->
+                  Masc_tui_types.remember_identity_login_expectation state
+                    { ile_origin = origin; ile_keeper = keeper_name;
+                      ile_provider = provider_id }
+              | None -> ());
              if keeper_detail_target_matches state keeper_name then
                state.identity_attempt_error <- None;
              report_action state "system"

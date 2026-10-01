@@ -2805,6 +2805,49 @@ type identity_login_request = {
   ilr_generation: int;
 }
 
+(* Login-completion expectation, held across a transient authority loss.
+   Where [identity_login_started] is the consent the pane presents, this is
+   only what the tick polls on: the workspace that admitted the login and
+   which Keeper/provider is still waiting. No URL is carried, so an old
+   consent is never resurrected, and the expectation alone cannot attach
+   anyone to anything. *)
+type identity_login_expectation = {
+  ile_origin: Tui_decode.server_identity;
+  ile_keeper: string;
+  ile_provider: string;
+}
+
+(* The one definition of "same workspace" used to admit a held expectation
+   back into the poll after authority is restored. Same answer as the screen
+   itself uses, so the pane never polls across a workspace change it would
+   refuse to display. *)
+let identity_expectation_workspace_matches ~(origin : Tui_decode.server_identity) state =
+  match state.server_identity with
+  | None -> false
+  | Some current ->
+      String.equal (canonical_path origin.sid_base_path)
+        (canonical_path current.sid_base_path)
+      && String.equal (canonical_path origin.sid_masc_root)
+           (canonical_path current.sid_masc_root)
+
+let identity_expectations_for_keeper (state : state) keeper_name =
+  List.filter
+    (fun expectation -> String.equal expectation.ile_keeper keeper_name)
+    state.identity_login_expectations
+
+let remember_identity_login_expectation (state : state) expectation =
+  (* One expectation per (Keeper, provider). Replaying the same login keeps
+     the newest one; everything else stays held. *)
+  state.identity_login_expectations <-
+    List.filter
+      (fun held ->
+        not
+          (String.equal held.ile_keeper expectation.ile_keeper
+          && String.equal held.ile_provider expectation.ile_provider))
+      state.identity_login_expectations;
+  state.identity_login_expectations <-
+    expectation :: state.identity_login_expectations
+
 (** Whether the login [login] started has landed: the service it was for now
     reports tools for this Keeper.
 
@@ -5525,6 +5568,14 @@ type state = {
   (* Consent URLs belong to a Keeper and provider. Opening another Keeper
      or starting another provider must leave outstanding logins available. *)
   mutable identity_logins: identity_login_started list;
+  (* Login-completion expectation only: the workspace it belongs to and the
+     Keeper/provider waiting, never a consent URL. [identity_logins] is the
+     token the tick polls on, but a transient authority loss used to clear it
+     together with the display, after which the recovery provider read could
+     not bring the outstanding login back and the poll gate stayed closed.
+     Keeping this expectation separately lets the recovery tick reopen the
+     poll for the same workspace without resurrecting the old consent URL. *)
+  mutable identity_login_expectations: identity_login_expectation list;
   mutable identity_login_requests: identity_login_request list;
   mutable identity_login_generation: int;
   (* Which provider the arrows are on. Held rather than derived because a
@@ -6491,6 +6542,18 @@ let reconcile_detail_intent_origins (state : state) reading =
   | Error _ -> ()
   | Ok (current : Tui_decode.server_identity) ->
       if current.sid_base_path <> "" && current.sid_masc_root <> "" then begin
+        let same =
+          String.equal (canonical_path origin.sid_base_path)
+            (canonical_path current.sid_base_path)
+          && String.equal (canonical_path origin.sid_masc_root)
+               (canonical_path current.sid_masc_root)
+        in
+        state.identity_login_expectations <-
+          List.filter
+            (fun expectation ->
+              same
+              || not (identity_expectation_workspace_matches ~origin:expectation.ile_origin state))
+            state.identity_login_expectations;
         let foreign = function
           | None -> false
           | Some (origin : Tui_decode.server_identity) ->
@@ -6515,7 +6578,14 @@ let reconcile_detail_intent_origins (state : state) reading =
 
 
 (* Keeper/provider keys do not include a workspace. Authority withdrawal must
-   retire both queued responses and consent already presented by that origin. *)
+   retire both queued responses and consent already presented by that origin.
+
+   The login-completion expectation is not consent and is not withdrawn here.
+   A transient [health] failure deletes [identity_logins] with the rest; if
+   the same workspace recovers, the recovery provider read must be able to
+   reopen the poll for a login the operator is still finishing in a browser.
+   Keeping the expectation lets that happen without ever carrying the old
+   consent URL into the recovered workspace. *)
 let withdraw_identity_readings (state : state) =
   state.identity_login_requests <- [];
   state.identity_logins <- [];
@@ -6562,6 +6632,16 @@ let finish_identity_login_request (state : state) request =
   else false
 
 let forget_identity_login (state : state) ~keeper_name ~provider_id =
+  (* An operator-initiated stop (restart, forget) ends the login for good, so
+     its completion expectation is retired too. A transient authority loss
+     never routes through here -- that is exactly the case the expectation
+     exists to survive. *)
+  state.identity_login_expectations <-
+    List.filter
+      (fun expectation ->
+        not (String.equal expectation.ile_keeper keeper_name
+             && String.equal expectation.ile_provider provider_id))
+      state.identity_login_expectations;
   state.identity_logins <-
     List.filter
       (fun login ->
@@ -6581,6 +6661,24 @@ let retire_identity_logins (state : state) ~keeper_name ~providers =
         not (String.equal login.ils_keeper keeper_name
              && identity_login_landed ~providers ~login))
       state.identity_logins
+
+(* A provider whose service now reports tools has finished its login, so the
+   held expectation retires with the consent it stood for. An unreadable or
+   no-tools reading is not evidence of completion and retires nothing. *)
+let forget_identity_login_expectations (state : state) ~keeper_name ~providers =
+  let landed expectation =
+    identity_login_landed ~providers
+      ~login:
+        { ils_keeper = expectation.ile_keeper;
+          ils_provider = expectation.ile_provider;
+          ils_label = "";
+          ils_url = "" }
+  in
+  state.identity_login_expectations <-
+    List.filter
+      (fun expectation ->
+        not (String.equal expectation.ile_keeper keeper_name && landed expectation))
+      state.identity_login_expectations
 
 let roster_pane_hidden (state : state) =
   Masc_tui_roster_pane.effective_hidden state.roster_pane_preference
@@ -8298,6 +8396,7 @@ let create_state
   identity_view = None;
   identity_view_error = None;
   identity_logins = [];
+  identity_login_expectations = [];
   identity_login_requests = [];
   identity_login_generation = 0;
   identity_cursor = 0;

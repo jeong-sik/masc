@@ -381,9 +381,8 @@ describe('RuntimeTomlEditor', () => {
 
     await waitFor(() => {
       expect(container.textContent).toContain('런타임 환경')
-      // The prototype models section renders each model read-only: id + context
-      // (formatContextTokens SSOT → "128K ctx") + capability chips. Model facts
-      // stay read-only; runtime execution knobs are edited per binding instead.
+      // Capability chips remain observations; the context request is editable
+      // through the shared model declaration and existing save path.
       const modelsSection = container.querySelector('[data-testid="runtime-section-models"]')
       expect(modelsSection?.textContent).toContain('qwen')
       expect(modelsSection?.textContent).toContain('128K ctx')
@@ -1333,6 +1332,62 @@ describe('RuntimeTomlEditor', () => {
     })
     expect(container.querySelector('[data-testid="runtime-toml-status"]')?.textContent).not.toContain('modified')
     expect(apiMocks.saveRuntimeTomlConfig).not.toHaveBeenCalled()
+  })
+
+  it.each([['500K', 500000], ['1M', 1000000]] as const)(
+    'edits existing model context to %s through the existing save path', async (label, tokens) => {
+      apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce(richConfig)
+      render(html`<${RuntimeTomlEditor} />`, container)
+      await waitFor(() => expect(container.querySelector('[aria-label="qwen max-context"]')).not.toBeNull())
+      fireEvent.click(container.querySelector(`[aria-label="qwen 컨텍스트 ${label}"]`) as HTMLButtonElement)
+      await waitFor(() => {
+        const source = (container.querySelector('[data-testid="runtime-toml-source"]') as HTMLTextAreaElement).value
+        expect(source).toContain(`max-context = ${tokens}`)
+        expect(source).toContain('api-name = "qwen"')
+        expect(apiMocks.saveRuntimeTomlConfig).not.toHaveBeenCalled()
+      })
+      fireEvent.click(container.querySelector('[data-testid="runtime-toml-save"]') as HTMLButtonElement)
+      await waitFor(() => expect(apiMocks.saveRuntimeTomlConfig.mock.calls[0]?.[0]).toContain(`max-context = ${tokens}`))
+    },
+  )
+
+  it('saves a typed context after a preset without a separate apply step', async () => {
+    apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce(richConfig)
+    render(html`<${RuntimeTomlEditor} />`, container)
+    await waitFor(() => expect(container.querySelector('[aria-label="qwen max-context"]')).not.toBeNull())
+    fireEvent.click(container.querySelector('[aria-label="qwen 컨텍스트 500K"]') as HTMLButtonElement)
+    fireEvent.input(container.querySelector('[aria-label="qwen max-context"]') as HTMLInputElement, { target: { value: '1000000' } })
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-save"]') as HTMLButtonElement)
+    await waitFor(() => expect(apiMocks.saveRuntimeTomlConfig.mock.calls[0]?.[0]).toContain('max-context = 1000000'))
+  })
+
+  it('keeps invalid context drafts across tabs, blocks save, and discards them on reset', async () => {
+    apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce(richConfig)
+    render(html`<${RuntimeTomlEditor} />`, container)
+    await waitFor(() => expect(container.querySelector('[aria-label="qwen max-context"]')).not.toBeNull())
+    fireEvent.click(container.querySelector('[aria-label="qwen 컨텍스트 500K"]') as HTMLButtonElement)
+    fireEvent.input(container.querySelector('[aria-label="qwen max-context"]') as HTMLInputElement, { target: { value: 'invalid' } })
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-nav-toml"]') as HTMLButtonElement)
+    expect((container.querySelector('[data-testid="runtime-toml-save"]') as HTMLButtonElement).disabled).toBe(true)
+    expect(container.textContent).toContain('unsaved')
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-nav-models"]') as HTMLButtonElement)
+    expect((container.querySelector('[aria-label="qwen max-context"]') as HTMLInputElement).value).toBe('invalid')
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-reset"]') as HTMLButtonElement)
+    await waitFor(() => expect((container.querySelector('[aria-label="qwen max-context"]') as HTMLInputElement).value).toBe('128000'))
+    expect(container.textContent).not.toContain('컨텍스트는 1 이상의 정수')
+    expect(apiMocks.saveRuntimeTomlConfig).not.toHaveBeenCalled()
+  })
+
+  it('rejects invalid context drafts without changing saved model configuration', async () => {
+    apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce(richConfig)
+    render(html`<${RuntimeTomlEditor} />`, container)
+    await waitFor(() => expect(container.querySelector('[aria-label="qwen max-context"]')).not.toBeNull())
+    for (const value of ['', '0', '-1', '1.5', '9007199254740992']) {
+      fireEvent.input(container.querySelector('[aria-label="qwen max-context"]') as HTMLInputElement, { target: { value } })
+      await waitFor(() => expect(container.textContent).toContain('컨텍스트는 1 이상의 정수'))
+      expect(apiMocks.saveRuntimeTomlConfig).not.toHaveBeenCalled()
+      expect((container.querySelector('[data-testid="runtime-toml-save"]') as HTMLButtonElement).disabled).toBe(true)
+    }
   })
 
   it('adds a new model through the form', async () => {

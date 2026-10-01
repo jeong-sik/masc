@@ -195,6 +195,7 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
   const [loadState, setLoadState] = useState<LoadState>('loading')
   const [config, setConfig] = useState<RuntimeTomlConfig | null>(null)
   const [draft, setDraft] = useState('')
+  const [modelContextDrafts, setModelContextDrafts] = useState<Record<string, string>>({})
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
@@ -228,7 +229,8 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 
-  const dirty = config !== null && draft !== config.source_text
+  const invalidModelContexts = Object.keys(modelContextDrafts).length > 0
+  const dirty = invalidModelContexts || (config !== null && draft !== config.source_text)
 
   async function adoptSavedRuntimeConfig(saved: CommittedRuntimeTomlConfig) {
     setConfig(saved)
@@ -255,6 +257,7 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
       const next = await fetchRuntimeTomlConfig()
       setConfig(next)
       setDraft(next.source_text)
+      setModelContextDrafts({})
       setLoadState('loaded')
       await refreshExactLanes()
     } catch (err: unknown) {
@@ -293,7 +296,7 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
 
   async function handleSave(sourceText?: string) {
     const nextSourceText = typeof sourceText === 'string' ? sourceText : textareaRef.current?.value ?? draft
-    if (config === null || saving || loadState === 'loading') return
+    if (config === null || saving || loadState === 'loading' || invalidModelContexts) return
     if (nextSourceText === config.source_text) return
     const nextEnvironment = parseRuntimeTomlEnvironment(nextSourceText, config.reserved_provider_ids)
     for (const provider of nextEnvironment.providers) {
@@ -457,6 +460,20 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
     editDraft(current => setRuntimeTomlProviderField(current, providerId, field, value))
   }
 
+  function handleModelContextChange(modelId: string, raw: string) {
+    if (saving || loadState !== 'loaded') return
+    const trimmed = raw.trim()
+    const tokens = Number(trimmed)
+    const valid = /^\d+$/.test(trimmed) && Number.isSafeInteger(tokens) && tokens > 0
+    setModelContextDrafts(current => {
+      if (!valid) return { ...current, [modelId]: raw }
+      const next = { ...current }
+      delete next[modelId]
+      return next
+    })
+    if (valid) editDraft(current => setRuntimeTomlModelField(current, modelId, 'max-context', tokens))
+  }
+
   function handleAddModel(input: NewRuntimeModelInput) {
     if (saving || loadState !== 'loaded') return
     editDraft(current => {
@@ -521,6 +538,7 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
   function handleReset() {
     if (!config || !dirty || saving) return
     setDraft(config.source_text)
+    setModelContextDrafts({})
     setError(null)
     setNotice('되돌림')
   }
@@ -669,7 +687,7 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
             variant="primary"
             size="sm"
             onClick=${handleSave}
-            disabled=${!dirty || saving || loadState === 'loading'}
+            disabled=${!dirty || saving || loadState === 'loading' || invalidModelContexts}
             ariaBusy=${saving}
             ariaLabel="runtime.toml 저장 및 적용"
             title="저장 및 적용 경계 확인"
@@ -689,6 +707,7 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
         <span>${stats.charCount} chars</span>
         <span>${dirty ? 'unsaved' : 'synced'}</span>
       </div>
+      ${invalidModelContexts ? html`<p role="alert">모델 컨텍스트 입력을 수정하거나 되돌린 뒤 저장하세요.</p>` : null}
       ${parseError !== null ? html`<p role="alert" data-testid="runtime-toml-parse-error">${parseError}</p>` : null}
       ${impact ? html`<${RuntimeTomlImpactPreview} impact=${impact} />` : null}
     </div>
@@ -838,6 +857,8 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
                 onBindingFieldChange=${handleBindingFieldChange}
                 onAddProvider=${handleAddProvider}
                 onAddModel=${handleAddModel}
+                modelContextDrafts=${modelContextDrafts}
+                onModelContextChange=${handleModelContextChange}
                 onAddBinding=${handleAddBinding}
                 onDeleteProvider=${handleDeleteProvider}
               onProviderTransportChange=${handleProviderTransportChange}

@@ -1,11 +1,11 @@
 # Item HTTP acceptance
 
 Run the **Manual probe artifacts** workflow on the desired Item branch with
-`target=linux-x64` and `capture_item_http=true`. It builds the release binaries
+`target=linux-x64` or `target=macos-arm64`, and `capture_item_http=true`. It builds the release binaries
 and production dashboard from that checkout, then starts its own loopback
 server in a fresh temporary workspace. No installed MASC process is contacted.
 
-The `item-http-<sha>` artifact contains HTTP and browser receipts, desktop/mobile
+The `item-http-<target>-<sha>-attempt-<run_attempt>` artifact contains HTTP and browser receipts, desktop/mobile
 screenshots, the Item account JSON,
 a portrait PNG and the isolated server log. The receipt records source SHA,
 binary hash, dashboard index hash, fixture hashes and HTTP response hashes.
@@ -45,6 +45,13 @@ with those inputs. It does not prove Keeper lifecycle creation, model-driven
 purchase/equipment decisions, a real earned payout, or production rollout.
 Additional browser fixture and TUI transition evidence comes from the separate dashboard and
 Test workflows.
+
+The macOS target runs natively on `macos-14`, using the Release workflow's
+OCaml dependencies and build flags. Its runtime artifact also records the
+server's dynamic-library dependencies. These raw probe binaries rely on the
+runner's native libraries; they are not the relocatable Release package.
+This target provides isolated Mac execution evidence before a separate
+release, installation and live-runtime check.
 
 The script accepts only a new output directory. Provider credentials and
 operator runtime settings are excluded from the child environment. Login

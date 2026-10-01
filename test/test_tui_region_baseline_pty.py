@@ -7,6 +7,8 @@ from Masc_tui_frame. This suite opens a screen for each reader below and pins
 the body's top, title, rules, bottom border, last drawn row, blank rows and any
 list window, the roster's borders and the key hints' row, so a step changes
 these numbers on purpose and its diff shows what moved.
+The Board checks its title, selection, table and reserved lower edge by their
+rendered relationships, so adding a heading does not require a new row map.
 docs/evidence/tui-region-baseline-2026-09-28 maps every reader to the screen
 that measures it; two more suites cover the overlays and the remaining detail
 screens.
@@ -124,7 +126,6 @@ def layout(top, title, rules, bottom, last, blank, windows=(), **pinned):
 # PR-check 36682370981 job 109780442320's six recorded widths keep the
 # title/footer/body edges, with the list rule at 8 and sixteen blank rows.
 KEEPERS = layout("blank", 3, (4, 8, 28), None, 28, 16, health_row=5)
-BOARD = layout("blank", 3, (4, 7, 9), None, 13, 15)
 CONFIG = layout("blank", 3, (4, 9), None, 27, 1, last_source_line=18)
 # The compact candle leaves one more transparent mosaic row than the old
 # portrait; the title, rule, last content row and 22-row viewport do not move.
@@ -146,7 +147,6 @@ CHAT_ONE_ROW_GATE = layout("blank", 3, (4, 26), None, 29, 20)
 # (screen, width) -> what measure() finds there.
 EXPECTED: dict[tuple[str, object], dict[str, object]] = {
     **{("keepers", width): KEEPERS for width in WIDTHS},
-    **{("board", width): BOARD for width in WIDTHS},
     **{("config", width): CONFIG for width in WIDTHS},
     **{("keeper-detail", width): DETAIL for width in WIDTHS},
     **{("keeper-detail-roster", width): DETAIL_BESIDE_ROSTER
@@ -157,6 +157,44 @@ EXPECTED: dict[tuple[str, object], dict[str, object]] = {
     # The folded Gate argument's first row in the chat at 100 columns.
     ("chat-gate-row", CHAT_PRESS_WIDTH): {"row": 6},
 }
+
+
+def assert_board_contract(rows, *, left, right, selected_title, where):
+    """Check rendered relationships rather than an old map of row numbers."""
+    footer = region.TERMINAL_ROWS - COMPOSER_ROWS["board"]
+    body = {row: region.body_row(rows, row, left=left, right=right)
+            for row in range(2, footer)}
+    titles = [row for row, text in body.items() if "MASC Board" in text]
+    previews = [row for row, text in body.items() if text.startswith("Selected post · ")]
+    headers = [row for row, text in body.items() if "TITLE" in text.split()]
+    if len(titles) != 1 or len(previews) != 1 or len(headers) != 1:
+        raise AssertionError(f"{where}: Board title, selected preview or table header missing: {body!r}")
+    title, preview, header = titles[0], previews[0], headers[0]
+    if not title < preview < header or body[preview] != "Selected post · " + selected_title:
+        raise AssertionError(f"{where}: selected title does not precede its table: {body!r}")
+    rules = [row for row in body if region.is_rule(
+        region.cells(rows[row], left, right))]
+    if not any(title < row < preview for row in rules) or not any(
+            preview < row < header for row in rules):
+        raise AssertionError(f"{where}: Board title/preview/table divisions lost: {body!r}")
+    posts = []
+    for identity, text in (("post-r1", "Retry"), ("post-r2", "Rollout"),
+                           ("post-r3", "Prose"), ("post-r4", "Hostile")):
+        matching = [row for row, value in body.items()
+                    if row > header and text in value.split()]
+        if len(matching) != 1 or not header < matching[0] < footer - 1:
+            raise AssertionError(f"{where}: fixture post {identity} lost from table: {body!r}")
+        if "ID" in body[header].split() and identity not in body[matching[0]].split():
+            raise AssertionError(f"{where}: shown ID no longer names {text}: {body!r}")
+        posts.extend(matching)
+    if posts != sorted(posts) or not any(header < row < posts[0] for row in rules):
+        raise AssertionError(f"{where}: table divider or post ordering lost: {body!r}")
+    # Chrome_screen's lower edge is an empty row (box_bottom), followed by
+    # hints and the composer. Keep that boundary even when content rows move.
+    if body[footer - 1] or any(text.startswith(region.BOX_BOTTOM_LEFT) for text in body.values()):
+        raise AssertionError(f"{where}: Board lower edge was overwritten or replaced: {body!r}")
+    if body[2]:
+        raise AssertionError(f"{where}: full-screen Board top edge was overwritten: {body!r}")
 
 
 class Counted:
@@ -255,7 +293,7 @@ def fixtures() -> region.ServedFixtures:
 def interaction(served: region.ServedFixtures):
     measured: dict[tuple[str, object], dict[str, object]] = {}
 
-    def take(process, fd, output, screen: str, columns: int) -> None:
+    def take(process, fd, output, screen: str, columns: int, *, selected_post="Retry") -> None:
         region.settle(process, fd, output)
         rows = region.whole_screen(output)
         where = f"{screen} at {columns}"
@@ -271,6 +309,9 @@ def interaction(served: region.ServedFixtures):
         measured[(screen, columns)] = region.measure(
             rows, columns=columns, composer_rows=COMPOSER_ROWS[screen],
             left=left, right=right)
+        if screen == "board":
+            assert_board_contract(rows, left=left, right=right,
+                selected_title=selected_post, where=where)
         if left:
             measured[(screen, columns)]["roster"] = region.measure_pane(
                 rows, left=0, right=left)
@@ -328,6 +369,30 @@ def interaction(served: region.ServedFixtures):
         board = h.screen_header(b"MASC Board", b" (4)")
         h.palette_go(process, fd, output, b"go board", board)
         sweep(process, fd, output, "board", b"Hostile", WIDTHS)
+        os.write(fd, b"j")
+        board_columns = WIDTHS[-1]
+        board_right = (board_columns - h.ACTING_PANE_NARROW_COLUMNS
+                       if board_columns >= h.ACTING_PANE_THRESHOLD_COLUMNS else board_columns)
+        def selected(title):
+            drawn = h.screen_rows(bytes(output))
+            return any(region.body_row(drawn, row, left=0, right=board_right)
+                == "Selected post · " + title for row in drawn)
+        if not h.wait_for_fixture_state(process, fd, output, lambda: selected("Rollout"),
+                timeout=region.QUIET_LIMIT_SECONDS):
+            raise AssertionError("moving Board selection did not update the selected title")
+        take(process, fd, output, "board", WIDTHS[-1], selected_post="Rollout")
+        os.write(fd, b"\r")
+        if not h.wait_for_fixture_state(process, fd, output,
+                lambda: any(b"MASC Board" in text and b"post-r2" in text
+                    for text in h.screen_rows(bytes(output)).values()),
+                timeout=region.QUIET_LIMIT_SECONDS):
+            raise AssertionError("Enter did not open the post named by Board selection")
+        h.send_and_wait(process, fd, output, b"\x1b", b"Selected post")
+        os.write(fd, b"k")
+        if not h.wait_for_fixture_state(process, fd, output, lambda: selected("Retry"),
+                timeout=region.QUIET_LIMIT_SECONDS):
+            raise AssertionError("returning Board selection did not restore its title")
+        take(process, fd, output, "board", WIDTHS[-1])
 
         h.tab_until(process, fd, output, b"MASC System")
         sweep(process, fd, output, "config", CONFIG_LOADED, WIDTHS)
@@ -387,7 +452,10 @@ def interaction(served: region.ServedFixtures):
         if FILE_CHANGE_READS.count == reads_before:
             raise AssertionError(f"the unfold at row {gate_row} read no file changes")
 
-        region.check_all(measured, EXPECTED)
+        board_widths = {width for (screen, width) in measured if screen == "board"}
+        if board_widths != set(WIDTHS):
+            raise AssertionError(f"Board functional checks did not cover every width: {board_widths!r}")
+        region.check_all({key: value for key, value in measured.items() if key[0] != "board"}, EXPECTED)
         h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
         h.send_and_wait(process, fd, output, b"q", b"q: press again to quit")
 

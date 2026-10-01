@@ -4997,6 +4997,13 @@ type play_invite =
   ; shown_name : string option
   }
 
+(* Replaced as one reading at refresh/workspace boundaries. The successful
+   index is built once by the loader and is read-only on render paths. *)
+type task_goal_links_reading =
+  | Goal_links_not_read
+  | Goal_links_read_failed of string
+  | Goal_links_read of (string, string list) Hashtbl.t
+
 type state = {
   mutable home_selected : home_action option;
   mutable home_decision_scroll : int;
@@ -5011,14 +5018,12 @@ type state = {
      detail view can show a task after it turns terminal -- the active list
      drops exactly those rows. Replaced wholesale with [tasks] on each load. *)
   mutable tasks_domain: Masc_domain.task list;
+  mutable goal_task_links: task_goal_links_reading;
   mutable task_flow: Masc_tui_task_flow.t option;
-  (* Primary backlog authority, shared by Home and Agenda. Supplemental
-     archive/link errors stay in tasks_error and cannot erase this reading. *)
+  (* Primary backlog authority, shared by Home and Agenda. Archive coverage
+     stays in tasks_error; Goal-link coverage owns goal_task_links. Neither
+     supplemental source can erase this reading. *)
   mutable operator_stalled: Masc_tui_agenda.stalled Masc_tui_agenda.reading;
-  (* Availability of the registry behind each task row's goal_ids. An empty
-     projection cannot claim an absent link when the registry was not read.
-     The reading payload is empty; memberships live on task.goal_ids. *)
-  mutable task_goal_links: unit Masc_tui_agenda.reading;
   (* Goals the verifier proved and only the operator's confirmation closes,
      read from the goal store on the same load as the tasks, so the agenda
      names them on every surface rather than only on Planning. *)
@@ -5030,7 +5035,7 @@ type state = {
   (* What the last backlog read said about the rows. [tasks] holds the same
      rows when they were read and [] otherwise; this says which of the two
      an empty [tasks] is. [tasks_error] stays what the Tasks section prints,
-     including notes (backup recovery, goal links) on rows that were read. *)
+     including notes (backup recovery, archive) on rows that were read. *)
   mutable task_reading: Masc_tui_overview_tasks.rows_reading;
   (* The [?] help overlay: open replaces the surface body until Esc/? closes
      it. The scroll survives only while it is open. *)
@@ -7788,9 +7793,9 @@ let create_state
   agents = [];
   tasks = [];
   tasks_domain = [];
+  goal_task_links = Goal_links_not_read;
   task_flow = None;
   operator_stalled = Masc_tui_agenda.Not_read;
-  task_goal_links = Masc_tui_agenda.Not_read;
   goals_to_confirm = Masc_tui_agenda.Not_read;
   task_focus = Masc_tui_overview_tasks.No_task_focus;
   task_reading = Masc_tui_overview_tasks.Rows_unread;
@@ -8980,6 +8985,15 @@ let changes_budget_note_rows (state : state) =
   match state.changes with
   | Some s when s.Tui_decode.fcs_over_budget > 0 -> 2
   | Some _ | None -> 0
+
+(* Both Task detail and Harness derive their goal references from this reading.
+   Failed or unread stores cannot prove that a task is unlinked. *)
+let task_goal_reading (state : state) ~task_id =
+  match state.goal_task_links with
+  | Goal_links_not_read -> Masc_tui_agenda.Not_read
+  | Goal_links_read_failed reason -> Masc_tui_agenda.Read_failed reason
+  | Goal_links_read index ->
+      Masc_tui_agenda.Read (Workspace_goal_index.goals_for_task index ~task_id)
 
 (* The strip above the composer: what fires next, and who is blocked on the
    operator. Both are already in the state and neither was readable from the

@@ -898,7 +898,11 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
                  rendered))
             in
             if List.length comments < post.bp_comment_count then begin
-              initial_comment_offset := Option.map (fun (id, row) -> id, row + 1) !initial_comment_offset;
+              (* The retained comment identity is only a scroll anchor here;
+                 rendered link ids still pass through Terminal_text above. *)
+              initial_comment_offset :=
+                Option.map (fun (comment_id, row) -> comment_id, row + 1)
+                  !initial_comment_offset;
               Printf.sprintf "  Showing %d of %d comments (o: all comments)"
                 (List.length comments) post.bp_comment_count
               :: comment_lines

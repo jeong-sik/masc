@@ -80,7 +80,7 @@ let test_representations_share_auth_and_prune_boundary () =
       (Invite.expired ~now:(Time_compat.now ()) credential |> Result.map_error
         (fun (Expiry.Invalid_timestamp stamp) -> stamp));
     check (list string) "the live credential remains a handoff target" [ "operator" ]
-      (auth_ok (Seat.participants ~base_path ~keepers:[] ~now:(Time_compat.now ())));
+      (Seat.participants ~base_path ~keepers:[] ~now:(Time_compat.now ()));
     check int "prune excludes the still authenticating bearer" 0
       (List.length (Inventory.expired ~now:(Time_compat.now ()) [ credential ]));
     Eio_mock.Clock.set_time clock (expiry_second +. 1.);
@@ -93,7 +93,7 @@ let test_representations_share_auth_and_prune_boundary () =
       (Invite.expired ~now:(Time_compat.now ()) credential |> Result.map_error
         (fun (Expiry.Invalid_timestamp stamp) -> stamp));
     check (list string) "expired credentials are not handoff targets" []
-      (auth_ok (Seat.participants ~base_path ~keepers:[] ~now:(Time_compat.now ())));
+      (Seat.participants ~base_path ~keepers:[] ~now:(Time_compat.now ()));
     check int "prune includes it only after authentication ends" 1
       (List.length (Inventory.expired ~now:(Time_compat.now ()) [ credential ])))
     [ canonical
@@ -133,7 +133,7 @@ let test_malformed_expiry_denies_a_known_bearer_and_bootstrap () =
      | Error (Expiry.Invalid_timestamp value) -> check string "Play preserves the parse error" stamp value
      | Ok _ -> fail "an unknown expiry is not an expired or live credential");
     check (list string) "the invalid persisted credential is not seated" []
-      (auth_ok (Seat.participants ~base_path ~keepers:[] ~now:(Time_compat.now ())));
+      (Seat.participants ~base_path ~keepers:[] ~now:(Time_compat.now ()));
     (match Inventory.classify ~now:(Time_compat.now ()) invalid with
      | Inventory.Invalid_expiry value -> check string "inventory reports invalid explicitly" stamp value
      | Inventory.Never | Inventory.Valid_until _ | Inventory.Expired_at _ ->
@@ -171,10 +171,139 @@ let test_malformed_expiry_keeps_the_controller () =
       | Ok _ -> fail "an unknown expiry cannot free the controller for another caller"))
     invalid_expiries
 
+let test_persisted_invalid_invite_reaches_diagnostic_projections () =
+  List.iter (fun use_uuid ->
+    with_workspace @@ fun base_path _ ->
+    let token, credential = auth_ok (Auth.create_token_without_expiry base_path
+        ~agent_name:"visitor" ~role:Masc_domain.Player) in
+    let id = if use_uuid then Some (Masc_domain.Credential_id.generate ()) else None in
+    Auth.save_credential base_path { credential with id; expires_at = Some "not-a-timestamp" };
+    check bool "the malformed persisted bearer still fails authentication" true
+      (Result.is_error (Auth.find_static_credential_by_token base_path ~token));
+    let entries = Auth.list_credential_results base_path in
+    (match entries with
+     | [ Error (Auth.Invalid_credential_expiry { agent_name; role; timestamp }) ] ->
+       check string "diagnostic retains the owner" "visitor" agent_name;
+       check bool "diagnostic retains Player role" true (role = Masc_domain.Player);
+       check string "diagnostic retains rejected expiry" "not-a-timestamp" timestamp;
+       check string "inventory exposes persisted invalid expiry"
+         (Printf.sprintf "%-32s %-6s INVALID expiry not-a-timestamp" "visitor" "player")
+         (Inventory.error_row (Auth.Invalid_credential_expiry { agent_name; role; timestamp }))
+     | _ -> fail "named and UUID-backed corruption must each produce exactly one diagnostic");
+    (match Invite.list ~base_path ~now:(Time_compat.now ()) with
+     | Error (Auth.Invalid_credential_expiry { timestamp = "not-a-timestamp"; _ }) -> ()
+     | Error error -> fail (Auth.credential_listing_error_to_string error)
+     | Ok _ -> fail "Play must not silently omit persisted malformed invites"))
+    [ false; true ]
+
+let test_invalid_exact_identity_refuses_prefix_bearer () =
+  with_workspace @@ fun base_path _ ->
+  let token, _owner = auth_ok (Auth.create_token_without_expiry base_path
+      ~agent_name:"alpha" ~role:Masc_domain.Worker) in
+  let exact_name = "keeper-alpha-agent" in
+  let _, exact = auth_ok (Auth.create_token_without_expiry base_path
+      ~agent_name:exact_name ~role:Masc_domain.Worker) in
+  Auth.save_credential base_path { exact with expires_at = Some "invalid" };
+  check bool "present invalid exact credential blocks prefix alias fallback" true
+    (Result.is_error (Auth.verify_token base_path ~agent_name:exact_name ~token));
+  let retired = Auth.with_credential_transaction base_path (fun transaction ->
+    let present = auth_ok (Auth.credential_exists_in_transaction transaction exact_name) in
+    check bool "explicit revoke still finds malformed credential" true present;
+    Auth.delete_credential_in_transaction transaction exact_name) |> Result.join in
+  let () = auth_ok retired in
+  check bool "explicit revocation removes the malformed named file" false
+    (Sys.file_exists (Auth.credential_file base_path exact_name))
+
+let test_alias_revocation_preserves_canonical_owner () =
+  List.iter (fun malformed -> with_workspace @@ fun base_path _ ->
+    let canonical = "keeper-alpha-agent" in
+    let token, credential = auth_ok (Auth.create_token_without_expiry base_path
+        ~agent_name:canonical ~role:Masc_domain.Worker) in
+    let id = Masc_domain.Credential_id.generate () in
+    Auth.save_credential base_path { credential with id = Some id };
+    Auth.save_private_text_file (Auth.raw_token_file base_path canonical) token;
+    let () = auth_ok (Auth.ensure_credential_alias base_path ~canonical_name:canonical ~alias_name:"alpha") in
+    if malformed then Auth.save_credential base_path
+        { credential with id = Some id; expires_at = Some "invalid" };
+    let paths = [Auth.credential_file base_path canonical; Auth.credential_file base_path "alpha";
+                 Filename.concat (Filename.dirname (Auth.credential_file base_path canonical))
+                   (Masc_domain.Credential_id.to_string id ^ ".json"); Auth.raw_token_file base_path canonical] in
+    let bytes () = List.map (fun path -> In_channel.with_open_bin path In_channel.input_all) paths in
+    let before = bytes () in
+    let result = Auth.with_credential_transaction base_path (fun transaction ->
+      Auth.delete_credential_in_transaction transaction "alpha") |> Result.join in
+    check bool "alias cannot revoke canonical owner, even with malformed expiry" true (Result.is_error result);
+    check bool "alias rejection preserves every canonical artifact" true (bytes () = before)) [false; true]
+
+let test_malformed_direct_owner_revokes_verified_uuid () =
+  List.iter (fun foreign -> with_workspace @@ fun base_path _ ->
+    let token, credential = auth_ok (Auth.create_token_without_expiry base_path
+        ~agent_name:"operator" ~role:Masc_domain.Worker) in
+    let id = Masc_domain.Credential_id.generate () in
+    let credential = { credential with id = Some id } in
+    Auth.save_credential base_path credential;
+    let named = Auth.credential_file base_path "operator" in
+    let uuid = Filename.concat (Filename.dirname named) (Masc_domain.Credential_id.to_string id ^ ".json") in
+    Auth.save_private_text_file named
+      (Yojson.Safe.to_string (Masc_domain.agent_credential_to_yojson
+        { credential with expires_at = Some "invalid" }));
+    Auth.save_private_text_file (Auth.raw_token_file base_path "operator") token;
+    if foreign then Auth.save_private_text_file uuid
+      (Yojson.Safe.to_string (Masc_domain.agent_credential_to_yojson
+        { credential with agent_name = "other" }));
+    let paths = [named; uuid; Auth.raw_token_file base_path "operator"] in
+    let snapshot () = List.map (fun path -> In_channel.with_open_bin path In_channel.input_all) paths in
+    let before = snapshot () in
+    let result = Auth.with_credential_transaction base_path (fun transaction ->
+      Auth.delete_credential_in_transaction transaction "operator") |> Result.join in
+    if foreign then (
+      check bool "foreign UUID refuses revocation" true (Result.is_error result);
+      check bool "refusal precedes every deletion" true (snapshot () = before))
+    else (
+      let () = auth_ok result in
+      List.iter (fun path -> check bool "all canonical artifacts removed" false (Sys.file_exists path)) paths;
+      check bool "old bearer cannot authenticate from remaining UUID index" true
+        (Result.is_error (Auth.find_static_credential_by_token base_path ~token)))) [false; true]
+
+let test_revoke_unlinks_dangling_named_path () =
+  with_workspace @@ fun base_path _ ->
+  let path = Auth.credential_file base_path "dangling" in
+  Unix.symlink (Filename.concat base_path "missing-credential") path;
+  let result = Auth.with_credential_transaction base_path (fun transaction ->
+    check bool "dangling entry is admitted" true
+      (auth_ok (Auth.credential_exists_in_transaction transaction "dangling"));
+    Auth.delete_credential_in_transaction transaction "dangling") |> Result.join in
+  let () = auth_ok result in
+  let present = try let _ = Unix.lstat path in true
+    with Unix.Unix_error (Unix.ENOENT, _, _) -> false in
+  check bool "successful revoke actually unlinks the dangling entry" false present;
+  check int "no diagnostic remains after revoke" 0 (List.length (Auth.list_credential_results base_path))
+
+let test_dangling_credential_directory_is_unreadable () =
+  with_workspace @@ fun base_path _ ->
+  let dir = Filename.dirname (Auth.credential_file base_path "unused") in
+  if Sys.file_exists dir then Unix.rmdir dir;
+  Unix.symlink (Filename.concat base_path "absent-target") dir;
+  (match Auth.list_credential_results base_path with
+   | [ Error (Auth.Unreadable_credential _) ] -> ()
+   | _ -> fail "a dangling agents directory is a storage failure, not an empty store");
+  (match Invite.list ~base_path ~now:(Time_compat.now ()) with
+   | Error (Auth.Unreadable_credential _) -> ()
+   | _ -> fail "Play must preserve credential directory failures")
+
 let () =
   run "credential expiry feature"
     [ "bearer, OAuth, seats and inventory",
-      [ test_case "offsets and fractions share the whole-second boundary" `Quick
+      [ test_case "malformed direct owner revokes only its verified UUID" `Quick test_malformed_direct_owner_revokes_verified_uuid
+      ; test_case "redirect aliases cannot revoke canonical owners" `Quick test_alias_revocation_preserves_canonical_owner
+      ; test_case "revoke actually unlinks dangling named paths" `Quick test_revoke_unlinks_dangling_named_path
+      ; test_case "malformed exact credential refuses prefix bearer and can be revoked" `Quick
+          test_invalid_exact_identity_refuses_prefix_bearer
+      ; test_case "dangling credential directory is unavailable" `Quick
+          test_dangling_credential_directory_is_unreadable
+      ; test_case "persisted malformed invites reach listings and inventory" `Quick
+          test_persisted_invalid_invite_reaches_diagnostic_projections
+      ; test_case "offsets and fractions share the whole-second boundary" `Quick
           test_representations_share_auth_and_prune_boundary
       ; test_case "malformed expiry denies a known bearer and live OAuth bootstrap" `Quick
           test_malformed_expiry_denies_a_known_bearer_and_bootstrap

@@ -87,6 +87,32 @@ let test_public_reader_fifo () = with_fifo_workspace @@ fun base_path ->
   Auth.save_private_text_file path "regular-reader-recovery";
   check_readers base_path (Some "regular-reader-recovery")
 
+let test_replacement_at_open_refuses_without_blocking () = with_fifo_workspace @@ fun base_path ->
+  let path = Auth.raw_token_file base_path "reader" in
+  let preserved = path ^ ".preserved" in
+  Auth.save_private_text_file path "original-reader-bytes";
+  let open_replacement path flags mode =
+    Unix.rename path preserved;
+    Unix.mkfifo path 0o600;
+    Unix.openfile path flags mode in
+  (match Auth.Regular_read_for_testing.read_with_open ~open_file:open_replacement path with
+   | Error (D.System (D.System_error.ValidationError _)) -> ()
+   | Error error -> fail (D.masc_error_to_string error)
+   | Ok _ -> fail "replacement FIFO was admitted as a regular file");
+  check string "replacement refusal preserves original bytes" "original-reader-bytes" (read preserved);
+  Unix.unlink path; Unix.rename preserved path;
+  let replace_after_open path flags mode =
+    let fd = Unix.openfile path flags mode in
+    Unix.rename path preserved;
+    Unix.mkfifo path 0o600;
+    fd in
+  (match Auth.Regular_read_for_testing.read_with_open ~open_file:replace_after_open path with
+   | Error (D.System (D.System_error.IoError _)) -> ()
+   | Error error -> fail (D.masc_error_to_string error)
+   | Ok _ -> fail "replaced pathname admitted bytes from its retired descriptor");
+  Unix.unlink path; Unix.rename preserved path;
+  check_readers base_path (Some "original-reader-bytes")
+
 let config_refused base_path =
   match Auth.load_auth_config base_path with
   | _config -> fail "occupied unreadable config must not select a default"
@@ -213,6 +239,14 @@ let test_canonical_fifo_verification_and_index () =
       Unix.rename path target; Unix.mkfifo path 0o600; path, target) occupied_paths in
     check bool "public canonical read refuses a nonregular payload" true
       (Auth.load_credential base_path "first" = None);
+    let diagnostic = Auth.list_credential_results base_path in
+    List.iter (fun path ->
+      check bool "diagnostic listing reports occupied FIFO paths without opening them" true
+        (List.exists (function
+          | Error (Auth.Unreadable_credential {path=failed_path;_}) ->
+            String.equal path failed_path
+          | Error (Auth.Invalid_credential_expiry _) | Ok _ -> false) diagnostic))
+      occupied_paths;
     check bool "warm verification cannot use either unreadable canonical source" true
       (Result.is_error (Auth.verify_token base_path ~agent_name:"first" ~token));
     if named_fifo then (
@@ -327,6 +361,7 @@ let () = run "Auth regular file read authority" [
   "file clients", [
     test_case "regular, symlink, dangling, directory and blank raw tokens" `Quick test_public_reader_file_states;
     test_case "public readers refuse a FIFO without a writer" `Quick test_public_reader_fifo;
+    test_case "replacement before and after open cannot block or admit retired bytes" `Quick test_replacement_at_open_refuses_without_blocking;
     test_case "strict config presence and secure missing defaults" `Quick test_config_file_states;
     test_case "config FIFO refuses actual publishers and repaired admission works" `Quick test_config_fifo_publishers;
     test_case "expected read errors do not swallow cancellation" `Quick test_cancellation_propagates;

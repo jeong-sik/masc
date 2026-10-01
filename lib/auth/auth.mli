@@ -8,6 +8,14 @@
 
 open Masc_domain
 
+module Regular_read_for_testing : sig
+  val read_with_open :
+    open_file:(string -> Unix.open_flag list -> int -> Unix.file_descr) ->
+    string -> (string, masc_error) result
+  (** Exercise the production descriptor reader with a deterministic open
+      boundary; no process-wide hook or production reader is changed. *)
+end
+
 (** {1 Token Generation} *)
 
 val generate_token : unit -> string
@@ -81,12 +89,6 @@ val credential_exists_in_transaction :
   credential_transaction -> string -> (bool, masc_error) result
 (** Check the name file under the caller's admission. Only ENOENT is missing;
     a dangling redirect, symlink or unreadable file still occupies the name. *)
-
-val current_credential_in_transaction :
-  credential_transaction -> string -> (agent_credential option, masc_error) result
-(** Resolve the current named credential under admission, validating its exact
-    owner and UUID binding before authorizing an effect. [None] means the name
-    file is absent; unreadable, unresolved or contradictory storage is [Error]. *)
 
 val load_credential : string -> string -> agent_credential option
 (** [load_credential config agent_name] reads [agent_name]'s own credential
@@ -178,7 +180,9 @@ val raw_token_file : string -> string -> string
 val delete_credential : string -> string -> unit
 (** Retire [agent_name]: the credential, its redirect stub and UUID file, and
     the raw token file, then invalidate the credential cache. The bearer stops
-    validating from the next request. Absent files are not an error. *)
+    validating from the next request. Absent files are not an error. Redirect
+    aliases are refused: request the payload's canonical owner instead. Expiry
+    decoding is not required for explicit canonical-owner revocation. *)
 
 val delete_credential_in_transaction :
   credential_transaction -> string -> (unit, masc_error) result
@@ -186,18 +190,20 @@ val delete_credential_in_transaction :
     {!with_credential_transaction}. No second lock is acquired. Cache
     invalidation also runs if a removal fails after a partial deletion. *)
 
-val list_credentials : string -> agent_credential list
+type credential_listing_error =
+  | Invalid_credential_expiry of
+      { agent_name : string; role : agent_role; timestamp : string }
+  | Unreadable_credential of { path : string; reason : string }
 
-val list_current_credentials : string -> (agent_credential list, masc_error) result
-(** Discover credential owners and read their current named bindings under one
-    Auth admission, in name order. A surviving UUID or stored alias is data,
-    never an independent role authority. A truly absent named owner is omitted;
-    an occupied unreadable, malformed or mismatched current binding of a
-    discovered owner is [Error]. Unresolvable data rows that establish no
-    owner are omitted as in store discovery; this is not a directory integrity
-    verdict or an exhaustive inventory of unreadable rows.
-    Discovery read and admission failures are [Error]; cancellation propagates.
-    This does not filter expiry. Do not call inside an Auth transaction. *)
+val list_credential_results :
+  string -> (agent_credential, credential_listing_error) result list
+(** Diagnostic listing that retains malformed expiry and read/decode failures.
+    Invalid records are never returned as authentication credentials. Redirect
+    aliases are de-duplicated by the resolved record or failing target. *)
+
+val credential_listing_error_to_string : credential_listing_error -> string
+
+val list_credentials : string -> agent_credential list
 
 val audit_token_uniqueness : string -> (string * string list) list
 (** #9786: walk all credentials under [config] and return groups of
@@ -349,6 +355,12 @@ val verify_internal_keeper_token :
 val ensure_internal_keeper_token :
   string -> string
 
+val ensure_keeper_credentials :
+  string -> agent_names:string list ->
+  ((string * (string * agent_credential, masc_error) result) list, masc_error) result
+(** Batch startup sync under one admitted snapshot. A publication failure stops
+    later writes rather than trusting an index with uncertain store effects. *)
+
 val ensure_keeper_credential :
   string -> agent_name:string ->
   (string * agent_credential, masc_error) result
@@ -471,3 +483,20 @@ val read_initial_admin : string -> string option
 (** [read_initial_admin config] returns the bootstrap admin agent name.
     Missing, nonregular, unreadable or blank files yield [None]. Cancellation
     propagates; symlinks to regular files are accepted. *)
+
+val current_credential_in_transaction :
+  credential_transaction -> string -> (agent_credential option, masc_error) result
+(** Resolve the current named credential under admission, validating its exact
+    owner and UUID binding before authorizing an effect. [None] means the name
+    file is absent; unreadable, unresolved or contradictory storage is [Error]. *)
+
+val list_current_credentials : string -> (agent_credential list, masc_error) result
+(** Discover credential owners and read their current named bindings under one
+    Auth admission, in name order. A surviving UUID or stored alias is data,
+    never an independent role authority. A truly absent named owner is omitted;
+    an occupied unreadable, malformed or mismatched current binding of a
+    discovered owner is [Error]. Unresolvable data rows that establish no
+    owner are omitted as in store discovery; this is not a directory integrity
+    verdict or an exhaustive inventory of unreadable rows.
+    Discovery read and admission failures are [Error]; cancellation propagates.
+    This does not filter expiry. Do not call inside an Auth transaction. *)

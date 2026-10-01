@@ -8,9 +8,8 @@ open Masc_domain
 include Auth_credential_base
 include Auth_credential_token
 
-let ensure_keeper_credential config ~agent_name
-  : (string * agent_credential, masc_error) result
-  =
+let ensure_keeper_credential_in_transaction
+    ((Credential_transaction config) as transaction) ~find_token ~agent_name =
   let create_fresh_keeper_token transaction existing =
     let raw_token = generate_token () in
     let id, agent_id =
@@ -36,7 +35,6 @@ let ensure_keeper_credential config ~agent_name
     |> Result.map_error file_backed_publication_error
     |> Result.map (fun () -> raw_token, cred)
   in
-  with_credential_transaction config (fun transaction ->
     let ( let* ) = Result.bind in
     let* current = current_credential_in_transaction transaction agent_name in
     let* raw = raw_token_in_transaction transaction agent_name in
@@ -49,12 +47,53 @@ let ensure_keeper_credential config ~agent_name
     match current, raw with
     | Some credential, Some raw_token
       when constant_time_string_equal credential.token (sha256_hash raw_token) ->
-      (match require_live_credential ~now:(Time_compat.now ()) credential with
+      (match find_token ~token:raw_token with
        | Ok credential -> Ok (raw_token, credential)
-       | Error (Auth (Auth_error.TokenExpired _)) -> create_fresh_keeper_token transaction current
+       | Error (Auth _) -> create_fresh_keeper_token transaction current
        | Error _ as error -> error)
     | Some _, Some _ | Some _, None | None, Some _ | None, None ->
-      create_fresh_keeper_token transaction current)
+      create_fresh_keeper_token transaction current
+;;
+
+let ensure_keeper_credential config ~agent_name =
+  with_credential_transaction config (fun transaction ->
+    ensure_keeper_credential_in_transaction transaction ~agent_name
+      ~find_token:(find_static_credential_in_transaction ~leaf_policy:Follow_regular_symlink transaction))
+  |> Result.join
+;;
+
+let ensure_keeper_credentials config ~agent_names =
+  with_credential_transaction config (fun transaction ->
+    let ( let* ) = Result.bind in
+    let* snapshot = credential_store_snapshot_in_transaction ~leaf_policy:Follow_regular_symlink transaction in
+    let credentials = List.map snd snapshot.current_credentials in
+    let index = build_token_index credentials in
+    let by_name = Hashtbl.create (List.length credentials) in
+    List.iter (fun (credential : agent_credential) ->
+      Hashtbl.replace by_name credential.agent_name credential) credentials;
+    let update (credential : agent_credential) =
+      (match Hashtbl.find_opt by_name credential.agent_name with
+       | None -> ()
+       | Some previous ->
+         (match Hashtbl.find_opt index previous.token with
+          | None -> ()
+          | Some entries -> Hashtbl.replace index previous.token
+              (List.filter (fun (entry : agent_credential) ->
+                not (String.equal entry.agent_name credential.agent_name)) entries)));
+      let entries = match Hashtbl.find_opt index credential.token with
+        | None -> [] | Some entries -> entries in
+      Hashtbl.replace index credential.token (credential :: entries);
+      Hashtbl.replace by_name credential.agent_name credential in
+    let rec sync = function
+      | [] -> []
+      | agent_name :: rest ->
+        let result = ensure_keeper_credential_in_transaction transaction ~agent_name
+            ~find_token:(find_static_credential_in_index index) in
+        (agent_name, result) ::
+        (match result with
+         | Ok (_, credential) -> update credential; sync rest
+         | Error error -> List.map (fun name -> name, Error error) rest) in
+    Ok (sync agent_names))
   |> Result.join
 ;;
 

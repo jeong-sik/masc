@@ -19,7 +19,11 @@ ownership and changed PNG bytes. Restoring the default must restore the
 original PNG; the other slots must stay unchanged. Before restoration, Chromium
 opens the production bundle served by that same native process, follows the
 Keeper route, opens 대화 도구 → 상세, selects the Item tab, and checks 0.100 Candle, one owned item and its
-equipped marker through real authenticated API requests. External browser
+equipped marker through real authenticated API requests. At 360px it also
+reloads the document, opens the visible keeper command menu and enters Item
+from fresh application state. Each entry must make its own real account read;
+the menu lower edge, runtime alert width and mobile overflow are checked.
+External browser
 requests are blocked; API responses are never replaced by fixtures. Finally
 the harness stops its server, starts a new process against the same isolated
 workspace with the purchased accessory equipped. It verifies identical account
@@ -59,3 +63,5 @@ A failed run is not a passing receipt. Inspect the workflow step and server
 log before interpreting the artifact.
 
 The transaction stage also rejects an owned face item in the head slot and checks that duplicate, insufficient and wrong-slot refusals leave the ledger unchanged. Both the original and equipped PNG must have valid dimensions, chunks and decoded image data.
+
+Browser validation failures retain a separate failed receipt with the current stage, request paths/statuses and available screenshot hashes. Credentials, storage, headers, request bodies, DOM dumps and raw error text are excluded. A successful receipt is written only after browser cleanup succeeds.

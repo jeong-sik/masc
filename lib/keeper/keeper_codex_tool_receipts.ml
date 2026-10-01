@@ -52,7 +52,8 @@ let hooks t (original : Agent_core.Hooks.hooks) =
     let result = invoke hook event in
     (match event with
      | Agent_core.Hooks.PostToolUse { invocation; _ }
-     | Agent_core.Hooks.PostToolUseFailure { invocation; _ } -> committed t invocation
+     | Agent_core.Hooks.PostToolUseFailure { invocation; stage = Agent_core.Hooks.Validation_before_execution; _ } -> committed t invocation
+     | Agent_core.Hooks.PostToolUseFailure { stage = Agent_core.Hooks.Execution; _ } -> ()
      | _ -> ());
     result
   in

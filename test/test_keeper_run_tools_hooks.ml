@@ -762,15 +762,15 @@ let test_codex_receipts_reach_live_and_cancelled_history () =
       feed (Agent_core.Types.ContentBlockStop {index=1});
       Receipts.finish receipts ~call_id:"reused-provider-id";
       let second = execute 2 (Error "read refused") in
-      (* Both post hooks precede ToolCompleted. Their notifications must refer
-         to the same committed result, leaving the bus join untouched. *)
+      (* Both post hooks precede ToolCompleted, but this execution owns exactly
+         one readiness receipt and leaves the bus join untouched. *)
       invoke hooks.post_tool_use_failure (Agent_core.Hooks.PostToolUseFailure {
         invocation=second; tool_name="Read"; input=`Assoc [];
         stage=Agent_core.Hooks.Execution; duration_ms=1.; error="read refused" });
-      check int "both executed-error hooks report before turn end" 3 (List.length !received);
-      check bool "error hooks share receipt, reused provider id does not" true
-        (match !received with [a;b;c] ->
-           Ids.Execution_id.equal a b && not (Ids.Execution_id.equal b c)
+      check int "executed error reports once before turn end" 2 (List.length !received);
+      check bool "reused provider id keeps distinct execution receipts" true
+        (match !received with [a;b] ->
+           not (Ids.Execution_id.equal a b)
          | _ -> false);
       check bool "error hooks leave join for ToolCompleted" true
         (Option.is_some (Masc.Keeper_execution_join.take ~invocation:second));
@@ -784,7 +784,7 @@ let test_codex_receipts_reach_live_and_cancelled_history () =
         invocation=rejected; tool_name="Read"; input=`Assoc [];
         stage=Agent_core.Hooks.Validation_before_execution;
         duration_ms=1.; error="invalid arguments" });
-      check int "validation rejection also delivers its durable result" 4 (List.length !received);
+      check int "validation rejection also delivers its durable result" 3 (List.length !received);
       (* Cancellation before the rejected call's ContentBlockStop retains its receipt. *)
       let saved = Accum.to_tool_calls_for_failure accum in
       check int "cancelled history retains all committed results" 3 (List.length saved);

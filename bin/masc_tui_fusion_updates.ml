@@ -6,16 +6,16 @@ let apply_fusion_runs_load state request = function
   | Ok snapshot ->
       let keeper_run_id =
         Option.map (fun (_, run) -> run.Masc.Tui_decode_fusion.fur_run_id)
-          (selected_keeper_run state)
+          (Masc_tui_fusion_model.selected_keeper_run state)
       in
       let current_selected_id =
         match state.fusion_mode with
-        | Fusion_historical_detail reference -> Some (fusion_entry_identity (Masc.Tui_decode_fusion.Fusion_historical_evidence reference))
+        | Fusion_historical_detail reference -> Some (Masc_tui_fusion_model.fusion_entry_identity (Masc.Tui_decode_fusion.Fusion_historical_evidence reference))
         | Fusion_detail run_id -> Some ("run:" ^ run_id)
-        | Fusion_list -> Option.map fusion_entry_identity (selected_fusion_entry state)
+        | Fusion_list -> Option.map Masc_tui_fusion_model.fusion_entry_identity (Masc_tui_fusion_model.selected_fusion_entry state)
       in
       let next_ids =
-        List.map fusion_entry_identity (fusion_snapshot_entries snapshot)
+        List.map Masc_tui_fusion_model.fusion_entry_identity (Masc_tui_fusion_model.fusion_snapshot_entries snapshot)
       in
       let fallback_cursor =
         min (max 0 state.fusion_cursor) (max 0 (List.length next_ids - 1))
@@ -30,7 +30,7 @@ let apply_fusion_runs_load state request = function
       in
       state.fusion_runs <-
         Masc_tui_fetched.complete ~equal:Unit.equal state.fusion_runs request (Ok snapshot);
-      let keeper_runs = selected_keeper_runs state in
+      let keeper_runs = Masc_tui_fusion_model.selected_keeper_runs state in
       state.keeper_run_cursor <-
         Option.bind keeper_run_id (fun id ->
           List.find_index (fun run -> String.equal run.Masc.Tui_decode_fusion.fur_run_id id) keeper_runs)
@@ -41,7 +41,7 @@ let apply_fusion_runs_load state request = function
       (match state.fusion_launch with
        | Some (Fusion_launch_started started) -> (
            match
-             fusion_snapshot_entries snapshot
+             Masc_tui_fusion_model.fusion_snapshot_entries snapshot
              |> List.find_index (function
                   | Masc.Tui_decode_fusion.Fusion_retained_run run ->
                       String.equal run.fur_run_id started.fls_run_id
@@ -153,7 +153,7 @@ let launch_options_loaded state ~generation ~report result =
             (* The run under the cursor names the Keeper the operator is
                looking at; without one, the roster's own cursor does. *)
             let keeper =
-              match selected_fusion_entry state with
+              match Masc_tui_fusion_model.selected_fusion_entry state with
               | Some (Masc.Tui_decode_fusion.Fusion_retained_run run) -> Some run.fur_keeper
               | Some (Masc.Tui_decode_fusion.Fusion_historical_evidence _) | None ->
                   Option.map (fun (k : keeper) -> k.k_name) (selected_keeper state)

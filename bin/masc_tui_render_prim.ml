@@ -467,7 +467,7 @@ let awaiting_approval_notice (state : state) =
    other surfaces continue to consult their live row projection.
 
    "n/N" appears only where those keys do something. They ask
-   [surface_row_texts] the same question and return without moving when it
+   [Masc_tui_surface_search.surface_row_texts] the same question and return without moving when it
    answers [None], so a detail pane or a cursorless surface that printed the
    suffix would be naming keys that are not there. It is also a key hint, so
    hints off drops it and keeps the query and its count.
@@ -478,7 +478,7 @@ let awaiting_approval_notice (state : state) =
 let search_marker (state : state) =
   let marker query ~settled =
     let has_query = surface_search_query state.view query <> "" in
-    let reached = Masc_tui_types.surface_search_count state state.view ~query in
+    let reached = Masc_tui_surface_search.surface_search_count state state.view ~query in
     let found =
       match reached with
       | None -> ""

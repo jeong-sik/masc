@@ -6074,13 +6074,13 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
               following when the other two change. *)
            Printf.sprintf "%s %s · %s · %s · %s"
              (if Option.fold ~none:false ~some:(fun (cursor, _) -> index = cursor)
-                   (selected_keeper_run state) then ">" else " ")
+                   (Masc_tui_fusion_model.selected_keeper_run state) then ">" else " ")
              (fusion_run_clock run)
              (Masc.Tui_decode_fusion.fusion_run_status_to_string run.fur_status)
              (Terminal_text.single_line run.fur_preset)
              (Terminal_text.single_line run.fur_run_id)) runs)
       in
-      match Masc_tui_types.keeper_runs_view state with
+      match Masc_tui_fusion_model.keeper_runs_view state with
       | Masc_tui_fetched.Absent -> [ Ansi.dim ^ page_unread_note ^ Ansi.reset ]
       | Masc_tui_fetched.Loading -> [ loading_row "loading Fusion runs" ]
       | Masc_tui_fetched.Failed detail -> [ failure detail ]
@@ -6265,7 +6265,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
             ~some:(fun (cursor, _) ->
               Masc_tui_scroll.ensure_visible ~cursor:(cursor + 1)
                 ~height:(max 1 content_height) scroll)
-            (selected_keeper_run state)
+            (Masc_tui_fusion_model.selected_keeper_run state)
         else scroll
     in
     let all_lines_window = Rows.of_list ~first:scroll ~height:visible_lines all_lines in
@@ -7833,14 +7833,14 @@ let render_fusion_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
-  let reading = Masc_tui_types.fusion_runs_view state in
-  let snapshot = Masc_tui_types.fusion_snapshot state in
+  let reading = Masc_tui_fusion_model.fusion_runs_view state in
+  let snapshot = Masc_tui_fusion_model.fusion_snapshot state in
   let runs =
     match snapshot with
     | None -> []
     | Some snapshot -> snapshot.fus_runs
   in
-  let entries = fusion_list_entries state in
+  let entries = Masc_tui_fusion_model.fusion_list_entries state in
   let shown = List.length entries in
   let history_count = shown - List.length runs in
   let replay_warning = Option.bind snapshot
@@ -8675,7 +8675,7 @@ let render_fusion_detail (state : state) run_id =
         Render_schedule.fusion_sidebar_label ~status ~time ~keeper ~run_id
       in
       let labels =
-        fusion_list_entries state
+        Masc_tui_fusion_model.fusion_list_entries state
         |> List.map (function
             | Fusion_retained_run run -> format_sidebar_fusion run
             | Fusion_historical_evidence reference ->
@@ -8686,7 +8686,7 @@ let render_fusion_detail (state : state) run_id =
       (* No list row is selected when its original remains open after the
          refreshed inventory omits it. The sidebar's index API uses -1 for
          no matching row; the domain selection stays optional. *)
-      let selected = Option.value (fusion_detail_entry_index state) ~default:(-1) in
+      let selected = Option.value (Masc_tui_fusion_model.fusion_detail_entry_index state) ~default:(-1) in
       (* The retained inventory is the whole list; nothing is held back. *)
       write_list_sidebar left_buf ~rows ~cols:left_cols ~title:"Fusion"
         ~focused:false ~holding:None ~labels ~selected;

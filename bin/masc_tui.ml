@@ -3105,9 +3105,9 @@ let launch_task_cancel state ~mailbox ~authority ~identity ~task_id ~reason =
   let host = server_peer_host in
   let port = state.port in
   let request_id = Printf.sprintf "tui-cancel-%.6f" (Unix.gettimeofday ()) in
-  launch_workspace_request state ~mailbox ~boundary_error:Fun.id
-    ~deliver:(fun result -> Task_cancel_done (task_id, expected_workspace, result))
-    (fun () ->
+  let run () =
+    let result =
+      try
       let ( let* ) = Result.bind in
       let* () = check_workspace_request state ~mailbox ~authority ~identity ~host ~port () in
       let* session_id = Masc_tui_http.open_mcp_session ~host ~port
@@ -3117,7 +3117,23 @@ let launch_task_cancel state ~mailbox ~authority ~identity ~task_id ~reason =
       let* outcome = Masc_tui_http.call_mcp_tool ~host ~port ~session_id ~request_id
           ~tool:"masc_transition" ~arguments in
       if outcome.Masc_tui_mcp.is_error then Error outcome.Masc_tui_mcp.text
-      else Ok outcome.Masc_tui_mcp.text)
+      else Ok outcome.Masc_tui_mcp.text
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Task_cancel_done (task_id, expected_workspace, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      (* Admission is bound to [expected_workspace]. Keep its response alive
+         after withdrawal: an accepted cancellation is reported against that
+         workspace, without refreshing or mutating the current workspace. *)
+      Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Task_cancel_done (task_id, expected_workspace, Error "Eio switch is unavailable"))
+
 
 (* The operator evidence bundle for the verification detail, over HTTP.
    Keyed by task id so a stale answer for a request the operator already
@@ -10972,16 +10988,33 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight ~mailbox
     } in
     let read_refresh () =
       try
-        if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
-        else Ok (load_http_scoped_surfaces ~refresh_ticket
-              ~server_identity:(load_server_identity ~host ~port) ~host ~port
+        let ( let* ) = Result.bind in
+        let identity = currency_authority.car_identity in
+        (* A superseded scoped probe must not enqueue an unticketed identity
+           withdrawal. Only its ticketed completion may change authority. *)
+        let probe () =
+          if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
+          else
+            let reading = load_server_identity ~host ~port in
+            if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
+            else if Masc_tui_types.server_workspace_matches ~expected:identity reading
+            then reading
+            else Error "Workspace identity changed or is unavailable; scoped refresh withdrawn"
+        in
+        let* server_identity = probe () in
+        let results = load_http_scoped_surfaces ~refresh_ticket
+              ~server_identity:(Ok server_identity) ~host ~port
               ~approval_ticket ~board_sort:state.board_sort
               ~board_hearth:state.board_hearth
               ~provider_history_days:state.provider_history_days
               ~system_log_level:
                 (Option.map Masc.Tui_decode.system_log_level_query
                    state.system_logs_min_level)
-              ~needs)
+              ~needs in
+        let* _ = probe () in
+        if Masc_tui_types.server_workspace_matches ~expected:identity
+             results.http_scoped_server_identity then Ok results
+        else Error "Workspace changed during scoped surface collection; bundle discarded"
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printf.sprintf "HTTP surface refresh failed: %s"

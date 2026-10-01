@@ -26,6 +26,7 @@ let run_adapter client_kind ~base_path ~keeper_name ~runtime_id ~cli_path =
     let config : Runtime_execution.codex_app_server =
       { cli_path; account_home = None; model = None; timeout_s = 1. } in
     let outcome = Keeper_codex_runtime.run
+        ~context_window:None
         ~accepts_image_input:false ~runtime_id ~keeper_name
         ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
         ~pre_tool_rejects:(ref []) ~base_path ~goal:"synthetic claim probe"

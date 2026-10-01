@@ -13,7 +13,7 @@ function keeperWire(name = 'planner') {
   return {
     runtime_class: 'keeper',
     candle_balance_milli: null,
-    portrait: { state: 'unavailable', reason: 'fixture portrait is unavailable' },
+    portrait: { state: 'ready', equipment: { face: 'bare_face', neck: 'bare_neck', head: 'bare_head', hand: 'empty_hand', base: 'no_dish' } },
     name,
     meta: {
       name,
@@ -41,7 +41,7 @@ function issueWire(name = 'broken') {
     status: 'error',
     runtime_class: 'keeper',
     candle_balance_milli: null,
-    portrait: { state: 'unavailable', reason: 'fixture portrait is unavailable' },
+    portrait: { state: 'ready', equipment: { face: 'bare_face', neck: 'bare_neck', head: 'bare_head', hand: 'empty_hand', base: 'no_dish' } },
     name,
     keepalive_running: false,
     effective_meta_error: {
@@ -68,18 +68,18 @@ function expectDrift(value: unknown): GateKeepersSchemaDriftError {
 // The listing half of the envelope. Present on every valid fixture so a
 // drift assertion below fails for the reason it names, not for a missing
 // field. masc#29077.
-const listingWire = (total: number) => ({ candle: { status: 'off' }, total, limit: 200, truncated: false })
+const listingWire = (total: number) => ({ total, limit: 200, truncated: false })
 
 describe('decodeGateKeepers', () => {
   it('decodes the current detailed wire shape into concrete product values', () => {
     const data = Effect.runSync(decodeGateKeepers({
+      candle: { status: 'off' },
       count: 1,
       keepers: [keeperWire()],
       ...listingWire(1),
     }))
 
     expect(data).toEqual({
-      candle: { status: 'off' },
       keepers: [{
         name: 'planner',
         status: 'running',
@@ -91,6 +91,7 @@ describe('decodeGateKeepers', () => {
 
   it('accepts the roster current failure without changing the compact product values', () => {
     const data = Effect.runSync(decodeGateKeepers({
+      candle: { status: 'off' },
       count: 1,
       keepers: [{ ...keeperWire(), runtime_blocker_summary: 'current failure' }],
       ...listingWire(1),
@@ -98,10 +99,23 @@ describe('decodeGateKeepers', () => {
     expect(data.keepers).toEqual([{ name: 'planner', status: 'running' }])
   })
 
+  it('keeps lifecycle controls readable when only the Candle observation is malformed', () => {
+    for (const [candle, balance] of [[undefined, undefined], [null, 123], [{ status: 'off' }, '1']]) {
+      const data = Effect.runSync(decodeGateKeepers({
+        candle, count: 1,
+        keepers: [{ ...keeperWire(), candle_balance_milli: balance }],
+        ...listingWire(1),
+      }))
+      expect(data.keepers).toEqual([{ name: 'planner', status: 'running' }])
+      expect(data.directoryIssues).toEqual([])
+    }
+  })
+
   it('accepts a nonempty sandbox name this consumer does not interpret', () => {
     const wire = keeperWire()
     wire.meta.sandbox_profile = 'uninterpreted-sandbox'
     const data = Effect.runSync(decodeGateKeepers({
+      candle: { status: 'off' },
       count: 1, keepers: [wire], ...listingWire(1),
     }))
     expect(data.keepers).toEqual([{ name: 'planner', status: 'running' }])
@@ -113,6 +127,7 @@ describe('decodeGateKeepers', () => {
     if (kind === 'missing') delete meta.sandbox_profile
     else meta.sandbox_profile = ''
     const error = expectDrift({
+      candle: { status: 'off' },
       count: 1, keepers: [{ ...wire, meta }], ...listingWire(1),
     })
     expect(error.issues.some(issue => issue.path.join('.') === 'keepers.0.meta.sandbox_profile')).toBe(true)
@@ -121,11 +136,12 @@ describe('decodeGateKeepers', () => {
   it('rejects an omitted current failure field', () => {
     const wire: Record<string, unknown> = keeperWire()
     delete wire.runtime_blocker_summary
-    expectDrift({ count: 1, keepers: [wire], ...listingWire(1) })
+    expectDrift({ candle: { status: 'off' }, count: 1, keepers: [wire], ...listingWire(1) })
   })
 
   it('separates producer-declared error rows from usable keepers once', () => {
     const data = Effect.runSync(decodeGateKeepers({
+      candle: { status: 'off' },
       count: 2,
       keepers: [keeperWire(), issueWire()],
       ...listingWire(2),
@@ -142,6 +158,7 @@ describe('decodeGateKeepers', () => {
     const row = issueWire('broken')
     const meta = keeperWire('broken').meta
     const data = Effect.runSync(decodeGateKeepers({
+      candle: { status: 'off' },
       count: 1,
       keepers: [{
         ...row,
@@ -154,7 +171,6 @@ describe('decodeGateKeepers', () => {
     }))
 
     expect(data).toEqual({
-      candle: { status: 'off' },
       keepers: [],
       directoryIssues: [{
         keeperName: 'broken',
@@ -166,11 +182,11 @@ describe('decodeGateKeepers', () => {
 
   it('accepts an explicit empty directory', () => {
     expect(Effect.runSync(decodeGateKeepers({
+      candle: { status: 'off' },
       count: 0,
       keepers: [],
       ...listingWire(0),
     }))).toEqual({
-      candle: { status: 'off' },
       keepers: [],
       directoryIssues: [],
       listing: { total: 0, limit: 200, truncated: false },
@@ -180,13 +196,15 @@ describe('decodeGateKeepers', () => {
   it.each([
     ['missing outer fields', {}],
     ['non-object payload', null],
-    ['malformed row', { count: 1, keepers: [{ name: 'orphan' }], ...listingWire(1) }],
+    ['malformed row', { candle: { status: 'off' }, count: 1, keepers: [{ name: 'orphan' }], ...listingWire(1) }],
     ['excess row property', {
+      candle: { status: 'off' },
       count: 1,
       keepers: [{ ...keeperWire(), unexpected: true }],
       ...listingWire(1),
     }],
     ['a response without the listing fields', {
+      candle: { status: 'off' },
       count: 1,
       keepers: [keeperWire()],
     }],
@@ -196,6 +214,7 @@ describe('decodeGateKeepers', () => {
 
   it('rejects a count that disagrees with the returned rows', () => {
     const error = expectDrift({
+      candle: { status: 'off' },
       count: 2,
       keepers: [keeperWire()],
       ...listingWire(2),
@@ -207,6 +226,7 @@ describe('decodeGateKeepers', () => {
   it('rejects identity disagreement inside a row', () => {
     const row = keeperWire()
     const error = expectDrift({
+      candle: { status: 'off' },
       count: 1,
       keepers: [{ ...row, meta: { ...row.meta, name: 'other' } }],
       ...listingWire(1),
@@ -217,6 +237,7 @@ describe('decodeGateKeepers', () => {
   it('rejects an error envelope attributed to another keeper', () => {
     const row = issueWire()
     const error = expectDrift({
+      candle: { status: 'off' },
       count: 1,
       keepers: [{
         ...row,
@@ -228,26 +249,5 @@ describe('decodeGateKeepers', () => {
       ...listingWire(1),
     })
     expect(error.message).toContain('effective_meta_error.keeper')
-  })
-})
-
-describe('Candle keeper-list observations', () => {
-  it('accepts every actual Candle state and preserves the summary', () => {
-    const states = [{ status: 'off' }, { status: 'disabled', reason: 'appraiser unavailable' },
-      { status: 'ready', issued_milli: '9007199254740993000', burned_milli: '1', circulating_milli: '9007199254740992999' }]
-    for (const candle of states) {
-      const row = { ...keeperWire(), candle_balance_milli: candle.status === 'ready' ? '0' : null }
-      const decoded = Effect.runSync(decodeGateKeepers({ count: 1, keepers: [row], ...listingWire(1), candle }))
-      expect(decoded.candle).toEqual(candle)
-    }
-  })
-  it('refuses malformed and inconsistent monetary observations rather than schema fallback', () => {
-    for (const candle of [{ status: 'unknown' }, { status: 'off', reason: 'extra' },
-      { status: 'ready', issued_milli: '01', burned_milli: '0', circulating_milli: '1' },
-      { status: 'ready', issued_milli: '3', burned_milli: '1', circulating_milli: '1' }]) {
-      expectDrift({ count: 0, keepers: [], ...listingWire(0), candle })
-    }
-    expectDrift({ count: 1, keepers: [{ ...keeperWire(), candle_balance_milli: '0' }], ...listingWire(1) })
-    expectDrift({ count: 1, keepers: [{ ...keeperWire(), portrait: { state: 'ready', equipment: {} } }], ...listingWire(1) })
   })
 })

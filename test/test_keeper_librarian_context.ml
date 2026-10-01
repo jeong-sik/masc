@@ -213,6 +213,56 @@ let test_incremental_campaign_merges_existing_context () = with_store @@ fun kee
   let third = append second 21 in
   check int "two incremental passes retain all twenty-two arrivals" 22 (List.length third.sources)
 
+let test_source_reassignment_does_not_collide_with_merged_identity () = with_store @@ fun keepers_dir ->
+  let keeper_id = "split-source" in
+  let a = source "event:a" "original question" in
+  let b = source "event:b" "continuation" in
+  let first = ok (Context.commit ~keepers_dir ~keeper_id ~expected_version:None
+    ~sources:[a] [pocket [a.reference] "Original context" []]) in
+  let old_id = (List.hd first.pockets).id in
+  let continuation = {(pocket ["s2"] "Continuing context" []) with merge_contexts = ["c1"]} in
+  let proposal = Context.pockets_to_json
+    [continuation; pocket ["s1"] "Reassigned question" ["Answer separately"]] in
+  let selected = ok (Context.select (input [a; b] (Some first)) proposal) in
+  check int "both valid source groups survive selection" 2 (List.length selected);
+  check string "explicit continuation retains its identity" old_id (List.hd selected).id;
+  check bool "reassigned source has a different identity" true
+    ((List.nth selected 1).id <> old_id);
+  let next = ok (Context.commit ~keepers_dir ~keeper_id
+    ~expected_version:(Some (Context.version first)) ~observed_sources:[a; b]
+    ~sources:[a; b] selected) in
+  check (list string) "selection and publication agree on identities"
+    (List.map (fun (p : Context.pocket) -> p.id) selected)
+    (List.map (fun (p : Context.pocket) -> p.id) next.pockets);
+  check bool "published split can be read back without quarantine" true
+    (ok (Context.read ~keepers_dir ~keeper_id) = Some next)
+
+let test_split_source_does_not_collide_with_untouched_context () = with_store @@ fun keepers_dir ->
+  let keeper_id = "split-untouched" in
+  let a = source "event:a" "original question" in
+  let b = source "event:b" "continuation" in
+  let first = ok (Context.commit ~keepers_dir ~keeper_id ~expected_version:None
+    ~sources:[a] [pocket [a.reference] "Original context" []]) in
+  let selected = ok (Context.select (input [b] (Some first))
+    (Context.pockets_to_json
+      [{(pocket ["s1"] "Both questions" []) with merge_contexts = ["c1"]}])) in
+  let grown = ok (Context.commit ~keepers_dir ~keeper_id
+    ~expected_version:(Some (Context.version first)) ~observed_sources:[a; b]
+    ~sources:[b] selected) in
+  let split = ok (Context.select (input [a] (Some grown))
+    (Context.pockets_to_json [pocket ["s1"] "Separate question" []])) in
+  let next = ok (Context.commit ~keepers_dir ~keeper_id
+    ~expected_version:(Some (Context.version grown)) ~observed_sources:[a; b]
+    ~sources:[a] split) in
+  check int "new group and untouched remainder both survive" 2 (List.length next.pockets);
+  check bool "untouched group preserves its identity with remaining source" true
+    (List.exists (fun (p : Context.pocket) ->
+      p.id = (List.hd first.pockets).id && p.sources = [b.reference]) next.pockets);
+  check bool "split snapshot remains readable" true
+    (ok (Context.read ~keepers_dir ~keeper_id) = Some next);
+  expect_error (Context.commit ~keepers_dir ~keeper_id
+    ~expected_version:(Some (Context.version grown)) ~sources:[a] split)
+
 let test_unrelated_prior_contexts_need_no_empty_source_output () = with_store @@ fun keepers_dir ->
   let keeper_id = "one-new-two-prior" in
   let a = source "event:a" "first pending task" in
@@ -465,6 +515,8 @@ let test_unchanged_capture_needs_no_second_queue_pass () = with_store @@ fun kee
 
 let () = run "Librarian working contexts"
   ["scenarios", [
+    test_case "source reassignment preserves distinct context identities" `Quick test_source_reassignment_does_not_collide_with_merged_identity;
+    test_case "split source does not collide with an untouched context" `Quick test_split_source_does_not_collide_with_untouched_context;
     test_case "exact source retraction is atomic and preserves unaffected pockets" `Quick test_exact_source_retraction_preserves_and_reconsiders;
     test_case "one new source preserves two unrelated prior contexts" `Quick test_unrelated_prior_contexts_need_no_empty_source_output;
     test_case "new execution basis cannot launder untouched advice" `Quick test_new_basis_cannot_launder_untouched_advice;

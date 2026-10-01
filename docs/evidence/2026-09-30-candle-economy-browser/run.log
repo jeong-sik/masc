@@ -1,0 +1,9 @@
+(node:72517) [DEP0205] DeprecationWarning: `module.register()` is deprecated. Use `module.registerHooks()` instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+{
+  "status": "passed",
+  "output_dir": "/tmp/masc-candle-economy-browser-20260930/final",
+  "screenshots": 8,
+  "requests": 38,
+  "browser_errors": []
+}

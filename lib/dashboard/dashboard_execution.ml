@@ -830,6 +830,7 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
     let base_fields =
       let utf8_repair = Safe_ops.persistence_utf8_repair_stats () in
       [ "generated_at", `String (Masc_domain.now_iso ())
+      ; "candle", member_assoc "candle" (member_assoc "keepers" snapshot_json)
       ; "status", workspace_status_json config
       ; ( "projection_diagnostics"
         , `Assoc

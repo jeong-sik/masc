@@ -17,7 +17,7 @@ const currentWire = {
   keepers: [{
     runtime_class: 'keeper',
     candle_balance_milli: null,
-    portrait: { state: 'unavailable', reason: 'fixture portrait unavailable' },
+    portrait: { state: 'ready', equipment: { face: 'bare_face', neck: 'bare_neck', head: 'bare_head', hand: 'empty_hand', base: 'no_dish' } },
     name: 'planner',
     meta: {
       name: 'planner',
@@ -117,7 +117,7 @@ describe('fetchGateKeepers', () => {
   it('preserves schema drift as a typed endpoint error', () => {
     const error = Effect.runSync(Effect.flip(runWithHttp(
       fetchGateKeepers(),
-      { getUnknown: () => Effect.succeed({ count: 1, keepers: [] }) },
+      { getUnknown: () => Effect.succeed({ candle: { status: 'off' }, count: 1, keepers: [] }) },
     )))
 
     expect(error).toBeInstanceOf(GateKeepersSchemaDriftError)

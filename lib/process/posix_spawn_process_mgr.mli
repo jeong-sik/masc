@@ -24,3 +24,12 @@ val foreground_mgr :
     its leader. TERM grants the supplied grace even if the leader exits first.
     Ordinary completion cleans up remaining group members without that delay.
     Children that deliberately leave the group are outside this contract. *)
+
+module For_testing : sig
+  val foreground_mgr :
+    clock:_ Eio.Time.clock -> grace_seconds:float ->
+    waitpid:(int -> int * Unix.process_status) ->
+    Eio_unix.Process.mgr_ty Eio.Resource.t
+  (** Inject the final blocking reap operation while retaining real spawn, exit
+      observation, group signalling and owner synchronization. *)
+end

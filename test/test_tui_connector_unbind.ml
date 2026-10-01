@@ -1,6 +1,5 @@
 open Alcotest
 module Unbind = Masc_tui_connector_unbind
-module Reading = Masc.Tui_decode
 
 (* Connectors read through the same decoder the TUI reads them through, then
    given names the way the loader gives them. *)
@@ -31,13 +30,13 @@ let snapshot () =
       ; ("active_count", `Int 2)
       ]
   in
-  match Reading.decode_connector_snapshot json with
+  match Masc.Tui_decode_connectors.decode_connector_snapshot json with
   | Error reason -> fail reason
   | Ok snapshot ->
-      let named (connector : Reading.connector) =
+      let named (connector : Masc.Tui_decode_connectors.connector) =
         let page =
-          { Reading.cnp_connector_id = connector.cn_id
-          ; cnp_kind = Reading.Connector_channel_name
+          { Masc.Tui_decode_connectors.cnp_connector_id = connector.cn_id
+          ; cnp_kind = Masc.Tui_decode_connectors.Connector_channel_name
           ; cnp_mapping_scope = "workspace"
           ; cnp_current_workspace_id = None
           ; cnp_path = "names"
@@ -46,13 +45,13 @@ let snapshot () =
           ; cnp_total = 1
           ; cnp_has_more = false
           ; cnp_mappings =
-              [ { Reading.cnm_kind = Reading.Connector_channel_name
+              [ { Masc.Tui_decode_connectors.cnm_kind = Masc.Tui_decode_connectors.Connector_channel_name
                 ; cnm_id = "111"
                 ; cnm_name = "general"
                 } ]
           }
         in
-        Reading.connector_with_name_pages connector ~pages:[ page ] ~error:None
+        Masc.Tui_decode_connectors.connector_with_name_pages connector ~pages:[ page ] ~error:None
       in
       List.map named snapshot.cs_connectors
 
@@ -139,7 +138,7 @@ let test_an_unreadable_transport_is_named () =
       ; ("active_count", `Int 1)
       ]
   in
-  match Reading.decode_connector_snapshot json with
+  match Masc.Tui_decode_connectors.decode_connector_snapshot json with
   | Error reason -> fail reason
   | Ok snapshot ->
       let unreadable = Unbind.unreadable_transports snapshot.cs_connectors in

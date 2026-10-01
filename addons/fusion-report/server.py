@@ -108,8 +108,13 @@ def reports(source: Source, observation: dict, *, recognized: bool):
     producer_status = coverage(observation.get("producer_status"), "producer_status")
     if source.incarnation != producer["instance_id"]:
         raise InvalidInput("Source incarnation does not identify this producer instance")
-    if producer_status["incarnation"] != producer["instance_id"]:
-        raise InvalidInput("Producer status incarnation does not identify this producer instance")
+    if (producer_status["incarnation"] != producer["instance_id"]
+            or producer_status["source_id"] != producer["instance_id"]):
+        raise InvalidInput("Producer status does not identify this producer instance")
+    cursor = str(sequence)
+    if (source.cursor != cursor or producer_status["cursor"] != cursor
+            or observation.get("id") != f"{producer['instance_id']}/output/{cursor}"):
+        raise InvalidInput("Report input coordinates disagree with the completed producer sequence")
     base_complete = (source.complete and recognized and producer_status["complete"]
                      and bool(upstream_coverage) and all(c["complete"] for c in upstream_coverage))
     groups = {}
@@ -130,6 +135,7 @@ def reports(source: Source, observation: dict, *, recognized: bool):
         if lane == "fusion/status":
             run = object_value(fields.get("fusion_run"), "fusion_run")
             run_id = string(run.get("run_id"), "fusion_run.run_id")
+            string(run.get("keeper"), "fusion_run.keeper")
             status = run_state(run.get("status"))
             if status is RunState.FAILED:
                 string(run.get("failure_code"), "fusion_run.failure_code")
@@ -142,6 +148,7 @@ def reports(source: Source, observation: dict, *, recognized: bool):
             if not isinstance(post.get("body"), str):
                 raise InvalidInput("board_post.body must be text")
             origin = object_value(post.get("origin"), "board_post.origin")
+            string(origin.get("fusion_producer"), "board_post.origin.fusion_producer")
             if origin.get("source") != "fusion" or origin.get("fusion_run_id") != run_id:
                 raise InvalidInput("Report evidence belongs to another Fusion run")
         if original["subject_id"] != run_id:
@@ -172,7 +179,8 @@ def reports(source: Source, observation: dict, *, recognized: bool):
         if status_row and result_row:
             status_fields = status_row[0]["fields"]
             if (status_fields.get("evidence_status") != "recorded"
-                    or status_fields.get("board_post_id") != post["id"]):
+                    or status_fields.get("board_post_id") != post["id"]
+                    or status_fields["fusion_run"]["keeper"] != post["origin"]["fusion_producer"]):
                 raise InvalidInput("Fusion status and result Board evidence disagree")
         complete = (base_complete and not skipped and status is not RunState.RUNNING
                     and post is not None

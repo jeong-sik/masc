@@ -1,14 +1,38 @@
-[runtime]
-default = "deepseek.smoke"
+# Isolated Item HTTP acceptance runtime config.
+#
+# scripts/item-http-acceptance.py copies this fixture into its fresh base path.
+# Its runtime bindings use a catalog-known model so startup capability checks
+# can admit the native server and required exact-output lanes.
+#
+# The provider endpoint is loopback port 9, with a synthetic inline credential.
+# The harness disables autonomous Keeper turns and the orchestrator; Item
+# balance, purchase and equipment requests do not call a model. This fixture
+# supports isolated server boot and TCP/MCP Item checks, not provider evidence.
 
+[runtime]
+# The default model id must be known to the AGENT_CORE capability catalog, or the
+# startup capability gate (missing_runtime_model_capabilities ->
+# Missing_catalog_models, RFC-0206)
+# refuses to boot (a fixture model named "smoke" is absent from the catalog and
+# was rejected, breaking this evidence step on every OCaml push to main).
+# deepseek-v4-flash is the catalog-known fleet default; the provider endpoint
+# below is an isolated dead port. The [models.deepseek-v4-flash] block mirrors
+# config/runtime.toml's shape so the runtime resolves; its model id is what the
+# gate matches against the catalog.
+default = "ollama_cloud.deepseek-v4-flash"
+
+# Startup requires every id in Standalone_lane.required_ids
+# to be declared here with a non-empty slot list; it synthesizes nothing. A slot
+# names a runtime binding from this same file, so the only slot this fixture can
+# offer is the binding it declares below.
 [runtime.exact_output_lanes.hitl_auto_judge]
-slots = ["deepseek.smoke"]
+slots = ["ollama_cloud.deepseek-v4-flash"]
 
 [runtime.exact_output_lanes.board_attention_exact]
-slots = ["deepseek.smoke"]
+slots = ["ollama_cloud.deepseek-v4-flash"]
 
-[providers.deepseek]
-display-name = "Transport Harness Smoke"
+[providers.ollama_cloud]
+display-name = "Release Evidence Smoke"
 protocol = "openai-compatible-http"
 endpoint = "http://127.0.0.1:9/v1"
 # Exact-output slots above run on this provider, and a slot whose provider
@@ -16,20 +40,28 @@ endpoint = "http://127.0.0.1:9/v1"
 # ever answered, so the value only has to be a valid deadline.
 exact-body-timeout-s = 1200.0
 
-[models.smoke]
-# Exact-output startup requires a model row in the embedded AGENT_CORE catalog.
-# The binding still uses the isolated loopback endpoint above; no model is called.
+# Synthetic authorization for the loopback provider fixture. This harness never
+# reaches Ollama Cloud, so inheriting that catalog row's environment credential
+# would make isolated Item boot depend on OLLAMA_CLOUD_API_KEY.
+[providers.ollama_cloud.credentials]
+type = "inline"
+value = "release-evidence-loopback"
+
+[models.deepseek-v4-flash]
+# config/runtime.toml declares this on the same row: ollama.com /v1 turns
+# reasoning on when a request carries no control, so a row that says
+# nothing about reasoning is refused before dispatch (#36412) -- here that
+# refusal ended the first Keeper turn before the fixture model saw a request.
+reasoning-uncontrolled = true
 api-name = "deepseek-v4-flash"
 max-context = 32768
 tools-support = true
 streaming = true
 
-[models.smoke.capabilities]
-supports-tool-choice = true
-
-[deepseek.smoke]
+[ollama_cloud.deepseek-v4-flash]
 is-default = true
 max-concurrent = 1
 
+# Item acceptance needs the optional appraiser to be admitted; no model call is made.
 [runtime.exact_output_lanes.candle_appraiser]
-slots = ["deepseek.smoke"]
+slots = ["ollama_cloud.deepseek-v4-flash"]

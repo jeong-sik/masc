@@ -101,6 +101,7 @@ for src, dst in [('runtime.toml', 'config/runtime.toml'),
     target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(fixtures / src, target)
     config_hashes[src] = hashlib.sha256(target.read_bytes()).hexdigest()
+(base / '.masc/config/prompts').mkdir(exist_ok=True)
 server = None
 reservation = None
 

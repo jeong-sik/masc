@@ -839,7 +839,8 @@ let resolve_stored_credential config name = function
        | Stored_redirect _ | Unresolved_credential -> Ok None)
 ;;
 
-type credential_prune_retirement = { retiring_agent_name : string; uuid_target : string option }
+type credential_prune_retirement =
+  { retiring_agent_name : string; uuid_target : string option; alias_names : string list }
 
 type credential_prune_snapshot =
   { credentials : (agent_credential * credential_prune_retirement) list
@@ -977,35 +978,37 @@ let file_backed_publication_error failure =
 
 type credential_store_snapshot =
   { current_credentials : (stored_credential * agent_credential) list
-  ; orphaned_names : string list }
+  ; orphaned_names : string list
+  ; aliases : (string * string * agent_credential) list }
 
 let credential_store_snapshot_in_transaction (Credential_transaction config) =
   let ( let* ) = Result.bind in
   let* files = credential_read_result (fun () -> read_dir (agents_dir config)) in
   let files = Array.to_list files |> List.filter (fun file -> Filename.check_suffix file ".json")
       |> List.sort String.compare in
-  let rec discover names orphans = function
-    | [] -> Ok (List.sort_uniq String.compare names, List.sort_uniq String.compare orphans)
+  let rec discover names orphans aliases = function
+    | [] -> Ok (List.sort_uniq String.compare names, List.sort_uniq String.compare orphans, aliases)
     | file :: rest ->
       let name = Filename.chop_suffix file ".json" in
       let path = Filename.concat (agents_dir config) file in
       let* present = credential_path_exists path in
-      if not present then discover names orphans rest
+      if not present then discover names orphans aliases rest
       else
         let* stored = read_stored_credential config name path in
         (match stored with
-         | Unresolved_credential -> discover names orphans rest
-         | Stored_credential credential -> discover (credential.agent_name :: names) orphans rest
+         | Unresolved_credential -> discover names orphans aliases rest
+         | Stored_credential credential -> discover (credential.agent_name :: names) orphans aliases rest
          | Stored_redirect target ->
            let* present = credential_path_exists target in
-           if not present then discover names (name :: orphans) rest
+           if not present then discover names (name :: orphans) aliases rest
            else
              let* resolved = resolve_stored_credential config name stored in
              (match resolved with
-              | None -> discover names orphans rest
-              | Some credential -> discover (credential.agent_name :: names) orphans rest))
+              | None -> discover names orphans aliases rest
+              | Some credential -> discover (credential.agent_name :: names) orphans
+                  ((name, target, credential) :: aliases) rest))
   in
-  let* names, orphans = discover [] [] files in
+  let* names, orphans, aliases = discover [] [] [] files in
   let rec current_credentials acc = function
     | [] -> Ok (List.rev acc)
     | name :: rest ->
@@ -1037,7 +1040,7 @@ let credential_store_snapshot_in_transaction (Credential_transaction config) =
          | Stored_credential _ | Unresolved_credential -> current_orphans acc rest)
   in
   let* orphaned_names = current_orphans [] orphans in
-  Ok { current_credentials = credentials; orphaned_names }
+  Ok { current_credentials = credentials; orphaned_names; aliases }
 ;;
 
 (* Prune adds deletion authority only after current-store discovery. Rotation
@@ -1049,10 +1052,14 @@ let credential_prune_snapshot_in_transaction ((Credential_transaction config) as
     | [] -> Ok (List.rev acc)
     | (stored, credential) :: rest ->
       let* uuid_target = credential_owned_uuid_target config credential.agent_name stored credential in
-      let authority = { retiring_agent_name = credential.agent_name; uuid_target } in
+      let alias_names = List.filter_map (fun (alias, target, resolved) ->
+        if not (String.equal alias credential.agent_name) && resolved = credential
+           && uuid_target = Some target then Some alias else None) snapshot.aliases
+        |> List.sort_uniq String.compare in
+      let authority = { retiring_agent_name = credential.agent_name; uuid_target; alias_names } in
       validate ((credential, authority) :: acc) rest in
   let* credentials = validate [] snapshot.current_credentials in
-  let orphaned_redirects = List.map (fun agent_name -> { retiring_agent_name = agent_name; uuid_target = None })
+  let orphaned_redirects = List.map (fun agent_name -> { retiring_agent_name = agent_name; uuid_target = None; alias_names = [] })
       snapshot.orphaned_names in
   Ok { credentials; orphaned_redirects }
 ;;
@@ -1068,9 +1075,12 @@ let retire_prune_credential_in_transaction (Credential_transaction config) retir
   try
     Fun.protect ~finally:(fun () -> !credential_cache_invalidator_ref config)
       (fun () ->
-        unlink_prune_path (credential_file config retirement.retiring_agent_name);
+        (* Canonical authority remains discoverable if dependent cleanup fails. *)
         unlink_prune_path (raw_token_file config retirement.retiring_agent_name);
+        List.iter (fun alias -> unlink_prune_path (credential_file config alias))
+          retirement.alias_names;
         Option.iter unlink_prune_path retirement.uuid_target;
+        unlink_prune_path (credential_file config retirement.retiring_agent_name);
         Ok ())
   with
   | Sys_error detail -> Error (System (System_error.IoError detail))

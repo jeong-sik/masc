@@ -84,11 +84,9 @@ def run(executable):
             # Task palette entries derive from the loaded durable snapshot.
             # Startup's Dashboard header appears before that async read; Enter
             # on a query with no matching entry simply closes the palette.
-            ready = b"1 awaiting verification"
-            h.wait_for_output(process, fd, output, ready, start=0, timeout=5)
-            h.wait_for_output(process, fd, output, h.FRAME_END,
-                              start=h.end_of_needle(output, ready, 0), timeout=3)
-            h.palette_go(process, fd, output, ("task " + TASK_ID).encode(), b"TITLEHEAD")
+            h.send_and_wait(process, fd, output, b":", b"MASC Command palette")
+            h.send_and_wait(process, fd, output, ("task " + TASK_ID).encode(), b"TITLEHEAD")
+            h.send_and_wait(process, fd, output, b"\r", b"MASC Task")
             # x on a Task owns its existing cancel editor, rather than the
             # Goal lifecycle handler. An empty reason must leave it untouched.
             original = (Path(base) / ".masc" / "tasks" / "backlog.json").read_bytes()

@@ -23507,6 +23507,7 @@ and is loaded on demand through keeper_skill.
                  | Link.Task, Planning, Some task_id ->
                      state.planning_mode <- Planning_list;
                      state.task_detail_id <- Some task_id;
+                     state.task_detail_scroll <- 0;
                      state.task_history <- None;
                      state.task_focus <-
                        Masc_tui_overview_tasks.land_on state.tasks ~task_id;

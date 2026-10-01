@@ -1,13 +1,13 @@
 # Item execution warm-up withdrawal
 
-The source receipt records a new functional regression failing against the parent and passing after the store correction from #40190 was carried onto the preview stack. The first corrected run exposed older currency fixtures without canonical workspace identity; the matching corrected fixtures were carried forward as well.
+## Current source check
 
-The final two focused suites passed 21 tests in 1.20s; TypeScript passed. The Item scenarios call the real refreshExecution path with a synthetic initializing HTTP envelope. They verify visible account and preview withdrawal, refusal of an old held reply, and a fresh account read after workspace recovery. Currency scenarios cover reconnect and epoch changes in existing summary/header consumers.
+Source `04c7980d4d2b1473258d796001cda9bd00e68d4c` passed both focused suites: 23 tests in 1.59s; `tsc --noEmit` exited0. The current regression test, store, scenario and workflow hashes are recorded in receipt.json. Raw focused-test and typecheck logs are retained alongside it.
 
-These are component/store checks using synthetic HTTP and a portrait stub. They do not prove native pixels, purchase/equip/restart durability or installed TUI. No Dune build or CI was started. Source identities and hashes are in receipt.json.
+The actual Chromium scenario passed through local Vite with production components/store, intercepted synthetic execution/account HTTP and mocked portrait PNG503. It withdrew the visible account, preview and preview failure during warm-up, then freshly read0.600 Candle/two owned items after recovery. Current captures and the distinct warmup-manifest.json are under browser/current/. The manual browser workflow now invokes this scenario without replacing the other scenario manifests; the workflow itself was not executed here.
 
-## Actual Chromium warm-up transition
+These checks establish frontend fixture behavior. Native pixels, live purchases/restart, installed service and production Keeper turns remain unverified. No build or CI was started.
 
-Scenario source `4497c76d6b4ec134ce867ac621c2bb959bab43c7` passed through local Vite with production Item components and store. The browser made actual intercepted HTTP requests to both Item and execution endpoints. The original preview failed visibly through mocked PNG503; an initializing execution reply withdrew account, picture and failure. A recovered execution envelope restored a newly read account (0.600 Candle, two owned items) without reviving the old preview. Three captures and the original manifest are retained under browser/. No page errors were recorded.
+## Historical records
 
-The first successful attempt supplied an incorrect source identity and is excluded; the retained run used the independently read git HEAD. These captures prove fixture frontend behavior; native pixels, live purchases/restart and installed TUI remain unverified.
+The original baseline failure and older21-test result are retained in historical-receipt.json, with the original4497 Chromium captures under browser/. The propagated test source no longer matches that historical focused-test hash, so those records are not evidence for the current source. The original discarded wrong-GITHUB_SHA browser attempt remains excluded.

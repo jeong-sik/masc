@@ -1,47 +1,71 @@
 {
-  "source_commit": "0ea63417bb1752c767387f303564a1fb11b12fcc",
-  "base_commit": "8d3b778ab56b678e560614ac7f0f63690e95122c",
-  "production_change_source": "#40190 f8501d1ce1d377f20cf5ae65b42c47fbeabb9307 store correction only",
-  "baseline_new_regression": {
-    "result": "FAIL",
-    "assertion": "executionWorkspaceAuthority expected null after real refreshExecution initializing reply; received old workspace authority"
-  },
-  "first_corrected_run": {
-    "item_tests": "15 passed",
-    "currency_tests": "2 failed: older fixtures omitted canonical workspace identity",
-    "resolution": "port matching currency fixtures and functional authority-withdrawal scenarios from #40190; add separate visible-preview warm-up regression"
-  },
+  "source_commit": "04c7980d4d2b1473258d796001cda9bd00e68d4c",
+  "base_commit": "b2b6f756d57a429fbe303a7b99c01b63209c02a8",
   "final_focused_checks": {
-    "command": "vitest run src/components/keeper-items-panel.test.ts src/components/candle-economy.test.ts",
+    "command": "vitest run --config vitest.config.ts src/components/keeper-items-panel.test.ts src/components/candle-economy.test.ts",
     "result": "PASS",
     "test_files": 2,
-    "tests": 21,
-    "duration_seconds": 1.2,
+    "tests": 23,
+    "duration_seconds": 1.59,
     "typecheck_command": "tsc --noEmit",
     "typecheck_exit_code": 0
   },
   "source_sha256": {
     "dashboard/src/store.ts": "93e30594fa54a56bcc5868ddec23a8459901f4535ea89712392851bdcced7391",
-    "dashboard/src/components/keeper-items-panel.test.ts": "6b2a61605a47a8831bfd09a7e8c3776a3352e7a4165a69850ded28534ce45f3f",
-    "dashboard/src/components/candle-economy.test.ts": "0f0e4a1657c8adc3f0cdace127996b989481609ec4b44839177a421a6bf31237"
+    "dashboard/src/components/keeper-items-panel.test.ts": "3541906b42b094aeea43bdc656417c61132469da4b7fce07621e9ad56616b9c8",
+    "dashboard/src/components/candle-economy.test.ts": "0f0e4a1657c8adc3f0cdace127996b989481609ec4b44839177a421a6bf31237",
+    "dashboard/e2e/keeper-items-warmup.mjs": "c082742c5516224aa1dd6060bb1260c89603257ff9516bf51133b20370e18bd3",
+    ".github/workflows/dashboard-artifact.yml": "b354b7bc676e0f235b65e02704a9c1eca204ce02c08dbe91097d3bbe33ae6c44"
   },
-  "scope": "Production store/components with synthetic HTTP and portrait component stub; native/browser/installed behavior not established by this receipt",
-  "build_or_ci_started": false,
-  "installed_complete": false,
   "browser": {
-    "result": "PASS",
-    "source_commit": "4497c76d6b4ec134ce867ac621c2bb959bab43c7",
-    "captures": 3,
-    "execution_reads": 2,
-    "account_reads": 2,
-    "errors": [],
-    "scope": "Actual Chromium through Vite using production components/store, synthetic HTTP and portrait PNG503; not installed or native proof",
-    "discarded_run": "First successful run used an incorrect supplied GITHUB_SHA; its artifacts are excluded. Retained manifest comes from a separate rerun with verified git rev-parse HEAD."
+    "scope": "real Chromium production Item component/store with synthetic HTTP accounts and execution warm-up; mocked PNG503",
+    "source_sha": "04c7980d4d2b1473258d796001cda9bd00e68d4c",
+    "browser_version": "149.0.7827.55",
+    "executionReads": [
+      {
+        "recovered": false
+      },
+      {
+        "recovered": true
+      }
+    ],
+    "accountReads": [
+      {
+        "recovered": false
+      },
+      {
+        "recovered": false
+      },
+      {
+        "recovered": true
+      }
+    ],
+    "captures": [
+      {
+        "name": "item-preview-before-warmup",
+        "sha256": "4d5952ed0c05d211263e2a2cc8c490490578562edfee725657090e57685e2b8a"
+      },
+      {
+        "name": "item-workspace-warmup",
+        "sha256": "92497afdb58d580cb5d1437f392b1968e319ee2c3cb1c8153cc1194baa558dea"
+      },
+      {
+        "name": "item-workspace-recovered",
+        "sha256": "759a701bdcd396eb40660bd0d00e46810d06460ca84f71533c5523710bbdfccf"
+      }
+    ],
+    "errors": []
   },
-  "browser_sha256": {
-    "item-preview-before-warmup.png": "4d5952ed0c05d211263e2a2cc8c490490578562edfee725657090e57685e2b8a",
-    "item-workspace-warmup.png": "92497afdb58d580cb5d1437f392b1968e319ee2c3cb1c8153cc1194baa558dea",
-    "manifest.json": "ca8b44ce69e46a4aaaed2add3b839959a708dc70f81d5c12b09ed9da98036f71",
-    "item-workspace-recovered.png": "759a701bdcd396eb40660bd0d00e46810d06460ca84f71533c5523710bbdfccf"
-  }
+  "artifact_sha256": {
+    "focused-tests.log": "9723d6baa7679cf495a7883f41221b6175f82300c508aef384e889230fef1160",
+    "typecheck.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "browser/current/item-preview-before-warmup.png": "4d5952ed0c05d211263e2a2cc8c490490578562edfee725657090e57685e2b8a",
+    "browser/current/item-workspace-recovered.png": "759a701bdcd396eb40660bd0d00e46810d06460ca84f71533c5523710bbdfccf",
+    "browser/current/item-workspace-warmup.png": "92497afdb58d580cb5d1437f392b1968e319ee2c3cb1c8153cc1194baa558dea",
+    "browser/current/warmup-manifest.json": "6e53357655404c358e76c73bc2841dc27b2c7993bf69a1d47669444323e02990"
+  },
+  "scope": "Current focused component/store checks and actual Chromium through local Vite with synthetic account/execution HTTP and portraitPNG503. Workflow source wired; workflow itself not executed. No native/installed/build/CI claim.",
+  "historical_receipt": "Historical baseline and older21-test/4497 browser records retained in historical-receipt.json; their hashes do not bind the current regression source and are not current verification.",
+  "build_or_ci_started": false,
+  "installed_complete": false
 }

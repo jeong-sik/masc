@@ -1969,6 +1969,7 @@ type runtime_resolved_lane = {
 }
 
 type runtime_resolved_snapshot = {
+  rrs_usage : (Tui_decode_usage.provider_usage_windows, string) result;
   rrs_generated_at_iso : string;
   rrs_config_path : string option;
   rrs_default_runtime_id : string option;
@@ -3863,7 +3864,8 @@ let decode_runtime_resolved_snapshot json =
     loop rrs_lanes
   in
   Ok
-    { rrs_generated_at_iso
+    { rrs_usage = Tui_decode_usage.decode_provider_usage_windows json
+    ; rrs_generated_at_iso
     ; rrs_config_path
     ; rrs_default_runtime_id
     ; rrs_media_failover

@@ -15,7 +15,18 @@ let runtime = {js|function browserScene(args) {
     try { return new URL(raw,element.baseURI || document.baseURI).href; }
     catch { return null; }
   };
-  const key = Symbol.for('masc.browser.scene.refs.v3');
+  // WAI-ARIA 1.2 roles are ordered fallbacks, not simultaneous declarations.
+  // https://www.w3.org/TR/wai-aria-1.2/#roles
+  const ariaRoles = new Set('alert alertdialog application article banner blockquote button caption cell checkbox code columnheader combobox complementary contentinfo definition deletion dialog directory document emphasis feed figure form generic grid gridcell group heading img insertion link list listbox listitem log main marquee math menu menubar menuitem menuitemcheckbox menuitemradio meter navigation none note option paragraph presentation progressbar radio radiogroup region row rowgroup rowheader scrollbar search searchbox separator slider spinbutton status strong subscript suggestion superscript switch tab table tablist tabpanel term textbox time timer toolbar tooltip tree treegrid treeitem'.split(' '));
+  const effectiveRole = element => (element.getAttribute('role') || '').split(/\s+/)
+    .find(role => ariaRoles.has(role)) || null;
+  const actionRoles = new Set('button link checkbox radio switch menuitem menuitemcheckbox menuitemradio tab option combobox'.split(' '));
+  const associatedControl = element => element.localName === 'label' ? (element.control ?? null) : null;
+  const labelledControl = element => {
+    const target=associatedControl(element);
+    return target instanceof HTMLInputElement && ['checkbox','radio'].includes(target.type) ? target : null;
+  };
+  const key = Symbol.for('masc.browser.scene.refs.v4');
   let state = window[key];
   const sameDocument = state && state.document === document && state.root === document.documentElement;
   if (args.mode === 'resolve' || args.mode === 'resolve_link') {
@@ -24,6 +35,12 @@ let runtime = {js|function browserScene(args) {
     const element = ref && ref.deref();
     if (!element || !element.isConnected || element.ownerDocument !== document)
       throw new Error('scene_node_detached');
+    if (state.labels.has(args.nodeId)) {
+      const pinned = state.labels.get(args.nodeId), current = associatedControl(element);
+      if (current !== (pinned.target ? pinned.target.deref() : null)
+          || (current?.type ?? null) !== pinned.type)
+        throw new Error('scene_label_control_changed');
+    }
     if (args.mode === 'resolve_link') {
       if (!state.links.has(args.nodeId)) throw new Error('scene_link_not_observed');
       if (linkHref(element) !== state.links.get(args.nodeId)) throw new Error('scene_link_destination_changed');
@@ -37,24 +54,30 @@ let runtime = {js|function browserScene(args) {
     const id = Array.from(crypto.getRandomValues(new Uint8Array(16)),
       byte => byte.toString(16).padStart(2,'0')).join('');
     state = {document, root:document.documentElement, id, next:0,
-      ids:new WeakMap(), nodes:new Map(), links:new Map()};
+      ids:new WeakMap(), nodes:new Map(), links:new Map(), labels:new Map()};
     window[key] = state;
   }
   if (args.mode === 'viewport') return {documentId:state.id,width:innerWidth,height:innerHeight,scrollX,scrollY};
   // Weak references preserve identity through reordering without retaining
   // detached page nodes for the lifetime of a single-page application.
   for (const [id, ref] of state.nodes) if (!ref.deref()?.isConnected) {
-    state.nodes.delete(id); state.links.delete(id);
+    state.nodes.delete(id); state.links.delete(id); state.labels.delete(id);
   }
   const nodeId = element => {
     let id = state.ids.get(element);
-    const href = linkHref(element);
+    const href = linkHref(element), target = associatedControl(element);
+    const pinned = id && state.labels.get(id);
+    const labelChanged = element.localName === 'label' && (!pinned
+      || target !== (pinned.target ? pinned.target.deref() : null)
+      || (target?.type ?? null) !== pinned.type);
     // A recycled anchor gets a new observation reference. Retire its old
     // reference so connected virtualized anchors cannot accumulate revisions.
-    if (!id || (href !== null && state.links.get(id) !== href)) {
-      if (id) { state.nodes.delete(id); state.links.delete(id); }
+    if (!id || (href !== null && state.links.get(id) !== href) || labelChanged) {
+      if (id) { state.nodes.delete(id); state.links.delete(id); state.labels.delete(id); }
       id = 'n' + (++state.next); state.ids.set(element,id);
       if (href !== null) state.links.set(id,href);
+      if (element.localName === 'label')
+        state.labels.set(id,{target:target === null ? null : new WeakRef(target),type:target?.type ?? null});
     }
     state.nodes.set(id,new WeakRef(element));
     return id;
@@ -65,7 +88,7 @@ let runtime = {js|function browserScene(args) {
   // otherwise retain the closest standard landmark that was actually exposed.
   const attribute = (element, name) =>
     typeof element.getAttribute === 'function' ? element.getAttribute(name) : null;
-  const regionRole = element => String(attribute(element,'role') || element.localName || '')
+  const regionRole = element => String(effectiveRole(element) || element.localName || '')
     .trim().toLowerCase();
   const regionTokens = new Set(['main','navigation','complementary','region','log',
     'banner','contentinfo','search','form','article','header','footer','section']);
@@ -73,9 +96,35 @@ let runtime = {js|function browserScene(args) {
     if (!element || element.nodeType !== 1) return false;
     const tag = element.localName || '', role = attribute(element,'role') || '';
     if (['main','nav','aside','section','article','header','footer','search'].includes(tag)) return true;
-    if (role.split(/\s+/).some(token => regionTokens.has(token))) return true;
+    if (regionTokens.has(effectiveRole(element))) return true;
     return tag === 'form' && (attribute(element,'aria-label') !== null
       || attribute(element,'aria-labelledby') !== null);
+  };
+  // Only declared DOM semantics make a custom control actionable. A native
+  // label is itself an activation target, including a hidden radio's label.
+  const nativeControlSelector = 'button,input:not([type=hidden]),textarea,select,summary,[contenteditable=true]';
+  const controlSelector = nativeControlSelector + ',label,[onclick],[role]';
+  const isControl = element => linkHref(element) !== null
+    || element.hasAttribute('onclick') || actionRoles.has(effectiveRole(element))
+    || (element.localName === 'label' ? (() => {
+        const target=labelledControl(element);
+        return target !== null && !(visible(target) && boxes(target.getClientRects(),target).length);
+      })()
+      : element.matches(nativeControlSelector));
+  // WAI-ARIA mixed is supported by checkbox/menuitemcheckbox only.
+  const checkedState = element => {
+    const role=effectiveRole(element), value=attribute(element,'aria-checked');
+    if (!['checkbox','menuitemcheckbox','radio','menuitemradio','switch'].includes(role)
+        || !['true','false','mixed'].includes(value)) return undefined;
+    return value === 'mixed' && !['checkbox','menuitemcheckbox'].includes(role) ? 'false' : value;
+  };
+  const disabledControl = element => {
+    const target = associatedControl(element) || element;
+    if (target.matches(':disabled')) return true;
+    for (const start of new Set([element,target]))
+      for (let parent=start; parent; parent=parent.parentElement)
+      if (attribute(parent,'aria-disabled') === 'true') return true;
+    return false;
   };
   const maxChars = args.maxChars;
   if (!Number.isSafeInteger(maxChars) || maxChars < 1 || maxChars > 100000)
@@ -122,16 +171,70 @@ let runtime = {js|function browserScene(args) {
         height:Math.min(bottom,r.bottom)-Math.max(top,r.y)}))
       .filter(r => r.width>0 && r.height>0);
   };
+  const labelTextRects = (element, admit = rects => Array.from(rects)) => {
+    if (element.localName !== 'label') return [];
+    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT), rects = [];
+    while (walker.nextNode()) {
+      const text = walker.currentNode, parent = text.parentElement;
+      if (!text.textContent.trim() || !parent || getComputedStyle(parent).visibility !== 'visible') continue;
+      let hidden = false;
+      for (let node = parent; node; node = node.parentElement) {
+        const style = getComputedStyle(node);
+        if (style.display === 'none' || Number(style.opacity) === 0) { hidden = true; break; }
+      }
+      if (hidden) continue;
+      const range = document.createRange(); range.selectNodeContents(text);
+      rects.push(...admit(range.getClientRects(), parent).filter(r => r.width > 0 && r.height > 0));
+    }
+    return rects;
+  };
   const visibleText = element => {
+    // innerText is the browser's whitespace/text-transform authority. Use it
+    // only when every painted text fragment is admitted by the scene geometry.
+    // innerText alone includes opacity-zero and clipped descendants; those
+    // retain the filtered traversal below rather than exposing hidden content.
+    const admitted=document.createTreeWalker(element,NodeFilter.SHOW_TEXT);
+    let complete=true;
+    while (admitted.nextNode()) {
+      const child=admitted.currentNode, parent=child.parentElement;
+      if (!parent || !child.textContent.trim()) continue;
+      let displayed=true, opaque=true;
+      for (let ancestor=parent;ancestor;ancestor=ancestor.parentElement) {
+        if (css(ancestor).display === 'none') displayed=false;
+        if (Number(css(ancestor).opacity) === 0) opaque=false;
+      }
+      if (!displayed || css(parent).visibility !== 'visible') continue;
+      const range=document.createRange(); range.selectNodeContents(child);
+      if (!opaque || !boxes(range.getClientRects(),parent).length) {complete=false;break;}
+    }
+    if (complete && typeof element.innerText === 'string') return element.innerText.trim();
     const pending=Array.from(element.childNodes || []).reverse(), parts=[];
+    let separator=null;
+    const append = text => {
+      if (!text) return;
+      if (separator !== null && parts.length && !/[\n\t]$/.test(parts[parts.length-1])) parts.push(separator);
+      separator=null; parts.push(text);
+    };
     while (pending.length) {
       const child=pending.pop();
+      if (child.separator) {
+        if (separator !== '\n') separator=child.separator;
+        continue;
+      }
       if (child.nodeType === 3) {
         const parent=child.parentElement;
         if (!parent || !child.textContent || !visible(parent)) continue;
         const range=document.createRange(); range.selectNodeContents(child);
-        if (boxes(range.getClientRects(),parent).length) parts.push(child.textContent);
+        if (boxes(range.getClientRects(),parent).length) append(child.textContent);
       } else if (child.nodeType === 1 && rendered(child)) {
+        if (child.localName === 'br' && visible(child)) { separator=null; parts.push('\n'); continue; }
+        const boundary = visible(child) && ['block','list-item','table-row','flex','grid'].includes(css(child).display);
+        const boundarySeparator = css(child).display === 'table-cell' ? '\t' : '\n';
+        if (boundary || css(child).display === 'table-cell') {
+          pending.push({separator:boundarySeparator});
+          // Opening and closing boundaries coalesce until actual text arrives.
+          if (separator !== '\n') separator=boundarySeparator;
+        }
         for (let i=child.childNodes.length-1;i>=0;i--) pending.push(child.childNodes[i]);
       }
     }
@@ -191,7 +294,7 @@ let runtime = {js|function browserScene(args) {
     for (let ancestor=element; ancestor; ancestor=ancestor.parentElement) {
       const tag=ancestor.localName || '';
       if (/^h[1-6]$/.test(tag)) return Number(tag.slice(1));
-      if (ancestor.getAttribute('role') === 'heading') {
+      if (effectiveRole(ancestor) === 'heading') {
         const raw=ancestor.getAttribute('aria-level');
         return /^[1-6]$/.test(raw || '') ? Number(raw) : null;
       }
@@ -224,8 +327,8 @@ let runtime = {js|function browserScene(args) {
     const regions = [...(root.matches(selector) ? [root] : []),...root.querySelectorAll(selector)];
     for (const region of regions) {
       if (truncated) break;
-      if (!visible(region)) continue;
-      const role = region.getAttribute('role') || region.localName;
+      if (!visible(region) || !semanticRegion(region)) continue;
+      const role = effectiveRole(region) || region.localName;
       const name = regionLabel(region);
       describe('region',region,name,boxes(region.getClientRects(),region),{role});
     }
@@ -265,17 +368,49 @@ let runtime = {js|function browserScene(args) {
     if (node.nodeType !== 1 || ['script','style','noscript','template'].includes(node.localName)
         || !rendered(node)) continue;
     const tag=node.localName;
-    const control=linkHref(node) !== null || node.matches('button,input:not([type=hidden]),textarea,select,[contenteditable=true],[role=button],[role=link]');
-    if (control && visible(node)) {
-      const label=node.getAttribute('aria-label') || node.getAttribute('placeholder') || node.innerText || svgVisibleText(node) || tag;
+    const control=isControl(node);
+    const controlRects = control && visible(node)
+      ? boxes(node.getClientRects(),node) : [];
+    if (control && visible(node) && !controlRects.length)
+      controlRects.push(...labelTextRects(node, (rects, parent) => boxes(rects,parent)));
+    if (control && visible(node) && controlRects.length) {
+      const labelledBy = (attribute(node,'aria-labelledby') || '').split(/\s+/).filter(Boolean)
+        .map(id => document.getElementById?.(id)?.textContent || '').join(' ').trim();
+      const nativeLabel = Array.from(node.labels || []).map(visibleText).filter(Boolean).join(' ');
+      const label=node.getAttribute('aria-label') || labelledBy || nativeLabel
+        || node.getAttribute('placeholder') || visibleText(node) || svgVisibleText(node) || tag;
       const input=node instanceof HTMLInputElement, textarea=node instanceof HTMLTextAreaElement;
+      const target=labelledControl(node) || node, disabled=disabledControl(node);
       const editable=(textarea || (input && ['text','search','email','url','tel','password','number'].includes(node.type)))
-        && !node.readOnly && !node.matches(':disabled');
-      describe('control',node,label,boxes(node.getClientRects(),node),{
+        && !node.readOnly && !disabled;
+      describe('control',node,label,controlRects,{
         ...(linkHref(node) !== null ? {href:linkHref(node)} : {}),
-        controlType:input ? node.type : tag,disabled:node.matches(':disabled'),editable,
-        clickable:typeof node.click === 'function' && !node.matches(':disabled'),
+        controlType:input ? node.type : tag,disabled,editable,
+        role:effectiveRole(node),
+        ...(target instanceof HTMLInputElement && ['checkbox','radio'].includes(target.type)
+          ? {checked:!!target.checked,...(target.type === 'checkbox' ? {indeterminate:!!target.indeterminate} : {})} : {}),
+        ...(checkedState(node) !== undefined ? {ariaChecked:checkedState(node)} : {}),
+        ...(['tab','option','row','treeitem','gridcell'].includes(effectiveRole(node))
+          && ['true','false'].includes(attribute(node,'aria-selected'))
+          ? {ariaSelected:attribute(node,'aria-selected')} : {}),
+        clickable:typeof node.click === 'function' && !disabled,
         headingLevel:headingLevel(node)});
+      // A delegated handler does not consume its heading, prose or raster
+      // descendants. Intrinsic/ARIA controls retain their own label semantics.
+      if (node.hasAttribute('onclick') && !node.matches(nativeControlSelector)
+          && !actionRoles.has(effectiveRole(node)) && tag !== 'label') {
+        for (let i=node.childNodes.length-1;i>=0;i--) stack.push(node.childNodes[i]);
+        continue;
+      }
+      // Visit the outermost nested controls; each visits its own descendants.
+      const nested=Array.from(node.querySelectorAll?.(controlSelector+',a') || [])
+        .filter(isControl);
+      const nestedSet=new Set(nested);
+      for (let i=nested.length-1;i>=0;i--) {
+        let ancestor=nested[i].parentElement;
+        while (ancestor && ancestor !== node && !nestedSet.has(ancestor)) ancestor=ancestor.parentElement;
+        if (ancestor === node) stack.push(nested[i]);
+      }
       continue;
     }
     if (visible(node) && ['img','svg','canvas','video','iframe','frame'].includes(tag)) {

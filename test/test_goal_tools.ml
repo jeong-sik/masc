@@ -512,6 +512,37 @@ let check_event_recordings label expected receipt =
   check (list (pair string string)) label expected actual
 ;;
 
+let test_goal_creation_survives_event_recording_failure () =
+  with_workspace @@ fun config ->
+  let call_goal_tool config name args =
+    match Tool_workspace.dispatch (workspace_ctx config) ~name ~args:(`Assoc args) with
+    | Some result -> parse_json_result result
+    | None -> fail (name ^ " not handled") in
+  let path = Filename.concat (Workspace_utils.masc_dir config) "goal_events.jsonl" in
+  Unix.mkdir path 0o700;
+  let created = call_goal_tool config "masc_goal_upsert"
+      [ "title", `String "Committed shared Goal"; "metric", `String "artifacts"
+      ; "target_value", `String "1" ] in
+  check_event_recordings "the missing creation is explicit"
+    [ "goal_created", "failed" ] created;
+  let recording = List.hd (event_recordings created) in
+  check bool "the append error is retained" true
+    (String.length (get_string_field recording "error") > 0);
+  let goal_id = get_string_field created "goal_id" in
+  let payload = Yojson.Safe.Util.member "payload" recording in
+  check string "the failed creation retains its Goal id" goal_id (get_string_field payload "id");
+  check string "the failed creation retains its actor" "planner" (get_string_field payload "actor");
+  let listed = call_goal_tool config "masc_goal_list" []
+      |> Yojson.Safe.Util.member "goals" |> Yojson.Safe.Util.to_list in
+  (match listed with
+   | [ goal ] ->
+     check string "the Goal committed despite append failure" goal_id (get_string_field goal "id");
+     check bool "the stored Goal has no owner" false
+       (Yojson.Safe.Util.member "owner" goal <> `Null)
+   | _ -> fail "one committed Goal must remain readable");
+  check bool "the failed append did not overwrite its directory" true (Sys.is_directory path)
+;;
+
 let test_metadata_edit_survives_event_recording_failure () =
   List.iter (fun phase ->
     with_workspace @@ fun config ->
@@ -1257,6 +1288,10 @@ let () =
             "creating a goal emits an event"
             `Quick
             test_goal_creation_emits_an_event
+        ; test_case
+            "committed creation retains its failed event receipt"
+            `Quick
+            test_goal_creation_survives_event_recording_failure
         ; test_case
             "metadata edit survives event recording failure"
             `Quick

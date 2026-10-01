@@ -88,8 +88,9 @@ let test_a_full_row_leaves_the_field_one_cell () =
   Alcotest.(check bool) "which is wider than the frame" true
     (cells drawn > Masc_tui_ansi.framed_inner_width cols)
 
-(* The two panes measured above lay their rows out through the helper. The
-   params pane has no hand-counted fit left at all. *)
+(* The two panes measured above lay their edit rows out through the helper.
+   Params list columns have independent fits; its edit-row producer must not
+   pre-fit the value by hand beside [row_with_field]. *)
 let render = "bin/masc_tui_render.ml"
 
 let calls ~binding ~callee =
@@ -99,8 +100,10 @@ let calls ~binding ~callee =
 let test_the_panes_measured_here_lay_out_through_the_helper () =
   Alcotest.(check int) "params: the edit row" 1
     (calls ~binding:"render_runtime_params" ~callee:"row_with_field");
-  Alcotest.(check int) "params: and no hand count beside it" 0
-    (calls ~binding:"render_runtime_params" ~callee:"fit_width");
+  Alcotest.(check int) "params: the edit-row producer uses the helper" 1
+    (calls ~binding:"runtime_param_edit_row" ~callee:"row_with_field");
+  Alcotest.(check int) "params: and no hand count beside the edit field" 0
+    (calls ~binding:"runtime_param_edit_row" ~callee:"fit_width");
   Alcotest.(check int) "presets: the list rows and the name prompt" 2
     (calls ~binding:"render_presets" ~callee:"row_with_field")
 

@@ -1,0 +1,43 @@
+{
+  "base_commit": "c112b2030652a5a25360f5d5322f8dc6da99c598",
+  "branch": "fix/play-current-main-20260930",
+  "local_tree_is_complete_pinned_main": true,
+  "local_composition": "read-only local clone of complete pinned main, then cherry-pick only Play source/audit/fixture commits and admit the newly added retired Keeper direct test caller",
+  "checked_source_commit": "c6b12939e01ef97d04f9ecd5159b27423d3d633a",
+  "source_sha256": {
+    "lib/auth/auth.mli": "2a0a09a2f4459ce901e819ec6d939a0db0425b025978126dc556621de58b506d",
+    "lib/auth/auth_credential_base.ml": "452f6b991f0fe7401bafc51c6c14813deee32f2b9ec55b5934d2e3ac3282e7b6",
+    "lib/auth/auth_credential_token.ml": "95685243c3da05a636e076a137d0533ebe61566ccbd9cfd891fc0e4334357dce",
+    "lib/auth/auth_credential_token.mli": "e45c275428cfb245aad93da900c432472b8e812a354383065a05537654763202",
+    "lib/keeper/keeper_dos_controller.ml": "eb1df86accabfcd18a21145819d23cd7a3bdbbae3ddc560d2ea911c8b89da31e",
+    "lib/keeper/keeper_dos_controller.mli": "810ad58ba0beac49cdf26a47619c24bc6354d317002c740f1bc9088fb27743c7",
+    "lib/play/play_invite.ml": "b9d22380d1c7d07373e6cfc6e2de8703b63eb8415d627d1730359ceb339e019a",
+    "lib/play/play_invite.mli": "53e8229485435be8e2c7a9c0861cf056f609d59754eadd53182eb18344d1a8c4",
+    "lib/server/server_routes_http_routes_play.ml": "a4b42093645264f09b4a04568451e20984d7c21bb37a8c83562b60e0814bd50a",
+    "test/test_play_credential_transaction.ml": "f3a4a4c8eb1ed777cf76bb62113788b33bb4595e72c1281c3adbe8e8006dfe74",
+    "test/test_play_invite.ml": "0c396afae9396cb6c5d11bead9dfd8e5cd35e70f1f9bcae0bfe344ab7a539f4a",
+    "test/test_dos_input_routes.ml": "d9370ac207f6e84211238d63f6fcbf60a4a6bf9b326a0e2f0aa205015aa8c865",
+    "test/test_dos_tools.ml": "410c151a926a6374063b3ad80de135aff65a5960b882f0b09ee2459a5f3a32a3",
+    "test/dune": "c36b7e06b84305a375088de8525a51f37ca8053b1a9fa82559200bb5f6a76502",
+    "test/stanzas/test_play_credential_transaction.inc": "d9db5f195b1c7ebed79bba76485707f79c5d0dda36f48f97425c031d70c1285c",
+    "docs/rfc/RFC-play-link-for-the-shared-machine.md": "5c0fedcc905b6fafd60c6739b4b79e800ae40e11e5f3105e2eb39f2b14cc19c9",
+    "changelog.d/40136.md": "79480a7e53876a7c20f113d8376d8996ab7773a0b46c1f7c6cd6d7dab9286acc"
+  },
+  "native_tests_executed": false,
+  "ci_executed": false,
+  "native_typecheck": "not_run_locally; current publication/native validation belongs to root",
+  "source_caller_repair": "current main removed Keeper regression now reads holder_left with Auth admission; release_retired API, implementation and case retained",
+  "preserved_current_main": {
+    "test_dune_exact": true,
+    "release_retired_api_exact": true,
+    "release_retired_source_exact": true,
+    "release_retired_api_sha256": "0fe533a36f9a4bd70101932211b193743412b418b8aab3cdcd3bb017a0f9d536",
+    "release_retired_source_sha256": "03e60f32e42deabee0e6d234cd11cb8c49e1b661dfb4849d042512c741f8fb7b"
+  },
+  "historical_artifacts": [
+    "static-checks.json",
+    "refresh-parse-only.json"
+  ],
+  "current_checks": "current-main-source-checks.json",
+  "route_refusal_fixture": "current main Server_refusal discriminant uses code, human sentence uses error"
+}

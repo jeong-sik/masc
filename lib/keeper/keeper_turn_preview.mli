@@ -19,23 +19,26 @@ type t =
 
 val tail_bytes : int
 
+(** A write capability for exactly one preview and its redaction state. Older
+    writers never resolve the currently displayed preview by Keeper name. *)
+type writer
+
 val current : keeper_name:string -> t option
 
-val note_text : keeper_name:string -> now:float -> string -> unit
+val note_text : writer:writer option -> now:float -> string -> unit
 (** Record the newest response text's tail, redacted with the snapshot
     {!reset} armed. Blank text is ignored — a tool-only turn must not erase
-    the last visible words. Before any {!reset} for this keeper no text is
-    recorded. *)
+    the last visible words. A missing writer records nothing. *)
 
-val note_tool : keeper_name:string -> now:float -> string -> unit
+val note_tool : writer:writer option -> now:float -> string -> unit
 
-val reset : keeper_name:string -> now:float -> redaction:Keeper_secret_redaction.t -> unit
-(** Start the turn's preview. Every response text the turn records passes
+val reset : keeper_name:string -> now:float -> redaction:Keeper_secret_redaction.t -> writer
+(** Install a new displayed preview and return its writer. Every response text the turn records passes
     through [redaction] first; streamed deltas pass through one
     {!Keeper_stream_text_redaction} per provider attempt, so the tail grows a
     line at a time and a secret split between deltas never reaches it. *)
 
-val note_attempt : keeper_name:string -> now:float -> runtime_id:string -> unit
-val note_failure : keeper_name:string -> now:float -> runtime_id:string -> string -> unit
-val note_stream : keeper_name:string -> now:float -> Agent_core.Types.sse_event -> unit
+val note_attempt : writer:writer option -> now:float -> runtime_id:string -> unit
+val note_failure : writer:writer option -> now:float -> runtime_id:string -> string -> unit
+val note_stream : writer:writer option -> now:float -> Agent_core.Types.sse_event -> unit
 val status_text : t -> string

@@ -1292,13 +1292,18 @@ async function doFetchExecution(): Promise<void> {
   const force = nextExecutionForce
   nextExecutionForce = false
   const requestGeneration = executionSnapshotRequestGeneration()
+  const publicationEpoch = executionPublicationEpoch
+  const publicationGeneration = executionPublicationGenerationWatermark
+  const requestStillCurrent = () => requestGeneration === executionHydrationRequestGeneration
+    && publicationEpoch === executionPublicationEpoch
+    && publicationGeneration === executionPublicationGenerationWatermark
   executionLoading.value = true
   executionError.value = null
   try {
     const { fetchDashboardExecution } = await import('./api/dashboard-execution')
     const data = await fetchDashboardExecution({ force })
     if (isInitializingExecutionPayload(data)) {
-      if (requestGeneration !== executionHydrationRequestGeneration) return
+      if (!requestStillCurrent()) return
       withdrawExecutionWorkspaceAuthority()
       scheduleExecutionWarmRetry()
       return
@@ -1307,7 +1312,7 @@ async function doFetchExecution(): Promise<void> {
     hydrateExecutionSnapshot(data, { requestGeneration })
   } catch (err) {
     console.warn('[Dashboard] execution fetch error:', err)
-    if (requestGeneration !== executionHydrationRequestGeneration) return
+    if (!requestStillCurrent()) return
     executionError.value = errorMessageOr(err, 'Execution projection load failed')
     candleObservation.value = { status: 'unavailable', reason: executionError.value }
     showToast('실행 데이터 로드 실패', 'error', 5000)

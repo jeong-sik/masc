@@ -15,3 +15,7 @@ These checks establish frontend fixture behavior. Native pixels, live purchases/
 ## Historical records
 
 The original baseline failure and older21-test result are retained in historical-receipt.json, with the original4497 Chromium captures under browser/. The propagated test source no longer matches that historical focused-test hash, so those records are not evidence for the current source. The original discarded wrong-GITHUB_SHA browser attempt remains excluded.
+
+## Delayed publication follow-up
+
+`publication-race-receipt.json` binds the updated store and test files to the focused 24-test run in `publication-race-tests.log`. Earlier receipts and browser captures retain their original source scope; they do not establish browser behavior after this publication-race correction.

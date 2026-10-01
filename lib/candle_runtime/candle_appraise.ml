@@ -91,7 +91,16 @@ let preparation_error ~at ~events error =
       (match Candle_balance.of_events ~at:through events with
        | Ok _ -> A.Transport_unavailable (Candle_balance.error_to_string error)
        | Error historical -> invalid historical)
-  | error -> invalid error
+  | (Candle_balance.Missing_half_life
+    | Candle_balance.Invalid_half_life _
+    | Candle_balance.Decay_failed {error=(Candle_decay.Negative_amount _ | Candle_decay.Non_positive_hours _);_}
+    | Candle_balance.Duplicate_payment _
+    | Candle_balance.Balance_overflow _
+    | Candle_balance.Negative_purchase _
+    | Candle_balance.Unowned_equipment _
+    | Candle_balance.Wrong_equipment_slot _
+    | Candle_balance.Already_owned _
+    | Candle_balance.Insufficient_balance _) as error -> invalid error
 
 let settle ~now ~appraise ~policy ~base_path events (waiting : Candle_payout.waiting) =
   let* body = decide ~appraise ~policy events waiting in
@@ -114,13 +123,27 @@ let settle ~now ~appraise ~policy ~base_path events (waiting : Candle_payout.wai
         | E.Paid payment -> Candle_balance.credit prepared.balance ~at payment |> Result.map (fun _ -> ())
         | E.Half_life_set _ | E.Unattributed _ | E.Equipped _ | E.Purchased _ | E.Payout_failed _ | E.Snapshot _ | E.Payout_owed _ | E.Candidates _ -> Ok () in
       (match credit, current_policy.half_life with
-       | Ok (), _ -> Ok (prepared.policy_events @ [{E.at;body}], Settled waiting.goal_id)
+       | Ok (), (Candle_decay.Off | Candle_decay.Hours _) ->
+         Ok (prepared.policy_events @ [{E.at;body}], Settled waiting.goal_id)
        | Error (Candle_balance.Balance_overflow _ as error), Candle_decay.Hours _ ->
          (* Commit the authorized policy boundary even when credit must wait:
             switching from Off must actually start decay before the next pulse. *)
          Ok (prepared.policy_events, Retry_later {goal_id=waiting.goal_id;
            detail=Candle_balance.error_to_string error})
-       | Error error, _ -> Error (A.Invalid_response (Candle_balance.error_to_string error)))
+       | Error (Candle_balance.Balance_overflow _ as error), Candle_decay.Off ->
+         Error (A.Invalid_response (Candle_balance.error_to_string error))
+       | Error ((Candle_balance.Missing_half_life
+           | Candle_balance.Clock_reversed _
+           | Candle_balance.Invalid_half_life _
+           | Candle_balance.Decay_failed _
+           | Candle_balance.Duplicate_payment _
+           | Candle_balance.Negative_purchase _
+           | Candle_balance.Unowned_equipment _
+           | Candle_balance.Wrong_equipment_slot _
+           | Candle_balance.Already_owned _
+           | Candle_balance.Insufficient_balance _) as error),
+         (Candle_decay.Off | Candle_decay.Hours _) ->
+         Error (A.Invalid_response (Candle_balance.error_to_string error)))
     | Candle_payout.Waiting _ | Candle_payout.No_obligation | Candle_payout.Failed _ | Candle_payout.Settled -> Ok ([], Superseded waiting.goal_id))
   |> Result.map_error (function
     | Candle_ledger.Refused error -> error

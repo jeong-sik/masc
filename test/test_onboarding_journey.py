@@ -1338,20 +1338,42 @@ class OfficialClientLookup(unittest.TestCase):
     def test_a_subcommand_spawns_the_client_the_lookup_finds(self):
         """The web setup path hands a configured command to these subcommands,
         which spawn it. With ~/.local/bin off PATH the spawn used to fail as
-        "not found"; the fake client below leaves a mark when it runs."""
+        "not found"; the fake client publishes its own effort metadata."""
         with tempfile.TemporaryDirectory() as home:
             marker = Path(home, 'spawned')
             client = Path(home, '.local/bin/codex')
             client.parent.mkdir(parents=True)
-            client.write_text('#!/bin/sh\nprintf %s spawned > ' + str(marker) + '\nexit 1\n')
+            client.write_text('''#!/usr/bin/env python3
+import json, os, pathlib, sys
+(pathlib.Path(os.environ['HOME']) / 'spawned').write_text('spawned')
+for line in sys.stdin:
+    request = json.loads(line)
+    method = request['method']
+    if method == 'initialized': continue
+    if method == 'initialize': result = {'userAgent':'journey-fixture/1'}
+    elif method == 'account/read': result = {'account':{'type':'apiKey'}, 'requiresOpenaiAuth':True}
+    elif method == 'model/list': result = {'data':[{
+        'id':'journey-ui-id', 'model':'journey-model', 'displayName':'Journey model', 'isDefault':True,
+        'supportedReasoningEfforts':[
+            {'reasoningEffort':'medium', 'description':'Everyday tasks'},
+            {'reasoningEffort':'future-effort', 'description':'New account-specific level'}],
+        'defaultReasoningEffort':'future-effort'}], 'nextCursor':None}
+    else: raise AssertionError('unexpected operation ' + method)
+    print(json.dumps({'id':request['id'],'result':result}), flush=True)
+''')
             client.chmod(0o700)
             env = dict(os.environ, HOME=home, PATH='/usr/bin:/bin')
             env.pop('CODEX_INSTALL_DIR', None)
             result = subprocess.run([BINARY, 'runtime-codex-models', '--cli-path', 'codex'],
                                     env=env, cwd=home, capture_output=True, text=True, timeout=60)
-            self.assertEqual(result.returncode, 1, result.stdout)
+            self.assertEqual(result.returncode, 0, result.stderr)
             self.assertTrue(marker.is_file(),
                             'masc did not spawn the client in the vendor directory: ' + result.stderr)
+            receipt = json.loads(result.stdout)
+            self.assertEqual(receipt['models'][0]['id'], 'journey-model')
+            self.assertEqual(receipt['models'][0]['supported_reasoning_efforts'],
+                             ['medium', 'future-effort'])
+            self.assertEqual(receipt['models'][0]['default_reasoning_effort'], 'future-effort')
 
 
 class QuickSetup(unittest.TestCase):

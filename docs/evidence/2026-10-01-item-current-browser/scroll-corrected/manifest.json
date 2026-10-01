@@ -1,0 +1,113 @@
+{
+  "scope": "production Item component in a controlled browser fixture; synthetic account and roster revisions",
+  "source_sha": "68db59f7d7ea05fe4f8128c84eebda69788c47f2",
+  "browser_version": "149.0.7827.55",
+  "requests": [
+    {
+      "failed": false,
+      "owned_items": [
+        "crown"
+      ]
+    },
+    {
+      "failed": false,
+      "owned_items": [
+        "crown",
+        "glasses"
+      ]
+    },
+    {
+      "failed": false,
+      "owned_items": [
+        "crown",
+        "glasses"
+      ]
+    },
+    {
+      "failed": true,
+      "owned_items": [
+        "crown",
+        "glasses"
+      ]
+    },
+    {
+      "failed": false,
+      "owned_items": [
+        "crown",
+        "glasses"
+      ]
+    }
+  ],
+  "portrait_requests": [
+    {
+      "keeper": "rondo",
+      "size": "224",
+      "preview": null
+    },
+    {
+      "keeper": "rondo",
+      "size": "224",
+      "preview": "beanie"
+    },
+    {
+      "keeper": "rondo",
+      "size": "224",
+      "preview": null
+    },
+    {
+      "keeper": "rondo",
+      "size": "224",
+      "preview": null
+    },
+    {
+      "keeper": "rondo",
+      "size": "224",
+      "preview": null
+    },
+    {
+      "keeper": "rondo",
+      "size": "224",
+      "preview": null
+    }
+  ],
+  "restoration": "held observed request released and settled to intended badge fallback",
+  "captures": [
+    {
+      "name": "keeper-items-desktop",
+      "sha256": "5d8edb9ea420577260846231c32ca69ab3dc996c13f00a6820865d26bfe16a0c"
+    },
+    {
+      "name": "keeper-items-preview-unavailable",
+      "sha256": "50347a68b0a3ca22ca8ee5fcab74d9cd040a9cc406b323668a00bea9278bfdb0"
+    },
+    {
+      "name": "keeper-items-preview-restored",
+      "sha256": "5d8edb9ea420577260846231c32ca69ab3dc996c13f00a6820865d26bfe16a0c"
+    },
+    {
+      "name": "keeper-items-mobile",
+      "sha256": "76ade8fb9c4b644bf2b8d3b068ccb601fe1ebdf4203d4c74164524a1d000b55d"
+    },
+    {
+      "name": "keeper-items-loading",
+      "sha256": "845ae6a495cd3ad421c479ad8d8695d6736c2aa11f9cc643af05ab23224b3567"
+    },
+    {
+      "name": "keeper-items-free-purchase",
+      "sha256": "841edccc23ee33b059d0b46600bb250ac910f48751cd64ef472f27667d5f13c9"
+    },
+    {
+      "name": "keeper-items-price-change",
+      "sha256": "b7e635786f0ab05b95330db86aeb2a975aa5ff17060a722af0e1933b662acc41"
+    },
+    {
+      "name": "keeper-items-unavailable",
+      "sha256": "d6ec71175cbbf2af2b84b8840d10c9adf63f7998397ac7e635d5febb4ac87872"
+    },
+    {
+      "name": "keeper-items-recovered",
+      "sha256": "9484e31829ca4f02cf4bafc0eb6a8acf8a1916beabde947338e0246bf94107c9"
+    }
+  ],
+  "errors": []
+}

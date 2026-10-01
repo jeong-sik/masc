@@ -67,3 +67,7 @@ val current : ('k, 'a) t -> ('k * 'a view) option
     and the key is the thing it is asking for. *)
 
 val current_key : ('k, 'a) t -> 'k option
+
+val current_request : ('k, 'a) t -> 'k request option
+(** The identity of the current reading, including after it has settled.
+    [None] when cleared; clearing preserves the next request's generation. *)

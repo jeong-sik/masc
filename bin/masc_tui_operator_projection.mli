@@ -45,6 +45,9 @@ module Flow : sig
   type t
 
   val initial : t
+  val invalidate : t -> t
+  (** Withdraw the current workspace's action and listings while preserving
+      a monotonic generation; old completions cannot settle a new action. *)
   val action_inflight : t -> bool
   val observe : t -> generation
   val begin_action : t -> (t * generation, [ `Already_inflight ]) result

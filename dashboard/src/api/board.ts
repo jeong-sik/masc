@@ -717,6 +717,7 @@ function normalizeBoardComment(raw: unknown): BoardComment | null {
   const supportedReactionEmojis = normalizeSupportedReactionEmojis(raw.supported_reaction_emojis)
   return {
     id,
+    ...(typeof raw.thread_offset === 'number' ? { thread_offset: raw.thread_offset } : {}),
     post_id: postId,
     parent_id: parentId,
     author,
@@ -1136,12 +1137,14 @@ export async function fetchFusionRunEvidencePost(postRunId: string): Promise<Boa
 export interface BoardCommentPage {
   offset: number
   total: number
+  revision?: string
 }
 
 export async function fetchBoardPost(
   postId: string,
   commentOffset?: number,
   commentLimit?: number,
+  focusedCommentId?: string | null,
 ): Promise<BoardPost & { comments: BoardComment[]; commentPage: BoardCommentPage }> {
   return timeBoardRequest('detail', () => runRequest('fetchBoardPost', async () => {
     const params = new URLSearchParams({
@@ -1150,6 +1153,7 @@ export async function fetchBoardPost(
     })
     if (commentOffset !== undefined) params.set('comment_offset', String(commentOffset))
     if (commentLimit !== undefined) params.set('comment_limit', String(commentLimit))
+    if (focusedCommentId) params.set('comment_focus', focusedCommentId)
     const raw = await get<Record<string, unknown>>(`/api/v1/board/${postId}?${params}`)
     const postRaw = isRecord(raw.post) ? raw.post : raw
     const post = normalizeBoardPost(postRaw) ?? {
@@ -1170,7 +1174,13 @@ export async function fetchBoardPost(
       visibility: 'internal',
       expires_at: null,
     }
-    const commentsRaw = Array.isArray(raw.comments) ? raw.comments : []
+    const commentsRaw = Array.isArray(raw.comment_context) ? raw.comment_context
+      : Array.isArray(raw.comments) ? raw.comments : []
+    if (Array.isArray(raw.comment_context) && commentsRaw.some(row =>
+      !isRecord(row) || typeof row.thread_offset !== 'number'
+      || !Number.isInteger(row.thread_offset) || row.thread_offset < 0)) {
+      throw new Error('Board detail returned invalid context positions')
+    }
     const comments = commentsRaw
       .map(normalizeBoardComment)
       .filter((row): row is BoardComment => row !== null)
@@ -1181,7 +1191,12 @@ export async function fetchBoardPost(
       || typeof total !== 'number' || !Number.isInteger(total) || total < offset) {
       throw new Error('Board detail returned an invalid comment page')
     }
-    return { ...post, comments, commentPage: { offset, total } }
+    if (raw.comment_revision !== undefined && typeof raw.comment_revision !== 'string') {
+      throw new Error('Board detail returned an invalid comment revision')
+    }
+    const commentPage: BoardCommentPage = { offset, total }
+    if (typeof raw.comment_revision === 'string') commentPage.revision = raw.comment_revision
+    return { ...post, comments, commentPage }
   }))
 }
 

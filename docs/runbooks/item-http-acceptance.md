@@ -23,6 +23,9 @@ equipped marker through real authenticated API requests. At 360px it also
 reloads the document, opens the visible keeper command menu and enters Item
 from fresh application state. Desktop and fresh mobile entry must each make a real account read;
 the menu lower edge, runtime alert width and mobile overflow are checked.
+A second fresh mobile reload enters through the composer `/detail` command list
+and independently checks its account request, ownership, equipment and portrait.
+All four screenshots and entry paths are recorded.
 External browser
 requests are blocked; API responses are never replaced by fixtures. Finally
 the harness stops its server, starts a new process against the same isolated

@@ -5011,7 +5011,6 @@ type task_goal_links_reading =
   | Goal_links_read_failed of string
   | Goal_links_read of (string, string list) Hashtbl.t
 
-
 type state = {
   mutable home_selected : home_action option;
   mutable home_decision_scroll : int;

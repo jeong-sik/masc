@@ -19,3 +19,10 @@ val hand_to : Workspace.config -> now:float -> (string list, string) result
     {!keeper_names}. [Error] when the fleet or the credentials do not list,
     since then nobody can say who sits at the machine. The play page lists these names and
     [masc_dos_pass] accepts only them. *)
+
+val hand_to_in_transaction :
+  transaction:Auth.credential_transaction -> Workspace.config -> now:float ->
+  (string list, string) result
+(** The same participant projection as {!hand_to}, without a second Auth
+    admission. [transaction] must belong to [config]'s workspace. The caller
+    keeps it through the actual controller handoff. *)

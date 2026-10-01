@@ -490,6 +490,12 @@ val current_credential_in_transaction :
     owner and UUID binding before authorizing an effect. [None] means the name
     file is absent; unreadable, unresolved or contradictory storage is [Error]. *)
 
+val list_current_credentials_in_transaction :
+  credential_transaction -> (agent_credential list, masc_error) result
+(** The same current-owner discovery as {!list_current_credentials}, under the
+    caller's existing admission. It acquires no recursive credential lock;
+    keep admission through the effect authorized by this snapshot. *)
+
 val list_current_credentials : string -> (agent_credential list, masc_error) result
 (** Discover credential owners and read their current named bindings under one
     Auth admission, in name order. A surviving UUID or stored alias is data,

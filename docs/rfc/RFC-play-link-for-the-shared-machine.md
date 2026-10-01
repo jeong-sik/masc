@@ -215,8 +215,12 @@ related: ["0439", "machine-spectating-goes-through-lanes"]
   (`Play_seat.hand_to`, 플레이 페이지가 보여 주는 목록과 같다). 다른 이름은 거절하고 아무것도 바꾸지 않는다.
 - 이 검사는 모든 요청이 credential 을 가져야 하는 워크스페이스(인증 켜짐, `require_token = true`)에서만 한다.
   초대 발급 조건과 같다. 그렇지 않은 곳에서는 이름을 스스로 정할 수 있어 명단이 없으므로 지금처럼 넘긴다.
-- Keeper 가 움직이든, 플레이 페이지 라우트든, MCP 클라이언트든 도구를 부르기 전에 같은 문
-  (`Keeper_dos_controller.before_call`)을 지난다.
+- Keeper 가 움직이든, 플레이 페이지 라우트든, MCP 클라이언트든 같은 실행 경계
+  (`Keeper_dos_controller.execute`)을 지난다.
+- handoff 대상 명단 조회·떠난 조종권 해제·실제 `Dos_lane.pass`는 하나의 Auth credential transaction 안에서 진행한다.
+  대상 회수가 먼저 끝나면 명단에서 빠져 거절한다. handoff가 먼저 admission을 얻으면 회수는 handoff가 끝날 때까지 기다린 뒤 그 대상의 조종권을 푼다.
+  실제 DOS 변경 중에는 알림을 큐에 넣기만 하고, Board 전송은 Auth 잠금을 놓은 뒤 한다. HTTP 본문을 기다리며 이 잠금을 잡지 않는다.
+  이미 인증한 요청의 주체를 다시 인증하거나 이미 발송된 요청을 취소하는 정책을 추가하지 않는다(§2.4).
 - 비어 있는 조종권은 지금처럼 다음에 움직이는 쪽이 가져간다.
 - "떠난 조종자"(`Keeper_dos_controller.holder_left`)는 다음 움직임 전에 풀린다.
   - 멈춘 keeper.

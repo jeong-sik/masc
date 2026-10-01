@@ -302,7 +302,7 @@ let overlay ?(frame = -1) ?width ~(now : float) ~(chat_target : string option)
   in
   let fitted_name name =
     Masc_tui_message_layout.fit_width
-      (Tui_decode.sanitize_terminal_text name) name_width
+      (Masc.Tui_terminal_text.sanitize_terminal_text name) name_width
   in
   (* What the rows below are a reading of. [observed_at] is when a poll last
      answered; without one there are no rows at all, so "showing the last rows

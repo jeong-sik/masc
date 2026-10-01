@@ -612,7 +612,9 @@ let test_post_effect_peer_artifact_remains_delegatable () =
         close_out blocked;
         match B.attach_artifact_manifest ~base_path exported with
         | Ok _ -> Alcotest.fail "blocked manifest storage unexpectedly succeeded"
-        | Error { kind = B.Artifact_storage_failure; _ } -> ());
+        | Error { kind = B.Artifact_storage_failure; _ } -> ()
+        | Error { kind = B.Inline_budget_exceeded; message } ->
+            Alcotest.failf "expected storage failure, got budget refusal: %s" message);
     let failed = Tool_result.make_err
         ~tool_name:"keeper_artifact_transfer" ~class_:Tool_result.Runtime_failure
         ~start_time:(Tool_timing.start ()) ~data

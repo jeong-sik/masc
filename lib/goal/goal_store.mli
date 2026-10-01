@@ -63,10 +63,25 @@ val goal_to_yojson : goal -> Yojson.Safe.t
 
 (** {1 State} *)
 
+type event_kind = Created | Updated | Phase | Edited
+
+type pending_event = {
+  event_id : string;
+  goal_id : string;
+  store_revision : int;
+  recorded_at : string;
+  kind : event_kind;
+  payload : Yojson.Safe.t;
+}
+
+val event_kind_to_string : event_kind -> string
+val pending_event_to_yojson : pending_event -> Yojson.Safe.t
+
 type state = {
   version : int;
   updated_at : string;
   goals : goal list;
+  pending_events : pending_event list;
 }
 (** On-disk shape persisted to {!goals_path}. [version] increments on every
     write so concurrent readers detect drift. *)
@@ -308,3 +323,26 @@ val validate_state_json : Yojson.Safe.t -> (unit, string) result
 (** Pure current-schema validation for the setup CLI. Does not read, repair
     or write a store; the rejection is rendered as one sentence naming the
     member. *)
+
+(** Persist audit attribution atomically with the upsert. Events retain the
+    store revision assigned under the Goal lock and survive every mutation. *)
+val upsert_goal_with_events :
+  Workspace_utils.config -> actor:string -> ?id:string -> ?title:string ->
+  ?metric:string -> ?target_value:string -> ?due_date:string -> ?priority:int ->
+  unit -> (goal * [ `created | `updated of goal ] * pending_event list, write_error) result
+
+(** Idempotently publish pending audit rows and acknowledge them under the Goal
+    lock. A failed append keeps all intents; an acknowledgement failure retains
+    already-published IDs for a safe retry. No external callback is invoked. *)
+val flush_pending_events : Workspace_utils.config -> (unit, string) result
+
+(** Append to the shared Goal audit ledger with the same cross-process durable
+    lock as outbox delivery. Does not acquire the Goal lock and may be called
+    from an existing Goal transaction. *)
+val append_audit_event : Workspace_utils.config -> Yojson.Safe.t -> (unit, string) result
+
+(** Publish existing outbox intents before appending a later ordinary event,
+    under the Goal lock. Do not call from an existing Goal transaction; use
+    [append_audit_event] there to avoid acquiring the Goal lock again. *)
+val append_audit_event_after_pending :
+  Workspace_utils.config -> Yojson.Safe.t -> (unit, string) result

@@ -60,3 +60,5 @@ Missing Git objects are fetched from the API-resolved `--repo` repository,
 independently of the checkout's origin. Receipt publication includes flush and
 close in its rollback boundary. On failure it removes the incomplete receipt
 and deletes only a candidate ref still pointing to the commit it created.
+
+Ordinary merge admission and candidate preparation share `review-scope.py`: approvals require the same base ref and native stack position, and either the exact reviewed base SHA or the same merge-base with the reviewed head. Missing or changed diff scope requires a fresh independent approval; unrelated base advancement remains admissible.

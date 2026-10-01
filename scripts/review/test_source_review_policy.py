@@ -46,6 +46,9 @@ elif endpoint.endswith('/stacks/10'):
     for n in members:
         item = dict(fixture, **fixture.get('prs',{}).get(str(n),{}))
         data['pull_requests'].append({'number':n,'state':item.get('pr_state','open'),'head':{'sha':item['head']}})
+elif '/compare/' in endpoint:
+    base = endpoint.split('/compare/', 1)[1].split('...', 1)[0]
+    data = {'merge_base_commit': {'sha': 'c'*40 if state.get('equivalent_base') else base}}
 elif endpoint == 'user': data = {'login':'reviewer'}
 elif '/actions/runs?' in endpoint:
     reads = sum('/actions/runs?' in row for row in log.read_text().splitlines())
@@ -99,9 +102,10 @@ class SourceReviewPolicy(unittest.TestCase):
                         REVIEW_FIXTURE=str(self.fixture), REVIEW_CALLS=str(self.calls))
         self.state = {'head':HEAD, 'base':'main'}
 
-    def review(self, state='APPROVED', author='reviewer', verdict='PASS', run=False):
+    def review(self, state='APPROVED', author='reviewer', verdict='PASS', run=False, base=None, stack=None):
         line = f'verdict: {verdict} head: {HEAD}' + (' run: 42' if run else '') + ' by: independent'
-        return {'id':12,'state':state,'body':line+'\n\n---\nreview-scope: '+json.dumps({'base_ref':self.state.get('base','main'),'base_sha':'c'*40,'stack':None},separators=(',',':'))+f'\napprove-guard: head `{HEAD}` · source review',
+        base = self.state['base'] if base is None else base
+        return {'id':12,'state':state,'body':line+'\n\n---\nreview-scope: '+json.dumps({'base_ref':base,'base_sha':'c'*40,'stack':stack},separators=(',',':'))+f'\napprove-guard: head `{HEAD}` · source review',
                 'user':{'login':author},'author_association':'MEMBER','submitted_at':'2026-09-30T00:00:00Z'}
 
     def invoke(self, script, *args):
@@ -157,6 +161,21 @@ class SourceReviewPolicy(unittest.TestCase):
         self.state.update(reviews=[self.review()],moved=OTHER,move_after=2)
         self.assertEqual(self.invoke('merge-guard.sh','--check').returncode,2)
 
+    def test_same_head_changed_diff_base_requires_reapproval(self):
+        self.state.update(reviews=[self.review()], base_move_after=1)
+        self.assertEqual(self.invoke('merge-guard.sh', '--check').returncode, 2)
+        self.assertNotIn('/merge-async', self.calls.read_text())
+
+    def test_same_head_unrelated_base_advance_preserves_approval(self):
+        self.state.update(reviews=[self.review()], base_move_after=1, equivalent_base=True)
+        self.assert_ok(self.invoke('merge-guard.sh', '--check'))
+        self.assertIn('/compare/', self.calls.read_text())
+
+    def test_same_head_retarget_requires_reapproval(self):
+        self.state['reviews'] = [self.review(base='previous/base')]
+        self.assertEqual(self.invoke('merge-guard.sh', '--check').returncode, 2)
+        self.assertNotIn('/merge-async', self.calls.read_text())
+
     def test_author_approval_is_not_counted(self):
         self.state['reviews']=[self.review(author='writer')]
         self.assertEqual(self.invoke('merge-guard.sh','--check').returncode,2)
@@ -180,7 +199,7 @@ class SourceReviewPolicy(unittest.TestCase):
         self.assertEqual(self.invoke('merge-guard.sh','--check','--run','42').returncode,2)
 
     def test_queue_reports_parent_after_source_review_without_actions(self):
-        self.state.update(base='stack/parent',reviews=[self.review()])
+        self.state.update(base='stack/parent',reviews=[self.review(base='stack/parent')])
         self.fixture.write_text(json.dumps(self.state))
         result=subprocess.run(['bash',str(HERE/'queue-ledger.sh'),'--repo','team/repo'],
                               env=self.env,text=True,capture_output=True)
@@ -201,7 +220,7 @@ class SourceReviewPolicy(unittest.TestCase):
         self.assertEqual(self.invoke('merge-guard.sh','--check').returncode,2)
 
     def test_child_merge_and_check_wait_for_parent(self):
-        self.state.update(base='stack/parent',reviews=[self.review()])
+        self.state.update(base='stack/parent',reviews=[self.review(base='stack/parent')])
         for args in [(), ('--check',)]:
             with self.subTest(args=args):
                 result=self.invoke('merge-guard.sh',*args)
@@ -253,11 +272,22 @@ class SourceReviewPolicy(unittest.TestCase):
 
 
     def native_stack(self):
-        lower_review = self.review()
+        lower_review = self.review(base='main', stack={'number':10,'position':1,'base_ref':'main'})
         lower_review['body'] = lower_review['body'].replace(HEAD, OTHER)
-        self.state.update(native=True,base='stack/parent',reviews=[self.review()],
+        self.state.update(native=True,base='stack/parent',reviews=[self.review(base='stack/parent', stack={'number':10,'position':2,'base_ref':'main'})],
                           prs={'2':{'head':OTHER,'base':'main','branch':'stack/parent','reviews':[lower_review]},
                                '3':{'head':'d'*40,'base':'stack/change','branch':'stack/upper','reviews':[],'draft':True}})
+
+    def set_review_stack_base(self, target):
+        for state in [self.state, *self.state.get('prs', {}).values()]:
+            for review in state.get('reviews', []):
+                lines = review['body'].splitlines()
+                for i, line in enumerate(lines):
+                    if line.startswith('review-scope: '):
+                        scope = json.loads(line.removeprefix('review-scope: '))
+                        scope['stack']['base_ref'] = target
+                        lines[i] = 'review-scope: ' + json.dumps(scope, separators=(',', ':'))
+                review['body'] = '\n'.join(lines)
 
     def test_native_middle_admits_lower_and_selected_without_upper_review(self):
         self.native_stack()
@@ -298,7 +328,7 @@ class SourceReviewPolicy(unittest.TestCase):
 
     def test_native_lower_release_requires_its_own_ci(self):
         self.native_stack()
-        review = self.review(run=True)
+        review = self.review(run=True, base='main', stack={'number':10,'position':1,'base_ref':'main'})
         review['body'] = review['body'].replace(HEAD, OTHER)
         self.state['prs']['2'].update(branch='release/v1',ci='failure',reviews=[review])
         result = self.invoke('merge-guard.sh')
@@ -309,6 +339,7 @@ class SourceReviewPolicy(unittest.TestCase):
     def test_native_custom_base_and_merged_lower_member(self):
         self.native_stack()
         self.state['stack_base'] = 'feature/integration'
+        self.set_review_stack_base('feature/integration')
         self.state['prs']['2'].update(base='feature/integration',pr_state='closed',merged=True,reviews=[])
         result = self.invoke('merge-guard.sh','--check')
         self.assert_ok(result)
@@ -349,6 +380,7 @@ class SourceReviewPolicy(unittest.TestCase):
     def test_native_async_acceptance_is_receipt_not_completion(self):
         self.native_stack()
         self.state['stack_base'] = 'feature/integration'
+        self.set_review_stack_base('feature/integration')
         result = self.invoke('merge-guard.sh')
         self.assert_ok(result)
         self.assertIn('ASYNC MERGE RECEIPT for #2, #1 (preflight target: feature/integration; accepted destination unconfirmed', result.stdout)
@@ -359,6 +391,7 @@ class SourceReviewPolicy(unittest.TestCase):
     def test_native_queue_uses_guard_target_after_initial_read(self):
         self.native_stack()
         self.state.update(stack_base='feature/old', stack_target_moves='feature/current')
+        self.set_review_stack_base('feature/current')
         self.fixture.write_text(json.dumps(self.state))
         result=subprocess.run(['bash',str(HERE/'queue-ledger.sh'),'--repo','team/repo'],
             env=self.env,text=True,capture_output=True)
@@ -371,6 +404,7 @@ class SourceReviewPolicy(unittest.TestCase):
         for fmt, expected in [('md', r'feature/a\|b'), ('tsv', 'feature/a|b')]:
             self.native_stack()
             self.state['stack_base']='feature/a|b'
+            self.set_review_stack_base('feature/a|b')
             self.fixture.write_text(json.dumps(self.state))
             result=subprocess.run(['bash',str(HERE/'queue-ledger.sh'),'--repo','team/repo','--format',fmt],
                 env=self.env,text=True,capture_output=True)
@@ -385,6 +419,7 @@ class SourceReviewPolicy(unittest.TestCase):
     def test_native_queue_reports_scope_not_parent_wait(self):
         self.native_stack()
         self.state['stack_base'] = 'feature/integration'
+        self.set_review_stack_base('feature/integration')
         self.fixture.write_text(json.dumps(self.state))
         result = subprocess.run(['bash',str(HERE/'queue-ledger.sh'),'--repo','team/repo'],
                                 env=self.env,text=True,capture_output=True)

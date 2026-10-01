@@ -12,9 +12,14 @@ args = sys.argv[1:]
 endpoint = next((a for a in args if a.startswith('repos/') or a == 'user'), '')
 with (root/'requests.jsonl').open('a') as out: out.write(endpoint+'\n')
 data = json.loads((root/'fixture.json').read_text())
-if endpoint not in data:
+if '/compare/' in endpoint:
+    base, head = endpoint.split('/compare/', 1)[1].split('...', 1)
+    sha = subprocess.check_output(['git', '-C', str(root/'repo'), 'merge-base', base, head], text=True).strip()
+    value = {'merge_base_commit': {'sha': sha}}
+elif endpoint not in data:
     print('unexpected endpoint '+endpoint, file=sys.stderr); sys.exit(3)
-value = data[endpoint]
+else:
+    value = data[endpoint]
 if '--jq' in args:
     q = subprocess.run(['jq','-r',args[args.index('--jq')+1]], input=json.dumps(value), text=True, capture_output=True)
     sys.stdout.write(q.stdout); sys.stderr.write(q.stderr); sys.exit(q.returncode)

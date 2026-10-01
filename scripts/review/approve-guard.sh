@@ -46,7 +46,7 @@ review_rows() {
     sort -t "$(printf '\t')" -k1,1 -k2,2nr | awk -F '\t' 'NF && !seen[$1]++'
 }
 check_reviews() {
-  local rows who rid state bound
+  local rows who rid state bound scope_status
   rows=$(review_rows) || return 1
   approvals=""; replaced=""; own_approval=""
   while IFS=$'\t' read -r who rid state; do
@@ -58,6 +58,12 @@ check_reviews() {
     if [ "$state" = APPROVED ] && [ "$who" != "$pr_author" ]; then
       bound=$(ci_gh_json "repos/$repo/pulls/$pr/reviews/$rid" "select(.state == \"APPROVED\" and (.author_association == \"OWNER\" or .author_association == \"MEMBER\" or .author_association == \"COLLABORATOR\") and ($approval_head_jq)) | .id") || return 1
       if [ -n "$bound" ]; then
+        scope_status=0
+        ci_gh_json "repos/$repo/pulls/$pr/reviews/$rid" '.' |
+          python3 "$here/review-scope.py" --repo "$repo" --head "$head" \
+            --base-ref "$pr_base" --base-sha "$pr_base_sha" --stack "$pr_stack" --gh "$GH" || scope_status=$?
+        if [ "$scope_status" -eq 2 ]; then continue; fi
+        [ "$scope_status" -eq 0 ] || return 1
         approvals="$approvals $bound"
         [ "$who" != "$me" ] || own_approval="$bound"
       fi
@@ -111,7 +117,7 @@ check_verdict
 read_current_pr
 if [ "$check_only" -eq 1 ]; then echo "WOULD APPROVE #$pr head $head policy $review_policy"; exit 0; fi
 # Bind the reviewed base and native stack position to the approval itself.
-# main may advance later; candidate preparation compares the actual diff base.
+# Main may advance later when the reviewed diff base remains identical.
 scope=$(python3 -c 'import json,sys; s=json.loads(sys.argv[3]); print(json.dumps({"base_ref":sys.argv[1],"base_sha":sys.argv[2],"stack":None if s is None else {"number":s["number"],"position":s["position"],"base_ref":s["base"]["ref"]}},separators=(",",":")))' "$pr_base" "$pr_base_sha" "$pr_stack")
 footer=$(printf '\n\n---\nreview-scope: %s\napprove-guard: head `%s` · %s review' "$scope" "$head" "$review_policy")
 if [ -n "$own_approval" ]; then

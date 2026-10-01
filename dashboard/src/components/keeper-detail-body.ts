@@ -55,6 +55,7 @@ import { KeeperRuntimeAlertStrip } from './keeper-detail-alert-strip'
 import { KeeperCommsPanel, RepositoryCheckoutsPanel } from './keeper-detail-comms'
 import { KeeperFusionRuns } from './keeper-detail-fusion'
 import { KeeperClearContextDialog } from './keeper-detail-lifecycle'
+import { KeeperItemsPanel } from './keeper-items-panel'
 import { KeeperSandboxLivePanel } from './keeper-sandbox-live'
 import type { KeeperDetailEvidenceState } from './keeper-detail-hooks'
 
@@ -103,6 +104,14 @@ export function KeeperDetailBody({
     <div class="kw-detail-body mx-auto flex w-full max-w-[1180px] flex-col gap-5 v2-monitoring-surface">
         <${KeeperRuntimeAlertStrip} keeper=${keeper} />
         <${KeeperDetailSectionRail} />
+
+        <${KeeperDetailSection}
+          id="keeper-items"
+          eyebrow="Candle & 초상화"
+          title="아이템"
+        >
+          <${KeeperItemsPanel} keeper=${keeper} />
+        <//>
 
         <${KeeperDetailSection}
           id="keeper-comms"

@@ -1279,7 +1279,7 @@ let code_history_bindings =
   ; b Navigate "Home/End" "edges"
   ; b Act "Enter" "open" ~help:"open the record owning the first visible row; metadata and failure rows have no target"
   ; b Act "H" "close"
-  ; b Navigate "Esc" "back"
+  ; b Navigate "Left / Esc" "back"
   ; b Meta "?" "help"
   ]
 
@@ -1498,7 +1498,8 @@ let footer_hints_git_changes =
 
 let footer_hints_git_diff =
   hints_of_bindings
-    ([ b Navigate "j/k" "scroll"
+    ([ b Navigate "Shift-Left / Shift-Right" "pan"
+     ; b Navigate "j/k" "scroll"
      ; b Act "v" "open in code"
      ; b Act "p" "open PR"
      ; b Act "t/g" "task / goal"

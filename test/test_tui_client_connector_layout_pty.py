@@ -262,14 +262,11 @@ def run_read_states(executable, failed):
 
 
 def run_connector_startup_identity(executable, *, failed=False, leave=False):
-    fixtures = h.overview_event_http_fixtures()
+    fixtures = h.keeper_runtime_http_fixtures()
     health = h.GatedHttpResponse((200, {}), hold_seconds=20)
     full_health = h.GatedHttpResponse(h.fleet_safety_fixture(), hold_seconds=20)
     requests: list[str] = []
     lock = threading.Lock()
-    roster_path = "/api/v1/gate/keepers?detailed=true"
-    roster = fixtures[roster_path]
-    assert isinstance(roster, tuple)
 
     def record(path):
         with lock:
@@ -289,10 +286,6 @@ def run_connector_startup_identity(executable, *, failed=False, leave=False):
         record("/health?full=1")
         return response
 
-    def roster_response():
-        record(roster_path)
-        return roster
-
     def connector_response():
         record(h.CONNECTORS_PATH)
         return ((503, {"error": "startup connector failure"}) if failed else
@@ -301,7 +294,6 @@ def run_connector_startup_identity(executable, *, failed=False, leave=False):
     fixtures["/health"] = compact_response
     fixtures["/health?full=1"] = full_response
     fixtures[h.CONNECTORS_PATH] = connector_response
-    fixtures[roster_path] = roster_response
 
     def interact(process, fd, _slave, output, base):
         matching = h.with_workspace_identity({
@@ -331,19 +323,24 @@ def run_connector_startup_identity(executable, *, failed=False, leave=False):
                 if failed:
                     assert not any(b"no connectors registered" in row
                                    for row in screen(output).values()), screen(output)
-            # The visible Keeper pane reads its roster on full refreshes.
-            # A second later roster read means the previous bundle settled.
-            observed = count(roster_path)
-            assert h.wait_for_fixture_state(process, fd, output,
-                lambda: count(roster_path) >= observed + 2, timeout=3.0), requests
-            h.drain_until_quiet(process, fd, output)
-            assert count(h.CONNECTORS_PATH) == (0 if leave else 1), requests
+            if leave:
+                # The roster is applied only after workspace discovery settles.
+                h.wait_for_output(process, fd, output, b"\xe2\x80\xba to alpha",
+                                  start=start, timeout=3.0)
+                h.drain_until_quiet(process, fd, output)
+                assert count(h.CONNECTORS_PATH) == 0, requests
+            else:
+                # A deliberate refresh remains available after either outcome.
+                os.write(fd, b"r")
+                assert h.wait_for_fixture_state(process, fd, output,
+                    lambda: count(h.CONNECTORS_PATH) == 2, timeout=3.0), requests
+                h.drain_until_quiet(process, fd, output)
+                assert count(h.CONNECTORS_PATH) == 2, requests
             expected_frame = b"MASC Dashboard" if leave else needle
             assert any(expected_frame in row for row in screen(output).values()), screen(output)
             print("CONNECTOR_STARTUP_IDENTITY " + json.dumps({
                 "case": "left" if leave else "failed" if failed else "empty",
-                "connector_requests": count(h.CONNECTORS_PATH),
-                "subsequent_roster_responses": count(roster_path) - observed}), flush=True)
+                "connector_requests": count(h.CONNECTORS_PATH)}), flush=True)
             os.write(fd, b"q")
         finally:
             health.release.set()
@@ -351,7 +348,7 @@ def run_connector_startup_identity(executable, *, failed=False, leave=False):
 
     h.run_terminal_scenario(executable,
         description="Connector initial identity " + ("left surface" if leave else "failed read" if failed else "automatic empty read"),
-        interact=interact, http_fixtures=fixtures, refresh=0.1, terminal_cols=160)
+        interact=interact, http_fixtures=fixtures, refresh=60.0, terminal_cols=160)
 
 
 if __name__ == "__main__":

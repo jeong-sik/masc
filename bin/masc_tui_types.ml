@@ -3651,7 +3651,7 @@ type memory_state =
   | Memory_starving
   | Memory_read_error
 
-let memory_state (k : Tui_decode.memory_keeper_health) =
+let memory_state (k : Masc.Tui_decode_memory_health.memory_keeper_health) =
   if Option.is_some k.mkh_read_error || Option.is_some k.mkh_source_read_error
   then Memory_read_error
   else if
@@ -3668,7 +3668,7 @@ let memory_state (k : Tui_decode.memory_keeper_health) =
   else if
     List.exists
       (fun alert ->
-        match Tui_decode.memory_alert_severity alert.Tui_decode.ma_code with
+        match Masc.Tui_decode_memory_health.memory_alert_severity alert.Masc.Tui_decode_memory_health.ma_code with
         | `Warn -> true
         | `Error -> false)
       k.mkh_alerts
@@ -6033,7 +6033,7 @@ type state = {
   mutable workspace_activity: (string, workspace_activity_read) Masc_tui_fetched.t;
   mutable workspace_activity_cursor: int;
   mutable workspace_activity_context_scroll: int option;
-  mutable memory_health: Tui_decode.memory_health_snapshot option;
+  mutable memory_health: Masc.Tui_decode_memory_health.memory_health_snapshot option;
   mutable memory_health_error: string option;
   mutable memory_health_inflight: bool;
   mutable memory_health_scroll: int;
@@ -9567,7 +9567,7 @@ let memory_back (state : state) =
     | None -> Memory_leaves
 
 let visible_memory_keepers (state : state) =
-  let open Tui_decode in
+  let open Masc.Tui_decode_memory_health in
   let raw_keepers =
     match state.memory_health with
     | None -> []
@@ -9577,7 +9577,7 @@ let visible_memory_keepers (state : state) =
     match state.memory_overview_sort with
     | Mem_overview_facts ->
         List.sort
-          (fun (a : memory_keeper_health) (b : memory_keeper_health) ->
+          (fun (a : Masc.Tui_decode_memory_health.memory_keeper_health) (b : Masc.Tui_decode_memory_health.memory_keeper_health) ->
             if a.mkh_facts <> b.mkh_facts then Stdlib.compare b.mkh_facts a.mkh_facts
             else String.compare a.mkh_keeper_id b.mkh_keeper_id)
           raw_keepers
@@ -11330,7 +11330,7 @@ let surface_row_texts (state : state) : surface -> string list option =
           (fun _ ->
             List.map
               (fun k ->
-                k.Tui_decode.mkh_keeper_id ^ " "
+                k.Masc.Tui_decode_memory_health.mkh_keeper_id ^ " "
                 ^ memory_state_label (memory_state k))
               (visible_memory_keepers state))
           state.memory_health

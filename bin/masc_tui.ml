@@ -1763,7 +1763,7 @@ type async_msg =
   | Fusion_launched of int * (string, string) result
   | Repositories_loaded of (Masc.Tui_decode.repository_snapshot, string) result
   | Workspace_activity_loaded of string Masc_tui_fetched.request * (workspace_activity_read, string) result
-  | Memory_loaded of (Masc.Tui_decode.memory_health_snapshot, string) result
+  | Memory_loaded of (Masc.Tui_decode_memory_health.memory_health_snapshot, string) result
   (* Carries the request it answers: the browser can be closed or pointed at
      another keeper while a load is in flight, and a late answer for somebody
      else must be dropped, not filed under whoever is open. The answer is the
@@ -5267,13 +5267,13 @@ let launch_all_memory_facts_load state ~mailbox =
     | Some health ->
       let loads =
         List.map
-          (fun (k : Tui_decode.memory_keeper_health) ->
-            let keeper_name = k.Tui_decode.mkh_keeper_id in
+          (fun (k : Masc.Tui_decode_memory_health.memory_keeper_health) ->
+            let keeper_name = k.Masc.Tui_decode_memory_health.mkh_keeper_id in
             ( keeper_name,
               try Masc_tui_loader.load_memory_facts ~host ~port ~keeper_name with
               | Eio.Cancel.Cancelled _ as exn -> raise exn
               | exn -> Error (Printexc.to_string exn) ))
-          health.Tui_decode.mhs_keepers
+          health.Masc.Tui_decode_memory_health.mhs_keepers
       in
       (* One answer: the merged facts and the keepers missing from them
          travel together, so the handler never has to keep one answer across
@@ -26116,7 +26116,7 @@ and is loaded on demand through keeper_skill.
                         | None -> ()
                         | Some keeper ->
                             let keeper_name =
-                              keeper.Masc.Tui_decode.mkh_keeper_id
+                              keeper.Masc.Tui_decode_memory_health.mkh_keeper_id
                             in
                             state.memory_facts_keeper <- Some keeper_name;
                             state.memory_facts <-

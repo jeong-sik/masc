@@ -9061,7 +9061,7 @@ let render_repository_changes (state : state) =
 
 let render_memory (state : state) =
   let terminal_rows, cols = get_terminal_size () in
-  let open Masc.Tui_decode in
+  let open Masc.Tui_decode_memory_health in
   let keepers =
     match state.memory_health with
     | None -> []

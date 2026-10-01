@@ -1683,10 +1683,10 @@ let load_repository_changes ~(host : string) ~(port : int)
   | Ok json -> Tui_decode.decode_repository_change_snapshot json
 
 let load_memory_health ~(host : string) ~(port : int) :
-    (Tui_decode.memory_health_snapshot, string) result =
+    (Masc.Tui_decode_memory_health.memory_health_snapshot, string) result =
   match fetch_keeper_memory_health ~host ~port with
   | Error err -> Error ("memory health load failed: " ^ err)
-  | Ok json -> Tui_decode.decode_memory_health_snapshot json
+  | Ok json -> Masc.Tui_decode_memory_health.decode_memory_health_snapshot json
 
 (** Load one keeper's remembered facts, both stores. *)
 let load_memory_facts ~(host : string) ~(port : int) ~(keeper_name : string) :

@@ -4726,9 +4726,9 @@ let test_decode_repository_requires_resolved_local_path () =
    still decode, so "the payload is not accepted" is either a whole-snapshot
    error or at least one refused row. *)
 let memory_health_rejects json =
-  match Tui_decode.decode_memory_health_snapshot json with
+  match Masc.Tui_decode_memory_health.decode_memory_health_snapshot json with
   | Error _ -> true
-  | Ok snapshot -> snapshot.Tui_decode.mhs_refused_keepers <> []
+  | Ok snapshot -> snapshot.Masc.Tui_decode_memory_health.mhs_refused_keepers <> []
 
 let empty_memory_context_cycle =
   `Assoc ["saved", `Null; "saved_read_error", `Null; "read_position", `Null;
@@ -4876,7 +4876,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
     "state", `String "not_committed"; "range", `Assoc ["start_atom", `Int 3;
       "end_atom", `Int 5; "completed_end_atom", `Int 20]] in
   let with_synthesis = replace_field "synthesis" synthesis cycle in
-  (match Tui_decode.decode_memory_health_snapshot (context_payload with_synthesis) with
+  (match Masc.Tui_decode_memory_health.decode_memory_health_snapshot (context_payload with_synthesis) with
    | Ok snapshot ->
      (match (List.hd snapshot.mhs_keepers).mkh_context_cycle.mcc_synthesis with
       | Some {state=Masc.Keeper_continuity_observation.Not_committed;
@@ -4889,19 +4889,19 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
     [replace_field "state" (`String "drained") synthesis;
      replace_field "trace_id" `Null synthesis;
      replace_field "state" (`String "running") (replace_field "range" `Null synthesis)];
-  (match Tui_decode.decode_memory_health_snapshot (context_payload cycle) with
+  (match Masc.Tui_decode_memory_health.decode_memory_health_snapshot (context_payload cycle) with
    | Ok snapshot ->
      (match (List.hd snapshot.mhs_keepers).mkh_context_cycle.mcc_prepared with
-      | Some {mcp_input = Tui_decode.Context_summarized {mcf_end_atom = 3; _}; mcp_request_bytes = 2048; _} -> ()
+      | Some {mcp_input = Masc.Tui_decode_memory_health.Context_summarized {mcf_end_atom = 3; _}; mcp_request_bytes = 2048; _} -> ()
       | _ -> Alcotest.fail "prepared frontier or bytes lost")
    | Error detail -> Alcotest.fail detail);
   let position = `Assoc ["trace_id", `String "context-trace"; "end_atom", `Int 7] in
   let absorbed = `Assoc ["kind", `String "absorbed"; "frontier", position] in
-  (match Tui_decode.decode_memory_health_snapshot
+  (match Masc.Tui_decode_memory_health.decode_memory_health_snapshot
            (context_payload (replace_field "prepared" (replace_field "input" absorbed prepared) cycle)) with
    | Ok snapshot ->
      (match (List.hd snapshot.mhs_keepers).mkh_context_cycle.mcc_prepared with
-      | Some {mcp_input = Tui_decode.Context_absorbed {mcpo_trace_id = "context-trace"; mcpo_end_atom = 7}; _} -> ()
+      | Some {mcp_input = Masc.Tui_decode_memory_health.Context_absorbed {mcpo_trace_id = "context-trace"; mcpo_end_atom = 7}; _} -> ()
       | _ -> Alcotest.fail "absorbed position lost")
    | Error detail -> Alcotest.fail detail);
   List.iter (fun invalid -> Alcotest.(check bool) "invalid context observation rejected" true
@@ -4942,7 +4942,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
         else value) fields)
     | other -> other
   in
-  (match Tui_decode.decode_memory_health_snapshot
+  (match Masc.Tui_decode_memory_health.decode_memory_health_snapshot
            (with_librarian ~stopped_keepers:1
               [ "state", `String "stopped"
               ; "detail", `String "the range could not be read"
@@ -4951,9 +4951,9 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
    | Ok snapshot ->
      let librarian = (List.hd snapshot.mhs_keepers).mkh_librarian in
      Alcotest.(check bool) "a stopped pass keeps its cause" true
-       (librarian.mlh_state = Some (Tui_decode.Pass_stopped "the range could not be read"));
+       (librarian.mlh_state = Some (Masc.Tui_decode_memory_health.Pass_stopped "the range could not be read"));
      Alcotest.(check bool) "the failure kind is decoded" true
-       (librarian.mlh_last_failure_kind = Some Tui_decode.Failure_exact_execution)
+       (librarian.mlh_last_failure_kind = Some Masc.Tui_decode_memory_health.Failure_exact_execution)
    | Error detail -> Alcotest.fail detail);
   (* A row this build cannot read is refused on its own: the other keeper
      still decodes and the refusal names the keeper and the reason, so a newer
@@ -4961,15 +4961,15 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
   List.iter
     (fun (label, stopped_keepers, updates, reason) ->
        match
-         Tui_decode.decode_memory_health_snapshot (with_librarian ~stopped_keepers updates)
+         Masc.Tui_decode_memory_health.decode_memory_health_snapshot (with_librarian ~stopped_keepers updates)
        with
        | Error detail -> Alcotest.failf "%s: the whole snapshot was refused: %s" label detail
        | Ok snapshot ->
          Alcotest.(check (list string)) (label ^ ": the other keeper still decodes")
            [ "healthy" ]
-           (List.map (fun keeper -> keeper.Tui_decode.mkh_keeper_id) snapshot.mhs_keepers);
+           (List.map (fun keeper -> keeper.Masc.Tui_decode_memory_health.mkh_keeper_id) snapshot.mhs_keepers);
          (match snapshot.mhs_refused_keepers with
-          | [ { Tui_decode.mkr_keeper_id = Some "source-only"; mkr_reason } ] ->
+          | [ { Masc.Tui_decode_memory_health.mkr_keeper_id = Some "source-only"; mkr_reason } ] ->
             Alcotest.(check bool) (label ^ ": the refusal says why") true
               (String_util.contains_substring mkr_reason reason)
           | _ -> Alcotest.failf "%s: expected one refusal naming source-only" label))
@@ -4994,7 +4994,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
     | `Assoc fields -> `Assoc (List.map (fun (key, value) -> key,
         if key = "totals" then replace_field "librarian_unread_turns" `Null value else value) fields)
     | _ -> unknown_unread in
-  (match Tui_decode.decode_memory_health_snapshot unknown_total with
+  (match Masc.Tui_decode_memory_health.decode_memory_health_snapshot unknown_total with
    | Ok snapshot -> Alcotest.(check (option int)) "unknown fleet total retained" None
        snapshot.mhs_total_librarian_unread_turns
    | Error detail -> Alcotest.fail detail);
@@ -5016,7 +5016,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
     | json -> json in
   Alcotest.(check bool) "an unmeasured continuity lag cannot leave the fleet count at zero" true
     (memory_health_rejects ((with_continuity `Null)));
-  (match Tui_decode.decode_memory_health_snapshot
+  (match Masc.Tui_decode_memory_health.decode_memory_health_snapshot
            (with_continuity_totals ~behind:0 ~unmeasured:1 (with_continuity `Null)) with
    | Ok snapshot ->
      Alcotest.(check (option int)) "an unmeasured continuity lag stays unknown" None
@@ -5026,7 +5026,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
      Alcotest.(check int) "and sums nothing for it" 0
        snapshot.mhs_total_librarian_continuity_unread_atoms
    | Error detail -> Alcotest.fail detail);
-  (match Tui_decode.decode_memory_health_snapshot
+  (match Masc.Tui_decode_memory_health.decode_memory_health_snapshot
            (with_continuity_totals ~behind:4 ~unmeasured:0 (with_continuity (`Int 4))) with
    | Ok snapshot ->
      Alcotest.(check (option int)) "a measured continuity lag is the row's number" (Some 4)
@@ -5052,12 +5052,12 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
       [ "kind", `String "gap"; "gap_start_atom", `Int start_atom; "gap_end_atom", `Int end_atom ]
   in
   let stalled_of payload =
-    match Tui_decode.decode_memory_health_snapshot (with_stalled payload) with
+    match Masc.Tui_decode_memory_health.decode_memory_health_snapshot (with_stalled payload) with
     | Ok snapshot -> (List.hd snapshot.mhs_keepers).mkh_librarian.mlh_stalled
     | Error detail -> Alcotest.fail detail
   in
   (match stalled_of (gap 2 8) with
-   | Some (Tui_decode.Stalled_gap { mls_gap_start_atom = 2; mls_gap_end_atom = 8 }) -> ()
+   | Some (Masc.Tui_decode_memory_health.Stalled_gap { mls_gap_start_atom = 2; mls_gap_end_atom = 8 }) -> ()
    | _ -> Alcotest.fail "the gap (2, 8) must decode as that gap");
   Alcotest.(check bool) "an empty gap is refused" true
     (memory_health_rejects (with_stalled (gap 8 8)));
@@ -5074,8 +5074,8 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
   in
   (match stalled_of (unmeasured "turn_records_unreadable") with
    | Some
-       (Tui_decode.Stalled_unmeasured
-          { mls_cause = Tui_decode.Stall_turn_records_unreadable; mls_detail = "bad" }) -> ()
+       (Masc.Tui_decode_memory_health.Stalled_unmeasured
+          { mls_cause = Masc.Tui_decode_memory_health.Stall_turn_records_unreadable; mls_detail = "bad" }) -> ()
    | _ -> Alcotest.fail "an unreadable turn record must decode as unmeasured, not as no gap");
   Alcotest.(check bool) "a cause this build does not know is refused" true
     (memory_health_rejects (with_stalled (unmeasured "disk_on_fire")));
@@ -5206,7 +5206,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
      that sentence is the whole of what the Memory surface drew -- nothing in
      it says which key, so the operator diffs the payload against the decoder
      by hand. These pin the named groups. *)
-  (match Tui_decode.decode_memory_health_snapshot unknown_field with
+  (match Masc.Tui_decode_memory_health.decode_memory_health_snapshot unknown_field with
    | Ok _ -> Alcotest.fail "an unknown root field has to be refused"
    | Error detail ->
        Alcotest.(check string) "the refusal names the unknown field"
@@ -5216,18 +5216,18 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
      | `Assoc fields -> `Assoc (("schema", `String "twice") :: fields)
      | json -> json
    in
-   match Tui_decode.decode_memory_health_snapshot duplicated_root with
+   match Masc.Tui_decode_memory_health.decode_memory_health_snapshot duplicated_root with
    | Ok _ -> Alcotest.fail "a duplicated root field has to be refused"
    | Error detail ->
        Alcotest.(check string) "the refusal names the duplicated field"
          "memory health snapshot fields mismatch (duplicates=[schema])" detail);
-  match Tui_decode.decode_memory_health_snapshot json with
+  match Masc.Tui_decode_memory_health.decode_memory_health_snapshot json with
   | Error err -> Alcotest.failf "decode failed: %s" err
   | Ok snapshot ->
       Alcotest.(check int) "keepers" 2 (List.length snapshot.mhs_keepers);
       Alcotest.(check (list (option (float 0.)))) "snapshot timestamps"
         [None; Some 1700000000.]
-        (List.map (fun keeper -> keeper.Tui_decode.mkh_updated_at) snapshot.mhs_keepers);
+        (List.map (fun keeper -> keeper.Masc.Tui_decode_memory_health.mkh_updated_at) snapshot.mhs_keepers);
       Alcotest.(check int) "starving keepers" 1 snapshot.mhs_starving_keepers;
       Alcotest.(check int) "error alerts" 1 snapshot.mhs_error_alerts;
       Alcotest.(check int) "source facts total" 2
@@ -5254,9 +5254,9 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
            Alcotest.(check int) "failures" 4
              source_only.mkh_librarian_failures;
            (match source_only.mkh_alerts with
-            | [ { Tui_decode.ma_code = Tui_decode.Librarian_starvation; _ } ] ->
+            | [ { Masc.Tui_decode_memory_health.ma_code = Masc.Tui_decode_memory_health.Librarian_starvation; _ } ] ->
                 (match
-                   Tui_decode.memory_alert_severity Tui_decode.Librarian_starvation
+                   Masc.Tui_decode_memory_health.memory_alert_severity Masc.Tui_decode_memory_health.Librarian_starvation
                  with
                  | `Error -> ()
                  | `Warn -> Alcotest.fail "starvation must carry error severity")
@@ -5357,13 +5357,13 @@ let memory_alert_snapshot = memory_alert_snapshot_with_extra []
 
 let test_decode_memory_alert_keeps_the_code_contract () =
   (match
-     Tui_decode.decode_memory_health_snapshot
+     Masc.Tui_decode_memory_health.decode_memory_health_snapshot
        (memory_alert_snapshot ~code:"librarian_starvation" ~severity:"error"
           ~target:"librarian_starvation")
    with
-   | Ok { Tui_decode.mhs_keepers =
-            [ { Tui_decode.mkh_alerts =
-                  [ { Tui_decode.ma_code = Tui_decode.Librarian_starvation; _ } ]
+   | Ok { Masc.Tui_decode_memory_health.mhs_keepers =
+            [ { Masc.Tui_decode_memory_health.mkh_alerts =
+                  [ { Masc.Tui_decode_memory_health.ma_code = Masc.Tui_decode_memory_health.Librarian_starvation; _ } ]
               ; _
               } ]
         ; _
@@ -5482,12 +5482,12 @@ let test_decode_memory_health_reads_the_librarian_position_beside_the_cut () =
       ]
   in
   let cycle_of snapshot =
-    match snapshot.Tui_decode.mhs_keepers with
-    | [ keeper ] -> keeper.Tui_decode.mkh_context_cycle
+    match snapshot.Masc.Tui_decode_memory_health.mhs_keepers with
+    | [ keeper ] -> keeper.Masc.Tui_decode_memory_health.mkh_context_cycle
     | _ -> Alcotest.fail "the fixture holds one keeper"
   in
   (match
-     Tui_decode.decode_memory_health_snapshot
+     Masc.Tui_decode_memory_health.decode_memory_health_snapshot
        (snapshot_with
           (cycle ~read_position:(Some 12887) ~read_error:None
              ~rewriting_through:(Some 12888) ()))
@@ -5496,20 +5496,20 @@ let test_decode_memory_health_reads_the_librarian_position_beside_the_cut () =
    | Ok snapshot ->
      let cycle = cycle_of snapshot in
      Alcotest.(check (option int)) "the read position is carried" (Some 12887)
-       cycle.Tui_decode.mcc_read_position;
+       cycle.Masc.Tui_decode_memory_health.mcc_read_position;
      Alcotest.(check (option int)) "the rewrite target is carried" (Some 12888)
-       cycle.Tui_decode.mcc_rewriting_through;
+       cycle.Masc.Tui_decode_memory_health.mcc_rewriting_through;
      Alcotest.(check bool) "the position was readable" false
-       cycle.Tui_decode.mcc_read_position_unreadable;
-     match cycle.Tui_decode.mcc_saved with
+       cycle.Masc.Tui_decode_memory_health.mcc_read_position_unreadable;
+     match cycle.Masc.Tui_decode_memory_health.mcc_saved with
      | None -> Alcotest.fail "the fixture saves a cut"
      | Some saved ->
        Alcotest.(check int) "the cut the position is read against" 7694
-         saved.Tui_decode.mcf_end_atom);
+         saved.Masc.Tui_decode_memory_health.mcf_end_atom);
   (* An unreadable position is why there is no number, not a keeper that has
      read nothing. *)
   (match
-     Tui_decode.decode_memory_health_snapshot
+     Masc.Tui_decode_memory_health.decode_memory_health_snapshot
        (snapshot_with
           (cycle ~read_position:None ~read_error:(Some "progress_unreadable")
              ~rewriting_through:None ()))
@@ -5517,7 +5517,7 @@ let test_decode_memory_health_reads_the_librarian_position_beside_the_cut () =
    | Error detail -> Alcotest.failf "decode failed: %s" detail
    | Ok snapshot ->
      Alcotest.(check bool) "an unreadable position says so" true
-       (cycle_of snapshot).Tui_decode.mcc_read_position_unreadable);
+       (cycle_of snapshot).Masc.Tui_decode_memory_health.mcc_read_position_unreadable);
   (* Both halves of the disagreement: a marker with a number, and a rewrite
      target the cut already reached. *)
   Alcotest.(check bool) "a read error beside a position is refused" true

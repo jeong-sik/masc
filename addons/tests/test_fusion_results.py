@@ -7,9 +7,8 @@ import importlib.util
 import json
 import os
 from pathlib import Path
-import subprocess
+from stdio_fixture import run_stdio
 import sys
-import tempfile
 import tomllib
 import unittest
 
@@ -69,21 +68,15 @@ def call(package, sources, sizes=None):
 
 
 def exchange(package, requests, sizes=None):
-    # Requests are prepared as a batch. A file-backed stdin avoids duplex
-    # pipe backpressure while retaining the actual worker and wire bytes.
-    with tempfile.TemporaryFile(mode="w+", encoding="utf-8") as wire:
-        serialized = "".join(json.dumps(item) + "\n" for item in requests)
-        wire.write(serialized)
-        wire.seek(0)
-        proc = subprocess.run([sys.executable, str(ADDONS / package / "server.py")],
-                              stdin=wire, capture_output=True, text=True, check=True)
+    serialized = "".join(json.dumps(item) + "\n" for item in requests)
+    proc = run_stdio([sys.executable, str(ADDONS / package / "server.py")],
+                     input=serialized, capture_output=True, text=True, check=True)
     assert not proc.stderr, proc.stderr
     lines = proc.stdout.splitlines(keepends=True)
     if sizes is not None:
         sizes.update(input_bytes=len(serialized.encode("utf-8")),
                      output_bytes=len(lines[-1].encode("utf-8")))
     return [json.loads(line) for line in lines]
-
 
 class FusionResults(unittest.TestCase):
     def test_oversized_integer_timestamps_do_not_terminate_worker(self):

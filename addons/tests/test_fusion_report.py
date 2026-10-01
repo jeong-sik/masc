@@ -4,8 +4,10 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
-from pathlib import Path
 import subprocess
+import tempfile
+from pathlib import Path
+from stdio_fixture import run_stdio
 import sys
 import tomllib
 import unittest
@@ -19,32 +21,48 @@ def reply_limit(package):
     return tomllib.loads(manifest.read_text())["resources"]["max_reply_bytes"]
 
 
-def upstream(output, *, complete=True, sequence=1, output_id=None, selected_lanes=None):
+SAMPLING_RECEIPTS = {}
+
+
+def retain_fixture_receipt(refs, terminal):
+    terminal = copy.deepcopy(terminal)
+    if terminal is not None and isinstance(terminal.get("response"), dict):
+        terminal["response"].pop("_meta", None)
+    SAMPLING_RECEIPTS[refs["request"]["sha256"]] = copy.deepcopy({
+        "request": refs["request"], "outcome": refs.get("outcome"), "terminal": terminal})
+
+
+def upstream(output, *, complete=True, sequence=1, instance_id="projection-1",
+             installation_id="fusion-results", output_id=None, selected_lanes=None):
     output = copy.deepcopy(output)
-    # Runtime IDs/relations include the sequence; lanes use the instance only.
-    # Domain subject IDs remain unchanged.
     for item in output["rows"]:
-        item["id"] = f"projection-1/{sequence}/" + item["id"]
-        item["lane_id"] = "projection-1/" + item["lane_id"]
-        item["related_ids"] = [f"projection-1/{sequence}/" + value for value in item["related_ids"]]
-    producer = {"installation_id": "fusion-results", "instance_id": "projection-1",
+        item["id"] = f"{instance_id}/{sequence}/" + item["id"]
+        item["lane_id"] = instance_id + "/" + item["lane_id"]
+        item["related_ids"] = [f"{instance_id}/{sequence}/" + value for value in item["related_ids"]]
+    producer = {"installation_id": installation_id, "instance_id": instance_id,
                 "run_id": "fusion-report", "configuration_revision": "config-1",
                 "package_revision": "0.1.1", "observation_seq": sequence,
                 "output_id": output_id,
                 "output_selection": {"all_lanes": True} if selected_lanes is None else {"lanes": selected_lanes},
                 "coverage_scope": "whole_producer"}
-    digest = hashlib.sha256(json.dumps({"producer": producer, "output": output},
+    sampling_receipts = []
+    for item in output["rows"]:
+        for reference in item["evidence"]:
+            receipt = SAMPLING_RECEIPTS.get(reference.get("sha256"))
+            if receipt is not None and receipt not in sampling_receipts:
+                sampling_receipts.append(copy.deepcopy(receipt))
+    digest = hashlib.sha256(json.dumps({"producer": producer, "output": output,
+                                       "sampling_receipts": sampling_receipts},
                                       ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
-    return {"source_id": "fusion-output", "incarnation": "projection-1",
+    return {"source_id": "fusion-output", "incarnation": instance_id,
             "cursor": str(sequence), "complete": complete, "detail": None,
-            "observations": [{"id": f"projection-1/output/{sequence}", "kind": "lane_output",
+            "observations": [{"id": f"{instance_id}/output/{sequence}", "kind": "lane_output",
                 "observed_at": 130, "actor": None,
                 "evidence": [{"uri": "lane-evidence:" + digest, "sha256": digest}],
                 "producer": producer, "producer_status": {
-                    "source_id": "projection-1", "incarnation": "projection-1",
+                    "source_id": instance_id, "incarnation": instance_id,
                     "cursor": str(sequence), "complete": complete, "detail": None},
-                "output": output}]}
-
+                "output": output, "sampling_receipts": sampling_receipts}]}
 
 def project(value):
     captured = source(value)
@@ -55,7 +73,7 @@ def project(value):
 def wire(package, sources):
     request = {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
                "params": {"name": "lane_observe", "arguments": {"binding": {"sources": []}, "sources": sources}}}
-    proc = subprocess.run([sys.executable, str(Path(__file__).resolve().parents[1] / package / "server.py")],
+    proc = run_stdio([sys.executable, str(Path(__file__).resolve().parents[1] / package / "server.py")],
                           input=json.dumps(request, ensure_ascii=False) + "\n", capture_output=True,
                           text=True, check=True)
     assert not proc.stderr, proc.stderr
@@ -70,7 +88,322 @@ def contexts(output):
     return [item for item in output["rows"] if item["lane_id"] == "fusion/report-context"]
 
 
+def computation_output(status="answered", *, role="panel", outcome=True, text="First measured finding\nSecond finding"):
+    refs = {"request": {"uri": "lane-evidence:" + "a" * 64, "sha256": "a" * 64}}
+    if outcome:
+        refs["outcome"] = {"uri": "lane-evidence:" + "b" * 64, "sha256": "b" * 64}
+    response = {"role": "assistant", "model": "actual-sampled-model",
+                "content": {"type": "text", "text": text},
+                "stopReason": "endTurn", "_meta": {"masc.lane_sampling": refs}}
+    answered = status == "answered"
+    if status == "invalid_response":
+        response["model"] = ""
+    fields = {"computation": {"analysis_id": "analysis-request", "role": role,
+                  "status": status, "model": "actual-sampled-model" if answered else None,
+                  "text": response["content"]["text"] if answered else None,
+                  "stop_reason": "endTurn" if answered else None},
+              "model_evidence": refs, "input_complete": True,
+              "sampling_response": response if answered else None,
+              "sampling_error": None if answered else {"code": -32603, "message": json.dumps({
+                  "status": status, "error": "actual host failure", "evidence": refs})},
+              "input_coverage": [{"source_id": "project", "incarnation": "capture-1",
+                  "cursor": "7", "complete": True, "detail": None}]}
+    terminal = None
+    if outcome:
+        terminal = {"status": status, "error": "actual host failure"}
+        if answered:
+            terminal["response"] = {key: value for key, value in response.items() if key != "_meta"}
+    retain_fixture_receipt(refs, terminal)
+    template = project(detail())
+    item = copy.deepcopy(template["rows"][0])
+    item.update(id="computed-model-output", lane_id="fusion/computation", subject_id="analysis-request",
+                title="Panel analysis", fields=fields, evidence=list(refs.values()), related_ids=[])
+    return {"rows": [item], "coverage": fields["input_coverage"]}
+
+
+def computation_context(output, report):
+    assert len(report["related_ids"]) == 1
+    context = next(item for item in output["rows"] if item["id"] == report["related_ids"][0])
+    assert context["lane_id"] == "fusion/report-context"
+    return context
+
+
 class FusionReport(unittest.TestCase):
+    def test_report_rejects_conflicting_or_missing_fusion_producer(self):
+        original = upstream(project(detail()))
+        for change in ("other-owner", "missing-origin-owner", "missing-run-owner"):
+            with self.subTest(change=change):
+                captured = copy.deepcopy(original)
+                rows = captured["observations"][0]["output"]["rows"]
+                status = next(row for row in rows if row["lane_id"].endswith("/fusion/status"))
+                result = next(row for row in rows if row["lane_id"].endswith("/fusion/result"))
+                origin = result["fields"]["board_post"]["origin"]
+                if change == "other-owner":
+                    origin["fusion_producer"] = "another-keeper"
+                elif change == "missing-origin-owner":
+                    del origin["fusion_producer"]
+                else:
+                    del status["fields"]["fusion_run"]["keeper"]
+                self.assertTrue(call("fusion-report", [captured])["isError"])
+
+    def test_report_rejects_mixed_output_coordinates(self):
+        original = upstream(project(detail()), sequence=2)
+        for change in ("source-cursor", "event-id", "status-cursor", "status-source"):
+            with self.subTest(change=change):
+                captured = copy.deepcopy(original)
+                observation = captured["observations"][0]
+                if change == "source-cursor":
+                    captured["cursor"] = "1"
+                elif change == "event-id":
+                    observation["id"] = "projection-1/output/1"
+                elif change == "status-cursor":
+                    observation["producer_status"]["cursor"] = "1"
+                else:
+                    observation["producer_status"]["source_id"] = "another-producer"
+                self.assertTrue(call("fusion-report", [captured])["isError"])
+        self.assertFalse(call("fusion-report", [original])["isError"])
+
+    def test_nested_nonfinite_report_inputs_refuse_and_keep_connection_open(self):
+        for value in (float("nan"), float("inf"), float("-inf")):
+            for location in ("error_code", "raw_extension", "producer_extension"):
+                with self.subTest(value=value, location=location):
+                    output = computation_output("host_error")
+                    supplied = upstream(output)
+                    observation = supplied["observations"][0]
+                    if location == "error_code":
+                        observation["output"]["rows"][0]["fields"]["sampling_error"]["code"] = value
+                    elif location == "raw_extension":
+                        observation["output"]["rows"][0]["fields"]["retained_extension"] = {"nested": [value]}
+                    else:
+                        observation["producer"]["retained_extension"] = {"nested": [value]}
+                    messages = [{"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                        "params": {"name": "lane_observe", "arguments": {
+                            "binding": {}, "sources": [supplied]}}},
+                        {"jsonrpc": "2.0", "id": 3, "method": "ping"}]
+                    worker = run_stdio([sys.executable, str(Path(__file__).resolve().parents[1]
+                        / "fusion-report/server.py")],
+                        input="".join(json.dumps(message) + "\n" for message in messages))
+                    self.assertEqual(worker.stderr, "")
+                    refused, pong = map(json.loads, worker.stdout.splitlines())
+                    self.assertEqual(refused["id"], 2)
+                    self.assertTrue(refused["result"]["isError"])
+                    self.assertIn("finite JSON numbers", refused["result"]["content"][0]["text"])
+                    self.assertNotIn("structuredContent", refused["result"])
+                    self.assertEqual(pong, {"jsonrpc": "2.0", "id": 3, "result": {}})
+
+    def test_actual_isolated_panel_output_reaches_report_named_port(self):
+        from test_fusion_compute import Host, call as compute_call, source as compute_source
+        with tempfile.TemporaryDirectory() as root:
+            panel = compute_call(Host(root, text="Panel measured comparison"), [compute_source()])
+            self.assertFalse(panel["isError"])
+            computed = panel["structuredContent"]
+            reported = call("fusion-report", [upstream(computed)])
+            self.assertFalse(reported["isError"])
+            item = reports(reported["structuredContent"])[0]
+            self.assertEqual(item["lane_id"], "fusion/report")
+            self.assertIn("Panel measured comparison", item["fields"]["body"])
+            self.assertEqual(item["fields"]["model_evidence"], computed["rows"][0]["fields"]["model_evidence"])
+            context = computation_context(reported["structuredContent"], item)
+            self.assertEqual(context["fields"]["raw_computed_rows"][0]["fields"]["sampling_response"],
+                             computed["rows"][0]["fields"]["sampling_response"])
+            self.assertEqual(item["fields"]["delivery_status"], "not_attempted")
+
+    def test_isolated_computation_becomes_report_with_actual_text_and_model_evidence(self):
+        captured = upstream(computation_output())
+        original = captured["observations"][0]["output"]["rows"][0]
+        result = call("fusion-report", [captured])
+        self.assertFalse(result["isError"])
+        item = reports(result["structuredContent"])[0]
+        fields = item["fields"]
+        self.assertEqual(item["lane_id"], "fusion/report")
+        self.assertEqual(item["subject_id"], "analysis-request")
+        self.assertEqual(fields["scope"], "supplied_fusion_computation")
+        self.assertEqual(fields["computation_status"], "answered")
+        self.assertIn("actual-sampled-model", fields["body"])
+        self.assertIn("First measured finding\nSecond finding", fields["body"])
+        self.assertTrue(fields["input_complete"])
+        context = computation_context(result["structuredContent"], item)
+        self.assertEqual(context["fields"]["raw_computed_rows"], [original])
+        self.assertEqual(fields["computation"], {key: value for key, value in original["fields"]["computation"].items() if key != "text"})
+        self.assertEqual(fields["model_evidence"], original["fields"]["model_evidence"])
+        for key in ("computation", "model_evidence", "sampling_response", "sampling_error", "input_coverage"):
+            self.assertEqual(context["fields"]["raw_computed_rows"][0]["fields"][key], original["fields"][key])
+        for ref in fields["model_evidence"].values():
+            self.assertIn(ref, item["evidence"])
+        self.assertEqual(context["fields"]["producer"], captured["observations"][0]["producer"])
+        self.assertEqual(context["evidence"], captured["observations"][0]["evidence"])
+        self.assertEqual(fields["delivery_status"], "not_attempted")
+        self.assertIsNone(item["actor"])
+        for key in ("fusion_run_id", "run_status", "board_post", "board_post_id"):
+            self.assertNotIn(key, fields)
+
+    def test_computed_failed_uncertain_and_invalid_responses_keep_actual_outcomes(self):
+        for status in ("host_error", "outcome_unknown", "invalid_response"):
+            with self.subTest(status=status):
+                output = computation_output(status, role="judge", outcome=status != "outcome_unknown")
+                result = call("fusion-report", [upstream(output)])
+                self.assertFalse(result["isError"])
+                fields = reports(result["structuredContent"])[0]["fields"]
+                self.assertEqual(fields["computation_status"], status)
+                context = computation_context(result["structuredContent"], reports(result["structuredContent"])[0])
+                retained = context["fields"]["raw_computed_rows"][0]["fields"]
+                self.assertEqual(retained["sampling_error"], output["rows"][0]["fields"]["sampling_error"])
+                self.assertEqual(retained["sampling_response"], output["rows"][0]["fields"]["sampling_response"])
+                self.assertIn(status, fields["body"])
+                self.assertIn("실제 응답 모델: 확인되지 않음", fields["body"])
+                if status == "outcome_unknown":
+                    self.assertFalse(fields["input_complete"])
+                    self.assertEqual(set(fields["model_evidence"]), {"request"})
+
+    def test_computed_context_keeps_named_port_and_large_response_once(self):
+        text = "A" * 700000
+        output = computation_output(text=text)
+        captured = upstream(output)
+        result = call("fusion-report", [captured])
+        self.assertFalse(result["isError"])
+        projected = result["structuredContent"]
+        report = reports(projected)[0]
+        context = computation_context(projected, report)
+        self.assertEqual(context["fields"]["raw_computed_rows"], captured["observations"][0]["output"]["rows"])
+        self.assertEqual(context["fields"]["producer"], captured["observations"][0]["producer"])
+        self.assertEqual(context["evidence"], captured["observations"][0]["evidence"])
+        self.assertIn(text, report["fields"]["body"])
+        self.assertNotIn("text", report["fields"]["computation"])
+        manifest = tomllib.loads((Path(__file__).resolve().parents[1] / "fusion-report/lane.toml").read_text())
+        self.assertEqual(set(manifest["world"]["outputs"]["report"]["lanes"]),
+                         {"fusion/report", "fusion/report-context"})
+        frame = json.dumps({"jsonrpc": "2.0", "id": 2, "result": result}, ensure_ascii=False) + "\n"
+        self.assertLessEqual(len(frame.encode()), manifest["resources"]["max_reply_bytes"])
+        self.assertNotIn(text, result["content"][0]["text"])
+
+    def test_computed_reports_share_one_context_and_oversize_wire_is_refused(self):
+        output = computation_output()
+        second = copy.deepcopy(output["rows"][0])
+        second["id"] = "second-computation"
+        second["subject_id"] = "second-analysis"
+        second["fields"]["computation"]["analysis_id"] = "second-analysis"
+        output["rows"].append(second)
+        captured = upstream(output)
+        result = call("fusion-report", [captured])
+        self.assertFalse(result["isError"])
+        rows = result["structuredContent"]["rows"]
+        reports = [row for row in rows if row["lane_id"] == "fusion/report"]
+        contexts = [row for row in rows if row["lane_id"] == "fusion/report-context"]
+        self.assertEqual(len(reports), 2)
+        self.assertEqual(len(contexts), 1)
+        self.assertTrue(all(row["related_ids"] == [contexts[0]["id"]] for row in reports))
+        self.assertEqual(contexts[0]["fields"]["raw_computed_rows"], captured["observations"][0]["output"]["rows"])
+        # The retained computation contains the text twice, and the report
+        # adds one complete rendering. Fill that declared output allocation.
+        text = "A" * (reply_limit("fusion-report") // 3)
+        oversized = computation_output(text=text)
+        refused = call("fusion-report", [upstream(oversized)])
+        self.assertTrue(refused["isError"])
+        self.assertNotIn("structuredContent", refused)
+        self.assertIn("no output was accepted", refused["content"][0]["text"])
+
+    def test_retained_producer_incarnations_must_agree(self):
+        for output in (computation_output(), project(detail())):
+            for boundary in ("source", "producer_status"):
+                with self.subTest(computed=output["rows"][0]["lane_id"], boundary=boundary):
+                    captured = upstream(output)
+                    if boundary == "source":
+                        captured["incarnation"] = "another-worker"
+                    else:
+                        captured["observations"][0]["producer_status"]["incarnation"] = "another-worker"
+                    self.assertTrue(call("fusion-report", [captured])["isError"])
+
+    def test_computed_subject_must_match_analysis(self):
+        output = computation_output()
+        output["rows"][0]["subject_id"] = "another-analysis"
+        self.assertTrue(call("fusion-report", [upstream(output)])["isError"])
+
+    def test_computed_model_evidence_must_match_sampling_metadata(self):
+        for key in ("request", "outcome"):
+            with self.subTest(key=key):
+                output = computation_output()
+                fields = output["rows"][0]["fields"]
+                refs = copy.deepcopy(fields["model_evidence"])
+                refs[key] = {"uri": "lane-evidence:" + "c" * 64, "sha256": "c" * 64}
+                fields["sampling_response"]["_meta"]["masc.lane_sampling"] = refs
+                self.assertTrue(call("fusion-report", [upstream(output)])["isError"])
+        for metadata in (None, {}):
+            with self.subTest(metadata=metadata):
+                output = computation_output()
+                output["rows"][0]["fields"]["sampling_response"]["_meta"] = metadata
+                self.assertTrue(call("fusion-report", [upstream(output)])["isError"])
+
+    def test_failed_sampling_envelope_cannot_change_status_evidence_or_response(self):
+        for mutation in ("status", "evidence", "response", "stop", "malformed"):
+            with self.subTest(mutation=mutation):
+                output = computation_output("outcome_unknown", outcome=True)
+                fields = output["rows"][0]["fields"]
+                if mutation == "status":
+                    fields["computation"]["status"] = "host_error"
+                elif mutation == "evidence":
+                    terminal = json.loads(fields["sampling_error"]["message"])
+                    terminal["evidence"]["request"] = {"uri": "lane-evidence:" + "c" * 64, "sha256": "c" * 64}
+                    fields["sampling_error"]["message"] = json.dumps(terminal)
+                elif mutation == "response":
+                    fields["sampling_response"] = {"content": "invented"}
+                elif mutation == "stop":
+                    fields["computation"]["stop_reason"] = "endTurn"
+                else:
+                    fields["sampling_error"]["message"] = "not a terminal JSON envelope"
+                self.assertTrue(call("fusion-report", [upstream(output)])["isError"])
+
+    def test_computed_payload_and_namespace_errors_do_not_become_successful_reports(self):
+        for path, value in (("role", "invented"), ("model", " "), ("text", 123),
+                            ("stop_reason", 123), ("status", "completed")):
+            malformed = computation_output()
+            malformed["rows"][0]["fields"]["computation"][path] = value
+            self.assertTrue(call("fusion-report", [upstream(malformed)])["isError"])
+        no_outcome = computation_output(outcome=False)
+        self.assertTrue(call("fusion-report", [upstream(no_outcome)])["isError"])
+        conflict = computation_output()
+        conflict["rows"][0]["fields"]["sampling_response"]["model"] = "another-model"
+        self.assertTrue(call("fusion-report", [upstream(conflict)])["isError"])
+        foreign = upstream(computation_output())
+        foreign["observations"][0]["output"]["rows"][0]["lane_id"] = "other-instance/fusion/computation"
+        result = call("fusion-report", [foreign])["structuredContent"]
+        self.assertEqual(result["rows"], [])
+        self.assertFalse(result["coverage"][0]["complete"])
+
+    def test_native_and_computed_reports_share_exact_context_and_completeness(self):
+        for computation_status in ("answered", "outcome_unknown"):
+            with self.subTest(computation_status=computation_status):
+                output = project(detail())
+                computed = computation_output(computation_status,
+                                              outcome=computation_status != "outcome_unknown")
+                output["rows"].extend(computed["rows"])
+                captured = upstream(output)
+                result = call("fusion-report", [captured])
+                self.assertFalse(result["isError"])
+                projected = result["structuredContent"]
+                report_rows = reports(projected)
+                context_rows = contexts(projected)
+                self.assertEqual(len(report_rows), 2)
+                self.assertEqual(len(context_rows), 1)
+                context = context_rows[0]
+                original = captured["observations"][0]["output"]["rows"]
+                self.assertEqual(context["fields"]["raw_computed_rows"], [original[-1]])
+                self.assertEqual(context["fields"]["upstream_rows"], [
+                    {key: row[key] for key in (
+                        "id", "lane_id", "kind", "subject_id", "observed_at", "clock", "actor", "evidence", "related_ids")}
+                    for row in original[:-1]])
+                self.assertEqual(context["evidence"], captured["observations"][0]["evidence"])
+                self.assertEqual(context["fields"]["content_trust"], "untrusted_source_text")
+                complete = computation_status == "answered"
+                for row in report_rows + context_rows:
+                    self.assertEqual(row["fields"]["input_complete"], complete)
+                for row in report_rows:
+                    self.assertEqual(row["related_ids"], [context["id"]])
+                native = next(row for row in report_rows if "fusion_run_id" in row["fields"])
+                self.assertIn("Untrusted retained evidence text", native["fields"]["body"])
+                computed_report = next(row for row in report_rows if "analysis_id" in row["fields"])
+                for reference in computed["rows"][0]["fields"]["model_evidence"].values():
+                    self.assertIn(reference, computed_report["evidence"])
+
     def test_sink_headline_and_canonical_judge_answer_are_distinct(self):
         value = detail()
         post = value["evidence"]["post"]
@@ -185,39 +518,7 @@ class FusionReport(unittest.TestCase):
         self.assertFalse(result["coverage"][0]["complete"])
         self.assertTrue(all(not row["fields"]["input_complete"] for row in reports(result)))
 
-    def test_report_rejects_conflicting_or_missing_fusion_producer(self):
-        original = upstream(project(detail()))
-        for change in ("other-owner", "missing-origin-owner", "missing-run-owner"):
-            with self.subTest(change=change):
-                captured = copy.deepcopy(original)
-                rows = captured["observations"][0]["output"]["rows"]
-                status = next(row for row in rows if row["lane_id"].endswith("/fusion/status"))
-                result = next(row for row in rows if row["lane_id"].endswith("/fusion/result"))
-                origin = result["fields"]["board_post"]["origin"]
-                if change == "other-owner":
-                    origin["fusion_producer"] = "another-keeper"
-                elif change == "missing-origin-owner":
-                    del origin["fusion_producer"]
-                else:
-                    del status["fields"]["fusion_run"]["keeper"]
-                self.assertTrue(call("fusion-report", [captured])["isError"])
 
-    def test_report_rejects_mixed_output_coordinates(self):
-        original = upstream(project(detail()), sequence=2)
-        for change in ("source-cursor", "event-id", "status-cursor", "status-source"):
-            with self.subTest(change=change):
-                captured = copy.deepcopy(original)
-                observation = captured["observations"][0]
-                if change == "source-cursor":
-                    captured["cursor"] = "1"
-                elif change == "event-id":
-                    observation["id"] = "projection-1/output/1"
-                elif change == "status-cursor":
-                    observation["producer_status"]["cursor"] = "1"
-                else:
-                    observation["producer_status"]["source_id"] = "another-producer"
-                self.assertTrue(call("fusion-report", [captured])["isError"])
-        self.assertFalse(call("fusion-report", [original])["isError"])
 
     def test_report_retains_full_body_and_exact_upstream_lineage(self):
         value = detail()

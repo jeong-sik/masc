@@ -28,6 +28,19 @@ let test_sender_snapshot_uses_verified_standing () =
      = Ok (D.Keeper_sender,["keeper-b"]));
   check bool "another Keeper's authority cannot use this caller" true
     (Result.is_error (select ~caller:"keeper-a" ~access:(Access.Keeper "keeper-b")));
+  check bool "mixed-case registered Keeper retains verified authority and excludes itself" true
+    (D.sender_snapshot ~caller:" alice " ~access:(Access.Keeper "ALICE")
+       ~registered:["Bob";"Alice"] = Ok (D.Keeper_sender,["Bob"]));
+  check bool "operator alias still reaches mixed-case Keeper registry entry" true
+    (D.sender_snapshot ~caller:"alice" ~access:Access.Operator_configuration
+       ~registered:["Alice"] = Ok (D.External_sender,["Alice"]));
+  check bool "canonical aliases receive only one delivery" true
+    (match D.sender_snapshot ~caller:"outside" ~access:Access.Operator_configuration
+       ~registered:["Bob";"bob"] with
+     | Ok (D.External_sender,[_]) -> true | _ -> false);
+  check bool "blank registry identity refuses rather than dropping a recipient" true
+    (Result.is_error (D.sender_snapshot ~caller:"alice" ~access:Access.Operator_configuration
+       ~registered:[" "]));
   check bool "unverified caller cannot admit a fleet snapshot" true
     (Result.is_error (select ~caller:"keeper-a" ~access:Access.Unauthenticated))
 let test_restart_and_partial_fanout () = fixture (fun root ledger ->

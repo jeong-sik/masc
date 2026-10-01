@@ -143,6 +143,15 @@ max_reply_bytes=4194304
   let broker = require (create "analysis") in
   let handler = require (Lane_addon_sampling.for_worker broker ~package
     ~instance_id:"installed-analysis-worker") in
+  let handler params =
+    let answer = ref None in
+    let scoped = Lane_addon_sampling.with_observation broker
+      ~binding:(`Assoc ["model_route",`String "analysis"]) ~sources:(`List [])
+      ~on_error:Fun.id (fun () ->
+        Result.map (fun value -> answer := Some value; {Lane_addon_types.rows=[];coverage=[]})
+          (handler params)) in
+    Result.bind scoped (fun _ -> match !answer with
+      | Some value -> Ok value | None -> Error "observation did not sample") in
   let request_params = if omit_temperature then {params with temperature=None} else params in
   let answer = require (handler request_params) in
   check string "route fallback returns the actual responding model, not its configured alias"

@@ -7,11 +7,45 @@ type outcome =
   | Host_error of string
   | Invalid_response of S.create_message_result * string
   | Invocation_exception of string
-type t = { package : Types.package; instance_id : string;
+type observation = Outside_observation | Observing of string
+type t = { package : Types.package; instance_id : string; store : Store.t;
+  observation : observation ref;
   handler : Agent_core.Mcp.sampling_handler }
 let for_worker t ~package ~instance_id =
   if t.package = package && String.equal t.instance_id instance_id then Ok t.handler
   else Error "host sampling broker belongs to another package or installation"
+
+let with_observation t ~binding ~sources ~on_error run =
+  let digest = Eio_unix.run_in_systhread (fun () ->
+    Store.digest (Yojson.Safe.to_string (`Assoc ["binding",binding;"sources",sources]))) in
+  match !(t.observation) with
+  | Observing _ -> Error (on_error "host sampling observation already active")
+  | Outside_observation ->
+      t.observation := Observing digest;
+      Fun.protect ~finally:(fun () -> t.observation := Outside_observation) (fun () ->
+        let* (output : Types.output) = run () in
+        let* () = Eio_unix.run_in_systhread (fun () ->
+          let budget = Store.read_budget ~max_bytes:t.package.resources.max_reply_bytes in
+          List.fold_left (fun result (reference : Types.evidence) ->
+            let* () = result in
+            (* Other evidence may be arbitrary bytes. Only this broker's own
+               model requests attest computation on its current inputs. *)
+            match Store.read_blob_bounded ~budget t.store reference with
+            | Error Store.Read_limit_exceeded -> Error "sampling observation evidence exceeds aggregate read envelope"
+            | Error (Store.Read_failed _) -> Ok ()
+            | Ok bytes ->
+                let json = try Some (Yojson.Safe.from_string bytes)
+                  with Yojson.Json_error _ -> None in
+                match json with
+                | Some (`Assoc fields)
+                  when List.assoc_opt "kind" fields = Some (`String "model_request")
+                    && List.assoc_opt "instance_id" fields = Some (`String t.instance_id) ->
+                    if List.assoc_opt "observation_inputs_sha256" fields = Some (`String digest)
+                    then Ok () else Error "model evidence belongs to different observation inputs"
+                | Some _ | None -> Ok ()) (Ok ())
+            (List.concat_map (fun (row : Types.row) -> row.evidence) output.rows
+             |> List.sort_uniq Stdlib.compare)) |> Result.map_error on_error in
+        Ok output)
 
 type request_state = Pending | Finished of Types.evidence
 
@@ -64,7 +98,11 @@ let create ~store ~(package : Types.package) ~instance_id ~route ~invoke () =
   let retain fields = Eio_unix.run_in_systhread (fun () ->
     let* bytes = encode_bounded ~max_bytes:package.resources.max_reply_bytes (`Assoc fields) in
     Store.write_blob store bytes) in
+  let observation = ref Outside_observation in
   let handler (params : S.create_message_params) =
+    let* observation_inputs = match !observation with
+      | Outside_observation -> Error "host sampling requires an active observation"
+      | Observing digest -> Ok (`String digest) in
     let* () = match params.include_context with
       | None | Some S.None_ -> Ok ()
       | Some S.ThisServer | Some S.AllServers -> Error "Lane sampling supplies its own context" in
@@ -73,6 +111,7 @@ let create ~store ~(package : Types.package) ~instance_id ~route ~invoke () =
     let* request = retain ["kind",`String "model_request";
       "request_id",`String request_id;
       "instance_id",`String instance_id;"route",`String route;
+      "observation_inputs_sha256",observation_inputs;
       "package",`Assoc ["id",`String package.id;"revision",`String package.revision];
       "params",S.create_message_params_to_yojson params] in
     let record state =
@@ -139,10 +178,82 @@ let create ~store ~(package : Types.package) ~instance_id ~route ~invoke () =
     | Host_error detail ->
         Error (Yojson.Safe.to_string (`Assoc ["status",`String "host_error";
           "error",`String detail;"evidence",references]))
-    | Invalid_response (_, detail) ->
+    | Invalid_response (answer, detail) ->
         Error (Yojson.Safe.to_string (`Assoc ["status",`String "invalid_response";
-          "error",`String detail;"evidence",references]))
+          "error",`String detail;"evidence",references;
+          "response",S.create_message_result_to_yojson (package_response answer)]))
     | Invocation_exception detail ->
         Error (Yojson.Safe.to_string (`Assoc ["status",`String "outcome_unknown";
           "error",`String detail;"evidence",references])) in
-  Ok {package; instance_id; handler}
+  Ok {package; instance_id; store; observation; handler}
+
+let retained_receipts ~store ~instance_id ~max_bytes (output : Types.output) =
+  let budget = Store.read_budget ~max_bytes in
+  let read_error = function
+    | Store.Read_limit_exceeded -> "sampling receipts exceed aggregate read envelope"
+    | Store.Read_failed detail -> detail in
+  let member key = function `Assoc fields -> List.assoc_opt key fields | _ -> None in
+  let same key expected json = member key json = Some (`String expected) in
+  let package_terminal = function
+    | `Assoc fields -> `Assoc (List.map (function
+        | "response",`Assoc response -> "response",`Assoc (List.remove_assoc "_meta" response)
+        | field -> field) fields)
+    | json -> json in
+  (* An outcome is both row evidence and a request's terminal. Resolve each
+     immutable address once so those two paths share the actual read charge. *)
+  let blobs = Hashtbl.create 8 in
+  let read_blob reference =
+    match Hashtbl.find_opt blobs reference with
+    | Some result -> result
+    | None ->
+        let result = Store.read_blob_bounded ~budget store reference in
+        Hashtbl.add blobs reference result;
+        result in
+  let json_bytes reference =
+    match read_blob reference with
+    | Error Store.Read_limit_exceeded -> Error (read_error Store.Read_limit_exceeded)
+    | Error (Store.Read_failed _) -> Ok None
+    | Ok bytes -> Ok (try Some (Yojson.Safe.from_string bytes) with Yojson.Json_error _ -> None) in
+  let receipt reference =
+    let* request = json_bytes reference in
+    match request with
+    | Some request when same "kind" "model_request" request && same "instance_id" instance_id request ->
+        (match member "request_id" request with
+         | Some (`String request_id) ->
+             let* record = Store.load_sampling_request_bounded ~budget store ~instance_id ~request_id
+               |> Result.map_error read_error in
+             (match record with
+              | Some record when same "instance_id" instance_id record
+                  && same "request_id" request_id record
+                  && member "request" record = Some (Types.evidence_to_json reference) ->
+                  (match member "state" record, member "outcome" record with
+                   | Some (`String "pending"), Some `Null ->
+                       Ok (Some (`Assoc ["request",Types.evidence_to_json reference;
+                         "outcome",`Null;"terminal",`Null]))
+                   | Some (`String "finished"), Some outcome ->
+                       let* outcome_ref = Types.evidence_of_json outcome in
+                       let* bytes = read_blob outcome_ref
+                         |> Result.map_error read_error in
+                       let* terminal = try Ok (Yojson.Safe.from_string bytes)
+                         with Yojson.Json_error error -> Error error in
+                       if same "kind" "model_outcome" terminal && same "instance_id" instance_id terminal
+                           && member "request" terminal = Some (Types.evidence_to_json reference)
+                       then Ok (Some (`Assoc ["request",Types.evidence_to_json reference;
+                         "outcome",outcome;"terminal",package_terminal terminal]))
+                       else Error "retained sampling outcome contradicts its host request"
+                   | _ -> Error "invalid host sampling receipt")
+              | _ -> Ok None)
+         | _ -> Ok None)
+    | _ -> Ok None in
+  let references = List.concat_map (fun (row : Types.row) -> row.evidence) output.rows
+    |> List.sort_uniq Stdlib.compare in
+  let* receipts, _ = List.fold_left (fun result reference ->
+    let* receipts, remaining = result in
+    let* captured = receipt reference in
+    match captured with
+    | None -> Ok (receipts, remaining)
+    | Some value ->
+        let size = String.length (Yojson.Safe.to_string value) in
+        if size > remaining then Error "sampling receipts exceed the source envelope"
+        else Ok (value :: receipts, remaining - size)) (Ok ([],max_bytes)) references in
+  Ok receipts

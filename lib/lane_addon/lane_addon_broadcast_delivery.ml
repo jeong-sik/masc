@@ -5,15 +5,27 @@ type recipient_state = Pending of string option | Accepted
 type workspace_state = Uncommitted | Committed of int
 type sender_authority = Keeper_sender | External_sender
 let sender_snapshot ~caller ~access ~registered =
-  let registered = List.sort_uniq String.compare registered in
+  let module Id = Keeper_identity.Keeper_id in
+  let parse name = match Id.of_string name with
+    | Some id -> Ok id | None -> Error "Fleet identity must not be blank" in
+  let* registered = List.fold_left (fun result name ->
+    let* names = result in
+    let* id = parse name in
+    Ok ((id,name)::names)) (Ok []) registered in
+  (* Compare canonical identities, retaining the registry's actual name for
+     delivery to its durable path. Case aliases must not duplicate fanout. *)
+  let registered = List.sort_uniq (fun (a,_) (b,_) -> Id.compare a b) registered in
+  let names entries = List.map snd entries in
   match access with
-  | Lane_addon_sources.Operator_configuration -> Ok (External_sender,registered)
-  | Lane_addon_sources.Keeper keeper when String.equal keeper caller ->
-      if List.mem keeper registered
-      then Ok (Keeper_sender,List.filter (fun name -> not (String.equal name keeper)) registered)
-      else Ok (External_sender,registered)
-  | Lane_addon_sources.Keeper _ | Lane_addon_sources.Unauthenticated ->
-      Error "Fleet sender lacks verified authority"
+  | Lane_addon_sources.Operator_configuration -> Ok (External_sender,names registered)
+  | Lane_addon_sources.Keeper keeper ->
+      let* keeper = parse keeper in
+      let* caller = parse caller in
+      if not (Id.equal keeper caller) then Error "Fleet sender lacks verified authority"
+      else if List.exists (fun (id,_) -> Id.equal id keeper) registered
+      then Ok (Keeper_sender,names (List.filter (fun (id,_) -> not (Id.equal id keeper)) registered))
+      else Ok (External_sender,names registered)
+  | Lane_addon_sources.Unauthenticated -> Error "Fleet sender lacks verified authority"
 type payload = {sender_authority:sender_authority;caller:string;operation_id:Request_id.t;artifact_sha256:string;
                 content:string;recipients:string list}
 type record = {payload:payload;workspace_request_id:Request_id.t;

@@ -7430,7 +7430,9 @@
        ../docs/examples/lane-addons/dos-value-difference.toml
        ../docs/examples/lane-addons/dos-value-statistics.toml
        ../docs/examples/lane-addons/dos-statistics.toml
-       ../docs/examples/lane-addons/output-statistics.toml)
+       ../docs/examples/lane-addons/output-statistics.toml
+       ../addons/fusion-compute/lane.toml ../addons/fusion-report/lane.toml
+       (glob_files ../docs/examples/lane-addons/fusion-compute/*.toml))
  (libraries alcotest masc yojson unix))
 
 (test
@@ -7441,13 +7443,15 @@
 (test
  (name test_lane_addon_composition)
  (modules test_lane_addon_composition)
- (deps ../addons/protocol.py ../addons/output-statistics/server.py
+ (deps ../addons/protocol.py ../addons/fusion_sampling.py ../addons/output-statistics/server.py
        ../addons/msx-observer/server.py ../addons/tests/test_packages.py
+       ../addons/tests/stdio_fixture.py
        ../addons/fusion-results/server.py ../addons/fusion-results/lane.toml
        ../addons/fusion-report/server.py ../addons/fusion-report/lane.toml)
  (libraries masc_test_deps masc.fusion_core masc.msx_lane eio eio_main yojson unix))
 
 (include stanzas/test_lane_quiz_packages.inc)
+(include stanzas/test_lane_fusion_compute_packages.inc)
 
 (test
  (name test_lane_addon_reconcile)

@@ -7,7 +7,19 @@ type t
 (** A broker retains its exact package and installation identity. *)
 val for_worker : t -> package:Lane_addon_types.package -> instance_id:string ->
   (Agent_core.Mcp.sampling_handler, string) result
-(** Refuse a broker created for a different worker before creating a container. *)
+(** Refuse a broker created for a different worker before creating a container.
+    The returned callback rejects calls outside [with_observation] before any
+    retention or provider invocation, including initialization/tool discovery. *)
+val with_observation : t -> binding:Yojson.Safe.t -> sources:Yojson.Safe.t ->
+  on_error:(string -> 'error) ->
+  (unit -> (Lane_addon_types.output, 'error) result) ->
+  (Lane_addon_types.output, 'error) result
+(** Bind sampling requests to the exact host input envelope, and reject the
+    returned output if its own model evidence belongs to different inputs.
+    Cached answers may be reused for identical inputs. Upstream workers' model
+    references remain lineage. The scope is cleared on exceptions/cancellation.
+    Concurrent observations on one broker are refused. All evidence reads share
+    the package byte envelope, including blobs that are not model requests. *)
 val package_response : Mcp_protocol.Sampling.create_message_result ->
   Mcp_protocol.Sampling.create_message_result
 (** Remove all callback metadata before exposing a response to a package.
@@ -19,3 +31,10 @@ val create :
     Mcp_protocol.Sampling.create_message_params ->
     (Mcp_protocol.Sampling.create_message_result, string) result) ->
   unit -> (t, string) result
+
+val retained_receipts : store:Lane_addon_store.t -> instance_id:string -> max_bytes:int ->
+  Lane_addon_types.output -> (Yojson.Safe.t list, string) result
+(** Resolve only the selected output's row evidence through exact host request
+    records. Artifact bytes alone never attest a model invocation. All request,
+    outcome, arbitrary evidence and journal reads share [max_bytes] in total.
+    Run off-thread. *)

@@ -6,7 +6,7 @@
        ../addons/quiz-questions/skills/quiz-deck/scripts/build_deck.py
        ../addons/quiz-grader/server.py
        ../addons/quiz-grader/lane.toml
-       ../addons/tests/test_quiz_lane.py)
+       ../addons/tests/test_quiz_lane.py ../addons/tests/stdio_fixture.py)
  (action (run python3 %{dep:test_lane_quiz_packages.py})))
 
 (alias

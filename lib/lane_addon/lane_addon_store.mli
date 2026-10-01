@@ -8,7 +8,19 @@ val blob_reference : string -> Lane_addon_types.evidence
 (** Content-addressed reference without writing. It may be used to measure a
     complete acquisition envelope; publish it only after [write_blob] succeeds. *)
 val write_blob : t -> string -> (Lane_addon_types.evidence, string) result
-val read_blob : t -> Lane_addon_types.evidence -> (string, string) result
+val read_blob : ?max_bytes:int -> t -> Lane_addon_types.evidence -> (string, string) result
+(** [max_bytes] rejects a retained file before allocating its complete body. *)
+type read_budget
+type bounded_read_error = Read_limit_exceeded | Read_failed of string
+val read_budget : max_bytes:int -> read_budget
+val read_blob_bounded : budget:read_budget -> t -> Lane_addon_types.evidence ->
+  (string, bounded_read_error) result
+(** One shared byte allowance, charged before reads including corrupt blobs.
+    Use one budget for an entire projection, not one per reference. *)
+val load_sampling_request_bounded : budget:read_budget -> t -> instance_id:string ->
+  request_id:string -> (Yojson.Safe.t option, bounded_read_error) result
+(** Prefer the independently retained terminal link; otherwise read the pending
+    request index. Both use the caller's shared aggregate read allowance. *)
 type jsonl_snapshot = { entry_count : int; reference : Lane_addon_types.evidence }
 val retain_jsonl : t -> history:string -> entry_count:int -> newest_first:'a list ->
   encode:('a -> string) -> (jsonl_snapshot, string) result

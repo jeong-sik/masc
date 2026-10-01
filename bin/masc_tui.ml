@@ -10426,6 +10426,7 @@ let refresh_keeper_detail_selection state ~base_path ~mailbox =
 ;;
 
 let open_keeper_detail state ~base_path ~mailbox (keeper : keeper) =
+  state.detail_focus_recovery <- None;
   state.keeper_run_cursor <- 0;
   state.view <- Keepers Keeper_detail;
   state.keeper_detail_focus <- Right_pane;
@@ -23130,7 +23131,9 @@ and is loaded on demand through keeper_skill.
                  | Lanes_overview ->
                      (* Lanes is a primary surface; Esc returns to the ring. *)
                      goto_surface state ~mailbox:async_messages Overview)
-            | Acting | Metrics | Keepers Keeper_list -> state.view <- Overview
+            | Acting | Metrics | Keepers Keeper_list ->
+                state.detail_focus_recovery <- None;
+                state.view <- Overview
             | Approvals ->
                 (* Esc leaves the ask and returns to the list with the cursor
                    where it was, the way the Changes diff does. *)
@@ -24485,6 +24488,7 @@ and is loaded on demand through keeper_skill.
            state.runtime_pick_keeper <- Some keeper.k_name;
            state.runtime_pick_list <- Masc_tui_pick_list.closed;
            launch_runtime_catalog_load state ~mailbox:async_messages;
+           state.detail_focus_recovery <- None;
            state.view <- Keepers Keeper_runtime_pick
        | Some "d" | Some "D"
          when state.view = Keepers Keeper_runtime_pick ->

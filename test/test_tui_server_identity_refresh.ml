@@ -202,6 +202,12 @@ let test_detail_focus_waits_for_authoritative_roster () =
   Alcotest.(check bool) "name and tab survive reorder" true
     (state.view=Keepers Keeper_detail && state.keeper_cursor=0 && state.detail_tab=Detail_instructions);
   Alcotest.(check bool) "restoration is consumed once" false (restore_keeper_detail_focus state);
+  let left = suspended () in
+  ready left [keeper "focused"];
+  left.view <- Overview;
+  Alcotest.(check bool) "leaving fallback list prevents recovery navigation" false
+    (restore_keeper_detail_focus left);
+  Alcotest.(check bool) "explicit exit retires focus" true (left.detail_focus_recovery=None);
   let missing = suspended () in
   ready missing [keeper "other"];
   Alcotest.(check bool) "missing name cannot reopen another Keeper" false (restore_keeper_detail_focus missing);

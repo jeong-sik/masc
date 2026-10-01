@@ -7437,6 +7437,9 @@ let remember_keeper_detail_focus state =
 let restore_keeper_detail_focus state =
   match state.detail_focus_recovery with
   | None -> false
+  | Some _ when state.view <> Keepers Keeper_detail && state.view <> Keepers Keeper_list ->
+      state.detail_focus_recovery <- None;
+      false
   | Some (_, _, tab) when state.detail_tab <> tab ->
       state.detail_focus_recovery <- None;
       false

@@ -5397,11 +5397,15 @@ type state = {
   mutable keeper_run_cursor: int;
   mutable detail_reads: detail_read_request list;
   mutable detail_read_generation: int;
+  (* Opaque workspace epoch shared by non-ticket detail loaders. *)
+  mutable detail_read_authority: unit ref;
   mutable keeper_sandbox_view: (string * Masc_tui_keeper_sandbox.t) option;
   mutable keeper_sandbox_view_error: string option;
   mutable keeper_sandbox_logs: (string * Masc_tui_keeper_sandbox.logs) option;
   mutable keeper_sandbox_logs_error: (string * string) option;
   mutable keeper_sandbox_logs_generation: int;
+  (* A visible first log read must resume even before it has any result. *)
+  mutable keeper_sandbox_logs_requested: string option;
   (* The container-log read, which is its own read: the operator opens the
      Sandbox tab, waits for its status, and presses o/l later. Its start lives
      with the request rather than beside it, so an in-flight log read cannot
@@ -5892,6 +5896,7 @@ type state = {
      connector read to learn whether it still holds bindings to offer to
      remove. *)
   mutable connector_unbind_offer_pending: string list;
+  mutable connector_unbind_offer_origin: Tui_decode.server_identity option;
   (* The offer after a pause or shutdown, while it waits for its one key.
      Separate from the unbind-all arm: that arm answers [U], and on the
      Keeper list [U] is the runtime picker. *)
@@ -7949,11 +7954,13 @@ let create_state
   keeper_run_cursor = 0;
   detail_reads = [];
   detail_read_generation = 0;
+  detail_read_authority = ref ();
   keeper_sandbox_view = None;
   keeper_sandbox_view_error = None;
   keeper_sandbox_logs = None;
   keeper_sandbox_logs_error = None;
   keeper_sandbox_logs_generation = 0;
+  keeper_sandbox_logs_requested = None;
   keeper_sandbox_logs_inflight = None;
   keeper_config_view = None;
   keeper_config_view_error = None;
@@ -8202,6 +8209,7 @@ let create_state
   connector_unbind_all_armed = None;
   connector_unbind_all_inflight = false;
   connector_unbind_offer_pending = [];
+  connector_unbind_offer_origin = None;
   connector_unbind_offer = None;
   frames_presented = 0;
   runtime_surface = None;

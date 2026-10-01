@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import os
 import hashlib
+import threading
 import json
 import re
 import sys
@@ -619,9 +620,8 @@ def item_account_requires_matching_roster_revision(binary: str) -> None:
             if row["name"] == "alpha":
                 row["runtime_id"] = "revision-b.current"
                 row["candle_balance_milli"] = "13000"
-        h.send_and_wait(process, fd, output, b"[", INFO_TAB)
-        await_frame(process, fd, output, b"revision-b.current")
-        h.send_and_wait(process, fd, output, b"]", "▸Items".encode())
+        # Stay on Items: accepting roster B must launch its replacement read
+        # without a second key press or leaving/re-entering the tab.
         await_frame(process, fd, output, b"Balance 13.000 Candle")
         assert not any(b"Account unavailable:" in line for line in last_frame_rows(output).values())
         # Turning Candle off cannot leave B's ready Item account alongside an
@@ -638,6 +638,96 @@ def item_account_requires_matching_roster_revision(binary: str) -> None:
         description="Item account publishes only beside its matching current roster revision",
         interact=interact, prepare_workspace=items.prepare, http_fixtures=fixtures,
         refresh=0.5, terminal_cols=200)
+
+
+def item_account_withdraws_unread_authority(binary: str) -> None:
+    fixtures = item_roster_fixtures()
+    identity = {"base": "", "unread": False, "probes": 0}
+    held, release, served = threading.Event(), threading.Event(), threading.Event()
+    arm = [False]
+    balance = ["12500"]
+    account = {"account_revision": "a" * 64, "status": "ready", "keeper": "alpha", "owned_items": [],
+               "catalog": [{"id": item, "slot": slot, "price_status": "unpriced"}
+                           for item, slot in ITEM_CATALOG]}
+
+    def health():
+        identity["probes"] += 1
+        value = ({"error": "identity unread"} if identity["unread"] else
+                 {"paths": {"effective_base_path": identity["base"],
+                            "effective_masc_root": os.path.join(identity["base"], ".masc")},
+                  "state_ready": True})
+        return h.RawHttpResponse(503 if identity["unread"] else 200,
+                                 json.dumps(value).encode(), content_type="application/json")
+
+    def items():
+        value = dict(account, balance_milli=balance[0])
+        if not arm[0]:
+            return 200, value
+        arm[0] = False
+        held.set()
+        if not release.wait(timeout=30):
+            return 504, {"error": "fixture release missing"}
+        def chunks():
+            yield json.dumps(value).encode()
+            served.set()
+        return h.StreamingHttpResponse(chunks)
+
+    fixtures["/health"] = health
+    fixtures["/api/v1/keepers/alpha/items"] = items
+
+    def frame(process, fd, output, predicate):
+        assert h.wait_for_fixture_state(process, fd, output,
+            lambda: predicate(b"\n".join(last_frame_rows(output).values())), timeout=10)
+
+    def recover(process, fd, output):
+        probes = identity["probes"]
+        identity["unread"] = False
+        # A subsequent serial full-refresh probe starts after the previous
+        # identity answer has been applied. This is a fixture barrier, not age.
+        assert h.wait_for_fixture_state(process, fd, output,
+            lambda: identity["probes"] >= probes + 2, timeout=10)
+
+    def interact(process, fd, _slave, output, _base):
+        try:
+            open_alpha_detail(process, fd, output)
+            h.resize_and_wait(process, fd, output, rows=SHORT_ROWS, columns=COLUMNS, needle=INFO_TAB)
+            h.send_and_wait(process, fd, output, b"]", b"Balance 12.500 Candle")
+            identity["unread"] = True
+            frame(process, fd, output, lambda text:
+                  b"Account unavailable:" in text and b"Balance 12.500 Candle" not in text)
+            recover(process, fd, output)
+            balance[0] = "13000"
+            h.send_and_wait(process, fd, output, b"r", b"Balance 13.000 Candle")
+            arm[0] = True
+            os.write(fd, b"r")
+            assert h.wait_for_fixture_state(process, fd, output, held.is_set, timeout=3)
+            identity["unread"] = True
+            frame(process, fd, output, lambda text: b"Account unavailable:" in text)
+            recover(process, fd, output)
+            # Release before any new Item read: otherwise the new read's
+            # generation alone would supersede this response and hide a
+            # missing authority-boundary invalidation.
+            start = len(output)
+            release.set()
+            assert h.wait_for_fixture_state(process, fd, output, served.is_set, timeout=3)
+            probes = identity["probes"]
+            assert h.wait_for_fixture_state(process, fd, output,
+                lambda: identity["probes"] >= probes + 2, timeout=10)
+            assert h.drain_until_quiet(process, fd, output), "late response did not settle"
+            text = b"\n".join(last_frame_rows(output).values())
+            assert b"Account unavailable:" in text
+            assert b"Balance 13.000 Candle" not in text
+            assert b"Balance 13.000 Candle" not in output[start:]
+            balance[0] = "14000"
+            h.send_and_wait(process, fd, output, b"r", b"Balance 14.000 Candle")
+            os.write(fd, b"q")
+        finally:
+            release.set()
+
+    h.run_terminal_scenario(binary, description="Item balances and pending reads lose unread workspace authority",
+                            interact=interact, http_fixtures=fixtures, terminal_cols=COLUMNS,
+                            prepare_workspace=lambda base: identity.update(base=str(Path(base).resolve())),
+                            refresh=0.2)
 
 
 if __name__ == "__main__":
@@ -660,4 +750,5 @@ if __name__ == "__main__":
     item_account_failure_keeps_the_preview(binary)
     item_account_follows_workspace_authority(binary)
     item_account_refuses_an_unobserved_server_workspace(binary)
-    print("tui keeper portrait: PASS (8 scenarios)")
+    item_account_withdraws_unread_authority(binary)
+    print("tui keeper portrait: PASS (9 scenarios)")

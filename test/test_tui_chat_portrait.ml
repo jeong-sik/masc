@@ -9,8 +9,11 @@ let project = Masc_tui_terminal_palette.For_testing.best_color_for_level
 let pixels = View.Pixels {cell_width = 10; cell_height = 20}
 
 let prepare cache ?(display = pixels) ?(rows = 28) ?(cols = 34)
-    ?(equipment = Look.bare) name =
-  Chat.prepare cache ~display ~project ~name ~equipment ~rows ~cols
+    ?equipment ?(portrait = Keeper_portrait_equipment.Ready Keeper_portrait_look.bare) name =
+  let portrait = match equipment with
+    | Some value -> Keeper_portrait_equipment.Ready value
+    | None -> portrait in
+  Chat.prepare cache ~display ~project ~name ~portrait ~rows ~cols
 
 let test_space_and_identity () =
   let cache = Portrait.cache () in
@@ -77,7 +80,21 @@ let test_small_and_colourless () =
     check bool "mosaic cells stay inside the roster" true
       (Masc_tui_message_layout.display_width line <= 30)) mosaic.picture_lines
 
+let test_observed_equipment_and_unavailable () =
+  let cache = Portrait.cache () in
+  let image portrait = (Option.get (Option.get portrait).Chat.placement).View.image in
+  let bare = image (prepare cache "alpha") in
+  let equipment = { Keeper_portrait_look.bare with face = Keeper_portrait_look.Glasses } in
+  let equipped = image (prepare cache ~portrait:(Keeper_portrait_equipment.Ready equipment) "alpha") in
+  check bool "same conversation displays the observed equipment" false
+    (String.equal bare.Keeper_portrait_draw.rgba equipped.Keeper_portrait_draw.rgba);
+  check bool "unchanged equipment reuses its pixels" true
+    (equipped == image (prepare cache ~portrait:(Keeper_portrait_equipment.Ready equipment) "alpha"));
+  check bool "unavailable reading does not reuse retained pixels" true
+    (Option.is_none (prepare cache ~portrait:(Keeper_portrait_equipment.Unavailable "fixture unread") "alpha"))
+
 let () = run "chat portrait" ["conversation identity and layout", [
+  test_case "uses observed equipment and suppresses unavailable readings" `Quick test_observed_equipment_and_unavailable;
   test_case "owns its space and follows the conversation" `Quick test_space_and_identity;
   test_case "follows observed clothing without taking roster space" `Quick test_observed_equipment;
   test_case "reserves four selectable roster rows at the boundary" `Quick test_four_selectable_roster_rows_are_the_boundary;

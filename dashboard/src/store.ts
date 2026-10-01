@@ -1288,6 +1288,8 @@ async function doFetchExecution(): Promise<void> {
   const force = nextExecutionForce
   nextExecutionForce = false
   const requestGeneration = executionSnapshotRequestGeneration()
+  const requestEpoch = executionPublicationEpoch
+  const requestPublicationGeneration = executionPublicationGenerationWatermark
   executionLoading.value = true
   executionError.value = null
   try {
@@ -1305,6 +1307,11 @@ async function doFetchExecution(): Promise<void> {
     // Initializing keeps its existing warm retry; superseded reads cannot
     // overwrite the newer accepted authority or turn into successful refresh.
     if (err instanceof ExecutionRefreshUnavailable) throw err
+    if (requestGeneration !== executionHydrationRequestGeneration
+      || requestEpoch !== executionPublicationEpoch
+      || requestPublicationGeneration !== executionPublicationGenerationWatermark) {
+      throw new ExecutionRefreshUnavailable('Execution failure was superseded by a newer observation')
+    }
     console.warn('[Dashboard] execution fetch error:', err)
     executionError.value = errorMessageOr(err, 'Execution projection load failed')
     candleObservation.value = { status: 'unavailable', reason: executionError.value }

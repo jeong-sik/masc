@@ -48,6 +48,11 @@ let recent_terminal_tasks ~cutoff (tasks : Masc_domain.task list) : Masc_domain.
   |> List.map snd
 ;;
 
+let canonical_workspace_root (config : Workspace.config) =
+  let paths = Server_base_path_diagnostics.detect
+    ~effective_base_path:config.base_path ~effective_masc_root:(Workspace.masc_dir config) () in
+  paths.effective_base_path
+
 let workspace_status_json (config : Workspace.config) : Yojson.Safe.t =
   let workspace_state_opt =
     if Workspace.is_initialized config then Some (Workspace.read_state config) else None
@@ -64,7 +69,7 @@ let workspace_status_json (config : Workspace.config) : Yojson.Safe.t =
   in
   let tempo = Tempo.get_tempo config in
   `Assoc
-    [ "workspace_root", `String config.base_path
+    [ "workspace_root", `String (canonical_workspace_root config)
     ; "workspace_path", `String config.workspace_path
     ; "workspace_differs", `Bool (config.workspace_path <> config.base_path)
     ; "cluster", `String (Env_config_core.cluster_name ())
@@ -835,7 +840,7 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
       ; ( "projection_diagnostics"
         , `Assoc
             [ "surface", `String "execution"
-            ; "workspace_root", `String config.base_path
+            ; "workspace_root", `String (canonical_workspace_root config)
             ; "workspace_path", `String config.workspace_path
             ; ( "persistence_sanitized_paths_sample"
               , `List (List.map (fun path -> `String path) utf8_repair.path_samples) )
@@ -948,6 +953,7 @@ let json ?actor ?fixture ?(light = true) ~config ~sw ~clock ~proc_mgr () =
 ;;
 
 module For_test = struct
+  let workspace_status_json = workspace_status_json
   let terminal_reason_requires_attention = terminal_reason_requires_attention
   let agents_json = agents_json
   let render_under_timeout = render_under_timeout

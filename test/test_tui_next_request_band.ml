@@ -1,9 +1,8 @@
 (* The NEXT REQUEST band draws the server's forecast in tokens at the tab's
-   scale: the carried range from the pair's front, the marks it is judged
-   against, what the provider last counted, and the parts in the order the
-   request carries them. The band is rendered here through its own entry
-   point with plain folding, so the assertions are about the sentences, not
-   the pane. *)
+   scale: the carried range from the pair's front, the retained ledger
+   baseline, the separate trim settings, and the parts in the order the request
+   carries them. The band is rendered here through its own entry point with
+   plain folding, so the assertions are about the sentences, not the pane. *)
 
 module Inspector = Masc_tui_context_inspector
 module Band = Masc_tui_next_request_band
@@ -44,7 +43,7 @@ let lines ?(scale = Masc_tui_token_scale.fleet) forecast =
     forecast
 
 (* lane-smith on a deepseek binding with marks 120k/80k: the ledger's front
-   sits at atom 3,100 of 3,395, the last count was 91k tokens. *)
+   sits at atom 3,100 of 3,395, the ledger baseline is 91k tokens. *)
 let measured : Inspector.forecast =
   { checkpoint_messages = 6012
   ; wake_line_bytes = 131
@@ -101,10 +100,18 @@ let assembled : Inspector.forecast_slot list =
 let with_candidate f (forecast : Inspector.forecast) : Inspector.forecast =
   { forecast with candidates = List.map f forecast.candidates }
 
-let test_the_band_names_the_marks_and_the_range () =
+let test_the_band_separates_settings_from_the_range () =
   let rows = lines (Ok measured) in
-  Alcotest.(check bool) "the marks are named in tokens" true
-    (says "ollama_cloud.deepseek-v4-1-flash  \xc2\xb7  marks 120.0k / 80.0k tok" rows);
+  Alcotest.(check bool) "the candidate heading is only its runtime" true
+    (List.exists
+       (fun row -> String.equal (strip row) "  ollama_cloud.deepseek-v4-1-flash")
+       rows);
+  Alcotest.(check bool) "configuration is separate from the forecast range" true
+    (says
+       "Config / Runtime: this binding sets context-high-water-tokens to 120.0k tok and context-low-water-tokens to 80.0k tok."
+       rows
+     && says "Without Librarian continuity, these marks evict oldest carried history at a turn boundary." rows
+     && says "neither this forecast's size nor the model limit" rows);
   (* 87,000 / 3.39 = 25,664; 237,000 / 3.39 = 69,912. *)
   Alcotest.(check bool) "the fixed parts and the pinned blocks each carry the turn they were read from"
     true
@@ -115,14 +122,17 @@ let test_the_band_names_the_marks_and_the_range () =
   (* 170,000 / 3.39 = 50,147. *)
   Alcotest.(check bool) "the range says how many atoms go, from where, and where the front came from"
     true
-    (says ("295 of 3395 atoms would go, from atom 3100 (" ^ approx ^ "50.1k tok)") rows
+    (says ("History preview: send 295 of 3395 original atoms, starting at #3100 (" ^ approx ^ "50.1k tok estimated).") rows
      && says "front from this runtime's ledger" rows);
-  Alcotest.(check bool) "the last count is read against the marks" true
-    (says "last counted 91.0k tok against marks 120.0k / 80.0k" rows);
+  Alcotest.(check bool) "the ledger baseline stands apart from configuration" true
+    (says "Ledger baseline 91.0k tok; may retain an earlier usage sample or be adjusted after history eviction." rows
+     && not (says "against marks" rows));
   (* 131 / 3.39 = 38.6: the wake line is named in the same estimated tokens as
      every other figure of the band, never in bytes beside them. *)
   Alcotest.(check bool) "the footer counts the checkpoint and the wake line in tokens" true
-    (says ("6012 messages in the checkpoint; the wake line adds " ^ approx ^ "39 tok as the newest atom") rows)
+    (says ("6012 messages in the checkpoint; the wake line adds " ^ approx ^ "39 tok as the newest atom") rows);
+  Alcotest.(check bool) "estimated figures do not claim provider usage" true
+    (says "Figures marked ≈ estimate token equivalents from bytes; they are not provider usage." rows)
 
 let test_a_pinned_figure_from_another_lane_names_it () =
   let forecast =
@@ -200,7 +210,7 @@ let test_no_assembly_draws_no_order () =
   Alcotest.(check bool) "without a layout there is no order to draw" false
     (says "In the order the request carries them" (lines (Ok measured)))
 
-let test_no_marks_says_only_a_refusal_moves_the_front () =
+let test_no_marks_still_points_to_configuration () =
   let forecast =
     with_candidate
       (fun candidate ->
@@ -214,10 +224,11 @@ let test_no_marks_says_only_a_refusal_moves_the_front () =
       measured
   in
   let rows = lines (Ok forecast) in
-  Alcotest.(check bool) "the head says so" true
-    (says "no marks declared: only a refusal moves the front" rows);
+  Alcotest.(check bool) "the setting is absent, not a forecast result" true
+    (says "Config / Runtime: this binding has no context-high-water-tokens or context-low-water-tokens setting." rows);
   Alcotest.(check bool) "the count stands alone" true
-    (says "last counted 91.0k tok" rows && not (says "against marks" rows))
+    (says "Ledger baseline 91.0k tok; may retain an earlier usage sample or be adjusted after history eviction." rows
+     && not (says "against marks" rows))
 
 let test_a_cold_front_names_its_record_and_nothing_counted () =
   let forecast =
@@ -238,7 +249,7 @@ let test_a_cold_front_names_its_record_and_nothing_counted () =
   let rows = lines (Ok forecast) in
   Alcotest.(check bool) "the record's turn is named" true
     (says "front from turn #3581's record; nothing counted since the server started" rows);
-  Alcotest.(check bool) "no count line" false (says "last counted" rows)
+  Alcotest.(check bool) "no ledger baseline line" false (says "Ledger baseline" rows)
 
 let test_the_turn_start_and_refusal_fronts_say_why () =
   let with_origin origin =
@@ -262,7 +273,7 @@ let test_the_turn_start_and_refusal_fronts_say_why () =
     (says "no front, and where this turn began could not be read: the newest atom alone (boundary read failed: fixture)"
        (with_origin (Inspector.Carried_turn_start_unknown { reason = "boundary read failed: fixture" })));
   Alcotest.(check bool) "and the range's own first atom stays on the fact line" true
-    (says "from atom 3100" turn_start);
+    (says "starting at #3100" turn_start);
   Alcotest.(check bool) "a range refused at the Librarian point" true
     (says "the range from the Librarian's point was refused: front moved to where this turn began"
        (with_origin Inspector.Carried_turn_start_after_librarian_refusal));
@@ -281,7 +292,7 @@ let test_the_turn_start_and_refusal_fronts_say_why () =
     (says "the seed range was refused: front moved to where this turn began"
        (with_origin Inspector.Carried_turn_start_after_seed_refusal));
   Alcotest.(check bool) "a fitting snapshot" true
-    (says "the Librarian's working state stands in for the atoms before 3100 (boundary line 42)"
+    (says "The earlier 3100 atoms are represented by the Librarian working state (Turn Boundary log row 42 covering the captured prefix)."
        (with_origin (Inspector.Carried_librarian_snapshot { end_atom = 3100; boundary_line = 42 })));
   Alcotest.(check bool) "the Librarian's read position" true
     (says "the Librarian has read up to atom 3100; nothing is sent in place of those atoms"
@@ -500,7 +511,7 @@ let test_an_official_client_runtime_carries_no_range_and_says_why () =
   in
   let rows = lines (Ok forecast) in
   Alcotest.(check bool) "the reason is drawn" true (says reason rows);
-  Alcotest.(check bool) "no range line" false (says "atoms would go" rows || says "no range was computed" rows)
+  Alcotest.(check bool) "no range line" false (says "History preview: send" rows || says "no range was computed" rows)
 
 let test_a_missing_forecast_is_named_not_hidden () =
   Alcotest.(check bool) "the band says why it is empty" true
@@ -768,8 +779,8 @@ let test_a_refused_walk_is_named_not_walked () =
 let () =
   Alcotest.run "tui_next_request_band"
     [ ( "render"
-      , [ Alcotest.test_case "the band names the marks and the range" `Quick
-            test_the_band_names_the_marks_and_the_range
+      , [ Alcotest.test_case "the band separates settings from the range" `Quick
+            test_the_band_separates_settings_from_the_range
         ; Alcotest.test_case "a pinned figure from another lane names it" `Quick
             test_a_pinned_figure_from_another_lane_names_it
         ; Alcotest.test_case "the assembly is drawn in travel order" `Quick
@@ -777,8 +788,8 @@ let () =
         ; Alcotest.test_case "a preamble slot is named when the range prepended one" `Quick
             test_a_preamble_slot_is_named_when_the_range_prepended_one
         ; Alcotest.test_case "no assembly draws no order" `Quick test_no_assembly_draws_no_order
-        ; Alcotest.test_case "no marks says only a refusal moves the front" `Quick
-            test_no_marks_says_only_a_refusal_moves_the_front
+        ; Alcotest.test_case "no marks still points to configuration" `Quick
+            test_no_marks_still_points_to_configuration
         ; Alcotest.test_case "a cold front names its record and nothing counted" `Quick
             test_a_cold_front_names_its_record_and_nothing_counted
         ; Alcotest.test_case "the turn start and refusal fronts say why" `Quick

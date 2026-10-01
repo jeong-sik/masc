@@ -8,6 +8,13 @@ val reader :
     explicit error, never a fabricated starting picture. *)
 val current : now:(unit -> float) -> base_path:string -> keeper:string -> (Keeper_portrait_look.equipment, string) result
 
+val read_persisted :
+  now:(unit -> float) -> base_path:string -> keeper:string ->
+  (Keeper_portrait_look.equipment, string) result
+(** Reads and replays recorded equipment without checking current payout
+    configuration/appraiser availability or appending a policy fact.
+    Unreadable ledger data is an explicit error. *)
+
 type receipt = {
   equipment : Keeper_portrait_look.equipment;
   changed : bool;

@@ -5,8 +5,9 @@ import { readFile, writeFile } from 'node:fs/promises'
 
 let input = ''
 for await (const chunk of process.stdin) input += chunk
-const { origin, token, output, sourceSha, keeper, ownedItem } = JSON.parse(input)
+const { origin, token, output, sourceSha, keeper, ownedItem, balanceLabel } = JSON.parse(input)
 input = ''
+if (typeof balanceLabel !== 'string' || !balanceLabel) throw new Error('Missing expected wallet label')
 const target = new URL(origin)
 if (target.hostname !== '127.0.0.1' || target.protocol !== 'http:') {
   throw new Error('Item browser acceptance requires isolated loopback HTTP')
@@ -48,7 +49,7 @@ try {
   await page.getByRole('tab', { name: '아이템', exact: true }).click()
   const panel = page.getByRole('tabpanel', { name: '아이템', exact: true })
   await panel.getByText('현재 잔액', { exact: true }).locator('..')
-    .getByText('0.000 Candle', { exact: true }).waitFor()
+    .getByText(balanceLabel, { exact: true }).waitFor()
   await panel.getByText('보유 1 / 18개', { exact: true }).waitFor()
   await panel.getByRole('listitem').filter({ has: page.getByText(ownedItem, { exact: true }) })
     .getByText('착용 중', { exact: true }).waitFor()

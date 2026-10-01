@@ -116,6 +116,26 @@ Keeper-turn async messaging is a separate surface (`keeper_msg`,
 `keeper_msg_result`, `keeper_msg_cancel`, `keeper_msg_list`) and is serialized
 through `Keeper_turn_admission`.
 
+For explicitly requested targeted verification, the surviving
+`test_tool_input_validation` suite exercises Execute's accepted fields and
+rejects background and async lifecycle fields. The Test workflow is reusable
+(`workflow_call`), so it cannot be dispatched directly. The MASC leader first
+prepares an approved candidate and its selection receipt using the
+[selection procedure](../scripts/review/APPROVED-CI-SELECTION.md). With
+`candidate_sha` set to that exact candidate and `selection.json` containing its
+receipt, request the explicit suite through the dispatchable caller on main:
+
+```bash
+gh workflow run leader-ci.yml --repo jeong-sik/masc --ref main \
+  -f candidate="$candidate_sha" -F selection=@selection.json \
+  -f tests=true -f suites=test_tool_input_validation
+```
+
+A dispatch is a request, not a passing result. Retain the completed run URL,
+exact candidate SHA and selected PR scope. A candidate result does not certify
+a different head or authorize a merge.
+
+
 ## Counter Endpoint
 
 ```text

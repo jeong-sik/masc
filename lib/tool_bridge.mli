@@ -91,8 +91,10 @@ val to_agent_core_typed_result :
     [artifact_refs_omitted] counts handles that cannot fit, while retaining the
     applied/no-repeat warning and current-target recovery instruction. Oversized
     reference previews may be omitted without changing their blob identity. It
-    never becomes success or retries manifest projection. The producer owns the
-    recovery payload; the bridge does not reconstruct domain fields.
+    never becomes success or retries manifest projection. A custom ceiling too
+    small for the fixed envelope receives a bounded plain notice; the typed
+    error remains non-recoverable. The producer owns the recovery payload;
+    the bridge does not reconstruct domain fields.
 
     When typed result data contains normalized artifact references, the
     producer must first call {!attach_artifact_manifest}; the provider-facing

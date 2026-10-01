@@ -11,6 +11,10 @@ import test_tui_keyboard_input as h
 
 SOURCE_MODULES = ("bin/masc_tui_render.ml", "bin/masc_tui.ml")
 TASK_ID = "task-metadata-501"
+FOLLOWED_TASK_ID = "task-followed-502"
+FOLLOWED_TITLE = "FOLLOWEDHEAD short task"
+HANDOFF_UPDATER = "handoff-owner-" + "delegate-" * 18 + "HANDOFFUPDATEREND"
+HANDOFF_STAMP = "2026-10-01T02:03:04Z"
 TITLE = "TITLEHEAD " + "한 " * 20 + "task title evidence " * 5 + "TITLEEND"
 ACTOR = "actor-" + "delegated-" * 14 + "ACTOREND"
 CREATOR = "creator-" + "owner-" * 18 + "CREATOREND"
@@ -18,8 +22,6 @@ VERIFICATION = "verification-" + "0123456789abcdef" * 7 + "VERIFYEND"
 NOTES = "NOTESHEAD\n\n" + "completed evidence " * 12 + "\nNOTESEND"
 REASON = "REASONHEAD\n\n" + "cancelled because source changed " * 8 + "\nREASONEND"
 HISTORY = "HISTORYHEAD " + "handoff observation " * 9 + "HISTORYEND"
-HANDOFF_STAMP = "2026-09-30T02:03:04Z"
-HANDOFF_EDITOR = "handoff-editor-" + "delegated-" * 8 + "HANDOFFEDITOREND"
 STAMP = "2026-09-30T01:02:03Z"
 WINDOW = re.compile(rb"\[lines (\d+)-(\d+)/(\d+)\]")
 
@@ -46,8 +48,8 @@ def task(status):
            "status": status, "assignee": ACTOR, "priority": 2, "cycle_count": 7,
            "created_at": STAMP, "created_by": CREATOR, "files": ["docs/evidence/task-metadata.md"],
            "reclaim_policy": "block_reclaim",
-           "handoff_context": {"summary": "Operator handoff", "reclaim_policy": "allow_reclaim",
-                               "updated_at": HANDOFF_STAMP, "updated_by": HANDOFF_EDITOR}}
+           "handoff_context": {"summary": "Retained handoff", "reclaim_policy": "allow_reclaim",
+                               "updated_at": HANDOFF_STAMP, "updated_by": HANDOFF_UPDATER}}
     if status == "awaiting_verification":
         row.update(started_at=STAMP, submitted_at=STAMP, verification_id=VERIFICATION)
     elif status == "done":
@@ -59,7 +61,9 @@ def task(status):
 
 def save_task(base, status):
     path = Path(base) / ".masc" / "tasks" / "backlog.json"
-    path.write_text(json.dumps({"tasks": [task(status)], "last_updated": STAMP, "version": 1}), encoding="utf-8")
+    followed = task("todo")
+    followed.update(id=FOLLOWED_TASK_ID, title=FOLLOWED_TITLE)
+    path.write_text(json.dumps({"tasks": [task(status), followed], "last_updated": STAMP, "version": 1}), encoding="utf-8")
 
 
 def run(executable):
@@ -69,6 +73,15 @@ def run(executable):
         "to_status": "awaiting_verification", "actor": ACTOR,
         "handoff_context": {"summary": HISTORY},
     }])
+    fixtures[f"/api/v1/dashboard/tasks/history?task_id={FOLLOWED_TASK_ID}&limit=50"] = (200, [])
+    fixtures["/api/v1/dashboard/harness-health"] = (200, {
+        "generated_at": 1787557669.0, "recent_verdicts": [{
+            "timestamp": 1787557668.0, "task_id": FOLLOWED_TASK_ID,
+            "task_title": FOLLOWED_TITLE, "agent_name": "beta", "gate": "verify",
+            "verdict": "approve", "evaluator_runtime": "glm-coding", "fallback_reason": None,
+            "notes_hash": "a51844ac8e12b5bf11f1c6db0021521298e5788cd64e4ec9b566dbf36a16fa51",
+        }], "calibration": {},
+    })
     requests = []
     with tempfile.TemporaryDirectory(prefix="masc-task-editor-") as directory:
         marker = Path(directory) / "opened"
@@ -81,12 +94,15 @@ def run(executable):
             save_task(base, "awaiting_verification")
 
         def interact(process, fd, _slave, output, base):
-            # Task palette entries derive from the loaded durable snapshot.
-            # Startup's Dashboard header appears before that async read; Enter
-            # on a query with no matching entry simply closes the palette.
-            h.send_and_wait(process, fd, output, b":", b"MASC Command palette")
-            h.send_and_wait(process, fd, output, ("task " + TASK_ID).encode(), b"TITLEHEAD")
-            h.send_and_wait(process, fd, output, b"\r", b"MASC Task")
+            # Home owns decisions and continuation. Work shows the durable
+            # Task roster before its exact Task palette entry can be opened.
+            h.palette_go(process, fd, output, b"go Work", b"MASC Work")
+            h.send_and_wait(process, fd, output, b"t", b"MASC Work / Tasks")
+            ready = b"awaiting_verification"
+            h.wait_for_output(process, fd, output, ready, start=0, timeout=5)
+            h.wait_for_output(process, fd, output, h.FRAME_END,
+                              start=h.end_of_needle(output, ready, 0), timeout=3)
+            h.palette_go(process, fd, output, ("task " + TASK_ID).encode(), b"TITLEHEAD")
             # x on a Task owns its existing cancel editor, rather than the
             # Goal lifecycle handler. An empty reason must leave it untouched.
             original = (Path(base) / ".masc" / "tasks" / "backlog.json").read_bytes()
@@ -113,8 +129,8 @@ def run(executable):
                     h.drain_until_quiet(process, fd, output)
                     all_text = compact(screen(output))
                     for value in (TITLE, TASK_ID, ACTOR, CREATOR, STAMP, evidence, HISTORY,
-                                  "handoff policy: allow_reclaim", "reclaim policy: block_reclaim",
-                                  "handoff updated: " + HANDOFF_STAMP, "handoff editor: " + HANDOFF_EDITOR):
+                                  "reclaim policy: block_reclaim", "handoff reclaim policy: allow_reclaim",
+                                  "handoff updated: " + HANDOFF_STAMP, "handoff updater: " + HANDOFF_UPDATER):
                         assert compact(value.encode()) in all_text, (status, width, value, all_text)
                     h.resize_and_wait(process, fd, output, rows=18, columns=width,
                                       needle=b"TITLEHEAD", final_cursor=b"\x1b[?25l")
@@ -140,17 +156,45 @@ def run(executable):
                 if status == "awaiting_verification":
                     h.send_and_wait(process, fd, output, b"\x1b", b"MASC Work")
                     h.palette_go(process, fd, output, ("task " + TASK_ID).encode(), b"TITLEHEAD")
+            # A Harness verdict points at another Task. Following it after
+            # reading the first Task's tail must open the new document at top.
+            h.send_and_wait(process, fd, output, b"\x1b[F", b"HISTORYEND")
+            h.drain_until_quiet(process, fd, output)
+            assert window(output)[0] > 1, window(output)
+            h.palette_go(process, fd, output, b"go Harness", b"FOLLOWEDHEAD")
+            h.send_and_wait(process, fd, output, b"\x1d", b"FOLLOWEDHEAD")
+            h.drain_until_quiet(process, fd, output)
+            assert b"MASC Task" in screen(output), screen(output)
+            assert window(output)[0] == 1, window(output)
+            assert compact(FOLLOWED_TASK_ID.encode()) in compact(screen(output)), screen(output)
             # A stale detail ID survives a task leaving the durable backlog,
             # but the visible Work list owns keys after that refresh.
             marker.unlink()
             backlog = Path(base) / ".masc" / "tasks" / "backlog.json"
-            backlog.write_text(json.dumps({"tasks": [], "last_updated": STAMP, "version": 1}), encoding="utf-8")
+            remaining = [dict(task("todo"), id=f"task-remaining-{index}",
+                              title=f"Remaining task {index}") for index in (1, 2)]
+            backlog.write_text(json.dumps({"tasks": remaining, "last_updated": STAMP, "version": 1}), encoding="utf-8")
             h.send_and_wait(process, fd, output, b"r", b"MASC Work")
             os.write(fd, b"x")
             h.drain_until_quiet(process, fd, output)
             assert not marker.exists(), "a hidden task accepted cancellation after removal"
             assert not any(b"masc_transition" in body for _, body in requests), requests
             assert b"MASC Work" in screen(output) and b"MASC Task" not in screen(output), screen(output)
+            # Choose the first visible row, then move down while the removed
+            # detail ID is still present. Enter must open the selected row.
+            h.send_and_wait(process, fd, output, b"\x1b[H", b"MASC Work")
+            h.send_and_wait(process, fd, output, b"j", b"MASC Work")
+            h.send_and_wait(process, fd, output, b"\r", b"MASC Task")
+            assert b"task-remaining-2" in compact(screen(output)), screen(output)
+            # Remove this detail too, retaining two rows to exercise k on
+            # the same stale-detail path with the cursor at the last row.
+            remaining[1]["id"] = "task-remaining-3"
+            backlog.write_text(json.dumps({"tasks": remaining, "last_updated": STAMP, "version": 1}), encoding="utf-8")
+            h.send_and_wait(process, fd, output, b"r", b"MASC Work")
+            h.send_and_wait(process, fd, output, b"\x1b[F", b"MASC Work")
+            h.send_and_wait(process, fd, output, b"k", b"MASC Work")
+            h.send_and_wait(process, fd, output, b"\r", b"MASC Task")
+            assert b"task-remaining-1" in compact(screen(output)), screen(output)
             os.write(fd, b"q")
 
         h.run_terminal_scenario(executable, description="Task metadata and terminal evidence are fully scrollable",

@@ -121,6 +121,9 @@ val agenda_viewport : Masc_tui_types.state -> int * int
 val task_detail_viewport : Masc_tui_types.state -> int * int
 (** Wrapped physical row count and visible body height for the current Task
     reading, including its metadata and the actual split-pane width. *)
+val planning_detail_viewport : Masc_tui_types.state -> int * int
+(** Physical row count and reader height of the current Goal detail,
+    including its pinned action rows and actual split-pane width. *)
 val agenda_scroll_position : Masc_tui_types.state -> int
 (** The scroll currently drawn, following a selected target only during
     target navigation. Page reading retains its own window. *)

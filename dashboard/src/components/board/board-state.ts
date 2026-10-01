@@ -337,11 +337,18 @@ export function visibilityBadgeColor(vis: string): string {
 }
 
 // ── Data operations ────────────────────────────────────────────────
-export async function loadPostDetail(postId: string, focusedCommentId?: string | null) {
-  const requestId = ++detailRequestId
-  const focus = focusedCommentId === undefined && detailPostId.value === postId
-    ? detailFocusedCommentId.value : focusedCommentId?.trim() || null
+function sameCommentSnapshot(left: BoardCommentPage, right: BoardCommentPage): boolean {
+  return left.total === right.total && left.revision === right.revision
+}
+
+export async function loadPostDetail(postId: string, focusedCommentId?: string | null, oldestOffset?: number) {
+  const samePost = detailPostId.value === postId
+  const hasLoadedRange = samePost && !detailLoading.value && detailPost.value !== null
+  const clearingFocus = focusedCommentId === null && detailFocusedCommentId.value !== null
+  const retainedOffset = oldestOffset ?? (hasLoadedRange && !clearingFocus ? detailCommentPage.value.offset : undefined)
+  const focus = focusedCommentId === undefined && samePost ? detailFocusedCommentId.value : focusedCommentId?.trim() || null
   detailFocusedCommentId.value = focus
+  const requestId = ++detailRequestId
   detailPostId.value = postId
   detailPost.value = null
   detailComments.value = []
@@ -350,7 +357,9 @@ export async function loadPostDetail(postId: string, focusedCommentId?: string |
   detailLoading.value = true
   detailReadPhase.value = 'loading'
   try {
-    const data = await fetchBoardPost(postId)
+    const data = focus
+      ? await fetchBoardPost(postId, undefined, undefined, focus)
+      : await fetchBoardPost(postId)
     if (detailPostId.value !== postId || detailRequestId !== requestId) return
     detailPost.value = {
       id: data.id,
@@ -382,13 +391,32 @@ export async function loadPostDetail(postId: string, focusedCommentId?: string |
     detailReadPhase.value = 'loaded'
     let comments = data.comments
     let page = data.commentPage
+    // Refresh only the range the operator already loaded. Focus resolution
+    // and ancestor lookup are part of the server's single thread read.
+    while (retainedOffset !== undefined && page.offset > retainedOffset) {
+      const offset = Math.max(retainedOffset, page.offset - COMMENT_PAGE_SIZE)
+      const older = await fetchBoardPost(postId, offset, page.offset - offset)
+      if (detailPostId.value !== postId || detailRequestId !== requestId) return
+      if (!sameCommentSnapshot(data.commentPage, older.commentPage)) {
+        throw new Error('Comment thread changed during refresh; retry to read one snapshot')
+      }
+      if (older.commentPage.offset >= page.offset) throw new Error('Older comment page did not advance')
+      comments = mergeCommentPages(older.comments, comments)
+      page = older.commentPage
+    }
     detailComments.value = comments
     detailCommentPage.value = page
     try {
-      while (focus && page.offset > 0 && focusedCommentNeedsAncestors(comments, focus)) {
+      // A server-focused read resolves absence. Only a returned reply with an
+      // incomplete parent chain needs the ancestor fallback.
+      while (focus && comments.some(comment => comment.id === focus)
+        && page.offset > 0 && focusedCommentNeedsAncestors(comments, focus)) {
         const offset = Math.max(0, page.offset - COMMENT_PAGE_SIZE)
         const older = await fetchBoardPost(postId, offset, page.offset - offset)
         if (detailPostId.value !== postId || detailRequestId !== requestId) return
+        if (!sameCommentSnapshot(data.commentPage, older.commentPage)) {
+          throw new Error('Comment thread changed during ancestor lookup; retry to read one snapshot')
+        }
         if (older.commentPage.offset >= page.offset) {
           throw new Error('Older comment page did not advance toward the start')
         }
@@ -427,6 +455,12 @@ export async function loadOlderPostComments(postId: string) {
   try {
     const data = await fetchBoardPost(postId, offset, page.offset - offset)
     if (detailPostId.value !== postId || detailRequestId !== requestId) return
+    if (!sameCommentSnapshot(page, data.commentPage)) {
+      // Rebuild the requested range from the new tail rather than publishing
+      // its count beside an old tail that lacks appended/deleted comments.
+      await loadPostDetail(postId, undefined, Math.min(offset, data.commentPage.offset))
+      return
+    }
     detailComments.value = mergeCommentPages(data.comments, detailComments.value)
     detailCommentPage.value = data.commentPage
   } catch (err) {

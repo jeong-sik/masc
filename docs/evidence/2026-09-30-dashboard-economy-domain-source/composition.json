@@ -1,0 +1,130 @@
+{
+  "actual_publication_parent": "9464d7404c97b086d1b5cdc7af2c817e8f5d23cc",
+  "actual_feature_composition_parent": "a065328066d9996f8658238e3077cad70c2c063c",
+  "local_parent": "a215894965a620af1ba80d6c464eb6e082e4e423",
+  "local_branch": "fix/dashboard-economy-domain-20260930",
+  "local_parent_is_partial": true,
+  "publication_rule": "overlay only this child delta onto actual publication parent; local partial whole tree is not a publication baseline",
+  "changed_source": [
+    {
+      "path": "dashboard/src/api/schemas/candle-observation.ts",
+      "local_parent_git_blob": "63332b2ddf68250f2288a3c8fe9693600d6f40d3",
+      "candidate_sha256": "843b3408805a3ab8378ab9e0b2375633c62faf88ad6146dd7af04d92598ed1ea"
+    },
+    {
+      "path": "dashboard/src/api/schemas/keeper-portrait.ts",
+      "local_parent_git_blob": "477a2bb56bebce60969399948c68a3007ba50756",
+      "candidate_sha256": "e656592642e05cdd20d48ee7e8539b92c28a2c780d079555805430822859a5fe"
+    },
+    {
+      "path": "dashboard/src/api/schemas/gate-keepers.ts",
+      "local_parent_git_blob": "bc4eb76ac15a9c26f505488f80ca1d62bcbe53d6",
+      "candidate_sha256": "f8a86378f5c6570b737f65701435ba02745636242b295ba57efdd85943d49279"
+    },
+    {
+      "path": "dashboard/src/api/schemas/candle-observation.test.ts",
+      "local_parent_git_blob": "9d99c0aea94e926b82781d62b085d53363daf204",
+      "candidate_sha256": "fe85585d123763fab414bf39a2baaf9985ae82c4eb3332020bb36dc70b8ed99a"
+    },
+    {
+      "path": "dashboard/src/api/schemas/keeper-portrait.test.ts",
+      "local_parent_git_blob": "10f58d08c593d5d308ce7952fb018c4511f65ab6",
+      "candidate_sha256": "4eb03f364523a83c40cbe6f4866cb611bfb9b318732ea6106d967d8e7008dbdd"
+    },
+    {
+      "path": "dashboard/src/api/schemas/gate-keepers.test.ts",
+      "local_parent_git_blob": "eed303e2ca0fe75ced0c36d0183275aa92e4c544",
+      "candidate_sha256": "0a17d57c9434da43f362419a46c0e4827490c19f115601fb6aeb00b1f0b6dc8c"
+    }
+  ],
+  "effect_declare_contract": {
+    "installed_declaration": "/tmp/masc-item-goal-rw/dashboard/node_modules/effect/dist/dts/Schema.d.ts:495",
+    "overload": "<A>(is: (input: unknown) => input is A, annotations?: Annotations.Schema<A>): declare<A>",
+    "version_major": 3,
+    "installed_declaration_sha256": "7bd0ec401fad889ab704a5705e876336121578da2a3f886c8e57bddea4dbf656",
+    "installed_version": "3.22.1"
+  },
+  "runtime_ci_for_candidate": "not executed",
+  "unchanged_authority_and_build_paths": [
+    "dashboard/src/store.ts",
+    "dashboard/src/sse-store.ts",
+    "dashboard/src/keeper-store-normalize.ts",
+    "dashboard/src/components/keeper-items-panel.ts",
+    "dashboard/src/components/keeper-items-panel.test.ts",
+    "dashboard/e2e/keeper-items.mjs",
+    "dashboard/e2e/keeper-items-workspace.mjs",
+    "dashboard/src/demo/keeper-items-fixture.ts",
+    "dashboard/vite.config.ts",
+    "dashboard/vite.preview.config.ts",
+    "dashboard/src/dashboard-bundle-preload.test.ts",
+    "dashboard/package.json",
+    "dashboard/pnpm-lock.yaml"
+  ],
+  "unchanged_paths_verified": [
+    {
+      "path": "dashboard/src/store.ts",
+      "equal_to_local_parent": true,
+      "sha256": "a9bc9fa1720208cd6c5439148e6f489fa57103bc448b5e12ee6da937ce828b39"
+    },
+    {
+      "path": "dashboard/src/sse-store.ts",
+      "equal_to_local_parent": true,
+      "sha256": "1a7bce7de0a6a2569b50cc4a7e82918d6eb5bb012c15e6c75251ce284b7102f5"
+    },
+    {
+      "path": "dashboard/src/keeper-store-normalize.ts",
+      "equal_to_local_parent": true,
+      "sha256": "ea3a547ab07c5e850e12e13f5203e32b87e2efe35b6b5652b00543bee9895961"
+    },
+    {
+      "path": "dashboard/src/components/keeper-items-panel.ts",
+      "equal_to_local_parent": true,
+      "sha256": "76fccad068760ac16015e9428eb9045566122ef07007592acb13d3848b0f59c3"
+    },
+    {
+      "path": "dashboard/src/components/keeper-items-panel.test.ts",
+      "equal_to_local_parent": true,
+      "sha256": "6f1f8f583083c936722ee2ea85cea88f527e9d6e879402b297e3f0689c2bb26e"
+    },
+    {
+      "path": "dashboard/e2e/keeper-items.mjs",
+      "equal_to_local_parent": true,
+      "sha256": "8cc77ec741641442e5774a60fa938deb6d318963e9aea76405fcd2e56f5c7d5a"
+    },
+    {
+      "path": "dashboard/e2e/keeper-items-workspace.mjs",
+      "equal_to_local_parent": true,
+      "sha256": "c9e03f3adef8e2cf42c40023afc7c924a8f4341aa9bc4a226cb0b31b69e9cb88"
+    },
+    {
+      "path": "dashboard/src/demo/keeper-items-fixture.ts",
+      "equal_to_local_parent": true,
+      "sha256": "1bd0502335e0b8386652cc7dd054ddd2514a9e412ce4c0c45f763a7037ec4785"
+    },
+    {
+      "path": "dashboard/vite.config.ts",
+      "equal_to_local_parent": true,
+      "sha256": "ee6d1c8814df4fc5d114e04ab3f82fd3546bda238cb68ce23651d931ca65e350"
+    },
+    {
+      "path": "dashboard/vite.preview.config.ts",
+      "equal_to_local_parent": true,
+      "sha256": "89e47e24b788a4fbca82537d7a9296d98053bbd085b0d93a5d9d7a4211408b7f"
+    },
+    {
+      "path": "dashboard/src/dashboard-bundle-preload.test.ts",
+      "equal_to_local_parent": true,
+      "sha256": "d3723bbe32a7ea85f6e854bb843eb4c211457a584dc009b036bb99cb1b814c55"
+    },
+    {
+      "path": "dashboard/package.json",
+      "equal_to_local_parent": true,
+      "sha256": "e6902e318f7aa58d601c7b1601d3bd1f7c151dac2c000eacb3e6f17c5bedb9a6"
+    },
+    {
+      "path": "dashboard/pnpm-lock.yaml",
+      "equal_to_local_parent": true,
+      "sha256": "6490e6d920eae466291aafcafa6bafe4247734eac6a8435784aee6811d8514e9"
+    }
+  ]
+}

@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import ast
 import io
+import importlib.util
+import shutil
 import os
 import re
 import runpy
@@ -37,6 +39,8 @@ SOURCE_MODULES = (
     "test/test_tui_keyboard_input.py",
     "test/test_tui_search_count.py",
     "evidence/39827/capture.py",
+    "docs/evidence/2026-09-30-candle-currency-native/scenario.py",
+    "scripts/capture-tui-audit.py",
     "test/dune",
     "test/tui_keyboard_approvals.py",
     "test/tui_keyboard_board.py",
@@ -194,6 +198,7 @@ class ScenarioSelectionTest(unittest.TestCase):
             'docs/evidence/tui-int-bounds-2026-09-27/initial-idle-profile/profile-scenario.py',
             'docs/evidence/tui-int-bounds-2026-09-27/ready-profile/profile-scenario.py',
             'evidence/39827/capture.py',
+            'docs/evidence/2026-09-30-candle-currency-native/scenario.py',
             'scripts/capture-tui-audit.py',
             'test/test_tui_agenda_navigation_pty.py',
             'test/test_tui_code_diff_pan_pty.py',
@@ -220,6 +225,33 @@ class ScenarioSelectionTest(unittest.TestCase):
             for name in names:
                 with self.subTest(capture=relative, helper=name):
                     self.assertTrue(hasattr(_keyboard_entry, name), name)
+
+    def test_candle_capture_uses_the_original_tab_helper(self) -> None:
+        self.assertIs(_keyboard_entry.tab_until, harness.tab_until)
+
+    def test_capture_manifest_detects_changed_owner_with_unchanged_entry(self) -> None:
+        spec = importlib.util.spec_from_file_location(
+            "capture_tui_audit", HERE.parent / "scripts/capture-tui-audit.py")
+        assert spec is not None and spec.loader is not None
+        capture = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(capture)
+        inputs = capture.fixture_helper_inputs()
+        for owner in ("tui_keyboard_harness.py", "tui_keyboard_repositories.py"):
+            key = "fixture_helper:" + owner
+            self.assertEqual(inputs[key], HERE / owner)
+        with tempfile.TemporaryDirectory(prefix="capture-owner-mutation-") as directory:
+            copies = {name: Path(directory) / path.name for name, path in inputs.items()}
+            for name, path in inputs.items():
+                shutil.copyfile(path, copies[name])
+            hashes = {name: capture.digest(path) for name, path in copies.items()}
+            capture.require_unchanged(copies, hashes)
+            owner_key = "fixture_helper:tui_keyboard_harness.py"
+            copies[owner_key].write_text(copies[owner_key].read_text() + "\n# mutated fixture\n")
+            entry_key = "fixture_helper:test_tui_keyboard_input.py"
+            self.assertEqual(capture.digest(copies[entry_key]), hashes[entry_key])
+            with self.assertRaisesRegex(RuntimeError, "tui_keyboard_harness"):
+                capture.require_unchanged(copies, hashes)
+            self.assertNotEqual(capture.digest(copies[owner_key]), hashes[owner_key])
 
     def test_all_entry_consumers_stage_the_full_import_closure(self) -> None:
         required = {path.name for path in HERE.glob("tui_keyboard_*.py")}

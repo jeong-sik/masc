@@ -4,7 +4,7 @@ The entry keeps the family registry, CLI and explicit public helper exports used
 
 ## Current source checks
 
-`current-python-checks.json` records 41 passing local Python tests for source verification, scenario selection, tracked capture helper construction, fixture shutdown, selection, stall observation and artifact comparison. Native terminal calls in the capture/search-count checks are mocked. No native TUI, Dune build, screenshots or CI execution is established by these tests.
+`current-python-checks.json` records 43 passing local Python tests for source verification, scenario selection, tracked capture helper construction, fixture shutdown, selection, stall observation and artifact comparison. The current receipt includes fixture owner mutation checks and Candle capture helper resolution, and hashes the declared Python test inputs, Dune rules and included stanzas. Native terminal calls in the capture/search-count checks are mocked. No native TUI, Dune build, screenshots or CI execution is established by these tests.
 
 The verifier now inventories every non-import top-level executable statement as well as definition bodies. The inventory detects changed content or multiplicity of constants, annotated assignments, side-effect statements, duplicates and the entrypoint guard. It does not compare statement order or owning module, so it does not certify equivalent execution ordering. Imports are ownership wiring and are covered separately by consumer/import tests; the report is not a proof of arbitrary import side-effect equivalence.
 

@@ -32,6 +32,7 @@ from tui_keyboard_harness import (
     seed_row_budget_workspace as seed_row_budget_workspace,
     seed_workspace as seed_workspace,
     test_http_endpoint as test_http_endpoint,
+    tab_until as tab_until,
     wait_for_http_request as wait_for_http_request,
     with_workspace_identity as with_workspace_identity,
 )
@@ -85,6 +86,7 @@ from tui_keyboard_harness import (
     CSI_RE as CSI_RE,
     FRAME_END as FRAME_END,
     FULL_REDRAW as FULL_REDRAW,
+    HttpRequests as HttpRequests,
     PathHttpResponse as PathHttpResponse,
     RequestHttpResponse as RequestHttpResponse,
     WINDOW_TEXT_RE as WINDOW_TEXT_RE,

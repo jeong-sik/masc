@@ -4912,6 +4912,7 @@
   test_tui_code_diff_pan_pty.py
   test_tui_agenda_navigation_pty.py
   ../scripts/capture-tui-audit.py
+  ../docs/evidence/2026-09-30-candle-currency-native/scenario.py
   ../docs/evidence/tui-int-bounds-2026-09-27/ready-profile/profile-scenario.py
   ../docs/evidence/tui-int-bounds-2026-09-27/initial-idle-profile/profile-scenario.py
   ../docs/evidence/tui-footer-pinned-key-rules-2026-09-26/profile-scenario.py

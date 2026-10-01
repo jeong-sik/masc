@@ -18,6 +18,20 @@ def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def fixture_helper_inputs():
+    """Bind every loaded source inside the fixture directory, including owners."""
+    fixture_root = (ROOT / 'test').resolve()
+    paths = {}
+    for module in tuple(sys.modules.values()):
+        filename = getattr(module, '__file__', None)
+        if filename is None:
+            continue
+        path = Path(filename).resolve()
+        if path.is_relative_to(fixture_root):
+            paths['fixture_helper:' + path.relative_to(fixture_root).as_posix()] = path
+    return paths
+
+
 def write_manifest(out, manifest):
     temporary = out / 'manifest.json.tmp'
     temporary.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + '\n')
@@ -65,12 +79,15 @@ def main():
     ttyd = shutil.which(args.ttyd)
     if ttyd is None:
         raise FileNotFoundError(f'ttyd is not executable: {args.ttyd}')
+    sys.path.insert(0, str(ROOT / 'test'))
+    import test_tui_keyboard_input as h
     inputs = {
         'executable': executable,
         'capture_script': Path(__file__).resolve(),
         'fixture_helper': ROOT / 'test/test_tui_keyboard_input.py',
         'terminal_helper': ROOT / 'scripts/capture-tui-screenshots.py',
     }
+    inputs.update(fixture_helper_inputs())
     hashes = {name: digest(path) for name, path in inputs.items()}
     commit = subprocess.check_output([str(executable), '--build-commit'], text=True).strip()
     manifest.update(binary_commit=commit, binary_sha256=hashes['executable'],
@@ -79,8 +96,6 @@ def main():
     write_manifest(out, manifest)
 
     from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
-    sys.path.insert(0, str(ROOT / 'test'))
-    import test_tui_keyboard_input as h
     spec = importlib.util.spec_from_file_location('capture', inputs['terminal_helper'])
     c = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(c)

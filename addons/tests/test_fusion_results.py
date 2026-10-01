@@ -400,6 +400,19 @@ class FusionResults(unittest.TestCase):
             self.assertNotEqual(refused.returncode, 0)
             self.assertEqual(output.read_bytes(), original)
 
+    def test_unencodable_capture_strings_do_not_terminate_worker(self):
+        for malformed in ("body\ud800", "body\udfff"):
+            value = detail()
+            value["evidence"]["post"]["body"] = malformed
+            responses = exchange("fusion-results", [
+                {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {
+                    "name": "lane_observe", "arguments": {"binding": {}, "sources": [source(value)]}}},
+                {"jsonrpc": "2.0", "id": 2, "method": "ping"},
+            ])
+            self.assertTrue(responses[0]["result"]["isError"])
+            self.assertIn("valid UTF-8", responses[0]["result"]["content"][0]["text"])
+            self.assertEqual(responses[1], {"jsonrpc": "2.0", "id": 2, "result": {}})
+
 
 if __name__ == "__main__":
     unittest.main()

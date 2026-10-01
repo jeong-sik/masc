@@ -1,0 +1,6 @@
+Test run: 36689755419
+Run head: c0c3d9b1ed2edac61edc3e031fd140b0f206aa7e (run metadata, not raw checkout output)
+Raw: prompts-pty-pass-key-expectation-failure.raw
+Raw SHA256: fe613f62b1b717025cf6fef1437ee938ec0ed25275b1940db86f1e915aafdcbc
+Overall run FAILED. New Prompts PTY suite PASS/OK95s and held-back-override PASS/OK15s. Keys125 cases passed and1 exact Config key-union expectation failed because source added Home/End:detail edges. New head1be34f2ae7457c115b34910fe9320ee84de39921 changes that expectation only. Primary matrix is10 width/color cases covering registry/assets; do not transfer its exacthead result to newhead. Focused36696374901/probe36696378672 requested.
+Root read first trace, final suite outcomes and relevant source. Independent hostile and response reviewers verified repairs. No local Dune build, repaired-head required-check/merge/install/production proof.

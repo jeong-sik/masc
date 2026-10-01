@@ -242,6 +242,8 @@ let candidate_path ~base_path ~keeper_name =
     (Workspace_utils_backend_setup.sanitize_namespace_segment keeper_name ^ ".jsonl")
 ;;
 
+let ledger_path = candidate_path
+
 let queue_reaction_to_yojson (reaction : Board_dispatch.board_reaction_change) =
   `Assoc
     [ ( "target_type"
@@ -1371,7 +1373,7 @@ let validate_keeper_context ~keeper_name json =
 (* 요청은 후보의 현재 signal 과 Keeper 역할만 투영한다. candidate_id 와
    signal 이 후보에서 오므로 durable 정체성과 달라질 수 없다. 역할은
    partition identity와 같은 이름 및 정규화된 관심사만 보낸다. *)
-let keeper_role candidate =
+let board_interests candidate =
   let context = "candidate.keeper_context" in
   let* canonical_context =
     validate_keeper_context
@@ -1380,11 +1382,13 @@ let keeper_role candidate =
   in
   let* fields = assoc ~context canonical_context in
   let* interests_json = field ~context "board_interests" fields in
-  let* interests =
-    string_list_of_yojson
-      ~context:(context ^ ".board_interests")
-      interests_json
-  in
+  string_list_of_yojson
+    ~context:(context ^ ".board_interests")
+    interests_json
+;;
+
+let keeper_role candidate =
+  let* interests = board_interests candidate in
   Ok
     (`Assoc
        [ "name", `String candidate.keeper_name

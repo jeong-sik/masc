@@ -1296,6 +1296,12 @@ async function doFetchExecution(): Promise<void> {
     const { fetchDashboardExecution } = await import('./api/dashboard-execution')
     const data = await fetchDashboardExecution({ force })
     if (isInitializingExecutionPayload(data)) {
+      if (requestGeneration !== executionHydrationRequestGeneration
+        || requestEpoch !== executionPublicationEpoch
+        || requestPublicationGeneration !== executionPublicationGenerationWatermark) {
+        throw new ExecutionRefreshUnavailable('Execution initialization was superseded by a newer observation')
+      }
+      acceptedExecutionWorkspace.value = null
       scheduleExecutionWarmRetry()
       throw new ExecutionRefreshUnavailable('Execution projection is initializing')
     }
@@ -1313,6 +1319,7 @@ async function doFetchExecution(): Promise<void> {
       throw new ExecutionRefreshUnavailable('Execution failure was superseded by a newer observation')
     }
     console.warn('[Dashboard] execution fetch error:', err)
+    if (requestGeneration !== executionHydrationRequestGeneration) return
     executionError.value = errorMessageOr(err, 'Execution projection load failed')
     candleObservation.value = { status: 'unavailable', reason: executionError.value }
     showToast('실행 데이터 로드 실패', 'error', 5000)
@@ -1341,9 +1348,13 @@ export function refreshExecution(opts?: RefreshOptions): Promise<void> {
 
 export async function refreshKeeperRuntimeStatus(opts?: RefreshOptions): Promise<void> {
   const force = opts?.force ?? true
-  await refreshShell({ light: true, force })
-  await refreshExecution({ force })
-  await refreshKeeperDeletions()
+  try {
+    await refreshShell({ light: true, force })
+    await refreshExecution({ force })
+  } finally {
+    // Deletion receipts are independent of execution projection availability.
+    await refreshKeeperDeletions()
+  }
 }
 
 /** Reconcile board posts by id+updated_at so unchanged items keep

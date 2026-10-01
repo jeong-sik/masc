@@ -11,10 +11,13 @@ description: "MASC 스택 PR의 현재 head를 읽고 기능·논리·코드 청
 ## 현재 변경 읽기
 
 ```sh
-gh pr list --repo jeong-sik/masc --state open --json number,title,headRefName,baseRefName,isDraft
+gh api --paginate 'repos/jeong-sik/masc/pulls?state=open&per_page=100' \
+  --jq '.[] | {number,title,headRefName:.head.ref,baseRefName:.base.ref,isDraft:.draft,stack}'
 gh pr view <N> --repo jeong-sik/masc --json headRefOid,baseRefName,isDraft,reviews,comments
 gh pr diff <N> --repo jeong-sik/masc
 ```
+
+목록 명령은 모든 페이지의 PR 을 JSON 객체 스트림으로 출력한다. 조회가 실패하면 전체 목록을 확인한 것으로 판단하지 않는다.
 
 현재 head와 base, 원래 작업 계약, 전체 diff를 직접 확인한다. 이전 리뷰·과거 녹색 CI·요약은 현재 변경의 증거가 아니다.
 Draft는 작업 중이라는 뜻이다. CI가 없다는 이유로 일반 PR을 Draft로 되돌리거나 승인 대기시키지 않는다.

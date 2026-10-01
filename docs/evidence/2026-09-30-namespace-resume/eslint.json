@@ -1,0 +1,14 @@
+{
+  "command": [
+    "npx",
+    "eslint",
+    "src/components/flow-control/flow-control-state.ts",
+    "src/components/flow-control/flow-control-state.test.ts",
+    "src/components/emergency-stop-control.ts",
+    "src/components/emergency-stop-control.test.ts"
+  ],
+  "cwd": "/masc-work/jazz-developer/masc/.worktrees/647-namespace-resume/dashboard",
+  "started_at": "2026-09-30T15:07:13.855940+00:00",
+  "finished_at": "2026-09-30T15:07:15.078947+00:00",
+  "exit_code": 0
+}

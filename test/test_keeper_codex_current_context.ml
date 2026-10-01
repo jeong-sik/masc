@@ -211,7 +211,16 @@ let test_context_admission_failure_preserves_settled_conversation () =
   check bool "unsupported context stays an explicit failed request" true
     (Result.is_error rejected.Keeper_codex_runtime.result);
   check int "context refusal does not consume continuation authority" 0 !admissions;
-  check bool "local admission keeps the previous settled authority" true (load () = original);
+  let restored = load () in
+  check bool "local admission keeps the previous settled authority" true
+    (restored.phase = original.phase && restored.runtime_id = original.runtime_id
+     && restored.client_kind = original.client_kind
+     && restored.tool_surface_sha256 = original.tool_surface_sha256);
+  check int "refused context does not advance the conversation" original.turn_count restored.turn_count;
+  check bool "pre-dispatch release is recorded" true
+    (match restored.last_transient_release with
+     | Some release -> release.failure = Keeper_official_client_session_store.Pre_dispatch_failed
+     | None -> false);
   check bool "local admission submits neither thread nor turn" true
     (read_requests capture = requests);
   successful (run ~instructions:"Keeper instructions" ~world:"Corrected context" ());

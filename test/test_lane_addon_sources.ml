@@ -410,14 +410,21 @@ let test_fusion_capture_retains_exact_state_across_terminal_change () =
         let first = read () in
         let rejected_store = Store.create ~root:(Filename.concat dir "rejected-envelope") in
         let detail_bytes = String.length (Yojson.Safe.to_string (member "detail" first)) in
+        check int "array serialization reserves exactly the detail plus brackets"
+          (detail_bytes + String.length "[]")
+          (String.length (Yojson.Safe.to_string (`List [member "detail" first])));
         let rejected = require (Sources.acquire ~access:(Sources.Keeper "fixture")
-          ~store:rejected_store ~package:(package dir detail_bytes)
+          ~store:rejected_store ~package:(package dir
+            (String.length (Yojson.Safe.to_string (`List [member "detail" first]))))
           ~resolve_lane_output:(fun ~installation_id:_ -> Error "unused")
           ~binding:(binding [`Assoc ["source_id",`String "fusion";
             "kind",`String "fusion_run";"run_id",`String run_id]]))
           |> list |> List.hd in
         check bool "whole envelope that cannot fit remains incomplete" false
           (member "complete" rejected |> Yojson.Safe.Util.to_bool);
+        check string "detail fits but its enclosing observation is refused"
+          "Fusion observation exceeds the available source ingress envelope"
+          (member "detail" rejected |> text);
         check bool "rejected envelope writes no orphan capture blob" false
           (Sys.file_exists (Filename.concat (Store.root rejected_store) "evidence"));
         let reference = member "evidence" first |> list |> List.hd |> own_reference in
@@ -432,7 +439,29 @@ let test_fusion_capture_retains_exact_state_across_terminal_change () =
         check string "old running capture is still frozen" frozen
           (require (Store.read_blob store reference));
         check bool "observed actor is not the requested Keeper" true
-          (member "actor" terminal=`Null)))
+          (member "actor" terminal=`Null);
+        List.iteri (fun index (producer,author) ->
+          let reused_run = run_id ^ "/reused/" ^ string_of_int index in
+          let origin : Masc.Board.post_origin = {turn_ref=None;source=Some "fusion";
+            fusion_run_id=Some reused_run;fusion_producer=producer} in
+          (match Masc.Board_dispatch.create_post_once_by_fusion_run_id
+            ~fusion_run_id:reused_run ~author ~content:"private foreign transcript"
+            ~meta_json:(`Assoc ["prompt",`String "private foreign prompt"])
+            ~post_kind:Masc.Board.System_post ~visibility:Masc.Board.Unlisted ~ttl_hours:0 ~origin () with
+           | Ok _ -> () | Error _ -> fail "fixture Board post creation failed");
+          Fusion_run_registry.register_running registry ~run_id:reused_run
+            ~keeper:"fixture" ~preset:"default" ~roster:Fusion_types.preset_roster
+            ~topology:Fusion_types.Simple ~started_at:2.;
+          let captured = require (Sources.acquire ~access:(Sources.Keeper "fixture")
+            ~store ~package:(package dir 16384)
+            ~resolve_lane_output:(fun ~installation_id:_ -> Error "unused")
+            ~binding:(binding [`Assoc ["source_id",`String "fusion";
+              "kind",`String "fusion_run";"run_id",`String reused_run]])) |> list |> List.hd in
+          check bool "foreign Board provenance refuses host capture" false
+            (member "complete" captured |> Yojson.Safe.Util.to_bool);
+          check int "no foreign prompt or transcript crosses package boundary" 0
+            (member "observations" captured |> list |> List.length))
+          [Some "foreign", "fixture"; Some "fixture", "foreign"; None, "fixture"] ))
 
 let test_fusion_binding_targets_only_exact_run () =
   let source run_id = `Assoc ["source_id",`String "fusion";

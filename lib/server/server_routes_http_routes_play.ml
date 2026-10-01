@@ -91,11 +91,10 @@ let current_controller () =
 
 let list_json ~config =
   match Play_invite.list ~base_path:config.Workspace.base_path ~now:(Time_compat.now ()) with
-  | Error error ->
-    let code = match error with
-      | Auth.Invalid_credential_expiry _ -> "invalid_credential_expiry"
-      | Auth.Unreadable_credential _ -> "credential_store_unavailable" in
-    `Service_unavailable, Server_refusal.json ~code (Auth.credential_listing_error_to_string error)
+  | Error (Play_invite.Credentials_unavailable error) ->
+    `Service_unavailable, Server_refusal.json ~code:"credentials_unreadable" (Masc_domain.masc_error_to_string error)
+  | Error (Play_invite.Invalid_expiry (Masc_domain.Credential_expiry.Invalid_timestamp stamp)) ->
+    `Service_unavailable, Server_refusal.json ~code:"invalid_credential_expiry" ("invalid credential expiry: " ^ stamp)
   | Ok invites ->
     let controller = current_controller () in
     `OK, `Assoc

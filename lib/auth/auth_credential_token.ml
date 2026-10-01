@@ -585,7 +585,11 @@ let rotate_shared_tokens_matching config ~include_agent =
           | None -> Ok targets
           | Some id ->
             let target = credential_uuid_file config id in
-            if List.exists (fun (_, (owner : agent_credential)) ->
+            if String.equal target (credential_file config credential.agent_name) then
+              Error (System (System_error.ValidationError
+                (Printf.sprintf "cannot rotate %s: UUID payload and named redirect would share a path"
+                  credential.agent_name)))
+            else if List.exists (fun (_, (owner : agent_credential)) ->
               not (String.equal owner.agent_name credential.agent_name)
               && Option.equal Credential_id.equal owner.id credential.id)
                 snapshot.current_credentials then

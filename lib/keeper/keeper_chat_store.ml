@@ -1101,6 +1101,13 @@ let provenance_index_of_existing existing =
   |> Result.map (fun () -> index)
 ;;
 
+(* The read every append-once delivery runs before it writes. A row this reads
+   as an error refuses every later delivery to the keeper, so the deploy
+   preflight asks the same question of a transcript on disk. *)
+let transcript_provenance_readable existing =
+  provenance_index_of_existing existing |> Result.map (fun (_ : provenance_index) -> ())
+;;
+
 let find_indexed_provenance index ~provenance =
   match
     Poisoned_delivery_keys.find_opt

@@ -1186,6 +1186,55 @@ let credential_store_snapshot_in_transaction ?(leaf_policy = Owned_regular_only)
   Ok { current_credentials = credentials; orphaned_names; aliases }
 ;;
 
+let credential_owner_discovery_in_transaction (Credential_transaction config) =
+  let ( let* ) = Result.bind in
+  let* files = credential_read_result (fun () -> read_dir (agents_dir config)) in
+  let files = Array.to_list files |> List.filter (fun file -> Filename.check_suffix file ".json")
+      |> List.sort String.compare in
+  let rec discover names orphans = function
+    | [] -> Ok (List.sort_uniq String.compare names, List.sort_uniq String.compare orphans)
+    | file :: rest ->
+      let name = Filename.chop_suffix file ".json" in
+      let path = Filename.concat (agents_dir config) file in
+      let* present = credential_path_exists path in
+      if not present then discover names orphans rest
+      else
+        let* stored = read_stored_credential config name path in
+        (match stored with
+         | Unresolved_credential -> discover names orphans rest
+         | Stored_credential credential -> discover (credential.agent_name :: names) orphans rest
+         | Stored_redirect target ->
+           let* present = credential_path_exists target in
+           if not present then discover names (name :: orphans) rest
+           else
+             let* resolved = resolve_stored_credential config name stored in
+             (match resolved with
+              | None -> discover names orphans rest
+              | Some credential -> discover (credential.agent_name :: names) orphans rest))
+  in
+  discover [] [] files
+;;
+
+
+let list_current_credentials_in_transaction transaction =
+  let ( let* ) = Result.bind in
+  let* names, _orphans = credential_owner_discovery_in_transaction transaction in
+  let rec collect credentials = function
+    | [] -> Ok (List.rev credentials)
+    | name :: rest ->
+      let* current = current_credential_in_transaction transaction name in
+      (match current with
+       | None -> collect credentials rest
+       | Some credential -> collect (credential :: credentials) rest)
+  in
+  collect [] names
+;;
+
+let list_current_credentials config =
+  with_credential_transaction config list_current_credentials_in_transaction
+  |> Result.join
+;;
+
 (* Prune adds deletion authority only after current-store discovery. Rotation
    uses the same current records without inheriting a deletion manifest. *)
 let credential_prune_snapshot_in_transaction ((Credential_transaction config) as transaction) =

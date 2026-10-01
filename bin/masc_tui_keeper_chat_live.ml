@@ -86,19 +86,9 @@ type delta =
   | Run_finished
   | Undecodable of string
 
-type t =
-  { lines : Masc_tui_sse_lines.t
-        (* Holds a line until it ends: half a line parses as invalid JSON,
-           and reporting that would be wrong. *)
-  ; mutable pending_seq : int option
-        (* The [id:] of the frame being read, held until the frame's end;
-           every [data:] line of the frame is tagged with it. It lives on [t],
-           not in one [feed], because a chunk may end between the two lines.
-           Cleared at the frame end so a later frame without an id
-           (acceptance, the settle-time run_error) cannot inherit it. *)
-  }
+type t = { decoder : Sse_wire.decoder }
 
-let create () = { lines = Masc_tui_sse_lines.create (); pending_seq = None }
+let create () = { decoder = Sse_wire.create_decoder () }
 
 let string_field fields name =
   match List.assoc_opt name fields with
@@ -445,25 +435,18 @@ let event_deltas (event : Yojson.Safe.t) =
          stops the build instead of landing here. *)
       [ Undecodable "event is not a JSON object" ]
 
-let line_deltas t raw_line =
-  let tagged deltas = List.map (fun delta -> (t.pending_seq, delta)) deltas in
-  match Projection.classify_sse_line raw_line with
-  | Projection.Sse_ignored -> []
-  | Projection.Sse_id seq ->
-      t.pending_seq <- Some seq;
-      []
-  | Projection.Sse_frame_end ->
-      t.pending_seq <- None;
-      []
-  | Projection.Sse_noncanonical_data ->
-      tagged [ Undecodable "non-canonical data field" ]
-  | Projection.Sse_data payload -> (
-      match Yojson.Safe.from_string payload with
-      | json -> tagged (event_deltas json)
-      | exception Yojson.Json_error detail ->
-          tagged [ Undecodable ("invalid JSON: " ^ detail) ])
+let frame_deltas (frame : Sse_wire.frame) =
+  let seq = match frame.id with
+    | None -> None
+    | Some id ->
+      match Projection.classify_sse_line ("id:" ^ id) with
+      | Projection.Sse_id seq -> Some seq
+      | Projection.Sse_ignored | Projection.Sse_frame_end
+      | Projection.Sse_data _ | Projection.Sse_noncanonical_data -> None in
+  let deltas = match Yojson.Safe.from_string frame.data with
+    | json -> event_deltas json
+    | exception Yojson.Json_error detail -> [ Undecodable ("invalid JSON: " ^ detail) ] in
+  List.map (fun delta -> seq, delta) deltas
 
-(* [concat_map] visits lines in order, which the [pending_seq] state depends
-   on: an id line must be seen before the data line it tags. *)
 let feed t chunk =
-  Masc_tui_sse_lines.feed t.lines chunk |> List.concat_map (line_deltas t)
+  Sse_wire.feed t.decoder chunk |> List.concat_map frame_deltas

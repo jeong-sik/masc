@@ -571,7 +571,7 @@ let test_turn_returns_before_a_background_child_releases_the_pipes () =
            (elapsed < turn_return_window_s))
 ;;
 
-let test_scheduling_handoff_preserves_active_protocol () =
+let test_scheduling_handoff_preserves_active_protocol ?(terminal_second = false) () =
   List.iter (fun acceptance ->
     let capture_path = Filename.temp_file "codex-handoff-" ".jsonl" in
     Fun.protect ~finally:(fun () -> Sys.remove capture_path) (fun () ->
@@ -586,23 +586,30 @@ let test_scheduling_handoff_preserves_active_protocol () =
         ; call = (fun ~call_id:_ _ -> incr calls;
             if !calls = 1 then (Eio.Promise.resolve signal (); Eio.Fiber.yield ());
             { success = true; content = "effect persisted";
-              content_blocks = None; abort_turn = None }) } in
+              content_blocks = None;
+              abort_turn = if terminal_second && !calls = 2 then
+                Some (Runtime_codex_app_server.Terminal_tool_boundary
+                  { tool_name = "masc_probe"; outcome = Terminal_completed })
+                else None }) } in
       let second_tool =
         {|{"id":"tool-request-2","method":"item/tool/call","params":{"threadId":"thread-1","turnId":"turn-1","callId":"call-2","tool":"masc_probe","arguments":{}}}|} in
+      let third_tool =
+        {|{"id":"tool-request-3","method":"item/tool/call","params":{"threadId":"thread-1","turnId":"turn-1","callId":"call-3","tool":"masc_probe","arguments":{}}}|} in
       let reply = match acceptance with
         | Some true -> Some {|{"id":6,"result":{"turnId":"turn-1"}}|}
         | Some false -> Some {|{"id":6,"error":{"code":-32600,"message":"turn no longer steerable"}}|}
         | None -> None in
       with_fixture ([init_result; account_chatgpt; thread_result; turn_result;
-        tool_call_request; second_tool; agent_message_delta]
-        @ Option.to_list reply @ [item_completed; turn_completed]) (fun path ->
+        tool_call_request; second_tool]
+        @ (if terminal_second then [third_tool] else [])
+        @ [agent_message_delta] @ Option.to_list reply @ [item_completed; turn_completed]) (fun path ->
           let original = In_channel.with_open_bin path In_channel.input_all in
           let reply_line = "printf '%s\\n' " ^ shell_quote (Option.value reply ~default:item_completed) in
           let capture = "IFS= read -r result\nprintf '%s\\n' \"$result\" >> "
             ^ shell_quote capture_path ^ "\n" in
           let instrumented = original |> String.split_on_char '\n'
             |> List.concat_map (fun line -> if line = reply_line
-              then [capture ^ capture ^ capture; line] else [line])
+              then [capture ^ capture ^ capture ^ (if terminal_second then capture else ""); line] else [line])
             |> String.concat "\n" in
           Out_channel.with_open_bin path (fun out -> output_string out instrumented);
           match run_fixture ~dynamic_tools:[tool] ~await_handoff:(fun () -> Eio.Promise.await ready; true) path with
@@ -620,7 +627,7 @@ let test_scheduling_handoff_preserves_active_protocol () =
         |> List.map Yojson.Safe.from_string in
       let open Yojson.Safe.Util in
       match rows with
-      | first_result :: steer :: [second_result] ->
+      | first_result :: steer :: second_result :: rest ->
         check string "first effect returned before steering" "tool-request-1"
           (first_result |> member "id" |> to_string);
         check string "uses active-turn steering" "turn/steer"
@@ -628,9 +635,17 @@ let test_scheduling_handoff_preserves_active_protocol () =
         check string "pins exact active turn" "turn-1"
           (steer |> member "params" |> member "expectedTurnId" |> to_string);
         check string "second effect returned while steering pending" "tool-request-2"
-          (second_result |> member "id" |> to_string)
+          (second_result |> member "id" |> to_string);
+        (match terminal_second, rest with
+         | false, [] -> ()
+         | true, [denied] ->
+           check string "post-terminal request receives its own rejection" "tool-request-3"
+             (denied |> member "id" |> to_string);
+           check bool "post-terminal effect is refused while vendor settles" false
+             (denied |> member "result" |> member "success" |> to_bool)
+         | _ -> fail "unexpected protocol writes after terminal effect")
       | _ -> fail "expected tool result, scheduling steer, and second tool result"))
-    [Some true; Some false; None]
+    (if terminal_second then [Some true; None] else [Some true; Some false; None])
 ;;
 
 let test_scheduling_handoff_wakes_idle_before_first_tool () =
@@ -7281,7 +7296,9 @@ let () =
         ; test_case "invalid context window is refused before dispatch" `Quick
             test_invalid_context_window_is_process_free
         ; test_case "scheduling handoff preserves active protocol" `Quick
-            test_scheduling_handoff_preserves_active_protocol
+            (fun () -> test_scheduling_handoff_preserves_active_protocol ())
+        ; test_case "handoff settles terminal effect without admitting more tools" `Quick
+            (fun () -> test_scheduling_handoff_preserves_active_protocol ~terminal_second:true ())
         ; test_case "scheduling handoff wakes idle turn before any tool" `Quick
             test_scheduling_handoff_wakes_idle_before_first_tool
         ; test_case "scheduling handoff waiter released at terminal" `Quick

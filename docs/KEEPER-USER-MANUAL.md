@@ -249,6 +249,11 @@ Queued continuations do not trigger another handoff, so two paused operations
 do not repeatedly yield to one another. Active tools must finish before the
 scheduling notice can be sent; provider cooperation determines the delay.
 
+If a terminal posting tool publishes progress during handoff, its delivery
+receipt remains evidence rather than completing the original operation. MASC
+returns that result, refuses further host tools in the closing turn, and waits
+for vendor completion before retaining the continuation.
+
 The retained continuation survives restart while queued or claimed before
 resume admission. A crash after resume authority has been consumed remains an
 interrupted execution; MASC does not silently replay potentially completed

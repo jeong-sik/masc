@@ -1148,7 +1148,7 @@ export function RuntimeEnvironmentEditor({
            masc #21521 / agentCore models.toml). Showing it back to the operator here
            invited editing a dead key as if it mattered. -->
       <div class=${section === 'models' ? '' : 'hidden'} data-testid="runtime-section-models">
-        <p class="rt-note">컨텍스트를 바꾼 뒤 상단에서 저장하세요. 이 모델을 공유하는 런타임에 함께 적용되며, Codex는 다음 실행부터 사용합니다. 이 숫자는 요청값이며 실제 사용 가능 크기를 보장하지 않습니다. 실제값은 실행 후 턴 상세의 클라이언트 보고값에서 확인하세요. 관측이 없으면 미측정입니다.</p>
+        <p class="rt-note">컨텍스트를 바꾼 뒤 상단에서 저장하세요. 이 모델을 공유하는 런타임의 MASC 컨텍스트 예산에 적용됩니다. 이 숫자는 요청값이며 실제 사용 가능 크기를 보장하지 않습니다. 실제값은 실행 후 턴 상세의 클라이언트 보고값에서 확인하세요. 관측이 없으면 미측정입니다.</p>
         <input
           class="rt-search mono"
           placeholder="모델 검색 — id / api-name"

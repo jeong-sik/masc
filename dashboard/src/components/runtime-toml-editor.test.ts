@@ -1378,6 +1378,21 @@ describe('RuntimeTomlEditor', () => {
     expect(apiMocks.saveRuntimeTomlConfig).not.toHaveBeenCalled()
   })
 
+  it('drops a hidden invalid context draft when raw TOML renames its model', async () => {
+    apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce(richConfig)
+    render(html`<${RuntimeTomlEditor} />`, container)
+    await waitFor(() => expect(container.querySelector('[aria-label="qwen max-context"]')).not.toBeNull())
+    fireEvent.input(container.querySelector('[aria-label="qwen max-context"]') as HTMLInputElement,
+      { target: { value: 'invalid' } })
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-nav-toml"]') as HTMLButtonElement)
+    const source = container.querySelector('[data-testid="runtime-toml-source"]') as HTMLTextAreaElement
+    const renamed = source.value.replaceAll('qwen', 'renamed-model') + '\n# retained raw edit\n'
+    fireEvent.input(source, { target: { value: renamed } })
+    await waitFor(() => expect((container.querySelector('[data-testid="runtime-toml-save"]') as HTMLButtonElement).disabled).toBe(false))
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-save"]') as HTMLButtonElement)
+    await waitFor(() => expect(apiMocks.saveRuntimeTomlConfig.mock.calls[0]?.[0]).toBe(renamed))
+  })
+
   it('rejects invalid context drafts without changing saved model configuration', async () => {
     apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce(richConfig)
     render(html`<${RuntimeTomlEditor} />`, container)

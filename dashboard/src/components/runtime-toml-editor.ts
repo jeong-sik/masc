@@ -614,6 +614,16 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
     () => (config === null ? null : parseRuntimeTomlEnvironment(draft, config.reserved_provider_ids)),
     [config, draft],
   )
+  useEffect(() => {
+    // Raw TOML can remove or rename a model while its structured input has an
+    // invalid draft. Only models still present may retain that input state.
+    if (environment === null || environment.parseError !== null) return
+    const modelIds = new Set(environment.models.map(model => model.id))
+    setModelContextDrafts(current => {
+      const retained = Object.entries(current).filter(([id]) => modelIds.has(id))
+      return retained.length === Object.keys(current).length ? current : Object.fromEntries(retained)
+    })
+  }, [environment])
   const parseError = environment === null ? null : environment.parseError
   const runtimeCount = environment !== null && parseError === null ? enabledRuntimeIds(environment).length : '—'
   const providerCount = environment !== null && parseError === null ? environment.providers.length : '—'

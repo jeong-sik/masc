@@ -788,20 +788,54 @@ let edit_directory config =
       message=String.concat "; " resolution.warnings; current=None}
   | Ready | Warn | Missing_status -> Ok (Filename.concat resolution.config_root.path "lane-addons")
 
+(* A malformed current TOML cannot prove who owns it. The last applied
+   configuration binding is durable and records the exact source path, private
+   visibility, and the Keeper identity used for source acquisition. Require
+   one live binding with all three agreeing before exposing bytes for repair;
+   a missing or ambiguous history grants nobody access. *)
+let authorize_applied_declaration m ~keeper ~source_path =
+  let denied () = Error {Lane_addon_declaration.code=Invalid_request;
+    message="Lane declaration is unavailable to this caller";current=None} in
+  match offload (fun () -> Lane_addon_store.bindings m.store) with
+  | Error detail -> Error {Lane_addon_declaration.code=Io_error;message=detail;current=None}
+  | Ok bindings ->
+      let owners = List.filter_map (function
+        | `Assoc fields ->
+            (match configuration_of_fields fields,
+                   List.assoc_opt "phase" fields,
+                   List.assoc_opt "source_access" fields with
+             | Ok (Some owner), Some phase, Some retained_access
+               when String.equal owner.source_path source_path ->
+                 (match phase_of_json phase,
+                        visibility_of_fields fields,
+                        Lane_addon_sources.access_of_json retained_access with
+                  | Ok (Attached | Observing | Failed _),
+                    Ok (Keeper_only visible_owner),
+                    Ok (Lane_addon_sources.Keeper source_owner)
+                    when String.equal visible_owner source_owner -> Some source_owner
+                  | _ -> None)
+             | _ -> None)
+        | _ -> None) bindings in
+      (match owners with
+       | [owner] when String.equal owner keeper -> Ok ()
+       | _ -> denied ())
+
 let authorize_document m ~access (document : Lane_addon_declaration.document) =
   match access with
   | Lane_addon_sources.Operator_configuration -> Ok ()
-  | Keeper _ | Unauthenticated ->
-      let* declaration = offload (fun () -> Lane_addon_config.load_source
-        ~source_path:document.source_path ~source_text:document.source_text)
-        |> Result.map_error (fun _ -> {Lane_addon_declaration.code=Invalid_request;
-            message="Lane declaration is unavailable to this caller";current=None}) in
-      let* () = Lane_addon_sources.authorize ~access declaration.binding
-        |> Result.map_error (fun message -> {Lane_addon_declaration.code=Invalid_request;message;current=None}) in
-      let* visibility = binding_visibility m ~access declaration.binding
-        |> Result.map_error (fun message -> {Lane_addon_declaration.code=Invalid_request;message;current=None}) in
-      require_read access visibility
-        |> Result.map_error (fun message -> {Lane_addon_declaration.code=Invalid_request;message;current=None})
+  | Unauthenticated -> Error {Lane_addon_declaration.code=Invalid_request;
+      message="Lane declaration is unavailable to this caller";current=None}
+  | Keeper keeper ->
+      (match offload (fun () -> Lane_addon_config.load_source
+         ~source_path:document.source_path ~source_text:document.source_text) with
+       | Error _ -> authorize_applied_declaration m ~keeper ~source_path:document.source_path
+       | Ok declaration ->
+           let* () = Lane_addon_sources.authorize ~access declaration.binding
+             |> Result.map_error (fun message -> {Lane_addon_declaration.code=Invalid_request;message;current=None}) in
+           let* visibility = binding_visibility m ~access declaration.binding
+             |> Result.map_error (fun message -> {Lane_addon_declaration.code=Invalid_request;message;current=None}) in
+           require_read access visibility
+             |> Result.map_error (fun message -> {Lane_addon_declaration.code=Invalid_request;message;current=None}))
 
 let read_declaration ?caller ?access ~config json = Eio_context.run_on_owner_domain (fun () ->
   let* source_path = Lane_addon_declaration.read_request json in
@@ -1281,6 +1315,13 @@ let dispatch ?caller ?access ~config ~operation json = Eio_context.run_on_owner_
         | _, access -> access in
       let* () = request_result (Lane_addon_sources.authorize ~access:source_access binding) in
       let* visibility = request_result (binding_visibility m ~access:source_access binding) in
+      (* A private attachment keeps its source owner for every later wake.
+         Operator authority may discover the binding, but must not remain the
+         worker's acquisition authority after its Fusion owner changes. *)
+      let source_access = match visibility with
+        | Keeper_only keeper -> Lane_addon_sources.Keeper keeper
+        | Shared | Operator_only -> source_access in
+      let* () = request_result (Lane_addon_sources.authorize ~access:source_access binding) in
       runtime_result (attach_entry ~sw m ~run_id ~package ~binding ~configuration:None ~source_access ~visibility)
   | Observe ->
       let* e = request_result (find m args) in

@@ -226,9 +226,16 @@ def broadcast_export(executable: str, captures: Path | None) -> None:
             (Path(base_path) / '.masc' / 'keepers' / f'{name}.json').unlink()
 
     accepted: list[dict] = []
+    principal_reads: list[bytes] = []
     requests: terminal.HttpRequests = []
 
+    def principal(body: bytes) -> tuple[int, dict]:
+        principal_reads.append(body)
+        return 200, {'principal': 'principal:operator:fixture-operator'}
+
     def share(body: bytes) -> tuple[int, dict]:
+        if len(principal_reads) != 1:
+            raise AssertionError('Broadcast sent before proving the captured bearer principal')
         request = json.loads(body)
         expected = {'instance_id': owner, 'row_ids': [selected], 'broadcast': True}
         request_id = request.get('request_id')
@@ -243,6 +250,7 @@ def broadcast_export(executable: str, captures: Path | None) -> None:
                                   'request_id': request_id,
                                   'receipt': {'request_id': 'fixture-broadcast', 'seq': 7}}}
 
+    fixtures['/api/v1/lane-addons/broadcast-principal'] = terminal.RequestHttpResponse(principal)
     fixtures['/api/v1/lane-addons/evidence'] = terminal.RequestHttpResponse(share)
 
     def interact(process, master, _slave, output, _base):
@@ -266,6 +274,8 @@ def broadcast_export(executable: str, captures: Path | None) -> None:
             raise AssertionError('Broadcast receipt claimed or hid Keeper-use status')
         if len(accepted) != 1:
             raise AssertionError('Explicit export did not submit exactly once')
+        if len(principal_reads) != 1:
+            raise AssertionError('Broadcast did not prove exactly one authenticated principal')
         if captures is not None:
             captures.mkdir(parents=True, exist_ok=True)
             (captures / 'broadcast-export.pty').write_bytes(bytes(output))

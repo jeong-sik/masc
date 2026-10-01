@@ -708,7 +708,40 @@ sources=%s
   let saved = active config "keeper-saved" |> text "instance_id" in
   check bool "operator reconciliation preserves saving Keeper read access" true
     (Result.is_ok (Runtime.dispatch ~caller:owner ~config ~operation:Runtime.Inspect
-      (`Assoc ["instance_id",`String saved]))))
+      (`Assoc ["instance_id",`String saved])));
+  let saved_path = Filename.concat directory "keeper-saved.toml" in
+  write saved_path "id = [";
+  reconcile config directory;
+  let broken = document owner (Lane_addon_sources.Keeper owner) in
+  let current_revision = match broken with
+    | Ok json -> text "source_revision" json
+    | Error error -> fail error.Lane_addon_declaration.message in
+  check bool "private owner reads malformed current bytes using applied ownership" true
+    (Result.is_ok broken);
+  check bool "foreign Keeper cannot read malformed private bytes" true
+    (Result.is_error (document "foreign" (Lane_addon_sources.Keeper "foreign")));
+  let repair caller access = Lane_addon_runtime.save_declaration ~caller ~access ~config
+    (`Assoc ["mode",`String "save";"file_name",`String "keeper-saved.toml";
+      "expected_source_revision",`String current_revision;
+      "source_text",`String new_source]) in
+  check bool "foreign Keeper cannot repair another owner's malformed declaration" true
+    (Result.is_error (repair "foreign" (Lane_addon_sources.Keeper "foreign")));
+  let unowned_path = Filename.concat directory "unowned.toml" in
+  write unowned_path "id = [";
+  check bool "malformed file without an applied owner grants no raw read" true
+    (Result.is_error (Lane_addon_runtime.read_declaration ~caller:owner
+      ~access:(Lane_addon_sources.Keeper owner) ~config
+      (`Assoc ["source_path",`String unowned_path])));
+  check bool "malformed file without an applied owner grants no replacement" true
+    (Result.is_error (Lane_addon_runtime.save_declaration ~caller:owner
+      ~access:(Lane_addon_sources.Keeper owner) ~config
+      (`Assoc ["mode",`String "save";"file_name",`String "unowned.toml";
+        "expected_source_revision",`String (Lane_addon_store.digest "id = [");
+        "source_text",`String new_source])));
+  check bool "applied owner can commit corrected declaration with exact CAS" true
+    (Result.is_ok (repair owner (Lane_addon_sources.Keeper owner)));
+  check string "repair wrote the authorized bytes" new_source
+    (In_channel.with_open_bin saved_path In_channel.input_all))
 
 let test_configured_fusion_rechecks_owner_before_capture () = with_fixture (fun clock config root directory received _ ->
   let owner = "initial-owner" in
@@ -732,6 +765,39 @@ let test_configured_fusion_rechecks_owner_before_capture () = with_fixture (fun 
   check int "worker receives no replacement owner's observations" 0
     (list "observations" denied |> List.length);
   check string "the source reports its actual ownership refusal"
+    "Fusion run is unavailable to this caller" (text "detail" denied))
+
+let test_operator_attached_private_fusion_rechecks_owner () = with_fixture (fun clock config root _directory received _ ->
+  let owner = "dynamic-owner" in
+  let run_id = register_private_run root owner in
+  let binding = `Assoc ["sources",`List [`Assoc [
+    "source_id",`String "fusion";"kind",`String "fusion_run";
+    "run_id",`String run_id]]] in
+  let attached = Runtime.dispatch ~caller:"operator" ~access:Lane_addon_sources.Operator_configuration
+    ~config ~operation:Runtime.Attach (`Assoc [
+      "manifest_path",`String (manifest root);"run_id",`String "world";
+      "binding",binding]) |> unwrap in
+  let id = text "instance_id" attached in
+  await clock (fun () -> member "observation_seq" (instance config id) <> `Int 0);
+  let before = instance config id in
+  check string "operator attach retains private source owner" owner
+    (before |> member "source_access" |> text "keeper");
+  let sequence = member "observation_seq" before in
+  Fusion_run_registry.register_running (Fusion_run_registry.global ()) ~run_id
+    ~keeper:"replacement-owner" ~preset:"default" ~roster:Fusion_types.preset_roster
+    ~topology:Fusion_types.Simple ~started_at:2.;
+  Runtime.notify_fusion_run ~run_id;
+  await clock (fun () -> member "observation_seq" (instance config id) <> sequence);
+  let denied = require_some "missing dynamic refusal envelope" (source received id) in
+  let retained = Runtime.dispatch ~caller:owner ~config ~operation:Runtime.Inspect
+    (`Assoc ["instance_id",`String id]) |> unwrap in
+  check bool "original owner retains access to old private evidence" true
+    (list "instances" retained <> []);
+  check bool "replacement owner is not captured by old private attachment" false
+    (member "complete" denied |> Yojson.Safe.Util.to_bool);
+  check int "replacement owner's observations stay private" 0
+    (list "observations" denied |> List.length);
+  check string "dynamic worker names ownership refusal"
     "Fusion run is unavailable to this caller" (text "detail" denied))
 
 let test_shared_consumer_refuses_new_private_producer () = with_fixture (fun clock config root directory received _ ->
@@ -767,6 +833,7 @@ let () = run "TOML cross-Lane composition" ["world inputs",[
     test_native_fusion_report_is_readable_after_detach;
   test_case "private visibility survives declared output graph" `Quick test_private_visibility_crosses_declared_output_graph;
   test_case "configured Fusion capture rechecks its retained owner" `Quick test_configured_fusion_rechecks_owner_before_capture;
+  test_case "operator-attached private Fusion rechecks owner" `Quick test_operator_attached_private_fusion_rechecks_owner;
   test_case "shared consumer refuses replacement with private producer" `Quick test_shared_consumer_refuses_new_private_producer;
   test_case "native input history crosses worker and survives Detach" `Quick
     test_native_msx_history_crosses_worker_freeze_and_detach;

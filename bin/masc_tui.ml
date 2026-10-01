@@ -4864,22 +4864,28 @@ let launch_lane_addons ?initial_detail state ~mailbox request =
           | Addons.Evidence _,`Assoc fields -> List.assoc_opt "broadcast" fields=Some (`Bool true)
           | _ -> false in
         let credential=Masc_tui_http.bind_credential () in
-        let* body = if not broadcast then Ok body
+        let* principal = if not broadcast then Ok None
           else if not broadcast_workspace_verified then Error (`Request
             "Verify the server workspace before sharing evidence via Broadcast")
-          else request_result (Masc_tui_lane_broadcast_pending.prepare
-            ~path:broadcast_path ~scope:broadcast_scope ~credential:credential.credential_identity body) in
+          else (request_result (Masc_tui_http.lane_broadcast_principal_bound
+            ~credential ~host ~port) |> Result.map Option.some) in
+        let* body = match principal with
+          | None -> Ok body
+          | Some principal -> request_result (Masc_tui_lane_broadcast_pending.prepare
+              ~path:broadcast_path ~scope:broadcast_scope ~credential:principal body) in
         let post = if broadcast then Masc_tui_http.post_json_bound ~credential
           else Masc_tui_http.post_json in
         let* receipt = request_result (post ~host ~port
           ~path:("/api/v1/lane-addons/" ^ suffix)
           ~body:(Yojson.Safe.to_string body)) in
-        let diagnostic = if not broadcast then None else
-          match Masc_tui_lane_broadcast_pending.acknowledge
-            ~path:broadcast_path ~scope:broadcast_scope ~credential:credential.credential_identity ~request:body receipt with
-          | Ok () -> None
-          | Error detail -> Some (Addons.Request_failure
-              ("Broadcast receipt received; retry tracking could not be confirmed: " ^ detail)) in
+        let diagnostic = match principal with
+          | None -> None
+          | Some principal ->
+              (match Masc_tui_lane_broadcast_pending.acknowledge
+                ~path:broadcast_path ~scope:broadcast_scope ~credential:principal ~request:body receipt with
+               | Ok () -> None
+               | Error detail -> Some (Addons.Request_failure
+                   ("Broadcast receipt received; retry tracking could not be confirmed: " ^ detail))) in
         (match inspect () with
          | Ok snapshot -> Ok (reply ~snapshot ~receipt ?diagnostic ~inventory_read:`Read ())
          | Error detail -> Ok (reply ~receipt ?diagnostic ~inventory_read:(`Failed detail) ()))

@@ -65,21 +65,25 @@ let test_durable_admission () = fixture (fun path ->
   check string "ledger ownership lets a later deliberate send use its own identity"
     "next-durable-send" (id next))
 
-let test_changed_credential_refuses_replay () = fixture (fun path ->
+let test_same_principal_recovers_after_token_rotation () = fixture (fun path ->
   let scope="same-server" in
-  let original=Pending.prepare ~credential:"actor-a-token" ~path ~scope (request "original") |> require in
-  check bool "new credential cannot replay or replace pending request" true
-    (Result.is_error (Pending.prepare ~credential:"actor-b-token" ~path ~scope (request "replacement")));
-  check string "restored original credential reconciles the same request" "original"
-    (Pending.prepare ~credential:"actor-a-token" ~path ~scope (request "fresh-id") |> require |> id);
+  (* Both token generations have already been authenticated as actor A by the
+     server principal endpoint. The journal never sees either bearer. *)
+  let actor_a="principal:operator:actor-a" in
+  let actor_b="principal:operator:actor-b" in
+  let original=Pending.prepare ~credential:actor_a ~path ~scope (request "original") |> require in
+  check bool "another principal cannot replay or replace pending request" true
+    (Result.is_error (Pending.prepare ~credential:actor_b ~path ~scope (request "replacement")));
+  check string "rotated token for actor A reconciles the original operation" "original"
+    (Pending.prepare ~credential:actor_a ~path ~scope (request "fresh-id") |> require |> id);
   let receipt=`Assoc ["delivery",`Assoc ["status",`String "committed";
     "request_id",`String "original";"receipt",`Assoc ["fanout_state",`String "finished"]]] in
-  require (Pending.acknowledge ~credential:"actor-b-token" ~path ~scope ~request:original receipt);
+  require (Pending.acknowledge ~credential:actor_b ~path ~scope ~request:original receipt);
   check bool "foreign acknowledgement cannot retire original operation" true
-    (Result.is_error (Pending.prepare ~credential:"actor-b-token" ~path ~scope (request "replacement")));
-  require (Pending.acknowledge ~credential:"actor-a-token" ~path ~scope ~request:original receipt);
-  check string "new credential may start after original settlement" "new-send"
-    (Pending.prepare ~credential:"actor-b-token" ~path ~scope (request "new-send") |> require |> id))
+    (Result.is_error (Pending.prepare ~credential:actor_b ~path ~scope (request "replacement")));
+  require (Pending.acknowledge ~credential:actor_a ~path ~scope ~request:original receipt);
+  check string "foreign principal may start only after original settlement" "new-send"
+    (Pending.prepare ~credential:actor_b ~path ~scope (request "new-send") |> require |> id))
 let test_legacy_credential_refuses_replay () = fixture (fun path ->
   let legacy=`Assoc ["event",`String "pending";"scope",`String "server";
     "selection",`Assoc ["instance_id",`String "instance";"row_ids",`List [`String "row-a";`String "row-b"]];
@@ -89,7 +93,7 @@ let test_legacy_credential_refuses_replay () = fixture (fun path ->
     (Result.is_error (Pending.prepare ~credential:"new-credential" ~path ~scope:"server" (request "fresh"))))
 
 let () = run "Durable TUI Broadcast identity" ["recovery",[
-  test_case "changed credential refuses replay" `Quick test_changed_credential_refuses_replay;
+  test_case "same principal recovers across token rotation" `Quick test_same_principal_recovers_after_token_rotation;
   test_case "legacy pending identity refuses replay" `Quick test_legacy_credential_refuses_replay;
   test_case "process restart and acknowledged next send" `Quick test_restart;
   test_case "storage refuses ambiguous sends" `Quick test_storage_refusal;

@@ -1,7 +1,9 @@
 (** Durable identities for unanswered TUI Broadcasts. The path belongs to the
-    verified workspace; scope distinguishes the server endpoint. A nonsecret credential fingerprint
-    binds an unanswered operation to the credential used before sending; changed
-    or legacy-unbound credentials refuse replay without replacing its ID. Both operations
+    verified workspace; scope distinguishes the server endpoint. The [credential]
+    argument is the nonsecret principal returned by the authenticated server
+    for the captured bearer. A later bearer for the same principal may recover
+    the original operation; another principal or a legacy unbound entry cannot.
+    Both operations
     serialize with a cross-process journal lock. Errors refuse a new send. *)
 val prepare : path:string -> scope:string -> credential:string -> Yojson.Safe.t -> (Yojson.Safe.t, string) result
 

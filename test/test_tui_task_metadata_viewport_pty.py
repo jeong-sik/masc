@@ -11,6 +11,10 @@ import test_tui_keyboard_input as h
 
 SOURCE_MODULES = ("bin/masc_tui_render.ml", "bin/masc_tui.ml")
 TASK_ID = "task-metadata-501"
+FOLLOWED_TASK_ID = "task-followed-502"
+FOLLOWED_TITLE = "FOLLOWEDHEAD short task"
+HANDOFF_UPDATER = "handoff-owner-" + "delegate-" * 18 + "HANDOFFUPDATEREND"
+HANDOFF_STAMP = "2026-10-01T02:03:04Z"
 TITLE = "TITLEHEAD " + "한 " * 20 + "task title evidence " * 5 + "TITLEEND"
 ACTOR = "actor-" + "delegated-" * 14 + "ACTOREND"
 CREATOR = "creator-" + "owner-" * 18 + "CREATOREND"
@@ -42,7 +46,9 @@ def window(output):
 def task(status):
     row = {"id": TASK_ID, "title": TITLE, "description": "Task description remains readable.",
            "status": status, "assignee": ACTOR, "priority": 2, "cycle_count": 7,
-           "created_at": STAMP, "created_by": CREATOR, "files": ["docs/evidence/task-metadata.md"]}
+           "created_at": STAMP, "created_by": CREATOR, "files": ["docs/evidence/task-metadata.md"],
+           "handoff_context": {"summary": "Retained handoff", "reclaim_policy": "block_reclaim",
+                               "updated_at": HANDOFF_STAMP, "updated_by": HANDOFF_UPDATER}}
     if status == "awaiting_verification":
         row.update(started_at=STAMP, submitted_at=STAMP, verification_id=VERIFICATION)
     elif status == "done":
@@ -54,7 +60,9 @@ def task(status):
 
 def save_task(base, status):
     path = Path(base) / ".masc" / "tasks" / "backlog.json"
-    path.write_text(json.dumps({"tasks": [task(status)], "last_updated": STAMP, "version": 1}), encoding="utf-8")
+    followed = task("todo")
+    followed.update(id=FOLLOWED_TASK_ID, title=FOLLOWED_TITLE)
+    path.write_text(json.dumps({"tasks": [task(status), followed], "last_updated": STAMP, "version": 1}), encoding="utf-8")
 
 
 def run(executable):
@@ -64,6 +72,15 @@ def run(executable):
         "to_status": "awaiting_verification", "actor": ACTOR,
         "handoff_context": {"summary": HISTORY},
     }])
+    fixtures[f"/api/v1/dashboard/tasks/history?task_id={FOLLOWED_TASK_ID}&limit=50"] = (200, [])
+    fixtures["/api/v1/dashboard/harness-health"] = (200, {
+        "generated_at": 1787557669.0, "recent_verdicts": [{
+            "timestamp": 1787557668.0, "task_id": FOLLOWED_TASK_ID,
+            "task_title": FOLLOWED_TITLE, "agent_name": "beta", "gate": "verify",
+            "verdict": "approve", "evaluator_runtime": "glm-coding", "fallback_reason": None,
+            "notes_hash": "a51844ac8e12b5bf11f1c6db0021521298e5788cd64e4ec9b566dbf36a16fa51",
+        }], "calibration": {},
+    })
     requests = []
     with tempfile.TemporaryDirectory(prefix="masc-task-editor-") as directory:
         marker = Path(directory) / "opened"
@@ -110,7 +127,7 @@ def run(executable):
                     h.wait_for_output(process, fd, output, b"HISTORYEND", start=0, timeout=10)
                     h.drain_until_quiet(process, fd, output)
                     all_text = compact(screen(output))
-                    for value in (TITLE, TASK_ID, ACTOR, CREATOR, STAMP, evidence, HISTORY):
+                    for value in (TITLE, TASK_ID, ACTOR, CREATOR, STAMP, evidence, HISTORY, "block_reclaim", HANDOFF_STAMP, HANDOFF_UPDATER):
                         assert compact(value.encode()) in all_text, (status, width, value, all_text)
                     h.resize_and_wait(process, fd, output, rows=18, columns=width,
                                       needle=b"TITLEHEAD", final_cursor=b"\x1b[?25l")
@@ -136,6 +153,17 @@ def run(executable):
                 if status == "awaiting_verification":
                     h.send_and_wait(process, fd, output, b"\x1b", b"MASC Work")
                     h.palette_go(process, fd, output, ("task " + TASK_ID).encode(), b"TITLEHEAD")
+            # A Harness verdict points at another Task. Following it after
+            # reading the first Task's tail must open the new document at top.
+            h.send_and_wait(process, fd, output, b"\x1b[F", b"HISTORYEND")
+            h.drain_until_quiet(process, fd, output)
+            assert window(output)[0] > 1, window(output)
+            h.palette_go(process, fd, output, b"go Harness", b"FOLLOWEDHEAD")
+            h.send_and_wait(process, fd, output, b"\x1d", b"FOLLOWEDHEAD")
+            h.drain_until_quiet(process, fd, output)
+            assert b"MASC Task" in screen(output), screen(output)
+            assert window(output)[0] == 1, window(output)
+            assert compact(FOLLOWED_TASK_ID.encode()) in compact(screen(output)), screen(output)
             # A stale detail ID survives a task leaving the durable backlog,
             # but the visible Work list owns keys after that refresh.
             marker.unlink()

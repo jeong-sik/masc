@@ -31,6 +31,9 @@ flowchart LR
 
 - Stacked PR로 작업합니다. 맨 아래 PR은 `main`을, 이후 PR은 직전 브랜치를 대상으로 합니다.
   PR 하나에는 구체적인 결과 하나를 담고 스택 아래부터 통합합니다.
+- GitHub Native Stack은 REST `stack`을 먼저 읽고 [전용 절차](NATIVE-GITHUB-STACKS.md)를 따릅니다.
+  선택한 PR 아래의 미병합 PR도 함께 병합되므로 전체 범위를 검토합니다. non-main base만으로
+  부모 선행 병합이나 수동 retarget을 요구하지 않습니다.
 - 동시 작업은 별도 worktree로 격리합니다. Task claim은 담당을 조율하며 파일을 잠그거나
   다른 체크아웃을 수정할 권한을 주지는 않습니다.
 - README는 제품 소개, CONTRIBUTING은 개발 시작, 매뉴얼은 사용법, 명세는 인터페이스,
@@ -122,7 +125,7 @@ Commit 후 `git push -u origin docs/your-topic`으로 올리고 템플릿을 사
    별도 worktree를 사용하고 기존 작업을 보존합니다.
 2. 요청한 결과, 범위와 증거 조건을 적습니다. 실제 소스, 현재 리뷰와 실패 로그를 읽습니다.
 3. 범위를 정한 변경을 구현합니다. 외부 코딩 세션은 로컬 Dune 빌드를 하지 않습니다.
-   일반 스택은 소스 리뷰로 판단합니다. 구체적인 필요가 있을 때만 2분 이내의 개발 검사를
+   일반 스택은 소스 리뷰로 판단합니다. 구체적인 필요가 있을 때만 범위를 좁힌 개발 검사를
    요청하고 전체 CI는 Release/Tag 경계에서 실행합니다. CI를 기다리거나 반복 조회하지 않습니다.
 4. 다음 작업 단위로 넘어갈 때 이전 작업에 적대적 리뷰 에이전트를 붙입니다. 발견한 내용을
    직접 판단하고 대응합니다. 서브에이전트 리뷰가 곧 다른 모델의 리뷰나 GitHub 승인은 아닙니다.
@@ -181,9 +184,11 @@ diff와 증거가 준비되면 ready for review로 바꿉니다. PR 생성, push
 CI를 자동으로 시작하지 않습니다.
 
 [pr-check.yml](../../.github/workflows/pr-check.yml)은 소스·설정 문법과 credential 검사를
-명시적 요청으로 2분 이내에 실행합니다. [ci.yml](../../.github/workflows/ci.yml)은 스택
-맨 아래 PR의 Core만 2분 이내에 빌드합니다. 필요할 때만 요청하세요. 의존성 캐시가
-준비되지 않으면 제한 안에 끝나지 않을 수 있으며, 미완료 실행은 빌드 성공 증거가 아닙니다.
+명시적 요청으로 실행합니다. [ci.yml](../../.github/workflows/ci.yml)은 스택
+맨 아래 PR의 Core만 빌드합니다. 필요할 때만 짧고 가벼운 검사를 요청하세요.
+헌법의 "2분 정도"는 검사 규모의 예시이며 강제 종료 시간이나 성공·실패 기준이 아닙니다.
+의존성 캐시가 준비되지 않으면 더 오래 걸릴 수 있습니다. 실제로 성공한 완료 결과만
+빌드 증거로 사용합니다.
 
 PR, 일반 push와 정기 CI는 없습니다. `release/vX.Y.Z`에서는
 [release-candidate.yml](../../.github/workflows/release-candidate.yml)을 명시적으로 요청하여

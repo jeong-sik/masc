@@ -25,6 +25,7 @@ type image =
   | Msx_screen
   | Mascot
   | Keeper_portrait
+  | About_keeper_1 | About_keeper_2 | About_keeper_3 | About_keeper_4
 [@@deriving enumerate]
 
 (* Fixed, so a query reply arriving late -- after the deadline, into the key
@@ -34,6 +35,10 @@ let image_id = function
   | Msx_screen -> 32
   | Mascot -> 41
   | Keeper_portrait -> 42
+  | About_keeper_1 -> 43
+  | About_keeper_2 -> 44
+  | About_keeper_3 -> 45
+  | About_keeper_4 -> 46
 
 let query_id = image_id Graphics_query
 
@@ -142,6 +147,11 @@ let identity ~image_id ~placement_id =
 
 let replace_rgb ~image_id ~placement_id =
   encode_rgb ~identity:(identity ~image_id ~placement_id)
+
+(* No payload and no format key: a=p names pixels the terminal already
+   holds, so there is nothing to decode. *)
+let put ~image_id ~placement_id ~rows =
+  Printf.sprintf "%sa=p%s,r=%d,q=2%s" apc (identity ~image_id ~placement_id) (max 1 rows) st
 
 let delete_image ~image_id =
   Printf.sprintf "%sa=d,d=I,i=%d,q=2%s" apc image_id st

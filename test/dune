@@ -1112,6 +1112,11 @@
  (libraries alcotest masc_test_deps masc.keeper_checkpoint_ref))
 
 (test
+ (name test_keeper_event_queue_codec_pool)
+ (modules test_keeper_event_queue_codec_pool)
+ (libraries alcotest masc.keeper_runtime masc.masc_core eio eio_main yojson unix))
+
+(test
  (name test_subsystem_health_state)
  (modules test_subsystem_health_state)
  (libraries alcotest masc_test_deps))
@@ -2914,6 +2919,7 @@
 (include stanzas/test_runtime_resolved_fleet.inc)
 
 (include stanzas/test_tui_overview_providers.inc)
+(include stanzas/test_tui_kept_reads.inc)
 
 (include stanzas/test_keeper_surface_status.inc)
 
@@ -3682,6 +3688,7 @@
  (name test_tui_chat_queue_wiring)
  (modules test_tui_chat_queue_wiring)
  (libraries masc_tui_link_preview masc_tui_image_preview
+  masc_tui_answering
   alcotest
   ast_grep
   astring
@@ -3704,6 +3711,7 @@
   masc_tui_ansi
   masc_tui_theme
   masc_tui_types
+  masc_tui_roster_pane
   unix
   yojson)
  (deps
@@ -3742,6 +3750,7 @@
   fmt
   masc
   masc_tui_types
+  masc_tui_voice_wizard_session
   masc_tui_pick_list
   masc_tui_fusion_launch
   masc_tui_ask_projection
@@ -3986,12 +3995,12 @@
 (test
  (name test_tui_palette_matching)
  (modules test_tui_palette_matching)
- (libraries alcotest masc.masc_types masc_tui_code_lexer masc_tui_types masc_tui_fetched))
+ (libraries masc_tui_palette masc_tui_pick_list alcotest masc.masc_types masc_tui_code_lexer masc_tui_types masc_tui_fetched))
 
 (test
  (name test_tui_workspace_entries)
  (modules test_tui_workspace_entries)
- (libraries alcotest masc masc.server masc_tui_fetched masc_tui_types))
+ (libraries alcotest masc masc.server masc_tui_fetched masc_tui_types masc_tui_code_results))
 
 (test
  (name test_tui_acting)
@@ -4028,7 +4037,7 @@
 (test
  (name test_tui_image_preview)
  (modules test_tui_image_preview)
- (libraries alcotest masc_tui_image_preview masc_tui_keeper_chat_projection masc.masc_tool_blob_store))
+ (libraries alcotest masc_tui_image_preview masc_tui_keeper_chat_projection masc.masc_tool_blob_store digestif))
 
 (test
  (name test_tui_keeper_chat_projection)
@@ -4510,6 +4519,7 @@
  (name test_tui_render_memory)
  (modules test_tui_render_memory)
  (libraries
+  masc_tui_pick_list
   alcotest
   masc
   masc_tui_acting_pane
@@ -4609,6 +4619,7 @@
   (alias runtest-test_tui_keyboard_rosters_pty)
   (alias runtest-test_tui_keyboard_board_terminal_pty)
   (alias runtest-test_tui_keyboard_input-http-badge-refresh)
+  (alias runtest-test_tui_keyboard_input-http-conditional-read)
 ))
 
 (alias
@@ -5247,6 +5258,16 @@
  (deps (alias runtest-test_tui_keyboard_input-resources)))
 
 (rule
+ (alias runtest-test_tui_resources_pty)
+ (deps test_tui_resources_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_resources_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_resources_pty)))
+
+(rule
  (alias runtest-test_tui_resources_read_error)
  (deps test_tui_resources_read_error.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
  (action
@@ -5690,7 +5711,8 @@
  (name test_tui_chat_activity)
  (modules test_tui_chat_activity)
  (libraries alcotest astring masc_tui_answering masc_tui_types masc_tui_keeper_chat_live
-  masc_tui_keeper_chat_projection masc_tui_keeper_chat_queue))
+  masc_tui_keeper_chat_projection masc_tui_keeper_chat_queue
+  masc_tui_roster_pane masc_tui_frame masc_tui_message_layout))
 
 (test
  (name test_keeper_turn_preview)
@@ -5969,6 +5991,9 @@
 (include stanzas/test_tui_keys.inc)
 
 (include stanzas/test_tui_voice_pane_fills_its_height.inc)
+(include stanzas/test_tui_runtime_params_viewport_pty.inc)
+(include stanzas/test_tui_runtime_picker_width_pty.inc)
+(include stanzas/test_tui_keeper_metadata_wrap_pty.inc)
 
 (include stanzas/test_tui_overlay_window_reading.inc)
 (include stanzas/test_tui_approvals_footer_matches_the_sheet.inc)
@@ -6022,6 +6047,7 @@
 (include stanzas/test_tui_portrait_view.inc)
 (include stanzas/test_tui_keeper_portrait.inc)
 (include stanzas/test_tui_candle.inc)
+(include stanzas/test_tui_chat_portrait.inc)
 (include stanzas/test_tui_emblem_state.inc)
 (include stanzas/test_tui_link_label.inc)
 (include stanzas/test_tui_link_preview.inc)
@@ -6676,6 +6702,17 @@
  (deps (alias runtest-test_tui_keyboard_input-http-badge-refresh)))
 
 (rule
+ (alias runtest-test_tui_keyboard_input-http-conditional-read)
+ (deps test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_keyboard_input.py}
+   %{dep:../bin/masc_tui.exe} http-conditional-read)))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_keyboard_input-http-conditional-read)))
+
+(rule
  (alias runtest-test_tui_keyboard_input-observer-reconnect)
  (deps test_tui_keyboard_input.py ../bin/masc_tui.exe)
  (action
@@ -6754,6 +6791,26 @@
  (deps test_tui_tab_strip_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
  (action
   (run python3 %{dep:test_tui_tab_strip_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(rule
+ (alias runtest-test_tui_queue_visibility_pty)
+ (deps test_tui_queue_visibility_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_queue_visibility_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(rule
+ (alias runtest-test_tui_stored_image_pty)
+ (deps test_tui_stored_image_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_stored_image_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_stored_image_pty)))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_queue_visibility_pty)))
 
 (rule
  (alias runtest-test_tui_play_invites_pty)
@@ -7536,6 +7593,7 @@
 (include stanzas/test_tui_keeper_current_failure_pty.inc)
 
 (include stanzas/test_tui_keeper_portrait_pty.inc)
+(include stanzas/test_tui_chat_portrait_pty.inc)
 
 (include stanzas/test_safe_ops_read_json_eio.inc)
 
@@ -7712,6 +7770,25 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_chat_load_errors_pty)))
+(include stanzas/test_tui_schedule_detail_viewport_pty.inc)
+(rule
+ (alias runtest-test_tui_keeper_create_journey_pty)
+ (deps test_tui_keeper_create_journey_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action (run python3 %{dep:test_tui_keeper_create_journey_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_keeper_create_journey_pty)))
+(rule
+ (alias runtest-test_tui_keeper_draft_payload_pty)
+ (deps test_tui_keeper_draft_payload_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action (run python3 %{dep:test_tui_keeper_draft_payload_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_keeper_draft_payload_pty)))
+
+(include stanzas/test_tui_keeper_logs_wrap_pty.inc)
 
 (include stanzas/test_candle_baseline_collector.inc)
 
@@ -7769,11 +7846,45 @@
  (name runtest)
  (deps (alias runtest-test_tui_skills_usage_summary)))
 
+(alias
+ (name runtest-test_tui_voice_wizard_pty)
+ (deps (alias runtest-test_tui_keyboard_input-voice-wizard)))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_voice_wizard_pty)))
+
 (include stanzas/test_candle_appraisal_flow.inc)
 
 (include stanzas/test_candle_balance.inc)
 
 (include stanzas/test_candle_appraiser_transport.inc)
+
+(include stanzas/test_tui_code_diff_pan_pty.inc)
+
+(rule
+ (alias runtest-test_tui_preset_viewport_pty)
+ (deps test_tui_preset_viewport_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_preset_viewport_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_preset_viewport_pty)))
+
+(rule
+ (alias runtest-test_tui_agenda_navigation_pty)
+ (deps test_tui_agenda_navigation_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action (run python3 %{dep:test_tui_agenda_navigation_pty.py} %{dep:../bin/masc_tui.exe})))
+(alias (name runtest) (deps (alias runtest-test_tui_agenda_navigation_pty)))
+
+(rule
+ (alias runtest-test_tui_client_connector_layout_pty)
+ (deps test_tui_client_connector_layout_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action (run python3 %{dep:test_tui_client_connector_layout_pty.py} %{dep:../bin/masc_tui.exe})))
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_client_connector_layout_pty)))
 
 (include stanzas/test_tui_review_verdict_layout_pty.inc)
 (include stanzas/test_tui_runtime_list_layout_pty.inc)
@@ -7792,7 +7903,53 @@
  (deps (alias runtest-test_tui_tools_layout_pty)))
 
 (include stanzas/test_tui_prompts_layout_pty.inc)
+(include stanzas/test_tui_recorded_diff_pan_pty.inc)
 
+
+(rule
+ (alias runtest-harness-server-binary)
+ (deps test_harness_server_binary.py ../scripts/harness/lib/server_bootstrap.sh)
+ (action (run python3 %{dep:test_harness_server_binary.py}
+          %{dep:../scripts/harness/lib/server_bootstrap.sh})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-harness-server-binary)))
+
+(rule
+ (alias runtest-test_benchmark_scripts)
+ (deps
+  test_benchmark_scripts.py
+  ../benchmarks/quick-bench.sh
+  ../benchmarks/benchmark.sh
+  ../scripts/harness/jsonrpc_sse.sh
+  ../scripts/harness/lib/mcp_jsonrpc.sh
+  (glob_files ../config/tools/masc_*.toml))
+ (action (run python3 %{dep:test_benchmark_scripts.py})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_benchmark_scripts)))
+
+(rule
+ (alias runtest-test_tool_quality_live_plan)
+ (deps
+  test_tool_quality_live_plan.py
+  ../scripts/harness_tool_call_quality.sh
+  ../scripts/harness/jsonrpc_sse.sh
+  ../scripts/harness/lib/test_framework.sh
+  ../scripts/harness/lib/server_bootstrap.sh
+  ../scripts/harness/lib/mcp_call.sh
+  ../scripts/harness/lib/mcp_jsonrpc.sh
+  ../benchmarks/data/tool_call_quality_cases.json
+  ../config/prompts/harness.tool_quality.analyst.txt
+  ../config/prompts/harness.tool_quality.executor.txt
+  ../config/prompts/harness.tool_quality.verifier.txt)
+ (action (run python3 %{dep:test_tool_quality_live_plan.py})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tool_quality_live_plan)))
 
 (include stanzas/test_candle_purchase_flow.inc)
 

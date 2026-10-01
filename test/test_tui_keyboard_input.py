@@ -99,8 +99,11 @@ class RequestHttpResponse:
     def __init__(
         self,
         resolve: Callable[[bytes], HttpResponse | RawHttpResponse | StreamingHttpResponse],
+        *,
+        get_response: HttpResponse | None = None,
     ) -> None:
         self.resolve = resolve
+        self.get_response = get_response
 
 
 class MethodHttpResponse:
@@ -279,7 +282,10 @@ def test_http_endpoint(
             else:
                 fixture = (503, {"error": "fixture endpoint unavailable"})
             if isinstance(fixture, RequestHttpResponse):
-                resolved = fixture.resolve(request_body or b"")
+                if self.command == "GET" and fixture.get_response is not None:
+                    resolved = fixture.get_response
+                else:
+                    resolved = fixture.resolve(request_body or b"")
             elif isinstance(fixture, MethodHttpResponse):
                 resolved = fixture.resolve(self.command)
             elif isinstance(fixture, PathHttpResponse):
@@ -2164,6 +2170,7 @@ def run_terminal_scenario(
     confirm_exit: bytes = b"q",
     refresh: float = 60.0,
     terminal_cols: int = 100,
+    terminal_rows: int = 30,
     workspace: str = WORKSPACE_PAYLOAD,
     http_fixtures: HttpFixtures | None = None,
     http_requests: HttpRequests | None = None,
@@ -2188,7 +2195,10 @@ def run_terminal_scenario(
     output = PtyOutput()
     process: subprocess.Popen[bytes] | None = None
     try:
-        fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, struct.pack("HHHH", 30, terminal_cols, 0, 0))
+        fcntl.ioctl(
+            slave_fd, termios.TIOCSWINSZ,
+            struct.pack("HHHH", terminal_rows, terminal_cols, 0, 0),
+        )
         os.set_blocking(master_fd, False)
         with tempfile.TemporaryDirectory(prefix="masc-tui-keyboard-") as base_path:
             with test_http_endpoint(
@@ -4867,6 +4877,60 @@ def open_loaded_planning(
     palette_go(process, master_fd, output, b"go Work", b"plan-alpha-29424")
 
 
+def planning_footer_dispatch_interaction(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    _slave_fd: int,
+    output: bytearray,
+    _base_path: str,
+) -> None:
+    open_loaded_planning(process, master_fd, output)
+    resize_and_wait(
+        process, master_fd, output, rows=32, columns=360,
+        needle=b"plan-alpha-29424", controls=(FULL_REDRAW,),
+        final_cursor=b"\x1b[?25l",
+    )
+
+    def footer() -> bytes:
+        rows = [row for row in screen_rows(bytes(output)).values()
+                if b"j/k:move" in row]
+        if len(rows) != 1:
+            raise AssertionError(f"Planning drew {len(rows)} footer rows")
+        return rows[0]
+
+    list_footer = footer()
+    for hint in (b"Right / Enter:detail", b"f:filter", b"s:sort"):
+        if hint not in list_footer:
+            raise AssertionError(f"Planning list omitted {hint!r}: {list_footer!r}")
+    if b"[ / ]:previous / next" in list_footer:
+        raise AssertionError(f"Planning list offered detail-only navigation: {list_footer!r}")
+
+    send_and_wait(
+        process, master_fd, output, b"\r", b"masc://planning/goal-a-29424"
+    )
+    detail_footer = footer()
+    if b"[ / ]:previous / next" not in detail_footer:
+        raise AssertionError(f"Planning detail omitted goal navigation: {detail_footer!r}")
+    if b"Right / Enter:detail" in detail_footer:
+        raise AssertionError(f"Planning detail offered list-only open: {detail_footer!r}")
+    send_and_wait(
+        process, master_fd, output, b"]", b"masc://planning/goal-b-29424"
+    )
+    if b"[ / ]:previous / next" not in footer():
+        raise AssertionError("Planning detail step lost its footer")
+    send_and_wait(
+        process, master_fd, output, b"\x1b[D", b"Right / Enter:detail"
+    )
+    if b"[ / ]:previous / next" in footer():
+        raise AssertionError("Planning list retained the detail-only hint")
+    send_and_wait(
+        process, master_fd, output, b"f", b"filter:completed"
+    )
+    if b"f:filter" not in footer():
+        raise AssertionError("Planning list filter lost its footer")
+    os.write(master_fd, b"q")
+
+
 def planning_reorder_identity_interaction(fixtures: HttpFixtures) -> Interaction:
     def interact(
         process: subprocess.Popen[bytes],
@@ -6925,9 +6989,9 @@ def chat_steer_interaction(fixture: AtomicChatFixture, requests: HttpRequests) -
             if not wait_for_fixture_event(process, master_fd, output, fixture.interrupted, timeout=5):
                 raise AssertionError("Esc never reached its exact observed turn")
             send_and_wait(process, master_fd, output, b"new-course", composer_showing(b"new-course"))
-            send_and_wait(process, master_fd, output, b"\r", b"Queue (1 waiting")
+            send_and_wait(process, master_fd, output, b"\r", b"Queue (2 pending")
             send_and_wait(process, master_fd, output, b"one-more", composer_showing(b"one-more"))
-            send_and_wait(process, master_fd, output, b"\r", b"Queue (2 waiting")
+            send_and_wait(process, master_fd, output, b"\r", b"Queue (3 pending")
             if not wait_for_fixture_event(process, master_fd, output, fixture.old_poll_seen, timeout=10):
                 raise AssertionError("no stale observation arrived during pending Esc")
             read_available(master_fd, output)
@@ -6979,7 +7043,7 @@ def chat_working_target_interaction(fixture: AtomicChatFixture) -> Interaction:
             time.sleep(0.08)  # delimit the terminal's lone Escape before typing
             read_available(master_fd, output)
             send_and_wait(process, master_fd, output, b"after-stop", composer_showing(b"after-stop"))
-            send_and_wait(process, master_fd, output, b"\r", b"Queue (1 waiting")
+            send_and_wait(process, master_fd, output, b"\r", b"Queue (2 pending")
             if len(fixture.interrupt_requests) != 1 or len(fixture.submitted) != 2:
                 raise AssertionError("double Esc duplicated control or released input before acknowledgement")
             fixture.release_interrupt.set()
@@ -7027,7 +7091,7 @@ def quit_names_waiting_messages_interaction(fixture: AtomicChatFixture) -> Inter
             if not wait_for_fixture_event(process, master_fd, output, fixture.interrupted, timeout=5):
                 raise AssertionError("Esc acknowledgement was not gated")
             send_and_wait(process, master_fd, output, b"waiting-line", composer_showing(b"waiting-line"))
-            send_and_wait(process, master_fd, output, b"\r", b"Queue (1 waiting")
+            send_and_wait(process, master_fd, output, b"\r", b"Queue (1 pending")
             if fixture.received:
                 raise AssertionError("pending control input was already sent to the server")
             escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
@@ -7065,7 +7129,7 @@ def chat_retained_stop_interaction(fixture: AtomicChatFixture) -> Interaction:
             if not wait_for_fixture_event(process, master_fd, output, fixture.interrupted, timeout=5):
                 raise AssertionError("initial stop never reached the server")
             send_and_wait(process, master_fd, output, b"retained-original", composer_showing(b"retained-original"))
-            send_and_wait(process, master_fd, output, b"\r", b"Queue (1 waiting")
+            send_and_wait(process, master_fd, output, b"\r", b"Queue (1 pending")
             send_and_wait(process, master_fd, output, b"\x1b", b"Input retained after Esc")
             if fixture.received:
                 raise AssertionError(f"second Esc dispatched retained input: {fixture.received!r}")
@@ -7183,7 +7247,11 @@ def chat_reconcile_interaction(
             send_and_wait(
                 process, master_fd, output, b"held-next", composer_showing(b"held-next")
             )
-            send_and_wait(process, master_fd, output, b"\r", b"Queue (1 waiting")
+            send_and_wait(process, master_fd, output, b"\r", b"Queue (2 pending")
+            completed = output.rfind(FRAME_END) + len(FRAME_END)
+            pending_screen = screen_text(bytes(output[:completed]))
+            if b"1 rechecking delivery" not in pending_screen or b"queued at Keeper" in pending_screen:
+                raise AssertionError("unknown admission was presented as confirmed queued: " + repr(pending_screen))
             before_release = [
                 json.loads(body).get("message")
                 for path, body in requests
@@ -7651,7 +7719,7 @@ def memory_facts_interaction() -> Interaction:
     return interact
 
 
-def memory_journal_fixture() -> HttpResponse:
+def memory_journal_fixture() -> tuple[int, dict[str, object]]:
     return (
         200,
         {
@@ -8514,6 +8582,186 @@ def run_context_inspector_transport_error_regression(executable: str) -> None:
     )
 
 
+def next_request_forecast_fixture(*, with_continuity: bool) -> dict[str, object]:
+    origin: dict[str, object] = (
+        {"kind": "librarian_snapshot", "end_atom": 2698, "boundary_line": 2215}
+        if with_continuity
+        else {"kind": "ledger"}
+    )
+    return {
+        "schema": "masc.keeper.next-request-forecast.v5",
+        "keeper": "alpha",
+        "trace_id": "trace-next-request",
+        "checkpoint_messages": 5217,
+        "wake_line_bytes": 131,
+        "walk": {
+            "lane_id": "kimi_coding.kimi-for-coding",
+            "declared": ["kimi_coding.kimi-for-coding"],
+        },
+        "candidates": [
+            {
+                "runtime_id": "kimi_coding.kimi-for-coding",
+                "lane": {"agent_core": True},
+                "marks": {"high_water_tokens": 100000, "low_water_tokens": 70000},
+                "parts": {"error": "no completed turn on this runtime carried a composition in the newest 200 records"},
+                "history_atoms": 2718,
+                "carried": {
+                    "first_atom": 2698,
+                    "kept_atoms": 20,
+                    "transmitted_bytes": 237300,
+                    "preamble_bytes": None,
+                    "origin": origin,
+                    "counted_tokens": None if with_continuity else 71000,
+                },
+                "assembly": None,
+                "place": {"walks_at": 0, "declared_at": 0, "rest": {"kind": "serving"}},
+            }
+        ],
+    }
+
+
+def scroll_context_one_line(process, master_fd, output) -> bytes:
+    # A scroll paints one frame. send_and_wait(..., FRAME_END) would consume
+    # that marker as its needle and then wait for an unnecessary second frame.
+    read_available(master_fd, output)
+    start = len(output)
+    os.write(master_fd, b"j")
+    wait_for_output(process, master_fd, output, FRAME_END, start=start, timeout=3.0)
+    frame_end = output.find(FRAME_END, start) + len(FRAME_END)
+    return bytes(output[start:frame_end])
+
+
+def open_context_and_read_history_pages(process, master_fd, output) -> bytes:
+    # The loaded context can be taller than the terminal. Walk its actual
+    # reported pages, preserving the bytes for the existing content checks.
+    drawn = send_and_wait(process, master_fd, output, b"\r", b"WHAT WENT IN")
+    while True:
+        visible = screen_text(bytes(output))
+        bounds = re.search(rb"\[lines (\d+)-(\d+)/(\d+)\]", visible)
+        if bounds is None or int(bounds[2]) == int(bounds[3]):
+            break
+        first = int(bounds[1])
+        drawn += scroll_context_one_line(process, master_fd, output)
+        advanced = re.search(rb"\[lines (\d+)-(\d+)/(\d+)\]",
+                             screen_text(bytes(output)))
+        if advanced is None or int(advanced[1]) <= first:
+            raise AssertionError("Context j did not advance its reported window")
+    if b"HOW FAR BACK" not in CSI_RE.sub(b"", drawn):
+        raise AssertionError("Loaded Context pages omitted the history band")
+    return drawn
+
+
+def context_visible_pane(output) -> tuple[bytes, bytes, tuple[int, int, int] | None]:
+    """Current completed Context body, joining only its visible row payloads."""
+    end = output.rfind(FRAME_END)
+    if end < 0:
+        raise AssertionError("Context has no completed frame")
+    completed = bytes(output[:end + len(FRAME_END)])
+    rows = screen_rows(completed)
+    title = next((number for number, row in sorted(rows.items())
+                  if b"MASC Context" in row), None)
+    if title is None:
+        raise AssertionError(f"Context title is not visible: {screen_text(completed)!r}")
+    window = next(((number, match) for number, row in sorted(rows.items())
+                   if (match := LINES_WINDOW_RE.search(row)) is not None), None)
+    bounds = None if window is None else tuple(int(value) for value in window[1].groups())
+    if bounds is not None and not (1 <= bounds[0] <= bounds[1] <= bounds[2]):
+        raise AssertionError(f"Invalid Context window: {bounds!r}")
+    border = "│".encode()
+    payloads = []
+    for number, row in sorted(rows.items()):
+        if number <= title or (window is not None and number >= window[0]):
+            continue
+        plain = row.strip()
+        if plain.startswith(border) and plain.endswith(border):
+            payload = plain[len(border):-len(border)].strip()
+            if payload:
+                payloads.append(payload)
+    return screen_text(completed), b" ".join(payloads), bounds
+
+
+def run_next_request_readability_regression(executable: str) -> None:
+    for with_continuity in (True, False):
+        for cols in (80, 140):
+            fixtures = context_inspector_fixtures()
+            fixtures["/api/v1/keepers/alpha/next-request"] = (
+                200,
+                next_request_forecast_fixture(with_continuity=with_continuity),
+            )
+
+            def interact(process, master_fd, _slave_fd, output, _base_path):
+                resize_and_wait(
+                    process, master_fd, output, rows=32, columns=cols,
+                    needle=b"MASC Dashboard",
+                )
+                send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
+                select_keeper_row(process, master_fd, output, b"alpha")
+                send_and_wait(
+                    process, master_fd, output, b"\r",
+                    b"Keepers \xe2\x96\xb8 \x1b[1malpha",
+                )
+                send_and_wait(
+                    process, master_fd, output, b"m",
+                    b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat",
+                )
+                send_and_wait(
+                    process, master_fd, output, b"/context",
+                    composer_showing(b"/context"),
+                )
+                send_and_wait(process, master_fd, output, b"\r", b"WHAT WENT IN")
+                while True:
+                    visible, pane, bounds = context_visible_pane(output)
+                    if (
+                        b"Config / Runtime:" in pane
+                        and b"model limit." in pane
+                        and b"History preview:" in pane
+                        and (
+                            (b"Librarian working state" in pane)
+                            if with_continuity
+                            else (b"front from this runtime's ledger" in pane)
+                        )
+                    ):
+                        break
+                    # At the last reported row j changes nothing, so no new
+                    # frame is expected. Fail here with the current viewport.
+                    if bounds is None or bounds[1] == bounds[2]:
+                        raise AssertionError(
+                            f"Next Request meaning not visible at {cols} columns "
+                            f"at Context window {bounds!r}: {visible!r}"
+                        )
+                    first = bounds[0]
+                    scroll_context_one_line(process, master_fd, output)
+                    _visible, _pane, advanced = context_visible_pane(output)
+                    if advanced is None or advanced[0] <= first:
+                        raise AssertionError(
+                            f"Context j did not advance its reported window: "
+                            f"{bounds!r} -> {advanced!r}"
+                        )
+                if b"100.0k / 70.0k" in visible:
+                    raise AssertionError("trim settings still look like a forecast figure")
+                print(
+                    f"NEXT_REQUEST_CAPTURE {'continuity' if with_continuity else 'ledger'} "
+                    f"{cols}x32\n{visible.decode(errors='replace')}"
+                )
+                send_and_wait(
+                    process, master_fd, output, b"\x1b",
+                    b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat",
+                )
+                escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
+                os.write(master_fd, b"q")
+
+            run_terminal_scenario(
+                executable,
+                description=(
+                    f"Next Request {'Librarian' if with_continuity else 'ledger'} "
+                    f"copy at {cols} columns"
+                ),
+                interact=interact,
+                terminal_cols=cols,
+                http_fixtures=fixtures,
+            )
+
+
 def context_inspector_interaction() -> Interaction:
     def interact(
         process: subprocess.Popen[bytes],
@@ -8540,8 +8788,8 @@ def context_inspector_interaction() -> Interaction:
         send_and_wait(
             process, master_fd, output, b"/context", composer_showing(b"/context")
         )
-        composition = send_and_wait(
-            process, master_fd, output, b"\r", b"HOW FAR BACK"
+        composition = open_context_and_read_history_pages(
+            process, master_fd, output
         )
         composition_plain = CSI_RE.sub(b"", composition)
         for needle in (
@@ -10024,9 +10272,12 @@ def message_origin_badge_interaction(
     draft_frame = send_and_wait(
         process, master_fd, output, b"draft-neutral", b"draft-neutral"
     )
-    if b"\x1b[96m  > \x1b[0mdraft-neutral" not in draft_frame:
+    # Restore only the foreground after the accented prompt. A full reset
+    # would erase the input surface background; accepting arbitrary SGR here
+    # could instead leave the draft tinted or clear its background with 49m.
+    if b"\x1b[96m  > \x1b[39mdraft-neutral" not in draft_frame:
         raise AssertionError(
-            f"chat composer did not limit accent to its prompt: {draft_frame!r}"
+            f"chat composer did not restore default foreground while preserving its background: {draft_frame!r}"
         )
     escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
     os.write(master_fd, b"q")
@@ -10210,10 +10461,9 @@ def keeper_message_switch_interaction(alpha_history: GatedHttpResponse) -> Inter
             composer_showing(b"alpha-draft"),
         )
 
-        # The roster is put away until it is asked for, so this scenario asks.
-        # Ctrl-B is refused below Masc_tui_roster_pane.threshold_cols, and the
-        # width above is chosen to clear it.
-        send_and_wait(process, master_fd, output, b"\x02", b"KEEPERS")
+        # Wide chat shows the roster by default. Leave that preference
+        # untouched while checking the selected Keeper and draft handoff.
+        wait_for_output(process, master_fd, output, b"KEEPERS", start=0, timeout=3.0)
 
         beta_start = len(output)
         # A drawn roster is an input pane: Left focuses it, Down moves its
@@ -13072,7 +13322,7 @@ def code_lane_interaction(
         process, master_fd, output, b"d", LEXED_LET
     )
     diff_plain = CSI_RE.sub(b"", diff_frame).decode("utf-8")
-    for needle in ("diff vs HEAD: lib/a.ml", "let a = 1", "let x = 1"):
+    for needle in ("diff col 1 vs HEAD: lib/a.ml", "let a = 1", "let x = 1"):
         if needle not in diff_plain:
             raise AssertionError(
                 f"the diff view missed {needle!r}: {diff_plain!r}"
@@ -14090,7 +14340,8 @@ def schedule_detail_interaction() -> Interaction:
             b"masc://keepers/alpha",
             b"schedule-stimulus-proof-701",
             b"schedule-occurrence-proof-701",
-            b"2026-08-25 09:30:20",
+            b"Turn started",
+            b"2026-08-25T09:30:20Z",
             b"Turn finished",
             b"WORK RESULT",
             b"bounded by its start and finish rows",
@@ -14100,6 +14351,10 @@ def schedule_detail_interaction() -> Interaction:
                 raise AssertionError(
                     f"Schedule turn/result page omitted {needle!r}: {result_plain!r}"
                 )
+        result_rows = screen_rows(result_page)
+        if not any(b"Turn started" in row and b"2026-08-25T09:30:20Z" in row
+                   for row in result_rows.values()):
+            raise AssertionError(f"Turn started row lost its exact ISO fixture timestamp: {result_rows!r}")
         returned = send_and_wait(process, master_fd, output, b"\x1b[D", b"j/k:move")
         returned_plain = CSI_RE.sub(b"", returned)
         for needle in (b"schedule-proof-701", b"status:running", b"queue:matched_pending/2 pending"):
@@ -14938,6 +15193,109 @@ def run_http_badge_refresh_regression(executable: str) -> None:
         )
     finally:
         release_slow.set()
+
+
+def run_http_conditional_read_regression(executable: str) -> None:
+    """A dashboard read sends the tag of the answer it kept, and a 304 answers
+    with that answer. On Work, the briefing is the first read of a full pass
+    and the goal tree the last. A slow goal tree keeps one pass out across
+    several ticks; the briefing's tag must still go out on the pass after it."""
+    fixtures = overview_event_http_fixtures()
+    briefing = fixtures["/api/v1/dashboard/briefing"]
+    if not isinstance(briefing, tuple):
+        raise AssertionError("briefing fixture must be a response tuple")
+    _status, briefing_payload = briefing
+    briefing_body = json.dumps(briefing_payload).encode()
+    briefing_tag = 'W/"briefing-fixture"'
+    reads = {"untagged": 0, "tagged": 0}
+    slow_goals = threading.Event()
+    goals_requested = threading.Event()
+    slow_goals_done = threading.Event()
+
+    def answer_briefing(headers: dict[str, str]) -> RawHttpResponse:
+        if headers.get("if-none-match") == briefing_tag:
+            reads["tagged"] += 1
+            return RawHttpResponse(
+                304, b"", content_type="application/json",
+                headers=(("ETag", briefing_tag),),
+            )
+        reads["untagged"] += 1
+        return RawHttpResponse(
+            200, briefing_body, content_type="application/json",
+            headers=(("ETag", briefing_tag),),
+        )
+
+    def answer_goals() -> HttpResponse:
+        goals_requested.set()
+        if slow_goals.is_set() and not slow_goals_done.is_set():
+            # Longer than three refresh ticks at refresh=0.5.
+            time.sleep(1.6)
+            slow_goals_done.set()
+        return empty_goals_fixture()
+
+    fixtures["/api/v1/dashboard/briefing"] = HeadersHttpResponse(answer_briefing)
+    fixtures[DASHBOARD_GOALS_PATH] = answer_goals
+
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        connected = re.compile(rb"HTTP (?:\x1b\[[0-9;]*m)*\[connected\]")
+        wait_for_output(
+            process, master_fd, output, connected, start=0, timeout=3.0
+        )
+        if not wait_for_fixture_state(
+            process, master_fd, output,
+            lambda: reads["tagged"] >= 2,
+            timeout=4.0,
+        ):
+            raise AssertionError(
+                f"the briefing's tag did not go out on two reads: {reads!r}"
+            )
+        answered_start = len(output)
+        wait_for_output(
+            process, master_fd, output, connected,
+            start=answered_start, timeout=2.0,
+        )
+        if b"HTTP 304" in output:
+            raise AssertionError("a 304 reached the screen as a refusal")
+        tab_until(process, master_fd, output, b"MASC Work")
+        if not wait_for_fixture_event(
+            process, master_fd, output, goals_requested, timeout=4.0
+        ):
+            raise AssertionError("Work did not request its goal tree")
+        slow_goals.set()
+        if not wait_for_fixture_state(
+            process, master_fd, output, slow_goals_done.is_set, timeout=4.0
+        ):
+            raise AssertionError("the slow goal tree read did not finish")
+        reads_after_slow = reads["tagged"] + reads["untagged"]
+        if not wait_for_fixture_state(
+            process, master_fd, output,
+            lambda: reads["tagged"] + reads["untagged"] >= reads_after_slow + 2,
+            timeout=4.0,
+        ):
+            raise AssertionError(
+                f"the briefing was not read again after the slow pass: {reads!r}"
+            )
+        if reads["untagged"] != 1:
+            raise AssertionError(
+                "only the first briefing read may go out without the tag; "
+                f"reads were {reads!r}"
+            )
+        os.write(master_fd, b"q")
+
+    try:
+        run_terminal_scenario(
+            executable, description="HTTP conditional read",
+            interact=interact, refresh=0.5, terminal_cols=140,
+            workspace="conditional-read-fixture", http_fixtures=fixtures,
+        )
+    finally:
+        slow_goals_done.set()
 
 
 def run_observer_reconnect_regression(executable: str) -> None:
@@ -16640,6 +16998,12 @@ def run_first_install_credential_regression(executable: str) -> None:
 def run_planning_review_regression(executable: str) -> None:
     run_terminal_scenario(
         executable,
+        description="Planning footer follows list and detail dispatch",
+        interact=planning_footer_dispatch_interaction,
+        http_fixtures=planning_selection_http_fixtures(),
+    )
+    run_terminal_scenario(
+        executable,
         description="Planning preserves selected goals and footer across resize",
         interact=planning_resize_budget_interaction,
         http_fixtures=planning_selection_http_fixtures(),
@@ -16808,7 +17172,7 @@ def run_browser_client_picker_regression(executable: str) -> None:
     fixtures["/api/v1/dashboard/browser-lane/read"] = RequestHttpResponse(read)
 
     def interact(process, master_fd, slave_fd, output, _base):
-        palette_go(process, master_fd, output, b"go Browser Lane", b"Choose a connected browser")
+        palette_go(process, master_fd, output, b"go Browser Lane", b"Choose browser \xc2\xb7 separate sessions do not share login")
         if reads:
             raise AssertionError("unselected multi-client view sent a browser read")
         os.write(master_fd, b"j")
@@ -16818,10 +17182,16 @@ def run_browser_client_picker_regression(executable: str) -> None:
             raise AssertionError("Zen choice did not pin its client ID")
         read_available(master_fd, output)
         chooser_start = len(output)
-        send_and_wait(process, master_fd, output, b"b", b"Choose a connected browser")
+        send_and_wait(process, master_fd, output, b"b", b"Choose browser \xc2\xb7 separate sessions do not share login")
         # b clears the displayed inventory until discovery settles. Require a
         # row from this request, not Firefox text in an earlier chooser frame.
         wait_for_output(process, master_fd, output, b"Firefox", start=chooser_start, timeout=3.0)
+        wait_for_output(process, master_fd, output, FRAME_END,
+                        start=bytes(output).rfind(b"Firefox", chooser_start))
+        picker = screen_text(bytes(output))
+        for option in (b"Firefox", b"Stagehand Chromium", b"Independent Firefox/Zen"):
+            if option not in picker:
+                raise AssertionError(f"browser picker omitted {option!r}: {picker!r}")
         send_and_wait(process, master_fd, output, b"\r", b"Firefox selected page")
         if reads[-1] != {"lane": "live", "clientId": firefox}:
             raise AssertionError("browser switch reused the old browser's tab ID")
@@ -18400,7 +18770,9 @@ def resources_mcp_fixture() -> HttpFixtures:
         )
 
     fixtures = overview_event_http_fixtures()
-    fixtures["/mcp"] = RequestHttpResponse(answer)
+    fixtures["/mcp"] = RequestHttpResponse(
+        answer, get_response=(405, {"error": "fixture does not offer an SSE stream"})
+    )
     return fixtures
 
 
@@ -20258,7 +20630,10 @@ def dashboard_usage_interaction(
     send_and_wait(process, master_fd, output, b"/telemetry", b"/telemetry")
     send_and_wait(process, master_fd, output, b"\r", b"MASC Usage / Telemetry")
     tab_until(process, master_fd, output, b"MASC Usage")
-    wait_for_output(process, master_fd, output, b"7 UTC days", start=output.rfind(b"MASC Usage"))
+    wait_for_output(
+        process, master_fd, output, b"7 UTC days",
+        start=output.rfind(b"MASC Usage"), timeout=10.0,
+    )
     os.write(master_fd, b"q")
 
 
@@ -20508,6 +20883,7 @@ SCENARIO_FAMILIES: tuple[ScenarioFamily, ...] = (
     ),
     ScenarioFamily("tools-purpose", "Tools purpose regression", (run_tools_purpose_regression,)),
     ScenarioFamily("http-badge-refresh", "HTTP badge refresh timing regression", (run_http_badge_refresh_regression,)),
+    ScenarioFamily("http-conditional-read", "HTTP conditional read regression", (run_http_conditional_read_regression,)),
     ScenarioFamily("observer-reconnect", "observer reconnect regression", (run_observer_reconnect_regression,)),
     ScenarioFamily("acting-call-evidence", "Acting call evidence regression", (run_acting_call_evidence_regression,)),
 )

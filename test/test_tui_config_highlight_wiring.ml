@@ -26,7 +26,7 @@ let test_the_config_surface_paints_its_segments () =
 let test_one_painter_serves_both_surfaces () =
   let mentions =
     Ast_grep.count_identifiers_outside_calls_in_value_binding
-      ~module_path:render_config ~binding_name:"render_code" ~callees:[]
+      ~module_path:"bin/masc_tui_render_code.ml" ~binding_name:"render_code" ~callees:[]
       ~identifiers:[ "lexed_span" ]
   in
   Alcotest.(check bool) "the Code surface reads the same painter" true

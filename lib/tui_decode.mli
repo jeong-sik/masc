@@ -709,80 +709,6 @@ type connector_snapshot = {
   cs_active : int;  (** How many the server counted as available. *)
 }
 
-(** Whether the non-blocking runtime-probe route served a cached reading or
-    scheduled background work. The wire vocabulary is closed so a producer
-    change cannot silently look fresh. *)
-type runtime_probe_refresh_state =
-  | Runtime_probe_fresh
-  | Runtime_probe_recent
-  | Runtime_probe_served_stale
-  | Runtime_probe_warming_up
-
-(** Fleet-level reachability verdict published by the runtime inventory
-    projection. This is provider metadata reachability, not a completion or
-    lane failover verdict. *)
-type runtime_probe_status =
-  | Runtime_probe_reachable
-  | Runtime_probe_no_http_runtimes
-  | Runtime_probe_degraded
-  | Runtime_probe_unreachable
-  | Runtime_probe_warming
-
-type runtime_provider_status =
-  | Runtime_provider_reachable
-  | Runtime_provider_missing_auth
-  | Runtime_provider_auth_failed
-  | Runtime_provider_network_error
-  | Runtime_provider_server_error
-  | Runtime_provider_endpoint_not_found
-  | Runtime_provider_http_error
-  | Runtime_provider_unknown_http_status
-  | Runtime_provider_skipped_cli
-  | Runtime_provider_skipped_native_auth
-  | Runtime_provider_invalid_endpoint
-  | Runtime_provider_invalid_execution_transport
-
-type runtime_probe_transport =
-  | Runtime_probe_http
-  | Runtime_probe_cli
-
-type runtime_provider_probe = {
-  rpp_runtime_id : string;
-  rpp_transport : runtime_probe_transport;
-  rpp_status : runtime_provider_status;
-  rpp_reachable : bool option;
-  rpp_http_status : int option;
-  rpp_latency_ms : float option;
-  rpp_error : string option;
-  rpp_checked_at : string;
-}
-
-type runtime_probe_summary = {
-  rpsu_runtimes : int;
-  rpsu_probed : int;
-  rpsu_reachable : int;
-  rpsu_failed : int;
-  rpsu_skipped : int;
-  rpsu_default_runtime_id : string option;
-}
-
-type runtime_probe_snapshot = {
-  rps_generated_at : string;
-  rps_refreshed_at_unix : float option;
-  rps_cache_ttl_sec : float;
-  rps_cache_age_sec : float option;
-  rps_cache_hit : bool;
-  rps_refresh_state : runtime_probe_refresh_state;
-  rps_status : runtime_probe_status;
-  rps_probe_ok : bool;
-  rps_checked_at : string;
-  rps_summary : runtime_probe_summary;
-  rps_providers : runtime_provider_probe list;
-  rps_errors : string list;
-  rps_observations : string list;
-  rps_limitations : string list;
-}
-
 (** One runtime row shared by the Keeper picker and Runtime surface.
     [ro_is_default] is derived from the document's top-level
     [default_runtime], not the row's independent binding flag. *)
@@ -790,6 +716,10 @@ type runtime_context_source =
   | Runtime_context_override
   | Runtime_context_capability
   | Runtime_context_clamped
+  | Runtime_context_provider_override
+  | Runtime_context_binding_override
+  | Runtime_context_provider_clamped
+  | Runtime_context_binding_clamped
 
 type exact_slot_group = Exact_http_slots | Exact_cli_slots | Exact_output_unsupported
 
@@ -859,11 +789,11 @@ type runtime_candidate_row = {
   rcr_position : int;
   rcr_candidate_count : int;
   rcr_runtime : runtime_option;
-  rcr_probe : runtime_provider_probe option;
+  rcr_probe : Tui_decode_runtime_probe.runtime_provider_probe option;
 }
 
 type runtime_surface_snapshot = {
-  rss_probe : runtime_probe_snapshot option;
+  rss_probe : Tui_decode_runtime_probe.runtime_probe_snapshot option;
       (** Current or last-good optional observation. [None] means no provider
           probe has been read; resolved lane identity remains usable. *)
   rss_probe_error : string option;
@@ -873,25 +803,6 @@ type runtime_surface_snapshot = {
   rss_candidates : runtime_candidate_row list;
   rss_unassigned_probe_count : int;
 }
-
-val runtime_probe_refresh_state_to_string : runtime_probe_refresh_state -> string
-val runtime_probe_status_of_string :
-  string -> (runtime_probe_status, string) result
-(** The probe's own status, as [Server_dashboard_http_runtime_info] writes it:
-    the live summary picks between ["ok"], ["idle"], ["degraded"] and
-    ["unavailable"], the failure envelope writes ["unreachable"], and the
-    cold-start envelope writes ["warming_up"].
-
-    Exported so the contract can be pinned against that list. It drifted from
-    it once -- this read ["reachable"] and ["no_http_runtimes"], which nothing
-    writes, so every live response failed to decode and the Runtime surface
-    drew every candidate as unobserved. *)
-
-val runtime_probe_status_to_string : runtime_probe_status -> string
-(** The word the wire uses, so a badge drawn from this names the reading the
-    server named. Many-to-one: ["unavailable"] and ["unreachable"] read as one
-    status and write back as ["unreachable"]. *)
-val runtime_provider_status_to_string : runtime_provider_status -> string
 
 (** A repository the workspace tracks. *)
 type repository_status =
@@ -1154,87 +1065,6 @@ type memory_health_snapshot = {
   mhs_starving_keepers : int;
 }
 
-(** Whether a search has ever returned the fact. The count, the number of
-    distinct UTC days and the last clock come from one list of retrieval
-    times on the server, so they are all absent or all present; the decoder
-    rejects a row where they disagree. *)
-type memory_fact_retrieval =
-  | Never_retrieved
-  | Retrieved of { count : int; distinct_days : int; last_at : float }
-
-(** What the keeper did with one fact, as the server projected it from the
-    memory-events sidecar (RFC-0418): whether and how a search returned it,
-    how often it was retracted, and which dropped facts it continues. No
-    strength or score; the numbers are the record. *)
-type memory_fact_events = {
-  mfe_retrieval : memory_fact_retrieval;
-  mfe_retracted_count : int;
-  mfe_revised_from : string list;
-}
-
-(** A fact nothing has used yet: never retrieved, no retractions, no
-    predecessors. Fixtures start here. *)
-val no_memory_fact_events : memory_fact_events
-
-(** One remembered fact from a keeper's ordinary Memory OS store. The
-    category and origin are the server's closed taxonomy, carried as the
-    strings it spelled them in: this side renders and groups them by exact
-    equality and never classifies on its own. *)
-type memory_fact = {
-  mf_claim : string;
-  mf_category : Keeper_memory_os_types.category;
-  mf_origin : string;
-  mf_first_seen : float;
-  mf_last_seen : float;
-  mf_memory_id : string;
-  mf_events : memory_fact_events;
-}
-
-(** A fact bound to a file: it holds only while the file at [msf_path] still
-    hashes to [msf_sha256]. *)
-type memory_source_fact = {
-  msf_claim : string;
-  msf_first_seen : float;
-  msf_path : string;
-  msf_sha256 : string;
-}
-
-(** A source-bound fact the store dropped, and the server's reason string. *)
-type memory_invalidation = {
-  mi_source_path : string;
-  mi_invalidated_at : float;
-  mi_reason : string;
-}
-
-(** One store's reading. The server answers each store independently --
-    a read error, no snapshot yet, or the snapshot -- so one failing store
-    never blanks the other, and this side keeps the three states apart
-    instead of collapsing them into an empty list. *)
-type 'a memory_store_reading =
-  | Memory_store_read_error of string
-  | Memory_store_absent
-  | Memory_store_present of 'a
-
-type memory_ordinary_store = {
-  mos_revision : int;
-  mos_updated_at : float;
-  mos_facts : memory_fact list;
-}
-
-type memory_source_store = {
-  mss_revision : int;
-  mss_updated_at : float;
-  mss_facts : memory_source_fact list;
-  mss_invalidations : memory_invalidation list;
-}
-
-type memory_fact_snapshot = {
-  mfs_keeper : string;
-  mfs_ordinary : memory_ordinary_store memory_store_reading;
-  mfs_source : memory_source_store memory_store_reading;
-  mfs_events_read_error : string option;
-}
-
 (** One verdict the harness recorded: which gate ran on which task, what it
     decided, and which evaluator decided it. *)
 type harness_verdict = {
@@ -1346,15 +1176,6 @@ val keeper_phase_is_running : keeper_phase -> bool
 (** Whether the phase is the normal running lifecycle. The Keepers table
     silences the word for it and spells out every other phase; exhaustive in
     the implementation so a new phase cannot silently count as not-running. *)
-
-(** Which Overview Team band a phase puts a Keeper in (RFC-0464). A stuck
-    Keeper's turns are failing or its fiber crashed; an alive one can take a
-    turn now or is between runs; a paused one was paused by an operator; a
-    stopped one was stopped or never started.
-    Exhaustive in the implementation, so a new phase has to choose a band. *)
-type keeper_phase_band = Phase_stuck | Phase_alive | Phase_paused | Phase_stopped
-
-val keeper_phase_band : keeper_phase -> keeper_phase_band
 
 type keeper_health
 (** A validated keeper health reading — whether the keeper's keepalive is
@@ -2528,13 +2349,6 @@ val decode_skills_catalog : Yojson.Safe.t -> (skills_catalog, string) result
 val decode_connector_snapshot :
   Yojson.Safe.t -> (connector_snapshot, string) result
 
-val decode_runtime_probe_snapshot :
-  Yojson.Safe.t -> (runtime_probe_snapshot, string) result
-(** Strict decoder for [GET /api/v1/dashboard/runtime-probe]. It accepts only
-    the producer's closed status vocabularies, requires the cache and provider
-    fields the Runtime surface draws, and rejects count/reachability/default
-    identity contradictions instead of repairing them locally. *)
-
 val decode_runtime_resolved_snapshot :
   Yojson.Safe.t -> (runtime_resolved_snapshot, string) result
 (** Strict Runtime-surface slice of [GET /api/v1/runtime/resolved]. Runtime and
@@ -2545,129 +2359,6 @@ val decode_runtime_resolved_snapshot :
 (** What each provider account said about its own usage windows, as
     [GET /api/v1/runtime/resolved] carries it. The server keeps these values
     as reported and derives no availability from them. *)
-type provider_usage_window_kind =
-  | Window_five_hour
-  | Window_seven_day
-  | Window_duration_minutes of int
-      (** A window length the server has no name for. *)
-  | Window_provider_label of string
-      (** A label the provider gave the window, kept as written. *)
-
-(** The usage in the unit the provider reported it in. Not clamped. *)
-type provider_usage_utilization =
-  | Utilization_fraction of float  (** [0.67] is 67 %. *)
-  | Utilization_percent of int
-
-(** What a window limits, as the server's decoder classified it from the
-    provider's own shape. *)
-type provider_usage_window_role =
-  | Role_gates_model_calls
-      (** Spending it refuses model calls on the account. *)
-  | Role_counts_other_use
-      (** It counts something a model call does not need, e.g. Z.AI's
-          TIME_LIMIT (MCP and tool calls). *)
-  | Role_unclassified_limit
-      (** A limit the server's decoder does not know. *)
-
-type provider_usage_window = {
-  puw_limit_id : string option;
-  puw_kind : provider_usage_window_kind;
-  puw_role : provider_usage_window_role;
-  puw_utilization : provider_usage_utilization;
-  puw_resets_at : float option;  (** Epoch seconds, as reported. *)
-  puw_observed_at : float;  (** When the server heard this report. *)
-}
-
-(** A reported account holds at least one window; an account that has not
-    reported since the server started holds none. *)
-type provider_usage_state =
-  | Account_not_reported_since_start
-  | Account_reported of provider_usage_window * provider_usage_window list
-
-(** A provider table that bills to the account. *)
-type provider_usage_provider = {
-  pup_id : string;  (** The [providers.<id>] key. *)
-  pup_display_name : string;
-      (** The table's [display-name]; the id when the table names none. *)
-}
-
-type provider_usage_account = {
-  pua_scope : string;  (** The quota scope, as [quota_scope] on runtime rows. *)
-  pua_scope_id : string;
-      (** The server's opaque id for the scope, the one its usage history
-          points carry as [scope_id]. Compared, never recomputed. *)
-  pua_providers : provider_usage_provider list;
-  pua_state : provider_usage_state;
-}
-
-type provider_usage_windows = {
-  puws_since : float;  (** Server process start: the table's first moment. *)
-  puws_accounts : provider_usage_account list;
-}
-
-type provider_usage_history_point = {
-  puhp_scope_id : string;
-  puhp_kind : string;
-  puhp_limit_id : string option;
-  puhp_unit : provider_usage_utilization;
-  puhp_observed_at : float;
-}
-
-type provider_usage_history = {
-  puh_days : int;
-  puh_generated_at : float;
-  puh_unreadable_reports : int;
-      (** Stored reports in the window the server could not read and left
-          out. A gap they leave is unknown, not a quiet day. *)
-  puh_points : provider_usage_history_point list;
-}
-
-val decode_provider_usage_history :
-  Yojson.Safe.t -> (provider_usage_history, string) result
-
-val decode_provider_usage_windows :
-  Yojson.Safe.t -> (provider_usage_windows, string) result
-(** Strict decoder for the [provider_usage_windows_since] and
-    [provider_usage_windows] members of [GET /api/v1/runtime/resolved]. An
-    unknown [state], window [kind], window [role] or utilization [unit] is an
-    error, as is a reported account without windows or an unreported one with
-    windows. *)
-
-type keeper_usage_coverage =
-  | Keeper_usage_complete
-  | Keeper_usage_partial of int
-  | Keeper_usage_failed of string
-
-type keeper_usage_row = {
-  kur_name : string;
-  kur_turn_samples : int;
-  kur_tokens : int option;
-  kur_cost_usd : float option;
-  kur_tokens_reported : int;
-  kur_tokens_missing : int;
-  kur_cost_reported : int;
-  kur_cost_missing : int;
-  kur_coverage : keeper_usage_coverage;
-}
-
-type keeper_usage_freshness =
-  | Keeper_usage_fresh
-  | Keeper_usage_stale of { age_s : float; last_error : string option }
-
-type keeper_usage_window =
-  | Keeper_usage_loading
-  | Keeper_usage_window of {
-      kuw_generated_at : float;
-      kuw_window_minutes : int;
-      kuw_rows : keeper_usage_row list;
-      kuw_freshness : keeper_usage_freshness;
-    }
-
-val decode_keeper_usage_window :
-  Yojson.Safe.t -> (keeper_usage_window, string) result
-(** Decode the coverage-bearing [/api/v1/dashboard/keeper-costs] projection.
-    A null sum stays absent, and a loading placeholder never reads as zero. *)
-
 val decode_runtime_surface_snapshot :
   probe_json:Yojson.Safe.t ->
   resolved_json:Yojson.Safe.t ->
@@ -2677,7 +2368,7 @@ val decode_runtime_surface_snapshot :
     candidate absent from a stale probe remains [None]. *)
 
 val join_runtime_surface :
-  probe:runtime_probe_snapshot option ->
+  probe:Tui_decode_runtime_probe.runtime_probe_snapshot option ->
   probe_error:string option ->
   resolved:runtime_resolved_snapshot ->
   (runtime_surface_snapshot, string) result
@@ -2697,26 +2388,6 @@ val decode_memory_health_snapshot :
 (** Decode the fleet memory-health snapshot served at
     [/api/v1/dashboard/keeper-memory-health]. Every consumed field is
     required: a keeper the server left out is invisible here, not defaulted. *)
-
-val decode_memory_fact_snapshot :
-  Yojson.Safe.t -> (memory_fact_snapshot, string) result
-(** Decode one keeper's fact listing served at
-    [/api/v1/keepers/:name/memory-facts]. Each store object is read by which
-    field it carries -- [read_error], [present]:false, or [present]:true with
-    its rows -- and any other shape is a decode error, not an empty store.
-    [mfs_events_read_error] keeps a sidecar read failure distinct from an empty
-    event history. *)
-
-val merge_keeper_memory_facts :
-  now:float ->
-  (string * (memory_fact_snapshot, string) result) list ->
-  memory_fact_snapshot * string option
-(** Merge per-keeper fact listings into the "all keepers" view ([mfs_keeper =
-    "*"]). Each fact is tagged with its keeper. The second value names every
-    keeper that could not be read -- a failed load, or a store answering
-    [Memory_store_read_error] -- as ["N of M keepers not read: ..."]; [None]
-    when all were read. [Memory_store_absent] is a keeper with no memory yet,
-    not a failure. *)
 
 val decode_harness_snapshot :
   Yojson.Safe.t -> (harness_snapshot, string) result
@@ -3198,7 +2869,6 @@ val decode_verification_evidence :
 
 val runtime_context_source_label : runtime_context_source -> string
 val runtime_reasoning_effort_label : Llm_provider.Reasoning_effort.t -> string
-val runtime_probe_for_id : runtime_surface_snapshot -> runtime_id:string -> runtime_provider_probe option
 
 (** Decoded durable async inventory. Malformed counters are errors, never zero.
     The active inventory contains queued, running and cancelling requests only. *)

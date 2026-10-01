@@ -45,23 +45,22 @@ let inflight ?(keeper_name = "alpha") ~request_id ~at () =
   ; log
   }
 
-(* The admission is the live progress row's to say
-   ([Masc_tui_keeper_chat_transcript.phase_text], pinned in
-   test_tui_keeper_chat_transcript): "sent; not accepted yet", "queued · 3
-   messages in the keeper's queue", "accepted; the run is starting". The
-   band said each again in a sentence of its own under it. For every
-   admission, the band now names only what the progress row does not: a
-   turn this pane did not open, which the pane is waiting behind. *)
+(* The live progress row owns the admission detail. The activity band adds
+   the pending request count and the observed turn it waits behind. Its
+   count comes from this pane's request identities, not the server's
+   queue_length snapshot of three or a copied admission sentence. *)
 let test_the_band_does_not_repeat_the_admission () =
-  List.iter (fun admission ->
+  List.iter (fun (admission, queue_rows) ->
     let state = state () in
     ignore (live state admission);
-    check (list string) "no turn observed: nothing under the progress row" []
+    check (list string) "only queued admission contributes a pending request" queue_rows
       (texts (Tui.keeper_message_activity_rows state));
     state.keeper_turns <- [running Turn_lane_autonomous];
     match Tui.keeper_message_activity_rows state with
-    | [ row ] ->
-      check bool "the one row is the turn the pane waits behind" true
+    | row :: pending ->
+      check (list string) "observing a turn preserves the independent queue summary"
+        queue_rows (texts pending);
+      check bool "the first row is the turn the pane waits behind" true
         (String.length row.Masc_tui_answering.lead > 0
          && Astring.String.is_infix ~affix:"autonomous" row.lead);
       check bool "and it does not restate the admission" false
@@ -69,7 +68,9 @@ let test_the_band_does_not_repeat_the_admission () =
            Astring.String.is_infix ~affix:needle (Masc_tui_answering.chat_activity_row_text row))
            [ "Your message"; "Your request"; "queued at the server" ])
     | rows -> fail (String.concat " | " (texts rows)))
-    [ None; Some Live.Running; Some Live.Settled; Some Live.Queued ]
+    [ None, []; Some Live.Running, []; Some Live.Settled, []
+    ; Some Live.Queued,
+        ["Queue (1 pending) · auto-next:off · Ctrl-T:queue"; "1 queued at Keeper · /queue"] ]
 
 (* The band names only a turn it observed for this keeper. With a line of
    this pane queued: nothing for no turn, another keeper's turn, an idle or
@@ -148,10 +149,26 @@ let test_a_request_in_the_live_batch_is_the_live_rows () =
     (Live.Batch_bound {operation_id = "request-1"; execution_id = "shared-execution"});
   let active = List.hd state.msg_inflight in
   let newer = live ~request_id:"queued-2" state (Some Live.Queued) in
+  let pending = List.hd state.msg_inflight in
   Tui.turn_log_add ~now:5. newer ~seq:(Some 1)
     (Live.Batch_bound {operation_id = "queued-2"; execution_id = "shared-execution"});
   state.msg_inflight <- state.msg_inflight @ [active];
   check (list string) "one execution, drawn once, by the live row" []
+    (texts (Tui.keeper_message_activity_rows state));
+  Tui.turn_log_add ~now:6. working ~seq:(Some 3) Live.Run_finished;
+  state.msg_settled_logs <- [working];
+  state.msg_inflight <- [pending];
+  check (list string) "a settled sibling still proves the batch has left the queue" []
+    (texts (Tui.keeper_message_activity_rows state));
+  let other = Tui.turn_log_create ~keeper_name:"beta"
+      ~request_id:"other-request" ~started_at:2. in
+  Tui.turn_log_add ~now:4. other ~seq:(Some 1)
+    (Live.Batch_bound {operation_id = "other-request"; execution_id = "shared-execution"});
+  Tui.turn_log_add ~now:4. other ~seq:(Some 2) Live.Run_started;
+  Tui.turn_log_add ~now:6. other ~seq:(Some 3) Live.Run_finished;
+  state.msg_settled_logs <- [other];
+  check (list string) "another Keeper's execution cannot consume this pending input"
+    ["Queue (1 pending) · auto-next:off · Ctrl-T:queue"; "1 queued at Keeper · /queue"]
     (texts (Tui.keeper_message_activity_rows state))
 
 let test_started_and_finished_requests_stop_waiting () =
@@ -182,7 +199,7 @@ let test_local_queue_is_not_server_admission () =
   add "alpha" "local-alpha";
   add "beta" "local-beta";
   check (list string) "only target's unsent messages are counted"
-    ["Queue (1 waiting · auto-next:off) NEXT: \"hello\" · Ctrl-T:queue"]
+    ["Queue (1 pending) · auto-next:off · Ctrl-T:queue"; "Local NEXT: \"hello\""]
     (texts (Tui.keeper_message_activity_rows state));
   state.msg_target_keeper_name <- None;
   check (list string) "no target has no attributed activity" []
@@ -198,10 +215,12 @@ let test_working_request_survives_newer_queued_view () =
   let active = List.hd state.msg_inflight in
   ignore (live ~request_id:"queued-2" state (Some Live.Queued));
   state.msg_inflight <- state.msg_inflight @ [active];
-  (* The live row draws the newer queued request; the working one under it
-     is named by the band, since nothing else on screen names it. *)
+  (* The working execution and the newer pending input remain independently
+     visible even while the live row draws that newer request. *)
   check (list string) "the working request the live row is not drawing stays visible"
-    ["Current direct conversation · shared-execution · in progress"]
+    ["Current direct conversation · shared-execution · in progress"
+    ; "Queue (1 pending) · auto-next:off · Ctrl-T:queue"
+    ; "1 queued at Keeper · /queue"]
     (texts (Tui.keeper_message_activity_rows state));
   check (list string) "stale autonomous interrupt rows are suppressed" []
     (Tui.keeper_observed_interrupt_rows state)
@@ -291,10 +310,50 @@ let test_one_status_row_per_server_batch () =
       group.representative.sent_at
   | groups -> failf "expected one batch row, got %d" (List.length groups)
 
+(* The foreign turn's stop command is operator input, so shortening the
+   Keeper identity would offer a command for an identity that does not exist. *)
+let test_foreign_stop_command_remains_complete () =
+  List.iter (fun keeper_name ->
+    List.iter (fun terminal_cols ->
+      let state = state () in
+      let empty = Tui.keeper_message_status_rows state ~terminal_cols in
+      state.msg_inflight <-
+        [inflight ~keeper_name ~request_id:"foreign-request" ~at:2. ()];
+      let chat_cols = Masc_tui_roster_pane.content_cols
+          ~hidden:(Tui.roster_pane_hidden state) ~cols:terminal_cols in
+      let rows = Tui.keeper_message_inflight_rows state ~chat_cols ~now:5. in
+      let command_rows = List.filteri
+          (fun index _ -> index < List.length rows - 1) rows in
+      let command_lines = List.map (fun (_, line) -> String.trim line) command_rows in
+      let reconstructed = match command_lines with
+        | "/interrupt" :: rest -> "/interrupt " ^ String.concat "" rest
+        | lines -> String.concat "" lines in
+      check string "the complete stop command precedes the status"
+        ("/interrupt " ^ keeper_name) reconstructed;
+      check bool "every physical command row is valid UTF-8" true
+        (List.for_all (fun (_, line) -> String.is_valid_utf_8 line) command_rows);
+      check bool "all command rows fit the pane" true
+        (List.for_all (fun (_, line) ->
+          Masc_tui_message_layout.display_width line <=
+            Masc_tui_frame.inner_width ~cols:chat_cols)
+          (List.filteri (fun index _ -> index < List.length rows - 1) rows));
+      check bool "foreign rows remain visually distinct" true
+        (List.for_all (fun (mine, _) -> not mine) rows);
+      check int "the composer reserves every physical row"
+        (List.length rows)
+        (Tui.keeper_message_status_rows state ~terminal_cols - empty);
+      check int "age updates cannot change the reserved height"
+        (List.length rows)
+        (List.length (Tui.keeper_message_inflight_rows state ~chat_cols ~now:100000.)))
+      [40; 60; 80; 120; 242])
+    ["beta"; "keeper-with-a-long-family-name-and-a-distinct-tail";
+     "아주긴키퍼이름으로행동안내가가려지면안되는키퍼"]
+
 let () =
   run "TUI chat activity"
     [ "request and lane states",
-      [ test_case "Working request stays visible behind newer queued view" `Quick test_working_request_survives_newer_queued_view
+      [ test_case "foreign stop command remains complete" `Quick test_foreign_stop_command_remains_complete
+      ; test_case "Working request stays visible behind newer queued view" `Quick test_working_request_survives_newer_queued_view
       ; test_case "the band does not repeat the admission" `Quick
           test_the_band_does_not_repeat_the_admission
       ; test_case "one status row per server batch" `Quick

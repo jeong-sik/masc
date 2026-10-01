@@ -26,7 +26,7 @@ type api_format =
    prompt above it, Codex windows its Start and Resume to it from the
    first attempt when one is declared (#37353), and Muse Code lowers the
    ceiling it derives from [max-context] to it
-   ([Runtime.muse_prompt_capacity]). No other runtime reads the field, so a
+   ([Runtime_instance.muse_prompt_capacity]). No other runtime reads the field, so a
    declaration there bounds nothing the provider checks. Every arm is listed
    so a new format has to be decided here. *)
 let api_format_reads_max_prompt_bytes = function
@@ -173,6 +173,8 @@ type provider =
   ; transport : transport
   ; is_non_interactive : bool
   ; credentials : credential option
+  ; max_context : int option
+    (** Provider context default; a binding override takes precedence, then the model default. *)
   ; account_home : string option
   ; capabilities : capabilities option
   ; healthcheck_path : string option
@@ -197,7 +199,7 @@ type provider =
         response body. [None] declares no body deadline; boot then leaves an
         exact-output lane slot on this provider out of its lane and reports
         it ([Runtime.exact_slot_degradation]), a save that adds such a slot
-        is refused ([Runtime.Exact_slot_body_deadlines_absent], #38779), and
+        is refused ([Runtime_config_error.Exact_slot_body_deadlines_absent], #38779), and
         a target that reaches plan admission without one is refused there
         (Missing_deadline). This does not replace [connect_timeout_s] or
         ordinary Keeper per-call body deadlines. *)
@@ -297,9 +299,9 @@ type model_spec =
   ; api_name : string
   ; tools_support : bool
   ; max_context : int option
-      (** [models.<id>.max-context] operator override. [None] means the AGENT_CORE
-          capability catalog's max-context is the sole source; resolved via
-          {!Runtime.resolve_max_context_of_runtime}, never read directly. *)
+      (** Shared model default, below binding and provider declarations.
+          [None] leaves undeclared bindings to the capability catalog. Resolve via
+          {!Runtime_instance.resolve_max_context_of_runtime}, never read directly. *)
   ; thinking_support : bool option
   ; preserve_thinking : bool option
   ; streaming : bool
@@ -406,6 +408,8 @@ type binding =
         [enabled] in TOML defaults to [true]. *)
   ; is_default : bool
   ; wizard_default : bool
+  ; max_context : int option
+    (** Context override for this provider/model binding, before provider and model defaults. *)
   ; max_concurrent : int option
   ; disable_parallel_tool_use : bool
   ; context_marks : context_marks option
@@ -494,6 +498,11 @@ type typesafeai =
   { lane_enabled : bool
   ; destinations : typesafeai_destination * typesafeai_destination list
   ; board_attention : bool
+  ; board_attention_confidence_floor : float
+      (** [board_attention_confidence_floor]: Jev's relevant or not-relevant
+          answer settles a Board attention candidate when its confidence is at
+          least this value (0 to 1); below it the [board_attention_exact] lane
+          judges the candidate. *)
   ; absorb_gate : bool
   ; context_review : bool
   ; skill_applicability : bool
@@ -512,11 +521,21 @@ let typesafe_destination =
 
 (* What an absent [typesafeai] table means: the lane on when a key is set,
    the vendor's own server alone, Board attention on, the absorb gate off (it
-   sends memories out, so the operator turns it on by name), nobody excluded. *)
+   sends memories out, so the operator turns it on by name), nobody excluded.
+
+   The Board attention confidence floor follows TypeSafe's confidence-gated
+   routing (https://docs.typesafe.ai/confidence.md: act when confidence is
+   high, fall back to a different system when it is low). With the three
+   relevance choices, confidence = (3 x top probability - 1) / 2, so 0.3 means
+   Jev's top choice holds about 53% of the probability. Measured on the
+   2026-09-23..30 logs: of 36,807 not-relevant Jev answers the LLM lane judged
+   again, it overturned 1,304. Below 0.3 were 7.3% of those answers and 41% of
+   the overturns; at or above it the LLM overturned 2.3%. *)
 let default_typesafeai =
   { lane_enabled = true
   ; destinations = typesafe_destination, []
   ; board_attention = true
+  ; board_attention_confidence_floor = 0.3
   ; absorb_gate = false
   ; context_review = false
   ; skill_applicability = false
@@ -593,7 +612,7 @@ let exec_ssh_endpoint (cfg : config) (name : string) : Exec_ssh_endpoint.t optio
 ;;
 
 (** Runtime id derived from a binding: ["provider.model"]. Single source of id
-    derivation, shared by {!Runtime.id_of_binding} and any caller indexing
+    derivation, shared by {!Runtime_instance.id_of_binding} and any caller indexing
     runtimes by id. *)
 let binding_key (b : binding) : string =
   Printf.sprintf "%s.%s" b.provider_id b.model_id

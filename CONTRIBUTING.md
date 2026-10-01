@@ -152,11 +152,15 @@ CI is manual and review comes first. Ordinary stacked PRs use independent
 function, logic and code-cleanliness reviews; approve when no P0/P1/P2 issue
 remains and collect P3 issues for later. There is no PR/push/nightly CI.
 
-`pr-check.yml` provides explicit syntax/configuration/credential checks in a
-two-minute job. `ci.yml` builds only Core for the bottom of a stack, also
-within two minutes. At `release/vX.Y.Z`, `release-candidate.yml` runs the full
-compile, typecheck, behavior and installation cycle. Tag publication waits
-for full checks and tests. See [the workflow](docs/CI-REVIEW-WORKFLOW.md).
+The MASC leader selects current source-approved heads, prepares a combined
+candidate, then selects CI scopes. `leader-ci.yml` is dispatched on main with
+the exact candidate SHA and preparation receipt; general compile/test runners
+are reusable only. Release candidates retain explicit full verification.
+See [the workflow](docs/CI-REVIEW-WORKFLOW.md).
+
+Prefer short, focused checks: the constitution's "about two minutes"
+describes their intended scale, not a timeout or a pass/fail threshold.
+Only an actual successful completion is build evidence.
 
 ## Commits
 

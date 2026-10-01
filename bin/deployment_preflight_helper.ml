@@ -910,12 +910,12 @@ let catalog_degradation_to_string (degradation : Runtime.startup_degradation) =
      | _ :: _ -> String.concat ", " keepers)
 ;;
 
-let exact_slot_degradation_to_string (degradation : Runtime.exact_slot_degradation) =
+let exact_slot_degradation_to_string (degradation : Runtime_config_error.exact_slot_degradation) =
   Printf.sprintf
     "boot would leave these exact-output slots out: %s%s"
     (String.concat
        "; "
-       (List.map Runtime.exact_slot_body_deadline_gap_to_string degradation.Runtime.gaps))
+       (List.map Runtime_config_error.exact_slot_body_deadline_gap_to_string degradation.Runtime_config_error.gaps))
     (match degradation.emptied_lane_ids with
      | [] -> ""
      | lane_ids -> "; lanes left with no slot: " ^ String.concat ", " lane_ids)
@@ -964,7 +964,7 @@ let judge_runtime_config ~base_path ~config_root path =
       in
       let* () =
         let degradation = Runtime.exact_slot_degradation () in
-        match degradation.Runtime.gaps with
+        match degradation.Runtime_config_error.gaps with
         | [] -> Ok ()
         | _ :: _ -> Error (exact_slot_degradation_to_string degradation)
       in

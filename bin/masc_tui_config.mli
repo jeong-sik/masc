@@ -8,6 +8,7 @@ type t = private {
   theme : string option;
   board_sort : string option;
   candle : string option;
+  reduce_motion : bool option;
   lift_colours : bool option;
   table_frame : bool option;
   hints_visible : bool option;
@@ -61,6 +62,10 @@ val set_theme : base_path:string -> string option -> (unit, string) result
     A write whose durability could not be confirmed is [Ok]: the replacement
     is already visible, which is what "stored" means to the next start. *)
 
+val reduce_motion_of_doc : Keeper_toml_loader.toml_doc -> bool option
+(** [tui].reduce_motion: show /about's final roster immediately. Absent
+    preserves the finite arrival animation. *)
+
 val table_frame_of_doc : Keeper_toml_loader.toml_doc -> bool option
 (** Whether tables draw their outer box, [tui].table_frame. Pure, so a test
     can hand it a parsed doc without a file. *)
@@ -113,5 +118,5 @@ val user_input_priority_next_of_doc : Keeper_toml_loader.toml_doc -> bool option
 val set_board_sort : base_path:string -> string -> (unit, string) result
 
 val set_candle : base_path:string -> string -> (unit, string) result
-(** Store how /about and the splash draw the candle, [\[tui\].candle], under
+(** Store how /about draws the candle, [\[tui\].candle], under
     the same lock and in the same file as {!set_board_sort}. *)

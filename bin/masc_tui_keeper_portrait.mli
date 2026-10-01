@@ -42,8 +42,10 @@ val image :
   ?compact:bool -> cache -> name:string -> equipment:Keeper_portrait_look.equipment
   -> Keeper_portrait_draw.size -> Keeper_portrait_draw.image
 (** The Keeper's still portrait at that edge, from the cache when it is
-    there, rendered and kept when it is not. [compact] is the mosaic drawing;
-    placed pixel portraits use the full drawing. *)
+    there, rendered and kept when it is not. [compact] uses the mosaic drawing
+    for the bare body and its dish. Face, neck, head and hand equipment uses
+    the full drawing so those accessories remain visible. Placed pixel
+    portraits always use the full drawing. *)
 
 type band = private {
   display : Masc_tui_portrait_view.display;
@@ -92,3 +94,8 @@ val placement :
 val shown : name:string -> equipment:Keeper_portrait_look.equipment -> content_rows:int -> content_cols:int -> band option
 (** {!band} against this process: one cache for the session, the display
     the start-up probe chose, and the stdout colour projection. *)
+
+val preview : name:string -> equipment:Keeper_portrait_look.equipment -> content_rows:int -> content_cols:int -> band option
+(** The same cached portrait with room for the Item list beside it. It fits
+    the picture within the actual pane and leaves two rows and two columns
+    for the screen's text. *)

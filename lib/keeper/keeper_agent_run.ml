@@ -718,7 +718,37 @@ let native_tool_boundary
                  ^ detail)))))
 ;;
 
+let finalize_turn_surface ~response_text ~stop_reason terminal_effect_state =
+  match terminal_effect_state with
+  | Keeper_tools_agent_core.Terminal_effect_failed
+      { failure_class; effect_disposition; detail } ->
+    (* A post may have acted before failing. Yield never turns that failure
+       into success or permits a fallback to replay the effect. *)
+    Error
+      (Keeper_internal_error.core_error_of_masc_internal_error
+         (Keeper_internal_error.Terminal_effect_failed
+            { failure_class; effect_disposition; detail }))
+  | Keeper_tools_agent_core.Terminal_effect_completed receipt ->
+    let outcome =
+      match Keeper_turn_outcome.of_result_surface ~response_text stop_reason with
+      | Keeper_turn_outcome.Continuation_checkpoint ->
+        (* Posting progress proves delivery, not completion of the operation
+           whose settled conversation must still be retained for resumption. *)
+        Keeper_turn_outcome.Continuation_checkpoint
+      | Keeper_turn_outcome.Visible_reply | Keeper_turn_outcome.No_visible_reply
+      | Keeper_turn_outcome.Terminal_effect_settled
+      | Keeper_turn_outcome.Awaiting_gate_approval ->
+        Keeper_turn_outcome.Terminal_effect_settled
+    in
+    Ok (outcome, Some receipt)
+  | Keeper_tools_agent_core.Terminal_effect_open
+  | Keeper_tools_agent_core.Deferred_tool_result
+  | Keeper_tools_agent_core.External_effect_deferred ->
+    Ok (Keeper_turn_outcome.of_result_surface ~response_text stop_reason, None)
+;;
+
 module For_testing = struct
+  let finalize_turn_surface = finalize_turn_surface
   let native_tool_boundary = native_tool_boundary
   let tool_boundary_before_repetition = tool_boundary_before_repetition
   let official_client_tool_boundary = official_client_tool_boundary
@@ -1601,14 +1631,40 @@ let run_turn
                        | None -> snapshot.checkpoint.working_context)
                   }
                 in
-                match
+                let save_started_at = Time_compat.now () in
+                let save_started_mono = Mtime_clock.now () in
+                let save_result =
                   Keeper_checkpoint_store.save_agent_core_classified_with_encoding_memo
                     ~session_dir:session.session_dir
                     ~encoding_memo:checkpoint_encoding_memo
                     ~history_retained:
                       (Runtime_params.get Runtime_settings.keeper_checkpoint_history_retained)
                     checkpoint
-                with
+                in
+                let save_finished_mono = Mtime_clock.now () in
+                let save_finished_at = Time_compat.now () in
+                let duration_ms =
+                  Mtime.Span.to_float_ns (Mtime.span save_started_mono save_finished_mono)
+                  /. 1_000_000.
+                in
+                let outcome, canonical_bytes =
+                  match save_result with
+                  | Ok (Keeper_checkpoint_store.Saved { canonical_bytes; _ }) ->
+                    "saved", Option.fold ~none:"unknown" ~some:string_of_int canonical_bytes
+                  | Ok (Keeper_checkpoint_store.Stale_noop _) -> "stale_noop", "unknown"
+                  | Error _ -> "error", "unknown"
+                in
+                Log.Keeper.info ~keeper_name:meta.name ~turn_id:manifest_keeper_turn_id
+                  "checkpoint_save trace_id=%s stage=%s turn_count=%d start_s=%.6f end_s=%.6f duration_ms=%.3f canonical_bytes=%s outcome=%s"
+                  trace_id
+                  (Agent_core.Agent.checkpoint_stage_to_string snapshot.stage)
+                  checkpoint.turn_count
+                  save_started_at
+                  save_finished_at
+                  duration_ms
+                  canonical_bytes
+                  outcome;
+                match save_result with
                 | Ok (Keeper_checkpoint_store.Saved _) ->
                   last_persisted_checkpoint_ref := Some checkpoint;
                   if Atomic.compare_and_set restart_notice_after_first_save true false
@@ -2013,38 +2069,9 @@ let run_turn
                       | Error e -> Error e
                       | Ok response_text ->
                         let terminal_effect_state = s.terminal_effect_state () in
-                        let terminal_effect_receipt =
-                          match terminal_effect_state with
-                          | Keeper_tools_agent_core.Terminal_effect_completed receipt ->
-                            Some receipt
-                          | Keeper_tools_agent_core.Terminal_effect_open
-                          | Keeper_tools_agent_core.Deferred_tool_result
-                          | Keeper_tools_agent_core.External_effect_deferred
-                          | Keeper_tools_agent_core.Terminal_effect_failed _ ->
-                            None
-                        in
                         let turn_outcome =
-                          match terminal_effect_state with
-                          | Keeper_tools_agent_core.Terminal_effect_completed _ ->
-                            Ok Keeper_turn_outcome.Terminal_effect_settled
-                          | Keeper_tools_agent_core.Terminal_effect_failed
-                              { failure_class; effect_disposition; detail } ->
-                            (* The closing tool may already have acted, so this
-                               is the terminal-effect failure itself, not an
-                               opaque internal error that fails open to the next
-                               runtime. The typed carrier also keeps a leaf
-                               message out of the persisted-string classifier. *)
-                            Error
-                              (Keeper_internal_error.core_error_of_masc_internal_error
-                                 (Keeper_internal_error.Terminal_effect_failed
-                                    { failure_class; effect_disposition; detail }))
-                          | Keeper_tools_agent_core.Terminal_effect_open
-                          | Keeper_tools_agent_core.Deferred_tool_result
-                          | Keeper_tools_agent_core.External_effect_deferred ->
-                            Ok
-                              (Keeper_turn_outcome.of_result_surface
-                                 ~response_text
-                                 result.stop_reason)
+                          finalize_turn_surface ~response_text
+                            ~stop_reason:result.stop_reason terminal_effect_state
                         in
                         (match turn_outcome, !final_agent_core_turn_ordinal_ref with
                          | Error e, _ -> Error e
@@ -2053,7 +2080,7 @@ let run_turn
                              (Agent_core.Error.Internal
                                 "successful Agent.run returned without an \
                                  AfterTurn ordinal")
-                         | Ok turn_outcome, Some final_agent_core_turn_ordinal ->
+                         | Ok (turn_outcome, terminal_effect_receipt), Some final_agent_core_turn_ordinal ->
                            Keeper_agent_run_finalize_response.finalize
                              ~config ~meta ~publication_recovery
                              ~ctx_snapshot:ctx_work

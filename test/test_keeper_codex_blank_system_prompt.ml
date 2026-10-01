@@ -148,7 +148,7 @@ let run_direct_attempt ~system_prompt ~base_path ~cli_path ~on_transmitted_model
                 let config =
                   match Runtime.get_runtime_by_id "codex.codex" with
                   | Some
-                      { Runtime.execution =
+                      { Runtime_instance.execution =
                           Runtime_execution.Codex_app_server config
                       ; _
                       } ->
@@ -156,6 +156,8 @@ let run_direct_attempt ~system_prompt ~base_path ~cli_path ~on_transmitted_model
                   | Some _ | None -> fail "Codex runtime fixture did not resolve"
                 in
                 Keeper_codex_runtime.run
+                  ~context_window:(Some (Runtime_instance.max_context_of_runtime
+                    (Runtime.get_runtime_by_id "codex.codex" |> Option.get)))
                     ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input
                       ~runtime:(Runtime.get_runtime_by_id "codex.codex" |> Option.get))
                   ~runtime_id:"codex.codex"

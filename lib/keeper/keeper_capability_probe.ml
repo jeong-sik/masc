@@ -245,12 +245,12 @@ let probe_invocation ~sw ~net ~clock ~now ~runtime_id ~tool ~prompt () =
      | None ->
        Error (Unresolvable_runtime (Printf.sprintf "%s is not a configured runtime" runtime_id))
      | Some rt ->
-       (match rt.Runtime.execution with
+       (match rt.Runtime_instance.execution with
         | Runtime_execution.Codex_app_server _
         | Runtime_execution.Antigravity_cli _
         | Runtime_execution.Claude_code _
         | Runtime_execution.Muse_serve _ ->
-          Error (Not_agent_core_lane (Runtime_execution.label rt.Runtime.execution))
+          Error (Not_agent_core_lane (Runtime_execution.label rt.Runtime_instance.execution))
         | Runtime_execution.Agent_core _ ->
     (* [_for_turn], not the bare resolver: the bare one yields the provider
        binding without the runtime's inference seed, and a probe that measures a
@@ -387,15 +387,15 @@ let probe_official_client_invocation ~mgr ~clock ~fs ~base_path ~now ~runtime_id
           let seen = ref [] in
           let dynamic_tools = [ recording_dynamic_tool ~schema ~seen ] in
           let started = now () in
-          (match rt.Runtime.execution with
+          (match rt.Runtime_instance.execution with
            | Runtime_execution.Agent_core _ ->
              Error
                (Not_official_client_lane
-                  (Runtime_execution.label rt.Runtime.execution))
+                  (Runtime_execution.label rt.Runtime_instance.execution))
            | Runtime_execution.Antigravity_cli _ | Runtime_execution.Muse_serve _ ->
              Error
                (Tools_only_via_mcp_bridge
-                  (Runtime_execution.label rt.Runtime.execution))
+                  (Runtime_execution.label rt.Runtime_instance.execution))
            | Runtime_execution.Claude_code exec ->
              (* Built from the same fields the keeper path builds it from, and
                 the deadline resolved by the same function, so the probe
@@ -463,6 +463,7 @@ let probe_official_client_invocation ~mgr ~clock ~fs ~base_path ~now ~runtime_id
                ; account_home = exec.account_home
                ; isolated_home = None
                ; model = exec.model
+               ; context_window = Some (Runtime_instance.max_context_of_runtime rt)
                ; native = Runtime_native_tools.codex_default
                ; developer_instructions = None
                ; admission_timeout_s = exec.timeout_s
@@ -534,10 +535,10 @@ let probe_antigravity_invocation ~sw ~net ~secure_random ~mgr ~clock ~fs ~base_p
          (Unresolvable_runtime
             (Printf.sprintf "%s is not a configured runtime" runtime_id))
      | Some rt ->
-       (match rt.Runtime.execution with
+       (match rt.Runtime_instance.execution with
         | Runtime_execution.Agent_core _ | Runtime_execution.Claude_code _
         | Runtime_execution.Codex_app_server _ | Runtime_execution.Muse_serve _ ->
-          Error (Not_antigravity_lane (Runtime_execution.label rt.Runtime.execution))
+          Error (Not_antigravity_lane (Runtime_execution.label rt.Runtime_instance.execution))
         | Runtime_execution.Antigravity_cli exec ->
           let schemas =
             Keeper_tool_descriptor.model_visible_schemas ()
@@ -660,7 +661,7 @@ let probe_muse_invocation ~net ~secure_random ~mgr ~clock ~fs ~base_path ~now
   | Projected {model_facing_name} ->
     (match Runtime.get_runtime_by_id runtime_id with
      | None -> Error (Unresolvable_runtime (runtime_id ^ " is not a configured runtime"))
-     | Some ({Runtime.execution=Runtime_execution.Muse_serve exec; _} as runtime) ->
+     | Some ({Runtime_instance.execution=Runtime_execution.Muse_serve exec; _} as runtime) ->
        (match List.find_opt (fun (schema : Masc_domain.tool_schema) ->
           String.equal schema.name model_facing_name) (Keeper_tool_descriptor.model_visible_schemas ()) with
         | None -> Error (Tool_schema_rejected (model_facing_name ^ " is absent from model_visible_schemas"))
@@ -680,11 +681,11 @@ let probe_muse_invocation ~net ~secure_random ~mgr ~clock ~fs ~base_path ~now
               | Minimal -> Effort_minimal | Low -> Effort_low | Medium -> Effort_medium
               | High -> Effort_high | XHigh -> Effort_xhigh | Max -> Effort_max
               | Ultra -> Effort_ultra) in
-          let quota_scope = Runtime.quota_scope_of_runtime runtime in
+          let quota_scope = Runtime_instance.quota_scope_of_runtime runtime in
           let started = now () in
           (match Runtime_verification_muse.run ~secure_random ~net ~mgr ~clock
               ~cwd:Eio.Path.(fs / base_path) ~directory:base_path ~account_home:exec.account_home ~quota_scope
-              ~config ~prompt_capacity:(Runtime.muse_prompt_capacity runtime) ~reasoning_effort ~tool ~prompt with
+              ~config ~prompt_capacity:(Runtime_instance.muse_prompt_capacity runtime) ~reasoning_effort ~tool ~prompt with
            | Error (Runtime_verification_muse.Home_error error) ->
              Error (Muse_home_unavailable (Runtime_muse_home.error_to_string error))
            | Error Runtime_verification_muse.Private_workspace_unavailable ->

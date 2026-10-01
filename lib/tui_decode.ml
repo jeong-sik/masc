@@ -76,16 +76,6 @@ let keeper_phase_is_running : keeper_phase -> bool = function
   | Keeper_state_machine.Crashed | Keeper_state_machine.Restarting ->
       false
 
-type keeper_phase_band = Phase_stuck | Phase_alive | Phase_paused | Phase_stopped
-
-let keeper_phase_band : keeper_phase -> keeper_phase_band = function
-  | Keeper_state_machine.Failing | Keeper_state_machine.Crashed -> Phase_stuck
-  | Keeper_state_machine.Running | Keeper_state_machine.Draining
-  | Keeper_state_machine.Restarting ->
-      Phase_alive
-  | Keeper_state_machine.Paused -> Phase_paused
-  | Keeper_state_machine.Stopped | Keeper_state_machine.Offline -> Phase_stopped
-
 type keeper_activation_mode = Activation_manual | Activation_on_demand | Activation_autonomous
 
 type keeper_portrait = Keeper_portrait_equipment.reading =
@@ -1943,74 +1933,6 @@ type connector_snapshot = {
   cs_active : int;
 }
 
-type runtime_probe_refresh_state =
-  | Runtime_probe_fresh
-  | Runtime_probe_recent
-  | Runtime_probe_served_stale
-  | Runtime_probe_warming_up
-
-type runtime_probe_status =
-  | Runtime_probe_reachable
-  | Runtime_probe_no_http_runtimes
-  | Runtime_probe_degraded
-  | Runtime_probe_unreachable
-  | Runtime_probe_warming
-
-type runtime_provider_status =
-  | Runtime_provider_reachable
-  | Runtime_provider_missing_auth
-  | Runtime_provider_auth_failed
-  | Runtime_provider_network_error
-  | Runtime_provider_server_error
-  | Runtime_provider_endpoint_not_found
-  | Runtime_provider_http_error
-  | Runtime_provider_unknown_http_status
-  | Runtime_provider_skipped_cli
-  | Runtime_provider_skipped_native_auth
-  | Runtime_provider_invalid_endpoint
-  | Runtime_provider_invalid_execution_transport
-
-type runtime_probe_transport =
-  | Runtime_probe_http
-  | Runtime_probe_cli
-
-type runtime_provider_probe = {
-  rpp_runtime_id : string;
-  rpp_transport : runtime_probe_transport;
-  rpp_status : runtime_provider_status;
-  rpp_reachable : bool option;
-  rpp_http_status : int option;
-  rpp_latency_ms : float option;
-  rpp_error : string option;
-  rpp_checked_at : string;
-}
-
-type runtime_probe_summary = {
-  rpsu_runtimes : int;
-  rpsu_probed : int;
-  rpsu_reachable : int;
-  rpsu_failed : int;
-  rpsu_skipped : int;
-  rpsu_default_runtime_id : string option;
-}
-
-type runtime_probe_snapshot = {
-  rps_generated_at : string;
-  rps_refreshed_at_unix : float option;
-  rps_cache_ttl_sec : float;
-  rps_cache_age_sec : float option;
-  rps_cache_hit : bool;
-  rps_refresh_state : runtime_probe_refresh_state;
-  rps_status : runtime_probe_status;
-  rps_probe_ok : bool;
-  rps_checked_at : string;
-  rps_summary : runtime_probe_summary;
-  rps_providers : runtime_provider_probe list;
-  rps_errors : string list;
-  rps_observations : string list;
-  rps_limitations : string list;
-}
-
 (* One decoder-owned resolved runtime row shared by the Keeper picker and the
    Runtime surface. [ro_is_default] comes from the document's top-level
    [default_runtime], not the row's independent binding flag. *)
@@ -2018,6 +1940,10 @@ type runtime_context_source =
   | Runtime_context_override
   | Runtime_context_capability
   | Runtime_context_clamped
+  | Runtime_context_provider_override
+  | Runtime_context_binding_override
+  | Runtime_context_provider_clamped
+  | Runtime_context_binding_clamped
 
 type exact_slot_group = Exact_http_slots | Exact_cli_slots | Exact_output_unsupported
 
@@ -2062,11 +1988,11 @@ type runtime_candidate_row = {
   rcr_position : int;
   rcr_candidate_count : int;
   rcr_runtime : runtime_option;
-  rcr_probe : runtime_provider_probe option;
+  rcr_probe : Tui_decode_runtime_probe.runtime_provider_probe option;
 }
 
 type runtime_surface_snapshot = {
-  rss_probe : runtime_probe_snapshot option;
+  rss_probe : Tui_decode_runtime_probe.runtime_probe_snapshot option;
   rss_probe_error : string option;
   rss_resolved : runtime_resolved_snapshot;
   rss_candidates : runtime_candidate_row list;
@@ -2293,70 +2219,6 @@ type memory_health_snapshot = {
   mhs_warn_alerts : int;
   mhs_error_alerts : int;
   mhs_starving_keepers : int;
-}
-
-type memory_fact_retrieval =
-  | Never_retrieved
-  | Retrieved of { count : int; distinct_days : int; last_at : float }
-
-type memory_fact_events = {
-  mfe_retrieval : memory_fact_retrieval;
-  mfe_retracted_count : int;
-  mfe_revised_from : string list;
-}
-
-let no_memory_fact_events =
-  { mfe_retrieval = Never_retrieved
-  ; mfe_retracted_count = 0
-  ; mfe_revised_from = []
-  }
-
-type memory_fact = {
-  mf_claim : string;
-  mf_category : Keeper_memory_os_types.category;
-  mf_origin : string;
-  mf_first_seen : float;
-  mf_last_seen : float;
-  mf_memory_id : string;
-  mf_events : memory_fact_events;
-}
-
-type memory_source_fact = {
-  msf_claim : string;
-  msf_first_seen : float;
-  msf_path : string;
-  msf_sha256 : string;
-}
-
-type memory_invalidation = {
-  mi_source_path : string;
-  mi_invalidated_at : float;
-  mi_reason : string;
-}
-
-type 'a memory_store_reading =
-  | Memory_store_read_error of string
-  | Memory_store_absent
-  | Memory_store_present of 'a
-
-type memory_ordinary_store = {
-  mos_revision : int;
-  mos_updated_at : float;
-  mos_facts : memory_fact list;
-}
-
-type memory_source_store = {
-  mss_revision : int;
-  mss_updated_at : float;
-  mss_facts : memory_source_fact list;
-  mss_invalidations : memory_invalidation list;
-}
-
-type memory_fact_snapshot = {
-  mfs_keeper : string;
-  mfs_ordinary : memory_ordinary_store memory_store_reading;
-  mfs_source : memory_source_store memory_store_reading;
-  mfs_events_read_error : string option;
 }
 
 type harness_verdict = {
@@ -3781,358 +3643,14 @@ let decode_connector_snapshot json =
   let* cs_active = required_int_field json "active_count" in
   Ok { cs_connectors; cs_refused; cs_total; cs_active }
 
-let runtime_probe_refresh_state_to_string = function
-  | Runtime_probe_fresh -> "fresh"
-  | Runtime_probe_recent -> "recent"
-  | Runtime_probe_served_stale -> "served_stale"
-  | Runtime_probe_warming_up -> "warming_up"
-
-(* The word the wire uses, so the badge shows what the server said. This
-   spelled two of them "reachable" and "no_http_runtimes" while the producer
-   wrote "ok" and "idle", and the only caller is the status badge -- so the
-   screen would have named a reading the system never used. One vocabulary,
-   read and written. *)
-let runtime_probe_status_to_string = function
-  | Runtime_probe_reachable -> "ok"
-  | Runtime_probe_no_http_runtimes -> "idle"
-  | Runtime_probe_degraded -> "degraded"
-  (* The producer writes both "unavailable" and "unreachable" for this
-     reading; one of them has to be the one written back. *)
-  | Runtime_probe_unreachable -> "unreachable"
-  | Runtime_probe_warming -> "warming_up"
-
-let runtime_provider_status_to_string = function
-  | Runtime_provider_reachable -> "reachable"
-  | Runtime_provider_missing_auth -> "missing_auth"
-  | Runtime_provider_auth_failed -> "auth_failed"
-  | Runtime_provider_network_error -> "network_error"
-  | Runtime_provider_server_error -> "server_error"
-  | Runtime_provider_endpoint_not_found -> "endpoint_not_found"
-  | Runtime_provider_http_error -> "http_error"
-  | Runtime_provider_unknown_http_status -> "unknown_http_status"
-  | Runtime_provider_skipped_cli -> "skipped_cli"
-  | Runtime_provider_skipped_native_auth -> "skipped_native_auth"
-  | Runtime_provider_invalid_endpoint -> "invalid_endpoint"
-  | Runtime_provider_invalid_execution_transport ->
-      "invalid_execution_transport"
-
-let runtime_probe_refresh_state_of_string = function
-  | "fresh" -> Ok Runtime_probe_fresh
-  | "recent" -> Ok Runtime_probe_recent
-  | "served_stale" -> Ok Runtime_probe_served_stale
-  | "warming_up" -> Ok Runtime_probe_warming_up
-  | value -> Error (Printf.sprintf "unknown runtime probe refresh_state %S" value)
-
-(* The words the producer writes, not a list that grew beside it.
-
-   [Server_dashboard_http_runtime_info] fills this field from three places:
-   the live summary picks between [Health_status.Ok], [Idle], [Degraded] and
-   [Unavailable]; the failure envelope writes ["unreachable"]; the cold-start
-   envelope writes ["warming_up"]. Those six are the whole vocabulary.
-
-   This list had ["reachable"] and ["no_http_runtimes"] instead of ["ok"] and
-   ["idle"], and nothing has written those two -- searched for the literals
-   across lib/ and bin/. So every response failed the decode and the surface
-   drew "probe unavailable / read failed" with all twenty-nine candidates
-   reading "unobserved". A dead column that looks like an observation nobody
-   made is worse than an empty one: it answers the question wrongly instead
-   of declining to.
-
-   The variant names stay: they say what the reading means, and the meaning
-   did not drift -- only the spelling the wire uses. *)
-let runtime_probe_status_of_string = function
-  | "ok" -> Ok Runtime_probe_reachable
-  | "idle" -> Ok Runtime_probe_no_http_runtimes
-  | "degraded" -> Ok Runtime_probe_degraded
-  (* Two spellings for one reading, both live: the summary path writes
-     ["unavailable"] and the failure envelope writes ["unreachable"]. *)
-  | "unavailable" | "unreachable" -> Ok Runtime_probe_unreachable
-  | "warming_up" -> Ok Runtime_probe_warming
-  | value -> Error (Printf.sprintf "unknown runtime probe status %S" value)
-
-let runtime_provider_status_of_string = function
-  | "reachable" -> Ok Runtime_provider_reachable
-  | "missing_auth" -> Ok Runtime_provider_missing_auth
-  | "auth_failed" -> Ok Runtime_provider_auth_failed
-  | "network_error" -> Ok Runtime_provider_network_error
-  | "server_error" -> Ok Runtime_provider_server_error
-  | "endpoint_not_found" -> Ok Runtime_provider_endpoint_not_found
-  | "http_error" -> Ok Runtime_provider_http_error
-  | "unknown_http_status" -> Ok Runtime_provider_unknown_http_status
-  | "skipped_cli" -> Ok Runtime_provider_skipped_cli
-  | "skipped_native_auth" -> Ok Runtime_provider_skipped_native_auth
-  | "invalid_endpoint" -> Ok Runtime_provider_invalid_endpoint
-  | "invalid_execution_transport" ->
-      Ok Runtime_provider_invalid_execution_transport
-  | value -> Error (Printf.sprintf "unknown runtime provider status %S" value)
-
-let runtime_probe_transport_of_string = function
-  | "http" -> Ok Runtime_probe_http
-  | "cli" -> Ok Runtime_probe_cli
-  | value -> Error (Printf.sprintf "unknown runtime probe transport %S" value)
-
-let decode_runtime_provider_probe json =
-  let* rpp_runtime_id = required_string_field json "runtime_id" in
-  let* transport = required_string_field json "transport" in
-  let* rpp_transport = runtime_probe_transport_of_string transport in
-  let* status = required_string_field json "status" in
-  let* rpp_status = runtime_provider_status_of_string status in
-  let* rpp_reachable = required_nullable_bool_field json "reachable" in
-  let* rpp_http_status = required_nullable_int_field json "http_status" in
-  let* rpp_latency_ms = required_nullable_float_field json "latency_ms" in
-  let* rpp_error = required_nullable_string_field json "error" in
-  let* rpp_checked_at = required_string_field json "checked_at" in
-  let expected_reachable =
-    match rpp_status with
-    | Runtime_provider_reachable -> Some true
-    | Runtime_provider_skipped_cli | Runtime_provider_skipped_native_auth -> None
-    | Runtime_provider_missing_auth
-    | Runtime_provider_auth_failed
-    | Runtime_provider_network_error
-    | Runtime_provider_server_error
-    | Runtime_provider_endpoint_not_found
-    | Runtime_provider_http_error
-    | Runtime_provider_unknown_http_status
-    | Runtime_provider_invalid_endpoint
-    | Runtime_provider_invalid_execution_transport -> Some false
-  in
-  let* () =
-    if rpp_reachable = expected_reachable then Ok ()
-    else
-      Error
-        (Printf.sprintf "runtime %S status %S disagrees with reachable"
-           rpp_runtime_id status)
-  in
-  let* () =
-    match rpp_transport, rpp_status with
-    | Runtime_probe_cli, Runtime_provider_skipped_cli
-    | Runtime_probe_http,
-      ( Runtime_provider_reachable
-      | Runtime_provider_skipped_native_auth
-      | Runtime_provider_missing_auth
-      | Runtime_provider_auth_failed
-      | Runtime_provider_network_error
-      | Runtime_provider_server_error
-      | Runtime_provider_endpoint_not_found
-      | Runtime_provider_http_error
-      | Runtime_provider_unknown_http_status
-      | Runtime_provider_invalid_endpoint
-      | Runtime_provider_invalid_execution_transport ) -> Ok ()
-    | Runtime_probe_cli, _ ->
-        Error (Printf.sprintf "CLI runtime %S was not skipped" rpp_runtime_id)
-    | Runtime_probe_http, Runtime_provider_skipped_cli ->
-        Error (Printf.sprintf "HTTP runtime %S was marked skipped_cli" rpp_runtime_id)
-  in
-  let nonnegative name = function
-    | Some value when value < 0 ->
-        Error (Printf.sprintf "runtime %S has negative %s" rpp_runtime_id name)
-    | Some _ | None -> Ok ()
-  in
-  let* () = nonnegative "http_status" rpp_http_status in
-  let* () =
-    match rpp_latency_ms with
-    | Some value when value < 0.0 ->
-        Error (Printf.sprintf "runtime %S has negative latency_ms" rpp_runtime_id)
-    | Some _ | None -> Ok ()
-  in
-  Ok
-    { rpp_runtime_id
-    ; rpp_transport
-    ; rpp_status
-    ; rpp_reachable
-    ; rpp_http_status
-    ; rpp_latency_ms
-    ; rpp_error
-    ; rpp_checked_at
-    }
-
-let decode_runtime_probe_summary json =
-  let* rpsu_runtimes = required_int_field json "runtimes" in
-  let* rpsu_probed = required_int_field json "probed" in
-  let* rpsu_reachable = required_int_field json "reachable" in
-  let* rpsu_failed = required_int_field json "failed" in
-  let* rpsu_skipped = required_int_field json "skipped" in
-  let* rpsu_default_runtime_id =
-    required_nullable_string_field json "default_runtime_id"
-  in
-  let counts =
-    [ "runtimes", rpsu_runtimes
-    ; "probed", rpsu_probed
-    ; "reachable", rpsu_reachable
-    ; "failed", rpsu_failed
-    ; "skipped", rpsu_skipped
-    ]
-  in
-  match List.find_opt (fun (_, value) -> value < 0) counts with
-  | Some (name, _) -> Error (Printf.sprintf "runtime probe summary %s is negative" name)
-  | None ->
-      Ok
-        { rpsu_runtimes
-        ; rpsu_probed
-        ; rpsu_reachable
-        ; rpsu_failed
-        ; rpsu_skipped
-        ; rpsu_default_runtime_id
-        }
-
-let decode_runtime_probe_snapshot json =
-  let* rps_generated_at = required_string_field json "generated_at" in
-  let* rps_refreshed_at_unix =
-    required_nullable_float_field json "refreshed_at_unix"
-  in
-  let* rps_cache_ttl_sec = Json_util.require_float json "cache_ttl_sec" in
-  let* rps_cache_age_sec = required_nullable_float_field json "cache_age_sec" in
-  let* rps_cache_hit = required_bool_field json "cache_hit" in
-  let* refresh_state = required_string_field json "refresh_state" in
-  let* rps_refresh_state = runtime_probe_refresh_state_of_string refresh_state in
-  let* probe = required_object_field json "probe" in
-  let* source = required_string_field probe "source" in
-  let* () =
-    if String.equal source Config_dir_resolver.runtime_toml_filename then Ok ()
-    else
-      Error
-        (Printf.sprintf "runtime probe source is %S, expected %s" source
-           Config_dir_resolver.runtime_toml_filename)
-  in
-  let* status = required_string_field probe "status" in
-  let* rps_status = runtime_probe_status_of_string status in
-  let* rps_probe_ok = required_bool_field probe "probe_ok" in
-  let* rps_checked_at = required_string_field probe "checked_at" in
-  let* summary = required_object_field probe "summary" in
-  let* rps_summary = decode_runtime_probe_summary summary in
-  let* providers = required_list_field probe "providers" in
-  let* rps_providers =
-    decode_list "providers" decode_runtime_provider_probe providers
-  in
-  let* rps_errors = require_string_list probe "errors" in
-  let* rps_observations = require_string_list probe "observations" in
-  let* rps_limitations = require_string_list probe "limitations" in
-  let* () =
-    if rps_cache_ttl_sec <= 0.0 then Error "runtime probe cache_ttl_sec must be positive"
-    else
-      match rps_cache_age_sec with
-      | Some age when age < 0.0 -> Error "runtime probe cache_age_sec is negative"
-      | Some _ | None -> Ok ()
-  in
-  let* () =
-    match rps_refreshed_at_unix, rps_cache_age_sec with
-    | Some _, Some _ | None, None -> Ok ()
-    | Some _, None | None, Some _ ->
-        Error "runtime probe refreshed_at_unix and cache_age_sec disagree"
-  in
-  let* () =
-    match rps_refresh_state, rps_cache_hit with
-    | (Runtime_probe_fresh | Runtime_probe_recent), true
-    | (Runtime_probe_served_stale | Runtime_probe_warming_up), false -> Ok ()
-    | _ ->
-        Error
-          (Printf.sprintf "runtime probe refresh_state %S disagrees with cache_hit"
-             refresh_state)
-  in
-  let observed_reachable, observed_failed, observed_skipped =
-    List.fold_left
-      (fun (reachable, failed, skipped) provider ->
-         match provider.rpp_reachable with
-         | Some true -> reachable + 1, failed, skipped
-         | Some false -> reachable, failed + 1, skipped
-         | None -> reachable, failed, skipped + 1)
-      (0, 0, 0) rps_providers
-  in
-  let row_count = List.length rps_providers in
-  let* () =
-    if rps_summary.rpsu_runtimes <> row_count then
-      Error
-        (Printf.sprintf "runtime probe summary has %d runtimes but providers has %d rows"
-           rps_summary.rpsu_runtimes row_count)
-    else if rps_summary.rpsu_reachable <> observed_reachable then
-      Error "runtime probe reachable count disagrees with providers"
-    else if rps_summary.rpsu_failed <> observed_failed then
-      Error "runtime probe failed count disagrees with providers"
-    else if rps_summary.rpsu_skipped <> observed_skipped then
-      Error "runtime probe skipped count disagrees with providers"
-    else if rps_summary.rpsu_probed <> observed_reachable + observed_failed then
-      Error "runtime probe probed count disagrees with providers"
-    else Ok ()
-  in
-  let* () =
-    let seen = Hashtbl.create (max 1 row_count) in
-    let rec loop = function
-      | [] -> Ok ()
-      | row :: rest ->
-          if Hashtbl.mem seen row.rpp_runtime_id then
-            Error
-              (Printf.sprintf "duplicate runtime probe id %S" row.rpp_runtime_id)
-          else begin
-            Hashtbl.add seen row.rpp_runtime_id ();
-            loop rest
-          end
-    in
-    loop rps_providers
-  in
-  let* () =
-    match rps_summary.rpsu_default_runtime_id with
-    | None -> Ok ()
-    | Some default_id ->
-        if List.exists (fun row -> String.equal row.rpp_runtime_id default_id) rps_providers
-        then Ok ()
-        else Error (Printf.sprintf "default runtime %S is absent from providers" default_id)
-  in
-  let status_counts_valid =
-    match rps_status with
-    | Runtime_probe_reachable -> observed_failed = 0 && observed_reachable > 0
-    | Runtime_probe_no_http_runtimes ->
-        observed_failed = 0 && observed_reachable = 0
-    | Runtime_probe_degraded -> observed_failed > 0 && observed_reachable > 0
-    | Runtime_probe_unreachable ->
-        observed_reachable = 0 && (observed_failed > 0 || row_count = 0)
-    | Runtime_probe_warming -> row_count = 0
-  in
-  let* () =
-    if status_counts_valid then Ok ()
-    else
-      Error
-        (Printf.sprintf "runtime probe status %S disagrees with provider counts" status)
-  in
-  let expected_probe_ok =
-    match rps_status with
-    | Runtime_probe_reachable | Runtime_probe_no_http_runtimes -> true
-    | Runtime_probe_degraded | Runtime_probe_unreachable | Runtime_probe_warming -> false
-  in
-  let* () =
-    if rps_probe_ok = expected_probe_ok then Ok ()
-    else Error (Printf.sprintf "runtime probe status %S disagrees with probe_ok" status)
-  in
-  let* () =
-    match rps_refresh_state, rps_status, rps_refreshed_at_unix with
-    | Runtime_probe_warming_up, Runtime_probe_warming, None -> Ok ()
-    | Runtime_probe_warming_up, _, _ ->
-        Error "runtime probe warming_up refresh must carry a warming probe without a cache time"
-    | (Runtime_probe_fresh | Runtime_probe_recent | Runtime_probe_served_stale), _, Some _ ->
-        Ok ()
-    | (Runtime_probe_fresh | Runtime_probe_recent | Runtime_probe_served_stale), _, None ->
-        Error "runtime probe cached refresh is missing refreshed_at_unix"
-  in
-  Ok
-    { rps_generated_at
-    ; rps_refreshed_at_unix
-    ; rps_cache_ttl_sec
-    ; rps_cache_age_sec
-    ; rps_cache_hit
-    ; rps_refresh_state
-    ; rps_status
-    ; rps_probe_ok
-    ; rps_checked_at
-    ; rps_summary
-    ; rps_providers
-    ; rps_errors
-    ; rps_observations
-    ; rps_limitations
-    }
-
 let runtime_context_source_label = function
   | Runtime_context_override -> "override"
   | Runtime_context_capability -> "capability"
   | Runtime_context_clamped -> "override_clamped_by_capability"
+  | Runtime_context_provider_override -> "provider_override"
+  | Runtime_context_binding_override -> "binding_override"
+  | Runtime_context_provider_clamped -> "provider_override_clamped_by_capability"
+  | Runtime_context_binding_clamped -> "binding_override_clamped_by_capability"
 
 let runtime_reasoning_effort_label = Llm_provider.Reasoning_effort.to_string
 
@@ -4140,12 +3658,11 @@ let decode_runtime_context_source = function
   | "override" -> Ok Runtime_context_override
   | "capability" -> Ok Runtime_context_capability
   | "override_clamped_by_capability" -> Ok Runtime_context_clamped
+  | "provider_override" -> Ok Runtime_context_provider_override
+  | "binding_override" -> Ok Runtime_context_binding_override
+  | "provider_override_clamped_by_capability" -> Ok Runtime_context_provider_clamped
+  | "binding_override_clamped_by_capability" -> Ok Runtime_context_binding_clamped
   | value -> Error (Printf.sprintf "unknown runtime max_context_source %S" value)
-
-let runtime_probe_for_id snapshot ~runtime_id =
-  Option.bind snapshot.rss_probe (fun probe ->
-    List.find_opt (fun row -> String.equal row.rpp_runtime_id runtime_id)
-      probe.rps_providers)
 
 let decode_runtime_option ~default_id json =
   let* ro_id = required_string_field json "id" in
@@ -4371,315 +3888,15 @@ let decode_runtime_resolved_snapshot json =
    provider account said about its own usage windows, as the server recorded
    it. Every word is closed here. A [state], window [kind] or [unit] this build
    cannot name fails the whole reading; it never becomes a neighbour's meaning. *)
-type provider_usage_window_kind =
-  | Window_five_hour
-  | Window_seven_day
-  | Window_duration_minutes of int
-  | Window_provider_label of string
-
-type provider_usage_utilization =
-  | Utilization_fraction of float
-  | Utilization_percent of int
-
-type provider_usage_window_role =
-  | Role_gates_model_calls
-  | Role_counts_other_use
-  | Role_unclassified_limit
-
-type provider_usage_window = {
-  puw_limit_id : string option;
-  puw_kind : provider_usage_window_kind;
-  puw_role : provider_usage_window_role;
-  puw_utilization : provider_usage_utilization;
-  puw_resets_at : float option;
-  puw_observed_at : float;
-}
-
-type provider_usage_state =
-  | Account_not_reported_since_start
-  | Account_reported of provider_usage_window * provider_usage_window list
-
-type provider_usage_provider = {
-  pup_id : string;
-  pup_display_name : string;
-}
-
-type provider_usage_account = {
-  pua_scope : string;
-  pua_scope_id : string;
-  pua_providers : provider_usage_provider list;
-  pua_state : provider_usage_state;
-}
-
-type provider_usage_windows = {
-  puws_since : float;
-  puws_accounts : provider_usage_account list;
-}
-
-let required_number_field json key =
-  match member key json with
-  | `Float value -> Ok value
-  | `Int value -> Ok (Float.of_int value)
-  | `Null -> missing_field key
-  | bad -> field_type_error key "a number" bad
-
-let decode_provider_usage_window_kind json =
-  let* kind = required_string_field json "kind" in
-  match kind with
-  | "five_hour" -> Ok Window_five_hour
-  | "seven_day" -> Ok Window_seven_day
-  | "duration_minutes" ->
-      let* minutes = required_int_field json "minutes" in
-      Ok (Window_duration_minutes minutes)
-  | "provider_label" ->
-      let* label = required_string_field json "label" in
-      Ok (Window_provider_label label)
-  | other -> Error (Printf.sprintf "unknown usage window kind %S" other)
-
-let decode_provider_usage_utilization json =
-  let* unit_word = required_string_field json "unit" in
-  match unit_word with
-  | "fraction" ->
-      let* value = required_number_field json "value" in
-      Ok (Utilization_fraction value)
-  | "percent" ->
-      let* value = required_int_field json "value" in
-      Ok (Utilization_percent value)
-  | other -> Error (Printf.sprintf "unknown usage unit %S" other)
-
-let decode_provider_usage_window_role json =
-  let* role = required_string_field json "role" in
-  match role with
-  | "gates_model_calls" -> Ok Role_gates_model_calls
-  | "counts_other_use" -> Ok Role_counts_other_use
-  | "unclassified_limit" -> Ok Role_unclassified_limit
-  | other -> Error (Printf.sprintf "unknown usage window role %S" other)
-
-let decode_provider_usage_window json =
-  let* limit_id = required_member json "limit_id" in
-  let* puw_limit_id =
-    match limit_id with
-    | `Null -> Ok None
-    | `String id -> Ok (Some id)
-    | bad -> field_type_error "limit_id" "a string or null" bad
-  in
-  let* kind = required_object_field json "window" in
-  let* puw_kind = decode_provider_usage_window_kind kind in
-  let* puw_role = decode_provider_usage_window_role json in
-  let* utilization = required_object_field json "utilization" in
-  let* puw_utilization = decode_provider_usage_utilization utilization in
-  let* resets_at = required_member json "resets_at" in
-  let* puw_resets_at =
-    match resets_at with
-    | `Null -> Ok None
-    | `Int at -> Ok (Some (Float.of_int at))
-    | `Float at -> Ok (Some at)
-    | bad -> field_type_error "resets_at" "a number or null" bad
-  in
-  let* puw_observed_at = required_number_field json "observed_at" in
-  Ok
-    { puw_limit_id
-    ; puw_kind
-    ; puw_role
-    ; puw_utilization
-    ; puw_resets_at
-    ; puw_observed_at
-    }
-
-let decode_provider_usage_account json =
-  let* pua_scope = required_string_field json "scope" in
-  let* pua_scope_id = required_string_field json "scope_id" in
-  let* provider_items = required_list_field json "providers" in
-  let* pua_providers =
-    decode_list "providers"
-      (fun provider ->
-        let* pup_id = required_string_field provider "id" in
-        let* pup_display_name = required_string_field provider "display_name" in
-        Ok { pup_id; pup_display_name })
-      provider_items
-  in
-  let* state = required_string_field json "state" in
-  let* window_items = required_list_field json "windows" in
-  let* windows = decode_list "windows" decode_provider_usage_window window_items in
-  let* pua_state =
-    match (state, windows) with
-    | "reported", first :: rest -> Ok (Account_reported (first, rest))
-    | "reported", [] ->
-        Error (Printf.sprintf "account %S is reported with no window" pua_scope)
-    | "not_reported_since_start", [] -> Ok Account_not_reported_since_start
-    | "not_reported_since_start", _ :: _ ->
-        Error
-          (Printf.sprintf "account %S carries windows but is not reported"
-             pua_scope)
-    | other, _ -> Error (Printf.sprintf "unknown usage state %S" other)
-  in
-  Ok { pua_scope; pua_scope_id; pua_providers; pua_state }
-
-let decode_provider_usage_windows json =
-  let* puws_since = required_number_field json "provider_usage_windows_since" in
-  let* items = required_list_field json "provider_usage_windows" in
-  let* puws_accounts =
-    decode_list "provider_usage_windows" decode_provider_usage_account items
-  in
-  Ok { puws_since; puws_accounts }
-
-type provider_usage_history_point = {
-  puhp_scope_id : string;
-  puhp_kind : string;
-  puhp_limit_id : string option;
-  puhp_unit : provider_usage_utilization;
-  puhp_observed_at : float;
-}
-
-type provider_usage_history = {
-  puh_days : int;
-  puh_generated_at : float;
-  puh_unreadable_reports : int;
-  puh_points : provider_usage_history_point list;
-}
-
-let decode_provider_usage_history_point json =
-  let* puhp_scope_id = required_string_field json "scope_id" in
-  let* puhp_kind = required_string_field json "kind" in
-  let* puhp_limit_id = required_nullable_string_field json "limit_id" in
-  let* puhp_observed_at = required_number_field json "observed_at" in
-  let* unit = required_string_field json "unit" in
-  let* puhp_unit =
-    match unit with
-    | "fraction" ->
-        let* value = required_number_field json "value" in
-        if Float.is_finite value then Ok (Utilization_fraction value)
-        else Error "provider usage history: non-finite fraction"
-    | "percent" ->
-        let* value = required_int_field json "value" in
-        Ok (Utilization_percent value)
-    | _ -> Error ("provider usage history: unknown unit " ^ unit)
-  in
-  Ok { puhp_scope_id; puhp_kind; puhp_limit_id; puhp_unit; puhp_observed_at }
-
-let decode_provider_usage_history json =
-  let* puh_days = required_int_field json "days" in
-  if not (List.mem puh_days [ 1; 7; 14 ]) then
-    Error "provider usage history: unsupported day window"
-  else
-    let* puh_generated_at = required_number_field json "generated_at" in
-    let* sampling = required_string_field json "sampling" in
-    if sampling <> "latest_provider_report_per_utc_day" then
-      Error "provider usage history: unknown sampling contract"
-    else
-      let* puh_unreadable_reports =
-        required_int_field json "unreadable_reports"
-      in
-      let* points = required_list_field json "points" in
-      let* puh_points =
-        decode_list "points" decode_provider_usage_history_point points
-      in
-      Ok { puh_days; puh_generated_at; puh_unreadable_reports; puh_points }
-
-type keeper_usage_coverage =
-  | Keeper_usage_complete
-  | Keeper_usage_partial of int
-  | Keeper_usage_failed of string
-
-type keeper_usage_row = {
-  kur_name : string;
-  kur_turn_samples : int;
-  kur_tokens : int option;
-  kur_cost_usd : float option;
-  kur_tokens_reported : int;
-  kur_tokens_missing : int;
-  kur_cost_reported : int;
-  kur_cost_missing : int;
-  kur_coverage : keeper_usage_coverage;
-}
-
-type keeper_usage_freshness =
-  | Keeper_usage_fresh
-  | Keeper_usage_stale of { age_s : float; last_error : string option }
-
-type keeper_usage_window =
-  | Keeper_usage_loading
-  | Keeper_usage_window of {
-      kuw_generated_at : float;
-      kuw_window_minutes : int;
-      kuw_rows : keeper_usage_row list;
-      kuw_freshness : keeper_usage_freshness;
-    }
-
-let decode_keeper_usage_row json =
-  let* kur_name = required_string_field json "keeper_name" in
-  let* kur_turn_samples = required_int_field json "sample_count" in
-  let* kur_tokens = required_nullable_int_field json "total_tokens" in
-  let* kur_cost_usd = required_nullable_float_field json "total_cost_usd" in
-  let* kur_tokens_reported = required_int_field json "tokens_reported_samples" in
-  let* tokens_unreported = required_int_field json "tokens_unreported_samples" in
-  let* tokens_unread = required_int_field json "tokens_unread_samples" in
-  let* kur_cost_reported = required_int_field json "cost_reported_samples" in
-  let* cost_unreported = required_int_field json "cost_unreported_samples" in
-  let* cost_unread = required_int_field json "cost_unread_samples" in
-  let* metrics_read = required_object_field json "metrics_read" in
-  let* read_state = required_string_field metrics_read "state" in
-  let* kur_coverage =
-    match read_state with
-    | "read" ->
-        let* malformed = required_int_field metrics_read "malformed_rows" in
-        Ok (if malformed = 0 then Keeper_usage_complete
-            else Keeper_usage_partial malformed)
-    | "failed" ->
-        let* reason = required_string_field metrics_read "reason" in
-        Ok (Keeper_usage_failed reason)
-    | state -> Error ("unknown keeper usage read state: " ^ state)
-  in
-  Ok
-    { kur_name; kur_turn_samples; kur_tokens; kur_cost_usd;
-      kur_tokens_reported;
-      kur_tokens_missing = tokens_unreported + tokens_unread;
-      kur_cost_reported;
-      kur_cost_missing = cost_unreported + cost_unread;
-      kur_coverage }
-
-let decode_keeper_usage_window json =
-  let* cache = required_object_field json "cache" in
-  let* cache_word = required_string_field cache "state" in
-  let* cache_state =
-    match Dashboard_cache_wire.of_string cache_word with
-    | Some state -> Ok state
-    | None -> Error ("unknown keeper usage cache state: " ^ cache_word)
-  in
-  let* last_error = optional_string_field cache "last_error" in
-  match Json_util.assoc_member_opt "state" json, cache_state with
-  | Some (`String "loading"), Dashboard_cache_wire.Cache_warming ->
-      (match last_error with
-       | None -> Ok Keeper_usage_loading
-       | Some detail -> Error ("Keeper usage computation failed: " ^ detail))
-  | None, (Dashboard_cache_wire.Cache_fresh | Dashboard_cache_wire.Cache_stale_refreshing) ->
-      let* kuw_freshness =
-        match cache_state with
-        | Dashboard_cache_wire.Cache_fresh -> Ok Keeper_usage_fresh
-        | Dashboard_cache_wire.Cache_stale_refreshing ->
-            let* age_s = required_number_field cache "age_s" in
-            Ok (Keeper_usage_stale { age_s; last_error })
-        | Dashboard_cache_wire.Cache_warming -> Error "keeper usage still warming"
-      in
-      let* kuw_generated_at = required_number_field json "generated_at" in
-      let* kuw_window_minutes = required_int_field json "window_minutes" in
-      let* rows = required_list_field json "keepers" in
-      let* kuw_rows = decode_list "keepers" decode_keeper_usage_row rows in
-      Ok (Keeper_usage_window
-        { kuw_generated_at; kuw_window_minutes; kuw_rows; kuw_freshness })
-  | Some (`String state), _ -> Error ("unknown keeper usage state or cache: " ^ state ^ "/" ^ cache_word)
-  | Some _, _ -> Error "keeper usage state must be a string"
-  | None, Dashboard_cache_wire.Cache_warming -> Error "keeper usage warming cache has no loading placeholder"
-
 let join_runtime_surface ~probe ~probe_error ~resolved =
   let probe_rows =
     match probe with
-    | Some snapshot -> snapshot.rps_providers
+    | Some snapshot -> snapshot.Tui_decode_runtime_probe.rps_providers
     | None -> []
   in
   let probe_by_runtime = Hashtbl.create (max 1 (List.length probe_rows)) in
   List.iter
-    (fun row -> Hashtbl.add probe_by_runtime row.rpp_runtime_id row)
+    (fun row -> Hashtbl.add probe_by_runtime row.Tui_decode_runtime_probe.rpp_runtime_id row)
     probe_rows;
   let runtime_by_id = Hashtbl.create (max 1 (List.length resolved.rrs_runtimes)) in
   List.iter
@@ -4725,7 +3942,7 @@ let join_runtime_surface ~probe ~probe_error ~resolved =
   let rss_unassigned_probe_count =
     List.fold_left
       (fun count row ->
-         if Hashtbl.mem candidate_ids row.rpp_runtime_id then count else count + 1)
+         if Hashtbl.mem candidate_ids row.Tui_decode_runtime_probe.rpp_runtime_id then count else count + 1)
       0 probe_rows
   in
   Ok
@@ -4737,7 +3954,7 @@ let join_runtime_surface ~probe ~probe_error ~resolved =
     }
 
 let decode_runtime_surface_snapshot ~probe_json ~resolved_json =
-  match decode_runtime_probe_snapshot probe_json with
+  match Tui_decode_runtime_probe.decode_runtime_probe_snapshot probe_json with
   | Error detail -> Error ("runtime probe decode failed: " ^ detail)
   | Ok probe ->
       (match decode_runtime_resolved_snapshot resolved_json with
@@ -4834,10 +4051,7 @@ let decode_repository_change_snapshot json =
 
    The wording follows the copy of this check in [Llm_provider.Types], which
    has printed all three groups since it was written: same keys, same
-   brackets, so one reader learns one shape. (Its function is not named here
-   on purpose -- scripts/ci/check_exact_field_decoder_preflight.py matches
-   that name against file text without stripping comments, so writing it in
-   prose registers this module as a decoder it is not. See #35471.)
+   brackets, so one reader learns one shape.
 
    Empty groups are left out rather than drawn as "[]" -- this message goes on
    a terminal row, where the surface cuts it. *)
@@ -5611,128 +4825,6 @@ let decode_memory_health_snapshot json =
     ; mhs_starving_keepers
     }
 
-(* The server computes these from the keeper's memory-events sidecar and
-   never stores them (RFC-0418). This side shows the record as it is. *)
-let decode_memory_fact_events json =
-  let* retrieved_count = required_int_field json "retrieved_count" in
-  let* retrieved_distinct_days = required_int_field json "retrieved_distinct_days" in
-  let* last_retrieved_at = optional_float_field json "last_retrieved_at" in
-  (* The server derives all three from one list of retrieval times
-     ([Keeper_memory_os_events.summary_for]): an empty list gives 0, 0 and
-     null, and a non-empty one gives a positive count, at least one day and
-     a clock. Any other combination is not a record this decoder knows, so it
-     is rejected here once instead of every reader drawing it. *)
-  let* mfe_retrieval =
-    match retrieved_count, retrieved_distinct_days, last_retrieved_at with
-    | 0, 0, None -> Ok Never_retrieved
-    | count, distinct_days, Some last_at when count > 0 && distinct_days > 0 ->
-        Ok (Retrieved { count; distinct_days; last_at })
-    | count, distinct_days, (None | Some _) ->
-        Error
-          (Printf.sprintf
-             "memory fact events disagree: retrieved_count %d, \
-              retrieved_distinct_days %d, last_retrieved_at %s"
-             count distinct_days
-             (match last_retrieved_at with
-              | None -> "null"
-              | Some at -> Float.to_string at))
-  in
-  let* mfe_retracted_count = required_int_field json "retracted_count" in
-  let* mfe_revised_from = require_string_list json "revised_from" in
-  Ok { mfe_retrieval; mfe_retracted_count; mfe_revised_from }
-
-let decode_memory_fact json =
-  let* mf_claim = required_string_field json "claim" in
-  let* raw_category = required_string_field json "category" in
-  let* mf_category =
-    (* The librarian taxonomy is a closed sum on the side that writes it
-       ([Keeper_memory_os_types.category]; the model's schema enum is built
-       from it and anything outside is rejected), so a word this build does
-       not know is a store written by something newer, not a category. *)
-    match Keeper_memory_os_types.category_of_string raw_category with
-    | Some category -> Ok category
-    | None -> Error (Printf.sprintf "unknown memory category %S" raw_category)
-  in
-  let* mf_origin = required_string_field json "origin" in
-  let* mf_first_seen = Json_util.require_float json "first_seen" in
-  let* mf_last_seen = Json_util.require_float json "last_seen" in
-  let* mf_memory_id = required_string_field json "memory_id" in
-  let* events_json = required_object_field json "events" in
-  let* mf_events = decode_memory_fact_events events_json in
-  Ok
-    { mf_claim
-    ; mf_category
-    ; mf_origin
-    ; mf_first_seen
-    ; mf_last_seen
-    ; mf_memory_id
-    ; mf_events
-    }
-
-let decode_memory_source_fact json =
-  let* msf_claim = required_string_field json "claim" in
-  let* msf_first_seen = Json_util.require_float json "first_seen" in
-  let* msf_path = required_string_field json "path" in
-  let* msf_sha256 = required_string_field json "sha256" in
-  Ok { msf_claim; msf_first_seen; msf_path; msf_sha256 }
-
-let decode_memory_invalidation json =
-  let* mi_source_path = required_string_field json "source_path" in
-  let* mi_invalidated_at = Json_util.require_float json "invalidated_at" in
-  let* mi_reason = required_string_field json "reason" in
-  Ok { mi_source_path; mi_invalidated_at; mi_reason }
-
-(* The server answers each store with exactly one of three shapes:
-   {"read_error"}, {"present": false}, or {"present": true, ...rows}. Read
-   by which field is there; anything else is a decode error, never an empty
-   store, so a broken reading cannot pass as "remembers nothing". *)
-let decode_memory_store_reading ~label decode_present json =
-  match Json_util.assoc_member_opt "read_error" json with
-  | Some (`String detail) -> Ok (Memory_store_read_error detail)
-  | Some other ->
-      Error
-        (Printf.sprintf "%s.read_error must be a string (received %s)" label
-           (Json_util.kind_name other))
-  | None ->
-      let* present = required_bool_field json "present" in
-      if not present then Ok Memory_store_absent
-      else
-        let* value = decode_present json in
-        Ok (Memory_store_present value)
-
-let decode_memory_ordinary_store json =
-  let* mos_revision = required_int_field json "revision" in
-  let* mos_updated_at = Json_util.require_float json "updated_at" in
-  let* facts_json = required_list_field json "facts" in
-  let* mos_facts = decode_list "facts" decode_memory_fact facts_json in
-  Ok { mos_revision; mos_updated_at; mos_facts }
-
-let decode_memory_source_store json =
-  let* mss_revision = required_int_field json "revision" in
-  let* mss_updated_at = Json_util.require_float json "updated_at" in
-  let* facts_json = required_list_field json "facts" in
-  let* mss_facts = decode_list "facts" decode_memory_source_fact facts_json in
-  let* invalidations_json = required_list_field json "invalidations" in
-  let* mss_invalidations =
-    decode_list "invalidations" decode_memory_invalidation invalidations_json
-  in
-  Ok { mss_revision; mss_updated_at; mss_facts; mss_invalidations }
-
-let decode_memory_fact_snapshot json =
-  let* mfs_keeper = required_string_field json "keeper" in
-  let* mfs_events_read_error = required_nullable_string_field json "events_read_error" in
-  let* ordinary_json = required_member json "ordinary" in
-  let* mfs_ordinary =
-    decode_memory_store_reading ~label:"ordinary" decode_memory_ordinary_store
-      ordinary_json
-  in
-  let* source_json = required_member json "source_bound" in
-  let* mfs_source =
-    decode_memory_store_reading ~label:"source_bound"
-      decode_memory_source_store source_json
-  in
-  Ok { mfs_keeper; mfs_ordinary; mfs_source; mfs_events_read_error }
-
 let decode_harness_verdict json =
   let* hv_task_id = required_string_field json "task_id" in
   let* hv_task_title = required_string_field json "task_title" in
@@ -5798,90 +4890,6 @@ let decode_harness_overview json =
       Some { hov_evaluator_status = status }
   | _ -> None
 
-
-let merge_keeper_memory_facts ~now loads =
-  let tagged keeper_name ~sep text =
-    if String.starts_with ~prefix:(keeper_name ^ sep) text then text
-    else keeper_name ^ sep ^ text
-  in
-  let step (ord, src, invals, event_errors, unread) (keeper_name, load) =
-    match load with
-    | Error detail -> ord, src, invals, event_errors, (keeper_name, detail) :: unread
-    | Ok snap ->
-      let event_errors =
-        match snap.mfs_events_read_error with
-        | None -> event_errors
-        | Some detail -> Printf.sprintf "%s: %s" keeper_name detail :: event_errors
-      in
-      let ord, unread =
-        match snap.mfs_ordinary with
-        | Memory_store_present store ->
-          ( List.rev_append
-              (List.map
-                 (fun (f : memory_fact) ->
-                   { f with mf_origin = tagged keeper_name ~sep:" \xc2\xb7 " f.mf_origin })
-                 store.mos_facts)
-              ord
-          , unread )
-        | Memory_store_read_error detail ->
-          ord, (keeper_name, "ordinary store: " ^ detail) :: unread
-        | Memory_store_absent -> ord, unread
-      in
-      let src, invals, unread =
-        match snap.mfs_source with
-        | Memory_store_present store ->
-          ( List.rev_append
-              (List.map
-                 (fun (f : memory_source_fact) ->
-                   { f with msf_path = tagged keeper_name ~sep:":" f.msf_path })
-                 store.mss_facts)
-              src
-          , List.rev_append
-              (List.map
-                 (fun (inv : memory_invalidation) ->
-                   { inv with mi_source_path = tagged keeper_name ~sep:":" inv.mi_source_path })
-                 store.mss_invalidations)
-              invals
-          , unread )
-        | Memory_store_read_error detail ->
-          src, invals, (keeper_name, "source-bound store: " ^ detail) :: unread
-        | Memory_store_absent -> src, invals, unread
-      in
-      ord, src, invals, event_errors, unread
-  in
-  let ord, src, invals, event_errors, unread =
-    List.fold_left step ([], [], [], [], []) loads
-  in
-  let snapshot =
-    { mfs_keeper = "*"
-    ; mfs_ordinary =
-        Memory_store_present
-          { mos_revision = 1; mos_updated_at = now; mos_facts = List.rev ord }
-    ; mfs_source =
-        Memory_store_present
-          { mss_revision = 1
-          ; mss_updated_at = now
-          ; mss_facts = List.rev src
-          ; mss_invalidations = List.rev invals
-          }
-    ; mfs_events_read_error =
-        (match List.rev event_errors with
-         | [] -> None
-         | errors -> Some (String.concat "; " errors))
-    }
-  in
-  let unread_summary =
-    match List.rev unread with
-    | [] -> None
-    | failures ->
-      Some
-        (Printf.sprintf "%d of %d keepers not read: %s"
-           (List.length (List.sort_uniq String.compare (List.map fst failures)))
-           (List.length loads)
-           (String.concat "; "
-              (List.map (fun (keeper_name, detail) -> keeper_name ^ ": " ^ detail) failures)))
-  in
-  snapshot, unread_summary
 
 let decode_harness_snapshot json =
   let* verdicts_json = required_list_field json "recent_verdicts" in

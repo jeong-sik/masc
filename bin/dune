@@ -1711,6 +1711,7 @@
  (wrapped false)
  (modules masc_tui_render_chat)
  (libraries
+  masc.keeper_portrait
   masc_tui_pick_list
   masc_tui_render_prim
   masc_tui_composer

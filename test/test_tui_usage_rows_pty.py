@@ -32,8 +32,8 @@ def run(executable):
             # Read this resize's completed frame so an earlier, wider screen
             # cannot supply coverage that disappeared at the current width.
             screen = h.unwrapped(h.screen_text(frame))
-            for evidence in (b"tokens 9876 (9 reported, 3 missing)",
-                             b"cost $0.1234 (8 reported, 4 missing)",
+            for evidence in (b"Tokens 9876 \xc2\xb7 9 reported, 3 missing",
+                             b"Cost $0.1234 \xc2\xb7 8 reported, 4 missing",
                              b"7 malformed rows"):
                 if evidence not in screen:
                     raise AssertionError(f"Usage evidence lost at {width} columns: {evidence!r}, {screen!r}")

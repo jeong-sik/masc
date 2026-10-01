@@ -246,6 +246,40 @@ let test_shared_saves_do_not_claim_keeper_ownership () =
       ~access:Lane_addon_sources.Unauthenticated ~config
       (request ~mode:"create" ~file_name:"local.toml" (declaration ~id:"local-editor" ())))))
 
+let test_unconfirmed_shared_save_withdraws_private_owner () =
+  with_fixture (fun _clock config directory _root _started ->
+    let run_id = "unconfirmed-private-source" in
+    Fusion_run_registry.register_running (Fusion_run_registry.global ()) ~run_id
+      ~keeper:"editor-keeper" ~preset:"default" ~roster:Fusion_types.preset_roster
+      ~topology:Fusion_types.Simple ~started_at:1.;
+    let private_bytes = Printf.sprintf {|id="private-save"
+run_id="editor-world"
+manifest_path="../../package.toml"
+[binding]
+sources=[{kind="fusion_run",source_id="fusion",run_id=%S}]
+|} run_id in
+    let receipt = unwrap (Runtime.save_declaration ~caller:"editor-keeper" ~config
+      (request ~mode:"create" ~file_name:"private.toml" private_bytes)) in
+    let revision = text "source_revision" (member "document" receipt) in
+    let shared = declaration ~id:"private-save" () in
+    let replace_file path source = Fs_compat.Atomic_replace_for_testing.save_file_atomic_strict_staged
+      ~sync_parent:(fun _ -> raise (Unix.Unix_error (Unix.EIO,"fsync",directory))) path source in
+    let writer ~directory request = Editor.For_testing.write ~replace_file ~directory request in
+    let saved = Runtime.For_testing.with_declaration_writer writer (fun () ->
+      Runtime.save_declaration ~caller:"editor-keeper" ~config
+        (request ~revision ~mode:"save" ~file_name:"private.toml" shared)) |> unwrap in
+    check string "visible shared save returns its durability receipt" "unconfirmed"
+      (member "write" saved |> text "durability");
+    let path = Filename.concat directory "private.toml" in
+    let observed = Runtime.read_declaration ~caller:"another-keeper" ~config
+      (`Assoc ["source_path",`String path]) |> unwrap in
+    check string "shared bytes remain readable after private ownership withdrawal" shared
+      (text "source_text" observed);
+    check bool "another Keeper can edit the now shared declaration" true
+      (Result.is_ok (Runtime.save_declaration ~caller:"another-keeper" ~config
+        (request ~revision:(text "source_revision" observed) ~mode:"save" ~file_name:"private.toml"
+          (declaration ~id:"private-save" ~value:"second-owner" ())))))
+
 let test_conflicts_and_invalid_candidates_preserve_active () = with_fixture (fun clock config directory _root started ->
   let original = declaration () in
   let created = save config (request ~mode:"create" ~file_name:"observer.toml" original) in
@@ -382,6 +416,8 @@ let () = run "Lane declaration editing" ["shared TOML owner",[
   test_case "shared and local saves do not claim private ownership" `Quick test_shared_saves_do_not_claim_keeper_ownership;
   test_case "Keeper cannot save another owner's Fusion capture" `Quick
       test_keeper_declaration_cannot_capture_another_fusion_owner;
+  test_case "unconfirmed shared save withdraws private ownership" `Quick
+      test_unconfirmed_shared_save_withdraws_private_owner;
   test_case "operator reassignment replaces private document authority" `Quick
       test_operator_reassignment_revokes_old_document_owner;
     test_case "Keeper creates and operator edits the same TOML" `Quick test_keeper_create_operator_read_and_edit;

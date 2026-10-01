@@ -35,7 +35,8 @@ vi.mock('../common/toast', () => ({
   showToast: vi.fn(),
 }))
 
-vi.mock('../common/feedback-state', () => ({
+vi.mock('../common/feedback-state', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../common/feedback-state')>(),
   EmptyState: ({ message }: { message: string }) => h('div', {}, message),
 }))
 
@@ -78,8 +79,10 @@ vi.mock('./board-state', () => ({
   detailComments: { value: [] },
   detailCommentPage: { value: { offset: 0, total: 0 } },
   detailLoading: { value: false },
+  detailReadPhase: { value: 'idle' },
   detailLoadingOlder: { value: false },
   detailPostId: { value: null },
+  detailFocusedCommentId: { value: null },
   loadOlderPostComments: vi.fn(),
   commentText: { value: '' },
   commentSubmitting: { value: false },
@@ -122,15 +125,18 @@ import {
   countCommentDescendants,
   filterCommentTree,
 } from './post-detail'
-import { detailCommentPage, detailComments } from './board-state'
+import { detailCommentPage, detailComments, detailPostId, detailFocusedCommentId, detailLoading, loadPostDetail } from './board-state'
 import { requestBoardContextInference, toggleReaction, voteComment, votePost } from '../../api/board'
-import type { BoardComment } from '../../types/core'
+import type { BoardComment, BoardPost } from '../../types/core'
 
 afterEach(() => {
   cleanup()
   vi.clearAllMocks()
   routerMock.route.value = { params: {} }
   detailComments.value = []
+  detailPostId.value = null
+  detailFocusedCommentId.value = null
+  detailLoading.value = false
   detailCommentPage.value = { offset: 0, total: 0 }
 })
 
@@ -501,6 +507,57 @@ describe('filterCommentTree', () => {
 })
 
 describe('PostDetail', () => {
+  it('loads missing ancestors when an already loaded reply gains route focus', async () => {
+    const post: BoardPost = {
+      id: 'post-1', author: 'keeper', title: 'Post', body: 'Body', tags: [],
+      votes: 0, comment_count: 21,
+      created_at: '2026-09-30T00:00:00Z', updated_at: '2026-09-30T00:00:00Z',
+    }
+    detailPostId.value = post.id
+    detailCommentPage.value = { offset: 20, total: 21 }
+    detailComments.value = [{
+      id: 'reply', post_id: post.id, parent_id: 'missing-parent', author: 'keeper',
+      content: 'loaded reply', created_at: post.created_at,
+    }]
+    routerMock.route.value = { params: { post: post.id } }
+    const { rerender } = render(h(PostDetail, { post }))
+    expect(loadPostDetail).not.toHaveBeenCalled()
+
+    routerMock.route.value = { params: { post: post.id, comment: 'reply' } }
+    rerender(h(PostDetail, { post: { ...post } }))
+
+    await waitFor(() => expect(loadPostDetail).toHaveBeenCalledExactlyOnceWith(post.id, 'reply'))
+  })
+
+  it('does not restart a focused detail when it remounts before ancestors arrive', () => {
+    const post = { id: 'post-1', author: 'keeper', title: 'Post', body: 'Body', tags: [],
+      votes: 0, comment_count: 21, created_at: '', updated_at: '' } as BoardPost
+    detailPostId.value = post.id
+    detailFocusedCommentId.value = 'reply'
+    detailLoading.value = true
+    detailCommentPage.value = { offset: 20, total: 21 }
+    detailComments.value = []
+    routerMock.route.value = { params: { post: post.id, comment: 'reply' } }
+    const mounted = render(h(PostDetail, { post }))
+    mounted.unmount()
+    render(h(PostDetail, { post: { ...post } }))
+    expect(loadPostDetail).not.toHaveBeenCalled()
+  })
+
+  it('retries an incomplete settled ancestor request when the focused detail is revisited', async () => {
+    const post = { id: 'retry-post', author: 'keeper', title: 'Post', body: 'Body', tags: [],
+      votes: 0, comment_count: 21, created_at: '', updated_at: '' } as BoardPost
+    detailPostId.value = post.id
+    detailFocusedCommentId.value = 'reply'
+    detailLoading.value = false
+    detailCommentPage.value = { offset: 20, total: 21 }
+    detailComments.value = [{ id: 'reply', post_id: post.id, parent_id: 'missing-parent',
+      author: 'keeper', content: 'Retained reply', created_at: '' } as BoardComment]
+    routerMock.route.value = { params: { post: post.id, comment: 'reply' } }
+    render(h(PostDetail, { post }))
+    await waitFor(() => expect(loadPostDetail).toHaveBeenCalledExactlyOnceWith(post.id, 'reply'))
+  })
+
   it('renders the classification reason when present', () => {
     const post = {
       id: 'post-1',

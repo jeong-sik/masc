@@ -24,20 +24,33 @@ class UnknownMethod(ValueError):
 
 def validate_json(value: Any) -> None:
     """Refuse values that cannot be encoded as finite UTF-8 JSON."""
-    if isinstance(value, float) and not math.isfinite(value):
-        raise InvalidInput("JSON data must contain only finite numbers")
-    if isinstance(value, str):
-        try:
-            value.encode("utf-8")
-        except UnicodeEncodeError as error:
-            raise InvalidInput("JSON strings must be valid UTF-8") from error
-    if isinstance(value, dict):
-        for key, item in value.items():
-            validate_json(key)
-            validate_json(item)
-    elif isinstance(value, (list, tuple)):
-        for item in value:
-            validate_json(item)
+    pending = [(value, False)]
+    active = set()
+    while pending:
+        item, leaving = pending.pop()
+        if leaving:
+            active.remove(id(item))
+            continue
+        if isinstance(item, float) and not math.isfinite(item):
+            raise InvalidInput("JSON data must contain only finite numbers")
+        if isinstance(item, str):
+            try:
+                item.encode("utf-8")
+            except UnicodeEncodeError as error:
+                raise InvalidInput("JSON strings must be valid UTF-8") from error
+        elif isinstance(item, dict):
+            if id(item) in active:
+                raise InvalidInput("JSON data must not contain reference cycles")
+            active.add(id(item))
+            pending.append((item, True))
+            for key, child in item.items():
+                pending.extend(((key, False), (child, False)))
+        elif isinstance(item, (list, tuple)):
+            if id(item) in active:
+                raise InvalidInput("JSON data must not contain reference cycles")
+            active.add(id(item))
+            pending.append((item, True))
+            pending.extend((child, False) for child in item)
 
 
 def object_value(value: Any, field: str) -> dict:
@@ -188,8 +201,12 @@ def serve(name: str, observe: Callable[[dict, tuple[Source, ...]], dict],
         method = None
         try:
             request = object_value(json.loads(line), "request")
-            # An invalid string ID cannot be echoed in a UTF-8 error reply.
-            validate_json(request.get("id"))
+            # Only JSON-RPC scalar IDs can be echoed in a bounded error reply.
+            supplied_id = request.get("id")
+            if not (supplied_id is None or isinstance(supplied_id, (str, int, float))
+                    and not isinstance(supplied_id, bool)):
+                raise InvalidInput("JSON-RPC id must be a string, number or null")
+            validate_json(supplied_id)
             request_id = request.get("id")
             method = request.get("method")
             if request.get("jsonrpc") != "2.0" or not isinstance(method, str):
@@ -224,6 +241,8 @@ def serve(name: str, observe: Callable[[dict, tuple[Source, ...]], dict],
                               "structuredContent": output, "isError": False}
                 except InvalidInput as error:
                     result = {"content": [{"type": "text", "text": str(error)}], "isError": True}
+                except RecursionError:
+                    result = {"content": [{"type": "text", "text": "JSON nesting exceeds the encoder limit"}], "isError": True}
             else:
                 raise UnknownMethod
             response = {"jsonrpc": "2.0", "id": request_id, "result": result}
@@ -236,7 +255,15 @@ def serve(name: str, observe: Callable[[dict, tuple[Source, ...]], dict],
         except InvalidInput as error:
             response = {"jsonrpc": "2.0", "id": request_id,
                         "error": {"code": -32602, "message": str(error)}}
-        encoded = json.dumps(response, ensure_ascii=False, allow_nan=False)
+        except RecursionError:
+            response = {"jsonrpc": "2.0", "id": request_id,
+                        "error": {"code": -32602, "message": "JSON nesting exceeds the decoder limit"}}
+        try:
+            encoded = json.dumps(response, ensure_ascii=False, allow_nan=False)
+        except RecursionError:
+            response = {"jsonrpc": "2.0", "id": request_id,
+                        "error": {"code": -32602, "message": "JSON nesting exceeds the encoder limit"}}
+            encoded = json.dumps(response, ensure_ascii=False, allow_nan=False)
         if max_reply_bytes is not None and len((encoded + "\n").encode("utf-8")) > max_reply_bytes:
             if method == "tools/call":
                 response = {"jsonrpc": "2.0", "id": request_id, "result": {

@@ -82,5 +82,14 @@ module For_testing : sig
       (unit, string) result) -> (unit -> 'a) -> 'a
   (** Fiber-local persistence replacement captured before filesystem offload.
       Allows the existing strict writer to inject a real post-rename failure. *)
+  val with_declaration_writer :
+    (directory:string -> Lane_addon_declaration.write_request ->
+      (Lane_addon_declaration.receipt, Lane_addon_declaration.error) result) ->
+    (unit -> 'a) -> 'a
+  val with_observation_writer :
+    (store:Lane_addon_store.t -> instance_id:string -> seq:int ->
+      sources:Yojson.Safe.t -> Lane_addon_types.output ->
+      (unit, Lane_addon_store.observation_write_error) result) -> (unit -> 'a) -> 'a
+  (** Fiber-local staged publication injection captured before offload. *)
   val reset : unit -> unit
 end

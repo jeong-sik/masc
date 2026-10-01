@@ -239,13 +239,17 @@ type runtime_attempt =
   ; lane_attempt_index : int
   ; checkpoint_owner : Runtime_execution.checkpoint_owner
   ; tool_result_inline_ceiling_bytes : int
+  ; tool_surface_enabled : bool
   ; usage_report : Runtime_execution.usage_report
   }
 (** Exact materialized candidate selected immediately before dispatch.
     [routing_run_id] identifies one lane walk, including reentry into the same
     Keeper turn. Together with [lane_attempt_index] it joins raw response usage
     to routed/completed/failed manifest rows. Lane
-    assignment ids and later runtime-table lookups are not attempt authority. *)
+    assignment ids and later runtime-table lookups are not attempt authority.
+    [tool_surface_enabled] reflects the selected runtime's tool capability,
+    including Claude Code's model-level tools suppression. Hooks intersect
+    this with their current tool names before advertising retrieval. *)
 
 type attempt_input =
   { attempt_goal_blocks : Agent_core.Types.content_block list option

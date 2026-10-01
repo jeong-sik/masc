@@ -7,13 +7,9 @@ import time
 import test_tui_keyboard_input as keyboard
 
 SOURCE_MODULES = (
-<<<<<<< HEAD
     "bin/masc_tui_render_approvals.ml",
     "bin/masc_tui_render_approvals.mli",
-||||||| 3bf3561070
-=======
     "bin/masc_tui.ml",
->>>>>>> 16ab89c310
     "bin/masc_tui_render_board.ml",
     "bin/masc_tui_render_board.mli",
     "bin/masc_tui_input_reader.ml",

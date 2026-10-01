@@ -8,7 +8,9 @@ let read ~now ~base_path =
   | Ok view -> Ready {policy=view.policy;balance=view.balance;events=view.events}
   | Error Candle_status.Off -> Off
   | Error (Candle_status.Disabled reason) -> Disabled reason
-  | Error error -> Disabled (Candle_status.error_to_string error)
+  | Error ((Candle_status.Invalid_time _ | Candle_status.Invalid_ledger _
+      | Candle_status.Ledger_unavailable _) as error) ->
+      Disabled (Candle_status.error_to_string error)
 
 let summary = function
   | Off -> Candle_observation.Off

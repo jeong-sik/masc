@@ -265,6 +265,100 @@ let test_forged_uuid_refused () =
     (Masc_domain.agent_credential_to_yojson escaped |> Yojson.Safe.to_string);
   check_refused_before_writes base_path (snapshot base_path)
 
+let test_keeper_ensure_refuses_foreign_uuid_before_publication () =
+  with_workspace @@ fun base_path ->
+  let first, _ = seed_pair base_path in
+  let token, operator = auth_ok (Auth.ensure_keeper_credential base_path ~agent_name:"operator") in
+  let operator = { operator with role = Masc_domain.Admin } in
+  Auth.save_credential base_path operator;
+  let id = match operator.id with Some id -> id | None -> fail "operator UUID missing" in
+  let uuid = Auth.credential_file base_path (Masc_domain.Credential_id.to_string id) in
+  Auth.save_private_text_file (Auth.credential_file base_path "aaa")
+    (Masc_domain.agent_credential_to_yojson { first with id = Some id } |> Yojson.Safe.to_string);
+  Auth.save_private_text_file (Auth.credential_file base_path "operator-alias")
+    (Yojson.Safe.to_string (`Assoc ["redirect_to", `String (Masc_domain.Credential_id.to_string id ^ ".json")]));
+  (* The earlier requested owner would need to remint its stale raw sidecar,
+     but another current owner's forged UUID must refuse that write too. *)
+  Auth.save_private_text_file (Auth.raw_token_file base_path "operator") shared;
+  let paths = [uuid; Auth.credential_file base_path "operator";
+    Auth.raw_token_file base_path "operator"; Auth.credential_file base_path "operator-alias";
+    Auth.credential_file base_path "aaa"; Auth.raw_token_file base_path "aaa";
+    Auth.credential_file base_path "bbb"; Auth.raw_token_file base_path "bbb"] in
+  let before = List.map read paths in
+  check bool "singleton refuses the forged UUID before publication" true
+    (Result.is_error (Auth.ensure_keeper_credential base_path ~agent_name:"aaa"));
+  check (list string) "singleton preserves every victim, raw and alias byte" before (List.map read paths);
+  let results = auth_ok (Auth.ensure_keeper_credentials base_path ~agent_names:["operator"; "aaa"]) in
+  check bool "both conflicting publishers refuse in the batch" true
+    (List.for_all (fun (_, result) -> Result.is_error result) results);
+  check (list string) "batch does not partially remint its earlier colliding owner" before (List.map read paths);
+  let verified = auth_ok (Auth.verify_token base_path ~agent_name:"operator" ~token) in
+  check bool "victim bearer remains the original Admin authority" true
+    (verified = operator)
+;;
+
+let test_keeper_ensure_refuses_another_owner_alias () =
+  List.iter (fun keep_raw -> with_workspace @@ fun base_path ->
+    let _pair = seed_pair base_path in
+    let token, victim = auth_ok (Auth.ensure_keeper_credential base_path ~agent_name:"operator") in
+    let id = match victim.id with Some id -> id | None -> fail "operator UUID missing" in
+    let uuid = Auth.credential_file base_path (Masc_domain.Credential_id.to_string id) in
+    Auth.save_private_text_file (Auth.credential_file base_path "aaa")
+      (Yojson.Safe.to_string (`Assoc ["redirect_to", `String (Masc_domain.Credential_id.to_string id ^ ".json")]));
+    let raw = Auth.raw_token_file base_path "aaa" in
+    if not keep_raw then Unix.unlink raw;
+    let paths = [uuid; Auth.credential_file base_path "operator";
+      Auth.raw_token_file base_path "operator"; Auth.credential_file base_path "aaa";
+      Auth.credential_file base_path "bbb"; Auth.raw_token_file base_path "bbb"] in
+    let before = List.map read paths in
+    check bool "singleton refuses another owner's redirect" true
+      (Result.is_error (Auth.ensure_keeper_credential base_path ~agent_name:"aaa"));
+    let results = auth_ok (Auth.ensure_keeper_credentials base_path ~agent_names:["aaa"]) in
+    check bool "batch refuses another owner's redirect" true
+      (List.for_all (fun (_, result) -> Result.is_error result) results);
+    check (list string) "refusal preserves credential, UUID and raw bytes" before (List.map read paths);
+    check bool "refusal does not create a missing raw sidecar" keep_raw (Sys.file_exists raw);
+    if keep_raw then check string "existing raw survives alias refusal" shared (read raw);
+    check bool "victim bearer remains authoritative" true
+      (auth_ok (Auth.verify_token base_path ~agent_name:"operator" ~token) = victim))
+    [true; false]
+;;
+
+let test_keeper_ensure_refuses_absent_uuid_collisions () =
+  List.iter (fun second_id -> with_workspace @@ fun base_path ->
+    let first, second = seed_pair base_path in
+    List.iter (fun (name, credential, id) ->
+      Auth.save_private_text_file (Auth.credential_file base_path name)
+        (Masc_domain.agent_credential_to_yojson
+           { credential with id = Some (Masc_domain.Credential_id.of_string id) }
+         |> Yojson.Safe.to_string))
+      ["aaa", first, "unpublished-keeper-uuid"; "bbb", second, second_id];
+    let before = snapshot base_path in
+    check bool "singleton refuses absent duplicate or case-variant UUID ownership" true
+      (Result.is_error (Auth.ensure_keeper_credential base_path ~agent_name:"aaa"));
+    let results = auth_ok (Auth.ensure_keeper_credentials base_path ~agent_names:["aaa"; "bbb"]) in
+    check bool "batch has no admitted publisher for these colliding targets" true
+      (List.for_all (fun (_, result) -> Result.is_error result) results);
+    check (list string) "all named credentials and raw bearers remain exact" before (snapshot base_path);
+    check bool "refusal never creates the colliding target" false
+      (Sys.file_exists (Auth.credential_file base_path "unpublished-keeper-uuid")))
+    ["unpublished-keeper-uuid"; "UNPUBLISHED-KEEPER-UUID"]
+;;
+
+let test_keeper_same_owner_partial_uuid_retry () =
+  with_workspace @@ fun base_path ->
+  let first, _ = seed_pair base_path in
+  let first = { first with id = Some (Masc_domain.Credential_id.of_string "keeper-retry-uuid") } in
+  Auth.save_private_text_file (Auth.credential_file base_path "aaa")
+    (Masc_domain.agent_credential_to_yojson first |> Yojson.Safe.to_string);
+  Auth.save_private_text_file (Auth.credential_file base_path "keeper-retry-uuid")
+    (Masc_domain.agent_credential_to_yojson { first with token = Auth.sha256_hash "partial-publication" }
+     |> Yojson.Safe.to_string);
+  let _, repaired = auth_ok (Auth.ensure_keeper_credential base_path ~agent_name:"aaa") in
+  check bool "same-owner partial UUID remains reusable" true (repaired.id = first.id);
+  check_recoverable base_path "aaa"
+;;
+
 let test_self_redirect_refused () =
   with_workspace @@ fun base_path ->
   let first, _ = seed_pair base_path in
@@ -554,12 +648,74 @@ let test_normalized_names_retain_bearer_authority () =
       (auth_ok (Auth.find_credential_by_token base_path ~token:raw)).agent_name)
     ["Minsu"; "keeper:foo"]
 
+
+let test_normalized_uuid_names_retain_bearer_authority () =
+  with_workspace @@ fun base_path ->
+  List.iteri (fun index name ->
+    let raw, current = auth_ok (Auth.ensure_keeper_credential base_path ~agent_name:name) in
+    let id = match current.id with
+      | Some id -> id
+      | None -> fail "Keeper fixture must publish a UUID credential" in
+    let named = Auth.credential_file base_path name in
+    let stub = Yojson.Safe.from_string (read named) in
+    check bool "normalized named file is the UUID stub" true
+      (stub = `Assoc ["redirect_to", `String (Masc_domain.Credential_id.to_string id ^ ".json")]);
+    check string "UUID bearer resolves the original owner name" name
+      (auth_ok (Auth.find_credential_by_token base_path ~token:raw)).agent_name;
+    let admitted = Auth.list_credentials base_path in
+    check bool "UUID-backed normalized owner appears in listing" true (List.mem current admitted);
+    let alias_name = "normalized-alias-" ^ string_of_int index in
+    auth_ok (Auth.ensure_credential_alias base_path ~canonical_name:name ~alias_name);
+    check bool "alias resolves without becoming a second canonical owner" true
+      (Auth.load_credential base_path alias_name = Some current);
+    let failed_raw = "normalized-orphan-token-" ^ string_of_int index in
+    let orphan_id = Masc_domain.Credential_id.of_string
+      ("normalized-orphan-" ^ string_of_int index) in
+    Auth.save_private_text_file
+      (Auth.credential_file base_path (Masc_domain.Credential_id.to_string orphan_id))
+      (Masc_domain.agent_credential_to_yojson
+         { current with id = Some orphan_id; token = Auth.sha256_hash failed_raw }
+       |> Yojson.Safe.to_string);
+    (* Republish the unchanged canonical credential through the public writer
+       to invalidate bearer lookup without retiring the alias or orphan. *)
+    Auth.save_credential base_path current;
+    check bool "aliases and orphan UUID do not change the owner listing" true
+      (List.sort Stdlib.compare (Auth.list_credentials base_path)
+       = List.sort Stdlib.compare admitted);
+    check bool "diagnostic listing excludes aliases and orphan UUID records" true
+      (List.sort Stdlib.compare (List.filter_map Result.to_option
+         (Auth.list_credential_results base_path)) = List.sort Stdlib.compare admitted);
+    check bool "normalized orphan payload cannot authenticate" true
+      (Result.is_error (Auth.find_credential_by_token base_path ~token:failed_raw));
+    check string "canonical UUID bearer retains authority after orphan publication" name
+      (auth_ok (Auth.find_credential_by_token base_path ~token:raw)).agent_name)
+    ["Minsu"; "keeper:foo"]
+
+let test_minted_bearer_survives_retirement_failure () =
+  with_workspace @@ fun base_path ->
+  let _, prior = auth_ok (Auth.ensure_keeper_credential base_path ~agent_name:"aaa") in
+  let id = match prior.id with Some id -> id | None -> fail "expected UUID-backed fixture" in
+  let target = Auth.credential_file base_path (Masc_domain.Credential_id.to_string id) in
+  Unix.unlink target;
+  Unix.mkdir target 0o700;
+  let raw, current = auth_ok (Auth.create_token base_path ~agent_name:"aaa" ~role:Masc_domain.Worker) in
+  check string "returned bearer matches committed named record" current.token (Auth.sha256_hash raw);
+  check string "returned bearer authenticates" "aaa"
+    (auth_ok (Auth.find_credential_by_token base_path ~token:raw)).agent_name;
+  check bool "cleanup failure remains observable on disk" true (Sys.is_directory target)
+
 let () =
   run "auth_token_rotation_transaction"
     [ "rotation",
-      [ test_case "batch retires every initial shared bearer" `Quick test_batch_retires_every_initially_shared_bearer
+      [ test_case "Keeper ensure rejects forged foreign UUID before publication" `Quick test_keeper_ensure_refuses_foreign_uuid_before_publication
+      ; test_case "Keeper ensure rejects foreign aliases with or without raw" `Quick test_keeper_ensure_refuses_another_owner_alias
+      ; test_case "Keeper refuses absent and case-variant UUID collisions" `Quick test_keeper_ensure_refuses_absent_uuid_collisions
+      ; test_case "Keeper same-owner partial UUID retry" `Quick test_keeper_same_owner_partial_uuid_retry
+      ; test_case "batch retires every initial shared bearer" `Quick test_batch_retires_every_initially_shared_bearer
       ; test_case "batch continues after raw preflight refusal" `Quick test_batch_continues_after_raw_preflight_failure
       ; test_case "normalized names retain bearer authority" `Quick test_normalized_names_retain_bearer_authority
+      ; test_case "normalized UUID names retain bearer authority" `Quick test_normalized_uuid_names_retain_bearer_authority
+      ; test_case "minted bearer survives superseded payload cleanup failure" `Quick test_minted_bearer_survives_retirement_failure
       ; test_case "unselected case-variant UUID refuses before writes" `Quick test_unselected_case_variant_uuid_refused
       ; test_case "unpublished UUID cannot grant bearer authority" `Quick test_unpublished_uuid_has_no_bearer_authority
       ; test_case "retired UUID cannot retain bearer authority" `Quick test_retired_uuid_has_no_bearer_authority

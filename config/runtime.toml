@@ -902,6 +902,7 @@ streaming = true
 reasoning-effort = "low"
 [models.codex-gpt-6-1-sol-low.capabilities]
 supports-image-input = true
+[codex_subscription.codex-gpt-6-1-sol-low]
 
 [models.codex-gpt-6-1-sol-medium]
 api-name = "gpt-6.1-sol"
@@ -912,6 +913,7 @@ streaming = true
 reasoning-effort = "medium"
 [models.codex-gpt-6-1-sol-medium.capabilities]
 supports-image-input = true
+[codex_subscription.codex-gpt-6-1-sol-medium]
 
 [models.codex-gpt-6-1-sol-high]
 api-name = "gpt-6.1-sol"
@@ -922,6 +924,7 @@ streaming = true
 reasoning-effort = "high"
 [models.codex-gpt-6-1-sol-high.capabilities]
 supports-image-input = true
+[codex_subscription.codex-gpt-6-1-sol-high]
 
 [models.codex-gpt-6-1-sol-xhigh]
 api-name = "gpt-6.1-sol"
@@ -932,6 +935,7 @@ streaming = true
 reasoning-effort = "xhigh"
 [models.codex-gpt-6-1-sol-xhigh.capabilities]
 supports-image-input = true
+[codex_subscription.codex-gpt-6-1-sol-xhigh]
 
 [models.codex-gpt-6-1-sol-max]
 api-name = "gpt-6.1-sol"
@@ -942,6 +946,7 @@ streaming = true
 reasoning-effort = "max"
 [models.codex-gpt-6-1-sol-max.capabilities]
 supports-image-input = true
+[codex_subscription.codex-gpt-6-1-sol-max]
 
 [models.codex-gpt-6-1-sol-ultra]
 api-name = "gpt-6.1-sol"
@@ -952,6 +957,7 @@ streaming = true
 reasoning-effort = "ultra"
 [models.codex-gpt-6-1-sol-ultra.capabilities]
 supports-image-input = true
+[codex_subscription.codex-gpt-6-1-sol-ultra]
 
 [models.codex-gpt-6-astra-ultra]
 api-name = "gpt-6-astra"
@@ -962,6 +968,7 @@ streaming = true
 reasoning-effort = "ultra"
 [models.codex-gpt-6-astra-ultra.capabilities]
 supports-image-input = true
+[codex_subscription.codex-gpt-6-astra-ultra]
 
 [models.codex-gpt-6-sol-ultra]
 api-name = "gpt-6-sol"
@@ -972,6 +979,7 @@ streaming = true
 reasoning-effort = "ultra"
 [models.codex-gpt-6-sol-ultra.capabilities]
 supports-image-input = true
+[codex_subscription.codex-gpt-6-sol-ultra]
 
 [models.codex-gpt-5-6-sol-ultra]
 api-name = "gpt-5.6-sol"
@@ -982,6 +990,7 @@ streaming = true
 reasoning-effort = "ultra"
 [models.codex-gpt-5-6-sol-ultra.capabilities]
 supports-image-input = true
+[codex_subscription.codex-gpt-5-6-sol-ultra]
 
 [models.codex-gpt-5-6-terra-ultra]
 api-name = "gpt-5.6-terra"
@@ -992,6 +1001,7 @@ streaming = true
 reasoning-effort = "ultra"
 [models.codex-gpt-5-6-terra-ultra.capabilities]
 supports-image-input = true
+[codex_subscription.codex-gpt-5-6-terra-ultra]
 
 [models.codex-gpt-5-6-sol-medium]
 api-name = "gpt-5.6-sol"

@@ -28,11 +28,11 @@ let channel_label ~channel_id ~channel_name =
 let target_label target =
   channel_label ~channel_id:target.channel_id ~channel_name:target.channel_name
 
-let targets ~keeper_name (connectors : Reading.connector list) =
+let targets ~keeper_name (connectors : Masc.Tui_decode_connectors.connector list) =
   List.concat_map
-    (fun (connector : Reading.connector) ->
+    (fun (connector : Masc.Tui_decode_connectors.connector) ->
        List.filter_map
-         (fun (binding : Reading.connector_binding) ->
+         (fun (binding : Masc.Tui_decode_connectors.connector_binding) ->
             if String.equal binding.cb_keeper_name keeper_name then
               Some
                 { connector_id = connector.cn_id
@@ -45,9 +45,9 @@ let targets ~keeper_name (connectors : Reading.connector list) =
          connector.cn_bindings)
     connectors
 
-let unreadable_transports (connectors : Reading.connector list) =
+let unreadable_transports (connectors : Masc.Tui_decode_connectors.connector list) =
   List.filter_map
-    (fun (connector : Reading.connector) ->
+    (fun (connector : Masc.Tui_decode_connectors.connector) ->
        match connector.cn_binding_store_read_ok with
        | Some false -> Some (Terminal_text.single_line connector.cn_display_name)
        | Some true | None -> None)

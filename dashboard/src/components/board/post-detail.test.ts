@@ -1,6 +1,6 @@
 import { h } from 'preact'
 import type { TurnAnchor } from '../keeper-turn-inspector'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/preact'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/preact'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import '@testing-library/jest-dom'
 
@@ -359,6 +359,16 @@ describe('CommentThread', () => {
     })
   })
 
+  it('keeps a recently active reply thread inside the initial root window', () => {
+    const root = { id: 'old-parent', post_id: 'post-1', parent_id: null, author: 'agent', content: 'Older thread', created_at: '2026-04-02T00:00:00Z' }
+    const comments = [root, ...Array.from({ length: 6 }, (_, index) => ({ ...root, id: `root-${index}`, content: `Other root ${index}` })),
+      { ...root, id: 'newest-reply', parent_id: root.id, content: 'Newest page reply' }]
+    render(h(CommentThread, { comments, postId: 'post-1' }))
+    expect(screen.getByText('Older thread')).toBeInTheDocument()
+    expect(screen.getByText('Newest page reply')).toBeInTheDocument()
+    expect(screen.queryByText('Other root 0')).not.toBeInTheDocument()
+  })
+
   it('surfaces an older root comment when it is route-focused', () => {
     const comments = Array.from({ length: 7 }, (_, index) => ({
       id: `c${index + 1}`,
@@ -507,6 +517,16 @@ describe('filterCommentTree', () => {
 })
 
 describe('PostDetail', () => {
+  it('clears retained route focus when the same full detail is reopened ordinarily', async () => {
+    const post = { id: 'post-1', author: 'agent', title: 'Reopened', body: 'Body', content: 'Body', tags: [], votes: 0, comment_count: 0,
+      created_at: '2026-04-02T00:00:00Z', updated_at: '2026-04-02T00:00:00Z', post_kind: 'direct' } as any
+    detailPostId.value = post.id
+    detailFocusedCommentId.value = 'old-focus'
+    render(h(PostDetail, { post }))
+    await waitFor(() => expect(loadPostDetail).toHaveBeenCalledExactlyOnceWith(post.id, null))
+  })
+
+
   it('loads missing ancestors when an already loaded reply gains route focus', async () => {
     const post: BoardPost = {
       id: 'post-1', author: 'keeper', title: 'Post', body: 'Body', tags: [],
@@ -859,6 +879,22 @@ describe('PostDetail', () => {
       post: 'post-1',
       focus: 'curation',
     })
+  })
+
+  it('reloads the ordinary page when an existing focused detail route is cleared', async () => {
+    const post = { id: 'clear-post', author: 'keeper', title: 'Post', body: 'Body', tags: [],
+      votes: 0, comment_count: 1, created_at: '', updated_at: '' } as any
+    detailPostId.value = post.id
+    detailFocusedCommentId.value = 'reply'
+    detailComments.value = [{ id: 'reply', post_id: post.id, parent_id: null,
+      author: 'keeper', content: 'Focused reply', created_at: '' }] as any
+    routerMock.route.value = { params: { post: post.id, comment: 'reply' } }
+    const mounted = render(h(PostDetail, { post }))
+    await act(async () => {})
+    vi.mocked(loadPostDetail).mockClear()
+    routerMock.route.value = { params: { post: post.id } }
+    mounted.rerender(h(PostDetail, { post: { ...post } }))
+    await waitFor(() => expect(loadPostDetail).toHaveBeenCalledExactlyOnceWith(post.id, null))
   })
 
   it('shows a turn affordance and opens the inspector at the post origin turn_ref', () => {

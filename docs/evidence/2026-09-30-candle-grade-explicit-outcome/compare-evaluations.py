@@ -6,6 +6,10 @@ from fractions import Fraction
 import hashlib
 import json
 from pathlib import Path
+import runpy
+
+
+validate_result = runpy.run_path(str(Path(__file__).with_name("audit-candidate.py")))["validate_result"]
 
 
 def require(condition, message):
@@ -30,6 +34,8 @@ def load_run(directory):
     require((metadata["plan"] == plan), 'validation failed: metadata["plan"] == plan')
     require((metadata["build"]["commit"] == plan["source_commit"]), 'validation failed: metadata["build"]["commit"] == plan["source_commit"]')
     require((json.loads((directory / "exit.json").read_text())["exit_code"] == 0), 'validation failed: json.loads((directory / "exit.json").read_text())["exit_code"] == 0')
+    for row in rows:
+        validate_result(row, plan["runtime_id"])
     summaries = {}
     for case_id, case in cases.items():
         selected = [row for row in rows if row["case_id"] == case_id]

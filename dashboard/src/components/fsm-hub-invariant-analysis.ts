@@ -29,14 +29,10 @@ function invariantDetail(
   ok: boolean,
 ): string {
   switch (key) {
-    case 'no_runtime_before_measurement':
-      return ok
-        ? 'measurement 가 captured 된 뒤에만 runtime work 가 진행됨.'
-        : `measurement.captured=${String(snapshot.measurement.captured)} 인데 KCL=${snapshot.runtime.state}.`
     case 'event_priority_monotone':
       return ok
-        ? '이 turn 은 경쟁 measurement snapshot 을 emit 하지 않았음.'
-        : '동일 turn 을 소유하려는 measurement event 가 둘 이상 등장.'
+        ? 'measurement bind_count <= 1 이고 current 와 pending measurement 가 동시에 존재하지 않음.'
+        : 'measurement bind_count > 1 이거나 current 와 pending measurement 가 동시에 존재함.'
     case 'phase_derivation_agreement': {
       const diag = snapshot.phase_diagnosis
       if (ok) return '저장된 KSM phase 와 derive_phase(conditions) 결과가 일치.'

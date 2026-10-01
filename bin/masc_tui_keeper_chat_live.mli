@@ -22,8 +22,8 @@
     {2 Chunk boundaries}
 
     [feed] takes bytes, not lines. A chunk may end mid-line, and the next one
-    may carry the rest. Deltas are only ever built from lines that have been
-    seen whole. *)
+    may carry the rest. Deltas are built only from complete blank-line-terminated
+    events; data fields are joined before decoding. *)
 
 type args_fragment =
   | Args_delta of string

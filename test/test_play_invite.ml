@@ -122,7 +122,10 @@ let test_list_marks_expiry () =
     let _ = Auth.create_token base_path ~agent_name:"codex" ~role:Masc_domain.Worker in
     let now = Unix.gettimeofday () in
     let listed at =
-      List.map (fun { I.invite_name; expired; _ } -> invite_name, expired) (I.list ~base_path ~now:at)
+      match I.list ~base_path ~now:at with
+      | Ok invites -> List.map (fun { I.invite_name; expired; _ } -> invite_name, expired) invites
+      | Error (I.Invalid_expiry (Masc_domain.Credential_expiry.Invalid_timestamp stamp)) -> fail ("invalid expiry: " ^ stamp)
+      | Error (I.Credentials_unavailable error) -> fail (Masc_domain.masc_error_to_string error)
     in
     check (list (pair string bool)) "only players, live" [ "minsu", false ] (listed now);
     check (list (pair string bool)) "expired two hours on" [ "minsu", true ]
@@ -165,6 +168,38 @@ let test_revoke () =
       (I.revoke ~base_path ~name:(name "codex") ~after_revoke:Fun.id = Error (I.Not_an_invite Masc_domain.Worker));
     check bool "and stays" true (Option.is_some (Auth.load_credential base_path "codex")))
 
+let test_revoke_rejects_forged_uuid_binding () =
+  with_workspace (fun base_path ->
+    ready base_path;
+    let create who role = match Auth.create_token base_path ~agent_name:who ~role with
+      | Ok value -> value
+      | Error error -> fail (Masc_domain.masc_error_to_string error) in
+    let _invite_token, invite = create "minsu" Masc_domain.Player in
+    let other_token, other = create "other" Masc_domain.Worker in
+    let uuid_path (credential : Masc_domain.agent_credential) = match credential.id with
+      | Some id -> Auth.credential_file base_path (Masc_domain.Credential_id.to_string id)
+      | None -> fail "fixture needs UUID-backed credentials" in
+    let invite_path=uuid_path invite and other_path=uuid_path other in
+    (* Keep the invite owner/role, but forge its embedded ID to name another
+       owner's actual UUID file. The name redirect still points to invite_path. *)
+    let forged={invite with id=other.id} in
+    Out_channel.with_open_text invite_path (fun channel ->
+      output_string channel (Yojson.Safe.to_string (Masc_domain.agent_credential_to_yojson forged)));
+    let paths=[Auth.credential_file base_path "minsu";invite_path;
+      Auth.credential_file base_path "other";other_path] in
+    let bytes path=In_channel.with_open_text path In_channel.input_all in
+    let before=List.map bytes paths in
+    let effects=ref 0 in
+    (match I.revoke ~base_path ~name:(name "minsu")
+       ~after_revoke:(fun _ -> incr effects) with
+     | Error (I.Credential_not_deleted _) -> ()
+     | Ok () | Error _ -> fail "forged UUID binding must refuse deletion");
+    check int "invalid ownership invokes no controller effect" 0 !effects;
+    check (list string) "both owners' redirects and UUID records remain exact" before (List.map bytes paths);
+    (match Auth.find_credential_by_token base_path ~token:other_token with
+     | Ok credential -> check string "unrelated owner still authenticates" "other" credential.Masc_domain.agent_name
+     | Error error -> fail (Masc_domain.masc_error_to_string error)))
+
 let () =
   run "play-invite"
     [ ( "invite"
@@ -176,6 +211,7 @@ let () =
             test_a_taken_name_is_refused
         ; test_case "the list shows players and their expiry" `Quick test_list_marks_expiry
         ; test_case "unreadable names remain occupied" `Quick test_unreadable_names_remain_occupied
+        ; test_case "forged UUID binding preserves both owners" `Quick test_revoke_rejects_forged_uuid_binding
         ; test_case "revoke deletes only an invite" `Quick test_revoke
         ] )
     ]

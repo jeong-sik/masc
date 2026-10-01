@@ -342,10 +342,9 @@ type canonical_reply_payload =
   ; turn_outcome : Keeper_turn_outcome.t
   ; turn_ref : Ids.Turn_ref.t
   ; external_effect_target : Keeper_surface_post.delivery_target option
-      (** [Some] exactly on [External_effect_completed]: the completed
-          effect was a surface post. The decoder rejects that outcome
-          without a delivery target and a delivery target on any other
-          outcome. *)
+      (** Completed surface-post evidence. Required for [Terminal_effect_settled]
+          and optional for [Continuation_checkpoint], where completed delivery
+          does not settle the unfinished operation. Rejected on other outcomes. *)
   ; visible_reply : string
   ; poll_body : string
   }

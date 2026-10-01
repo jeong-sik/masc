@@ -1279,7 +1279,7 @@ let code_history_bindings =
   ; b Navigate "Home/End" "edges"
   ; b Act "Enter" "open" ~help:"open the record owning the first visible row; metadata and failure rows have no target"
   ; b Act "H" "close"
-  ; b Navigate "Esc" "back"
+  ; b Navigate "Left / Esc" "back"
   ; b Meta "?" "help"
   ]
 

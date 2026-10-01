@@ -620,6 +620,18 @@ sources=%s
      | Ok _ -> fail "stale repair replaced a changed document");
     ignore (save ~revision:(Store.digest malformed) (source next_run) |> require_document);
     check string "repair can replace a pruned source" (source next_run)
+      (read owner |> require_document |> text "source_text");
+    write path (source foreign_run);
+    let final_run = register_private_run (root ^ "/after-stale") owner in
+    let final_source = source final_run in
+    (match save ~revision:(Store.digest "stale") final_source with
+     | Error error -> check bool "failed repair keeps current body private" true
+         (Option.is_none error.Lane_addon_declaration.current)
+     | Ok _ -> fail "stale repair replaced a changed document");
+    check bool "stale repair never admits foreign bytes as readable prior" true
+      (Result.is_error (read owner));
+    ignore (save ~revision:(Store.digest (source foreign_run)) final_source |> require_document);
+    check string "exact repair after stale refusal restores owned bytes" final_source
       (read owner |> require_document |> text "source_text"))
 
 let test_pending_document_owner_rejects_replaced_source () =

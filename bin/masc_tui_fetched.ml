@@ -135,6 +135,14 @@ let current state =
 
 let current_key state = Option.map fst (current state)
 
+let current_request state =
+  match state.status with
+  | Status_absent -> None
+  | Status_loading request | Status_ready (request, _)
+  | Status_refreshing (request, _, _) | Status_stale (request, _, _)
+  | Status_failed (request, _) -> Some request
+;;
+
 let view_for ~equal state ~key =
   let matches request = equal request.key key in
   match state.status with

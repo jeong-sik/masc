@@ -2020,9 +2020,10 @@ type async_msg =
       string Masc_tui_fetched.request
       * (Masc.Tui_decode.blame_block list, string) result
   (* The path the note anchored to; success re-reads the listing. *)
-  (* (question, symbol, answer) — the note the pane shows names both. *)
+  (* The query owns its source file, scope and question until it lands. *)
   | Code_lsp_answered of
-      string * string * (Masc.Tui_decode.lsp_answer, string) result
+      Masc_tui_types.code_lsp_query Masc_tui_fetched.request
+      * (Masc.Tui_decode.lsp_answer, string) result
   | Resource_read of
       string * (Masc_tui_mcp.resource_content list, string) result
   | Github_identity_view_loaded of Masc_tui_types.detail_read_request * (string list, string) result
@@ -3930,32 +3931,36 @@ let start_code_lsp_question state ~mailbox ~(question : string)
   match Masc_tui_fetched.current_key state.code_file with
   | None -> report_action state "error" "no file is open on the Code surface"
   | Some path ->
-      state.code_lsp_note <-
-        Some (Printf.sprintf "asking %s about %S" question symbol);
-      let host = server_peer_host in
-      let port = state.port in
-      let line = state.code_file_cursor + 1 in
-      let keeper, repo = code_scope_axes state in
-      let run () =
-        let result =
-          try
-            Masc_tui_http.fetch_lsp_question ?keeper ?repo ~host ~port ~path
-              ~line ~symbol ~question ()
-          with
-          | Eio.Cancel.Cancelled _ as exn -> raise exn
-          | exn -> Error (Printexc.to_string exn)
-        in
-        enqueue_async mailbox (Code_lsp_answered (question, symbol, result))
-      in
-      (match Eio_context.get_switch_opt () with
-       | Some sw ->
-           Eio.Fiber.fork_daemon ~sw (fun () ->
-               run ();
-               `Stop_daemon)
-       | None ->
-           enqueue_async mailbox
-             (Code_lsp_answered
-                (question, symbol, Error "Eio switch is unavailable")))
+      (match Code_results.start_lsp_question state ~question ~symbol with
+       | None -> ()
+       | Some request ->
+          let query = Masc_tui_fetched.request_key request in
+          state.code_lsp_note <-
+            Some (Printf.sprintf "asking %s about %S" question symbol);
+          let host = server_peer_host in
+          let port = state.port in
+          let line = query.clq_line in
+          let keeper, repo = code_scope_axes state in
+          let run () =
+            let result =
+              try
+                Masc_tui_http.fetch_lsp_question ?keeper ?repo ~host ~port ~path
+                  ~line ~symbol ~question ()
+              with
+              | Eio.Cancel.Cancelled _ as exn -> raise exn
+              | exn -> Error (Printexc.to_string exn)
+            in
+            enqueue_async mailbox (Code_lsp_answered (request, result))
+          in
+          (match Eio_context.get_switch_opt () with
+           | Some sw ->
+               Eio.Fiber.fork_daemon ~sw (fun () ->
+                   run ();
+                   `Stop_daemon)
+           | None ->
+               enqueue_async mailbox
+                 (Code_lsp_answered
+                    (request, Error "Eio switch is unavailable"))))
 
 let account_login_resume_path state =
   Filename.concat (Common.masc_dir_from_base_path ~base_path:state.local_base_path) "tui-account-login.json"
@@ -5421,7 +5426,7 @@ let refresh_repository_changes state ~mailbox =
 
 let open_repository_change_in_code state ~mailbox ~scope
     (change : Tui_decode.repository_change) =
-  state.code_scope <-
+  set_code_scope state
     (match scope with
      | Tui_decode.Repository_change_project -> Code_scope_project
      | Tui_decode.Repository_change_repository repository_id ->
@@ -15110,8 +15115,8 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
       Code_results.apply_file state request result
   | Code_blame_loaded (request, result) ->
       Code_results.apply_blame state request result
-  | Code_lsp_answered (question, symbol, result) ->
-      (match Code_results.apply_lsp_answer state ~question ~symbol result with
+  | Code_lsp_answered (request, result) ->
+      (match Code_results.apply_lsp_answer state request result with
        | Code_results.No_followup -> ()
        | Code_results.Reveal_cursor ->
            state.code_file_scroll <-
@@ -23812,7 +23817,7 @@ and is loaded on demand through keeper_skill.
             | (scope, dir, file, cursor, scroll) :: rest ->
                 state.code_jump_back <- rest;
                 let scope_changed = state.code_scope <> scope in
-                state.code_scope <- scope;
+                set_code_scope state scope;
                 let dir_changed = not (String.equal state.code_dir dir) in
                 state.code_dir <- dir;
                 if scope_changed || dir_changed then begin
@@ -24772,7 +24777,7 @@ and is loaded on demand through keeper_skill.
                 else if state.code_scope <> Code_scope_project then begin
                   (* Above a keeper's or a repository's root sits the
                      project tree the surface started on. *)
-                  state.code_scope <- Code_scope_project;
+                  set_code_scope state Code_scope_project;
                   state.code_cursor <- 0;
                   state.code_listing <- Masc_tui_fetched.clear state.code_listing;
                   launch_code_entries_load state ~mailbox:async_messages
@@ -24986,7 +24991,7 @@ and is loaded on demand through keeper_skill.
                   launch_code_entries_load state ~mailbox:async_messages
                 end
                 else if state.code_scope <> Code_scope_project then begin
-                  state.code_scope <- Code_scope_project;
+                  set_code_scope state Code_scope_project;
                   state.code_cursor <- 0;
                   state.code_listing <- Masc_tui_fetched.clear state.code_listing;
                   launch_code_entries_load state ~mailbox:async_messages
@@ -26109,8 +26114,8 @@ and is loaded on demand through keeper_skill.
                     with
                     | None -> ()
                     | Some repo ->
-                        state.code_scope <-
-                          Code_scope_repo repo.Masc.Tui_decode.rp_id;
+                        set_code_scope state
+                          (Code_scope_repo repo.Masc.Tui_decode.rp_id);
                         state.code_dir <- "";
                         state.code_cursor <- 0;
                         state.code_listing <- Masc_tui_fetched.clear state.code_listing;
@@ -26468,7 +26473,7 @@ and is loaded on demand through keeper_skill.
                            keeper's workspace; o opens it in $EDITOR"
                     | Some path ->
                         let keeper = change.Masc.Tui_decode.fc_keeper in
-                        state.code_scope <- Code_scope_keeper keeper;
+                        set_code_scope state (Code_scope_keeper keeper);
                         let parent = Filename.dirname path in
                         state.code_dir <-
                           (if String.equal parent "." then "" else parent);

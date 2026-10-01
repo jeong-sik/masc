@@ -300,7 +300,15 @@ def currency_follows_workspace_authority(binary: str, captures: Path | None) -> 
         os.write(fd, b"r")
         seen("identity-error", lambda text: b"MASC Dashboard" in text and no_currency(text))
         h.send_and_wait(process, fd, output, b"?", b"MASC Cheat Sheet")
-        assert no_currency(screen(output)) and b"Candle details" not in screen(output)
+        help_frame = screen(output)
+        if captures is not None:
+            (captures / "authority-identity-error-help.txt").write_bytes(help_frame)
+            (captures / "authority-identity-error-help.pty").write_bytes(output)
+        # Unavailable retains its diagnostic in Help without restoring amounts.
+        assert no_currency(help_frame), help_frame
+        assert b"Candle details" in help_frame, help_frame
+        assert (b"Candle unavailable: live keeper status unreadable: "
+                b"Server workspace identity is unavailable") in help_frame, help_frame
         h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
         publish("b-ready")
         os.write(fd, b"r")

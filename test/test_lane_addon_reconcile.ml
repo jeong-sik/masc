@@ -585,19 +585,30 @@ let test_historical_never_started_leaves_no_binding () =
     let bytes = declaration ~id:"observer" ~manifest () in
     write path bytes;
     ignore (reconcile config directory);
-    let old_id = declared_instance config "observer" |> text "instance_id" in
-    await_ready clock config old_id;
-    let captured = instance config old_id in
-    detach clock config old_id;
+    let started_id = declared_instance config "observer" |> text "instance_id" in
+    await_ready clock config started_id;
+    let captured = instance config started_id in
+    detach clock config started_id;
     Runtime.For_testing.reset ();
-    let fields = Yojson.Safe.Util.to_assoc captured in
+    (* Retained observations restore their high-water sequence on read. A
+       never-started fixture needs its own identity, without that history. *)
+    let old_id = started_id ^ "-never-started" in
+    let fields = Yojson.Safe.Util.to_assoc captured
+      |> List.filter (fun (key, _) ->
+        not (List.mem key ["instance_id"; "incarnation"; "container_id";
+                           "observation_seq"; "rows_count"])) in
     let never_started =
       `Assoc
-        (("container_id", `Null) :: ("observation_seq", `Int 0)
-         :: List.remove_assoc "observation_seq" (List.remove_assoc "container_id" fields))
+        (("instance_id", `String old_id) :: ("incarnation", `String old_id)
+         :: ("container_id", `Null) :: ("observation_seq", `Int 0)
+         :: ("rows_count", `Int 0) :: fields)
     in
     let store = Store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
     unwrap (Store.save_binding store ~instance_id:old_id never_started);
+    let retained = unwrap (Store.bindings store)
+      |> List.find (fun value -> text "instance_id" value = old_id) in
+    check int "never-started fixture has no retained observations" 0
+      (number "observation_seq" retained);
     let has_binding () =
       unwrap (Store.bindings store)
       |> List.exists (function

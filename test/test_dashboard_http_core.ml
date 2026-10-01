@@ -3213,6 +3213,9 @@ let test_execution_first_compute_reuses_prepared_bytes () =
       let open Yojson.Safe.Util in
       check bool "default query retained" true
         (payload.json |> member "query" |> member "default_light_request" |> to_bool);
+      check bool "prepared execution includes its Candle observation identity" true
+        (match payload.json |> member "candle_observation_sequence" with
+         | `Int _ -> true | _ -> false);
       check bool "computed identity bytes match JSON" true
         (Yojson.Safe.equal payload.json (Yojson.Safe.from_string payload.raw_json));
       match Surface.dashboard_execution_cached_http_representation context with

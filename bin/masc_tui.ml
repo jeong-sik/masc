@@ -10586,7 +10586,7 @@ let refresh_status results =
   | n, total when n = total -> Masc_tui_types.Connected
   | _ -> Masc_tui_types.Degraded
 
-let load_http_scoped_surfaces ~host ~port ~approval_ticket ~board_sort
+let load_http_scoped_surfaces ~host ~port ~expected_workspace ~approval_ticket ~board_sort
     ~board_hearth ~system_log_level ~provider_history_days
     ~(needs : Masc_tui_types.surface_needs) =
   let when_needed wanted load = if wanted then Some (load ()) else None in
@@ -10628,7 +10628,9 @@ let load_http_scoped_surfaces ~host ~port ~approval_ticket ~board_sort
   in
   let http_keeper_roster =
     when_needed needs.needs_keeper_roster (fun () ->
-        load_keeper_roster ~host ~port)
+        match expected_workspace with
+        | None -> Error (Keeper_control.Roster_malformed "Server workspace identity is unavailable")
+        | Some expected_workspace -> load_keeper_roster ~host ~port ~expected_workspace)
   in
   let http_runtime_quota =
     when_needed needs.needs_runtime_quota (fun () ->
@@ -10713,7 +10715,10 @@ let load_http_surfaces ~host ~port ~approval_ticket ~board_sort
          announced, so the periodic refresh always fetches them; the surface
          still decides whether the panel renders, only the fetch is
          unconditional. Targeted scoped refreshes keep their own needs. *)
-      load_http_scoped_surfaces ~host ~port ~approval_ticket:None
+      load_http_scoped_surfaces ~host ~port
+        ~expected_workspace:(Result.to_option http_server_identity
+          |> Option.map (fun identity -> canonical_path identity.Tui_decode.sid_base_path))
+        ~approval_ticket:None
         ~board_sort ~board_hearth ~system_log_level ~provider_history_days
         ~needs:{ needs with needs_asks = true }
     in
@@ -11416,6 +11421,9 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight ~mailbox
         enqueue_async mailbox
           (Http_scoped_refresh_done
              (currency_authority, load_http_scoped_surfaces ~host ~port
+                ~expected_workspace:(Option.map
+                  (fun identity -> canonical_path identity.Tui_decode.sid_base_path)
+                  currency_authority.car_identity)
                 ~approval_ticket ~board_sort:state.board_sort
                 ~board_hearth:state.board_hearth
                 ~provider_history_days:state.provider_history_days
@@ -11440,6 +11448,9 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight ~mailbox
           (fun () ->
              apply_http_scoped_surfaces_and_refresh state ~mailbox
                (load_http_scoped_surfaces ~host ~port
+                  ~expected_workspace:(Option.map
+                    (fun identity -> canonical_path identity.Tui_decode.sid_base_path)
+                    currency_authority.car_identity)
                   ~approval_ticket ~board_sort:state.board_sort
                 ~board_hearth:state.board_hearth
                 ~provider_history_days:state.provider_history_days

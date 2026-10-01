@@ -267,6 +267,8 @@ def test_http_endpoint(
             path_only = self.path.split("?", 1)[0]
             if self.path in fixtures:
                 fixture = fixtures[self.path]
+            elif path_only == "/api/v1/gate/keepers" and "/api/v1/gate/keepers?detailed=true" in fixtures:
+                fixture = fixtures["/api/v1/gate/keepers?detailed=true"]
             elif self.path == "/health":
                 fixture = (200, {})
             elif self.path == "/health?full=1":

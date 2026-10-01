@@ -7198,8 +7198,8 @@ let launch_keeper_run_next ?(automatic = false) state ~mailbox request =
     let keeper_name = request.Keeper_chat.keeper_name in
     let request_id = request.Keeper_chat.request_id in
     state.keeper_run_next_inflight <- request :: state.keeper_run_next_inflight;
-    append_chat_history state request Message_status
-      "Requesting priority for this message; waiting for server confirmation";
+    state.keeper_run_next_receipts <- List.filter (fun (old, _) ->
+      not (Keeper_chat.same_request_identity old request)) state.keeper_run_next_receipts;
     let priority_predecessors =
       if automatic then
         let rec earlier reversed = function
@@ -7506,6 +7506,8 @@ let inflight_for state keeper_name =
 ;;
 
 let drop_inflight state request =
+  state.keeper_run_next_receipts <- List.filter (fun (received, _) ->
+    not (Keeper_chat.same_request_identity received request)) state.keeper_run_next_receipts;
   state.keeper_run_next_pending <- List.filter
     (fun pending -> not (Keeper_chat.same_request_identity pending request))
     state.keeper_run_next_pending;
@@ -15366,8 +15368,15 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         state.keeper_run_next_inflight <- List.filter
           (fun inflight -> not (Keeper_chat.same_request_identity inflight request))
           state.keeper_run_next_inflight;
-        append_chat_history state request Message_status
-          (match result with Ok detail -> detail | Error detail -> "Could not prioritize this message: " ^ detail);
+        if List.exists (fun (entry : inflight) ->
+            Keeper_chat.same_request_identity entry.sent_request request) state.msg_inflight then
+          state.keeper_run_next_receipts <- (request, result) ::
+          List.filter (fun (old, _) -> not (Keeper_chat.same_request_identity old request))
+            state.keeper_run_next_receipts;
+        (match result with
+         | Ok _ -> ()
+         | Error detail -> append_chat_history state request Message_error
+             ("다음 순서 접수 실패: " ^ detail));
         dispatch_ready_run_next state ~mailbox request.Keeper_chat.keeper_name
       end
   | Keeper_observed_interrupt_done (keeper_name, interrupt_token, generation, result) ->

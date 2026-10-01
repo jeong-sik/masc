@@ -10,6 +10,7 @@ module Queue = Masc_tui_keeper_chat_queue
 let state () =
   let state = Tui.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
   state.msg_target_keeper_name <- Some "alpha";
+  state.msg_tool_visibility <- Tui.Tools_full;
   state
 
 let running ?(keeper_name = "alpha") lane : Decode.keeper_turn_row =
@@ -310,10 +311,67 @@ let test_one_status_row_per_server_batch () =
       group.representative.sent_at
   | groups -> failf "expected one batch row, got %d" (List.length groups)
 
+let test_compact_status_keeps_delivery_and_priority_truth () =
+  let state = state () in
+  state.msg_tool_visibility <- Tui.Tools_compact;
+  let first = inflight ~request_id:"first-private-id" ~at:2. () in
+  let second = inflight ~request_id:"second-private-id" ~at:3. () in
+  List.iter (fun entry -> Tui.turn_log_add ~now:4. entry.Tui.log ~seq:None
+      (Live.Accepted {admission=Live.Queued; queue_length=99; interactive=None})) [first; second];
+  state.msg_inflight <- [second; first];
+  state.msg_live <- Some second.log;
+  state.keeper_turns <- [running Turn_lane_autonomous];
+  let rows () = List.map (fun row -> row.Masc_tui_answering.lead ^ row.rest)
+      (Tui.keeper_message_activity_rows state) in
+  check (list string) "one quiet status preserves exact current queue count"
+    ["기존 작업 처리 중 · 내 메시지 2건 대기 · 접수됨"] (rows ());
+  state.keeper_run_next_inflight <- [second.sent_request];
+  state.keeper_run_next_receipts <- [first.sent_request, Ok "confirmed first"];
+  check (list string) "in-flight priority cannot claim confirmation"
+    ["기존 작업 처리 중 · 내 메시지 2건 대기 · 다음 순서 확인 중"] (rows ());
+  state.keeper_run_next_inflight <- [];
+  check (list string) "one receipt does not confirm both inputs"
+    ["기존 작업 처리 중 · 내 메시지 2건 대기 · 일부 메시지 다음 순서로 접수됨"] (rows ());
+  state.keeper_run_next_receipts <- [first.sent_request, Ok "first"; second.sent_request, Ok "second"];
+  check (list string) "both exact receipts confirm priority"
+    ["기존 작업 처리 중 · 내 메시지 2건 대기 · 다음 순서로 접수됨"] (rows ());
+  state.keeper_run_next_receipts <- [second.sent_request, Error "offline"];
+  check bool "actual refusal retains attention" true (Tui.keeper_message_activity_needs_attention state);
+  check (list string) "failure does not claim priority"
+    ["다음 순서 접수 실패 · 기존 작업 처리 중 · 내 메시지 2건 대기"] (rows ());
+  let foreign = inflight ~keeper_name:"beta" ~request_id:"foreign-private-id" ~at:1. () in
+  state.msg_inflight <- foreign :: state.msg_inflight;
+  (match Tui.keeper_message_inflight_drawn state with
+   | [group] -> check string "foreign stop target survives folding" "beta" group.representative.sent_request.keeper_name
+   | groups -> failf "expected foreign-only row, got %d" (List.length groups));
+  state.msg_tool_visibility <- Tui.Tools_full;
+  check bool "diagnostics keep exact private ID" true
+    (List.exists (fun text -> Astring.String.is_infix ~affix:"second-private-id" text) (rows ()))
+
+let test_compact_keeps_uncovered_execution_problems () =
+  let state = state () in
+  state.msg_tool_visibility <- Tui.Tools_compact;
+  let active = inflight ~request_id:"active" ~at:1. () in
+  let uncovered = inflight ~request_id:"uncovered" ~at:2. () in
+  List.iter (fun entry -> Tui.turn_log_add ~now:3. entry.Tui.log ~seq:(Some 1)
+      Live.Run_started) [active; uncovered];
+  state.msg_live <- Some active.log;
+  state.msg_inflight <- [active; {uncovered with phase=Tui.Turn_reconciling}];
+  let text () = texts (Tui.keeper_message_activity_rows state) |> String.concat " | " in
+  check bool "another running execution's reconciliation is visible without color" true
+    (Astring.String.is_infix ~affix:"메시지 전달 재확인 중" (text ()));
+  Tui.turn_log_add ~now:4. uncovered.log ~seq:(Some 2)
+    (Live.Run_failed {message="fixture failure"});
+  state.msg_inflight <- [active; uncovered];
+  check bool "another execution failure remains named while one works" true
+    (Astring.String.is_infix ~affix:"요청 처리 실패" (text ()))
+
 let () =
   run "TUI chat activity"
     [ "request and lane states",
-      [ test_case "Working request stays visible behind newer queued view" `Quick test_working_request_survives_newer_queued_view
+      [ test_case "uncovered execution failures remain visible" `Quick test_compact_keeps_uncovered_execution_problems
+      ; test_case "compact delivery and priority truth" `Quick test_compact_status_keeps_delivery_and_priority_truth
+      ; test_case "Working request stays visible behind newer queued view" `Quick test_working_request_survives_newer_queued_view
       ; test_case "the band does not repeat the admission" `Quick
           test_the_band_does_not_repeat_the_admission
       ; test_case "one status row per server batch" `Quick

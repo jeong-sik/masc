@@ -951,6 +951,7 @@ let visible_reply reply =
 
 let test_queue_summary_follows_admission_and_execution () =
   let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  state.msg_tool_visibility <- Tui_types.Tools_full;
   let accepted keeper at = inflight_with_log ~keeper_name:keeper ~started_at:at
       [Live.Accepted {admission=Live.Queued; queue_length=99; interactive=None}] in
   let first = accepted "alpha" 1. and second = accepted "alpha" 2. in

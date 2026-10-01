@@ -32,7 +32,8 @@
     invalidations and per-pass source readability. Snapshot commit revisions
     and update times remain in the durable stores and tools; identical facts
     recommitted by a later Librarian tick render identically. The wall clock
-    passed as [now] drives revalidation only and never appears in the text. *)
+    passed as [now] drives revalidation and dates retention history; it never
+    appears in the text. *)
 
 (** Render only the ordinary snapshot. Kept as the focused ordinary-store
     projection; production prompt assembly calls [render_if_enabled]. *)

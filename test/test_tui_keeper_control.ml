@@ -670,19 +670,19 @@ let test_roster_equipment_is_required_and_failures_stay_per_keeper () =
 
 let test_item_revision_hint_preserves_keeper_observation () =
   let row = Yojson.Safe.from_string (gate_row "analyst") in
-  let decode value =
+  let decode ?(candle = `Assoc ["status", `String "off"]) value =
     let row = match row with
-      | `Assoc fields -> `Assoc (("candle_account_revision", value) :: fields)
+      | `Assoc fields -> `Assoc (("candle_account_revision", value) :: List.remove_assoc "candle_account_revision" fields)
       | _ -> Alcotest.fail "bad Keeper fixture" in
     match Decode.decode_keeper_runtime_list (`Assoc [
-      "candle", `Assoc ["status", `String "off"]; "keepers", `List [row];
+      "candle", candle; "keepers", `List [row];
       "total", `Int 1; "truncated", `Bool false]) with
     | Ok ([runtime], [], false, 1, _) -> runtime
     | _ -> Alcotest.fail "Item revision hint hid the Keeper"
   in
   let digest = String.make 64 'a' in
   Alcotest.(check bool) "canonical revision decoded" true
-    ((decode (`String digest)).kr_candle_account_revision = Ok (Some digest));
+    ((decode ~candle:(`Assoc ["status", `String "disabled"; "reason", `String "fixture ledger unavailable"]) (`String digest)).kr_candle_account_revision = Ok (Some digest));
   Alcotest.(check bool) "null denotes no hint" true
     ((decode `Null).kr_candle_account_revision = Ok None);
   List.iter (fun value ->

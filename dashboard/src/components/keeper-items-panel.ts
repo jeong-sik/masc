@@ -7,7 +7,7 @@ import { keeperEquipmentKey, type KeeperEquipment } from '../api/schemas/keeper-
 import { KeeperPortrait } from './keeper-portrait'
 import { KeeperBadge } from './keeper-badge'
 import type { Keeper } from '../types'
-import { executionWorkspaceAuthority, type ExecutionWorkspaceAuthority, keeperRosterObservationRevision } from '../store'
+import { executionWorkspaceAuthority, executionWorkspaceRevision, type ExecutionWorkspaceAuthority, keeperRosterObservationRevision } from '../store'
 import { readCandleAccountRevision } from '../api/schemas/candle-observation'
 
 type Reading =
@@ -28,6 +28,7 @@ function candle(milli: string): string {
 
 export function KeeperItemsPanel({ keeper }: { keeper: Keeper }) {
   const authority = executionWorkspaceAuthority.value
+  const workspaceRevision = executionWorkspaceRevision.value
   const authRevision = storedTokenRevision.value
   const [revision, setRevision] = useState(0)
   const equipmentKey = keeper.portrait?.state === 'ready'
@@ -35,7 +36,7 @@ export function KeeperItemsPanel({ keeper }: { keeper: Keeper }) {
   const rosterObservation = keeperRosterObservationRevision.value
   const accountRevision = readCandleAccountRevision(keeper.candle_account_revision)
   const revisionObserved = accountRevision !== undefined
-  const identity = JSON.stringify([keeper.name, equipmentKey, keeper.candle_balance_milli, accountRevision, revisionObserved, revision, authRevision])
+  const identity = JSON.stringify([keeper.name, equipmentKey, keeper.candle_balance_milli, accountRevision, revisionObserved, revision, authRevision, workspaceRevision])
   const [reading, setReading] = useState<Reading>({ kind: 'loading', identity })
 
   useEffect(() => {
@@ -44,6 +45,7 @@ export function KeeperItemsPanel({ keeper }: { keeper: Keeper }) {
     const controller = new AbortController()
     const currentRequest = () => !controller.signal.aborted
       && executionWorkspaceAuthority.peek() === authority
+      && executionWorkspaceRevision.peek() === workspaceRevision
       && currentStoredTokenRevision() === authRevision
     fetchKeeperItems(keeper.name, controller.signal)
       .then(value => {

@@ -31,12 +31,12 @@ let fixtureEpoch = ''
 let fixtureEpochSequence = 0
 let fixtureGeneration = 0
 let fixtureConnectionGeneration = 0
-function observeWorkspace(root: unknown, includeRoot = true) {
+function observeWorkspace(root: unknown, includeRoot = true, project = 'same-project') {
   expect(hydrateExecutionSnapshot({
     execution_publication_epoch: fixtureEpoch,
     execution_publication_generation: ++fixtureGeneration,
     // Deliberately identical project label across distinct canonical roots.
-    status: { project: 'same-project', ...(includeRoot ? { workspace_root: root } : {}) },
+    status: { project, ...(includeRoot ? { workspace_root: root } : {}) },
   } as Parameters<typeof hydrateExecutionSnapshot>[0], {
     requestGeneration: fixtureConnectionGeneration,
   })).toBe(true)
@@ -133,6 +133,24 @@ describe('Keeper Item tab', () => {
     expect(await screen.findByText('보유 4 / 18개')).toBeTruthy()
     expect(screen.getByText('0.400 Candle')).toBeTruthy()
     expect(screen.getByText('0.800 Candle')).toBeTruthy()
+  })
+
+  it('withdraws a held Item read when only the project revision changes', async () => {
+    const oldRead = pendingAccount()
+    const newRead = pendingAccount()
+    fetchKeeperItems.mockReturnValueOnce(oldRead.promise).mockReturnValueOnce(newRead.promise)
+    render(html`<${KeeperItemsPanel} keeper=${keeper('rondo')} />`)
+    await waitFor(() => expect(fetchKeeperItems).toHaveBeenCalledTimes(1))
+    const authority = executionWorkspaceAuthority.peek()
+    await act(async () => { observeWorkspace('/fixture/workspace-a', true, 'other-project') })
+    expect(executionWorkspaceAuthority.peek()).toBe(authority)
+    await waitFor(() => expect(fetchKeeperItems).toHaveBeenCalledTimes(2))
+    await act(async () => { oldRead.resolve(account(['crown'], '900')) })
+    expect(screen.queryByText('0.900 Candle')).toBeNull()
+    expect(screen.getByRole('status').textContent).toBe('Item 계정 불러오는 중…')
+    await act(async () => { newRead.resolve(account(['crown', 'beanie'], '300')) })
+    expect(await screen.findByText('보유 2 / 18개')).toBeTruthy()
+    expect(screen.getByText('0.300 Candle')).toBeTruthy()
   })
 
   it('does not admit retained display roots, stale failures or pre-reconnect requests', async () => {

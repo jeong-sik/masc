@@ -8212,6 +8212,9 @@ let chat_status_text completed =
    is the one the observer feed keeps; without one, this call opens one and
    the observer reuses it. *)
 let launch_task_dispatch state ~mailbox ~keeper_name ~title ~body ~original =
+  let enqueue_async = workspace_enqueue state in
+  let authority = state.workspace_authority in
+  let identity = state.server_identity in
   let host = server_peer_host in
   let port = state.port in
   let session = state.mcp_session in
@@ -8221,6 +8224,8 @@ let launch_task_dispatch state ~mailbox ~keeper_name ~title ~body ~original =
   let run () =
     let result =
       try
+        let ( let* ) = Result.bind in
+        let* () = check_workspace_request state ~mailbox ~authority ~identity ~host ~port () in
         let session_result =
           match session with
           | Some session_id -> Ok session_id
@@ -8231,6 +8236,7 @@ let launch_task_dispatch state ~mailbox ~keeper_name ~title ~body ~original =
         match session_result with
         | Error detail -> Error detail
         | Ok session_id -> (
+            let* () = check_workspace_request state ~mailbox ~authority ~identity ~host ~port () in
             let arguments =
               ("title", `String title)
               ::
@@ -8258,10 +8264,7 @@ let launch_task_dispatch state ~mailbox ~keeper_name ~title ~body ~original =
            Task_dispatch_failed { keeper = keeper_name; detail; original })
   in
   match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
+  | Some sw -> fork_workspace_job state ~sw run
   | None ->
       enqueue_async mailbox
         (Task_dispatch_failed
@@ -12785,6 +12788,8 @@ let handle_schedule_cancel_key state ~mailbox =
 let start_verification_verdict state ~mailbox ~(task_id : string)
     ~(verification_id : string) ~(verdict : [ `Approve | `Reject of string ]) =
   let enqueue_async = workspace_enqueue state in
+  let authority = state.workspace_authority in
+  let identity = state.server_identity in
   state.verification_verdict_error <- None;
   let verb = match verdict with `Approve -> "approving" | `Reject _ -> "rejecting" in
   report_action state "system" (Printf.sprintf "%s %s" verb task_id);
@@ -12792,6 +12797,8 @@ let start_verification_verdict state ~mailbox ~(task_id : string)
   let port = state.port in
   let run_verdict () =
     let result =
+      let ( let* ) = Result.bind in
+      let* () = check_workspace_request state ~mailbox ~authority ~identity ~host ~port () in
       match
         Masc_tui_http.post_verification_verdict ~host ~port ~task_id
           ~verification_id ~verdict

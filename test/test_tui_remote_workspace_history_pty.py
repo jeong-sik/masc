@@ -1236,6 +1236,89 @@ def verification_workspace_withdrawal(binary: str) -> None:
         refresh=0.5, terminal_cols=300)
 
 
+def task_dispatch_workspace_withdrawal(binary: str) -> None:
+    """An A MCP initialization cannot create a task after B becomes current."""
+    fixtures = h.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
+    wire = WorkspaceWire(fixtures[ROSTER_PATH][1])
+    initialized = threading.Event()
+    release_initialize = threading.Event()
+    initialize_returned = threading.Event()
+    created = []
+    requests = []
+
+    def mcp(body):
+        request = json.loads(body)
+        with wire.lock:
+            phase = wire.phase
+        if request["method"] == "initialize":
+            if phase == "a":
+                initialized.set()
+                assert release_initialize.wait(timeout=30), "A initialization not released"
+                initialize_returned.set()
+            return h.RawHttpResponse(200, json.dumps({
+                "jsonrpc": "2.0", "id": request["id"], "result": {}}).encode(),
+                content_type="application/json",
+                headers=(("Mcp-Session-Id", "task-session-" + phase),))
+        assert request["method"] == "tools/call", request
+        assert request["params"]["name"] == "masc_add_task", request
+        created.append((phase, request["params"]["arguments"]))
+        return 200, {"jsonrpc": "2.0", "id": request["id"], "result": {
+            "content": [{"type": "text", "text": json.dumps({
+                "ok": True, "task_id": "task-9"})}], "isError": False}}
+
+    fixtures.update({ROSTER_PATH: wire.roster, "/health": wire.health,
+                     "/health?full=1": wire.health,
+                     HISTORY_PATH: wire.history, MEMORY_PATH: wire.memory,
+                     "/mcp": h.RequestHttpResponse(mcp),
+                     "/api/v1/keepers/chat/stream": (503, {"error": "synthetic chat capture"})})
+
+    def interact(process, fd, _slave, output, _base):
+        def await_screen(predicate, label):
+            assert h.wait_for_fixture_state(process, fd, output,
+                lambda: predicate(screen(output)), timeout=WAIT_SECONDS), label
+        try:
+            h.resize_and_wait(process, fd, output, rows=45, columns=300,
+                needle=b"MASC Dashboard", controls=(h.FULL_REDRAW,))
+            h.tab_until(process, fd, output, b"MASC Keepers")
+            h.select_keeper_row(process, fd, output, b"alpha")
+            h.send_and_wait(process, fd, output, b"m", "Keepers ▸ alpha ▸ chat".encode())
+            h.send_and_wait(process, fd, output, b"/task workspace-a-pending-task",
+                h.composer_showing(b"/task workspace-a-pending-task"))
+            os.write(fd, b"\r")
+            assert h.wait_for_fixture_event(process, fd, output, initialized,
+                timeout=WAIT_SECONDS), "A task initialization not held"
+            wire.publish("b")
+            await_screen(lambda text: b"MISMATCH local " in text and b"b.current" in text,
+                         "B authority not applied while initialization held")
+            release_initialize.set()
+            assert h.wait_for_fixture_event(process, fd, output, initialize_returned,
+                timeout=WAIT_SECONDS), "A initialization response not released"
+            wire.publish("b-after-late")
+            await_screen(lambda text: b"b.settled" in text, "B refresh not applied")
+            assert created == [], "A initialization created work in B"
+            assert b"workspace-a-pending-task" not in screen(output), "A dispatch revived its draft"
+            assert not [path for path, _ in requests if path == "/api/v1/keepers/chat/stream"], requests
+            wire.publish("a-returned")
+            await_screen(lambda text: b"a.returned" in text and b"MISMATCH" not in text,
+                         "A authority did not return")
+            h.select_keeper_row(process, fd, output, b"alpha")
+            h.send_and_wait(process, fd, output, b"m", "Keepers ▸ alpha ▸ chat".encode())
+            h.send_and_wait(process, fd, output, b"/task workspace-a-fresh-task",
+                h.composer_showing(b"/task workspace-a-fresh-task"))
+            os.write(fd, b"\r")
+            chat = h.wait_for_http_request(process, fd, output, requests,
+                path="/api/v1/keepers/chat/stream")
+            assert created == [("a-returned", {"title": "workspace-a-fresh-task"})], created
+            assert json.loads(chat)["message"] == "[task-9] workspace-a-fresh-task"
+            os.write(fd, b"q")
+        finally:
+            release_initialize.set()
+    h.run_terminal_scenario(binary,
+        description="workspace withdrawal cancels pending task creation and permits a fresh task after return",
+        interact=interact, prepare_workspace=wire.prepare, http_fixtures=fixtures,
+        http_requests=requests, refresh=0.5, terminal_cols=300)
+
+
 if __name__ == "__main__":
     binary = str(Path(sys.argv[1]).resolve())
     artifact_root = os.environ.get("RUNNER_TEMP")
@@ -1247,6 +1330,7 @@ if __name__ == "__main__":
             "binary_sha256": hashlib.sha256(Path(binary).read_bytes()).hexdigest(),
             "scenario_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
         }, indent=2) + "\n")
+    task_dispatch_workspace_withdrawal(binary)
     verification_workspace_withdrawal(binary)
     tools_workspace_withdrawal(binary)
     connector_workspace_withdrawal(binary)

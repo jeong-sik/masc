@@ -191,11 +191,9 @@ let compact_transition_wals_unlocked owner =
     owner
 ;;
 
-(* The snapshot is rewritten whole on every transition, and live snapshots
-   print to 2.5-3.3 MB. Building the JSON, sanitizing it and printing it ran on
-   the fiber committing the transition, under the owner's lock. The value is
-   immutable, so all three run in one pool job. *)
-let save_snapshot_atomic_with ~strict_parent_sync path json_of =
+(* Encoding holds the owner's lock. The snapshot codec uses its own executor,
+   which cannot be occupied by a recovery job waiting for this same lock. *)
+let save_snapshot_atomic_with ~strict_parent_sync path state =
   match
     try Ok (Fs_compat.mkdir_p (Filename.dirname path)) with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -203,17 +201,14 @@ let save_snapshot_atomic_with ~strict_parent_sync path json_of =
   with
   | Error _ as error -> error
   | Ok () ->
-    let content =
-      Domain_pool_ref.submit_cpu_or_inline (fun () ->
-        json_of () |> Safe_ops.sanitize_json_utf8 |> Yojson.Safe.pretty_to_string)
-    in
+    let content = Keeper_event_queue_snapshot_codec.encode_state state in
     if strict_parent_sync
     then Fs_compat.save_file_atomic_strict path content
     else Fs_compat.save_file_atomic path content
 ;;
 
-let save_json_atomic_strict path json =
-  save_snapshot_atomic_with ~strict_parent_sync:true path (fun () -> json)
+let save_snapshot_atomic_strict path state =
+  save_snapshot_atomic_with ~strict_parent_sync:true path state
 ;;
 
 (* The decoded snapshot, against the file it was decoded from.
@@ -275,7 +270,7 @@ let save_state_unlocked_with ~strict_parent_sync owner state =
   let keeper_name = keeper_name_of_owner owner in
   let path = snapshot_path_of_owner owner in
   match
-    save_snapshot_atomic_with ~strict_parent_sync path (fun () -> State.to_yojson state)
+    save_snapshot_atomic_with ~strict_parent_sync path state
   with
   | Ok () ->
     (* The atomic writer does not return the written descriptor identity.
@@ -1070,7 +1065,7 @@ let discover_keeper_names_with_durable_state ~base_path =
 ;;
 
 let commit_transform_unlocked
-      ?(confirm_snapshot = save_json_atomic_strict)
+      ?(confirm_snapshot = save_snapshot_atomic_strict)
       ?(strict_snapshot_durability = false)
       owner
       ~after_commit
@@ -1088,7 +1083,7 @@ let commit_transform_unlocked
             retry must cross the durability barrier again before admission.
             Re-publish the authoritative state without a logical mutation. *)
          let path = snapshot_path_of_owner owner in
-         let confirmed = confirm_snapshot path (State.to_yojson current) in
+         let confirmed = confirm_snapshot path current in
          forget_snapshot path;
          Result.map (fun () -> value) confirmed
      | Ok (next, value) ->

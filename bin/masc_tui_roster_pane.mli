@@ -1,3 +1,14 @@
+type preference = Auto | Hidden | Shown
+(** [Auto] shows the roster beside Keeper chat and hides it on other surfaces.
+    Explicit choices remain the same across surface changes and resizing. *)
+
+val effective_hidden : preference -> in_chat:bool -> bool
+(** Resolve the surface default without changing the stored preference. *)
+
+val toggle_preference : preference -> in_chat:bool -> cols:int -> preference option
+(** Turn the effective visibility into an explicit choice. Below the width
+    threshold, return [None] and leave even [Auto] unchanged. *)
+
 (** Whether the keeper roster shares the screen with what it sits beside.
 
     Two things decide it and they are not the same kind of fact. The terminal

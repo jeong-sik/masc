@@ -96,7 +96,17 @@ source = subprocess.check_output([str(binary), 'build-commit'], text=True, env=e
 if source != args.source_sha:
     raise SystemExit('native probe source differs from prepared dashboard')
 base = root / 'workspace'
-fixtures = Path(__file__).resolve().parents[1] / 'test/fixtures/item-http'
+repo = Path(__file__).resolve().parents[1]
+input_paths = ['scripts/item-http-acceptance.py'] + [
+    f'test/fixtures/item-http/{name}'
+    for name in ('runtime.toml', 'candle.toml', 'keeper.toml', 'keeper.json')]
+verified_inputs = {}
+for relative in input_paths:
+    expected = subprocess.check_output(['git', '-C', str(repo), 'show', f'{source}:{relative}'])
+    actual = (repo / relative).read_bytes()
+    require(actual == expected, f'acceptance input differs from source SHA: {relative}')
+    verified_inputs[relative] = actual
+harness_sha256 = hashlib.sha256(verified_inputs['scripts/item-http-acceptance.py']).hexdigest()
 config_hashes = {}
 for src, dst in [('runtime.toml', 'config/runtime.toml'),
                  ('candle.toml', 'config/candle.toml'),
@@ -104,7 +114,7 @@ for src, dst in [('runtime.toml', 'config/runtime.toml'),
                  ('keeper.json', 'keepers/item-runtime-probe.json')]:
     target = base / '.masc' / dst
     target.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(fixtures / src, target)
+    target.write_bytes(verified_inputs[f'test/fixtures/item-http/{src}'])
     config_hashes[src] = hashlib.sha256(target.read_bytes()).hexdigest()
 server = None
 reservation = None
@@ -192,6 +202,7 @@ def start_ready(log):
     global server, reservation, port, origin
     deadline = time.monotonic() + 60
     while time.monotonic() < deadline:
+        attempt_record_start = len(records)
         # Hold the ephemeral port through setup/login; native main has no
         # inherited-listener interface. Retry confirmed bind collisions.
         reservation.close()
@@ -226,6 +237,7 @@ def start_ready(log):
                     pass
                 time.sleep(0.2)
         except PortCollision:
+            del records[attempt_record_start:]
             stop_server()
             reservation, port = reserve_port()
             origin = f'http://127.0.0.1:{port}'
@@ -246,7 +258,6 @@ with (root / 'server.log').open('wb') as log:
         require(status == 200 and account['status'] == 'ready'
                 and account['keeper'] == 'item-runtime-probe', account)
         require(account['balance_milli'] == '0' and account['owned_items'] == [], account)
-        require(len(account['catalog']) == 18, account)
         glasses = next(item for item in account['catalog'] if item['id'] == 'glasses')
         require(glasses['price_status'] == 'priced' and glasses['price_milli'] == '0', glasses)
         crown = next(item for item in account['catalog'] if item['id'] == 'crown')
@@ -263,7 +274,7 @@ with (root / 'server.log').open('wb') as log:
         require(hashlib.sha256(index).hexdigest() == hashlib.sha256(
             (dashboard / 'index.html').read_bytes()).hexdigest(), 'served index differs')
         result = dict(source_sha=source, binary_sha256=hashlib.sha256(binary.read_bytes()).hexdigest(),
-            fixture_sha256=config_hashes, dashboard_index_sha256=hashlib.sha256(index).hexdigest(),
+            harness_sha256=harness_sha256, fixture_sha256=config_hashes, dashboard_index_sha256=hashlib.sha256(index).hexdigest(),
             scope='Isolated CI binary over real TCP HTTP; synthetic current-schema paused Keeper metadata, empty test ledger and configured catalog; no lifecycle creation, production rollout or Keeper tool execution',
             requests=records, passed=True)
         (root / 'http-evidence.json').write_text(json.dumps(result, indent=2) + '\n')

@@ -25,7 +25,7 @@ let notify_state_change_observer () =
     (fun () -> (Atomic.get state_change_observer) ())
 ;;
 
-let set_turn_phase ~base_path name (turn_phase : packed_turn_phase) =
+let set_turn_phase ~observation_token ~base_path name (turn_phase : packed_turn_phase) =
   (* RFC-0072 Phase 4b + Phase 5: dispatch via [resolve_turn_phase_transition]
      (PR #14912) instead of the [validate_turn_phase_transition] call.
      Mirrors the runtime-side wiring (PR #14908) — idempotent self-loops no
@@ -40,7 +40,7 @@ let set_turn_phase ~base_path name (turn_phase : packed_turn_phase) =
   let changed =
     update_entry_if_registered ~base_path name (fun e ->
       let e', changed =
-        update_current_turn e (fun obs ->
+        update_current_turn ~observation_token e (fun obs ->
           match resolve_turn_phase_transition ~from:obs.turn_phase ~target:turn_phase with
           | Resolved_turn_idempotent -> obs
           | Resolved_turn_transition _ ->
@@ -75,23 +75,23 @@ let set_turn_phase ~base_path name (turn_phase : packed_turn_phase) =
   if changed then broadcast_composite_changed ~name ~ts_unix:now
 ;;
 
-let mark_turn_provider_attempt_started ~base_path name =
+let mark_turn_provider_attempt_started ~observation_token ~base_path name =
   match get ~base_path name with
   | None | Some { current_turn_observation = None; _ } -> ()
   | Some _ ->
     set_turn_decision_stage
-      ~base_path
+      ~observation_token ~base_path
       name
       Decision_active_tool_policy_selected;
-    set_turn_phase ~base_path name (Packed Turn_executing)
+    set_turn_phase ~observation_token ~base_path name (Packed Turn_executing)
 ;;
 
-let set_turn_selected_model ~base_path name selected_model =
+let set_turn_selected_model ~observation_token ~base_path name selected_model =
   let now = Time_compat.now () in
   let changed =
     update_entry_if_registered ~base_path name (fun e ->
       let e', changed =
-        update_current_turn e (fun obs ->
+        update_current_turn ~observation_token e (fun obs ->
           { (stamp_turn_progress ~now ~event_kind:"selected_model" obs) with
             selected_model
           })

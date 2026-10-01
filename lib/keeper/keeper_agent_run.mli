@@ -244,9 +244,12 @@ end
     @param on_event Optional event callback
     @param trajectory_acc Optional trajectory accumulator for recording
     @param shared_context Optional shared AGENT_CORE context for cross-turn state
-    @param event_bus Optional MASC event bus *)
+    @param event_bus Optional MASC event bus
+    @param observation_token Captured registry observation ownership. Omission
+      disables observation updates; it never adopts a currently active turn. *)
 val run_turn
-  :  config:Workspace.config
+  :  ?observation_token:Keeper_turn_observation_token.t
+  -> config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
   -> publication_recovery:
        Keeper_publication_recovery_availability.turn_context

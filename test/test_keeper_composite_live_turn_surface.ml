@@ -56,7 +56,7 @@ let test_live_turn_surfaces_model_and_tools () =
         let observation_token = Masc.Keeper_turn_observation_token.fresh () in
         Keeper_registry.mark_turn_started ~observation_token ~base_path:base
           ~wake:Keeper_registry.Proactive_tick name;
-        Keeper_registry.set_turn_selected_model ~base_path:base name
+        Keeper_registry.set_turn_selected_model ~observation_token:(Some observation_token) ~base_path:base name
           (Some "claude-sonnet");
         Keeper_registry.record_turn_tool_inflight ~observation_token ~base_path:base name ~count:3)
       ()
@@ -258,14 +258,60 @@ let test_late_predecessor_cannot_finish_successor () =
   let finish token =
     Keeper_registry.mark_turn_finished ~observation_token:token ~base_path:base name
   in
+  let hooks token =
+    Masc.Keeper_hooks_agent_core.make_hooks ~observation_token:token
+      ~config:(Masc.Workspace.default_config base)
+      ~meta_ref:(ref (make_meta name))
+      ~turn_ctx_cell:(Masc.Keeper_tool_call_log.create_turn_ctx_cell ())
+      ~trace_id:"ownership-test" ~keeper_turn_id:1
+      ~on_after_turn_ordinal:ignore ()
+  in
+  let fire_before_turn hooks =
+    match hooks.Agent_core.Hooks.before_turn with
+    | None -> fail "before-turn hook missing"
+    | Some hook ->
+      ignore (hook (Agent_core.Hooks.BeforeTurn { turn = 1; messages = [] }))
+  in
   start a;
+  let a_hooks = hooks a in
   let a_counter = (live ()).turn_id in
   start b;
   check int "display counters deliberately coincide" a_counter (live ()).turn_id;
   Keeper_registry.record_turn_tool_inflight ~observation_token:b
     ~base_path:base name ~count:2;
+  let b_hooks = hooks b in
+  fire_before_turn b_hooks;
+  check (option string) "current hook records progress"
+    (Some "agent_core_before_turn") (live ()).last_progress_kind;
+  Keeper_registry.set_turn_phase ~observation_token:(Some b)
+    ~base_path:base name Keeper_registry.(Packed Turn_routing);
+  Keeper_registry.set_turn_selected_model ~observation_token:(Some b)
+    ~base_path:base name (Some "successor-model");
+  let measurement : Keeper_registry.turn_measurement =
+    { tm_captured_at = 123.; tm_context_actions = { handoff = false } }
+  in
+  (match Keeper_registry.update_entry ~base_path:base name (fun entry ->
+     { entry with pending_turn_measurement = Some measurement }) with
+   | Ok () -> ()
+   | Error _ -> fail "could not install pending measurement fixture");
   let before = entry () in
   Atomic.set before.fiber_wakeup true;
+  fire_before_turn a_hooks;
+  List.iter (fun observation_token ->
+    Keeper_registry.record_turn_progress ~observation_token
+      ~base_path:base name ~event_kind:"late_progress";
+    Keeper_registry.mark_agent_core_turn_started ~observation_token ~base_path:base name;
+    Keeper_registry.mark_turn_measurement ~observation_token ~base_path:base name;
+    Keeper_registry.set_turn_decision_stage ~observation_token ~base_path:base name
+      Keeper_registry.Decision_active_tool_policy_selected;
+    Keeper_registry.set_turn_phase ~observation_token ~base_path:base name
+      Keeper_registry.(Packed Turn_finalizing);
+    Keeper_registry.set_turn_selected_model ~observation_token ~base_path:base name
+      (Some "predecessor-model");
+    Keeper_registry.mark_turn_provider_attempt_started ~observation_token ~base_path:base name;
+    Keeper_registry.mark_turn_runtime_done ~observation_token ~base_path:base name;
+    Keeper_registry.mark_turn_runtime_exhausted ~observation_token ~base_path:base name)
+    [Some a; None];
   Keeper_registry.record_turn_tool_inflight ~observation_token:a
     ~base_path:base name ~count:0;
   finish a;
@@ -278,6 +324,12 @@ let test_late_predecessor_cannot_finish_successor () =
   let json = Observer.snapshot_to_json (Observer.observe after) in
   check int "dashboard still sees successor tools" 2
     (J.member "live_turn" json |> J.member "active_tool_count" |> J.to_int);
+  Keeper_registry.mark_turn_measurement ~observation_token:(Some b)
+    ~base_path:base name;
+  check bool "current turn binds its own reserved measurement" true
+    ((live ()).measurement = Some measurement);
+  check bool "current binding consumes the pending measurement" true
+    ((entry ()).pending_turn_measurement = None);
   finish b;
   let completed = entry () in
   check bool "own finish clears live observation" true

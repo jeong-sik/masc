@@ -315,6 +315,7 @@ let initial_tool_calls
 ;;
 
 let prepare_agent_setup
+      ?observation_token
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
       ~(profile_defaults : Keeper_types_profile.keeper_profile_defaults)
@@ -971,6 +972,7 @@ let prepare_agent_setup
     }
   in
   Keeper_run_tools_hooks.assemble_hooks
+    ?observation_token
     ?dynamic_context_for_tools
     ?repetition_execution
     ~ctx ~session ~turn_system_prompt ~model_message ~dynamic_context

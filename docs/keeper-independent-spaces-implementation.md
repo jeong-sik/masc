@@ -25,10 +25,29 @@ This change protects observation lifetime and tool counts only. It does not
 introduce simultaneous execution, and does not claim to fix all stuck states.
 Validation so far: OCaml parsing and diff checks; runtime tests not run.
 
+## Second change: registry callback attribution
+
+The installed token now flows from both lifecycle roots through `run_turn`,
+tool setup, hook assembly and stream/progress callbacks. Progress, core-turn
+reset, FSM transitions, model selection, runtime terminal state and measurement
+binding match the captured token under the registry update lock. A standalone
+invocation without a token does not adopt the currently active observation.
+
+The regression creates real Agent Core before-turn hooks for A and B, then
+fires A after B starts. It also injects stale or unowned registry updates while
+B has a pending measurement, verifies that B's entire entry is unchanged, and
+checks that B's own hook and measurement binding still work.
+
+This protects `current_turn_observation`, not every Keeper-scoped projection.
+`Keeper_turn_preview` still stores streaming preview by Keeper name, and pending
+measurement production belongs to the Keeper lifecycle. Both require space
+attribution before concurrent execution. Session/checkpoint and external-effect
+ownership are also unchanged. Source review and parsing are not runtime proof.
+
 ## Remaining stack order
 
-1. Attribute remaining registry progress/FSM/model/measurement callbacks to the
-   captured attempt. Do not fetch the current attempt when a delayed callback runs.
+1. Partition streaming preview and lifecycle measurement production by execution
+   space; registry callback mutation is now attributed to the captured attempt.
 2. Partition provider history/checkpoints and official-client session stores by
    execution space, preserving existing CAS, effect and continuation contracts.
 3. Scope event subscriptions and emitted events by execution identity. The current

@@ -810,6 +810,7 @@ let capture_skill_snapshot ~base_path =
            declaration takes precedence. When omitted,
            [Keeper_config.keeper_unified_temperature] is the fallback. *)
 let run_turn
+      ?observation_token
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
       ~(publication_recovery :
@@ -1113,6 +1114,7 @@ let run_turn
   let setup = match native_scope with
     | Error detail -> Error (checkpoint_persistence_error ~keeper_name:meta.name ~detail)
     | Ok () -> Keeper_run_tools.prepare_agent_setup
+      ?observation_token
       ?dynamic_context_for_tools:prompt_ctx.dynamic_context_for_tools
       ?repetition_execution
       ~config
@@ -1499,6 +1501,7 @@ let run_turn
     (* 8. Run Agent *)
     let record_turn_progress, yield_on_tool, on_yield, on_resume, on_event =
       Turn_helpers.turn_progress_callbacks
+        ~observation_token
         ~config
         ~keeper_name:meta.name
         ~downstream:on_event

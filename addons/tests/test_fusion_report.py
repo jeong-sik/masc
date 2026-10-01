@@ -204,6 +204,12 @@ class FusionReport(unittest.TestCase):
                 self.assertTrue(result["isError"])
                 self.assertNotIn("structuredContent", result)
 
+    def test_paired_rows_require_one_immutable_snapshot(self):
+        output = project(detail())
+        output["rows"][1]["evidence"] = [{"uri": "lane-evidence:" + "b" * 64,
+                                             "sha256": "b" * 64}]
+        self.assertTrue(call("fusion-report", [upstream(output)])["isError"])
+
     def test_full_body_fits_when_native_producer_wire_fits(self):
         producer_limit = reply_limit("fusion-results")
         report_limit = reply_limit("fusion-report")
@@ -248,6 +254,7 @@ class FusionReport(unittest.TestCase):
             value = detail()
             value["run"]["run_id"] = f"fusion-{index}"
             value["evidence"]["post"]["origin"]["fusion_run_id"] = value["run"]["run_id"]
+            value["evidence"]["post"]["id"] = f"p-{index:032x}"
             value["evidence"]["post"]["body"] = f"Body {index}\n" + "x" * 60000
             captured = source(value)
             captured["incarnation"] = value["run"]["run_id"]
@@ -283,6 +290,7 @@ class FusionReport(unittest.TestCase):
             run_id = f"fusion-{index}"
             value["run"]["run_id"] = run_id
             value["evidence"]["post"]["origin"]["fusion_run_id"] = run_id
+            value["evidence"]["post"]["id"] = f"p-{index:032x}"
             captured = source(value)
             captured["incarnation"] = run_id
             captures.append(captured)
@@ -436,6 +444,11 @@ class FusionReport(unittest.TestCase):
         second_output = project(second)
         combined["rows"].extend(second_output["rows"])
         combined["coverage"].extend(second_output["coverage"])
+        self.assertTrue(call("fusion-report", [upstream(combined)])["isError"],
+                        "one Board post cannot certify two different Fusion runs")
+        second_output["rows"][1]["fields"]["board_post"]["id"] = "p-" + "b" * 32
+        second_output["rows"][0]["fields"]["board_post_id"] = "p-" + "b" * 32
+        combined["rows"][-2:] = second_output["rows"]
         report = call("fusion-report", [upstream(combined)])["structuredContent"]
         self.assertEqual([r["subject_id"] for r in reports(report)], [RUN, "fusion-request-2"])
         self.assertEqual(len({r["id"] for r in reports(report)}), 2)
@@ -448,6 +461,22 @@ class FusionReport(unittest.TestCase):
         self.assertEqual(selected_producer["output_id"], "result")
         self.assertEqual(selected_producer["output_selection"], {"lanes": ["fusion/result"]})
         self.assertEqual(selected_producer["coverage_scope"], "whole_producer")
+
+    def test_complete_report_requires_matching_output_selection(self):
+        output = project(detail())
+        for selection in (None, {"all_lanes": False}, {"lanes": ["fusion/status"]}):
+            with self.subTest(selection=selection):
+                captured = upstream(output)
+                producer = captured["observations"][0]["producer"]
+                if selection is None:
+                    del producer["output_selection"]
+                else:
+                    producer["output_selection"] = selection
+                self.assertTrue(call("fusion-report", [captured])["isError"])
+        captured = upstream(output, output_id="both",
+                            selected_lanes=["fusion/status", "fusion/result"])
+        report = call("fusion-report", [captured])["structuredContent"]
+        self.assertTrue(reports(report)[0]["fields"]["input_complete"])
 
     def test_every_fusion_row_requires_matching_source_coverage(self):
         original = project(detail())

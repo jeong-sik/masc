@@ -95,6 +95,18 @@ def row_coordinates(original):
         "id", "lane_id", "kind", "subject_id", "observed_at", "clock", "actor", "evidence", "related_ids")}
 
 
+def output_selection(producer):
+    selected = object_value(producer.get("output_selection"), "producer.output_selection")
+    if selected == {"all_lanes": True}:
+        return None
+    lanes = selected.get("lanes")
+    if (set(selected) != {"lanes"} or not isinstance(lanes, list) or not lanes
+            or any(not isinstance(lane, str) or not lane.strip() for lane in lanes)
+            or len(lanes) != len(set(lanes))):
+        raise InvalidInput("Invalid producer output selection")
+    return set(lanes)
+
+
 def reports(source: Source, observation: dict, *, recognized: bool):
     producer = object_value(observation.get("producer"), "producer")
     for key in ("installation_id", "instance_id", "run_id",
@@ -105,6 +117,7 @@ def reports(source: Source, observation: dict, *, recognized: bool):
         raise InvalidInput("producer.observation_seq must be a positive completed sequence")
     if producer.get("coverage_scope") != "whole_producer":
         raise InvalidInput("Report input requires whole-producer coverage")
+    selected_lanes = output_selection(producer)
     retained = evidence(observation.get("evidence"))
     if not retained or not any(item["sha256"] is not None for item in retained):
         raise InvalidInput("Report input requires a retained upstream output digest")
@@ -131,6 +144,7 @@ def reports(source: Source, observation: dict, *, recognized: bool):
     base_complete = (source.complete and recognized and producer_status["complete"]
                      and bool(upstream_coverage) and all(c["complete"] for c in upstream_coverage))
     groups = {}
+    board_post_owners = {}
     skipped = set()
     ports = {f"{producer['instance_id']}/fusion/status": "fusion/status",
              f"{producer['instance_id']}/fusion/result": "fusion/result"}
@@ -141,6 +155,8 @@ def reports(source: Source, observation: dict, *, recognized: bool):
             skipped.add(lane)
             continue
         lane = ports[lane]
+        if selected_lanes is not None and lane not in selected_lanes:
+            raise InvalidInput("Fusion row is excluded by producer output selection")
         identity = string(original.get("id"), "row.id")
         if not identity.startswith(f"{producer['instance_id']}/{sequence}/"):
             raise InvalidInput("Fusion row identity disagrees with the producer sequence")
@@ -168,7 +184,10 @@ def reports(source: Source, observation: dict, *, recognized: bool):
             run_id = string(fields.get("fusion_run_id"), "fusion_run_id")
             status = run_state(fields.get("run_status"))
             post = object_value(fields.get("board_post"), "board_post")
-            string(post.get("id"), "board_post.id")
+            post_id = string(post.get("id"), "board_post.id")
+            previous_run = board_post_owners.setdefault(post_id, run_id)
+            if previous_run != run_id:
+                raise InvalidInput("One Board post cannot identify two Fusion runs")
             if not isinstance(post.get("body"), str):
                 raise InvalidInput("board_post.body must be text")
             origin = object_value(post.get("origin"), "board_post.origin")
@@ -208,6 +227,8 @@ def reports(source: Source, observation: dict, *, recognized: bool):
                 raise InvalidInput("Fusion status and result belong to different source coordinates")
             if result_row[0]["related_ids"] != [status_row[0]["id"]]:
                 raise InvalidInput("Fusion result relation does not identify its paired status row")
+            if evidence(status_row[0]["evidence"]) != evidence(result_row[0]["evidence"]):
+                raise InvalidInput("Fusion status and result cite different snapshots")
             status_event = string(status_fields.get("source_event_id"), "status.source_event_id")
             if string(result_fields.get("source_event_id"), "result.source_event_id") != status_event:
                 raise InvalidInput("Fusion status and result belong to different source events")

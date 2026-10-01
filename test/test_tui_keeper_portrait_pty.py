@@ -620,9 +620,8 @@ def item_account_requires_matching_roster_revision(binary: str) -> None:
             if row["name"] == "alpha":
                 row["runtime_id"] = "revision-b.current"
                 row["candle_balance_milli"] = "13000"
-        h.send_and_wait(process, fd, output, b"[", INFO_TAB)
-        await_frame(process, fd, output, b"revision-b.current")
-        h.send_and_wait(process, fd, output, b"]", "▸Items".encode())
+        # Stay on Items: accepting roster B must launch its replacement read
+        # without a second key press or leaving/re-entering the tab.
         await_frame(process, fd, output, b"Balance 13.000 Candle")
         assert not any(b"Account unavailable:" in line for line in last_frame_rows(output).values())
         # Turning Candle off cannot leave B's ready Item account alongside an

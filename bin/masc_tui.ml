@@ -4283,6 +4283,21 @@ let launch_keeper_items state ~mailbox keeper_name =
       let* _ = Masc_tui_keeper_items.match_revision ~expected_revision reading in
       Ok reading)
 
+let visible_item_revision state =
+  match state.view, state.detail_tab, selected_keeper state with
+  | Keepers Keeper_detail, Detail_items, Some keeper ->
+      Some (keeper.k_name, keeper_item_revision state keeper.k_name)
+  | _ -> None
+
+let refresh_changed_keeper_items state ~mailbox previous =
+  let current = visible_item_revision state in
+  if current <> previous then
+    match current with
+    | Some (keeper_name, Ok _) -> launch_keeper_items state ~mailbox keeper_name
+    | Some (_, Error detail) ->
+        withdraw_keeper_items state; state.item_account_error <- Some detail
+    | None -> ()
+
 let launch_keeper_sandbox_view state ~mailbox keeper_name =
   let request = mark_detail_read_started state ~tab:Detail_sandbox ~keeper:keeper_name in
   let host = server_peer_host in
@@ -10692,6 +10707,11 @@ let apply_http_scoped_surfaces state results =
   Option.iter (apply_overview_goals_load state) results.http_overview_goals;
   Option.iter (apply_account_emails_load state) results.http_account_emails
 
+let apply_http_scoped_surfaces_and_refresh state ~mailbox results =
+  let previous_items = visible_item_revision state in
+  apply_http_scoped_surfaces state results;
+  refresh_changed_keeper_items state ~mailbox previous_items
+
 (* This is a current reading, not a last-known cache. A failed probe makes
    the projection unread; every following refresh asks again, so a same-port
    replacement still moves A -> B as soon as /health succeeds. The local
@@ -10736,11 +10756,13 @@ let apply_server_identity_reading state reading =
   | Masc_tui_types.Workspace_identity_unread ->
     state.item_account_error <- Some "Server workspace identity is unavailable"
 
-let apply_http_surfaces state results =
+let apply_http_surfaces state ~mailbox results =
+  let previous_items = visible_item_revision state in
   apply_overview_load state results.http_overview;
   Option.iter (apply_approval_observation state) results.http_approvals;
   apply_http_scoped_surfaces state results.http_scoped;
   apply_server_identity_reading state results.http_server_identity;
+  refresh_changed_keeper_items state ~mailbox previous_items;
   let reached result =
     Result.map (fun _ -> ()) result |> Result.map_error (fun _ -> ())
   in
@@ -10771,8 +10793,8 @@ let apply_server_booting state ~identity ~approval_ticket =
     approval_ticket;
   state.connection_status <- Masc_tui_types.Booting
 
-let apply_http_refresh_outcome state = function
-  | Refresh_surfaces results -> apply_http_surfaces state results
+let apply_http_refresh_outcome state ~mailbox = function
+  | Refresh_surfaces results -> apply_http_surfaces state ~mailbox results
   | Refresh_server_booting { identity; approval_ticket } ->
     apply_server_booting state ~identity ~approval_ticket
 
@@ -11305,7 +11327,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
         Fun.protect
           ~finally:(fun () -> refresh_inflight := false)
           (fun () ->
-             apply_http_refresh_outcome state
+             apply_http_refresh_outcome state ~mailbox
                (load_http_surfaces ~host ~port ~approval_ticket
                   ~board_sort:state.board_sort
                 ~board_hearth:state.board_hearth
@@ -11359,7 +11381,7 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight ~mailbox
         Fun.protect
           ~finally:(fun () -> refresh_inflight := false)
           (fun () ->
-             apply_http_scoped_surfaces state
+             apply_http_scoped_surfaces_and_refresh state ~mailbox
                (load_http_scoped_surfaces ~host ~port
                   ~approval_ticket ~board_sort:state.board_sort
                 ~board_hearth:state.board_hearth
@@ -13407,7 +13429,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
   | Http_refresh_done (Refresh_surfaces results) ->
       http_refresh_inflight := false;
       state.http_refresh_started_ns <- None;
-      apply_http_surfaces state results;
+      apply_http_surfaces state ~mailbox results;
       (* The local roster is trustworthy only after a workspace-matched read.
          Resolve the boot choice once; a key the operator pressed meanwhile
          takes precedence over the saved choice. *)
@@ -13753,7 +13775,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         ~scoped_refresh_followup ~mailbox
   | Http_scoped_refresh_done results ->
       http_scoped_refresh_inflight := false;
-      apply_http_scoped_surfaces state results;
+      apply_http_scoped_surfaces_and_refresh state ~mailbox results;
       (match state.view with
        | Overview | Approvals -> launch_keeper_tool_approvals_load state ~mailbox
        | Keepers _ -> launch_keeper_tool_modes_load state ~mailbox

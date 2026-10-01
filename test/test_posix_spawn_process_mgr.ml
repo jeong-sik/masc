@@ -317,8 +317,9 @@ let test_group_final_reap_does_not_block_scheduler () =
   Eio.Promise.await entered;
   (* This fiber must run while the final wait blocks its system thread.
      A concurrent termination request cannot signal/reap the owned PID. *)
-  Eio.Process.signal proc Sys.sigterm;
-  ignore (Unix.write_substring output "x" 0 1 : int);
+  Fun.protect
+    ~finally:(fun () -> ignore (Unix.write_substring output "x" 0 1 : int))
+    (fun () -> Eio.Process.signal proc Sys.sigterm);
   (match Eio.Time.with_timeout_exn clock 10. (fun () -> Eio.Process.await proc) with
    | `Exited code -> check int "original exit preserved" 9 code
    | `Signaled _ -> fail "reaping child was signalled");

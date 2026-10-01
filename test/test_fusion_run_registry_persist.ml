@@ -425,6 +425,12 @@ let test_observer_lookup_refuses_reused_and_unreadable_history () =
   expect_terminal registry;
   let replayed = R.replay path in
   expect_terminal replayed;
+  (* Successive exact lookups read the indexed identity, and a later append
+     remains visible without replaying the earlier history. *)
+  expect_terminal replayed;
+  register replayed "after-index" "later-owner" 500.;
+  R.mark_completed replayed ~run_id:"after-index" ~outcome:R.Succeeded;
+  expect_terminal replayed;
   check int "replay keeps only the bounded completed cache" R.max_completed_retained
     (List.length (R.list_runs replayed));
   let history = Fs_compat.load_file path in

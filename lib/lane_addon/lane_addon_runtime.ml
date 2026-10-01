@@ -967,7 +967,10 @@ let read_declaration ?caller ?access ~config json = Eio_context.run_on_owner_dom
         | Keeper _ | Unauthenticated -> denied) in
     Ok (Lane_addon_declaration.document_to_json document)))
 
+let declaration_writer_key = Eio.Fiber.create_key ()
 let save_declaration ?caller ?access ~config json = Eio_context.run_on_owner_domain (fun () ->
+  let write = Option.value ~default:Lane_addon_declaration.write
+    (Eio.Fiber.get declaration_writer_key) in
   let* request = Lane_addon_declaration.write_request json in
   let* directory = edit_directory config in
   let m = manager config in let access = caller_access ?access caller in
@@ -1013,7 +1016,7 @@ let save_declaration ?caller ?access ~config json = Eio_context.run_on_owner_dom
               ~prior_revision:(Option.map (fun (d : Lane_addon_declaration.document) -> d.source_revision) current)
               ~proposed_revision:(Lane_addon_store.digest request.source_text))
           |> Result.map_error ownership_error in
-    let* receipt = offload (fun () -> Lane_addon_declaration.write ~directory request)
+    let* receipt = offload (fun () -> write ~directory request)
       |> Result.map_error (fun error -> match access with
           | Lane_addon_sources.Operator_configuration -> error
           | Keeper _ | Unauthenticated -> {error with Lane_addon_declaration.current=None}) in
@@ -1026,10 +1029,14 @@ let save_declaration ?caller ?access ~config json = Eio_context.run_on_owner_dom
             else Lane_addon_document_owner.complete ~root:(Lane_addon_store.root m.store)
               ~source_path ~keeper ~source_revision:observed.source_revision
               |> Result.map_error ownership_error)
-      | None, Durable ->
-          offload (fun () -> Lane_addon_document_owner.revoke ~root:(Lane_addon_store.root m.store) ~source_path)
-          |> Result.map_error ownership_error
-      | _, Unconfirmed _ -> Ok () in
+      | None, (Durable | Unconfirmed _) ->
+          offload (fun () ->
+            let* observed = Lane_addon_declaration.read ~directory ~source_path in
+            if observed.source_revision <> receipt.document.source_revision
+            then Error (ownership_error "declaration changed before shared ownership withdrawal")
+            else Lane_addon_document_owner.revoke ~root:(Lane_addon_store.root m.store) ~source_path
+              |> Result.map_error ownership_error)
+      | Some _, Unconfirmed _ -> Ok () in
     let* () = authorize_document m ~access receipt.document in
     m.configuration_nudge ();
     Ok (Lane_addon_declaration.receipt_to_json receipt)))
@@ -1490,6 +1497,7 @@ let start_configuration_service ~config ~sw ~clock =
     Pulse.run ~sw pulse)
 
 module For_testing = struct
+  let with_declaration_writer writer f = Eio.Fiber.with_binding declaration_writer_key writer f
   type nonrec connection = connection = {
     observe : binding:Yojson.Safe.t -> sources:Yojson.Safe.t -> (output, string) result;
     action_schema : unit -> Yojson.Safe.t option;

@@ -13,6 +13,8 @@ import test_tui_home_journey_pty as home
 import test_tui_keyboard_input as h
 
 SOURCE_MODULES = (
+    "bin/masc_tui_home.ml", "bin/masc_tui_home.mli",
+    "bin/masc_tui_surface_navigation.ml", "bin/masc_tui_surface_navigation.mli",
     "bin/masc_tui.ml", "bin/masc_tui_types.ml", "bin/masc_tui_render.ml",
 )
 CHAT_PATH = "/api/v1/keepers/chat/stream"

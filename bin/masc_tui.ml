@@ -24634,7 +24634,7 @@ and is loaded on demand through keeper_skill.
                 (match state.planning_mode with
                  | Planning_list
                    when Masc_tui_overview_tasks.is_focused state.task_focus ->
-                     if Option.is_some state.task_detail_id then
+                     if Option.is_some (task_detail_on_screen state) then
                        state.task_detail_scroll <-
                          Masc_tui_types.scroll_down_from state.task_detail_scroll ~by:1
                      else
@@ -25003,7 +25003,7 @@ and is loaded on demand through keeper_skill.
                 (match state.planning_mode with
                  | Planning_list
                    when Masc_tui_overview_tasks.is_focused state.task_focus ->
-                     if Option.is_some state.task_detail_id then
+                     if Option.is_some (task_detail_on_screen state) then
                        state.task_detail_scroll <- max 0 (state.task_detail_scroll - 1)
                      else
                        state.task_focus <-

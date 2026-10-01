@@ -1819,7 +1819,7 @@ type async_msg =
       * bool
       * (Masc_tui_http.tool_approval_answer, string) result
   | Keeper_tool_approvals_loaded of
-      Snapshot_read.request * (Tui_decode.keeper_tool_approval list, string) result
+      Snapshot_read.request * Tui_decode.server_identity * (Tui_decode.keeper_tool_approval list, string) result
   | Sent_image_ready of {
       generation : int;
       view : surface;
@@ -2072,6 +2072,12 @@ let same_server_workspace (expected : Tui_decode.server_identity)
   && String.equal
        (Masc_tui_types.canonical_path expected.sid_masc_root)
        (Masc_tui_types.canonical_path actual.sid_masc_root)
+
+let probe_expected_workspace ~host ~port expected =
+  match Masc_tui_loader.load_server_identity ~host ~port with
+  | Ok actual when same_server_workspace expected actual -> Ok ()
+  | Ok _ -> Error "workspace changed before the action completed"
+  | Error detail -> Error detail
 
 let same_workspace_identity expected current =
   match expected, current with
@@ -2513,7 +2519,9 @@ let launch_surface_tool_approval state ~mailbox ~keeper_name ~tool_call_id
     ~allow =
   if state.workspace_identity <> Workspace_identity_match then
     report_action state "error" "Cannot decide: workspace identity is unverified"
-  else
+  else match state.server_identity with
+  | None -> report_action state "error" "Cannot decide: workspace identity is unverified"
+  | Some expected_workspace ->
   (* Answering a held tool call mutates server state over one round trip, like
      the Gate and operator-confirm decisions beside it. Take the same
      single-action slot so the header shows [submitting] at once and a repeat
@@ -2530,6 +2538,8 @@ let launch_surface_tool_approval state ~mailbox ~keeper_name ~tool_call_id
       let run () =
         let result =
           try
+            let ( let* ) = Result.bind in
+            let* () = probe_expected_workspace ~host ~port expected_workspace in
             Masc_tui_http.post_keeper_tool_approval ~host ~port ~keeper_name
               ~tool_call_id ~allow
           with
@@ -2559,7 +2569,9 @@ let launch_surface_tool_approval state ~mailbox ~keeper_name ~tool_call_id
    the keypress. *)
 let launch_keeper_tool_approvals_load ?(intent = Snapshot_read.Poll) state ~mailbox =
   if state.workspace_identity <> Workspace_identity_match then ()
-  else
+  else match state.server_identity with
+  | None -> ()
+  | Some expected_workspace ->
   let read, request = Snapshot_read.start ~intent state.keeper_tool_approvals_read in
   state.keeper_tool_approvals_read <- read;
   match request with
@@ -2569,8 +2581,13 @@ let launch_keeper_tool_approvals_load ?(intent = Snapshot_read.Poll) state ~mail
   let port = state.port in
   Masc_tui_async_read.launch
     ~deliver:(fun result ->
-      enqueue_async mailbox (Keeper_tool_approvals_loaded (request, result)))
-    (fun () -> Masc_tui_loader.load_keeper_tool_approvals ~host ~port)
+      enqueue_async mailbox (Keeper_tool_approvals_loaded (request, expected_workspace, result)))
+    (fun () ->
+      let ( let* ) = Result.bind in
+      let* () = probe_expected_workspace ~host ~port expected_workspace in
+      let* held = Masc_tui_loader.load_keeper_tool_approvals ~host ~port in
+      let* () = probe_expected_workspace ~host ~port expected_workspace in
+      Ok held)
 
 (* What voice actually resolved to, plus the microphone the recorder would
    open.
@@ -3065,12 +3082,6 @@ let launch_keeper_turns_load state ~mailbox =
         enqueue_async mailbox (Keeper_turns_loaded (generation, result)))
       (fun () -> Masc_tui_loader.load_keeper_turns ~host ~port)
   end
-
-let probe_expected_workspace ~host ~port expected =
-  match Masc_tui_loader.load_server_identity ~host ~port with
-  | Ok actual when same_server_workspace expected actual -> Ok ()
-  | Ok _ -> Error "workspace changed before the action completed"
-  | Error detail -> Error detail
 
 let launch_gate_snapshot_load ?(intent = Snapshot_read.Poll) state ~mailbox =
   if state.workspace_identity <> Workspace_identity_match then ()
@@ -14254,7 +14265,9 @@ let apply_async_message state ~base_path ~http_refresh_inflight
              ~intent:Revalidate ~refresh_inflight:http_refresh_inflight
              ~scoped_refresh_inflight:http_scoped_refresh_inflight
              ~scoped_refresh_followup ~mailbox
-       | Ok _ -> ()
+       | Ok _ ->
+           report_action state "system"
+             (Printf.sprintf "task %s cancelled in the previous workspace; current workspace unchanged" task_id)
        | Error err -> report_action state "error" ("task cancel failed: " ^ err))
   | Goal_timeline_loaded (goal_id, result) ->
       (* Drawn only while the operator still has this goal open; a stale
@@ -15355,12 +15368,13 @@ let apply_async_message state ~base_path ~http_refresh_inflight
              Message_status
          | _ -> Message_error)
         text
-  | Keeper_tool_approvals_loaded (request, result) ->
+  | Keeper_tool_approvals_loaded (request, expected_workspace, result) ->
       (match Snapshot_read.settle state.keeper_tool_approvals_read request with
        | None -> ()
        | Some read ->
        state.keeper_tool_approvals_read <- read;
-       if state.workspace_identity = Workspace_identity_match then
+       if state.workspace_identity = Workspace_identity_match
+          && Option.exists (same_server_workspace expected_workspace) state.server_identity then
        match result with
        | Ok held ->
            state.keeper_tool_approvals <- held;

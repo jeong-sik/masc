@@ -11260,11 +11260,6 @@ let home_continue_rows (state : state) =
           "Last conversation with " ^ Masc.Tui_terminal_text.sanitize_terminal_text name
           ^ save_notice
           ^ " · roster unavailable; read history" ]
-    | Some (name, save_notice) when state.workspace_identity = Workspace_identity_unread
-                                   && state.local_workspace = Local_workspace_read ->
-        [ Home_read_last name,
-          "Last conversation with " ^ Masc.Tui_terminal_text.sanitize_terminal_text name
-          ^ save_notice ^ " · workspace identity not read; read history" ]
     | Some _ | None -> []
   in
   let choose =
@@ -11288,7 +11283,9 @@ let home_continue_rows (state : state) =
                     "Conversation history unavailable · choose a Keeper"
                 | (No_chat_receipt | Recorded_chat _ | Session_chat _ | Unconfirmed_chat _), Some (name, _) ->
                     "Last conversation " ^ Masc.Tui_terminal_text.sanitize_terminal_text name
-                    ^ " unavailable · choose a Keeper"
+                    ^ (if state.workspace_identity = Workspace_identity_unread
+                       then " unavailable · workspace identity not read · choose a Keeper"
+                       else " unavailable · choose a Keeper")
                 | (No_chat_receipt | Recorded_chat _ | Session_chat _ | Unconfirmed_chat _), None ->
                     "Choose a Keeper  · start a conversation")
            | _ :: _ -> "New work  · choose a Keeper") ]

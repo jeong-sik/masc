@@ -1,5 +1,7 @@
 # Chat queue visibility
 
+Patched execution follow-up: [2026-10-01 Queue/image build and PTY evidence](../2026-10-01-tui-queue-image/README.md). The observations below retain their original source/binary scope.
+
 The isolated PTY reproduced the reported disappearance with the existing
 installed TUI, version 0.49.0. Both the installed executable and the checkout's
 existing executable had SHA-256

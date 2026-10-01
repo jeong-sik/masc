@@ -159,7 +159,8 @@ val frame_choice :
   | `Account_login of Masc_tui_account_login.t
   | `Lane_addons of Masc_tui_lane_addons.t
   | `About | `Palette | `Context | `Keeper_deletions | `Help
-  | `Agenda | `Answering | `Patch | `Link | `Surface ]
+  | `Agenda | `Answering | `Patch | `Link
+  | `Client_detail of Masc.Tui_decode.client_row | `Surface ]
 (** The visible surface or overlay, also used before preparing Home focus. *)
 
 val render :

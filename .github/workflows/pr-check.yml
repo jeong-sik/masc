@@ -22,5 +22,6 @@ jobs:
           python3 -c "import xml.etree.ElementTree as ET; ET.parse('docs/constitution.xml')"
           bash scripts/lint/yaml-syntax.sh
           bash scripts/check-toml-syntax.sh
-      - name: Scan committed credentials
-        run: python3 scripts/ci/check-committed-secrets.py
+      - name: Verify the credential scanner and scan the tracked tree
+        # The self-test includes the tree scan, novel-key rejection and allowlist reachability.
+        run: python3 scripts/ci/test_check_committed_secrets.py

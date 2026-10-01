@@ -1986,6 +1986,25 @@ let test_jev_event_fanout_settles_and_defers () =
       | _ -> Alcotest.fail "event did not make exactly one request"))
 ;;
 
+let test_jev_event_fanout_failure_releases_claim () =
+  run_eio_with_http_pool (fun ~sw ~net ~clock ->
+    with_temp_base "board-event-fanout-failure" @@ fun base_path ->
+    let c = candidate "failed-event" in
+    let jev = Fixture.start_server ~sw ~net ~clock (Fixture.Reply "{}") in
+    with_jev ~endpoint:jev.base_url (fun () ->
+      (match Candidate.record ~base_path c with
+       | Candidate.Recorded _ -> ()
+       | _ -> Alcotest.fail "record failed");
+      Eio.Switch.run (fun batch_sw ->
+        Keeper_board_attention_fanout.dispatch ~sw:batch_sw ~clock ~base_path [c]);
+      (match Candidate.load_candidates ~base_path ~keeper_name:c.keeper_name with
+       | Ok [{ status = Candidate.Pending _; _ }] -> ()
+       | _ -> Alcotest.fail "failed batch changed the pending candidate");
+      match Partition.load ~base_path ~keeper_name:c.keeper_name with
+      | Ok [{ state = Partition.Ready; _ }] -> ()
+      | _ -> Alcotest.fail "failed batch stranded a claimed partition"))
+;;
+
 let test_jev_adapter_sends_the_decisions_and_reads_not_relevant () =
   run_eio_with_http_pool (fun ~sw ~net ~clock ->
     let candidate = candidate "board-attention-jev-adapter" in
@@ -2482,6 +2501,8 @@ let () =
     ; ( "jev first"
       , [ Alcotest.test_case "event fanout settles confident answers and defers review" `Quick
             test_jev_event_fanout_settles_and_defers
+        ; Alcotest.test_case "failed event fanout releases the claim" `Quick
+            test_jev_event_fanout_failure_releases_claim
         ; Alcotest.test_case
             "a relevant Jev answer is kept"
             `Quick

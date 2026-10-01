@@ -1606,6 +1606,11 @@ let decode_play_mutation decode = function
   | Masc_tui_http.Post_refused detail -> Play_refused detail
   | Masc_tui_http.Post_unanswered detail -> Play_unanswered detail
 
+type currency_authority_request = {
+  car_generation : int;
+  car_identity : Tui_decode.server_identity option;
+}
+
 type async_msg =
   | Lane_package_preview_loaded of int * string * (Yojson.Safe.t, string) result
   | Keeper_queue_loaded of string * int option * Masc_tui_queue_inspection.action * (string list, string) result
@@ -1646,7 +1651,7 @@ type async_msg =
   | Voice_failed of { keeper : string; error : string }
   | Http_refresh_done of http_refresh_outcome
   | Http_refresh_failed of string * Approval.Listing_order.ticket option
-  | Http_scoped_refresh_done of unit ref * http_scoped_surface_results
+  | Http_scoped_refresh_done of currency_authority_request * http_scoped_surface_results
   | Http_scoped_refresh_failed of
       string * Approval.Listing_order.ticket option
   | Board_post_refresh_done of
@@ -4216,7 +4221,7 @@ let launch_keeper_config_view state ~mailbox keeper_name =
       enqueue_async mailbox (Keeper_config_view_loaded (request, result)))
     (fun () -> Masc_tui_loader.load_keeper_config_view ~host ~port ~keeper_name)
 
-let server_authority_ready state =
+let item_authority_ready state =
   match state.server_identity with
   | Some identity ->
       identity.Tui_decode.sid_state_ready <> Some false
@@ -4231,7 +4236,7 @@ let withdraw_keeper_items_reading state =
       (fun request -> request.drr_tab <> Detail_items) state.detail_reads
 
 let launch_keeper_items state ~mailbox keeper_name =
-  if not (server_authority_ready state) then withdraw_keeper_items_reading state
+  if not (item_authority_ready state) then withdraw_keeper_items_reading state
   else
   let request = mark_detail_read_started state ~tab:Detail_items ~keeper:keeper_name in
   let host = server_peer_host in
@@ -10344,7 +10349,9 @@ let apply_overview_goals_load state = function
 let apply_keeper_roster_load state = function
   | Ok (roster, candle) ->
       state.candle_observation <-
-        (if server_authority_ready state then Some candle else None);
+        (match state.server_identity with
+         | None | Some { Tui_decode.sid_state_ready = Some false; _ } -> None
+         | Some { Tui_decode.sid_state_ready = Some true | None; _ } -> Some candle);
       state.keeper_roster <- roster;
       state.keeper_roster_error <- None
   | Error failure ->
@@ -10683,6 +10690,21 @@ let apply_http_scoped_surfaces state results =
   Option.iter (apply_overview_goals_load state) results.http_overview_goals;
   Option.iter (apply_account_emails_load state) results.http_account_emails
 
+let same_currency_workspace source current =
+  match source, current with
+  | Some source, Some current
+    when source.Tui_decode.sid_state_ready <> Some false
+      && current.Tui_decode.sid_state_ready <> Some false ->
+      String.equal (Masc_tui_types.canonical_path source.Tui_decode.sid_base_path)
+        (Masc_tui_types.canonical_path current.Tui_decode.sid_base_path)
+      && String.equal (Masc_tui_types.canonical_path source.Tui_decode.sid_masc_root)
+        (Masc_tui_types.canonical_path current.Tui_decode.sid_masc_root)
+  | _ -> false
+
+let withdraw_currency_authority state =
+  state.candle_authority_generation <- state.candle_authority_generation + 1;
+  state.candle_observation <- None
+
 (* This is a current reading, not a last-known cache. A failed probe makes
    the projection unread; every following refresh asks again, so a same-port
    replacement still moves A -> B as soon as /health succeeds. The local
@@ -10690,6 +10712,10 @@ let apply_http_scoped_surfaces state results =
    match reloads it, so a screen never shows rows from a workspace the server
    just stopped serving. *)
 let apply_server_identity_reading state reading =
+  (* A withdrawal invalidates outstanding roster reads even if the same
+     workspace becomes ready again before those reads finish. *)
+  if not (same_currency_workspace state.server_identity (Result.to_option reading))
+  then withdraw_currency_authority state;
   let same_item_authority =
     match state.server_identity, reading with
     | Some previous, Ok current ->
@@ -10703,11 +10729,7 @@ let apply_server_identity_reading state reading =
              (Masc_tui_types.canonical_path current.sid_masc_root)
     | None, _ | Some _, Error _ -> false
   in
-  if not same_item_authority then begin
-    withdraw_keeper_items_reading state;
-    state.candle_observation <- None;
-    state.candle_read_authority <- ref ()
-  end;
+  if not same_item_authority then withdraw_keeper_items_reading state;
   state.server_identity <- Masc_tui_types.server_identity_of_refresh reading;
   state.workspace_identity <-
     Masc_tui_types.workspace_identity_of_refresh
@@ -10719,8 +10741,6 @@ let apply_server_identity_reading state reading =
   | Masc_tui_types.Workspace_identity_unread -> ()
 
 let apply_http_surfaces state results =
-  (* A full refresh's roster and identity are admitted together. Applying the
-     identity afterward could erase fresh remote values or retain old ones. *)
   apply_server_identity_reading state results.http_server_identity;
   apply_overview_load state results.http_overview;
   Option.iter (apply_approval_observation state) results.http_approvals;
@@ -11322,7 +11342,10 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight ~mailbox
        match state.msg_target_keeper_name with
        | Some keeper_name -> launch_keeper_history_load state ~mailbox ~keeper_name
        | None -> ());
-    let currency_authority = state.candle_read_authority in
+    let currency_authority = {
+      car_generation = state.candle_authority_generation;
+      car_identity = state.server_identity;
+    } in
     let run_refresh () =
       try
         enqueue_async mailbox
@@ -13739,9 +13762,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight
              { ao_ticket; ao_result = Error err })
       approval_ticket;
       withdraw_keeper_items_reading state;
-      state.candle_observation <- None;
-      state.candle_read_authority <- ref ();
       state.server_identity <- None;
+      withdraw_currency_authority state;
       state.connection_status <- Masc_tui_types.Disconnected;
       add_event state "error" err;
       react_to_server_contact state ~base_path ~host:server_peer_host
@@ -13753,11 +13775,15 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         ~scoped_refresh_followup ~mailbox
   | Http_scoped_refresh_done (currency_authority, results) ->
       http_scoped_refresh_inflight := false;
-      (* Even an A -> B -> A return cannot revive A's earlier scoped roster.
-         Keep unrelated dataset application behavior unchanged. *)
+      let same_workspace =
+        currency_authority.car_generation = state.candle_authority_generation
+        && same_currency_workspace currency_authority.car_identity state.server_identity
+      in
+      (* A late roster belongs to its request's workspace, not to the next
+         process that answered at the same port. Other scoped datasets keep
+         their existing application paths. *)
       let results =
-        if currency_authority == state.candle_read_authority
-           && server_authority_ready state then results
+        if same_workspace then results
         else { results with http_keeper_roster = None }
       in
       apply_http_scoped_surfaces state results;
@@ -14010,7 +14036,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         | Some keeper -> String.equal keeper.k_name request.drr_keeper
         | None -> false
       in
-      if current && still_selected && server_authority_ready state then
+      if current && still_selected && item_authority_ready state then
         match result with
         | Ok account ->
             state.item_account <- Some (request.drr_keeper, account);

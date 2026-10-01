@@ -1,0 +1,52 @@
+{
+  "old": {
+    "source": "1f1cd345b3f81459004371b53ca647433df31dce",
+    "head": "da4772b2277ed333f6851ab1e020a16cf59cd0f7",
+    "reviewed_base": "a9dda091b3bfd2b3603f8e0fa575521412292ed4",
+    "retargeted_base": "e15b80d9045c93f040fe1250824d5f69147c7da7",
+    "old_diff": "df12538eb6ef15c72b4da15652e0317f7d747e755f43e88c1b8630e364985a53",
+    "changed_diff": "b240f3bd4ab69967a973f6589bc5bcdb8415bdee9f383776fff00fa70973716b",
+    "approval_body": "verdict: PASS head: da4772b2277ed333f6851ab1e020a16cf59cd0f7 by: independent\nReviewed the feature files.\n\n---\napprove-guard: head `da4772b2277ed333f6851ab1e020a16cf59cd0f7` \u00b7 source review",
+    "exit": 0,
+    "stdout": "{\"pr\": 1, \"head\": \"da4772b2277ed333f6851ab1e020a16cf59cd0f7\", \"approval_ids\": [99]}\n",
+    "expected_exit": 2,
+    "control": "old guard incorrectly accepts changed diff"
+  },
+  "new": {
+    "head": "da4772b2277ed333f6851ab1e020a16cf59cd0f7",
+    "reviewed_base": "a9dda091b3bfd2b3603f8e0fa575521412292ed4",
+    "approval_body": "verdict: PASS head: da4772b2277ed333f6851ab1e020a16cf59cd0f7 by: independent\nReviewed both feature files.\n\n---\napprove-guard: head `da4772b2277ed333f6851ab1e020a16cf59cd0f7` \u00b7 source review \u00b7 reviewed base `a9dda091b3bfd2b3603f8e0fa575521412292ed4` \u00b7 diff sha256 `df12538eb6ef15c72b4da15652e0317f7d747e755f43e88c1b8630e364985a53`",
+    "outcomes": {
+      "unchanged": {
+        "base": "a9dda091b3bfd2b3603f8e0fa575521412292ed4",
+        "diff": "df12538eb6ef15c72b4da15652e0317f7d747e755f43e88c1b8630e364985a53",
+        "exit": 0,
+        "stdout": "{\"pr\": 1, \"head\": \"da4772b2277ed333f6851ab1e020a16cf59cd0f7\", \"approval_ids\": [99]}\n",
+        "stderr": ""
+      },
+      "retarget-expanded": {
+        "base": "e15b80d9045c93f040fe1250824d5f69147c7da7",
+        "diff": "b240f3bd4ab69967a973f6589bc5bcdb8415bdee9f383776fff00fa70973716b",
+        "exit": 2,
+        "stdout": "",
+        "stderr": "REFUSED #1 head da4772b2277ed333f6851ab1e020a16cf59cd0f7: no trusted non-author approval bound to this head and complete diff\n"
+      },
+      "parent-landed-narrowed": {
+        "base": "779cc6dd127d22cef4b3abfa5dfd5abf86dca90f",
+        "diff": "d9d534b7d969475f49a5a75f74036f7d8ba0e471a282f1bc055b4351c875befc",
+        "exit": 2,
+        "stdout": "",
+        "stderr": "REFUSED #1 head da4772b2277ed333f6851ab1e020a16cf59cd0f7: no trusted non-author approval bound to this head and complete diff\n"
+      },
+      "moved-base-identical-diff": {
+        "base": "45e7ce077b5f87e3019736c56036e4366b048ccf",
+        "diff": "df12538eb6ef15c72b4da15652e0317f7d747e755f43e88c1b8630e364985a53",
+        "exit": 0,
+        "stdout": "{\"pr\": 1, \"head\": \"da4772b2277ed333f6851ab1e020a16cf59cd0f7\", \"approval_ids\": [99]}\n",
+        "stderr": ""
+      }
+    },
+    "original_approval_preserved": true,
+    "actions_requests": []
+  }
+}

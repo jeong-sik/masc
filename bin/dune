@@ -1060,6 +1060,7 @@
   masc ; the health reading is a typed variant: the pane decides what a gone
        ; keeper's open turn may claim, as masc_tui_keeper_mark already
        ; reads the same variant for its glyph.
+  masc_tui_ansi
   masc_tui_acting
   masc_tui_observer
   masc_tui_message_layout
@@ -1376,7 +1377,7 @@
  (name masc_tui_types)
  (wrapped false)
  (modules masc_tui_types)
- (libraries masc.masc_candle masc.keeper_registry masc_tui_voice_wizard_session masc_tui_config masc_tui_account_login digestif mtime.clock.os masc_tui_command masc_tui_play_card masc_tui_pick_list masc_tui_esc_interrupt masc_tui_planning_detail
+ (libraries masc.masc_core masc.masc_candle masc.keeper_registry masc_tui_voice_wizard_session masc_tui_config masc_tui_account_login digestif mtime.clock.os masc_tui_command masc_tui_play_card masc_tui_pick_list masc_tui_esc_interrupt masc_tui_planning_detail
   ;; [threshold_cols] is the width two panes need: the Board read layout is
   ;; decided here so the footer and the frame cannot disagree about it.
   masc_tui_roster_pane

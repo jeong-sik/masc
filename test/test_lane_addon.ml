@@ -690,7 +690,9 @@ let test_mcp_attributed_name_is_not_private_lane_authority () =
     let register name =
       let meta = match Masc_test_deps.meta_of_json_fixture (`Assoc ["name", `String name]) with
         | Ok meta -> meta | Error reason -> fail reason in
-      ignore (Keeper_registry.register_offline ~base_path:dir name meta) in
+      let path = Keeper_types_profile.keeper_meta_path config name in
+      Fs_compat.mkdir_p (Filename.dirname path);
+      Fs_compat.save_file path (Yojson.Safe.to_string (Keeper_meta_json.meta_to_json meta)) in
     register owner; register foreign;
     let anonymous_session = "lane-anonymous-" ^ Store.digest dir in
     let owner_session = "lane-owner-" ^ Store.digest dir in
@@ -698,9 +700,7 @@ let test_mcp_attributed_name_is_not_private_lane_authority () =
     let operator_session = "lane-operator-" ^ Store.digest dir in
     Fun.protect ~finally:(fun () ->
       List.iter Client_registry_eio.unregister_mcp_session
-        [anonymous_session; owner_session; foreign_session; operator_session];
-      Keeper_registry.For_testing.unregister ~base_path:dir owner;
-      Keeper_registry.For_testing.unregister ~base_path:dir foreign) (fun () ->
+        [anonymous_session; owner_session; foreign_session; operator_session]) (fun () ->
       check bool "fixture runs with workspace auth disabled" false
         (Auth.is_auth_enabled dir);
       let run_id = "mcp-private-" ^ Store.digest dir in

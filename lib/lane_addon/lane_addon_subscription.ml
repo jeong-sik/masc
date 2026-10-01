@@ -217,7 +217,7 @@ let configuration_snapshot ~io ~access ~caller config subscriptions revision =
     "source_revision",(match revision with None->`Null|Some value->`String value);
     "subscriptions",`List (List.map json subscriptions);"reader_states",`List reader_states]
 
-let dispatch_with ~io ?access ~config ~caller ~operation args =
+let dispatch_with ?access ~io ~config ~caller ~operation args =
   Eio_guard.run_in_systhread ~label:"lane-subscription-dispatch" (fun () ->
   protect (fun () -> Mutex.protect mutex (fun () ->
   let access = Option.value access ~default:Lane_addon_sources.Unauthenticated in
@@ -313,7 +313,7 @@ let dispatch_with ~io ?access ~config ~caller ~operation args =
       | Read,Some _ | Acknowledge,None | (Inspect | Save),_ -> assert false)))
 let dispatch = dispatch_with ~io:real_cursor_io
 let observe = observe_with ~io:real_cursor_io
-let handle_with ~io ?access ~config ~caller args =
+let handle_with ?access ~io ~config ~caller args =
   let* operation = get "operation" (function
     | `String "inspect" -> Ok Inspect | `String "save" -> Ok Save
     | `String "read" -> Ok Read | `String "acknowledge" -> Ok Acknowledge
@@ -321,12 +321,12 @@ let handle_with ~io ?access ~config ~caller args =
   let* fields = object_ args in
   if List.length fields<>List.length (List.sort_uniq String.compare (List.map fst fields))
   then Error "duplicate subscription request field"
-  else dispatch_with ~io ?access ~config ~caller ~operation (`Assoc (List.remove_assoc "operation" fields))
+  else dispatch_with ?access ~io ~config ~caller ~operation (`Assoc (List.remove_assoc "operation" fields))
 
 let handle = handle_with ~io:real_cursor_io
 module For_testing = struct
-  let handle ~replace_cursor_file ~sync_file ~sync_parent =
-    handle_with ~io:{replace_cursor_file;sync_file;sync_parent}
+  let handle ?access ~replace_cursor_file ~sync_file ~sync_parent =
+    handle_with ?access ~io:{replace_cursor_file;sync_file;sync_parent}
   let observe ~sync_file ~sync_parent =
     observe_with ~io:{real_cursor_io with sync_file;sync_parent}
 end

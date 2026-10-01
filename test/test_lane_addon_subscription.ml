@@ -305,7 +305,8 @@ let cursor_publication_requires_durable_visibility () = with_workspace (fun conf
           Fun.protect ~finally:(fun () -> Unix.close fd) (fun () -> Unix.fsync fd))
       ~sync_parent:(fun path -> raise (Unix.Unix_error (Unix.EIO,"fsync",path))) path bytes in
   let fault_call ~replace_cursor_file ~sync_parent operation = S.For_testing.handle
-    ~replace_cursor_file ~sync_file:Unix.fsync ~sync_parent ~access:(Lane_addon_sources.Keeper "researcher") ~config ~caller:"researcher" operation in
+    ~access:(Lane_addon_sources.Keeper "researcher")
+    ~replace_cursor_file ~sync_file:Unix.fsync ~sync_parent ~config ~caller:"researcher" operation in
   let ack_args=`Assoc (("operation",`String "acknowledge")::("receipt",first_receipt)::selection) in
   check bool "before-rename acknowledgement is rejected" true
     (Result.is_error (fault_call ~replace_cursor_file:(staged ~before:true) ~sync_parent:Unix.fsync ack_args));
@@ -343,11 +344,11 @@ let cursor_publication_requires_durable_visibility () = with_workspace (fun conf
     (Result.is_error (ack config first_receipt)))
 
 let () = run "Lane subscription use" ["operator scenarios",[
+  test_case "shared subscription requires verified cursor owner" `Quick
+    shared_producer_requires_subscription_owner_for_read_and_ack;
   test_case "hidden and absent producers share one notice" `Quick hidden_and_absent_producers_have_identical_notices;
   test_case "Keeper saves preserve hidden subscriptions" `Quick keeper_save_preserves_hidden_subscriptions;
   test_case "private producer enforces durable owner and verified access" `Quick private_producer_requires_real_owner_access;
-  test_case "shared subscription requires verified cursor owner" `Quick
-    shared_producer_requires_subscription_owner_for_read_and_ack;
   test_case "staged cursor publication survives durability failure and exact retry" `Quick cursor_publication_requires_durable_visibility;
   test_case "producer lifecycle must decode before reading or acknowledging" `Quick producer_phase_preserves_position;
   test_case "cursor identity and incomplete source remain distinct" `Quick cursor_identity_and_incomplete_source;

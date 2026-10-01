@@ -1,0 +1,51 @@
+{
+  "plan": {
+    "schema": "masc.candle_appraiser_eval.v1",
+    "source_commit": "4fae8f4e3fef99a0b23871dd6bfc58a0250df43f",
+    "runtime_id": "glm-coding.glm-5.3-flash",
+    "credential_env": "ZAI_API_KEY_SB",
+    "trials": 20,
+    "case_count": 20,
+    "planned_calls": 400,
+    "runtime_config_sha256": "97e96bfeaa9567756b108e462e6eb46c1bfa465d12eaa6b70ac806d59f5fcbc3",
+    "cases_sha256": "a67cf6aa002cd87032bceee3c6d6a4a5a3aaddf787e721883e18d12445ba1ef2",
+    "prompt_sha256": {
+      "candle_appraiser_grade.md": "ea0085dc4b0de14f1cd3a61e9edb9ec216c973bb23ca8eb6d9866736c9482a85",
+      "candle_appraiser_relation.md": "515f02279539c69e38d86202b48d865687f89446e560cff9692d141c0fb731ad",
+      "candle_appraiser_weights.md": "2adf48d36d1686f2b5be67855850da2b7d109eb18777ced390d187894c00d4ae"
+    },
+    "evaluation_overrides": {
+      "exact-body-timeout-s": 1200.0,
+      "source-exact-body-timeout-s": 1200.0,
+      "max-output-tokens": 4096
+    },
+    "calibration": {
+      "status": "not_performed",
+      "reason": "No human-graded set of 20 Goals is supplied"
+    },
+    "scope": "Synthetic isolated stage judgments; no Goal, Task, Candle ledger or Paid mutations"
+  },
+  "build": {
+    "release_version": "dev",
+    "binary_version": "dev",
+    "commit": "4fae8f4e3fef99a0b23871dd6bfc58a0250df43f",
+    "commit_source": "embedded",
+    "binary_commit": "4fae8f4e3fef99a0b23871dd6bfc58a0250df43f",
+    "binary_commit_source": "embedded",
+    "ocaml_dos_core": {
+      "source_digest": "338277ba6cc5b69d499c769d4351d73c",
+      "pinned_source_digest": "338277ba6cc5b69d499c769d4351d73c",
+      "matches_pin": true
+    },
+    "provenance_source": "self_observed",
+    "executable_sha256": "fd5d67fd9befb6349f20521f1ea86759498d3d83187bbb2812808403df495a19",
+    "binary_commit_unix_ts": 1790691940.0,
+    "binary_commit_age_seconds": 11124,
+    "executable_path": "/artifact/candle_appraiser_eval_cli.exe",
+    "executable_dir": "/artifact",
+    "runtime_instance_id": "01a0ee38-5432-7000-ac63-1ae5e5ffa035",
+    "started_at": "2026-09-29T17:31:04Z",
+    "uptime_seconds": 0
+  },
+  "scope": "production appraiser judgments only; no Goal or Candle ledger writes"
+}

@@ -1,0 +1,61 @@
+{
+  "head": "f4041a99a7d86886336e4838588dc2f4e47f3b74",
+  "run_id": 36654016413,
+  "test_step": "success",
+  "suites_ok": 9,
+  "suites_failed": 0,
+  "raw_log_sha256": "f13584123b702f21311c45b02d0eccfb8b887507c5941c67e2fad10822eb1b6e",
+  "suites": [
+    {
+      "suite": "test_tui_item_workspace_authority_pty",
+      "status": "OK",
+      "detail": "in 31s"
+    },
+    {
+      "suite": "test_tui_keeper_portrait_pty",
+      "status": "OK",
+      "detail": "in 17s"
+    },
+    {
+      "suite": "test_tui_remote_workspace_history_pty",
+      "status": "OK",
+      "detail": "in 12s"
+    },
+    {
+      "suite": "test_tui_remote_equipped_portrait",
+      "status": "OK",
+      "detail": "in 14s"
+    },
+    {
+      "suite": "test_tui_tab_strip_pty",
+      "status": "OK",
+      "detail": "in 11s"
+    },
+    {
+      "suite": "test_keeper_portrait_http",
+      "status": "OK",
+      "detail": "in 1s"
+    },
+    {
+      "suite": "test_candle_purchase_flow",
+      "status": "OK",
+      "detail": "in 1s"
+    },
+    {
+      "suite": "test_tui_http_ast",
+      "status": "OK",
+      "detail": "in 49s"
+    },
+    {
+      "suite": "test_tui_keys",
+      "status": "OK",
+      "detail": "in 0s"
+    }
+  ],
+  "tui": {
+    "scope": "synthetic HTTP A/B/A Item accounts through a real PTY; no live deployment",
+    "binary_sha256": "daedc12a303f73f9622f24c8ede77f4ea89bcad3354fc1fca7587873aeabadda",
+    "scenario_sha256": "c13bf444d0b7eb8249b602fc338d9f533d3cb0c5bbbfba011482d32340ceb64b"
+  },
+  "scope": "controlled native HTTP plus actual TUI PTYs; not a deployment or current-head merge check"
+}

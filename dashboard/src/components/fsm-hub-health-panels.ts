@@ -59,10 +59,8 @@ function Flag({ label, on, tone = 'ok' }: { label: string; on: boolean; tone?: '
 
 /** Plain-english safety-property descriptions per invariant key. */
 const INVARIANT_DESCRIPTIONS: Record<string, string> = {
-  no_runtime_before_measurement:
-    'Runtime selection 은 measurement phase 가 auto-rule 을 capture 하기 전에 시작되면 안 됨. violation 은 보통 guardrail/drift check 없이 provider call 이 발사된 경우.',
   event_priority_monotone:
-    'Event_bus priority 는 monotone 해야 함 (higher priority 먼저 delivered). break 시 critical event 가 lower priority 뒤에 도착해 keeper decision 왜곡.',
+    'measurement bind_count <= 1 이고 current 와 pending measurement 가 동시에 존재하지 않아야 함. 위반은 measurement 가 여러 번 bind 되었거나 두 위치에서 동시에 소유되고 있음을 뜻함.',
   phase_derivation_agreement:
     '저장된 KSM phase 가 derive_phase(conditions) 결과와 일치해야 함. drift 는 registry 가 phase 를 갱신하지 않았거나 condition source 가 신호를 흘렸음을 의미.',
 }

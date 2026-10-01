@@ -1085,36 +1085,39 @@ let token_revoke_cmd_exit base_path agent =
    garbage collection rather than a security decision, which is why this needs
    no confirmation while [revoke] names its target. *)
 let token_prune_cmd_exit base_path dry_run =
-  let base_path, creds = token_credentials base_path in
+  let base_path = Env_config.normalize_masc_base_path_input base_path in
   let now = Unix.gettimeofday () in
-  let expired =
-    Auth_token_inventory.expired ~now creds
-    |> List.map (fun (c : Types_auth.agent_credential) -> (c.agent_name, "expired"))
-  in
-  (* A stub whose target is gone is invisible to a listing and authenticates
-     nothing, so it belongs in the same sweep rather than living forever. *)
-  let orphaned =
-    Auth.orphaned_credential_stubs base_path
-    |> List.map (fun name -> (name, "orphaned redirect"))
-  in
-  match expired @ orphaned with
-  | [] ->
+  let mode = if dry_run then Auth_token_prune.Preview else Auth_token_prune.Retire in
+  match Auth_token_prune.run ~base_path ~now ~mode with
+  | Error error ->
+    Printf.eprintf "could not prune credentials: %s\n" (Masc_domain.masc_error_to_string error);
+    Cmd.Exit.some_error
+  | Ok [] ->
     print_endline "nothing to prune: no expired credentials, no orphaned stubs";
     Cmd.Exit.ok
-  | doomed ->
+  | Ok entries ->
+    let retired = ref 0 and previewed = ref 0 and failed = ref 0 in
     List.iter
-      (fun (name, why) ->
-         if dry_run
-         then Printf.printf "would retire %s (%s)\n" name why
-         else (
-           Auth.delete_credential base_path name;
-           Printf.printf "retired %s (%s)\n" name why))
-      doomed;
-    Printf.printf
-      "%d credential(s)%s\n"
-      (List.length doomed)
-      (if dry_run then " would be retired (--dry-run)" else " retired");
-    Cmd.Exit.ok
+      (fun { Auth_token_prune.agent_name; reason; outcome } ->
+         let why = match reason with
+           | Auth_token_prune.Expired -> "expired"
+           | Auth_token_prune.Orphaned_redirect -> "orphaned redirect" in
+         match outcome with
+         | Auth_token_prune.Would_retire ->
+           incr previewed;
+           Printf.printf "would retire %s (%s)\n" agent_name why
+         | Auth_token_prune.Retired ->
+           incr retired;
+           Printf.printf "retired %s (%s)\n" agent_name why
+         | Auth_token_prune.Failed error ->
+           incr failed;
+           Printf.eprintf "could not fully retire %s (%s; some files may already be removed): %s\n"
+             agent_name why (Masc_domain.masc_error_to_string error))
+      entries;
+    (match mode with
+     | Auth_token_prune.Preview -> Printf.printf "%d credential(s) would be retired (--dry-run)\n" !previewed
+     | Auth_token_prune.Retire -> Printf.printf "%d credential(s) retired, %d failed\n" !retired !failed);
+    if !failed = 0 then Cmd.Exit.ok else Cmd.Exit.some_error
 
 let token_cmd =
   let list_cmd =

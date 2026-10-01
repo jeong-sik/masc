@@ -5,6 +5,10 @@ let internal_error = Keeper_official_client_host.internal_error
 
 module Host = Keeper_official_client_host
 
+type scheduling_turn =
+  | Autonomous_schedule
+  | Direct_schedule of Keeper_chat_operation.Operation_id.t
+
 type successful_tool_completion =
   | No_successful_tool_completion
   | Successful_tool_completion
@@ -434,9 +438,6 @@ let codex_stream_callback ~keeper_name ~quota_scope ~raw_trace_run ~turn_count ~
             (Hashtbl.find_opt tool_indexes call_id)
         | Runtime_codex_app_server.Native_tool_started observation ->
           Option.iter
-            (Keeper_turn_preview.note_tool ~keeper_name ~now:(Time_compat.now ()))
-            observation.tool_name;
-          Option.iter
             (fun observe -> Runtime_native_tools.observe_exact_action ~official_turn:turn_count ~observe observation)
             on_native_action;
           Host.record_raw_native_tool
@@ -457,9 +458,6 @@ let codex_stream_callback ~keeper_name ~quota_scope ~raw_trace_run ~turn_count ~
                ; tool_name = observation.tool_name
                })
         | Runtime_codex_app_server.Native_tool_finished observation ->
-          Option.iter
-            (Keeper_turn_preview.note_tool ~keeper_name ~now:(Time_compat.now ()))
-            observation.tool_name;
           Host.record_raw_native_tool
             ~keeper_name
             ~raw_trace_run
@@ -779,7 +777,7 @@ let observe_failed_dispatch ~observe_transport_uncertain = function
   | Runtime_codex_app_server.Runtime_shutting_down -> ()
 ;;
 
-let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~required_native_posture ~official_client_continuation ~runtime_id ~quota_scope ~keeper_name
+let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~required_native_posture ~official_client_continuation ~runtime_id ~context_window ~quota_scope ~keeper_name
     ~pre_tool_rejects ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ~loading_plan ~initial_messages ~declared_max_prompt_bytes ~capacity_bytes ~project_history
     ~on_transmitted_model_input ~hooks
@@ -1106,6 +1104,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
       ; account_home = config.account_home
       ; isolated_home = None
       ; model = config.model
+      ; context_window
       ; native = native_posture
       ; developer_instructions
       ; admission_timeout_s = config.timeout_s
@@ -1422,8 +1421,27 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
            | Usage_windows_reported _ | Turn_finished _ -> ());
           Option.iter (fun observe -> observe event) observe_stream
         in
+        let scheduling_turn =
+           match Keeper_owner_registry.get ~base_path ~keeper_name with
+           | Error _ -> None
+           | Ok owner ->
+             (match Keeper_owner.turn_in_flight owner with
+              | Some { lane = Keeper_owner.Autonomous; _ } ->
+                Some (owner, Autonomous_schedule)
+              | Some { lane = Keeper_owner.Chat_operation; _ } ->
+                Option.map (fun operation_id -> owner, Direct_schedule operation_id)
+                  (Keeper_owner.operation_projection owner).running_operation_id
+              | Some { lane = Keeper_owner.Maintenance; _ } | None -> None)
+        in
+        let await_handoff = Option.map (fun (owner, turn) ->
+          match turn with
+          | Autonomous_schedule ->
+            (fun () -> Keeper_owner.await_claimable_operation owner)
+          | Direct_schedule operation_id ->
+            (fun () -> Keeper_owner.await_newer_original_operation owner ~operation_id)) scheduling_turn in
         (match
        Runtime_codex_app_server.run_turn
+         ?await_handoff
          ~mgr:(Posix_spawn_process_mgr.foreground_mgr ~clock
            ~grace_seconds:Process_eio.child_exit_grace_seconds)
          ~clock
@@ -1593,7 +1611,20 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
          ; run_validation = None
          ; runtime_observation = Some runtime_observation
          ; cooperative_boundary = None
-         ; stop_reason = Completed
+         ; stop_reason =
+             (* This is after natural vendor completion and durable session
+                settlement. The direct turn owner retains that exact authority
+                before requeueing the original operation, never succeeding it
+                on the scheduling reply. An unacknowledged notice is equally
+                unable to prove original-work completion. Autonomous turns keep
+                their own event-batch completion contract. *)
+             (match scheduling_turn, turn.scheduling_handoff with
+              | Some (_, Direct_schedule _),
+                  (Runtime_codex_app_server.Handoff_pending | Handoff_accepted) ->
+                Yielded_to_operation_queued { turns_used = turn_count }
+              | (Some (_, Autonomous_schedule) | None), _
+              | Some (_, Direct_schedule _),
+                  (Handoff_unrequested | Handoff_rejected) -> Completed)
          })
       with
       (* A stop the owner raised is not an ambiguity: it knows the turn did
@@ -1675,7 +1706,7 @@ let note_transport_uncertainty effect_disposition =
   | true | false -> ()
 ;;
 
-let run ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
+let run ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~context_window ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ?(loading_plan = Keeper_official_client_host.All_on_demand) ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks
     ~context_injector ~context
@@ -1761,7 +1792,7 @@ let run ?official_task_reference ?composed_context ~accepts_image_input ?require
         (* A read in an abandoned attempt cannot certify a tool-only answer
            from the next one. Effect evidence remains cumulative. *)
         Atomic.set successful_tool_completion No_successful_tool_completion;
-        run_without_lifecycle ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~official_client_continuation
+        run_without_lifecycle ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~official_client_continuation ~context_window
           ~required_native_posture
           ~runtime_id
           ~quota_scope

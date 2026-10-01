@@ -155,7 +155,7 @@ def run(executable, *, mode, evidence_dir=None):
                     raise AssertionError("first admission was not held")
                 stage(process, fd, output, base_path)
                 h.send_and_wait(process, fd, output, b"queued-image", h.composer_showing(b"queued-image"))
-                h.send_and_wait(process, fd, output, b"\r", b"Queue (2 pending")
+                h.send_and_wait(process, fd, output, b"\r", "내 메시지 2건 대기".encode())
                 if len(queue.received) != 1:
                     raise AssertionError("image request was not waiting locally behind the first admission")
             else:
@@ -188,7 +188,7 @@ def run(executable, *, mode, evidence_dir=None):
                     screen = h.screen_text(bytes(output[:end + len(h.FRAME_END)]))
                     return (b"reply-settled-local-image" in screen
                             and b"bounded-tail-image-ready" in screen
-                            and b"IN PROGRESS" not in screen and b"Queue (" not in screen
+                            and b"IN PROGRESS" not in screen and "내 메시지".encode() not in screen
                             and b"stream ended; settling" not in screen)
 
                 if not h.wait_for_fixture_state(process, fd, output, settled_frame, timeout=5):

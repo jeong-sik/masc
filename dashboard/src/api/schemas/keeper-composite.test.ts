@@ -24,7 +24,6 @@ const VALID_SNAPSHOT = {
   runtime: { state: 'idle' },
   measurement: { captured: true },
   invariants: {
-    no_runtime_before_measurement: true,
     event_priority_monotone: true,
     phase_derivation_agreement: true,
   },
@@ -53,6 +52,10 @@ describe('parseKeeperCompositeSnapshot', () => {
     expect(result.last_outcome).toBeNull()
     expect(result.recommended_actions).toEqual([])
     expect(result.fsm_guard_violations).toBe(0)
+    expect(result.invariants).toEqual({
+      event_priority_monotone: true,
+      phase_derivation_agreement: true,
+    })
   })
 
   it('parses a non-zero fsm_guard_violations count', () => {

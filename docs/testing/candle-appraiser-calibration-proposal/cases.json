@@ -1,0 +1,262 @@
+[
+  {
+    "id": "human-reference-01",
+    "stage": "grade",
+    "input": {
+      "goal": {
+        "title": "Correct the misspelled label on the Preferences tab",
+        "metric": "Occurrences of the misspelled label in Preferences",
+        "target_value": "0"
+      }
+    },
+    "comparison": null,
+    "relation_expectation": null
+  },
+  {
+    "id": "human-reference-02",
+    "stage": "grade",
+    "input": {
+      "goal": {
+        "title": "Show the accepted YYYY-MM-DD format and one example in the error returned for an invalid Goal due date",
+        "metric": "Invalid-date responses containing the documented format and example",
+        "target_value": "100%"
+      }
+    },
+    "comparison": null,
+    "relation_expectation": null
+  },
+  {
+    "id": "human-reference-03",
+    "stage": "grade",
+    "input": {
+      "goal": {
+        "title": "Preserve the stored Goal due date when an edit changes only its priority",
+        "metric": "Priority-only edits that change the stored due date",
+        "target_value": "0"
+      }
+    },
+    "comparison": null,
+    "relation_expectation": null
+  },
+  {
+    "id": "human-reference-04",
+    "stage": "grade",
+    "input": {
+      "goal": {
+        "title": "Add CSV export for the filtered expense report",
+        "metric": "CSV export acceptance tests passing",
+        "target_value": "24"
+      }
+    },
+    "comparison": null,
+    "relation_expectation": null
+  },
+  {
+    "id": "human-reference-05",
+    "stage": "grade",
+    "input": {
+      "goal": {
+        "title": "Remember the most recently selected workspace tab and restore it after restarting the application",
+        "metric": "Restart scenarios restoring the last selected tab",
+        "target_value": "100%"
+      }
+    },
+    "comparison": null,
+    "relation_expectation": null
+  },
+  {
+    "id": "human-reference-06",
+    "stage": "grade",
+    "input": {
+      "goal": {
+        "title": "Let a user search and select a Task using only the keyboard in the existing Goal editor",
+        "metric": "Task selection journeys requiring a mouse",
+        "target_value": "0"
+      }
+    },
+    "comparison": null,
+    "relation_expectation": null
+  },
+  {
+    "id": "human-reference-07",
+    "stage": "grade",
+    "input": {
+      "goal": {
+        "title": "Make same-name credential renewal and expired game-controller recovery atomic across HTTP and MCP requests",
+        "metric": "Controlled concurrent renewal and recovery schedules that release a valid renewed holder",
+        "target_value": "0"
+      }
+    },
+    "comparison": null,
+    "relation_expectation": null
+  },
+  {
+    "id": "human-reference-08",
+    "stage": "grade",
+    "input": {
+      "goal": {
+        "title": "Reject unknown fields in a stored Goal and show the resulting unavailable state consistently in the server, dashboard and TUI",
+        "metric": "Unknown-field scenarios silently accepted or shown as an empty Goal list",
+        "target_value": "0"
+      }
+    },
+    "comparison": null,
+    "relation_expectation": null
+  },
+  {
+    "id": "human-reference-09",
+    "stage": "grade",
+    "input": {
+      "goal": {
+        "title": "Expose a Keeper tool that reads its own current Candle balance and purchased items from the existing ledger",
+        "metric": "Wallet reads attributed to another Keeper or recomputed using current prices",
+        "target_value": "0"
+      }
+    },
+    "comparison": null,
+    "relation_expectation": null
+  },
+  {
+    "id": "human-reference-10",
+    "stage": "grade",
+    "input": {
+      "goal": {
+        "title": "Provide a portrait item catalog with previews for every listed item and restore the default appearance when the preview is cleared",
+        "metric": "Catalog entries without a working preview and default-reset scenario",
+        "target_value": "0"
+      }
+    },
+    "comparison": null,
+    "relation_expectation": null
+  },
+  {
+    "id": "human-reference-11",
+    "stage": "grade",
+    "input": {
+      "goal": {
+        "title": "Add profile image upload with file validation, stored resized images, authenticated retrieval and an account-settings preview",
+        "metric": "Image upload-to-reload acceptance scenarios passing",
+        "target_value": "30"
+      }
+    },
+    "comparison": null,
+    "relation_expectation": null
+  },
+  {
+    "id": "human-reference-12",
+    "stage": "grade",
+    "input": {
+      "goal": {
+        "title": "Show each Goal verification request and result in a timeline with its actual actor and evidence in both the dashboard and TUI",
+        "metric": "Recorded Goal verification results that cannot be traced to their request and actor",
+        "target_value": "0"
+      }
+    },
+    "comparison": null,
+    "relation_expectation": null
+  },
+  {
+    "id": "human-reference-13",
+    "stage": "grade",
+    "input": {
+      "goal": {
+        "title": "Deliver a scheduled daily workspace report with persisted schedules, a durable delivery outbox, retry after restart and operator controls",
+        "metric": "Scheduled reports lost or delivered twice across controlled process restarts",
+        "target_value": "0"
+      }
+    },
+    "comparison": null,
+    "relation_expectation": null
+  },
+  {
+    "id": "human-reference-14",
+    "stage": "grade",
+    "input": {
+      "goal": {
+        "title": "Implement an append-only account ledger with atomic purchases, balances, item ownership, replay after restart and an audit view",
+        "metric": "Concurrent purchase and restart scenarios violating balance or ownership",
+        "target_value": "0"
+      }
+    },
+    "comparison": null,
+    "relation_expectation": null
+  },
+  {
+    "id": "human-reference-15",
+    "stage": "grade",
+    "input": {
+      "goal": {
+        "title": "Deliver the complete Candle purchase-and-equip workflow through Keeper tools, authenticated APIs, dashboard and TUI portraits",
+        "metric": "Purchase-to-equip journeys that show a different persisted item across surfaces",
+        "target_value": "0"
+      }
+    },
+    "comparison": null,
+    "relation_expectation": null
+  },
+  {
+    "id": "human-reference-16",
+    "stage": "grade",
+    "input": {
+      "goal": {
+        "title": "Allow two workspace instances to exchange Board posts, comments and reactions with authenticated peers, durable reconciliation and duplicate suppression",
+        "metric": "Cross-instance Board reconciliation scenarios losing or duplicating accepted actions",
+        "target_value": "0"
+      }
+    },
+    "comparison": null,
+    "relation_expectation": null
+  },
+  {
+    "id": "human-reference-17",
+    "stage": "grade",
+    "input": {
+      "goal": {
+        "title": "Provide HTTP and CLI model failover across Keeper turns with durable request receipts, operator-editable slot order and consistent server, dashboard and TUI observation",
+        "metric": "Declared failover scenarios that lose the request receipt or diverge across observation surfaces",
+        "target_value": "0"
+      }
+    },
+    "comparison": null,
+    "relation_expectation": null
+  },
+  {
+    "id": "human-reference-18",
+    "stage": "grade",
+    "input": {
+      "goal": {
+        "title": "Provide a shared browser document editor with concurrent editing, access controls, durable history, presence and recovery after disconnect",
+        "metric": "Concurrent editing and reconnect acceptance journeys passing",
+        "target_value": "40"
+      }
+    },
+    "comparison": null,
+    "relation_expectation": null
+  },
+  {
+    "id": "human-reference-19",
+    "stage": "grade",
+    "input": {
+      "goal": {
+        "title": "Build a transactional workspace data subsystem that stores Goals, Tasks, Board activity and Keeper state in PostgreSQL with consistent backups, restore and operational metrics",
+        "metric": "Backup-and-restore product journeys with inconsistent cross-domain references",
+        "target_value": "0"
+      }
+    },
+    "comparison": null,
+    "relation_expectation": null
+  },
+  {
+    "id": "human-reference-20",
+    "stage": "grade",
+    "input": {
+      "goal": {
+        "title": "Build a hosted collaboration product with workspace creation, member access, shared Goals and Tasks, Board discussion, autonomous Keeper work, scheduled jobs and operator observability",
+        "metric": "End-to-end hosted workspace lifecycle journeys passing",
+        "target_value": "50"
+      }
+    },
+    "comparison": null,
+    "relation_expectation": null
+  }
+]

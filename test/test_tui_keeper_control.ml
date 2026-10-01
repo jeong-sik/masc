@@ -22,6 +22,8 @@ let runtime ?(keepalive_running = true) ?(health = health "healthy") ?(paused = 
     ?(sandbox_profile = "docker") name :
     Decode.keeper_runtime =
   { kr_name = name
+  ; kr_identity = Ok { k_trace_id = "trace-" ^ name;
+      k_created_at = "2026-09-30T00:00:00Z"; k_updated_at = "2026-09-30T00:00:00Z" }
   ; kr_portrait = Decode.Ready Keeper_portrait_look.bare
   ; kr_candle_balance_milli = None
   ; kr_candle_account_revision = Ok None
@@ -590,6 +592,58 @@ let gate_row ?(health = "healthy") ?(paused = false)
 (* The roster is where an operator compares keepers, so the sandbox each one is
    declared for has to survive the decode. Reading it per keeper from a detail
    pane was the thing this replaced. *)
+let test_remote_identity_failure_preserves_observed_controls () =
+  let row = Yojson.Safe.from_string (gate_row "analyst") in
+  let fields = match row with `Assoc fields -> fields | _ -> assert false in
+  let metadata = match List.assoc "meta" fields with
+    | `Assoc fields -> fields | _ -> assert false in
+  let decode metadata =
+    let row = `Assoc (("meta", `Assoc metadata) :: List.remove_assoc "meta" fields) in
+    match Decode.decode_keeper_runtime_list (`Assoc [
+      "candle", `Assoc ["status", `String "off"]; "keepers", `List [row];
+      "total", `Int 1; "truncated", `Bool false]) with
+    | Ok ([runtime], [], false, 1, _) -> runtime
+    | Ok _ -> Alcotest.fail "remote row was hidden"
+    | Error reason -> Alcotest.fail reason
+  in
+  let runtime = decode metadata in
+  let keeper = Decode.keeper_of_runtime runtime in
+  Alcotest.(check (result string string)) "canonical server trace" (Ok "trace-1")
+    (Decode.keeper_trace_id keeper);
+  Alcotest.(check bool) "public roster never invents activity" true
+    (Option.is_none keeper.k_activity);
+  List.iter (fun metadata ->
+    let runtime = decode metadata in
+    let keeper = Decode.keeper_of_runtime runtime in
+    Alcotest.(check bool) "invalid identity is explicit" true
+      (Result.is_error keeper.k_identity);
+    let reason = match keeper.k_identity with
+      | Error reason -> reason
+      | Ok _ -> Alcotest.fail "invalid identity unexpectedly succeeded" in
+    Alcotest.(check (result string string)) "original identity failure survives" (Error reason)
+      (Decode.keeper_trace_id keeper);
+    let projection = Decode.keeper_trace_projection [keeper] in
+    Alcotest.(check (list (pair string string))) "invalid identity cannot bind events" [] projection.bindings;
+    Alcotest.(check (list (pair string string))) "named failure remains readable"
+      [keeper.k_name, reason] projection.unavailable;
+    let valid = Decode.keeper_of_runtime (decode (match row with
+      | `Assoc fields -> (match List.assoc "meta" fields with
+          | `Assoc fields -> fields
+          | _ -> Alcotest.fail "metadata fixture is not an object")
+      | _ -> Alcotest.fail "roster fixture is not an object")) in
+    let mixed = Decode.keeper_trace_projection [valid; keeper] in
+    Alcotest.(check (list (pair string string))) "valid correlation survives beside failure"
+      [valid.k_name, "trace-1"] mixed.bindings;
+    Alcotest.(check (list (pair string string))) "failure not hidden by valid correlation"
+      [keeper.k_name, reason] mixed.unavailable;
+    let reading = reading ~liveness:(Control.Present runtime) keeper.k_name in
+    check_actions "independently valid lifecycle remains actionable"
+      [Control.Pause; Control.Wakeup; Control.Shutdown; Control.Delete]
+      (Control.available reading))
+    [ List.remove_assoc "trace_id" metadata;
+      ("trace_id", `String "../other") :: List.remove_assoc "trace_id" metadata;
+      ("name", `String "other") :: List.remove_assoc "name" metadata ]
+
 let test_roster_equipment_is_required_and_failures_stay_per_keeper () =
   let row = Yojson.Safe.from_string (gate_row "analyst") in
   let with_portrait portrait = match row with
@@ -613,6 +667,33 @@ let test_roster_equipment_is_required_and_failures_stay_per_keeper () =
   | `Assoc fields -> Alcotest.(check bool) "missing snapshot rejected" true
       (Result.is_error (decode (`Assoc (List.remove_assoc "portrait" fields))))
   | _ -> Alcotest.fail "bad row fixture"
+
+let test_item_revision_hint_preserves_keeper_observation () =
+  let row = Yojson.Safe.from_string (gate_row "analyst") in
+  let decode ?(candle = `Assoc ["status", `String "off"]) value =
+    let row = match row with
+      | `Assoc fields -> `Assoc (("candle_account_revision", value) :: List.remove_assoc "candle_account_revision" fields)
+      | _ -> Alcotest.fail "bad Keeper fixture" in
+    match Decode.decode_keeper_runtime_list (`Assoc [
+      "candle", candle; "keepers", `List [row];
+      "total", `Int 1; "truncated", `Bool false]) with
+    | Ok ([runtime], [], false, 1, _) -> runtime
+    | _ -> Alcotest.fail "Item revision hint hid the Keeper"
+  in
+  let digest = String.make 64 'a' in
+  Alcotest.(check bool) "canonical revision decoded" true
+    ((decode ~candle:(`Assoc ["status", `String "disabled"; "reason", `String "fixture ledger unavailable"]) (`String digest)).kr_candle_account_revision = Ok (Some digest));
+  Alcotest.(check bool) "null denotes no hint" true
+    ((decode `Null).kr_candle_account_revision = Ok None);
+  List.iter (fun value ->
+    let runtime = decode value in
+    Alcotest.(check bool) "malformed hint reported independently" true
+      (Result.is_error runtime.kr_candle_account_revision);
+    let roster = Control.Roster_complete [runtime] in
+    Alcotest.(check bool) "malformed hint retains lifecycle controls" true
+      (List.mem Control.Shutdown
+        (Control.available (reading ~liveness:(Control.liveness_of_roster roster "analyst") "analyst"))))
+    [`Int 1; `String "short"; `String (String.make 64 'A')]
 
 let test_roster_candle_amounts_and_status_agree () =
   let amount = "18446744073709551614000" in
@@ -1175,10 +1256,14 @@ let () =
             test_empty_error_body_names_the_status
         ] )
     ; ( "roster"
-      , [ Alcotest.test_case "the sandbox profile survives the decode" `Quick
+      , [ Alcotest.test_case "remote identity failures preserve observed controls" `Quick
+            test_remote_identity_failure_preserves_observed_controls
+        ; Alcotest.test_case "the sandbox profile survives the decode" `Quick
             test_roster_decode_reads_the_sandbox_profile
         ; Alcotest.test_case "server equipment required; failures preserve Keeper" `Quick test_roster_equipment_is_required_and_failures_stay_per_keeper
         ; Alcotest.test_case "Candle exact amounts and envelope status" `Quick test_roster_candle_amounts_and_status_agree
+        ; Alcotest.test_case "Item revision hints preserve lifecycle observations" `Quick
+            test_item_revision_hint_preserves_keeper_observation
         ; Alcotest.test_case "paused stays apart from phase" `Quick
             test_roster_decode_keeps_paused_apart_from_phase
         ; Alcotest.test_case "a row without a sandbox profile is rejected" `Quick

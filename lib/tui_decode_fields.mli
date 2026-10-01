@@ -50,3 +50,7 @@ val optional_int_field : Yojson.Safe.t -> string -> (int option, string) result
 val decode_string_name_list : Yojson.Safe.t -> string -> (string list, string) result
 val decode_bool_field_or : Yojson.Safe.t -> string -> default:bool -> (bool, string) result
 val required_nonempty_string_field : Yojson.Safe.t -> string -> (string, string) result
+
+val require_exact_object_fields :
+  string -> string list -> Yojson.Safe.t -> (unit, string) result
+(** Reject missing, unknown and duplicate object fields, naming each mismatch. *)

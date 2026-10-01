@@ -15,15 +15,19 @@ import test_tui_keyboard_input as h
 SOURCE_MODULES = (
     "bin/masc_tui_async_protocol.ml",
     "bin/masc_tui_async_protocol.mli",
-    "bin/masc_tui_home.ml", "bin/masc_tui_home.mli",
+    "bin/masc_tui_home.ml",
+    "bin/masc_tui_home.mli",
     "bin/masc_tui.ml",
     "bin/masc_tui_http.ml",
     "bin/masc_tui_render.ml",
     "bin/masc_tui_planning_detail.ml",
+    "bin/masc_tui_planning_detail.mli",
+    "bin/masc_tui_render_prim.ml",
+    "bin/masc_tui_types.ml",
 )
 
 
-def run(executable: str, *, replace_proof: bool) -> None:
+def run(executable: str, *, replace_proof: bool, long_binding: bool = False) -> None:
     goal_id = "goal-confirmation"
     goal = h.planning_goal(goal_id, "plan-alpha-29424")
     goal.update(phase="awaiting_confirmation", criterion_revision="revision-1")
@@ -42,22 +46,53 @@ def run(executable: str, *, replace_proof: bool) -> None:
         "evidence": "All measured scenarios passed",
         "recorded_at": "2026-09-19T08:00:00Z",
     }
+    if long_binding:
+        goal["title"] = "plan-alpha-29424 " + "criterion title " * 100 + "TITLE_BINDING_END"
+        goal["criterion_revision"] = "revision-" * 100 + "REVISION_BINDING_END"
+        verdict["criterion"].update(title=goal["title"], revision=goal["criterion_revision"])
+        verdict["request_id"] = "request-" * 100 + "REQUEST_BINDING_END"
+        verdict["verification_run_id"] = "verifier-" * 100 + "VERIFIER_BINDING_END"
+        verdict["evidence"] = "proof evidence " * 100 + "EVIDENCE_BINDING_END"
     proof = {"state": "proof_proven", "verdict": verdict}
     goal["verification"] = {"completion": proof}
     response = {
         "goal": goal,
         "verification": {"goal_id": goal_id, "completion": proof},
     }
+    expected_binding = {
+        "goal_id": goal_id, "criterion_revision": goal["criterion_revision"],
+        "request_id": verdict["request_id"], "verification_run_id": verdict["verification_run_id"],
+    }
     fixtures = h.overview_event_http_fixtures()
     fixtures[h.PLANNING_PATH] = h.planning_snapshot([goal])
+    fixtures[h.DASHBOARD_GOALS_PATH] = (200, {
+        "generated_at": "2026-09-19T08:00:00Z",
+        "tree": [{
+            "id": goal_id, "title": goal["title"], "phase": "awaiting_confirmation",
+            "priority": goal["priority"], "criterion_revision": goal["criterion_revision"],
+            "metric": goal["metric"], "target_value": goal["target_value"],
+            "measurement": {"state": "reported", "record": {
+                "goal_id": goal_id, "criterion_revision": goal["criterion_revision"],
+                "observed_value": "5", "evidence": "measurement evidence beyond first viewport " * 1000,
+                "actor": "measurement-fixture", "recorded_at": "2026-09-19T08:00:00Z",
+            }},
+            "due_date": None, "task_count": 0, "task_done_count": 0,
+            "stagnation_seconds": None, "tasks": [], "children": [],
+        }],
+    })
     read_count = 0
     posted: list[object] = []
+    read_entered = threading.Event()
+    release_read = threading.Event()
     submit_entered = threading.Event()
     release_submit = threading.Event()
 
     def read() -> h.HttpResponse:
         nonlocal read_count
         read_count += 1
+        read_entered.set()
+        if not release_read.wait(timeout=15.0):
+            return 500, {"error": "test did not release confirmation read"}
         return 200, response
 
     def submit(body: bytes) -> h.HttpResponse:
@@ -65,12 +100,7 @@ def run(executable: str, *, replace_proof: bool) -> None:
         submit_entered.set()
         if not release_submit.wait(timeout=15.0):
             return 500, {"error": "test did not release the confirmation response"}
-        expected = {
-            "goal_id": goal_id,
-            "criterion_revision": "revision-1",
-            "request_id": "request-1",
-            "verification_run_id": "run-1",
-        }
+        expected = expected_binding
         if posted[-1] != expected:
             return 400, {"error": "the TUI did not retain the displayed binding"}
         if replace_proof:
@@ -104,7 +134,7 @@ def run(executable: str, *, replace_proof: bool) -> None:
             process,
             master_fd,
             output,
-            rows=50,
+            rows=24,
             columns=160,
             needle=b"MASC Dashboard",
             final_cursor=b"\x1b[?25l",
@@ -114,12 +144,45 @@ def run(executable: str, *, replace_proof: bool) -> None:
         for phase_filter in (b"completed", b"dropped", b"all"):
             h.send_and_wait(process, master_fd, output, b"f", b"filter:" + phase_filter)
         h.send_and_wait(process, master_fd, output, b"\r", b"[a] Confirm proof")
-        proof_frame = h.send_and_wait(
-            process, master_fd, output, b"a", b"CONFIRM THIS PROOF"
-        )
-        h.wait_for_output(
-            process, master_fd, output, b"Verifier run: run-1", start=0, timeout=5.0
-        )
+        if not long_binding:
+            h.wait_for_output(process, master_fd, output, b"Actual: 5 (reported)", start=0, timeout=5.0)
+        h.write_all(master_fd, output, b"a")
+        if not h.wait_for_fixture_event(process, master_fd, output, read_entered, timeout=3.0):
+            raise AssertionError("confirmation read never reached the server")
+        try:
+            # Scroll the long measurement while the proof request is held.
+            # Its completion must bring the newly actionable binding into view.
+            h.press_and_settle(process, master_fd, output, b"jjjjjjjjjj")
+            proof_start = len(output)
+        finally:
+            release_read.set()
+        h.wait_for_output(process, master_fd, output, b"CONFIRM THIS PROOF",
+                          start=proof_start, timeout=5.0)
+        h.wait_for_output(process, master_fd, output, h.FRAME_END,
+                          start=h.end_of_needle(output, b"CONFIRM THIS PROOF", proof_start), timeout=3.0)
+        proof_frame = bytes(output[proof_start:])
+        # send_and_wait ends at FRAME_END after this interaction's confirmation.
+        # Replay only that returned frame, never historical terminal output.
+        proof_screen = h.screen_text(proof_frame)
+        if long_binding:
+            if b"EVIDENCE_BINDING_END" in proof_screen:
+                raise AssertionError("long binding unexpectedly fits in the initial viewport")
+            h.send_and_wait(process, master_fd, output, b"a",
+                            b"Read through the proof binding before confirming")
+            if posted:
+                raise AssertionError("unseen binding allowed completion")
+            # A taller real frame shows the whole binding, including its end.
+            h.resize_and_wait(process, master_fd, output, rows=400, columns=160,
+                              needle=b"EVIDENCE_BINDING_END", controls=(h.FULL_REDRAW,))
+            binding_screen = h.screen_text(bytes(output))
+            for tail in (b"TITLE_BINDING_END", b"REVISION_BINDING_END", b"REQUEST_BINDING_END",
+                         b"VERIFIER_BINDING_END", b"EVIDENCE_BINDING_END"):
+                if tail not in binding_screen:
+                    raise AssertionError(f"expanded proof lost binding field: {tail!r}")
+        else:
+            for binding in (b"CONFIRM THIS PROOF", b"revision-1", b"request-1", b"Verifier run: run-1"):
+                if binding not in proof_screen:
+                    raise AssertionError(f"Long measurement hid the active proof binding: {binding!r}")
         if read_count != 1 or posted:
             raise AssertionError("first key must read the proof without posting")
         if replace_proof:
@@ -161,12 +224,7 @@ def run(executable: str, *, replace_proof: bool) -> None:
             raise AssertionError(
                 "second key must post once without reading a new proof"
             )
-        if posted[0] != {
-            "goal_id": goal_id,
-            "criterion_revision": "revision-1",
-            "request_id": "request-1",
-            "verification_run_id": "run-1",
-        }:
+        if posted[0] != expected_binding:
             raise AssertionError(
                 f"confirmation changed the displayed binding: {posted!r}"
             )
@@ -176,6 +234,7 @@ def run(executable: str, *, replace_proof: bool) -> None:
                 {
                     "server": "controlled_http_fixture",
                     "proof_changed": replace_proof,
+                    "long_binding": long_binding,
                     "get_requests": read_count,
                     "post_requests": posted,
                     "encoding": "base64",
@@ -190,7 +249,8 @@ def run(executable: str, *, replace_proof: bool) -> None:
     h.run_terminal_scenario(
         executable,
         description="Goal confirmation preserves the inspected proof"
-        + (" when the server proof changes" if replace_proof else ""),
+        + (" when the server proof changes" if replace_proof else "")
+        + (" after every long binding field becomes visible" if long_binding else ""),
         interact=interact,
         http_fixtures=fixtures,
     )
@@ -199,4 +259,5 @@ def run(executable: str, *, replace_proof: bool) -> None:
 if __name__ == "__main__":
     for replaced in (False, True):
         run(os.path.abspath(sys.argv[1]), replace_proof=replaced)
-    print("Goal confirmation key and HTTP wiring: PASS")
+    run(os.path.abspath(sys.argv[1]), replace_proof=False, long_binding=True)
+    print("Goal confirmation key and HTTP wiring: PASS (3 scenarios)")

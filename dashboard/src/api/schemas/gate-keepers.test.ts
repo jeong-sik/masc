@@ -91,6 +91,26 @@ describe('decodeGateKeepers', () => {
     })
   })
 
+  it('accepts nullable canonical account revisions across all row variants', () => {
+    const healthy = keeperWire()
+    const issue = issueWire()
+    const retained = { ...issue, meta: healthy.meta, name: healthy.name,
+      effective_meta_error: { ...issue.effective_meta_error, keeper: healthy.name },
+      created_at: healthy.created_at, updated_at: healthy.updated_at, activation_mode: 'manual' }
+    for (const row of [healthy, issue, retained]) {
+      for (const revision of [null, 'a'.repeat(64)]) {
+        expect(() => Effect.runSync(decodeGateKeepers({
+          candle: { status: 'off' }, count: 1, ...listingWire(1),
+          keepers: [{ ...row, candle_account_revision: revision }],
+        }))).not.toThrow()
+      }
+      for (const revision of [undefined, '', 'A'.repeat(64), 'a'.repeat(63), 12]) {
+        expectDrift({ candle: { status: 'off' }, count: 1, ...listingWire(1),
+          keepers: [{ ...row, candle_account_revision: revision }] })
+      }
+    }
+  })
+
   it('accepts the roster current failure without changing the compact product values', () => {
     const data = Effect.runSync(decodeGateKeepers({
       candle: { status: 'off' },

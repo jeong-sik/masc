@@ -781,6 +781,16 @@ if "app-server" in args:
     emit({"id": request["id"], "result": {"account": {"type": "chatgpt", "email": "fixture@example.test",
         "planType": "pro"}, "requiresOpenaiAuth": True}})
     request = read()
+    if request["method"] == "model/list":
+        assert request["params"]["includeHidden"] is True
+        models = ["gpt-6.1-sol", "gpt-future-fixture"]
+        emit({"id": request["id"], "result": {"data": [{"id": candidate, "model": candidate,
+            "displayName": candidate, "isDefault": candidate == models[0],
+            "defaultReasoningEffort": "medium",
+            "supportedReasoningEfforts": [{"reasoningEffort": effort, "description": effort}
+                for effort in ["low", "medium", "high", "xhigh", "max", "ultra"]]}
+            for candidate in models], "nextCursor": None}})
+        request = read()
     assert request["method"] == "thread/start"
     model = request["params"]["model"]
     tool = request["params"]["dynamicTools"][0]["name"]
@@ -916,6 +926,7 @@ default = "fixture.selected"
         check bool (protocol ^ " actual readiness tool consumed") true result.tool_roundtrip;
         check_capture (protocol ^ " readiness") expected model)
         [ "codex-app-server", "gpt-6.1-sol", Some "ultra", Some "ultra"
+        ; "codex-app-server", "gpt-future-fixture", Some "ultra", Some "ultra"
         ; "codex-app-server", "gpt-6.1-sol", None, None
         ; "claude-code", "claude-sonnet-5-5", Some "high", Some "high"
         ; "claude-code", "claude-sonnet-5-5", Some "minimal", Some "low"

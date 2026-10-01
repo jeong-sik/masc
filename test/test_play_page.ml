@@ -62,6 +62,97 @@ let dispatch_get ~state ~target ~token =
     Server_auth.clear_server_state ();
     Buffer.contents response_buf)
 
+type h2_reply = { h2_status : int; h2_headers : H2.Headers.t; h2_body : string }
+
+type lane = { mutable pending : string }
+
+let transfer lane next_write report_write read =
+  let rec drain progressed =
+    match next_write () with
+    | `Write iovecs ->
+      let chunk = Buffer.create 4096 in
+      Buffer.add_string chunk lane.pending;
+      let written =
+        List.fold_left
+          (fun total (iov : Bigstringaf.t H2.IOVec.t) ->
+            Buffer.add_string chunk
+              (Bigstringaf.substring iov.buffer ~off:iov.off ~len:iov.len);
+            total + iov.len)
+          0 iovecs
+      in
+      report_write (`Ok written);
+      let data = Buffer.contents chunk in
+      let length = String.length data in
+      let consumed =
+        read (Bigstringaf.of_string data ~off:0 ~len:length) ~off:0 ~len:length
+      in
+      lane.pending <- String.sub data consumed (length - consumed);
+      drain true
+    | `Yield | `Close _ -> progressed
+  in
+  drain false
+
+(* Real H2 frames, including response body completion, through the gateway.
+   Stop with a failure if neither peer advances rather than hanging. *)
+let exchange_h2 ~handler target =
+  let status = ref None in
+  let headers = ref (H2.Headers.of_list []) in
+  let body = Buffer.create 4096 in
+  let complete = ref false in
+  let client =
+    H2.Client_connection.create
+      ~config:
+        { H2.Config.default with
+          H2.Config.initial_window_size = 65535l
+        }
+      ~error_handler:(fun _ -> fail "H2 connection error")
+      ()
+  in
+  let request =
+    H2.Request.create ~scheme:"http" `GET target
+      ~headers:(H2.Headers.of_list [ ":authority", "127.0.0.1:8935" ])
+  in
+  let writer =
+    H2.Client_connection.request client request
+      ~error_handler:(fun _ -> fail "H2 stream error")
+      ~response_handler:(fun response reader ->
+        status := Some (H2.Status.to_code response.H2.Response.status);
+        headers := response.H2.Response.headers;
+        let rec consume () =
+          H2.Body.Reader.schedule_read reader
+            ~on_eof:(fun () -> complete := true)
+            ~on_read:(fun buffer ~off ~len ->
+              Buffer.add_string body (Bigstringaf.substring buffer ~off ~len);
+              consume ())
+        in
+        consume ())
+  in
+  H2.Body.Writer.close writer;
+  let server = H2.Server_connection.create handler in
+  let to_server = { pending = "" } in
+  let to_client = { pending = "" } in
+  let rec pump () =
+    let sent =
+      transfer to_server
+        (fun () -> H2.Client_connection.next_write_operation client)
+        (H2.Client_connection.report_write_result client)
+        (H2.Server_connection.read server)
+    in
+    let received =
+      transfer to_client
+        (fun () -> H2.Server_connection.next_write_operation server)
+        (H2.Server_connection.report_write_result server)
+        (H2.Client_connection.read client)
+    in
+    if !complete then ()
+    else if sent || received then pump ()
+    else fail "H2 exchange stalled before the response completed"
+  in
+  pump ();
+  match !status with
+  | Some status -> { h2_status = status; h2_headers = !headers; h2_body = Buffer.contents body }
+  | None -> fail "the response carried no headers"
+
 let split_response response =
   let separator = "\r\n\r\n" in
   let rec find i =
@@ -167,8 +258,11 @@ let test_the_guide_names_this_servers_doors () =
         let response = get () in
         check int "no public base URL, no address to join at" 409 (status_of response);
         check bool "named as not ready" true
+          (member "code" (Yojson.Safe.from_string (snd (split_response response)))
+           = Some (`String "not_ready"));
+        check bool "the refusal explains why" true
           (member "error" (Yojson.Safe.from_string (snd (split_response response)))
-           = Some (`String "not_ready")));
+           = Some (`String "MASC_HTTP_BASE_URL is not set, so there is no address to join at")));
       Masc_test_deps.with_process_env "MASC_HTTP_BASE_URL" (Some public_base) (fun () ->
         let response = get () in
         check int "the guide needs no bearer" 200 (status_of response);
@@ -189,6 +283,52 @@ let test_the_guide_names_this_servers_doors () =
             check bool ("the arguments of " ^ schema.name) true
               (contains ~sub:(Yojson.Safe.pretty_to_string schema.input_schema) body))
           Server_routes_http_routes_dos.moves)))
+
+let test_the_guide_over_h2 () =
+  with_dir "play-guide-h2-" (fun base_path ->
+    Auth.save_auth_config base_path
+      { Masc_domain.default_auth_config with enabled = true; require_token = true };
+    let state = Masc.Mcp_server.For_testing.create_state ~base_path in
+    Server_auth.publish_server_state state;
+    Fun.protect ~finally:Server_auth.clear_server_state (fun () ->
+      Eio_main.run (fun env ->
+        Masc_test_deps.init_eio_clock env;
+        Eio.Switch.run (fun sw ->
+          let trust_policy =
+            match Server_request_authority.make_trust_policy
+                    ~bind_host:"127.0.0.1" ~bind_port:8935 ~explicit_base_url:None with
+            | Ok policy -> policy
+            | Error error -> fail (Server_request_authority.trust_policy_error_to_string error)
+          in
+          let handler =
+            Server_h2_gateway.make_request_handler ~trust_policy ~sw
+              ~clock:(Eio.Stdenv.clock env) ~server_start_time:0.0 ~request_sw:sw
+              (`Tcp (Eio.Net.Ipaddr.V4.loopback, 54321))
+          in
+          let get target = exchange_h2 ~handler target in
+          Masc_test_deps.with_process_env "MASC_HTTP_AUTH_STRICT" (Some "1") (fun () ->
+            Masc_test_deps.with_process_env "MASC_HTTP_BASE_URL" None (fun () ->
+              let reply = get Masc.Play_invite.agent_guide_path in
+              check int "H2 reports missing public address" 409 reply.h2_status;
+              let json = Yojson.Safe.from_string reply.h2_body in
+              check bool "H2 refusal code" true
+                (member "code" json = Some (`String "not_ready"));
+              check bool "H2 readable refusal" true
+                (member "error" json = Some (`String
+                  "MASC_HTTP_BASE_URL is not set, so there is no address to join at")));
+            Masc_test_deps.with_process_env "MASC_HTTP_BASE_URL" (Some public_base) (fun () ->
+              let reply = get Masc.Play_invite.agent_guide_path in
+              check int "H2 guide is public even with strict auth" 200 reply.h2_status;
+              List.iter (fun (name, value) ->
+                check (option string) name (Some value) (H2.Headers.get reply.h2_headers name))
+                [ "content-type", "text/markdown; charset=utf-8"
+                ; "cache-control", "no-store"
+                ; "x-content-type-options", "nosniff" ];
+              (match Guide.guide ~base:public_base with
+               | Ok expected -> check string "same rendered guide" expected reply.h2_body
+               | Error reason -> fail reason);
+              check int "guide suffix is not another public guide" 404
+                (get (Masc.Play_invite.agent_guide_path ^ "/x")).h2_status))))))
 
 let test_the_seat () =
   with_dir "play-seat-" (fun base_path ->
@@ -262,6 +402,7 @@ let () =
     [ ( "page"
       , [ test_case "the page is public and self-contained" `Quick test_the_page_is_public_and_self_contained
         ; test_case "the guide names this server's doors" `Quick test_the_guide_names_this_servers_doors
+        ; test_case "the guide over HTTP/2" `Quick test_the_guide_over_h2
         ; test_case "the seat names the bearer, the holder and the seats" `Quick test_the_seat
         ; test_case "expired invites and operators are not seats" `Quick test_expired_credentials_are_not_seats
         ] )

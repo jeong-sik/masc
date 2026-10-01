@@ -158,7 +158,7 @@ page.document.querySelector=()=>null;
 page.location.assign=url=>assigned.push(url);
 page.followAnchor=new Anchor('_blank');
 page.followAnchor.isConnected=true;page.followAnchor.ownerDocument=page.document;
-vm.runInContext("window[Symbol.for('masc.browser.scene.refs.v3')].nodes.set('follow-link',new WeakRef(followAnchor));window[Symbol.for('masc.browser.scene.refs.v3')].links.set('follow-link',followAnchor.href)",page);
+vm.runInContext("window[Symbol.for('masc.browser.scene.refs.v4')].nodes.set('follow-link',new WeakRef(followAnchor));window[Symbol.for('masc.browser.scene.refs.v4')].links.set('follow-link',followAnchor.href)",page);
 const dispatchedFollow={tabId:7,action:'follow_link',documentId:viewport.documentId,nodeId:'follow-link',expectedUrl:page.location.href};
 assert.equal((await command(dispatchedFollow)).error,'follow_link_requires_same_tab');
 page.followAnchor.target='_self';

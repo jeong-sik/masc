@@ -96,6 +96,8 @@ interface RuntimeEnvironmentEditorProps {
   ) => void
   onAddProvider: (input: NewRuntimeProviderInput) => void
   onAddModel: (input: NewRuntimeModelInput) => void
+  modelContextDrafts: Readonly<Record<string, string>>
+  onModelContextChange: (modelId: string, raw: string) => void
   onAddBinding: (providerId: string, modelId: string) => void
   onDeleteProvider: (providerId: string) => void
   onProviderTransportChange: (
@@ -195,6 +197,35 @@ function parseRequiredPositiveInteger(raw: string): number | undefined {
   if (!/^\d+$/.test(trimmed)) return undefined
   const parsed = Number.parseInt(trimmed, 10)
   return parsed > 0 ? parsed : undefined
+}
+
+function ModelContextEditor({ modelId, value, draft, disabled, onChange }: {
+  modelId: string
+  value: number | null
+  draft: string | undefined
+  disabled: boolean
+  onChange: (modelId: string, raw: string) => void
+}) {
+  return html`
+    <div class="rt-field" style=${{ marginTop: '9px', flexWrap: 'wrap' }}>
+      <label class="sub-k" for=${`model-context-${modelId}`}>컨텍스트 토큰</label>
+      <input
+        id=${`model-context-${modelId}`}
+        class="rt-input-sm mono"
+        value=${draft ?? (value == null ? '' : String(value))}
+        inputMode="numeric"
+        disabled=${disabled}
+        aria-label=${`${modelId} max-context`}
+        aria-invalid=${draft !== undefined}
+        onInput=${(event: Event) => onChange(modelId, (event.currentTarget as HTMLInputElement).value)}
+      />
+      <button class="rt-test-btn" type="button" disabled=${disabled} onClick=${() => onChange(modelId, '500000')}
+        aria-label=${`${modelId} 컨텍스트 500K`}>500K</button>
+      <button class="rt-test-btn" type="button" disabled=${disabled} onClick=${() => onChange(modelId, '1000000')}
+        aria-label=${`${modelId} 컨텍스트 1M`}>1M</button>
+      ${draft !== undefined ? html`<span class="rt-note" role="alert">컨텍스트는 1 이상의 정수로 입력하세요.</span>` : null}
+    </div>
+  `
 }
 
 function transportField(provider: RuntimeTomlProvider): RuntimeProviderTransportEditableField {
@@ -309,6 +340,8 @@ export function RuntimeEnvironmentEditor({
   onBindingFieldChange,
   onAddProvider,
   onAddModel,
+  modelContextDrafts,
+  onModelContextChange,
   onAddBinding,
   onDeleteProvider,
   onProviderTransportChange,
@@ -1115,6 +1148,7 @@ export function RuntimeEnvironmentEditor({
            masc #21521 / agentCore models.toml). Showing it back to the operator here
            invited editing a dead key as if it mattered. -->
       <div class=${section === 'models' ? '' : 'hidden'} data-testid="runtime-section-models">
+        <p class="rt-note">컨텍스트를 바꾼 뒤 상단에서 저장하세요. 이 모델을 공유하는 런타임의 MASC 컨텍스트 예산에 적용됩니다. 클라이언트의 실제 컨텍스트 크기는 해당 모델과 클라이언트의 적용 상태를 확인하세요.</p>
         <input
           class="rt-search mono"
           placeholder="모델 검색 — id / api-name"
@@ -1144,16 +1178,9 @@ export function RuntimeEnvironmentEditor({
                 ${model.structuredOutput !== null ? capChip(model.structuredOutput, 'structured') : null}
                 ${model.multimodal !== null ? capChip(model.multimodal, 'multimodal') : null}
               </div>
-              <div class="rt-field" style=${{ marginTop: '9px' }}>
-                <span class="sub-k">max-ctx</span>
-                <input
-                  class="rt-input-sm mono"
-                  value=${model.maxContext == null ? '' : String(model.maxContext)}
-                  placeholder="—"
-                  readOnly
-                  aria-label=${`${model.id} max-context`}
-                />
-              </div>
+              <${ModelContextEditor} key=${model.id} modelId=${model.id}
+                value=${model.maxContext} draft=${Object.hasOwn(modelContextDrafts, model.id) ? modelContextDrafts[model.id] : undefined} disabled=${isDisabled}
+                onChange=${onModelContextChange} />
             </div>
           `)}
           ${filteredModels.length === 0 ? html`

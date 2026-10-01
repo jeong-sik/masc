@@ -246,6 +246,17 @@ let overview_entries snapshot =
                 declaration.instance_id in
               if has_worker then None else Some (`Declaration (index, declaration))))
 let overview_count snapshot = List.length (overview_entries snapshot)
+let selectable_overview_entries presentation snapshot =
+  if presentation=Flow then List.map (fun instance -> `Instance instance) snapshot.instances
+  else overview_entries snapshot
+let move_instance view delta =
+  match view.snapshot with
+  | None -> view
+  | Some snapshot ->
+      let count = List.length (selectable_overview_entries view.presentation snapshot) in
+      let instance_cursor = if count=0 then -1
+        else max 0 (min (count - 1) (view.instance_cursor + delta)) in
+      {view with instance_cursor; scroll=0}
 let selected_document view = Option.bind view.document_key (fun key ->
   List.find_opt (fun (s : Document.session) -> s.file_name = key) view.documents)
 let put_document view (document : Document.session) =
@@ -291,8 +302,8 @@ let reconcile_snapshot view snapshot =
         then configuration_cursor else -1 in
       (* A vanished identity leaves no selection. Selecting a replacement is
          an explicit navigation action, never a side effect of a refresh. *)
-      let previous_entries = overview_entries previous in
-      let entries = overview_entries snapshot in
+      let previous_entries = selectable_overview_entries view.presentation previous in
+      let entries = selectable_overview_entries view.presentation snapshot in
       let instance_cursor =
         if previous_entries=[] && entries<>[] then 0
         else anchor (function
@@ -313,7 +324,7 @@ let selected_instance view = Option.bind view.snapshot (fun snapshot ->
            Option.bind declaration.instance_id (fun id ->
              List.find_opt (fun (instance : instance) -> instance.id=id) snapshot.instances))
        | _, _ ->
-           (match at_cursor (overview_entries snapshot) view.instance_cursor with
+           (match at_cursor (selectable_overview_entries view.presentation snapshot) view.instance_cursor with
             | Some (`Instance instance) -> Some instance
             | Some (`Declaration _) | None -> None)))
 let ordered_rows view snapshot =
@@ -322,9 +333,11 @@ let ordered_rows view snapshot =
     let time = Float.compare a.observed_at b.observed_at in
     if time=0 then String.compare a.id b.id else time)
 let toggle_flow view =
-  {view with presentation=(if view.presentation=Flow then Summary else Flow);
+  let presentation = if view.presentation=Flow then Summary else Flow in
+  let view = {view with presentation;
     focus=(if view.screen=Overview then Instances else view.focus);
-    document_key=None; scroll=0}
+    document_key=None; scroll=0} in
+  if view.screen=Overview && presentation=Flow then move_instance view 0 else view
 let open_selected_instance view =
   match view.snapshot with
   | None -> view

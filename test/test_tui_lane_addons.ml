@@ -447,6 +447,22 @@ let context_flow_uses_declared_connections () =
   check bool "leaving Flow keeps overview navigation on visible instances" true
     (let summary = UI.toggle_flow flow in
      summary.focus=UI.Instances && summary.presentation=UI.Summary);
+  let mixed = {snapshot with configuration=Some {configuration with
+    declarations=configuration.declarations @ [declaration "pending" "not-installed"]}} in
+  let mixed_flow = {flow with snapshot=Some mixed} in
+  let at_last = UI.move_instance mixed_flow 1 in
+  check int "Flow stops at the last visible worker" 1 at_last.instance_cursor;
+  check (option string) "Flow boundary keeps its visible action target" (Some consumer.id)
+    (Option.map (fun (i : UI.instance) -> i.id) (UI.selected_instance at_last));
+  let pending_flow = UI.toggle_flow {mixed_flow with presentation=UI.Summary;
+    instance_cursor=UI.overview_count mixed - 1} in
+  check int "entering Flow from an unresolved declaration selects a visible worker" 1
+    pending_flow.instance_cursor;
+  let empty_flow = UI.toggle_flow {mixed_flow with presentation=UI.Summary;
+    snapshot=Some {mixed with instances=[]}} in
+  check int "Flow with no workers has no selection" (-1) empty_flow.instance_cursor;
+  check (option string) "empty Flow cannot target an unresolved declaration" None
+    (Option.map (fun (i : UI.instance) -> i.id) (UI.selected_instance empty_flow));
   check bool "detail Flow preserves its own focus" true
     (let detail = UI.toggle_flow {flow with screen=UI.Detail (producer.id,producer.incarnation);
       focus=UI.Connections} in detail.focus=UI.Connections);

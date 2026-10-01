@@ -86,6 +86,8 @@ val open_selected_instance : t -> t
     incarnation; an installation opens its existing TOML detail section. *)
 val overview_count : snapshot -> int
 (** Number of selectable workers and unresolved installations in the list. *)
+val move_instance : t -> int -> t
+(** Move among visible overview entries; Flow shows only installed workers. *)
 val move_record : t -> int -> t
 (** Move only among records belonging to the pinned detail incarnation. *)
 val selected_source_path : t -> string option

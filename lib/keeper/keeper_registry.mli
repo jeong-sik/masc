@@ -218,8 +218,11 @@ val set_last_correlation_id : base_path:string -> string -> string -> unit
 (** Mark the beginning of a keeper turn. Installs a fresh
     [current_turn_observation] with [turn_id = usage.total_turns + 1] and
     [wake] frozen for the turn's lifetime (#16, 38-bug campaign PR-5).
-    Must be paired with [mark_turn_finished] (or [mark_turn_failed]). *)
-val mark_turn_started : base_path:string -> wake:wake_reason -> string -> unit
+    Supply a fresh [observation_token] for each attempt and capture it in
+    tool-count callbacks and [mark_turn_finished]. *)
+val mark_turn_started :
+  observation_token:Keeper_turn_observation_token.t ->
+  base_path:string -> wake:wake_reason -> string -> unit
 
 (** Refresh the live turn's progress timestamp without changing its FSM
     projection.  No-op when no turn is active.  [event_kind] must be a
@@ -228,9 +231,12 @@ val record_turn_progress :
   base_path:string -> string -> event_kind:string -> unit
 
 (** Write-through observation of the turn event bus [pending_tool_count] in the
-    live turn's [active_tool_count]. No-op when no turn is active. This is
+    live turn's [active_tool_count]. No-op unless [observation_token] owns
+    the current observation. This is
     telemetry only and has no timeout or lifecycle authority. *)
-val record_turn_tool_inflight : base_path:string -> string -> count:int -> unit
+val record_turn_tool_inflight :
+  observation_token:Keeper_turn_observation_token.t ->
+  base_path:string -> string -> count:int -> unit
 
 (** Mark the beginning of an agent-core turn within an existing keeper turn.
 
@@ -290,9 +296,10 @@ val set_turn_selected_model :
 (** Mark the end of a keeper turn. Clears [current_turn_observation]
     so the composite observer reverts to idle and stamps
     [runtime.usage.last_turn_ts] for the completed turn. Idempotent —
-    safe to call in finally blocks even if [mark_turn_started] was not
-    called. *)
-val mark_turn_finished : base_path:string -> string -> unit
+    a stale token cannot finish a successor or clear its wakeup flag. *)
+val mark_turn_finished :
+  observation_token:Keeper_turn_observation_token.t ->
+  base_path:string -> string -> unit
 
 (** Store or clear the live [Eio.Switch.t] for the current turn.
     The switch is used by [interrupt_current_turn] to cancel an

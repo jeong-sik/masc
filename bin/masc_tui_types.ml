@@ -4138,6 +4138,18 @@ module Browser_lane_view = struct
     | Browser_missing -> "Browser not connected"
   let busy t = match t.load with Loading _ -> true | Idle | No_browser | Failed _ -> false
   let listed_clients t = Option.value t.clients ~default:[]
+  type browser_choice = Connected_browser of client | Stagehand_browser | Automation_browser
+  let browser_choices t =
+    List.map (fun client -> Connected_browser client) (listed_clients t)
+    @ [Stagehand_browser; Automation_browser]
+  let browser_choice_selected t = function
+    | Connected_browser client -> t.source = Live && t.selected_client = Some client
+    | Stagehand_browser -> t.source = Stagehand
+    | Automation_browser -> t.source = Automation
+  let browser_choice_label = function
+    | Connected_browser client -> browser_name client.browser ^ " · existing login · " ^ client.client_id
+    | Stagehand_browser -> "Stagehand Chromium · sentence actions · separate login"
+    | Automation_browser -> "Independent Firefox/Zen · automation · separate login"
   let request_body t =
     `Assoc ([ "lane", `String (source_name t.source) ]
             @ (match client_id t with None -> [] | Some id -> ["clientId", `String id])
@@ -4179,17 +4191,28 @@ module Browser_lane_view = struct
     | Scene_refresh {scene_view;scope;_} -> Scene_view {scene_view;scope}
     | Discover _ | Screenshot _ | Viewport_refresh _ | Viewport_cadence _ | Viewport_pointer _ -> previous
   let choose_client client t =
-    { t with selected_client = Some client; selected_tab = None;
+    { t with source = Live; selected_client = Some client; selected_tab = None;
       reading = None; scene = None; scene_cursor = 0; scene_scope = None; scene_guard = None; scene_delta = None;
       scroll = 0; load = Idle; client_picker = None; read_view = Text_view }
+  let choose_browser choice t =
+    if browser_choice_selected t choice then { t with client_picker = None }
+    else match choice with
+      | Connected_browser client -> choose_client client t
+      | Stagehand_browser -> switch_source Stagehand t
+      | Automation_browser -> switch_source Automation t
   let accept_clients ~generation result t =
     match t.load with
     | Loading (current, Discover purpose) when current = generation ->
         (match result with
+         | Error detail when t.source <> Live && purpose = Choose_client ->
+             { t with clients = None; client_picker = Some 0; load = Failed detail }, false
          | Error detail -> { t with clients = None; selected_tab = None; reading = None; scene = None; scene_cursor = 0; scene_scope = None; scene_guard = None; scene_delta = None;
              scroll = 0; client_picker = Some 0; load = Failed detail }, false
          | Ok clients ->
              let next = { t with clients = Some clients; load = Idle } in
+             if t.source <> Live && purpose = Choose_client then
+               { next with client_picker = Some 0 }, false
+             else
              match t.selected_client, clients, purpose with
              | None, [client], Read_after_discovery -> choose_client client next, true
              | Some _, _, _ when selected_client_available next ->

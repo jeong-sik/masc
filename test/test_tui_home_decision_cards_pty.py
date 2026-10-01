@@ -153,6 +153,7 @@ def failed_source_keeps_known_cards(executable):
 
     def interact(process, fd, _slave, output, _base):
         h.wait_for_output(process, fd, output, b"known-gate-card", start=0, timeout=10)
+        h.wait_for_output(process, fd, output, b"known-held-card", start=0, timeout=10)
         h.wait_for_output(process, fd, output, b"confirm queue not fully read", start=0, timeout=10)
         visible = frame(process, fd, output, "partial-source-success")
         for label in (b"known-held-card", b"known-gate-card", b"confirm queue not fully read"):
@@ -289,13 +290,13 @@ def operator_task_survives_supplemental_failure(executable):
                 recovery.write_text(json.dumps({"version": 1, "links": recovery_links}))
 
         def interact(process, fd, _slave, output, base):
-            h.wait_for_output(process, fd, output, b"Operator task", start=0, timeout=10)
+            h.wait_for_output(process, fd, output, b"Operator task \xc2\xb7 task-777", start=0, timeout=10)
             visible = frame(process, fd, output, "operator-task-supplemental-failure")
             assert b"Operator tasks unavailable" not in visible, visible
             if relative == "tasks/goal_task_links.json":
                 assert b"Work:" in visible, visible
                 assert b"Work: reading unavailable" not in visible, visible
-            select_home(process, fd, output, b"Operator task", destinations=4)
+            select_home(process, fd, output, b"Operator task \xc2\xb7 task-777", destinations=4)
             h.send_and_wait(process, fd, output, b"\r", b"Primary task remains visible")
             drawn = h.screen_text(bytes(output))
             assert b"MASC Task" in drawn and b"task-777" in drawn, drawn
@@ -322,7 +323,7 @@ def operator_task_survives_supplemental_failure(executable):
             assert b"membership unknown" not in drawn, drawn
             home.assert_no_decision_posts(requests)
             h.send_and_wait(process, fd, output, b"\x1b", b"Enter:open")
-            assert_selected(output, b"Operator task")
+            assert_selected(output, b"Operator task \xc2\xb7 task-777")
             os.write(fd, b"q")
 
         backup_kind = "no-backup" if recovery_links is None else "empty-backup" if not recovery_links else "linked-backup"
@@ -365,6 +366,42 @@ def planning_link_failure_has_own_diagnostic(executable):
         os.write(fd, b"q")
 
     run(executable, "Planning owns unavailable Goal-link coverage beside a current Task backlog",
+        fixtures, interact, requests, prepare=prepare)
+
+
+def planning_backlog_failure_recovers(executable):
+    fixtures = fixtures_with_held([])
+    goal = h.planning_goal("goal-backlog-truth", "Planning backlog source fixture")
+    fixtures[h.PLANNING_PATH] = h.planning_snapshot([goal])
+    fixtures["/api/v1/dashboard/goals/detail?goal_id=goal-backlog-truth"] = (200, {"timeline": []})
+    requests = []
+
+    def prepare(base):
+        seed_operator_task(base)
+        root = Path(base) / ".masc"
+        (root / "tasks" / "backlog.json").write_text("{unreadable backlog")
+        (root / "tasks" / "goal_task_links.json").write_text(json.dumps({"version": 1, "links": []}))
+
+    def interact(process, fd, _slave, output, base):
+        h.wait_for_output(process, fd, output, b"Operator tasks unavailable", start=0, timeout=10)
+        h.send_and_wait(process, fd, output, b":", b"MASC Command palette")
+        h.send_and_wait(process, fd, output, b"go Work", b"go Work")
+        h.send_and_wait(process, fd, output, b"\r", goal["title"].encode())
+        h.send_and_wait(process, fd, output, b"\r", b"Open tasks  (nothing here is a reading)")
+        failed = h.screen_text(bytes(output))
+        assert b"links not read" not in failed, failed
+        assert b"Open tasks  (none)" not in failed, failed
+        seed_operator_task(base)
+        # An auxiliary archive error must not impersonate a primary failure.
+        (Path(base) / ".masc" / "tasks-archive.json").write_text("{unreadable archive")
+        h.send_and_wait(process, fd, output, b"r", b"Open tasks  (none)")
+        repaired = h.screen_text(bytes(output))
+        assert b"nothing here is a reading" not in repaired, repaired
+        assert b"links not read" not in repaired, repaired
+        home.assert_no_decision_posts(requests)
+        os.write(fd, b"q")
+
+    run(executable, "Planning prioritizes failed backlog and recovers on refresh",
         fixtures, interact, requests, prepare=prepare)
 
 
@@ -537,7 +574,8 @@ def question_identity_and_return(executable):
         current[0] = (200, reordered)
         h.wait_for_output(process, fd, output, b"refreshed pinned ask-one prompt",
                           start=len(output), timeout=5)
-        h.send_and_wait(process, fd, output, b"1", b"(o) c-yes")
+        drawn = h.send_and_wait(process, fd, output, b"1", b"1 answered")
+        assert b"1 (o) c-yes" in h.screen_text(drawn)
         home.assert_no_decision_posts(requests)
         current[0] = (503, {"error": "question source offline"})
         h.wait_for_output(process, fd, output, b"questions stale", start=len(output), timeout=5)
@@ -554,8 +592,9 @@ if __name__ == "__main__":
     for scenario in (same_keeper_distinct_and_duplicate, failed_source_keeps_known_cards,
                      each_failed_source_keeps_other_cards, hidden_help_does_not_pin_unseen_request,
                      operator_task_survives_supplemental_failure, planning_link_failure_has_own_diagnostic,
+                     planning_backlog_failure_recovers,
                      recovered_tasks_are_not_current_cards,
                      refresh_identity_and_deletion, many_cards_keep_continuation,
                      goal_opens_exact_detail, question_identity_and_return):
         scenario(executable)
-    print("Home decision cards PTY: PASS (17 scenarios)")
+    print("Home decision cards PTY: PASS")

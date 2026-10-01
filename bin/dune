@@ -1300,6 +1300,12 @@
  (libraries yojson masc masc_tui_theme masc.string_util))
 
 (library
+ (name masc_tui_keeper_items)
+ (wrapped false)
+ (modules masc_tui_keeper_items)
+ (libraries yojson masc.keeper_portrait))
+
+(library
  (name masc_tui_keeper_sandbox)
  (wrapped false)
  (modules masc_tui_keeper_sandbox)
@@ -1414,10 +1420,12 @@
   masc_tui_keeper_control
   masc_tui_keeper_selection
   masc_tui_keeper_sandbox
+  masc_tui_keeper_items
   masc_tui_context_state
   masc_tui_message_layout
   masc_tui_metrics_tail
   masc_tui_context_inspector
+  masc_tui_observation_layout
   masc_tui_observer
   masc_tui_operator_projection
   masc_tui_paste
@@ -1477,6 +1485,13 @@
 ; surface could only be extracted from masc_tui_render.ml by staying inside
 ; this same stanza -- which is why the file split out in #3808 grew back to
 ; 16.5k lines. A library makes per-surface modules possible at all.
+(library
+ (name masc_tui_palette)
+ (wrapped false)
+ (modules masc_tui_palette)
+ (libraries masc_tui_fetched masc_tui_types masc_tui_pick_list masc_tui_rows
+  masc_tui_message_layout masc_tui_code_lexer masc.keeper_contract masc))
+
 (library
  (name masc_tui_render_tools)
  (wrapped false)
@@ -1667,6 +1682,7 @@
  (wrapped false)
  (modules masc_tui_render_chat)
  (libraries
+  masc_tui_pick_list
   masc_tui_render_prim
   masc_tui_composer
   masc_tui_ansi
@@ -1737,6 +1753,13 @@
   masc_tui_message_layout
   unix))
 
+;; The last answer to each dashboard read, kept with its entity tag so the
+;; next read can ask whether it changed. A library so a test can drive it.
+(library
+ (name masc_tui_kept_reads)
+ (wrapped false)
+ (modules masc_tui_kept_reads))
+
 (executable
  (name masc_tui)
  (modules
@@ -1749,11 +1772,15 @@
  (public_name masc-tui)
  (package masc)
  (libraries
+  masc_tui_kept_reads
+  masc_tui_palette
   masc_tui_account_login
   masc_tui_play_card
   masc_tui_sgr_text
   masc_tui_emblem_screen
   masc_tui_keeper_portrait
+  masc_tui_keeper_items
+  masc.keeper_portrait
   masc_tui_portrait_view
   masc_tui_hit
   masc_tui_press
@@ -2111,7 +2138,7 @@
  (name masc_tui_chat_portrait)
  (wrapped false)
  (modules masc_tui_chat_portrait)
- (libraries masc_tui_keeper_portrait masc_tui_portrait_view
+ (libraries masc.keeper_portrait masc_tui_keeper_portrait masc_tui_portrait_view
   masc_tui_graphics masc_tui_terminal_palette masc_tui_ansi masc_tui_frame))
 
 ;; Decides, by magic bytes, whether a downloaded body may sit in the preview

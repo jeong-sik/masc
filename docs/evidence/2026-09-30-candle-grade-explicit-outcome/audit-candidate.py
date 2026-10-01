@@ -17,7 +17,7 @@ def validate_result(row, runtime_id):
     if row['status'] == 'ok':
         require(receipt['status'] == 'succeeded' and receipt['selected_slot'] == runtime_id,
                 'successful result classification or slot mismatch')
-        require(receipt['output']['result'] == row['answer'], 'successful answer mismatch')
+        require(same_json(receipt['output']['result'], row['answer']), 'successful answer mismatch')
     else:
         require(row['status'] in {'invalid_response', 'transport_unavailable'}, 'unknown result status')
         code = {'invalid_response': 'candle_appraisal_rejected',
@@ -25,12 +25,36 @@ def validate_result(row, runtime_id):
         require(receipt['status'] == 'failed' and receipt['code'] == code,
                 'failed result classification mismatch')
         require(isinstance(row['answer'], str) and receipt['detail'] == row['answer']
-                and receipt['output']['result'] == {'error': row['answer']},
+                and same_json(receipt['output']['result'], {'error': row['answer']}),
                 'failed answer mismatch')
 
 
 def sha(raw):
     return hashlib.sha256(raw).hexdigest()
+
+
+def same_json(left, right):
+    def canonical(value):
+        return json.dumps(value, sort_keys=True, ensure_ascii=False,
+                          separators=(',', ':'), allow_nan=False)
+    return canonical(left) == canonical(right)
+
+
+def expected_schema(case):
+    # Frozen evaluation contract from Candle_appraisal.schema, including the
+    # ordered required Keeper names and integer weight bound.
+    def object_schema(properties):
+        return {'type': 'object', 'properties': properties,
+                'required': list(properties), 'additionalProperties': False}
+    if case['stage'] == 'grade':
+        return object_schema({'grade': {'type': 'string',
+            'enum': ['trivial', 'small', 'medium', 'large', 'epic']}})
+    if case['stage'] == 'relation':
+        return object_schema({'relation': {'type': 'string', 'enum': ['related', 'unrelated']}})
+    require(case['stage'] == 'weights', 'unknown frozen appraisal stage')
+    data = case['input']
+    return object_schema({'weights': object_schema({name: {'type': 'integer',
+        'minimum': 0, 'maximum': data['weight_max']} for name in data['keepers']})})
 
 
 def expected_input(case):
@@ -48,7 +72,7 @@ def expected_input(case):
 def audit(workspace, evidence, resources, *, runtime_config=None):
     plan = json.loads((workspace/'plan.json').read_text())
     metadata = json.loads((evidence/'metadata.json').read_text())
-    require(metadata['plan'] == plan, "audit check failed: metadata['plan'] == plan")
+    require(same_json(metadata['plan'], plan), "audit check failed: same_json(metadata['plan'], plan)")
     require(metadata['build']['commit_source'] == 'embedded', "audit check failed: metadata['build']['commit_source'] == 'embedded'")
     require(metadata['build']['commit'] == plan['source_commit'], "audit check failed: metadata['build']['commit'] == plan['source_commit']")
     require(metadata['build']['binary_commit'] == plan['source_commit'], "audit check failed: metadata['build']['binary_commit'] == plan['source_commit']")
@@ -108,7 +132,9 @@ def audit(workspace, evidence, resources, *, runtime_config=None):
         require(payload['request_id'] == f"eval-{case['id']}-{row['trial']}", 'audit check failed: payload[\'request_id\'] == f"eval-{case[\'id\']}-{row[\'trial\']}"')
         require(payload['verification_run_id'] == 'synthetic-eval-verification', "audit check failed: payload['verification_run_id'] == 'synthetic-eval-verification'")
         require(payload['stage'] == case['stage'], "audit check failed: payload['stage'] == case['stage']")
-        require(payload['actual_input'] == expected_input(case), "audit check failed: payload['actual_input'] == expected_input(case)")
+        require(same_json(payload['actual_input'], expected_input(case)), "audit check failed: same_json(payload['actual_input'], expected_input(case))")
+        require(same_json(payload['output_schema'], expected_schema(case)),
+                'receipt output schema disagrees with frozen stage and case')
         prompt = payload['prompt']
         require(prompt['source'] == 'file', "audit check failed: prompt['source'] == 'file'")
         require(prompt['key'] == 'candle_appraiser_'+case['stage'], "audit check failed: prompt['key'] == 'candle_appraiser_'+case['stage']")
@@ -136,6 +162,7 @@ def audit(workspace, evidence, resources, *, runtime_config=None):
     events_raw = (evidence/'exact-lane-runs-v6.jsonl').read_bytes()
     events = [json.loads(line) for line in events_raw.splitlines()]
     registered, completed = set(), set()
+    registration_order = []
     for event in events:
         run_id = event['id']
         require(run_id in receipts, 'registry run ID is absent from reported receipts')
@@ -143,6 +170,7 @@ def audit(workspace, evidence, resources, *, runtime_config=None):
         if event['event'] == 'register':
             require(run_id not in registered, 'audit check failed: run_id not in registered')
             registered.add(run_id)
+            registration_order.append(run_id)
             registration = event['registration']
             require(registration['lane'] == receipt['lane'], "audit check failed: registration['lane'] == receipt['lane']")
             require(registration['actor'] == receipt['actor'], "audit check failed: registration['actor'] == receipt['actor']")
@@ -165,8 +193,10 @@ def audit(workspace, evidence, resources, *, runtime_config=None):
         payload_bytes = path.read_bytes()
         require(len(payload_bytes) == reference['bytes'], "audit check failed: len(payload_bytes) == reference['bytes']")
         require(sha(payload_bytes) == reference['sha256'], "audit check failed: sha(payload_bytes) == reference['sha256']")
-        require(json.loads(payload_bytes) == expected, 'audit check failed: json.loads(payload_bytes) == expected')
+        require(same_json(json.loads(payload_bytes), expected), 'audit check failed: same_json(json.loads(payload_bytes), expected)')
     require(registered == completed == run_ids, 'audit check failed: registered == completed == run_ids')
+    require(registration_order == [row['receipt']['run_id'] for row in rows],
+            'reported trial order disagrees with registry registration order')
     result = {
         'scope': 'Provenance and structural checks, not semantic acceptance',
         'runtime_config_verification': 'prepared_bytes_verified' if runtime_config is not None else 'declared_hash_only',
@@ -182,6 +212,7 @@ def audit(workspace, evidence, resources, *, runtime_config=None):
         'receipt_results_match_reported_decisions': True,
         'registry_sha256': sha(events_raw),
         'registered_before_completed_with_matching_durable_payloads': True,
+        'trial_order': [[row['case_id'], row['trial']] for row in rows],
         'cases': {key: {'input_sha256': next(iter(input_hashes[key])),
             'rendered_prompt_sha256': next(iter(prompt_hashes[key])),
             'decisions': sorted(decisions[key], key=lambda row: row['trial'])} for key in cases},

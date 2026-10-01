@@ -10,7 +10,9 @@ from pathlib import Path
 
 
 # Share the complete artifact, registry and durable-payload audit with the CLI.
-AUDIT = runpy.run_path(str(Path(__file__).with_name('audit-candidate.py')))['audit']
+AUDIT_MODULE = runpy.run_path(str(Path(__file__).with_name('audit-candidate.py')))
+AUDIT = AUDIT_MODULE['audit']
+same_json = AUDIT_MODULE['same_json']
 
 def require(condition, detail):
     if not condition:
@@ -22,7 +24,7 @@ def validate_result(row, runtime_id):
     if row['status'] == 'ok':
         require(receipt['status'] == 'succeeded' and receipt['selected_slot'] == runtime_id,
                 'successful result classification or slot mismatch')
-        require(receipt['output']['result'] == row['answer'], 'successful answer mismatch')
+        require(same_json(receipt['output']['result'], row['answer']), 'successful answer mismatch')
     else:
         require(row['status'] in {'invalid_response', 'transport_unavailable'}, 'unknown result status')
         code = {'invalid_response': 'candle_appraisal_rejected',
@@ -30,7 +32,7 @@ def validate_result(row, runtime_id):
         require(receipt['status'] == 'failed' and receipt['code'] == code,
                 'failed result classification mismatch')
         require(isinstance(row['answer'], str) and receipt['detail'] == row['answer']
-                and receipt['output']['result'] == {'error': row['answer']},
+                and same_json(receipt['output']['result'], {'error': row['answer']}),
                 'failed answer mismatch')
 
 
@@ -60,7 +62,7 @@ def load_run(directory, resources):
     require(len(pairs) == len(rows), "duplicate case/trial")
     require(len({row["receipt"]["run_id"] for row in rows}) == len(rows), "Evidence validation failed: len({row['receipt']['run_id'] for row in rows}) == len(rows)")
     metadata = json.loads((directory / "metadata.json").read_text())
-    require(metadata["plan"] == plan, "Evidence validation failed: metadata['plan'] == plan")
+    require(same_json(metadata["plan"], plan), "Evidence validation failed: same_json(metadata['plan'], plan)")
     require(metadata["build"]["commit"] == plan["source_commit"], "Evidence validation failed: metadata['build']['commit'] == plan['source_commit']")
     require(json.loads((directory / "exit.json").read_text())["exit_code"] == 0, "Evidence validation failed: json.loads((directory / 'exit.json').read_text())['exit_code'] == 0")
     prompt_bodies = {}
@@ -77,7 +79,7 @@ def load_run(directory, resources):
                 'receipt input stage or case identity mismatch')
         require(payload['request_id'] == f"eval-{case['id']}-{row['trial']}",
                 'receipt request identity mismatch')
-        require(payload['actual_input'] == expected_input(case),
+        require(same_json(payload['actual_input'], expected_input(case)),
                 'receipt actual input disagrees with frozen case')
         validate_result(row, plan['runtime_id'])
         prompt = payload['prompt']
@@ -88,7 +90,7 @@ def load_run(directory, resources):
         encoded = json.dumps(payload['actual_input'], ensure_ascii=False, separators=(',', ':'))
         require(prompt['rendered'] == prompt['effective_template'].replace('{{appraisal_input}}', encoded),
                 'receipt rendered prompt disagrees with frozen template and input')
-    AUDIT(directory, directory, resources)
+    audited = AUDIT(directory, directory, resources)
     summaries = {}
     for case_id, case in cases.items():
         selected = [row for row in rows if row["case_id"] == case_id]
@@ -108,7 +110,7 @@ def load_run(directory, resources):
         tally["modes"] = sorted(value for value, count in counts.items() if count == max(counts.values())) if counts else []
         tally["modal_count"] = max(counts.values()) if counts else 0
         summaries[case_id] = tally
-    return plan, metadata, summaries, hashlib.sha256(raw).hexdigest(), {row["receipt"]["run_id"] for row in rows}
+    return plan, metadata, summaries, hashlib.sha256(raw).hexdigest(), {row["receipt"]["run_id"] for row in rows}, audited["trial_order"]
 
 
 def main():
@@ -118,8 +120,9 @@ def main():
     parser.add_argument('--baseline-resources', type=Path, help='Baseline frozen prompts and artifact record; defaults to baseline directory')
     parser.add_argument('--candidate-resources', type=Path, help='Candidate frozen prompts and artifact record; defaults to candidate directory')
     args = parser.parse_args()
-    baseline, base_meta, base_cases, base_hash, base_ids = load_run(args.baseline, args.baseline_resources or args.baseline)
-    candidate, candidate_meta, candidate_cases, candidate_hash, candidate_ids = load_run(args.candidate, args.candidate_resources or args.candidate)
+    baseline, base_meta, base_cases, base_hash, base_ids, base_order = load_run(args.baseline, args.baseline_resources or args.baseline)
+    candidate, candidate_meta, candidate_cases, candidate_hash, candidate_ids, candidate_order = load_run(args.candidate, args.candidate_resources or args.candidate)
+    require(base_order == candidate_order, "baseline and candidate trial order differs")
     require(base_ids.isdisjoint(candidate_ids), "baseline and candidate reuse run IDs")
     require({key: value for key, value in baseline.items() if key != "prompt_sha256"} == {
         key: value for key, value in candidate.items() if key != "prompt_sha256"}, "Evidence validation failed: {key: value for key, value in baseline.items() if key != 'prompt_sha256'} == {key: value for key, value in candidate.items() if key != 'prompt_sha256'}")

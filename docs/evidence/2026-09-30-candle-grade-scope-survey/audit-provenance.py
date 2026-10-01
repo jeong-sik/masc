@@ -17,7 +17,7 @@ def validate_result(row, runtime_id):
     if row['status'] == 'ok':
         require(receipt['status'] == 'succeeded' and receipt['selected_slot'] == runtime_id,
                 'successful result classification or slot mismatch')
-        require(receipt['output']['result'] == row['answer'], 'successful answer mismatch')
+        require(same_json(receipt['output']['result'], row['answer']), 'successful answer mismatch')
     else:
         require(row['status'] in {'invalid_response', 'transport_unavailable'}, 'unknown result status')
         code = {'invalid_response': 'candle_appraisal_rejected',
@@ -25,12 +25,36 @@ def validate_result(row, runtime_id):
         require(receipt['status'] == 'failed' and receipt['code'] == code,
                 'failed result classification mismatch')
         require(isinstance(row['answer'], str) and receipt['detail'] == row['answer']
-                and receipt['output']['result'] == {'error': row['answer']},
+                and same_json(receipt['output']['result'], {'error': row['answer']}),
                 'failed answer mismatch')
 
 
 def sha(raw):
     return hashlib.sha256(raw).hexdigest()
+
+
+def same_json(left, right):
+    def canonical(value):
+        return json.dumps(value, sort_keys=True, ensure_ascii=False,
+                          separators=(',', ':'), allow_nan=False)
+    return canonical(left) == canonical(right)
+
+
+def expected_schema(case):
+    # Frozen evaluation contract from Candle_appraisal.schema, including the
+    # ordered required Keeper names and integer weight bound.
+    def object_schema(properties):
+        return {'type': 'object', 'properties': properties,
+                'required': list(properties), 'additionalProperties': False}
+    if case['stage'] == 'grade':
+        return object_schema({'grade': {'type': 'string',
+            'enum': ['trivial', 'small', 'medium', 'large', 'epic']}})
+    if case['stage'] == 'relation':
+        return object_schema({'relation': {'type': 'string', 'enum': ['related', 'unrelated']}})
+    require(case['stage'] == 'weights', 'unknown frozen appraisal stage')
+    data = case['input']
+    return object_schema({'weights': object_schema({name: {'type': 'integer',
+        'minimum': 0, 'maximum': data['weight_max']} for name in data['keepers']})})
 
 
 def expected_input(case):
@@ -51,11 +75,14 @@ def main():
     p.add_argument('evidence', type=Path)
     args = p.parse_args()
     plan = json.loads((args.workspace/'plan.json').read_text())
+    exit_code = json.loads((args.evidence/'exit.json').read_text())['exit_code']
+    require(type(exit_code) is int and exit_code == 0, 'retained evaluation exit is not zero')
     metadata = json.loads((args.evidence/'metadata.json').read_text())
-    require(metadata['plan'] == plan, "Evidence validation failed: metadata['plan'] == plan")
+    require(same_json(metadata['plan'], plan), "Evidence validation failed: same_json(metadata['plan'], plan)")
     require(metadata['build']['commit_source'] == 'embedded', "Evidence validation failed: metadata['build']['commit_source'] == 'embedded'")
     require(metadata['build']['commit'] == plan['source_commit'], "Evidence validation failed: metadata['build']['commit'] == plan['source_commit']")
     require(metadata['build']['binary_commit'] == plan['source_commit'], "Evidence validation failed: metadata['build']['binary_commit'] == plan['source_commit']")
+    frozen_prompt_commit = None
     for filename, source_key in (('freeze.json', 'binary_commit'), ('frozen-audit.json', 'source_commit')):
         provenance = json.loads((args.evidence/filename).read_text())
         require(provenance[source_key] == plan['source_commit'], 'survey binary source disagrees with frozen provenance')
@@ -63,6 +90,18 @@ def main():
                 'survey executable hash disagrees with frozen provenance')
         require(provenance['plan_sha256'] == sha((args.workspace/'plan.json').read_bytes()),
                 'survey plan disagrees with frozen provenance')
+        for field, plan_field in [('cases_sha256', 'cases_sha256'),
+                ('runtime_config_sha256', 'runtime_config_sha256'),
+                ('prompt_sha256', 'prompt_sha256'), ('case_count', 'case_count'),
+                ('trials_each', 'trials'), ('planned_calls', 'planned_calls'),
+                ('runtime_id', 'runtime_id')]:
+            require(same_json(provenance[field], plan[plan_field]),
+                    f'{filename} frozen {field} disagrees with plan')
+        if frozen_prompt_commit is None:
+            frozen_prompt_commit = provenance['prompt_commit']
+        else:
+            require(provenance['prompt_commit'] == frozen_prompt_commit,
+                    'frozen prompt source declarations disagree')
     corpus = (args.workspace/'cases.json').read_bytes()
     require(sha(corpus) == plan['cases_sha256'], "Evidence validation failed: sha(corpus) == plan['cases_sha256']")
     require(sha((args.workspace/'.masc/config/runtime.toml').read_bytes()) == plan['runtime_config_sha256'], "Evidence validation failed: sha((args.workspace / '.masc/config/runtime.toml').read_bytes()) == plan['runtime_config_sha256']")
@@ -74,7 +113,11 @@ def main():
         require(prompt_text.startswith('---\n'), "Evidence validation failed: prompt_text.startswith('---\\n')")
         # The frozen files use one frontmatter block; preserve body newlines.
         prompt_bodies[name] = prompt_text.split('\n---\n', 1)[1]
-    cases = {case['id']: case for case in json.loads(corpus)}
+    raw_cases = json.loads(corpus)
+    require(isinstance(raw_cases, list) and len(raw_cases) == plan['case_count'],
+            'raw corpus count disagrees with declared case count')
+    cases = {case['id']: case for case in raw_cases}
+    require(len(cases) == len(raw_cases), 'raw corpus contains duplicate case IDs')
     raw = (args.evidence/'results.jsonl').read_bytes()
     require(raw.endswith(b'\n'), 'partial result line')
     rows = [json.loads(line) for line in raw.splitlines()]
@@ -105,7 +148,9 @@ def main():
         require(payload['request_id'] == f"eval-{case['id']}-{row['trial']}", 'Evidence validation failed: payload[\'request_id\'] == f"eval-{case[\'id\']}-{row[\'trial\']}"')
         require(payload['verification_run_id'] == 'synthetic-eval-verification', "Evidence validation failed: payload['verification_run_id'] == 'synthetic-eval-verification'")
         require(payload['stage'] == case['stage'], "Evidence validation failed: payload['stage'] == case['stage']")
-        require(payload['actual_input'] == expected_input(case), "Evidence validation failed: payload['actual_input'] == expected_input(case)")
+        require(same_json(payload['actual_input'], expected_input(case)), "Evidence validation failed: same_json(payload['actual_input'], expected_input(case))")
+        require(same_json(payload['output_schema'], expected_schema(case)),
+                'receipt output schema disagrees with frozen stage and case')
         prompt = payload['prompt']
         require(prompt['source'] == 'file', "Evidence validation failed: prompt['source'] == 'file'")
         require(prompt['key'] == 'candle_appraiser_'+case['stage'], "Evidence validation failed: prompt['key'] == 'candle_appraiser_' + case['stage']")
@@ -133,12 +178,14 @@ def main():
     events_raw = (args.evidence/'exact-lane-runs-v6.jsonl').read_bytes()
     events = [json.loads(line) for line in events_raw.splitlines()]
     registered, completed = set(), set()
+    registration_order = []
     for event in events:
         run_id = event['id']
         receipt = receipts[run_id]
         if event['event'] == 'register':
             require(run_id not in registered, 'Evidence validation failed: run_id not in registered')
             registered.add(run_id)
+            registration_order.append(run_id)
             registration = event['registration']
             require(registration['lane'] == receipt['lane'], "Evidence validation failed: registration['lane'] == receipt['lane']")
             require(registration['actor'] == receipt['actor'], "Evidence validation failed: registration['actor'] == receipt['actor']")
@@ -158,8 +205,10 @@ def main():
         payload_bytes = path.read_bytes()
         require(len(payload_bytes) == reference['bytes'], "Evidence validation failed: len(payload_bytes) == reference['bytes']")
         require(sha(payload_bytes) == reference['sha256'], "Evidence validation failed: sha(payload_bytes) == reference['sha256']")
-        require(json.loads(payload_bytes) == expected, 'Evidence validation failed: json.loads(payload_bytes) == expected')
+        require(same_json(json.loads(payload_bytes), expected), 'Evidence validation failed: same_json(json.loads(payload_bytes), expected)')
     require(registered == completed == run_ids, 'Evidence validation failed: registered == completed == run_ids')
+    require(registration_order == [row['receipt']['run_id'] for row in rows],
+            'reported trial order disagrees with registry registration order')
     result = {
         'scope': 'Provenance and structural checks, not semantic acceptance',
         'source_commit': plan['source_commit'], 'runtime_id': plan['runtime_id'],
@@ -174,6 +223,7 @@ def main():
         'receipt_results_match_reported_decisions': True,
         'registry_sha256': sha(events_raw),
         'registered_before_completed_with_matching_durable_payloads': True,
+        'trial_order': [[row['case_id'], row['trial']] for row in rows],
         'cases': {key: {'input_sha256': next(iter(input_hashes[key])),
             'rendered_prompt_sha256': next(iter(prompt_hashes[key])),
             'decisions': sorted(decisions[key], key=lambda row: row['trial'])} for key in cases},

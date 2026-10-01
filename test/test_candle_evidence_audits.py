@@ -137,6 +137,14 @@ class CandleEvidenceAudits(unittest.TestCase):
         script = CANDIDATE/'compare-evaluations.py'
         valid = self.run_audit(script, baseline, candidate, '--baseline-resources', resources)
         self.assertEqual(valid['changed_prompt_files'], ['candle_appraiser_grade.md'])
+        write_rows(baseline/'results.jsonl', list(reversed(rows)))
+        self.run_audit(script, baseline, candidate, '--baseline-resources', resources,
+                       error='trial order disagrees with registry')
+        rewrite_fixture_registry(baseline, list(reversed(rows)))
+        self.run_audit(script, baseline, candidate, '--baseline-resources', resources,
+                       error='baseline and candidate trial order differs')
+        write_rows(baseline/'results.jsonl', rows)
+        rewrite_fixture_registry(baseline, rows)
         events = [json.loads(line) for line in (baseline/'exact-lane-runs-v6.jsonl').read_text().splitlines()]
         registration = events[0]
         reference = registration['registration']['input']
@@ -219,6 +227,79 @@ class CandleEvidenceAudits(unittest.TestCase):
         metadata['build']['executable_sha256'] = '0'*64
         write_json(bundle/'metadata.json', metadata)
         self.run_audit(script, bundle, bundle, error='executable hash disagrees with frozen provenance')
+
+    def test_candidate_preserves_json_types_and_output_schema(self):
+        bundle = self.root/'candidate'
+        hydrate(CANDIDATE, bundle)
+        script = CANDIDATE/'audit-candidate.py'
+        original = [json.loads(line) for line in (bundle/'results.jsonl').read_text().splitlines()]
+        rows = copy.deepcopy(original)
+        case_id = next(row['case_id'] for row in rows if row['stage'] == 'weights')
+        for row in rows:
+            if row['case_id'] == case_id:
+                payload = row['receipt']['input']['payload']
+                payload['actual_input']['weight_max'] = float(payload['actual_input']['weight_max'])
+                encoded = json.dumps(payload['actual_input'], ensure_ascii=False, separators=(',', ':'))
+                payload['prompt']['rendered'] = payload['prompt']['effective_template'].replace('{{appraisal_input}}', encoded)
+        write_rows(bundle/'results.jsonl', rows)
+        rewrite_fixture_registry(bundle, rows)
+        self.run_audit(script, bundle, bundle, error='same_json(payload')
+        for stage in ('grade', 'relation', 'weights'):
+            with self.subTest(stage=stage):
+                rows = copy.deepcopy(original)
+                row = next(row for row in rows if row['stage'] == stage)
+                row['receipt']['input']['payload']['output_schema'] = {'type': 'object'}
+                write_rows(bundle/'results.jsonl', rows)
+                rewrite_fixture_registry(bundle, rows)
+                self.run_audit(script, bundle, bundle, error='output schema disagrees')
+
+    def test_survey_joins_all_frozen_input_declarations(self):
+        bundle = self.root/'survey'
+        hydrate(SURVEY, bundle)
+        script = SURVEY/'audit-provenance.py'
+        for filename in ('freeze.json', 'frozen-audit.json'):
+            original = json.loads((bundle/filename).read_text())
+            for field in ('cases_sha256', 'runtime_config_sha256', 'prompt_sha256',
+                          'case_count', 'trials_each', 'planned_calls', 'runtime_id'):
+                with self.subTest(filename=filename, field=field):
+                    modified = copy.deepcopy(original)
+                    modified[field] = 'contradiction'
+                    write_json(bundle/filename, modified)
+                    self.run_audit(script, bundle, bundle, error=f'frozen {field} disagrees')
+            write_json(bundle/filename, original)
+
+    def test_survey_raw_case_count_and_duplicate_identity(self):
+        bundle = self.root/'survey'
+        hydrate(SURVEY, bundle)
+        script = SURVEY/'audit-provenance.py'
+        cases = json.loads((bundle/'cases.json').read_text())
+        cases.append(copy.deepcopy(cases[0]))
+        write_json(bundle/'cases.json', cases)
+        plan = json.loads((bundle/'plan.json').read_text())
+        plan['cases_sha256'] = hashlib.sha256((bundle/'cases.json').read_bytes()).hexdigest()
+        for declare_duplicate in (False, True):
+            if declare_duplicate:
+                plan['case_count'] = len(cases)
+            write_json(bundle/'plan.json', plan)
+            metadata = json.loads((bundle/'metadata.json').read_text())
+            metadata['plan'] = plan
+            write_json(bundle/'metadata.json', metadata)
+            for filename in ('freeze.json', 'frozen-audit.json'):
+                record = json.loads((bundle/filename).read_text())
+                record.update(plan_sha256=hashlib.sha256((bundle/'plan.json').read_bytes()).hexdigest(),
+                              cases_sha256=plan['cases_sha256'], case_count=plan['case_count'])
+                write_json(bundle/filename, record)
+            self.run_audit(script, bundle, bundle,
+                           error='duplicate case IDs' if declare_duplicate else 'raw corpus count disagrees')
+
+    def test_survey_refuses_nonzero_retained_exit(self):
+        bundle = self.root/'survey'
+        hydrate(SURVEY, bundle)
+        path = bundle/'exit.json'
+        outcome = json.loads(path.read_text())
+        outcome['exit_code'] = 73
+        write_json(path, outcome)
+        self.run_audit(SURVEY/'audit-provenance.py', bundle, bundle, error='retained evaluation exit is not zero')
 
     def test_candidate_registry_failure_fields_match_receipt(self):
         bundle = self.root/'candidate'

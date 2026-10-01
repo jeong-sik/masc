@@ -53,7 +53,6 @@ function snapshot(
     runtime: { state: 'idle' },
     measurement: { captured: false },
     invariants: {
-      no_runtime_before_measurement: true,
       event_priority_monotone: true,
       phase_derivation_agreement: true,
     },
@@ -255,8 +254,7 @@ describe('fsm-hub derived state', () => {
         phase: 'Failing',
         turn_phase: 'executing',
         invariants: {
-          no_runtime_before_measurement: false,
-          event_priority_monotone: true,
+          event_priority_monotone: false,
           phase_derivation_agreement: true,
         },
       }),
@@ -266,7 +264,7 @@ describe('fsm-hub derived state', () => {
 
     expect(result.tone).toBe('error')
     expect(result.headline).toContain('Spec drift')
-    expect(result.detail).toContain('measurement.captured=false')
+    expect(result.detail).toContain('bind_count')
   })
 
   it('interprets idle snapshots as stable placeholders, not live work', () => {
@@ -612,8 +610,8 @@ describe('flagTooltip', () => {
 describe('invariantDescription', () => {
   it('returns domain-specific prose for each known invariant key', () => {
     const keys = [
-      'no_runtime_before_measurement',
       'event_priority_monotone',
+      'phase_derivation_agreement',
     ]
     for (const key of keys) {
       const desc = invariantDescription(key)
@@ -623,8 +621,8 @@ describe('invariantDescription', () => {
   })
 
   it('mentions the specific contract each invariant guards', () => {
-    expect(invariantDescription('no_runtime_before_measurement')).toMatch(/runtime|measurement/i)
-    expect(invariantDescription('event_priority_monotone')).toMatch(/priority|priorit/i)
+    expect(invariantDescription('event_priority_monotone')).toContain('bind_count <= 1')
+    expect(invariantDescription('phase_derivation_agreement')).toContain('derive_phase')
   })
 
   it('falls back to generic text for unknown keys', () => {

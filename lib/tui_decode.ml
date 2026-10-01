@@ -8545,36 +8545,37 @@ let decode_chat_event json =
       | None -> Ok Ignore)
 
 let parse_keeper_chat_response response =
-  let lines = String.split_on_char '\n' response in
+  let body =
+    if String.starts_with ~prefix:"HTTP/" response then
+      match split_headers_body response with
+      | Some body -> body
+      | None -> response
+    else response in
+  let payloads = Sse_wire.data_payloads_of_stream body in
   let result = Buffer.create 256 in
   let completion_text = ref None in
   let saw_terminal = ref false in
   let rec consume_sse = function
     | [] -> Ok ()
-    | raw_line :: rest ->
-        let line = trim raw_line in
-        if String.length line > 6 && String.starts_with line ~prefix:"data: " then (
-          let payload = String.sub line 6 (String.length line - 6) |> trim in
-          if payload = "[DONE]" || payload = "" then consume_sse rest
-          else
-            let* json =
-              try Ok (Yojson.Safe.from_string payload)
-              with Yojson.Json_error msg ->
-                Error ("invalid SSE JSON payload: " ^ msg)
-            in
-            let* chunk = decode_chat_event json in
-            (match chunk with
-             | Delta text -> Buffer.add_string result text
-             | Complete text when Buffer.length result = 0 ->
-                 saw_terminal := true;
-                 if text <> "" then completion_text := Some text
-             | Complete _ -> saw_terminal := true
-             | Ignore -> ());
-            consume_sse rest
-        ) else
+    | raw_payload :: rest ->
+        let payload = trim raw_payload in
+        if payload = "" then consume_sse rest
+        else if payload = "[DONE]" then (saw_terminal := true; consume_sse rest)
+        else
+          let* json =
+            try Ok (Yojson.Safe.from_string payload)
+            with Yojson.Json_error msg -> Error ("invalid SSE JSON payload: " ^ msg) in
+          let* chunk = decode_chat_event json in
+          (match chunk with
+           | Delta text -> Buffer.add_string result text
+           | Complete text when Buffer.length result = 0 ->
+               saw_terminal := true;
+               if text <> "" then completion_text := Some text
+           | Complete _ -> saw_terminal := true
+           | Ignore -> ());
           consume_sse rest
   in
-  let* () = consume_sse lines in
+  let* () = consume_sse payloads in
   if Buffer.length result > 0 then
     Ok (Buffer.contents result)
   else
@@ -8582,11 +8583,6 @@ let parse_keeper_chat_response response =
     | Some text when text <> "" -> Ok text
     | _ when !saw_terminal -> Ok ""
     | _ -> (
-        let body =
-          match split_headers_body response with
-          | Some body -> body
-          | None -> response
-        in
             let* json =
               try Ok (Yojson.Safe.from_string (trim body))
               with Yojson.Json_error msg ->

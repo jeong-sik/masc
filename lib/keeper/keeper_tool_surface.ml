@@ -104,9 +104,14 @@ let keeper_list_body ~(config : Workspace.config) args : tool_result =
       let balance = match Json_util.assoc_string_opt "name" (`Assoc fields) with
         | Some keeper -> Candle_observe.balance candle ~keeper
         | None -> None in
+      let account_revision = match Json_util.assoc_string_opt "name" json with
+        | Some keeper -> Candle_observe.account_revision candle ~keeper
+        | None -> None in
       `Assoc (("portrait", Keeper_portrait_equipment.reading_to_json portrait)
         :: ("candle_balance_milli", Json_util.option_to_yojson (fun value -> `String value) balance)
-        :: List.remove_assoc "candle_balance_milli" (List.remove_assoc "portrait" fields))
+        :: ("candle_account_revision", Json_util.option_to_yojson (fun value -> `String value) account_revision)
+        :: List.remove_assoc "candle_account_revision"
+          (List.remove_assoc "candle_balance_milli" (List.remove_assoc "portrait" fields)))
     | json -> json in
   let data = match data with
     | `Assoc fields -> `Assoc (List.map (fun (key, value) ->

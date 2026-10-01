@@ -451,6 +451,71 @@ let test_equipment_failure_and_repair_bypass_the_roster_cache () =
         check bool "repair is visible inside the same cached roster" true (portrait (read ()) = expected))
       (fun json -> check bool "Off uses server-selected starting equipment" true (portrait json = expected)))
 
+(* The gate uses masc_keeper_list, not the Dashboard observation projection.
+   Keep the actual producer's metadata cache warm while Item ownership and
+   catalog prices change without a balance or outfit change. *)
+let test_account_revision_bypasses_the_roster_cache () =
+  let write_policy config price =
+    let path = Config_dir_resolver.candle_toml_path_for_base_path
+        ~base_path:config.Workspace.base_path in
+    mkdir_p (Filename.dirname path);
+    Out_channel.with_open_bin path (fun oc ->
+      Printf.fprintf oc {|[payout]
+weight_max = 1
+deduction_rate = 0
+deduction_floor = 1000
+[payout.grades_milli]
+trivial = 1000
+small = 1000
+medium = 1000
+large = 1000
+epic = 1000
+[shop.prices_milli]
+glasses = %d
+|} price) in
+  let reading json =
+    match Tui_decode.decode_keeper_runtime_list json with
+    | Ok ([row], [], false, 1, _) ->
+      let revision = match row.Tui_decode.kr_candle_account_revision with
+        | Ok (Some revision) -> revision
+        | Ok None -> fail "gate producer omitted the Item account revision"
+        | Error detail -> fail detail in
+      revision, row.kr_candle_balance_milli, row.kr_portrait
+    | Ok _ -> fail "actual gate roster did not decode one complete Keeper"
+    | Error detail -> fail detail in
+  Masc_test_deps.with_process_env "MASC_KEEPER_LIST_CACHE_TTL_S" (Some "3600")
+  (fun () ->
+    keeper_list ~names:["alpha"] ~args:(`Assoc ["detailed", `Bool true])
+      ~before_list:(fun config ->
+        write_policy config 0;
+        Candle_status.install_appraiser_check (fun () -> Ok ()))
+      ~after_list:(fun config read ->
+        let before_revision, before_balance, before_portrait = reading (read ()) in
+        check (option string) "ready account starts with an empty wallet" (Some "0") before_balance;
+        check bool "unchanged roster repeats keep a stable revision" true
+          (reading (read ()) = (before_revision, before_balance, before_portrait));
+        let owner = match Keeper_id.Keeper_name.of_string "alpha" with
+          | Ok owner -> owner | Error detail -> fail detail in
+        let glasses = match Keeper_portrait_item.of_id "glasses" with
+          | Some item -> item | None -> fail "glasses missing from canonical catalog" in
+        (match Candle_shop.purchase ~now:(fun () -> 1790640000.)
+            ~base_path:config.base_path ~keeper:owner ~item:glasses with
+         | Ok _ -> () | Error error -> fail (Candle_shop.error_to_string error));
+        let free_revision, free_balance, free_portrait = reading (read ()) in
+        check bool "gate revision follows free ownership inside metadata TTL" false
+          (String.equal before_revision free_revision);
+        check (option string) "free purchase leaves wallet unchanged" before_balance free_balance;
+        check bool "free purchase leaves outfit unchanged" true (before_portrait = free_portrait);
+        write_policy config 1;
+        let price_revision, price_balance, price_portrait = reading (read ()) in
+        check bool "gate revision follows price-only edit inside metadata TTL" false
+          (String.equal free_revision price_revision);
+        check (option string) "price edit leaves wallet unchanged" before_balance price_balance;
+        check bool "price edit leaves outfit unchanged" true (before_portrait = price_portrait);
+        check bool "unchanged repriced roster remains stable" true
+          (reading (read ()) = (price_revision, price_balance, price_portrait)))
+      (fun json -> ignore (reading json)))
+
 let () =
   run "keeper_list_truncation"
     [ ( "listing truth"
@@ -469,6 +534,7 @@ let () =
       , [ test_case "row publishes phase, health and paused" `Quick
             test_detailed_row_carries_every_axis
         ; test_case "equipment failure and repair bypass metadata cache" `Quick test_equipment_failure_and_repair_bypass_the_roster_cache
+        ; test_case "Item revision bypasses metadata cache" `Quick test_account_revision_bypasses_the_roster_cache
         ; test_case "health uses the health vocabulary" `Quick
             test_health_is_a_health_word_not_a_surface_word
         ; test_case "an unnamed next action is null" `Quick

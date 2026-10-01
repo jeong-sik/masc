@@ -7892,6 +7892,22 @@
 (alias
  (name runtest)
  (deps (alias runtest-harness-server-binary)))
+
+(rule
+ (alias runtest-test_benchmark_scripts)
+ (deps
+  test_benchmark_scripts.py
+  ../benchmarks/quick-bench.sh
+  ../benchmarks/benchmark.sh
+  ../scripts/harness/jsonrpc_sse.sh
+  ../scripts/harness/lib/mcp_jsonrpc.sh
+  (glob_files ../config/tools/masc_*.toml))
+ (action (run python3 %{dep:test_benchmark_scripts.py})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_benchmark_scripts)))
+
 (rule
  (alias runtest-test_tool_quality_live_plan)
  (deps

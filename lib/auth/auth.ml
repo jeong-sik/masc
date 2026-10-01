@@ -102,7 +102,7 @@ let ensure_keeper_credentials config ~agent_names =
              (* Preflight failures leave other Keepers independent. After any
                 failure, re-read admitted authority before deciding whether
                 the remaining names can safely use a rebuilt index. *)
-             (match credential_store_snapshot_in_transaction transaction with
+             (match credential_store_snapshot_in_transaction ~leaf_policy:Follow_regular_symlink transaction with
               | Error error -> List.map (fun name -> name, Error error) rest
               | Ok snapshot ->
                   Hashtbl.clear index; Hashtbl.clear by_name;

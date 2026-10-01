@@ -347,15 +347,51 @@ let test_expired_uuid_retires_validated_aliases () =
   with_workspace @@ fun base_path ->
   let _, credential = auth_ok (Auth.ensure_keeper_credential base_path ~agent_name:"keeper-canonical") in
   Auth.save_credential base_path { credential with expires_at = Some expired };
-  List.iter (fun alias_name -> auth_ok (Auth.ensure_credential_alias base_path
+  List.iter (fun alias_name ->
+    (* A real independently minted Keeper has a raw bearer before its named
+       credential is repointed to the canonical UUID. *)
+    let token, _ = auth_ok (Auth.ensure_keeper_credential base_path ~agent_name:alias_name) in
+    check (option string) "minted alias owns a raw sidecar" (Some token)
+      (Auth.load_raw_token base_path ~agent_name:alias_name);
+    auth_ok (Auth.ensure_credential_alias base_path
       ~canonical_name:"keeper-canonical" ~alias_name)) ["keeper-short"; "keeper-other"];
   (match auth_ok (prune base_path) with
    | [{ Prune.agent_name = "keeper-canonical"; reason = Prune.Expired; outcome = Prune.Retired }] -> ()
    | _ -> fail "the canonical credential and aliases must retire in one entry");
-  List.iter (fun name -> check bool "validated alias was removed in the same prune" false
-      (Sys.file_exists (Auth.credential_file base_path name)))
+  List.iter (fun name ->
+    check bool "validated alias was removed in the same prune" false
+      (Sys.file_exists (Auth.credential_file base_path name));
+    check bool "raw bearer was removed in the same prune" false
+      (Sys.file_exists (Auth.raw_token_file base_path name)))
     ["keeper-canonical"; "keeper-short"; "keeper-other"];
   check (list string) "no orphan remains for a second prune" [] (names (auth_ok (prune base_path)))
+
+let test_alias_raw_cleanup_failure_retains_retry_authority () =
+  with_workspace @@ fun base_path ->
+  let _, credential = auth_ok (Auth.ensure_keeper_credential base_path ~agent_name:"aaa") in
+  let _, _ = auth_ok (Auth.ensure_keeper_credential base_path ~agent_name:"alias") in
+  auth_ok (Auth.ensure_credential_alias base_path ~canonical_name:"aaa" ~alias_name:"alias");
+  Auth.save_credential base_path { credential with expires_at = Some expired };
+  let _later = make_expired base_path "bbb" in
+  let canonical = Auth.credential_file base_path "aaa" in
+  let alias = Auth.credential_file base_path "alias" in
+  let before_canonical = read canonical and before_alias = read alias in
+  let raw = Auth.raw_token_file base_path "alias" in
+  Unix.unlink raw;
+  Unix.mkdir raw 0o700;
+  (match auth_ok (prune base_path) with
+   | [{Prune.agent_name="aaa"; outcome=Prune.Failed _; _};
+      {Prune.agent_name="bbb"; outcome=Prune.Retired; _}] -> ()
+   | _ -> fail "alias raw cleanup failure must not report successful canonical retirement");
+  check string "canonical owner remains for retry" before_canonical (read canonical);
+  check string "alias stays discoverable until its raw bearer retires" before_alias (read alias);
+  check bool "failed raw cleanup retains the obstructing path" true (Sys.file_exists raw);
+  Unix.rmdir raw;
+  (match auth_ok (prune base_path) with
+   | [{Prune.agent_name="aaa"; outcome=Prune.Retired; _}] -> ()
+   | _ -> fail "repairing alias raw cleanup must allow one complete retirement");
+  List.iter (fun path -> check bool "retry removes every admitted alias artifact" false
+      (Sys.file_exists path)) [canonical; alias; raw]
 
 let test_normalized_canonical_survives_uuid_cleanup_failure () =
   with_workspace @@ fun base_path ->
@@ -407,7 +443,8 @@ let test_failed_admission_preserves_every_file () =
 let () =
   run "auth_token_prune_transaction"
     [ "prune",
-      [ test_case "normalized canonical survives UUID cleanup failure" `Quick test_normalized_canonical_survives_uuid_cleanup_failure
+      [ test_case "alias raw cleanup failure retains retry authority" `Quick test_alias_raw_cleanup_failure_retains_retry_authority
+      ; test_case "normalized canonical survives UUID cleanup failure" `Quick test_normalized_canonical_survives_uuid_cleanup_failure
       ; test_case "renewal before prune preserves the current Admin" `Quick test_renewal_before_prune
       ; test_case "orphan replacement before prune preserves its bearer" `Quick test_orphan_renewal_before_prune
       ; test_case "prune finishes before the later renewal" `Quick test_prune_before_renewal

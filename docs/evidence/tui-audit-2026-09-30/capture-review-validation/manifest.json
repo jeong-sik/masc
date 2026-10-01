@@ -1,0 +1,349 @@
+{
+  "captures": [
+    {
+      "stem": "dashboard-80",
+      "terminal": {
+        "columns": 80,
+        "rows": 41
+      },
+      "provenance": "installed_binary_isolated_fixture_PTY",
+      "ready_markers": [
+        "Health: ok"
+      ],
+      "text_sha256": "7182739cde3514bb5461a15ae5db9d477a514c7392e214a00e21e95eed6965e9",
+      "png_sha256": "24382d6ad6d5a86aa07299e22db24fe66e5c1910e29f3f276ebe6158a86eb026"
+    },
+    {
+      "stem": "work-80",
+      "terminal": {
+        "columns": 80,
+        "rows": 41
+      },
+      "provenance": "installed_binary_isolated_fixture_PTY",
+      "ready_markers": [
+        "Audit goal"
+      ],
+      "text_sha256": "98b8b1205c19677cc4bf85d38ca740897abc944f49d61d4c6b2d4ffa61b8813a",
+      "png_sha256": "0e73979ab6767aa2f7a62cbf39304dd1f511e9d4e89bff09d7568f540916ae99"
+    },
+    {
+      "stem": "keepers-80",
+      "terminal": {
+        "columns": 80,
+        "rows": 41
+      },
+      "provenance": "installed_binary_isolated_fixture_PTY",
+      "ready_markers": [
+        "alpha",
+        "beta"
+      ],
+      "text_sha256": "899bd3cfbffa6b0ebadd73f1e531d7bed814783bcba7c5014ee1d84d24e664b3",
+      "png_sha256": "fb3f1c037126907d8a078de03e5f01aaa2953fffaf94760e36d32723e67cea93"
+    },
+    {
+      "stem": "usage-80",
+      "terminal": {
+        "columns": 80,
+        "rows": 41
+      },
+      "provenance": "installed_binary_isolated_fixture_PTY",
+      "ready_markers": [
+        "Audit provider",
+        "40%"
+      ],
+      "text_sha256": "fa0d64c835da3499133037559bc18c7b13b766fa39c4cb5492ddc23d49bfd32b",
+      "png_sha256": "14305e92d4c408b63bef5423f27195163b0a3ff7b3bc5f13bb1c186c2c13da3f"
+    },
+    {
+      "stem": "board-80",
+      "terminal": {
+        "columns": 80,
+        "rows": 41
+      },
+      "provenance": "installed_binary_isolated_fixture_PTY",
+      "ready_markers": [
+        "Sort [s]",
+        "댓글 폭 기준 화면"
+      ],
+      "text_sha256": "cfb0476dde69cccd7064f40a2b07e652a46c94c7f2d6484ab046226cc0d52d2a",
+      "png_sha256": "5580d1858696ba7582e61294f21ab4ef3f103967c531cd5ae2acf829fa39df30"
+    },
+    {
+      "stem": "workspace-80",
+      "terminal": {
+        "columns": 80,
+        "rows": 41
+      },
+      "provenance": "installed_binary_isolated_fixture_PTY",
+      "ready_markers": [
+        "/srv/masc/workspace/masc"
+      ],
+      "text_sha256": "f4004933ad38a3207b6dcfb93f6499fbfe431daf88db9a61a88b8b090b457c9b",
+      "png_sha256": "b12c6792b25f0cd9edf6ed4b14bff0425525f8b5bab33e27432c91354b39e58d"
+    },
+    {
+      "stem": "system-80",
+      "terminal": {
+        "columns": 80,
+        "rows": 41
+      },
+      "provenance": "installed_binary_isolated_fixture_PTY",
+      "ready_markers": [
+        "runtime config load failed:"
+      ],
+      "text_sha256": "33ff1fea2468ac89e233538f597f082d29b26265cb17f198368a5ab269195acd",
+      "png_sha256": "457a3ca140c090a6a7c49e34aa0c6986952e957fc0273d6cf4d319483707323d"
+    },
+    {
+      "stem": "board-detail-80",
+      "terminal": {
+        "columns": 80,
+        "rows": 41
+      },
+      "provenance": "installed_binary_isolated_fixture_PTY",
+      "ready_markers": [
+        "Comments",
+        "긴 댓글 본문은"
+      ],
+      "text_sha256": "21b5bbe51dcc18780ac8a200edce9a0660b19c4e5bafd167fb6f66e5dfec4c33",
+      "png_sha256": "24b6db870ad9b3757f3387fc9543365c0612549e3ab82e367438b163b3385d51"
+    },
+    {
+      "stem": "dashboard-120",
+      "terminal": {
+        "columns": 120,
+        "rows": 41
+      },
+      "provenance": "installed_binary_isolated_fixture_PTY",
+      "ready_markers": [
+        "Health: ok"
+      ],
+      "text_sha256": "893da58796c81e206eb0721a5f922088e88a7495d0ab7e48b2f17491c8cf16f6",
+      "png_sha256": "2a769485fb9c9bec3ce25808e6d23446631f63fcc0dbeb1bf8af5bbb467219fe"
+    },
+    {
+      "stem": "work-120",
+      "terminal": {
+        "columns": 120,
+        "rows": 41
+      },
+      "provenance": "installed_binary_isolated_fixture_PTY",
+      "ready_markers": [
+        "Audit goal"
+      ],
+      "text_sha256": "64d52d6951a0cc5496bbdcdb1d1174a8f4a3cff38b78bac4ccd708bb88cfe84f",
+      "png_sha256": "f2e445020845b01a100432cae628d2499de9e386f70fb968a2f667865fc19952"
+    },
+    {
+      "stem": "keepers-120",
+      "terminal": {
+        "columns": 120,
+        "rows": 41
+      },
+      "provenance": "installed_binary_isolated_fixture_PTY",
+      "ready_markers": [
+        "alpha",
+        "beta"
+      ],
+      "text_sha256": "d71b1b5387ed0294f1d394bdcdf4a9e1535104c77f1ccc5ef89071a7b51f90de",
+      "png_sha256": "676aaae8a3edf5c02a3d80d0e19b262dbe3beb541a52c9db8f48071e8a8136a1"
+    },
+    {
+      "stem": "usage-120",
+      "terminal": {
+        "columns": 120,
+        "rows": 41
+      },
+      "provenance": "installed_binary_isolated_fixture_PTY",
+      "ready_markers": [
+        "Audit provider",
+        "40%"
+      ],
+      "text_sha256": "22c55f3b403655d00d50573ba1a302ecf79aa12946b5c50b22a210dc3d12ba75",
+      "png_sha256": "a92f0c8636792e6000615a16c2567e20a0e6ab335cd0acffed656b39508a924f"
+    },
+    {
+      "stem": "board-120",
+      "terminal": {
+        "columns": 120,
+        "rows": 41
+      },
+      "provenance": "installed_binary_isolated_fixture_PTY",
+      "ready_markers": [
+        "Sort [s]",
+        "댓글 폭 기준 화면"
+      ],
+      "text_sha256": "874cffde0159874234f004e8b71c8ad1c35f9aaef0ac2de61e08aed8cd0f64b5",
+      "png_sha256": "00d2839a26e1bc843b9e1feaf11bfc2acf26c21bb4cbd877fe34a2e45029e771"
+    },
+    {
+      "stem": "workspace-120",
+      "terminal": {
+        "columns": 120,
+        "rows": 41
+      },
+      "provenance": "installed_binary_isolated_fixture_PTY",
+      "ready_markers": [
+        "/srv/masc/workspace/masc"
+      ],
+      "text_sha256": "9f3a7fae3f9f75aef99eb26c3f8f6bca72c0f3c47cfc34b2aed14493bd614626",
+      "png_sha256": "e33e1ae0a9a4fb7188d53396c2eb89243795107339b35be449b696cf501188b2"
+    },
+    {
+      "stem": "system-120",
+      "terminal": {
+        "columns": 120,
+        "rows": 41
+      },
+      "provenance": "installed_binary_isolated_fixture_PTY",
+      "ready_markers": [
+        "runtime config load failed:"
+      ],
+      "text_sha256": "e9569638b01297f35bf80ba36606cb9c479f6e9ba7b896bd2c1bb83ce82209b6",
+      "png_sha256": "0c5abd552ce7a2f9d9db00c638651810e1970d4b11e892ab503190d910a427a0"
+    },
+    {
+      "stem": "board-detail-120",
+      "terminal": {
+        "columns": 120,
+        "rows": 41
+      },
+      "provenance": "installed_binary_isolated_fixture_PTY",
+      "ready_markers": [
+        "Comments",
+        "긴 댓글 본문은"
+      ],
+      "text_sha256": "58388b10d0f83a006c4ff680e543d5327887527de7e86a4e098d11eabcec9a24",
+      "png_sha256": "e6b52e83b8611ef1b210c48abb2936225cd21be0cf5a40d9af1c161ce4ddb284"
+    },
+    {
+      "stem": "dashboard-240",
+      "terminal": {
+        "columns": 242,
+        "rows": 41
+      },
+      "provenance": "installed_binary_isolated_fixture_PTY",
+      "ready_markers": [
+        "Health: ok"
+      ],
+      "text_sha256": "8e2028e52de6b3dbca14531bf2c74f03d96dc036313197c83a13004422217a63",
+      "png_sha256": "eacefd15d986219b50f08c4094928620b7b9577a906ecad52d210bfa9b647ab3"
+    },
+    {
+      "stem": "work-240",
+      "terminal": {
+        "columns": 242,
+        "rows": 41
+      },
+      "provenance": "installed_binary_isolated_fixture_PTY",
+      "ready_markers": [
+        "Audit goal"
+      ],
+      "text_sha256": "4d07b91987e61e34214d9c3b33a1d5b1677ac4813cfac2fa03a64215224979e9",
+      "png_sha256": "b2839cd79948d787de740879432fc1b739265d3fe89b668d8d063b17ef641979"
+    },
+    {
+      "stem": "keepers-240",
+      "terminal": {
+        "columns": 242,
+        "rows": 41
+      },
+      "provenance": "installed_binary_isolated_fixture_PTY",
+      "ready_markers": [
+        "alpha",
+        "beta"
+      ],
+      "text_sha256": "c9b14640b3310b57b7eff85dba1b7df452f200203189f98d8cdc7d5c8b6c6fac",
+      "png_sha256": "aa5545d85635dc28b6b73e612b1cac910a31c984856f65f682d44bd8260237b6"
+    },
+    {
+      "stem": "usage-240",
+      "terminal": {
+        "columns": 242,
+        "rows": 41
+      },
+      "provenance": "installed_binary_isolated_fixture_PTY",
+      "ready_markers": [
+        "Audit provider",
+        "40%"
+      ],
+      "text_sha256": "8f6b18e50fa07f815095ad8301db04b7b671283a020809c3b5949cdd6d4e51ea",
+      "png_sha256": "22271daba8dd7b09b57dd69bd2c46ec84fee0599d006d001426d23173af0dab0"
+    },
+    {
+      "stem": "board-240",
+      "terminal": {
+        "columns": 242,
+        "rows": 41
+      },
+      "provenance": "installed_binary_isolated_fixture_PTY",
+      "ready_markers": [
+        "Sort [s]",
+        "댓글 폭 기준 화면"
+      ],
+      "text_sha256": "ba98193d852607cf0c183af7baf43274ed2fc77061f199ba20104347ae49bc3d",
+      "png_sha256": "d091df01b81882a1276259a8c76c0a5b997c440168a76a182d721d901268c247"
+    },
+    {
+      "stem": "workspace-240",
+      "terminal": {
+        "columns": 242,
+        "rows": 41
+      },
+      "provenance": "installed_binary_isolated_fixture_PTY",
+      "ready_markers": [
+        "/srv/masc/workspace/masc"
+      ],
+      "text_sha256": "464b1f0577db08d7eba453ecca7c512e4e0435601fb5ae43f5f619693aed7fc6",
+      "png_sha256": "44f3b75a619ad1c2837c32c4d0b0ea866e14b095ea19a59465ea03d2ffeecb2c"
+    },
+    {
+      "stem": "system-240",
+      "terminal": {
+        "columns": 242,
+        "rows": 41
+      },
+      "provenance": "installed_binary_isolated_fixture_PTY",
+      "ready_markers": [
+        "runtime config load failed:"
+      ],
+      "text_sha256": "6cd50fc3613d24e91d90e7705599266b515a061612f0f671bb0b394ad955b660",
+      "png_sha256": "01daa8400bb181478b05bb53526855046279aac8dc3366ccc15d01eb628dfdb8"
+    },
+    {
+      "stem": "board-detail-240",
+      "terminal": {
+        "columns": 242,
+        "rows": 41
+      },
+      "provenance": "installed_binary_isolated_fixture_PTY",
+      "ready_markers": [
+        "Comments",
+        "긴 댓글 본문은"
+      ],
+      "text_sha256": "90e36be3e9cb61b5661de625485232c06bfb5e548dceb968dea6c08ef04cfcce",
+      "png_sha256": "c0b81e2e7aa93231a10b384ddb53618a2f73a16e89a4d2431967c9e258be4e17"
+    }
+  ],
+  "complete": true,
+  "limitations": [
+    "Synthetic fixture data",
+    "Direct native executable only; no wrapper provenance claim",
+    "Missing fixture API returns HTTP503",
+    "Terminal dimensions are measured, not filename values"
+  ],
+  "binary_commit": "ff7f49c40cd09e36acd18e76df0c0c512f6a7eab",
+  "binary_sha256": "0ba80256daabb703cdcfbed4097a31b0c5a2cb136a424d59015da1d919951f44",
+  "launched_executable": "/Users/dancer/.local/bin/masc-tui",
+  "input_sha256": {
+    "executable": "0ba80256daabb703cdcfbed4097a31b0c5a2cb136a424d59015da1d919951f44",
+    "capture_script": "df63ca74bf32331e4fb933f31f749f1c3863bde3cd9cb50905cf74a0ce1cb498",
+    "fixture_helper": "2d9560cddfb735f5f1d58132555b581173ea923c19749aeff240132a219416e8",
+    "terminal_helper": "5e332f6c0a06fd74c638b6c42b51a61037ca1e5a6594b429c032e7f95b407d4c"
+  },
+  "fixture_parameters": {
+    "author": "wkbl-layout-reviewer-with-long-name",
+    "board_only": false
+  },
+  "fixture_sha256": "0ab1f9ae06e94dfbba75b9a59576acfdbc8daa8531cefceec61d3bfd455e155c"
+}

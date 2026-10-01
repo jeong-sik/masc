@@ -1,0 +1,41 @@
+Binary: /Users/dancer/.local/bin/masc-tui
+Build commit (queried before run): 86751f610442e4d82992ebc54bf9eb8ba45ef6d2
+Binary SHA256 (queried before and after run, unchanged): 96955f7800f497c831f6cd25c953d0143cc8c6441f0b7935d18198f49008760b
+Raw assertion log SHA256: d69053e30e111597195660a89768fce0ca732aeb4eee429d15cc0b1f6aa2b0f7
+Raw log file: runtime-list-before-86751.raw.txt
+Provenance: installed binary launched in a separate temporary fixture PTY; not active user session or production data.
+Measured condition: 40 columns, 32 rows, color mode, lane listing. Producer-consistent singleton probe, 1 reachable/0 failed/0 skipped.
+Result: expected before-repair failure waiting for ROUTE / PROBE; table status outside frame. Later widths/modes, detail reconstruction and repaired binary were not tested in this run.
+
+ ‹4 Board  Workspace  ▸System
+
+   MASC System / Runtime    ok / fres…  
+ ────────────────────────────────────── 
+    SSOT: runtime.toml                  
+    projections: resolved + probe       
+    1 reachable / 0 failed / 0 skipped  
+    fleet: 2 keepers · 0 turns · 0 tok  
+    · $0.00                             
+    /workspace/config/runtime.toml      
+ ────────────────────────────────────── 
+    [runtime]… fixture-runtime-한 …  …  
+    media_fai… none — no vision ru…  …  
+ ────────────────────────────────────── 
+    LANE       CANDIDATE            P…  
+ ────────────────────────────────────── 
+    fix…-tailL 1/1 fi…dentity-tailZ f…  
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+
+  Right / Enter:detail  Left / Esc:bac…?
+ › to alpha   (i to write)              

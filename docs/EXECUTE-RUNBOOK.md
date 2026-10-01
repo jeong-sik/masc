@@ -116,12 +116,6 @@ Keeper-turn async messaging is a separate surface (`keeper_msg`,
 `keeper_msg_result`, `keeper_msg_cancel`, `keeper_msg_list`) and is serialized
 through `Keeper_turn_admission`.
 
-Verification:
-
-```bash
-bash scripts/check-execute-async-surface.sh
-```
-
 ## Counter Endpoint
 
 ```text

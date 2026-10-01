@@ -1,3 +1,4 @@
+(include stanzas/test_tui_usage_studio_pty.inc)
 (include stanzas/test_librarian_working_state_evaluation.inc)
 (include stanzas/test_librarian_working_state_cli.inc)
 (include stanzas/test_librarian_continuity_snapshot_cli.inc)
@@ -8031,3 +8032,27 @@
 
 (include stanzas/test_tui_remote_equipped_portrait.inc)
 (include stanzas/test_play_current_credential_authority.inc)
+
+(rule
+ (alias runtest-test_prepare_keeper_collaboration)
+ (deps
+  test_prepare_keeper_collaboration.py
+  ../scripts/prepare-keeper-collaboration.py
+  ../scripts/prepare-fusion-decision-live.py)
+ (action (run python3 %{dep:test_prepare_keeper_collaboration.py})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_prepare_keeper_collaboration)))
+
+(rule
+ (alias runtest-test_keeper_continuity_admission)
+ (deps
+  test_keeper_continuity_admission.py
+  ../scripts/harness/workload/keeper_continuity_validation.sh
+  ../config/tools/masc_keeper_up.toml)
+ (action (run python3 %{dep:test_keeper_continuity_admission.py})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_keeper_continuity_admission)))

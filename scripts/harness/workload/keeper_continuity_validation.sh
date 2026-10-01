@@ -32,6 +32,11 @@ SERVER_EXE="${SERVER_EXE:-}"
 MCP_URL="${MCP_URL:-}"
 MCP_TOKEN="${MASC_TOKEN:-}"
 KEEPER_RUNTIME_NAME="${KEEPER_RUNTIME_NAME:-}"
+# Caller-selected sandbox declaration for this harness's fresh Keeper.
+KEEPER_SANDBOX_PROFILE="${KEEPER_SANDBOX_PROFILE:-}"
+KEEPER_SANDBOX_IMAGE="${KEEPER_SANDBOX_IMAGE:-}"
+KEEPER_MICROVM_BACKEND="${KEEPER_MICROVM_BACKEND:-}"
+KEEPER_REMOTE_ENDPOINT="${KEEPER_REMOTE_ENDPOINT:-}"
 KEEPER_NAME="${KEEPER_NAME:-continuity-${RUN_ID}}"
 # The phases this harness runs, in run order.
 KNOWN_PHASES=(bootstrap liveness continuity recovery)
@@ -546,20 +551,50 @@ send_keeper_message() {
   LATEST_OUTPUT_PREVIEW="$(trim_preview "$output_text")"
 }
 
+require_keeper_sandbox() {
+  case "$KEEPER_SANDBOX_PROFILE" in
+    docker|microvm)
+      if [[ -z "$KEEPER_SANDBOX_IMAGE" ]]; then
+        echo "KEEPER_SANDBOX_IMAGE must name the caller's sandbox image" >&2
+        return 1
+      fi
+      if [[ "$KEEPER_SANDBOX_PROFILE" == microvm && -z "$KEEPER_MICROVM_BACKEND" ]]; then
+        echo "KEEPER_MICROVM_BACKEND must name the caller's microVM backend" >&2
+        return 1
+      fi
+      ;;
+    remote_ssh)
+      if [[ -z "$KEEPER_REMOTE_ENDPOINT" ]]; then
+        echo "KEEPER_REMOTE_ENDPOINT must name the caller's SSH endpoint" >&2
+        return 1
+      fi
+      ;;
+    *)
+      echo "Set KEEPER_SANDBOX_PROFILE to docker, microvm, or remote_ssh; no sandbox is chosen by the harness" >&2
+      return 1
+      ;;
+  esac
+}
+
 create_keeper() {
   local args
   args="$(jq -cn \
     --arg name "$KEEPER_NAME" \
-    --arg goal "Validate real keeper continuity under isolated load." \
-    --arg instructions "모든 응답은 한국어로 작성하세요. 짧고 구조적으로 답하세요." \
+    --arg instructions "Validate real keeper continuity under isolated load. 모든 응답은 한국어로 작성하세요. 짧고 구조적으로 답하세요." \
     --arg runtime_id "$KEEPER_RUNTIME_NAME" \
+    --arg sandbox_profile "$KEEPER_SANDBOX_PROFILE" \
+    --arg sandbox_image "$KEEPER_SANDBOX_IMAGE" \
+    --arg microvm_backend "$KEEPER_MICROVM_BACKEND" \
+    --arg remote_endpoint "$KEEPER_REMOTE_ENDPOINT" \
     '{
       name:$name,
-      goal:$goal,
       instructions:$instructions,
       activation_mode:"on_demand",
-      drift_enabled:false
-    } + (if ($runtime_id | length) > 0 then {runtime_id:$runtime_id} else {} end)')"
+      sandbox_profile:$sandbox_profile
+    } + (if ($runtime_id | length) > 0 then {runtime_id:$runtime_id} else {} end)
+      + (if ($sandbox_image | length) > 0 then {sandbox_image:$sandbox_image} else {} end)
+      + (if ($microvm_backend | length) > 0 then {microvm_backend:$microvm_backend} else {} end)
+      + (if ($remote_endpoint | length) > 0 then {remote_endpoint:$remote_endpoint} else {} end)')"
   call_mcp_tool 1100 "masc_keeper_up" "$args" 60
 }
 
@@ -805,6 +840,8 @@ EOF
 
 real_run() {
   local status_json snapshot_info snapshot_file heartbeat_file status_after
+
+  require_keeper_sandbox || return 1
 
   require_cmd jq || { echo "jq is required" >&2; return 1; }
   require_cmd curl || { echo "curl is required" >&2; return 1; }

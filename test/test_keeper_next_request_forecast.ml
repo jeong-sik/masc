@@ -382,7 +382,7 @@ max-concurrent = 1
   let mark_head ~keeper_name =
     let head = Option.get (Runtime.get_runtime_by_id "forecast.head") in
     Runtime_candidate_backpressure.note_failed_attempt
-      ~candidate:head.Runtime.candidate_backpressure
+      ~candidate:head.Runtime_instance.candidate_backpressure
       ~failure:Runtime_candidate_backpressure.Provider_timeout
       ~recorded_by:(Runtime_candidate_backpressure.keeper_recorder ~keeper_name)
   in

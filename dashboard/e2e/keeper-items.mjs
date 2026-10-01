@@ -78,6 +78,10 @@ try {
   failed = true
   await page.getByRole('button', { name: '새로고침', exact: true }).click()
   await page.getByRole('alert').waitFor()
+  const failureText = await page.getByRole('alert').textContent()
+  if (!failureText?.includes('fixture ledger unreadable') || failureText.includes('/api/')) {
+    throw new Error('Item error must show the server reason without an internal endpoint')
+  }
   if (await page.getByText('0.800 Candle').count()) throw new Error('failed refresh retained balance')
   await capture('keeper-items-unavailable')
   failed = false

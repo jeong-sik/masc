@@ -1,4 +1,4 @@
-import { readCandleRosterObservation, type CandleReading } from './api/schemas/candle-observation'
+import { readCandleRosterObservation, type CandleReading } from './lib/candle-observation'
 import { decodeGoalProof } from './api/goal-proof'
 import { fetchKeeperDeletions, type KeeperDeletionInventory } from './api/keeper-lifecycle'
 // MASC Dashboard — Centralized reactive state via @preact/signals

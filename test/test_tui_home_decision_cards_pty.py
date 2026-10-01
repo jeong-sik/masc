@@ -232,7 +232,7 @@ def each_failed_source_keeps_other_cards(executable):
             note = b"Approvals and questions: " + failed_label + b" not fully read"
             # Match the sole-source label through the end of its drawn row,
             # so transient boot notes cannot satisfy the settled-source barrier.
-            settled = re.compile(re.escape(note) + rb"(?: |\x1b\[[0-9;]*m)*\x1b\[0m\x1b\[[0-9;]*H")
+            settled = re.compile(re.escape(note) + rb"(?: |\x1b\[[0-9;]*m)*\x1b\[0m(?:\x1b\[[0-9;]*H|\x1b\[\?25l\x1b\[\?7h)")
             h.wait_for_output(process, fd, output, settled, start=0, timeout=10)
             h.resize_and_wait(process, fd, output, rows=24, columns=81,
                               needle=note, controls=(h.FULL_REDRAW,),

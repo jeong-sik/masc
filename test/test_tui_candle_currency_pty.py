@@ -340,12 +340,11 @@ def currency_follows_workspace_authority(binary: str, captures: Path | None) -> 
 
 
 def short_overview_keeps_its_baseline(binary: str) -> None:
-    # Compare the current Dashboard's short-screen projection with Candle off.
-    # Main gives its first rows to health and Goals and labels any overflow;
-    # it no longer promises the old Overview's five-todo/attention floor.
+    # Compare Home decision identities against Candle off. Roster failures
+    # legitimately alter the conversation destination but never the request window.
     baseline = {}
     def core_rows(output):
-        # Compare Dashboard body rows, preserving its Usage facts. The footer
+        # Compare Home decision rows, preserving request identities. The footer
         # also says m:Usage, but its separately seeded HTTP port is not a body
         # fact and differs between the off/disabled/error/ready scenarios.
         end = output.rfind(h.FRAME_END)
@@ -353,13 +352,13 @@ def short_overview_keeps_its_baseline(binary: str) -> None:
         rows = h.screen_rows(bytes(output[:end + len(h.FRAME_END)]))
         footer = h.screen_row_of(rows, b"q:quit")
         assert footer > 1 and b"Port:" in rows[footer], rows
-        markers = (b"Goals", b"actual ", b"linked tasks", b"Work", b"Open:",
-                   b"Usage", b"Needs you", b"attention-", b"rows not shown", b"row not shown")
+        markers = (b"Approval", b"Question", b"Needs your decision",
+                   b"Continue", b"Home destinations")
         return tuple(line for row, line in sorted(rows.items())
                      if 1 < row < footer
                      and any(marker in line for marker in markers))
     for phase in ("off", "disabled", "error", "ready"):
-        fixtures = h.row_budget_http_fixtures()
+        fixtures, _items, _new = h.approval_selection_http_fixtures()
         roster_payload = copy.deepcopy(h.keeper_runtime_http_fixtures()[ROSTER_PATH][1])
         reason = " ".join(["diagnostic-part"] * 40) + " candle-diagnostic-end"
         if phase == "off":
@@ -380,11 +379,11 @@ def short_overview_keeps_its_baseline(binary: str) -> None:
             fixtures[ROSTER_PATH] = (200, roster_payload)
 
         def interact(process, fd, _slave, output, _base):
-            h.resize_and_wait(process, fd, output, rows=38, columns=100,
-                              needle=b"MASC Dashboard", controls=(h.FULL_REDRAW,))
             await_screen(process, fd, output,
-                lambda text: b"attention-2" in text and b"Goals" in text,
-                "loaded baseline task and attention rows")
+                lambda text: b"Approvals and questions: 3" in text,
+                "loaded authoritative Home decision rows")
+            h.resize_and_wait(process, fd, output, rows=38, columns=100,
+                              needle=b"Approvals and questions: 3", final_cursor=b"\x1b[?25l")
             # The shared fixed-chrome floor is 14 body rows. Navigation
             # owns one physical row; at 15 rows the composer stands down.
             # Below that floor the truthful surface is the compact gate.
@@ -399,9 +398,12 @@ def short_overview_keeps_its_baseline(binary: str) -> None:
                 h.resize_and_wait(process, fd, output, rows=height, columns=100,
                     needle=b"MASC Dashboard", controls=(h.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
                 visible = screen(output)
-                for expected in (b"Health:", b"Goals", b"q:quit"):
+                for expected in (b"Continue", b"q:quit", b"Enter:open"):
                     assert expected in visible, (phase, height, expected, visible)
-                assert re.search(rb"\+\d+ rows? not shown", visible), visible
+                rows = h.screen_rows(bytes(output[:output.rfind(h.FRAME_END) + len(h.FRAME_END)]))
+                assert max(rows) <= height, (phase, height, rows)
+                assert all(h.fixture_cell_width(row.decode("utf-8")) <= 100
+                           for row in rows.values()), (phase, height, rows)
                 projected = core_rows(output)
                 if phase == "off":
                     baseline[height] = projected

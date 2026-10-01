@@ -27,7 +27,7 @@ try {
   let releaseResponse = null
   const requests = []
   const captures = []
-  await page.route('**/api/v1/keepers/rondo/items', async route => {
+  await page.route('**/api/v1/keepers/rondo/items?*', async route => {
     const status = failed ? 503 : 200
     const body = JSON.stringify(failed ? { error: 'fixture ledger unreadable' } : account)
     requests.push({ failed, owned_items: [...account.owned_items] })

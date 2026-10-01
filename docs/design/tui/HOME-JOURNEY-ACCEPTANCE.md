@@ -49,10 +49,14 @@ these checks do not emulate every terminal's display rules.
 These are synthetic fixture observations when executed. They cannot prove
 Keeper operation, production readiness, installation, or human action timing.
 
-Run the focused acceptance in CI with:
+After preparing an approved candidate and its selection receipt with the
+[leader-selected CI procedure](../../CI-REVIEW-WORKFLOW.md), request the focused
+acceptance on that exact candidate:
 
 ```sh
-gh workflow run test.yml --ref <branch> -f suite=test_tui_home_viewports_pty
+gh workflow run leader-ci.yml --ref main \
+  -f candidate=<candidate-sha> -F selection=@selection.json \
+  -F tests=true -f suites=test_tui_home_viewports_pty
 ```
 
 No local Dune build is needed. Current-head required PR checks, focused test

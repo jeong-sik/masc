@@ -371,7 +371,10 @@ async function settleTaskDeletion(taskId: string) {
       ? '태스크는 삭제됐지만 정리가 남아 있습니다.' : '태스크 삭제와 정리를 완료했습니다',
       result.status === 'cleanup_failed' ? 'error' : 'success')
   } finally {
-    await Promise.all([refreshDeletionInventory(), refreshExecution({ force: true })])
+    await Promise.all([refreshDeletionInventory(), refreshExecution({ force: true })]).catch(error => {
+      // Preserve the deletion outcome; executionError owns the read failure.
+      console.warn('[Tasks] post-deletion observation refresh failed:', error)
+    })
   }
 }
 
@@ -389,8 +392,13 @@ function TaskCleanupFailures() {
       if (!result.ok) showToast(result.errors.join('\n'), 'error')
     } catch (error) { showToast(error instanceof Error ? error.message : '삭제 후 정리 재시도 실패', 'error') }
     finally {
-      await Promise.all([refreshDeletionInventory(), refreshExecution({ force: true })])
-      setRetrying(null)
+      try {
+        await Promise.all([refreshDeletionInventory(), refreshExecution({ force: true })])
+      } catch (error) {
+        console.warn('[Tasks] post-cleanup observation refresh failed:', error)
+      } finally {
+        setRetrying(null)
+      }
     }
   }
   return html`

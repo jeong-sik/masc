@@ -316,8 +316,12 @@ with (root / 'server.log').open('wb') as log:
         purchase = tool('keeper_candle_purchase', {'item': item})
         require(purchase['amount_milli'] == '0', purchase)
         require(purchase['account']['owned_items'] == [item], purchase)
+        ledger_path = base / '.masc/candle-ledger.jsonl'
+        purchased_ledger = ledger_path.read_bytes()
         tool('keeper_candle_purchase', {'item': item}, 'already_owned')
         tool('keeper_candle_purchase', {'item': 'crown'}, 'insufficient_balance')
+        tool('keeper_candle_equip', {'slot': 'head', 'item': item}, 'equipment_refused')
+        require(ledger_path.read_bytes() == purchased_ledger, 'refused Item calls changed the ledger')
         equipped = tool('keeper_candle_equip', {'slot': 'face', 'item': item})
         require(equipped['changed'] is True and equipped['equipment']['face'] == item, equipped)
         for slot in ('head', 'neck', 'hand', 'base'):
@@ -328,7 +332,8 @@ with (root / 'server.log').open('wb') as log:
         require(account_after['owned_items'] == [item], account_after)
         (root / 'account-after.json').write_bytes(updated)
         status, equipped_png = request('/api/v1/keepers/item-runtime-probe/portrait.png?size=96')
-        require(status == 200 and equipped_png.startswith(b'\x89PNG\r\n\x1a\n'), status)
+        require(status == 200, status)
+        validate_portrait(equipped_png, 96)
         require(equipped_png != png, 'equipment did not change the served portrait')
         (root / 'portrait-equipped.png').write_bytes(equipped_png)
         restored = tool('keeper_candle_equip', {'slot': 'face', 'item': 'default'})

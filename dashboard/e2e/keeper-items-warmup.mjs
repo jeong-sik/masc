@@ -59,7 +59,7 @@ try {
   if (await page.getByRole('alert').count()) throw new Error('workspace recovery retained old preview failure')
   await capture('item-workspace-recovered')
   if (errors.length) throw new Error(`browser errors: ${errors.join(' | ')}`)
-  await writeFile(`${artifactDir}/manifest.json`, JSON.stringify({
+  await writeFile(`${artifactDir}/warmup-manifest.json`, JSON.stringify({
     scope: 'real Chromium production Item component/store with synthetic HTTP accounts and execution warm-up; mocked PNG503',
     source_sha: process.env.GITHUB_SHA ?? null, browser_version: browser.version(),
     executionReads, accountReads, captures, errors,

@@ -1,7 +1,8 @@
 # Source review and leader-selected CI
 
 The operator's policy in `docs/constitution.xml` owns this workflow. Work proceeds
-in stacked PRs: the bottom targets main and later PRs target the preceding branch.
+in stacked PRs: each later PR targets the preceding branch. Native Stack metadata
+names the trunk and the included parents.
 Review function, logic and code cleanliness independently; approve the current
 head when no P0/P1/P2 issue remains and collect P3 findings for later. Ordinary
 verdicts use `verdict: PASS|FAIL head: <40-hex SHA> by: <reviewer>` without a run ID.

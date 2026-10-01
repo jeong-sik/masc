@@ -100,9 +100,26 @@ try:
     require(ns['request']('/probe')[0] == 200, 'normal GET was rejected')
     if args.mcp:
         require(ns['rpc']('tools/call', {}) == {'local': True}, 'normal RPC was rejected')
+    # Execute every real request-result assignment against the actual request
+    # helper. Only its path argument is changed to this loopback control route;
+    # tuple binding remains the harness's original AST.
+    consumer_lines = []
+    for node in ast.walk(source):
+        if (isinstance(node, ast.Assign) and isinstance(node.value, ast.Call)
+                and isinstance(node.value.func, ast.Name) and node.value.func.id == 'request'):
+            assignment = ast.Assign(targets=node.targets,
+                                    value=ast.Call(func=ast.Name(id='request', ctx=ast.Load()),
+                                                   args=[ast.Constant('/probe')], keywords=[]))
+            exec(compile(ast.fix_missing_locations(ast.Module(body=[assignment], type_ignores=[])),
+                         str(args.source), 'exec'), ns)
+            require(ns['status'] == 200, 'request consumer discarded status')
+            consumer_lines.append(node.lineno)
+    require(consumer_lines, 'acceptance source has no request consumers')
+
     print(json.dumps({'scope': 'actual extracted helpers, synthetic loopback TCP; no native run',
                       'source_sha256': hashlib.sha256(args.source.read_bytes()).hexdigest(),
-                      'controls': results, 'direct_requests_pass': True}, indent=2))
+                      'controls': results, 'direct_requests_pass': True,
+                      'request_consumer_lines': sorted(consumer_lines)}, indent=2))
 finally:
     for s in servers:
         s.shutdown()

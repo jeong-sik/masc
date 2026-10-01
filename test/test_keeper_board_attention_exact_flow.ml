@@ -1976,20 +1976,35 @@ let test_jev_adapter_sends_the_decisions_and_reads_not_relevant () =
           | _ -> None, None
         in
         Alcotest.(check bool)
-          "Jev receives exactly the current signal and projected keeper role"
+          "Jev's state carries only the current signal"
           true
-          (state =
-           Some
-             (match Candidate.singleton_judgment_request candidate with
-              | Ok request -> request
-              | Error detail ->
-                Alcotest.failf "candidate request projection failed: %s" detail));
+          (state = Some (`Assoc [ "signal", Candidate.signal_to_yojson candidate.signal ]));
+        let interests =
+          match Candidate.board_interests candidate with
+          | Ok interests -> interests
+          | Error detail -> Alcotest.failf "candidate interests failed: %s" detail
+        in
         (match relevance with
          | Some (`Assoc question) ->
            Alcotest.(check (option string))
              "the relevance question is a choice"
              (Some "choice")
              (json_string_field "type" (`Assoc question));
+           (match json_string_field "instructions" (`Assoc question) with
+            | Some instructions ->
+              Alcotest.(check bool)
+                "the question names the keeper"
+                true
+                (contains_substring ~needle:(Printf.sprintf "%S" candidate.keeper_name) instructions);
+              Alcotest.(check bool)
+                "the question carries the keeper's interests"
+                true
+                (contains_substring
+                   ~needle:
+                     (Yojson.Safe.to_string
+                        (`List (List.map (fun interest -> `String interest) interests)))
+                   instructions)
+            | None -> Alcotest.fail "the relevance question has no instructions");
            (match List.assoc_opt "criteria" question with
             | Some (`Assoc criteria) ->
               Alcotest.(check (list string))
@@ -1999,7 +2014,7 @@ let test_jev_adapter_sends_the_decisions_and_reads_not_relevant () =
               Alcotest.(check (option string))
                 "relevant requires the current signal, not capability overlap"
                 (Some
-                   "The current signal itself requires this keeper's concrete attention, review, or action for one of keeper_role.board_interests; general topic or capability overlap alone is insufficient.")
+                   "The current signal itself requires this keeper's concrete attention, review, or action for one of its board interests; general topic or capability overlap alone is insufficient.")
                 (match List.assoc_opt "relevant" criteria with
                  | Some (`String description) -> Some description
                  | Some _ | None -> None);

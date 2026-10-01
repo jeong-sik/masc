@@ -1350,21 +1350,21 @@ let planning_detail_lines (state : state) ~confirmation ~cols (goal : planning_g
        | `Inspect (Masc_tui_fetched.Ready value) -> Planning_detail.confirmation_lines ~width value
        | `Inspect Loading -> [{Planning_detail.tone = Waiting; text = "Reading the proof to confirm..."}]
        | `Inspect (Stale (_, reason) | Failed reason) -> [{Planning_detail.tone = Unreadable; text = reason}]
-       | `Inspect Absent ->
+       | `Inspect Masc_tui_fetched.Absent ->
            (match goal.pg_verifier_unreconciled with Some blocked -> Planning_detail.unreconciled_lines ~width blocked | None -> [])
            @ Planning_detail.body ~width goal.pg_proof goal.pg_last_review_note)
   in
   let measurement = planning_measurement_lines state goal in
   let proof =
     (match confirmation with
-     | `Inspect Absent -> measurement @ confirmation_rows
-     | `Submitting | `Inspect (Ready _ | Loading | Stale _ | Failed _) ->
+     | `Inspect Masc_tui_fetched.Absent -> measurement @ confirmation_rows
+     | `Submitting | `Inspect (Masc_tui_fetched.Ready _ | Loading | Stale _ | Failed _) ->
          confirmation_rows @ measurement)
     @ Planning_detail.timeline ~width ~goal_id:goal.pg_id state.goal_timeline in
   let wrapped_proof = planning_proof_rows ~width proof in
   (match confirmation with
-   | `Inspect Absent -> metadata @ linked @ wrapped_proof
-   | `Submitting | `Inspect (Ready _ | Loading | Stale _ | Failed _) ->
+   | `Inspect Masc_tui_fetched.Absent -> metadata @ linked @ wrapped_proof
+   | `Submitting | `Inspect (Masc_tui_fetched.Ready _ | Loading | Stale _ | Failed _) ->
        wrapped_proof @ metadata @ linked)
 
 let planning_detail_height ~rows ~action_rows ~count =
@@ -1418,12 +1418,12 @@ let planning_detail_pane (state : state) ~armed ~confirmation ~rows ~cols (goal 
     (Masc_tui_scroll.position_row ~scroll ~height count);
   box_bottom buf cols;
   let seen = match confirmation with
-    | `Inspect (Ready proof) ->
+    | `Inspect (Masc_tui_fetched.Ready proof) ->
         let width = max 1 (framed_inner_width cols - 2) in
         let last = List.length (planning_proof_rows ~width
           (Planning_detail.confirmation_lines ~width proof)) - 1 in
         if last >= scroll && last < scroll + height then Some proof else None
-    | `Submitting | `Inspect (Absent | Loading | Stale _ | Failed _) -> None in
+    | `Submitting | `Inspect (Masc_tui_fetched.Absent | Loading | Stale _ | Failed _) -> None in
   scroll, seen
 ;;
 

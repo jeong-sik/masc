@@ -378,6 +378,9 @@ export async function loadPostDetail(postId: string, focusedCommentId?: string |
       const offset = Math.max(0, page.offset - COMMENT_PAGE_SIZE)
       const older = await fetchBoardPost(postId, offset, page.offset - offset)
       if (detailPostId.value !== postId || detailRequestId !== requestId) return
+      if (older.commentPage.offset >= page.offset) {
+        throw new Error('Older comment page did not advance toward the start')
+      }
       comments = mergeCommentPages(older.comments, comments)
       page = older.commentPage
     }

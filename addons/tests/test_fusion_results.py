@@ -381,6 +381,18 @@ class FusionResults(unittest.TestCase):
                     self.assertNotIn("structuredContent", responses[0]["result"])
                     self.assertEqual(responses[1], {"jsonrpc": "2.0", "id": 2, "result": {}})
 
+    def test_deep_json_request_keeps_worker_available(self):
+        request = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {
+            "name": "lane_observe", "arguments": {"binding": {"copied": "__deep__"}, "sources": []}}}
+        wire = json.dumps(request).replace('"__deep__"', "[" * 1000 + "0" + "]" * 1000)
+        wire += "\n" + json.dumps({"jsonrpc": "2.0", "id": 2, "method": "ping"}) + "\n"
+        worker = subprocess.run([sys.executable, str(ADDONS / "fusion-results/server.py")],
+                                input=wire, capture_output=True, text=True)
+        self.assertEqual(worker.returncode, 0, worker.stderr)
+        responses = [json.loads(line) for line in worker.stdout.splitlines()]
+        self.assertEqual([response["id"] for response in responses], [1, 2])
+        self.assertEqual(responses[1], {"jsonrpc": "2.0", "id": 2, "result": {}})
+
     def test_surrogate_values_and_keys_are_refused_and_unicode_is_retained(self):
         requests = []
         for bad in ("\ud800", "\udfff"):
@@ -440,6 +452,23 @@ class FusionResults(unittest.TestCase):
             refused = subprocess.run(command, capture_output=True, text=True)
             self.assertNotEqual(refused.returncode, 0)
             self.assertEqual(output.read_bytes(), original)
+
+    def test_unencodable_export_does_not_claim_capture_path(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            detail_path, output = root / "detail.json", root / "capture.json"
+            command = [sys.executable, str(ADDONS / "fusion-results/export_snapshot.py"),
+                       str(detail_path), str(output), "--source-id", "fusion"]
+            malformed = detail()
+            malformed["evidence"]["post"]["body"] = "invalid\ud800"
+            detail_path.write_text(json.dumps(malformed))
+            refused = subprocess.run(command, capture_output=True, text=True)
+            self.assertNotEqual(refused.returncode, 0)
+            self.assertFalse(output.exists(), "failed serialization must not claim the capture path")
+            detail_path.write_text(json.dumps(detail()))
+            accepted = subprocess.run(command, capture_output=True, text=True)
+            self.assertEqual(accepted.returncode, 0, accepted.stderr)
+            self.assertEqual(json.loads(output.read_bytes())["incarnation"], RUN)
 
     def test_unencodable_capture_strings_do_not_terminate_worker(self):
         for malformed in ("body\ud800", "body\udfff"):

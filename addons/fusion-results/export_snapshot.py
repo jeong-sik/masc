@@ -34,7 +34,8 @@ if __name__ == "__main__":
     parser.add_argument("--source-id", required=True)
     args = parser.parse_args()
     value = snapshot(json.loads(args.detail.read_text()), args.source_id)
+    encoded = (json.dumps(value, ensure_ascii=False, allow_nan=False, indent=2) + "\n").encode("utf-8")
     # Refuse replacing an existing capture; publish by explicitly choosing a new path.
     descriptor = os.open(args.output, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    with os.fdopen(descriptor, "w", encoding="utf-8") as output:
-        output.write(json.dumps(value, ensure_ascii=False, allow_nan=False, indent=2) + "\n")
+    with os.fdopen(descriptor, "wb") as output:
+        output.write(encoded)

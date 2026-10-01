@@ -71,13 +71,15 @@ class ApprovedSelectionFixture(unittest.TestCase):
         self.data['repos/o/r/'+path] = value
 
     def api(self,gh,path):
-        return self.data[path]
+        return json.loads(json.dumps(self.data[path]))
 
     def approvals(self):
         for pr,head in self.heads.items():
             row = {'id':pr*10,'state':'APPROVED','user':{'login':'reviewer'},
                 'author_association':'MEMBER','submitted_at':'2026-09-30T00:00:00Z',
-                'body':f'verdict: PASS head: {head} by: reviewer\n\napprove-guard: head `{head}` · source review'}
+                'body': (f'verdict: PASS head: {head} by: reviewer\n\n'
+                         + 'review-scope: ' + json.dumps({'base_ref':'main','base_sha':self.base,'stack':None})
+                         + f'\napprove-guard: head `{head}` · source review')}
             self.put(f'pulls/{pr}/reviews?per_page=100',[row])
             self.put(f'pulls/{pr}/reviews',[row])
             self.put(f'pulls/{pr}/reviews/{row["id"]}',row)

@@ -316,11 +316,11 @@ let test_accepted_transport_failure_fences_replay_but_routes_timeout () =
     Map.observe_failed_dispatch
       ~observe_transport_uncertain:(fun () -> Map.note_transport_uncertainty observation)
       before_dispatch;
-    Alcotest.(check bool) "admission failure still permits fallback" true
+    Alcotest.(check bool) "pre-dispatch failure still permits fallback" true
       (Effect.allows_same_turn_retry (Atomic.get observation)))
     [ Codex.Timeout {seconds = 300.; turn_accepted = false}
     ; Codex.Reasoning_effort_admission_failed
-        {model = "fixture"; detail = "no advertised tier"}
+        {model = "fixture"; detail = "model/list timed out"}
     ];
   let after_dispatch = Codex.Timeout {seconds = 300.; turn_accepted = true} in
   match Keeper_runtime_failure_route.route_of_error

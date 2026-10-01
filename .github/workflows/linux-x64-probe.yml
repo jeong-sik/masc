@@ -12,72 +12,11 @@ on:
           - linux-x64
           - macos-arm64
           - stagehand-model-macos-arm64
-          - lane-fusion-container
 
 permissions:
   contents: read
 
 jobs:
-  validate-lane-release-ref:
-    if: inputs.target == 'lane-fusion-container'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 2
-    steps:
-      - name: Require a release branch or tag
-        run: |
-          case "$GITHUB_REF" in
-            refs/heads/release/v*|refs/tags/v*) ;;
-            *) echo "Native Fusion qualification belongs to a Release/Tag candidate" >&2; exit 1 ;;
-          esac
-
-  lane-fusion-container:
-    needs: validate-lane-release-ref
-    if: inputs.target == 'lane-fusion-container'
-    name: Qualify isolated Fusion containers and host sampling
-    runs-on: ubuntu-24.04
-    timeout-minutes: 90
-    steps:
-      - uses: actions/checkout@v7
-      - uses: ./.github/actions/setup-ocaml-toolchain
-      - uses: ./.github/actions/pin-ocaml-deps
-        with:
-          pin-flags: --with-bisect
-      - uses: ./.github/actions/install-ocaml-deps
-        with:
-          install-flags: --with-test
-      - name: Build native qualification executable
-        run: opam exec -- dune build --profile release bin/lane_fusion_container_probe.exe
-      - name: Build declared worker images on the CI daemon
-        env:
-          PROBE_OUT: ${{ runner.temp }}/lane-fusion-container
-        run: |
-          set -euo pipefail
-          mkdir -p "$PROBE_OUT"
-          docker info --format '{{json .ID}}' > "$PROBE_OUT/daemon.json"
-          docker build -f addons/fusion-compute/Dockerfile -t masc-lane-fusion-compute:0.1.0 addons
-          docker build -f addons/fusion-report/Dockerfile -t masc-lane-fusion-report:0.2.0 addons
-          docker image inspect masc-lane-fusion-compute:0.1.0 masc-lane-fusion-report:0.2.0 > "$PROBE_OUT/images.json"
-      - name: Exercise real runtime, concurrent panels, judge and report
-        env:
-          PROBE_OUT: ${{ runner.temp }}/lane-fusion-container
-          SOURCE_SHA: ${{ github.sha }}
-        run: |
-          set -euo pipefail
-          cp _build/default/bin/lane_fusion_container_probe.exe "$PROBE_OUT/"
-          sha256sum "$PROBE_OUT/lane_fusion_container_probe.exe" > "$PROBE_OUT/binary.sha256"
-          opam exec -- _build/default/bin/lane_fusion_container_probe.exe \
-            --repo-root "$GITHUB_WORKSPACE" \
-            --output-dir "$PROBE_OUT/evidence" \
-            --head-sha "$SOURCE_SHA"
-      - name: Preserve qualification artifacts, including failures
-        if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v7
-        with:
-          name: lane-fusion-container-${{ github.sha }}-attempt-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/lane-fusion-container/
-          if-no-files-found: warn
-          retention-days: 7
-
   linux-x64-probe:
     if: inputs.target == 'linux-x64'
     name: Build Linux x64 probe

@@ -130,7 +130,7 @@ let payment_of_event (row : E.t) =
   match row.body with
   | E.Paid payment -> payment
   | E.Snapshot _ | E.Payout_owed _ | E.Candidates _ | E.Unattributed _
-  | E.Payout_failed _ | E.Purchased _ ->
+  | E.Payout_failed _ | E.Purchased _ | E.Equipped _ ->
     Alcotest.fail "expected a Paid receipt"
 ;;
 

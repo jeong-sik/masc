@@ -71,6 +71,12 @@ val terminal_effect_boundary_decision
     envelope. *)
 
 module For_testing : sig
+  val finalize_turn_surface :
+    response_text:string ->
+    stop_reason:Runtime_agent.stop_reason ->
+    Keeper_tools_agent_core.terminal_effect_state ->
+    (Keeper_turn_outcome.t * Keeper_tool_execution.terminal_effect_receipt option,
+     Agent_core.Error.t) result
   val native_tool_boundary :
     keeper_name:string ->
     repetition_execution:Keeper_repetition_scope.Execution.t option ->

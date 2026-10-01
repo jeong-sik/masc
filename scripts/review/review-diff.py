@@ -30,6 +30,26 @@ def _supports_no_lazy_fetch() -> bool:
     return _NO_LAZY_FETCH
 
 
+def _has_promisor_remotes(root: Path) -> bool:
+    try:
+        res = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(root),
+                "config",
+                "--get-regexp",
+                r"^(extensions\.partialclone|remote\..*\.promisor)$",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        return res.returncode == 0
+    except Exception:
+        return False
+
+
 def diff_identity(repo: str, base: str, head: str, root: Path) -> str:
     for value in (base, head):
         if re.fullmatch(r"[0-9a-f]{40}", value) is None:
@@ -55,13 +75,24 @@ def diff_identity(repo: str, base: str, head: str, root: Path) -> str:
         git_flags.append("--no-lazy-fetch")
     git = ["git", *git_flags, "-C", str(root)]
     commits = (merge_base, head)
-    # Commit presence alone is insufficient in tree-filtered partial clones.
-    # Traverse every required tree without hydrating the caller's promisor
-    # objects; blobs are not needed for the raw identity below.
-    missing = any(subprocess.run(
-        [*git, "ls-tree", "-r", "-t", f"{commit}^{{commit}}"],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
-    ).returncode for commit in commits)
+    has_promisor = _has_promisor_remotes(root)
+    # When --no-lazy-fetch is unsupported and the caller repository has promisor
+    # remotes (partial clone), probing caller trees would trigger implicit
+    # promisor hydration. Choose the isolated store directly without probing
+    # the caller repository.
+    if has_promisor and not _supports_no_lazy_fetch():
+        missing = True
+    else:
+        missing = any(
+            subprocess.run(
+                [*git, "ls-tree", "-r", "-t", f"{commit}^{{commit}}"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+                env={**os.environ, "GIT_NO_LAZY_FETCH": "1"},
+            ).returncode
+            for commit in commits
+        )
     # Fetch into an isolated object store: --depth must not change the caller's
     # shallow boundary, and raw tree identities never require blob contents.
     with tempfile.TemporaryDirectory(prefix="masc-review-objects-") as directory:

@@ -353,13 +353,13 @@ class SourceReviewPolicy(unittest.TestCase):
         subprocess.run(['git', 'clone', '--quiet', *clone_args, '--no-local', str(original), str(empty)], check=True)
         shallow = empty / '.git/shallow'
         before_shallow = shallow.read_bytes() if shallow.exists() else None
-        subprocess.run(['git', '-C', str(empty), 'remote', 'set-url', 'origin', str(self.root/'unavailable')], check=True)
         before_config = (empty / '.git/config').read_bytes()
         lazy_flag = ['--no-lazy-fetch'] if GIT_SUPPORTS_NO_LAZY_FETCH else []
+        no_lazy_env = {} if GIT_SUPPORTS_NO_LAZY_FETCH else {'GIT_NO_LAZY_FETCH': '1'}
         if kind != 'shallow':
             for commit in (self.base, HEAD):
-                subprocess.run(['git', *lazy_flag, '-C', str(empty), 'cat-file', '-e', commit], check=True)
-            missing_tree = subprocess.run(['git', *lazy_flag, '-C', str(empty), 'ls-tree', '-r', HEAD], capture_output=True)
+                subprocess.run(['git', *lazy_flag, '-C', str(empty), 'cat-file', '-e', commit], check=True, env={**os.environ, **no_lazy_env})
+            missing_tree = subprocess.run(['git', *lazy_flag, '-C', str(empty), 'ls-tree', '-r', HEAD], capture_output=True, env={**os.environ, **no_lazy_env})
             self.assertNotEqual(missing_tree.returncode, 0, 'fixture must contain commits but lack required trees')
         helper_dir = self.root / ("credential helper's directory " + kind.replace(':', '-'))
         helper_dir.mkdir()
@@ -390,7 +390,16 @@ class SourceReviewPolicy(unittest.TestCase):
         self.env.update(GUARD_GH=str(helper), GUARD_REPO_ROOT=str(empty),
                         FAKE_COMPARE_REPO=str(original),
                         PATH=str(wrapper_dir) + os.pathsep + os.environ['PATH'])
+        before_objects = subprocess.check_output(
+            [real_git, '-C', str(empty), 'cat-file', '--batch-all-objects', '--batch-check=%(objectname) %(objecttype)'],
+            text=True,
+        ).splitlines()
         self.assertEqual(self.identity(self.base), self.digest)
+        after_objects = subprocess.check_output(
+            [real_git, '-C', str(empty), 'cat-file', '--batch-all-objects', '--batch-check=%(objectname) %(objecttype)'],
+            text=True,
+        ).splitlines()
+        self.assertEqual(before_objects, after_objects, 'caller repository must not receive any new objects')
         fetched = [json.loads(line) for line in commands.read_text().splitlines()]
         self.assertEqual(len(fetched), 2)
         object_snapshots = [json.loads(line) for line in Path(str(commands)+'.objects').read_text().splitlines()]
@@ -414,7 +423,7 @@ class SourceReviewPolicy(unittest.TestCase):
         self.assertEqual(shallow.read_bytes() if shallow.exists() else None, before_shallow)
         self.assertEqual((empty / '.git/config').read_bytes(), before_config)
         missing_args = ['cat-file', '-e', self.base] if kind == 'shallow' else ['ls-tree', '-r', HEAD]
-        still_missing = subprocess.run([real_git, *lazy_flag, '-C', str(empty), *missing_args], capture_output=True)
+        still_missing = subprocess.run([real_git, *lazy_flag, '-C', str(empty), *missing_args], capture_output=True, env={**os.environ, **no_lazy_env})
         self.assertNotEqual(still_missing.returncode, 0, 'isolated fetch must not hydrate or deepen caller history')
         persisted = subprocess.run([real_git, '-C', str(empty), 'config', '--local',
                                     '--get-all', 'credential.helper'], capture_output=True)

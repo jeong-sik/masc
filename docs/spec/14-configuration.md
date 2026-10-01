@@ -52,6 +52,58 @@ Runtime declarations describe capabilities reported by agent core, including tex
 tool use, reasoning/thinking, multi-turn, image/audio/voice, streaming, and
 structured output. MASC must not guess these features from model-name strings.
 
+### Context window precedence
+
+`max-context` is an optional positive integer on a binding (`[provider.model]`),
+a provider (`[providers.provider]`) or a model (`[models.model]`). The binding
+wins, then the provider, then the model default; without a declaration, a known
+provider/model capability supplies the window. A genuine catalog hard limit
+still clamps an oversized declaration. Model defaults synthesized into custom
+capabilities do not limit a more specific declaration.
+
+The same model can therefore serve different windows without duplicating its
+model definition:
+
+```toml
+[models.sol]
+api-name = "gpt-6.1-sol"
+max-context = 272000
+
+[providers.codex_standard]
+protocol = "codex-app-server"
+command = "codex"
+account-home = "/absolute/path/to/codex-account"
+
+[providers.codex_extended]
+protocol = "codex-app-server"
+command = "codex"
+account-home = "/absolute/path/to/codex-account"
+max-context = 400000
+
+[providers.codex_large]
+protocol = "codex-app-server"
+command = "codex"
+account-home = "/absolute/path/to/codex-account"
+max-context = 400000
+
+[codex_standard.sol]
+# Inherits the model default: 272000.
+
+[codex_extended.sol]
+# Inherits the provider default: 400000.
+
+[codex_large.sol]
+# Overrides the provider default: 1000000.
+max-context = 1000000
+```
+
+These values declare deployment intent; they do not prove an account supports
+that window. The resolved MASC window is passed to Codex on start and resume,
+independently of the selected account home's config. Runtime context metadata
+reports whether the binding, provider, model or capability supplied the value,
+including capability clamping. Config edits preserve these declarations in the
+runtime TOML; account login does not change their precedence.
+
 ### Official-client accounts and Muse Code
 
 Claude Code, Codex, Antigravity and Muse Code own their model/tool loops. MASC

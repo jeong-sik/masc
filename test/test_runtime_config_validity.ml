@@ -4167,6 +4167,7 @@ let test_of_binding_reports_an_undeclared_provider () =
     ; enabled = true
     ; is_default = false
     ; wizard_default = false
+    ; max_context = None
     ; max_concurrent = None
     ; disable_parallel_tool_use = false
     ; context_marks = None
@@ -6032,10 +6033,139 @@ let test_every_shipped_binding_is_admissible () =
          (String.concat "\n" refused))
 ;;
 
+let scoped_context_config ?(provider_context = "") ?(binding_context = "")
+    ?(model_context = "max-context = 272000") ?(http = false) () =
+  Printf.sprintf
+    {|[providers.scoped]
+%s
+%s
+[models.shared]
+api-name = "scoped-context-fixture"
+%s
+[models.shared.capabilities]
+supports-tool-choice = true
+[scoped.shared]
+%s
+[runtime]
+default = "scoped.shared"
+|}
+    (if http then "protocol = \"openai-compatible-http\"\nkind = \"openai_compat\"\nendpoint = \"http://127.0.0.1:1/v1\"\ncredentials = { type = \"inline\", value = \"fixture\" }"
+     else "protocol = \"codex-app-server\"\ncommand = \"codex\"\naccount-home = \"/tmp/context-fixture-account\"")
+    provider_context model_context binding_context
+;;
+
+let scoped_context_runtime text =
+  let config = match Runtime_toml.parse_string text with
+    | Ok config -> config
+    | Error errors -> failf "scoped context parse: %s" (render_parse_errors errors) in
+  match Runtime_instance.of_binding config (List.hd config.bindings) with
+  | Ok runtime -> runtime
+  | Error _ -> fail "scoped context binding must materialize"
+;;
+
+let test_context_declaration_precedence_and_http_agreement () =
+  List.iter (fun http ->
+    List.iter (fun (provider_context, binding_context, expected, provenance) ->
+      let runtime = scoped_context_runtime
+        (scoped_context_config ~http ~provider_context ~binding_context ()) in
+      check (option (pair int string)) "resolved scoped declaration"
+        (Some (expected, provenance))
+        (Runtime_instance.resolve_max_context_of_runtime runtime
+         |> Option.map (fun (tokens, source) -> tokens, Runtime_instance.max_context_source_to_string source));
+      match runtime.execution with
+      | Runtime_execution.Agent_core config ->
+        check (option int) "HTTP admission uses the same window" (Some expected) config.max_context;
+        check (option int) "custom capability uses selected window, not model default" (Some expected)
+          (Option.bind (Llm_provider.Provider_config.capabilities_for_config_model config)
+             (fun caps -> caps.Llm_provider.Capabilities.max_context_tokens))
+      | Runtime_execution.Codex_app_server _ -> ()
+      | _ -> fail "unexpected fixture execution owner")
+      ["", "", 272000, "override";
+       "max-context = 400000", "", 400000, "provider_override";
+       "max-context = 400000", "max-context = 1000000", 1000000, "binding_override";
+       "max-context = 400000", "max-context = 128000", 128000, "binding_override"])
+    [false; true]
+;;
+
+let test_same_model_context_windows_coexist () =
+  let provider id extra = Printf.sprintf
+    "[providers.%s]\nprotocol = \"codex-app-server\"\ncommand = \"codex\"\naccount-home = \"/tmp/shared-context-account\"\n%s\n" id extra in
+  let text = String.concat "\n"
+    [provider "standard" ""; provider "medium" "max-context = 400000";
+     provider "large" "max-context = 400000";
+     "[models.shared]\napi-name = \"gpt-6.1-sol\"\nmax-context = 272000";
+     "[standard.shared]\n[medium.shared]\n[large.shared]\nmax-context = 1000000";
+     "[runtime]\ndefault = \"standard.shared\""] in
+  let cfg = match Runtime_toml.parse_string text with
+    | Ok cfg -> cfg | Error errs -> failf "coexisting config: %s" (render_parse_errors errs) in
+  check int "one model definition" 1 (List.length cfg.models);
+  List.iter (fun (provider_id, expected) ->
+    let binding = List.find (fun (binding : Runtime_schema.binding) -> binding.provider_id = provider_id) cfg.bindings in
+    let runtime = match Runtime_instance.of_binding cfg binding with
+      | Ok runtime -> runtime | Error _ -> fail "coexisting binding must materialize" in
+    check string "shared provider API model" "gpt-6.1-sol" runtime.model.api_name;
+    check int "independent served window" expected (Runtime_instance.max_context_of_runtime runtime))
+    ["standard", 272000; "medium", 400000; "large", 1000000]
+;;
+
+let test_context_declarations_reject_nonpositive_and_wrong_type () =
+  List.iter (fun value ->
+    List.iter (fun provider ->
+      let field = "max-context = " ^ value in
+      let text = if provider then scoped_context_config ~provider_context:field ()
+        else scoped_context_config ~binding_context:field () in
+      match Runtime_toml.parse_string text with
+      | Error _ -> ()
+      | Ok _ -> fail "invalid scoped max-context was accepted") [false; true])
+    ["0"; "-1"; "\"400000\""; "400000.0"; "true"]
+;;
+
+let test_context_scopes_preserve_genuine_catalog_cap () =
+  with_model_catalog_content
+    "[[models]]\nid_prefix = \"scoped-context-fixture\"\nprovider_name = \"scoped\"\nbase = \"openai_chat\"\nmax_context_tokens = 500000\n"
+    (fun () ->
+      List.iter (fun (provider_context, binding_context, provenance) ->
+        let runtime = scoped_context_runtime
+          (scoped_context_config ~http:true ~provider_context ~binding_context ()) in
+        check (option (pair int string)) "real catalog limit still clamps"
+          (Some (500000, provenance))
+          (Runtime_instance.resolve_max_context_of_runtime runtime
+           |> Option.map (fun (tokens, source) -> tokens, Runtime_instance.max_context_source_to_string source));
+        check (option int) "HTTP adapter applies the real cap" (Some 500000)
+          (agent_core_provider_config runtime).max_context)
+        ["max-context = 1000000", "", "provider_override_clamped_by_capability";
+         "max-context = 400000", "max-context = 1000000", "binding_override_clamped_by_capability"])
+;;
+
+let test_context_scope_survives_config_edit () =
+  let text = scoped_context_config ~provider_context:"max-context = 400000"
+      ~binding_context:"max-context = 1000000" () in
+  let snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect ~finally:(fun () -> Runtime.For_testing.restore snapshot) (fun () ->
+    with_temp_runtime_toml text (fun path ->
+      (match Runtime.edit_config_text ~runtime_config_path:path (fun current ->
+         current ^ "\n[tui]\ntheme = \"gruvbox-dark\"\n") with
+       | Ok _ -> () | Error detail -> failf "scoped config edit: %s" detail);
+      let runtime = scoped_context_runtime (Fs_compat.load_file path) in
+      check (option int) "provider declaration survives saving" (Some 400000) runtime.provider.max_context;
+      check (option int) "binding declaration survives saving" (Some 1000000) runtime.binding.max_context;
+      check int "saved resolution remains scoped" 1000000 (Runtime_instance.max_context_of_runtime runtime)))
+;;
+
 let () =
   run "runtime_config_validity"
     [ ( "runtime TOML gate",
-        [ test_case "runtime.json is not a repo config source" `Quick
+        [ test_case "same model serves three context windows concurrently" `Quick
+            test_same_model_context_windows_coexist;
+          test_case "context declarations resolve by deployment scope" `Quick
+            test_context_declaration_precedence_and_http_agreement;
+          test_case "scoped context declarations reject invalid values" `Quick
+            test_context_declarations_reject_nonpositive_and_wrong_type;
+          test_case "scoped declarations retain real catalog context caps" `Quick
+            test_context_scopes_preserve_genuine_catalog_cap;
+          test_case "scoped context declarations survive config edits" `Quick
+            test_context_scope_survives_config_edit;
+          test_case "runtime.json is not a repo config source" `Quick
             test_runtime_json_not_in_repo_config;
           test_case "every shipped binding is admissible" `Quick
             test_every_shipped_binding_is_admissible;

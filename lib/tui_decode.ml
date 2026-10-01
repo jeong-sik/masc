@@ -2012,6 +2012,10 @@ type runtime_context_source =
   | Runtime_context_override
   | Runtime_context_capability
   | Runtime_context_clamped
+  | Runtime_context_provider_override
+  | Runtime_context_binding_override
+  | Runtime_context_provider_clamped
+  | Runtime_context_binding_clamped
 
 type exact_slot_group = Exact_http_slots | Exact_cli_slots | Exact_output_unsupported
 
@@ -4063,6 +4067,10 @@ let runtime_context_source_label = function
   | Runtime_context_override -> "override"
   | Runtime_context_capability -> "capability"
   | Runtime_context_clamped -> "override_clamped_by_capability"
+  | Runtime_context_provider_override -> "provider_override"
+  | Runtime_context_binding_override -> "binding_override"
+  | Runtime_context_provider_clamped -> "provider_override_clamped_by_capability"
+  | Runtime_context_binding_clamped -> "binding_override_clamped_by_capability"
 
 let runtime_reasoning_effort_label = Llm_provider.Reasoning_effort.to_string
 
@@ -4070,6 +4078,10 @@ let decode_runtime_context_source = function
   | "override" -> Ok Runtime_context_override
   | "capability" -> Ok Runtime_context_capability
   | "override_clamped_by_capability" -> Ok Runtime_context_clamped
+  | "provider_override" -> Ok Runtime_context_provider_override
+  | "binding_override" -> Ok Runtime_context_binding_override
+  | "provider_override_clamped_by_capability" -> Ok Runtime_context_provider_clamped
+  | "binding_override_clamped_by_capability" -> Ok Runtime_context_binding_clamped
   | value -> Error (Printf.sprintf "unknown runtime max_context_source %S" value)
 
 let runtime_probe_for_id snapshot ~runtime_id =

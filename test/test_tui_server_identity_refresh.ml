@@ -63,6 +63,20 @@ let test_workspace_identity_mismatch_keeps_both_paths () =
     Alcotest.(check string) "server path" "/workspace/server" server_base_path
   | _ -> Alcotest.fail "different workspaces were not blocked"
 
+let test_same_base_with_different_masc_root_cannot_restore_inputs () =
+  let a = identity "/workspace/shared" in
+  let b = { a with sid_masc_root = "/workspace/other-cluster/.masc" } in
+  (match Masc_tui_types.workspace_identity_of_refresh
+      ~local_base_path:"/workspace/shared" (Ok b) with
+   | Masc_tui_types.Workspace_identity_mismatch _ -> ()
+   | _ -> Alcotest.fail "a different MASC root authorized local metadata");
+  let key identity = Masc_tui_types.workspace_input_identity_of_server (Some identity) in
+  let retained = [key a, "A's queued input and draft"] in
+  Alcotest.(check (option string)) "B cannot restore A's retained input" None
+    (List.assoc_opt (key b) retained);
+  Alcotest.(check (option string)) "returning to A retains explicit resume"
+    (Some "A's queued input and draft") (List.assoc_opt (key a) retained)
+
 (* The keeper, task and log lists start empty and are read only once the server
    vouches for this workspace, so before that an empty list is not an empty
    workspace (#35747). *)
@@ -106,7 +120,9 @@ let test_request_authority_requires_complete_current_identity () =
 let () =
   Alcotest.run "tui_server_identity_refresh"
     [ ( "server-identity-refresh"
-      , [ Alcotest.test_case "request authority requires complete current identity" `Quick
+      , [ Alcotest.test_case "same base and different MASC root retain separate inputs" `Quick
+            test_same_base_with_different_masc_root_cannot_restore_inputs
+        ; Alcotest.test_case "request authority requires complete current identity" `Quick
             test_request_authority_requires_complete_current_identity
         ; Alcotest.test_case "same endpoint replaces A with B" `Quick
             test_same_endpoint_restart_replaces_a_with_b

@@ -114,6 +114,11 @@ type workspace_identity =
       ; server_base_path : string
       }
 
+type workspace_input_identity =
+  { wi_base_path : string
+  ; wi_masc_root : string
+  }
+
 (* Whether the rows kept from this workspace's own directory -- agents, tasks,
    keepers, their logs -- were read from it. They are read only once the server
    says it serves this workspace, and cleared again when it serves another, and
@@ -137,11 +142,27 @@ let workspace_identity_of_refresh ~local_base_path reading =
   | Ok identity ->
     let local_base_path = canonical_path local_base_path in
     let server_base_path = canonical_path identity.Tui_decode.sid_base_path in
+    let local_masc_root = canonical_path
+      (Filename.concat local_base_path Masc.Common.masc_dirname) in
+    let server_masc_root = canonical_path identity.sid_masc_root in
     if String.equal local_base_path "" || String.equal server_base_path ""
+       || String.equal server_masc_root "" || server_is_booting reading
     then Workspace_identity_unread
     else if String.equal local_base_path server_base_path
+         && String.equal local_masc_root server_masc_root
     then Workspace_identity_match
     else Workspace_identity_mismatch { local_base_path; server_base_path }
+;;
+
+(* Retained input belongs to the complete observed server workspace. Local
+   match/mismatch is a permission classification, not a durable input key. *)
+let workspace_input_identity_of_server = function
+  | Some identity when identity.Tui_decode.sid_state_ready <> Some false ->
+      let wi_base_path = canonical_path identity.sid_base_path in
+      let wi_masc_root = canonical_path identity.sid_masc_root in
+      if wi_base_path = "" || wi_masc_root = "" then None
+      else Some { wi_base_path; wi_masc_root }
+  | Some _ | None -> None
 ;;
 
 type event = {
@@ -5501,7 +5522,7 @@ type state = {
   local_base_path: string;
   mutable workspace_identity: workspace_identity;
   mutable workspace_authority: workspace_authority;
-  mutable suspended_keeper_inputs: (workspace_identity * Masc_tui_keeper_chat_queue.t) list;
+  mutable suspended_keeper_inputs: (workspace_input_identity option * Masc_tui_keeper_chat_queue.t) list;
   mutable workspace_cancellations: (unit ref * (unit -> unit)) list;
   mutable help_scroll: int;
   (* An image the operator asked to see, drawn over the whole terminal rather
@@ -6542,7 +6563,7 @@ type state = {
   mutable msg_attachments_since: msg_anchor option;
   mutable msg_target_keeper_name: string option;
   mutable msg_return: keeper_chat_return;
-  mutable msg_drafts: ((workspace_identity * string) * keeper_composer_draft) list;
+  mutable msg_drafts: ((workspace_input_identity option * string) * keeper_composer_draft) list;
   mutable msg_history: msg_entry list;
   (* How far back the arrows have walked through what this pane sent, and the
      draft they set aside to do it. [None] means the composer holds the

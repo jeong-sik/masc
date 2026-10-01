@@ -55,11 +55,12 @@ def history_row(marker: bytes, stamp: float) -> h.HttpResponse:
 
 
 class WorkspaceWire:
-    def __init__(self, roster):
+    def __init__(self, roster, *, root_only=False):
         self.lock = threading.Lock()
         self.local_base: str | None = None
         self.remote_base: str | None = None
         self.phase = "a"
+        self.root_only = root_only
         self.roster_template = roster
         self.hold_next = False
         self.held_started = threading.Event()
@@ -89,10 +90,13 @@ class WorkspaceWire:
             phase = self.phase
             base = self.remote_base if phase.startswith("b") else self.local_base
             assert base is not None
+            root = str(Path(base, ".masc"))
+            if self.root_only:
+                base = self.local_base
             self.events.append({"event": "health", "phase": phase, "base_path": base})
         _, payload = h.fleet_safety_fixture()
         payload["paths"] = {"effective_base_path": base,
-                            "effective_masc_root": str(Path(base, ".masc"))}
+                            "effective_masc_root": root}
         # A tuple health response is rewritten to the harness workspace.
         # Raw bytes preserve the authority this scenario deliberately chose.
         return h.RawHttpResponse(200, json.dumps(payload).encode(),
@@ -376,9 +380,9 @@ def scoped_roster_authority(binary: str) -> None:
         refresh=30.0, terminal_cols=80)
 
 
-def queued_workspace_inputs(binary: str) -> None:
+def queued_workspace_inputs(binary: str, *, root_only=False) -> None:
     fixtures = h.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
-    wire = WorkspaceWire(fixtures[ROSTER_PATH][1])
+    wire = WorkspaceWire(fixtures[ROSTER_PATH][1], root_only=root_only)
     queued = b"retained-workspace-a-queued-payload"
     class HeldAdmission(h.AtomicChatFixture):
         def __init__(self):
@@ -447,15 +451,16 @@ def queued_workspace_inputs(binary: str) -> None:
             admission.release.set()
             admission.release_interrupt.set()
     h.run_terminal_scenario(binary,
-        description="workspace change suspends complete unsent inputs until explicit resume in A",
+        description=("MASC-root-only change" if root_only else "workspace change")
+            + " suspends complete unsent inputs until explicit resume in A",
         interact=interact, prepare_workspace=wire.prepare, http_fixtures=fixtures,
         refresh=0.5, terminal_cols=TERMINAL_COLUMNS)
 
 
-def staged_payload_workspace_inputs(binary: str) -> None:
+def staged_payload_workspace_inputs(binary: str, *, root_only=False) -> None:
     """Actual /attach + /ref payloads survive A/B/A only for their original Keeper."""
     fixtures = h.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
-    wire = WorkspaceWire(fixtures[ROSTER_PATH][1])
+    wire = WorkspaceWire(fixtures[ROSTER_PATH][1], root_only=root_only)
     admission = h.AtomicChatFixture(no_control_token=True)
     fixtures.update(admission.fixtures)
     beta_submitted = []
@@ -532,7 +537,8 @@ def staged_payload_workspace_inputs(binary: str) -> None:
             admission.release.set()
             admission.release_interrupt.set()
     h.run_terminal_scenario(binary,
-        description="staged image bytes and references retain exact workspace and Keeper ownership",
+        description=("MASC-root-only transition: " if root_only else "")
+            + "staged image bytes and references retain exact workspace and Keeper ownership",
         interact=interact, prepare_workspace=prepare, http_fixtures=fixtures,
         refresh=0.5, terminal_cols=300)
 
@@ -1245,13 +1251,18 @@ def task_dispatch_workspace_withdrawal(binary: str) -> None:
     initialize_returned = threading.Event()
     created = []
     requests = []
+    foreground_armed = threading.Event()
+    observer_requested, observer_release = hold_observer_before_headers(fixtures)
 
     def mcp(body):
         request = json.loads(body)
         with wire.lock:
             phase = wire.phase
+            held = phase == "a" and foreground_armed.is_set()
+            if request["method"] == "initialize" and held:
+                foreground_armed.clear()
         if request["method"] == "initialize":
-            if phase == "a":
+            if held:
                 initialized.set()
                 assert release_initialize.wait(timeout=30), "A initialization not released"
                 initialize_returned.set()
@@ -1277,6 +1288,9 @@ def task_dispatch_workspace_withdrawal(binary: str) -> None:
             assert h.wait_for_fixture_state(process, fd, output,
                 lambda: predicate(screen(output)), timeout=WAIT_SECONDS), label
         try:
+            assert h.wait_for_fixture_event(process, fd, output, observer_requested,
+                timeout=WAIT_SECONDS), "startup observer did not finish initialization"
+            assert not initialized.is_set(), "startup initialization satisfied the task barrier"
             h.resize_and_wait(process, fd, output, rows=45, columns=300,
                 needle=b"MASC Dashboard", controls=(h.FULL_REDRAW,))
             h.tab_until(process, fd, output, b"MASC Keepers")
@@ -1284,7 +1298,9 @@ def task_dispatch_workspace_withdrawal(binary: str) -> None:
             h.send_and_wait(process, fd, output, b"m", "Keepers ▸ alpha ▸ chat".encode())
             h.send_and_wait(process, fd, output, b"/task workspace-a-pending-task",
                 h.composer_showing(b"/task workspace-a-pending-task"))
-            os.write(fd, b"\r")
+            foreground_armed.set()
+            h.send_and_wait(process, fd, output, b"\r",
+                b"creating a task for alpha: workspace-a-pending-task")
             assert h.wait_for_fixture_event(process, fd, output, initialized,
                 timeout=WAIT_SECONDS), "A task initialization not held"
             wire.publish("b")
@@ -1313,10 +1329,158 @@ def task_dispatch_workspace_withdrawal(binary: str) -> None:
             os.write(fd, b"q")
         finally:
             release_initialize.set()
+            observer_release.set()
     h.run_terminal_scenario(binary,
         description="workspace withdrawal cancels pending task creation and permits a fresh task after return",
         interact=interact, prepare_workspace=wire.prepare, http_fixtures=fixtures,
         http_requests=requests, refresh=0.5, terminal_cols=300)
+
+
+def hold_observer_before_headers(fixtures):
+    """Observe completed startup initialization without caching its session.
+
+    The observer GET proves its initialize returned. Withhold response headers
+    so Observer_opened cannot run and Observer_opening cannot retry, leaving
+    the foreground operation as the only possible next A initialization.
+    """
+    requested, release = threading.Event(), threading.Event()
+
+    def observer(_headers):
+        requested.set()
+        assert release.wait(timeout=30), "baseline observer was not released"
+        return h.RawHttpResponse(503, b'{"error":"baseline observer stopped"}',
+            content_type="application/json")
+
+    fixtures["/mcp?sse_kind=observer"] = h.HeadersHttpResponse(observer)
+    return requested, release
+
+
+def resource_workspace_withdrawal(binary: str) -> None:
+    for held_method in ("initialize", "resources/read"):
+        fixtures = h.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
+        wire = WorkspaceWire(fixtures[ROSTER_PATH][1])
+        started, release, returned = (threading.Event() for _ in range(3))
+        foreground_armed = threading.Event()
+        observer_requested, observer_release = hold_observer_before_headers(fixtures)
+        calls = []
+        uri = "masc://same-resource.txt"
+
+        def mcp(body):
+            request = json.loads(body)
+            method = request["method"]
+            with wire.lock:
+                phase = wire.phase
+                held = phase == "a" and method == held_method and foreground_armed.is_set()
+                if held:
+                    foreground_armed.clear()
+            calls.append((phase, method))
+            if held:
+                started.set()
+                assert release.wait(timeout=30), "held resource request was not released"
+                returned.set()
+            headers = ()
+            if method == "initialize":
+                result = {}
+                headers = (("Mcp-Session-Id", "resource-session-" + phase),)
+            elif method == "resources/list":
+                result = {"resources": [{"uri": uri, "name": "resource-" + phase,
+                    "mimeType": "text/plain"}]}
+            elif method == "resources/read":
+                result = {"contents": [{"uri": uri, "mimeType": "text/plain",
+                    "text": "resource-body-" + phase}]}
+            else:
+                raise AssertionError(request)
+            return h.RawHttpResponse(200,
+                json.dumps({"jsonrpc": "2.0", "id": request["id"], "result": result}).encode(),
+                content_type="application/json", headers=headers)
+
+        fixtures.update({ROSTER_PATH: wire.roster, "/health": wire.health,
+            "/health?full=1": wire.health, "/mcp": h.RequestHttpResponse(mcp)})
+
+        def interact(process, fd, _slave, output, _base):
+            try:
+                assert h.wait_for_fixture_event(process, fd, output, observer_requested,
+                    timeout=WAIT_SECONDS), "startup observer did not finish initialization"
+                assert not started.is_set(), "startup initialization satisfied the foreground barrier"
+                h.tab_until(process, fd, output, b"MASC System")
+                if held_method == "initialize":
+                    foreground_armed.set()
+                h.send_and_wait(process, fd, output, b"s", b"MASC System / Resources")
+                if held_method == "resources/read":
+                    h.wait_for_output(process, fd, output, b"resource-a", start=0, timeout=WAIT_SECONDS)
+                    foreground_armed.set()
+                    os.write(fd, b"\r")
+                assert h.wait_for_fixture_event(process, fd, output, started, timeout=WAIT_SECONDS)
+                wire.publish("b")
+                assert h.wait_for_fixture_state(process, fd, output,
+                    lambda: b"MISMATCH local " in screen(output), timeout=WAIT_SECONDS)
+                assert b"resource-a" not in screen(output) and b"resource-body-a" not in screen(output)
+                release.set()
+                assert h.wait_for_fixture_event(process, fd, output, returned, timeout=WAIT_SECONDS)
+                h.send_and_wait(process, fd, output, b"r", b"resource-b")
+                h.send_and_wait(process, fd, output, b"\r", b"resource-body-b")
+                assert b"resource-body-a" not in screen(output), screen(output)
+                if held_method == "initialize":
+                    assert [(phase, method) for phase, method in calls
+                            if method == "resources/list"] == [("b", "resources/list")], calls
+                os.write(fd, b"q")
+            finally:
+                release.set()
+                observer_release.set()
+        h.run_terminal_scenario(binary,
+            description=f"Resource {held_method} ownership is withdrawn before same-URI B recovery",
+            interact=interact, prepare_workspace=wire.prepare, http_fixtures=fixtures,
+            refresh=0.5, terminal_cols=300)
+
+
+
+def runtime_parameter_workspace_withdrawal(binary: str) -> None:
+    fixtures = h.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
+    wire = WorkspaceWire(fixtures[ROSTER_PATH][1])
+    current_read = threading.Event()
+    writes = []
+
+    def parameters():
+        with wire.lock:
+            phase = wire.phase
+        if phase != "a":
+            current_read.set()
+            return 503, {"error": "B parameters unavailable"}
+        return 200, {"parameters": [{"key": "original_a_parameter", "current": 7,
+            "default": 1, "has_override": True, "meta": {"value_type": "int"}}]}
+
+    def write(body):
+        writes.append(json.loads(body))
+        return 200, {"ok": True}
+
+    fixtures.update({ROSTER_PATH: wire.roster, "/health": wire.health,
+        "/health?full=1": wire.health, "/api/v1/runtime/params": parameters,
+        "/api/v1/runtime/params/set": h.RequestHttpResponse(write),
+        "/api/v1/runtime/params/clear": h.RequestHttpResponse(write)})
+
+    def interact(process, fd, _slave, output, _base):
+        h.tab_until(process, fd, output, b"MASC Keepers")
+        h.select_keeper_row(process, fd, output, b"alpha")
+        h.send_and_wait(process, fd, output, b"\r", b"Keepers")
+        h.send_and_wait(process, fd, output, b"c", b"Esc:detail")
+        h.send_and_wait(process, fd, output, b"/settings", b"/settings")
+        h.send_and_wait(process, fd, output, b"\r", b"original_a_parameter")
+        h.send_and_wait(process, fd, output, b"\r", b"editing original_a_parameter")
+        wire.publish("b")
+        assert h.wait_for_fixture_state(process, fd, output,
+            lambda: b"MISMATCH local " in screen(output), timeout=WAIT_SECONDS)
+        assert b"original_a_parameter" not in screen(output), screen(output)
+        os.write(fd, b"\r")
+        # Re-read B explicitly. Its failure cannot authorize retained A input.
+        os.write(fd, b"r")
+        assert h.wait_for_fixture_event(process, fd, output, current_read, timeout=WAIT_SECONDS)
+        h.drain_until_quiet(process, fd, output)
+        assert writes == [], "parameters sent an A-derived write after withdrawal"
+        os.write(fd, b"q")
+    h.run_terminal_scenario(binary,
+        description="Workspace withdrawal retires parameter edits before successor writes",
+        interact=interact, prepare_workspace=wire.prepare, http_fixtures=fixtures,
+        refresh=0.5, terminal_cols=300)
 
 
 if __name__ == "__main__":
@@ -1333,6 +1497,8 @@ if __name__ == "__main__":
     task_dispatch_workspace_withdrawal(binary)
     verification_workspace_withdrawal(binary)
     tools_workspace_withdrawal(binary)
+    resource_workspace_withdrawal(binary)
+    runtime_parameter_workspace_withdrawal(binary)
     connector_workspace_withdrawal(binary)
     bundle_identity_during_read(binary)
     settings_editor_workspace_change(binary)
@@ -1340,8 +1506,10 @@ if __name__ == "__main__":
     github_workspace_withdrawal(binary)
     run(binary, captures)
     queued_workspace_inputs(binary)
+    queued_workspace_inputs(binary, root_only=True)
     scoped_roster_authority(binary)
     staged_payload_workspace_inputs(binary)
+    staged_payload_workspace_inputs(binary, root_only=True)
     armed_schedule_and_runtime_workspace(binary)
     observer_workspace_retirement(binary)
     identity_refresh_workspace_chain(binary)

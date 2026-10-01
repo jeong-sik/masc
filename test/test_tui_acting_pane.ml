@@ -178,7 +178,17 @@ let test_many_trace_failures_keep_navigation_and_full_reading () =
     (List.exists (fun line -> contains "Trace unavailable:" (text line)) compact_scrolled.Pane.rows);
   let reading = Pane.lines ~rows:8 ~cols:90 ~scroll:1 input in
   check bool "full failure reasons stay scrollable" true
-    (List.exists (fun line -> contains "unbooted-01 · reason-01" (text line)) reading.Pane.rows)
+    (List.exists (fun line -> contains "unbooted-00 · reason-00" (text line)) reading.Pane.rows);
+  let single = { fixture with trace_unavailable = ["tester", "first-failure"] } in
+  let tiny = Pane.lines ~rows:3 ~cols:90 ~scroll:1 single in
+  check bool "one failure is reachable after its synthetic overview" true
+    (List.exists (fun line -> contains "tester · first-failure" (text line)) tiny.Pane.rows);
+  List.iter (fun (name, reason) ->
+      check bool "every failure is reachable across the scroll range" true
+        (List.init (compact.Pane.scroll_max + 1) (fun scroll ->
+             Pane.lines ~rows:3 ~cols:90 ~scroll input)
+         |> List.exists (fun drawn -> List.exists
+              (fun line -> contains (name ^ " · " ^ reason) (text line)) drawn.Pane.rows))) failures
 
 let test_clipped_header_preserves_spans_and_padding () =
   (* The count and the feed are two readings now, each carrying the

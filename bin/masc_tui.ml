@@ -2444,7 +2444,7 @@ let start_masc_server_here ~base_path ~host ~port ~note ~on_ready =
    id-less acceptance, which would inherit that seq while the leftover bytes
    glued onto the next chunk -- so each (re)connect starts a fresh one and
    asks the server to resume from the log's last seq instead. *)
-let post_keeper_chat_watching ~enqueue ~control_generation ~admission_intent ~mailbox ~port ~log request =
+let post_keeper_chat_watching ~check_request ~enqueue ~control_generation ~admission_intent ~mailbox ~port ~log request =
   let enqueue_async = enqueue in
   let host = server_peer_host in
   match Eio_context.get_clock_opt () with
@@ -2453,7 +2453,9 @@ let post_keeper_chat_watching ~enqueue ~control_generation ~admission_intent ~ma
         (Keeper_chat_stream_unavailable
            ( request
            , "sending without a live view: no Eio clock to bound the stream" ));
-      Masc_tui_http.post_keeper_chat ~admission_intent ~host ~port request
+      (match check_request () with
+       | Error detail -> Error (Keeper_chat.Transport_error detail)
+       | Ok () -> Masc_tui_http.post_keeper_chat ~admission_intent ~host ~port request)
   | Some clock ->
       (* After the highest seq this watcher has handed to the mailbox. The
          log is folded by the main loop, so at the moment of a re-POST it may
@@ -2467,6 +2469,9 @@ let post_keeper_chat_watching ~enqueue ~control_generation ~admission_intent ~ma
             Masc.Keeper_chat_event_log.replay_position_advance !delivered held
       in
       let rec watch ~since_seq was_unverified =
+        match check_request () with
+        | Error detail -> Error (Keeper_chat.Transport_error detail)
+        | Ok () ->
         let decoder = Keeper_chat_live.create () in
         (* Each idempotent re-subscribe has its own SSE grammar state. The
            visible transcript remains request-owned, but an acceptance event
@@ -7680,6 +7685,13 @@ let take_pending_attachments state =
 
 let launch_keeper_request ?promoted ?(admission_intent = Keeper_chat.Queue_only) state ~mailbox request =
   let enqueue_async = workspace_enqueue state in
+  let authority = state.workspace_authority in
+  let identity = state.server_identity in
+  let host = server_peer_host in
+  let port = state.port in
+  let check_request () =
+    check_workspace_request state ~mailbox ~authority ~identity ~host ~port ()
+  in
   if keeper_available_for_new_message state request.Keeper_chat.keeper_name then begin
   state.keeper_interactive_waiting <- List.filter (fun (_, id, _) ->
     id <> request.Keeper_chat.request_id) state.keeper_interactive_waiting;
@@ -7726,7 +7738,7 @@ let launch_keeper_request ?promoted ?(admission_intent = Keeper_chat.Queue_only)
     then begin
       let result =
         try
-          post_keeper_chat_watching ~enqueue:enqueue_async ~control_generation ~admission_intent ~mailbox ~port:state.port ~log:log.tl_log
+          post_keeper_chat_watching ~check_request ~enqueue:enqueue_async ~control_generation ~admission_intent ~mailbox ~port ~log:log.tl_log
             request
         with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -12413,7 +12425,7 @@ let handle_ask_submit state ~mailbox =
    conflict on an action that names a recovery continues into it instead of
    surfacing as a failure. Recovery runs once — a conflict raised by the
    recovery itself is the operator's to read. *)
-let run_keeper_action_steps ~authority_current ~host ~port ~keeper_name ~operator_operation_id
+let run_keeper_action_steps ~check_request ~host ~port ~keeper_name ~operator_operation_id
     action =
   let perform = function
     | Keeper_control.Lifecycle lifecycle_action ->
@@ -12436,10 +12448,8 @@ let run_keeper_action_steps ~authority_current ~host ~port ~keeper_name ~operato
             Error
               (Printf.sprintf "%s has no request to send"
                  (Keeper_control.action_label action)))
-    | _ :: _ when not (authority_current ()) ->
-        Error "Workspace changed; the remaining lifecycle steps were not sent"
     | step :: rest -> (
-        match perform step with
+        match Result.bind (check_request ()) (fun () -> perform step) with
         | Error transport -> Error transport
         | Ok (status, body) -> (
             let outcome = match step with
@@ -12501,7 +12511,7 @@ let start_keeper_action state ~base_path:_ ~mailbox keeper_name action =
   | Workspace_identity_match | Workspace_identity_mismatch _ ->
   let enqueue_async = workspace_enqueue state in
   let authority = state.workspace_authority in
-  let authority_current () = authority = state.workspace_authority in
+  let identity = state.server_identity in
   let serial = state.keeper_action_serial + 1 in
   state.keeper_action_serial <- serial;
   state.keeper_action_inflight <- Some (keeper_name, action);
@@ -12513,10 +12523,13 @@ let start_keeper_action state ~base_path:_ ~mailbox keeper_name action =
   let operator_operation_id =
     Keeper_control.mint_operation_id ~keeper:keeper_name ~serial
   in
+  let check_request () =
+    check_workspace_request state ~mailbox ~authority ~identity ~host ~port ()
+  in
   let run_action () =
     let result =
       try
-        run_keeper_action_steps ~authority_current ~host ~port ~keeper_name
+        run_keeper_action_steps ~check_request ~host ~port ~keeper_name
           ~operator_operation_id action
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -12529,9 +12542,11 @@ let start_keeper_action state ~base_path:_ ~mailbox keeper_name action =
   | None ->
       let result =
         try
-          run_keeper_action_steps ~authority_current ~host ~port ~keeper_name
+          run_keeper_action_steps ~check_request ~host ~port ~keeper_name
             ~operator_operation_id action
-        with exn -> Error (Printexc.to_string exn)
+        with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> Error (Printexc.to_string exn)
       in
       enqueue_async mailbox (Keeper_action_done (keeper_name, action, result))
 

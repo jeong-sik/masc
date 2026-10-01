@@ -1574,6 +1574,55 @@ def runtime_parameter_workspace_withdrawal(binary: str) -> None:
         refresh=0.5, terminal_cols=300)
 
 
+def live_identity_before_chat_and_lifecycle(binary: str) -> None:
+    # No refresh after readiness: the client retains A while the same endpoint
+    # reports B only to the dispatch-time health probe.
+    for operation in ("chat", "pause", "boot-recovery"):
+        fixtures = h.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
+        if operation == "boot-recovery":
+            row = fixtures[ROSTER_PATH][1]["keepers"][0]
+            row.update(keepalive_running=False, status="idle", phase="stopped")
+        wire = WorkspaceWire(fixtures[ROSTER_PATH][1])
+        probes = threading.Event()
+        armed = threading.Event()
+        writes = []
+        def health():
+            reply = wire.health()
+            if armed.is_set(): probes.set()
+            return reply
+        def post(path, body):
+            writes.append((path, body))
+            if operation == "boot-recovery" and path.endswith("/boot"):
+                wire.publish("b")
+                return 409, {"error":"owner paused"}
+            return 200, {"ok":True}
+        fixtures.update({ROSTER_PATH:wire.roster, HISTORY_PATH:wire.history,
+                         MEMORY_PATH:wire.memory, "/health":health, "/health?full=1":health})
+        for path in ("/api/v1/keepers/chat/stream", "/api/v1/keepers/chat",
+                     "/api/v1/keepers/alpha/boot", "/api/v1/keepers/alpha/directive"):
+            fixtures[path] = h.RequestHttpResponse(lambda body, path=path: post(path, body))
+        def interact(process, fd, _slave, output, _base):
+            h.tab_until(process, fd, output, b"MASC Keepers")
+            h.select_keeper_row(process, fd, output, b"alpha")
+            if operation == "chat":
+                h.send_and_wait(process, fd, output, b"m", "Keepers ▸ alpha ▸ chat".encode())
+                h.send_and_wait(process, fd, output, b"private-A-message", h.composer_showing(b"private-A-message"))
+            armed.set()
+            if operation != "boot-recovery": wire.publish("b")
+            os.write(fd, b"\r" if operation == "chat" else b"p")
+            assert h.wait_for_fixture_event(process, fd, output, probes, timeout=WAIT_SECONDS), "dispatch did not probe the endpoint"
+            assert h.wait_for_fixture_state(process, fd, output,
+                lambda: b"Workspace identity changed or is unavailable" in screen(output), timeout=WAIT_SECONDS)
+            h.drain_until_quiet(process, fd, output)
+            expected = ["/api/v1/keepers/alpha/boot"] if operation == "boot-recovery" else []
+            assert [path for path, _ in writes] == expected, (operation, writes)
+            os.write(fd, b"q")
+        h.run_terminal_scenario(binary,
+            description="Live dispatch identity refuses cached workspace " + operation,
+            interact=interact, prepare_workspace=wire.prepare, http_fixtures=fixtures,
+            refresh=3600, terminal_cols=TERMINAL_COLUMNS)
+
+
 if __name__ == "__main__":
     binary = str(Path(sys.argv[1]).resolve())
     artifact_root = os.environ.get("RUNNER_TEMP")
@@ -1591,6 +1640,7 @@ if __name__ == "__main__":
     resource_workspace_withdrawal(binary)
     runtime_parameter_workspace_withdrawal(binary)
     connector_workspace_withdrawal(binary)
+    live_identity_before_chat_and_lifecycle(binary)
     bundle_identity_during_read(binary)
     settings_editor_workspace_change(binary)
     schedule_editor_workspace_change(binary)

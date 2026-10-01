@@ -7,13 +7,13 @@ Two real Chromium scenarios ran against that unchanged source's production Item 
 - Account scenario: seven screenshots cover desktop/mobile, pending read withdrawal, free ownership change, price-only change, failed read and recovery. Five account reads completed; no uncaught page errors.
 - Workspace scenario: eight screenshots cover fixed Keeper/wallet/outfit across A→B→A, held old response release, current response, and unknown workspace withdrawal. Four scoped reads completed; no uncaught page errors. Browser abort outcomes are recorded without claiming an aborted JavaScript promise was forced to resolve.
 
-The first cold attempt was displaced by Vite's dependency optimization and page reload. Its account count was six and the workspace scenario timed out at its first account wait. The Vite log confirmed the reload. Both unchanged scenarios then passed on the same server after optimization; the failed attempts are not silently counted as passes.
+The author reported a failed cold attempt with six account reads and a workspace wait timeout, followed by successful reruns. No raw failed-run/Vite log was retained, so the proposed dependency-reload cause is unverified; the failure report is not a reproducible diagnostic artifact.
 
 ## Installed observation
 
-Read-only health identified installed server version 0.49.0, embedded commit `4f3f70f7909bc440e3c305c0941250ef39ac0245`, readiness true. Its real roster listed 27 Keepers, but an authenticated Item read for `code-reviewer` returned HTTP 404. That source's main tree contains neither the Item route nor the TUI Items tab. An installed TUI version of 0.49.0 alone does not identify its source commit.
+The retained historical observation identifies server version 0.49.0, embedded commit `4f3f70f7909bc440e3c305c0941250ef39ac0245`, readiness true and an authenticated Item HTTP 404 for `code-reviewer`. The exact Keeper roster entry and source inspection were not preserved with that response. This evidence alone cannot distinguish a missing Item route from an unknown Keeper, and does not establish an installed route gap.
 
-This proves the tested frontend fixture behavior and the installed route gap. It does not prove current-head native purchase/equip/restart behavior, native PNG output, an installed Items screen, or release readiness. No build, CI, install, runtime restart, purchase or configuration change was performed.
+These captures document the historical frontend fixture runs only. They do not prove current-head native purchase/equip/restart behavior, native PNG output, an installed Items screen, or release readiness.
 
 Hashes and exact source/runtime provenance are in [receipt.json](receipt.json). Original scenario manifests are retained in the account and workspace directories.
 
@@ -22,3 +22,7 @@ A repeated authenticated HTTP observation is retained in [installed-http-observa
 ## Preview failure and restoration
 
 Scenario source `05044d48a75b1e3036e14210990fe4ec04362edf` adds Chromium clicks for the unowned beanie preview. The mocked 503 PNG produces the explicit preview-failure alert. Returning to the observed outfit removes the alert and selection while preserving the real displayed account observation. The expanded scenario passed with nine screenshots and five account reads; its production component source remains unchanged from d688. The preview directory preserves that separate manifest and captures. This still does not prove native preview pixels.
+
+## Preserved source and capture limits
+
+[source-snapshot.json](source-snapshot.json) maps the relevant historical scenario, component and style files to content-addressed copies, independent of transient branch references. This is not a complete build snapshot. The old preview-unavailable screenshot was captured after Playwright scrolled to its button; its displaced sticky rail makes it unsuitable as a complete layout proof. The current capture helper resets page scroll before capture, but no new browser run is claimed by this correction.

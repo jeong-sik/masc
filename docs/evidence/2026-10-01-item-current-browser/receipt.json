@@ -4,11 +4,11 @@
   "account_browser_result": "PASS: seven screenshots, five reads",
   "workspace_browser_result": "PASS: eight screenshots, four scoped reads",
   "first_attempt": {
-    "result": "failed during cold Vite reload",
-    "evidence": "Vite logged new dependencies optimized: htm; optimized dependencies changed. reloading",
+    "result": "reported failed cold attempt; raw evidence unavailable",
+    "evidence": "Historical operator report only; raw cold-run log was not retained. Reload causation is unverified.",
     "account_failure": "expected five account reads, got six",
-    "workspace_failure": "first account wait timed out; sequential mock response was displaced by reload",
-    "resolution": "same live server after dependency optimization, unchanged source, both scenarios passed"
+    "workspace_failure": "reported first account wait timeout; cause not independently evidenced",
+    "resolution": "Author reported later unchanged-source scenarios passed; cause of the earlier failure is not established by retained evidence."
   },
   "installed_runtime": {
     "server_commit": "4f3f70f7909bc440e3c305c0941250ef39ac0245",
@@ -18,7 +18,7 @@
     "actual_keeper_items_http_status": 404,
     "observed_keeper": "code-reviewer",
     "main_contains_tui_items_tab": false,
-    "scope": "read-only observation; no credentials captured, no purchase/config/runtime changes"
+    "scope": "historical health/readiness/HTTP404 observation; exact roster entry and source inspection not preserved, so route-gap conclusion is unverified"
   },
   "native_current_head": false,
   "installed_item_completion": false,
@@ -41,7 +41,7 @@
     "workspace/keeper-items-workspace-b-mobile.png": "bd93524112a20f0bcd4dc9dd4ce163c857bc12f3fc1a5b04aa02ca46a6a962a0",
     "workspace/keeper-items-workspace-unknown-mobile.png": "632aae2861665cdaa38f84a0b54feae25e2b0f08db51e16906157f0bdabfd66f",
     "workspace/workspace-manifest.json": "938f68fa5829b7cac9f2791c230c837a5188a38f9ff9c7c6c8b12abaa0c77a36",
-    "installed-http-observation.json": "deb30ad6faece866aff9cbd0ab787b416a0975237d15cfbb33fedfcd86989881",
+    "installed-http-observation.json": "8017a685a07a5641fc28040e085c9e08e983c1839f9fb8580bb7f5165fb25cf8",
     "preview/keeper-items-desktop.png": "5d8edb9ea420577260846231c32ca69ab3dc996c13f00a6820865d26bfe16a0c",
     "preview/keeper-items-free-purchase.png": "841edccc23ee33b059d0b46600bb250ac910f48751cd64ef472f27667d5f13c9",
     "preview/keeper-items-loading.png": "deea1bba289ba814c5f9e7d18cbf4e3c573fc9034b2d3b3808aadd4c586626f1",
@@ -51,7 +51,14 @@
     "preview/keeper-items-price-change.png": "b7e635786f0ab05b95330db86aeb2a975aa5ff17060a722af0e1933b662acc41",
     "preview/keeper-items-recovered.png": "9484e31829ca4f02cf4bafc0eb6a8acf8a1916beabde947338e0246bf94107c9",
     "preview/keeper-items-unavailable.png": "d6ec71175cbbf2af2b84b8840d10c9adf63f7998397ac7e635d5febb4ac87872",
-    "preview/manifest.json": "4d9e65a4801d7b68c28d3bc54a59b59e39f40ec5e31d3877ab2e711240d01257"
+    "preview/manifest.json": "4d9e65a4801d7b68c28d3bc54a59b59e39f40ec5e31d3877ab2e711240d01257",
+    "source-snapshot.json": "9fce2f6e4f686ffacd7bc430b91cdfea146325524539b4bab09e258180e9c692",
+    "source-snapshot/a0d5e3bdee58627dff2f9584ff7de6cda9ca5db3e48be90bd1fc76207ea12ca3": "a0d5e3bdee58627dff2f9584ff7de6cda9ca5db3e48be90bd1fc76207ea12ca3",
+    "source-snapshot/c9e03f3adef8e2cf42c40023afc7c924a8f4341aa9bc4a226cb0b31b69e9cb88": "c9e03f3adef8e2cf42c40023afc7c924a8f4341aa9bc4a226cb0b31b69e9cb88",
+    "source-snapshot/7bc48c1a41db6d8ad53c48a4c26ca0df592f4e8626fa75e77d82e47a9dba404e": "7bc48c1a41db6d8ad53c48a4c26ca0df592f4e8626fa75e77d82e47a9dba404e",
+    "source-snapshot/443c04d6ecd27fa9f64f4dfc6d0d3092f9d9b334ef407498bf56a4699f3285c8": "443c04d6ecd27fa9f64f4dfc6d0d3092f9d9b334ef407498bf56a4699f3285c8",
+    "source-snapshot/e4d2525a462d30964ca959cdbe8113bdc193c3973d772ef724b5c68e9244c781": "e4d2525a462d30964ca959cdbe8113bdc193c3973d772ef724b5c68e9244c781",
+    "source-snapshot/51f4278b80da798781683c063493e1fb306221dcbb4c77c7b8d80d130ee50d7e": "51f4278b80da798781683c063493e1fb306221dcbb4c77c7b8d80d130ee50d7e"
   },
   "installed_repeat_observation": {
     "server_commit": "4f3f70f7909bc440e3c305c0941250ef39ac0245",

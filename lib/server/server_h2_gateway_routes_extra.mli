@@ -19,6 +19,10 @@ val dispatch :
 (** [dispatch ~h2_reqd ~httpun_request ~cors ~path ~config ~with_public_read method_]
     handles the following routes:
 
+    {2 Public Play guide}
+    - [GET /play/agent.md] — the same public Markdown and refusal contract
+      as {!Server_routes_http_routes_play_guide}, without a bearer token.
+
     {2 Voice config}
     - [GET /api/v1/voice/config] — JSON dump from
       {!Server_voice_config.voice_config_payload}; HTTP 500 when

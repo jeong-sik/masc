@@ -157,7 +157,7 @@ let check_same_provenance label
 ;;
 
 let partition_history ~base_path ~keeper_name =
-  Partition.For_testing.path ~base_path ~keeper_name
+  Partition.ledger_path ~base_path ~keeper_name
   |> Fs_compat.load_file
   |> String.split_on_char '\n'
   |> List.filter (fun line -> not (String.equal line ""))
@@ -1501,16 +1501,41 @@ type jev_run =
 
 (* Runs the exact flow with Jev switched on and answering [jev_choice], in
    front of one LLM slot that answers relevant. *)
+(* [candidate] after an operator requeued it from a quarantine: the durable
+   requeue the worker executes like a pending candidate. *)
+let requeued_after_quarantine (pending : Candidate.candidate) : Candidate.candidate =
+  let quarantine : Candidate.quarantine =
+    { quarantine_id = "ba-quarantine-" ^ pending.candidate_id
+    ; partition_id = "ba-root-" ^ pending.candidate_id
+    ; partition_generation = Masc.Keeper_board_attention_partition_generation.initial
+    ; failure_category = Candidate.Exact_lane_exhausted
+    ; attempt_provenance = None
+    ; quarantined_at = 2.0
+    ; prior_status = Candidate.Resumable_pending { last_delivery_failure = None }
+    }
+  in
+  { pending with
+    status =
+      Candidate.Quarantine
+        { quarantine
+        ; phase = Candidate.Requeued { requeued_at = 4.0; requested_by = "operator-test" }
+        }
+  }
+;;
+
 let execute_behind_jev
       ?(jev_confidence = 0.6)
       ?(jev_probabilities = [ "relevant", 0.2; "not_relevant", 0.8 ])
+      ?(requeued = false)
       ~name
       ~jev_choice
       ()
   =
   with_prompt_registry (fun () ->
     run_eio_with_http_pool (fun ~sw ~net ~clock ->
-      let candidate = candidate name in
+      let candidate =
+        if requeued then requeued_after_quarantine (candidate name) else candidate name
+      in
       let jev =
         Fixture.start_server
           ~sw
@@ -1617,6 +1642,19 @@ let check_terminal_provenance label run provenance =
   | _ -> Alcotest.failf "%s: terminal evidence is missing" label
 ;;
 
+let check_terminal_confidence label run expected =
+  match run.terminal_jev with
+  | [ jev ] ->
+    (match json_field "confidence" jev with
+     | Some (`Float confidence) ->
+       Alcotest.(check (float 0.000001))
+         (label ^ ": the terminal entry keeps Jev's confidence")
+         expected
+         confidence
+     | Some _ | None -> Alcotest.failf "%s: terminal entry has no numeric confidence" label)
+  | _ -> Alcotest.failf "%s: terminal evidence is missing" label
+;;
+
 let test_jev_relevant_is_kept () =
   let run =
     execute_behind_jev
@@ -1627,6 +1665,7 @@ let test_jev_relevant_is_kept () =
       ()
   in
   check_terminal_jev "relevant" ~answer:"relevant" ~rejudged:None run;
+  check_terminal_confidence "relevant" run 0.9;
   match run.result with
   | Ok judgment ->
     Alcotest.(check int) "Jev asked once" 1 run.jev_posts;
@@ -1676,15 +1715,91 @@ let check_judged_by_the_llm_lane label run =
   | Error _ -> Alcotest.failf "%s: the LLM lane did not complete the flow" label
 ;;
 
-(* The terminal entry is what tells these two apart: both end in one Jev call
-   and one LLM call, but only the first had an answer from Jev. *)
-let test_jev_not_relevant_is_judged_again () =
+let test_jev_confident_not_relevant_is_kept () =
   let run =
-    execute_behind_jev ~name:"board-attention-jev-not-relevant" ~jev_choice:"not_relevant" ()
+    execute_behind_jev
+      ~name:"board-attention-jev-not-relevant"
+      ~jev_choice:"not_relevant"
+      ~jev_confidence:0.9
+      ~jev_probabilities:[ "relevant", 0.05; "not_relevant", 0.95 ]
+      ()
   in
-  check_judged_by_the_llm_lane "not_relevant" run;
-  check_terminal_jev "not_relevant" ~answer:"not_relevant" ~rejudged:(Some "relevant") run;
-  check_terminal_provenance "not_relevant" run (expected_jev_provenance run)
+  check_terminal_jev "not_relevant" ~answer:"not_relevant" ~rejudged:None run;
+  check_terminal_confidence "not_relevant" run 0.9;
+  match run.result with
+  | Ok judgment ->
+    Alcotest.(check int) "Jev asked once" 1 run.jev_posts;
+    Alcotest.(check int) "the LLM lane is not asked" 0 run.llm_posts;
+    (match judgment.Candidate.verdict.Judgment.decision with
+     | Judgment.Not_relevant -> ()
+     | Judgment.Relevant -> Alcotest.fail "Jev's not-relevant decision was not the one kept");
+    (match judgment.Candidate.source with
+     | Candidate.Vendor_system_one provenance ->
+       Alcotest.(check string)
+         "the exact request bytes are durable"
+         (expected_jev_provenance run).request_body_sha256
+         provenance.request_body_sha256;
+       check_terminal_provenance "not_relevant" run provenance
+     | Candidate.Exact_attempt _ | Candidate.Cli_lane_slot ->
+       Alcotest.fail "a confident not-relevant Jev answer must be recorded as Jev's")
+  | Error _ -> Alcotest.fail "a confident not-relevant Jev answer did not complete the flow"
+;;
+
+let settle_floor =
+  Runtime_schema.default_typesafeai.Runtime_schema.board_attention_confidence_floor
+;;
+
+let below_the_settle_floor = settle_floor /. 2.0
+
+(* A requeued quarantine is executed like a pending candidate, so Jev is asked
+   first for it too; before, it skipped Jev and went to the LLM lane. *)
+let test_jev_settles_a_requeued_candidate () =
+  let run =
+    execute_behind_jev
+      ~requeued:true
+      ~name:"board-attention-jev-requeued"
+      ~jev_choice:"not_relevant"
+      ~jev_confidence:0.9
+      ~jev_probabilities:[ "relevant", 0.05; "not_relevant", 0.95 ]
+      ()
+  in
+  check_terminal_jev "requeued" ~answer:"not_relevant" ~rejudged:None run;
+  Alcotest.(check int) "Jev is asked for the requeued candidate" 1 run.jev_posts;
+  Alcotest.(check int) "the LLM lane is not asked" 0 run.llm_posts;
+  match run.result with
+  | Ok judgment ->
+    (match judgment.Candidate.source with
+     | Candidate.Vendor_system_one _ -> ()
+     | Candidate.Exact_attempt _ | Candidate.Cli_lane_slot ->
+       Alcotest.fail "the requeued candidate's judgment must be Jev's")
+  | Error _ -> Alcotest.fail "the requeued candidate did not complete the flow"
+;;
+
+(* Either decision below the floor goes to the LLM lane, and the terminal entry
+   keeps what Jev decided next to what the lane decided. *)
+let test_jev_low_confidence_is_judged_again () =
+  List.iter
+    (fun choice ->
+       let run =
+         execute_behind_jev
+           ~name:("board-attention-jev-low-confidence-" ^ choice)
+           ~jev_choice:choice
+           ~jev_confidence:below_the_settle_floor
+           ()
+       in
+       let label = "low-confidence " ^ choice in
+       check_judged_by_the_llm_lane label run;
+       check_terminal_jev label ~answer:"low_confidence" ~rejudged:(Some "relevant") run;
+       check_terminal_provenance label run (expected_jev_provenance run);
+       check_terminal_confidence label run below_the_settle_floor;
+       match run.terminal_jev with
+       | [ jev ] ->
+         Alcotest.(check (option string))
+           (label ^ ": the terminal entry keeps Jev's decision")
+           (Some choice)
+           (json_string_field "decision" jev)
+       | _ -> Alcotest.failf "%s: terminal evidence is missing" label)
+    [ "relevant"; "not_relevant" ]
 ;;
 
 (* An explicit uncertain answer delegates to the full judgment lane. *)
@@ -1700,22 +1815,19 @@ let test_jev_uncertain_is_judged_again () =
   check_judged_by_the_llm_lane "uncertain" run;
   check_terminal_jev "uncertain" ~answer:"uncertain" ~rejudged:(Some "relevant") run;
   check_terminal_provenance "uncertain" run (expected_jev_provenance run);
-  (match run.terminal_jev with
-   | [ jev ] ->
-     (match json_field "confidence" jev with
-      | Some (`Float confidence) ->
-        Alcotest.(check (float 0.000001))
-          "the terminal entry retains confidence as observation"
-          0.26
-          confidence
-      | Some _ | None -> Alcotest.fail "uncertain: terminal entry has no numeric confidence")
-   | _ -> Alcotest.fail "uncertain: terminal evidence is missing")
+  check_terminal_confidence "uncertain" run 0.26
 ;;
 
-let test_jev_confidence_does_not_route () =
-  let run = execute_behind_jev ~name:"board-attention-jev-low-confidence"
-      ~jev_choice:"relevant" ~jev_confidence:0.0 () in
-  check_terminal_jev "confidence is observation" ~answer:"relevant" ~rejudged:None run
+let test_jev_confidence_at_the_floor_settles () =
+  let run =
+    execute_behind_jev
+      ~name:"board-attention-jev-at-the-floor"
+      ~jev_choice:"not_relevant"
+      ~jev_confidence:settle_floor
+      ()
+  in
+  Alcotest.(check int) "the LLM lane is not asked at the floor" 0 run.llm_posts;
+  check_terminal_jev "at the floor" ~answer:"not_relevant" ~rejudged:None run
 ;;
 
 let test_jev_invalid_confidence_is_judged_again () =
@@ -1727,7 +1839,7 @@ let test_jev_invalid_confidence_is_judged_again () =
     [-0.1; 1.5]
 ;;
 
-let test_jev_not_relevant_cli_fallback_is_in_the_terminal_entry () =
+let test_jev_low_confidence_cli_fallback_is_in_the_terminal_entry () =
   Fixture.with_official_client_runtimes (fun () ->
   with_prompt_registry (fun () ->
     run_eio_with_http_pool (fun ~sw ~net ~clock ->
@@ -1737,7 +1849,8 @@ let test_jev_not_relevant_cli_fallback_is_in_the_terminal_entry () =
           ~sw
           ~net
           ~clock
-          (Fixture.Reply (jev_response ~choice:"not_relevant" ()))
+          (Fixture.Reply
+             (jev_response ~confidence:below_the_settle_floor ~choice:"not_relevant" ()))
       in
       publish_lane
         ~cli_slot_ids:[ Fixture.cli_primary_runtime ]
@@ -1783,7 +1896,7 @@ let test_jev_not_relevant_cli_fallback_is_in_the_terminal_entry () =
        | [ jev ] ->
          Alcotest.(check (option string))
            "the terminal entry keeps Jev's answer"
-           (Some "not_relevant")
+           (Some "low_confidence")
            (json_string_field "answer" jev);
          Alcotest.(check (option string))
            "the terminal entry includes the CLI fallback decision"
@@ -1843,7 +1956,7 @@ let test_jev_adapter_sends_the_decisions_and_reads_not_relevant () =
        | Typesafeai_board_attention.Needs_review _ ->
          Alcotest.fail "a not_relevant answer decoded as another assessment");
       Alcotest.(check (float 0.0))
-        "the adapter retains Jev's confidence as observation"
+        "the adapter returns Jev's confidence"
         0.6
         judged.confidence;
       match Fixture.request_bodies jev with
@@ -1863,20 +1976,35 @@ let test_jev_adapter_sends_the_decisions_and_reads_not_relevant () =
           | _ -> None, None
         in
         Alcotest.(check bool)
-          "Jev receives exactly the current signal and projected keeper role"
+          "Jev's state carries only the current signal"
           true
-          (state =
-           Some
-             (match Candidate.singleton_judgment_request candidate with
-              | Ok request -> request
-              | Error detail ->
-                Alcotest.failf "candidate request projection failed: %s" detail));
+          (state = Some (`Assoc [ "signal", Candidate.signal_to_yojson candidate.signal ]));
+        let interests =
+          match Candidate.board_interests candidate with
+          | Ok interests -> interests
+          | Error detail -> Alcotest.failf "candidate interests failed: %s" detail
+        in
         (match relevance with
          | Some (`Assoc question) ->
            Alcotest.(check (option string))
              "the relevance question is a choice"
              (Some "choice")
              (json_string_field "type" (`Assoc question));
+           (match json_string_field "instructions" (`Assoc question) with
+            | Some instructions ->
+              Alcotest.(check bool)
+                "the question names the keeper"
+                true
+                (contains_substring ~needle:(Printf.sprintf "%S" candidate.keeper_name) instructions);
+              Alcotest.(check bool)
+                "the question carries the keeper's interests"
+                true
+                (contains_substring
+                   ~needle:
+                     (Yojson.Safe.to_string
+                        (`List (List.map (fun interest -> `String interest) interests)))
+                   instructions)
+            | None -> Alcotest.fail "the relevance question has no instructions");
            (match List.assoc_opt "criteria" question with
             | Some (`Assoc criteria) ->
               Alcotest.(check (list string))
@@ -1886,7 +2014,7 @@ let test_jev_adapter_sends_the_decisions_and_reads_not_relevant () =
               Alcotest.(check (option string))
                 "relevant requires the current signal, not capability overlap"
                 (Some
-                   "The current signal itself requires this keeper's concrete attention, review, or action for one of keeper_role.board_interests; general topic or capability overlap alone is insufficient.")
+                   "The current signal itself requires this keeper's concrete attention, review, or action for one of its board interests; general topic or capability overlap alone is insufficient.")
                 (match List.assoc_opt "relevant" criteria with
                  | Some (`String description) -> Some description
                  | Some _ | None -> None);
@@ -2289,23 +2417,31 @@ let () =
             `Quick
             test_jev_relevant_is_kept
         ; Alcotest.test_case
-            "a not-relevant Jev answer is judged again by the LLM lane"
+            "a confident not-relevant Jev answer is kept"
             `Quick
-            test_jev_not_relevant_is_judged_again
+            test_jev_confident_not_relevant_is_kept
+        ; Alcotest.test_case
+            "a Jev decision below the settle floor is judged again by the LLM lane"
+            `Quick
+            test_jev_low_confidence_is_judged_again
         ; Alcotest.test_case
             "an explicit uncertain Jev answer is judged again by the LLM lane"
             `Quick
             test_jev_uncertain_is_judged_again
         ; Alcotest.test_case
-            "confidence does not route a relevant answer"
+            "a Jev decision at the settle floor is kept"
             `Quick
-            test_jev_confidence_does_not_route
+            test_jev_confidence_at_the_floor_settles
+        ; Alcotest.test_case
+            "a requeued candidate asks Jev first"
+            `Quick
+            test_jev_settles_a_requeued_candidate
         ; Alcotest.test_case "invalid confidence delegates to the LLM lane" `Quick
             test_jev_invalid_confidence_is_judged_again
         ; Alcotest.test_case
-            "a not-relevant Jev terminal entry includes the CLI fallback"
+            "a low-confidence Jev terminal entry includes the CLI fallback"
             `Quick
-            test_jev_not_relevant_cli_fallback_is_in_the_terminal_entry
+            test_jev_low_confidence_cli_fallback_is_in_the_terminal_entry
         ; Alcotest.test_case
             "a Jev choice the question did not offer goes to the LLM lane"
             `Quick

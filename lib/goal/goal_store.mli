@@ -30,19 +30,8 @@ val parse_goal_phase : string option -> Goal_phase.t option
 
 (** {1 Goal record} *)
 
-type owner =
-  | Owner of string
-  | Unknown_owner
-      (** Who owns a Goal (#39571). A row written before the owner field
-          existed decodes to [Unknown_owner] — an explicit value, never an
-          empty string. *)
-
-val owner_to_yojson : owner -> Yojson.Safe.t
-val owner_of_yojson : Yojson.Safe.t -> (owner, string) result
-
 type goal = {
   id : string;
-  owner : owner;
   criterion_revision : string;
   title : string;
   metric : string option;
@@ -52,19 +41,11 @@ type goal = {
   phase : Goal_phase.t;
   last_review_note : string option;
   last_review_at : string option;
-  notified_refuted_key : string option;
-      (** The dedup key of the last owner notice sent for a refuted verdict
-          (#39571). Written only after the notice row is durably committed, so
-          a crash between the two re-sends and the idempotent append keeps the
-          owner's transcript at one row. [None] before any notice. *)
-  notified_overdue_key : string option;
-      (** The dedup key of the last owner notice sent for an overdue Goal
-          (#39571). Same write-after-commit ordering as
-          {!notified_refuted_key}. *)
   created_at : string;
   updated_at : string;
 }
-(** A single goal entry. [priority] is clamped to [1..5] on every write. *)
+(** A workspace-shared goal. Creation and transition actors are event
+    provenance. [priority] is clamped to [1..5] on every write. *)
 
 type criterion = Criterion of {
   revision : string;
@@ -265,6 +246,20 @@ val delete_goal :
 
 (** {1 Upsert} *)
 
+val upsert_goal_with_revision :
+  Workspace_utils.config ->
+  ?id:string ->
+  ?title:string ->
+  ?metric:string ->
+  ?target_value:string ->
+  ?due_date:string ->
+  ?priority:int ->
+  unit ->
+  (goal * [ `created | `updated of goal ] * int, write_error) result
+(** The upsert outcome with the exact committed store version from the same
+    locked write. Snapshot event readers use this witness to order commits
+    independently of event append order. It is never a later store read. *)
+
 val upsert_goal :
   Workspace_utils.config ->
   ?id:string ->
@@ -273,7 +268,6 @@ val upsert_goal :
   ?target_value:string ->
   ?due_date:string ->
   ?priority:int ->
-  ?owner:string ->
   unit ->
   (goal * [ `created | `updated of goal ], write_error) result
 (** Creates a new goal when [id] is omitted (mints [goal-<ms>-<4 hex digits>]

@@ -99,8 +99,11 @@ class RequestHttpResponse:
     def __init__(
         self,
         resolve: Callable[[bytes], HttpResponse | RawHttpResponse | StreamingHttpResponse],
+        *,
+        get_response: HttpResponse | None = None,
     ) -> None:
         self.resolve = resolve
+        self.get_response = get_response
 
 
 class MethodHttpResponse:
@@ -279,7 +282,10 @@ def test_http_endpoint(
             else:
                 fixture = (503, {"error": "fixture endpoint unavailable"})
             if isinstance(fixture, RequestHttpResponse):
-                resolved = fixture.resolve(request_body or b"")
+                if self.command == "GET" and fixture.get_response is not None:
+                    resolved = fixture.get_response
+                else:
+                    resolved = fixture.resolve(request_body or b"")
             elif isinstance(fixture, MethodHttpResponse):
                 resolved = fixture.resolve(self.command)
             elif isinstance(fixture, PathHttpResponse):
@@ -1621,6 +1627,7 @@ def keeper_runtime_http_fixtures(
                     "activation_mode": "autonomous",
                     "runtime_id": alpha_runtime_id,
                     "runtime_blocker_summary": None,
+                    "portrait": {"state": "ready", "equipment": {"face": "bare_face", "neck": "bare_neck", "head": "bare_head", "hand": "empty_hand", "base": "no_dish"}},
                 },
                 {
                     "runtime_class": "keeper",
@@ -1634,6 +1641,7 @@ def keeper_runtime_http_fixtures(
                     "activation_mode": "on_demand",
                     "runtime_id": beta_runtime_id,
                     "runtime_blocker_summary": None,
+                    "portrait": {"state": "ready", "equipment": {"face": "bare_face", "neck": "bare_neck", "head": "bare_head", "hand": "empty_hand", "base": "no_dish"}},
                 },
             ],
         },
@@ -2145,6 +2153,7 @@ def run_terminal_scenario(
     confirm_exit: bytes = b"q",
     refresh: float = 60.0,
     terminal_cols: int = 100,
+    terminal_rows: int = 30,
     workspace: str = WORKSPACE_PAYLOAD,
     http_fixtures: HttpFixtures | None = None,
     http_requests: HttpRequests | None = None,
@@ -2155,9 +2164,12 @@ def run_terminal_scenario(
     conflicting_env_base_path: bool = False,
     omit_operator_token: bool = False,
     starts_in_chat: bool = False,
+    launch_count: int = 1,
 ) -> None:
     if not scenario_admitted(scenario_selection, description):
         return
+    if launch_count < 1:
+        raise ValueError("launch_count must be positive")
     executable = tui_executable(executable)
     workspace_rendered = (
         WORKSPACE_RENDERED if workspace == WORKSPACE_PAYLOAD else workspace.encode()
@@ -2166,7 +2178,10 @@ def run_terminal_scenario(
     output = PtyOutput()
     process: subprocess.Popen[bytes] | None = None
     try:
-        fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, struct.pack("HHHH", 30, terminal_cols, 0, 0))
+        fcntl.ioctl(
+            slave_fd, termios.TIOCSWINSZ,
+            struct.pack("HHHH", terminal_rows, terminal_cols, 0, 0),
+        )
         os.set_blocking(master_fd, False)
         with tempfile.TemporaryDirectory(prefix="masc-tui-keyboard-") as base_path:
             with test_http_endpoint(
@@ -2249,8 +2264,17 @@ def run_terminal_scenario(
                         # installs its own handlers for both, so ignoring
                         # them here only keeps the shell alive to stop
                         # itself after the TUI exits.
-                        "trap '' INT TERM; kill -STOP $$; \"$@\"; tui_status=$?; "
-                        'kill -STOP $$; exit "$tui_status"',
+                        (
+                            "trap '' INT TERM; kill -STOP $$; \"$@\"; tui_status=$?; "
+                            'kill -STOP $$; exit "$tui_status"'
+                            if launch_count == 1 else
+                            "trap '' INT TERM; kill -STOP $$; "
+                            f"launches_left={launch_count}; "
+                            'while [ "$launches_left" -gt 0 ]; do '
+                            '"$@"; tui_status=$?; kill -STOP $$; '
+                            'launches_left=$((launches_left - 1)); done; '
+                            'exit "$tui_status"'
+                        ),
                         "masc-tui-test-launcher",
                         executable,
                         "--base-path",
@@ -4155,9 +4179,9 @@ def assert_row_budgeted_surfaces(
     output: bytearray,
     _base_path: str,
 ) -> None:
-    # The Dashboard title is visible before its data, so the title alone
-    # does not say the briefing arrived; its first attention item does.
-    wait_for_output(process, master_fd, output, b"attention-1", start=0, timeout=10.0)
+    # Home is interactive while connecting. This fixture's health reading,
+    # rather than its early entry points, proves the briefing arrived.
+    wait_for_output(process, master_fd, output, b"Health: ok", start=0, timeout=10.0)
 
     overview = resize_and_wait(
         process,
@@ -4169,35 +4193,18 @@ def assert_row_budgeted_surfaces(
         controls=(FULL_REDRAW,),
         final_cursor=b"\x1b[?25l",
     )
-    # The compact Dashboard gives its first rows to health, measured Goals,
-    # and durable Work. Attention follows those sections when room permits.
-    for expected in (b"MASC Dashboard", b"Health:", b"Goals", b"q:quit"):
+    # Home keeps decision entry points and a conversation entry visible;
+    # generic incidents never become operator decisions by severity alone.
+    for expected in (b"MASC Dashboard", b"Health:", b"Continue", b"q:quit"):
         if expected not in overview:
             raise AssertionError(f"compact Dashboard omitted {expected!r}: {overview!r}")
-    if b"attention-4" in overview or b"attention-6" in overview:
-        raise AssertionError(f"compact Dashboard exceeded its attention limit: {overview!r}")
-    # Sixteen rows cannot hold "Needs you" under the sections above it, and
-    # the cut says how many rows it left out rather than drop them silently.
-    if re.search(rb"\+\d+ rows? not shown", overview) is None:
-        raise AssertionError(f"compact Dashboard hid its cut rows: {overview!r}")
-
     expanded = resize_and_wait(
-        process,
-        master_fd,
-        output,
-        rows=30,
-        columns=100,
-        # The title also renders before the briefing arrives. Inspect the
-        # expanded row budget only after its second attention row is visible.
-        needle=b"attention-2",
-        controls=(FULL_REDRAW,),
-        final_cursor=b"\x1b[?25l",
+        process, master_fd, output, rows=30, columns=100,
+        needle=b"Continue", controls=(FULL_REDRAW,), final_cursor=b"\x1b[?25l",
     )
-    for expected in (b"Work", b"Needs you", b"attention-1", b"attention-2"):
-        if expected not in expanded:
-            raise AssertionError(f"expanded Dashboard omitted {expected!r}: {expanded!r}")
-    if b"attention-3" in expanded:
-        raise AssertionError(f"Dashboard displayed more than two attention rows: {expanded!r}")
+    for forbidden in (b"attention-1", b"attention-2", b"linked tasks", b"scope windows in Usage"):
+        if forbidden in expanded:
+            raise AssertionError(f"Home repeated detail content: {expanded!r}")
     tab_until(process, master_fd, output, b"MASC Keepers")
     tab_until(process, master_fd, output, b"MASC Board")
     send_and_wait(process, master_fd, output, b"\r", b"comment-5")
@@ -4851,6 +4858,60 @@ def open_loaded_planning(
 ) -> None:
     # Navigate by named surface so Planning tests do not depend on tab order.
     palette_go(process, master_fd, output, b"go Work", b"plan-alpha-29424")
+
+
+def planning_footer_dispatch_interaction(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    _slave_fd: int,
+    output: bytearray,
+    _base_path: str,
+) -> None:
+    open_loaded_planning(process, master_fd, output)
+    resize_and_wait(
+        process, master_fd, output, rows=32, columns=360,
+        needle=b"plan-alpha-29424", controls=(FULL_REDRAW,),
+        final_cursor=b"\x1b[?25l",
+    )
+
+    def footer() -> bytes:
+        rows = [row for row in screen_rows(bytes(output)).values()
+                if b"j/k:move" in row]
+        if len(rows) != 1:
+            raise AssertionError(f"Planning drew {len(rows)} footer rows")
+        return rows[0]
+
+    list_footer = footer()
+    for hint in (b"Right / Enter:detail", b"f:filter", b"s:sort"):
+        if hint not in list_footer:
+            raise AssertionError(f"Planning list omitted {hint!r}: {list_footer!r}")
+    if b"[ / ]:previous / next" in list_footer:
+        raise AssertionError(f"Planning list offered detail-only navigation: {list_footer!r}")
+
+    send_and_wait(
+        process, master_fd, output, b"\r", b"masc://planning/goal-a-29424"
+    )
+    detail_footer = footer()
+    if b"[ / ]:previous / next" not in detail_footer:
+        raise AssertionError(f"Planning detail omitted goal navigation: {detail_footer!r}")
+    if b"Right / Enter:detail" in detail_footer:
+        raise AssertionError(f"Planning detail offered list-only open: {detail_footer!r}")
+    send_and_wait(
+        process, master_fd, output, b"]", b"masc://planning/goal-b-29424"
+    )
+    if b"[ / ]:previous / next" not in footer():
+        raise AssertionError("Planning detail step lost its footer")
+    send_and_wait(
+        process, master_fd, output, b"\x1b[D", b"Right / Enter:detail"
+    )
+    if b"[ / ]:previous / next" in footer():
+        raise AssertionError("Planning list retained the detail-only hint")
+    send_and_wait(
+        process, master_fd, output, b"f", b"filter:completed"
+    )
+    if b"f:filter" not in footer():
+        raise AssertionError("Planning list filter lost its footer")
+    os.write(master_fd, b"q")
 
 
 def planning_reorder_identity_interaction(fixtures: HttpFixtures) -> Interaction:
@@ -5634,17 +5695,12 @@ def board_detail_authority_interaction(
         try:
             open_loaded_board(process, master_fd, output, post_count=2)
             fixtures["/api/v1/board?sort_by=hot"] = late_list
-            # The Overview draws the new briefing's attention item, which is
-            # how the walk below knows the refresh reached it.
+            # Home retains the briefing's unreadable-source reason. Use it
+            # to observe the refresh without relying on removed incident cards.
             late_briefing = overview_event_briefing()
-            late_briefing["attention_queue"] = [
-                {
-                    "kind": "fixture_marker",
-                    "severity": "info",
-                    "summary": "late-list-applied",
-                    "target_type": "board",
-                }
-            ]
+            late_briefing["keepers_listing"] = {
+                "state": "unreadable", "detail": "late-list-applied"
+            }
             fixtures["/api/v1/dashboard/briefing"] = (200, late_briefing)
 
             read_available(master_fd, output)
@@ -6916,9 +6972,9 @@ def chat_steer_interaction(fixture: AtomicChatFixture, requests: HttpRequests) -
             if not wait_for_fixture_event(process, master_fd, output, fixture.interrupted, timeout=5):
                 raise AssertionError("Esc never reached its exact observed turn")
             send_and_wait(process, master_fd, output, b"new-course", composer_showing(b"new-course"))
-            send_and_wait(process, master_fd, output, b"\r", b"Queue (1 waiting")
+            send_and_wait(process, master_fd, output, b"\r", b"Queue (2 pending")
             send_and_wait(process, master_fd, output, b"one-more", composer_showing(b"one-more"))
-            send_and_wait(process, master_fd, output, b"\r", b"Queue (2 waiting")
+            send_and_wait(process, master_fd, output, b"\r", b"Queue (3 pending")
             if not wait_for_fixture_event(process, master_fd, output, fixture.old_poll_seen, timeout=10):
                 raise AssertionError("no stale observation arrived during pending Esc")
             read_available(master_fd, output)
@@ -6970,7 +7026,7 @@ def chat_working_target_interaction(fixture: AtomicChatFixture) -> Interaction:
             time.sleep(0.08)  # delimit the terminal's lone Escape before typing
             read_available(master_fd, output)
             send_and_wait(process, master_fd, output, b"after-stop", composer_showing(b"after-stop"))
-            send_and_wait(process, master_fd, output, b"\r", b"Queue (1 waiting")
+            send_and_wait(process, master_fd, output, b"\r", b"Queue (2 pending")
             if len(fixture.interrupt_requests) != 1 or len(fixture.submitted) != 2:
                 raise AssertionError("double Esc duplicated control or released input before acknowledgement")
             fixture.release_interrupt.set()
@@ -7018,7 +7074,7 @@ def quit_names_waiting_messages_interaction(fixture: AtomicChatFixture) -> Inter
             if not wait_for_fixture_event(process, master_fd, output, fixture.interrupted, timeout=5):
                 raise AssertionError("Esc acknowledgement was not gated")
             send_and_wait(process, master_fd, output, b"waiting-line", composer_showing(b"waiting-line"))
-            send_and_wait(process, master_fd, output, b"\r", b"Queue (1 waiting")
+            send_and_wait(process, master_fd, output, b"\r", b"Queue (1 pending")
             if fixture.received:
                 raise AssertionError("pending control input was already sent to the server")
             escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
@@ -7056,7 +7112,7 @@ def chat_retained_stop_interaction(fixture: AtomicChatFixture) -> Interaction:
             if not wait_for_fixture_event(process, master_fd, output, fixture.interrupted, timeout=5):
                 raise AssertionError("initial stop never reached the server")
             send_and_wait(process, master_fd, output, b"retained-original", composer_showing(b"retained-original"))
-            send_and_wait(process, master_fd, output, b"\r", b"Queue (1 waiting")
+            send_and_wait(process, master_fd, output, b"\r", b"Queue (1 pending")
             send_and_wait(process, master_fd, output, b"\x1b", b"Input retained after Esc")
             if fixture.received:
                 raise AssertionError(f"second Esc dispatched retained input: {fixture.received!r}")
@@ -7174,7 +7230,11 @@ def chat_reconcile_interaction(
             send_and_wait(
                 process, master_fd, output, b"held-next", composer_showing(b"held-next")
             )
-            send_and_wait(process, master_fd, output, b"\r", b"Queue (1 waiting")
+            send_and_wait(process, master_fd, output, b"\r", b"Queue (2 pending")
+            completed = output.rfind(FRAME_END) + len(FRAME_END)
+            pending_screen = screen_text(bytes(output[:completed]))
+            if b"1 rechecking delivery" not in pending_screen or b"queued at Keeper" in pending_screen:
+                raise AssertionError("unknown admission was presented as confirmed queued: " + repr(pending_screen))
             before_release = [
                 json.loads(body).get("message")
                 for path, body in requests
@@ -7642,7 +7702,7 @@ def memory_facts_interaction() -> Interaction:
     return interact
 
 
-def memory_journal_fixture() -> HttpResponse:
+def memory_journal_fixture() -> tuple[int, dict[str, object]]:
     return (
         200,
         {
@@ -8505,6 +8565,186 @@ def run_context_inspector_transport_error_regression(executable: str) -> None:
     )
 
 
+def next_request_forecast_fixture(*, with_continuity: bool) -> dict[str, object]:
+    origin: dict[str, object] = (
+        {"kind": "librarian_snapshot", "end_atom": 2698, "boundary_line": 2215}
+        if with_continuity
+        else {"kind": "ledger"}
+    )
+    return {
+        "schema": "masc.keeper.next-request-forecast.v5",
+        "keeper": "alpha",
+        "trace_id": "trace-next-request",
+        "checkpoint_messages": 5217,
+        "wake_line_bytes": 131,
+        "walk": {
+            "lane_id": "kimi_coding.kimi-for-coding",
+            "declared": ["kimi_coding.kimi-for-coding"],
+        },
+        "candidates": [
+            {
+                "runtime_id": "kimi_coding.kimi-for-coding",
+                "lane": {"agent_core": True},
+                "marks": {"high_water_tokens": 100000, "low_water_tokens": 70000},
+                "parts": {"error": "no completed turn on this runtime carried a composition in the newest 200 records"},
+                "history_atoms": 2718,
+                "carried": {
+                    "first_atom": 2698,
+                    "kept_atoms": 20,
+                    "transmitted_bytes": 237300,
+                    "preamble_bytes": None,
+                    "origin": origin,
+                    "counted_tokens": None if with_continuity else 71000,
+                },
+                "assembly": None,
+                "place": {"walks_at": 0, "declared_at": 0, "rest": {"kind": "serving"}},
+            }
+        ],
+    }
+
+
+def scroll_context_one_line(process, master_fd, output) -> bytes:
+    # A scroll paints one frame. send_and_wait(..., FRAME_END) would consume
+    # that marker as its needle and then wait for an unnecessary second frame.
+    read_available(master_fd, output)
+    start = len(output)
+    os.write(master_fd, b"j")
+    wait_for_output(process, master_fd, output, FRAME_END, start=start, timeout=3.0)
+    frame_end = output.find(FRAME_END, start) + len(FRAME_END)
+    return bytes(output[start:frame_end])
+
+
+def open_context_and_read_history_pages(process, master_fd, output) -> bytes:
+    # The loaded context can be taller than the terminal. Walk its actual
+    # reported pages, preserving the bytes for the existing content checks.
+    drawn = send_and_wait(process, master_fd, output, b"\r", b"WHAT WENT IN")
+    while True:
+        visible = screen_text(bytes(output))
+        bounds = re.search(rb"\[lines (\d+)-(\d+)/(\d+)\]", visible)
+        if bounds is None or int(bounds[2]) == int(bounds[3]):
+            break
+        first = int(bounds[1])
+        drawn += scroll_context_one_line(process, master_fd, output)
+        advanced = re.search(rb"\[lines (\d+)-(\d+)/(\d+)\]",
+                             screen_text(bytes(output)))
+        if advanced is None or int(advanced[1]) <= first:
+            raise AssertionError("Context j did not advance its reported window")
+    if b"HOW FAR BACK" not in CSI_RE.sub(b"", drawn):
+        raise AssertionError("Loaded Context pages omitted the history band")
+    return drawn
+
+
+def context_visible_pane(output) -> tuple[bytes, bytes, tuple[int, int, int] | None]:
+    """Current completed Context body, joining only its visible row payloads."""
+    end = output.rfind(FRAME_END)
+    if end < 0:
+        raise AssertionError("Context has no completed frame")
+    completed = bytes(output[:end + len(FRAME_END)])
+    rows = screen_rows(completed)
+    title = next((number for number, row in sorted(rows.items())
+                  if b"MASC Context" in row), None)
+    if title is None:
+        raise AssertionError(f"Context title is not visible: {screen_text(completed)!r}")
+    window = next(((number, match) for number, row in sorted(rows.items())
+                   if (match := LINES_WINDOW_RE.search(row)) is not None), None)
+    bounds = None if window is None else tuple(int(value) for value in window[1].groups())
+    if bounds is not None and not (1 <= bounds[0] <= bounds[1] <= bounds[2]):
+        raise AssertionError(f"Invalid Context window: {bounds!r}")
+    border = "│".encode()
+    payloads = []
+    for number, row in sorted(rows.items()):
+        if number <= title or (window is not None and number >= window[0]):
+            continue
+        plain = row.strip()
+        if plain.startswith(border) and plain.endswith(border):
+            payload = plain[len(border):-len(border)].strip()
+            if payload:
+                payloads.append(payload)
+    return screen_text(completed), b" ".join(payloads), bounds
+
+
+def run_next_request_readability_regression(executable: str) -> None:
+    for with_continuity in (True, False):
+        for cols in (80, 140):
+            fixtures = context_inspector_fixtures()
+            fixtures["/api/v1/keepers/alpha/next-request"] = (
+                200,
+                next_request_forecast_fixture(with_continuity=with_continuity),
+            )
+
+            def interact(process, master_fd, _slave_fd, output, _base_path):
+                resize_and_wait(
+                    process, master_fd, output, rows=32, columns=cols,
+                    needle=b"MASC Dashboard",
+                )
+                send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
+                select_keeper_row(process, master_fd, output, b"alpha")
+                send_and_wait(
+                    process, master_fd, output, b"\r",
+                    b"Keepers \xe2\x96\xb8 \x1b[1malpha",
+                )
+                send_and_wait(
+                    process, master_fd, output, b"m",
+                    b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat",
+                )
+                send_and_wait(
+                    process, master_fd, output, b"/context",
+                    composer_showing(b"/context"),
+                )
+                send_and_wait(process, master_fd, output, b"\r", b"WHAT WENT IN")
+                while True:
+                    visible, pane, bounds = context_visible_pane(output)
+                    if (
+                        b"Config / Runtime:" in pane
+                        and b"model limit." in pane
+                        and b"History preview:" in pane
+                        and (
+                            (b"Librarian working state" in pane)
+                            if with_continuity
+                            else (b"front from this runtime's ledger" in pane)
+                        )
+                    ):
+                        break
+                    # At the last reported row j changes nothing, so no new
+                    # frame is expected. Fail here with the current viewport.
+                    if bounds is None or bounds[1] == bounds[2]:
+                        raise AssertionError(
+                            f"Next Request meaning not visible at {cols} columns "
+                            f"at Context window {bounds!r}: {visible!r}"
+                        )
+                    first = bounds[0]
+                    scroll_context_one_line(process, master_fd, output)
+                    _visible, _pane, advanced = context_visible_pane(output)
+                    if advanced is None or advanced[0] <= first:
+                        raise AssertionError(
+                            f"Context j did not advance its reported window: "
+                            f"{bounds!r} -> {advanced!r}"
+                        )
+                if b"100.0k / 70.0k" in visible:
+                    raise AssertionError("trim settings still look like a forecast figure")
+                print(
+                    f"NEXT_REQUEST_CAPTURE {'continuity' if with_continuity else 'ledger'} "
+                    f"{cols}x32\n{visible.decode(errors='replace')}"
+                )
+                send_and_wait(
+                    process, master_fd, output, b"\x1b",
+                    b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat",
+                )
+                escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
+                os.write(master_fd, b"q")
+
+            run_terminal_scenario(
+                executable,
+                description=(
+                    f"Next Request {'Librarian' if with_continuity else 'ledger'} "
+                    f"copy at {cols} columns"
+                ),
+                interact=interact,
+                terminal_cols=cols,
+                http_fixtures=fixtures,
+            )
+
+
 def context_inspector_interaction() -> Interaction:
     def interact(
         process: subprocess.Popen[bytes],
@@ -8531,8 +8771,8 @@ def context_inspector_interaction() -> Interaction:
         send_and_wait(
             process, master_fd, output, b"/context", composer_showing(b"/context")
         )
-        composition = send_and_wait(
-            process, master_fd, output, b"\r", b"HOW FAR BACK"
+        composition = open_context_and_read_history_pages(
+            process, master_fd, output
         )
         composition_plain = CSI_RE.sub(b"", composition)
         for needle in (
@@ -10015,9 +10255,12 @@ def message_origin_badge_interaction(
     draft_frame = send_and_wait(
         process, master_fd, output, b"draft-neutral", b"draft-neutral"
     )
-    if b"\x1b[96m  > \x1b[0mdraft-neutral" not in draft_frame:
+    # Restore only the foreground after the accented prompt. A full reset
+    # would erase the input surface background; accepting arbitrary SGR here
+    # could instead leave the draft tinted or clear its background with 49m.
+    if b"\x1b[96m  > \x1b[39mdraft-neutral" not in draft_frame:
         raise AssertionError(
-            f"chat composer did not limit accent to its prompt: {draft_frame!r}"
+            f"chat composer did not restore default foreground while preserving its background: {draft_frame!r}"
         )
     escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
     os.write(master_fd, b"q")
@@ -10201,10 +10444,9 @@ def keeper_message_switch_interaction(alpha_history: GatedHttpResponse) -> Inter
             composer_showing(b"alpha-draft"),
         )
 
-        # The roster is put away until it is asked for, so this scenario asks.
-        # Ctrl-B is refused below Masc_tui_roster_pane.threshold_cols, and the
-        # width above is chosen to clear it.
-        send_and_wait(process, master_fd, output, b"\x02", b"KEEPERS")
+        # Wide chat shows the roster by default. Leave that preference
+        # untouched while checking the selected Keeper and draft handoff.
+        wait_for_output(process, master_fd, output, b"KEEPERS", start=0, timeout=3.0)
 
         beta_start = len(output)
         # A drawn roster is an input pane: Left focuses it, Down moves its
@@ -11243,6 +11485,10 @@ def standalone_lane_fixture(
             "changes; semantic verification is not performed.",
             False,
         ),
+        "candle_appraiser": (
+            "Appraises a confirmed Goal payout grade, each candidate Task's relation to the Goal, and Keeper contribution weights.",
+            False,
+        ),
         "verifier_exact": (
             "Reviews Task completion and Goal proof evidence.",
             False,
@@ -11322,6 +11568,7 @@ def standalone_lanes_response() -> HttpResponse:
                     "browser_stagehand_exact", "Browser Stagehand",
                     status="no_retained_observation", retained=0,
                 ),
+                standalone_lane_fixture("candle_appraiser", "Candle Appraiser"),
             ],
         },
     )
@@ -12640,8 +12887,9 @@ def run_tab_strip_keeps_current_entry_regression(executable: str) -> None:
 def run_activity_logs_tab_pane_regression(executable: str) -> None:
     """Dashboard, Work and Usage share the pane's 102-column surface floor.
 
-    At the narrow threshold they all retain the Recent pane. Activity's
-    Events and Logs readings suppress it, because they own that content.
+    Home stays compact by default. An explicit Ctrl-L choice opens the
+    Recent pane, whose 102-column surface boundary then persists on Work and
+    Usage. Activity Events and Logs suppress it because they own that content.
     """
 
     def pane_row(output: bytearray) -> int:
@@ -12655,8 +12903,13 @@ def run_activity_logs_tab_pane_regression(executable: str) -> None:
         resize_and_wait(process, master_fd, output, rows=38,
                         columns=ACTING_PANE_THRESHOLD_COLUMNS,
                         needle=b"MASC Dashboard", final_cursor=b"\x1b[?25l")
+        # Home starts without a feed. An explicit pane choice still applies
+        # on Home and survives the following surface switches.
+        drain_until_quiet(process, master_fd, output)
+        assert pane_row(output) < 0, screen_text(bytes(output))
+        send_and_wait(process, master_fd, output, b"\x0c", b"[Recent]")
         for title, ready, whole_row in (
-            (b"MASC Dashboard", b"D12 Goal", b"linked tasks 0/1 done"),
+            (b"MASC Dashboard", b"Continue", b"Choose a Keeper"),
             (b"MASC Work", b"D12 Goal", b"D12 Goal"),
             (b"MASC Usage", b"D12 provider", b"40%"),
         ):
@@ -13052,7 +13305,7 @@ def code_lane_interaction(
         process, master_fd, output, b"d", LEXED_LET
     )
     diff_plain = CSI_RE.sub(b"", diff_frame).decode("utf-8")
-    for needle in ("diff vs HEAD: lib/a.ml", "let a = 1", "let x = 1"):
+    for needle in ("diff col 1 vs HEAD: lib/a.ml", "let a = 1", "let x = 1"):
         if needle not in diff_plain:
             raise AssertionError(
                 f"the diff view missed {needle!r}: {diff_plain!r}"
@@ -14070,7 +14323,8 @@ def schedule_detail_interaction() -> Interaction:
             b"masc://keepers/alpha",
             b"schedule-stimulus-proof-701",
             b"schedule-occurrence-proof-701",
-            b"2026-08-25 09:30:20",
+            b"Turn started",
+            b"2026-08-25T09:30:20Z",
             b"Turn finished",
             b"WORK RESULT",
             b"bounded by its start and finish rows",
@@ -14080,6 +14334,10 @@ def schedule_detail_interaction() -> Interaction:
                 raise AssertionError(
                     f"Schedule turn/result page omitted {needle!r}: {result_plain!r}"
                 )
+        result_rows = screen_rows(result_page)
+        if not any(b"Turn started" in row and b"2026-08-25T09:30:20Z" in row
+                   for row in result_rows.values()):
+            raise AssertionError(f"Turn started row lost its exact ISO fixture timestamp: {result_rows!r}")
         returned = send_and_wait(process, master_fd, output, b"\x1b[D", b"j/k:move")
         returned_plain = CSI_RE.sub(b"", returned)
         for needle in (b"schedule-proof-701", b"status:running", b"queue:matched_pending/2 pending"):
@@ -15396,7 +15654,10 @@ def task_dispatch_interaction(requests: HttpRequests) -> Interaction:
             process, master_fd, output, b"feed: closed", start=0, timeout=10.0
         )
         tab_until(process, master_fd, output, b"MASC Dashboard")
-        send_and_wait(process, master_fd, output, b"i", b"\xe2\x80\xba to alpha")
+        send_and_wait(process, master_fd, output, b"i", b"MASC Keepers")
+        select_keeper_row(process, master_fd, output, b"alpha")
+        send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
+        send_and_wait(process, master_fd, output, b"c", b"Esc:detail")
         send_and_wait(process, master_fd, output, b"/task Lanes surface", b"/task Lanes surface")
         os.write(master_fd, b"\r")
         chat_body = wait_for_http_request(
@@ -15503,7 +15764,7 @@ def unread_keeper_counted_interaction() -> Interaction:
             process,
             master_fd,
             output,
-            b"Keepers: 1 listed (1 state unreadable)",
+            b"1 Keeper states unreadable",
             start=0,
             timeout=10.0,
         )
@@ -15559,7 +15820,7 @@ def unlisted_keepers_named_interaction() -> Interaction:
             process,
             master_fd,
             output,
-            b"(EACCES)",
+            b"Keepers unlisted: EACCES",
             start=0,
             timeout=10.0,
         )
@@ -15606,10 +15867,9 @@ def paused_apart_from_stopped_interaction() -> Interaction:
         output: bytearray,
         _base_path: str,
     ) -> None:
-        # The first screen counts listed Keepers without guessing state from
-        # recent tasks or folding paused/stopped into a synthetic idle count.
+        # Home no longer derives a fleet state summary from briefing rows.
         wait_for_output(
-            process, master_fd, output, b"Keepers: 5 listed", start=0, timeout=10.0
+            process, master_fd, output, b"Continue", start=0, timeout=10.0
         )
         frame = resize_and_wait(
             process, master_fd, output, rows=30, columns=120,
@@ -15631,36 +15891,16 @@ def attention_drawn_once_interaction() -> Interaction:
         output: bytearray,
         _base_path: str,
     ) -> None:
-        wait_for_output(
-            process,
-            master_fd,
-            output,
-            b"sangsu has external attention",
-            start=0,
-            timeout=10.0,
-        )
-        wait_for_output(
-            process, master_fd, output, b"analyst needs operator", start=0, timeout=3.0
-        )
-        # One full repaint to count rows in: the ordinary paints are row
-        # diffs, so counting in the raw stream would count repaints.
+        wait_for_output(process, master_fd, output, b"Continue", start=0, timeout=10.0)
         frame = resize_and_wait(
-            process,
-            master_fd,
-            output,
-            rows=30,
-            columns=99,
-            needle=b"sangsu has external attention",
-            controls=(FULL_REDRAW,),
-            final_cursor=b"\x1b[?25l",
+            process, master_fd, output, rows=30, columns=99, needle=b"Continue",
+            controls=(FULL_REDRAW,), final_cursor=b"\x1b[?25l",
         )
-        repeated = frame.count(b"sangsu has external attention")
-        if repeated != 1:
-            raise AssertionError(
-                f"an attention fact on two briefing lists drew {repeated} rows: {frame!r}"
-            )
-        if frame.count(b"analyst needs operator") != 1:
-            raise AssertionError(f"the distinct item vanished: {frame!r}")
+        # Incident text is not an authoritative operator request. Neither
+        # duplicated nor distinct briefing incidents enter Home's decisions.
+        for label in (b"sangsu has external attention", b"analyst needs operator"):
+            if label in frame:
+                raise AssertionError(f"Home projected an incident as a decision: {frame!r}")
 
         os.write(master_fd, b"q")
 
@@ -16717,6 +16957,12 @@ def run_first_install_credential_regression(executable: str) -> None:
 
 
 def run_planning_review_regression(executable: str) -> None:
+    run_terminal_scenario(
+        executable,
+        description="Planning footer follows list and detail dispatch",
+        interact=planning_footer_dispatch_interaction,
+        http_fixtures=planning_selection_http_fixtures(),
+    )
     run_terminal_scenario(
         executable,
         description="Planning preserves selected goals and footer across resize",
@@ -18030,7 +18276,7 @@ def run_mermaid_chat_regression(executable: str) -> None:
 # RFC-0429 §1.3 and §4. The second recorded change carries
 # "let b = 2\nlet c = 3", and the Changes list has one line per row to say it
 # in. Printing the newline writes the rest of the row wherever the terminal's
-# cursor lands; Tui_decode.preview_line projects it to one cell instead.
+# cursor lands; Masc.Tui_terminal_text.preview_line projects it to one cell instead.
 #
 # This is its own lane rather than an assertion inside the default keyboard
 # regression: that lane stops before reaching the Changes surface, at the exit
@@ -18479,7 +18725,9 @@ def resources_mcp_fixture() -> HttpFixtures:
         )
 
     fixtures = overview_event_http_fixtures()
-    fixtures["/mcp"] = RequestHttpResponse(answer)
+    fixtures["/mcp"] = RequestHttpResponse(
+        answer, get_response=(405, {"error": "fixture does not offer an SSE stream"})
+    )
     return fixtures
 
 
@@ -20279,10 +20527,12 @@ def dashboard_usage_interaction(
     _base_path: str,
 ) -> None:
     wait_for_output(process, master_fd, output, b"MASC Dashboard", start=0, timeout=30.0)
-    wait_for_output(process, master_fd, output, b"actual 3 (reported)", start=0, timeout=10.0)
+    wait_for_output(process, master_fd, output, b"Continue", start=0, timeout=10.0)
     dashboard = unwrapped(screen_text(bytes(output)))
-    if b"Goals" not in dashboard or b"Work" not in dashboard or b"linked tasks 0/1 done" not in dashboard:
-        raise AssertionError(f"Dashboard summary missing: {dashboard!r}")
+    if b"Work:" not in dashboard or b"Continue" not in dashboard:
+        raise AssertionError(f"Dashboard entry missing: {dashboard!r}")
+    if b"actual 3 (reported)" in dashboard or b"linked tasks 0/1 done" in dashboard:
+        raise AssertionError(f"Dashboard duplicated Work detail: {dashboard!r}")
     print("DASHBOARD_PTY_SCREEN=" + json.dumps(dashboard.decode("utf-8", errors="replace")), flush=True)
     send_and_wait(process, master_fd, output, b"\t", b"Fixture Goal")
     send_and_wait(process, master_fd, output, b"\r", b"Actual: 3 (reported)")
@@ -20312,14 +20562,33 @@ def dashboard_usage_interaction(
     send_and_wait(process, master_fd, output, b"p", b"MASC Usage")
     send_and_wait(process, master_fd, output, b"w", b"1 UTC days")
     send_and_wait(process, master_fd, output, b"w", b"7 UTC days")
+    # Leave from diagnostics: Home's Usage shortcut must still open accounts.
+    send_and_wait(process, master_fd, output, b"p", b"MASC Usage / Telemetry")
     system = tab_until(process, master_fd, output, b"MASC System")
     if b"MASC System" not in system:
         raise AssertionError(f"System is not on the main ring: {system!r}")
     send_and_wait(process, master_fd, output, b"A", b"MASC Activity")
     tab_until(process, master_fd, output, b"MASC Dashboard")
-    send_and_wait(process, master_fd, output, b"i", b"\xe2\x80\xba to alpha")
+    send_and_wait(process, master_fd, output, b"m", b"7 UTC days")
+    usage = screen_text(bytes(output))
+    if b"MASC Usage / Telemetry" in usage:
+        raise AssertionError(f"Home Usage shortcut resumed diagnostics: {usage!r}")
+    send_and_wait(process, master_fd, output, b"p", b"MASC Usage / Telemetry")
+    palette_go(process, master_fd, output, b"go Usage", b"7 UTC days")
+    send_and_wait(process, master_fd, output, b"p", b"MASC Usage / Telemetry")
+    palette_go(process, master_fd, output, b"go Keepers", b"MASC Keepers")
+    select_keeper_row(process, master_fd, output, b"alpha")
+    send_and_wait(process, master_fd, output, b"c", b"Esc:list")
     send_and_wait(process, master_fd, output, b"/cost", b"/cost")
-    send_and_wait(process, master_fd, output, b"\r", b"MASC Usage")
+    send_and_wait(process, master_fd, output, b"\r", b"7 UTC days")
+    send_and_wait(process, master_fd, output, b"i", b"to alpha")
+    send_and_wait(process, master_fd, output, b"/telemetry", b"/telemetry")
+    send_and_wait(process, master_fd, output, b"\r", b"MASC Usage / Telemetry")
+    tab_until(process, master_fd, output, b"MASC Usage")
+    wait_for_output(
+        process, master_fd, output, b"7 UTC days",
+        start=output.rfind(b"MASC Usage"), timeout=10.0,
+    )
     os.write(master_fd, b"q")
 
 

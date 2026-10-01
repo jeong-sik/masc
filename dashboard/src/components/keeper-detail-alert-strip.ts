@@ -273,7 +273,7 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
   const trustDispositionDisplay = trustDispositionLabel(trustDisposition)
 
   return html`
-    <div class="px-6 pt-4 v2-monitoring-surface">
+    <div class="kw-detail-alert-strip px-6 pt-4 v2-monitoring-surface">
       <div class="rounded-[var(--r-1)] border ${toneClass} px-4 py-3 flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-[var(--color-fg-primary)] v2-monitoring-panel">
         ${actionVisibility.canResume
           ? html`<${RuntimeBadge} tone="warn">일시정지</${RuntimeBadge}>

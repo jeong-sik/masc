@@ -13,6 +13,8 @@ on:
 
 permissions:
   contents: write
+  issues: write
+  pull-requests: read
 
 concurrency:
   group: ${{ inputs.candidate_verification && format('candidate-release-{0}', github.run_id) || format('release-{0}', github.ref) }}
@@ -37,6 +39,22 @@ jobs:
                 ;;
             esac
           fi
+
+  verification:
+    needs: validate-release-entrypoint
+    if: ${{ !inputs.candidate_verification && !cancelled() && (needs.validate-release-entrypoint.result == 'success' || needs.validate-release-entrypoint.result == 'skipped') }}
+    uses: ./.github/workflows/full-check.yml
+
+  behavior:
+    needs: validate-release-entrypoint
+    if: ${{ !inputs.candidate_verification && !cancelled() && (needs.validate-release-entrypoint.result == 'success' || needs.validate-release-entrypoint.result == 'skipped') }}
+    uses: ./.github/workflows/test.yml
+    permissions:
+      contents: read
+      issues: write
+    with:
+      suite: ""
+      eio_backend: ""
 
   build:
     needs: validate-release-entrypoint
@@ -530,8 +548,8 @@ jobs:
             --append compare-link.md --max-chars 125000 --expect-date "$tag_day"
 
   release:
-    needs: build
-    if: ${{ !cancelled() && needs.build.result == 'success' }}
+    needs: [build, verification, behavior]
+    if: ${{ !cancelled() && needs.build.result == 'success' && (inputs.candidate_verification || (needs.verification.result == 'success' && needs.behavior.result == 'success')) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
 

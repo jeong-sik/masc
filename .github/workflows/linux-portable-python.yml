@@ -1,13 +1,5 @@
 name: Linux portable Python
 on:
-  pull_request:
-    paths:
-      - 'scripts/package-linux-runtime.py'
-      - 'scripts/package-macos-runtime.py'
-      - 'scripts/portable-python-runtime.lock.json'
-      - 'scripts/install.sh'
-      - 'test/test_installer_dependencies.py'
-      - '.github/workflows/linux-portable-python.yml'
   workflow_dispatch:
 permissions:
   contents: read

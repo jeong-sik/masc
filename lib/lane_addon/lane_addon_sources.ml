@@ -61,7 +61,8 @@ let offers : Lane_id.builtin -> kind list = function
   | Lane_id.Exact
       ( Standalone_lane.Librarian | Standalone_lane.Hitl_auto_judge
       | Standalone_lane.Board_attention | Standalone_lane.Workspace_curator
-      | Standalone_lane.Verifier | Standalone_lane.Browser_stagehand ) -> []
+      | Standalone_lane.Verifier | Standalone_lane.Browser_stagehand
+      | Standalone_lane.Candle_appraiser ) -> []
   | Lane_id.Browser lane ->
     (match document_observer lane with
      | Operator_client_observer | Automation_observer -> [ Browser_document_kind ]
@@ -187,6 +188,7 @@ let activity_of_misc_operation : Tool_schemas_misc.misc_operation -> activity = 
   | Misc_lane_evidence | Misc_lane_act | Misc_lane_action_status | Misc_lane_updates
   | Misc_ask | Misc_ask_status | Misc_ask_withdraw
   | Misc_config | Misc_dashboard | Misc_gc | Misc_keeper_waiting_inventory
+  | Misc_candle_balance | Misc_candle_catalog | Misc_candle_purchase | Misc_candle_equip
   | Misc_tool_help | Misc_portrait_read | Misc_web_fetch | Misc_web_search -> Tool_completed
 let snapshot_files_only = function
   | [] -> false

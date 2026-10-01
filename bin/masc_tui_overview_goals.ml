@@ -114,7 +114,7 @@ let overdue_text ~now (goal : Tui_decode.overview_goal) =
   else None
 
 (* A row is a scan target, not a Goal progress meter. Task counts name
-   linked task work only; the Goal metric and ownership live in Planning. *)
+   linked task work only; the Goal metric lives in Planning. *)
 let goal_rows ~now ~inner_width goals =
   let now = Ptime.of_float_s now in
   List.map

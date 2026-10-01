@@ -559,7 +559,7 @@ let fetch_machine_live ~(host : string) ~(port : int)
           | Error _ as error -> error
           | Ok json -> Masc_tui_machine_live.decode source json)
   in
-  Result.map_error Masc.Tui_decode.sanitize_terminal_text result
+  Result.map_error Masc.Tui_terminal_text.sanitize_terminal_text result
 
 (** POST a JSON body and parse the JSON response. *)
 let post_json_with_timeout ~timeout_sec ~(host : string) ~(port : int)
@@ -1845,7 +1845,7 @@ let set_runtime_lane_slots ~(host : string) ~(port : int) ~(lane : string)
       | (first : Runtime_toml.parse_error) :: _ ->
         Printf.sprintf "runtime.toml parse error at %s: %s"
           first.path first.message
-        |> Masc.Tui_decode.sanitize_terminal_text) in
+        |> Masc.Tui_terminal_text.sanitize_terminal_text) in
   let* current = match List.find_opt
       (fun (decl : Runtime_schema.lane_decl) -> String.equal decl.id lane)
       config.Runtime_schema.lane_decls with
@@ -3242,7 +3242,7 @@ let fetch_git_diff ?repo ~(host : string) ~(port : int)
     {!submit_keeper_ask_answer} takes ids back, so nothing on this side ever
     matches a choice by its wording. *)
 let fetch_keeper_asks ?keeper_name ~(host : string) ~(port : int) () :
-    (Masc.Tui_decode.asks_snapshot, string) result =
+    (Masc.Tui_decode_asks.asks_snapshot, string) result =
   (* No keeper named means the whole fleet. An operator opening this surface
      does not know which Keeper is stuck yet, and asking them to pick a name
      first is asking them to guess. *)
@@ -3265,7 +3265,7 @@ let fetch_keeper_asks ?keeper_name ~(host : string) ~(port : int) () :
       Error (refusal ~status_code:status ~body)
   | Ok (_, body) -> (
       match Yojson.Safe.from_string body with
-      | json -> Masc.Tui_decode.decode_asks_snapshot json
+      | json -> Masc.Tui_decode_asks.decode_asks_snapshot json
       | exception Yojson.Json_error detail -> Error ("asks were not JSON: " ^ detail))
 
 (** Answer one question of one ask ([POST /api/v1/keepers/ask-answer]).

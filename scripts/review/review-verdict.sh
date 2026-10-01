@@ -14,7 +14,10 @@ verdict_for() { # pr head
       if (w[1]=="verdict:" && names_head) {
         state=w[2]; run="-"; by="-"
         if (state=="PASS" || state=="FAIL") {
-          if (body ~ /^verdict: (PASS|FAIL) head: [0-9a-f]+ run: [1-9][0-9]* by: [A-Za-z0-9._-]+$/ &&
+          if (body ~ /^verdict: (PASS|FAIL) head: [0-9a-f]+ by: [A-Za-z0-9._-]+$/ &&
+              n==6 && head_fields==1 && w[3]=="head:" && w[4]==head &&
+              w[5]=="by:" && w[6] ~ /^[A-Za-z0-9._-]+$/) { by=w[6] }
+          else if (body ~ /^verdict: (PASS|FAIL) head: [0-9a-f]+ run: [1-9][0-9]* by: [A-Za-z0-9._-]+$/ &&
               n==8 && head_fields==1 && w[3]=="head:" && w[4]==head &&
               w[5]=="run:" && w[6] ~ /^[1-9][0-9]*$/ &&
               w[7]=="by:" && w[8] ~ /^[A-Za-z0-9._-]+$/) { run=w[6]; by=w[8] }

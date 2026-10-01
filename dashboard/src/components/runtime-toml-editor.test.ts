@@ -169,7 +169,7 @@ const richConfig = {
 function laneSnapshot(slots = ['runpod_mtp.qwen', 'openai.gpt'], cliSlots = ['codex_subscription.luna']) {
   return { lanes: [
     'board_attention_exact', 'hitl_auto_judge', 'librarian_exact',
-    'workspace_curator_exact', 'verifier_exact',
+    'workspace_curator_exact', 'verifier_exact', 'browser_stagehand_exact', 'candle_appraiser',
   ].map(laneId => ({
     laneId,
     label: laneId,
@@ -861,6 +861,21 @@ describe('RuntimeTomlEditor', () => {
     await waitFor(() => expect(apiMocks.patchRuntimeExactSlot)
       .toHaveBeenCalledWith('workspace_curator_exact', 'append', 'next.client', undefined))
     expect(container.textContent).toContain('CLI tail is not supported')
+    expect(apiMocks.saveRuntimeTomlConfig).not.toHaveBeenCalled()
+  })
+
+  it('configures Candle appraisal through the exact-lane slot endpoint', async () => {
+    render(html`<${RuntimeTomlEditor} />`, container)
+    await waitFor(() => expect(container.querySelector('[data-testid="runtime-toml-nav-lanes"]')).not.toBeNull())
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-nav-lanes"]') as HTMLButtonElement)
+    await waitFor(() => expect(container.querySelector(
+      '[aria-label="candle_appraiser 추가할 runtime"]')).not.toBeNull())
+    const select = container.querySelector(
+      '[aria-label="candle_appraiser 추가할 runtime"]') as HTMLSelectElement
+    fireEvent.change(select, { target: { value: 'openai.gpt' } })
+    fireEvent.click(container.querySelector('[data-testid="exact-lane-candle_appraiser"] button[aria-label="candle_appraiser 후보 추가"]') as HTMLButtonElement)
+    await waitFor(() => expect(apiMocks.patchRuntimeExactSlot)
+      .toHaveBeenCalledWith('candle_appraiser', 'append', 'openai.gpt', undefined))
     expect(apiMocks.saveRuntimeTomlConfig).not.toHaveBeenCalled()
   })
 

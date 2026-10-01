@@ -23,6 +23,7 @@ python3 collect.py --base <MASC_BASE_PATH> > baseline-<날짜>.json
 | Goal 수, phase 별 수, 기한이 있는 Goal 수 | Goal 을 늘리거나 기한을 안 적는 움직임 |
 | 생성부터 기한까지 시간(기한은 그날 UTC 23:59:59) | 짧은 Goal 이 감액을 받기 쉬운 정도 |
 | drop 한 주체별 수 | Goal 을 버리고 갈아타는 움직임 |
+| 기록된 기한·priority 변경 횟수와 주체별 수 | 완료 기준 외의 조건을 바꾸는 움직임 |
 | 검증 통과부터 사람의 확정까지 걸린 시간 | 감액 시계를 검증 통과로 잡은 이유 |
 | Task 수(backlog, archive 로 나눔), 끝난 Task 중 만든 사람이 곧 담당자인 비율 | 자기가 만들고 자기가 끝내는 움직임 |
 | 만든 사람별로 다른 keeper 가 끝낸 Task 수 | 맡기는 대신 직접 하는 움직임 |
@@ -49,6 +50,18 @@ python3 collect_link_timing.py --base <MASC_BASE_PATH> > link-timing-<날짜>.js
 
 ## 읽는 법
 
+- 새 보고서는 공유 Goal 에 소유자를 집계하지 않아요. 보관된 `baseline.json` 은 당시 관측값이라
+  `owner_known` 을 포함한 원본을 그대로 둬요.
+- `goal_events.metadata_edits` 는 `goal_edited` 의 `actor` 와 각 필드의 `{from, to}` 를 세요.
+  한 이벤트가 두 필드를 바꾸면 `recorded_events` 는 1이고 두 필드의 `changes` 는 각각 1이에요.
+  주체나 변경 값이 잘못된 이벤트는 수집을 실패시켜요.
+- 이 집계의 범위는 기록된 변경뿐이에요. 이벤트가 없으면 `coverage` 는 `not_observed` 이고,
+  관측 횟수 0이 실제 수정 횟수 0을 뜻하지 않아요. 변경 이벤트 producer 는
+  [#39951](https://github.com/jeong-sik/masc/pull/39951)에서 진행 중이며, 이 수집기 기반의
+  공유 Goal head에는 아직 포함되지 않았어요. 이벤트가 있어도 기록 실패로 빠진 수정까지 알 수는 없어요.
+- `goal_created`·`goal_updated` 는 변경 후 snapshot 이라 기한·priority 변경으로 추정하지 않아요.
+  동시에 일어난 수정의 이벤트는 저장 순서와 다르게 붙을 수 있어요. 변경 이벤트와 snapshot 이
+  함께 있어도 변경 횟수를 두 번 세지 않아요.
 - `baseline.json` 은 2026-09-29T05:59Z 의 라이브 값이에요. 표본이 Goal 18개와 완료 3건이라 작아요.
   변화가 보여도 원인이 Candle 인지는 이 값만으로 말할 수 없어요. 모델, persona, 난수 같은 다른 변수가
   같이 움직여요(`docs/rfc/RFC-0435-world-preset-comparison-validity.md` 2절).

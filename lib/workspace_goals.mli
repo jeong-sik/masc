@@ -20,7 +20,11 @@ val handle_goal_list
     create-or-update a goal record. Validates priority and rejects lifecycle
     fields, which belong to [masc_goal_transition]. Lifecycle field errors are
     reported via the dedicated
-    [goal_upsert_lifecycle_error] formatter. *)
+    [goal_upsert_lifecycle_error] formatter. A committed write remains successful
+    if a subsequent event append fails. [event_recordings] reports each snapshot,
+    criterion-induced phase event and exact due-date/priority edit event as
+    [recorded] or [failed]; a failed entry
+    carries the attempted payload and error. Cancellation still propagates. *)
 val handle_goal_upsert
   :  tool_name:string
   -> start_time:Tool_timing.started
@@ -146,24 +150,3 @@ val confirm_completion : ?after_confirmation:confirmation_step ->
     is repeated for a Goal that is already [Completed], so it must give the
     same answer the second time. When it refuses, the confirmation stays
     recorded, the phase does not move, and confirming again runs it again. *)
-
-val scan_overdue_goal_notifications :
-  ?now:Ptime.t -> Workspace_utils_backend_setup.config -> unit
-(** Send the one owner notice owed to each Goal past its [due_date] while still
-    executing or verifying (#39571). Judged by the server's periodic/restart
-    scan, never as a side effect of a list query. Idempotent: an already
-    notified Goal is skipped by its marker, and a re-send reuses the delivery
-    key, so the owner's transcript gains exactly one row per event. A Goal with
-    no recorded owner has no recipient and is skipped.
-
-    A Goal is past its due date once [now] is later than 23:59:59 UTC of that
-    day ({!Goal_due}). The operator's time zone plays no part, and a value that
-    is not a due date is never past. [now] is the wall clock unless given. *)
-
-val scan_refuted_goal_notifications : Workspace_utils_backend_setup.config -> unit
-(** Reconcile the one owner notice owed for each Goal whose current ledger
-    verdict is refuted (#39571). The commit-time send is the fast path; this
-    periodic/restart scan is the retry: a send that failed left no marker, so
-    the next scan re-sends, and a Goal whose owner changed after the verdict
-    reaches the new owner because the delivery key carries the owner. A verdict
-    whose criterion no longer matches the Goal is stale and is not re-sent. *)

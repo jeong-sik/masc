@@ -1,7 +1,5 @@
-// Vendors a prototype stylesheet into src/styles/keeper-v2/, applying the one
-// transform the repo requires: whole-pixel font-size literals that already have
-// a --fs-<N> token become var(--fs-<N>) (scripts/lint/no-raw-font-size-px.sh).
-// The token values are 1:1 with the pixels, so the render is unchanged.
+// Vendors a prototype stylesheet into src/styles/keeper-v2/ and maps
+// whole-pixel font-size literals to equivalent design tokens.
 import { readFileSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'

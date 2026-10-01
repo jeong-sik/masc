@@ -35,7 +35,7 @@ let observed =
 let render json =
   match
     Masc_tui_keeper_sandbox.decode
-      ~sanitize:Masc.Tui_decode.sanitize_terminal_text
+      ~sanitize:Masc.Tui_terminal_text.sanitize_terminal_text
       json
   with
   | Error detail -> Alcotest.fail detail
@@ -234,7 +234,7 @@ let test_unknown_profile_fails_closed () =
   in
   match
     Masc_tui_keeper_sandbox.decode
-      ~sanitize:Masc.Tui_decode.sanitize_terminal_text
+      ~sanitize:Masc.Tui_terminal_text.sanitize_terminal_text
       json
   with
   | Ok _ -> Alcotest.fail "an unknown sandbox profile was accepted"
@@ -288,7 +288,7 @@ let test_actual_container_logs_are_typed_and_terminal_safe () =
   let logs =
     match
       Masc_tui_keeper_sandbox.decode_logs
-        ~sanitize:Masc.Tui_decode.sanitize_terminal_text json
+        ~sanitize:Masc.Tui_terminal_text.sanitize_terminal_text json
     with
     | Ok logs -> logs
     | Error detail -> Alcotest.fail detail

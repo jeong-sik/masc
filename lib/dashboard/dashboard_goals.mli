@@ -81,12 +81,16 @@ val unlisted_goal_history_json :
     phase and left it had no surviving record that it existed; this reads the log
     without asking the current list what to look for.
 
-    Per goal: [opened_at] and [title] from its [goal_created] row, the last
-    [final_phase] it reached, [closed_at] only when that phase is terminal, and
+    Per goal: [opened_at] from [goal_created], [title] from the creation or
+    update with the greatest committed [store_version], and [title_ordering]
+    naming committed, unknown, or conflicting order. Missing/invalid snapshot
+    versions or conflicting latest titles report null titles. Phase events
+    retain their recorded order: the last recorded
+    [final_phase], [closed_at] only when that phase is terminal, and
     [lifetime_hours] between the two. A goal opened before [goal_created] existed
     reports null rather than a guessed time, and a goal that left the list
     without a terminal phase reports no closing time rather than an invented
-    outcome. [coverage] counts malformed lines, rows carrying no [goal_id], and
+    outcome. [coverage] counts unordered snapshot rows, malformed lines, rows carrying no [goal_id], and
     names every event type this reader does not understand, so nothing is
     dropped in silence. *)
 

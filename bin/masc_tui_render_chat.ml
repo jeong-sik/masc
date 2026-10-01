@@ -1807,56 +1807,6 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name
   layout_entries
 
 
-(* What a queued line is waiting on. "Pending" reads the same behind this
-   Keeper's turn that is still out and behind another queued line, and the
-   difference is whether the wait is ordinary. Computed here rather than in
-   the queue module: the answer needs the in-flight list, and the queue
-   cannot see it without a dependency cycle through [masc_tui_types]. *)
-let chat_pending_behind (state : state)
-  (item : Masc_tui_keeper_chat_queue.item) =
-  let keeper_name =
-  item.Masc_tui_keeper_chat_queue.request.Keeper_chat.keeper_name
-  in
-  let held =
-  List.length
-    (List.filter
-       (fun (entry : Masc_tui_types.inflight) ->
-          String.equal entry.Masc_tui_types.sent_request.keeper_name
-            keeper_name)
-       state.msg_inflight)
-  in
-  let ahead =
-  List.filter
-    (fun (waiting : Masc_tui_keeper_chat_queue.item) ->
-       String.equal
-         waiting.Masc_tui_keeper_chat_queue.request.Keeper_chat.keeper_name
-         keeper_name
-       && waiting.submission_seq > item.submission_seq
-       &&
-       (* A steer precedes ordinary input whatever its seq; a NEXT line
-          ahead of a steer is not ahead at all. *)
-       (match (waiting.intent, item.intent) with
-        | Steer_after_interrupt, Next -> true
-        | Next, Steer_after_interrupt -> false
-        | _ -> waiting.submission_seq > item.submission_seq))
-    (Masc_tui_keeper_chat_queue.waiting state.msg_queued)
-  in
-  match (item.intent, held, ahead) with
-  | Masc_tui_keeper_chat_queue.Steer_after_interrupt, 0, [] ->
-    Some "after the interrupted turn settles"
-  | Masc_tui_keeper_chat_queue.Steer_after_interrupt, _, _ ->
-    Some "behind this Keeper's turn still out"
-  | Masc_tui_keeper_chat_queue.Next, 0, [] -> None
-  | Masc_tui_keeper_chat_queue.Next, 0, waiting_ahead :: _ -> (
-    match waiting_ahead.intent with
-    | Steer_after_interrupt -> Some "behind a queued steer"
-    | Next -> Some "behind an earlier queued message")
-  | Masc_tui_keeper_chat_queue.Next, 1, _ ->
-    Some "behind this Keeper's running turn"
-  | Masc_tui_keeper_chat_queue.Next, held, _ ->
-    Some
-      (Printf.sprintf "behind this Keeper's %d running turns" held)
-
 (* The operator's own lines that have left the composer and not settled yet:
    the one a running turn is answering, and the ones waiting behind it.
 
@@ -1907,11 +1857,7 @@ let chat_tail_entries (state : state) ~keeper_name ~role_label_column =
                | Masc_tui_keeper_chat_queue.Next -> "NEXT"
                | Masc_tui_keeper_chat_queue.Steer_after_interrupt -> "STEER"
              in
-             let note =
-               match chat_pending_behind state item with
-               | Some reason -> Printf.sprintf "%s %d · %s" intent position reason
-               | None -> Printf.sprintf "%s %d" intent position
-             in
+             let note = Printf.sprintf "%s %d" intent position in
              entry ~at:item.submitted_at ~label:"YOU" ~note
                ~body:item.Masc_tui_keeper_chat_queue.request.Keeper_chat.message
          | Pending_preview_omitted omitted ->
@@ -2185,7 +2131,7 @@ let keeper_message_layout_entries ?messages (state : state) ~keeper_name
    result, and it settles when the turn ends.
 
    [needle] is trimmed by its caller and case-folded inside
-   {!Masc_tui_types.palette_contains}, which keeps case folding out of a
+   {!Masc_tui_pick_list.lowercase_contains}, which keeps case folding out of a
    module whose one rule about [String.lowercase_ascii] is that it does not
    appear here.
 
@@ -2196,7 +2142,7 @@ let keeper_message_find_scroll (state : state) ~keeper_name ~needle ~older_than 
   else
     let _, cols = get_terminal_size () in
     let chat_cols =
-      Masc_tui_roster_pane.content_cols ~hidden:state.roster_pane_hidden ~cols
+      Masc_tui_roster_pane.content_cols ~hidden:(roster_pane_hidden state) ~cols
     in
     let messages = keeper_message_visible_messages state ~keeper_name in
     let entries =
@@ -2215,7 +2161,7 @@ let keeper_message_find_scroll (state : state) ~keeper_name ~needle ~older_than 
       |> List.mapi (fun index (entry : Message_layout.entry) -> (index, entry))
       |> List.rev
       |> List.find_opt (fun (_, (entry : Message_layout.entry)) ->
-             Masc_tui_types.palette_contains ~needle entry.body)
+             Masc_tui_pick_list.lowercase_contains ~needle entry.body)
     in
     match matched with
     | None -> None
@@ -2319,7 +2265,7 @@ let render_keeper_message (state : state) =
        view does; the chat lays out against its own pane width. *)
     let split = keeper_roster_pane_shown state ~cols in
     let chat_cols =
-      Masc_tui_roster_pane.content_cols ~hidden:state.roster_pane_hidden ~cols
+      Masc_tui_roster_pane.content_cols ~hidden:(roster_pane_hidden state) ~cols
     in
     let title, mode_suffix =
       (* Both features put a mode indicator here: memory arrived on main
@@ -2409,7 +2355,8 @@ let render_keeper_message (state : state) =
        the width needed to identify the runtime the composer will address. *)
     let telemetry_cells = max 0 (cols - 1) in
     let telemetry_keeper =
-      fit_runtime_id (telemetry_cells / 3) display_keeper_name ^ " · "
+      Masc_tui_theme.tone Masc_tui_theme.Accent
+      ^ fit_runtime_id (telemetry_cells / 3) display_keeper_name ^ Ansi.reset ^ " · "
     in
     let telemetry_identity_cells =
       max 0 (telemetry_cells - Message_layout.display_width telemetry_keeper)
@@ -2473,7 +2420,7 @@ let render_keeper_message (state : state) =
                     context_separator ^ Theme.warn () ^ item ^ Ansi.reset)
                   librarian_item
               ; Option.map
-                  (fun item -> context_separator ^ Ansi.dim ^ item ^ Ansi.reset)
+                  (fun item -> context_separator ^ item ^ Ansi.reset)
                   context_item
               ])
     in
@@ -3454,11 +3401,10 @@ let render_keeper_message (state : state) =
        List.iter (fun (selected, (item : Masc_tui_command.menu_item)) ->
          let label = fit_width (Terminal_text.single_line item.label) label_cells in
          let marker = if selected then "› " else "  " in
-         let style = if selected then Masc_tui_theme.tone Masc_tui_theme.Accent ^ Ansi.bold else Theme.recede () in
-         box_line chat_buf chat_cols
-           ("  " ^ style ^ marker ^ label ^ "  "
-            ^ (if selected then Ansi.reset else Theme.recede ())
-            ^ Terminal_text.single_line item.description ^ Ansi.reset)) entries;
+         let content = "  " ^ marker ^ label ^ "  "
+           ^ Terminal_text.single_line item.description in
+         if selected then box_line_selected chat_buf chat_cols content
+         else box_line_styled chat_buf chat_cols ~style:(Theme.recede ()) content) entries;
        box_divider chat_buf chat_cols);
     let input = Buffer.contents state.msg_input in
     let composer =
@@ -3487,15 +3433,20 @@ let render_keeper_message (state : state) =
         let prefix =
           if index = 0 then Message_layout.chat_input_prompt_prefix else "    "
         in
-        box_line chat_buf chat_cols
-          ((Masc_tui_theme.tone Masc_tui_theme.Accent) ^ prefix ^ Ansi.reset ^ line))
+        (* The input owns a calm background distinct from the conversation.
+           Foreground-only restore keeps that ground through the prompt. The
+           already viewport-fitted draft leaves room for this exact prefix. *)
+        box_line_styled chat_buf chat_cols ~style:chat_theme.Chat_theme.user_background
+          ((Masc_tui_theme.tone Masc_tui_theme.Accent) ^ prefix ^ Ansi.default_fg ^ line))
       composer;
 
     let input_row =
       min (max 1 rows) (rows_above_composer + max 1 (List.length composer))
     in
 
-    box_bottom chat_buf chat_cols;
+    (* Reuse the existing bottom spacer as input padding: the input has a
+       clear surface without taking another row from conversation history. *)
+    box_line_styled chat_buf chat_cols ~style:chat_theme.Chat_theme.user_background "";
     (* Footer *)
     let disposition = send_disposition state ~keeper_name in
     let pending_count =
@@ -3541,6 +3492,7 @@ let render_keeper_message (state : state) =
     in
     let return_hint () =
       match state.msg_return with
+      | Keeper_chat_return_home -> "Esc:Dashboard"
       | Keeper_chat_return_list -> "Esc:list"
       | Keeper_chat_return_detail -> "Esc:detail"
       | Keeper_chat_return_lanes -> "Esc:Lanes"
@@ -3679,9 +3631,36 @@ let render_keeper_message (state : state) =
     in
     if split then begin
       let left_buf = Buffer.create 1024 in
+      let pane_rows = count_frame_lines chat_buf in
+      let portrait =
+        match Keeper_control.liveness_of_roster state.keeper_roster keeper_name with
+        | Keeper_control.Present runtime ->
+            Masc_tui_chat_portrait.shown ~name:keeper_name ~portrait:runtime.kr_portrait
+              ~rows:pane_rows ~cols:keeper_roster_pane_cols
+        | Keeper_control.Unobserved | Keeper_control.Absent | Keeper_control.Invalid _ -> None
+      in
+      let roster_rows = match portrait with
+        | None -> pane_rows
+        | Some portrait -> portrait.Masc_tui_chat_portrait.roster_rows in
       keeper_roster_pane
         ~focused:(state.keeper_message_focus = Left_pane)
-        state ~rows:(count_frame_lines chat_buf) ~cols:keeper_roster_pane_cols left_buf;
+        state ~rows:roster_rows ~cols:keeper_roster_pane_cols left_buf;
+      Option.iter (fun portrait ->
+        box_line left_buf keeper_roster_pane_cols
+          (Theme.recede () ^ " 대화 · " ^ display_keeper_name ^ Ansi.reset);
+        (* Anchor pixels to the actual caption, since the roster renderer can
+           emit fewer lines than its requested budget. *)
+        let picture_row = count_frame_lines left_buf in
+        List.iter (box_line left_buf keeper_roster_pane_cols)
+          portrait.Masc_tui_chat_portrait.picture_lines;
+        (* A present left-pane row must retain its width: [box_bottom] is
+           a bare newline for full-screen surfaces and would pull the
+           right-pane composer into the portrait column. *)
+        box_line left_buf keeper_roster_pane_cols "";
+        Option.iter (fun (placement : Masc_tui_portrait_view.placement) ->
+          Masc_tui_portrait_view.request
+            {placement with row = picture_row + strip_rows}) portrait.placement)
+        portrait;
       write_two_panes buf ~left_cols:keeper_roster_pane_cols ~left:left_buf
         ~right:chat_buf
     end;

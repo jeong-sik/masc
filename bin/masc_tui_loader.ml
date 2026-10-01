@@ -154,7 +154,8 @@ let load_active_tasks (base_path : string) :
     * Masc_domain.task list
     * string option
     * Masc_tui_task_flow.t option
-    * Masc_tui_agenda.stalled list option =
+    * Masc_tui_agenda.stalled Masc_tui_agenda.reading
+    * unit Masc_tui_agenda.reading =
   let config = Workspace_core.default_config base_path in
   let path = Workspace_backlog.backlog_path config in
   match Workspace_backlog.read_backlog_observation_with_source_r config with
@@ -165,7 +166,8 @@ let load_active_tasks (base_path : string) :
       , []
       , Some reason
       , None
-      , None )
+      , Masc_tui_agenda.Read_failed reason
+      , Masc_tui_agenda.Not_read )
   | Ok observation ->
       let recovery_error =
         match observation.recovered_from with
@@ -183,7 +185,7 @@ let load_active_tasks (base_path : string) :
          failing the whole load: the tasks are still worth showing, and the
          reason is reported beside them rather than as an absence of links. *)
       let goals_for_task, goal_link_error =
-        match Workspace_goal_index.read_goal_task_links_r config with
+        match Workspace_goal_index.read_goal_task_links_authoritative_r config with
         | Error err -> (fun _ -> []), Some ("goal links unavailable: " ^ err)
         | Ok goal_task_links ->
           let index =
@@ -218,15 +220,21 @@ let load_active_tasks (base_path : string) :
          assignee has a Keeper queue reads the registry and the meta store, and
          a frame that touches the filesystem per row is a frame that stutters.
          Same rows, same load, same answer the rejection delivery computes. *)
-      , Some
-          (Masc.Operator_task_attention.project ~config
-             observation.observed_backlog.tasks
-           |> List.map (fun item ->
-                { Masc_tui_agenda.task_id =
-                    Masc.Operator_task_attention.task_id item
-                ; what = Masc.Operator_task_attention.summary item
-                ; since_iso = Masc.Operator_task_attention.waiting_since item
-                })) )
+      , (match recovery_error with
+         | Some reason -> Masc_tui_agenda.Read_failed reason
+         | None ->
+             Masc_tui_agenda.Read
+               (Masc.Operator_task_attention.project ~config
+                  observation.observed_backlog.tasks
+                |> List.map (fun item ->
+                     { Masc_tui_agenda.task_id =
+                         Masc.Operator_task_attention.task_id item
+                     ; what = Masc.Operator_task_attention.summary item
+                     ; since_iso = Masc.Operator_task_attention.waiting_since item
+                     })))
+      , (match goal_link_error with
+         | Some reason -> Masc_tui_agenda.Read_failed reason
+         | None -> Masc_tui_agenda.Read []) )
 
 (* The Goals the verifier proved, each waiting on the operator's confirmation.
    Read from the goal store the way the tasks above are read from the backlog,
@@ -259,8 +267,9 @@ let apply_keeper_log_snapshot (state : state)
     (snapshot : Metrics_tail.snapshot) =
   state.log_entries <- snapshot.entries;
   state.log_error <- snapshot.error;
+  let _, cols = Masc_tui_render_prim.get_terminal_size () in
   state.log_scroll <-
-    min state.log_scroll (max 0 (List.length snapshot.entries - 1))
+    min state.log_scroll (max 0 (List.length (keeper_log_rows state ~cols) - 1))
 
 (** Load the newest physical metrics rows across months and rotations. *)
 let load_selected_keeper_logs (state : state) (base_path : string)
@@ -344,7 +353,7 @@ let load_from_masc_dir (state : state) (base_path : string) =
   (* Load tasks from their single durable source. The domain rows land first:
      a detail view open across this refresh keeps its row even when the task
      just turned terminal, because the projection below drops exactly those. *)
-  let rows, tasks_domain, tasks_error, task_flow, operator_stalled =
+  let rows, tasks_domain, tasks_error, task_flow, operator_stalled, task_goal_links =
     load_active_tasks base_path
   in
   state.tasks_domain <- tasks_domain;
@@ -374,6 +383,7 @@ let load_from_masc_dir (state : state) (base_path : string) =
      left);
   state.task_flow <- task_flow;
   state.operator_stalled <- operator_stalled;
+  state.task_goal_links <- task_goal_links;
   state.goals_to_confirm <- load_goals_to_confirm base_path;
 
   (* Capture navigation before replacing the roster. Detail and logs are bound
@@ -505,7 +515,8 @@ let clear_local_workspace (state : state) =
   state.task_focus <- Masc_tui_overview_tasks.No_task_focus;
   state.task_reading <- Masc_tui_overview_tasks.Rows_unread;
   state.task_flow <- None;
-  state.operator_stalled <- None;
+  state.operator_stalled <- Masc_tui_agenda.Not_read;
+  state.task_goal_links <- Masc_tui_agenda.Not_read;
   state.goals_to_confirm <- Masc_tui_agenda.Not_read;
   state.tasks_error <- None;
   state.keepers <- [];
@@ -554,12 +565,12 @@ let decode_workspace_health raw =
            other)
 
 let decode_attention_item json =
-  let* ai_kind = required_string_field json "kind" in
-  let* raw_severity = required_string_field json "severity" in
+  let* ai_kind = Masc.Tui_decode_fields.required_string_field json "kind" in
+  let* raw_severity = Masc.Tui_decode_fields.required_string_field json "severity" in
   let* ai_severity = decode_attention_severity raw_severity in
-  let* ai_summary = required_string_field json "summary" in
-  let* target_type = required_string_field json "target_type" in
-  let* target_id = optional_string_field json "target_id" in
+  let* ai_summary = Masc.Tui_decode_fields.required_string_field json "summary" in
+  let* target_type = Masc.Tui_decode_fields.required_string_field json "target_type" in
+  let* target_id = Masc.Tui_decode_fields.optional_string_field json "target_id" in
   (* The producers write ["keeper"] with the Keeper's name as the id
      (lib/dashboard/dashboard_execution.ml, the keeper status bridge). A
      keeper item without a name names nobody to join on, so it stays with the
@@ -576,7 +587,7 @@ let decode_attention_item json =
      row survives without it. *)
   let* evidence_log_ts =
     match Yojson.Safe.Util.member "evidence" json with
-    | `Assoc _ as nested -> optional_string_field nested "log_ts"
+    | `Assoc _ as nested -> Masc.Tui_decode_fields.optional_string_field nested "log_ts"
     | _ -> Ok None
   in
   (* The keeper status bridge puts the blocker's own sentence under
@@ -588,7 +599,7 @@ let decode_attention_item json =
     | `Assoc _ as evidence -> (
         match Yojson.Safe.Util.member "runtime_blocker" evidence with
         | `Assoc _ as blocker ->
-            optional_string_field blocker "runtime_blocker_summary"
+            Masc.Tui_decode_fields.optional_string_field blocker "runtime_blocker_summary"
         | _ -> Ok None)
     | _ -> Ok None
   in
@@ -605,17 +616,17 @@ let decode_attention_item json =
     }
 
 let decode_attention_items json_list =
-  decode_list "attention_items" decode_attention_item json_list
+  Masc.Tui_decode_fields.decode_list "attention_items" decode_attention_item json_list
 
 let decode_board_post ?(require_body = false) json =
-  let* bp_id = required_string_field json "id" in
-  let* bp_author = required_string_field json "author" in
-  let* bp_title = required_string_field json "title" in
+  let* bp_id = Masc.Tui_decode_fields.required_string_field json "id" in
+  let* bp_author = Masc.Tui_decode_fields.required_string_field json "author" in
+  let* bp_title = Masc.Tui_decode_fields.required_string_field json "title" in
   let* bp_body =
     if require_body then required_body_field json else optional_body_field json
   in
-  let* bp_votes = required_int_field json "votes" in
-  let* bp_comment_count = required_int_field json "comment_count" in
+  let* bp_votes = Masc.Tui_decode_fields.required_int_field json "votes" in
+  let* bp_comment_count = Masc.Tui_decode_fields.required_int_field json "comment_count" in
   let* bp_created_at =
     required_display_any_field json [ "created_at_iso"; "created_at" ]
   in
@@ -650,9 +661,9 @@ let decode_board_post ?(require_body = false) json =
     match Yojson.Safe.Util.member "closed" json with
     | `Null -> Ok None
     | `Assoc _ as nested ->
-        let* bpc_closed_by = required_string_field nested "closed_by" in
-        let* bpc_successor_id = optional_string_field nested "successor_id" in
-        let* bpc_summary = optional_string_field nested "summary" in
+        let* bpc_closed_by = Masc.Tui_decode_fields.required_string_field nested "closed_by" in
+        let* bpc_successor_id = Masc.Tui_decode_fields.optional_string_field nested "successor_id" in
+        let* bpc_summary = Masc.Tui_decode_fields.optional_string_field nested "summary" in
         let bpc_closed_at =
           match Yojson.Safe.Util.member "closed_at" nested with
           | `Float value -> Some value
@@ -665,8 +676,8 @@ let decode_board_post ?(require_body = false) json =
           (Printf.sprintf "board post closed must be an object or null: %s"
              (Yojson.Safe.to_string value))
   in
-  let* bp_hearth = optional_string_field json "hearth" in
-  let* raw_kind = optional_string_field json "post_kind" in
+  let* bp_hearth = Masc.Tui_decode_fields.optional_string_field json "hearth" in
+  let* raw_kind = Masc.Tui_decode_fields.optional_string_field json "post_kind" in
   (* Optional, and an unknown value is carried rather than rejected: the list
      is a projection for a pane, and a post whose kind this build does not know
      is still a post the operator should see. *)
@@ -733,22 +744,22 @@ let load_board_hearths ~(host : string) ~(port : int) :
   | Ok json -> decode_board_hearths json
 
 let decode_board_posts json_list =
-  decode_list "posts" decode_board_post json_list
+  Masc.Tui_decode_fields.decode_list "posts" decode_board_post json_list
 
 let decode_board_comment json =
-  let* bc_id = required_string_field json "id" in
+  let* bc_id = Masc.Tui_decode_fields.required_string_field json "id" in
   (* Optional because a top-level comment has none, not because the field may
      be absent: the wire always carries the key and answers [null] there. *)
-  let* bc_parent_id = optional_string_field json "parent_id" in
-  let* bc_author = required_string_field json "author" in
-  let* bc_content = required_string_field json "content" in
+  let* bc_parent_id = Masc.Tui_decode_fields.optional_string_field json "parent_id" in
+  let* bc_author = Masc.Tui_decode_fields.required_string_field json "author" in
+  let* bc_content = Masc.Tui_decode_fields.required_string_field json "content" in
   let* bc_created_at =
     required_display_any_field json [ "created_at_iso"; "created_at" ]
   in
   Ok { bc_id; bc_parent_id; bc_author; bc_content; bc_created_at }
 
 let decode_board_comments json_list =
-  decode_list "comments" decode_board_comment json_list
+  Masc.Tui_decode_fields.decode_list "comments" decode_board_comment json_list
 
 (* The kind beside the name is a word, not the wire token: the row read
    "Operator Proof (human_operator)" and "keeper-701 (automated_actor)". The
@@ -763,13 +774,13 @@ let schedule_actor_kind_word = function
 let decode_schedule_actor json field =
   match Yojson.Safe.Util.member field json with
   | `Assoc _ as actor ->
-      let* id = required_string_field actor "id" in
-      let* kind = required_string_field actor "kind" in
+      let* id = Masc.Tui_decode_fields.required_string_field actor "id" in
+      let* kind = Masc.Tui_decode_fields.required_string_field actor "kind" in
       let* kind =
         Schedule_contract_values.actor_kind_of_string kind
         |> Result.map_error Schedule_contract_values.decode_error_to_string
       in
-      let* display_name = optional_string_field actor "display_name" in
+      let* display_name = Masc.Tui_decode_fields.optional_string_field actor "display_name" in
       let name = Option.value ~default:id display_name in
       Ok (Printf.sprintf "%s (%s)" name (schedule_actor_kind_word kind))
   | value ->
@@ -780,7 +791,7 @@ let decode_schedule_actor json field =
 let optional_nested_string_field json object_field field =
   match Yojson.Safe.Util.member object_field json with
   | `Null -> Ok None
-  | `Assoc _ as nested -> optional_string_field nested field
+  | `Assoc _ as nested -> Masc.Tui_decode_fields.optional_string_field nested field
   | value ->
       Error
         (Printf.sprintf "schedule %s must be an object or null: %s"
@@ -829,33 +840,33 @@ let required_schedule_json_field json field =
 
 let decode_schedule_row json =
   let* sch_schedule_instance_id =
-    required_string_field json "schedule_instance_id"
+    Masc.Tui_decode_fields.required_string_field json "schedule_instance_id"
   in
-  let* sch_schedule_id = required_string_field json "schedule_id" in
-  let* sch_status = required_string_field json "status" in
-  let* sch_source = required_string_field json "source" in
+  let* sch_schedule_id = Masc.Tui_decode_fields.required_string_field json "schedule_id" in
+  let* sch_status = Masc.Tui_decode_fields.required_string_field json "status" in
+  let* sch_source = Masc.Tui_decode_fields.required_string_field json "source" in
   let* sch_requested_by = decode_schedule_actor json "requested_by" in
   let* sch_scheduled_by = decode_schedule_actor json "scheduled_by" in
-  let* sch_requested_at_iso = required_string_field json "requested_at_iso" in
-  let* sch_due_at_iso = optional_string_field json "due_at_iso" in
-  let* sch_next_due_at_iso = optional_string_field json "next_due_at_iso" in
-  let* sch_expires_at_iso = optional_string_field json "expires_at_iso" in
+  let* sch_requested_at_iso = Masc.Tui_decode_fields.required_string_field json "requested_at_iso" in
+  let* sch_due_at_iso = Masc.Tui_decode_fields.optional_string_field json "due_at_iso" in
+  let* sch_next_due_at_iso = Masc.Tui_decode_fields.optional_string_field json "next_due_at_iso" in
+  let* sch_expires_at_iso = Masc.Tui_decode_fields.optional_string_field json "expires_at_iso" in
   let* sch_recurrence_summary =
-    required_string_field json "recurrence_summary"
+    Masc.Tui_decode_fields.required_string_field json "recurrence_summary"
   in
   let* sch_recurrence = required_schedule_json_field json "recurrence" in
-  let* sch_payload_digest = required_string_field json "payload_digest" in
+  let* sch_payload_digest = Masc.Tui_decode_fields.required_string_field json "payload_digest" in
   let* sch_payload = required_schedule_json_field json "payload" in
-  let* sch_payload_kind = optional_string_field json "payload_kind" in
-  let* sch_payload_support = required_string_field json "payload_support" in
+  let* sch_payload_kind = Masc.Tui_decode_fields.optional_string_field json "payload_kind" in
+  let* sch_payload_support = Masc.Tui_decode_fields.required_string_field json "payload_support" in
   let* sch_payload_dispatch_tool =
-    optional_string_field json "payload_dispatch_tool"
+    Masc.Tui_decode_fields.optional_string_field json "payload_dispatch_tool"
   in
-  let* sch_payload_target = optional_string_field json "payload_target" in
+  let* sch_payload_target = Masc.Tui_decode_fields.optional_string_field json "payload_target" in
   let* sch_payload_keeper_name =
-    optional_string_field json "payload_keeper_name"
+    Masc.Tui_decode_fields.optional_string_field json "payload_keeper_name"
   in
-  let* sch_payload_summary = optional_string_field json "payload_summary" in
+  let* sch_payload_summary = Masc.Tui_decode_fields.optional_string_field json "payload_summary" in
   let* sch_last_wake_status =
     (* The server writes this from [wake_status_to_string], so a word the
        contract does not list is a wire error, not a fourth status. *)
@@ -998,15 +1009,15 @@ let decode_schedule_row json =
     }
 
 let decode_schedule_rows json_list =
-  decode_list "requests" decode_schedule_row json_list
+  Masc.Tui_decode_fields.decode_list "requests" decode_schedule_row json_list
 
 (* The snapshot keeps the server's ok/unknown split: on a store read failure
    the route reports [status = "unknown"] with a null [request_count] and an
    empty row list, and the pane must not draw that as "no schedules". *)
 let decode_schedule_snapshot json =
-  let* scs_status = required_string_field json "status" in
+  let* scs_status = Masc.Tui_decode_fields.required_string_field json "status" in
   let* scs_read_error =
-    optional_string_field json "schedule_store_read_error"
+    Masc.Tui_decode_fields.optional_string_field json "schedule_store_read_error"
   in
   let* scs_request_count =
     match Yojson.Safe.Util.member "request_count" json with
@@ -1075,7 +1086,7 @@ let decode_schedule_snapshot json =
           (Printf.sprintf "schedules counts must be an object or null: %s"
              (Yojson.Safe.to_string other))
   in
-  let* rows = required_list_field json "requests" in
+  let* rows = Masc.Tui_decode_fields.required_list_field json "requests" in
   let* scs_rows = decode_schedule_rows rows in
   let* scs_runner_status = Tui_decode.decode_schedule_runner_status json in
   Ok
@@ -1098,13 +1109,13 @@ let load_schedules ~(host : string) ~(port : int) :
 
 let decode_schedule_wake json =
   let* swk_status =
-    let* word = required_string_field json "status" in
+    let* word = Masc.Tui_decode_fields.required_string_field json "status" in
     Schedule_contract_values.wake_status_of_string word
     |> Result.map_error Schedule_contract_values.decode_error_to_string
   in
-  let* swk_started_at_iso = optional_string_field json "started_at_iso" in
-  let* swk_finished_at_iso = optional_string_field json "finished_at_iso" in
-  let* swk_error = optional_string_field json "error" in
+  let* swk_started_at_iso = Masc.Tui_decode_fields.optional_string_field json "started_at_iso" in
+  let* swk_finished_at_iso = Masc.Tui_decode_fields.optional_string_field json "finished_at_iso" in
+  let* swk_error = Masc.Tui_decode_fields.optional_string_field json "error" in
   Ok { swk_status; swk_started_at_iso; swk_finished_at_iso; swk_error }
 
 (* The lookup answers four ways and only one of them carries a schedule. The
@@ -1112,16 +1123,16 @@ let decode_schedule_wake json =
    history, because "this schedule has never woken" and "the store could not
    be read" are the two readings this pane exists to keep apart. *)
 let decode_schedule_wake_history json =
-  let* status = required_string_field json "status" in
-  let* swh_schedule_id = required_string_field json "schedule_id" in
+  let* status = Masc.Tui_decode_fields.required_string_field json "status" in
+  let* swh_schedule_id = Masc.Tui_decode_fields.required_string_field json "schedule_id" in
   match status with
   | "found" ->
-      let* wake_jsons = required_list_field json "wakes" in
-      let* swh_wakes = decode_list "wakes" decode_schedule_wake wake_jsons in
+      let* wake_jsons = Masc.Tui_decode_fields.required_list_field json "wakes" in
+      let* swh_wakes = Masc.Tui_decode_fields.decode_list "wakes" decode_schedule_wake wake_jsons in
       (* [wake_count] rides the wire for a JSON reader; the pane counts the
          list it is about to draw, so the two cannot drift apart on screen. *)
       let* swh_retention_per_schedule =
-        required_int_field json "wake_retention_per_schedule"
+        Masc.Tui_decode_fields.required_int_field json "wake_retention_per_schedule"
       in
       Ok { swh_schedule_id; swh_wakes; swh_retention_per_schedule }
   | "not_found" ->
@@ -1129,7 +1140,7 @@ let decode_schedule_wake_history json =
   | "invalid_id" -> Error "the schedule lookup was asked for an empty id"
   | "unavailable" ->
       let reason =
-        match optional_string_field json "reason" with
+        match Masc.Tui_decode_fields.optional_string_field json "reason" with
         | Ok (Some reason) -> reason
         | Ok None | Error _ -> "no reason given"
       in
@@ -1157,7 +1168,7 @@ let load_board_list ~(host : string) ~(port : int)
   match fetch_board ~host ~port ~sort_by ~hearth with
   | Error err -> Error ("board load failed: " ^ err)
   | Ok json ->
-      let* posts = required_list_field json "posts" in
+      let* posts = Masc.Tui_decode_fields.required_list_field json "posts" in
       decode_board_posts posts
 
 (** The ordinary Board read uses the newest twenty. The reader can request
@@ -1177,11 +1188,11 @@ let load_board_post ?(full_history = false) ~(host : string) ~(port : int)
     in
     Masc_tui_frame_timing.time_stage ~name:"board.model_decode"
       (fun () ->
-        let* comments_json = optional_list_field json "comments" in
+        let* comments_json = Masc.Tui_decode_fields.optional_list_field json "comments" in
         let* comments = decode_board_comments comments_json in
-        let* page = required_object_field json "comment_page" in
-        let* actual_offset = required_int_field page "offset" in
-        let* total = required_int_field page "total" in
+        let* page = Masc.Tui_decode_fields.required_object_field json "comment_page" in
+        let* actual_offset = Masc.Tui_decode_fields.required_int_field page "offset" in
+        let* total = Masc.Tui_decode_fields.required_int_field page "total" in
         match offset with
         | Some expected when actual_offset <> expected ->
             Error "board detail returned a different comment offset"
@@ -1237,7 +1248,7 @@ let load_runtime_resolved ~(host : string) ~(port : int) :
     fails both with one reason. *)
 let load_overview_runtime_resolved ~(host : string) ~(port : int) :
     (Tui_decode.runtime_option list, string) result
-    * (Tui_decode.provider_usage_windows, string) result =
+    * (Masc.Tui_decode_usage.provider_usage_windows, string) result =
   match fetch_runtime_resolved ~host ~port with
   | Error err ->
       let reason = "runtime catalogue load failed: " ^ err in
@@ -1246,12 +1257,12 @@ let load_overview_runtime_resolved ~(host : string) ~(port : int) :
       ( Result.map
           (fun (options, _lanes, _assignments) -> options)
           (Tui_decode.decode_runtime_resolved_full json)
-      , Tui_decode.decode_provider_usage_windows json )
+      , Masc.Tui_decode_usage.decode_provider_usage_windows json )
 
 let load_keeper_usage ~(host : string) ~(port : int) =
   match fetch_keeper_usage ~host ~port with
   | Error reason -> Error ("keeper usage load failed: " ^ reason)
-  | Ok json -> Tui_decode.decode_keeper_usage_window json
+  | Ok json -> Masc.Tui_decode_usage.decode_keeper_usage_window json
 
 let load_provider_usage_history ~(host : string) ~(port : int) ~(days : int) =
   match fetch_provider_usage_history ~host ~port ~days with
@@ -1275,7 +1286,7 @@ let load_provider_usage_history ~(host : string) ~(port : int) ~(days : int) =
            (match Json_util.assoc_member_opt "reason" json with
             | Some (`String reason) -> Error reason
             | _ -> Error "history unavailable without a reason")
-       | Some _ | None -> Tui_decode.decode_provider_usage_history json)
+       | Some _ | None -> Masc.Tui_decode_usage.decode_provider_usage_history json)
 
 type runtime_surface_load = {
   rsl_resolved : Tui_decode.runtime_resolved_snapshot;
@@ -1461,30 +1472,30 @@ let load_overview ~(host : string) ~(port : int) :
   match fetch_dashboard_briefing ~host ~port with
   | Error err -> Error ("overview load failed: " ^ err)
   | Ok json ->
-      let* summary = required_object_field json "summary" in
+      let* summary = Masc.Tui_decode_fields.required_object_field json "summary" in
       let* incidents =
-        let* items = optional_list_field json "incidents" in
+        let* items = Masc.Tui_decode_fields.optional_list_field json "incidents" in
         decode_attention_items items
       in
       let* attention_queue =
-        let* items = optional_list_field json "attention_queue" in
+        let* items = Masc.Tui_decode_fields.optional_list_field json "attention_queue" in
         decode_attention_items items
       in
-      let* agent_briefs = optional_list_field json "agent_briefs" in
-      let* keeper_briefs = optional_list_field json "keeper_briefs" in
+      let* agent_briefs = Masc.Tui_decode_fields.optional_list_field json "agent_briefs" in
+      let* keeper_briefs = Masc.Tui_decode_fields.optional_list_field json "keeper_briefs" in
       (* Keepers the server listed but could not build a row for. They are
          not in [keeper_briefs]; before #38090 they were in neither, and the
          Overview counted a fleet that had lost a Keeper as a smaller one. *)
       let* keepers_unread =
-        let* items = required_list_field json "keepers_unread" in
+        let* items = Masc.Tui_decode_fields.required_list_field json "keepers_unread" in
         Keeper_snapshot_unread.list_of_json (`List items)
       in
       let* ov_keeper_listing =
-        let* listing = required_object_field json "keepers_listing" in
+        let* listing = Masc.Tui_decode_fields.required_object_field json "keepers_listing" in
         Keeper_snapshot_unread.listing_of_json listing
       in
       let* ov_workspace_health =
-        let* workspace_health = required_string_field summary "workspace_health" in
+        let* workspace_health = Masc.Tui_decode_fields.required_string_field summary "workspace_health" in
         decode_workspace_health workspace_health
       in
       (* Counted from the lists the briefing carries. The summary object
@@ -1521,7 +1532,7 @@ let load_overview ~(host : string) ~(port : int) :
             keepers_unread
       in
       let ov_mcp_agents = List.length agent_briefs in
-      let* ov_generated_at = required_string_field json "generated_at" in
+      let* ov_generated_at = Masc.Tui_decode_fields.required_string_field json "generated_at" in
       Ok
         {
           ov_workspace_health;
@@ -1706,10 +1717,10 @@ let load_memory_health ~(host : string) ~(port : int) :
 
 (** Load one keeper's remembered facts, both stores. *)
 let load_memory_facts ~(host : string) ~(port : int) ~(keeper_name : string) :
-    (Tui_decode.memory_fact_snapshot, string) result =
+    (Masc.Tui_decode_memory_facts.memory_fact_snapshot, string) result =
   match fetch_keeper_memory_facts ~host ~port ~keeper_name with
   | Error err -> Error ("memory facts load failed: " ^ err)
-  | Ok json -> Tui_decode.decode_memory_fact_snapshot json
+  | Ok json -> Masc.Tui_decode_memory_facts.decode_memory_fact_snapshot json
 
 (** Load the current project's Git working-tree changes. *)
 let load_project_changes ~(host : string) ~(port : int) :
@@ -1743,29 +1754,29 @@ let load_harness ~(host : string) ~(port : int) :
 
 (** Load the retained Fusion registry list. *)
 let load_fusion_runs ~(host : string) ~(port : int) :
-    (Tui_decode.fusion_snapshot, string) result =
+    (Masc.Tui_decode_fusion.fusion_snapshot, string) result =
   match fetch_fusion_runs ~host ~port with
   | Error err -> Error ("fusion runs load failed: " ^ err)
-  | Ok json -> Tui_decode.decode_fusion_snapshot json
+  | Ok json -> Masc.Tui_decode_fusion.decode_fusion_snapshot json
 
 (** Load one exact Fusion run/evidence projection. *)
 let load_fusion_historical_detail ~(host : string) ~(port : int) ~reference =
-  match fetch_board_post ~host ~port ~post_id:reference.Tui_decode.fhe_post_id () with
+  match fetch_board_post ~host ~port ~post_id:reference.Masc.Tui_decode_fusion.fhe_post_id () with
   | Error err -> Error ("Fusion Board original load failed: " ^ err)
-  | Ok json -> Tui_decode.decode_fusion_historical_detail ~reference json
+  | Ok json -> Masc.Tui_decode_fusion.decode_fusion_historical_detail ~reference json
 
 let load_fusion_detail ~(host : string) ~(port : int) ~(run_id : string) :
-    (Tui_decode.fusion_detail, string) result =
+    (Masc.Tui_decode_fusion.fusion_detail, string) result =
   match fetch_fusion_detail ~host ~port ~run_id with
   | Error err -> Error ("fusion detail load failed: " ^ err)
-  | Ok json -> Tui_decode.decode_fusion_detail json
+  | Ok json -> Masc.Tui_decode_fusion.decode_fusion_detail json
 
 (** Read what the launch form offers. *)
 let load_fusion_launch_options ~(host : string) ~(port : int) :
-    (Tui_decode.fusion_launch_options, string) result =
+    (Masc.Tui_decode_fusion.fusion_launch_options, string) result =
   match fetch_fusion_config ~host ~port with
   | Error err -> Error ("fusion presets load failed: " ^ err)
-  | Ok json -> Tui_decode.decode_fusion_launch_options json
+  | Ok json -> Masc.Tui_decode_fusion.decode_fusion_launch_options json
 
 (** Start a Fusion run and read back its run id. A refusal is the server's
     sentence; an unanswered request says so, because the run may have
@@ -1776,7 +1787,7 @@ let launch_fusion_run ~(host : string) ~(port : int)
     post_fusion_launch ~host ~port ~keeper:request.Masc_tui_fusion_launch.keeper
       ~body:(Masc_tui_fusion_launch.request_body request)
   with
-  | Post_answered json -> Tui_decode.decode_fusion_launch_receipt json
+  | Post_answered json -> Masc.Tui_decode_fusion.decode_fusion_launch_receipt json
   | Post_refused detail -> Error detail
   | Post_unanswered detail ->
       Error ("fusion launch unanswered: " ^ detail ^ "; the run may have started, r refreshes the list")
@@ -1885,7 +1896,7 @@ let load_keeper_roster ~(host : string) ~(port : int) :
    sanitizer: a CR, a tab, or a stray OSC in fetched text is data to show
    escaped, not a control to replay into the frame. *)
 let sanitize_view_lines lines =
-  List.map Masc.Tui_decode.sanitize_terminal_text lines
+  List.map Masc.Tui_terminal_text.sanitize_terminal_text lines
 
 let load_keeper_config_view ~(host : string) ~(port : int)
     ~(keeper_name : string) : (string list, string) result =
@@ -1900,7 +1911,7 @@ let load_keeper_config_view ~(host : string) ~(port : int)
        would escape it along with the data. *)
     Ok
       (Masc_tui_keeper_config.view_lines
-         ~sanitize:Masc.Tui_decode.sanitize_terminal_text json)
+         ~sanitize:Masc.Tui_terminal_text.sanitize_terminal_text json)
 
 let load_keeper_sandbox_view ~(host : string) ~(port : int)
     ~(keeper_name : string) : (Masc_tui_keeper_sandbox.t, string) result =
@@ -1910,7 +1921,7 @@ let load_keeper_sandbox_view ~(host : string) ~(port : int)
   | Error err -> Error ("keeper sandbox status load failed: " ^ err)
   | Ok json ->
     Masc_tui_keeper_sandbox.decode
-      ~sanitize:Masc.Tui_decode.sanitize_terminal_text
+      ~sanitize:Masc.Tui_terminal_text.sanitize_terminal_text
       json
 
 let load_keeper_sandbox_logs ~(host : string) ~(port : int)
@@ -1922,7 +1933,7 @@ let load_keeper_sandbox_logs ~(host : string) ~(port : int)
   | Error err -> Error ("keeper sandbox logs load failed: " ^ err)
   | Ok json ->
     Masc_tui_keeper_sandbox.decode_logs
-      ~sanitize:Masc.Tui_decode.sanitize_terminal_text json
+      ~sanitize:Masc.Tui_terminal_text.sanitize_terminal_text json
 
 let load_keeper_config_editor ~(host : string) ~(port : int)
     ~(keeper_name : string) : (Yojson.Safe.t * string, string) result =
@@ -1941,7 +1952,7 @@ let load_keeper_github_identity_view ~(host : string) ~(port : int)
   | Ok json ->
     Ok
       (Masc_tui_github_identity.view_lines
-         ~sanitize:Masc.Tui_decode.sanitize_terminal_text json)
+         ~sanitize:Masc.Tui_terminal_text.sanitize_terminal_text json)
 
 let load_keeper_board_quarantines ~(host : string) ~(port : int)
     ~(keeper_name : string) :

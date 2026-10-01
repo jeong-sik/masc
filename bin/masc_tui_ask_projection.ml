@@ -1,4 +1,4 @@
-module Decode = Masc.Tui_decode
+module Decode = Masc.Tui_decode_asks
 
 type draft_response =
   | Draft_chose of string list

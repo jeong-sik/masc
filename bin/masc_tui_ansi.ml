@@ -720,8 +720,8 @@ let fit_width = Masc_tui_message_layout.fit_width
 (** External values become one printable logical row before renderer-owned ANSI
     styling or width calculation is applied. *)
 module Terminal_text = struct
-  let single_line text = Masc.Tui_decode.sanitize_terminal_text text
-  let preview_line text = Masc.Tui_decode.preview_line text
+  let single_line text = Masc.Tui_terminal_text.sanitize_terminal_text text
+  let preview_line text = Masc.Tui_terminal_text.preview_line text
   let optional_single_line = Option.map single_line
 
   let single_line_or ~default value =
@@ -729,9 +729,9 @@ module Terminal_text = struct
 
   let single_lines values = List.map single_line values
   let short_timestamp text =
-    Masc.Tui_decode.short_timestamp_for_terminal ~localtime:Unix.localtime text
+    Masc.Tui_terminal_text.short_timestamp_for_terminal ~localtime:Unix.localtime text
   let short_timestamp_of_unix unix_seconds =
-    Masc.Tui_decode.short_timestamp_of_unix_for_terminal ~localtime:Unix.localtime
+    Masc.Tui_terminal_text.short_timestamp_of_unix_for_terminal ~localtime:Unix.localtime
       unix_seconds
   (* The screen's clock is the terminal's zone. This is the one place that
      names it, so every row clock and the header clock agree -- which is also
@@ -740,9 +740,9 @@ module Terminal_text = struct
      other thirty-one are something else. The guide states the zone once, for
      the whole screen. *)
   let clock_timestamp text =
-    Masc.Tui_decode.clock_timestamp_for_terminal ~localtime:Unix.localtime text
+    Masc.Tui_terminal_text.clock_timestamp_for_terminal ~localtime:Unix.localtime text
   let clock_timestamp_of_unix unix_seconds =
-    Masc.Tui_decode.clock_timestamp_of_unix_for_terminal ~localtime:Unix.localtime
+    Masc.Tui_terminal_text.clock_timestamp_of_unix_for_terminal ~localtime:Unix.localtime
       unix_seconds
 end
 

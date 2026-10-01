@@ -124,6 +124,34 @@ describe('InternalAgentsMonitor', () => {
     expect(rawApi.fetchKeeperRawTraces).not.toHaveBeenCalled()
   })
 
+  it('shows Candle appraisal as workspace work without assigning a Keeper owner', async () => {
+    const actor = '/workspace/candle-appraisal'
+    const run = {
+      runId: 'candle-grade-run', runKind: 'exact_output', lane: 'candle_appraiser',
+      subjectId: null, actor, startedAt: 1786200000, status: 'succeeded', elapsedSeconds: 1,
+    }
+    api.fetchExactLaneRuns.mockResolvedValue({ runs: [run], count: 1, total: 1, hasMore: false, generatedAt: 'now' })
+    api.fetchFusionRuns.mockResolvedValue({ runs: [], count: 0, generatedAt: 'now' })
+    api.fetchVerificationRuns.mockResolvedValue({ runs: [], count: 0, generatedAt: 'now' })
+    api.fetchExactLaneRun.mockResolvedValue({ ...run,
+      input: { kind: 'exact', payload: { goal_id: 'goal-1' } },
+      output: { grade: 'medium' },
+      payloadAvailability: { input: { state: 'available' }, output: { state: 'available' } },
+      skillEvidence: { state: 'no_keeper_skills' },
+    })
+    const { container } = render(html`<${InternalAgentsMonitor} />`)
+    fireEvent.click(await screen.findByRole('button', { name: /succeeded Candle Appraiser/ }))
+    expect(await screen.findByText(/후보 Task별 관련성, Keeper의 기여 가중치/)).toBeTruthy()
+    expect(container.textContent).toContain(actor)
+    expect(container.textContent).toContain('1 runs · 0 Keeper owners')
+    expect(screen.queryByRole('link', { name: /Keeper 전체 evidence/ })).toBeNull()
+    expect(Array.from(container.querySelectorAll('option')).some(option => option.value === actor)).toBe(false)
+    expect(memoryApi.fetchKeeperMemoryJournal).not.toHaveBeenCalled()
+    expect(rawApi.fetchKeeperRawTraces).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Candle Appraiser 1' }))
+    expect(screen.getByRole('button', { name: /succeeded Candle Appraiser/ })).toBeTruthy()
+  })
+
   it('keeps historical Auto Judge source resolution uncertain', async () => {
     const run = {
       runId: 'hitl-source-resolved', runKind: 'exact_output', lane: 'hitl_auto_judge',

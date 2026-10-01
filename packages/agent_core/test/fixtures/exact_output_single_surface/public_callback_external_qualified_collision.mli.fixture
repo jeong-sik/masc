@@ -1,4 +1,0 @@
-type hook = unit
-type dispatch_hook = External.Callback.hook
-
-val measure : request:string -> callback:dispatch_hook -> unit

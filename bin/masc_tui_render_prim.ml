@@ -6,6 +6,7 @@
 
 open Masc_tui_types
 open Tui_decode
+open Masc.Tui_decode_fusion
 open Masc_tui_ansi
 open Masc_tui_press
 
@@ -98,12 +99,15 @@ let clamped_scroll_now (state : state) = function
   | Schedule_detail_scroll _ -> Schedule_detail_scroll state.schedule_scroll
   | Keeper_detail _ -> Keeper_detail state.detail_scroll
   | Keeper_calls _ -> Keeper_calls state.keeper_calls_scroll
+  | Keeper_logs_scroll { cols; _ } ->
+      Keeper_logs_scroll { scroll = state.log_scroll; cols }
   | Acting _ -> Acting state.acting_scroll
   | Acting_selection _ ->
       Acting_selection (state.acting_scroll, state.acting_cursor)
   | Acting_detail_scroll _ -> Acting_detail_scroll state.acting_detail_scroll
   | Memory_fact_detail_scroll _ ->
       Memory_fact_detail_scroll state.memory_fact_detail_scroll
+  | Client_detail_scroll _ -> Client_detail_scroll state.client_detail_scroll
   | Verification_detail_scroll _ ->
       Verification_detail_scroll state.verification_detail_scroll
   | Harness_detail_scroll _ -> Harness_detail_scroll state.harness_detail_scroll
@@ -122,10 +126,11 @@ let clamped_scroll_now (state : state) = function
   | Resource_scroll _ -> Resource_scroll state.resource_scroll
   | Metrics_scroll _ -> Metrics_scroll state.metrics_scroll
   | Approval_detail_scroll _ -> Approval_detail_scroll state.approval_detail_scroll
-  | Patch_modal_scroll _ -> Patch_modal_scroll state.patch_modal_scroll
+  | Patch_modal_scroll _ -> Patch_modal_scroll (state.patch_modal_scroll, state.patch_modal_hscroll)
   | Link_modal_scroll _ -> Link_modal_scroll state.link_modal_scroll
   | Play_invite_scroll _ -> Play_invite_scroll state.play_invite_scroll
   | Voice_scroll _ -> Voice_scroll state.config_scroll
+  | Preset_detail_scroll _ -> Preset_detail_scroll state.config_scroll
   | Keeper_list_scroll _ -> Keeper_list_scroll state.keeper_list_scroll
   | Context_inspector_scroll _ ->
       Context_inspector_scroll state.context_inspector_scroll
@@ -151,6 +156,7 @@ let reader_after_wheel (reader : clamped_scroll)
   | Schedule_detail_scroll value -> Some (Schedule_detail_scroll (step value))
   | Acting_detail_scroll value -> Some (Acting_detail_scroll (step value))
   | Memory_fact_detail_scroll value -> Some (Memory_fact_detail_scroll (step value))
+  | Client_detail_scroll value -> Some (Client_detail_scroll (step value))
   | Verification_detail_scroll value ->
       Some (Verification_detail_scroll (step value))
   | Harness_detail_scroll value -> Some (Harness_detail_scroll (step value))
@@ -165,10 +171,12 @@ let reader_after_wheel (reader : clamped_scroll)
       Some (Repository_changes_diff_scroll (step value))
   | Metrics_scroll value -> Some (Metrics_scroll (step value))
   | Approval_detail_scroll value -> Some (Approval_detail_scroll (step value))
-  | Patch_modal_scroll value -> Some (Patch_modal_scroll (step value))
+  | Patch_modal_scroll (vertical, horizontal) ->
+      Some (Patch_modal_scroll (step vertical, horizontal))
   | Link_modal_scroll value -> Some (Link_modal_scroll (step value))
   | Play_invite_scroll value -> Some (Play_invite_scroll (step value))
   | Voice_scroll value -> Some (Voice_scroll (step value))
+  | Preset_detail_scroll value -> Some (Preset_detail_scroll (step value))
   | Context_inspector_scroll value ->
       Some (Context_inspector_scroll (step value))
   (* The chat reads its own wheel, three rows a notch, and its scroll counts
@@ -180,6 +188,8 @@ let reader_after_wheel (reader : clamped_scroll)
   (* Some Keeper detail tabs and the calls view move a row cursor on [j]; the
      notch keeps reaching them as that key. *)
   | Keeper_detail _ | Keeper_calls _ -> None
+  (* Logs use their own bounded Metrics_tail movement through the key path. *)
+  | Keeper_logs_scroll _ -> None
   (* List scrolls: the notch moves the list's cursor as the arrow does. *)
   | Acting _ | Acting_selection _ | Keeper_list_scroll _ -> None
   (* Resources has panes of its own that [h] and [l] move between. *)
@@ -668,7 +678,9 @@ let slash_hint_text ~restore draft =
   | spans -> Some (String.concat "" (List.map paint spans))
 
 let composer_line state ~cols =
-  match browser_lane_on_screen state with
+  if state.view = Overview && not state.composer_focused then
+    Theme.recede () ^ fit_width " Choose a Keeper before writing · i:choose" cols ^ Ansi.reset
+  else match browser_lane_on_screen state with
   (* The page reader owns the keys here, so there is no composer to draw. The
      row it would take stays empty: the title already names the lane, its
      source and its browser, and a second copy down here is a state the reader
@@ -1495,12 +1507,10 @@ let count_frame_lines buf =
     else !n + 1
 
 
-(* The roster shows when the terminal can spare its columns and the reader
-   has not put it away. Width is the terminal's answer, [roster_pane_hidden]
-   is theirs, and hiding survives a resize because it is a decision rather
-   than a measurement. *)
+(* Resolve the chat default or explicit choice before applying the terminal's
+   width constraint; resizing never overwrites the reader's preference. *)
 let keeper_roster_pane_shown (state : state) ~cols =
-  Masc_tui_roster_pane.shown ~hidden:state.roster_pane_hidden ~cols
+  Masc_tui_roster_pane.shown ~hidden:(roster_pane_hidden state) ~cols
 
 
 (** Render the keeper list view *)
@@ -1739,7 +1749,7 @@ let data_unreliable_close = ")"
 
 
 let data_unreliable_row ~cols err =
-  let err = Tui_decode.sanitize_terminal_text err in
+  let err = Masc.Tui_terminal_text.sanitize_terminal_text err in
   let room =
     max 8
       (framed_inner_width cols
@@ -1861,8 +1871,8 @@ let selected_ask_question (state : state) =
   | Some snapshot -> (
       match List.nth_opt (Ask_projection.open_rows snapshot) state.ask_cursor with
       | None -> None
-      | Some (row : Masc.Tui_decode.ask_row) ->
-          List.nth_opt row.Masc.Tui_decode.ar_questions state.ask_question_cursor)
+      | Some (row : Masc.Tui_decode_asks.ask_row) ->
+          List.nth_opt row.Masc.Tui_decode_asks.ar_questions state.ask_question_cursor)
 
 
 let draw_ask_text_entry buf cols ~draft ~question (entry : ask_text_entry) =
@@ -1884,8 +1894,8 @@ let draw_ask_text_entry buf cols ~draft ~question (entry : ask_text_entry) =
    choices and their marks, whatever the draft holds, and the free-text line.
    Lifted out of the panel so the panel can draw a question into a buffer of
    its own and ask how tall it came out before deciding to spend those rows. *)
-let draw_ask_question buf cols (state : state) ~(row : Masc.Tui_decode.ask_row)
-    ~draft ~(question : Masc.Tui_decode.ask_question) ~answering
+let draw_ask_question buf cols (state : state) ~(row : Masc.Tui_decode_asks.ask_row)
+    ~draft ~(question : Masc.Tui_decode_asks.ask_question) ~answering
     ~selected_question =
   (* The caret is the only thing saying where the cursor is: which question
      [a] opens while browsing, and which one the digits land on while
@@ -1895,11 +1905,11 @@ let draw_ask_question buf cols (state : state) ~(row : Masc.Tui_decode.ask_row)
     ~head:
       (Printf.sprintf " %s%s%s%s%s  " caret
          (if selected_question then Ansi.bold else "")
-         (fit_width (Terminal_text.single_line row.Masc.Tui_decode.ar_keeper) 16)
+         (fit_width (Terminal_text.single_line row.Masc.Tui_decode_asks.ar_keeper) 16)
          (if selected_question then Ansi.reset else "")
          Ansi.reset)
     ~style:(if selected_question then Ansi.bold else "")
-    question.Masc.Tui_decode.aq_prompt;
+    question.Masc.Tui_decode_asks.aq_prompt;
   let chosen =
     match Ask_projection.response_for draft ~question with
     | Some (Ask_projection.Draft_chose ids) -> ids
@@ -1908,19 +1918,19 @@ let draw_ask_question buf cols (state : state) ~(row : Masc.Tui_decode.ask_row)
     | None -> []
   in
   List.iteri
-    (fun choice_index (choice : Masc.Tui_decode.ask_choice) ->
+    (fun choice_index (choice : Masc.Tui_decode_asks.ask_choice) ->
       let picked =
-        List.exists (String.equal choice.Masc.Tui_decode.ac_id) chosen
+        List.exists (String.equal choice.Masc.Tui_decode_asks.ac_id) chosen
       in
       (* One mark shape per mode: a round one where only one answer fits, a
          square one where several do. The operator should not have to read the
          header to know whether picking a second choice replaces the first. *)
       let mark =
-        match (question.Masc.Tui_decode.aq_mode, picked) with
-        | Masc.Tui_decode.Ask_single, true -> "(o)"
-        | Masc.Tui_decode.Ask_single, false -> "( )"
-        | Masc.Tui_decode.Ask_multi, true -> "[x]"
-        | Masc.Tui_decode.Ask_multi, false -> "[ ]"
+        match (question.Masc.Tui_decode_asks.aq_mode, picked) with
+        | Masc.Tui_decode_asks.Ask_single, true -> "(o)"
+        | Masc.Tui_decode_asks.Ask_single, false -> "( )"
+        | Masc.Tui_decode_asks.Ask_multi, true -> "[x]"
+        | Masc.Tui_decode_asks.Ask_multi, false -> "[ ]"
       in
       (* Numbers only where they do something: the digits answer the question
          under the caret, and only once the operator is answering it. A number
@@ -1935,15 +1945,15 @@ let draw_ask_question buf cols (state : state) ~(row : Masc.Tui_decode.ask_row)
         ~head:
           (Printf.sprintf "    %s %s %s%s%s  " position mark
              (if picked then Ansi.bold else Ansi.dim)
-             (Terminal_text.single_line choice.Masc.Tui_decode.ac_id)
+             (Terminal_text.single_line choice.Masc.Tui_decode_asks.ac_id)
              Ansi.reset)
         ~style:(if picked then Ansi.bold ^ Theme.ok () else Theme.info ())
-        choice.Masc.Tui_decode.ac_label;
+        choice.Masc.Tui_decode_asks.ac_label;
       (* What picking this commits to. The wire carries it, the dashboard
          draws it under the label, and this pane dropped it -- so the operator
          answering from the terminal weighed a label where the one answering
          from a browser weighed a label and its consequence. *)
-      match choice.Masc.Tui_decode.ac_description with
+      match choice.Masc.Tui_decode_asks.ac_description with
       | None -> ()
       | Some description ->
         (* Not [single_line] here: the field is a block and the escaping is
@@ -1953,7 +1963,7 @@ let draw_ask_question buf cols (state : state) ~(row : Masc.Tui_decode.ask_row)
           ~head:"          "
           ~style:Ansi.dim
           description)
-    question.Masc.Tui_decode.aq_choices;
+    question.Masc.Tui_decode_asks.aq_choices;
   (* What the operator has put down so far, in the two shapes a list of
      choices cannot show. *)
   (match Ask_projection.response_for draft ~question with
@@ -1964,7 +1974,7 @@ let draw_ask_question buf cols (state : state) ~(row : Masc.Tui_decode.ask_row)
    | Some Ask_projection.Draft_skipped ->
        box_line buf cols (Printf.sprintf "      %sskipped%s" Ansi.dim Ansi.reset)
    | Some (Ask_projection.Draft_chose _) | None -> ());
-  let ask_id = row.Masc.Tui_decode.ar_id in
+  let ask_id = row.Masc.Tui_decode_asks.ar_id in
   let slot = Ask_projection.free_text_slot ~ask_id question in
   let aft_hint = Ask_projection.free_text_hint slot in
   (
@@ -1979,7 +1989,7 @@ let draw_ask_question buf cols (state : state) ~(row : Masc.Tui_decode.ask_row)
           when String.equal (Ask_projection.free_text_ask_id entry.ate_slot) ask_id
                && String.equal
                     (Ask_projection.free_text_question_id entry.ate_slot)
-                    question.Masc.Tui_decode.aq_id ->
+                    question.Masc.Tui_decode_asks.aq_id ->
             Some entry
         | Some _ | None -> None
       in
@@ -1997,7 +2007,7 @@ let draw_ask_question buf cols (state : state) ~(row : Masc.Tui_decode.ask_row)
               | None -> "[t] "
           in
           let label =
-            if question.Masc.Tui_decode.aq_choices = [] then "Write your answer"
+            if question.Masc.Tui_decode_asks.aq_choices = [] then "Write your answer"
             else "Other: write your own answer"
           in
           box_line buf cols
@@ -2008,8 +2018,8 @@ let draw_ask_question buf cols (state : state) ~(row : Masc.Tui_decode.ask_row)
 
 (* The reason is what separates a decision that matters from one that does
    not, so it is drawn, not hidden behind a detail view. *)
-let draw_ask_context buf cols ~(row : Masc.Tui_decode.ask_row) =
-  match row.Masc.Tui_decode.ar_context with
+let draw_ask_context buf cols ~(row : Masc.Tui_decode_asks.ask_row) =
+  match row.Masc.Tui_decode_asks.ar_context with
   | None -> ()
   | Some context ->
       box_wrapped_field buf cols
@@ -2042,8 +2052,8 @@ let question_hints (state : state) =
                let question = selected_ask_question state in
                let has_choices =
                  match question with
-                 | Some (q : Masc.Tui_decode.ask_question) ->
-                     q.Masc.Tui_decode.aq_choices <> []
+                 | Some (q : Masc.Tui_decode_asks.ask_question) ->
+                     q.Masc.Tui_decode_asks.aq_choices <> []
                  | None -> false
                in
                let takes_text = Option.is_some question in
@@ -2919,19 +2929,26 @@ let build_change_context_lines (change_ctx : change_context) : string list =
   | None, None -> []
 
 
-let tree_diff_row_span ~width (row : Masc.Tui_decode.git_diff_row) =
-  let background, marker =
+let tree_diff_gutter (row : Masc.Tui_decode.git_diff_row) =
+  let marker =
     match row.Masc.Tui_decode.gdr_kind with
-    | Masc.Tui_decode.Gd_removed -> (Span.bg Theme.Syntax.diff_removed_bg, "-")
-    | Masc.Tui_decode.Gd_added -> (Span.bg Theme.Syntax.diff_added_bg, "+")
-    | Masc.Tui_decode.Gd_context -> (Span.plain, " ")
+    | Masc.Tui_decode.Gd_removed -> "-"
+    | Masc.Tui_decode.Gd_added -> "+"
+    | Masc.Tui_decode.Gd_context -> " "
   in
-  let gutter =
-    Printf.sprintf "%s %s %s "
-      (Diff.line_number_cell row.Masc.Tui_decode.gdr_old_line)
-      (Diff.line_number_cell row.Masc.Tui_decode.gdr_new_line)
-      marker
+  Printf.sprintf "%s %s %s "
+    (Diff.line_number_cell row.Masc.Tui_decode.gdr_old_line)
+    (Diff.line_number_cell row.Masc.Tui_decode.gdr_new_line) marker
+;;
+
+let tree_diff_row_span ?(hscroll = 0) ~width (row : Masc.Tui_decode.git_diff_row) =
+  let background =
+    match row.Masc.Tui_decode.gdr_kind with
+    | Masc.Tui_decode.Gd_removed -> Span.bg Theme.Syntax.diff_removed_bg
+    | Masc.Tui_decode.Gd_added -> Span.bg Theme.Syntax.diff_added_bg
+    | Masc.Tui_decode.Gd_context -> Span.plain
   in
+  let gutter = tree_diff_gutter row in
   let text_style =
     match row.Masc.Tui_decode.gdr_kind with
     | Masc.Tui_decode.Gd_context -> Span.combine background (Span.weight Ansi.dim)
@@ -2941,7 +2958,8 @@ let tree_diff_row_span ~width (row : Masc.Tui_decode.git_diff_row) =
     Span.concat
       [ Span.text (Span.combine background (Span.weight Ansi.dim)) gutter
       ; Span.text text_style
-          (Terminal_text.single_line row.Masc.Tui_decode.gdr_text)
+          (Message_layout.drop_cells
+             (Terminal_text.single_line row.Masc.Tui_decode.gdr_text) hscroll)
       ]
   in
   Span.pad_to width background (Span.truncate width composed)
@@ -3137,7 +3155,7 @@ let runtime_all_rows (snapshot : Masc.Tui_decode.runtime_surface_snapshot) =
 
 let tools_scrolled_for_lines state display_lines =
   { sc_count = List.length display_lines
-  ; sc_chrome = if Option.is_some state.tools_error then 8 else 6
+  ; sc_chrome = if Option.is_some state.tools_error then 9 else 7
   ; sc_overflow_takes_row = true
   ; sc_preview_keep = None
   }
@@ -3440,7 +3458,7 @@ let help_lines ~width (state : state) =
      [help_sections] puts Global first where the surface has no section of its
      own, so the head of this list is the most relevant thing either way and
      nothing has to look for it by name. *)
-  match Masc_tui_keys.help_sections ~current:state.view () with
+  match Masc_tui_keys.help_sections_for_state state with
   | [] -> slash_commands
   | first :: rest ->
       section first @ slash_commands @ List.concat_map section rest

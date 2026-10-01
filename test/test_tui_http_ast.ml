@@ -174,19 +174,22 @@ let test_the_categorical_guard_rejects_a_raw_hue () =
 ;;
 
 let test_tui_render_asks_the_theme_for_a_categorical_hue () =
-  let violations =
-    Ast_grep.parse_implementation_or_fail "bin/masc_tui_render.ml"
-    |> colour_path_violations ~reserved:(fun segment ->
-         List.mem segment categorical_hue_segments)
-  in
-  match violations with
-  | [] -> ()
-  | _ ->
-    failf
-      "bin/masc_tui_render.ml names a categorical hue instead of a Theme slot:\n%s"
-      (violations
-       |> List.map status_color_violation_to_string
-       |> String.concat "\n")
+  List.iter
+    (fun module_path ->
+      let violations =
+        Ast_grep.parse_implementation_or_fail module_path
+        |> colour_path_violations ~reserved:(fun segment ->
+             List.mem segment categorical_hue_segments)
+      in
+      match violations with
+      | [] -> ()
+      | _ ->
+        failf "%s names a categorical hue instead of a Theme slot:\n%s"
+          module_path
+          (violations
+           |> List.map status_color_violation_to_string
+           |> String.concat "\n"))
+    [ "bin/masc_tui_render.ml"; "bin/masc_tui_render_board.ml" ]
 ;;
 
 let test_theme_apply_is_boot_and_the_surface () =
@@ -196,18 +199,21 @@ let test_theme_apply_is_boot_and_the_surface () =
 ;;
 
 let test_tui_status_colors_use_theme_tokens () =
-  let violations =
-    Ast_grep.parse_implementation_or_fail "bin/masc_tui_render.ml"
-    |> reserved_status_color_path_violations
-  in
-  match violations with
-  | [] -> ()
-  | _ ->
-    failf
-      "bin/masc_tui_render.ml bypasses semantic Theme status tokens:\n%s"
-      (violations
-       |> List.map status_color_violation_to_string
-      |> String.concat "\n")
+  List.iter
+    (fun module_path ->
+      let violations =
+        Ast_grep.parse_implementation_or_fail module_path
+        |> reserved_status_color_path_violations
+      in
+      match violations with
+      | [] -> ()
+      | _ ->
+        failf "%s bypasses semantic Theme status tokens:\n%s"
+          module_path
+          (violations
+           |> List.map status_color_violation_to_string
+           |> String.concat "\n"))
+    [ "bin/masc_tui_render.ml"; "bin/masc_tui_render_board.ml" ]
 ;;
 
 let test_tui_ansi_status_helpers_use_theme_tokens () =
@@ -492,6 +498,7 @@ let test_no_row_marks_its_own_timestamp_with_a_zone () =
             (Ast_grep.count_string_literals ~module_path ~needle))
         [ "(local)"; "local date"; "local time"; "local timezone" ])
     [ "bin/masc_tui_render.ml"
+    ; "bin/masc_tui_render_board.ml"
     ; "bin/masc_tui_render_memory.ml"
     ; "bin/masc_tui_render_chat.ml"
     ; "bin/masc_tui_render_prim.ml"
@@ -510,19 +517,18 @@ let test_http_client_does_not_own_tui_env_contract () =
     (Ast_grep.count_value_bindings ~module_path ~name:"timeout_env")
 ;;
 
-(* The Dashboard's attention section writes three cells of indent ahead of
-   every row it draws. Its empty and unread notes stand in for rows, and they are
-   written for a body that indents them itself -- pasted in whole, a note sat
-   two cells right of the rows it replaces and of the title above them. *)
-let test_the_attention_note_starts_where_its_rows_do () =
-  check int "the note carries no indent of its own" 0
+(* Home's empty decision note replaces a section, not a selectable destination.
+   It shares the section heading's one-cell inset; another inset would make
+   the empty state look like a destination row. *)
+let test_home_empty_decision_note_has_section_indent () =
+  check int "the note adds no second indent" 0
     (Ast_grep.count_exact_string_literals_in_value_binding
        ~module_path:"bin/masc_tui_render.ml" ~binding_name:"render_overview"
-       ~needle:"  Nothing needs attention.");
-  check int "it is still the panel's word" 1
+       ~needle:"  No decision is waiting on you.");
+  check int "the section names the absence of human decisions" 1
     (Ast_grep.count_exact_string_literals_in_value_binding
        ~module_path:"bin/masc_tui_render.ml" ~binding_name:"render_overview"
-       ~needle:"Nothing needs attention.")
+       ~needle:" No decision is waiting on you.")
 ;;
 
 (* A surface whose load failed draws the lane-read message. It names
@@ -1114,7 +1120,7 @@ let test_operator_approvals_use_current_contract () =
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_ansi.ml"
        ~binding_name:"single_line"
-       ~callee:"Masc.Tui_decode.sanitize_terminal_text");
+       ~callee:"Masc.Tui_terminal_text.sanitize_terminal_text");
   check int "approval payload uses its terminal projection" 1
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_render.ml"
@@ -1130,7 +1136,7 @@ let test_operator_approvals_use_current_contract () =
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_operator_projection.ml"
        ~binding_name:"approval_payload_for_terminal"
-       ~callee:"Masc.Tui_decode.sanitize_terminal_text");
+       ~callee:"Masc.Tui_terminal_text.sanitize_terminal_text");
   check int "approval renderer never serializes a raw payload" 0
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_render.ml"
@@ -1338,7 +1344,7 @@ let test_tui_current_projection_wiring () =
      regressions. *)
   check int "Board renderer selects detail by post identity" 1
     (Ast_grep.count_calls_in_value_binding
-       ~module_path:"bin/masc_tui_render.ml"
+       ~module_path:"bin/masc_tui_render_board.ml"
        ~binding_name:"board_read_pane"
        ~callee:"Board_detail.view_for");
   check bool "metadata refresh reconciles the selected log identity" true
@@ -1349,9 +1355,9 @@ let test_tui_current_projection_wiring () =
      = 1);
   check bool "metrics diagnostics are terminal-safe before rendering" true
     (Ast_grep.count_calls_in_value_binding
-       ~module_path:"bin/masc_tui_render.ml"
-       ~binding_name:"render_keeper_logs"
-       ~callee:"Keeper_chat.terminal_safe_text"
+       ~module_path:"bin/masc_tui_types.ml"
+       ~binding_name:"keeper_log_rows"
+       ~callee:"Masc.Tui_terminal_text.sanitize_terminal_text"
      >= 1);
   check bool "log input uses viewport-bounded scrolling" true
     (Ast_grep.count_calls_across_files
@@ -1416,8 +1422,8 @@ let test_tui_current_projection_wiring () =
        ~callee:"Observation_layout.context_header_item" ~label:"max_cells");
   check bool "log diagnostics remain operator-visible" true
     (Ast_grep.count_calls_in_value_binding
-       ~module_path:"bin/masc_tui_render.ml"
-       ~binding_name:"render_keeper_logs"
+       ~module_path:"bin/masc_tui_types.ml"
+       ~binding_name:"keeper_log_rows"
        ~callee:"Metrics_tail.error_to_string"
      = 1);
   check bool "log empty copy distinguishes typed outcomes" true
@@ -1812,12 +1818,13 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
        ~binding_name:"refill_input_reader"
        ~callee:"Render_schedule.Input_wait.await"
      = 1);
-  check int "surface renderers perform no direct stdout writes" 0
-    (Ast_grep.count_calls
-       ~module_path:"bin/masc_tui_render.ml" ~callee:"print_string");
-  check int "surface renderers perform no direct flushes" 0
-    (Ast_grep.count_calls
-       ~module_path:"bin/masc_tui_render.ml" ~callee:"flush");
+  List.iter
+    (fun module_path ->
+      check int (module_path ^ " performs no direct stdout writes") 0
+        (Ast_grep.count_calls ~module_path ~callee:"print_string");
+      check int (module_path ^ " performs no direct flushes") 0
+        (Ast_grep.count_calls ~module_path ~callee:"flush"))
+    [ "bin/masc_tui_render.ml"; "bin/masc_tui_render_board.ml" ];
   check int "main has one frame presentation boundary" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"main" ~callee:"Frame_presenter.present");
@@ -1836,10 +1843,14 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
   check int "resize polling consumes one pending signal" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"consume_resize_request" ~callee:"Atomic.exchange");
-  check int "render owns one compact viewport gate" 1
+  check int "the shared frame choice owns one compact viewport gate" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_render.ml" ~binding_name:"frame_choice"
+       ~callee:"Render_schedule.Viewport.requires_compact_frame");
+  check int "render uses the same frame choice as Home preparation" 1
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_render.ml" ~binding_name:"render"
-       ~callee:"Render_schedule.Viewport.requires_compact_frame");
+       ~callee:"frame_choice");
   check int "compact render has one fallback branch" 1
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_render.ml" ~binding_name:"render"
@@ -1868,22 +1879,21 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
        ; "surface_body_rows"
        ; "surface_chrome_budget"
        ]);
-  (* Both the attention count in the title and its empty-body note read the
-     shared page state: unread/failed must not become a zero count, and unread
-     must not become a blank body. *)
-  check int "Dashboard's attention title and body both read the shared empty page" 2
+  (* Home's typed decision projection keeps unread/failed sources visible.
+     The old attention page's emptiness says nothing about human decisions. *)
+  check int "Home reads the shared decision projection once" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path
-       ~binding_name:"render_overview" ~callee:"empty_page_of");
+       ~binding_name:"render_overview" ~callee:"home_decision_rows");
   check int "board read consumes one shared row allocation" 1
-    (Ast_grep.count_calls_in_value_binding ~module_path:render_path
+    (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_render_board.ml"
        ~binding_name:"board_read_pane"
        ~callee:"Layout.allocate_board_read");
   check int "board body and comments share the allocation" 2
     (Ast_grep.count_field_accesses_outside_calls_in_value_binding
-       ~module_path:render_path ~binding_name:"board_read_pane" ~callees:[]
+       ~module_path:"bin/masc_tui_render_board.ml" ~binding_name:"board_read_pane" ~callees:[]
        ~fields:[ "body_rows"; "comment_rows" ]);
   check int "board read projects the two scroll offsets together" 1
-    (Ast_grep.count_calls_in_value_binding ~module_path:render_path
+    (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_render_board.ml"
        ~binding_name:"board_read_pane"
        ~callee:"Layout.project_board_read_scroll");
   (* Position labels and the returned clamp read the same independent
@@ -1893,24 +1903,24 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
     (fun field ->
       check bool ("board renderer consumes projected " ^ field) true
         (Ast_grep.count_field_accesses_outside_calls_in_value_binding
-           ~module_path:render_path ~binding_name:"board_read_pane" ~callees:[]
+           ~module_path:"bin/masc_tui_render_board.ml" ~binding_name:"board_read_pane" ~callees:[]
            ~fields:[ field ] > 0))
     board_scroll_fields;
   check int "board offsets all come from the scroll projection" 0
     (Ast_grep.count_field_accesses_off_other_records_in_value_binding
-       ~module_path:render_path ~binding_name:"board_read_pane" ~record:"scroll"
+       ~module_path:"bin/masc_tui_render_board.ml" ~binding_name:"board_read_pane" ~record:"scroll"
        ~fields:board_scroll_fields);
   check int "board rendering never bypasses normalization with raw scroll" 0
     (Ast_grep.count_field_accesses_outside_calls_in_value_binding
-       ~module_path:render_path ~binding_name:"board_read_pane"
+       ~module_path:"bin/masc_tui_render_board.ml" ~binding_name:"board_read_pane"
        ~callees:[ "Layout.project_board_read_scroll" ]
        ~fields:[ "board_scroll"; "board_comment_scroll" ]);
   check int "side board read owns one row allocation" 1
-    (Ast_grep.count_calls_in_value_binding ~module_path:render_path
+    (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_render_board.ml"
        ~binding_name:"draw_board_read_side"
        ~callee:"Layout.allocate_board_read_side");
   check int "side board read owns one scroll projection" 1
-    (Ast_grep.count_calls_in_value_binding ~module_path:render_path
+    (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_render_board.ml"
        ~binding_name:"draw_board_read_side"
        ~callee:"Layout.project_board_read_scroll");
   (* Two doors notice a resize and they learn of it differently: SIGWINCH
@@ -2418,7 +2428,7 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
     ; "Terminal_text.clock_timestamp"
       (* Not a [Terminal_text] name, but it is a boundary crossing all the
          same: it serializes the approval payload and hands the result to
-         [Masc.Tui_decode.sanitize_terminal_text] before returning
+         [Masc.Tui_terminal_text.sanitize_terminal_text] before returning
          (masc_tui_operator_projection.ml). This list matches on the call
          site's spelling, so a wrapper that sanitizes internally has to be
          named here or the guard reads it as a raw access. *)
@@ -2432,7 +2442,7 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
     ; "Message_layout.wrap_body"
       (* Also not a [Terminal_text] name, and also a boundary: every answer it
          returns is either built from digits and the letters of a span, or is
-         the stamp put through [Masc.Tui_decode.sanitize_terminal_text]
+         the stamp put through [Masc.Tui_terminal_text.sanitize_terminal_text]
          (masc_tui_wire_age.ml, whose interface says so and whose suite pins
          it). It reads the stamp rather than drawing it, which is why it is a
          wrapper and not a [Terminal_text] call. *)
@@ -2541,10 +2551,11 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
   check_fields "task_line" [ "id"; "title" ];
   check_identifiers ~module_path:render_path ~binding:"task_line"
     ~callees:sanitizer_calls [ "name" ];
-  check_fields "render_overview"
-    [ "overview_error"
-    ; "ai_summary"
-    ];
+  check_fields "render_overview" [ "overview_error" ];
+  check int "Home does not draw the removed attention summary" 0
+    (Ast_grep.count_field_accesses_outside_calls_in_value_binding
+       ~module_path:render_path ~binding_name:"render_overview" ~callees:[]
+       ~fields:[ "ai_summary" ]);
   check_fields "render_work_tasks" [ "tasks_error" ];
   (* The Dashboard's title row, visible from the first frame, and
      /about's colour scheme name from the operator's configuration. *)
@@ -2598,7 +2609,7 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
      [approvals_error] here. *)
   check_identifiers ~module_path:"bin/masc_tui_render.ml" ~binding:"render_approvals"
     ~callees:sanitizer_calls [ "cause" ];
-  check_fields "render_board_list"
+  check_fields ~module_path:"bin/masc_tui_render_board.ml" "render_board_list"
     [ "board_list_error"; "bp_id"; "bp_author"; "bp_title" ];
   (* [String.equal] keeps a post out of its own related list. Comparison never
      reaches the terminal, and sanitizing first would be wrong besides: two
@@ -2606,7 +2617,7 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
   check_fields
     ~non_rendering_calls:
       [ "Board_detail.view_for"; "String.equal"; "Link.scan" ]
-    "board_read_pane"
+    ~module_path:"bin/masc_tui_render_board.ml" "board_read_pane"
     [ "bp_id"
     ; "bp_hearth"
     ; "bp_author"
@@ -2635,7 +2646,7 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
   check_fields ~module_path:"bin/masc_tui_render_metrics.ml"
     "render_section_tools"
     [ "mkh_keeper_id"; "gp_display_tool"; "kta_tool" ];
-  check_identifiers ~module_path:render_path ~binding:"board_read_pane"
+  check_identifiers ~module_path:"bin/masc_tui_render_board.ml" ~binding:"board_read_pane"
     ~callees:sanitizer_calls [ "id" ];
   (* Every split surface hands its list through one sidebar, so this is the
      single place a row label can reach the terminal unsanitized. Seven
@@ -2678,7 +2689,7 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
      one helper. It splits the text on LF (not drawn) and escapes each line
      before it wraps. *)
   check_identifiers ~module_path:"bin/masc_tui_planning_detail.ml" ~binding:"wrapped"
-    ~callees:[ "Tui_decode.sanitize_terminal_text"; "String.split_on_char" ]
+    ~callees:[ "Masc.Tui_terminal_text.sanitize_terminal_text"; "String.split_on_char" ]
     [ "text"; "line" ];
   check int "the goal detail heads a stuck goal with the verifier's reason" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path
@@ -2748,6 +2759,9 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
         (* Hashes the name into the portrait's look; what it returns is
            pixels and cells, never the name's text. *)
       ; "Masc_tui_keeper_portrait.shown"
+        (* Item preview hashes the name by the same portrait path and returns
+           only pixels; no Keeper-name text reaches terminal cells. *)
+      ; "Masc_tui_keeper_portrait.preview"
       ]
     "keeper_detail_pane"
     [ "k_name"
@@ -2759,8 +2773,30 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
     ; "k_created_at"
     ; "k_updated_at"
     ];
-  check_fields "render_keeper_logs"
-    [ "k_name"; "le_ts"; "le_tools_used"; "le_work_kind" ];
+  check_fields "render_keeper_logs" [ "k_name" ];
+  check_fields ~module_path:"bin/masc_tui_types.ml"
+    ~non_rendering_calls:[ "Masc.Tui_terminal_text.clock_timestamp_for_terminal" ]
+    "keeper_log_rows" [ "le_ts" ];
+  (* The entry projector owns the full timestamp and every tool/work fact.
+     [wrap] sanitizes the final text, including values assembled in lambdas. *)
+  check_fields ~module_path:"bin/masc_tui_observation_layout.ml"
+    ~non_rendering_calls:[ "wrap"; "List.concat_map" ]
+    "log_entry_rows" [ "le_ts"; "le_tools_used" ];
+  check int "log work-kind option is read once before its value is wrapped" 1
+    (Ast_grep.count_field_accesses_outside_calls_in_value_binding
+       ~module_path:"bin/masc_tui_observation_layout.ml"
+       ~binding_name:"log_entry_rows" ~callees:[] ~fields:[ "le_work_kind" ]);
+  check_identifiers ~module_path:"bin/masc_tui_observation_layout.ml"
+    ~binding:"log_entry_rows"
+    ~callees:[ "Masc.Tui_terminal_text.sanitize_terminal_text" ] [ "text" ];
+  check_identifiers ~module_path:"bin/masc_tui_observation_layout.ml"
+    ~binding:"log_entry_rows" ~callees:[ "wrap" ] [ "tool"; "work" ];
+  check int "logs render the shared row projection" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:render_path
+       ~binding_name:"render_keeper_logs" ~callee:"Masc_tui_types.keeper_log_rows");
+  check int "log rows render full entry facts through the observation projection" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_types.ml"
+       ~binding_name:"keeper_log_rows" ~callee:"Masc_tui_observation_layout.log_entry_rows");
   (* The Info tab's Board-attention rows are drawn from wire strings -- a
      partition id, a Keeper name on a ledger error, the server's own words on
      a failed read -- so the module that builds them is held to the same
@@ -2791,18 +2827,18 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
          ~module_path:ansi_path ~binding_name:binding ~callees:[ callee ])
   in
   check_direct_result "single_line"
-    "Masc.Tui_decode.sanitize_terminal_text";
+    "Masc.Tui_terminal_text.sanitize_terminal_text";
   check_direct_result "optional_single_line" "Option.map";
   check_direct_result "single_line_or" "Option.value";
   check_direct_result "single_lines" "List.map";
   check_direct_result "short_timestamp"
-    "Masc.Tui_decode.short_timestamp_for_terminal";
+    "Masc.Tui_terminal_text.short_timestamp_for_terminal";
   check_direct_result "clock_timestamp"
-    "Masc.Tui_decode.clock_timestamp_for_terminal";
+    "Masc.Tui_terminal_text.clock_timestamp_for_terminal";
   check int "shared terminal boundary delegates to the typed sanitizer" 1
     (Ast_grep.count_calls_in_value_binding
        ~module_path:ansi_path ~binding_name:"single_line"
-       ~callee:"Masc.Tui_decode.sanitize_terminal_text");
+       ~callee:"Masc.Tui_terminal_text.sanitize_terminal_text");
   check int "optional boundary maps the sanitizer" 1
     (Ast_grep
      .count_applications_with_exact_positional_identifier_in_value_binding
@@ -2819,12 +2855,12 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
   check int "short timestamp delegates to slice-then-sanitize helper" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:ansi_path
        ~binding_name:"short_timestamp"
-       ~callee:"Masc.Tui_decode.short_timestamp_for_terminal");
+       ~callee:"Masc.Tui_terminal_text.short_timestamp_for_terminal");
   check int "clock timestamp delegates to slice-then-sanitize helper" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:ansi_path
        ~binding_name:"clock_timestamp"
-       ~callee:"Masc.Tui_decode.clock_timestamp_for_terminal");
-  let decode_path = "lib/tui_decode.ml" in
+       ~callee:"Masc.Tui_terminal_text.clock_timestamp_for_terminal");
+  let decode_path = "lib/tui_terminal_text.ml" in
   [ "short_timestamp_for_terminal"; "clock_timestamp_for_terminal" ]
   |> List.iter (fun binding ->
        check_binding decode_path binding;
@@ -2843,9 +2879,9 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path
        ~binding_name:"render_keeper_logs" ~callee:"String.sub");
   check int "log renderer uses the safe clock projection once" 1
-    (Ast_grep.count_calls_in_value_binding ~module_path:render_path
-       ~binding_name:"render_keeper_logs"
-       ~callee:"Terminal_text.clock_timestamp");
+    (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_types.ml"
+       ~binding_name:"keeper_log_rows"
+       ~callee:"Masc.Tui_terminal_text.clock_timestamp_for_terminal");
   (* Seven: two observation timestamps in Live Context, the last turn, the
      oldest row a partial Last 24h window reached, the created / updated pair,
      and the Automation row's request clock. Each one arrives from a keeper
@@ -2897,7 +2933,7 @@ let test_the_session_filter_reads_the_transcript () =
    spelling widths again: one layout -- the columns a narrow list keeps and
    the title's share -- asked once, and the two rows built from it. *)
 let test_the_board_header_and_rows_share_one_layout () =
-  let module_path = "bin/masc_tui_render.ml" in
+  let module_path = "bin/masc_tui_render_board.ml" in
   let in_board callee =
     Ast_grep.count_calls_in_value_binding ~module_path
       ~binding_name:"render_board_list" ~callee
@@ -2934,7 +2970,7 @@ let test_the_answering_overlay_is_the_shared_contract () =
    row the surface stops drawing cannot leave a gap behind it. *)
 let test_the_board_list_frame_is_the_shared_contract () =
   let in_board callee =
-    Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_render.ml"
+    Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_render_board.ml"
       ~binding_name:"render_board_list" ~callee
   in
   check int "the frame is drawn by the contract" 1 (in_board "surface_chrome");
@@ -3134,8 +3170,8 @@ let () =
         test_case "check success status" `Quick test_is_success_http_status_called;
         test_case "the spectator reads the live route" `Quick
           test_the_spectator_reads_the_live_route;
-        test_case "the attention note starts where its rows do" `Quick
-          test_the_attention_note_starts_where_its_rows_do;
+        test_case "the Home empty decision note has section indent" `Quick
+          test_home_empty_decision_note_has_section_indent;
         test_case "the lane failure row adds no second verdict" `Quick
           test_the_lane_failure_row_adds_no_second_verdict;
         test_case "missing operator token is reported" `Quick

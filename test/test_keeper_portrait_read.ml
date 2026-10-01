@@ -41,6 +41,7 @@ let field key = function
 
 let call ~name ~args =
   Read.handle
+    ~base_path:(Sys.getenv "MASC_BASE_PATH")
     ~keeper_name:name
     ~tool_name:"keeper_portrait_read"
     ~start_time:(Tool_timing.start ())
@@ -93,7 +94,7 @@ let test_browse_and_preview_without_equipping () =
   let args = `Assoc [ "size", `Int 48 ] in
   let starting = call ~name ~args |> completed_data in
   output_validator args starting;
-  Alcotest.(check string) "default view is explicitly starting" "starting"
+  Alcotest.(check string) "default view is explicitly current" "current"
     (string_field "mode" starting);
   Alcotest.(check bool) "default view has no preview item" true
     (field "preview_item" starting = `Null);

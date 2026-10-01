@@ -33,6 +33,7 @@ from tui_keyboard_harness import (
     screen_text,
     send_and_wait,
     tab_until,
+    wait_for_fixture_event,
     wait_for_fixture_state,
     wait_for_output,
 )
@@ -508,10 +509,9 @@ def observer_feed_interaction(requests: HttpRequests) -> Interaction:
 
 def run_http_conditional_read_regression(executable: str) -> None:
     """A dashboard read sends the tag of the answer it kept, and a 304 answers
-    with that answer. The briefing is the first read of every full pass and
-    the goal tree the last one on the Overview, so a slow goal tree keeps one
-    pass out across several ticks; the briefing's tag must still go out on
-    the pass after it."""
+    with that answer. On Work, the briefing is the first read of a full pass
+    and the goal tree the last. A slow goal tree keeps one pass out across
+    several ticks; the briefing's tag must still go out on the pass after it."""
     fixtures = overview_event_http_fixtures()
     briefing = fixtures["/api/v1/dashboard/briefing"]
     if not isinstance(briefing, tuple):
@@ -521,6 +521,7 @@ def run_http_conditional_read_regression(executable: str) -> None:
     briefing_tag = 'W/"briefing-fixture"'
     reads = {"untagged": 0, "tagged": 0}
     slow_goals = threading.Event()
+    goals_requested = threading.Event()
     slow_goals_done = threading.Event()
 
     def answer_briefing(headers: dict[str, str]) -> RawHttpResponse:
@@ -537,6 +538,7 @@ def run_http_conditional_read_regression(executable: str) -> None:
         )
 
     def answer_goals() -> HttpResponse:
+        goals_requested.set()
         if slow_goals.is_set() and not slow_goals_done.is_set():
             # Longer than three refresh ticks at refresh=0.5.
             time.sleep(1.6)
@@ -572,6 +574,11 @@ def run_http_conditional_read_regression(executable: str) -> None:
         )
         if b"HTTP 304" in output:
             raise AssertionError("a 304 reached the screen as a refusal")
+        tab_until(process, master_fd, output, b"MASC Work")
+        if not wait_for_fixture_event(
+            process, master_fd, output, goals_requested, timeout=4.0
+        ):
+            raise AssertionError("Work did not request its goal tree")
         slow_goals.set()
         if not wait_for_fixture_state(
             process, master_fd, output, slow_goals_done.is_set, timeout=4.0

@@ -480,7 +480,7 @@ def question_identity_and_return(executable):
     requests = []
 
     def interact(process, fd, _slave, output, _base):
-        _keyboard_harness.wait_for_output(process, fd, output, b"other-question-card", start=0, timeout=10)
+        _keyboard_harness.wait_for_output(process, fd, output, b"Approvals and questions: 2 need you", start=0, timeout=10)
         visible = frame(process, fd, output, "question-cards")
         assert visible.count(b"Question ") == 2, visible
         assert b"Approvals and questions: 2 need you" in visible, visible

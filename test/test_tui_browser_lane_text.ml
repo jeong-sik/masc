@@ -153,7 +153,7 @@ let () =
     `Assoc ["documentId", `String content.document_id;
       "nodeId", `String "article"; "role", `String "article";
       "label", `String "Post A"]);
-  let control = {node with kind=Control {clickable=true;editable=false;disabled=false;href=None};tag="button"} in
+  let control = {node with kind=Control {clickable=true;editable=false;disabled=false;href=None;selection=Masc.Browser_scene.unobserved_control_selection};tag="button"} in
   let control_context = copied_target Automation None control in
   let control_action = control_context |> member "defaultAction" in
   assert (Lane.scene_target_action control = Some Click_control);
@@ -164,7 +164,7 @@ let () =
    | _ -> failwith "copied control action does not satisfy the actual interaction contract");
   let link = {node with node_id="link"; kind=Control {
       clickable=true;editable=false;disabled=false;
-      href=Some "https://example.org/observed"}; tag="a"; text="Observed thread"} in
+      href=Some "https://example.org/observed";selection=Masc.Browser_scene.unobserved_control_selection}; tag="a"; text="Observed thread"} in
   let link_context = copied_target Automation None link in
   let link_action = link_context |> member "defaultAction" in
   assert (Lane.scene_target_action link = Some Follow_link);
@@ -183,8 +183,8 @@ let () =
     let selected={node with kind} in
     assert (Lane.scene_target_action selected=None);
     assert (copied_target Automation None selected |> member "defaultAction" = `Null))
-    [Text;Raster;Control {clickable=true;editable=false;disabled=true;href=None};
-     Control {clickable=false;editable=true;disabled=false;href=None}];
+    [Text;Raster;Control {clickable=true;editable=false;disabled=true;href=None;selection=Masc.Browser_scene.unobserved_control_selection};
+     Control {clickable=false;editable=true;disabled=false;href=None;selection=Masc.Browser_scene.unobserved_control_selection}];
   let lines = (fst (Masc_tui_types.browser_lane_page_layout ~cols:80 view)) in
   List.iter (fun line ->
     if Masc_tui_message_layout.display_width ("  " ^ line) > 76 then
@@ -199,7 +199,7 @@ let () =
   let nested_heading = {heading with node_id="nested-heading"; tag="span"; heading_level=Some 2} in
   let aria_heading = {heading with node_id="aria-heading"; tag="span"; heading_level=Some 3} in
   let heading_link = {heading with node_id="heading-link"; kind=Control {
-      clickable=true; editable=false; disabled=false; href=Some "https://example.org/post"};
+      clickable=true; editable=false; disabled=false; href=Some "https://example.org/post";selection=Masc.Browser_scene.unobserved_control_selection};
       tag="a"; heading_level=Some 2} in
   assert (Masc.Browser_scene.text_role nested_heading = Masc.Browser_scene.Heading 2);
   assert (Masc.Browser_scene.text_role aria_heading = Masc.Browser_scene.Heading 3);
@@ -575,3 +575,35 @@ let () =
   assert ((Lane.move_scene_article ~backwards:false content_without_articles).scene_cursor =
     content_without_articles.scene_cursor);
   print_endline "PASS article navigation uses typed regions and article ancestors"
+
+(* Producer JSON reaches the typed scene, TUI delta comparison and visible label. *)
+let () =
+  let node attributes = `Assoc ([
+    "kind",`String "control";"nodeId",`String "selection";"tag",`String "input";
+    "text",`String "Agree";"clickable",`Bool true;"editable",`Bool false;"disabled",`Bool false;
+    "rects",`List [`Assoc ["x",`Int 0;"y",`Int 0;"width",`Int 100;"height",`Int 20]];
+    "color",`String "rgb(0,0,0)";"fontSize",`Int 14;"fontWeight",`String "400";
+    "whiteSpace",`String "normal";"sourceContext",`Null] @ attributes) in
+  let decode attributes =
+    Lane.decode_scene (`Assoc ["ok",`Bool true;"data",`Assoc [
+      "source",`String "automation";"clientId",`Null;"tabId",`Int 1;"elapsed_ms",`Int 0;
+      "schema",`String "masc.browser.scene.v1";"documentId",`String "doc";
+      "url",`String "https://example.org";"title",`String "Selection";
+      "viewport",`Assoc ["width",`Int 100;"height",`Int 40;"scrollX",`Int 0;"scrollY",`Int 0];
+      "nodes",`List [node attributes];"truncated",`Bool false;"view",`String "content";"scope",`Null]]) in
+  let require = function Ok x -> x | Error error -> failwith error in
+  let base = require (decode []) in
+  let base_node = List.hd base.content.nodes in
+  List.iter (fun (field,value,expected) ->
+    let scene = require (decode [field,value]) in
+    let changed = List.hd scene.content.nodes in
+    assert (Lane.scene_node_changed base_node changed);
+    let view = {(Lane.create ()) with scene=Some scene} in
+    let lines = fst (Masc_tui_types.browser_lane_page_layout ~cols:100 view) in
+    assert (lines = [Printf.sprintf "[>1 button/link · %s] Agree" expected]))
+    ["checked",`Bool true,"checked";"indeterminate",`Bool true,"mixed";
+     "ariaChecked",`String "mixed","aria mixed";"ariaSelected",`String "true","selected"];
+  List.iter (fun attributes -> assert (Result.is_error (decode attributes)))
+    [["checked",`String "true"];["indeterminate",`String "mixed"];
+     ["ariaChecked",`String "unknown"];["ariaSelected",`String "mixed"]];
+  print_endline "PASS producer selection states reach TUI deltas and labels"

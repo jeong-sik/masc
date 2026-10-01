@@ -97,7 +97,7 @@ def row_coordinates(original):
 
 def output_selection(producer):
     selected = object_value(producer.get("output_selection"), "producer.output_selection")
-    if selected == {"all_lanes": True}:
+    if set(selected) == {"all_lanes"} and selected["all_lanes"] is True:
         return None
     lanes = selected.get("lanes")
     if (set(selected) != {"lanes"} or not isinstance(lanes, list) or not lanes

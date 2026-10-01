@@ -464,7 +464,8 @@ class FusionReport(unittest.TestCase):
 
     def test_complete_report_requires_matching_output_selection(self):
         output = project(detail())
-        for selection in (None, {"all_lanes": False}, {"lanes": ["fusion/status"]}):
+        for selection in (None, {"all_lanes": False}, {"all_lanes": 1},
+                          {"lanes": ["fusion/status"]}):
             with self.subTest(selection=selection):
                 captured = upstream(output)
                 producer = captured["observations"][0]["producer"]

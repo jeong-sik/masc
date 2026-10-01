@@ -8785,7 +8785,7 @@ let test_decode_and_join_runtime_surface () =
        | Some probe ->
            Alcotest.(check string) "freshness stays producer-owned"
              "served_stale"
-             (Tui_decode.runtime_probe_refresh_state_to_string
+             (Masc.Tui_decode_runtime_probe.runtime_probe_refresh_state_to_string
                 probe.rps_refresh_state)
        | None -> Alcotest.fail "fixture probe became unavailable");
       (match snapshot.rss_candidates with
@@ -8797,7 +8797,7 @@ let test_decode_and_join_runtime_surface () =
            (match failed.rcr_probe with
             | Some row ->
                 Alcotest.(check string) "failure kind" "network_error"
-                  (Tui_decode.runtime_provider_status_to_string row.rpp_status)
+                  (Masc.Tui_decode_runtime_probe.runtime_provider_status_to_string row.rpp_status)
             | None -> Alcotest.fail "network failure became unobserved");
            Alcotest.(check bool) "stale absence is unobserved" true
              (Option.is_none unobserved.rcr_probe)
@@ -8822,7 +8822,7 @@ let test_decode_and_join_runtime_surface () =
 let test_runtime_probe_status_reads_every_word_the_server_writes () =
   List.iter
     (fun word ->
-      match Tui_decode.runtime_probe_status_of_string word with
+      match Masc.Tui_decode_runtime_probe.runtime_probe_status_of_string word with
       | Ok _ -> ()
       | Error detail ->
         Alcotest.failf "the server writes %S and this refused it: %s" word
@@ -8838,7 +8838,7 @@ let test_runtime_probe_status_reads_every_word_the_server_writes () =
 let test_runtime_probe_status_refuses_words_nobody_writes () =
   List.iter
     (fun word ->
-      match Tui_decode.runtime_probe_status_of_string word with
+      match Masc.Tui_decode_runtime_probe.runtime_probe_status_of_string word with
       | Error _ -> ()
       | Ok _ -> Alcotest.failf "%S decoded, and no producer writes it" word)
     [ "reachable"; "no_http_runtimes"; "warming"; "healthy"; "" ]
@@ -8850,23 +8850,23 @@ let test_runtime_probe_status_refuses_words_nobody_writes () =
 let test_runtime_probe_status_round_trips () =
   List.iter
     (fun status ->
-      let word = Tui_decode.runtime_probe_status_to_string status in
-      match Tui_decode.runtime_probe_status_of_string word with
+      let word = Masc.Tui_decode_runtime_probe.runtime_probe_status_to_string status in
+      match Masc.Tui_decode_runtime_probe.runtime_probe_status_of_string word with
       | Ok back when back = status -> ()
       | Ok _ -> Alcotest.failf "%S read back as a different status" word
       | Error detail ->
         Alcotest.failf "%S is written but not read: %s" word detail)
-    [ Tui_decode.Runtime_probe_reachable
-    ; Tui_decode.Runtime_probe_no_http_runtimes
-    ; Tui_decode.Runtime_probe_degraded
-    ; Tui_decode.Runtime_probe_unreachable
-    ; Tui_decode.Runtime_probe_warming
+    [ Masc.Tui_decode_runtime_probe.Runtime_probe_reachable
+    ; Masc.Tui_decode_runtime_probe.Runtime_probe_no_http_runtimes
+    ; Masc.Tui_decode_runtime_probe.Runtime_probe_degraded
+    ; Masc.Tui_decode_runtime_probe.Runtime_probe_unreachable
+    ; Masc.Tui_decode_runtime_probe.Runtime_probe_warming
     ]
 ;;
 
 let test_runtime_probe_rejects_unknown_status () =
   match
-    Tui_decode.decode_runtime_probe_snapshot
+    Masc.Tui_decode_runtime_probe.decode_runtime_probe_snapshot
       (runtime_probe_surface_json ~first_status:"ok" ())
   with
   | Ok _ -> Alcotest.fail "unknown provider status decoded"
@@ -8874,14 +8874,14 @@ let test_runtime_probe_rejects_unknown_status () =
 
 let test_runtime_probe_rejects_status_reachability_disagreement () =
   match
-    Tui_decode.decode_runtime_probe_snapshot
+    Masc.Tui_decode_runtime_probe.decode_runtime_probe_snapshot
       (runtime_probe_surface_json ~first_reachable:(`Bool false) ())
   with
   | Ok _ -> Alcotest.fail "reachable status with false reachability decoded"
   | Error _ -> ()
 
 let test_runtime_probe_preserves_limitations () =
-  match Tui_decode.decode_runtime_probe_snapshot (runtime_probe_surface_json ()) with
+  match Masc.Tui_decode_runtime_probe.decode_runtime_probe_snapshot (runtime_probe_surface_json ()) with
   | Error detail -> Alcotest.fail detail
   | Ok snapshot ->
       Alcotest.(check (list string)) "producer limitations"
@@ -8890,7 +8890,7 @@ let test_runtime_probe_preserves_limitations () =
 
 let test_runtime_probe_accepts_empty_limitations () =
   match
-    Tui_decode.decode_runtime_probe_snapshot
+    Masc.Tui_decode_runtime_probe.decode_runtime_probe_snapshot
       (runtime_probe_surface_json ~limitations:(`List []) ())
   with
   | Error detail -> Alcotest.fail detail
@@ -8899,7 +8899,7 @@ let test_runtime_probe_accepts_empty_limitations () =
 
 let test_runtime_probe_rejects_malformed_limitations () =
   match
-    Tui_decode.decode_runtime_probe_snapshot
+    Masc.Tui_decode_runtime_probe.decode_runtime_probe_snapshot
       (runtime_probe_surface_json
          ~limitations:(`List [ `String "typed"; `Int 1 ]) ())
   with
@@ -8915,7 +8915,7 @@ let test_runtime_probe_rejects_malformed_limitations () =
    direction. *)
 let test_runtime_probe_rejects_a_source_that_is_not_the_runtime_config () =
   match
-    Tui_decode.decode_runtime_probe_snapshot
+    Masc.Tui_decode_runtime_probe.decode_runtime_probe_snapshot
       (runtime_probe_surface_json ~source:"keeper_runtime.toml" ())
   with
   | Ok _ -> Alcotest.fail "a probe naming another file decoded"
@@ -8942,13 +8942,13 @@ let test_runtime_catalog_probe_is_independent_of_dispatch () =
   | Ok snapshot ->
       let runtime = List.find (fun row -> row.Tui_decode.ro_id = "runtime-c")
           snapshot.rss_resolved.rrs_runtimes in
-      (match Tui_decode.runtime_probe_for_id snapshot ~runtime_id:runtime.ro_id with
+      (match Masc.Tui_decode_runtime_probe.runtime_probe_for_id snapshot.Masc.Tui_decode.rss_probe ~runtime_id:runtime.ro_id with
        | None -> Alcotest.fail "catalog lost failed provider observation"
        | Some probe -> Alcotest.(check string) "failure remains independently visible"
-           "endpoint_not_found" (Tui_decode.runtime_provider_status_to_string probe.rpp_status);
+           "endpoint_not_found" (Masc.Tui_decode_runtime_probe.runtime_provider_status_to_string probe.rpp_status);
            Alcotest.(check (option int)) "actual HTTP result" (Some 404) probe.rpp_http_status);
       Alcotest.(check bool) "missing observation stays absent" true
-        (Option.is_none (Tui_decode.runtime_probe_for_id snapshot ~runtime_id:"runtime-d"))
+        (Option.is_none (Masc.Tui_decode_runtime_probe.runtime_probe_for_id snapshot.Masc.Tui_decode.rss_probe ~runtime_id:"runtime-d"))
 
 let test_runtime_limits_reject_unknown_or_invalid_values () =
   let replace name value = function

@@ -9866,7 +9866,17 @@ let repository_studio_geometry (state : state) ~cols ~budget ~cursor =
         | Some repo -> Terminal_text.single_line repo.rp_name in
       let errors = match state.repositories_error with
         | None -> []
-        | Some detail -> [Theme.bad () ^ Terminal_text.single_line detail ^ Ansi.reset] in
+        | Some detail ->
+            Message_layout.wrap_words ~max_cells:(max 1 (list_width - 4))
+              (Terminal_text.single_line detail)
+            |> List.map (fun line -> Theme.bad () ^ line ^ Ansi.reset) in
+      (* Keep the header, panel edges and a selected repository visible.
+         The stacked layout also needs the selected-context panel edges. *)
+      let error_budget = max 0 (budget - if split then 4 else 6) in
+      let errors =
+        if List.length errors <= error_budget then errors
+        else List.take (max 0 (error_budget - 1)) errors
+          @ (if error_budget > 0 then ["More error detail · enlarge terminal"] else []) in
       let context_budget = max 0 (if split then budget - 2 else budget - 6 - List.length errors) in
       let truncated = List.length context_lines > context_budget in
       let show_notice = truncated && context_budget >= 2 in

@@ -500,6 +500,7 @@ jobs:
           "$RUNNER_TEMP/studio-browser-venv/bin/python" scripts/capture-tui-ci-frames.py \
             --log "$STUDIO_LOG" --run-info "$RUNNER_TEMP/studio-run.json" \
             --expected-head "$STUDIO_SOURCE_SHA" --out "$STUDIO_OUT" \
+            --suite test_tui_surface_studio_pty \
             --suite-pass-marker "tui surface studio PTY: PASS"
 
       - name: Upload Surface fixture PTY screenshots
@@ -554,6 +555,7 @@ jobs:
           "$RUNNER_TEMP/studio-browser-venv/bin/python" scripts/capture-tui-ci-frames.py \
             --log "$STUDIO_LOG" --run-info "$RUNNER_TEMP/studio-run.json" \
             --expected-head "$STUDIO_SOURCE_SHA" --out "$STUDIO_OUT" \
+            --suite test_tui_lane_visual_pty \
             --suite-pass-marker "TUI navigation consistency: PASS"
 
       - name: Upload Navigation fixture PTY screenshots

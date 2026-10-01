@@ -49,7 +49,7 @@ def record_payload(line: str) -> str | None:
     return payload
 
 
-def captures(log: str) -> list[dict]:
+def captures(log: str, suite: str | None = None) -> list[dict]:
     result = []
     marker = "STUDIO_CAPTURE="
     for line in log.splitlines():
@@ -57,7 +57,9 @@ def captures(log: str) -> list[dict]:
         if payload is None:
             continue
         if payload.startswith(marker):
-            result.append(json.loads(payload[len(marker):]))
+            record = json.loads(payload[len(marker):])
+            if suite is None or record.get("suite") == suite:
+                result.append(record)
     return result
 
 
@@ -167,6 +169,7 @@ def main() -> None:
     parser.add_argument("--expected-head")
     parser.add_argument("--out", type=Path)
     parser.add_argument("--suite-pass-marker")
+    parser.add_argument("--suite", help="Select records explicitly tagged with this producing suite")
     parser.add_argument("--replay", type=Path, help=argparse.SUPPRESS)
     args = parser.parse_args()
     if args.replay is not None:
@@ -190,7 +193,7 @@ def main() -> None:
     if run["headSha"] != args.expected_head:
         raise SystemExit("run source SHA differs from --expected-head")
     log = args.log.read_text()
-    frames = captures(log)
+    frames = captures(log, suite=args.suite)
     if not frames:
         raise SystemExit("log contains no STUDIO_CAPTURE records")
     binaries = binary_hashes(log)
@@ -199,6 +202,7 @@ def main() -> None:
         "provenance": "xterm replay of CI fixture PTY frames",
         "source_sha": run["headSha"], "run": run,
         "binary_sha256": sorted(binaries),
+        "suite": args.suite,
         "suite_pass_seen": any(
             args.suite_pass_marker is not None and record_payload(line) == args.suite_pass_marker
             for line in log.splitlines()

@@ -31,7 +31,13 @@ def run(executable, no_color=False):
             "id": name, "name": name, "local_path": "workspace/" + name,
             "resolved_local_path": "/srv/masc/workspace/" + name})
     repositories["total"] = len(repositories["repositories"])
-    fixtures[h.REPOSITORIES_PATH] = (200, repositories)
+    refresh_failed = False
+    refresh_error = ("Workspace repository refresh unavailable while reading the registered checkout "
+        "and its remote identity; the previous repositories remain available for selection. "
+        "Recover using surface-refresh-recovery-token")
+    def read_repositories():
+        return (503, {"error": refresh_error}) if refresh_failed else (200, repositories)
+    fixtures[h.REPOSITORIES_PATH] = read_repositories
     fixtures["/api/v1/runtime/params"] = (200, {"parameters": [
         {"key": "studio.enabled", "current": True, "default": False,
          "has_override": True, "meta": {"description": "Enable the observed feature",
@@ -41,6 +47,7 @@ def run(executable, no_color=False):
          "meta": {"description": "Presentation mode",
          "value_type": "string"}}], "surfaces": []})
     def interact(process, fd, _slave, output, _base):
+        nonlocal refresh_failed
         def key(value, needle):
             return h.send_and_wait(process, fd, output, value, needle)
         def capture(name, rows, columns, needle, selected_name=None, *, raw=False):
@@ -52,7 +59,7 @@ def run(executable, no_color=False):
                 raise AssertionError("repository status injected a newline or terminal cursor control")
             if selected_name is not None and not h.keeper_row_selected(selected_name).search(frame):
                 raise AssertionError(f"selected repository {selected_name!r} vanished from its table")
-            print("STUDIO_CAPTURE="+json.dumps({"name":name+("-no-color" if no_color else ""),
+            print("STUDIO_CAPTURE="+json.dumps({"suite":"test_tui_surface_studio_pty", "name":name+("-no-color" if no_color else ""),
                 "rows":rows,"columns":columns,"provenance":"CI fixture PTY",
                 "frame_b64":base64.b64encode(frame).decode(),
                 "screen":b"\n".join(h.screen_rows(frame).get(row, b"") for row in range(1, rows + 1)).decode(errors="replace")}),flush=True)
@@ -90,6 +97,24 @@ def run(executable, no_color=False):
             if re.search(rb"\x1b\[7m *"+re.escape(name)+rb"(?= )",paged)]
         if len(selected)!=1 or not 0<selected[0]<=visible:
             raise AssertionError(f"Workspace page skipped undisplayed repositories: {selected}, visible={visible}")
+        # A failed surface refresh retains the table. Its diagnostic belongs
+        # to that table's interior, even in the wide split layout.
+        key(b"\x1b[H", b"/srv/masc/workspace/masc")
+        capture("workspace-before-failed-refresh",32,160,b"Keepers: alpha",b"masc")
+        refresh_failed = True
+        key(b"r", b"surface-refresh-recovery-token")
+        failed_refresh = capture("workspace-surface-error-wide",32,160,
+            b"surface-refresh-recovery-token",b"masc")
+        if b"surface-refresh-recovery-token" not in failed_refresh:
+            raise AssertionError("Workspace clipped the surface refresh recovery suffix")
+        visible = sum(name in failed_refresh for name in names)
+        key(b"\x1b[6~",b"page-")
+        paged_error = capture("workspace-surface-error-page",32,160,
+            b"surface-refresh-recovery-token",raw=True)
+        selected = [index for index,name in enumerate(names)
+            if re.search(rb"\x1b\[7m *"+re.escape(name)+rb"(?= )",paged_error)]
+        if len(selected)!=1 or not 0<selected[0]<=visible:
+            raise AssertionError("Workspace error rows made PageDown skip undisplayed repositories")
         key(b":settings\r",b"studio.enabled")
         wide=capture("system-wide",32,160,b"Selected setting")
         for needle in (b"Current on",b"Default off",b"override",b"Enable the observed feature"):

@@ -6,3 +6,12 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_surface_studio_pty)))
+
+(rule
+ (alias runtest-test_capture_tui_ci_frames)
+ (deps test_capture_tui_ci_frames.py ../scripts/capture-tui-ci-frames.py)
+ (action (run python3 %{dep:test_capture_tui_ci_frames.py})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_capture_tui_ci_frames)))

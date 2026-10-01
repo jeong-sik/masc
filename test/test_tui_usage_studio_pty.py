@@ -21,6 +21,7 @@ def fixtures():
     now = time.time()
     result = h.keeper_runtime_http_fixtures()
     _, runtime = h.runtime_resolved_response()
+    assert isinstance(runtime, dict)
     scopes = []
     for index, (name, share) in enumerate([
         ("Claude Code Max Subscription", 0.0),
@@ -81,7 +82,7 @@ def capture(process, fd, output, name, rows, columns, needle):
     frame = h.resize_and_wait(process, fd, output, rows=rows, columns=columns,
                              needle=needle, controls=(h.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
     screen = h.screen_text(frame)
-    print("STUDIO_CAPTURE=" + json.dumps({
+    print("STUDIO_CAPTURE=" + json.dumps({"suite": "test_tui_usage_studio_pty",
         "name": name, "rows": rows, "columns": columns,
         "provenance": "CI fixture PTY", "frame_b64": base64.b64encode(frame).decode(),
         "screen": b"\n".join(h.screen_rows(frame).get(row, b"") for row in range(1, rows + 1)).decode(errors="replace")}), flush=True)

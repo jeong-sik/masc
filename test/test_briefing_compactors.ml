@@ -266,6 +266,8 @@ let test_attention_read_failure_is_not_empty () =
       replace "recommended_actions" (`Assoc []);
       replace "recommended_actions" (`List [`Assoc []]);
       replace "recommended_actions" (`List [`String "pause"]);
+      replace "recommended_actions" (`List [`Assoc [ "action_type", `String "namespace_pause";
+        "target_type", `String "workspace"; "reason", `String "review"; "reason", `Null ]]);
       replace "recommended_actions" (`List [`Assoc [ "action_type", `String "pause";
         "target_type", `String "workspace"; "reason", `String " " ]]);
       replace "summary" (`Assoc []);

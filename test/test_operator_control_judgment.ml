@@ -64,8 +64,8 @@ let test_digest_workspace_prefers_fresh_operator_judgment () =
       (match recommended_actions with
        | action :: _ ->
          Alcotest.(check string) "top-level action comes from judgment"
-           "pause_workspace"
-           Yojson.Safe.Util.(action |> member "action_kind" |> to_string)
+           "namespace_pause"
+           Yojson.Safe.Util.(action |> member "action_type" |> to_string)
        | [] -> Alcotest.fail "expected one authoritative recommendation");
       Alcotest.(check bool) "top-level recommendation summary is authoritative"
         true
@@ -361,9 +361,28 @@ let test_operator_judgment_requires_stated_confidence () =
 
 let test_briefing_validates_written_recommendations () =
   let valid_action =
+    `Assoc [ "action_kind", `String "pause_workspace";
+             "resolved_tool", `String "masc_operator_confirm";
+             "target_type", `String "workspace";
+             "reason", `String "Pause for operator review.";
+             "payload_preview", `Assoc [ "reason", `String "manual review" ] ]
+  in
+  let canonical_action =
     `Assoc [ "action_type", `String "namespace_pause";
              "target_type", `String "workspace";
-             "reason", `String "Pause for operator review." ]
+             "reason", `String "Pause for operator review.";
+             "confirm_required", `Bool true;
+             "suggested_payload", `Assoc [ "reason", `String "manual review" ] ]
+  in
+  let duplicate_reason =
+    match canonical_action with
+    | `Assoc fields -> `Assoc (fields @ [ "reason", `Null ])
+    | _ -> Alcotest.fail "canonical recommendation must be an object"
+  in
+  let duplicate_kind =
+    match valid_action with
+    | `Assoc fields -> `Assoc (fields @ [ "action_kind", `String "pause_workspace" ])
+    | _ -> Alcotest.fail "written recommendation must be an object"
   in
   List.iter (fun (action, available) ->
     Eio_main.run @@ fun env ->
@@ -388,7 +407,23 @@ let test_briefing_validates_written_recommendations () =
         | Ok json -> json
         | Error detail -> Alcotest.fail detail in
       let actions = Yojson.Safe.Util.member "recommended_actions" digest in
-      Alcotest.(check bool) "writer action reaches digest unchanged" true
+      let written_action = Operator_judgment.latest_active config
+        ~surface:"command.namespace" ~target_type:Operator_judgment.Workspace ~target_id:None in
+      (match written_action with
+       | Some judgment -> Alcotest.(check bool) "record retains original decision" true
+           (judgment.recommended_action = Some action)
+       | None -> Alcotest.fail "written judgment missing");
+      if available then (match actions with
+       | `List [projected] ->
+           Alcotest.(check string) "digest uses executable action type" "namespace_pause"
+             Yojson.Safe.Util.(projected |> member "action_type" |> to_string);
+           Alcotest.(check bool) "digest preserves action payload" true
+             (Yojson.Safe.Util.member "suggested_payload" projected
+              = `Assoc [ "reason", `String "manual review" ]);
+           Alcotest.(check bool) "action requires confirmation" true
+             Yojson.Safe.Util.(projected |> member "confirm_required" |> to_bool)
+       | _ -> Alcotest.fail "one canonical recommendation expected")
+      else Alcotest.(check bool) "malformed action remains observable" true
         (actions = `List [action]);
       let summary = Briefing_compactors.compact_briefing_summary_json
         (`Assoc [ "attention_read_error", `Null;
@@ -401,7 +436,8 @@ let test_briefing_validates_written_recommendations () =
           Yojson.Safe.Util.(json |> member "recommended_action_count" |> to_int)
       | Error detail, true -> Alcotest.fail detail
       | Ok _, false -> Alcotest.fail "empty written recommendation fabricated attention"))
-    [ `Assoc [], false; valid_action, true ]
+    [ `Assoc [], false; duplicate_reason, false; duplicate_kind, false;
+      valid_action, true; canonical_action, true ]
 
 let tests =
   [

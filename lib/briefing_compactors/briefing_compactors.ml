@@ -67,6 +67,10 @@ let compact_briefing_summary_json briefing =
         let* () = result in
         match action with
         | `Assoc fields ->
+            let* () =
+              Json_util.reject_unknown_fields ~surface:"briefing recommended action"
+                ~allowed:(List.map fst fields) fields
+            in
             List.fold_left
               (fun result name ->
                 let* () = result in

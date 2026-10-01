@@ -25,6 +25,10 @@ val active_guidance :
     recommendation projection. When a fresh
     operator judgment exists, emits
     [judgment_owner = "operator_keeper"] with the judgment's
-    summary/recommendation; otherwise emits
+    summary and recommendation. The recommendation projection translates the
+    recorded [pause_workspace] action kind to the canonical [namespace_pause]
+    action type and exposes its preview payload as [suggested_payload]. The raw
+    judgment remains unchanged. Malformed recommendations remain visible to
+    observation validation; otherwise emits
     [judgment_owner = "fallback_read_model"], preserves the supplied
     observation summary, and emits no recommendation. *)

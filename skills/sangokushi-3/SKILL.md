@@ -168,15 +168,16 @@ protection, then `2`.
 
 ## The ending
 
-In the observed unification on 2026-09-29, one ruler held every city and
-KOEI.COM entered the ending path by running `END.EXE`. That game-state end
-is separate from displaying the intended ending.
+In the loader experiment on 2026-09-29, `MAIN.EXE` was replaced with a test
+program that exited with code 0. KOEI.COM then ran `END.EXE`. This forced the
+loader's ending path; it did not establish that one ruler held every city or
+that an actual campaign had reached unification.
 
-`END.EXE` reads `ENDSTIL.DAT` first, and the observed `samguk3` program folder
-had no such file. The screen showed `END.EXE : file access failure.` and the
-machine exited. This was an ending-display failure; the intended ending was
-not shown and remains unverified. Report the unification and file-access
-failure separately.
+`END.EXE` tried to read `ENDSTIL.DAT` first. The observed `samguk3` program
+folder had no such file, and the INT 21h trace recorded a file-not-found error
+(2). The screen showed `END.EXE : file access failure.` and the machine
+exited. The experiment established that ending-display failure; the intended
+ending and a campaign's unification remain unverified by this evidence.
 
 In the observed game where every ruler's clan died out, the KOEI copyright
 screen appeared and a key exited.

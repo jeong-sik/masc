@@ -197,6 +197,49 @@ let test_keeper_broadcast_rejects_partial_typed_cache_signal () =
    within one priority the newest task sits last and falls off [limit] first.
    Eight tasks registered at priority 2 and 3 stayed invisible across nineteen
    todo listings because the response gave no sign it had cut anything (#29101). *)
+let test_tasks_list_completed_census_omits_receipts () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       ignore (Masc.Workspace.add_task config ~title:"completed census"
+                 ~priority:3 ~description:"body");
+       let backlog = Workspace_backlog.read_backlog_r config |> Result.get_ok in
+       let seed = List.hd backlog.tasks in
+       let notes = String.make 4096 'x' in
+       let tasks = List.init 101 (fun index ->
+         { seed with id = Printf.sprintf "task-%03d" index;
+           task_status = Masc_domain.Done
+             { assignee = "worker"; completed_at = "2026-10-01T18:00:00Z";
+               notes = Some notes } }) in
+       Workspace_backlog.write_backlog config { backlog with tasks };
+       let page fields =
+         Task.handle_keeper_task_tool_with_outcome ~config ~meta:(keeper_meta ())
+           ~name:"keeper_tasks_list"
+           ~args:(`Assoc ([ "status", `String "done"; "limit", `Int 100 ] @ fields))
+         |> fun execution -> Option.get execution.data
+       in
+       let first = page [] in
+       let second = page [ "cursor", U.(first |> member "next_cursor") ] in
+       let rows = U.(first |> member "snapshot" |> to_list)
+                  @ U.(second |> member "snapshot" |> to_list) in
+       check int "all completed tasks can be counted" 101 (List.length rows);
+       List.iter (fun row ->
+         check bool "receipt body is absent" false (List.mem "notes" (U.keys row));
+         check string "completion timestamp is retained" "2026-10-01T18:00:00Z"
+           U.(row |> member "completed_at" |> to_string)) rows;
+       let full = page [ "projection", `String "full" ] in
+       let first_full = List.hd U.(full |> member "snapshot" |> to_list) in
+       check string "full projection preserves the receipt" notes
+         U.(first_full |> member "notes" |> to_string);
+       Printf.printf "completed census: compact=%d bytes, full first page=%d bytes\n%!"
+         (String.length (Yojson.Safe.to_string first)
+          + String.length (Yojson.Safe.to_string second))
+         (String.length (Yojson.Safe.to_string full)))
+;;
+
 let test_tasks_list_reports_truncation () =
   let base_path = temp_dir () in
   Fun.protect
@@ -427,6 +470,13 @@ let test_tasks_list_pages_with_cursor () =
        let page2 = page ~cursor:(next page1) 2 in
        check bool "page 2 is cut" true (cut page2);
        let page3 = page ~cursor:(next page2) 2 in
+       List.iter
+         (fun data ->
+           check int "continuations do not replay the discovery window" 0
+             U.(data |> member "new_tasks_count" |> to_int);
+           check int "continuations carry no extra task rows" 0
+             U.(data |> member "new_tasks" |> to_list |> List.length))
+         [ page2; page3 ];
        check bool "the last page is not cut" false (cut page3);
        check bool "the last page carries no cursor" false
          (List.mem "next_cursor" (U.keys page3));
@@ -1415,6 +1465,8 @@ let () =
             "keeper_tasks_list is compact by default and full on request"
             `Quick
             test_tasks_list_projection_compact_by_default_full_on_request
+        ; test_case "completed census omits receipts" `Quick
+            test_tasks_list_completed_census_omits_receipts
         ; test_case "response finalization keeps visible reply only" `Quick
             test_response_finalization_keeps_visible_reply_only
         ; test_case "rejected done (missing task_id) emits typed Error (D1)"

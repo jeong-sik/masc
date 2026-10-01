@@ -1,13 +1,15 @@
 name = "keeper_tasks_list"
 description = """
 List backlog tasks. Rows carry id, title, priority, created_at, status, \
-assignee; projection=full adds description, files, contract, \
+assignee and lifecycle timestamps; projection=full adds completion notes, description, files, contract, \
 handoff_context, execution_links. awaiting_verification means the task \
 awaits the completion-authority verdict and no Keeper can claim it; \
 never Read producer sandbox paths. Rows are ordered by priority, then \
 created_at, then id. When truncated is true the response carries \
 next_cursor; pass it as cursor with the same status, include_done and \
-projection to read the rows after that page. The last page has none."""
+projection to read the rows after that page. The last page has none. \
+new_tasks highlights recent off-page rows only on the first page; \
+continuation pages do not repeat that discovery window."""
 [help]
 short_description = "List MASC backlog tasks visible to this keeper."
 when_to_use = "Use before claiming work, checking awaiting verification items, or diagnosing current task state."

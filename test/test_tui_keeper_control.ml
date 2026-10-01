@@ -670,30 +670,41 @@ let test_roster_equipment_is_required_and_failures_stay_per_keeper () =
 
 let test_item_revision_hint_preserves_keeper_observation () =
   let row = Yojson.Safe.from_string (gate_row "analyst") in
-  let decode ?(candle = `Assoc ["status", `String "off"]) value =
+  let decode ~candle ~balance value =
     let row = match row with
-      | `Assoc fields -> `Assoc (("candle_account_revision", value) :: List.remove_assoc "candle_account_revision" fields)
+      | `Assoc fields -> `Assoc (("candle_account_revision", value)
+          :: ("candle_balance_milli", balance)
+          :: List.remove_assoc "candle_account_revision"
+               (List.remove_assoc "candle_balance_milli" fields))
       | _ -> Alcotest.fail "bad Keeper fixture" in
     match Decode.decode_keeper_runtime_list (`Assoc [
       "candle", candle; "keepers", `List [row];
       "total", `Int 1; "truncated", `Bool false]) with
     | Ok ([runtime], [], false, 1, _) -> runtime
-    | _ -> Alcotest.fail "Item revision hint hid the Keeper"
+    | _ -> Alcotest.fail "Item revision reading hid the Keeper"
   in
+  let ready = `Assoc ["status", `String "ready"; "issued_milli", `String "0";
+    "burned_milli", `String "0"; "circulating_milli", `String "0"] in
+  let off = `Assoc ["status", `String "off"] in
   let digest = String.make 64 'a' in
-  Alcotest.(check bool) "canonical revision decoded" true
-    ((decode ~candle:(`Assoc ["status", `String "disabled"; "reason", `String "fixture ledger unavailable"]) (`String digest)).kr_candle_account_revision = Ok (Some digest));
-  Alcotest.(check bool) "null denotes no hint" true
-    ((decode `Null).kr_candle_account_revision = Ok None);
-  List.iter (fun value ->
-    let runtime = decode value in
-    Alcotest.(check bool) "malformed hint reported independently" true
+  Alcotest.(check bool) "canonical ready revision decoded" true
+    ((decode ~candle:ready ~balance:(`String "0") (`String digest)).kr_candle_account_revision = Ok (Some digest));
+  let disabled = `Assoc ["status", `String "disabled";
+    "reason", `String "fixture ledger unavailable"] in
+  Alcotest.(check bool) "disabled revision decoded without balance" true
+    ((decode ~candle:disabled ~balance:`Null (`String digest)).kr_candle_account_revision = Ok (Some digest));
+  Alcotest.(check bool) "null authorizes only observed Off" true
+    ((decode ~candle:off ~balance:`Null `Null).kr_candle_account_revision = Ok None);
+  List.iter (fun (runtime : Decode.keeper_runtime) ->
+    Alcotest.(check bool) "invalid authority reported independently" true
       (Result.is_error runtime.kr_candle_account_revision);
     let roster = Control.Roster_complete [runtime] in
-    Alcotest.(check bool) "malformed hint retains lifecycle controls" true
+    Alcotest.(check bool) "invalid authority retains lifecycle controls" true
       (List.mem Control.Shutdown
         (Control.available (reading ~liveness:(Control.liveness_of_roster roster "analyst") "analyst"))))
-    [`Int 1; `String "short"; `String (String.make 64 'A')]
+    (decode ~candle:off ~balance:`Null (`String digest)
+     :: List.map (decode ~candle:ready ~balance:(`String "0"))
+          [`Null; `Int 1; `String "short"; `String (String.make 64 'A')])
 
 let test_roster_candle_amounts_and_status_agree () =
   let amount = "18446744073709551614000" in

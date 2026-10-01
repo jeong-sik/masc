@@ -255,6 +255,7 @@ let test_observed_items_remain_visible_in_the_info_mosaic () =
   check bool "removing the outfit restores the cached compact body" true
     (restored.Portrait.image == bare.Portrait.image)
 
+
 let () =
   run "tui_keeper_portrait"
     [ ( "band"

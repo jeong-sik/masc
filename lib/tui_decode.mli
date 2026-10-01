@@ -1302,8 +1302,13 @@ val keeper_health_reading : keeper_health -> keeper_health_reading
 
 type keeper_activation_mode = Activation_manual | Activation_on_demand | Activation_autonomous
 
+type keeper_portrait = Keeper_portrait_equipment.reading =
+  | Ready of Keeper_portrait_look.equipment
+  | Unavailable of string
+
 type keeper_runtime = {
   kr_name : string;
+  kr_portrait : keeper_portrait;
   kr_health : keeper_health;
   kr_paused : bool;
   kr_next_action : Keeper_status_runtime.keeper_next_action_path option;

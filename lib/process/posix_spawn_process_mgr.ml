@@ -11,17 +11,18 @@ external posix_spawn
 
 external exited_without_reaping : int -> bool = "masc_process_exited_without_reaping"
 
-type group_phase = Running | Terminating of Monotonic_deadline.t | Killed
+type group_phase = Running | Terminating of Monotonic_deadline.t | Killed | Reaping
 
 type group_owner = {
   sleep : float -> unit;
   grace_seconds : float;
+  waitpid : int -> int * Unix.process_status;
   mutable phase : group_phase;
 }
 
 type t =
   { pid : int
-  ; exit_status : Unix.process_status Promise.t
+  ; exit_status : (Unix.process_status, exn) result Promise.t
   ; lock : Stdlib.Mutex.t
   ; group : group_owner option
   }
@@ -45,14 +46,15 @@ let signal t signal =
     if not (Promise.is_resolved t.exit_status) then
       match t.group with
       | None -> Unix.kill t.pid signal
-      | Some owner ->
+      | Some { phase = Reaping; _ } -> ()
+      | Some ({ phase = Running | Terminating _ | Killed; _ } as owner) ->
         kill_group t signal;
         if signal = Sys.sigkill then owner.phase <- Killed
         else if signal = Sys.sigterm then
           match owner.phase with
           | Running -> owner.phase <- Terminating
               (Monotonic_deadline.after ~seconds:owner.grace_seconds)
-          | Terminating _ | Killed -> ());
+          | Terminating _ | Killed | Reaping -> ());
   (* A termination request must wake a daemon waiting for SIGCHLD even
      when the leader ignores TERM. The deadline belongs to the owner. *)
   Eio.Condition.broadcast Eio_unix.Process.sigchld
@@ -67,7 +69,7 @@ let reap t set_exit_status =
       None
     | reaped, status ->
       assert (reaped = t.pid);
-      Promise.resolve set_exit_status status;
+      Promise.resolve_ok set_exit_status status;
       Stdlib.Mutex.unlock t.lock;
       Some ())
 ;;
@@ -79,32 +81,53 @@ let rec reap_group t owner set_exit_status =
   let next = Eio.Condition.loop_no_mutex Eio_unix.Process.sigchld (fun () ->
     locked t (fun () ->
       if Promise.is_resolved t.exit_status then Some `Done
+      else if owner.phase = Reaping then Some `Await
       else
         let delay = match owner.phase with
           | Terminating deadline -> Monotonic_deadline.remaining_seconds deadline
-          | Running | Killed -> 0. in
+          | Running | Killed | Reaping -> 0. in
         if delay > 0. then Some (`Sleep delay)
         else (
           (match owner.phase with
            | Terminating _ -> kill_group t Sys.sigkill; owner.phase <- Killed
-           | Running | Killed -> ());
+           | Running | Killed | Reaping -> ());
           if not (exited_without_reaping t.pid) then None
           else (
             (* [Killed] records an already successful whole-group SIGKILL.
                Repeating it after exit can fail on Darwin's zombie-only group.
                Normal completion still kills descendants before PID release. *)
             (match owner.phase with
-             | Killed -> ()
+             | Killed | Reaping -> ()
              | Running | Terminating _ ->
                kill_group t Sys.sigkill;
                owner.phase <- Killed);
-            let reaped, status = Unix.waitpid [ WNOHANG ] t.pid in
-            assert (reaped = t.pid);
-            Promise.resolve set_exit_status status;
-            Some `Done)))) in
+            Some `Reap)))) in
   match next with
   | `Done -> ()
+  | `Await -> ignore (Promise.await_exn t.exit_status : Unix.process_status)
   | `Sleep seconds -> owner.sleep seconds; reap_group t owner set_exit_status
+  | `Reap ->
+    (* WNOWAIT retains the PID through the final group signal. Finish with a
+       blocking wait in a system thread: a WNOHANG zero must neither crash the
+       caller nor wait for a second SIGCHLD that may never arrive. *)
+    Eio.Cancel.protect (fun () ->
+      let claimed = locked t (fun () ->
+        if Promise.is_resolved t.exit_status || owner.phase = Reaping then false
+        else (owner.phase <- Reaping; true)) in
+      if not claimed then ignore (Promise.await_exn t.exit_status : Unix.process_status)
+      else
+        let rec wait () =
+          try owner.waitpid t.pid with
+          | Unix.Unix_error (Unix.EINTR, _, _) -> wait () in
+        match Eio_unix.run_in_systhread wait with
+        | reaped, status ->
+          assert (reaped = t.pid);
+          locked t (fun () -> Promise.resolve_ok set_exit_status status)
+        | exception exn ->
+          (* Preserve the failure for a concurrent cleanup waiter as well. *)
+          locked t (fun () -> Promise.resolve_error set_exit_status exn);
+          raise exn)
+
 ;;
 
 let reap_owned t set_exit_status =
@@ -120,7 +143,7 @@ module Process_impl = struct
   let pid t = t.pid
 
   let await t =
-    match Promise.await t.exit_status with
+    match Promise.await_exn t.exit_status with
     | Unix.WEXITED code -> `Exited code
     | Unix.WSIGNALED signal -> `Signaled signal
     | Unix.WSTOPPED _ -> assert false
@@ -200,8 +223,17 @@ let mgr : Eio_unix.Process.mgr_ty Eio.Resource.t =
   Eio.Resource.T ((fun () -> None), handler)
 ;;
 
-let foreground_mgr ~clock ~grace_seconds =
+let foreground_mgr_with_waitpid ~clock ~grace_seconds ~waitpid =
   let handler = Eio_unix.Process.Pi.mgr_unix (module Impl) in
   Eio.Resource.T
-    ((fun () -> Some { sleep = Eio.Time.sleep clock; grace_seconds; phase = Running }), handler)
+    ((fun () -> Some { sleep = Eio.Time.sleep clock; grace_seconds; waitpid; phase = Running }), handler)
 ;;
+
+let foreground_mgr ~clock ~grace_seconds =
+  foreground_mgr_with_waitpid ~clock ~grace_seconds
+    ~waitpid:(Unix.waitpid [])
+;;
+
+module For_testing = struct
+  let foreground_mgr = foreground_mgr_with_waitpid
+end

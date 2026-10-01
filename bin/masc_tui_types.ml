@@ -143,7 +143,7 @@ let workspace_identity_of_refresh ~local_base_path reading =
     let local_base_path = canonical_path local_base_path in
     let server_base_path = canonical_path identity.Tui_decode.sid_base_path in
     let local_masc_root = canonical_path
-      (Filename.concat local_base_path Masc.Common.masc_dirname) in
+      (Filename.concat local_base_path Common.masc_dirname) in
     let server_masc_root = canonical_path identity.sid_masc_root in
     if String.equal local_base_path "" || String.equal server_base_path ""
        || String.equal server_masc_root "" || server_is_booting reading

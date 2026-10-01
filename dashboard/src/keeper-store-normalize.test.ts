@@ -1079,8 +1079,6 @@ describe('official-client local claim refusal', () => {
     expect(cleared?.runtime_blocker_summary).toBeNull()
   })
 })
-
-
 describe('Keeper portrait projection', () => {
   it('preserves equipped snapshots and reports corrupt or absent equipment without dropping the Keeper', () => {
     const equipment = { face: 'glasses', neck: 'medal', head: 'crown', hand: 'book', base: 'dish_oak' }

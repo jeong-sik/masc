@@ -44,7 +44,7 @@ let launch ~sw runtime owner =
        | Candle_appraise.Superseded _ -> Hashtbl.remove runtime.owners owner.waiting.goal_id
        | Candle_appraise.Rejected _ -> owner.rejected <- true
        | Candle_appraise.Retry_later _ -> owner.rejected <- false);
-      (* Only an event can release semantic rejection. A pulse received during
+      (* Only an event can release semantic or execution rejection. A pulse received during
          the call cannot turn a later rejection into an immediate retry loop. *)
       if owner.event_queued then request_pass runtime Event);
     `Stop_daemon)

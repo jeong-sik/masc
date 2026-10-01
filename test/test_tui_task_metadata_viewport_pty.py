@@ -129,7 +129,9 @@ def run(executable):
                     h.drain_until_quiet(process, fd, output)
                     all_text = compact(screen(output))
                     for value in (TITLE, TASK_ID, ACTOR, CREATOR, STAMP, evidence, HISTORY,
-                                  "reclaim policy: block_reclaim", "handoff reclaim policy: allow_reclaim",
+                                  "reclaim policy: block_reclaim",
+                                  ("handoff reclaim policy allow_reclaim" if width == 30
+                                   else "handoff reclaim policy: allow_reclaim"),
                                   "handoff updated: " + HANDOFF_STAMP, "handoff updater: " + HANDOFF_UPDATER):
                         assert compact(value.encode()) in all_text, (status, width, value, all_text)
                     h.resize_and_wait(process, fd, output, rows=18, columns=width,

@@ -11881,7 +11881,10 @@ let keeper_message_unfolded_status_rows (state : state) live ~now =
     | Tools_full -> rows
     | Tools_compact | Tools_results -> List.filter (fun (kind, _) ->
         match kind with
-        | Masc_tui_keeper_chat_transcript.Progress -> false
+        | Masc_tui_keeper_chat_transcript.Progress ->
+            (match Masc_tui_keeper_chat_transcript.phase live with
+             | Stream_failed _ -> true
+             | Waiting | Working | Stream_ended -> false)
         | Answer_needed | Attention | Approval _ -> true) rows in
   rows
 
@@ -12146,7 +12149,7 @@ let keeper_message_activity_rows (state : state) =
         | Some name -> List.filter_map (fun (request, result) ->
             if request.Masc_tui_keeper_chat_projection.keeper_name <> name then None
             else Some { Masc_tui_answering.lead = (if keeper_run_next_receipt_provisional state request then "Priority (control pending) "
-                else match result with Ok _ -> "Priority " | Error _ -> "Priority failed ") ^ Masc_tui_keeper_chat_projection.terminal_safe_text request.request_id;
+                else match result with Ok _ -> "Priority " | Error _ -> "Priority confirmation unavailable ") ^ Masc_tui_keeper_chat_projection.terminal_safe_text request.request_id;
               rest = " · " ^ (match result with Ok detail | Error detail ->
                 Masc_tui_keeper_chat_projection.terminal_safe_text detail); keys = "" })
             state.keeper_run_next_receipts in
@@ -12210,7 +12213,7 @@ let keeper_message_activity_rows (state : state) =
         let receipts = List.filter (fun (request, _) -> holds request
             && not (keeper_run_next_receipt_provisional state request)) state.keeper_run_next_receipts in
         if List.exists (fun (_, result) -> Result.is_error result) receipts then
-          attention "다음 순서 접수 실패"
+          attention "다음 순서 확인 불가"
         else if pending then add "다음 순서 확인 중"
         else if List.for_all (fun request -> List.exists (fun (received, result) ->
             Masc_tui_keeper_chat_projection.same_request_identity request received

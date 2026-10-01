@@ -389,7 +389,7 @@ def run_compact(executable: str, evidence_dir: Path | None = None, *, fail_prior
             text = h.screen_text(pending)
             assert "다음 순서로 접수됨".encode() not in text, "unconfirmed priority shown as confirmed"
             priority_release.set()
-            expected = "다음 순서 접수 실패" if fail_priority else "다음 순서로 접수됨"
+            expected = "다음 순서 확인 불가" if fail_priority else "다음 순서로 접수됨"
             h.wait_for_output(process, fd, output, expected.encode(), start=0, timeout=10)
             # A changed geometry owns a redraw; repeated 80x30 does not.
             h.resize_and_wait(process, fd, output, rows=30, columns=100,

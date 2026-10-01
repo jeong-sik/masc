@@ -338,7 +338,7 @@ let test_compact_status_keeps_delivery_and_priority_truth () =
   state.keeper_run_next_receipts <- [second.sent_request, Error "offline"];
   check bool "actual refusal retains attention" true (Tui.keeper_message_activity_needs_attention state);
   check (list string) "failure does not claim priority"
-    ["다음 순서 접수 실패 · 기존 작업 처리 중 · 내 메시지 2건 대기"] (rows ());
+    ["다음 순서 확인 불가 · 기존 작업 처리 중 · 내 메시지 2건 대기"] (rows ());
   let foreign = inflight ~keeper_name:"beta" ~request_id:"foreign-private-id" ~at:1. () in
   state.msg_inflight <- foreign :: state.msg_inflight;
   (match Tui.keeper_message_inflight_drawn state with
@@ -445,10 +445,26 @@ let test_priority_control_receipt_ordering () =
   check int "failed newer control restores original accepted receipt" 1
     (List.length state.keeper_run_next_receipts)
 
+let test_compact_failure_keeps_exact_cause () =
+  let state = state () in
+  let entry = inflight ~request_id:"failed-request" ~at:1. () in
+  Tui.turn_log_add ~now:2. entry.log ~seq:(Some 1)
+    (Live.Run_failed {message="exact stream failure cause"});
+  List.iter (fun mode ->
+    state.msg_tool_visibility <- mode;
+    List.iter (fun folded ->
+      state.msg_turn_folded <- folded;
+      let rows = Tui.keeper_message_visible_status_rows state entry.log.tl_transcript ~now:3. in
+      check bool "compact failure cause survives folding" true
+        (List.exists (fun (kind, text) -> kind = Masc_tui_keeper_chat_transcript.Progress
+          && Astring.String.is_infix ~affix:"exact stream failure cause" text) rows)) [false; true])
+    [Tui.Tools_compact; Tui.Tools_results]
+
 let () =
   run "TUI chat activity"
     [ "request and lane states",
-      [ test_case "priority control receipt ordering" `Quick test_priority_control_receipt_ordering
+      [ test_case "compact exact failure cause" `Quick test_compact_failure_keeps_exact_cause
+      ; test_case "priority control receipt ordering" `Quick test_priority_control_receipt_ordering
       ; test_case "foreign stop command remains complete" `Quick test_foreign_stop_command_remains_complete
       ; test_case "uncovered execution failures remain visible" `Quick test_compact_keeps_uncovered_execution_problems
       ; test_case "compact delivery and priority truth" `Quick test_compact_status_keeps_delivery_and_priority_truth

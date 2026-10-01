@@ -15434,7 +15434,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            (match completion, result with
             | Run_next_received, Error detail ->
                 append_chat_history state request Message_error
-                  ("다음 순서 접수 실패: " ^ detail)
+                  ("다음 순서 확인 불가: " ^ detail)
             | (Run_next_untracked | Run_next_retired), _
             | Run_next_received, Ok _ -> ());
            dispatch_ready_run_next state ~mailbox request.Keeper_chat.keeper_name)

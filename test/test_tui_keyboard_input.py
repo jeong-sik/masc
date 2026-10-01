@@ -7027,7 +7027,7 @@ def chat_working_target_interaction(fixture: AtomicChatFixture) -> Interaction:
         try:
             open_atomic_chat(process, master_fd, output)
             send_and_wait(process, master_fd, output, b"working-question", composer_showing(b"working-question"))
-            send_and_wait(process, master_fd, output, b"\r", b"IN PROGRESS")
+            send_and_wait(process, master_fd, output, b"\r", "기존 작업 처리 중".encode())
             wait_for_atomic_admissions(process, master_fd, output, fixture, 1)
             send_and_wait(process, master_fd, output, b"follow-up", composer_showing(b"follow-up"))
             os.write(master_fd, b"\r")
@@ -7067,7 +7067,7 @@ def chat_pending_stop_leave_interaction(fixture: AtomicChatFixture) -> Interacti
         try:
             open_atomic_chat(process, master_fd, output)
             send_and_wait(process, master_fd, output, b"working-question", composer_showing(b"working-question"))
-            send_and_wait(process, master_fd, output, b"\r", b"IN PROGRESS")
+            send_and_wait(process, master_fd, output, b"\r", "기존 작업 처리 중".encode())
             os.write(master_fd, b"\x1b")
             if not wait_for_fixture_event(process, master_fd, output, fixture.interrupted, timeout=5):
                 raise AssertionError("stop acknowledgement was not held")

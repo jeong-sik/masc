@@ -26,6 +26,9 @@ type config =
     (** Verification-only private CODEX_HOME prepared with projected auth and
         provider configuration. Its safe CLI overrides apply only here. *)
   ; model : string option
+  ; context_window : int option
+    (** Resolved MASC model window, passed to the actual client on both start
+        and resume. [None] preserves the selected account's Codex setting. *)
   ; developer_instructions : string option
   ; native : Runtime_native_tools.posture
     (** Built-in tool posture (RFC-0390): [Native_read] maps to the
@@ -132,12 +135,18 @@ type turn_usage =
 
 val frame_usage_of_breakdowns : last:token_usage -> thread_total:token_usage -> frame_usage
 
+type handoff_state = Handoff_unrequested | Handoff_pending | Handoff_accepted | Handoff_rejected
+(** Scheduling notice outcome at natural turn completion. Pending means a
+    notice was sent but its acknowledgement did not precede the terminal frame;
+    it is not evidence that the original operation finished. *)
+
 type turn_result =
   { thread_id : string
   ; turn_id : string
   ; model : string
   ; text : string
   ; dynamic_tool_calls : int
+  ; scheduling_handoff : handoff_state
   ; subscription : subscription
   ; user_agent : string option
   ; resumed : bool
@@ -407,6 +416,12 @@ val read_rate_limits :
     the app-server's schema says clients must not infer recovery from them. *)
 
 val run_turn :
+  ?await_handoff:(unit -> bool) ->
+  (* Event-driven scheduling notice. The waiter returns true when queued input
+     needs the turn slot, false when its owner closes. It is cancelled when the
+     turn ends. Only the protocol consumer writes the steer, after any active
+     dynamic-tool result, including before the first tool. Input is not consumed
+     and the client still completes naturally. *)
   ?dynamic_tools:dynamic_tool list ->
   ?reasoning_effort:Llm_provider.Reasoning_effort.t ->
   ?thread_mode:thread_mode ->

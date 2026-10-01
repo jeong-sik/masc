@@ -163,12 +163,9 @@ let librarian_failures_metric =
   Keeper_metrics.(to_string MemoryOsLibrarianFailures)
 ;;
 
-(* What the operator needs here is what this memory costs the model, so the
-   figure is the recall block's own bytes -- the same strings
-   [Keeper_memory_os_recall] injects -- not the snapshot file on disk. The
-   file carries first_seen, origin, basis and JSON punctuation that never
-   reach a request, so its size answered a question nobody asked. A snapshot
-   that could not be read has no rendering and reports nothing. *)
+(* Rendered knowledge size, excluding snapshot bookkeeping. These bytes are
+   available through demand recall, not injected on every turn. Actual prompt
+   index bytes belong to the turn record and last-prompt capture. *)
 let rendered_bytes facts =
   String.length (Keeper_memory_os_render.render_facts facts)
 ;;

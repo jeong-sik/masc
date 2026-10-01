@@ -190,9 +190,9 @@ let test_equipment_change_replaces_same_keeper_pixels () =
   let unchanged = Option.get (band ~cache ~display:pixels ~equipment:equipped ()) in
   check bool "unchanged equipment reuses the cache" true (second.Portrait.image == unchanged.Portrait.image);
   let mosaic = Option.get (band ~cache ~equipment:equipped ()) in
-  let compact = Draw.render_compact_posed (Look.body_of_name alpha) equipped Draw.still mosaic.Portrait.box.View.size in
-  check string "mosaic keeps the server equipment in compact pixels"
-    compact.Draw.rgba mosaic.Portrait.image.Draw.rgba;
+  let expected = Draw.render (Look.body_of_name alpha) equipped mosaic.Portrait.box.View.size in
+  check string "mosaic keeps the server equipment pixels"
+    expected.Draw.rgba mosaic.Portrait.image.Draw.rgba;
   let placement band = Option.get (Portrait.placement band ~scroll:0
     ~visible_rows:band.Portrait.box.View.rows ~origin:(4,2)) in
   ignore (frame []);

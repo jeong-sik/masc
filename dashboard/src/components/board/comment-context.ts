@@ -22,5 +22,9 @@ export function mergeCommentPages(older: readonly BoardComment[], retained: read
     seen.add(comment.id)
     return true
   })
-  return [...missing, ...retained]
+  const merged = [...missing, ...retained]
+  if (merged.every(comment => comment.thread_offset !== undefined)) {
+    merged.sort((left, right) => left.thread_offset! - right.thread_offset!)
+  }
+  return merged
 }

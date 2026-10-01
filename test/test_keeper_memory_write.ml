@@ -726,7 +726,7 @@ let test_recall_artifacts_follow_history_retention () =
   let config = Masc.Workspace.default_config base_path in
   let meta = make_meta "recall-retention" in
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
-  let store = Masc.Tool_blob_store.create ~base_path in
+  let store = Tool_blob_store.create ~base_path in
   let write content =
     let execution = Runtime.keeper_memory_write_with_outcome ~config ~meta
         ~args:(make_args ~title:"" ~content) in
@@ -740,8 +740,8 @@ let test_recall_artifacts_follow_history_retention () =
   let artifact prompt =
     let json = List.hd (List.rev (String.split_on_char '\n' prompt))
         |> Yojson.Safe.from_string in
-    match Masc.Tool_output.normalized_artifact_ref_of_json json with
-    | Masc.Tool_output.Decoded_normalized_artifact_ref reference -> reference
+    match Tool_output.normalized_artifact_ref_of_json json with
+    | Tool_output.Decoded_normalized_artifact_ref reference -> reference
     | _ -> Alcotest.fail "expected published recall artifact"
   in
   let sweep mode =
@@ -750,10 +750,10 @@ let test_recall_artifacts_follow_history_retention () =
     | Ok _ -> ()
     | Error error -> Alcotest.fail (Tool_blob_maintenance.error_to_string error)
   in
-  let present (reference : Masc.Tool_output.artifact_ref) =
-    match Masc.Tool_blob_store.fetch store ~sha256:reference.sha256 with
+  let present (reference : Tool_output.artifact_ref) =
+    match Tool_blob_store.fetch store ~sha256:reference.sha256 with
     | Ok value -> Option.is_some value
-    | Error error -> Alcotest.fail (Masc.Tool_blob_store.fetch_error_to_string error)
+    | Error error -> Alcotest.fail (Tool_blob_store.fetch_error_to_string error)
   in
   write "The first historical memory remains readable.";
   let first = artifact (render 1.) in

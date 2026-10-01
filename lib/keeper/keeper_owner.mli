@@ -362,6 +362,13 @@ val has_newer_original_queued
   -> operation_id:Chat_operation.Operation_id.t
   -> (bool, error) result
 
+val await_newer_original_operation
+  : t -> operation_id:Chat_operation.Operation_id.t -> bool
+(** Wait for later original input while the named direct operation is running.
+    Queued continuations do not trigger a handoff. Returns false if the operation
+    stops running, the store cannot be read or the owner closes. Cancellation
+    unregisters the condition waiter; no timer or polling loop is installed. *)
+
 (** The running operations {!start} settled as [Interrupted_by_restart], as
     they were read before settlement. The registry leaves a failure row in the
     transcript for each; the owner has no transcript of its own. *)

@@ -454,8 +454,11 @@ let publish_operation_projection t next =
   if not (operation_projection_equal previous next)
   then (
     Atomic.set t.operation_projection next;
-    Eio.Condition.broadcast t.operation_changed;
-    notify_state_change_observer ~keeper_name:t.keeper_name)
+    notify_state_change_observer ~keeper_name:t.keeper_name);
+  (* Direct readiness depends on identities and continuation state, not just
+     the aggregate counts above. Every committed publication wakes its exact
+     predicate even when the display projection is unchanged. *)
+  Eio.Condition.broadcast t.operation_changed
 ;;
 
 let publish_turn_in_flight t next =
@@ -2188,6 +2191,19 @@ let resume_direct_runtime_retry t ~operation_id ~observed =
 let exact_operation t operation_id = request t (Exact_operation operation_id)
 let has_newer_original_queued t ~operation_id =
   request t (Has_newer_original_queued operation_id)
+let await_newer_original_operation t ~operation_id =
+  Eio.Condition.loop_no_mutex t.operation_changed (fun () ->
+    if Atomic.get t.closed || (Atomic.get t.operation_projection).store_unavailable
+    then Some false
+    else
+      (* The mailbox owns the durable predicate. loop_no_mutex also observes
+         broadcasts during this yielding read, closing the check/wait race. *)
+      match has_newer_original_queued t ~operation_id with
+      | Ok true -> Some true
+      | Ok false -> None
+      | Error _ -> Some false)
+;;
+
 let restart_interrupted_operations t = t.restart_interrupted
 let pause_and_interrupt ?expected_control_token t target = request t (Pause_and_interrupt {target; expected_control_token})
 let interrupt_turn = pause_and_interrupt

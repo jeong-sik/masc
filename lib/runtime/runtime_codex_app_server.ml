@@ -161,12 +161,15 @@ let fold_turn_usage seen frame =
     Thread_count { last; thread_total }
 ;;
 
+type handoff_state = Handoff_unrequested | Handoff_pending | Handoff_accepted | Handoff_rejected
+
 type turn_result =
   { thread_id : string
   ; turn_id : string
   ; model : string
   ; text : string
   ; dynamic_tool_calls : int
+  ; scheduling_handoff : handoff_state
   ; subscription : subscription
   ; user_agent : string option
   ; resumed : bool
@@ -714,7 +717,7 @@ let send_dynamic_tool_response io ~id (result : dynamic_tool_result) =
        ])
 ;;
 
-let handle_dynamic_tool_call io ~tools ~thread_id ~turn_id ~tool_call_count ~tool_effect_attempted
+let handle_dynamic_tool_call io ~tools ~terminal_tools_closed ~thread_id ~turn_id ~tool_call_count ~tool_effect_attempted
     ~on_stream_event ~id params =
   let stage = "item/tool/call" in
   let* fields = assoc_at stage params in
@@ -730,6 +733,14 @@ let handle_dynamic_tool_call io ~tools ~thread_id ~turn_id ~tool_call_count ~too
      one namespace and every call names it back. *)
   if request_thread_id <> thread_id || request_turn_id <> turn_id
   then protocol_error stage "tool call identity does not match the active turn"
+  else if !terminal_tools_closed then (
+    (* A terminal tool already completed during scheduling handoff. Preserve
+       that result while the vendor settles the turn, without admitting another
+       host effect or killing the client before it records the returned result. *)
+    send_dynamic_tool_response io ~id
+      { success = false; content = "A terminal tool already completed. No further tools are admitted in this turn. Preserve its result and finish with your progress reply.";
+        content_blocks = None; abort_turn = None };
+    Ok ())
   else
     match find_dynamic_tool tools tool_name with
     | None -> protocol_error stage (Printf.sprintf "unknown dynamic tool %S" tool_name)
@@ -1341,8 +1352,6 @@ let cancel_unhandled_elicitation io ~thread_id ~turn_id ~on_stream_event ~id par
     Ok ())
 ;;
 
-type handoff_state = Handoff_unrequested | Handoff_pending | Handoff_accepted | Handoff_rejected
-
 let request_scheduling_handoff io ~thread_id ~turn_id =
   send_request io ~id:6 ~method_:"turn/steer"
     ~params:(`Assoc
@@ -1393,9 +1402,9 @@ let with_scheduling_handoff io ~await_handoff ~handoff ~thread_id ~turn_id run =
       run { io with receive })
 ;;
 
-let rec await_turn_terminal io ~handoff ~tools ~tool_call_count ~tool_effect_attempted ~model_context_window ~thread_id ~turn_id ~model ~seen_final
+let rec await_turn_terminal io ~handoff ~terminal_tools_closed ~tools ~tool_call_count ~tool_effect_attempted ~model_context_window ~thread_id ~turn_id ~model ~seen_final
     ~seen_fallback ~seen_usage ~open_tool_call_ids ~on_stream_event =
-  let continue () = await_turn_terminal io ~handoff ~tools
+  let continue () = await_turn_terminal io ~handoff ~terminal_tools_closed ~tools
       ~tool_call_count ~tool_effect_attempted ~model_context_window ~thread_id ~turn_id
       ~model ~seen_final ~seen_fallback ~seen_usage ~open_tool_call_ids ~on_stream_event in
   let* message = io.receive () in
@@ -1417,18 +1426,24 @@ let rec await_turn_terminal io ~handoff ~tools ~tool_call_count ~tool_effect_att
     protocol_error "turn" "received an unsolicited JSON-RPC response"
   | Server_request { id; method_ = "item/tool/call"; params } ->
     let* () =
-      handle_dynamic_tool_call
+      match handle_dynamic_tool_call
         io
-        ~tools
+        ~tools ~terminal_tools_closed
         ~thread_id
         ~turn_id
         ~tool_call_count ~tool_effect_attempted
         ~on_stream_event
         ~id
         params
+      with
+      | Error (Stopped_by_host (Terminal_tool_boundary { outcome = Terminal_completed; _ }))
+        when !handoff = Handoff_pending || !handoff = Handoff_accepted ->
+        terminal_tools_closed := true;
+        Ok ()
+      | result -> result
     in
     await_turn_terminal
-      io ~handoff
+      io ~handoff ~terminal_tools_closed
       ~tools
       ~tool_call_count ~tool_effect_attempted ~model_context_window
       ~thread_id
@@ -1441,7 +1456,7 @@ let rec await_turn_terminal io ~handoff ~tools ~tool_call_count ~tool_effect_att
       ~on_stream_event
   | Server_request { id; method_ = "mcpServer/elicitation/request"; params } ->
     let* () = cancel_unhandled_elicitation io ~thread_id ~turn_id ~on_stream_event ~id params in
-    await_turn_terminal io ~handoff ~tools ~tool_call_count ~tool_effect_attempted ~model_context_window ~thread_id ~turn_id ~model
+    await_turn_terminal io ~handoff ~terminal_tools_closed ~tools ~tool_call_count ~tool_effect_attempted ~model_context_window ~thread_id ~turn_id ~model
       ~seen_final ~seen_fallback ~seen_usage ~open_tool_call_ids ~on_stream_event
   | Server_request { id; method_; _ } ->
     reject_server_request io id;
@@ -1460,7 +1475,7 @@ let rec await_turn_terminal io ~handoff ~tools ~tool_call_count ~tool_effect_att
        are still open in the background. *)
     io.set_receive_phase Model_turn;
     await_turn_terminal
-      io ~handoff
+      io ~handoff ~terminal_tools_closed
       ~tools
       ~tool_call_count ~tool_effect_attempted ~model_context_window
       ~thread_id
@@ -1475,7 +1490,7 @@ let rec await_turn_terminal io ~handoff ~tools ~tool_call_count ~tool_effect_att
     let* (_ : string) = item_delta_notification ~method_ ~thread_id ~turn_id params in
     io.set_receive_phase Model_turn;
     await_turn_terminal
-      io ~handoff
+      io ~handoff ~terminal_tools_closed
       ~tools
       ~tool_call_count ~tool_effect_attempted ~model_context_window
       ~thread_id
@@ -1495,7 +1510,7 @@ let rec await_turn_terminal io ~handoff ~tools ~tool_call_count ~tool_effect_att
        phase stays where it is; the read itself already counted as activity. *)
     let* (_ : string) = item_delta_notification ~method_ ~thread_id ~turn_id params in
     await_turn_terminal
-      io ~handoff
+      io ~handoff ~terminal_tools_closed
       ~tools
       ~tool_call_count ~tool_effect_attempted ~model_context_window
       ~thread_id
@@ -1531,7 +1546,7 @@ let rec await_turn_terminal io ~handoff ~tools ~tool_call_count ~tool_effect_att
         :: List.filter (fun open_id -> not (String.equal open_id call_id)) open_tool_call_ids
     in
     await_turn_terminal
-      io ~handoff ~tools ~tool_call_count ~tool_effect_attempted ~model_context_window ~thread_id ~turn_id ~model ~seen_final ~seen_fallback
+      io ~handoff ~terminal_tools_closed ~tools ~tool_call_count ~tool_effect_attempted ~model_context_window ~thread_id ~turn_id ~model ~seen_final ~seen_fallback
       ~seen_usage ~open_tool_call_ids ~on_stream_event
   | Notification { method_ = "item/completed"; params } ->
     let stage = "item/completed" in
@@ -1569,7 +1584,7 @@ let rec await_turn_terminal io ~handoff ~tools ~tool_call_count ~tool_effect_att
       | None -> seen_final, seen_fallback
     in
     await_turn_terminal
-      io ~handoff
+      io ~handoff ~terminal_tools_closed
       ~tools
       ~tool_call_count ~tool_effect_attempted ~model_context_window
       ~thread_id
@@ -1594,7 +1609,7 @@ let rec await_turn_terminal io ~handoff ~tools ~tool_call_count ~tool_effect_att
     if will_retry
     then
       await_turn_terminal
-        io ~handoff
+        io ~handoff ~terminal_tools_closed
         ~tools
         ~tool_call_count ~tool_effect_attempted ~model_context_window
         ~thread_id
@@ -1659,7 +1674,7 @@ let rec await_turn_terminal io ~handoff ~tools ~tool_call_count ~tool_effect_att
       | None -> seen_usage
     in
     await_turn_terminal
-      io ~handoff
+      io ~handoff ~terminal_tools_closed
       ~tools
       ~tool_call_count ~tool_effect_attempted ~model_context_window
       ~thread_id
@@ -1681,7 +1696,7 @@ let rec await_turn_terminal io ~handoff ~tools ~tool_call_count ~tool_effect_att
          "Codex app-server rate-limit update not read: %s"
          (Runtime_provider_usage_window.decode_error_to_string error));
     await_turn_terminal
-      io ~handoff
+      io ~handoff ~terminal_tools_closed
       ~tools
       ~tool_call_count ~tool_effect_attempted ~model_context_window
       ~thread_id
@@ -1697,7 +1712,7 @@ let rec await_turn_terminal io ~handoff ~tools ~tool_call_count ~tool_effect_att
      message resets the stream-idle liveness boundary. *)
   | Notification _ ->
     await_turn_terminal
-      io ~handoff
+      io ~handoff ~terminal_tools_closed
       ~tools
       ~tool_call_count ~tool_effect_attempted ~model_context_window
       ~thread_id
@@ -1937,10 +1952,11 @@ let run_protocol io (config : config) ~await_handoff ~protocol_cwd ~dynamic_tool
   let tool_effect_attempted = ref false in
   let model_context_window = ref None in
   let handoff = ref Handoff_unrequested in
+  let terminal_tools_closed = ref false in
   let* text, turn_usage =
     with_scheduling_handoff io ~await_handoff ~handoff ~thread_id ~turn_id (fun io ->
     await_turn_terminal
-      io ~handoff
+      io ~handoff ~terminal_tools_closed
       ~tools:dynamic_tools
       ~tool_call_count ~tool_effect_attempted ~model_context_window
       ~thread_id
@@ -1959,6 +1975,7 @@ let run_protocol io (config : config) ~await_handoff ~protocol_cwd ~dynamic_tool
     ; model
     ; text
     ; dynamic_tool_calls = !tool_call_count
+    ; scheduling_handoff = !handoff
     ; subscription
     ; user_agent
     ; resumed

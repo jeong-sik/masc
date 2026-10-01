@@ -7,13 +7,13 @@ Two real Chromium scenarios ran against that unchanged source's production Item 
 - Account scenario: seven screenshots cover desktop/mobile, pending read withdrawal, free ownership change, price-only change, failed read and recovery. Five account reads completed; no uncaught page errors.
 - Workspace scenario: eight screenshots cover fixed Keeper/wallet/outfit across A→B→A, held old response release, current response, and unknown workspace withdrawal. Four scoped reads completed; no uncaught page errors. Browser abort outcomes are recorded without claiming an aborted JavaScript promise was forced to resolve.
 
-The first cold attempt was displaced by Vite's dependency optimization and page reload. Its account count was six and the workspace scenario timed out at its first account wait. The Vite log confirmed the reload. Both unchanged scenarios then passed on the same server after optimization; the failed attempts are not silently counted as passes.
+The historical receipt reports an initial failed account/workspace attempt, but its raw output and Vite log were not retained. The claimed dependency-optimization cause cannot be verified from these artifacts and is withdrawn. Only the separately preserved successful scenario manifests establish their recorded passes.
 
 ## Installed observation
 
-Read-only health identified installed server version 0.49.0, embedded commit `4f3f70f7909bc440e3c305c0941250ef39ac0245`, readiness true. Its real roster listed 27 Keepers, but an authenticated Item read for `code-reviewer` returned HTTP 404. That source's main tree contains neither the Item route nor the TUI Items tab. An installed TUI version of 0.49.0 alone does not identify its source commit.
+The retained read-only observation identifies installed server version 0.49.0, embedded commit `4f3f70f7909bc440e3c305c0941250ef39ac0245`, readiness true, and an authenticated Item read for `code-reviewer` returning HTTP404. It does not retain that Keeper's roster entry or a successful control request. Unknown Keeper and missing route are therefore not distinguished; the prior “installed route gap” conclusion and uncaptured 27-Keeper/source-tree claims are withdrawn.
 
-This proves the tested frontend fixture behavior and the installed route gap. It does not prove current-head native purchase/equip/restart behavior, native PNG output, an installed Items screen, or release readiness. No build, CI, install, runtime restart, purchase or configuration change was performed.
+The browser artifacts establish their named frontend fixture behavior. They do not prove installed route availability, current-head native purchase/equip/restart behavior, native PNG output, an installed Items screen, or release readiness. No build, CI, install, runtime restart, purchase or configuration change was performed.
 
 Hashes and exact source/runtime provenance are in [receipt.json](receipt.json). Original scenario manifests are retained in the account and workspace directories.
 
@@ -22,3 +22,9 @@ A repeated authenticated HTTP observation is retained in [installed-http-observa
 ## Preview failure and restoration
 
 Scenario source `05044d48a75b1e3036e14210990fe4ec04362edf` adds Chromium clicks for the unowned beanie preview. The mocked 503 PNG produces the explicit preview-failure alert. Returning to the observed outfit removes the alert and selection while preserving the real displayed account observation. The expanded scenario passed with nine screenshots and five account reads; its production component source remains unchanged from d688. The preview directory preserves that separate manifest and captures. This still does not prove native preview pixels.
+
+## Scroll-corrected capture follow-up
+
+`scroll-corrected/receipt.json` records the base commit and exact modified scenario hash. Actual Chromium passed the updated scenario: nine captures and five account reads. Before every capture the scenario returns the document to x=0/y=0 and waits two animation frames; the preview-failure capture was visually inspected with the navigation rail at the top. The portrait route records the selected beanie request and holds the restored current-portrait response until the scenario verifies loading, then verifies its settled badge fallback. HTTP account data and portrait503 responses remain synthetic.
+
+The first follow-up attempt reached an unavailable local Vite server because its required proxy configuration had not been set. Its exact failure log and receipt are retained separately as `scroll-corrected/initial-server-not-ready.*`; it is not a pass. This new captured failure does not reconstruct the missing historical cold-run log.

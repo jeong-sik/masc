@@ -63,5 +63,10 @@
       "content_type": "application/json; charset=utf-8"
     }
   },
-  "credential_capture": false
+  "credential_capture": false,
+  "evidence_limits": {
+    "keeper_presence": "not captured; no roster entry or successful exact-Keeper control request retained",
+    "route_availability": "unverified; this HTTP404 alone cannot distinguish unknown Keeper from missing route",
+    "source_inspection": "not retained in this observation"
+  }
 }

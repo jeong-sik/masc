@@ -40,6 +40,11 @@ try {
     })
   })
   async function capture(name) {
+    await page.evaluate(() => window.scrollTo({ top: 0, left: 0, behavior: 'instant' }))
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+    if (await page.evaluate(() => window.scrollX !== 0 || window.scrollY !== 0)) {
+      throw new Error(`capture ${name} did not return to the page origin`)
+    }
     const path = `${artifactDir}/${name}.png`
     await page.screenshot({ path, fullPage: true })
     captures.push({ name, sha256: createHash('sha256').update(await readFile(path)).digest('hex') })

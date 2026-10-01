@@ -1,9 +1,12 @@
 (** Render current ordinary and source-bound Memory OS facts.
 
     Ordinary facts come from the same snapshot as the dashboard. Source-bound
-    facts are revalidated against their exact file bytes before injection;
-    changed or unavailable sources contribute a typed invalidation instead of
-    their old claim. Recall never truncates, ranks, or partially injects facts.
+    facts are revalidated against their exact file bytes before injection.
+    Confirmed changes, missing or non-regular sources, rejected paths and
+    source-size/read-limit refusals contribute a typed invalidation instead of
+    their old claim. I/O failures and unanswered endpoints retain the prior
+    claim with an unverified marker. Recall never truncates, ranks, or partially
+    injects facts.
 
     Each store is rendered as present, authoritatively empty/absent, or
     unavailable. Empty and absent states explicitly supersede earlier current

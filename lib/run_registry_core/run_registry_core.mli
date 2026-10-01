@@ -131,15 +131,17 @@ module Make (Payload : Payload) : sig
   val validate_event_json : Yojson.Safe.t -> (unit, string) result
   (** Pure event codec validation; does not replay or mutate a registry. *)
 
-  val replay : ?retain_completed_history:bool -> string -> t
+  val replay : string -> t
   (** Retains a lightweight in-memory projection while compaction streams the
       selected original register/complete rows. Dropped payload fields are
       never serialized from the projection over their durable source.
       A replayed running entry gets the subsystem's explicit restart verdict.
-      As with {!cut_replay_log}, replay requires exclusive ownership of the log.
-      [retain_completed_history:true] retains the JSONL history without automatic
-      compaction while keeping completed in-memory entries bounded. Its default
-      is false. This supports durable exact-terminal source readers. *)
+      As with {!cut_replay_log}, replay requires exclusive ownership of the log. *)
+
+  val replay_with_retained_history : string -> t
+  (** Retains JSONL history without automatic compaction while keeping completed
+      in-memory entries bounded. Only durable exact-terminal consumers need it.
+      Other registry callers retain {!replay}'s existing compaction behavior. *)
 
   val register
     :  t

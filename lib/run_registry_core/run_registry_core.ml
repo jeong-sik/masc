@@ -775,7 +775,7 @@ module Make (Payload : Payload) = struct
         unread)
   ;;
 
-  let replay ?(retain_completed_history = false) path =
+  let replay_with_policy ~retain_completed_history path =
     let existed = Fs_compat.file_exists path in
     let snapshot = fold_replay_entries ~retain_completed_history path in
     (match snapshot.malformed with
@@ -803,6 +803,10 @@ module Make (Payload : Payload) = struct
           }
     }
   ;;
+
+  let replay path = replay_with_policy ~retain_completed_history:false path
+  let replay_with_retained_history path =
+    replay_with_policy ~retain_completed_history:true path
 
   (* A row the current decoder refuses can never be read again: the field it
      carries was hard cut, and production holds no compatibility reader for it.

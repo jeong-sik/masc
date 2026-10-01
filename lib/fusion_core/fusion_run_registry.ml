@@ -218,7 +218,7 @@ let create ?path () =
 ;;
 
 let replay path =
-  { store = Store.replay ~retain_completed_history:true path
+  { store = Store.replay_with_retained_history path
   ; progress_by_run = Hashtbl.create 16
   ; progress_mutex = Stdlib.Mutex.create ()
   }

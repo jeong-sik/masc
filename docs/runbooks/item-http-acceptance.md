@@ -21,7 +21,7 @@ opens the production bundle served by that same native process, follows the
 Keeper route, opens 대화 도구 → 상세, selects the Item tab, and checks 0.100 Candle, one owned item and its
 equipped marker through real authenticated API requests. At 360px it also
 reloads the document, opens the visible keeper command menu and enters Item
-from fresh application state. Each entry must make its own real account read;
+from fresh application state. Desktop and fresh mobile entry must each make a real account read;
 the menu lower edge, runtime alert width and mobile overflow are checked.
 External browser
 requests are blocked; API responses are never replaced by fixtures. Finally

@@ -41,6 +41,11 @@ def run(executable: str) -> None:
     requests: h.HttpRequests = []
     revoke_methods: list[str] = []
     list_reads = []
+    first_invite = h.GatedHttpResponse(
+        (201, {"name": "guest1", "expires_at": "2026-09-30T00:00:00Z", "link": LINK}),
+        subsequent_response=(201, {"name": "guest1", "expires_at": "2026-09-30T00:00:00Z", "link": LINK}),
+        hold_seconds=10.0,
+    )
     revokes = h.SequencedHttpResponse([
         (200, {"name": "guest1", "revoked": True,
                "released_controller": False, "release_error": "disk fault"}),
@@ -62,7 +67,7 @@ def run(executable: str) -> None:
             payload = json.loads(body)
             if payload != {"name": "guest1", "hours": 24}:
                 raise AssertionError(f"wrong invite request: {payload!r}")
-            return 201, {"name": "guest1", "expires_at": "2026-09-30T00:00:00Z", "link": LINK}
+            return first_invite()
         list_reads.append(True)
         return 200, {"invites": [
             {"name": "guest1", "expires_at": "2026-09-30T00:00:00Z",
@@ -95,7 +100,20 @@ def run(executable: str) -> None:
         assert_only_play_admin_requests(requests)
         # Only an explicit expiry and a further Enter issue the invite.
         h.send_and_wait(process, master, output, b" guest1 24", h.composer_showing(b"/play invite guest1 24"))
-        h.send_and_wait(process, master, output, b"\r", LINK.encode())
+        os.write(master, b"\r")
+        try:
+            h.wait_for_http_request(process, master, output, requests,
+                                    path="/api/v1/play/invites")
+            h.escape_to_keeper_detail(process, master, output, name=b"alpha")
+            h.send_and_wait(process, master, output, b"q", b"q: press again to quit")
+        finally:
+            first_invite.release.set()
+        h.wait_for_output(process, master, output, LINK.encode(), start=0, timeout=10)
+        h.send_and_wait(process, master, output, b"q", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
+        h.send_and_wait(process, master, output, b"q", b"q: press again to quit")
+        assert process.poll() is None, "card dismissal retained an earlier quit arm"
+        h.send_and_wait(process, master, output, b"m", CHAT)
+        command(b"/play link", b"MASC Play invite")
         h.wait_for_http_request(process, master, output, requests,
                                 path="/api/v1/play/invites")
         close_card()

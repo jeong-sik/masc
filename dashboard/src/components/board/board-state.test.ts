@@ -41,7 +41,7 @@ import {
   type ContentCategory,
   type VisibleBoardGroups,
 } from './board-state'
-import type { BoardPost } from '../../types'
+import type { BoardPost, BoardComment } from '../../types'
 import { fetchBoardFlairs, fetchBoardHearths, fetchBoardPost, type BoardFlair, type BoardHearth } from '../../api'
 import { showToast } from '../common/toast'
 
@@ -426,6 +426,30 @@ describe('loadPostDetail', () => {
     await loadPostDetail('p1', 'c1')
     expect(fetchBoardPost).toHaveBeenNthCalledWith(2, 'p1', 0, 5)
     expect(detailComments.value.map(comment => comment.id)).toContain('c1')
+    expect(detailCommentPage.value.offset).toBe(0)
+  })
+
+  it('loads every missing ancestor when the focused reply is already on the newest page', async () => {
+    const comment = (id: string, parent_id: string | null): BoardComment => ({
+      id, parent_id, post_id: 'p1', author: 'fixture', content: id,
+      created_at: '2026-09-30T00:00:00Z',
+    })
+    vi.mocked(fetchBoardPost)
+      .mockResolvedValueOnce({ ...makePost({ id: 'p1', comment_count: 45 }),
+        comments: [comment('focused', 'parent')], commentPage: { offset: 40, total: 45 },
+      })
+      .mockResolvedValueOnce({ ...makePost({ id: 'p1', comment_count: 45 }),
+        comments: [comment('parent', 'root')], commentPage: { offset: 20, total: 45 },
+      })
+      .mockResolvedValueOnce({ ...makePost({ id: 'p1', comment_count: 45 }),
+        comments: [comment('root', null)], commentPage: { offset: 0, total: 45 },
+      })
+    await loadPostDetail('p1', 'focused')
+    expect(fetchBoardPost).toHaveBeenNthCalledWith(2, 'p1', 20, 20)
+    expect(fetchBoardPost).toHaveBeenNthCalledWith(3, 'p1', 0, 20)
+    expect(detailComments.value.map(comment => [comment.id, comment.parent_id])).toEqual([
+      ['root', null], ['parent', 'root'], ['focused', 'parent'],
+    ])
     expect(detailCommentPage.value.offset).toBe(0)
   })
 

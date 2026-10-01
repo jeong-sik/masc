@@ -11999,16 +11999,6 @@ let open_fusion_detail state ~mailbox =
       state.fusion_detail_error <- None;
       launch_fusion_detail_load state ~mailbox ~run_id:run.fur_run_id
 
-let open_selected_resource state ~mailbox =
-  match
-    Option.bind state.resources_list (fun resources ->
-        List.nth_opt resources state.resources_cursor)
-  with
-  | None -> ()
-  | Some resource ->
-      state.resource_focus <- Right_pane;
-      launch_resource_read state ~mailbox ~uri:resource.Masc_tui_mcp.uri
-
 let open_selected_system_log state =
   match
     List.nth_opt
@@ -14057,88 +14047,10 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
       Code_results.apply_diff state request result
   | Code_history_loaded (request, result) ->
       Code_results.apply_history state request result
-  | Resources_listed result -> (
-      match result with
-      | Ok rows ->
-          let rows =
-            List.map
-              (fun (resource : Masc_tui_mcp.resource) ->
-                { resource with
-                  uri = Masc.Tui_terminal_text.sanitize_terminal_text resource.uri
-                ; name = Masc.Tui_terminal_text.sanitize_terminal_text resource.name
-                ; title =
-                    Option.map Masc.Tui_terminal_text.sanitize_terminal_text
-                      resource.title
-                ; description =
-                    Option.map Masc.Tui_terminal_text.sanitize_terminal_text
-                      resource.description
-                ; mime_type =
-                    Option.map Masc.Tui_terminal_text.sanitize_terminal_text
-                      resource.mime_type
-                })
-              rows
-          in
-          state.resources_list <- Some rows;
-          state.resources_error <- None;
-          let open_uri =
-            match state.resource_pending_uri, state.resource_content_error,
-                  state.resource_content with
-            | Some uri, _, _ -> Some uri
-            | None, Some (uri, _), _ -> Some uri
-            | None, None, Some (uri, _) -> Some uri
-            | None, None, None -> None
-          in
-          let rec index_of_uri index uri = function
-            | [] -> None
-            | (resource : Masc_tui_mcp.resource) :: rest ->
-                if String.equal resource.uri uri then Some index
-                else index_of_uri (index + 1) uri rest
-          in
-          (match Option.bind open_uri (fun uri -> index_of_uri 0 uri rows) with
-           | Some cursor -> state.resources_cursor <- cursor
-           | None ->
-               state.resources_cursor <-
-                 max 0 (min state.resources_cursor (List.length rows - 1));
-               if Option.is_some open_uri then begin
-                 state.resource_pending_uri <- None;
-                 state.resource_content <- None;
-                 state.resource_content_error <- None;
-                 state.resource_scroll <- 0
-               end)
-      | Error detail -> state.resources_error <- Some detail)
-  | Resource_read (uri, result) -> (
-      match state.resource_pending_uri with
-      | Some pending_uri when String.equal pending_uri uri ->
-          state.resource_pending_uri <- None;
-          (match result with
-           | Ok contents ->
-               let sanitize_document text =
-                 String.split_on_char '\n' text
-                 |> List.map Masc.Tui_terminal_text.sanitize_terminal_text
-                 |> String.concat "\n"
-               in
-               let contents =
-                 List.map
-                   (fun (content : Masc_tui_mcp.resource_content) ->
-                     { Masc_tui_mcp.rc_uri =
-                         Option.map Masc.Tui_terminal_text.sanitize_terminal_text
-                           content.rc_uri
-                     ; rc_mime_type =
-                         Option.map Masc.Tui_terminal_text.sanitize_terminal_text
-                           content.rc_mime_type
-                     ; rc_kind =
-                         (match content.rc_kind with
-                          | Masc_tui_mcp.Resource_text text ->
-                              Masc_tui_mcp.Resource_text (sanitize_document text)
-                          | Masc_tui_mcp.Resource_blob _ as blob -> blob)
-                     })
-                   contents
-               in
-               state.resource_content <- Some (uri, contents);
-               state.resource_content_error <- None
-           | Error detail ->
-               state.resource_content_error <- Some (uri, detail))
-      | Some _ | None -> ())
+  | Resources_listed result ->
+      Masc_tui_resources_updates.listed state result
+  | Resource_read (uri, result) ->
+      Masc_tui_resources_updates.read_done state ~uri result
   | Github_identity_view_loaded (request, result) -> (
       let keeper_name = request.drr_keeper in
       let current = Masc_tui_types.finish_detail_read state request in
@@ -21880,7 +21792,7 @@ and is loaded on demand through keeper_skill.
              ~delta:(if bracket = "]" then 1 else -1)
              ~set_cursor:(fun cursor -> state.resources_cursor <- cursor)
              ~reopen:(fun () ->
-               open_selected_resource state ~mailbox:async_messages)
+               Masc_tui_resources_updates.open_selected state ~read:(fun ~uri -> launch_resource_read state ~mailbox:async_messages ~uri))
        | Some "]" when state.view = Lanes ->
            (match state.lanes_mode, state.lane_runs_next, state.lane_runs_loading with
             | Lanes_run_list lane, Some before, false ->
@@ -22060,7 +21972,7 @@ and is loaded on demand through keeper_skill.
                 report_action state "system"
                   "Approval list changed; review the updated row before retrying")
        | Some "\r" when state.view = Resources ->
-           open_selected_resource state ~mailbox:async_messages
+           Masc_tui_resources_updates.open_selected state ~read:(fun ~uri -> launch_resource_read state ~mailbox:async_messages ~uri)
        | Some "J" when state.view = Resources ->
            state.resource_scroll <-
              Masc_tui_types.scroll_down_from state.resource_scroll ~by:1

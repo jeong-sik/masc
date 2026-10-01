@@ -57,9 +57,15 @@ let handle ~base_path ~keeper_name ~tool_name ~start_time ~args =
        | Some size ->
            let body = Keeper_portrait_look.body_of_name keeper_name in
            let starting_equipment = Keeper_portrait_look.equipment_of_name keeper_name in
-           match Candle_equipment.current ~base_path ~keeper:keeper_name with
-           | Error message -> Tool_result.make_err ~tool_name ~class_:Tool_result.Runtime_failure ~start_time message
-           | Ok current_equipment ->
+           let current, current_equipment, observation =
+             match Candle_equipment.read_persisted ~now:Time_compat.now ~base_path ~keeper:keeper_name with
+             | Ok equipment ->
+                 equipment_to_json equipment, equipment,
+                 `Assoc ["status", `String "available"; "detail", `Null]
+             | Error detail ->
+                 `Null, starting_equipment,
+                 `Assoc ["status", `String "unavailable"; "detail", `String detail]
+           in
            let equipment =
              match mode with
              | Current -> current_equipment
@@ -98,7 +104,8 @@ let handle ~base_path ~keeper_name ~tool_name ~start_time ~args =
                                    ; "mode", `String (match mode with Current -> "current" | Preview _ -> "preview")
                                    ; "preview_item", (match mode with Current -> `Null | Preview item -> `String (Item.id item))
                                    ; "starting_equipment", equipment_to_json starting_equipment
-                                   ; "current_equipment", equipment_to_json current_equipment
+                                   ; "current_equipment", current
+                                   ; "equipment_observation", observation
                                    ; "equipment", equipment_to_json equipment
                                    ; "catalog", catalog
                                    ; "artifact", `String (Multimodal.Vision_artifact_store.to_string artifact)

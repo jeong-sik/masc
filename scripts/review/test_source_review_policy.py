@@ -12,6 +12,10 @@ HERE = Path(os.environ.get('GUARD_SCRIPTS', str(Path(__file__).resolve().parent)
 DIFF_TOOL = Path(__file__).resolve().parent / 'review-diff.py'
 HEAD = 'a' * 40
 OTHER = 'b' * 40
+GIT_SUPPORTS_NO_LAZY_FETCH = subprocess.run(
+    ['git', '--no-lazy-fetch', 'version'],
+    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False
+).returncode == 0
 FAKE = r'''#!/usr/bin/env python3
 import json, os, pathlib, re, subprocess, sys
 state = json.loads(pathlib.Path(os.environ['REVIEW_FIXTURE']).read_text())
@@ -286,6 +290,24 @@ class SourceReviewPolicy(unittest.TestCase):
         self.assertEqual(sum('/compare/' in line for line in self.calls.read_text().splitlines()), 3)
         self.assertNotIn('POST ', self.calls.read_text())
 
+    def test_producer_rechecks_authority_after_final_compare(self):
+        for change in ('CR', 'FAIL', 'HOLD'):
+            with self.subTest(change=change):
+                self.calls.write_text('')
+                body = self.root / 'body'
+                body.write_text(f'verdict: PASS head: {HEAD} by: independent\nReviewed source.')
+                self.state = dict(head=HEAD, base='main', base_sha=self.base)
+                update = (
+                    {'reviews': [dict(self.review(state='CHANGES_REQUESTED', author='other'), id=13)]}
+                    if change == 'CR' else {'comments': [{
+                        'created_at':'2026-10-01T00:00:00Z', 'author_association':'MEMBER',
+                        'body': f'verdict: {change} head: {HEAD} by: independent'}]})
+                self.state.update(compare_block_after=3, compare_block_update=update)
+                result = self.invoke('approve-guard.sh', '--body', str(body))
+                self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                self.assertNotIn('POST ', self.calls.read_text())
+                self.assertEqual(sum('/compare/' in line for line in self.calls.read_text().splitlines()), 3)
+
     def test_merge_rechecks_authority_after_final_compare(self):
         for change in ('CR', 'FAIL', 'HOLD', 'noapproval'):
             with self.subTest(change=change):
@@ -333,10 +355,11 @@ class SourceReviewPolicy(unittest.TestCase):
         before_shallow = shallow.read_bytes() if shallow.exists() else None
         subprocess.run(['git', '-C', str(empty), 'remote', 'set-url', 'origin', str(self.root/'unavailable')], check=True)
         before_config = (empty / '.git/config').read_bytes()
+        lazy_flag = ['--no-lazy-fetch'] if GIT_SUPPORTS_NO_LAZY_FETCH else []
         if kind != 'shallow':
             for commit in (self.base, HEAD):
-                subprocess.run(['git', '--no-lazy-fetch', '-C', str(empty), 'cat-file', '-e', commit], check=True)
-            missing_tree = subprocess.run(['git', '--no-lazy-fetch', '-C', str(empty), 'ls-tree', '-r', HEAD], capture_output=True)
+                subprocess.run(['git', *lazy_flag, '-C', str(empty), 'cat-file', '-e', commit], check=True)
+            missing_tree = subprocess.run(['git', *lazy_flag, '-C', str(empty), 'ls-tree', '-r', HEAD], capture_output=True)
             self.assertNotEqual(missing_tree.returncode, 0, 'fixture must contain commits but lack required trees')
         helper_dir = self.root / ("credential helper's directory " + kind.replace(':', '-'))
         helper_dir.mkdir()
@@ -376,7 +399,10 @@ class SourceReviewPolicy(unittest.TestCase):
                         'raw diff fetch needs trees and exact commits, not file contents')
         for call in fetched:
             self.assertIn('--no-replace-objects', call['args'])
-            self.assertIn('--no-lazy-fetch', call['args'])
+            if GIT_SUPPORTS_NO_LAZY_FETCH:
+                self.assertIn('--no-lazy-fetch', call['args'])
+            else:
+                self.assertNotIn('--no-lazy-fetch', call['args'])
             fetched_root = Path(call['args'][call['args'].index('-C')+1])
             self.assertNotEqual(fetched_root, empty)
             self.assertIn('--depth=1', call['args'])
@@ -388,7 +414,7 @@ class SourceReviewPolicy(unittest.TestCase):
         self.assertEqual(shallow.read_bytes() if shallow.exists() else None, before_shallow)
         self.assertEqual((empty / '.git/config').read_bytes(), before_config)
         missing_args = ['cat-file', '-e', self.base] if kind == 'shallow' else ['ls-tree', '-r', HEAD]
-        still_missing = subprocess.run([real_git, '--no-lazy-fetch', '-C', str(empty), *missing_args], capture_output=True)
+        still_missing = subprocess.run([real_git, *lazy_flag, '-C', str(empty), *missing_args], capture_output=True)
         self.assertNotEqual(still_missing.returncode, 0, 'isolated fetch must not hydrate or deepen caller history')
         persisted = subprocess.run([real_git, '-C', str(empty), 'config', '--local',
                                     '--get-all', 'credential.helper'], capture_output=True)

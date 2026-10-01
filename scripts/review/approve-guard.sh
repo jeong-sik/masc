@@ -132,6 +132,8 @@ final_diff=$(python3 "$here/review-diff.py" --repo "$repo" --base "$pr_base_sha"
 # The compare/fetch above can block while the PR is retargeted. Revalidate the
 # producer identity after all network-dependent diff work, before any POST.
 read_current_pr
+check_reviews
+check_verdict
 if [ "$check_only" -eq 1 ]; then echo "WOULD APPROVE #$pr head $head policy $review_policy"; exit 0; fi
 # Bind the reviewed base and native stack position to the approval itself.
 # main may advance later; candidate preparation compares the actual diff base.

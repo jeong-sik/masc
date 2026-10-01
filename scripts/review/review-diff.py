@@ -11,6 +11,25 @@ import tempfile
 from pathlib import Path
 
 
+_NO_LAZY_FETCH: bool | None = None
+
+
+def _supports_no_lazy_fetch() -> bool:
+    global _NO_LAZY_FETCH
+    if _NO_LAZY_FETCH is None:
+        try:
+            res = subprocess.run(
+                ["git", "--no-lazy-fetch", "version"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+            _NO_LAZY_FETCH = res.returncode == 0
+        except Exception:
+            _NO_LAZY_FETCH = False
+    return _NO_LAZY_FETCH
+
+
 def diff_identity(repo: str, base: str, head: str, root: Path) -> str:
     for value in (base, head):
         if re.fullmatch(r"[0-9a-f]{40}", value) is None:
@@ -31,7 +50,10 @@ def diff_identity(repo: str, base: str, head: str, root: Path) -> str:
     ).strip()
     if re.fullmatch(r"[0-9a-f]{40}", merge_base) is None:
         raise ValueError("GitHub did not return a complete merge base")
-    git = ["git", "--no-replace-objects", "--no-lazy-fetch", "-C", str(root)]
+    git_flags = ["--no-replace-objects"]
+    if _supports_no_lazy_fetch():
+        git_flags.append("--no-lazy-fetch")
+    git = ["git", *git_flags, "-C", str(root)]
     commits = (merge_base, head)
     # Commit presence alone is insufficient in tree-filtered partial clones.
     # Traverse every required tree without hydrating the caller's promisor
@@ -45,7 +67,7 @@ def diff_identity(repo: str, base: str, head: str, root: Path) -> str:
     with tempfile.TemporaryDirectory(prefix="masc-review-objects-") as directory:
         if missing:
             subprocess.run(["git", "init", "--bare", "--quiet", directory], check=True)
-            git = ["git", "--no-replace-objects", "--no-lazy-fetch", "-C", directory]
+            git = ["git", *git_flags, "-C", directory]
             for commit in commits:
                 subprocess.run(
                     [*git, "-c", "credential.helper=",

@@ -31,6 +31,7 @@ type cache_state = {
   mutable cached_at : float;
   mutable cached_json : Yojson.Safe.t option;
   mutable refresh_in_flight : bool;
+  mutable refresh_owner : unit ref option;
   mutable last_error : string option;
 }
 
@@ -42,6 +43,7 @@ let create_cache () =
     cached_at = 0.0;
     cached_json = None;
     refresh_in_flight = false;
+    refresh_owner = None;
     last_error = None;
   }
 
@@ -230,12 +232,14 @@ let compute_briefing_json ~actor_name ~config ~sw ~(clock : [> float Eio.Time.cl
 (* ── Async refresh ──────────────────────────────────────────────── *)
 
 let start_async_refresh ~cache ~actor_name ~config ~sw ~(clock : [> float Eio.Time.clock_ty ] Eio.Resource.t) ~proc_mgr () =
+  let owner = ref () in
   let should_start =
     with_cache_lock cache (fun () ->
         if cache.refresh_in_flight then
           false
         else (
           cache.refresh_in_flight <- true;
+          cache.refresh_owner <- Some owner;
           true))
   in
   let refresh_sw =
@@ -245,10 +249,16 @@ let start_async_refresh ~cache ~actor_name ~config ~sw ~(clock : [> float Eio.Ti
   in
   let release ?error () = Eio.Cancel.protect (fun () ->
     with_cache_lock cache (fun () ->
-      cache.refresh_in_flight <- false;
-      Option.iter (fun detail -> cache.last_error <- Some detail) error)) in
+      match cache.refresh_owner with
+      | Some current when current == owner ->
+        cache.refresh_in_flight <- false;
+        cache.refresh_owner <- None;
+        Option.iter (fun detail -> cache.last_error <- Some detail) error
+      | Some _ | None -> ())) in
   if should_start then try
+    let hook = Eio.Switch.on_release_cancellable refresh_sw (fun () -> release ()) in
     Eio.Fiber.fork_daemon ~sw:refresh_sw (fun () ->
+      Fun.protect ~finally:(fun () -> Eio.Switch.remove_hook hook) (fun () ->
         (try
            let clock =
              match Eio_context.get_clock_opt () with
@@ -264,10 +274,12 @@ let start_async_refresh ~cache ~actor_name ~config ~sw ~(clock : [> float Eio.Ti
                    cache.cached_json <- Some result_json;
                    cache.cached_at <- Unix.gettimeofday ();
                    cache.refresh_in_flight <- false;
+                   cache.refresh_owner <- None;
                    cache.last_error <- None)
            | Error reason ->
                with_cache_lock cache (fun () ->
                    cache.refresh_in_flight <- false;
+                   cache.refresh_owner <- None;
                    cache.last_error <- Some reason)
          with
          | Eio.Cancel.Cancelled _ as e ->
@@ -275,7 +287,7 @@ let start_async_refresh ~cache ~actor_name ~config ~sw ~(clock : [> float Eio.Ti
            raise e
          | exn ->
            release ~error:(Printexc.to_string exn) ());
-        `Stop_daemon)
+        `Stop_daemon))
   with
   | Eio.Cancel.Cancelled _ as e -> release (); raise e
   | exn -> release ~error:(Printexc.to_string exn) ()

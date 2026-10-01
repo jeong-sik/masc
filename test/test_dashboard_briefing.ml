@@ -1140,11 +1140,36 @@ let test_worker_support_tracks_each_exact_assignee_across_renders () =
   check bool "an empty fleet has no worker briefs" true
     (render ~tasks ~agents:[] = [])
 
+let test_attention_read_failures_reach_briefing () =
+  List.iter (fun broken_meta ->
+    let dir = test_dir () in
+    Fun.protect ~finally:(fun () -> cleanup_dir dir) (fun () ->
+      with_test_env @@ fun ~clock ~sw ->
+      let config = Workspace_utils.default_config dir in
+      ignore (Lib.Workspace.init config ~agent_name:(Some "fixture-root"));
+      let keepers = Lib.Workspace.keepers_runtime_dir config in
+      if Sys.file_exists keepers then cleanup_dir keepers;
+      if broken_meta then (
+        Fs_compat.mkdir_p keepers;
+        Fs_compat.save_file
+          (Lib.Keeper_types_profile.keeper_meta_path config "broken") "not json")
+      else Fs_compat.save_file keepers "not a directory";
+      Dashboard_cache.invalidate_all ();
+      Dashboard_projection_cache.invalidate_snapshot_json ~config;
+      let json = Dashboard_briefing.json ~actor:"attention-read-fixture"
+        ~config ~sw ~clock ~proc_mgr:None () in
+      match Yojson.Safe.Util.member "attention_read_error" json with
+      | `String detail when String.length detail > 0 -> ()
+      | _ -> fail "keeper read failure was projected as zero observed incidents"))
+    [false; true]
+
 let () =
   Alcotest.run "Dashboard Mission"
     [
       ( "read_model",
         [
+          Alcotest.test_case "keeper attention read errors reach briefing" `Quick
+            test_attention_read_failures_reach_briefing;
           Alcotest.test_case "latest_message_to tolerates empty agent name"
             `Quick test_latest_message_to_empty_name_safe;
           Alcotest.test_case "latest_message_to requires a real mention"

@@ -222,6 +222,10 @@ class MascAgent(BaseInstalledAgent):
             # episode failure this block exists to preserve — a truncated
             # result.json would surface as a JSONDecodeError from the
             # recovery path instead of as the run error.
+            try:
+                self.record_install_identity(context)
+            except Exception:  # noqa: BLE001 - metadata recording cannot replace the run error
+                self.logger.exception("recording install identity failed")
             deadline = asyncio.get_running_loop().time() + RECOVERY_TOTAL_TIMEOUT_SEC
             try:
                 async with asyncio.timeout_at(deadline):
@@ -345,6 +349,14 @@ class MascAgent(BaseInstalledAgent):
             "route": self._route,
             **provenance_metadata(self._config_provenance),
         }
+
+    def record_install_identity(self, context: AgentContext) -> None:
+        """Preserve what was configured/installed even when the run fails or recovery fails."""
+        if context.metadata is None:
+            context.metadata = {}
+        context.metadata.update(self._arm_metadata())
+        context.metadata.update(
+            identity_metadata(getattr(self, "_dist_identity", None)))
 
     def populate_context_post_run(self, context: AgentContext) -> None:
         result_path = Path(self.logs_dir) / "result.json"

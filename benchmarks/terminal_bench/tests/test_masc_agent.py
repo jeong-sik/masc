@@ -758,6 +758,61 @@ def test_an_agent_that_never_installed_reports_no_provenance(tmp_path):
     assert "config_provenance" not in context.metadata
 
 
+def test_run_failure_and_recovery_failure_still_records_config_provenance(tmp_path, monkeypatch):
+    from harbor.models.agent.context import AgentContext
+
+    agent, logs, _ = installed_agent(tmp_path, monkeypatch)
+
+    class FailingRecoveryEnv(FakeEnv):
+        async def exec(self, command, **kw):
+            if "run_episode.sh" in command:
+                raise RuntimeError("episode failed")
+            if "cat /opt/masc-bench/result.json" in command:
+                raise OSError("remote recovery failed")
+            return await super().exec(command, **kw)
+
+    context = AgentContext()
+    with pytest.raises(RuntimeError, match="episode failed"):
+        asyncio.run(agent.run("do the task", FailingRecoveryEnv(), context))
+
+    assert context.metadata["config_provenance"]["checkout_commit"] == "c" * 40
+    assert context.metadata["config_provenance"]["checkout_dirty"] is False
+    assert context.metadata["candidates"] == ["claude.claude-fable-5"]
+    assert context.metadata["route"] == "claude.claude-fable-5"
+    assert "masc_dist" in context.metadata
+
+
+def test_run_cancellation_and_recovery_failure_still_records_config_provenance(tmp_path, monkeypatch):
+    from harbor.models.agent.context import AgentContext
+
+    agent, logs, _ = installed_agent(tmp_path, monkeypatch)
+
+    class CancelledRecoveryEnv(FakeEnv):
+        async def exec(self, command, **kw):
+            if "run_episode.sh" in command:
+                raise asyncio.CancelledError()
+            if "cat /opt/masc-bench/result.json" in command:
+                raise OSError("remote recovery failed")
+            return await super().exec(command, **kw)
+
+    context = AgentContext()
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(agent.run("do the task", CancelledRecoveryEnv(), context))
+
+    assert context.metadata["config_provenance"]["checkout_commit"] == "c" * 40
+    assert context.metadata["candidates"] == ["claude.claude-fable-5"]
+    assert "masc_dist" in context.metadata
+
+
+def test_record_install_identity_preserves_arm_and_provenance(tmp_path, monkeypatch):
+    agent, logs, _ = installed_agent(tmp_path, monkeypatch)
+    context = SimpleNamespace(metadata=None)
+    agent.record_install_identity(context)
+    assert context.metadata["config_provenance"]["checkout_commit"] == "c" * 40
+    assert context.metadata["arm"] == "b"
+    assert "masc_dist" in context.metadata
+
+
 def test_concurrent_dist_replacement_cannot_mix_one_upload_snapshot(
         tmp_path, monkeypatch):
     root = fake_bench(tmp_path)

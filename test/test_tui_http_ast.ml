@@ -499,6 +499,7 @@ let test_no_row_marks_its_own_timestamp_with_a_zone () =
         [ "(local)"; "local date"; "local time"; "local timezone" ])
     [ "bin/masc_tui_render.ml"
     ; "bin/masc_tui_render_board.ml"
+    ; "bin/masc_tui_render_approvals.ml"
     ; "bin/masc_tui_render_memory.ml"
     ; "bin/masc_tui_render_chat.ml"
     ; "bin/masc_tui_render_prim.ml"

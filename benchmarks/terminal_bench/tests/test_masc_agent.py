@@ -681,6 +681,83 @@ def test_validated_dist_identity_reaches_harbor_metadata(tmp_path, monkeypatch):
         (root / "dist" / "linux-x64" / "masc").read_bytes()).hexdigest()
 
 
+class ConfigCapturingEnv(FakeEnv):
+    """Keeps a copy of the config directory the install uploads."""
+
+    def __init__(self, copy_to):
+        super().__init__()
+        self.copy_to = copy_to
+
+    async def upload_dir(self, src, dst):
+        await super().upload_dir(src, dst)
+        if dst == "/opt/masc-bench/config":
+            shutil.copytree(src, self.copy_to)
+
+
+def installed_agent(tmp_path, monkeypatch, commit=("c" * 40, False), **kw):
+    """An agent that has installed into a fake container, and the config it uploaded."""
+    import agents.masc_agent as m
+    import masc_config_provenance as provenance
+
+    monkeypatch.setattr(m, "BENCH_ROOT", fake_bench(tmp_path))
+    monkeypatch.setattr(provenance, "checkout_state", lambda repo_root: commit)
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    agent = make_agent(logs, arm="b", **kw)
+    uploaded = tmp_path / "uploaded-config"
+    asyncio.run(agent.install(ConfigCapturingEnv(uploaded)))
+    return agent, logs, uploaded
+
+
+def test_the_provenance_names_the_config_the_container_was_given(tmp_path, monkeypatch):
+    import masc_config_provenance as provenance
+
+    agent, logs, uploaded = installed_agent(tmp_path, monkeypatch, effort="low")
+    write_result(logs)
+    context = SimpleNamespace(metadata=None)
+    agent.populate_context_post_run(context)
+    assert context.metadata["config_provenance"] == {
+        "checkout_commit": "c" * 40,
+        "checkout_dirty": False,
+        "runtime_toml_sha256": hashlib.sha256(
+            (uploaded / "runtime.toml").read_bytes()).hexdigest(),
+        "config_dir_sha256": provenance.tree_sha256(uploaded),
+        "effort": "low",
+    }
+
+
+def test_the_provenance_says_dirty_and_unknown_as_they_are(tmp_path, monkeypatch):
+    agent, logs, _ = installed_agent(tmp_path, monkeypatch, commit=(None, None))
+    write_result(logs)
+    context = SimpleNamespace(metadata=None)
+    agent.populate_context_post_run(context)
+    recorded = context.metadata["config_provenance"]
+    assert recorded["checkout_commit"] is None and recorded["checkout_dirty"] is None
+    agent, logs, _ = installed_agent(
+        tmp_path / "again", monkeypatch, commit=("d" * 40, True))
+    write_result(logs)
+    context = SimpleNamespace(metadata=None)
+    agent.populate_context_post_run(context)
+    assert context.metadata["config_provenance"]["checkout_dirty"] is True
+
+
+@pytest.mark.parametrize("result_text", [None, "{truncated"])
+def test_the_provenance_is_reported_without_a_readable_result(tmp_path, monkeypatch, result_text):
+    agent, logs, _ = installed_agent(tmp_path, monkeypatch)
+    if result_text is not None:
+        (logs / "result.json").write_text(result_text)
+    context = SimpleNamespace(metadata=None)
+    agent.populate_context_post_run(context)
+    assert context.metadata["config_provenance"]["checkout_commit"] == "c" * 40
+
+
+def test_an_agent_that_never_installed_reports_no_provenance(tmp_path):
+    agent = make_agent(tmp_path)
+    context = SimpleNamespace(metadata=None)
+    agent.populate_context_post_run(context)
+    assert "config_provenance" not in context.metadata
+
+
 def test_concurrent_dist_replacement_cannot_mix_one_upload_snapshot(
         tmp_path, monkeypatch):
     root = fake_bench(tmp_path)

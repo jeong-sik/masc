@@ -286,6 +286,22 @@ harbor 기본 에이전트는 태스크 명령을 `exec_as_agent` 로 돌린다.
 - 환경변수는 bootstrap 이 PID 1 의 환경을 PID 1 소유자 권한으로 읽어 shim `env_file=` 로 옮기고
   (`driver/endpoint_env.sh`), `PATH` 는 `path=` 로 넘긴다.
 
+## trial 결과에 남는 출처
+
+harbor metadata 에 이 trial 이 무엇으로 돌았는지 남는다.
+
+- `masc_dist`: 올린 binary 의 릴리스 버전, 소스 커밋, 기계, binary sha256.
+- `config_provenance`: binary 는 릴리스에서, 설정은 이 체크아웃에서 와서 따로 남긴다.
+  - `checkout_commit`, `checkout_dirty`: 체크아웃의 HEAD 와, 추적 파일이 HEAD 와 다른지.
+    git 이 답하지 못하면 둘 다 `null` 이고, 깨끗하다는 뜻이 아니다.
+  - `runtime_toml_sha256`: 컨테이너에 올린 `runtime.toml` 의 sha256.
+  - `config_dir_sha256`: 올린 설정 디렉터리 전체(상대 경로와 내용)의 sha256.
+  - `effort`: 렌더에 쓴 effort.
+
+같은 체크아웃과 인자로 렌더하면 설정이 바이트까지 같다(arm b·h 를 두 번 렌더해 비교했다).
+그래서 두 trial 의 `config_dir_sha256` 이 같으면 같은 설정으로 돈 것이다. 태스크가 skills 를
+주면 그 내용도 설정에 들어가므로 태스크마다 값이 다르다. git 상태는 프로세스당 한 번 읽는다.
+
 ## 4.0.0 에서 아직 맞지 않는 조건
 
 - 태스크 이미지가 선언한 환경변수 가운데 shim 이 받지 않는 이름(GitHub 토큰 이름,

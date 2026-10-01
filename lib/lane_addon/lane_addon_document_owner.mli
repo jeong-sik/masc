@@ -18,3 +18,6 @@ val reassign : root:string -> source_path:string -> keeper:string ->
   source_revision:string -> (unit, string) result
 (** Operator configuration authority only: records an explicit reassignment to
     exact observed bytes. Call [complete] after rereading those bytes. *)
+
+val revoke : root:string -> source_path:string -> (unit, string) result
+(** Supersede Keeper authority when operator configuration becomes shared or operator-only. *)

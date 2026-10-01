@@ -215,7 +215,36 @@ sources=[{kind="fusion_run",source_id="fusion",run_id=%S}]
       (Error "upstream installation is unavailable to this caller")
       (Result.map Yojson.Safe.to_string private_denial);
     check bool "private and absent upstreams expose one denial" true
-      (private_denial = upstream_denial "absent-installation"))
+      (private_denial = upstream_denial "absent-installation");
+    write path (declaration ~id:"private-transfer" ());
+    ignore (reconcile config directory);
+    check bool "private-to-shared reconciliation revokes exclusive Keeper authority" true
+      (runtime_result (Lane_addon_document_owner.read
+        ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") ~source_path:path) = None);
+    check bool "shared declaration remains readable by other Keepers" true
+      (Result.is_ok (read_as "another-keeper")))
+
+let test_shared_saves_do_not_claim_keeper_ownership () =
+  with_fixture (fun _clock config directory _root _started ->
+    let bytes = declaration ~id:"shared-editor" () in
+    ignore (save config (request ~mode:"create" ~file_name:"shared.toml" bytes));
+    let path = Filename.concat directory "shared.toml" in
+    let read_as keeper = Runtime.read_declaration ~caller:keeper ~config
+      (`Assoc ["source_path",`String path]) |> unwrap in
+    let edit = read_as "first-keeper" in
+    ignore (unwrap (Runtime.save_declaration ~caller:"first-keeper" ~config
+      (request ~revision:(text "source_revision" edit) ~mode:"save" ~file_name:"shared.toml" bytes)));
+    ignore (read_as "other-keeper");
+    check bool "shared save leaves no exclusive Keeper ownership" true
+      (runtime_result (Lane_addon_document_owner.read
+        ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") ~source_path:path) = None);
+    let edit = read_as "other-keeper" in
+    ignore (unwrap (Runtime.save_declaration ~caller:"local-dashboard"
+      ~access:Lane_addon_sources.Unauthenticated ~config
+      (request ~revision:(text "source_revision" edit) ~mode:"save" ~file_name:"shared.toml" bytes)));
+    ignore (unwrap (Runtime.save_declaration ~caller:"local-dashboard"
+      ~access:Lane_addon_sources.Unauthenticated ~config
+      (request ~mode:"create" ~file_name:"local.toml" (declaration ~id:"local-editor" ())))))
 
 let test_conflicts_and_invalid_candidates_preserve_active () = with_fixture (fun clock config directory _root started ->
   let original = declaration () in
@@ -350,6 +379,7 @@ let test_create_publication_collision_preserves_competing_bytes () = with_fixtur
   | Some path -> check bool "owned staging is cleaned after refused publication" false (Sys.file_exists path))
 
 let () = run "Lane declaration editing" ["shared TOML owner",[
+  test_case "shared and local saves do not claim private ownership" `Quick test_shared_saves_do_not_claim_keeper_ownership;
   test_case "Keeper cannot save another owner's Fusion capture" `Quick
       test_keeper_declaration_cannot_capture_another_fusion_owner;
   test_case "operator reassignment replaces private document authority" `Quick

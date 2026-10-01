@@ -71,6 +71,7 @@ describe('committed Gate mutation audit degradation', () => {
       id: 'appr-audit',
       decision: 'approve',
       rule_id: null,
+      remembered_rule_status: 'not_requested',
       audit_receipts: [{
         event: 'resolved',
         recorded: false,
@@ -127,6 +128,28 @@ describe('committed Gate mutation audit degradation', () => {
     observeGateAuditReceipts([receipt], { id: null, transport: 'sse' })
 
     expect(gateAuditWriteFailures.value).toHaveLength(2)
+  })
+})
+
+describe('remembered approval outcomes', () => {
+  it.each([
+    ['conflicted', '이번 요청은 승인했습니다 · Always 규칙 갱신은 다른 변경과 충돌해 적용하지 않았습니다', 'warning'],
+    ['skipped', '이번 요청의 승인 결정은 저장됐지만 Keeper가 없어 Always 규칙을 저장하지 않았습니다', 'warning'],
+    ['replayed', 'keeper 승인 요청을 승인했습니다 · Always 규칙은 이미 저장되어 있습니다', 'success'],
+    ['saved', 'keeper 승인 요청을 승인하고 Always 규칙을 저장했습니다', 'success'],
+  ])('shows the actual %s outcome after always-approve', async (status, message, level) => {
+    mocks.resolveGateApproval.mockResolvedValue({
+      ok: true, id: 'approval-renewal', decision: 'approve',
+      rule_id: status === 'saved' || status === 'replayed' ? 'rule-1' : null,
+      remembered_rule_status: status,
+      audit_receipts: (status === 'saved' ? ['rule_created']
+        : status === 'conflicted' ? ['rule_conflicted'] : [])
+        .map(event => ({ event, recorded: true })),
+    })
+    await respondToKeeperApproval('approval-renewal', 'approve', true)
+    expect(mocks.showToast).toHaveBeenCalledWith(message, level)
+    expect(mocks.refreshGate).toHaveBeenCalledWith({ force: true })
+    expect(gateApprovalActing.value).toBeNull()
   })
 })
 

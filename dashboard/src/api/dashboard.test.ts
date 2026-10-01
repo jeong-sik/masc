@@ -2856,6 +2856,57 @@ describe('fetchDashboardGate', () => {
 })
 
 describe('Gate mutation audit receipts', () => {
+  it.each(['saved', 'replayed', 'conflicted', 'skipped'])('rejects remembered %s on rejection', async status => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      ok: true, id: 'approval-rejected', decision: 'reject',
+      rule_id: status === 'saved' || status === 'replayed' ? 'rule-1' : null,
+      remembered_rule_status: status, audit_receipts: [],
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
+    await expect(resolveGateApproval('approval-rejected', {
+      decision: 'reject', reason: 'operator declined',
+    })).rejects.toMatchObject({ errorCode: 'protocol_drift' })
+  })
+
+  it.each([
+    ['saved', 'rule-1', ['rule_created']],
+    ['replayed', 'rule-1', []],
+    ['conflicted', null, ['rule_conflicted']],
+    ['skipped', null, []],
+    ['not_requested', null, []],
+  ] as const)('decodes %s and its first-commit or replay receipts', async (status, ruleId, events) => {
+    for (const resolved of [false, true]) {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+        ok: true, id: 'approval-renewal', decision: 'approve', rule_id: ruleId,
+        remembered_rule_status: status,
+        audit_receipts: [...events, ...(resolved ? ['resolved'] : [])]
+          .map(event => ({ event, recorded: true })),
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
+      await expect(resolveGateApproval('approval-renewal', {
+        decision: 'approve', rememberRule: status !== 'not_requested',
+      })).resolves.toMatchObject({ remembered_rule_status: status, rule_id: ruleId })
+    }
+  })
+
+  it.each([
+    ['saved', null, ['rule_created']],
+    ['replayed', null, []],
+    ['conflicted', 'rule-1', ['rule_conflicted']],
+    ['skipped', 'rule-1', []],
+    ['saved', 'rule-1', []],
+    ['conflicted', null, ['rule_created']],
+    ['replayed', 'rule-1', ['rule_conflicted']],
+    ['unknown', null, []],
+  ] as const)('rejects inconsistent remembered outcome %s / %s / %s', async (status, ruleId, events) => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      ok: true, id: 'approval-renewal', decision: 'approve', rule_id: ruleId,
+      remembered_rule_status: status,
+      audit_receipts: events.map(event => ({ event, recorded: true })),
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
+    await expect(resolveGateApproval('approval-renewal', {
+      decision: 'approve', rememberRule: true,
+    })).rejects.toMatchObject({ errorCode: 'protocol_drift' })
+  })
+
   it('keeps a committed resolution successful while decoding failed audit writes', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
@@ -2863,6 +2914,7 @@ describe('Gate mutation audit receipts', () => {
         id: 'appr-audit',
         decision: 'approve',
         rule_id: null,
+        remembered_rule_status: 'not_requested',
         audit_receipts: [{
           event: 'resolved',
           recorded: false,
@@ -2891,6 +2943,7 @@ describe('Gate mutation audit receipts', () => {
         id: 'appr-audit',
         decision: 'approve',
         rule_id: null,
+        remembered_rule_status: 'not_requested',
       }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -2936,6 +2989,7 @@ describe('Gate mutation audit receipts', () => {
         id: 'appr-audit',
         decision: 'approve',
         rule_id: null,
+        remembered_rule_status: 'not_requested',
         audit_receipts: [{ event: 'pending', recorded: true }],
       }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
     ))
@@ -2966,6 +3020,7 @@ describe('Gate mutation audit receipts', () => {
         id: 'appr-cleanup',
         decision: 'approve',
         rule_id: null,
+        remembered_rule_status: 'not_requested',
         audit_receipts: [{
           event: 'resolved',
           recorded: true,

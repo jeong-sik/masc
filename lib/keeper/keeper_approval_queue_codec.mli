@@ -12,6 +12,7 @@ type persisted_delivery =
   ; source : decision_source
   ; remember_rule : bool
   ; rule_expires_at : float option
+  ; rule_intent : Keeper_rule_revision.intent option
   ; created_by : string option
   ; grant_consumed : bool
   ; replay_outcome : resolution_replay_outcome option
@@ -48,6 +49,11 @@ val replay_results_to_yojson :
 val log_row_to_yojson : generation:int -> next_sequence:int -> log_row -> Yojson.Safe.t
 
 val pending_entry_of_yojson : base_path:string -> Yojson.Safe.t -> (pending_approval, string) result
+type pending_snapshot_format = Released_v11 | Current_v12
+val pending_snapshot_format_of_yojson :
+  Yojson.Safe.t -> (pending_snapshot_format, string) result
+(** The authoritative snapshot selects the append-delivery format. *)
+
 val snapshot_of_yojson :
   base_path:string -> Yojson.Safe.t ->
   (pending_approval Set_util.StringMap.t * persisted_delivery Set_util.StringMap.t
@@ -57,12 +63,19 @@ val snapshot_of_yojson :
 val validate_pending_snapshot : base_path:string -> Yojson.Safe.t -> (unit, string) result
 (** Run the snapshot decode {!Keeper_approval_queue.install_persistence} runs on
     [gate/pending.json], without installing anything. [Error] carries the
-    loader's own message: an unsupported [version] (which names the runtime
-    reset), a malformed snapshot, or the first entry the loader would drop.
+    loader's own message: an unsupported [version], a malformed snapshot, or
+    the first entry the loader would drop. Released v11 snapshots retain their
+    pending entries and one-shot deliveries; new snapshots use v12.
     The append log is not read. *)
 val replay_results_of_yojson :
   Yojson.Safe.t -> (resolution_replay_outcome Set_util.StringMap.t, string) result
-val log_row_of_yojson : base_path:string -> Yojson.Safe.t -> (decoded_log_row, string) result
+val log_row_generation_of_yojson : Yojson.Safe.t -> (int, string) result
+(** Read the strict row header before interpreting a possibly stale body. *)
+val log_row_of_yojson :
+  ?snapshot_format:pending_snapshot_format -> base_path:string ->
+  Yojson.Safe.t -> (decoded_log_row, string) result
+(** Defaults to strict v12; only an authoritative v11 snapshot permits released
+    one-shot delivery rows without a captured intent. *)
 val apply_log_row :
   pending_approval Set_util.StringMap.t * persisted_delivery Set_util.StringMap.t ->
   log_row -> pending_approval Set_util.StringMap.t * persisted_delivery Set_util.StringMap.t

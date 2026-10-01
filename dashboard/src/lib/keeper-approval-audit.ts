@@ -9,6 +9,7 @@ const APPROVAL_AUDIT_EVENTS = new Set<KeeperApprovalAuditEvent>([
   'resolved',
   'summary_updated',
   'rule_created',
+  'rule_conflicted',
   'rule_deleted',
   'grant_consumed',
   'gate_allowed',

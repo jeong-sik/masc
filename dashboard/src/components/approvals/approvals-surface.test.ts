@@ -158,13 +158,17 @@ async function loadSurface(
   vi.resetModules()
   const resolveGateApproval = vi
     .fn()
-    .mockResolvedValue({
+    .mockImplementation(async (id: string, resolution: { decision: string; rememberRule?: boolean }) => ({
       ok: true,
-      id: 'appr-1',
-      decision: 'approve',
-      rule_id: null,
-      audit_receipts: [{ event: 'resolved', recorded: true }],
-    })
+      id,
+      decision: resolution.decision,
+      rule_id: resolution.rememberRule ? 'rule-1' : null,
+      remembered_rule_status: resolution.rememberRule ? 'saved' : 'not_requested',
+      audit_receipts: [
+        ...(resolution.rememberRule ? [{ event: 'rule_created', recorded: true }] : []),
+        { event: 'resolved', recorded: true },
+      ],
+    }))
   const retryGateAutoJudge = vi
     .fn()
     .mockResolvedValue({ ok: true, id: 'appr-1' })
@@ -1337,6 +1341,7 @@ describe('ApprovalsSurface', () => {
       id: 'appr-audit',
       decision: 'approve',
       rule_id: null,
+      remembered_rule_status: 'not_requested',
       audit_receipts: [{
         event: 'resolved',
         recorded: false,

@@ -25,6 +25,7 @@ let every_event =
   ; Audit.Resolved
   ; Audit.Summary_updated
   ; Audit.Rule_created
+  ; Audit.Rule_conflicted
   ; Audit.Rule_deleted
   ; Audit.Grant_consumed
   ; Audit.Gate_allowed

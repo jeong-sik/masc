@@ -476,6 +476,8 @@ let rule_store_error_to_string error =
 ;;
 
 let rule_expired ~now (rule : approval_rule) =
+  (* Authorization ends at its deadline, including equality. Memory fact
+     freshness has a different boundary because it grants no permission. *)
   match rule.expires_at with
   | None -> false
   | Some expires_at -> expires_at <= now

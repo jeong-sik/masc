@@ -1,0 +1,41 @@
+ ▸Dashboard  Work  Keepers  Usage  Board  Workspace  System
+
+   MASC Dashboard  [tui-audit-fixture]  22:33:12  HTTP [connected]
+ ──────────────────────────────────────────────────────────────────────────────
+   Health: ok
+   Work: 0 currently done in the last 24h · details in Work
+
+   Needs your decision
+    Approvals and questions: held calls not fully read; Gate queue not fully …
+
+   Continue
+    Choose a Keeper  · start a conversation
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  j/k:choose  Enter:open  p:requests  ;:agenda  m:Usage  r:refresh  q:quit  …?
+ Choose a Keeper before writing · i:choose

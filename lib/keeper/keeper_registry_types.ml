@@ -123,7 +123,8 @@ type registry_entry =
   }
 
 and turn_observation =
-  { turn_id : int
+  { observation_token : Keeper_turn_observation_token.t
+  ; turn_id : int
   ; started_at : float
   ; last_progress_at : float
   ; last_progress_kind : string option

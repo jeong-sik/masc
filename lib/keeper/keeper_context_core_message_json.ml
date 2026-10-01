@@ -109,7 +109,8 @@ let string_field_opt key value =
 let metadata_of_json (json : Yojson.Safe.t) : (string * Yojson.Safe.t) list =
   match Json_util.assoc_member_opt "metadata" json with
   | Some (`Assoc fields) -> fields
-  | _ -> []
+  | None -> []
+  | Some _ -> invalid_arg "keeper_context_core: invalid metadata"
 
 let message_to_json (m : Agent_core.Types.message) : Yojson.Safe.t =
   let m = Inference_utils.sanitize_message_utf8 m in
@@ -170,7 +171,7 @@ let message_of_json (json : Yojson.Safe.t) : Agent_core.Types.message =
       tool_call_id =
         (Json_util.get_string json "tool_call_id"
          |> Option.map Inference_utils.sanitize_text_utf8);
-      metadata = [];
+      metadata = metadata_of_json json;
     }
 
 (** Extract human-readable text from a single history.jsonl line.

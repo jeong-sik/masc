@@ -139,7 +139,7 @@ Where each checkout stands against its upstream default branch.
 {{rows}}
 
 ### context.checkouts.unmeasured (vars: count)
-- {{count}} checkout(s) not measurable this turn — the keeper_status tool carries each reason
+- {{count}} checkout(s) not measurable this turn
 
 ### context.checkouts.standing.current (vars: target, age)
 current with locally observed {{target}} ({{age}}s ago)
@@ -569,4 +569,4 @@ For relevant Task, Goal or collaboration context, use `keeper_workspace_memory_r
 
 ### context.workspace_memory.unavailable
 ## Shared workspace memory ledger
-The current ledger is unavailable. Do not infer that no shared memory exists or substitute an older proposal. Continue work using the evidence already available.
+The current ledger is unavailable. Do not infer that no shared memory exists. Continue work using the evidence already available.

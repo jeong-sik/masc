@@ -144,7 +144,11 @@ val load_credential_of :
 
 val save_credential : string -> agent_credential -> unit
 (** Publish under {!with_credential_transaction}, including token-cache
-    invalidation. Lock admission errors raise [Sys_error], like write errors. *)
+    invalidation. Lock admission errors raise [Sys_error], like write errors.
+    Once a named credential or redirect stub is committed, retirement failures for the
+    superseded UUID payload are logged without failing that publication, so a
+    caller that minted a bearer can return it. Superseded payloads do not acquire
+    named-owner authentication or diagnostic-listing authority. *)
 
 val ensure_credential_alias :
   string ->
@@ -208,46 +212,38 @@ val audit_token_uniqueness : string -> (string * string list) list
     [bearer-token-belongs-to-X] failure mode (#9786) BEFORE
     runtime requests start failing.  Empty list = healthy. *)
 
-(** Outcome of one shared-token rotation group.  [token_hash_prefix]
-    matches the corresponding entry from {!audit_token_uniqueness}.
-    [rotated_agents] reports each agent in declaration order: the
-    [Ok ()] case means a fresh per-agent credential was written,
-    [Error _] preserves the failure (typically I/O during
-    [save_credential]) without aborting the whole batch.  Callers
-    that want strict atomicity should retry on partial failure. *)
+type rotation_publication =
+  | Published
+  | Not_published
+  | Publication_unreadable of masc_error
+
+type rotation_failure = {
+  error : masc_error;
+  raw_token : rotation_publication;
+  credential : rotation_publication;
+}
+(** Observed publication after a per-agent write failure. Files may have changed
+    before the failure. Unreadable state is retained rather than guessed. *)
+
 type rotation_outcome = {
   token_hash_prefix : string;
-  rotated_agents : (string * (unit, masc_error) result) list;
+  rotated_agents : (string * (unit, rotation_failure) result) list;
 }
 
-val rotate_shared_tokens : string -> rotation_outcome list
-(** #10304 follow-up to #9786: when {!audit_token_uniqueness} reports
-    a group of agents sharing one bearer token, generate a fresh
-    unique token for EACH agent in the group and persist the
-    credential plus its raw token file.  Returns one
-    [rotation_outcome] per group, in the same order as the audit, so
-    callers can attach a structured WARN or counter to every
-    rotation.
+val rotation_failure_to_string : rotation_failure -> string
 
-    A single shared-token incident on the production fleet flips
-    14 keeper credentials at once (#10304 evidence: 3 distinct
-    [token_hash_prefix] each shared by 14 agents in a single day),
-    so this is intended as an opt-in escalation: detection
-    (audit_token_uniqueness) stays the default; explicit rotation
-    is what an operator or a guarded boot path drives.
-
-    Note: rotating an agent's token forces every running consumer
-    of that token to re-fetch credentials.  Callers should hold
-    rotation to boot-time or operator-driven contexts where the
-    re-auth burst is acceptable. *)
+val rotate_shared_tokens : string -> (rotation_outcome list, masc_error) result
+(** Read the current canonical credentials and rotate shared groups under one
+    Auth transaction. Admission or discovery I/O failure returns [Error] before
+    any rotation. Per-agent publication failures remain in the group's results;
+    a successful agent has both its credential and recoverable raw token written.
+    Rotation forces consumers to fetch their current bearer again. *)
 
 val rotate_shared_tokens_for_agents :
-  string -> agent_names:string list -> rotation_outcome list
-(** Guarded variant of {!rotate_shared_tokens}.  Only credentials
-    whose [agent_name] is present in [agent_names] are eligible for
-    rotation.  Boot-time keeper repair uses this to avoid rotating
-    operator/admin tokens while still breaking shared keeper bearer
-    groups. *)
+  string -> agent_names:string list -> (rotation_outcome list, masc_error) result
+(** Only the selected canonical names participate in groups. The current role
+    and identity are preserved while publishers, revoke and prune are excluded
+    by the same transaction. *)
 
 val find_credential_by_token :
   string -> token:string -> (agent_credential, masc_error) result
@@ -329,13 +325,21 @@ val verify_internal_keeper_token :
 val ensure_internal_keeper_token :
   string -> string
 
+val ensure_keeper_credentials :
+  string -> agent_names:string list ->
+  ((string * (string * agent_credential, masc_error) result) list, masc_error) result
+(** Batch startup sync under one admitted token index. Every publisher validates
+    current named-owner and UUID authority before writing. After a failure,
+    authority is reread before any later independent Keeper is synchronized. *)
+
 val ensure_keeper_credential :
   string -> agent_name:string ->
   (string * agent_credential, masc_error) result
 (** [ensure_keeper_credential config ~agent_name] returns a valid credential,
     backed by a per-keeper raw bearer token file.  The internal
     keeper MCP token remains separate and is only used for the
-    [x-masc-internal-token] trust path. *)
+    [x-masc-internal-token] trust path. Existing names must resolve to this
+    exact canonical owner, and UUID ownership is validated before publication. *)
 
 type credential_status =
   | Credential_present of agent_credential

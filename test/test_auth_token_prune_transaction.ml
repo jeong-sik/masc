@@ -303,6 +303,28 @@ let test_forged_uuid_cannot_delete_another_owners_bearer () =
   check string "a traversal id cannot authorize an outside file" escaped_json (read outside);
   check_live base_path token
 
+let test_same_owner_uuid_replacement_refuses_stale_prune () =
+  with_workspace @@ fun base_path ->
+  let _, current = auth_ok (Auth.ensure_keeper_credential base_path ~agent_name:"keeper-current") in
+  let id = match current.id with Some id -> id | None -> fail "fixture needs a UUID" in
+  let target = Auth.credential_file base_path (Masc_domain.Credential_id.to_string id) in
+  let named = Auth.credential_file base_path "keeper-current" in
+  let raw = Auth.raw_token_file base_path "keeper-current" in
+  (* The IDs still agree, but the named copy precedes a token/expiry renewal.
+     Publication recovery may recognize this UUID; deletion must not use it. *)
+  let stale = { current with expires_at = Some expired;
+    token = Auth.sha256_hash (Auth.generate_token ()) } in
+  Auth.save_private_text_file named
+    (Masc_domain.agent_credential_to_yojson stale |> Yojson.Safe.to_string);
+  let read path = In_channel.with_open_bin path In_channel.input_all in
+  let before_named, before_target, before_raw = read named, read target, read raw in
+  (match prune base_path with
+   | Error _ -> ()
+   | Ok _ -> fail "an expired named copy must not authorize deleting its renewed UUID");
+  check string "stale canonical remains diagnosable" before_named (read named);
+  check string "renewed same-owner UUID survives" before_target (read target);
+  check string "recoverable current raw token survives" before_raw (read raw)
+
 let test_dangling_raw_sidecar_is_really_removed () =
   with_workspace @@ fun base_path ->
   let _expired_token = make_expired base_path "player" in
@@ -407,7 +429,8 @@ let test_failed_admission_preserves_every_file () =
 let () =
   run "auth_token_prune_transaction"
     [ "prune",
-      [ test_case "normalized canonical survives UUID cleanup failure" `Quick test_normalized_canonical_survives_uuid_cleanup_failure
+      [ test_case "same-owner renewed UUID refuses stale deletion authority" `Quick test_same_owner_uuid_replacement_refuses_stale_prune
+      ; test_case "normalized canonical survives UUID cleanup failure" `Quick test_normalized_canonical_survives_uuid_cleanup_failure
       ; test_case "renewal before prune preserves the current Admin" `Quick test_renewal_before_prune
       ; test_case "orphan replacement before prune preserves its bearer" `Quick test_orphan_renewal_before_prune
       ; test_case "prune finishes before the later renewal" `Quick test_prune_before_renewal

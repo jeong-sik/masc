@@ -1,4 +1,3 @@
-import { CandleAccountRevisionSchema } from './candle-observation'
 import { KeeperPortraitSchema } from './keeper-portrait'
 import { KEEPER_ACTIVATION_MODES } from '../../lib/keeper-activation-mode'
 import { Data, Effect, ParseResult, Schema } from 'effect'
@@ -20,7 +19,7 @@ const GateKeeperWireSchema = Schema.Struct({
   // Monetary observations do not determine Keeper lifecycle actions. The
   // execution consumer validates them together with their Candle envelope.
   candle_balance_milli: Schema.Unknown,
-  candle_account_revision: CandleAccountRevisionSchema,
+  candle_account_revision: Schema.Unknown,
   name: Schema.NonEmptyString,
   meta: KeeperMetaWireSchema,
   status: Schema.NonEmptyString,
@@ -50,7 +49,7 @@ const GateKeeperIssueBaseWireSchema = Schema.Struct({
   runtime_class: Schema.Literal('keeper'),
   portrait: KeeperPortraitSchema,
   candle_balance_milli: Schema.Unknown,
-  candle_account_revision: CandleAccountRevisionSchema,
+  candle_account_revision: Schema.Unknown,
   name: Schema.NonEmptyString,
   keepalive_running: Schema.Boolean,
   effective_meta_error: GateKeeperDirectoryIssueWireSchema,

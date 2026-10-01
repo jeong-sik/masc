@@ -296,10 +296,10 @@ def portrait_as_pixels(binary: str) -> None:
 def item_roster_fixtures():
     fixtures = h.keeper_runtime_http_fixtures()
     roster = fixtures["/api/v1/gate/keepers?detailed=true"][1]
-    roster["candle"] = {"status": "ready", "issued_milli": "12500", "burned_milli": "0", "circulating_milli": "12500"}
+    roster.pop("candle", None)
     for row in roster["keepers"]:
-        row["candle_balance_milli"] = "12500" if row["name"] == "alpha" else "0"
-        row["candle_account_revision"] = "a" * 64
+        row.pop("candle_balance_milli", None)
+        row.pop("candle_account_revision", None)
     return fixtures
 
 
@@ -586,7 +586,7 @@ def item_account_refuses_an_unobserved_server_workspace(binary: str) -> None:
     )
 
 
-def item_account_requires_matching_roster_revision(binary: str) -> None:
+def item_account_refreshes_without_public_currency(binary: str) -> None:
     fixtures = item_roster_fixtures()
     roster = fixtures["/api/v1/gate/keepers?detailed=true"][1]
     fixtures["/api/v1/gate/keepers?detailed=true"] = lambda: (200, roster)
@@ -606,49 +606,28 @@ def item_account_requires_matching_roster_revision(binary: str) -> None:
         h.resize_and_wait(process, fd, output, rows=40, columns=200, needle=INFO_TAB)
         h.send_and_wait(process, fd, output, b"]", "▸Items".encode())
         await_frame(process, fd, output, b"Balance 12.500 Candle")
-        # The Item account changes first, while the current roster still owns
-        # revision A and its previous equipment. B cannot publish beside A.
+        # The public roster has no private account fields. The next accepted
+        # roster refresh wakes the selected authenticated account reader.
         items.response = 200, dict(ready, account_revision="b" * 64, balance_milli="13000")
-        os.write(fd, b"r")
-        await_frame(process, fd, output, b"Account unavailable:")
-        assert not any(b"Balance 13.000" in line or b"Balance 12.500" in line
-                       for line in last_frame_rows(output).values()), last_frame_rows(output)
-        # A newly observed roster owns B. Its visible runtime ID is a response
-        # barrier, rather than waiting for a timer or a tab header alone.
-        for row in roster["keepers"]:
-            row["candle_account_revision"] = "b" * 64
-            if row["name"] == "alpha":
-                row["runtime_id"] = "revision-b.current"
-                row["candle_balance_milli"] = "13000"
-        # Stay on Items: accepting roster B must launch its replacement read
-        # without a second key press or leaving/re-entering the tab.
         await_frame(process, fd, output, b"Balance 13.000 Candle")
-        assert not any(b"Account unavailable:" in line for line in last_frame_rows(output).values())
-        # Passive decay changes the observed balance without changing the
-        # durable account revision. It must refresh Items while the tab stays open.
+        assert "candle" not in roster
+        assert all("candle_account_revision" not in row for row in roster["keepers"])
+        # Passive decay keeps the revision stable but refreshes the balance.
         items.response = 200, dict(ready, account_revision="b" * 64, balance_milli="12000")
-        for row in roster["keepers"]:
-            if row["name"] == "alpha":
-                row["candle_balance_milli"] = "12000"
         await_frame(process, fd, output, b"Balance 12.000 Candle")
         assert not any(b"Balance 13.000" in line for line in last_frame_rows(output).values())
-        # Turning Candle off cannot leave B's ready Item account alongside an
-        # off roster. The next current reading withdraws it before a new GET.
-        roster["candle"] = {"status": "off"}
-        for row in roster["keepers"]:
-            row["candle_balance_milli"] = None
-            row["candle_account_revision"] = None
-        await_frame(process, fd, output, b"Account unavailable:")
-        assert not any(b"Balance 13.000" in line for line in last_frame_rows(output).values())
+        items.response = 200, {"status": "off", "keeper": "alpha", "account_revision": None}
+        await_frame(process, fd, output, b"Candle off")
+        assert not any(b"Balance 12.000" in line for line in last_frame_rows(output).values())
         os.write(fd, b"q")
 
     h.run_terminal_scenario(binary,
-        description="Item account publishes only beside its matching current roster revision",
+        description="Item account refreshes from its authenticated response while public roster omits currency",
         interact=interact, prepare_workspace=items.prepare, http_fixtures=fixtures,
         refresh=0.5, terminal_cols=200)
 
 
-def item_account_withdraws_unread_authority(binary: str) -> None:
+def item_account_withdraws_unread_authority(binary: str, boundary="identity") -> None:
     fixtures = item_roster_fixtures()
     identity = {"base": "", "unread": False, "probes": 0}
     held, release, served = threading.Event(), threading.Event(), threading.Event()
@@ -660,11 +639,12 @@ def item_account_withdraws_unread_authority(binary: str) -> None:
 
     def health():
         identity["probes"] += 1
-        value = ({"error": "identity unread"} if identity["unread"] else
+        unavailable = identity["unread"] and boundary == "identity"
+        value = ({"error": "identity unread"} if unavailable else
                  {"paths": {"effective_base_path": identity["base"],
                             "effective_masc_root": os.path.join(identity["base"], ".masc")},
                   "state_ready": True})
-        return h.RawHttpResponse(503 if identity["unread"] else 200,
+        return h.RawHttpResponse(503 if unavailable else 200,
                                  json.dumps(value).encode(), content_type="application/json")
 
     def items():
@@ -680,7 +660,13 @@ def item_account_withdraws_unread_authority(binary: str) -> None:
             served.set()
         return h.StreamingHttpResponse(chunks)
 
+    public_roster = fixtures["/api/v1/gate/keepers?detailed=true"][1]
+    def roster():
+        if identity["unread"] and boundary == "roster":
+            return h.RawHttpResponse(503, b'{"error":"roster unread"}', content_type="application/json")
+        return 200, public_roster
     fixtures["/health"] = health
+    fixtures["/api/v1/gate/keepers?detailed=true"] = roster
     fixtures["/api/v1/keepers/alpha/items"] = items
 
     def frame(process, fd, output, predicate):
@@ -711,10 +697,9 @@ def item_account_withdraws_unread_authority(binary: str) -> None:
             assert h.wait_for_fixture_state(process, fd, output, held.is_set, timeout=3)
             identity["unread"] = True
             frame(process, fd, output, lambda text: b"Account unavailable:" in text)
-            recover(process, fd, output)
-            # Release before any new Item read: otherwise the new read's
-            # generation alone would supersede this response and hide a
-            # missing authority-boundary invalidation.
+            # Release while the failed observation still owns the boundary.
+            # In roster mode health remains ready, so only the revoked detail
+            # ticket prevents this late account from being published.
             start = len(output)
             release.set()
             assert h.wait_for_fixture_state(process, fd, output, served.is_set, timeout=3)
@@ -727,12 +712,14 @@ def item_account_withdraws_unread_authority(binary: str) -> None:
             assert b"Balance 13.000 Candle" not in text
             assert b"Balance 13.000 Candle" not in output[start:]
             balance[0] = "14000"
-            h.send_and_wait(process, fd, output, b"r", b"Balance 14.000 Candle")
+            recover(process, fd, output)
+            await_new = b"Balance 14.000 Candle"
+            frame(process, fd, output, lambda text: await_new in text)
             os.write(fd, b"q")
         finally:
             release.set()
 
-    h.run_terminal_scenario(binary, description="Item balances and pending reads lose unread workspace authority",
+    h.run_terminal_scenario(binary, description=f"Item balances and pending reads lose unread {boundary} authority",
                             interact=interact, http_fixtures=fixtures, terminal_cols=COLUMNS,
                             prepare_workspace=lambda base: identity.update(base=str(Path(base).resolve())),
                             refresh=0.2)
@@ -753,10 +740,11 @@ if __name__ == "__main__":
     portrait_follows_the_terminal_height(binary)
     no_portrait_under_no_color(binary)
     portrait_as_pixels(binary)
-    item_account_requires_matching_roster_revision(binary)
+    item_account_refreshes_without_public_currency(binary)
     item_tab_previews_accessories(binary)
     item_account_failure_keeps_the_preview(binary)
     item_account_follows_workspace_authority(binary)
     item_account_refuses_an_unobserved_server_workspace(binary)
     item_account_withdraws_unread_authority(binary)
-    print("tui keeper portrait: PASS (9 scenarios)")
+    item_account_withdraws_unread_authority(binary, boundary="roster")
+    print("tui keeper portrait: PASS (10 scenarios)")

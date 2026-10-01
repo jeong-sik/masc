@@ -638,7 +638,7 @@ beanie = %d
     let reader = token_for config ~agent_name:"portrait-item-reader" Masc_domain.Worker in
     let credited = get ~router ~token:reader (item_path keeper) in
     let credited_json = Yojson.Safe.from_string credited.body in
-    check (option string) "ready HTTP account is bound to the actual roster revision"
+    check (option string) "ready HTTP account is bound to its authoritative Candle revision"
       (Candle_observe.account_revision (Candle_observe.read ~now:Time_compat.now ~base_path) ~keeper)
       (Some Yojson.Safe.Util.(credited_json |> member "account_revision" |> to_string));
     let fields = match credited_json with `Assoc fields -> fields | _ -> fail "Item object" in
@@ -656,16 +656,9 @@ beanie = %d
     let changed_revision = Yojson.Safe.Util.(changed_json |> member "account_revision" |> to_string) in
     check bool "price B changes actual response revision" false (original_revision = changed_revision);
     let changed_reading = require_ok Fun.id (Masc_tui_keeper_items.decode ~keeper_name:keeper changed_json) in
-    check bool "TUI refuses price B beside the retained price A roster" true
-      (Result.is_error (Masc_tui_keeper_items.match_revision
-        ~expected_revision:(Ok (Some original_revision)) changed_reading));
-    check bool "TUI accepts price B only with its matching observed roster revision" true
-      (Result.is_ok (Masc_tui_keeper_items.match_revision
-        ~expected_revision:(Ok (Some changed_revision)) changed_reading));
-    check bool "an unobserved roster cannot authorize an otherwise valid Item body" true
-      (Result.is_error (Masc_tui_keeper_items.match_revision
-        ~expected_revision:(Error "roster unavailable") changed_reading));
-    check (option string) "price B response uses the same current roster view identity"
+    check (option string) "TUI decoded account retains its own current revision"
+      (Some changed_revision) (fst changed_reading);
+    check (option string) "price B response uses the same current Candle view identity"
       (Candle_observe.account_revision (Candle_observe.read ~now:Time_compat.now ~base_path) ~keeper)
       (Some changed_revision);
     let changed_catalog = Yojson.Safe.Util.(changed_json |> member "catalog" |> to_list) in

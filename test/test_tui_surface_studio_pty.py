@@ -74,7 +74,11 @@ def run(executable, no_color=False):
         medium=capture("work-medium",24,120,b"plan-alpha-29424")
         for needle in (b"Backlog:", b"done=15", b"cancelled=16"):
             if needle not in medium: raise AssertionError(f"Work omitted {needle!r} at 120 columns")
-        capture("work-narrow",24,80,b"plan-alpha-29424")
+        narrow=capture("work-narrow",24,80,b"plan-alpha-29424")
+        for needle in (b"Goals:", b"Backlog:", b"done=15", b"cancelled=16"):
+            if needle not in narrow: raise AssertionError(f"Narrow Work omitted {needle!r}")
+        for heading in ("Goals · measured outcomes".encode(), "Tasks · Backlog:".encode()):
+            if heading in narrow: raise AssertionError("Narrow Work retained wide summary cards")
         key(b":go Workspace\r",b"/srv/masc/workspace/masc")
         for name,rows,cols in (("workspace-wide",32,160),("workspace-narrow",24,80)):
             screen=capture(name,rows,cols,b"Keepers: alpha")
@@ -120,7 +124,11 @@ def run(executable, no_color=False):
         wide=capture("system-wide",32,160,b"Selected setting")
         for needle in (b"Current on",b"Default off",b"override",b"Enable the observed feature"):
             if needle not in wide: raise AssertionError(f"System omitted {needle!r}")
-        capture("system-short",16,80,b"studio.enabled")
+        short=capture("system-short",16,80,b"studio.enabled")
+        if b"Enable the observed feature" not in short:
+            raise AssertionError("Short System omitted the selected setting contract")
+        if not re.search(rb"studio\.enabled\s+on\s+default off", short):
+            raise AssertionError("Short System omitted current/default values from its compact row")
         key(b"\r",b"editing studio.enabled")
         key(b"\x1b",b"studio.enabled")
         key(b"j",b"studio.mode")

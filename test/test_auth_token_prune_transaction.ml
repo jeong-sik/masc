@@ -357,6 +357,27 @@ let test_expired_uuid_retires_validated_aliases () =
     ["keeper-canonical"; "keeper-short"; "keeper-other"];
   check (list string) "no orphan remains for a second prune" [] (names (auth_ok (prune base_path)))
 
+let test_normalized_canonical_survives_uuid_cleanup_failure () =
+  with_workspace @@ fun base_path ->
+  let _, credential = auth_ok (Auth.ensure_keeper_credential base_path ~agent_name:"Alice") in
+  let credential = { credential with expires_at = Some expired } in
+  Auth.save_credential base_path credential;
+  let uuid = match credential.id with Some id -> Auth.credential_file base_path
+      (Masc_domain.Credential_id.to_string id) | None -> fail "fixture needs UUID" in
+  let before_uuid = read uuid in
+  let retirement = Auth_credential_base.with_credential_transaction base_path (fun transaction ->
+    let snapshot = auth_ok (Auth_credential_base.credential_prune_snapshot_in_transaction transaction) in
+    let _, authority = List.find (fun (current, _) -> current.Masc_domain.agent_name = "Alice") snapshot.credentials in
+    Unix.unlink uuid; Unix.mkdir uuid 0o700;
+    Auth_credential_base.retire_prune_credential_in_transaction transaction authority) |> auth_ok in
+  check bool "UUID failure is explicit" true (Result.is_error retirement);
+  check bool "normalized canonical remains retryable" true
+    (Sys.file_exists (Auth.credential_file base_path "Alice"));
+  Unix.rmdir uuid; Auth.save_private_text_file uuid before_uuid;
+  (match auth_ok (prune base_path) with
+   | [{ Prune.agent_name = "Alice"; outcome = Prune.Retired; _ }] -> ()
+   | _ -> fail "the restored target must finish under the retained canonical owner")
+
 let test_raw_publication_waits_for_prune () =
   with_workspace @@ fun base_path ->
   let old_token, credential = auth_ok (Auth.ensure_keeper_credential base_path ~agent_name:"keeper") in
@@ -386,7 +407,8 @@ let test_failed_admission_preserves_every_file () =
 let () =
   run "auth_token_prune_transaction"
     [ "prune",
-      [ test_case "renewal before prune preserves the current Admin" `Quick test_renewal_before_prune
+      [ test_case "normalized canonical survives UUID cleanup failure" `Quick test_normalized_canonical_survives_uuid_cleanup_failure
+      ; test_case "renewal before prune preserves the current Admin" `Quick test_renewal_before_prune
       ; test_case "orphan replacement before prune preserves its bearer" `Quick test_orphan_renewal_before_prune
       ; test_case "prune finishes before the later renewal" `Quick test_prune_before_renewal
       ; test_case "preview preserves exact files" `Quick test_preview_preserves_files

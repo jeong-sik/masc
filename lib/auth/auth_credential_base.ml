@@ -825,7 +825,8 @@ let credential_prune_snapshot_in_transaction (Credential_transaction config) =
          | Some credential when String.equal credential.agent_name name ->
            let* authority = credential_prune_authority config name stored credential in
            let alias_names = List.filter_map (fun (alias, target, resolved) ->
-             if not (String.equal alias name) && resolved = credential
+             if not (String.equal (credential_file config alias) (credential_file config name))
+                && resolved = credential
                 && authority.uuid_target = Some target
              then Some alias else None) aliases
              |> List.sort_uniq String.compare in

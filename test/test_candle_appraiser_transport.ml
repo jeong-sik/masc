@@ -429,6 +429,11 @@ let test_invalid_http_then_valid_successor_keeps_both_slots () =
       [ bad_slot; good_slot ]
       (dispatched output);
     check json "accepted answer is retained" valid_answer (U.member "result" output);
+    check int "one successful HTTP attempt records one parsed response" 1
+      (attempts output |> List.filter (fun event ->
+        U.member "kind" event = `String "response"
+        && U.member "slot" event = `String good_slot
+        && U.member "output" event = valid_answer) |> List.length);
     check_http_failure ~slot:bad_slot ~body:malformed_body ~invalid:true output;
     let (Runs.Exact_input input) = run.input in
     check
@@ -496,6 +501,11 @@ let test_declared_cli_success_after_http_failure () =
       [ slot; F.cli_primary_runtime ]
       (dispatched output);
     check json "CLI answer is retained" valid_answer (U.member "result" output);
+    check int "CLI success retains one parsed response alongside its raw response" 1
+      (attempts output |> List.filter (fun event ->
+        U.member "kind" event = `String "response"
+        && U.member "slot" event = `String F.cli_primary_runtime
+        && U.member "output" event = valid_answer) |> List.length);
     check
       bool
       "CLI raw answer is retained under the actual slot"

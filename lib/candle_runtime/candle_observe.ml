@@ -7,6 +7,7 @@ let read ~now ~base_path =
   match Candle_status.observed_view ~now ~base_path with
   | Ok view -> Ready {policy=view.policy;balance=view.balance;events=view.events}
   | Error Candle_status.Off -> Off
+  | Error (Candle_status.Disabled reason) -> Disabled reason
   | Error error -> Disabled (Candle_status.error_to_string error)
 
 let summary = function

@@ -18,7 +18,13 @@ let text_cap requested =
 ;;
 
 let elements = {|
-const nodes = Array.from(document.querySelectorAll('a[href],button,input:not([type=hidden]),textarea,select,[contenteditable=true],[role=button],[role=link]'));
+// WAI-ARIA 1.2 roles are ordered fallbacks, not simultaneous declarations.
+// https://www.w3.org/TR/wai-aria-1.2/#roles
+const ariaRoles = new Set('alert alertdialog application article banner blockquote button caption cell checkbox code columnheader combobox complementary contentinfo definition deletion dialog directory document emphasis feed figure form generic grid gridcell group heading img insertion link list listbox listitem log main marquee math menu menubar menuitem menuitemcheckbox menuitemradio meter navigation none note option paragraph presentation progressbar radio radiogroup region row rowgroup rowheader scrollbar search searchbox separator slider spinbutton status strong subscript suggestion superscript switch tab table tablist tabpanel term textbox time timer toolbar tooltip tree treegrid treeitem'.split(' '));
+const effectiveRole = element => (element.getAttribute('role') || '').split(/\s+/)
+  .find(role => ariaRoles.has(role)) || null;
+const actionRoles = new Set('button link checkbox radio switch menuitem menuitemcheckbox menuitemradio tab option combobox'.split(' '));
+const nodes = Array.from(document.querySelectorAll('a[href],button,input:not([type=hidden]),textarea,select,summary,label,[contenteditable=true],[onclick],[role~=button],[role~=link],[role~=checkbox],[role~=radio],[role~=switch],[role~=menuitem],[role~=menuitemcheckbox],[role~=menuitemradio],[role~=tab],[role~=option],[role~=combobox]'));
 function selector(el) {
   const parts=[];
   for (let node=el; node && node.nodeType===1; node=node.parentElement) {
@@ -28,11 +34,64 @@ function selector(el) {
   }
   return parts.join(' > ');
 }
-const visible = nodes.filter(el=>el.getClientRects().length && getComputedStyle(el).visibility!=='hidden');
+const labelTextRects = (element, admit = rects => Array.from(rects)) => {
+  if (element.localName !== 'label') return [];
+  const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT), rects = [];
+  while (walker.nextNode()) {
+    const text = walker.currentNode, parent = text.parentElement;
+    if (!text.textContent.trim() || !parent || getComputedStyle(parent).visibility !== 'visible') continue;
+    let hidden = false;
+    for (let node = parent; node; node = node.parentElement) {
+      const style = getComputedStyle(node);
+      if (style.display === 'none' || Number(style.opacity) === 0) { hidden = true; break; }
+    }
+    if (hidden) continue;
+    const range = document.createRange(); range.selectNodeContents(text);
+    rects.push(...admit(range.getClientRects(), parent).filter(r => r.width > 0 && r.height > 0));
+  }
+  return rects;
+};
+const observable = el => (el.getClientRects().length || labelTextRects(el).length) && getComputedStyle(el).visibility !== 'hidden'
+  && getComputedStyle(el).visibility !== 'collapse'
+  && (() => { for (let parent=el;parent;parent=parent.parentElement) {
+    const style=getComputedStyle(parent);
+    if (style.display === 'none' || Number(style.opacity) === 0) return false;
+  } return true; })();
+const visible = nodes.filter(el=>observable(el)
+  && (!el.getAttribute('role') || actionRoles.has(effectiveRole(el))
+    || ['a','button','input','textarea','select','summary','label'].includes(el.localName)
+    || el.getAttribute('onclick') !== null || el.getAttribute('contenteditable') === 'true')
+  && (el.localName!=='label' || el.hasAttribute('onclick') || actionRoles.has(effectiveRole(el))
+    || (el.control?.localName==='input' && ['checkbox','radio'].includes(el.control.type) && !observable(el.control))));
+function disabled(el) {
+  const target=(el.localName==='label' && el.control) || el;
+  if (target.matches(':disabled')) return true;
+  for (const start of new Set([el,target]))
+    for (let parent=start;parent;parent=parent.parentElement)
+    if (parent.getAttribute('aria-disabled')==='true') return true;
+  return false;
+}
+function name(el) {
+  const labelledBy=(el.getAttribute('aria-labelledby') || '').split(/\s+/).filter(Boolean)
+    .map(id=>document.getElementById(id)?.textContent || '').join(' ').trim();
+  const labels=Array.from(el.labels || []).map(label=>label.innerText || '').filter(Boolean).join(' ');
+  return el.getAttribute('aria-label') || labelledBy || labels || el.getAttribute('placeholder') || '';
+}
 function observe(el) {
   const result = {selector:selector(el),tag:el.localName,
-    role:el.getAttribute('role'),type:el.getAttribute('type'),name:el.getAttribute('aria-label') || el.getAttribute('placeholder') || '',
-    text:(el.innerText || '').slice(0,500),href:el.href || null,disabled:el.matches(':disabled')};
+    role:effectiveRole(el),type:el.getAttribute('type'),name:name(el),
+    text:(el.innerText || '').slice(0,500),href:el.href || null,disabled:disabled(el)};
+  const target=(el.localName==='label' && el.control) || el;
+  if (target.localName==='input' && ['checkbox','radio'].includes(target.type))
+    result.checked=!!target.checked;
+  if (target.localName==='input' && target.type==='checkbox') result.indeterminate=!!target.indeterminate;
+  const checkedRole=effectiveRole(el), checked=el.getAttribute('aria-checked');
+  if (['checkbox','menuitemcheckbox','radio','menuitemradio','switch'].includes(checkedRole)
+      && ['true','false','mixed'].includes(checked))
+    result.ariaChecked=checked==='mixed' && !['checkbox','menuitemcheckbox'].includes(checkedRole) ? 'false' : checked;
+  if (['tab','option','row','treeitem','gridcell'].includes(effectiveRole(el))
+      && ['true','false'].includes(el.getAttribute('aria-selected')))
+    result.ariaSelected=el.getAttribute('aria-selected');
   if (el.localName==='input') {
     // Read the normalized DOM type: missing/unknown types behave as text inputs.
     result.type=el.type;

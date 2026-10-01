@@ -1,5 +1,5 @@
-(** One immutable authoritative view for a whole response. The current half-life
-    is recorded under CAS when needed; reading never repairs or truncates rows. *)
+(** One immutable authoritative view for a whole response. Reading replays recorded
+    half-life boundaries without publishing policy, repairing or truncating rows. *)
 type t
 val read : now:(unit -> float) -> base_path:string -> t
 val summary : t -> Candle_observation.t

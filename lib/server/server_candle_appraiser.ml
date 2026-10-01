@@ -256,7 +256,9 @@ let execute ~cli_runner ~base_path ~observe ~request ~prompt =
           | Keeper_lane_cli_oneshot.Raw_response {runtime_id;text} -> observe (Raw_response {slot=runtime_id;text}))
         ~validate:(fun raw -> Result.map (fun _ -> raw) (A.decode request raw))
         ~on_failure:(fun failure -> observe (Failure {transport="cli";detail=Keeper_lane_cli_oneshot.failure_to_string failure})) ()
-      |> Result.map (fun (slot, raw) -> raw, slot)
+      |> Result.map (fun (slot, raw) ->
+        observe (Response {slot;output=raw});
+        raw, slot)
       |> Result.map_error (fun failures ->
         let error = cli_error failures in
         match previous, error with
@@ -317,7 +319,6 @@ let run_with ~base_path ~execute ~identity request =
       let* prompt = prompt |> Result.map_error (fun detail -> A.Transport_unavailable detail) in
       let* raw, slot_id = execute ~observe ~request ~prompt in
       selected := Some slot_id;
-      observe (Response {slot=slot_id;output=raw});
       let* decision = A.decode request raw |> Result.map_error (fun s -> A.Invalid_response s) in
       let* trace = A.trace_of_json (A.trace_json {run_id;slot_id}) |> Result.map_error (fun s -> A.Invalid_response s) in
       let* () = complete Runs.Succeeded raw |> Result.map_error (fun s -> A.Transport_unavailable s) in
@@ -334,5 +335,8 @@ module For_testing = struct
   let terminal_error = terminal_error
   let run_declared ~base_path ~cli_runner = run_with ~base_path ~execute:(execute ~cli_runner:(Some cli_runner) ~base_path)
   let run ~base_path ~execute = run_with ~base_path
-    ~execute:(fun ~observe:_ ~request ~prompt -> execute ~request ~prompt)
+    ~execute:(fun ~observe ~request ~prompt ->
+      let* raw, slot = execute ~request ~prompt in
+      observe (Response {slot;output=raw});
+      Ok (raw,slot))
 end

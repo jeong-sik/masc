@@ -135,14 +135,20 @@ let select_subscription ~caller args subscriptions =
     && s.installation_id=installation_id && s.output_id=output_id) subscriptions with
   | Some s -> Ok s | None -> Error "caller has no matching subscription"
 let producer bindings s =
-  let matches value = match get "run_id" text value,field "configuration" value,field "phase" value with
-    | Ok run,Ok owner,Ok phase when run=s.run_id ->
-        get "id" text owner=Ok s.installation_id
-        && (match Types.phase_of_json phase with
-            | Ok (Types.Attached | Types.Observing | Types.Failed _) -> true
-            | Ok (Types.Detached | Types.Detaching) | Error _ -> false)
+  let matches value = match get "run_id" text value,field "configuration" value with
+    | Ok run,Ok owner when run=s.run_id -> get "id" text owner=Ok s.installation_id
     | _ -> false in
-  match List.filter matches bindings with
+  let rec live = function
+    | [] -> Ok []
+    | value::rest ->
+        let* phase = field "phase" value in
+        let* phase = Types.phase_of_json phase in
+        let* rest = live rest in
+        match phase with
+        | Types.Attached | Types.Observing | Types.Failed _ -> Ok (value::rest)
+        | Types.Detached | Types.Detaching -> Ok rest in
+  let* candidates = live (List.filter matches bindings) in
+  match candidates with
   | [value] ->
       let* instance = get "instance_id" text value in
       let* sequence = get "observation_seq" integer value in

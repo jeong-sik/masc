@@ -902,12 +902,12 @@ let consume_dispatched_message_draft state request =
    so the jump is a screenful on every window; a page smaller than the pane
    would leave rows the reader has to catch with the arrow keys anyway. *)
 let keeper_message_page_rows state =
-  let rows, _cols = get_terminal_size () in
+  let rows, cols = get_terminal_size () in
   (* The pane's fixed chrome is shared with [render_keeper_message];
      composer growth is already inside [keeper_message_status_rows]. Adding
      composer_max_rows here counted it twice, and every PgUp jumped four
      rows short of the screenful the comment promises. *)
-  let status_rows = keeper_message_status_rows state in
+  let status_rows = keeper_message_status_rows state ~terminal_cols:cols in
   (* PgUp creates the reading-back notice and PgDn removes it. Reserve that
      possible row on both sides of the transition: using only the rows drawn
      right now made a 46-row pane move 38 up, then only 37 down, leaving the
@@ -1112,7 +1112,7 @@ let submit_chat_draft (state : state) ~(submit_message : string -> unit)
 
 let keeper_message_input_supported state =
   let rows, cols = get_terminal_size () in
-  let status_rows = keeper_message_status_rows state in
+  let status_rows = keeper_message_status_rows state ~terminal_cols:cols in
   Masc_tui_message_layout.message_viewport_supported ~terminal_rows:rows
     ~terminal_cols:cols
     ~status_rows:(keeper_message_support_status_rows state ~status_rows)
@@ -1606,6 +1606,11 @@ let decode_play_mutation decode = function
   | Masc_tui_http.Post_refused detail -> Play_refused detail
   | Masc_tui_http.Post_unanswered detail -> Play_unanswered detail
 
+type currency_authority_request = {
+  car_generation : int;
+  car_identity : Tui_decode.server_identity option;
+}
+
 type async_msg =
   | Lane_package_preview_loaded of int * string * (Yojson.Safe.t, string) result
   | Keeper_queue_loaded of string * int option * Masc_tui_queue_inspection.action * (string list, string) result
@@ -1646,7 +1651,7 @@ type async_msg =
   | Voice_failed of { keeper : string; error : string }
   | Http_refresh_done of http_refresh_outcome
   | Http_refresh_failed of string * Approval.Listing_order.ticket option
-  | Http_scoped_refresh_done of http_scoped_surface_results
+  | Http_scoped_refresh_done of currency_authority_request * http_scoped_surface_results
   | Http_scoped_refresh_failed of
       string * Approval.Listing_order.ticket option
   | Board_post_refresh_done of
@@ -4269,15 +4274,19 @@ let visible_item_revision state =
       let balance = match Keeper_control.liveness_of_roster state.keeper_roster keeper.k_name with
         | Keeper_control.Present runtime -> runtime.kr_candle_balance_milli
         | Unobserved | Invalid _ | Absent -> None in
-      Some (keeper.k_name, keeper_item_revision state keeper.k_name, balance)
+      Some (keeper.k_name, keeper_item_revision state keeper.k_name, balance,
+        Option.map (fun identity ->
+          (Masc_tui_types.canonical_path identity.Tui_decode.sid_base_path,
+           Masc_tui_types.canonical_path identity.sid_masc_root,
+           identity.sid_state_ready)) state.server_identity)
   | _ -> None
 
 let refresh_changed_keeper_items state ~mailbox previous =
   let current = visible_item_revision state in
   if current <> previous then
     match current with
-    | Some (keeper_name, Ok _, _) -> launch_keeper_items state ~mailbox keeper_name
-    | Some (_, Error detail, _) ->
+    | Some (keeper_name, Ok _, _, _) -> launch_keeper_items state ~mailbox keeper_name
+    | Some (_, Error detail, _, _) ->
         withdraw_keeper_items state; state.item_account_error <- Some detail
     | None -> ()
 
@@ -6024,7 +6033,7 @@ let row_list (state : state) : row_list option =
                      state.code_file_cursor <- index;
                      state.code_file_scroll <-
                        Masc_tui_scroll.ensure_visible ~cursor:index
-                         ~height:(Masc_tui_render.code_pane_content_height state)
+                         ~height:(Masc_tui_render_code.code_pane_content_height state)
                          state.code_file_scroll)
                }
          (* Nothing to move through while the file is still being read, and
@@ -6268,6 +6277,7 @@ let reading_pane (state : state) : (int -> Masc_tui_types.clamped_scroll) option
   (* The voice pane is lines the frame lays out; its wizard takes its own keys
      while open. *)
   | Config when state.config_pane = Config_voice -> pane (fun v -> Voice_scroll v)
+  | Config when state.config_pane = Config_params -> pane (fun v -> Runtime_params_scroll v)
   | Config when state.config_pane = Config_presets -> pane (fun v -> Preset_detail_scroll v)
   (* Surfaces whose whole body is a row list, which [row_list] answers for,
      and the two panes that own every key while they are open. *)
@@ -10376,7 +10386,10 @@ let apply_overview_goals_load state = function
 
 let apply_keeper_roster_load state = function
   | Ok (roster, candle) ->
-      state.candle_observation <- Some candle;
+      state.candle_observation <-
+        (match state.server_identity with
+         | None | Some { Tui_decode.sid_state_ready = Some false; _ } -> None
+         | Some { Tui_decode.sid_state_ready = Some true | None; _ } -> Some candle);
       state.keeper_roster <- roster;
       state.keeper_roster_error <- None;
       (match state.item_account with
@@ -10573,7 +10586,7 @@ let refresh_status results =
   | n, total when n = total -> Masc_tui_types.Connected
   | _ -> Masc_tui_types.Degraded
 
-let load_http_scoped_surfaces ~host ~port ~approval_ticket ~board_sort
+let load_http_scoped_surfaces ~host ~port ~expected_workspace ~approval_ticket ~board_sort
     ~board_hearth ~system_log_level ~provider_history_days
     ~(needs : Masc_tui_types.surface_needs) =
   let when_needed wanted load = if wanted then Some (load ()) else None in
@@ -10615,7 +10628,9 @@ let load_http_scoped_surfaces ~host ~port ~approval_ticket ~board_sort
   in
   let http_keeper_roster =
     when_needed needs.needs_keeper_roster (fun () ->
-        load_keeper_roster ~host ~port)
+        match expected_workspace with
+        | None -> Error (Keeper_control.Roster_malformed "Server workspace identity is unavailable")
+        | Some expected_workspace -> load_keeper_roster ~host ~port ~expected_workspace)
   in
   let http_runtime_quota =
     when_needed needs.needs_runtime_quota (fun () ->
@@ -10700,7 +10715,10 @@ let load_http_surfaces ~host ~port ~approval_ticket ~board_sort
          announced, so the periodic refresh always fetches them; the surface
          still decides whether the panel renders, only the fetch is
          unconditional. Targeted scoped refreshes keep their own needs. *)
-      load_http_scoped_surfaces ~host ~port ~approval_ticket:None
+      load_http_scoped_surfaces ~host ~port
+        ~expected_workspace:(Result.to_option http_server_identity
+          |> Option.map (fun identity -> canonical_path identity.Tui_decode.sid_base_path))
+        ~approval_ticket:None
         ~board_sort ~board_hearth ~system_log_level ~provider_history_days
         ~needs:{ needs with needs_asks = true }
     in
@@ -10729,6 +10747,21 @@ let apply_http_scoped_surfaces_and_refresh state ~mailbox results =
   apply_http_scoped_surfaces state results;
   refresh_changed_keeper_items state ~mailbox previous_items
 
+let same_currency_workspace source current =
+  match source, current with
+  | Some source, Some current
+    when source.Tui_decode.sid_state_ready <> Some false
+      && current.Tui_decode.sid_state_ready <> Some false ->
+      String.equal (Masc_tui_types.canonical_path source.Tui_decode.sid_base_path)
+        (Masc_tui_types.canonical_path current.Tui_decode.sid_base_path)
+      && String.equal (Masc_tui_types.canonical_path source.Tui_decode.sid_masc_root)
+        (Masc_tui_types.canonical_path current.Tui_decode.sid_masc_root)
+  | _ -> false
+
+let withdraw_currency_authority state =
+  state.candle_authority_generation <- state.candle_authority_generation + 1;
+  state.candle_observation <- None
+
 (* This is a current reading, not a last-known cache. A failed probe makes
    the projection unread; every following refresh asks again, so a same-port
    replacement still moves A -> B as soon as /health succeeds. The local
@@ -10736,6 +10769,10 @@ let apply_http_scoped_surfaces_and_refresh state ~mailbox results =
    match reloads it, so a screen never shows rows from a workspace the server
    just stopped serving. *)
 let apply_server_identity_reading state reading =
+  (* A withdrawal invalidates outstanding roster reads even if the same
+     workspace becomes ready again before those reads finish. *)
+  if not (same_currency_workspace state.server_identity (Result.to_option reading))
+  then withdraw_currency_authority state;
   let same_item_authority =
     match state.server_identity, reading with
     | Some previous, Ok current ->
@@ -10775,10 +10812,10 @@ let apply_server_identity_reading state reading =
 
 let apply_http_surfaces state ~mailbox results =
   let previous_items = visible_item_revision state in
+  apply_server_identity_reading state results.http_server_identity;
   apply_overview_load state results.http_overview;
   Option.iter (apply_approval_observation state) results.http_approvals;
   apply_http_scoped_surfaces state results.http_scoped;
-  apply_server_identity_reading state results.http_server_identity;
   refresh_changed_keeper_items state ~mailbox previous_items;
   let reached result =
     Result.map (fun _ -> ()) result |> Result.map_error (fun _ -> ())
@@ -11375,11 +11412,18 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight ~mailbox
        match state.msg_target_keeper_name with
        | Some keeper_name -> launch_keeper_history_load state ~mailbox ~keeper_name
        | None -> ());
+    let currency_authority = {
+      car_generation = state.candle_authority_generation;
+      car_identity = state.server_identity;
+    } in
     let run_refresh () =
       try
         enqueue_async mailbox
           (Http_scoped_refresh_done
-             (load_http_scoped_surfaces ~host ~port
+             (currency_authority, load_http_scoped_surfaces ~host ~port
+                ~expected_workspace:(Option.map
+                  (fun identity -> canonical_path identity.Tui_decode.sid_base_path)
+                  currency_authority.car_identity)
                 ~approval_ticket ~board_sort:state.board_sort
                 ~board_hearth:state.board_hearth
                 ~provider_history_days:state.provider_history_days
@@ -11404,6 +11448,9 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight ~mailbox
           (fun () ->
              apply_http_scoped_surfaces_and_refresh state ~mailbox
                (load_http_scoped_surfaces ~host ~port
+                  ~expected_workspace:(Option.map
+                    (fun identity -> canonical_path identity.Tui_decode.sid_base_path)
+                    currency_authority.car_identity)
                   ~approval_ticket ~board_sort:state.board_sort
                 ~board_hearth:state.board_hearth
                 ~provider_history_days:state.provider_history_days
@@ -13794,8 +13841,19 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         ~port:state.port ~refresh_inflight:http_refresh_inflight
         ~scoped_refresh_inflight:http_scoped_refresh_inflight
         ~scoped_refresh_followup ~mailbox
-  | Http_scoped_refresh_done results ->
+  | Http_scoped_refresh_done (currency_authority, results) ->
       http_scoped_refresh_inflight := false;
+      let same_workspace =
+        currency_authority.car_generation = state.candle_authority_generation
+        && same_currency_workspace currency_authority.car_identity state.server_identity
+      in
+      (* A late roster belongs to its request's workspace, not to the next
+         process that answered at the same port. Other scoped datasets keep
+         their existing application paths. *)
+      let results =
+        if same_workspace then results
+        else { results with http_keeper_roster = None }
+      in
       apply_http_scoped_surfaces_and_refresh state ~mailbox results;
       (match state.view with
        | Overview | Approvals -> launch_keeper_tool_approvals_load state ~mailbox
@@ -14380,9 +14438,25 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       state.runtime_params_loading <- false;
       match result with
       | Ok rows ->
+          let selected_key =
+            List.nth_opt state.runtime_params state.runtime_params_cursor
+            |> Option.map (fun (row : Tui_decode.runtime_param_row) -> row.rpr_key)
+          in
+          let cursor =
+            Option.bind selected_key (fun key ->
+              List.find_mapi (fun index (row : Tui_decode.runtime_param_row) ->
+                if String.equal row.rpr_key key then Some index else None) rows)
+            |> Option.value
+                 ~default:(max 0 (min state.runtime_params_cursor (List.length rows - 1)))
+          in
+          let next_key =
+            List.nth_opt rows cursor
+            |> Option.map (fun (row : Tui_decode.runtime_param_row) -> row.rpr_key)
+          in
+          if not (Option.equal String.equal selected_key next_key)
+          then state.config_scroll <- 0;
           state.runtime_params <- rows;
-          state.runtime_params_cursor <-
-            max 0 (min state.runtime_params_cursor (List.length rows - 1));
+          state.runtime_params_cursor <- cursor;
           state.runtime_params_error <- None
       | Error detail ->
           (* Reported, not swallowed into an empty list: empty means nothing is
@@ -14437,7 +14511,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
        | Code_results.Reveal_cursor ->
            state.code_file_scroll <-
              Masc_tui_scroll.ensure_visible ~cursor:state.code_file_cursor
-               ~height:(Masc_tui_render.code_pane_content_height state)
+               ~height:(Masc_tui_render_code.code_pane_content_height state)
                state.code_file_scroll
        | Code_results.Load_file path -> launch_code_file_load state ~mailbox ~path)
   | Code_diff_loaded (request, result) ->
@@ -20107,6 +20181,18 @@ and is loaded on demand through keeper_skill.
                  state.runtime_param_edit <- None;
                  state.runtime_params_notice <-
                    Some (true, edit.rpe_key ^ ": edit cancelled")
+               | "home" | "end" ->
+                 state.config_scroll <-
+                   (if String.equal k "home" then 0 else Masc_tui_types.clamped_scroll_end)
+               | "pageup" | "pagedown" ->
+                 let terminal_rows, _ = get_terminal_size () in
+                 let _, detail_height =
+                   Masc_tui_types.runtime_params_viewport state ~terminal_rows in
+                 let page = max 1 (detail_height - 1) in
+                 state.config_scroll <-
+                   (if String.equal k "pagedown" then
+                      Masc_tui_types.scroll_down_from state.config_scroll ~by:page
+                    else max 0 (state.config_scroll - page))
                | "\r" | "\n" | "enter" -> handle_runtime_param_edit_apply ()
                | "\127" | "\b" | "backspace" ->
                  set (Masc_tui_types.runtime_param_edit_backspace edit);
@@ -23179,7 +23265,7 @@ and is loaded on demand through keeper_skill.
        | Some ("pageup" | "pagedown" | "home" | "end" as move)
          when state.view = Code && state.code_focus_file = Right_pane
               && state.code_notes_open && not state.repository_changes_open ->
-           let count, height = Masc_tui_render.code_notes_viewport state in
+           let count, height = Masc_tui_render_code.code_notes_viewport state in
            let maximum = max 0 (count - height) in
            let current = max 0 (min state.code_notes_scroll maximum) in
            let page = Masc_tui_scroll.page_step ~height in
@@ -23226,7 +23312,7 @@ and is loaded on demand through keeper_skill.
        | Some ("pageup" | "pagedown" | "home" | "end" as move)
          when state.view = Code && state.code_focus_file = Right_pane
               && state.code_history_open && not state.repository_changes_open ->
-           let count, height = Masc_tui_render.code_history_viewport state in
+           let count, height = Masc_tui_render_code.code_history_viewport state in
            let current = Masc_tui_scroll.normalize ~count ~height:1 state.code_history_scroll in
            let maximum = Masc_tui_scroll.maximum ~count ~height:1 in
            let page = Masc_tui_scroll.page_step ~height in
@@ -23670,6 +23756,17 @@ and is loaded on demand through keeper_skill.
             | Config when state.config_pane = Config_prompts ->
                 state.config_scroll <-
                   max 0 (state.config_scroll + (direction * page))
+            | Config when state.config_pane = Config_params ->
+                let terminal_rows, _ = get_terminal_size () in
+                let _, detail_height =
+                  Masc_tui_types.runtime_params_viewport state ~terminal_rows in
+                (* One repeated row anchors consecutive pages. The key uses
+                   the same detail height as the renderer, including forms. *)
+                let page = max 1 (detail_height - 1) in
+                state.config_scroll <-
+                  (if direction > 0 then
+                     Masc_tui_types.scroll_down_from state.config_scroll ~by:page
+                   else max 0 (state.config_scroll + (direction * page)))
             | Config when state.config_pane = Config_voice ->
                 state.config_scroll <-
                   (if direction > 0 then
@@ -24363,7 +24460,7 @@ and is loaded on demand through keeper_skill.
                   state.repository_changes_scroll <- scroll
                 else if state.code_focus_file = Right_pane then (
                   if state.code_notes_open then (
-                    let count, height = Masc_tui_render.code_notes_viewport state in
+                    let count, height = Masc_tui_render_code.code_notes_viewport state in
                     state.code_notes_scroll <-
                       Masc_tui_scroll.down ~count ~height state.code_notes_scroll)
                   else if state.code_diff_open then (
@@ -24376,7 +24473,7 @@ and is loaded on demand through keeper_skill.
                             (state.code_diff_scroll + 1)
                     | Some (_, _) | None -> ())
                   else if state.code_history_open then (
-                    let count, _ = Masc_tui_render.code_history_viewport state in
+                    let count, _ = Masc_tui_render_code.code_history_viewport state in
                     state.code_history_scroll <-
                       Masc_tui_scroll.down ~count ~height:1 state.code_history_scroll)
                   else
@@ -24390,7 +24487,7 @@ and is loaded on demand through keeper_skill.
                         state.code_file_cursor <- cursor;
                         state.code_file_scroll <-
                           Masc_tui_scroll.ensure_visible ~cursor
-                            ~height:(Masc_tui_render.code_pane_content_height state)
+                            ~height:(Masc_tui_render_code.code_pane_content_height state)
                             state.code_file_scroll
                     (* No rows to move a cursor through. *)
                     | Some (_, _) | None -> ())
@@ -24467,11 +24564,15 @@ and is loaded on demand through keeper_skill.
                   state.prompts_librarian_input_loading <- false
                 end
             | Config when state.config_pane = Config_params ->
-                state.runtime_params_cursor <-
+                let next_cursor =
                   min
                     (max 0 (List.length state.runtime_params - 1))
-                    (state.runtime_params_cursor + 1);
-                state.runtime_params_notice <- None
+                    (state.runtime_params_cursor + 1) in
+                if next_cursor <> state.runtime_params_cursor then begin
+                  state.runtime_params_cursor <- next_cursor;
+                  state.config_scroll <- 0;
+                  state.runtime_params_notice <- None
+                end
             | Approvals when state.approval_detail_open ->
                 (* End writes a row past the end and the frame reports the
                    real one back. A j pressed before that frame carries the
@@ -24742,14 +24843,14 @@ and is loaded on demand through keeper_skill.
                   state.repository_changes_scroll <- scroll
                 else if state.code_focus_file = Right_pane then (
                   if state.code_notes_open then (
-                    let count, height = Masc_tui_render.code_notes_viewport state in
+                    let count, height = Masc_tui_render_code.code_notes_viewport state in
                     state.code_notes_scroll <-
                       Masc_tui_scroll.up ~count ~height state.code_notes_scroll)
                   else if state.code_diff_open then
                     state.code_diff_scroll <-
                       max 0 (state.code_diff_scroll - 1)
                   else if state.code_history_open then (
-                    let count, _ = Masc_tui_render.code_history_viewport state in
+                    let count, _ = Masc_tui_render_code.code_history_viewport state in
                     state.code_history_scroll <-
                       Masc_tui_scroll.up ~count ~height:1 state.code_history_scroll)
                   else
@@ -24763,7 +24864,7 @@ and is loaded on demand through keeper_skill.
                         state.code_file_cursor <- cursor;
                         state.code_file_scroll <-
                           Masc_tui_scroll.ensure_visible ~cursor
-                            ~height:(Masc_tui_render.code_pane_content_height state)
+                            ~height:(Masc_tui_render_code.code_pane_content_height state)
                             state.code_file_scroll
                     (* No rows to move a cursor through. *)
                     | Some (_, _) | None -> ())
@@ -24841,9 +24942,12 @@ and is loaded on demand through keeper_skill.
                   state.prompts_librarian_input_loading <- false
                 end
             | Config when state.config_pane = Config_params ->
-                state.runtime_params_cursor <-
-                  max 0 (state.runtime_params_cursor - 1);
-                state.runtime_params_notice <- None
+                let next_cursor = max 0 (state.runtime_params_cursor - 1) in
+                if next_cursor <> state.runtime_params_cursor then begin
+                  state.runtime_params_cursor <- next_cursor;
+                  state.config_scroll <- 0;
+                  state.runtime_params_notice <- None
+                end
             | Approvals when state.approval_detail_open ->
                 state.approval_detail_scroll <-
                   max 0 (state.approval_detail_scroll - 1)
@@ -25123,7 +25227,7 @@ and is loaded on demand through keeper_skill.
                   match Masc_tui_fetched.current state.code_history with
                   | Some (_, Masc_tui_fetched.Ready _) -> (
                       match
-                        Masc_tui_render.code_history_selected state
+                        Masc_tui_render_code.code_history_selected state
                       with
                       | None -> ()
                       | Some (Hist_keeper_change change) -> (
@@ -25142,7 +25246,7 @@ and is loaded on demand through keeper_skill.
                             state.code_file_scroll <-
                               Masc_tui_scroll.ensure_visible ~cursor
                                 ~height:
-                                  (Masc_tui_render.code_pane_content_height state)
+                                  (Masc_tui_render_code.code_pane_content_height state)
                                 state.code_file_scroll
                           (* No rows on screen to jump within. *)
                           | Some (_, _) | None -> ())

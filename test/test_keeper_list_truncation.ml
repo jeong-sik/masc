@@ -444,6 +444,12 @@ let test_equipment_failure_and_repair_bypass_the_roster_cache () =
         let path = Config_dir_resolver.candle_toml_path_for_base_path ~base_path:config.Workspace.base_path in
         if not (String.starts_with ~prefix:config.base_path path) then fail "policy escaped fixture";
         Out_channel.with_open_bin path (fun oc -> output_string oc "malformed policy");
+        let observation = Candle_observe.read ~now:Time_compat.now ~base_path:config.base_path in
+        (match Candle_status.observed_view ~now:Time_compat.now ~base_path:config.base_path,
+               Candle_observe.equipment observation ~keeper:"alpha" with
+         | Error (Candle_status.Disabled reason), Error message ->
+           check string "disabled prefix occurs once" ("Candle is disabled: " ^ reason) message
+         | _ -> fail "malformed policy did not report Disabled");
         (match portrait (read ()) with
          | Keeper_portrait_equipment.Unavailable reason -> check bool "failure has evidence" true (String.length reason>0)
          | Keeper_portrait_equipment.Ready _ -> fail "cached name gear concealed an unreadable policy");
@@ -451,47 +457,27 @@ let test_equipment_failure_and_repair_bypass_the_roster_cache () =
         check bool "repair is visible inside the same cached roster" true (portrait (read ()) = expected))
       (fun json -> check bool "Off uses server-selected starting equipment" true (portrait json = expected)))
 
-let test_gate_account_revision_uses_current_candle_reading () =
-  let assert_revision config json =
-    let candle = Candle_observe.read ~now:Time_compat.now ~base_path:config.Workspace.base_path in
-    match Yojson.Safe.Util.member "keepers" json with
-    | `List rows ->
-      List.iter (fun row ->
-        let name = Yojson.Safe.Util.(row |> member "name" |> to_string) in
-        let expected = match Candle_observe.account_revision candle ~keeper:name with
-          | None -> `Null | Some value -> `String value in
-        check bool "actual Gate tool producer emits the same immutable account revision" true
-          (Yojson.Safe.Util.member "candle_account_revision" row = expected);
-        match row with
-        | `Assoc fields -> check int "revision is emitted exactly once" 1
-            (List.length (List.filter (fun (key,_) -> key="candle_account_revision") fields))
-        | _ -> fail "Gate row is not an object") rows
-    | _ -> fail "Gate rows missing" in
-  keeper_list ~names:["alpha";"broken"] ~args:(`Assoc ["detailed",`Bool true])
-    ~before_list:(fun config ->
-      let path=Filename.concat (Config_dir_resolver.keepers_dir_for_base_path
-        ~base_path:config.Workspace.base_path) "broken.toml" in
-      Out_channel.with_open_bin path (fun channel -> output_string channel "invalid keeper TOML"))
-    ~after_list:(fun config read ->
-      assert_revision config (read ());
-      let path=Config_dir_resolver.candle_toml_path_for_base_path ~base_path:config.Workspace.base_path in
-      Out_channel.with_open_bin path (fun channel -> output_string channel "invalid Candle policy");
-      let disabled=read () in
-      assert_revision config disabled;
-      let rows=Yojson.Safe.Util.(disabled |> member "keepers" |> to_list) in
-      check bool "healthy and directory-error rows both receive a disabled revision" true
-        (List.for_all (fun row -> match Yojson.Safe.Util.member "candle_account_revision" row with
-          | `String value -> String.length value=64 | _ -> false) rows);
-      check bool "fixture includes the actual producer directory-error row" true
-        (List.exists (fun row -> Yojson.Safe.Util.member "status" row=`String "error") rows);
-      Sys.remove path;
-      assert_revision config (read ()))
-    (fun _ -> ())
+let test_shared_roster_omits_currency () =
+  List.iter (fun detailed ->
+    keeper_list ~names:["alpha"; "beta"] ~args:(`Assoc ["detailed", `Bool detailed])
+      (fun json ->
+        check bool "no shared currency envelope" true (Json_util.assoc_member_opt "candle" json = None);
+        let rows = Yojson.Safe.Util.(to_list (member (if detailed then "keepers" else "items") json)) in
+        List.iter (fun row ->
+          check bool "no other keeper balance" true (Json_util.assoc_member_opt "candle_balance_milli" row = None);
+          check bool "no other keeper account revision" true (Json_util.assoc_member_opt "candle_account_revision" row = None)) rows;
+        if detailed then match Tui_decode.decode_keeper_runtime_list json with
+          | Ok (rows, [], _, _, Error _) ->
+            check int "strict decoder retains both public rows" 2 (List.length rows);
+            check bool "account authority remains unavailable" true
+              (List.for_all (fun row -> Result.is_error row.Tui_decode.kr_candle_account_revision) rows)
+          | _ -> fail "private currency omission broke the public roster")) [false; true]
 
 let () =
   run "keeper_list_truncation"
     [ ( "listing truth"
-      , [ test_case "truncated answer reports the whole directory" `Quick
+      , [ test_case "shared roster omits currency" `Quick test_shared_roster_omits_currency
+        ; test_case "truncated answer reports the whole directory" `Quick
             test_truncated_reports_the_whole_directory
         ; test_case "complete answer is not marked truncated" `Quick
             test_complete_answer_is_not_marked_truncated
@@ -505,7 +491,6 @@ let () =
     ; ( "one axis per field"
       , [ test_case "row publishes phase, health and paused" `Quick
             test_detailed_row_carries_every_axis
-        ; test_case "Gate account revisions use the current Candle reading" `Quick test_gate_account_revision_uses_current_candle_reading
         ; test_case "equipment failure and repair bypass metadata cache" `Quick test_equipment_failure_and_repair_bypass_the_roster_cache
         ; test_case "health uses the health vocabulary" `Quick
             test_health_is_a_health_word_not_a_surface_word

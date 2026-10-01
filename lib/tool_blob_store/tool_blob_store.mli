@@ -114,6 +114,11 @@ val put_durable : t -> bytes:string -> mime:string -> Tool_output.artifact_ref
     Cancellation propagates. Other write or sync failures raise [Sys_error]
     without returning a reference. *)
 
+val put_durable_reuse : t -> bytes:string -> mime:string -> Tool_output.artifact_ref
+(** Strictly publish once per process, then reuse the address only after a
+    successful integrity-checked read. Ordinary [put] does not establish this
+    durability evidence. Missing or damaged bytes are strictly republished. *)
+
 val put_file_durable : t -> path:string -> mime:string -> Tool_output.artifact_ref
 (** Store an internal regular spool file without loading its complete contents
     into memory. The caller owns the source file; this operation never removes

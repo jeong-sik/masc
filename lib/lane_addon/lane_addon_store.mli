@@ -22,6 +22,9 @@ val remove_binding : t -> instance_id:string -> (unit, string) result
 val save_action : t -> instance_id:string -> request_id:string -> Yojson.Safe.t -> (unit, string) result
 val load_action : t -> instance_id:string -> request_id:string -> (Yojson.Safe.t option, string) result
 val bindings : t -> (Yojson.Safe.t list, string) result
+(** Reconciles each binding sequence with retained observation filenames so a
+    failed binding write cannot hide a renamed observation. Exact record reads
+    still require their own durability and payload verification. *)
 type observation_write_error =
   | Observation_rejected of string
   | Publication_failed of { failure : Fs_compat.atomic_replace_failure;

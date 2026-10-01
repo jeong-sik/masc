@@ -202,7 +202,7 @@ def creation_preserves_retained_queue(executable):
                 os.write(fd, b"\x1b")
                 assert h.wait_for_fixture_event(process, fd, output, fixture.interrupted, timeout=5)
                 h.send_and_wait(process, fd, output, b"keep-this-local", h.composer_showing(b"keep-this-local"))
-                h.send_and_wait(process, fd, output, b"\r", b"Queue (1 waiting")
+                h.send_and_wait(process, fd, output, b"\r", "내 메시지 1건 대기".encode())
                 h.send_and_wait(process, fd, output, b"\x1b", b"Input retained after Esc")
                 fixture.release_interrupt.set()
                 h.wait_for_output(process, fd, output, b"Interrupt received", start=0, timeout=10)

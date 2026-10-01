@@ -1,3 +1,21 @@
+type frame = { id : string option; data : string }
+type decoder
+val create_decoder : unit -> decoder
+val feed : decoder -> string -> frame list
+(** Complete events from arbitrary byte chunks. Supports LF/CRLF/CR, an initial
+    BOM, and joined data fields. Unterminated EOF events are not emitted.
+    [id] is the explicit field of this frame, not a persisted reconnect cursor. *)
+
+val data_payload_line : string -> string option
+(** Read one SSE data field, stripping one optional space after the colon and
+    a trailing CR. Bare [data] is an empty field; other fields are ignored. *)
+
+val data_payloads_of_stream : string -> string list
+(** Payloads of complete blank-line-terminated events in a buffered UTF-8
+    stream. Joins data fields with LF, accepts LF/CRLF/CR and an initial BOM,
+    and discards an unterminated event at EOF. Event/id/retry fields are not
+    projected by this payload-only reader. *)
+
 (** Canonical Server-Sent Events wire framing. *)
 
 val format_event : ?id:int -> ?event_type:string -> string -> string

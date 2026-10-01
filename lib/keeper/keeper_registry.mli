@@ -218,19 +218,30 @@ val set_last_correlation_id : base_path:string -> string -> string -> unit
 (** Mark the beginning of a keeper turn. Installs a fresh
     [current_turn_observation] with [turn_id = usage.total_turns + 1] and
     [wake] frozen for the turn's lifetime (#16, 38-bug campaign PR-5).
-    Must be paired with [mark_turn_finished] (or [mark_turn_failed]). *)
-val mark_turn_started : base_path:string -> wake:wake_reason -> string -> unit
+    Supply a fresh [observation_token] for each attempt and capture it in
+    tool-count callbacks and [mark_turn_finished]. *)
+val mark_turn_started :
+  observation_token:Keeper_turn_observation_token.t ->
+  base_path:string -> wake:wake_reason -> string -> unit
+
+(* Callback setters below require the attempt token captured at construction.
+    [None] denotes a standalone invocation with no registry observation and is
+    always a no-op; it never selects whichever observation is current. *)
 
 (** Refresh the live turn's progress timestamp without changing its FSM
     projection.  No-op when no turn is active.  [event_kind] must be a
     low-cardinality diagnostic label. *)
 val record_turn_progress :
+  observation_token:Keeper_turn_observation_token.t option ->
   base_path:string -> string -> event_kind:string -> unit
 
 (** Write-through observation of the turn event bus [pending_tool_count] in the
-    live turn's [active_tool_count]. No-op when no turn is active. This is
+    live turn's [active_tool_count]. No-op unless [observation_token] owns
+    the current observation. This is
     telemetry only and has no timeout or lifecycle authority. *)
-val record_turn_tool_inflight : base_path:string -> string -> count:int -> unit
+val record_turn_tool_inflight :
+  observation_token:Keeper_turn_observation_token.t ->
+  base_path:string -> string -> count:int -> unit
 
 (** Mark the beginning of an agent-core turn within an existing keeper turn.
 
@@ -253,46 +264,55 @@ val record_turn_tool_inflight : base_path:string -> string -> count:int -> unit
 
     No-op when [current_turn_observation = None] (defensive: should not
     happen in normal flow because [mark_turn_started] runs first). *)
-val mark_agent_core_turn_started : base_path:string -> string -> unit
+val mark_agent_core_turn_started : observation_token:Keeper_turn_observation_token.t option ->
+  base_path:string -> string -> unit
 
 (** Attach the most recent [Context_measured] snapshot to the live turn.
     No-op if no turn is active or no pending measurement exists. *)
-val mark_turn_measurement : base_path:string -> string -> unit
+val mark_turn_measurement : observation_token:Keeper_turn_observation_token.t option ->
+  base_path:string -> string -> unit
 
 (** Advance the live turn's projected decision stage. No-op if idle.
     Input type [decision_stage_active] excludes [Decision_undecided];
     the 3 spec-forbidden [<active>_to_undecided] transitions are therefore
     unrepresentable at the call site (replaces prior runtime [invalid_arg]). *)
 val set_turn_decision_stage :
+  observation_token:Keeper_turn_observation_token.t option ->
   base_path:string -> string -> decision_stage_active -> unit
 
 (** Mark runtime exhaustion on the live turn. *)
-val mark_turn_runtime_exhausted : base_path:string -> string -> unit
+val mark_turn_runtime_exhausted : observation_token:Keeper_turn_observation_token.t option ->
+  base_path:string -> string -> unit
 
 (** Mark runtime success on the live turn. *)
-val mark_turn_runtime_done : base_path:string -> string -> unit
+val mark_turn_runtime_done : observation_token:Keeper_turn_observation_token.t option ->
+  base_path:string -> string -> unit
 
 (** Mark that the live turn has entered a provider attempt.
 
     This materializes the registry-side projection that corresponds to
     [Keeper_turn_fsm.Streaming]: [turn_phase] advances to [Turn_executing].
     No-op when no turn is active. *)
-val mark_turn_provider_attempt_started : base_path:string -> string -> unit
+val mark_turn_provider_attempt_started : observation_token:Keeper_turn_observation_token.t option ->
+  base_path:string -> string -> unit
 
 (** Update the live turn's phase directly. No-op if idle. *)
 val set_turn_phase :
+  observation_token:Keeper_turn_observation_token.t option ->
   base_path:string -> string -> packed_turn_phase -> unit
 
 (** Record the surface model selected for the current turn. No-op if idle. *)
 val set_turn_selected_model :
+  observation_token:Keeper_turn_observation_token.t option ->
   base_path:string -> string -> string option -> unit
 
 (** Mark the end of a keeper turn. Clears [current_turn_observation]
     so the composite observer reverts to idle and stamps
     [runtime.usage.last_turn_ts] for the completed turn. Idempotent —
-    safe to call in finally blocks even if [mark_turn_started] was not
-    called. *)
-val mark_turn_finished : base_path:string -> string -> unit
+    a stale token cannot finish a successor or clear its wakeup flag. *)
+val mark_turn_finished :
+  observation_token:Keeper_turn_observation_token.t ->
+  base_path:string -> string -> unit
 
 (** Store or clear the live [Eio.Switch.t] for the current turn.
     The switch is used by [interrupt_current_turn] to cancel an

@@ -1,4 +1,5 @@
 import { readKeeperPortrait } from './api/schemas/keeper-portrait'
+import { readCandleBalance } from './api/schemas/candle-observation'
 import { parseKeeperActivationMode } from './lib/keeper-activation-mode'
 import type {
   CtxAttribution,
@@ -698,6 +699,7 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
             value === 'runtime_check_required' || value === 'sandbox_check_required' || value === 'declaration_invalid')
           : [],
         portrait: readKeeperPortrait(row.portrait),
+        candle_balance_milli: readCandleBalance(row.candle_balance_milli),
         status: normalizeKeeperAgentStatus(statusRaw),
         keepalive_running:
           typeof row.keepalive_running === 'boolean' ? row.keepalive_running : undefined,

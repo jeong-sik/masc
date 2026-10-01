@@ -53,6 +53,7 @@ let diff_marker_bindings =
 let width_measured_modules =
   [ "bin/masc_tui_render.ml"
   ; "bin/masc_tui_render_code.ml"
+  ; "bin/masc_tui_render_resources.ml"
   ; "bin/masc_tui_render_board.ml"
   ; "bin/masc_tui_render_prim.ml"
   ; "bin/masc_tui_render_memory.ml"

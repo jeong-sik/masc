@@ -63,7 +63,7 @@ let ok label = function
 ;;
 
 let ready_confirmation_events ~base_path =
-  P.For_testing.path ~base_path ~keeper_name:"alpha"
+  P.ledger_path ~base_path ~keeper_name:"alpha"
   |> Fs_compat.load_file
   |> String.split_on_char '\n'
   |> List.filter_map (fun line ->
@@ -2410,7 +2410,7 @@ let test_candidate_quarantine_restores_a_missing_partition () =
     | Error error ->
       Alcotest.failf "operator command rejected: %s" (Q.input_error_to_string error)
   in
-  let partition_path = P.For_testing.path ~base_path ~keeper_name:"alpha" in
+  let partition_path = P.ledger_path ~base_path ~keeper_name:"alpha" in
   Sys.remove partition_path;
   ignore
     (ok

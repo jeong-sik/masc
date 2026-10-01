@@ -157,7 +157,7 @@ let check_same_provenance label
 ;;
 
 let partition_history ~base_path ~keeper_name =
-  Partition.For_testing.path ~base_path ~keeper_name
+  Partition.ledger_path ~base_path ~keeper_name
   |> Fs_compat.load_file
   |> String.split_on_char '\n'
   |> List.filter (fun line -> not (String.equal line ""))

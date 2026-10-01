@@ -81,6 +81,9 @@ if [ "$merge_check" -eq 1 ]; then
     refuse "complete diff unavailable at consumption"
   [ "$current_diff" = "$final_diff" ] || refuse "complete diff moved during consumption"
   read_current_pr
+  check_reviews
+  [ -n "$approvals" ] || refuse "approval changed after final diff read"
+  check_verdict
   if [ "$receipt_json" -eq 1 ]; then
     python3 -c 'import json,sys; print(json.dumps({"pr":int(sys.argv[1]),"head":sys.argv[2],"approval_ids":[int(x) for x in sys.argv[3].split()]}))' "$pr" "$head" "$approvals"
   else echo "MERGE-CHECK PASS #$pr head $head approvals:$approvals"; fi

@@ -58,6 +58,9 @@ elif '/compare/' in endpoint:
     if compares == state.get('compare_move_after'):
         fixture['base_sha'] = fixture['compare_moved_base']
         pathlib.Path(os.environ['REVIEW_FIXTURE']).write_text(json.dumps(fixture))
+    if compares == state.get('compare_block_after'):
+        fixture.update(fixture['compare_block_update'])
+        pathlib.Path(os.environ['REVIEW_FIXTURE']).write_text(json.dumps(fixture))
 elif endpoint == 'user': data = {'login':'reviewer'}
 elif '/actions/runs?' in endpoint:
     reads = sum('/actions/runs?' in row for row in log.read_text().splitlines())
@@ -280,12 +283,32 @@ class SourceReviewPolicy(unittest.TestCase):
         self.assertEqual(sum('/compare/' in line for line in self.calls.read_text().splitlines()), 3)
         self.assertNotIn('POST ', self.calls.read_text())
 
+    def test_merge_rechecks_authority_after_final_compare(self):
+        for change in ('CR', 'FAIL', 'HOLD', 'noapproval'):
+            with self.subTest(change=change):
+                self.calls.write_text('')
+                self.state = dict(head=HEAD, base='main', base_sha=self.base,
+                                  reviews=[self.review()])
+                update = {'reviews': []} if change == 'noapproval' else (
+                    {'reviews': [self.review(), dict(self.review(state='CHANGES_REQUESTED', author='other'), id=13)]}
+                    if change == 'CR' else {'comments': [{
+                        'created_at':'2026-10-01T00:00:00Z', 'author_association':'MEMBER',
+                        'body': f'verdict: {change} head: {HEAD} by: independent'}]})
+                self.state.update(compare_block_after=2, compare_block_update=update)
+                result = self.invoke('approve-guard.sh', '--merge-check', '--receipt-json')
+                self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                self.assertEqual(result.stdout, '')
+                self.assertNotIn('POST ', self.calls.read_text())
+                self.assertEqual(sum('/compare/' in line for line in self.calls.read_text().splitlines()), 2)
+
     def test_missing_objects_fetch_uses_gh_credentials_without_prompting(self):
         # Use a real empty repository and real object fetches. Only the remote
         # transport is redirected to our local fixture; no network is contacted.
         original = self.git_root
         empty = self.root / 'empty'
-        subprocess.run(['git', 'init', '-q', str(empty)], check=True)
+        subprocess.run(['git', 'clone', '--quiet', '--depth=1', '--no-local', str(original), str(empty)], check=True)
+        before_shallow = (empty/'.git/shallow').read_bytes()
+        subprocess.run(['git', '-C', str(original), 'config', 'uploadpack.allowFilter', 'true'], check=True)
         helper_dir = self.root / "credential helper's directory"
         helper_dir.mkdir()
         helper = helper_dir / 'gh'
@@ -305,8 +328,12 @@ class SourceReviewPolicy(unittest.TestCase):
             "    prefix=args[:args.index('fetch')]\n" +
             "    auth=subprocess.run([real_git,*prefix,'credential','fill'],input='protocol=https\\nhost=github.com\\n\\n',text=True,capture_output=True)\n" +
             "    if auth.returncode or 'username=fixture' not in auth.stdout: sys.exit(7)\n" +
-            "    args=[remote if a.startswith('https://github.com/') else a for a in args]\n" +
-            "sys.exit(subprocess.run([real_git,*args]).returncode)\n")
+            "    args=['file://'+remote if a.startswith('https://github.com/') else a for a in args]\n" +
+            "rc=subprocess.run([real_git,*args]).returncode\n" +
+            "if 'fetch' in args and rc == 0:\n" +
+            "    kinds=subprocess.check_output([real_git,*args[:args.index('fetch')],'cat-file','--batch-all-objects','--batch-check=%(objecttype)'],text=True).splitlines()\n" +
+            "    with open(record+'.objects', 'a') as f: f.write(json.dumps(kinds)+'\\n')\n" +
+            "sys.exit(rc)\n")
         wrapper.chmod(0o755)
         self.env.update(GUARD_GH=str(helper), GUARD_REPO_ROOT=str(empty),
                         FAKE_COMPARE_REPO=str(original),
@@ -314,12 +341,23 @@ class SourceReviewPolicy(unittest.TestCase):
         self.assertEqual(self.identity(self.base), self.digest)
         fetched = [json.loads(line) for line in commands.read_text().splitlines()]
         self.assertEqual(len(fetched), 2)
+        object_snapshots = [json.loads(line) for line in Path(str(commands)+'.objects').read_text().splitlines()]
+        self.assertEqual([kinds.count('commit') for kinds in object_snapshots], [1, 2])
+        self.assertTrue(all('blob' not in kinds for kinds in object_snapshots),
+                        'raw diff fetch needs trees and exact commits, not file contents')
         for call in fetched:
             self.assertIn('--no-replace-objects', call['args'])
+            fetched_root = Path(call['args'][call['args'].index('-C')+1])
+            self.assertNotEqual(fetched_root, empty)
+            self.assertIn('--depth=1', call['args'])
+            self.assertIn('--filter=blob:none', call['args'])
             self.assertIn('credential.helper=', call['args'])
             self.assertEqual(call['env'], {'GIT_TERMINAL_PROMPT':'0','GIT_ASKPASS':'false',
                                           'SSH_ASKPASS':'false','GCM_INTERACTIVE':'Never'})
         self.assertEqual(self.calls.read_text().splitlines().count('CREDENTIAL'), 2)
+        self.assertEqual((empty/'.git/shallow').read_bytes(), before_shallow)
+        missing_base = subprocess.run([real_git, '-C', str(empty), 'cat-file', '-e', self.base], capture_output=True)
+        self.assertNotEqual(missing_base.returncode, 0, 'isolated fetch must not deepen caller history')
         persisted = subprocess.run([real_git, '-C', str(empty), 'config', '--local',
                                     '--get-all', 'credential.helper'], capture_output=True)
         self.assertEqual(persisted.returncode, 1)

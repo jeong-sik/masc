@@ -7,6 +7,7 @@ import re
 import shlex
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 
@@ -31,33 +32,32 @@ def diff_identity(repo: str, base: str, head: str, root: Path) -> str:
     if re.fullmatch(r"[0-9a-f]{40}", merge_base) is None:
         raise ValueError("GitHub did not return a complete merge base")
     git = ["git", "--no-replace-objects", "-C", str(root)]
-    for commit in (merge_base, head):
-        exists = subprocess.run(
-            [*git, "cat-file", "-e", f"{commit}^{{commit}}"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=False,
-        )
-        if exists.returncode:
-            subprocess.run(
-                [
-                    *git,
-                    "-c", "credential.helper=",
-                    "-c", "credential.helper=!" + shlex.quote(
-                        os.environ.get("GUARD_GH", "gh")
-                    ) + " auth git-credential",
-                    "fetch",
-                    "--no-tags",
-                    f"https://github.com/{repo}.git",
-                    commit,
-                ],
-                # Use the same authenticated gh installation as the API read,
-                # without persistent config changes or an interactive fallback.
-                env={**os.environ, "GIT_TERMINAL_PROMPT": "0",
-                     "GIT_ASKPASS": "false", "SSH_ASKPASS": "false",
-                     "GCM_INTERACTIVE": "Never"},
-                check=True,
-            )
+    commits = (merge_base, head)
+    missing = any(subprocess.run(
+        [*git, "cat-file", "-e", f"{commit}^{{commit}}"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
+    ).returncode for commit in commits)
+    # Fetch into an isolated object store: --depth must not change the caller's
+    # shallow boundary, and raw tree identities never require blob contents.
+    with tempfile.TemporaryDirectory(prefix="masc-review-objects-") as directory:
+        if missing:
+            subprocess.run(["git", "init", "--bare", "--quiet", directory], check=True)
+            git = ["git", "--no-replace-objects", "-C", directory]
+            for commit in commits:
+                subprocess.run(
+                    [*git, "-c", "credential.helper=",
+                     "-c", "credential.helper=!" + shlex.quote(
+                         os.environ.get("GUARD_GH", "gh")) + " auth git-credential",
+                     "fetch", "--no-tags", "--depth=1", "--filter=blob:none",
+                     f"https://github.com/{repo}.git", commit],
+                    env={**os.environ, "GIT_TERMINAL_PROMPT": "0",
+                         "GIT_ASKPASS": "false", "SSH_ASKPASS": "false",
+                         "GCM_INTERACTIVE": "Never"}, check=True,
+                )
+        return raw_identity(git, merge_base, head)
+
+
+def raw_identity(git, merge_base, head):
     # -z preserves arbitrary filenames. Disable rename guessing, external
     # drivers, text conversions and abbreviated blob IDs. Binary, mode-only,
     # symlink and submodule changes retain their complete object identities.

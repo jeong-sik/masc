@@ -260,7 +260,10 @@ val find_credential_by_token :
 
 val find_static_credential_by_token :
   string -> token:string -> (agent_credential, masc_error) result
-(** Static bearer-only lookup for the OAuth authorization bootstrap. *)
+(** Static bearer-only lookup for the OAuth authorization bootstrap. A stored
+    UUID payload grants no bearer authority unless its owner's current named
+    credential resolves to the same complete record. Cache rebuilds preserve
+    that rule; unknown or changed named authority is rejected. *)
 
 (** Structured description of which credential fields differ between two
     credentials that share the same token hash. *)
@@ -418,6 +421,9 @@ val create_token_expiring_in_if_absent :
 val verify_token :
   string -> agent_name:string -> token:string ->
   (agent_credential, masc_error) result
+(** Static verification through a UUID or stored redirect alias requires the
+    complete credential to still match its owner's current named binding.
+    Direct UUID data reads do not grant independent bearer authority. *)
 
 (** {1 Permission Checks} *)
 
@@ -483,3 +489,26 @@ val read_initial_admin : string -> string option
 (** [read_initial_admin config] returns the bootstrap admin agent name.
     Missing, nonregular, unreadable or blank files yield [None]. Cancellation
     propagates; symlinks to regular files are accepted. *)
+
+val current_credential_in_transaction :
+  credential_transaction -> string -> (agent_credential option, masc_error) result
+(** Resolve the current named credential under admission, validating its exact
+    owner and UUID binding before authorizing an effect. [None] means the name
+    file is absent; unreadable, unresolved or contradictory storage is [Error]. *)
+
+val list_current_credentials_in_transaction :
+  credential_transaction -> (agent_credential list, masc_error) result
+(** The same current-owner discovery as {!list_current_credentials}, under the
+    caller's existing admission. It acquires no recursive credential lock;
+    keep admission through the effect authorized by this snapshot. *)
+
+val list_current_credentials : string -> (agent_credential list, masc_error) result
+(** Discover credential owners and read their current named bindings under one
+    Auth admission, in name order. A surviving UUID or stored alias is data,
+    never an independent role authority. A truly absent named owner is omitted;
+    an occupied unreadable, malformed or mismatched current binding of a
+    discovered owner is [Error]. Unresolvable data rows that establish no
+    owner are omitted as in store discovery; this is not a directory integrity
+    verdict or an exhaustive inventory of unreadable rows.
+    Discovery read and admission failures are [Error]; cancellation propagates.
+    This does not filter expiry. Do not call inside an Auth transaction. *)

@@ -1186,6 +1186,55 @@ let credential_store_snapshot_in_transaction ?(leaf_policy = Owned_regular_only)
   Ok { current_credentials = credentials; orphaned_names; aliases }
 ;;
 
+let credential_owner_discovery_in_transaction (Credential_transaction config) =
+  let ( let* ) = Result.bind in
+  let* files = credential_read_result (fun () -> read_dir (agents_dir config)) in
+  let files = Array.to_list files |> List.filter (fun file -> Filename.check_suffix file ".json")
+      |> List.sort String.compare in
+  let rec discover names orphans = function
+    | [] -> Ok (List.sort_uniq String.compare names, List.sort_uniq String.compare orphans)
+    | file :: rest ->
+      let name = Filename.chop_suffix file ".json" in
+      let path = Filename.concat (agents_dir config) file in
+      let* present = credential_path_exists path in
+      if not present then discover names orphans rest
+      else
+        let* stored = read_stored_credential config name path in
+        (match stored with
+         | Unresolved_credential -> discover names orphans rest
+         | Stored_credential credential -> discover (credential.agent_name :: names) orphans rest
+         | Stored_redirect target ->
+           let* present = credential_path_exists target in
+           if not present then discover names (name :: orphans) rest
+           else
+             let* resolved = resolve_stored_credential config name stored in
+             (match resolved with
+              | None -> discover names orphans rest
+              | Some credential -> discover (credential.agent_name :: names) orphans rest))
+  in
+  discover [] [] files
+;;
+
+
+let list_current_credentials_in_transaction transaction =
+  let ( let* ) = Result.bind in
+  let* names, _orphans = credential_owner_discovery_in_transaction transaction in
+  let rec collect credentials = function
+    | [] -> Ok (List.rev credentials)
+    | name :: rest ->
+      let* current = current_credential_in_transaction transaction name in
+      (match current with
+       | None -> collect credentials rest
+       | Some credential -> collect (credential :: credentials) rest)
+  in
+  collect [] names
+;;
+
+let list_current_credentials config =
+  with_credential_transaction config list_current_credentials_in_transaction
+  |> Result.join
+;;
+
 (* Prune adds deletion authority only after current-store discovery. Rotation
    uses the same current records without inheriting a deletion manifest. *)
 let credential_prune_snapshot_in_transaction ((Credential_transaction config) as transaction) =
@@ -1256,9 +1305,9 @@ let retire_prune_credential_in_transaction (Credential_transaction config) retir
     - Explicit invalidation from [save_credential] / [delete_credential]
       so writes through this module are visible immediately.
     - Token hash -> [agent_credential list] (not single value) so the
-      #9786 ambiguous-lookup warn path still sees all matches.  The
-      list is built in [list_credentials] order so first-match
-      semantics stay identical to the pre-cache implementation. *)
+      #9786 ambiguous-lookup warn path still sees all matches. Current named
+      owners are indexed in sorted name order; collision checks compare the
+      complete records rather than granting the first candidate authority. *)
 
 type credential_index_cache_entry = {
   loaded_at : float;
@@ -1297,8 +1346,8 @@ let build_token_index (creds : agent_credential list)
        in
        Hashtbl.replace idx cred.token (cred :: prev))
     creds;
-  (* Reverse each bucket so callers see [list_credentials] order
-     (first-match semantics match the legacy [List.filter] flow). *)
+  (* Restore the input credential order within each token bucket. The
+     caller supplies current named owners in sorted name order. *)
   Hashtbl.filter_map_inplace
     (fun _ entries -> Some (List.rev entries))
     idx;
@@ -1338,7 +1387,19 @@ let credential_token_index config
       Auth_metric_store.metric_auth_credential_index_cache_misses
       ();
     with_credential_transaction config (fun _transaction ->
-       let creds = list_credentials config in
+       (* Directory entries discover owners. Only each owner's current named
+          binding supplies the credential indexed for authentication. An old
+          UUID payload must neither resurrect its bearer nor hide a replacement
+          because it happened to be listed before the named file. *)
+       let creds =
+         list_credentials config
+         |> List.map (fun (credential : agent_credential) -> credential.agent_name)
+         |> List.sort_uniq String.compare
+         |> List.filter_map (fun name ->
+           match load_credential config name with
+           | Some credential when String.equal credential.agent_name name -> Some credential
+           | Some _ | None -> None)
+       in
        let by_token = build_token_index creds in
        with_credential_index_cache_lock (fun () ->
          Hashtbl.replace credential_index_cache key { loaded_at = now; by_token });

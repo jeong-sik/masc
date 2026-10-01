@@ -415,6 +415,7 @@ let test_alias_raw_cleanup_failure_retains_retry_authority () =
   List.iter (fun path -> check bool "retry removes every admitted alias artifact" false
       (Sys.file_exists path)) [canonical; alias; raw]
 
+
 let test_normalized_canonical_survives_uuid_cleanup_failure () =
   with_workspace @@ fun base_path ->
   let _, credential = auth_ok (Auth.ensure_keeper_credential base_path ~agent_name:"Alice") in
@@ -465,8 +466,8 @@ let test_failed_admission_preserves_every_file () =
 let () =
   run "auth_token_prune_transaction"
     [ "prune",
-      [ test_case "same-owner renewed UUID refuses stale deletion authority" `Quick test_same_owner_uuid_replacement_refuses_stale_prune
-      ; test_case "alias raw cleanup failure retains retry authority" `Quick test_alias_raw_cleanup_failure_retains_retry_authority
+      [ test_case "alias raw cleanup failure retains retry authority" `Quick test_alias_raw_cleanup_failure_retains_retry_authority
+      ; test_case "same-owner renewed UUID refuses stale deletion authority" `Quick test_same_owner_uuid_replacement_refuses_stale_prune
       ; test_case "normalized canonical survives UUID cleanup failure" `Quick test_normalized_canonical_survives_uuid_cleanup_failure
       ; test_case "renewal before prune preserves the current Admin" `Quick test_renewal_before_prune
       ; test_case "orphan replacement before prune preserves its bearer" `Quick test_orphan_renewal_before_prune

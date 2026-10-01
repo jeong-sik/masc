@@ -647,7 +647,7 @@ let test_runtime_mcp_keeper_log_context_uses_keeper_trace_and_current_turn () =
     (fun () ->
       ignore
         (Masc.Keeper_registry.register_offline ~base_path keeper_name meta);
-      Masc.Keeper_registry.mark_turn_started ~base_path
+      Masc.Keeper_registry.mark_turn_started ~observation_token:(Masc.Keeper_turn_observation_token.fresh ()) ~base_path
         ~wake:Masc.Keeper_registry.Proactive_tick keeper_name;
       let entry =
         match Masc.Keeper_registry.get ~base_path keeper_name with
@@ -741,7 +741,7 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
     (fun () ->
       ignore
         (Masc.Keeper_registry.register_offline ~base_path keeper_name meta);
-      Masc.Keeper_registry.mark_turn_started ~base_path
+      Masc.Keeper_registry.mark_turn_started ~observation_token:(Masc.Keeper_turn_observation_token.fresh ()) ~base_path
         ~wake:Masc.Keeper_registry.Proactive_tick keeper_name;
       let entry =
         match Masc.Keeper_registry.get ~base_path keeper_name with

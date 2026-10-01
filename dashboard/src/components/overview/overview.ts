@@ -16,7 +16,7 @@
 //   - Keeper fleet    — full keeper grid with status, runtime, context meter
 
 import { CandleSummary } from '../candle-economy'
-import { candleObservation } from '../../store'
+import { candleObservation, executionWorkspaceAuthority } from '../../store'
 import { html } from 'htm/preact'
 import { useEffect, useMemo } from 'preact/hooks'
 import { AgentAvatar } from './agent-avatar'
@@ -1690,7 +1690,9 @@ export function Overview() {
           digest=${digest}
           approvalQueueState=${approvalQueueState}
         />
-        <${CandleSummary} reading=${candleObservation.value} />
+        <${CandleSummary} reading=${executionWorkspaceAuthority.value
+          ? candleObservation.value
+          : { status: 'unavailable', reason: 'Workspace authority is being verified' }} />
         <div class="ov-grid v2-overview-primary-grid" data-testid="overview-primary-grid">
           <${OverviewAttentionPanel} keeperList=${keeperList} health=${compositeHealth} />
           <${OverviewTelemetry} telemetry=${telemetry} />

@@ -191,6 +191,30 @@ let test_cron_recurrence_rejects_invalid_expression () =
     check string "cron error" "recurrence.cron.minute step must be positive" msg
 ;;
 
+let test_cron_step_admission_and_actual_next_due () =
+  let create expression =
+    create_request ~schedule_id:"cron-step" ~requested_by:(human "requester")
+      ~scheduled_by:(human "scheduler") ~requested_at:0.0 ~due_at:60.0
+      ~payload:(payload_json ()) ~source:Operator_request
+      ~recurrence:(Cron { expression; timezone = "UTC" }) () in
+  List.iter (fun expression ->
+    match create expression with
+    | Error _ -> () | Ok _ -> failf "unsupported step accepted: %s" expression)
+    [ "5/10 * * * *"; "5/1 * * * *"; "0 5/10 * * *";
+      "0 0 5/10 * *"; "0 0 * 5/10 *"; "0 0 * * 1/2";
+      "0,5/10 * * * *"; "*/x * * * *"; "*/2/3 * * * *" ];
+  List.iter (fun (expression, now, expected) ->
+    let req = match create expression with
+      | Ok req -> req | Error reason -> fail reason in
+    match next_due_after ~now req with
+    | Some due -> check (float 0.001) expression expected due
+    | None -> failf "supported step lost its next due: %s" expression)
+    [ "5 * * * *", 0.0, 300.0;
+      "5-25/10 * * * *", 300.0, 900.0;
+      "*/10 * * * *", 0.0, 600.0;
+      Printf.sprintf "5-59/%d * * * *" max_int, 0.0, 300.0 ]
+;;
+
 let test_cron_recurrence_finds_occurrence_beyond_five_years () =
   let req =
     request
@@ -419,6 +443,8 @@ let () =
             test_cron_recurrence_next_due_weekdays;
           test_case "cron recurrence supports steps ranges and Sunday alias" `Quick
             test_cron_recurrence_supports_steps_ranges_and_sunday_alias;
+          test_case "cron step admission and next due" `Quick
+            test_cron_step_admission_and_actual_next_due;
           test_case "cron recurrence rejects invalid expression" `Quick
             test_cron_recurrence_rejects_invalid_expression;
           test_case "cron recurrence finds occurrence beyond five years" `Quick

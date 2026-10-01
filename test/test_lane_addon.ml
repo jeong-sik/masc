@@ -486,6 +486,52 @@ let test_activity_from_another_domain_reaches_the_owner () =
     detach config id;
     await_phase clock config id "detached")
 
+let test_mcp_attribution_does_not_authorize_private_lane () =
+  with_fixture (fun env sw config dir _state ->
+    ignore (Workspace.init config ~agent_name:(Some "fixture-operator"));
+    check bool "fixture has authentication disabled" false (Auth.is_auth_enabled config.base_path);
+    let owner = "lane-private-owner" in
+    let meta = unwrap (Masc_test_deps.meta_of_json_fixture
+      (`Assoc ["name",`String owner;"trace_id",`String "trace-lane-owner"])) in
+    let meta_path = Keeper_types_profile.keeper_meta_path config owner in
+    Fs_compat.mkdir_p (Filename.dirname meta_path);
+    Fs_compat.save_file meta_path (Yojson.Safe.to_string (Keeper_meta_json.meta_to_json meta));
+    let run_id = "mcp-private-" ^ Store.digest dir in
+    Fusion_run_registry.register_running (Fusion_run_registry.global ()) ~run_id
+      ~keeper:owner ~preset:"default" ~roster:Fusion_types.preset_roster
+      ~topology:Fusion_types.Simple ~started_at:1.;
+    let id = unwrap (Runtime.dispatch ~caller:owner ~config ~operation:Runtime.Attach
+      (`Assoc ["manifest_path",`String (manifest dir "good");"run_id",`String "world";
+        "binding",`Assoc ["sources",`List [`Assoc ["source_id",`String "fusion";
+          "kind",`String "fusion_run";"run_id",`String run_id]]]])) |> text "instance_id" in
+    let clock = Eio.Stdenv.clock env in
+    await clock (fun () -> int "observation_seq" (instance config id) = 1);
+    let state = Mcp_server_eio.For_testing.create_state ~base_path:config.base_path () in
+    let session_id = "untrusted-lane-" ^ Store.digest dir in
+    Fun.protect ~finally:(fun () -> Client_registry_eio.unregister_mcp_session session_id)
+      (fun () ->
+        let mcp ?auth_token name fields = Mcp_server_eio.execute_tool_eio
+          ~sw ~clock ~workspace_scope:(Mcp_server.workspace_scope state)
+          ~mcp_session_id:session_id ?auth_token state ~name ~arguments:(`Assoc fields) in
+        let failed = mcp "masc_lane_observe" ["_agent_name",`String owner] in
+        check bool "first attribution-only call fails" false (Tool_result.is_success failed);
+        check (option string) "failed first call cached attribution" (Some owner)
+          (Client_registry_eio.get_resolved_name session_id);
+        List.iter (fun name ->
+          let result = mcp name ["instance_id",`String id] in
+          check bool (name ^ " cannot promote cached attribution to authority") false
+            (Tool_result.is_success result))
+          ["masc_lane_inspect";"masc_lane_evidence";"masc_lane_observe";"masc_lane_detach"];
+        let token = match Auth.create_token config.base_path ~agent_name:owner ~role:Masc_domain.Worker with
+          | Ok (token,_) -> token | Error error -> fail (Masc_domain.masc_error_to_string error) in
+        let owned = mcp ~auth_token:token "masc_lane_inspect" ["instance_id",`String id] in
+        check bool ("verified owner reads private lane: " ^ Tool_result.message owned) true
+          (Tool_result.is_success owned);
+        let foreign = match Auth.create_token config.base_path ~agent_name:"foreign-lane-reader" ~role:Masc_domain.Worker with
+          | Ok (token,_) -> token | Error error -> fail (Masc_domain.masc_error_to_string error) in
+        let denied = mcp ~auth_token:foreign "masc_lane_inspect" ["instance_id",`String id] in
+        check bool "foreign bearer cannot borrow cached owner" false (Tool_result.is_success denied)))
+
 let test_fusion_status_hint_wakes_only_its_bound_run () =
   with_fixture (fun env _sw config dir _state ->
     let watcher run_id =
@@ -936,6 +982,8 @@ let test_broadcast_pending_commit_recovers_same_identity () =
     detach config id; await_phase clock config id "detached")
 
 let () = run "Lane Add-on runtime" ["optional extension", [
+  test_case "MCP attribution never authorizes private Lane reads" `Quick
+    test_mcp_attribution_does_not_authorize_private_lane;
   test_case "Fleet service isolates blocked recipients, later admissions and cancellation" `Quick
     test_fleet_service_isolates_blocked_recipient_and_admissions;
   test_case "private Broadcast retry uses saved visibility after binding removal" `Quick

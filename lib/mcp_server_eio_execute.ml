@@ -428,6 +428,9 @@ let execute_tool_eio
                          "Candle tools require an authenticated Keeper; a supplied caller name is not a wallet identity") in
                    let dispatch () =
                      Tool_misc.dispatch
+                       ~lane_access:(match owner_keeper_identity with
+                         | Some (keeper_name, _) -> Lane_addon_sources.Keeper keeper_name
+                         | None -> Lane_addon_sources.Unauthenticated)
                        { Tool_misc.config
                        ; agent_name
                        ; help_schemas = Config.raw_all_tool_schemas

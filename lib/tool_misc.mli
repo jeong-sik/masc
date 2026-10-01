@@ -47,8 +47,12 @@ val with_web_fetch_http_get_for_test :
   (unit -> 'a) ->
   'a
 
-(** The context carries the exact schema projection visible to the caller. *)
-val dispatch : context -> name:string -> args:Yojson.Safe.t -> Tool_result.result option
+(** The context carries the exact schema projection visible to the caller.
+    Lane authority defaults to [Unauthenticated]. [context.agent_name] is
+    attribution only; authenticated boundaries and trusted Keeper calls must
+    supply their verified authority explicitly. *)
+val dispatch : ?lane_access:Lane_addon_sources.access ->
+  context -> name:string -> args:Yojson.Safe.t -> Tool_result.result option
 
 val tool_inventory_json :
   context -> include_hidden:bool -> Yojson.Safe.t

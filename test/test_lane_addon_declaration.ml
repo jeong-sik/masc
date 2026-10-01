@@ -60,7 +60,8 @@ let keeper_call config name args =
     (descriptor.runtime_handler=Keeper_tool_descriptor.Tool_masc_misc_dispatch);
   let translated = Keeper_tool_descriptor.translate_input_for_descriptor descriptor args in
   let context : Tool_misc.context = {config;agent_name="editor-keeper";help_schemas=[]} in
-  match Tool_misc.dispatch context ~name:descriptor.internal_name ~args:translated with
+  match Tool_misc.dispatch ~lane_access:(Lane_addon_sources.Keeper "editor-keeper")
+      context ~name:descriptor.internal_name ~args:translated with
   | Some value -> value | None -> fail "Keeper descriptor has no executable declaration route"
 
 let with_fixture f =

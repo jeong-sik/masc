@@ -244,9 +244,15 @@ end
     @param on_event Optional event callback
     @param trajectory_acc Optional trajectory accumulator for recording
     @param shared_context Optional shared AGENT_CORE context for cross-turn state
-    @param event_bus Optional MASC event bus *)
+    @param event_bus Optional MASC event bus
+    @param event_scope Producer scope shared with a turn subscriber. Omission
+      creates a fresh scope for this execution.
+    @param observation_token Captured registry observation ownership. Omission
+      disables observation updates; it never adopts a currently active turn. *)
 val run_turn
-  :  config:Workspace.config
+  : ?event_scope:Keeper_turn_scope.t
+  -> ?observation_token:Keeper_turn_observation_token.t
+  -> config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
   -> publication_recovery:
        Keeper_publication_recovery_availability.turn_context

@@ -18,7 +18,7 @@ val apply_board_list_load :
 val apply_board_post_load :
   Masc_tui_types.state -> report_error:(string -> unit) ->
   Masc_tui_board_detail.request ->
-  (Masc_tui_types.board_post * Masc_tui_types.board_comment list, string) result -> unit
+  (Masc_tui_types.board_post * Masc_tui_types.board_comment list * string option, string) result -> unit
 (** Only the current request and selected post may populate detail. Success
     enriches the matching list row without reranking. Failure is reported to
     [report_error] only when the operator is away from the Board surface. *)

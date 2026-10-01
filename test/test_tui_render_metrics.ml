@@ -9,17 +9,11 @@ let make_state () =
 ;;
 
 let make_keeper ?(paused = false) name : Decode.keeper =
-  { k_origin = Masc.Tui_decode.Persisted_keeper; k_name = name
-  ; k_trace_id = "trace-" ^ name
+  { k_origin = Masc.Tui_decode.Persisted_keeper
+  ; k_name = name
   ; k_paused = paused
-  ; k_current_task_id = None
-  ; k_total_turns = 10
-  ; k_total_tokens = 5000
-  ; k_total_cost_usd = 0.05
-  ; k_last_turn_ts = "2026-09-05T12:00:00Z"
-  ; k_last_proactive_outcome = None
-  ; k_created_at = "2026-09-01T00:00:00Z"
-  ; k_updated_at = "2026-09-05T12:00:00Z"
+  ; k_identity = Ok { k_trace_id = "trace-" ^ name; k_created_at = "2026-09-01T00:00:00Z"; k_updated_at = "2026-09-05T12:00:00Z" }
+  ; k_activity = Some { k_current_task_id = None; k_total_turns = 10; k_total_tokens = 5000; k_total_cost_usd = 0.05; k_last_turn_ts = "2026-09-05T12:00:00Z"; k_last_proactive_outcome = None }
   }
 ;;
 

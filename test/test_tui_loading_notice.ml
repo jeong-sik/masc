@@ -180,7 +180,7 @@ let test_offscreen_completion_and_late_poll_do_not_age_a_new_wait () =
     check bool "duplicate terminal delivery is ignored" false
       (Types.finish_detail_read state fresh))
     [Types.Detail_instructions; Types.Detail_sandbox; Types.Detail_github;
-     Types.Detail_identity]
+     Types.Detail_identity; Types.Detail_automation]
 
 let test_logs_keep_repainting_after_status_arrives () =
   let state = fresh () in
@@ -199,10 +199,57 @@ let test_logs_keep_repainting_after_status_arrives () =
   check bool "finished logs stop requesting repaints" false
     (Types.detail_read_waiting state ~tab:Types.Detail_sandbox ~keeper:"analyst")
 
+let test_schedule_responses_follow_keeper_and_generation () =
+  let keeper name : Types.keeper =
+    { k_origin = Masc.Tui_decode.Persisted_keeper; k_name = name
+    ; k_trace_id = "trace"; k_paused = false; k_current_task_id = None
+    ; k_total_turns = 0; k_total_tokens = 0; k_total_cost_usd = 0.
+    ; k_last_turn_ts = ""; k_last_proactive_outcome = None
+    ; k_created_at = ""; k_updated_at = "" }
+  in
+  let snapshot count : Types.schedule_snapshot =
+    { scs_status = "ok"; scs_read_error = None; scs_request_count = Some count
+    ; scs_truncated = false; scs_next_due_iso = None; scs_counts = None
+    ; scs_rows = []; scs_runner_status = Masc.Tui_decode.Runner_status Schedule_contract_values.Runner_ok }
+  in
+  let state = fresh () in
+  state.keepers <- [keeper "alpha"; keeper "beta"];
+  let ask name = Types.mark_detail_read_started state
+    ~tab:Types.Detail_automation ~keeper:name ~now_ns:(ns 10) in
+  let alpha = ask "alpha" in
+  state.keeper_cursor <- 1;
+  let beta = ask "beta" in
+  Types.apply_keeper_schedules_read state beta (Ok (snapshot 2));
+  Types.apply_keeper_schedules_read state alpha (Error "late alpha failure");
+  check (option string) "late A cannot replace B's page" (Some "beta")
+    (Option.map fst state.keeper_schedules);
+  check (option (pair string string)) "late A error is not B's error" None
+    state.keeper_schedules_error;
+  check bool "offscreen A's request is retired" false
+    (Types.detail_read_waiting state ~tab:Types.Detail_automation ~keeper:"alpha");
+  let old_beta = ask "beta" in
+  let new_beta = ask "beta" in
+  Types.apply_keeper_schedules_read state new_beta (Ok (snapshot 3));
+  Types.apply_keeper_schedules_read state old_beta (Ok (snapshot 1));
+  check (option int) "older generation cannot regress the current page" (Some 3)
+    (Option.bind state.keeper_schedules (fun (_, page) -> page.scs_request_count));
+  let failed = ask "beta" in
+  Types.apply_keeper_schedules_read state failed (Error "beta offline");
+  check (option int) "failed refresh retains the last read" (Some 3)
+    (Option.bind state.keeper_schedules (fun (_, page) -> page.scs_request_count));
+  check (option (pair string string)) "failed refresh is attributed to B"
+    (Some ("beta", "beta offline")) state.keeper_schedules_error;
+  check bool "A's identity action cannot mutate B's view" false
+    (Types.keeper_detail_target_matches state "alpha");
+  check bool "B's identity action can refresh its own view" true
+    (Types.keeper_detail_target_matches state "beta")
+
 let () =
   run "tui loading notice"
     [ ( "a read in flight"
-      , [ test_case "offscreen completion and late polls preserve a fresh wait" `Quick
+      , [ test_case "schedule responses follow target and generation" `Quick
+            test_schedule_responses_follow_keeper_and_generation
+        ; test_case "offscreen completion and late polls preserve a fresh wait" `Quick
             test_offscreen_completion_and_late_poll_do_not_age_a_new_wait
         ; test_case "logs keep repainting after status arrives" `Quick
             test_logs_keep_repainting_after_status_arrives

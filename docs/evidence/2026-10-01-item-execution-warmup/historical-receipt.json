@@ -1,0 +1,47 @@
+{
+  "source_commit": "0ea63417bb1752c767387f303564a1fb11b12fcc",
+  "base_commit": "8d3b778ab56b678e560614ac7f0f63690e95122c",
+  "production_change_source": "#40190 f8501d1ce1d377f20cf5ae65b42c47fbeabb9307 store correction only",
+  "baseline_new_regression": {
+    "result": "FAIL",
+    "assertion": "executionWorkspaceAuthority expected null after real refreshExecution initializing reply; received old workspace authority"
+  },
+  "first_corrected_run": {
+    "item_tests": "15 passed",
+    "currency_tests": "2 failed: older fixtures omitted canonical workspace identity",
+    "resolution": "port matching currency fixtures and functional authority-withdrawal scenarios from #40190; add separate visible-preview warm-up regression"
+  },
+  "final_focused_checks": {
+    "command": "vitest run src/components/keeper-items-panel.test.ts src/components/candle-economy.test.ts",
+    "result": "PASS",
+    "test_files": 2,
+    "tests": 21,
+    "duration_seconds": 1.2,
+    "typecheck_command": "tsc --noEmit",
+    "typecheck_exit_code": 0
+  },
+  "source_sha256": {
+    "dashboard/src/store.ts": "93e30594fa54a56bcc5868ddec23a8459901f4535ea89712392851bdcced7391",
+    "dashboard/src/components/keeper-items-panel.test.ts": "6b2a61605a47a8831bfd09a7e8c3776a3352e7a4165a69850ded28534ce45f3f",
+    "dashboard/src/components/candle-economy.test.ts": "0f0e4a1657c8adc3f0cdace127996b989481609ec4b44839177a421a6bf31237"
+  },
+  "scope": "Production store/components with synthetic HTTP and portrait component stub; native/browser/installed behavior not established by this receipt",
+  "build_or_ci_started": false,
+  "installed_complete": false,
+  "browser": {
+    "result": "PASS",
+    "source_commit": "4497c76d6b4ec134ce867ac621c2bb959bab43c7",
+    "captures": 3,
+    "execution_reads": 2,
+    "account_reads": 2,
+    "errors": [],
+    "scope": "Actual Chromium through Vite using production components/store, synthetic HTTP and portrait PNG503; not installed or native proof",
+    "discarded_run": "First successful run used an incorrect supplied GITHUB_SHA; its artifacts are excluded. Retained manifest comes from a separate rerun with verified git rev-parse HEAD."
+  },
+  "browser_sha256": {
+    "item-preview-before-warmup.png": "4d5952ed0c05d211263e2a2cc8c490490578562edfee725657090e57685e2b8a",
+    "item-workspace-warmup.png": "92497afdb58d580cb5d1437f392b1968e319ee2c3cb1c8153cc1194baa558dea",
+    "manifest.json": "ca8b44ce69e46a4aaaed2add3b839959a708dc70f81d5c12b09ed9da98036f71",
+    "item-workspace-recovered.png": "759a701bdcd396eb40660bd0d00e46810d06460ca84f71533c5523710bbdfccf"
+  }
+}

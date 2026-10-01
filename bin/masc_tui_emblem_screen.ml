@@ -198,7 +198,8 @@ let about_keeper_image_id = function
   | 2 -> Masc_tui_graphics.image_id Masc_tui_graphics.About_keeper_3
   | _ -> Masc_tui_graphics.image_id Masc_tui_graphics.About_keeper_4
 
-(* Newest portrait by name and edge, with the existing 32-entry bound. At the
+(* Newest portrait by raw name, observed equipment and edge, with the existing
+   32-entry bound. At the
    largest pixel box here (160 square), this holds at most 3,276,800 RGBA
    bytes. The scene does not cache a frame for every animation tick. *)
 let about_portraits = Masc_tui_keeper_portrait.cache ()
@@ -219,9 +220,10 @@ let about_rows ~style ~cols ~rows ~caption ~frame ~keepers
   let name_budget =
     max 0 (rows - picture_rows - List.length caption - (if picture_rows > 0 then 2 else 1))
   in
+  let keeper_label (name, _) = Masc.Tui_terminal_text.sanitize_terminal_text name in
   let rec choose chosen used = function
     | ((name, _) as keeper) :: rest when List.length chosen < max_portraits ->
-        let wrapped = Masc_tui_message_layout.wrap_words ~max_cells:(max 1 cols) name in
+        let wrapped = Masc_tui_message_layout.wrap_words ~max_cells:(max 1 cols) (keeper_label keeper) in
         let overflow_rows = if rest = [] then 0 else 1 in
         if used + List.length wrapped + overflow_rows <= name_budget then
           choose (keeper :: chosen) (used + List.length wrapped) rest
@@ -299,7 +301,7 @@ let about_rows ~style ~cols ~rows ~caption ~frame ~keepers
   let names =
     List.concat_map
       (Masc_tui_message_layout.wrap_words ~max_cells:(max 1 cols))
-      (List.map fst visible)
+      (List.map keeper_label visible)
     |> List.map (centred ~cols)
   in
   let overflow =

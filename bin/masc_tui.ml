@@ -4319,6 +4319,7 @@ let launch_keeper_sandbox_logs state ~mailbox keeper_name =
    read already in flight for this Keeper, so the tab asks once per visit; a
    read for a Keeper already on screen keeps its rows up while it runs. *)
 let launch_keeper_board_quarantines state ~mailbox keeper_name =
+  if server_authority_ready state then
   match
     Masc_tui_fetched.start ~equal:String.equal state.keeper_board_quarantines
       ~key:keeper_name
@@ -10731,13 +10732,39 @@ let apply_server_identity_reading state reading =
   in
   if not same_item_authority then begin
     withdraw_keeper_items_reading state;
+    (* Every detail ticket needs the workspace authority that launched it.
+       Unread authority revokes replies without moving the operator away. *)
+    state.detail_reads <- [];
+    state.keeper_board_quarantines <- Masc_tui_fetched.clear state.keeper_board_quarantines;
     state.candle_observation <- None;
     state.candle_read_authority <- ref ()
   end;
-  state.server_identity <- Masc_tui_types.server_identity_of_refresh reading;
-  state.workspace_identity <-
+  let workspace_identity =
     Masc_tui_types.workspace_identity_of_refresh
-      ~local_base_path:state.local_base_path reading;
+      ~local_base_path:state.local_base_path reading
+  in
+  let workspace_changed =
+    match state.workspace_identity, workspace_identity with
+    | _, Masc_tui_types.Workspace_identity_unread
+    | Masc_tui_types.Workspace_identity_unread,
+      Masc_tui_types.Workspace_identity_match -> false
+    | previous, current -> previous <> current
+  in
+  if workspace_changed then begin
+    (* Pending detail tokens belong to the workspace that launched them.
+       Keep the generation monotonic so an A -> B -> A return cannot admit
+       an old response after the operator opens a new detail read. *)
+    state.detail_reads <- [];
+    state.keeper_board_quarantines <- Masc_tui_fetched.clear state.keeper_board_quarantines;
+    state.item_account <- None;
+    state.item_account_error <- None;
+    state.item_account_revision <- None;
+    (match state.view with
+     | Keepers Keeper_detail -> state.view <- Keepers Keeper_list
+     | _ -> ())
+  end;
+  state.server_identity <- Masc_tui_types.server_identity_of_refresh reading;
+  state.workspace_identity <- workspace_identity;
   match state.workspace_identity with
   | Masc_tui_types.Workspace_identity_mismatch _ -> clear_local_workspace state
   | Masc_tui_types.Workspace_identity_match ->
@@ -10866,6 +10893,21 @@ let launch_detail_tab_reading state ~mailbox (keeper : keeper) =
       state.keeper_schedules_error <- None;
       launch_keeper_schedules_load state ~mailbox ~keeper_name:keeper.k_name
   | Detail_runs -> launch_fusion_runs_load state ~mailbox
+;;
+
+(* Authority loss revokes every detail ticket. Resume the pane's current
+   reading once authority returns; ordinary roster ticks retain its request. *)
+let refresh_visible_detail_after_authority_recovery state ~mailbox ~was_ready =
+  if not was_ready && server_authority_ready state then
+    match state.view, state.detail_tab, selected_keeper state with
+    | Keepers Keeper_detail, Detail_items, _ -> ()
+    | Keepers Keeper_detail, Detail_identity, Some keeper ->
+        (* Recovery refreshes the reading without applying tab-entry resets
+           to the operator's filter, cursor or pending attempt diagnostic. *)
+        launch_identity_view state ~mailbox keeper.k_name
+    | Keepers Keeper_detail, _, Some keeper ->
+        launch_detail_tab_reading state ~mailbox keeper
+    | _ -> ()
 ;;
 
 (* Entering a Keeper detail tab, by [ / ] or by a press on its name in the
@@ -13424,7 +13466,9 @@ let apply_async_message state ~base_path ~http_refresh_inflight
   | Http_refresh_done (Refresh_surfaces results) ->
       http_refresh_inflight := false;
       state.http_refresh_started_ns <- None;
+      let was_ready = server_authority_ready state in
       apply_http_surfaces state results;
+      refresh_visible_detail_after_authority_recovery state ~mailbox ~was_ready;
       refresh_visible_item_account state ~mailbox;
       (* The local roster is trustworthy only after a workspace-matched read.
          Resolve the boot choice once; a key the operator pressed meanwhile
@@ -13760,6 +13804,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight
              { ao_ticket; ao_result = Error err })
       approval_ticket;
       withdraw_keeper_items_reading state;
+      state.detail_reads <- [];
+      state.keeper_board_quarantines <- Masc_tui_fetched.clear state.keeper_board_quarantines;
       state.candle_observation <- None;
       state.candle_read_authority <- ref ();
       state.server_identity <- None;

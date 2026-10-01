@@ -398,7 +398,7 @@ def run_compact(executable: str, evidence_dir: Path | None = None, *, fail_prior
                 needle=expected.encode(), controls=(h.FULL_REDRAW,))
             text = h.screen_text(final)
             rows = h.screen_rows(final)
-            status = [row for row in rows if "내 메시지 2건 대기".encode() in row]
+            status = [row for row in rows.values() if "내 메시지 2건 대기".encode() in row]
             assert len(status) == 1, "pending input has duplicate status owners"
             assert expected.encode() in status[0], "receipt evidence clipped from composite status"
             assert "Esc:중단".encode() in status[0], "the actual stop action was clipped"
@@ -412,6 +412,13 @@ def run_compact(executable: str, evidence_dir: Path | None = None, *, fail_prior
                 (evidence_dir / f"{name}-80x30.txt").write_bytes(text)
             fixture.release.set()
             h.wait_for_output(process, fd, output, b"reply-compact-two", start=0, timeout=10)
+            if not h.wait_for_fixture_state(
+                process, fd, output,
+                lambda: b"Esc:detail" in h.screen_text(bytes(output)),
+                timeout=5,
+            ):
+                raise AssertionError("settled chat did not restore detail navigation")
+            h.send_and_wait(process, fd, output, b"\x1b", b"Info")
             os.write(fd, b"q")
         finally:
             priority_release.set()

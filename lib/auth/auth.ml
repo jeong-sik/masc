@@ -34,9 +34,11 @@ let ensure_keeper_credential config ~agent_name
       ; expires_at = None
       }
     in
-    persist_raw_token config ~agent_name raw_token;
-    save_credential config cred;
-    raw_token, cred
+    (match with_credential_transaction config (fun transaction ->
+       persist_raw_token config ~agent_name raw_token;
+       save_credential_in_transaction transaction cred) with
+     | Ok () -> raw_token, cred
+     | Error error -> raise (Sys_error (masc_error_to_string error)))
   in
   let result =
     try

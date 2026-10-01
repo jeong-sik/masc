@@ -389,8 +389,7 @@ let with_credential_transaction config f =
       Ok value
 ;;
 
-let credential_exists_in_transaction (Credential_transaction config) agent_name =
-  let file = credential_file config agent_name in
+let credential_path_exists file =
   try
     let _stat = run_blocking_io (fun () -> Unix.lstat file) in
     Ok true
@@ -401,6 +400,10 @@ let credential_exists_in_transaction (Credential_transaction config) agent_name 
       (Printf.sprintf "%s(%s): %s" operation argument (Unix.error_message error))))
   | Sys_error detail -> Error (System (System_error.IoError detail))
   | Eio.Io _ as exn -> Error (System (System_error.IoError (Printexc.to_string exn)))
+;;
+
+let credential_exists_in_transaction (Credential_transaction config) agent_name =
+  credential_path_exists (credential_file config agent_name)
 ;;
 
 (** Save agent credential.
@@ -659,26 +662,6 @@ let delete_credential config agent_name =
 
     De-duplicates by [agent_name] so that a UUID-backed credential
     plus its redirect stub do not appear twice in the result. *)
-(* A redirect stub whose target is gone. [load_credential] follows the redirect
-   and answers [None], so [list_credentials] skips these silently and nothing
-   ever removes them: they authenticate nothing and stay forever. Reported by
-   agent name so the same [delete_credential] retires them as any other. *)
-let orphaned_credential_stubs config : string list =
-  let dir = agents_dir config in
-  if not (file_exists dir)
-  then []
-  else
-    read_dir dir
-    |> Array.to_list
-    |> List.filter (fun f -> Filename.check_suffix f ".json")
-    |> List.filter_map (fun f ->
-      let name = Filename.chop_suffix f ".json" in
-      match load_redirect_target config (credential_file config name) with
-      | Some target when not (file_exists target) -> Some name
-      | Some _ | None -> None)
-    |> List.sort compare
-;;
-
 let list_credentials config : agent_credential list =
   let dir = agents_dir config in
   if file_exists dir
@@ -697,6 +680,206 @@ let list_credentials config : agent_credential list =
          []
     |> List.rev
   else []
+;;
+
+(* Prune discovery keeps decode failures distinct from I/O failure: the former
+   preserve their file, the latter abort the whole plan before deletion. These
+   helpers are private to the Auth library and require its current admission. *)
+type stored_credential =
+  | Stored_credential of agent_credential
+  | Stored_redirect of string
+  | Unresolved_credential
+
+let credential_read_result f =
+  try Ok (f ()) with
+  | Sys_error detail -> Error (System (System_error.IoError detail))
+  | Unix.Unix_error (error, operation, argument) ->
+    Error (System (System_error.IoError
+      (Printf.sprintf "%s(%s): %s" operation argument (Unix.error_message error))))
+  | Eio.Io _ as exn -> Error (System (System_error.IoError (Printexc.to_string exn)))
+;;
+
+let read_stored_credential config name path =
+  let ( let* ) = Result.bind in
+  (* Prune holds the shared publisher transaction: a FIFO must never wait for
+     a writer here. This existing reader opens nonblocking, verifies the real
+     FD and no-follow path identity, closes it, and propagates cancellation. *)
+  (* The transaction already canonicalizes its store root. Preserve relative
+     base paths and directory aliases without following the JSON leaf. All
+     callers supply discovered or validated direct children of this store. *)
+  let* ownership_root =
+    credential_read_result (fun () ->
+      run_blocking_io (fun () -> Unix.realpath (agents_dir config)))
+  in
+  let owned_path = Filename.concat ownership_root (Filename.basename path) in
+  let* content =
+    match Fs_compat.load_owned_regular_file ~ownership_root owned_path with
+    | Ok (Some content) -> Ok content
+    | Ok None ->
+        Error (System (System_error.IoError
+          (Printf.sprintf "credential disappeared before verified read: %s" path)))
+    | Error error ->
+        Error (System (System_error.IoError
+          (Fs_compat.owned_regular_file_read_error_to_string error)))
+  in
+  match Yojson.Safe.from_string content with
+  | exception Yojson.Json_error _ -> Ok Unresolved_credential
+  | `Assoc [ "redirect_to", `String target ] ->
+    (match redirect_target_file config target with
+     | Some path -> Ok (Stored_redirect path)
+     | None -> Ok Unresolved_credential)
+  | json ->
+    (match credential_of_json name json with
+     | Some credential -> Ok (Stored_credential credential)
+     | None -> Ok Unresolved_credential)
+;;
+
+let resolve_stored_credential config name = function
+  | Stored_credential credential -> Ok (Some credential)
+  | Unresolved_credential -> Ok None
+  | Stored_redirect target ->
+    let ( let* ) = Result.bind in
+    let* present = credential_path_exists target in
+    if not present then Ok None
+    else
+      let* stored = read_stored_credential config name target in
+      (match stored with
+       | Stored_credential credential -> Ok (Some credential)
+       | Stored_redirect _ | Unresolved_credential -> Ok None)
+;;
+
+type credential_prune_retirement =
+  { retiring_agent_name : string; uuid_target : string option; alias_names : string list }
+
+type credential_prune_snapshot =
+  { credentials : (agent_credential * credential_prune_retirement) list
+  ; orphaned_redirects : credential_prune_retirement list }
+
+let credential_prune_authority config name stored (credential : agent_credential) =
+  let ( let* ) = Result.bind in
+  let refused detail = Error (System (System_error.ValidationError
+      (Printf.sprintf "cannot prune %s: %s" name detail))) in
+  let uuid_path id =
+    match redirect_target_file config (Credential_id.to_string id ^ ".json") with
+    | Some target -> Ok target
+    | None -> refused "credential UUID is not a store filename" in
+  match stored, credential.id with
+  | Stored_credential _, None -> Ok { retiring_agent_name = name; uuid_target = None; alias_names = [] }
+  | Stored_redirect target, Some id ->
+    let* uuid = uuid_path id in
+    if String.equal target uuid
+    then Ok { retiring_agent_name = name; uuid_target = Some target; alias_names = [] }
+    else refused "redirect target disagrees with the credential UUID"
+  | Stored_credential _, Some id ->
+    let* target = uuid_path id in
+    let* present = credential_path_exists target in
+    if not present then Ok { retiring_agent_name = name; uuid_target = None; alias_names = [] }
+    else
+      let* target_record = read_stored_credential config name target in
+      (match target_record with
+       | Stored_credential current when current = credential ->
+         Ok { retiring_agent_name = name; uuid_target = Some target; alias_names = [] }
+       | Stored_credential _ | Stored_redirect _ | Unresolved_credential ->
+         refused "embedded UUID resolves to another credential")
+  | Stored_redirect _, None -> refused "redirected credential has no UUID binding"
+  | Unresolved_credential, (Some _ | None) -> refused "credential cannot be resolved"
+;;
+
+let credential_prune_snapshot_in_transaction (Credential_transaction config) =
+  let ( let* ) = Result.bind in
+  let* files = credential_read_result (fun () -> read_dir (agents_dir config)) in
+  let files = Array.to_list files |> List.filter (fun file -> Filename.check_suffix file ".json")
+      |> List.sort String.compare in
+  let rec discover names orphans aliases = function
+    | [] -> Ok (List.sort_uniq String.compare names, List.sort_uniq String.compare orphans, aliases)
+    | file :: rest ->
+      let name = Filename.chop_suffix file ".json" in
+      let path = Filename.concat (agents_dir config) file in
+      let* present = credential_path_exists path in
+      if not present then discover names orphans aliases rest
+      else
+        let* stored = read_stored_credential config name path in
+        (match stored with
+         | Unresolved_credential -> discover names orphans aliases rest
+         | Stored_credential credential -> discover (credential.agent_name :: names) orphans aliases rest
+         | Stored_redirect target ->
+           let* present = credential_path_exists target in
+           if not present then discover names (name :: orphans) aliases rest
+           else
+             let* resolved = resolve_stored_credential config name stored in
+             (match resolved with
+              | None -> discover names orphans aliases rest
+              | Some credential -> discover (credential.agent_name :: names) orphans
+                  ((name, target, credential) :: aliases) rest))
+  in
+  let* names, orphans, aliases = discover [] [] [] files in
+  let rec current_credentials acc = function
+    | [] -> Ok (List.rev acc)
+    | name :: rest ->
+      let* present = credential_path_exists (credential_file config name) in
+      if not present then current_credentials acc rest
+      else
+        let* stored = read_stored_credential config name (credential_file config name) in
+        let* resolved = resolve_stored_credential config name stored in
+        (match resolved with
+         | Some credential when String.equal credential.agent_name name ->
+           let* authority = credential_prune_authority config name stored credential in
+           let alias_names = List.filter_map (fun (alias, target, resolved) ->
+             if not (String.equal (credential_file config alias) (credential_file config name))
+                && resolved = credential
+                && authority.uuid_target = Some target
+             then Some alias else None) aliases
+             |> List.sort_uniq String.compare in
+           let authority = { authority with alias_names } in
+           current_credentials ((credential, authority) :: acc) rest
+         | Some _ | None -> current_credentials acc rest)
+  in
+  let* credentials = current_credentials [] names in
+  (* Check each named stub again, through its canonical filename. A raw UUID
+     entry or an unrelated owner's alias cannot authorize a name deletion. *)
+  let rec current_orphans acc = function
+    | [] -> Ok (List.rev acc)
+    | name :: rest ->
+      let* present = credential_path_exists (credential_file config name) in
+      if not present then current_orphans acc rest
+      else
+        let* stored = read_stored_credential config name (credential_file config name) in
+        (match stored with
+         | Stored_redirect target ->
+           let* present = credential_path_exists target in
+           if present then current_orphans acc rest
+           else current_orphans ({ retiring_agent_name = name; uuid_target = None; alias_names = [] } :: acc) rest
+         | Stored_credential _ | Unresolved_credential -> current_orphans acc rest)
+  in
+  let* orphaned_redirects = current_orphans [] orphans in
+  Ok { credentials; orphaned_redirects }
+;;
+
+(* The plan carries only paths whose ownership was validated during discovery.
+   Do not re-interpret a record's embedded id with the explicit revoke primitive. *)
+let unlink_prune_path path =
+  try run_blocking_io (fun () -> Unix.unlink path) with
+  | Unix.Unix_error (Unix.ENOENT, _, _) -> ()
+;;
+
+let retire_prune_credential_in_transaction (Credential_transaction config) retirement =
+  try
+    Fun.protect ~finally:(fun () -> !credential_cache_invalidator_ref config)
+      (fun () ->
+        (* Keep canonical discovery authority until every dependent path is
+           retired. A failed sidecar/alias/UUID unlink must remain retryable. *)
+        unlink_prune_path (raw_token_file config retirement.retiring_agent_name);
+        List.iter (fun alias -> unlink_prune_path (credential_file config alias))
+          retirement.alias_names;
+        Option.iter unlink_prune_path retirement.uuid_target;
+        unlink_prune_path (credential_file config retirement.retiring_agent_name);
+        Ok ())
+  with
+  | Sys_error detail -> Error (System (System_error.IoError detail))
+  | Unix.Unix_error (error, operation, argument) ->
+    Error (System (System_error.IoError
+      (Printf.sprintf "%s(%s): %s" operation argument (Unix.error_message error))))
+  | Eio.Io _ as exn -> Error (System (System_error.IoError (Printexc.to_string exn)))
 ;;
 
 type credential_listing_error =

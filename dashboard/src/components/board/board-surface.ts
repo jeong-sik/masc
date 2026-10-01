@@ -79,6 +79,7 @@ import {
   detailLoading,
   detailLoadingOlder,
   detailPostId,
+  detailFocusedCommentId,
   detailComments,
   detailCommentPage,
   loadOlderPostComments,
@@ -369,7 +370,7 @@ function PostCard({ post, reactions, supportedEmojis, reactionsArriving = false 
 
   const openPost = () => {
     selectedBoardPostId.value = post.id
-    void loadPostDetail(post.id)
+    void loadPostDetail(post.id, null)
   }
   const handlePostKeyDown = (event: KeyboardEvent) => {
     if (event.key !== 'Enter' && event.key !== ' ') return
@@ -661,8 +662,8 @@ function BdThreadDetail({
   onClose: () => void
 }) {
   useEffect(() => {
-    if (detailPostId.value !== post.id) {
-      void loadPostDetail(post.id)
+    if (detailPostId.value !== post.id || detailFocusedCommentId.value !== null) {
+      void loadPostDetail(post.id, null)
     }
   }, [post.id])
 
@@ -1449,7 +1450,7 @@ export function BoardSurface() {
     : null
 
   if (postId && !post && detailPostId.value !== postId && !detailLoading.value) {
-    void loadPostDetail(postId)
+    void loadPostDetail(postId, route.value.params.comment ?? null)
   }
 
   if (postId) {

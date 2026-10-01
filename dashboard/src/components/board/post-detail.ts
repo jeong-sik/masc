@@ -1,6 +1,6 @@
 import { html } from 'htm/preact'
 import { focusedCommentNeedsAncestors } from './comment-context'
-import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
+import { useEffect, useMemo, useState } from 'preact/hooks'
 import { useSignal } from '@preact/signals'
 import { ActionButton } from '../common/button'
 import { SectionCard, SurfaceCard } from '../common/card'
@@ -31,6 +31,7 @@ import {
   detailLoading,
   detailLoadingOlder,
   detailPostId,
+  detailFocusedCommentId,
   loadOlderPostComments,
   commentText,
   commentSubmitting,
@@ -89,6 +90,28 @@ function buildCommentTree(comments: BoardComment[]): { roots: BoardComment[]; ch
       roots.push(c)
     }
   }
+  // A recently active reply keeps its entire thread in the newest-root window.
+  // Resolve each parent chain once; missing parents remain visible root rows.
+  const byId = new Map(comments.map(comment => [comment.id, comment]))
+  const rootIds = new Map<string, string | null>()
+  const visiting = new Set<string>()
+  const rootFor = (id: string): string | null => {
+    if (rootIds.has(id)) return rootIds.get(id) ?? null
+    if (visiting.has(id)) return null
+    visiting.add(id)
+    const comment = byId.get(id)
+    const root = comment?.parent_id && byId.has(comment.parent_id)
+      ? rootFor(comment.parent_id) : id
+    visiting.delete(id)
+    rootIds.set(id, root)
+    return root
+  }
+  const latest = new Map<string, number>()
+  comments.forEach((comment, index) => {
+    const root = rootFor(comment.id)
+    if (root !== null) latest.set(root, index)
+  })
+  roots.sort((left, right) => (latest.get(left.id) ?? 0) - (latest.get(right.id) ?? 0))
   return { roots, childrenMap }
 }
 
@@ -543,11 +566,8 @@ export function CommentForm({ postId }: { postId: string }) {
 // ── Post detail view ───────────────────────────────────────────────
 export function PostDetail({ post }: { post: BoardPost }) {
   const focusedCommentId = cleanCommentRouteParam((route.value.params as Record<string, string | undefined>).comment)
-  const previousFocus = useRef(focusedCommentId)
   useEffect(() => {
-    const focusChanged = previousFocus.current !== focusedCommentId
-    previousFocus.current = focusedCommentId
-    if (detailPostId.value !== post.id || focusChanged
+    if (detailPostId.value !== post.id || detailFocusedCommentId.value !== focusedCommentId
       || (focusedCommentId && focusedCommentNeedsAncestors(detailComments.value, focusedCommentId))) {
       void loadPostDetail(post.id, focusedCommentId)
     }

@@ -1904,7 +1904,9 @@ def board_detail_page(
         "post": {**post, "comment_count": total},
         "comments": page,
         "comment_context": [comment for comment in comments if comment["id"] in context_ids],
-        "comment_revision": hashlib.sha256(json.dumps(comments, ensure_ascii=False).encode()).hexdigest(),
+        "comment_revision": hashlib.sha256(json.dumps(
+            [[comment["id"], comment.get("parent_id")] for comment in comments],
+            ensure_ascii=False, separators=(",", ":")).encode()).hexdigest(),
         "comment_page": {
             "offset": first,
             "returned": len(page),

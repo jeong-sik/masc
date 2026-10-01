@@ -1643,6 +1643,14 @@ let test_dashboard_comment_context_contains_page_and_focus_ancestors () =
   let missing = read ~focused_comment:"deleted-comment" () in
   Alcotest.(check (list string)) "missing focus still returns the ordinary context"
     (ids "comment_context" latest) (ids "comment_context" missing);
+  (match Board_dispatch.vote_comment ~comment_id:newest_reply ~voter:"context-voter"
+      ~direction:Board.Up with
+   | Ok _ -> ()
+   | Error error -> Alcotest.fail (Board.show_board_error error));
+  let voted = read () in
+  Alcotest.(check bool) "a vote does not invalidate pagination structure" true
+    (Yojson.Safe.Util.member "comment_revision" latest =
+     Yojson.Safe.Util.member "comment_revision" voted);
   ignore (add "appended after the page");
   let changed = read () in
   Alcotest.(check bool) "appending invalidates the page snapshot revision" true

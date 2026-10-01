@@ -839,7 +839,7 @@ let test_missing_cli_is_not_reported_as_logout () =
         config)
   in
   match outcome with
-  | Error (Runtime_claude_code.Spawn_failed _) -> ()
+  | Error (Runtime_claude_code.Invalid_config _) -> ()
   | Error error -> fail (Runtime_claude_code.error_to_string error)
   | Ok _ -> fail "missing Claude CLI was reported as a valid login"
 ;;

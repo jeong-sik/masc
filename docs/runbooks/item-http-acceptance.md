@@ -11,7 +11,7 @@ a portrait PNG and the isolated server log. The receipt records source SHA,
 binary hash, dashboard index hash, fixture hashes and HTTP response hashes.
 The harness requires the native `build-commit` and dashboard build identity to
 match the workflow SHA. It verifies readiness, refusal of anonymous account
-reads, an authenticated 100-milli wallet with empty inventory and catalog, PNG delivery, and delivery
+reads, an authenticated 100-milli wallet with empty ownership and its catalog, PNG delivery, and delivery
 of the exact production dashboard index. It then authenticates as the synthetic
 Keeper over MCP, buys a free face item, rejects repeat/insufficient purchases
 and unowned equipment, equips the item, and verifies ledger-backed account

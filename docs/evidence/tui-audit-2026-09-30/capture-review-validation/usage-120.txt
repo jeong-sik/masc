@@ -1,0 +1,41 @@
+ Dashboard  Work  Keepers  ▸Usage  Board  Workspace  System
+
+   MASC Usage  22:33:50  HTTP [connected]
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   Plan usage
+   Audit provider · 10b5205e  5h ▕█████████▌              ▏ 40%  —  heard 39d13h ago
+
+   Quota scope trend (14 UTC days) · unavailable: provider usage history load failed: HTTP 503: fixture endpoint unav…
+
+   Keeper usage (24h) · unavailable: keeper usage load failed: HTTP 503: fixture endpoint unavailable
+
+   Transport · queue pressure steady
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  j/k:scroll  p:Usage / Telemetry  w:1d / 7d / 14d  Esc:Dashboard  r:refresh  Tab:next  q:quit  | Port: 62426
+ › to alpha   (i to write)

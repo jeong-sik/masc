@@ -1753,6 +1753,13 @@
   masc_tui_message_layout
   unix))
 
+;; The last answer to each dashboard read, kept with its entity tag so the
+;; next read can ask whether it changed. A library so a test can drive it.
+(library
+ (name masc_tui_kept_reads)
+ (wrapped false)
+ (modules masc_tui_kept_reads))
+
 (executable
  (name masc_tui)
  (modules
@@ -1764,6 +1771,7 @@
  (public_name masc-tui)
  (package masc)
  (libraries
+  masc_tui_kept_reads
   masc_tui_palette
   masc_tui_account_login
   masc_tui_play_card

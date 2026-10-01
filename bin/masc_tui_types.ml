@@ -2083,29 +2083,6 @@ type provider_history_reading =
   | Provider_history_read of Masc_tui_usage_trend.t
   | Provider_history_error of string
 
-(** What a [keeper_briefs] row says about the Keeper's lifecycle phase. The
-    briefing writes [null] for a Keeper with no registry entry (an offline
-    Keeper that never booted this process), which is a different fact from a
-    word this build cannot name; neither is folded into a phase. *)
-type overview_keeper_phase =
-  | Keeper_phase of Tui_decode.keeper_phase
-  | Keeper_phase_absent
-  | Keeper_phase_unreadable of string
-
-(** One [keeper_briefs] row from the operator snapshot. *)
-type overview_keeper = {
-  okp_name: string;
-  okp_phase: overview_keeper_phase;
-  okp_last_turn_ago_s: float option;
-      (** [None] when the Keeper has not finished a turn this process saw. *)
-  okp_paused: bool option;
-      (** The brief's [paused]: an operator paused this Keeper. It is read
-          apart from [okp_phase] because a paused Keeper is left out of
-          autoboot, so after a server restart it has no registry entry and
-          its phase is [null] while [paused] still says [true]. [None] when
-          the brief carried no boolean there. *)
-}
-
 type overview_snapshot = {
   ov_workspace_health: workspace_health;
   ov_keepers: int;  (** [keeper_briefs] plus [keepers_unread] *)
@@ -2114,8 +2091,6 @@ type overview_snapshot = {
           could not list the Keeper directory, so [ov_keepers] counts nothing
           it read rather than an empty fleet (#38120). *)
   ov_keeper_liveness: keeper_liveness_counts;
-  ov_keeper_rows: overview_keeper list;
-      (** Every [keeper_briefs] row with a name, in the briefing's order. *)
   ov_mcp_agents: int;  (** [agent_briefs]: MCP clients, not keepers *)
   ov_attention_items: attention_item list;
   ov_generated_at: string;
@@ -5286,6 +5261,9 @@ type home_chat_receipt =
   | Session_chat of { keeper : Keeper_id.Keeper_name.t; save_error : string }
   | Unconfirmed_chat of { keeper : Keeper_id.Keeper_name.t; detail : string }
   | Unreadable_chat_receipt of string
+
+type agenda_navigation = Agenda_follow_selection | Agenda_read_rows
+
 (* The server sends each invite's link once and keeps only its hash. Keep the
    cards newest first in this TUI process so issuing another invite does not
    erase the first person's only link. [shown_name] selects the card on screen;
@@ -5310,11 +5288,13 @@ type state = {
      drops exactly those rows. Replaced wholesale with [tasks] on each load. *)
   mutable tasks_domain: Masc_domain.task list;
   mutable task_flow: Masc_tui_task_flow.t option;
-  (* Tasks whose only exit belongs to the operator, as
-     [Operator_task_attention] projected them from the same load. [None] until
-     the first load answers: an empty list is a fact about the workspace and
-     "not looked yet" is not. *)
-  mutable operator_stalled: Masc_tui_agenda.stalled list option;
+  (* Primary backlog authority, shared by Home and Agenda. Supplemental
+     archive/link errors stay in tasks_error and cannot erase this reading. *)
+  mutable operator_stalled: Masc_tui_agenda.stalled Masc_tui_agenda.reading;
+  (* Availability of the registry behind each task row's goal_ids. An empty
+     projection cannot claim an absent link when the registry was not read.
+     The reading payload is empty; memberships live on task.goal_ids. *)
+  mutable task_goal_links: unit Masc_tui_agenda.reading;
   (* Goals the verifier proved and only the operator's confirmation closes,
      read from the goal store on the same load as the tasks, so the agenda
      names them on every surface rather than only on Planning. *)
@@ -5347,6 +5327,7 @@ type state = {
      the selection of another Goal or a Task. A removed identity opens nothing
      until an explicit navigation key selects another target. *)
   mutable agenda_selected: Masc_tui_agenda.destination;
+  mutable agenda_navigation: agenda_navigation;
   (* The [@] answering overlay: the footer badge says that keepers are
      mid-turn, and this says which ones, on which lane, for how long. Modal
      like the agenda sheet, and like it the scroll survives only while it
@@ -6272,6 +6253,8 @@ type state = {
   mutable repository_changes_diff_error: string option;
   mutable repository_changes_diff_path: string option;
   mutable repository_changes_diff_scroll: int;
+  mutable repository_changes_diff_hscroll: int;
+  mutable repository_changes_diff_max_width: int;
   mutable repository_changes_return_chat: bool;
   (* The patch review overlay: the pending diff to scroll, and [e] to open it
      in $EDITOR. *)
@@ -6403,6 +6386,8 @@ type state = {
      answer no longer holds. Out of range closes the view. *)
   mutable changes_diff_row: int option;
   mutable changes_diff_scroll: int;
+  mutable changes_diff_hscroll: int;
+  mutable changes_diff_max_width: int;
   (* The tree's reading of the same file. Held beside the tool-call reading
      rather than replacing it: one says what the keeper tried to write and the
      other what survived, and they disagree often enough that a single field
@@ -8039,6 +8024,7 @@ let close_context_inspector (state : state) =
 let close_agenda (state : state) =
   state.agenda_open <- false;
   state.agenda_scroll <- 0;
+  state.agenda_navigation <- Agenda_read_rows;
   state.agenda_selected <- Masc_tui_agenda.Nowhere
 
 (* Every overlay [modal_owns_keys] names, closed the way its own Esc closes
@@ -8077,7 +8063,8 @@ let create_state
   tasks = [];
   tasks_domain = [];
   task_flow = None;
-  operator_stalled = None;
+  operator_stalled = Masc_tui_agenda.Not_read;
+  task_goal_links = Masc_tui_agenda.Not_read;
   goals_to_confirm = Masc_tui_agenda.Not_read;
   task_focus = Masc_tui_overview_tasks.No_task_focus;
   task_reading = Masc_tui_overview_tasks.Rows_unread;
@@ -8091,6 +8078,7 @@ let create_state
   agenda_open = false;
   agenda_scroll = 0;
   agenda_selected = Masc_tui_agenda.Nowhere;
+  agenda_navigation = Agenda_read_rows;
   hints_visible = true;
   coalesce_queued_input = false;
   user_input_priority_next = false;
@@ -8535,6 +8523,8 @@ let create_state
   repository_changes_diff_error = None;
   repository_changes_diff_path = None;
   repository_changes_diff_scroll = 0;
+  repository_changes_diff_hscroll = 0;
+  repository_changes_diff_max_width = 0;
   repository_changes_return_chat = false;
   patch_modal_open = false;
   patch_modal_scroll = 0;
@@ -8582,6 +8572,8 @@ let create_state
   changes_scroll = 0;
   changes_diff_row = None;
   changes_diff_scroll = 0;
+  changes_diff_hscroll = 0;
+  changes_diff_max_width = 0;
   changes_tree_diff = None;
   changes_tree_diff_error = None;
   changes_tree_diff_path = None;
@@ -9314,15 +9306,8 @@ let agenda (state : state) : Masc_tui_agenda.t =
               })
            state.keeper_tool_approvals)
   in
-  let stalled =
-    match state.operator_stalled, state.tasks_error with
-    | None, Some error ->
-      Masc_tui_agenda.Read_failed error
-    | None, None -> Masc_tui_agenda.Not_read
-    | Some rows, _ -> Masc_tui_agenda.Read rows
-  in
   Masc_tui_agenda.project ~scheduled ~awaiting
-    ~confirming:state.goals_to_confirm ~stalled
+    ~confirming:state.goals_to_confirm ~stalled:state.operator_stalled
 ;;
 
 (* Rows the agenda strip takes from every surface. Added once, here, rather
@@ -11408,10 +11393,10 @@ let home_decision_rows (state : state) =
     | Not_read -> [Home_agenda, "Goal confirmations not read · inspect sources"]
     | Read_failed _ -> [Home_agenda, "Goal confirmations unavailable · inspect sources"]
   in
-  let tasks = match state.tasks_error, state.operator_stalled with
-    | Some _, _ -> [Home_agenda, "Operator tasks unavailable · inspect sources"]
-    | None, None -> [Home_agenda, "Operator tasks not read · inspect sources"]
-    | None, Some rows ->
+  let tasks = match state.operator_stalled with
+    | Masc_tui_agenda.Read_failed _ -> [Home_agenda, "Operator tasks unavailable · inspect sources"]
+    | Not_read -> [Home_agenda, "Operator tasks not read · inspect sources"]
+    | Read rows ->
         List.map (fun (row : Masc_tui_agenda.stalled) ->
           Home_request (Home_operator_task row.task_id),
           Printf.sprintf "Operator task · %s · %s" (clean row.task_id) (clean row.what)) rows
@@ -11540,7 +11525,8 @@ let home_initial_reading_ready state selected =
   | Some (Home_request _ | Home_resume _ | Home_read_last _) -> true
   | Some Home_approvals -> approvals_reading_current state
   | Some (Home_choose_keeper | Home_create_keeper) ->
-      approvals_reading_current state && Option.is_some state.operator_stalled
+      approvals_reading_current state
+      && (match state.operator_stalled with Masc_tui_agenda.Read _ -> true | Not_read | Read_failed _ -> false)
       && (match state.goals_to_confirm with Masc_tui_agenda.Read _ -> true | _ -> false)
   | Some Home_agenda | None -> false
 

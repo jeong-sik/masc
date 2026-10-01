@@ -25,7 +25,18 @@ An API error or missing CLI field is unknown state, not proof of no stack.
 A non-main direct base is normal for a native stack. Do not demand separate
 parent merges or manually retarget it to main. For an API-confirmed non-native
 branch chain, land the parent first and inspect the resulting base/head changes.
-Native stack bases need not be named main in other repositories.
+Native stack bases need not be named main in other repositories. A native stack can
+also target the branch of another open PR, including one in a different native
+stack. Report the exact destination. Merging into that branch does not mean the
+changes reached main, and the other stack is not automatically part of this
+request. Follow that upstream relationship separately.
+
+When scanning a repository, list all open PRs and native stacks before selecting
+work. Preserve the difference between branch dependency, native membership and
+source inclusion in an integration PR. Verify the latter against current commits
+and file contents; a body naming an old canonical head is not evidence that the
+latest original head is included. Annotate overlapping alternatives without
+closing them or combining their scopes solely because titles look similar.
 
 ## Review all PRs that will merge
 
@@ -69,7 +80,9 @@ Do not use `--admin` or `--auto`.
 
 The API's `sha` pins the selected head, not a client-supplied vector of all lower
 heads. The final snapshot reduces races but is not an atomic all-head lock.
-GitHub's server-side checks still apply. Capture the response's `details.uuid` and retrieve its result:
+GitHub's server-side checks still apply. Receipt output labels the destination as the preflight target, not an accepted
+destination: stack metadata may still change between that read and the request.
+Capture the response's `details.uuid` and retrieve its result:
 
 ```bash
 gh api repos/OWNER/REPO/pulls/NUMBER/merge-async/UUID

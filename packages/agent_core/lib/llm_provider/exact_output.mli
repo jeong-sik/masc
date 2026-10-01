@@ -932,11 +932,14 @@ val flow_execution_binding_standing
 (** [Every_binding_resting] only when the flow ended on an execution failure
     and every candidate it visited failed on a refusal of its binding's
     standing: a rate limit or quota spent ([Rate_limited], [Hard_quota]), a
-    full capacity ([Overloaded], [Capacity_exhausted]), or an account that
-    cannot pay ([Payment_required]). Such a refusal says nothing about the
-    input, so the same input can be served once a binding frees. A visit
-    rejected before dispatch, an input-sized or input-shaped refusal, an
-    unusable answer or an unknown effect makes it [Not_every_binding_resting].
+    full capacity ([Overloaded], [Capacity_exhausted]), an account that
+    cannot pay ([Payment_required]), or a network or timeout failure before
+    the generation request was dispatched ([No_generation_dispatch]). Such a
+    failure says nothing about the input, so the same input can be served once
+    a binding frees or the network returns. A visit rejected before dispatch,
+    an input-sized or input-shaped refusal, an unusable answer, an unknown
+    effect, or a network failure after the dispatch started makes it
+    [Not_every_binding_resting].
     This is narrower than {!flow_execution_terminal_kind}, which admits any
     failure a successor might serve. *)
 

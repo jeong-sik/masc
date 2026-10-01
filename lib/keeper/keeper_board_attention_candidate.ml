@@ -242,6 +242,8 @@ let candidate_path ~base_path ~keeper_name =
     (Workspace_utils_backend_setup.sanitize_namespace_segment keeper_name ^ ".jsonl")
 ;;
 
+let ledger_path = candidate_path
+
 let queue_reaction_to_yojson (reaction : Board_dispatch.board_reaction_change) =
   `Assoc
     [ ( "target_type"

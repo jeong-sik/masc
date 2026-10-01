@@ -124,8 +124,13 @@ def row_coordinates(original):
         string(clock.get("domain"), "row.clock.domain")
         string(clock.get("value"), "row.clock.value")
     evidence(original.get("evidence"))
+    related = original.get("related_ids")
+    if not isinstance(related, list):
+        raise InvalidInput("row.related_ids must be an array")
+    for identity in related:
+        string(identity, "row.related_ids entry")
     return {key: original[key] for key in (
-        "id", "lane_id", "kind", "subject_id", "observed_at", "clock", "actor", "evidence")}
+        "id", "lane_id", "kind", "subject_id", "observed_at", "clock", "actor", "evidence", "related_ids")}
 
 
 def reports(source: Source, observation: dict, *, recognized: bool):
@@ -143,11 +148,22 @@ def reports(source: Source, observation: dict, *, recognized: bool):
     if not isinstance(output.get("rows"), list) or not isinstance(output.get("coverage"), list):
         raise InvalidInput("Output must contain rows and coverage arrays")
     upstream_coverage = [coverage(item, "output coverage") for item in output["coverage"]]
+    coverage_by_source = {}
+    for item in upstream_coverage:
+        key = (item["source_id"], item["incarnation"])
+        if key in coverage_by_source and coverage_by_source[key] != item:
+            raise InvalidInput("Conflicting upstream coverage for the same source incarnation")
+        coverage_by_source[key] = item
     producer_status = coverage(observation.get("producer_status"), "producer_status")
     if source.incarnation != producer["instance_id"]:
         raise InvalidInput("Source incarnation does not identify this producer instance")
-    if producer_status["incarnation"] != producer["instance_id"]:
-        raise InvalidInput("Producer status incarnation does not identify this producer instance")
+    if (producer_status["incarnation"] != producer["instance_id"]
+            or producer_status["source_id"] != producer["instance_id"]):
+        raise InvalidInput("Producer status does not identify this producer instance")
+    cursor = str(sequence)
+    if (source.cursor != cursor or producer_status["cursor"] != cursor
+            or observation.get("id") != f"{producer['instance_id']}/output/{cursor}"):
+        raise InvalidInput("Report input coordinates disagree with the completed producer sequence")
     base_complete = (source.complete and recognized and producer_status["complete"]
                      and bool(upstream_coverage) and all(c["complete"] for c in upstream_coverage))
     groups = {}
@@ -164,15 +180,22 @@ def reports(source: Source, observation: dict, *, recognized: bool):
         string(original.get("id"), "row.id")
         row_coordinates(original)
         fields = object_value(original.get("fields"), "row.fields")
+        coordinates = (string(fields.get("source_id"), "row.fields.source_id"),
+                       string(fields.get("incarnation"), "row.fields.incarnation"))
+        if coordinates not in coverage_by_source:
+            raise InvalidInput("Fusion row has no matching upstream source coverage")
         boolean(fields.get("input_complete"), "row.input_complete")
         if lane == "fusion/status":
             run = object_value(fields.get("fusion_run"), "fusion_run")
             run_id = string(run.get("run_id"), "fusion_run.run_id")
+            string(run.get("keeper"), "fusion_run.keeper")
             status = run_state(run.get("status"))
             if status is RunState.FAILED:
                 string(run.get("failure_code"), "fusion_run.failure_code")
                 string(run.get("error"), "fusion_run.error")
         else:
+            if len(original["related_ids"]) != 1:
+                raise InvalidInput("Fusion result must identify its status row")
             run_id = string(fields.get("fusion_run_id"), "fusion_run_id")
             status = run_state(fields.get("run_status"))
             post = object_value(fields.get("board_post"), "board_post")
@@ -180,6 +203,7 @@ def reports(source: Source, observation: dict, *, recognized: bool):
             if not isinstance(post.get("body"), str):
                 raise InvalidInput("board_post.body must be text")
             origin = object_value(post.get("origin"), "board_post.origin")
+            string(origin.get("fusion_producer"), "board_post.origin.fusion_producer")
             if origin.get("source") != "fusion" or origin.get("fusion_run_id") != run_id:
                 raise InvalidInput("Report evidence belongs to another Fusion run")
         if original["subject_id"] != run_id:
@@ -209,11 +233,15 @@ def reports(source: Source, observation: dict, *, recognized: bool):
         post = result_row[0]["fields"]["board_post"] if result_row else None
         if status_row and result_row:
             status_fields = status_row[0]["fields"]
+            if result_row[0]["related_ids"] != [status_row[0]["id"]]:
+                raise InvalidInput("Fusion result relation does not identify its paired status row")
             if (status_fields.get("evidence_status") != "recorded"
-                    or status_fields.get("board_post_id") != post["id"]):
+                    or status_fields.get("board_post_id") != post["id"]
+                    or status_fields["fusion_run"]["keeper"] != post["origin"]["fusion_producer"]):
                 raise InvalidInput("Fusion status and result Board evidence disagree")
         complete = (base_complete and not skipped and status is not RunState.RUNNING
                     and post is not None
+                    and (status is not RunState.FAILED or status_row is not None)
                     and all(item[0]["fields"]["input_complete"] for item in group.values()))
         # A failed run can have complete evidence. Completeness never means success.
         heading = {RunState.RUNNING: "분석 진행 중", RunState.COMPLETED: "분석 완료",

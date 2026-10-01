@@ -245,19 +245,29 @@ let highwater t instance_id = protect (fun () ->
           | _ -> scan maximum
           | exception End_of_file -> Ok maximum
         in scan 0))
-let retained_read_limit max_bytes =
+let retained_read_limit ~instance_id max_bytes =
   let envelope_bytes = String.length {|{"sources":,"output":}|} in
   if max_bytes <= 0 || max_bytes > (max_int - envelope_bytes) / 2
   then Error "invalid retained record byte envelope"
-  else Ok (2 * max_bytes + envelope_bytes)
+  else
+    (* Each namespaced value occupied at least two JSON quote bytes in the
+       bounded package output. The longest host prefix includes the largest
+       representable sequence. Sources keep their original package bound. *)
+    let prefix_bytes = String.length (Yojson.Safe.to_string
+      (`String (instance_id ^ "/" ^ string_of_int max_int ^ "/"))) - 2 in
+    let values = max_bytes / 2 in
+    let base_bytes = 2 * max_bytes + envelope_bytes in
+    if values > (max_int - base_bytes) / prefix_bytes
+    then Error "invalid namespaced record byte envelope"
+    else Ok (base_bytes + values * prefix_bytes)
 let read_observation ~instance_id ~seq ~max_bytes t =
   if seq <= 0 then Error "observation sequence must be positive" else
-  let* max_record_bytes = retained_read_limit max_bytes in
+  let* max_record_bytes = retained_read_limit ~instance_id max_bytes in
   let* bytes = bounded_file ~max_bytes:max_record_bytes (record_path t instance_id seq) in
   let* _,output = decode_record bytes in
   Ok output
 let query_observations t ~instance_id ~expected_seq ~max_bytes ~since ~until ~lane_id =
-  let* max_record_bytes = retained_read_limit max_bytes in
+  let* max_record_bytes = retained_read_limit ~instance_id max_bytes in
   let* found = highwater t instance_id in
   let maximum = max found expected_seq in
   let matches (row : row) =
@@ -374,7 +384,7 @@ let freeze t ~instance_id ~binding ~row_ids =
               | _ -> Error "missing retained package resources")
          | _ -> Error "missing retained package")
     | _ -> Error "invalid retained binding" in
-  let* max_record_bytes = retained_read_limit max_bytes in
+  let* max_record_bytes = retained_read_limit ~instance_id max_bytes in
   let rec sequences acc = function
     | [] -> Ok (List.sort_uniq Int.compare acc)
     | id :: rest -> let* seq = sequence_of_row ~instance_id id in sequences (seq :: acc) rest in

@@ -56,7 +56,19 @@ type lane_output = {
   status : Lane_addon_types.coverage;
 }
 val dependencies : Yojson.Safe.t -> (string list, string) result
-val acquire : store:Lane_addon_store.t -> package:Lane_addon_types.package ->
+type access = Operator_configuration | Keeper of string | Unauthenticated
+(** Native Fusion reads require the installation's authenticated Keeper owner,
+    or an operator-owned persistent configuration. This value is host-owned. *)
+val access_to_json : access -> Yojson.Safe.t
+val access_of_json : Yojson.Safe.t -> (access, string) result
+val has_native_fusion : Yojson.Safe.t -> (bool, string) result
+val fusion_owner : access:access -> run_id:string -> (string, string) result
+(** Read the authoritative registry owner only after the same Fusion access
+    check used for acquisition. Unknown and foreign runs share one denial. *)
+val authorize : access:access -> Yojson.Safe.t -> (unit, string) result
+(** Reject unowned native Fusion bindings before attaching. Acquisition repeats
+    the check before capturing any evidence. *)
+val acquire : access:access -> store:Lane_addon_store.t -> package:Lane_addon_types.package ->
   resolve_lane_output:(installation_id:string -> (lane_output, string) result) ->
   binding:Yojson.Safe.t -> (Yojson.Safe.t, string) result
 (** The complete returned source array fits the package's ingress envelope.

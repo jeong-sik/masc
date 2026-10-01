@@ -88,7 +88,7 @@ let with_fixture f =
                       action_schema=(fun () -> None);act=(fun ~arguments:_ -> Error "read-only");
                       stop=(fun () -> Ok ());container_id=instance_id} in on_created connection;Ok connection);
                   image_ready=(fun ~package:_ -> Ok ());
-                  acquire=(fun ~store:_ ~package:_ ~resolve_lane_output:_ ~binding:_ -> Ok (`List []));
+                  acquire=(fun ~access:_ ~store:_ ~package:_ ~resolve_lane_output:_ ~binding:_ -> Ok (`List []));
                   recover_stop=(fun ~instance_id:_ ~container_id:_ ~max_reply_bytes:_ -> Ok ())} in
                 let config = Workspace.default_config root in
                 Runtime.For_testing.with_backend backend (fun () ->
@@ -132,6 +132,35 @@ let test_keeper_create_operator_read_and_edit () = with_fixture (fun clock confi
   ignore (reconcile config directory);
   await clock (fun () -> List.length !started=2);
   check bool "reconcile owns actual replacement" true (original_id <> (one_live config |> text "instance_id")))
+
+let test_keeper_declaration_cannot_capture_another_fusion_owner () =
+  with_fixture (fun _clock config directory _root started ->
+    let run_id = "editor-fusion-ownership" in
+    Fusion_run_registry.register_running (Fusion_run_registry.global ()) ~run_id
+      ~keeper:"another-keeper" ~preset:"default" ~roster:Fusion_types.preset_roster
+      ~topology:Fusion_types.Simple ~started_at:1.;
+    let bytes = Printf.sprintf {|id="foreign-fusion"
+run_id="editor-world"
+manifest_path="../../package.toml"
+[binding]
+sources=[{kind="fusion_run", source_id="fusion", run_id=%S}]
+|} run_id in
+    let result = keeper_call config "masc_lane_declaration_save"
+      (request ~mode:"create" ~file_name:"foreign.toml" bytes) in
+    check bool "Keeper save rejects foreign Fusion capture" false (Tool_result.is_success result);
+    check bool "rejected configuration cannot be reconciled as operator-owned" false
+      (Sys.file_exists (Filename.concat directory "foreign.toml"));
+    check int "rejection starts no worker" 0 (List.length !started);
+    Fusion_run_registry.register_running (Fusion_run_registry.global ()) ~run_id
+      ~keeper:"editor-keeper" ~preset:"default" ~roster:Fusion_types.preset_roster
+      ~topology:Fusion_types.Simple ~started_at:1.;
+    let own = keeper_call config "masc_lane_declaration_save"
+      (request ~mode:"create" ~file_name:"own.toml" bytes) in
+    check bool "Keeper can save its own source without granting shared read authority" true
+      (Tool_result.is_success own);
+    check bool "operator declaration writer remains available" true
+      (Result.is_ok (Runtime.save_declaration ~config
+        (request ~mode:"create" ~file_name:"operator.toml" bytes))))
 
 let test_conflicts_and_invalid_candidates_preserve_active () = with_fixture (fun clock config directory _root started ->
   let original = declaration () in
@@ -265,7 +294,9 @@ let test_create_publication_collision_preserves_competing_bytes () = with_fixtur
   | Some path -> check bool "owned staging is cleaned after refused publication" false (Sys.file_exists path))
 
 let () = run "Lane declaration editing" ["shared TOML owner",[
-  test_case "Keeper creates and operator edits the same TOML" `Quick test_keeper_create_operator_read_and_edit;
+  test_case "Keeper cannot save another owner's Fusion capture" `Quick
+      test_keeper_declaration_cannot_capture_another_fusion_owner;
+    test_case "Keeper creates and operator edits the same TOML" `Quick test_keeper_create_operator_read_and_edit;
   test_case "conflict and invalid candidate preserve active installation" `Quick test_conflicts_and_invalid_candidates_preserve_active;
   test_case "invalid source and missing package remain repairable" `Quick test_invalid_existing_source_can_be_repaired;
   test_case "mode, create-only and direct-child path boundaries" `Quick test_request_paths_and_create_are_exact;

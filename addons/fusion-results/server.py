@@ -204,8 +204,16 @@ def observe(binding: dict, sources: tuple[Source, ...]) -> dict:
     return {"rows": rows, "coverage": coverage}
 
 
+def text_summary(output: dict) -> str:
+    if any(item["lane_id"] == "fusion/result" for item in output["rows"]):
+        return "Fusion status and retained Board evidence are available in structuredContent with exact run identity."
+    if output["rows"]:
+        return "Fusion status is available in structuredContent with exact run identity; no retained Board evidence is available in this capture."
+    return "No Fusion snapshot rows are available; structuredContent reports the observation coverage."
+
+
 if __name__ == "__main__":
     manifest = tomllib.loads(Path(__file__).with_name("lane.toml").read_text())
     serve("masc-fusion-results", observe,
-          text_summary=lambda output: "Fusion status and retained Board evidence are available in structuredContent with exact run identity.",
+          text_summary=text_summary,
           max_reply_bytes=manifest["resources"]["max_reply_bytes"])

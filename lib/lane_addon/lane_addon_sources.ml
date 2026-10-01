@@ -229,10 +229,47 @@ let envelope ~id ~incarnation ~cursor ~complete ~detail observations =
 let unavailable source message = envelope ~id:(source_id source) ~incarnation:"unobserved"
   ~cursor:`Null ~complete:false ~detail:(`String message) []
 
-let fusion_run ~store ~max_bytes ~id ~run_id =
+type access = Operator_configuration | Keeper of string | Unauthenticated
+
+let access_to_json = function
+  | Operator_configuration -> `Assoc ["kind",`String "operator_configuration"]
+  | Keeper keeper -> `Assoc ["kind",`String "keeper";"keeper",`String keeper]
+  | Unauthenticated -> `Assoc ["kind",`String "unauthenticated"]
+let access_of_json = function
+  | `Assoc fields ->
+      (match List.sort (fun (a,_) (b,_) -> String.compare a b) fields with
+       | ["kind",`String "operator_configuration"] -> Ok Operator_configuration
+       | ["kind",`String "unauthenticated"] -> Ok Unauthenticated
+       | ["keeper",`String keeper;"kind",`String "keeper"] when String.trim keeper <> "" -> Ok (Keeper keeper)
+       | _ -> Error "invalid retained source authority")
+  | _ -> Error "invalid retained source authority"
+let has_native_fusion binding =
+  let* sources = parse binding in
+  Ok (List.exists (function Fusion_run _ -> true
+    | Snapshot_file _ | Msx_capture _ | Dos_capture _ | Lane_output _ | Browser_document _ -> false) sources)
+
+let authorized_fusion_run ~access ~run_id =
   match Fusion_run_registry.get (Fusion_run_registry.global ()) ~run_id with
-  | None -> Error ("Fusion run unavailable: " ^ run_id)
+  | None -> Error "Fusion run is unavailable to this caller"
   | Some run ->
+      let* () = match access with
+        | Operator_configuration -> Ok ()
+        | Keeper keeper when String.equal keeper run.Fusion_run_registry.keeper -> Ok ()
+        | Keeper _ | Unauthenticated -> Error "Fusion run is unavailable to this caller" in
+      Ok run
+let fusion_owner ~access ~run_id =
+  Result.map (fun run -> run.Fusion_run_registry.keeper) (authorized_fusion_run ~access ~run_id)
+let authorize ~access binding =
+  let* sources = parse binding in
+  List.fold_left (fun checked -> function
+    | Fusion_run {run_id;_} ->
+        let* () = checked in
+        (match access with Operator_configuration -> Ok ()
+         | Keeper _ | Unauthenticated -> Result.map (fun _ -> ()) (authorized_fusion_run ~access ~run_id))
+    | Snapshot_file _ | Msx_capture _ | Dos_capture _ | Lane_output _ | Browser_document _ -> checked)
+    (Ok ()) sources
+let fusion_run ~access ~store ~max_bytes ~id ~run_id =
+      let* run = authorized_fusion_run ~access ~run_id in
       let post = match Board_dispatch.find_post_by_run_id ~run_id with
         | Some post ->
             (match post.Board.origin with
@@ -294,10 +331,22 @@ let read_bounded ~max_bytes path =
   with Sys_error message -> Error message
      | End_of_file -> Error "source changed while reading"
      | Unix.Unix_error (error,call,path) -> Error (call ^ " " ^ path ^ ": " ^ Unix.error_message error)
+let unique_snapshot_keys json =
+  let rec walk = function
+    | [] -> Ok ()
+    | `Assoc fields :: rest ->
+        let names = List.map fst fields in
+        if List.length names <> List.length (List.sort_uniq String.compare names)
+        then Error "snapshot contains duplicate object keys"
+        else walk (List.rev_append (List.map snd fields) rest)
+    | `List values :: rest -> walk (List.rev_append values rest)
+    | _ :: rest -> walk rest in
+  walk [json]
 let snapshot_file ~store ~max_bytes ~id path =
   let* bytes = Eio_unix.run_in_systhread (fun () -> read_bounded ~max_bytes path) in
   try
     let json = Yojson.Safe.from_string bytes in
+    let* () = unique_snapshot_keys json in
     let* fields = match json with `Assoc fields -> Ok fields | _ -> Error "snapshot must be an envelope" in
     let* observed_id = text fields "source_id" in
     let* _incarnation = text fields "incarnation" in
@@ -471,12 +520,12 @@ let lane_output ~store ~max_bytes ~resolve_lane_output ~id ~installation_id ~out
       ~cursor:(`String (string_of_int captured.observation_seq)) ~complete
       ~detail:(Option.fold ~none:`Null ~some:(fun value -> `String value) detail) [observation])
 
-let acquire ~store ~(package : Lane_addon_types.package) ~resolve_lane_output ~binding =
+let acquire ~access ~store ~(package : Lane_addon_types.package) ~resolve_lane_output ~binding =
   let* () = validate binding in
   let* sources = parse binding in
   let capture ~max_bytes source =
     let result = match source with
-      | Fusion_run {id;run_id} -> fusion_run ~store ~max_bytes ~id ~run_id
+      | Fusion_run {id;run_id} -> fusion_run ~access ~store ~max_bytes ~id ~run_id
       | Snapshot_file {id;path} -> snapshot_file ~store ~max_bytes ~id path
       | Msx_capture {id} -> msx_capture ~store ~id
       | Dos_capture {id} -> dos_capture ~store ~id

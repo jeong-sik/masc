@@ -1142,6 +1142,100 @@ def tools_workspace_withdrawal(binary: str) -> None:
         refresh=0.5, terminal_cols=300)
 
 
+def verification_workspace_withdrawal(binary: str) -> None:
+    """Held A rows cannot restore an approval arm on B with the same IDs."""
+    fixtures = h.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
+    fixtures.update(h.verification_verdict_fixtures())
+    wire = WorkspaceWire(fixtures[ROSTER_PATH][1])
+    old_started = threading.Event()
+    old_release = threading.Event()
+    old_returned = threading.Event()
+    hold_next = False
+    verdicts = []
+
+    def queue():
+        nonlocal hold_next
+        with wire.lock:
+            phase = wire.phase
+            held = hold_next and phase == "a"
+            if held:
+                hold_next = False
+        if held:
+            old_started.set()
+            assert old_release.wait(timeout=30), "A verification fixture not released"
+            old_returned.set()
+        if phase == "b":
+            return 503, {"error": "verification-b-not-ready"}
+        row = h.verification_request_row("task-901")
+        row["task_title"] = (
+            "workspace-a-verification-row" if phase == "a"
+            else "workspace-b-verification-row")
+        return 200, h.verification_snapshot([row])
+
+    def verdict(body):
+        with wire.lock:
+            phase = wire.phase
+        verdicts.append((phase, json.loads(body)))
+        return 200, {"ok": True, "message": "workspace verdict recorded", "noop": False}
+
+    fixtures.update({ROSTER_PATH: wire.roster, "/health": wire.health,
+                     "/health?full=1": wire.health,
+                     h.VERIFICATION_QUEUE_PATH: queue,
+                     h.VERIFICATION_VERDICT_PATH: h.RequestHttpResponse(verdict)})
+
+    def interact(process, fd, _slave, output, _base):
+        nonlocal hold_next
+        def await_screen(predicate, label):
+            assert h.wait_for_fixture_state(process, fd, output,
+                lambda: predicate(screen(output)), timeout=WAIT_SECONDS), label
+        try:
+            h.resize_and_wait(process, fd, output, rows=45, columns=300,
+                needle=b"MASC Dashboard", controls=(h.FULL_REDRAW,))
+            h.tab_until(process, fd, output, b"MASC Work")
+            h.send_and_wait(process, fd, output, b"v", b"Task Review")
+            await_screen(lambda text: b"workspace-a-verification-row" in text,
+                         "A verification row not visible")
+            h.send_and_wait(process, fd, output, b"a",
+                b"armed: approve task-901 -- same key again to send")
+            assert verdicts == [], "first A press sent a verdict"
+            with wire.lock:
+                hold_next = True
+            assert h.wait_for_fixture_event(process, fd, output, old_started,
+                timeout=WAIT_SECONDS), "next A verification read was not held"
+            wire.publish("b")
+            await_screen(lambda text: b"MISMATCH local " in text
+                         and b"workspace-a-verification-row" not in text
+                         and b"armed: approve" not in text,
+                         "B did not withdraw A verification rows and confirmation")
+            os.write(fd, b"a")
+            old_release.set()
+            assert h.wait_for_fixture_event(process, fd, output, old_returned,
+                timeout=WAIT_SECONDS), "A verification reply was not released"
+            await_screen(lambda text: b"verification-b-not-ready" in text,
+                         "fresh B verification refusal did not settle")
+            assert verdicts == [], "A confirmation sent a verdict in B"
+            wire.publish("b-after-late")
+            await_screen(lambda text: b"workspace-b-verification-row" in text,
+                         "B verification read did not recover")
+            assert b"workspace-a-verification-row" not in screen(output)
+            h.send_and_wait(process, fd, output, b"a",
+                b"armed: approve task-901 -- same key again to send")
+            assert verdicts == [], "B reused A confirmation for matching IDs"
+            os.write(fd, b"a")
+            assert h.wait_for_fixture_state(process, fd, output,
+                lambda: len(verdicts) == 1, timeout=WAIT_SECONDS)
+            assert verdicts[0] == ("b-after-late", {
+                "task_id": "task-901", "verification_id": "vr-task-901",
+                "verdict": "approve"}), verdicts
+            os.write(fd, b"q")
+        finally:
+            old_release.set()
+    h.run_terminal_scenario(binary,
+        description="workspace verification withdrawal requires fresh rows and confirmation",
+        interact=interact, prepare_workspace=wire.prepare, http_fixtures=fixtures,
+        refresh=0.5, terminal_cols=300)
+
+
 if __name__ == "__main__":
     binary = str(Path(sys.argv[1]).resolve())
     artifact_root = os.environ.get("RUNNER_TEMP")
@@ -1153,6 +1247,7 @@ if __name__ == "__main__":
             "binary_sha256": hashlib.sha256(Path(binary).read_bytes()).hexdigest(),
             "scenario_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
         }, indent=2) + "\n")
+    verification_workspace_withdrawal(binary)
     tools_workspace_withdrawal(binary)
     connector_workspace_withdrawal(binary)
     bundle_identity_during_read(binary)

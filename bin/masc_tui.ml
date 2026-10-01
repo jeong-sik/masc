@@ -3581,6 +3581,7 @@ let launch_task_cancel state ~mailbox ~task_id ~reason =
    Keyed by task id so a stale answer for a request the operator already
    left is discarded, not drawn under another one. *)
 let launch_verification_evidence_load state ~mailbox task_id =
+  let enqueue_async = workspace_enqueue state in
   let host = server_peer_host in
   let port = state.port in
   Masc_tui_async_read.launch_with
@@ -5909,6 +5910,7 @@ let reset_verification_rows state =
   state.verification_verdict_error <- None
 
 let launch_verification_load state ~mailbox =
+  let enqueue_async = workspace_enqueue state in
   if state.verification_inflight then ()
   else begin
     state.verification_inflight <- true;
@@ -10933,6 +10935,13 @@ let withdraw_currency_authority state =
    match reloads it, so a screen never shows rows from a workspace the server
    just stopped serving. *)
 let withdraw_keeper_workspace_presentation state ~previous =
+  reset_verification_rows state;
+  state.verification <- None;
+  state.verification_error <- None;
+  state.verification_evidence <- None;
+  state.verification_inflight <- false;
+  state.verification_refresh_after_inflight <- false;
+  state.verification_offset <- 0;
   (* Tools callbacks use their own generation, independent of Keeper reads.
      Retire that owner before any same-named Keeper can appear on another root. *)
   state.tools_request_generation <- state.tools_request_generation + 1;
@@ -12775,6 +12784,7 @@ let handle_schedule_cancel_key state ~mailbox =
    pre-guess from the row it rendered a moment ago. *)
 let start_verification_verdict state ~mailbox ~(task_id : string)
     ~(verification_id : string) ~(verdict : [ `Approve | `Reject of string ]) =
+  let enqueue_async = workspace_enqueue state in
   state.verification_verdict_error <- None;
   let verb = match verdict with `Approve -> "approving" | `Reject _ -> "rejecting" in
   report_action state "system" (Printf.sprintf "%s %s" verb task_id);
@@ -12792,7 +12802,7 @@ let start_verification_verdict state ~mailbox ~(task_id : string)
     enqueue_async mailbox (Verification_verdict_done result)
   in
   match Eio_context.get_switch_opt () with
-  | Some sw -> Eio.Fiber.fork ~sw run_verdict
+  | Some sw -> fork_workspace_job state ~sw run_verdict
   | None -> run_verdict ()
 
 (* The row under the Verification cursor, if the list has one. *)

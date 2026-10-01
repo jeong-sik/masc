@@ -161,8 +161,9 @@ let retryable_codex_error = function
      | Runtime_codex_app_server.Codex_error_info.Active_turn_not_steerable _
      | Runtime_codex_app_server.Codex_error_info.Unrecognized _ -> true)
   | Runtime_codex_app_server.Turn_failed {codex_error_info=None;_}
-  | Runtime_codex_app_server.Spawn_failed _
+  (* Admission also wraps transient model/list transport failures. *)
   | Runtime_codex_app_server.Reasoning_effort_admission_failed _
+  | Runtime_codex_app_server.Spawn_failed _
   | Runtime_codex_app_server.Turn_input_write_failed _
   | Runtime_codex_app_server.Protocol_error _
   | Runtime_codex_app_server.Stopped_by_host _

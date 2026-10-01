@@ -767,8 +767,8 @@ let observe_failed_dispatch ~observe_transport_uncertain = function
     observe_transport_uncertain ()
   | Runtime_codex_app_server.Timeout { turn_accepted = false; _ }
   | Runtime_codex_app_server.Process_exited { turn_accepted = false; _ }
-  | Runtime_codex_app_server.Invalid_config _
   | Runtime_codex_app_server.Reasoning_effort_admission_failed _
+  | Runtime_codex_app_server.Invalid_config _
   | Runtime_codex_app_server.Spawn_failed _
   | Runtime_codex_app_server.Protocol_error _
   | Runtime_codex_app_server.Rpc_error _

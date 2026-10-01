@@ -1,4 +1,5 @@
 import { signal } from '@preact/signals'
+import { focusedCommentNeedsAncestors, mergeCommentPages } from './comment-context'
 import { showToast } from '../common/toast'
 import {
   boardPosts,
@@ -61,9 +62,13 @@ export const SORT_MODES: { id: BoardSortMode; label: string }[] = [
 export const detailPost = signal<BoardPost | null>(null)
 export const detailComments = signal<BoardComment[]>([])
 export const detailCommentPage = signal<BoardCommentPage>({ offset: 0, total: 0 })
+// Initial post GET; ancestor pagination keeps the existing loading flags.
+export type DetailReadPhase = 'idle' | 'loading' | 'loaded' | 'failed'
+export const detailReadPhase = signal<DetailReadPhase>('idle')
 export const detailLoading = signal(false)
 export const detailLoadingOlder = signal(false)
 export const detailPostId = signal<string | null>(null)
+export const detailFocusedCommentId = signal<string | null>(null)
 let detailRequestId = 0
 
 // ── Signals: hearth filters ───────────────────────────────────────
@@ -334,12 +339,16 @@ export function visibilityBadgeColor(vis: string): string {
 // ── Data operations ────────────────────────────────────────────────
 export async function loadPostDetail(postId: string, focusedCommentId?: string | null) {
   const requestId = ++detailRequestId
+  const focus = focusedCommentId === undefined && detailPostId.value === postId
+    ? detailFocusedCommentId.value : focusedCommentId?.trim() || null
+  detailFocusedCommentId.value = focus
   detailPostId.value = postId
   detailPost.value = null
   detailComments.value = []
   detailCommentPage.value = { offset: 0, total: 0 }
   detailLoadingOlder.value = false
   detailLoading.value = true
+  detailReadPhase.value = 'loading'
   try {
     const data = await fetchBoardPost(postId)
     if (detailPostId.value !== postId || detailRequestId !== requestId) return
@@ -370,21 +379,33 @@ export async function loadPostDetail(postId: string, focusedCommentId?: string |
       // dropped here even after the wire/list-normalization fix landed.
       closed: data.closed,
     }
+    detailReadPhase.value = 'loaded'
     let comments = data.comments
     let page = data.commentPage
-    while (focusedCommentId && page.offset > 0
-      && !comments.some(comment => comment.id === focusedCommentId)) {
-      const offset = Math.max(0, page.offset - COMMENT_PAGE_SIZE)
-      const older = await fetchBoardPost(postId, offset, page.offset - offset)
-      if (detailPostId.value !== postId || detailRequestId !== requestId) return
-      comments = [...older.comments, ...comments]
-      page = older.commentPage
-    }
     detailComments.value = comments
     detailCommentPage.value = page
+    try {
+      while (focus && page.offset > 0 && focusedCommentNeedsAncestors(comments, focus)) {
+        const offset = Math.max(0, page.offset - COMMENT_PAGE_SIZE)
+        const older = await fetchBoardPost(postId, offset, page.offset - offset)
+        if (detailPostId.value !== postId || detailRequestId !== requestId) return
+        if (older.commentPage.offset >= page.offset) {
+          throw new Error('Older comment page did not advance toward the start')
+        }
+        comments = mergeCommentPages(older.comments, comments)
+        page = older.commentPage
+        detailComments.value = comments
+        detailCommentPage.value = page
+      }
+    } catch (err) {
+      if (detailPostId.value !== postId || detailRequestId !== requestId) return
+      console.warn('[Board] failed to load focused comment ancestors:', postId, err)
+      showToast('이전 댓글을 불러오는 데 실패했습니다', 'error')
+    }
   } catch (err) {
     console.warn('[Board] failed to load post detail:', postId, err)
     if (detailPostId.value === postId && detailRequestId === requestId) {
+      detailReadPhase.value = 'failed'
       detailPost.value = null
       detailComments.value = []
       detailCommentPage.value = { offset: 0, total: 0 }
@@ -406,11 +427,7 @@ export async function loadOlderPostComments(postId: string) {
   try {
     const data = await fetchBoardPost(postId, offset, page.offset - offset)
     if (detailPostId.value !== postId || detailRequestId !== requestId) return
-    const seen = new Set(detailComments.value.map(comment => comment.id))
-    detailComments.value = [
-      ...data.comments.filter(comment => !seen.has(comment.id)),
-      ...detailComments.value,
-    ]
+    detailComments.value = mergeCommentPages(data.comments, detailComments.value)
     detailCommentPage.value = data.commentPage
   } catch (err) {
     console.warn('[Board] failed to load older comments:', postId, err)

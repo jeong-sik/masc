@@ -138,6 +138,8 @@ type provider =
   ; transport : transport
   ; is_non_interactive : bool
   ; credentials : credential option
+  ; max_context : int option
+    (** Provider context default; a binding override takes precedence, then the model default. *)
   ; account_home : string option
     (** Absolute, operator-owned CLI state directory for Claude Code, Codex
         or Muse Code. Muse requires an explicit value at materialization;
@@ -235,8 +237,8 @@ type model_spec =
   ; api_name : string
   ; tools_support : bool
   ; max_context : int option
-      (** [models.<id>.max-context] operator override. [None] means the AGENT_CORE
-          capability catalog's max-context is the sole source; resolved via
+      (** Shared model default, below binding and provider declarations.
+          [None] leaves undeclared bindings to the capability catalog. Resolve via
           {!Runtime_instance.resolve_max_context_of_runtime}, never read directly. *)
   ; thinking_support : bool option
         (** Absent inherits provider defaults; Some false explicitly disables thinking. *)
@@ -285,6 +287,8 @@ type binding =
         [enabled] in TOML defaults to [true]. *)
   ; is_default : bool
   ; wizard_default : bool
+  ; max_context : int option
+    (** Context override for this provider/model binding, before provider and model defaults. *)
   ; max_concurrent : int option
   ; disable_parallel_tool_use : bool
         (** Request policy for this binding. [true] asks the provider for at

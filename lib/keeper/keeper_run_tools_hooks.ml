@@ -951,6 +951,9 @@ let assemble_hooks
                 in
                 let recall_tool_available name =
                   !active_tool_surface_enabled
+                  && (match current_params.tool_choice with
+                      | Some Agent_core.Types.None_ -> false
+                      | None | Some (Agent_core.Types.Auto | Agent_core.Types.Any | Agent_core.Types.Tool _) -> true)
                   && List.mem name schema_filter
                   && List.exists (fun (tool : Agent_core.Tool.t) ->
                        String.equal tool.schema.name name)

@@ -407,7 +407,8 @@ Successful catalog admission is cached per binary, connection, workspace and
 model/window. Binary metadata, account configuration, credentials, original catalog,
 inherited configuration, and filtered environment revisions invalidate that cache.
 Only digests and public model metadata are retained. There is no age-based cache.
-An unchanged connection avoids a catalog subprocess on later turns.
+An unchanged connection avoids a catalog subprocess on later turns. Ephemeral
+readiness homes do not populate the process-global cache.
 
 MASC also overrides `model_auto_compact_token_limit` with the requested nominal
 window. Codex applies its own model-native compaction headroom; an account-local

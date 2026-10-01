@@ -2508,8 +2508,12 @@ let admit_declared_context ~mgr ~clock ~cwd ~protocol_cwd config =
       | Some model -> Ok model
       | None -> Error (Invalid_config "a declared Codex context requires an explicit model") in
     let* cache_key, revision = context_admission_identity ~cwd:protocol_cwd config in
-    let cached = Mutex.protect context_admission_cache_mutex (fun () ->
-      Hashtbl.find_opt context_admission_cache cache_key) in
+    (* Readiness owns a fresh short-lived home. Never retain its catalog in a
+       process-global cache after that home has been removed. *)
+    let cacheable = Option.is_none config.isolated_home in
+    let cached = if not cacheable then None else
+      Mutex.protect context_admission_cache_mutex (fun () ->
+        Hashtbl.find_opt context_admission_cache cache_key) in
     match cached with
     | Some (cached_revision, cached_model, cached_requested, catalog)
       when cached_revision = revision && cached_model = model && cached_requested = requested -> Ok (Some catalog)
@@ -2541,8 +2545,9 @@ let admit_declared_context ~mgr ~clock ~cwd ~protocol_cwd config =
       if revision <> after_revision then
         Error (Invalid_config "Codex connection changed during context admission; retry with the current connection")
       else (
-        Mutex.protect context_admission_cache_mutex (fun () ->
-          Hashtbl.replace context_admission_cache cache_key (revision, model, requested, payload));
+        if cacheable then
+          Mutex.protect context_admission_cache_mutex (fun () ->
+            Hashtbl.replace context_admission_cache cache_key (revision, model, requested, payload));
         Ok (Some payload)))
 ;;
 

@@ -192,7 +192,10 @@ let test_persisted_invalid_invite_reaches_diagnostic_projections () =
      | _ -> fail "named and UUID-backed corruption must each produce exactly one diagnostic");
     (match Invite.list ~base_path ~now:(Time_compat.now ()) with
      | Error (Invite.Invalid_expiry (Expiry.Invalid_timestamp "not-a-timestamp")) -> ()
-     | Error error -> fail (Auth.credential_listing_error_to_string error)
+     | Error (Invite.Invalid_expiry (Expiry.Invalid_timestamp stamp)) ->
+         fail ("unexpected invalid expiry: " ^ stamp)
+     | Error (Invite.Credentials_unavailable error) ->
+         fail (Masc_domain.masc_error_to_string error)
      | Ok _ -> fail "Play must not silently omit persisted malformed invites"))
     [ false; true ]
 
@@ -305,10 +308,10 @@ let test_nonregular_inventory_entries_are_unreadable () =
           fifo, named
       | `Redirect ->
           let id = Masc_domain.Credential_id.generate () in
-          let target = Masc_domain.Credential_id.to_string id in
+          let target = Masc_domain.Credential_id.to_string id ^ ".json" in
           Auth.save_private_text_file named
             (Yojson.Safe.to_string (`Assoc ["redirect_to", `String target]));
-          let fifo = Filename.concat (Filename.dirname named) (target ^ ".json") in
+          let fifo = Filename.concat (Filename.dirname named) target in
           fifo, fifo
     in
     Unix.mkfifo fifo 0o600;

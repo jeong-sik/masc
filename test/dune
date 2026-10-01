@@ -7954,3 +7954,5 @@
 (include stanzas/test_candle_purchase_flow.inc)
 
 (include stanzas/test_tui_candle_currency_pty.inc)
+
+(include stanzas/test_item_http_redirects.inc)

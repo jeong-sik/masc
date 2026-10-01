@@ -159,8 +159,8 @@ let test_progress_post_keeps_typed_continuation () =
     } in
   match finish (Runtime_agent.Yielded_to_operation_queued { turns_used = 1 }) failed with
   | Error error ->
-    (match Masc.Keeper_internal_error.classify_masc_internal_error error with
-     | Some (Masc.Keeper_internal_error.Terminal_effect_failed
+    (match Keeper_internal_error.classify_masc_internal_error error with
+     | Some (Keeper_internal_error.Terminal_effect_failed
          { failure_class = Tool_result.Runtime_failure
          ; effect_disposition = Tool_result.Proven_post_effect
          ; detail = Keeper_terminal_effect_detail.Output_artifact_unstored { message }

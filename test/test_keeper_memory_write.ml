@@ -726,7 +726,7 @@ let test_recall_artifacts_follow_history_retention () =
   let config = Masc.Workspace.default_config base_path in
   let meta = make_meta "recall-retention" in
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
-  let store = Masc.Tool_blob_store.create ~base_path in
+  let store = Tool_blob_store.create ~base_path in
   let write content =
     let execution = Runtime.keeper_memory_write_with_outcome ~config ~meta
         ~args:(make_args ~title:"" ~content) in
@@ -740,8 +740,8 @@ let test_recall_artifacts_follow_history_retention () =
   let artifact prompt =
     let json = List.hd (List.rev (String.split_on_char '\n' prompt))
         |> Yojson.Safe.from_string in
-    match Masc.Tool_output.normalized_artifact_ref_of_json json with
-    | Masc.Tool_output.Decoded_normalized_artifact_ref reference -> reference
+    match Tool_output.normalized_artifact_ref_of_json json with
+    | Tool_output.Decoded_normalized_artifact_ref reference -> reference
     | _ -> Alcotest.fail "expected published recall artifact"
   in
   let sweep mode =
@@ -750,10 +750,10 @@ let test_recall_artifacts_follow_history_retention () =
     | Ok _ -> ()
     | Error error -> Alcotest.fail (Tool_blob_maintenance.error_to_string error)
   in
-  let present (reference : Masc.Tool_output.artifact_ref) =
-    match Masc.Tool_blob_store.fetch store ~sha256:reference.sha256 with
+  let present (reference : Tool_output.artifact_ref) =
+    match Tool_blob_store.fetch store ~sha256:reference.sha256 with
     | Ok value -> Option.is_some value
-    | Error error -> Alcotest.fail (Masc.Tool_blob_store.fetch_error_to_string error)
+    | Error error -> Alcotest.fail (Tool_blob_store.fetch_error_to_string error)
   in
   write "The first historical memory remains readable.";
   let first = artifact (render 1.) in
@@ -833,14 +833,14 @@ let test_source_bound_write_discards_stale_claim_and_recreates () =
     | reference :: _ ->
       (match Yojson.Safe.from_string reference with
        | json ->
-         (match Masc.Tool_output.normalized_artifact_ref_of_json json with
-          | Masc.Tool_output.Decoded_normalized_artifact_ref artifact ->
-            (match Masc.Tool_blob_store.fetch
-               (Masc.Tool_blob_store.create ~base_path:config.base_path)
+         (match Tool_output.normalized_artifact_ref_of_json json with
+          | Tool_output.Decoded_normalized_artifact_ref artifact ->
+            (match Tool_blob_store.fetch
+               (Tool_blob_store.create ~base_path:config.base_path)
                ~sha256:artifact.sha256 with
              | Ok (Some body) -> body
              | Ok None -> Alcotest.fail "recall artifact is missing"
-             | Error error -> Alcotest.fail (Masc.Tool_blob_store.fetch_error_to_string error))
+             | Error error -> Alcotest.fail (Tool_blob_store.fetch_error_to_string error))
           | _ -> prompt)
        | exception Yojson.Json_error _ -> prompt)
     | [] -> prompt
@@ -967,8 +967,8 @@ let test_source_bound_write_discards_stale_claim_and_recreates () =
   Alcotest.(check bool) "no-reader fallback identifies the invalidated source" true
     (contains ~needle:source_path without_reader
      && contains ~needle:"reason=source_changed" without_reader);
-  let blob_root = Masc.Tool_blob_store.root_dir
-      (Masc.Tool_blob_store.create ~base_path) in
+  let blob_root = Tool_blob_store.root_dir
+      (Tool_blob_store.create ~base_path) in
   let saved_blob_root = blob_root ^ ".saved" in
   Sys.rename blob_root saved_blob_root;
   Fs_compat.save_file blob_root "not a directory";
@@ -1204,8 +1204,8 @@ let test_one_unreadable_source_does_not_stop_the_pass () =
             ~config ~meta ~keepers_dir ~keeper_id:meta.name ~now:200.0 () |> Option.get in
         let reference = List.hd (List.rev (String.split_on_char '\n' prompt))
           |> Yojson.Safe.from_string in
-        let body = match Masc.Tool_output.normalized_artifact_ref_of_json reference with
-          | Masc.Tool_output.Decoded_normalized_artifact_ref artifact ->
+        let body = match Tool_output.normalized_artifact_ref_of_json reference with
+          | Tool_output.Decoded_normalized_artifact_ref artifact ->
             let execution, page = Masc.Keeper_artifact_read.handle_with_page
                 ~base_path ~args:(`Assoc ["sha256", `String artifact.sha256]) in
             (match page with

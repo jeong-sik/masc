@@ -1353,16 +1353,21 @@ let test_repo_runtime_toml_declares_no_clamped_max_context () =
       List.filter_map
         (fun (rt : Runtime_instance.t) ->
            match Runtime_instance.resolve_max_context_of_runtime rt with
-           | Some (effective, Runtime_instance.Override_clamped_by_capability) ->
+           | Some (effective, (Runtime_instance.Override_clamped_by_capability
+               | Runtime_instance.Provider_override_clamped_by_capability
+               | Runtime_instance.Binding_override_clamped_by_capability)) ->
              Some
                (Printf.sprintf
                   "%s declares %s and the catalog gives %d"
                   rt.Runtime_instance.id
-                  (match rt.Runtime_instance.model.Runtime_schema.max_context with
-                   | Some declared -> string_of_int declared
-                   | None -> "<none>")
+                  (match rt.binding.max_context, rt.provider.max_context, rt.model.max_context with
+                   | Some declared, _, _ | None, Some declared, _
+                   | None, None, Some declared -> string_of_int declared
+                   | None, None, None -> "<none>")
                   effective)
-           | Some (_, (Runtime_instance.Override | Runtime_instance.Capability)) | None -> None)
+           | Some (_, (Runtime_instance.Override | Runtime_instance.Capability
+               | Runtime_instance.Provider_override | Runtime_instance.Binding_override))
+           | None -> None)
         runtimes
     in
     check (list string)

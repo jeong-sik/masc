@@ -914,7 +914,7 @@ def tab_until(
     """Press Tab until the screen shows [needle], or give up after a lap.
 
     Name the surface the walk is going to, not one on the way. The ring is
-    not fixed: Masc_tui_types.is_surface_active leaves Approvals out of it
+    not fixed: Masc_tui_surface_navigation.is_surface_active leaves Approvals out of it
     while nothing is pending, so a walk that stopped there first burned
     every press on a screen that did not exist. Six scenarios used it as a
     waypoint to Board, and a seventh fabricated a pending tool approval in
@@ -7148,7 +7148,7 @@ def chat_retained_stop_interaction(fixture: AtomicChatFixture) -> Interaction:
                 raise AssertionError("initial stop never reached the server")
             send_and_wait(process, master_fd, output, b"retained-original", composer_showing(b"retained-original"))
             send_and_wait(process, master_fd, output, b"\r", "내 메시지 1건 대기".encode())
-            send_and_wait(process, master_fd, output, b"\x1b", b"Input retained after Esc")
+            send_and_wait(process, master_fd, output, b"\x1b", "중단 뒤 보관 중".encode())
             if fixture.received:
                 raise AssertionError(f"second Esc dispatched retained input: {fixture.received!r}")
             fixture.release_interrupt.set()

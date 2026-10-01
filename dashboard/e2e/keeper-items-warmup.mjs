@@ -21,6 +21,7 @@ try {
     accountReads.push({ recovered })
     return route.fulfill({ contentType: 'application/json', body: JSON.stringify({
       status: 'ready', keeper: 'rondo', balance_milli: recovered ? '600' : '800',
+      account_revision: (recovered ? '1' : '0').repeat(64),
       owned_items: recovered ? ['crown', 'beanie'] : ['crown'], catalog,
     }) })
   })
@@ -43,7 +44,18 @@ try {
   await page.getByText('미리보기 · beanie', { exact: true }).waitFor()
   await page.getByRole('alert').waitFor()
   await capture('item-preview-before-warmup')
-  await page.evaluate(() => window.refreshKeeperItemsExecutionFixture())
+  let warmUpRejected = false
+  try {
+    await page.evaluate(() => window.refreshKeeperItemsExecutionFixture())
+  } catch (error) {
+    if (!error?.message?.includes('Execution projection is initializing')) {
+      throw error
+    }
+    warmUpRejected = true
+  }
+  if (!warmUpRejected) {
+    throw new Error('expected warmup execution refresh to reject with initializing')
+  }
   await page.getByText('현재 작업 공간을 확인하는 중…', { exact: true }).waitFor()
   for (const text of ['0.800 Candle', '미리보기 · beanie', '보유 1 / 18개']) {
     if (await page.getByText(text, { exact: true }).count()) throw new Error(`warm-up retained ${text}`)
@@ -51,6 +63,7 @@ try {
   if (await page.getByRole('alert').count()) throw new Error('warm-up retained old preview failure')
   await capture('item-workspace-warmup')
   recovered = true
+  await page.evaluate(() => window.updateKeeperItemsFixture('1'.repeat(64)))
   await page.evaluate(() => window.refreshKeeperItemsExecutionFixture())
   await page.getByText('0.600 Candle', { exact: true }).waitFor()
   await page.getByText('보유 2 / 18개', { exact: true }).waitFor()

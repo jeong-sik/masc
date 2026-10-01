@@ -168,13 +168,30 @@ def run(executable):
             # but the visible Work list owns keys after that refresh.
             marker.unlink()
             backlog = Path(base) / ".masc" / "tasks" / "backlog.json"
-            backlog.write_text(json.dumps({"tasks": [], "last_updated": STAMP, "version": 1}), encoding="utf-8")
+            remaining = [dict(task("todo"), id=f"task-remaining-{index}",
+                              title=f"Remaining task {index}") for index in (1, 2)]
+            backlog.write_text(json.dumps({"tasks": remaining, "last_updated": STAMP, "version": 1}), encoding="utf-8")
             h.send_and_wait(process, fd, output, b"r", b"MASC Work")
             os.write(fd, b"x")
             h.drain_until_quiet(process, fd, output)
             assert not marker.exists(), "a hidden task accepted cancellation after removal"
             assert not any(b"masc_transition" in body for _, body in requests), requests
             assert b"MASC Work" in screen(output) and b"MASC Task" not in screen(output), screen(output)
+            # Choose the first visible row, then move down while the removed
+            # detail ID is still present. Enter must open the selected row.
+            h.send_and_wait(process, fd, output, b"\x1b[H", b"MASC Work")
+            h.send_and_wait(process, fd, output, b"j", b"MASC Work")
+            h.send_and_wait(process, fd, output, b"\r", b"MASC Task")
+            assert b"task-remaining-2" in compact(screen(output)), screen(output)
+            # Remove this detail too, retaining two rows to exercise k on
+            # the same stale-detail path with the cursor at the last row.
+            remaining[1]["id"] = "task-remaining-3"
+            backlog.write_text(json.dumps({"tasks": remaining, "last_updated": STAMP, "version": 1}), encoding="utf-8")
+            h.send_and_wait(process, fd, output, b"r", b"MASC Work")
+            h.send_and_wait(process, fd, output, b"\x1b[F", b"MASC Work")
+            h.send_and_wait(process, fd, output, b"k", b"MASC Work")
+            h.send_and_wait(process, fd, output, b"\r", b"MASC Task")
+            assert b"task-remaining-1" in compact(screen(output)), screen(output)
             os.write(fd, b"q")
 
         h.run_terminal_scenario(executable, description="Task metadata and terminal evidence are fully scrollable",

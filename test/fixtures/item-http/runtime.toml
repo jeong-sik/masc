@@ -17,9 +17,8 @@ endpoint = "http://127.0.0.1:9/v1"
 exact-body-timeout-s = 1200.0
 
 [models.smoke]
-# Keep the harness-local slot alias, with a real provider-scoped catalog model
-# so exact-output lanes can publish. The loopback endpoint still answers no
-# model requests; this fixture exercises startup and Item routes only.
+# Exact-output startup requires a model row in the embedded AGENT_CORE catalog.
+# The binding still uses the isolated loopback endpoint above; no model is called.
 api-name = "deepseek-v4-flash"
 max-context = 32768
 tools-support = true

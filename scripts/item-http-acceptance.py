@@ -3,7 +3,8 @@
 No live instance is contacted. Login writes credentials inside the isolated
 workspace; its auth directory is removed on exit and excluded from evidence.
 Keeper metadata, empty ledger and catalog are synthetic inputs, not evidence
-of lifecycle creation, a real payout or a Keeper purchase.
+of lifecycle creation, a real payout or a model-driven purchase.
+Authenticated MCP calls exercise the real purchase and equipment ledger.
 """
 import argparse
 import atexit
@@ -157,14 +158,19 @@ def reserve_port():
 
 reservation, port = reserve_port()
 env.update(MASC_BASE_PATH=str(base), MASC_ASSETS_DIR=str(dashboard.parent),
-           MASC_HOST='127.0.0.1', MASC_HTTP_AUTH_STRICT='1',
-           MASC_KEEPER_AUTONOMOUS_ENABLED='0',
+           MASC_HOST='127.0.0.1', MASC_HTTP_AUTH_STRICT='1', MASC_CONFIG_BOOTSTRAP='skip',
+           MASC_GRPC_ENABLED='0', MASC_WS_ENABLED='0', MASC_KEEPER_AUTONOMOUS_ENABLED='0',
            MASC_ORCHESTRATOR_ENABLED='0', MASC_OTEL_ENABLED='0')
 login = subprocess.run([str(binary), 'login', '--base-path', str(base),
     '--host', '127.0.0.1', '--port', str(port), '--agent', 'item-probe-worker',
     '--role', 'worker', '--client-env', 'MCP_TOKEN', '--no-expiry', '--json'],
     env=env, capture_output=True, text=True, check=True)
 token = json.loads(login.stdout)['bearer_token']
+keeper_login = subprocess.run([str(binary), 'login', '--base-path', str(base),
+    '--host', '127.0.0.1', '--port', str(port), '--agent', 'item-runtime-probe',
+    '--role', 'worker', '--client-env', 'ITEM_PROBE_TOKEN', '--no-expiry', '--json'],
+    env=env, capture_output=True, text=True, check=True)
+keeper_token = json.loads(keeper_login.stdout)['bearer_token']
 origin = f'http://127.0.0.1:{port}'
 # These requests target only the isolated child server and carry local auth.
 # Proxy settings in the invoking shell must not route them elsewhere.
@@ -182,6 +188,52 @@ def request(path, authenticated=True):
         records.append({'path': path, 'authenticated': authenticated,
                         'status': response.status, 'sha256': hashlib.sha256(body).hexdigest()})
         return response.status, body
+
+rpc_sequence = 0
+rpc_session = {}
+tool_records = []
+def rpc(method, params, notification=False):
+    global rpc_sequence
+    rpc_sequence += 1
+    payload = {'jsonrpc': '2.0', 'method': method, 'params': params}
+    if not notification:
+        payload['id'] = rpc_sequence
+    headers = {'Authorization': 'Bearer ' + keeper_token,
+               'Content-Type': 'application/json',
+               'Accept': 'application/json, text/event-stream', **rpc_session}
+    req = urllib.request.Request(origin + '/mcp', data=json.dumps(payload).encode(), headers=headers)
+    with http.open(req, timeout=10) as response:
+        body = response.read()
+        records.append({'path': '/mcp', 'authenticated': True, 'rpc_method': method,
+                        'status': response.status, 'sha256': hashlib.sha256(body).hexdigest()})
+        if method == 'initialize':
+            rpc_session['Mcp-Session-Id'] = response.headers['Mcp-Session-Id']
+            rpc_session['Mcp-Protocol-Version'] = '2025-11-25'
+    if notification:
+        return None
+    try:
+        envelope = json.loads(body)
+    except json.JSONDecodeError:
+        events = [json.loads(line[5:].strip()) for line in body.decode().splitlines()
+                  if line.startswith('data:')]
+        require(len(events) == 1, 'expected one JSON-RPC SSE event')
+        envelope = events[0]
+    require(envelope.get('id') == rpc_sequence and 'error' not in envelope, envelope)
+    return envelope['result']
+
+def tool(name, arguments, error_code=None, validation_reason=None):
+    result = rpc('tools/call', {'name': name, 'arguments': arguments})
+    failed = result.get('isError', False)
+    require(failed == (error_code is not None or validation_reason is not None), result)
+    data = result['structuredContent']
+    if error_code is not None:
+        require(data['error_code'] == error_code, data)
+    if validation_reason is not None:
+        require(data['validation'] == 'agent_core_tool_middleware', data)
+        require(data['reason'] == validation_reason, data)
+    tool_records.append({'name': name, 'arguments': arguments, 'is_error': failed,
+                         'data': data})
+    return data
 
 class PortCollision(Exception):
     pass
@@ -269,14 +321,50 @@ with (root / 'server.log').open('wb') as log:
         require(status == 200, status)
         validate_portrait(png, 96)
         (root / 'portrait.png').write_bytes(png)
+        rpc('initialize', {'protocolVersion': '2025-11-25', 'capabilities': {},
+                           'clientInfo': {'name': 'item-http-acceptance', 'version': '1'}})
+        rpc('notifications/initialized', {}, notification=True)
+        own = tool('keeper_candle_balance', {})
+        require(own['keeper'] == 'item-runtime-probe' and own['balance_milli'] == '0', own)
+        tool('keeper_candle_balance', {'keeper': 'another-keeper'}, validation_reason='empty_schema_args')
+        starting = tool('keeper_candle_equip', {'slot': 'face', 'item': 'default'})['equipment']
+        item = 'shades' if starting['face'] == 'glasses' else 'glasses'
+        tool('keeper_candle_equip', {'slot': 'face', 'item': item}, 'equipment_refused')
+        purchase = tool('keeper_candle_purchase', {'item': item})
+        require(purchase['amount_milli'] == '0', purchase)
+        require(purchase['account']['owned_items'] == [item], purchase)
+        ledger_path = base / '.masc/candle-ledger.jsonl'
+        purchased_ledger = ledger_path.read_bytes()
+        tool('keeper_candle_purchase', {'item': item}, 'already_owned')
+        tool('keeper_candle_purchase', {'item': 'crown'}, 'insufficient_balance')
+        tool('keeper_candle_equip', {'slot': 'head', 'item': item}, 'equipment_refused')
+        require(ledger_path.read_bytes() == purchased_ledger, 'refused Item calls changed the ledger')
+        equipped = tool('keeper_candle_equip', {'slot': 'face', 'item': item})
+        require(equipped['changed'] is True and equipped['equipment']['face'] == item, equipped)
+        for slot in ('head', 'neck', 'hand', 'base'):
+            require(equipped['equipment'][slot] == starting[slot], equipped)
+        status, updated = request(path)
+        account_after = json.loads(updated)
+        require(status == 200 and account_after['balance_milli'] == '0', account_after)
+        require(account_after['owned_items'] == [item], account_after)
+        (root / 'account-after.json').write_bytes(updated)
+        status, equipped_png = request('/api/v1/keepers/item-runtime-probe/portrait.png?size=96')
+        require(status == 200, status)
+        validate_portrait(equipped_png, 96)
+        require(equipped_png != png, 'equipment did not change the served portrait')
+        (root / 'portrait-equipped.png').write_bytes(equipped_png)
+        restored = tool('keeper_candle_equip', {'slot': 'face', 'item': 'default'})
+        require(restored['equipment'] == starting, restored)
+        status, restored_png = request('/api/v1/keepers/item-runtime-probe/portrait.png?size=96')
+        require(status == 200 and restored_png == png, 'default did not restore the served portrait')
         status, index = request('/dashboard/', False)
         require(status == 200, status)
         require(hashlib.sha256(index).hexdigest() == hashlib.sha256(
             (dashboard / 'index.html').read_bytes()).hexdigest(), 'served index differs')
         result = dict(source_sha=source, binary_sha256=hashlib.sha256(binary.read_bytes()).hexdigest(),
             harness_sha256=harness_sha256, fixture_sha256=config_hashes, dashboard_index_sha256=hashlib.sha256(index).hexdigest(),
-            scope='Isolated CI binary over real TCP HTTP; synthetic current-schema paused Keeper metadata, empty test ledger and configured catalog; no lifecycle creation, production rollout or Keeper tool execution',
-            requests=records, passed=True)
+            scope='Isolated CI binary over real TCP HTTP; synthetic current-schema paused Keeper metadata, empty test ledger and configured catalog; authenticated Keeper MCP purchase/equipment calls and ledger-backed HTTP; no lifecycle creation, model-driven decision, paid purchase/payout or production rollout',
+            requests=records, tool_calls=tool_records, passed=True)
         (root / 'http-evidence.json').write_text(json.dumps(result, indent=2) + '\n')
         print('Isolated Item HTTP acceptance: PASS')
     finally:

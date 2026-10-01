@@ -379,6 +379,11 @@ let test_briefing_validates_written_recommendations () =
     | `Assoc fields -> `Assoc (fields @ [ "reason", `Null ])
     | _ -> Alcotest.fail "canonical recommendation must be an object"
   in
+  let blank_reason reason =
+    match canonical_action with
+    | `Assoc fields -> `Assoc (("reason", `String reason) :: List.remove_assoc "reason" fields)
+    | _ -> Alcotest.fail "canonical recommendation must be an object"
+  in
   let duplicate_kind =
     match valid_action with
     | `Assoc fields -> `Assoc (fields @ [ "action_kind", `String "pause_workspace" ])
@@ -437,6 +442,7 @@ let test_briefing_validates_written_recommendations () =
       | Error detail, true -> Alcotest.fail detail
       | Ok _, false -> Alcotest.fail "empty written recommendation fabricated attention"))
     [ `Assoc [], false; duplicate_reason, false; duplicate_kind, false;
+      blank_reason "\u{00A0}", false; blank_reason "\u{FEFF}", false;
       valid_action, true; canonical_action, true ]
 
 let tests =

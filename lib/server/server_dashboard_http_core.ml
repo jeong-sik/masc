@@ -203,8 +203,8 @@ let dashboard_briefing_sections_http_json ~state ~sw ~clock request =
       ~proc_mgr:state.Mcp_server.proc_mgr
       ()
   in
-  (* Sections own their live cache. Caching a pending/error envelope again
-     would hide a completed asynchronous refresh from ordinary polling. *)
+  (* Sections owns its async cache and publishes recovery there. Caching its
+     pending envelope again would hide that recovery from ordinary polls. *)
   with_dashboard_timeout ~clock compute
 ;;
 

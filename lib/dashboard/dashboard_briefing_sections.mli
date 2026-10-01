@@ -13,6 +13,8 @@ module For_test : sig
   val compact_agent_json : Masc_domain.agent -> Yojson.Safe.t
   val reset_cache : unit -> unit
   val seed_cache :
+    config:Workspace.config ->
+    ?actor:string ->
     ?cached_at:float ->
     ?last_error:string ->
     ?refresh_in_flight:bool ->

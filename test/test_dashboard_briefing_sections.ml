@@ -83,6 +83,28 @@ let iso_of_unix ts =
     (tm.Unix.tm_mon + 1)
     tm.Unix.tm_mday tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
 
+let test_cache_is_scoped_to_workspace_and_actor () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_a = temp_dir () and base_b = temp_dir () in
+  Fun.protect ~finally:(fun () -> Briefing.reset_cache (); cleanup_dir base_a; cleanup_dir base_b)
+    (fun () ->
+      Briefing.reset_cache ();
+      let config_a = Workspace.default_config base_a in
+      let config_b = Workspace.default_config base_b in
+      let seed config actor marker =
+        Briefing.seed_cache ~config ~actor ~cached_at:(Unix.gettimeofday ())
+          (`Assoc ["status", `String "ok"; "marker", `String marker]) in
+      seed config_a "alice" "A/alice";
+      seed config_a "bob" "A/bob";
+      seed config_b "alice" "B/alice";
+      List.iter (fun (config, actor, expected) ->
+        let result = Dashboard_briefing_sections.json ~config ~actor ~sw
+            ~clock:(Eio.Stdenv.clock env) ~proc_mgr:None () in
+        check_string_field result "marker" expected)
+        [config_a, "alice", "A/alice"; config_a, "bob", "A/bob";
+         config_b, "alice", "B/alice"])
+
 let test_briefing_cold_call_returns_pending () =
   (* After #2094, cold calls (no cache) return "pending" and trigger async refresh.
      This avoids blocking the dashboard on cold-start computation. *)
@@ -148,7 +170,7 @@ let test_force_refresh_with_cached_result_returns_stale_cached_payload () =
       Briefing.reset_cache ();
       let config = Workspace.default_config base_path in
       ignore (Workspace.init config ~agent_name:None);
-      Briefing.seed_cache
+      Briefing.seed_cache ~config
         ~cached_at:(Unix.gettimeofday ())
         (`Assoc
           [
@@ -384,6 +406,7 @@ let test_build_briefing_sections_watch_evidence_uses_namespace_wording () =
   | _ -> fail "expected watch evidence list"
 
 let () =
+  test_cache_is_scoped_to_workspace_and_actor ();
   run "Dashboard Mission Briefing"
     [
       ( "deterministic",

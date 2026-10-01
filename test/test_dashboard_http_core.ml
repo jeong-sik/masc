@@ -465,13 +465,13 @@ let test_briefing_http_observes_owner_recovery_on_next_poll () =
   (* These publications use the same owner cache that the asynchronous refresh
      updates. Both requests are ordinary polls, with the same actor and URL. *)
   Fun.protect ~finally:Dashboard_briefing_sections.For_test.reset_cache (fun () ->
-    Dashboard_briefing_sections.For_test.seed_cache
+    Dashboard_briefing_sections.For_test.seed_cache ~config
       ~cached_at:(Unix.gettimeofday ()) ~last_error:"attention unavailable" pending;
     let poll () = Server_dashboard_http_core.dashboard_briefing_sections_http_json
       ~state ~sw ~clock:env#clock (request "/api/v1/dashboard/briefing/sections") in
     check bool "first poll pending" true
       (Yojson.Safe.Util.member "status" (poll ()) = `String "pending");
-    Dashboard_briefing_sections.For_test.seed_cache
+    Dashboard_briefing_sections.For_test.seed_cache ~config
       ~cached_at:(Unix.gettimeofday ()) recovered;
     let fresh = poll () in
     check bool "next ordinary poll sees recovered sections" true

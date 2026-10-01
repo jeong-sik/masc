@@ -36,6 +36,24 @@ let compact_agent_json (agent : Masc_domain.agent) =
       ("capabilities", `List (List.map (fun item -> `String item) (take 2 agent.capabilities)));
     ]
 
+(* ECMAScript WhiteSpace and LineTerminator code points: the browser's
+   asString uses String.trim before deciding whether an action is displayable.
+   https://tc39.es/ecma262/multipage/ecmascript-language-lexical-grammar.html#sec-white-space *)
+let action_string_is_displayable value =
+  let rec has_content offset =
+    if offset >= String.length value then false
+    else
+      let decoded = String.get_utf_8_uchar value offset in
+      match Uchar.to_int (Uchar.utf_decode_uchar decoded) with
+      | 0x0009 | 0x000A | 0x000B | 0x000C | 0x000D | 0x0020 | 0x00A0
+      | 0x1680 | 0x2000 | 0x2001 | 0x2002 | 0x2003 | 0x2004 | 0x2005
+      | 0x2006 | 0x2007 | 0x2008 | 0x2009 | 0x200A | 0x2028 | 0x2029
+      | 0x202F | 0x205F | 0x3000 | 0xFEFF ->
+          has_content (offset + Uchar.utf_decode_length decoded)
+      | _ -> true
+  in
+  has_content 0
+
 let compact_briefing_summary_json briefing =
   let ( let* ) = Result.bind in
   let field name =
@@ -75,7 +93,7 @@ let compact_briefing_summary_json briefing =
               (fun result name ->
                 let* () = result in
                 match List.assoc_opt name fields with
-                | Some (`String value) when String.trim value <> "" -> Ok ()
+                | Some (`String value) when action_string_is_displayable value -> Ok ()
                 | _ ->
                     Error ("briefing recommended action." ^ name
                            ^ " must be a nonempty string"))

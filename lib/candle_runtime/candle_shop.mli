@@ -36,6 +36,14 @@ val account
   -> keeper:Keeper_id.Keeper_name.t
   -> (account, error) result
 
+val observed_account
+  :  now:(unit -> float)
+  -> base_path:string
+  -> keeper:Keeper_id.Keeper_name.t
+  -> (account, error) result
+(** Read-only account using recorded half-life boundaries. Does not publish
+    desired policy changes; read-authorized HTTP callers must use this path. *)
+
 val catalog : base_path:string -> (catalog_entry list, error) result
 
 (** The caller supplies its trusted Keeper identity. A single cursor-checked

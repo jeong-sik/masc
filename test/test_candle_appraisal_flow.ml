@@ -535,10 +535,32 @@ let test_server_records_the_request_before_dispatch_and_retains_its_answer () =
           Yojson.Safe.Util.(member "attempts" output = `List [])
       | _ -> fail "missing prompt lost its failed run outcome")
 
+let test_clock_reversal_retries_but_malformed_history_rejects () =
+  with_workspace @@ fun _env config ->
+  let waiting = prepared config "clock-catchup" in
+  let later () = now () +. 60. in
+  let future = ok (Candle_stamp.at ~now:later) in
+  append config [{E.at=future;body=E.Half_life_set Candle_decay.Off}];
+  let calls = ref [] in
+  (match Candle_appraise.settle_one ~now ~appraise:(make_runner calls)
+      ~base_path:config.base_path waiting with
+   | Candle_appraise.Retry_later _ -> () | _ -> fail "early wall clock was not retryable");
+  check int "early clock appends no payment" 0 (List.length (paid config waiting.goal_id));
+  (match Candle_appraise.settle_one ~now:later ~appraise:(make_runner calls)
+      ~base_path:config.base_path waiting with
+   | Candle_appraise.Settled _ -> () | _ -> fail "clock catch-up did not settle");
+  check int "clock recovery pays exactly once" 1 (List.length (paid config waiting.goal_id));
+  let malformed = prepared config "malformed-history" in
+  append config [{E.at=confirmed_at;body=E.Half_life_set Candle_decay.Off}];
+  (match Candle_appraise.settle_one ~now:later ~appraise:(make_runner calls)
+      ~base_path:config.base_path malformed with
+   | Candle_appraise.Rejected _ -> () | _ -> fail "reversed historical order became retryable")
+
 let () =
   run "candle_appraisal_flow"
     ["payout",
-      [test_case "worker pays once with isolated judgments and arithmetic" `Quick test_worker_pays_once_with_isolated_inputs_and_integer_evidence
+      [test_case "clock catch-up retries but malformed history rejects" `Quick test_clock_reversal_retries_but_malformed_history_rejects
+      ;test_case "worker pays once with isolated judgments and arithmetic" `Quick test_worker_pays_once_with_isolated_inputs_and_integer_evidence
       ;test_case "allowed large weights preserve exact money and Paid evidence" `Quick test_allowed_large_weights_settle_with_exact_money_and_evidence
       ;test_case "invalid weights wait for an event, not a pulse" `Quick test_invalid_weights_wait_for_an_event_not_a_pulse
       ;test_case "pulse retries unavailable transport" `Quick test_transport_recovery_is_retried_by_pulse

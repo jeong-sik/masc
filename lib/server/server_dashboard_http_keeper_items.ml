@@ -71,7 +71,7 @@ let handle_get state request reqd name =
      | Error detail -> respond ~status:`Service_unavailable (error_json detail)
      | Ok false -> respond ~status:`Not_found (error_json "Keeper not found")
      | Ok true ->
-       match Candle_status.current_view ~now:Time_compat.now ~base_path with
+       match Candle_status.observed_view ~now:Time_compat.now ~base_path with
        | Error Candle_status.Off ->
          respond (`Assoc [ "status", `String "off"; "keeper", `String name;
            "account_revision", `Null ])

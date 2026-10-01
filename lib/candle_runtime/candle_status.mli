@@ -26,6 +26,12 @@ type error =
   | Invalid_ledger of Candle_balance.error
   | Ledger_unavailable of string
 val error_to_string : error -> string
+val observed_view : now:(unit -> float) -> base_path:string -> (view, error) result
+(** Read-only ledger observation. Amounts use only recorded half-life boundaries;
+    the desired config policy is available for the catalog but takes monetary
+    effect only when an authorized writer publishes its boundary. Never appends,
+    repairs, or truncates the ledger. *)
+
 val current_view : now:(unit -> float) -> base_path:string -> (view, error) result
 (** One immutable current view. Configuration and trusted clock are observed
     again on each CAS attempt. The desired half-life is published before the

@@ -92,6 +92,142 @@ let test_another_service_landing_does_not_end_this_login () =
     (Masc_tui_types.identity_login_landed ~providers
        ~login:(login ~provider:"atlassian"))
 
+let pending_login ~keeper ~provider ~url =
+  { (login ~provider) with ils_keeper = keeper; ils_url = url }
+
+let pending_urls state keeper =
+  Masc_tui_types.identity_logins_for_keeper state keeper
+  |> List.map (fun login -> login.Masc_tui_types.ils_url)
+
+let identity_state () =
+  Masc_tui_types.create_state ~workspace:"test" ~port:8935
+    ~refresh_interval:2.0 ()
+
+let test_workspace_withdrawal_retires_identity_consent () =
+  let state = identity_state () in
+  Masc_tui_types.remember_identity_login state
+    (pending_login ~keeper:"A" ~provider:"slack" ~url:"https://old-workspace/consent");
+  state.identity_view <- Some ("A", [declared "slack" "Slack"]);
+  state.github_identity_view <- Some ("A", ["old identity"]);
+  let old = Masc_tui_types.start_identity_login_request state
+    ~keeper_name:"A" ~provider_id:"slack" in
+  Masc_tui_types.withdraw_identity_readings state;
+  check (Alcotest.list Alcotest.string) "new workspace neither shows nor polls old consent"
+    [] (pending_urls state "A");
+  check Alcotest.bool "old provider list withdrawn" true (state.identity_view = None);
+  check Alcotest.bool "old GitHub reading withdrawn" true (state.github_identity_view = None);
+  let successor = Masc_tui_types.start_identity_login_request state
+    ~keeper_name:"A" ~provider_id:"slack" in
+  check Alcotest.bool "same named successor rejects the old queued answer" false
+    (Masc_tui_types.finish_identity_login_request state old);
+  check Alcotest.bool "new workspace request remains current" true
+    (Masc_tui_types.finish_identity_login_request state successor)
+
+let test_switching_keepers_retains_each_consent_url () =
+  let state = identity_state () in
+  Masc_tui_types.remember_identity_login state
+    (pending_login ~keeper:"A" ~provider:"atlassian" ~url:"https://auth/A");
+  Masc_tui_types.remember_identity_login state
+    (pending_login ~keeper:"B" ~provider:"atlassian" ~url:"https://auth/B");
+  check (Alcotest.list Alcotest.string) "A can reopen its consent URL"
+    ["https://auth/A"] (pending_urls state "A");
+  check (Alcotest.list Alcotest.string) "B has its own consent URL"
+    ["https://auth/B"] (pending_urls state "B");
+  Masc_tui_types.retire_identity_logins state ~keeper_name:"B"
+    ~providers:[declared ~tools:[] "atlassian" "Atlassian"];
+  check (Alcotest.list Alcotest.string) "B's completion preserves A's URL"
+    ["https://auth/A"] (pending_urls state "A");
+  check (Alcotest.list Alcotest.string) "B's completed login stops polling"
+    [] (pending_urls state "B")
+
+let test_multiple_providers_complete_independently () =
+  let state = identity_state () in
+  List.iter (Masc_tui_types.remember_identity_login state)
+    [pending_login ~keeper:"A" ~provider:"atlassian" ~url:"https://auth/A/atlas";
+     pending_login ~keeper:"A" ~provider:"slack" ~url:"https://auth/A/slack";
+     pending_login ~keeper:"B" ~provider:"slack" ~url:"https://auth/B/slack"];
+  check (Alcotest.list Alcotest.string) "both provider URLs remain available"
+    ["https://auth/A/atlas"; "https://auth/A/slack"] (pending_urls state "A");
+  Masc_tui_types.retire_identity_logins state ~keeper_name:"A"
+    ~providers:[declared ~tools:["sendMessage"] "slack" "Slack";
+                declared "atlassian" "Atlassian"];
+  check (Alcotest.list Alcotest.string) "unfinished provider stays pending"
+    ["https://auth/A/atlas"] (pending_urls state "A");
+  check (Alcotest.list Alcotest.string) "another keeper's Slack stays pending"
+    ["https://auth/B/slack"] (pending_urls state "B")
+
+let test_restarting_and_forgetting_only_change_the_matching_login () =
+  let state = identity_state () in
+  List.iter (Masc_tui_types.remember_identity_login state)
+    [pending_login ~keeper:"A" ~provider:"atlassian" ~url:"https://auth/old";
+     pending_login ~keeper:"A" ~provider:"slack" ~url:"https://auth/A/slack";
+     pending_login ~keeper:"B" ~provider:"atlassian" ~url:"https://auth/B/atlas"];
+  Masc_tui_types.remember_identity_login state
+    (pending_login ~keeper:"A" ~provider:"atlassian" ~url:"https://auth/new");
+  check (Alcotest.list Alcotest.string) "restart replaces only that consent URL"
+    ["https://auth/A/slack"; "https://auth/new"] (pending_urls state "A");
+  Masc_tui_types.forget_identity_login state ~keeper_name:"A"
+    ~provider_id:"atlassian";
+  check (Alcotest.list Alcotest.string) "A's other provider remains"
+    ["https://auth/A/slack"] (pending_urls state "A");
+  check (Alcotest.list Alcotest.string) "B's same provider remains"
+    ["https://auth/B/atlas"] (pending_urls state "B");
+  Masc_tui_types.retire_identity_logins state ~keeper_name:"A"
+    ~providers:[unreadable "slack" "read failed"];
+  check (Alcotest.list Alcotest.string) "a failed read keeps consent evidence"
+    ["https://auth/A/slack"] (pending_urls state "A")
+
+let test_inverse_retry_responses_keep_the_newest_consent () =
+  let state = identity_state () in
+  let start keeper =
+    Masc_tui_types.start_identity_login_request state ~keeper_name:keeper
+      ~provider_id:"atlassian"
+  in
+  let older = start "A" in
+  let other_keeper = start "B" in
+  let newer = start "A" in
+  let arrive request url =
+    let current = Masc_tui_types.finish_identity_login_request state request in
+    if current then
+      Masc_tui_types.remember_identity_login state
+        (pending_login ~keeper:request.Masc_tui_types.ilr_keeper
+           ~provider:request.ilr_provider ~url);
+    current
+  in
+  check Alcotest.bool "new retry arrives first" true
+    (arrive newer "https://auth/A/new");
+  check Alcotest.bool "old response is rejected" false
+    (arrive older "https://auth/A/old");
+  check Alcotest.bool "duplicate response is rejected" false
+    (arrive newer "https://auth/A/duplicate");
+  check (Alcotest.list Alcotest.string) "new consent remains actionable"
+    ["https://auth/A/new"] (pending_urls state "A");
+  check Alcotest.bool "B's request was not superseded by A" true
+    (arrive other_keeper "https://auth/B");
+  check (Alcotest.list Alcotest.string) "B's consent remains separate"
+    ["https://auth/B"] (pending_urls state "B")
+
+let test_failed_restart_preserves_the_existing_consent () =
+  let state = identity_state () in
+  Masc_tui_types.remember_identity_login state
+    (pending_login ~keeper:"A" ~provider:"slack" ~url:"https://auth/A/slack");
+  let restart =
+    Masc_tui_types.start_identity_login_request state ~keeper_name:"A"
+      ~provider_id:"slack"
+  in
+  let other_provider =
+    Masc_tui_types.start_identity_login_request state ~keeper_name:"A"
+      ~provider_id:"atlassian"
+  in
+  check (Alcotest.list Alcotest.string) "URL stays visible while retry runs"
+    ["https://auth/A/slack"] (pending_urls state "A");
+  check Alcotest.bool "failed retry consumes its request" true
+    (Masc_tui_types.finish_identity_login_request state restart);
+  check (Alcotest.list Alcotest.string) "failed retry preserves consent URL"
+    ["https://auth/A/slack"] (pending_urls state "A");
+  check Alcotest.bool "other provider's request remains current" true
+    (Masc_tui_types.finish_identity_login_request state other_provider)
+
 (* ── the cursor, once the list outgrew the digits ───────────────────── *)
 
 let test_the_cursor_names_a_provider () =
@@ -484,5 +620,19 @@ let () =
             test_not_attached_has_not_landed;
           Alcotest.test_case "another service landing does not end this login"
             `Quick test_another_service_landing_does_not_end_this_login;
+        ] );
+      ( "pending consent lifecycle",
+        [ Alcotest.test_case "workspace withdrawal retires identity consent"
+            `Quick test_workspace_withdrawal_retires_identity_consent;
+          Alcotest.test_case "switching Keepers retains each consent URL"
+            `Quick test_switching_keepers_retains_each_consent_url;
+          Alcotest.test_case "multiple providers complete independently"
+            `Quick test_multiple_providers_complete_independently;
+          Alcotest.test_case "restart and forget change only the matching login"
+            `Quick test_restarting_and_forgetting_only_change_the_matching_login;
+          Alcotest.test_case "inverse retry responses keep newest consent"
+            `Quick test_inverse_retry_responses_keep_the_newest_consent;
+          Alcotest.test_case "failed restart preserves existing consent"
+            `Quick test_failed_restart_preserves_the_existing_consent;
         ] );
     ]

@@ -190,7 +190,7 @@ let test_equipment_change_replaces_same_keeper_pixels () =
   let unchanged = Option.get (band ~cache ~display:pixels ~equipment:equipped ()) in
   check bool "unchanged equipment reuses the cache" true (second.Portrait.image == unchanged.Portrait.image);
   let mosaic = Option.get (band ~cache ~equipment:equipped ()) in
-  let equipped_pixels = Draw.render (Look.body_of_name alpha) equipped mosaic.Portrait.box.View.size in
+  let equipped_pixels = Draw.render_compact_posed (Look.body_of_name alpha) equipped Draw.still mosaic.Portrait.box.View.size in
   check string "mosaic keeps all equipped slots visible"
     equipped_pixels.Draw.rgba mosaic.Portrait.image.Draw.rgba;
   let placement band = Option.get (Portrait.placement band ~scroll:0
@@ -258,17 +258,17 @@ let test_observed_items_remain_visible_in_the_info_mosaic () =
 let test_mosaic_previews_every_catalog_accessory () =
   let cache = Portrait.cache () in
   let bare = Option.get (band ~cache ()) in
-  let full_bare = Draw.render (Look.body_of_name alpha) Look.bare bare.Portrait.box.View.size in
-  List.iter (fun item ->
+    List.iter (fun item ->
     let equipment = Keeper_portrait_item.preview item Look.bare in
     let shown = Option.get (band ~cache ~equipment ()) in
     let id = Keeper_portrait_item.id item in
     check bool (id ^ " changes the Mosaic portrait") false
       (String.equal bare.Portrait.image.Draw.rgba shown.Portrait.image.Draw.rgba);
-    (* Switching drawing style alone must not pass an accessory test. *)
-    check bool (id ^ " remains visible beyond a full empty portrait") false
-      (String.equal full_bare.Draw.rgba shown.Portrait.image.Draw.rgba))
+    let expected = Draw.render_compact_posed (Look.body_of_name alpha) equipment Draw.still shown.Portrait.box.View.size in
+    check string (id ^ " preserves compact equipped rendering")
+      expected.Draw.rgba shown.Portrait.image.Draw.rgba)
     Keeper_portrait_item.all
+
 
 let () =
   run "tui_keeper_portrait"

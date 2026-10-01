@@ -5881,6 +5881,7 @@ type state = {
   mutable log_entries: log_entry list;
   mutable log_error: Metrics_tail.load_error option;
   mutable log_scroll: int;
+  mutable log_wrap_cols: int option;
   mutable live_context: Masc_tui_context_state.t;
   mutable overview: overview_snapshot option;
   mutable overview_error: string option;
@@ -6092,7 +6093,7 @@ type state = {
      between the two presses, so the schedule id is captured at arm time and a
      press on a different row re-arms for that row. *)
   mutable schedule_cancel_armed: string option;
-  mutable schedule_cancel_error: string option;
+  mutable schedule_cancel_error: (string * string) option;
   mutable lanes: Tui_decode.keeper_lanes_snapshot option;
   mutable keeper_lanes_inflight: bool;
   mutable standalone_lanes: Tui_decode.standalone_lanes_snapshot option;
@@ -8317,6 +8318,7 @@ let create_state
   log_entries = [];
   log_error = None;
   log_scroll = 0;
+  log_wrap_cols = None;
   live_context = Masc_tui_context_state.empty;
   overview = None;
   overview_error = None;
@@ -9108,6 +9110,7 @@ type clamped_scroll =
   | Schedule_detail_scroll of int
   | Keeper_detail of int
   | Keeper_calls of int
+  | Keeper_logs_scroll of { scroll : int; cols : int }
   | Acting of int
   | Acting_selection of int * int
   | Acting_detail_scroll of int
@@ -9217,6 +9220,9 @@ let apply_clamped_scroll (state : state) = function
   | Fusion_detail_scroll value -> state.fusion_scroll <- value
   | Runtime_detail_scroll value -> state.runtime_detail_scroll <- value
   | System_log_detail_scroll value -> state.system_logs_detail_scroll <- value
+  | Keeper_logs_scroll { scroll; cols } ->
+      state.log_scroll <- scroll;
+      state.log_wrap_cols <- Some cols
   | Planning_detail_scroll value -> state.planning_scroll <- value
   | Lane_run_detail_scroll { scroll; content_height } ->
       state.lane_run_detail_scroll <- scroll;
@@ -9350,6 +9356,28 @@ let surface_body_rows (state : state) ~terminal_rows =
      - Masc_tui_composer.rows_for ~terminal_rows
      - agenda_chrome_rows state)
 ;;
+
+(* Count the rows after wrapping, shared by the reader and every movement key.
+   Entry order is newest first; facts inside each entry keep their reading order. *)
+let keeper_log_rows (state : state) ~cols =
+  let width = Masc_tui_frame.inner_width ~cols in
+  let diagnostics =
+    match state.log_error with
+    | None -> []
+    | Some error ->
+        Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (width - 2))
+          (Masc.Tui_terminal_text.sanitize_terminal_text (Metrics_tail.error_to_string error))
+        |> List.map (fun line -> Some error, "  " ^ line)
+  in
+  let entries =
+    List.rev state.log_entries
+    |> List.concat_map (fun (entry : Tui_decode.log_entry) ->
+         Masc_tui_observation_layout.log_entry_rows ~width
+           ~time:(Tui_decode.clock_timestamp_for_terminal ~localtime:Unix.localtime entry.le_ts)
+           entry
+         |> List.map (fun line -> None, line))
+  in
+  diagnostics @ entries
 
 (* The three layouts the Board read surface draws in. Both the pane split and
    the [z] key read this one answer: spelled as a pair of booleans it admitted
@@ -10532,7 +10560,8 @@ let runtime_pick_item_id = function
    text that tells them apart, and at a fixed 24 cells every one of them was
    cut to the same [claude_code.claude-sonn…]. The target column therefore
    takes the longest id, and the route column, which repeats provider and
-   model, gives up that room. Neither goes below the 24 cells both had. *)
+   model, gives up that room. Twenty-four cells is the preferred floor when
+   the measured frame can contain both columns. *)
 let runtime_pick_min_column_cells = 24
 
 (* The context size as the row writes it. It lives here, not in the renderer,
@@ -10714,13 +10743,22 @@ let keeper_runtime_picker_empty_note view =
    [cursor ^ badge ^ target ^ "  " ^ route ^ "  " ^ facts]. *)
 let runtime_pick_fixed_cells = 2 + runtime_pick_badge_cells + 2 + 2
 
+(* The preferred name columns can only be floors when the frame can pay for
+   both. Below that width, divide the remaining cells between names and facts
+   instead of reserving columns outside the terminal. *)
+let runtime_pick_column_floor ~cols =
+  let available = max 0 (Masc_tui_frame.inner_width ~cols - runtime_pick_fixed_cells) in
+  if available >= 2 * runtime_pick_min_column_cells
+  then runtime_pick_min_column_cells
+  else max 1 (available / 3)
+
 (* What is left for the facts once the chrome and the two column floors are
    paid. At 80 columns that is 15 cells, which one fact fills. *)
 let runtime_pick_tail_budget ~cols =
   max 0
     (Masc_tui_frame.inner_width ~cols
      - runtime_pick_fixed_cells
-     - (2 * runtime_pick_min_column_cells))
+     - (2 * runtime_pick_column_floor ~cols))
 
 (* The facts a row can afford, dropped from the front.
 
@@ -10757,6 +10795,7 @@ let runtime_pick_properties_room ~cols ~target ~route =
   max 0 (Masc_tui_frame.inner_width ~cols - runtime_pick_fixed_cells - target - route)
 
 let runtime_pick_column_widths ~cols items =
+  let floor = runtime_pick_column_floor ~cols in
   let longest_id =
     List.fold_left
       (fun longest item ->
@@ -10777,12 +10816,12 @@ let runtime_pick_column_widths ~cols items =
   in
   let shared =
     max
-      (2 * runtime_pick_min_column_cells)
+      (2 * floor)
       (Masc_tui_frame.inner_width ~cols - runtime_pick_fixed_cells - longest_tail)
   in
   let target =
-    max runtime_pick_min_column_cells
-      (min longest_id (shared - runtime_pick_min_column_cells))
+    max floor
+      (min longest_id (shared - floor))
   in
   target, shared - target
 

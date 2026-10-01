@@ -1312,6 +1312,7 @@ async function doFetchExecution(): Promise<void> {
   } catch (err) {
     console.warn('[Dashboard] execution fetch error:', err)
     if (requestGeneration !== executionHydrationRequestGeneration) return
+    acceptedExecutionWorkspace.value = null
     executionError.value = errorMessageOr(err, 'Execution projection load failed')
     candleObservation.value = { status: 'unavailable', reason: executionError.value }
     showToast('실행 데이터 로드 실패', 'error', 5000)

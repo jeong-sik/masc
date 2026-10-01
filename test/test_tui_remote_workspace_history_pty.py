@@ -911,6 +911,52 @@ def schedule_editor_workspace_change(binary: str) -> None:
             refresh=30.0, terminal_cols=TERMINAL_COLUMNS)
 
 
+def runtime_config_editor_workspace_change(binary: str) -> None:
+    fixtures = h.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
+    wire = WorkspaceWire(fixtures[ROSTER_PATH][1])
+    fixtures[h.RUNTIME_CONFIG_RAW_PATH] = (200, {
+        **h.runtime_config_read_metadata(),
+        "path": "/workspace/config/runtime.toml", "source_text": h.config_navigation_source(),
+    })
+    fixtures.update({ROSTER_PATH: wire.roster, "/health": wire.health,
+                     "/health?full=1": wire.health})
+    posts: h.HttpRequests = []
+    with tempfile.TemporaryDirectory(prefix="tui-runtime-workspace-editor-") as work:
+        started, release = Path(work, "started"), Path(work, "release")
+        editor = Path(work, "edit.py")
+        editor.write_text("import sys, time\nfrom pathlib import Path\n"
+            "path=Path(sys.argv[1]); path.write_text(path.read_text() + '\\n# edited in A\\n')\n"
+            f"Path({str(started)!r}).touch()\n"
+            f"while not Path({str(release)!r}).exists(): time.sleep(0.01)\n")
+        def interact(process, fd, _slave, output, _base):
+            try:
+                h.resize_and_wait(process, fd, output,
+                    rows=40, columns=TERMINAL_COLUMNS, needle=b"MASC Dashboard",
+                    controls=(h.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
+                h.tab_until(process, fd, output, b"MASC System")
+                h.wait_for_output(process, fd, output, b"first-value = ", start=0, timeout=WAIT_SECONDS)
+                os.write(fd, b"e")
+                assert h.wait_for_fixture_state(process, fd, output, started.exists,
+                    timeout=WAIT_SECONDS), "runtime config editor did not open"
+                # The clone keeps the same config revision.
+                # No event-loop refresh can retire A while $EDITOR blocks.
+                wire.publish("b")
+                release.touch()
+                assert h.wait_for_fixture_state(process, fd, output,
+                    lambda: b"Workspace identity changed" in screen(output), timeout=WAIT_SECONDS), \
+                    "post-editor identity change was not visibly refused"
+                assert not [p for p, _ in posts if p.startswith("/api/v1/runtime/config/")], \
+                    "the edited A runtime config reached a preview or save in B"
+                os.write(fd, b"q")
+            finally:
+                release.touch()
+        h.run_terminal_scenario(binary,
+            description="workspace replacement while runtime.toml editor blocks refuses preview and save",
+            interact=interact, prepare_workspace=wire.prepare, http_fixtures=fixtures,
+            http_requests=posts, extra_env={"EDITOR": shlex.join([sys.executable, str(editor)])},
+            refresh=30.0, terminal_cols=TERMINAL_COLUMNS)
+
+
 def ask_workspace_withdrawal(binary: str) -> None:
     # Exercise both the armed editor and an already admitted, held POST.
     for submit in (False, True):
@@ -1528,6 +1574,55 @@ def runtime_parameter_workspace_withdrawal(binary: str) -> None:
         refresh=0.5, terminal_cols=300)
 
 
+def live_identity_before_chat_and_lifecycle(binary: str) -> None:
+    # No refresh after readiness: the client retains A while the same endpoint
+    # reports B only to the dispatch-time health probe.
+    for operation in ("chat", "pause", "boot-recovery"):
+        fixtures = h.keeper_runtime_http_fixtures(alpha_runtime_id="a.current")
+        if operation == "boot-recovery":
+            row = fixtures[ROSTER_PATH][1]["keepers"][0]
+            row.update(keepalive_running=False, status="idle", phase="stopped")
+        wire = WorkspaceWire(fixtures[ROSTER_PATH][1])
+        probes = threading.Event()
+        armed = threading.Event()
+        writes = []
+        def health():
+            reply = wire.health()
+            if armed.is_set(): probes.set()
+            return reply
+        def post(path, body):
+            writes.append((path, body))
+            if operation == "boot-recovery" and path.endswith("/boot"):
+                wire.publish("b")
+                return 409, {"error":"owner paused"}
+            return 200, {"ok":True}
+        fixtures.update({ROSTER_PATH:wire.roster, HISTORY_PATH:wire.history,
+                         MEMORY_PATH:wire.memory, "/health":health, "/health?full=1":health})
+        for path in ("/api/v1/keepers/chat/stream", "/api/v1/keepers/chat",
+                     "/api/v1/keepers/alpha/boot", "/api/v1/keepers/alpha/directive"):
+            fixtures[path] = h.RequestHttpResponse(lambda body, path=path: post(path, body))
+        def interact(process, fd, _slave, output, _base):
+            h.tab_until(process, fd, output, b"MASC Keepers")
+            h.select_keeper_row(process, fd, output, b"alpha")
+            if operation == "chat":
+                h.send_and_wait(process, fd, output, b"m", "Keepers ▸ alpha ▸ chat".encode())
+                h.send_and_wait(process, fd, output, b"private-A-message", h.composer_showing(b"private-A-message"))
+            armed.set()
+            if operation != "boot-recovery": wire.publish("b")
+            os.write(fd, b"\r" if operation == "chat" else b"p")
+            assert h.wait_for_fixture_event(process, fd, output, probes, timeout=WAIT_SECONDS), "dispatch did not probe the endpoint"
+            assert h.wait_for_fixture_state(process, fd, output,
+                lambda: b"Workspace identity changed or is unavailable" in screen(output), timeout=WAIT_SECONDS)
+            h.drain_until_quiet(process, fd, output)
+            expected = ["/api/v1/keepers/alpha/boot"] if operation == "boot-recovery" else []
+            assert [path for path, _ in writes] == expected, (operation, writes)
+            os.write(fd, b"q")
+        h.run_terminal_scenario(binary,
+            description="Live dispatch identity refuses cached workspace " + operation,
+            interact=interact, prepare_workspace=wire.prepare, http_fixtures=fixtures,
+            refresh=3600, terminal_cols=TERMINAL_COLUMNS)
+
+
 if __name__ == "__main__":
     binary = str(Path(sys.argv[1]).resolve())
     artifact_root = os.environ.get("RUNNER_TEMP")
@@ -1545,9 +1640,11 @@ if __name__ == "__main__":
     resource_workspace_withdrawal(binary)
     runtime_parameter_workspace_withdrawal(binary)
     connector_workspace_withdrawal(binary)
+    live_identity_before_chat_and_lifecycle(binary)
     bundle_identity_during_read(binary)
     settings_editor_workspace_change(binary)
     schedule_editor_workspace_change(binary)
+    runtime_config_editor_workspace_change(binary)
     ask_workspace_withdrawal(binary)
     github_workspace_withdrawal(binary)
     run(binary, captures)

@@ -392,7 +392,7 @@ let test_router_preview_is_read_only () =
   with_router (fun ~config router ->
     let current = get ~router (path ~size:"72" keeper) in
     let equipment () = require_ok Fun.id
-      (Candle_equipment.current ~base_path:config.Workspace.base_path ~keeper) in
+      (Candle_equipment.current ~now:Time_compat.now ~base_path:config.Workspace.base_path ~keeper) in
     let before = equipment () in
     let preview_id = match before.Keeper_portrait_look.face with
       | Keeper_portrait_look.Glasses -> "shades"

@@ -489,7 +489,14 @@ let test_failed_terminal_and_fallback_keep_hot_uncertainty () = with_fixture (fu
     check int "repair keeps the received package result" 1 (number "calls" (member "result" recovered));
     check string "repaired uncertainty is durable" "outcome_unknown"
       (text "state" (Yojson.Safe.from_string (Fs_compat.load_file path)));
+    Atomic.set armed true;
+    let writes_before = Atomic.get fallback_failures in
+    let retained = status fixture id request_id in
+    check string "repaired stopped-worker receipt remains readable with writes failing"
+      "outcome_unknown" (text "state" retained);
     ignore (act fixture id request_id (`Int 1) |> unwrap);
+    check int "repaired reads and duplicates never rewrite the receipt"
+      writes_before (Atomic.get fallback_failures);
     check int "a repaired receipt never replays the external action" 1 !(fixture.calls);
     detach clock fixture id))
 

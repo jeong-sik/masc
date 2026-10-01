@@ -8029,3 +8029,15 @@
 
 (include stanzas/test_tui_remote_equipped_portrait.inc)
 (include stanzas/test_play_current_credential_authority.inc)
+
+(rule
+ (alias runtest-test_keeper_continuity_admission)
+ (deps
+  test_keeper_continuity_admission.py
+  ../scripts/harness/workload/keeper_continuity_validation.sh
+  ../config/tools/masc_keeper_up.toml)
+ (action (run python3 %{dep:test_keeper_continuity_admission.py})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_keeper_continuity_admission)))

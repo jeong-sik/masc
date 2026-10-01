@@ -23,7 +23,12 @@ val run :
     agree with its resolved credential's UUID. Any extra UUID deletion target
     must resolve to that same credential; a forged pointer refuses planning.
 
-    [Preview] reports [Would_retire] without changing files or token caches.
+    Validated aliases of an expired UUID owner are retired in the same plan.
+    Canonical metadata is removed last, preserving discovery for a cleanup retry.
+    Raw-token publication and credential publication share the prune transaction.
+
+    [Preview] reports [Would_retire] without changing credentials or token caches.
+    An absent store returns an empty plan without creating its directory or lock.
     [Retire] reports each completed deletion as [Retired]. A deletion error is
     [Failed], which can follow partial file removal; later entries are still
     attempted. The caller must count only [Retired] as completed retirement. *)

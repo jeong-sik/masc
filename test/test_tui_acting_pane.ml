@@ -177,18 +177,19 @@ let test_many_trace_failures_keep_navigation_and_full_reading () =
   check bool "one-row viewport still scrolls through failures" true
     (List.exists (fun line -> contains "Trace unavailable:" (text line)) compact_scrolled.Pane.rows);
   let reading = Pane.lines ~rows:8 ~cols:90 ~scroll:1 input in
-  check bool "full failure reasons stay scrollable" true
+  check bool "first full failure reason is reachable after the overview" true
     (List.exists (fun line -> contains "unbooted-00 · reason-00" (text line)) reading.Pane.rows);
-  let single = { fixture with trace_unavailable = ["tester", "first-failure"] } in
-  let tiny = Pane.lines ~rows:3 ~cols:90 ~scroll:1 single in
-  check bool "one failure is reachable after its synthetic overview" true
-    (List.exists (fun line -> contains "tester · first-failure" (text line)) tiny.Pane.rows);
-  List.iter (fun (name, reason) ->
-      check bool "every failure is reachable across the scroll range" true
-        (List.init (compact.Pane.scroll_max + 1) (fun scroll ->
-             Pane.lines ~rows:3 ~cols:90 ~scroll input)
-         |> List.exists (fun drawn -> List.exists
-              (fun line -> contains (name ^ " · " ^ reason) (text line)) drawn.Pane.rows))) failures
+  List.iter (fun rows ->
+    let first = Pane.lines ~rows ~cols:90 ~scroll:1 input in
+    check bool "first detail survives even one body row" true
+      (List.exists (fun line -> contains "unbooted-00 · reason-00" (text line)) first.Pane.rows);
+    let all = List.init (first.Pane.scroll_max + 1) (fun scroll ->
+      (Pane.lines ~rows ~cols:90 ~scroll input).Pane.rows)
+      |> List.concat |> List.map text in
+    List.iter (fun (name, reason) ->
+      check bool (name ^ " detail is reachable") true
+        (List.exists (contains (name ^ " · " ^ reason)) all)) failures)
+    [3; 8]
 
 let test_clipped_header_preserves_spans_and_padding () =
   (* The count and the feed are two readings now, each carrying the

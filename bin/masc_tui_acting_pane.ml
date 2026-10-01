@@ -1447,17 +1447,19 @@ let fleet_lines ~below ~scroll (body, overview) =
   match body with
   | Trace_unavailable _ :: _ when below > 0
       && (below = 1 || List.length body > below) ->
-      (* Scroll zero is a synthetic overview. Positive positions start at
-         body row zero, so the overview does not consume its first failure. *)
+      (* The folded overview is a synthetic first page, not body[0].
+         The first positive position must expose that first factual row. *)
       let room = if below = 1 then 1 else below - 1 in
-      let scroll_max = max 1 (List.length body - room + 1) in
+      let scroll_max = max 0 (List.length body - room) + 1 in
       let scroll = max 0 (min scroll scroll_max) in
-      if scroll = 0 then (overview ~below, scroll_max)
-      else if below = 1 then
-        (List.filteri (fun index _ -> index = scroll - 1) body, scroll_max)
-      else (scrolled_rows ~below ~scroll:(scroll - 1) body, scroll_max)
-  | _ ->
-      window ~below ~scroll body ~overview:(fun () -> overview ~below)
+      let visible =
+        if scroll = 0 then overview ~below
+        else if below = 1 then
+          List.filteri (fun index _ -> index = scroll - 1) body
+        else scrolled_rows ~below ~scroll:(scroll - 1) body
+      in
+      visible, scroll_max
+  | _ -> window ~below ~scroll body ~overview:(fun () -> overview ~below)
 
 (* A row that spends the pane's four columns -- state, tool, calls and tokens.
    The column names sit over these. A focus header with no record of its own

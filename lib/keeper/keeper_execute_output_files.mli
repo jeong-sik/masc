@@ -15,8 +15,8 @@ type publication =
 
 val publish :
   inline_ceiling_bytes:int ->
-    (** Combined output up to this many bytes is returned inline; above it
-        the streams are stored as blobs. The caller passes the ceiling of the
+    (** Valid UTF-8 combined output up to this many bytes is returned inline;
+        larger or non-UTF-8 output is stored byte-for-byte as blobs. The caller passes the ceiling of the
         projection its result crosses for the lane running the call, so the
         bound is the one that lane declares ([maxResultSizeChars]). *)
   base_path:string ->

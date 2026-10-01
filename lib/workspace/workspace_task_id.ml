@@ -32,32 +32,72 @@ let read_archive_task_ids config =
     | None -> None
   ) (read_archive_entries config)
 
+(* The archive rows a writer is about to rewrite. A missing file is an empty
+   archive. A file that cannot be read, is blank, does not parse, or has no
+   [tasks] list is an error: a writer that took any of those for an empty
+   archive would replace the file and drop every row in it. *)
+let read_archive_entries_for_write config =
+  match read_json_doc config (archive_path config) with
+  | Ok None -> Ok []
+  | Error error -> Error (json_doc_error_to_string error)
+  | Ok (Some json) ->
+    (match Json_util.assoc_member_opt "tasks" json with
+     | Some (`List tasks) -> Ok tasks
+     | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _)
+     | None -> Error "the document has no \"tasks\" list")
+
 (** Append tasks to archive file (tasks-archive.json).
 
     The read->merge->write sequence is wrapped in [with_file_lock] so
     concurrent callers cannot lose each other's archive entries. *)
 let append_archive_tasks config (tasks : task list) =
-  if tasks = [] then ()
+  if tasks = [] then Ok ()
   else
     let arch_path = archive_path config in
     with_file_lock config arch_path (fun () ->
-      let existing = read_json config arch_path in
-      let existing_tasks = archive_entries_of_json existing in
-      let new_tasks = List.map task_to_yojson tasks in
-      let seen = Hashtbl.create 64 in
-      let dedup = List.filter (fun json ->
-        match Json_util.get_string json "id" with
-        | Some id ->
-            if Hashtbl.mem seen id then false
-            else (Hashtbl.add seen id (); true)
-        | None -> false
-      ) (existing_tasks @ new_tasks)
-      in
-      let archive_json = `Assoc [
-        ("tasks", `List dedup);
-        ("last_updated", `String (now_iso ()));
-      ] in
-      write_json config arch_path archive_json)
+      match read_archive_entries_for_write config with
+      | Error detail ->
+        Error
+          (Printf.sprintf
+             "tasks-archive.json could not be read, so nothing was appended: %s"
+             detail)
+      | Ok existing_rows ->
+        let new_rows = List.map task_to_yojson tasks in
+        let id_of row = Json_util.get_string row "id" in
+        let incoming = Hashtbl.create 64 in
+        List.iter
+          (fun row -> Option.iter (fun id -> Hashtbl.replace incoming id ()) (id_of row))
+          new_rows;
+        (* The rows given are the current copies, so each replaces the archive
+           row with the same id, whatever that row holds: an older copy, or a
+           row that does not decode as a Task. Every other row stays as it is,
+           rows with no id and repeated ids included. This is not the place to
+           drop them, the rule [drop_archive_tasks] applies to the same file. *)
+        let kept =
+          List.filter
+            (fun row ->
+              match id_of row with
+              | Some id -> not (Hashtbl.mem incoming id)
+              | None -> true)
+            existing_rows
+        in
+        let seen = Hashtbl.create 64 in
+        let appended =
+          List.filter
+            (fun row ->
+              match id_of row with
+              | Some id ->
+                if Hashtbl.mem seen id then false else (Hashtbl.add seen id (); true)
+              | None -> true)
+            new_rows
+        in
+        let archive_json = `Assoc [
+          ("tasks", `List (kept @ appended));
+          ("last_updated", `String (now_iso ()));
+        ] in
+        write_json_result config arch_path archive_json
+        |> Result.map_error (fun detail ->
+             Printf.sprintf "tasks-archive.json could not be written: %s" detail))
 
 (** Read the archive and return every task whose status is non-terminal. A
     non-terminal task in the archive is an obligation a

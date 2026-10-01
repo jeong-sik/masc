@@ -121,14 +121,14 @@ let test_context_status_description_matches_current_output () =
          ("current field documented: " ^ current_field)
          true
          (contains schema.description current_field))
-    [ "checkpoint_bytes"; "message_count"; "generation" ];
+    [ "checkpoint_bytes"; "message_count" ];
   List.iter
     (fun unobserved_field ->
        Alcotest.(check bool)
          ("unobserved field not promised: " ^ unobserved_field)
          false
          (contains schema.description unobserved_field))
-    [ "context_ratio"; "context_tokens"; "context_max"; "last_model_used" ]
+    [ "generation"; "context_ratio"; "context_tokens"; "context_max"; "last_model_used" ]
 ;;
 
 let required_keeper_board_schema board_name =

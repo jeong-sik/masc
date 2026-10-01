@@ -3738,24 +3738,21 @@ let test_provider_resets_outlive_the_fallback_cap () =
        | Driver.Walk_waits_until _ -> Alcotest.fail "the quota path is released")))
 ;;
 
-(* A failure without a suffix used every path the input may take. Its wait
-   covers the failed path's own rest and never ends before a fresh walk of the
-   assignment can start on a serving head: with A resting 600 s and B failing
-   on an unstated 429, the walk still starts on A, so B's 60 s is not enough. *)
+(* Exhausting a lane does not turn the last candidate's quota reset into a
+   deadline for every sibling. Use the observed fresh-walk rest and otherwise
+   let the normal failed-cycle cadence run. *)
 let test_a_failure_without_a_suffix_waits_until_a_fresh_walk_head_serves () =
   with_runtime_config runtime_toml_quota_lane (fun () ->
     Fun.protect ~finally:Runtime_quota_window.reset_for_testing (fun () ->
       reset_quota_lane_rests ();
       let now = Unix.gettimeofday () in
-      let floor_sec = Env_config_keeper.KeeperKeepalive.rate_limit_backoff_floor_sec in
       let decide () =
         describe_dispatch ~now
           (Driver.next_dispatch_after_failure
              ~now ~route:rate_limited_route ~assignment_id:"quota_lane" None)
       in
-      Alcotest.(check string) "a serving fresh walk head waits only for the failed path"
-        (Printf.sprintf "wait %.0fs for quota_lane" floor_sec)
-        (decide ());
+      Alcotest.(check string) "a serving sibling keeps ordinary cadence"
+        "no provider wait" (decide ());
       Runtime_candidate_backpressure.note_rate_limit
         ~candidate:(quota_lane_candidate "shared_a.test_model") ~retry_after:(Some 600.);
       Runtime_candidate_backpressure.note_rate_limit
@@ -3765,7 +3762,21 @@ let test_a_failure_without_a_suffix_waits_until_a_fresh_walk_head_serves () =
         ~resets_at:(now +. 900.);
       Alcotest.(check string) "a resting fresh walk head extends the wait to its release"
         "wait 600s for shared_a.test_model"
-        (decide ())))
+        (decide ());
+      let last_quota = Keeper_runtime_failure_route.Retry_after_observed
+        {retry_class = Keeper_runtime_failure_route.Hard_quota; retry_after = Some 3600.} in
+      Alcotest.(check string) "last candidate quota cannot outlast the next walk's release"
+        "wait 600s for shared_a.test_model"
+        (describe_dispatch ~now
+          (Driver.next_dispatch_after_failure ~now ~route:last_quota
+            ~assignment_id:"quota_lane" None));
+      Runtime_candidate_backpressure.note_candidate_success
+        ~candidate:(quota_lane_candidate "shared_a.test_model");
+      Alcotest.(check string) "an available sibling is not held by the last quota response"
+        "no provider wait"
+        (describe_dispatch ~now
+          (Driver.next_dispatch_after_failure ~now ~route:last_quota
+            ~assignment_id:"quota_lane" None))))
 ;;
 
 (* RFC-provider-path-rest §3.4: the chat lane's deferred retry reads the same

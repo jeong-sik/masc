@@ -666,21 +666,29 @@ let index_of haystack needle =
   in
   walk 0
 
-(* A column label that is a prefix of another label matches the wrong column
-   and says nothing about it. "ST" is inside "STARTED", so after the Memory
-   table renamed STATE to ST (#33919) the Fusion case read the first column
-   as the state one and reported its offset as 0. A label occurs once in a
-   header row, so more than one occurrence is the question being asked
-   wrongly rather than an answer. *)
+(* Match a complete space-delimited cell. "ST" inside "STARTED" or "STORED"
+   is another column's text, while two complete "ST" cells are ambiguous. *)
 let offset_of needle text =
-  match index_of text needle with
-  | None -> failf "%S is not in %S" needle text
-  | Some index ->
-    let rest = String.sub text (index + String.length needle)
-                 (String.length text - index - String.length needle) in
-    (match index_of rest needle with
-     | Some _ -> failf "%S appears more than once in %S" needle text
-     | None -> index)
+  let text_length = String.length text in
+  let needle_length = String.length needle in
+  let rec walk index found =
+    if index + needle_length > text_length then
+      match found with
+      | Some offset -> offset
+      | None -> failf "%S is not in %S" needle text
+    else
+      let is_cell =
+        (index = 0 || text.[index - 1] = ' ')
+        && (index + needle_length = text_length
+            || text.[index + needle_length] = ' ')
+        && String.sub text index needle_length = needle in
+      if is_cell then
+        match found with
+        | Some _ -> failf "%S appears more than once in %S" needle text
+        | None -> walk (index + needle_length) (Some index)
+      else walk (index + 1) found
+  in
+  walk 0 None
 
 (* Offsets are asked in display cells, not bytes: the delta column is headed
    with a two-byte glyph that occupies one cell. *)
@@ -709,11 +717,49 @@ type cell_edge =
   | Left_edge
   | Right_edge
 
+(* Style escapes take no display cells. Remove only valid SGR sequences before
+   locating complete column tokens; an unknown escape remains visible and
+   cannot silently make an alignment assertion pass. *)
+let strip_sgr text =
+  let length = String.length text in
+  let visible = Buffer.create length in
+  let rec sgr_end offset =
+    if offset >= length then None
+    else match text.[offset] with
+      | 'm' -> Some (offset + 1)
+      | '0' .. '9' | ';' -> sgr_end (offset + 1)
+      | _ -> None
+  in
+  let rec scan offset =
+    if offset < length then
+      if text.[offset] = '\027' && offset + 1 < length
+         && text.[offset + 1] = '[' then
+        match sgr_end (offset + 2) with
+        | Some next -> scan next
+        | None -> Buffer.add_char visible text.[offset]; scan (offset + 1)
+      else begin
+        Buffer.add_char visible text.[offset];
+        scan (offset + 1)
+      end
+  in
+  scan 0;
+  Buffer.contents visible
+
 (* A table laid out by [Masc_tui_table.fit] draws some of its columns. A drawn
    column's reading sits under its name; a column the table has given up has
    no name in the header and no reading in the row. [cells] names every
    column with its edge, its header and the reading the probe puts in it. *)
 let check_fitted_cells ~shown ~header ~row ~inner_width cells =
+  let visible_header = strip_sgr header in
+  let visible_row = strip_sgr row in
+  check int (Printf.sprintf "inner %d: header style keeps width" inner_width)
+    (Masc_tui_message_layout.display_width header)
+    (Masc_tui_message_layout.display_width visible_header);
+  check int (Printf.sprintf "inner %d: row style keeps width" inner_width)
+    (Masc_tui_message_layout.display_width row)
+    (Masc_tui_message_layout.display_width visible_row);
+  let header = visible_header in
+  let row = visible_row in
   List.iter
     (fun (column, edge, label, mark) ->
       if List.mem column shown then
@@ -778,7 +824,7 @@ let test_memory_header_and_row_share_their_offsets () =
     if columns.Schedule.mcol_show_updated then
       check_right_cell "UPDATED" "R" ~header ~row ~inner_width;
     check_right_cell "FACTS" "F" ~header ~row ~inner_width;
-    check_right_cell "RECALL" "Z" ~header ~row ~inner_width;
+    check_right_cell "STORED" "Z" ~header ~row ~inner_width;
     if columns.Schedule.mcol_show_source then
       check_left_cell "SOURCE" "U" ~header ~row ~inner_width;
     check_right_cell "\xce\x94" "D" ~header ~row ~inner_width

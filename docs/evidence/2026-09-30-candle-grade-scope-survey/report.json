@@ -1,0 +1,180 @@
+{
+  "scope": "Grade distribution and repeatability on synthetic Goals; no human calibration",
+  "attempts": 400,
+  "valid": 400,
+  "errors": 0,
+  "human_labels": null,
+  "acceptance_thresholds": null,
+  "cases": [
+    {
+      "id": "human-reference-01",
+      "title": "Correct the misspelled label on the Preferences tab",
+      "attempts": 20,
+      "distribution": {
+        "trivial": 20
+      }
+    },
+    {
+      "id": "human-reference-02",
+      "title": "Show the accepted YYYY-MM-DD format and one example in the error returned for an invalid Goal due date",
+      "attempts": 20,
+      "distribution": {
+        "trivial": 20
+      }
+    },
+    {
+      "id": "human-reference-03",
+      "title": "Preserve the stored Goal due date when an edit changes only its priority",
+      "attempts": 20,
+      "distribution": {
+        "trivial": 13,
+        "small": 7
+      }
+    },
+    {
+      "id": "human-reference-04",
+      "title": "Add CSV export for the filtered expense report",
+      "attempts": 20,
+      "distribution": {
+        "small": 20
+      }
+    },
+    {
+      "id": "human-reference-05",
+      "title": "Remember the most recently selected workspace tab and restore it after restarting the application",
+      "attempts": 20,
+      "distribution": {
+        "small": 20
+      }
+    },
+    {
+      "id": "human-reference-06",
+      "title": "Let a user search and select a Task using only the keyboard in the existing Goal editor",
+      "attempts": 20,
+      "distribution": {
+        "small": 20
+      }
+    },
+    {
+      "id": "human-reference-07",
+      "title": "Make same-name credential renewal and expired game-controller recovery atomic across HTTP and MCP requests",
+      "attempts": 20,
+      "distribution": {
+        "small": 15,
+        "medium": 5
+      }
+    },
+    {
+      "id": "human-reference-08",
+      "title": "Reject unknown fields in a stored Goal and show the resulting unavailable state consistently in the server, dashboard and TUI",
+      "attempts": 20,
+      "distribution": {
+        "small": 9,
+        "medium": 11
+      }
+    },
+    {
+      "id": "human-reference-09",
+      "title": "Expose a Keeper tool that reads its own current Candle balance and purchased items from the existing ledger",
+      "attempts": 20,
+      "distribution": {
+        "small": 20
+      }
+    },
+    {
+      "id": "human-reference-10",
+      "title": "Provide a portrait item catalog with previews for every listed item and restore the default appearance when the preview is cleared",
+      "attempts": 20,
+      "distribution": {
+        "medium": 19,
+        "small": 1
+      }
+    },
+    {
+      "id": "human-reference-11",
+      "title": "Add profile image upload with file validation, stored resized images, authenticated retrieval and an account-settings preview",
+      "attempts": 20,
+      "distribution": {
+        "medium": 20
+      }
+    },
+    {
+      "id": "human-reference-12",
+      "title": "Show each Goal verification request and result in a timeline with its actual actor and evidence in both the dashboard and TUI",
+      "attempts": 20,
+      "distribution": {
+        "small": 20
+      }
+    },
+    {
+      "id": "human-reference-13",
+      "title": "Deliver a scheduled daily workspace report with persisted schedules, a durable delivery outbox, retry after restart and operator controls",
+      "attempts": 20,
+      "distribution": {
+        "medium": 18,
+        "small": 2
+      }
+    },
+    {
+      "id": "human-reference-14",
+      "title": "Implement an append-only account ledger with atomic purchases, balances, item ownership, replay after restart and an audit view",
+      "attempts": 20,
+      "distribution": {
+        "medium": 20
+      }
+    },
+    {
+      "id": "human-reference-15",
+      "title": "Deliver the complete Candle purchase-and-equip workflow through Keeper tools, authenticated APIs, dashboard and TUI portraits",
+      "attempts": 20,
+      "distribution": {
+        "medium": 20
+      }
+    },
+    {
+      "id": "human-reference-16",
+      "title": "Allow two workspace instances to exchange Board posts, comments and reactions with authenticated peers, durable reconciliation and duplicate suppression",
+      "attempts": 20,
+      "distribution": {
+        "medium": 19,
+        "small": 1
+      }
+    },
+    {
+      "id": "human-reference-17",
+      "title": "Provide HTTP and CLI model failover across Keeper turns with durable request receipts, operator-editable slot order and consistent server, dashboard and TUI observation",
+      "attempts": 20,
+      "distribution": {
+        "medium": 20
+      }
+    },
+    {
+      "id": "human-reference-18",
+      "title": "Provide a shared browser document editor with concurrent editing, access controls, durable history, presence and recovery after disconnect",
+      "attempts": 20,
+      "distribution": {
+        "medium": 19,
+        "large": 1
+      }
+    },
+    {
+      "id": "human-reference-19",
+      "title": "Build a transactional workspace data subsystem that stores Goals, Tasks, Board activity and Keeper state in PostgreSQL with consistent backups, restore and operational metrics",
+      "attempts": 20,
+      "distribution": {
+        "epic": 2,
+        "large": 6,
+        "medium": 12
+      }
+    },
+    {
+      "id": "human-reference-20",
+      "title": "Build a hosted collaboration product with workspace creation, member access, shared Goals and Tasks, Board discussion, autonomous Keeper work, scheduled jobs and operator observability",
+      "attempts": 20,
+      "distribution": {
+        "epic": 19,
+        "large": 1
+      }
+    }
+  ]
+}

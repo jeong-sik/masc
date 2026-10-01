@@ -1079,8 +1079,6 @@ describe('official-client local claim refusal', () => {
     expect(cleared?.runtime_blocker_summary).toBeNull()
   })
 })
-
-
 describe('Keeper portrait projection', () => {
   it('preserves equipped snapshots and reports corrupt or absent equipment without dropping the Keeper', () => {
     const equipment = { face: 'glasses', neck: 'medal', head: 'crown', hand: 'book', base: 'dish_oak' }
@@ -1091,5 +1089,13 @@ describe('Keeper portrait projection', () => {
       expect(keeper?.name).toBe('equipped')
       expect(keeper?.portrait?.state).toBe('unavailable')
     }
+  })
+
+  it('carries only a canonical Item account revision into the Keeper row', () => {
+    const revision = 'a'.repeat(64)
+    const [ready] = normalizeKeepers([{ name: 'imp', status: 'active', candle_balance_milli: '0', candle_account_revision: revision }])
+    expect(ready?.candle_account_revision).toBe(revision)
+    const [malformed] = normalizeKeepers([{ name: 'imp', status: 'active', candle_balance_milli: '0', candle_account_revision: 'changed' }])
+    expect(malformed?.candle_account_revision).toBeUndefined()
   })
 })

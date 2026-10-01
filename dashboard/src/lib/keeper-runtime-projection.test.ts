@@ -28,7 +28,6 @@ function composite(overrides: Partial<KeeperCompositeSnapshot> = {}): KeeperComp
     runtime: { state: 'idle' },
     measurement: { captured: true },
     invariants: {
-      no_runtime_before_measurement: true,
       event_priority_monotone: true,
       phase_derivation_agreement: true,
     },

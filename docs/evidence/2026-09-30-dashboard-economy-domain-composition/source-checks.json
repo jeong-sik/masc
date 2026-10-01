@@ -1,0 +1,58 @@
+{
+  "scope": "Static source checks on the pinned partial composition; not runtime validation.",
+  "checks": {
+    "all_eight_actual_6e_snapshot_blobs_match_local_import_base": true,
+    "own_source_and_test_delta_exactly_seven_files": true,
+    "all_three_actual_6e_test_bodies_retained": true,
+    "gate_production_byte_unchanged_actual_parent": true,
+    "item_schema_unchanged_actual_6e": true,
+    "pure_lib_domains_have_no_effect_import": true,
+    "api_public_lib_reexports_preserved": true,
+    "api_domain_schemas_use_only_shared_lib_declare_predicates": true,
+    "actual_6e_store_and_normalizer_import_pure_lib_domains": true
+  },
+  "actual_6e_authority_receipts": [
+    {
+      "path": "dashboard/src/store.ts",
+      "blob_sha": "d1cbeb7707dd211948fc2297e40d250279d40800",
+      "sha256": "cfe7d1f2d831b27de168cbba8f4ebcf3a971e9bbb3d1f3152b9a669b1909b297",
+      "relevant_lines": [
+        {
+          "line": 1,
+          "text": "import { readCandleRosterObservation, type CandleReading } from './lib/candle-observation'"
+        },
+        {
+          "line": 1243,
+          "text": "  candleObservation.value = readCandleRosterObservation(data.candle, data.keepers)"
+        }
+      ]
+    },
+    {
+      "path": "dashboard/src/keeper-store-normalize.ts",
+      "blob_sha": "339994e4d672530932e8f6f5b9af9e7fe3290d35",
+      "sha256": "9a4e56c5ca8ef29af372a88fa9de4b640e1fd9ada72293059b82e7a8a9cdd215",
+      "relevant_lines": [
+        {
+          "line": 1,
+          "text": "import { readKeeperPortrait } from './lib/keeper-portrait'"
+        },
+        {
+          "line": 2,
+          "text": "import { readCandleAccountRevision, readCandleBalance } from './lib/candle-observation'"
+        },
+        {
+          "line": 701,
+          "text": "        portrait: readKeeperPortrait(row.portrait),"
+        },
+        {
+          "line": 702,
+          "text": "        candle_balance_milli: readCandleBalance(row.candle_balance_milli),"
+        },
+        {
+          "line": 703,
+          "text": "        candle_account_revision: readCandleAccountRevision(row.candle_account_revision),"
+        }
+      ]
+    }
+  ]
+}

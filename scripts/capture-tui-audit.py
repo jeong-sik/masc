@@ -1,0 +1,205 @@
+"""Capture isolated synthetic fixture screens; never open an operator session."""
+import argparse
+import hashlib
+import importlib.util
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+import tempfile
+
+ROOT = Path(__file__).resolve().parents[1]
+SCREEN_JS = """() => {const b=window.term.buffer.active;return Array.from({length:window.term.rows},(_,i)=>b.getLine(b.viewportY+i)?.translateToString(true)||'').join('\\n');}"""
+
+
+def digest(path):
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def write_manifest(out, manifest):
+    temporary = out / 'manifest.json.tmp'
+    temporary.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + '\n')
+    temporary.replace(out / 'manifest.json')
+
+
+def require_unchanged(paths, hashes):
+    for name, path in paths.items():
+        if digest(path) != hashes[name]:
+            raise RuntimeError(f'capture input changed during the run: {name}')
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('executable', help='native TUI executable, launched directly by ttyd')
+    parser.add_argument('--out', default='docs/evidence/tui-audit-2026-09-30/baseline')
+    parser.add_argument('--provenance', default='baseline_binary_fixture_PTY')
+    parser.add_argument('--binary-file', help='optional alias for the same executable; wrappers are refused')
+    parser.add_argument('--ttyd', default='ttyd', help='ttyd executable name on PATH or explicit path')
+    parser.add_argument('--board-only', action='store_true')
+    parser.add_argument('--author', default='wkbl-layout-reviewer-with-long-name')
+    args = parser.parse_args()
+    out = ROOT / args.out
+    out.mkdir(parents=True, exist_ok=True)
+    manifest = {
+        'captures': [], 'complete': False,
+        'limitations': ['Synthetic fixture data', 'Direct native executable only; no wrapper provenance claim',
+                       'Missing fixture API returns HTTP503', 'Terminal dimensions are measured, not filename values'],
+    }
+    # A failed refresh must not leave the previous run's complete manifest.
+    write_manifest(out, manifest)
+    executable = Path(args.executable).resolve(strict=True)
+    binary_path = Path(args.binary_file or args.executable).resolve(strict=True)
+    if not executable.samefile(binary_path):
+        raise ValueError('--binary-file must identify the executable actually launched; run capture inside the binary host')
+    # ELF and Mach-O (including universal) executables have an authoritative
+    # file-format signature. A shell/Python driver cannot attest another file.
+    with executable.open('rb') as stream:
+        magic = stream.read(4)
+    if magic not in (b'\x7fELF', b'\xfe\xed\xfa\xce', b'\xce\xfa\xed\xfe',
+                     b'\xfe\xed\xfa\xcf', b'\xcf\xfa\xed\xfe',
+                     b'\xca\xfe\xba\xbe', b'\xbe\xba\xfe\xca',
+                     b'\xca\xfe\xba\xbf', b'\xbf\xba\xfe\xca'):
+        raise ValueError('capture requires the native TUI executable, not a wrapper script')
+    ttyd = shutil.which(args.ttyd)
+    if ttyd is None:
+        raise FileNotFoundError(f'ttyd is not executable: {args.ttyd}')
+    inputs = {
+        'executable': executable,
+        'capture_script': Path(__file__).resolve(),
+        'fixture_helper': ROOT / 'test/test_tui_keyboard_input.py',
+        'terminal_helper': ROOT / 'scripts/capture-tui-screenshots.py',
+    }
+    hashes = {name: digest(path) for name, path in inputs.items()}
+    commit = subprocess.check_output([str(executable), '--build-commit'], text=True).strip()
+    manifest.update(binary_commit=commit, binary_sha256=hashes['executable'],
+                    launched_executable=str(executable), input_sha256=hashes,
+                    fixture_parameters={'author': args.author, 'board_only': args.board_only})
+    write_manifest(out, manifest)
+
+    from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
+    sys.path.insert(0, str(ROOT / 'test'))
+    import test_tui_keyboard_input as h
+    spec = importlib.util.spec_from_file_location('capture', inputs['terminal_helper'])
+    c = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(c)
+    c.EXECUTABLE = executable
+    c.TTYD = Path(ttyd).resolve()
+    os.environ['MASC_TOKEN'] = 'masc-tui-keyboard-regression-token'
+    os.environ['PATH'] = h.path_without_masc(os.environ.get('PATH', ''))
+    fixtures = h.overview_event_http_fixtures()
+    fixtures.update(h.keeper_runtime_http_fixtures())
+    fixtures.update(h.row_budget_http_fixtures())
+    fixtures[h.REPOSITORIES_PATH] = h.repositories_fixture()
+    goal = h.planning_goal('goal-audit-ready', 'Audit goal')
+    goal.update(metric='checks', target_value='5', task_count=1, task_done_count=0,
+                measurement={'state': 'not_recorded'}, stagnation_seconds=None,
+                tasks=[{'id': 'task-audit-ready'}], children=[])
+    fixtures[h.PLANNING_PATH] = h.planning_snapshot([goal])
+    fixtures[h.DASHBOARD_GOALS_PATH] = (200, {'tree': [goal]})
+    _, runtime = h.empty_runtime_resolved_fixture()
+    runtime['provider_usage_windows'] = [{
+        'scope': 'provider:audit', 'scope_id': hashlib.md5(b'provider:audit').hexdigest(),
+        'providers': [{'id': 'audit', 'display_name': 'Audit provider'}],
+        'state': 'reported', 'windows': [{
+            'limit_id': None, 'window': {'kind': 'five_hour'}, 'role': 'gates_model_calls',
+            'utilization': {'unit': 'fraction', 'value': 0.4},
+            'resets_at': None, 'observed_at': 1787356800.0, 'source': 'fixture'}],
+    }]
+    fixtures[h.RUNTIME_RESOLVED_PATH] = (200, runtime)
+    post = h.board_selection_post('layout', '댓글 폭 기준 화면', '본문과 댓글의 독립적인 폭을 확인합니다.\n' * 8)
+    comments = [dict(h.board_detail_comment('layout-comment',
+                '긴 댓글 본문은 작성자 옆의 좁은 잔여 폭이 아닌 댓글 영역 전체를 사용해야 합니다.\n' * 10),
+                author=args.author)]
+    post['comment_count'] = 1
+    fixtures['/api/v1/board?sort_by=hot'] = (200, {'posts': [post]})
+    fixtures['/api/v1/board/post-layout?format=flat'] = (200, {
+        'post': post, 'comments': comments,
+        'comment_page': {'offset': 0, 'returned': len(comments), 'total': len(comments),
+                         'has_more': False, 'next_offset': None},
+    })
+    manifest['fixture_sha256'] = hashlib.sha256(json.dumps(fixtures, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+    write_manifest(out, manifest)
+
+    def wait_ready(page, markers):
+        try:
+            page.wait_for_function(
+                '(markers) => {const text=(' + SCREEN_JS + ')(); return markers.every(marker => text.includes(marker));}',
+                arg=markers, timeout=15000)
+        except PlaywrightTimeoutError as error:
+            observed = page.evaluate(SCREEN_JS)
+            raise RuntimeError(f'fixture readiness missing {markers!r}: {observed}') from error
+
+    def board_list(page):
+        if not c.goto_surface(page, 'go Board', 'MASC Board'):
+            raise RuntimeError(('Board unavailable', c.screen_text(page)))
+        # Re-selecting Board retains its reader mode. Left explicitly closes it.
+        page.keyboard.press('ArrowLeft')
+        wait_ready(page, ['Sort [s]', '댓글 폭 기준 화면'])
+
+    def shot(page, stem, markers):
+        wait_ready(page, markers)
+        if not page.evaluate(c.FREEZE_JS):
+            raise RuntimeError('terminal is unavailable to freeze')
+        try:
+            # Drain writes already queued before freeze and let the DOM paint
+            # that same buffer before reading either half of the evidence pair.
+            page.evaluate('''async () => {
+                await new Promise(resolve => window.__mascWrite('', resolve));
+                await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+            }''')
+            text = page.evaluate(SCREEN_JS)
+            if not all(marker in text for marker in markers):
+                raise RuntimeError(f'fixture readiness changed before capture: {stem}')
+            text_path, image_path = out / (stem + '.txt'), out / (stem + '.png')
+            text_path.write_text('\n'.join(line.rstrip() for line in text.splitlines()) + '\n')
+            page.locator('.xterm-screen').screenshot(path=str(image_path))
+            dims = page.evaluate('() => ({columns: window.term.cols, rows: window.term.rows})')
+            entry = {'stem': stem, 'terminal': dims, 'provenance': args.provenance,
+                     'ready_markers': markers, 'text_sha256': digest(text_path), 'png_sha256': digest(image_path)}
+            manifest['captures'].append(entry)
+            write_manifest(out, manifest)
+            print(json.dumps(entry), flush=True)
+        finally:
+            page.evaluate(c.THAW_JS)
+
+    surfaces = [
+        ('dashboard', 'go Dashboard', 'MASC Dashboard', ['Health: ok']),
+        ('work', 'go Work', 'MASC Work', ['Audit goal']),
+        ('keepers', 'go Keepers', 'MASC Keepers', ['alpha', 'beta']),
+        ('usage', 'go Usage', 'MASC Usage', ['Audit provider', '40%']),
+        ('board', 'go Board', 'MASC Board', ['Sort [s]', '댓글 폭 기준 화면']),
+        ('workspace', 'go Workspace', 'MASC Workspace', ['/srv/masc/workspace/masc']),
+        ('system', 'go System', 'runtime.toml', ['runtime config load failed:']),
+    ]
+    with tempfile.TemporaryDirectory(prefix='masc-tui-audit-fixture-') as base:
+        h.seed_workspace(base)
+        h.seed_row_budget_workspace(base)
+        with h.test_http_endpoint(h.with_workspace_identity(fixtures, base), None) as (port, start, identity):
+            identity(base)
+            start()
+            with sync_playwright() as p:
+                browser = p.chromium.launch(headless=True)
+                try:
+                    with c.ttyd_session(browser, Path(base), port, 120, 38, 'tui-audit-fixture') as page:
+                        for width in ((240,) if args.board_only else (80, 120, 240)):
+                            page.set_viewport_size({'width': int(width*8.5)+24, 'height': 38*17+24})
+                            for name, query, title, ready in ([surfaces[4]] if args.board_only else surfaces):
+                                if name == 'board':
+                                    board_list(page)
+                                elif not c.goto_surface(page, query, title):
+                                    raise RuntimeError((query, c.screen_text(page)))
+                                shot(page, f'{name}-{width}', ready)
+                            board_list(page)
+                            page.keyboard.press('Enter')
+                            shot(page, f'board-detail-{width}', ['Comments', '긴 댓글 본문은'])
+                finally:
+                    browser.close()
+    require_unchanged(inputs, hashes)
+    manifest['complete'] = True
+    write_manifest(out, manifest)
+
+
+if __name__ == '__main__':
+    main()

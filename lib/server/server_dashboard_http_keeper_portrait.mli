@@ -1,5 +1,8 @@
-(** [GET /api/v1/keepers/:name/portrait.png?size=N]: a Keeper's candle-imp
+(** [GET /api/v1/keepers/:name/portrait.png?size=N&preview=ITEM]: a Keeper's candle-imp
     portrait (lib/keeper_portrait) as a PNG with straight alpha.
+    Optional [expected_equipment] is the existing strict equipment JSON codec.
+    A malformed expectation is 400; a current equipment mismatch is 409 even
+    for a held ETag. Dashboard requests always bind their observed equipment.
 
     A plain read of the Keeper, authorised like its other plain reads: open
     on a loopback server, a [CanReadState] token once HTTP auth is strict.
@@ -14,7 +17,8 @@
     without a drawing. [Cache-Control: no-cache] makes the browser keep the
     file and revalidate it. A new binary gives new tags, so a change to the
     drawing is never served under an old one. Drawn images are kept in a
-    small cache bounded by bytes. *)
+    small cache bounded by bytes. [preview] optionally replaces one slot in
+    the drawing with a catalog accessory; it never buys or persists equipment. *)
 
 val route : string -> string option
 (** The Keeper name when the path is exactly
@@ -51,6 +55,9 @@ type answer =
   | Invalid_size of string
       (** [size] is not a whole number of pixels in the renderer's range: 400.
           Out-of-range sizes are refused, not clamped. *)
+  | Invalid_preview of string (** Unknown accessory id: 400. *)
+  | Invalid_equipment of string (** Malformed expected equipment: 400. *)
+  | Equipment_changed (** Current equipment differs from the expected snapshot: 409. *)
   | Unknown_keeper  (** No Keeper by that name here: 404. *)
   | Lookup_failed of string  (** The Keeper store could not be read: 503. *)
   | Encode_failed of string  (** The PNG encoder refused the image: 500. *)
@@ -64,11 +71,16 @@ val answer :
   build:build ->
   name:string ->
   size:string option ->
+  preview:string option ->
+  expected_equipment:(Keeper_portrait_look.equipment, string) result option ->
   keeper_present:(unit -> (bool, string) result) ->
   equipment:(unit -> (Keeper_portrait_look.equipment, string) result) ->
   holds_tag:(string -> bool) ->
   answer
-(** Decides the response. Checks run in this order: name syntax, size,
+(** [None] asks for current equipment without binding to a prior observation.
+    [Some expected] requires the existing strict equipment codec's result.
+    A mismatch is refused before ETag, cache or PNG publication.
+    Decides the response. Checks run in this order: name syntax, size, preview id, expected equipment syntax,
     Keeper presence, current equipment, the request's tag, drawing. [keeper_present] runs only
     for a well-formed request; with an {!Executable} build, a request whose
     [holds_tag] accepts the tag is answered before any drawing or cache read. *)

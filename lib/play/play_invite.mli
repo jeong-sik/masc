@@ -83,19 +83,25 @@ type invite =
   ; expired : bool
   }
 
-val credential_exists : base_path:string -> string -> bool
-(** Whether [name]'s own credential file is there, read or not.
-    [Auth.load_credential] answers [None] both for a missing file and for one
-    it cannot parse, so only this tells the two apart. *)
-
-val expired : now:float -> Masc_domain.agent_credential -> bool
+val expired :
+  now:float -> Masc_domain.agent_credential ->
+  (bool, Masc_domain.Credential_expiry.error) result
 (** Whether a credential's time has run out at [now]. A credential with no
     [expires_at] never expires; an invite always has one. This is the rule a
     static bearer is checked by: whole UTC seconds and a strict [now > expiry],
-    so the bearer still works during its expiry second. *)
+    so the bearer still works during its expiry second. A malformed in-memory
+    expiry returns [Error]; persisted malformed credentials fail decoding. *)
 
-val list : base_path:string -> now:float -> invite list
-(** Every [Player] credential, expired ones included, by name. *)
+type list_error =
+  | Credentials_unavailable of Masc_domain.masc_error
+  | Invalid_expiry of Masc_domain.Credential_expiry.error
+
+val list :
+  base_path:string -> now:float ->
+  (invite list, list_error) result
+(** Every current named [Player] credential, expired ones included, by name.
+    Surviving UUID/alias data does not revive an invite. Unavailable current
+    storage or an invalid expiry returns [Error], never a fabricated row. *)
 
 type revoked =
   | Deleted  (** the invite's credential was there and is gone *)
@@ -109,13 +115,19 @@ type revoke_error =
       (** The name belongs to a credential of another role; nothing changed. *)
   | Credential_not_deleted of Masc_domain.masc_error
       (** Credential storage or lock admission failed; no controller effect ran. *)
+  | Credential_unreadable
+      (** The name file exists but cannot resolve to a credential. No effect ran. *)
+  | Credential_identity_mismatch of string
+      (** The file resolves to another credential owner. No effect ran. *)
 
 val revoke :
   base_path:string -> name:Name.t -> after_revoke:(revoked -> 'a) ->
   ('a, revoke_error) result
-(** Checks the current role and deletes the invite in one Auth transaction;
+(** Checks the current role and exact UUID binding before deleting the invite in
+    one Auth transaction;
     its bearer stops validating from the next request. [after_revoke] runs for
     both [Deleted] and [Already_gone], before credential writers can resume.
+    A present unreadable or mismatched credential is refused, not treated as gone.
     It may free a controller or check Keeper identity but must not enter an
     Auth transaction or perform Board publication. Flush announcements after
     this returns. *)

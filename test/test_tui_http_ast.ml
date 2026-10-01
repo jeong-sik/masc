@@ -1315,7 +1315,7 @@ let test_tui_current_projection_wiring () =
        ~callee:"Board_selection.reconcile_cursor");
   check int "Board detail starts through the generation-aware projection" 1
     (Ast_grep.count_calls_in_value_binding
-       ~module_path:"bin/masc_tui.ml"
+       ~module_path:"bin/masc_tui_board_requests.ml"
        ~binding_name:"start_board_post_refresh"
        ~callee:"Board_detail.start");
   (* Two identity comparisons, and both have to stay. The guard refuses a

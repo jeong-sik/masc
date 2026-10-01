@@ -84,10 +84,14 @@ class Roster:
         empty.update(keepers=[], count=0, total=0, truncated=False)
         missing_identity = json.loads(equipped)
         del missing_identity["keepers"][0]["meta"]["trace_id"]
+        invalid = json.loads(equipped)
+        invalid["keepers"][0]["effective_meta_error"] = {
+            "keeper": invalid["keepers"][0]["name"], "message": "invalid-remote-keeper-metadata"}
         self.snapshots = {
             "before": (200, before), "equipped": (200, equipped),
             "empty": (200, json.dumps(empty).encode()),
             "missing-identity": (200, json.dumps(missing_identity).encode()),
+            "invalid": (200, json.dumps(invalid).encode()),
             "failed": (503, b'{"error":"remote roster unavailable"}'),
         }
         self.phase = "before"
@@ -110,6 +114,10 @@ class Roster:
     def publish(self, phase):
         with self.lock:
             self.phase = phase
+
+    def count(self):
+        with self.lock:
+            return len(self.calls)
 
     def hold_refresh(self, keeper: str) -> bytes:
         # A labelled scenario derivative of the native equipped receipt.
@@ -158,7 +166,11 @@ def remote_portrait(binary: str, evidence: Path) -> None:
     fixtures[ROSTER_PATH] = roster
     requests: h.HttpRequests = []
     boot_path = f"/api/v1/keepers/{keeper}/boot"
-    fixtures[boot_path] = (200, {"ok": True})
+    held_boot = h.GatedHttpResponse((409, {"error": "paused owner"}), hold_seconds=30.0)
+    boot_armed = threading.Event()
+    fixtures[boot_path] = lambda: held_boot() if boot_armed.is_set() else (200, {"ok": True})
+    directive_path = f"/api/v1/keepers/{keeper}/directive"
+    fixtures[directive_path] = (200, {"ok": True})
     # Raw health answers deliberately bypass both harness identity fillers.
     # No native state exists here; this distinct path identifies the remote
     # server whose recorded wire is being replayed.
@@ -235,7 +247,10 @@ def remote_portrait(binary: str, evidence: Path) -> None:
             # Presentation metadata can fail independently of lifecycle.
             # The same real native row still offers its observed boot action.
             roster.publish("missing-identity")
+            calls = roster.count()
             os.write(fd, b"r")
+            assert h.wait_for_fixture_state(process, fd, output,
+                lambda: roster.count() > calls, timeout=WAIT_SECONDS)
             h.resize_and_wait(process, fd, output, rows=70, columns=99, needle=b"Metadata:")
             screen_is(lambda text: b"Metadata:" in text and b"trace_id" in text
                       and b"metrics not read for the remote workspace" in text,
@@ -243,6 +258,18 @@ def remote_portrait(binary: str, evidence: Path) -> None:
             h.send_and_wait(process, fd, output, b"p", f"{keeper} boot accepted".encode())
             assert [json.loads(body) for path, body in requests if path == boot_path] == [{}]
             assert not (Path(local_base) / ".masc/keepers" / f"{keeper}.json").exists()
+
+            # A decoder error row has a verified name but no runtime payload.
+            # It remains selectable and exposes only its Invalid-state actions.
+            roster.publish("invalid")
+            os.write(fd, b"r")
+            screen_is(lambda text: b"invalid-remote-keeper-metadata" in text,
+                      "invalid remote Keeper was dropped from navigation")
+            h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+            h.select_keeper_row(process, fd, output, keeper.encode())
+            h.send_and_wait(process, fd, output, b"x", f"press x again to delete {keeper}".encode())
+            assert not any(path == "/api/v1/dashboard/agents/purge" for path, _ in requests)
+            h.send_and_wait(process, fd, output, b"\r", INFO_TAB)
 
             roster.publish("failed")
             os.write(fd, b"r")
@@ -261,13 +288,51 @@ def remote_portrait(binary: str, evidence: Path) -> None:
             (evidence / "tui-recovered.png").write_bytes(recovered)
             h.send_and_wait(process, fd, output, b"c", b"Chat requires a matching workspace")
 
+            # Hold an already-dispatched Boot's paused-owner response across
+            # the boundary. The remaining Resume/Boot plan belongs to its
+            # original workspace, even though C names the same Keeper.
+            # Keep the exact authority path in the footer for this boundary
+            # proof; the earlier 99-column portrait pixel checks stay intact.
+            h.resize_and_wait(process, fd, output, rows=70, columns=300, needle=b"Identity")
+            boot_armed.set()
+            os.write(fd, b"p")
+            assert h.wait_for_fixture_event(process, fd, output, held_boot.requested,
+                timeout=WAIT_SECONDS), "the lifecycle response was not held"
+            c_payload = json.loads(roster.snapshots["equipped"][1])
+            c_payload["keepers"][0]["runtime_blocker_summary"] = "authority-c-current-roster"
+            with roster.lock:
+                roster.snapshots["c-current"] = (200, json.dumps(c_payload).encode())
+            roster.publish("c-current")
+            c_base = str(evidence / "another-remote-workspace")
+            remote_identity.publish(c_base)
+            screen_is(lambda text: b"Base: " + c_base.encode() in text
+                      and b"MASC Keepers" in text,
+                      "C authority did not withdraw B's detail selection")
+            # Row withdrawal returns the old detail to the list. Select C's
+            # actual row and reopen Info, where Current failure is rendered.
+            h.select_keeper_row(process, fd, output, keeper.encode())
+            h.send_and_wait(process, fd, output, b"\r", INFO_TAB)
+            screen_is(lambda text: b"authority-c-current-roster" in text,
+                      "C roster was not applied while B Boot was held")
+            lifecycle_offset = len(requests)
+            held_boot.release.set()
+            c_payload["keepers"][0]["runtime_blocker_summary"] = "authority-c-settled-roster"
+            with roster.lock:
+                roster.snapshots["c-settled"] = (200, json.dumps(c_payload).encode())
+            roster.publish("c-settled")
+            screen_is(lambda text: b"authority-c-settled-roster" in text,
+                      "fresh C roster after release was not applied")
+            assert not [path for path, _ in requests[lifecycle_offset:]
+                if path in (boot_path, directive_path)],                 "a superseded B lifecycle plan sent a successor request to C"
+            boot_armed.clear()
+
             # The automatic refresh (no cancelling input) changes authority
             # while Delete is armed. The same name in the new workspace
             # requires a fresh first press, never the old confirmation.
             h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
             armed = f"press x again to delete {keeper}".encode()
             h.send_and_wait(process, fd, output, b"x", armed)
-            remote_identity.publish(str(evidence / "another-remote-workspace"))
+            remote_identity.publish(str(evidence / "third-remote-workspace"))
             screen_is(lambda text: armed not in text, "delete arm crossed remote workspace identity")
             h.select_keeper_row(process, fd, output, keeper.encode())
             h.send_and_wait(process, fd, output, b"x", armed)
@@ -299,6 +364,7 @@ def remote_portrait(binary: str, evidence: Path) -> None:
             (evidence / "tui-manifest.json").write_text(json.dumps(proof, indent=2) + "\n")
             os.write(fd, b"q")
         finally:
+            held_boot.release.set()
             roster.release_refresh.set()
             (evidence / "tui.pty").write_bytes(output)
 

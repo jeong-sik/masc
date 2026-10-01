@@ -1,0 +1,12 @@
+{
+  "status": "one_operator_scope_anchor",
+  "origin": "Synthetic inputs proposed by the coding agent; no live Goal was read or created",
+  "case_count": 20,
+  "cases_sha256": "a67cf6aa002cd87032bceee3c6d6a4a5a3aaddf787e721883e18d12445ba1ef2",
+  "human_labels_supplied": 1,
+  "model_calls_performed": 400,
+  "criteria_adopted_by_operator": false,
+  "human_reference_agreement": "not_measured",
+  "reference_is_blinded": false,
+  "prior_survey": "docs/evidence/2026-09-30-candle-grade-scope-survey"
+}

@@ -189,7 +189,7 @@ let test_tui_render_asks_the_theme_for_a_categorical_hue () =
           (violations
            |> List.map status_color_violation_to_string
            |> String.concat "\n"))
-    [ "bin/masc_tui_render.ml"; "bin/masc_tui_render_board.ml"; "bin/masc_tui_render_code.ml"; "bin/masc_tui_render_resources.ml" ]
+    [ "bin/masc_tui_render.ml"; "bin/masc_tui_render_board.ml"; "bin/masc_tui_render_approvals.ml"; "bin/masc_tui_render_code.ml"; "bin/masc_tui_render_resources.ml" ]
 ;;
 
 let test_theme_apply_is_boot_and_the_surface () =
@@ -213,7 +213,7 @@ let test_tui_status_colors_use_theme_tokens () =
           (violations
            |> List.map status_color_violation_to_string
            |> String.concat "\n"))
-    [ "bin/masc_tui_render.ml"; "bin/masc_tui_render_board.ml"; "bin/masc_tui_render_code.ml"; "bin/masc_tui_render_resources.ml" ]
+    [ "bin/masc_tui_render.ml"; "bin/masc_tui_render_board.ml"; "bin/masc_tui_render_approvals.ml"; "bin/masc_tui_render_code.ml"; "bin/masc_tui_render_resources.ml" ]
 ;;
 
 let test_tui_ansi_status_helpers_use_theme_tokens () =
@@ -501,6 +501,7 @@ let test_no_row_marks_its_own_timestamp_with_a_zone () =
     ; "bin/masc_tui_render_code.ml"
     ; "bin/masc_tui_render_resources.ml"
     ; "bin/masc_tui_render_board.ml"
+    ; "bin/masc_tui_render_approvals.ml"
     ; "bin/masc_tui_render_memory.ml"
     ; "bin/masc_tui_render_chat.ml"
     ; "bin/masc_tui_render_prim.ml"
@@ -598,10 +599,21 @@ let test_keeper_chat_uses_current_async_contract () =
   check int "chat send does not keep the root switch alive on exit" 0
     (Ast_grep.count_calls_in_value_binding ~module_path
        ~binding_name:"launch_keeper_request" ~callee:"Eio.Fiber.fork");
-  check bool "chat send runs in a cancellable daemon fiber" true
+  check int "chat send delegates once to its workspace job owner" 1
     (Ast_grep.count_calls_in_value_binding ~module_path
-       ~binding_name:"launch_keeper_request" ~callee:"Eio.Fiber.fork_daemon"
-     >= 1);
+       ~binding_name:"launch_keeper_request" ~callee:"fork_workspace_job");
+  check int "workspace jobs do not keep the root switch alive" 0
+    (Ast_grep.count_calls_in_value_binding ~module_path
+       ~binding_name:"fork_workspace_job" ~callee:"Eio.Fiber.fork");
+  check int "workspace job owner runs one daemon fiber" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path
+       ~binding_name:"fork_workspace_job" ~callee:"Eio.Fiber.fork_daemon");
+  check int "workspace job owns a cancellation context" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path
+       ~binding_name:"fork_workspace_job" ~callee:"Eio.Cancel.sub");
+  check int "workspace withdrawal cancels the owned context" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path
+       ~binding_name:"fork_workspace_job" ~callee:"Eio.Cancel.cancel");
   check bool "async completion checks request identity" true
     (Ast_grep.count_calls_in_value_binding ~module_path
        ~binding_name:"apply_keeper_chat_result"
@@ -978,7 +990,7 @@ let test_operator_approvals_use_current_contract () =
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui.ml"
        ~binding_name:"answer_presented_approval"
-       ~callee:"approval_items");
+       ~callee:"Masc_tui_approvals_model.approval_items");
   check int "approval effects never reselect by mutable cursor" 0
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui.ml"
@@ -1013,7 +1025,7 @@ let test_operator_approvals_use_current_contract () =
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_render.ml"
        ~binding_name:"render"
-       ~callee:"approval_items");
+       ~callee:"Masc_tui_approvals_model.approval_items");
   check int "approval refresh preserves selected token identity" 1
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui.ml"
@@ -1033,12 +1045,11 @@ let test_operator_approvals_use_current_contract () =
        ~needle:"Confirmation outcome unverified");
   check int "payload has its own visible row" 1
     (Ast_grep.count_string_literals
-       ~module_path:"bin/masc_tui_render.ml"
+       ~module_path:"bin/masc_tui_render_approvals.ml"
        ~needle:"  %spayload=%s%s");
   check bool "approval renderer sanitizes direct external text" true
     (Ast_grep.count_calls_in_value_binding
-       ~module_path:"bin/masc_tui_render.ml"
-       ~binding_name:"render_approvals"
+       ~module_path:"bin/masc_tui_render_approvals.ml" ~binding_name:"render_approvals"
        ~callee:"Terminal_text.single_line"
      >= 7);
   (* A floor, like the [single_line] check above it, not an exact count. What
@@ -1048,15 +1059,14 @@ let test_operator_approvals_use_current_contract () =
      below the floor is the real risk, and a floor still catches that. *)
   check bool "approval renderer sanitizes optional text with defaults" true
     (Ast_grep.count_calls_in_value_binding
-       ~module_path:"bin/masc_tui_render.ml"
-       ~binding_name:"render_approvals"
+       ~module_path:"bin/masc_tui_render_approvals.ml" ~binding_name:"render_approvals"
        ~callee:"Terminal_text.single_line_or"
      >= 3);
   (* A floor for the same reason as its two neighbours, and it is the last of
      the three to become one. [gate_error] reaches the Gate lane row through
      this call; a list that was not read reaches the empty queue as the
      reading's cause, through [Terminal_text.single_line] (the "cause" check
-     beside [check_fields "render_approvals"]).
+     beside [check_fields ~module_path:"bin/masc_tui_render_approvals.ml" "render_approvals"]).
 
      The distinction worth keeping: an exact count is right where a new call
      site is a new way to do something, which is why the theme-apply check
@@ -1102,20 +1112,17 @@ let test_operator_approvals_use_current_contract () =
      live (#36333). *)
   check bool "the approvals meta row draws both its times in one zone" true
     (Ast_grep.count_calls_in_value_binding
-       ~module_path:"bin/masc_tui_render.ml"
-       ~binding_name:"approval_metadata_lines"
+       ~module_path:"bin/masc_tui_render_approvals.ml" ~binding_name:"approval_metadata_lines"
        ~callee:"Terminal_text.short_timestamp"
      >= 2);
   check bool "approval renderer measures its name column" true
     (Ast_grep.count_calls_in_value_binding
-       ~module_path:"bin/masc_tui_render.ml"
-       ~binding_name:"render_approvals"
+       ~module_path:"bin/masc_tui_render_approvals.ml" ~binding_name:"render_approvals"
        ~callee:"Message_layout.display_width"
      >= 1);
   check bool "approval renderer sanitizes optional error text" true
     (Ast_grep.count_calls_in_value_binding
-       ~module_path:"bin/masc_tui_render.ml"
-       ~binding_name:"render_approvals"
+       ~module_path:"bin/masc_tui_render_approvals.ml" ~binding_name:"render_approvals"
        ~callee:"Terminal_text.optional_single_line"
      >= 1);
   check int "terminal text boundary delegates to the typed sanitizer" 1
@@ -1125,8 +1132,7 @@ let test_operator_approvals_use_current_contract () =
        ~callee:"Masc.Tui_terminal_text.sanitize_terminal_text");
   check int "approval payload uses its terminal projection" 1
     (Ast_grep.count_calls_in_value_binding
-       ~module_path:"bin/masc_tui_render.ml"
-       ~binding_name:"approval_metadata_lines"
+       ~module_path:"bin/masc_tui_render_approvals.ml" ~binding_name:"approval_metadata_lines"
        ~callee:
          "Masc_tui_operator_projection.approval_payload_for_terminal");
   check int "approval payload projection serializes once" 1
@@ -1141,8 +1147,7 @@ let test_operator_approvals_use_current_contract () =
        ~callee:"Masc.Tui_terminal_text.sanitize_terminal_text");
   check int "approval renderer never serializes a raw payload" 0
     (Ast_grep.count_calls_in_value_binding
-       ~module_path:"bin/masc_tui_render.ml"
-       ~binding_name:"render_approvals"
+       ~module_path:"bin/masc_tui_render_approvals.ml" ~binding_name:"render_approvals"
        ~callee:"Yojson.Safe.to_string");
   check int "briefing is not an approval source" 0
     (Ast_grep.count_string_literals
@@ -1224,7 +1229,7 @@ let test_planning_phase_uses_goal_ssot () =
      answer, asked in the binding that draws the row. *)
   check bool "goal detail lights its keys from the transition matrix" true
     (Ast_grep.count_calls_in_value_binding
-       ~module_path:"bin/masc_tui_render.ml" ~binding_name:"planning_detail_pane"
+       ~module_path:"bin/masc_tui_render.ml" ~binding_name:"planning_detail_action_rows"
        ~callee:"Goal_phase.moves_goal"
      >= 1)
 ;;
@@ -1574,7 +1579,9 @@ let test_the_screen_does_not_read_the_servers_bind_address () =
 
 let test_server_identity_is_revalidated_on_every_refresh () =
   let main_path = "bin/masc_tui.ml" in
-  check int "each full refresh asks the compact identity probe once" 1
+  (* Surface collection is bracketed by identity probes so a same-port
+     workspace replacement cannot publish a mixed-authority bundle. *)
+  check int "each full refresh probes identity before and after collecting surfaces" 2
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"load_http_surfaces" ~callee:"load_server_identity");
   check int "identity-known cache gating is absent" 0
@@ -1593,9 +1600,18 @@ let test_server_identity_is_revalidated_on_every_refresh () =
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"apply_http_surfaces"
        ~callee:"apply_server_identity_reading");
-  check int "a failed refresh withdraws identity through its owner" 1
+  (* Both an unconfirmed request identity and a failed full refresh withdraw
+     through the same transition owner. *)
+  check int "unconfirmed identity and failed refresh both withdraw through their owner" 2
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
-       ~binding_name:"apply_async_message" ~callee:"apply_server_identity_reading")
+       ~binding_name:"apply_async_message" ~callee:"apply_server_identity_reading");
+  (* Failed refreshes must feed Error through the same transition. The pure
+     server-identity test proves that this projection turns Error into None. *)
+  check int "unconfirmed identity and failed refresh both clear current identity" 2
+    (Ast_grep.count_applications_with_exact_positional_constructor_in_value_binding
+       ~module_path:main_path ~binding_name:"apply_async_message"
+       ~callee:"apply_server_identity_reading" ~position:1
+       ~constructor:"Error")
 ;;
 
 let test_scoped_surface_refresh_does_not_own_connection_status () =
@@ -1824,7 +1840,7 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
         (Ast_grep.count_calls ~module_path ~callee:"print_string");
       check int (module_path ^ " performs no direct flushes") 0
         (Ast_grep.count_calls ~module_path ~callee:"flush"))
-    [ "bin/masc_tui_render.ml"; "bin/masc_tui_render_board.ml"; "bin/masc_tui_render_code.ml"; "bin/masc_tui_render_resources.ml" ];
+    [ "bin/masc_tui_render.ml"; "bin/masc_tui_render_board.ml"; "bin/masc_tui_render_approvals.ml"; "bin/masc_tui_render_code.ml"; "bin/masc_tui_render_resources.ml" ];
   check int "main has one frame presentation boundary" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"main" ~callee:"Frame_presenter.present");
@@ -1882,7 +1898,7 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
      The old attention page's emptiness says nothing about human decisions. *)
   check int "Home reads the shared decision projection once" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path
-       ~binding_name:"render_overview" ~callee:"home_decision_rows");
+       ~binding_name:"render_overview" ~callee:"Masc_tui_home.home_decision_rows");
   check int "board read consumes one shared row allocation" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_render_board.ml"
        ~binding_name:"board_read_pane"
@@ -2567,11 +2583,11 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
   (* [ap_summary] is not in this list: the press-again line and the row
      summary both moved into [approval_detail_line], and the guard follows
      the field rather than the surface's name. *)
-  check_fields "approval_detail_line" [ "ap_summary" ];
+  check_fields ~module_path:"bin/masc_tui_render_approvals.ml" "approval_detail_line" [ "ap_summary" ];
   (* The whole-ask screen draws what the list row cuts, and none of it was on
      this list: a model's command reached the terminal through [kta_question]
      with its escapes intact. Every field goes through [of_fields] now. *)
-  check_fields "approval_detail_pane"
+  check_fields ~module_path:"bin/masc_tui_render_approvals.ml" "approval_detail_pane"
     [ "kta_keeper"
     ; "kta_tool"
     ; "kta_tool_call_id"
@@ -2594,9 +2610,9 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
      became [approval_metadata_lines] so the row could be measured against the
      frame and could say how tall it is (#36333). The four fields it draws
      followed it, and the guard follows the field. *)
-  check_fields "approval_metadata_lines"
+  check_fields ~module_path:"bin/masc_tui_render_approvals.ml" "approval_metadata_lines"
     [ "ap_expires_at"; "ap_payload"; "ap_trace_id"; "ap_created_at" ];
-  check_fields "render_approvals"
+  check_fields ~module_path:"bin/masc_tui_render_approvals.ml" "render_approvals"
     [ "aps_actor_filter"
     ; "ap_target_id"
     ; "ap_actor"
@@ -2604,9 +2620,9 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
     ; "ap_target_type"
     ];
   (* A list that was not read reaches the empty queue as the loader's cause,
-     carried by [Masc_tui_types.approvals_reading] rather than read off
+     carried by [Masc_tui_approvals_model.approvals_reading] rather than read off
      [approvals_error] here. *)
-  check_identifiers ~module_path:"bin/masc_tui_render.ml" ~binding:"render_approvals"
+  check_identifiers ~module_path:"bin/masc_tui_render_approvals.ml" ~binding:"render_approvals"
     ~callees:sanitizer_calls [ "cause" ];
   check_fields ~module_path:"bin/masc_tui_render_board.ml" "render_board_list"
     [ "board_list_error"; "bp_id"; "bp_author"; "bp_title" ];
@@ -2657,23 +2673,26 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
     ~binding:"write_list_sidebar_selection" ~callees:sanitizer_calls [ "label" ];
   check_fields "render_planning_list"
     [ "planning_error"; "pg_due_date"; "pg_title" ];
-  (* The drawing moved into [planning_detail_pane] when the goal list came to
-     sit beside the goal; [render_planning_detail] is now the split, and
-     guarding it would guard a function that renders nothing. Same move as
-     #29626 made for [keeper_row_content].
-
-     [String.equal] finds the open goal's row in the sidebar and [List.mem]
-     asks which tasks name this goal. Neither reaches the terminal, and the
-     labels the sidebar draws are sanitized where they are drawn.
-
-     [Planning_detail.timeline] takes the goal id to answer one question --
-     whether the timeline that came back is this goal's or the previous
-     one's -- and draws the events, never the id
-     (masc_tui_planning_detail.ml). *)
+  (* Metadata rows now belong to [planning_detail_lines]. Its local [field]
+     builder passes every value through the text-block sanitizer; the pane
+     draws those projected rows and the separate transition-derived actions. *)
+  check_fields "planning_detail_pane" [ "pg_id" ];
   check_fields
-    ~non_rendering_calls:[ "List.mem"; "Planning_detail.timeline" ]
-    "planning_detail_pane"
+    ~non_rendering_calls:[ "field"; "List.mem"; "Planning_detail.timeline"; "Link.reference" ]
+    "planning_detail_lines"
     [ "pg_id"; "pg_title"; "pg_due_date"; "pg_metric"; "pg_target_value" ];
+  check int "goal pane draws its metadata projection" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:render_path
+       ~binding_name:"planning_detail_pane" ~callee:"planning_detail_lines");
+  check int "goal pane draws its transition-derived action projection" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:render_path
+       ~binding_name:"planning_detail_pane" ~callee:"planning_detail_action_rows");
+  check bool "goal metadata values pass through the text-block boundary" true
+    (Ast_grep.count_calls_in_value_binding ~module_path:render_path
+       ~binding_name:"planning_detail_lines" ~callee:"Masc_tui_text_block.rows" >= 1);
+  check_identifiers ~module_path:"bin/masc_tui_text_block.ml"
+    ~binding:"rows_of_line"
+    ~callees:[ "Masc.Tui_terminal_text.sanitize_terminal_text" ] [ "line" ];
   check_fields ~non_rendering_calls:[ "String.equal" ] "render_planning_detail"
     [ "pg_id" ];
   (* The verifier's reason for skipping a Verifying goal comes off the wire
@@ -2692,7 +2711,7 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
     [ "text"; "line" ];
   check int "the goal detail heads a stuck goal with the verifier's reason" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path
-       ~binding_name:"planning_detail_pane"
+       ~binding_name:"planning_detail_lines"
        ~callee:"Planning_detail.unreconciled_lines");
   check int "the Verifying next step comes from the tested sentence" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path

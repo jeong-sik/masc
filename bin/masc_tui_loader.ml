@@ -1178,7 +1178,7 @@ let load_board_list ~(host : string) ~(port : int)
 (** The ordinary Board read uses the newest twenty. The reader can request
     the complete history explicitly; that read walks bounded REST pages. *)
 let load_board_post ?(full_history = false) ~(host : string) ~(port : int)
-    ~(post_id : string) () : (board_post * board_comment list, string) result =
+    ~(post_id : string) () : (board_post * board_comment list * string option, string) result =
   let read_page offset =
     let* json =
       Masc_tui_frame_timing.time_stage ~name:"board.http_json"
@@ -1192,17 +1192,22 @@ let load_board_post ?(full_history = false) ~(host : string) ~(port : int)
     in
     Masc_tui_frame_timing.time_stage ~name:"board.model_decode"
       (fun () ->
-        let* comments_json = Masc.Tui_decode_fields.optional_list_field json "comments" in
+        let* comments_json = Masc.Tui_decode_fields.required_list_field json
+          (if full_history then "comments" else "comment_context") in
         let* comments = decode_board_comments comments_json in
+        let* revision = Masc.Tui_decode_fields.required_string_field json "comment_revision" in
+        let* () = if String.length revision=64 && String.for_all
+            (function '0'..'9' | 'a'..'f' -> true | _ -> false) revision
+          then Ok () else Error "board detail comment revision is malformed" in
         let* page = Masc.Tui_decode_fields.required_object_field json "comment_page" in
         let* actual_offset = Masc.Tui_decode_fields.required_int_field page "offset" in
         let* total = Masc.Tui_decode_fields.required_int_field page "total" in
         match offset with
         | Some expected when actual_offset <> expected ->
             Error "board detail returned a different comment offset"
-        | None | Some _ -> Ok (json, comments, actual_offset, total))
+        | None | Some _ -> Ok (json, comments, actual_offset, total, revision))
   in
-  let* (first_json, first_comments, first_offset, total) =
+  let* (first_json, first_comments, first_offset, total, revision) =
     read_page (if full_history then Some 0 else None)
   in
   let post_json =
@@ -1215,9 +1220,11 @@ let load_board_post ?(full_history = false) ~(host : string) ~(port : int)
       (fun () -> decode_board_post ~require_body:true post_json)
   in
   let rec read_remaining offset total reversed =
-    if offset >= total then Ok (post, List.rev reversed)
+    if offset >= total then Ok (post, List.rev reversed, None)
     else
-      let* (_, comments, _, total) = read_page (Some offset) in
+      let* (_, comments, _, page_total, page_revision) = read_page (Some offset) in
+      let* () = if page_revision=revision && page_total=total then Ok ()
+        else Error "Board comment thread changed during full history read; refresh to read one snapshot" in
       let next_offset = offset + List.length comments in
       if next_offset <= offset then
         Error "board detail comment page did not advance"
@@ -1226,7 +1233,22 @@ let load_board_post ?(full_history = false) ~(host : string) ~(port : int)
   if full_history then
     read_remaining (first_offset + List.length first_comments) total
       (List.rev first_comments)
-  else Ok (post, first_comments)
+  else
+    let* page_json = Masc.Tui_decode_fields.required_list_field first_json "comments" in
+    let* page_comments = decode_board_comments page_json in
+    let* () =
+      if List.for_all (fun page_comment ->
+          List.exists (fun context_comment ->
+            String.equal page_comment.bc_id context_comment.bc_id) first_comments)
+          page_comments then Ok ()
+      else Error "Board comment context is missing a page comment"
+    in
+    let landing =
+      if List.length first_comments = List.length page_comments then None
+      else match List.rev page_comments with
+        | [] -> None
+        | comment :: _ -> Some comment.bc_id in
+    Ok (post, first_comments, landing)
 
 (** Load the actor-scoped pending confirmation envelope from the operator
     surface. Missing or malformed envelopes remain explicit errors. *)
@@ -1520,23 +1542,23 @@ let load_system_logs ~(host : string) ~(port : int) ?level ~(limit : int) () :
 (** Load the registered tool inventory and, when selected, one Keeper's exact
     effective turn surface from /api/v1/dashboard/tools. *)
 let load_tools ~(host : string) ~(port : int) ?keeper () :
-    (Tui_decode.tool_snapshot, string) result =
+    (Masc.Tui_decode_tools.tool_snapshot, string) result =
   match fetch_dashboard_tools ~host ~port ?keeper () with
   | Error err -> Error ("tool inventory load failed: " ^ err)
-  | Ok json -> Tui_decode.decode_tool_snapshot json
+  | Ok json -> Masc.Tui_decode_tools.decode_tool_snapshot json
 
 (** Load the workspace skills catalog for the Tools screen tracking views. *)
 let load_skills_catalog ~(host : string) ~(port : int) :
-    (Tui_decode.skills_catalog, string) result =
-  Result.bind (fetch_skills_catalog ~host ~port) Tui_decode.decode_skills_catalog
+    (Masc.Tui_decode_tools.skills_catalog, string) result =
+  Result.bind (fetch_skills_catalog ~host ~port) Masc.Tui_decode_tools.decode_skills_catalog
 
 (** Load connector status from /api/v1/gate/connectors *)
 let load_connectors ~(host : string) ~(port : int) :
-    (Tui_decode.connector_snapshot, string) result =
+    (Masc.Tui_decode_connectors.connector_snapshot, string) result =
   match fetch_connectors ~host ~port with
   | Error err -> Error err
   | Ok json ->
-      (match Tui_decode.decode_connector_snapshot json with
+      (match Masc.Tui_decode_connectors.decode_connector_snapshot json with
        | Error _ as error -> error
        | Ok snapshot ->
            let load_pages connector kind =
@@ -1544,13 +1566,13 @@ let load_connectors ~(host : string) ~(port : int) :
              let rec loop after_id pages =
                match
                  Masc_tui_http.fetch_connector_names ~host ~port
-                   ~connector:connector.Tui_decode.cn_id ~kind ?after_id
+                   ~connector:connector.Masc.Tui_decode_connectors.cn_id ~kind ?after_id
                    ~limit:page_limit ()
                with
                | Error detail ->
                  List.rev pages, Some (kind ^ ": " ^ detail)
                | Ok json ->
-                 (match Tui_decode.decode_connector_name_page json with
+                 (match Masc.Tui_decode_connectors.decode_connector_name_page json with
                   | Error detail ->
                     List.rev pages, Some (kind ^ ": " ^ detail)
                   | Ok page ->
@@ -1600,7 +1622,7 @@ let load_connectors ~(host : string) ~(port : int) :
                   let read_problems =
                     List.filter_map snd directory_results
                   in
-                  Tui_decode.connector_with_name_pages connector ~pages
+                  Masc.Tui_decode_connectors.connector_with_name_pages connector ~pages
                     ~error:
                       (match read_problems with
                        | [] -> None
@@ -1661,10 +1683,10 @@ let load_repository_changes ~(host : string) ~(port : int)
   | Ok json -> Tui_decode.decode_repository_change_snapshot json
 
 let load_memory_health ~(host : string) ~(port : int) :
-    (Tui_decode.memory_health_snapshot, string) result =
+    (Masc.Tui_decode_memory_health.memory_health_snapshot, string) result =
   match fetch_keeper_memory_health ~host ~port with
   | Error err -> Error ("memory health load failed: " ^ err)
-  | Ok json -> Tui_decode.decode_memory_health_snapshot json
+  | Ok json -> Masc.Tui_decode_memory_health.decode_memory_health_snapshot json
 
 (** Load one keeper's remembered facts, both stores. *)
 let load_memory_facts ~(host : string) ~(port : int) ~(keeper_name : string) :

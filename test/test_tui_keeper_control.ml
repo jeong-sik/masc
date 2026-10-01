@@ -602,7 +602,7 @@ let test_remote_identity_failure_preserves_observed_controls () =
     match Decode.decode_keeper_runtime_list (`Assoc [
       "candle", `Assoc ["status", `String "off"]; "keepers", `List [row];
       "total", `Int 1; "truncated", `Bool false]) with
-    | Ok ([runtime], [], false, 1) -> runtime
+    | Ok ([runtime], [], false, 1, _) -> runtime
     | Ok _ -> Alcotest.fail "remote row was hidden"
     | Error reason -> Alcotest.fail reason
   in
@@ -667,6 +667,33 @@ let test_roster_equipment_is_required_and_failures_stay_per_keeper () =
   | `Assoc fields -> Alcotest.(check bool) "missing snapshot rejected" true
       (Result.is_error (decode (`Assoc (List.remove_assoc "portrait" fields))))
   | _ -> Alcotest.fail "bad row fixture"
+
+let test_item_revision_hint_preserves_keeper_observation () =
+  let row = Yojson.Safe.from_string (gate_row "analyst") in
+  let decode ?(candle = `Assoc ["status", `String "off"]) value =
+    let row = match row with
+      | `Assoc fields -> `Assoc (("candle_account_revision", value) :: List.remove_assoc "candle_account_revision" fields)
+      | _ -> Alcotest.fail "bad Keeper fixture" in
+    match Decode.decode_keeper_runtime_list (`Assoc [
+      "candle", candle; "keepers", `List [row];
+      "total", `Int 1; "truncated", `Bool false]) with
+    | Ok ([runtime], [], false, 1, _) -> runtime
+    | _ -> Alcotest.fail "Item revision hint hid the Keeper"
+  in
+  let digest = String.make 64 'a' in
+  Alcotest.(check bool) "canonical revision decoded" true
+    ((decode ~candle:(`Assoc ["status", `String "disabled"; "reason", `String "fixture ledger unavailable"]) (`String digest)).kr_candle_account_revision = Ok (Some digest));
+  Alcotest.(check bool) "null denotes no hint" true
+    ((decode `Null).kr_candle_account_revision = Ok None);
+  List.iter (fun value ->
+    let runtime = decode value in
+    Alcotest.(check bool) "malformed hint reported independently" true
+      (Result.is_error runtime.kr_candle_account_revision);
+    let roster = Control.Roster_complete [runtime] in
+    Alcotest.(check bool) "malformed hint retains lifecycle controls" true
+      (List.mem Control.Shutdown
+        (Control.available (reading ~liveness:(Control.liveness_of_roster roster "analyst") "analyst"))))
+    [`Int 1; `String "short"; `String (String.make 64 'A')]
 
 let test_roster_candle_amounts_and_status_agree () =
   let amount = "18446744073709551614000" in
@@ -1235,6 +1262,8 @@ let () =
             test_roster_decode_reads_the_sandbox_profile
         ; Alcotest.test_case "server equipment required; failures preserve Keeper" `Quick test_roster_equipment_is_required_and_failures_stay_per_keeper
         ; Alcotest.test_case "Candle exact amounts and envelope status" `Quick test_roster_candle_amounts_and_status_agree
+        ; Alcotest.test_case "Item revision hints preserve lifecycle observations" `Quick
+            test_item_revision_hint_preserves_keeper_observation
         ; Alcotest.test_case "paused stays apart from phase" `Quick
             test_roster_decode_keeps_paused_apart_from_phase
         ; Alcotest.test_case "a row without a sandbox profile is rejected" `Quick

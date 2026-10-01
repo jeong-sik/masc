@@ -200,10 +200,8 @@ let multi_line_claim =
   "The chat pane keeps the model's reply verbatim.\n\n**Why**:\n1. first reason\n\
    2. second reason\x07 rings"
 
-(* The claim's rows are the ones between the block heading and the first
-   labelled field. The fixed-format rows under it (Origin and Timeline, File
-   SHA) are not wrapped by this change, so a 40-cell bound on them would be a
-   claim about something else. *)
+(* The claim's rows are those before the first labeled provenance field;
+   detail wraps both prose and provenance to the frame width. *)
 let claim_rows lines =
   let plain = List.map Masc_tui_theme.strip_sgr lines in
   let is_field line =
@@ -261,6 +259,58 @@ let test_detail_keeps_the_claim_line_breaks () =
   check_claim_rows ~what:"source-bound fact"
     (Render_memory.memory_fact_detail_lines ~cols:40
        (Types.Memory_row_source_fact sfact))
+;;
+
+let test_narrow_detail_preserves_provenance () =
+  let origin = "keeper:" ^ String.concat "/" (List.init 12 (fun _ -> "긴출처")) in
+  let memory_id = "memory-" ^ String.make 96 'x' in
+  let path = "docs/" ^ String.concat "/" (List.init 12 (fun _ -> "long-directory")) in
+  let sha = String.make 64 'a' in
+  let reason = "source_changed:" ^ String.make 80 'r' in
+  let fact : Masc.Tui_decode_memory_facts.memory_fact =
+    { mf_claim = "This fact retains its complete provenance."
+    ; mf_category = Cat.Constraint
+    ; mf_origin = origin
+    ; mf_first_seen = 100.
+    ; mf_last_seen = 200.
+    ; mf_memory_id = memory_id
+    ; mf_events = Masc.Tui_decode_memory_facts.no_memory_fact_events
+    }
+  in
+  let source : Masc.Tui_decode_memory_facts.memory_source_fact =
+    { msf_claim = fact.mf_claim; msf_first_seen = 100.; msf_path = path; msf_sha256 = sha }
+  in
+  let dropped : Masc.Tui_decode_memory_facts.memory_invalidation =
+    { mi_source_path = path; mi_invalidated_at = 200.; mi_reason = reason }
+  in
+  let compact text =
+    String.split_on_char ' ' text |> String.concat ""
+  in
+  List.iter
+    (fun cols ->
+      List.iter
+        (fun (row, values) ->
+          let lines = Render_memory.memory_fact_detail_lines ~cols row in
+          (* The block title is chrome; prose and provenance own scrollable
+             rows that must fit before the frame can clip them. *)
+          let body = match lines with [] -> [] | _heading :: body -> body in
+          List.iter
+            (fun line ->
+              check bool "body fits the frame, including indentation" true
+                (Layout.display_width line <= Masc_tui_frame.inner_width ~cols))
+            body;
+          let text =
+            body |> List.map Masc_tui_theme.strip_sgr |> String.concat "" |> compact
+          in
+          List.iter
+            (fun value -> check bool "exact provenance survives wrapping" true
+                (contains (compact value) text))
+            values)
+        [ Types.Memory_row_fact fact, [ origin; memory_id ]
+        ; Types.Memory_row_source_fact source, [ path; sha ]
+        ; Types.Memory_row_invalidation dropped, [ path; reason ]
+        ])
+    [ 80; 40; 30; 16 ]
 ;;
 
 let test_detail_lines_source_and_invalidation () =
@@ -2173,6 +2223,8 @@ let () =
         ] )
     ; ( "detail_lines"
       , [ test_case "detail_lines_bounded" `Quick test_detail_lines
+        ; test_case "narrow detail preserves exact provenance" `Quick
+            test_narrow_detail_preserves_provenance
         ; test_case "detail_lines_source_and_invalidation" `Quick test_detail_lines_source_and_invalidation
         ; test_case "the detail keeps the claim's line breaks" `Quick
             test_detail_keeps_the_claim_line_breaks

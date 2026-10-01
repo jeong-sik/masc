@@ -7975,11 +7975,10 @@ let render_memory_fact_detail (state : state) =
   let facts = Masc_tui_types.memory_fact_rows state in
   let total = List.length facts in
   let cursor = max 0 (min state.memory_facts_cursor (max 0 (total - 1))) in
-  let detail_cols = max 30 (framed_inner_width cols) in
   let lines =
     match List.nth_opt facts cursor with
     | None -> [ "    This list has no fact row to read." ]
-    | Some row -> Render_memory.memory_fact_detail_lines ~cols:detail_cols row
+    | Some row -> Render_memory.memory_fact_detail_lines ~cols row
   in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"memory-fact-detail"
     ~frame:Chrome_overlay

@@ -591,9 +591,11 @@ let test_a_confirmed_goal_pays_its_keeper_once_across_reopen_and_restart () =
   let grade_started, signal_grade_started = Eio.Promise.create () in
   let grade_release, release_grade = Eio.Promise.create () in
   let appraise ~identity request =
+    (* The worker turns callback exceptions into Retry_later. Record entry
+       before assertions so a rejected extra invocation cannot disappear. *)
+    calls := A.stage request :: !calls;
     check bool "each model request names the confirmed proof" true (identity = first_identity);
     check int "Candidates are durable before any model request" 1 (count_kind config "candidates");
-    calls := A.stage request :: !calls;
     let decision = match request with
       | A.Grade goal ->
         check string "grade reads the real Goal snapshot" "Ship the ledger" goal.title;

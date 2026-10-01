@@ -337,7 +337,7 @@ def currency_follows_workspace_authority(binary: str, captures: Path | None) -> 
         publish("a-ready")
         os.write(fd, b"r")
         seen("a-before-held", lambda text: all(line in text for line in SUMMARY))
-        h.send_and_wait(process, fd, output, b"A", b"MASC Activity")
+        h.palette_go(process, fd, output, b"go Activity", b"MASC Activity")
         # Activity asks for no roster. Entering Dashboard therefore launches
         # a scoped roster request; its A response is frozen before the switch.
         with lock:
@@ -362,7 +362,7 @@ def currency_follows_workspace_authority(binary: str, captures: Path | None) -> 
             publish("a-ready")
             os.write(fd, b"r")
             seen(withdrawal + "-before", lambda text: all(line in text for line in SUMMARY))
-            h.send_and_wait(process, fd, output, b"A", b"MASC Activity")
+            h.palette_go(process, fd, output, b"go Activity", b"MASC Activity")
             held_started.clear()
             release_held.clear()
             with lock:

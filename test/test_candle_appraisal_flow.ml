@@ -440,7 +440,7 @@ let test_cumulative_overflow_refuses_the_real_settlement () =
       ~deduction_floor:1000 ~overdue_hours:0 ~weights:["keeper-a",1] |> ok in
     funding_rows confirmed_at payment)) in
   append config history;
-  let waiting = prepared config "overflow" in
+  let waiting = prepared ~due_date:None config "overflow" in
   let calls = ref [] in
   (match drain config (make_runner calls) with
    | [Candle_appraise.Rejected _] -> ()
@@ -483,7 +483,7 @@ let test_finite_overflow_retries_after_decay () =
   let off = "half_life = \"off\"" in
   Fs_compat.save_file path ("half_life = 1" ^ String.sub configured (String.length off)
     (String.length configured - String.length off));
-  let waiting = prepared config "decay-overflow" in
+  let waiting = prepared ~due_date:None config "decay-overflow" in
   let appraise = make_runner (ref []) in
   (match Candle_appraise.settle_one ~now ~appraise ~base_path:config.base_path waiting with
    | Candle_appraise.Retry_later _ -> () | _ -> fail "finite overflow was not retryable");

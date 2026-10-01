@@ -45,7 +45,7 @@ let route_candidates route =
   | Ok {order;_} -> Ok order
   | Error refusal -> Error (Keeper_turn_driver.assignment_refusal_to_string refusal)
 
-let note_answered (runtime : Runtime.t option) = Option.iter (fun (runtime : Runtime.t) ->
+let note_answered (runtime : Runtime_instance.t option) = Option.iter (fun (runtime : Runtime_instance.t) ->
   Runtime_candidate_backpressure.note_candidate_success ~candidate:runtime.candidate_backpressure;
   Runtime_quota_window.note_succeeded ~scope:(Runtime_instance.quota_scope_of_runtime runtime)) runtime
 
@@ -54,7 +54,7 @@ let note_provider_failure runtime error =
   let cause = Agent_core.Error.Provider (Llm_provider.Error.of_http_error error) in
   match Route.route_of_error ~boundary:Route.Agent_core_execution cause with
   | Route.Retry_after_observed {retry_class=Rate_limited;retry_after} ->
-      Option.iter (fun (runtime : Runtime.t) -> Runtime_candidate_backpressure.note_rate_limit
+      Option.iter (fun (runtime : Runtime_instance.t) -> Runtime_candidate_backpressure.note_rate_limit
         ~candidate:runtime.candidate_backpressure ~retry_after) runtime
   | Retry_after_observed {retry_class=Hard_quota;retry_after} ->
       Option.iter (fun runtime ->

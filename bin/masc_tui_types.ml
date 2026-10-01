@@ -2083,29 +2083,6 @@ type provider_history_reading =
   | Provider_history_read of Masc_tui_usage_trend.t
   | Provider_history_error of string
 
-(** What a [keeper_briefs] row says about the Keeper's lifecycle phase. The
-    briefing writes [null] for a Keeper with no registry entry (an offline
-    Keeper that never booted this process), which is a different fact from a
-    word this build cannot name; neither is folded into a phase. *)
-type overview_keeper_phase =
-  | Keeper_phase of Tui_decode.keeper_phase
-  | Keeper_phase_absent
-  | Keeper_phase_unreadable of string
-
-(** One [keeper_briefs] row from the operator snapshot. *)
-type overview_keeper = {
-  okp_name: string;
-  okp_phase: overview_keeper_phase;
-  okp_last_turn_ago_s: float option;
-      (** [None] when the Keeper has not finished a turn this process saw. *)
-  okp_paused: bool option;
-      (** The brief's [paused]: an operator paused this Keeper. It is read
-          apart from [okp_phase] because a paused Keeper is left out of
-          autoboot, so after a server restart it has no registry entry and
-          its phase is [null] while [paused] still says [true]. [None] when
-          the brief carried no boolean there. *)
-}
-
 type overview_snapshot = {
   ov_workspace_health: workspace_health;
   ov_keepers: int;  (** [keeper_briefs] plus [keepers_unread] *)
@@ -2114,8 +2091,6 @@ type overview_snapshot = {
           could not list the Keeper directory, so [ov_keepers] counts nothing
           it read rather than an empty fleet (#38120). *)
   ov_keeper_liveness: keeper_liveness_counts;
-  ov_keeper_rows: overview_keeper list;
-      (** Every [keeper_briefs] row with a name, in the briefing's order. *)
   ov_mcp_agents: int;  (** [agent_briefs]: MCP clients, not keepers *)
   ov_attention_items: attention_item list;
   ov_generated_at: string;

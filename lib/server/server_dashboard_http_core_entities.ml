@@ -1,3 +1,15 @@
+let namespace_pause_status_json (config : Workspace.config) =
+  match Workspace.read_state_strict config with
+  | Error error -> Error (Workspace.state_read_error_to_string error)
+  | Ok state ->
+      Ok (`Assoc
+        [ "ok", `Bool true
+        ; "initializing", `Bool (Option.is_none state)
+        ; "paused", (match state with
+            | None -> `Null | Some state -> `Bool state.paused)
+        ])
+;;
+
 let dashboard_shell_status_json (config : Workspace.config) : Yojson.Safe.t =
   let workspace_state = Workspace.read_state config in
   let cluster = Env_config_core.cluster_name () in

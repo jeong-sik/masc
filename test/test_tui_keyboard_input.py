@@ -914,7 +914,7 @@ def tab_until(
     """Press Tab until the screen shows [needle], or give up after a lap.
 
     Name the surface the walk is going to, not one on the way. The ring is
-    not fixed: Masc_tui_types.is_surface_active leaves Approvals out of it
+    not fixed: Masc_tui_surface_navigation.is_surface_active leaves Approvals out of it
     while nothing is pending, so a walk that stopped there first burned
     every press on a screen that did not exist. Six scenarios used it as a
     waypoint to Board, and a seventh fabricated a pending tool approval in
@@ -1894,9 +1894,23 @@ def board_detail_page(
     first = max(0, total - limit) if offset is None else offset
     page = comments[first:first + limit]
     next_offset = first + len(page) if first + len(page) < total else None
+    by_id = {comment["id"]: comment for comment in comments}
+    context_ids = set()
+    for comment in page:
+        current = comment
+        while current["id"] not in context_ids:
+            context_ids.add(current["id"])
+            parent = by_id.get(current.get("parent_id"))
+            if parent is None:
+                break
+            current = parent
     return {
         "post": {**post, "comment_count": total},
         "comments": page,
+        "comment_context": [comment for comment in comments if comment["id"] in context_ids],
+        "comment_revision": hashlib.sha256(json.dumps(
+            [[comment["id"], comment.get("parent_id")] for comment in comments],
+            ensure_ascii=False, separators=(",", ":")).encode()).hexdigest(),
         "comment_page": {
             "offset": first,
             "returned": len(page),
@@ -2205,6 +2219,8 @@ def run_terminal_scenario(
         )
         os.set_blocking(master_fd, False)
         with tempfile.TemporaryDirectory(prefix="masc-tui-keyboard-") as base_path:
+            # Health and route fixtures must publish the same workspace identity.
+            base_path = os.path.realpath(base_path)
             with test_http_endpoint(
                 with_workspace_identity(http_fixtures, base_path), http_requests
             ) as (
@@ -7134,7 +7150,7 @@ def chat_retained_stop_interaction(fixture: AtomicChatFixture) -> Interaction:
                 raise AssertionError("initial stop never reached the server")
             send_and_wait(process, master_fd, output, b"retained-original", composer_showing(b"retained-original"))
             send_and_wait(process, master_fd, output, b"\r", "내 메시지 1건 대기".encode())
-            send_and_wait(process, master_fd, output, b"\x1b", b"Input retained after Esc")
+            send_and_wait(process, master_fd, output, b"\x1b", "중단 뒤 보관 중".encode())
             if fixture.received:
                 raise AssertionError(f"second Esc dispatched retained input: {fixture.received!r}")
             fixture.release_interrupt.set()

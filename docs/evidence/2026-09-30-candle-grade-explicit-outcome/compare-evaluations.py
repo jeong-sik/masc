@@ -96,7 +96,7 @@ def load_run(directory, resources):
         selected = [row for row in rows if row["case_id"] == case_id]
         require(all(row["stage"] == case["stage"] for row in selected), "Evidence validation failed: all((row['stage'] == case['stage'] for row in selected))")
         valid = [row for row in selected if row["status"] == "ok"]
-        tally = {"statuses": dict(Counter(row["status"] for row in selected))}
+        tally: dict[str, object] = {"statuses": dict(Counter(row["status"] for row in selected))}
         if case["stage"] == "weights":
             comparison = case["comparison"]
             contributor = comparison["candidate_keeper"] if comparison else case["input"]["keepers"][0]

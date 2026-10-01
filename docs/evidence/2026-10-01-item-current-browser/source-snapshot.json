@@ -1,0 +1,65 @@
+{
+  "scope": "Relevant historical scenario/component/style blobs, not a complete dependency/build snapshot",
+  "files": [
+    {
+      "source_commit": "d688917369e608765472b63f6a2c307b42a66b90",
+      "source_path": "dashboard/e2e/keeper-items.mjs",
+      "snapshot": "source-snapshot/a0d5e3bdee58627dff2f9584ff7de6cda9ca5db3e48be90bd1fc76207ea12ca3",
+      "sha256": "a0d5e3bdee58627dff2f9584ff7de6cda9ca5db3e48be90bd1fc76207ea12ca3"
+    },
+    {
+      "source_commit": "d688917369e608765472b63f6a2c307b42a66b90",
+      "source_path": "dashboard/e2e/keeper-items-workspace.mjs",
+      "snapshot": "source-snapshot/c9e03f3adef8e2cf42c40023afc7c924a8f4341aa9bc4a226cb0b31b69e9cb88",
+      "sha256": "c9e03f3adef8e2cf42c40023afc7c924a8f4341aa9bc4a226cb0b31b69e9cb88"
+    },
+    {
+      "source_commit": "d688917369e608765472b63f6a2c307b42a66b90",
+      "source_path": "dashboard/src/components/keeper-items-panel.ts",
+      "snapshot": "source-snapshot/7bc48c1a41db6d8ad53c48a4c26ca0df592f4e8626fa75e77d82e47a9dba404e",
+      "sha256": "7bc48c1a41db6d8ad53c48a4c26ca0df592f4e8626fa75e77d82e47a9dba404e"
+    },
+    {
+      "source_commit": "d688917369e608765472b63f6a2c307b42a66b90",
+      "source_path": "dashboard/src/components/keeper-portrait.ts",
+      "snapshot": "source-snapshot/443c04d6ecd27fa9f64f4dfc6d0d3092f9d9b334ef407498bf56a4699f3285c8",
+      "sha256": "443c04d6ecd27fa9f64f4dfc6d0d3092f9d9b334ef407498bf56a4699f3285c8"
+    },
+    {
+      "source_commit": "d688917369e608765472b63f6a2c307b42a66b90",
+      "source_path": "dashboard/src/styles/keeper-workspace.css",
+      "snapshot": "source-snapshot/e4d2525a462d30964ca959cdbe8113bdc193c3973d772ef724b5c68e9244c781",
+      "sha256": "e4d2525a462d30964ca959cdbe8113bdc193c3973d772ef724b5c68e9244c781"
+    },
+    {
+      "source_commit": "05044d48a75b1e3036e14210990fe4ec04362edf",
+      "source_path": "dashboard/e2e/keeper-items.mjs",
+      "snapshot": "source-snapshot/51f4278b80da798781683c063493e1fb306221dcbb4c77c7b8d80d130ee50d7e",
+      "sha256": "51f4278b80da798781683c063493e1fb306221dcbb4c77c7b8d80d130ee50d7e"
+    },
+    {
+      "source_commit": "05044d48a75b1e3036e14210990fe4ec04362edf",
+      "source_path": "dashboard/e2e/keeper-items-workspace.mjs",
+      "snapshot": "source-snapshot/c9e03f3adef8e2cf42c40023afc7c924a8f4341aa9bc4a226cb0b31b69e9cb88",
+      "sha256": "c9e03f3adef8e2cf42c40023afc7c924a8f4341aa9bc4a226cb0b31b69e9cb88"
+    },
+    {
+      "source_commit": "05044d48a75b1e3036e14210990fe4ec04362edf",
+      "source_path": "dashboard/src/components/keeper-items-panel.ts",
+      "snapshot": "source-snapshot/7bc48c1a41db6d8ad53c48a4c26ca0df592f4e8626fa75e77d82e47a9dba404e",
+      "sha256": "7bc48c1a41db6d8ad53c48a4c26ca0df592f4e8626fa75e77d82e47a9dba404e"
+    },
+    {
+      "source_commit": "05044d48a75b1e3036e14210990fe4ec04362edf",
+      "source_path": "dashboard/src/components/keeper-portrait.ts",
+      "snapshot": "source-snapshot/443c04d6ecd27fa9f64f4dfc6d0d3092f9d9b334ef407498bf56a4699f3285c8",
+      "sha256": "443c04d6ecd27fa9f64f4dfc6d0d3092f9d9b334ef407498bf56a4699f3285c8"
+    },
+    {
+      "source_commit": "05044d48a75b1e3036e14210990fe4ec04362edf",
+      "source_path": "dashboard/src/styles/keeper-workspace.css",
+      "snapshot": "source-snapshot/e4d2525a462d30964ca959cdbe8113bdc193c3973d772ef724b5c68e9244c781",
+      "sha256": "e4d2525a462d30964ca959cdbe8113bdc193c3973d772ef724b5c68e9244c781"
+    }
+  ]
+}

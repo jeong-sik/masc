@@ -1,0 +1,11 @@
+{
+  "command": [
+    "python3",
+    "scripts/changelog-fragments.py",
+    "check"
+  ],
+  "cwd": "/masc-work/jazz-developer/masc/.worktrees/647-namespace-resume",
+  "started_at": "2026-09-30T15:41:58.525008+00:00",
+  "finished_at": "2026-09-30T15:41:58.549257+00:00",
+  "exit_code": 1
+}

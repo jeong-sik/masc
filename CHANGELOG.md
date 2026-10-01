@@ -589,6 +589,7 @@
 - Restore process manager compilation by explicitly matching every signal group phase instead of triggering fatal warning 4. (#40630)
 - Clear Fusion read owners, retained runs, and priority receipts when TUI workspace authority changes, preventing delayed results from reviving the previous workspace's state (#40625).
 - Restore main executable builds after decoder and runtime integration: share strict memory-health field validation, retain pre-dispatch fallback and retryable Candle appraisals, declare the TUI core dependency, and resolve Goal/log renderer variants and workspace request declaration order. (#40633, #40635)
+- Preserve Candle balance's write permission during tool registration, and allow portrait results with unavailable equipment in composed tool plans (#40648).
 
 ### Performance
 
@@ -696,6 +697,7 @@
 - Verify that a superseded warm-up reply also preserves current Candle balance and does not schedule a stale retry. (#40466)
 - Keep the shipped commit hook free of automatic local builds (#40412).
 - Offer native Fusion qualification only with its probe, Dune target and Dockerfiles in the source-owning #40410/#40614 branch; remove the unavailable target from this workflow (#40412).
+- Restore release test compilation against current module, Keeper and credential contracts, preserving cleanup failure and request-authority coverage (#40648).
 
 ## [0.48.0] - 2026-09-29
 

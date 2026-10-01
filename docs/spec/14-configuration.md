@@ -75,12 +75,14 @@ max-context = 272000
 
 [providers.codex_standard]
 protocol = "codex-app-server"
+is-non-interactive = true
 command = "codex"
 is-non-interactive = true
 account-home = "/absolute/path/to/codex-account"
 
 [providers.codex_extended]
 protocol = "codex-app-server"
+is-non-interactive = true
 command = "codex"
 is-non-interactive = true
 account-home = "/absolute/path/to/codex-account"
@@ -88,6 +90,7 @@ max-context = 400000
 
 [providers.codex_large]
 protocol = "codex-app-server"
+is-non-interactive = true
 command = "codex"
 is-non-interactive = true
 account-home = "/absolute/path/to/codex-account"

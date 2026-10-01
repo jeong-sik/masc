@@ -748,6 +748,9 @@ let rec refresh_execution_default_light_http_body_with
         Eio.Promise.await settled;
         refresh_execution_default_light_http_body_with ~prepare ~config ()
       | `Prepare (preparation, response_json) ->
+        let response_json =
+          Dashboard_projection_cache.with_current_keeper_observations ~config response_json
+        in
         let etag, encoded =
           Domain_pool_ref.submit_cpu_or_inline (fun () ->
             let body = Yojson.Safe.to_string response_json in
@@ -1658,6 +1661,10 @@ let cached_dashboard_execution_http_response ~sw ~clock context =
       compute ?actor ?fixture ~light ()
       |> with_execution_publication_generation ~generation
       |> with_execution_metadata ~config ~cache_key ~query
+      |> fun json ->
+      match fixture with
+      | Some _ -> json
+      | None -> Dashboard_projection_cache.with_current_keeper_observations ~config json
     in
     let payload =
       Dashboard_cache.get_or_compute_payload_with_timeout

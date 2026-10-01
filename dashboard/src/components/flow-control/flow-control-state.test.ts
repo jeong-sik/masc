@@ -62,12 +62,26 @@ describe('flow-control-state', () => {
   })
   afterEach(() => { flowState.value = 'unknown' })
 
-  it.each([true, false])('uses an existing snapshot (paused=%s) without raw MCP', async paused => {
-    snapshot(paused)
+  it('uses an existing paused snapshot without raw MCP', async () => {
+    snapshot(true)
     await fetchPauseStatus()
-    expect(flowState.value).toBe(paused ? 'paused' : 'running')
+    expect(flowState.value).toBe('paused')
     expect(mocks.callMcpTool).not.toHaveBeenCalled()
     expect(mocks.refreshNamespaceTruth).not.toHaveBeenCalled()
+  })
+
+  it('revalidates cached running state when another client has paused', async () => {
+    snapshot(false)
+    await fetchPauseStatus()
+    expect(mocks.callMcpTool).toHaveBeenCalledWith('masc_pause_status', {})
+    expect(flowState.value).toBe('paused')
+  })
+
+  it('withdraws cached running state when direct pause status is unavailable', async () => {
+    snapshot(false)
+    mocks.callMcpTool.mockRejectedValue(new Error('unavailable'))
+    await fetchPauseStatus()
+    expect(flowState.value).toBe('unknown')
   })
 
   it('loads missing pause status from namespace truth', async () => {
@@ -97,9 +111,9 @@ describe('flow-control-state', () => {
     await run()
     expect(mocks.dispatchOperatorAction).toHaveBeenCalledWith({
       actor: 'test-operator', action_type: action, target_type: 'workspace', payload: {},
-    })
+    }, { refresh: 'background' })
     expect(mocks.requestConfirm).toHaveBeenCalledTimes(1)
-    expect(mocks.confirmOperatorPendingAction).toHaveBeenCalledWith('test-operator', 'token-1', 'confirm')
+    expect(mocks.confirmOperatorPendingAction).toHaveBeenCalledWith('test-operator', 'token-1', 'confirm', { refresh: 'background' })
     expect(mocks.refreshNamespaceTruth).toHaveBeenCalledWith({ force: true })
     expect(mocks.callMcpTool).toHaveBeenCalledWith('masc_pause_status', {})
     expect(flowState.value).toBe(after ? 'paused' : 'running')
@@ -107,12 +121,23 @@ describe('flow-control-state', () => {
     expect(flowLoading.value).toBe(false)
   })
 
+  it('reads and acknowledges before an unrelated namespace refresh completes', async () => {
+    let finishRefresh!: () => void
+    mocks.refreshNamespaceTruth.mockImplementation(() => new Promise<void>(resolve => { finishRefresh = resolve }))
+    mocks.callMcpTool.mockResolvedValue(JSON.stringify({ ok: true, initializing: false, paused: false }))
+    await resumeWorkspace()
+    expect(mocks.showToast).toHaveBeenCalledWith('Namespace resumed.', 'success')
+    expect(flowLoading.value).toBe(false)
+    expect(mocks.callMcpTool.mock.invocationCallOrder[0]).toBeLessThan(mocks.refreshNamespaceTruth.mock.invocationCallOrder[0]!)
+    finishRefresh()
+  })
+
   it('denies the pending action when the dialog is cancelled', async () => {
     snapshot(true)
     mocks.requestConfirm.mockResolvedValue(false)
     await fetchPauseStatus()
     await resumeWorkspace()
-    expect(mocks.confirmOperatorPendingAction).toHaveBeenCalledWith('test-operator', 'token-1', 'deny')
+    expect(mocks.confirmOperatorPendingAction).toHaveBeenCalledWith('test-operator', 'token-1', 'deny', { refresh: 'background' })
     expect(flowState.value).toBe('paused')
     expect(mocks.showToast).not.toHaveBeenCalledWith('Namespace resumed.', 'success')
   })

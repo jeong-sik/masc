@@ -121,7 +121,26 @@ export async function refreshOperatorWorkspaceDigest(opts?: RefreshOptions): Pro
   return workspaceDigestRefreshInflight
 }
 
-export async function dispatchOperatorAction(request: OperatorActionRequest): Promise<OperatorActionResult> {
+type ActionRefreshOptions = { refresh?: 'await' | 'background' }
+
+async function refreshAfterAction(options: ActionRefreshOptions): Promise<void> {
+  const refreshed = Promise.all([
+    refreshOperatorSnapshot({ force: true }),
+    refreshOperatorWorkspaceDigest({ force: true }),
+  ])
+  if (options.refresh === 'background') {
+    // Both stores report their own read errors. A projection is not the action
+    // receipt and must not hold its confirmation token or acknowledgement.
+    void refreshed
+  } else {
+    await refreshed
+  }
+}
+
+export async function dispatchOperatorAction(
+  request: OperatorActionRequest,
+  options: ActionRefreshOptions = {},
+): Promise<OperatorActionResult> {
   operatorActionBusy.value = true
   operatorError.value = null
   operatorErrorStatus.value = null
@@ -135,8 +154,7 @@ export async function dispatchOperatorAction(request: OperatorActionRequest): Pr
       message: logMessageFromResult(result),
       tool_name: result.tool_name,
     })
-    await refreshOperatorSnapshot({ force: true })
-    await refreshOperatorWorkspaceDigest({ force: true })
+    await refreshAfterAction(options)
     return result
   } catch (err) {
     const summary = extractApiError(err, 'operator 액션 실패')
@@ -160,6 +178,7 @@ export async function confirmOperatorPendingAction(
   actor: string,
   confirmToken: string,
   decision: 'confirm' | 'deny' = 'confirm',
+  options: ActionRefreshOptions = {},
 ): Promise<OperatorActionResult> {
   operatorActionBusy.value = true
   operatorError.value = null
@@ -174,8 +193,7 @@ export async function confirmOperatorPendingAction(
       message: logMessageFromResult(result),
       tool_name: result.tool_name,
     })
-    await refreshOperatorSnapshot({ force: true })
-    await refreshOperatorWorkspaceDigest({ force: true })
+    await refreshAfterAction(options)
     return result
   } catch (err) {
     const summary = extractApiError(err, 'operator 확인 실패')

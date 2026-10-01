@@ -43,8 +43,23 @@ effect(() => {
   syncFlowStateFromDashboardSignals()
 })
 
+async function readWorkspacePause(): Promise<boolean> {
+  const observed: unknown = JSON.parse(await callMcpTool('masc_pause_status', {}))
+  if (!isRecord(observed) || observed.ok !== true || observed.initializing !== false
+    || typeof observed.paused !== 'boolean') {
+    throw new Error('Namespace pause readback is unavailable.')
+  }
+  flowState.value = observed.paused ? 'paused' : 'running'
+  return observed.paused
+}
+
 export async function fetchPauseStatus(): Promise<void> {
-  if (syncFlowStateFromDashboardSignals()) return
+  if (syncFlowStateFromDashboardSignals()) {
+    if (flowState.value !== 'running') return
+    // A healthy SSE stream does not refresh Workspace pause authority.
+    try { await readWorkspacePause() } catch { flowState.value = 'unknown' }
+    return
+  }
   await refreshNamespaceTruth({ force: true })
   syncFlowStateFromDashboardSignals()
 }
@@ -65,7 +80,7 @@ async function changeNamespacePause(paused: boolean): Promise<void> {
       action_type: paused ? 'namespace_pause' : 'namespace_resume',
       target_type: 'workspace',
       payload: {},
-    })
+    }, { refresh: 'background' })
     if (result.confirm_required) {
       if (!result.confirm_token) throw new Error('Server did not return a confirmation token.')
       const confirmed = await requestConfirm({
@@ -76,22 +91,17 @@ async function changeNamespacePause(paused: boolean): Promise<void> {
         confirmText: verb,
         tone: paused ? 'danger' : 'info',
       })
-      await confirmOperatorPendingAction(actor, result.confirm_token, confirmed ? 'confirm' : 'deny')
+      await confirmOperatorPendingAction(actor, result.confirm_token, confirmed ? 'confirm' : 'deny', { refresh: 'background' })
       if (!confirmed) return
     }
-    await refreshNamespaceTruth({ force: true })
-    syncFlowStateFromDashboardSignals()
     // Project snapshots refresh asynchronously. Read the current Workspace
     // pause state after confirmation rather than treating that projection as
     // acknowledgement of this action.
     flowState.value = 'unknown'
-    const observed: unknown = JSON.parse(await callMcpTool('masc_pause_status', {}))
-    if (!isRecord(observed) || observed.ok !== true || observed.initializing !== false
-      || typeof observed.paused !== 'boolean') {
-      throw new Error('Namespace pause readback is unavailable.')
-    }
-    flowState.value = observed.paused ? 'paused' : 'running'
-    if (observed.paused === paused) {
+    const observedPaused = await readWorkspacePause()
+    // Updating the broader projection is independent of this direct readback.
+    void refreshNamespaceTruth({ force: true })
+    if (observedPaused === paused) {
       showToast(paused ? 'Namespace paused.' : 'Namespace resumed.', 'success')
     } else {
       showToast(`${verb} sent; namespace state is ${flowState.value}.`, 'warning')

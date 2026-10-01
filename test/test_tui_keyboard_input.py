@@ -13326,7 +13326,7 @@ def code_lane_interaction(
             raise AssertionError(
                 f"history missed {needle!r}: {history_plain!r}"
             )
-    if "Left / Esc:back" not in history_plain:
+    if "Esc:back" not in history_plain or "H:close" not in history_plain:
         raise AssertionError(
             f"history footer does not offer the way back: {history_plain!r}"
         )

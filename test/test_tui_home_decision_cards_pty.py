@@ -17,6 +17,7 @@ import test_tui_keyboard_input as h
 
 SOURCE_MODULES = (
     "bin/masc_tui.ml", "bin/masc_tui_types.ml", "bin/masc_tui_render.ml",
+    "bin/masc_tui_loader.ml", "lib/goal/goal_store.ml",
 )
 OPERATOR_PATH = "/api/v1/operator?view=summary&include_messages=0&include_keepers=0"
 HELD_PATH = "/api/v1/keepers/tool-approvals"
@@ -345,6 +346,15 @@ def goal_opens_exact_detail(executable):
                  phase="awaiting_confirmation", criterion_revision="r1",
                  created_at=goal["created_at"], updated_at=goal["updated_at"])
     fixtures[h.PLANNING_PATH] = h.planning_snapshot([other, goal])
+    # Persistence stores criteria; verification facts belong to the HTTP view.
+    stored_goals = [{
+        "id": row["id"], "criterion_revision": row["criterion_revision"],
+        "title": row["title"], "metric": row["metric"],
+        "target_value": row["target_value"], "due_date": None,
+        "priority": row["priority"], "phase": row["phase"],
+        "last_review_note": None, "last_review_at": None,
+        "created_at": row["created_at"], "updated_at": row["updated_at"],
+    } for row in (other, goal)]
     requests = []
 
     def interact(process, fd, _slave, output, base):
@@ -362,7 +372,7 @@ def goal_opens_exact_detail(executable):
         os.write(fd, b"q")
 
     run(executable, "Home Goal card opens the same Goal detail without mutation",
-        fixtures, interact, requests, prepare=lambda base: home.seed_goals(base, [other, goal]))
+        fixtures, interact, requests, prepare=lambda base: home.seed_goals(base, stored_goals))
 
 
 def question_identity_and_return(executable):

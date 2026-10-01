@@ -435,11 +435,18 @@ let context_flow_uses_declared_connections () =
   let configured = {view with presentation=UI.Summary;focus=UI.Configurations;
     configuration_cursor=0;instance_cursor=1} in
   let configured_lines = UI.lines ~width:160 configured in
-  check (option string) "configuration action targets its selected declaration" (Some producer.id)
+  check (option string) "summary actions target the visibly selected worker despite hidden configuration focus" (Some consumer.id)
     (Option.map (fun (i : UI.instance) -> i.id) (UI.selected_instance configured));
-  check bool "overview lists both workers regardless of hidden focus" true
-    (List.exists (String.starts_with ~prefix:"  Project observer · attached") configured_lines
-     && List.exists (String.starts_with ~prefix:"> Project metric · attached") configured_lines);
+  check (option string) "technical installation actions target their selected declaration" (Some producer.id)
+    (Option.map (fun (i : UI.instance) -> i.id)
+      (UI.selected_instance {configured with presentation=UI.Technical}));
+  check bool "overview starts with its selected worker regardless of hidden focus" true
+    (List.exists (String.starts_with ~prefix:"> Project metric · attached") configured_lines
+     && not (List.exists (String.starts_with ~prefix:"  Project observer · attached") configured_lines));
+  let observer_lines = UI.lines ~width:160 {configured with instance_cursor=0} in
+  check bool "moving selection still exposes the preceding observer" true
+    (List.exists (String.starts_with ~prefix:"> Project observer · attached") observer_lines
+     && List.exists (String.starts_with ~prefix:"  Project metric · attached") observer_lines);
   check bool "overview offers help and opening" true
     (List.exists (String.starts_with ~prefix:"?:help  Colon:palette  Esc:back  Enter:open  i:install  n:new  S:subs  A:command  r:refresh") configured_lines);
   check bool "overview omits the old timeline" true

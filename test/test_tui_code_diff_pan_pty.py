@@ -1,5 +1,6 @@
 """Diff tails are reachable without moving the file behind the overlay."""
 import re
+import os
 import sys
 import test_tui_keyboard_input as h
 
@@ -81,6 +82,7 @@ def run(executable, no_color):
             h.drain_until_quiet(process, fd, output)
             h.send_and_wait(process, fd, output, b"\x1b", b"(col 3)")
             print(f"Code diff pan: width={columns} NO_COLOR={no_color} tails/gutters/clamp/isolation OK")
+        os.write(fd, b"q")
 
     h.run_terminal_scenario(executable, description=f"Code diff pan NO_COLOR={no_color}",
         interact=interact, http_fixtures=fixtures, terminal_cols=100,

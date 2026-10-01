@@ -8001,7 +8001,11 @@ let verification_detail_pane (state : state) ~rows ~cols request buf =
     1 + (if Option.is_some armed_note then 1 else 0)
       + (if Option.is_some state.verification_verdict_error then 1 else 0)
   in
-  let content_height = max 1 (rows - framed_chrome_rows - fixed_rows) in
+  let content_height =
+    Masc_tui_scroll.content_height ~rows
+      ~chrome:(framed_chrome_rows + fixed_rows) ~count:(List.length lines)
+      ~preview_keep:None ~overflow_takes_row:true
+  in
   let max_scroll = max 0 (List.length lines - content_height) in
   let scroll = max 0 (min state.verification_detail_scroll max_scroll) in
   let lines_window = Rows.of_list ~first:scroll ~height:content_height lines in
@@ -8010,6 +8014,8 @@ let verification_detail_pane (state : state) ~rows ~cols request buf =
     | Some (style, line) -> box_line_styled buf cols ~style line
     | None -> box_empty buf cols
   done;
+  Option.iter (box_line_styled buf cols ~style:(Theme.recede ()))
+    (Masc_tui_scroll.position_row ~scroll ~height:content_height (List.length lines));
   Option.iter
     (fun note -> box_line_styled buf cols ~style:(Theme.warn ())
       (fit_width note (cols - 4)))
@@ -8019,14 +8025,11 @@ let verification_detail_pane (state : state) ~rows ~cols request buf =
       (fit_width ("  " ^ Terminal_text.single_line err) (cols - 4)))
     state.verification_verdict_error;
   box_line_styled buf cols ~style:(Theme.warn ())
-    "  a twice:approve x:reject";
+    "  a twice: approve; x: reject with reason";
   box_bottom buf cols;
-  (* A position, not a key: handed to the footer's position slot as the
-     Verdicts detail does, so narrow widths drop key items before it. *)
-  ( scroll
-  , Some
-      (Masc_tui_scroll.window_text ~scroll ~height:content_height
-         (List.length lines)) )
+  (* The reader owns its position row, so pinned verdict commands cannot
+     crowd the evidence window out of a narrow footer. *)
+  scroll, None
 ;;
 
 (* The queue stays beside the request under review. Opening one used to hide the others, and the others
@@ -8506,7 +8509,10 @@ let harness_detail_pane (state : state) ~rows ~cols verdict buf =
        | goal_lines -> (Ansi.dim, "") :: goal_lines)
     |> judgement_detail_rows ~width:(max 1 (framed_inner_width cols))
   in
-  let content_height = max 1 (rows - 5) in
+  let content_height =
+    Masc_tui_scroll.content_height ~rows ~chrome:framed_chrome_rows
+      ~count:(List.length lines) ~preview_keep:None ~overflow_takes_row:true
+  in
   let max_scroll = max 0 (List.length lines - content_height) in
   let scroll = max 0 (min state.harness_detail_scroll max_scroll) in
   let lines_window = Rows.of_list ~first:scroll ~height:content_height lines in
@@ -8515,16 +8521,11 @@ let harness_detail_pane (state : state) ~rows ~cols verdict buf =
     | Some (style, line) -> box_line_styled buf cols ~style line
     | None -> box_empty buf cols
   done;
+  Option.iter (box_line_styled buf cols ~style:(Theme.recede ()))
+    (Masc_tui_scroll.position_row ~scroll ~height:content_height (List.length lines));
   box_bottom buf cols;
-  (* A position, not a key. Packed into the hints string it was read as a key
-     item and dropped from the back before any of them, so the one screen that
-     exists for reading a ruling in full never said which part of it was on
-     screen -- at a hundred, a hundred and thirty and a hundred and sixty
-     columns alike. *)
-  ( scroll
-  , Some
-      (Masc_tui_scroll.window_text ~scroll ~height:content_height
-         (List.length lines)) )
+  (* Keep the evidence window with the reading, independently of footer keys. *)
+  scroll, None
 ;;
 
 (* The verdict list stays beside the verdict. A verdict is a judgement

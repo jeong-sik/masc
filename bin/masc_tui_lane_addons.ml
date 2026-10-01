@@ -307,12 +307,14 @@ let selected_instance view = Option.bind view.snapshot (fun snapshot ->
       List.find_opt (fun (instance : instance) ->
         String.equal instance.id id && String.equal instance.incarnation incarnation) snapshot.instances
   | Overview ->
-      (match view.focus with
-       | Timeline | Rows -> Option.bind (selected_row view) (row_owner snapshot.instances)
-       | Configurations -> Option.bind (selected_declaration view) (fun declaration ->
+      (match view.focus, view.presentation with
+       | Configurations, Technical -> Option.bind (selected_declaration view) (fun declaration ->
            Option.bind declaration.instance_id (fun id ->
              List.find_opt (fun (instance : instance) -> instance.id=id) snapshot.instances))
-       | Connections | Instances -> at_cursor snapshot.instances view.instance_cursor))
+       | _, _ ->
+           (match at_cursor (overview_entries snapshot) view.instance_cursor with
+            | Some (`Instance instance) -> Some instance
+            | Some (`Declaration _) | None -> None)))
 let ordered_rows view snapshot =
   rows_in_screen view snapshot
   |> List.stable_sort (fun (_, (a : Row.row)) (_, (b : Row.row)) ->
@@ -902,7 +904,7 @@ let overview_lines ~width view =
           configuration_summary active failed
           (if Option.is_some view.snapshot_read_error then " · STALE" else "") in
         let entries = overview_entries snapshot in
-        let window = max 0 (view.instance_cursor - 1) in
+        let window = max 0 view.instance_cursor in
         let items = List.mapi (fun index item -> index,item) entries
           |> List.filter (fun (index,_) -> index >= window && index < window + 9) in
         let empty = match snapshot.configuration with

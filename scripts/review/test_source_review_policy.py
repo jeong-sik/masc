@@ -1,19 +1,30 @@
-#!/usr/bin/env python3
 """Exercise admission with a fake GitHub transport, including mutation races."""
 import json
 import os
-from pathlib import Path
+import shutil
 import subprocess
 import tempfile
 import unittest
+from pathlib import Path
+from typing import Any
 
-HERE = Path(__file__).resolve().parent
+HERE = Path(os.environ.get('GUARD_SCRIPTS', str(Path(__file__).resolve().parent)))
+DIFF_TOOL = Path(__file__).resolve().parent / 'review-diff.py'
 HEAD = 'a' * 40
 OTHER = 'b' * 40
+GIT_SUPPORTS_NO_LAZY_FETCH = subprocess.run(
+    ['git', '--no-lazy-fetch', 'version'],
+    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False
+).returncode == 0
 FAKE = r'''#!/usr/bin/env python3
 import json, os, pathlib, re, subprocess, sys
 state = json.loads(pathlib.Path(os.environ['REVIEW_FIXTURE']).read_text())
 args = sys.argv[1:]
+if args[:2] == ['auth', 'git-credential']:
+    with pathlib.Path(os.environ['REVIEW_CALLS']).open('a') as f: f.write('CREDENTIAL\n')
+    sys.stdin.read()
+    print('username=fixture\npassword=offline-unused')
+    sys.exit(0)
 endpoint = next((a for a in args if a.startswith('repos/') or a == 'user'), '')
 log = pathlib.Path(os.environ['REVIEW_CALLS'])
 with log.open('a') as f: f.write((args[args.index('-X')+1]+' ' if '-X' in args else '') + endpoint + '\n')
@@ -30,14 +41,14 @@ if args[:2] == ['pr','list']:
 elif re.search(r'/pulls/\d+$', endpoint):
     count = log.read_text().splitlines().count(endpoint)
     current = state.get('moved', head) if count >= state.get('move_after', 100000) else head
-    data = {'state':state.get('pr_state','open'),'draft':state.get('draft',False),'merged':state.get('merged',False),'user':{'login':state.get('author','writer')},'base':{'ref':state.get('base','stack/parent'),'sha':'c'*40},'head':{'sha':current,'ref':state.get('branch','stack/change')}}
-    if count >= state.get('base_move_after', 100000): data['base']['sha'] = 'f'*40
+    data = {'state':state.get('pr_state','open'),'draft':state.get('draft',False),'merged':state.get('merged',False),'user':{'login':state.get('author','writer')},'base':{'ref':state.get('base','stack/parent'),'sha':state['base_sha']},'head':{'sha':current,'ref':state.get('branch','stack/change')}}
+    if count >= state.get('base_move_after', 100000): data['base']['sha'] = state.get('moved_base', fixture['head'])
     if fixture.get('native'):
         members = fixture.get('members', [2,1,3])
         if fixture.get('stack_target_moves') and count > 1:
             fixture['stack_base'] = fixture['stack_target_moves']
             pathlib.Path(os.environ['REVIEW_FIXTURE']).write_text(json.dumps(fixture))
-        data['stack'] = {'id':99,'number':10,'position':members.index(number)+1,'size':len(members),'base':{'ref':fixture.get('stack_base','main'),'sha':'c'*40}}
+        data['stack'] = {'id':99,'number':10,'position':members.index(number)+1,'size':len(members),'base':{'ref':fixture.get('stack_base','main'),'sha':fixture.get('stack_base_sha',fixture['base_sha'])}}
 elif endpoint.endswith('/stacks/10'):
     members = fixture.get('members', [2,1,3])
     if fixture.get('membership_moves') and log.read_text().splitlines().count(endpoint) > 1:
@@ -47,8 +58,16 @@ elif endpoint.endswith('/stacks/10'):
         item = dict(fixture, **fixture.get('prs',{}).get(str(n),{}))
         data['pull_requests'].append({'number':n,'state':item.get('pr_state','open'),'head':{'sha':item['head']}})
 elif '/compare/' in endpoint:
-    base = endpoint.split('/compare/', 1)[1].split('...', 1)[0]
-    data = {'merge_base_commit': {'sha': 'c'*40 if state.get('equivalent_base') else base}}
+    base, compared_head = endpoint.rsplit('/',1)[1].split('...')
+    merge_base = subprocess.check_output(['git','--no-replace-objects','-C',os.environ.get('FAKE_COMPARE_REPO', os.environ['GUARD_REPO_ROOT']),'merge-base',base,compared_head],text=True).strip()
+    data = {'merge_base_commit':{'sha':None if state.get('bad_compare') else merge_base}}
+    compares = sum('/compare/' in row for row in log.read_text().splitlines())
+    if compares == state.get('compare_move_after'):
+        fixture['base_sha'] = fixture['compare_moved_base']
+        pathlib.Path(os.environ['REVIEW_FIXTURE']).write_text(json.dumps(fixture))
+    if compares == state.get('compare_block_after'):
+        fixture.update(fixture['compare_block_update'])
+        pathlib.Path(os.environ['REVIEW_FIXTURE']).write_text(json.dumps(fixture))
 elif endpoint == 'user': data = {'login':'reviewer'}
 elif '/actions/runs?' in endpoint:
     reads = sum('/actions/runs?' in row for row in log.read_text().splitlines())
@@ -67,10 +86,10 @@ elif endpoint.endswith('/jobs?per_page=100'):
 elif endpoint.endswith('/comments'):
     data = state.get('comments', [])
 elif endpoint.endswith('/reviews?per_page=100') or endpoint.endswith('/reviews'):
-    data = state.get('reviews', [])
+    data = state.get('reviews', []) + ([state['posted']] if 'posted' in state else [])
     if '-X' in args:
         body = sys.stdin.read()
-        posted = {'id':99,'state':'APPROVED','commit_id':head,'body':body,'author_association':'MEMBER','user':{'login':'reviewer'}}
+        posted = {'id':99,'state':'APPROVED','commit_id':head,'body':body,'author_association':'MEMBER','user':{'login':'reviewer'},'submitted_at':'2026-09-30T00:00:00Z'}
         state['posted']=posted
         pathlib.Path(os.environ['REVIEW_FIXTURE']).write_text(json.dumps(state))
         data = posted
@@ -100,21 +119,319 @@ class SourceReviewPolicy(unittest.TestCase):
         self.calls.write_text('')
         self.env = dict(os.environ, GUARD_GH=str(self.fake), LEDGER_GH=str(self.fake),
                         REVIEW_FIXTURE=str(self.fixture), REVIEW_CALLS=str(self.calls))
-        self.state = {'head':HEAD, 'base':'main'}
+        global HEAD, OTHER
+        self.git_root = self.root / 'repo'
+        self.git_root.mkdir()
+        self.git('init', '-q', '-b', 'review-fixture')
+        self.git('config', 'user.email', 'fixture@example.test')
+        self.git('config', 'user.name', 'fixture')
+        self.commit_file('root.txt', 'root')
+        OTHER = self.git('rev-parse', 'HEAD')
+        self.commit_file('parent.txt', 'parent')
+        self.base = self.git('rev-parse', 'HEAD')
+        self.commit_file('feature-a.txt', 'feature A')
+        self.narrowed_base = self.git('rev-parse', 'HEAD')
+        self.commit_file('feature-b.txt', 'feature B')
+        HEAD = self.git('rev-parse', 'HEAD')
+        self.env['GUARD_REPO_ROOT'] = str(self.git_root)
+        self.state: dict[str, Any] = {'head':HEAD, 'base':'main', 'base_sha':self.base}
+        self.digest = self.identity(self.base)
 
-    def review(self, state='APPROVED', author='reviewer', verdict='PASS', run=False, base=None, stack=None):
+    def git(self, *args):
+        return subprocess.check_output(['git','-C',str(self.git_root),*args],text=True,
+            env={**os.environ, 'GIT_AUTHOR_DATE':'2026-09-30T00:00:00Z',
+                 'GIT_COMMITTER_DATE':'2026-09-30T00:00:00Z'}).strip()
+
+    def commit_file(self, path, content):
+        (self.git_root / path).write_text(content)
+        self.git('add', '--', path)
+        self.git('commit', '-qm', path)
+
+    def identity(self, base, head=None):
+        head = HEAD if head is None else head
+        self.fixture.write_text(json.dumps(self.state))
+        return subprocess.check_output(
+            ['python3', str(DIFF_TOOL), '--repo','team/repo','--base',base,'--head',head],
+            env=self.env, text=True).strip()
+
+    def review(self, state='APPROVED', author='reviewer', verdict='PASS', run=False, base=None, stack=None, base_sha=None):
         line = f'verdict: {verdict} head: {HEAD}' + (' run: 42' if run else '') + ' by: independent'
         base = self.state['base'] if base is None else base
-        return {'id':12,'state':state,'body':line+'\n\n---\nreview-scope: '+json.dumps({'base_ref':base,'base_sha':'c'*40,'stack':stack},separators=(',',':'))+f'\napprove-guard: head `{HEAD}` · source review',
+        footer = f' · reviewed base `{self.base}` · diff sha256 `{self.digest}`'
+        return {'id':12,'state':state,'body':line+'\n\n---\nreview-scope: '+json.dumps({'base_ref':base,'base_sha':self.state['base_sha'] if base_sha is None else base_sha,'stack':stack},separators=(',',':'))+f'\napprove-guard: head `{HEAD}` · source review'+footer,
                 'user':{'login':author},'author_association':'MEMBER','submitted_at':'2026-09-30T00:00:00Z'}
 
     def invoke(self, script, *args):
+        if '--body' in args and '--review-base' not in args:
+            args = (*args, '--review-base', self.base, '--review-diff', self.digest)
         self.fixture.write_text(json.dumps(self.state))
         return subprocess.run(['bash',str(HERE/script),'--repo','team/repo','--pr','1','--head',HEAD,*args],
-                              env=self.env,text=True,capture_output=True)
+                              env=self.env,text=True,capture_output=True,check=False)
 
     def assert_ok(self, result):
         self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+
+    def test_retarget_expanding_complete_diff_refuses_old_approval(self):
+        self.state['reviews'] = [self.review()]
+        self.state.update(base='older-parent', base_sha=OTHER)
+        self.assertNotEqual(self.identity(OTHER), self.digest)
+        result = self.invoke('approve-guard.sh', '--merge-check', '--receipt-json')
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertNotIn('/actions/', self.calls.read_text())
+
+    def test_parent_landing_narrowing_diff_refuses_old_approval(self):
+        self.state['reviews'] = [self.review()]
+        self.state['base_sha'] = self.narrowed_base
+        self.assertNotEqual(self.identity(self.narrowed_base), self.digest)
+        result = self.invoke('merge-guard.sh', '--check')
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertNotIn('/merge-async', self.calls.read_text())
+
+    def test_base_and_ref_moving_with_identical_diff_requires_scoped_reapproval(self):
+        self.git('checkout', '-qb', 'unrelated-base', self.base)
+        self.commit_file('unrelated.txt', 'unrelated base change')
+        moved_base = self.git('rev-parse', 'HEAD')
+        self.state.update(base='renamed-parent', base_sha=moved_base, reviews=[self.review()])
+        self.assertEqual(self.identity(moved_base), self.digest)
+        result = self.invoke('approve-guard.sh', '--merge-check', '--receipt-json')
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn('no trusted non-author approval', result.stderr)
+        self.assertNotIn('POST ', self.calls.read_text())
+        self.assertNotIn('/actions/', self.calls.read_text())
+
+    def test_head_only_approval_is_never_backfilled(self):
+        review = self.review()
+        review['body'] = review['body'].split(' · reviewed base')[0]
+        self.state['reviews'] = [review]
+        result = self.invoke('approve-guard.sh', '--merge-check')
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertNotIn('POST ', self.calls.read_text())
+
+    def test_old_review_scope_cannot_be_stamped_with_current_diff(self):
+        body = self.root / 'body'
+        body.write_text(f'verdict: PASS head: {HEAD} by: independent\nOld source review.')
+        self.state['base_sha'] = OTHER
+        result = self.invoke('approve-guard.sh', '--body', str(body))
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertNotIn('POST ', self.calls.read_text())
+
+    def test_approval_requires_explicit_review_snapshot(self):
+        body = self.root / 'body'
+        body.write_text(f'verdict: PASS head: {HEAD} by: independent\nOld source review.')
+        result = self.invoke('approve-guard.sh', '--body', str(body), '--review-base', '',
+                             '--review-diff', '')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn('POST ', self.calls.read_text())
+
+    def test_real_producer_then_fresh_consumer_checks_changed_and_same_diff(self):
+        body = self.root / 'body'
+        body.write_text(f'verdict: PASS head: {HEAD} by: independent\nReviewed both feature files.')
+        self.assert_ok(self.invoke('approve-guard.sh', '--body', str(body)))
+        self.state = json.loads(self.fixture.read_text())
+        original_body = self.state['posted']['body']
+        self.assertIn(f' · diff sha256 `{self.digest}`', original_body)
+        self.assert_ok(self.invoke('approve-guard.sh', '--merge-check', '--receipt-json'))
+        self.state['base_sha'] = OTHER
+        result = self.invoke('approve-guard.sh', '--merge-check', '--receipt-json')
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertEqual(json.loads(self.fixture.read_text())['posted']['body'], original_body)
+        self.state['base_sha'] = self.base
+        self.assert_ok(self.invoke('merge-guard.sh', '--check'))
+        self.assertEqual(self.calls.read_text().count('POST '), 1)
+
+    def test_unreadable_complete_diff_refuses(self):
+        self.state.update(bad_compare=True, reviews=[self.review()])
+        result = self.invoke('approve-guard.sh','--merge-check')
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn('complete review diff unavailable', result.stderr)
+        self.assertNotIn('POST ',self.calls.read_text())
+
+    def test_latest_fail_still_blocks_matching_diff(self):
+        self.state['reviews'] = [self.review()]
+        self.state['comments'] = [{'created_at':'2026-09-30T00:01:00Z',
+            'body':f'verdict: FAIL head: {HEAD} by: independent','author_association':'MEMBER'}]
+        self.assertEqual(self.invoke('merge-guard.sh','--check').returncode, 2)
+
+    def test_complete_identity_includes_binary_mode_and_odd_paths(self):
+        self.git('checkout', '-q', HEAD)
+        odd = self.git_root / 'binary\npath'
+        odd.write_bytes(b'\0before')
+        self.git('add', '--', odd.name)
+        self.git('commit', '-qm', 'binary')
+        before = self.identity(self.base, self.git('rev-parse', 'HEAD'))
+        odd.write_bytes(b'\0after')
+        self.git('add', '--', odd.name)
+        self.git('commit', '-qm', 'binary content')
+        after_binary = self.identity(self.base, self.git('rev-parse', 'HEAD'))
+        self.assertNotEqual(before, after_binary)
+        odd.chmod(0o755)
+        self.git('add', '--', odd.name)
+        self.git('commit', '-qm', 'executable mode only')
+        after_mode = self.identity(self.base, self.git('rev-parse', 'HEAD'))
+        self.assertNotEqual(after_binary, after_mode)
+        self.git('config','diff.orderFile', str(self.root / 'order'))
+        (self.root / 'order').write_text('feature-b.txt\nfeature-a.txt\n')
+        self.assertEqual(self.identity(self.base), self.digest)
+
+    def test_replacement_refs_cannot_change_named_head_or_base_identity(self):
+        self.git('replace', HEAD, self.narrowed_base)
+        self.assertEqual(self.identity(self.base), self.digest)
+        self.git('replace', '-d', HEAD)
+        self.git('replace', self.base, OTHER)
+        self.assertEqual(self.identity(self.base), self.digest)
+
+    def test_producer_retarget_during_final_compare_refuses_before_post(self):
+        body = self.root / 'body'
+        body.write_text(f'verdict: PASS head: {HEAD} by: independent\nReviewed source.')
+        self.calls.write_text('')
+        self.state.update(compare_move_after=3, compare_moved_base=OTHER)
+        result = self.invoke('approve-guard.sh', '--body', str(body))
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn('identity moved during review', result.stderr)
+        self.assertEqual(sum('/compare/' in line for line in self.calls.read_text().splitlines()), 3)
+        self.assertNotIn('POST ', self.calls.read_text())
+
+    def test_producer_rechecks_authority_after_final_compare(self):
+        for change in ('CR', 'FAIL', 'HOLD'):
+            with self.subTest(change=change):
+                self.calls.write_text('')
+                body = self.root / 'body'
+                body.write_text(f'verdict: PASS head: {HEAD} by: independent\nReviewed source.')
+                self.state = dict(head=HEAD, base='main', base_sha=self.base)
+                update = (
+                    {'reviews': [dict(self.review(state='CHANGES_REQUESTED', author='other'), id=13)]}
+                    if change == 'CR' else {'comments': [{
+                        'created_at':'2026-10-01T00:00:00Z', 'author_association':'MEMBER',
+                        'body': f'verdict: {change} head: {HEAD} by: independent'}]})
+                self.state.update(compare_block_after=3, compare_block_update=update)
+                result = self.invoke('approve-guard.sh', '--body', str(body))
+                self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                self.assertNotIn('POST ', self.calls.read_text())
+                self.assertEqual(sum('/compare/' in line for line in self.calls.read_text().splitlines()), 3)
+
+    def test_merge_rechecks_authority_after_final_compare(self):
+        for change in ('CR', 'FAIL', 'HOLD', 'noapproval'):
+            with self.subTest(change=change):
+                self.calls.write_text('')
+                self.state = dict(head=HEAD, base='main', base_sha=self.base,
+                                  reviews=[self.review()])
+                update = {'reviews': []} if change == 'noapproval' else (
+                    {'reviews': [self.review(), dict(self.review(state='CHANGES_REQUESTED', author='other'), id=13)]}
+                    if change == 'CR' else {'comments': [{
+                        'created_at':'2026-10-01T00:00:00Z', 'author_association':'MEMBER',
+                        'body': f'verdict: {change} head: {HEAD} by: independent'}]})
+                self.state.update(compare_block_after=2, compare_block_update=update)
+                result = self.invoke('approve-guard.sh', '--merge-check', '--receipt-json')
+                self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                self.assertEqual(result.stdout, '')
+                self.assertNotIn('POST ', self.calls.read_text())
+                self.assertEqual(sum('/compare/' in line for line in self.calls.read_text().splitlines()), 2)
+
+    def test_missing_objects_fetch_uses_gh_credentials_without_prompting(self):
+        self.assert_authenticated_object_fetch('shallow')
+
+    def test_missing_root_and_nested_trees_use_isolated_authenticated_fetch(self):
+        for kind in ('tree:0', 'tree:1'):
+            with self.subTest(kind=kind):
+                self.assert_authenticated_object_fetch(kind)
+
+    def assert_authenticated_object_fetch(self, kind):
+        # Use a real filtered repository and real object fetches. Only the remote
+        # transport is redirected to our local fixture; no network is contacted.
+        original = self.git_root
+        self.calls.write_text('')
+        self.env.update(GUARD_GH=str(self.fake), GUARD_REPO_ROOT=str(original), PATH=os.environ['PATH'])
+        if kind != 'shallow':
+            global HEAD
+            (original / 'nested').mkdir(exist_ok=True)
+            self.commit_file('nested/feature.txt', kind)
+            HEAD = self.git('rev-parse', 'HEAD')
+            self.state['head'] = HEAD
+            self.digest = self.identity(self.base)
+        empty = self.root / kind.replace(':', '-')
+        subprocess.run(['git', '-C', str(original), 'config', 'uploadpack.allowFilter', 'true'], check=True)
+        clone_args = ['--depth=1'] if kind == 'shallow' else ['--no-checkout', '--filter='+kind]
+        subprocess.run(['git', 'clone', '--quiet', *clone_args, '--no-local', str(original), str(empty)], check=True)
+        shallow = empty / '.git/shallow'
+        before_shallow = shallow.read_bytes() if shallow.exists() else None
+        before_config = (empty / '.git/config').read_bytes()
+        lazy_flag = ['--no-lazy-fetch'] if GIT_SUPPORTS_NO_LAZY_FETCH else []
+        no_lazy_env = {} if GIT_SUPPORTS_NO_LAZY_FETCH else {'GIT_NO_LAZY_FETCH': '1'}
+        if kind != 'shallow':
+            for commit in (self.base, HEAD):
+                subprocess.run(['git', *lazy_flag, '-C', str(empty), 'cat-file', '-e', commit], check=True, env={**os.environ, **no_lazy_env})
+            missing_tree = subprocess.run(['git', *lazy_flag, '-C', str(empty), 'ls-tree', '-r', HEAD], capture_output=True, env={**os.environ, **no_lazy_env})
+            self.assertNotEqual(missing_tree.returncode, 0, 'fixture must contain commits but lack required trees')
+        helper_dir = self.root / ("credential helper's directory " + kind.replace(':', '-'))
+        helper_dir.mkdir()
+        helper = helper_dir / 'gh'
+        helper.write_text(FAKE)
+        helper.chmod(0o755)
+        commands = empty / 'git-commands.jsonl'
+        real_git = shutil.which('git')
+        if real_git is None:
+            self.fail('Git is required for the isolated-fetch fixture')
+        wrapper_dir = empty / 'bin'
+        wrapper_dir.mkdir()
+        wrapper = wrapper_dir / 'git'
+        wrapper.write_text("#!/usr/bin/env python3\n" +
+            "import json, os, subprocess, sys\n" +
+            f"real_git={real_git!r}\nremote={str(original)!r}\nrecord={str(commands)!r}\n" +
+            "args=sys.argv[1:]\n" +
+            "if 'fetch' in args:\n" +
+            "    with open(record, 'a') as f: f.write(json.dumps({'args':args,'env':{k:os.environ.get(k) for k in ['GIT_TERMINAL_PROMPT','GIT_ASKPASS','SSH_ASKPASS','GCM_INTERACTIVE']}})+'\\n')\n" +
+            "    prefix=args[:args.index('fetch')]\n" +
+            "    auth=subprocess.run([real_git,*prefix,'credential','fill'],input='protocol=https\\nhost=github.com\\n\\n',text=True,capture_output=True)\n" +
+            "    if auth.returncode or 'username=fixture' not in auth.stdout: sys.exit(7)\n" +
+            "    args=['file://'+remote if a.startswith('https://github.com/') else a for a in args]\n" +
+            "rc=subprocess.run([real_git,*args]).returncode\n" +
+            "if 'fetch' in args and rc == 0:\n" +
+            "    kinds=subprocess.check_output([real_git,*args[:args.index('fetch')],'cat-file','--batch-all-objects','--batch-check=%(objecttype)'],text=True).splitlines()\n" +
+            "    with open(record+'.objects', 'a') as f: f.write(json.dumps(kinds)+'\\n')\n" +
+            "sys.exit(rc)\n")
+        wrapper.chmod(0o755)
+        self.env.update(GUARD_GH=str(helper), GUARD_REPO_ROOT=str(empty),
+                        FAKE_COMPARE_REPO=str(original),
+                        PATH=str(wrapper_dir) + os.pathsep + os.environ['PATH'])
+        before_objects = subprocess.check_output(
+            [real_git, '-C', str(empty), 'cat-file', '--batch-all-objects', '--batch-check=%(objectname) %(objecttype)'],
+            text=True,
+        ).splitlines()
+        self.assertEqual(self.identity(self.base), self.digest)
+        after_objects = subprocess.check_output(
+            [real_git, '-C', str(empty), 'cat-file', '--batch-all-objects', '--batch-check=%(objectname) %(objecttype)'],
+            text=True,
+        ).splitlines()
+        self.assertEqual(before_objects, after_objects, 'caller repository must not receive any new objects')
+        fetched = [json.loads(line) for line in commands.read_text().splitlines()]
+        self.assertEqual(len(fetched), 2)
+        object_snapshots = [json.loads(line) for line in Path(str(commands)+'.objects').read_text().splitlines()]
+        self.assertEqual([kinds.count('commit') for kinds in object_snapshots], [1, 2])
+        self.assertTrue(all('blob' not in kinds for kinds in object_snapshots),
+                        'raw diff fetch needs trees and exact commits, not file contents')
+        for call in fetched:
+            self.assertIn('--no-replace-objects', call['args'])
+            if GIT_SUPPORTS_NO_LAZY_FETCH:
+                self.assertIn('--no-lazy-fetch', call['args'])
+            else:
+                self.assertNotIn('--no-lazy-fetch', call['args'])
+            fetched_root = Path(call['args'][call['args'].index('-C')+1])
+            self.assertNotEqual(fetched_root, empty)
+            self.assertIn('--depth=1', call['args'])
+            self.assertIn('--filter=blob:none', call['args'])
+            self.assertIn('credential.helper=', call['args'])
+            self.assertEqual(call['env'], {'GIT_TERMINAL_PROMPT':'0','GIT_ASKPASS':'false',
+                                          'SSH_ASKPASS':'false','GCM_INTERACTIVE':'Never'})
+        self.assertEqual(self.calls.read_text().splitlines().count('CREDENTIAL'), 2)
+        self.assertEqual(shallow.read_bytes() if shallow.exists() else None, before_shallow)
+        self.assertEqual((empty / '.git/config').read_bytes(), before_config)
+        missing_args = ['cat-file', '-e', self.base] if kind == 'shallow' else ['ls-tree', '-r', HEAD]
+        still_missing = subprocess.run([real_git, *lazy_flag, '-C', str(empty), *missing_args], capture_output=True, env={**os.environ, **no_lazy_env})
+        self.assertNotEqual(still_missing.returncode, 0, 'isolated fetch must not hydrate or deepen caller history')
+        persisted = subprocess.run([real_git, '-C', str(empty), 'config', '--local',
+                                    '--get-all', 'credential.helper'], capture_output=True)
+        self.assertEqual(persisted.returncode, 1)
+        self.assertEqual(persisted.stdout, b'')
 
     def test_bottom_stack_merges_without_actions(self):
         self.state['reviews']=[self.review()]
@@ -132,7 +449,7 @@ class SourceReviewPolicy(unittest.TestCase):
         self.assertEqual(posted['commit_id'],HEAD)
         scope = next(line.removeprefix('review-scope: ') for line in posted['body'].splitlines()
                      if line.startswith('review-scope: '))
-        self.assertEqual(json.loads(scope), {'base_ref':'stack/parent','base_sha':'c'*40,'stack':None})
+        self.assertEqual(json.loads(scope), {'base_ref':'stack/parent','base_sha':self.state['base_sha'],'stack':None})
         self.assertNotIn('/actions/',self.calls.read_text())
 
     def test_same_head_approval_is_idempotent_but_new_hold_refuses(self):
@@ -167,7 +484,10 @@ class SourceReviewPolicy(unittest.TestCase):
         self.assertNotIn('/merge-async', self.calls.read_text())
 
     def test_same_head_unrelated_base_advance_preserves_approval(self):
-        self.state.update(reviews=[self.review()], base_move_after=1, equivalent_base=True)
+        self.git('checkout', '-q', '--detach', self.base)
+        self.commit_file('unrelated.txt', 'unrelated base advance')
+        advanced_base = self.git('rev-parse', 'HEAD')
+        self.state.update(reviews=[self.review()], base_move_after=1, moved_base=advanced_base)
         self.assert_ok(self.invoke('merge-guard.sh', '--check'))
         self.assertIn('/compare/', self.calls.read_text())
 
@@ -202,7 +522,7 @@ class SourceReviewPolicy(unittest.TestCase):
         self.state.update(base='stack/parent',reviews=[self.review(base='stack/parent')])
         self.fixture.write_text(json.dumps(self.state))
         result=subprocess.run(['bash',str(HERE/'queue-ledger.sh'),'--repo','team/repo'],
-                              env=self.env,text=True,capture_output=True)
+                              env=self.env,text=True,capture_output=True,check=False)
         self.assert_ok(result)
         self.assertIn('parent #2',result.stdout)
         self.assertNotIn('/actions/',self.calls.read_text())
@@ -271,11 +591,22 @@ class SourceReviewPolicy(unittest.TestCase):
         self.assertIn('/actions/',self.calls.read_text())
 
 
+    def native_lower_review(self, *, run=False, state="APPROVED"):
+        review = self.review(run=run, state=state, base='main', base_sha=OTHER,
+                             stack={'number':10,'position':1,'base_ref':'main'})
+        review['commit_id'] = self.base
+        review['body'] = review['body'].replace(HEAD, self.base)
+        review['body'] = review['body'].replace(
+            f" · reviewed base `{self.base}` · diff sha256 `{self.digest}`",
+            f" · reviewed base `{OTHER}` · diff sha256 `{self.identity(OTHER, self.base)}`")
+        return review
+
     def native_stack(self):
-        lower_review = self.review(base='main', stack={'number':10,'position':1,'base_ref':'main'})
-        lower_review['body'] = lower_review['body'].replace(HEAD, OTHER)
-        self.state.update(native=True,base='stack/parent',reviews=[self.review(base='stack/parent', stack={'number':10,'position':2,'base_ref':'main'})],
-                          prs={'2':{'head':OTHER,'base':'main','branch':'stack/parent','reviews':[lower_review]},
+        lower_review = self.native_lower_review()
+        self.state.update(native=True, base='stack/parent', stack_base_sha=OTHER,
+                          reviews=[self.review(base='stack/parent', stack={'number':10,'position':2,'base_ref':'main'})],
+                          prs={'2':{'head':self.base, 'base':'main', 'base_sha':OTHER,
+                                    'branch':'stack/parent','reviews':[lower_review]},
                                '3':{'head':'d'*40,'base':'stack/change','branch':'stack/upper','reviews':[],'draft':True}})
 
     def set_review_stack_base(self, target):
@@ -302,9 +633,9 @@ class SourceReviewPolicy(unittest.TestCase):
         self.assertNotIn('/actions/', calls)
 
     def test_native_lower_blockers_prevent_write(self):
-        for change in ({'reviews':[]}, {'reviews':[self.review(state='CHANGES_REQUESTED')]},
+        for change in ({'reviews':[]}, {'reviews':[self.native_lower_review(state='CHANGES_REQUESTED')]},
                        {'draft':True}, {'comments':[{'created_at':'2026-10-01T00:00:00Z',
-                           'body':f'verdict: HOLD head: {OTHER} by: independent','author_association':'MEMBER'}]}):
+                           'body':f'verdict: HOLD head: {self.base} by: independent','author_association':'MEMBER'}]}):
             with self.subTest(change=change):
                 self.native_stack()
                 self.state['prs']['2'].update(change)
@@ -328,8 +659,7 @@ class SourceReviewPolicy(unittest.TestCase):
 
     def test_native_lower_release_requires_its_own_ci(self):
         self.native_stack()
-        review = self.review(run=True, base='main', stack={'number':10,'position':1,'base_ref':'main'})
-        review['body'] = review['body'].replace(HEAD, OTHER)
+        review = self.native_lower_review(run=True)
         self.state['prs']['2'].update(branch='release/v1',ci='failure',reviews=[review])
         result = self.invoke('merge-guard.sh')
         self.assertEqual(result.returncode,2,result.stdout+result.stderr)
@@ -427,4 +757,5 @@ class SourceReviewPolicy(unittest.TestCase):
         self.assertIn('merge native stack through #1 into feature/integration', result.stdout)
         self.assertNotIn('parent #2', result.stdout)
 
-if __name__=='__main__': unittest.main()
+if __name__ == '__main__':
+    unittest.main()

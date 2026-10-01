@@ -666,11 +666,21 @@ beanie = %d
     let initial = ledger_bytes () in
     (match call id with Tool_result.Completed _ -> fail "equipped without purchase" | _ -> ());
     check string "refusal did not mutate ledger" initial (ledger_bytes ());
+    let read_roster () =
+      Keeper_tool_surface.For_testing.reset_keeper_list_cache ();
+      match !Keeper_dispatch_ref.dispatch ~config ~agent_name:"observer"
+        ~publication_recovery_provider:Masc_test_deps.non_runtime_publication_recovery_provider
+        ~name:"masc_keeper_list" ~args:(`Assoc ["detailed", `Bool true]) () with
+      | Some result -> Yojson.Safe.from_string (Tool_result.message result)
+      | None -> fail "public Keeper roster not registered" in
     check int "expected equipment does not authorize an unowned outfit" 409
       (get ~router (bound_path ~size:"96" expected keeper)).status;
     check string "bound refusal does not equip or append" initial (ledger_bytes ());
-    let before = get ~router (path ~size:"96" keeper) in
+    let before = get ~router (path ~size:"160" keeper) in
     check int "starting portrait" 200 before.status;
+    let before96 = get ~router (path ~size:"96" keeper) in
+    check int "starting 96px portrait" 200 before96.status;
+    let before_roster = read_roster () in
     let reader = token_for config ~agent_name:"portrait-item-reader" Masc_domain.Worker in
     let credited = get ~router ~token:reader (item_path keeper) in
     let credited_json = Yojson.Safe.from_string credited.body in
@@ -753,13 +763,14 @@ beanie = %d
       (dashboard_portrait () = Keeper_portrait_equipment.Ready starting);
     ignore (require_ok Candle_shop.error_to_string
       (Candle_shop.purchase ~now:(fun () -> 1790640000.) ~base_path ~keeper:owner ~item));
+    check string "purchase alone does not equip" before.body (get ~router (path ~size:"160" keeper)).body;
     (match item_account (get ~router ~token:reader (item_path keeper)) with
      | Masc_tui_keeper_items.Ready account ->
        check int "Item view reads debit" 800 account.balance_milli;
        check bool "Item view reads purchase" true (List.mem item account.owned_items)
      | Masc_tui_keeper_items.Off | Masc_tui_keeper_items.Disabled _ ->
        fail "purchased Item account unavailable");
-    check string "purchase alone does not equip" before.body (get ~router (path ~size:"96" keeper)).body;
+    check string "purchase alone does not equip" before96.body (get ~router (path ~size:"96" keeper)).body;
     let purchased = ledger_bytes () in
     (match call ~slot:"face" id with Tool_result.Completed _ -> fail "head item equipped into face slot" | _ -> ());
     check string "wrong-slot refusal does not append" purchased (ledger_bytes ());
@@ -768,7 +779,7 @@ beanie = %d
     check bool "cached operator metadata exposes fresh equipped portrait" true
       (dashboard_portrait () = Keeper_portrait_equipment.Ready expected);
     check int "equipment refresh did not recompute metadata" 1 !snapshot_computations;
-    let after = get ~router ~if_none_match:(header before "etag") (path ~size:"96" keeper) in
+    let after = get ~router ~if_none_match:(header before "etag") (path ~size:"160" keeper) in
     check int "old tag does not conceal equipped item" 200 after.status;
     check bool "actual HTTP PNG changed" false (before.body = after.body);
     let refused = get ~router ~if_none_match:"*" (bound_path ~size:"96" starting keeper) in
@@ -776,7 +787,8 @@ beanie = %d
     check bool "mismatch publishes no PNG" false (String.starts_with ~prefix:png_signature refused.body);
     let bound = get ~router (bound_path ~size:"96" expected keeper) in
     check int "matching equipment publishes current B" 200 bound.status;
-    check string "bound and unbound B share actual PNG" after.body bound.body;
+    check string "bound and unbound B share actual PNG"
+      (get ~router (path ~size:"96" keeper)).body bound.body;
     check int "matching equipment preserves 304" 304
       (get ~router ~if_none_match:(header bound "etag") (bound_path ~size:"96" expected keeper)).status;
     let stable = ledger_bytes () in
@@ -810,15 +822,16 @@ beanie = %d
     check bool "restart-style replay preserves current equipment" true
       (require_ok Fun.id (Candle_equipment.current ~now:Time_compat.now ~base_path ~keeper) = expected);
     ignore (accepted (call "default"));
-    check string "Default restores exact starting PNG" before.body (get ~router (path ~size:"96" keeper)).body;
+    check string "Default restores exact starting PNG" before.body (get ~router (path ~size:"160" keeper)).body;
     let restored = get ~router (bound_path ~size:"96" starting keeper) in
     check int "A after B after A accepts only matching A" 200 restored.status;
-    check string "restored bound A is never the B PNG" before.body restored.body;
+    check string "restored bound A is never the B PNG" before96.body restored.body;
     let account = require_ok Candle_shop.error_to_string (Candle_shop.account ~now:Time_compat.now ~base_path ~keeper:owner) in
     check int "equipping spends no Candle" 800 account.balance_milli;
     check bool "reset preserves purchase ownership" true (List.mem item account.owned_items);
     Fs_compat.append_file (Candle_ledger.path ~base_path) "{partial";
     let corrupt = ledger_bytes () in
+    check int "unreadable ledger refuses a cached portrait" 503 (get ~router (path ~size:"160" keeper)).status;
     check int "unreadable ledger refuses a cached portrait" 503 (get ~router (path ~size:"96" keeper)).status;
     check int "unreadable authority refuses a bound cached portrait" 503
       (get ~router (bound_path ~size:"96" starting keeper)).status;
@@ -851,8 +864,12 @@ beanie = %d
        Fs_compat.mkdir_p evidence;
        Fs_compat.save_file (Filename.concat evidence "before.png") before.body;
        Fs_compat.save_file (Filename.concat evidence "equipped.png") after.body;
+       Fs_compat.save_file (Filename.concat evidence "before-roster.json")
+         (Yojson.Safe.pretty_to_string before_roster);
+       Fs_compat.save_file (Filename.concat evidence "equipped-roster.json")
+         (Yojson.Safe.pretty_to_string roster);
        Fs_compat.save_file (Filename.concat evidence "manifest.json")
-         (Yojson.Safe.pretty_to_string (`Assoc ["keeper",`String keeper;
+         (Yojson.Safe.pretty_to_string (`Assoc ["keeper",`String keeper;"pixel_size",`Int 160;
            "before",Keeper_portrait_equipment.to_json starting;
            "equipped",Keeper_portrait_equipment.to_json expected;
            "before_etag",`String (header before "etag");"equipped_etag",`String (header after "etag");

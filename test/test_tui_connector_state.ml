@@ -1,13 +1,12 @@
 open Alcotest
 module State = Masc_tui_connector_state
-module Reading = Masc.Tui_decode
 
 let connections =
-  [ ("connected", Reading.Connector_connected)
-  ; ("connected / unavailable", Reading.Connector_connected_unavailable)
-  ; ("disconnected", Reading.Connector_disconnected)
-  ; ("offline", Reading.Connector_offline)
-  ; ("stale", Reading.Connector_stale)
+  [ ("connected", Masc.Tui_decode_connectors.Connector_connected)
+  ; ("connected / unavailable", Masc.Tui_decode_connectors.Connector_connected_unavailable)
+  ; ("disconnected", Masc.Tui_decode_connectors.Connector_disconnected)
+  ; ("offline", Masc.Tui_decode_connectors.Connector_offline)
+  ; ("stale", Masc.Tui_decode_connectors.Connector_stale)
   ]
 
 let test_every_connection_spells_its_own_badge () =
@@ -46,8 +45,8 @@ let connector ~status ~available ~connected ?gateway_state ?poll_state () =
       ; ("active_count", `Int 1)
       ]
   in
-  match Reading.decode_connector_snapshot json with
-  | Ok { Reading.cs_connectors = [ c ]; _ } -> c
+  match Masc.Tui_decode_connectors.decode_connector_snapshot json with
+  | Ok { Masc.Tui_decode_connectors.cs_connectors = [ c ]; _ } -> c
   | Ok _ -> fail "expected one connector"
   | Error err -> failf "decode failed: %s" err
 
@@ -138,7 +137,7 @@ let test_the_badge_column_holds_every_word_whole () =
   (* The fact that made this a defect rather than a preference. *)
   check bool "the compound word did not fit the twelve cells the row reserved"
     true
-    (String.length (State.badge_word Reading.Connector_connected_unavailable)
+    (String.length (State.badge_word Masc.Tui_decode_connectors.Connector_connected_unavailable)
     > 12)
 
 (* Three things share the row and only one may be shortened. Without the two

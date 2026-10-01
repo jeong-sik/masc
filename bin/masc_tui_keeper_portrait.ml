@@ -61,6 +61,9 @@ let image ?(compact = false) c ~name ~equipment size =
     | None ->
         let body = Look.body_of_name name in
         let picture =
+          (* The compact silhouette draws only the body and its dish. Keep
+             that geometry where it is complete; other slots need the full
+             drawing rather than silently losing their observed equipment. *)
           match compact, equipment.Look.face, equipment.Look.neck,
                 equipment.Look.head, equipment.Look.hand with
           | true, Look.Bare_face, Look.Bare_neck, Look.Bare_head, Look.Empty_hand ->
@@ -122,3 +125,16 @@ let session_cache = cache ()
 let shown ~name ~equipment ~content_rows ~content_cols =
   band session_cache ~display:(View.current_display ())
     ~project:Masc_tui_terminal_palette.best_color ~name ~equipment ~content_rows ~content_cols
+
+let preview ~name ~equipment ~content_rows ~content_cols =
+  let display = View.current_display () in
+  match band_size display with
+  | None -> None
+  | Some size when content_rows < size.rows + 2 || content_cols < String.length indent + size.cols + 2 ->
+      None
+  | Some size ->
+      View.fit display ~max_cols:size.cols ~max_rows:size.rows
+      |> Option.map (fun box ->
+             let picture = image session_cache ~name ~equipment box.View.size in
+             { display; box; image = picture
+             ; lines = View.lines ~project:Masc_tui_terminal_palette.best_color display box picture })

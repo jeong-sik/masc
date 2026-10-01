@@ -2061,12 +2061,12 @@ type overview_goals_reading =
     so a row this build cannot read does not hide what the providers said. *)
 type overview_providers_reading =
   | Providers_unread
-  | Providers_read of Tui_decode.provider_usage_windows
+  | Providers_read of Masc.Tui_decode_usage.provider_usage_windows
   | Providers_failed of string
 
 type keeper_usage_reading =
   | Keeper_usage_unread
-  | Keeper_usage_read of Tui_decode.keeper_usage_window
+  | Keeper_usage_read of Masc.Tui_decode_usage.keeper_usage_window
   | Keeper_usage_error of string
 
 (** Plan usage's reading of [GET /api/v1/setup/account-emails]: each
@@ -2447,6 +2447,7 @@ type keeper_mode =
     case a tab earns (unrelated content would want its own surface). *)
 type keeper_detail_tab =
   | Detail_info
+  | Detail_items
   | Detail_sandbox
   | Detail_instructions
   | Detail_secrets
@@ -2457,11 +2458,12 @@ type keeper_detail_tab =
   | Detail_runs
 
 let keeper_detail_tabs =
-  [ Detail_info; Detail_sandbox; Detail_instructions; Detail_secrets; Detail_github
+  [ Detail_info; Detail_items; Detail_sandbox; Detail_instructions; Detail_secrets; Detail_github
   ; Detail_identity; Detail_channels; Detail_automation; Detail_runs ]
 
 let keeper_detail_tab_label = function
   | Detail_info -> "Info"
+  | Detail_items -> "Items"
   | Detail_sandbox -> "Sandbox"
   | Detail_instructions -> "Settings"
   | Detail_secrets -> "Secrets"
@@ -5249,6 +5251,13 @@ module Verification_evidence_read = struct
     | Launch_failure of string
 end
 
+type message_draft = {
+  draft_text : string;
+  draft_attachments : Masc_tui_keeper_chat_projection.attachment list;
+  draft_references : Masc_tui_keeper_chat_projection.image_reference list;
+  draft_attachments_since : msg_anchor option;
+}
+
 (* Home links identify destinations, never an inferred approval target. The
    approval/agenda screens still own the exact request and its decision. *)
 type home_request =
@@ -5426,10 +5435,9 @@ type state = {
      newest; the keys that move it re-fetch the exact provider input for the
      row they name, so every tab describes the turn the operator chose. *)
   mutable context_inspector_turn_back: int;
-  (* The roster beside a keeper surface costs the chat 30 columns for a
-     list the reader may already know. Hidden is a choice they make, not a
-     width the terminal forces, so it survives resizing. *)
-  mutable roster_pane_hidden: bool;
+  (* Chat shows its roster by default; other surfaces keep their columns.
+     An explicit Ctrl-B choice survives both navigation and resizing. *)
+  mutable roster_pane_preference: Masc_tui_roster_pane.preference;
   (* The Activity pane on the right edge costs a surface
      [Masc_tui_acting_pane.pane_cols] columns for the fleet's live feed, or
      [wide_pane_cols] wide. Same contract as the roster: narrow, wide or
@@ -5480,6 +5488,7 @@ type state = {
      drew the candle (Masc_tui_emblem_screen.drawn) and puts it back to [-1]
      when none did, so a screen without it stops repainting. *)
   mutable emblem_frame: int;
+  mutable about_reduce_motion: bool;
   (* /about: the candle over the surface, with the theme and the keeper count.
      Modal, like the help sheet; Esc closes it. *)
   mutable about_open: bool;
@@ -5677,6 +5686,9 @@ type state = {
   mutable runtime_config_cursor: int;
   mutable config_scroll: int;
   mutable detail_tab: keeper_detail_tab;
+  mutable item_cursor: int;
+  mutable item_account: (string * Masc_tui_keeper_items.t) option;
+  mutable item_account_error: string option;
   mutable keeper_run_cursor: int;
   mutable detail_reads: detail_read_request list;
   mutable detail_read_generation: int;
@@ -5738,6 +5750,9 @@ type state = {
   mutable events: event list;
   mutable keepers: keeper list;
   mutable keepers_error: string option;
+  (* A refused creation remains editable, including malformed JSON. The
+     editor owns a temporary file, so the declaration must survive here. *)
+  mutable keeper_creation_draft: string option;
   (* The live roster reading, separate from the durable one above: it answers
      whether a keepalive fiber is running each keeper, which metadata on disk
      cannot. It is typed rather than a plain list because "the roster did not
@@ -5746,6 +5761,7 @@ type state = {
   mutable keeper_roster: Masc_tui_keeper_control.roster;
   mutable keeper_roster_error: string option;
   mutable candle_observation: (Candle_observation.t, string) result option;
+  mutable candle_authority_generation : int;
   mutable keeper_action_inflight:
     (string * Masc_tui_keeper_control.action) option;
   mutable keeper_action_pending: Masc_tui_keeper_control.pending option;
@@ -5863,6 +5879,7 @@ type state = {
   mutable log_entries: log_entry list;
   mutable log_error: Metrics_tail.load_error option;
   mutable log_scroll: int;
+  mutable log_wrap_cols: int option;
   mutable live_context: Masc_tui_context_state.t;
   mutable overview: overview_snapshot option;
   mutable overview_error: string option;
@@ -6074,7 +6091,7 @@ type state = {
      between the two presses, so the schedule id is captured at arm time and a
      press on a different row re-arms for that row. *)
   mutable schedule_cancel_armed: string option;
-  mutable schedule_cancel_error: string option;
+  mutable schedule_cancel_error: (string * string) option;
   mutable lanes: Tui_decode.keeper_lanes_snapshot option;
   mutable keeper_lanes_inflight: bool;
   mutable standalone_lanes: Tui_decode.standalone_lanes_snapshot option;
@@ -6097,6 +6114,8 @@ type state = {
   mutable clients_surface_inflight: bool;
   mutable clients_surface_scroll: int;
   mutable clients_surface_cursor: int;
+  mutable client_detail: Tui_decode.client_row option;
+  mutable client_detail_scroll: int;
   mutable clients_surface_generation: int;
   (* Run drill-down under the standalone observation rows. [lane_runs] is the
      summary page of the lane named in [lanes_mode]; payloads stay behind the
@@ -6231,7 +6250,7 @@ type state = {
      carries the keepers the fleet merge could not read beside the facts it
      could; a single keeper's answer has none. *)
   mutable memory_facts:
-    (string, Tui_decode.memory_fact_snapshot * string option) Masc_tui_fetched.t;
+    (string, Masc.Tui_decode_memory_facts.memory_fact_snapshot * string option) Masc_tui_fetched.t;
   mutable memory_facts_cursor: int;
   mutable memory_facts_scroll: int;
   (* One selected claim's wrapped rows. The cursor and renderer ask for the
@@ -6334,6 +6353,8 @@ type state = {
   mutable code_diff: (string, Tui_decode.git_diff) Masc_tui_fetched.t;
   mutable code_diff_open: bool;
   mutable code_diff_scroll: int;
+  mutable code_diff_hscroll: int;
+  mutable code_diff_max_width: int;
   (* The file pane's notes view: m on an open file swaps the content for
      the memos written as comments in the file itself. Read off the rows
      once at load, like the width above: the memos change when the file
@@ -6506,14 +6527,16 @@ type state = {
   mutable msg_references: Masc_tui_keeper_chat_projection.image_reference list;
   (* Ctrl-O weighs a staged image against a .png the conversation named by
      which is newer, so the batch carries a recency marker: an anchor to the
-     history row that was newest when the newest attachment entered the
-     composer. [None] is a real answer -- staged while the history was empty,
-     so any row it holds now arrived later. Meaningful only while
-     [msg_attachments] is non-empty and reset when it clears. *)
+     session row that was newest when the newest attachment entered the
+     composer. [None] means staging preceded all observed session rows.
+     Loading historical rows alone does not supersede the draft. Meaningful
+     only while [msg_attachments] is non-empty and reset when it clears. *)
   mutable msg_attachments_since: msg_anchor option;
   mutable msg_target_keeper_name: string option;
   mutable msg_return: keeper_chat_return;
-  mutable msg_drafts: (string * string) list;
+  (* The entire unsent payload belongs to its Keeper, including image-only
+     drafts. Restoring another target cannot inherit its staged media. *)
+  mutable msg_drafts: (string * message_draft) list;
   mutable msg_history: msg_entry list;
   (* How far back the arrows have walked through what this pane sent, and the
      draft they set aside to do it. [None] means the composer holds the
@@ -6650,6 +6673,19 @@ type state = {
   refresh_interval: float;
 }
 
+let roster_pane_hidden (state : state) =
+  Masc_tui_roster_pane.effective_hidden state.roster_pane_preference
+    ~in_chat:(state.view = Keepers Keeper_message)
+
+(* Called at interaction and presentation boundaries with the surface width,
+   after reserving any Activity pane. Visibility preference survives a resize;
+   focus does not: an absent roster cannot keep arrows, Enter or the caret. *)
+let reconcile_keeper_message_focus (state : state) ~cols =
+  if state.view = Keepers Keeper_message
+     && not (Masc_tui_roster_pane.shown ~hidden:(roster_pane_hidden state) ~cols)
+  then state.keeper_message_focus <- Right_pane
+
+
 (* One selection shared by Tools actions, pinned heading and document. *)
 let tools_skill_profiles (state : state) =
   match state.tools_inventory with
@@ -6660,8 +6696,6 @@ let tools_skill_profiles (state : state) =
 
 let selected_tools_skill_profile (state : state) =
   List.nth_opt (tools_skill_profiles state) state.tools_skill_cursor
-
-
 
 (* Which field a typed character lands in.
 
@@ -7810,6 +7844,8 @@ let enter_keeper_code_file state ~keeper ~path =
   state.code_diff <- Masc_tui_fetched.clear state.code_diff;
   state.code_diff_open <- false;
   state.code_diff_scroll <- 0;
+  state.code_diff_hscroll <- 0;
+  state.code_diff_max_width <- 0;
   state.code_memos <- [];
   state.code_notes_open <- false;
   state.code_notes_scroll <- 0;
@@ -7817,6 +7853,19 @@ let enter_keeper_code_file state ~keeper ~path =
   state.code_focus_file <- Right_pane;
   state.followed_from <- Some (state.view, None);
   state.view <- Code
+
+(* A visible overlay owns navigation; panning one must never move the
+   file hidden underneath it. History and notes currently have no pan axis. *)
+let pan_code_content (state : state) ~direction =
+  if state.repository_changes_open || state.code_history_open || state.code_notes_open then ()
+  else if state.code_diff_open then
+    state.code_diff_hscroll <-
+      max 0 (min (max 0 (state.code_diff_max_width - 1))
+        (state.code_diff_hscroll + direction))
+  else
+    state.code_file_hscroll <-
+      max 0 (min (max 0 (state.code_file_max_width - 1))
+        (state.code_file_hscroll + direction))
 
 let selected_standalone_lane (state : state) =
   match state.standalone_lanes with
@@ -7978,6 +8027,7 @@ let play_invite_forget current name =
 let modal_owns_keys (state : state) =
   state.help_open || state.keeper_deletions_open || state.agenda_open
   || state.context_inspector_open || state.about_open
+  || Option.is_some state.client_detail
   || Option.is_some (play_card_shown state)
 
 let close_context_inspector (state : state) =
@@ -8004,6 +8054,8 @@ let close_key_modals (state : state) =
   state.help_scroll <- 0;
   state.about_open <- false;
   state.keeper_deletions_open <- false;
+  state.client_detail <- None;
+  state.client_detail_scroll <- 0;
   if state.agenda_open then close_agenda state;
   if state.context_inspector_open then close_context_inspector state
 
@@ -8077,13 +8129,9 @@ let create_state
   context_inspector_detail_scroll = 0;
   context_inspector_focus = Left_pane;
   context_inspector_turn_back = 0;
-  (* The roster comes when it is asked for. Ctrl-L's Activity pane already
-     answers "what is every keeper doing right now", and a name-only column
-     beside the chat repeated that answer while taking 34 of the
-     conversation's cells. Ctrl-B brings it back, and that press is the whole
-     cost of being wrong here -- whereas the column was drawn on every frame
-     whether or not anyone read it. *)
-  roster_pane_hidden = true;
+  (* Wide chat starts with its Keeper roster. Other surfaces keep their
+     full width until Ctrl-B records an explicit choice. *)
+  roster_pane_preference = Masc_tui_roster_pane.Auto;
   acting_pane_preference = Default_acting_pane;
   acting_pane_scroll = 0;
   acting_pane_cursor = None;
@@ -8096,6 +8144,7 @@ let create_state
   roster_marquee_frame = 0;
   activity_frame = -1;
   emblem_frame = -1;
+  about_reduce_motion = false;
   about_open = false;
   keeper_detail_focus = Right_pane;
   keeper_message_focus = Right_pane;
@@ -8179,6 +8228,9 @@ let create_state
   runtime_config_cursor = 0;
   config_scroll = 0;
   detail_tab = Detail_info;
+  item_cursor = 0;
+  item_account = None;
+  item_account_error = None;
   keeper_run_cursor = 0;
   detail_reads = [];
   detail_read_generation = 0;
@@ -8210,9 +8262,11 @@ let create_state
   events = [];
   keepers = [];
   keepers_error = None;
+  keeper_creation_draft = None;
   keeper_roster = Masc_tui_keeper_control.Roster_unobserved;
   keeper_roster_error = None;
   candle_observation = None;
+  candle_authority_generation = 0;
   keeper_action_inflight = None;
   keeper_action_pending = None;
   keeper_action_serial = 0;
@@ -8262,6 +8316,7 @@ let create_state
   log_entries = [];
   log_error = None;
   log_scroll = 0;
+  log_wrap_cols = None;
   live_context = Masc_tui_context_state.empty;
   overview = None;
   overview_error = None;
@@ -8378,6 +8433,8 @@ let create_state
   clients_surface_inflight = false;
   clients_surface_scroll = 0;
   clients_surface_cursor = 0;
+  client_detail = None;
+  client_detail_scroll = 0;
   clients_surface_generation = 0;
   lanes_mode = Lanes_overview;
   lanes_standalone_cursor = 0;
@@ -8515,6 +8572,8 @@ let create_state
   code_diff = Masc_tui_fetched.initial;
   code_diff_open = false;
   code_diff_scroll = 0;
+  code_diff_hscroll = 0;
+  code_diff_max_width = 0;
   code_notes_open = false;
   code_notes_scroll = 0;
   code_blame = Masc_tui_fetched.initial;
@@ -9049,10 +9108,12 @@ type clamped_scroll =
   | Schedule_detail_scroll of int
   | Keeper_detail of int
   | Keeper_calls of int
+  | Keeper_logs_scroll of { scroll : int; cols : int }
   | Acting of int
   | Acting_selection of int * int
   | Acting_detail_scroll of int
   | Memory_fact_detail_scroll of int
+  | Client_detail_scroll of int
   | Verification_detail_scroll of int
   | Harness_detail_scroll of int
   | Fusion_detail_scroll of int
@@ -9099,6 +9160,7 @@ type clamped_scroll =
      it -- later endpoints, the probe's last rows, the footer -- could not be
      reached. *)
   | Voice_scroll of int
+  | Preset_detail_scroll of int
   (* The Keepers list window, which the frame keeps still while the cursor
      is on it. Worked out from the cursor alone, the cursor sat on the bottom
      row once the list scrolled, and choosing a row above it moved the whole
@@ -9149,12 +9211,16 @@ let apply_clamped_scroll (state : state) = function
   | Acting_selection (scroll, cursor) -> state.acting_scroll <- scroll; state.acting_cursor <- cursor
   | Acting_detail_scroll value -> state.acting_detail_scroll <- value
   | Memory_fact_detail_scroll value -> state.memory_fact_detail_scroll <- value
+  | Client_detail_scroll value -> state.client_detail_scroll <- value
   | Verification_detail_scroll value ->
       state.verification_detail_scroll <- value
   | Harness_detail_scroll value -> state.harness_detail_scroll <- value
   | Fusion_detail_scroll value -> state.fusion_scroll <- value
   | Runtime_detail_scroll value -> state.runtime_detail_scroll <- value
   | System_log_detail_scroll value -> state.system_logs_detail_scroll <- value
+  | Keeper_logs_scroll { scroll; cols } ->
+      state.log_scroll <- scroll;
+      state.log_wrap_cols <- Some cols
   | Planning_detail_scroll value -> state.planning_scroll <- value
   | Lane_run_detail_scroll { scroll; content_height } ->
       state.lane_run_detail_scroll <- scroll;
@@ -9171,6 +9237,7 @@ let apply_clamped_scroll (state : state) = function
   | Link_modal_scroll value -> state.link_modal_scroll <- value
   | Play_invite_scroll value -> state.play_invite_scroll <- value
   | Voice_scroll value -> state.config_scroll <- value
+  | Preset_detail_scroll value -> state.config_scroll <- value
   | Keeper_list_scroll value -> state.keeper_list_scroll <- value
   | Context_inspector_scroll value -> state.context_inspector_scroll <- value
 
@@ -9287,6 +9354,28 @@ let surface_body_rows (state : state) ~terminal_rows =
      - Masc_tui_composer.rows_for ~terminal_rows
      - agenda_chrome_rows state)
 ;;
+
+(* Count the rows after wrapping, shared by the reader and every movement key.
+   Entry order is newest first; facts inside each entry keep their reading order. *)
+let keeper_log_rows (state : state) ~cols =
+  let width = Masc_tui_frame.inner_width ~cols in
+  let diagnostics =
+    match state.log_error with
+    | None -> []
+    | Some error ->
+        Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (width - 2))
+          (Masc.Tui_terminal_text.sanitize_terminal_text (Metrics_tail.error_to_string error))
+        |> List.map (fun line -> Some error, "  " ^ line)
+  in
+  let entries =
+    List.rev state.log_entries
+    |> List.concat_map (fun (entry : Tui_decode.log_entry) ->
+         Masc_tui_observation_layout.log_entry_rows ~width
+           ~time:(Masc.Tui_terminal_text.clock_timestamp_for_terminal ~localtime:Unix.localtime entry.le_ts)
+           entry
+         |> List.map (fun line -> None, line))
+  in
+  diagnostics @ entries
 
 (* The three layouts the Board read surface draws in. Both the pane split and
    the [z] key read this one answer: spelled as a pair of booleans it admitted
@@ -9407,9 +9496,9 @@ let lanes_overview_hit (state : state) ~terminal_rows:_ ~row : lanes_overview_hi
    sections apart -- an ordinary fact, a fact bound to a file, and a fact
    the store dropped -- while the cursor walks them as one flat list. *)
 type memory_fact_row =
-  | Memory_row_fact of Tui_decode.memory_fact
-  | Memory_row_source_fact of Tui_decode.memory_source_fact
-  | Memory_row_invalidation of Tui_decode.memory_invalidation
+  | Memory_row_fact of Masc.Tui_decode_memory_facts.memory_fact
+  | Memory_row_source_fact of Masc.Tui_decode_memory_facts.memory_source_fact
+  | Memory_row_invalidation of Masc.Tui_decode_memory_facts.memory_invalidation
 
 (* The three palette matchers fold case themselves, on both sides. A caller
    hands them the operator's text as typed; "ADM" and "adm" find the same
@@ -9432,13 +9521,13 @@ let surface_search_query surface query =
 
 let memory_fact_search_text = function
   | Memory_row_fact f ->
-      f.Tui_decode.mf_claim ^ " "
-      ^ Memory_category.category_to_string f.Tui_decode.mf_category
-      ^ " " ^ f.Tui_decode.mf_origin
+      f.Masc.Tui_decode_memory_facts.mf_claim ^ " "
+      ^ Memory_category.category_to_string f.Masc.Tui_decode_memory_facts.mf_category
+      ^ " " ^ f.Masc.Tui_decode_memory_facts.mf_origin
   | Memory_row_source_fact f ->
-      f.Tui_decode.msf_claim ^ " " ^ f.Tui_decode.msf_path
+      f.Masc.Tui_decode_memory_facts.msf_claim ^ " " ^ f.Masc.Tui_decode_memory_facts.msf_path
   | Memory_row_invalidation f ->
-      f.Tui_decode.mi_reason ^ " " ^ f.Tui_decode.mi_source_path
+      f.Masc.Tui_decode_memory_facts.mi_reason ^ " " ^ f.Masc.Tui_decode_memory_facts.mi_source_path
 
 (* The filter the Memory surface is narrowed by: the text being typed while a
    search is open, and the applied one otherwise. Every count, every list and
@@ -9616,35 +9705,35 @@ let memory_fact_rows (state : state) : memory_fact_row list =
   | None -> []
   | Some snapshot ->
       let ordinary =
-        match snapshot.Tui_decode.mfs_ordinary with
-        | Tui_decode.Memory_store_read_error _ | Tui_decode.Memory_store_absent
+        match snapshot.Masc.Tui_decode_memory_facts.mfs_ordinary with
+        | Masc.Tui_decode_memory_facts.Memory_store_read_error _ | Masc.Tui_decode_memory_facts.Memory_store_absent
           ->
             []
-        | Tui_decode.Memory_store_present store ->
+        | Masc.Tui_decode_memory_facts.Memory_store_present store ->
             let facts =
               match state.memory_facts_category with
-              | Category_all -> store.Tui_decode.mos_facts
+              | Category_all -> store.Masc.Tui_decode_memory_facts.mos_facts
               | Category_ordinary category ->
                   List.filter
-                    (fun (fact : Tui_decode.memory_fact) ->
-                      fact.Tui_decode.mf_category = category)
-                    store.Tui_decode.mos_facts
+                    (fun (fact : Masc.Tui_decode_memory_facts.memory_fact) ->
+                      fact.Masc.Tui_decode_memory_facts.mf_category = category)
+                    store.Masc.Tui_decode_memory_facts.mos_facts
               | Category_source | Category_dropped -> []
             in
             List.map (fun fact -> Memory_row_fact fact) facts
       in
       let source_rows, invalidation_rows =
-        match snapshot.Tui_decode.mfs_source with
-        | Tui_decode.Memory_store_read_error _ | Tui_decode.Memory_store_absent
+        match snapshot.Masc.Tui_decode_memory_facts.mfs_source with
+        | Masc.Tui_decode_memory_facts.Memory_store_read_error _ | Masc.Tui_decode_memory_facts.Memory_store_absent
           ->
             ([], [])
-        | Tui_decode.Memory_store_present store ->
+        | Masc.Tui_decode_memory_facts.Memory_store_present store ->
             let src =
               match state.memory_facts_category with
               | Category_all | Category_source ->
                   List.map
                     (fun fact -> Memory_row_source_fact fact)
-                    store.Tui_decode.mss_facts
+                    store.Masc.Tui_decode_memory_facts.mss_facts
               | Category_ordinary _ | Category_dropped -> []
             in
             let inv =
@@ -9652,7 +9741,7 @@ let memory_fact_rows (state : state) : memory_fact_row list =
               | Category_all | Category_dropped ->
                   List.map
                     (fun row -> Memory_row_invalidation row)
-                    store.Tui_decode.mss_invalidations
+                    store.Masc.Tui_decode_memory_facts.mss_invalidations
               | Category_ordinary _ | Category_source -> []
             in
             (src, inv)
@@ -9672,9 +9761,9 @@ let memory_fact_rows (state : state) : memory_fact_row list =
            List.sort
              (fun a b ->
                let ts = function
-                 | Memory_row_fact f -> f.Tui_decode.mf_last_seen
-                 | Memory_row_source_fact f -> f.Tui_decode.msf_first_seen
-                 | Memory_row_invalidation f -> f.Tui_decode.mi_invalidated_at
+                 | Memory_row_fact f -> f.Masc.Tui_decode_memory_facts.mf_last_seen
+                 | Memory_row_source_fact f -> f.Masc.Tui_decode_memory_facts.msf_first_seen
+                 | Memory_row_invalidation f -> f.Masc.Tui_decode_memory_facts.mi_invalidated_at
                in
                Stdlib.compare (ts b) (ts a))
              filtered_rows
@@ -9687,11 +9776,11 @@ let memory_fact_rows (state : state) : memory_fact_row list =
              (fun a b ->
                let key = function
                  | Memory_row_fact f ->
-                   (match f.Tui_decode.mf_events.Tui_decode.mfe_retrieval with
-                    | Tui_decode.Retrieved { last_at; _ } -> (0, last_at)
-                    | Tui_decode.Never_retrieved -> (1, f.Tui_decode.mf_last_seen))
-                 | Memory_row_source_fact f -> (2, f.Tui_decode.msf_first_seen)
-                 | Memory_row_invalidation f -> (2, f.Tui_decode.mi_invalidated_at)
+                   (match f.Masc.Tui_decode_memory_facts.mf_events.Masc.Tui_decode_memory_facts.mfe_retrieval with
+                    | Masc.Tui_decode_memory_facts.Retrieved { last_at; _ } -> (0, last_at)
+                    | Masc.Tui_decode_memory_facts.Never_retrieved -> (1, f.Masc.Tui_decode_memory_facts.mf_last_seen))
+                 | Memory_row_source_fact f -> (2, f.Masc.Tui_decode_memory_facts.msf_first_seen)
+                 | Memory_row_invalidation f -> (2, f.Masc.Tui_decode_memory_facts.mi_invalidated_at)
                in
                let g_a, t_a = key a in
                let g_b, t_b = key b in
@@ -9703,12 +9792,12 @@ let memory_fact_rows (state : state) : memory_fact_row list =
                let key = function
                  | Memory_row_fact f ->
                    ( 0
-                   , (match f.Tui_decode.mf_events.Tui_decode.mfe_retrieval with
-                      | Tui_decode.Retrieved { count; _ } -> count
-                      | Tui_decode.Never_retrieved -> 0)
-                   , f.Tui_decode.mf_last_seen )
-                 | Memory_row_source_fact f -> (1, 0, f.Tui_decode.msf_first_seen)
-                 | Memory_row_invalidation f -> (1, 0, f.Tui_decode.mi_invalidated_at)
+                   , (match f.Masc.Tui_decode_memory_facts.mf_events.Masc.Tui_decode_memory_facts.mfe_retrieval with
+                      | Masc.Tui_decode_memory_facts.Retrieved { count; _ } -> count
+                      | Masc.Tui_decode_memory_facts.Never_retrieved -> 0)
+                   , f.Masc.Tui_decode_memory_facts.mf_last_seen )
+                 | Memory_row_source_fact f -> (1, 0, f.Masc.Tui_decode_memory_facts.msf_first_seen)
+                 | Memory_row_invalidation f -> (1, 0, f.Masc.Tui_decode_memory_facts.mi_invalidated_at)
                in
                let g_a, n_a, t_a = key a in
                let g_b, n_b, t_b = key b in
@@ -9721,7 +9810,7 @@ let memory_fact_rows (state : state) : memory_fact_row list =
              (fun a b ->
                let cat = function
                  | Memory_row_fact f ->
-                     (0, Memory_category.category_to_string f.Tui_decode.mf_category)
+                     (0, Memory_category.category_to_string f.Masc.Tui_decode_memory_facts.mf_category)
                  | Memory_row_source_fact _ -> (1, "source")
                  | Memory_row_invalidation _ -> (2, "dropped")
                in
@@ -9732,9 +9821,9 @@ let memory_fact_rows (state : state) : memory_fact_row list =
                else if p_a <> p_b then Stdlib.compare p_a p_b
                else
                  let claim = function
-                   | Memory_row_fact f -> f.Tui_decode.mf_claim
-                   | Memory_row_source_fact f -> f.Tui_decode.msf_claim
-                   | Memory_row_invalidation f -> f.Tui_decode.mi_reason
+                   | Memory_row_fact f -> f.Masc.Tui_decode_memory_facts.mf_claim
+                   | Memory_row_source_fact f -> f.Masc.Tui_decode_memory_facts.msf_claim
+                   | Memory_row_invalidation f -> f.Masc.Tui_decode_memory_facts.mi_reason
                  in
                  String.compare (claim a) (claim b))
              filtered_rows
@@ -9742,9 +9831,9 @@ let memory_fact_rows (state : state) : memory_fact_row list =
            List.sort
              (fun a b ->
                let claim = function
-                 | Memory_row_fact f -> f.Tui_decode.mf_claim
-                 | Memory_row_source_fact f -> f.Tui_decode.msf_claim
-                 | Memory_row_invalidation f -> f.Tui_decode.mi_reason
+                 | Memory_row_fact f -> f.Masc.Tui_decode_memory_facts.mf_claim
+                 | Memory_row_source_fact f -> f.Masc.Tui_decode_memory_facts.msf_claim
+                 | Memory_row_invalidation f -> f.Masc.Tui_decode_memory_facts.mi_reason
                in
                String.compare (claim a) (claim b))
              filtered_rows)
@@ -9758,24 +9847,24 @@ let memory_fact_categories (state : state) : memory_category_filter list =
   | None -> []
   | Some snapshot ->
       let ordinary_cats =
-        match snapshot.Tui_decode.mfs_ordinary with
-        | Tui_decode.Memory_store_read_error _ | Tui_decode.Memory_store_absent
+        match snapshot.Masc.Tui_decode_memory_facts.mfs_ordinary with
+        | Masc.Tui_decode_memory_facts.Memory_store_read_error _ | Masc.Tui_decode_memory_facts.Memory_store_absent
           ->
             []
-        | Tui_decode.Memory_store_present store ->
-            store.Tui_decode.mos_facts
-            |> List.map (fun (fact : Tui_decode.memory_fact) ->
-                 Category_ordinary fact.Tui_decode.mf_category)
+        | Masc.Tui_decode_memory_facts.Memory_store_present store ->
+            store.Masc.Tui_decode_memory_facts.mos_facts
+            |> List.map (fun (fact : Masc.Tui_decode_memory_facts.memory_fact) ->
+                 Category_ordinary fact.Masc.Tui_decode_memory_facts.mf_category)
             |> List.sort_uniq Stdlib.compare
       in
       let source_cats =
-        match snapshot.Tui_decode.mfs_source with
-        | Tui_decode.Memory_store_read_error _ | Tui_decode.Memory_store_absent
+        match snapshot.Masc.Tui_decode_memory_facts.mfs_source with
+        | Masc.Tui_decode_memory_facts.Memory_store_read_error _ | Masc.Tui_decode_memory_facts.Memory_store_absent
           ->
             []
-        | Tui_decode.Memory_store_present store ->
-            (if store.Tui_decode.mss_facts <> [] then [ Category_source ] else [])
-            @ (if store.Tui_decode.mss_invalidations <> [] then [ Category_dropped ] else [])
+        | Masc.Tui_decode_memory_facts.Memory_store_present store ->
+            (if store.Masc.Tui_decode_memory_facts.mss_facts <> [] then [ Category_source ] else [])
+            @ (if store.Masc.Tui_decode_memory_facts.mss_invalidations <> [] then [ Category_dropped ] else [])
       in
       ordinary_cats @ source_cats
 
@@ -10469,7 +10558,8 @@ let runtime_pick_item_id = function
    text that tells them apart, and at a fixed 24 cells every one of them was
    cut to the same [claude_code.claude-sonn…]. The target column therefore
    takes the longest id, and the route column, which repeats provider and
-   model, gives up that room. Neither goes below the 24 cells both had. *)
+   model, gives up that room. Twenty-four cells is the preferred floor when
+   the measured frame can contain both columns. *)
 let runtime_pick_min_column_cells = 24
 
 (* The context size as the row writes it. It lives here, not in the renderer,
@@ -10651,13 +10741,22 @@ let keeper_runtime_picker_empty_note view =
    [cursor ^ badge ^ target ^ "  " ^ route ^ "  " ^ facts]. *)
 let runtime_pick_fixed_cells = 2 + runtime_pick_badge_cells + 2 + 2
 
+(* The preferred name columns can only be floors when the frame can pay for
+   both. Below that width, divide the remaining cells between names and facts
+   instead of reserving columns outside the terminal. *)
+let runtime_pick_column_floor ~cols =
+  let available = max 0 (Masc_tui_frame.inner_width ~cols - runtime_pick_fixed_cells) in
+  if available >= 2 * runtime_pick_min_column_cells
+  then runtime_pick_min_column_cells
+  else max 1 (available / 3)
+
 (* What is left for the facts once the chrome and the two column floors are
    paid. At 80 columns that is 15 cells, which one fact fills. *)
 let runtime_pick_tail_budget ~cols =
   max 0
     (Masc_tui_frame.inner_width ~cols
      - runtime_pick_fixed_cells
-     - (2 * runtime_pick_min_column_cells))
+     - (2 * runtime_pick_column_floor ~cols))
 
 (* The facts a row can afford, dropped from the front.
 
@@ -10694,6 +10793,7 @@ let runtime_pick_properties_room ~cols ~target ~route =
   max 0 (Masc_tui_frame.inner_width ~cols - runtime_pick_fixed_cells - target - route)
 
 let runtime_pick_column_widths ~cols items =
+  let floor = runtime_pick_column_floor ~cols in
   let longest_id =
     List.fold_left
       (fun longest item ->
@@ -10714,12 +10814,12 @@ let runtime_pick_column_widths ~cols items =
   in
   let shared =
     max
-      (2 * runtime_pick_min_column_cells)
+      (2 * floor)
       (Masc_tui_frame.inner_width ~cols - runtime_pick_fixed_cells - longest_tail)
   in
   let target =
-    max runtime_pick_min_column_cells
-      (min longest_id (shared - runtime_pick_min_column_cells))
+    max floor
+      (min longest_id (shared - floor))
   in
   target, shared - target
 
@@ -11053,8 +11153,8 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
        (* The voice pane draws neither the file nor a list the state holds.
           It was counted as the file's rows, a bound that has nothing to do
           with what it draws; the frame reports [Voice_scroll] instead. *)
-       | Config_voice -> None
-       | Config_runtime | Config_params | Config_prompts | Config_presets
+       | Config_voice | Config_presets -> None
+       | Config_runtime | Config_params | Config_prompts
        | Config_themes ->
          listing ~error:state.runtime_config_view_error (file_rows ()))
   (* Acting counts rows the drawing builds out of formatted text, not rows the
@@ -11286,7 +11386,7 @@ let home_decision_rows (state : state) =
   let questions =
     if list_is_read reading.questions then
       Option.value ~default:[] (approvals_open_questions state)
-      |> List.map (fun (row : Tui_decode.ask_row) ->
+      |> List.map (fun (row : Masc.Tui_decode_asks.ask_row) ->
           let why = match row.ar_context, row.ar_questions with
             | Some reason, _ -> reason
             | None, question :: _ -> question.aq_prompt
@@ -11379,7 +11479,7 @@ let reconcile_home_request_detail state =
                  (approval_items state))
         | Home_question ask_id ->
             Option.iter (fun index -> state.ask_cursor <- index)
-              (List.find_index (fun (row : Tui_decode.ask_row) -> row.ar_id = ask_id)
+              (List.find_index (fun (row : Masc.Tui_decode_asks.ask_row) -> row.ar_id = ask_id)
                  (Option.value ~default:[] (approvals_open_questions state)))
         | Home_goal_confirmation goal_id -> state.planning_mode <- Planning_detail goal_id
         | Home_operator_task task_id -> state.task_detail_id <- Some task_id
@@ -12086,6 +12186,70 @@ let keeper_observed_interrupt_rows (state : state) =
    the row that names the observed turn. On the 2026-09-22 screen the band
    was five rows, all in the status colour, for two facts: a turn is
    running, and this pane's line waits behind it. *)
+(* The local queue releases a request when its POST starts, before the Keeper
+   starts running it. Keep promoted requests while their POST is pending,
+   then accepted, still-waiting requests until RUN_STARTED. An admission's
+   queue_length is only a snapshot and cannot supply the current count.
+   In-flight entries are newest first,
+   while the local queue already carries its dispatch order. *)
+type keeper_message_pending_delivery =
+  | Local_pending
+  | Awaiting_receipt
+  | Keeper_queued
+  | Rechecking_delivery
+
+let keeper_message_waiting_requests (state : state) ~keeper_name =
+  let module Executions = Set.Make (String) in
+  let remember_started executions log =
+    if not (String.equal (turn_log_keeper_name log) keeper_name) then executions
+    else
+      let transcript = log.tl_transcript in
+      let started = match Masc_tui_keeper_chat_transcript.phase transcript with
+        | Working | Stream_ended | Stream_failed _ -> true
+        | Waiting -> Masc_tui_keeper_chat_transcript.awaiting_continuation transcript in
+      if started then Executions.add (turn_log_execution_id log) executions else executions
+  in
+  (* A batch's watchers receive its journal independently. A sibling's run
+     start (or retained terminal log) already proves this execution consumed
+     its bound inputs, even while another watcher is catching up. *)
+  let started = List.fold_left remember_started Executions.empty state.msg_settled_logs in
+  let started = List.fold_left (fun ids (entry : inflight) ->
+      remember_started ids entry.log) started state.msg_inflight in
+  let local = Masc_tui_keeper_chat_queue.waiting_for_keeper
+      state.msg_queued ~keeper_name in
+  let submitted =
+    List.rev state.msg_inflight
+    |> List.filter_map (fun (entry : inflight) ->
+      if not (String.equal entry.sent_request.keeper_name keeper_name)
+         || Executions.mem (turn_log_execution_id entry.log) started
+         || List.exists (fun (item : Masc_tui_keeper_chat_queue.item) ->
+              Masc_tui_keeper_chat_projection.same_request_identity
+                item.request entry.sent_request) local
+      then None
+      else
+        let transcript = entry.log.tl_transcript in
+        match Masc_tui_keeper_chat_transcript.phase transcript,
+              Masc_tui_keeper_chat_transcript.admission transcript with
+        | Waiting, None
+          when not (Masc_tui_keeper_chat_transcript.awaiting_continuation transcript) ->
+            (match entry.phase, entry.origin with
+             | Turn_reconciling, (Promoted_queue _ | Direct_submission) ->
+                 Some (entry.sent_request, Rechecking_delivery)
+             | Turn_streaming, Promoted_queue _ ->
+                 Some (entry.sent_request, Awaiting_receipt)
+             | Turn_streaming, Direct_submission -> None)
+        | Waiting, Some (Masc_tui_keeper_chat_live.Queued, _)
+          when not (Masc_tui_keeper_chat_transcript.awaiting_continuation transcript) ->
+            let delivery = match entry.phase with
+              | Turn_streaming -> Keeper_queued
+              | Turn_reconciling -> Rechecking_delivery in
+            Some (entry.sent_request, delivery)
+        | Waiting, (None | Some _) | (Working | Stream_ended | Stream_failed _), _ -> None)
+  in
+  submitted @ List.map (fun (item : Masc_tui_keeper_chat_queue.item) ->
+    item.request, Local_pending) local
+;;
+
 let keeper_message_activity_rows (state : state) =
   match state.msg_target_keeper_name with
   | None -> []
@@ -12119,9 +12283,18 @@ let keeper_message_activity_rows (state : state) =
           ~text_tail_drawn:(observed_turn_text_drawn state keeper_name)
           state.keeper_turns
     in
-    let waiting_items = Masc_tui_keeper_chat_queue.waiting_for_keeper
+    let waiting_items = keeper_message_waiting_requests state ~keeper_name in
+    let waiting_count = List.length waiting_items in
+    let local = Masc_tui_keeper_chat_queue.waiting_for_keeper
       state.msg_queued ~keeper_name in
-    let local_count = List.length waiting_items in
+    let awaiting_receipt, keeper_queued, rechecking =
+      List.fold_left (fun (awaiting, queued, rechecking) (_, delivery) ->
+        match delivery with
+        | Local_pending -> awaiting, queued, rechecking
+        | Awaiting_receipt -> awaiting + 1, queued, rechecking
+        | Keeper_queued -> awaiting, queued + 1, rechecking
+        | Rechecking_delivery -> awaiting, queued, rechecking + 1)
+        (0, 0, 0) waiting_items in
     let retained = List.exists (fun (name, _, intervention) ->
       name = keeper_name && match intervention with
       | Retained_after_stop -> true | Awaiting_control _ -> false)
@@ -12130,21 +12303,36 @@ let keeper_message_activity_rows (state : state) =
     let queue_rows =
       match waiting_items with
       | [] -> []
-      | first :: _ ->
-        let preview =
-          let single = String.map (fun c -> if c = '\n' || c = '\r' then ' ' else c) first.request.message in
-          let trimmed = String.trim single in
-          if String.length trimmed > 34 then
-            String.sub trimmed 0 31 ^ "..."
-          else trimmed
-        in
-        let intent_str = match first.intent with
-          | Steer_after_interrupt -> " [steer]"
-          | Next -> ""
-        in
+      | _ :: _ ->
+        (* Server-side edit/reorder changes the input independently of this
+           session's request. Only local unsent input has an authoritative
+           preview here; /queue reads the server's current contents/order. *)
+        let count_row count label =
+          if count = 0 then [] else [plain (Printf.sprintf "%d %s" count label)] in
+        let local_rows = match local with
+          | [] -> []
+          | first :: _ ->
+            let preview =
+              Masc_tui_keeper_chat_projection.terminal_safe_text first.request.message
+              |> String.trim
+              |> fun text -> Masc_tui_message_layout.fit_width text 34 |> String.trim in
+            let intent_str = match first.intent with
+              | Steer_after_interrupt -> " [steer]"
+              | Next -> "" in
+            [ { Masc_tui_answering.lead = "Local NEXT" ^ intent_str
+              ; rest = Printf.sprintf ": \"%s\"" preview
+              ; keys = "" } ] in
         let auto_tag = if state.user_input_priority_next then "auto-next:on" else "auto-next:off" in
-        [ plain (Printf.sprintf "Queue (%d waiting · %s) NEXT%s: \"%s\" · Ctrl-T:queue"
-            local_count auto_tag intent_str preview) ]
+        (* The renderer reserves [keys] before fitting [rest]. Keep the
+           aggregate, delivery evidence and local preview on separate rows;
+           the status budget counts this same projection. *)
+        [ { Masc_tui_answering.lead = Printf.sprintf "Queue (%d pending)" waiting_count
+          ; rest = " · " ^ auto_tag
+          ; keys = " · Ctrl-T:queue" } ]
+        @ count_row keeper_queued "queued at Keeper · /queue"
+        @ count_row awaiting_receipt "awaiting receipt"
+        @ count_row rechecking "rechecking delivery"
+        @ local_rows
     in
     activity @ (if retained then
       [plain "Input retained after Esc; /queue resume sends it"]
@@ -12281,7 +12469,7 @@ let keeper_message_command_window state ~terminal_rows ~terminal_cols =
      | Some menu ->
        let status_rows = keeper_message_status_rows state + 1 in
        let chat_cols = Masc_tui_roster_pane.content_cols
-           ~hidden:state.roster_pane_hidden ~cols:terminal_cols in
+           ~hidden:(roster_pane_hidden state) ~cols:terminal_cols in
        let history_rows = Masc_tui_message_layout.message_history_height
            ~terminal_rows ~status_rows in
        (* Keep three conversation rows plus a heading and input separator.
@@ -12412,6 +12600,23 @@ let workspace_entries_count_label total =
 let lsp_question_prefixes =
   [ "def ", "definition"; "hover ", "hover"; "refs ", "references" ]
 
+(* A Code question is a whole command word, followed by an optional symbol.
+   Other text remains a palette filter. Both Enter and the preview read this. *)
+let palette_typed_question query =
+  let query = String.trim query in
+  let word, symbol =
+    match String.index_opt query ' ' with
+    | None -> query, None
+    | Some index ->
+        let symbol = String.trim (String.sub query (index + 1)
+            (String.length query - index - 1)) in
+        String.sub query 0 index,
+        (if String.equal symbol "" then None else Some symbol)
+  in
+  List.find_map (fun (prefix, question) ->
+      if String.equal word (String.trim prefix) then Some (question, symbol)
+      else None) lsp_question_prefixes
+
 let palette_entries (state : state) =
   [ "settings", Palette_config Config_params ]
   @ List.concat_map (fun lane ->
@@ -12530,7 +12735,16 @@ let palette_matches (state : state) =
   let needle = String.trim state.palette_query in
   let entries =
     match state.palette_mode with
-    | Palette_jump -> palette_entries state
+    | Palette_jump ->
+        let entries = palette_entries state in
+        (match palette_typed_question state.palette_query with
+         | None -> entries
+         | Some (question, None) ->
+             List.filter (function
+               | _, Palette_lsp (candidate_question, _) ->
+                   String.equal question candidate_question
+               | _ -> false) entries
+         | Some (_, Some _) -> [])
     | Palette_choice { choice_question; _ } ->
         List.map
           (fun name -> (name, Palette_lsp (choice_question, name)))
@@ -12538,8 +12752,8 @@ let palette_matches (state : state) =
   in
   (* Three ranks, entry order kept inside each: a label that starts with the
      query, then one that contains it, then one that only has its characters
-     in order. A K/D pre-fill of "def " therefore lists the cursor line's
-     names before a post that merely mentions "deferred". *)
+     in order. Typed Code questions retain only executable symbol candidates;
+     ordinary jump filters continue ranking destinations and content. *)
   let rank (label, action) =
     let texts = label :: palette_action_words action in
     if List.exists (palette_starts_with ~needle) texts then Some 0

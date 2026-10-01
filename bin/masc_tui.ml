@@ -1528,8 +1528,6 @@ let decode_play_mutation decode = function
   | Masc_tui_http.Post_unanswered detail -> Play_unanswered detail
 
 
-
-
 let enqueue_async mailbox msg =
   Eio.Stream.add mailbox
     { ready_at_ns = Mtime_clock.elapsed_ns (); message = msg }
@@ -11347,18 +11345,6 @@ let start_scoped_refresh_followup state ~host ~port ~refresh_inflight
     start_http_refresh state ~host ~port ~intent:Revalidate ~refresh_inflight
       ~scoped_refresh_inflight ~scoped_refresh_followup ~mailbox
 
-let start_board_post_refresh state ~host ~port ~post_id ~mailbox =
-  if state.board_history_post_id <> Some post_id then
-    state.board_history_post_id <- None;
-  match Board_detail.start state.board_detail ~post_id with
-  | Board_detail.Already_loading -> ()
-  | Board_detail.Started (detail, request) ->
-    state.board_detail <- detail;
-    let full_history = state.board_history_post_id = Some post_id in
-    launch_workspace_request state ~mailbox ~boundary_error:Fun.id
-      ~deliver:(fun result -> Board_post_refresh_done (request, result))
-      (fun () -> load_board_post ~full_history ~host ~port ~post_id ())
-
 let open_board_post state ~mailbox ~focus (post : board_post) =
   state.board_mode <- Board_read post.bp_id;
   state.board_detail <- Board_detail.clear state.board_detail;
@@ -11368,8 +11354,8 @@ let open_board_post state ~mailbox ~focus (post : board_post) =
   state.board_comment_scroll <- 0;
   state.board_comment_landing <- None;
   state.board_comments_focused <- false;
-  start_board_post_refresh state ~host:server_peer_host
-    ~port:state.port ~post_id:post.bp_id ~mailbox
+  Masc_tui_board_requests.start_board_post_refresh state ~host:server_peer_host
+    ~port:state.port ~post_id:post.bp_id ~launch:(launch_workspace_request state ~mailbox ~boundary_error:Fun.id)
 
 let move_board_read_scroll state ~by =
   let current =
@@ -11913,31 +11899,6 @@ let start_keeper_action state ~base_path:_ ~mailbox keeper_name action =
 let split_board_draft (text : string) : string * string =
   Board_composer.split_draft text
 
-(* Post the draft through the tools endpoint. Runs in a fiber like a keeper
-   action: the compose pane must keep accepting keys while the request is
-   out, and the outcome lands in the same mailbox everything else does. *)
-let start_board_post state ~mailbox ~(title : string) ~(body : string) ?hearth () =
-  if state.workspace_identity <> Workspace_identity_match then begin
-    let detail = "Cannot write to Board: workspace identity is unverified; draft retained" in
-    state.board_post_error <- Some detail;
-    report_action state "error" detail
-  end else begin
-  state.board_post_error <- None;
-  state.board_post_inflight <- true;
-  report_action state "system" "posting to Board";
-  (* What this send answers for: the completion clears and lands against
-     these, not against whatever the operator typed while it was out. *)
-  let sent_draft = Buffer.contents state.board_draft in
-  let host = server_peer_host in
-  let port = state.port in
-  launch_workspace_request state ~mailbox ~boundary_error:Fun.id
-    ~deliver:(fun result -> Board_new_post_done { reply_to = None; sent_draft; result })
-    (fun () ->
-      match Masc_tui_http.post_board_new ~host ~port ~title ~body ?hearth () with
-      | Error err -> Error err
-      | Ok json -> Masc.Tui_decode.tool_envelope_outcome json )
-  end
-
 
 (* Request a goal lifecycle change through the tools route. Runs in a fiber
    like the other writes; the outcome lands in the shared mailbox and the
@@ -12040,52 +12001,6 @@ let handle_goal_action_key state ~mailbox ~(action : Goal_phase.Public_action.t)
                goal_id))
   | Planning_list -> ()
 
-(* Compose-mode keys. Sending is armed rather than pressed: esc offers
-   send-or-discard, so a stray key during writing cannot publish. Returns
-   false for keys this pane does not own, so Tab and quit keep their global
-   meaning. *)
-(* Send a comment through the tools route. Same fiber-and-mailbox shape as
-   the other board writes; the route stamps the author. *)
-let start_board_comment state ~mailbox ~(post_id : string)
-    ~(content : string) =
-  if state.workspace_identity <> Workspace_identity_match then begin
-    let detail = "Cannot write to Board: workspace identity is unverified; draft retained" in
-    state.board_post_error <- Some detail;
-    report_action state "error" detail
-  end else begin
-  state.board_post_error <- None;
-  state.board_post_inflight <- true;
-  report_action state "system" "commenting on Board";
-  let sent_draft = Buffer.contents state.board_draft in
-  let host = server_peer_host in
-  let port = state.port in
-  launch_workspace_request state ~mailbox ~boundary_error:Fun.id
-    ~deliver:(fun result -> Board_new_post_done { reply_to = Some post_id; sent_draft; result })
-    (fun () ->
-      match Masc_tui_http.post_board_comment ~host ~port ~post_id ~content with
-      | Error err -> Error err
-      | Ok json -> Masc.Tui_decode.tool_envelope_outcome json )
-  end
-
-(* Send a vote through the tools route. The voter is stamped by the route,
-   so the payload says only which post and which way. *)
-let start_board_vote state ~mailbox ~(post_id : string) ~(up : bool) =
-  if state.workspace_identity <> Workspace_identity_match then begin
-    let detail = "Cannot write to Board: workspace identity is unverified; draft retained" in
-    state.board_post_error <- Some detail;
-    report_action state "error" detail
-  end else begin
-  report_action state "system"
-    (Printf.sprintf "voting %s on %s" (if up then "up" else "down") post_id);
-  let host = server_peer_host in
-  let port = state.port in
-  launch_workspace_request state ~mailbox ~boundary_error:Fun.id
-    ~deliver:(fun result -> Board_vote_done result)
-    (fun () ->
-      match Masc_tui_http.post_board_vote ~host ~port ~post_id ~up with
-      | Error err -> Error err
-      | Ok json -> Masc.Tui_decode.tool_envelope_outcome json )
-  end
 
 (* The vote keys on the list row under the cursor. Two presses: the first
    names the post and direction, the same press again sends it. The post id
@@ -12101,7 +12016,7 @@ let handle_board_vote_key state ~mailbox ~(up : bool) =
           | Some (armed_post, armed_up)
             when String.equal armed_post post.bp_id && armed_up = up ->
               state.board_vote_armed <- None;
-              start_board_vote state ~mailbox ~post_id:post.bp_id ~up
+              Masc_tui_board_requests.start_board_vote state ~host:server_peer_host ~report:(report_action state) ~launch:(launch_workspace_request state ~mailbox ~boundary_error:Fun.id) ~post_id:post.bp_id ~up
           | Some _ | None ->
               state.board_vote_armed <- Some (post.bp_id, up);
               report_action state "system"
@@ -12400,6 +12315,10 @@ let open_board_composer_editor state ~restore ~reenter =
           end )
 ;;
 
+(* Compose-mode keys. Sending is armed rather than pressed: esc offers
+   send-or-discard, so a stray key during writing cannot publish. Returns
+   false for keys this pane does not own, so Tab and quit keep their global
+   meaning. *)
 let handle_board_compose_key state ~mailbox ?restore ?reenter (key : string) : bool =
   let armed_allowed =
     if Option.is_none state.board_compose_reply_to then
@@ -12455,7 +12374,7 @@ let handle_board_compose_key state ~mailbox ?restore ?reenter (key : string) : b
             true
           end else begin
             state.board_compose_armed <- false;
-            start_board_comment state ~mailbox ~post_id ~content;
+            Masc_tui_board_requests.start_board_comment state ~host:server_peer_host ~report:(report_action state) ~launch:(launch_workspace_request state ~mailbox ~boundary_error:Fun.id) ~post_id ~content;
             true
           end
       | None ->
@@ -12473,7 +12392,7 @@ let handle_board_compose_key state ~mailbox ?restore ?reenter (key : string) : b
               true
           | _ ->
               state.board_compose_armed <- false;
-              start_board_post state ~mailbox ~title ~body
+              Masc_tui_board_requests.start_board_post state ~host:server_peer_host ~report:(report_action state) ~launch:(launch_workspace_request state ~mailbox ~boundary_error:Fun.id) ~title ~body
                 ?hearth:state.board_compose_hearth ();
               true )
   | "d" | "D" when state.board_compose_armed ->
@@ -13809,8 +13728,8 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
             ~scoped_refresh_inflight:http_scoped_refresh_inflight
             ~scoped_refresh_followup ~mailbox)
         ~refresh_detail:(fun post_id ->
-          start_board_post_refresh state ~host:server_peer_host
-            ~port:state.port ~post_id ~mailbox) result
+          Masc_tui_board_requests.start_board_post_refresh state ~host:server_peer_host
+            ~port:state.port ~post_id ~launch:(launch_workspace_request state ~mailbox ~boundary_error:Fun.id)) result
   | Board_vote_done result ->
       Masc_tui_board_updates.vote_done state ~report:(report_action state)
         ~refresh:(fun () ->
@@ -21927,8 +21846,8 @@ and is loaded on demand through keeper_skill.
                 state.board_comments_focused <- false;
                 state.board_focus <- Right_pane;
                 goto_surface ~from_reference:true state ~mailbox:async_messages Board;
-                start_board_post_refresh state ~host:server_peer_host ~port:state.port
-                  ~post_id:reference.fhe_post_id ~mailbox:async_messages
+                Masc_tui_board_requests.start_board_post_refresh state ~host:server_peer_host ~port:state.port
+                  ~post_id:reference.fhe_post_id ~launch:(launch_workspace_request state ~mailbox:async_messages ~boundary_error:Fun.id)
             | Some (Masc.Tui_decode_fusion.Fusion_retained_run _) | None ->
                 report_action state "system" "Open a Fusion run to follow its Board evidence")
        | Some "B" when state.view = Fusion ->
@@ -21944,8 +21863,8 @@ and is loaded on demand through keeper_skill.
                 state.board_comments_focused <- false;
                 state.board_focus <- Right_pane;
                 goto_surface ~from_reference:true state ~mailbox:async_messages Board;
-                start_board_post_refresh state ~host:server_peer_host ~port:state.port
-                  ~post_id:reference.fhe_post_id ~mailbox:async_messages
+                Masc_tui_board_requests.start_board_post_refresh state ~host:server_peer_host ~port:state.port
+                  ~post_id:reference.fhe_post_id ~launch:(launch_workspace_request state ~mailbox:async_messages ~boundary_error:Fun.id)
             | Fusion_detail id, Some detail when id = detail.fud_run.fur_run_id ->
                 (match detail.fud_evidence with
                  | None -> report_action state "system" "No Board evidence has been recorded for this run"
@@ -21960,8 +21879,8 @@ and is loaded on demand through keeper_skill.
                      state.board_comments_focused <- false;
                      state.board_focus <- Right_pane;
                      goto_surface ~from_reference:true state ~mailbox:async_messages Board;
-                     start_board_post_refresh state ~host:server_peer_host ~port:state.port
-                       ~post_id:evidence.fe_post_id ~mailbox:async_messages)
+                     Masc_tui_board_requests.start_board_post_refresh state ~host:server_peer_host ~port:state.port
+                       ~post_id:evidence.fe_post_id ~launch:(launch_workspace_request state ~mailbox:async_messages ~boundary_error:Fun.id))
             | _ -> report_action state "system" "Open a Fusion run to follow its Board evidence")
        | Some ("h" | "H") when state.view = Repositories && not state.repository_changes_open && Option.is_none state.workspace_activity_repo ->
            (match state.repositories with
@@ -23172,8 +23091,8 @@ and is loaded on demand through keeper_skill.
                 state.board_comment_scroll <- 0;
                 state.board_comment_landing <- None;
                 state.board_detail <- Board_detail.clear state.board_detail;
-                start_board_post_refresh state ~host ~port ~post_id
-                  ~mailbox:async_messages
+                Masc_tui_board_requests.start_board_post_refresh state ~host ~port ~post_id
+                  ~launch:(launch_workspace_request state ~mailbox:async_messages ~boundary_error:Fun.id)
             | Board_list | Board_compose | Board_read _ -> ());
        | Some ("z" | "Z") when state.view = Board ->
            (match state.board_mode with
@@ -23816,8 +23735,8 @@ and is loaded on demand through keeper_skill.
             | Board ->
                 (match state.board_mode with
                  | Board_read post_id ->
-                     start_board_post_refresh state ~host ~port ~post_id
-                       ~mailbox:async_messages
+                     Masc_tui_board_requests.start_board_post_refresh state ~host ~port ~post_id
+                       ~launch:(launch_workspace_request state ~mailbox:async_messages ~boundary_error:Fun.id)
                  | Board_list | Board_compose -> ())
             | Keepers Keeper_message ->
                 (match state.msg_target_keeper_name with
@@ -26637,8 +26556,8 @@ and is loaded on demand through keeper_skill.
          | Board ->
              (match state.board_mode with
               | Board_read post_id ->
-                  start_board_post_refresh state ~host ~port ~post_id
-                    ~mailbox:async_messages
+                  Masc_tui_board_requests.start_board_post_refresh state ~host ~port ~post_id
+                    ~launch:(launch_workspace_request state ~mailbox:async_messages ~boundary_error:Fun.id)
               | Board_list | Board_compose -> ())
          | Verification ->
              (* The queue moves while an operator watches it -- a task settles,

@@ -3,8 +3,11 @@
 This child of #40378 removes the remaining call to the intentionally unpublished
 `masc_pause_status` MCP tool. The new read-only
 `GET /api/v1/operator/pause-status` returns the current workspace state directly,
-outside dashboard snapshot/publication caches. It reports an uninitialized
-workspace as `initializing=true, paused=null`. Pause/Resume writes continue to use
+outside dashboard snapshot/publication caches. The Workspace strict reader uses
+`read_json_doc` and the existing state decoder without recovery or writes. It
+reports an absent document as `initializing=true, paused=null`; invalid or
+unreadable documents return HTTP 503 and no authoritative pause boolean.
+Pause/Resume writes continue to use
 the existing operator action and confirmation path.
 
 ## Diagnosis actually executed
@@ -44,8 +47,14 @@ workspace. The release binary is not a build of this new child branch.
   exit 0.
 - The native regression covers uninitialized, running, pause, resume and another
   operator's subsequent pause without a projection cache.
+- A second regression sends the actual GET route as an authenticated worker
+  without admin permission. Blank, malformed and schema-invalid bytes must stay
+  unchanged while the response is 503 with paused=null. A directory at the state
+  path exercises an unreadable document and must not be replaced by the GET.
 - Native type checking and execution of the new route are not yet verified:
-  the lane's earlier focused build was refused by dependency-pin drift. Parsing
+  the lane's earlier focused build was refused by dependency-pin drift. The
+  documented pin repair then exited 99 because the supplied opam switch lock is
+  not writable. Its separate exit-status defect is tracked in #40622. Parsing
   is not compilation or a native regression PASS.
 - The previous parent UI screenshots remain fixture evidence, not proof of
   the new child or a deployed server.

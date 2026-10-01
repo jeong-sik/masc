@@ -7382,7 +7382,9 @@ let render_keeper_logs (state : state) =
             let style = match diagnostic with
               | None -> Ansi.reset
               | Some (Metrics_tail.Storage_error _) -> Theme.bad ()
-              | Some (Metrics_tail.Row_errors _) -> Theme.warn () in
+              | Some (Metrics_tail.Row_errors _) -> Theme.warn ()
+              | Some (Metrics_tail.Remote_workspace | Metrics_tail.Workspace_unconfirmed) ->
+                  Theme.recede () in
             box_line_styled buf cols ~style line
         | None -> box_empty buf cols
     done;

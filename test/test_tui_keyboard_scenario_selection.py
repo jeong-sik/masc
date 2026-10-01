@@ -168,19 +168,70 @@ class ScenarioSelectionTest(unittest.TestCase):
 
     def test_tracked_capture_helpers_resolve_from_the_entry(self) -> None:
         samples = (
-            "evidence/39827/capture.py",
-            "docs/evidence/tui-footer-parse-once-2026-09-27/profile-scenario.py",
-            "docs/evidence/browser-bidi-live-20260913/corrected/capture.py",
+            'docs/evidence/browser-bidi-live-20260913/corrected/capture-original.py',
+            'docs/evidence/browser-bidi-live-20260913/corrected/capture.py',
+            'docs/evidence/browser-bidi-live-20260913/metadata-assumptions/capture.py',
+            'docs/evidence/browser-bidi-live-20260913/post-drag-scene-adapter-failure/capture.py',
+            'docs/evidence/browser-context-recovery-20260913/scripts/capture-browser-context-action.py',
+            'docs/evidence/browser-continuity-20260913/after-viewport/gesture-capture.py',
+            'docs/evidence/browser-current-native-20260913/capture-helper-after-run.py',
+            'docs/evidence/browser-delivery-20260913/native-history-fixture.py',
+            'docs/evidence/browser-delivery-20260913/scripts/capture-bundled-browser-history.py',
+            'docs/evidence/browser-delivery-20260913/scripts/capture-persistent-content-browser.py',
+            'docs/evidence/browser-handoff-20260912/raw-follow-c230/probe.py',
+            'docs/evidence/browser-history-20260913/capture-original.py',
+            'docs/evidence/browser-history-20260913/direct/capture-original.py',
+            'docs/evidence/browser-live-content-20260913/native-history-d441/fixture.py',
+            'docs/evidence/browser-live-content-20260913/scripts/capture-live-content-browser.py',
+            'docs/evidence/browser-live-viewport-20260913/gesture-capture.py',
+            'docs/evidence/browser-navigation-composition-20260912/composed/capture-tui.py',
+            'docs/evidence/tui-fixture-readable-wait-2026-09-26/reader-wait/scenario.py',
+            'docs/evidence/tui-fixture-readable-wait-2026-09-26/screen-window/oracle.py',
+            'docs/evidence/tui-fixture-readable-wait-2026-09-26/screen-window/whole.py',
+            'docs/evidence/tui-fixture-readable-wait-2026-09-26/screen-window/window.py',
+            'docs/evidence/tui-footer-parse-once-2026-09-27/profile-scenario.py',
+            'docs/evidence/tui-footer-pinned-key-rules-2026-09-26/profile-scenario.py',
+            'docs/evidence/tui-int-bounds-2026-09-27/initial-idle-profile/profile-scenario.py',
+            'docs/evidence/tui-int-bounds-2026-09-27/ready-profile/profile-scenario.py',
+            'evidence/39827/capture.py',
+            'scripts/capture-tui-audit.py',
+            'test/test_tui_agenda_navigation_pty.py',
+            'test/test_tui_code_diff_pan_pty.py',
+            'test/test_tui_context_inspector.py',
+            'test/test_tui_keeper_create_journey_pty.py',
+            'test/test_tui_keeper_draft_payload_pty.py',
+            'test/test_tui_keeper_logs_wrap_pty.py',
+            'test/test_tui_keeper_metadata_wrap_pty.py',
+            'test/test_tui_keyboard_scenario_selection.py',
+            'test/test_tui_preset_viewport_pty.py',
+            'test/test_tui_recorded_diff_pan_pty.py',
+            'test/test_tui_runtime_picker_width_pty.py',
+            'test/test_tui_schedule_detail_viewport_pty.py',
         )
         for relative in samples:
             source = ast.parse((HERE.parent / relative).read_text())
+            aliases = {alias.asname or alias.name for node in ast.walk(source)
+                       if isinstance(node, ast.Import) for alias in node.names
+                       if alias.name == "test_tui_keyboard_input"}
             names = {node.attr for node in ast.walk(source)
                      if isinstance(node, ast.Attribute)
-                     and isinstance(node.value, ast.Name) and node.value.id == "h"}
+                     and isinstance(node.value, ast.Name) and node.value.id in aliases}
             self.assertTrue(names, relative)
             for name in names:
                 with self.subTest(capture=relative, helper=name):
                     self.assertTrue(hasattr(_keyboard_entry, name), name)
+
+    def test_all_entry_consumers_stage_the_full_import_closure(self) -> None:
+        required = {path.name for path in HERE.glob("tui_keyboard_*.py")}
+        seen = 0
+        for match in re.finditer(r"(?ms)^\(rule\b.*?(?=^\(|\Z)", rule_files_text()):
+            rule = match.group()
+            if "test_tui_keyboard_input.py" not in rule:
+                continue
+            seen += 1
+            staged = set(re.findall(r"\b(tui_keyboard_\w+\.py)\b", rule))
+            self.assertFalse(required - staged, f"missing {required - staged}: {rule[:120]}")
+        self.assertGreater(seen, 0)
 
     def test_about_capture_constructs_both_fixtures_before_a_terminal(self) -> None:
         calls = []

@@ -3,6 +3,57 @@ from __future__ import annotations
 import sys
 from functools import partial
 
+# Explicit compatibility exports required by tracked standalone PTY/capture consumers.
+from tui_keyboard_chat import (
+    AtomicChatFixture as AtomicChatFixture,
+    IMAGE_NAME as IMAGE_NAME,
+    keeper_chat_succeeded_response as keeper_chat_succeeded_response,
+    open_atomic_chat as open_atomic_chat,
+    seed_image_workspace as seed_image_workspace,
+    unwrapped as unwrapped,
+)
+from tui_keyboard_harness import (
+    DASHBOARD_GOALS_PATH as DASHBOARD_GOALS_PATH,
+    PLANNING_PATH as PLANNING_PATH,
+    RUNTIME_RESOLVED_PATH as RUNTIME_RESOLVED_PATH,
+    board_detail_comment as board_detail_comment,
+    board_selection_post as board_selection_post,
+    composer_showing as composer_showing,
+    copy_reference as copy_reference,
+    empty_runtime_resolved_fixture as empty_runtime_resolved_fixture,
+    escape_to_keeper_detail as escape_to_keeper_detail,
+    fixture_cell_width as fixture_cell_width,
+    path_without_masc as path_without_masc,
+    planning_goal as planning_goal,
+    planning_snapshot as planning_snapshot,
+    press_and_settle as press_and_settle,
+    row_budget_http_fixtures as row_budget_http_fixtures,
+    screen_row_of as screen_row_of,
+    seed_row_budget_workspace as seed_row_budget_workspace,
+    seed_workspace as seed_workspace,
+    test_http_endpoint as test_http_endpoint,
+    wait_for_http_request as wait_for_http_request,
+    with_workspace_identity as with_workspace_identity,
+)
+from tui_keyboard_repositories import (
+    REPOSITORIES_PATH as REPOSITORIES_PATH,
+    repositories_fixture as repositories_fixture,
+)
+from tui_keyboard_runtime import (
+    runtime_resolved_response as runtime_resolved_response,
+    runtime_resolved_runtime as runtime_resolved_runtime,
+)
+from tui_keyboard_schedule import (
+    SCHEDULES_PATH as SCHEDULES_PATH,
+    schedule_detail_http_fixtures as schedule_detail_http_fixtures,
+)
+from tui_keyboard_workspace import (
+    FILE_CHANGES_ALPHA_PATH as FILE_CHANGES_ALPHA_PATH,
+    code_lane_fixtures as code_lane_fixtures,
+    file_changes_alpha_response as file_changes_alpha_response,
+    open_changes as open_changes,
+)
+
 from tui_keyboard_board import (
     run_board_compose_footer_regression,
     run_board_json_regression,

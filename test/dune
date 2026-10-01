@@ -4860,6 +4860,15 @@
  (action (run python3 %{dep:test_tui_context_inspector.py} %{dep:../bin/masc_tui.exe})))
 
 (rule
+ (alias runtest-test_verify_tui_keyboard_split)
+ (deps test_verify_tui_keyboard_split.py ../scripts/verify-tui-keyboard-split.py)
+ (action (run python3 %{dep:test_verify_tui_keyboard_split.py})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_verify_tui_keyboard_split)))
+
+(rule
  (alias runtest-test_tui_fixture_shutdown)
  (deps
   test_tui_fixture_shutdown.py
@@ -4877,6 +4886,41 @@
 (rule
  (alias runtest-test_tui_keyboard_scenario_selection)
  (deps
+  test_tui_schedule_detail_viewport_pty.py
+  test_tui_runtime_picker_width_pty.py
+  test_tui_recorded_diff_pan_pty.py
+  test_tui_preset_viewport_pty.py
+  test_tui_keeper_metadata_wrap_pty.py
+  test_tui_keeper_logs_wrap_pty.py
+  test_tui_keeper_draft_payload_pty.py
+  test_tui_keeper_create_journey_pty.py
+  test_tui_context_inspector.py
+  test_tui_code_diff_pan_pty.py
+  test_tui_agenda_navigation_pty.py
+  ../scripts/capture-tui-audit.py
+  ../docs/evidence/tui-int-bounds-2026-09-27/ready-profile/profile-scenario.py
+  ../docs/evidence/tui-int-bounds-2026-09-27/initial-idle-profile/profile-scenario.py
+  ../docs/evidence/tui-footer-pinned-key-rules-2026-09-26/profile-scenario.py
+  ../docs/evidence/tui-fixture-readable-wait-2026-09-26/screen-window/window.py
+  ../docs/evidence/tui-fixture-readable-wait-2026-09-26/screen-window/whole.py
+  ../docs/evidence/tui-fixture-readable-wait-2026-09-26/screen-window/oracle.py
+  ../docs/evidence/tui-fixture-readable-wait-2026-09-26/reader-wait/scenario.py
+  ../docs/evidence/browser-navigation-composition-20260912/composed/capture-tui.py
+  ../docs/evidence/browser-live-viewport-20260913/gesture-capture.py
+  ../docs/evidence/browser-live-content-20260913/scripts/capture-live-content-browser.py
+  ../docs/evidence/browser-live-content-20260913/native-history-d441/fixture.py
+  ../docs/evidence/browser-history-20260913/direct/capture-original.py
+  ../docs/evidence/browser-history-20260913/capture-original.py
+  ../docs/evidence/browser-handoff-20260912/raw-follow-c230/probe.py
+  ../docs/evidence/browser-delivery-20260913/scripts/capture-persistent-content-browser.py
+  ../docs/evidence/browser-delivery-20260913/scripts/capture-bundled-browser-history.py
+  ../docs/evidence/browser-delivery-20260913/native-history-fixture.py
+  ../docs/evidence/browser-current-native-20260913/capture-helper-after-run.py
+  ../docs/evidence/browser-continuity-20260913/after-viewport/gesture-capture.py
+  ../docs/evidence/browser-context-recovery-20260913/scripts/capture-browser-context-action.py
+  ../docs/evidence/browser-bidi-live-20260913/post-drag-scene-adapter-failure/capture.py
+  ../docs/evidence/browser-bidi-live-20260913/metadata-assumptions/capture.py
+  ../docs/evidence/browser-bidi-live-20260913/corrected/capture-original.py
   test_tui_keyboard_scenario_selection.py
   test_tui_keyboard_input.py
   test_tui_search_count.py

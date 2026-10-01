@@ -1,61 +1,25 @@
 # #39851 keyboard scenario split
 
-Current pre-split parent: `ccef0a8dab4d54e64853f0a73216d268a07d89a5`.
-Original monolith SHA256: `890a9e80adc6e6ddfd3346c76780992da18780aec0c783da334b32a21c768153`.
-The split branch incorporated this parent in `4a6b5c275720fd83cb3b21b6b170bd004d69ef1c`.
+The entry keeps the family registry, CLI and explicit public helper exports used by tracked capture/profile scripts. Shared machinery lives in `tui_keyboard_harness.py`; area modules own scenario bodies. Client/Connector consumers import their owners directly. Remaining legacy standalone/capture consumers use explicit compatibility exports; their required helper surface and complete entry import closure are recorded in `helper-closure-repair.json` and declared in Dune. The generic `press_and_settle` helper belongs to the harness.
 
-The entry keeps the family registry, CLI and explicit public helper exports
-used by tracked capture/profile scripts. Shared PTY machinery lives in
-`tui_keyboard_harness.py`; existing scenarios live in 23 area modules.
-New consumers import the module that owns their functions. Existing capture
-sources retain their imports and recorded evidence provenance.
+## Current source checks
 
-## Current source identity
+`current-python-checks.json` records 41 passing local Python tests for source verification, scenario selection, tracked capture helper construction, fixture shutdown, selection, stall observation and artifact comparison. Native terminal calls in the capture/search-count checks are mocked. No native TUI, Dune build, screenshots or CI execution is established by these tests.
+
+The verifier now inventories every non-import top-level executable statement as well as definition bodies. The inventory detects changed content or multiplicity of constants, annotated assignments, side-effect statements, duplicates and the entrypoint guard. It does not compare statement order or owning module, so it does not certify equivalent execution ordering. Imports are ownership wiring and are covered separately by consumer/import tests; the report is not a proof of arbitrary import side-effect equivalence.
+
+## Current differences from the recorded pre-split source
 
 Run from the repository root:
 
 ```sh
-python3 scripts/verify-tui-keyboard-split.py --before-ref ccef0a8dab4d54e64853f0a73216d268a07d89a5 --output docs/evidence/39851-keyboard-split/move.json
+python3 scripts/verify-tui-keyboard-split.py --before-ref ccef0a8dab4d54e64853f0a73216d268a07d89a5 --output /tmp/keyboard-current-source-delta.json
 ```
 
-The regenerated `move.json` compares this current pre-split parent with the
-entry and all extracted owners: 373 definitions, missing 0, extra 0, changed
-body bytes 0. The listing has the same 44 families and 152 description
-occurrences. This command lists scenarios without launching a TUI.
-The public import declarations do not change any definition body.
+On reviewed source `ef1d61b2024196bb6450d4e48164a5e519833ef5` plus this verifier correction, this command **exits 1**, because the current scenarios have evolved after the extraction. The retained `current-source-delta.json` records 373 prior definitions versus 380 current definitions: zero missing, seven added and 19 changed bodies; one removed and two added module statements; scenario listings also differ. Each current input file is bound by SHA256. These differences require source review and are not certified as a mechanical-equivalence pass. The earlier claim that the current tree reproduces a zero-difference 373-definition proof is withdrawn.
 
-## Current Python verification
+## Historical receipts
 
-`review-followup-commands.json` and `review-followup-unit.log` record the
-current commands and results. The focused Python suites include the tracked
-capture helper contract, construction of both #39827 capture fixtures with
-the terminal call mocked, and search-count Board fixture construction up to
-a mocked terminal boundary. These tests do not run a native TUI or claim
-that a screenshot was captured.
+`move.json` and `review-followup-commands.json` are historical records of an earlier follow-up. They are retained without relabelling their successful commands as current-head results. They do not establish equivalence of today's changed scenarios.
 
-The capture contract resolves the helpers used by the retained About/Info,
-profile and browser capture sources. The regression suite declares these
-source files and the search-count consumer in its Dune dependencies.
-
-## Original extraction receipts
-
-The other files in this directory were recorded for the original extraction
-from `86751f610442e4d82992ebc54bf9eb8ba45ef6d2`. Their original source refs,
-command lines and measurements remain in the receipts:
-
-- `move-comparison.json`: original definition-body and 146 Dune rule action comparisons.
-- `dune-dependency-proof.json` and `selector-proof.json`: original import closure and selector probes.
-- `dependency-mutant.log`: original deliberately removed dependency failing control.
-- `commands.json`, `focused-unit.log` and `quality-baseline.json`: original 33-test and static-tool observations.
-- `targeted-suites.json`: the 146 aliases partitioned for targeted execution.
-
-The current source equivalence result is the regenerated `move.json` above.
-The original quality and dependency measurements are scoped to their recorded
-sources; they are not relabelled as executions of the refreshed branch.
-
-## Runtime verification still required
-
-No native TUI or local Dune build was run for this follow-up. The original
-local attempt stopped at the installed ocaml-msx/ocaml-dos pin guard and did
-not bypass it. Runtime equivalence requires evidence from the applicable
-current-head checks and targeted executions; no CI was dispatched here.
+The original extraction records used `86751f610442e4d82992ebc54bf9eb8ba45ef6d2`: `move-comparison.json`, `dune-dependency-proof.json`, `selector-proof.json`, `dependency-mutant.log`, `commands.json`, `focused-unit.log`, `quality-baseline.json` and `targeted-suites.json`. Their original refs and scope remain in the artifacts. No current native runtime equivalence is claimed.

@@ -154,7 +154,11 @@ val load_credential_of :
 
 val save_credential : string -> agent_credential -> unit
 (** Publish under {!with_credential_transaction}, including token-cache
-    invalidation. Lock admission errors raise [Sys_error], like write errors. *)
+    invalidation. Lock admission errors raise [Sys_error], like write errors.
+    Once a named credential or redirect stub is committed, retirement failures for the
+    superseded UUID payload are logged without failing that publication, so a
+    caller that minted a bearer can return it. Superseded payloads do not acquire
+    named-owner authentication or diagnostic-listing authority. *)
 
 val ensure_credential_alias :
   string ->
@@ -358,8 +362,9 @@ val ensure_internal_keeper_token :
 val ensure_keeper_credentials :
   string -> agent_names:string list ->
   ((string * (string * agent_credential, masc_error) result) list, masc_error) result
-(** Batch startup sync under one admitted snapshot. A publication failure stops
-    later writes rather than trusting an index with uncertain store effects. *)
+(** Batch startup sync under one admitted token index. Every publisher validates
+    current named-owner and UUID authority before writing. After a failure,
+    authority is reread before any later independent Keeper is synchronized. *)
 
 val ensure_keeper_credential :
   string -> agent_name:string ->
@@ -373,7 +378,8 @@ val ensure_keeper_credential :
     effects; it is not silently normalized or replaced.
     Errors describe observed partial publication when a write fails. The internal
     keeper MCP token remains separate and is only used for the
-    [x-masc-internal-token] trust path. *)
+    [x-masc-internal-token] trust path. Existing names must resolve to this
+    exact canonical owner, and UUID ownership is validated before publication. *)
 
 type credential_status =
   | Credential_present of agent_credential

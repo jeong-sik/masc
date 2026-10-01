@@ -1,0 +1,316 @@
+{
+  "scope": "integrated native fixture/PTY evidence, not merge checks or deployment",
+  "head": "88531ac2f4d671b629567eb96113e7323bd6f9ff",
+  "run_id": 36647356450,
+  "test_step": "failure",
+  "suites_total": 57,
+  "suites_ok": 55,
+  "suites_failed": 2,
+  "raw_log_sha256": "84d77e7723d12148cffc4ff3755b8499e2d3f3ab98ca7cd6016d75299eec3364",
+  "suites": [
+    {
+      "suite": "test_tui_keeper_portrait_pty",
+      "status": "OK",
+      "detail": "in 31s"
+    },
+    {
+      "suite": "test_lane_quiz_packages",
+      "status": "OK",
+      "detail": "in 6s"
+    },
+    {
+      "suite": "test_tui_remote_equipped_portrait",
+      "status": "OK",
+      "detail": "in 14s"
+    },
+    {
+      "suite": "test_tui_candle_currency_pty",
+      "status": "OK",
+      "detail": "in 20s"
+    },
+    {
+      "suite": "test_candle_baseline_collector",
+      "status": "OK",
+      "detail": "in 5s"
+    },
+    {
+      "suite": "test_tui_remote_workspace_history_pty",
+      "status": "FAIL",
+      "detail": "exit 1 in 17s"
+    },
+    {
+      "suite": "test_tui_lane_heading_keeps_its_reading",
+      "status": "OK",
+      "detail": "in 11s"
+    },
+    {
+      "suite": "test_tui_keyboard_board_terminal_pty",
+      "status": "FAIL",
+      "detail": "exit 1 in 64s"
+    },
+    {
+      "suite": "test_tui_region_baseline_pty",
+      "status": "OK",
+      "detail": "in 28s"
+    },
+    {
+      "suite": "test_tui_account_login_pty",
+      "status": "OK",
+      "detail": "in 45s"
+    },
+    {
+      "suite": "test_goal_tools",
+      "status": "OK",
+      "detail": "in 1s"
+    },
+    {
+      "suite": "test_goal_timeline_projection",
+      "status": "OK",
+      "detail": "in 0s"
+    },
+    {
+      "suite": "test_candle_goal_flow",
+      "status": "OK",
+      "detail": "in 1s"
+    },
+    {
+      "suite": "test_candle_appraisal_flow",
+      "status": "OK",
+      "detail": "in 0s"
+    },
+    {
+      "suite": "test_candle_appraiser_transport",
+      "status": "OK",
+      "detail": "in 0s"
+    },
+    {
+      "suite": "test_candle_payout_worker",
+      "status": "OK",
+      "detail": "in 1s"
+    },
+    {
+      "suite": "test_candle_purchase_flow",
+      "status": "OK",
+      "detail": "in 1s"
+    },
+    {
+      "suite": "test_keeper_portrait_http",
+      "status": "OK",
+      "detail": "in 1s"
+    },
+    {
+      "suite": "test_tui_keeper_control",
+      "status": "OK",
+      "detail": "in 0s"
+    },
+    {
+      "suite": "test_tui_keeper_portrait",
+      "status": "OK",
+      "detail": "in 0s"
+    },
+    {
+      "suite": "test_play_credential_transaction",
+      "status": "OK",
+      "detail": "in 2s"
+    },
+    {
+      "suite": "test_play_invite_routes",
+      "status": "OK",
+      "detail": "in 0s"
+    },
+    {
+      "suite": "test_play_pad_routes",
+      "status": "OK",
+      "detail": "in 0s"
+    },
+    {
+      "suite": "test_auth_credential_index_cache",
+      "status": "OK",
+      "detail": "in 0s"
+    },
+    {
+      "suite": "test_lane_addon_sources",
+      "status": "OK",
+      "detail": "in 0s"
+    },
+    {
+      "suite": "test_lane_addon_composition",
+      "status": "OK",
+      "detail": "in 1s"
+    },
+    {
+      "suite": "test_candle_balance",
+      "status": "OK",
+      "detail": "in 0s"
+    },
+    {
+      "suite": "test_candle_config",
+      "status": "OK",
+      "detail": "in 0s"
+    },
+    {
+      "suite": "test_candle_event",
+      "status": "OK",
+      "detail": "in 0s"
+    },
+    {
+      "suite": "test_candle_ledger",
+      "status": "OK",
+      "detail": "in 1s"
+    },
+    {
+      "suite": "test_keeper_portrait_read",
+      "status": "OK",
+      "detail": "in 0s"
+    },
+    {
+      "suite": "test_keeper_list_truncation",
+      "status": "OK",
+      "detail": "in 0s"
+    },
+    {
+      "suite": "test_tui_decode",
+      "status": "OK",
+      "detail": "in 1s"
+    },
+    {
+      "suite": "test_dashboard_http_core",
+      "status": "OK",
+      "detail": "in 4s"
+    },
+    {
+      "suite": "test_tui_candle",
+      "status": "OK",
+      "detail": "in 0s"
+    },
+    {
+      "suite": "test_tui_surface_needs",
+      "status": "OK",
+      "detail": "in 0s"
+    },
+    {
+      "suite": "test_goal_store",
+      "status": "OK",
+      "detail": "in 0s"
+    },
+    {
+      "suite": "test_auth",
+      "status": "OK",
+      "detail": "in 0s"
+    },
+    {
+      "suite": "test_tui_chat_queue_wiring",
+      "status": "OK",
+      "detail": "in 6s"
+    },
+    {
+      "suite": "test_tui_composer_projection",
+      "status": "OK",
+      "detail": "in 1s"
+    },
+    {
+      "suite": "test_tui_context_state",
+      "status": "OK",
+      "detail": "in 0s"
+    },
+    {
+      "suite": "test_tui_http_ast",
+      "status": "OK",
+      "detail": "in 50s"
+    },
+    {
+      "suite": "test_tui_keys",
+      "status": "OK",
+      "detail": "in 0s"
+    },
+    {
+      "suite": "test_tui_render_metrics",
+      "status": "OK",
+      "detail": "in 0s"
+    },
+    {
+      "suite": "test_tui_repository_changes_listing",
+      "status": "OK",
+      "detail": "in 0s"
+    },
+    {
+      "suite": "test_keeper_declared_roster",
+      "status": "OK",
+      "detail": "in 0s"
+    },
+    {
+      "suite": "test_tui_lane_addons",
+      "status": "OK",
+      "detail": "in 0s"
+    },
+    {
+      "suite": "test_tui_lane_addon_reading",
+      "status": "OK",
+      "detail": "in 0s"
+    },
+    {
+      "suite": "test_play_pad",
+      "status": "OK",
+      "detail": "in 0s"
+    },
+    {
+      "suite": "test_tui_metrics_tail",
+      "status": "OK",
+      "detail": "in 0s"
+    },
+    {
+      "suite": "test_dashboard_cache",
+      "status": "OK",
+      "detail": "in 6s"
+    },
+    {
+      "suite": "test_keeper_gate_effect_coverage",
+      "status": "OK",
+      "detail": "in 0s"
+    },
+    {
+      "suite": "test_keeper_tool_descriptor_registry_integrity",
+      "status": "OK",
+      "detail": "in 0s"
+    },
+    {
+      "suite": "test_keeper_tool_schema_bytes",
+      "status": "OK",
+      "detail": "in 0s"
+    },
+    {
+      "suite": "test_candle_status",
+      "status": "OK",
+      "detail": "in 0s"
+    },
+    {
+      "suite": "test_candle_snapshot",
+      "status": "OK",
+      "detail": "in 0s"
+    },
+    {
+      "suite": "test_candle_payout_owed",
+      "status": "OK",
+      "detail": "in 0s"
+    }
+  ],
+  "following_test_only_repair_head": "3d28845eab3b024690b6f25d94ec885274a196a0",
+  "following_test_only_repair_run": 36649996584,
+  "artifact_groups": [
+    "candle-currency-tui",
+    "candle-equipped-portrait",
+    "candle-remote-tui-portrait",
+    "suite-runner-log",
+    "tui-remote-workspace-history"
+  ],
+  "following_test_only_repair_result": {
+    "run_id": 36649996584,
+    "head": "3d28845eab3b024690b6f25d94ec885274a196a0",
+    "workflow_conclusion": "success",
+    "suites_ok": 2,
+    "suites_failed": 0,
+    "raw_log_sha256": "f9cbe9da3c286bf26030c394e3c4ffe03c7436db73288735830af6343051b769",
+    "production_source_changed": false,
+    "currency_pr_concurrent_head_preserved": "5731d33c10349b461ae8a4e20f362984f432b6fe"
+  }
+}

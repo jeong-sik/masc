@@ -11907,10 +11907,14 @@ let render_voice_wizard (state : state) (session : Masc_tui_voice_wizard_session
    | Voice_wizard.Credential
    | Voice_wizard.Model
    | Voice_wizard.Voice ->
+     let caret = if Masc_tui_voice_wizard_session.voice_wizard_is_sending session then "" else "▏" in
+     let input =
+       Message_layout.input_viewport
+         ~max_cells:(max 0 (framed_inner_width cols - 4 - Message_layout.display_width caret))
+         (Terminal_text.single_line session.vws_input)
+     in
      box_line head cols
-       (Printf.sprintf "    %s%s%s%s" Ansi.bold (Message_layout.fit_middle (max 1 (framed_inner_width cols - 5))
-             (Terminal_text.single_line session.vws_input)) Ansi.reset
-          (if Masc_tui_voice_wizard_session.voice_wizard_is_sending session then "" else "▏")));
+       (Printf.sprintf "    %s%s%s%s" Ansi.bold input Ansi.reset caret));
   (match session.vws_step with
    | Voice_wizard.Name | Voice_wizard.Address | Voice_wizard.Credential
    | Voice_wizard.Model | Voice_wizard.Voice ->
@@ -11965,8 +11969,8 @@ let render_voice_wizard (state : state) (session : Masc_tui_voice_wizard_session
    reader has to keep apart. *)
 let render_voice_agent (state : state) (session : voice_agent_session) =
   let terminal_rows, cols = get_terminal_size () in
-  let head = Buffer.create 256 in
   let buf = Buffer.create 2048 in
+  let head = Buffer.create 256 in
   let selector label items cursor draw =
     let position =
       if items = [] then "0/0"

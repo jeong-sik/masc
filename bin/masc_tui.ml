@@ -18720,7 +18720,7 @@ and is loaded on demand through keeper_skill.
             | Some session ->
               let set updated = state.voice_agent_voices <- Some updated in
               (* Help is read-only and may cover an in-flight save. *)
-              if session.vas_saving && not (String.equal key "esc" || String.equal key "?")
+              if (compact_viewport && not (String.equal key "esc")) || (session.vas_saving && not (String.equal key "esc" || String.equal key "?"))
               then ()
               else (
                 match key with

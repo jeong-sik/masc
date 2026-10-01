@@ -5979,6 +5979,7 @@
 (include stanzas/test_tui_keys.inc)
 
 (include stanzas/test_tui_voice_pane_fills_its_height.inc)
+(include stanzas/test_tui_runtime_params_viewport_pty.inc)
 (include stanzas/test_tui_runtime_picker_width_pty.inc)
 (include stanzas/test_tui_keeper_metadata_wrap_pty.inc)
 

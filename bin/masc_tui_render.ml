@@ -12977,7 +12977,6 @@ let binary_age_text = function
    it and it did not take" happens, so these stay two panes over one store. *)
 let render_runtime_params (state : state) =
   let terminal_rows, cols = get_terminal_size () in
-  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
   box_top buf cols;
   box_line buf cols
@@ -13003,59 +13002,75 @@ let render_runtime_params (state : state) =
      box_line_styled buf cols ~style:(if ok then Theme.ok () else Theme.bad ())
        ("  " ^ Terminal_text.single_line detail));
   let selected = List.nth_opt state.runtime_params state.runtime_params_cursor in
-  let selected_contract =
+  let field label value =
+    ("  " ^ Ansi.bold ^ label ^ Ansi.reset)
+    :: (Masc_tui_text_block.rows ~max_cells:(max 1 (framed_inner_width cols - 4)) value
+        |> List.map (fun line -> "    " ^ line))
+  in
+  (* Values are exact JSON. Word wrapping can discard a space at a chunk
+     boundary, so split the sanitised value only between terminal cells. *)
+  let value_field label value =
+    ("  " ^ Ansi.bold ^ label ^ Ansi.reset)
+    :: (Message_layout.split_cells
+          ~max_cells:(max 1 (framed_inner_width cols - 4))
+          (Masc.Tui_terminal_text.sanitize_terminal_text value)
+        |> List.map (fun line -> "    " ^ line))
+  in
+  let selected_lines =
+    (match state.runtime_params_notice with
+     | None -> []
+     | Some (ok, text) -> field (if ok then "Result" else "Refused") text)
+    @
     match selected with
-    | None -> "  Select a row to see its contract"
+    | None -> ["  Select a row to see its contract"]
     | Some row ->
       let open Tui_decode in
-      let type_name =
-        if String.trim row.rpr_value_type = "" then "typed value"
-        else row.rpr_value_type
-      in
-      let bounds =
-        [ Option.map (fun value -> "min " ^ value) row.rpr_min_json
-        ; Option.map (fun value -> "max " ^ value) row.rpr_max_json
-        ]
-        |> List.filter_map Fun.id
-        |> String.concat " · "
-      in
-      String.concat " · "
-        (List.filter (fun text -> String.trim text <> "")
-           [ "  " ^ type_name; bounds; row.rpr_description ])
+      field "Key" row.rpr_key
+      @ value_field "Current" row.rpr_current_json
+      @ value_field "Default" row.rpr_default_json
+      @ field "Type" (if String.trim row.rpr_value_type = "" then "typed value" else row.rpr_value_type)
+      @ (match row.rpr_min_json with None -> [] | Some value -> value_field "Minimum" value)
+      @ (match row.rpr_max_json with None -> [] | Some value -> value_field "Maximum" value)
+      @ (row.rpr_choices
+         |> List.mapi (fun index choice ->
+              value_field (Printf.sprintf "Choice %d" (index + 1))
+                (Yojson.Safe.to_string (`String choice)))
+         |> List.concat)
+      @ field "Contract" row.rpr_description
+      @ (match row.rpr_surface with
+         | None -> []
+         | Some surface -> field "Group" (surface.rps_id ^ " · " ^ surface.rps_description))
   in
-  (* [box_line_styled] fits this row to the frame and the style covers what it
-     fits, so a fit here only padded the row past the frame and spent its last
-     cell on the cut mark. *)
   box_line_styled buf cols ~style:(Theme.recede ())
-    (Terminal_text.single_line selected_contract);
+    "  j/k selects · PgUp/PgDn reads the complete value and contract";
   box_divider buf cols;
-  let editing = Option.is_some state.runtime_param_edit in
   (* Editing adds a divider and two form rows.  Spend those rows out of the
      list budget so the footer remains visible instead of falling underneath
      the always-present composer. *)
-  let content_height = max 1 (rows - (if editing then 10 else 7)) in
+  let list_height, detail_height =
+    Masc_tui_types.runtime_params_viewport state ~terminal_rows in
   let count = List.length state.runtime_params in
   let cursor = max 0 (min state.runtime_params_cursor (count - 1)) in
   (match state.runtime_params_error with
    | Some detail ->
      box_line buf cols ((Theme.bad ()) ^ "설정을 읽지 못했습니다: " ^ Ansi.reset
                         ^ Terminal_text.single_line detail);
-     for _ = 2 to content_height do box_empty buf cols done
+     for _ = 2 to list_height do box_empty buf cols done
    | None ->
      if state.runtime_params_loading && state.runtime_params = []
      then begin
        box_line buf cols (Ansi.dim ^ "  (loading runtime parameters…)" ^ Ansi.reset);
-       for _ = 2 to content_height do box_empty buf cols done
+       for _ = 2 to list_height do box_empty buf cols done
      end
      else if state.runtime_params = []
      then begin
        box_line buf cols (Ansi.dim ^ "  등록된 설정 없음" ^ Ansi.reset);
-       for _ = 2 to content_height do box_empty buf cols done
+       for _ = 2 to list_height do box_empty buf cols done
      end else begin
        (* Rows arrive in registry-group order (Tui_decode sorts them by
           surface). Headers are lines on this screen, not decoration outside it:
           they are built into the same list the window scrolls over, so a group
-          heading costs a row from [content_height] instead of pushing the last
+          heading costs a row from [list_height] instead of pushing the last
           param off the bottom.
 
           The cursor stays an index into [state.runtime_params] — key handling
@@ -13093,12 +13108,12 @@ let render_runtime_params (state : state) =
        in
        let total = List.length display in
        let first =
-         if total <= content_height then 0
-         else if cursor_display < content_height then 0
-         else min (total - content_height) (cursor_display - content_height + 1)
+         if total <= list_height then 0
+         else if cursor_display < list_height then 0
+         else min (total - list_height) (cursor_display - list_height + 1)
        in
-       let display_window = Rows.of_list ~first:first ~height:content_height display in
-       for index = 0 to content_height - 1 do
+       let display_window = Rows.of_list ~first:first ~height:list_height display in
+       for index = 0 to list_height - 1 do
          match Rows.at display_window (first + index) with
          | None -> box_empty buf cols
          | Some (`Header (id, description)) ->
@@ -13110,21 +13125,17 @@ let render_runtime_params (state : state) =
                 (Ansi.dim ^ Terminal_text.single_line description ^ Ansi.reset))
          | Some (`Row (row_index, row)) ->
            let open Tui_decode in
+           let value_width = max 4 (min 16 ((framed_inner_width cols - 7) / 3)) in
+           let key_width = max 1 (framed_inner_width cols - 7 - value_width) in
            let line =
-             Printf.sprintf "    %s %-41s %-16s%s"
+             Printf.sprintf "    %s %s %s"
                (Masc_tui_config_mark.param_glyph
                   ~has_override:row.rpr_has_override)
-               (Terminal_text.single_line row.rpr_key)
-               (Terminal_text.single_line
+               (Message_layout.fit_middle key_width (Terminal_text.single_line row.rpr_key)
+                |> fun key -> fit_width key key_width)
+               (fit_width (Terminal_text.single_line
                   (runtime_param_value_text ~value_type:row.rpr_value_type
-                     row.rpr_current_json))
-               (if row.rpr_has_override
-                then Printf.sprintf "  default %s"
-                       (Terminal_text.single_line
-                          (runtime_param_value_text
-                             ~value_type:row.rpr_value_type
-                             row.rpr_default_json))
-                else "")
+                     row.rpr_current_json)) value_width)
            in
            if row_index = cursor then box_line_selected buf cols line
            else
@@ -13132,6 +13143,18 @@ let render_runtime_params (state : state) =
                ~style:(if row.rpr_has_override then (Masc_tui_theme.tone Masc_tui_theme.Accent) else Ansi.dim) line
        done
      end);
+  box_divider buf cols;
+  let scroll = Masc_tui_scroll.normalize ~count:(List.length selected_lines)
+      ~height:(max 1 detail_height) state.config_scroll in
+  let detail_window = Rows.of_list ~first:scroll ~height:detail_height selected_lines in
+  for index = 0 to detail_height - 1 do
+    match Rows.at detail_window (scroll + index) with
+    | None -> box_empty buf cols
+    | Some line -> box_line buf cols line
+  done;
+  box_line_styled buf cols ~style:(Theme.recede ())
+    ("  " ^ Masc_tui_scroll.window_reading ~noun:"Detail" ~scroll
+       ~height:detail_height (List.length selected_lines));
   (match state.runtime_param_edit with
    | None -> ()
    | Some edit ->
@@ -13159,10 +13182,12 @@ let render_runtime_params (state : state) =
        else draft
      in
      box_divider buf cols;
-     box_line buf cols
-       (row_with_field ~cols
-          ~lead:(Printf.sprintf "  %s%s%s " Ansi.bold field_label Ansi.reset)
-          ~field:draft ~tail:"");
+     let runtime_param_edit_row =
+       row_with_field ~cols
+         ~lead:(Printf.sprintf "  %s%s%s " Ansi.bold field_label Ansi.reset)
+         ~field:draft ~tail:""
+     in
+     box_line buf cols runtime_param_edit_row;
      box_line_styled buf cols ~style:(Theme.recede ())
        (Printf.sprintf "  editing %s · %s"
           (Terminal_text.single_line edit.rpe_key)
@@ -13197,7 +13222,8 @@ let render_runtime_params (state : state) =
           | Some { rpe_mode = Advanced_json; _ } ->
             "type JSON  Enter:apply  Ctrl-U:clear  Esc:cancel"
           | None -> Masc_tui_keys.footer_hints_config ~pane:Config_params));
-  finish_surface state ~surface_key:"config-params" ~rows:terminal_rows ~cols buf
+  finish_surface state ~clamped:(Runtime_params_scroll scroll)
+    ~surface_key:"config-params" ~rows:terminal_rows ~cols buf
 ;;
 
 (* Where the prompt catalog is, for the one row both prompt screens draw above

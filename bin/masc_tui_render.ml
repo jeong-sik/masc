@@ -318,8 +318,20 @@ let render_overview (state : state) =
       if budget >= essential_rows && (all_decisions = [] || capacity > 0) then begin
         let spare = budget - essential_rows in
         let context =
+          let candle = Masc_tui_candle.summary_lines state.candle_observation
+            |> List.concat_map (fun line ->
+              Message_layout.wrap_words ~max_cells:(max 1 (cols - 4))
+                (Terminal_text.single_line line))
+            |> List.map (fun line -> None, " " ^ line) in
+          let notice_rows = if Option.is_some state.opening_notice then 1 else 0 in
+          let candle_fits = spare >= 2 + notice_rows + List.length candle in
+          let health = if candle_fits then health else
+            match Masc_tui_candle.compact_status state.candle_observation with
+            | None -> health
+            | Some status -> " " ^ status ^ " · " ^ health in
           let readings =
             [ (None, health); (Some (Theme.recede ()), work) ]
+            @ if candle_fits then candle else []
           in
           match state.opening_notice with
           | None -> readings
@@ -327,17 +339,6 @@ let render_overview (state : state) =
               let notice = (None, " " ^ Terminal_text.single_line notice) in
               if spare < List.length readings + 1 then notice :: readings
               else readings @ [notice]
-        in
-        let candle =
-          Masc_tui_candle.summary_lines state.candle_observation
-          |> List.concat_map (fun line ->
-               Message_layout.wrap_words ~max_cells:(max 1 (cols - 4))
-                 (Terminal_text.single_line line))
-          |> List.map (fun line -> (None, " " ^ line))
-        in
-        let context =
-          if List.length context + List.length candle <= spare then context @ candle
-          else context
         in
         let shown_context = List.take (min spare (List.length context)) context in
         List.iter
@@ -6099,7 +6100,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
     in
     let account =
       match state.item_account with
-      | Some (name, account) when String.equal name k.k_name -> Some account
+      | Some (name, (_, account)) when String.equal name k.k_name -> Some account
       | Some _ | None -> None
     in
     let milli value = Printf.sprintf "%d.%03d" (value / 1000) (value mod 1000) in
@@ -14376,13 +14377,13 @@ let render_about (state : state) =
           | Masc_tui_emblem_screen.Keepers_read _ ->
               List.map (fun (keeper : Tui_decode.keeper) ->
                 let portrait =
-                  match Keeper_control.liveness_of_roster state.keeper_roster keeper.k_name with
+                  match (keeper_reading state keeper).Keeper_control.liveness with
                   | Keeper_control.Present runtime -> runtime.kr_portrait
                   | Keeper_control.Unobserved | Keeper_control.Absent
                   | Keeper_control.Invalid _ ->
                       Keeper_portrait_equipment.Unavailable "Keeper equipment not observed"
                 in
-                Terminal_text.single_line keeper.k_name, portrait) state.keepers
+                keeper.k_name, portrait) state.keepers
           | Masc_tui_emblem_screen.Keepers_unreadable
           | Masc_tui_emblem_screen.Keepers_unread -> [])
         ~caption:

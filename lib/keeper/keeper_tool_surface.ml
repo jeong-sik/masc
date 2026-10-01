@@ -101,7 +101,8 @@ let keeper_list_body ~(config : Workspace.config) args : tool_result =
             | Error reason -> Keeper_portrait_equipment.Unavailable reason)
         | None -> Keeper_portrait_equipment.Unavailable "Keeper name unavailable" in
       `Assoc (("portrait", Keeper_portrait_equipment.reading_to_json portrait)
-        :: List.remove_assoc "candle_balance_milli" (List.remove_assoc "portrait" fields))
+        :: List.remove_assoc "candle_account_revision"
+          (List.remove_assoc "candle_balance_milli" (List.remove_assoc "portrait" fields)))
     | json -> json in
   let data = match data with
     | `Assoc fields -> `Assoc (List.map (fun (key, value) ->

@@ -3213,6 +3213,9 @@ let test_execution_first_compute_reuses_prepared_bytes () =
       let open Yojson.Safe.Util in
       check bool "default query retained" true
         (payload.json |> member "query" |> member "default_light_request" |> to_bool);
+      check bool "prepared execution includes its Candle observation identity" true
+        (match payload.json |> member "candle_observation_sequence" with
+         | `Int _ -> true | _ -> false);
       check bool "computed identity bytes match JSON" true
         (Yojson.Safe.equal payload.json (Yojson.Safe.from_string payload.raw_json));
       match Surface.dashboard_execution_cached_http_representation context with
@@ -3271,11 +3274,14 @@ beanie = 200
   let item = match Keeper_portrait_item.of_id item_id with
     | Some item -> item | None -> fail "portrait catalog item missing" in
   let expected = Keeper_portrait_item.preview item starting in
+  let account_revision = Candle_observe.account_revision
+    (Candle_observe.read ~now:Time_compat.now ~base_path) ~keeper in
   (* Preserve the real builder's name-before-portrait order: an unchanged
      authority must not defeat the prepared-byte path by reordering fields. *)
   let row = `Assoc ["name", `String keeper;
     "portrait", Portrait.reading_to_json (Portrait.Ready starting);
-    "candle_balance_milli", `String "1000"] in
+    "candle_balance_milli", `String "1000";
+    "candle_account_revision", Json_util.option_to_yojson (fun value -> `String value) account_revision] in
   let ready_candle = Candle_observation.Ready
     {issued_milli="1000";burned_milli="0";circulating_milli="1000"} in
   let candle_json = Candle_observation.to_json ready_candle in
@@ -3339,7 +3345,7 @@ beanie = 200
     ~expected_portrait:(fun reading -> reading = Portrait.Ready starting)
     ~expected_candle:(fun candle -> candle = ready_candle) ~expected_balance:(Some "1000");
   ignore (ok Candle_shop.error_to_string
-    (Candle_shop.purchase ~now:Time_compat.now ~base_path ~keeper:owner ~item));
+    (Candle_shop.purchase ~now:(fun () -> 1790640000.) ~base_path ~keeper:owner ~item));
   (match Lib.Keeper_candle_tools.handle ~operation:Lib.Keeper_candle_tools.Equip
       ~base_path ~keeper_name:keeper ~tool_name:"keeper_candle_equip"
       ~start_time:(Tool_timing.start ())
@@ -3369,6 +3375,99 @@ beanie = 200
       | Candle_observation.Off | Candle_observation.Ready _ -> false)
     ~expected_balance:None;
   check string "warm HTTP and SSE preparation never repair the damaged ledger" corrupt (Fs_compat.load_file ledger)
+
+let test_candle_account_revision_tracks_free_purchase_and_price_edit () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let base_path = config.Workspace.base_path in
+  let keeper = "free-item-keeper" in
+  let policy_path = Config_dir_resolver.candle_toml_path_for_base_path ~base_path in
+  let write_policy price =
+    mkdir_p (Filename.dirname policy_path);
+    write_file policy_path (Printf.sprintf {|half_life = "off"
+[payout]
+weight_max = 1
+deduction_rate = 0
+deduction_floor = 1000
+[payout.grades_milli]
+trivial = 1000
+small = 1000
+medium = 1000
+large = 1000
+epic = 1000
+[shop.prices_milli]
+crown = %d
+|} price)
+  in
+  write_policy 0;
+  Candle_status.install_appraiser_check (fun () -> Ok ());
+  let observation_sequence = ref (-1) in
+  let row () =
+    let snapshot = `Assoc ["keepers", `List [`Assoc ["name", `String keeper]]] in
+    let projected = Dashboard_projection_cache.with_current_keeper_observations ~config snapshot in
+    observation_sequence := Yojson.Safe.Util.(projected |> member "candle_observation_sequence" |> to_int);
+    match Yojson.Safe.Util.(projected |> member "keepers" |> to_list) with
+    | [row] -> row
+    | _ -> fail "Item revision projection lost the Keeper"
+  in
+  let revision row = Yojson.Safe.Util.(row |> member "candle_account_revision" |> to_string) in
+  let first = row () in
+  let first_sequence = !observation_sequence in
+  let first_view = Candle_observe.read ~now:Time_compat.now ~base_path in
+  let owner = match Keeper_id.Keeper_name.of_string keeper with
+    | Ok owner -> owner | Error reason -> fail reason in
+  let item = match Keeper_portrait_item.of_id "crown" with
+    | Some item -> item | None -> fail "crown absent from catalog" in
+  (match Candle_shop.purchase ~now:(fun () -> 1790640000.) ~base_path ~keeper:owner ~item with
+   | Ok _ -> ()
+   | Error error -> fail (Candle_shop.error_to_string error));
+  let purchased = row () in
+  check bool "purchase advances fresh overlay publication identity" true
+    (!observation_sequence > first_sequence);
+  check bool "free purchase changes Item account revision" false
+    (String.equal (revision first) (revision purchased));
+  check bool "free purchase preserves observed balance" true
+    (Yojson.Safe.Util.member "candle_balance_milli" first
+     = Yojson.Safe.Util.member "candle_balance_milli" purchased);
+  check bool "free purchase preserves observed outfit" true
+    (Yojson.Safe.Util.member "portrait" first
+     = Yojson.Safe.Util.member "portrait" purchased);
+  let purchased_view = Candle_observe.read ~now:Time_compat.now ~base_path in
+  let snapshot = `Assoc ["keepers", `List [`Assoc ["name", `String keeper]]] in
+  let project read = Dashboard_projection_cache.For_test.with_current_keeper_observations
+    ~read ~config snapshot in
+  let sequence json = Yojson.Safe.Util.(json |> member "candle_observation_sequence" |> to_int) in
+  let seed = project (fun () -> first_view) in
+  let newer = ref None in
+  (* A held B read finishes after the next request has already observed A.
+     Consecutive unchanged A reads may reuse an identity, but this gap cannot:
+     otherwise delayed B's request number could outrank the newer A identity. *)
+  let delayed = project (fun () ->
+    newer := Some (project (fun () -> first_view));
+    purchased_view) in
+  let newer = match !newer with Some json -> json | None -> fail "newer read did not run" in
+  check bool "newer overlapping read advances unchanged observation identity" true
+    (sequence newer > sequence seed);
+  check bool "held old read cannot outrank newer completed overlay" true
+    (sequence delayed < sequence newer);
+  let repeated = project (fun () -> first_view) in
+  check int "unchanged consecutive observation preserves reusable encoding identity"
+    (sequence newer) (sequence repeated);
+  write_policy 1;
+  let repriced = row () in
+  check bool "price-only edit changes Item account revision" false
+    (String.equal (revision purchased) (revision repriced));
+  check bool "price-only edit preserves observed balance" true
+    (Yojson.Safe.Util.member "candle_balance_milli" purchased
+     = Yojson.Safe.Util.member "candle_balance_milli" repriced);
+  write_file policy_path "not = [\n";
+  let disabled = row () in
+  write_file policy_path "[shop]\n";
+  let differently_disabled = row () in
+  check bool "changed disabled reason changes Item account revision" false
+    (String.equal (revision disabled) (revision differently_disabled));
+  check bool "disabled readings withdraw the balance" true
+    (Yojson.Safe.Util.member "candle_balance_milli" disabled = `Null
+     && Yojson.Safe.Util.member "candle_balance_milli" differently_disabled = `Null)
 
 let test_execution_parameterized_payload_reuses_decorated_bytes () =
   with_execution_payload_env @@ fun ~env ~sw ~state ->
@@ -7301,6 +7400,8 @@ let () =
             test_execution_first_compute_reuses_prepared_bytes;
           test_case "warm execution and briefing follow equipped or unreadable authority" `Quick
             test_warm_dashboard_responses_follow_equipment_authority;
+          test_case "Item account revision follows free purchase and price edit" `Quick
+            test_candle_account_revision_tracks_free_purchase_and_price_edit;
           test_case "execution parameterized response reuses decorated bytes" `Quick
             test_execution_parameterized_payload_reuses_decorated_bytes;
           test_case "execution parameterized responses separate queries" `Quick

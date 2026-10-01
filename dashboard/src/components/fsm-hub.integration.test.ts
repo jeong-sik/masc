@@ -116,7 +116,6 @@ const REAL_COMPOSITE_PAYLOAD = {
 
 /** Decoded gate keeper product values consumed by FsmHub. */
 const REAL_GATE_KEEPERS_SHAPE: GateKeepersData = {
-  candle: { status: 'off' },
   keepers: [
     { name: 'analyst', status: 'busy' },
     { name: 'ani1999', status: 'inactive' },

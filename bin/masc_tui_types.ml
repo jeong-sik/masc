@@ -2918,10 +2918,12 @@ let nothing =
    instead of the roster. The roster is 8.4 KB and answers in about a
    millisecond, which is what makes this affordable where planning is not.
  *)
-let rec surface_needs ~keeper_pane_drawn surface =
+let rec surface_needs ~keeper_pane_drawn ~about_open surface =
   let needs = surface_needs_of_surface surface in
   let needs =
-    if keeper_pane_drawn then { needs with needs_keeper_roster = true }
+    (* About hides the ordinary Keeper pane but draws current outfits. Its
+       opening delta and refresh cadence must keep reading that same roster. *)
+    if keeper_pane_drawn || about_open then { needs with needs_keeper_roster = true }
     else needs
   in
   needs
@@ -3009,9 +3011,9 @@ let surface_needs_delta ~previous ~next =
 
 let surface_needs_any needs = needs <> nothing
 
-let full_refresh_needs ~scoped_refresh_inflight ~keeper_pane_drawn surface =
+let full_refresh_needs ~scoped_refresh_inflight ~keeper_pane_drawn ~about_open surface =
   if scoped_refresh_inflight then nothing
-  else surface_needs ~keeper_pane_drawn surface
+  else surface_needs ~keeper_pane_drawn ~about_open surface
 
 type full_refresh_intent = Cadence | Revalidate
 
@@ -5408,7 +5410,7 @@ type state = {
   mutable config_scroll: int;
   mutable detail_tab: keeper_detail_tab;
   mutable item_cursor: int;
-  mutable item_account: (string * Masc_tui_keeper_items.t) option;
+  mutable item_account: (string * (string option * Masc_tui_keeper_items.t)) option;
   mutable item_account_error: string option;
   mutable keeper_run_cursor: int;
   mutable detail_reads: detail_read_request list;

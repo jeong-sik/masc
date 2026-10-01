@@ -464,9 +464,13 @@ let test_shared_roster_omits_currency () =
         check bool "no shared currency envelope" true (Json_util.assoc_member_opt "candle" json = None);
         let rows = Yojson.Safe.Util.(to_list (member (if detailed then "keepers" else "items") json)) in
         List.iter (fun row ->
-          check bool "no other keeper balance" true (Json_util.assoc_member_opt "candle_balance_milli" row = None)) rows;
+          check bool "no other keeper balance" true (Json_util.assoc_member_opt "candle_balance_milli" row = None);
+          check bool "no other keeper account revision" true (Json_util.assoc_member_opt "candle_account_revision" row = None)) rows;
         if detailed then match Tui_decode.decode_keeper_runtime_list json with
-          | Ok (rows, [], _, _, Error _) -> check int "strict decoder retains both public rows" 2 (List.length rows)
+          | Ok (rows, [], _, _, Error _) ->
+            check int "strict decoder retains both public rows" 2 (List.length rows);
+            check bool "account authority remains unavailable" true
+              (List.for_all (fun row -> Result.is_error row.Tui_decode.kr_candle_account_revision) rows)
           | _ -> fail "private currency omission broke the public roster")) [false; true]
 
 let () =

@@ -1934,7 +1934,7 @@ type async_msg =
                 Masc_tui_types.Verification_evidence_read.failure) result
   | Keeper_config_view_loaded of Masc_tui_types.detail_read_request * (string list, string) result
   | Keeper_items_loaded of
-      Masc_tui_types.detail_read_request * (Masc_tui_keeper_items.t, string) result
+      Masc_tui_types.detail_read_request * (string option * Masc_tui_keeper_items.t, string) result
   | Keeper_sandbox_view_loaded of
       Masc_tui_types.detail_read_request * (Masc_tui_keeper_sandbox.t, string) result
   | Keeper_sandbox_logs_loaded of
@@ -4229,16 +4229,30 @@ let item_authority_ready state =
       && not (String.equal identity.sid_masc_root "")
   | None -> false
 
-let withdraw_keeper_items_reading state =
+let withdraw_keeper_items state =
   state.item_account <- None;
-  state.item_account_error <- Some "Workspace identity unavailable or changed";
+  state.item_account_error <- None;
+  (* Removing the pending receipt rejects its late answer. A later read uses
+     the existing monotonic detail generation, including after A -> B -> A. *)
   state.detail_reads <- List.filter
-      (fun request -> request.drr_tab <> Detail_items) state.detail_reads
+    (fun request -> request.drr_tab <> Detail_items) state.detail_reads
+
+let keeper_item_revision state keeper_name =
+  match Keeper_control.liveness_of_roster state.keeper_roster keeper_name with
+  | Keeper_control.Present runtime -> runtime.kr_candle_account_revision
+  | Unobserved | Invalid _ | Absent -> Error "Keeper account revision is not observed in the current roster"
 
 let launch_keeper_items state ~mailbox keeper_name =
-  if not (item_authority_ready state) then withdraw_keeper_items_reading state
-  else
+  withdraw_keeper_items state;
+  match state.workspace_identity, state.server_identity with
+  | (Workspace_identity_unread | Workspace_identity_mismatch _), _
+  | Workspace_identity_match, None ->
+    state.item_account_error <- Some "Server workspace identity is unavailable or differs from the local workspace"
+  | Workspace_identity_match, Some _ when not (item_authority_ready state) ->
+    state.item_account_error <- Some "Server workspace identity is unavailable or differs from the local workspace"
+  | Workspace_identity_match, Some identity ->
   let request = mark_detail_read_started state ~tab:Detail_items ~keeper:keeper_name in
+  let expected_revision = keeper_item_revision state keeper_name in
   let host = server_peer_host in
   let port = state.port in
   Masc_tui_async_read.launch
@@ -4246,10 +4260,35 @@ let launch_keeper_items state ~mailbox keeper_name =
       enqueue_async mailbox (Keeper_items_loaded (request, result)))
     (fun () ->
       let path = "/api/v1/keepers/"
-        ^ Masc_tui_http.percent_encode_path_segment keeper_name ^ "/items" in
+        ^ Masc_tui_http.percent_encode_path_segment keeper_name ^ "/items?expected_workspace="
+        ^ Masc_tui_http.percent_encode_query_value identity.Tui_decode.sid_base_path in
       let ( let* ) = Result.bind in
       let* json = Masc_tui_http.get_json ~host ~port ~path in
-      Masc_tui_keeper_items.decode ~keeper_name json)
+      let* reading = Masc_tui_keeper_items.decode ~keeper_name json in
+      let* _ = Masc_tui_keeper_items.match_revision ~expected_revision reading in
+      Ok reading)
+
+let visible_item_revision state =
+  match state.view, state.detail_tab, selected_keeper state with
+  | Keepers Keeper_detail, Detail_items, Some keeper ->
+      let balance = match Keeper_control.liveness_of_roster state.keeper_roster keeper.k_name with
+        | Keeper_control.Present runtime -> runtime.kr_candle_balance_milli
+        | Unobserved | Invalid _ | Absent -> None in
+      Some (keeper.k_name, keeper_item_revision state keeper.k_name, balance,
+        Option.map (fun identity ->
+          (Masc_tui_types.canonical_path identity.Tui_decode.sid_base_path,
+           Masc_tui_types.canonical_path identity.sid_masc_root,
+           identity.sid_state_ready)) state.server_identity)
+  | _ -> None
+
+let refresh_changed_keeper_items state ~mailbox previous =
+  let current = visible_item_revision state in
+  if current <> previous then
+    match current with
+    | Some (keeper_name, Ok _, _, _) -> launch_keeper_items state ~mailbox keeper_name
+    | Some (_, Error detail, _, _) ->
+        withdraw_keeper_items state; state.item_account_error <- Some detail
+    | None -> ()
 
 let launch_keeper_sandbox_view state ~mailbox keeper_name =
   let request = mark_detail_read_started state ~tab:Detail_sandbox ~keeper:keeper_name in
@@ -10354,7 +10393,14 @@ let apply_keeper_roster_load state = function
          | None | Some { Tui_decode.sid_state_ready = Some false; _ } -> None
          | Some { Tui_decode.sid_state_ready = Some true | None; _ } -> Some candle);
       state.keeper_roster <- roster;
-      state.keeper_roster_error <- None
+      state.keeper_roster_error <- None;
+      (match state.item_account with
+       | None -> ()
+       | Some (keeper_name, reading) ->
+         (match Masc_tui_keeper_items.match_revision
+             ~expected_revision:(keeper_item_revision state keeper_name) reading with
+          | Ok _ -> ()
+          | Error detail -> state.item_account <- None; state.item_account_error <- Some detail))
   | Error failure ->
       (* The last good roster is dropped rather than kept: a stale one reports
          fibers as running after the reading that said so stopped arriving,
@@ -10362,6 +10408,8 @@ let apply_keeper_roster_load state = function
          back to unobserved withdraws the actions instead of offering the
          wrong one. *)
       state.keeper_roster <- Keeper_control.Roster_unobserved;
+      state.item_account <- None;
+      state.item_account_error <- Some "Keeper account revision is not observed in the current roster";
       state.candle_observation <- Some (Error (Keeper_control.roster_failure_message
         ~credential_sent:(Masc_tui_http.operator_token_present ()) failure));
       remember_surface_error state ~surface:"keeper roster"
@@ -10540,7 +10588,7 @@ let refresh_status results =
   | n, total when n = total -> Masc_tui_types.Connected
   | _ -> Masc_tui_types.Degraded
 
-let load_http_scoped_surfaces ~host ~port ~approval_ticket ~board_sort
+let load_http_scoped_surfaces ~host ~port ~expected_workspace ~approval_ticket ~board_sort
     ~board_hearth ~system_log_level ~provider_history_days
     ~(needs : Masc_tui_types.surface_needs) =
   let when_needed wanted load = if wanted then Some (load ()) else None in
@@ -10582,7 +10630,9 @@ let load_http_scoped_surfaces ~host ~port ~approval_ticket ~board_sort
   in
   let http_keeper_roster =
     when_needed needs.needs_keeper_roster (fun () ->
-        load_keeper_roster ~host ~port)
+        match expected_workspace with
+        | None -> Error (Keeper_control.Roster_malformed "Server workspace identity is unavailable")
+        | Some expected_workspace -> load_keeper_roster ~host ~port ~expected_workspace)
   in
   let http_runtime_quota =
     when_needed needs.needs_runtime_quota (fun () ->
@@ -10667,7 +10717,10 @@ let load_http_surfaces ~host ~port ~approval_ticket ~board_sort
          announced, so the periodic refresh always fetches them; the surface
          still decides whether the panel renders, only the fetch is
          unconditional. Targeted scoped refreshes keep their own needs. *)
-      load_http_scoped_surfaces ~host ~port ~approval_ticket:None
+      load_http_scoped_surfaces ~host ~port
+        ~expected_workspace:(Result.to_option http_server_identity
+          |> Option.map (fun identity -> canonical_path identity.Tui_decode.sid_base_path))
+        ~approval_ticket:None
         ~board_sort ~board_hearth ~system_log_level ~provider_history_days
         ~needs:{ needs with needs_asks = true }
     in
@@ -10690,6 +10743,11 @@ let apply_http_scoped_surfaces state results =
   Option.iter (apply_provider_history_load state) results.http_provider_history;
   Option.iter (apply_overview_goals_load state) results.http_overview_goals;
   Option.iter (apply_account_emails_load state) results.http_account_emails
+
+let apply_http_scoped_surfaces_and_refresh state ~mailbox results =
+  let previous_items = visible_item_revision state in
+  apply_http_scoped_surfaces state results;
+  refresh_changed_keeper_items state ~mailbox previous_items
 
 let same_currency_workspace source current =
   match source, current with
@@ -10730,22 +10788,37 @@ let apply_server_identity_reading state reading =
              (Masc_tui_types.canonical_path current.sid_masc_root)
     | None, _ | Some _, Error _ -> false
   in
-  if not same_item_authority then withdraw_keeper_items_reading state;
+  if not same_item_authority then withdraw_keeper_items state;
+  let previous = state.workspace_identity in
   state.server_identity <- Masc_tui_types.server_identity_of_refresh reading;
   state.workspace_identity <-
     Masc_tui_types.workspace_identity_of_refresh
       ~local_base_path:state.local_base_path reading;
+  let same_workspace = match previous, state.workspace_identity with
+    | Workspace_identity_match, Workspace_identity_match -> true
+    | Workspace_identity_mismatch prior, Workspace_identity_mismatch current ->
+      String.equal prior.server_base_path current.server_base_path
+    | Workspace_identity_unread,
+        (Workspace_identity_match | Workspace_identity_mismatch _ | Workspace_identity_unread)
+    | (Workspace_identity_match | Workspace_identity_mismatch _), Workspace_identity_unread
+    | Workspace_identity_match, Workspace_identity_mismatch _
+    | Workspace_identity_mismatch _, Workspace_identity_match -> false
+  in
+  if not same_workspace then withdraw_keeper_items state;
   match state.workspace_identity with
   | Masc_tui_types.Workspace_identity_mismatch _ -> clear_local_workspace state
   | Masc_tui_types.Workspace_identity_match ->
     load_from_masc_dir state state.local_base_path
-  | Masc_tui_types.Workspace_identity_unread -> ()
+  | Masc_tui_types.Workspace_identity_unread ->
+    state.item_account_error <- Some "Server workspace identity is unavailable"
 
-let apply_http_surfaces state results =
+let apply_http_surfaces state ~mailbox results =
+  let previous_items = visible_item_revision state in
   apply_server_identity_reading state results.http_server_identity;
   apply_overview_load state results.http_overview;
   Option.iter (apply_approval_observation state) results.http_approvals;
   apply_http_scoped_surfaces state results.http_scoped;
+  refresh_changed_keeper_items state ~mailbox previous_items;
   let reached result =
     Result.map (fun _ -> ()) result |> Result.map_error (fun _ -> ())
   in
@@ -10776,8 +10849,8 @@ let apply_server_booting state ~identity ~approval_ticket =
     approval_ticket;
   state.connection_status <- Masc_tui_types.Booting
 
-let apply_http_refresh_outcome state = function
-  | Refresh_surfaces results -> apply_http_surfaces state results
+let apply_http_refresh_outcome state ~mailbox = function
+  | Refresh_surfaces results -> apply_http_surfaces state ~mailbox results
   | Refresh_server_booting { identity; approval_ticket } ->
     apply_server_booting state ~identity ~approval_ticket
 
@@ -10814,8 +10887,6 @@ let launch_detail_tab_reading state ~mailbox (keeper : keeper) =
   match state.detail_tab with
   | Detail_info -> launch_keeper_board_quarantines state ~mailbox keeper.k_name
   | Detail_items ->
-      state.item_account <- None;
-      state.item_account_error <- None;
       launch_keeper_items state ~mailbox keeper.k_name
   | Detail_sandbox ->
       state.keeper_sandbox_view <- None;
@@ -11224,7 +11295,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
        | Reconnecting -> Masc_tui_types.Reconnecting
        | Disconnected | Connecting -> Masc_tui_types.Connecting);
     let needs =
-      Masc_tui_types.full_refresh_needs
+      Masc_tui_types.full_refresh_needs ~about_open:state.about_open
         ~scoped_refresh_inflight:!scoped_refresh_inflight
         ~keeper_pane_drawn:
           (not (Masc_tui_render.acting_pane_suppressed state))
@@ -11316,7 +11387,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
         Fun.protect
           ~finally:(fun () -> refresh_inflight := false)
           (fun () ->
-             apply_http_refresh_outcome state
+             apply_http_refresh_outcome state ~mailbox
                (load_http_surfaces ~host ~port ~approval_ticket
                   ~board_sort:state.board_sort
                 ~board_hearth:state.board_hearth
@@ -11352,6 +11423,9 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight ~mailbox
         enqueue_async mailbox
           (Http_scoped_refresh_done
              (currency_authority, load_http_scoped_surfaces ~host ~port
+                ~expected_workspace:(Option.map
+                  (fun identity -> canonical_path identity.Tui_decode.sid_base_path)
+                  currency_authority.car_identity)
                 ~approval_ticket ~board_sort:state.board_sort
                 ~board_hearth:state.board_hearth
                 ~provider_history_days:state.provider_history_days
@@ -11374,8 +11448,11 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight ~mailbox
         Fun.protect
           ~finally:(fun () -> refresh_inflight := false)
           (fun () ->
-             apply_http_scoped_surfaces state
+             apply_http_scoped_surfaces_and_refresh state ~mailbox
                (load_http_scoped_surfaces ~host ~port
+                  ~expected_workspace:(Option.map
+                    (fun identity -> canonical_path identity.Tui_decode.sid_base_path)
+                    currency_authority.car_identity)
                   ~approval_ticket ~board_sort:state.board_sort
                 ~board_hearth:state.board_hearth
                 ~provider_history_days:state.provider_history_days
@@ -13425,7 +13502,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
   | Http_refresh_done (Refresh_surfaces results) ->
       http_refresh_inflight := false;
       state.http_refresh_started_ns <- None;
-      apply_http_surfaces state results;
+      apply_http_surfaces state ~mailbox results;
       (* The local roster is trustworthy only after a workspace-matched read.
          Resolve the boot choice once; a key the operator pressed meanwhile
          takes precedence over the saved choice. *)
@@ -13759,9 +13836,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            apply_approval_observation state
              { ao_ticket; ao_result = Error err })
       approval_ticket;
-      withdraw_keeper_items_reading state;
-      state.server_identity <- None;
-      withdraw_currency_authority state;
+      apply_server_identity_reading state (Error err);
       state.connection_status <- Masc_tui_types.Disconnected;
       add_event state "error" err;
       react_to_server_contact state ~base_path ~host:server_peer_host
@@ -13784,7 +13859,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         if same_workspace then results
         else { results with http_keeper_roster = None }
       in
-      apply_http_scoped_surfaces state results;
+      apply_http_scoped_surfaces_and_refresh state ~mailbox results;
       (match state.view with
        | Overview | Approvals -> launch_keeper_tool_approvals_load state ~mailbox
        | Keepers _ -> launch_keeper_tool_modes_load state ~mailbox
@@ -14034,7 +14109,13 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         | Some keeper -> String.equal keeper.k_name request.drr_keeper
         | None -> false
       in
-      if current && still_selected && item_authority_ready state then
+      if current && still_selected
+         && state.workspace_identity = Masc_tui_types.Workspace_identity_match
+         && item_authority_ready state then
+        let result = Result.bind result (fun reading ->
+          Masc_tui_keeper_items.match_revision
+            ~expected_revision:(keeper_item_revision state request.drr_keeper) reading
+          |> Result.map (fun _ -> reading)) in
         match result with
         | Ok account ->
             state.item_account <- Some (request.drr_keeper, account);
@@ -17246,7 +17327,7 @@ let main
      change, rather than asking each of the places that change it to remember. *)
   let drawn_needs =
     ref
-      (Masc_tui_types.surface_needs
+      (Masc_tui_types.surface_needs ~about_open:state.about_open
          ~keeper_pane_drawn:(not (Masc_tui_render.acting_pane_suppressed state))
          state.view)
   in
@@ -26533,7 +26614,7 @@ and is loaded on demand through keeper_skill.
          once per distinct [surface_needs] record. A scoped refresh neither
          repeats them nor changes connection status. *)
       let needed =
-        Masc_tui_types.surface_needs
+        Masc_tui_types.surface_needs ~about_open:state.about_open
           ~keeper_pane_drawn:
             (not (Masc_tui_render.acting_pane_suppressed state))
           state.view

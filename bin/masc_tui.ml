@@ -22866,16 +22866,12 @@ and is loaded on demand through keeper_skill.
                       | Planning_filter_all | Planning_filter_active -> ()
                       | Planning_filter_completed | Planning_filter_dropped ->
                           state.planning_filter <- Planning_filter_active);
-                     let goals = match state.planning with
-                       | None -> []
-                       | Some planning -> planning_visible_goals
-                           ~filter:state.planning_filter ~sort:state.planning_sort planning.pl_goals in
-                     (match List.find_index (fun goal -> String.equal goal.pg_id goal_id) goals with
-                      | None -> report_action state "system" "Goal changed; choose again"
-                      | Some cursor ->
-                          navigate Planning;
-                          state.planning_cursor <- cursor;
-                          open_planning_detail state ~mailbox:async_messages)
+                     navigate Planning;
+                     state.task_focus <- Masc_tui_overview_tasks.No_task_focus;
+                     state.planning_mode <- Planning_detail goal_id;
+                     state.planning_scroll <- 0;
+                     state.goal_timeline <- None;
+                     launch_goal_timeline_load state ~mailbox:async_messages goal_id
                  | Home_operator_task task_id ->
                      navigate Planning;
                      state.planning_mode <- Planning_list;

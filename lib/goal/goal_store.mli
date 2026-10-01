@@ -343,6 +343,9 @@ val append_audit_event : Workspace_utils.config -> Yojson.Safe.t -> (unit, strin
 
 (** Publish existing outbox intents before appending a later ordinary event,
     under the Goal lock. Do not call from an existing Goal transaction; use
-    [append_audit_event] there to avoid acquiring the Goal lock again. *)
+    [append_audit_event_after_pending_locked] there to avoid acquiring the Goal lock again. *)
 val append_audit_event_after_pending :
   Workspace_utils.config -> Yojson.Safe.t -> (unit, string) result
+
+(** Requires the caller to hold the Goal lock. Flush older intents before this event. *)
+val append_audit_event_after_pending_locked : Workspace_utils.config -> Yojson.Safe.t -> (unit, string) result

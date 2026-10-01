@@ -5,6 +5,7 @@ from pathlib import Path
 import unittest
 
 spec = importlib.util.spec_from_file_location("capture", Path(__file__).resolve().parents[1] / "scripts/capture-tui-ci-frames.py")
+assert spec is not None and spec.loader is not None
 capture = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(capture)
 
@@ -16,7 +17,8 @@ class CaptureOwnership(unittest.TestCase):
         navigation = {"suite": "test_tui_lane_visual_pty", "name": "workspace", "screen": "navigation"}
         primary = {"suite": "test_tui_board_heading_width", "name": "workspace", "screen": "primary"}
         unscoped = {"name": "workspace", "screen": "manual"}
-        record = lambda value: "STUDIO_CAPTURE=" + json.dumps(value)
+        def record(value):
+            return "STUDIO_CAPTURE=" + json.dumps(value)
         log = "\n".join([record(surface),
             "tests\trun\t2026-10-01T00:00:00Z " + record(navigation),
             record(primary), record(unscoped),

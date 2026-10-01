@@ -26,6 +26,7 @@ let runtime ?(keepalive_running = true) ?(health = health "healthy") ?(paused = 
       k_created_at = "2026-09-30T00:00:00Z"; k_updated_at = "2026-09-30T00:00:00Z" }
   ; kr_portrait = Decode.Ready Keeper_portrait_look.bare
   ; kr_candle_balance_milli = None
+  ; kr_candle_account_revision = Ok None
   ; kr_health = health
   ; kr_paused = paused
   ; kr_next_action = next_action
@@ -583,7 +584,7 @@ let gate_row ?(health = "healthy") ?(paused = false)
        "meta":{"name":%S,"trace_id":"trace-1","created_at":"2026-08-21T17:32:29Z",
                "updated_at":"2026-08-23T06:53:43Z","sandbox_profile":%S},
        "health":%S,"paused":%b,"next_action":%s,"runtime_blocker_summary":null,
-       "candle_balance_milli":null,"portrait":{"state":"ready","equipment":{"face":"bare_face","neck":"bare_neck","head":"bare_head","hand":"empty_hand","base":"no_dish"}},
+       "candle_balance_milli":null,"candle_account_revision":null,"portrait":{"state":"ready","equipment":{"face":"bare_face","neck":"bare_neck","head":"bare_head","hand":"empty_hand","base":"no_dish"}},
        "phase":%S,"keepalive_running":true,"activation_mode":"autonomous","runtime_id":"anthropic.claude-opus-5",
        "created_at":"2026-08-21T17:32:29Z","updated_at":"2026-08-23T06:53:43Z"}|}
     name name name sandbox_profile health paused next_action phase
@@ -674,11 +675,19 @@ let test_roster_candle_amounts_and_status_agree () =
   let row balance = match Yojson.Safe.from_string (gate_row "analyst") with
     | `Assoc fields -> `Assoc (("candle_balance_milli",balance) :: List.remove_assoc "candle_balance_milli" fields)
     | _ -> Alcotest.fail "bad Keeper fixture" in
-  let envelope candle balance = `Assoc ["candle",candle;"keepers",`List [row balance];"total",`Int 1;"truncated",`Bool false] in
+  let envelope candle balance =
+    let revision = match Yojson.Safe.Util.member "status" candle with
+      | `String "off" -> `Null | _ -> `String (String.make 64 'a') in
+    let row = match row balance with
+      | `Assoc fields -> `Assoc (("candle_account_revision",revision)::List.remove_assoc "candle_account_revision" fields)
+      | _ -> Alcotest.fail "bad Keeper fixture" in
+    `Assoc ["candle",candle;"keepers",`List [row];"total",`Int 1;"truncated",`Bool false] in
   (match Decode.decode_keeper_runtime_list (envelope ready (`String "9007199254740993")) with
    | Ok ([runtime],[],false,1,Ok (Candle_observation.Ready supply)) ->
      Alcotest.(check (option string)) "wallet is not rounded through float" (Some "9007199254740993") runtime.kr_candle_balance_milli;
-     Alcotest.(check string) "supply exceeds machine integer without loss" amount supply.issued_milli
+     Alcotest.(check string) "supply exceeds machine integer without loss" amount supply.issued_milli;
+     Alcotest.(check bool) "roster keeps the exact account revision" true
+       (runtime.kr_candle_account_revision = Ok (Some (String.make 64 'a')))
    | _ -> Alcotest.fail "exact Candle reading rejected");
   let unavailable json = match Decode.decode_keeper_runtime_list json with
     | Ok (rows, errors, truncated, total, Error detail) ->
@@ -764,7 +773,7 @@ let test_a_row_without_a_sandbox_profile_is_rejected () =
       {|{"candle":{"status":"off"},"count":1,"total":1,"truncated":false,"keepers":[
          {"runtime_class":"keeper","name":"n","agent_name":"keeper-n-agent",
           "meta":{"name":"n","trace_id":"t","created_at":"c","updated_at":"u"},
-          "candle_balance_milli":null,"portrait":{"state":"ready","equipment":{"face":"bare_face","neck":"bare_neck","head":"bare_head","hand":"empty_hand","base":"no_dish"}},
+          "candle_balance_milli":null,"candle_account_revision":null,"portrait":{"state":"ready","equipment":{"face":"bare_face","neck":"bare_neck","head":"bare_head","hand":"empty_hand","base":"no_dish"}},
           "health":"healthy","paused":false,"next_action":null,
           "phase":"running","keepalive_running":true,"activation_mode":"autonomous","runtime_id":"r",
           "created_at":"c","updated_at":"u"}]}|}
@@ -846,7 +855,7 @@ let test_roster_decode_rejects_an_unknown_phase () =
 (* A detail-less error is retained as unavailable, never a runtime snapshot. *)
 let error_row name = Printf.sprintf
     {|{"status":"error","runtime_class":"keeper","name":%S,
-       "keepalive_running":false,"candle_balance_milli":null,
+       "keepalive_running":false,"candle_balance_milli":null,"candle_account_revision":null,
        "meta":null,"created_at":null,"updated_at":null}|}
     name
 
@@ -868,7 +877,7 @@ let test_roster_decodes_an_error_row_without_refusing_the_rest () =
 let test_actual_producer_error_is_isolated () =
   let producer_row = Yojson.Safe.from_string
     {|{"status":"error","runtime_class":"keeper","name":"broken-meta",
-       "keepalive_running":false,"candle_balance_milli":null,"meta":null,"created_at":null,"updated_at":null,
+       "keepalive_running":false,"candle_balance_milli":null,"candle_account_revision":null,"meta":null,"created_at":null,"updated_at":null,
        "effective_meta_error":{"keeper":"broken-meta","message":"metadata unreadable",
        "terminal_reason":"effective_meta_read_failed","severity":"error",
        "operator_action_required":true,"next_action":"fix_keeper_toml_or_keeper_instructions"}}|} in
@@ -1072,7 +1081,7 @@ let test_purge_response_binds_exact_operation () =
 let test_configuration_error_isolated_and_deletable () =
   let json = Yojson.Safe.from_string
       (Printf.sprintf
-         {|{"candle":{"status":"off"},"total":2,"truncated":false,"keepers":[%s,{"name":"probe","candle_balance_milli":null,"effective_meta_error":{"keeper":"probe","message":"sandbox_profile is required"}}]}|}
+         {|{"candle":{"status":"off"},"total":2,"truncated":false,"keepers":[%s,{"name":"probe","candle_balance_milli":null,"candle_account_revision":null,"effective_meta_error":{"keeper":"probe","message":"sandbox_profile is required"}}]}|}
          (gate_row "analyst")) in
   match Decode.decode_keeper_runtime_list json with
   | Error detail -> Alcotest.fail detail
@@ -1098,7 +1107,7 @@ let test_configuration_error_identity_must_match_the_row () =
   let roster keeper_field =
     Yojson.Safe.from_string
       (Printf.sprintf
-         {|{"candle":{"status":"off"},"total":2,"truncated":false,"keepers":[%s,{"name":"probe","candle_balance_milli":null,"effective_meta_error":{%s"message":"sandbox_profile is required"}}]}|}
+         {|{"candle":{"status":"off"},"total":2,"truncated":false,"keepers":[%s,{"name":"probe","candle_balance_milli":null,"candle_account_revision":null,"effective_meta_error":{%s"message":"sandbox_profile is required"}}]}|}
          (gate_row "analyst") keeper_field)
   in
   let names_field detail affix =

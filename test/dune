@@ -2585,6 +2585,12 @@
 (include stanzas/test_sandbox_image_version.inc)
 (include stanzas/test_sandbox_image_catalog.inc)
 (include stanzas/test_auth_token_inventory.inc)
+(include stanzas/test_credential_expiry.inc)
+(include stanzas/test_auth_token_prune_transaction.inc)
+(include stanzas/test_auth_token_rotation_transaction.inc)
+(include stanzas/test_auth_file_backed_transaction.inc)
+(include stanzas/test_auth_regular_read_boundary.inc)
+(include stanzas/test_auth_credential_index_authority.inc)
 (include stanzas/test_config_root_embedded_seed.inc)
 (include stanzas/test_builtin_skill_package.inc)
 (include stanzas/test_builtin_skill_judgement.inc)
@@ -3689,6 +3695,7 @@
  (modules test_tui_chat_queue_wiring)
  (libraries masc_tui_link_preview masc_tui_image_preview
   masc_tui_answering
+  masc_tui_keys
   alcotest
   ast_grep
   astring
@@ -3745,7 +3752,7 @@
 (test
  (name test_tui_text_input_target)
  (modules test_tui_text_input_target)
- (libraries
+ (libraries masc_tui_surface_navigation
   alcotest
   fmt
   masc
@@ -4138,6 +4145,9 @@
  (deps
   %{workspace_root}/bin/masc_tui.ml
   %{workspace_root}/bin/masc_tui_render.ml
+  %{workspace_root}/bin/masc_tui_render_prim.ml
+  %{workspace_root}/bin/masc_tui_render_chat.ml
+  %{workspace_root}/bin/masc_tui_render_approvals.ml
   %{workspace_root}/bin/masc_tui_render_tools.ml
   %{workspace_root}/bin/masc_tui_types.ml)
  (libraries
@@ -4272,7 +4282,7 @@
 (test
  (name test_tui_approval_authority)
  (modules test_tui_approval_authority)
- (libraries alcotest masc_tui_approval_authority masc_tui_types))
+ (libraries masc_tui_approvals_model alcotest masc_tui_approval_authority masc_tui_types))
 
 (test
  (name test_tui_terminal_profile)
@@ -5715,6 +5725,7 @@
  (modules test_tui_chat_activity)
  (libraries alcotest astring masc_tui_answering masc_tui_types masc_tui_keeper_chat_live
   masc_tui_keeper_chat_projection masc_tui_keeper_chat_queue
+  masc_tui_keeper_chat_transcript
   masc_tui_roster_pane masc_tui_frame masc_tui_message_layout))
 
 (test
@@ -5779,7 +5790,7 @@
  ; vocabulary is read through Ast_grep. The source is a dep: without it the
  ; test reads a cached verdict and stays green while the row it measures has
  ; gone back to being joined by hand.
- (deps %{workspace_root}/bin/masc_tui_render.ml)
+ (deps %{workspace_root}/bin/masc_tui_render_approvals.ml)
  (libraries alcotest ast_grep masc_tui_frame masc_tui_message_layout))
 
 (test
@@ -6051,6 +6062,7 @@
 (include stanzas/test_tui_keeper_portrait.inc)
 (include stanzas/test_tui_candle.inc)
 (include stanzas/test_tui_chat_portrait.inc)
+
 (include stanzas/test_tui_emblem_state.inc)
 (include stanzas/test_tui_link_label.inc)
 (include stanzas/test_tui_link_preview.inc)
@@ -6367,7 +6379,7 @@
 (test
  (name test_tui_loading_notice)
  (modules test_tui_loading_notice)
- (libraries alcotest masc_tui_types))
+ (libraries alcotest masc masc.masc_schedule masc_tui_types))
 
 (test
  (name test_keeper_composition_async_broker)
@@ -7877,6 +7889,16 @@
  (deps (alias runtest-test_tui_preset_viewport_pty)))
 
 (rule
+ (alias runtest-test_tui_goal_detail_viewport_pty)
+ (deps test_tui_goal_detail_viewport_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_goal_detail_viewport_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_goal_detail_viewport_pty)))
+
+(rule
  (alias runtest-test_tui_agenda_navigation_pty)
  (deps test_tui_agenda_navigation_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
  (action (run python3 %{dep:test_tui_agenda_navigation_pty.py} %{dep:../bin/masc_tui.exe})))
@@ -7969,6 +7991,10 @@
 
 (include stanzas/test_candle_purchase_flow.inc)
 
+(include stanzas/test_tui_remote_workspace_history_pty.inc)
+
+(include stanzas/test_tui_item_workspace_authority_pty.inc)
+
 (test
  (name test_sse_wire_payload)
  (modules test_sse_wire_payload)
@@ -7977,3 +8003,6 @@
 (include stanzas/test_tui_candle_currency_pty.inc)
 
 (include stanzas/test_item_http_redirects.inc)
+
+(include stanzas/test_tui_remote_equipped_portrait.inc)
+(include stanzas/test_play_current_credential_authority.inc)

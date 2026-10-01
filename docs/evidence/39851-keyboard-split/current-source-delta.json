@@ -14,7 +14,7 @@
     "test/tui_keyboard_keepers.py": "15c756ec9b0383ff6c6cf15e5cbb91f3d4278354d7379f3212ca93677ad87e17",
     "test/tui_keyboard_machines.py": "c7c273ce4ea5d7ed151b867f8323f190010f165f0477388720b95a8559ee7c2a",
     "test/tui_keyboard_memory.py": "65a2860f0730bed346c94871229ff694de7411f152d5ce05f23a385128e0c8f4",
-    "test/tui_keyboard_observer.py": "5f6070ae6baa96d1b4406048a962d06352c96a22b0b9b04c797253d7c477770e",
+    "test/tui_keyboard_observer.py": "1e4a827822ac1d4e4c00bce470541b50e9762572a2fdd6ae970f7d75bd50986e",
     "test/tui_keyboard_planning.py": "ce1a3b4a83e59fdf90fc51ea39ffc09b5a38b8084f724912d0cb01f90334f20a",
     "test/tui_keyboard_repositories.py": "f3208c2055970d679c41dd6353dd967fd1be330a8b77b714351d7ebcc29f9bc9",
     "test/tui_keyboard_resources.py": "81b697db06d8f1b9b013274a2d6bb442f0a79b04afcfcd765ba9437a76f098e9",

@@ -119,7 +119,7 @@ let exact_fields expected fields =
   then Ok () else Error "invalid released binding shape"
 let rec unique_json = function
   | `Assoc fields ->
-      let* () = Json_util.reject_unknown_fields ~allowed:(List.map fst fields) fields in
+      let* () = Json_util.reject_unknown_fields ~surface:"retained binding" ~allowed:(List.map fst fields) fields in
       List.fold_left (fun result (_, value) -> let* () = result in unique_json value) (Ok ()) fields
   | `List values -> List.fold_left (fun result value -> let* () = result in unique_json value) (Ok ()) values
   | _ -> Ok ()
@@ -188,7 +188,7 @@ let validate_released_binding fields =
           | Some (`String "lane_output") -> Ok ["source_id";"kind";"installation_id";"selection";"output_id"]
           | Some (`String "browser_document") -> Ok ["source_id";"kind";"lane";"client_id";"tab_id";"target_id";"environment";"request_id"]
           | _ -> Error "source not present in published binding schema" in
-        Json_util.reject_unknown_fields ~allowed f) (Ok ()) sources
+        Json_util.reject_unknown_fields ~surface:"retained source" ~allowed f) (Ok ()) sources
     | _ -> Error "invalid retained sources" in
   Lane_addon_sources.parse binding
 let prove_released_shared ~bindings fields =

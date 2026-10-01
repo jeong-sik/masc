@@ -317,6 +317,126 @@ let report_action (state : state) event_type content =
   state.last_action <-
     Some (Masc_tui_ansi.Terminal_text.single_line content, Unix.gettimeofday ())
 
+(* Local metadata and the public remote roster share identity-based navigation.
+   Replacing rows never reads a local directory. *)
+let replace_keeper_rows ~preserve_on_error (state : state)
+    ~keepers:loaded_keepers ~error:keepers_error =
+  (* Capture navigation before replacing the roster. Detail and logs are bound
+     to the selected row; message mode is bound to its explicit target. *)
+  let current_keeper_ids =
+    List.map (fun keeper -> keeper.k_name) state.keepers
+  in
+  let selected_keeper_name =
+    if state.keeper_cursor < 0 then None
+    else
+      List.nth_opt state.keepers state.keeper_cursor
+      |> Option.map (fun keeper -> keeper.k_name)
+  in
+  let current_keeper_mode =
+    match state.view with
+    | Keepers mode -> Some mode
+    | Overview | Acting | Metrics | Memory | Lanes | Clients | Board | Approvals
+    | Planning | Schedules | Verification | Harness | Fusion | Repositories
+    | Code | Changes | Connectors | Runtime | Config | Resources | Tools
+    | System_logs -> None
+  in
+  let current_navigation =
+    match current_keeper_mode with
+    | Some Keeper_detail ->
+        (match selected_keeper_name with
+         | Some keeper_name ->
+             Keeper_selection.Detail_keeper
+               { keeper_name; cursor = state.keeper_cursor }
+         | None -> Keeper_selection.List_cursor state.keeper_cursor)
+    | Some Keeper_logs ->
+        (match selected_keeper_name with
+         | Some keeper_name ->
+             Keeper_selection.Logs_keeper
+               { keeper_name; cursor = state.keeper_cursor }
+         | None -> Keeper_selection.List_cursor state.keeper_cursor)
+    | Some Keeper_calls ->
+        (match selected_keeper_name with
+         | Some keeper_name ->
+             Keeper_selection.Calls_keeper
+               { keeper_name; cursor = state.keeper_cursor }
+         | None -> Keeper_selection.List_cursor state.keeper_cursor)
+    | Some Keeper_message ->
+        (match state.msg_target_keeper_name with
+         | Some keeper_name ->
+             Keeper_selection.Message_keeper
+               { keeper_name; cursor = state.keeper_cursor }
+         | None -> Keeper_selection.List_cursor state.keeper_cursor)
+    | Some Keeper_list
+    (* The picker rides the list cursor: its own cursor points into the
+       runtime catalogue, not the roster. *)
+    | Some Keeper_runtime_pick
+    | None ->
+        Keeper_selection.List_cursor state.keeper_cursor
+  in
+
+  let keepers =
+    match keepers_error, current_keeper_mode with
+    | Some _, Some (Keeper_detail | Keeper_logs | Keeper_calls
+                   | Keeper_runtime_pick) when preserve_on_error ->
+        (* A partial or failed read cannot prove that the focused Keeper was
+           deleted. Keep the last complete roster until a reliable refresh can
+           reconcile that identity. Message mode instead uses its explicit
+           target and can render the unavailable state safely. *)
+        state.keepers
+    | Some _, Some (Keeper_detail | Keeper_logs | Keeper_calls | Keeper_runtime_pick
+                   | Keeper_list | Keeper_message) | Some _, None | None, _ ->
+        loaded_keepers
+  in
+  state.keepers <- keepers;
+  state.keepers_error <- keepers_error;
+
+  let next_keeper_ids =
+    List.map (fun keeper -> keeper.k_name) state.keepers
+  in
+  (* A roster change no longer dismisses an action notice: the notice answers
+     the operator's last action, and a refresh tick would otherwise wipe it
+     before it is read. User actions still clear it. *)
+  (match
+     Keeper_selection.reconcile ~current_ids:current_keeper_ids
+       ~next_ids:next_keeper_ids ~current:current_navigation
+   with
+   | Keeper_selection.List_cursor cursor ->
+       state.keeper_cursor <- cursor;
+       (match current_keeper_mode with
+        | Some (Keeper_detail | Keeper_logs | Keeper_calls | Keeper_message) ->
+            state.view <- Keepers Keeper_list;
+            state.detail_scroll <- 0;
+            state.log_scroll <- 0;
+            state.keeper_calls_scroll <- 0
+        (* The picker rides the list cursor, so a reconciled cursor is not a
+           lost focus: it stays open across refreshes. *)
+        | Some Keeper_runtime_pick | Some Keeper_list | None -> ())
+   | Keeper_selection.Detail_keeper { cursor; _ } ->
+       state.keeper_cursor <- cursor;
+       state.view <- Keepers Keeper_detail
+   | Keeper_selection.Logs_keeper { cursor; _ } ->
+       state.keeper_cursor <- cursor;
+       state.view <- Keepers Keeper_logs
+   | Keeper_selection.Calls_keeper { cursor; _ } ->
+       state.keeper_cursor <- cursor;
+       state.view <- Keepers Keeper_calls
+   | Keeper_selection.Message_keeper { cursor; _ } ->
+       state.keeper_cursor <- cursor;
+       state.view <- Keepers Keeper_message);
+
+  let selected_keeper = List.nth_opt state.keepers state.keeper_cursor in
+
+  let current_logs : Metrics_tail.snapshot =
+    { entries = state.log_entries; error = state.log_error }
+  in
+  let selected_keeper_name_after_refresh =
+    Option.map (fun keeper -> keeper.k_name) selected_keeper
+  in
+  Metrics_tail.reconcile_selection ~current:current_logs
+    ~previous_keeper:selected_keeper_name
+    ~selected_keeper:selected_keeper_name_after_refresh
+  |> apply_keeper_log_snapshot state
+
 (** Load state from .masc directory *)
 let load_from_masc_dir (state : state) (base_path : string) =
   let masc_dir = Filename.concat base_path Common.masc_dirname in
@@ -383,129 +503,14 @@ let load_from_masc_dir (state : state) (base_path : string) =
   state.operator_stalled <- operator_stalled;
   state.goals_to_confirm <- load_goals_to_confirm base_path;
 
-  (* Capture navigation before replacing the roster. Detail and logs are bound
-     to the selected row; message mode is bound to its explicit target. *)
-  let current_keeper_ids =
-    List.map (fun keeper -> keeper.k_name) state.keepers
-  in
-  let selected_keeper_name =
-    if state.keeper_cursor < 0 then None
-    else
-      List.nth_opt state.keepers state.keeper_cursor
-      |> Option.map (fun keeper -> keeper.k_name)
-  in
-  let current_keeper_mode =
-    match state.view with
-    | Keepers mode -> Some mode
-    | Overview | Acting | Metrics | Memory | Lanes | Clients | Board | Approvals
-    | Planning | Schedules | Verification | Harness | Fusion | Repositories
-    | Code | Changes | Connectors | Runtime | Config | Resources | Tools
-    | System_logs -> None
-  in
-  let current_navigation =
-    match current_keeper_mode with
-    | Some Keeper_detail ->
-        (match selected_keeper_name with
-         | Some keeper_name ->
-             Keeper_selection.Detail_keeper
-               { keeper_name; cursor = state.keeper_cursor }
-         | None -> Keeper_selection.List_cursor state.keeper_cursor)
-    | Some Keeper_logs ->
-        (match selected_keeper_name with
-         | Some keeper_name ->
-             Keeper_selection.Logs_keeper
-               { keeper_name; cursor = state.keeper_cursor }
-         | None -> Keeper_selection.List_cursor state.keeper_cursor)
-    | Some Keeper_calls ->
-        (match selected_keeper_name with
-         | Some keeper_name ->
-             Keeper_selection.Calls_keeper
-               { keeper_name; cursor = state.keeper_cursor }
-         | None -> Keeper_selection.List_cursor state.keeper_cursor)
-    | Some Keeper_message ->
-        (match state.msg_target_keeper_name with
-         | Some keeper_name ->
-             Keeper_selection.Message_keeper
-               { keeper_name; cursor = state.keeper_cursor }
-         | None -> Keeper_selection.List_cursor state.keeper_cursor)
-    | Some Keeper_list
-    (* The picker rides the list cursor: its own cursor points into the
-       runtime catalogue, not the roster. *)
-    | Some Keeper_runtime_pick
-    | None ->
-        Keeper_selection.List_cursor state.keeper_cursor
-  in
-
-  (* Load keepers *)
-  let loaded_keepers, keepers_error = load_keepers base_path in
-  let keepers =
-    match keepers_error, current_keeper_mode with
-    | Some _, Some (Keeper_detail | Keeper_logs | Keeper_calls
-                   | Keeper_runtime_pick) ->
-        (* A partial or failed read cannot prove that the focused Keeper was
-           deleted. Keep the last complete roster until a reliable refresh can
-           reconcile that identity. Message mode instead uses its explicit
-           target and can render the unavailable state safely. *)
-        state.keepers
-    | Some _, Some (Keeper_list | Keeper_message) | Some _, None | None, _ ->
-        loaded_keepers
-  in
-  state.keepers <- keepers;
-  state.keepers_error <- keepers_error;
-
-  let next_keeper_ids =
-    List.map (fun keeper -> keeper.k_name) state.keepers
-  in
-  (* A roster change no longer dismisses an action notice: the notice answers
-     the operator's last action, and a refresh tick would otherwise wipe it
-     before it is read. User actions still clear it. *)
-  (match
-     Keeper_selection.reconcile ~current_ids:current_keeper_ids
-       ~next_ids:next_keeper_ids ~current:current_navigation
-   with
-   | Keeper_selection.List_cursor cursor ->
-       state.keeper_cursor <- cursor;
-       (match current_keeper_mode with
-        | Some (Keeper_detail | Keeper_logs | Keeper_calls | Keeper_message) ->
-            state.view <- Keepers Keeper_list;
-            state.detail_scroll <- 0;
-            state.log_scroll <- 0;
-            state.keeper_calls_scroll <- 0
-        (* The picker rides the list cursor, so a reconciled cursor is not a
-           lost focus: it stays open across refreshes. *)
-        | Some Keeper_runtime_pick | Some Keeper_list | None -> ())
-   | Keeper_selection.Detail_keeper { cursor; _ } ->
-       state.keeper_cursor <- cursor;
-       state.view <- Keepers Keeper_detail
-   | Keeper_selection.Logs_keeper { cursor; _ } ->
-       state.keeper_cursor <- cursor;
-       state.view <- Keepers Keeper_logs
-   | Keeper_selection.Calls_keeper { cursor; _ } ->
-       state.keeper_cursor <- cursor;
-       state.view <- Keepers Keeper_calls
-   | Keeper_selection.Message_keeper { cursor; _ } ->
-       state.keeper_cursor <- cursor;
-       state.view <- Keepers Keeper_message);
-
-  let selected_keeper = List.nth_opt state.keepers state.keeper_cursor in
-
-  (* Load live context for the selected keeper. Metadata-only refresh paths do
-     not read metrics, but an empty roster must clear any cached log state. *)
-  load_selected_live_context state base_path selected_keeper;
-  let current_logs : Metrics_tail.snapshot =
-    { entries = state.log_entries; error = state.log_error }
-  in
-  let selected_keeper_name_after_refresh =
-    Option.map (fun keeper -> keeper.k_name) selected_keeper
-  in
-  Metrics_tail.reconcile_selection ~current:current_logs
-    ~previous_keeper:selected_keeper_name
-    ~selected_keeper:selected_keeper_name_after_refresh
-  |> apply_keeper_log_snapshot state;
+  let keepers, error = load_keepers base_path in
+  replace_keeper_rows ~preserve_on_error:true state ~keepers ~error;
+  load_selected_live_context state base_path
+    (List.nth_opt state.keepers state.keeper_cursor);
 
   state.local_workspace <- Local_workspace_read
 
-let clear_local_workspace (state : state) =
+let clear_local_workspace ?(keep_keeper_rows = false) (state : state) =
   state.agents <- [];
   state.tasks <- [];
   state.tasks_domain <- [];
@@ -516,10 +521,12 @@ let clear_local_workspace (state : state) =
   state.operator_stalled <- Masc_tui_agenda.Not_read;
   state.goals_to_confirm <- Masc_tui_agenda.Not_read;
   state.tasks_error <- None;
-  state.keepers <- [];
-  state.keepers_error <- None;
+  if not keep_keeper_rows then begin
+    state.keepers <- [];
+    state.keepers_error <- None;
+    state.keeper_cursor <- 0
+  end;
   state.lanes_action_error <- None;
-  state.keeper_cursor <- 0;
   state.log_entries <- [];
   state.log_error <- None;
   state.live_context <- Context_state.empty;

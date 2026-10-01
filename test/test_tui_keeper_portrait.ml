@@ -190,9 +190,9 @@ let test_equipment_change_replaces_same_keeper_pixels () =
   let unchanged = Option.get (band ~cache ~display:pixels ~equipment:equipped ()) in
   check bool "unchanged equipment reuses the cache" true (second.Portrait.image == unchanged.Portrait.image);
   let mosaic = Option.get (band ~cache ~equipment:equipped ()) in
-  let expected = Draw.render (Look.body_of_name alpha) equipped mosaic.Portrait.box.View.size in
-  check string "mosaic keeps the server equipment pixels"
-    expected.Draw.rgba mosaic.Portrait.image.Draw.rgba;
+  let expected_mosaic = Draw.render (Look.body_of_name alpha) equipped mosaic.Portrait.box.View.size in
+  check string "mosaic keeps the server equipment in accessory pixels"
+    expected_mosaic.Draw.rgba mosaic.Portrait.image.Draw.rgba;
   let placement band = Option.get (Portrait.placement band ~scroll:0
     ~visible_rows:band.Portrait.box.View.rows ~origin:(4,2)) in
   ignore (frame []);
@@ -256,13 +256,53 @@ let test_observed_items_remain_visible_in_the_info_mosaic () =
     (restored.Portrait.image == bare.Portrait.image)
 
 
+let test_item_mosaic_preview_changes_with_selected_accessory () =
+  let previous = View.current_display () in
+  Fun.protect ~finally:(fun () -> View.set_display previous) (fun () ->
+    View.set_display View.Mosaic;
+    let preview equipment = Option.get (Portrait.preview ~name:alpha ~equipment
+      ~content_rows:(mosaic_size.Portrait.rows + 2)
+      ~content_cols:(mosaic_size.Portrait.cols + 4)) in
+    let glasses = {Look.bare with face=Look.Glasses} in
+    let shades = {Look.bare with face=Look.Shades} in
+    let info () = Option.get (Portrait.shown ~name:alpha ~equipment:glasses
+      ~content_rows:(Portrait.min_content_rows mosaic_size)
+      ~content_cols:(Portrait.min_content_cols mosaic_size)) in
+    let observed_info = info () in
+    let expected_info = Draw.render (Look.body_of_name alpha) glasses
+      observed_info.Portrait.box.View.size in
+    check string "Info draws the observed glasses with the accessory renderer"
+      expected_info.Draw.rgba observed_info.Portrait.image.Draw.rgba;
+    let first = preview glasses and second = preview shades in
+    check bool "selecting shades changes the glasses preview" false
+      (String.equal first.Portrait.image.Draw.rgba second.Portrait.image.Draw.rgba);
+    let mosaic shown = View.lines ~project View.Mosaic shown.Portrait.box shown.Portrait.image in
+    check bool "the projected Mosaic cells show the selection change" false
+      (mosaic first = mosaic second);
+    check bool "returning to glasses restores its cached preview" true
+      ((preview glasses).Portrait.image == first.Portrait.image);
+    check string "Info and the same observed glasses draw the same pixels"
+      observed_info.Portrait.image.Draw.rgba first.Portrait.image.Draw.rgba;
+    let retained_info = info () in
+    check bool "selecting a preview does not replace the observed Info cache entry" true
+      (retained_info.Portrait.image == observed_info.Portrait.image);
+    check string "selecting shades leaves observed Info equipment unchanged"
+      observed_info.Portrait.image.Draw.rgba retained_info.Portrait.image.Draw.rgba;
+    check bool "the shades preview differs from observed glasses" false
+      (String.equal second.Portrait.image.Draw.rgba retained_info.Portrait.image.Draw.rgba);
+    View.set_display View.No_picture;
+    check bool "No_picture still suppresses Item preview" true
+      (Option.is_none (Portrait.preview ~name:alpha ~equipment:shades
+        ~content_rows:100 ~content_cols:100)))
+
 let () =
   run "tui_keeper_portrait"
     [ ( "band"
       , [ test_case "a small pane keeps its rows for facts" `Quick
             test_a_small_pane_keeps_its_rows_for_facts
         ; test_case "no picture is no band" `Quick test_no_picture_is_no_band
-        ; test_case "the band is compact" `Quick test_the_band_is_compact
+        ; test_case "Item Mosaic selection changes accessory preview" `Quick test_item_mosaic_preview_changes_with_selected_accessory;
+          test_case "the band is compact" `Quick test_the_band_is_compact
         ; test_case "the still portrait the name draws" `Quick
             test_the_still_portrait_the_name_draws
         ; test_case "observed Items remain visible in the Info mosaic" `Quick

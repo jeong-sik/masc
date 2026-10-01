@@ -21,6 +21,7 @@ try {
     accountReads.push({ recovered })
     return route.fulfill({ contentType: 'application/json', body: JSON.stringify({
       status: 'ready', keeper: 'rondo', balance_milli: recovered ? '600' : '800',
+      account_revision: (recovered ? '1' : '0').repeat(64),
       owned_items: recovered ? ['crown', 'beanie'] : ['crown'], catalog,
     }) })
   })
@@ -62,6 +63,7 @@ try {
   if (await page.getByRole('alert').count()) throw new Error('warm-up retained old preview failure')
   await capture('item-workspace-warmup')
   recovered = true
+  await page.evaluate(() => window.updateKeeperItemsFixture('1'.repeat(64)))
   await page.evaluate(() => window.refreshKeeperItemsExecutionFixture())
   await page.getByText('0.600 Candle', { exact: true }).waitFor()
   await page.getByText('보유 2 / 18개', { exact: true }).waitFor()

@@ -3636,6 +3636,10 @@ let runtime_model_list_cmd =
          | Error message -> Error message
          | Ok catalog ->
            let entries = wizard_model_entries client catalog in
+           let entries = match client with
+             | Wizard_codex -> List.filter (fun (entry : Llm_provider.Model_catalog.model_entry) ->
+                 Option.is_none entry.provider_name) entries
+             | Wizard_claude_code -> entries in
            Ok
              (`List
                (entries

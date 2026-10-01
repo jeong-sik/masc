@@ -695,7 +695,7 @@ let test_item_revision_hint_preserves_keeper_observation () =
     ((decode ~candle:disabled ~balance:`Null (`String digest)).kr_candle_account_revision = Ok (Some digest));
   Alcotest.(check bool) "null authorizes only observed Off" true
     ((decode ~candle:off ~balance:`Null `Null).kr_candle_account_revision = Ok None);
-  List.iter (fun runtime ->
+  List.iter (fun (runtime : Decode.keeper_runtime) ->
     Alcotest.(check bool) "invalid authority reported independently" true
       (Result.is_error runtime.kr_candle_account_revision);
     let roster = Control.Roster_complete [runtime] in

@@ -67,7 +67,7 @@ check_failure other-status
 run_case success 0 99 0
 pin_count=$(grep -c '^pin ' "$work/success/calls")
 [[ "$pin_count" -gt 1 ]]
-! grep -q '^install$' "$work/success/calls"
+if grep -q '^install$' "$work/success/calls"; then exit 1; fi
 run_case success-install 0 99 0 --install
 [[ $(grep -c '^pin ' "$work/success-install/calls") -eq "$pin_count" ]]
 [[ $(grep -c '^install$' "$work/success-install/calls") -eq 1 ]]

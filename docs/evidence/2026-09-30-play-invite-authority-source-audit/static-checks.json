@@ -1,0 +1,158 @@
+{
+  "kind": "parse_and_whitespace_only",
+  "checks": [
+    {
+      "command": [
+        "ocamlformat",
+        "--output",
+        "/dev/null",
+        "lib/auth/auth.mli"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "ocamlformat",
+        "--output",
+        "/dev/null",
+        "lib/auth/auth_credential_base.ml"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "ocamlformat",
+        "--output",
+        "/dev/null",
+        "lib/auth/auth_credential_token.ml"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "ocamlformat",
+        "--output",
+        "/dev/null",
+        "lib/auth/auth_credential_token.mli"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "ocamlformat",
+        "--output",
+        "/dev/null",
+        "lib/play/play_invite.ml"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "ocamlformat",
+        "--output",
+        "/dev/null",
+        "lib/play/play_invite.mli"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "ocamlformat",
+        "--output",
+        "/dev/null",
+        "lib/server/server_routes_http_routes_play.ml"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "ocamlformat",
+        "--output",
+        "/dev/null",
+        "test/test_play_credential_transaction.ml"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "ocamlformat",
+        "--output",
+        "/dev/null",
+        "test/test_play_invite.ml"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "ocamlformat",
+        "--output",
+        "/dev/null",
+        "lib/keeper/keeper_dos_controller.ml"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "ocamlformat",
+        "--output",
+        "/dev/null",
+        "lib/keeper/keeper_dos_controller.mli"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "ocamlformat",
+        "--output",
+        "/dev/null",
+        "test/test_dos_input_routes.ml"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "ocamlformat",
+        "--output",
+        "/dev/null",
+        "test/test_dos_tools.ml"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    }
+  ]
+}

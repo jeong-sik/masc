@@ -2136,6 +2136,7 @@
  (wrapped false)
  (modules masc_tui_emblem_screen)
  (libraries
+  masc
   masc.keeper_portrait
   masc_tui_keeper_portrait
   masc_tui_graphics

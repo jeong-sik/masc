@@ -494,6 +494,11 @@ type typesafeai =
   { lane_enabled : bool
   ; destinations : typesafeai_destination * typesafeai_destination list
   ; board_attention : bool
+  ; board_attention_confidence_floor : float
+      (** [board_attention_confidence_floor]: Jev's relevant or not-relevant
+          answer settles a Board attention candidate when its confidence is at
+          least this value (0 to 1); below it the [board_attention_exact] lane
+          judges the candidate. *)
   ; absorb_gate : bool
   ; context_review : bool
   ; skill_applicability : bool
@@ -512,11 +517,21 @@ let typesafe_destination =
 
 (* What an absent [typesafeai] table means: the lane on when a key is set,
    the vendor's own server alone, Board attention on, the absorb gate off (it
-   sends memories out, so the operator turns it on by name), nobody excluded. *)
+   sends memories out, so the operator turns it on by name), nobody excluded.
+
+   The Board attention confidence floor follows TypeSafe's confidence-gated
+   routing (https://docs.typesafe.ai/confidence.md: act when confidence is
+   high, fall back to a different system when it is low). With the three
+   relevance choices, confidence = (3 x top probability - 1) / 2, so 0.3 means
+   Jev's top choice holds about 53% of the probability. Measured on the
+   2026-09-23..30 logs: of 36,807 not-relevant Jev answers the LLM lane judged
+   again, it overturned 1,304. Below 0.3 were 7.3% of those answers and 41% of
+   the overturns; at or above it the LLM overturned 2.3%. *)
 let default_typesafeai =
   { lane_enabled = true
   ; destinations = typesafe_destination, []
   ; board_attention = true
+  ; board_attention_confidence_floor = 0.3
   ; absorb_gate = false
   ; context_review = false
   ; skill_applicability = false

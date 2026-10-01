@@ -12,3 +12,5 @@ val empty : t
 val of_json : Yojson.Safe.t -> (t, string) result
 val to_json : t -> Yojson.Safe.t
 val render : reading -> Yojson.Safe.t -> (string, string) result
+(** Text readings preserve line breaks. Terminal and HTML consumers must
+    sanitize/escape the returned text at their respective display boundary. *)

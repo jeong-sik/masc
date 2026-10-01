@@ -98,7 +98,7 @@ let test_json_shape () =
   check int "window propagated" 60 window
 
 let test_unavailable_queue_is_not_projected_as_empty () =
-  let error : Masc.Keeper_approval_queue.storage_error =
+  let error : Masc.Keeper_approval_queue_result.storage_error =
     { path = "/tmp/masc-gate-metrics-unavailable"
     ; reason = "current snapshot requires reset"
     }

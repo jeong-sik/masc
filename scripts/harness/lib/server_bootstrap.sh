@@ -1,59 +1,52 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Implicit selection stays in the requested checkout, including through
+# symlinks. An external build is allowed only through the explicit argument.
+# Selection records paths; it does not establish the binary's source SHA.
 harness_find_server_exe() {
   local repo_root="$1"
   local explicit="${2:-}"
-  local common_root=""
-  local dune_build_dir="${DUNE_BUILD_DIR:-_build}"
-  local repo_build_dir="$repo_root/$dune_build_dir"
-  local common_build_dir=""
-  if [[ -n "$explicit" && -x "$explicit" ]]; then
-    printf '%s\n' "$explicit"
-    return 0
+  if ! command -v python3 >/dev/null 2>&1; then
+    echo "python3 is required to resolve harness executable ownership" >&2
+    return 1
   fi
+  python3 - "$repo_root" "$explicit" "${DUNE_BUILD_DIR:-_build}" <<'PY_RESOLVE'
+import os
+import pathlib
+import sys
 
-  if command -v git >/dev/null 2>&1; then
-    local common_dir
-    common_dir="$(git -C "$repo_root" rev-parse --git-common-dir 2>/dev/null || true)"
-    if [[ -n "$common_dir" ]]; then
-      if [[ "$common_dir" != /* ]]; then
-        common_dir="$repo_root/$common_dir"
-      fi
-      common_root="$(cd "$(dirname "$common_dir")" && pwd)"
-      common_build_dir="$common_root/$dune_build_dir"
-    fi
-  fi
+repo = pathlib.Path(sys.argv[1]).resolve()
+explicit, build_dir = sys.argv[2:]
 
-  if [[ "$dune_build_dir" = /* ]]; then
-    repo_build_dir="$dune_build_dir"
-    if [[ -n "$common_root" ]]; then
-      common_build_dir="$dune_build_dir"
-    fi
-  fi
+def executable(path):
+    return path.is_file() and os.access(path, os.X_OK)
 
-  local -a candidates=(
-    "${repo_build_dir}/default/bin/main_eio.exe"
-    "${repo_root}/_build/default/bin/main_eio.exe"
-    "${repo_root}/bin/main_eio.exe"
-  )
-  if [[ -n "$common_root" && "$common_root" != "$repo_root" ]]; then
-    candidates+=(
-      "${common_build_dir}/default/bin/main_eio.exe"
-      "${common_root}/_build/default/bin/main_eio.exe"
-      "${common_root}/bin/main_eio.exe"
-    )
-  fi
-  local candidate
-  for candidate in "${candidates[@]}"; do
-    if [[ -x "$candidate" ]]; then
-      printf '%s\n' "$candidate"
-      return 0
-    fi
-  done
+def select(path, source):
+    print(f"harness executable: source={source} repo={repo} path={path}", file=sys.stderr)
+    print(path)
 
-  echo "server executable not found; build with: dune build --root . ./bin/main_eio.exe" >&2
-  return 1
+if explicit:
+    path = pathlib.Path(explicit).resolve()
+    if not executable(path):
+        print(f"explicit server executable is missing or not executable: {path}", file=sys.stderr)
+        sys.exit(1)
+    select(path, "explicit")
+    sys.exit(0)
+
+candidates = [repo / build_dir / "default/bin/main_eio.exe",
+              repo / "_build/default/bin/main_eio.exe", repo / "bin/main_eio.exe"]
+for candidate in candidates:
+    path = candidate.resolve()
+    if not path.is_relative_to(repo):
+        continue
+    if executable(path):
+        select(path, "requested_checkout")
+        sys.exit(0)
+print(f"server executable not found in requested checkout: {repo}; "
+      "supply an explicit executable to use an external build", file=sys.stderr)
+sys.exit(1)
+PY_RESOLVE
 }
 
 harness_pick_free_port() {

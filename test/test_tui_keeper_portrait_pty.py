@@ -54,7 +54,9 @@ COLUMNS = 100
 KITTY_TERMINAL_REPLIES = b"\x1b[6;20;10t" + h.GRAPHICS_SUPPORTED_REPLY
 # Masc_tui_graphics.image_id Keeper_portrait.
 PORTRAIT_IMAGE_ID = b"42"
-PLACEMENT = re.compile(rb"\x1b7\x1b\[(\d+);(\d+)H\x1b_G([^;]*);")
+# A picture at a corner: a transfer, whose control data ends at the payload's
+# ";", or a put of pixels the terminal already holds, which ends the escape.
+PLACEMENT = re.compile(rb"\x1b7\x1b\[(\d+);(\d+)H\x1b_G([^;\x1b]*)(?:;|\x1b\\)")
 # A placement is written after the frame, between a cursor save and restore;
 # it is not text on the row it starts on.
 PLACED_PICTURE = re.compile(rb"\x1b7.*?\x1b8", re.S)
@@ -186,9 +188,12 @@ def portrait_as_pixels(binary: str) -> None:
     def interact(process, fd, _slave, output, _base):
         start = len(output)
         open_alpha_detail(process, fd, output)
+        # The transfers: a later row rewritten across the picture puts the
+        # held pixels back (a=p), which carries no format to check.
         placements = [
             match for match in PLACEMENT.finditer(bytes(output[start:]))
             if kitty_fields(match[3]).get(b"i") == PORTRAIT_IMAGE_ID
+            and kitty_fields(match[3]).get(b"a") == b"T"
         ]
         assert placements, "the detail placed no portrait on a Kitty terminal"
         placement = placements[-1]

@@ -20,6 +20,18 @@ const captures = []
 const errors = []
 let page = null
 let stage = 'context'
+async function retainFailure(failedStage) {
+  try {
+    await writeFile(`${output}/browser-evidence.json`, JSON.stringify({
+      scope: 'Failed isolated native-server dashboard acceptance; no PASS or rollout proof',
+      source_sha: sourceSha, keeper, owned_item: ownedItem,
+      browser_version: browser.version(), stage: failedStage, requests, captures,
+      page_error_count: errors.length, passed: false,
+    }, null, 2) + '\n')
+  } catch {
+    console.error('Item failure receipt could not be retained')
+  }
+}
 try {
   const context = await browser.newContext({ viewport: { width: 1280, height: 900 } })
   await context.addInitScript(({ token, origin }) => {
@@ -142,24 +154,25 @@ try {
       console.error('Item failure screenshot could not be retained')
     }
   }
-  try {
-    await writeFile(`${output}/browser-evidence.json`, JSON.stringify({
-      scope: 'Failed isolated native-server dashboard acceptance; no PASS or rollout proof',
-      source_sha: sourceSha, keeper, owned_item: ownedItem,
-      browser_version: browser.version(), stage, requests, captures,
-      page_error_count: errors.length, passed: false,
-    }, null, 2) + '\n')
-  } catch {
-    console.error('Item failure receipt could not be retained')
-  }
+  await retainFailure(stage)
   throw error
 } finally {
   try {
     await browser.close()
   } catch (error) {
     if (validationFailed) console.error('Item browser cleanup failed after validation failure')
-    else throw error
+    else {
+      await retainFailure('browser-cleanup')
+      throw error
+    }
   }
 }
+// The pageerror listener remains active during cleanup. Validate at the final
+// publication boundary, then freeze the empty list used by the PASS receipt.
+if (errors.length) {
+  await retainFailure('browser-cleanup')
+  throw new Error('served dashboard emitted page errors during browser cleanup')
+}
+successReceipt.page_errors = [...errors]
 // Publish a success receipt only after browser cleanup also succeeded.
 await writeFile(`${output}/browser-evidence.json`, JSON.stringify(successReceipt, null, 2) + '\n')

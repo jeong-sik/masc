@@ -88,7 +88,8 @@ root = args.output.resolve()
 root.mkdir(parents=True, exist_ok=False)
 # Every child, including build-commit, receives the isolated environment.
 env = {key: value for key, value in os.environ.items()
-       if key in {'PATH', 'HOME', 'LANG', 'LC_ALL', 'TMPDIR', 'LD_LIBRARY_PATH'}}
+       if key in {'PATH', 'HOME', 'LANG', 'LC_ALL', 'TMPDIR', 'LD_LIBRARY_PATH',
+                  'PLAYWRIGHT_BROWSERS_PATH', 'XDG_CACHE_HOME'}}
 binary = args.binary.resolve()
 dashboard = args.dashboard.resolve()
 identity = json.loads((dashboard / '.build-identity.json').read_text())

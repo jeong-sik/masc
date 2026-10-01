@@ -12,6 +12,8 @@ SOURCE_MODULES = (
     "bin/masc_tui.ml",
     "bin/masc_tui_render_board.ml",
     "bin/masc_tui_render_board.mli",
+    "bin/masc_tui_render_approvals.ml",
+    "bin/masc_tui_render_approvals.mli",
     "bin/masc_tui_input_reader.ml",
     "bin/masc_tui_input_reader.mli",
     "bin/masc_tui_markdown.ml",

@@ -1,7 +1,7 @@
 (** Screen dispatch and shared rendering projections.
-    Workspace Code drawing and its viewport are owned by {!Masc_tui_render_code};
-    Board screens by {!Masc_tui_render_board}; MCP resource reading by
-    {!Masc_tui_render_resources}. *)
+    Board, Code, MCP resource and Approval screens are owned by
+    {!Masc_tui_render_board}, {!Masc_tui_render_code},
+    {!Masc_tui_render_resources} and {!Masc_tui_render_approvals}. *)
 
 module Frame_presenter = Masc_tui_frame_presenter
 module Ask_projection = Masc_tui_ask_projection

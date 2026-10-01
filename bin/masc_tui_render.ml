@@ -13819,7 +13819,7 @@ let help_viewport (state : state) =
   (count, overlay_window_height ~rows ~count)
 
 (* The [:] palette: a typed filter over every jump the strip and roster
-   offer. The list is the same [palette_matches] the Enter key resolves, so
+   offer. The list is the same [Masc_tui_palette.palette_matches] the Enter key resolves, so
    what is highlighted is what will run. *)
 let render_palette (state : state) =
   let terminal_rows, cols = get_terminal_size () in

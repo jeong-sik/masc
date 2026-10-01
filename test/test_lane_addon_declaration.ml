@@ -181,6 +181,12 @@ sources=[{kind="fusion_run",source_id="fusion",run_id=%S}]
     let path = Filename.concat directory "transfer.toml" in
     let read_as caller = Runtime.read_declaration ~caller ~config
       (`Assoc ["source_path", `String path]) in
+    let declaration_denial name = match Runtime.read_declaration ~caller:"foreign-keeper" ~config
+        (`Assoc ["source_path", `String (Filename.concat directory name)]) with
+      | Error error -> error.Editor.code, error.message, error.current
+      | Ok _ -> fail "foreign declaration read unexpectedly succeeded" in
+    check bool "private and absent declarations expose the same complete error" true
+      (declaration_denial "transfer.toml" = declaration_denial "absent.toml");
     write path (bytes "editor-owner-b");
     check bool "old owner cannot read reassigned bytes before reconciliation" true
       (Result.is_error (read_as "editor-keeper"));
@@ -195,7 +201,21 @@ sources=[{kind="fusion_run",source_id="fusion",run_id=%S}]
     check bool "old owner remains denied after journal reassignment" true
       (Result.is_error (read_as "editor-keeper"));
     check bool "new verified owner can read the reassigned document" true
-      (Result.is_ok (read_as "next-keeper")))
+      (Result.is_ok (read_as "next-keeper"));
+    let upstream_denial installation_id = Runtime.dispatch ~caller:"foreign-keeper" ~config
+        ~operation:Runtime.Attach (`Assoc [
+          "manifest_path", `String (Filename.concat _root ".masc/package.toml");
+          "run_id", `String "editor-world";
+          "binding", `Assoc ["sources", `List [`Assoc [
+            "source_id", `String "upstream"; "kind", `String "lane_output";
+            "installation_id", `String installation_id;
+            "selection", `String "latest_completed"]]]]) in
+    let private_denial = upstream_denial "private-transfer" in
+    check (result string string) "private upstream reaches the ownership denial"
+      (Error "upstream installation is unavailable to this caller")
+      (Result.map Yojson.Safe.to_string private_denial);
+    check bool "private and absent upstreams expose one denial" true
+      (private_denial = upstream_denial "absent-installation"))
 
 let test_conflicts_and_invalid_candidates_preserve_active () = with_fixture (fun clock config directory _root started ->
   let original = declaration () in

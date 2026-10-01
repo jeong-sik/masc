@@ -410,14 +410,21 @@ let test_fusion_capture_retains_exact_state_across_terminal_change () =
         let first = read () in
         let rejected_store = Store.create ~root:(Filename.concat dir "rejected-envelope") in
         let detail_bytes = String.length (Yojson.Safe.to_string (member "detail" first)) in
+        check int "array serialization reserves exactly the detail plus brackets"
+          (detail_bytes + String.length "[]")
+          (String.length (Yojson.Safe.to_string (`List [member "detail" first])));
         let rejected = require (Sources.acquire ~access:(Sources.Keeper "fixture")
-          ~store:rejected_store ~package:(package dir detail_bytes)
+          ~store:rejected_store ~package:(package dir
+            (String.length (Yojson.Safe.to_string (`List [member "detail" first]))))
           ~resolve_lane_output:(fun ~installation_id:_ -> Error "unused")
           ~binding:(binding [`Assoc ["source_id",`String "fusion";
             "kind",`String "fusion_run";"run_id",`String run_id]]))
           |> list |> List.hd in
         check bool "whole envelope that cannot fit remains incomplete" false
           (member "complete" rejected |> Yojson.Safe.Util.to_bool);
+        check string "detail fits but its enclosing observation is refused"
+          "Fusion observation exceeds the available source ingress envelope"
+          (member "detail" rejected |> text);
         check bool "rejected envelope writes no orphan capture blob" false
           (Sys.file_exists (Filename.concat (Store.root rejected_store) "evidence"));
         let reference = member "evidence" first |> list |> List.hd |> own_reference in

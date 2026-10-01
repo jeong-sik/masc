@@ -4156,6 +4156,7 @@
   masc
   masc_workspace
   masc_tui_agenda
+  masc_tui_home
   masc_tui_markdown_render_cache
   masc_tui_message_layout
   masc_tui_types

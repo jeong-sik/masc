@@ -69,6 +69,7 @@ export class FetchScheduler {
     // Inflight exists — requestNow sets urgent flag; wait for current fetch,
     // then wait for the follow-up triggered by drainPending.
     const current = this.inflight
+    this.requestNow()
     await current
     // drainPending may have started a new fetch; if so, wait for it.
     if (this.inflight && this.inflight !== current) {

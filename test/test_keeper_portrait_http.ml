@@ -804,7 +804,8 @@ beanie = %d
         let response = get ~router ~token:operator "/api/v1/gate/keepers?detailed=true" in
         check int "operator roster succeeds" 200 response.status;
         Yojson.Safe.from_string response.body) in
-    let runtime_rows, errors, _, _, candle = require_ok Fun.id (Tui_decode.decode_keeper_runtime_list (public_roster ())) in
+    let roster = public_roster () in
+    let runtime_rows, errors, _, _, candle = require_ok Fun.id (Tui_decode.decode_keeper_runtime_list roster) in
     check int "public roster has no metadata error rows" 0 (List.length errors);
     (match require_ok Fun.id candle with
      | Candle_observation.Ready supply ->

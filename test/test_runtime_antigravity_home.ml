@@ -286,7 +286,6 @@ let test_generation_pointer_failure_retry ~after_rename () =
 
 let test_pointerless_store_reseeds_only_a_fresh_seed () =
   let seed_a = Masc_test_deps.antigravity_oauth_fixture "account-a" in
-  let seed_b = Masc_test_deps.antigravity_oauth_fixture "account-b" in
   let seed_captured_orphan revision_dir ~seed =
     (* The exact layout a process death between [Unix.mkdir] and the pointer
        rename leaves behind. *)
@@ -336,14 +335,19 @@ let test_pointerless_store_reseeds_only_a_fresh_seed () =
   check bool "refusal preserves the CLI state" true
     (Sys.is_directory (Filename.concat (Filename.concat second ".gemini")
          (Filename.concat "antigravity-cli" "cache")));
-  (* A vendor-refreshed credential beyond the seed also refuses. *)
+  (* Isolate the refreshed credential from the cache refusal above: its bytes
+     alone must prevent reseeding a pointerless fresh-layout generation. *)
+  with_temp_root @@ fun runtime_root ->
+  let oauth_source = Filename.concat runtime_root "source" in
+  write_file ~mode:0o600 oauth_source seed_a;
+  let store = Filename.concat runtime_root
+      (Filename.concat "official-clients" (Filename.concat "antigravity" owner_leaf)) in
+  let prepare () = Runtime_antigravity_home.prepare ~runtime_root ~owner_leaf ~oauth_source in
   let third = Filename.concat store "00000000-0000-7000-8000-000000000001" in
-  seed_captured_orphan third ~seed:seed_b;
-  Unix.unlink (Filename.concat third ".gemini/antigravity-cli/antigravity-oauth-token");
-  write_file ~mode:0o600 (Filename.concat third ".gemini/antigravity-cli/antigravity-oauth-token")
-    (Masc_test_deps.antigravity_oauth_fixture ~revision:"vendor-refresh" "account-a");
-  let refreshed = Fs_compat.load_file
-      (Filename.concat third ".gemini/antigravity-cli/antigravity-oauth-token") in
+  let refreshed = Masc_test_deps.antigravity_oauth_fixture ~revision:"vendor-refresh" "account-a" in
+  seed_captured_orphan third ~seed:refreshed;
+  check (list string) "only the refreshed generation is present"
+    [Filename.basename third] (Sys.readdir store |> Array.to_list);
   (match prepare () with
    | Error (Runtime_antigravity_home.Invalid_managed_oauth _) -> ()
    | Error error -> fail (Runtime_antigravity_home.error_to_string error)

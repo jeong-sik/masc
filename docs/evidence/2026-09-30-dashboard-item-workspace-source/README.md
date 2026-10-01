@@ -4,7 +4,7 @@ This directory records the 2026-09-30 candidate, not the current PR head. Every 
 
 Current production code and tests are integrated in parent `cc9c1556d96740f78b461ff9fa8bdd131731ba1e`. The remaining child changes include the workspace browser scenario in explicit artifact capture and the existing Item HTML fixture in preview inputs. This historical candidate receipt does not establish current native, browser, installed or release behavior.
 
-Except for the explicitly refreshed frozen-source manifest, all candidate, parent, failure and unverified statements below describe the dated candidate work unless an explicit source is cited.
+All candidate, parent, failure and unverified statements below describe the dated candidate work unless an explicit source is cited.
 
 ## Candidate provenance
 
@@ -13,12 +13,7 @@ Except for the explicitly refreshed frozen-source manifest, all candidate, paren
 - Local partial baseline: `4e12031c141d30dafde4aa604ca05c22660e9395`. It starts from old local integration `09826ddd4f4f4e66432f40c2902493ea99c6f4b0`, imports the current parent's three overlapping consumers and two browser contract files, then composes the workspace repair. It is not a full checkout of the actual parent's tree. Publication must apply only the delta from this local baseline onto the actual full parent tree.
 - `composition.json` records the supplied parent, local import commits and verified Git blob identities of all five imported files. Existing account-revision refresh, free-purchase/repricing tests and the controlled reactive demo revision updater are preserved. The existing browser script remains byte-identical to its imported current-parent version.
 - This is a dependent Dashboard consumer fix. The base is an integration candidate, not a statement that the Item feature shipped on main.
-- `source-sha256.json` records the source blobs frozen at commit
-  `337f547de110f9fdfa3c4abe4609352d862d27ae`, including the browser workflow. Verify each entry with
-  `git show 337f547de110f9fdfa3c4abe4609352d862d27ae:<path>` and SHA-256. Later stack recomposition does not
-  change this receipt's source scope. The README and manifest themselves are
-  excluded to avoid self-referential hashes. Historical composition and syntax
-  receipts retain their original scope; no new runtime result is claimed.
+- `source-sha256.json` preserves source bytes from `beef16127fee6754b31c3da04bea8dc4750aed75`, including the browser workflow. It is a historical snapshot and is not regenerated for later code. The composition and syntax receipts also retain their original scope.
 - Changelog fragment `40190.md` cites the assigned child PR #40190; no placeholder was published.
 
 ## Reachable defect

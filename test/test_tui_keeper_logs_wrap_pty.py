@@ -86,7 +86,11 @@ def run(executable):
             if initial[2] <= initial[1]:
                 raise AssertionError("initial-entry fixture did not overflow the reader")
             if opening_key == b"l":
+                info = h.send_and_wait(process, fd, output, b"\x1b", b"Identity")
+                if b"Keepers \xe2\x96\xb8 alpha" not in h.screen_text(info):
+                    raise AssertionError("Logs did not return to Keeper Info")
                 h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+                h.select_keeper_row(process, fd, output, b"alpha")
         for columns in (40, 60, 80):
             h.resize_and_wait(process, fd, output, rows=24, columns=columns,
                               needle=b"logs", controls=(h.FULL_REDRAW,))
@@ -159,7 +163,8 @@ def run(executable):
 
     h.run_terminal_scenario(executable, description="Keeper log facts wrap without skipping rows",
                            interact=interact, http_fixtures=h.keeper_runtime_http_fixtures(),
-                           prepare_workspace=prepare, terminal_cols=40)
+                           prepare_workspace=prepare, terminal_cols=40,
+                           workspace="logs")
 
 
 if __name__ == "__main__":

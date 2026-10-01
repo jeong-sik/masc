@@ -21,8 +21,9 @@ let runtime = {js|function browserScene(args) {
   const effectiveRole = element => (element.getAttribute('role') || '').split(/\s+/)
     .find(role => ariaRoles.has(role)) || null;
   const actionRoles = new Set('button link checkbox radio switch menuitem menuitemcheckbox menuitemradio tab option combobox'.split(' '));
+  const associatedControl = element => element.localName === 'label' ? (element.control ?? null) : null;
   const labelledControl = element => {
-    const target=element.localName === 'label' ? element.control : null;
+    const target=associatedControl(element);
     return target instanceof HTMLInputElement && ['checkbox','radio'].includes(target.type) ? target : null;
   };
   const key = Symbol.for('masc.browser.scene.refs.v4');
@@ -35,8 +36,9 @@ let runtime = {js|function browserScene(args) {
     if (!element || !element.isConnected || element.ownerDocument !== document)
       throw new Error('scene_node_detached');
     if (state.labels.has(args.nodeId)) {
-      const pinned = state.labels.get(args.nodeId), current = labelledControl(element);
-      if (!current || current !== pinned.target.deref() || current.type !== pinned.type)
+      const pinned = state.labels.get(args.nodeId), current = associatedControl(element);
+      if (current !== (pinned.target ? pinned.target.deref() : null)
+          || (current?.type ?? null) !== pinned.type)
         throw new Error('scene_label_control_changed');
     }
     if (args.mode === 'resolve_link') {
@@ -63,17 +65,19 @@ let runtime = {js|function browserScene(args) {
   }
   const nodeId = element => {
     let id = state.ids.get(element);
-    const href = linkHref(element), target = labelledControl(element);
+    const href = linkHref(element), target = associatedControl(element);
     const pinned = id && state.labels.get(id);
-    const labelChanged = pinned ? target !== pinned.target.deref() || target?.type !== pinned.type
-      : target !== null;
+    const labelChanged = element.localName === 'label' && (!pinned
+      || target !== (pinned.target ? pinned.target.deref() : null)
+      || (target?.type ?? null) !== pinned.type);
     // A recycled anchor gets a new observation reference. Retire its old
     // reference so connected virtualized anchors cannot accumulate revisions.
     if (!id || (href !== null && state.links.get(id) !== href) || labelChanged) {
       if (id) { state.nodes.delete(id); state.links.delete(id); state.labels.delete(id); }
       id = 'n' + (++state.next); state.ids.set(element,id);
       if (href !== null) state.links.set(id,href);
-      if (target !== null) state.labels.set(id,{target:new WeakRef(target),type:target.type});
+      if (element.localName === 'label')
+        state.labels.set(id,{target:target === null ? null : new WeakRef(target),type:target?.type ?? null});
     }
     state.nodes.set(id,new WeakRef(element));
     return id;
@@ -115,7 +119,7 @@ let runtime = {js|function browserScene(args) {
     return value === 'mixed' && !['checkbox','menuitemcheckbox'].includes(role) ? 'false' : value;
   };
   const disabledControl = element => {
-    const target = labelledControl(element) || element;
+    const target = associatedControl(element) || element;
     if (target.matches(':disabled')) return true;
     for (const start of new Set([element,target]))
       for (let parent=start; parent; parent=parent.parentElement)
@@ -166,6 +170,23 @@ let runtime = {js|function browserScene(args) {
         width:Math.min(right,r.right)-Math.max(left,r.x),
         height:Math.min(bottom,r.bottom)-Math.max(top,r.y)}))
       .filter(r => r.width>0 && r.height>0);
+  };
+  const labelTextRects = (element, admit = rects => Array.from(rects)) => {
+    if (element.localName !== 'label') return [];
+    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT), rects = [];
+    while (walker.nextNode()) {
+      const text = walker.currentNode, parent = text.parentElement;
+      if (!text.textContent.trim() || !parent || getComputedStyle(parent).visibility !== 'visible') continue;
+      let hidden = false;
+      for (let node = parent; node; node = node.parentElement) {
+        const style = getComputedStyle(node);
+        if (style.display === 'none' || Number(style.opacity) === 0) { hidden = true; break; }
+      }
+      if (hidden) continue;
+      const range = document.createRange(); range.selectNodeContents(text);
+      rects.push(...admit(range.getClientRects(), parent).filter(r => r.width > 0 && r.height > 0));
+    }
+    return rects;
   };
   const visibleText = element => {
     // innerText is the browser's whitespace/text-transform authority. Use it
@@ -348,7 +369,11 @@ let runtime = {js|function browserScene(args) {
         || !rendered(node)) continue;
     const tag=node.localName;
     const control=isControl(node);
-    if (control && visible(node)) {
+    const controlRects = control && visible(node)
+      ? boxes(node.getClientRects(),node) : [];
+    if (control && visible(node) && !controlRects.length)
+      controlRects.push(...labelTextRects(node, (rects, parent) => boxes(rects,parent)));
+    if (control && visible(node) && controlRects.length) {
       const labelledBy = (attribute(node,'aria-labelledby') || '').split(/\s+/).filter(Boolean)
         .map(id => document.getElementById?.(id)?.textContent || '').join(' ').trim();
       const nativeLabel = Array.from(node.labels || []).map(visibleText).filter(Boolean).join(' ');
@@ -358,7 +383,7 @@ let runtime = {js|function browserScene(args) {
       const target=labelledControl(node) || node, disabled=disabledControl(node);
       const editable=(textarea || (input && ['text','search','email','url','tel','password','number'].includes(node.type)))
         && !node.readOnly && !disabled;
-      describe('control',node,label,boxes(node.getClientRects(),node),{
+      describe('control',node,label,controlRects,{
         ...(linkHref(node) !== null ? {href:linkHref(node)} : {}),
         controlType:input ? node.type : tag,disabled,editable,
         role:effectiveRole(node),

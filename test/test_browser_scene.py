@@ -404,6 +404,37 @@ try:
  except RuntimeError as e:check('reread retires previous label references','scene_node_detached' in str(e))
  act(after_retarget,new_label,action='click')
  check('fresh label observation activates the newly observed input',js("return document.querySelector('#card-a').checked;") is True)
+ # All native label associations, including null and non-choice controls,
+ # belong to the exact observed reference before any inline/native effect.
+ js("""document.body.innerHTML=`<label id="none-label" onclick="this.dataset.clicked='yes'">Initially unassociated</label>
+ <label id="button-label" for="button-a" onclick="this.dataset.clicked='yes'">Button association</label>
+ <button id="button-a" onclick="this.dataset.clicked='yes'">Button A</button>
+ <button id="button-b" onclick="this.dataset.clicked='yes'">Button B</button>
+ <label id="boxless-native" style="display:contents"><input id="boxless-check" type="checkbox" style="display:none">Boxless agree</label>
+ <label id="boxless-aria" role="checkbox" aria-checked="false" style="display:contents" onclick="this.setAttribute('aria-checked','true')">Boxless ARIA agree</label>
+ <label role="checkbox" style="display:contents"><span style="visibility:hidden">BOXLESS_HIDDEN</span></label>`;""")
+ pinned=observe()
+ for label,element_id in [('Initially unassociated','none-label'),('Button association','button-label')]:
+  old=control(pinned,label)
+  js("document.getElementById(arguments[0]).htmlFor='button-b';",[element_id])
+  args={'documentId':pinned['documentId'],'nodeId':old['nodeId'],'expectedUrl':pinned['url'],'action':'click'}
+  result=js(scene+interaction.replace('return interactInPage(arguments[0]);','return {outcome:interactInPage(arguments[0])};'),[args])['outcome']
+  check('complete label association rejects before effects: '+label,result.get('interactionFailure')=={'message':'scene_label_control_changed','effectStarted':False},result)
+  check('refused association has no label or button effects: '+label,js("return ['none-label','button-label','button-a','button-b'].every(id=>!document.getElementById(id).dataset.clicked);"))
+  fresh=observe();new=control(fresh,label)
+  check('nullable/button association change gets a fresh reference: '+label,new['nodeId']!=old['nodeId'])
+ # Native and ARIA labels with no principal box use their painted text geometry.
+ boxless=observe()
+ native=control(boxless,'Boxless agree');aria=control(boxless,'Boxless ARIA agree')
+ check('boxless native and ARIA labels retain admitted rectangles',bool(native['rects']) and bool(aria['rects']))
+ check('boxless hidden text remains excluded','BOXLESS_HIDDEN' not in json.dumps(boxless))
+ inventory=js(elements_script)['elements']
+ check('elements retains both boxless label targets',all(any(n['tag']=='label' and n['text']==label for n in inventory) for label in ['Boxless agree','Boxless ARIA agree']))
+ act(boxless,native,action='click')
+ check('boxless native label activates its hidden checkbox',js("return document.querySelector('#boxless-check').checked;") is True)
+ act(boxless,aria,action='click')
+ check('boxless ARIA label activates and reports its checked state',control(observe(),'Boxless ARIA agree')['ariaChecked']=='true')
+ check('boxless checkbox state is re-observed after activation',control(observe(),'Boxless agree')['checked'] is True)
  # End review regressions.
  (a.out/'form-controls.json').write_text(json.dumps({'scene':observe(),'elements':form_elements},ensure_ascii=False,indent=2))
  form_png=call('GET','/session/'+sid+'/screenshot')

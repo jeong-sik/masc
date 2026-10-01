@@ -5019,6 +5019,10 @@ let browser_lane_page_layout ~cols (view : Browser_lane_view.t) =
         | Control {href=Some _;_} -> Some "link"
         | Control {editable=true;_} -> Some "input"
         | Control _ -> Some "button/link" in
+      let label = Option.map (fun label ->
+        match Masc.Browser_scene.control_selection_text anchor.kind with
+        | Some state -> label ^ " · " ^ state
+        | None -> label) label in
       let prefix = match label, index with
         | _, None -> ""
         | None, Some _ ->

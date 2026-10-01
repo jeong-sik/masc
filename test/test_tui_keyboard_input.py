@@ -15186,10 +15186,9 @@ def run_http_badge_refresh_regression(executable: str) -> None:
 
 def run_http_conditional_read_regression(executable: str) -> None:
     """A dashboard read sends the tag of the answer it kept, and a 304 answers
-    with that answer. The briefing is the first read of every full pass and
-    the goal tree belongs to Work. Opening Work admits its goal read, so a
-    slow goal tree keeps one pass out across several ticks; the briefing's
-    tag must still go out on the pass after it."""
+    with that answer. On Work, the briefing is the first read of a full pass
+    and the goal tree the last. A slow goal tree keeps one pass out across
+    several ticks; the briefing's tag must still go out on the pass after it."""
     fixtures = overview_event_http_fixtures()
     briefing = fixtures["/api/v1/dashboard/briefing"]
     if not isinstance(briefing, tuple):
@@ -15200,6 +15199,7 @@ def run_http_conditional_read_regression(executable: str) -> None:
     reads = {"untagged": 0, "tagged": 0}
     goal_reads = {"total": 0, "delayed": 0}
     slow_goals = threading.Event()
+    goals_requested = threading.Event()
     slow_goals_done = threading.Event()
 
     def answer_briefing(headers: dict[str, str]) -> RawHttpResponse:
@@ -15217,6 +15217,7 @@ def run_http_conditional_read_regression(executable: str) -> None:
 
     def answer_goals() -> HttpResponse:
         goal_reads["total"] += 1
+        goals_requested.set()
         if slow_goals.is_set() and not slow_goals_done.is_set():
             goal_reads["delayed"] += 1
             # Longer than three refresh ticks at refresh=0.5.
@@ -15253,14 +15254,18 @@ def run_http_conditional_read_regression(executable: str) -> None:
         )
         if b"HTTP 304" in output:
             raise AssertionError("a 304 reached the screen as a refusal")
-        goals_before_work = goal_reads["total"]
+        tab_until(process, master_fd, output, b"MASC Work")
+        if not wait_for_fixture_event(
+            process, master_fd, output, goals_requested, timeout=4.0
+        ):
+            raise AssertionError("Work did not request its goal tree")
+        goals_before_slow = goal_reads["total"]
         slow_goals.set()
-        palette_go(process, master_fd, output, b"go Work", b"MASC Work")
         if not wait_for_fixture_state(
             process, master_fd, output, slow_goals_done.is_set, timeout=4.0
         ):
             raise AssertionError("the slow goal tree read did not finish")
-        if goal_reads["total"] <= goals_before_work or goal_reads["delayed"] != 1:
+        if goal_reads["total"] <= goals_before_slow or goal_reads["delayed"] != 1:
             raise AssertionError(f"Work did not own exactly one delayed goal read: {goal_reads!r}")
         reads_after_slow = reads["tagged"] + reads["untagged"]
         if not wait_for_fixture_state(

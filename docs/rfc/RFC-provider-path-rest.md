@@ -128,15 +128,17 @@ rate-limited failure route; backing off next cycle by 600s (cadence 600s, cap 90
 |---|---|---|
 | deferred suffix 있음 | 걷는 순서의 첫 경로가 쉬지 않음 | 기다리지 않는다. 남은 입력이 있으면 곧바로 그 suffix 로 턴을 잇는다 |
 | deferred suffix 있음 | 첫 경로가 쉼 | 다음 턴의 첫 경로가 쉬지 않게 되는 가장 이른 시각까지 기다린다 (3.3 끝) |
-| suffix 없음, route 가 `Rate_limited`·`Hard_quota` | 실패한 경로가 쉼 | 실패한 경로가 풀리는 시각과, assignment 를 새로 걸을 때 첫 경로가 쉬지 않게 되는 시각 중 늦은 쪽까지 기다린다 |
+| suffix 없음, 여러 후보, route 가 `Rate_limited`·`Hard_quota` | 새 walk의 머리가 쉬지 않음 | 일반 실패 cadence를 유지한다. 마지막 후보의 quota로 다른 후보까지 쉬지 않는다 |
+| suffix 없음, 여러 후보, route 가 `Rate_limited`·`Hard_quota` | 새 walk의 머리가 쉼 | 새 walk의 관측된 release 시각까지 기다린다 |
+| suffix 없음, 단일·미해결 배정, route 가 `Rate_limited`·`Hard_quota` | 실패한 경로가 쉼 | 실패 응답과 관측된 경로의 release 중 늦은 시각까지 기다린다 |
 | 그 밖 | — | 지금처럼 cadence |
 
-suffix 가 없다는 것은 이 입력에 쓸 수 있는 경로를 이 턴이 이미 다 썼다는 뜻이다
-(마지막 후보였거나, 반복 생성으로 거부된 모델만 남았다). 그래서 이 경우는 실패한
-경로의 쉼을 기다린다. 같은 입력을 방금 실패한 경로들에 곧바로 다시 보내지 않는다.
-대기가 끝나면 다음 턴은 assignment 를 머리부터 새로 걷는다. 그 머리가 아직 쉬면 대기를
-그 머리가 풀릴 때까지 늘린다. 예: lane [A; B] 에서 A 가 600초 힌트로 쉬고 B 가 힌트 없는
-429 로 끝나면, B 의 60초 뒤 새 walk 는 여전히 A 부터 부르므로 A 가 풀릴 때까지 기다린다.
+suffix가 없으면 이 턴의 후보 순회가 끝났다는 뜻이다. 모든 후보가 같은 이유나
+같은 기한으로 쉬는 것은 아니다. 마지막 Claude 후보가 quota reset을 알려 줬더라도
+앞선 HTTP·Codex 후보가 일시적인 연결 오류로 실패했다면 그 reset을 레인 전체의
+대기시간으로 적용하지 않는다. 새 walk의 머리가 사용 가능하면 일반 실패 cadence로
+돌아간다. 즉시 같은 입력을 반복하는 deferred continuation을 만들지는 않는다.
+단일 후보와 해소할 수 없는 배정은 실패 응답 자체의 대기 근거를 유지한다.
 
 heartbeat 와 채팅 lane 은 이 표 하나(`Keeper_turn_driver.next_dispatch_after_failure`)를
 같이 읽는다. 같은 실패에 두 lane 이 다르게 답하지 않는다.
@@ -194,8 +196,8 @@ cadence는 어디에도 들어가지 않는다. Retry-After가 후속 요청 전
 `Observed` 는 기록 시각을 갖지 않으므로 판단한 시각부터 센다. 기록 시각을 더하면
 `note_observed_exhausted` 호출처 13곳이 바뀌어 이번 범위에서 뺐다.
 
-실패한 턴이 방금 받은 route 는 저장소보다 새 사실이다. suffix 가 없을 때는 route 의
-`retry_class` 와 힌트로 같은 표를 적용한다.
+단일·미해결 배정의 실패 응답은 저장소에 관측이 없어도 자기 경로의 휴식 근거다.
+여러 후보의 배정에서는 마지막 실패 응답 하나를 다른 후보의 휴식으로 확대하지 않는다.
 
 풀리는 시각과 걷는 순서는 같이 움직이지 않을 수 있다. 다음 턴은
 `quota_ordered_deferred_runtime_lane` 순서로 걷고, 그 순서는 쉬는 증거가 있는 경로를
@@ -212,7 +214,7 @@ cadence는 어디에도 들어가지 않는다. Retry-After가 후속 요청 전
   쉬는 첫 경로를 부른다.
 
 suffix 가 없으면 같은 규칙을 assignment 의 새 walk 순서(선언 순서 → quota·backpressure
-강등)에 적용하고, 실패한 경로의 쉼과 비교해 늦은 쪽을 쓴다.
+강등)에 적용한다. 단일·미해결 배정만 실패 응답의 쉼과 비교해 늦은 쪽을 쓴다.
 
 ### 3.4 chat lane
 
@@ -298,7 +300,7 @@ terminal 로 끝내게 한다. RFC-0433 의 "새 fail-closed 경로를 만들지
 
 - 결정 함수 테스트: 첫 경로가 쉬지 않는 suffix → 이어가기, 모두 쉬는 suffix → 순서가
   풀리는 가장 이른 시각, 순서가 안 풀리는 뒤 경로는 대기를 줄이지 않음, quota 리셋 시각,
-  suffix 없는 rate limit → 실패 경로의 쉼, 새 walk 머리가 쉬면 그 머리까지, 힌트 5초 →
+  suffix 없는 여러 후보의 rate limit → 새 walk 머리가 사용 가능하면 cadence, 쉬면 그 release까지; 단일 경로 힌트 5초 →
   5초(cadence 무관), 그 밖 → cadence.
 - 채팅 lane: 쉬지 않는 머리 → 곧바로 claim, 쉬는 머리 → 풀릴 때까지.
 - #34653 회귀: 유일한 경로가 쉬는 동안 결정은 `Serve_wakeup_after_duration` 대기이고,

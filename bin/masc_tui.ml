@@ -5197,11 +5197,38 @@ let launch_repository_changes_diff_load state ~mailbox ~reader ~scope ~path =
       Masc_tui_loader.load_git_diff ~host ~port ?repo ~keeper:None ~path
         ~base_ref:tree_diff_base_ref ())
 
+let diff_text_max_width text =
+  String.split_on_char '\n' text
+  |> List.fold_left (fun widest line ->
+       max widest (Message_layout.display_width (Terminal_text.single_line line))) 0
+
+let git_diff_body_max_width (diff : Tui_decode.git_diff) =
+  List.fold_left (fun widest (row : Tui_decode.git_diff_row) ->
+    max widest (Message_layout.display_width
+      (Terminal_text.single_line row.gdr_text))) 0 diff.gd_rows
+
+let refresh_recorded_diff_bounds state ~reset =
+  let width = match opened_file_change state with
+    | None -> 0
+    | Some change ->
+        (match change.Tui_decode.fc_kind with
+         | Tui_decode.Fc_edited { before; after; _ } ->
+             max (diff_text_max_width before) (diff_text_max_width after)
+         | Tui_decode.Fc_inserted { text; _ } -> diff_text_max_width text
+         | Tui_decode.Fc_written { content } -> diff_text_max_width content
+         | Tui_decode.Fc_materialized _ -> 0) in
+  state.changes_diff_max_width <- width;
+  state.changes_diff_hscroll <-
+    if reset then 0
+    else min state.changes_diff_hscroll (max 0 (width - 1))
+
 let open_repository_change_diff state ~mailbox ~scope
     (change : Tui_decode.repository_change) =
   state.repository_changes_diff <- None;
   state.repository_changes_diff_error <- None;
   state.repository_changes_diff_path <- Some change.rc_path;
+  state.repository_changes_diff_hscroll <- 0;
+  state.repository_changes_diff_max_width <- 0;
   state.repository_changes_diff_scroll <- 0;
   launch_repository_changes_diff_load state ~mailbox ~reader:Repository_diff_reader
     ~scope ~path:change.rc_path
@@ -5210,6 +5237,8 @@ let close_repository_changes_diff state =
   state.repository_changes_diff <- None;
   state.repository_changes_diff_error <- None;
   state.repository_changes_diff_path <- None;
+  state.repository_changes_diff_hscroll <- 0;
+  state.repository_changes_diff_max_width <- 0;
   state.repository_changes_diff_scroll <- 0
 
 let open_repository_changes state ~mailbox ~scope =
@@ -5222,6 +5251,8 @@ let open_repository_changes state ~mailbox ~scope =
   state.repository_changes_diff <- None;
   state.repository_changes_diff_error <- None;
   state.repository_changes_diff_path <- None;
+  state.repository_changes_diff_hscroll <- 0;
+  state.repository_changes_diff_max_width <- 0;
   state.repository_changes_diff_scroll <- 0;
   launch_repository_changes_load state ~mailbox ~scope
 
@@ -5236,6 +5267,8 @@ let close_repository_changes state =
   state.repository_changes_diff <- None;
   state.repository_changes_diff_error <- None;
   state.repository_changes_diff_path <- None;
+  state.repository_changes_diff_hscroll <- 0;
+  state.repository_changes_diff_max_width <- 0;
   state.repository_changes_diff_scroll <- 0
 
 let refresh_repository_changes state ~mailbox =
@@ -9195,6 +9228,7 @@ let handle_acting_pane_click (state : state) ~base_path ~mailbox ~line =
               state.changes_cursor <- index;
               state.changes_scroll <- 0;
               state.changes_diff_row <- Some index;
+              refresh_recorded_diff_bounds state ~reset:true;
               state.changes_diff_scroll <- 0;
               state.changes_tree_diff <- None;
               state.changes_tree_diff_error <- None;
@@ -16280,6 +16314,10 @@ let apply_async_message state ~base_path ~http_refresh_inflight
              (match result with
               | Ok diff ->
                   state.repository_changes_diff <- Some (request.rdr_path, diff);
+                  state.repository_changes_diff_max_width <- git_diff_body_max_width diff;
+                  state.repository_changes_diff_hscroll <-
+                    min state.repository_changes_diff_hscroll
+                      (max 0 (state.repository_changes_diff_max_width - 1));
                   state.repository_changes_diff_error <- None
               | Error detail -> state.repository_changes_diff_error <- Some detail)
        | Patch_diff_reader ->
@@ -16383,6 +16421,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                  state.changes_scroll <- 0;
                  state.changes_diff_scroll <- 0);
             state.changes_diff_row <- kept_row;
+            refresh_recorded_diff_bounds state
+              ~reset:(Option.is_some state.changes_tree_diff_path || Option.is_none kept_row);
             state.changes_tree_diff <- None;
             state.changes_tree_diff_error <- None;
             state.changes_tree_diff_path <- None
@@ -16395,6 +16435,9 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         match result with
         | Ok diff ->
             state.changes_tree_diff <- Some diff;
+            state.changes_diff_max_width <- git_diff_body_max_width diff;
+            state.changes_diff_hscroll <-
+              min state.changes_diff_hscroll (max 0 (state.changes_diff_max_width - 1));
             state.changes_tree_diff_error <- None
         | Error detail -> state.changes_tree_diff_error <- Some detail)
   | Lanes_loaded result ->
@@ -23182,6 +23225,19 @@ and is loaded on demand through keeper_skill.
            | Right_pane ->
                if not (acting_pane_drawn state && focus_acting_pane state)
                then state.resource_focus <- Left_pane)
+       | Some ("shift-left" | "shift-right") as key
+         when state.repository_changes_open
+              && Option.is_some state.repository_changes_diff_path ->
+           let direction = if key = Some "shift-left" then -1 else 1 in
+           state.repository_changes_diff_hscroll <-
+             max 0 (min (max 0 (state.repository_changes_diff_max_width - 1))
+               (state.repository_changes_diff_hscroll + direction))
+       | Some ("shift-left" | "shift-right") as key
+         when state.view = Changes && Option.is_some (opened_file_change state) ->
+           let direction = if key = Some "shift-left" then -1 else 1 in
+           state.changes_diff_hscroll <-
+             max 0 (min (max 0 (state.changes_diff_max_width - 1))
+               (state.changes_diff_hscroll + direction))
        | Some "shift-left"
          when state.view = Code && state.code_focus_file = Right_pane ->
            pan_code_content state ~direction:(-1)
@@ -25412,6 +25468,7 @@ and is loaded on demand through keeper_skill.
                         report_action state "error" "no change under the cursor"
                     | Some _ ->
                         state.changes_diff_row <- Some state.changes_cursor;
+                        refresh_recorded_diff_bounds state ~reset:true;
                         state.changes_diff_scroll <- 0;
                         state.changes_tree_diff <- None;
                         state.changes_tree_diff_error <- None;
@@ -25763,10 +25820,12 @@ and is loaded on demand through keeper_skill.
                            reading needs a path under it"
                     | Some path ->
                         state.changes_diff_row <- Some state.changes_cursor;
+                        refresh_recorded_diff_bounds state ~reset:true;
                         state.changes_diff_scroll <- 0;
                         state.changes_tree_diff <- None;
                         state.changes_tree_diff_error <- None;
                         state.changes_tree_diff_path <- Some path;
+                        state.changes_diff_max_width <- 0;
                         launch_git_diff_load state ~mailbox:async_messages
                           ~keeper:(Some change.Masc.Tui_decode.fc_keeper) ~path)))
        | Some "v" | Some "V"

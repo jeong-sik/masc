@@ -6256,6 +6256,8 @@ type state = {
   mutable repository_changes_diff_error: string option;
   mutable repository_changes_diff_path: string option;
   mutable repository_changes_diff_scroll: int;
+  mutable repository_changes_diff_hscroll: int;
+  mutable repository_changes_diff_max_width: int;
   mutable repository_changes_return_chat: bool;
   (* The patch review overlay: the pending diff to scroll, and [e] to open it
      in $EDITOR. *)
@@ -6387,6 +6389,8 @@ type state = {
      answer no longer holds. Out of range closes the view. *)
   mutable changes_diff_row: int option;
   mutable changes_diff_scroll: int;
+  mutable changes_diff_hscroll: int;
+  mutable changes_diff_max_width: int;
   (* The tree's reading of the same file. Held beside the tool-call reading
      rather than replacing it: one says what the keeper tried to write and the
      other what survived, and they disagree often enough that a single field
@@ -8524,6 +8528,8 @@ let create_state
   repository_changes_diff_error = None;
   repository_changes_diff_path = None;
   repository_changes_diff_scroll = 0;
+  repository_changes_diff_hscroll = 0;
+  repository_changes_diff_max_width = 0;
   repository_changes_return_chat = false;
   patch_modal_open = false;
   patch_modal_scroll = 0;
@@ -8571,6 +8577,8 @@ let create_state
   changes_scroll = 0;
   changes_diff_row = None;
   changes_diff_scroll = 0;
+  changes_diff_hscroll = 0;
+  changes_diff_max_width = 0;
   changes_tree_diff = None;
   changes_tree_diff_error = None;
   changes_tree_diff_path = None;

@@ -910,9 +910,14 @@ let test_home_and_agenda_refuse_noncurrent_task_source () =
     (List.exists (fun (action, _) -> match action with
        | Masc_tui_types.Home_request (Home_operator_task _) -> true
        | _ -> false) (Masc_tui_types.home_decision_rows state));
-  check bool "Agenda shares noncurrent source state" true
-    (match (Masc_tui_types.agenda state).Agenda.stuck with
-     | Agenda.Read_failed _ -> true | Agenda.Not_read | Agenda.Read _ -> false);
+  let agenda_lines = lines_of_state state in
+  check bool "Agenda reports the noncurrent source" true
+    (List.exists (fun line -> line.Agenda.tone = Agenda.Failed
+       && contains ~needle:"backlog recovered from backup" line.Agenda.text)
+       agenda_lines);
+  check bool "Agenda offers no task from a backup" false
+    (List.exists (fun line -> match line.Agenda.goes_to with
+       | Agenda.Stuck_task _ -> true | _ -> false) agenda_lines);
   state.view <- Masc_tui_types.Planning;
   state.home_opened_request <- Some (Home_operator_task task_id);
   Masc_tui_types.reconcile_home_request_detail state;

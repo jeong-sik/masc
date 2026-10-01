@@ -86,6 +86,27 @@ def name_contains(text: bytes, name: bytes) -> bool:
                for line in text.splitlines() if b"Name:" in line)
 
 
+def help_candle_diagnostic(text: bytes, expected: str) -> bool:
+    # Help has two columns. Read the diagnostic's consecutive left-column
+    # rows, excluding Dashboard help on the right of the column boundary.
+    rows = text.decode("utf-8", "replace").splitlines()
+    boundary = next((row.index("◆ Dashboard") for row in rows
+                     if "◆ Dashboard" in row), None)
+    if boundary is None:
+        return False
+    left = [row[:boundary].strip(" │") for row in rows]
+    for index, row in enumerate(left):
+        if row != "Candle details":
+            continue
+        parts = []
+        for continuation in left[index + 1:]:
+            if not continuation:
+                break
+            parts.append(continuation)
+        return " ".join(" ".join(part.split()) for part in parts) == expected
+    return False
+
+
 class CurrencyRoster:
     def __init__(self, original):
         self.original = original
@@ -301,7 +322,15 @@ def currency_follows_workspace_authority(binary: str, captures: Path | None) -> 
         os.write(fd, b"r")
         seen("identity-error", lambda text: b"MASC Dashboard" in text and no_currency(text))
         h.send_and_wait(process, fd, output, b"?", b"MASC Cheat Sheet")
-        assert no_currency(screen(output)) and b"Candle details" not in screen(output)
+        help_frame = screen(output)
+        if captures is not None:
+            (captures / "authority-identity-error-help.txt").write_bytes(help_frame)
+            (captures / "authority-identity-error-help.pty").write_bytes(output)
+        # Unavailable retains its diagnostic in Help without restoring amounts.
+        assert no_currency(help_frame), help_frame
+        assert help_candle_diagnostic(help_frame,
+            "Candle unavailable: live keeper status unreadable: "
+            "Server workspace identity is unavailable"), help_frame
         h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
         publish("b-ready")
         os.write(fd, b"r")
@@ -309,7 +338,7 @@ def currency_follows_workspace_authority(binary: str, captures: Path | None) -> 
         publish("a-ready")
         os.write(fd, b"r")
         seen("a-before-held", lambda text: all(line in text for line in SUMMARY))
-        h.send_and_wait(process, fd, output, b"A", b"MASC Activity")
+        h.palette_go(process, fd, output, b"go Activity", b"MASC Activity")
         # Activity asks for no roster. Entering Dashboard therefore launches
         # a scoped roster request; its A response is frozen before the switch.
         with lock:
@@ -334,7 +363,7 @@ def currency_follows_workspace_authority(binary: str, captures: Path | None) -> 
             publish("a-ready")
             os.write(fd, b"r")
             seen(withdrawal + "-before", lambda text: all(line in text for line in SUMMARY))
-            h.send_and_wait(process, fd, output, b"A", b"MASC Activity")
+            h.palette_go(process, fd, output, b"go Activity", b"MASC Activity")
             held_started.clear()
             release_held.clear()
             with lock:

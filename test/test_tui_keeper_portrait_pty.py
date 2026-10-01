@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import os
 import hashlib
-import json
+import copy
 import threading
 import json
 import re
@@ -21,21 +21,22 @@ import tui_keyboard_harness as _keyboard_harness
 # scripts/ci/run-edited-tests.sh runs this suite when a pull request changes a
 # path named here.
 SOURCE_MODULES = (
-    "bin/masc_tui.ml",
-    "bin/masc_tui_keeper_items.ml",
-    "bin/masc_tui_types.ml",
-    "bin/masc_tui_graphics.ml",
-    "bin/masc_tui_image_mosaic.ml",
-    "bin/masc_tui_keeper_portrait.ml",
-    "bin/masc_tui_portrait_view.ml",
-    "bin/masc_tui_render.ml",
-    "bin/masc_tui_render_prim.ml",
-    "lib/keeper_portrait/keeper_portrait_draw.ml",
-    "lib/keeper_portrait/keeper_portrait_look.ml",
-    "test/tui_keyboard_chat.py",
-    "test/tui_keyboard_harness.py",
-    "test/tui_keyboard_observer.py",
-    "test/tui_keyboard_tools.py",
+    'bin/masc_tui.ml',
+    'bin/masc_tui_keeper_items.ml',
+    'bin/masc_tui_types.ml',
+    'lib/tui_decode.ml',
+    'bin/masc_tui_graphics.ml',
+    'bin/masc_tui_image_mosaic.ml',
+    'bin/masc_tui_keeper_portrait.ml',
+    'bin/masc_tui_portrait_view.ml',
+    'bin/masc_tui_render.ml',
+    'bin/masc_tui_render_prim.ml',
+    'lib/keeper_portrait/keeper_portrait_draw.ml',
+    'lib/keeper_portrait/keeper_portrait_look.ml',
+    'test/tui_keyboard_chat.py',
+    'test/tui_keyboard_harness.py',
+    'test/tui_keyboard_observer.py',
+    'test/tui_keyboard_tools.py',
 )
 
 # U+2580 and U+2584, the half blocks the mosaic is drawn in.
@@ -204,6 +205,13 @@ def open_alpha_detail(process, fd, output) -> None:
     _keyboard_harness.select_keeper_row(process, fd, output, b"alpha")
     _keyboard_harness.send_and_wait(process, fd, output, b"\r", INFO_TAB)
     _keyboard_harness.drain_until_quiet(process, fd, output)
+
+
+def reopen_alpha_items(process, fd, output, balance: bytes) -> None:
+    _keyboard_harness.send_and_wait(process, fd, output, b"3", b"MASC Keepers")
+    _keyboard_harness.select_keeper_row(process, fd, output, b"alpha")
+    # Workspace withdrawal returns to the list but retains the chosen detail tab.
+    _keyboard_harness.send_and_wait(process, fd, output, b"\r", balance)
 
 
 def portrait_follows_the_terminal_height(binary: str) -> None:
@@ -433,6 +441,78 @@ def item_account_failure_keeps_the_preview(binary: str) -> None:
         terminal_cols=COLUMNS,
     )
 
+def item_account_follows_roster_revision(binary: str) -> None:
+    # Synthetic authorized currency observations exercise refresh wiring; the
+    # shared production Keeper roster deliberately omits these private fields.
+    fixtures = _keyboard_harness.keeper_runtime_http_fixtures()
+    roster_path = "/api/v1/gate/keepers?detailed=true"
+    roster = copy.deepcopy(fixtures[roster_path][1])
+    roster_polls = []
+    roster["candle"] = {"status": "ready", "issued_milli": "12500",
+                        "burned_milli": "0", "circulating_milli": "12500"}
+    for row in roster["keepers"]:
+        row["candle_balance_milli"] = "12500" if row["name"] == "alpha" else "0"
+        row["candle_account_revision"] = "a" * 64
+    def read_roster():
+        roster_polls.append(copy.deepcopy(roster))
+        return 200, copy.deepcopy(roster)
+
+    fixtures[roster_path] = read_roster
+    account = {"status": "ready", "account_revision": "a" * 64, "keeper": "alpha", "balance_milli": "12500",
+               "owned_items": [], "catalog": [
+                   {"id": item, "slot": slot,
+                    "price_status": "priced" if item == "glasses" else "unpriced",
+                    **({"price_milli": "0"} if item == "glasses" else {})}
+                   for item, slot in ITEM_CATALOG]}
+    calls = []
+
+    def read_account():
+        calls.append(copy.deepcopy(account))
+        return 200, copy.deepcopy(account)
+
+    items = ItemWorkspaceFixture(read_account)
+    fixtures["/api/v1/keepers/alpha/items"] = _keyboard_harness.PathHttpResponse(items.read)
+
+    def await_text(process, fd, output, needle):
+        assert _keyboard_harness.wait_for_fixture_state(process, fd, output,
+            lambda: needle in b"\n".join(last_frame_rows(output).values()), timeout=10.0), \
+            f"automatic Item refresh never drew {needle!r}: {last_frame_rows(output)!r}"
+
+    def publish_revision(value):
+        account["account_revision"] = value * 64
+        for row in roster["keepers"]:
+            if row["name"] == "alpha":
+                row["candle_account_revision"] = value * 64
+
+    def interact(process, fd, _slave, output, _base):
+        open_alpha_detail(process, fd, output)
+        _keyboard_harness.resize_and_wait(process, fd, output, rows=SHORT_ROWS, columns=COLUMNS, needle=INFO_TAB)
+        _keyboard_harness.send_and_wait(process, fd, output, b"]", "▸Items".encode())
+        await_text(process, fd, output, b"Balance 12.500 Candle")
+        account["owned_items"] = ["glasses"]
+        publish_revision("b")
+        # No key or tab transition: ordinary roster cadence must follow this.
+        await_text(process, fd, output, b"0.000 owned")
+        capture_item_screen(output, "automatic-free-purchase")
+        account["catalog"][0]["price_milli"] = "1"
+        publish_revision("c")
+        await_text(process, fd, output, b"0.001 owned")
+        capture_item_screen(output, "automatic-price-change")
+        previous_polls = len(roster_polls)
+        assert _keyboard_harness.wait_for_fixture_state(process, fd, output,
+            lambda: len(roster_polls) > previous_polls, timeout=10.0), \
+            "ordinary roster cadence stopped after the price change"
+        _keyboard_harness.drain_until_quiet(process, fd, output)
+        assert len(calls) == 3, f"unchanged roster revisions reread the account: {len(calls)}"
+        assert all(reading["balance_milli"] == "12500" for reading in calls)
+        os.write(fd, b"q")
+
+    _keyboard_harness.run_terminal_scenario(binary,
+        description="an open Item account follows free purchase and price-only roster revisions",
+        # The harness defaults to a 60-second cadence for keyboard tests;
+        # this scenario specifically exercises the synthetic refresh cadence.
+        interact=interact, http_fixtures=fixtures, prepare_workspace=items.prepare, terminal_cols=COLUMNS, refresh=0.2)
+
 
 def item_account_follows_workspace_authority(binary: str) -> None:
     fixtures = item_roster_fixtures()
@@ -485,17 +565,21 @@ def item_account_follows_workspace_authority(binary: str) -> None:
                            for row in last_frame_rows(output).values()), "a pending reread retained its account"
             items.served_base_path = str(Path(items.base_path, "other-workspace"))
             phase[0] = "b"
-            await_frame(process, fd, output, b"No keeper selected.")
+            await_frame(process, fd, output, b"[workspace mismatch]")
+            assert not any(b"Balance " in row or b"1.000 owned" in row
+                           for row in last_frame_rows(output).values())
             items.served_base_path = items.base_path
+            reads = len(health_reads)
             phase[0] = "a"
-            await_frame(process, fd, output, "Loading Item account…".encode())
+            assert _keyboard_harness.wait_for_fixture_state(process, fd, output,
+                lambda: len(health_reads) >= reads + 2, timeout=10.0)
+            reopen_alpha_items(process, fd, output, b"Balance 13.000 Candle")
+            start = len(output)
             held.release.set()
             assert _keyboard_harness.wait_for_fixture_state(process, fd, output, held.completed.is_set, timeout=10.0)
             _keyboard_harness.drain_until_quiet(process, fd, output)
-            assert not any(b"Balance 90.000" in row for row in last_frame_rows(output).values()), \
+            assert b"Balance 90.000" not in output[start:], \
                 "late first-A account became current after A/B/A"
-            os.write(fd, b"r")
-            await_frame(process, fd, output, b"Balance 13.000 Candle")
             # Repeated successful probes for the same canonical workspace do
             # not invalidate the current account or manufacture another read.
             reads = len(health_reads)
@@ -505,17 +589,17 @@ def item_account_follows_workspace_authority(binary: str) -> None:
             assert any(b"Balance 13.000" in row for row in last_frame_rows(output).values())
             assert held.calls == 2
             phase[0] = "unread"
-            await_frame(process, fd, output, b"Account unavailable: Server workspace identity is unavailable")
+            await_frame(process, fd, output, b"MASC Keepers")
             assert not any(b"Balance 13.000" in row or b"1.000 owned" in row
                            for row in last_frame_rows(output).values()), "unread health retained account authority"
             os.write(fd, b"r")
-            await_frame(process, fd, output, b"Account unavailable:")
             _keyboard_harness.drain_until_quiet(process, fd, output)
             assert held.calls == 2, "unconfirmed workspace launched an Item request"
+            reads = len(health_reads)
             phase[0] = "a"
-            await_frame(process, fd, output, "Loading Item account…".encode())
-            os.write(fd, b"r")
-            await_frame(process, fd, output, b"Balance 13.000 Candle")
+            assert _keyboard_harness.wait_for_fixture_state(process, fd, output,
+                lambda: len(health_reads) >= reads + 2, timeout=10.0)
+            reopen_alpha_items(process, fd, output, b"Balance 13.000 Candle")
             capture_item_screen(output, "workspace-authority-recovered")
             os.write(fd, b"q")
         finally:
@@ -708,15 +792,15 @@ def item_account_withdraws_unread_authority(binary: str) -> None:
             _keyboard_harness.send_and_wait(process, fd, output, b"]", b"Balance 12.500 Candle")
             identity["unread"] = True
             frame(process, fd, output, lambda text:
-                  b"Account unavailable:" in text and b"Balance 12.500 Candle" not in text)
+                  b"MASC Keepers" in text and b"Balance 12.500 Candle" not in text)
             recover(process, fd, output)
             balance[0] = "13000"
-            _keyboard_harness.send_and_wait(process, fd, output, b"r", b"Balance 13.000 Candle")
+            reopen_alpha_items(process, fd, output, b"Balance 13.000 Candle")
             arm[0] = True
             os.write(fd, b"r")
             assert _keyboard_harness.wait_for_fixture_state(process, fd, output, held.is_set, timeout=3)
             identity["unread"] = True
-            frame(process, fd, output, lambda text: b"Account unavailable:" in text)
+            frame(process, fd, output, lambda text: b"MASC Keepers" in text and b"Balance " not in text)
             recover(process, fd, output)
             # Release before any new Item read: otherwise the new read's
             # generation alone would supersede this response and hide a
@@ -729,11 +813,11 @@ def item_account_withdraws_unread_authority(binary: str) -> None:
                 lambda: identity["probes"] >= probes + 2, timeout=10)
             assert _keyboard_harness.drain_until_quiet(process, fd, output), "late response did not settle"
             text = b"\n".join(last_frame_rows(output).values())
-            assert b"Account unavailable:" in text
+            assert b"MASC Keepers" in text
             assert b"Balance 13.000 Candle" not in text
             assert b"Balance 13.000 Candle" not in output[start:]
             balance[0] = "14000"
-            _keyboard_harness.send_and_wait(process, fd, output, b"r", b"Balance 14.000 Candle")
+            reopen_alpha_items(process, fd, output, b"Balance 14.000 Candle")
             os.write(fd, b"q")
         finally:
             release.set()
@@ -762,7 +846,8 @@ if __name__ == "__main__":
     item_account_requires_matching_roster_revision(binary)
     item_tab_previews_accessories(binary)
     item_account_failure_keeps_the_preview(binary)
+    item_account_follows_roster_revision(binary)
     item_account_follows_workspace_authority(binary)
     item_account_refuses_an_unobserved_server_workspace(binary)
     item_account_withdraws_unread_authority(binary)
-    print("tui keeper portrait: PASS (9 scenarios)")
+    print("tui keeper portrait: PASS (10 scenarios)")

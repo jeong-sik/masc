@@ -7,13 +7,15 @@ import tui_keyboard_chat as _keyboard_chat
 import tui_keyboard_harness as _keyboard_harness
 
 SOURCE_MODULES = (
-    "bin/masc_tui.ml",
-    "bin/masc_tui_loader.ml",
-    "bin/masc_tui_render.ml",
-    "test/tui_keyboard_chat.py",
-    "test/tui_keyboard_harness.py",
-    "test/tui_keyboard_observer.py",
-    "test/tui_keyboard_tools.py",
+    'bin/masc_tui.ml',
+    'bin/masc_tui_loader.ml',
+    'bin/masc_tui_render.ml',
+    'lib/tui_decode_connectors.ml',
+    'lib/tui_decode_connectors.mli',
+    'test/tui_keyboard_chat.py',
+    'test/tui_keyboard_harness.py',
+    'test/tui_keyboard_observer.py',
+    'test/tui_keyboard_tools.py',
 )
 
 CONNECTORS = "/api/v1/gate/connectors"

@@ -37,6 +37,9 @@ import tui_keyboard_walk as _keyboard_walk
 # a glob declares in dune but no single path here can name.
 SOURCE_MODULES = (
     "test/test_tui_keyboard_input.py",
+    "test/test_tui_item_workspace_authority_pty.py",
+    "test/test_tui_remote_equipped_portrait.py",
+    "test/test_tui_remote_workspace_history_pty.py",
     "test/test_tui_search_count.py",
     "evidence/39827/capture.py",
     "docs/evidence/2026-09-30-candle-currency-native/scenario.py",
@@ -252,6 +255,21 @@ class ScenarioSelectionTest(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "tui_keyboard_harness"):
                 capture.require_unchanged(copies, hashes)
             self.assertNotEqual(capture.digest(copies[owner_key]), hashes[owner_key])
+
+    def test_incoming_workspace_suites_resolve_split_owner_helpers(self) -> None:
+        for filename in ("test_tui_item_workspace_authority_pty.py",
+                         "test_tui_remote_equipped_portrait.py",
+                         "test_tui_remote_workspace_history_pty.py"):
+            source = ast.parse((HERE / filename).read_text())
+            owners = {alias.asname or alias.name: importlib.import_module(alias.name)
+                      for node in source.body if isinstance(node, ast.Import)
+                      for alias in node.names if alias.name.startswith("tui_keyboard_")}
+            self.assertTrue(owners, filename)
+            for node in ast.walk(source):
+                if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) \
+                        and node.value.id in owners:
+                    with self.subTest(consumer=filename, helper=node.attr):
+                        self.assertTrue(hasattr(owners[node.value.id], node.attr))
 
     def test_all_entry_consumers_stage_the_full_import_closure(self) -> None:
         required = {path.name for path in HERE.glob("tui_keyboard_*.py")}

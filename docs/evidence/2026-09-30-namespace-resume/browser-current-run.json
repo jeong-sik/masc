@@ -1,0 +1,12 @@
+{
+  "command": [
+    "node",
+    "../docs/evidence/2026-09-30-namespace-resume/browser.mjs",
+    ".",
+    "../docs/evidence/2026-09-30-namespace-resume/browser-current"
+  ],
+  "cwd": "/private/tmp/masc-40378-browser-readback-response/dashboard",
+  "started_at": "2026-10-01T01:24:30.730142+00:00",
+  "finished_at": "2026-10-01T01:24:35.475973+00:00",
+  "exit_code": 0
+}

@@ -17,18 +17,18 @@ import tui_keyboard_approvals as _keyboard_approvals
 import tui_keyboard_harness as _keyboard_harness
 
 SOURCE_MODULES = (
-    "bin/masc_tui.ml",
-    "bin/masc_tui_types.ml",
-    "bin/masc_tui_render.ml",
-    "test/tui_keyboard_approvals.py",
-    "test/tui_keyboard_harness.py",
-    "bin/masc_tui_render_approvals.ml",
-    "bin/masc_tui_render_approvals.mli",
-    "bin/masc_tui_approvals_model.ml",
-    "bin/masc_tui_approvals_model.mli",
-    "bin/masc_tui_home.ml",
-    "bin/masc_tui_home.mli",
-    "bin/masc_tui_loader.ml",
+    'bin/masc_tui_render_approvals.ml',
+    'bin/masc_tui_render_approvals.mli',
+    'bin/masc_tui_approvals_model.ml',
+    'bin/masc_tui_approvals_model.mli',
+    'bin/masc_tui_home.ml',
+    'bin/masc_tui_home.mli',
+    'bin/masc_tui.ml',
+    'bin/masc_tui_types.ml',
+    'bin/masc_tui_render.ml',
+    'bin/masc_tui_loader.ml',
+    'test/tui_keyboard_approvals.py',
+    'test/tui_keyboard_harness.py',
 )
 OPERATOR_PATH = "/api/v1/operator?view=summary&include_messages=0&include_keepers=0"
 HELD_PATH = "/api/v1/keepers/tool-approvals"
@@ -243,9 +243,13 @@ def each_failed_source_keeps_other_cards(executable):
             known = b"retained-gate-card" if failed_path == HELD_PATH else b"retained-held-card"
             _keyboard_harness.wait_for_output(process, fd, output, known, start=0, timeout=10)
             note = b"Approvals and questions: " + failed_label + b" not fully read"
-            # Match the sole-source label through the end of its drawn row,
-            # so transient boot notes cannot satisfy the settled-source barrier.
-            settled = re.compile(re.escape(note) + rb"(?: |\x1b\[[0-9;]*m)*\x1b\[0m\x1b\[[0-9;]*H")
+            # Match the sole-source label through the end of its drawn row.
+            # The last changed row ends the frame without another row cursor.
+            settled = re.compile(
+                re.escape(note)
+                + rb"(?: |\x1b\[[0-9;]*m)*\x1b\[0m"
+                + rb"(?:\x1b\[[0-9;]*H|\x1b\[\?25l\x1b\[\?7h)"
+            )
             _keyboard_harness.wait_for_output(process, fd, output, settled, start=0, timeout=10)
             _keyboard_harness.resize_and_wait(process, fd, output, rows=24, columns=81,
                               needle=note, controls=(_keyboard_harness.FULL_REDRAW,),
@@ -362,10 +366,10 @@ def planning_link_failure_has_own_diagnostic(executable):
         assert b"Work:" in visible and b"Work: reading unavailable" not in visible, visible
         # Enter the palette only after it owns input. The 80-column Goal list
         # truncates titles, so use its selected ID before opening full detail.
-        _keyboard_approvals.send_and_wait(process, fd, output, b":", b"MASC Command palette")
-        _keyboard_approvals.send_and_wait(process, fd, output, b"go Work", b"go Work")
-        _keyboard_approvals.send_and_wait(process, fd, output, b"\r", goal["id"].encode())
-        _keyboard_approvals.send_and_wait(process, fd, output, b"\r", b"Open tasks  (links unavailable)")
+        _keyboard_harness.send_and_wait(process, fd, output, b":", b"MASC Command palette")
+        _keyboard_harness.send_and_wait(process, fd, output, b"go Work", b"go Work")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\r", goal["id"].encode())
+        _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"Open tasks  (links unavailable)")
         unavailable = _keyboard_harness.screen_text(bytes(output))
         assert goal["title"].encode() in unavailable, unavailable
         assert b"(none)" not in unavailable, unavailable

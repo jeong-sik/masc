@@ -4,10 +4,10 @@ import hashlib
 import json
 import os
 import re
+from pathlib import Path
 import sys
 import threading
 import unicodedata
-from pathlib import Path
 
 import tui_keyboard_chat as _keyboard_chat
 import tui_keyboard_harness as _keyboard_harness
@@ -17,12 +17,16 @@ SOURCE_MODULES = (
     'bin/masc_tui_render_tools.ml',
     'bin/masc_tui_tool_table.ml',
     'bin/masc_tui_render.ml',
+    'lib/tui_decode_skill_evidence.ml',
+    'lib/tui_decode_skill_evidence.mli',
+    'lib/tui_decode_tools.ml',
+    'lib/tui_decode_tools.mli',
+    'lib/tui_decode_fields.ml',
+    'lib/tui_decode_fields.mli',
     'test/tui_keyboard_chat.py',
     'test/tui_keyboard_harness.py',
     'test/tui_keyboard_observer.py',
     'test/tui_keyboard_tools.py',
-    'lib/tui_decode_skill_evidence.ml',
-    'lib/tui_decode_skill_evidence.mli',
 )
 LONG_NAME = 'long-skill-' + 'x' * 100 + '-tail'
 

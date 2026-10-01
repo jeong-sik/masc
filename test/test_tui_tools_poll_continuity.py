@@ -3,11 +3,11 @@ import base64
 import hashlib
 import json
 import os
+from pathlib import Path
 import sys
 import threading
 import time
 import zlib
-from pathlib import Path
 
 import tui_keyboard_harness as _keyboard_harness
 import tui_keyboard_tools as _keyboard_tools
@@ -18,12 +18,16 @@ import tui_keyboard_tools as _keyboard_tools
 # The two surface titles are masc_tui_render.ml's, the broker row
 # ("Async broker") masc_tui_render_tools.ml's.
 SOURCE_MODULES = (
-    "bin/masc_tui_render.ml",
-    "bin/masc_tui_render_tools.ml",
-    "test/tui_keyboard_harness.py",
-    "test/tui_keyboard_tools.py",
-    "lib/tui_decode_skill_evidence.ml",
-    "lib/tui_decode_skill_evidence.mli",
+    'bin/masc_tui_render.ml',
+    'bin/masc_tui_render_tools.ml',
+    'lib/tui_decode_skill_evidence.ml',
+    'lib/tui_decode_skill_evidence.mli',
+    'lib/tui_decode_tools.ml',
+    'lib/tui_decode_tools.mli',
+    'lib/tui_decode_fields.ml',
+    'lib/tui_decode_fields.mli',
+    'test/tui_keyboard_harness.py',
+    'test/tui_keyboard_tools.py',
 )
 
 

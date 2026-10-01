@@ -66,6 +66,9 @@ let test_every_variant_lands_in_its_class () =
        { message = "full"; tool_effect_attempted = true })
     "provider:reported:context_window_exceeded_after_tool_effect";
   check "spawn_failed" (Codex.Spawn_failed "no exe") "provider:unavailable";
+  check "reasoning effort admission failed"
+    (Codex.Reasoning_effort_admission_failed {model="fixture";detail="no advertised tier"})
+    "provider:unavailable";
   (* Split from [Spawn_failed] by RFC-0454 P2: a client that died after it
      started is a closed connection, and the pane needs to say so without
      reading the rendered sentence. Rotation is unchanged —
@@ -308,13 +311,17 @@ let test_accepted_transport_failure_fences_replay_but_routes_timeout () =
     ; Codex.Process_exited { detail = "stdout closed"; turn_accepted = true }
     ; Codex.Turn_input_write_failed "partial write"
     ];
-  let before_dispatch = Codex.Timeout {seconds = 300.; turn_accepted = false} in
-  let observation = Atomic.make Effect.No_effect_observed in
-  Map.observe_failed_dispatch
-    ~observe_transport_uncertain:(fun () -> Map.note_transport_uncertainty observation)
-    before_dispatch;
-  Alcotest.(check bool) "admission timeout still permits fallback" true
-    (Effect.allows_same_turn_retry (Atomic.get observation));
+  List.iter (fun before_dispatch ->
+    let observation = Atomic.make Effect.No_effect_observed in
+    Map.observe_failed_dispatch
+      ~observe_transport_uncertain:(fun () -> Map.note_transport_uncertainty observation)
+      before_dispatch;
+    Alcotest.(check bool) "pre-dispatch failure still permits fallback" true
+      (Effect.allows_same_turn_retry (Atomic.get observation)))
+    [ Codex.Timeout {seconds = 300.; turn_accepted = false}
+    ; Codex.Reasoning_effort_admission_failed
+        {model = "fixture"; detail = "model/list timed out"}
+    ];
   let after_dispatch = Codex.Timeout {seconds = 300.; turn_accepted = true} in
   match Keeper_runtime_failure_route.route_of_error
           ~boundary:Keeper_runtime_failure_route.Agent_core_execution

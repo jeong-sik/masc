@@ -7,6 +7,8 @@ from Masc_tui_frame. This suite opens a screen for each reader below and pins
 the body's top, title, rules, bottom border, last drawn row, blank rows and any
 list window, the roster's borders and the key hints' row, so a step changes
 these numbers on purpose and its diff shows what moved.
+The Board checks its title, selection, table and reserved lower edge by their
+rendered relationships, so adding a heading does not require a new row map.
 docs/evidence/tui-region-baseline-2026-09-28 maps every reader to the screen
 that measures it; two more suites cover the overlays and the remaining detail
 screens.
@@ -51,28 +53,28 @@ import tui_region_harness as region
 # Kept out of the default keyboard walk, which already runs near the CI limit
 # (the PTY scenario guidance, #36343).
 SOURCE_MODULES = (
-    "bin/masc_tui_frame.ml",
-    "bin/masc_tui_frame.mli",
-    "bin/masc_tui_ansi.ml",
-    "bin/masc_tui_types.ml",
-    "bin/masc_tui_render_prim.ml",
-    "bin/masc_tui_render.ml",
-    "bin/masc_tui_keeper_portrait.ml",
-    "bin/masc_tui_keeper_portrait.mli",
-    "bin/masc_tui_portrait_view.ml",
-    "bin/masc_tui_render_chat.ml",
-    "bin/masc_tui_message_layout.ml",
-    "test/tui_region_harness.py",
-    "test/tui_keyboard_approvals.py",
-    "test/tui_keyboard_board.py",
-    "test/tui_keyboard_fusion.py",
-    "test/tui_keyboard_harness.py",
-    "test/tui_keyboard_keepers.py",
-    "test/tui_keyboard_observer.py",
-    "test/tui_keyboard_repositories.py",
-    "test/tui_keyboard_runtime.py",
-    "test/tui_keyboard_schedule.py",
-    "test/tui_keyboard_workspace.py",
+    'bin/masc_tui_frame.ml',
+    'bin/masc_tui_frame.mli',
+    'bin/masc_tui_ansi.ml',
+    'bin/masc_tui_types.ml',
+    'bin/masc_tui_render_prim.ml',
+    'bin/masc_tui_render.ml',
+    'bin/masc_tui_keeper_portrait.ml',
+    'bin/masc_tui_keeper_portrait.mli',
+    'bin/masc_tui_portrait_view.ml',
+    'bin/masc_tui_render_chat.ml',
+    'bin/masc_tui_message_layout.ml',
+    'test/tui_region_harness.py',
+    'test/tui_keyboard_approvals.py',
+    'test/tui_keyboard_board.py',
+    'test/tui_keyboard_fusion.py',
+    'test/tui_keyboard_harness.py',
+    'test/tui_keyboard_keepers.py',
+    'test/tui_keyboard_observer.py',
+    'test/tui_keyboard_repositories.py',
+    'test/tui_keyboard_runtime.py',
+    'test/tui_keyboard_schedule.py',
+    'test/tui_keyboard_workspace.py',
 )
 
 # 80 and 100 are the common terminals. The roster and the keeper detail's
@@ -139,20 +141,24 @@ def layout(top, title, rules, bottom, last, blank, windows=(), **pinned):
 # #39750 places the three Identity rows beside a twelve-row mosaic portrait.
 # The recorded CI frames from job 109222918530 retain the same 22-row viewport
 # and borders, with nine more content rows; see the evidence README's refresh.
-KEEPERS = layout("blank", 3, (4, 7, 28), None, 28, 17)
-BOARD = layout("blank", 3, (4, 7, 9), None, 13, 15)
+# #40155 moves the live roster health summary out of the title to row 5.
+# PR-check 36682370981 job 109780442320's six recorded widths keep the
+# title/footer/body edges, with the list rule at 8 and sixteen blank rows.
+KEEPERS = layout("blank", 3, (4, 8, 28), None, 28, 16, health_row=5)
 CONFIG = layout("blank", 3, (4, 9), None, 27, 1, last_source_line=18)
-# The compact candle leaves one more transparent mosaic row than the old
-# portrait; the title, rule, last content row and 22-row viewport do not move.
-# PR-check job109790368513: replayed six unframed and two roster Info
-# frames. Identity, failure, attention and Gate facts remain; the24px candle
-# has two transparent bottom mosaic rows. Only unframed blank count changes.
+# The normal walk restores the live roster after the Board fixture. Replay
+# of PR-check job109790368513's eight Info frames keeps46 content rows and
+# the22-row window, with six blanks in the bare candle's transparent band.
 DETAIL = layout("blank", 3, (4,), None, 27, 6, ("1-22/46",))
 DETAIL_BESIDE_ROSTER = layout("border", 3, (4, 28), 28, 28, 0, ("1-22/46",),
                               roster={"top": 2, "bottom": 28})
-# #39883 reserves rows below the roster for the chat Keeper's portrait.
-# Only the left roster border moves. The right composer stays at row 27,
-# column 39, so its blank-row count remains 19 (see the evidence README).
+# Empty live roster is a separate authority scenario: local metadata must not
+# invent equipment. Retain the previously recorded38-row unavailable reading.
+ABSENT_DETAIL = layout("blank", 3, (4,), None, 27, 7, ("1-22/38",))
+ABSENT_DETAIL_BESIDE_ROSTER = layout("border", 3, (4, 28), 28, 28, 0, ("1-22/38",),
+                                     roster={"top": 2, "bottom": 28})
+# The normal walk observes live equipment and reserves Chat portrait rows.
+# Its separate absent-roster scenario retains the unavailable Info reading.
 CHAT_BESIDE_ROSTER = layout("blank", 3, (4, 26), None, 29, 19,
                             roster={"top": 2, "bottom": 13})
 CHAT = layout("blank", 3, (4, 26), None, 29, 19)
@@ -162,7 +168,6 @@ CHAT_ONE_ROW_GATE = layout("blank", 3, (4, 26), None, 29, 20)
 # (screen, width) -> what measure() finds there.
 EXPECTED: dict[tuple[str, object], dict[str, object]] = {
     **{("keepers", width): KEEPERS for width in WIDTHS},
-    **{("board", width): BOARD for width in WIDTHS},
     **{("config", width): CONFIG for width in WIDTHS},
     **{("keeper-detail", width): DETAIL for width in WIDTHS},
     **{("keeper-detail-roster", width): DETAIL_BESIDE_ROSTER
@@ -173,6 +178,44 @@ EXPECTED: dict[tuple[str, object], dict[str, object]] = {
     # The folded Gate argument's first row in the chat at 100 columns.
     ("chat-gate-row", CHAT_PRESS_WIDTH): {"row": 6},
 }
+
+
+def assert_board_contract(rows, *, left, right, selected_title, where):
+    """Check rendered relationships rather than an old map of row numbers."""
+    footer = region.TERMINAL_ROWS - COMPOSER_ROWS["board"]
+    body = {row: region.body_row(rows, row, left=left, right=right)
+            for row in range(2, footer)}
+    titles = [row for row, text in body.items() if "MASC Board" in text]
+    previews = [row for row, text in body.items() if text.startswith("Selected post · ")]
+    headers = [row for row, text in body.items() if "TITLE" in text.split()]
+    if len(titles) != 1 or len(previews) != 1 or len(headers) != 1:
+        raise AssertionError(f"{where}: Board title, selected preview or table header missing: {body!r}")
+    title, preview, header = titles[0], previews[0], headers[0]
+    if not title < preview < header or body[preview] != "Selected post · " + selected_title:
+        raise AssertionError(f"{where}: selected title does not precede its table: {body!r}")
+    rules = [row for row in body if region.is_rule(
+        region.cells(rows[row], left, right))]
+    if not any(title < row < preview for row in rules) or not any(
+            preview < row < header for row in rules):
+        raise AssertionError(f"{where}: Board title/preview/table divisions lost: {body!r}")
+    posts = []
+    for identity, text in (("post-r1", "Retry"), ("post-r2", "Rollout"),
+                           ("post-r3", "Prose"), ("post-r4", "Hostile")):
+        matching = [row for row, value in body.items()
+                    if row > header and text in value.split()]
+        if len(matching) != 1 or not header < matching[0] < footer - 1:
+            raise AssertionError(f"{where}: fixture post {identity} lost from table: {body!r}")
+        if "ID" in body[header].split() and identity not in body[matching[0]].split():
+            raise AssertionError(f"{where}: shown ID no longer names {text}: {body!r}")
+        posts.extend(matching)
+    if posts != sorted(posts) or not any(header < row < posts[0] for row in rules):
+        raise AssertionError(f"{where}: table divider or post ordering lost: {body!r}")
+    # Chrome_screen's lower edge is an empty row (box_bottom), followed by
+    # hints and the composer. Keep that boundary even when content rows move.
+    if body[footer - 1] or any(text.startswith(region.BOX_BOTTOM_LEFT) for text in body.values()):
+        raise AssertionError(f"{where}: Board lower edge was overwritten or replaced: {body!r}")
+    if body[2]:
+        raise AssertionError(f"{where}: full-screen Board top edge was overwritten: {body!r}")
 
 
 class Counted:
@@ -200,7 +243,7 @@ def observer_stream():
         time.sleep(OBSERVER_KEEPALIVE_SECONDS)
 
 
-def fixtures() -> region.ServedFixtures:
+def fixtures(*, absent_live_roster=False) -> region.ServedFixtures:
     """Every request the TUI makes on its way to these screens, answered.
 
     Where nothing is waiting -- no approvals, asks, schedules, pull requests,
@@ -213,6 +256,10 @@ def fixtures() -> region.ServedFixtures:
     # Keep Board's four posts while restoring the observed Keepers and their
     # portraits over Board's empty Overview roster.
     served[roster_path] = keeper_roster
+    if absent_live_roster:
+        status, payload = keeper_roster
+        served[roster_path] = (status, {**payload, "count": 0, "total": 0,
+                                      "truncated": False, "keepers": []})
     served["/api/v1/board/hearths"] = (200, {"hearths": []})
     served["/api/v1/dashboard/gate"] = _keyboard_harness.empty_gate_snapshot()
     served["/api/v1/dashboard/gate/keeper-settings"] = (200, {
@@ -273,10 +320,10 @@ def fixtures() -> region.ServedFixtures:
     return region.ServedFixtures(served)
 
 
-def interaction(served: region.ServedFixtures):
+def interaction(served: region.ServedFixtures, *, absent_live_roster=False):
     measured: dict[tuple[str, object], dict[str, object]] = {}
 
-    def take(process, fd, output, screen: str, columns: int) -> None:
+    def take(process, fd, output, screen: str, columns: int, *, selected_post="Retry") -> None:
         region.settle(process, fd, output)
         rows = region.whole_screen(output)
         where = f"{screen} at {columns}"
@@ -292,16 +339,38 @@ def interaction(served: region.ServedFixtures):
         measured[(screen, columns)] = region.measure(
             rows, columns=columns, composer_rows=COMPOSER_ROWS[screen],
             left=left, right=right)
+        if screen == "board":
+            assert_board_contract(rows, left=left, right=right,
+                selected_title=selected_post, where=where)
         if left:
             measured[(screen, columns)]["roster"] = region.measure_pane(
                 rows, left=0, right=left)
+        if screen == "keepers":
+            health_rows = [row for row in rows
+                           if region.body_row(rows, row, left=left, right=right).startswith("Health ")]
+            if health_rows != [5]:
+                raise AssertionError(f"{where}: Health must have its own row 5: {health_rows!r}")
+            health = region.body_row(rows, 5, left=left, right=right)
+            if health != "Health 1 healthy · 1 idle":
+                raise AssertionError(f"{where}: Health lost the exact fixture reading: {health!r}")
+            title = region.body_row(rows, 3, left=left, right=right)
+            if any(text in title for text in ("Health", "1 healthy", "1 idle")):
+                raise AssertionError(f"{where}: Health was repeated in the title")
+            measured[(screen, columns)]["health_row"] = 5
         if screen in ("keeper-detail", "keeper-detail-roster"):
             body = "\n".join(region.body_row(rows, row, left=left, right=right)
                              for row in range(3, region.TERMINAL_ROWS - 1))
-            for text in ("Identity", "Name: alpha", "Paused: no", "Current failure",
-                         "Board attention", "Gate"):
+            for text in ("Identity", "Name: alpha", "Paused: no",
+                         "Current failure", "Board attention", "Gate"):
                 if text not in body:
                     raise AssertionError(f"{where}: Info omitted {text!r}: {body!r}")
+            unavailable = "Portrait: unavailable: absent from live roster"
+            if absent_live_roster:
+                if unavailable not in body:
+                    raise AssertionError(f"{where}: Info omitted {unavailable!r}: {body!r}")
+            else:
+                if unavailable in body or not any(glyph in body for glyph in ("▀", "▄")):
+                    raise AssertionError(f"{where}: live equipment lost its portrait: {body!r}")
         if screen == "config":
             # The body ends on a source line whose number leads the row. A
             # height one off shows a line more or fewer, or the frame cuts.
@@ -331,12 +400,53 @@ def interaction(served: region.ServedFixtures):
             raise AssertionError("the input sentinel was not erased")
 
     def interact(process, fd, _slave, output, _base):
+        if absent_live_roster:
+            _keyboard_harness.tab_until(process, fd, output, b"MASC Keepers")
+            _keyboard_harness.select_keeper_row(process, fd, output, b"alpha")
+            _keyboard_harness.send_and_wait(process, fd, output, b"\r", INFO_TAB)
+            sweep(process, fd, output, "keeper-detail", INFO_TAB, WIDTHS)
+            _keyboard_harness.resize_and_wait(process, fd, output, rows=region.TERMINAL_ROWS,
+                              columns=157, needle=INFO_TAB, controls=(_keyboard_harness.FULL_REDRAW,))
+            _keyboard_harness.send_and_wait(process, fd, output, CTRL_B, ROSTER_HEADING)
+            sweep(process, fd, output, "keeper-detail-roster", ROSTER_HEADING, ROSTER_WIDTHS)
+            expected = {**{("keeper-detail", width): ABSENT_DETAIL for width in WIDTHS},
+                        **{("keeper-detail-roster", width): ABSENT_DETAIL_BESIDE_ROSTER
+                           for width in ROSTER_WIDTHS}}
+            region.print_measured(measured)
+            region.check_all(measured, expected)
+            _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+            _keyboard_harness.send_and_wait(process, fd, output, b"q", b"q: press again to quit")
+            return
         _keyboard_harness.tab_until(process, fd, output, b"MASC Keepers")
         sweep(process, fd, output, "keepers", b"beta", WIDTHS)
 
         board = _keyboard_harness.screen_header(b"MASC Board", b" (4)")
         _keyboard_harness.palette_go(process, fd, output, b"go board", board)
         sweep(process, fd, output, "board", b"Hostile", WIDTHS)
+        os.write(fd, b"j")
+        board_columns = WIDTHS[-1]
+        board_right = (board_columns - _keyboard_harness.ACTING_PANE_NARROW_COLUMNS
+                       if board_columns >= _keyboard_harness.ACTING_PANE_THRESHOLD_COLUMNS else board_columns)
+        def selected(title):
+            drawn = _keyboard_harness.screen_rows(bytes(output))
+            return any(region.body_row(drawn, row, left=0, right=board_right)
+                == "Selected post · " + title for row in drawn)
+        if not _keyboard_harness.wait_for_fixture_state(process, fd, output, lambda: selected("Rollout"),
+                timeout=region.QUIET_LIMIT_SECONDS):
+            raise AssertionError("moving Board selection did not update the selected title")
+        take(process, fd, output, "board", WIDTHS[-1], selected_post="Rollout")
+        os.write(fd, b"\r")
+        if not _keyboard_harness.wait_for_fixture_state(process, fd, output,
+                lambda: any(b"MASC Board" in text and b"post-r2" in text
+                    for text in _keyboard_harness.screen_rows(bytes(output)).values()),
+                timeout=region.QUIET_LIMIT_SECONDS):
+            raise AssertionError("Enter did not open the post named by Board selection")
+        _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"Selected post")
+        os.write(fd, b"k")
+        if not _keyboard_harness.wait_for_fixture_state(process, fd, output, lambda: selected("Retry"),
+                timeout=region.QUIET_LIMIT_SECONDS):
+            raise AssertionError("returning Board selection did not restore its title")
+        take(process, fd, output, "board", WIDTHS[-1])
 
         _keyboard_harness.tab_until(process, fd, output, b"MASC System")
         sweep(process, fd, output, "config", CONFIG_LOADED, WIDTHS)
@@ -396,7 +506,10 @@ def interaction(served: region.ServedFixtures):
         if FILE_CHANGE_READS.count == reads_before:
             raise AssertionError(f"the unfold at row {gate_row} read no file changes")
 
-        region.check_all(measured, EXPECTED)
+        board_widths = {width for (screen, width) in measured if screen == "board"}
+        if board_widths != set(WIDTHS):
+            raise AssertionError(f"Board functional checks did not cover every width: {board_widths!r}")
+        region.check_all({key: value for key, value in measured.items() if key[0] != "board"}, EXPECTED)
         _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
         _keyboard_harness.send_and_wait(process, fd, output, b"q", b"q: press again to quit")
 
@@ -410,5 +523,12 @@ if __name__ == "__main__":
         description="Region baseline: Board, Config, keeper detail and chat",
         interact=interaction(served),
         http_fixtures=served,
+    )
+    absent = fixtures(absent_live_roster=True)
+    _keyboard_harness.run_terminal_scenario(
+        os.path.abspath(sys.argv[1]),
+        description="Region baseline: Info refuses equipment absent from live roster",
+        interact=interaction(absent, absent_live_roster=True),
+        http_fixtures=absent,
     )
     print("region baseline: PASS")

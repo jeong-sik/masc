@@ -72,7 +72,7 @@ class KeeperToolsAgent(MascSidecar, ClaudeCode):
         try:
             await super().run(instruction, environment, context)
         finally:
-            self.record_dist_identity(context)
+            self.record_install_identity(context)
         # What the keepers spent is not in what Claude Code reports, and the arm
         # is compared on cost. The opencode variant merged it; this one did not,
         # so it read as cheaper than the baseline by the keepers' whole spend.

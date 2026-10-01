@@ -208,6 +208,7 @@ let test_failed_admission_preserves_pair () = with_workspace @@ fun base_path ->
   check bool "admission failure precedes every pair write" true (snapshot paths = before)
 let test_partial_publication_reported () = with_workspace @@ fun base_path ->
   let _old = seed_keeper base_path in
+  let previous_raw = raw base_path "keeper" in
   let named = Auth.credential_file base_path "keeper" in
   let before = read named in
   let directory = Filename.dirname named in
@@ -215,14 +216,15 @@ let test_partial_publication_reported () = with_workspace @@ fun base_path ->
   Fun.protect ~finally:(fun () -> Unix.chmod directory 0o700) (fun () ->
     match set_admin base_path with
     | Error (D.System (D.System_error.IoError detail)) ->
-      check bool "failure reports already published raw token" true
-        (String_util.string_contains_substring ~needle:"raw token: published" detail);
+      check bool "failure reports restored raw token" true
+        (String_util.string_contains_substring ~needle:"raw token: not published" detail);
       check bool "failure reports unpublished credential" true
         (String_util.string_contains_substring ~needle:"credential: not published" detail)
     | Error error -> fail (D.masc_error_to_string error)
     | Ok _ -> fail "readable but unwritable credential directory must refuse successful publication");
   check bool "credential remained unchanged" true (read named = before);
-  check bool "raw publication was observed rather than rolled back" true (raw base_path "keeper" = supplied);
+  check bool "old recoverable raw token restored" true (raw base_path "keeper" = previous_raw);
+  check_pair base_path "keeper";
   check bool "partial pair is not claimed to authenticate" true
     (Result.is_error (Auth.verify_token base_path ~agent_name:"keeper" ~token:supplied))
 let test_opaque_bearer_and_name_roundtrip () = with_workspace @@ fun base_path ->
@@ -335,6 +337,12 @@ let test_regular_symlink_authority_remains_readable () = with_workspace @@ fun b
     Unix.rename path target; Unix.symlink target path)
     [ Auth.credential_file base_path "keeper"; Auth.raw_token_file base_path "keeper" ];
   let _issued_pair = auth_ok (ensure base_path) in
+  check_pair base_path "keeper";
+  let batch = auth_ok (Auth.ensure_keeper_credentials base_path ~agent_names:["keeper"]) in
+  List.iter (fun (_, issued) -> ignore (auth_ok issued)) batch;
+  let _admin = auth_ok (set_admin base_path) in
+  check_pair base_path "keeper";
+  let _login = auth_ok (login base_path) in
   check_pair base_path "keeper"
 
 type bootstrap_config = Missing_config | Disabled_config
@@ -402,7 +410,21 @@ let test_missing_config_admin_keeps_required_default_and_pair () = with_workspac
   check bool "report contains the recoverable bearer" true (raw base_path "keeper" = report.bearer_token);
   check_pair base_path "keeper"
 
+let test_keeper_reuse_repairs_unselected_collision () = with_workspace @@ fun base_path ->
+  seed_shared base_path;
+  let other_before = current base_path "other" in
+  let token, credential = auth_ok (ensure base_path) in
+  check bool "keeper remints its ambiguous bearer" false (String.equal token (raw base_path "other"));
+  check bool "unselected owner is preserved" true (current base_path "other" = other_before);
+  check bool "returned credential is current" true (current base_path "keeper" = credential);
+  List.iter (check_pair base_path) [ "keeper"; "other" ];
+  let request = Httpun.Request.create
+      ~headers:(Httpun.Headers.of_list [ "Authorization", "Bearer " ^ token ]) `POST "/mcp" in
+  check (option string) "repaired keeper bearer reaches HTTP actor resolution"
+    (Some "keeper") (Server_auth.dashboard_actor_for_request ~base_path request)
+
 let () = run "auth_file_backed_transaction" [ "publication", [
+  test_case "keeper reuse repairs a bearer shared with an unselected owner" `Quick test_keeper_reuse_repairs_unselected_collision;
   test_case "prune then ensure recreates a recoverable pair" `Quick test_prune_then_ensure;
   test_case "ensure then prune preserves live pair and UUID" `Quick test_ensure_then_prune;
   test_case "Admin then ensure reuses current role and identity" `Quick test_admin_then_ensure;

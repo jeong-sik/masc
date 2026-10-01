@@ -36,6 +36,13 @@ let row ~now ~raw_present (cred : Types_auth.agent_credential) =
     (if raw_present then "raw token on disk" else "no raw token file")
 ;;
 
+let error_row = function
+  | Auth.Invalid_credential_expiry { agent_name; role; timestamp } ->
+    Printf.sprintf "%-32s %-6s %s" agent_name
+      (Types_auth.agent_role_to_string role) (expiry_label (Invalid_expiry timestamp))
+  | Auth.Unreadable_credential _ as error -> Auth.credential_listing_error_to_string error
+;;
+
 let expired ~now creds = List.filter (fun c -> is_expired (classify ~now c)) creds
 
 (* Sorted so a listing of a hundred credentials is readable and so two runs of

@@ -54,10 +54,27 @@ let retain_artifact ~config ~keeper_id ~now (artifact : Tool_output.artifact_ref
   let json = Tool_output.normalized_artifact_ref_to_json artifact in
   let base_dir = Filename.concat keeper_dir
       (Common.keeper_runtime_store_dirname Common.Keeper_memory_recall_artifacts) in
-  ignore (Jsonl_writer.append_dated_jsonl ~base_dir ~ts:now json);
+  let path = (Jsonl_writer.dated_path ~base_dir ~ts:now).path in
+  let payload = Yojson.Safe.to_string json in
+  let retained =
+    match Fs_compat.append_private_jsonl_durable_locked_result path (payload ^ "\n") with
+    | Fs_compat.Private_file_succeeded () -> Ok ()
+    | Fs_compat.Private_file_succeeded_with_cleanup_failure { value = (); cleanup_failure } ->
+      Log.Keeper.warn "memory os recall retention committed keeper=%s; descriptor cleanup failed: %s"
+        keeper_id (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure);
+      Ok ()
+    | Fs_compat.Private_file_failed error ->
+      Error (Fs_compat.private_jsonl_append_error_to_string error)
+    | Fs_compat.Private_file_failed_with_cleanup_failure { error; cleanup_failure } ->
+      Error (Printf.sprintf "%s; descriptor cleanup failed: %s"
+        (Fs_compat.private_jsonl_append_error_to_string error)
+        (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure)) in
+  (* The historical row and its parent directory must survive a crash before
+     replacement of the previous current pin can release its reference. *)
+  Result.bind retained (fun () ->
   Fs_compat.save_file_atomic_strict
     (Filename.concat keeper_dir "memory-recall-current.json")
-    (Yojson.Safe.to_string json)
+    payload)
 ;;
 
 let render_context ~keepers_dir ~keeper_id () =

@@ -101,6 +101,37 @@ status: reference
 : 같은 MASC 상태에 접근하고 관찰하는 사용자 표면. TUI, MCP, Dashboard처럼 서로 다른
   입구를 가리키며, 각 표면은 독립 상태를 소유하지 않는다.
 
+**Home (TUI Home 화면)**
+: TUI 최상단 대시보드(Overview) 탭에서 제공되는 운영자 중심의 의사결정·대화 진입 화면.
+  전체 통계와 차트 나열 위주의 집계형 구성을 대체하여, 사람 운영자의 직접 판단과 처리가 필요한
+  개별 의사결정(Decisions) 카드, 마지막 방문 대화 상대 재개(Continue), Keeper 선택/생성,
+  간결한 작업 흐름 요약(Dashboard Goals 등)을 제공한다(#39817·#40137·#40152).
+  - 요청 식별과 탐색(`home_request`·`home_action`): 사람이 판단해야 하는 대기 요청은
+    `home_request` 닫힌 합타입 6개(`Home_held_call`·`Home_gate_request`·`Home_operator_request`·
+    `Home_question`·`Home_goal_confirmation`·`Home_operator_task`)로 식별한다. 탐색 액션 대상
+    `home_action` 7개(`Home_approvals`·`Home_request`·`Home_agenda`·`Home_resume`·`Home_read_last`·
+    `Home_choose_keeper`·`Home_create_keeper`)를 `j`/`k` 또는 방향키로 선택하고 `Enter`로
+    원천 화면(Approvals·Agenda·Chat)을 열며, `Enter` 진입은 순수 탐색일 뿐 의사결정(승인/거절)을
+    제출하지 않는다(`requests_are_navigation`·`assert_no_decision_posts`).
+  - 복귀와 선택 보존: 열람 화면에서 `Esc`를 누르면 Home으로 복귀하며, 직전 선택 항목(`home_selected`)과
+    스크롤 윈도우(`home_decision_scroll`)를 그대로 유지한다. 새로운 최상단 탐색이 발생하면 직전 복귀
+    컨텍스트는 정리된다.
+  - 인간 개입 분리: 자동 게이트 작업(`approval_item_needs_person = false`)이나 일반 인시던트는
+    의사결정 목록에서 제외되어 사람 운영자의 의사결정 대기 목록을 침범하지 않는다.
+  - 실패 정직성과 결손 보존: 특정 출처의 읽기 실패나 알 수 없는 상태는 "대기 중인 의사결정 0건"으로
+    왜곡하지 않고 실패/알 수 없음 상태를 화면에 명시한다. 성공한 출처의 요청 행은 정상 유지된다.
+  - 대화 지속과 수신 영수증(`home_chat_receipt`): 마지막 방문 대화 상대를 `[tui].last_chat_keeper`에
+    저장하고 Continue 카드로 연결한다. 수신 상태는 `home_chat_receipt` 5개(`No_chat_receipt`·
+    `Recorded_chat`·`Session_chat`·`Unconfirmed_chat`·`Unreadable_chat_receipt`)로 투영하며,
+    고정 시작 설정(`opening = "keeper"`)은 마지막 대화 기록으로 보지 않는다. 작성 중인 메시지는
+    Keeper별 드래프트 저장소에 보존된다.
+  - 뷰포트 적응: 터미널 높이가 짧은 화면에서는 의사결정과 Continue 행이 부가 컨텍스트(Health/완료 작업)보다
+    화면 예산을 우선 할당받으며, 160열 이상의 넓은 터미널에서도 Recent 패널은 기본 닫힘 상태를
+    유지한다(`Ctrl-L`로 명시적 열기).
+  → [Masc_tui_types](../../bin/masc_tui_types.ml) ·
+  [docs/TUI-GUIDE.md](../TUI-GUIDE.md) ·
+  [docs/design/tui/HOME-JOURNEY-ACCEPTANCE.md](../design/tui/HOME-JOURNEY-ACCEPTANCE.md)
+
 **Dashboard Goals**
 : TUI 첫 화면에서 Goal의 기록된 측정값과 연결된 Task 완료 수를 별도로 요약한다.
   Goal의 실제 값은 동일한 Goal ID·기준 개정·지표·목표를 가진 관측 기록에서만 읽는다.

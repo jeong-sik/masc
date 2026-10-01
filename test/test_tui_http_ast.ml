@@ -1229,7 +1229,7 @@ let test_planning_phase_uses_goal_ssot () =
      answer, asked in the binding that draws the row. *)
   check bool "goal detail lights its keys from the transition matrix" true
     (Ast_grep.count_calls_in_value_binding
-       ~module_path:"bin/masc_tui_render.ml" ~binding_name:"planning_detail_pane"
+       ~module_path:"bin/masc_tui_render.ml" ~binding_name:"planning_detail_action_rows"
        ~callee:"Goal_phase.moves_goal"
      >= 1)
 ;;
@@ -2673,23 +2673,26 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
     ~binding:"write_list_sidebar_selection" ~callees:sanitizer_calls [ "label" ];
   check_fields "render_planning_list"
     [ "planning_error"; "pg_due_date"; "pg_title" ];
-  (* The drawing moved into [planning_detail_pane] when the goal list came to
-     sit beside the goal; [render_planning_detail] is now the split, and
-     guarding it would guard a function that renders nothing. Same move as
-     #29626 made for [keeper_row_content].
-
-     [String.equal] finds the open goal's row in the sidebar and [List.mem]
-     asks which tasks name this goal. Neither reaches the terminal, and the
-     labels the sidebar draws are sanitized where they are drawn.
-
-     [Planning_detail.timeline] takes the goal id to answer one question --
-     whether the timeline that came back is this goal's or the previous
-     one's -- and draws the events, never the id
-     (masc_tui_planning_detail.ml). *)
+  (* Metadata rows now belong to [planning_detail_lines]. Its local [field]
+     builder passes every value through the text-block sanitizer; the pane
+     draws those projected rows and the separate transition-derived actions. *)
+  check_fields "planning_detail_pane" [ "pg_id" ];
   check_fields
-    ~non_rendering_calls:[ "List.mem"; "Planning_detail.timeline" ]
-    "planning_detail_pane"
+    ~non_rendering_calls:[ "field"; "List.mem"; "Planning_detail.timeline"; "Link.reference" ]
+    "planning_detail_lines"
     [ "pg_id"; "pg_title"; "pg_due_date"; "pg_metric"; "pg_target_value" ];
+  check int "goal pane draws its metadata projection" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:render_path
+       ~binding_name:"planning_detail_pane" ~callee:"planning_detail_lines");
+  check int "goal pane draws its transition-derived action projection" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:render_path
+       ~binding_name:"planning_detail_pane" ~callee:"planning_detail_action_rows");
+  check bool "goal metadata values pass through the text-block boundary" true
+    (Ast_grep.count_calls_in_value_binding ~module_path:render_path
+       ~binding_name:"planning_detail_lines" ~callee:"Masc_tui_text_block.rows" >= 1);
+  check_identifiers ~module_path:"bin/masc_tui_text_block.ml"
+    ~binding:"rows_of_line"
+    ~callees:[ "Masc.Tui_terminal_text.sanitize_terminal_text" ] [ "line" ];
   check_fields ~non_rendering_calls:[ "String.equal" ] "render_planning_detail"
     [ "pg_id" ];
   (* The verifier's reason for skipping a Verifying goal comes off the wire
@@ -2708,7 +2711,7 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
     [ "text"; "line" ];
   check int "the goal detail heads a stuck goal with the verifier's reason" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path
-       ~binding_name:"planning_detail_pane"
+       ~binding_name:"planning_detail_lines"
        ~callee:"Planning_detail.unreconciled_lines");
   check int "the Verifying next step comes from the tested sentence" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path

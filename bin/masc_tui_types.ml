@@ -5862,6 +5862,7 @@ type state = {
   mutable goal_action_armed:
     (string * Goal_phase.Public_action.t) option;
   mutable goal_action_error: string option;
+  mutable goal_confirmation_presented : Masc_tui_planning_detail.confirmation option;
   mutable goal_confirmation:
     Masc_tui_planning_detail.confirmation_state;
   (* The schedule list and its cursor. The snapshot keeps the server's
@@ -8367,6 +8368,7 @@ let create_state
   planning_sort = Planning_sort_phase_priority;
   goal_action_armed = None;
   goal_action_error = None;
+  goal_confirmation_presented = None;
   goal_confirmation = Masc_tui_planning_detail.Inspecting Masc_tui_fetched.initial;
   schedules = None;
   schedules_error = None;
@@ -9097,6 +9099,7 @@ type clamped_scroll =
   | Runtime_detail_scroll of int
   | Runtime_params_scroll of int
   | System_log_detail_scroll of int
+  | Planning_confirmation_scroll of int * Masc_tui_planning_detail.confirmation option
   | Planning_detail_scroll of int
   | Lane_run_detail_scroll of { scroll : int; content_height : int }
   (* An open diff's rows are built by the drawing, out of the recorded before
@@ -9201,7 +9204,8 @@ let apply_clamped_scroll (state : state) = function
   | Keeper_logs_scroll { scroll; cols } ->
       state.log_scroll <- scroll;
       state.log_wrap_cols <- Some cols
-  | Planning_detail_scroll value -> state.planning_scroll <- value
+  | Planning_detail_scroll value
+  | Planning_confirmation_scroll (value, _) -> state.planning_scroll <- value
   | Lane_run_detail_scroll { scroll; content_height } ->
       state.lane_run_detail_scroll <- scroll;
       state.lane_run_detail_content_height <- content_height

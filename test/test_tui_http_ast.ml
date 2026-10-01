@@ -189,7 +189,7 @@ let test_tui_render_asks_the_theme_for_a_categorical_hue () =
           (violations
            |> List.map status_color_violation_to_string
            |> String.concat "\n"))
-    [ "bin/masc_tui_render.ml"; "bin/masc_tui_render_board.ml" ]
+    [ "bin/masc_tui_render.ml"; "bin/masc_tui_render_board.ml"; "bin/masc_tui_render_code.ml" ]
 ;;
 
 let test_theme_apply_is_boot_and_the_surface () =
@@ -213,7 +213,7 @@ let test_tui_status_colors_use_theme_tokens () =
           (violations
            |> List.map status_color_violation_to_string
            |> String.concat "\n"))
-    [ "bin/masc_tui_render.ml"; "bin/masc_tui_render_board.ml" ]
+    [ "bin/masc_tui_render.ml"; "bin/masc_tui_render_board.ml"; "bin/masc_tui_render_code.ml" ]
 ;;
 
 let test_tui_ansi_status_helpers_use_theme_tokens () =
@@ -498,6 +498,7 @@ let test_no_row_marks_its_own_timestamp_with_a_zone () =
             (Ast_grep.count_string_literals ~module_path ~needle))
         [ "(local)"; "local date"; "local time"; "local timezone" ])
     [ "bin/masc_tui_render.ml"
+    ; "bin/masc_tui_render_code.ml"
     ; "bin/masc_tui_render_board.ml"
     ; "bin/masc_tui_render_memory.ml"
     ; "bin/masc_tui_render_chat.ml"
@@ -1355,9 +1356,9 @@ let test_tui_current_projection_wiring () =
      = 1);
   check bool "metrics diagnostics are terminal-safe before rendering" true
     (Ast_grep.count_calls_in_value_binding
-       ~module_path:"bin/masc_tui_render.ml"
-       ~binding_name:"render_keeper_logs"
-       ~callee:"Keeper_chat.terminal_safe_text"
+       ~module_path:"bin/masc_tui_types.ml"
+       ~binding_name:"keeper_log_rows"
+       ~callee:"Masc.Tui_terminal_text.sanitize_terminal_text"
      >= 1);
   check bool "log input uses viewport-bounded scrolling" true
     (Ast_grep.count_calls_across_files
@@ -1422,8 +1423,8 @@ let test_tui_current_projection_wiring () =
        ~callee:"Observation_layout.context_header_item" ~label:"max_cells");
   check bool "log diagnostics remain operator-visible" true
     (Ast_grep.count_calls_in_value_binding
-       ~module_path:"bin/masc_tui_render.ml"
-       ~binding_name:"render_keeper_logs"
+       ~module_path:"bin/masc_tui_types.ml"
+       ~binding_name:"keeper_log_rows"
        ~callee:"Metrics_tail.error_to_string"
      = 1);
   check bool "log empty copy distinguishes typed outcomes" true
@@ -1824,7 +1825,7 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
         (Ast_grep.count_calls ~module_path ~callee:"print_string");
       check int (module_path ^ " performs no direct flushes") 0
         (Ast_grep.count_calls ~module_path ~callee:"flush"))
-    [ "bin/masc_tui_render.ml"; "bin/masc_tui_render_board.ml" ];
+    [ "bin/masc_tui_render.ml"; "bin/masc_tui_render_board.ml"; "bin/masc_tui_render_code.ml" ];
   check int "main has one frame presentation boundary" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"main" ~callee:"Frame_presenter.present");
@@ -1860,11 +1861,10 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
        ~module_path:"bin/masc_tui_render.ml" ~binding_name:"render"
        ~callee:"render_surface");
   let render_path = "bin/masc_tui_render.ml" in
-  (* The Dashboard is a fixed set of summary sections over one body height;
-     it holds no Team block, task panel or attention window whose rows a
-     shared allocation would split (RFC-tui-measured-operator-home). That
-     height is the shared chrome's budget, which also says how many rows a
-     short terminal could not hold. *)
+  (* The Dashboard is a fixed set of summary sections over one body height, so
+     no shared allocation splits their rows (RFC-tui-measured-operator-home).
+     That height is the shared chrome's budget, which also says how many rows
+     a short terminal could not hold. *)
   check int "Dashboard draws through the shared chrome once" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path
        ~binding_name:"render_overview" ~callee:"surface_chrome");
@@ -2759,6 +2759,9 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
         (* Hashes the name into the portrait's look; what it returns is
            pixels and cells, never the name's text. *)
       ; "Masc_tui_keeper_portrait.shown"
+        (* Item preview hashes the name by the same portrait path and returns
+           only pixels; no Keeper-name text reaches terminal cells. *)
+      ; "Masc_tui_keeper_portrait.preview"
       ]
     "keeper_detail_pane"
     [ "k_name"
@@ -2770,8 +2773,30 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
     ; "k_created_at"
     ; "k_updated_at"
     ];
-  check_fields "render_keeper_logs"
-    [ "k_name"; "le_ts"; "le_tools_used"; "le_work_kind" ];
+  check_fields "render_keeper_logs" [ "k_name" ];
+  check_fields ~module_path:"bin/masc_tui_types.ml"
+    ~non_rendering_calls:[ "Masc.Tui_terminal_text.clock_timestamp_for_terminal" ]
+    "keeper_log_rows" [ "le_ts" ];
+  (* The entry projector owns the full timestamp and every tool/work fact.
+     [wrap] sanitizes the final text, including values assembled in lambdas. *)
+  check_fields ~module_path:"bin/masc_tui_observation_layout.ml"
+    ~non_rendering_calls:[ "wrap"; "List.concat_map" ]
+    "log_entry_rows" [ "le_ts"; "le_tools_used" ];
+  check int "log work-kind option is read once before its value is wrapped" 1
+    (Ast_grep.count_field_accesses_outside_calls_in_value_binding
+       ~module_path:"bin/masc_tui_observation_layout.ml"
+       ~binding_name:"log_entry_rows" ~callees:[] ~fields:[ "le_work_kind" ]);
+  check_identifiers ~module_path:"bin/masc_tui_observation_layout.ml"
+    ~binding:"log_entry_rows"
+    ~callees:[ "Masc.Tui_terminal_text.sanitize_terminal_text" ] [ "text" ];
+  check_identifiers ~module_path:"bin/masc_tui_observation_layout.ml"
+    ~binding:"log_entry_rows" ~callees:[ "wrap" ] [ "tool"; "work" ];
+  check int "logs render the shared row projection" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:render_path
+       ~binding_name:"render_keeper_logs" ~callee:"Masc_tui_types.keeper_log_rows");
+  check int "log rows render full entry facts through the observation projection" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_types.ml"
+       ~binding_name:"keeper_log_rows" ~callee:"Masc_tui_observation_layout.log_entry_rows");
   (* The Info tab's Board-attention rows are drawn from wire strings -- a
      partition id, a Keeper name on a ledger error, the server's own words on
      a failed read -- so the module that builds them is held to the same
@@ -2854,9 +2879,9 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path
        ~binding_name:"render_keeper_logs" ~callee:"String.sub");
   check int "log renderer uses the safe clock projection once" 1
-    (Ast_grep.count_calls_in_value_binding ~module_path:render_path
-       ~binding_name:"render_keeper_logs"
-       ~callee:"Terminal_text.clock_timestamp");
+    (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_types.ml"
+       ~binding_name:"keeper_log_rows"
+       ~callee:"Masc.Tui_terminal_text.clock_timestamp_for_terminal");
   (* Seven: two observation timestamps in Live Context, the last turn, the
      oldest row a partial Last 24h window reached, the created / updated pair,
      and the Automation row's request clock. Each one arrives from a keeper
@@ -3037,23 +3062,24 @@ let test_the_config_frame_is_the_shared_contract () =
    the title when the pane is alone, so the title is counted there and the
    surfaces are counted calling it. *)
 let test_the_pane_surfaces_open_on_a_title_row () =
-  let calls binding_name callee =
-    Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_render.ml"
-      ~binding_name ~callee
+  let calls ~module_path binding_name callee =
+    Ast_grep.count_calls_in_value_binding ~module_path ~binding_name ~callee
   in
-  List.iter
-    (fun binding_name ->
-      check int (binding_name ^ " draws the title row once") 1
-        (calls binding_name "pane_surface_header"))
-    [ "render_code"; "render_resources" ];
+  let in_code = calls ~module_path:"bin/masc_tui_render_code.ml" in
+  let in_resources = calls ~module_path:"bin/masc_tui_render.ml" in
+  let in_prim = calls ~module_path:"bin/masc_tui_render_prim.ml" in
+  check int "render_code draws the title row once" 1
+    (in_code "render_code" "pane_surface_header");
+  check int "render_resources draws the title row once" 1
+    (in_resources "render_resources" "pane_surface_header");
   check int "the header draws the title once" 1
-    (calls "pane_surface_header" "pane_surface_title");
+    (in_prim "pane_surface_header" "pane_surface_title");
   check bool "Code's list reads the shared pane height" true
-    (calls "render_code" "code_pane_content_height" >= 1);
+    (in_code "render_code" "code_pane_content_height" >= 1);
   check bool "Code's pane height gives up the title row" true
-    (calls "code_pane_content_height" "pane_surface_content_height" >= 1);
+    (in_code "code_pane_content_height" "pane_surface_content_height" >= 1);
   check bool "Resources gives up the same title row" true
-    (calls "render_resources" "pane_surface_content_height" >= 1)
+    (in_resources "render_resources" "pane_surface_content_height" >= 1)
 ;;
 
 (* The runtime picker is the contract's too: the frame counts its rows, the

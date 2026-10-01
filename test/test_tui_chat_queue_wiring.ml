@@ -3432,13 +3432,13 @@ let test_the_support_threshold_reserves_the_scrollback_row () =
   let state =
     Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
   in
-  let newest_status_rows = Tui_types.keeper_message_status_rows state in
+  let newest_status_rows = Tui_types.keeper_message_status_rows state ~terminal_cols:80 in
   let newest =
     Tui_types.keeper_message_support_status_rows state
       ~status_rows:newest_status_rows
   in
   state.msg_scroll <- 1;
-  let reading_back_status_rows = Tui_types.keeper_message_status_rows state in
+  let reading_back_status_rows = Tui_types.keeper_message_status_rows state ~terminal_cols:80 in
   let reading_back =
     Tui_types.keeper_message_support_status_rows state
       ~status_rows:reading_back_status_rows
@@ -3969,15 +3969,28 @@ let test_the_calls_table_says_what_came_back () =
    slow and stuck. The age is computed where it can be tested; this pins that
    the pane actually asks for it. *)
 let test_the_sending_rows_show_an_age () =
-  let n =
-    calls ~module_path:"bin/masc_tui_render_chat.ml"
-      ~callee:"Message_layout.age_text"
-  in
-  if n < 1 then
-    failf
-      "bin/masc_tui_render_chat.ml must age the rows it draws for a request \
-       in flight; Message_layout.age_text is called %d time(s)"
-      n
+  check bool "the renderer consumes the shared status rows" true
+    (calls ~module_path:"bin/masc_tui_render_chat.ml"
+       ~callee:"Masc_tui_types.keeper_message_inflight_rows" > 0);
+  check bool "the shared producer computes the age" true
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_types.ml"
+       ~binding_name:"keeper_message_inflight_rows"
+       ~callee:"Masc_tui_message_layout.age_text" > 0);
+  List.iter (fun keeper_name ->
+    let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+    state.msg_target_keeper_name <- Some "alpha";
+    state.msg_inflight <- [inflight_with_log ~keeper_name ~started_at:2. [Live.Run_started]];
+    let summary ~now =
+      match List.rev (Tui_types.keeper_message_inflight_rows state ~chat_cols:80 ~now) with
+      | (_, text) :: _ -> text
+      | [] -> fail "an in-flight request lost its status row"
+    in
+    check bool "three-second request displays its age" true
+      (String.ends_with ~suffix:" · 3s)" (summary ~now:5.));
+    check bool "thirteen-minute request displays its changed age" true
+      (String.ends_with ~suffix:" · 13m00s)" (summary ~now:782.)))
+    ["alpha"; "beta"]
 ;;
 
 let test_image_headers_sanitize_untrusted_attachment_names () =

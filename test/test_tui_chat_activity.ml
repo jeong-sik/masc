@@ -366,11 +366,51 @@ let test_compact_keeps_uncovered_execution_problems () =
   check bool "another execution failure remains named while one works" true
     (Astring.String.is_infix ~affix:"요청 처리 실패" (text ()))
 
+(* The foreign turn's stop command is operator input, so shortening the
+   Keeper identity would offer a command for an identity that does not exist. *)
+let test_foreign_stop_command_remains_complete () =
+  List.iter (fun keeper_name ->
+    List.iter (fun terminal_cols ->
+      let state = state () in
+      let empty = Tui.keeper_message_status_rows state ~terminal_cols in
+      state.msg_inflight <-
+        [inflight ~keeper_name ~request_id:"foreign-request" ~at:2. ()];
+      let chat_cols = Masc_tui_roster_pane.content_cols
+          ~hidden:state.roster_pane_hidden ~cols:terminal_cols in
+      let rows = Tui.keeper_message_inflight_rows state ~chat_cols ~now:5. in
+      let command_rows = List.filteri
+          (fun index _ -> index < List.length rows - 1) rows in
+      let command_lines = List.map (fun (_, line) -> String.trim line) command_rows in
+      let reconstructed = match command_lines with
+        | "/interrupt" :: rest -> "/interrupt " ^ String.concat "" rest
+        | lines -> String.concat "" lines in
+      check string "the complete stop command precedes the status"
+        ("/interrupt " ^ keeper_name) reconstructed;
+      check bool "every physical command row is valid UTF-8" true
+        (List.for_all (fun (_, line) -> String.is_valid_utf_8 line) command_rows);
+      check bool "all command rows fit the pane" true
+        (List.for_all (fun (_, line) ->
+          Masc_tui_message_layout.display_width line <=
+            Masc_tui_frame.inner_width ~cols:chat_cols)
+          (List.filteri (fun index _ -> index < List.length rows - 1) rows));
+      check bool "foreign rows remain visually distinct" true
+        (List.for_all (fun (mine, _) -> not mine) rows);
+      check int "the composer reserves every physical row"
+        (List.length rows)
+        (Tui.keeper_message_status_rows state ~terminal_cols - empty);
+      check int "age updates cannot change the reserved height"
+        (List.length rows)
+        (List.length (Tui.keeper_message_inflight_rows state ~chat_cols ~now:100000.)))
+      [40; 60; 80; 120; 242])
+    ["beta"; "keeper-with-a-long-family-name-and-a-distinct-tail";
+     "아주긴키퍼이름으로행동안내가가려지면안되는키퍼"]
+
 let () =
   run "TUI chat activity"
     [ "request and lane states",
       [ test_case "uncovered execution failures remain visible" `Quick test_compact_keeps_uncovered_execution_problems
       ; test_case "compact delivery and priority truth" `Quick test_compact_status_keeps_delivery_and_priority_truth
+      ; test_case "foreign stop command remains complete" `Quick test_foreign_stop_command_remains_complete
       ; test_case "Working request stays visible behind newer queued view" `Quick test_working_request_survives_newer_queued_view
       ; test_case "the band does not repeat the admission" `Quick
           test_the_band_does_not_repeat_the_admission

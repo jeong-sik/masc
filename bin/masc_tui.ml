@@ -14125,6 +14125,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
   | Http_refresh_done (Refresh_surfaces results) ->
       http_refresh_inflight := false;
       state.http_refresh_started_ns <- None;
+      let previous_authority = state.workspace_authority in
       apply_http_surfaces state ~mailbox results;
       (* The local roster is trustworthy only after a workspace-matched read.
          Resolve the boot choice once; a key the operator pressed meanwhile
@@ -14177,6 +14178,16 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
        | _ -> ());
       open_observer_if_due state ~retry_closed:false
         ~host:(server_peer_host) ~port:state.port ~mailbox;
+      (* Adopting a workspace invalidates the approval ticket and companion
+         reads dispatched before its identity was known. Read them again under
+         the new authority; a stable workspace does not schedule another pass. *)
+      if previous_authority <> state.workspace_authority
+         && Masc_tui_types.server_workspace_matches
+              ~expected:state.server_identity results.http_server_identity then
+        start_http_refresh state ~host:server_peer_host ~port:state.port
+          ~intent:Revalidate ~refresh_inflight:http_refresh_inflight
+          ~scoped_refresh_inflight:http_scoped_refresh_inflight
+          ~scoped_refresh_followup ~mailbox;
       start_scoped_refresh_followup state ~host:(server_peer_host)
         ~port:state.port ~refresh_inflight:http_refresh_inflight
         ~scoped_refresh_inflight:http_scoped_refresh_inflight

@@ -1377,7 +1377,7 @@ def chat_retained_stop_interaction(fixture: AtomicChatFixture) -> Interaction:
                 raise AssertionError("initial stop never reached the server")
             send_and_wait(process, master_fd, output, b"retained-original", composer_showing(b"retained-original"))
             send_and_wait(process, master_fd, output, b"\r", "내 메시지 1건 대기".encode())
-            send_and_wait(process, master_fd, output, b"\x1b", b"Input retained after Esc")
+            send_and_wait(process, master_fd, output, b"\x1b", "중단 뒤 보관 중".encode())
             if fixture.received:
                 raise AssertionError(f"second Esc dispatched retained input: {fixture.received!r}")
             fixture.release_interrupt.set()

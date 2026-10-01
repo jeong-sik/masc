@@ -671,7 +671,12 @@ let render_work_tasks (state : state) =
       let link_error = match state.goal_task_links with
         | Goal_links_read_failed reason -> Some reason
         | Goal_links_not_read | Goal_links_read _ -> None in
-      (match List.filter_map Terminal_text.optional_single_line [state.tasks_error; link_error] with
+      let reasons =
+        [ Terminal_text.optional_single_line state.tasks_error
+        ; Terminal_text.optional_single_line link_error
+        ]
+        |> List.filter_map Fun.id in
+      (match reasons with
        | [] -> ()
        | reasons -> c.push (" Coverage: " ^ String.concat " · " reasons));
       c.push "";
@@ -13473,7 +13478,7 @@ let render_surface (state : state) =
        | Board_compose -> Masc_tui_render_board.render_board_compose state
        | Board_read post_id ->
            match Board_detail.view_for state.board_detail ~post_id with
-           | Board_detail.Ready (post, _) -> Masc_tui_render_board.render_board_read state post
+           | Board_detail.Ready (post, _, _) -> Masc_tui_render_board.render_board_read state post
            | Board_detail.Absent | Board_detail.Loading | Board_detail.Failed _ ->
                (match List.find_opt (fun p -> p.bp_id = post_id) state.board_posts with
                 | Some post -> Masc_tui_render_board.render_board_read state post

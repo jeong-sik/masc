@@ -174,8 +174,8 @@ def run(executable: str) -> None:
             third_start = len(output)
             os.write(master_fd, b"\r")
             _keyboard_chat.wait_for_atomic_admissions(process, master_fd, output, priority_fixture, 3)
-            _keyboard_harness.wait_for_output(
-                process, master_fd, output, b"3 messages in the keeper's queue",
+            _keyboard_chat.wait_for_output(
+                process, master_fd, output, "내 메시지 3건 대기".encode(),
                 start=third_start, timeout=5,
             )
             third = priority_fixture.submitted[2]
@@ -186,8 +186,8 @@ def run(executable: str) -> None:
             fourth_start = len(output)
             os.write(master_fd, b"\r")
             _keyboard_chat.wait_for_atomic_admissions(process, master_fd, output, priority_fixture, 4)
-            _keyboard_harness.wait_for_output(
-                process, master_fd, output, b"4 messages in the keeper's queue",
+            _keyboard_chat.wait_for_output(
+                process, master_fd, output, "내 메시지 4건 대기".encode(),
                 start=fourth_start, timeout=5,
             )
             fourth = priority_fixture.submitted[3]

@@ -215,6 +215,8 @@ export interface BoardPost {
 }
 
 export interface BoardComment {
+  /** Position in the companion context's server thread snapshot. */
+  thread_offset?: number
   id: string
   post_id: string
   parent_id?: string | null

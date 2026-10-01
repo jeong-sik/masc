@@ -5724,7 +5724,10 @@ type state = {
   mutable pending_approval_action: pending_approval_action option;
   mutable board_posts: board_post list;
   mutable board_detail:
-    (board_post * board_comment list) Masc_tui_board_detail.t;
+    (board_post * board_comment list * string option) Masc_tui_board_detail.t;
+  mutable board_comment_landing: string option;
+  (** Pending initial numeric-page comment identity. Cleared when a frame
+      returns the ordinary wrapped-row scroll position. *)
   mutable board_history_post_id: string option;
   mutable board_list_error: string option;
   mutable board_list_reading: board_list_reading;
@@ -8255,6 +8258,7 @@ let create_state
   pending_approval_action = None;
   board_posts = [];
   board_detail = Masc_tui_board_detail.initial;
+  board_comment_landing = None;
   board_history_post_id = None;
   board_list_error = None;
   board_list_reading = Board_list_unread;
@@ -9089,7 +9093,8 @@ let apply_clamped_scroll (state : state) = function
   | Task_detail value -> state.task_detail_scroll <- value
   | Board_read (body, comments) ->
       state.board_scroll <- body;
-      state.board_comment_scroll <- comments
+      state.board_comment_scroll <- comments;
+      state.board_comment_landing <- None
   | Message_scroll value -> set_msg_scroll state value
   | Schedule_detail_scroll value -> state.schedule_scroll <- value
   | Keeper_detail value -> state.detail_scroll <- value
@@ -11773,7 +11778,12 @@ let keeper_message_activity_rows (state : state) =
           | Stream_failed _ -> true | Waiting | Working | Stream_ended -> false) then
         attention "요청 처리 실패";
       if List.exists (fun entry -> match entry.phase with
-          | Turn_reconciling -> true | Turn_streaming -> false) own then
+          | Turn_reconciling ->
+              not (List.exists (fun (request, delivery) ->
+                  delivery = Rechecking_delivery
+                  && Masc_tui_keeper_chat_projection.same_request_identity
+                    request entry.sent_request) waiting)
+          | Turn_streaming -> false) own then
         attention "메시지 전달 재확인 중";
       if any_phase Masc_tui_keeper_chat_transcript.awaiting_continuation then
         add "이어서 처리하기를 기다리는 중";

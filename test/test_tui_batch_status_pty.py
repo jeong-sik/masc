@@ -74,6 +74,7 @@ def run(executable: str) -> None:
     def interact(process, master_fd, _slave_fd, output, _base_path):
         try:
             _keyboard_chat.open_atomic_chat(process, master_fd, output)
+            _keyboard_chat.send_and_wait(process, master_fd, output, b"\x04\x04", b"tools:full")
             for index, message in enumerate(
                 (b"batch-one", b"batch-two", b"batch-three", b"next-turn"), 1
             ):

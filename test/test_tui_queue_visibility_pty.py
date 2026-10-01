@@ -180,10 +180,10 @@ def run(executable: str, evidence_dir: Path | None = None) -> None:
             os.write(fd, b"\x1b")
             if not _keyboard_harness.wait_for_fixture_event(process, fd, output, fixture.interrupted, timeout=5):
                 raise AssertionError("the mixed queue's control receipt was not held")
-            _keyboard_harness.send_and_wait(process, fd, output, b"local-three", _keyboard_harness.composer_showing(b"local-three"))
-            _keyboard_harness.send_and_wait(process, fd, output, b"\r", b"Queue (3 pending")
-            _keyboard_harness.resize_and_wait(process, fd, output, rows=40, columns=80,
-                              needle=CHAT, controls=(_keyboard_harness.FULL_REDRAW,), final_cursor=b"\x1b[?25h")
+            _keyboard_chat.send_and_wait(process, fd, output, b"local-three", _keyboard_chat.composer_showing(b"local-three"))
+            _keyboard_chat.send_and_wait(process, fd, output, b"\r", b"Queue (3 pending")
+            _keyboard_chat.resize_and_wait(process, fd, output, rows=40, columns=80,
+                              needle=b"Queue (3 pending", controls=(_keyboard_chat.FULL_REDRAW,), final_cursor=b"\x1b[?25h")
             screen = capture(output, "mixed-queue", columns=80)
             rows = _keyboard_harness.screen_rows(current_screen(output)[0])
             queue_row = _keyboard_harness.screen_row_of(rows, b"Queue (3 pending")
@@ -397,13 +397,13 @@ def run_compact(executable: str, evidence_dir: Path | None = None, *, fail_prior
             expected = "다음 순서 확인 불가" if fail_priority else "다음 순서로 접수됨"
             _keyboard_harness.wait_for_output(process, fd, output, expected.encode(), start=0, timeout=10)
             # A changed geometry owns a redraw; repeated 80x30 does not.
-            _keyboard_harness.resize_and_wait(process, fd, output, rows=30, columns=100,
-                needle=expected.encode(), controls=(_keyboard_harness.FULL_REDRAW,))
-            final = _keyboard_harness.resize_and_wait(process, fd, output, rows=30, columns=80,
-                needle=expected.encode(), controls=(_keyboard_harness.FULL_REDRAW,))
-            text = _keyboard_harness.screen_text(final)
-            rows = _keyboard_harness.screen_rows(final)
-            status = [row for row in rows if "내 메시지 2건 대기".encode() in row]
+            _keyboard_chat.resize_and_wait(process, fd, output, rows=30, columns=100,
+                needle=expected.encode(), controls=(_keyboard_chat.FULL_REDRAW,))
+            final = _keyboard_chat.resize_and_wait(process, fd, output, rows=30, columns=80,
+                needle=expected.encode(), controls=(_keyboard_chat.FULL_REDRAW,))
+            text = _keyboard_chat.screen_text(final)
+            rows = _keyboard_chat.screen_rows(final)
+            status = [row for row in rows.values() if "내 메시지 2건 대기".encode() in row]
             assert len(status) == 1, "pending input has duplicate status owners"
             assert expected.encode() in status[0], "receipt evidence clipped from composite status"
             assert "Esc:중단".encode() in status[0], "the actual stop action was clipped"
@@ -416,7 +416,14 @@ def run_compact(executable: str, evidence_dir: Path | None = None, *, fail_prior
                 (evidence_dir / f"{name}-80x30.ansi").write_bytes(bytes(output))
                 (evidence_dir / f"{name}-80x30.txt").write_bytes(text)
             fixture.release.set()
-            _keyboard_harness.wait_for_output(process, fd, output, b"reply-compact-two", start=0, timeout=10)
+            _keyboard_chat.wait_for_output(process, fd, output, b"reply-compact-two", start=0, timeout=10)
+            if not _keyboard_harness.wait_for_fixture_state(
+                process, fd, output,
+                lambda: b"Esc:detail" in _keyboard_chat.screen_text(bytes(output)),
+                timeout=5,
+            ):
+                raise AssertionError("settled chat did not restore detail navigation")
+            _keyboard_chat.send_and_wait(process, fd, output, b"\x1b", b"Info")
             os.write(fd, b"q")
         finally:
             priority_release.set()

@@ -91,4 +91,28 @@ describe('Keeper Item request workspace authority', () => {
     await expect(fetchKeeperItems('rondo', expected)).rejects.toMatchObject({ status: 409 })
     expect(fetch).toHaveBeenCalledTimes(1)
   })
+
+  it('rejects line-terminated monetary bytes in both the wallet and priced catalog', () => {
+    for (const ending of ['\n', '\r', '\r\n', '\u2028', '\u2029']) {
+      const amount = `200${ending}`
+      expect(() => parseKeeperItems({ ...ready, balance_milli: amount }, 'rondo')).toThrow('Keeper Item account schema drift')
+      expect(() => parseKeeperItems({ ...ready,
+        catalog: catalog.map(item => item.id === 'crown' ? { ...item, price_milli: amount } : item),
+      }, 'rondo')).toThrow('Keeper Item account schema drift')
+    }
+  })
+
+  it('keeps explicit zero priced and preserves canonical wallet and price amounts beyond machine integers', () => {
+    for (const amount of ['0', '18446744073709551614000']) {
+      const parsed = parseKeeperItems({ ...ready, balance_milli: amount,
+        catalog: catalog.map(item => item.id === 'crown' ? { ...item, price_milli: amount } : item),
+      }, 'rondo')
+      if (parsed.status !== 'ready') throw new Error('Expected ready account')
+      expect(parsed.balance_milli).toBe(amount)
+      const crown = parsed.catalog.find(item => item.id === 'crown')
+      if (!crown || crown.price_status !== 'priced') throw new Error('Expected an explicitly priced crown')
+      expect(crown.price_milli).toBe(amount)
+      expect(parsed.catalog.find(item => item.id === 'book')).toMatchObject({ price_status: 'unpriced' })
+    }
+  })
 })

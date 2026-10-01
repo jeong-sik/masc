@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import os
 import hashlib
+import json
 import threading
 import json
 import re

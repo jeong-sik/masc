@@ -473,17 +473,26 @@ status: reference
 **Jev (TypeSafe AI System One 판정 어댑터)**
 : Board Attention Candidate의 관련성을 비자기회귀 System One 1회 요청으로 신속 판정하는
   TypeSafe AI 어댑터(`Typesafeai_board_attention`). 신뢰도 조건을 충족한 후보를 직접 확정하여
-  `board_attention_exact`의 LLM 판정 요청을 줄인다(#40413·#40420·#40428).
+  `board_attention_exact`의 고비용 LLM 판정 요청을 줄인다(#40413·#40420·#40428·#40505·#40521).
   - 양방향 직접 확정(`Jev_decided`): `relevant` 또는 `not_relevant` 판정 신뢰도가
     `[typesafeai].board_attention_confidence_floor`(기본값 0.3) 이상이면 LLM 레인을 거치지 않고
     후보를 즉시 종단 확정한다. `not_relevant` 역시 신뢰도 충족 시 LLM 레인을 건너뛰고 직접 확정된다.
-  - LLM 레인 이관: 신뢰도 미달(`Jev_low_confidence`), 명시적 불확실성(`Needs_review` / `Jev_uncertain`),
-    호출 실패(`Jev_failed`), 또는 비활성화(`Jev_off`·`Jev_cli_only`) 시에는 설정된 board_attention_exact 슬롯/CLI 경로로 이관하여 재판정한다.
+  - LLM 레인 이관: HTTP 전송 레인에서 Jev가 실행된 뒤 신뢰도 미달(`Jev_low_confidence`), 명시적
+    불확실성(`Needs_review` / `Jev_uncertain`), 또는 호출 실패(`Jev_failed`)가 발생하면
+    설정된 `board_attention_exact` HTTP LLM 레인으로 이관하여 재판정한다.
+  - Jev 부재 및 CLI 전용 처리: Jev가 꺼져 있거나 제외된 키퍼(`Jev_off`)는 HTTP LLM 레인을 직접
+    실행한다. 반면 전송 레인이 CLI 전용(`Jev_cli_only`, `Cli_only`)인 경우 Jev는 HTTP 레인 앞에서만
+    호출되므로 Jev 판정을 건너뛰고 CLI 슬롯을 직접 실행(`walk_cli_slots`)한다(이관이나 재판정이 아님).
+  - 신호 단독 요청 형태(#40505): Jev 요청 상태에는 신호만(`{ "signal": ... }`) 싣고 질문에 키퍼
+    이름과 정규화된 관심사(`board_interests`)를 명시하여, 역할 전체 주입으로 인한 편향을 제거했다.
+  - 푸시 이벤트 다중 키퍼 배치(#40521): 새 Board 이벤트 발생 시 `Keeper_board_attention_fanout`을 통해
+    후보 키퍼들을 단일 Jev 요청에 복수 질문으로 묶어 1회 왕복으로 일괄 판정한다.
   - 재큐 후보 우선 판정: 격리(Quarantine)에서 재투입된 후보(`Requeued_pending`)도 `ask_jev`의
     첫 번째 관문을 거치며, 재큐 후보에도 같은 직접 확정 조건을 적용한다(#40428).
   - 신뢰도 관측 가능성: 확정된 종단 로그 행에 실제 신뢰도가 보존되어 운영자가 임계값을 사후
     재조정할 수 있는 정량적 근거를 제공한다(#40420).
   → [Typesafeai_board_attention](../../lib/typesafeai/typesafeai_board_attention.mli) ·
+  [Keeper_board_attention_fanout](../../lib/keeper/keeper_board_attention_fanout.mli) ·
   [Keeper_board_attention_exact_flow](../../lib/keeper/keeper_board_attention_exact_flow.ml) ·
   [config/runtime.toml](../../config/runtime.toml)
 
@@ -2639,15 +2648,16 @@ status: reference
 **Memory OS Recall (기억 회상 / 전송 투영)**
 : 매 턴 실행 시 저장된 Memory OS 사실(일반 사실 및 소스 바인딩 사실)을 모델의 프롬프트 문맥으로 주입(projection)하는 전송 메커니즘.
   `render_if_enabled`가 호출되어 각 스토어의 상태(`Present`, `Authoritatively empty / Absent`, `Unavailable`)를 투영하며, 회상 비활성화 시 안정적 중지 마커(`disabled`)를 방출한다.
-  현행 구현([`keeper_memory_os_recall.mli`](../../lib/keeper/keeper_memory_os_recall.mli))은 절단(truncate), 임의 순위화(rank), 부분 주입(partially inject)을 금지하고 current fact 전량을 전송한다. 소스 바인딩 사실(`source-bound fact`)은 주입 직전 대상 파일의 정확한 바이트를 재검증하며, 변경·삭제가 입증된 소스는 이전 주장 대신 타입화된 무효화(`typed invalidation`)를 기여한다. 반면 읽기 실패·접근 불능 소스는 기존 주장을 `verified=false`인 미검증 상태(`keep_unverified`)로 보존하여 모델에 전달하며, 소스 스토어 장애 시에도 읽기 가능한 일반 사실(`ordinary fact`)은 보존하여 전달한다.
-  유계 작업연계 투영 제안 규약(Draft [`RFC-memory-os-recall-selection`](../../docs/rfc/RFC-memory-os-recall-selection.md))은 현행 전량 주입 계약을 개정하여 작업 중심의 유계 투영(Bounded Task-linked Projection with Explicit Omission)을 도입하는 목표 아키텍처다:
+  현행 구현([`keeper_memory_os_recall.mli`](../../lib/keeper/keeper_memory_os_recall.mli))은 사실 전량을 프롬프트에 직접 주입하지 않고 온디맨드 회상(Demand Recall, #40473)으로 전송한다. 일반 사실과 검증된 소스 바인딩 사실 전량은 불변 아티팩트(`tool_blob_store`)로 출판되며, 프롬프트에는 사실 건수, 스토어 가용성, 타입화된 무효화(`typed invalidation`), 보류된 소스 안내, 아티팩트 핸들(`_blob` sha256)만 전달된다. 모델은 `keeper_memory_search`나 아티팩트 페이징(`keeper_artifact_read`)을 통해 필요한 사실을 선별 조회한다. 조회 도구가 없는 런타임 표면에서만 읽기 가능한 일반 사실과 검증된 소스 사실을 절단 없이 인라인 주입하는 폴백을 쓴다.
+  소스 바인딩 사실(`source-bound fact`)은 주입 직전 대상 파일의 정확한 바이트를 재검증하며, 변경·삭제가 입증된 소스는 이전 주장 대신 타입화된 무효화(`typed invalidation`)를 기여한다. 반면 읽기 실패·접근 불능 소스는 주장 본문(`claim text`)을 보류(`withheld`)하고 소스 식별자·사유·재읽기 안내(`deferred source identity, reason, re-read instructions`)만 인라인으로 전달한다. 출판된 스냅샷 참조는 키퍼 런타임 트리에 구조적으로 고정(`current pin`)되어 dated reference 이력이 유지되는 동안 롱텀 히스토리 GC에서 보존된다(#40486·#40557).
+  유계 작업연계 투영 제안 규약(Draft [`RFC-memory-os-recall-selection`](../../docs/rfc/RFC-memory-os-recall-selection.md))은 작업 중심의 유계 투영(Bounded Task-linked Projection with Explicit Omission)을 정의하는 아키텍처다:
   - **보존과 전송의 분리**: 저장소는 모든 current fact를 영구 보존하며, 전송 예산이나 링크 미부합으로 누락된 fact를 저장 사실의 삭제·철회·부정으로 해석하지 않는다.
   - **상시 블록(`Standing`)**: Keeper 정체성, 지속 선호, 권한 경계, 현재 Task/Goal 주소만 포함하며, 넓은 분류(`category=constraint`)만으로 상시 승격하지 않는다.
   - **후보 선정(`Candidate`)**: 현재 턴의 Task(`Task of task_id`), Goal(`Goal of goal_id`), 자극(`Stimulus of stimulus_id`)과 타입화 링크(`typed link`)가 확인된 사실만 후보가 되며, 비연결 사실에 최신순·문자열 유사도 점수를 임의 적용하지 않는다.
   - **조건부 유효성과 만료(`Validity & Expiry`)**: 유효성(`Unconditional | Conditional of condition`)은 사건 증거가 확인되었을 때만 만료(`Expired`)하며, 상태를 읽지 못했을 때는 유효나 만료로 단정하지 않고 미확인(`Unknown`)으로 다룬다.
   - **적용 권한 고정과 철회(`Recall Scope & Withdrawal`)**: 모든 정상 투영은 `Recall_scope = Current_projection_only`를 선언하여 과거 턴 Recall projection의 본문과 조건이 현재 턴의 근거가 아님을 확정한다. 용량 정책 위반(`Invalid_capacity_policy`)이나 예산 초과(`Budget_overrun`) 시에는 과거 적용 권한을 즉시 끝내는 고정 제어 블록(`Recall_withdrawn`)을 발행한다.
   - **식별자 및 원자적 번들**: 식별자는 `Ordinary { keeper_id; memory_id } | Source_bound { keeper_id; claim_id }`의 닫힌 형태를 따르고, 일반·소스·메타데이터 3대 스냅샷은 불변 번들(`Recall_snapshot_bundle`)과 CAS 매니페스트로 원자적 출판 경계를 유지한다.
-  → [Keeper_memory_os_recall](../../lib/keeper/keeper_memory_os_recall.mli) · [keeper_memory_source_current](../../lib/keeper/keeper_memory_source_current.ml) · [RFC-memory-os-recall-selection](../../docs/rfc/RFC-memory-os-recall-selection.md)
+  → [Keeper_memory_os_recall](../../lib/keeper/keeper_memory_os_recall.mli) · [keeper_memory_source_current](../../lib/keeper/keeper_memory_source_current.ml) · [Tool_blob_store](../../lib/tool_blob_store/tool_blob_store.mli) · [RFC-memory-os-recall-selection](../../docs/rfc/RFC-memory-os-recall-selection.md)
 
 **Workspace Memory Ledger (작업공간 기억 원장)**
 : Workspace Curator가 변경된 Keeper 사실을 기존 주장·충돌에 합류시키거나 새 항목을 만들고, 제외 이유를 기록한 원장. 다른 Keeper의 가까운 사실은 판정 맥락이고 선택된 변경 사실만 분류한다. 원장은 Keeper Memory OS를 바꾸지 않으며, 모델 분류가 의미 검증이나 사실 승격을 뜻하지 않는다. Keeper는 주장·충돌 목록을 본 뒤 ID별로 현재 원문 상태를 읽는다. 스토어를 읽지 못한 사실은 사라진 사실로 단정하지 않는다.

@@ -14,7 +14,7 @@ on:
           - stagehand-model-macos-arm64
 
       capture_item_http:
-        description: Exercise isolated Item HTTP routes with the compiled binary and production dashboard
+        description: Exercise Item TUI and isolated HTTP routes with the compiled binaries and production dashboard
         type: boolean
         default: false
 
@@ -85,6 +85,14 @@ jobs:
           shasum -a 256 deployment_preflight_helper.exe main_eio.exe masc_browser_host.exe masc_tui.exe > SHA256SUMS
           shasum -a 256 --check SHA256SUMS
 
+      - name: Exercise Item TUI with the matching compiled binary
+        if: inputs.capture_item_http
+        shell: bash
+        run: |
+          test "$("$PROBE_OUT/masc_tui.exe" --build-commit)" = "$GITHUB_SHA"
+          python3 test/test_tui_keeper_portrait_pty.py "$PROBE_OUT/masc_tui.exe" \
+            | tee "$RUNNER_TEMP/keeper-items-tui.log"
+
       - name: Set up Node for Item HTTP acceptance
         if: inputs.capture_item_http
         uses: actions/setup-node@v7
@@ -120,6 +128,10 @@ jobs:
         with:
           name: item-http-${{ inputs.target }}-${{ github.sha }}-attempt-${{ github.run_attempt }}
           path: |
+            ${{ runner.temp }}/keeper-items-tui/manifest.json
+            ${{ runner.temp }}/keeper-items-tui/*.txt
+            ${{ runner.temp }}/keeper-items-tui/*.pty
+            ${{ runner.temp }}/keeper-items-tui.log
             ${{ runner.temp }}/item-http-evidence/browser-evidence.json
             ${{ runner.temp }}/item-http-evidence/item-server-*.png
             ${{ runner.temp }}/item-http-evidence/http-evidence.json

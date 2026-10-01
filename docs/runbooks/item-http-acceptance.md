@@ -7,7 +7,7 @@ server in a fresh temporary workspace. No installed MASC process is contacted.
 
 The `item-http-<target>-<sha>-attempt-<run_attempt>` artifact contains HTTP and browser receipts, desktop/mobile
 screenshots, the Item account JSON,
-a portrait PNG and the isolated server log. The receipt records source SHA,
+a portrait PNG and the isolated server log. It also retains the matching TUI’s synthetic-HTTP PTY manifest, captured frames and scenario log. The receipt records source SHA,
 binary hash, dashboard index hash, fixture hashes and HTTP response hashes.
 The harness requires the native `build-commit` and dashboard build identity to
 match the workflow SHA. It verifies readiness, refusal of anonymous account
@@ -43,8 +43,7 @@ one200-milli purchase event may exist. Both original synthetic Paid rows must
 remain unchanged. Seed and before/after ledger hashes are retained. This proves real HTTP routing
 with those inputs. It does not prove Keeper lifecycle creation, model-driven
 purchase/equipment decisions, a real earned payout, or production rollout.
-Additional browser fixture and TUI transition evidence comes from the separate dashboard and
-Test workflows.
+The same explicit Item capture first runs the existing eight portrait/Item TUI scenarios against the compiled TUI, checking its embedded source SHA. These exercise preview, short panes, roster revisions, account failure and workspace authority with synthetic HTTP fixtures; they do not prove a live TUI account or earned payout. Additional browser fixture evidence comes from the separate Dashboard workflow.
 
 The macOS target runs natively on `macos-14`, using the Release workflow's
 OCaml dependencies and build flags. Its runtime artifact also records the

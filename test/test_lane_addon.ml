@@ -5,7 +5,10 @@ open Masc
 module Runtime = struct
   include Lane_addon_runtime
   let dispatch ?caller ~config ~operation args =
-    Lane_addon_runtime.dispatch ?caller ~config ~operation args
+    let access = match caller with
+      | None -> Lane_addon_sources.Operator_configuration
+      | Some keeper -> Lane_addon_sources.Keeper keeper in
+    Lane_addon_runtime.dispatch ?caller ~access ~config ~operation args
     |> Result.map_error Lane_addon_runtime.error_to_string
 end
 module Types = Lane_addon_types
@@ -248,7 +251,8 @@ let test_evidence_is_optional_retained_and_delivery_is_only_acceptance () =
 
 let test_request_refusals_preserve_runtime_failure_distinction () =
   with_fixture (fun _env _sw config dir _state ->
-    let dispatch operation fields = Lane_addon_runtime.dispatch ~config ~operation (`Assoc fields) in
+    let dispatch operation fields = Lane_addon_runtime.dispatch
+      ~access:Lane_addon_sources.Operator_configuration ~config ~operation (`Assoc fields) in
     let rejected label = function
       | Error (Lane_addon_runtime.Request_rejected _) -> ()
       | Error (Runtime_failed detail) -> failf "%s became runtime failure: %s" label detail
@@ -267,6 +271,7 @@ let test_request_refusals_preserve_runtime_failure_distinction () =
       "expected_incarnation", `String "absent"; "request_id", `String "request";
       "action", `Assoc []] in
     rejected "missing action target" (Lane_addon_runtime.dispatch ~caller:"fixture-caller"
+      ~access:(Lane_addon_sources.Keeper "fixture-caller")
       ~config ~operation:Runtime.Act (`Assoc action_fields));
     rejected "invalid slice timestamp" (dispatch Runtime.Slice ["since", `String "bad"]);
     rejected "reversed slice range" (dispatch Runtime.Slice ["since", `Int 2; "until", `Int 1]);
@@ -287,7 +292,8 @@ let test_direct_attach_validates_package_binding () =
 [interface]
 binding_schema = '''{"type":"object","properties":{"sources":{"type":"array","items":{"type":"object","properties":{},"additionalProperties":false}},"limit":{"type":"integer","minimum":1}},"required":["sources","limit"],"additionalProperties":false}'''
 |});
-    let attach_binding binding = Lane_addon_runtime.dispatch ~config
+    let attach_binding binding = Lane_addon_runtime.dispatch
+      ~access:Lane_addon_sources.Operator_configuration ~config
       ~operation:Runtime.Attach (`Assoc ["manifest_path",`String path;
         "run_id",`String "binding-run";"binding",`Assoc binding]) in
     List.iter (fun binding ->
@@ -513,7 +519,8 @@ let test_fusion_status_hint_wakes_only_its_bound_run () =
     check Alcotest.int "foreign retained slice exposes no private rows" 0
       (member "rows" foreign_slice |> Yojson.Safe.Util.to_list |> List.length);
     let denied operation fields =
-      match Lane_addon_runtime.dispatch ~caller:"another-keeper" ~config ~operation
+      match Lane_addon_runtime.dispatch ~caller:"another-keeper"
+          ~access:(Lane_addon_sources.Keeper "another-keeper") ~config ~operation
           (`Assoc (("instance_id",`String one)::fields)) with
       | Error (Runtime.Request_rejected detail) ->
           check string "private instance is denied before read or mutation"
@@ -578,6 +585,99 @@ let test_private_fusion_reads_survive_retirement () = with_fixture (fun env _sw 
   denied Runtime.Evidence ["instance_id",`String id;"row_ids",`List [`String row_id]];
   check Alcotest.int "historical inspection excludes private bindings" 0
     (unwrap (call foreign Runtime.Inspect []) |> member "instances" |> Yojson.Safe.Util.to_list |> List.length))
+
+let test_mcp_attributed_name_is_not_private_lane_authority () =
+  with_fixture (fun env sw config dir _state ->
+    let owner = "mcp-private-owner" and foreign = "mcp-foreign-owner" in
+    ignore (Workspace.init config ~agent_name:(Some owner));
+    Auth.disable_auth dir;
+    let register name =
+      let meta = match Masc_test_deps.meta_of_json_fixture (`Assoc ["name", `String name]) with
+        | Ok meta -> meta | Error reason -> fail reason in
+      ignore (Keeper_registry.register_offline ~base_path:dir name meta) in
+    register owner; register foreign;
+    let anonymous_session = "lane-anonymous-" ^ Store.digest dir in
+    let owner_session = "lane-owner-" ^ Store.digest dir in
+    let foreign_session = "lane-foreign-" ^ Store.digest dir in
+    let operator_session = "lane-operator-" ^ Store.digest dir in
+    Fun.protect ~finally:(fun () ->
+      List.iter Client_registry_eio.unregister_mcp_session
+        [anonymous_session; owner_session; foreign_session; operator_session];
+      Keeper_registry.For_testing.unregister ~base_path:dir owner;
+      Keeper_registry.For_testing.unregister ~base_path:dir foreign) (fun () ->
+      check bool "fixture runs with workspace auth disabled" false
+        (Auth.is_auth_enabled dir);
+      let run_id = "mcp-private-" ^ Store.digest dir in
+      Fusion_run_registry.register_running (Fusion_run_registry.global ()) ~run_id
+        ~keeper:owner ~preset:"default" ~roster:Fusion_types.preset_roster
+        ~topology:Fusion_types.Simple ~started_at:1.;
+      let binding = `Assoc ["sources", `List [`Assoc [
+        "source_id", `String "fusion"; "kind", `String "fusion_run";
+        "run_id", `String run_id]]] in
+      let id = unwrap (Lane_addon_runtime.dispatch ~caller:owner
+        ~access:(Lane_addon_sources.Keeper owner) ~config ~operation:Runtime.Attach
+        (`Assoc ["manifest_path", `String (manifest dir "good");
+          "run_id", `String "mcp-private-world"; "binding", binding])
+        |> Result.map_error Lane_addon_runtime.error_to_string)
+        |> text "instance_id" in
+      let clock = Eio.Stdenv.clock env in
+      await clock (fun () -> int "observation_seq" (instance config id) = 1);
+      let state = Mcp_server_eio.For_testing.create_state ~base_path:dir () in
+      let execute ?auth_token ~session ~name arguments =
+        Mcp_server_eio_execute.execute_tool_eio ~sw ~clock
+          ~workspace_scope:(Mcp_server.workspace_scope state)
+          ~mcp_session_id:session ?auth_token state ~name ~arguments in
+      let inspect ?auth_token session arguments =
+        execute ?auth_token ~session ~name:"masc_lane_inspect" arguments in
+      let empty = `Assoc [] in
+      let first = inspect anonymous_session
+        (`Assoc ["_agent_name", `String owner]) in
+      check bool "first attributed call is rejected by the Lane request schema" false
+        (Tool_result.is_success first);
+      check bool "failed first call cached only an attributed name" true
+        (match Client_registry_eio.get_resolved_name anonymous_session with
+         | Some (name, false) -> String.equal name owner
+         | Some _ | None -> false);
+      let anonymous = inspect anonymous_session empty in
+      check bool "cached-name follow-up can inspect shared Lane state" true
+        (Tool_result.is_success anonymous);
+      check int "cached attribution exposes no private instance" 0
+        (member "instances" (Tool_result.data anonymous) |> Yojson.Safe.Util.to_list |> List.length);
+      check int "cached attribution exposes no private rows" 0
+        (member "rows" (Tool_result.data anonymous) |> Yojson.Safe.Util.to_list |> List.length);
+      let token name role = match Auth.create_token dir ~agent_name:name ~role with
+        | Ok (value, _) -> value | Error _ -> fail "credential fixture creation failed" in
+      let owner_token = token owner Masc_domain.Worker in
+      let foreign_token = token foreign Masc_domain.Worker in
+      let operator_token = token "lane-operator" Masc_domain.Admin in
+      check bool "credential issuance does not enable workspace auth" false
+        (Auth.is_auth_enabled dir);
+      let owned = inspect ~auth_token:owner_token owner_session empty in
+      check bool "valid Keeper credential reads its private instance" true
+        (Tool_result.is_success owned);
+      let owned_rows = member "rows" (Tool_result.data owned) |> Yojson.Safe.Util.to_list in
+      check int "valid owner sees its private instance" 1
+        (member "instances" (Tool_result.data owned) |> Yojson.Safe.Util.to_list |> List.length);
+      check int "valid owner sees its private row" 1 (List.length owned_rows);
+      let row_id = text "id" (List.hd owned_rows) in
+      let anonymous_evidence = execute ~session:anonymous_session
+        ~name:"masc_lane_evidence"
+        (`Assoc ["instance_id", `String id; "row_ids", `List [`String row_id]]) in
+      check bool "cached attribution cannot preserve private evidence" false
+        (Tool_result.is_success anonymous_evidence);
+      let foreign_view = inspect ~auth_token:foreign_token foreign_session empty in
+      check bool "foreign valid Keeper can inspect shared Lane state" true
+        (Tool_result.is_success foreign_view);
+      check int "foreign valid Keeper cannot see another Keeper's instance" 0
+        (member "instances" (Tool_result.data foreign_view)
+         |> Yojson.Safe.Util.to_list |> List.length);
+      let operator_view = inspect ~auth_token:operator_token operator_session empty in
+      check bool "valid operator credential retains configuration authority" true
+        (Tool_result.is_success operator_view);
+      check int "operator sees private instance" 1
+        (member "instances" (Tool_result.data operator_view)
+         |> Yojson.Safe.Util.to_list |> List.length)))
+;;
 
 let test_private_broadcast_retry_uses_saved_visibility () = with_fixture (fun env _ config dir _ ->
   let owner = "private-broadcast-owner" in
@@ -945,6 +1045,8 @@ let () = run "Lane Add-on runtime" ["optional extension", [
   test_case "Broadcast intention and failed commit retain exact evidence" `Quick
     test_broadcast_pending_commit_recovers_same_identity;
   test_case "Fusion read ownership survives retirement and restart" `Quick test_private_fusion_reads_survive_retirement;
+  test_case "MCP attribution never grants private Lane authority" `Quick
+    test_mcp_attributed_name_is_not_private_lane_authority;
   test_case "Fusion state hint wakes only the exact run binding" `Quick
     test_fusion_status_hint_wakes_only_its_bound_run;
   test_case "a human MSX press wakes machine watchers exactly once" `Quick

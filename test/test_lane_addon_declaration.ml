@@ -4,8 +4,15 @@ open Alcotest
 open Masc
 module Runtime = struct
   include Lane_addon_runtime
+  let read_declaration ?caller ?(access = Lane_addon_sources.Operator_configuration) ~config args =
+    Lane_addon_runtime.read_declaration ?caller ~access ~config args
+  let save_declaration ?caller ?(access = Lane_addon_sources.Operator_configuration) ~config args =
+    Lane_addon_runtime.save_declaration ?caller ~access ~config args
   let dispatch ?caller ~config ~operation args =
-    Lane_addon_runtime.dispatch ?caller ~config ~operation args
+    let access = match caller with
+      | None -> Lane_addon_sources.Operator_configuration
+      | Some keeper -> Lane_addon_sources.Keeper keeper in
+    Lane_addon_runtime.dispatch ?caller ~access ~config ~operation args
     |> Result.map_error Lane_addon_runtime.error_to_string
 end
 module Editor = Lane_addon_declaration
@@ -43,8 +50,8 @@ let request ?revision ~mode ~file_name source_text =
   `Assoc (["mode",`String mode;"file_name",`String file_name;"source_text",`String source_text]
     @ Option.fold ~none:[] ~some:(fun value -> ["expected_source_revision",`String value]) revision)
 let read config directory name =
-  Runtime.read_declaration ~config (`Assoc ["source_path",`String (Filename.concat directory name)]) |> unwrap
-let save config args = Runtime.save_declaration ~config args |> unwrap
+  Runtime.read_declaration ~access:Lane_addon_sources.Operator_configuration ~config (`Assoc ["source_path",`String (Filename.concat directory name)]) |> unwrap
+let save config args = Runtime.save_declaration ~access:Lane_addon_sources.Operator_configuration ~config args |> unwrap
 let inspect config = Runtime.dispatch ~config ~operation:Runtime.Inspect (`Assoc []) |> runtime_result
 let reconcile config directory = Runtime.reconcile_configuration ~config ~directory |> runtime_result
 let live config = inspect config |> list "instances" |> List.filter (fun item -> text "kind" (member "phase" item) <> "detached")
@@ -60,7 +67,8 @@ let keeper_call config name args =
     (descriptor.runtime_handler=Keeper_tool_descriptor.Tool_masc_misc_dispatch);
   let translated = Keeper_tool_descriptor.translate_input_for_descriptor descriptor args in
   let context : Tool_misc.context = {config;agent_name="editor-keeper";help_schemas=[]} in
-  match Tool_misc.dispatch context ~name:descriptor.internal_name ~args:translated with
+  match Tool_misc.dispatch ~lane_access:(Lane_addon_sources.Keeper "editor-keeper")
+    context ~name:descriptor.internal_name ~args:translated with
   | Some value -> value | None -> fail "Keeper descriptor has no executable declaration route"
 
 let with_fixture f =

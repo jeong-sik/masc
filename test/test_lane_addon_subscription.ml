@@ -19,7 +19,8 @@ let subscription = `Assoc ["keeper_name",`String "researcher";"run_id",`String "
   "installation_id",`String "documents";"output_id",`String "changes"]
 let selection = ["run_id",`String "study";"installation_id",`String "documents";"output_id",`String "changes"]
 let args operation = `Assoc (("operation",`String operation)::selection)
-let call config caller args = S.handle ~config ~caller args
+let call config caller args =
+  S.handle ~access:(Lane_addon_sources.Keeper caller) ~config ~caller args
 let operator_call config args = S.handle ~access:Lane_addon_sources.Operator_configuration ~config ~caller:"operator" args
 let save config = operator_call config (`Assoc ["operation",`String "save";"subscriptions",`List [subscription]]) |> ok
 let store config = Store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons")
@@ -72,6 +73,37 @@ let private_producer_requires_real_owner_access () = with_workspace (fun config 
   producer ~visibility:(visibility "another-owner") retained "private-instance" 1;
   check bool "explicit operator authority can read retained private output" true
     (Result.is_ok (S.handle ~access:Lane_addon_sources.Operator_configuration ~config ~caller:"researcher" request)))
+let shared_producer_requires_subscription_owner_for_read_and_ack () = with_workspace (fun config ->
+  ignore (save config);
+  let retained = store config in
+  producer retained "shared-instance" 1;
+  append retained "shared-instance" 1;
+  let read = args "read" in
+  let untrusted operation = S.handle ~access:Lane_addon_sources.Unauthenticated
+    ~config ~caller:"researcher" operation in
+  check bool "attributed name cannot read a shared subscribed source" true
+    (Result.is_error (untrusted read));
+  let first = call config "researcher" read |> ok in
+  check int "authenticated owner reads one named shared row" 1
+    (member "output" first |> member "rows" |> Yojson.Safe.Util.to_list |> List.length);
+  check bool "valid operator can read by explicit configuration authority" true
+    (Result.is_ok (S.handle ~access:Lane_addon_sources.Operator_configuration
+      ~config ~caller:"researcher" read));
+  let cursor_path = Filename.concat (Filename.concat (Store.root retained) "subscriptions")
+    (Store.digest (Yojson.Safe.to_string subscription) ^ ".json") in
+  let acknowledge = `Assoc (("operation",`String "acknowledge")
+    :: ("receipt",receipt first) :: selection) in
+  check bool "attributed name cannot acknowledge the owner's shared cursor" true
+    (Result.is_error (untrusted acknowledge));
+  check bool "refused acknowledgment left no cursor" false (Sys.file_exists cursor_path);
+  check bool "different verified Keeper cannot use the attributed owner name" true
+    (Result.is_error (S.handle ~access:(Lane_addon_sources.Keeper "foreign")
+      ~config ~caller:"researcher" read));
+  check bool "owner's first receipt remains next after refusals" true
+    (receipt (call config "researcher" read |> ok) = receipt first);
+  ignore (ack config (receipt first) |> ok);
+  check bool "verified owner's acknowledgment commits its cursor" true
+    (Sys.file_exists cursor_path))
 let keeper_save_preserves_hidden_subscriptions () = with_workspace (fun config ->
   let other = match subscription with `Assoc fields ->
     `Assoc (("keeper_name",`String "other") :: List.remove_assoc "keeper_name" fields)
@@ -179,6 +211,8 @@ let cursor_identity_and_incomplete_source () = with_workspace (fun config ->
 
 let () = run "Lane subscription use" ["operator scenarios",[
   test_case "private producer enforces durable owner and verified access" `Quick private_producer_requires_real_owner_access;
+  test_case "shared subscription requires verified cursor owner" `Quick
+    shared_producer_requires_subscription_owner_for_read_and_ack;
   test_case "cursor identity and incomplete source remain distinct" `Quick cursor_identity_and_incomplete_source;
   test_case "Keeper save preserves hidden subscriptions" `Quick keeper_save_preserves_hidden_subscriptions;
   test_case "reference discovery, explicit reading and durable acknowledgement" `Quick read_ack_and_restart;

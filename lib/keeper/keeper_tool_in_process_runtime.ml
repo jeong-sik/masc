@@ -1949,8 +1949,9 @@ let handle_masc_misc_with_outcome ~(config : Workspace.config) ~(meta : keeper_m
      Some (Keeper_dos_screen.handle ~keeper_name:meta.name ~base_path:config.base_path
        ~tool_name:name ~start_time:(Tool_timing.start ()) args)
    | Some _ | None ->
-     (match Keeper_dos_controller.before_call ~config ~who:meta.name ~name ~args with
-      | Ok () -> Tool_misc.dispatch ctx ~name ~args
+     (match Keeper_dos_controller.execute ~config ~who:meta.name ~name ~args
+         ~run:(fun () -> Tool_misc.dispatch ctx ~name ~args) with
+      | Ok result -> result
       | Error refusal -> Some (Keeper_dos_controller.refusal_result ~tool_name:name refusal)))
   |> dispatch_option_to_execution ~name
 ;;

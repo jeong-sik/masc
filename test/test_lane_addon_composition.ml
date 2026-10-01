@@ -5,7 +5,10 @@ open Masc
 module Runtime = struct
   include Lane_addon_runtime
   let dispatch ?caller ?access ~config ~operation args =
-    Lane_addon_runtime.dispatch ?caller ?access ~config ~operation args
+    let access = Option.value ~default:(match caller with
+      | None -> Lane_addon_sources.Operator_configuration
+      | Some keeper -> Lane_addon_sources.Keeper keeper) access in
+    Lane_addon_runtime.dispatch ?caller ~access ~config ~operation args
     |> Result.map_error Lane_addon_runtime.error_to_string
 end
 module Types = Lane_addon_types
@@ -90,9 +93,9 @@ let with_fixture ?produce_package ?(produce=(fun ~binding:_ ~sources:_ -> output
                 await clock (fun () -> inspect config |> list "instances" |> List.for_all (fun json ->
                   text "kind" (member "phase" json) = "detached"));
                 result))))))))
-let manifest ?(name="package") ?(outputs="") root =
+let manifest ?(name="package") ?(outputs="") ?(max_reply_bytes=16384) root =
   let path = Filename.concat root (name ^ ".toml") in
-  write path ({|id="generic-package"
+  write path (Printf.sprintf {|id="generic-package"
 revision="1"
 title="Generic output"
 image="not-executed"
@@ -102,8 +105,8 @@ contributions=["observe"]
 cpus=0.5
 memory_bytes=67108864
 pids=16
-max_reply_bytes=16384
-|} ^ outputs); path
+max_reply_bytes=%d
+|} max_reply_bytes ^ outputs); path
 let declare ?(run="world") ?(value="initial") directory manifest id sources =
   let path = Filename.concat directory (id ^ ".toml") in
   write path (Printf.sprintf {|id=%S
@@ -121,6 +124,37 @@ let source received id = match Hashtbl.find_opt received id with
 let require_some label = function Some value -> value | None -> fail label
 let completed received id = Option.bind (source received id) (fun source ->
   match list "observations" source with [observation] -> Some observation | _ -> None)
+
+let test_namespace_overhead_does_not_consume_package_capacity () =
+  let original = List.hd output.rows in
+  let related_ids = List.init 1024 string_of_int in
+  let local_row = {original with Types.related_ids;
+    fields=["body", `String (String.make 4096 'x')]} in
+  let supplied = ref {output with rows=[local_row]} in
+  let cap = String.length (Yojson.Safe.to_string (Types.output_to_json !supplied)) in
+  with_fixture ~produce:(fun ~binding:_ ~sources:_ -> !supplied)
+    (fun clock config root directory _received _stopped ->
+      let manifest = manifest ~max_reply_bytes:cap root in
+      let _path = declare directory manifest "near-limit" "[]" in
+      reconcile config directory;
+      let id = active config "near-limit" |> text "instance_id" in
+      await clock (fun () -> member "observation_seq" (instance config id) = `Int 1);
+      let store = Store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
+      let observed = unwrap (Store.read_observation ~instance_id:id ~seq:1 ~max_bytes:cap store)
+        |> Types.output_to_json in
+      check bool "host prefixes exceed package wire cap" true
+        (String.length (Yojson.Safe.to_string observed) > 2 * cap);
+      let row = List.hd (list "rows" observed) in
+      check string "row remains namespaced" (id ^ "/1/row") (text "id" row);
+      check string "lane remains namespaced" (id ^ "/arbitrary-domain") (text "lane_id" row);
+      check (Alcotest.list string) "all relations remain namespaced"
+        (List.map (fun related -> id ^ "/1/" ^ related) related_ids)
+        (list "related_ids" row |> List.map Yojson.Safe.Util.to_string);
+      supplied := {output with rows=[{local_row with fields=["body", `String (String.make (cap + 1) 'x')]}]};
+      ignore (dispatch config Runtime.Observe ["instance_id", `String id]);
+      await clock (fun () -> text "kind" (member "phase" (instance config id)) = "failed");
+      check bool "oversized package data was not committed" true
+        (member "observation_seq" (instance config id) = `Int 1))
 
 let test_toml_output_connection_and_retained_provenance () = with_fixture (fun clock config root directory received stopped ->
   let manifest = manifest root in
@@ -493,7 +527,12 @@ let fusion_package (package : Types.package) ~binding ~sources =
   let script = {|import json, sys
 sys.path.insert(0, sys.argv[1])
 from test_packages import ProtocolCase
-output = ProtocolCase().call(sys.argv[2], json.loads(sys.argv[3]), json.loads(sys.argv[4]))
+summaries = {
+    "fusion-results": "Fusion status and retained Board evidence are available in structuredContent with exact run identity.",
+    "fusion-report": "Fusion reports are retained in structuredContent with exact upstream coordinates and evidence.",
+}
+output = ProtocolCase().call(sys.argv[2], json.loads(sys.argv[3]), json.loads(sys.argv[4]),
+                             expected_summary=summaries[sys.argv[2]])
 assert "rows" in output, output
 print(json.dumps(output))
 |} in
@@ -708,7 +747,42 @@ sources=%s
   let saved = active config "keeper-saved" |> text "instance_id" in
   check bool "operator reconciliation preserves saving Keeper read access" true
     (Result.is_ok (Runtime.dispatch ~caller:owner ~config ~operation:Runtime.Inspect
-      (`Assoc ["instance_id",`String saved]))))
+      (`Assoc ["instance_id",`String saved])));
+  let saved_path = Filename.concat directory "keeper-saved.toml" in
+  write saved_path "id = [";
+  reconcile config directory;
+  let saved_document caller access = Lane_addon_runtime.read_declaration ~caller ~access ~config
+    (`Assoc ["source_path",`String saved_path]) in
+  let broken = saved_document owner (Lane_addon_sources.Keeper owner) in
+  let current_revision = match broken with
+    | Ok json -> text "source_revision" json
+    | Error error -> fail error.Lane_addon_declaration.message in
+  check bool "private owner reads malformed current bytes using applied ownership" true
+    (Result.is_ok broken);
+  check bool "foreign Keeper cannot read malformed private bytes" true
+    (Result.is_error (saved_document "foreign" (Lane_addon_sources.Keeper "foreign")));
+  let repair caller access = Lane_addon_runtime.save_declaration ~caller ~access ~config
+    (`Assoc ["mode",`String "save";"file_name",`String "keeper-saved.toml";
+      "expected_source_revision",`String current_revision;
+      "source_text",`String new_source]) in
+  check bool "foreign Keeper cannot repair another owner's malformed declaration" true
+    (Result.is_error (repair "foreign" (Lane_addon_sources.Keeper "foreign")));
+  let unowned_path = Filename.concat directory "unowned.toml" in
+  write unowned_path "id = [";
+  check bool "malformed file without an applied owner grants no raw read" true
+    (Result.is_error (Lane_addon_runtime.read_declaration ~caller:owner
+      ~access:(Lane_addon_sources.Keeper owner) ~config
+      (`Assoc ["source_path",`String unowned_path])));
+  check bool "malformed file without an applied owner grants no replacement" true
+    (Result.is_error (Lane_addon_runtime.save_declaration ~caller:owner
+      ~access:(Lane_addon_sources.Keeper owner) ~config
+      (`Assoc ["mode",`String "save";"file_name",`String "unowned.toml";
+        "expected_source_revision",`String (Lane_addon_store.digest "id = [");
+        "source_text",`String new_source])));
+  check bool "applied owner can commit corrected declaration with exact CAS" true
+    (Result.is_ok (repair owner (Lane_addon_sources.Keeper owner)));
+  check string "repair wrote the authorized bytes" new_source
+    (In_channel.with_open_bin saved_path In_channel.input_all))
 
 let test_configured_fusion_rechecks_owner_before_capture () = with_fixture (fun clock config root directory received _ ->
   let owner = "initial-owner" in
@@ -733,6 +807,109 @@ let test_configured_fusion_rechecks_owner_before_capture () = with_fixture (fun 
     (list "observations" denied |> List.length);
   check string "the source reports its actual ownership refusal"
     "Fusion run is unavailable to this caller" (text "detail" denied))
+
+let test_operator_attached_private_fusion_rechecks_owner () = with_fixture (fun clock config root _directory received _ ->
+  let owner = "dynamic-owner" in
+  let run_id = register_private_run root owner in
+  let binding = `Assoc ["sources",`List [`Assoc [
+    "source_id",`String "fusion";"kind",`String "fusion_run";
+    "run_id",`String run_id]]] in
+  let attached = Runtime.dispatch ~caller:"operator" ~access:Lane_addon_sources.Operator_configuration
+    ~config ~operation:Runtime.Attach (`Assoc [
+      "manifest_path",`String (manifest root);"run_id",`String "world";
+      "binding",binding]) |> unwrap in
+  let id = text "instance_id" attached in
+  await clock (fun () -> member "observation_seq" (instance config id) <> `Int 0);
+  let before = instance config id in
+  check string "operator attach retains private source owner" owner
+    (before |> member "source_access" |> text "keeper");
+  let sequence = member "observation_seq" before in
+  Fusion_run_registry.register_running (Fusion_run_registry.global ()) ~run_id
+    ~keeper:"replacement-owner" ~preset:"default" ~roster:Fusion_types.preset_roster
+    ~topology:Fusion_types.Simple ~started_at:2.;
+  Runtime.notify_fusion_run ~run_id;
+  await clock (fun () -> member "observation_seq" (instance config id) <> sequence);
+  let denied = require_some "missing dynamic refusal envelope" (source received id) in
+  let retained = Runtime.dispatch ~caller:owner ~config ~operation:Runtime.Inspect
+    (`Assoc ["instance_id",`String id]) |> unwrap in
+  check bool "original owner retains access to old private evidence" true
+    (list "instances" retained <> []);
+  check bool "replacement owner is not captured by old private attachment" false
+    (member "complete" denied |> Yojson.Safe.Util.to_bool);
+  check int "replacement owner's observations stay private" 0
+    (list "observations" denied |> List.length);
+  check string "dynamic worker names ownership refusal"
+    "Fusion run is unavailable to this caller" (text "detail" denied))
+
+let test_saved_document_keeps_repair_authority_after_source_eviction () =
+  with_fixture (fun clock config root directory _received _ ->
+    let owner = "repair-owner" in
+    let old_run = register_private_run root owner in
+    let package = manifest root in
+    let source run = Printf.sprintf {|id="owned-document"
+run_id="world"
+manifest_path=%S
+[binding]
+sources=%s
+|} package (fusion_source run) in
+    let save ?revision bytes = Lane_addon_runtime.save_declaration ~caller:owner
+      ~access:(Lane_addon_sources.Keeper owner) ~config (`Assoc ([
+        "mode",`String (if Option.is_none revision then "create" else "save");
+        "file_name",`String "owned.toml"; "source_text",`String bytes] @
+        Option.fold ~none:[] ~some:(fun value -> ["expected_source_revision",`String value]) revision)) in
+    let require_document = function Ok value -> value | Error error -> fail error.Lane_addon_declaration.message in
+    ignore (save (source old_run) |> require_document);
+    let path = Filename.concat directory "owned.toml" in
+    let read keeper = Lane_addon_runtime.read_declaration ~caller:keeper
+      ~access:(Lane_addon_sources.Keeper keeper) ~config (`Assoc ["source_path",`String path]) in
+    let operator_path = declare directory package "operator-created" (fusion_source old_run) in
+    reconcile config directory;
+    let registry = Fusion_run_registry.global () in
+    Fusion_run_registry.mark_completed registry ~run_id:old_run ~outcome:Fusion_run_registry.Succeeded;
+    for index = 1 to Fusion_run_registry.max_completed_retained do
+      Eio.Time.sleep clock 0.001;
+      let run_id = old_run ^ "/newer/" ^ string_of_int index in
+      Fusion_run_registry.register_running registry ~run_id ~keeper:owner ~preset:"default"
+        ~roster:Fusion_types.preset_roster ~topology:Fusion_types.Simple ~started_at:(float_of_int index +. 100.);
+      Fusion_run_registry.mark_completed registry ~run_id ~outcome:Fusion_run_registry.Succeeded
+    done;
+    check bool "original source has left bounded registry" true
+      (Option.is_none (Fusion_run_registry.get registry ~run_id:old_run));
+    check string "durable owner can read after source eviction" (source old_run)
+      (read owner |> require_document |> text "source_text");
+    check bool "foreign Keeper cannot read an owned document" true (Result.is_error (read "foreign"));
+    let malformed = "id = \"unfinished" in
+    write operator_path malformed;
+    let operator_document = Lane_addon_runtime.read_declaration ~caller:owner
+      ~access:(Lane_addon_sources.Keeper owner) ~config
+      (`Assoc ["source_path",`String operator_path]) |> require_document in
+    check string "operator-created private document retains its verified owner" malformed
+      (text "source_text" operator_document);
+    write path malformed;
+    let damaged = read owner |> require_document in
+    check string "invalid source is available for authorized repair" malformed (text "source_text" damaged);
+    let next_run = register_private_run (root ^ "/replacement") owner in
+    ignore (save ~revision:(text "source_revision" damaged) (source next_run) |> require_document);
+    check string "repair can replace a pruned source" (source next_run)
+      (read owner |> require_document |> text "source_text"))
+
+let test_pending_document_owner_rejects_replaced_source () =
+  with_fixture (fun _clock config root directory _received _ ->
+    let package = manifest root in
+    let path = declare directory package "pending-owner" "[]" in
+    let bytes = Fs_compat.load_file path in
+    let store_root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
+    unwrap (Lane_addon_document_owner.prepare ~root:store_root ~source_path:path ~keeper:"owner"
+      ~prior_revision:None ~proposed_revision:(Store.digest bytes));
+    let read () = Lane_addon_runtime.read_declaration ~caller:"owner"
+      ~access:(Lane_addon_sources.Keeper "owner") ~config (`Assoc ["source_path",`String path]) in
+    check bool "pending admission authorizes only exact proposed bytes" true (Result.is_ok (read ()));
+    write path (bytes ^ "\nforeign = true\n");
+    check bool "uncommitted ownership cannot adopt replacement bytes" true (Result.is_error (read ()));
+    write path bytes;
+    let journal = Filename.concat store_root (Filename.concat "declaration-owners" (Store.digest path ^ ".jsonl")) in
+    Out_channel.with_open_gen [Open_wronly;Open_append;Open_binary] 0o600 journal (fun out -> output_string out "{");
+    check bool "incomplete ownership journal fails closed" true (Result.is_error (read ())))
 
 let test_shared_consumer_refuses_new_private_producer () = with_fixture (fun clock config root directory received _ ->
   let package = manifest root in
@@ -765,9 +942,16 @@ let test_shared_consumer_refuses_new_private_producer () = with_fixture (fun clo
 let () = run "TOML cross-Lane composition" ["world inputs",[
   test_case "native Fusion report crosses packages and remains Keeper-readable" `Quick
     test_native_fusion_report_is_readable_after_detach;
+  test_case "owned declarations survive source eviction and malformed edits" `Quick
+    test_saved_document_keeps_repair_authority_after_source_eviction;
+  test_case "pending document owner cannot adopt replacement bytes" `Quick
+    test_pending_document_owner_rejects_replaced_source;
   test_case "private visibility survives declared output graph" `Quick test_private_visibility_crosses_declared_output_graph;
-  test_case "configured Fusion capture rechecks its retained owner" `Quick test_configured_fusion_rechecks_owner_before_capture;
   test_case "shared consumer refuses replacement with private producer" `Quick test_shared_consumer_refuses_new_private_producer;
+  test_case "host namespace overhead preserves package reply capacity" `Quick
+    test_namespace_overhead_does_not_consume_package_capacity;
+  test_case "configured Fusion capture rechecks its retained owner" `Quick test_configured_fusion_rechecks_owner_before_capture;
+  test_case "operator-attached private Fusion rechecks owner" `Quick test_operator_attached_private_fusion_rechecks_owner;
   test_case "native input history crosses worker and survives Detach" `Quick
     test_native_msx_history_crosses_worker_freeze_and_detach;
   test_case "named output feeds statistics and preserves mapping revisions" `Quick

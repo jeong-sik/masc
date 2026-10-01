@@ -90,7 +90,11 @@ let producer ~access bindings s =
         get "id" text owner=Ok s.installation_id
         && (match get "kind" text phase with Ok "detached" | Ok "detaching" -> false | _ -> true)
     | _ -> false in
-  match List.filter matches bindings with
+  (* Hidden and absent installations share one public result. Filter by
+     durable read authority before counting possible producers. *)
+  let readable = List.filter (fun value ->
+    Result.is_ok (Lane_addon_runtime.authorize_retained_read ~access value)) bindings in
+  match List.filter matches readable with
   | [value] ->
       let* () = Lane_addon_runtime.authorize_retained_read ~access value in
       let* instance = get "instance_id" text value in
@@ -154,7 +158,7 @@ let configuration_snapshot ~access ~caller config subscriptions revision =
     "subscriptions",`List (List.map json subscriptions);"reader_states",`List reader_states]
 
 let dispatch ?access ~config ~caller ~operation args = protect (fun () -> Mutex.protect mutex (fun () ->
-  let access = match access with Some value -> value | None -> Lane_addon_sources.Keeper caller in
+  let access = Option.value access ~default:Lane_addon_sources.Unauthenticated in
   let* subscriptions,revision = load config in
   match operation with
   | Inspect -> let* ()=exact [] args in
@@ -184,6 +188,10 @@ let dispatch ?access ~config ~caller ~operation args = protect (fun () -> Mutex.
   | Read | Acknowledge ->
       let* ()=exact (match operation with Read->["run_id";"installation_id";"output_id"]
         | _->["run_id";"installation_id";"output_id";"receipt"]) args in
+      let* ()=match access with
+        | Lane_addon_sources.Operator_configuration -> Ok ()
+        | Keeper keeper when String.equal keeper caller -> Ok ()
+        | Keeper _ | Unauthenticated -> Error "Authenticated subscription owner required" in
       let* s=select_subscription ~caller args subscriptions in
       let store=Store.create ~root:(root config) in
       let* bindings=Store.bindings store in

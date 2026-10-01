@@ -331,10 +331,22 @@ let read_bounded ~max_bytes path =
   with Sys_error message -> Error message
      | End_of_file -> Error "source changed while reading"
      | Unix.Unix_error (error,call,path) -> Error (call ^ " " ^ path ^ ": " ^ Unix.error_message error)
+let unique_snapshot_keys json =
+  let rec walk = function
+    | [] -> Ok ()
+    | `Assoc fields :: rest ->
+        let names = List.map fst fields in
+        if List.length names <> List.length (List.sort_uniq String.compare names)
+        then Error "snapshot contains duplicate object keys"
+        else walk (List.rev_append (List.map snd fields) rest)
+    | `List values :: rest -> walk (List.rev_append values rest)
+    | _ :: rest -> walk rest in
+  walk [json]
 let snapshot_file ~store ~max_bytes ~id path =
   let* bytes = Eio_unix.run_in_systhread (fun () -> read_bounded ~max_bytes path) in
   try
     let json = Yojson.Safe.from_string bytes in
+    let* () = unique_snapshot_keys json in
     let* fields = match json with `Assoc fields -> Ok fields | _ -> Error "snapshot must be an envelope" in
     let* observed_id = text fields "source_id" in
     let* _incarnation = text fields "incarnation" in

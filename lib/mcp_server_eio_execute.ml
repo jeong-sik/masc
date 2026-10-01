@@ -417,6 +417,20 @@ let execute_tool_eio
                      ~name
                      ~args:coerced_args
                  | Mod_misc ->
+                   let lane_access =
+                     match token with
+                     | None -> Lane_addon_sources.Unauthenticated
+                     | Some raw ->
+                       (match Auth.find_credential_by_token config.base_path ~token:raw with
+                        | Ok { Masc_domain.role = Masc_domain.Admin; _ } ->
+                          Lane_addon_sources.Operator_configuration
+                        | Ok { Masc_domain.role = Masc_domain.Worker; _ } ->
+                          (match owner_keeper_identity with
+                           | Some (keeper_name, _) -> Lane_addon_sources.Keeper keeper_name
+                           | None -> Lane_addon_sources.Unauthenticated)
+                        | Ok { Masc_domain.role = Masc_domain.Player; _ } | Error _ ->
+                          Lane_addon_sources.Unauthenticated)
+                   in
                    let candle operation =
                      match owner_keeper_identity with
                      | Some (keeper_name, _) ->
@@ -428,6 +442,7 @@ let execute_tool_eio
                          "Candle tools require an authenticated Keeper; a supplied caller name is not a wallet identity") in
                    let dispatch () =
                      Tool_misc.dispatch
+                       ~lane_access
                        { Tool_misc.config
                        ; agent_name
                        ; help_schemas = Config.raw_all_tool_schemas

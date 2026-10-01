@@ -32,6 +32,9 @@ completed output is a frozen capture, not a live mirror of arbitrary Board edits
 Native `fusion_run` captures are visible to the authoritative registry Keeper
 and to the operator. HTTP access uses verified operator or agent credentials;
 local actor attribution and player credentials cannot grant private source access.
+The MCP facade also carries verified Lane authority separately from the attributed
+name; omitted authority is unauthenticated. Unreadable retained visibility is
+omitted from inventory without discarding its evidence or exposing its rows.
 Unknown and foreign run identities receive the same acquisition denial.
 
 Every retained binding records a strict read visibility: shared, operator, or one
@@ -47,6 +50,16 @@ replacement becomes more private, acquisition refuses the new bytes until the
 consumer is reattached with compatible visibility. Existing shared captures remain
 readable under their original policy. Configuration inventory and declaration
 editing apply source ownership before returning sensitive entries or current bytes.
+Authenticated Keeper saves also retain document ownership separately from the
+referenced run. Initial admission records the exact prior/proposed source digests
+before writing; only a durable matching write establishes stable repair authority.
+The owner can then read and repair malformed TOML or replace a run that has left
+the registry. Proposed bindings still require current source authorization.
+Ownership remains attached to the canonical workspace and document path; submitted
+TOML cannot transfer it. Reconciliation also records the verified Keeper owner of
+operator-created private declarations; exact-revision retained visibility can
+establish that owner after its Fusion run leaves the registry. Corrupt ownership
+records require operator repair.
 
 The native regression fixtures cover direct and historical access, unverified
 attribution, private graph propagation, subscription cursor preservation and an
@@ -103,6 +116,7 @@ Source authority: `lib/fusion_core/fusion_run_registry.ml`,
 `lib/fusion/fusion_orchestrator.mli`,
 `lib/fusion/fusion_delivery_obligation.mli`,
 and [generic output composition](../guides/lane-output-composition.md).
+
 ## Readable report output
 
 The `fusion-report` package adds an executable projection after `fusion-results`:
@@ -123,7 +137,9 @@ The final serialized reply must fit the package manifest's resource envelope;
 an oversized reply is refused without truncating analysis or accepting a report.
 
 Regenerate the fixture composition and preview with
-`python3 scripts/fusion-report-preview.py`. Browser receipts in
+`python3 scripts/fusion-report-preview.py`, then regenerate browser screenshots
+and receipts with `python3 scripts/fusion-report-preview-browser.py` (requires
+Playwright and its Chromium browser). Browser receipts in
 `docs/evidence/fusion-report-20260930/preview-checks.json` identify the exact HTML
 and composition hashes, delivery label, lineage interaction and screenshots.
 

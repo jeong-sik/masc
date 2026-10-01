@@ -3591,7 +3591,7 @@ let read_private_jsonl_rows_locked_with_io_for_testing ~io path =
   read_private_jsonl_rows_locked_with_io ~io path
 ;;
 
-let update_private_file_durable_locked_with_io ?(create=true) ~io path decide =
+let update_private_file_durable_locked_with_io ?(create=true) ?(recover_incomplete_tail=false) ~io path decide =
   test_exec_home_guard ~op:"update_private_file_durable_locked" path;
   let dir = Filename.dirname path in
   if create then mkdir_p_memoized dir;
@@ -3619,6 +3619,19 @@ let update_private_file_durable_locked_with_io ?(create=true) ~io path decide =
            (* See Unix.lseek: only the file-position side effect is required. *)
            ignore (Unix.lseek fd 0 Unix.SEEK_SET : int);
            let existing = read_fd_chunks fd (Buffer.create 4096) in
+           let recovered =
+             if not recover_incomplete_tail || existing = ""
+                || existing.[String.length existing - 1] = '\n' then Ok existing
+             else
+               let complete_length = private_jsonl_last_complete_row_length existing in
+               let ( let* ) = Result.bind in
+               let failure append_failure = {append_failure; rollback_failures=[]} in
+               let* () = run_unix_io ~operation:Incomplete_tail_truncate (fun () ->
+                 Unix.ftruncate fd complete_length) |> Result.map_error failure in
+               let* () = run_unix_io ~operation:Incomplete_tail_fsync (fun () -> Unix.fsync fd)
+                 |> Result.map_error failure in
+               Ok (String.sub existing 0 complete_length) in
+           Result.bind recovered (fun existing ->
            let suffix, result = decide existing in
            match suffix with
             | None -> Ok result
@@ -3630,7 +3643,7 @@ let update_private_file_durable_locked_with_io ?(create=true) ~io path decide =
                 ~fd
                 ~original_length
                 suffix
-              |> Result.map (fun () -> result))))
+              |> Result.map (fun () -> result)))))
 ;;
 
 let update_private_file_durable_locked_result ?(create=true) path decide =
@@ -3638,6 +3651,11 @@ let update_private_file_durable_locked_result ?(create=true) path decide =
     ~io:private_jsonl_transaction_unix_io
     path
     decide
+;;
+
+let recover_and_update_private_jsonl_durable_locked_result path decide =
+  update_private_file_durable_locked_with_io ~recover_incomplete_tail:true
+    ~io:private_jsonl_transaction_unix_io path decide
 ;;
 
 let update_private_file_durable_locked_with_io_for_testing ?(create=true) ~io path decide =

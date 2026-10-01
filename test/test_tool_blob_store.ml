@@ -944,6 +944,27 @@ let test_maintenance_keeps_board_attachment_reference () =
         None
         (fetch_ok store ~sha256:dead.sha256))
 
+let test_maintenance_keeps_prepared_lane_broadcast () =
+  with_temp_dir (fun base_path ->
+    let store = B.create ~base_path in
+    let child = B.put_durable store ~bytes:"prepared Lane evidence" ~mime:"text/plain" in
+    let manifest = B.put_durable store ~mime:O.artifact_manifest_mime
+      ~bytes:(O.artifact_manifest_to_json ~content:"prepared evidence"
+        ~structured_content:(`Assoc ["artifact",O.normalized_artifact_ref_to_json child])
+        |> Yojson.Safe.to_string) in
+    let workspace = Workspace_utils.masc_root_dir_from ~base_path ~cluster_name:"default" in
+    let prepared = Filename.concat workspace "lane-addons/broadcasts/instance/operation.json" in
+    Fs_compat.mkdir_p (Filename.dirname prepared);
+    Fs_compat.save_file prepared (Yojson.Safe.to_string (`Assoc ["evidence",`Assoc [
+      "keeper_artifact",O.normalized_artifact_ref_to_json manifest]]));
+    for _pass = 1 to 2 do
+      let result = maintenance_ok ~base_path ~mode:M.Delete_previous_candidates in
+      Alcotest.(check int) "prepared manifest and child remain rooted" 2 result.live_references;
+      Alcotest.(check int) "prepared evidence is not swept" 0 result.deleted
+    done;
+    Alcotest.(check (option string)) "child remains readable for retry"
+      (Some "prepared Lane evidence") (fetch_ok store ~sha256:child.sha256))
+
 let test_maintenance_keeps_wire_capture_reference_within_retention () =
   with_temp_dir (fun base_path ->
       let store = B.create ~base_path in
@@ -2081,6 +2102,8 @@ let () =
             "maintenance ignores marker embedded in prose"
             `Quick
             test_maintenance_ignores_marker_embedded_in_prose;
+          Alcotest.test_case "maintenance keeps prepared Lane Broadcast artifacts" `Quick
+            test_maintenance_keeps_prepared_lane_broadcast;
           Alcotest.test_case
             "maintenance keeps wire-capture reference within retention"
             `Quick

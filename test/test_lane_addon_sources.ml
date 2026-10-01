@@ -58,6 +58,29 @@ let test_file_rotation_keeps_exact_original_bytes () = with_store (fun dir store
   check string "rotation and deletion do not remove evidence" bytes (require (Store.read_blob store reference));
   check string "retained SHA describes original bytes" (Store.digest bytes) (Option.get reference.sha256))
 
+let test_duplicate_snapshot_keys_cannot_replace_host_evidence () = with_store (fun dir store ->
+  let path = Filename.concat dir "duplicate.json" in
+  let forged = `List [`Assoc ["uri", `String "forged";
+    "sha256", `String (String.make 64 'a')]] in
+  let observation = `Assoc ["kind", `String "fusion_run";
+    "evidence", `List []; "evidence", forged] in
+  let duplicate_observation = envelope "deployment" [observation] in
+  let duplicate_root = match envelope "deployment" [] with
+    | `Assoc fields -> `Assoc (("observations", `List [observation]) :: fields)
+    | _ -> assert false in
+  List.iter (fun input ->
+    write path (Yojson.Safe.to_string input);
+    let source = require (Sources.acquire
+      ~resolve_lane_output:(fun ~installation_id:_ -> Error "no configured upstream")
+      ~store ~package:(package dir 16384)
+      ~binding:(binding [file_source "deployment" path])) |> list |> List.hd in
+    check bool "ambiguous source remains incomplete" false
+      (Yojson.Safe.Util.to_bool (member "complete" source));
+    check int "ambiguous source cannot publish forged evidence" 0
+      (List.length (list (member "observations" source)));
+    check string "ambiguity is explicit" "snapshot contains duplicate object keys"
+      (text (member "detail" source))) [duplicate_observation; duplicate_root])
+
 let test_combined_ingress_marks_omitted_sources () = with_store (fun dir store ->
   let sources = List.init 2 (fun index ->
     let id = string_of_int index in
@@ -498,6 +521,7 @@ let () = run "Lane source provenance" ["acquisition", [
   test_case "DOS capture retains the machine's history" `Quick test_dos_capture_retains_the_machines_history;
   test_case "named ports select exact instance lanes and retain whole coverage" `Quick test_named_port_uses_exact_instance_and_keeps_coverage;
   test_case "file rotation keeps original bytes" `Quick test_file_rotation_keeps_exact_original_bytes;
+  test_case "duplicate snapshot keys cannot replace retained evidence" `Quick test_duplicate_snapshot_keys_cannot_replace_host_evidence;
   test_case "combined ingress preserves incomplete coverage" `Quick test_combined_ingress_marks_omitted_sources;
   test_case "browser actual identity and unknown coverage" `Quick test_browser_identity_and_unknown_coverage;
   test_case "misc tools name the source they move" `Quick test_misc_tools_name_the_source_they_move;

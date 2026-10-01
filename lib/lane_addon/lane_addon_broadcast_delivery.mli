@@ -43,14 +43,16 @@ val recipient_result : t -> caller:string -> operation_id:Request_id.t ->
     callers pass the same workspace_request_id to append_user_message_once on
     every attempt. *)
 val complete : record -> bool
-type recovery = {pending:receipt list;settled_with_cleanup:receipt list}
+type recovery = {pending:receipt list;settled_with_cleanup:receipt list;rejected:(string * error) list}
 val recover : t -> (recovery, error) result
 (** Restart scans only durable pending markers, created before admission and
     retired after terminal journal commit. Full journals remain addressable for
     exact replay and audit; completed history is not reread on every pulse.
     Pending filenames must be exact lowercase SHA-256 journal identities.
-    Missing, nonregular or malformed pending journals fail the authoritative scan without
-    creating a replacement journal or discarding the marker. An existing empty
+    Missing, nonregular or malformed individual journals are returned in [rejected]
+    without creating a replacement or discarding their marker; other recoverable
+    operations remain scheduled. Failure to list the pending directory still
+    refuses the scan as a whole. An existing empty
     pre-admission journal may retire its marker under the exclusive journal lock.
     Completed records with descriptor settlement failures are returned separately
     and never put back into the pending drain. *)

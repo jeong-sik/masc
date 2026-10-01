@@ -601,15 +601,26 @@ let post_json ~(host : string) ~(port : int) ~(path : string) ~(body : string) :
   | Error e -> Error e
   | Ok (status_code, body) -> decode_json ~allow_empty:true ~status_code ~body
 
-(* Durable side effects must keep the same credential across admission and
-   transport. In particular, a 401 cannot replay an unanswered Broadcast with
-   a newly adopted actor's bearer. Only its digest reaches the pending journal. *)
-type bound_credential = { bound_headers : (string * string) list; credential_identity : string }
-let bind_credential () =
-  let bound_headers = auth_headers () in
-  let encoded = `List (List.map (fun (name,value) -> `List [`String name;`String value]) bound_headers)
-    |> Yojson.Safe.to_string in
-  {bound_headers;credential_identity=Masc.Lane_addon_store.digest encoded}
+(* A Broadcast keeps one captured bearer for principal proof and the write.
+   A refused bearer is not silently refreshed into another actor's authority. *)
+type bound_credential = { bound_headers : (string * string) list }
+let bind_credential () = {bound_headers=auth_headers ()}
+let get_json_bound ~credential ~host ~port ~path =
+  let url = url_of ~host ~port ~path in
+  timed ~verb:"GET" ~path @@ fun () ->
+  match Masc_http_client.get_sync ?clock:(request_clock ())
+    ~timeout_sec:(request_timeout_sec ()) ~url ~headers:credential.bound_headers () with
+  | Error detail -> Error (Masc.Tui_decode.http_transport_error ~verb:"GET" ~url ~detail)
+  | Ok (status_code,body) -> decode_json ~allow_empty:false ~status_code ~body
+let lane_broadcast_principal_bound ~credential ~host ~port =
+  let ( let* ) = Result.bind in
+  let* json = get_json_bound ~credential ~host ~port
+    ~path:"/api/v1/lane-addons/broadcast-principal" in
+  match json with
+  | `Assoc ["principal",`String principal]
+    when String.starts_with ~prefix:"principal:" principal
+         && String.length principal > String.length "principal:" -> Ok principal
+  | _ -> Error "Broadcast principal response is invalid"
 let post_json_bound ~credential ~host ~port ~path ~body =
   let url = url_of ~host ~port ~path in
   timed ~verb:"POST" ~path @@ fun () ->

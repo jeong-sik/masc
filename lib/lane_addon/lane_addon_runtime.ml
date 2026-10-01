@@ -111,12 +111,8 @@ let visibility_of_fields fields =
   | ["kind", `String "operator"] -> Ok Operator_only
   | ["keeper", `String keeper; "kind", `String "keeper"] when String.trim keeper <> "" -> Ok (Keeper_only keeper)
   | _ -> Error "invalid retained read visibility"
-let caller_access ?access caller = match access with
-  | Some access -> access
-  | None -> (match caller with
-      | Some keeper when String.trim keeper <> "" -> Lane_addon_sources.Keeper keeper
-      | Some _ -> Lane_addon_sources.Unauthenticated
-      | None -> Lane_addon_sources.Operator_configuration)
+let caller_access ?access _caller =
+  Option.value access ~default:Lane_addon_sources.Unauthenticated
 let can_read access = function
   | Shared -> true
   | Operator_only -> (match access with Lane_addon_sources.Operator_configuration -> true
@@ -279,6 +275,21 @@ let namespace e seq output =
   { output with rows = List.map (fun (row : row) -> { row with
       id = prefix row.id; lane_id = e.instance_id ^ "/" ^ row.lane_id;
       related_ids = List.map prefix row.related_ids }) output.rows }
+let add_output_bytes left right =
+  if left > Int64.sub Int64.max_int right
+  then Error "namespaced observation size overflow"
+  else Ok (Int64.add left right)
+let namespace_allowance e seq output =
+  let escaped_bytes value =
+    Int64.of_int (String.length (Yojson.Safe.to_string (`String value)) - 2) in
+  let lane_prefix = escaped_bytes (e.instance_id ^ "/") in
+  let row_prefix = escaped_bytes (e.instance_id ^ "/" ^ string_of_int seq ^ "/") in
+  List.fold_left (fun total (row : row) ->
+    let* total = total in
+    let* total = add_output_bytes total lane_prefix in
+    let* total = add_output_bytes total row_prefix in
+    List.fold_left (fun total _ -> let* total = total in add_output_bytes total row_prefix)
+      (Ok total) row.related_ids) (Ok 0L) output.rows
 type action_writer = store:Lane_addon_store.t -> instance_id:string -> request_id:string ->
   Yojson.Safe.t -> (unit, string) result
 let action_writer_key : action_writer Eio.Fiber.key = Eio.Fiber.create_key ()
@@ -309,9 +320,18 @@ let finalize_actions m e =
   Queue.clear e.action_queue
 let commit_output m e ~sources output =
   let seq = e.seq + 1 in
-  let output = namespace e seq output in
+  (* The package limit bounds its reply, before host-owned identity prefixes.
+     Keep a separate persisted bound with exactly those prefixes as allowance;
+     no package-controlled field receives additional capacity. *)
   let* () =
     if String.length (Yojson.Safe.to_string (output_to_json output)) <= e.package.resources.max_reply_bytes
+    then Ok () else Error "observation exceeds the package output envelope" in
+  let* allowance = namespace_allowance e seq output in
+  let* max_namespaced_bytes = add_output_bytes
+    (Int64.of_int e.package.resources.max_reply_bytes) allowance in
+  let output = namespace e seq output in
+  let* () =
+    if Int64.of_int (String.length (Yojson.Safe.to_string (output_to_json output))) <= max_namespaced_bytes
     then Ok () else Error "namespaced observation exceeds the package output envelope" in
   let* () = offload (fun () -> Lane_addon_store.append_observation m.store
     ~instance_id:e.instance_id ~seq ~sources output) in
@@ -632,10 +652,12 @@ let snapshot m ~access ?instance_id () =
   let past = List.filter (function `Assoc fields ->
     Option.fold ~none:true ~some:(fun id -> List.assoc_opt "instance_id" fields = Some (`String id)) instance_id
     | _ -> Option.is_none instance_id) past in
-  let* past = List.fold_right (fun value acc ->
-    let* values = acc in
-    let* fields = object_ value in let* visibility = visibility_of_fields fields in
-    Ok (if can_read access visibility then value :: values else values)) past (Ok []) in
+  let past = List.filter (fun value ->
+    match Result.bind (object_ value) visibility_of_fields with
+    | Ok visibility -> can_read access visibility
+    | Error detail ->
+        Log.Misc.warn "Lane retained binding omitted from inventory: %s" detail;
+        false) past in
   let* () = if Option.is_some instance_id && live = [] && past = []
     then Error "Lane instance is unavailable to this caller" else Ok () in
   let retained = function `Assoc fields ->
@@ -792,6 +814,18 @@ let authorize_document m ~access (document : Lane_addon_declaration.document) =
   match access with
   | Lane_addon_sources.Operator_configuration -> Ok ()
   | Keeper _ | Unauthenticated ->
+      let* ownership = offload (fun () -> Lane_addon_document_owner.read
+        ~root:(Lane_addon_store.root m.store) ~source_path:document.source_path)
+        |> Result.map_error (fun message -> {Lane_addon_declaration.code=Io_error;message;current=None}) in
+      match ownership with
+      | Some owner ->
+          (match access with
+           | Keeper keeper when Lane_addon_document_owner.permits owner ~keeper
+               ~source_revision:document.source_revision -> Ok ()
+           | Keeper _ | Unauthenticated | Operator_configuration ->
+               Error {Lane_addon_declaration.code=Invalid_request;
+                 message="Lane declaration is unavailable to this caller";current=None})
+      | None ->
       let* declaration = offload (fun () -> Lane_addon_config.load_source
         ~source_path:document.source_path ~source_text:document.source_text)
         |> Result.map_error (fun _ -> {Lane_addon_declaration.code=Invalid_request;
@@ -817,10 +851,10 @@ let save_declaration ?caller ?access ~config json = Eio_context.run_on_owner_dom
   let* directory = edit_directory config in
   let m = manager config in let access = caller_access ?access caller in
   Eio.Mutex.use_ro m.configuration_mutex (fun () ->
-    let* () = match offload (fun () -> Lane_addon_declaration.read ~directory
+    let* current = match offload (fun () -> Lane_addon_declaration.read ~directory
       ~source_path:(Filename.concat directory request.file_name)) with
-      | Ok current -> authorize_document m ~access current
-      | Error {Lane_addon_declaration.code=Not_found;_} -> Ok ()
+      | Ok current -> let* () = authorize_document m ~access current in Ok (Some current)
+      | Error {Lane_addon_declaration.code=Not_found;_} -> Ok None
       | Error error -> Error error in
     let* () = match access with
       | Lane_addon_sources.Operator_configuration -> Ok ()
@@ -833,7 +867,33 @@ let save_declaration ?caller ?access ~config json = Eio_context.run_on_owner_dom
           binding_visibility m ~access declaration.binding
             |> Result.map (fun _ -> ())
             |> Result.map_error (fun message -> {Lane_addon_declaration.code=Invalid_request;message;current=None}) in
-    let* receipt = offload (fun () -> Lane_addon_declaration.write ~directory request) in
+    let source_path = Filename.concat directory request.file_name in
+    let ownership_error message = {Lane_addon_declaration.code=Io_error;message;current=None} in
+    let* () = match access with
+      | Lane_addon_sources.Operator_configuration -> Ok ()
+      | Unauthenticated -> Error {Lane_addon_declaration.code=Invalid_request;
+          message="verified declaration owner required";current=None}
+      | Keeper keeper ->
+          offload (fun () ->
+            Lane_addon_document_owner.prepare ~root:(Lane_addon_store.root m.store)
+              ~source_path ~keeper
+              ~prior_revision:(Option.map (fun (d : Lane_addon_declaration.document) -> d.source_revision) current)
+              ~proposed_revision:(Lane_addon_store.digest request.source_text))
+          |> Result.map_error ownership_error in
+    let* receipt = offload (fun () -> Lane_addon_declaration.write ~directory request)
+      |> Result.map_error (fun error -> match access with
+          | Lane_addon_sources.Operator_configuration -> error
+          | Keeper _ | Unauthenticated -> {error with Lane_addon_declaration.current=None}) in
+    let* () = match access, receipt.durability with
+      | Lane_addon_sources.Keeper keeper, Lane_addon_declaration.Durable ->
+          offload (fun () ->
+            let* observed = Lane_addon_declaration.read ~directory ~source_path in
+            if observed.source_revision <> receipt.document.source_revision
+            then Error (ownership_error "declaration changed before ownership admission completed")
+            else Lane_addon_document_owner.complete ~root:(Lane_addon_store.root m.store)
+              ~source_path ~keeper ~source_revision:observed.source_revision
+              |> Result.map_error ownership_error)
+      | Keeper _, Unconfirmed _ | (Operator_configuration | Unauthenticated), _ -> Ok () in
     m.configuration_nudge ();
     Ok (Lane_addon_declaration.receipt_to_json receipt)))
 
@@ -1051,6 +1111,8 @@ let recover_fleet ~config ~sw = Eio_context.run_on_owner_domain (fun () ->
   let ledger=fleet_store m in
   let* recovered=offload (fun () -> Fleet_ledger.recover ledger) |> fleet_result in
   List.iter observe_fleet_settlement recovered.settled_with_cleanup;
+  List.iter (fun (journal,error) -> Log.Misc.warn "Lane Fleet journal %s isolated: %s"
+    journal (fleet_error_to_string error)) recovered.rejected;
   let current payload =
     let* found=offload (fun () -> Fleet_ledger.find ledger
       ~caller:payload.Fleet_ledger.caller ~operation_id:payload.operation_id) |> fleet_result in
@@ -1281,6 +1343,13 @@ let dispatch ?caller ?access ~config ~operation json = Eio_context.run_on_owner_
         | _, access -> access in
       let* () = request_result (Lane_addon_sources.authorize ~access:source_access binding) in
       let* visibility = request_result (binding_visibility m ~access:source_access binding) in
+      (* A private attachment keeps its source owner for every later wake.
+         Operator authority may discover the binding, but must not remain the
+         worker's acquisition authority after its Fusion owner changes. *)
+      let source_access = match visibility with
+        | Keeper_only keeper -> Lane_addon_sources.Keeper keeper
+        | Shared | Operator_only -> source_access in
+      let* () = request_result (Lane_addon_sources.authorize ~access:source_access binding) in
       runtime_result (attach_entry ~sw m ~run_id ~package ~binding ~configuration:None ~source_access ~visibility)
   | Observe ->
       let* e = request_result (find m args) in
@@ -1312,6 +1381,29 @@ let dispatch ?caller ?access ~config ~operation json = Eio_context.run_on_owner_
             let* () = match e.configuration with None -> Ok () | Some owner ->
               runtime_result (offload (fun () -> remove_configuration_file ~directory:(configuration_directory config) owner)) in
             runtime_result (detach_entry ~sw m e)))
+
+let retain_configured_document_owner m (d : Lane_addon_config.declaration) visibility =
+  match visibility with
+  | Shared | Operator_only -> Ok ()
+  | Keeper_only keeper -> offload (fun () ->
+      let root = Lane_addon_store.root m.store in
+      let* previous = Lane_addon_document_owner.read ~root ~source_path:d.source_path in
+      match previous with
+      | Some _ -> Ok ()
+      | None ->
+          let read () = Lane_addon_declaration.read ~directory:(Filename.dirname d.source_path)
+            ~source_path:d.source_path |> Result.map_error (fun error -> error.Lane_addon_declaration.message) in
+          let* document = read () in
+          if document.desired_revision <> Some d.revision
+          then Error "declaration changed before ownership admission"
+          else
+            let* () = Lane_addon_document_owner.prepare ~root ~source_path:d.source_path ~keeper
+              ~prior_revision:(Some document.source_revision) ~proposed_revision:document.source_revision in
+            let* current = read () in
+            if current.source_revision <> document.source_revision
+            then Error "declaration changed before ownership admission completed"
+            else Lane_addon_document_owner.complete ~root ~source_path:d.source_path ~keeper
+              ~source_revision:current.source_revision)
 
 let reconcile_configuration ~config ~directory = Eio_context.run_on_owner_domain (fun () ->
   let m = manager config in
@@ -1378,7 +1470,22 @@ let reconcile_configuration ~config ~directory = Eio_context.run_on_owner_domain
      | Error _ -> ()
      | Ok sw when can_apply ->
          List.iter (fun (d : Lane_addon_config.declaration) ->
-           match validate_connection m ~run_id:d.run_id ~configuration_id:d.id ~binding:d.binding with
+           let retained_visibility =
+             let same (owner : configuration_owner) = owner.id = d.id
+               && owner.source_path = d.source_path && owner.revision = d.revision in
+             let live = live_for d.id |> List.filter_map (fun e ->
+               match e.configuration with Some owner when same owner -> Some e.visibility | _ -> None) in
+             let past = histories |> List.filter_map (fun (owner, fields) ->
+               if same owner then Result.to_option (visibility_of_fields fields) else None) in
+             match List.sort_uniq Stdlib.compare (live @ past) with
+             | [visibility] -> Ok visibility
+             | [] -> desired_visibility [] d
+             | _ -> Error "declaration has ambiguous retained ownership" in
+           let admitted =
+             let* visibility = retained_visibility in
+             let* () = retain_configured_document_owner m d visibility in
+             validate_connection m ~run_id:d.run_id ~configuration_id:d.id ~binding:d.binding in
+           match admitted with
            | Error message -> add_issue ~id:d.id d.source_path message
            | Ok _ -> match live_for d.id with
            | [e] ->

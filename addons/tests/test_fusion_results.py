@@ -130,7 +130,9 @@ class FusionResults(unittest.TestCase):
         for value in (detail("running", "pending"), detail("completed", "absent"),
                       detail("failed", "absent")):
             with self.subTest(value=value):
-                result = call("fusion-results", [source(value)])["structuredContent"]
+                reply = call("fusion-results", [source(value)])
+                self.assertIn("no retained Board evidence is available", reply["content"][0]["text"])
+                result = reply["structuredContent"]
                 self.assertEqual(len(result["rows"]), 1)
                 self.assertFalse(result["coverage"][0]["complete"])
         output = call("fusion-results", [source(detail(), complete=False)])["structuredContent"]
@@ -163,7 +165,9 @@ class FusionResults(unittest.TestCase):
         self.assertTrue(call("fusion-results", [missing])["isError"])
 
     def test_empty_and_mixed_sources_preserve_coverage_gaps(self):
-        self.assertFalse(call("fusion-results", [])["structuredContent"]["coverage"][0]["complete"])
+        empty = call("fusion-results", [])
+        self.assertIn("No Fusion snapshot rows are available", empty["content"][0]["text"])
+        self.assertFalse(empty["structuredContent"]["coverage"][0]["complete"])
         mixed = source(detail())
         mixed["observations"].append({"kind": "unrelated"})
         output = call("fusion-results", [mixed])["structuredContent"]

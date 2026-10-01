@@ -55,7 +55,7 @@ let event name scope credential selected id = Yojson.Safe.to_string (`Assoc [
   "selection",selected;"request_id",`String id]) ^ "\n"
 let transact ~path decide =
   try
-    let outcome=Fs_compat.update_private_file_durable_locked_result path (fun bytes ->
+    let outcome=Fs_compat.recover_and_update_private_jsonl_durable_locked_result path (fun bytes ->
       match decode bytes with Error detail -> None,Error detail | Ok pending -> decide pending) in
     match outcome with
     | Fs_compat.Private_file_succeeded result -> result

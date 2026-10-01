@@ -1,13 +1,18 @@
 """The Board's two heading rows drop their tail rather than cut it."""
 import os
+import base64
+import hashlib
+import json
 import sys
 import test_tui_keyboard_input as h
 
 # The sources this scenario stands over. scripts/ci/run-edited-tests.sh runs
 # a suite when a pull request changes a path the suite names, so without this
 # a change to the drawn text below reaches main with no scenario run. Both
-# rows are built in masc_tui_render.ml.
+# rows are built in masc_tui_render_board.ml.
 SOURCE_MODULES = (
+    "bin/masc_tui_render_board.ml",
+    "bin/masc_tui_render_board.mli",
     "bin/masc_tui_render.ml",
 )
 
@@ -87,6 +92,72 @@ def run(executable: str) -> None:
                             interact=interact, http_fixtures=fixtures)
 
 
+def run_primary_list_studio(executable: str, no_color: bool = False) -> None:
+    fixtures = h.keeper_runtime_http_fixtures()
+    title = "Selected post title is readable above compact table columns"
+    next_title = "Second post follows the selected row"
+    fixtures["/api/v1/board?sort_by=hot"] = (200, {"posts": [
+        h.board_selection_post("studio-first", title, "First body"),
+        h.board_selection_post("studio-second", next_title, "Second body")]})
+
+    def interact(process, fd, _slave, output, _base):
+        def key(value, needle):
+            return h.send_and_wait(process, fd, output, value, needle)
+
+        def capture(name, rows, columns, needle):
+            h.resize_and_wait(process, fd, output, rows=rows, columns=columns + 1,
+                              needle=needle, controls=(h.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
+            frame = h.resize_and_wait(process, fd, output, rows=rows, columns=columns,
+                                      needle=needle, controls=(h.FULL_REDRAW,), final_cursor=b"\x1b[?25l")
+            screen = h.screen_text(frame)
+            print("STUDIO_CAPTURE=" + json.dumps({
+                "name": name + ("-no-color" if no_color else ""),
+                "rows": rows, "columns": columns, "provenance": "CI fixture PTY",
+                "frame_b64": base64.b64encode(frame).decode(),
+                "screen": b"\n".join(h.screen_rows(frame).get(row, b"") for row in range(1, rows + 1)).decode(errors="replace")}), flush=True)
+            if name.startswith("keepers-") and not h.keeper_row_selected(b"alpha").search(frame):
+                raise AssertionError("Keeper selected row vanished from the captured viewport")
+            return h.screen_rows(frame)
+
+        h.wait_for_output(process, fd, output, b"Health: ", start=0, timeout=10)
+        key(b":go Keepers\r", b"MASC Keepers")
+        h.select_keeper_row(process, fd, output, b"alpha")
+        for name, rows, columns in (("keepers-wide", 32, 140), ("keepers-narrow", 24, 80), ("keepers-short", 16, 80)):
+            drawn = capture(name, rows, columns, b"  Health  ")
+            heading_row = h.screen_row_of(drawn, b"MASC Keepers")
+            health_row = h.screen_row_of(drawn, b"  Health  ")
+            if heading_row < 0 or health_row <= heading_row:
+                raise AssertionError("Keeper health was not separated from the title")
+            if b"connected" not in drawn[heading_row] or b"Health" in drawn[heading_row]:
+                raise AssertionError("Keeper title lost connection identity or mixes health")
+        # The preceding short-viewport case leaves 80 columns active. Restore
+        # the wide geometry before waiting for the entire long Board title;
+        # narrow previews intentionally fit their text to the current cells.
+        h.resize_and_wait(process, fd, output, rows=32, columns=140,
+                          needle=b"  Health  ", controls=(h.FULL_REDRAW,),
+                          final_cursor=b"\x1b[?25l")
+        key(b":go Board\r", title.encode())
+        capture("board-wide", 32, 140, title.encode())
+        key(b"j", next_title.encode())
+        narrow = capture("board-narrow", 24, 80, next_title.encode())
+        preview_row = h.screen_row_of(narrow, b"Selected post")
+        if preview_row < 0 or next_title.encode() not in narrow[preview_row]:
+            raise AssertionError("Board selected title vanished at 80 columns")
+        key(b":go Dashboard\r", b"MASC Dashboard")
+        os.write(fd, b"q")
+
+    h.run_terminal_scenario(executable,
+        description="Primary list studio" + (" without color" if no_color else ""),
+        interact=interact, http_fixtures=fixtures, workspace="Primary lists fixture",
+        extra_env={"NO_COLOR": "1"} if no_color else None)
+
+
 if __name__ == "__main__":
     run(os.path.abspath(sys.argv[1]))
     print("Board heading tails are whole or absent: PASS")
+    executable = os.path.abspath(sys.argv[1])
+    with open(executable, "rb") as binary:
+        print("STUDIO_BINARY_SHA256=" + hashlib.sha256(binary.read()).hexdigest(), flush=True)
+    run_primary_list_studio(executable)
+    run_primary_list_studio(executable, no_color=True)
+    print("tui primary list studio PTY: PASS", flush=True)

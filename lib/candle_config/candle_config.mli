@@ -15,15 +15,33 @@ type payout_policy = private {
 
 val grade_amount_milli : payout_policy -> Candle_grade.t -> int
 
+type policy = private
+  { payout : payout_policy
+  ; prices : (Keeper_portrait_item.t * int) list
+  ; half_life : Candle_decay.half_life
+  }
+
+type price = Unpriced | Priced of int
+val price : policy -> Keeper_portrait_item.t -> price
+(** The explicit current milli-Candle price. A missing entry is [Unpriced],
+    including when the optional [shop] table is absent. *)
+
 type t =
   | Off  (** There is no [candle.toml]. Nothing is recorded, paid or sold. *)
-  | Enabled of payout_policy
+  | Enabled of policy
   | Disabled of { reason : string }
       (** The file is there and does not read. Nothing is recorded, paid or
           sold, and the reason is for the operator to see. *)
 
 val of_toml_string : string -> t
-(** The content of a [candle.toml]. All payout fields and all five grade amounts must be present. No defaults. *)
+(** [half_life] must be explicitly ["off"] or a positive integer number of
+    hours. Missing, unknown or malformed values disable Candle; no default.
+    All payout fields and all five grade amounts are required. The optional
+    [shop.prices_milli] table accepts only canonical catalog ids and
+    nonnegative integers. Grade amounts accept [0..max_int], independent of
+    the weight range: payout intermediates are exact, while each allocation
+    remains bounded by its configured total. Cumulative wallet overflow is
+    checked at settlement. No default prices or payout values. *)
 
 val load_file : path:string -> t
 (** [Off] when [path] does not exist. Anything else that stops it from being

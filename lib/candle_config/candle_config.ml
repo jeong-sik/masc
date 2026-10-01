@@ -11,9 +11,18 @@ let grade_amount_milli policy = function
  | Small -> policy.small_milli | Medium -> policy.medium_milli
  | Large -> policy.large_milli | Epic -> policy.epic_milli
 
+type policy = {
+  payout : payout_policy;
+  prices : (Keeper_portrait_item.t * int) list;
+  half_life : Candle_decay.half_life;
+}
+type price = Unpriced | Priced of int
+let price policy item =
+  match List.assoc_opt item policy.prices with None -> Unpriced | Some amount -> Priced amount
+
  type t =
   | Off
-  | Enabled of payout_policy
+  | Enabled of policy
   | Disabled of { reason : string }
 
 let table_fields = function
@@ -48,9 +57,7 @@ let integer context fields key low high =
   | Otoml.TomlTableArray _ | Otoml.TomlTable _ | Otoml.TomlInlineTable _ ->
     Error (Printf.sprintf "%s.%s must be an integer in %d..%d" context key low high)
 
-let policy_of_toml toml =
-  let* root = exact_table "candle.toml" ["payout"] toml in
-  let* payout = required "candle.toml" root "payout" in
+let payout_of_toml payout =
   let* fields = exact_table "payout"
       ["grades_milli"; "weight_max"; "deduction_rate"; "deduction_floor"] payout in
   let* weight_max = integer "payout" fields "weight_max" 1 max_int in
@@ -60,7 +67,7 @@ let policy_of_toml toml =
   let* grades = exact_table "payout.grades_milli"
       (List.map Candle_grade.to_string Candle_grade.all) grades in
   let amount grade = integer "payout.grades_milli" grades (Candle_grade.to_string grade)
-      0 (min (max_int / weight_max) (max_int / 1000)) in
+      0 max_int in
   let* trivial_milli = amount Candle_grade.Trivial in
   let* small_milli = amount Candle_grade.Small in
   let* medium_milli = amount Candle_grade.Medium in
@@ -68,6 +75,39 @@ let policy_of_toml toml =
   let* epic_milli = amount Candle_grade.Epic in
   Ok {trivial_milli; small_milli; medium_milli; large_milli; epic_milli;
       weight_max; deduction_rate; deduction_floor}
+
+let prices_of_toml shop =
+  let* shop = exact_table "shop" ["prices_milli"] shop in
+  let* fields = match List.assoc_opt "prices_milli" shop with
+    | None -> Ok []
+    | Some prices -> exact_table "shop.prices_milli"
+        (List.map Keeper_portrait_item.id Keeper_portrait_item.all) prices in
+  List.fold_right (fun item result ->
+    let* prices = result in
+    let key = Keeper_portrait_item.id item in
+    match List.assoc_opt key fields with
+    | None -> Ok prices
+    | Some _ ->
+      let* amount = integer "shop.prices_milli" fields key 0 max_int in
+      Ok ((item, amount) :: prices)) Keeper_portrait_item.all (Ok [])
+
+let policy_of_toml toml =
+  let* root = exact_table "candle.toml" ["payout"; "shop"; "half_life"] toml in
+  let* raw_half_life = required "candle.toml" root "half_life" in
+  let* half_life = match raw_half_life with
+    | Otoml.TomlString "off" -> Ok Candle_decay.Off
+    | Otoml.TomlInteger hours -> Candle_decay.half_life_of_hours hours
+    | Otoml.TomlString _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
+    | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
+    | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTableArray _
+    | Otoml.TomlTable _ | Otoml.TomlInlineTable _ ->
+      Error "candle.toml.half_life must be off or positive integer hours" in
+  let* payout = required "candle.toml" root "payout" in
+  let* payout = payout_of_toml payout in
+  let* prices = match List.assoc_opt "shop" root with
+    | None -> Ok []
+    | Some shop -> prices_of_toml shop in
+  Ok {payout;prices;half_life}
 
 let of_toml_string text =
   match Otoml.Parser.from_string_result text with

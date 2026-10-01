@@ -49,15 +49,17 @@ let snapshot ?(request_id = "req-1") goal_id : E.t =
 ;;
 
 let goal_ids events =
-  List.map
+  List.filter_map
     (fun (event : E.t) ->
        match event.body with
        | E.Snapshot { goal_id; _ }
        | E.Payout_owed { goal_id; _ }
        | E.Candidates { goal_id; _ }
        | E.Unattributed { goal_id; _ }
-       | E.Payout_failed { goal_id; _ } -> goal_id
-       | E.Paid p -> p.identity.goal_id)
+       | E.Payout_failed { goal_id; _ } -> Some goal_id
+       | E.Paid p -> Some p.identity.goal_id
+       | E.Half_life_set _ -> None
+       | E.Equipped _ | E.Purchased _ -> Alcotest.fail "a purchase has no Goal identity")
     events
 ;;
 
@@ -110,6 +112,179 @@ let append_raw base_path text =
   Fs_compat.mkdir_p_memoized (Filename.dirname path);
   Out_channel.with_open_gen [ Open_append; Open_creat; Open_binary ] 0o600 path (fun oc ->
     Out_channel.output_string oc text)
+;;
+
+(* Persisted receipt fixtures, intentionally independent of [make]. The first
+   records nearest rounding; the second gives a tied remainder to the last
+   name. They simulate older arithmetic choices in the same row format. The
+   current producer floors deductions and gives equal remainders to the first
+   name, but that must not rewrite or make these stored facts unreadable. *)
+let stored_rounded_payment =
+  {|{"kind":"paid","at":"2026-09-29T06:00:00Z","goal_id":"past-rounded","request_id":"request-rounded","verification_run_id":"verified-rounded","grade":"small","total_milli":2001,"grade_trace":{"run_id":"grade-rounded","slot_id":"slot-grade"},"relations":[{"task_id":"task-a","relation":"related","trace":{"run_id":"relation-a","slot_id":"slot-relation"}}],"weights_trace":{"run_id":"weights-rounded","slot_id":"slot-weights"},"weight_max":10,"deduction_rate":10,"deduction_floor":200,"overdue_hours":30,"coefficient":700,"allocations":[{"keeper":"keeper-a","weight":1,"share_milli":2001,"amount_milli":1401}]}|}
+;;
+
+let stored_tied_payment =
+  {|{"kind":"paid","at":"2026-09-29T06:00:00Z","goal_id":"past-tied","request_id":"request-tied","verification_run_id":"verified-tied","grade":"trivial","total_milli":1000,"grade_trace":{"run_id":"grade-tied","slot_id":"slot-grade"},"relations":[{"task_id":"task-a","relation":"related","trace":{"run_id":"relation-a","slot_id":"slot-relation"}},{"task_id":"task-b","relation":"related","trace":{"run_id":"relation-b","slot_id":"slot-relation"}},{"task_id":"task-c","relation":"related","trace":{"run_id":"relation-c","slot_id":"slot-relation"}}],"weights_trace":{"run_id":"weights-tied","slot_id":"slot-weights"},"weight_max":10,"deduction_rate":10,"deduction_floor":200,"overdue_hours":0,"coefficient":1000,"allocations":[{"keeper":"keeper-a","weight":1,"share_milli":333,"amount_milli":333},{"keeper":"keeper-b","weight":1,"share_milli":333,"amount_milli":333},{"keeper":"keeper-c","weight":1,"share_milli":334,"amount_milli":334}]}|}
+;;
+
+let payment_of_event (row : E.t) =
+  match row.body with
+  | E.Paid payment -> payment
+  | E.Snapshot _ | E.Payout_owed _ | E.Candidates _ | E.Unattributed _
+  | E.Payout_failed _ | E.Half_life_set _ | E.Purchased _ | E.Equipped _ ->
+    Alcotest.fail "expected a Paid receipt"
+;;
+
+let balance_of_view view =
+  match Candle_balance.of_events ~at:(at "2026-09-30T00:00:00Z") (Candle_ledger.events view) with
+  | Ok balance -> balance
+  | Error error -> Alcotest.fail (Candle_balance.error_to_string error)
+;;
+
+(* A receipt remains tied to the frozen contributing tasks, even when its
+   historical arithmetic differs from the current append formula. *)
+let payment_prerequisites (row : E.t) =
+  let payment = payment_of_event row in
+  let { Candle_appraisal.goal_id; request_id; verification_run_id } = payment.identity in
+  let task_keepers = List.map2
+    (fun (relation : Candle_appraisal.task_relation) (allocation : Candle_payment.allocation) ->
+      relation.task_id, allocation.keeper) payment.relations payment.allocations in
+  let ids = List.map fst task_keepers in
+  [ { E.at = row.at; body = E.Snapshot {
+        goal_id; request_id; verification_run_id; criterion_revision = "receipt-fixture";
+        passed_at = row.at; goal_created_at = at "2026-09-28T00:00:00Z";
+        due_date = None; title = "Recorded payout"; metric = None; target_value = None;
+        linked_task_ids = ids } }
+  ; { E.at = row.at; body = E.Payout_owed {
+        goal_id; request_id; verification_run_id; passed_at = row.at; confirmed_at = row.at } }
+  ; { E.at = row.at; body = E.Candidates {
+        goal_id; request_id; verification_run_id;
+        tasks = List.map (fun (id, keeper) -> id, E.Found {
+          title = id; assignee = Some keeper; status = E.Done {completed_at = row.at} }) task_keepers;
+        candidate_task_ids = ids; candidate_keepers = List.map snd task_keepers;
+        candidate_task_keepers = List.map (fun (id, keeper) -> id, Some keeper) task_keepers } }
+  ]
+;;
+
+let event_lines rows =
+  String.concat "" (List.map (fun row -> ok_or_fail (E.to_line row) ^ "\n") rows)
+;;
+
+let test_stored_payments_replay_but_new_appends_require_current_arithmetic () =
+  with_base_path @@ fun base_path ->
+  let receipts = List.map (fun line -> ok_or_fail (E.of_line line))
+      [stored_rounded_payment; stored_tied_payment] in
+  let policy : E.t = {at = at "2026-09-29T06:00:00Z"; body = E.Half_life_set Candle_decay.Off} in
+  let bytes = event_lines [policy] ^ String.concat "" (List.map2
+    (fun row line -> event_lines (payment_prerequisites row) ^ line ^ "\n")
+    receipts [stored_rounded_payment; stored_tied_payment]) in
+  append_raw base_path bytes;
+  let view = read_ok base_path in
+  let stored = Candle_ledger.events view in
+  let balance = balance_of_view view in
+  Alcotest.(check int) "stored rounded amount and first tie share are credited"
+    1734 (Candle_balance.balance balance ~keeper:"keeper-a");
+  Alcotest.(check int) "middle tie share is retained"
+    333 (Candle_balance.balance balance ~keeper:"keeper-b");
+  Alcotest.(check int) "stored remainder recipient is retained"
+    334 (Candle_balance.balance balance ~keeper:"keeper-c");
+  Alcotest.(check string) "issuance uses recorded credits, not nominal totals"
+    "2401" (Candle_balance.supply balance).issued_milli;
+  (match Candle_ledger.recover_at_start ~base_path with
+   | Ok recovered ->
+     Alcotest.(check bool) "startup recovery retains both receipts" true
+       (Candle_ledger.events recovered = stored)
+   | Error error -> Alcotest.fail (Candle_ledger.read_error_to_string error));
+  List.iter
+    (fun row ->
+      let line = ok_or_fail (E.to_line row) in
+      Alcotest.(check bool) "receipt serialization retains the stored fields" true
+        (ok_or_fail (E.of_line line) = row);
+      (match Candle_ledger.update ~base_path (fun _ -> Ok ([row], ())) with
+       | Error (Candle_ledger.Event_unwritable detail) ->
+         Alcotest.(check string) "new issuance still checks arithmetic"
+           "new payment arithmetic does not match its evidence" detail
+       | Error other -> Alcotest.fail (Candle_ledger.update_error_to_string Fun.id other)
+       | Ok () -> Alcotest.fail "old arithmetic was accepted for a new payment");
+      Alcotest.(check string) "read and refused append never rewrite history"
+        bytes (file_text base_path))
+    receipts;
+  let rounded = payment_of_event (List.hd receipts) in
+  let current =
+    Candle_payment.make
+      ~identity:{ rounded.identity with goal_id = "new-current" }
+      ~grade:rounded.grade ~total_milli:rounded.total_milli
+      ~grade_trace:rounded.grade_trace ~relations:rounded.relations
+      ~weights_trace:rounded.weights_trace ~weight_max:rounded.weight_max
+      ~deduction_rate:rounded.deduction_rate ~deduction_floor:rounded.deduction_floor
+      ~overdue_hours:rounded.overdue_hours
+      ~weights:(List.map (fun (a : Candle_payment.allocation) -> a.keeper, a.weight)
+        rounded.allocations)
+    |> ok_or_fail
+  in
+  Alcotest.(check (list int)) "new payment still uses today's floor rule"
+    [1400] (List.map (fun (a : Candle_payment.allocation) -> a.amount_milli) current.allocations);
+  let current_row : E.t = { at = at "2026-09-30T00:00:00Z"; body = E.Paid current } in
+  update_ok base_path (fun _ -> Ok (payment_prerequisites current_row @ [current_row], ()));
+  Alcotest.(check bool) "valid new payment appends after unchanged history" true
+    (String.starts_with ~prefix:bytes (file_text base_path));
+  let after = balance_of_view (read_ok base_path) in
+  Alcotest.(check int) "old recorded credit and new calculated credit coexist"
+    3134 (Candle_balance.balance after ~keeper:"keeper-a")
+;;
+
+let test_malformed_paid_receipts_still_fail_the_whole_ledger_read () =
+  let rounded = Yojson.Safe.from_string stored_rounded_payment in
+  let tied = Yojson.Safe.from_string stored_tied_payment in
+  let replace key value json =
+    let fields = Yojson.Safe.Util.to_assoc json in
+    `Assoc (List.map (fun (name, old) -> name, if name = key then value else old) fields)
+  in
+  let allocation index key value json =
+    let rows = Yojson.Safe.Util.(json |> member "allocations" |> to_list) in
+    replace "allocations"
+      (`List (List.mapi (fun i row -> if i = index then replace key value row else row) rows)) json
+  in
+  let cases =
+    [ "negative total", replace "total_milli" (`Int (-1)) rounded
+    ; "negative rate", replace "deduction_rate" (`Int (-1)) rounded
+    ; "rate above thousandths", replace "deduction_rate" (`Int 1001) rounded
+    ; "negative floor", replace "deduction_floor" (`Int (-1)) rounded
+    ; "floor above thousandths", replace "deduction_floor" (`Int 1001) rounded
+    ; "negative hours", replace "overdue_hours" (`Int (-1)) rounded
+    ; "coefficient below floor", replace "coefficient" (`Int 199) rounded
+    ; "coefficient above thousandths", replace "coefficient" (`Int 1001) rounded
+    ; "empty allocations", replace "allocations" (`List []) rounded
+    ; "duplicate recipient", allocation 1 "keeper" (`String "keeper-a") tied
+    ; "blank recipient", allocation 0 "keeper" (`String " ") rounded
+    ; "invalid weight bound", replace "weight_max" (`Int 0) rounded
+    ; "negative weight", allocation 0 "weight" (`Int (-1)) rounded
+    ; "weight above its bound", allocation 0 "weight" (`Int 11) rounded
+    ; "no positive weight", allocation 0 "weight" (`Int 0) rounded
+    ; "zero weight has a share", allocation 0 "weight" (`Int 0) tied
+    ; "negative share", allocation 0 "share_milli" (`Int (-1)) rounded
+    ; "negative credit", allocation 0 "amount_milli" (`Int (-1)) rounded
+    ; "credit exceeds share", allocation 0 "amount_milli" (`Int 2002) rounded
+    ; "shares exceed total", allocation 0 "share_milli" (`Int 2002) rounded
+    ; "shares below total", allocation 0 "share_milli" (`Int 2000) rounded
+    ; "overflowing share sum",
+      (tied |> replace "total_milli" (`Int max_int)
+       |> allocation 0 "share_milli" (`Int max_int)
+       |> allocation 1 "share_milli" (`Int max_int))
+    ; "wrong JSON amount kind", allocation 0 "amount_milli" (`String "1401") rounded
+    ]
+  in
+  List.iter (fun (label, damaged) ->
+    with_base_path @@ fun base_path ->
+    let before = ok_or_fail (E.to_line (snapshot "before-damage")) ^ "\n"
+      ^ Yojson.Safe.to_string damaged ^ "\n" in
+    append_raw base_path before;
+    (match Candle_ledger.read ~base_path with
+     | Error (Candle_ledger.Row_rejected {line_number = 2; _}) -> ()
+     | Error error -> Alcotest.failf "%s: %s" label (Candle_ledger.read_error_to_string error)
+     | Ok _ -> Alcotest.failf "%s was accepted or skipped" label);
+    Alcotest.(check string) (label ^ " does not repair or rewrite the file")
+      before (file_text base_path)) cases
 ;;
 
 let test_a_missing_file_is_an_empty_ledger () =
@@ -352,6 +527,10 @@ let () =
     [ ( "read"
       , [ Alcotest.test_case "a missing file is an empty ledger" `Quick
             test_a_missing_file_is_an_empty_ledger
+        ; Alcotest.test_case "stored credits survive changed rounding; new appends validate" `Quick
+            test_stored_payments_replay_but_new_appends_require_current_arithmetic
+        ; Alcotest.test_case "malformed Paid receipts fail the whole ledger read" `Quick
+            test_malformed_paid_receipts_still_fail_the_whole_ledger_read
         ; Alcotest.test_case "a row that does not read fails the read" `Quick
             test_a_row_that_does_not_read_fails_the_read
         ; Alcotest.test_case "only recovery cuts a torn tail" `Quick

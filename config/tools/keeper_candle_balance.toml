@@ -1,0 +1,4 @@
+name = "keeper_candle_balance"
+description = "Synchronize the durable decay-policy observation and return your current Candle balance in milli-Candle (1000 milli-Candle = 1 Candle) and the portrait accessories you own. Your Keeper identity comes from this turn."
+additional_properties = false
+defer_loading = false

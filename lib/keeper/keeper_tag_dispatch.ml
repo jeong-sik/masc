@@ -129,13 +129,23 @@ let dispatch
         ~name
         ~args
     | Mod_misc ->
-      Tool_misc.dispatch
-        { Tool_misc.config
-        ; agent_name
-        ; help_schemas = Keeper_tool_descriptor.model_visible_schemas ()
-        }
-        ~name
-        ~args
+      let candle operation = Some (Keeper_candle_tools.handle ~operation
+        ~base_path:config.base_path ~keeper_name ~tool_name:name ~start_time ~args) in
+      (match Tool_schemas_misc.misc_operation_of_tool_name name with
+       | Some Tool_schemas_misc.Misc_candle_balance -> candle Keeper_candle_tools.Balance
+       | Some Tool_schemas_misc.Misc_candle_catalog -> candle Keeper_candle_tools.Catalog
+       | Some Tool_schemas_misc.Misc_candle_purchase -> candle Keeper_candle_tools.Purchase
+       | Some Tool_schemas_misc.Misc_candle_equip -> candle Keeper_candle_tools.Equip
+       | Some _ | None ->
+         let run () = Tool_misc.dispatch
+           { Tool_misc.config
+           ; agent_name
+           ; help_schemas = Keeper_tool_descriptor.model_visible_schemas ()
+           }
+           ~name ~args in
+         (match Keeper_dos_controller.execute ~config ~who:agent_name ~name ~args ~run with
+          | Ok result -> result
+          | Error refusal -> Some (Keeper_dos_controller.refusal_result ~tool_name:name refusal)))
     | Mod_library ->
       Tool_library.dispatch
         { Tool_library.base_path = config.base_path; agent_name }

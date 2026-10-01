@@ -179,10 +179,11 @@ val assignment_walk_rest : now:float -> string -> walk_rest
 (** The next dispatch after a failed turn (RFC-provider-path-rest §3.1),
     shared by the heartbeat cycle and the chat lane's deferred retry.
     A deferred suffix dispatches now when its walk head serves, else waits as {!deferred_lane_rest} says.
-    Without a suffix a rate limit or quota waits for the later of the failed
-    path's rest and {!assignment_walk_rest}; [waiting_on] then names the
-    assignment or the resting head. Every other failure without a suffix is
-    [None]: no provider wait. *)
+    Without a suffix a multi-candidate assignment uses its fresh walk's rest:
+    a serving head returns [None] (ordinary cadence), while a resting head
+    waits for that walk's release. A single or unresolved assignment also
+    retains the failed response's own rest. Every other failure without a
+    suffix is [None]: no provider wait. *)
 type wait_basis = Failure_response | Observed_path_rest
 (** Whether a wait has only the failed response as evidence, or a path rest
     observed while choosing the next dispatch. Observed evidence can be
@@ -238,13 +239,17 @@ type runtime_attempt =
   ; lane_attempt_index : int
   ; checkpoint_owner : Runtime_execution.checkpoint_owner
   ; tool_result_inline_ceiling_bytes : int
+  ; tool_surface_enabled : bool
   ; usage_report : Runtime_execution.usage_report
   }
 (** Exact materialized candidate selected immediately before dispatch.
     [routing_run_id] identifies one lane walk, including reentry into the same
     Keeper turn. Together with [lane_attempt_index] it joins raw response usage
     to routed/completed/failed manifest rows. Lane
-    assignment ids and later runtime-table lookups are not attempt authority. *)
+    assignment ids and later runtime-table lookups are not attempt authority.
+    [tool_surface_enabled] reflects the selected runtime's tool capability,
+    including Claude Code's model-level tools suppression. Hooks intersect
+    this with their current tool names before advertising retrieval. *)
 
 type attempt_input =
   { attempt_goal_blocks : Agent_core.Types.content_block list option
@@ -488,7 +493,7 @@ module For_testing : sig
     keeper_name:string ->
     assignment_id:string ->
     first_candidate_id:string ->
-    Runtime.t Runtime_agent.reroute_decision ->
+    Runtime_instance.t Runtime_agent.reroute_decision ->
     unit
   (** On [Reroute], logs a WARN naming the lane head, the lane candidate the
       image turn starts from, and [assignment_id]. Logs nothing otherwise (the
@@ -498,36 +503,36 @@ module For_testing : sig
     now:float ->
     walk:walk_start ->
     deferred_runtime_lane:deferred_runtime_lane option ->
-    first_candidate:Runtime.t ->
-    remaining_runtimes:Runtime.t list ->
-    Runtime.t list
+    first_candidate:Runtime_instance.t ->
+    remaining_runtimes:Runtime_instance.t list ->
+    Runtime_instance.t list
 
   val attempt_runtimes_for_turn :
-    media_walk:Runtime.t list ->
-    lane:Runtime.t list ->
-    Runtime.t list
+    media_walk:Runtime_instance.t list ->
+    lane:Runtime_instance.t list ->
+    Runtime_instance.t list
 
   val lane_modality_reroute_decision :
     checkpoint_messages:Agent_core.Types.message list ->
     initial_messages:Agent_core.Types.message list ->
     goal_blocks:Agent_core.Types.content_block list ->
-    first_candidate:Runtime.t ->
-    candidates:Runtime.t list ->
-    Runtime.t Runtime_agent.reroute_decision
+    first_candidate:Runtime_instance.t ->
+    candidates:Runtime_instance.t list ->
+    Runtime_instance.t Runtime_agent.reroute_decision
 
-  val dedupe_runtimes_preserve_order : Runtime.t list -> Runtime.t list
+  val dedupe_runtimes_preserve_order : Runtime_instance.t list -> Runtime_instance.t list
   val resolve_runtime_candidates :
     string list ->
-    (Runtime.t list, Agent_core.Error.t) result
+    (Runtime_instance.t list, Agent_core.Error.t) result
 
   val resolve_runtime_candidate_for_attempt :
     ?on_missing:(unit -> unit) ->
     string ->
-    (Runtime.t, Agent_core.Error.t) result
+    (Runtime_instance.t, Agent_core.Error.t) result
 
   val selected_runtime_result :
     ?official_client_settlement:Keeper_official_client_session_store.t ->
-    Runtime.t ->
+    Runtime_instance.t ->
     lane_attempt_index:int ->
     (Runtime_agent.run_result, Agent_core.Error.t) result ->
     (named_run_result, Agent_core.Error.t) result
@@ -550,7 +555,7 @@ module For_testing : sig
     initial_messages:Agent_core.Types.message list ->
     agent_core_checkpoint:Agent_core.Checkpoint.t option ->
     runtime_id:string ->
-    Runtime.t ->
+    Runtime_instance.t ->
     attempt_input
   (** The per-attempt RFC-0265 decision for one resolved candidate: unchanged
       when the runtime admits the turn's modalities, otherwise image readings/references

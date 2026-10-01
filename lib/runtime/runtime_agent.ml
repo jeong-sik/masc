@@ -722,9 +722,9 @@ let input_capabilities_for_config (config : config) =
    candidate scoring). Same composition as [input_capabilities_for_config]:
    provider caps overlaid with the model's declared media capabilities, then
    constrained by the concrete execution transport. *)
-let input_capabilities_of_runtime (rt : Runtime.t) =
+let input_capabilities_of_runtime (rt : Runtime_instance.t) =
   let provider_caps =
-    match rt.Runtime.execution with
+    match rt.Runtime_instance.execution with
     | Runtime_execution.Agent_core provider_config ->
       provider_caps_of_config provider_config
     | Runtime_execution.Codex_app_server _
@@ -735,14 +735,14 @@ let input_capabilities_of_runtime (rt : Runtime.t) =
   in
   apply_runtime_model_input_capabilities
     provider_caps
-    (Option.value rt.Runtime.model.capabilities
+    (Option.value rt.Runtime_instance.model.capabilities
        ~default:Runtime_schema.model_capabilities_default)
   |> apply_execution_input_capabilities rt.execution
 
 (* Tool-result media admission uses the materialized dispatch snapshot, so a
    concurrent configuration replacement cannot change the active client's
    capabilities between selection and host construction. *)
-let runtime_accepts_image_input ~(runtime : Runtime.t) =
+let runtime_accepts_image_input ~(runtime : Runtime_instance.t) =
   (input_capabilities_of_runtime runtime).Llm_provider.Capabilities.supports_image_input
 ;;
 
@@ -753,18 +753,18 @@ let runtime_accepts_image_input ~(runtime : Runtime.t) =
    A keeper turn never dispatches to them: its image reroute stays inside its
    own lane. No capability or execution filter here: the vision tool admits
    by modality and execution itself. *)
-let media_candidates_of ~(runtimes : Runtime.t list)
-    ~(media_failover : string list) : Runtime.t list =
+let media_candidates_of ~(runtimes : Runtime_instance.t list)
+    ~(media_failover : string list) : Runtime_instance.t list =
   let by_id id =
     List.find_opt
-      (fun (runtime : Runtime.t) -> String.equal runtime.Runtime.id id)
+      (fun (runtime : Runtime_instance.t) -> String.equal runtime.Runtime_instance.id id)
       runtimes
   in
   let rec dedupe seen = function
     | [] -> []
-    | (runtime : Runtime.t) :: rest ->
-      if List.mem runtime.Runtime.id seen then dedupe seen rest
-      else runtime :: dedupe (runtime.Runtime.id :: seen) rest
+    | (runtime : Runtime_instance.t) :: rest ->
+      if List.mem runtime.Runtime_instance.id seen then dedupe seen rest
+      else runtime :: dedupe (runtime.Runtime_instance.id :: seen) rest
   in
   dedupe [] (List.filter_map by_id media_failover)
 
@@ -777,10 +777,10 @@ let media_candidates () =
    that walk; the driver walks the rest of the lane after it, in declared
    order, as the degrade tail. A run that requires no media has no media walk
    at all and keeps its lane order. *)
-let media_walk ~(candidates : Runtime.t list)
+let media_walk ~(candidates : Runtime_instance.t list)
     ?(checkpoint_messages = [])
     ?(initial_messages = [])
-    (blocks : Agent_core.Types.content_block list) : Runtime.t list =
+    (blocks : Agent_core.Types.content_block list) : Runtime_instance.t list =
   match
     required_modalities_for_run_with_checkpoint ~checkpoint_messages
       ~initial_messages ~goal_blocks:blocks
@@ -788,7 +788,7 @@ let media_walk ~(candidates : Runtime.t list)
   | [] -> []
   | required_modalities ->
     List.filter
-      (fun (runtime : Runtime.t) ->
+      (fun (runtime : Runtime_instance.t) ->
         caps_admit_required_modalities
           (input_capabilities_of_runtime runtime)
           required_modalities)
@@ -828,7 +828,7 @@ let validate_content_blocks_for_config
    [input_capabilities_for_config]. *)
 (* ['target] is what a reroute names. The capability-level decision below names a
    runtime id ([string]); the keeper-dispatch decision names an already-resolved
-   [Runtime.t]. Keeping them one type but two instantiations means the dispatch
+   [Runtime_instance.t]. Keeping them one type but two instantiations means the dispatch
    path cannot be handed a decision it still has to look up: the runtime the
    decision selected is the runtime the caller dispatches to. The type is
    [private] in the .mli, so [Reroute] exists only where this module builds it —
@@ -867,12 +867,12 @@ let decide_modality_reroute
    into some other runtime. The previous shape returned the winning id as a bare
    string and left [Runtime.get_runtime_by_id] to the driver, whose [None] arm
    silently kept the runtime that could not accept the turn. *)
-let decide_modality_reroute_for_runtime_candidates ~(assigned : Runtime.t)
-    ~(candidates : Runtime.t list)
+let decide_modality_reroute_for_runtime_candidates ~(assigned : Runtime_instance.t)
+    ~(candidates : Runtime_instance.t list)
     ?(checkpoint_messages = [])
     ?(initial_messages = [])
     (blocks : Agent_core.Types.content_block list) :
-    Runtime.t reroute_decision =
+    Runtime_instance.t reroute_decision =
   let required_modalities =
     required_modalities_for_run_with_checkpoint ~checkpoint_messages
       ~initial_messages ~goal_blocks:blocks
@@ -885,13 +885,13 @@ let decide_modality_reroute_for_runtime_candidates ~(assigned : Runtime.t)
   else
     let eligible =
       List.filter
-        (fun (runtime : Runtime.t) ->
-          not (String.equal runtime.Runtime.id assigned.Runtime.id))
+        (fun (runtime : Runtime_instance.t) ->
+          not (String.equal runtime.Runtime_instance.id assigned.Runtime_instance.id))
         candidates
     in
     match
       List.find_opt
-        (fun (runtime : Runtime.t) ->
+        (fun (runtime : Runtime_instance.t) ->
           caps_admit_required_modalities
             (input_capabilities_of_runtime runtime)
             required_modalities)

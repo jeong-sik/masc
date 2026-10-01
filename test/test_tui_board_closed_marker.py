@@ -7,9 +7,11 @@ import test_tui_keyboard_input as h
 # The sources this scenario stands over. scripts/ci/run-edited-tests.sh runs
 # a suite when a pull request changes a path the suite names, so without this
 # a change to the closed-state drawing below reaches main with no scenario
-# run. Both the list row and the detail lines are built in masc_tui_render.ml;
+# run. Both the list row and the detail lines are built in masc_tui_render_board.ml;
 # the wire field is decoded in masc_tui_loader.ml.
 SOURCE_MODULES = (
+    "bin/masc_tui_render_board.ml",
+    "bin/masc_tui_render_board.mli",
     "bin/masc_tui_render.ml",
     "bin/masc_tui_loader.ml",
     "bin/masc_tui_types.ml",
@@ -52,13 +54,29 @@ def run(executable: str) -> None:
                           timeout=10.0)
         h.read_available(fd, output)
         rows = h.screen_rows(bytes(output))
-        closed_row = h.screen_row_of(rows, b"Wrapped up thread")
+        # The Selected post heading repeats the title before the table. Its
+        # TITLE header and footer delimit the list even when narrow columns
+        # omit IDs, so locate each post inside that independent row range.
+        table_header = h.screen_row_of(rows, b"TITLE")
+        footer = h.screen_row_of(rows, b"q:quit")
+        if not 0 < table_header < footer:
+            raise AssertionError(f"Board list row boundaries not found: {rows!r}")
+
+        def list_row(post):
+            title = post["title"].encode()
+            matches = [row for row, text in rows.items()
+                       if table_header < row < footer and title in text]
+            if len(matches) != 1:
+                raise AssertionError(f"expected one Board list row for {post['id']!r}: {rows!r}")
+            return matches[0]
+
+        closed_row = list_row(closed)
         if closed_row < 0:
             raise AssertionError("closed post title not found in the list")
         if LOCK not in rows[closed_row]:
             raise AssertionError(
                 f"closed post row carries no lock marker: {rows[closed_row]!r}")
-        open_row = h.screen_row_of(rows, b"Still going")
+        open_row = list_row(open_post)
         if open_row < 0:
             raise AssertionError("open post title not found in the list")
         if LOCK in rows[open_row]:

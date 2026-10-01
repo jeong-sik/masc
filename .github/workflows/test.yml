@@ -1,148 +1,55 @@
 name: Test
 
-# The manual CI lane (ci.yml) stops at `dune build @check`: it type-checks
-# test/ but links and runs nothing. That is an explicit owner decision
-# (2026-09-02, see the ci.yml header) — linking the ~296 test executables is
-# this repo's slow step.
-#
-# The PR gate (pr-check.yml) stopped there too until 2026-09-06. Since #33507
-# its `@check` job ends by running scripts/ci/run-edited-tests.sh over the
-# suites the pull request selects, inside a 1080-second budget. The step log
-# names them in four groups, in the script's own words:
-#
-#   - test sources this pull request edits
-#   - suites named after the sources this pull request edits
-#   - guards that name the sources this pull request edits
-#   - suites whose code calls a module this pull request edits
-#
-# The fourth is call-graph reachability rather than naming, and it is the
-# widest by far: on #37371 the four groups were 1, 1, 4 and 18 suites, and
-# the step reported "ran 22, skipped 0". Sizing this gate from the first two
-# groups alone understates it several times over.
-#
-# A suite the budget does not reach fails the step by name. So a red `@check`
-# there can be a failing assertion rather than a compile error, and a green
-# one is a real run of those suites — read the step log, not the job
-# conclusion.
-#
-# What that still leaves: a behavioural regression in a suite the pull
-# request neither edits, nor names, nor calls. Nothing in the gate runs
-# those. It happened with the test_keeper_owner actor-38 incident; nothing
-# ran the suite before the breakage landed.
-#
-# This lane covers that rest on a schedule. It runs the full behavioral suite
-# nightly (02:43 KST, off-peak) and on manual dispatch, so a regression the
-# gate does not select surfaces within ~24h instead of never. RFC-0428 moved
-# the selected part into the gate; what is left here is the unselected part
-# and the link cost that keeps it out of every push.
-#
-# A red scheduled run used to reach nobody: GitHub emails only the last
-# editor of the cron line, and a dispatched run notifies only the
-# dispatcher. The last step of this job now files the failure as an issue
-# labelled `nightly-test-lane`, reusing the open one so a run of red
-# nights is one thread. A dispatch files nothing — its dispatcher is
-# already told.
-#
-# See: https://github.com/jeong-sik/masc/issues/33008
-#
-# A dispatch can also name suites. With the `suite` input set, the Test
-# step builds only those executables and runs each straight from
-# _build/default/test under a per-suite timeout, outside dune's (test)
-# action, with ALCOTEST_VERBOSE=1: every case prints its [OK] line as it
-# finishes, so a hang names the case after the last [OK] instead of a
-# suite after 90 minutes. Two suites hung past the full lane's deadline
-# on 2026-09-05 (#33200); this is how to measure them in ten minutes
-# rather than ninety, and with `eio_backend=posix` how to tell an Eio
-# backend difference from a scheduling one.
+# Explicit full or targeted behavior checks on the selected ref.
 
 on:
   workflow_call:
     inputs:
+      candidate_sha:
+        type: string
+        default: ''
       candidate_verification:
         type: boolean
         default: false
       suite:
         type: string
         default: ""
+      minimal:
+        type: boolean
+        default: false
       eio_backend:
-        type: string
-        default: ""
-  workflow_dispatch:
-    inputs:
-      suite:
-        description: >-
-          Comma-separated test suites to build and run on their own instead of
-          the full runner. Empty runs the full suite. A bare name is resolved
-          under test/, for example test_heartbeat_integration. A suite outside
-          test/ is named by its path from the repository root, for example
-          packages/agent_core/test/test_capabilities -- the 43 suites under
-          packages/ and tools/ have no other spelling here, and a bare name
-          is reported as "no test/<name>.ml and no <name>.ml" while the names
-          that did resolve still run. A name with a
-          test/<name>.py script, or one a test/ dune file declares as
-          (alias runtest-<name>), runs that alias instead
-          (test_tui_keyboard_input).
-        type: string
-        default: ""
-      eio_backend:
-        description: >-
-          EIO_BACKEND for a targeted run, for example posix. Empty leaves
-          the Eio default, io_uring on Linux where available. Ignored
-          when suite is empty.
         type: string
         default: ""
 
 permissions:
   contents: read
-  # The scheduled failure below files an issue. A dispatch never reaches
-  # that step, so this scope is unused on every other path.
-  issues: write
 
-# Two kinds of lane plus one per targeted run. A full dispatch shares a lane
-# with the other dispatches of the same ref, where a new dispatch cancels the
-# run in flight instead of stacking a second job for the same commit; the
-# scheduled run has a lane of its own that no dispatch can reach. The dispatch
-# lane was one for the whole repo. Parallel sessions each verify their own
-# branch by dispatching this workflow, so each dispatch cancelled another
-# branch's run: on 2026-09-29, 5 of the last 14 runs ended cancelled. A lane per ref
-# keeps the cancel where it is wanted (a newer dispatch of the same branch
-# supersedes an older one) and spends up to one full run per branch in
-# parallel, which the one-lane rule existed to avoid when a run took 180
-# minutes; a dispatched run now takes 13 to 19 minutes (the 15 most recent completed runs). One group for the whole repo did reach
-# it: on 2026-09-04 the scheduled run (17:43:56Z, 7aed1b696f) was
-# cancelled within two seconds by a branch dispatch created the same
-# second, and of this lane's first 13 runs none completed successfully.
-# A dispatch that names suites runs beside the full lane, not instead of
-# it, so it gets a group of its own keyed by run id: the first targeted
-# dispatch (33951571973, 2026-09-05 07:05:06Z) shared the dispatch lane
-# and cancelled a full run 82 minutes in (33947949528). On the schedule
-# there are no inputs, and `inputs.suite` is null; GitHub compares a null
-# with '' by coercing both to 0, so the test below is false and the
-# scheduled run keeps its lane.
 concurrency:
-  group: ${{ inputs.candidate_verification && format('candidate-test-{0}', github.run_id) || inputs.suite != '' && format('test-targeted-{0}', github.run_id) || github.event_name == 'workflow_dispatch' && format('test-dispatch-{0}', github.ref) || format('test-{0}', github.event_name) }}
-  cancel-in-progress: true
+  group: test-${{ github.run_id }}
+  cancel-in-progress: false
 
 jobs:
   test:
     name: test suite
     runs-on: ubuntu-24.04
-    # This cap counts from job start, not from the Test step. On an opam
-    # cache miss the setup steps can consume 40-75 minutes (compiler
-    # bootstrap plus up to three 20-minute install attempts), so 180 =
-    # worst-case setup (~75 min) + the full 100-minute test budget with
-    # margin. Whether a run is warm depends on where the cache came from:
-    # GitHub restores a cache only from the run's own ref or the default
-    # branch, and a cache written by a pull_request run belongs to its
-    # merge ref, so pr-check.yml keeps nothing warm for this lane. A
-    # branch dispatch restores what its own branch or main saved; the
-    # scheduled run on main restores only what a run on main saved, and
-    # actions/cache saves only when the job succeeds. Until a dispatch of
-    # ci.yml or this workflow on main, or a nightly, has completed green,
-    # the nightly pays the cold-cache setup every time.
+    # Preserve the existing stalled-job backstop: cold setup can take about
+    # 75 minutes, followed by the full runner's 100-minute hang guard and margin.
+    # This is hang safety, not the size goal or a two-minute limit for minimal checks.
     timeout-minutes: 180
     steps:
+      - name: Require explicit minimal suites
+        if: inputs.minimal
+        env:
+          SUITES: ${{ inputs.suite }}
+        run: |
+          python3 - <<'PYCODE'
+          import os
+          if not any(part.strip() for part in os.environ["SUITES"].split(",")):
+              raise SystemExit("Minimal behavior verification requires explicit suites")
+          PYCODE
+
       - name: Free disk space
+        if: inputs.minimal == false
         # Same cleanup as ci.yml: linking the test executables is
         # disk-heavy, and ubuntu-24.04 preinstalls the Android SDK,
         # .NET, GHC and the CodeQL bundle this build never uses.
@@ -165,11 +72,14 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.candidate_sha || github.sha }}
 
       - name: Check source text integrity
         run: scripts/ci/check-source-text-integrity.sh
 
       - name: Suite runner self-test
+        if: inputs.minimal == false
         # The reader's own fixtures, under this runner's awk and python3,
         # before any toolchain work: a header it cannot attribute or a
         # suite it cannot find at the deadline is a wrong verdict later.
@@ -178,7 +88,12 @@ jobs:
       - name: Setup OCaml toolchain
         uses: ./.github/actions/setup-ocaml-toolchain
 
+      - name: Pin minimal OCaml dependencies
+        if: inputs.minimal
+        uses: ./.github/actions/pin-ocaml-deps
+
       - name: Pin external OCaml dependencies
+        if: inputs.minimal == false
         uses: ./.github/actions/pin-ocaml-deps
         with:
           pin-flags: --with-bisect
@@ -190,9 +105,10 @@ jobs:
           # running the suite needs: dune-project gates alcotest,
           # qcheck-core, qcheck-alcotest and bisect_ppx behind :with-test.
           install-flags: --with-test
-          os-packages: jq ripgrep poppler-utils ffmpeg libreoffice-impress python3-venv
+          os-packages: ${{ inputs.minimal && 'jq ripgrep' || 'jq ripgrep poppler-utils ffmpeg libreoffice-impress python3-venv' }}
 
       - name: Prepare managed presentation verification inputs
+        if: inputs.minimal == false
         run: python3 scripts/ci/prepare-presentation-verifier.py
 
       # test_run_local_script builds the PATH a dashboard build would run
@@ -203,14 +119,16 @@ jobs:
       # the pull requests that select this suite. The version is the one
       # pr-check.yml and release.yml build the SPA with.
       - name: Make pnpm available to the suites that read a dashboard PATH
+        if: inputs.minimal == false
         run: corepack enable && corepack prepare pnpm@10.31.0 --activate
 
       - name: Test
+        id: tests
         env:
           # Public runners give four CPUs; use all four for the build
           # and the suite.
           DUNE_JOBS: "4"
-          # Three nested deadlines, innermost first:
+          # Release full-suite deadlines, innermost first:
           # 1. MASC_TEST_SUITE_DEADLINE (90 min) bounds the suite itself;
           #    on expiry ci-run-test-suite.sh lists the executables still
           #    running under dune, then a log tail, before failing, so a
@@ -218,8 +136,9 @@ jobs:
           # 2. CI_TEST_TIMEOUT_SEC (100 min) is the observer's fail-closed
           #    backstop -- reached only if the suite script cannot enforce
           #    its own deadline.
-          # 3. timeout-minutes (180, from job start) is the last boundary;
-          #    see the comment above it for the cold-cache arithmetic.
+          # 3. The release job ends after 180 minutes from job start.
+          # Explicit minimal suites select less work; the two-minute example
+          # is not a deadline or a pass/fail boundary.
           MASC_TEST_SUITE_DEADLINE: "5400"
           CI_TEST_TIMEOUT_SEC: "6000"
           CI_TEST_HEARTBEAT_SEC: "30"
@@ -234,6 +153,7 @@ jobs:
           MASC_TEST_SUITE_LOG_ARTIFACT: test-suite-log
           # The targeted path, from the dispatch inputs; both are empty on
           # the schedule and on a dispatch that names no suite.
+          MINIMAL_CHECK: ${{ inputs.minimal }}
           TARGET_SUITES: ${{ inputs.suite }}
           TARGET_EIO_BACKEND: ${{ inputs.eio_backend }}
           # One suite's budget on the targeted path, where none of the
@@ -273,24 +193,26 @@ jobs:
           # on a host with no checkout, and --print writes that embedded copy.
           # The general image includes repository and creative-document
           # tools; its build is shared by full and targeted lanes.
-          opam exec -- dune build --root . bin/main_eio.exe
-          ./_build/default/bin/main_eio.exe sandbox-image --print \
-            | docker build -t masc-sandbox-test:ci -
-          # Building the image is half of what a sandboxed suite needs. A
-          # fixture whose keeper runs a command starts a persistent
-          # container through the turn sandbox factory, and
-          # Keeper_sandbox_runtime_setup refuses that under a test
-          # executable unless the run says it wants the real daemon: the
-          # guard exists so a developer's daemon does not collect
-          # containers named for temp workspaces. This runner is thrown
-          # away with its daemon, and a fixture that started a container
-          # removes it in its own teardown
-          # (Masc_test_deps.teardown_fixture_sandbox), so this lane says
-          # so, once, here -- not in every stanza that dispatches. Without
-          # it every Docker
-          # case that used to skip on "image not found" fails on the
-          # guard instead (dispatch_runtime, execute_exit_result).
-          export MASC_TEST_ALLOW_REAL_DOCKER=1
+          if [ "${MINIMAL_CHECK}" != true ]; then
+            opam exec -- dune build --root . bin/main_eio.exe
+            ./_build/default/bin/main_eio.exe sandbox-image --print \
+              | docker build -t masc-sandbox-test:ci -
+            # Building the image is half of what a sandboxed suite needs. A
+            # fixture whose keeper runs a command starts a persistent
+            # container through the turn sandbox factory, and
+            # Keeper_sandbox_runtime_setup refuses that under a test
+            # executable unless the run says it wants the real daemon: the
+            # guard exists so a developer's daemon does not collect
+            # containers named for temp workspaces. This runner is thrown
+            # away with its daemon, and a fixture that started a container
+            # removes it in its own teardown
+            # (Masc_test_deps.teardown_fixture_sandbox), so this lane says
+            # so, once, here -- not in every stanza that dispatches. Without
+            # it every Docker
+            # case that used to skip on "image not found" fails on the
+            # guard instead (dispatch_runtime, execute_exit_result).
+            export MASC_TEST_ALLOW_REAL_DOCKER=1
+          fi
           if [ -z "${TARGET_SUITES}" ]; then
             scripts/ci-run-tests.sh "scripts/ci-run-test-suite.sh"
             exit 0
@@ -377,11 +299,14 @@ jobs:
           fi
           log "[targeted] EIO_BACKEND=${EIO_BACKEND:-<unset>} timeout=${TARGET_SUITE_TIMEOUT_SEC}s per suite"
           status="${resolution_status}"
+          # Stream fixture records directly to tee: buffered Dune output can
+          # truncate a successful suite mid-JSON. Keep actions serial so their
+          # evidence records cannot interleave.
           for suite in ${aliases[@]+"${aliases[@]}"}; do
             log "[targeted] ${suite}: start $(date -u +%Y-%m-%dT%H:%M:%SZ) (dune alias)"
             started=$(date +%s)
             rc=0
-            timeout -s TERM -k "${TARGET_SUITE_KILL_GRACE_SEC}" "${TARGET_SUITE_TIMEOUT_SEC}"               opam exec -- dune build --root . "@runtest-${suite}" 2>&1 | tee -a "${CI_TEST_LOG_FILE}" || rc=$?
+            timeout -s TERM -k "${TARGET_SUITE_KILL_GRACE_SEC}" "${TARGET_SUITE_TIMEOUT_SEC}"               opam exec -- dune build --root . --no-buffer -j 1 "@runtest-${suite}" 2>&1 | tee -a "${CI_TEST_LOG_FILE}" || rc=$?
             elapsed=$(( $(date +%s) - started ))
             case "${rc}" in
               0)   log "[targeted] ${suite}: OK in ${elapsed}s" ;;
@@ -462,6 +387,150 @@ jobs:
           done
           exit "${status}"
 
+      - name: Capture Primary list fixture PTY screenshots
+        if: ${{ !cancelled() && contains(inputs.suite, 'test_tui_board_heading_width') }}
+        env:
+          STUDIO_SOURCE_SHA: ${{ github.sha }}
+          STUDIO_RUN_ID: ${{ github.run_id }}
+          STUDIO_TEST_OUTCOME: ${{ steps.tests.outcome }}
+          STUDIO_OUT: ${{ runner.temp }}/primary-list-studio
+          STUDIO_LOG: ${{ runner.temp }}/ci-run-tests.log
+        run: |
+          set -euo pipefail
+          if ! rg -q 'STUDIO_CAPTURE=' "$STUDIO_LOG"; then
+            echo "No Primary list PTY frames were produced; capture remains unproven."
+            exit 1
+          fi
+          sudo apt-get update -qq
+          sudo apt-get install -y ttyd fonts-noto-cjk
+          python3 -m venv "$RUNNER_TEMP/studio-browser-venv"
+          "$RUNNER_TEMP/studio-browser-venv/bin/pip" install playwright
+          "$RUNNER_TEMP/studio-browser-venv/bin/playwright" install --with-deps chromium
+          python3 - <<'PYINFO'
+          import json, os
+          from pathlib import Path
+          info = {
+              "headSha": os.environ["STUDIO_SOURCE_SHA"],
+              "databaseId": os.environ["STUDIO_RUN_ID"],
+              "url": "https://github.com/jeong-sik/masc/actions/runs/" + os.environ["STUDIO_RUN_ID"],
+              "status": "in_progress_at_capture",
+              "test_step_outcome": os.environ["STUDIO_TEST_OUTCOME"],
+          }
+          Path(os.environ["RUNNER_TEMP"], "studio-run.json").write_text(json.dumps(info))
+          PYINFO
+          "$RUNNER_TEMP/studio-browser-venv/bin/python" scripts/capture-tui-ci-frames.py \
+            --log "$STUDIO_LOG" --run-info "$RUNNER_TEMP/studio-run.json" \
+            --expected-head "$STUDIO_SOURCE_SHA" --out "$STUDIO_OUT" \
+            --suite-pass-marker "tui primary list studio PTY: PASS"
+
+      - name: Upload Primary list fixture PTY screenshots
+        if: ${{ always() && contains(inputs.suite, 'test_tui_board_heading_width') }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: primary-list-studio-${{ github.sha }}
+          path: ${{ runner.temp }}/primary-list-studio/
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload equipped portrait HTTP evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: candle-equipped-portrait
+          path: ${{ runner.temp }}/candle-equipped-portrait/
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Upload Candle currency terminal evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: candle-currency-tui
+          path: ${{ runner.temp }}/candle-currency-tui/
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Upload Keeper Items terminal evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: keeper-items-tui
+          path: ${{ runner.temp }}/keeper-items-tui/
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Capture Navigation fixture PTY screenshots
+        if: ${{ !cancelled() && contains(inputs.suite, 'test_tui_lane_visual_pty') }}
+        env:
+          STUDIO_SOURCE_SHA: ${{ github.sha }}
+          STUDIO_RUN_ID: ${{ github.run_id }}
+          STUDIO_TEST_OUTCOME: ${{ steps.tests.outcome }}
+          STUDIO_OUT: ${{ runner.temp }}/navigation-studio
+          STUDIO_LOG: ${{ runner.temp }}/ci-run-tests.log
+        run: |
+          set -euo pipefail
+          if ! rg -q 'STUDIO_CAPTURE=' "$STUDIO_LOG"; then
+            echo "No Navigation PTY frames were produced; capture remains unproven."
+            exit 1
+          fi
+          sudo apt-get update -qq
+          sudo apt-get install -y ttyd fonts-noto-cjk
+          python3 -m venv "$RUNNER_TEMP/studio-browser-venv"
+          "$RUNNER_TEMP/studio-browser-venv/bin/pip" install playwright
+          "$RUNNER_TEMP/studio-browser-venv/bin/playwright" install --with-deps chromium
+          python3 - <<'PYINFO'
+          import json, os
+          from pathlib import Path
+          info = {
+              "headSha": os.environ["STUDIO_SOURCE_SHA"],
+              "databaseId": os.environ["STUDIO_RUN_ID"],
+              "url": "https://github.com/jeong-sik/masc/actions/runs/" + os.environ["STUDIO_RUN_ID"],
+              "status": "in_progress_at_capture",
+              "test_step_outcome": os.environ["STUDIO_TEST_OUTCOME"],
+          }
+          Path(os.environ["RUNNER_TEMP"], "studio-run.json").write_text(json.dumps(info))
+          PYINFO
+          "$RUNNER_TEMP/studio-browser-venv/bin/python" scripts/capture-tui-ci-frames.py \
+            --log "$STUDIO_LOG" --run-info "$RUNNER_TEMP/studio-run.json" \
+            --expected-head "$STUDIO_SOURCE_SHA" --out "$STUDIO_OUT" \
+            --suite-pass-marker "TUI navigation consistency: PASS"
+
+      - name: Upload Navigation fixture PTY screenshots
+        if: ${{ always() && contains(inputs.suite, 'test_tui_lane_visual_pty') }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: navigation-studio-${{ github.sha }}
+          path: ${{ runner.temp }}/navigation-studio/
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload remote TUI equipped portrait evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: candle-remote-tui-portrait
+          path: ${{ runner.temp }}/candle-remote-tui-portrait/
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Upload remote workspace history terminal evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: tui-remote-workspace-history
+          path: ${{ runner.temp }}/tui-remote-workspace-history/
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Upload Item workspace authority terminal evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: tui-item-workspace-authority
+          path: ${{ runner.temp }}/tui-item-workspace-authority/
+          if-no-files-found: ignore
+          retention-days: 14
+
       - name: Upload the full Dune suite log
         if: always()
         uses: actions/upload-artifact@v7
@@ -478,6 +547,7 @@ jobs:
       # lost every other verdict with it (#33200). Uploaded on every
       # outcome, since a red run is when the file is read.
       - name: Exercise creative artifacts in the built Keeper image
+        if: inputs.minimal == false
         run: |
           mkdir -p "$RUNNER_TEMP/keeper-creative-proof"
           chmod 0777 "$RUNNER_TEMP/keeper-creative-proof"
@@ -490,10 +560,10 @@ jobs:
             masc-sandbox-test:ci python3 /proof/verify-sandbox-creative-tools.py /out
 
       - name: Upload creative artifact proof
-        if: always()
+        if: always() && inputs.minimal == false
         uses: actions/upload-artifact@v7
         with:
-          name: keeper-creative-proof-${{ github.sha }}
+          name: keeper-creative-proof-${{ inputs.candidate_sha || github.sha }}
           path: |
             ${{ runner.temp }}/keeper-creative-proof
             ${{ runner.temp }}/keeper-creative-image-id.txt
@@ -518,58 +588,6 @@ jobs:
       # the pull-request lane recorded: test_tool_name_prefix_boundary is
       # red on purpose until #33778 is decided.
       - name: Run the suites that need no build
-        if: always()
-        continue-on-error: true
+        if: always() && inputs.minimal == false && inputs.suite == ''
         timeout-minutes: 15
         run: python3 scripts/run-standalone-suites.py --all-matching '*'
-
-      # The lane's whole point is that a test-only regression surfaces
-      # within ~24h. Without this step it surfaced only to whoever opened
-      # the Actions tab, which is how the 2026-09-05 hang (#33200) sat
-      # unread. Scheduled runs only: a dispatcher already sees their own
-      # run. Cancellation counts as a failure here because the job-level
-      # 180-minute cap is exactly what a hung suite hits.
-      - name: File the scheduled failure as an issue
-        if: (failure() || cancelled()) && github.event_name == 'schedule'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          # gh infers the repo from the checkout's git remote. This step also
-          # runs when the job failed before Checkout, where there is no remote
-          # to read, so name the repo outright.
-          GH_REPO: ${{ github.repository }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          JOB_STATUS: ${{ job.status }}
-        run: |
-          set -euo pipefail
-          label=nightly-test-lane
-          # --force is a no-op when the label already exists, so the first
-          # red night does not fail on a label nobody created yet.
-          gh label create "${label}" \
-            --color B60205 \
-            --description "야간 테스트 레인이 실패한 실행" \
-            --force
-          # The taxonomy workflow comments on any issue with no declaration
-          # block, so this body carries one. A red lane is a ci defect that
-          # degrades and whose root is that nothing said so.
-          body=$(printf '%s\n\n%s\n%s\n\n%s\n%s\n\n%s\n%s\n%s\n%s\n%s\n%s\n' \
-            "야간 테스트 레인이 \`${JOB_STATUS}\` 로 끝났습니다." \
-            "- 실행: ${RUN_URL}" \
-            "- 커밋: \`${GITHUB_SHA}\`" \
-            "스위트별 판정은 그 실행의 \`suite-runner-log\` 아티팩트에 있습니다." \
-            "단계 출력에는 마지막 120줄만 남습니다." \
-            '```masc-triage' \
-            "kind: defect" \
-            "area: ci" \
-            "impact: degrades" \
-            "must-do: false" \
-            '```')
-          existing=$(gh issue list --state open --label "${label}" \
-            --limit 1 --json number --jq '.[0].number // empty')
-          if [ -n "${existing}" ]; then
-            gh issue comment "${existing}" --body "${body}"
-            echo "commented on #${existing}"
-          else
-            gh issue create --label "${label}" \
-              --title "야간 테스트 레인이 빨갛습니다" \
-              --body "${body}"
-          fi

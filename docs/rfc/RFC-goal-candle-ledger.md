@@ -79,7 +79,7 @@ related: ["every-lane-is-one-row-in-one-registry", "exact-lane-walks-one-slot-li
 - **[사실]** Goal 전이는 `Goal_phase.decide_transition` 다음에 검증 원장에 기록하고, 그다음 phase 를 쓰고, 그다음 이벤트를 남긴다. 원장 기록이 실패하면 phase 쓰기를 막는다(`lib/workspace_goals.ml:409-416`). 사람이 확정하면 Goal 잠금 안에서 `confirmed_at` 이 먼저 검증 기록(`goal_verifications.json`)에 저장되고, 그 뒤에 Goal phase 가 `goals.json` 에 저장된다. 두 저장은 다른 파일이라 한꺼번에 일어나지 않는다(`lib/workspace_goals.ml:1187-1208`, `lib/goal/goal_verification.ml:510-519`, `lib/goal/goal_store.ml:591-616`).
 - **[사실]** 검증기의 통과·반박 결과는 `Goal_store.transact_goal` 안에서 검증 원장에 먼저 커밋되고, phase 는 그 뒤에 쓰인다. 결과의 `recorded_at` 은 트랜잭션에 들어가기 전에 정해진다(`lib/workspace_goals.ml:482-498`, `:815-862`). 결과를 커밋하는 곳은 `Goal_verification.record_proof_verdict` 를 부르는 `commit_verifier_decision` 한 곳이다(`:831`). 이미 커밋된 결과로 phase 를 옮기는 경로가 둘 더 있다. 서버가 커밋과 phase 쓰기 사이에 죽었을 때 `reconcile_committed_proof`(`:871`)가, `Verifying` 에서 `request_complete` 를 다시 받았을 때 `answer_verifying_repeat`(`:1008`)가 그렇다. 이미 반영된 결과가 다시 오면 phase 를 옮기지 않고 그대로 돌려준다(`:832-846`). 사람의 확정 `confirm_completion` 은 `request_id`, `verification_run_id`, `criterion_revision` 셋을 대조하고, 확정을 커밋한 뒤 이벤트를 남긴다(`:1204-1235`). Goal 의 criterion 은 `revision` 문자열을 가진다(`lib/goal/goal_store.mli:69-74`). 잠금 순서는 Goal, backlog, goal-task links 이고(`goal_store.mli:295-297`), 검증 원장 잠금은 Goal 잠금을 잡은 뒤에 잡는다(`lib/goal/goal_verification.mli:4-5`).
 - **[사실]** `read_backlog_observation_r` 는 주 파일을 못 읽으면 `.last-good` 를 돌려준다. 원본만 읽는 함수는 `read_backlog_r` 다(`lib/workspace/workspace_backlog.mli:8, 20-27`). Task 와 Goal 의 연결에는 `read_goal_task_links_authoritative_r` 가 있다(`lib/workspace/workspace_goal_index.mli:73`).
-- **[사실]** GC 는 끝난(`Done`·`Cancelled`) Task 를 `tasks-archive.json` 으로 옮긴다(`lib/workspace/workspace_gc.mli:41-56`). 지금 Goal 에 연결된 Task 41개 중 12개가 archive 에 있다. GC 는 backlog 를 먼저 쓰고 잠금을 놓은 뒤에 archive 에 붙여서, 그 사이에는 끝난 Task 가 두 파일 어디에도 없다(`lib/workspace/workspace_gc.ml:121-129`). Task 를 삭제하면 Goal 연결도 함께 지운다(`lib/workspace/workspace_task.mli:29-36`).
+- **[사실]** GC 는 끝난(`Done`·`Cancelled`) Task 를 `tasks-archive.json` 으로 옮긴다(`lib/workspace/workspace_gc.mli:41-56`). 지금 Goal 에 연결된 Task 41개 중 12개가 archive 에 있다. GC 는 archive 에 먼저 붙이고 그다음 backlog 를 써서, 그 사이에는 끝난 Task 가 두 파일에 다 있다. archive 를 읽거나 쓰지 못하면 GC 는 backlog 를 건드리지 않고 멈춘다(`lib/workspace/workspace_gc.ml` 의 `gc`). Task 를 삭제하면 Goal 연결도 함께 지운다(`lib/workspace/workspace_task.mli:29-36`).
   - lib 에는 archive 의 Task 를 엄격하게 읽는 함수가 없다. 행을 JSON 으로 꺼내는 `archive_entries_of_json`(모양이 다르면 빈 목록), id 만 읽는 `read_archive_task_ids`, 끝나지 않은 Task 만 읽고 못 읽는 항목은 건너뛰는 `read_orphaned_nonterminal_tasks` 가 있다(`lib/workspace/workspace_task_id.mli`).
 - **[사실]** runtime.toml 의 lane 표는 모르는 키를 서버 로드 에러로 다룬다(`lib/runtime/runtime_toml.ml:2620-2640`). 모르는 lane 이름의 표도 로드 에러다(`:2783-2793`). 설정을 runtime.toml 에 두면 Candle 설정 오류가 서버 부팅을 막을 수 있다.
 - **[사실]** 도구의 `defer_loading = true` 는 모델이 이름을 부르기 전까지 요청에서 뺀다. 도구 112개가 그렇다(`config/tools/masc_goal_upsert.toml:10-12` 의 주석, `config/tools/` 에서 `defer_loading = true` 를 센 값).
@@ -125,19 +125,17 @@ related: ["every-lane-is-one-row-in-one-registry", "exact-lane-walks-one-slot-li
 
 **[제안]** keeper 의 잔액은 시간이 지나며 지수적으로 줄어든다(운영자 결정: Candle 은 저절로 소모된다). 반감기(잔액이 절반이 되는 데 걸리는 시간)는 TOML 로 정하고, 값은 `Off`(감소 없음)와 `Hours n`(n 시간) 중 하나다.
 
-이 규칙은 헌법과 맞지 않는다. 헌법 `no_wall_clock_death` 는 "시간 경과로 상태를 죽이지 않는다"고 한다(`docs/constitution.xml:211`). 헌법은 저장소의 SSOT 라서(`:9-10`) 이 RFC 가 예외를 선언할 수 없다. 잔액이 줄면 살 수 있는 물건도 줄기 때문에 화면에 보이는 값만 바뀌는 것도 아니다. 그래서 순서를 이렇게 한다.
-
-1. 헌법 개정 PR 을 먼저 낸다(5장 1번). 문안은 8.1 에 있다. Candle 을 `domain` 에 넣고 `no_wall_clock_death` 에 잔액 감소 예외를 적는다. 운영자가 문안을 승인한 뒤에 연다.
-2. 그 PR 이 들어가기 전에는 잔액 감소 코드를 넣지 않는다. 잔액은 줄지 않는다.
-3. 들어간 뒤 잔액 감소 단계(5장 8번)에서 `HalfLifeSet` 과 `Hours n` 을 넣는다. 처음 값은 `Off` 다.
+헌법은 Candle 잔액 감소를 `no_wall_clock_death`의 명시적 예외로 둔다. 이 감소는 화폐 가치의 계산이며 Task·Goal·Board 상태나 원장 사실을 지우지 않는다.
 
 감소를 넣은 뒤의 동작은 다음과 같다.
 
 - 줄어든 양은 원장에 적지 않는다. 잔액을 읽을 때 마지막 이벤트 시각부터 지금까지 줄어든 만큼을 계산해 반영한다. 원장에는 발행·구매 같은 사실만 남는다.
 - 처음에는 `Off` 로 시작한다. 지급이 쌓여야 반감기를 정할 수 있고, 지급이 쌓이려면 기능이 켜져 있어야 하기 때문이다. `Off` 는 기본값이 아니다. TOML 에 반드시 적어야 하고, 값이 없으면 Candle 이 `Disabled` 상태가 된다(3.9).
-- 반감기를 바꾸면 그 사실을 원장에 `HalfLifeSet` 으로 남긴다. `HalfLifeSet` 은 모든 keeper 의 구간을 나눈다. 잔액을 읽을 때 keeper 의 이벤트와 모든 `HalfLifeSet` 을 시각순으로 합쳐서, 구간마다 그 구간을 시작한 시점의 반감기로 계산한다. 그래서 반감기를 바꿔도 과거 잔액이 다시 계산되지 않고, 이미 한 구매 때문에 잔액이 마이너스가 되는 일이 없다. `Off` 인 동안 받은 잔액도 `Hours n` 이 켜지는 시각부터 줄기 시작한다. 이 두 가지는 함수 시험에 넣는다. `candle.toml` 의 반감기가 원장의 마지막 `HalfLifeSet` 과 다르면 새 `HalfLifeSet` 을 쓴다. 쓰지 못하면 Candle 을 `Disabled` 로 둔다. 잔액은 언제나 원장의 값으로 계산한다.
+- 반감기를 바꾸면 그 사실을 원장에 `HalfLifeSet` 으로 남긴다. `HalfLifeSet` 은 실제 정책이 바뀔 때 모든 keeper 의 구간을 나눈다. 같은 정책을 다시 기록해도 구간을 나누지 않는다. 잔액을 읽을 때 원장의 파일 순서대로 keeper의 금전 이벤트와 모든 `HalfLifeSet`을 재생해서, 구간마다 그 구간을 시작한 시점의 반감기로 계산한다. 그래서 반감기를 바꿔도 과거 잔액이 다시 계산되지 않고, 이미 한 구매 때문에 잔액이 마이너스가 되는 일이 없다. `Off` 인 동안 받은 잔액도 `Hours n` 이 켜지는 시각부터 줄기 시작한다. 설정 변경·구매·잔액 관찰을 연결한 기능 시나리오로 확인한다. `candle.toml` 의 반감기가 원장의 마지막 `HalfLifeSet` 과 다르면 새 `HalfLifeSet` 을 쓴다. 쓰지 못하면 Candle 을 `Disabled` 로 둔다. 잔액은 언제나 원장의 값으로 계산한다.
 - 지수 감소를 고른 이유: 잔액을 지급 시점별로 나눠 각각 깎으면 구매할 때 어느 지급분부터 쓸지 정해야 한다. 지수 감소는 잔액 하나에만 적용하고 구매 순서가 결과에 영향을 주지 않는다(정수 내림 때문에 이벤트마다 1 milli 이내의 차이는 생긴다). Goal 보상의 감액은 선형이다. 사람이 얼마나 깎였는지 바로 계산할 수 있어야 하기 때문이다.
 - 계산은 정수 연산이다. 부동소수 `exp` 를 쓰면 실행 환경마다 잔액이 달라질 수 있다. 고정소수점 자릿수와 내림 규칙은 구현 전에 정한다.
+  - 설정 키는 최상위 `half_life = "off"` 또는 양의 정수 시간이다. 누락·알 수 없는 문자열·0·음수는 설정 오류다. 조회와 금전 변경은 현재 설정을 CAS 안에서 다시 읽고, 변경된 정책 사실을 내구적으로 덧붙인 뒤 그 잔액을 반환한다. 지급·구매와 함께 바뀌면 한 번의 append로 기록한다. 첫 금전 기록 전에 명시적 정책 사실이 있어야 하며 과거 금액에 현재 설정을 끼워 넣지 않는다. 금전·정책 시각이나 관찰 시각이 앞선 금전·정책 시각보다 이르면 거절한다. 장비 선택과 반복 조회는 금전 내림 구간을 만들지 않는다.
+  - 구현 계산 계약: Q128 coefficient, fractional exponent는 128 binary bits로 올림, 정수 sqrt와 coefficient 곱은 내림, 원래 금액과 coefficient를 곱한 뒤 whole half-life와 Q128 scale을 한 번에 내려 정수 금액으로 만든다. Whole half-life는 정확한 정수 나눗셈이며 fractional 값은 보수적 근사다. 최종 내림 전 오차는 public 금액 범위에서 `641 * 2^-66` milli 미만이다. 최종 결과가 이상적인 실수 지수의 내림보다 1 milli 낮을 수 있다. typed whole-second 입력에서의 단조성·오차 증명과 반올림 규칙은 [Candle decay arithmetic contract](../design/candle-decay-arithmetic.md)를 따른다.
 - 효과: 장신구를 다 사도 Candle 이 계속 줄어서 잔액이 끝없이 쌓이지는 않는다. 유통 총량은 지급 속도와 줄어드는 속도가 맞는 지점으로 수렴한다. 3.5 에서 물가를 유통량에 연동하게 되면 이 총량이 그 입력이 된다.
 - 부작용: 감소를 켠 뒤에는 keeper 가 오래 쉬면 잔액이 줄고, Candle 을 아는 keeper 에게는 빨리 쓰게 만드는 압박이 생긴다. 살 수 있는 것이 장신구뿐이라 일에는 영향이 없다(3.7).
 - 값을 고르는 기준: keeper 한 명이 Candle 을 받는 간격을 Δ, 1회 지급액을 A, 반감기를 T 라고 하자. 오래 지나 잔액이 안정되면 평균 잔액은 A·T ÷ (Δ·ln 2) 이고, 지급 직후의 최고점은 A ÷ (1 − 2^(−Δ/T)) 다. 아이템을 살 수 있는지는 최고점으로 본다. Δ 와 T 가 같으면 최고점은 2A 이고, Δ 가 T 보다 훨씬 길면 최고점이 A 에 가까워서 모을 수 있는 한도가 1회 지급액 정도다. 가장 비싼 아이템 가격이 최고점보다 크면 아무도 못 산다. Δ 는 keeper 전체의 지급 간격이 아니라 한 명이 받는 간격이다(3.8). 감소를 켜기 전에 가격표가 이 최고점 아래인지 다시 본다(5장 8번). `Off` 동안 모은 keeper 는 비싼 아이템을 살 수 있지만, 켠 뒤 드물게 받는 keeper 는 최고점이 A 근처라 못 살 수 있다.
@@ -170,7 +168,7 @@ related: ["every-lane-is-one-row-in-one-registry", "exact-lane-walks-one-slot-li
    - 일꾼은 Goal 검증기와 같은 모양이다(2장). 조건 변수로 깨우고, 서버를 시작할 때 한 번 훑는다. Goal 하나에 하나만 돈다. 점검 루프나 확정 요청 안에서 모델을 부르지 않는다. 그 시간만큼 다른 요청이 멈추기 때문이다. lane 호출은 fork 해서 다른 Goal 의 처리가 긴 호출 뒤에 줄 서지 않게 하고, 깨움은 Atomic 표시로 놓치지 않게 한다(검증기가 그렇게 한다: `lib/goal_verification_agent.ml:745-770`, `:774`).
    - 일꾼은 이럴 때 깨어난다. `PayoutOwed` 를 썼을 때, 서버를 시작할 때, 다른 지급이 끝났을 때(`Paid`·`Unattributed`·`PayoutFailed`).
    - lane 이 쉬거나 연결되지 않아 호출하지 못했을 때와 Task 나 연결을 읽지 못했을 때는 maintenance pulse 가 다시 깨운다. 판정 lane 이 쉬면 pulse 간격에 다시 깨우는 기존 방식과 같다(`docs/constitution.xml:190-191`).
-   - 응답이 거절된 경우에는 pulse 로 깨우지 않는다. 같은 입력에서 거절이 반복되면 pulse 마다 모델을 부르게 되기 때문이다. 그런 지급은 위 세 때에 다시 시도한다.
+   - 응답이나 실행 요청이 거절된 경우에는 pulse 로 깨우지 않는다. 같은 입력에서 거절이 반복되면 pulse 마다 모델을 부르게 되기 때문이다. 모델 응답의 형식·도메인 오류(`Invalid_response`)와 실행 요청의 거절(`Execution_rejected`)을 구분해 실행 기록에 남기며, 둘 다 지급 의무를 지우지 않고 위 세 때에 다시 시도한다. 계정 휴식·서버 오류·연결 실패·시간 초과는 Exact와 공식 클라이언트의 typed 원인을 따라 `Transport_unavailable`로 유지한다. 요청·인증·설정 거절을 증명하는 typed 원인이 없으면 기존 재시도 동작을 유지하며, Muse의 실패는 호스트의 `retryable` 판정을 따른다. 이 분류는 지급 일꾼의 재시도만 정하며 CLI 레인 회전이나 중단된 턴의 무부작용을 보증하지 않는다. 앞선 HTTP 거절 뒤 CLI도 실패했거나 실행 기록 저장이 실패해도 그 거절을 일시적 연결 불가로 바꾸지 않는다. 선언한 다음 후보가 성공하면 정상 지급을 계속한다.
 
 - 지급은 `PayoutOwed` 와 그것이 가리키는 `Snapshot` 의 값(검증 통과 시각, 기한, Task id 목록)만 따른다. 재오픈해서 다시 통과해도 이미 남은 `PayoutOwed` 는 바뀌지 않는다.
 - 같은 Goal 에 두 번 지급하지 않게 하는 키(멱등 키, idempotency key)는 goal_id 다. 3.1 의 cursor 조건 덧붙이기와 지급 상태가 이 키를 강제한다.
@@ -213,17 +211,18 @@ lane 은 요청을 셋으로 나눠 받는다. 한 요청이 아는 것을 줄�
 
 Task 제목은 keeper 가 쓴 글이다. 등급 요청은 Task 를 보지 못해서 Task 를 잘게 쪼개거나 제목에 지시문을 넣어도 총액은 오르지 않는다. 관계 판정은 후보 Task 를 하나씩 따로 받아서, 한 Task 제목의 지시문이 다른 Task 의 판정을 바꾸지 못한다. 표에 없는 입력(priority, 비용, 검증에 제출된 증거)은 어느 요청에도 넣지 않는다. priority 는 만든 쪽이 정하는 값이라 부풀릴 수 있다.
 
-**총액.** lane 은 등급 하나를 고른다. 등급은 닫힌 variant 이고(예: `Trivial`, `Small`, `Medium`, `Large`, `Epic`), 등급별 금액은 TOML 표로 정한다. 모델이 만든 임의의 숫자가 발행되지 않는다. 등급의 이름과 개수는 구현 전에 정한다.
+**총액.** lane 은 등급 하나를 고른다. 등급은 운영자가 확정한 다섯 닫힌 variant `Trivial`, `Small`, `Medium`, `Large`, `Epic` 이고, 등급별 금액은 TOML 표에 모두 명시한다. 코드 기본 금액은 없다. 모델이 만든 임의의 숫자가 발행되지 않는다.
 
 **후보 Task 와 후보 keeper.** 일꾼이 `Snapshot` 의 Task id 마다 backlog 와 `tasks-archive.json` 에서 Task 를 읽고 `Candidates` 를 쓴다.
 
 - Task 마다 상태는 셋이다. 찾음, 삭제됨, 못 읽음.
   - backlog 나 archive 에 있으면 찾음이다.
   - 둘 다 없고 Goal 연결도 남아 있지 않으면 삭제됨이다. Task 삭제가 연결도 함께 지우기 때문이다(2장).
-  - 둘 다 없는데 연결은 남아 있으면 못 읽음이다. GC 가 backlog 를 쓴 뒤 archive 에 붙이기 전이거나, archive 가 깨졌을 수 있다(2장).
+  - 둘 다 없는데 연결은 남아 있으면 못 읽음이다. archive 가 깨졌거나, 예전 GC 가 backlog 를 쓴 뒤 archive 에 붙이기 전에 죽으면서 잃은 Task 일 수 있다(2장).
   - 못 읽음이 하나라도 있으면 `Candidates` 를 쓰지 않고 다음에 다시 한다(3.2). 이 일꾼이 쓰는 archive reader 는 새로 만든 엄격한 것이다. 모양이 다르거나 못 읽는 행을 빈 목록이나 건너뛰기로 바꾸지 않고 못 읽음으로 돌려준다.
 - 후보 Task 는 찾음 상태이고 `done` 이며 끝난 시각이 Goal 생성 시각보다 늦고 확정 시각 이전인 Task 다. Goal 이 만들어지기 전에 끝난 옛 Task 를 나중에 붙여서 몫을 얻는 것을 막으려는 조건이다. 검증 통과 때 `AwaitingVerification` 이던 Task 가 확정 전에 끝났으면 후보가 된다. 완료를 요청하는 시점을 골라서 다른 keeper 의 Task 를 후보에서 빼는 일을 막으려는 것이다. 끝난 시각과 담당자는 `done` 상태에 적힌 값이라서 일꾼이 언제 읽어도 같다.
 - 후보 keeper 는 후보 Task 담당자 가운데 keeper 인 사람이다. 담당자 이름을 `Keeper_id.Keeper_name.of_string`(`lib/keeper_registry/keeper_id.mli`)으로 파싱하고, 통과한 이름에 keeper 설정 파일(`Config_dir_resolver.keeper_toml_path_for_base_path` 가 가리키는 `<이름>.toml`)이 있어야 한다. `Keeper_identity.Keeper_id.of_string` 은 소문자로 바꾸고 빈 문자열만 거절하는 함수라서 파일 경로를 만들기 전에 쓰지 않는다(`lib/keeper/keeper_identity.ml:15-45`). 설정 폴더를 읽지 못한 것과 파일이 없는 것은 다른 결과다.
+- `candidate_task_keepers` 는 후보 Task id마다 당시 Keeper로 확인한 담당자 이름 또는 `null`을 기록한다. 정산은 이 목록이 모든 후보 Task를 한 번씩 포함하고, 이름이 해당 Task 담당자와 일치하며, `candidate_keepers`가 그 이름들의 정확한 집합인지 확인한다. 나중의 Keeper 설정으로 과거 판정을 다시 만들지 않는다.
 - `Candidates` 는 모델을 부르기 전에 쓴다. 대기 중에 설정 파일이 바뀌어도 후보는 그대로다. 지금 Goal 에 연결된 done Task 9건은 모두 Goal 생성 뒤에 끝났다.
 - 연결에는 시각이 없어서(2장) 끝난 뒤에 붙은 Task 를 가려낼 수 없다. 끝난 Task 를 연결하지 못하게 하면(5장 2번 (나)) 그런 Task 는 새로 생기지 않는다. 끝나기 전에 붙은 관계없는 Task 는 관계 판정이 거른다.
 
@@ -270,7 +269,7 @@ price : item -> milli_candle
 
 - 소유는 `Purchased` 를 모아 계산한다. 이미 가진 아이템은 다시 살 수 없다.
 - 착용은 슬롯마다 마지막 `Equipped` 로 정한다. 소유한 아이템만 착용할 수 있다. 이름에서 정한 기본 장신구로 되돌리는 것도 `Equipped`(아이템 자리에 `Default`)로 남긴다.
-- `Equipped` 는 조건 없이 덧붙는 줄이라서 착용을 자주 바꾸는 keeper 가 있으면 모든 읽기가 늘고 `Paid`·`Purchased` 의 덧붙이기와 겹친다. 착용 상태를 원장 밖에 둘지는 6번 PR 에서 정한다(7장).
+- 착용 상태도 같은 원장에 둔다. 소유 확인과 `Equipped` 기록은 같은 원장 CAS 안에서 처리한다. 슬롯의 선택이 같으면 다시 기록하지 않는다. 별도 착용 저장소와 구매 원장 사이에 동기화 경로를 만들지 않는다.
 - 초상화 렌더러는 이름에서 장신구를 정하는 호출부가 두 곳이다(2장). 두 곳 모두 서버가 정한 착용 상태를 받아 그리게 하고, 원장의 착용을 이름에서 정한 장신구보다 우선한다. 몸은 바꾸지 않는다. 장신구는 2D 초상화에만 그린다. 3D 렌더러는 마스코트만 그려서 바꾸지 않는다.
 - 서버의 응답 ETag 와 그림 캐시, TUI 의 그림 캐시는 이름과 크기만 키로 쓴다(2장). 착용 상태를 키에 넣지 않으면 구매한 뒤에도 옛 그림이 나간다. TUI 는 착용 상태를 서버가 주는 wire 필드로만 받는다. 로컬 파일을 읽는 경로(2장)와 원격 경로를 따로 두지 않는다. 이 필드는 엄격 디코더와 Python fixture 까지 같은 PR 에서 바꾼다.
 - 카탈로그가 18개라서 다 사면 쓸 곳이 없다. 이 점은 받아들이고 후속 RFC(현상금 Task, 모델 변경 요청)에서 다룬다.
@@ -439,10 +438,9 @@ Candle 을 켜면 keeper 행동이 바뀔 수 있다. 바뀌는지는 켜기 전
 - 바닥 20%(시간당 1% 감액과 함께 초기값).
 - 반감기의 시간 값. 처음은 `Off` 이고, 지급이 쌓인 뒤 3.8 의 어림을 다시 계산해서 정한다.
 - 유통량에 연동하는 물가 공식 f 와 그 입력의 정의(3.5). 지급이 쌓인 뒤에 정한다.
-- 등급의 이름과 개수, 등급별 금액. 가장 낮은 등급의 금액이 0 인지도 정한다. 0 보다 크면 Goal 을 많이 만드는 것만으로 Candle 이 늘어난다.
+- 다섯 등급의 실제 운영 금액. 가장 낮은 등급의 금액이 0 인지도 정한다. 0 보다 크면 Goal 을 많이 만드는 것만으로 Candle 이 늘어난다.
 - 정수 감소 계산의 고정소수점 자릿수와 내림 규칙(3.1.1).
 - 가중치 상한 `weight_max`(3.4).
-- 착용 상태를 원장에 둘지(3.6).
 - 5장 시험 세트의 합격선과 기준 Goal 묶음.
 
 운영자 승인이 필요한 것:

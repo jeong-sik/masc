@@ -203,3 +203,36 @@ let required_nonnegative_int_field json key =
   if value < 0
   then Error (Printf.sprintf "field '%s' must be non-negative" key)
   else Ok value
+
+let optional_int_field json key =
+  match Json_util.assoc_member_opt key json with
+  | None | Some `Null -> Ok None
+  | Some (`Int value) -> Ok (Some value)
+  | Some other ->
+    Error
+      (Printf.sprintf
+         "field '%s' must be an integer or null (received %s)"
+         key
+         (Json_util.kind_name other))
+;;
+
+let decode_string_name_list json key =
+  let* items = optional_list_field json key in
+  decode_list key
+    (fun item ->
+       match item with
+       | `String value -> Ok value
+       | bad -> field_type_error key "a string" bad)
+    items
+
+let decode_bool_field_or json key ~default =
+  match member key json with
+  | `Bool value -> Ok value
+  | `Null -> Ok default
+  | bad -> field_type_error key "a bool or null" bad
+
+let required_nonempty_string_field json key =
+  let* value = required_string_field json key in
+  if String.equal value ""
+  then Error (Printf.sprintf "field '%s' must be a non-empty string" key)
+  else Ok value

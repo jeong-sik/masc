@@ -8,7 +8,7 @@ let default_size = 160
 
 module Item = Keeper_portrait_item
 
-type mode = Starting | Preview of Item.t
+type mode = Current | Preview of Item.t
 
 let request_arg args =
   let ( let* ) = Result.bind in
@@ -22,7 +22,7 @@ let request_arg args =
       in
       let* mode =
         match List.assoc_opt "preview_item" fields with
-        | None -> Ok Starting
+        | None -> Ok Current
         | Some (`String id) ->
             (match Item.of_id id with
              | Some item -> Ok (Preview item)
@@ -32,17 +32,7 @@ let request_arg args =
       Ok (size, mode)
   | _ -> Error "arguments must be an object"
 
-let equipment_to_json equipment =
-  `Assoc
-    (List.map
-       (fun slot ->
-          let id =
-            match Item.in_slot equipment slot with
-            | Some item -> Item.id item
-            | None -> Item.empty_id slot
-          in
-          Item.slot_id slot, `String id)
-       Item.slots)
+let equipment_to_json = Keeper_portrait_equipment.to_json
 
 let catalog =
   `List
@@ -52,7 +42,7 @@ let catalog =
                  ; "slot", `String (Item.slot_id (Item.slot item)) ])
        Item.all)
 
-let handle ~keeper_name ~tool_name ~start_time ~args =
+let handle ~base_path ~keeper_name ~tool_name ~start_time ~args =
   match request_arg args with
   | Error message -> Tool_result.make_err ~tool_name ~class_:Tool_result.Policy_rejection ~start_time message
   | Ok (size, mode) ->
@@ -67,10 +57,19 @@ let handle ~keeper_name ~tool_name ~start_time ~args =
        | Some size ->
            let body = Keeper_portrait_look.body_of_name keeper_name in
            let starting_equipment = Keeper_portrait_look.equipment_of_name keeper_name in
+           let current, current_equipment, observation =
+             match Candle_equipment.read_persisted ~now:Time_compat.now ~base_path ~keeper:keeper_name with
+             | Ok equipment ->
+                 equipment_to_json equipment, equipment,
+                 `Assoc ["status", `String "available"; "detail", `Null]
+             | Error detail ->
+                 `Null, starting_equipment,
+                 `Assoc ["status", `String "unavailable"; "detail", `String detail]
+           in
            let equipment =
              match mode with
-             | Starting -> starting_equipment
-             | Preview item -> Item.preview item starting_equipment
+             | Current -> current_equipment
+             | Preview item -> Item.preview item current_equipment
            in
            let width = Keeper_portrait_draw.int_of_size size in
            (* Distance-field sampling, pixel composition and PNG compression
@@ -102,9 +101,11 @@ let handle ~keeper_name ~tool_name ~start_time ~args =
                 | Ok artifact ->
                     Tool_result.make_ok ~tool_name ~start_time
                       ~data:(`Assoc [ "name", `String keeper_name
-                                   ; "mode", `String (match mode with Starting -> "starting" | Preview _ -> "preview")
-                                   ; "preview_item", (match mode with Starting -> `Null | Preview item -> `String (Item.id item))
+                                   ; "mode", `String (match mode with Current -> "current" | Preview _ -> "preview")
+                                   ; "preview_item", (match mode with Current -> `Null | Preview item -> `String (Item.id item))
                                    ; "starting_equipment", equipment_to_json starting_equipment
+                                   ; "current_equipment", current
+                                   ; "equipment_observation", observation
                                    ; "equipment", equipment_to_json equipment
                                    ; "catalog", catalog
                                    ; "artifact", `String (Multimodal.Vision_artifact_store.to_string artifact)

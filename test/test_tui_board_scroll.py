@@ -8,10 +8,18 @@ import test_tui_keyboard_input as h
 # The sources this scenario stands over. scripts/ci/run-edited-tests.sh runs
 # a suite when a pull request changes a path the suite names, so without
 # this a change to the drawn text below reaches main with no scenario run.
-# The surface this scrolls ("MASC Board") is titled in masc_tui_render.ml.
+# The surface this scrolls ("MASC Board") is titled in masc_tui_render_board.ml.
 SOURCE_MODULES = (
+    "bin/masc_tui_render_board.ml",
+    "bin/masc_tui_render_board.mli",
     "bin/masc_tui_render.ml",
     "bin/masc_tui_layout.ml",
+    "bin/masc_tui.ml",
+    "bin/masc_tui_loader.ml",
+    "bin/masc_tui_types.ml",
+    "bin/masc_tui_board_read_layout.ml",
+    "bin/masc_tui_board_read_layout.mli",
+    "bin/masc_tui_board_detail.ml",
 )
 
 
@@ -38,11 +46,19 @@ def run(executable: str) -> None:
         fixtures[f"{detail_path}&comment_offset={offset}&comment_limit=100"] = (
             200, h.board_detail_page(post, comments, offset=offset, limit=100))
 
+    first_page_path = f"{detail_path}&comment_offset=0&comment_limit=100"
+    fixtures[first_page_path] = h.SequencedHttpResponse([
+        (503, {"error": "full history temporarily unavailable"}),
+        (200, h.board_detail_page(post, comments, offset=0, limit=100)),
+    ])
+
     def interact(process, fd, _slave, output, _base):
         h.wait_for_output(process, fd, output, b"Health: ", start=0, timeout=10)
         h.palette_go(process, fd, output, b"go board", b"MASC Board")
         h.wait_for_output(process, fd, output, ONE_POST_LISTED, start=0, timeout=10)
         h.send_and_wait(process, fd, output, b"\r", b"Showing 20 of 128 comments")
+        h.send_and_wait(process, fd, output, b"o", b"full history temporarily unavailable")
+        h.send_and_wait(process, fd, output, b"o", b"Showing 20 of 128 comments")
         h.send_and_wait(process, fd, output, b"o", b"Comment 000")
         h.read_available(fd, output)
         start = len(output)
@@ -330,7 +346,118 @@ def run_full_width_comments(executable: str) -> None:
         interact=interact, http_fixtures=fixtures)
 
 
+def run_snapshot_context(executable: str) -> None:
+    fixtures = h.overview_event_http_fixtures()
+    post = h.board_selection_post("context", "Snapshot context", "One captured thread")
+    comments = [h.board_detail_comment(f"context-{i}", f"Context row {i}") for i in range(121)]
+    comments[0]["content"] = "Older ancestor retained in newest context"
+    comments[-1]["parent_id"] = comments[0]["id"]
+    fixtures["/api/v1/board?sort_by=hot"] = (200, {"posts": [post]})
+    path = "/api/v1/board/post-context?format=flat"
+    fixtures[path] = (200, h.board_detail_page(post, comments))
+    fixtures[f"{path}&comment_offset=0&comment_limit=100"] = (
+        200, h.board_detail_page(post, comments, offset=0, limit=100))
+    changed = [dict(comment) for comment in comments]
+    changed[-1]["content"] = "Changed generation must not enter history"
+    changed[-1]["parent_id"] = comments[1]["id"]
+    fixtures[f"{path}&comment_offset=100&comment_limit=100"] = (
+        200, h.board_detail_page(post, changed, offset=100, limit=100))
+
+    def interact(process, fd, _slave, output, _base):
+        h.wait_for_output(process, fd, output, b"Health: ", start=0, timeout=10)
+        h.palette_go(process, fd, output, b"go board", b"MASC Board")
+        h.wait_for_output(process, fd, output, ONE_POST_LISTED, start=0, timeout=10)
+        # Numeric page selection opens at its latest reply; Home can still
+        # read the old root that only comment_context retained.
+        h.send_and_wait(process, fd, output, b"\r", b"Context row 120")
+        h.send_and_wait(process, fd, output, b"b", b"Comments")
+        h.send_and_wait(process, fd, output, b"\x1b[H", b"Older ancestor retained in newest context")
+        refused = h.send_and_wait(process, fd, output, b"o", b"Board comment thread changed")
+        if b"Changed generation must not enter history" in h.screen_text(refused):
+            raise AssertionError("mixed snapshot history was published despite refusal")
+        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Board")
+        os.write(fd, b"q")
+
+    h.run_terminal_scenario(executable, description="Board context ancestors and mixed revision refusal",
+        interact=interact, http_fixtures=fixtures)
+
+
+def run_long_ancestor_landing(executable: str) -> None:
+    fixtures = h.overview_event_http_fixtures()
+    post = h.board_selection_post("deep", "Deep latest thread", "Short body")
+    comments = [h.board_detail_comment(f"deep-{i}", f"Deep reply {i:03d}")
+                for i in range(81)]
+    for i in range(1, len(comments)):
+        comments[i]["parent_id"] = comments[i - 1]["id"]
+    post["comment_count"] = len(comments)
+    path = "/api/v1/board/post-deep?format=flat"
+    fixtures["/api/v1/board?sort_by=hot"] = (200, {"posts": [post]})
+    fixtures[path] = (200, h.board_detail_page(post, comments))
+
+    def interact(process, fd, _slave, output, _base):
+        h.wait_for_output(process, fd, output, b"Health: ", start=0, timeout=10)
+        h.palette_go(process, fd, output, b"go board", b"MASC Board")
+        h.wait_for_output(process, fd, output, ONE_POST_LISTED, start=0, timeout=10)
+        opened = h.send_and_wait(process, fd, output, b"\r", b"Deep reply 080")
+        assert b"Deep reply 080" in h.screen_text(opened), "newest reply missing on open"
+        assert b"Deep reply 000" not in h.screen_text(opened), "open stayed at old ancestors"
+        h.send_and_wait(process, fd, output, b"b", b"Comments")
+        h.send_and_wait(process, fd, output, b"\x1b[H", b"Deep reply 000")
+        h.send_and_wait(process, fd, output, b"\x1b[F", b"Deep reply 080")
+        os.write(fd, b"q")
+
+    h.run_terminal_scenario(executable, description="Board newest reply opens after long ancestor context",
+                            interact=interact, http_fixtures=fixtures)
+
+
+def run_history_refresh_ownership(executable: str) -> None:
+    fixtures = h.overview_event_http_fixtures()
+    post = h.board_selection_post("held", "Held history refresh", "Short body")
+    comments = [h.board_detail_comment(f"held-{i}", f"Held reply {i:03d}")
+                for i in range(41)]
+    post["comment_count"] = len(comments)
+    path = "/api/v1/board/post-held?format=flat"
+    full_path = path + "&comment_offset=0&comment_limit=100"
+    newest = h.SequencedHttpResponse([(200, h.board_detail_page(post, comments))])
+    gate = h.GatedHttpResponse((200, h.board_detail_page(post, comments, offset=0, limit=100)),
+                              hold_seconds=30.0)
+    fixtures["/api/v1/board?sort_by=hot"] = (200, {"posts": [post]})
+    fixtures[path] = newest
+    fixtures[full_path] = (200, h.board_detail_page(post, comments, offset=0, limit=100))
+
+    def interact(process, fd, _slave, output, _base):
+        try:
+            h.wait_for_output(process, fd, output, b"Health: ", start=0, timeout=10)
+            h.palette_go(process, fd, output, b"go board", b"MASC Board")
+            h.wait_for_output(process, fd, output, ONE_POST_LISTED, start=0, timeout=10)
+            h.send_and_wait(process, fd, output, b"\r", b"Held reply 021")
+            h.send_and_wait(process, fd, output, b"o", b"Held reply 000")
+            fixtures[full_path] = gate
+            os.write(fd, b"R")
+            assert h.wait_for_fixture_event(process, fd, output, gate.requested, timeout=10)
+            before = newest.served
+            refreshing = h.send_and_wait(process, fd, output, b"o", b"Held reply 000")
+            assert b"Held reply 000" in h.screen_text(refreshing)
+            assert newest.served == before, "history toggled during its active request"
+            assert not gate.completed.is_set(), "refresh fixture was not held"
+            h.release_and_wait_for_frame(process, fd, output, gate, b"Held reply 000")
+            h.send_and_wait(process, fd, output, b"o", b"Held reply 021")
+            assert newest.served > before, "settled history could not return to newest page"
+            os.write(fd, b"q")
+        finally:
+            gate.release.set()
+
+    h.run_terminal_scenario(executable, description="Board history mode owns its held refresh",
+                            interact=interact, http_fixtures=fixtures)
+
+
 if __name__ == "__main__":
+    run_long_ancestor_landing(os.path.abspath(sys.argv[1]))
+    print("Board long ancestor latest landing: PASS")
+    run_history_refresh_ownership(os.path.abspath(sys.argv[1]))
+    print("Board history refresh ownership: PASS")
+    run_snapshot_context(os.path.abspath(sys.argv[1]))
+    print("Board context ancestors and mixed revision refusal: PASS")
     run_full_width_comments(os.path.abspath(sys.argv[1]))
     print("Board full width comments: PASS")
     run_independent_windows(os.path.abspath(sys.argv[1]))

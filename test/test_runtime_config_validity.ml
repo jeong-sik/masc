@@ -5,7 +5,7 @@ open Masc
    rendered once here instead of at every call below. *)
 let load_list_text ~config_path =
   Runtime.load_list ~config_path
-  |> Result.map_error (Runtime.to_diagnostic_text ~config_path)
+  |> Result.map_error (Runtime_config_error.to_diagnostic_text ~config_path)
 ;;
 
 
@@ -18,7 +18,7 @@ let parse_or_fail content =
   | Ok doc -> doc
   | Error msg -> failf "TOML parse failed: %s" msg
 
-let agent_core_provider_config (runtime : Runtime.t) =
+let agent_core_provider_config (runtime : Runtime_instance.t) =
   match runtime.execution with
   | Runtime_execution.Agent_core provider_config -> provider_config
   | Runtime_execution.Codex_app_server _
@@ -190,7 +190,7 @@ let has_prefix ~prefix value =
 
 let find_runtime runtimes runtime_id =
   List.find_opt
-    (fun (runtime : Runtime.t) -> String.equal runtime.id runtime_id)
+    (fun (runtime : Runtime_instance.t) -> String.equal runtime.id runtime_id)
     runtimes
 
 let assert_ollama_cloud_seed_runtime runtimes case =
@@ -205,7 +205,7 @@ let assert_ollama_cloud_seed_runtime runtimes case =
        clamps and the pinned number never reaches anything (#28738). What the
        seed must keep stable is the window the runtime resolves. *)
     check (option int) (case.runtime_id ^ " context") (Some case.context)
-      (Runtime.resolve_max_context_of_runtime runtime |> Option.map fst);
+      (Runtime_instance.resolve_max_context_of_runtime runtime |> Option.map fst);
     check bool (case.runtime_id ^ " tools") case.tools
       runtime.model.tools_support;
     check (option bool) (case.runtime_id ^ " thinking") (Some case.thinking)
@@ -689,7 +689,7 @@ let test_repo_runtime_bindings_resolve_through_agent_core_provider_config () =
        visits the provider-backed bindings only. *)
     let provider_backed =
       List.filter
-        (fun (runtime : Runtime.t) ->
+        (fun (runtime : Runtime_instance.t) ->
            match runtime.execution with
            | Runtime_execution.Agent_core _ -> true
            | Runtime_execution.Codex_app_server _
@@ -699,7 +699,7 @@ let test_repo_runtime_bindings_resolve_through_agent_core_provider_config () =
         runtimes
     in
     List.iter
-      (fun (runtime : Runtime.t) ->
+      (fun (runtime : Runtime_instance.t) ->
          match
            Llm_provider.Provider_config.capabilities_for_config_model
              (agent_core_provider_config runtime)
@@ -729,7 +729,7 @@ let test_repo_deepseek_thinking_request () =
   let runtimes = match load_list_text ~config_path:path with
     | Ok (runtimes, _, _, _, _) -> runtimes
     | Error detail -> fail detail in
-  let runtime = match List.find_opt (fun (runtime : Runtime.t) ->
+  let runtime = match List.find_opt (fun (runtime : Runtime_instance.t) ->
       String.equal runtime.id "deepseek.deepseek-v4-pro") runtimes with
     | Some runtime -> runtime
     | None -> fail "direct DeepSeek seed runtime is missing" in
@@ -758,7 +758,7 @@ let test_repo_deepseek_nothinking_binding_requests_no_reasoning () =
   let runtimes = match load_list_text ~config_path:path with
     | Ok (runtimes, _, _, _, _) -> runtimes
     | Error detail -> fail detail in
-  let runtime = match List.find_opt (fun (runtime : Runtime.t) ->
+  let runtime = match List.find_opt (fun (runtime : Runtime_instance.t) ->
       String.equal runtime.id "ollama_cloud.ollama-cloud-deepseek-v4-1-flash-none") runtimes with
     | Some runtime -> runtime
     | None -> fail "no-thinking DeepSeek seed runtime is missing" in
@@ -1341,8 +1341,8 @@ let test_repo_runtime_toml_declares_no_clamped_max_context () =
             (Some provider_stated_context) catalog_context;
           check (option (pair int string)) (runtime_id ^ " uses its provider catalog")
             (Option.map (fun n -> n, "capability") catalog_context)
-            (Runtime.resolve_max_context_of_runtime runtime
-             |> Option.map (fun (n, source) -> n, Runtime.max_context_source_to_string source)))
+            (Runtime_instance.resolve_max_context_of_runtime runtime
+             |> Option.map (fun (n, source) -> n, Runtime_instance.max_context_source_to_string source)))
       [ "deepseek.deepseek-v4-flash", 1048576
       ; "ollama_cloud.ollama-cloud-deepseek-v4-1-flash", 1048576
       ; "ollama_cloud.ollama-cloud-deepseek-v4-pro", 1048576
@@ -1351,18 +1351,23 @@ let test_repo_runtime_toml_declares_no_clamped_max_context () =
       ];
     let clamped =
       List.filter_map
-        (fun (rt : Runtime.t) ->
-           match Runtime.resolve_max_context_of_runtime rt with
-           | Some (effective, Runtime.Override_clamped_by_capability) ->
+        (fun (rt : Runtime_instance.t) ->
+           match Runtime_instance.resolve_max_context_of_runtime rt with
+           | Some (effective, (Runtime_instance.Override_clamped_by_capability
+               | Runtime_instance.Provider_override_clamped_by_capability
+               | Runtime_instance.Binding_override_clamped_by_capability)) ->
              Some
                (Printf.sprintf
                   "%s declares %s and the catalog gives %d"
-                  rt.Runtime.id
-                  (match rt.Runtime.model.Runtime_schema.max_context with
-                   | Some declared -> string_of_int declared
-                   | None -> "<none>")
+                  rt.Runtime_instance.id
+                  (match rt.binding.max_context, rt.provider.max_context, rt.model.max_context with
+                   | Some declared, _, _ | None, Some declared, _
+                   | None, None, Some declared -> string_of_int declared
+                   | None, None, None -> "<none>")
                   effective)
-           | Some (_, (Runtime.Override | Runtime.Capability)) | None -> None)
+           | Some (_, (Runtime_instance.Override | Runtime_instance.Capability
+               | Runtime_instance.Provider_override | Runtime_instance.Binding_override))
+           | None -> None)
         runtimes
     in
     check (list string)
@@ -1494,7 +1499,7 @@ let test_self_hosted_templates_resolve_when_enabled () =
     (fun (runtime_id, context, structured, required_choice, parallel_calls) ->
        match
          List.find_opt
-           (fun (rt : Runtime.t) -> String.equal rt.Runtime.id runtime_id)
+           (fun (rt : Runtime_instance.t) -> String.equal rt.Runtime_instance.id runtime_id)
            runtimes
        with
        | None -> failf "uncommenting the example did not produce runtime %s" runtime_id
@@ -1527,7 +1532,7 @@ let test_official_client_declarations_load () =
   match load_list_text ~config_path:path with
   | Error msg -> failf "repo runtime.toml should load: %s" msg
   | Ok (runtimes, _default, _assignments, _media_failover, _lanes) ->
-    let ids = List.map (fun (rt : Runtime.t) -> rt.Runtime.id) runtimes in
+    let ids = List.map (fun (rt : Runtime_instance.t) -> rt.Runtime_instance.id) runtimes in
     List.iter
       (fun expected ->
          if not (List.exists (String.equal expected) ids)
@@ -1649,7 +1654,7 @@ let test_seed_catalog_decided_capability_keys_agree_with_the_catalog () =
   let visited = ref [] in
   let disagreements = ref [] in
   List.iter
-    (fun (runtime : Runtime.t) ->
+    (fun (runtime : Runtime_instance.t) ->
        match runtime.execution, runtime.model.capabilities with
        | Runtime_execution.Agent_core _, None
        | ( ( Runtime_execution.Codex_app_server _
@@ -1779,7 +1784,7 @@ let test_repo_runtime_toml_loads () =
       , lanes ) ->
     check bool "at least one runtime" true (List.length runtimes > 0);
     check string "default runtime" "ollama_cloud.ollama-cloud-glm-5-3-flash"
-      default.Runtime.id;
+      default.Runtime_instance.id;
     (match Runtime_toml.parse_file path with
      | Error _ -> fail "repo runtime.toml exact-output lanes must parse"
      | Ok config ->
@@ -1841,7 +1846,7 @@ List.iter
       (List.length ollama_cloud_seed_cases)
       (List.length
          (List.filter
-            (fun (runtime : Runtime.t) ->
+            (fun (runtime : Runtime_instance.t) ->
                has_prefix ~prefix:"ollama_cloud.ollama-cloud-" runtime.id)
             runtimes));
     List.iter
@@ -1852,7 +1857,7 @@ List.iter
          (find_runtime runtimes "ollama_cloud.ollama-cloud-deepseek-v4-flash"));
     (match
        List.find_opt
-         (fun (runtime : Runtime.t) ->
+         (fun (runtime : Runtime_instance.t) ->
             String.equal runtime.id "deepseek.deepseek-v4-pro")
          runtimes
      with
@@ -1871,7 +1876,7 @@ List.iter
         | None -> fail "expected DeepSeek Pro resolved capabilities"));
     (match
        List.find_opt
-         (fun (runtime : Runtime.t) ->
+         (fun (runtime : Runtime_instance.t) ->
             String.equal runtime.id "deepseek.deepseek-v4-flash")
          runtimes
      with
@@ -1896,7 +1901,7 @@ List.iter
         | None -> fail "expected DeepSeek Flash resolved capabilities"));
     (match
        List.find_opt
-         (fun (runtime : Runtime.t) ->
+         (fun (runtime : Runtime_instance.t) ->
             String.equal runtime.id "ollama_cloud.minimax-m3")
          runtimes
      with
@@ -1905,8 +1910,8 @@ List.iter
        check string "MiniMax M3 api name" "minimax-m3" runtime.model.api_name;
        check (option (pair int string)) "MiniMax M3 provider-derived context"
          (Some (512000, "capability"))
-         (Runtime.resolve_max_context_of_runtime runtime
-          |> Option.map (fun (n, source) -> n, Runtime.max_context_source_to_string source));
+         (Runtime_instance.resolve_max_context_of_runtime runtime
+          |> Option.map (fun (n, source) -> n, Runtime_instance.max_context_source_to_string source));
        (match runtime.model.capabilities with
         | Some caps ->
           check (option bool) "MiniMax M3 image input declared" (Some true)
@@ -2093,7 +2098,7 @@ let exact_slots_missing_body_deadline (config : Runtime_schema.config) =
   let provider_of_slot slot_id =
     match
       List.find_opt
-        (fun binding -> String.equal (Runtime.id_of_binding binding) slot_id)
+        (fun binding -> String.equal (Runtime_instance.id_of_binding binding) slot_id)
         config.bindings
     with
     | None -> None
@@ -2191,22 +2196,22 @@ let test_release_evidence_fixture_lanes_resolve_without_environment_credentials 
           default_runtime_id
     in
     let runtime =
-      match Runtime.of_binding config binding with
+      match Runtime_instance.of_binding config binding with
       | Ok runtime -> runtime
       | Error reason ->
         failf
           "release-evidence smoke default runtime must materialize: %s"
-          (Runtime.string_of_drop_reason reason)
+          (Runtime_config_error.string_of_drop_reason reason)
     in
     let provider_config = agent_core_provider_config runtime in
     check bool "synthetic credential reaches dispatch" false
       (Llm_provider.Secret.is_empty provider_config.api_key);
-    (match Runtime.validate_dispatch_credential ~provider_config runtime with
+    (match Runtime_instance.validate_dispatch_credential ~provider_config runtime with
      | Ok () -> ()
      | Error error ->
        failf
          "release-evidence smoke dispatch credential must be usable: %s"
-         (Runtime.dispatch_credential_error_to_string error));
+         (Runtime_instance.dispatch_credential_error_to_string error));
     List.iter
       (fun lane_id ->
          match
@@ -2557,8 +2562,8 @@ let test_runtime_atomic_getters_are_consistent_after_init () =
     check
       (option string)
       "get_default_runtime is stable"
-      (Option.map (fun (rt : Runtime.t) -> rt.id) default1)
-      (Option.map (fun (rt : Runtime.t) -> rt.id) default2);
+      (Option.map (fun (rt : Runtime_instance.t) -> rt.id) default1)
+      (Option.map (fun (rt : Runtime_instance.t) -> rt.id) default2);
     let ids1 = Runtime.get_runtime_ids () in
     let ids2 = Runtime.get_runtime_ids () in
     check (list string) "get_runtime_ids is stable" ids1 ids2;
@@ -3297,9 +3302,9 @@ let test_runtime_toml_rejects_a_table_inside_a_binding () =
 
 let test_runtime_context_marks_failure_renders_both_numbers () =
   let text =
-    Runtime.to_diagnostic_text
+    Runtime_config_error.to_diagnostic_text
       ~config_path:"runtime.toml"
-      (Runtime.Context_marks_exceed_max_context
+      (Runtime_config_error.Context_marks_exceed_max_context
          { runtime_id = "local.sample"; high_water_tokens = 2_048; max_context = 1_024 })
   in
   let mentions needle =
@@ -3333,17 +3338,17 @@ let test_runtime_refuses_context_marks_above_max_context () =
     match Runtime_toml.parse_string (context_marks_config ~high:(Some high) ~low:(Some low)) with
     | Error errs -> failf "marks should parse:\n%s" (render_parse_errors errs)
     | Ok cfg ->
-      (match Runtime.of_binding cfg (sample_binding cfg) with
+      (match Runtime_instance.of_binding cfg (sample_binding cfg) with
        | Ok rt -> rt
        | Error _ -> fail "local.sample should materialize")
   in
-  (match Runtime.validate_runtime_context_marks [ materialize ~high:2_048 ~low:300 ] with
-   | Error (Runtime.Context_marks_exceed_max_context { high_water_tokens; max_context; _ }) ->
+  (match Runtime_config_validation.validate_runtime_context_marks [ materialize ~high:2_048 ~low:300 ] with
+   | Error (Runtime_config_error.Context_marks_exceed_max_context { high_water_tokens; max_context; _ }) ->
      check int "the mark" 2_048 high_water_tokens;
      check int "the model's context" 1_024 max_context
    | Error _ -> fail "expected the marks failure"
    | Ok () -> fail "a high-water mark above max-context must be refused");
-  match Runtime.validate_runtime_context_marks [ materialize ~high:900 ~low:300 ] with
+  match Runtime_config_validation.validate_runtime_context_marks [ materialize ~high:900 ~low:300 ] with
   | Ok () -> ()
   | Error _ -> fail "marks within max-context must pass"
 ;;
@@ -3651,7 +3656,7 @@ let test_runtime_provider_disable_excludes_its_bindings () =
     | Error msg -> failf "disabled provider should not block active runtime: %s" msg
     | Ok (runtimes, _, _, _, _) ->
       check (list string) "materialized runtime ids" [ "active.sample" ]
-        (List.map (fun (runtime : Runtime.t) -> runtime.id) runtimes))
+        (List.map (fun (runtime : Runtime_instance.t) -> runtime.id) runtimes))
 ;;
 
 let test_runtime_binding_disable_excludes_only_that_binding () =
@@ -3680,7 +3685,7 @@ let test_runtime_binding_disable_excludes_only_that_binding () =
     | Error msg -> failf "disabled binding should not block active runtime: %s" msg
     | Ok (runtimes, _, _, _, _) ->
       check (list string) "materialized runtime ids" [ "local.good" ]
-        (List.map (fun (runtime : Runtime.t) -> runtime.id) runtimes));
+        (List.map (fun (runtime : Runtime_instance.t) -> runtime.id) runtimes));
   let referenced_runtime_toml =
     runtime_toml
     ^ "\n[runtime.assignments]\nkeeper_a = \"local.disabled\"\n"
@@ -3837,7 +3842,7 @@ let gaps_after_boot_load content =
 
 let gap_triples gaps =
   List.map
-    (fun (gap : Runtime.exact_slot_body_deadline_gap) ->
+    (fun (gap : Runtime_config_error.exact_slot_body_deadline_gap) ->
        Printf.sprintf "%s/%s/%s" gap.lane_id gap.slot_id gap.provider_id)
     gaps
 ;;
@@ -3996,7 +4001,7 @@ let test_catalog_and_gap_degradation_name_both_reasons () =
     ; unavailable_assignments = []
     }
   in
-  let exact_slots : Runtime.exact_slot_degradation =
+  let exact_slots : Runtime_config_error.exact_slot_degradation =
     { gaps = [ { lane_id = "librarian_exact"; slot_id = "local.sample"; provider_id = "local" } ]
     ; emptied_lane_ids = [ "librarian_exact" ]
     }
@@ -4055,7 +4060,7 @@ let test_binding_naming_an_undeclared_model_fails_the_load () =
     | Ok (runtimes, _, _, _, _) ->
       failf
         "binding naming an undeclared model must fail the load; got runtimes [%s]"
-        (String.concat "; " (List.map (fun (r : Runtime.t) -> r.id) runtimes))
+        (String.concat "; " (List.map (fun (r : Runtime_instance.t) -> r.id) runtimes))
     | Error msg ->
       check bool "error names the dangling binding" true
         (String_util.contains_substring msg "local.typo");
@@ -4098,7 +4103,7 @@ let test_non_provider_namespaces_are_not_bindings () =
     | Ok (runtimes, _, _, _, _) ->
       check (list string) "only the declared provider binds a runtime"
         [ "local.good" ]
-        (List.map (fun (runtime : Runtime.t) -> runtime.id) runtimes))
+        (List.map (fun (runtime : Runtime_instance.t) -> runtime.id) runtimes))
 ;;
 
 (* RFC-0206 §2.1 is unchanged by the above: a binding MASC is told not to run is
@@ -4138,7 +4143,7 @@ let test_deliberate_disable_is_still_a_tolerated_drop () =
     | Ok (runtimes, _, _, _, _) ->
       check (list string) "disabled binding and disabled provider are excluded"
         [ "local.good" ]
-        (List.map (fun (runtime : Runtime.t) -> runtime.id) runtimes))
+        (List.map (fun (runtime : Runtime_instance.t) -> runtime.id) runtimes))
 ;;
 
 (* [Provider_not_declared] is unreachable from TOML once the namespace is closed
@@ -4167,6 +4172,7 @@ let test_of_binding_reports_an_undeclared_provider () =
     ; enabled = true
     ; is_default = false
     ; wizard_default = false
+    ; max_context = None
     ; max_concurrent = None
     ; disable_parallel_tool_use = false
     ; context_marks = None
@@ -4180,14 +4186,14 @@ let test_of_binding_reports_an_undeclared_provider () =
     ; return_progress = None
     }
   in
-  match Runtime.of_binding cfg binding with
+  match Runtime_instance.of_binding cfg binding with
   | Ok _ -> fail "binding with an undeclared provider must not materialize"
-  | Error (Runtime.Provider_not_declared id) ->
+  | Error (Runtime_config_error.Provider_not_declared id) ->
     check string "reports the provider it could not find" "absent" id
   | Error other ->
     failf
       "expected Provider_not_declared, got %s"
-      (Runtime.string_of_drop_reason other)
+      (Runtime_config_error.string_of_drop_reason other)
 ;;
 
 let test_runtime_toml_rejects_non_boolean_enabled () =
@@ -4829,7 +4835,7 @@ let test_runtime_toml_max_concurrent_flows_to_provider_config () =
         , _lanes ) ->
       let expect id expected =
         match
-          List.find_opt (fun (rt : Runtime.t) -> String.equal rt.id id) runtimes
+          List.find_opt (fun (rt : Runtime_instance.t) -> String.equal rt.id id) runtimes
         with
         | None -> failf "expected runtime %s" id
         | Some rt ->
@@ -4837,7 +4843,7 @@ let test_runtime_toml_max_concurrent_flows_to_provider_config () =
             (option int)
             (Printf.sprintf "%s binding max_concurrent" id)
             expected
-            rt.Runtime.binding.max_concurrent;
+            rt.Runtime_instance.binding.max_concurrent;
           check
             (option int)
             (Printf.sprintf "%s provider_config max_concurrent_requests" id)
@@ -4891,7 +4897,7 @@ let test_runtime_toml_reasoning_effort_flows_to_provider_config () =
     | Ok (runtimes, _default, _assignments, _media_failover, _lanes) ->
       let effort id =
         match
-          List.find_opt (fun (rt : Runtime.t) -> String.equal rt.id id) runtimes
+          List.find_opt (fun (rt : Runtime_instance.t) -> String.equal rt.id id) runtimes
         with
         | None -> failf "expected runtime %s" id
         | Some rt ->
@@ -5157,7 +5163,7 @@ let test_unknown_capability_key_rejected_at_load () =
 (* PR-6 (bugs #14/#15/#36): [model.max-context] is now optional — a runtime
    can resolve its effective context window from the runtime.toml override,
    the AGENT_CORE capability catalog, or the override clamped by the catalog cap.
-   The four cases below cover [Runtime.resolve_max_context_of_runtime]'s
+   The four cases below cover [Runtime_instance.resolve_max_context_of_runtime]'s
    full match; the fifth covers the assignment-document default-rider join
    (bug #14) that [Server_dashboard_runtime_resolved_json.assignment_json]
    depends on. *)
@@ -5197,9 +5203,9 @@ let test_runtime_max_context_capability_only_uses_catalog_cap () =
             | Some rt ->
               check (option (pair int string)) "capability-derived max-context"
                 (Some (4096, "capability"))
-                (Runtime.resolve_max_context_of_runtime rt
+                (Runtime_instance.resolve_max_context_of_runtime rt
                  |> Option.map (fun (n, source) ->
-                   n, Runtime.max_context_source_to_string source)))))
+                   n, Runtime_instance.max_context_source_to_string source)))))
 
 let test_runtime_max_context_override_below_cap_wins_as_override () =
   let catalog =
@@ -5237,9 +5243,9 @@ let test_runtime_max_context_override_below_cap_wins_as_override () =
             | Some rt ->
               check (option (pair int string)) "override wins under the catalog cap"
                 (Some (2048, "override"))
-                (Runtime.resolve_max_context_of_runtime rt
+                (Runtime_instance.resolve_max_context_of_runtime rt
                  |> Option.map (fun (n, source) ->
-                   n, Runtime.max_context_source_to_string source)))))
+                   n, Runtime_instance.max_context_source_to_string source)))))
 
 let test_runtime_max_context_override_above_cap_is_clamped () =
   let catalog =
@@ -5278,9 +5284,9 @@ let test_runtime_max_context_override_above_cap_is_clamped () =
               check (option (pair int string))
                 "override above the catalog cap is clamped to the cap"
                 (Some (8192, "override_clamped_by_capability"))
-                (Runtime.resolve_max_context_of_runtime rt
+                (Runtime_instance.resolve_max_context_of_runtime rt
                  |> Option.map (fun (n, source) ->
-                   n, Runtime.max_context_source_to_string source)));
+                   n, Runtime_instance.max_context_source_to_string source)));
            let meta =
              match
                Masc_test_deps.meta_of_json_fixture
@@ -5866,6 +5872,21 @@ let test_typesafeai_refuses_a_stray_key () =
     "[typesafeai.absorb_gate]\nenabled = true\n" "absorb_gate must be a boolean"
 ;;
 
+(* otoml's strict float getter still reads a TOML integer, so the two
+   boundaries can be written as 0 and 1. *)
+let test_typesafeai_reads_integer_confidence_floor_boundaries () =
+  List.iter
+    (fun (literal, expected) ->
+       let tail = "[typesafeai]\nboard_attention_confidence_floor = " ^ literal ^ "\n" in
+       match Runtime_toml.parse_string (lsp_probe_config tail) with
+       | Error errors ->
+         failf "floor %s must parse: %s" literal (error_messages errors)
+       | Ok config ->
+         check (float 0.0) ("floor " ^ literal) expected
+           config.Runtime_schema.typesafeai.Runtime_schema.board_attention_confidence_floor)
+    [ "0", 0.0; "1", 1.0 ]
+;;
+
 let test_typesafeai_refuses_a_confidence_floor_outside_0_to_1 () =
   typesafeai_rejects ~what:"a floor above 1"
     "[typesafeai]\nboard_attention_confidence_floor = 1.5\n" "must be a number from 0 to 1";
@@ -6017,10 +6038,149 @@ let test_every_shipped_binding_is_admissible () =
          (String.concat "\n" refused))
 ;;
 
+let scoped_context_config ?(provider_context = "") ?(binding_context = "")
+    ?(model_context = "max-context = 272000") ?(http = false) () =
+  Printf.sprintf
+    {|[providers.scoped]
+%s
+%s
+[models.shared]
+api-name = "scoped-context-fixture"
+%s
+[models.shared.capabilities]
+supports-tool-choice = true
+[scoped.shared]
+%s
+[runtime]
+default = "scoped.shared"
+|}
+    (if http then "protocol = \"openai-compatible-http\"\nkind = \"openai_compat\"\nendpoint = \"http://127.0.0.1:1/v1\"\ncredentials = { type = \"inline\", value = \"fixture\" }"
+     else "protocol = \"codex-app-server\"\nis-non-interactive = true\ncommand = \"codex\"\naccount-home = \"/tmp/context-fixture-account\"")
+    provider_context model_context binding_context
+;;
+
+let scoped_context_runtime text =
+  let config = match Runtime_toml.parse_string text with
+    | Ok config -> config
+    | Error errors -> failf "scoped context parse: %s" (render_parse_errors errors) in
+  match Runtime_instance.of_binding config (List.hd config.bindings) with
+  | Ok runtime -> runtime
+  | Error reason -> failf "scoped context binding must materialize: %s"
+      (Runtime_config_error.string_of_drop_reason reason)
+;;
+
+let test_context_declaration_precedence_and_http_agreement () =
+  List.iter (fun http ->
+    List.iter (fun (provider_context, binding_context, expected, provenance) ->
+      let runtime = scoped_context_runtime
+        (scoped_context_config ~http ~provider_context ~binding_context ()) in
+      check (option (pair int string)) "resolved scoped declaration"
+        (Some (expected, provenance))
+        (Runtime_instance.resolve_max_context_of_runtime runtime
+         |> Option.map (fun (tokens, source) -> tokens, Runtime_instance.max_context_source_to_string source));
+      match runtime.execution with
+      | Runtime_execution.Agent_core config ->
+        check (option int) "HTTP admission uses the same window" (Some expected) config.max_context;
+        check (option int) "custom capability uses selected window, not model default" (Some expected)
+          (Option.bind (Llm_provider.Provider_config.capabilities_for_config_model config)
+             (fun caps -> caps.Llm_provider.Capabilities.max_context_tokens))
+      | Runtime_execution.Codex_app_server _ -> ()
+      | _ -> fail "unexpected fixture execution owner")
+      ["", "", 272000, "override";
+       "max-context = 400000", "", 400000, "provider_override";
+       "max-context = 400000", "max-context = 1000000", 1000000, "binding_override";
+       "max-context = 400000", "max-context = 128000", 128000, "binding_override"])
+    [false; true]
+;;
+
+let test_same_model_context_windows_coexist () =
+  let provider id extra = Printf.sprintf
+    "[providers.%s]\nprotocol = \"codex-app-server\"\nis-non-interactive = true\ncommand = \"codex\"\naccount-home = \"/tmp/shared-context-account\"\n%s\n" id extra in
+  let text = String.concat "\n"
+    [provider "standard" ""; provider "medium" "max-context = 400000";
+     provider "large" "max-context = 400000";
+     "[models.shared]\napi-name = \"gpt-6.1-sol\"\nmax-context = 272000";
+     "[standard.shared]\n[medium.shared]\n[large.shared]\nmax-context = 1000000";
+     "[runtime]\ndefault = \"standard.shared\""] in
+  let cfg = match Runtime_toml.parse_string text with
+    | Ok cfg -> cfg | Error errs -> failf "coexisting config: %s" (render_parse_errors errs) in
+  check int "one model definition" 1 (List.length cfg.models);
+  let inventory = Runtime_wizard_inventory.to_json cfg |> Yojson.Safe.Util.member "runtimes" |> Yojson.Safe.Util.to_list in
+  List.iter (fun (provider_id, expected) ->
+    let binding = List.find (fun (binding : Runtime_schema.binding) -> binding.provider_id = provider_id) cfg.bindings in
+    let runtime = match Runtime_instance.of_binding cfg binding with
+      | Ok runtime -> runtime
+      | Error reason -> failf "coexisting binding must materialize: %s"
+          (Runtime_config_error.string_of_drop_reason reason) in
+    check string "shared provider API model" "gpt-6.1-sol" runtime.model.api_name;
+    let row = List.find (fun row -> Yojson.Safe.Util.(row |> member "provider_id" |> to_string) = provider_id) inventory in
+    check int "wizard keeps the served binding declaration" expected
+      Yojson.Safe.Util.(row |> member "max_context" |> to_int);
+    check string "wizard reports the declaration scope"
+      (Runtime_instance.resolve_max_context_of_runtime runtime |> Option.get |> snd |> Runtime_instance.max_context_source_to_string)
+      Yojson.Safe.Util.(row |> member "max_context_source" |> to_string);
+    check int "independent served window" expected (Runtime_instance.max_context_of_runtime runtime))
+    ["standard", 272000; "medium", 400000; "large", 1000000]
+;;
+
+let test_context_declarations_reject_nonpositive_and_wrong_type () =
+  List.iter (fun value ->
+    List.iter (fun provider ->
+      let field = "max-context = " ^ value in
+      let text = if provider then scoped_context_config ~provider_context:field ()
+        else scoped_context_config ~binding_context:field () in
+      match Runtime_toml.parse_string text with
+      | Error _ -> ()
+      | Ok _ -> fail "invalid scoped max-context was accepted") [false; true])
+    ["0"; "-1"; "\"400000\""; "400000.0"; "true"]
+;;
+
+let test_context_scopes_preserve_genuine_catalog_cap () =
+  with_model_catalog_content
+    "[[models]]\nid_prefix = \"scoped-context-fixture\"\nprovider_name = \"scoped\"\nbase = \"openai_chat\"\nmax_context_tokens = 500000\n"
+    (fun () ->
+      List.iter (fun (provider_context, binding_context, provenance) ->
+        let runtime = scoped_context_runtime
+          (scoped_context_config ~http:true ~provider_context ~binding_context ()) in
+        check (option (pair int string)) "real catalog limit still clamps"
+          (Some (500000, provenance))
+          (Runtime_instance.resolve_max_context_of_runtime runtime
+           |> Option.map (fun (tokens, source) -> tokens, Runtime_instance.max_context_source_to_string source));
+        check (option int) "HTTP adapter applies the real cap" (Some 500000)
+          (agent_core_provider_config runtime).max_context)
+        ["max-context = 1000000", "", "provider_override_clamped_by_capability";
+         "max-context = 400000", "max-context = 1000000", "binding_override_clamped_by_capability"])
+;;
+
+let test_context_scope_survives_config_edit () =
+  let text = scoped_context_config ~provider_context:"max-context = 400000"
+      ~binding_context:"max-context = 1000000" () in
+  let snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect ~finally:(fun () -> Runtime.For_testing.restore snapshot) (fun () ->
+    with_temp_runtime_toml text (fun path ->
+      (match Runtime.edit_config_text ~runtime_config_path:path (fun current ->
+         current ^ "\n[tui]\ntheme = \"gruvbox-dark\"\n") with
+       | Ok _ -> () | Error detail -> failf "scoped config edit: %s" detail);
+      let runtime = scoped_context_runtime (Fs_compat.load_file path) in
+      check (option int) "provider declaration survives saving" (Some 400000) runtime.provider.max_context;
+      check (option int) "binding declaration survives saving" (Some 1000000) runtime.binding.max_context;
+      check int "saved resolution remains scoped" 1000000 (Runtime_instance.max_context_of_runtime runtime)))
+;;
+
 let () =
   run "runtime_config_validity"
     [ ( "runtime TOML gate",
-        [ test_case "runtime.json is not a repo config source" `Quick
+        [ test_case "same model serves three context windows concurrently" `Quick
+            test_same_model_context_windows_coexist;
+          test_case "context declarations resolve by deployment scope" `Quick
+            test_context_declaration_precedence_and_http_agreement;
+          test_case "scoped context declarations reject invalid values" `Quick
+            test_context_declarations_reject_nonpositive_and_wrong_type;
+          test_case "scoped declarations retain real catalog context caps" `Quick
+            test_context_scopes_preserve_genuine_catalog_cap;
+          test_case "scoped context declarations survive config edits" `Quick
+            test_context_scope_survives_config_edit;
+          test_case "runtime.json is not a repo config source" `Quick
             test_runtime_json_not_in_repo_config;
           test_case "every shipped binding is admissible" `Quick
             test_every_shipped_binding_is_admissible;
@@ -6335,6 +6495,8 @@ let () =
         ; test_case "reads destinations written as table headers" `Quick
             test_typesafeai_reads_destinations_written_as_table_headers
         ; test_case "refuses a stray key" `Quick test_typesafeai_refuses_a_stray_key
+        ; test_case "reads integer confidence floor boundaries" `Quick
+            test_typesafeai_reads_integer_confidence_floor_boundaries
         ; test_case "refuses a confidence floor outside 0 to 1" `Quick
             test_typesafeai_refuses_a_confidence_floor_outside_0_to_1
         ; test_case "refuses a value that names nothing" `Quick

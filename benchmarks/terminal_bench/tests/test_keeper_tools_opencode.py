@@ -461,6 +461,23 @@ def test_parent_cancellation_still_records_the_dist_identity(tmp_path, monkeypat
     assert "keeper_usage" not in context.metadata
 
 
+def test_parent_cancellation_still_records_the_config_provenance(tmp_path, monkeypatch):
+    async def cancelled_parent(self, instruction, environment, context):
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(
+        "harbor.agents.installed.opencode.OpenCode.run", cancelled_parent)
+    agent = make_agent(tmp_path)
+    from masc_config_provenance import ConfigProvenance
+    agent._config_provenance = ConfigProvenance(
+        checkout_commit="c" * 40, checkout_dirty=False,
+        runtime_toml_sha256="r" * 64, config_dir_sha256="d" * 64, effort="high")
+    context = AgentContext()
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(agent.run("solve the task", FakeEnv(), context))
+    assert context.metadata["config_provenance"]["config_dir_sha256"] == "d" * 64
+
+
 def test_the_keeper_pool_runs_without_a_github_credential(tmp_path, monkeypatch):
     """The remote_ssh preflight checks a GitHub login only for an endpoint that
     has one (#35412), and a token given here reaches every task container."""

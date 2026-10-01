@@ -1,4 +1,5 @@
-let valid_text = {|[payout]
+let valid_text = {|half_life = "off"
+[payout]
 weight_max = 10
 deduction_rate = 10
 deduction_floor = 200
@@ -34,20 +35,63 @@ let test_explicit_policy () =
   match enabled with
   | Candle_config.Enabled policy ->
     List.iter2 (fun grade expected -> Alcotest.(check int) (Candle_grade.to_string grade)
-      expected (Candle_config.grade_amount_milli policy grade))
+      expected (Candle_config.grade_amount_milli policy.payout grade))
       Candle_grade.all [1000;2000;3000;4000;5000]
   | Off | Disabled _ -> Alcotest.fail "complete payout policy was rejected"
 ;;
 
+let test_optional_shop_prices () =
+  List.iter (fun suffix ->
+    match Candle_config.of_toml_string (valid_text ^ suffix) with
+    | Candle_config.Enabled policy ->
+        List.iter (fun item ->
+          Alcotest.(check bool) "omitted price is unpriced" true
+            (Candle_config.price policy item = Candle_config.Unpriced))
+          Keeper_portrait_item.all;
+        Alcotest.(check int) "payout remains enabled" 1000
+          (Candle_config.grade_amount_milli policy.payout Candle_grade.Trivial)
+    | Off | Disabled _ -> Alcotest.fail "omitting optional prices disabled payouts")
+    [""; "[shop]\n"; "[shop.prices_milli]\n"];
+  List.iter (fun suffix ->
+    ignore (disabled_reason (Candle_config.of_toml_string (valid_text ^ suffix))))
+    ["[shop]\nprices_milli = 1\n";
+     "[shop]\nunknown = 1\n";
+     "[shop.prices_milli]\nunknown_item = 1\n";
+     "[shop.prices_milli]\ncrown = -1\n";
+     "[shop.prices_milli]\ncrown = \"1\"\n"]
+;;
+
+
+let test_explicit_half_life () =
+  let lines = String.split_on_char '\n' valid_text in
+  let without = List.filter (fun line -> not (String.starts_with ~prefix:"half_life =" line)) lines
+    |> String.concat "\n" in
+  ignore (disabled_reason (Candle_config.of_toml_string without));
+  List.iter (fun raw ->
+    ignore (disabled_reason (Candle_config.of_toml_string ("half_life = " ^ raw ^ "\n" ^ without))))
+    ["0";"-1";"true";"1.5";"\"OFF\"";"\"1\"";"{}"];
+  List.iter (fun hours -> match Candle_config.of_toml_string
+      ("half_life = " ^ string_of_int hours ^ "\n" ^ without) with
+    | Enabled policy -> Alcotest.(check bool) "explicit integer hours preserve the configured value" true
+        (policy.half_life = Candle_decay.Hours hours)
+    | Off | Disabled _ -> Alcotest.fail "valid half-life hours rejected") [1;max_int];
+  match enabled with
+  | Enabled policy -> Alcotest.(check bool) "Off is explicit and is not a default" true
+      (policy.half_life = Candle_decay.Off)
+  | Off | Disabled _ -> Alcotest.fail "explicit Off rejected"
+;;
+
 let test_policy_boundaries () =
   let text ~weight ~amount = Printf.sprintf
-    "[payout]\nweight_max = %d\ndeduction_rate = 0\ndeduction_floor = 1000\n[payout.grades_milli]\ntrivial = %d\nsmall = 0\nmedium = 0\nlarge = 0\nepic = 0\n" weight amount in
+    "half_life = \"off\"\n[payout]\nweight_max = %d\ndeduction_rate = 0\ndeduction_floor = 1000\n[payout.grades_milli]\ntrivial = %d\nsmall = 0\nmedium = 0\nlarge = 0\nepic = 0\n" weight amount in
   List.iter (fun weight ->
-    let limit = min (max_int / weight) (max_int / 1000) in
-    (match Candle_config.of_toml_string (text ~weight ~amount:limit) with
-     | Enabled policy -> Alcotest.(check int) "largest safe amount" limit policy.trivial_milli
-     | Off | Disabled _ -> Alcotest.fail "safe arithmetic boundary rejected");
-    ignore (disabled_reason (Candle_config.of_toml_string (text ~weight ~amount:(limit + 1)))))
+    (match Candle_config.of_toml_string (text ~weight ~amount:max_int) with
+     | Enabled policy -> Alcotest.(check int) "largest representable amount" max_int policy.payout.trivial_milli
+     | Off | Disabled _ -> Alcotest.fail "representable grade amount rejected");
+    let beyond = Int64.(to_string (add (of_int max_int) 1L)) in
+    let oversized = Printf.sprintf
+      "half_life = \"off\"\n[payout]\nweight_max = %d\ndeduction_rate = 0\ndeduction_floor = 1000\n[payout.grades_milli]\ntrivial = %s\nsmall = 0\nmedium = 0\nlarge = 0\nepic = 0\n" weight beyond in
+    ignore (disabled_reason (Candle_config.of_toml_string oversized)))
     [1; 1000; 1001; max_int];
   ignore (disabled_reason (Candle_config.of_toml_string (text ~weight:0 ~amount:1)));
   ignore (disabled_reason (Candle_config.of_toml_string (text ~weight:1 ~amount:(-1))));
@@ -169,7 +213,9 @@ let () =
   Alcotest.run
     "candle_config"
     [ ( "content"
-      , [ Alcotest.test_case "arithmetic and required-field boundaries" `Quick test_policy_boundaries
+      , [ Alcotest.test_case "optional shop prices preserve payouts" `Quick test_optional_shop_prices
+        ; Alcotest.test_case "arithmetic and required-field boundaries" `Quick test_policy_boundaries
+        ; Alcotest.test_case "half-life is explicit and strictly typed" `Quick test_explicit_half_life
         ; Alcotest.test_case "explicit policy is required" `Quick test_explicit_policy
         ; Alcotest.test_case "a key this build does not know disables" `Quick
             test_a_key_this_build_does_not_know_disables

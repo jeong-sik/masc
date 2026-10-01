@@ -124,7 +124,8 @@ let candle_toml config =
 ;;
 
 let ledger_path config = Candle_ledger.path ~base_path:(base_path_of config)
-let enable_candle config = write_file (candle_toml config) {|[payout]
+let enable_candle config = write_file (candle_toml config) {|half_life = "off"
+[payout]
 weight_max = 10
 deduction_rate = 10
 deduction_floor = 200
@@ -166,15 +167,17 @@ let no_ledger label config =
 ;;
 
 let goal_ids events =
-  List.map
+  List.filter_map
     (fun (event : Candle_event.t) ->
        match event.body with
        | Candle_event.Snapshot { goal_id; _ }
        | Candle_event.Payout_owed { goal_id; _ }
        | Candle_event.Candidates { goal_id; _ }
        | Candle_event.Unattributed { goal_id; _ }
-       | Candle_event.Payout_failed { goal_id; _ } -> goal_id
-       | Candle_event.Paid p -> p.identity.goal_id)
+       | Candle_event.Payout_failed { goal_id; _ } -> Some goal_id
+       | Candle_event.Paid p -> Some p.identity.goal_id
+       | Candle_event.Half_life_set _ -> None
+       | Candle_event.Equipped _ | Candle_event.Purchased _ -> Alcotest.fail "a purchase has no Goal identity")
     events
 ;;
 

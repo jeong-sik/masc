@@ -1559,6 +1559,14 @@ let test_readonly_policy_projection_is_descriptor_owned () =
     (List.mem "tool_write_file" projected)
 
 let test_concurrent_execution_opt_ins_are_exact () =
+  let balance = required_internal_descriptor "keeper_candle_balance" in
+  Alcotest.(check bool) "balance policy sync is a serial mutation" true
+    (balance.execution = Descriptor.Ordinary Descriptor.Serial);
+  let metadata = Masc.Tool_catalog.metadata "keeper_candle_balance" in
+  Alcotest.(check bool) "balance policy sync is not read-only" true
+    (metadata.readonly = Some false);
+  Alcotest.(check bool) "balance policy sync requires write-class permission" true
+    (metadata.required_permission = Masc_domain.CanBroadcast);
   let concurrent_internal_names =
     all_descriptors ()
     |> List.filter_map (fun (descriptor : Descriptor.t) ->
@@ -1571,6 +1579,7 @@ let test_concurrent_execution_opt_ins_are_exact () =
   Alcotest.(check (list string))
     "only explicitly audited handlers opt into concurrent batches"
     [ "keeper_artifact_read"
+    ; "keeper_candle_catalog"
     ; "keeper_capability_search"
     ; "keeper_constitution_read"
     ; "keeper_lane_status"

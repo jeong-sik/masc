@@ -157,7 +157,7 @@ let check_same_provenance label
 ;;
 
 let partition_history ~base_path ~keeper_name =
-  Partition.For_testing.path ~base_path ~keeper_name
+  Partition.ledger_path ~base_path ~keeper_name
   |> Fs_compat.load_file
   |> String.split_on_char '\n'
   |> List.filter (fun line -> not (String.equal line ""))
@@ -1416,12 +1416,14 @@ let run_eio_with_http_pool f =
 
 (* Jev is on for [f] and asks the server at [endpoint]. *)
 let with_jev
+      ?(excluded_keepers = [])
       ~endpoint
       f
   =
   Masc_test_deps.with_process_env "TYPESAFEAI_API_KEY" (Some "test-typesafeai-key") (fun () ->
     Masc_test_deps.with_typesafeai_policy
       { Runtime_schema.default_typesafeai with
+        excluded_keepers;
         destinations =
           ( { Runtime_schema.endpoint; model = "requested-model"; api_key_env = "TYPESAFEAI_API_KEY" }
           , [] )
@@ -1501,16 +1503,41 @@ type jev_run =
 
 (* Runs the exact flow with Jev switched on and answering [jev_choice], in
    front of one LLM slot that answers relevant. *)
+(* [candidate] after an operator requeued it from a quarantine: the durable
+   requeue the worker executes like a pending candidate. *)
+let requeued_after_quarantine (pending : Candidate.candidate) : Candidate.candidate =
+  let quarantine : Candidate.quarantine =
+    { quarantine_id = "ba-quarantine-" ^ pending.candidate_id
+    ; partition_id = "ba-root-" ^ pending.candidate_id
+    ; partition_generation = Masc.Keeper_board_attention_partition_generation.initial
+    ; failure_category = Candidate.Exact_lane_exhausted
+    ; attempt_provenance = None
+    ; quarantined_at = 2.0
+    ; prior_status = Candidate.Resumable_pending { last_delivery_failure = None }
+    }
+  in
+  { pending with
+    status =
+      Candidate.Quarantine
+        { quarantine
+        ; phase = Candidate.Requeued { requeued_at = 4.0; requested_by = "operator-test" }
+        }
+  }
+;;
+
 let execute_behind_jev
       ?(jev_confidence = 0.6)
       ?(jev_probabilities = [ "relevant", 0.2; "not_relevant", 0.8 ])
+      ?(requeued = false)
       ~name
       ~jev_choice
       ()
   =
   with_prompt_registry (fun () ->
     run_eio_with_http_pool (fun ~sw ~net ~clock ->
-      let candidate = candidate name in
+      let candidate =
+        if requeued then requeued_after_quarantine (candidate name) else candidate name
+      in
       let jev =
         Fixture.start_server
           ~sw
@@ -1617,6 +1644,19 @@ let check_terminal_provenance label run provenance =
   | _ -> Alcotest.failf "%s: terminal evidence is missing" label
 ;;
 
+let check_terminal_confidence label run expected =
+  match run.terminal_jev with
+  | [ jev ] ->
+    (match json_field "confidence" jev with
+     | Some (`Float confidence) ->
+       Alcotest.(check (float 0.000001))
+         (label ^ ": the terminal entry keeps Jev's confidence")
+         expected
+         confidence
+     | Some _ | None -> Alcotest.failf "%s: terminal entry has no numeric confidence" label)
+  | _ -> Alcotest.failf "%s: terminal evidence is missing" label
+;;
+
 let test_jev_relevant_is_kept () =
   let run =
     execute_behind_jev
@@ -1627,6 +1667,7 @@ let test_jev_relevant_is_kept () =
       ()
   in
   check_terminal_jev "relevant" ~answer:"relevant" ~rejudged:None run;
+  check_terminal_confidence "relevant" run 0.9;
   match run.result with
   | Ok judgment ->
     Alcotest.(check int) "Jev asked once" 1 run.jev_posts;
@@ -1686,6 +1727,7 @@ let test_jev_confident_not_relevant_is_kept () =
       ()
   in
   check_terminal_jev "not_relevant" ~answer:"not_relevant" ~rejudged:None run;
+  check_terminal_confidence "not_relevant" run 0.9;
   match run.result with
   | Ok judgment ->
     Alcotest.(check int) "Jev asked once" 1 run.jev_posts;
@@ -1711,6 +1753,30 @@ let settle_floor =
 
 let below_the_settle_floor = settle_floor /. 2.0
 
+(* A requeued quarantine is executed like a pending candidate, so Jev is asked
+   first for it too; before, it skipped Jev and went to the LLM lane. *)
+let test_jev_settles_a_requeued_candidate () =
+  let run =
+    execute_behind_jev
+      ~requeued:true
+      ~name:"board-attention-jev-requeued"
+      ~jev_choice:"not_relevant"
+      ~jev_confidence:0.9
+      ~jev_probabilities:[ "relevant", 0.05; "not_relevant", 0.95 ]
+      ()
+  in
+  check_terminal_jev "requeued" ~answer:"not_relevant" ~rejudged:None run;
+  Alcotest.(check int) "Jev is asked for the requeued candidate" 1 run.jev_posts;
+  Alcotest.(check int) "the LLM lane is not asked" 0 run.llm_posts;
+  match run.result with
+  | Ok judgment ->
+    (match judgment.Candidate.source with
+     | Candidate.Vendor_system_one _ -> ()
+     | Candidate.Exact_attempt _ | Candidate.Cli_lane_slot ->
+       Alcotest.fail "the requeued candidate's judgment must be Jev's")
+  | Error _ -> Alcotest.fail "the requeued candidate did not complete the flow"
+;;
+
 (* Either decision below the floor goes to the LLM lane, and the terminal entry
    keeps what Jev decided next to what the lane decided. *)
 let test_jev_low_confidence_is_judged_again () =
@@ -1727,19 +1793,13 @@ let test_jev_low_confidence_is_judged_again () =
        check_judged_by_the_llm_lane label run;
        check_terminal_jev label ~answer:"low_confidence" ~rejudged:(Some "relevant") run;
        check_terminal_provenance label run (expected_jev_provenance run);
+       check_terminal_confidence label run below_the_settle_floor;
        match run.terminal_jev with
        | [ jev ] ->
          Alcotest.(check (option string))
            (label ^ ": the terminal entry keeps Jev's decision")
            (Some choice)
-           (json_string_field "decision" jev);
-         (match json_field "confidence" jev with
-          | Some (`Float confidence) ->
-            Alcotest.(check (float 0.000001))
-              (label ^ ": the terminal entry keeps Jev's confidence")
-              below_the_settle_floor
-              confidence
-          | Some _ | None -> Alcotest.failf "%s: terminal entry has no numeric confidence" label)
+           (json_string_field "decision" jev)
        | _ -> Alcotest.failf "%s: terminal evidence is missing" label)
     [ "relevant"; "not_relevant" ]
 ;;
@@ -1757,16 +1817,7 @@ let test_jev_uncertain_is_judged_again () =
   check_judged_by_the_llm_lane "uncertain" run;
   check_terminal_jev "uncertain" ~answer:"uncertain" ~rejudged:(Some "relevant") run;
   check_terminal_provenance "uncertain" run (expected_jev_provenance run);
-  (match run.terminal_jev with
-   | [ jev ] ->
-     (match json_field "confidence" jev with
-      | Some (`Float confidence) ->
-        Alcotest.(check (float 0.000001))
-          "the terminal entry retains confidence as observation"
-          0.26
-          confidence
-      | Some _ | None -> Alcotest.fail "uncertain: terminal entry has no numeric confidence")
-   | _ -> Alcotest.fail "uncertain: terminal evidence is missing")
+  check_terminal_confidence "uncertain" run 0.26
 ;;
 
 let test_jev_confidence_at_the_floor_settles () =
@@ -1869,6 +1920,91 @@ let test_jev_choice_outside_the_question_is_judged_again () =
 (* The adapter alone, against the same stand-in: the request offers the two
    decisions under their labels, and a not-relevant answer decodes to
    [Not_relevant] rather than an error. *)
+let test_jev_event_fanout_settles_and_defers () =
+  run_eio_with_http_pool (fun ~sw ~net ~clock ->
+    with_temp_base "board-event-fanout" @@ fun base_path ->
+    let first = candidate "shared-event" in
+    let make_keeper keeper_name =
+      { first with Candidate.keeper_name
+      ; candidate_id = Candidate.candidate_id_of_signal ~keeper_name first.signal
+      ; keeper_context = `Assoc
+          [ "lane_keeper_name", `String keeper_name
+          ; "board_interests", `List [`String "runtime"] ] }
+    in
+    let second = make_keeper "beta" in
+    let third = make_keeper "gamma" in
+    let relevant = make_keeper "delta" in
+    let excluded = make_keeper "excluded" in
+    let missing = make_keeper "missing" in
+    let answer choice confidence =
+      `Assoc [ "type", `String "choice"; "choice", `String choice
+             ; "probabilities", `Assoc ["relevant", `Float 0.1; "not_relevant", `Float 0.8; "uncertain", `Float 0.1]
+             ; "confidence", `Float confidence ]
+    in
+    let response = Yojson.Safe.to_string (`Assoc
+      [ "model", `String "jev-latest"
+      ; "answers", `Assoc
+          [first.candidate_id, answer "not_relevant" 1.0
+          ;second.candidate_id, answer "uncertain" 1.0
+          ;third.candidate_id, answer "not_relevant" 0.0
+          ;relevant.candidate_id, answer "relevant" 1.0] ]) in
+    let jev = Fixture.start_server ~sw ~net ~clock (Fixture.Reply response) in
+    with_jev ~excluded_keepers:["excluded"] ~endpoint:jev.base_url (fun () ->
+      List.iter (fun c -> match Candidate.record ~base_path c with
+        | Candidate.Recorded _ -> ()
+        | Candidate.Duplicate _ | Candidate.Record_error _ -> Alcotest.fail "record failed")
+        [first; second; third; relevant; excluded; missing];
+      Eio.Switch.run (fun batch_sw ->
+        Keeper_board_attention_fanout.dispatch ~sw:batch_sw ~clock ~base_path [first; second; third; relevant; excluded; missing]);
+      let load c = match Candidate.load_candidates ~base_path ~keeper_name:c.Candidate.keeper_name with
+        | Ok [c] -> c
+        | _ -> Alcotest.fail "candidate ledger missing" in
+      (match (load first).status with
+       | Candidate.Consumed { delivery = Candidate.Not_relevant; judgment; _ } ->
+         (match judgment.source with
+          | Candidate.Vendor_system_one _ -> ()
+          | _ -> Alcotest.fail "wrong judgment source")
+       | _ -> Alcotest.fail "confident answer did not settle");
+      List.iter (fun c ->
+        (match (load c).status with Candidate.Pending _ -> () | _ -> Alcotest.fail "review candidate consumed");
+        match Keeper_board_attention_partition.load ~base_path ~keeper_name:c.keeper_name with
+        | Ok [{ state = Keeper_board_attention_partition.Ready; _ }] -> ()
+        | _ -> Alcotest.fail "review partition not returned to worker") [second; third; missing];
+      (match (load excluded).status with Candidate.Pending _ -> () | _ -> Alcotest.fail "excluded candidate judged");
+      (match (load relevant).status with Candidate.Pending _ -> () | _ -> Alcotest.fail "relevant delivery bypassed owner");
+      (match Partition.load ~base_path ~keeper_name:relevant.keeper_name with
+       | Ok [{ state = Partition.Completed _; _ }] -> ()
+       | _ -> Alcotest.fail "relevant completion not durable");
+      match Fixture.request_bodies jev with
+      | [body] ->
+        let json = Yojson.Safe.from_string body in
+        let questions = Yojson.Safe.Util.(json |> member "questions" |> to_assoc) in
+        Alcotest.(check int) "one request carries eligible questions" 5 (List.length questions);
+        Alcotest.(check bool) "excluded keeper is not sent" false (List.mem_assoc excluded.candidate_id questions);
+        Alcotest.(check bool) "signal-only state" true
+          (Yojson.Safe.Util.member "state" json = `Assoc ["signal", Candidate.signal_to_yojson first.signal])
+      | _ -> Alcotest.fail "event did not make exactly one request"))
+;;
+
+let test_jev_event_fanout_failure_releases_claim () =
+  run_eio_with_http_pool (fun ~sw ~net ~clock ->
+    with_temp_base "board-event-fanout-failure" @@ fun base_path ->
+    let c = candidate "failed-event" in
+    let jev = Fixture.start_server ~sw ~net ~clock (Fixture.Reply "{}") in
+    with_jev ~endpoint:jev.base_url (fun () ->
+      (match Candidate.record ~base_path c with
+       | Candidate.Recorded _ -> ()
+       | _ -> Alcotest.fail "record failed");
+      Eio.Switch.run (fun batch_sw ->
+        Keeper_board_attention_fanout.dispatch ~sw:batch_sw ~clock ~base_path [c]);
+      (match Candidate.load_candidates ~base_path ~keeper_name:c.keeper_name with
+       | Ok [{ status = Candidate.Pending _; _ }] -> ()
+       | _ -> Alcotest.fail "failed batch changed the pending candidate");
+      match Partition.load ~base_path ~keeper_name:c.keeper_name with
+      | Ok [{ state = Partition.Ready; _ }] -> ()
+      | _ -> Alcotest.fail "failed batch stranded a claimed partition"))
+;;
+
 let test_jev_adapter_sends_the_decisions_and_reads_not_relevant () =
   run_eio_with_http_pool (fun ~sw ~net ~clock ->
     let candidate = candidate "board-attention-jev-adapter" in
@@ -1907,7 +2043,7 @@ let test_jev_adapter_sends_the_decisions_and_reads_not_relevant () =
        | Typesafeai_board_attention.Needs_review _ ->
          Alcotest.fail "a not_relevant answer decoded as another assessment");
       Alcotest.(check (float 0.0))
-        "the adapter retains Jev's confidence as observation"
+        "the adapter returns Jev's confidence"
         0.6
         judged.confidence;
       match Fixture.request_bodies jev with
@@ -1927,20 +2063,35 @@ let test_jev_adapter_sends_the_decisions_and_reads_not_relevant () =
           | _ -> None, None
         in
         Alcotest.(check bool)
-          "Jev receives exactly the current signal and projected keeper role"
+          "Jev's state carries only the current signal"
           true
-          (state =
-           Some
-             (match Candidate.singleton_judgment_request candidate with
-              | Ok request -> request
-              | Error detail ->
-                Alcotest.failf "candidate request projection failed: %s" detail));
+          (state = Some (`Assoc [ "signal", Candidate.signal_to_yojson candidate.signal ]));
+        let interests =
+          match Candidate.board_interests candidate with
+          | Ok interests -> interests
+          | Error detail -> Alcotest.failf "candidate interests failed: %s" detail
+        in
         (match relevance with
          | Some (`Assoc question) ->
            Alcotest.(check (option string))
              "the relevance question is a choice"
              (Some "choice")
              (json_string_field "type" (`Assoc question));
+           (match json_string_field "instructions" (`Assoc question) with
+            | Some instructions ->
+              Alcotest.(check bool)
+                "the question names the keeper"
+                true
+                (contains_substring ~needle:(Printf.sprintf "%S" candidate.keeper_name) instructions);
+              Alcotest.(check bool)
+                "the question carries the keeper's interests"
+                true
+                (contains_substring
+                   ~needle:
+                     (Yojson.Safe.to_string
+                        (`List (List.map (fun interest -> `String interest) interests)))
+                   instructions)
+            | None -> Alcotest.fail "the relevance question has no instructions");
            (match List.assoc_opt "criteria" question with
             | Some (`Assoc criteria) ->
               Alcotest.(check (list string))
@@ -1950,7 +2101,7 @@ let test_jev_adapter_sends_the_decisions_and_reads_not_relevant () =
               Alcotest.(check (option string))
                 "relevant requires the current signal, not capability overlap"
                 (Some
-                   "The current signal itself requires this keeper's concrete attention, review, or action for one of keeper_role.board_interests; general topic or capability overlap alone is insufficient.")
+                   "The current signal itself requires this keeper's concrete attention, review, or action for one of its board interests; general topic or capability overlap alone is insufficient.")
                 (match List.assoc_opt "relevant" criteria with
                  | Some (`String description) -> Some description
                  | Some _ | None -> None);
@@ -2348,7 +2499,11 @@ let () =
             test_flow_bookkeeping_failures_are_not_provider_exhaustion
         ] )
     ; ( "jev first"
-      , [ Alcotest.test_case
+      , [ Alcotest.test_case "event fanout settles confident answers and defers review" `Quick
+            test_jev_event_fanout_settles_and_defers
+        ; Alcotest.test_case "failed event fanout releases the claim" `Quick
+            test_jev_event_fanout_failure_releases_claim
+        ; Alcotest.test_case
             "a relevant Jev answer is kept"
             `Quick
             test_jev_relevant_is_kept
@@ -2368,6 +2523,10 @@ let () =
             "a Jev decision at the settle floor is kept"
             `Quick
             test_jev_confidence_at_the_floor_settles
+        ; Alcotest.test_case
+            "a requeued candidate asks Jev first"
+            `Quick
+            test_jev_settles_a_requeued_candidate
         ; Alcotest.test_case "invalid confidence delegates to the LLM lane" `Quick
             test_jev_invalid_confidence_is_judged_again
         ; Alcotest.test_case

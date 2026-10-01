@@ -1,0 +1,217 @@
+[targeted] EIO_BACKEND=<unset> timeout=600s per suite
+[targeted] dune build test/test_tui_link_preview.exe 
+[targeted] test/test_tui_link_preview: stanza env MASC_BASE_PATH= ZAI_API_KEY= TYPESAFEAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+[targeted] test/test_tui_link_preview: start 2026-09-30T06:17:36Z
+::group::{tui link preview}
+Testing `tui link preview'.
+This run has ID `7ZGMSJW9'.
+
+ASSERT site name is GitHub
+ASSERT title is the recognized label
+ASSERT has informative metadata
+ASSERT label
+ASSERT owner
+ASSERT repo
+  [OK]          synthesizer               0   github pr.
+ASSERT title is issue label
+ASSERT issue label
+  [OK]          synthesizer               1   github issue.
+ASSERT title is commit label with short sha
+ASSERT short commit label
+  [OK]          synthesizer               2   github commit.
+ASSERT title is ci run label
+  [OK]          synthesizer               3   github ci run.
+ASSERT title is file label
+  [OK]          synthesizer               4   github file.
+ASSERT repo root title
+  [OK]          synthesizer               5   github repo root.
+ASSERT site name
+ASSERT title
+ASSERT has informative metadata
+ASSERT arxiv id
+  [OK]          synthesizer               6   arxiv.
+ASSERT site name
+ASSERT title
+ASSERT has informative metadata
+ASSERT hn item id
+  [OK]          synthesizer               7   hackernews.
+ASSERT yt site
+ASSERT yt thumbnail
+ASSERT has metadata
+ASSERT video id
+ASSERT short video id
+  [OK]          synthesizer               8   youtube.
+ASSERT filename as title
+ASSERT image_url matches url
+ASSERT has metadata
+ASSERT image ext
+  [OK]          synthesizer               9   direct image.
+ASSERT anthropic docs has no synthetic metadata
+ASSERT badge is None under silence contract
+ASSERT github api subdomain gets no label
+ASSERT badge is None
+ASSERT bare google has no synthetic metadata
+ASSERT badge is None
+  [OK]          synthesizer              10   silence contract.
+ASSERT initially not in cache
+ASSERT now in cache
+ASSERT same url from cache
+ASSERT empty after clear
+  [OK]          cache                     0   cache lifecycle and bounding.
+ASSERT badge exists for informative preview
+ASSERT starts with corner glyph
+  [OK]          render                    0   compact badge.
+ASSERT card has lines
+ASSERT first line has positive width
+ASSERT all card borders and content rows have identical display cell width
+ASSERT all card borders and content rows have identical display cell width
+ASSERT all card borders and content rows have identical display cell width
+ASSERT all card borders and content rows have identical display cell width
+ASSERT all card borders and content rows have identical display cell width
+ASSERT all card borders and content rows have identical display cell width
+  [OK]          render                    1   inline card column alignment.
+ASSERT 2-column card has 7 lines (top + 5 content + bottom)
+ASSERT first line has positive width
+ASSERT all 7 lines match cell width for https://github.com/jeong-sik/masc/pull/30866
+ASSERT all 7 lines match cell width for https://github.com/jeong-sik/masc/pull/30866
+ASSERT all 7 lines match cell width for https://github.com/jeong-sik/masc/pull/30866
+ASSERT all 7 lines match cell width for https://github.com/jeong-sik/masc/pull/30866
+ASSERT all 7 lines match cell width for https://github.com/jeong-sik/masc/pull/30866
+ASSERT all 7 lines match cell width for https://github.com/jeong-sik/masc/pull/30866
+ASSERT all 7 lines match cell width for https://github.com/jeong-sik/masc/pull/30866
+ASSERT 2-column card has 7 lines (top + 5 content + bottom)
+ASSERT first line has positive width
+ASSERT all 7 lines match cell width for https://www.youtube.com/watch?v=dQw4w9WgXcQ
+ASSERT all 7 lines match cell width for https://www.youtube.com/watch?v=dQw4w9WgXcQ
+ASSERT all 7 lines match cell width for https://www.youtube.com/watch?v=dQw4w9WgXcQ
+ASSERT all 7 lines match cell width for https://www.youtube.com/watch?v=dQw4w9WgXcQ
+ASSERT all 7 lines match cell width for https://www.youtube.com/watch?v=dQw4w9WgXcQ
+ASSERT all 7 lines match cell width for https://www.youtube.com/watch?v=dQw4w9WgXcQ
+ASSERT all 7 lines match cell width for https://www.youtube.com/watch?v=dQw4w9WgXcQ
+ASSERT 2-column card has 7 lines (top + 5 content + bottom)
+ASSERT first line has positive width
+ASSERT all 7 lines match cell width for https://arxiv.org/abs/2301.07041
+ASSERT all 7 lines match cell width for https://arxiv.org/abs/2301.07041
+ASSERT all 7 lines match cell width for https://arxiv.org/abs/2301.07041
+ASSERT all 7 lines match cell width for https://arxiv.org/abs/2301.07041
+ASSERT all 7 lines match cell width for https://arxiv.org/abs/2301.07041
+ASSERT all 7 lines match cell width for https://arxiv.org/abs/2301.07041
+ASSERT all 7 lines match cell width for https://arxiv.org/abs/2301.07041
+ASSERT 2-column card has 7 lines (top + 5 content + bottom)
+ASSERT first line has positive width
+ASSERT all 7 lines match cell width for https://news.ycombinator.com/item?id=38912345
+ASSERT all 7 lines match cell width for https://news.ycombinator.com/item?id=38912345
+ASSERT all 7 lines match cell width for https://news.ycombinator.com/item?id=38912345
+ASSERT all 7 lines match cell width for https://news.ycombinator.com/item?id=38912345
+ASSERT all 7 lines match cell width for https://news.ycombinator.com/item?id=38912345
+ASSERT all 7 lines match cell width for https://news.ycombinator.com/item?id=38912345
+ASSERT all 7 lines match cell width for https://news.ycombinator.com/item?id=38912345
+ASSERT 2-column card has 7 lines (top + 5 content + bottom)
+ASSERT first line has positive width
+ASSERT all 7 lines match cell width for https://example.com/assets/diagram.png
+ASSERT all 7 lines match cell width for https://example.com/assets/diagram.png
+ASSERT all 7 lines match cell width for https://example.com/assets/diagram.png
+ASSERT all 7 lines match cell width for https://example.com/assets/diagram.png
+ASSERT all 7 lines match cell width for https://example.com/assets/diagram.png
+ASSERT all 7 lines match cell width for https://example.com/assets/diagram.png
+ASSERT all 7 lines match cell width for https://example.com/assets/diagram.png
+ASSERT 2-column card has 7 lines (top + 5 content + bottom)
+ASSERT first line has positive width
+ASSERT all 7 lines match cell width for https://example.com/article
+ASSERT all 7 lines match cell width for https://example.com/article
+ASSERT all 7 lines match cell width for https://example.com/article
+ASSERT all 7 lines match cell width for https://example.com/article
+ASSERT all 7 lines match cell width for https://example.com/article
+ASSERT all 7 lines match cell width for https://example.com/article
+ASSERT all 7 lines match cell width for https://example.com/article
+  [OK]          render                    2   notion 2-column card alignment.
+ASSERT narrow card has lines
+ASSERT first line has positive width
+ASSERT narrow card all lines match cell width
+ASSERT narrow card all lines match cell width
+ASSERT narrow card all lines match cell width
+ASSERT narrow card all lines match cell width
+ASSERT narrow card all lines match cell width
+ASSERT narrow card all lines match cell width
+  [OK]          render                    3   notion narrow fallback.
+ASSERT modal card has content lines
+  [OK]          render                    4   modal card.
+ASSERT each rendered row fits the actual modal width
+ASSERT each physical row is valid UTF-8
+ASSERT the complete URL survives wrapping and short window height
+ASSERT the image viewing instruction reaches its final word
+ASSERT each rendered row fits the actual modal width
+ASSERT each physical row is valid UTF-8
+ASSERT the complete URL survives wrapping and short window height
+ASSERT the image viewing instruction reaches its final word
+ASSERT each rendered row fits the actual modal width
+ASSERT each physical row is valid UTF-8
+ASSERT the complete URL survives wrapping and short window height
+ASSERT the image viewing instruction reaches its final word
+ASSERT each rendered row fits the actual modal width
+ASSERT each physical row is valid UTF-8
+ASSERT the complete URL survives wrapping and short window height
+ASSERT the image viewing instruction reaches its final word
+ASSERT each rendered row fits the actual modal width
+ASSERT each physical row is valid UTF-8
+ASSERT the complete URL survives wrapping and short window height
+ASSERT the image viewing instruction reaches its final word
+  [OK]          render                    5   modal keeps complete URL and in...
+ASSERT o:browser is named
+ASSERT y:copy is named
+ASSERT v:image is named
+ASSERT j/k:scroll is named
+ASSERT d/u:page is named
+ASSERT g/G:first/last is named
+ASSERT Esc:close is named
+ASSERT one link offers no cycle
+ASSERT no image offers no retry
+ASSERT several links offer the cycle
+ASSERT an image offers the retry
+ASSERT the exit is last
+  [OK]          render                    6   modal hints name what the keys do.
+ASSERT refusal kept
+ASSERT wrapped refusal rows fit
+ASSERT the card says: could not be fetched: the server answered with an HTTP error status
+ASSERT refusal kept
+ASSERT wrapped refusal rows fit
+ASSERT the card says: answered with an empty body
+ASSERT refusal kept
+ASSERT wrapped refusal rows fit
+ASSERT the card says: could not be read: EACCES
+ASSERT refusal kept
+ASSERT wrapped refusal rows fit
+ASSERT the card says: could not be decoded: ffmpeg rejected the body (exit 1)
+  [OK]          render                    7   a refused image url is remember...
+ASSERT no entry
+ASSERT wrapped refusal rows fit
+ASSERT no preview line
+  [OK]          render                    8   an undecided image url says not...
+ASSERT og:title wins
+ASSERT og:description
+ASSERT og:image
+ASSERT og:site_name
+ASSERT has_metadata true when fetched
+  [OK]          fetch (og parse)          0   og full.
+ASSERT falls back to <title>
+ASSERT has_metadata true from title
+  [OK]          fetch (og parse)          1   title fallback.
+ASSERT does not fabricate has_metadata
+ASSERT no fabricated title
+  [OK]          fetch (og parse)          2   no metadata degrades honestly.
+ASSERT entities decoded
+  [OK]          fetch (og parse)          3   entity decode.
+ASSERT og title overrides synth label
+  [OK]          fetch (og parse)          4   keeps kind.
+ASSERT single-quoted attrs
+ASSERT name= attribute accepted
+  [OK]          fetch (og parse)          5   single quote and name attr.
+ASSERT og found far into body
+ASSERT has_metadata true
+  [OK]          fetch (og parse)          6   og far into body (no head cap).
+ASSERT newlines/tabs/space-runs collapsed
+  [OK]          fetch (og parse)          7   collapses newlines.
+
+Test Successful in 0.015s. 29 tests run.
+::endgroup::
+[targeted] test/test_tui_link_preview: OK in 0s

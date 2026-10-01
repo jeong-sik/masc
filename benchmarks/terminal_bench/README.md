@@ -43,8 +43,25 @@ MASC 하네스 자체를 Terminal-Bench 4.0.0 전체로 잰다.
     BENCH_ENV=modal ./run_matrix.sh  # 샌드박스를 태스크마다 맞춰 만드는 환경
     python aggregate.py results/jobs # → CSV
 
-`run_matrix.sh` 는 데이터셋을 받아(`results/datasets/`, 끝까지 받았을 때만 `.complete`)
-`dataset_plan.py` 로 먼저 판정한다.
+`run_matrix.sh` 는 데이터셋을 받기 전에 `preflight_arms.py` 로 MASC arm 마다 컨테이너에서
+서버를 띄워 본다. `bootstrap.sh` 가 서버를 켜고, arm 이 선언한 keeper 를 전부(`bench-1`부터
+1·4·8명) 올리고, 승인 모드를 정하는 데까지 가며, 모델은 부르지 않고 provider 키는 자리표시자다.
+arm 하나라도 못 올라오면 멈춘 단계와 로그 끝을 적고 실행을 시작하지 않는다. 에뮬레이션
+amd64 에서 arm 마다 1~2분 걸린다(2026-10-01, v0.48.0, b 55초, e 94초, f 53초, h 65초).
+
+trial 과 다른 점은 셋이다.
+
+- trial 은 f·h 의 keeper 를 `run_episode.sh` 가 `keeper-instructions.txt` 와 keeper 당
+  90초 제한으로 올린다. 사전 점검은 `bootstrap.sh` 의 자체 지침과 180초 제한을 쓴다.
+- 태스크 Skills 는 렌더링에도 점검에도 들어가지 않는다.
+- 태스크 이미지(사용자, PATH) 대신 `ubuntu:24.04` 를 쓰고, 모델의 답은 다루지 않는다.
+
+`GH_TOKEN` 이 있으면 `gh` 를 올리는 것까지 trial 과 같이 하고, 토큰 값은 컨테이너에 넣지 않는다.
+`BENCH_ENV=modal` 에서는 이 호스트의 docker 데몬이 답할 때만 돌리고, 답하지 않으면 건너뛴다고
+출력한다.
+
+그 다음 데이터셋을 받아(`results/datasets/`, 끝까지 받았을 때만 `.complete`)
+`dataset_plan.py` 로 판정한다.
 
 - GPU 태스크(`fp8-rmsnorm-gemm`, `jax-speedrun-gpu`, `math-eval-grader`, H100 요구)는
   docker 에서 `-x` 로 뺀다. harbor 는 GPU 를 줄 수 없는 환경에서 이 trial 을 만들다가
@@ -285,6 +302,25 @@ harbor 기본 에이전트는 태스크 명령을 `exec_as_agent` 로 돌린다.
 - keeper 의 작업 디렉터리는 `/opt/masc-bench/remote/<name>` 이고 그 계정 소유다.
 - 환경변수는 bootstrap 이 PID 1 의 환경을 PID 1 소유자 권한으로 읽어 shim `env_file=` 로 옮기고
   (`driver/endpoint_env.sh`), `PATH` 는 `path=` 로 넘긴다.
+
+## trial 결과에 남는 출처
+
+harbor metadata 에 이 trial 이 무엇으로 돌았는지 남는다.
+
+- `masc_dist`: 올린 binary 의 릴리스 버전, 소스 커밋, 기계, binary sha256.
+- `config_provenance`: binary 는 릴리스에서, 설정은 이 체크아웃에서 와서 따로 남긴다.
+  - `checkout_commit`, `checkout_dirty`: 체크아웃의 HEAD 와, 추적 파일이 HEAD 와 다른지.
+    git 이 답하지 못하면 둘 다 `null` 이고, 깨끗하다는 뜻이 아니다.
+  - `runtime_toml_sha256`: 컨테이너에 올린 `runtime.toml` 의 sha256.
+  - `config_dir_sha256`: 올린 설정 디렉터리 전체(상대 경로와 내용)의 sha256.
+  - `effort`: 렌더에 쓴 effort.
+
+체크아웃의 입력만 쓰는 arm은 같은 체크아웃과 인자로 렌더하면 설정 바이트가 같다
+(arm b·h 를 두 번 렌더해 비교했다). OpenRouter arm은 조회한 외부 모델 한도도 같아야
+한다. 외부 한도가 바뀌면 같은 커밋과 인자만으로 설정을 재현할 수 없다.
+두 trial의 `config_dir_sha256`이 같으면 같은 설정으로 돈 것이다. 태스크가 skills를
+주면 그 내용도 설정에 들어가므로 태스크마다 값이 다르다. 체크아웃 git 상태(HEAD·dirty)는
+trial 설치 시점마다 새로 읽어 반영한다.
 
 ## 4.0.0 에서 아직 맞지 않는 조건
 

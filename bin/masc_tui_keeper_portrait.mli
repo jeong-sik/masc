@@ -1,6 +1,6 @@
 (** A Keeper's own portrait at the head of its detail: the candle imp its
-    name draws ({!Keeper_portrait_look.body_of_name},
-    {!Keeper_portrait_look.equipment_of_name}), standing still, with the
+    name draws ({!Keeper_portrait_look.body_of_name}), wearing the equipment
+    observed by the server, standing still, with the
     Identity facts beside it. How it reaches the terminal -- real pixels, a
     half-block mosaic, or not at all -- is {!Masc_tui_portrait_view}'s. *)
 
@@ -27,7 +27,7 @@ val min_content_cols : band_size -> int
 val cache_capacity : int
 (** How many rendered portraits a {!cache} keeps. *)
 
-(** Rendered portraits by Keeper name, pixel edge and drawing mode. Walking
+(** Rendered portraits by Keeper name, complete equipment snapshot, pixel edge and drawing mode. Walking
     the roster reuses a Keeper already seen instead of redrawing it. Holds
     at most {!cache_capacity}; the one used longest ago goes first. *)
 type cache
@@ -39,10 +39,13 @@ val cached : cache -> int
 (** How many portraits the cache holds. *)
 
 val image :
-  ?compact:bool -> cache -> name:string -> Keeper_portrait_draw.size -> Keeper_portrait_draw.image
+  ?compact:bool -> cache -> name:string -> equipment:Keeper_portrait_look.equipment
+  -> Keeper_portrait_draw.size -> Keeper_portrait_draw.image
 (** The Keeper's still portrait at that edge, from the cache when it is
-    there, rendered and kept when it is not. [compact] is the mosaic drawing;
-    placed pixel portraits use the full drawing. *)
+    there, rendered and kept when it is not. [compact] uses the mosaic drawing
+    for the bare body and its dish. Face, neck, head and hand equipment uses
+    the full drawing so those accessories remain visible. Placed pixel
+    portraits always use the full drawing. *)
 
 type band = private {
   display : Masc_tui_portrait_view.display;
@@ -59,6 +62,7 @@ val band :
   display:Masc_tui_portrait_view.display ->
   project:(Masc_tui_terminal_palette.rgb -> Masc_tui_terminal_palette.projected_color option) ->
   name:string ->
+  equipment:Keeper_portrait_look.equipment ->
   content_rows:int ->
   content_cols:int ->
   band option
@@ -87,6 +91,11 @@ val placement :
     and shows at least the portrait's rows. A placement cannot draw half a
     picture, and one left standing after a scroll would cover facts. *)
 
-val shown : name:string -> content_rows:int -> content_cols:int -> band option
+val shown : name:string -> equipment:Keeper_portrait_look.equipment -> content_rows:int -> content_cols:int -> band option
 (** {!band} against this process: one cache for the session, the display
     the start-up probe chose, and the stdout colour projection. *)
+
+val preview : name:string -> equipment:Keeper_portrait_look.equipment -> content_rows:int -> content_cols:int -> band option
+(** The equipped portrait with room for the Item list beside it, including
+    accessories in the compact Mosaic drawing. It fits the picture within the actual pane and
+    leaves two rows and two columns for the screen's text. *)

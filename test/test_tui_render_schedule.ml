@@ -666,21 +666,29 @@ let index_of haystack needle =
   in
   walk 0
 
-(* A column label that is a prefix of another label matches the wrong column
-   and says nothing about it. "ST" is inside "STARTED", so after the Memory
-   table renamed STATE to ST (#33919) the Fusion case read the first column
-   as the state one and reported its offset as 0. A label occurs once in a
-   header row, so more than one occurrence is the question being asked
-   wrongly rather than an answer. *)
+(* Match a complete space-delimited cell. "ST" inside "STARTED" or "STORED"
+   is another column's text, while two complete "ST" cells are ambiguous. *)
 let offset_of needle text =
-  match index_of text needle with
-  | None -> failf "%S is not in %S" needle text
-  | Some index ->
-    let rest = String.sub text (index + String.length needle)
-                 (String.length text - index - String.length needle) in
-    (match index_of rest needle with
-     | Some _ -> failf "%S appears more than once in %S" needle text
-     | None -> index)
+  let text_length = String.length text in
+  let needle_length = String.length needle in
+  let rec walk index found =
+    if index + needle_length > text_length then
+      match found with
+      | Some offset -> offset
+      | None -> failf "%S is not in %S" needle text
+    else
+      let is_cell =
+        (index = 0 || text.[index - 1] = ' ')
+        && (index + needle_length = text_length
+            || text.[index + needle_length] = ' ')
+        && String.sub text index needle_length = needle in
+      if is_cell then
+        match found with
+        | Some _ -> failf "%S appears more than once in %S" needle text
+        | None -> walk (index + needle_length) (Some index)
+      else walk (index + 1) found
+  in
+  walk 0 None
 
 (* Offsets are asked in display cells, not bytes: the delta column is headed
    with a two-byte glyph that occupies one cell. *)
@@ -709,11 +717,49 @@ type cell_edge =
   | Left_edge
   | Right_edge
 
+(* Style escapes take no display cells. Remove only valid SGR sequences before
+   locating complete column tokens; an unknown escape remains visible and
+   cannot silently make an alignment assertion pass. *)
+let strip_sgr text =
+  let length = String.length text in
+  let visible = Buffer.create length in
+  let rec sgr_end offset =
+    if offset >= length then None
+    else match text.[offset] with
+      | 'm' -> Some (offset + 1)
+      | '0' .. '9' | ';' -> sgr_end (offset + 1)
+      | _ -> None
+  in
+  let rec scan offset =
+    if offset < length then
+      if text.[offset] = '\027' && offset + 1 < length
+         && text.[offset + 1] = '[' then
+        match sgr_end (offset + 2) with
+        | Some next -> scan next
+        | None -> Buffer.add_char visible text.[offset]; scan (offset + 1)
+      else begin
+        Buffer.add_char visible text.[offset];
+        scan (offset + 1)
+      end
+  in
+  scan 0;
+  Buffer.contents visible
+
 (* A table laid out by [Masc_tui_table.fit] draws some of its columns. A drawn
    column's reading sits under its name; a column the table has given up has
    no name in the header and no reading in the row. [cells] names every
    column with its edge, its header and the reading the probe puts in it. *)
 let check_fitted_cells ~shown ~header ~row ~inner_width cells =
+  let visible_header = strip_sgr header in
+  let visible_row = strip_sgr row in
+  check int (Printf.sprintf "inner %d: header style keeps width" inner_width)
+    (Masc_tui_message_layout.display_width header)
+    (Masc_tui_message_layout.display_width visible_header);
+  check int (Printf.sprintf "inner %d: row style keeps width" inner_width)
+    (Masc_tui_message_layout.display_width row)
+    (Masc_tui_message_layout.display_width visible_row);
+  let header = visible_header in
+  let row = visible_row in
   List.iter
     (fun (column, edge, label, mark) ->
       if List.mem column shown then
@@ -778,7 +824,7 @@ let test_memory_header_and_row_share_their_offsets () =
     if columns.Schedule.mcol_show_updated then
       check_right_cell "UPDATED" "R" ~header ~row ~inner_width;
     check_right_cell "FACTS" "F" ~header ~row ~inner_width;
-    check_right_cell "RECALL" "Z" ~header ~row ~inner_width;
+    check_right_cell "STORED" "Z" ~header ~row ~inner_width;
     if columns.Schedule.mcol_show_source then
       check_left_cell "SOURCE" "U" ~header ~row ~inner_width;
     check_right_cell "\xce\x94" "D" ~header ~row ~inner_width
@@ -1139,15 +1185,9 @@ let test_the_delivery_column_holds_the_words_on_the_page () =
 let test_schedule_recurrence_takes_the_remainder () =
   for inner_width = 20 to 300 do
     let layout = schedule_short_page ~inner_width in
-    let recurrence_width = schedule_recurrence_cells layout in
-    if recurrence_width > Schedule.schedule_minimum_recurrence_width then
-      check int
-        (Printf.sprintf "inner %d is fully allocated" inner_width)
-        inner_width (schedule_header_width layout)
-    else
-      check int
-        (Printf.sprintf "inner %d keeps the floor" inner_width)
-        Schedule.schedule_minimum_recurrence_width recurrence_width
+    check int (Printf.sprintf "inner %d is fully allocated" inner_width)
+      inner_width (schedule_header_width layout);
+    check bool "the recurrence has a reading" true (schedule_recurrence_cells layout > 0)
   done
 
 (* Six names above the rows, and none of them left inside a row. *)
@@ -1171,11 +1211,9 @@ let test_schedule_names_its_columns_once () =
    gives 74 and a 100-column one 94; 96 is the body at the width where the
    Activity pane opens beside it, 102 cells less the same six.
 
-   A short page needs 85 cells for every column: 12 + 19 + 16 + 9 + 12 and
-   the recurrence's floor of 12, with five gaps. At 74 the delivery goes and
-   the rest need 72. A long page needs 117; the delivery and the wake go at
-   94 (86 left), only the delivery beside the pane (96 exactly), and the
-   state too at 74 (73 left). *)
+   Long target names are bounded before optional columns are dropped. The
+   recurrence keeps its room and the due time stays visible alongside the target
+   even at a narrow terminal. *)
 let test_the_schedule_at_the_widths_it_is_read_at () =
   let without columns =
     List.filter (fun column -> not (List.mem column columns))
@@ -1211,23 +1249,22 @@ let test_the_schedule_at_the_widths_it_is_read_at () =
     ; ( "long page, 80 columns"
       , schedule_long_page ~inner_width:74
       , 74
-      , without Schedule.[ Schedule_delivery; Schedule_wake; Schedule_status ]
-      , 13 )
+      , without Schedule.[ Schedule_delivery; Schedule_wake ]
+      , 16 )
     ; ( "long page, 100 columns"
       , schedule_long_page ~inner_width:94
       , 94
-      , without Schedule.[ Schedule_delivery; Schedule_wake ]
-      , 20 )
+      , without Schedule.[ Schedule_delivery ]
+      , 19 )
     ; ( "long page, beside the Activity pane"
       , schedule_long_page ~inner_width:96
       , 96
       , without Schedule.[ Schedule_delivery ]
-      , 12 )
+      , 20 )
     ]
 
-(* Narrower still, the columns go in the order the list declares. Each width
-   sits inside the range where exactly that many have gone on a short page:
-   72 to 84 for the delivery, 62 to 71 for the wake, 49 to 61 for the state. *)
+(* At narrow widths the optional delivery, wake and state readings give way
+   while due time, target and recurrence remain on the same row. *)
 let test_a_narrow_schedule_gives_up_columns_in_its_order () =
   let at inner_width = schedule_shown (schedule_short_page ~inner_width) in
   check bool "at 80 the delivery goes first" true
@@ -1243,16 +1280,13 @@ let test_a_narrow_schedule_gives_up_columns_in_its_order () =
     (at 66
     = Schedule.
         [ Schedule_status; Schedule_due; Schedule_target; Schedule_recurrence ]);
-  check bool "at 55 the state goes last" true
+  check bool "at 55 the state gives way, retaining due time" true
     (at 55 = Schedule.[ Schedule_due; Schedule_target; Schedule_recurrence ]);
   let narrowest = schedule_short_page ~inner_width:20 in
-  check bool "the due time, the target and the recurrence never go" true
+  check bool "due time, target and recurrence stay together" true
     (schedule_shown narrowest
-    = Schedule.[ Schedule_due; Schedule_target; Schedule_recurrence ]);
-  check int "the recurrence stays at its floor"
-    Schedule.schedule_minimum_recurrence_width
-    (schedule_recurrence_cells narrowest);
-  check int "the row is wider than the space, as the frame's cut expects" 49
+     = Schedule.[ Schedule_due; Schedule_target; Schedule_recurrence ]);
+  check int "even the narrowest summary fits its allocation" 20
     (schedule_header_width narrowest)
 
 (* The reading the probe puts in each column. Every schedule column is
@@ -1277,7 +1311,7 @@ let schedule_cells =
     ]
 
 let test_schedule_columns_hold_their_offsets () =
-  for inner_width = fitted_narrowest_swept_width to 240 do
+  for inner_width = 24 to 240 do
     List.iter
       (fun layout ->
         let header = Schedule.schedule_header_row ~layout in

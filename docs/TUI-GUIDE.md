@@ -754,6 +754,18 @@ The Channels tab lists every transport and its channel bindings. A channel
 reads `name (id)` when the connector's name directory knows it, and
 `id (name unknown)` when it does not.
 
+The Items tab is one `]` after Info. It lists the 18 portrait accessories by
+slot. `j`/`k`, the page keys, and Home/End select an item; the portrait beside
+the list previews that item over the Keeper's current observed outfit. An
+`equipped` label describes the current picture, while the preview changes no
+equipment or Candle ledger entry. The Item account read shows the Keeper's
+balance, purchased items and configured prices; `Off`, `Disabled`, and an
+unreadable account each have their own message. On a narrower pane the selected
+item's price and ownership sit below the list. If the server cannot report
+equipment, the tab gives the reason and leaves the picture unavailable. The
+catalog remains readable without a picture. Buying and equipping remain
+Keeper-owned tool actions.
+
 | Key | Effect |
 |-----|--------|
 | `j` / `k` | move between transports |
@@ -905,8 +917,18 @@ the column blank and keeps its width. `Ctrl-F` walks the axis: a full
 timestamp heading, then the bare clock-free gutter, then back. The
 header names the two stops away from rest as `metadata:full` or
 `metadata:off`. A streaming
-row uses its actual start clock rather than the word `live`; the active-turn
-status below the history carries the live state and elapsed time. When
+row uses its actual start clock rather than the word `live`. In compact and
+results modes, one quiet status below the history summarizes current work,
+your waiting messages, and their observed delivery or priority receipts.
+Waiting for confirmation and confirmed acceptance remain distinct. If a priority
+reply is unavailable, the status says confirmation is unavailable and retains
+the diagnostic detail; it does not claim the priority change was refused. Full mode
+(`Ctrl-D` twice from compact, or `/tools full`) shows execution IDs, elapsed
+time, individual queue states, and priority receipt details. Failures, approval
+requests, and explicit stop targets remain visible in the concise modes.
+Auto-next requests priority for your message; current work continues until it
+finishes or yields. Use the explicit interrupt controls to stop current work.
+When
 one newest message is taller than the history pane, the live edge keeps its
 heading (or inline opening) and latest rows with an explicit
 `⋯ N hidden · PgUp` separator.
@@ -2003,7 +2025,7 @@ Per surface:
 | `e` | Schedules | Modify the selected active schedule atomically |
 | `x` | Schedules | Cancel the selected schedule (armed: same key again sends) |
 | `e` | Keeper list or detail | Edit the selected keeper's settings in `$EDITOR` (JSON patch; only the fields you keep in the file are sent). Exit 0 sends, any other exit changes nothing |
-| `a` | Keeper list or detail | Create a keeper: a declaration stub opens in `$EDITOR`; the `name` field in the file names the new keeper |
+| `a` | Keeper list or detail | Create a keeper in `$EDITOR`. Malformed or refused declarations remain available for another `a` in this session. A confirmed response opens that Keeper's composer; writing and sending the first request is a separate action |
 | Left / `Esc` | any structural detail or logs view | Back one level; Left never interrupts chat |
 | `Enter` | Message | Send |
 | `Ctrl-G` | Message | Switch to the next Keeper while no turn is in flight |

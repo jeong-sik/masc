@@ -8,13 +8,28 @@
 val normalize_actor_name : string option -> string
 (** Trim and default a missing/empty actor to ["dashboard"]. *)
 
+val with_current_keeper_observations :
+  config:Workspace_utils.config -> Yojson.Safe.t -> Yojson.Safe.t
+(** Refresh Keeper equipment, wallet balances, Item-account revisions and currency supply together in
+    an operator/execution/briefing envelope.
+    Call after outer HTTP caches as well as the metadata snapshot cache.
+    [candle_observation_sequence] orders fresh reads independently of cached
+    metadata generations; consumers reject an older observation in the same
+    server incarnation. *)
+
+val with_current_gate_keeper_observations :
+  config:Workspace_utils.config -> Yojson.Safe.t -> Yojson.Safe.t
+(** Add operator-only Candle observations to a Gate roster after CanAdmin
+    authorization. Retain the Gate schema without execution sequence fields. *)
+
 val get_or_compute_snapshot_json :
   config:Workspace_utils.config ->
   actor:string option ->
   (string -> Yojson.Safe.t) ->
   Yojson.Safe.t
-(** Cached read with TTL [3.0 s]. The compute callback receives the
-    normalized actor name produced by {!normalize_actor_name}. *)
+(** Cached metadata with fresh authoritative portrait equipment per response.
+    The compute callback receives the normalized actor name produced by
+    {!normalize_actor_name}. *)
 
 val invalidate_snapshot_json : config:Workspace_utils.config -> unit
 (** Drop every actor and HTTP operator-snapshot cache entry and advance the
@@ -87,3 +102,9 @@ val operator_digest_json :
   ?include_workers:bool ->
   'a Tool_operator.context ->
   (Yojson.Safe.t, string) result
+
+module For_test : sig
+  val with_current_keeper_observations :
+    read:(unit -> Candle_observe.t) -> config:Workspace_utils.config ->
+    Yojson.Safe.t -> Yojson.Safe.t
+end

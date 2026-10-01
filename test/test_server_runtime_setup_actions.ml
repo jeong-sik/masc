@@ -43,10 +43,16 @@ if args[0]=='runtime-muse-models':
 if args[0]=='runtime-codex-models':
     with open(os.path.join(os.path.dirname(__file__),'codex-args.json'),'w') as f:
         json.dump(args,f)
-    print(json.dumps({'schema':'masc.codex_model_refresh.v1','models':[
-      {'id':'fresh-model','label':'Fresh model','context':272000},
-      {'id':'second-model','label':'Second model','context':272000},
-      {'id':'other-model','label':'Other account model','context':272000}],
+    catalog_file=os.path.join(os.path.dirname(__file__),'fixture-codex-catalog.json')
+    if os.path.exists(catalog_file):
+        with open(catalog_file) as f: models=json.load(f)
+    else: models=[
+      {'id':'fresh-model','label':'Fresh model','context':272000,
+       'supported_reasoning_efforts':['low','high','ultra','adaptive-v2'],'default_reasoning_effort':'high'},
+      {'id':'second-model','label':'Second model','context':272000,
+       'supported_reasoning_efforts':[],'default_reasoning_effort':'native-auto'},
+      {'id':'other-model','label':'Other account model','context':272000}]
+    print(json.dumps({'schema':'masc.codex_model_refresh.v1','models':models,
       'credential_file':'/private/not-for-browser'}))
     sys.exit(0)
 assert args[1]=='--base-path'
@@ -109,7 +115,37 @@ let test_native_client_metadata () = fixture (fun base _runtime binary net ->
       (json |> member "account_availability_verified" |> to_bool);
     let model=json |> member "models" |> to_list |> List.hd in
     Alcotest.check Alcotest.int "fresh client context retained" 272000 (model |> member "context" |> to_int);
+    Alcotest.check (Alcotest.list Alcotest.string) "reported effort vocabulary retained without clamping"
+      ["low";"high";"ultra";"adaptive-v2"]
+      (model |> member "supported_reasoning_efforts" |> to_list |> List.map to_string);
+    Alcotest.check Alcotest.string "reported default effort retained" "high"
+      (model |> member "default_reasoning_effort" |> to_string);
+    let second=json |> member "models" |> to_list |> List.tl |> List.hd in
+    Alcotest.check Alcotest.bool "empty supported effort list is valid" true
+      (second |> member "supported_reasoning_efforts" = `List []);
+    Alcotest.check Alcotest.string "default need not occur in the supported list" "native-auto"
+      (second |> member "default_reasoning_effort" |> to_string);
     Alcotest.check Alcotest.bool "child private field not projected" true (json |> member "credential_file" = `Null)))
+let test_malformed_client_reasoning_efforts () = fixture (fun base runtime binary net ->
+  let before=In_channel.with_open_bin runtime In_channel.input_all in
+  let supported value="supported_reasoning_efforts",value in
+  let default value="default_reasoning_effort",value in
+  let valid_supported=supported (`List [`String "ultra"]) in
+  let valid_default=default (`String "ultra") in
+  Eio.Switch.run (fun sw ->
+    List.iter (fun metadata ->
+      save (Filename.concat base "fixture-codex-catalog.json")
+        (Yojson.Safe.to_string (`List [`Assoc (["id",`String "fresh";"context",`Int 272000] @ metadata)]));
+      Alcotest.check Alcotest.bool "malformed advertised effort metadata is refused" true
+        (Actions.discover ~binary ~sw ~net ~base_path:base (`Assoc ["integration_id",`String "codex"])
+         = Error Actions.Unsupported_connection))
+      [ [valid_supported];[valid_default];[supported `Null;valid_default]
+      ; [supported (`String "ultra");valid_default];[supported (`List [`Int 1]);valid_default]
+      ; [supported (`List [`String ""]);valid_default]
+      ; [supported (`List [`String "ultra";`String "ultra"]);valid_default]
+      ; [valid_supported;default `Null];[valid_supported;default (`String "")] ]);
+  Alcotest.check Alcotest.string "failed discovery leaves the runtime source untouched" before
+    (In_channel.with_open_bin runtime In_channel.input_all))
 let test_configured_codex_account_save () = fixture (fun base runtime binary net ->
   let account_home = Filename.concat base "private-selected-codex" ^ "/" in
   Unix.mkdir account_home 0o700;
@@ -160,7 +196,7 @@ let test_configured_codex_account_save () = fixture (fun base runtime binary net
     Alcotest.check Alcotest.string "verification keeps the exact configured account home"
       account_home (verified |> member "account_home" |> to_string);
     let saved = Runtime_toml.parse_file runtime |> Result.get_ok in
-    let binding = List.find (fun binding -> Runtime.id_of_binding binding = runtime_id) saved.bindings in
+    let binding = List.find (fun binding -> Runtime_instance.id_of_binding binding = runtime_id) saved.bindings in
     let provider = List.find (fun (provider:Runtime_schema.provider) -> provider.id = binding.provider_id) saved.providers in
     Alcotest.check (Alcotest.option Alcotest.string) "new saved provider retains that same account"
       (Some account_home) provider.account_home;
@@ -200,6 +236,10 @@ let test_account_reference () = fixture (fun base _runtime binary _net ->
   let reference=receipt |> member "account_ref" |> to_string in
   Alcotest.check Alcotest.bool "opaque account identity" true (Auth.is_generated_token_shape reference);
   Alcotest.check Alcotest.bool "import is not invocation verification" false (receipt |> member "invocation_verified" |> to_bool);
+  let model=receipt |> member "catalog" |> member "models" |> to_list |> List.hd in
+  Alcotest.check Alcotest.bool "other providers receive no invented Codex effort metadata" true
+    ((model |> member "supported_reasoning_efforts") = `Null
+     && (model |> member "default_reasoning_effort") = `Null);
   Alcotest.check (Alcotest.list Alcotest.string) "safe import response only"
     (List.sort String.compare ["schema";"account_ref";"account_imported";"invocation_verified";"catalog"])
     (receipt |> to_assoc |> List.map fst |> List.sort String.compare);
@@ -404,6 +444,7 @@ let () = Alcotest.run "web setup actions" ["request boundary",[
   Alcotest.test_case "private key joins verified native save" `Quick test_private_key;
   Alcotest.test_case "no browser credential paths or executable override" `Quick test_forbidden_reference;
   Alcotest.test_case "native client metadata without private fields" `Quick test_native_client_metadata;
+  Alcotest.test_case "malformed advertised reasoning efforts refuse discovery" `Quick test_malformed_client_reasoning_efforts;
   Alcotest.test_case "configured Codex account survives discovery, verification and save" `Quick test_configured_codex_account_save;
   Alcotest.test_case "configured Muse advertises readiness independently" `Quick test_configured_muse_readiness_inventory;
   Alcotest.test_case "imported opaque account joins native save" `Quick test_account_reference;

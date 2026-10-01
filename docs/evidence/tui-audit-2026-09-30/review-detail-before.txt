@@ -1,0 +1,9 @@
+Frozen867 installed-copy binary: 86751f610442e4d82992ebc54bf9eb8ba45ef6d2
+Binary SHA256: 96955f7800f497c831f6cd25c953d0143cc8c6441f0b7935d18198f49008760b
+Native and browser captures: independent isolated100x18 color fixture PTYs.
+Completed native frame1-10/32, original four metadata fields visible; REQUESTEND/TASKEND/TITLEEND/AGENTEND absent.
+This proves original field truncation only, not repairedhead behavior, full evidence navigation, installation or production.
+Raw representation is PTY_RAW_REPR followed by Python bytes repr; ast.literal_eval recovers original bytes.
+Original bytes SHA256: 152068933d6b587fd6f7c14c37b9972cc114b0c5cda6c78ff785d9fd391f1a08
+Repr SHA256: 6194d07ece48729128421eed27c2eafa8fd780ba637da75a79cc50ff2007b1f2
+PNG SHA256: f3c2940107b984a66bda6f9acaa430fdfb650b49b58421954284cf9bbce4ddfa

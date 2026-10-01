@@ -417,6 +417,15 @@ let execute_tool_eio
                      ~name
                      ~args:coerced_args
                  | Mod_misc ->
+                   let candle operation =
+                     match owner_keeper_identity with
+                     | Some (keeper_name, _) ->
+                       Some (Keeper_candle_tools.handle ~operation ~base_path:config.base_path
+                         ~keeper_name ~tool_name:name ~start_time ~args:coerced_args)
+                     | None ->
+                       Some (Tool_result.make_err ~tool_name:name ~start_time
+                         ~class_:Tool_result.Policy_rejection
+                         "Candle tools require an authenticated Keeper; a supplied caller name is not a wallet identity") in
                    let dispatch () =
                      Tool_misc.dispatch
                        { Tool_misc.config
@@ -427,9 +436,13 @@ let execute_tool_eio
                        ~args:coerced_args
                    in
                    (* Identity, profile membership and tool authorization have
-                      passed above. The gate a Keeper's call and the play
-                      page's routes run comes next. *)
+                      passed above. The controller execution boundary shared
+                      by Keeper calls and the play routes comes next. *)
                    (match Tool_schemas_misc.misc_operation_of_tool_name name with
+                    | Some Tool_schemas_misc.Misc_candle_balance -> candle Keeper_candle_tools.Balance
+                    | Some Tool_schemas_misc.Misc_candle_catalog -> candle Keeper_candle_tools.Catalog
+                    | Some Tool_schemas_misc.Misc_candle_purchase -> candle Keeper_candle_tools.Purchase
+                    | Some Tool_schemas_misc.Misc_candle_equip -> candle Keeper_candle_tools.Equip
                     (* Keeper-only, like spawn and code_query above: the
                        portrait is the Keeper's own, drawn from its name, and
                        this endpoint has no Keeper turn to name. The name is
@@ -448,10 +461,10 @@ let execute_tool_eio
                               name))
                     | Some _ | None ->
                       (match
-                         Keeper_dos_controller.before_call ~config ~who:agent_name ~name
-                           ~args:coerced_args
+                         Keeper_dos_controller.execute ~config ~who:agent_name ~name
+                           ~args:coerced_args ~run:dispatch
                        with
-                       | Ok () -> dispatch ()
+                       | Ok result -> result
                        | Error refusal ->
                          Some (Keeper_dos_controller.refusal_result ~tool_name:name refusal)))
                  | Mod_library ->

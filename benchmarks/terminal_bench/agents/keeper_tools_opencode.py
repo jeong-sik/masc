@@ -103,7 +103,7 @@ class KeeperToolsOpenCode(MascSidecar, OpenCode):
         try:
             await super().run(instruction, environment, context)
         finally:
-            self.record_dist_identity(context)
+            self.record_install_identity(context)
         # What the keepers spent is not in what opencode reports, and the arm is
         # compared on cost.
         await merge_keeper_usage(self, environment, context)

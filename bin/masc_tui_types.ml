@@ -2759,6 +2759,12 @@ type identity_login_started = {
   ils_url: string;
 }
 
+type identity_login_request = {
+  ilr_keeper: string;
+  ilr_provider: string;
+  ilr_generation: int;
+}
+
 (** Whether the login [login] started has landed: the service it was for now
     reports tools for this Keeper.
 
@@ -2918,10 +2924,12 @@ let nothing =
    instead of the roster. The roster is 8.4 KB and answers in about a
    millisecond, which is what makes this affordable where planning is not.
  *)
-let rec surface_needs ~keeper_pane_drawn surface =
+let rec surface_needs ~keeper_pane_drawn ~about_open surface =
   let needs = surface_needs_of_surface surface in
   let needs =
-    if keeper_pane_drawn then { needs with needs_keeper_roster = true }
+    (* About hides the ordinary Keeper pane but draws current outfits. Its
+       opening delta and refresh cadence must keep reading that same roster. *)
+    if keeper_pane_drawn || about_open then { needs with needs_keeper_roster = true }
     else needs
   in
   needs
@@ -3009,9 +3017,9 @@ let surface_needs_delta ~previous ~next =
 
 let surface_needs_any needs = needs <> nothing
 
-let full_refresh_needs ~scoped_refresh_inflight ~keeper_pane_drawn surface =
+let full_refresh_needs ~scoped_refresh_inflight ~keeper_pane_drawn ~about_open surface =
   if scoped_refresh_inflight then nothing
-  else surface_needs ~keeper_pane_drawn surface
+  else surface_needs ~keeper_pane_drawn ~about_open surface
 
 type full_refresh_intent = Cadence | Revalidate
 
@@ -4997,6 +5005,13 @@ type play_invite =
   ; shown_name : string option
   }
 
+type keeper_priority_control = {
+  priority_generation : int;
+  priority_requests : Masc_tui_keeper_chat_projection.request list;
+}
+
+type keeper_priority_control_outcome = Priority_superseded | Priority_unconfirmed
+
 (* Replaced as one reading at refresh/workspace boundaries. The successful
    index is built once by the loader and is read-only on render paths. *)
 type task_goal_links_reading =
@@ -5080,6 +5095,11 @@ type state = {
      ordered run-next call. No priority intent is inferred from queue text. *)
   mutable keeper_run_next_pending : Masc_tui_keeper_chat_projection.request list;
   mutable keeper_run_next_ready : Masc_tui_keeper_chat_projection.request list;
+  mutable keeper_priority_controls : (string * keeper_priority_control) list;
+  mutable keeper_run_next_receipts :
+    (Masc_tui_keeper_chat_projection.request * (string, string) result) list;
+  (** Exact acknowledged priority results, retained while that input waits.
+      Pending requests are tracked by the existing pending/ready/inflight lists. *)
   mutable keeper_auto_priority_pending : (string * string) list;
   (* Accepted automatic priority requests still owned by this session, in
      Enter order per Keeper. The server uses these exact IDs as predecessors
@@ -5396,7 +5416,7 @@ type state = {
   mutable config_scroll: int;
   mutable detail_tab: keeper_detail_tab;
   mutable item_cursor: int;
-  mutable item_account: (string * Masc_tui_keeper_items.t) option;
+  mutable item_account: (string * (string option * Masc_tui_keeper_items.t)) option;
   mutable item_account_error: string option;
   mutable keeper_run_cursor: int;
   mutable detail_reads: detail_read_request list;
@@ -5435,7 +5455,11 @@ type state = {
      out of one list -- see [identity_connectable]. *)
   mutable identity_view: (string * identity_provider list) option;
   mutable identity_view_error: string option;
-  mutable identity_login: identity_login_started option;
+  (* Consent URLs belong to a Keeper and provider. Opening another Keeper
+     or starting another provider must leave outstanding logins available. *)
+  mutable identity_logins: identity_login_started list;
+  mutable identity_login_requests: identity_login_request list;
+  mutable identity_login_generation: int;
   (* Which provider the arrows are on. Held rather than derived because a
      screen that renumbered under a moving cursor would start the wrong
      service; [identity_cursor_clamped] is what keeps it inside the list. *)
@@ -5636,6 +5660,9 @@ type state = {
   mutable keeper_turns_inflight: bool;
   mutable keeper_observed_interrupts: observed_interrupt list;
   mutable keeper_run_next_inflight: Masc_tui_keeper_chat_projection.request list;
+  mutable keeper_run_next_retired: Masc_tui_keeper_chat_projection.request list;
+  (** Dispatched requests whose visible receipts were withdrawn by control.
+      They remain in [keeper_run_next_inflight] until their actual callback. *)
   (* The durable Gate: approvals that survive nobody watching (external
      service writes among them), plus both lane modes. Refreshed with the
      same surface; answered through the dashboard resolve route. *)
@@ -5795,7 +5822,6 @@ type state = {
      read as having none. *)
   mutable keeper_schedules: (string * schedule_snapshot) option;
   mutable keeper_schedules_error: (string * string) option;
-  mutable keeper_schedules_inflight: string option;
   (* A cancel armed for a second keypress: which schedule. The cursor can move
      between the two presses, so the schedule id is captured at arm time and a
      press on a different row re-arms for that row. *)
@@ -6385,6 +6411,62 @@ type state = {
   port: int;
   refresh_interval: float;
 }
+
+let identity_logins_for_keeper (state : state) keeper_name =
+  List.filter
+    (fun login -> String.equal login.ils_keeper keeper_name)
+    state.identity_logins
+
+(* A restart supersedes the outstanding response for this exact key, while
+   the previous consent URL remains available until a replacement arrives. *)
+let start_identity_login_request (state : state) ~keeper_name ~provider_id =
+  state.identity_login_generation <- state.identity_login_generation + 1;
+  let request =
+    { ilr_keeper = keeper_name;
+      ilr_provider = provider_id;
+      ilr_generation = state.identity_login_generation }
+  in
+  state.identity_login_requests <-
+    request :: List.filter
+      (fun pending ->
+        not (String.equal pending.ilr_keeper keeper_name
+             && String.equal pending.ilr_provider provider_id))
+      state.identity_login_requests;
+  request
+
+let finish_identity_login_request (state : state) request =
+  let is_current pending =
+    String.equal pending.ilr_keeper request.ilr_keeper
+    && String.equal pending.ilr_provider request.ilr_provider
+    && pending.ilr_generation = request.ilr_generation
+  in
+  if List.exists is_current state.identity_login_requests then (
+    state.identity_login_requests <-
+      List.filter (fun pending -> not (is_current pending))
+        state.identity_login_requests;
+    true)
+  else false
+
+let forget_identity_login (state : state) ~keeper_name ~provider_id =
+  state.identity_logins <-
+    List.filter
+      (fun login ->
+        not (String.equal login.ils_keeper keeper_name
+             && String.equal login.ils_provider provider_id))
+      state.identity_logins
+
+let remember_identity_login (state : state) login =
+  forget_identity_login state ~keeper_name:login.ils_keeper
+    ~provider_id:login.ils_provider;
+  state.identity_logins <- state.identity_logins @ [login]
+
+let retire_identity_logins (state : state) ~keeper_name ~providers =
+  state.identity_logins <-
+    List.filter
+      (fun login ->
+        not (String.equal login.ils_keeper keeper_name
+             && identity_login_landed ~providers ~login))
+      state.identity_logins
 
 let roster_pane_hidden (state : state) =
   Masc_tui_roster_pane.effective_hidden state.roster_pane_preference
@@ -7226,6 +7308,19 @@ let begin_keeper_chat_control state keeper_name =
     (fun (request : Masc_tui_keeper_chat_projection.request) ->
        not (String.equal request.keeper_name keeper_name))
     state.keeper_run_next_ready;
+  (* Keep acknowledged evidence and active callbacks until the control's
+     semantic result arrives. The token callback alone is not that result. *)
+  let previous = List.concat_map (fun (name, control) ->
+    if String.equal name keeper_name then control.priority_requests else [])
+    state.keeper_priority_controls in
+  let requests = List.fold_left (fun requests request ->
+    if String.equal request.Masc_tui_keeper_chat_projection.keeper_name keeper_name
+       && not (List.exists (Masc_tui_keeper_chat_projection.same_request_identity request) requests)
+    then request :: requests else requests) previous
+    (state.keeper_run_next_inflight @ List.map fst state.keeper_run_next_receipts) in
+  state.keeper_priority_controls <-
+    (keeper_name, { priority_generation = generation; priority_requests = requests }) ::
+    state.keeper_priority_controls;
   state.keeper_auto_priority_pending <- List.filter
     (fun (name, _) -> not (String.equal name keeper_name))
     state.keeper_auto_priority_pending;
@@ -7233,6 +7328,56 @@ let begin_keeper_chat_control state keeper_name =
     name, id, (if name = keeper_name then Retained_after_stop else intervention))
     state.keeper_interactive_waiting;
   generation
+
+let keeper_run_next_receipt_provisional state request =
+  List.exists (fun (_, control) -> List.exists
+    (Masc_tui_keeper_chat_projection.same_request_identity request)
+    control.priority_requests) state.keeper_priority_controls
+
+let settle_keeper_priority_control state keeper_name ~generation ~outcome =
+  let matches (name, control) = String.equal name keeper_name
+    && control.priority_generation = generation in
+  match List.find_opt matches state.keeper_priority_controls with
+  | Some (_, control) ->
+      (match outcome with
+       | Priority_unconfirmed -> ()
+       | Priority_superseded ->
+           let member request = List.exists
+             (Masc_tui_keeper_chat_projection.same_request_identity request)
+             control.priority_requests in
+           state.keeper_run_next_receipts <- List.filter
+             (fun (request, _) -> not (member request)) state.keeper_run_next_receipts;
+           state.keeper_run_next_retired <- List.fold_left (fun retired request ->
+             if member request && not (List.exists
+                 (Masc_tui_keeper_chat_projection.same_request_identity request) retired)
+             then request :: retired else retired)
+             state.keeper_run_next_retired state.keeper_run_next_inflight);
+      state.keeper_priority_controls <- List.filter (fun control -> not (matches control))
+        state.keeper_priority_controls
+  | None -> ()
+
+type keeper_run_next_completion =
+  | Run_next_untracked
+  | Run_next_retired
+  | Run_next_received
+
+let settle_keeper_run_next state request result =
+  let same = Masc_tui_keeper_chat_projection.same_request_identity request in
+  if not (List.exists same state.keeper_run_next_inflight) then Run_next_untracked
+  else begin
+    state.keeper_run_next_inflight <- List.filter (fun old -> not (same old))
+      state.keeper_run_next_inflight;
+    let retired = List.exists same state.keeper_run_next_retired in
+    state.keeper_run_next_retired <- List.filter (fun old -> not (same old))
+      state.keeper_run_next_retired;
+    let current = not retired && List.exists (fun (entry : inflight) ->
+      same entry.sent_request) state.msg_inflight in
+    if current then begin
+      state.keeper_run_next_receipts <- (request, result) ::
+        List.filter (fun (old, _) -> not (same old)) state.keeper_run_next_receipts;
+      Run_next_received
+    end else Run_next_retired
+  end
 
 let finish_keeper_chat_control state keeper_name ~generation =
   if generation <> keeper_chat_control_generation state keeper_name
@@ -7397,6 +7542,23 @@ let detail_read_waiting state ~tab ~keeper =
 
 let selected_keeper (state : state) =
   List.nth_opt state.keepers state.keeper_cursor
+
+let keeper_detail_target_matches state keeper_name =
+  match selected_keeper state with
+  | Some keeper -> String.equal keeper.k_name keeper_name
+  | None -> false
+
+(* Retirement belongs to the request even off screen; presentation belongs
+   only to the currently selected Keeper and the newest request generation. *)
+let apply_keeper_schedules_read state request result =
+  let current = finish_detail_read state request in
+  if current && keeper_detail_target_matches state request.drr_keeper then
+    match result with
+    | Ok snapshot ->
+        state.keeper_schedules <- Some (request.drr_keeper, snapshot);
+        state.keeper_schedules_error <- None
+    | Error err ->
+        state.keeper_schedules_error <- Some (request.drr_keeper, err)
 
 let fusion_snapshot_entries (snapshot : Masc.Tui_decode_fusion.fusion_snapshot) =
   List.map (fun run -> Masc.Tui_decode_fusion.Fusion_retained_run run) snapshot.fus_runs
@@ -7820,6 +7982,8 @@ let create_state
   keeper_queue_inflight = [];
   keeper_run_next_pending = [];
   keeper_run_next_ready = [];
+  keeper_priority_controls = [];
+  keeper_run_next_receipts = [];
   keeper_auto_priority_pending = [];
   keeper_auto_priority_requests = [];
   voice_send_on_stop = false;
@@ -7966,7 +8130,9 @@ let create_state
   github_login_scopes = [];
   identity_view = None;
   identity_view_error = None;
-  identity_login = None;
+  identity_logins = [];
+  identity_login_requests = [];
+  identity_login_generation = 0;
   identity_cursor = 0;
   identity_attempt_error = None;
   identity_filter = None;
@@ -8059,6 +8225,7 @@ let create_state
   keeper_turns_inflight = false;
   keeper_observed_interrupts = [];
   keeper_run_next_inflight = [];
+  keeper_run_next_retired = [];
   gate_pending = [];
   gate_modes = None;
   gate_queue_unavailable = None;
@@ -8133,7 +8300,6 @@ let create_state
   schedule_wake_history_inflight = None;
   keeper_schedules = None;
   keeper_schedules_error = None;
-  keeper_schedules_inflight = None;
   schedule_cancel_armed = None;
   schedule_cancel_error = None;
   lanes = None;
@@ -10900,504 +11066,6 @@ let scrolled_surface (state : state) (surface : surface) : scrolled option =
    searchable and [texts] is the same decoded list the row cursor names, in
    the same order -- a match index is a cursor position. [None] keeps "/"
    closed on that surface. *)
-(* One list under one cursor: the calls keepers are holding first (they run
-   out in [kta_timeout_sec]; the operator actions keep), then the operator
-   actions. The two kinds answer through different routes, so the row is a
-   sum the key handler matches on rather than a shape it infers. *)
-type approval_row =
-  | Keeper_tool_row of Tui_decode.keeper_tool_approval
-  | Gate_row of Tui_decode.gate_pending
-      (** A durable Gate approval — an external-service write among them.
-          It keeps: nobody watching loses nothing. Answered through the
-          dashboard resolve route. *)
-  | Operator_row of Masc_tui_operator_projection.approval_item
-
-let operator_approval_items (state : state) =
-  match state.approval_snapshot with
-  | Some snapshot -> snapshot.aps_items
-  | None -> []
-
-let approval_items (state : state) =
-  List.map (fun held -> Keeper_tool_row held) state.keeper_tool_approvals
-  @ List.map (fun pending -> Gate_row pending) state.gate_pending
-  @ List.map (fun item -> Operator_row item) (operator_approval_items state)
-
-(* Everything on the Approvals surface waiting on the operator: the three
-   approval row kinds plus the questions keepers have open. The surface
-   answers both -- that is why it fetches asks -- so its ring entry, badge
-   and alert colour must all count the same thing. One count here, not
-   three copies that can drift: with zero approvals and one open question
-   the entry still has to be reachable, or the question has nowhere to be
-   seen from. The badge number is therefore the SUM of approval rows and open
-   questions, not an approval count: a badge of 3 may be three approvals,
-   three questions, or a mix. *)
-(* The questions behind the count, so the three places that say how many there
-   are cannot count different things: this surface's title, the block heading
-   above the questions themselves, and the badge below. [None] is a reading
-   that has not come back, which is not the same answer as a reading with no
-   question in it -- the block draws nothing for the first and says so for the
-   second. *)
-let approvals_open_questions (state : state) =
-  Option.map Masc_tui_ask_projection.open_rows state.asks_snapshot
-
-(* The questions themselves. One ask can carry several, and counting the asks
-   under the word "question" understated the work: the live surface read
-   "MASC Approvals (1 question)" and "Questions waiting on you (1)" over one
-   ask holding two, with "+2 more questions" three rows below saying so. *)
-let approvals_open_question_count (state : state) =
-  match approvals_open_questions state with
-  | Some rows ->
-      List.fold_left
-        (fun total (row : Masc.Tui_decode_asks.ask_row) ->
-          total + List.length row.Masc.Tui_decode_asks.ar_questions)
-        0 rows
-  | None -> 0
-
-(* One list the Approvals surface draws, as its last poll left it.
-
-   - [List_read]: the last poll answered, and the rows on screen are its rows.
-   - [List_not_read Approval_unread]: no poll has answered yet.
-   - [List_not_read (Approval_failed cause)]: the last poll failed and nothing
-     from an earlier one is on screen. A failed confirm-queue read clears its snapshot
-     ([apply_approvals_load]), and a first poll that fails has nothing to keep.
-   - [List_not_read (Approval_stale cause)]: the last poll failed and the
-     rows on screen are an
-     earlier poll's. The held-call, Gate and question polls replace their rows
-     only on [Ok], so those rows can name calls the server no longer holds.
-   - [List_not_read (Approval_unavailable detail)]: the server answered and
-     said the store behind the list could not be read. The Gate snapshot sends
-     [approval_queue: null] with [approval_queue_state] in this case.
-
-   Every place that has to know whether a list was read -- the strip entry,
-   the Dashboard approvals count, the Approvals title and the empty queue --
-   reads it from here, so none of them keeps its own list of fields. *)
-type approval_not_read =
-  | Approval_unread
-  | Approval_failed of string
-  | Approval_stale of string
-  | Approval_unavailable of string
-
-type approval_list_reading =
-  | List_read
-  | List_not_read of approval_not_read
-
-type approvals_reading =
-  { confirm_queue : approval_list_reading
-  ; held_calls : approval_list_reading
-  ; gate_queue : approval_list_reading
-  ; questions : approval_list_reading
-  }
-
-(* A failed confirm-queue read sets [approval_snapshot] to [None] in the same
-   step as it sets [approvals_error], so a snapshot on screen is always the
-   last answer. *)
-let confirm_queue_reading (state : state) =
-  match (state.approval_snapshot, state.approvals_error) with
-  | Some _, _ -> List_read
-  | None, Some cause -> List_not_read (Approval_failed cause)
-  | None, None -> List_not_read Approval_unread
-
-let kept_rows_reading ~observed ~error =
-  match (observed, error) with
-  | false, None -> List_not_read Approval_unread
-  | false, Some cause -> List_not_read (Approval_failed cause)
-  | true, Some cause -> List_not_read (Approval_stale cause)
-  | true, None -> List_read
-
-let gate_queue_reading (state : state) =
-  match
-    kept_rows_reading ~observed:state.gate_snapshot_observed ~error:state.gate_error
-  with
-  | List_read ->
-      (match state.gate_queue_unavailable with
-       | Some detail -> List_not_read (Approval_unavailable detail)
-       | None -> List_read)
-  | List_not_read _ as reading -> reading
-
-(* The questions' snapshot doubles as their "observed" mark: [apply_asks_load]
-   sets it on the first [Ok] and never clears it. *)
-let approvals_questions_reading (state : state) =
-  kept_rows_reading ~observed:(Option.is_some state.asks_snapshot)
-    ~error:state.asks_error
-
-let approvals_reading (state : state) =
-  { confirm_queue = confirm_queue_reading state
-  ; held_calls =
-      kept_rows_reading ~observed:state.keeper_tool_approvals_observed
-        ~error:state.keeper_tool_approvals_error
-  ; gate_queue = gate_queue_reading state
-  ; questions = approvals_questions_reading state
-  }
-
-let list_is_read = function
-  | List_read -> true
-  | List_not_read _ -> false
-
-(* The three lists that hold approval rows, by the name the title and the
-   empty queue give each. The questions are drawn in their own block, which
-   says for itself when they were not read. *)
-let approval_row_lists (reading : approvals_reading) =
-  [ ("confirm queue", reading.confirm_queue)
-  ; ("held calls", reading.held_calls)
-  ; ("Gate queue", reading.gate_queue)
-  ]
-
-let approvals_surface_pending (state : state) =
-  List.length (approval_items state) + approvals_open_question_count state
-
-(* Whether every list the count is taken over was read. The count is a
-   reading of what is waiting only when all four came back.
-
-   The strip entry and the Dashboard approvals count both call this, so the
-   entry leaves the strip exactly when the count is drawn without "?".
-   An unreadable Gate store with every other list empty keeps the entry:
-   an entry that is gone reads as "nothing is waiting". *)
-let approvals_reading_current (state : state) =
-  let reading = approvals_reading state in
-  List.for_all list_is_read
-    (reading.questions :: List.map snd (approval_row_lists reading))
-
-(* The Dashboard approvals count. The "?" tail marks a count no source will
-   stand behind; it does not say which way the number is wrong, because a
-   dropped confirm queue leaves it short and a stale held-call or Gate list
-   can leave it long. The Approvals title says which list it was. *)
-let approvals_count_label (state : state) =
-  let on_screen = approvals_surface_pending state in
-  if approvals_reading_current state then string_of_int on_screen
-  else Printf.sprintf "%d?" on_screen
-
-let approval_item_needs_person = function
-  | Keeper_tool_row _ | Operator_row _ -> true
-  | Gate_row (pending : Tui_decode.gate_pending) ->
-      match pending.gp_phase with
-      | Gate_human_required -> true
-      | Gate_queued | Gate_judging | Gate_blocked -> false
-
-let approvals_human_pending (state : state) =
-  List.length (List.filter approval_item_needs_person (approval_items state))
-  + approvals_open_question_count state
-
-let home_request_of_approval = function
-  | Keeper_tool_row held ->
-      Home_held_call { keeper = held.Tui_decode.kta_keeper; call_id = held.kta_tool_call_id }
-  | Gate_row pending -> Home_gate_request pending.Tui_decode.gp_id
-  | Operator_row item -> Home_operator_request item.ap_token
-
-(* Current successes survive another source's failure. Stale snapshots are
-   reachable through their source reading, never offered as current requests. *)
-let home_decision_rows (state : state) =
-  let reading = approvals_reading state in
-  let clean = Masc.Tui_terminal_text.sanitize_terminal_text in
-  let approval_rows =
-    approval_items state
-    |> List.filter_map (fun row ->
-      let current, who, why, kind, request_id = match row with
-        | Keeper_tool_row held ->
-            list_is_read reading.held_calls, held.kta_keeper, held.kta_question, "Held call", held.kta_tool_call_id
-        | Gate_row pending ->
-            list_is_read reading.gate_queue, pending.gp_keeper, pending.gp_display_tool, "Approval", pending.gp_id
-        | Operator_row item ->
-            list_is_read reading.confirm_queue, item.ap_actor, item.ap_summary, "Approval", item.ap_token
-      in
-      if current && approval_item_needs_person row then
-        Some (Home_request (home_request_of_approval row),
-              Printf.sprintf "%s · %s [%s] · %s" kind (clean who)
-                (String.trim (Masc_tui_message_layout.fit_middle 12 (clean request_id))) (clean why))
-      else None)
-  in
-  let questions =
-    if list_is_read reading.questions then
-      Option.value ~default:[] (approvals_open_questions state)
-      |> List.map (fun (row : Masc.Tui_decode_asks.ask_row) ->
-          let why = match row.ar_context, row.ar_questions with
-            | Some reason, _ -> reason
-            | None, question :: _ -> question.aq_prompt
-            | None, [] -> "open question"
-          in
-          Home_request (Home_question row.ar_id),
-          Printf.sprintf "Question · %s [%s] · %s" (clean row.ar_keeper)
-            (String.trim (Masc_tui_message_layout.fit_middle 12 (clean row.ar_id))) (clean why))
-    else []
-  in
-  let source_notes =
-    approval_row_lists reading @ ["questions", reading.questions]
-    |> List.filter_map (fun (name, status) -> match status with
-        | List_read -> None
-        | List_not_read _ -> Some (name ^ " not fully read"))
-  in
-  let approvals =
-    let notes =
-      match state.approval_snapshot with
-      | Some snapshot when snapshot.aps_hidden_count > 0 ->
-          source_notes @ [Printf.sprintf "%d requests outside current filter" snapshot.aps_hidden_count]
-      | Some _ | None -> source_notes
-    in
-    match notes with
-    | [] ->
-        let count =
-          List.map fst (approval_rows @ questions) |> List.sort_uniq compare |> List.length
-        in
-        if count = 0 then []
-        else [Home_approvals, Printf.sprintf "Approvals and questions: %d need you · all requests" count]
-    | _ :: _ -> [Home_approvals, "Approvals and questions: " ^ String.concat "; " notes]
-  in
-  let goals = match state.goals_to_confirm with
-    | Masc_tui_agenda.Read rows ->
-        List.map (fun (row : Masc_tui_agenda.goal_to_confirm) ->
-          Home_request (Home_goal_confirmation row.goal_id),
-          Printf.sprintf "Confirm Goal · %s · %s" (clean row.goal_id) (clean row.title)) rows
-    | Not_read -> [Home_agenda, "Goal confirmations not read · inspect sources"]
-    | Read_failed _ -> [Home_agenda, "Goal confirmations unavailable · inspect sources"]
-  in
-  let tasks = match state.operator_stalled with
-    | Masc_tui_agenda.Read_failed _ -> [Home_agenda, "Operator tasks unavailable · inspect sources"]
-    | Not_read -> [Home_agenda, "Operator tasks not read · inspect sources"]
-    | Read rows ->
-        List.map (fun (row : Masc_tui_agenda.stalled) ->
-          Home_request (Home_operator_task row.task_id),
-          Printf.sprintf "Operator task · %s · %s" (clean row.task_id) (clean row.what)) rows
-  in
-  (* Equality is kind plus authoritative request ID, never a Keeper/task
-     grouping key. Distinct calls belonging to one Keeper remain distinct. *)
-  List.fold_left (fun rows ((action, label) as row) ->
-    match List.assoc_opt action rows with
-    | None -> rows @ [row]
-    | Some previous when action = Home_agenda ->
-        List.map (fun (key, text) ->
-          if key = action then key, previous ^ "; " ^ label else key, text) rows
-    | Some _ -> rows) [] (approval_rows @ questions @ goals @ tasks @ approvals)
-
-let clear_ask_answering state =
-  state.ask_answer_mode <- Ask_browsing;
-  state.ask_draft <- None;
-  state.ask_text_entry <- None;
-  state.pending_ask_submit <- None
-
-let reconcile_home_request_detail state =
-  match state.home_opened_request with
-  | None -> ()
-  | Some request ->
-      let expected_surface = match request with
-        | Home_held_call _ | Home_gate_request _ | Home_operator_request _ | Home_question _ -> Approvals
-        | Home_goal_confirmation _ | Home_operator_task _ -> Planning
-      in
-      if state.view <> expected_surface then begin
-        state.home_opened_request <- None;
-        (match state.followed_from with
-         | Some (Overview, _) -> state.followed_from <- None
-         | Some _ | None -> ())
-      end else if not (List.mem_assoc (Home_request request) (home_decision_rows state)) then begin
-        (match request with Home_question _ -> clear_ask_answering state | _ -> ());
-        state.home_opened_request <- None;
-        state.approval_detail_open <- false;
-        state.pending_approval_action <- None;
-        state.followed_from <- None;
-        state.view <- Overview
-      end else
-        match request with
-        | Home_held_call _ | Home_gate_request _ | Home_operator_request _ ->
-            Option.iter (fun index -> state.approval_cursor <- index)
-              (List.find_index (fun row -> home_request_of_approval row = request)
-                 (approval_items state))
-        | Home_question ask_id ->
-            Option.iter (fun index -> state.ask_cursor <- index)
-              (List.find_index (fun (row : Masc.Tui_decode_asks.ask_row) -> row.ar_id = ask_id)
-                 (Option.value ~default:[] (approvals_open_questions state)))
-        | Home_goal_confirmation goal_id -> state.planning_mode <- Planning_detail goal_id
-        | Home_operator_task task_id -> state.task_detail_id <- Some task_id
-
-let home_continue_rows (state : state) =
-  let last =
-    match state.home_last_chat, state.opening_mode with
-    | Recorded_chat name, _ -> Some (Keeper_id.Keeper_name.to_string name, "")
-    | Session_chat { keeper; _ }, _ ->
-        Some (Keeper_id.Keeper_name.to_string keeper, " · this session only")
-    | Unconfirmed_chat { keeper; _ }, _ ->
-        Some (Keeper_id.Keeper_name.to_string keeper, " · save durability unconfirmed")
-    | No_chat_receipt, Masc_tui_config.Last (Some name) ->
-        Some (Keeper_id.Keeper_name.to_string name, "")
-    | Unreadable_chat_receipt _, _
-    | No_chat_receipt, (Masc_tui_config.Last None | Masc_tui_config.Overview
-                       | Masc_tui_config.Keeper _) -> None
-  in
-  let resume =
-    match last with
-    | Some (name, save_notice) when state.workspace_identity = Workspace_identity_match
-                   && keeper_available_for_new_message state name ->
-        [ Home_resume name,
-          "Continue with " ^ Masc.Tui_terminal_text.sanitize_terminal_text name
-          ^ save_notice ]
-    | Some (name, save_notice) when state.workspace_identity = Workspace_identity_match
-                         && Option.is_some state.keepers_error ->
-        [ Home_read_last name,
-          "Last conversation with " ^ Masc.Tui_terminal_text.sanitize_terminal_text name
-          ^ save_notice
-          ^ " · roster unavailable; read history" ]
-    | Some _ | None -> []
-  in
-  let choose =
-    match state.workspace_identity, state.local_workspace, state.keepers_error, state.keepers with
-    | Workspace_identity_match, Local_workspace_read, None, [] ->
-        [ Home_create_keeper,
-          (match state.home_last_chat, last with
-           | Unreadable_chat_receipt _, _ ->
-               "Create a Keeper · conversation history unavailable"
-           | (No_chat_receipt | Recorded_chat _ | Session_chat _ | Unconfirmed_chat _), Some (name, _) ->
-               "Create a Keeper · last conversation "
-               ^ Masc.Tui_terminal_text.sanitize_terminal_text name ^ " unavailable"
-           | (No_chat_receipt | Recorded_chat _ | Session_chat _ | Unconfirmed_chat _), None ->
-               "Create a Keeper  · choose who will take the work") ]
-    | _ ->
-        [ Home_choose_keeper,
-          (match resume with
-           | [] ->
-               (match state.home_last_chat, last with
-                | Unreadable_chat_receipt _, _ ->
-                    "Conversation history unavailable · choose a Keeper"
-                | (No_chat_receipt | Recorded_chat _ | Session_chat _ | Unconfirmed_chat _), Some (name, _) ->
-                    "Last conversation " ^ Masc.Tui_terminal_text.sanitize_terminal_text name
-                    ^ " unavailable · choose a Keeper"
-                | (No_chat_receipt | Recorded_chat _ | Session_chat _ | Unconfirmed_chat _), None ->
-                    "Choose a Keeper  · start a conversation")
-           | _ :: _ -> "New work  · choose a Keeper") ]
-  in
-  resume @ choose
-
-let home_actions state =
-  List.map fst (home_decision_rows state @ home_continue_rows state)
-
-let home_selected_action state =
-  let actions = home_actions state in
-  match state.home_selected with
-  | None -> List.nth_opt actions 0
-  | Some action ->
-      if List.mem action actions then Some action else None
-
-(* Frame preparation pins only an authoritative initial reading; transient
-   boot destinations must remain free to settle. Drawing shares these pure
-   projections but does not store either selection or viewport state. *)
-let home_initial_reading_ready state selected =
-  match selected with
-  | Some (Home_request _ | Home_resume _ | Home_read_last _) -> true
-  | Some Home_approvals -> approvals_reading_current state
-  | Some (Home_choose_keeper | Home_create_keeper) ->
-      approvals_reading_current state
-      && (match state.operator_stalled with Masc_tui_agenda.Read _ -> true | Not_read | Read_failed _ -> false)
-      && (match state.goals_to_confirm with Masc_tui_agenda.Read _ -> true | _ -> false)
-  | Some Home_agenda | None -> false
-
-let home_decision_window state ~budget =
-  let decisions = home_decision_rows state in
-  let continuation = home_continue_rows state in
-  let selected = home_selected_action state in
-  let warning_rows =
-    if Option.is_some state.home_selected && Option.is_none selected then 1 else 0
-  in
-  let capacity = max 0 (budget - List.length continuation - 2 - warning_rows) in
-  let first = max 0 (min state.home_decision_scroll (List.length decisions - capacity)) in
-  let first = match List.find_index (fun (action, _) -> Some action = selected) decisions with
-    | Some index when index < first -> index
-    | Some index when index >= first + capacity -> max 0 (index - capacity + 1)
-    | Some _ | None -> first
-  in
-  first, capacity
-
-let home_step state ~backwards =
-  let actions = home_actions state in
-  let current = home_selected_action state in
-  let index =
-    match List.find_index (fun action -> Some action = current) actions with
-    | None -> 0
-    | Some index ->
-        if backwards then max 0 (index - 1)
-        else min (List.length actions - 1) (index + 1)
-  in
-  state.home_selected <- List.nth_opt actions index
-
-(* One title clause per list that was not read, in the order the lists are
-   drawn. A list with nothing read and nothing kept is "unread" whether or not
-   a poll failed; the rows of a list read before and not since are "stale". *)
-let approval_list_note ~name = function
-  | List_read -> ""
-  | List_not_read (Approval_unread | Approval_failed _) ->
-      Printf.sprintf ", %s unread" name
-  | List_not_read (Approval_stale _) -> Printf.sprintf ", %s stale" name
-  | List_not_read (Approval_unavailable _) ->
-      Printf.sprintf ", %s unavailable" name
-
-let approvals_title_notes (reading : approvals_reading) =
-  String.concat ""
-    (List.map
-       (fun (name, list_reading) -> approval_list_note ~name list_reading)
-       (approval_row_lists reading @ [ ("questions", reading.questions) ]))
-
-(* What the queue says when it has no approval row to draw. "No pending
-   approvals" is a reading of all three row lists, so it is said only when
-   each of them was read; otherwise each list that was not read is named with
-   its reading. *)
-type approvals_empty_queue =
-  | Nothing_pending
-  | Lists_not_read of (string * approval_not_read) list
-
-let approvals_empty_queue (reading : approvals_reading) =
-  match
-    List.filter_map
-      (fun (name, list_reading) ->
-        match list_reading with
-        | List_read -> None
-        | List_not_read not_read -> Some (name, not_read))
-      (approval_row_lists reading)
-  with
-  | [] -> Nothing_pending
-  | not_read -> Lists_not_read not_read
-
-let is_surface_active (state : state) (s : surface) =
-  match s with
-  | Approvals ->
-      (* An entry that disappears says "nothing is waiting", which is the one
-         thing the strip cannot say when it could not look. With the server
-         unreachable every other surface drew "(load failed)" and this one
-         left the ring, so the screen that holds the operator's decisions was
-         the only one that read as settled. The entry stands until a reading
-         says the lists are empty. *)
-      state.view = Approvals
-      || approvals_surface_pending state > 0
-      || not (approvals_reading_current state)
-  | _ -> true
-;;
-
-let visible_surface_ring (state : state) : (surface * string) list =
-  List.filter (fun (s, _) -> is_surface_active state s) surface_ring
-;;
-
-(* One mapping for the strip highlight and Tab family. Every surface is named
-   so a new surface must choose its destination explicitly. *)
-let surface_ring_family (state : state) (view : surface) =
-  match view with
-  | Keepers _ -> Keepers Keeper_list
-  | Verification | Harness | Approvals -> Planning
-  | Connectors when Option.is_some (browser_lane_on_screen state) -> Config
-  | Changes | Connectors | Schedules | Fusion | Memory -> Keepers Keeper_list
-  | Runtime | Clients | Lanes | Acting | System_logs -> Config
-  | Code -> Repositories
-  | Resources | Tools -> Config
-  | Metrics -> Metrics
-  | Overview -> Overview
-  | Board -> Board
-  | Planning -> Planning
-  | Repositories -> Repositories
-  | Config -> Config
-
-let visible_surface_ring_index (state : state) (view : surface) =
-  let ring = visible_surface_ring state in
-  let family = surface_ring_family state view in
-  let rec find i = function
-    | [] -> 0
-    | (surface, _) :: rest -> if surface = family then i else find (i + 1) rest
-  in
-  find 0 ring
-;;
-
 let conversation_urls (state : state) : string list =
   let seen = Hashtbl.create 16 in
   let acc = ref [] in
@@ -11812,8 +11480,21 @@ let keeper_effects_at_the_gate (state : state) ~keeper_name =
    returns and the pane draws what this returns, which is the arrangement that
    kept the unavailable row from going missing while the send hint still read
    Enter:send. Folding would have been a second place to disagree. *)
-let keeper_message_visible_status_rows (state : state) live ~now =
+let keeper_message_unfolded_status_rows (state : state) live ~now =
   let rows = Masc_tui_keeper_chat_transcript.status_rows ~now live in
+  let rows = match state.msg_tool_visibility with
+    | Tools_full -> rows
+    | Tools_compact | Tools_results -> List.filter (fun (kind, _) ->
+        match kind with
+        | Masc_tui_keeper_chat_transcript.Progress ->
+            (match Masc_tui_keeper_chat_transcript.phase live with
+             | Stream_failed _ -> true
+             | Waiting | Working | Stream_ended -> false)
+        | Answer_needed | Attention | Approval _ -> true) rows in
+  rows
+
+let keeper_message_visible_status_rows (state : state) live ~now =
+  let rows = keeper_message_unfolded_status_rows state live ~now in
   if state.msg_turn_folded then
     List.filter
       (fun (kind, _) ->
@@ -11821,12 +11502,12 @@ let keeper_message_visible_status_rows (state : state) live ~now =
       rows
   else rows
 
-(* How many rows the fold took, which the folded progress line reports so the
-   count is never a thing the reader has to notice is missing. *)
+(* Count rows hidden by folding after the diagnostic mode has selected its
+   rows. Full progress and the compact summary report this same count. *)
 let keeper_message_folded_status_count (state : state) live ~now =
   if not state.msg_turn_folded then 0
   else
-    List.length (Masc_tui_keeper_chat_transcript.status_rows ~now live)
+    List.length (keeper_message_unfolded_status_rows state live ~now)
     - List.length (keeper_message_visible_status_rows state live ~now)
 
 let keeper_observed_turn (state : state) keeper_name =
@@ -11973,7 +11654,7 @@ let keeper_message_waiting_requests (state : state) ~keeper_name =
     item.request, Local_pending) local
 ;;
 
-let keeper_message_activity_rows (state : state) =
+let keeper_message_diagnostic_activity_rows (state : state) =
   match state.msg_target_keeper_name with
   | None -> []
   | Some keeper_name ->
@@ -12062,6 +11743,125 @@ let keeper_message_activity_rows (state : state) =
       else []) @ queue_rows
 ;;
 
+(* Default chat status has one owner. Typed admission, execution and priority
+   receipts remain separate facts inside that one row; detailed rows use the
+   same Ctrl-D axis as tool diagnostics. *)
+let keeper_message_activity_rows (state : state) =
+  match state.msg_tool_visibility, state.msg_target_keeper_name with
+  | Tools_full, _ ->
+      let receipts = match state.msg_target_keeper_name with
+        | None -> []
+        | Some name -> List.filter_map (fun (request, result) ->
+            if request.Masc_tui_keeper_chat_projection.keeper_name <> name then None
+            else Some { Masc_tui_answering.lead = (if keeper_run_next_receipt_provisional state request then "Priority (control pending) "
+                else match result with Ok _ -> "Priority " | Error _ -> "Priority confirmation unavailable ") ^ Masc_tui_keeper_chat_projection.terminal_safe_text request.request_id;
+              rest = " · " ^ (match result with Ok detail | Error detail ->
+                Masc_tui_keeper_chat_projection.terminal_safe_text detail); keys = "" })
+            state.keeper_run_next_receipts in
+      keeper_message_diagnostic_activity_rows state @ receipts
+  | (Tools_compact | Tools_results), None -> []
+  | (Tools_compact | Tools_results), Some keeper_name ->
+      let waiting = keeper_message_waiting_requests state ~keeper_name in
+      let clauses = ref [] and urgent = ref [] in
+      let add text = clauses := text :: !clauses in
+      let attention text = urgent := text :: !urgent in
+      let matching entry = String.equal entry.sent_request.keeper_name keeper_name in
+      let own = List.filter matching state.msg_inflight in
+      let any_phase phase = List.exists (fun entry ->
+          phase entry.log.tl_transcript) own in
+      if any_phase (fun transcript -> match Masc_tui_keeper_chat_transcript.phase transcript with
+          | Stream_failed _ -> true | Waiting | Working | Stream_ended -> false) then
+        attention "요청 처리 실패";
+      if List.exists (fun entry -> match entry.phase with
+          | Turn_reconciling -> true | Turn_streaming -> false) own then
+        attention "메시지 전달 재확인 중";
+      if any_phase Masc_tui_keeper_chat_transcript.awaiting_continuation then
+        add "이어서 처리하기를 기다리는 중";
+      let has_working = any_phase (fun transcript ->
+        Masc_tui_keeper_chat_transcript.phase transcript = Working) in
+      if has_working then add "기존 작업 처리 중";
+      if any_phase (fun transcript -> Masc_tui_keeper_chat_transcript.phase transcript = Stream_ended) then
+        add "응답 마무리 중";
+      List.iter (fun (admission, text) ->
+          if List.exists (fun entry ->
+              entry.phase = Turn_streaming
+              && Masc_tui_keeper_chat_transcript.phase entry.log.tl_transcript = Waiting
+              && not (Masc_tui_keeper_chat_transcript.awaiting_continuation entry.log.tl_transcript)
+              && Option.map fst (Masc_tui_keeper_chat_transcript.admission entry.log.tl_transcript) = admission) own
+          then add text)
+        [None, "메시지 접수 확인 중";
+         Some Masc_tui_keeper_chat_live.Running, "응답 시작 중";
+         Some Settled, "완료된 응답을 다시 읽는 중"];
+      if not has_working then
+        (match state.keeper_turns_error with
+         | Some _ -> attention "현재 작업 확인 불가"
+         | None -> List.iter (fun (row : Tui_decode.keeper_turn_row) ->
+             if String.equal row.ktr_keeper_name keeper_name then
+               match row.ktr_state with
+               | Keeper_turn_running _ -> add "기존 작업 처리 중"
+               | Keeper_turn_unavailable _ -> attention "현재 작업 확인 불가"
+               | Keeper_turn_idle -> ()) state.keeper_turns);
+      if waiting <> [] then begin
+        add (Printf.sprintf "내 메시지 %d건 대기" (List.length waiting));
+        let count delivery = List.length (List.filter (fun (_, kind) -> kind = delivery) waiting) in
+        List.iter (fun (delivery, text) -> let n = count delivery in
+          if n > 0 then add (Printf.sprintf "%d건 %s" n text))
+          [Local_pending, "전송 전"; Awaiting_receipt, "접수 확인 중";
+           Rechecking_delivery, "전달 재확인 중"];
+        let requests = List.map fst waiting in
+        let holds request = List.exists
+          (Masc_tui_keeper_chat_projection.same_request_identity request) requests in
+        let pending = List.exists (fun (_, control) ->
+            List.exists holds control.priority_requests) state.keeper_priority_controls
+            || List.exists holds
+            (state.keeper_run_next_pending @ state.keeper_run_next_ready @ state.keeper_run_next_inflight) in
+        let receipts = List.filter (fun (request, _) -> holds request
+            && not (keeper_run_next_receipt_provisional state request)) state.keeper_run_next_receipts in
+        if List.exists (fun (_, result) -> Result.is_error result) receipts then
+          attention "다음 순서 확인 불가"
+        else if pending then add "다음 순서 확인 중"
+        else if List.for_all (fun request -> List.exists (fun (received, result) ->
+            Masc_tui_keeper_chat_projection.same_request_identity request received
+            && Result.is_ok result) receipts) requests then
+          add "다음 순서로 접수됨"
+        else if receipts <> [] then add "일부 메시지 다음 순서로 접수됨"
+        else if count Keeper_queued > 0 then add "접수됨"
+      end;
+      if List.exists (fun (name, _, intervention) ->
+          String.equal name keeper_name && match intervention with
+          | Retained_after_stop -> true | Awaiting_control _ -> false)
+          state.keeper_interactive_waiting then attention "중단 뒤 보관 중 · /queue resume";
+      let folded = match state.msg_live with
+        | Some live when String.equal (turn_log_keeper_name live) keeper_name ->
+            keeper_message_folded_status_count state live.tl_transcript ~now:(Unix.gettimeofday ())
+        | Some _ | None -> 0 in
+      let keys =
+        (match keeper_observed_stop_hint state with None -> "" | Some _ -> " · Esc:중단")
+        ^ (if folded > 0 then Printf.sprintf " · +%d" folded else "") in
+      match List.rev !urgent @ List.rev !clauses with
+      | [] when folded = 0 -> []
+      | parts -> [{ Masc_tui_answering.lead = String.concat " · " parts;
+          rest = ""; keys }]
+;;
+
+let keeper_message_activity_needs_attention (state : state) =
+  match state.msg_target_keeper_name with
+  | None -> false
+  | Some name ->
+      Option.is_some state.keeper_turns_error
+      || List.exists (fun (row : Tui_decode.keeper_turn_row) ->
+          String.equal row.ktr_keeper_name name && match row.ktr_state with
+          | Keeper_turn_unavailable _ -> true
+          | Keeper_turn_running _ | Keeper_turn_idle -> false) state.keeper_turns
+      || List.exists (fun entry -> String.equal entry.sent_request.keeper_name name
+          && (match entry.phase with Turn_reconciling -> true | Turn_streaming -> false
+              || match Masc_tui_keeper_chat_transcript.phase entry.log.tl_transcript with
+                 | Stream_failed _ -> true | Waiting | Working | Stream_ended -> false)) state.msg_inflight
+      || List.exists (fun (request, result) ->
+          String.equal request.Masc_tui_keeper_chat_projection.keeper_name name
+          && Result.is_error result) state.keeper_run_next_receipts
+;;
+
 (* The in-flight requests the chat pane draws a row for.
 
    A request the live transcript is already drawing gets no row of its own:
@@ -12094,6 +11894,10 @@ let keeper_message_inflight_drawn (state : state) =
         state.msg_inflight
     | Some _ | None -> state.msg_inflight
   in
+  let uncovered = match state.msg_tool_visibility with
+    | Tools_full -> uncovered
+    | Tools_compact | Tools_results -> List.filter (fun entry ->
+        state.msg_target_keeper_name <> Some entry.sent_request.keeper_name) uncovered in
   List.fold_left
     (fun groups entry ->
       let execution_id = turn_log_execution_id entry.log in
@@ -12216,7 +12020,7 @@ let keeper_message_status_rows (state : state) ~terminal_cols =
      anything was waiting on the operator. *)
   + (match state.msg_target_keeper_name with
      | Some keeper_name
-       when (not state.msg_turn_folded)
+       when ((not state.msg_turn_folded) || state.msg_tool_visibility <> Tools_full)
             && keeper_effects_at_the_gate state ~keeper_name <> [] ->
          1
      | Some _ | None -> 0)

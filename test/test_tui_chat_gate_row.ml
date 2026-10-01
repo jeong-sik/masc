@@ -135,6 +135,7 @@ let test_the_pane_and_the_budget_read_one_list () =
    replaces was written for. *)
 let test_a_folded_turn_gives_the_queue_no_row () =
   let state = state () in
+  state.msg_tool_visibility <- Tui_types.Tools_full;
   state.msg_target_keeper_name <- Some "polisher";
   state.msg_turn_folded <- true;
   let empty = Tui_types.keeper_message_status_rows state ~terminal_cols:80 in

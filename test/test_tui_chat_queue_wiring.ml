@@ -951,6 +951,7 @@ let visible_reply reply =
 
 let test_queue_summary_follows_admission_and_execution () =
   let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  state.msg_tool_visibility <- Tui_types.Tools_full;
   let accepted keeper at = inflight_with_log ~keeper_name:keeper ~started_at:at
       [Live.Accepted {admission=Live.Queued; queue_length=99; interactive=None}] in
   let first = accepted "alpha" 1. and second = accepted "alpha" 2. in
@@ -4262,10 +4263,85 @@ let test_hidden_chat_roster_releases_focus_without_changing_conversation () =
   check bool "visible roster retains deliberate focus" true
     (state.keeper_message_focus = Tui_types.Left_pane)
 
+let test_priority_completion_survives_controls () =
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let alpha = inflight_with_log ~keeper_name:"alpha" ~started_at:1. [] in
+  let beta = inflight_with_log ~keeper_name:"beta" ~started_at:1. [] in
+  state.msg_inflight <- [alpha; beta];
+  state.keeper_run_next_inflight <- [alpha.sent_request; beta.sent_request];
+  let generation = Tui_types.begin_keeper_chat_control state "alpha" in
+  check bool "old HTTP remains tracked while control is pending" true
+    (List.exists (Keeper_chat.same_request_identity alpha.sent_request) state.keeper_run_next_inflight);
+  Tui_types.settle_keeper_priority_control state "alpha" ~generation
+    ~outcome:Tui_types.Priority_superseded;
+  check bool "successful control retires receipt without redisplaying" true
+    (Tui_types.settle_keeper_run_next state alpha.sent_request (Ok "old priority") = Tui_types.Run_next_retired);
+  check bool "retired request leaves tracking" false
+    (List.exists (Keeper_chat.same_request_identity alpha.sent_request) state.keeper_run_next_inflight);
+  check bool "controlled receipt is absent" false
+    (List.exists (fun (request, _) -> Keeper_chat.same_request_identity alpha.sent_request request) state.keeper_run_next_receipts);
+  ignore (Tui_types.advance_keeper_chat_control state "beta");
+  check bool "ordinary admission advancement retains the existing request receipt" true
+    (Tui_types.settle_keeper_run_next state beta.sent_request (Ok "current priority") = Tui_types.Run_next_received);
+  check bool "current receipt is retained" true
+    (List.exists (fun (request, result) -> Keeper_chat.same_request_identity beta.sent_request request && result = Ok "current priority") state.keeper_run_next_receipts);
+  check bool "duplicate callback has no effect" true
+    (Tui_types.settle_keeper_run_next state beta.sent_request (Error "duplicate") = Tui_types.Run_next_untracked)
+
+let test_status_details_and_fold_counts_reach_the_frame () =
+  let cache = Masc_tui_ansi.terminal_size_cache in
+  let previous = Masc_tui_ansi.get_terminal_size () in
+  let set_size size = ignore (Masc_tui_render_schedule.Terminal_size_cache.refresh cache ~probe:(fun () -> Some size)) in
+  Fun.protect ~finally:(fun () -> set_size previous) (fun () ->
+    set_size (40, 160);
+    let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+    state.view <- Tui_types.Keepers Tui_types.Keeper_message;
+    state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
+    state.msg_target_keeper_name <- Some "alpha";
+    let entry = inflight_with_log ~keeper_name:"alpha" ~started_at:1. [Live.Run_started] in
+    state.msg_inflight <- [entry];
+    state.msg_tool_visibility <- Tui_types.Tools_full;
+    let unsent = Keeper_chat.create_request ~keeper_name:"alpha" ~message:"LOCAL_PREVIEW_DETAIL" () in
+    (match Masc_tui_keeper_chat_queue.push state.msg_queued ~submitted_at:2. unsent with
+     | Error detail -> fail detail | Ok (queue, _) -> state.msg_queued <- queue);
+    state.keeper_run_next_receipts <- [entry.sent_request, Ok "ACKNOWLEDGED_PRIORITY_DETAIL"];
+    let lines () = let frame, _ = Masc_tui_render_chat.render_keeper_message state in
+      List.map Masc_tui_theme.strip_sgr frame.Masc_tui_frame_presenter.lines in
+    let has_detail lead detail = List.exists (fun line ->
+      Astring.String.is_infix ~affix:lead line && Astring.String.is_infix ~affix:detail line) (lines ()) in
+    check bool "Full execution detail remains beside its lead" true
+      (has_detail "Current direct conversation" (Tui_types.turn_log_execution_id entry.log));
+    check bool "Full local preview remains beside its lead" true
+      (has_detail "Local NEXT" "LOCAL_PREVIEW_DETAIL");
+    check bool "Full priority receipt remains beside its lead" true
+      (has_detail "Priority " "ACKNOWLEDGED_PRIORITY_DETAIL");
+    state.msg_live <- Some entry.log;
+    state.msg_queued <- Masc_tui_keeper_chat_queue.empty;
+    List.iteri (fun i delta -> Tui_types.turn_log_add ~now:2. entry.log ~seq:(Some (i+1)) delta)
+      [Live.Approval_requested {call_id="fold-call";tool_name="Execute";args="";question="Approve?";because="fixture"};
+       Live.Approval_settled {call_id="fold-call";outcome="approved"};
+       Live.Stream_protocol_error {quarantined_occurrence=None;detail="fixture unreadable event"}];
+    state.msg_turn_folded <- true;
+    List.iter (fun mode ->
+      state.msg_tool_visibility <- mode;
+      check int "only fold-hidden Approval and Attention rows are counted" 2
+        (Tui_types.keeper_message_folded_status_count state entry.log.tl_transcript ~now:3.);
+      check bool "compact summary offers hidden rows and expansion" true
+        (has_detail "+2" Masc_tui_keys.expand_turn_label);
+      state.msg_turn_folded <- false;
+      check bool "unfolded status does not retain hidden count" false
+        (List.exists (Astring.String.is_infix ~affix:"+2") (lines ()));
+      state.msg_turn_folded <- true)
+      [Tui_types.Tools_compact; Tui_types.Tools_results])
+
+
 let () =
   run
     "tui_chat_queue_wiring"
-    [ ( "link card layout", [test_case "actual body width and preview cache changes" `Quick test_link_cards_use_actual_message_body_width] )
+    [ ( "status ownership",
+        [ test_case "priority completions survive controls" `Quick test_priority_completion_survives_controls
+        ; test_case "status details and fold counts reach the frame" `Quick test_status_details_and_fold_counts_reach_the_frame ] )
+    ; ( "link card layout", [test_case "actual body width and preview cache changes" `Quick test_link_cards_use_actual_message_body_width] )
     ; ( "wiring"
       , [ test_case "queue summary follows admission and execution" `Quick test_queue_summary_follows_admission_and_execution
         ; test_case "checkpoint watcher allows new input" `Quick test_checkpoint_watcher_allows_new_input

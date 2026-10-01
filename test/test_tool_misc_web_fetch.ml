@@ -1,7 +1,6 @@
 open Alcotest
 
 let handle ?(extract_mode = "markdown") ?(max_chars = 5_000) url =
-  Eio_main.run @@ fun _env ->
   Masc.Tool_misc_web_fetch.handle ~tool_name:"masc_web_fetch"
     ~start_time:(Tool_timing.start ())
     (`Assoc
@@ -70,7 +69,7 @@ let test_html_metadata_and_article_extraction () =
 (* Title, description and the markdown rendering run as one job on the
    domain pool when one is installed. The same document must extract to the
    same fields inline and pooled; two urls keep the response cache out of it. *)
-let test_extraction_matches_on_the_pool () =
+let test_extraction_matches_on_the_pool ~env () =
   let html =
     {|<!doctype html>
 <html>
@@ -110,8 +109,6 @@ let test_extraction_matches_on_the_pool () =
                ])
         in
         let result =
-          Eio_main.run
-          @@ fun env ->
           if String.equal url "https://example.com/pooled"
           then
             Eio.Switch.run (fun sw ->
@@ -527,6 +524,9 @@ let test_upstream_http_failure status guidance =
         Yojson.Safe.Util.(second |> member "text" |> to_string))
 
 let () =
+  (* One runtime owns every request and the pooled extraction switch for the
+     whole test execution, including explicit retries after upstream failures. *)
+  Eio_main.run @@ fun env ->
   run "tool_misc_web_fetch"
     [
       ( "fetch",
@@ -536,7 +536,7 @@ let () =
           test_case "plain text preserves angle brackets" `Quick
             test_plain_text_preserves_angle_brackets;
           test_case "extraction matches on the pool" `Quick
-            test_extraction_matches_on_the_pool;
+            (test_extraction_matches_on_the_pool ~env);
           test_case "invalid redirect class" `Quick
             test_invalid_redirect_is_workflow_rejection;
           test_case "truncation offloads full text" `Quick

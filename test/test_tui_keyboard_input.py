@@ -267,6 +267,8 @@ def test_http_endpoint(
             path_only = self.path.split("?", 1)[0]
             if self.path in fixtures:
                 fixture = fixtures[self.path]
+            elif path_only == "/api/v1/gate/keepers" and "/api/v1/gate/keepers?detailed=true" in fixtures:
+                fixture = fixtures["/api/v1/gate/keepers?detailed=true"]
             elif self.path == "/health":
                 fixture = (200, {})
             elif self.path == "/health?full=1":
@@ -912,7 +914,7 @@ def tab_until(
     """Press Tab until the screen shows [needle], or give up after a lap.
 
     Name the surface the walk is going to, not one on the way. The ring is
-    not fixed: Masc_tui_types.is_surface_active leaves Approvals out of it
+    not fixed: Masc_tui_surface_navigation.is_surface_active leaves Approvals out of it
     while nothing is pending, so a walk that stopped there first burned
     every press on a screen that did not exist. Six scenarios used it as a
     waypoint to Board, and a seventh fabricated a pending tool approval in
@@ -1643,6 +1645,7 @@ def keeper_runtime_http_fixtures(
                     "runtime_id": alpha_runtime_id,
                     "runtime_blocker_summary": None,
                     "candle_balance_milli": None,
+                    "candle_account_revision": None,
                     "portrait": {"state": "ready", "equipment": {"face": "bare_face", "neck": "bare_neck", "head": "bare_head", "hand": "empty_hand", "base": "no_dish"}},
                 },
                 {
@@ -1658,6 +1661,7 @@ def keeper_runtime_http_fixtures(
                     "runtime_id": beta_runtime_id,
                     "runtime_blocker_summary": None,
                     "candle_balance_milli": None,
+                    "candle_account_revision": None,
                     "portrait": {"state": "ready", "equipment": {"face": "bare_face", "neck": "bare_neck", "head": "bare_head", "hand": "empty_hand", "base": "no_dish"}},
                 },
             ],
@@ -6918,7 +6922,7 @@ def open_atomic_chat(process: subprocess.Popen[bytes], master_fd: int, output: b
     send_and_wait(process, master_fd, output, b"m", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
     # Seeing the preview proves the same observer response carrying the control
     # token has reached the UI before the first Enter.
-    wait_for_output(process, master_fd, output, b"Atomic fixture ready", start=0, timeout=10)
+    wait_for_output(process, master_fd, output, "기존 작업 처리 중".encode(), start=0, timeout=10)
 
 
 def wait_for_atomic_admissions(process: subprocess.Popen[bytes], master_fd: int,
@@ -6989,9 +6993,9 @@ def chat_steer_interaction(fixture: AtomicChatFixture, requests: HttpRequests) -
             if not wait_for_fixture_event(process, master_fd, output, fixture.interrupted, timeout=5):
                 raise AssertionError("Esc never reached its exact observed turn")
             send_and_wait(process, master_fd, output, b"new-course", composer_showing(b"new-course"))
-            send_and_wait(process, master_fd, output, b"\r", b"Queue (2 pending")
+            send_and_wait(process, master_fd, output, b"\r", "내 메시지 2건 대기".encode())
             send_and_wait(process, master_fd, output, b"one-more", composer_showing(b"one-more"))
-            send_and_wait(process, master_fd, output, b"\r", b"Queue (3 pending")
+            send_and_wait(process, master_fd, output, b"\r", "내 메시지 3건 대기".encode())
             if not wait_for_fixture_event(process, master_fd, output, fixture.old_poll_seen, timeout=10):
                 raise AssertionError("no stale observation arrived during pending Esc")
             read_available(master_fd, output)
@@ -7027,7 +7031,7 @@ def chat_working_target_interaction(fixture: AtomicChatFixture) -> Interaction:
         try:
             open_atomic_chat(process, master_fd, output)
             send_and_wait(process, master_fd, output, b"working-question", composer_showing(b"working-question"))
-            send_and_wait(process, master_fd, output, b"\r", b"IN PROGRESS")
+            send_and_wait(process, master_fd, output, b"\r", "기존 작업 처리 중".encode())
             wait_for_atomic_admissions(process, master_fd, output, fixture, 1)
             send_and_wait(process, master_fd, output, b"follow-up", composer_showing(b"follow-up"))
             os.write(master_fd, b"\r")
@@ -7043,7 +7047,7 @@ def chat_working_target_interaction(fixture: AtomicChatFixture) -> Interaction:
             time.sleep(0.08)  # delimit the terminal's lone Escape before typing
             read_available(master_fd, output)
             send_and_wait(process, master_fd, output, b"after-stop", composer_showing(b"after-stop"))
-            send_and_wait(process, master_fd, output, b"\r", b"Queue (2 pending")
+            send_and_wait(process, master_fd, output, b"\r", "내 메시지 2건 대기".encode())
             if len(fixture.interrupt_requests) != 1 or len(fixture.submitted) != 2:
                 raise AssertionError("double Esc duplicated control or released input before acknowledgement")
             fixture.release_interrupt.set()
@@ -7067,7 +7071,7 @@ def chat_pending_stop_leave_interaction(fixture: AtomicChatFixture) -> Interacti
         try:
             open_atomic_chat(process, master_fd, output)
             send_and_wait(process, master_fd, output, b"working-question", composer_showing(b"working-question"))
-            send_and_wait(process, master_fd, output, b"\r", b"IN PROGRESS")
+            send_and_wait(process, master_fd, output, b"\r", "기존 작업 처리 중".encode())
             os.write(master_fd, b"\x1b")
             if not wait_for_fixture_event(process, master_fd, output, fixture.interrupted, timeout=5):
                 raise AssertionError("stop acknowledgement was not held")
@@ -7091,7 +7095,7 @@ def quit_names_waiting_messages_interaction(fixture: AtomicChatFixture) -> Inter
             if not wait_for_fixture_event(process, master_fd, output, fixture.interrupted, timeout=5):
                 raise AssertionError("Esc acknowledgement was not gated")
             send_and_wait(process, master_fd, output, b"waiting-line", composer_showing(b"waiting-line"))
-            send_and_wait(process, master_fd, output, b"\r", b"Queue (1 pending")
+            send_and_wait(process, master_fd, output, b"\r", "내 메시지 1건 대기".encode())
             if fixture.received:
                 raise AssertionError("pending control input was already sent to the server")
             escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
@@ -7129,7 +7133,7 @@ def chat_retained_stop_interaction(fixture: AtomicChatFixture) -> Interaction:
             if not wait_for_fixture_event(process, master_fd, output, fixture.interrupted, timeout=5):
                 raise AssertionError("initial stop never reached the server")
             send_and_wait(process, master_fd, output, b"retained-original", composer_showing(b"retained-original"))
-            send_and_wait(process, master_fd, output, b"\r", b"Queue (1 pending")
+            send_and_wait(process, master_fd, output, b"\r", "내 메시지 1건 대기".encode())
             send_and_wait(process, master_fd, output, b"\x1b", b"Input retained after Esc")
             if fixture.received:
                 raise AssertionError(f"second Esc dispatched retained input: {fixture.received!r}")
@@ -7247,10 +7251,10 @@ def chat_reconcile_interaction(
             send_and_wait(
                 process, master_fd, output, b"held-next", composer_showing(b"held-next")
             )
-            send_and_wait(process, master_fd, output, b"\r", b"Queue (2 pending")
+            send_and_wait(process, master_fd, output, b"\r", "내 메시지 2건 대기".encode())
             completed = output.rfind(FRAME_END) + len(FRAME_END)
             pending_screen = screen_text(bytes(output[:completed]))
-            if b"1 rechecking delivery" not in pending_screen or b"queued at Keeper" in pending_screen:
+            if "1건 전달 재확인 중".encode() not in pending_screen or "접수됨".encode() in pending_screen:
                 raise AssertionError("unknown admission was presented as confirmed queued: " + repr(pending_screen))
             before_release = [
                 json.loads(body).get("message")
@@ -17187,7 +17191,7 @@ def run_browser_client_picker_regression(executable: str) -> None:
         # row from this request, not Firefox text in an earlier chooser frame.
         wait_for_output(process, master_fd, output, b"Firefox", start=chooser_start, timeout=3.0)
         wait_for_output(process, master_fd, output, FRAME_END,
-                        start=bytes(output).rfind(b"Firefox", chooser_start))
+                        start=bytes(output).rfind(b"Firefox", chooser_start), timeout=3.0)
         picker = screen_text(bytes(output))
         for option in (b"Firefox", b"Stagehand Chromium", b"Independent Firefox/Zen"):
             if option not in picker:

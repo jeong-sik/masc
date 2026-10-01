@@ -45,18 +45,14 @@ def expected_input(case):
     }
 
 
-def main():
-    p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument('workspace', type=Path)
-    p.add_argument('evidence', type=Path)
-    args = p.parse_args()
-    plan = json.loads((args.workspace/'plan.json').read_text())
-    metadata = json.loads((args.evidence/'metadata.json').read_text())
+def audit(workspace, evidence, resources, *, runtime_config=None):
+    plan = json.loads((workspace/'plan.json').read_text())
+    metadata = json.loads((evidence/'metadata.json').read_text())
     require(metadata['plan'] == plan, "audit check failed: metadata['plan'] == plan")
     require(metadata['build']['commit_source'] == 'embedded', "audit check failed: metadata['build']['commit_source'] == 'embedded'")
     require(metadata['build']['commit'] == plan['source_commit'], "audit check failed: metadata['build']['commit'] == plan['source_commit']")
     require(metadata['build']['binary_commit'] == plan['source_commit'], "audit check failed: metadata['build']['binary_commit'] == plan['source_commit']")
-    verification = json.loads((args.evidence/'artifact-verification.json').read_text())
+    verification = json.loads((resources/'artifact-verification.json').read_text())
     require(verification['source_commit'] == plan['source_commit'], 'CI artifact source commit mismatch')
     executable = Path(metadata['build']['executable_path']).name
     require(executable == 'candle_appraiser_eval_cli.exe', 'unexpected evaluation executable')
@@ -64,19 +60,25 @@ def main():
     require(len(artifacts) == 1, 'CI artifact must identify exactly one evaluation executable')
     require(metadata['build']['executable_sha256'] == artifacts[0]['sha256'],
             'evaluation executable hash disagrees with CI artifact verification')
-    corpus = (args.workspace/'cases.json').read_bytes()
+    corpus = (workspace/'cases.json').read_bytes()
     require(sha(corpus) == plan['cases_sha256'], "audit check failed: sha(corpus) == plan['cases_sha256']")
-    require(sha((args.workspace/'.masc/config/runtime.toml').read_bytes()) == plan['runtime_config_sha256'], "audit check failed: sha((args.workspace/'.masc/config/runtime.toml').read_bytes()) == plan['runtime_config_sha256']")
+    if runtime_config is not None:
+        require(sha(runtime_config.read_bytes()) == plan['runtime_config_sha256'],
+                'prepared runtime configuration hash disagrees with plan')
     prompt_bodies = {}
     for name, digest in plan['prompt_sha256'].items():
-        prompt_raw = (args.workspace/'prompts'/name).read_bytes()
+        prompt_raw = (resources/'prompts'/name).read_bytes()
         require(sha(prompt_raw) == digest, 'audit check failed: sha(prompt_raw) == digest')
         prompt_text = prompt_raw.decode()
         require(prompt_text.startswith('---\n'), "audit check failed: prompt_text.startswith('---\\n')")
         # The frozen files use one frontmatter block; preserve body newlines.
         prompt_bodies[name] = prompt_text.split('\n---\n', 1)[1]
-    cases = {case['id']: case for case in json.loads(corpus)}
-    raw = (args.evidence/'results.jsonl').read_bytes()
+    raw_cases = json.loads(corpus)
+    require(isinstance(raw_cases, list) and len(raw_cases) == plan['case_count'],
+            'raw corpus count disagrees with declared case count')
+    cases = {case['id']: case for case in raw_cases}
+    require(len(cases) == len(raw_cases), 'raw corpus contains duplicate case IDs')
+    raw = (evidence/'results.jsonl').read_bytes()
     require(raw.endswith(b'\n'), 'partial result line')
     rows = [json.loads(line) for line in raw.splitlines()]
     require(len(rows) == plan['planned_calls'], 'evaluation is not complete')
@@ -131,11 +133,12 @@ def main():
     # Independently re-read the persisted registry and hash-addressed payloads.
     # The hydrated result must describe the same registered/completed run.
     receipts = {row['receipt']['run_id']: row['receipt'] for row in rows}
-    events_raw = (args.evidence/'exact-lane-runs-v6.jsonl').read_bytes()
+    events_raw = (evidence/'exact-lane-runs-v6.jsonl').read_bytes()
     events = [json.loads(line) for line in events_raw.splitlines()]
     registered, completed = set(), set()
     for event in events:
         run_id = event['id']
+        require(run_id in receipts, 'registry run ID is absent from reported receipts')
         receipt = receipts[run_id]
         if event['event'] == 'register':
             require(run_id not in registered, 'audit check failed: run_id not in registered')
@@ -158,7 +161,7 @@ def main():
             require(completion['elapsed_s'] == receipt['elapsed_s'], "audit check failed: completion['elapsed_s'] == receipt['elapsed_s']")
             side, reference, expected = 'output', completion['output'], receipt['output']
         require(reference['kind'] == 'file', "audit check failed: reference['kind'] == 'file'")
-        path = args.evidence/'exact-lane-run-payloads'/run_id/f"{side}-{reference['sha256']}.json"
+        path = evidence/'exact-lane-run-payloads'/run_id/f"{side}-{reference['sha256']}.json"
         payload_bytes = path.read_bytes()
         require(len(payload_bytes) == reference['bytes'], "audit check failed: len(payload_bytes) == reference['bytes']")
         require(sha(payload_bytes) == reference['sha256'], "audit check failed: sha(payload_bytes) == reference['sha256']")
@@ -166,6 +169,7 @@ def main():
     require(registered == completed == run_ids, 'audit check failed: registered == completed == run_ids')
     result = {
         'scope': 'Provenance and structural checks, not semantic acceptance',
+        'runtime_config_verification': 'prepared_bytes_verified' if runtime_config is not None else 'declared_hash_only',
         'source_commit': plan['source_commit'], 'runtime_id': plan['runtime_id'],
         'executable_sha256': metadata['build']['executable_sha256'],
         'results_sha256': sha(raw), 'complete_pairs': len(seen), 'unique_run_ids': len(run_ids),
@@ -182,7 +186,17 @@ def main():
             'rendered_prompt_sha256': next(iter(prompt_hashes[key])),
             'decisions': sorted(decisions[key], key=lambda row: row['trial'])} for key in cases},
     }
-    print(json.dumps(result, indent=2, ensure_ascii=False))
+    return result
+
+
+def main():
+    p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument('workspace', type=Path)
+    p.add_argument('evidence', type=Path)
+    p.add_argument('--resources', type=Path, help='Frozen prompts and independent artifact record; defaults to evidence directory')
+    args = p.parse_args()
+    print(json.dumps(audit(args.workspace, args.evidence, args.resources or args.evidence,
+                           runtime_config=args.workspace/'.masc/config/runtime.toml'), indent=2, ensure_ascii=False))
 
 
 if __name__ == '__main__':

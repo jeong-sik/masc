@@ -7797,3 +7797,14 @@
 (include stanzas/test_candle_purchase_flow.inc)
 
 (include stanzas/test_tui_candle_currency_pty.inc)
+
+(rule
+ (alias runtest-test_candle_evidence_audits)
+ (deps test_candle_evidence_audits.py
+       (source_tree ../docs/evidence/2026-09-30-candle-grade-explicit-outcome)
+       (source_tree ../docs/evidence/2026-09-30-candle-grade-scope-survey))
+ (action (run python3 %{dep:test_candle_evidence_audits.py})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_candle_evidence_audits)))

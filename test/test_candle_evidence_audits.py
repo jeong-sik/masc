@@ -14,6 +14,11 @@ import tarfile
 import tempfile
 import unittest
 
+SOURCE_MODULES = (
+    "docs/evidence/2026-09-30-candle-grade-explicit-outcome/audit-candidate.py",
+    "docs/evidence/2026-09-30-candle-grade-explicit-outcome/compare-evaluations.py",
+    "docs/evidence/2026-09-30-candle-grade-scope-survey/audit-provenance.py",
+)
 ROOT = Path(__file__).resolve().parents[1]
 CANDIDATE = ROOT/'docs/evidence/2026-09-30-candle-grade-explicit-outcome'
 SURVEY = ROOT/'docs/evidence/2026-09-30-candle-grade-scope-survey'
@@ -25,6 +30,29 @@ def write_json(path, value):
 
 def write_rows(path, rows):
     path.write_text(''.join(json.dumps(row, ensure_ascii=False)+'\n' for row in rows))
+
+
+def rewrite_fixture_registry(bundle, rows):
+    """Build internally consistent synthetic receipts, never measured evidence."""
+    events = []
+    for row in rows:
+        receipt = row['receipt']
+        references = {}
+        for side, payload in [('input', receipt['input']['payload']), ('output', receipt['output'])]:
+            raw = json.dumps(payload, ensure_ascii=False, separators=(',', ':')).encode()
+            digest = hashlib.sha256(raw).hexdigest()
+            path = bundle/'exact-lane-run-payloads'/receipt['run_id']/f'{side}-{digest}.json'
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(raw)
+            references[side] = {'kind':'file', 'bytes':len(raw), 'sha256':digest}
+        events.append({'event':'register', 'id':receipt['run_id'], 'started_at':receipt['started_at'],
+                       'registration':{'lane':receipt['lane'], 'actor':receipt['actor'], 'input':references['input']}})
+        completion = {'outcome':receipt['status'], 'selected_slot':receipt['selected_slot'],
+                      'elapsed_s':receipt['elapsed_s'], 'output':references['output']}
+        if receipt['status'] == 'failed':
+            completion.update(code=receipt['code'], detail=receipt['detail'])
+        events.append({'event':'complete', 'id':receipt['run_id'], 'completion':completion})
+    write_rows(bundle/'exact-lane-runs-v6.jsonl', events)
 
 
 def hydrate(source, target):
@@ -92,41 +120,95 @@ class CandleEvidenceAudits(unittest.TestCase):
                 encoded = json.dumps(payload['actual_input'], ensure_ascii=False, separators=(',', ':'))
                 payload['prompt']['rendered'] = body.replace('{{appraisal_input}}', encoded)
         write_rows(baseline/'results.jsonl', rows)
+        rewrite_fixture_registry(baseline, rows)
+        # Public comparison requires no private runtime file. Model the original
+        # baseline's explicit sibling resource layout without inferred fallback.
+        shutil.rmtree(baseline/'.masc')
+        shutil.rmtree(candidate/'.masc')
+        resources = self.root/'baseline-resources'
+        resources.mkdir()
+        shutil.move(str(baseline/'prompts'), resources/'prompts')
+        prompt_file = resources/'prompts/candle_appraiser_grade.md'
+        shutil.move(str(baseline/'artifact-verification.json'), resources/'artifact-verification.json')
         source_path = candidate/'prompt-source.json'
         prompt_source = json.loads(source_path.read_text())
         prompt_source['baseline_prompt_sha256'] = plan['prompt_sha256']
         write_json(source_path, prompt_source)
         script = CANDIDATE/'compare-evaluations.py'
-        valid = self.run_audit(script, baseline, candidate)
+        valid = self.run_audit(script, baseline, candidate, '--baseline-resources', resources)
         self.assertEqual(valid['changed_prompt_files'], ['candle_appraiser_grade.md'])
+        events = [json.loads(line) for line in (baseline/'exact-lane-runs-v6.jsonl').read_text().splitlines()]
+        registration = events[0]
+        reference = registration['registration']['input']
+        payload_path = baseline/'exact-lane-run-payloads'/registration['id']/f"input-{reference['sha256']}.json"
+        original_payload = payload_path.read_bytes()
+        payload_path.write_bytes(b'x'*len(original_payload))
+        self.run_audit(script, baseline, candidate, '--baseline-resources', resources, error="sha(payload_bytes) == reference['sha256']")
+        payload_path.write_bytes(original_payload)
         answer_rows = copy.deepcopy(rows)
         grade = next(row for row in answer_rows if row['stage'] == 'grade' and row['status'] == 'ok')
         grade['answer']['grade'] = 'fixture-unreported-answer'
         write_rows(baseline/'results.jsonl', answer_rows)
-        self.run_audit(script, baseline, candidate, error='successful answer mismatch')
+        self.run_audit(script, baseline, candidate, '--baseline-resources', resources, error='successful answer mismatch')
         shared_rows = copy.deepcopy(rows)
         for row in shared_rows:
             row['receipt']['run_id'] = row['receipt']['run_id'].removeprefix('fixture-baseline-')
         write_rows(baseline/'results.jsonl', shared_rows)
-        self.run_audit(script, baseline, candidate, error='reuse run IDs')
+        self.run_audit(script, baseline, candidate, '--baseline-resources', resources, error='registry run ID is absent')
+        rewrite_fixture_registry(baseline, shared_rows)
+        self.run_audit(script, baseline, candidate, '--baseline-resources', resources, error='reuse run IDs')
+        rewrite_fixture_registry(baseline, rows)
         write_rows(baseline/'results.jsonl', rows)
         prompt_source['baseline_prompt_sha256'] = json.loads((candidate/'plan.json').read_text())['prompt_sha256']
         write_json(source_path, prompt_source)
-        self.run_audit(script, baseline, candidate, error='baseline prompt hashes disagree')
+        self.run_audit(script, baseline, candidate, '--baseline-resources', resources, error='baseline prompt hashes disagree')
         prompt_source['baseline_prompt_sha256'] = plan['prompt_sha256']
         write_json(source_path, prompt_source)
+        for directory in (baseline, candidate):
+            metadata = json.loads((directory/'metadata.json').read_text())
+            metadata['build']['executable_sha256'] = '0'*64
+            write_json(directory/'metadata.json', metadata)
+        self.run_audit(script, baseline, candidate, '--baseline-resources', resources, error='executable hash disagrees')
+        for directory in (baseline, candidate):
+            metadata = json.loads((directory/'metadata.json').read_text())
+            metadata['build']['executable_sha256'] = next(entry['sha256'] for entry in json.loads(((resources if directory == baseline else directory)/'artifact-verification.json').read_text())['files'] if entry['file'] == 'candle_appraiser_eval_cli.exe')
+            write_json(directory/'metadata.json', metadata)
         changed_rows = copy.deepcopy(rows)
         payload = changed_rows[0]['receipt']['input']['payload']
         payload['actual_input']['goal']['title'] = 'Different unmeasured goal'
         encoded = json.dumps(payload['actual_input'], ensure_ascii=False, separators=(',', ':'))
         payload['prompt']['rendered'] = payload['prompt']['effective_template'].replace('{{appraisal_input}}', encoded)
         write_rows(baseline/'results.jsonl', changed_rows)
-        self.run_audit(script, baseline, candidate, error='actual input disagrees with frozen case')
+        self.run_audit(script, baseline, candidate, '--baseline-resources', resources, error='actual input disagrees with frozen case')
         shutil.copyfile(candidate/'results.jsonl', baseline/'results.jsonl')
-        self.run_audit(script, baseline, candidate, error='effective template disagrees')
+        self.run_audit(script, baseline, candidate, '--baseline-resources', resources, error='effective template disagrees')
         write_rows(baseline/'results.jsonl', rows)
         prompt_file.write_text(frozen + 'tampered')
-        self.run_audit(script, baseline, candidate, error='frozen prompt hash mismatch')
+        self.run_audit(script, baseline, candidate, '--baseline-resources', resources, error='frozen prompt hash mismatch')
+
+    def test_candidate_raw_corpus_count_and_identity(self):
+        bundle = self.root/'candidate'
+        hydrate(CANDIDATE, bundle)
+        script = CANDIDATE/'audit-candidate.py'
+        original_plan = json.loads((bundle/'plan.json').read_text())
+        original_cases = json.loads((bundle/'cases.json').read_text())
+        for duplicate in (False, True):
+            with self.subTest(duplicate=duplicate):
+                plan = copy.deepcopy(original_plan)
+                cases = copy.deepcopy(original_cases)
+                if duplicate:
+                    cases.append(copy.deepcopy(cases[0]))
+                    write_json(bundle/'cases.json', cases)
+                    plan['cases_sha256'] = hashlib.sha256((bundle/'cases.json').read_bytes()).hexdigest()
+                    plan['case_count'] = len(cases)
+                else:
+                    plan['case_count'] = 999
+                write_json(bundle/'plan.json', plan)
+                metadata = json.loads((bundle/'metadata.json').read_text())
+                metadata['plan'] = plan
+                write_json(bundle/'metadata.json', metadata)
+                expected = 'duplicate case IDs' if duplicate else 'raw corpus count disagrees'
+                self.run_audit(script, bundle, bundle, error=expected)
 
     def test_survey_binary_hash_matches_frozen_provenance(self):
         bundle = self.root/'survey'

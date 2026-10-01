@@ -5,8 +5,12 @@ from collections import Counter
 from fractions import Fraction
 import hashlib
 import json
+import runpy
 from pathlib import Path
 
+
+# Share the complete artifact, registry and durable-payload audit with the CLI.
+AUDIT = runpy.run_path(str(Path(__file__).with_name('audit-candidate.py')))['audit']
 
 def require(condition, detail):
     if not condition:
@@ -42,7 +46,7 @@ def expected_input(case):
     }
 
 
-def load_run(directory):
+def load_run(directory, resources):
     plan = json.loads((directory / "plan.json").read_text())
     cases_raw = (directory / "cases.json").read_bytes()
     require(hashlib.sha256(cases_raw).hexdigest() == plan["cases_sha256"], "Evidence validation failed: hashlib.sha256(cases_raw).hexdigest() == plan['cases_sha256']")
@@ -61,7 +65,7 @@ def load_run(directory):
     require(json.loads((directory / "exit.json").read_text())["exit_code"] == 0, "Evidence validation failed: json.loads((directory / 'exit.json').read_text())['exit_code'] == 0")
     prompt_bodies = {}
     for name, digest in plan['prompt_sha256'].items():
-        frozen = (directory/'prompts'/name).read_bytes()
+        frozen = (resources/'prompts'/name).read_bytes()
         require(hashlib.sha256(frozen).hexdigest() == digest, 'frozen prompt hash mismatch')
         text = frozen.decode('utf-8')
         require(text.startswith('---\n') and '\n---\n' in text, 'frozen prompt frontmatter missing')
@@ -84,6 +88,7 @@ def load_run(directory):
         encoded = json.dumps(payload['actual_input'], ensure_ascii=False, separators=(',', ':'))
         require(prompt['rendered'] == prompt['effective_template'].replace('{{appraisal_input}}', encoded),
                 'receipt rendered prompt disagrees with frozen template and input')
+    AUDIT(directory, directory, resources)
     summaries = {}
     for case_id, case in cases.items():
         selected = [row for row in rows if row["case_id"] == case_id]
@@ -110,9 +115,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("baseline", type=Path)
     parser.add_argument("candidate", type=Path)
+    parser.add_argument('--baseline-resources', type=Path, help='Baseline frozen prompts and artifact record; defaults to baseline directory')
+    parser.add_argument('--candidate-resources', type=Path, help='Candidate frozen prompts and artifact record; defaults to candidate directory')
     args = parser.parse_args()
-    baseline, base_meta, base_cases, base_hash, base_ids = load_run(args.baseline)
-    candidate, candidate_meta, candidate_cases, candidate_hash, candidate_ids = load_run(args.candidate)
+    baseline, base_meta, base_cases, base_hash, base_ids = load_run(args.baseline, args.baseline_resources or args.baseline)
+    candidate, candidate_meta, candidate_cases, candidate_hash, candidate_ids = load_run(args.candidate, args.candidate_resources or args.candidate)
     require(base_ids.isdisjoint(candidate_ids), "baseline and candidate reuse run IDs")
     require({key: value for key, value in baseline.items() if key != "prompt_sha256"} == {
         key: value for key, value in candidate.items() if key != "prompt_sha256"}, "Evidence validation failed: {key: value for key, value in baseline.items() if key != 'prompt_sha256'} == {key: value for key, value in candidate.items() if key != 'prompt_sha256'}")
@@ -127,6 +134,7 @@ def main():
     print(json.dumps({
         "scope": "Complete same-corpus measurements, not an acceptance or calibration verdict",
         "binary_commit": baseline["source_commit"], "prompt_commit": prompt_source["prompt_commit"],
+        "runtime_config_verification": "declared_hash_only; private configuration bytes are not published",
         "runtime_id": baseline["runtime_id"], "calls_each": baseline["planned_calls"],
         "cases_sha256": baseline["cases_sha256"], "runtime_config_sha256": baseline["runtime_config_sha256"],
         "changed_prompt_files": changed,

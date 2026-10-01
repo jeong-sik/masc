@@ -1,7 +1,7 @@
 import { expect, it, vi } from 'vitest'
 const api = vi.hoisted(() => ({ read: vi.fn(), refresh: vi.fn() }))
-vi.mock('../../api/mcp', () => ({ callMcpTool: api.read }))
-vi.mock('../../api/core', () => ({ currentDashboardActor: () => 'operator' }))
+vi.mock('../../api/mcp', () => ({ callMcpTool: vi.fn() }))
+vi.mock('../../api/core', () => ({ currentDashboardActor: () => 'operator', get: api.read }))
 vi.mock('../../operator-store', () => ({
   dispatchOperatorAction: async () => ({ status: 'ok' }),
   confirmOperatorPendingAction: vi.fn(),
@@ -23,12 +23,12 @@ import { namespaceTruth, namespaceTruthError } from '../../namespace-truth-store
 import { flowState, resumeWorkspace } from './flow-control-state'
 
 it('keeps direct readback authoritative across stale and failed reactive projections', async () => {
-  const answer = JSON.stringify({ ok: true, initializing: false, paused: false })
+  const answer = { ok: true, initializing: false, paused: false }
   api.read.mockResolvedValue(answer)
   api.refresh.mockResolvedValue(undefined)
   await resumeWorkspace()
   expect(flowState.value).toBe('running')
-  let release!: (value: string) => void
+  let release!: (value: typeof answer) => void
   api.read.mockImplementationOnce(() => new Promise(resolve => { release = resolve }))
   namespaceTruth.value = { root: { status: { paused: true } } } as typeof namespaceTruth.value
   expect(flowState.value).toBe('running')

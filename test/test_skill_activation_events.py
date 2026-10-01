@@ -653,6 +653,29 @@ class SkillActivationEventsTest(unittest.TestCase):
                         log_fixture.header_row(WORKSPACE, session)]))
                 self.assertIs(caught.exception.fault, Fault.MALFORMED_HEADER)
 
+    def test_projection_enforces_server_ledger_wide_invariants(self):
+        original = ledger()
+        duplicate = copy.deepcopy(original)
+        duplicate["activations"].append(activation("call-a", 11))
+        orphan = copy.deepcopy(original)
+        orphan["transition_rejections"][0]["skill_tool_use_id"] = "absent-call"
+        mismatch = copy.deepcopy(original)
+        mismatch["transition_rejections"][0]["activation_turn_ref"] = f"{SESSION}#9"
+        # These are the exact of_projection_yojson error codes. A different
+        # turn does not make a repeated call identity a new activation.
+        for value, fault in (
+            (duplicate, Fault.DUPLICATE_SKILL_TOOL_USE_ID),
+            (orphan, Fault.ORPHAN_TRANSITION_REJECTION),
+            (mismatch, Fault.TRANSITION_REJECTION_ACTIVATION_MISMATCH),
+        ):
+            with self.subTest(fault=fault):
+                before = copy.deepcopy(value)
+                with self.assertRaises(events.SkillLedgerError) as caught:
+                    events.ledger_revision(value)
+                self.assertIs(caught.exception.fault, fault)
+                self.assertIsNone(caught.exception.row)
+                self.assertEqual(value, before)
+
     def test_projection_shape_faults_have_no_event_log_row(self):
         fixture = json.loads((REPO_ROOT / "test/fixtures/skill-ledger-revision.json").read_text())
         for name in ("activations", "transition_rejections"):

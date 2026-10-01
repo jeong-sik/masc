@@ -720,10 +720,36 @@ def _revision(
     activations = copy.deepcopy(activations)
     transition_rejections = copy.deepcopy(transition_rejections)
     try:
-        for activation in activations:
+        parsed_activations = [
             _parse_activation({"activation": activation}, 0, session_id)
-        for rejection in transition_rejections:
+            for activation in activations
+        ]
+        # Match of_projection_yojson: validate every activation first, then
+        # enforce the ledger-wide call identity before decoding rejections.
+        by_call = {}
+        for activation in parsed_activations:
+            if activation.skill_tool_use_id in by_call:
+                raise SkillLedgerError(
+                    SkillLedgerFault.DUPLICATE_SKILL_TOOL_USE_ID,
+                    f"duplicate activation {activation.skill_tool_use_id!r}",
+                )
+            by_call[activation.skill_tool_use_id] = activation
+        parsed_rejections = [
             _parse_rejection({"rejection": rejection}, 0, session_id)
+            for rejection in transition_rejections
+        ]
+        for rejection in parsed_rejections:
+            activation = by_call.get(rejection.skill_tool_use_id)
+            if activation is None:
+                raise SkillLedgerError(
+                    SkillLedgerFault.ORPHAN_TRANSITION_REJECTION,
+                    f"no activation {rejection.skill_tool_use_id!r}",
+                )
+            if activation.turn_ref != rejection.activation_turn_ref:
+                raise SkillLedgerError(
+                    SkillLedgerFault.TRANSITION_REJECTION_ACTIVATION_MISMATCH,
+                    f"rejection for {rejection.skill_tool_use_id!r} names a different activation turn",
+                )
     except SkillLedgerError as error:
         # These values come from a projection, with no event-log row.
         # Shape refusals are ledger faults; specific invariant codes remain.

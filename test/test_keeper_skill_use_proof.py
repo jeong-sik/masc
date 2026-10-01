@@ -598,10 +598,13 @@ class KeeperSkillUseProofTest(unittest.TestCase):
     def test_rejects_duplicate_exact_activation_identity(self):
         health, dashboard, ledger = fixture()
         ledger["activations"].append(copy.deepcopy(ledger["activations"][0]))
-        refresh_projection(dashboard, ledger)
 
-        with self.assertRaisesRegex(proof.ProofError, "found 2"):
+        # The projection must now fail before a duplicate can acquire a valid
+        # revision or reach proof selection. The CLI handles this typed error.
+        with self.assertRaises(events.SkillLedgerError) as caught:
             self.validate(health, dashboard, ledger)
+        self.assertIs(caught.exception.fault, events.SkillLedgerFault.DUPLICATE_SKILL_TOOL_USE_ID)
+        self.assertIsNone(caught.exception.row)
 
     def test_rejects_resource_as_skill_body_proof(self):
         health, dashboard, ledger = fixture()

@@ -1,4 +1,5 @@
 import { Either, Schema } from 'effect'
+import { isCandleAmount } from '../../lib/candle-observation'
 import { EQUIPMENT_IDS } from './keeper-portrait'
 
 const slots = ['face', 'neck', 'head', 'hand', 'base'] as const
@@ -6,7 +7,7 @@ const itemSlot = new Map<string, typeof slots[number]>(
   slots.flatMap(slot => EQUIPMENT_IDS[slot].slice(1).map(id => [id, slot] as const)),
 )
 const AmountSchema = Schema.String.pipe(
-  Schema.filter(value => /^(0|[1-9][0-9]*)$/.test(value) || 'Item amount must be canonical decimal'),
+  Schema.filter(value => isCandleAmount(value) || 'Item amount must be canonical decimal'),
 )
 const ItemIdSchema = Schema.String.pipe(
   Schema.filter(value => itemSlot.has(value) || 'unknown Item id'),

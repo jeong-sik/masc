@@ -91,6 +91,21 @@ describe('decodeGateKeepers', () => {
     })
   })
 
+  it('decodes currency-free shared discovery for healthy and directory-error rows', () => {
+    const { candle_balance_milli: _healthyBalance, candle_account_revision: _healthyRevision, ...healthy } = keeperWire()
+    const { candle_balance_milli: _issueBalance, candle_account_revision: _issueRevision, ...issue } = issueWire()
+    const data = Effect.runSync(decodeGateKeepers({
+      count: 2,
+      keepers: [healthy, issue],
+      ...listingWire(2),
+    }))
+    expect(data.keepers).toEqual([{ name: 'planner', status: 'running' }])
+    expect(data.directoryIssues).toEqual([{
+      keeperName: 'broken', message: 'invalid keeper config',
+    }])
+    expect(data.listing).toEqual({ total: 2, limit: 200, truncated: false })
+  })
+
   it('accepts nullable canonical account revisions across all row variants', () => {
     const healthy = keeperWire()
     const issue = issueWire()
@@ -98,13 +113,13 @@ describe('decodeGateKeepers', () => {
       effective_meta_error: { ...issue.effective_meta_error, keeper: healthy.name },
       created_at: healthy.created_at, updated_at: healthy.updated_at, activation_mode: 'manual' }
     for (const row of [healthy, issue, retained]) {
-      for (const revision of [null, 'a'.repeat(64)]) {
+      for (const revision of [undefined, null, 'a'.repeat(64)]) {
         expect(() => Effect.runSync(decodeGateKeepers({
           candle: { status: 'off' }, count: 1, ...listingWire(1),
           keepers: [{ ...row, candle_account_revision: revision }],
         }))).not.toThrow()
       }
-      for (const revision of [undefined, '', 'A'.repeat(64), 'a'.repeat(63), 12]) {
+      for (const revision of ['', 'A'.repeat(64), 'a'.repeat(63), 12]) {
         expectDrift({ candle: { status: 'off' }, count: 1, ...listingWire(1),
           keepers: [{ ...row, candle_account_revision: revision }] })
       }
@@ -133,7 +148,7 @@ describe('decodeGateKeepers', () => {
     }
   })
 
-  it('keeps lifecycle discovery independent of omitted or malformed account revisions', () => {
+  it('accepts emitted account revisions on healthy and both directory-error row shapes', () => {
     const revision = 'a'.repeat(64)
     const issue = issueWire()
     const persisted = { ...issueWire('persisted'), meta: keeperWire('persisted').meta,
@@ -145,10 +160,9 @@ describe('decodeGateKeepers', () => {
     }))
     expect(data.keepers).toEqual([{ name: 'planner', status: 'running' }])
     expect(data.directoryIssues.map(issue => issue.keeperName)).toEqual(['broken', 'persisted'])
-    for (const value of [undefined, '', 'A'.repeat(64), revision + '\n', 1]) {
-      const decoded = Effect.runSync(decodeGateKeepers({ count: 1,
-        keepers: [{ ...keeperWire(), candle_account_revision: value }], ...listingWire(1) }))
-      expect(decoded.keepers).toEqual([{ name: 'planner', status: 'running' }])
+    for (const value of ['', 'A'.repeat(64), revision + '\n', 1]) {
+      expectDrift({ candle: { status: 'off' }, count: 1,
+        keepers: [{ ...keeperWire(), candle_account_revision: value }], ...listingWire(1) })
     }
   })
 

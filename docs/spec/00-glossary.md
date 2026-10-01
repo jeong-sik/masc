@@ -1523,8 +1523,9 @@ status: reference
   - 사용처 한정: Candle로 살 수 있는 것은 초상화 장신구(**Keeper Portrait**의 장비 아이템)뿐이다.
     도구, 스킬, 모델, 런타임 예산 등 다른 자원은 구매할 수 없다(헌법 불변식). 상점 구매는
     `Purchased`로 기록해 소유권을 부여하고, 소유한 아이템은 `keeper_candle_equip` 도구로 각 슬롯에 착용한다.
-  - 설정과 착용 투영: `<base-path>/.masc/config/candle.toml`에서 활성화 여부를 읽는다. 파일 부재는 `off`(시작 장비 유지),
-    키 없는 파일은 `enabled`, 파싱 실패나 미지원 키·비정규 파일은 `disabled with reason`으로 안전하게 비활성화되어 턴 진행을
+  - 설정과 착용 투영: `<base-path>/.masc/config/candle.toml`에서 활성화 여부를 읽는다(`Candle_config.t`). 파일 부재는 `Off`(시작 장비 유지, 기록·지급·판매 없음),
+    필수 `[payout]` 테이블(`weight_max`·`deduction_rate`·`deduction_floor` 및 5개 등급 금액 `grades_milli` 전수)을 갖춘 설정 파일은 `Enabled of policy`(선택적 `[shop.prices_milli]`로 장신구 가격 지정),
+    빈 파일이나 `[payout]` 누락·파싱 실패·미지원 키·비정규 파일은 `Disabled of { reason }`으로 안전하게 비활성화되어 사유를 보고하고 턴 진행을
     차단하지 않는다. 서버 대시보드와 원격 TUI는 `Candle_equipment` 투영을 통해 원장의 `Equipped` 사건을 재생하여 최신 착용 상태를 표시한다.
     초상화 캐시는 빈 슬롯을 명시한 정규 캐시 식별자를 쓰며, 장비 변경 시 마운트된 이미지와 렌더러가 즉시 갱신된다.
   - 잔액 감쇠 규범: 헌법(`<candle>`, `no_wall_clock_death` 예외)은 잔액의 지수 감쇠를 요구한다.
@@ -1534,6 +1535,7 @@ status: reference
     유일한 명시적 예외 요구다(Task·Goal·Board 상태는 만료시키지 않는다).
   → [Candle_event](../../lib/candle/candle_event.mli) ·
   [Candle_balance](../../lib/candle/candle_balance.mli) ·
+  [Candle_config](../../lib/candle_config/candle_config.mli) ·
   [Candle_equipment](../../lib/candle_runtime/candle_equipment.mli) ·
   [Keeper_portrait_equipment](../../lib/keeper_portrait/keeper_portrait_equipment.mli) ·
   [Candle_ledger](../../lib/candle_store/candle_ledger.mli) ·

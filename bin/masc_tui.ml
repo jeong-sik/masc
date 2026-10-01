@@ -2131,6 +2131,24 @@ let fork_workspace_job state ~sw run =
       List.filter (fun (held, _) -> held != token) state.workspace_cancellations;
     Printexc.raise_with_backtrace exn backtrace
 
+(* The server this screen reads. It runs on this machine, so the address is
+   loopback and there is nothing to configure.
+
+   It used to read MASC_HOST, which is the *server's* bind address
+   ([main_eio.ml] spells it "Host/IP to bind", [Server_auth] calls it
+   [configured_bind_host]). That answers a different question -- which
+   interfaces to accept on -- and its documented non-default values are the
+   wildcards 0.0.0.0 and ::, which [Masc_network_defaults.is_unspecified_host]
+   exists to name as "every interface" rather than a reachable peer. Setting
+   it the way the server's own help recommends therefore pointed this screen
+   at an address that is not a destination.
+
+   Reading it also made a second setting: the roster, the task backlog, the
+   keeper metrics and the context occupancy are read from [base_path] on
+   local disk, and nothing checked that the two named the same machine. With
+   one of them gone there is nothing left to disagree. *)
+let server_peer_host = Masc_network_defaults.masc_http_loopback_peer
+
 (* A request owns both its cancellation context and its completion. Recheck the
    endpoint before dispatch: an unchanged port can now serve another root. *)
 let launch_workspace_request state ~mailbox ~boundary_error ~deliver read =
@@ -2283,24 +2301,6 @@ let enqueue_dispatch_start ~enqueue mailbox request was_replay =
   enqueue mailbox
     (Keeper_chat_dispatch_started (request, was_replay, acknowledge));
   Eio.Promise.await acknowledged
-
-(* The server this screen reads. It runs on this machine, so the address is
-   loopback and there is nothing to configure.
-
-   It used to read MASC_HOST, which is the *server's* bind address
-   ([main_eio.ml] spells it "Host/IP to bind", [Server_auth] calls it
-   [configured_bind_host]). That answers a different question -- which
-   interfaces to accept on -- and its documented non-default values are the
-   wildcards 0.0.0.0 and ::, which [Masc_network_defaults.is_unspecified_host]
-   exists to name as "every interface" rather than a reachable peer. Setting
-   it the way the server's own help recommends therefore pointed this screen
-   at an address that is not a destination.
-
-   Reading it also made a second setting: the roster, the task backlog, the
-   keeper metrics and the context occupancy are read from [base_path] on
-   local disk, and nothing checked that the two named the same machine. With
-   one of them gone there is nothing left to disagree. *)
-let server_peer_host = Masc_network_defaults.masc_http_loopback_peer
 
 (* Track the background server started by this TUI for readiness and child
    reaping. Closing the UI does not stop the workspace server. *)
@@ -10992,7 +10992,7 @@ let withdraw_keeper_workspace_presentation state ~previous =
   state.preset_restore_armed <- None;
   state.preset_report <- None;
   state.preset_busy <- false;
-  ignore (Masc_tui_types.abandon_fusion_launch state);
+  Masc_tui_types.withdraw_fusion_workspace state;
   state.dos_live <- Masc_tui_machine_live.Unread;
   state.dos_activity <- [];
   state.dos_live_in_flight <- None;
@@ -11086,16 +11086,7 @@ let withdraw_keeper_workspace_presentation state ~previous =
       "Workspace changed: unsent Keeper inputs retained for their original workspace; resume there to send"
   end;
   state.msg_queued <- Chat_queue.empty;
-  state.keeper_interactive_waiting <- [];
-  state.keeper_chat_control_tokens <- [];
-  state.keeper_chat_control_pending <- [];
-  state.keeper_queue_inflight <- [];
-  state.keeper_run_next_pending <- [];
-  state.keeper_run_next_ready <- [];
-  state.keeper_run_next_inflight <- [];
-  state.keeper_auto_priority_pending <- [];
-  state.keeper_auto_priority_requests <- [];
-  state.msg_inflight <- [];
+  Masc_tui_types.withdraw_keeper_chat_requests state;
   release_composer_for_browser_reader state;
   close_context_inspector state;
   state.context_inspector_generation <- state.context_inspector_generation + 1;

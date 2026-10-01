@@ -320,7 +320,7 @@ let test_foreign_stop_command_remains_complete () =
       state.msg_inflight <-
         [inflight ~keeper_name ~request_id:"foreign-request" ~at:2. ()];
       let chat_cols = Masc_tui_roster_pane.content_cols
-          ~hidden:state.roster_pane_hidden ~cols:terminal_cols in
+          ~hidden:(Tui.roster_pane_hidden state) ~cols:terminal_cols in
       let rows = Tui.keeper_message_inflight_rows state ~chat_cols ~now:5. in
       let command_rows = List.filteri
           (fun index _ -> index < List.length rows - 1) rows in

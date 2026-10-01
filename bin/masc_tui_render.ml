@@ -2272,8 +2272,8 @@ let planning_detail_lines (state : state) ~confirmation ~cols (goal : planning_g
             field "Task" task.id @ field "Title" task.title
             @ field ~tone:Planning_detail.Quiet "Link" (Link.reference Task task.id)) tasks
   in
-  let proof = planning_measurement_lines state goal
-    @ (match confirmation with
+  let confirmation_rows =
+    (match confirmation with
        | `Submitting -> [{Planning_detail.tone = Waiting; text = "Sending proof confirmation..."}]
        | `Inspect (Masc_tui_fetched.Ready value) -> Planning_detail.confirmation_lines ~width value
        | `Inspect Loading -> [{Planning_detail.tone = Waiting; text = "Reading the proof to confirm..."}]
@@ -2281,6 +2281,13 @@ let planning_detail_lines (state : state) ~confirmation ~cols (goal : planning_g
        | `Inspect Absent ->
            (match goal.pg_verifier_unreconciled with Some blocked -> Planning_detail.unreconciled_lines ~width blocked | None -> [])
            @ Planning_detail.body ~width goal.pg_proof goal.pg_last_review_note)
+  in
+  let measurement = planning_measurement_lines state goal in
+  let proof =
+    (match confirmation with
+     | `Inspect Absent -> measurement @ confirmation_rows
+     | `Submitting | `Inspect (Ready _ | Loading | Stale _ | Failed _) ->
+         confirmation_rows @ measurement)
     @ Planning_detail.timeline ~width ~goal_id:goal.pg_id state.goal_timeline in
   let wrapped_proof = List.concat_map (fun (line : Planning_detail.line) ->
     match Masc_tui_text_block.rows ~max_cells:width line.text with

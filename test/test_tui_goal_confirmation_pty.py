@@ -47,6 +47,21 @@ def run(executable: str, *, replace_proof: bool) -> None:
     }
     fixtures = h.overview_event_http_fixtures()
     fixtures[h.PLANNING_PATH] = h.planning_snapshot([goal])
+    fixtures[h.DASHBOARD_GOALS_PATH] = (200, {
+        "generated_at": "2026-09-19T08:00:00Z",
+        "tree": [{
+            "id": goal_id, "title": goal["title"], "phase": "awaiting_confirmation",
+            "priority": goal["priority"], "criterion_revision": "revision-1",
+            "metric": goal["metric"], "target_value": goal["target_value"],
+            "measurement": {"state": "reported", "record": {
+                "goal_id": goal_id, "criterion_revision": "revision-1",
+                "observed_value": "5", "evidence": "measurement evidence beyond first viewport " * 1000,
+                "actor": "measurement-fixture", "recorded_at": "2026-09-19T08:00:00Z",
+            }},
+            "due_date": None, "task_count": 0, "task_done_count": 0,
+            "stagnation_seconds": None, "tasks": [], "children": [],
+        }],
+    })
     read_count = 0
     posted: list[object] = []
     submit_entered = threading.Event()
@@ -111,12 +126,16 @@ def run(executable: str, *, replace_proof: bool) -> None:
         for phase_filter in (b"completed", b"dropped", b"all"):
             h.send_and_wait(process, master_fd, output, b"f", b"filter:" + phase_filter)
         h.send_and_wait(process, master_fd, output, b"\r", b"[a] Confirm proof")
+        h.wait_for_output(process, master_fd, output, b"Actual: 5 (reported)", start=0, timeout=5.0)
         proof_frame = h.send_and_wait(
             process, master_fd, output, b"a", b"CONFIRM THIS PROOF"
         )
-        h.wait_for_output(
-            process, master_fd, output, b"Verifier run: run-1", start=0, timeout=5.0
-        )
+        # send_and_wait ends at FRAME_END after this interaction's confirmation.
+        # Replay only that returned frame, never historical terminal output.
+        proof_screen = h.screen_text(proof_frame)
+        for binding in (b"CONFIRM THIS PROOF", b"revision-1", b"request-1", b"Verifier run: run-1"):
+            if binding not in proof_screen:
+                raise AssertionError(f"Long measurement hid the active proof binding: {binding!r}")
         if read_count != 1 or posted:
             raise AssertionError("first key must read the proof without posting")
         if replace_proof:

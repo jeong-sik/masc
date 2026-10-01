@@ -489,7 +489,7 @@ let test_a_confirmation_wakes_the_worker_that_prepares_the_payout () =
   pass config goal_id;
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run (fun sw ->
-    Candle_payout_worker.start ~appraise ~sw ~config;
+    Candle_payout_worker.start ~appraise ~sw ~config ();
     confirmed config goal_id;
     match
       Eio.Time.with_timeout clock 10. (fun () ->
@@ -629,7 +629,7 @@ let test_a_confirmed_goal_pays_its_keeper_once_across_reopen_and_restart () =
   in
   let idle () = await "the payout worker to finish its wake" Candle_payout_worker.For_testing.idle in
   Eio.Switch.run (fun sw ->
-    Candle_payout_worker.start ~appraise ~sw ~config;
+    Candle_payout_worker.start ~appraise ~sw ~config ();
     idle ();
     check (list string) "startup cannot appraise an unconfirmed proof" [] !calls;
     check rows_testable "before confirmation only the actual Snapshot exists"
@@ -704,7 +704,7 @@ let test_a_confirmed_goal_pays_its_keeper_once_across_reopen_and_restart () =
     check_payment ());
   let settled_ledger = In_channel.with_open_bin (ledger_path config) In_channel.input_all in
   Eio.Switch.run (fun sw ->
-    Candle_payout_worker.start ~appraise ~sw ~config;
+    Candle_payout_worker.start ~appraise ~sw ~config ();
     idle ();
     Candle_payout_worker.wake ();
     idle ();

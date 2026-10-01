@@ -736,7 +736,7 @@ let test_read_seed_stops_at_history_restart () =
     { recorded_at = 1.
     ; event =
         Masc.Keeper_turn_boundaries.Turn_ended
-          { turn_ref = Ids.Turn_ref.make ~trace_id:"trace-1" ~absolute_turn:1
+          { task_context = Masc.Keeper_turn_task_context.No_task; turn_ref = Ids.Turn_ref.make ~trace_id:"trace-1" ~absolute_turn:1
           ; history_at_start = Masc.Keeper_turn_boundaries.Continued_history
           ; position = Masc.Keeper_turn_boundaries.Stale_noop
           }

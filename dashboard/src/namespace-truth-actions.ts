@@ -94,12 +94,12 @@ export function requestNamespaceTruthNow(): void {
 
 export async function refreshNamespaceTruth(opts?: { force?: boolean }): Promise<void> {
   if (opts?.force) {
-    requestNamespaceTruthNow()
+    await namespaceTruthScheduler.requestNowAndWait()
   } else {
     requestNamespaceTruth()
-  }
-  if (namespaceTruthScheduler.inflightPromise) {
-    await namespaceTruthScheduler.inflightPromise
+    if (namespaceTruthScheduler.inflightPromise) {
+      await namespaceTruthScheduler.inflightPromise
+    }
   }
 }
 

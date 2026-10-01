@@ -200,10 +200,8 @@ let multi_line_claim =
   "The chat pane keeps the model's reply verbatim.\n\n**Why**:\n1. first reason\n\
    2. second reason\x07 rings"
 
-(* The claim's rows are the ones between the block heading and the first
-   labelled field. The fixed-format rows under it (Origin and Timeline, File
-   SHA) are not wrapped by this change, so a 40-cell bound on them would be a
-   claim about something else. *)
+(* The claim's rows are those before the first labeled provenance field;
+   detail wraps both prose and provenance to the frame width. *)
 let claim_rows lines =
   let plain = List.map Masc_tui_theme.strip_sgr lines in
   let is_field line =
@@ -261,6 +259,58 @@ let test_detail_keeps_the_claim_line_breaks () =
   check_claim_rows ~what:"source-bound fact"
     (Render_memory.memory_fact_detail_lines ~cols:40
        (Types.Memory_row_source_fact sfact))
+;;
+
+let test_narrow_detail_preserves_provenance () =
+  let origin = "keeper:" ^ String.concat "/" (List.init 12 (fun _ -> "긴출처")) in
+  let memory_id = "memory-" ^ String.make 96 'x' in
+  let path = "docs/" ^ String.concat "/" (List.init 12 (fun _ -> "long-directory")) in
+  let sha = String.make 64 'a' in
+  let reason = "source_changed:" ^ String.make 80 'r' in
+  let fact : Masc.Tui_decode_memory_facts.memory_fact =
+    { mf_claim = "This fact retains its complete provenance."
+    ; mf_category = Cat.Constraint
+    ; mf_origin = origin
+    ; mf_first_seen = 100.
+    ; mf_last_seen = 200.
+    ; mf_memory_id = memory_id
+    ; mf_events = Masc.Tui_decode_memory_facts.no_memory_fact_events
+    }
+  in
+  let source : Masc.Tui_decode_memory_facts.memory_source_fact =
+    { msf_claim = fact.mf_claim; msf_first_seen = 100.; msf_path = path; msf_sha256 = sha }
+  in
+  let dropped : Masc.Tui_decode_memory_facts.memory_invalidation =
+    { mi_source_path = path; mi_invalidated_at = 200.; mi_reason = reason }
+  in
+  let compact text =
+    String.split_on_char ' ' text |> String.concat ""
+  in
+  List.iter
+    (fun cols ->
+      List.iter
+        (fun (row, values) ->
+          let lines = Render_memory.memory_fact_detail_lines ~cols row in
+          (* The block title is chrome; prose and provenance own scrollable
+             rows that must fit before the frame can clip them. *)
+          let body = match lines with [] -> [] | _heading :: body -> body in
+          List.iter
+            (fun line ->
+              check bool "body fits the frame, including indentation" true
+                (Layout.display_width line <= Masc_tui_frame.inner_width ~cols))
+            body;
+          let text =
+            body |> List.map Masc_tui_theme.strip_sgr |> String.concat "" |> compact
+          in
+          List.iter
+            (fun value -> check bool "exact provenance survives wrapping" true
+                (contains (compact value) text))
+            values)
+        [ Types.Memory_row_fact fact, [ origin; memory_id ]
+        ; Types.Memory_row_source_fact source, [ path; sha ]
+        ; Types.Memory_row_invalidation dropped, [ path; reason ]
+        ])
+    [ 80; 40; 30; 16 ]
 ;;
 
 let test_detail_lines_source_and_invalidation () =
@@ -1580,8 +1630,8 @@ let test_memory_search_uses_the_filter_text_and_query () =
     let rows = Types.memory_fact_rows state in
     check int "filter row count" expected (List.length rows);
     check (option int) "marker agrees with filter" (Some expected)
-      (Types.surface_search_count state Types.Memory ~query);
-    let texts = Option.get (Types.surface_row_texts state Types.Memory) in
+      (Masc_tui_surface_search.surface_search_count state Types.Memory ~query);
+    let texts = Option.get (Masc_tui_surface_search.surface_row_texts state Types.Memory) in
     let effective = Types.surface_search_query Types.Memory query in
     check int "cursor matcher reaches every filtered row" expected
       (List.length (List.filter (Masc_tui_pick_list.lowercase_contains ~needle:effective) texts))
@@ -1598,7 +1648,7 @@ let test_memory_search_uses_the_filter_text_and_query () =
   check int "blank Memory query still shows all rows" 3
     (List.length (Types.memory_fact_rows state));
   check (option int) "blank query has no matches to jump" (Some 0)
-    (Types.surface_search_count state Types.Memory ~query:"   ");
+    (Masc_tui_surface_search.surface_search_count state Types.Memory ~query:"   ");
   check string "other surfaces retain literal whitespace" "  deploy fact  "
     (Types.surface_search_query Types.Board "  deploy fact  ")
 ;;
@@ -1934,7 +1984,7 @@ let test_render_memory_overflow_selection () =
   let layout = Render_memory.memory_overview_scrolled ~cols:100 ~budget state in
   check int "filter bounds the cursor to the one visible keeper" 1 layout.sc_count;
   check (option (list string)) "search names the same filtered row"
-    (Some ["keeper-4 read-error"]) (Types.surface_row_texts state Types.Memory);
+    (Some ["keeper-4 read-error"]) (Masc_tui_surface_search.surface_row_texts state Types.Memory);
   (* A refresh/filter can change the body before another keypress. *)
   assert_selected_visible ()
 ;;
@@ -2173,6 +2223,8 @@ let () =
         ] )
     ; ( "detail_lines"
       , [ test_case "detail_lines_bounded" `Quick test_detail_lines
+        ; test_case "narrow detail preserves exact provenance" `Quick
+            test_narrow_detail_preserves_provenance
         ; test_case "detail_lines_source_and_invalidation" `Quick test_detail_lines_source_and_invalidation
         ; test_case "the detail keeps the claim's line breaks" `Quick
             test_detail_keeps_the_claim_line_breaks

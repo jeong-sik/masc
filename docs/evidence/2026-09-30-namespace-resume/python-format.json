@@ -1,0 +1,16 @@
+{
+  "command": [
+    "env",
+    "PYTHONPATH=.evidence-tools",
+    "python3",
+    "-m",
+    "ruff",
+    "format",
+    "--check",
+    "docs/evidence/2026-09-30-namespace-resume/run.py"
+  ],
+  "cwd": "/masc-work/jazz-developer/masc/.worktrees/647-namespace-resume",
+  "started_at": "2026-09-30T15:32:14.595985+00:00",
+  "finished_at": "2026-09-30T15:32:14.610616+00:00",
+  "exit_code": 0
+}

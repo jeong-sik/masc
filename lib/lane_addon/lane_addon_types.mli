@@ -33,6 +33,9 @@ type resources = {
   memory_bytes : int64;
   pids : int;
   max_reply_bytes : int;
+  (** Bounds worker replies, acquired input, and serialized namespaced host
+      output separately. A worker reply that fits may still be refused when
+      host identity prefixes exceed the same observation envelope. *)
 }
 type refresh_policy = Every_hint | Source_changes
 type model_access = Model_disabled | Host_sampling

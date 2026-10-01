@@ -28,7 +28,9 @@ let operator_call config args = S.handle ~access:Lane_addon_sources.Operator_con
 let save config = operator_call config (`Assoc ["operation",`String "save";"subscriptions",`List [subscription]]) |> ok
 let store config = Store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons")
 let producer ?(visibility=`Assoc ["kind",`String "shared"]) ?(phase=T.phase_to_json T.Attached) store id seq = Store.save_binding store ~instance_id:id
-  (`Assoc ["visibility",visibility;"instance_id",`String id;"run_id",`String "study";"configuration",`Assoc ["id",`String "documents"];
+  (`Assoc ["visibility",visibility;
+    "source_access",Lane_addon_sources.access_to_json Lane_addon_sources.Operator_configuration;
+    "instance_id",`String id;"run_id",`String "study";"configuration",`Assoc ["id",`String "documents"];
     "phase",phase;"observation_seq",`Int seq;
     "package",`Assoc ["outputs",`Assoc ["changes",`Assoc ["lanes",`List [`String "changes"]]];
       "resources",`Assoc ["max_reply_bytes",`Int 8192]]]) |> ok

@@ -682,6 +682,67 @@ let test_private_fusion_reads_survive_retirement () = with_fixture (fun env _sw 
   check Alcotest.int "historical inspection excludes private bindings" 0
     (unwrap (call foreign Runtime.Inspect []) |> member "instances" |> Yojson.Safe.Util.to_list |> List.length))
 
+let test_released_shared_bindings_keep_read_and_cleanup () =
+  with_fixture (fun env _sw config dir state ->
+    let clock = Eio.Stdenv.clock env in
+    let id = attach config dir "good" in
+    await clock (fun () -> int "observation_seq" (instance config id) = 1);
+    detach config id; await_phase clock config id "detached";
+    let captured = instance config id |> Yojson.Safe.Util.to_assoc in
+    let released = List.remove_assoc "visibility" (List.remove_assoc "source_access" captured) in
+    (* The published package envelope predates host model declarations. *)
+    let released = List.map (fun (key, value) ->
+      match key, value with
+      | "package", `Assoc fields -> key, `Assoc (List.remove_assoc "model_access" fields)
+      | _ -> key, value) released in
+    let store = Store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
+    let before = `Assoc released in
+    unwrap (Store.save_binding store ~instance_id:id before);
+    Runtime.For_testing.reset ();
+    let observed = instance config id in
+    check string "released reads carry no operator acquisition authority" "unauthenticated"
+      (observed |> member "source_access" |> text "kind");
+    check Alcotest.int "released direct retained rows remain readable" 1
+      (unwrap (dispatch config Runtime.Slice []) |> member "rows" |> Yojson.Safe.Util.to_list |> List.length);
+    check bool "read recognition leaves durable bytes unchanged" true
+      (unwrap (Store.bindings store) = [before]);
+    let set fields key value = (key,value)::List.remove_assoc key fields in
+    let record name installation sources =
+      released |> fun f -> set f "instance_id" (`String name)
+      |> fun f -> set f "incarnation" (`String name)
+      |> fun f -> set f "configuration" (`Assoc ["id",`String installation;
+          "source_path",`String (Filename.concat dir (installation ^ ".toml"));
+          "revision",`String (Store.digest installation)])
+      |> fun f -> set f "binding" (`Assoc ["sources",`List sources]) |> fun f -> `Assoc f in
+    let upstream installation = `Assoc ["source_id",`String "upstream";"kind",`String "lane_output";
+      "installation_id",`String installation;"selection",`String "latest_completed"] in
+    let producer = record "released-producer" "producer" [] in
+    let consumer = record "released-consumer" "consumer" [upstream "producer"] in
+    let authorize bindings value = Runtime.authorize_retained_read ~bindings
+      ~access:Lane_addon_sources.Unauthenticated value in
+    check bool "released composed graph is shared only with its unique producer" true
+      (Result.is_ok (authorize [producer;consumer] consumer));
+    let refused label bindings value = check bool label true (Result.is_error (authorize bindings value)) in
+    refused "missing producer fails closed" [consumer] consumer;
+    refused "ambiguous producer incarnation fails closed" [producer;producer;consumer] consumer;
+    let cycle = record "released-producer" "producer" [upstream "consumer"] in
+    refused "producer cycles fail closed" [cycle;consumer] consumer;
+    let private_producer = match producer with `Assoc f -> `Assoc (("visibility",`Assoc ["kind",`String "keeper";"keeper",`String "other"])
+      ::("source_access",Lane_addon_sources.access_to_json (Lane_addon_sources.Keeper "other"))::f) | _ -> assert false in
+    refused "private producer never becomes shared" [private_producer;consumer] consumer;
+    let private_without_authority = record "released-producer" "producer" [`Assoc [
+      "source_id",`String "fusion";"kind",`String "fusion_run";"run_id",`String "private-run"]] in
+    refused "private source missing both authority fields is refused" [private_without_authority;consumer] consumer;
+    let malformed = match producer with `Assoc f -> `Assoc (set f "observation_seq" `Null) | _ -> assert false in
+    refused "malformed released record is refused" [malformed] malformed;
+    let unknown = match producer with `Assoc f -> `Assoc (("unknown",`Bool true)::f) | _ -> assert false in
+    refused "unknown released record field is refused" [unknown] unknown;
+    let missing_modern = `Assoc (List.remove_assoc "visibility" captured) in
+    refused "current source access without visibility is refused" [missing_modern] missing_modern;
+    unwrap (Store.save_binding store ~instance_id:id (`Assoc (set released "phase" (Types.phase_to_json Types.Attached))));
+    detach config id; await_phase clock config id "detached";
+    check Alcotest.int "released surviving container retains exact cleanup ownership" 1 (List.length !(state.recovery)))
+
 let test_mcp_attributed_name_is_not_private_lane_authority () =
   with_fixture (fun env sw config dir _state ->
     let owner = "mcp-private-owner" and foreign = "mcp-foreign-owner" in
@@ -1155,9 +1216,11 @@ let () = run "Lane Add-on runtime" ["optional extension", [
     test_broadcast_retry_reconciles_receipt_during_slow_fanout;
   test_case "Broadcast intention and failed commit retain exact evidence" `Quick
     test_broadcast_pending_commit_recovers_same_identity;
-  test_case "Fusion read ownership survives retirement and restart" `Quick test_private_fusion_reads_survive_retirement;
   test_case "MCP attribution never grants private Lane authority" `Quick
     test_mcp_attributed_name_is_not_private_lane_authority;
+  test_case "published shared bindings retain read and exact cleanup authority" `Quick
+    test_released_shared_bindings_keep_read_and_cleanup;
+  test_case "Fusion read ownership survives retirement and restart" `Quick test_private_fusion_reads_survive_retirement;
   test_case "Fusion state hint wakes only the exact run binding" `Quick
     test_fusion_status_hint_wakes_only_its_bound_run;
   test_case "a human MSX press wakes machine watchers exactly once" `Quick

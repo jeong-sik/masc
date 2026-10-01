@@ -71,7 +71,6 @@ let test_duplicate_snapshot_keys_cannot_replace_host_evidence () = with_store (f
   List.iter (fun input ->
     write path (Yojson.Safe.to_string input);
     let source = require (Sources.acquire
-      ~access:Sources.Operator_configuration
       ~resolve_lane_output:(fun ~installation_id:_ -> Error "no configured upstream")
       ~store ~package:(package dir 16384)
       ~binding:(binding [file_source "deployment" path])) |> list |> List.hd in
@@ -382,7 +381,9 @@ let test_fusion_capture_retains_exact_state_across_terminal_change () =
       (fun () ->
         Unix.putenv "MASC_BASE_PATH" dir;
         reset ();
-        let registry = Fusion_run_registry.global () in
+        let registry = Fusion_run_registry.create ~path:(Filename.concat dir "fusion-runs.jsonl") () in
+        (match Fusion_run_registry.install_global registry with
+         | Ok () -> () | Error _ -> fail "source fixture registry already installed");
         let run_id = "fusion-capture-" ^ Store.digest dir in
         Fusion_run_registry.register_running registry ~run_id
           ~keeper:"fixture" ~preset:"default" ~roster:Fusion_types.preset_roster
@@ -410,6 +411,25 @@ let test_fusion_capture_retains_exact_state_across_terminal_change () =
         check (result unit string) "foreign and unknown Fusion IDs have one denial"
           (authorize run_id) (authorize (run_id ^ "-missing"));
         let first = read () in
+        let rejected_store = Store.create ~root:(Filename.concat dir "rejected-envelope") in
+        let detail_bytes = String.length (Yojson.Safe.to_string (member "detail" first)) in
+        check int "array serialization reserves exactly the detail plus brackets"
+          (detail_bytes + String.length "[]")
+          (String.length (Yojson.Safe.to_string (`List [member "detail" first])));
+        let rejected = require (Sources.acquire ~access:(Sources.Keeper "fixture")
+          ~store:rejected_store ~package:(package dir
+            (String.length (Yojson.Safe.to_string (`List [member "detail" first]))))
+          ~resolve_lane_output:(fun ~installation_id:_ -> Error "unused")
+          ~binding:(binding [`Assoc ["source_id",`String "fusion";
+            "kind",`String "fusion_run";"run_id",`String run_id]]))
+          |> list |> List.hd in
+        check bool "whole envelope that cannot fit remains incomplete" false
+          (member "complete" rejected |> Yojson.Safe.Util.to_bool);
+        check string "detail fits but its enclosing observation is refused"
+          "Fusion observation exceeds the available source ingress envelope"
+          (member "detail" rejected |> text);
+        check bool "rejected envelope writes no orphan capture blob" false
+          (Sys.file_exists (Filename.concat (Store.root rejected_store) "evidence"));
         let reference = member "evidence" first |> list |> List.hd |> own_reference in
         let frozen = require (Store.read_blob store reference) in
         check string "captures exact registered run" run_id
@@ -419,10 +439,55 @@ let test_fusion_capture_retains_exact_state_across_terminal_change () =
         let terminal = read () in
         check string "captures terminal failure" "failed"
           (terminal |> member "detail" |> member "run" |> member "status" |> text);
+        for index = 1 to Fusion_run_registry.max_completed_retained do
+          let newer = run_id ^ "/newer/" ^ string_of_int index in
+          Fusion_run_registry.register_running registry ~run_id:newer ~keeper:"foreign"
+            ~preset:"default" ~roster:Fusion_types.preset_roster ~topology:Fusion_types.Simple
+            ~started_at:(float_of_int index +. 10.);
+          Fusion_run_registry.mark_completed registry ~run_id:newer ~outcome:Fusion_run_registry.Succeeded
+        done;
+        check bool "delayed source target has left the recent cache" true
+          (Option.is_none (Fusion_run_registry.get registry ~run_id));
+        let delayed_terminal = read () in
+        check string "delayed observer reads durable exact terminal failure" "failed"
+          (delayed_terminal |> member "detail" |> member "run" |> member "status" |> text);
+        check string "durable fallback retains original owner" "fixture"
+          (delayed_terminal |> member "detail" |> member "run" |> member "keeper" |> text);
+        check bool "eviction does not transfer access to a foreign Keeper" true
+          (Result.is_error (authorize run_id));
+        Fusion_run_registry.register_running registry ~run_id ~keeper:"replacement-owner"
+          ~preset:"default" ~roster:Fusion_types.preset_roster ~topology:Fusion_types.Simple
+          ~started_at:1000.;
+        check bool "reused id denies former owner's retained source access" true
+          (Result.is_error (Sources.authorize ~access:(Sources.Keeper "fixture")
+            (binding [`Assoc ["source_id",`String "fusion";"kind",`String "fusion_run";
+              "run_id",`String run_id]])));
         check string "old running capture is still frozen" frozen
           (require (Store.read_blob store reference));
         check bool "observed actor is not the requested Keeper" true
-          (member "actor" terminal=`Null)))
+          (member "actor" terminal=`Null);
+        List.iteri (fun index (producer,author) ->
+          let reused_run = run_id ^ "/reused/" ^ string_of_int index in
+          let origin : Masc.Board.post_origin = {turn_ref=None;source=Some "fusion";
+            fusion_run_id=Some reused_run;fusion_producer=producer} in
+          (match Masc.Board_dispatch.create_post_once_by_fusion_run_id
+            ~fusion_run_id:reused_run ~author ~content:"private foreign transcript"
+            ~meta_json:(`Assoc ["prompt",`String "private foreign prompt"])
+            ~post_kind:Masc.Board.System_post ~visibility:Masc.Board.Unlisted ~ttl_hours:0 ~origin () with
+           | Ok _ -> () | Error _ -> fail "fixture Board post creation failed");
+          Fusion_run_registry.register_running registry ~run_id:reused_run
+            ~keeper:"fixture" ~preset:"default" ~roster:Fusion_types.preset_roster
+            ~topology:Fusion_types.Simple ~started_at:2.;
+          let captured = require (Sources.acquire ~access:(Sources.Keeper "fixture")
+            ~store ~package:(package dir 16384)
+            ~resolve_lane_output:(fun ~installation_id:_ -> Error "unused")
+            ~binding:(binding [`Assoc ["source_id",`String "fusion";
+              "kind",`String "fusion_run";"run_id",`String reused_run]])) |> list |> List.hd in
+          check bool "foreign Board provenance refuses host capture" false
+            (member "complete" captured |> Yojson.Safe.Util.to_bool);
+          check int "no foreign prompt or transcript crosses package boundary" 0
+            (member "observations" captured |> list |> List.length))
+          [Some "foreign", "fixture"; Some "fixture", "foreign"; None, "fixture"] ))
 
 let test_fusion_envelope_overflow_does_not_retain_or_remove_blobs () =
   with_store (fun dir store ->
@@ -475,7 +540,7 @@ let test_fusion_envelope_overflow_does_not_retain_or_remove_blobs () =
           check bool "an oversized source is explicitly unavailable" true
             (member "complete" rejected = `Bool false && member "observations" rejected = `List []);
           check string "inner detail fits but complete capture is refused before retention"
-            "Fusion capture exceeds the available source ingress envelope"
+            "Fusion observation exceeds the available source ingress envelope"
             (member "detail" rejected |> text);
           check (Alcotest.list string) "rejected captures create no orphan blobs" before (blob_names ());
           check string "previous retained evidence remains readable" frozen

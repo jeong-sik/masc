@@ -151,14 +151,21 @@ Fusion registry and exact-origin Board fixture feeding both shipped packages
 over MCP stdio through real declaration reconciliation and source acquisition.
 It asserts exact upstream identity, preserved report body, a deferred delivery
 receipt, and reads the published evidence using `Keeper_artifact_read` after
-both installations detach and the Lane evidence store is removed.
+the fixture installations detach and the Lane evidence store is removed.
 
 Container lifecycle and the delivery recipient are fixture callbacks. Artifact
 reads exercise the real reader; they do not demonstrate a model understanding
 or using the report. No Docker isolation, credential separation, Broadcast
 publication, or production Keeper action is established by this scenario.
-Its native execution remains pending targeted CI. The 14 Fusion Python MCP
-package scenarios passed on the integration checkout.
+Its native execution remains pending targeted CI. The merged Python MCP package
+suite passed 58 fixture tests, including canonical judge content and the newer
+protocol and lineage rejection cases. This is fixture stdio evidence only.
+
+The committed preview HTML, composition, browser receipts and screenshots are
+retained from historical integration commit
+`125600b0e5909ac44b05e2f06da6bd09c9fe418e`. Their hashes remain linked by
+`preview-checks.json`; they are not screenshots or browser execution of this
+merged revision.
 
 ## Explicit report sharing
 

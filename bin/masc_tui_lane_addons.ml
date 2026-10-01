@@ -1164,8 +1164,7 @@ let flow_inputs binding =
   let* sources = S.parse binding in
   Ok (List.filter_map (function
     | S.Lane_output {id;installation_id;output_id} -> Some {source_id=id;installation_id;output_id}
-    | S.Snapshot_file _ | S.Msx_capture _ | S.Dos_capture _ | S.Browser_document _
-    | S.Fusion_run _ -> None) sources)
+    | S.Fusion_run _ | S.Snapshot_file _ | S.Msx_capture _ | S.Dos_capture _ | S.Browser_document _ -> None) sources)
 
 let installation_identity (instance : instance) = instance.installation_id
 

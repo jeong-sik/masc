@@ -2,8 +2,6 @@
 
 ## [Unreleased]
 
-## [0.49.0] - 2026-10-01
-
 ### Upgrade notes
 
 - Update the server and TUI together to use the shared Goal model and actor-based activity display. No compatibility reader or automatic migration is provided. (#39975)

@@ -5900,7 +5900,7 @@ type state = {
   mutable browser_history_generation: int;
   mutable browser_lane_visibility: browser_lane_visibility;
   mutable browser_lane_generation: int;
-  mutable connectors: Tui_decode.connector_snapshot option;
+  mutable connectors: Masc.Tui_decode_connectors.connector_snapshot option;
   mutable connectors_error: string option;
   mutable connectors_inflight: bool;
   (* A binding write landed while a load was in flight; read once more when
@@ -11008,7 +11008,7 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
       listing ~error:state.connectors_error
         (match state.connectors with
          | None -> 0
-         | Some s -> List.length s.Tui_decode.cs_connectors)
+         | Some s -> List.length s.Masc.Tui_decode_connectors.cs_connectors)
   (* The authority row above the list is wrapped to the terminal width, which
      this arm does not read. [Masc_tui.scrolled_surface] answers Runtime from
      [runtime_scrolled] with the width, as it does for the Memory overview. *)
@@ -11217,8 +11217,8 @@ let surface_row_texts (state : state) : surface -> string list option =
       Option.map
         (fun s ->
           List.map
-            (fun c -> c.Tui_decode.cn_id ^ " " ^ c.Tui_decode.cn_display_name)
-            s.Tui_decode.cs_connectors)
+            (fun c -> c.Masc.Tui_decode_connectors.cn_id ^ " " ^ c.Masc.Tui_decode_connectors.cn_display_name)
+            s.Masc.Tui_decode_connectors.cs_connectors)
         state.connectors
   | Runtime ->
       if Option.is_some state.runtime_detail_target then None

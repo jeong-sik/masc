@@ -1525,11 +1525,11 @@ let load_skills_catalog ~(host : string) ~(port : int) :
 
 (** Load connector status from /api/v1/gate/connectors *)
 let load_connectors ~(host : string) ~(port : int) :
-    (Tui_decode.connector_snapshot, string) result =
+    (Masc.Tui_decode_connectors.connector_snapshot, string) result =
   match fetch_connectors ~host ~port with
   | Error err -> Error err
   | Ok json ->
-      (match Tui_decode.decode_connector_snapshot json with
+      (match Masc.Tui_decode_connectors.decode_connector_snapshot json with
        | Error _ as error -> error
        | Ok snapshot ->
            let load_pages connector kind =
@@ -1537,13 +1537,13 @@ let load_connectors ~(host : string) ~(port : int) :
              let rec loop after_id pages =
                match
                  Masc_tui_http.fetch_connector_names ~host ~port
-                   ~connector:connector.Tui_decode.cn_id ~kind ?after_id
+                   ~connector:connector.Masc.Tui_decode_connectors.cn_id ~kind ?after_id
                    ~limit:page_limit ()
                with
                | Error detail ->
                  List.rev pages, Some (kind ^ ": " ^ detail)
                | Ok json ->
-                 (match Tui_decode.decode_connector_name_page json with
+                 (match Masc.Tui_decode_connectors.decode_connector_name_page json with
                   | Error detail ->
                     List.rev pages, Some (kind ^ ": " ^ detail)
                   | Ok page ->
@@ -1593,7 +1593,7 @@ let load_connectors ~(host : string) ~(port : int) :
                   let read_problems =
                     List.filter_map snd directory_results
                   in
-                  Tui_decode.connector_with_name_pages connector ~pages
+                  Masc.Tui_decode_connectors.connector_with_name_pages connector ~pages
                     ~error:
                       (match read_problems with
                        | [] -> None

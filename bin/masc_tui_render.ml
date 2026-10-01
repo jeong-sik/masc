@@ -1,3 +1,4 @@
+open Masc.Tui_decode_connectors
 (** TUI rendering functions — split from masc_tui.ml (#3808) *)
 
 open Masc_tui_types
@@ -5722,12 +5723,12 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
              it, which meant a change to the vocabulary could land in one
              place and leave the omission rule in [Masc_tui_connector_state]
              judging against the other. *)
-          let connection_label (connector : Tui_decode.connector) =
+          let connection_label (connector : Masc.Tui_decode_connectors.connector) =
             let word =
               Masc_tui_connector_state.badge_word connector.cn_connection
             in
             match connector.cn_connection with
-            | Tui_decode.Connector_connected ->
+            | Masc.Tui_decode_connectors.Connector_connected ->
                 (Theme.ok ()) ^ "● " ^ word ^ Ansi.reset
             | Connector_connected_unavailable ->
                 (Theme.warn ()) ^ "● " ^ word ^ Ansi.reset
@@ -5737,11 +5738,11 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
           in
           let transport_rows =
             List.mapi
-              (fun index (connector : Tui_decode.connector) ->
+              (fun index (connector : Masc.Tui_decode_connectors.connector) ->
                  let here_count =
                    List.length
                      (List.filter
-                        (fun (binding : Tui_decode.connector_binding) ->
+                        (fun (binding : Masc.Tui_decode_connectors.connector_binding) ->
                            String.equal binding.cb_keeper_name k.k_name)
                         connector.cn_bindings)
                  in
@@ -5775,7 +5776,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
           in
           let refused_rows =
             List.map
-              (fun (refusal : Tui_decode.connector_refusal) ->
+              (fun (refusal : Masc.Tui_decode_connectors.connector_refusal) ->
                  let name =
                    match refusal.cr_connector_id with
                    | Some id -> Terminal_text.single_line id
@@ -5816,7 +5817,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                        String.equal keeper.k_name keeper_name)
                     state.keepers
                 in
-                let binding_reference (binding : Tui_decode.connector_binding) =
+                let binding_reference (binding : Masc.Tui_decode_connectors.connector_binding) =
                   Masc_tui_connector_unbind.channel_label
                     ~channel_id:binding.cb_channel_id
                     ~channel_name:binding.cb_channel_name
@@ -5829,7 +5830,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                 in
                 let binding_lines =
                   List.mapi
-                    (fun index (binding : Tui_decode.connector_binding) ->
+                    (fun index (binding : Masc.Tui_decode_connectors.connector_binding) ->
                       let here = String.equal binding.cb_keeper_name k.k_name in
                       let selected = index = state.connectors_binding_cursor in
                       let missing_keeper =
@@ -5896,7 +5897,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                 @ optional_row "Directory state"
                     (Option.map
                        (function
-                         | Tui_decode.Connector_directory_not_started ->
+                         | Masc.Tui_decode_connectors.Connector_directory_not_started ->
                            "not started"
                          | Connector_directory_refreshing -> "refreshing"
                          | Connector_directory_complete -> "complete"
@@ -5947,10 +5948,10 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                    | mappings ->
                        [ ""; Ansi.bold ^ "  Known ID ↔ names" ^ Ansi.reset ]
                        @ List.concat_map
-                           (fun (mapping : Tui_decode.connector_name_mapping) ->
+                           (fun (mapping : Masc.Tui_decode_connectors.connector_name_mapping) ->
                               Printf.sprintf "%-7s %s ↔ %s"
                                 (match mapping.cnm_kind with
-                                 | Tui_decode.Connector_channel_name -> "channel"
+                                 | Masc.Tui_decode_connectors.Connector_channel_name -> "channel"
                                  | Connector_person_name -> "person"
                                  | Connector_server_name -> "server")
                                 (Terminal_text.single_line mapping.cnm_id)
@@ -9901,7 +9902,7 @@ let render_connectors (state : state) =
   let connectors =
     match state.connectors with
     | None -> []
-    | Some s -> s.Masc.Tui_decode.cs_connectors
+    | Some s -> s.Masc.Tui_decode_connectors.cs_connectors
   in
   let shown = List.length connectors in
   let column_width = function
@@ -9945,7 +9946,7 @@ let render_connectors (state : state) =
     | Some snapshot ->
         Printf.sprintf "%s (%d of %d available)  %s  %s"
           (screen_title " MASC Connectors")
-          snapshot.Masc.Tui_decode.cs_active snapshot.Masc.Tui_decode.cs_total
+          snapshot.Masc.Tui_decode_connectors.cs_active snapshot.Masc.Tui_decode_connectors.cs_total
           timestamp (connection_badge state)
   in
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"connectors" ~title
@@ -9991,7 +9992,7 @@ let render_connectors (state : state) =
           match Rows.at connectors_window idx with
           | None -> c.push_empty ()
           | Some connector ->
-              let open Masc.Tui_decode in
+              let open Masc.Tui_decode_connectors in
               let yes_no flag = if flag then "yes" else "no" in
               let line =
                 "  " ^ Masc_tui_table.row (cells

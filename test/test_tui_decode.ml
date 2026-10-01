@@ -4327,52 +4327,52 @@ let connector_snapshot_json ?(active = 1) connectors =
 
 let test_decode_connector_snapshot_reads_the_live_shape () =
   match
-    Tui_decode.decode_connector_snapshot
+    Masc.Tui_decode_connectors.decode_connector_snapshot
       (connector_snapshot_json [ connector_json () ])
   with
   | Error err -> Alcotest.failf "decode failed: %s" err
   | Ok snapshot ->
-      Alcotest.(check int) "total" 1 snapshot.Tui_decode.cs_total;
-      Alcotest.(check int) "active" 1 snapshot.Tui_decode.cs_active;
-      (match snapshot.Tui_decode.cs_connectors with
+      Alcotest.(check int) "total" 1 snapshot.Masc.Tui_decode_connectors.cs_total;
+      Alcotest.(check int) "active" 1 snapshot.Masc.Tui_decode_connectors.cs_active;
+      (match snapshot.Masc.Tui_decode_connectors.cs_connectors with
        | [ c ] ->
            Alcotest.(check string) "name" "Slack"
-             c.Tui_decode.cn_display_name;
-           Alcotest.(check bool) "available" true c.Tui_decode.cn_available;
-           Alcotest.(check bool) "connected" true c.Tui_decode.cn_connected;
+             c.Masc.Tui_decode_connectors.cn_display_name;
+           Alcotest.(check bool) "available" true c.Masc.Tui_decode_connectors.cn_available;
+           Alcotest.(check bool) "connected" true c.Masc.Tui_decode_connectors.cn_connected;
            Alcotest.(check (option string)) "channel"
-             (Some "#release-deployment") c.Tui_decode.cn_channel;
+             (Some "#release-deployment") c.Masc.Tui_decode_connectors.cn_channel;
            Alcotest.(check bool) "typed connected state" true
-             (c.Tui_decode.cn_connection = Tui_decode.Connector_connected);
+             (c.Masc.Tui_decode_connectors.cn_connection = Masc.Tui_decode_connectors.Connector_connected);
            Alcotest.(check (option string)) "trigger policy"
-             (Some "mention_only") c.Tui_decode.cn_trigger_policy;
+             (Some "mention_only") c.Masc.Tui_decode_connectors.cn_trigger_policy;
            Alcotest.(check (option bool)) "bot token presence" (Some true)
-             c.Tui_decode.cn_bot_token_present;
+             c.Masc.Tui_decode_connectors.cn_bot_token_present;
            Alcotest.(check (option int)) "server pid" (Some 4242)
-             c.Tui_decode.cn_pid;
+             c.Masc.Tui_decode_connectors.cn_pid;
            Alcotest.(check bool) "typed gateway state" true
-             (c.Tui_decode.cn_gateway_state
-              = Some Tui_decode.Connector_gateway_connected);
+             (c.Masc.Tui_decode_connectors.cn_gateway_state
+              = Some Masc.Tui_decode_connectors.Connector_gateway_connected);
            Alcotest.(check bool) "no poll state" true
-             (c.Tui_decode.cn_poll_state = None);
+             (c.Masc.Tui_decode_connectors.cn_poll_state = None);
            Alcotest.(check bool) "typed directory state" true
-             (c.Tui_decode.cn_directory_state
-              = Some Tui_decode.Connector_directory_partial);
+             (c.Masc.Tui_decode_connectors.cn_directory_state
+              = Some Masc.Tui_decode_connectors.Connector_directory_partial);
            Alcotest.(check (list string)) "permission limit"
-             [ "members" ] c.Tui_decode.cn_directory_permission_denied;
-           (match c.Tui_decode.cn_bindings with
+             [ "members" ] c.Masc.Tui_decode_connectors.cn_directory_permission_denied;
+           (match c.Masc.Tui_decode_connectors.cn_bindings with
             | [ binding ] ->
                 Alcotest.(check string) "bound channel" "C09TK9L4DV4"
-                  binding.Tui_decode.cb_channel_id;
+                  binding.Masc.Tui_decode_connectors.cb_channel_id;
                 Alcotest.(check (option string)) "bound channel name"
-                  None binding.Tui_decode.cb_channel_name;
+                  None binding.Masc.Tui_decode_connectors.cb_channel_name;
                 Alcotest.(check string) "bound keeper"
-                  "pinewood-pr-jira-checker" binding.Tui_decode.cb_keeper_name
+                  "pinewood-pr-jira-checker" binding.Masc.Tui_decode_connectors.cb_keeper_name
             | bindings ->
                 Alcotest.failf "expected one binding, got %d"
                   (List.length bindings))
            ; Alcotest.(check int) "public response has no name mappings" 0
-               (List.length c.Tui_decode.cn_name_mappings)
+               (List.length c.Masc.Tui_decode_connectors.cn_name_mappings)
        | cs -> Alcotest.failf "expected one connector, got %d" (List.length cs))
 
 let test_decode_connector_configured_but_unreachable () =
@@ -4380,29 +4380,29 @@ let test_decode_connector_configured_but_unreachable () =
      up but cannot be reached needs a different action than one that was never
      configured, so the two are not folded. *)
   match
-    Tui_decode.decode_connector_snapshot
+    Masc.Tui_decode_connectors.decode_connector_snapshot
       (connector_snapshot_json ~active:1
          [ connector_json ~connected:(`Bool false) ~status:"disconnected" () ])
   with
-  | Ok { Tui_decode.cs_connectors = [ c ]; _ } ->
-      Alcotest.(check bool) "configured" true c.Tui_decode.cn_available;
-      Alcotest.(check bool) "but not reachable" false c.Tui_decode.cn_connected
+  | Ok { Masc.Tui_decode_connectors.cs_connectors = [ c ]; _ } ->
+      Alcotest.(check bool) "configured" true c.Masc.Tui_decode_connectors.cn_available;
+      Alcotest.(check bool) "but not reachable" false c.Masc.Tui_decode_connectors.cn_connected
   | Ok _ -> Alcotest.fail "expected one connector"
   | Error err -> Alcotest.failf "decode failed: %s" err
 
 let test_decode_connector_reads_a_poll_state () =
   match
-    Tui_decode.decode_connector_snapshot
+    Masc.Tui_decode_connectors.decode_connector_snapshot
       (connector_snapshot_json
          [ connector_json ~gateway_state:`Null
              ~poll_state:(`String "degraded") ()
          ])
   with
-  | Ok { Tui_decode.cs_connectors = [ c ]; _ } ->
+  | Ok { Masc.Tui_decode_connectors.cs_connectors = [ c ]; _ } ->
       Alcotest.(check bool) "typed poll state" true
-        (c.Tui_decode.cn_poll_state = Some Tui_decode.Connector_poll_degraded);
+        (c.Masc.Tui_decode_connectors.cn_poll_state = Some Masc.Tui_decode_connectors.Connector_poll_degraded);
       Alcotest.(check bool) "no gateway state" true
-        (c.Tui_decode.cn_gateway_state = None)
+        (c.Masc.Tui_decode_connectors.cn_gateway_state = None)
   | Ok _ -> Alcotest.fail "expected one connector"
   | Error err -> Alcotest.failf "decode failed: %s" err
 
@@ -4411,7 +4411,7 @@ let test_decode_connector_reads_a_poll_state () =
    the transports beside it still decode, and the refusal names the row. *)
 let test_decode_connector_refuses_only_the_row_with_an_unknown_state () =
   match
-    Tui_decode.decode_connector_snapshot
+    Masc.Tui_decode_connectors.decode_connector_snapshot
       (connector_snapshot_json
          [ connector_json ~id:"discord" ~gateway_state:(`String "half_open") ()
          ; connector_json ~id:"imessage" ~gateway_state:`Null
@@ -4424,27 +4424,27 @@ let test_decode_connector_refuses_only_the_row_with_an_unknown_state () =
       Alcotest.(check (list string)) "the readable row still decodes"
         [ "slack" ]
         (List.map
-           (fun (c : Tui_decode.connector) -> c.cn_id)
-           snapshot.Tui_decode.cs_connectors);
+           (fun (c : Masc.Tui_decode_connectors.connector) -> c.cn_id)
+           snapshot.Masc.Tui_decode_connectors.cs_connectors);
       Alcotest.(check (list (pair (option string) int)))
         "each unreadable row is refused by name and position"
         [ (Some "discord", 0); (Some "imessage", 1) ]
         (List.map
-           (fun (r : Tui_decode.connector_refusal) ->
+           (fun (r : Masc.Tui_decode_connectors.connector_refusal) ->
               (r.cr_connector_id, r.cr_row))
-           snapshot.Tui_decode.cs_refused);
+           snapshot.Masc.Tui_decode_connectors.cs_refused);
       List.iter
-        (fun (r : Tui_decode.connector_refusal) ->
+        (fun (r : Masc.Tui_decode_connectors.connector_refusal) ->
            Alcotest.(check bool) "the refusal carries its reason" true
              (String.length r.cr_reason > 0))
-        snapshot.Tui_decode.cs_refused
+        snapshot.Masc.Tui_decode_connectors.cs_refused
 
 let test_decode_connector_hides_nonpositive_pid () =
   match
-    Tui_decode.decode_connector_snapshot
+    Masc.Tui_decode_connectors.decode_connector_snapshot
       (connector_snapshot_json [ connector_json ~pid:(`Int 0) () ])
   with
-  | Ok { Tui_decode.cs_connectors = [ connector ]; _ } ->
+  | Ok { Masc.Tui_decode_connectors.cs_connectors = [ connector ]; _ } ->
       Alcotest.(check (option int)) "non-process pid omitted" None
         connector.cn_pid
   | Ok _ -> Alcotest.fail "expected one connector"
@@ -4453,17 +4453,17 @@ let test_decode_connector_hides_nonpositive_pid () =
 let test_decode_connector_absent_flags_are_off () =
   (* Defaulting the other way would draw a dead connector as a working one. *)
   match
-    Tui_decode.decode_connector_snapshot
+    Masc.Tui_decode_connectors.decode_connector_snapshot
       (connector_snapshot_json ~active:0
          [ connector_json ~available:`Null ~connected:`Null ~status:"offline"
              ~channel:`Null ()
          ])
   with
-  | Ok { Tui_decode.cs_connectors = [ c ]; _ } ->
-      Alcotest.(check bool) "not available" false c.Tui_decode.cn_available;
-      Alcotest.(check bool) "not connected" false c.Tui_decode.cn_connected;
+  | Ok { Masc.Tui_decode_connectors.cs_connectors = [ c ]; _ } ->
+      Alcotest.(check bool) "not available" false c.Masc.Tui_decode_connectors.cn_available;
+      Alcotest.(check bool) "not connected" false c.Masc.Tui_decode_connectors.cn_connected;
       Alcotest.(check (option string)) "no channel" None
-        c.Tui_decode.cn_channel
+        c.Masc.Tui_decode_connectors.cn_channel
   | Ok _ -> Alcotest.fail "expected one connector"
   | Error err -> Alcotest.failf "decode failed: %s" err
 
@@ -4472,34 +4472,34 @@ let test_decode_connector_absent_flags_are_off () =
 let expect_only_row_refused label result =
   match result with
   | Error err -> Alcotest.failf "%s: one bad row failed the snapshot: %s" label err
-  | Ok { Tui_decode.cs_connectors = []; cs_refused = [ refusal ]; _ } ->
+  | Ok { Masc.Tui_decode_connectors.cs_connectors = []; cs_refused = [ refusal ]; _ } ->
       Alcotest.(check (option string)) (label ^ ": refusal names the row")
-        (Some "slack") refusal.Tui_decode.cr_connector_id
+        (Some "slack") refusal.Masc.Tui_decode_connectors.cr_connector_id
   | Ok _ -> Alcotest.failf "%s: the row was not refused" label
 
 let test_decode_connector_rejects_contradictory_connection () =
   expect_only_row_refused "connected while unavailable"
-    (Tui_decode.decode_connector_snapshot
+    (Masc.Tui_decode_connectors.decode_connector_snapshot
        (connector_snapshot_json
           [ connector_json ~available:(`Bool false) ~connected:(`Bool true) () ]))
 
 let test_decode_connector_keeps_connected_but_unavailable_distinct () =
   match
-    Tui_decode.decode_connector_snapshot
+    Masc.Tui_decode_connectors.decode_connector_snapshot
       (connector_snapshot_json
          [ connector_json ~available:(`Bool false) ~connected:(`Bool true)
              ~status:"offline" ()
          ])
   with
-  | Ok { Tui_decode.cs_connectors = [ connector ]; _ } ->
+  | Ok { Masc.Tui_decode_connectors.cs_connectors = [ connector ]; _ } ->
       Alcotest.(check bool) "typed degraded connection" true
-        (connector.cn_connection = Tui_decode.Connector_connected_unavailable)
+        (connector.cn_connection = Masc.Tui_decode_connectors.Connector_connected_unavailable)
   | Ok _ -> Alcotest.fail "expected one connector"
   | Error err -> Alcotest.failf "decode failed: %s" err
 
 let test_decode_connector_rejects_a_malformed_binding () =
   expect_only_row_refused "a binding without channel_id"
-    (Tui_decode.decode_connector_snapshot
+    (Masc.Tui_decode_connectors.decode_connector_snapshot
        (connector_snapshot_json
           [ connector_json
               ~bindings:
@@ -4512,11 +4512,11 @@ let test_decode_connector_rejects_a_malformed_binding () =
 
 let test_decode_connector_order_is_stable () =
   match
-    Tui_decode.decode_connector_snapshot
+    Masc.Tui_decode_connectors.decode_connector_snapshot
       (connector_snapshot_json
          [ connector_json ~id:"slack" (); connector_json ~id:"discord" () ])
   with
-  | Ok { Tui_decode.cs_connectors = first :: second :: []; _ } ->
+  | Ok { Masc.Tui_decode_connectors.cs_connectors = first :: second :: []; _ } ->
       Alcotest.(check string) "first id" "discord" first.cn_id;
       Alcotest.(check string) "second id" "slack" second.cn_id
   | Ok _ -> Alcotest.fail "expected two connectors"
@@ -4544,13 +4544,13 @@ let test_authenticated_name_page_enriches_connector () =
       ]
   in
   match
-    Tui_decode.decode_connector_snapshot
+    Masc.Tui_decode_connectors.decode_connector_snapshot
       (connector_snapshot_json [ connector_json () ]),
-    Tui_decode.decode_connector_name_page page_json
+    Masc.Tui_decode_connectors.decode_connector_name_page page_json
   with
   | Ok { cs_connectors = [ connector ]; _ }, Ok page ->
       let connector =
-        Tui_decode.connector_with_name_pages connector ~pages:[ page ] ~error:None
+        Masc.Tui_decode_connectors.connector_with_name_pages connector ~pages:[ page ] ~error:None
       in
       Alcotest.(check (option string)) "workspace remains separate provenance"
         (Some "T012345") connector.cn_workspace_id;

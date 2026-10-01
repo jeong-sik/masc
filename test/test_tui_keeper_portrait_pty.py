@@ -403,6 +403,7 @@ def item_tab_previews_accessories(binary: str) -> None:
         narrow = last_frame_rows(output)
         assert row_of(narrow, b"> 18 base  dish_oak") > 0, "resize lost the last accessory name"
         assert row_of(narrow, b"Selected: unpriced") > 0, "narrow Items hid the authoritative price"
+        assert row_of(narrow, b"Preview changes this picture only") > 0, "narrow Items hid the preview notice"
         assert not portrait_rows(narrow), "narrow Items pane retained a portrait beside clipped names"
         os.write(fd, b"q")
 

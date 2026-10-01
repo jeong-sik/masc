@@ -4469,10 +4469,7 @@ let decode_repository_change_snapshot json =
 
    The wording follows the copy of this check in [Llm_provider.Types], which
    has printed all three groups since it was written: same keys, same
-   brackets, so one reader learns one shape. (Its function is not named here
-   on purpose -- scripts/ci/check_exact_field_decoder_preflight.py matches
-   that name against file text without stripping comments, so writing it in
-   prose registers this module as a decoder it is not. See #35471.)
+   brackets, so one reader learns one shape.
 
    Empty groups are left out rather than drawn as "[]" -- this message goes on
    a terminal row, where the surface cuts it. *)

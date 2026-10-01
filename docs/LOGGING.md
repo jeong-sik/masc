@@ -1,6 +1,6 @@
 # Logging
 
-One logging surface, enforced by `scripts/ci/check-logging-consistency.sh`.
+One logging surface: the per-module loggers in `lib/masc_log/log.ml`.
 
 ## Canonical surface
 
@@ -52,7 +52,7 @@ Log.Keeper.info ~keeper_name "%s"
 
 Only the message text is shaped; the ring entry's typed fields are untouched.
 
-## Forbidden in `lib/` and `bin/` (the gate fails on these)
+## Forbidden in `lib/` and `bin/`
 
 | Pattern | Why it is non-canonical | Migrate to |
 |---|---|---|
@@ -68,10 +68,10 @@ routine API and either is acceptable, but prefer the per-module form.
 `Logs.*` is forbidden in `lib/`: it is the `logs` opam library, not
 `lib/masc_log`. It bypasses the structured ring buffer entirely.
 
-## Allowlist (legit non-canonical)
+## Where non-canonical output is intended
 
-Maintained in `ci/logging-consistency-allowlist.txt` as path prefixes. Each
-entry states why the site cannot route through the canonical surface. Summary:
+These sites print outside the canonical surface on purpose. Each states why it
+cannot route through it:
 
 - **`lib/masc_log/`** — the Log system cannot log through itself; its `eprintf`
   are the terminal sink and unparsable-env-var / rotation-failure warnings.
@@ -101,31 +101,5 @@ entry states why the site cannot route through the canonical surface. Summary:
   contain a colon even though the OCaml identifier cannot; that site became the
   `Oas_event` module.)
 
-Four files (`server_startup_takeover.ml`, `backend.ml`, `workspace_query.ml`,
-`mcp_server_eio_resource.ml`) are allowlisted **wholesale** even though they also
-contain canonical logging — the suppression is intentional because their only
-non-canonical sites are the embedded-`[LEVEL]` legacy-bridge lines. The trade-off
-is that a future stray `Printf.eprintf` added to one of these files would not be
-caught; reviewers of those four files must check logging by hand.
-
-Do not add an allowlist entry to silence a migrate-able site. Fix the call
-site. The gate is a ratchet: `ci/logging-consistency-baseline.txt` is `0` and
-may only be lowered.
-
-## Migration counts (this change)
-
-Non-canonical sites in `lib/` + `bin/`, before → after:
-
-| Category | Before | Migrated | Allowlisted | After (gated) |
-|---|---:|---:|---:|---:|
-| top-level `Log.{info,warn,error,debug}` (`~ctx` + no-ctx) | 63 | 61 | 2 (dynamic `~ctx:context`) | 0 |
-| `Logs.*` library | 11 | 11 | 0 | 0 |
-| `Log.legacy_stderr` / `legacy_traceln` (call sites) | 27 | 0 | 27 (embedded `[LEVEL]` prefix) | 0 |
-| bare `Log.emit` / `emit_event` (non-comment) | 8 | 7 | 1 (`"agent_core:" ^ …` runtime component) | 0 |
-| raw `Printf.eprintf` / `prerr_*` | 47 | 3 | 44 (log.ml, fs_compat, CLI tools, boot/FATAL) | 0 |
-
-The migration added per-module loggers for the components that previously only
-existed as `~ctx:"…"` strings (e.g. `Dashboard_runtime`, `Otel`,
-`H2_gateway`), preserving the exact component string operators see, plus
-domain-named modules (`Voice`, `ExecTap`, `ToolValidation`, `Discord`) for raw /
-`Logs.*` sites that previously carried no component.
+A site that can route through the canonical surface does. Fix its call site
+instead of printing around the logging surface.

@@ -220,7 +220,7 @@
 
 - 브리프의 라이브 소스(4b881ab570, 19:55 부팅)는 사실과 다르다: 19:55 시작은 base path 잠금으로 FATAL 이었고, 그때까지 돈 서버는 19:04 부팅(3e22dc273c)이며 지금은 23:45 부팅(pid 72110, ccef0a8dab)이다.
 - D6-07 의 4초가 락 경합인지 목록 복사인지 분리하지 못했다.
-- GLM coding endpoint 가 strict JSON schema 응답 형식을 지원하는지 공식 문서로 확인하지 못했다(D6-04 수정안 1).
+- GLM coding endpoint 가 strict JSON schema 응답 형식을 지원하는지 공식 문서로 확인하지 못했다(D6-04와 관련된 별도 확인 항목).
 - keeper 별 drain 횟수가 왜 3명에 몰리는지 worker.run(2284-2437)의 wake 제어를 끝까지 읽지 못했다.
 - verifier 시도 한 번의 토큰·비용은 사용량 원장과 join 하지 못했다.
 - #39555 Comment_page.select 의 경계 계산은 diff 로만 읽었고 실행하지 않았다.

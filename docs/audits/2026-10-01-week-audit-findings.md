@@ -50,7 +50,7 @@ Keeper 걷기 자체는 맞게 돈다. 429·403·402·timeout·5xx·빈 답·con
 
 ## D4 Skills 발행·발견·활성화와 재생성 (되풀이 풀이 → Skill)
 
-기본 흐름은 돈다. 09-29 16시(KST)에 들어온 이벤트 원장은 31.5시간 동안 활성화 2,957건, 행 8,759개(4.2 MB), 경고 0건이다. 도구 로그와 건수도 맞는다(keeper_skill 성공 445 대 원장 439, 실패한 compose 호출도 기록됨). Keeper 가 직접 발행한 Skill 은 6건(09-23~29)이고 거절 0건이다. 라이브에서 지금 일어나는 문제는 하나다. 가장 많이 도는 Skill(work-intake, 활성화의 63%)의 보드 칸이 Keeper 가 쓴 글을 전부 뺀다(D4-01, P1). 나머지는 낭비, 잠재 결함, 정리 대상이다(P2 10건). 물음별 답. 1) 되풀이 풀이를 Skill 로 자동으로 묶는 기능: 코드가 없다. 판정은 미구현이다(09-29 표의 미연결은 라벨 정정). 있는 것은 프롬프트 한 문단(config/prompts/keeper.md:66), 발행 도구 keeper_skill_publish, 활성화 원장이다.
+기본 흐름은 돈다. 09-29 16시(KST)에 들어온 이벤트 원장은 31.5시간 동안 활성화 2,957건, 행 8,759개(4.2 MB), 경고 0건이다. 도구 로그와 건수도 맞는다(keeper_skill 성공 445 대 원장 439, 실패한 compose 호출도 기록됨). Keeper 가 직접 발행한 Skill 은 6건(09-23~29)이고 거절 0건이다. 라이브에서 지금 일어나는 문제는 하나다. 가장 많이 도는 Skill(work-intake, 활성화의 63%)의 보드 칸이 Keeper 가 쓴 글을 전부 뺀다(D4-01, P2). 나머지 항목의 최종 심각도는 아래 표를 따른다. 물음별 답. 1) 되풀이 풀이를 Skill 로 자동으로 묶는 기능: 코드가 없다. 판정은 미구현이다(09-29 표의 미연결은 라벨 정정). 있는 것은 프롬프트 한 문단(config/prompts/keeper.md:66), 발행 도구 keeper_skill_publish, 활성화 원장이다.
 
 | id | sev | file:line | 열린 PR · 09-29 | 한 줄 결함 | 고치는 방향 | 판정 |
 |---|---|---|---|---|---|---|
@@ -124,7 +124,7 @@ Candle 은 라이브에서 꺼져 있다. candle.toml 이 없고, 23:45 부팅 �
 | D6-01 | P1 | `packages/agent_core/lib/llm_provider/exact_output.ml:1926-1943 (execution_cause_is_binding_rest, NetworkError/TimeoutError 는 dispatch 를 보지 않고 false)` | 09-29 DM-BD-3 | 요청이 나가지도 못한 DNS 실패가 입력 문제로 분류돼 Board attention 파티션이 Blocked 로 굳는다 | PR1 (작게): `execution_cause_is_binding_rest` 가 `Completion_failed { dispatch = No_generation_dispatch }` 를 '지금 못 보냄'으로 보게 하고(exhaustive match 유지), `lane_disposition` 이 그 경우… | 확인 · High |
 | D6-02 | P1 | `lib/keeper/keeper_board_audience.ml:80-110 (Discoverable → Judge_discoverable, board_interests 가 있으면 전원)` |  | Board attention 대기열이 줄지 않는다: 처리까지 중앙값 13초 → 12.9시간 | 코드를 고치기 전에 RFC 로 두 질문을 정합니다. (a) 판정 단위를 (신호, keeper) 쌍이 아니라 신호 하나로 바꿀 수 있는가. 디코더가 verdicts 목록을 이미 받으므로 한 호출에 여러 keeper 의 후보를 넣는 방향이 자연스럽습니다. (b) Jev 의 not_relevant 를 끝으로 볼 것인가(D6-10). | 확인 · High |
 | D6-03 | P1 | `lib/completion_authority_agent.ml:1039-1088 (retry_delay_of_path_rest, schedule_retry)` | 09-29 DM-verifier | verifier_exact 재시도가 닫히지 않는다: 하루 469번 시도, 판정 18건, 900초 무응답 330번 | 운영자 결정 두 가지는 그대로입니다: 슬롯을 하나 더 두거나 capabilities 를 적는 것. 코드 쪽은 RFC 로 '슬롯이 하나뿐인 lane 의 재시도를 무엇이 닫는가'를 정합니다. 타이머(pulse)가 아니라 상태 변화(다른 슬롯 성공, 운영자 조치)로 닫는 쪽을 검토합니다. | 확인 · High |
-| D6-04 | P2 | `config/prompts/judge.md (#39970, 2줄)` |  | #39970 프롬프트 수정이 domain_output_invalid 를 줄이지 못했다: 하루 300건대 그대로 격리 | 디코더를 느슨하게 하지 않습니다(repair 는 워크어라운드). 두 가지를 봅니다. (1) provider 가 strict JSON schema 응답 형식을 지원하는지 공식 문서로 확인해서 지원하면 `minimum_guarantee` 를 올립니다. 확인 못 함: GLM coding endpoint 지원 여부. | 확인 |
+| D6-04 | P2(조사 우선순위) | `config/prompts/judge.md (#39970, 2줄)` |  | 하루 300건대 격리를 관측했다. #39970 프롬프트 수정의 효과는 측정하지 못했다 | 효과를 판단하려면 같은 길이의 전후 관측 구간, 전체 시도 수, 같은 분류 기준의 invalid-output 수, 요청에 실제 적용된 프롬프트 revision(override 포함)과 모델을 확인한다. PR 병합 시각만으로 적용 여부나 실패율 변화를 판단하지 않는다. | 관측값 유지 · 프롬프트 효과 확인 필요 |
 | D6-05 | P2 | `lib/board/board_audience.ml:93-110` |  | 판정 정체 알림이 producer 에게 주소를 붙이지 않아 keeper 전원이 판정 비용을 낸다 | 알림 본문 첫 줄에 producer 를 `@<assignee>` 로 적어 `Explicit_targets` 가 되게 합니다(Board_addressing 문법이 이미 처리). Goal 알림도 같은 방식으로 owner 를 적습니다. board_audience.ml 주석은 실제 동작에 맞게 고칩니다. | 확인 |
 | D6-06 | P2 | `lib/keeper/keeper_board_attention_candidate.ml:1752-1761 (compaction_ratio = 2, needs_compaction), 1788-1800` |  | attention 후보 원장이 줄어드는 길 없이 커진다: 307MB, 후보마다 Board 본문 전체 | RFC 로 정합니다. 후보는 (post_id, comment_id, 내용 revision)을 참조하고 본문은 Board 에서 읽는 쪽, 그리고 consumed 후보를 판정 증거만 남기고 live 집합에서 빼는 쪽입니다. '먼저 영속화한다'는 헌법 규칙은 참조로도 지켜집니다. 삭제된 글의 판정 증거 보존 방식이 정해져야 합니다. | 확인 |
 | D6-08 | P2 | `lib/verification_run_registry.ml:226, 285 (unknown verification outcome)` |  | verification-runs.jsonl 의 `operator_routed` 19줄이 원장 압축을 4일째 막고 있다 | 운영자 작업 한 번: 서버를 멈추고 네 원장(exact-lane-runs-v6, fusion-runs, verification-runs, goal-verification-runs)을 백업한 뒤 `cut-run-registries` 를 dry-run 으로 본 다음 `--execute`. | 확인 |
@@ -438,13 +438,15 @@ registry 와 핸들러 사이의 이름 어긋남은 찾지 못했다. descripto
 
 | id | 09-29 sev | 상태 | 근거 |
 |---|---|---|---|
-| RT-R1 | P1 | 일부만 고쳐짐 | #39997(ec1eaeb053)이 Keeper Codex 경로에 적용됐다. 사용량 읽기가 알려준 리셋 시각으로 쉬게 한다(runtime_provider_usage_read.ml:597, keeper_codex_runtime.ml:297). Fusion one-shot 경로는 여전히 관측만 기록한다. |
+| RT-R1 | P1 | 일부만 반영(관측 갱신) | #39997 뒤 Keeper Codex 경로는 사용량 관측을 갱신한다. 스냅샷 727fc53123의 runtime_provider_usage_read.ml:593-604는 거절된 limit_id를 알 수 없어 reset 기반 account rest를 추론하지 않는다고 명시한다. 원래 지적한 reset까지의 쉼은 구현된 것으로 셀 수 없다. 이는 D1-05에서 기각한 설계 변경 요구와 구분한다. Fusion one-shot도 관측만 기록한다. |
 | RT-R5 | P2 | 일부만 고쳐짐 | refresh_scope가 매 주기 catalogue를 다시 읽어 주기를 바꾸고, 없어지면 멈춘다(runtime_provider_usage_read.ml:324-334). 그러나 반복 대상 목록은 부팅 때 한 번 만들어진다(:337-348). 부팅 뒤 새로 선언한 refresh-s는 시작되지 않는다. |
 | RT-A7 | P2 | 일부만 고쳐짐 | #40096 뒤 모델 set은 여러 계정이 공유하므로 계정을 지워도 남는 것이 의도다(runtime_account_removal.ml:194-211). 저장 뒤 검사도 after.models = config.models를 요구한다(:292). 계정 전용 명시 바인딩의 모델 표가 남는지는 확인하지 못했다. |
 
+이하 S2·S3·S5의 본문 합계는 문서에 보존된 상태 표와 맞췄다. 이번 문서 정정으로 과거의 전체 항목을 다시 측정하거나 판정한 것은 아니다.
+
 ### S2 MM-* 발견 상태 확인
 
-MM 행 29개 확인. 고쳐짐 4 (M1, M2, M5, C1), 일부만 2 (M3, S3), 그대로 열림 18, 위치를 못 찾음 5 (W6~W10). 나머지 open 행은 09-29 이후 그 파일을 건드린 커밋이 없어 결함이 그대로다. 근거: 스냅샷 727fc53123 에서 각 위치를 열어 봤고, base 99076b1308 이후 커밋을 파일별 git log 로 대조했다. 열린 PR 199개 중 이 행들을 실제로 다루는 PR 은 못 찾았다(파일명만 겹치는 PR 은 무관한 리팩터링). 스냅샷 코드 기준이다. 라이브 서버 소스는 4b881ab570 이라 그 뒤(#40019 등)는 라이브에 아직 없을 수 있다. Curator(W1~W5)는 라이브 runtime.toml 에 lane 이 없고 로그도 0건이라 코드 결함만 남은 잠복 상태다.
+아래 상태 표의 MM 합계는 28개다. 고쳐짐 4 (M1, M2, M5, C1), 일부만 2 (M3, S3), 그대로 열림 17, 위치를 못 찾음 5 (W6~W10). 나머지 open 행은 09-29 이후 그 파일을 건드린 커밋이 없어 결함이 그대로다. 근거: 스냅샷 727fc53123 에서 각 위치를 열어 봤고, base 99076b1308 이후 커밋을 파일별 git log 로 대조했다. 열린 PR 199개 중 이 행들을 실제로 다루는 PR 은 못 찾았다(파일명만 겹치는 PR 은 무관한 리팩터링). 스냅샷 코드 기준이다. 라이브 서버 소스는 4b881ab570 이라 그 뒤(#40019 등)는 라이브에 아직 없을 수 있다. Curator(W1~W5)는 라이브 runtime.toml 에 lane 이 없고 로그도 0건이라 코드 결함만 남은 잠복 상태다.
 
 | 상태 | 개수 |
 |---|---|
@@ -460,7 +462,7 @@ MM 행 29개 확인. 고쳐짐 4 (M1, M2, M5, C1), 일부만 2 (M3, S3), 그대�
 
 ### S3 DM-* 발견 상태 확인
 
-42행 확인 (DM-GT-11 은 09-29 발견 목록에 행이 없어 위치를 못 찾음). 결과: 고쳐짐 8, 없어진 코드 2, 일부만 4, 그대로 열림 27, 위치를 못 찾음 1. 기준은 감사 시점의 origin/main 727fc53123. 코드에서 위치를 다시 열어 확인했고, 09-29 20:58 이후 바뀐 파일은 git log 로 확인함. 크게 닫힌 것은 세 묶음이다. 첫째 #40003 이 Board attention 일꾼이 통째로 멈추는 문제(BD-1)를 닫았다. 둘째 #39975 가 Goal owner 개념과 알림 scan 을 없애서 GT-01, GT-07, GT-12 가 닫히거나 무의미해졌다. 셋째 Play·Portrait P1 4건(PL-01, PL-09, PT-1, PT-2)이 머지된 PR 로 닫혔다. 나머지 P2 는 대부분 그대로다. 그 파일들이 09-29 이후 안 바뀌었거나, 바뀐 커밋이 다른 곳을 고쳤다. 열린 PR 가운데 #40171 은 PL-06 과 PL-07 을 같은 파일에서 고치려는 PR 로 보인다. 다만 PR diff 는 읽지 않았고 제목과 파일 목록만 봤다.
+42행 확인 (DM-GT-11 은 09-29 발견 목록에 행이 없어 위치를 못 찾음). 아래 상태 표의 합계: 고쳐짐 7, 없어진 코드 2, 일부만 4, 그대로 열림 28, 위치를 못 찾음 1. 기준은 감사 시점의 origin/main 727fc53123. 코드에서 위치를 다시 열어 확인했고, 09-29 20:58 이후 바뀐 파일은 git log 로 확인함. 크게 닫힌 것은 세 묶음이다. 첫째 #40003 이 Board attention 일꾼이 통째로 멈추는 문제(BD-1)를 닫았다. 둘째 #39975 가 Goal owner 개념과 알림 scan 을 없애서 GT-01, GT-07, GT-12 가 닫히거나 무의미해졌다. 셋째 Play·Portrait P1 4건(PL-01, PL-09, PT-1, PT-2)이 머지된 PR 로 닫혔다. 나머지 P2 는 대부분 그대로다. 그 파일들이 09-29 이후 안 바뀌었거나, 바뀐 커밋이 다른 곳을 고쳤다. 열린 PR 가운데 #40171 은 PL-06 과 PL-07 을 같은 파일에서 고치려는 PR 로 보인다. 다만 PR diff 는 읽지 않았고 제목과 파일 목록만 봤다.
 
 | 상태 | 개수 |
 |---|---|
@@ -494,7 +496,7 @@ MM 행 29개 확인. 고쳐짐 4 (M1, M2, M5, C1), 일부만 2 (M3, S3), 그대�
 
 ### S5 TU-F31~F60 상태 확인
 
-34행(TU-F31~F60 30행 + 웹 전용 P2 4건)을 스냅샷 727fc53123 에서 열어 확인했습니다. 고쳐짐 0, 일부만 3(F34, F44, F49), 위치를 못 찾음 1(웹 퍼센트), 나머지 30행은 그대로 열려 있습니다. 09-29 문서가 겹친다고 적은 #39892(F46), #39971(F47)은 둘 다 머지됐지만 그 행은 닫히지 않았습니다. 줄 번호는 많이 밀렸고 이름과 문맥으로 다시 찾았습니다. 열린 PR 이 이 결함을 직접 다루는 행은 못 찾았습니다(파일만 겹치는 PR 은 F34 한 곳에 적음).
+34행(TU-F31~F60 30행 + 웹 전용 P2 4건)을 스냅샷 727fc53123 에서 열어 확인했습니다. 아래 상태 표의 합계는 고쳐짐 0, 일부만 4(F34, F44, F49, F51), 위치를 못 찾음 1(웹 퍼센트), 그대로 열림 29입니다. 09-29 문서가 겹친다고 적은 #39892(F46), #39971(F47)은 둘 다 머지됐지만 그 행은 닫히지 않았습니다. 줄 번호는 많이 밀렸고 이름과 문맥으로 다시 찾았습니다. 열린 PR 이 이 결함을 직접 다루는 행은 못 찾았습니다(파일만 겹치는 PR 은 F34 한 곳에 적음).
 
 | 상태 | 개수 |
 |---|---|

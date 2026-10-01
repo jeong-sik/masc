@@ -12145,7 +12145,7 @@ let keeper_message_inflight_rows (state : state) ~chat_cols ~now =
       (keeper_message_inflight_drawn state) in
   List.map (fun group -> true, summary group) mine
   @ List.concat_map (fun group ->
-      let name = Tui_decode.sanitize_terminal_text
+      let name = Masc.Tui_terminal_text.sanitize_terminal_text
           group.representative.sent_request.keeper_name in
       let command_rows =
         Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (width - 2))

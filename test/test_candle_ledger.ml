@@ -553,12 +553,49 @@ let test_item_http_seed_replays_current_contract () =
   Alcotest.(check string) "replay leaves seed byte-identical" bytes (file_text base_path)
 ;;
 
+let test_item_acceptance_seed_contract () =
+  with_base_path @@ fun base_path ->
+  let fixture name = In_channel.with_open_bin
+      (Filename.concat "fixtures/item-http" name) In_channel.input_all in
+  let policy = match Candle_config.of_toml_string (fixture "candle.toml") with
+    | Candle_config.Enabled policy -> policy
+    | Candle_config.Off -> Alcotest.fail "Item fixture must enable Candle"
+    | Candle_config.Disabled {reason} -> Alcotest.fail reason in
+  Alcotest.(check bool) "fixture balances do not decay" true
+    (policy.half_life = Candle_decay.Off);
+  let seed = fixture "restart-credit.jsonl" in
+  append_raw base_path seed;
+  let events = Candle_ledger.events (read_ok base_path) in
+  let balance = Candle_balance.of_events ~at:(at "2026-10-01T00:00:00Z") events
+      |> Result.map_error Candle_balance.error_to_string |> ok_or_fail in
+  Alcotest.(check int) "free-purchase Keeper seed" 100
+    (Candle_balance.balance balance ~keeper:"item-runtime-probe");
+  List.iter (fun (event : E.t) -> match event.body with
+    | E.Paid payment ->
+        Alcotest.(check int) "synthetic payout matches the fixture policy"
+          (Candle_config.grade_amount_milli policy.payout payment.grade)
+          payment.total_milli
+    | _ -> ()) events;
+  (* Seed receipts alone must not bypass the same production admission rules. *)
+  let incomplete_base = Filename.concat base_path "incomplete" in
+  Unix.mkdir incomplete_base 0o700;
+  let payments = String.split_on_char '\n' seed |> List.filter (fun line ->
+      line <> "" && Yojson.Safe.Util.(Yojson.Safe.from_string line |> member "kind") = `String "paid") in
+  append_raw incomplete_base (String.concat "\n" payments ^ "\n");
+  match Candle_ledger.read ~base_path:incomplete_base with
+  | Error (Candle_ledger.Row_rejected _) -> ()
+  | Error error -> Alcotest.fail (Candle_ledger.read_error_to_string error)
+  | Ok _ -> Alcotest.fail "synthetic Paid rows were accepted without payout provenance"
+;;
+
 let () =
   Alcotest.run
     "candle_ledger"
     [ ( "read"
       , [ Alcotest.test_case "Item HTTP seed replays current payout and policy contract" `Quick
             test_item_http_seed_replays_current_contract
+        ; Alcotest.test_case "Item acceptance seeds satisfy current Candle contract" `Quick
+            test_item_acceptance_seed_contract
         ; Alcotest.test_case "a missing file is an empty ledger" `Quick
             test_a_missing_file_is_an_empty_ledger
         ; Alcotest.test_case "stored credits survive changed rounding; new appends validate" `Quick

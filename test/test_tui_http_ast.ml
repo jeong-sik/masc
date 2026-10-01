@@ -1593,11 +1593,9 @@ let test_server_identity_is_revalidated_on_every_refresh () =
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"apply_http_surfaces"
        ~callee:"apply_server_identity_reading");
-  (* The clearing is [state.server_identity <- None], a write. Counting
-     reads of the field found none and called a working path broken. *)
-  check int "a failed refresh clears current identity" 1
-    (Ast_grep.count_field_clears_to_none ~module_path:main_path
-       ~binding_name:"apply_async_message" ~field_name:"server_identity")
+  check int "full refresh failure uses the same identity transition" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"apply_async_message" ~callee:"apply_server_identity_reading")
 ;;
 
 let test_scoped_surface_refresh_does_not_own_connection_status () =
@@ -1711,9 +1709,9 @@ let test_planning_refresh_reconciles_navigation_identity () =
     (Ast_grep.count_field_accesses_outside_calls_in_value_binding
        ~module_path:main_path ~binding_name:"apply_planning_load" ~callees:[]
        ~fields:[ "view" ]);
-  check int "scoped HTTP application owns one planning apply" 1
+  check int "HTTP dataset application owns one planning apply" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
-       ~binding_name:"apply_http_scoped_surfaces"
+       ~binding_name:"apply_http_scoped_data"
        ~callee:"apply_planning_load");
   (* #29443 removed two [List.find_opt (fun g -> g.pg_id = goal_id) p.pl_goals]
      lookups from the key loop: the loop re-derived the Planning selection from

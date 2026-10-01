@@ -14,6 +14,7 @@ module Snapshot_read : sig
   val idle : t
   val start : intent:intent -> t -> t * request option
   val settle : t -> request -> t option
+  val invalidate : t -> t
 end = struct
   type request = int
   type t = { next : int; pending : request option }
@@ -27,6 +28,8 @@ end = struct
     | (Poll | Refresh), _ ->
       let request = state.next in
       { next = request + 1; pending = Some request }, Some request
+
+  let invalidate state = { state with pending = None }
 
   let settle state request =
     match state.pending with
@@ -3009,11 +3012,16 @@ let surface_needs_delta ~previous ~next =
 
 let surface_needs_any needs = needs <> nothing
 
-let full_refresh_needs ~scoped_refresh_inflight ~keeper_pane_drawn surface =
-  if scoped_refresh_inflight then nothing
-  else surface_needs ~keeper_pane_drawn surface
-
 type full_refresh_intent = Cadence | Revalidate
+
+(* Full and scoped bundles share one authority order. A later dispatch
+   supersedes an earlier result, including failure and booting results. *)
+module Http_refresh_order = struct
+  type ticket = Ticket of int
+  let initial = Ticket 0
+  let dispatch (Ticket generation) = Ticket (generation + 1)
+  let is_current latest ticket = latest = ticket
+end
 
 type scoped_refresh_followup =
   | No_scoped_followup
@@ -4949,12 +4957,8 @@ module Verification_evidence_read = struct
     | Launch_failure of string
 end
 
-type message_draft = {
-  draft_text : string;
-  draft_attachments : Masc_tui_keeper_chat_projection.attachment list;
-  draft_references : Masc_tui_keeper_chat_projection.image_reference list;
-  draft_attachments_since : msg_anchor option;
-}
+(* Home carries authoritative request identity; existing detail readers own
+   each explicit decision. *)
 
 (* Home links identify destinations, never an inferred approval target. The
    approval/agenda screens still own the exact request and its decision. *)
@@ -4986,6 +4990,14 @@ type home_chat_receipt =
   | Unconfirmed_chat of { keeper : Keeper_id.Keeper_name.t; detail : string }
   | Unreadable_chat_receipt of string
 
+type message_draft = {
+  draft_text : string;
+  draft_attachments : Masc_tui_keeper_chat_projection.attachment list;
+  draft_references : Masc_tui_keeper_chat_projection.image_reference list;
+  draft_attachments_since : msg_anchor option;
+}
+
+
 type agenda_navigation = Agenda_follow_selection | Agenda_read_rows
 
 (* The server sends each invite's link once and keeps only its hash. Keep the
@@ -5001,6 +5013,8 @@ type state = {
   mutable home_selected : home_action option;
   mutable home_decision_scroll : int;
   mutable home_opened_request : home_request option;
+  mutable home_decision_receipt : (home_request * string) option;
+  mutable home_decision_inflight : home_request option;
   mutable home_last_chat : home_chat_receipt;
   mutable metrics_scroll: int;
   mutable metrics_section: metrics_section;
@@ -5457,6 +5471,8 @@ type state = {
   (* A refused creation remains editable, including malformed JSON. The
      editor owns a temporary file, so the declaration must survive here. *)
   mutable keeper_creation_draft: string option;
+  mutable keeper_creation_return: keeper_chat_return option;
+  mutable keeper_creation_awaiting_roster: string option;
   (* The live roster reading, separate from the durable one above: it answers
      whether a keepalive fiber is running each keeper, which metadata on disk
      cannot. It is typed rather than a plain list because "the roster did not
@@ -5521,6 +5537,7 @@ type state = {
   mutable fleet_safety_error: string option;
   mutable connection_status: connection_status;
   mutable http_refresh_started_ns: int64 option;
+  mutable http_refresh_order: Http_refresh_order.ticket;
   mutable local_workspace: local_workspace_reading;
   mutable view: surface;
   mutable opening_mode: Masc_tui_config.opening;
@@ -7781,6 +7798,8 @@ let create_state
   home_selected = None;
   home_decision_scroll = 0;
   home_opened_request = None;
+  home_decision_receipt = None;
+  home_decision_inflight = None;
   home_last_chat = No_chat_receipt;
   metrics_scroll = 0;
   metrics_section = Section_fleet;
@@ -7974,6 +7993,8 @@ let create_state
   keepers = [];
   keepers_error = None;
   keeper_creation_draft = None;
+  keeper_creation_return = None;
+  keeper_creation_awaiting_roster = None;
   keeper_roster = Masc_tui_keeper_control.Roster_unobserved;
   keeper_roster_error = None;
   candle_observation = None;
@@ -7993,6 +8014,7 @@ let create_state
   fleet_safety_error = None;
   connection_status = Disconnected;
   http_refresh_started_ns = None;
+  http_refresh_order = Http_refresh_order.initial;
   local_workspace = Local_workspace_unread;
   view = Overview;
   opening_mode = Masc_tui_config.Overview;
@@ -11056,8 +11078,8 @@ let approval_item_needs_person = function
   | Keeper_tool_row _ | Operator_row _ -> true
   | Gate_row (pending : Tui_decode.gate_pending) ->
       match pending.gp_phase with
-      | Gate_human_required -> true
-      | Gate_queued | Gate_judging | Gate_blocked -> false
+      | Gate_human_required | Gate_blocked -> true
+      | Gate_queued | Gate_judging -> false
 
 let approvals_human_pending (state : state) =
   List.length (List.filter approval_item_needs_person (approval_items state))
@@ -11172,7 +11194,17 @@ let reconcile_home_request_detail state =
         (match state.followed_from with
          | Some (Overview, _) -> state.followed_from <- None
          | Some _ | None -> ())
-      end else if not (List.mem_assoc (Home_request request) (home_decision_rows state)) then begin
+      end else if
+        (match request with
+         | Home_question _ ->
+             state.workspace_identity <> Workspace_identity_match
+             || (match approvals_questions_reading state with
+                 | List_not_read _ -> true
+                 | List_read -> false)
+         | Home_held_call _ | Home_gate_request _ | Home_operator_request _
+         | Home_goal_confirmation _ | Home_operator_task _ -> false)
+      then ()
+      else if not (List.mem_assoc (Home_request request) (home_decision_rows state)) then begin
         (match request with Home_question _ -> clear_ask_answering state | _ -> ());
         state.home_opened_request <- None;
         state.approval_detail_open <- false;
@@ -11189,7 +11221,16 @@ let reconcile_home_request_detail state =
             Option.iter (fun index -> state.ask_cursor <- index)
               (List.find_index (fun (row : Masc.Tui_decode_asks.ask_row) -> row.ar_id = ask_id)
                  (Option.value ~default:[] (approvals_open_questions state)))
-        | Home_goal_confirmation goal_id -> state.planning_mode <- Planning_detail goal_id
+        | Home_goal_confirmation goal_id ->
+            state.planning_mode <- Planning_detail goal_id;
+            (match state.planning with
+             | None -> ()
+             | Some planning ->
+                 Option.iter (fun index -> state.planning_cursor <- index)
+                   (List.find_index
+                      (fun (goal : planning_goal) -> String.equal goal.pg_id goal_id)
+                      (planning_visible_goals ~filter:state.planning_filter
+                         ~sort:state.planning_sort planning.pl_goals)))
         | Home_operator_task task_id -> state.task_detail_id <- Some task_id
 
 let home_continue_rows (state : state) =
@@ -11219,6 +11260,11 @@ let home_continue_rows (state : state) =
           "Last conversation with " ^ Masc.Tui_terminal_text.sanitize_terminal_text name
           ^ save_notice
           ^ " · roster unavailable; read history" ]
+    | Some (name, save_notice) when state.workspace_identity = Workspace_identity_unread
+                                   && state.local_workspace = Local_workspace_read ->
+        [ Home_read_last name,
+          "Last conversation with " ^ Masc.Tui_terminal_text.sanitize_terminal_text name
+          ^ save_notice ^ " · workspace identity not read; read history" ]
     | Some _ | None -> []
   in
   let choose =

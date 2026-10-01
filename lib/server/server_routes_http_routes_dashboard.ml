@@ -1531,8 +1531,9 @@ let handle_gate_external_mode_body state operator_name request reqd body_str =
 let handle_gate_resolve_body state operator_name request reqd body_str =
   try
     let args = Yojson.Safe.from_string body_str in
-    let base_path = (Mcp_server.workspace_config state).Workspace.base_path in
-    match dashboard_gate_resolve_http_json ~base_path ~created_by:operator_name ~args with
+    let workspace_config = Mcp_server.workspace_config state in
+    let base_path = workspace_config.Workspace.base_path in
+    match dashboard_gate_resolve_http_json ~workspace_config ~base_path ~created_by:operator_name ~args () with
     | Ok json -> respond_json_value_with_cors request reqd json
     | Error (Gone _ as error) ->
       respond_json_value_with_cors
@@ -3579,7 +3580,19 @@ let add_routes ~sw ~clock router =
   |> Http.Router.post "/api/v1/keepers/chat/stream" (fun request reqd ->
        with_tool_actor_auth ~tool_name:Keeper_tool_name.(to_string Keeper_delegate) (fun state submitted_by _req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
-           match parse_keeper_chat_stream_request body_str with
+           let admitted_body =
+             try
+               match Workspace.validate_expected_workspace
+                   ~config:(Mcp_server.workspace_config state)
+                   (Yojson.Safe.from_string body_str) with
+               | Ok payload -> Ok (Yojson.Safe.to_string payload)
+               | Error Workspace.Invalid_workspace_precondition ->
+                   Error "invalid expected_workspace precondition"
+               | Error Workspace.Workspace_precondition_failed ->
+                   Error "workspace precondition failed"
+             with Yojson.Json_error _ -> Error "invalid JSON body"
+           in
+           match Result.bind admitted_body parse_keeper_chat_stream_request with
            | Ok payload ->
                handle_keeper_chat_stream
                  ~sw

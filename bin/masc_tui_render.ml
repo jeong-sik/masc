@@ -299,7 +299,11 @@ let render_overview (state : state) =
         let spare = budget - essential_rows in
         let context =
           let readings =
-            [ (None, health); (Some (Theme.recede ()), work) ]
+            (match state.home_decision_receipt with
+             | None -> []
+             | Some (_, receipt) ->
+                 [None, " Last decision receipt · " ^ Terminal_text.single_line receipt])
+            @ [ (None, health); (Some (Theme.recede ()), work) ]
           in
           match state.opening_notice with
           | None -> readings

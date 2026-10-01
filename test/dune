@@ -4647,6 +4647,17 @@
  (action (run python3 %{dep:test_tui_keyboard_overview_pty.py} %{dep:../bin/masc_tui.exe})))
 
 (rule
+ (alias runtest-test_tui_home_decision_receipt_pty)
+ (deps test_tui_home_decision_receipt_pty.py test_tui_home_decision_cards_pty.py
+       test_tui_home_journey_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_home_decision_receipt_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_home_decision_receipt_pty)))
+
+(rule
  (alias runtest-test_tui_home_receipt_pty)
  (enabled_if (= %{system} linux))
  (deps test_tui_home_receipt_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
@@ -7773,7 +7784,7 @@
 (include stanzas/test_tui_schedule_detail_viewport_pty.inc)
 (rule
  (alias runtest-test_tui_keeper_create_journey_pty)
- (deps test_tui_keeper_create_journey_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (deps test_tui_keeper_create_journey_pty.py test_tui_home_journey_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
  (action (run python3 %{dep:test_tui_keeper_create_journey_pty.py} %{dep:../bin/masc_tui.exe})))
 
 (alias
@@ -7827,7 +7838,10 @@
  (name runtest)
  (deps (alias runtest-test_tui_home_decision_cards_pty)))
 
-(rule (alias runtest-test_tui_palette_input_viewport_pty)
+
+
+(rule
+ (alias runtest-test_tui_palette_input_viewport_pty)
  (deps test_tui_palette_input_viewport_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
  (action
   (run python3 %{dep:test_tui_palette_input_viewport_pty.py} %{dep:../bin/masc_tui.exe})))
@@ -7845,6 +7859,82 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_skills_usage_summary)))
+
+(rule
+ (alias runtest-test_tui_home_failure_task_pty)
+ (deps test_tui_home_failure_task_pty.py test_tui_home_decision_cards_pty.py
+       test_tui_home_journey_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_home_failure_task_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_home_failure_task_pty)))
+
+(rule
+ (alias runtest-test_tui_home_queue_identity_pty)
+ (deps test_tui_home_queue_identity_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_home_queue_identity_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_home_queue_identity_pty)))
+
+(rule
+ (alias runtest-test_tui_home_overflow_pty)
+ (deps test_tui_home_overflow_pty.py test_tui_home_decision_cards_pty.py
+       test_tui_home_journey_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_home_overflow_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_home_overflow_pty)))
+
+(rule
+ (alias runtest-test_tui_home_identity_decision_pty)
+ (deps test_tui_home_identity_decision_pty.py test_tui_home_decision_cards_pty.py
+       test_tui_home_journey_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_home_identity_decision_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_home_identity_decision_pty)))
+
+(rule
+ (alias runtest-test_tui_home_question_recovery_pty)
+ (deps test_tui_home_question_recovery_pty.py test_tui_home_decision_cards_pty.py
+       test_tui_home_journey_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_home_question_recovery_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_home_question_recovery_pty)))
+
+(rule
+ (alias runtest-test_tui_home_composer_focus_pty)
+ (deps test_tui_home_composer_focus_pty.py test_tui_home_decision_cards_pty.py
+       test_tui_home_journey_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_home_composer_focus_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_home_composer_focus_pty)))
+
+(rule
+ (alias runtest-test_tui_home_scoped_identity_pty)
+ (deps test_tui_home_scoped_identity_pty.py test_tui_home_decision_cards_pty.py
+       test_tui_home_journey_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_home_scoped_identity_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_home_scoped_identity_pty)))
 
 (alias
  (name runtest-test_tui_voice_wizard_pty)

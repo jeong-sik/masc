@@ -6,12 +6,14 @@ from pathlib import Path
 import shlex
 import sys
 import tempfile
+import time
 
 import test_tui_keyboard_input as h
+import test_tui_home_journey_pty as home
 
 SOURCE_MODULES = (
     "bin/masc_tui.ml", "bin/masc_tui_types.ml", "bin/masc_tui_editor.ml",
-    "bin/masc_tui_http.ml",
+    "bin/masc_tui_http.ml", "bin/masc_cli_keeper_create.ml",
 )
 CREATE_PATH = "/api/v1/keepers/gamma/up"
 MALFORMED = '{"name": "gamma",'
@@ -21,7 +23,7 @@ DECLARATION = json.dumps({
 }) + "\n"
 
 
-def creation_journey(executable, *, wrong_receipt):
+def creation_journey(executable, *, wrong_receipt, from_home=False, reconfigured=False, collision=False, workspace_changed=False):
     requests = []
     authored = []
     workspace = {}
@@ -29,11 +31,28 @@ def creation_journey(executable, *, wrong_receipt):
 
     def prepare(base):
         workspace["base"] = base
+        home.seed_goals(base)
+        if collision:
+            Path(base, ".masc", "keepers", "gamma.json").write_text(
+                json.dumps(h.keeper_metadata("gamma")), encoding="utf-8")
+            return
         for path in (Path(base) / ".masc" / "keepers").glob("*.json"):
             path.unlink()
 
+    def expected_declaration():
+        return dict(json.loads(DECLARATION), create_only=True,
+                    expected_workspace={"base_path": workspace["base"],
+                                        "masc_root": str(Path(workspace["base"], ".masc"))})
+
     def create(body):
         authored.append(body)
+        assert json.loads(body) == expected_declaration()
+        if workspace_changed:
+            # The probe still describes A; the receiving server now owns B.
+            # The real lifecycle precondition is covered in dashboard_http_core.
+            return 409, {"error": "workspace changed since identity probe; Keeper was not created"}
+        if reconfigured:
+            return 200, {"ok": True, "action": "up", "name": "gamma", "detail": {"name": "gamma"}}
         if not wrong_receipt and len(authored) == 1:
             return 400, {"error": "fixture declaration refused"}
         if wrong_receipt:
@@ -42,7 +61,7 @@ def creation_journey(executable, *, wrong_receipt):
         # it does not create an actual Keeper process or invoke a provider.
         path = Path(workspace["base"], ".masc", "keepers", "gamma.json")
         path.write_text(json.dumps(h.keeper_metadata("gamma")), encoding="utf-8")
-        return 200, {"ok": True, "action": "up", "name": "gamma", "detail": {}}
+        return 200, {"ok": True, "action": "up", "name": "gamma", "detail": {"name": "gamma", "sandbox_profile": "docker", "network_mode": "none"}}
 
     fixtures[CREATE_PATH] = h.RequestHttpResponse(create)
     fixtures["/api/v1/keepers/gamma/chat/history"] = (200, [])
@@ -61,13 +80,58 @@ def creation_journey(executable, *, wrong_receipt):
             "step = int(count.read_text()) + 1 if count.exists() else 1\n"
             "(root / f'input-{step}.json').write_text(form.read_text())\n"
             "count.write_text(str(step))\n"
-            f"form.write_text({DECLARATION!r} if {wrong_receipt!r} or step > 1 else {MALFORMED!r})\n",
+            f"form.write_text({DECLARATION!r} if {wrong_receipt or reconfigured or collision or workspace_changed!r} or step > 1 else {MALFORMED!r})\n",
             encoding="utf-8",
         )
 
         def interact(process, fd, _slave, output, _base):
             h.wait_for_output(process, fd, output, b"Health: ", start=0, timeout=10)
-            h.palette_go(process, fd, output, b"go keepers", b"MASC Keepers")
+            if from_home:
+                h.wait_for_output(process, fd, output, b"Create a Keeper", start=0, timeout=10)
+                home.select_destination(process, fd, output, b"Create a Keeper")
+            else:
+                if not collision:
+                    h.wait_for_output(process, fd, output, b"Create a Keeper", start=0, timeout=10)
+                h.palette_go(process, fd, output, b"go keepers", b"MASC Keepers")
+                if collision:
+                    h.wait_for_output(process, fd, output, b"gamma", start=0, timeout=10)
+            if workspace_changed:
+                h.send_and_wait(process, fd, output, b"\r" if from_home else b"a", b"workspace changed since identity probe")
+                assert len(authored) == 1, authored
+                assert not Path(workspace["base"], ".masc", "keepers", "gamma.json").exists()
+                assert not [body for path, body in requests if path == "/api/v1/keepers/chat/stream"]
+                os.write(fd, b"a")
+                deadline = time.monotonic() + 5
+                while len(authored) < 2:
+                    h.read_available(fd, output)
+                    assert process.poll() is None
+                    assert time.monotonic() < deadline, "workspace refusal did not retain retry"
+                    time.sleep(0.01)
+                assert (editor_root / "input-2.json").read_text() == DECLARATION
+                os.write(fd, b"q")
+                return
+            if reconfigured or collision:
+                message = b"Keeper already exists" if collision else b"server reconfigured an existing Keeper"
+                h.send_and_wait(process, fd, output, b"\r" if from_home else b"a", message)
+                assert len(authored) == (0 if collision else 1), authored
+                assert not [body for path, body in requests if path == "/api/v1/keepers/chat/stream"]
+                # The second refusal can leave identical screen bytes. Wait
+                # for the second authored input and actual POST admission,
+                # rather than accepting a delayed repaint of the first error.
+                os.write(fd, b"a")
+                deadline = time.monotonic() + 5
+                second_input = editor_root / "input-2.json"
+                while not second_input.exists() or (not collision and len(authored) < 2):
+                    h.read_available(fd, output)
+                    assert process.poll() is None, "creation retry exited the TUI"
+                    assert time.monotonic() < deadline, "creation retry never reopened its authored input"
+                    time.sleep(0.01)
+                h.drain_until_quiet(process, fd, output)
+                assert second_input.read_text() == DECLARATION
+                assert len(authored) == (0 if collision else 2), authored
+                assert b"Keepers \xe2\x96\xb8 gamma \xe2\x96\xb8 chat" not in h.screen_text(bytes(output))
+                os.write(fd, b"q")
+                return
             if wrong_receipt:
                 h.send_and_wait(process, fd, output, b"a", b"Creation response did not confirm")
                 assert process.poll() is None
@@ -76,15 +140,15 @@ def creation_journey(executable, *, wrong_receipt):
                 assert b"Keepers \xe2\x96\xb8 gamma \xe2\x96\xb8 chat" not in h.screen_text(bytes(output))
                 os.write(fd, b"q")
                 return
-            h.send_and_wait(process, fd, output, b"a", b"Keeper declaration is not JSON")
+            h.send_and_wait(process, fd, output, b"\r" if from_home else b"a", b"Keeper declaration is not JSON")
             assert process.poll() is None
             assert authored == [], authored
             h.send_and_wait(process, fd, output, b"a", b"fixture declaration refused")
             assert (editor_root / "input-2.json").read_text() == MALFORMED
-            assert authored == [DECLARATION.encode()], authored
+            assert [json.loads(body) for body in authored] == [expected_declaration()], authored
             h.send_and_wait(process, fd, output, b"a", b"declaration accepted")
             assert (editor_root / "input-3.json").read_text() == DECLARATION
-            assert authored == [DECLARATION.encode(), DECLARATION.encode()], authored
+            assert [json.loads(body) for body in authored] == [expected_declaration()] * 2, authored
             frame = h.resize_and_wait(
                 process, fd, output, rows=24, columns=80,
                 needle="Keepers ▸ gamma ▸ chat".encode(),
@@ -99,7 +163,7 @@ def creation_journey(executable, *, wrong_receipt):
             sent = [json.loads(body) for path, body in requests if path == "/api/v1/keepers/chat/stream"]
             assert len(sent) == 1, sent
             assert (sent[0]["name"], sent[0]["message"]) == ("gamma", "first-assignment"), sent
-            h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+            h.send_and_wait(process, fd, output, b"\x1b", b"Continue with gamma" if from_home else b"MASC Keepers")
             os.write(fd, b"q")
 
         h.run_terminal_scenario(
@@ -120,7 +184,7 @@ def creation_preserves_retained_queue(executable):
     def create(_body):
         path = Path(workspace["base"], ".masc", "keepers", "gamma.json")
         path.write_text(json.dumps(h.keeper_metadata("gamma")), encoding="utf-8")
-        return 200, {"ok": True, "action": "up", "name": "gamma"}
+        return 200, {"ok": True, "action": "up", "name": "gamma", "detail": {"name": "gamma", "sandbox_profile": "docker", "network_mode": "none"}}
 
     fixture.fixtures[CREATE_PATH] = h.RequestHttpResponse(create)
     fixture.fixtures["/api/v1/keepers/gamma/chat/history"] = (200, [])
@@ -174,6 +238,10 @@ def creation_preserves_retained_queue(executable):
 if __name__ == "__main__":
     executable = os.path.abspath(sys.argv[1])
     creation_journey(executable, wrong_receipt=False)
+    creation_journey(executable, wrong_receipt=False, from_home=True)
     creation_journey(executable, wrong_receipt=True)
+    creation_journey(executable, wrong_receipt=False, from_home=True, reconfigured=True)
+    creation_journey(executable, wrong_receipt=False, collision=True)
     creation_preserves_retained_queue(executable)
-    print("Keeper create journey PTY: PASS (3 scenarios)")
+    creation_journey(executable, wrong_receipt=False, from_home=True, workspace_changed=True)
+    print("Keeper create journey PTY: PASS (7 scenarios)")

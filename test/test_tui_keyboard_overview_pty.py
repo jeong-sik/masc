@@ -168,7 +168,7 @@ def first_use_frames(executable: str) -> None:
             # differs from the harness and the checks below to force a redraw.
             capture("LOADING", 120, b"Connecting to workspace")
             for columns in (80, 140):
-                unread = capture("UNREAD", columns, b"Approvals and questions: confirm queue not fully read")
+                unread = capture("UNREAD", columns, b"Approvals and questions: not fully read")
                 if b"Create a Keeper" in unread:
                     raise AssertionError("an unread briefing claimed an empty fleet")
                 if b"No decision is waiting on you." in unread:

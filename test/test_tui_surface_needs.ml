@@ -136,21 +136,6 @@ let test_equal_needs_have_no_delta () =
        (Types.surface_needs_delta ~previous ~next))
 ;;
 
-let test_full_refresh_omits_scoped_datasets_while_their_owner_is_running () =
-  let concurrent =
-    Types.full_refresh_needs ~scoped_refresh_inflight:true
-      ~keeper_pane_drawn:true Types.Board
-  in
-  let alone =
-    Types.full_refresh_needs ~scoped_refresh_inflight:false
-      ~keeper_pane_drawn:true Types.Board
-  in
-  check bool "concurrent full refresh is global-only" false
-    (Types.surface_needs_any concurrent);
-  check bool "an unopposed full refresh still updates the visible board" true
-    alone.Types.needs_board
-;;
-
 let test_authoritative_refresh_waits_for_both_owners_then_runs_once () =
   let pending =
     Types.note_full_refresh_intent ~intent:Types.Revalidate
@@ -210,10 +195,6 @@ let test_usage_asks_for_keeper_usage () =
 let test_only_usage_asks_for_account_emails () =
   check bool "Usage asks for them" true
     (needs Types.Metrics).Types.needs_account_emails;
-  check bool "and so does its full refresh" true
-    (Types.full_refresh_needs ~scoped_refresh_inflight:false
-       ~keeper_pane_drawn:false Types.Metrics)
-      .Types.needs_account_emails;
   List.iter
     (fun (label, surface) ->
       check bool (label ^ " does not") false
@@ -244,8 +225,6 @@ let () =
             test_forward_navigation_fetches_only_new_surface_datasets
         ; test_case "equal needs have no delta" `Quick
             test_equal_needs_have_no_delta
-        ; test_case "full refresh does not race a scoped owner" `Quick
-            test_full_refresh_omits_scoped_datasets_while_their_owner_is_running
         ; test_case "authoritative refresh coalesces to one followup" `Quick
             test_authoritative_refresh_waits_for_both_owners_then_runs_once
         ] )

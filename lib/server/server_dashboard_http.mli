@@ -76,9 +76,11 @@ val dashboard_proof_http_json :
   config:Workspace.config -> Httpun.Request.t -> Yojson.Safe.t
 
 val dashboard_gate_resolve_http_json :
+  ?workspace_config:Workspace.config ->
   base_path:string ->
   created_by:string ->
   args:Yojson.Safe.t ->
+  unit ->
   (Yojson.Safe.t, approval_resolve_http_error) result
 
 val dashboard_gate_retry_http_json :
@@ -166,4 +168,3 @@ val warm_dashboard_surfaces : Mcp_server.server_state -> unit
 (** Concurrently pre-warms primary dashboard surfaces (shell, board,
     planning, config, keeper-memory-health) across worker domains using
     the multi-core domain pool so initial requests hit warm caches instantly. *)
-

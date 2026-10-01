@@ -1787,6 +1787,7 @@
  (libraries
   masc_tui_candle
   masc.masc_candle
+  masc_cli_keeper_create
   masc_tui_voice_wizard_session
   masc_tui_kept_reads
   masc_tui_palette

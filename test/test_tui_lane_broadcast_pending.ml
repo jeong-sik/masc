@@ -92,7 +92,29 @@ let test_legacy_credential_refuses_replay () = fixture (fun path ->
   check bool "legacy pending identity has no caller proof and must not replay" true
     (Result.is_error (Pending.prepare ~credential:"new-credential" ~path ~scope:"server" (request "fresh"))))
 
+let test_torn_tail_recovery () = fixture (fun path ->
+  let append bytes = Out_channel.with_open_gen [Open_wronly;Open_append;Open_binary] 0o600 path
+    (fun out -> output_string out bytes) in
+  let scope="server" and credential="principal:keeper:owner" in
+  let original=Pending.prepare ~path ~scope ~credential (request "original") |> require in
+  append "{\"event\":\"acknowledged\"";
+  check string "torn acknowledgement retains original identity" "original"
+    (Pending.prepare ~path ~scope ~credential (request "replacement") |> require |> id);
+  let receipt=`Assoc ["delivery",`Assoc ["status",`String "committed";
+    "request_id",`String "original";"receipt",`Assoc ["fanout_state",`String "finished"]]] in
+  require (Pending.acknowledge ~path ~scope ~credential ~request:original receipt);
+  append "{\"event\":\"pending\"";
+  check string "torn pre-send admission can start a fresh request" "next"
+    (Pending.prepare ~path ~scope ~credential (request "next") |> require |> id);
+  append "{malformed}\n";
+  let before=In_channel.with_open_bin path In_channel.input_all in
+  check bool "complete malformed event still refuses sends" true
+    (Result.is_error (Pending.prepare ~path ~scope ~credential (request "other")));
+  check string "complete malformed evidence is unchanged" before
+    (In_channel.with_open_bin path In_channel.input_all))
+
 let () = run "Durable TUI Broadcast identity" ["recovery",[
+  test_case "incomplete tails recover without replaying acknowledged sends" `Quick test_torn_tail_recovery;
   test_case "same principal recovers across token rotation" `Quick test_same_principal_recovers_after_token_rotation;
   test_case "legacy pending identity refuses replay" `Quick test_legacy_credential_refuses_replay;
   test_case "process restart and acknowledged next send" `Quick test_restart;

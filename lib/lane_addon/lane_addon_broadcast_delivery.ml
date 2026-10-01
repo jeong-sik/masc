@@ -11,7 +11,7 @@ type record = {payload:payload;workspace_request_id:Request_id.t;
 type error = Invalid_input of string | Conflict | Unknown_operation | Corrupt of string | Io_error of string
   | Settlement_failed of {primary:error;cleanup:string}
 type receipt = {record:record;settlement_error:string option}
-type recovery = {pending:receipt list;settled_with_cleanup:receipt list}
+type recovery = {pending:receipt list;settled_with_cleanup:receipt list;rejected:(string * error) list}
 let create ~root = {root;io=None}
 let transaction t path decide = match t.io with
   | None -> Fs_compat.update_private_file_durable_locked_result path decide
@@ -245,8 +245,7 @@ let recover_after_scan t ~after_scan = protect (fun () ->
     | Fs_compat.Exact_missing -> []
     | _ -> Fs_compat.read_dir (pending_dir t) |> List.sort String.compare in
   after_scan ();
-  List.fold_left (fun acc name ->
-    let* recovery=acc in
+  let recover_one recovery name =
     if not (Filename.check_suffix name ".jsonl") then Ok recovery else
     let digest=String.sub name 0 (String.length name-6) in
     if not (valid_digest digest) then Error (Corrupt "invalid pending journal filename") else
@@ -287,10 +286,15 @@ let recover_after_scan t ~after_scan = protect (fun () ->
         if complete record then (match settlement_error with
           | None -> Ok recovery
           | Some _ -> Ok {recovery with settled_with_cleanup=receipt::recovery.settled_with_cleanup})
-        else Ok {recovery with pending=receipt::recovery.pending})
-    (Ok {pending=[];settled_with_cleanup=[]}) names
-  |> Result.map (fun recovery -> {pending=List.rev recovery.pending;
-      settled_with_cleanup=List.rev recovery.settled_with_cleanup}))
+        else Ok {recovery with pending=receipt::recovery.pending} in
+  let recovery=List.fold_left (fun recovery name ->
+    match protect (fun () -> recover_one recovery name) with
+    | Ok next -> next
+    | Error error -> {recovery with rejected=(name,error)::recovery.rejected})
+    {pending=[];settled_with_cleanup=[];rejected=[]} names in
+  Ok {pending=List.rev recovery.pending;
+      settled_with_cleanup=List.rev recovery.settled_with_cleanup;
+      rejected=List.rev recovery.rejected})
 
 let recover t = recover_after_scan t ~after_scan:(fun () -> ())
 module For_testing = struct

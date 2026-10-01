@@ -4,8 +4,11 @@ open Alcotest
 open Masc
 module Runtime = struct
   include Lane_addon_runtime
-  let dispatch ?caller ~config ~operation args =
-    Lane_addon_runtime.dispatch ?caller ~config ~operation args
+  let dispatch ?caller ?access ~config ~operation args =
+    let access = Option.value ~default:(match caller with
+      | None -> Lane_addon_sources.Operator_configuration
+      | Some keeper -> Lane_addon_sources.Keeper keeper) access in
+    Lane_addon_runtime.dispatch ?caller ~access ~config ~operation args
     |> Result.map_error Lane_addon_runtime.error_to_string
 end
 module Types = Lane_addon_types
@@ -280,6 +283,28 @@ let test_request_refusals_preserve_runtime_failure_distinction () =
     runtime_failed (dispatch Runtime.Detach ["instance_id", `String "absent"]);
     runtime_failed (dispatch Runtime.Slice []))
 
+let test_invalid_retained_visibility_is_isolated () = with_fixture (fun env _ config dir _ ->
+  let id = attach config dir "good" in
+  let clock = Eio.Stdenv.clock env in
+  await clock (fun () -> int "observation_seq" (instance config id) = 1);
+  let current = instance config id |> Yojson.Safe.Util.to_assoc in
+  let store = Store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
+  List.iteri (fun index visibility ->
+    let retained_id = "unreadable-" ^ string_of_int index in
+    let fields = ("instance_id",`String retained_id) ::
+      List.remove_assoc "instance_id" (List.remove_assoc "visibility" current) in
+    let fields = match visibility with None -> fields | Some value -> ("visibility",value)::fields in
+    unwrap (Store.save_binding store ~instance_id:retained_id (`Assoc fields)))
+    [None; Some (`Assoc ["kind",`String "unknown"])];
+  check Alcotest.int "unreadable retained policy cannot hide a valid live installation" 1
+    (inspect config |> member "instances" |> Yojson.Safe.Util.to_list |> List.length);
+  check bool "unreadable record still cannot be requested directly" true
+    (Result.is_error (Runtime.dispatch ~config ~operation:Runtime.Inspect
+      (`Assoc ["instance_id",`String "unreadable-0"])));
+  check Alcotest.int "both invalid records remain available for operator repair" 3
+    (Store.bindings store |> unwrap |> List.length);
+  detach config id; await_phase clock config id "detached")
+
 let test_direct_attach_validates_package_binding () =
   with_fixture (fun env _sw config dir state ->
     let path = manifest dir "binding-contract" in
@@ -552,6 +577,23 @@ let test_private_fusion_reads_survive_retirement () = with_fixture (fun env _sw 
   await clock (fun () -> int "observation_seq" (instance config id) = 1);
   let view = unwrap (call owner Runtime.Inspect ["instance_id",`String id]) in
   let row_id = member "rows" view |> Yojson.Safe.Util.to_list |> List.hd |> text "id" in
+  let unverified = Lane_addon_runtime.dispatch ~caller:owner ~config ~operation:Runtime.Inspect (`Assoc [])
+    |> Result.map_error Lane_addon_runtime.error_to_string |> unwrap in
+  check Alcotest.int "bare caller attribution never grants private access" 0
+    (member "instances" unverified |> Yojson.Safe.Util.to_list |> List.length);
+  let tool access name fields =
+    let ctx : Tool_misc.context = {config;agent_name=owner;help_schemas=[]} in
+    match Tool_misc.dispatch ~lane_access:access ctx ~name ~args:(`Assoc fields) with
+    | Some result -> result | None -> fail "Lane tool was not dispatched" in
+  let unverified_tool = tool Lane_addon_sources.Unauthenticated "masc_lane_inspect" [] in
+  check Alcotest.int "MCP claimed Keeper name does not reveal private instances" 0
+    (Tool_result.data unverified_tool |> member "instances" |> Yojson.Safe.Util.to_list |> List.length);
+  check bool "unverified tool cannot export private evidence" false
+    (Tool_result.is_success (tool Lane_addon_sources.Unauthenticated "masc_lane_evidence"
+      ["instance_id",`String id;"row_ids",`List [`String row_id]]));
+  check Alcotest.int "verified tool authority still sees its private instance" 1
+    (tool (Lane_addon_sources.Keeper owner) "masc_lane_inspect" [] |> Tool_result.data
+      |> member "instances" |> Yojson.Safe.Util.to_list |> List.length);
   let denied operation fields = match call foreign operation fields with
     | Error detail -> check string "uniform exact-instance denial" "Lane instance is unavailable to this caller" detail
     | Ok _ -> fail "foreign Keeper accessed private instance" in
@@ -936,6 +978,7 @@ let test_broadcast_pending_commit_recovers_same_identity () =
     detach config id; await_phase clock config id "detached")
 
 let () = run "Lane Add-on runtime" ["optional extension", [
+  test_case "invalid retained visibility is isolated" `Quick test_invalid_retained_visibility_is_isolated;
   test_case "Fleet service isolates blocked recipients, later admissions and cancellation" `Quick
     test_fleet_service_isolates_blocked_recipient_and_admissions;
   test_case "private Broadcast retry uses saved visibility after binding removal" `Quick

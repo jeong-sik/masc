@@ -1,6 +1,10 @@
 open Alcotest
 module D = Masc.Lane_addon_broadcast_delivery
 let require = function Ok v -> v | Error _ -> fail "delivery ledger refused"
+let recovery_failure = function
+  | Ok (recovery : D.recovery) -> (match recovery.rejected with
+      | [(_,error)] -> Error error | _ -> Ok recovery)
+  | Error error -> Error error
 let rec remove path = if Sys.is_directory path then (
   Array.iter (fun child -> remove (Filename.concat path child)) (Sys.readdir path);
   Unix.rmdir path) else Sys.remove path
@@ -69,7 +73,7 @@ let test_collision_and_unknown_states () = fixture (fun root ledger ->
   let channel=open_out_gen [Open_append;Open_binary] 0o600 (Filename.concat root file) in
   output_string channel "{\"event\":\"invented\"}\n"; close_out channel;
   check bool "unknown stored state refuses recovery rather than consuming evidence" true
-    (match D.recover ledger with Error (D.Corrupt _) -> true | _ -> false))
+    (match recovery_failure (D.recover ledger) with Error (D.Corrupt _) -> true | _ -> false))
 let test_pending_marker_crash_boundaries () = fixture (fun root ledger ->
   let _admitted=require (D.admit ledger payload) in
   let file=Sys.readdir root |> Array.to_list |> List.find (fun name -> Filename.check_suffix name ".jsonl") in
@@ -90,7 +94,7 @@ let test_pending_marker_crash_boundaries () = fixture (fun root ledger ->
     let channel=open_out_bin journal in
     output_string channel (Yojson.Safe.to_string (`Assoc replacement) ^ "\n");close_out channel;
     check bool "unknown or missing sender authority never defaults" true
-      (match D.recover ledger with Error (D.Corrupt _) -> true | _ -> false))
+      (match recovery_failure (D.recover ledger) with Error (D.Corrupt _) -> true | _ -> false))
     [("sender_authority",`String "owner")::List.remove_assoc "sender_authority" fields;
      List.remove_assoc "sender_authority" fields])
 let test_pending_journal_loss_and_invalid_identity () = fixture (fun root ledger ->
@@ -101,19 +105,19 @@ let test_pending_journal_loss_and_invalid_identity () = fixture (fun root ledger
   let original=Fs_compat.load_file journal in
   Sys.remove journal;
   check bool "missing pending evidence refuses recovery" true
-    (match D.recover ledger with Error (D.Corrupt _) -> true | _ -> false);
+    (match recovery_failure (D.recover ledger) with Error (D.Corrupt _) -> true | _ -> false);
   check bool "missing journal is never recreated" false (Sys.file_exists journal);
   check bool "missing evidence retains its durable marker" true (Sys.file_exists marker);
   let channel=open_out_bin journal in output_string channel "torn";close_out channel;
   check bool "torn pending evidence refuses recovery" true
-    (match D.recover ledger with Error (D.Corrupt _) -> true | _ -> false);
+    (match recovery_failure (D.recover ledger) with Error (D.Corrupt _) -> true | _ -> false);
   check string "torn evidence is unchanged" "torn" (Fs_compat.load_file journal);
   check bool "torn evidence retains its marker" true (Sys.file_exists marker);
   let channel=open_out_bin journal in output_string channel original;close_out channel;
   let invalid=Filename.concat (Filename.concat root "pending") "invalid.jsonl" in
   let channel=open_out_bin invalid in close_out channel;
   check bool "malformed pending identity refuses recovery" true
-    (match D.recover ledger with Error (D.Corrupt _) -> true | _ -> false);
+    (match recovery_failure (D.recover ledger) with Error (D.Corrupt _) -> true | _ -> false);
   check bool "malformed identity creates no journal" false
     (Sys.file_exists (Filename.concat root "invalid.jsonl"));
   check bool "invalid marker remains auditable" true (Sys.file_exists invalid);
@@ -225,7 +229,7 @@ let test_primary_and_settlement_are_preserved () = fixture (fun root ledger ->
   output_string channel "{\"event\":\"invented\"}\n"; close_out channel;
   restore_marker ();
   check bool "corrupt recovery state and settlement failure are both preserved" true
-    (match D.recover faulty with
+    (match recovery_failure (D.recover faulty) with
      | Error (D.Settlement_failed {primary=D.Corrupt _;cleanup}) -> cleanup<>""
      | _ -> false);
   check bool "existing-only mutations retain corrupt state and descriptor failure" true
@@ -235,7 +239,7 @@ let test_primary_and_settlement_are_preserved () = fixture (fun root ledger ->
   let channel=open_out_bin (Filename.concat root file) in
   output_string channel "{\n"; close_out channel;
   check bool "malformed JSON and descriptor failure remain typed recovery evidence" true
-    (match D.recover faulty with
+    (match recovery_failure (D.recover faulty) with
      | Error (D.Settlement_failed {primary=D.Corrupt _;cleanup}) -> cleanup<>""
      | _ -> false))
 let test_unknown_mutations_do_not_persist () = fixture (fun root ledger ->
@@ -283,7 +287,7 @@ let test_regular_descriptor_boundary () = fixture (fun root ledger ->
     (match D.find ledger ~caller:payload.caller ~operation_id:operation with
      | Error (D.Io_error _) -> true | _ -> false);
   check bool "recovery refuses a directory journal without replacing it" true
-    (match D.recover ledger with Error (D.Io_error _) -> true | _ -> false);
+    (match recovery_failure (D.recover ledger) with Error (D.Io_error _) -> true | _ -> false);
   check bool "directory journal remains a directory" true
     ((Unix.lstat filename).Unix.st_kind=Unix.S_DIR);
   Unix.rmdir filename;
@@ -303,7 +307,7 @@ let test_regular_descriptor_boundary () = fixture (fun root ledger ->
         (match D.find ledger ~caller:payload.caller ~operation_id:operation with
          | Error (D.Io_error _) -> true | _ -> false);
       check bool "restart recovery refuses writerless FIFO without waiting" true
-        (match D.recover ledger with Error (D.Io_error _) -> true | _ -> false);
+        (match recovery_failure (D.recover ledger) with Error (D.Io_error _) -> true | _ -> false);
       let io : Fs_compat.private_jsonl_transaction_io_for_testing = {
         before_sync_parent=(fun _ -> ());
         close_fd=(fun fd -> Unix.close fd; raise (Sys_error "fixture nonregular close failure"))} in
@@ -334,8 +338,8 @@ let test_recovery_disappearance_and_torn_journal () = fixture (fun root ledger -
     |> Filename.concat root in
   let preserved=filename ^ ".preserved" in
   check bool "disappearance after scan refuses authoritative recovery" true
-    (match D.For_testing.recover ledger
-       ~after_scan:(fun () -> Unix.rename filename preserved) with
+    (match recovery_failure (D.For_testing.recover ledger
+       ~after_scan:(fun () -> Unix.rename filename preserved)) with
      | Error (D.Corrupt _) -> true | _ -> false);
   check bool "recovery does not recreate the disappeared journal" false (Sys.file_exists filename);
   Unix.rename preserved filename;
@@ -343,9 +347,29 @@ let test_recovery_disappearance_and_torn_journal () = fixture (fun root ledger -
   output_string channel "torn"; close_out channel;
   let before=Fs_compat.load_file filename in
   check bool "torn journal refuses recovery without accepting its valid prefix" true
-    (match D.recover ledger with Error (D.Corrupt _) -> true | _ -> false);
+    (match recovery_failure (D.recover ledger) with Error (D.Corrupt _) -> true | _ -> false);
   check string "torn recovery evidence remains exact" before (Fs_compat.load_file filename))
+let test_corrupt_journal_does_not_block_other_operations () = fixture (fun root ledger ->
+  ignore (require (D.admit ledger payload));
+  let bad = Sys.readdir root |> Array.to_list
+    |> List.find (fun name -> Filename.check_suffix name ".jsonl") in
+  let bad_path=Filename.concat root bad in
+  let before=Fs_compat.load_file bad_path ^ "{" in
+  Out_channel.with_open_bin bad_path (fun out -> output_string out before);
+  let healthy={payload with operation_id=require (D.Request_id.of_string "healthy-operation")} in
+  ignore (require (D.admit ledger healthy));
+  let recovered=require (D.recover ledger) in
+  check int "healthy operation remains recoverable" 1 (List.length recovered.pending);
+  check bool "healthy identity is retained exactly" true
+    (D.Request_id.equal (List.hd recovered.pending).record.payload.operation_id healthy.operation_id);
+  check bool "damaged operation has explicit rejection evidence" true
+    (match recovered.rejected with [(name,D.Corrupt _)] -> name=bad | _ -> false);
+  check string "damaged evidence is preserved for operator repair" before (Fs_compat.load_file bad_path);
+  check bool "damaged pending marker remains durable" true
+    (Sys.file_exists (Filename.concat (Filename.concat root "pending") bad)))
+
 let () = run "Durable optional Lane Broadcast intentions" ["recovery",[
+  test_case "one damaged journal cannot block healthy deliveries" `Quick test_corrupt_journal_does_not_block_other_operations;
   test_case "recovery disappearance and torn evidence" `Quick test_recovery_disappearance_and_torn_journal;
   test_case "missing and invalid pending journals preserve evidence" `Quick test_pending_journal_loss_and_invalid_identity;
   test_case "existing-only transaction typed boundaries" `Quick test_existing_update_boundaries;

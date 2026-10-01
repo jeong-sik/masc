@@ -19,7 +19,7 @@ let subscription = `Assoc ["keeper_name",`String "researcher";"run_id",`String "
   "installation_id",`String "documents";"output_id",`String "changes"]
 let selection = ["run_id",`String "study";"installation_id",`String "documents";"output_id",`String "changes"]
 let args operation = `Assoc (("operation",`String operation)::selection)
-let call config caller args = S.handle ~config ~caller args
+let call config caller args = S.handle ~access:(Lane_addon_sources.Keeper caller) ~config ~caller args
 let operator_call config args = S.handle ~access:Lane_addon_sources.Operator_configuration ~config ~caller:"operator" args
 let save config = operator_call config (`Assoc ["operation",`String "save";"subscriptions",`List [subscription]]) |> ok
 let store config = Store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons")

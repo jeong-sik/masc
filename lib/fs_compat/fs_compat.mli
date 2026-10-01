@@ -1303,6 +1303,16 @@ val update_private_file_durable_locked_result :
   (string -> string option * 'a) ->
   ('a, durable_append_error) private_file_transaction_outcome
 
+(** Append transaction for a recovery journal whose incomplete final event has
+    no externally committed effect. Under the same in-process mutex and exclusive
+    descriptor lock as the updater, truncate only the suffix after the last newline
+    and fsync before calling [decide]. Complete malformed rows are preserved for
+    the consumer decoder to refuse. Recovery/append/descriptor failures remain
+    explicit; no callback or success is returned after failed truncation/fsync. *)
+val recover_and_update_private_jsonl_durable_locked_result :
+  string -> (string -> string option * 'a) ->
+  ('a, durable_append_error) private_file_transaction_outcome
+
 (** Existing-only sibling of {!update_private_file_durable_locked_result}.
     Returns [None] without calling [decide] when the journal is absent; never
     creates its parent directory, journal, or a lock file. Existing journals

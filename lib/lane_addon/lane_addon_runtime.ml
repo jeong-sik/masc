@@ -111,12 +111,8 @@ let visibility_of_fields fields =
   | ["kind", `String "operator"] -> Ok Operator_only
   | ["keeper", `String keeper; "kind", `String "keeper"] when String.trim keeper <> "" -> Ok (Keeper_only keeper)
   | _ -> Error "invalid retained read visibility"
-let caller_access ?access caller = match access with
-  | Some access -> access
-  | None -> (match caller with
-      | Some keeper when String.trim keeper <> "" -> Lane_addon_sources.Keeper keeper
-      | Some _ -> Lane_addon_sources.Unauthenticated
-      | None -> Lane_addon_sources.Operator_configuration)
+let caller_access ?access _caller =
+  Option.value ~default:Lane_addon_sources.Unauthenticated access
 let can_read access = function
   | Shared -> true
   | Operator_only -> (match access with Lane_addon_sources.Operator_configuration -> true
@@ -656,10 +652,12 @@ let snapshot m ~access ?instance_id () =
   let past = List.filter (function `Assoc fields ->
     Option.fold ~none:true ~some:(fun id -> List.assoc_opt "instance_id" fields = Some (`String id)) instance_id
     | _ -> Option.is_none instance_id) past in
-  let* past = List.fold_right (fun value acc ->
-    let* values = acc in
-    let* fields = object_ value in let* visibility = visibility_of_fields fields in
-    Ok (if can_read access visibility then value :: values else values)) past (Ok []) in
+  let past = List.filter (fun value ->
+    match Result.bind (object_ value) visibility_of_fields with
+    | Ok visibility -> can_read access visibility
+    | Error detail ->
+        Log.Misc.warn "Lane retained binding omitted from inventory: %s" detail;
+        false) past in
   let* () = if Option.is_some instance_id && live = [] && past = []
     then Error "Lane instance is unavailable to this caller" else Ok () in
   let retained = function `Assoc fields ->
@@ -1113,6 +1111,8 @@ let recover_fleet ~config ~sw = Eio_context.run_on_owner_domain (fun () ->
   let ledger=fleet_store m in
   let* recovered=offload (fun () -> Fleet_ledger.recover ledger) |> fleet_result in
   List.iter observe_fleet_settlement recovered.settled_with_cleanup;
+  List.iter (fun (journal,error) -> Log.Misc.warn "Lane Fleet journal %s isolated: %s"
+    journal (fleet_error_to_string error)) recovered.rejected;
   let current payload =
     let* found=offload (fun () -> Fleet_ledger.find ledger
       ~caller:payload.Fleet_ledger.caller ~operation_id:payload.operation_id) |> fleet_result in

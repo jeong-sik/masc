@@ -23,6 +23,7 @@ val recover_fleet : config:Workspace.config -> sw:Eio.Switch.t -> (unit,string) 
 val start_fleet_service : config:Workspace.config -> sw:Eio.Switch.t -> clock:_ Eio.Time.clock -> unit
 (** Server-root Pulse owns reconciliation and retry. Failed recipients remain
     pending; a committed message is only read, never republished if missing. *)
+(** Omitted [access] is unauthenticated; [caller] carries attribution only. *)
 val dispatch : ?caller:string -> ?access:Lane_addon_sources.access -> config:Workspace.config -> operation:operation -> Yojson.Safe.t ->
   (Yojson.Safe.t, error) result
 (** No I/O and no package callback. Runs on the root-switch owner domain: a

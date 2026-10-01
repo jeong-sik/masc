@@ -32,6 +32,9 @@ completed output is a frozen capture, not a live mirror of arbitrary Board edits
 Native `fusion_run` captures are visible to the authoritative registry Keeper
 and to the operator. HTTP access uses verified operator or agent credentials;
 local actor attribution and player credentials cannot grant private source access.
+The MCP facade also carries verified Lane authority separately from the attributed
+name; omitted authority is unauthenticated. Unreadable retained visibility is
+omitted from inventory without discarding its evidence or exposing its rows.
 Unknown and foreign run identities receive the same acquisition denial.
 
 Every retained binding records a strict read visibility: shared, operator, or one

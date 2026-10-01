@@ -7,6 +7,8 @@ Select two exact direct runtime IDs with --primary-runtime and --secondary-runti
 Each must have an explicit [provider.model] binding table plus its [providers]
 and [models] declarations in the source runtime.toml. Lane names, implicit
 bindings, aliases and spelling substitutions are not resolved by this copy tool.
+Both IDs must be distinct and enabled, with env credentials available. Providers
+using model-set declarations are unsupported; their dependencies are not copied.
 The primary runtime remains the default, verifier and Fusion judge.
 """
 import argparse
@@ -33,6 +35,11 @@ def declared_binding(source, runtime_id):
     provider, model = matches[0]
     if model not in source['models']:
         raise ValueError(f'{runtime_id!r} has no model declaration for {model!r}')
+    if (source['providers'][provider].get('enabled', True) is False
+            or source[provider][model].get('enabled', True) is False):
+        raise ValueError(f'{runtime_id!r} is disabled')
+    if 'model-set' in source['providers'][provider]:
+        raise ValueError(f'{provider!r} model-set is unsupported by this copy tool')
     return provider, model
 
 
@@ -54,13 +61,19 @@ def main():
     source = tomllib.loads((args.source_config / 'runtime.toml').read_text())
     primary, secondary = args.primary_runtime, args.secondary_runtime
     try:
+        if primary == secondary:
+            raise ValueError('primary and secondary runtime IDs must be distinct')
         bindings = [declared_binding(source, identity) for identity in (primary, secondary)]
     except ValueError as error:
         parser.error(f'{args.source_config / "runtime.toml"}: {error}')
     providers = list(dict.fromkeys(provider for provider, _ in bindings))
     for provider in providers:
-        credential = source['providers'][provider]['credentials']
-        assert credential['type'] == 'env' and os.environ.get(credential['key']), 'selected credential unavailable'
+        credential = source['providers'][provider].get('credentials')
+        if not isinstance(credential, dict) or credential.get('type') != 'env':
+            parser.error(f'{provider!r} requires env credentials for this copy tool')
+        key = credential.get('key')
+        if not isinstance(key, str) or not key or not os.environ.get(key):
+            parser.error(f'{provider!r}: selected credential unavailable')
     with socket.socket() as probe:
         probe.bind(('127.0.0.1', args.port))
     spec = importlib.util.spec_from_file_location('prepare_fusion', Path(__file__).with_name('prepare-fusion-decision-live.py'))

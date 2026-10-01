@@ -164,6 +164,49 @@ class PrepareCollaboration(unittest.TestCase):
         self.assertIn("has no model declaration", result.stderr)
         self.assertFalse(self.base.exists())
 
+    def assert_selection_rejected(self, source, message, **selection):
+        self.base = Path(tempfile.mkdtemp(dir=self.root)) / "prepared"
+        self.source.write_text(source)
+        result = self.prepare(**selection)
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn(message, result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+        self.assertFalse(self.base.exists())
+        self.assertEqual(self.source.read_text(), source)
+
+    def test_unsupported_credentials_are_argument_errors_before_writes(self):
+        credential = (
+            '[providers.fixture.credentials]\ntype = "env"\nkey = "PREP_FIXTURE_KEY"'
+        )
+        for replacement in (
+            "",
+            '[providers.fixture.credentials]\ntype = "none"',
+            '[providers.fixture.credentials]\ntype = "file"\npath = "private.json"',
+        ):
+            with self.subTest(replacement=replacement):
+                self.assert_selection_rejected(
+                    SOURCE.replace(credential, replacement), "requires env credentials"
+                )
+
+    def test_disabled_provider_or_binding_is_rejected_before_writes(self):
+        for table in ("[providers.fixture]", '[fixture."model.with.dots"]'):
+            with self.subTest(table=table):
+                self.assert_selection_rejected(
+                    SOURCE.replace(table, table + "\nenabled = false"), "is disabled"
+                )
+
+    def test_identical_runtime_ids_are_rejected_before_writes(self):
+        self.assert_selection_rejected(
+            SOURCE, "must be distinct", secondary="fixture.model.with.dots"
+        )
+
+    def test_model_set_provider_is_rejected_without_narrowing_its_semantics(self):
+        source = SOURCE.replace(
+            "[providers.fixture]", '[providers.fixture]\nmodel-set = "shared"'
+        )
+        source += '\n[model_sets.shared]\nmodels = ["second"]\n'
+        self.assert_selection_rejected(source, "model-set is unsupported")
+
     def test_credentials_and_binary_identity_remain_required(self):
         result = self.prepare(credentials=False)
         self.assertNotEqual(result.returncode, 0)

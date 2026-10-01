@@ -158,7 +158,7 @@ let configuration_snapshot ~access ~caller config subscriptions revision =
     "subscriptions",`List (List.map json subscriptions);"reader_states",`List reader_states]
 
 let dispatch ?access ~config ~caller ~operation args = protect (fun () -> Mutex.protect mutex (fun () ->
-  let access = match access with Some value -> value | None -> Lane_addon_sources.Keeper caller in
+  let access = Option.value access ~default:Lane_addon_sources.Unauthenticated in
   let* subscriptions,revision = load config in
   match operation with
   | Inspect -> let* ()=exact [] args in
@@ -188,6 +188,10 @@ let dispatch ?access ~config ~caller ~operation args = protect (fun () -> Mutex.
   | Read | Acknowledge ->
       let* ()=exact (match operation with Read->["run_id";"installation_id";"output_id"]
         | _->["run_id";"installation_id";"output_id";"receipt"]) args in
+      let* ()=match access with
+        | Lane_addon_sources.Operator_configuration -> Ok ()
+        | Keeper keeper when String.equal keeper caller -> Ok ()
+        | Keeper _ | Unauthenticated -> Error "Authenticated subscription owner required" in
       let* s=select_subscription ~caller args subscriptions in
       let store=Store.create ~root:(root config) in
       let* bindings=Store.bindings store in

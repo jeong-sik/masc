@@ -6,6 +6,7 @@ val error_to_string : error -> string
 val register_delivery_handler :
   (config:Workspace.config -> caller:string -> keeper_name:string -> prompt:string ->
     (Yojson.Safe.t, string) result) -> unit
+(** Omitted [access] is unauthenticated; [caller] carries attribution only. *)
 val dispatch : ?caller:string -> ?access:Lane_addon_sources.access -> config:Workspace.config -> operation:operation -> Yojson.Safe.t ->
   (Yojson.Safe.t, error) result
 (** No I/O and no package callback. Runs on the root-switch owner domain: a
@@ -45,6 +46,8 @@ val read_declaration : ?caller:string -> ?access:Lane_addon_sources.access -> co
   (Yojson.Safe.t, Lane_addon_declaration.error) result
 val save_declaration : ?caller:string -> ?access:Lane_addon_sources.access -> config:Workspace.config -> Yojson.Safe.t ->
   (Yojson.Safe.t, Lane_addon_declaration.error) result
+(** Declaration reads and writes use the same explicit authority boundary as
+    [dispatch]; an omitted [access] grants no private authority. *)
 (** HTTP and Keeper editors share the configuration serializer with reconcile
     and managed Detach. Saving bytes only nudges the existing maintenance owner;
     its receipt never claims that a worker has already applied the change. *)

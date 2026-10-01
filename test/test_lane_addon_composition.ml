@@ -5,7 +5,11 @@ open Masc
 module Runtime = struct
   include Lane_addon_runtime
   let dispatch ?caller ?access ~config ~operation args =
-    Lane_addon_runtime.dispatch ?caller ?access ~config ~operation args
+    let access = match access, caller with
+      | Some access, _ -> access
+      | None, None -> Lane_addon_sources.Operator_configuration
+      | None, Some keeper -> Lane_addon_sources.Keeper keeper in
+    Lane_addon_runtime.dispatch ?caller ~access ~config ~operation args
     |> Result.map_error Lane_addon_runtime.error_to_string
 end
 module Types = Lane_addon_types

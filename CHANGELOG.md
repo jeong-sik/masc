@@ -6,9 +6,12 @@
 
 
 
+
 ### Upgrade notes
 
 - Update the server and TUI together to use the shared Goal model and actor-based activity display. No compatibility reader or automatic migration is provided. (#39975)
+- Previously stored single-value step expressions such as `5/10 * * * *` are now rejected on read as well as at admission, including cancelled or succeeded schedule rows. An unsupported row makes its entire schedule file unreadable; if it exists in both primary and last-good files, normal ticks, startup recovery and mutations refuse the store (#40460).
+- Before deploying, stop MASC and every schedule writer, and back up `<base-path>/.masc/schedules.json` and `schedules.json.last-good`. Review both files, confirm the intended timing of every unsupported expression, and explicitly rewrite it to a supported expression. Do not mechanically turn a singleton step into a range step: that may change the timing the old singleton implementation actually used. Validate each existing file with the candidate `deployment_preflight_helper validate-schedule-ledger <file>` command before restarting writers. Leave deployment pending until the operator has reviewed this stored-format change and the validation evidence; this note does not authorize editing or resetting a live store (#40460).
 
 ### Fresh state required
 
@@ -45,6 +48,7 @@
 - Show individual Home decisions by request identity, keep successful source readings during partial failures, preserve exact detail and return context across refresh, and retain continuation beside long request lists. #40152
 - Start the MASC server and every keeper of the arm for each arm before a Terminal-Bench run, so a release that cannot boot a rendered config or bring its keepers up stops the run before the dataset download (#40509).
 - Batch Jev questions for newly pushed Board attention candidates; retain durable partition ownership, owner delivery and worker fallback. (#40521)
+- Show Candle wallet balances and issued, burned and circulating supply in the TUI and dashboard, using exact decimal amounts from the authoritative ledger. (#40024)
 
 ### Changed
 
@@ -120,11 +124,13 @@
 - Removed `resolve_keeper_wake_target`, which documented an `agent_name` binding lookup but returned the requested Keeper name in every branch. `dispatch_keeper_wake` and `cancel_keeper_schedules` use the payload's Keeper name directly. A metadata read failure for an unregistered name no longer holds the wake at this step; `read_owner_meta` handles it as before (#40407).
 - Board attention asks Jev with the current signal alone in the state and names the keeper and its board interests in the question. With the keeper's role in the state, Jev answered relevant far more often than the judge rule allows; a blind evaluation sided with the new shape in 23 of 26 disagreements. #40505
 - Give TUI Code drawing and cursor viewport one explicit module owner, keeping Code and Resources on shared pane title geometry. (#40154)
+- Move MCP resource document rendering into a dedicated TUI module while preserving MIME formatting, pane layout and normalized scroll behavior. (#40159)
+- Keepers retrieve stored memories through search and paged snapshot artifacts instead of loading every stored fact into each turn. Complete facts and source validation remain preserved. The Memory screen now labels this size as stored knowledge. ([#40473](https://github.com/jeong-sik/masc/pull/40473))
+- Clarify Recall source-read uncertainty and document deletion receipts among the four task-number allocation inputs. #40497
 
 ### Removed
 
 - Remove the former Overview Team block. The startup Dashboard, Work, and Usage surfaces replace it (#38801).
-
 - The microVM image gate no longer builds `masc-sandbox:general` from the
   embedded recipe when a Keeper's image is missing from the store; it refuses
   the missing image. A Keeper's image is the build the host catalog promoted,
@@ -353,6 +359,77 @@
 - Keep a multi-provider Keeper lane on its fresh walk's retry schedule instead of applying the last candidate's quota deadline to every provider. Single-path and deferred waits retain their existing behavior. (#40503)
 - Require `MASC_URL` in `benchmarks/quick-bench.sh` and `benchmarks/benchmark.sh` instead of defaulting to the production port, and drop the call to the `masc_agents` tool that no registry lists (#40512).
 - The Code history footer keeps its H close hint beside the back key when a search query crowds a 100-column screen (#40539).
+- Withdraw unavailable currency observations without hiding healthy Keeper lifecycle controls, and refresh wallet, supply and equipment together beyond dashboard response caches. (#40024)
+- Keep cache and terminal layout fixtures faithful to the public Candle observation and Keeper roster, preserving prepared-byte reuse checks and the measured portrait layout. (#40024)
+- Candle uses only spare Overview rows, keeping the existing attention and task allocation on short terminals. Crowded views name the observed state, with full wrapped diagnostics and exact supply amounts in the global help sheet and Keeper Info (#40024).
+- Check Candle short-screen summaries at the supported 15- and 16-row terminal sizes, and verify the compact resize guidance below the shared viewport floor (#40024).
+- Withdraw prior Candle amounts before a booting or unread server authority and apply a ready refresh identity before its new roster values (#40024).
+- Reject scoped currency reads from before an authority withdrawal, including same-workspace recovery and A/B/A switches (#40024).
+- Withdraw Dashboard Candle supply and Keeper wallet amounts during reconnect and current execution warm-up, preserve the Keeper lifecycle roster, and ignore older warm-up or failure responses after recovery. (#40024)
+- Replay stored Candle payments from their recorded allocations without applying the current rounding or remainder rules. Receipt decoding still rejects invalid ranges, duplicate recipients and inconsistent totals; every new Paid append validates current arithmetic. (#40066)
+- Record one parsed response per successful Candle HTTP appraisal while preserving the CLI raw and parsed response pair. (#40066)
+- Show complete runtime parameter keys, current/default values and contracts in a scrollable detail window while keeping selection and type-aware editing stable at narrow terminal sizes. #40135
+- Preserve the detail reading position at selection boundaries and show current/default string values as JSON so boundary whitespace and empty strings remain visible. #40135
+- Home and End continue to scroll Runtime parameter details while their inline editor is open. #40135
+- Preserve exact JSON whitespace and separators by rendering each parameter choice as its own literal value. #40135
+- Keep complete stop commands for other Keepers visible in narrow TUI chat panes, and reserve their wrapped rows above the composer (#40186).
+- Guard macOS Keychain fixture Security headers and API calls with `__APPLE__`; non-Apple foreign stubs still compile and fail explicitly if called (#40186).
+- Keep the sending-row age regression on the shared status producer and its renderer, checking elapsed ages for local and foreign requests. (#40186)
+- Pin labelled inputs across scene interactions, retain delegated content and rendered label separators, and expose mixed/selected state using the first recognized ARIA role. (#40187)
+- Coalesce adjacent rendered block/cell boundaries, expose associated labels only when their native checkbox/radio is unobservable, and distinguish ARIA checked versus selected verification (#40187).
+- Preserve explicit label click handlers, normalize ARIA mixed states by role, and read admitted control labels through browser-rendered text without exposing filtered descendants (#40187).
+- Pin every nullable native label association before activation, retain boxless label text geometry across Scene, Elements and interactions, and carry typed choice state into TUI deltas and labels. (#40187)
+- Retain regression coverage for committed shared Goal creation when its audit event append fails, including the failed receipt, actor, stored Goal and recording-path evidence (#40248).
+- Bind approved CI candidate composition to the reviewed base and native stack scope; fetch missing objects from the selected repository and roll back failed receipt close without deleting concurrently moved refs (#40279).
+- Keep leader-selected ordinary compilation on the Core library and explicit minimal behavior suites; reserve full checks for Release/Tag verification (#40290).
+- Let read-only approved-candidate checks use Actions installation tokens without an authenticated-user lookup; review and approval checks still require caller identity (#40290).
+- Treat the two-minute check size as an example rather than an enforced job deadline; preserve existing stalled-job and runner hang safeguards separately (#40290).
+- Keep Goal-link failures in their authoritative reading, retain current Task flow on Home, and show independent link coverage in Work and Planning instead of claiming unavailable Tasks or absent links (#40311).
+- Report failed Task backlog reads before unread Goal links in Planning, and restore empty-link reporting after refresh without treating archive coverage warnings as primary failures (#40311).
+- Build the Task-to-Goal index once per successful registry load and reuse it across Task, Harness and active-task projections; failed reads and workspace changes replace the cached reading (#40311).
+- Classify each Work Goal read before counting it and signal after that decision, so the conditional HTTP fixture cannot accidentally delay a read already included in its baseline. Preserve request-count, ETag and retained-answer checks. #40313
+- Start a new off-feed Board detail request when the route changes during another post's pending read, retaining rejection of stale responses. (#40353)
+- Load older Board comment pages until a focused reply and its full ancestor chain are available, preserving conversation context across pagination. (#40353)
+- Deduplicate overlapping comment pages and load missing ancestors when an already visible reply receives route focus. (#40353)
+- Keep focused Board detail requests stable across remounts and action refreshes, retaining the loaded post and successful comment pages if ancestor enrichment fails. (#40353)
+- Clear retained comment focus on ordinary post opens, and retry incomplete settled ancestry when a focused detail is revisited (#40353).
+- Clear focused-route ancestry when restoring a retained compact Board thread, so comment action refreshes stay on its current page (#40353).
+- Retry an initially failed focused Board detail read on a later visit, while reusing pending reads and retaining successfully loaded offset-zero comments (#40353).
+- `deployment_preflight_helper validate-stores` reads every keeper chat transcript with the read that append-once deliveries run. A row that read refuses now fails the preflight with the file and line, instead of surfacing as `transcript_persist_failed` when a keeper is next messaged. An existing transcript directory that cannot be listed also fails with its path and reason (#40402).
+- Refuse deployment preflight when the transcript directory cannot be inspected or listed, while allowing a genuinely absent directory. #40423
+- Retain optional manual source/configuration syntax and committed-credential checks alongside leader-selected CI without automatic triggers or a two-minute cap. (#40424)
+- Run the shared duplicate-key YAML validator and repository-wide TOML syntax checker in the manual source/config job. (#40424)
+- Include all tracked YAML configuration in strict syntax validation and exercise credential-scanner detection and allowlist checks in the explicit manual job. (#40424)
+- Reject unsupported single-value cron steps during schedule admission and prevent overflow when expanding supported range steps. #40460
+- Decode complete TUI chat SSE events with optional data-field spacing, multiline payloads and standard line endings through the shared wire module. #40462
+- Remove the always-true runtime-order invariant from Keeper composite responses and dashboard displays, retaining the measured ownership and phase checks. #40463
+- Preserve owner-stop and input-rejection recovery failures in dashboard sessions and history, and offer previous-session retry only when a previous settlement exists. #40467
+- Codex now receives the runtime's declared context window when starting or resuming a Keeper, Fusion, or verification session. Previously, the client could keep its account default while MASC reported the configured window. (#40472)
+- Use the blob library’s public modules and explicit dependency in the real Recall artifact-reader regressions. (#40473)
+- Respect tool-disabled requests when offering memory retrieval and reuse unchanged, integrity-checked durable recall artifacts instead of rewriting them each turn. (#40473)
+- Autonomous Codex turns wake on durable queued input even while waiting for a provider frame, preserve active tool results, and wait for normal completion before delivering the queued message. (#40474)
+- Librarian source reassignment no longer gives a new working context the same identity as an existing context. Explicitly continued contexts retain their identity, while new contexts use the observed snapshot version. (#40481)
+- Preserve persisted message metadata, including reasoning-source provenance, when Keeper history is restored; reject malformed present metadata instead of erasing it. #40482
+- Canonicalize accepted Skill activation ledger fields in server serialization order before Python revision hashing, preserving event order and strict evidence validation. #40483
+- Report malformed Skill projection shapes as ledger faults without a fictitious event-log row, while retaining specific invariant faults (#40483).
+- Show inline and dotted TOML lane declarations in Keeper assignment options while preserving standard-table candidate editing. #40484
+- Return HTTP 504 for Dashboard timeout envelopes from both HTTP/2 JSON-value response paths, preserving explicit non-200 statuses. #40485
+- Skip unchanged Board post or comment snapshots during flush while retaining parent reply-count updates and failed-write retries. #40488
+- Preserve producer artifact descriptors in post-effect failure responses when result manifest storage fails, so already-exported bytes remain reusable. #40491
+- Bound applied-effect manifest failures by the caller’s output policy, preserving fitting descriptors and explicitly reporting omitted payloads or artifact handles without replaying projection. (#40491)
+- Preserve Unicode boundaries and the shared cut mark in TUI HTTP error previews and Board mention hints, fitting hints to the available terminal cells. #40495
+- Fit Planning Goal errors and Harness gate fields to their actual framed width so padding no longer produces a false truncation mark. #40498
+- Fix Keeper observation ownership: delayed cleanup and tool-count callbacks from an earlier turn cannot modify the successor observation or clear its wakeup signal. (#40524)
+- Bind Keeper live progress, FSM, model and measurement callbacks to the originating observation attempt so delayed callbacks cannot update a successor turn. (#40530)
+- Isolate Keeper preview and streaming redaction state per execution so late callbacks cannot alter a successor preview; retain native tool start/stop attribution through the per-execution stream. (#40537)
+- Consolidate TUI chat work, waiting inputs, and acknowledged priority into one quiet status summary, while keeping failures and stop controls visible (#40540).
+- Preserve available Full diagnostic details, retain dispatched priority requests through chat controls until completion, and show folded status counts in compact/results summaries (#40540).
+- Settle overlapping chat controls by their own generation, so an older confirmed control cannot lose its priority supersession when a newer control fails (#40540).
+- Isolate Keeper event intake by a fresh execution scope before subscriber queue admission, preserving the captured producer/subscriber bus and excluding foreign tool events. (#40544)
+- Repair TUI compilation by using the terminal-text sanitizer owner for interrupt hints. (#40555)
+- Preserve Librarian working-context artifacts through blob GC, repair missing or corrupt snapshots, and prevent stale readers from replacing newer retention pins (#40557).
+- Use the actual roster visibility accessor when reserving chat status rows and in the existing activity test, restoring the main TUI build after the roster preference migration. #40559
+- Fix TUI compilation and the chat activity regression test by reading effective roster visibility through the existing preference helper. (#40561)
 
 ### Performance
 
@@ -387,6 +464,7 @@
 - Define deterministic encoder inputs, separately encoded response cases, unknown-discriminator rejection and existing standalone TUI decoder coverage; retain immutable source evidence for the proposal (#40000).
 - Add RFC board-attention-asks-jev-once-per-event: ask Jev once per Board event with one question per eligible keeper, move task verification off the shared GLM slots, and record the before and after measurements of the Jev confidence gate. #40450
 - Record in RFC board-attention-asks-jev-once-per-event that one Jev request carrying 21 to 24 keeper questions was accepted for 13 real events in 0.24 to 0.55 s. The measured purge-plan gap predates #40508, which now removes the Board attention ledgers when a keeper is purged. #40507
+- Describe Candle equipment events in the ledger, the keeper_candle_equip tool, and candle.toml configuration lifecycle invariants in the glossary (#40471).
 
 ### Internal
 
@@ -423,6 +501,8 @@
 - Move terminal voice setup session state and pure transitions into a dedicated module with direct consumers and a public interface (#40195).
 - Delegate the source-selectable voice wizard PTY alias to its existing family so full tests execute it once. #40195
 - Verify the real Goal confirmation and payout worker path keeps one payment across pending reopen/drop, re-verification and worker restart; retain scoped integration evidence. (#40047)
+- Cover literal payment receipts through ledger recovery, balance projection and new-append refusal, including malformed rows that must reject the entire read. (#40066)
+- Add a manual macOS arm64 runtime probe with relocatable companions, source identity, dependency metadata, and artifact checksums. #40205
 
 ## [0.48.0] - 2026-09-29
 

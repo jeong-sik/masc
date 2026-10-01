@@ -90,7 +90,7 @@ let skills_catalog_with ~shadows =
 
 let usage_pane_lines ~shadows =
   let state = make_state () in
-  (match Masc.Tui_decode.decode_skills_catalog (skills_catalog_with ~shadows) with
+  (match Masc.Tui_decode_tools.decode_skills_catalog (skills_catalog_with ~shadows) with
    | Ok catalog -> state.skills_catalog <- Some catalog
    | Error detail -> Alcotest.failf "decode failed: %s" detail);
   state.tools_pane <- Tools_usage;
@@ -185,7 +185,7 @@ let tools_snapshot ~effective =
 let state_showing ?tools ~unavailable_skill_names () =
   let state = make_state () in
   (match
-     Masc.Tui_decode.decode_tool_snapshot
+     Masc.Tui_decode_tools.decode_tool_snapshot
        (tools_snapshot ~effective:(surface_with ?tools ~unavailable_skill_names ()))
    with
    | Ok snapshot -> state.tools_inventory <- Some snapshot

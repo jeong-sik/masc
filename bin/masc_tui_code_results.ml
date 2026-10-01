@@ -132,7 +132,34 @@ let apply_blame (state : state) request result =
 
 ;;
 
-let apply_lsp_answer (state : state) ~question ~symbol result =
+let start_lsp_question (state : state) ~question ~symbol =
+  match Masc_tui_fetched.current_request state.code_file with
+  | None -> None
+  | Some file ->
+      let key = { clq_scope = state.code_scope; clq_file = file;
+                  clq_question = question; clq_symbol = symbol;
+                  clq_line = state.code_file_cursor + 1 } in
+      (match Masc_tui_fetched.start ~equal:code_lsp_query_equal state.code_lsp_query ~key with
+       | Masc_tui_fetched.Already_loading -> None
+       | Masc_tui_fetched.Started (next, request) ->
+           state.code_lsp_query <- next;
+           Some request)
+;;
+
+let apply_lsp_answer (state : state) request result =
+  let query = Masc_tui_fetched.request_key request in
+  let current_file = match Masc_tui_fetched.current_request state.code_file with
+    | None -> false
+    | Some current ->
+        Masc_tui_fetched.same_request ~equal:String.equal current query.clq_file in
+  if not (Masc_tui_fetched.is_current ~equal:code_lsp_query_equal state.code_lsp_query request)
+     || query.clq_scope <> state.code_scope || not current_file
+  then No_followup
+  else begin
+  state.code_lsp_query <-
+    Masc_tui_fetched.complete ~equal:code_lsp_query_equal state.code_lsp_query request
+      (Result.map (fun _ -> ()) result);
+  let question, symbol = query.clq_question, query.clq_symbol in
   (match result with
    | Error detail ->
        state.code_lsp_note <- Some (symbol ^ ": " ^ detail);
@@ -187,6 +214,7 @@ let apply_lsp_answer (state : state) ~question ~symbol result =
                 location.ll_path location.ll_line);
          No_followup
        end)
+  end
 
 ;;
 

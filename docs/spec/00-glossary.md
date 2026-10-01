@@ -599,6 +599,30 @@ status: reference
   → [Masc_tui_types](../../bin/masc_tui_types.ml),
   [Masc_tui_render_chat](../../bin/masc_tui_render_chat.ml)
 
+**Chat Queue (TUI 채팅 큐 / 대기 입력 가시성)**
+: TUI 채팅 화면에서 사용자가 제출한 입력 메시지가 실제 Keeper 턴(turn) 시작에 이르기까지의
+  전송·대기 생애주기를 가시화하고 보존하는 표면(#40340 `2fd7a34c67`).
+  서버 접수 전후의 미결 상태를 단순히 지우거나 "대기 0건" 또는 확정 큐잉으로 왜곡하지 않고,
+  전송 불확실성과 단계별 대기 건수를 분리 투영한다.
+  - 전송 생애주기 4상태(`keeper_message_pending_delivery`): 닫힌 네 가지 배달 상태를 구분한다.
+    `Local_pending`(아직 서버로 송신되지 않은 로컬 대기열 입력),
+    `Awaiting_receipt`(서버로 POST 전송을 시작했으나 수신 영수증을 아직 받지 못한 상태),
+    `Keeper_queued`(서버 진입이 승인되어 Keeper 큐에 안착했으나 턴 실행이 시작되지 않은 상태),
+    `Rechecking_delivery`(재연결이나 전달 상태를 재확인 중인 상태, 과거 Queued 영수증이 있더라도 확인 중엔 재확인으로 표시).
+  - 상태별 건수와 뷰포트 예산: 단일 합산 숫자로 뭉개지 않고 `queued at Keeper`·`awaiting receipt`·
+    `rechecking delivery` 건수를 분리 표시한다. 80열 좁은 터미널 환경에서도 총 대기 건수,
+    상태별 세부 근거, 로컬 NEXT 프리뷰(`local_waiting_next_preview`)를 별도 행으로 배치하며,
+    단축키 가이드(`Ctrl-T:queue`)를 보존한다.
+  - 큐 제어와 입력 보존: 대화 대기열 제어 명령(`/queue`·`/queue resume` 및 `Ctrl-T`)을 제공하며,
+    작성 도중 `Esc`로 다른 화면을 탐색하더라도 대기열 상태와 입력 드래프트는 파기되지 않고 유지된다.
+  - 검증과 증거: PTY 시나리오(`test/test_tui_queue_visibility_pty.py`) 및 OCaml 생애주기
+    테스트(`test/test_tui_chat_queue_wiring.ml`, `test/test_tui_chat_activity.ml`)가
+    80열 레이아웃·재연결 불확실성·Keeper 이동 후 복귀 계약을 다룬다. 실행 증거와 한계는
+    아래 증거 문서에 기록한다.
+  → [Masc_tui_types](../../bin/masc_tui_types.ml) ·
+  [docs/evidence/2026-09-30-chat-queue-visibility/README.md](../evidence/2026-09-30-chat-queue-visibility/README.md) ·
+  [docs/TUI-GUIDE.md](../TUI-GUIDE.md)
+
 **Fold (접기)**
 : TUI가 넘치는 내용을 줄여 그리는 두 가지 방식. 코드의 타입 이름이 아니라 이 문서와
   [TUI 안내](../TUI-GUIDE.md)가 쓰는 라벨이다. (A) **블록 접기** — 한 블록을 한 줄로

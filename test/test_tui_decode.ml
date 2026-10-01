@@ -377,23 +377,25 @@ let test_decode_keeper_projects_current_schema () =
       (current_keeper_json ~paused:true ~current_task_id:(Some "task-42") ())
   with
   | Ok keeper ->
+      let activity = Option.get keeper.k_activity in
+      let identity = Result.get_ok keeper.k_identity in
       Alcotest.(check string) "name" "keeper-main" keeper.k_name;
       Alcotest.(check bool) "trace identity is projected" true
-        (String.trim keeper.k_trace_id <> "");
+        (String.trim identity.k_trace_id <> "");
       Alcotest.(check bool) "paused" true keeper.k_paused;
       Alcotest.(check (option string)) "current task" (Some "task-42")
-        keeper.k_current_task_id;
-      Alcotest.(check int) "total turns" 4 keeper.k_total_turns;
-      Alcotest.(check int) "total tokens" 120 keeper.k_total_tokens;
+        activity.k_current_task_id;
+      Alcotest.(check int) "total turns" 4 activity.k_total_turns;
+      Alcotest.(check int) "total tokens" 120 activity.k_total_tokens;
       Alcotest.(check (float 0.0001)) "total cost" 0.42
-        keeper.k_total_cost_usd;
+        activity.k_total_cost_usd;
       Alcotest.(check bool) "last outcome is the typed contract value" true
-        (keeper.k_last_proactive_outcome
+        (activity.k_last_proactive_outcome
          = Some Keeper_meta_contract.Proactive_tool_use);
       Alcotest.(check string) "created at" "2026-08-20T01:02:03Z"
-        keeper.k_created_at;
+        identity.k_created_at;
       Alcotest.(check string) "updated at" "2026-08-21T04:05:06Z"
-        keeper.k_updated_at
+        identity.k_updated_at
   | Error err -> Alcotest.fail err
 
 let test_decode_keeper_formats_last_turn_timestamp () =
@@ -402,16 +404,18 @@ let test_decode_keeper_formats_last_turn_timestamp () =
     Tui_decode.decode_keeper (current_keeper_json ~last_turn_ts:timestamp ())
   with
   | Ok keeper ->
+      let activity = Option.get keeper.k_activity in
       Alcotest.(check string) "timestamp uses canonical ISO formatter"
         (Masc_domain.iso8601_of_unix_seconds timestamp)
-        keeper.k_last_turn_ts
+        activity.k_last_turn_ts
   | Error err -> Alcotest.fail err
 
 let test_decode_keeper_zero_last_turn_is_empty () =
   match Tui_decode.decode_keeper (current_keeper_json ()) with
   | Ok keeper ->
+      let activity = Option.get keeper.k_activity in
       Alcotest.(check string) "zero timestamp becomes empty" ""
-        keeper.k_last_turn_ts
+        activity.k_last_turn_ts
   | Error err -> Alcotest.fail err
 
 let test_terminal_text_escapes_control_sequences () =

@@ -8,8 +8,35 @@ open Masc_domain
 include Auth_credential_base
 include Auth_credential_token
 
+let keeper_credential_write_authority config ~credentials ~agent_name stored
+    (credential : agent_credential) =
+  let ( let* ) = Result.bind in
+  let refused detail = Error (System (System_error.ValidationError
+      (Printf.sprintf "Keeper credential storage authority for %s: %s" agent_name detail))) in
+  if not (String.equal credential.agent_name agent_name) then
+    refused "requested name is not the credential's canonical owner"
+  else
+    (* A noncanonical UUID on an unselected owner can still alias this write
+       target on a case-insensitive store, including before either file exists. *)
+    let* () = List.fold_left (fun checked (owner_stored, owner) ->
+      let* () = checked in
+      let* _target = credential_owned_uuid_target ~leaf_policy:Follow_regular_symlink config owner.agent_name owner_stored owner in
+      Ok ()) (Ok ()) credentials in
+    let* _target = credential_owned_uuid_target ~leaf_policy:Follow_regular_symlink config agent_name stored credential in
+    match credential.id with
+    | None -> Ok ()
+    | Some id ->
+        if String.equal (credential_uuid_file config id) (credential_file config agent_name) then
+          refused "UUID payload and named credential share a path"
+        else if List.exists (fun (_, (owner : agent_credential)) ->
+          not (String.equal owner.agent_name agent_name)
+          && Option.equal Credential_id.equal owner.id credential.id) credentials then
+          refused "another current owner has the same UUID"
+        else Ok ()
+;;
+
 let ensure_keeper_credential_in_transaction
-    ((Credential_transaction config) as transaction) ~find_token ~agent_name =
+    ((Credential_transaction config) as transaction) ~credentials ~find_token ~agent_name =
   let create_fresh_keeper_token transaction existing =
     let raw_token = generate_token () in
     let id, agent_id =
@@ -31,11 +58,22 @@ let ensure_keeper_credential_in_transaction
       ; expires_at = None
       }
     in
+    let ( let* ) = Result.bind in
+    let* () = keeper_credential_write_authority config ~credentials ~agent_name
+        (Stored_credential cred) cred in
     publish_file_backed_credential_in_transaction transaction cred ~raw_token
     |> Result.map_error file_backed_publication_error
     |> Result.map (fun () -> raw_token, cred)
   in
     let ( let* ) = Result.bind in
+    let* present = credential_path_exists (credential_file config agent_name) in
+    let* () = if not present then Ok () else
+      let* stored = read_stored_credential ~leaf_policy:Follow_regular_symlink config agent_name (credential_file config agent_name) in
+      let* resolved = resolve_stored_credential ~leaf_policy:Follow_regular_symlink config agent_name stored in
+      match resolved with
+      | None -> Error (System (System_error.ValidationError
+          (Printf.sprintf "Keeper credential storage authority for %s cannot be resolved" agent_name)))
+      | Some credential -> keeper_credential_write_authority config ~credentials ~agent_name stored credential in
     let* current = current_credential_in_transaction transaction agent_name in
     let* raw = raw_token_in_transaction transaction agent_name in
     let* () = match current, raw with
@@ -48,8 +86,8 @@ let ensure_keeper_credential_in_transaction
     | Some credential, Some raw_token
       when constant_time_string_equal credential.token (sha256_hash raw_token) ->
       (match find_token ~token:raw_token with
-       | Ok credential -> Ok (raw_token, credential)
-       | Error (Auth _) -> create_fresh_keeper_token transaction current
+       | Ok credential when String.equal credential.agent_name agent_name -> Ok (raw_token, credential)
+       | Ok _ | Error (Auth _) -> create_fresh_keeper_token transaction current
        | Error _ as error -> error)
     | Some _, Some _ | Some _, None | None, Some _ | None, None ->
       create_fresh_keeper_token transaction current
@@ -57,7 +95,10 @@ let ensure_keeper_credential_in_transaction
 
 let ensure_keeper_credential config ~agent_name =
   with_credential_transaction config (fun transaction ->
+    let ( let* ) = Result.bind in
+    let* snapshot = credential_store_snapshot_in_transaction ~leaf_policy:Follow_regular_symlink transaction in
     ensure_keeper_credential_in_transaction transaction ~agent_name
+      ~credentials:snapshot.current_credentials
       ~find_token:(find_static_credential_in_transaction ~leaf_policy:Follow_regular_symlink transaction))
   |> Result.join
 ;;
@@ -90,14 +131,22 @@ let ensure_keeper_credentials config ~agent_names =
         | None -> [] | Some entries -> entries in
       Hashtbl.replace index credential.token (credential :: entries);
       Hashtbl.replace by_name credential.agent_name credential in
-    let rec sync = function
+    let rec sync ownership = function
       | [] -> []
       | agent_name :: rest ->
         let result = ensure_keeper_credential_in_transaction transaction ~agent_name
+            ~credentials:ownership
             ~find_token in
         (agent_name, result) ::
         (match result with
-         | Ok (_, credential) -> update credential; sync rest
+         | Ok (_, credential) ->
+             update credential;
+             let stored = match credential.id with
+               | None -> Stored_credential credential
+               | Some id -> Stored_redirect (credential_uuid_file config id) in
+             let ownership = (stored, credential) :: List.filter (fun (_, owner) ->
+               not (String.equal owner.agent_name credential.agent_name)) ownership in
+             sync ownership rest
          | Error _ ->
              (* Preflight failures leave other Keepers independent. After any
                 failure, re-read admitted authority before deciding whether
@@ -107,8 +156,8 @@ let ensure_keeper_credentials config ~agent_names =
               | Ok snapshot ->
                   Hashtbl.clear index; Hashtbl.clear by_name;
                   List.iter (fun (_, credential) -> update credential) snapshot.current_credentials;
-                  sync rest)) in
-    Ok (sync agent_names))
+                  sync snapshot.current_credentials rest)) in
+    Ok (sync snapshot.current_credentials agent_names))
   |> Result.join
 ;;
 

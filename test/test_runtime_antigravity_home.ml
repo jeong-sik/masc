@@ -354,6 +354,68 @@ let test_pointerless_store_reseeds_only_a_fresh_seed () =
     (Fs_compat.load_file (Filename.concat third ".gemini/antigravity-cli/antigravity-oauth-token"))
 ;;
 
+let test_pointerless_store_preserves_entries_outside_managed_scope () =
+  List.iter (fun kind ->
+    with_temp_root @@ fun runtime_root ->
+    let oauth_source = Filename.concat runtime_root "source" in
+    write_file ~mode:0o600 oauth_source
+      (Masc_test_deps.antigravity_oauth_fixture "account-a");
+    let owner_leaf = "foreign-store-entry" in
+    let store = List.fold_left (fun parent leaf ->
+      let path = Filename.concat parent leaf in
+      Unix.mkdir path 0o700;
+      path) runtime_root ["official-clients"; "antigravity"; owner_leaf] in
+    (* A real pointer-writer temp must survive too: classify the whole store
+       before deleting any entry. *)
+    let temp, channel = Fs_compat.open_atomic_temp_file ~temp_dir:store () in
+    output_string channel "partial pointer";
+    close_out channel;
+    let path = Filename.concat store (match kind with
+      | `Atomic_directory | `Atomic_symlink | `Atomic_public | `Atomic_hardlink ->
+        ".atomic_foreign.tmp"
+      | `Unknown_directory -> "operator-notes"
+      | `Public_generation | `Public_child -> Random_id.uuid_v7 ()) in
+    let notes = Filename.concat path "notes" in
+    (match kind with
+     | `Atomic_directory ->
+       Unix.mkdir path 0o700;
+       write_file ~mode:0o600 notes "operator state"
+     | `Unknown_directory -> Unix.mkdir path 0o700
+     | `Public_generation -> Unix.mkdir path 0o755
+     | `Public_child ->
+       Unix.mkdir path 0o700;
+       Unix.mkdir (Filename.concat path ".gemini") 0o755
+     | `Atomic_symlink -> Unix.symlink oauth_source path
+     | `Atomic_public -> write_file ~mode:0o644 path "external file"
+     | `Atomic_hardlink -> Unix.link oauth_source path);
+    let entries () = Sys.readdir store |> Array.to_list |> List.sort String.compare in
+    let before = entries () in
+    (match Runtime_antigravity_home.prepare_account
+       ~runtime_root ~owner_leaf ~oauth_source with
+     | Error (Runtime_antigravity_home.Invalid_managed_oauth _) -> ()
+     | Error error -> fail (Runtime_antigravity_home.error_to_string error)
+     | Ok _ -> fail "an unmanaged pointerless-store entry was discarded");
+    check (list string) "refusal preserves every store entry" before (entries ());
+    check string "refusal preserves a valid staged pointer" "partial pointer"
+      (Fs_compat.load_file temp);
+    check bool "no replacement pointer is published" false
+      (Sys.file_exists (Filename.concat store "current.json"));
+    match kind with
+    | `Atomic_directory ->
+      check string "foreign directory contents remain" "operator state"
+        (Fs_compat.load_file notes)
+    | `Unknown_directory | `Public_generation | `Public_child ->
+      check bool "foreign directory remains" true (Sys.is_directory path)
+    | `Atomic_symlink ->
+      check string "foreign symlink remains" oauth_source (Unix.readlink path)
+    | `Atomic_public ->
+      check string "foreign file remains" "external file" (Fs_compat.load_file path)
+    | `Atomic_hardlink ->
+      check int "foreign hardlink remains" 2 (Unix.lstat path).Unix.st_nlink)
+    [`Atomic_directory; `Unknown_directory; `Public_generation; `Public_child;
+     `Atomic_symlink; `Atomic_public; `Atomic_hardlink]
+;;
+
 let test_generation_pointer_is_private_under_standard_umask () =
   with_temp_root @@ fun runtime_root ->
   let previous_umask = Unix.umask 0o022 in
@@ -1072,6 +1134,8 @@ let () =
             (test_generation_pointer_failure_retry ~after_rename:false)
         ; test_case "post-rename pointer failure preserves HOME until retry" `Quick
             (test_generation_pointer_failure_retry ~after_rename:true)
+        ; test_case "pointerless store preserves unmanaged entries" `Quick
+            test_pointerless_store_preserves_entries_outside_managed_scope
         ; test_case "pointerless store reseeds only a fresh seed" `Quick
             test_pointerless_store_reseeds_only_a_fresh_seed
         ; test_case "pointer permissions permit repeated preparation under 0022" `Quick

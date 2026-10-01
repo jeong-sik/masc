@@ -694,10 +694,7 @@ let existing_generation ~store ~revision ~account_sha256 ~read_keychain =
    source cannot reproduce that state. *)
 let unreferenced_generation_is_reseedable ~seed revision_dir =
   let lstat path = try Some (Unix.lstat path) with Unix.Unix_error _ -> None in
-  let directory path =
-    match lstat path with
-    | Some stat -> stat.Unix.st_kind = Unix.S_DIR
-    | None -> false in
+  let directory path = Result.is_ok (verify_private_directory path) in
   let seeded_credential path =
     match lstat path with
     | Some stat ->
@@ -744,28 +741,40 @@ let unreferenced_generation_is_reseedable ~seed revision_dir =
    for the operator, and a removal failure refuses naming the path. *)
 let clear_reseedable_store ~sync_store ~seed ~store =
   let entries = Array.to_list (Sys.readdir store) in
-  let reseedable entry =
-    Fs_compat.is_atomic_orphan_name entry
-    ||
+  let classify entry =
     let path = Filename.concat store entry in
     match Unix.lstat path with
+    | stat when stat.Unix.st_kind = Unix.S_REG
+                && Fs_compat.is_atomic_orphan_name entry
+                && stat.Unix.st_uid = effective_uid
+                && stat.Unix.st_perm land 0o7777 = 0o600
+                && stat.Unix.st_nlink = 1 ->
+      Some (`Pointer_temp path)
     | stat when stat.Unix.st_kind = Unix.S_DIR ->
-      unreferenced_generation_is_reseedable ~seed path
-    | _ -> false
+      (match Random_id.parse_uuid_v7 entry with
+       | Ok revision when String.equal revision entry
+                          && Result.is_ok (verify_private_directory path)
+                          && unreferenced_generation_is_reseedable ~seed path ->
+         Some (`Generation path)
+       | Ok _ | Error _ -> None)
+    | _ -> None
   in
-  if not (List.for_all reseedable entries) then
+  let classified = List.map classify entries in
+  if List.exists Option.is_none classified then
     Error (generation_error store
       "account generation pointer is missing and the unreferenced entries are not reproducible from the selected credential")
   else
     let failures =
       List.filter_map
         (fun entry ->
-          let path = Filename.concat store entry in
-          try Fs_compat.remove_tree path; None with
+          let path, remove = match entry with
+            | `Pointer_temp path -> path, Unix.unlink
+            | `Generation path -> path, Fs_compat.remove_tree in
+          try remove path; None with
           | Sys_error detail -> Some (generation_error path detail)
           | Unix.Unix_error (error, fn, arg) ->
             Some (generation_error path (unix_error_detail error fn arg)))
-        entries in
+        (List.filter_map Fun.id classified) in
     match failures with
     | [] -> sync_store store; Ok ()
     | error :: _ -> Error error

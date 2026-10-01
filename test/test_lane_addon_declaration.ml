@@ -149,12 +149,13 @@ let test_keeper_declaration_cannot_capture_another_fusion_owner () =
     Fusion_run_registry.register_running (Fusion_run_registry.global ()) ~run_id
       ~keeper:"another-keeper" ~preset:"default" ~roster:Fusion_types.preset_roster
       ~topology:Fusion_types.Simple ~started_at:1.;
-    let bytes = Printf.sprintf {|id="foreign-fusion"
+    let source id = Printf.sprintf {|id=%S
 run_id="editor-world"
 manifest_path="../../package.toml"
 [binding]
 sources=[{kind="fusion_run", source_id="fusion", run_id=%S}]
-|} run_id in
+|} id run_id in
+    let bytes = source "foreign-fusion" in
     let result = keeper_call config "masc_lane_declaration_save"
       (request ~mode:"create" ~file_name:"foreign.toml" bytes) in
     check bool "Keeper save rejects foreign Fusion capture" false (Tool_result.is_success result);
@@ -168,9 +169,10 @@ sources=[{kind="fusion_run", source_id="fusion", run_id=%S}]
       (request ~mode:"create" ~file_name:"own.toml" bytes) in
     check bool "Keeper can save its own source without granting shared read authority" true
       (Tool_result.is_success own);
-    check bool "operator declaration writer remains available" true
-      (Result.is_ok (Runtime.save_declaration ~access:Lane_addon_sources.Operator_configuration ~config
-        (request ~mode:"create" ~file_name:"operator.toml" bytes))))
+    match Runtime.save_declaration ~access:Lane_addon_sources.Operator_configuration ~config
+      (request ~mode:"create" ~file_name:"operator.toml" (source "operator-fusion")) with
+    | Ok _ -> ()
+    | Error error -> failf "operator declaration writer remains available: %s" error.Editor.message)
 
 let test_operator_reassignment_revokes_old_document_owner () =
   with_fixture (fun _clock config directory _root _started ->

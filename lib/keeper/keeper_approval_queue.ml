@@ -2658,7 +2658,10 @@ let project_resolution_chat delivery =
       ("chat projection: " ^ reason)
 ;;
 
-let complete_delivery ~(occasion : delivery_occasion) delivery =
+let complete_delivery ?reconciled_rule ~(occasion : delivery_occasion) delivery =
+  let reconcile_rule () = match reconciled_rule with
+    | Some outcome -> outcome
+    | None -> reconcile_delivery_rule delivery in
   let id = delivery.entry.id in
   let base_path = delivery.entry.audit_base_path in
   (match occasion with
@@ -2675,7 +2678,7 @@ let complete_delivery ~(occasion : delivery_occasion) delivery =
     if delivery.grant_consumed
     then (
       (* Consumption suppresses the wake, not the journaled rule mutation. *)
-      match reconcile_delivery_rule delivery with
+      match reconcile_rule () with
       | Error storage_error -> Error (Persistence_failed { approval_id = id; storage_error })
       | Ok (remembered_rule, remembered_rule_status, audit_receipts) ->
         (match remembered_rule_status with
@@ -2707,7 +2710,12 @@ let complete_delivery ~(occasion : delivery_occasion) delivery =
        | Error (Keeper_registry_event_queue.Hitl_enqueue_failed reason) ->
          Error (Delivery_failed { approval_id = id; reason })
        | Ok () ->
-         (match reconcile_delivery_rule delivery with
+         (* The one-shot wake and its notification do not depend on the
+            optional rule store. Keep any failed rule intent for recovery. *)
+         project_resolution_chat delivery;
+         signal_resolution_after_commit
+           ~base_path ~keeper_name:delivery.entry.keeper_name ~approval_id:id;
+         (match reconcile_rule () with
           | Error storage_error ->
             Error (Persistence_failed { approval_id = id; storage_error })
           | Ok (remembered_rule, remembered_rule_status, rule_audit_receipts) ->
@@ -2715,11 +2723,6 @@ let complete_delivery ~(occasion : delivery_occasion) delivery =
                A waiting direct operation must re-read the exact rejection as
                well as an approval; the wake alone is not the request store.
                A retained rejection is never a consumable approval grant. *)
-            project_resolution_chat delivery;
-            signal_resolution_after_commit
-              ~base_path
-              ~keeper_name:delivery.entry.keeper_name
-              ~approval_id:id;
             Ok { remembered_rule; remembered_rule_status; audit_receipts = rule_audit_receipts }))
 ;;
 
@@ -3069,20 +3072,28 @@ let install_persistence_internal ~after_load ~base_path =
   match installed with
   | Error storage_error -> Error (Install_storage_failed storage_error)
   | Ok (loaded_pending, loaded_deliveries, replay_projection_error) ->
+    (* A boot reconciles each optional rule once, before retirement. Replay
+       reuses both success and failure instead of appending duplicate audits. *)
+    let reconciled_rules = Hashtbl.create (List.length loaded_deliveries) in
+    let reconciliation_failures = Hashtbl.create (List.length loaded_deliveries) in
     let rule_failures =
       List.filter_map (fun delivery ->
         let result =
           match resolve_store_readiness_error ~base_path ~approval_id:delivery.entry.id with
           | Error _ as error -> error
           | Ok () ->
-            (match reconcile_delivery_rule delivery with
+            let outcome = reconcile_delivery_rule delivery in
+            Hashtbl.replace reconciled_rules delivery.entry.id outcome;
+            (match outcome with
              | Ok _ -> Ok ()
              | Error storage_error ->
                Error (Persistence_failed { approval_id = delivery.entry.id; storage_error })) in
         match result with
         | Ok () -> None
-        | Error error -> Some { approval_id = delivery.entry.id;
-                                reason = resolve_error_to_string error })
+        | Error error ->
+          Hashtbl.replace reconciliation_failures delivery.entry.id error;
+          Some { approval_id = delivery.entry.id;
+                 reason = resolve_error_to_string error })
         loaded_deliveries in
     let rule_failed id =
       List.exists (fun failure -> String.equal failure.approval_id id) rule_failures in
@@ -3110,15 +3121,19 @@ let install_persistence_internal ~after_load ~base_path =
           ; delivery_retirement_error
           }
       | delivery :: rest ->
-        if rule_failed delivery.entry.id
-        then replay count failures rest
-        else if delivery.grant_consumed
+        if delivery.grant_consumed
         then replay count failures rest
         else if delivery_wake_was_observed delivery
         then replay count failures rest
         else
-          (match complete_delivery ~occasion:Boot_replay delivery with
+          (match complete_delivery
+                   ?reconciled_rule:(Hashtbl.find_opt reconciled_rules delivery.entry.id)
+                   ~occasion:Boot_replay delivery with
            | Ok _ -> replay (count + 1) failures rest
+           | Error error when
+               Hashtbl.find_opt reconciliation_failures delivery.entry.id = Some error ->
+             (* The prepass already retained this exact failure. *)
+             replay count failures rest
            | Error error ->
              let failure =
                { approval_id = delivery.entry.id

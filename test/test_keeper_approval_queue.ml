@@ -1979,10 +1979,20 @@ let test_renewal_preserves_newer_rule_across_delivery_replay () =
       (match AQ.approved_resolution_state ~base_path ~id:id_a with
        | Ok Masc.Keeper_approval_queue_result.Resolution_unconsumed -> ()
        | _ -> Alcotest.fail "rule conflict revoked the one-shot approval");
+      let conflict_rows () =
+        let rows = match Keeper_approval.Audit.read_recent ~base_path ~n:100 () with
+          | Ok rows -> rows
+          | Error error -> Alcotest.fail (Keeper_approval.Audit.read_error_to_string error) in
+        let open Yojson.Safe.Util in
+        List.filter (fun row -> (row |> member "event") = `String "rule_conflicted"
+          && (row |> member "id") = `String id_a) rows |> List.length in
+      let before_boot = conflict_rows () in
       AQ.For_testing.reset_runtime_state ();
       let report = install_exn ~base_path in
       Alcotest.(check int) "conflicts do not become replay failures" 0
         (List.length report.delivery_replay_failures);
+      Alcotest.(check int) "one conflict audit per boot reconciliation"
+        (before_boot + 1) (conflict_rows ());
       status "replayed" (resolve id_b 2000.0);
       status "conflicted" (resolve id_a 1000.0);
       (match Rules.list_rules ~base_path () with
@@ -5677,6 +5687,26 @@ let test_one_delivery_replay_failure_does_not_stop_others () =
                ~base_path
                ~keeper_name
                ~approval_id:successful_id));
+       List.iter (fun approval_id ->
+         Alcotest.(check bool) "failed optional rule still delivers one-shot wake" true
+           (Option.is_some (durable_resolution_opt ~base_path ~keeper_name ~approval_id)))
+         [ first_id; second_id ];
+       let open Yojson.Safe.Util in
+       let retained = read_pending_snapshot ~base_path |> member "deliveries" |> to_list in
+       List.iter (fun approval_id ->
+         Alcotest.(check bool) "failed rule intent remains durable" true
+           (List.exists (fun delivery ->
+             (delivery |> member "entry" |> member "id") = `String approval_id
+             && (delivery |> member "rule_intent") <> `Null) retained))
+         [ first_id; second_id ];
+       Unix.rmdir rules_path;
+       AQ.For_testing.reset_runtime_state ();
+       let recovered = install_exn ~base_path in
+       Alcotest.(check int) "repaired rule store clears recovery failures" 0
+         (List.length recovered.delivery_replay_failures);
+       (match Rules.list_rules ~base_path () with
+        | Ok rules -> Alcotest.(check int) "both retained intents recover" 2 (List.length rules)
+        | Error error -> Alcotest.fail (Rule_types.rule_store_error_to_string error));
        List.iter
          (fun approval_id ->
             match durable_resolution_opt ~base_path ~keeper_name ~approval_id with

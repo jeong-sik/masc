@@ -4,7 +4,7 @@ type t =
   | Ready of { policy : Candle_config.policy; balance : Candle_balance.t; events : Candle_event.t list }
 
 let read ~now ~base_path =
-  match Candle_status.current_view ~now ~base_path with
+  match Candle_status.observed_view ~now ~base_path with
   | Ok view -> Ready {policy=view.policy;balance=view.balance;events=view.events}
   | Error Candle_status.Off -> Off
   | Error error -> Disabled (Candle_status.error_to_string error)

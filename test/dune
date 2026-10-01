@@ -3691,6 +3691,8 @@
  (libraries masc_tui_link_preview masc_tui_image_preview
   masc_tui_answering
   masc_tui_keys
+  masc.fusion_core
+  masc_tui_fetched
   alcotest
   ast_grep
   astring

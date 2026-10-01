@@ -63,7 +63,7 @@ let ok label = function
 ;;
 
 let ready_confirmation_events ~base_path =
-  P.For_testing.path ~base_path ~keeper_name:"alpha"
+  P.ledger_path ~base_path ~keeper_name:"alpha"
   |> Fs_compat.load_file
   |> String.split_on_char '\n'
   |> List.filter_map (fun line ->
@@ -1385,15 +1385,32 @@ let test_flow_already_started_blocks_unbound_without_hot_retry () =
   Alcotest.(check int) "one affine-flow replay observation" 1 !calls
 ;;
 
-let test_domain_error_preserves_classification_and_bound_progress () =
+let test_malformed_answer_quarantines_then_requeues_and_settles () =
   with_temp_base "board-attention-worker-domain-invalid" @@ fun base_path ->
   let persisted = record ~base_path (candidate ()) in
   let exact = provenance "domain-invalid" in
+  let malformed =
+    `Assoc
+      [ "verdicts",
+        `List
+          [ `Assoc
+              [ "candidate_id", `String persisted.candidate_id
+              ; "decision", `String "relevant"
+              ; "reason", `String "wrong field"
+              ]
+          ]
+      ]
+  in
+  let detail =
+    match J.batch_of_yojson malformed with
+    | Ok _ -> Alcotest.fail "the malformed answer was accepted"
+    | Error detail -> detail
+  in
   let calls = ref 0 in
   let execute ~before_dispatch ~before_advance:_ _candidate =
     incr calls;
     ok "bind domain-invalid attempt" (before_dispatch exact);
-    Error (E.Domain_output_invalid "singleton candidate identity mismatch")
+    Error (E.Domain_output_invalid detail)
   in
   (match
      ok
@@ -1404,13 +1421,23 @@ let test_domain_error_preserves_classification_and_bound_progress () =
        { candidate_id
        ; reason =
            P.Domain_output_invalid
-             { detail = "singleton candidate identity mismatch"
-             ; progress = Some (P.Bound durable)
-             }
+             { detail = observed; progress = Some (P.Bound durable) }
        }
      when String.equal candidate_id persisted.candidate_id
+          && String.equal observed detail
           && same_provenance durable exact -> ()
    | _ -> Alcotest.fail "domain error lost its durable exact binding");
+  let quarantined = load_one_candidate ~base_path in
+  let blocked = load_one_partition ~base_path in
+  let quarantine =
+    match quarantined.status, blocked.state with
+    | A.Quarantine { quarantine; phase = A.Quarantined },
+      P.Blocked { reason = P.Domain_output_invalid { detail = observed; _ }; _ }
+      when String.equal observed detail
+           && String.equal blocked.candidate_id persisted.candidate_id ->
+      quarantine
+    | _ -> Alcotest.fail "malformed answer did not persist Blocked and Quarantine"
+  in
   (match
      ok
        "bound domain error is not retried"
@@ -1418,7 +1445,74 @@ let test_domain_error_preserves_classification_and_bound_progress () =
    with
    | W.Idle -> ()
    | _ -> Alcotest.fail "quarantined domain error became claimable");
-  Alcotest.(check int) "one domain-invalid exact execution" 1 !calls
+  Alcotest.(check int) "one domain-invalid exact execution" 1 !calls;
+  let request : Q.request =
+    { candidate_id = persisted.candidate_id
+    ; expected_quarantine_id = quarantine.quarantine_id
+    ; decision = Q.Acknowledge_and_requeue
+    }
+  in
+  let command =
+    match
+      Q.make
+        ~keeper_name:"alpha"
+        ~raw_partition_id:blocked.partition_id
+        ~requested_by:"operator-test"
+        request
+    with
+    | Ok command -> command
+    | Error error ->
+      Alcotest.failf "requeue command rejected: %s" (Q.input_error_to_string error)
+  in
+  (match Q.execute ~now:30.0 ~base_path command with
+   | Ok _ -> ()
+   | Error error ->
+     Alcotest.failf "requeue failed: %s" (Q.execution_error_label error));
+  (match (load_one_candidate ~base_path).status, (load_one_partition ~base_path).state with
+   | A.Quarantine { phase = A.Requeued _; _ }, P.Ready -> ()
+   | _ -> Alcotest.fail "authorized requeue did not restore Ready");
+  let recovered = provenance "domain-invalid-recovered" in
+  let valid =
+    `Assoc
+      [ "verdicts",
+        `List
+          [ `Assoc
+              [ "candidate_id", `String persisted.candidate_id
+              ; "decision", `String "relevant"
+              ; "rationale", `String "recovered after requeue"
+              ]
+          ]
+      ]
+  in
+  let recovered_verdict =
+    match ok "parse recovered answer" (J.batch_of_yojson valid) with
+    | [ ({ candidate_id; verdict } : J.batch_item) ]
+      when String.equal candidate_id persisted.candidate_id -> verdict
+    | _ -> Alcotest.fail "recovered answer did not cover the same candidate"
+  in
+  let execute_valid ~before_dispatch ~before_advance:_ _candidate =
+    ok "bind recovered attempt" (before_dispatch recovered);
+    Ok { (judgment recovered J.Relevant) with verdict = recovered_verdict }
+  in
+  (match
+     ok
+       "judge authorized requeue"
+       (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute:execute_valid)
+   with
+   | W.Judgment_completed { candidate_id; _ }
+     when String.equal candidate_id persisted.candidate_id -> ()
+   | _ -> Alcotest.fail "authorized requeue did not complete the same candidate");
+  (match
+     ok
+       "settle recovered candidate"
+       (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha")
+   with
+   | W.Partition_settled { candidate_id; _ }
+     when String.equal candidate_id persisted.candidate_id -> ()
+   | _ -> Alcotest.fail "recovered candidate did not settle");
+  match (load_one_candidate ~base_path).status, (load_one_partition ~base_path).state with
+  | A.Consumed { delivery = A.Enqueued_to_keeper_lane; _ }, P.Settled _ -> ()
+  | _ -> Alcotest.fail "recovered candidate was not consumed and settled"
 ;;
 
 (* A Pending candidate the lane could not judge because every slot refused for
@@ -2410,7 +2504,7 @@ let test_candidate_quarantine_restores_a_missing_partition () =
     | Error error ->
       Alcotest.failf "operator command rejected: %s" (Q.input_error_to_string error)
   in
-  let partition_path = P.For_testing.path ~base_path ~keeper_name:"alpha" in
+  let partition_path = P.ledger_path ~base_path ~keeper_name:"alpha" in
   Sys.remove partition_path;
   ignore
     (ok
@@ -3886,9 +3980,9 @@ let () =
             `Quick
             test_flow_already_started_blocks_unbound_without_hot_retry
         ; Alcotest.test_case
-            "domain error preserves classification and Bound"
+            "malformed answer quarantines, requeues, and settles"
             `Quick
-            test_domain_error_preserves_classification_and_bound_progress
+            test_malformed_answer_quarantines_then_requeues_and_settles
         ; Alcotest.test_case
             "CLI exhaustion preserves prior domain rejection"
             `Quick

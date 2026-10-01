@@ -464,11 +464,18 @@ let task_detail_pane (state : state) ~rows ~cols (task : Masc_domain.task) buf =
    with
    | None -> ()
    | Some row ->
-     (match row.goal_ids with
-      | [] ->
+     (match state.task_goal_links, row.goal_ids with
+      | Masc_tui_agenda.Not_read, _ ->
+        box_line buf cols
+          (Ansi.dim ^ "  Goal        (membership unknown: links not read)" ^ Ansi.reset)
+      | Masc_tui_agenda.Read_failed reason, _ ->
+        box_line buf cols
+          (Ansi.dim ^ "  Goal        (membership unknown: "
+           ^ Terminal_text.single_line reason ^ ")" ^ Ansi.reset)
+      | Masc_tui_agenda.Read _, [] ->
         box_line buf cols
           (Ansi.dim ^ "  Goal        (not linked to a goal)" ^ Ansi.reset)
-      | goal_ids ->
+      | Masc_tui_agenda.Read _, goal_ids ->
         List.iteri
           (fun index goal_id ->
             let label = if index = 0 then "Goal" else "" in
@@ -1362,9 +1369,9 @@ let render_approvals (state : state) =
            "  %s[w] Workspace: %s  |  [e] Outside services: %s%s"
            (Theme.info ())
            (match Masc.Keeper_gate_mode.of_string modes.Tui_decode.glm_workspace with
-            | Some mode -> gate_mode_label mode | None -> "Unknown mode")
+            | Some mode -> Masc_tui_palette.gate_mode_label mode | None -> "Unknown mode")
            (match Masc.Keeper_gate_mode.of_string modes.Tui_decode.glm_external with
-            | Some mode -> gate_mode_label mode | None -> "Unknown mode")
+            | Some mode -> Masc_tui_palette.gate_mode_label mode | None -> "Unknown mode")
            Ansi.reset
      (* No prefix: [data_unreliable_row] already opens "(data unreliable: "
         and the loader's message already opens "gate load failed:", so a third
@@ -8562,8 +8569,12 @@ let harness_goal_lines (state : state) (verdict : Masc.Tui_decode.harness_verdic
         (fun (goal : Tui_decode.planning_goal) -> String.equal goal.pg_id id)
         snapshot.Tui_decode.pl_goals)
   in
-  match goal_ids with
-  | [] ->
+  match state.task_goal_links, goal_ids with
+  | Masc_tui_agenda.Not_read, _ ->
+      [ Ansi.dim, "  Towards      membership unknown: goal links not read" ]
+  | Masc_tui_agenda.Read_failed reason, _ ->
+      [ Ansi.dim, "  Towards      membership unknown: " ^ Terminal_text.single_line reason ]
+  | Masc_tui_agenda.Read _, [] ->
     (* Two different silences, told apart. A task this screen has never seen
        (the backlog has not loaded, or the verdict judged something already
        archived) is not the same as a task that serves no goal, and drawing
@@ -8577,7 +8588,7 @@ let harness_goal_lines (state : state) (verdict : Masc.Tui_decode.harness_verdic
       [ Ansi.dim, "  Towards      this task is not linked to a goal" ]
     else
       [ Ansi.dim, "  Towards      the judged task is not in this backlog" ]
-  | goal_ids ->
+  | Masc_tui_agenda.Read _, goal_ids ->
     (Ansi.bold, "  TOWARDS")
     :: List.concat_map
          (fun id ->
@@ -15707,7 +15718,7 @@ let render_palette (state : state) =
   let typed_question =
     match state.palette_mode with
     | Masc_tui_types.Palette_jump ->
-        Masc_tui_types.palette_typed_question state.palette_query
+        Masc_tui_palette.palette_typed_question state.palette_query
     | Masc_tui_types.Palette_choice _ -> None
   in
   let explicit_question =
@@ -15715,7 +15726,7 @@ let render_palette (state : state) =
     | Some (question, Some symbol) -> Some (question, symbol)
     | Some (_, None) | None -> None
   in
-  let matches = Masc_tui_types.palette_matches state in
+  let matches = Masc_tui_palette.palette_matches state in
   let total = List.length matches in
   let cursor = max 0 (min state.palette_cursor (total - 1)) in
   let origin =
@@ -15730,7 +15741,7 @@ let render_palette (state : state) =
     | Masc_tui_types.Palette_jump ->
         (" MASC Command palette", ":", if Option.is_some typed_question then "ask" else "run")
     | Masc_tui_types.Palette_choice { choice_question; choice_line } ->
-        let names = List.length (Masc_tui_types.code_cursor_line_symbols state) in
+        let names = List.length (Masc_tui_palette.code_cursor_line_symbols state) in
         ( Printf.sprintf " %s · %d names on line %d" choice_question names choice_line
         , "filter:", "ask" )
   in
@@ -16144,6 +16155,17 @@ let agenda_viewport (state : state) =
   let count = List.length (agenda_lines state) in
   (count, overlay_window_height ~rows ~count)
 
+let agenda_scroll_position (state : state) =
+  let lines = agenda_lines state in
+  let count, height = agenda_viewport state in
+  let scroll = Masc_tui_scroll.normalize ~count ~height state.agenda_scroll in
+  match state.agenda_navigation with
+  | Agenda_read_rows -> scroll
+  | Agenda_follow_selection ->
+      (match Agenda.selected_index lines ~selected:state.agenda_selected with
+       | Some cursor -> Masc_tui_scroll.ensure_visible ~cursor ~height scroll
+       | None -> scroll)
+
 let answering_viewport (state : state) =
   let terminal_rows, _cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
@@ -16274,8 +16296,8 @@ let render_agenda (state : state) =
      naming a key that would do nothing. *)
   let hints =
     match Agenda.target_indexes lines with
-    | [] -> "j/k:scroll  Esc:close"
-    | _ -> "j/k:move  Enter:open  Esc:close"
+    | [] -> "j/k:scroll  PgUp/PgDn:page  g/G:first/last  Esc:close"
+    | _ -> "j/k:move  PgUp/PgDn:page  g/G:first/last  Enter:open  Esc:close"
   in
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"agenda"
     ~frame:Chrome_overlay
@@ -16285,15 +16307,9 @@ let render_agenda (state : state) =
        keypress bounds the cursor against that pair. *)
     ~body:(fun ~budget:_ c ->
       let count, height = agenda_viewport state in
-      let scroll =
-        Masc_tui_scroll.normalize ~count ~height state.agenda_scroll
-      in
-      (* A refresh can move the selected identity beyond the old viewport.
-         Reveal its new row without changing which target Enter owns. *)
-      let scroll = match selected with
-        | Some cursor -> Masc_tui_scroll.ensure_visible ~cursor ~height scroll
-        | None -> scroll
-      in
+      (* Selection follows refreshes while navigating targets. Reading pages
+         owns its window, so repainting cannot pull it away from schedules. *)
+      let scroll = agenda_scroll_position state in
       List.iteri
         (fun index line ->
           if index >= scroll && index < scroll + height then

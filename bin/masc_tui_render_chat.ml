@@ -3632,8 +3632,13 @@ let render_keeper_message (state : state) =
     if split then begin
       let left_buf = Buffer.create 1024 in
       let pane_rows = count_frame_lines chat_buf in
-      let portrait = Masc_tui_chat_portrait.shown ~name:keeper_name
-        ~rows:pane_rows ~cols:keeper_roster_pane_cols in
+      let portrait =
+        match Keeper_control.liveness_of_roster state.keeper_roster keeper_name with
+        | Keeper_control.Present runtime ->
+            Masc_tui_chat_portrait.shown ~name:keeper_name ~portrait:runtime.kr_portrait
+              ~rows:pane_rows ~cols:keeper_roster_pane_cols
+        | Keeper_control.Unobserved | Keeper_control.Absent | Keeper_control.Invalid _ -> None
+      in
       let roster_rows = match portrait with
         | None -> pane_rows
         | Some portrait -> portrait.Masc_tui_chat_portrait.roster_rows in

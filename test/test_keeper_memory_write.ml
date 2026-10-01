@@ -1156,6 +1156,13 @@ let test_one_unreadable_source_does_not_stop_the_pass () =
           (contains ~needle:("claim about " ^ unreadable) inline);
         Alcotest.(check bool) "tool-less fallback retains verified facts" true
           (contains ~needle:("claim about " ^ unchanged) inline);
+        let search = Runtime.keeper_memory_search_json ~config ~meta
+            ~ctx_work:(Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"")
+            ~args:(`Assoc ["query", `String "claim about";
+                          "source", `String "current"; "limit", `Int 10])
+            |> Yojson.Safe.from_string in
+        Alcotest.(check (list string)) "search returns only revalidated source claims"
+          ["claim about " ^ unchanged] (match_texts search);
         Source.revalidate ~config ~meta ~keepers_dir ~now:200.0 ())
   in
   match revalidated with

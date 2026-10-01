@@ -692,10 +692,9 @@ status: reference
   MASC 자체의 슬롯 대기가 아니라 시도한 런타임 후보의 실패(Server_error와 같은 층위)로 분류되며,
   클래스 라벨은 `provider_capacity`다(#38290). 이 실패는 다음 런타임 후보로 walk하며 503 과 같이
   다음 후보로 넘기고 이 후보를 뒤로 미룬다. 영수증 `fallback_reason`과 이벤트 에러 `variant`도
-  같은 조건을 같은 `provider_capacity` 이름으로 적는다(#38858). 이 조건의 runtime blocker class 는
-  만드는 곳이 없어 지웠다.
-  `capacity_backpressure`라는 글자는 다른 개념인 provider `timeout_phase`(용량·슬롯을 기다리다
-  끝난 timeout 단계) 라벨로만 남는다. 원문 문자열로 거르는 질의는 필드를 구분해야 한다.
+  같은 조건을 같은 `provider_capacity` 이름으로 적는다(#38858).
+  `capacity_backpressure`는 provider `timeout_phase`(용량·슬롯을 기다리다 끝난 timeout
+  단계)의 라벨이다. 원문 문자열로 거르는 질의는 필드를 구분해야 한다.
   `ECONNRESET`은 요청을 보낸 뒤(`sent`) 발생한 연결 단절로, 연결 수립 전 거부(`connection_refused`)와
   구분되는 `connection_reset`으로 기록된다(#38518). 재시도 가능 여부·Librarian 크기 판정 제외 등
   처리 정책은 `connection_refused`와 같으나 wire 및 운영자 요약 라벨이 분리된다.
@@ -1539,8 +1538,8 @@ status: reference
   `drop`으로 `Dropped`로, `reopen`으로 `Executing`으로 옮길 수 있다. 그 뒤에
   도착한 verdict는 거절된다. 완료 verdict는 verifier가 기록하고, 사람의
   확인이 `Completed` 전이를 확정한다. `goal_phase.mli`의
-  `admits_self_directed_progress`가 이 경계를 정의한다. TUI Overview 투영은
-  `Goals 블록 (Overview Goals)`를 따른다.
+  `admits_self_directed_progress`가 이 경계를 정의한다. TUI 첫 화면의 투영은
+  `Dashboard Goals`를 따른다.
 
 **Goal Measurement (목표 관측값)**
 : Goal의 선언된 지표(`metric`)를 누가 언제 얼마로 봤는지 남긴 기록 한 건. 값, 증거,
@@ -1555,7 +1554,7 @@ status: reference
     (`criterion_revision`이 달라지면) 옛 관측은 새 기준의 값으로 보이지 않고
     `not_recorded`가 된다. Goal을 지우면 그 관측도 지운다.
   - 화면: Goal 트리·상세와 `masc_goal_list`가 `reported`·`not_recorded`·`unavailable`·
-    `not_loaded` 중 하나로 보여 준다. `Goals 블록 (Overview Goals)`의 진행 바는 이 값이
+    `not_loaded` 중 하나로 보여 준다. `Dashboard Goals`의 진행 바는 이 값이
     아니라 연결된 Task 완료 수다.
   → [Goal_measurement](../../lib/goal/goal_measurement.mli)
 
@@ -2211,10 +2210,8 @@ status: reference
 
 **Shutdown Admission Fence (종료 진입 차단막)**
 : 종료 작업 진행 중인 Keeper의 재부팅을 막아 원장 정합성을 지키는 진입 차단 술어(`Keeper_shutdown_types.requires_admission_fence`).
-  - **단계별 차단막 해제 규칙 (#31738·#38569·#38859)**: 과거에는 `Blocked` 상태의 종료 작업에 대해 실패 단계와
-    무관하게 차단막을 영구 유지하여, 영속 상태가 전혀 파괴되지 않은 Keeper도 수동 교체(`Superseded`) 없이는
-    영구히 재부팅할 수 없는 결함이 있었다. 현재는 실패 단계(`failure_stage`)를 `failure_stage_boot_replay`로
-    분류한다:
+  - **단계별 차단막 해제 규칙 (#31738·#38569·#38859)**: `Blocked` 상태의 종료 작업은 실패 단계
+    (`failure_stage`)를 `failure_stage_boot_replay`로 분류한다:
     1. **부팅 재실행 대상 (부팅 사이에는 차단막 없음)**: 메타데이터·세션·레지스트리를 건드리기 전의 단계.
        `Task_discovery`·`Record_persist`·`Meta_read`는 `Replay_unsettled_tasks`(이 작업의 반환 영수증이 있는
        태스크만 정산된 것으로 보고 나머지를 정산), `Meta_update`·`Pending_confirm_cleanup`은

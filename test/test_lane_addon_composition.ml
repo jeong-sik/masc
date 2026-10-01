@@ -528,8 +528,15 @@ let fusion_package (package : Types.package) ~binding ~sources =
 sys.path.insert(0, sys.argv[1])
 from test_packages import ProtocolCase
 summaries = {
-    "fusion-results": "Fusion status and retained Board evidence are available in structuredContent with exact run identity.",
-    "fusion-report": "Fusion reports are retained in structuredContent with exact upstream coordinates and evidence.",
+    "fusion-results": lambda output: (
+        "Fusion status and retained Board evidence are available in structuredContent with exact run identity."
+        if any(row["lane_id"] == "fusion/result" for row in output["rows"])
+        else "Fusion status is available in structuredContent with exact run identity; no retained Board evidence is available in this capture."
+        if output["rows"] else "No Fusion snapshot rows are available; structuredContent reports the observation coverage."),
+    "fusion-report": lambda output: (
+        "Fusion reports are retained in structuredContent with exact upstream coordinates and evidence."
+        if any(row["lane_id"] == "fusion/report" for row in output["rows"])
+        else "No Fusion reports are available; inspect structuredContent coverage for missing inputs."),
 }
 output = ProtocolCase().call(sys.argv[2], json.loads(sys.argv[3]), json.loads(sys.argv[4]),
                              expected_summary=summaries[sys.argv[2]])
@@ -839,7 +846,10 @@ let test_operator_attached_private_fusion_rechecks_owner () = with_fixture (fun 
   check int "replacement owner's observations stay private" 0
     (list "observations" denied |> List.length);
   check string "dynamic worker names ownership refusal"
-    "Fusion run is unavailable to this caller" (text "detail" denied))
+    "Fusion run is unavailable to this caller" (text "detail" denied);
+  ignore (Runtime.dispatch ~caller:"operator" ~access:Lane_addon_sources.Operator_configuration
+    ~config ~operation:Runtime.Detach (`Assoc ["instance_id",`String id]) |> unwrap);
+  await clock (fun () -> text "kind" (member "phase" (instance config id)) = "detached"))
 
 let test_saved_document_keeps_repair_authority_after_source_eviction () =
   with_fixture (fun clock config root directory _received _ ->

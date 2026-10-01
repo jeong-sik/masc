@@ -106,7 +106,7 @@ export function KeeperItemsPanel({ keeper }: { keeper: Keeper }) {
     ${current.kind === 'loaded' && current.value.status === 'disabled' ? html`<p role="alert">Candle 설정을 사용할 수 없습니다: ${current.value.reason}</p>` : null}
     ${account ? html`
       <div class="flex flex-wrap items-center gap-5 rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] p-4">
-        <${KeeperPortrait} name=${keeper.name} reading=${keeper.portrait ?? { state: 'unavailable', reason: '초상화 관측 없음' }} sizePx=${112} fallback=${html`<${KeeperBadge} id=${keeper.name} size="lg" variant="sigil" />`} />
+        <${KeeperPortrait} name=${keeper.name} accountRevision=${keeper.candle_account_revision} reading=${keeper.portrait ?? { state: 'unavailable', reason: '초상화 관측 없음' }} sizePx=${112} fallback=${html`<${KeeperBadge} id=${keeper.name} size="lg" variant="sigil" />`} />
         <div>
           <div class="text-xs text-[var(--color-fg-muted)]">현재 잔액</div>
           <div class="text-xl font-semibold tabular-nums text-[var(--color-fg-primary)]">${candle(account.balance_milli)}</div>

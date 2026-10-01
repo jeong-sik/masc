@@ -56,8 +56,8 @@ describe('KeeperPortrait', () => {
   })
 
   const fallback = html`<span data-testid="fallback">KB</span>`
-  const portrait = (name: string, reading: KeeperPortraitReading = ready) =>
-    html`<${KeeperPortrait} name=${name} reading=${reading} sizePx=${40} fallback=${fallback} />`
+  const portrait = (name: string, reading: KeeperPortraitReading = ready, accountRevision?: string) =>
+    html`<${KeeperPortrait} name=${name} reading=${reading} accountRevision=${accountRevision} sizePx=${40} fallback=${fallback} />`
   const shown = () => container.querySelector('img[data-testid="keeper-portrait"]') as HTMLImageElement | null
 
   it('reserves its box while the portrait is on its way', () => {
@@ -126,6 +126,19 @@ describe('KeeperPortrait', () => {
     render(portrait('wick-tester'), container)
     await waitFor(() => expect(shown()?.getAttribute('src')).toBe('blob:portrait-1'))
     expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('retries refused A equipment after a newer A account observation', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response('', { status: 409 }))
+      .mockResolvedValueOnce(png())
+    vi.stubGlobal('fetch', fetchMock)
+    render(portrait('wick-tester', ready, 'a'.repeat(64)), container)
+    await waitFor(() => expect(container.querySelector('[data-testid="keeper-portrait-refused"]')).not.toBeNull())
+    render(portrait('wick-tester', ready, 'b'.repeat(64)), container)
+    await waitFor(() => expect(shown()).not.toBeNull())
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchMock.mock.calls[0][0]).toBe(fetchMock.mock.calls[1][0])
   })
 
   it('draws the fallback when the bytes are not an image it can show', async () => {

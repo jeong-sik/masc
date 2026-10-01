@@ -160,6 +160,7 @@ let purchases config =
   |> List.filter_map (fun (event : E.t) ->
     match event.body with
     | E.Purchased p -> Some (p.keeper, Item.id p.item, p.amount_milli)
+    | E.Equipped _ -> None
     | E.Snapshot _
     | E.Payout_owed _
     | E.Candidates _

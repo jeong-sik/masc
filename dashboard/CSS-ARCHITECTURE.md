@@ -277,8 +277,7 @@ A drift-detection lint script would:
    compare hex values.
 3. Fail CI on mismatch; allow `// approx` to opt out.
 
-The lint follows the file-level grep pattern established in
-RFC-0063 §7-B (`scripts/ci/check-drain-loop-yields.sh`).
+The lint follows the file-level grep pattern established in RFC-0063 §7-B.
 
 A structural alternative — typed mirror codegen (e.g. `mirrorOf('--bg-2')`
 with compile-time token lookup or a codemod that verifies the resolved hex

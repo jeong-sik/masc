@@ -1,0 +1,24 @@
+::group::{Keeper portrait HTTP}
+Testing `[1mKeeper portrait HTTP[0m'.
+[2mThis run has ID `OHOZM8FM'.
+
+[0m  [33m[SKIP][0m        [36manswer[0m          0   route is exact.
+  [33m[SKIP][0m        [36manswer[0m          1   default and requested size.
+  [33m[SKIP][0m        [36manswer[0m          2   bad sizes are refused, not clamped.
+  [33m[SKIP][0m        [36manswer[0m          3   name, size, presence, in that order.
+  [33m[SKIP][0m        [36manswer[0m          4   same name, same bytes.
+  [33m[SKIP][0m        [36manswer[0m          5   a held tag is answered without drawing.
+  [33m[SKIP][0m        [36manswer[0m          6   tags follow build, name and size.
+  [33m[SKIP][0m        [36manswer[0m          7   unscoped tags follow the bytes.
+  [33m[SKIP][0m        [36manswer[0m          8   cache stays within its byte budget.
+  [33m[SKIP][0m        [36manswer[0m          9   equipment wire changes actual PNG and cac...
+  [33m[SKIP][0m        [36mrouter[0m          0   PNG with a strong tag and 304.
+  [33m[SKIP][0m        [36mrouter[0m          1   400 and 404.
+  [33m[SKIP][0m        [36mrouter[0m          2   strict auth needs a read token.
+  [33m[SKIP][0m        [36mrouter[0m          3   GET leaves keeper metadata untouched.
+  [32m[OK][0m          [36mrouter[0m          4   purchase equip reset and remote portrait ...
+
+Full test results in `[36m~/work/masc/masc/_build/default/test/_build/_tests/Keeper portrait HTTP[0m'.
+[32mTest Successful[0m in 0.648s. 1 test run.
+::endgroup::
+[2026-09-29 15:59:16] [INFO] [MCP] Tag registry initialized: 190 tools registered

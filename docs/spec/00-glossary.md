@@ -101,6 +101,37 @@ status: reference
 : 같은 MASC 상태에 접근하고 관찰하는 사용자 표면. TUI, MCP, Dashboard처럼 서로 다른
   입구를 가리키며, 각 표면은 독립 상태를 소유하지 않는다.
 
+**Home (TUI Home 화면)**
+: TUI 최상단 대시보드(Overview) 탭에서 제공되는 운영자 중심의 의사결정·대화 진입 화면.
+  전체 통계와 차트 나열 위주의 집계형 구성을 대체하여, 사람 운영자의 직접 판단과 처리가 필요한
+  개별 의사결정(Decisions) 카드, 마지막 방문 대화 상대 재개(Continue), Keeper 선택/생성,
+  간결한 작업 흐름 요약(Dashboard Goals 등)을 제공한다(#39817·#40137·#40152).
+  - 요청 식별과 탐색(`home_request`·`home_action`): 사람이 판단해야 하는 대기 요청은
+    `home_request` 닫힌 합타입 6개(`Home_held_call`·`Home_gate_request`·`Home_operator_request`·
+    `Home_question`·`Home_goal_confirmation`·`Home_operator_task`)로 식별한다. 탐색 액션 대상
+    `home_action` 7개(`Home_approvals`·`Home_request`·`Home_agenda`·`Home_resume`·`Home_read_last`·
+    `Home_choose_keeper`·`Home_create_keeper`)를 `j`/`k` 또는 방향키로 선택하고 `Enter`로
+    원천 화면(Approvals·Agenda·Chat)을 열며, `Enter` 진입은 순수 탐색일 뿐 의사결정(승인/거절)을
+    제출하지 않는다(`requests_are_navigation`·`assert_no_decision_posts`).
+  - 복귀와 선택 보존: 열람 화면에서 `Esc`를 누르면 Home으로 복귀하며, 직전 선택 항목(`home_selected`)과
+    스크롤 윈도우(`home_decision_scroll`)를 그대로 유지한다. 새로운 최상단 탐색이 발생하면 직전 복귀
+    컨텍스트는 정리된다.
+  - 인간 개입 분리: 자동 게이트 작업(`approval_item_needs_person = false`)이나 일반 인시던트는
+    의사결정 목록에서 제외되어 사람 운영자의 의사결정 대기 목록을 침범하지 않는다.
+  - 실패 정직성과 결손 보존: 특정 출처의 읽기 실패나 알 수 없는 상태는 "대기 중인 의사결정 0건"으로
+    왜곡하지 않고 실패/알 수 없음 상태를 화면에 명시한다. 성공한 출처의 요청 행은 정상 유지된다.
+  - 대화 지속과 수신 영수증(`home_chat_receipt`): 마지막 방문 대화 상대를 `[tui].last_chat_keeper`에
+    저장하고 Continue 카드로 연결한다. 수신 상태는 `home_chat_receipt` 5개(`No_chat_receipt`·
+    `Recorded_chat`·`Session_chat`·`Unconfirmed_chat`·`Unreadable_chat_receipt`)로 투영하며,
+    고정 시작 설정(`opening = "keeper"`)은 마지막 대화 기록으로 보지 않는다. 작성 중인 메시지는
+    Keeper별 드래프트 저장소에 보존된다.
+  - 뷰포트 적응: 터미널 높이가 짧은 화면에서는 의사결정과 Continue 행이 부가 컨텍스트(Health/완료 작업)보다
+    화면 예산을 우선 할당받으며, 160열 이상의 넓은 터미널에서도 Recent 패널은 기본 닫힘 상태를
+    유지한다(`Ctrl-L`로 명시적 열기).
+  → [Masc_tui_types](../../bin/masc_tui_types.ml) ·
+  [docs/TUI-GUIDE.md](../TUI-GUIDE.md) ·
+  [docs/design/tui/HOME-JOURNEY-ACCEPTANCE.md](../design/tui/HOME-JOURNEY-ACCEPTANCE.md)
+
 **Dashboard Goals**
 : TUI 첫 화면에서 Goal의 기록된 측정값과 연결된 Task 완료 수를 별도로 요약한다.
   Goal의 실제 값은 동일한 Goal ID·기준 개정·지표·목표를 가진 관측 기록에서만 읽는다.
@@ -293,11 +324,12 @@ status: reference
   Plaster·Freckles·Beard 7종), `neck`(Bare_neck·Scarf·Bow_tie·Medal 4종), `head`(Bare_head·Bow·
   Crown·Beanie 4종), `hand`(Empty_hand·Book·Mug·Quill 4종), `base`(No_dish·Dish of Gilt/Silver/Oak 4종).
   시작 장비는 이름의 별도 해시로 정해져 몸체와 독립적이다. MASC 자체의 고유 양초인 `mascot`은
-  TUI 시작 화면과 `/about`에 표시된다(Ivory 왁스, Ember 불꽃, Long Crimson 뿔, Bean 눈, "w" 입,
+  TUI `/about`에 표시된다(Ivory 왁스, Ember 불꽃, Long Crimson 뿔, Bean 눈, "w" 입,
   Blush, Gilt 접시, 무착용). MCP 도구 `keeper_portrait_read`는 PNG 아티팩트와 시작 장비,
   액세서리 카탈로그를 반환하며 `preview_item`으로 장착 권한 변경 없이 임시 미리보기가 가능하다.
-  TUI에서는 상단 바 축약 캔들, 모자이크 카드, 엠블럼 화면에 렌더된다. 시작 화면과 `/about`의
-  마스코트 표시 스타일은 2D 초상화인 `painted`와 3D 점묘 양초인 `dotted`가 있다.
+  TUI에서는 Keeper 상세 화면 맨 위, 대화 화면의 Keeper 목록 아래, 아이템 미리보기, `/about`에
+  그려진다. 터미널이 알려 준 능력에 따라 실제 픽셀, 반블록 모자이크, 그림 없음 중 하나로 나온다.
+  `/about`의 마스코트 표시 스타일은 2D 초상화인 `painted`와 3D 점묘 양초인 `dotted`가 있다.
   → [Keeper_portrait_look](../../lib/keeper_portrait/keeper_portrait_look.mli) ·
   [Keeper_portrait_item](../../lib/keeper_portrait/keeper_portrait_item.mli) ·
   [Keeper_portrait_draw](../../lib/keeper_portrait/keeper_portrait_draw.mli) ·
@@ -567,6 +599,30 @@ status: reference
   → [Masc_tui_types](../../bin/masc_tui_types.ml),
   [Masc_tui_render_chat](../../bin/masc_tui_render_chat.ml)
 
+**Chat Queue (TUI 채팅 큐 / 대기 입력 가시성)**
+: TUI 채팅 화면에서 사용자가 제출한 입력 메시지가 실제 Keeper 턴(turn) 시작에 이르기까지의
+  전송·대기 생애주기를 가시화하고 보존하는 표면(#40340 `2fd7a34c67`).
+  서버 접수 전후의 미결 상태를 단순히 지우거나 "대기 0건" 또는 확정 큐잉으로 왜곡하지 않고,
+  전송 불확실성과 단계별 대기 건수를 분리 투영한다.
+  - 전송 생애주기 4상태(`keeper_message_pending_delivery`): 닫힌 네 가지 배달 상태를 구분한다.
+    `Local_pending`(아직 서버로 송신되지 않은 로컬 대기열 입력),
+    `Awaiting_receipt`(서버로 POST 전송을 시작했으나 수신 영수증을 아직 받지 못한 상태),
+    `Keeper_queued`(서버 진입이 승인되어 Keeper 큐에 안착했으나 턴 실행이 시작되지 않은 상태),
+    `Rechecking_delivery`(재연결이나 전달 상태를 재확인 중인 상태, 과거 Queued 영수증이 있더라도 확인 중엔 재확인으로 표시).
+  - 상태별 건수와 뷰포트 예산: 단일 합산 숫자로 뭉개지 않고 `queued at Keeper`·`awaiting receipt`·
+    `rechecking delivery` 건수를 분리 표시한다. 80열 좁은 터미널 환경에서도 총 대기 건수,
+    상태별 세부 근거, 로컬 NEXT 프리뷰(`local_waiting_next_preview`)를 별도 행으로 배치하며,
+    단축키 가이드(`Ctrl-T:queue`)를 보존한다.
+  - 큐 제어와 입력 보존: 대화 대기열 제어 명령(`/queue`·`/queue resume` 및 `Ctrl-T`)을 제공하며,
+    작성 도중 `Esc`로 다른 화면을 탐색하더라도 대기열 상태와 입력 드래프트는 파기되지 않고 유지된다.
+  - 검증과 증거: PTY 시나리오(`test/test_tui_queue_visibility_pty.py`) 및 OCaml 생애주기
+    테스트(`test/test_tui_chat_queue_wiring.ml`, `test/test_tui_chat_activity.ml`)가
+    80열 레이아웃·재연결 불확실성·Keeper 이동 후 복귀 계약을 다룬다. 실행 증거와 한계는
+    아래 증거 문서에 기록한다.
+  → [Masc_tui_types](../../bin/masc_tui_types.ml) ·
+  [docs/evidence/2026-09-30-chat-queue-visibility/README.md](../evidence/2026-09-30-chat-queue-visibility/README.md) ·
+  [docs/TUI-GUIDE.md](../TUI-GUIDE.md)
+
 **Fold (접기)**
 : TUI가 넘치는 내용을 줄여 그리는 두 가지 방식. 코드의 타입 이름이 아니라 이 문서와
   [TUI 안내](../TUI-GUIDE.md)가 쓰는 라벨이다. (A) **블록 접기** — 한 블록을 한 줄로
@@ -636,10 +692,9 @@ status: reference
   MASC 자체의 슬롯 대기가 아니라 시도한 런타임 후보의 실패(Server_error와 같은 층위)로 분류되며,
   클래스 라벨은 `provider_capacity`다(#38290). 이 실패는 다음 런타임 후보로 walk하며 503 과 같이
   다음 후보로 넘기고 이 후보를 뒤로 미룬다. 영수증 `fallback_reason`과 이벤트 에러 `variant`도
-  같은 조건을 같은 `provider_capacity` 이름으로 적는다(#38858). 이 조건의 runtime blocker class 는
-  만드는 곳이 없어 지웠다.
-  `capacity_backpressure`라는 글자는 다른 개념인 provider `timeout_phase`(용량·슬롯을 기다리다
-  끝난 timeout 단계) 라벨로만 남는다. 원문 문자열로 거르는 질의는 필드를 구분해야 한다.
+  같은 조건을 같은 `provider_capacity` 이름으로 적는다(#38858).
+  `capacity_backpressure`는 provider `timeout_phase`(용량·슬롯을 기다리다 끝난 timeout
+  단계)의 라벨이다. 원문 문자열로 거르는 질의는 필드를 구분해야 한다.
   `ECONNRESET`은 요청을 보낸 뒤(`sent`) 발생한 연결 단절로, 연결 수립 전 거부(`connection_refused`)와
   구분되는 `connection_reset`으로 기록된다(#38518). 재시도 가능 여부·Librarian 크기 판정 제외 등
   처리 정책은 `connection_refused`와 같으나 wire 및 운영자 요약 라벨이 분리된다.
@@ -1483,8 +1538,8 @@ status: reference
   `drop`으로 `Dropped`로, `reopen`으로 `Executing`으로 옮길 수 있다. 그 뒤에
   도착한 verdict는 거절된다. 완료 verdict는 verifier가 기록하고, 사람의
   확인이 `Completed` 전이를 확정한다. `goal_phase.mli`의
-  `admits_self_directed_progress`가 이 경계를 정의한다. TUI Overview 투영은
-  `Goals 블록 (Overview Goals)`를 따른다.
+  `admits_self_directed_progress`가 이 경계를 정의한다. TUI 첫 화면의 투영은
+  `Dashboard Goals`를 따른다.
 
 **Goal Measurement (목표 관측값)**
 : Goal의 선언된 지표(`metric`)를 누가 언제 얼마로 봤는지 남긴 기록 한 건. 값, 증거,
@@ -1499,7 +1554,7 @@ status: reference
     (`criterion_revision`이 달라지면) 옛 관측은 새 기준의 값으로 보이지 않고
     `not_recorded`가 된다. Goal을 지우면 그 관측도 지운다.
   - 화면: Goal 트리·상세와 `masc_goal_list`가 `reported`·`not_recorded`·`unavailable`·
-    `not_loaded` 중 하나로 보여 준다. `Goals 블록 (Overview Goals)`의 진행 바는 이 값이
+    `not_loaded` 중 하나로 보여 준다. `Dashboard Goals`의 진행 바는 이 값이
     아니라 연결된 Task 완료 수다.
   → [Goal_measurement](../../lib/goal/goal_measurement.mli)
 
@@ -2114,6 +2169,21 @@ status: reference
   [docs/CI-REVIEW-WORKFLOW.md](../CI-REVIEW-WORKFLOW.md) ·
   [scripts/review/merge-guard.sh](../../scripts/review/merge-guard.sh)
 
+**ROLL (롤 / 일괄 착지 규약)**
+: 여러 작업 또는 여러 PR을 단일 묶음 PR/커밋으로 묶어 검증한 뒤 한 건만 착지시키는 MASC 내부 일괄 병합 규약.
+  GitHub 공식 기능인 Native Stack이나 수동 브랜치 체인과 구별되는 고유한 운영 프로토콜이다(세계 헌법 `a-34749e1e`·`a-213da42f`).
+  - 고정과 합집합 영수증: BASE와 멤버 PR들의 head를 고정하고, 각 멤버의 필수 테스트 스위트 합집합과
+    실행 결과를 영수증으로 대조한다. 멤버 누락, 빈 목록, tree 또는 main과의 불일치가 있으면 일괄 착지를 거절한다.
+  - 멤버 대체와 독립 검토: 멤버 PR들의 개별 CI·PASS·승인은 ROLL의 종합 영수증으로 대체할 수 있으나,
+    각 멤버는 고정 head·기준 SHA·범위·원문 좌표·검토자를 갖춘 독립적인 내용 검토(CR·FAIL 부재)를 반드시 거쳐야 한다.
+  - 착지와 원본 닫기: 현재 head의 PASS, 독립 승인, approve-guard 및 merge-guard 검증을 거쳐 ROLL PR 한 건만 main에
+    병합하며, 착지 직전 재확인과 도착 부모·tree·포함 증명을 확인한 뒤에만 원본 멤버 PR들을 병합 없이 닫는다.
+  - Native Stack과의 경계: GitHub의 Native Stack(`stack != null`)은 각 층의 PR이 유지되면서 하위 층을 포함해
+    비동기(`merge-async`)로 일괄 접수되는 외부 플랫폼 기능인 반면, ROLL은 복수 작업의 커밋/트리를 단일 PR로 묶어 착지시키고
+    원본을 닫는 내부 운영 규약이다.
+  → [docs/constitution.xml](../constitution.xml) ·
+  [scripts/review/merge-guard.sh](../../scripts/review/merge-guard.sh)
+
 **Disposable Build Volume (일회용 빌드 볼륨)**
 : Apple container 샌드박스에서 Keeper의 `_build` 출력이 놓이는, Keeper마다 하나씩
   할당되는 일회용(disposable) 볼륨(RFC-keeper-build-output-returns-to-a-disposable-volume,
@@ -2140,10 +2210,8 @@ status: reference
 
 **Shutdown Admission Fence (종료 진입 차단막)**
 : 종료 작업 진행 중인 Keeper의 재부팅을 막아 원장 정합성을 지키는 진입 차단 술어(`Keeper_shutdown_types.requires_admission_fence`).
-  - **단계별 차단막 해제 규칙 (#31738·#38569·#38859)**: 과거에는 `Blocked` 상태의 종료 작업에 대해 실패 단계와
-    무관하게 차단막을 영구 유지하여, 영속 상태가 전혀 파괴되지 않은 Keeper도 수동 교체(`Superseded`) 없이는
-    영구히 재부팅할 수 없는 결함이 있었다. 현재는 실패 단계(`failure_stage`)를 `failure_stage_boot_replay`로
-    분류한다:
+  - **단계별 차단막 해제 규칙 (#31738·#38569·#38859)**: `Blocked` 상태의 종료 작업은 실패 단계
+    (`failure_stage`)를 `failure_stage_boot_replay`로 분류한다:
     1. **부팅 재실행 대상 (부팅 사이에는 차단막 없음)**: 메타데이터·세션·레지스트리를 건드리기 전의 단계.
        `Task_discovery`·`Record_persist`·`Meta_read`는 `Replay_unsettled_tasks`(이 작업의 반환 영수증이 있는
        태스크만 정산된 것으로 보고 나머지를 정산), `Meta_update`·`Pending_confirm_cleanup`은
@@ -2547,6 +2615,19 @@ status: reference
 : Keeper 하나가 오래 들고 가는 기억(Fact)을 저장하고 다시 꺼내 주는 곳.
   operator config의 Keeper 이름에 묶인다. cluster 사이에서 무엇을 같이 쓰는지는
   **Cluster** 항목에 적었다.
+
+**Memory OS Recall (기억 회상 / 전송 투영)**
+: 매 턴 실행 시 저장된 Memory OS 사실(일반 사실 및 소스 바인딩 사실)을 모델의 프롬프트 문맥으로 주입(projection)하는 전송 메커니즘.
+  `render_if_enabled`가 호출되어 각 스토어의 상태(`Present`, `Authoritatively empty / Absent`, `Unavailable`)를 투영하며, 회상 비활성화 시 안정적 중지 마커(`disabled`)를 방출한다.
+  현행 구현([`keeper_memory_os_recall.mli`](../../lib/keeper/keeper_memory_os_recall.mli))은 절단(truncate), 임의 순위화(rank), 부분 주입(partially inject)을 금지하고 current fact 전량을 전송한다. 소스 바인딩 사실(`source-bound fact`)은 주입 직전 대상 파일의 정확한 바이트를 재검증하며, 변경·삭제가 입증된 소스는 이전 주장 대신 타입화된 무효화(`typed invalidation`)를 기여한다. 반면 읽기 실패·접근 불능 소스는 기존 주장을 `verified=false`인 미검증 상태(`keep_unverified`)로 보존하여 모델에 전달하며, 소스 스토어 장애 시에도 읽기 가능한 일반 사실(`ordinary fact`)은 보존하여 전달한다.
+  유계 작업연계 투영 제안 규약(Draft [`RFC-memory-os-recall-selection`](../../docs/rfc/RFC-memory-os-recall-selection.md))은 현행 전량 주입 계약을 개정하여 작업 중심의 유계 투영(Bounded Task-linked Projection with Explicit Omission)을 도입하는 목표 아키텍처다:
+  - **보존과 전송의 분리**: 저장소는 모든 current fact를 영구 보존하며, 전송 예산이나 링크 미부합으로 누락된 fact를 저장 사실의 삭제·철회·부정으로 해석하지 않는다.
+  - **상시 블록(`Standing`)**: Keeper 정체성, 지속 선호, 권한 경계, 현재 Task/Goal 주소만 포함하며, 넓은 분류(`category=constraint`)만으로 상시 승격하지 않는다.
+  - **후보 선정(`Candidate`)**: 현재 턴의 Task(`Task of task_id`), Goal(`Goal of goal_id`), 자극(`Stimulus of stimulus_id`)과 타입화 링크(`typed link`)가 확인된 사실만 후보가 되며, 비연결 사실에 최신순·문자열 유사도 점수를 임의 적용하지 않는다.
+  - **조건부 유효성과 만료(`Validity & Expiry`)**: 유효성(`Unconditional | Conditional of condition`)은 사건 증거가 확인되었을 때만 만료(`Expired`)하며, 상태를 읽지 못했을 때는 유효나 만료로 단정하지 않고 미확인(`Unknown`)으로 다룬다.
+  - **적용 권한 고정과 철회(`Recall Scope & Withdrawal`)**: 모든 정상 투영은 `Recall_scope = Current_projection_only`를 선언하여 과거 턴 Recall projection의 본문과 조건이 현재 턴의 근거가 아님을 확정한다. 용량 정책 위반(`Invalid_capacity_policy`)이나 예산 초과(`Budget_overrun`) 시에는 과거 적용 권한을 즉시 끝내는 고정 제어 블록(`Recall_withdrawn`)을 발행한다.
+  - **식별자 및 원자적 번들**: 식별자는 `Ordinary { keeper_id; memory_id } | Source_bound { keeper_id; claim_id }`의 닫힌 형태를 따르고, 일반·소스·메타데이터 3대 스냅샷은 불변 번들(`Recall_snapshot_bundle`)과 CAS 매니페스트로 원자적 출판 경계를 유지한다.
+  → [Keeper_memory_os_recall](../../lib/keeper/keeper_memory_os_recall.mli) · [keeper_memory_source_current](../../lib/keeper/keeper_memory_source_current.ml) · [RFC-memory-os-recall-selection](../../docs/rfc/RFC-memory-os-recall-selection.md)
 
 **Workspace Memory Ledger (작업공간 기억 원장)**
 : Workspace Curator가 변경된 Keeper 사실을 기존 주장·충돌에 합류시키거나 새 항목을 만들고, 제외 이유를 기록한 원장. 다른 Keeper의 가까운 사실은 판정 맥락이고 선택된 변경 사실만 분류한다. 원장은 Keeper Memory OS를 바꾸지 않으며, 모델 분류가 의미 검증이나 사실 승격을 뜻하지 않는다. Keeper는 주장·충돌 목록을 본 뒤 ID별로 현재 원문 상태를 읽는다. 스토어를 읽지 못한 사실은 사라진 사실로 단정하지 않는다.

@@ -38,7 +38,7 @@ tools-support = true
 
 let candidate runtime_id =
   match Runtime.get_runtime_by_id runtime_id with
-  | Some (runtime : Runtime.t) -> runtime.candidate_backpressure
+  | Some (runtime : Runtime_instance.t) -> runtime.candidate_backpressure
   | None -> failf "runtime %s is not in the catalog" runtime_id
 
 let with_lane f =

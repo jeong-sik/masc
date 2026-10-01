@@ -1945,6 +1945,68 @@ let test_set_pinned_persistence_failure_rolls_back () =
   | Ok fetched ->
       Alcotest.(check bool) "pinned rolled back" false fetched.pinned
 
+(* A write that raises no SSE event -- an edit, a thread change, a pin, a close,
+   a reopen, a delete -- still changes what a cached page of the board answers.
+   The write hook is how the server drops those pages; it runs once per write
+   the store took. *)
+let test_write_hook_runs_after_each_write_that_raises_no_event () =
+  let writes = ref 0 in
+  let events = ref 0 in
+  Board_dispatch.set_board_write_hook (fun () -> incr writes);
+  Board_dispatch.set_board_sse_hook (fun _ -> incr events);
+  let post =
+    match
+      Board_dispatch.create_post ~author:"write-hook" ~content:"a post to write to"
+        ~post_kind:Board.Human_post ()
+    with
+    | Ok post -> post
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+  in
+  let post_id = Board.Post_id.to_string post.id in
+  let ok label = function
+    | Ok _ -> ()
+    | Error e -> Alcotest.fail (label ^ ": " ^ Board.show_board_error e)
+  in
+  Alcotest.(check int) "creating raises an event, not a write" 0 !writes;
+  Alcotest.(check int) "and the event reached the SSE hook" 1 !events;
+  ok "update"
+    (Board_dispatch.update_post ~post_id ~editor:"write-hook"
+       ~content:"a post to write to, edited" ());
+  Alcotest.(check int) "an edit" 1 !writes;
+  ok "thread" (Board_dispatch.set_thread_id ~post_id ~thread_id:"write-hook-thread");
+  Alcotest.(check int) "a thread change" 2 !writes;
+  ok "pin" (Board_dispatch.set_pinned ~post_id ~pinned:true);
+  Alcotest.(check int) "a pin" 3 !writes;
+  ok "close"
+    (Board_dispatch.set_closed ~post_id ~closed_by:"write-hook"
+       ~successor:Board.No_successor ~summary:"done" ());
+  Alcotest.(check int) "a close" 4 !writes;
+  ok "reopen" (Board_dispatch.reopen ~post_id);
+  Alcotest.(check int) "a reopen" 5 !writes;
+  ok "delete" (Board_dispatch.delete_post ~post_id);
+  Alcotest.(check int) "a delete" 6 !writes;
+  Alcotest.(check int) "none of them raised an SSE event" 1 !events
+
+(* A write the store refuses changed nothing, so nothing is dropped. *)
+let test_write_hook_skips_a_write_the_store_refuses () =
+  let writes = ref 0 in
+  Board_dispatch.set_board_write_hook (fun () -> incr writes);
+  let missing = "never-existed-write-hook" in
+  let refused label = function
+    | Ok _ -> Alcotest.fail (label ^ ": a missing post took the write")
+    | Error _ -> ()
+  in
+  refused "update"
+    (Board_dispatch.update_post ~post_id:missing ~editor:"write-hook"
+       ~content:"nothing to edit" ());
+  refused "thread" (Board_dispatch.set_thread_id ~post_id:missing ~thread_id:"t");
+  refused "pin" (Board_dispatch.set_pinned ~post_id:missing ~pinned:true);
+  refused "close"
+    (Board_dispatch.set_closed ~post_id:missing ~closed_by:"write-hook"
+       ~successor:Board.No_successor ~summary:"done" ());
+  refused "delete" (Board_dispatch.delete_post ~post_id:missing);
+  Alcotest.(check int) "no refused write reached the hook" 0 !writes
+
 let test_set_closed_and_reopen_round_trip () =
   match
     Board_dispatch.create_post ~author:"close-test" ~content:"close me"
@@ -2522,6 +2584,10 @@ let () =
       Alcotest.test_case "create and get" `Quick (with_eio test_create_and_get_post);
       Alcotest.test_case "content clock survives activity and reload" `Quick
         (with_eio test_content_update_time_survives_activity_and_reload);
+      Alcotest.test_case "write hook runs after each write that raises no event"
+        `Quick (with_eio test_write_hook_runs_after_each_write_that_raises_no_event);
+      Alcotest.test_case "write hook skips a write the store refuses" `Quick
+        (with_eio test_write_hook_skips_a_write_the_store_refuses);
       Alcotest.test_case "update by owner persists" `Quick
         (with_eio test_update_post_by_owner);
       Alcotest.test_case "update rejects non-owner" `Quick

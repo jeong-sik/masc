@@ -1042,6 +1042,37 @@ let executionPublicationGenerationWatermark = -1
 let executionHydrationRequestGeneration = 0
 const retiredExecutionPublicationEpochs = new Set<string>()
 
+export interface ExecutionWorkspaceAuthority {
+  readonly epoch: string
+  readonly workspaceRoot: string
+  readonly connectionGeneration: number
+}
+
+const acceptedExecutionWorkspace = signal<ExecutionWorkspaceAuthority | null>(null)
+/** Authority of an accepted execution response, not a retained display status.
+ *  Object identity is the admission token: A → B → A cannot revive an old A read. */
+export const executionWorkspaceAuthority: ReadonlySignal<ExecutionWorkspaceAuthority | null>
+  = acceptedExecutionWorkspace
+
+function acceptExecutionWorkspace(
+  epoch: string | null,
+  workspaceRoot: unknown,
+): void {
+  if (epoch === null || typeof workspaceRoot !== 'string' || workspaceRoot.trim() === '') {
+    acceptedExecutionWorkspace.value = null
+    return
+  }
+  const previous = acceptedExecutionWorkspace.peek()
+  if (
+    previous?.epoch === epoch
+    && previous.workspaceRoot === workspaceRoot
+    && previous.connectionGeneration === executionHydrationRequestGeneration
+  ) return
+  acceptedExecutionWorkspace.value = Object.freeze({
+    epoch, workspaceRoot, connectionGeneration: executionHydrationRequestGeneration,
+  })
+}
+
 function retireExecutionPublicationEpoch(epoch: string): void {
   retiredExecutionPublicationEpochs.add(epoch)
 }
@@ -1087,6 +1118,7 @@ export function invalidateExecutionSnapshotGeneration(
       retireExecutionPublicationEpoch(previousEpoch)
     }
     executionPublicationEpoch = epoch
+    acceptedExecutionWorkspace.value = null
     executionReconnectPreviousEpoch = null
     executionPublicationGenerationWatermark = generation
     return true
@@ -1105,6 +1137,7 @@ export function resetExecutionSnapshotGeneration(): void {
   executionReconnectAwaitingHttp = true
   executionReconnectInvalidationFloors.clear()
   executionHydrationRequestGeneration += 1
+  acceptedExecutionWorkspace.value = null
 }
 
 /** Hydrate all execution-related signals from a raw data payload.
@@ -1167,6 +1200,9 @@ export function hydrateExecutionSnapshot(
     )
   }
   const normalizedStatus = normalizeServerStatus(data.status, data.generated_at)
+  // Read the current response only. mergeServerStatus may retain an old root
+  // for presentation; that root cannot admit account reads in this response.
+  acceptExecutionWorkspace(identity?.epoch ?? null, normalizedStatus?.workspace_root)
   const previousProject = serverStatus.value?.project
   if (normalizedStatus) {
     serverStatus.value = mergeServerStatus(serverStatus.value, normalizedStatus)
@@ -1252,6 +1288,8 @@ async function doFetchExecution(): Promise<void> {
     const { fetchDashboardExecution } = await import('./api/dashboard-execution')
     const data = await fetchDashboardExecution({ force })
     if (isInitializingExecutionPayload(data)) {
+      if (requestGeneration !== executionHydrationRequestGeneration) return
+      acceptedExecutionWorkspace.value = null
       scheduleExecutionWarmRetry()
       return
     }
@@ -1259,6 +1297,7 @@ async function doFetchExecution(): Promise<void> {
     hydrateExecutionSnapshot(data, { requestGeneration })
   } catch (err) {
     console.warn('[Dashboard] execution fetch error:', err)
+    if (requestGeneration !== executionHydrationRequestGeneration) return
     executionError.value = errorMessageOr(err, 'Execution projection load failed')
     showToast('실행 데이터 로드 실패', 'error', 5000)
   } finally {

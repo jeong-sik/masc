@@ -263,8 +263,9 @@ let apply_keeper_log_snapshot (state : state)
     (snapshot : Metrics_tail.snapshot) =
   state.log_entries <- snapshot.entries;
   state.log_error <- snapshot.error;
+  let _, cols = Masc_tui_render_prim.get_terminal_size () in
   state.log_scroll <-
-    min state.log_scroll (max 0 (List.length snapshot.entries - 1))
+    min state.log_scroll (max 0 (List.length (keeper_log_rows state ~cols) - 1))
 
 (** Load the newest physical metrics rows across months and rotations. *)
 let load_selected_keeper_logs (state : state) (base_path : string)
@@ -1407,39 +1408,6 @@ let keeper_liveness_of_briefs briefs =
       | _ -> { counts with klc_unreadable = counts.klc_unreadable + 1 })
     empty briefs
 
-(* One Team row per brief. A row with no name is not a Keeper anyone can act
-   on and is left out; the liveness counts above still count it. A phase or a
-   turn age this build cannot read stays visible as such on its own row
-   rather than failing the whole snapshot for one Keeper. *)
-let overview_keeper_rows_of_briefs briefs =
-  List.filter_map
-    (fun brief ->
-      match Yojson.Safe.Util.member "name" brief with
-      | `String name when String.trim name <> "" ->
-          let okp_phase =
-            match Yojson.Safe.Util.member "phase" brief with
-            | `Null -> Keeper_phase_absent
-            | `String word -> (
-                match Tui_decode.keeper_phase_of_string word with
-                | Some phase -> Keeper_phase phase
-                | None -> Keeper_phase_unreadable word)
-            | other -> Keeper_phase_unreadable (Yojson.Safe.to_string other)
-          in
-          let okp_last_turn_ago_s =
-            match Yojson.Safe.Util.member "last_turn_ago_s" brief with
-            | `Float seconds -> Some seconds
-            | `Int seconds -> Some (float_of_int seconds)
-            | _ -> None
-          in
-          let okp_paused =
-            match Yojson.Safe.Util.member "paused" brief with
-            | `Bool paused -> Some paused
-            | _ -> None
-          in
-          Some { okp_name = name; okp_phase; okp_last_turn_ago_s; okp_paused }
-      | _ -> None)
-    briefs
-
 (* Plan usage on Usage names each account's email. The route needs Admin,
    and a read that fails is said beside the section rather than drawn as
    accounts without an email. The section names the failure, so the reason is
@@ -1507,25 +1475,6 @@ let load_overview ~(host : string) ~(port : int) :
         let counts = keeper_liveness_of_briefs keeper_briefs in
         { counts with klc_unreadable = counts.klc_unreadable + n_unread }
       in
-      (* An unread Keeper gets a Team row too, so the block and the count
-         name the same fleet; its phase is the reason the row was not read. *)
-      let ov_keeper_rows =
-        overview_keeper_rows_of_briefs keeper_briefs
-        @ List.map
-            (fun (unread : Keeper_snapshot_unread.t) ->
-              let reason =
-                match unread.reason with
-                | Keeper_snapshot_unread.Meta_read_failed detail ->
-                    "metadata unread: " ^ detail
-                | Keeper_snapshot_unread.Row_raised detail -> "row raised: " ^ detail
-              in
-              { okp_name = unread.name
-              ; okp_phase = Keeper_phase_unreadable reason
-              ; okp_last_turn_ago_s = None
-              ; okp_paused = None
-              })
-            keepers_unread
-      in
       let ov_mcp_agents = List.length agent_briefs in
       let* ov_generated_at = Masc.Tui_decode_fields.required_string_field json "generated_at" in
       Ok
@@ -1534,7 +1483,6 @@ let load_overview ~(host : string) ~(port : int) :
           ov_keepers;
           ov_keeper_listing;
           ov_keeper_liveness;
-          ov_keeper_rows;
           ov_mcp_agents;
           (* The briefing projects one fact onto two lists: an incident is
              also queued for operator attention, as the same JSON row. On the
@@ -1712,10 +1660,10 @@ let load_memory_health ~(host : string) ~(port : int) :
 
 (** Load one keeper's remembered facts, both stores. *)
 let load_memory_facts ~(host : string) ~(port : int) ~(keeper_name : string) :
-    (Tui_decode.memory_fact_snapshot, string) result =
+    (Masc.Tui_decode_memory_facts.memory_fact_snapshot, string) result =
   match fetch_keeper_memory_facts ~host ~port ~keeper_name with
   | Error err -> Error ("memory facts load failed: " ^ err)
-  | Ok json -> Tui_decode.decode_memory_fact_snapshot json
+  | Ok json -> Masc.Tui_decode_memory_facts.decode_memory_fact_snapshot json
 
 (** Load the current project's Git working-tree changes. *)
 let load_project_changes ~(host : string) ~(port : int) :

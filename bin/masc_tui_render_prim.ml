@@ -99,6 +99,8 @@ let clamped_scroll_now (state : state) = function
   | Schedule_detail_scroll _ -> Schedule_detail_scroll state.schedule_scroll
   | Keeper_detail _ -> Keeper_detail state.detail_scroll
   | Keeper_calls _ -> Keeper_calls state.keeper_calls_scroll
+  | Keeper_logs_scroll { cols; _ } ->
+      Keeper_logs_scroll { scroll = state.log_scroll; cols }
   | Acting _ -> Acting state.acting_scroll
   | Acting_selection _ ->
       Acting_selection (state.acting_scroll, state.acting_cursor)
@@ -128,6 +130,7 @@ let clamped_scroll_now (state : state) = function
   | Link_modal_scroll _ -> Link_modal_scroll state.link_modal_scroll
   | Play_invite_scroll _ -> Play_invite_scroll state.play_invite_scroll
   | Voice_scroll _ -> Voice_scroll state.config_scroll
+  | Preset_detail_scroll _ -> Preset_detail_scroll state.config_scroll
   | Keeper_list_scroll _ -> Keeper_list_scroll state.keeper_list_scroll
   | Context_inspector_scroll _ ->
       Context_inspector_scroll state.context_inspector_scroll
@@ -173,6 +176,7 @@ let reader_after_wheel (reader : clamped_scroll)
   | Link_modal_scroll value -> Some (Link_modal_scroll (step value))
   | Play_invite_scroll value -> Some (Play_invite_scroll (step value))
   | Voice_scroll value -> Some (Voice_scroll (step value))
+  | Preset_detail_scroll value -> Some (Preset_detail_scroll (step value))
   | Context_inspector_scroll value ->
       Some (Context_inspector_scroll (step value))
   (* The chat reads its own wheel, three rows a notch, and its scroll counts
@@ -184,6 +188,8 @@ let reader_after_wheel (reader : clamped_scroll)
   (* Some Keeper detail tabs and the calls view move a row cursor on [j]; the
      notch keeps reaching them as that key. *)
   | Keeper_detail _ | Keeper_calls _ -> None
+  (* Logs use their own bounded Metrics_tail movement through the key path. *)
+  | Keeper_logs_scroll _ -> None
   (* List scrolls: the notch moves the list's cursor as the arrow does. *)
   | Acting _ | Acting_selection _ | Keeper_list_scroll _ -> None
   (* Resources has panes of its own that [h] and [l] move between. *)
@@ -2971,6 +2977,7 @@ type diff_surface =
   ; ds_diff : Masc.Tui_decode.git_diff option  (** [None] until the tree is read *)
   ; ds_error : string option
   ; ds_scroll : int  (** the stored scroll, clamped here and reported back *)
+  ; ds_hscroll : int  (** body offset in display cells; gutters remain fixed *)
   ; ds_unchanged : string  (** the empty line when the tree reports no change *)
   ; ds_esc_hint : string  (** what esc does on this surface *)
   ; ds_footer_hints : string
@@ -3011,7 +3018,7 @@ let render_diff_surface (state : state) (ds : diff_surface) =
       box_divider buf cols)
     ds.ds_context_lines;
   box_line_styled buf cols ~style:(Theme.recede ())
-    "  old   new     what the working tree holds, against its last commit";
+    (Printf.sprintf "  col %d · old / new · working tree vs HEAD" (ds.ds_hscroll + 1));
   box_divider buf cols;
   (match ds.ds_error with
    | None -> ()
@@ -3053,7 +3060,7 @@ let render_diff_surface (state : state) (ds : diff_surface) =
       match Rows.at diff_rows_window (i + scroll) with
       | None -> box_empty buf cols
       | Some row ->
-          box_line_span buf cols (tree_diff_row_span ~width:(framed_inner_width cols) row)
+          box_line_span buf cols (tree_diff_row_span ~hscroll:ds.ds_hscroll ~width:(framed_inner_width cols) row)
     done;
   (* The status line carries the esc hint at every count, so it is one of
      the fixed chrome rows above and the reading needs no row of its own. *)
@@ -3081,6 +3088,7 @@ let render_repository_changes_diff (state : state) ~path =
          | Some _ | None -> None)
     ; ds_error = state.repository_changes_diff_error
     ; ds_scroll = state.repository_changes_diff_scroll
+    ; ds_hscroll = state.repository_changes_diff_hscroll
     ; ds_unchanged = "  (this file matches its last commit, or is untracked)"
     ; ds_esc_hint = "esc back to files"
     ; ds_footer_hints = Masc_tui_keys.footer_hints_git_diff

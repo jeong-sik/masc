@@ -1,0 +1,49 @@
+{
+  "keeper": "portrait-http-probe",
+  "pixel_size": 160,
+  "before": {
+    "face": "bare_face",
+    "neck": "bare_neck",
+    "head": "beanie",
+    "hand": "empty_hand",
+    "base": "dish_oak"
+  },
+  "equipped": {
+    "face": "bare_face",
+    "neck": "bare_neck",
+    "head": "crown",
+    "hand": "empty_hand",
+    "base": "dish_oak"
+  },
+  "before_etag": "\"fda7fe90d9f8\"",
+  "equipped_etag": "\"85a25b26cc80\"",
+  "build": {
+    "release_version": "dev",
+    "binary_version": "dev",
+    "repo_version": "0.48.0",
+    "commit": "2c413a064c82f57c722fed3c7f99c485c1c0429f",
+    "commit_source": "embedded",
+    "binary_commit": "2c413a064c82f57c722fed3c7f99c485c1c0429f",
+    "binary_commit_source": "embedded",
+    "ocaml_dos_core": {
+      "source_digest": "338277ba6cc5b69d499c769d4351d73c",
+      "pinned_source_digest": "338277ba6cc5b69d499c769d4351d73c",
+      "matches_pin": true
+    },
+    "provenance_source": "self_observed",
+    "executable_sha256": "c05d6fea8f28f9f4389962814fb3ee8e7e7bc1b9c3045443032622919f9d8fd2",
+    "binary_commit_unix_ts": 1790697026.0,
+    "binary_commit_age_seconds": 530,
+    "repo_head_commit": "2c413a06",
+    "repo_head_commit_source": "runtime_repo_head",
+    "repo_head_commit_unix_ts": 1790697026.0,
+    "repo_head_commit_age_seconds": 530,
+    "executable_path": "/home/runner/work/masc/masc/_build/default/test/test_keeper_portrait_http.exe",
+    "executable_dir": "/home/runner/work/masc/masc/_build/default/test",
+    "repo_root": "/home/runner/work/masc/masc",
+    "runtime_instance_id": "01a0ede4-48b9-7000-a54e-5661212e7745",
+    "started_at": "2026-09-29T15:59:16Z",
+    "uptime_seconds": 0
+  },
+  "scope": "real HTTP router fixture after purchase and equip; not live deployment"
+}

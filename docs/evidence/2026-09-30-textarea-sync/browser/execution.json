@@ -1,0 +1,11 @@
+{
+  "command": [
+    "node",
+    "/masc-work/jazz-developer/masc/.worktrees/40334-textarea-sync/docs/evidence/2026-09-30-textarea-sync/browser.mjs",
+    "/masc-work/jazz-developer/masc/.worktrees/40334-textarea-sync/dashboard",
+    "/masc-work/jazz-developer/masc/.worktrees/40334-textarea-sync/docs/evidence/2026-09-30-textarea-sync/browser"
+  ],
+  "started": "2026-09-30T14:14:53.498118+00:00",
+  "finished": "2026-09-30T14:14:55.628481+00:00",
+  "exit": 0
+}

@@ -475,6 +475,11 @@ def goal_opens_exact_detail(executable):
                  phase="awaiting_confirmation", criterion_revision="r1",
                  created_at=goal["created_at"], updated_at=goal["updated_at"])
     fixtures[h.PLANNING_PATH] = h.planning_snapshot([other, goal])
+    stored_goals = [
+        {key: value for key, value in row.items()
+         if key not in ("verification", "verifier_unreconciled")}
+        for row in (other, goal)
+    ]
     requests = []
 
     def interact(process, fd, _slave, output, base):
@@ -492,7 +497,7 @@ def goal_opens_exact_detail(executable):
         os.write(fd, b"q")
 
     run(executable, "Home Goal card opens the same Goal detail without mutation",
-        fixtures, interact, requests, prepare=lambda base: home.seed_goals(base, [other, goal]))
+        fixtures, interact, requests, prepare=lambda base: home.seed_goals(base, stored_goals))
 
 
 def question_identity_and_return(executable):

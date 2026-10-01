@@ -7,18 +7,7 @@
 > **Status (2026-05-17)**: 아래 표는 consolidation 전 정적 스냅샷이다.
 > Current Dashboard v1 navigation의 SSOT로 쓰지 않는다. 현재 SSOT는
 > `dashboard/src/config/navigation.ts`, `lib/dashboard/dashboard_surface_readiness.ml`,
-> `lib/dashboard/dashboard_nav_event.ml`이며, drift 검증은
-> `scripts/check-dashboard-surface-parity.sh`와
-> `scripts/check-dashboard-nav-event-parity.sh`가 담당한다.
->
-> [근거] `bash scripts/check-dashboard-surface-parity.sh`
-> (2026-05-17 KST, High) ->
-> `Dashboard surface parity OK: 25 canonical surfaces aligned between
-> navigation.ts and dashboard_surface_readiness.ml`.
->
-> [근거] `bash scripts/check-dashboard-nav-event-parity.sh`
-> (2026-05-17 KST, High) ->
-> `dashboard nav-event allowlist parity: OK`.
+> `lib/dashboard/dashboard_nav_event.ml`이다.
 
 ## Current Canonical Inventory (2026-05-17)
 

@@ -491,7 +491,12 @@ let fusion_package (package : Types.package) ~binding ~sources =
   let script = {|import json, sys
 sys.path.insert(0, sys.argv[1])
 from test_packages import ProtocolCase
-output = ProtocolCase().call(sys.argv[2], json.loads(sys.argv[3]), json.loads(sys.argv[4]))
+summaries = {
+    "fusion-results": "Fusion status and retained Board evidence are available in structuredContent with exact run identity.",
+    "fusion-report": "Fusion reports are retained in structuredContent with exact upstream coordinates and evidence.",
+}
+output = ProtocolCase().call(sys.argv[2], json.loads(sys.argv[3]), json.loads(sys.argv[4]),
+                             expected_summary=summaries[sys.argv[2]])
 assert "rows" in output, output
 print(json.dumps(output))
 |} in

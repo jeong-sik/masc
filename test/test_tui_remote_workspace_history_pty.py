@@ -30,20 +30,20 @@ import tui_keyboard_tools as _keyboard_tools
 # scripts/ci/run-edited-tests.sh selects this runnable alias when a changed
 # source path occurs as a quoted literal here; it reads these outside Python.
 SOURCE_MODULES = (
-    'bin/masc_tui.ml',
-    'bin/masc_tui_loader.ml',
-    'bin/masc_tui_types.ml',
-    'bin/masc_tui_keeper_selection.ml',
-    'bin/masc_tui_render_chat.ml',
-    'bin/masc_tui_render_prim.ml',
-    'test/tui_keyboard_harness.py',
-    'test/tui_keyboard_chat.py',
-    'test/tui_keyboard_runtime.py',
-    'test/tui_keyboard_keepers.py',
-    'test/tui_keyboard_tools.py',
-    'test/tui_keyboard_schedule.py',
-    'test/tui_keyboard_observer.py',
-    'test/tui_keyboard_approvals.py',
+    "bin/masc_tui.ml",
+    "bin/masc_tui_loader.ml",
+    "bin/masc_tui_types.ml",
+    "bin/masc_tui_keeper_selection.ml",
+    "bin/masc_tui_render_chat.ml",
+    "bin/masc_tui_render_prim.ml",
+    "test/tui_keyboard_harness.py",
+    "test/tui_keyboard_chat.py",
+    "test/tui_keyboard_runtime.py",
+    "test/tui_keyboard_keepers.py",
+    "test/tui_keyboard_tools.py",
+    "test/tui_keyboard_schedule.py",
+    "test/tui_keyboard_observer.py",
+    "test/tui_keyboard_approvals.py",
 )
 
 ROSTER_PATH = "/api/v1/gate/keepers?detailed=true"

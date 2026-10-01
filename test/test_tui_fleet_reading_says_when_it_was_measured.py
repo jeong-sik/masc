@@ -9,13 +9,13 @@ import tui_keyboard_harness as _keyboard_harness
 # in masc_tui_fleet_line.ml, read out of the body by tui_decode.ml, and drawn
 # by the Keepers header and the Metrics readiness section.
 SOURCE_MODULES = (
-    'bin/masc_tui_fleet_line.ml',
-    'bin/masc_tui_render.ml',
-    'bin/masc_tui_render_metrics.ml',
-    'lib/tui_decode.ml',
-    'lib/tui_decode_memory_health.ml',
-    'lib/tui_decode_memory_health.mli',
-    'test/tui_keyboard_harness.py',
+    "bin/masc_tui_fleet_line.ml",
+    "bin/masc_tui_render.ml",
+    "bin/masc_tui_render_metrics.ml",
+    "lib/tui_decode.ml",
+    "lib/tui_decode_memory_health.ml",
+    "lib/tui_decode_memory_health.mli",
+    "test/tui_keyboard_harness.py",
 )
 
 FLEET_PATH = "/health?full=1"

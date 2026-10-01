@@ -21,19 +21,19 @@ from test_tui_emblem_screen_pty import rgba_png
 
 
 SOURCE_MODULES = (
-    'bin/masc_tui.ml',
-    'bin/masc_tui_keeper_portrait.ml',
-    'bin/masc_tui_metrics_tail.ml',
-    'bin/masc_tui_portrait_view.ml',
-    'bin/masc_tui_render.ml',
-    'lib/keeper_portrait/keeper_portrait_equipment.ml',
-    'lib/tui_decode.ml',
-    'lib/server/server_dashboard_http_keeper_portrait.ml',
-    'test/test_keeper_portrait_http.ml',
-    'test/tui_keyboard_chat.py',
-    'test/tui_keyboard_harness.py',
-    'test/tui_keyboard_observer.py',
-    'test/tui_keyboard_tools.py',
+    "bin/masc_tui.ml",
+    "bin/masc_tui_keeper_portrait.ml",
+    "bin/masc_tui_metrics_tail.ml",
+    "bin/masc_tui_portrait_view.ml",
+    "bin/masc_tui_render.ml",
+    "lib/keeper_portrait/keeper_portrait_equipment.ml",
+    "lib/tui_decode.ml",
+    "lib/server/server_dashboard_http_keeper_portrait.ml",
+    "test/test_keeper_portrait_http.ml",
+    "test/tui_keyboard_chat.py",
+    "test/tui_keyboard_harness.py",
+    "test/tui_keyboard_observer.py",
+    "test/tui_keyboard_tools.py",
 )
 
 ROSTER_PATH = "/api/v1/gate/keepers?detailed=true"

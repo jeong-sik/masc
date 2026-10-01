@@ -15,20 +15,20 @@ import tui_keyboard_harness as _keyboard_harness
 import tui_keyboard_planning as _keyboard_planning
 
 SOURCE_MODULES = (
-    'bin/masc_tui_home.ml',
-    'bin/masc_tui_home.mli',
-    'bin/masc_tui.ml',
-    'bin/masc_tui_http.ml',
-    'bin/masc_tui_render.ml',
-    'bin/masc_tui_planning_detail.ml',
-    'bin/masc_tui_planning_detail.mli',
-    'bin/masc_tui_render_prim.ml',
-    'bin/masc_tui_types.ml',
-    'test/tui_keyboard_approvals.py',
-    'test/tui_keyboard_harness.py',
-    'test/tui_keyboard_planning.py',
-    'bin/masc_tui_async_protocol.ml',
-    'bin/masc_tui_async_protocol.mli',
+    "bin/masc_tui_home.ml",
+    "bin/masc_tui_home.mli",
+    "bin/masc_tui.ml",
+    "bin/masc_tui_http.ml",
+    "bin/masc_tui_render.ml",
+    "bin/masc_tui_planning_detail.ml",
+    "bin/masc_tui_planning_detail.mli",
+    "bin/masc_tui_render_prim.ml",
+    "bin/masc_tui_types.ml",
+    "test/tui_keyboard_approvals.py",
+    "test/tui_keyboard_harness.py",
+    "test/tui_keyboard_planning.py",
+    "bin/masc_tui_async_protocol.ml",
+    "bin/masc_tui_async_protocol.mli",
 )
 
 

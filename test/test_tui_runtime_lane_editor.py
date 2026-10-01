@@ -19,22 +19,22 @@ import tui_keyboard_runtime as _keyboard_runtime
 # The sources this scenario stands over. scripts/ci/run-edited-tests.sh runs a
 # suite when a pull request changes a path the suite names.
 SOURCE_MODULES = (
-    'bin/masc_tui.ml',
-    'bin/masc_tui_render.ml',
-    'bin/masc_tui_types.ml',
-    'bin/masc_tui_keys.ml',
-    'bin/masc_tui_http.ml',
-    'lib/server/server_standalone_lane_projection.ml',
-    'lib/tui_decode.ml',
-    'test/tui_keyboard_harness.py',
-    'test/tui_keyboard_keepers.py',
-    'test/tui_keyboard_runtime.py',
-    'lib/tui_decode_runtime_probe.ml',
-    'lib/tui_decode_runtime_probe.mli',
-    'lib/runtime/runtime.ml',
-    'lib/runtime/runtime.mli',
-    'lib/runtime/runtime_config_text.ml',
-    'lib/runtime/runtime_config_text.mli',
+    "bin/masc_tui.ml",
+    "bin/masc_tui_render.ml",
+    "bin/masc_tui_types.ml",
+    "bin/masc_tui_keys.ml",
+    "bin/masc_tui_http.ml",
+    "lib/server/server_standalone_lane_projection.ml",
+    "lib/tui_decode.ml",
+    "test/tui_keyboard_harness.py",
+    "test/tui_keyboard_keepers.py",
+    "test/tui_keyboard_runtime.py",
+    "lib/tui_decode_runtime_probe.ml",
+    "lib/tui_decode_runtime_probe.mli",
+    "lib/runtime/runtime.ml",
+    "lib/runtime/runtime.mli",
+    "lib/runtime/runtime_config_text.ml",
+    "lib/runtime/runtime_config_text.mli",
 )
 
 ROUTING_PATH = "/api/v1/runtime/config/routing"

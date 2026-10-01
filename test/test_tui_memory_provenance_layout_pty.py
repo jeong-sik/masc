@@ -8,13 +8,13 @@ import tui_keyboard_memory as _keyboard_memory
 import test_tui_memory_fact_detail_pty as detail
 
 SOURCE_MODULES = (
-    'bin/masc_tui_render.ml',
-    'bin/masc_tui_render_memory.ml',
-    'test/tui_keyboard_memory.py',
-    'test/tui_keyboard_harness.py',
-    'test/tui_keyboard_chat.py',
-    'test/tui_keyboard_observer.py',
-    'test/tui_keyboard_tools.py',
+    "bin/masc_tui_render.ml",
+    "bin/masc_tui_render_memory.ml",
+    "test/tui_keyboard_memory.py",
+    "test/tui_keyboard_harness.py",
+    "test/tui_keyboard_chat.py",
+    "test/tui_keyboard_observer.py",
+    "test/tui_keyboard_tools.py",
 )
 # Force overflow at both 80 and 30 columns in the short frame, while the
 # full reading grows by the observed overflow, retaining the entire record.

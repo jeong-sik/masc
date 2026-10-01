@@ -14,15 +14,15 @@ import tui_keyboard_harness as _keyboard_harness
 import tui_keyboard_memory as _keyboard_memory
 
 SOURCE_MODULES = (
-    'bin/masc_tui_render_memory.ml',
-    'bin/masc_tui_keys.ml',
-    'bin/masc_tui.ml',
-    'lib/tui_decode_memory_health.ml',
-    'lib/tui_decode_memory_health.mli',
-    'lib/tui_decode_memory_facts.ml',
-    'lib/tui_decode_memory_facts.mli',
-    'test/tui_keyboard_harness.py',
-    'test/tui_keyboard_memory.py',
+    "bin/masc_tui_render_memory.ml",
+    "bin/masc_tui_keys.ml",
+    "bin/masc_tui.ml",
+    "lib/tui_decode_memory_health.ml",
+    "lib/tui_decode_memory_health.mli",
+    "lib/tui_decode_memory_facts.ml",
+    "lib/tui_decode_memory_facts.mli",
+    "test/tui_keyboard_harness.py",
+    "test/tui_keyboard_memory.py",
 )
 
 # The ledger coordinates the default view folds: the snapshot revision, the

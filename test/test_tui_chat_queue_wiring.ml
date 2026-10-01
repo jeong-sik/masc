@@ -2655,6 +2655,7 @@ let test_an_observed_running_turn_is_drawn_from_its_journal () =
     let state =
       Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. ()
     in
+    state.msg_tool_visibility <- Tui_types.Tools_full;
     state.view <- Tui_types.Keepers Tui_types.Keeper_message;
     state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
     state.msg_target_keeper_name <- Some "alpha";
@@ -3974,6 +3975,7 @@ let test_the_sending_rows_show_an_age () =
        ~callee:"Masc_tui_message_layout.age_text" > 0);
   List.iter (fun keeper_name ->
     let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+    state.msg_tool_visibility <- Tui_types.Tools_full;
     state.msg_target_keeper_name <- Some "alpha";
     state.msg_inflight <- [inflight_with_log ~keeper_name ~started_at:2. [Live.Run_started]];
     let summary ~now =

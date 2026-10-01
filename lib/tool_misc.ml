@@ -331,6 +331,7 @@ let dispatch ctx ~name ~args : Tool_result.result option =
 let is_read_only = function
   | Tool_schemas_misc.Misc_lane_declaration_read -> true
   | Tool_schemas_misc.Misc_lane_declaration_save
+  | Tool_schemas_misc.Misc_candle_balance
   | Tool_schemas_misc.Misc_candle_purchase
   | Tool_schemas_misc.Misc_candle_equip
   | Tool_schemas_misc.Misc_lane_updates -> false
@@ -346,7 +347,6 @@ let is_read_only = function
   | Tool_schemas_misc.Misc_keeper_waiting_inventory
   | Tool_schemas_misc.Misc_tool_help
   | Tool_schemas_misc.Misc_portrait_read
-  | Tool_schemas_misc.Misc_candle_balance
   | Tool_schemas_misc.Misc_candle_catalog
   (* Read-back only: records nothing, matching the descriptor's readonly flag
      and the MCP lane's runtime_tool_policy. *)

@@ -332,11 +332,14 @@ type reply = { status : int; headers : (string * string) list; body : string }
 
 let get ~router ?if_none_match ?token path =
   let output = Buffer.create 4096 in
+  let authority = require_ok (fun `Malformed -> "invalid fixture authority")
+      (Server_request_authority.of_host_port ~host:"127.0.0.1" ~port:8935) in
   let connection = Httpun.Server_connection.create (fun reqd ->
-    Http.Router.dispatch router (Httpun.Reqd.request reqd) reqd) in
+    Server_request_authority.with_current authority (fun () ->
+      Http.Router.dispatch router (Httpun.Reqd.request reqd) reqd)) in
   let optional name = Option.fold ~none:"" ~some:(fun value -> name ^ ": " ^ value ^ "\r\n") in
   let raw_request =
-    Printf.sprintf "GET %s HTTP/1.1\r\nHost: x\r\n%s%sContent-Length: 0\r\n\r\n" path
+    Printf.sprintf "GET %s HTTP/1.1\r\nHost: 127.0.0.1:8935\r\n%s%sContent-Length: 0\r\n\r\n" path
       (optional "If-None-Match" if_none_match)
       (optional "Authorization" (Option.map (fun token -> "Bearer " ^ token) token)) in
   let input = Bigstringaf.of_string ~off:0 ~len:(String.length raw_request) raw_request in

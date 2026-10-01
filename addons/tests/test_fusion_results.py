@@ -381,6 +381,47 @@ class FusionResults(unittest.TestCase):
                     self.assertNotIn("structuredContent", responses[0]["result"])
                     self.assertEqual(responses[1], {"jsonrpc": "2.0", "id": 2, "result": {}})
 
+    def test_surrogate_values_and_keys_are_refused_and_unicode_is_retained(self):
+        requests = []
+        for bad in ("\ud800", "\udfff"):
+            for location in ("body", "nested value", "nested key"):
+                value = detail()
+                if location == "body":
+                    value["evidence"]["post"]["body"] = "retained " + bad
+                elif location == "nested value":
+                    value["run"]["roster"] = {"panel": [{"value": bad}]}
+                else:
+                    value["run"]["roster"] = {"panel": [{bad: "value"}]}
+                requests.append({"jsonrpc": "2.0", "id": len(requests) + 1,
+                    "method": "tools/call", "params": {"name": "lane_observe",
+                    "arguments": {"binding": {}, "sources": [source(value)]}}})
+        valid = detail()
+        valid["evidence"]["post"]["body"] = "한글 café 🌱 e\u0301"
+        requests.append({"jsonrpc": "2.0", "id": 7, "method": "tools/call",
+            "params": {"name": "lane_observe", "arguments": {
+                "binding": {}, "sources": [source(valid)]}}})
+        requests.append({"jsonrpc": "2.0", "id": 8, "method": "ping"})
+        responses = exchange("fusion-results", requests)
+        self.assertEqual([response["id"] for response in responses], list(range(1, 9)))
+        for response in responses[:6]:
+            self.assertTrue(response["result"]["isError"])
+            self.assertNotIn("structuredContent", response["result"])
+            self.assertIn("UTF-8", response["result"]["content"][0]["text"])
+        result = responses[6]["result"]
+        self.assertFalse(result["isError"])
+        evidence_row = result["structuredContent"]["rows"][1]
+        self.assertEqual(evidence_row["fields"]["board_post"]["body"], valid["evidence"]["post"]["body"])
+        self.assertEqual(responses[7], {"jsonrpc": "2.0", "id": 8, "result": {}})
+
+    def test_surrogate_request_id_has_safe_error_and_next_request_succeeds(self):
+        responses = exchange("fusion-results", [
+            {"jsonrpc": "2.0", "id": "\ud800", "method": "ping"},
+            {"jsonrpc": "2.0", "id": "한글 🌱", "method": "ping"},
+        ])
+        self.assertIsNone(responses[0]["id"])
+        self.assertEqual(responses[0]["error"]["code"], -32602)
+        self.assertEqual(responses[1], {"jsonrpc": "2.0", "id": "한글 🌱", "result": {}})
+
     def test_export_is_private_and_never_replaces_an_existing_capture(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

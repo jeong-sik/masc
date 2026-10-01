@@ -382,16 +382,34 @@ class FusionResults(unittest.TestCase):
                     self.assertEqual(responses[1], {"jsonrpc": "2.0", "id": 2, "result": {}})
 
     def test_deep_json_request_keeps_worker_available(self):
-        request = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {
-            "name": "lane_observe", "arguments": {"binding": {"copied": "__deep__"}, "sources": []}}}
-        wire = json.dumps(request).replace('"__deep__"', "[" * 1000 + "0" + "]" * 1000)
-        wire += "\n" + json.dumps({"jsonrpc": "2.0", "id": 2, "method": "ping"}) + "\n"
-        worker = subprocess.run([sys.executable, str(ADDONS / "fusion-results/server.py")],
-                                input=wire, capture_output=True, text=True)
-        self.assertEqual(worker.returncode, 0, worker.stderr)
-        responses = [json.loads(line) for line in worker.stdout.splitlines()]
-        self.assertEqual([response["id"] for response in responses], [1, 2])
-        self.assertEqual(responses[1], {"jsonrpc": "2.0", "id": 2, "result": {}})
+        for depth in (20, 1000, 2000):
+            with self.subTest(depth=depth):
+                request = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {
+                    "name": "lane_observe", "arguments": {"binding": {"copied": "__deep__"}, "sources": [{}]}}}
+                request_wire = json.dumps(request).replace('"__deep__"', "[" * depth + "0" + "]" * depth)
+                # The stdio child uses this interpreter. Older Python decoders
+                # refuse this nesting before the protocol can read its ID;
+                # newer decoders admit it and reach tool validation instead.
+                try:
+                    json.loads(request_wire)
+                except RecursionError:
+                    decoded = False
+                else:
+                    decoded = True
+                wire = request_wire + "\n" + json.dumps({"jsonrpc": "2.0", "id": 2, "method": "ping"}) + "\n"
+                worker = subprocess.run([sys.executable, str(ADDONS / "fusion-results/server.py")],
+                                        input=wire, capture_output=True, text=True)
+                self.assertEqual(worker.returncode, 0, worker.stderr)
+                responses = [json.loads(line) for line in worker.stdout.splitlines()]
+                self.assertEqual(len(responses), 2)
+                if decoded:
+                    self.assertEqual(responses[0]["id"], 1)
+                    self.assertTrue(responses[0]["result"]["isError"])
+                else:
+                    self.assertIsNone(responses[0]["id"])
+                    self.assertEqual(responses[0]["error"], {
+                        "code": -32602, "message": "JSON nesting exceeds the decoder limit"})
+                self.assertEqual(responses[1], {"jsonrpc": "2.0", "id": 2, "result": {}})
 
     def test_deep_array_id_is_refused_without_echo_or_worker_exit(self):
         request = {"jsonrpc": "2.0", "id": "__deep__", "method": "ping"}

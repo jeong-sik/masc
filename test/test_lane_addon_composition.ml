@@ -593,6 +593,11 @@ sources=%s
     check string "durable owner can read after source eviction" (source old_run)
       (read owner |> require_document |> text "source_text");
     check bool "foreign Keeper cannot read an owned document" true (Result.is_error (read "foreign"));
+    let foreign_run = register_private_run (root ^ "/foreign") "foreign" in
+    write path (source foreign_run);
+    check bool "unadmitted foreign Fusion source cannot inherit the old owner's read" true
+      (Result.is_error (read owner));
+    write path (source old_run);
     let malformed = "id = \"unfinished" in
     write operator_path malformed;
     let operator_document = Lane_addon_runtime.read_declaration ~caller:owner

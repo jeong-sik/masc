@@ -1,4 +1,5 @@
-type t = Pending of {keeper:string; prior:string option; proposed:string} | Owned of string
+type t = Pending of {keeper:string; prior:string option; proposed:string}
+  | Owned of {keeper:string; revision:string}
   | Reassigned of {keeper:string; revision:string}
 let ( let* ) = Result.bind
 let protect f = try f () with
@@ -11,19 +12,23 @@ let identity ~root ~source_path =
   let path = Filename.concat root (Filename.concat "declaration-owners"
     (Lane_addon_store.digest source_path ^ ".jsonl")) in
   root, source_path, path
-let keeper = function Pending p -> p.keeper | Owned keeper -> keeper | Reassigned p -> p.keeper
+let keeper = function Pending p -> p.keeper | Owned p -> p.keeper | Reassigned p -> p.keeper
 let permits state ~keeper:caller ~source_revision =
   String.equal (keeper state) caller && match state with
-    | Owned _ -> true
+    | Owned p -> p.revision = source_revision
     | Reassigned p -> p.revision = source_revision
     | Pending p -> p.prior = Some source_revision || p.proposed = source_revision
+let repair_permits state ~keeper:caller =
+  match state with
+  | Owned p -> String.equal p.keeper caller
+  | Pending _ | Reassigned _ -> false
 let digest = function
   | `String value when String.length value = 64
       && String.for_all (function '0'..'9' | 'a'..'f' -> true | _ -> false) value -> Ok value
   | _ -> Error "invalid declaration ownership source revision"
 let encode ~root ~source_path state =
   let kind, prior, proposed = match state with
-    | Owned _ -> "owned", `Null, `Null
+    | Owned p -> "owned", `Null, `String p.revision
     | Reassigned p -> "reassigned", `Null, `String p.revision
     | Pending p -> "pending", Option.fold ~none:`Null ~some:(fun value -> `String value) p.prior, `String p.proposed in
   Yojson.Safe.to_string (`Assoc ["root",`String root; "source_path",`String source_path;
@@ -40,7 +45,8 @@ let decode ~root ~source_path bytes =
               && List.assoc "source_path" fields = `String source_path ->
               (match List.assoc "keeper" fields, List.assoc "kind" fields,
                      List.assoc "prior" fields, List.assoc "proposed" fields with
-               | `String keeper, `String "owned", `Null, `Null when String.trim keeper <> "" -> Ok (Owned keeper)
+               | `String keeper, `String "owned", `Null, revision when String.trim keeper <> "" ->
+                   let* revision = digest revision in Ok (Owned {keeper;revision})
                | `String keeper, `String "reassigned", `Null, revision when String.trim keeper <> "" ->
                    let* revision = digest revision in Ok (Reassigned {keeper;revision})
                | `String keeper, `String "pending", prior, proposed when String.trim keeper <> "" ->
@@ -52,8 +58,11 @@ let decode ~root ~source_path bytes =
         let* () = match previous, state with
           | None, Pending _ -> Ok ()
           | Some _, Reassigned _ -> Ok ()
-          | Some before, after when String.equal (keeper before) (keeper after) ->
-              (match before, after with Owned _, Pending _ -> Error "declaration ownership regressed" | _ -> Ok ())
+          | Some (Pending before), Owned after when before.proposed <> after.revision ->
+              Error "completed ownership does not match the proposed revision"
+          | Some (Reassigned before), Owned after when before.revision <> after.revision ->
+              Error "completed reassignment does not match the observed revision"
+          | Some before, after when String.equal (keeper before) (keeper after) -> Ok ()
           | _ -> Error "declaration ownership changed without authority" in
         loop (Some state) rest in
   if bytes = "" then Ok None else loop None (String.split_on_char '\n' bytes)
@@ -86,7 +95,8 @@ let prepare ~root ~source_path ~keeper:caller ~prior_revision ~proposed_revision
   protect (fun () ->
   Fs_compat.mkdir_p (Filename.dirname source_path);
   update ~root ~source_path (function
-    | Some (Owned owner) when String.equal owner caller -> Ok None
+    | Some (Owned owner) when String.equal owner.keeper caller ->
+        Ok (Some (Pending {keeper=caller;prior=prior_revision;proposed=proposed_revision}))
     | None -> Ok (Some (Pending {keeper=caller;prior=prior_revision;proposed=proposed_revision}))
     | Some (Pending p) when String.equal p.keeper caller
         && (prior_revision = None || Option.fold ~none:false ~some:(fun revision -> permits (Pending p)
@@ -95,14 +105,15 @@ let prepare ~root ~source_path ~keeper:caller ~prior_revision ~proposed_revision
     | Some _ -> Error "declaration is owned by another caller or admission is unconfirmed"))
 let complete ~root ~source_path ~keeper:caller ~source_revision =
   update ~root ~source_path (function
-    | Some (Owned owner) when String.equal owner caller -> Ok None
+    | Some (Owned owner) when String.equal owner.keeper caller ->
+        Ok (Some (Owned {keeper=caller;revision=source_revision}))
     | Some (Pending p) when String.equal p.keeper caller && p.proposed = source_revision ->
-        Ok (Some (Owned caller))
+        Ok (Some (Owned {keeper=caller;revision=source_revision}))
     | Some (Reassigned p) when String.equal p.keeper caller && p.revision = source_revision ->
-        Ok (Some (Owned caller))
+        Ok (Some (Owned {keeper=caller;revision=source_revision}))
     | None | Some _ -> Error "declaration ownership has no matching pending admission")
 let reassign ~root ~source_path ~keeper:caller ~source_revision =
   update ~root ~source_path (function
     | None -> Ok (Some (Pending {keeper=caller;prior=Some source_revision;proposed=source_revision}))
-    | Some (Owned owner) when String.equal owner caller -> Ok None
+    | Some (Owned owner) when String.equal owner.keeper caller -> Ok None
     | Some _ -> Ok (Some (Reassigned {keeper=caller;revision=source_revision})))

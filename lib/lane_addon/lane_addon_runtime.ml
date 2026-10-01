@@ -804,7 +804,8 @@ let authorize_document m ~access (document : Lane_addon_declaration.document) =
       | Some owner ->
           (match access with
            | Keeper keeper when Lane_addon_document_owner.permits owner ~keeper
-               ~source_revision:document.source_revision ->
+               ~source_revision:document.source_revision -> Ok ()
+           | Keeper keeper when Lane_addon_document_owner.repair_permits owner ~keeper ->
                let denied = Error {Lane_addon_declaration.code=Invalid_request;
                  message="Lane declaration is unavailable to this caller";current=None} in
                (match offload (fun () -> Lane_addon_config.load_source
@@ -814,7 +815,7 @@ let authorize_document m ~access (document : Lane_addon_declaration.document) =
                            binding_visibility m ~access declaration.binding with
                      | Ok (), Ok visibility when can_read access visibility -> Ok ()
                      | _ -> denied)
-                | Error _ -> denied)
+                | Error _ -> Ok ())
            | Keeper _ | Unauthenticated | Operator_configuration ->
                Error {Lane_addon_declaration.code=Invalid_request;
                  message="Lane declaration is unavailable to this caller";current=None})

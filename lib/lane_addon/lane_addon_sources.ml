@@ -270,13 +270,15 @@ let authorize ~access binding =
     (Ok ()) sources
 let fusion_run ~access ~store ~max_bytes ~id ~run_id =
       let* run = authorized_fusion_run ~access ~run_id in
-      let post = match Board_dispatch.find_post_by_run_id ~run_id with
+      let* post = match Board_dispatch.find_post_by_run_id ~run_id with
         | Some post ->
             (match post.Board.origin with
-             | Some {source=Some source;fusion_run_id=Some origin_id;_}
-               when String.equal source "fusion" && String.equal origin_id run_id -> Some post
-             | Some _ | None -> None)
-        | None -> None in
+             | Some {source=Some source;fusion_run_id=Some origin_id;fusion_producer=Some producer;_}
+               when String.equal source "fusion" && String.equal origin_id run_id
+                 && String.equal producer run.keeper
+                 && String.equal (Board.Agent_id.to_string post.author) run.keeper -> Ok (Some post)
+             | Some _ | None -> Error "Fusion evidence is unavailable to this caller")
+        | None -> Ok None in
       let status = match post,run.Fusion_run_registry.status with
         | Some _, _ -> "recorded"
         | None,Fusion_run_registry.Running -> "pending"

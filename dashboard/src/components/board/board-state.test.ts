@@ -7,8 +7,14 @@ vi.mock('../../api', async (importOriginal) => {
     fetchBoardHearths: vi.fn(),
     fetchBoardFlairs: vi.fn(),
     fetchBoardPost: vi.fn(),
+    commentPost: vi.fn(),
   }
 })
+
+vi.mock('../../store', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../../store')>(),
+  refreshBoard: vi.fn(),
+}))
 
 vi.mock('../common/toast', () => ({
   showToast: vi.fn(),
@@ -34,6 +40,8 @@ import {
   refreshBoardFlairs,
   refreshBoardHearths,
   loadPostDetail,
+  submitComment,
+  commentText,
   loadOlderPostComments,
   detailPost,
   detailComments,
@@ -42,7 +50,7 @@ import {
   type VisibleBoardGroups,
 } from './board-state'
 import type { BoardComment, BoardPost } from '../../types'
-import { fetchBoardFlairs, fetchBoardHearths, fetchBoardPost, type BoardFlair, type BoardHearth } from '../../api'
+import { fetchBoardFlairs, fetchBoardHearths, fetchBoardPost, commentPost, type BoardFlair, type BoardHearth } from '../../api'
 import { showToast } from '../common/toast'
 
 // Reset module-scope signals between tests
@@ -83,6 +91,7 @@ beforeEach(() => {
   vi.mocked(fetchBoardHearths).mockReset()
   vi.mocked(fetchBoardFlairs).mockReset()
   vi.mocked(fetchBoardPost).mockReset()
+  vi.mocked(commentPost).mockReset()
   vi.mocked(showToast).mockReset()
 })
 
@@ -583,6 +592,31 @@ describe('loadPostDetail', () => {
     expect(fetchBoardPost).toHaveBeenNthCalledWith(3, 'p1', 0, 20)
     expect(detailComments.value.map(comment => [comment.id, comment.parent_id])).toEqual([
       ['root', null], ['parent', 'root'], ['focused', 'parent'],
+    ])
+    expect(detailCommentPage.value.offset).toBe(0)
+  })
+
+  it('retains the older parent chain after submitting a new reply', async () => {
+    const comment = (id: string, parent_id: string | null): BoardComment => ({
+      id, parent_id, post_id: 'p1', author: 'fixture', content: id,
+      created_at: '2026-09-30T00:00:00Z',
+    })
+    vi.mocked(commentPost).mockResolvedValue({})
+    vi.mocked(fetchBoardPost)
+      .mockResolvedValueOnce({ ...makePost({ comment_count: 45 }),
+        comments: [comment('new-reply', 'older-parent')], commentPage: { offset: 40, total: 45 },
+      })
+      .mockResolvedValueOnce({ ...makePost({ comment_count: 45 }),
+        comments: [comment('older-parent', 'root')], commentPage: { offset: 20, total: 45 },
+      })
+      .mockResolvedValueOnce({ ...makePost({ comment_count: 45 }),
+        comments: [comment('root', null)], commentPage: { offset: 0, total: 45 },
+      })
+    commentText.value = 'Reply to the older page'
+    await submitComment('p1', 'older-parent')
+    expect(commentPost).toHaveBeenCalledWith('p1', expect.any(String), 'Reply to the older page', 'older-parent')
+    expect(detailComments.value.map(comment => [comment.id, comment.parent_id])).toEqual([
+      ['root', null], ['older-parent', 'root'], ['new-reply', 'older-parent'],
     ])
     expect(detailCommentPage.value.offset).toBe(0)
   })

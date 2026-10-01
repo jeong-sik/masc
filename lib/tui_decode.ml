@@ -16,22 +16,49 @@ type task = {
   goal_ids : string list;
 }
 
-type keeper_origin = Persisted_keeper | Declared_keeper of Keeper_declared_roster.requirement list
+type keeper_origin =
+  | Persisted_keeper
+  | Declared_keeper of Keeper_declared_roster.requirement list
+  | Remote_keeper
 
-type keeper = {
-  k_origin : keeper_origin;
-  k_name : string;
+type keeper_identity = {
   k_trace_id : string;
-  k_paused : bool;
+  k_created_at : string;
+  k_updated_at : string;
+}
+
+type keeper_activity = {
   k_current_task_id : string option;
   k_total_turns : int;
   k_total_tokens : int;
   k_total_cost_usd : float;
   k_last_turn_ts : string;
   k_last_proactive_outcome : Keeper_meta_contract.proactive_cycle_outcome option;
-  k_created_at : string;
-  k_updated_at : string;
 }
+
+type keeper = {
+  k_origin : keeper_origin;
+  k_name : string;
+  k_paused : bool;
+  k_identity : (keeper_identity, string) result;
+  k_activity : keeper_activity option;
+}
+
+let keeper_trace_id keeper =
+  Result.map (fun identity -> identity.k_trace_id) keeper.k_identity
+
+type keeper_trace_projection = {
+  bindings : (string * string) list;
+  unavailable : (string * string) list;
+}
+
+let keeper_trace_projection keepers =
+  let bindings, unavailable = List.fold_left (fun (bindings, unavailable) keeper ->
+      match keeper_trace_id keeper with
+      | Ok trace -> (keeper.k_name, trace) :: bindings, unavailable
+      | Error reason -> bindings, (keeper.k_name, reason) :: unavailable)
+      ([], []) keepers in
+  { bindings = List.rev bindings; unavailable = List.rev unavailable }
 
 (* One row of GET /api/v1/gate/keepers. That route is [masc_keeper_list], which
    renders [status] through [Keeper_status_runtime.keeper_surface_status] — the
@@ -84,8 +111,11 @@ type keeper_portrait = Keeper_portrait_equipment.reading =
 
 type keeper_runtime = {
   kr_name : string;
+  kr_identity : (keeper_identity, string) result;
   kr_portrait : keeper_portrait;
   kr_candle_balance_milli : string option;
+  kr_candle_account_revision : (string option, string) result;
+  (** [Ok None] is observed Candle-off; [Error] cannot authorize an Item account. *)
   kr_health : keeper_health;
   kr_paused : bool;
   kr_next_action : Keeper_status_runtime.keeper_next_action_path option;
@@ -561,25 +591,31 @@ let keeper_of_meta (meta : Keeper_meta_contract.keeper_meta) =
   {
     k_origin = Persisted_keeper;
     k_name = meta.name;
-    k_trace_id = Keeper_id.Trace_id.to_string runtime.trace_id;
     k_paused = meta.paused;
-    k_current_task_id =
-      Option.map Keeper_id.Task_id.to_string meta.current_task_id;
-    k_total_turns = usage.total_turns;
-    k_total_tokens = usage.total_tokens;
-    k_total_cost_usd = usage.total_cost_usd;
-    k_last_turn_ts;
-    k_last_proactive_outcome = Some proactive.last_outcome;
-    k_created_at = meta.created_at;
-    k_updated_at = meta.updated_at;
+    k_identity = Ok {
+      k_trace_id = Keeper_id.Trace_id.to_string runtime.trace_id;
+      k_created_at = meta.created_at;
+      k_updated_at = meta.updated_at;
+    };
+    k_activity = Some {
+      k_current_task_id =
+        Option.map Keeper_id.Task_id.to_string meta.current_task_id;
+      k_total_turns = usage.total_turns;
+      k_total_tokens = usage.total_tokens;
+      k_total_cost_usd = usage.total_cost_usd;
+      k_last_turn_ts;
+      k_last_proactive_outcome = Some proactive.last_outcome;
+    };
   }
 
 let keeper_of_declaration (row : Keeper_declared_roster.t) =
   { k_origin = Declared_keeper row.requirements; k_name = row.name;
-    k_trace_id = ""; k_paused = false; k_current_task_id = None;
-    k_total_turns = 0; k_total_tokens = 0; k_total_cost_usd = 0.;
-    k_last_turn_ts = ""; k_last_proactive_outcome = None;
-    k_created_at = ""; k_updated_at = "" }
+    k_paused = false; k_activity = None;
+    k_identity = Error "Keeper has not started" }
+
+let keeper_of_runtime row =
+  { k_origin = Remote_keeper; k_name = row.kr_name; k_paused = row.kr_paused;
+    k_identity = row.kr_identity; k_activity = None }
 
 let decode_keeper json =
   let* meta = Keeper_meta_json_parse.meta_of_json json in
@@ -1700,6 +1736,7 @@ type runtime_resolved_lane = {
 }
 
 type runtime_resolved_snapshot = {
+  rrs_usage : (Tui_decode_usage.provider_usage_windows, string) result;
   rrs_generated_at_iso : string;
   rrs_config_path : string option;
   rrs_default_runtime_id : string option;
@@ -2078,7 +2115,8 @@ let decode_runtime_resolved_snapshot json =
     loop rrs_lanes
   in
   Ok
-    { rrs_generated_at_iso
+    { rrs_usage = Tui_decode_usage.decode_provider_usage_windows json
+    ; rrs_generated_at_iso
     ; rrs_config_path
     ; rrs_default_runtime_id
     ; rrs_media_failover
@@ -2881,7 +2919,23 @@ let decode_overview_goals json =
   let* nodes = decode_overview_goal_items decode_overview_goal_node tree_json in
   Ok (List.concat nodes)
 
-let decode_keeper_runtime ~candle_balance_milli json =
+let decode_keeper_roster_identity ~name json =
+  let* metadata_name = required_string_field json "name" in
+  let* () =
+    if String.equal metadata_name name then Ok ()
+    else Error "Keeper brief metadata names a different Keeper"
+  in
+  let* raw_trace_id = required_string_field json "trace_id" in
+  let* trace_id = Keeper_id.Trace_id.of_string raw_trace_id in
+  let k_trace_id = Keeper_id.Trace_id.to_string trace_id in
+  let* k_created_at = required_string_field json "created_at" in
+  let* k_updated_at = required_string_field json "updated_at" in
+  if List.exists (fun value -> String.trim value = "")
+       [ k_trace_id; k_created_at; k_updated_at ] then
+    Error "Keeper brief identity fields must not be empty"
+  else Ok { k_trace_id; k_created_at; k_updated_at }
+
+let decode_keeper_runtime ~candle_balance_milli ~account_revision json =
   let* kr_name = required_string_field json "name" in
   let* kr_portrait = Keeper_portrait_equipment.reading_of_json (member "portrait" json) in
   let* raw_health = required_string_field json "health" in
@@ -2920,6 +2974,7 @@ let decode_keeper_runtime ~candle_balance_milli json =
      declaration there; a second top-level copy would be a second place to
      update. *)
   let* row_meta = required_object_field json "meta" in
+  let kr_identity = decode_keeper_roster_identity ~name:kr_name row_meta in
   let* kr_sandbox_profile = required_string_field row_meta "sandbox_profile" in
   let* kr_runtime_blocker_summary =
     required_nullable_string_field json "runtime_blocker_summary"
@@ -2935,8 +2990,10 @@ let decode_keeper_runtime ~candle_balance_milli json =
   in
   Ok
     { kr_name
+    ; kr_identity
     ; kr_portrait
     ; kr_candle_balance_milli = candle_balance_milli
+    ; kr_candle_account_revision = account_revision
     ; kr_health
     ; kr_paused
     ; kr_next_action
@@ -2959,9 +3016,17 @@ let decode_keeper_runtime_list json =
       let* balance = match Json_util.assoc_member_opt "candle_balance_milli" json with
         | Some value -> Candle_observation.balance_of_json value
         | None -> Error "missing required field candle_balance_milli" in
+      let* revision = match Json_util.assoc_member_opt "candle_account_revision" json with
+        | Some `Null when candle = Candle_observation.Off -> Ok None
+        | Some (`String revision) when String.length revision = 64
+            && String.for_all (function '0'..'9' | 'a'..'f' -> true | _ -> false) revision ->
+            (match candle with
+             | Candle_observation.Ready _ | Candle_observation.Disabled _ -> Ok (Some revision)
+             | Candle_observation.Off -> Error "Candle-off row revision must be null")
+        | Some _ | None -> Error "Candle row account revision is missing or malformed" in
       match candle, balance with
       | Candle_observation.Ready _, Some _
-      | (Candle_observation.Off | Candle_observation.Disabled _), None -> Ok (json, balance)
+      | (Candle_observation.Off | Candle_observation.Disabled _), None -> Ok (json, balance, Ok revision)
       | Candle_observation.Ready _, None
       | (Candle_observation.Off | Candle_observation.Disabled _), Some _ ->
         Error "Candle row balance disagrees with the envelope observation" in
@@ -2970,9 +3035,9 @@ let decode_keeper_runtime_list json =
   in
   let candle, items = match candle_rows with
     | Ok (candle, rows) -> Ok candle, rows
-    | Error detail -> Error detail, List.map (fun row -> row, None) items
+    | Error detail -> Error detail, List.map (fun row -> row, None, Error detail) items
   in
-  let decode_row (json, candle_balance_milli) =
+  let decode_row (json, candle_balance_milli, account_revision) =
     match member "effective_meta_error" json with
     | `Null when member "status" json = `String "error" ->
         let* name = required_string_field json "name" in
@@ -2986,7 +3051,7 @@ let decode_keeper_runtime_list json =
           | `Null -> Ok "Keeper metadata unavailable; the server supplied no error detail"
           | bad -> field_type_error "message" "a string or null" bad in
         Ok (Error (name, detail))
-    | `Null -> Result.map (fun row -> Ok row) (decode_keeper_runtime ~candle_balance_milli json)
+    | `Null -> Result.map (fun row -> Ok row) (decode_keeper_runtime ~candle_balance_milli ~account_revision json)
     | error ->
         let* name = required_string_field json "name" in
         (* The row and the nested error name the same keeper on the wire:
@@ -5895,36 +5960,37 @@ let decode_chat_event json =
       | None -> Ok Ignore)
 
 let parse_keeper_chat_response response =
-  let lines = String.split_on_char '\n' response in
+  let body =
+    if String.starts_with ~prefix:"HTTP/" response then
+      match split_headers_body response with
+      | Some body -> body
+      | None -> response
+    else response in
+  let payloads = Sse_wire.data_payloads_of_stream body in
   let result = Buffer.create 256 in
   let completion_text = ref None in
   let saw_terminal = ref false in
   let rec consume_sse = function
     | [] -> Ok ()
-    | raw_line :: rest ->
-        let line = trim raw_line in
-        if String.length line > 6 && String.starts_with line ~prefix:"data: " then (
-          let payload = String.sub line 6 (String.length line - 6) |> trim in
-          if payload = "[DONE]" || payload = "" then consume_sse rest
-          else
-            let* json =
-              try Ok (Yojson.Safe.from_string payload)
-              with Yojson.Json_error msg ->
-                Error ("invalid SSE JSON payload: " ^ msg)
-            in
-            let* chunk = decode_chat_event json in
-            (match chunk with
-             | Delta text -> Buffer.add_string result text
-             | Complete text when Buffer.length result = 0 ->
-                 saw_terminal := true;
-                 if text <> "" then completion_text := Some text
-             | Complete _ -> saw_terminal := true
-             | Ignore -> ());
-            consume_sse rest
-        ) else
+    | raw_payload :: rest ->
+        let payload = trim raw_payload in
+        if payload = "" then consume_sse rest
+        else if payload = "[DONE]" then (saw_terminal := true; consume_sse rest)
+        else
+          let* json =
+            try Ok (Yojson.Safe.from_string payload)
+            with Yojson.Json_error msg -> Error ("invalid SSE JSON payload: " ^ msg) in
+          let* chunk = decode_chat_event json in
+          (match chunk with
+           | Delta text -> Buffer.add_string result text
+           | Complete text when Buffer.length result = 0 ->
+               saw_terminal := true;
+               if text <> "" then completion_text := Some text
+           | Complete _ -> saw_terminal := true
+           | Ignore -> ());
           consume_sse rest
   in
-  let* () = consume_sse lines in
+  let* () = consume_sse payloads in
   if Buffer.length result > 0 then
     Ok (Buffer.contents result)
   else
@@ -5932,11 +5998,6 @@ let parse_keeper_chat_response response =
     | Some text when text <> "" -> Ok text
     | _ when !saw_terminal -> Ok ""
     | _ -> (
-        let body =
-          match split_headers_body response with
-          | Some body -> body
-          | None -> response
-        in
             let* json =
               try Ok (Yojson.Safe.from_string (trim body))
               with Yojson.Json_error msg ->

@@ -917,8 +917,18 @@ the column blank and keeps its width. `Ctrl-F` walks the axis: a full
 timestamp heading, then the bare clock-free gutter, then back. The
 header names the two stops away from rest as `metadata:full` or
 `metadata:off`. A streaming
-row uses its actual start clock rather than the word `live`; the active-turn
-status below the history carries the live state and elapsed time. When
+row uses its actual start clock rather than the word `live`. In compact and
+results modes, one quiet status below the history summarizes current work,
+your waiting messages, and their observed delivery or priority receipts.
+Waiting for confirmation and confirmed acceptance remain distinct. If a priority
+reply is unavailable, the status says confirmation is unavailable and retains
+the diagnostic detail; it does not claim the priority change was refused. Full mode
+(`Ctrl-D` twice from compact, or `/tools full`) shows execution IDs, elapsed
+time, individual queue states, and priority receipt details. Failures, approval
+requests, and explicit stop targets remain visible in the concise modes.
+Auto-next requests priority for your message; current work continues until it
+finishes or yields. Use the explicit interrupt controls to stop current work.
+When
 one newest message is taller than the history pane, the live edge keeps its
 heading (or inline opening) and latest rows with an explicit
 `⋯ N hidden · PgUp` separator.

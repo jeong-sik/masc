@@ -17,7 +17,15 @@ import sys
 
 import test_tui_keyboard_input as h
 
-SOURCE_MODULES = ('bin/masc_tui_palette.ml', 'bin/masc_tui_palette.mli', 'bin/masc_tui.ml', 'bin/masc_tui_types.ml', 'bin/masc_tui_render.ml', 'lib/tui_decode_connectors.ml', 'lib/tui_decode_connectors.mli')
+SOURCE_MODULES = (
+    "bin/masc_tui_palette.ml",
+    "bin/masc_tui_palette.mli",
+    "bin/masc_tui.ml",
+    "bin/masc_tui_types.ml",
+    "bin/masc_tui_render.ml",
+    "lib/tui_decode_connectors.ml",
+    "lib/tui_decode_connectors.mli",
+)
 CONNECTORS = "/api/v1/gate/connectors"
 TITLE = b"MASC Connectors"
 LOADED_TITLE = h.screen_header(TITLE, b" (0 of 0 available)")

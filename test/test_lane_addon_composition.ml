@@ -716,7 +716,7 @@ let test_configured_fusion_rechecks_owner_before_capture () = with_fixture (fun 
   ignore (declare directory (manifest root) "private-source" (fusion_source run_id));
   reconcile config directory;
   let id = active config "private-source" |> text "instance_id" in
-  await clock (fun () -> Option.is_some (source received id));
+  await clock (fun () -> member "observation_seq" (instance config id) <> `Int 0);
   let before = instance config id in
   let sequence = member "observation_seq" before in
   check string "configured capture is bound to retained private owner" owner

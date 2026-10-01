@@ -2653,7 +2653,8 @@ let test_an_observed_running_turn_is_drawn_from_its_journal () =
   Fun.protect ~finally:(fun () -> set_size previous_size) (fun () ->
     set_size (40, 100);
     let state =
-      Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. ()
+      Tui_types.create_state ~tool_visibility:Tui_types.Tools_full
+        ~workspace:"test" ~port:8935 ~refresh_interval:2. ()
     in
     state.view <- Tui_types.Keepers Tui_types.Keeper_message;
     state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
@@ -2699,6 +2700,13 @@ let test_an_observed_running_turn_is_drawn_from_its_journal () =
     check int "the turn's rail has not closed" 0
       (count (Masc_tui_message_layout.turn_rail_glyph Masc_tui_message_layout.Rail_closes)
          running_screen);
+    state.msg_tool_visibility <- Tui_types.Tools_compact;
+    let compact_screen = screen () in
+    check bool "compact status still reports the observed running turn" true
+      (Astring.String.is_infix ~affix:"기존 작업 처리 중" compact_screen);
+    check int "compact mode keeps the journal reply once" 1
+      (count "said" compact_screen);
+    state.msg_tool_visibility <- Tui_types.Tools_full;
     (* The next journal read brings the end of the turn: the log now stands
        for it, leaves the observed set, and is drawn as a settled block. *)
     let _ = Tui_types.turn_log_add_journaled running
@@ -3973,7 +3981,8 @@ let test_the_sending_rows_show_an_age () =
        ~binding_name:"keeper_message_inflight_rows"
        ~callee:"Masc_tui_message_layout.age_text" > 0);
   List.iter (fun keeper_name ->
-    let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+    let state = Tui_types.create_state ~tool_visibility:Tui_types.Tools_full
+        ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
     state.msg_target_keeper_name <- Some "alpha";
     state.msg_inflight <- [inflight_with_log ~keeper_name ~started_at:2. [Live.Run_started]];
     let summary ~now =
@@ -3984,7 +3993,17 @@ let test_the_sending_rows_show_an_age () =
     check bool "three-second request displays its age" true
       (String.ends_with ~suffix:" · 3s)" (summary ~now:5.));
     check bool "thirteen-minute request displays its changed age" true
-      (String.ends_with ~suffix:" · 13m00s)" (summary ~now:782.)))
+      (String.ends_with ~suffix:" · 13m00s)" (summary ~now:782.));
+    state.msg_tool_visibility <- Tui_types.Tools_compact;
+    if keeper_name = "alpha" then begin
+      check (list (pair bool string)) "compact mode has no duplicate own request row" []
+        (Tui_types.keeper_message_inflight_rows state ~chat_cols:80 ~now:5.);
+      check (list string) "compact status retains the running request" ["기존 작업 처리 중"]
+        (List.map Masc_tui_answering.chat_activity_row_text
+           (Tui_types.keeper_message_activity_rows state))
+    end else
+      check bool "compact mode retains the other Keeper request age" true
+        (String.ends_with ~suffix:" · 3s)" (summary ~now:5.)))
     ["alpha"; "beta"]
 ;;
 

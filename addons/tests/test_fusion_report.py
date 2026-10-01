@@ -391,6 +391,19 @@ class FusionReport(unittest.TestCase):
                 self.assertTrue(refused["isError"])
                 self.assertIn("different source coordinates", refused["content"][0]["text"])
 
+    def test_repeated_source_aliases_are_refused_before_row_generation(self):
+        captured = upstream(project(detail()))
+        refused = call("fusion-report", [captured, copy.deepcopy(captured)])
+        self.assertTrue(refused["isError"])
+        self.assertNotIn("structuredContent", refused)
+        self.assertIn("source aliases must be distinct", refused["content"][0]["text"])
+        separate = copy.deepcopy(captured)
+        separate["source_id"] = "another-alias"
+        accepted = call("fusion-report", [captured, separate])
+        self.assertFalse(accepted["isError"])
+        ids = [item["id"] for item in accepted["structuredContent"]["rows"]]
+        self.assertEqual(len(ids), len(set(ids)))
+
     def test_running_missing_and_stale_producer_are_partial(self):
         for value in (detail("running", "pending"), detail("completed", "absent")):
             report = call("fusion-report", [upstream(project(value))])["structuredContent"]

@@ -249,6 +249,9 @@ def reports(source: Source, observation: dict, *, recognized: bool):
 
 
 def observe(binding: dict, sources: tuple[Source, ...]) -> dict:
+    aliases = [source.source_id for source in sources]
+    if len(set(aliases)) != len(aliases):
+        raise InvalidInput("Fusion report source aliases must be distinct")
     rows, statuses = [], []
     if not sources:
         return {"rows": [], "coverage": [{"source_id": "fusion-report/input",

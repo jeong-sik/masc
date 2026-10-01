@@ -1565,8 +1565,9 @@ let handle_gate_resolve_body state operator_name request reqd body_str =
 let handle_gate_retry_body state operator_name request reqd body_str =
   try
     let args = Yojson.Safe.from_string body_str in
-    let base_path = (Mcp_server.workspace_config state).base_path in
-    match dashboard_gate_retry_http_json ~base_path ~requested_by:operator_name ~args with
+    let workspace_config = Mcp_server.workspace_config state in
+    let base_path = workspace_config.Workspace.base_path in
+    match dashboard_gate_retry_http_json ~workspace_config ~base_path ~requested_by:operator_name ~args with
     | Ok json -> respond_json_value_with_cors request reqd json
     | Error message ->
       respond_json_value_with_cors

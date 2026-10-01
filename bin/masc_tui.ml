@@ -1855,8 +1855,8 @@ type async_msg =
           the header stops drawing [submitting] and a second press is admitted
           again. *)
   | Gate_auto_judge_retried of
-      string * (unit, string) result * Approval.Flow.generation
-      (** approval id, rearm outcome, and the action slot this explicit retry
+      string * Tui_decode.server_identity * (unit, string) result * Approval.Flow.generation
+      (** approval id, captured workspace, rearm outcome, and the action slot this explicit retry
           owns. The server accepts it only if every observed identity field
           still matches the blocked row. *)
   | Gate_mode_set of Masc_tui_palette.gate_lane * string * (unit, string) result
@@ -3158,7 +3158,9 @@ let launch_gate_resolve state ~mailbox ~approval_id ~approve ~reason =
 let launch_gate_auto_judge_retry state ~mailbox (pending : Tui_decode.gate_pending) =
   if state.workspace_identity <> Workspace_identity_match then
     report_action state "error" "Cannot decide: workspace identity is unverified"
-  else
+  else match state.server_identity with
+  | None -> report_action state "error" "Cannot decide: workspace identity is unverified"
+  | Some expected_workspace ->
   match pending.gp_retry_request with
   | None ->
       report_action state "system"
@@ -3174,12 +3176,17 @@ let launch_gate_auto_judge_retry state ~mailbox (pending : Tui_decode.gate_pendi
           let port = state.port in
           let run () =
             let result =
-              try Masc_tui_http.post_dashboard_gate_retry ~host ~port ~request with
+              try
+                let ( let* ) = Result.bind in
+                let* () = probe_expected_workspace ~host ~port expected_workspace in
+                Masc_tui_http.post_dashboard_gate_retry ~host ~port ~request
+                  ~expected_workspace
+              with
               | Eio.Cancel.Cancelled _ as exn -> raise exn
               | exn -> Error (Printexc.to_string exn)
             in
             enqueue_async mailbox
-              (Gate_auto_judge_retried (pending.gp_id, result, generation))
+              (Gate_auto_judge_retried (pending.gp_id, expected_workspace, result, generation))
           in
           match Eio_context.get_switch_opt () with
           | Some sw ->
@@ -3190,6 +3197,7 @@ let launch_gate_auto_judge_retry state ~mailbox (pending : Tui_decode.gate_pendi
               enqueue_async mailbox
                 (Gate_auto_judge_retried
                    ( pending.gp_id,
+                     expected_workspace,
                      Error "Eio switch is unavailable",
                      generation )))
 
@@ -8179,7 +8187,12 @@ let chat_status_text completed =
    is the one the observer feed keeps; without one, this call opens one and
    the observer reuses it. *)
 let launch_task_dispatch state ~mailbox ~keeper_name ~title ~body ~original =
-  match state.workspace_identity, state.server_identity with
+  if Option.is_some state.keepers_error
+     || not (keeper_available_for_new_message state keeper_name) then
+    enqueue_async mailbox
+      (Task_dispatch_failed { keeper = keeper_name;
+        detail = "waiting for the current Keeper roster · command retained"; original })
+  else match state.workspace_identity, state.server_identity with
   | Workspace_identity_match, Some expected_workspace ->
   let host = server_peer_host in
   let port = state.port in
@@ -10122,6 +10135,9 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       in
       match target with
       | None -> report_action state "error" "/task needs a keeper to hand the work to"
+      | Some keeper when not (keeper_available_for_new_message state keeper) ->
+          report_action state "error"
+            "/task cannot create: waiting for the current Keeper roster · command retained"
       | Some keeper ->
           Buffer.clear state.msg_input;
           report_action state "task"
@@ -15611,16 +15627,18 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            report_action state "error"
              (Printf.sprintf "Gate decision for %s failed: %s" approval_id
                 detail))
-  | Gate_auto_judge_retried (approval_id, result, generation) ->
-      let flow, _owns_action =
+  | Gate_auto_judge_retried (approval_id, expected_workspace, result, generation) ->
+      let flow, owns_action =
         Approval.Flow.finish_action state.approval_flow generation
       in
       state.approval_flow <- flow;
-      (match result with
-       | Ok () ->
+      if owns_action then (match result with
+       | Ok () when state.workspace_identity = Workspace_identity_match
+                    && Option.exists (same_server_workspace expected_workspace) state.server_identity ->
            report_action state "system"
              (Printf.sprintf "Auto Judge retry started for %s" approval_id);
            launch_gate_snapshot_load ~intent:Snapshot_read.Refresh state ~mailbox
+       | Ok () -> ()
        | Error detail ->
            report_action state "error"
              (Printf.sprintf "Auto Judge retry for %s failed: %s" approval_id

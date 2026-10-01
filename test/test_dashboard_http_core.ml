@@ -260,6 +260,41 @@ let test_gate_resolve_workspace_precondition () =
      | Error (Server_dashboard_http.Unavailable _) -> ()
      | _ -> fail "matching Gate workspace did not reach approval lookup"))
 
+let test_gate_retry_workspace_precondition () =
+  let dir = test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir dir) (fun () ->
+    let config = Workspace.default_config dir in
+    mkdir_p (Workspace.masc_root_dir config);
+    let base = Unix.realpath config.base_path in
+    let root = Unix.realpath (Workspace.masc_root_dir config) in
+    let expected base_path masc_root =
+      `Assoc [ "base_path", `String base_path; "masc_root", `String masc_root ]
+    in
+    let retry fields =
+      Server_dashboard_http.dashboard_gate_retry_http_json
+        ~workspace_config:config ~base_path:base ~requested_by:"operator"
+        ~args:(`Assoc fields)
+    in
+    let expect_error label expected result =
+      match result with
+      | Error actual -> check string label expected actual
+      | Ok _ -> fail (label ^ ": retry unexpectedly admitted")
+    in
+    (* Invalid row data would fail with [id is required] after admission.
+       Refusal must precede row parsing, and therefore all queue mutation. *)
+    expect_error "foreign base refused before lookup" "workspace precondition failed"
+      (retry [ "expected_workspace", expected (base ^ "-other") root ]);
+    expect_error "foreign root refused before lookup" "workspace precondition failed"
+      (retry [ "expected_workspace", expected base (root ^ "-other") ]);
+    expect_error "duplicate precondition refused" "invalid expected_workspace precondition"
+      (retry [ "expected_workspace", expected base root
+             ; "expected_workspace", expected base root ]);
+    expect_error "matching workspace reaches row parser" "retry request.id is required"
+      (retry [ "expected_workspace", expected base root ]);
+    expect_error "unbound dashboard request keeps existing parser" "retry request.id is required"
+      (retry []))
+
+
 let test_keeper_memory_cleanup_routes_and_closed_requests () =
   let module Cleanup = Server_dashboard_http_keeper_memory_cleanup in
   let memory_path = "/api/v1/keepers/fixture-keeper/memory/retractions" in
@@ -7407,6 +7442,8 @@ let () =
             test_keeper_up_workspace_precondition;
           test_case "Gate resolve binds to receiving workspace" `Quick
             test_gate_resolve_workspace_precondition;
+          test_case "Gate retry workspace precondition" `Quick
+            test_gate_retry_workspace_precondition;
           test_case "keeper memory cleanup routes and requests are closed" `Quick
             test_keeper_memory_cleanup_routes_and_closed_requests;
           test_case "keeper sensitive GET permissions are exact" `Quick

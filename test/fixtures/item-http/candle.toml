@@ -1,3 +1,5 @@
+half_life = "off"
+
 [payout]
 weight_max = 1
 deduction_rate = 0

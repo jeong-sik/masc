@@ -15216,13 +15216,16 @@ def run_http_conditional_read_regression(executable: str) -> None:
         )
 
     def answer_goals() -> HttpResponse:
+        delay_this_read = slow_goals.is_set() and not slow_goals_done.is_set()
         goal_reads["total"] += 1
-        goals_requested.set()
-        if slow_goals.is_set() and not slow_goals_done.is_set():
+        if delay_this_read:
             goal_reads["delayed"] += 1
             # Longer than three refresh ticks at refresh=0.5.
             time.sleep(1.6)
             slow_goals_done.set()
+        # Classify before counting and signal afterwards: any read admitted
+        # after the harness arms its delay must advance the captured baseline.
+        goals_requested.set()
         return empty_goals_fixture()
 
     fixtures["/api/v1/dashboard/briefing"] = HeadersHttpResponse(answer_briefing)

@@ -683,15 +683,8 @@ let schedule_columns =
   ; Schedule_recurrence
   ]
 
-(* What a narrow list gives up, first to go first (operator, 2026-09-28).
-   - The delivery: the two rows under the list read the selected row's
-     queue and reaction whole, so the column shortens what stays on the
-     screen for the row the cursor is on.
-   - The wake: the last wake's status, which the schedule's detail lists
-     wake by wake.
-   - The state last.
-   When it is due, whom it reaches and how it repeats never go: they are
-   what a row is for. *)
+(* Preserve the operator's list priority: due time, target and recurrence.
+   Delivery goes first, then wake, then state; full state is in the detail. *)
 let schedule_drop_order =
   [ Schedule_delivery; Schedule_wake; Schedule_status ]
 
@@ -700,25 +693,37 @@ let schedule_drop_order =
    the header and every row are drawn from the same ones. *)
 type schedule_layout = {
   sl_columns : schedule_column Table.layout;
+  sl_due_width : int;
   sl_target_width : int;
   sl_wake_width : int;
   sl_delivery_width : int;
 }
 
 let schedule_layout ~inner_width ~target_width ~wake_width ~delivery_width =
-  (* The recurrence's entry is its floor: it is the flexible column and takes
-     what the others leave. *)
+  let due_floor = Masc_tui_message_layout.display_width "DUE" in
+  let target_floor = Masc_tui_message_layout.display_width "TARGET" in
+  let primary_gaps = 2 * Table.cell_gap in
+  let due_width = min schedule_due_width
+      (max due_floor (inner_width - target_floor - schedule_minimum_recurrence_width - primary_gaps)) in
+  (* A target takes at most a third of the row and leaves the operator's due
+     and recurrence readings their floors before optional columns are fitted. *)
+  let target_width = min target_width
+      (max target_floor (min (inner_width / 3)
+         (inner_width - due_width - schedule_minimum_recurrence_width - primary_gaps))) in
+  let recurrence_floor = min schedule_minimum_recurrence_width
+      (max 1 (inner_width - due_width - target_width - primary_gaps)) in
   let width = function
     | Schedule_status -> schedule_status_width
-    | Schedule_due -> schedule_due_width
+    | Schedule_due -> due_width
     | Schedule_target -> target_width
     | Schedule_wake -> wake_width
     | Schedule_delivery -> delivery_width
-    | Schedule_recurrence -> schedule_minimum_recurrence_width
+    | Schedule_recurrence -> recurrence_floor
   in
   { sl_columns =
       Table.fit ~inner_width ~width ~flex:Schedule_recurrence
         ~drop_order:schedule_drop_order schedule_columns
+  ; sl_due_width = due_width
   ; sl_target_width = target_width
   ; sl_wake_width = wake_width
   ; sl_delivery_width = delivery_width
@@ -730,7 +735,7 @@ let schedule_cell ~status_style ~wake_style ~recurrence_style
       Table.cell ~style:status_style ~header:"STATUS"
         ~width:schedule_status_width values.srow_status
   | Schedule_due ->
-      Table.cell ~header:"DUE" ~width:schedule_due_width values.srow_due
+      Table.cell ~header:"DUE" ~width:layout.sl_due_width values.srow_due
   | Schedule_target ->
       Table.cell ~header:"TARGET" ~width:layout.sl_target_width
         values.srow_target

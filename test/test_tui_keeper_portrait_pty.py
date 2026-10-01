@@ -63,7 +63,9 @@ COLUMNS = 100
 KITTY_TERMINAL_REPLIES = b"\x1b[6;20;10t" + h.GRAPHICS_SUPPORTED_REPLY
 # Masc_tui_graphics.image_id Keeper_portrait.
 PORTRAIT_IMAGE_ID = b"42"
-PLACEMENT = re.compile(rb"\x1b7\x1b\[(\d+);(\d+)H\x1b_G([^;]*);")
+# A picture at a corner: a transfer, whose control data ends at the payload's
+# ";", or a put of pixels the terminal already holds, which ends the escape.
+PLACEMENT = re.compile(rb"\x1b7\x1b\[(\d+);(\d+)H\x1b_G([^;\x1b]*)(?:;|\x1b\\)")
 # A placement is written after the frame, between a cursor save and restore;
 # it is not text on the row it starts on.
 PLACED_PICTURE = re.compile(rb"\x1b7.*?\x1b8", re.S)
@@ -218,9 +220,12 @@ def portrait_as_pixels(binary: str) -> None:
     def interact(process, fd, _slave, output, _base):
         start = len(output)
         open_alpha_detail(process, fd, output)
+        # The transfers: a later row rewritten across the picture puts the
+        # held pixels back (a=p), which carries no format to check.
         placements = [
             match for match in PLACEMENT.finditer(bytes(output[start:]))
             if kitty_fields(match[3]).get(b"i") == PORTRAIT_IMAGE_ID
+            and kitty_fields(match[3]).get(b"a") == b"T"
         ]
         assert placements, "the detail placed no portrait on a Kitty terminal"
         placement = placements[-1]
@@ -256,6 +261,7 @@ def portrait_as_pixels(binary: str) -> None:
         terminal_cols=COLUMNS,
         preload_input=KITTY_TERMINAL_REPLIES,
     )
+
 
 
 def item_tab_previews_accessories(binary: str) -> None:
@@ -378,7 +384,7 @@ def item_account_failure_keeps_the_preview(binary: str) -> None:
 
 def item_account_is_withdrawn_at_workspace_boundary(binary: str) -> None:
     fixtures = h.keeper_runtime_http_fixtures()
-    identity = {"base": None, "unread": False, "matched_reads": 0}
+    identity = {"base": None, "matched_reads": 0}
     held = threading.Event()
     release = threading.Event()
     served = threading.Event()
@@ -390,8 +396,6 @@ def item_account_is_withdrawn_at_workspace_boundary(binary: str) -> None:
                          for item, slot in ITEM_CATALOG]}
 
     def health():
-        if identity["unread"]:
-            return 503, {"error": "fixture identity unavailable"}
         identity["matched_reads"] += 1
         base = identity["base"] or ""
         return 200, {"paths": {"effective_base_path": base,
@@ -431,11 +435,11 @@ def item_account_is_withdrawn_at_workspace_boundary(binary: str) -> None:
             arm[0] = True
             os.write(fd, b"r")
             assert h.wait_for_fixture_state(process, fd, output, held.is_set, timeout=10)
-            identity["unread"] = True
+            identity["base"] = str(base) + "-other-workspace"
             await_frame(process, fd, output, lambda frame: "▸Items".encode() not in frame
                         and b"Balance 12.500 Candle" not in frame)
             previous_reads = identity["matched_reads"]
-            identity["unread"] = False
+            identity["base"] = str(base)
             # Two serial full-refresh probes prove the first matching result
             # was admitted before its successor could start.
             assert h.wait_for_fixture_state(process, fd, output,
@@ -462,7 +466,7 @@ def item_account_is_withdrawn_at_workspace_boundary(binary: str) -> None:
         finally:
             release.set()
 
-    h.run_terminal_scenario(binary, description="Item detail tokens are withdrawn across unread workspace identity",
+    h.run_terminal_scenario(binary, description="Item detail tokens are withdrawn across a different workspace identity",
                             interact=interact, http_fixtures=fixtures, terminal_cols=COLUMNS,
                             prepare_workspace=lambda base: identity.update(base=str(base)),
                             refresh=0.2)
@@ -537,6 +541,99 @@ def item_account_follows_roster_revision(binary: str) -> None:
         interact=interact, http_fixtures=fixtures, terminal_cols=COLUMNS, refresh=0.2)
 
 
+def item_account_withdraws_unread_authority(binary: str) -> None:
+    fixtures = h.keeper_runtime_http_fixtures()
+    identity = {"base": "", "unread": False, "probes": 0}
+    held, release, served = threading.Event(), threading.Event(), threading.Event()
+    arm = [False]
+    balance = ["12500"]
+    account = {"status": "ready", "keeper": "alpha", "owned_items": [],
+               "catalog": [{"id": item, "slot": slot, "price_status": "unpriced"}
+                           for item, slot in ITEM_CATALOG]}
+
+    def health():
+        identity["probes"] += 1
+        value = ({"error": "identity unread"} if identity["unread"] else
+                 {"paths": {"effective_base_path": identity["base"],
+                            "effective_masc_root": os.path.join(identity["base"], ".masc")},
+                  "state_ready": True})
+        return h.RawHttpResponse(503 if identity["unread"] else 200,
+                                 json.dumps(value).encode(), content_type="application/json")
+
+    def items():
+        value = dict(account, balance_milli=balance[0])
+        if not arm[0]:
+            return 200, value
+        arm[0] = False
+        held.set()
+        if not release.wait(timeout=30):
+            return 504, {"error": "fixture release missing"}
+        def chunks():
+            yield json.dumps(value).encode()
+            served.set()
+        return h.StreamingHttpResponse(chunks)
+
+    fixtures["/health"] = health
+    fixtures["/api/v1/keepers/alpha/items"] = items
+
+    def frame(process, fd, output, predicate):
+        assert h.wait_for_fixture_state(process, fd, output,
+            lambda: predicate(b"\n".join(last_frame_rows(output).values())), timeout=10)
+
+    def recover(process, fd, output):
+        probes = identity["probes"]
+        identity["unread"] = False
+        # A subsequent serial full-refresh probe starts after the previous
+        # identity answer has been applied. This is a fixture barrier, not age.
+        assert h.wait_for_fixture_state(process, fd, output,
+            lambda: identity["probes"] >= probes + 2, timeout=10)
+
+    def interact(process, fd, _slave, output, _base):
+        try:
+            open_alpha_detail(process, fd, output)
+            h.resize_and_wait(process, fd, output, rows=SHORT_ROWS, columns=COLUMNS, needle=INFO_TAB)
+            h.send_and_wait(process, fd, output, b"]", b"Balance 12.500 Candle")
+            identity["unread"] = True
+            frame(process, fd, output, lambda text:
+                  b"Account unavailable:" in text and b"Balance 12.500 Candle" not in text)
+            recover(process, fd, output)
+            balance[0] = "13000"
+            h.send_and_wait(process, fd, output, b"r", b"Balance 13.000 Candle")
+            arm[0] = True
+            os.write(fd, b"r")
+            assert h.wait_for_fixture_state(process, fd, output, held.is_set, timeout=3)
+            identity["unread"] = True
+            frame(process, fd, output, lambda text: b"Account unavailable:" in text)
+            balance[0] = "14000"
+            recover(process, fd, output)
+            # Revision-aware Items automatically resumes the account read on
+            # ordinary roster cadence after authority recovers. Observe the
+            # successor before releasing the older held response; neither the
+            # retained screen nor a later frame may return to that old wallet.
+            frame(process, fd, output, lambda text: b"Balance 14.000 Candle" in text)
+            start = len(output)
+            release.set()
+            assert h.wait_for_fixture_state(process, fd, output, served.is_set, timeout=3)
+            probes = identity["probes"]
+            assert h.wait_for_fixture_state(process, fd, output,
+                lambda: identity["probes"] >= probes + 2, timeout=10)
+            assert h.drain_until_quiet(process, fd, output), "late response did not settle"
+            text = b"\n".join(last_frame_rows(output).values())
+            assert b"Balance 14.000 Candle" in text
+            assert b"Account unavailable:" not in text
+            assert b"Balance 13.000 Candle" not in text
+            assert b"Balance 13.000 Candle" not in output[start:]
+            balance[0] = "15000"
+            h.send_and_wait(process, fd, output, b"r", b"Balance 15.000 Candle")
+            os.write(fd, b"q")
+        finally:
+            release.set()
+
+    h.run_terminal_scenario(binary, description="Item balances and pending reads lose unread workspace authority",
+                            interact=interact, http_fixtures=fixtures, terminal_cols=COLUMNS,
+                            prepare_workspace=lambda base: identity.update(base=str(Path(base).resolve())),
+                            refresh=0.2)
+
 if __name__ == "__main__":
     binary = str(Path(sys.argv[1]).resolve())
     artifact_root = os.environ.get("RUNNER_TEMP")
@@ -555,5 +652,6 @@ if __name__ == "__main__":
     item_tab_previews_accessories(binary)
     item_account_failure_keeps_the_preview(binary)
     item_account_follows_roster_revision(binary)
+    item_account_withdraws_unread_authority(binary)
     item_account_is_withdrawn_at_workspace_boundary(binary)
-    print("tui keeper portrait: PASS (7 scenarios)")
+    print("tui keeper portrait: PASS (8 scenarios)")

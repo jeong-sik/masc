@@ -40,3 +40,5 @@ python3 scripts/item-http-acceptance.py \
 
 A failed run is not a passing receipt. Inspect the workflow step and server
 log before interpreting the artifact.
+
+The transaction stage also rejects an owned face item in the head slot and checks that duplicate, insufficient and wrong-slot refusals leave the ledger unchanged. Both the original and equipped PNG must have valid dimensions, chunks and decoded image data.

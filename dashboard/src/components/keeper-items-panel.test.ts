@@ -253,6 +253,29 @@ describe('Keeper Item tab', () => {
     expect(screen.queryByRole('alert')).toBeNull()
   })
 
+  it('adopts a newer same-workspace roster while the older forced refresh later rejects', async () => {
+    let rejectRefresh!: (error: Error) => void
+    const held = new Promise<void>((_, reject) => { rejectRefresh = reject })
+    fetchKeeperItems.mockResolvedValueOnce(account([], '200'))
+      .mockResolvedValueOnce({ ...account(['crown'], '300'), account_revision: revisionB })
+    const view = render(html`<${KeeperItemsPanel} keeper=${keeper('rondo')} />`)
+    await screen.findByText('보유 0 / 18개')
+    const authority = executionWorkspaceAuthority.peek()
+    refreshExecution.mockReturnValueOnce(held)
+    fireEvent.click(screen.getByRole('button', { name: '새로고침' }))
+    await screen.findByText('Item 계정 불러오는 중…')
+    await act(async () => {
+      observeWorkspace('/fixture/workspace-a')
+      view.rerender(html`<${KeeperItemsPanel} keeper=${keeper('rondo', 'crown', revisionB)} />`)
+    })
+    expect(executionWorkspaceAuthority.peek()).toBe(authority)
+    expect(await screen.findByText('보유 1 / 18개')).toBeTruthy()
+    await act(async () => { rejectRefresh(new Error('superseded old HTTP')); await held.catch(() => {}) })
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.getByText('0.300 Candle')).toBeTruthy()
+    expect(fetchKeeperItems).toHaveBeenCalledTimes(2)
+  })
+
   it.each(['ready', 'off', 'disabled'] as const)('withdraws loaded %s at the refresh click until execution completes', async status => {
     const value = status === 'ready' ? account(['crown'], '200')
       : status === 'off' ? { status: 'off' as const, account_revision: null, keeper: 'rondo' }

@@ -1341,9 +1341,13 @@ export function refreshExecution(opts?: RefreshOptions): Promise<void> {
 
 export async function refreshKeeperRuntimeStatus(opts?: RefreshOptions): Promise<void> {
   const force = opts?.force ?? true
-  await refreshShell({ light: true, force })
-  await refreshExecution({ force })
-  await refreshKeeperDeletions()
+  try {
+    await refreshShell({ light: true, force })
+    await refreshExecution({ force })
+  } finally {
+    // A purge receipt is independent of the execution projection's health.
+    await refreshKeeperDeletions()
+  }
 }
 
 /** Reconcile board posts by id+updated_at so unchanged items keep

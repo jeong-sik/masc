@@ -153,6 +153,7 @@ def failed_source_keeps_known_cards(executable):
 
     def interact(process, fd, _slave, output, _base):
         h.wait_for_output(process, fd, output, b"known-gate-card", start=0, timeout=10)
+        h.wait_for_output(process, fd, output, b"known-held-card", start=0, timeout=10)
         h.wait_for_output(process, fd, output, b"confirm queue not fully read", start=0, timeout=10)
         visible = frame(process, fd, output, "partial-source-success")
         for label in (b"known-held-card", b"known-gate-card", b"confirm queue not fully read"):
@@ -289,13 +290,13 @@ def operator_task_survives_supplemental_failure(executable):
                 recovery.write_text(json.dumps({"version": 1, "links": recovery_links}))
 
         def interact(process, fd, _slave, output, base):
-            h.wait_for_output(process, fd, output, b"Operator task", start=0, timeout=10)
+            h.wait_for_output(process, fd, output, b"Operator task \xc2\xb7 task-777", start=0, timeout=10)
             visible = frame(process, fd, output, "operator-task-supplemental-failure")
             assert b"Operator tasks unavailable" not in visible, visible
             if relative == "tasks/goal_task_links.json":
                 assert b"Work:" in visible, visible
                 assert b"Work: reading unavailable" not in visible, visible
-            select_home(process, fd, output, b"Operator task", destinations=4)
+            select_home(process, fd, output, b"Operator task \xc2\xb7 task-777", destinations=4)
             h.send_and_wait(process, fd, output, b"\r", b"Primary task remains visible")
             drawn = h.screen_text(bytes(output))
             assert b"MASC Task" in drawn and b"task-777" in drawn, drawn
@@ -322,7 +323,7 @@ def operator_task_survives_supplemental_failure(executable):
             assert b"membership unknown" not in drawn, drawn
             home.assert_no_decision_posts(requests)
             h.send_and_wait(process, fd, output, b"\x1b", b"Enter:open")
-            assert_selected(output, b"Operator task")
+            assert_selected(output, b"Operator task \xc2\xb7 task-777")
             os.write(fd, b"q")
 
         backup_kind = "no-backup" if recovery_links is None else "empty-backup" if not recovery_links else "linked-backup"
@@ -537,7 +538,8 @@ def question_identity_and_return(executable):
         current[0] = (200, reordered)
         h.wait_for_output(process, fd, output, b"refreshed pinned ask-one prompt",
                           start=len(output), timeout=5)
-        h.send_and_wait(process, fd, output, b"1", b"(o) c-yes")
+        drawn = h.send_and_wait(process, fd, output, b"1", b"1 answered")
+        assert b"1 (o) c-yes" in h.screen_text(drawn)
         home.assert_no_decision_posts(requests)
         current[0] = (503, {"error": "question source offline"})
         h.wait_for_output(process, fd, output, b"questions stale", start=len(output), timeout=5)

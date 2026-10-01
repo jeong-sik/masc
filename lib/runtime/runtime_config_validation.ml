@@ -171,9 +171,8 @@ let validate_runtime_max_context (runtimes : t list)
          })
 ;;
 
-(* A high-water mark above the model's context cannot be reached: the
-   provider refuses first. Checked here, where the model is resolved, because
-   the binding table cannot see [max-context]. *)
+(* Context marks are checked against the resolved binding/provider/model
+   window, including any genuine provider catalog cap. *)
 let validate_runtime_context_marks (runtimes : t list) : (unit, load_failure) result =
   match
     List.find_map

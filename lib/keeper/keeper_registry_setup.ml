@@ -1073,9 +1073,16 @@ let set_last_correlation_id ~base_path name cid =
 let broadcast_composite_changed = Keeper_registry_broadcast.composite_changed
 let record_phase_broadcast_failure = Keeper_registry_broadcast.record_phase_failure
 
-let update_current_turn e f =
+let owns_turn_observation observation_token obs =
+  match observation_token with
+  | None -> false
+  | Some token -> Keeper_turn_observation_token.equal token obs.observation_token
+;;
+
+let update_current_turn ~observation_token e f =
   match e.current_turn_observation with
   | None -> e, false
+  | Some obs when not (owns_turn_observation observation_token obs) -> e, false
   | Some obs ->
     let obs' = f obs in
     if obs == obs' then e, false else { e with current_turn_observation = Some obs' }, true
@@ -1088,13 +1095,14 @@ let stamp_turn_progress ~now ~event_kind obs =
   }
 ;;
 
-let mark_turn_started ~base_path ~wake name =
+let mark_turn_started ~observation_token ~base_path ~wake name =
   let now = Time_compat.now () in
   let changed =
     update_entry_if_registered ~base_path name (fun e ->
       let turn_id = e.meta.runtime.usage.total_turns + 1 in
       let obs =
-        { turn_id
+        { observation_token
+        ; turn_id
         ; started_at = now
         ; last_progress_at = now
         ; last_progress_kind = Some "turn_started"
@@ -1114,35 +1122,36 @@ let mark_turn_started ~base_path ~wake name =
   if changed then broadcast_composite_changed ~name ~ts_unix:now
 ;;
 
-let record_turn_progress ~base_path name ~event_kind =
+let record_turn_progress ~observation_token ~base_path name ~event_kind =
   let now = Time_compat.now () in
   let (_ : bool) =
     update_entry_if_registered ~base_path name (fun e ->
-      update_current_turn e (stamp_turn_progress ~now ~event_kind))
+      update_current_turn ~observation_token e (stamp_turn_progress ~now ~event_kind))
   in
   ()
 ;;
 
 (* Write-through observation of the turn event bus [pending_tool_count] in the
-   live [turn_observation]. It has no timeout or lifecycle authority. A [None]
-   [current_turn_observation] (turn already ended) is a no-op, so a late
-   background-drain callback after [mark_turn_finished] cannot leak. *)
-let record_turn_tool_inflight ~base_path name ~count =
+   live [turn_observation]. It has no timeout or lifecycle authority. A missing observation or a different ownership token is a no-op, including
+   when a successor has already started before the background drain finishes. *)
+let record_turn_tool_inflight ~observation_token ~base_path name ~count =
   let (_ : bool) =
     update_entry_if_registered ~base_path name (fun e ->
-      update_current_turn e (fun obs -> { obs with active_tool_count = count }))
+      update_current_turn ~observation_token:(Some observation_token) e
+        (fun obs -> { obs with active_tool_count = count }))
   in
   ()
 ;;
 
 (* Reset agent core-turn FSM fields while retaining Keeper-turn identity,
    timing, model, and measurement state. *)
-let mark_agent_core_turn_started ~base_path name =
+let mark_agent_core_turn_started ~observation_token ~base_path name =
   let now = Time_compat.now () in
   let changed =
     update_entry_if_registered ~base_path name (fun e ->
       match e.current_turn_observation with
       | None -> e, false
+      | Some obs when not (owns_turn_observation observation_token obs) -> e, false
       | Some obs ->
         if
           obs.turn_phase = Packed Turn_prompting
@@ -1160,12 +1169,12 @@ let mark_agent_core_turn_started ~base_path name =
   if changed then broadcast_composite_changed ~name ~ts_unix:now
 ;;
 
-let mark_turn_measurement ~base_path name =
+let mark_turn_measurement ~observation_token ~base_path name =
   let now = Time_compat.now () in
   let changed =
     update_entry_if_registered ~base_path name (fun e ->
       match e.current_turn_observation, e.pending_turn_measurement with
-      | Some obs, Some measurement ->
+      | Some obs, Some measurement when owns_turn_observation observation_token obs ->
         { e with
           current_turn_observation =
             Some
@@ -1185,13 +1194,13 @@ let mark_turn_measurement ~base_path name =
 (* FSM transition validators moved to Keeper_registry_fsm_validators. *)
 let validate_turn_phase_transition = Keeper_registry_fsm_validators.turn_phase_transition
 
-let set_turn_decision_stage ~base_path name (decision_stage : decision_stage_active) =
+let set_turn_decision_stage ~observation_token ~base_path name (decision_stage : decision_stage_active) =
 (* Spec invariant: the 3 [<active>_to_undecided] transitions are forbidden within a turn.  Previously enforced at runtime via [invalid_arg] inside a 16-pair match; now unrepresentable through the [dec... *)
   let target_packed = decision_stage_active_to_packed decision_stage in
   let now = Time_compat.now () in
   let changed =
     update_entry_if_registered ~base_path name (fun e ->
-      update_current_turn e (fun obs ->
+      update_current_turn ~observation_token e (fun obs ->
         if obs.decision_stage = target_packed
         then obs
         else (
@@ -1202,12 +1211,12 @@ let set_turn_decision_stage ~base_path name (decision_stage : decision_stage_act
   if changed then broadcast_composite_changed ~name ~ts_unix:now
 ;;
 
-let set_turn_phase_direct ~base_path name ~event_kind (turn_phase : packed_turn_phase) =
+let set_turn_phase_direct ~observation_token ~base_path name ~event_kind (turn_phase : packed_turn_phase) =
   let now = Time_compat.now () in
   let changed =
     update_entry_if_registered ~base_path name (fun e ->
       let e', changed =
-        update_current_turn e (fun obs ->
+        update_current_turn ~observation_token e (fun obs ->
           match resolve_turn_phase_transition ~from:obs.turn_phase ~target:turn_phase with
           | Resolved_turn_idempotent -> obs
           | Resolved_turn_transition _ ->
@@ -1231,7 +1240,7 @@ let set_turn_phase_direct ~base_path name ~event_kind (turn_phase : packed_turn_
   if changed then broadcast_composite_changed ~name ~ts_unix:now
 ;;
 
-let set_turn_phase_with ~base_path name ~event_kind ~target ~update_obs =
+let set_turn_phase_with ~observation_token ~base_path name ~event_kind ~target ~update_obs =
   (* RFC-0072 Phase 4b + Phase 5 variant: resolve the turn_phase transition
      and let the caller apply additional observation mutations atomically in
      the same CAS.  This keeps multi-field setters (gate rejection) on the
@@ -1245,7 +1254,7 @@ let set_turn_phase_with ~base_path name ~event_kind ~target ~update_obs =
   let changed =
     update_entry_if_registered ~base_path name (fun e ->
       let e', changed =
-        update_current_turn e (fun obs ->
+        update_current_turn ~observation_token e (fun obs ->
           match resolve_turn_phase_transition ~from:obs.turn_phase ~target with
           | Resolved_turn_idempotent -> obs
           | Resolved_turn_transition _ ->
@@ -1270,19 +1279,19 @@ let set_turn_phase_with ~base_path name ~event_kind ~target ~update_obs =
   if changed then broadcast_composite_changed ~name ~ts_unix:now
 ;;
 
-let mark_turn_runtime_exhausted ~base_path name =
-  set_turn_decision_stage ~base_path name Decision_active_tool_policy_selected;
+let mark_turn_runtime_exhausted ~observation_token ~base_path name =
+  set_turn_decision_stage ~observation_token ~base_path name Decision_active_tool_policy_selected;
   set_turn_phase_direct
-    ~base_path
+    ~observation_token ~base_path
     name
     ~event_kind:"runtime_exhausted"
     (Packed Turn_exhausted)
 ;;
 
-let mark_turn_runtime_done ~base_path name =
-  set_turn_decision_stage ~base_path name Decision_active_tool_policy_selected;
+let mark_turn_runtime_done ~observation_token ~base_path name =
+  set_turn_decision_stage ~observation_token ~base_path name Decision_active_tool_policy_selected;
   set_turn_phase_direct
-    ~base_path
+    ~observation_token ~base_path
     name
     ~event_kind:"runtime_done"
     (Packed Turn_finalizing)

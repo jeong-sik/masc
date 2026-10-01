@@ -457,7 +457,7 @@ export function parseRuntimeTomlEnvironment(
   return {
     defaultRuntimeId: asString(runtimeValues.default),
     assignments,
-    laneIds: laneIdsFromDocument(document),
+    laneIds: [...declaredKeysUnder(document.rootEntries, document.sections, ['runtime', 'lanes'])],
     providers,
     models,
     bindings,

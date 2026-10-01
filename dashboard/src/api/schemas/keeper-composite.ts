@@ -57,7 +57,6 @@ const KeeperCompositeMeasurementSchema = object({
 })
 
 const KeeperCompositeInvariantsSchema = object({
-  no_runtime_before_measurement: boolean(),
   event_priority_monotone: boolean(),
   phase_derivation_agreement: boolean(),
 })

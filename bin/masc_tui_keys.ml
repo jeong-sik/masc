@@ -45,9 +45,9 @@ let config_bindings =
   ; b Navigate "L" "logs"
       ~help:"server logs under System", None
   ; b Navigate "PgUp/PgDn" "page"
-      ~help:"pages runtime.toml, the voice reading and the detail of prompts \
+      ~help:"pages runtime.toml, the voice reading and the detail of params, prompts \
              and presets, and moves the selection a page on models and themes",
-      Some [ Config_runtime; Config_models; Config_prompts; Config_presets
+      Some [ Config_runtime; Config_models; Config_params; Config_prompts; Config_presets
            ; Config_themes; Config_voice ]
   ; b Navigate "Home/End" "detail"
       ~help:"first and last wrapped detail rows of the selected preset",

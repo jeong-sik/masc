@@ -7,6 +7,10 @@ Without preview_item, mode is current. Pass an id from catalog as preview_item
 to see that accessory on the current outfit of the same Keeper body; mode is then preview.
 equipment describes the picture; current_equipment and starting_equipment
 report the current outfit and name-derived starting outfit respectively.
+Equipment is read from the recorded ledger independently of payout availability.
+If the ledger cannot be read, current_equipment is null, equipment_observation
+reports unavailable with a detail, and the PNG uses the starting outfit (plus
+any requested preview). This fallback does not claim current equipment.
 Previewing an accessory does not buy or equip it. This read does not report
 purchased inventory."""
 additional_properties = false

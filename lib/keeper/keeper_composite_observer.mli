@@ -1,11 +1,12 @@
-(** Keeper Composite Lifecycle Observer — pure projection.
+(** Keeper Composite Lifecycle Observer — lifecycle projection.
 
     Projects a [Keeper_registry.registry_entry] into a composite snapshot
     spanning Decision / Runtime / Memory sub-FSMs as
     specified in RFC-0003.
 
     Contract:
-    - Pure read. No mutation, no I/O, no event emission.
+    - Reads lifecycle state without changing it. [observe] records invariant
+      violations in observation metrics; it does not emit lifecycle events.
     - Never calls [Keeper_state_machine.apply_event],
       [Keeper_runtime_routing.select_runtime], or any routine that would
       shift keeper lifecycle state.
@@ -36,7 +37,6 @@ type runtime_state = string
 
 (** Named composite invariants, one variant per {!invariants_check} field. *)
 type invariant_key =
-  | Invariant_no_runtime_before_measurement
   | Invariant_event_priority_monotone
   | Invariant_phase_derivation_agreement
 
@@ -45,33 +45,16 @@ type invariant_key =
     snapshot. A [false] value signals a composite-level safety violation
     that the dashboard should surface to the operator. *)
 type invariants_check = {
-  no_runtime_before_measurement : bool;
   event_priority_monotone : bool;
   phase_derivation_agreement : bool;
 }
 
-(** Increment [masc_keeper_invariant_violations_total\{keeper, invariant\}]
-    once per violated invariant. No-op when all invariants hold. Called
-    automatically from [observe]; exposed so unit tests can assert the
-    counter bump without going through the full snapshot pipeline. *)
-(** {2 Pure invariant predicates}
+(** {2 Pure invariant predicate}
 
-    The [check_*] functions below are the conjuncts of the composite
-    safety invariant plus the runtime phase-derivation agreement check.
-    They are exposed so tests can drive state combinations through the
-    same predicates production [compute_invariants] uses, without having
-    to construct a full {!Keeper_registry.registry_entry} value.
-    [test/test_event_priority_monotone_pbt.ml] does this for
-    {!check_event_priority_monotone_pure}; the other four have no test of
-    their own.
-
-    Pure: no side effects, no clock, no I/O. *)
-
-
-
-(** Runtime-visible mirror of
-    [Keeper_invariant_check.DerivePhaseAgreement]: the recorded registry
-    phase must equal [Keeper_state_machine.derive_phase conditions]. *)
+    The measurement predicate below is also used by [observe]. Phase
+    agreement is computed directly from the registry entry. Observation
+    records a metric for each violated invariant without changing lifecycle
+    state. *)
 
 (** Minimal state extracted from {!Keeper_registry.registry_entry} for
     the [EventPriorityMonotone] invariant. Separating this type allows

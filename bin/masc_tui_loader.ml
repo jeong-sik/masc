@@ -155,7 +155,7 @@ let load_active_tasks (base_path : string) :
     * string option
     * Masc_tui_task_flow.t option
     * Masc_tui_agenda.stalled Masc_tui_agenda.reading
-    * unit Masc_tui_agenda.reading =
+    * task_goal_links_reading =
   let config = Workspace_core.default_config base_path in
   let path = Workspace_backlog.backlog_path config in
   match Workspace_backlog.read_backlog_observation_with_source_r config with
@@ -167,7 +167,7 @@ let load_active_tasks (base_path : string) :
       , Some reason
       , None
       , Masc_tui_agenda.Read_failed reason
-      , Masc_tui_agenda.Not_read )
+      , Goal_links_not_read )
   | Ok observation ->
       let recovery_error =
         match observation.recovered_from with
@@ -176,23 +176,22 @@ let load_active_tasks (base_path : string) :
             report path recovery.primary_error;
             Some ("task backlog recovered from backup: " ^ recovery.primary_error)
       in
-      (* The backlog says what the tasks are; the goal-task registry says what
-         they serve. A task record carries no goal on purpose -- the registry
-         is the source of truth -- so reading only the backlog is what left
-         every task on this screen unable to name its goal.
-
-         A registry that cannot be read leaves the links empty rather than
-         failing the whole load: the tasks are still worth showing, and the
-         reason is reported beside them rather than as an absence of links. *)
-      let goals_for_task, goal_link_error =
+      (* Goal links are supplemental to tasks, but only a successful primary
+         registry read can establish their presence or absence. *)
+      let goal_task_links =
         match Workspace_goal_index.read_goal_task_links_authoritative_r config with
-        | Error err -> (fun _ -> []), Some ("goal links unavailable: " ^ err)
+        | Error err ->
+            let reason = "goal links unavailable: " ^ err in
+            Goal_links_read_failed reason
         | Ok goal_task_links ->
-          let index =
-            Workspace_goal_index.build_task_goal_index ~goal_task_links ()
-          in
-          ( (fun task_id -> Workspace_goal_index.goals_for_task index ~task_id)
-          , None )
+            Goal_links_read
+              (Workspace_goal_index.build_task_goal_index ~goal_task_links ())
+      in
+      let goals_for_task =
+        match goal_task_links with
+        | Goal_links_read index ->
+            fun task_id -> Workspace_goal_index.goals_for_task index ~task_id
+        | Goal_links_not_read | Goal_links_read_failed _ -> fun _ -> []
       in
       let archived, archive_error =
         match read_archived_tasks config with
@@ -211,7 +210,7 @@ let load_active_tasks (base_path : string) :
              observation.observed_backlog.tasks)
       , observation.observed_backlog.tasks
       , (match List.filter_map Fun.id
-                 [ recovery_error; goal_link_error; archive_error ] with
+                 [ recovery_error; archive_error ] with
          | [] -> None
          | errors -> Some (String.concat " · " errors))
       , Some (Masc_tui_task_flow.of_tasks ~now:(Unix.gettimeofday ()) ~archived
@@ -232,9 +231,7 @@ let load_active_tasks (base_path : string) :
                      ; what = Masc.Operator_task_attention.summary item
                      ; since_iso = Masc.Operator_task_attention.waiting_since item
                      })))
-      , (match goal_link_error with
-         | Some reason -> Masc_tui_agenda.Read_failed reason
-         | None -> Masc_tui_agenda.Read []) )
+      , goal_task_links )
 
 (* The Goals the verifier proved, each waiting on the operator's confirmation.
    Read from the goal store the way the tasks above are read from the backlog,
@@ -353,10 +350,11 @@ let load_from_masc_dir (state : state) (base_path : string) =
   (* Load tasks from their single durable source. The domain rows land first:
      a detail view open across this refresh keeps its row even when the task
      just turned terminal, because the projection below drops exactly those. *)
-  let rows, tasks_domain, tasks_error, task_flow, operator_stalled, task_goal_links =
+  let rows, tasks_domain, tasks_error, task_flow, operator_stalled, goal_task_links =
     load_active_tasks base_path
   in
   state.tasks_domain <- tasks_domain;
+  state.goal_task_links <- goal_task_links;
   state.task_reading <- rows;
   state.tasks <-
     (match rows with
@@ -383,7 +381,6 @@ let load_from_masc_dir (state : state) (base_path : string) =
      left);
   state.task_flow <- task_flow;
   state.operator_stalled <- operator_stalled;
-  state.task_goal_links <- task_goal_links;
   state.goals_to_confirm <- load_goals_to_confirm base_path;
 
   (* Capture navigation before replacing the roster. Detail and logs are bound
@@ -512,11 +509,11 @@ let clear_local_workspace (state : state) =
   state.agents <- [];
   state.tasks <- [];
   state.tasks_domain <- [];
+  state.goal_task_links <- Goal_links_not_read;
   state.task_focus <- Masc_tui_overview_tasks.No_task_focus;
   state.task_reading <- Masc_tui_overview_tasks.Rows_unread;
   state.task_flow <- None;
   state.operator_stalled <- Masc_tui_agenda.Not_read;
-  state.task_goal_links <- Masc_tui_agenda.Not_read;
   state.goals_to_confirm <- Masc_tui_agenda.Not_read;
   state.tasks_error <- None;
   state.keepers <- [];
@@ -1290,7 +1287,7 @@ let load_provider_usage_history ~(host : string) ~(port : int) ~(days : int) =
 
 type runtime_surface_load = {
   rsl_resolved : Tui_decode.runtime_resolved_snapshot;
-  rsl_probe : (Tui_decode.runtime_probe_snapshot, string) result;
+  rsl_probe : (Masc.Tui_decode_runtime_probe.runtime_probe_snapshot, string) result;
 }
 
 (** Load the Runtime operator surface from its identity projection and optional
@@ -1319,7 +1316,7 @@ let load_runtime_surface ~(host : string) ~(port : int) ~(force : bool) :
              match probe_result with
              | Error detail -> Error ("runtime probe load failed: " ^ detail)
              | Ok probe_json ->
-                 (match Tui_decode.decode_runtime_probe_snapshot probe_json with
+                 (match Masc.Tui_decode_runtime_probe.decode_runtime_probe_snapshot probe_json with
                   | Ok probe -> Ok probe
                   | Error detail ->
                       Error ("runtime probe decode failed: " ^ detail))
@@ -1820,10 +1817,10 @@ let load_fleet_safety ~(host : string) ~(port : int) :
     rather than dropped: a clamped list cannot answer whether a keeper the TUI
     knows from disk has a running fiber, and the lifecycle actions depend on
     that answer. *)
-let load_keeper_roster ~(host : string) ~(port : int) :
-    (Masc_tui_keeper_control.roster, Masc_tui_keeper_control.roster_failure)
+let load_keeper_roster ~(host : string) ~(port : int) ~expected_workspace :
+    (Masc_tui_keeper_control.roster * (Candle_observation.t, string) result, Masc_tui_keeper_control.roster_failure)
     result =
-  match fetch_keeper_runtimes ~host ~port with
+  match fetch_keeper_runtimes ~host ~port ~expected_workspace with
   | Error transport ->
       Error (Masc_tui_keeper_control.Roster_unreachable transport)
   | Ok (status, body) when not (Tui_decode.is_success_http_status status) ->
@@ -1836,8 +1833,8 @@ let load_keeper_roster ~(host : string) ~(port : int) :
           match Tui_decode.decode_keeper_runtime_list json with
           | Error detail ->
               Error (Masc_tui_keeper_control.Roster_malformed detail)
-          | Ok (rows, errors, truncated, total) ->
-              Ok (Masc_tui_keeper_control.roster_of_reading ~errors ~rows ~truncated ~total)))
+          | Ok (rows, errors, truncated, total, candle) ->
+              Ok (Masc_tui_keeper_control.roster_of_reading ~errors ~rows ~truncated ~total, candle)))
 
 (* Every line these views hand the renderer goes through the terminal
    sanitizer: a CR, a tab, or a stray OSC in fetched text is data to show

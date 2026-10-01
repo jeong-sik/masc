@@ -10,7 +10,7 @@ type request = Grade of goal | Relation of { goal : goal; task_title : string }
 type decision = Grade_decided of Candle_grade.t | Relation_decided of relation
   | Weights_decided of (string * int) list
 type answer = { decision : decision; trace : trace }
-type error = Transport_unavailable of string | Invalid_response of string
+type error = Transport_unavailable of string | Invalid_response of string | Execution_rejected of string
 type runner = identity:identity -> request -> (answer, error) result
 let as_int = function `Int n -> Ok n | _ -> Error "expected integer"
 let grade_of_json json =
@@ -83,4 +83,4 @@ let relation_of_json json =
   let* trace, fields = Candle_json.field ~context "trace" trace_of_json fields in
   let* () = Candle_json.finish ~context fields in Ok {task_id; relation; trace}
 
-let error_to_string = function Transport_unavailable detail | Invalid_response detail -> detail
+let error_to_string = function Transport_unavailable detail | Invalid_response detail | Execution_rejected detail -> detail

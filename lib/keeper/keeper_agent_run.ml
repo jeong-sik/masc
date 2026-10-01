@@ -780,6 +780,7 @@ let capture_skill_snapshot ~base_path =
            declaration takes precedence. When omitted,
            [Keeper_config.keeper_unified_temperature] is the fallback. *)
 let run_turn
+      ?event_scope
       ?observation_token
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
@@ -981,6 +982,10 @@ let run_turn
   let runtime_config_path = ctx.runtime_config_path in
   let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
   let manifest_keeper_turn_id = meta.runtime.usage.total_turns + 1 in
+  let event_scope = match event_scope with
+    | Some scope -> scope
+    | None -> Keeper_turn_scope.create ~keeper_turn_id:manifest_keeper_turn_id
+  in
   let turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:manifest_keeper_turn_id in
   let turn_start = Mtime_clock.now () in
   let seq_ref = Atomic.make 0 in
@@ -1727,7 +1732,7 @@ let run_turn
                       ?agent_core_checkpoint:checkpoint
                       ?event_bus:
                         (Option.map
-                           (Keeper_turn_scope.bus ~keeper_turn_id:manifest_keeper_turn_id)
+                           (Keeper_turn_scope.bus ~scope:event_scope)
                            event_bus)
                       ?trace_link
                       ~on_runtime_attempt:

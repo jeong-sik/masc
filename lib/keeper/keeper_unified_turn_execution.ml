@@ -95,6 +95,7 @@ type ctx =
   }
 
 let run (ctx : ctx)
+      ~event_scope
       ~observation_token
       ~(yield_requested :
           unit -> (Keeper_agent_run.yield_request option, string) result)
@@ -225,6 +226,7 @@ let run (ctx : ctx)
                  ~prev:Keeper_turn_fsm.Awaiting_provider
                  Keeper_turn_fsm.Streaming;
                Keeper_agent_run.run_turn
+                 ~event_scope
                  ~observation_token
                  ~config
                  ~meta:run_meta

@@ -116,10 +116,10 @@ def run(binary: str, phase: str, captures: Path | None):
 
     def interact(process, fd, _slave, output, _base):
         try:
-            h.resize_and_wait(process, fd, output, rows=38, columns=120,
-                              needle=b"MASC Dashboard", controls=(h.FULL_REDRAW,))
             await_screen(process, fd, output,
                 lambda text: all(line in text for line in SUMMARY), "exact large currency summary")
+            h.resize_and_wait(process, fd, output, rows=38, columns=120,
+                              needle=SUMMARY[0], final_cursor=b"\x1b[?25l")
             capture(output, "ready-overview")
             h.tab_until(process, fd, output, b"MASC Keepers")
             h.select_keeper_row(process, fd, output, b"alpha")
@@ -182,6 +182,7 @@ def run(binary: str, phase: str, captures: Path | None):
         terminal_cols=120)
 
 
+
 def currency_follows_workspace_authority(binary: str, captures: Path | None) -> None:
     fixtures = h.keeper_runtime_http_fixtures(alpha_runtime_id="currency.authority")
     original = copy.deepcopy(fixtures[ROSTER_PATH][1])
@@ -238,8 +239,6 @@ def currency_follows_workspace_authority(binary: str, captures: Path | None) -> 
     fixtures[ROSTER_PATH] = roster
 
     def interact(process, fd, _slave, output, _base):
-        h.resize_and_wait(process, fd, output, rows=50, columns=160,
-                          needle=b"MASC Dashboard", controls=(h.FULL_REDRAW,))
         def seen(phase, predicate):
             await_screen(process, fd, output, predicate, "currency authority " + phase)
             if captures is not None:
@@ -248,6 +247,8 @@ def currency_follows_workspace_authority(binary: str, captures: Path | None) -> 
             return b"Candle issued:" not in text and b"Candle burned:" not in text \
                 and b"Candle circulating:" not in text and b"Candle ready:" not in text
         seen("a-ready", lambda text: all(line in text for line in SUMMARY))
+        h.resize_and_wait(process, fd, output, rows=50, columns=160,
+                          needle=SUMMARY[0], final_cursor=b"\x1b[?25l")
         publish("b-booting")
         os.write(fd, b"r")
         seen("b-booting", lambda text: b"booting" in text and no_currency(text))

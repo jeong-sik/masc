@@ -5465,9 +5465,7 @@ type state = {
   mutable keeper_roster: Masc_tui_keeper_control.roster;
   mutable keeper_roster_error: string option;
   mutable candle_observation: (Candle_observation.t, string) result option;
-  (* A scoped roster read belongs to this observed workspace incarnation.
-     Replace on authority withdrawal; returning to the same paths is new. *)
-  mutable candle_read_authority: unit ref;
+  mutable candle_authority_generation : int;
   mutable keeper_action_inflight:
     (string * Masc_tui_keeper_control.action) option;
   mutable keeper_action_pending: Masc_tui_keeper_control.pending option;
@@ -7979,7 +7977,7 @@ let create_state
   keeper_roster = Masc_tui_keeper_control.Roster_unobserved;
   keeper_roster_error = None;
   candle_observation = None;
-  candle_read_authority = ref ();
+  candle_authority_generation = 0;
   keeper_action_inflight = None;
   keeper_action_pending = None;
   keeper_action_serial = 0;
@@ -12152,7 +12150,7 @@ let keeper_message_inflight_rows (state : state) ~chat_cols ~now =
       (keeper_message_inflight_drawn state) in
   List.map (fun group -> true, summary group) mine
   @ List.concat_map (fun group ->
-      let name = Tui_decode.sanitize_terminal_text
+      let name = Masc.Tui_terminal_text.sanitize_terminal_text
           group.representative.sent_request.keeper_name in
       let command_rows =
         Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (width - 2))
@@ -12162,7 +12160,7 @@ let keeper_message_inflight_rows (state : state) ~chat_cols ~now =
 
 let keeper_message_status_rows (state : state) ~terminal_cols =
   let chat_cols = Masc_tui_roster_pane.content_cols
-      ~hidden:state.roster_pane_hidden ~cols:terminal_cols in
+      ~hidden:(roster_pane_hidden state) ~cols:terminal_cols in
   let unavailable_target =
     match state.msg_target_keeper_name with
     | Some keeper_name when keeper_available_for_new_message state keeper_name

@@ -182,9 +182,14 @@ let test_replay_prunes_completed () =
   check int "pruned completed only" R.max_completed_retained (List.length runs);
   check bool "replayed running run dropped" true
     (Option.is_none (R.get t2 ~run_id:"r-running"));
-  check bool "compacted log omits stale running run" false
+  check bool "history retains bytes without resurrecting stale running work" true
     (String_util.contains_substring (Fs_compat.load_file path) "r-running");
-  (* Newest completed run (r70) must be present; oldest (r1) pruned. *)
+  (match R.get_for_observer t2 ~run_id:"r1" with
+   | Ok (Some {keeper="k"; status=R.Completed R.Succeeded;_}) -> ()
+   | _ -> fail "evicted terminal owner and outcome must survive restart");
+  check bool "latest unfinished lifecycle is not restored by observer lookup" true
+    (R.get_for_observer t2 ~run_id:"r-running" = Ok None);
+  (* The dashboard list remains bounded; only exact observer reads use history. *)
   check bool "newest completed kept" true (Option.is_some (R.get t2 ~run_id:"r70"));
   check bool "oldest completed pruned" true (Option.is_none (R.get t2 ~run_id:"r1"))
 ;;
@@ -307,8 +312,8 @@ let test_replay_rejects_a_non_string_panel_route () =
   | None -> fail "a valid roster line must survive its malformed neighbour"
 ;;
 
-(* (5) Replay streams raw JSONL lines and compacts the retained state. *)
-let test_replay_streams_and_compacts () =
+(* (5) Replay streams raw JSONL without discarding durable observer authority. *)
+let test_replay_streams_and_retains_history () =
   let path = fresh_path "-stream.jsonl" in
   let before =
     {|{"event":"register","id":"r-stream","started_at":1.0,"registration":{"keeper":"k","preset":"p","topology":"simple"}}|}
@@ -327,14 +332,12 @@ let test_replay_streams_and_compacts () =
    | Some _ -> fail "expected streamed run to be completed"
    | None -> fail "expected streamed run to replay");
   match Fs_compat.file_size path with
-  | Some size -> check bool "log compacted" true (size < String.length content)
-  | None -> fail "expected compacted replay log to exist"
+  | Some size -> check int "durable history is not automatically compacted" (String.length content) size
+  | None -> fail "expected retained history log to exist"
 ;;
 
-(* (6) Atomic replay compaction replaces the path inode. The shared JSONL
-   writer caches descriptors, so replay must invalidate the descriptor opened
-   by the pre-compaction registry before the replayed owner appends again. *)
-let test_append_after_replay_compaction_targets_live_path () =
+(* (6) A replayed registry appends to the same retained history. *)
+let test_append_after_replay_targets_live_path () =
   let path = fresh_path "-append-after-replay.jsonl" in
   let original = R.create ~path () in
   R.register_running original ~run_id:"before" ~keeper:"k" ~preset:"p" ~roster:Fusion_types.preset_roster ~topology:Fusion_types.Simple ~started_at:1.0;
@@ -345,12 +348,12 @@ let test_append_after_replay_compaction_targets_live_path () =
   let replayed_again = R.replay path in
   check
     bool
-    "pre-compaction run remains"
+    "earlier run remains"
     true
     (Option.is_some (R.get replayed_again ~run_id:"before"));
   check
     bool
-    "post-compaction append reaches live path"
+    "post-replay append reaches live path"
     true
     (Option.is_some (R.get replayed_again ~run_id:"after"))
 ;;
@@ -400,11 +403,56 @@ let test_startup_replay_diagnostics () =
   check string "partial input was not compacted" before (Fs_compat.load_file path)
 ;;
 
+let test_observer_lookup_refuses_reused_and_unreadable_history () =
+  let path = fresh_path "-observer-history.jsonl" in
+  Fun.protect ~finally:(fun () -> remove_if_exists path) @@ fun () ->
+  let registry = R.create ~path () in
+  let register registry id keeper started_at =
+    R.register_running registry ~run_id:id ~keeper ~preset:"p"
+      ~roster:Fusion_types.preset_roster ~topology:Fusion_types.Simple ~started_at in
+  register registry "target" "original-owner" 1.;
+  R.mark_completed registry ~run_id:"target"
+    ~outcome:(R.Failed {reason="terminal evidence";code="captured"});
+  for index = 1 to R.max_completed_retained do
+    let id = "newer-" ^ string_of_int index in
+    register registry id "other" (float_of_int (index + 1));
+    R.mark_completed registry ~run_id:id ~outcome:R.Succeeded
+  done;
+  check bool "bounded cache evicts the target" true (Option.is_none (R.get registry ~run_id:"target"));
+  let expect_terminal registry = match R.get_for_observer registry ~run_id:"target" with
+    | Ok (Some {keeper="original-owner";status=R.Completed (R.Failed {reason="terminal evidence";code="captured"});_}) -> ()
+    | _ -> fail "delayed exact observer lost its terminal owner/outcome" in
+  expect_terminal registry;
+  let replayed = R.replay path in
+  expect_terminal replayed;
+  check int "replay keeps only the bounded completed cache" R.max_completed_retained
+    (List.length (R.list_runs replayed));
+  let history = Fs_compat.load_file path in
+  Fs_compat.append_file path "{incomplete";
+  check bool "partial tail refuses stale fallback" true
+    (Result.is_error (R.get_for_observer replayed ~run_id:"target"));
+  Fs_compat.invalidate_cached_writer path;
+  Fs_compat.save_file path (history ^ "not-json\n");
+  check bool "malformed event refuses fallback" true
+    (Result.is_error (R.get_for_observer replayed ~run_id:"target"));
+  Fs_compat.invalidate_cached_writer path;
+  Fs_compat.save_file path history;
+  let reused = R.replay path in
+  register reused "target" "replacement-owner" 1000.;
+  let restarted = R.replay path in
+  check bool "new unfinished registration supersedes old terminal owner" true
+    (R.get_for_observer restarted ~run_id:"target" = Ok None);
+  Sys.remove path;
+  check bool "missing authoritative history is not an old terminal result" true
+    (Result.is_error (R.get_for_observer restarted ~run_id:"target"))
+;;
+
 let () =
   run
     "fusion_run_registry_persist"
     [ ( "rfc-0266-phase-d"
-      , [ test_case "startup replay diagnostics" `Quick test_startup_replay_diagnostics
+      , [ test_case "observer lookup retains terminal identity and refuses invalid history" `Quick test_observer_lookup_refuses_reused_and_unreadable_history
+        ; test_case "startup replay diagnostics" `Quick test_startup_replay_diagnostics
         ; test_case "register+complete append JSONL" `Quick test_persist_register_complete
         ; test_case "roster survives replay" `Quick test_roster_survives_replay
         ; test_case "replay rejects a non-string panel route" `Quick
@@ -420,11 +468,11 @@ let () =
             test_replay_prunes_completed
         ; test_case "no-path registry is in-memory only" `Quick test_no_path_is_in_memory_only
         ; test_case "replay skips malformed lines" `Quick test_replay_skips_malformed_lines
-        ; test_case "replay streams and compacts log" `Quick test_replay_streams_and_compacts
+        ; test_case "replay streams and retains observer history" `Quick test_replay_streams_and_retains_history
         ; test_case
-            "append after replay compaction targets the live path"
+            "append after replay targets the retained history"
             `Quick
-            test_append_after_replay_compaction_targets_live_path
+            test_append_after_replay_targets_live_path
         ; test_case
             "replay preserves unterminated tail"
             `Quick

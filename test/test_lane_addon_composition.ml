@@ -556,6 +556,34 @@ sources=%s
     (Result.is_ok (Runtime.dispatch ~caller:owner ~config ~operation:Runtime.Inspect
       (`Assoc ["instance_id",`String saved]))))
 
+let test_recreated_private_worker_keeps_admitted_owner () =
+  with_fixture (fun clock config root directory received _stopped ->
+    let run_id = register_private_run root "admitted-owner" in
+    let package = manifest root in
+    let path = declare directory package "restart-private" (fusion_source run_id) in
+    let bytes = Fs_compat.load_file path in
+    reconcile config directory;
+    let old = active config "restart-private" |> text "instance_id" in
+    await clock (fun () -> Option.is_some (completed received old));
+    ignore (dispatch config Runtime.Detach ["instance_id",`String old]);
+    await clock (fun () -> text "kind" (member "phase" (instance config old)) = "detached");
+    write path bytes;
+    Fusion_run_registry.register_running (Fusion_run_registry.global ()) ~run_id
+      ~keeper:"replacement-owner" ~preset:"default" ~roster:Fusion_types.preset_roster
+      ~topology:Fusion_types.Simple ~started_at:99.;
+    Runtime.For_testing.reset ();
+    reconcile config directory;
+    let recreated = active config "restart-private" |> text "instance_id" in
+    await clock (fun () -> Option.is_some (source received recreated));
+    check bool "restart does not grant replacement registry ownership" true
+      (member "visibility" (instance config recreated) =
+        `Assoc ["kind",`String "keeper";"keeper",`String "admitted-owner"]);
+    let captured = require_some "recreated worker did not capture source status" (source received recreated) in
+    check int "replacement owner's transcript never reaches unchanged declaration" 0
+      (List.length (list "observations" captured));
+    check bool "owner mismatch remains explicitly unavailable" false
+      (member "complete" captured |> Yojson.Safe.Util.to_bool))
+
 let test_saved_document_keeps_repair_authority_after_source_eviction () =
   with_fixture (fun clock config root directory _received _ ->
     let owner = "repair-owner" in
@@ -593,18 +621,19 @@ sources=%s
     check string "durable owner can read after source eviction" (source old_run)
       (read owner |> require_document |> text "source_text");
     check bool "foreign Keeper cannot read an owned document" true (Result.is_error (read "foreign"));
+    let admitted = read owner |> require_document in
     let malformed = "id = \"unfinished" in
     write operator_path malformed;
-    let operator_document = Lane_addon_runtime.read_declaration ~caller:owner
-      ~access:(Lane_addon_sources.Keeper owner) ~config
-      (`Assoc ["source_path",`String operator_path]) |> require_document in
-    check string "operator-created private document retains its verified owner" malformed
-      (text "source_text" operator_document);
+    check bool "unadmitted operator replacement is not disclosed to the former owner" true
+      (Result.is_error (Lane_addon_runtime.read_declaration ~caller:owner
+        ~access:(Lane_addon_sources.Keeper owner) ~config
+        (`Assoc ["source_path",`String operator_path])));
     write path malformed;
-    let damaged = read owner |> require_document in
-    check string "invalid source is available for authorized repair" malformed (text "source_text" damaged);
+    check bool "unadmitted malformed replacement cannot inherit repair authority" true
+      (Result.is_error (read owner));
+    write path (source old_run);
     let next_run = register_private_run (root ^ "/replacement") owner in
-    ignore (save ~revision:(text "source_revision" damaged) (source next_run) |> require_document);
+    ignore (save ~revision:(text "source_revision" admitted) (source next_run) |> require_document);
     check string "repair can replace a pruned source" (source next_run)
       (read owner |> require_document |> text "source_text"))
 
@@ -655,7 +684,8 @@ let test_shared_consumer_refuses_new_private_producer () = with_fixture (fun clo
     (member "visibility" (instance config consumer) = `Assoc ["kind",`String "shared"]))
 
 let () = run "TOML cross-Lane composition" ["world inputs",[
-  test_case "owned declarations survive source eviction and malformed edits" `Quick
+  test_case "recreated private worker keeps its admitted owner" `Quick test_recreated_private_worker_keeps_admitted_owner;
+  test_case "admitted declarations survive source eviction without authorizing replacement bytes" `Quick
     test_saved_document_keeps_repair_authority_after_source_eviction;
   test_case "pending document owner cannot adopt replacement bytes" `Quick
     test_pending_document_owner_rejects_replaced_source;

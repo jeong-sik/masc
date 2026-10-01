@@ -185,7 +185,7 @@ let load_active_tasks (base_path : string) :
          failing the whole load: the tasks are still worth showing, and the
          reason is reported beside them rather than as an absence of links. *)
       let goals_for_task, goal_link_error =
-        match Workspace_goal_index.read_goal_task_links_r config with
+        match Workspace_goal_index.read_goal_task_links_authoritative_r config with
         | Error err -> (fun _ -> []), Some ("goal links unavailable: " ^ err)
         | Ok goal_task_links ->
           let index =

@@ -273,14 +273,21 @@ def seed_operator_task(base, *, backup=False):
 
 
 def operator_task_survives_supplemental_failure(executable):
-    for relative in ("tasks-archive.json", "tasks/goal_task_links.json"):
+    for relative, recovered_links in (
+        ("tasks-archive.json", False),
+        ("tasks/goal_task_links.json", False),
+        ("tasks/goal_task_links.json", True),
+    ):
         fixtures = fixtures_with_held([])
         fixtures["/api/v1/dashboard/tasks/history?task_id=task-777&limit=50"] = (200, [])
         requests = []
 
         def prepare(base):
             seed_operator_task(base)
-            (Path(base) / ".masc" / relative).write_text("{broken supplemental source")
+            path = Path(base) / ".masc" / relative
+            if recovered_links:
+                path.with_name(path.name + ".last-good").write_text(json.dumps({"links": []}))
+            path.write_text("{broken supplemental source")
 
         def interact(process, fd, _slave, output, base):
             h.wait_for_output(process, fd, output, b"Operator task", start=0, timeout=10)
@@ -313,7 +320,7 @@ def operator_task_survives_supplemental_failure(executable):
             assert_selected(output, b"Operator task")
             os.write(fd, b"q")
 
-        run(executable, f"Home current task and exact detail survive {relative} failure",
+        run(executable, f"Home current task and exact detail survive {relative} failure (backup={recovered_links})",
             fixtures, interact, requests, prepare=prepare)
 
 

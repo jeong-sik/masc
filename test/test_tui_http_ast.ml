@@ -189,7 +189,7 @@ let test_tui_render_asks_the_theme_for_a_categorical_hue () =
           (violations
            |> List.map status_color_violation_to_string
            |> String.concat "\n"))
-    [ "bin/masc_tui_render.ml"; "bin/masc_tui_render_board.ml"; "bin/masc_tui_render_code.ml"; "bin/masc_tui_render_resources.ml"; "bin/masc_tui_render_approvals.ml" ]
+    [ "bin/masc_tui_render.ml"; "bin/masc_tui_render_board.ml"; "bin/masc_tui_render_code.ml"; "bin/masc_tui_render_resources.ml"; "bin/masc_tui_render_approvals.ml"; "bin/masc_tui_render_fusion.ml" ]
 ;;
 
 let test_theme_apply_is_boot_and_the_surface () =
@@ -213,7 +213,7 @@ let test_tui_status_colors_use_theme_tokens () =
           (violations
            |> List.map status_color_violation_to_string
            |> String.concat "\n"))
-    [ "bin/masc_tui_render.ml"; "bin/masc_tui_render_board.ml"; "bin/masc_tui_render_code.ml"; "bin/masc_tui_render_resources.ml"; "bin/masc_tui_render_approvals.ml" ]
+    [ "bin/masc_tui_render.ml"; "bin/masc_tui_render_board.ml"; "bin/masc_tui_render_code.ml"; "bin/masc_tui_render_resources.ml"; "bin/masc_tui_render_approvals.ml"; "bin/masc_tui_render_fusion.ml" ]
 ;;
 
 let test_tui_ansi_status_helpers_use_theme_tokens () =
@@ -502,6 +502,7 @@ let test_no_row_marks_its_own_timestamp_with_a_zone () =
     ; "bin/masc_tui_render_code.ml"
     ; "bin/masc_tui_render_resources.ml"
     ; "bin/masc_tui_render_approvals.ml"
+    ; "bin/masc_tui_render_fusion.ml"
     ; "bin/masc_tui_render_memory.ml"
     ; "bin/masc_tui_render_chat.ml"
     ; "bin/masc_tui_render_prim.ml"
@@ -1840,7 +1841,7 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
         (Ast_grep.count_calls ~module_path ~callee:"print_string");
       check int (module_path ^ " performs no direct flushes") 0
         (Ast_grep.count_calls ~module_path ~callee:"flush"))
-    [ "bin/masc_tui_render.ml"; "bin/masc_tui_render_board.ml"; "bin/masc_tui_render_code.ml"; "bin/masc_tui_render_resources.ml"; "bin/masc_tui_render_approvals.ml" ];
+    [ "bin/masc_tui_render.ml"; "bin/masc_tui_render_board.ml"; "bin/masc_tui_render_code.ml"; "bin/masc_tui_render_resources.ml"; "bin/masc_tui_render_approvals.ml"; "bin/masc_tui_render_fusion.ml" ];
   check int "main has one frame presentation boundary" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"main" ~callee:"Frame_presenter.present");

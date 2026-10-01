@@ -24,6 +24,7 @@ SOURCE_MODULES = (
     "bin/masc_tui.ml",
     "bin/masc_tui_keeper_items.ml",
     "bin/masc_tui_types.ml",
+    "bin/masc_tui_loader.ml",
     "lib/tui_decode.ml",
     "bin/masc_tui_graphics.ml",
     "bin/masc_tui_image_mosaic.ml",
@@ -978,7 +979,18 @@ def instructions_read_recovers_workspace_authority(binary: str, *, sandbox_logs:
             wait_refreshes(process, fd, output)
             assert reads == [True], "unread authority restarted the held detail read"
             assert old not in frame(output)
-            identity["unread"] = False
+            # Exercise the complete disk-loader path, including a failed first
+            # roster after identity returns. That failure cannot prove absence
+            # or let cursor zero silently select another Keeper.
+            metadata = Path(_base) / ".masc" / "keepers" / "alpha.json"
+            original_metadata = metadata.read_bytes()
+            metadata.write_text("{", encoding="utf-8")
+            try:
+                identity["unread"] = False
+                wait_refreshes(process, fd, output)
+                assert reads == [True], "incomplete roster restored detail authority"
+            finally:
+                metadata.write_bytes(original_metadata)
             assert h.wait_for_fixture_state(process, fd, output,
                 lambda: current in frame(output), timeout=10), "Instructions did not recover automatically"
             assert len(reads) == 2, "authority recovery duplicated its detail read"

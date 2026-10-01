@@ -5474,6 +5474,9 @@ type state = {
   mutable runtime_config_cursor: int;
   mutable config_scroll: int;
   mutable detail_tab: keeper_detail_tab;
+  (* Navigation intent only; withdrawn roster facts are never retained. *)
+  mutable pending_detail_focus:
+    (Tui_decode.server_identity * string * keeper_detail_tab) option;
   mutable item_cursor: int;
   mutable item_account: (string * (string option * Masc_tui_keeper_items.t)) option;
   mutable item_account_error: string option;
@@ -6496,6 +6499,10 @@ let reconcile_detail_intent_origins (state : state) reading =
                    && String.equal (canonical_path origin.sid_masc_root)
                         (canonical_path current.sid_masc_root))
         in
+        (match state.pending_detail_focus with
+         | Some (origin, _, _) when foreign (Some origin) ->
+             state.pending_detail_focus <- None
+         | _ -> ());
         if foreign state.connector_unbind_offer_origin then begin
           state.connector_unbind_offer_pending <- [];
           state.connector_unbind_offer_origin <- None
@@ -8271,6 +8278,7 @@ let create_state
   detail_reads = [];
   detail_read_generation = 0;
   detail_read_authority = ref ();
+  pending_detail_focus = None;
   keeper_sandbox_view = None;
   keeper_sandbox_view_error = None;
   keeper_sandbox_logs = None;

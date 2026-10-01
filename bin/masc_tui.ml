@@ -11332,7 +11332,6 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
    | _ -> ())
 
 let apply_server_identity_reading state reading =
-  Masc_tui_types.reconcile_detail_intent_origins state reading;
   let previous_server = state.server_identity in
   let previous_input_workspace = workspace_input_identity_of_server previous_server in
   (* A withdrawal invalidates outstanding roster reads even if the same
@@ -11348,9 +11347,15 @@ let apply_server_identity_reading state reading =
     | None, _ | Some _, Error _ -> false
   in
   if not same_item_authority then begin
+    (match state.pending_detail_focus, state.view, previous_server, selected_keeper state with
+     | None, Keepers Keeper_detail, Some origin, Some keeper
+       when server_authority_ready state && state.detail_tab <> Detail_items ->
+         state.pending_detail_focus <- Some (origin, keeper.k_name, state.detail_tab)
+     | _ -> ());
     withdraw_keeper_items state;
     revoke_detail_readings state
   end;
+  Masc_tui_types.reconcile_detail_intent_origins state reading;
   let previous = state.workspace_identity in
   state.server_identity <- Masc_tui_types.server_identity_of_refresh reading;
   state.workspace_identity <-
@@ -11557,7 +11562,20 @@ let launch_detail_tab_reading state ~mailbox (keeper : keeper) =
 (* Authority loss revokes every detail ticket. Resume the pane's current
    reading once authority returns; ordinary roster ticks retain its request. *)
 let refresh_visible_detail_after_authority_recovery state ~mailbox ~previous_authority =
-  if previous_authority != state.detail_read_authority && server_authority_ready state then begin
+  let restored_focus =
+    match state.pending_detail_focus, state.view, selected_keeper state with
+    | Some (origin, name, tab), Keepers Keeper_detail, Some keeper
+      when state.keepers_error = None && server_authority_ready state
+           && Masc_tui_types.server_workspace_matches ~expected:(Some origin)
+                (match state.server_identity with Some current -> Ok current | None -> Error "unread")
+           && String.equal name keeper.k_name ->
+        state.pending_detail_focus <- None;
+        state.detail_tab <- tab;
+        true
+    | _ -> false
+  in
+  if (restored_focus || previous_authority != state.detail_read_authority)
+     && state.pending_detail_focus = None && server_authority_ready state then begin
     if state.connector_unbind_offer_pending <> [] then launch_connectors_load state ~mailbox;
     match state.view, state.detail_tab, selected_keeper state with
     | Keepers Keeper_detail, Detail_items, _ -> ()
@@ -11578,6 +11596,10 @@ let refresh_visible_detail_after_authority_recovery state ~mailbox ~previous_aut
    belonged to the tab being left. *)
 let enter_keeper_detail_tab state ~mailbox tab =
   state.detail_tab <- tab;
+  state.pending_detail_focus <-
+    if tab = Detail_items then None
+    else Option.map (fun (origin, name, _) -> origin, name, tab)
+      state.pending_detail_focus;
   state.detail_scroll <- 0;
   if tab = Detail_items then state.item_cursor <- 0;
   match selected_keeper state with
@@ -27370,6 +27392,11 @@ and is loaded on demand through keeper_skill.
             | Board | Planning | Schedules | Harness
             | Fusion | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs | Clients -> ())
       | _ -> ());
+
+      (* Retire navigation intent before another queued refresh can restore it.
+         This runs after each input, including leaving and returning to the list. *)
+      if state.view <> Keepers Keeper_detail then
+        state.pending_detail_focus <- None;
 
       (* Surface navigation asks only for datasets the destination adds. The
          full refresh owns connection identity and the global badges; replaying

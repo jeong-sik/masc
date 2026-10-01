@@ -515,7 +515,7 @@ let test_fusion_status_hint_wakes_only_its_bound_run () =
           (`Assoc (("instance_id",`String one)::fields)) with
       | Error (Runtime.Request_rejected detail) ->
           check string "private instance is denied before read or mutation"
-            "instance is unavailable to this caller" detail
+            "Lane instance is unavailable to this caller" detail
       | Error (Runtime_failed detail) -> failf "access denial became runtime failure: %s" detail
       | Ok _ -> fail "another Keeper read or mutated private evidence" in
     List.iter (fun (operation,fields) -> denied operation fields)

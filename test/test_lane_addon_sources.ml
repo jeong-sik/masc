@@ -70,6 +70,7 @@ let test_duplicate_snapshot_keys_cannot_replace_host_evidence () = with_store (f
   List.iter (fun input ->
     write path (Yojson.Safe.to_string input);
     let source = require (Sources.acquire
+      ~access:Sources.Operator_configuration
       ~resolve_lane_output:(fun ~installation_id:_ -> Error "no configured upstream")
       ~store ~package:(package dir 16384)
       ~binding:(binding [file_source "deployment" path])) |> list |> List.hd in

@@ -1266,15 +1266,6 @@ val keeper_phase_is_running : keeper_phase -> bool
     silences the word for it and spells out every other phase; exhaustive in
     the implementation so a new phase cannot silently count as not-running. *)
 
-(** Which Overview Team band a phase puts a Keeper in (RFC-0464). A stuck
-    Keeper's turns are failing or its fiber crashed; an alive one can take a
-    turn now or is between runs; a paused one was paused by an operator; a
-    stopped one was stopped or never started.
-    Exhaustive in the implementation, so a new phase has to choose a band. *)
-type keeper_phase_band = Phase_stuck | Phase_alive | Phase_paused | Phase_stopped
-
-val keeper_phase_band : keeper_phase -> keeper_phase_band
-
 type keeper_health
 (** A validated keeper health reading — whether the keeper's keepalive is
     running, whether it has turned yet, and whether its turns are failing.
@@ -1302,8 +1293,13 @@ val keeper_health_reading : keeper_health -> keeper_health_reading
 
 type keeper_activation_mode = Activation_manual | Activation_on_demand | Activation_autonomous
 
+type keeper_portrait = Keeper_portrait_equipment.reading =
+  | Ready of Keeper_portrait_look.equipment
+  | Unavailable of string
+
 type keeper_runtime = {
   kr_name : string;
+  kr_portrait : keeper_portrait;
   kr_health : keeper_health;
   kr_paused : bool;
   kr_next_action : Keeper_status_runtime.keeper_next_action_path option;

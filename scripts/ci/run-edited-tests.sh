@@ -1414,6 +1414,26 @@ FAKE
     if [ -n "${RUNNER_DUNE_CALLS_FILE:-}" ]; then
       export FAKE_DUNE_CALLS_FILE="${RUNNER_DUNE_CALLS_FILE}"
     fi
+    if [ -n "${RUNNER_TIMEOUT_CALLS_FILE:-}" ]; then
+      # Observe the real runner's timeout boundary without a wall-clock race.
+      # Each completed fake command advances the owned virtual step clock by
+      # its allowance, so later waves must still receive a fresh suite cap.
+      printf '0\n' > "${work}/elapsed"
+      budget_left() {
+        local elapsed
+        elapsed=$(cat "${work}/elapsed")
+        echo "$((budget_seconds - elapsed))"
+      }
+      timeout() {
+        local allowance="$1" elapsed status=0
+        printf '%s\n' "$*" >> "${RUNNER_TIMEOUT_CALLS_FILE}"
+        shift
+        "$@" || status=$?
+        elapsed=$(cat "${work}/elapsed")
+        printf '%s\n' "$((elapsed + allowance))" > "${work}/elapsed"
+        return "${status}"
+      }
+    fi
     scope_tool="${work}/scope.py"
     stanza_reader="${work}/reader.py"
     repo_root="${work}/root"
@@ -1531,12 +1551,24 @@ FAKE
     runner_calls_check "one Python wave shares one dune invocation" \
     "@test/runtest-test_python_one @test/runtest-test_python_two" \
     0 30 test/test_python_one.py test/test_python_two.py
-  # Each stand-in rule is shorter than the existing suite cap, but their
-  # combined duration is longer. They cannot share one cap with one worker.
-  RUNNER_DUNE_JOBS=1 RUNNER_PER_SUITE_TIMEOUT=2 FAKE_DUNE_SUITE_SECONDS=1.2 \
-    runner_calls_check "queued Python rules each receive a fresh wave cap" \
-      $'@test/runtest-test_python_slow_one\n@test/runtest-test_python_slow_two' \
-      0 30 test/test_python_slow_one.py test/test_python_slow_two.py
+  # Assert both actual timeout invocations, including the second wave after
+  # the virtual step clock has spent the first wave's entire allowance.
+  # The real cancellation tests above/below still use the installed timeout.
+  local timeout_calls timeout_trace wave_failures
+  timeout_calls=$(mktemp)
+  wave_failures=$(RUNNER_DUNE_JOBS=1 RUNNER_PER_SUITE_TIMEOUT=2 \
+    RUNNER_TIMEOUT_CALLS_FILE="${timeout_calls}" runner_failures \
+      0 30 test/test_python_one.py test/test_python_two.py)
+  timeout_trace=$(cat "${timeout_calls}")
+  rm -f "${timeout_calls}"
+  if [ -z "${wave_failures}" ] && [ "${timeout_trace}" = \
+    $'2 dune build @test/runtest-test_python_one\n2 dune build @test/runtest-test_python_two' ]; then
+    echo "ok   queued Python rules each receive a fresh wave cap"
+  else
+    echo "FAIL queued Python rules each receive a fresh wave cap"
+    echo "     failures: ${wave_failures:-<none>}; timeout calls: ${timeout_trace}"
+    failures=$((failures + 1))
+  fi
   RUNNER_DUNE_JOBS=2 \
     runner_calls_check "Python waves use the existing worker count and keep every target" \
       $'@test/runtest-test_python_one @test/runtest-test_python_two\n@test/runtest-test_python_three' \

@@ -1,0 +1,61 @@
+{
+  "scope": "Source shell preflight only; no Vitest, build, module resolution or native test execution",
+  "actual_main": {
+    "head": "0a8ecf4a2dcbf473ef674ac3e7d3fe32381e8672",
+    "tree": "fd9d751412febfc5511969ddaca0449a4c8fdc6c",
+    "workflow_git_blob": "74872837e39e77f8f804cf42d59f299dc67689b2",
+    "workflow_sha256": "1bbc5282ccc0706f24e350039e592d0390a635cc4b62cd90b650b985275b1e24"
+  },
+  "local_partial_baseline": "771668de51eb7946e9cbd224423a1f2e5e72f4ba",
+  "workflow_path": ".github/workflows/dashboard-artifact.yml",
+  "candidate_workflow_sha256": "498481541927857974167d4261f938d26c64196b9a7d5f0e6e4e463083c3dedf",
+  "primary_failure_log": {
+    "path": "/tmp/masc-dashboard-item-domain-reconcile-publish/c46-job.log",
+    "sha256": "dfbe8b253b553e6ed6e4ecacc05812d643e25262d3a9ed33b004664848468ea7",
+    "observation": "4 requested exact paths including nonexistent keeper-items-workspace.test.ts; Vitest executed3 files/20 tests and workflow succeeded; root confirmed missing-path404 at actualc46"
+  },
+  "yaml_read": {
+    "reader": "PyYAML BaseLoader",
+    "all_structure_except_requested_run_preserved": true
+  },
+  "bash_syntax": {
+    "command": [
+      "bash",
+      "-n"
+    ],
+    "exit_code": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  "source_shell_reproductions": [
+    {
+      "case": "existing_exact_file",
+      "requested": "src/api/keeper-items.test.ts",
+      "exit_code": 0,
+      "stdout": "preflight reached final boundary\n",
+      "stderr": ""
+    },
+    {
+      "case": "existing_and_missing_file",
+      "requested": "src/api/keeper-items.test.ts src/components/keeper-items-workspace.test.ts",
+      "exit_code": 1,
+      "stdout": "",
+      "stderr": "Requested dashboard test file not found: src/components/keeper-items-workspace.test.ts\n"
+    }
+  ],
+  "actual_test_files_invoked": false,
+  "vitest_or_build_invoked": false,
+  "limits": "Only each supplied exact path exists as a regular file (or symlink to one) before Vitest. Existing one-line space-separated input parser and Vitest include/filter behavior are unchanged; no emitted test inventory or per-selector runtime count assertion is introduced.",
+  "local_tree_publication_rule": "Overlay only own delta onto full actualmain GitData baseline; this imported workflow snapshot is not the complete main tree.",
+  "input_newline_behavior": "Unchanged; existing read-array contract consumes one line. No multi-line selector support or broader execution proof is introduced.",
+  "whitespace": {
+    "command": [
+      "git",
+      "diff",
+      "--check"
+    ],
+    "exit_code": 0,
+    "stdout": "",
+    "stderr": ""
+  }
+}

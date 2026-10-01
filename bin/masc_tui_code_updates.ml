@@ -89,6 +89,8 @@ let file_loaded (state : state) request result =
       state.code_diff <- Masc_tui_fetched.clear state.code_diff;
       state.code_diff_open <- false;
       state.code_diff_scroll <- 0;
+      state.code_diff_hscroll <- 0;
+      state.code_diff_max_width <- 0;
       state.code_notes_open <- false;
       state.code_notes_scroll <- 0;
       state.code_blame <- Masc_tui_fetched.clear state.code_blame
@@ -179,7 +181,17 @@ let diff_loaded (state : state) request result =
   in
   state.code_diff
   <- Masc_tui_fetched.complete ~equal:String.equal state.code_diff request result;
-  if landed then state.code_diff_scroll <- 0
+  if landed then begin
+    state.code_diff_scroll <- 0;
+    state.code_diff_hscroll <- 0;
+    state.code_diff_max_width <-
+      match result with
+      | Error _ -> 0
+      | Ok diff ->
+          List.fold_left (fun widest (row : Masc.Tui_decode.git_diff_row) ->
+            max widest (Message_layout.display_width
+              (Masc.Tui_terminal_text.sanitize_terminal_text row.gdr_text))) 0 diff.gd_rows
+  end
 ;;
 
 let history_loaded (state : state) request result =

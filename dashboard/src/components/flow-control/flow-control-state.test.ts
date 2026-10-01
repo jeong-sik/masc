@@ -1,165 +1,260 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const {
-  callMcpTool,
-  namespaceTruth,
-  namespaceTruthInitializing,
-  serverStatus,
-  shellAuthSummary,
-  showToast,
-} = vi.hoisted(() => ({
+const mocks = vi.hoisted(() => ({
   callMcpTool: vi.fn(),
+  readPauseStatus: vi.fn(),
+  dispatchOperatorAction: vi.fn(),
+  confirmOperatorPendingAction: vi.fn(),
+  requestConfirm: vi.fn(),
+  refreshNamespaceTruth: vi.fn(),
   namespaceTruth: { value: null as unknown },
   namespaceTruthInitializing: { value: false },
+  namespaceTruthError: { value: null as string | null },
   serverStatus: { value: null as unknown },
   shellAuthSummary: { value: null as unknown },
   showToast: vi.fn(),
 }))
-
-vi.mock('../../api/mcp', () => ({
-  callMcpTool,
+vi.mock('../../api/mcp', () => ({ callMcpTool: mocks.callMcpTool }))
+vi.mock('../../api/core', () => ({ currentDashboardActor: () => 'test-operator', get: mocks.readPauseStatus }))
+vi.mock('../../operator-store', () => ({
+  dispatchOperatorAction: mocks.dispatchOperatorAction,
+  confirmOperatorPendingAction: mocks.confirmOperatorPendingAction,
 }))
-
 vi.mock('../../namespace-truth-store', () => ({
-  namespaceTruth,
-  namespaceTruthInitializing,
+  namespaceTruth: mocks.namespaceTruth,
+  namespaceTruthInitializing: mocks.namespaceTruthInitializing,
+  namespaceTruthError: mocks.namespaceTruthError,
+  refreshNamespaceTruth: mocks.refreshNamespaceTruth,
 }))
-
 vi.mock('../../store', () => ({
-  serverStatus,
-  shellAuthSummary,
+  serverStatus: mocks.serverStatus,
+  shellAuthSummary: mocks.shellAuthSummary,
 }))
+vi.mock('../common/toast', () => ({ showToast: mocks.showToast }))
+vi.mock('../common/confirm-dialog', () => ({ requestConfirm: mocks.requestConfirm }))
 
-vi.mock('../common/toast', () => ({ showToast }))
+let fetchPauseStatus: typeof import('./flow-control-state').fetchPauseStatus
+let flowState: typeof import('./flow-control-state').flowState
+let flowLoading: typeof import('./flow-control-state').flowLoading
+let pauseWorkspace: typeof import('./flow-control-state').pauseWorkspace
+let resumeWorkspace: typeof import('./flow-control-state').resumeWorkspace
+let runGarbageCollection: typeof import('./flow-control-state').runGarbageCollection
 
-import {
-  fetchPauseStatus,
-  flowState,
-  runGarbageCollection,
-} from './flow-control-state'
+function snapshot(paused: boolean): void {
+  mocks.namespaceTruth.value = { root: { status: { paused } } }
+}
 
 describe('flow-control-state', () => {
-  beforeEach(() => {
-    callMcpTool.mockReset()
-    namespaceTruth.value = null
-    namespaceTruthInitializing.value = false
-    serverStatus.value = null
-    shellAuthSummary.value = {
-      effective_role: 'worker',
-      auth_error_code: null,
-      auth_error_detail: null,
+  beforeEach(async () => {
+    vi.resetModules()
+    vi.resetAllMocks()
+    mocks.namespaceTruth.value = null
+    mocks.namespaceTruthInitializing.value = false
+    mocks.namespaceTruthError.value = null
+    mocks.serverStatus.value = null
+    mocks.shellAuthSummary.value = {
+      effective_role: 'admin', auth_error_code: null, auth_error_detail: null,
     }
+    ;({ fetchPauseStatus, flowState, flowLoading, pauseWorkspace, resumeWorkspace, runGarbageCollection } = await import('./flow-control-state'))
     flowState.value = 'unknown'
-    showToast.mockReset()
+    flowLoading.value = false
+    mocks.dispatchOperatorAction.mockResolvedValue({
+      status: 'pending_confirm', confirm_required: true, confirm_token: 'token-1',
+    })
+    mocks.confirmOperatorPendingAction.mockResolvedValue({ status: 'ok' })
+    mocks.requestConfirm.mockResolvedValue(true)
+    mocks.readPauseStatus.mockResolvedValue({ ok: true, initializing: false, paused: true })
   })
+  afterEach(() => { flowState.value = 'unknown' })
 
-  afterEach(() => {
-    flowState.value = 'unknown'
-  })
-
-  it('reuses project snapshot pause state before calling MCP', async () => {
-    namespaceTruth.value = {
-      root: {
-        status: {
-          paused: true,
-        },
-      },
-    }
-
+  it('uses an existing paused snapshot without raw MCP', async () => {
+    snapshot(true)
     await fetchPauseStatus()
-
     expect(flowState.value).toBe('paused')
-    expect(callMcpTool).not.toHaveBeenCalled()
+    expect(mocks.readPauseStatus).not.toHaveBeenCalled()
+    expect(mocks.refreshNamespaceTruth).not.toHaveBeenCalled()
   })
 
-  it('treats project snapshot warm-up as initializing before calling MCP', async () => {
-    namespaceTruthInitializing.value = true
-
-    await fetchPauseStatus()
-
-    expect(flowState.value).toBe('initializing')
-    expect(callMcpTool).not.toHaveBeenCalled()
+  it('reads pause state without depending on operator-only MCP tools', async () => {
+    mocks.callMcpTool.mockRejectedValue(new Error("Tool 'masc_pause_status' is not available on this MCP endpoint."))
+    mocks.readPauseStatus.mockResolvedValue({ ok: true, initializing: false, paused: false })
+    await resumeWorkspace()
+    expect(mocks.readPauseStatus).toHaveBeenCalledWith('/api/v1/operator/pause-status')
+    expect(mocks.callMcpTool).not.toHaveBeenCalled()
+    expect(flowState.value).toBe('running')
+    expect(mocks.showToast).toHaveBeenCalledWith('Namespace resumed.', 'success')
   })
 
-  it('keeps initializing workspaces out of the running state', async () => {
-    callMcpTool.mockResolvedValueOnce(
-      JSON.stringify({ status: 'initializing', initializing: true, paused: null }),
-    )
-
+  it('revalidates cached running state when another client has paused', async () => {
+    snapshot(false)
     await fetchPauseStatus()
-
-    expect(flowState.value).toBe('initializing')
-  })
-
-  it('marks paused workspaces as paused', async () => {
-    callMcpTool.mockResolvedValueOnce(
-      JSON.stringify({ status: 'paused', paused: true }),
-    )
-
-    await fetchPauseStatus()
-
+    expect(mocks.readPauseStatus).toHaveBeenCalledWith('/api/v1/operator/pause-status')
     expect(flowState.value).toBe('paused')
   })
 
-  it('trims status strings before matching pause state', async () => {
-    callMcpTool.mockResolvedValueOnce(
-      JSON.stringify({ status: ' paused ', paused: null }),
-    )
-
+  it('withdraws cached running state when direct pause status is unavailable', async () => {
+    snapshot(false)
+    mocks.readPauseStatus.mockRejectedValue(new Error('unavailable'))
     await fetchPauseStatus()
-
-    expect(flowState.value).toBe('paused')
-  })
-
-  it('fails safe to unknown for unexpected status strings', async () => {
-    callMcpTool.mockResolvedValueOnce(
-      JSON.stringify({ status: 'mystery', paused: null, initializing: false }),
-    )
-
-    await fetchPauseStatus()
-
     expect(flowState.value).toBe('unknown')
   })
 
-  it('recomputes from project-snapshot signals on the next fetch', async () => {
-    namespaceTruthInitializing.value = true
+  it('loads missing pause status from namespace truth', async () => {
+    mocks.refreshNamespaceTruth.mockImplementation(async () => snapshot(true))
     await fetchPauseStatus()
-    expect(flowState.value).toBe('initializing')
-
-    namespaceTruthInitializing.value = false
-    namespaceTruth.value = {
-      root: {
-        status: {
-          paused: false,
-        },
-      },
-    }
-    callMcpTool.mockResolvedValueOnce(JSON.stringify({ status: 'running', paused: false }))
-    await fetchPauseStatus()
-    expect(flowState.value).toBe('running')
+    expect(mocks.refreshNamespaceTruth).toHaveBeenCalledWith({ force: true })
+    expect(flowState.value).toBe('paused')
+    expect(mocks.readPauseStatus).not.toHaveBeenCalled()
   })
 
-  it('rejects garbage collection for a worker before calling MCP', async () => {
-    await runGarbageCollection()
+  it('revalidates running after the initial forced projection read', async () => {
+    mocks.refreshNamespaceTruth.mockImplementation(async () => snapshot(false))
+    await fetchPauseStatus()
+    expect(mocks.readPauseStatus).toHaveBeenCalledWith('/api/v1/operator/pause-status')
+    expect(flowState.value).toBe('paused')
+  })
 
-    expect(callMcpTool).not.toHaveBeenCalled()
-    expect(showToast).toHaveBeenCalledWith(
-      'Current role is worker; admin role is required.',
-      'error',
-      6000,
-    )
+  it('retains initializing and unknown states', async () => {
+    mocks.namespaceTruthInitializing.value = true
+    await fetchPauseStatus()
+    expect(flowState.value).toBe('initializing')
+    mocks.namespaceTruthInitializing.value = false
+    await fetchPauseStatus()
+    expect(flowState.value).toBe('unknown')
+  })
+
+  it.each([
+    ['namespace_resume', () => resumeWorkspace(), true, false, 'Namespace resumed.'],
+    ['namespace_pause', () => pauseWorkspace(), false, true, 'Namespace paused.'],
+  ] as const)('confirms %s then reads its result', async (action, run, before, after, message) => {
+    snapshot(before)
+    mocks.refreshNamespaceTruth.mockImplementation(async () => snapshot(before))
+    mocks.readPauseStatus.mockResolvedValue({ ok: true, initializing: false, paused: after })
+    await run()
+    expect(mocks.dispatchOperatorAction).toHaveBeenCalledWith({
+      actor: 'test-operator', action_type: action, target_type: 'workspace', payload: {},
+    }, { refresh: 'background' })
+    expect(mocks.requestConfirm).toHaveBeenCalledTimes(1)
+    expect(mocks.confirmOperatorPendingAction).toHaveBeenCalledWith('test-operator', 'token-1', 'confirm', { refresh: 'background' })
+    expect(mocks.refreshNamespaceTruth).toHaveBeenCalledWith({ force: true })
+    expect(mocks.readPauseStatus).toHaveBeenCalledWith('/api/v1/operator/pause-status')
+    expect(flowState.value).toBe(after ? 'paused' : 'running')
+    expect(mocks.showToast).toHaveBeenCalledWith(message, 'success')
+    expect(flowLoading.value).toBe(false)
+  })
+
+  it('reads and acknowledges before an unrelated namespace refresh completes', async () => {
+    let finishRefresh!: () => void
+    mocks.refreshNamespaceTruth.mockImplementation(() => new Promise<void>(resolve => { finishRefresh = resolve }))
+    mocks.readPauseStatus.mockResolvedValue({ ok: true, initializing: false, paused: false })
+    await resumeWorkspace()
+    expect(mocks.showToast).toHaveBeenCalledWith('Namespace resumed.', 'success')
+    expect(flowLoading.value).toBe(false)
+    expect(mocks.readPauseStatus.mock.invocationCallOrder[0]).toBeLessThan(mocks.refreshNamespaceTruth.mock.invocationCallOrder[0]!)
+    finishRefresh()
+  })
+
+  it('denies the pending action when the dialog is cancelled', async () => {
+    snapshot(true)
+    mocks.requestConfirm.mockResolvedValue(false)
+    await fetchPauseStatus()
+    await resumeWorkspace()
+    expect(mocks.confirmOperatorPendingAction).toHaveBeenCalledWith('test-operator', 'token-1', 'deny', { refresh: 'background' })
+    expect(flowState.value).toBe('paused')
+    expect(mocks.showToast).not.toHaveBeenCalledWith('Namespace resumed.', 'success')
+  })
+
+  it('does not label a still-paused namespace as resumed', async () => {
+    snapshot(true)
+    await resumeWorkspace()
+    expect(flowState.value).toBe('paused')
+    expect(mocks.showToast).not.toHaveBeenCalledWith('Namespace resumed.', 'success')
+  })
+
+  it('does not claim success when readback fails, even with stale running status', async () => {
+    snapshot(true)
+    mocks.serverStatus.value = { paused: false }
+    mocks.readPauseStatus.mockRejectedValue(new Error('readback failed'))
+    mocks.refreshNamespaceTruth.mockImplementation(async () => {
+      mocks.namespaceTruth.value = null
+      mocks.namespaceTruthError.value = 'readback failed'
+    })
+    await resumeWorkspace()
+    expect(flowState.value).toBe('unknown')
+    expect(mocks.showToast).not.toHaveBeenCalledWith('Namespace resumed.', 'success')
+  })
+
+  it('preserves pause state and releases loading after confirmation fails', async () => {
+    snapshot(true)
+    await fetchPauseStatus()
+    mocks.confirmOperatorPendingAction.mockRejectedValue(new Error('expired token'))
+    await resumeWorkspace()
+    expect(flowState.value).toBe('paused')
+    expect(flowLoading.value).toBe(false)
+    expect(mocks.showToast).toHaveBeenCalledWith('Resume failed: expired token', 'error')
+  })
+
+  it('never confirms without a server token', async () => {
+    mocks.dispatchOperatorAction.mockResolvedValue({ status: 'pending_confirm', confirm_required: true })
+    await resumeWorkspace()
+    expect(mocks.requestConfirm).not.toHaveBeenCalled()
+    expect(mocks.confirmOperatorPendingAction).not.toHaveBeenCalled()
+    expect(mocks.showToast).toHaveBeenCalledWith(expect.stringContaining('confirmation token'), 'error')
+  })
+
+  it('blocks overlapping clicks while confirmation is open', async () => {
+    let resolveDialog!: (value: boolean) => void
+    mocks.requestConfirm.mockImplementation(() => new Promise<boolean>(resolve => { resolveDialog = resolve }))
+    const first = resumeWorkspace()
+    await vi.waitFor(() => expect(mocks.requestConfirm).toHaveBeenCalledTimes(1))
+    await resumeWorkspace()
+    expect(mocks.dispatchOperatorAction).toHaveBeenCalledTimes(1)
+    resolveDialog(false)
+    await first
+  })
+
+  it.each([
+    { ok: true, initializing: false, paused: null },
+    { ok: true, initializing: true, paused: false },
+    { ok: false, initializing: false, paused: false },
+    { ok: true, initializing: false, any_pause_active: false },
+  ])('rejects unavailable Workspace readback %j', async readback => {
+    snapshot(false)
+    mocks.readPauseStatus.mockResolvedValue(readback)
+    await resumeWorkspace()
+    expect(flowState.value).toBe('unknown')
+    expect(mocks.showToast).not.toHaveBeenCalledWith('Namespace resumed.', 'success')
+    expect(mocks.showToast).toHaveBeenCalledWith('Resume failed: Namespace pause readback is unavailable.', 'error')
+  })
+
+  it('rejects a reader before creating a pending action', async () => {
+    mocks.shellAuthSummary.value = { effective_role: 'reader' }
+    await resumeWorkspace()
+    expect(mocks.dispatchOperatorAction).not.toHaveBeenCalled()
+    expect(mocks.readPauseStatus).not.toHaveBeenCalled()
+    expect(mocks.showToast).toHaveBeenCalledWith('Current role is reader; admin role is required.', 'error', 6000)
+  })
+
+  it.each([() => pauseWorkspace(), () => resumeWorkspace()])('rejects worker namespace actions before dispatch', async run => {
+    mocks.shellAuthSummary.value = { effective_role: 'worker' }
+    await run()
+    expect(mocks.dispatchOperatorAction).not.toHaveBeenCalled()
+    expect(mocks.requestConfirm).not.toHaveBeenCalled()
+    expect(mocks.confirmOperatorPendingAction).not.toHaveBeenCalled()
+    expect(mocks.showToast).toHaveBeenCalledWith('Current role is worker; admin role is required.', 'error', 6000)
+  })
+
+  it('rejects garbage collection for a worker', async () => {
+    mocks.shellAuthSummary.value = { effective_role: 'worker' }
+    await runGarbageCollection()
+    expect(mocks.callMcpTool).not.toHaveBeenCalled()
+    expect(mocks.showToast).toHaveBeenCalledWith('Current role is worker; admin role is required.', 'error', 6000)
   })
 
   it('runs garbage collection for an admin', async () => {
-    shellAuthSummary.value = {
-      effective_role: 'admin',
-      auth_error_code: null,
-      auth_error_detail: null,
-    }
-    callMcpTool.mockResolvedValueOnce('{"removed":0}')
-
+    mocks.shellAuthSummary.value = { effective_role: 'admin' }
+    mocks.callMcpTool.mockResolvedValue('{ "removed": 0 }')
     await runGarbageCollection()
-
-    expect(callMcpTool).toHaveBeenCalledWith('masc_gc', {})
+    expect(mocks.callMcpTool).toHaveBeenCalledWith('masc_gc', {})
   })
 })

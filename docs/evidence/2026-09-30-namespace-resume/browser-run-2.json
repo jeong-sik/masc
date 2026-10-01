@@ -1,0 +1,12 @@
+{
+  "command": [
+    "node",
+    "masc/.worktrees/647-namespace-resume/docs/evidence/2026-09-30-namespace-resume/browser.mjs",
+    "masc/.worktrees/647-namespace-resume/dashboard",
+    "masc/.worktrees/647-namespace-resume/docs/evidence/2026-09-30-namespace-resume/browser"
+  ],
+  "cwd": "/masc-work/jazz-developer",
+  "started_at": "2026-09-30T15:10:47.173166+00:00",
+  "finished_at": "2026-09-30T15:10:51.333334+00:00",
+  "exit_code": 0
+}

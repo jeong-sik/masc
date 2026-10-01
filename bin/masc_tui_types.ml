@@ -5896,6 +5896,7 @@ type state = {
      connector read to learn whether it still holds bindings to offer to
      remove. *)
   mutable connector_unbind_offer_pending: string list;
+  mutable connector_unbind_offer_origin: Tui_decode.server_identity option;
   (* The offer after a pause or shutdown, while it waits for its one key.
      Separate from the unbind-all arm: that arm answers [U], and on the
      Keeper list [U] is the runtime picker. *)
@@ -8208,6 +8209,7 @@ let create_state
   connector_unbind_all_armed = None;
   connector_unbind_all_inflight = false;
   connector_unbind_offer_pending = [];
+  connector_unbind_offer_origin = None;
   connector_unbind_offer = None;
   frames_presented = 0;
   runtime_surface = None;

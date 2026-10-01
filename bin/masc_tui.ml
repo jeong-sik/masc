@@ -1889,7 +1889,8 @@ type async_msg =
           needs the chat request this path does not have. *)
   | Keeper_chat_dispatch_blocked of Keeper_chat.request * string
   | Keeper_action_done of
-      string
+      Tui_decode.server_identity option
+      * string
       * Keeper_control.action
       * (Keeper_control.outcome, string) result
   | Board_new_post_done of {
@@ -10744,7 +10745,6 @@ let revoke_detail_readings state =
   state.connectors_reload_after_inflight <- false;
   state.connectors <- None;
   state.connectors_error <- None;
-  state.connector_unbind_offer_pending <- [];
   state.connector_unbind_offer <- None;
   state.connector_unbind_armed <- None;
   state.connector_unbind_all_armed <- None;
@@ -10753,6 +10753,12 @@ let revoke_detail_readings state =
   state.keeper_schedules_error <- None;
   state.fusion_runs <- Masc_tui_fetched.clear state.fusion_runs
 
+let same_server_workspace (left : Tui_decode.server_identity) (right : Tui_decode.server_identity) =
+  String.equal (Masc_tui_types.canonical_path left.sid_base_path)
+    (Masc_tui_types.canonical_path right.sid_base_path)
+  && String.equal (Masc_tui_types.canonical_path left.sid_masc_root)
+       (Masc_tui_types.canonical_path right.sid_masc_root)
+
 (* This is a current reading, not a last-known cache. A failed probe makes
    the projection unread; every following refresh asks again, so a same-port
    replacement still moves A -> B as soon as /health succeeds. The local
@@ -10760,17 +10766,22 @@ let revoke_detail_readings state =
    match reloads it, so a screen never shows rows from a workspace the server
    just stopped serving. *)
 let apply_server_identity_reading state reading =
+  (* Pending post-action intent is retained through an unread probe, but it
+     cannot cross into a different workspace once identity is observed. *)
+  (match reading with
+   | Error _ -> ()
+   | Ok current ->
+       if not (Option.exists (fun origin -> same_server_workspace origin current)
+                 state.connector_unbind_offer_origin) then begin
+         state.connector_unbind_offer_pending <- [];
+         state.connector_unbind_offer_origin <- None
+       end);
   let same_item_authority =
     match state.server_identity, reading with
     | Some previous, Ok current ->
         previous.Tui_decode.sid_state_ready <> Some false
         && current.Tui_decode.sid_state_ready <> Some false
-        && String.equal
-             (Masc_tui_types.canonical_path previous.sid_base_path)
-             (Masc_tui_types.canonical_path current.sid_base_path)
-        && String.equal
-             (Masc_tui_types.canonical_path previous.sid_masc_root)
-             (Masc_tui_types.canonical_path current.sid_masc_root)
+        && same_server_workspace previous current
     | None, _ | Some _, Error _ -> false
   in
   if not same_item_authority then begin
@@ -10938,8 +10949,9 @@ let launch_detail_tab_reading state ~mailbox (keeper : keeper) =
 
 (* Authority loss revokes every detail ticket. Resume the pane's current
    reading once authority returns; ordinary roster ticks retain its request. *)
-let refresh_visible_detail_after_authority_recovery state ~mailbox ~was_ready =
-  if not was_ready && server_authority_ready state then
+let refresh_visible_detail_after_authority_recovery state ~mailbox ~previous_authority =
+  if previous_authority != state.detail_read_authority && server_authority_ready state then begin
+    if state.connector_unbind_offer_pending <> [] then launch_connectors_load state ~mailbox;
     match state.view, state.detail_tab, selected_keeper state with
     | Keepers Keeper_detail, Detail_items, _ -> ()
     | Keepers Keeper_detail, Detail_identity, Some keeper ->
@@ -10949,6 +10961,7 @@ let refresh_visible_detail_after_authority_recovery state ~mailbox ~was_ready =
     | Keepers Keeper_detail, _, Some keeper ->
         launch_detail_tab_reading state ~mailbox keeper
     | _ -> ()
+  end
 ;;
 
 (* Entering a Keeper detail tab, by [ / ] or by a press on its name in the
@@ -12042,6 +12055,7 @@ let apply_keeper_action_result state ~base_path keeper_name action result =
   load_local_workspace_if_safe state base_path
 
 let start_keeper_action state ~base_path:_ ~mailbox keeper_name action =
+  let origin = state.server_identity in
   let serial = state.keeper_action_serial + 1 in
   state.keeper_action_serial <- serial;
   state.keeper_action_inflight <- Some (keeper_name, action);
@@ -12062,7 +12076,7 @@ let start_keeper_action state ~base_path:_ ~mailbox keeper_name action =
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
     in
-    enqueue_async mailbox (Keeper_action_done (keeper_name, action, result))
+    enqueue_async mailbox (Keeper_action_done (origin, keeper_name, action, result))
   in
   match Eio_context.get_switch_opt () with
   | Some sw -> Eio.Fiber.fork ~sw run_action
@@ -12073,7 +12087,7 @@ let start_keeper_action state ~base_path:_ ~mailbox keeper_name action =
             ~operator_operation_id action
         with exn -> Error (Printexc.to_string exn)
       in
-      enqueue_async mailbox (Keeper_action_done (keeper_name, action, result))
+      enqueue_async mailbox (Keeper_action_done (origin, keeper_name, action, result))
 
 (* The Board draft splits at the first newline: commit-message shape, one
    buffer covering title and body. Trimming the title keeps a draft whose
@@ -13507,9 +13521,9 @@ let apply_async_message state ~base_path ~http_refresh_inflight
   | Http_refresh_done (Refresh_surfaces results) ->
       http_refresh_inflight := false;
       state.http_refresh_started_ns <- None;
-      let was_ready = server_authority_ready state in
+      let previous_authority = state.detail_read_authority in
       apply_http_surfaces state results;
-      refresh_visible_detail_after_authority_recovery state ~mailbox ~was_ready;
+      refresh_visible_detail_after_authority_recovery state ~mailbox ~previous_authority;
       refresh_visible_item_account state ~mailbox;
       (* The local roster is trustworthy only after a workspace-matched read.
          Resolve the boot choice once; a key the operator pressed meanwhile
@@ -13912,7 +13926,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
             | [] -> None | row :: rest -> if same_operation row then Some i else find (i + 1) rest in
           state.keeper_deletions_cursor <- (match find 0 inventory.operations with
             | Some i -> i | None -> 0))
-  | Keeper_action_done (keeper_name, action, result) ->
+  | Keeper_action_done (origin, keeper_name, action, result) ->
       apply_keeper_action_result state ~base_path keeper_name action result;
       (* A paused or shut-down Keeper still routes its channels to itself, and
          answers on them the moment it runs again. Read the bindings fresh
@@ -13921,11 +13935,24 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       (match action, result with
        | (Keeper_control.Pause | Keeper_control.Shutdown),
          Ok (Keeper_control.Accepted _) ->
-           if not (List.mem keeper_name state.connector_unbind_offer_pending)
-           then
-             state.connector_unbind_offer_pending <-
-               keeper_name :: state.connector_unbind_offer_pending;
-           launch_connectors_load state ~mailbox
+           (match origin with
+            | None -> ()
+            | Some origin ->
+                (* Unread identity retains intent only; the loader still
+                   requires ready authority before issuing the lookup. *)
+                let current_workspace = match state.server_identity with
+                  | None -> true
+                  | Some current -> same_server_workspace origin current in
+                let pending_workspace = match state.connector_unbind_offer_origin with
+                  | None -> true
+                  | Some pending -> same_server_workspace origin pending in
+                if current_workspace && pending_workspace then begin
+                  state.connector_unbind_offer_origin <- Some origin;
+                  if not (List.mem keeper_name state.connector_unbind_offer_pending) then
+                    state.connector_unbind_offer_pending <-
+                      keeper_name :: state.connector_unbind_offer_pending;
+                  launch_connectors_load state ~mailbox
+                end)
        | (Keeper_control.Pause | Keeper_control.Shutdown),
          (Ok
             ( Keeper_control.Purge_accepted _
@@ -16088,6 +16115,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                what it read is still what the Keeper holds. *)
             let pending = List.rev state.connector_unbind_offer_pending in
             state.connector_unbind_offer_pending <- [];
+            state.connector_unbind_offer_origin <- None;
             let unreadable =
               Masc_tui_connector_unbind.unreadable_transports
                 snapshot.cs_connectors
@@ -16142,6 +16170,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
             state.connectors_error <- Some detail;
             let pending = List.rev state.connector_unbind_offer_pending in
             state.connector_unbind_offer_pending <- [];
+            state.connector_unbind_offer_origin <- None;
             List.iter
               (fun keeper_name ->
                  report_action state "error"

@@ -346,7 +346,7 @@ let api_usage_of_token_usage (usage : Runtime_codex_app_server.token_usage)
 (* Always installed so usage-window reports and the thread's usage counts are
    recorded. A turn nobody streams, traces or observes gets only those; its
    other events are ignored as before. *)
-let codex_stream_callback ~keeper_name ~quota_scope ~raw_trace_run ~turn_count ~on_native_action
+let codex_stream_callback ?receipts ~keeper_name ~quota_scope ~raw_trace_run ~turn_count ~on_native_action
     ~on_usage_report ~position on_event =
   (* The thread's running count, reported under the app-server turn id (the
      identity the completion hook also writes for a Codex turn) and the
@@ -375,8 +375,8 @@ let codex_stream_callback ~keeper_name ~quota_scope ~raw_trace_run ~turn_count ~
            })
       on_usage_report
   in
-  match on_event, raw_trace_run, on_native_action with
-  | None, None, None ->
+  match on_event, raw_trace_run, on_native_action, receipts with
+  | None, None, None, None ->
     Some
       (function
         | Runtime_codex_app_server.Usage_windows_reported report ->
@@ -411,6 +411,9 @@ let codex_stream_callback ~keeper_name ~quota_scope ~raw_trace_run ~turn_count ~
           Keeper_official_client_text_stream.tool_row text_stream;
           let index = !next_tool_index in
           incr next_tool_index;
+          Option.iter
+            (fun receipts -> Keeper_codex_tool_receipts.start receipts ~call_id ~block_index:index)
+            receipts;
           Hashtbl.replace tool_indexes call_id index;
           emit
             (Agent_core.Types.ContentBlockStart
@@ -427,6 +430,7 @@ let codex_stream_callback ~keeper_name ~quota_scope ~raw_trace_run ~turn_count ~
                      (Yojson.Safe.to_string arguments)
                })
         | Runtime_codex_app_server.Dynamic_tool_finished { call_id } ->
+          Option.iter (fun receipts -> Keeper_codex_tool_receipts.finish receipts ~call_id) receipts;
           Option.iter
             (fun index ->
                Hashtbl.remove tool_indexes call_id;
@@ -759,7 +763,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
     ~on_transmitted_model_input ~hooks
     ~context_injector ~context ~terminal_effect_state ~event_bus ~raw_trace ~on_event
     ~observe_effect_attempted ~observe_successful_tool_completion ~observe_transport_uncertain
-    ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action
+    ~on_tool_execution ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action
     ~on_usage_report ~(config : Runtime_execution.codex_app_server) =
   match Eio_context.get_env_opt (), Eio_context.get_clock_opt () with
   | None, _ ->
@@ -773,7 +777,15 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
          ~field:"eio_clock"
          "Codex app-server runtime requires the initialized Eio clock")
   | Some env, Some clock ->
+    let receipts =
+      Option.map (fun notify -> Keeper_codex_tool_receipts.create ~notify) on_tool_execution
+    in
     let hooks = match hooks with Some hooks -> hooks | None -> Agent_core.Hooks.empty in
+    let hooks =
+      match receipts with
+      | Some receipts -> Keeper_codex_tool_receipts.hooks receipts hooks
+      | None -> hooks
+    in
     let owner_epoch = Keeper_official_client_session_store.process_epoch () in
     let* stored_session =
       match Keeper_official_client_session_store.load ~base_path ~keeper_name with
@@ -1367,7 +1379,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
     let turn_result =
       try
         let observe_stream =
-          codex_stream_callback
+          codex_stream_callback ?receipts
           ~keeper_name ~quota_scope ~raw_trace_run ~turn_count ~on_native_action
           ~on_usage_report
           ~position:
@@ -1662,6 +1674,7 @@ let run ?official_task_reference ?composed_context ~accepts_image_input ?require
     ?on_carried_front
     ~turn_start
     ?on_official_client_tool_boundary
+    ?on_tool_execution
     ?(on_official_client_result_handoff = fun ~invocation:_ ~content:_ -> ())
     ?on_native_action
     ?on_usage_report
@@ -1789,7 +1802,7 @@ let run ?official_task_reference ?composed_context ~accepts_image_input ?require
           ~context_injector
           ~context
           ~terminal_effect_state
-        ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action
+        ~on_tool_execution ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action
           ~on_usage_report
           ~event_bus
           ~raw_trace

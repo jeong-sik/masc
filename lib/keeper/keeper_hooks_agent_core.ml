@@ -236,6 +236,11 @@ type tool_stream_observation =
       { turn : int
       ; tool_source_map : Agent_core.Hooks.admitted_tool_source_map
       }
+  | Official_tool_result of
+      { block_index : int
+      ; tool_call_id : string
+      ; execution_id : Ids.Execution_id.t
+      }
   | Turn_closed_without_sources of { turn : int }
 
 let make_hooks

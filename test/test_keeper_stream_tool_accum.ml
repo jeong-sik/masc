@@ -1188,6 +1188,44 @@ let test_producer_and_keeper_reject_ambiguous_tool_inputs_together () =
     fixtures
 ;;
 
+let test_official_receipt_does_not_certify_sibling_or_corrupt_scope () =
+  let t = A.create () in
+  start_runtime_attempt t;
+  A.on_event t (message_start "official");
+  let open_call index =
+    A.on_event t (start ~index ~tool_id:(Some "reused") ~tool_name:(Some "Read"));
+    A.on_event t (json_snapshot ~index {|{"file_path":"fixture.ml"}|})
+  in
+  open_call 1;
+  let execution_id = Ids.Execution_id.of_string "exec-official-1" in
+  (match A.record_official_execution_id t ~block_index:1 ~tool_call_id:"reused" ~execution_id with
+   | Ok _ -> () | Error detail -> fail detail);
+  A.on_event t (stop ~index:1);
+  open_call 2;
+  A.on_event t (stop ~index:2);
+  check int "receipt does not seal or advance whole scope" 0 (A.current_stream_scope t);
+  (match A.record_official_execution_id t ~block_index:2 ~tool_call_id:"reused" ~execution_id with
+   | Error _ -> () | Ok _ -> fail "execution reused for sibling");
+  check int "outer failure keeps only committed sibling" 1
+    (List.length (A.to_tool_calls_for_failure t));
+  start_runtime_attempt t;
+  A.on_event t (message_start "fallback");
+  open_call 1;
+  (match A.record_official_execution_id t ~block_index:1 ~tool_call_id:"reused"
+           ~execution_id:(Ids.Execution_id.of_string "exec-official-fallback") with
+   | Ok _ -> () | Error detail -> fail detail);
+  check int "fallback may reuse block and provider id without aliasing receipt" 2
+    (List.length (A.to_tool_calls_for_failure t));
+  let corrupt = A.create () in
+  A.on_event corrupt (start ~index:1 ~tool_id:(Some "id") ~tool_name:(Some "Read"));
+  A.on_event corrupt (json_snapshot ~index:1 "{}");
+  (match A.record_official_execution_id corrupt ~block_index:1 ~tool_call_id:"id" ~execution_id with
+   | Ok _ -> () | Error detail -> fail detail);
+  A.on_event corrupt (start ~index:1 ~tool_id:(Some "id") ~tool_name:(Some "Read"));
+  check (list tool_call) "receipt cannot excuse conflicting stream evidence" []
+    (A.to_tool_calls_for_failure corrupt)
+;;
+
 let () =
   run "Keeper_stream_tool_accum"
     [ ( "accumulation"
@@ -1272,6 +1310,8 @@ let () =
             test_admission_source_ordinal_survives_unknown_middle_call
         ; test_case "pre-admission inventory is exact" `Quick
             test_pre_admission_tool_inventory_is_exact
+        ; test_case "official receipt preserves only exact uncorrupted result" `Quick
+            test_official_receipt_does_not_certify_sibling_or_corrupt_scope
         ; test_case "official turn without sources stays delivery-only" `Quick
             test_official_turn_without_sources_stays_delivery_only
         ; test_case "official close validates stream integrity" `Quick

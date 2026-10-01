@@ -393,9 +393,10 @@ let prepare_agent_setup
            notify ~tool_call_id ~turn ~planned_index ~execution_id
          | Some Runtime_execution.Official_client ->
            (* Official clients execute dynamic tools without an Agent Core
-              pre-admission source sidecar. Keep those persisted chat rows
-              delivery-only. The owner comes from the exact resolved candidate
-              attempt, including heterogeneous lane fallbacks. *)
+              pre-admission source sidecar. This callback cannot join them.
+              Codex separately emits its producer-bound Official_tool_result.
+              The owner comes from the exact resolved candidate attempt,
+              including heterogeneous lane fallbacks. *)
            ()
          | None ->
            failwith

@@ -1698,6 +1698,7 @@ let run_named
     ?official_task_reference
     ?official_client_composed_context
     ?on_official_client_tool_boundary
+    ?on_tool_execution
     ?on_official_client_result_handoff
     ?on_official_client_native_action
     ?on_official_client_usage_report
@@ -2387,6 +2388,7 @@ let run_named
               on_request_attribution
           in
           Keeper_codex_runtime.run
+            ?on_tool_execution
             ?composed_context:official_client_composed_context
             ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input ~runtime)
             ?required_native_posture

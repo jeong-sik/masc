@@ -1346,9 +1346,9 @@ let render_approvals (state : state) =
            "  %s[w] Workspace: %s  |  [e] Outside services: %s%s"
            (Theme.info ())
            (match Masc.Keeper_gate_mode.of_string modes.Tui_decode.glm_workspace with
-            | Some mode -> gate_mode_label mode | None -> "Unknown mode")
+            | Some mode -> Masc_tui_palette.gate_mode_label mode | None -> "Unknown mode")
            (match Masc.Keeper_gate_mode.of_string modes.Tui_decode.glm_external with
-            | Some mode -> gate_mode_label mode | None -> "Unknown mode")
+            | Some mode -> Masc_tui_palette.gate_mode_label mode | None -> "Unknown mode")
            Ansi.reset
      (* No prefix: [data_unreliable_row] already opens "(data unreliable: "
         and the loader's message already opens "gate load failed:", so a third
@@ -15673,7 +15673,7 @@ let render_palette (state : state) =
   let typed_question =
     match state.palette_mode with
     | Masc_tui_types.Palette_jump ->
-        Masc_tui_types.palette_typed_question state.palette_query
+        Masc_tui_palette.palette_typed_question state.palette_query
     | Masc_tui_types.Palette_choice _ -> None
   in
   let explicit_question =
@@ -15681,7 +15681,7 @@ let render_palette (state : state) =
     | Some (question, Some symbol) -> Some (question, symbol)
     | Some (_, None) | None -> None
   in
-  let matches = Masc_tui_types.palette_matches state in
+  let matches = Masc_tui_palette.palette_matches state in
   let total = List.length matches in
   let cursor = max 0 (min state.palette_cursor (total - 1)) in
   let origin =
@@ -15696,7 +15696,7 @@ let render_palette (state : state) =
     | Masc_tui_types.Palette_jump ->
         (" MASC Command palette", ":", if Option.is_some typed_question then "ask" else "run")
     | Masc_tui_types.Palette_choice { choice_question; choice_line } ->
-        let names = List.length (Masc_tui_types.code_cursor_line_symbols state) in
+        let names = List.length (Masc_tui_palette.code_cursor_line_symbols state) in
         ( Printf.sprintf " %s · %d names on line %d" choice_question names choice_line
         , "filter:", "ask" )
   in

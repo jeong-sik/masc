@@ -1,0 +1,67 @@
+{
+  "observed_at_utc": "2026-09-30T23:24:18.743847+00:00",
+  "health_path": "/health?full=1",
+  "health_http_status": 200,
+  "health_fields": {
+    "status": "ok",
+    "version": "0.49.0",
+    "build": {
+      "release_version": "0.49.0",
+      "binary_version": "0.49.0",
+      "commit": "4f3f70f7909bc440e3c305c0941250ef39ac0245",
+      "commit_source": "embedded",
+      "binary_commit": "4f3f70f7909bc440e3c305c0941250ef39ac0245",
+      "binary_commit_source": "embedded",
+      "ocaml_dos_core": {
+        "source_digest": "307ce3cb738c345eda66091f2d01ba5f",
+        "pinned_source_digest": "307ce3cb738c345eda66091f2d01ba5f",
+        "matches_pin": true
+      },
+      "provenance_source": "self_observed",
+      "executable_sha256": "19b3a0b2e5195dcb439f2fc047f88be769cb1d40a755b7b67b8b563d24f83e85",
+      "binary_commit_unix_ts": 1790810080.0,
+      "binary_commit_age_seconds": 578,
+      "repo_head_commit": "dd1359a6ea",
+      "repo_head_commit_source": "runtime_repo_head",
+      "repo_head_commit_unix_ts": 1790572670.0,
+      "repo_head_commit_age_seconds": 237988,
+      "executable_path": "/Users/dancer/.local/bin/masc",
+      "executable_dir": "/Users/dancer/.local/bin",
+      "repo_root": "/Users/dancer/me",
+      "runtime_instance_id": "01a0f49a-3d9c-7000-9be8-1f6ad4d2841e",
+      "started_at": "2026-09-30T23:15:44Z",
+      "uptime_seconds": 514
+    },
+    "paths": {
+      "cwd": "/Users/dancer/me",
+      "effective_base_path": "/Users/dancer/me",
+      "effective_masc_root": "/Users/dancer/me/.masc",
+      "current_task_path": "/Users/dancer/me/.masc/current_task",
+      "current_task_shape": "absent",
+      "effective_has_masc_dir": true,
+      "roots_diverge": false,
+      "strict_mode_requested": false,
+      "startup_rejected": false,
+      "startup_abort_eligible": false,
+      "input_base_path": "/Users/dancer/me",
+      "env_masc_base_path": "/Users/dancer/me",
+      "resolution_source": "explicit_cli"
+    }
+  },
+  "ready": {
+    "status": 200,
+    "body": "{\"ready\":true,\"phase\":\"ready\"}",
+    "content_type": "application/json; charset=utf-8"
+  },
+  "item_request": {
+    "method": "GET",
+    "path": "/api/v1/keepers/code-reviewer/items",
+    "authenticated": true,
+    "response": {
+      "status": 404,
+      "body": "{\"error\":\"not found\"}",
+      "content_type": "application/json; charset=utf-8"
+    }
+  },
+  "credential_capture": false
+}

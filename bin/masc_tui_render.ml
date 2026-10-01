@@ -169,7 +169,9 @@ let workspace_health_label = function
   | Workspace_health_ok -> "ok"
   | Workspace_health_unknown -> "unknown"
 
-let task_line ~cols (task : task) =
+module Task_id_set = Set.Make (String)
+
+let task_line ~cols ~ordinal ~task_ids ~use_ordinals (task : task) =
   let status = Masc_domain.task_status_to_string task.status in
   (* The icon and the status word share one color so the row's state reads at
      a glance: in-flight rows in cyan, waiting rows dimmed. Terminal states
@@ -199,28 +201,58 @@ let task_line ~cols (task : task) =
     Printf.sprintf "%s%s%s %s[%s]%s " status_color
       (task_status_icon task.status) Ansi.reset Ansi.dim id Ansi.reset
   in
-  let suffix owner =
+  let suffix status owner =
     Printf.sprintf " %s(%s%s)%s %s" status_color status owner Ansi.reset
       (priority_indicator task.priority)
   in
-  (* State and priority are never shortened. The remaining cells are shared
-     by the identifier, owner and title; each identifier gets at most a third
-     before the title takes the remainder. This bounds long owner names too.
-     Goal links appear only when the full title leaves room; detail keeps all
-     identifiers. The frame and leading space consume five cells. *)
-  let available = max 0 (cols - 5) in
-  let fixed_chrome = Message_layout.display_width (prefix "")
-    + Message_layout.display_width (suffix "") in
-  let share = max 0 (available - fixed_chrome) / 3 in
+  (* Preserve the Task number before spending cells on its owner and title.
+     The canonical prefix may yield on narrow screens, but its digits do not
+     share a truncation budget with unrelated fields. *)
+  let available = max 0 (framed_inner_width cols - 1) in
   let id = Terminal_text.single_line task.id in
-  let id = fit_width id (min share (Message_layout.display_width id)) in
+  let short_id =
+    if String.starts_with ~prefix:"task-" id then
+      let digits = String.sub id 5 (String.length id - 5) in
+      if digits <> "" && String.for_all (fun c -> c >= '0' && c <= '9') digits then digits else id
+    else id in
+  let status =
+    let required = Message_layout.display_width (prefix "")
+      + Message_layout.display_width (suffix status "")
+      + Message_layout.display_width id + Message_layout.display_width "Task" in
+    if required <= available then status
+    else match task.status with
+      | Masc_domain.Todo -> "todo"
+      | Masc_domain.Claimed _ -> "claimed"
+      | Masc_domain.InProgress _ -> "active"
+      | Masc_domain.AwaitingVerification _ -> "verify"
+      | Masc_domain.Done _ -> "done"
+      | Masc_domain.Cancelled _ -> "cancelled"
+  in
+  let fixed_chrome = Message_layout.display_width (prefix "")
+    + Message_layout.display_width (suffix status "") in
+  let fields = max 0 (available - fixed_chrome) in
+  let id = if Message_layout.display_width id + Message_layout.display_width "Task" <= fields
+    then id else short_id in
+  (* A row coordinate stays distinct when an opaque ID cannot fit. The
+     original identifier remains the selection key and is readable in detail. *)
+  let id =
+    if use_ordinals || Message_layout.display_width id > fields
+       || (not (String.equal id task.id)
+           && Task_id_set.mem id task_ids)
+    then Printf.sprintf "row %d" ordinal else id
+  in
+  let remainder = max 0 (fields - Message_layout.display_width id) in
+  let title = Terminal_text.single_line task.title in
+  (* A short title needs only its measured cells. Its spare allocation can
+     show the owner instead of padding beside a shortened identity. *)
+  let title_cells = min (remainder / 2) (Message_layout.display_width title) in
   let assignee =
-    fit_width assignee (min share (Message_layout.display_width assignee))
+    fit_width assignee
+      (min (remainder - title_cells) (Message_layout.display_width assignee))
   in
   let prefix = prefix id in
-  let suffix = suffix assignee in
+  let suffix = suffix status assignee in
   let fixed = Message_layout.display_width prefix + Message_layout.display_width suffix in
-  let title = Terminal_text.single_line task.title in
   let goal_tag =
     if fixed + Message_layout.display_width title
        + Message_layout.display_width goal_tag <= available
@@ -425,171 +457,134 @@ let task_history_lines (state : state) task_id =
   in
   ("" :: header :: rows)
 
+let task_detail_lines (state : state) ~cols (task : Masc_domain.task) =
+  let width = max 1 (framed_inner_width cols - 2) in
+  let labeled_lines label text =
+    let prefix = "  " ^ label ^ ": " in
+    let prefix_width = Message_layout.display_width prefix in
+    if prefix_width < framed_inner_width cols then
+      Masc_tui_text_block.rows ~max_cells:(framed_inner_width cols - prefix_width) text
+      |> List.mapi (fun index line ->
+           (if index = 0 then prefix else String.make prefix_width ' ') ^ line)
+    else
+      (Message_layout.wrap_words ~max_cells:width label
+       |> List.map (fun line -> "  " ^ line))
+      @ (Masc_tui_text_block.rows ~max_cells:width text
+         |> List.map (fun line -> "  " ^ line))
+  in
+  let some_lines label = function None -> [] | Some text -> labeled_lines label text in
+  let list_lines label items = List.concat_map (labeled_lines label) items in
+  let goal_lines =
+    match task_goal_reading state ~task_id:task.id with
+    | Masc_tui_agenda.Not_read ->
+        labeled_lines "goal" "(membership unknown: links not read)"
+    | Masc_tui_agenda.Read_failed reason ->
+        labeled_lines "goal" ("(membership unknown: " ^ reason ^ ")")
+    | Masc_tui_agenda.Read [] -> labeled_lines "goal" "(not linked to a goal)"
+    | Masc_tui_agenda.Read goal_ids -> List.concat_map (fun goal_id ->
+        labeled_lines "goal" goal_id @ labeled_lines "link" (Link.reference Goal goal_id)) goal_ids
+  in
+  (* Status, actor and every transition's evidence are real rows in the same
+     reading as the description. No metadata field is a one-line preview. *)
+  let status_lines =
+    match task.task_status with
+    | Masc_domain.Todo -> labeled_lines "status" "todo — unclaimed"
+    | Masc_domain.Claimed { assignee; claimed_at } ->
+        labeled_lines "status" "claimed" @ labeled_lines "actor" assignee
+        @ labeled_lines "claimed" claimed_at
+    | Masc_domain.InProgress { assignee; started_at } ->
+        labeled_lines "status" "in progress" @ labeled_lines "actor" assignee
+        @ labeled_lines "started" started_at
+    | Masc_domain.AwaitingVerification { assignee; started_at; submitted_at; verification_id } ->
+        labeled_lines "status" "awaiting verification" @ labeled_lines "actor" assignee
+        @ labeled_lines "started" started_at @ labeled_lines "submitted" submitted_at
+        @ labeled_lines "verification" verification_id
+    | Masc_domain.Done { assignee; completed_at; notes } ->
+        labeled_lines "status" "done" @ labeled_lines "actor" assignee
+        @ labeled_lines "completed" completed_at @ some_lines "notes" notes
+    | Masc_domain.Cancelled { cancelled_by; cancelled_at; reason } ->
+        labeled_lines "status" "cancelled" @ labeled_lines "actor" cancelled_by
+        @ labeled_lines "cancelled" cancelled_at @ some_lines "reason" reason
+  in
+  labeled_lines "title" task.title @ labeled_lines "id" task.id @ goal_lines
+  @ status_lines
+  @ labeled_lines "created" task.created_at
+  @ labeled_lines "creator" (match task.created_by with Some by -> by | None -> Masc_tui_theme.Glyph.no_value)
+  @ labeled_lines "priority" (string_of_int task.priority)
+  @ labeled_lines "cycles" (string_of_int task.cycle_count)
+  @ some_lines "predecessor" task.predecessor_task_id
+  @ some_lines "operation" task.execution_links.operation_id
+  @ some_lines "session" task.execution_links.session_id
+  @ some_lines "reclaim policy"
+      (Option.map Masc_domain.task_reclaim_policy_to_string task.reclaim_policy)
+  @ some_lines "do not reclaim" task.do_not_reclaim_reason
+  @ List.concat_map (fun skill ->
+      labeled_lines "skill" (Yojson.Safe.to_string (Skill_reference.to_yojson skill))) task.skills
+  @ (if String.equal task.description "" then [] else labeled_lines "what" task.description)
+  @ (match task.handoff_context with
+     | None -> []
+     | Some handoff ->
+         some_lines "why" handoff.Masc_domain.reason
+         @ (if String.equal handoff.Masc_domain.summary "" then [] else labeled_lines "handoff" handoff.Masc_domain.summary)
+         @ some_lines "next" handoff.Masc_domain.next_step
+         @ some_lines "failure" handoff.Masc_domain.failure_mode
+         @ some_lines "handoff reclaim policy"
+             (Option.map Masc_domain.task_reclaim_policy_to_string
+                handoff.Masc_domain.reclaim_policy)
+         @ some_lines "handoff updated" handoff.Masc_domain.updated_at
+         @ some_lines "handoff updater" handoff.Masc_domain.updated_by
+         @ list_lines "evidence" handoff.Masc_domain.evidence_refs)
+  @ (match task.contract with
+     | None -> []
+     | Some contract ->
+         (if contract.Masc_domain.strict then ["  contract strict"] else [])
+         @ list_lines "done-when" contract.Masc_domain.completion_contract
+         @ list_lines "evidence" contract.Masc_domain.required_evidence
+         @ list_lines "inspection evidence" contract.Masc_domain.inspect_gate_evidence
+         @ list_lines "verification evidence" contract.Masc_domain.verify_gate_evidence)
+  @ list_lines "file" task.files
+  @ (task_history_lines state task.id
+     |> List.concat_map (fun line ->
+          if String.equal line "" then [""]
+          else Masc_tui_text_block.rows ~max_cells:(framed_inner_width cols) line))
+
+let task_detail_height ~rows ~count =
+  Masc_tui_scroll.content_height ~rows ~chrome:framed_chrome_rows ~count
+    ~preview_keep:None ~overflow_takes_row:true
+
+let task_detail_viewport (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let pane_cols = if cols < keeper_split_threshold_cols then cols else cols - keeper_roster_pane_cols in
+  let count = match Task_selection.detail_row ~detail_id:state.task_detail_id ~tasks:state.tasks_domain with
+    | None -> 0
+    | Some task -> List.length (task_detail_lines state ~cols:pane_cols task)
+  in
+  count, task_detail_height ~rows ~count
+
 let task_detail_pane (state : state) ~rows ~cols (task : Masc_domain.task) buf =
   let now = Unix.localtime (Unix.gettimeofday ()) in
-  let timestamp = Printf.sprintf "%02d:%02d:%02d"
-    now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
+  let timestamp = Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
   let header = Printf.sprintf "%s  %s%s%s  %s  %s"
-    (screen_title " MASC Task")
-    (Masc_tui_theme.tone Masc_tui_theme.Accent)
-    (bracketed ~max_cells:20 (Terminal_text.single_line task.id)) Ansi.reset timestamp
-    (connection_badge state) in
-
+    (screen_title " MASC Task") (Masc_tui_theme.tone Masc_tui_theme.Accent)
+    (bracketed ~max_cells:20 (Terminal_text.single_line task.id)) Ansi.reset timestamp (connection_badge state) in
   box_top buf cols;
   box_line buf cols header;
   box_divider buf cols;
-
-  box_line buf cols
-    (Ansi.bold ^ "  "
-    ^ fit_width (Terminal_text.single_line task.title) (cols - 6)
-    ^ Ansi.reset);
-  (* What this task serves. The task record carries no goal -- the goal-task
-     registry is the source of truth -- so this reads the links the loader
-     resolved rather than a field that would always be empty.
-
-     Written as a reference so Ctrl-] can follow it: naming a goal the
-     operator then has to go find by hand is the gap this closes. *)
-  (match task_goal_reading state ~task_id:task.id with
-   | Masc_tui_agenda.Not_read ->
-     box_line buf cols (Ansi.dim ^ "  Goal        links not read" ^ Ansi.reset)
-   | Read_failed _ ->
-     box_line buf cols (Ansi.dim ^ "  Goal        links unavailable" ^ Ansi.reset)
-   | Read [] ->
-     box_line buf cols (Ansi.dim ^ "  Goal        (not linked to a goal)" ^ Ansi.reset)
-   | Read goal_ids ->
-     List.iteri
-       (fun index goal_id ->
-         let label = if index = 0 then "Goal" else "" in
-         box_line buf cols
-           (Printf.sprintf "  %-11s %s  %s" label
-              (fit_width goal_id 28)
-              (Ansi.dim ^ Link.reference Goal goal_id ^ Ansi.reset)))
-       goal_ids);
-  (* Each status carries its own timestamps and actors; one exhaustive match
-     keeps the row and the status from disagreeing about who did what. The
-     note lines stay counted so the body budget below shrinks with them --
-     a verification id must not push the helper row off the screen. *)
-  let status_line, note_lines =
-    match task.task_status with
-    | Masc_domain.Todo -> ("todo — unclaimed", [])
-    | Masc_domain.Claimed { assignee; claimed_at } ->
-        ( Printf.sprintf "claimed by %s at %s"
-            (Terminal_text.single_line assignee)
-            (Terminal_text.single_line claimed_at)
-        , [] )
-    | Masc_domain.InProgress { assignee; started_at } ->
-        ( Printf.sprintf "in progress by %s since %s"
-            (Terminal_text.single_line assignee)
-            (Terminal_text.single_line started_at)
-        , [] )
-    | Masc_domain.AwaitingVerification
-        { assignee; submitted_at; verification_id; _ } ->
-        ( Printf.sprintf "awaiting verification by %s, submitted %s"
-            (Terminal_text.single_line assignee)
-            (Terminal_text.single_line submitted_at)
-        , [Printf.sprintf "verification %s"
-             (Terminal_text.single_line verification_id)] )
-    | Masc_domain.Done { assignee; completed_at; notes } ->
-        ( Printf.sprintf "done by %s at %s"
-            (Terminal_text.single_line assignee)
-            (Terminal_text.single_line completed_at)
-        , match notes with None -> [] | Some note -> [note] )
-    | Masc_domain.Cancelled { cancelled_by; cancelled_at; reason } ->
-        ( Printf.sprintf "cancelled by %s at %s"
-            (Terminal_text.single_line cancelled_by)
-            (Terminal_text.single_line cancelled_at)
-        , match reason with None -> [] | Some r -> [r] )
-  in
-  box_line buf cols
-    (Ansi.dim ^ "  status   " ^ Ansi.reset
-    ^ fit_width status_line (cols - 16));
-  List.iter
-    (fun note ->
-       box_line buf cols
-         (Ansi.dim ^ "           " ^ fit_width
-            (Terminal_text.single_line note) (cols - 16)
-         ^ Ansi.reset))
-    note_lines;
-  box_line buf cols
-    (Ansi.dim ^ Printf.sprintf "  created  %s by %s  priority %d  cycles %d"
-       (Terminal_text.short_timestamp task.created_at)
-       (match task.created_by with
-        | Some by -> Terminal_text.single_line by
-        | None -> Masc_tui_theme.Glyph.no_value)
-       task.priority task.cycle_count
-    ^ Ansi.reset);
-  box_divider buf cols;
-
-  (* Labeled block: the label rides the first wrapped line and continuation
-     lines keep the text column, so long handoff summaries stay readable. *)
-  let labeled_lines label text =
-    let width = max 10 (cols - 16) in
-    (* The block has rows, so a line break in the text takes one instead of
-       being spelled into the sentence. Of the 718 tasks on this workspace
-       406 are written with line breaks. *)
-    Masc_tui_text_block.rows ~max_cells:width text
-    |> List.mapi
-         (fun index line ->
-            if index = 0 then Printf.sprintf "  %-8s %s" label line
-            else Printf.sprintf "           %s" line)
-  in
-  let some_lines label = function
-    | None -> []
-    | Some text -> labeled_lines label text
-  in
-  let list_lines label items =
-    List.concat_map (fun item -> labeled_lines label item) items
-  in
-  let body_lines =
-    (if String.equal task.description "" then [] else labeled_lines "what" task.description)
-    @ (match task.handoff_context with
-       | None -> []
-       | Some handoff ->
-           some_lines "why" handoff.Masc_domain.reason
-           @ (if String.equal handoff.Masc_domain.summary "" then []
-              else labeled_lines "handoff" handoff.Masc_domain.summary)
-           @ some_lines "next" handoff.Masc_domain.next_step
-           @ some_lines "failure" handoff.Masc_domain.failure_mode
-           @ list_lines "evidence" handoff.Masc_domain.evidence_refs)
-    @ (match task.contract with
-       | None -> []
-       | Some contract ->
-           (if contract.Masc_domain.strict then
-              ["  contract strict"]
-            else [])
-           @ list_lines "done-when" contract.Masc_domain.completion_contract
-           @ list_lines "evidence" contract.Masc_domain.required_evidence)
-    @ list_lines "file" task.files
-    @ task_history_lines state task.id
-  in
-  let total_lines = List.length body_lines in
-  (* Chrome above and below the scrolling body: top border, header, divider,
-     the title block, the bottom border, the helper row and the composer row.
-     Clamped through the same helper the keeper log pane uses. Ten, not nine:
-     at nine the frame came out one row taller than its budget, which cost the
-     surface the composer row rather than a body row. On top of the ten, the
-     status note lines vary by state -- a verification id or cancellation
-     reason must shrink the body, not push rows off the bottom. *)
-  let content_height = max 1 (rows - boxed_surface_chrome_rows - List.length note_lines) in
-  let offset =
-    min state.task_detail_scroll
-      (Metrics_tail.maximum_scroll ~entry_count:total_lines ~content_height)
-  in
-  let body_lines_window = Rows.of_list ~first:offset ~height:content_height body_lines in
-  for i = 0 to content_height - 1 do
-    let line_index = i + offset in
-    let text =
-      if line_index < total_lines then
-        Option.value (Rows.at body_lines_window line_index) ~default:""
-      else ""
-    in
-    box_line buf cols
-      (Ansi.dim ^ fit_width (Terminal_text.single_line text) (cols - 8)
-      ^ Ansi.reset)
+  let lines = task_detail_lines state ~cols task in
+  let count = List.length lines in
+  let height = task_detail_height ~rows ~count in
+  let scroll = Masc_tui_scroll.normalize ~count ~height state.task_detail_scroll in
+  let window = Rows.of_list ~first:scroll ~height lines in
+  for offset = 0 to height - 1 do
+    match Rows.at window (scroll + offset) with
+    | None -> box_empty buf cols
+    | Some line -> box_line_styled buf cols ~style:Ansi.dim line
   done;
-
+  Option.iter (box_line_styled buf cols ~style:(Theme.recede ()))
+    (Masc_tui_scroll.position_row ~scroll ~height count);
   box_bottom buf cols;
-  offset
+  scroll
 ;;
 
 (* The task list stays beside the task. Overview's rows are the queue
@@ -636,13 +631,24 @@ let render_task_detail (state : state) (task : Masc_domain.task) =
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~status:[ Masc_tui_footer.Refresh_interval state.refresh_interval ]
-       ~hints:"j/k:scroll  x:cancel  Left / Esc:back  r:refresh");
+       ~hints:"j/k:scroll  PgUp/PgDn:page  Home/End  x:cancel  Left / Esc:back  r:refresh");
 
   finish_surface state ~clamped:(Task_detail offset) ~surface_key:"task-detail" ~rows:terminal_rows ~cols buf
 
 let render_work_tasks (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Overview_tasks.work_rows state.tasks in
+  let task_ids =
+    Task_id_set.of_list
+      (List.map (fun (task : Tui_decode.task) -> Terminal_text.single_line task.id) rows)
+  in
+  let ordinal_labels =
+    Task_id_set.of_list (List.mapi (fun index _ -> Printf.sprintf "row %d" (index + 1)) rows)
+  in
+  (* A canonical ID may itself occupy the row-coordinate namespace. In
+     that population every row uses its unique coordinate, so no fallback
+     can impersonate a different Task. Detail and selection retain IDs. *)
+  let use_ordinals = not (Task_id_set.disjoint task_ids ordinal_labels) in
   let selected =
     Overview_tasks.work_selected_index state.tasks
       ~selected:(Overview_tasks.selection state.task_focus)
@@ -695,7 +701,7 @@ let render_work_tasks (state : state) =
       List.iteri
         (fun index (task : Tui_decode.task) ->
            if index >= first && index < first + room then
-             let line = " " ^ task_line ~cols task in
+             let line = " " ^ task_line ~cols ~ordinal:(index + 1) ~task_ids ~use_ordinals task in
              if Some index = selected then
                c.push_selected (Masc_tui_theme.strip_sgr line)
              else c.push line)
@@ -1278,7 +1284,7 @@ let planning_detail_action_rows ~cols ~armed (goal : planning_goal) =
        then ["[a] Confirm proof"] else []) in
   (* These are commands, so every action stays visible while its evidence is
      read. Their physical rows are subtracted before the reader is allocated. *)
-  Message_layout.wrap_words ~max_cells:(max 1 (framed_inner_width cols - 2))
+  Message_layout.wrap_styled_words ~max_cells:(max 1 (framed_inner_width cols - 2))
     ("Actions: " ^ String.concat "   " actions)
   |> List.map (fun line -> "  " ^ line)
   |> fun rows -> rows @ (match armed with
@@ -1349,30 +1355,45 @@ let planning_detail_lines (state : state) ~confirmation ~cols (goal : planning_g
        | `Inspect (Masc_tui_fetched.Ready value) -> Planning_detail.confirmation_lines ~width value
        | `Inspect Loading -> [{Planning_detail.tone = Waiting; text = "Reading the proof to confirm..."}]
        | `Inspect (Stale (_, reason) | Failed reason) -> [{Planning_detail.tone = Unreadable; text = reason}]
-       | `Inspect Absent ->
+       | `Inspect Masc_tui_fetched.Absent ->
            (match goal.pg_verifier_unreconciled with Some blocked -> Planning_detail.unreconciled_lines ~width blocked | None -> [])
            @ Planning_detail.body ~width goal.pg_proof goal.pg_last_review_note)
   in
   let measurement = planning_measurement_lines state goal in
   let proof =
     (match confirmation with
-     | `Inspect Absent -> measurement @ confirmation_rows
-     | `Submitting | `Inspect (Ready _ | Loading | Stale _ | Failed _) ->
+     | `Inspect Masc_tui_fetched.Absent -> measurement @ confirmation_rows
+     | `Submitting | `Inspect (Masc_tui_fetched.Ready _ | Loading | Stale _ | Failed _) ->
          confirmation_rows @ measurement)
     @ Planning_detail.timeline ~width ~goal_id:goal.pg_id state.goal_timeline in
   let wrapped_proof = planning_proof_rows ~width proof in
   (match confirmation with
-   | `Inspect Absent -> metadata @ linked @ wrapped_proof
-   | `Submitting | `Inspect (Ready _ | Loading | Stale _ | Failed _) ->
+   | `Inspect Masc_tui_fetched.Absent -> metadata @ linked @ wrapped_proof
+   | `Submitting | `Inspect (Masc_tui_fetched.Ready _ | Loading | Stale _ | Failed _) ->
        wrapped_proof @ metadata @ linked)
 
-let planning_detail_height ~rows ~action_rows ~count =
-  Masc_tui_scroll.content_height ~rows ~chrome:(framed_chrome_rows + action_rows)
+let planning_detail_header_rows (state : state) ~cols (goal : planning_goal) =
+  let phase = "  " ^ bracketed ~max_cells:planning_phase_column
+      (planning_phase_label goal.pg_phase) in
+  let identity = Terminal_text.single_line goal.pg_id in
+  let tail = phase ^ " " ^ identity in
+  let header = planning_workspace_title state ~cols ~tab:Planning_goals ~window:""
+    ~after:tail ^ tail in
+  if Message_layout.display_width header <= framed_inner_width cols then [header]
+  else
+    (planning_workspace_title state ~cols ~tab:Planning_goals ~window:""
+       ~after:phase ^ phase)
+    :: (Masc_tui_text_block.rows ~max_cells:(max 1 (framed_inner_width cols - 2))
+          ("Goal: " ^ identity)
+        |> List.map (fun line -> "  " ^ line))
+
+let planning_detail_height ~rows ~header_rows ~action_rows ~count =
+  Masc_tui_scroll.content_height ~rows ~chrome:(framed_chrome_rows + max 0 (header_rows - 1) + action_rows)
     ~count ~preview_keep:None ~overflow_takes_row:true
 
-let planning_detail_fits ~rows ~action_rows ~count =
-  let height = planning_detail_height ~rows ~action_rows ~count in
-  framed_chrome_rows + action_rows + height
+let planning_detail_fits ~rows ~header_rows ~action_rows ~count =
+  let height = planning_detail_height ~rows ~header_rows ~action_rows ~count in
+  framed_chrome_rows + max 0 (header_rows - 1) + action_rows + height
     + (if count > height then 1 else 0) <= rows
 
 let planning_detail_viewport (state : state) =
@@ -1387,24 +1408,23 @@ let planning_detail_viewport (state : state) =
            let action_rows = List.length (planning_detail_action_rows ~cols ~armed:(goal_action_armed_for state goal_id) goal) in
            let count = List.length (planning_detail_lines state ~cols goal
              ~confirmation:(planning_confirmation_view state ~goal_id)) in
-           if planning_detail_fits ~rows ~action_rows ~count
-           then count, planning_detail_height ~rows ~action_rows ~count
+           let header_rows = List.length (planning_detail_header_rows state ~cols goal) in
+           if planning_detail_fits ~rows ~header_rows ~action_rows ~count
+           then count, planning_detail_height ~rows ~header_rows ~action_rows ~count
            else 0, 1)
   | Planning_list, _ | Planning_detail _, None -> 0, max 1 (rows - framed_chrome_rows)
 
 let planning_detail_pane (state : state) ~armed ~confirmation ~rows ~cols (goal : planning_goal) buf =
-  let header = planning_workspace_title state ~cols ~tab:Planning_goals ~window:""
-    ~after:(Printf.sprintf "  %s %s"
-      (bracketed ~max_cells:planning_phase_column (planning_phase_label goal.pg_phase))
-      (Terminal_text.single_line goal.pg_id)) in
+  let headers = planning_detail_header_rows state ~cols goal in
   box_top buf cols;
-  box_line buf cols header;
+  List.iter (box_line buf cols) headers;
   box_divider buf cols;
   let actions = planning_detail_action_rows ~cols ~armed goal in
   List.iter (box_line buf cols) actions;
   let lines = planning_detail_lines state ~confirmation ~cols goal in
   let count = List.length lines in
-  let height = planning_detail_height ~rows ~action_rows:(List.length actions) ~count in
+  let height = planning_detail_height ~rows ~header_rows:(List.length headers)
+    ~action_rows:(List.length actions) ~count in
   let scroll = Masc_tui_scroll.normalize ~count ~height state.planning_scroll in
   let window = Rows.of_list ~first:scroll ~height lines in
   for offset = 0 to height - 1 do
@@ -1416,12 +1436,12 @@ let planning_detail_pane (state : state) ~armed ~confirmation ~rows ~cols (goal 
     (Masc_tui_scroll.position_row ~scroll ~height count);
   box_bottom buf cols;
   let seen = match confirmation with
-    | `Inspect (Ready proof) ->
+    | `Inspect (Masc_tui_fetched.Ready proof) ->
         let width = max 1 (framed_inner_width cols - 2) in
         let last = List.length (planning_proof_rows ~width
           (Planning_detail.confirmation_lines ~width proof)) - 1 in
         if last >= scroll && last < scroll + height then Some proof else None
-    | `Submitting | `Inspect (Absent | Loading | Stale _ | Failed _) -> None in
+    | `Submitting | `Inspect (Masc_tui_fetched.Absent | Loading | Stale _ | Failed _) -> None in
   scroll, seen
 ;;
 
@@ -1438,7 +1458,8 @@ let render_planning_detail (state : state)
   let detail_cols = if cols < keeper_split_threshold_cols then cols else cols - keeper_roster_pane_cols in
   let action_rows = List.length (planning_detail_action_rows ~cols:detail_cols ~armed goal) in
   let count = List.length (planning_detail_lines state ~confirmation ~cols:detail_cols goal) in
-  if not (planning_detail_fits ~rows ~action_rows ~count) then begin
+  let header_rows = List.length (planning_detail_header_rows state ~cols:detail_cols goal) in
+  if not (planning_detail_fits ~rows ~header_rows ~action_rows ~count) then begin
     let buf = Buffer.create 96 in
     Buffer.add_string buf (fit_width "Goal detail needs more room; resize to read and act" cols);
     Buffer.add_char buf '\n';
@@ -11652,10 +11673,17 @@ let usage_lines ~cols (state : state) =
   List.concat_map
     (fun line ->
       if String.equal line "" then [ "" ]
+      else if Message_layout.display_width line <= framed_inner_width cols then [line]
       else
-        Message_layout.wrap_words ~max_cells:(max 1 (cols - 7)) line
-        |> List.mapi (fun index text ->
-             if index = 0 then text else "   " ^ text))
+        let rec leading index =
+          if index < String.length line && Char.equal line.[index] ' '
+          then leading (index + 1) else index in
+        let indent_cells = leading 0 in
+        let indent = String.make indent_cells ' ' in
+        let body = String.sub line indent_cells (String.length line - indent_cells) in
+        Message_layout.split_styled_cells
+          ~max_cells:(max 1 (framed_inner_width cols - indent_cells)) body
+        |> List.map (fun text -> indent ^ text))
     lines
 
 let render_metrics (state : state) =

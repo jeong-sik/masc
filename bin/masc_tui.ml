@@ -2131,6 +2131,24 @@ let fork_workspace_job state ~sw run =
       List.filter (fun (held, _) -> held != token) state.workspace_cancellations;
     Printexc.raise_with_backtrace exn backtrace
 
+(* The server this screen reads. It runs on this machine, so the address is
+   loopback and there is nothing to configure.
+
+   It used to read MASC_HOST, which is the *server's* bind address
+   ([main_eio.ml] spells it "Host/IP to bind", [Server_auth] calls it
+   [configured_bind_host]). That answers a different question -- which
+   interfaces to accept on -- and its documented non-default values are the
+   wildcards 0.0.0.0 and ::, which [Masc_network_defaults.is_unspecified_host]
+   exists to name as "every interface" rather than a reachable peer. Setting
+   it the way the server's own help recommends therefore pointed this screen
+   at an address that is not a destination.
+
+   Reading it also made a second setting: the roster, the task backlog, the
+   keeper metrics and the context occupancy are read from [base_path] on
+   local disk, and nothing checked that the two named the same machine. With
+   one of them gone there is nothing left to disagree. *)
+let server_peer_host = Masc_network_defaults.masc_http_loopback_peer
+
 (* A request owns both its cancellation context and its completion. Recheck the
    endpoint before dispatch: an unchanged port can now serve another root. *)
 let launch_workspace_request state ~mailbox ~boundary_error ~deliver read =
@@ -2283,24 +2301,6 @@ let enqueue_dispatch_start ~enqueue mailbox request was_replay =
   enqueue mailbox
     (Keeper_chat_dispatch_started (request, was_replay, acknowledge));
   Eio.Promise.await acknowledged
-
-(* The server this screen reads. It runs on this machine, so the address is
-   loopback and there is nothing to configure.
-
-   It used to read MASC_HOST, which is the *server's* bind address
-   ([main_eio.ml] spells it "Host/IP to bind", [Server_auth] calls it
-   [configured_bind_host]). That answers a different question -- which
-   interfaces to accept on -- and its documented non-default values are the
-   wildcards 0.0.0.0 and ::, which [Masc_network_defaults.is_unspecified_host]
-   exists to name as "every interface" rather than a reachable peer. Setting
-   it the way the server's own help recommends therefore pointed this screen
-   at an address that is not a destination.
-
-   Reading it also made a second setting: the roster, the task backlog, the
-   keeper metrics and the context occupancy are read from [base_path] on
-   local disk, and nothing checked that the two named the same machine. With
-   one of them gone there is nothing left to disagree. *)
-let server_peer_host = Masc_network_defaults.masc_http_loopback_peer
 
 (* Track the background server started by this TUI for readiness and child
    reaping. Closing the UI does not stop the workspace server. *)
@@ -6176,7 +6176,7 @@ let row_list (state : state) : row_list option =
        | Planning_detail _ -> None
        | Planning_list
          when Masc_tui_overview_tasks.is_focused state.task_focus ->
-           if Option.is_some state.task_detail_id then None
+           if Option.is_some (task_detail_on_screen state) then None
            else
              let rows = Masc_tui_overview_tasks.work_rows state.tasks in
              let cursor =
@@ -10993,7 +10993,7 @@ let withdraw_keeper_workspace_presentation state ~previous =
   state.preset_restore_armed <- None;
   state.preset_report <- None;
   state.preset_busy <- false;
-  ignore (Masc_tui_types.abandon_fusion_launch state);
+  Masc_tui_types.withdraw_fusion_workspace state;
   state.dos_live <- Masc_tui_machine_live.Unread;
   state.dos_activity <- [];
   state.dos_live_in_flight <- None;
@@ -11087,16 +11087,7 @@ let withdraw_keeper_workspace_presentation state ~previous =
       "Workspace changed: unsent Keeper inputs retained for their original workspace; resume there to send"
   end;
   state.msg_queued <- Chat_queue.empty;
-  state.keeper_interactive_waiting <- [];
-  state.keeper_chat_control_tokens <- [];
-  state.keeper_chat_control_pending <- [];
-  state.keeper_queue_inflight <- [];
-  state.keeper_run_next_pending <- [];
-  state.keeper_run_next_ready <- [];
-  state.keeper_run_next_inflight <- [];
-  state.keeper_auto_priority_pending <- [];
-  state.keeper_auto_priority_requests <- [];
-  state.msg_inflight <- [];
+  Masc_tui_types.withdraw_keeper_chat_requests state;
   release_composer_for_browser_reader state;
   close_context_inspector state;
   state.context_inspector_generation <- state.context_inspector_generation + 1;
@@ -12726,6 +12717,7 @@ let handle_goal_confirmation_key state ~mailbox =
        | Ready confirmation ->
            state.goal_confirmation <- Goal_confirmation.Submitting
                (goal_id, Goal_confirmation_read.clear read);
+           state.planning_scroll <- 0;
            launch_workspace_request state ~mailbox ~boundary_error:Fun.id
              ~deliver:(fun result -> Goal_confirmation_submitted result)
              (fun () ->
@@ -18453,9 +18445,10 @@ let main
   let handle_task_cancel () =
     let authority = state.workspace_authority in
     let identity = state.server_identity in
-    match state.task_detail_id with
+    match task_detail_on_screen state with
     | None -> ()
-    | Some task_id -> (
+    | Some (task : Masc_domain.task) -> (
+        let task_id = task.id in
         match Masc_tui_editor.editor_command () with
         | None ->
             report_action state "error"
@@ -20299,7 +20292,8 @@ and is loaded on demand through keeper_skill.
            (* Scrolling reads the exact proof; leaving it invalidates pending
               reads as well as an already displayed confirmation binding. *)
            if cancelled [ "a"; "A"; "j"; "k"; "up"; "down";
-                          "pageup"; "pagedown"; "wheel-up"; "wheel-down" ] then
+                          "pageup"; "pagedown"; "home"; "end";
+                          "wheel-up"; "wheel-down" ] then
              (match state.goal_confirmation with
               | Goal_confirmation.Inspecting read ->
                   state.goal_confirmation <- Goal_confirmation.Inspecting
@@ -24159,6 +24153,7 @@ and is loaded on demand through keeper_skill.
                  | Link.Task, Planning, Some task_id ->
                      state.planning_mode <- Planning_list;
                      state.task_detail_id <- Some task_id;
+                     state.task_detail_scroll <- 0;
                      state.task_history <- None;
                      state.task_focus <-
                        Masc_tui_overview_tasks.land_on state.tasks ~task_id;
@@ -24315,6 +24310,12 @@ and is loaded on demand through keeper_skill.
            let page = surface_page_rows state in
            let direction = if key = Some "pagedown" then 1 else -1 in
            (match state.view with
+            | Planning when state.planning_mode = Planning_list
+                            && Masc_tui_overview_tasks.is_focused state.task_focus
+                            && Option.is_some (task_detail_on_screen state) ->
+                let count, height = Masc_tui_render.task_detail_viewport state in
+                let move = if direction > 0 then Masc_tui_scroll.page_down else Masc_tui_scroll.page_up in
+                state.task_detail_scroll <- move ~count ~height state.task_detail_scroll
             (* Applying a scheme used to live on the page keys, where the
                footer never said it was and where PageDown is a scroll
                everywhere else; it answers to Enter. Emptying the arm left the
@@ -25285,7 +25286,7 @@ and is loaded on demand through keeper_skill.
                 (match state.planning_mode with
                  | Planning_list
                    when Masc_tui_overview_tasks.is_focused state.task_focus ->
-                     if Option.is_some state.task_detail_id then
+                     if Option.is_some (task_detail_on_screen state) then
                        state.task_detail_scroll <-
                          Masc_tui_types.scroll_down_from state.task_detail_scroll ~by:1
                      else
@@ -25654,7 +25655,7 @@ and is loaded on demand through keeper_skill.
                 (match state.planning_mode with
                  | Planning_list
                    when Masc_tui_overview_tasks.is_focused state.task_focus ->
-                     if Option.is_some state.task_detail_id then
+                     if Option.is_some (task_detail_on_screen state) then
                        state.task_detail_scroll <- max 0 (state.task_detail_scroll - 1)
                      else
                        state.task_focus <-
@@ -26397,6 +26398,7 @@ and is loaded on demand through keeper_skill.
                    Masc_tui_overview_tasks.land_on state.tasks ~task_id:tid
              | None ->
                  state.task_detail_id <- None;
+                 state.task_detail_scroll <- 0;
                  state.task_focus <-
                    Masc_tui_overview_tasks.focus_list state.tasks)
         | Some ("p" | "P") when state.view = Planning ->
@@ -26410,7 +26412,7 @@ and is loaded on demand through keeper_skill.
             | Code -> ()
             | Keepers Keeper_runtime_pick -> ()
             | Planning when state.planning_mode = Planning_list
-                            && Option.is_none state.task_detail_id ->
+                            && Option.is_none (task_detail_on_screen state) ->
                 state.task_focus <-
                   Masc_tui_overview_tasks.toggle state.tasks state.task_focus
             | Keepers (Keeper_list | Keeper_detail) ->
@@ -26660,7 +26662,9 @@ and is loaded on demand through keeper_skill.
            state.system_logs_scroll <- 0;
            state.system_logs_cursor <- 0
        | Some "x" | Some "X"
-         when state.view = Planning && state.task_detail_id <> None ->
+         when state.view = Planning && state.planning_mode = Planning_list
+              && Masc_tui_overview_tasks.is_focused state.task_focus
+              && Option.is_some (task_detail_on_screen state) ->
            (* Cancel wants a reason, and $EDITOR is the form we already
               have; the editor itself is the confirmation step. *)
            handle_task_cancel ()

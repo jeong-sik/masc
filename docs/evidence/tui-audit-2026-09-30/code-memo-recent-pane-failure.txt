@@ -1,0 +1,6 @@
+Test run: 36692603068
+Run head: 9bba366587728629efa61aa4ac14e419e3f60ee6 (run metadata, not raw checkout output)
+Raw: code-memo-recent-pane-failure.raw
+Raw SHA256: aeab89bd05067c08926dbab78c7b65daf90520b0966ed5bc298d7c7f374b72d3
+Six hidden-Recent color widths completed, then default160 color failed literal reconstruction because right Activity rows appeared between wrapped memo fragments. Primary author/body assertions passed before this literal check; NO_COLOR not reached. Old memo family and126 keys passed. Repair7c8a737df2932b48316dc726cff35e6960ba9c81 restricts Unicode extraction to actual Recent header boundary, without payload filters. Focused36696258326/probe36696262199 requested; no newhead execution claim.
+Root read first trace, final suite outcomes and relevant source. Independent hostile and response reviewers verified repairs. No local Dune build, repaired-head required-check/merge/install/production proof.

@@ -8227,8 +8227,9 @@ let harness_ledger_lines ~cols snapshot =
             [ Printf.sprintf "  %sledger%s  %d ruled  \xc2\xb7  approve %d  \xc2\xb7  reject %d%s"
                 Ansi.dim Ansi.reset calibration.hcal_total
                 calibration.hcal_approve calibration.hcal_reject evaluator
-            ; Printf.sprintf "  %sgate%s    %s" Ansi.dim Ansi.reset
-                (fit_width gates (max 8 (cols - 12)))
+            ; row_with_field ~cols
+                ~lead:(Printf.sprintf "  %sgate%s    " Ansi.dim Ansi.reset)
+                ~field:gates ~tail:""
             ; (if calibration.hcal_labeled > 0 then
                  Printf.sprintf "  %slabelled%s %d" Ansi.dim Ansi.reset
                    calibration.hcal_labeled

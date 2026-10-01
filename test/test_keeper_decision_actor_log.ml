@@ -296,7 +296,7 @@ let test_interrupt_stamps_the_token_owner ~sw ~clock ~base_path:_ ~state ~token 
    runs in its own sub-switch so failing it does not cancel the test fiber
    (the shape test_keeper_turn_interrupt.ml uses). *)
 let test_cancelled_turn_response_carries_the_actor ~sw ~clock ~base_path ~state ~token ~keeper =
-  Masc.Keeper_registry.mark_turn_started ~base_path
+  Masc.Keeper_registry.mark_turn_started ~observation_token:(Masc.Keeper_turn_observation_token.fresh ()) ~base_path
     ~wake:Masc.Keeper_registry.Proactive_tick keeper;
   let registered, set_registered = Eio.Promise.create () in
   Eio.Fiber.fork ~sw (fun () ->

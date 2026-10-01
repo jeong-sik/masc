@@ -857,8 +857,10 @@ let fleet_record config operation =
   let module Ledger = Masc.Lane_addon_broadcast_delivery in
   let ledger=Ledger.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons/fleet-delivery") in
   let operation_id=Ledger.Request_id.of_string operation |> unwrap in
-  Eio_unix.run_in_systhread (fun () -> Ledger.find ledger ~caller:"fixture-operator" ~operation_id)
-  |> unwrap |> function Some receipt -> receipt.record | None -> fail "Fleet intention absent"
+  match Eio_unix.run_in_systhread (fun () -> Ledger.find ledger ~caller:"fixture-operator" ~operation_id) with
+  | Ok (Some receipt) -> receipt.record
+  | Ok None -> fail "Fleet intention absent"
+  | Error _ -> fail "Fleet intention lookup failed"
 
 let fleet_recipient config operation recipient =
   List.assoc recipient (fleet_record config operation).recipients

@@ -652,9 +652,10 @@ type bound_credential = { bound_headers : (string * string) list }
 let bind_credential () = {bound_headers=auth_headers ()}
 let get_json_bound ~credential ~host ~port ~path =
   let url = url_of ~host ~port ~path in
-  timed ~verb:"GET" ~path @@ fun () ->
-  match Masc_http_client.get_sync ?clock:(request_clock ())
-    ~timeout_sec:(request_timeout_sec ()) ~url ~headers:credential.bound_headers () with
+  let response = timed ~verb:"GET" ~path (fun () ->
+    Masc_http_client.get_sync ?clock:(request_clock ())
+      ~timeout_sec:(request_timeout_sec ()) ~url ~headers:credential.bound_headers ()) in
+  match response with
   | Error detail -> Error (Masc.Tui_decode.http_transport_error ~verb:"GET" ~url ~detail)
   | Ok (status_code,body) -> decode_json ~allow_empty:false ~status_code ~body
 let lane_broadcast_principal_bound ~credential ~host ~port =
@@ -668,9 +669,10 @@ let lane_broadcast_principal_bound ~credential ~host ~port =
   | _ -> Error "Broadcast principal response is invalid"
 let post_json_bound ~credential ~host ~port ~path ~body =
   let url = url_of ~host ~port ~path in
-  timed ~verb:"POST" ~path @@ fun () ->
-  match Masc_http_client.post_sync ?clock:(request_clock ())
-    ~timeout_sec:(request_timeout_sec ()) ~url ~headers:(json_headers credential.bound_headers) ~body () with
+  let response = timed ~verb:"POST" ~path (fun () ->
+    Masc_http_client.post_sync ?clock:(request_clock ())
+      ~timeout_sec:(request_timeout_sec ()) ~url ~headers:(json_headers credential.bound_headers) ~body ()) in
+  match response with
   | Error detail -> Error (Masc.Tui_decode.http_transport_error ~verb:"POST" ~url ~detail)
   | Ok (status_code,body) -> decode_json ~allow_empty:true ~status_code ~body
 

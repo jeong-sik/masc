@@ -1,0 +1,120 @@
+{
+  "scope": "composed OCaml syntax/source inspection only; no typecheck, Dune, native test, deployed CLI, network or CI",
+  "checked_at": "2026-09-30T03:53:09.591838+00:00",
+  "branch": "fix/prune-expiry-stack-20260930",
+  "local_parent": "219ff24a8ab705af76620af8039b614c3d5f81b1",
+  "expiry_parent": "9d2e0d1448b27bd8952a5fcc51b8ba6e1015c607",
+  "play_assertion_overlay_from": "886762f483",
+  "original_prune_commits": [
+    "072783ceed",
+    "2d587d4cbd"
+  ],
+  "local_tree_is_complete_current_main": false,
+  "compiler_version": "5.5.1",
+  "commands": [
+    {
+      "command": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "-intf",
+        "lib/auth/auth.mli"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "lib/auth/auth_credential_base.ml"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "-intf",
+        "lib/auth/auth_token_prune.mli"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "lib/auth/auth_token_prune.ml"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "bin/main_eio.ml"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "test/test_auth_token_prune_transaction.ml"
+      ],
+      "exit_code": 0
+    }
+  ],
+  "source_sha256": {
+    "lib/auth/auth.mli": "649115c9e7aeaaa9a792b4c00bc468ac58fd8723f67ee28b46a68692c8a9ca72",
+    "lib/auth/auth_credential_base.ml": "83a3a03f95fd45e07fbbb62658b8cb2dea9c9a27d0362eb0f73d166a91ea42e5",
+    "lib/auth/auth_token_prune.mli": "b9d7625be9f23b652b1ca1bdadf5a7568eb8d780a3588d1b41df5993d477901f",
+    "lib/auth/auth_token_prune.ml": "264efe9e2557ad9298d6fdf2a1f1d3cfa412cd11fa8483fe5fe307dac5a52bd5",
+    "bin/main_eio.ml": "439f3e0b122c2a4c93fe6bf955f0a8df925fad195747535066d6e9ade7dd7ad3",
+    "test/test_auth_token_prune_transaction.ml": "4cad0bcd4ff86af07b78b4e4a5f1b0a85169186c1d03fcd3c976d9aaeaf1c3a6",
+    "test/dune": "2fc1a3ea245ef6682d2fb7e48df6c793b310bdbe7ce05b2b267801b19df8020f",
+    "test/stanzas/test_auth_token_prune_transaction.inc": "cbe63938b5da55132817256c20bbdd9ef9a8beaf82d7332d24989799353f4820",
+    "changelog.d/40174.md": "831df8667601c01e30ed54c15d8a2c5382dcd73256538a55d42e70385be61c77"
+  },
+  "expiry_ssot_source_sha256": {
+    "lib/types/types_auth.ml": "c3d8bd1e5995484f8ddd520a6b1a452556dc14ead31e3f8c7c3a5c34c9f35f7b",
+    "lib/auth/auth_token_inventory.ml": "0a62fbfcfd3119813a438058b584de6765de18c809d821bdf566f5a3ef53a4cf"
+  },
+  "test_dune_parent_plus_only_prune_include_verified": true,
+  "parent_refusal_test_outside_prune_delta_verified": true,
+  "native_test_status": "not_run_locally",
+  "native_test_suite": "test_auth_token_prune_transaction",
+  "scenarios_committed": 12,
+  "publication_status": "root owns stacked publication and composed native validation",
+  "ignore_lint": {
+    "command": [
+      "python3",
+      "scripts/lint-ignore-without-comment.py",
+      "--include-tests",
+      "--strict",
+      "--target",
+      "lib/auth/auth_credential_base.ml",
+      "test/test_auth_token_prune_transaction.ml"
+    ],
+    "exit_code": 0
+  },
+  "fragment_check": {
+    "command": [
+      "python3",
+      "scripts/changelog-fragments.py",
+      "check"
+    ],
+    "exit_code": 0,
+    "stdout": "8 changelog fragment(s) OK\n"
+  },
+  "published_expiry_parent": "63cc46e9380102e8a39e46b14bd7b9358fcfad74",
+  "pull_request": 40174
+}

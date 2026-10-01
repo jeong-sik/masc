@@ -117,6 +117,7 @@ for src, dst in [('runtime.toml', 'config/runtime.toml'),
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(verified_inputs[f'test/fixtures/item-http/{src}'])
     config_hashes[src] = hashlib.sha256(target.read_bytes()).hexdigest()
+(base / '.masc/config/prompts').mkdir(exist_ok=True)
 server = None
 reservation = None
 

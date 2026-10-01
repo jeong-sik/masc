@@ -8,6 +8,10 @@ import tui_keyboard_harness as _keyboard_harness
 import tui_keyboard_resources as _keyboard_resources
 
 SOURCE_MODULES = (
+    "bin/masc_tui_render_resources.ml",
+    "bin/masc_tui_render_resources.mli",
+    "bin/masc_tui_render_prim.ml",
+    "bin/masc_tui_render_prim.mli",
     "bin/masc_tui.ml",
     "bin/masc_tui_async_read.ml",
     "bin/masc_tui_http.ml",

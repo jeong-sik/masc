@@ -10,6 +10,8 @@ SOURCE_MODULES = (
     "bin/masc_tui_render.ml",
     "test/tui_keyboard_harness.py",
     "test/tui_keyboard_runtime.py",
+    "lib/tui_decode_runtime_probe.ml",
+    "lib/tui_decode_runtime_probe.mli",
 )
 
 ERROR = b"runtime resolved load failed: HTTP 503: fixture resolved unavailable"

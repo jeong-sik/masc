@@ -29,6 +29,8 @@ SOURCE_MODULES = (
     "test/tui_keyboard_harness.py",
     "test/tui_keyboard_keepers.py",
     "test/tui_keyboard_runtime.py",
+    "lib/tui_decode_runtime_probe.ml",
+    "lib/tui_decode_runtime_probe.mli",
 )
 
 ROUTING_PATH = "/api/v1/runtime/config/routing"

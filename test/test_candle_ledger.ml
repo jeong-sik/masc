@@ -49,15 +49,16 @@ let snapshot ?(request_id = "req-1") goal_id : E.t =
 ;;
 
 let goal_ids events =
-  List.map
+  List.filter_map
     (fun (event : E.t) ->
        match event.body with
        | E.Snapshot { goal_id; _ }
        | E.Payout_owed { goal_id; _ }
        | E.Candidates { goal_id; _ }
        | E.Unattributed { goal_id; _ }
-       | E.Payout_failed { goal_id; _ } -> goal_id
-       | E.Paid p -> p.identity.goal_id
+       | E.Payout_failed { goal_id; _ } -> Some goal_id
+       | E.Paid p -> Some p.identity.goal_id
+       | E.Half_life_set _ -> None
        | E.Equipped _ | E.Purchased _ -> Alcotest.fail "a purchase has no Goal identity")
     events
 ;;
@@ -130,19 +131,53 @@ let payment_of_event (row : E.t) =
   match row.body with
   | E.Paid payment -> payment
   | E.Snapshot _ | E.Payout_owed _ | E.Candidates _ | E.Unattributed _
-  | E.Payout_failed _ | E.Purchased _ | E.Equipped _ ->
+  | E.Payout_failed _ | E.Half_life_set _ | E.Purchased _ | E.Equipped _ ->
     Alcotest.fail "expected a Paid receipt"
 ;;
 
 let balance_of_view view =
-  match Candle_balance.of_events (Candle_ledger.events view) with
+  match Candle_balance.of_events ~at:(at "2026-09-30T00:00:00Z") (Candle_ledger.events view) with
   | Ok balance -> balance
   | Error error -> Alcotest.fail (Candle_balance.error_to_string error)
 ;;
 
+(* A receipt remains tied to the frozen contributing tasks, even when its
+   historical arithmetic differs from the current append formula. *)
+let payment_prerequisites (row : E.t) =
+  let payment = payment_of_event row in
+  let { Candle_appraisal.goal_id; request_id; verification_run_id } = payment.identity in
+  let task_keepers = List.map2
+    (fun (relation : Candle_appraisal.task_relation) (allocation : Candle_payment.allocation) ->
+      relation.task_id, allocation.keeper) payment.relations payment.allocations in
+  let ids = List.map fst task_keepers in
+  [ { E.at = row.at; body = E.Snapshot {
+        goal_id; request_id; verification_run_id; criterion_revision = "receipt-fixture";
+        passed_at = row.at; goal_created_at = at "2026-09-28T00:00:00Z";
+        due_date = None; title = "Recorded payout"; metric = None; target_value = None;
+        linked_task_ids = ids } }
+  ; { E.at = row.at; body = E.Payout_owed {
+        goal_id; request_id; verification_run_id; passed_at = row.at; confirmed_at = row.at } }
+  ; { E.at = row.at; body = E.Candidates {
+        goal_id; request_id; verification_run_id;
+        tasks = List.map (fun (id, keeper) -> id, E.Found {
+          title = id; assignee = Some keeper; status = E.Done {completed_at = row.at} }) task_keepers;
+        candidate_task_ids = ids; candidate_keepers = List.map snd task_keepers;
+        candidate_task_keepers = List.map (fun (id, keeper) -> id, Some keeper) task_keepers } }
+  ]
+;;
+
+let event_lines rows =
+  String.concat "" (List.map (fun row -> ok_or_fail (E.to_line row) ^ "\n") rows)
+;;
+
 let test_stored_payments_replay_but_new_appends_require_current_arithmetic () =
   with_base_path @@ fun base_path ->
-  let bytes = stored_rounded_payment ^ "\n" ^ stored_tied_payment ^ "\n" in
+  let receipts = List.map (fun line -> ok_or_fail (E.of_line line))
+      [stored_rounded_payment; stored_tied_payment] in
+  let policy : E.t = {at = at "2026-09-29T06:00:00Z"; body = E.Half_life_set Candle_decay.Off} in
+  let bytes = event_lines [policy] ^ String.concat "" (List.map2
+    (fun row line -> event_lines (payment_prerequisites row) ^ line ^ "\n")
+    receipts [stored_rounded_payment; stored_tied_payment]) in
   append_raw base_path bytes;
   let view = read_ok base_path in
   let stored = Candle_ledger.events view in
@@ -173,8 +208,8 @@ let test_stored_payments_replay_but_new_appends_require_current_arithmetic () =
        | Ok () -> Alcotest.fail "old arithmetic was accepted for a new payment");
       Alcotest.(check string) "read and refused append never rewrite history"
         bytes (file_text base_path))
-    stored;
-  let rounded = payment_of_event (List.hd stored) in
+    receipts;
+  let rounded = payment_of_event (List.hd receipts) in
   let current =
     Candle_payment.make
       ~identity:{ rounded.identity with goal_id = "new-current" }
@@ -189,7 +224,8 @@ let test_stored_payments_replay_but_new_appends_require_current_arithmetic () =
   in
   Alcotest.(check (list int)) "new payment still uses today's floor rule"
     [1400] (List.map (fun (a : Candle_payment.allocation) -> a.amount_milli) current.allocations);
-  update_ok base_path (fun _ -> Ok ([{ E.at = at "2026-09-30T00:00:00Z"; body = E.Paid current }], ()));
+  let current_row : E.t = { at = at "2026-09-30T00:00:00Z"; body = E.Paid current } in
+  update_ok base_path (fun _ -> Ok (payment_prerequisites current_row @ [current_row], ()));
   Alcotest.(check bool) "valid new payment appends after unchanged history" true
     (String.starts_with ~prefix:bytes (file_text base_path));
   let after = balance_of_view (read_ok base_path) in

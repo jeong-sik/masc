@@ -57,6 +57,9 @@ type http_surface_results = {
    and nothing else, so there are no surfaces to carry. *)
 type http_refresh_outcome =
   | Refresh_surfaces of http_surface_results
+  | Refresh_workspace_unconfirmed of
+      { detail : string; unreachable : bool;
+        approval_ticket : Masc_tui_operator_projection.Listing_order.ticket option }
   | Refresh_server_booting of
       { identity : (Masc.Tui_decode.server_identity, string) result
       ; (* The ticket [start_http_refresh] took before the probe went
@@ -109,6 +112,8 @@ type currency_authority_request = {
 }
 
 type async_msg =
+  | Workspace_scoped of workspace_authority * async_msg
+  | Workspace_identity_unconfirmed of string
   | Lane_package_preview_loaded of int * string * (Yojson.Safe.t, string) result
   | Keeper_queue_loaded of string * int option * Masc_tui_queue_inspection.action * (string list, string) result
   | Lane_addons_loaded of int * (lane_addons_reply, lane_addons_failure) result
@@ -148,11 +153,11 @@ type async_msg =
   | Voice_failed of { keeper : string; error : string }
   | Http_refresh_done of http_refresh_outcome
   | Http_refresh_failed of string * Masc_tui_operator_projection.Listing_order.ticket option
-  | Http_scoped_refresh_done of currency_authority_request * http_scoped_surface_results
+  | Http_scoped_refresh_done of workspace_authority * currency_authority_request * http_scoped_surface_results
   | Http_scoped_refresh_failed of
-      string * Masc_tui_operator_projection.Listing_order.ticket option
+      workspace_authority * string * Masc_tui_operator_projection.Listing_order.ticket option
   | Board_post_refresh_done of
-      Masc_tui_board_detail.request * (board_post * board_comment list, string) result
+      Masc_tui_board_detail.request * (board_post * board_comment list * string option, string) result
   | Approval_decision_done of
       approval_item
       * approval_decision
@@ -413,7 +418,7 @@ type async_msg =
   (* Carries the keeper it was asked about: the roster cursor can move while a
      load is in flight, and an answer that did not say whose it was would be
      filed under whoever is selected when it lands. *)
-  | Keeper_schedules_loaded of string * (schedule_snapshot, string) result
+  | Keeper_schedules_loaded of detail_read_request * (schedule_snapshot, string) result
   | System_logs_loaded of (system_log_snapshot, string) result
   | Schedule_cancel_done of string * (string, string) result
   (* (message, noop): [noop = true] says the verdict already stood. *)
@@ -431,7 +436,7 @@ type async_msg =
                 Masc_tui_types.Verification_evidence_read.failure) result
   | Keeper_config_view_loaded of Masc_tui_types.detail_read_request * (string list, string) result
   | Keeper_items_loaded of
-      Masc_tui_types.detail_read_request * (Masc_tui_keeper_items.t, string) result
+      Masc_tui_types.detail_read_request * (string option * Masc_tui_keeper_items.t, string) result
   | Keeper_sandbox_view_loaded of
       Masc_tui_types.detail_read_request * (Masc_tui_keeper_sandbox.t, string) result
   | Keeper_sandbox_logs_loaded of
@@ -440,6 +445,8 @@ type async_msg =
       (string * string list * Masc_tui_runtime_config_view.metadata, string) result
   | Runtime_params_loaded of
       (Masc.Tui_decode.runtime_param_row list, string) result
+  | Runtime_param_written of
+      runtime_param_edit option * (string, string) result
   | Prompts_loaded of
       unit Masc_tui_fetched.request * (Masc.Tui_decode.prompts_snapshot, string) result
   | Keeper_board_quarantines_loaded of
@@ -494,7 +501,8 @@ type async_msg =
   (* The path the note anchored to; success re-reads the listing. *)
   (* (question, symbol, answer) — the note the pane shows names both. *)
   | Code_lsp_answered of
-      string * string * (Masc.Tui_decode.lsp_answer, string) result
+      Masc_tui_types.code_lsp_query Masc_tui_fetched.request
+      * (Masc.Tui_decode.lsp_answer, string) result
   | Resource_read of
       string * (Masc_tui_mcp.resource_content list, string) result
   | Github_identity_view_loaded of Masc_tui_types.detail_read_request * (string list, string) result
@@ -504,10 +512,10 @@ type async_msg =
       string * string * bool * (unit, string) result
       (** keeper, provider, the state the operator asked for, and whether
           the server took it. *)
-  | Identity_login_started of string * identity_login_result
+  | Identity_login_started of identity_login_request * identity_login_result
   | Identity_refreshed of string * (unit, string) result
-  | Identity_app_saved of string * (int, string) result
-      (** provider id, then how many scopes were recorded *)
+  | Identity_app_saved of string option * string * (int, string) result
+      (** presentation Keeper, provider id, then recorded scope count *)
   | Account_login_event of Masc_tui_account_login.t * int * Masc_tui_account_login.event
   | Account_login_json of Masc_tui_account_login.t * int * Masc_tui_account_login.action * (Yojson.Safe.t, string) result
   (* A removal's answer keeps what is known about its effect: removed, declined

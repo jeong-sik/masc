@@ -1,18 +1,12 @@
-(** The keeper turn as the caller scope of the agent-core bus a turn's agent
-    publishes on.
+(** Producer-owned identity of a top-level Keeper execution. Display counters
+    can repeat across attempts; a fresh scope distinguishes those executions. *)
+type t
 
-    A keeper turn is several provider calls, and an agent session created
-    without a checkpoint numbers those calls from zero again, so the agent's
-    own ordinal cannot say which keeper turn an event belongs to. The turn
-    hands its agent a bus handle scoped to its keeper turn id; every event the
-    agent publishes carries it, and the event bridge reads it back here. This
-    module is the only place that knows how the id is spelled inside the
-    scope. *)
+val create : keeper_turn_id:int -> t
+val turn_id : t -> int
+val bus : Agent_core.Event_bus.t -> scope:t -> Agent_core.Event_bus.t
+val filter : t -> Agent_core.Event_bus.filter
 
-(** [bus event_bus ~keeper_turn_id] is [event_bus] for publishing on behalf of
-    keeper turn [keeper_turn_id]. *)
-val bus : Agent_core.Event_bus.t -> keeper_turn_id:int -> Agent_core.Event_bus.t
-
-(** The keeper turn id a scope made by {!bus} names. [Error] for a scope this
-    module did not make. *)
+(** Decode the display counter from our strict structured scope. Missing,
+    foreign or malformed scope values are errors, never guessed counters. *)
 val keeper_turn_id : Agent_core.Caller_scope.t -> (int, string) result

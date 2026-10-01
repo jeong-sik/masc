@@ -64,7 +64,6 @@ function snapshot(
     runtime: { state: 'idle' },
     measurement: { captured: true },
     invariants: {
-      no_runtime_before_measurement: allHold,
       event_priority_monotone: allHold,
       phase_derivation_agreement: allHold,
       ...overrides.violate,
@@ -194,7 +193,6 @@ describe('tallyInvariantViolations', () => {
   it('returns all zeros when every keeper satisfies every invariant', () => {
     const s = [snapshot({ name: 'a' }), snapshot({ name: 'b' })]
     expect(tallyInvariantViolations(s)).toEqual({
-      no_runtime_before_measurement: 0,
       event_priority_monotone: 0,
       phase_derivation_agreement: 0,
     })
@@ -202,16 +200,16 @@ describe('tallyInvariantViolations', () => {
 
   it('counts one per keeper per violated invariant', () => {
     const s = [
-      snapshot({ name: 'c' }),
+      snapshot({ name: 'c', violate: { event_priority_monotone: false } }),
+      snapshot({ name: 'd', allHold: false }),
     ]
     const t = tallyInvariantViolations(s)
-    expect(t.no_runtime_before_measurement).toBe(0)
-    expect(t.event_priority_monotone).toBe(0)
+    expect(t.event_priority_monotone).toBe(2)
+    expect(t.phase_derivation_agreement).toBe(1)
   })
 
   it('treats an empty fleet as clean', () => {
     expect(tallyInvariantViolations([])).toEqual({
-      no_runtime_before_measurement: 0,
       event_priority_monotone: 0,
       phase_derivation_agreement: 0,
     })

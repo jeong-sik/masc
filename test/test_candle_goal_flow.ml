@@ -61,7 +61,8 @@ let enable_candle (config : Workspace.config) =
   if not (String.starts_with ~prefix:config.base_path path)
   then failf "the candle.toml path %s is outside the test workspace" path;
   mkdir_p (Filename.dirname path);
-  Out_channel.with_open_bin path (fun oc -> Out_channel.output_string oc {|[payout]
+  Out_channel.with_open_bin path (fun oc -> Out_channel.output_string oc {|half_life = "off"
+[payout]
 weight_max = 10
 deduction_rate = 10
 deduction_floor = 200
@@ -82,9 +83,9 @@ let ledger_events (config : Workspace.config) =
   | Error error -> failf "%s" (Candle_ledger.read_error_to_string error)
 ;;
 
-(* Kind, Goal and request of every row, in file order. *)
+(* Kind, Goal and request of every Goal row, in file order. *)
 let rows config =
-  List.map
+  List.filter_map
     (fun (event : Candle_event.t) ->
        match event.body with
        | Candle_event.Snapshot { goal_id; request_id; _ }
@@ -92,8 +93,9 @@ let rows config =
        | Candle_event.Candidates { goal_id; request_id; _ }
        | Candle_event.Unattributed { goal_id; request_id; _ }
        | Candle_event.Payout_failed { goal_id; request_id; _ } ->
-         Candle_event.kind event.body, goal_id, request_id
-       | Candle_event.Paid p -> Candle_event.kind event.body, p.identity.goal_id, p.identity.request_id
+         Some (Candle_event.kind event.body, goal_id, request_id)
+       | Candle_event.Paid p -> Some (Candle_event.kind event.body, p.identity.goal_id, p.identity.request_id)
+       | Candle_event.Half_life_set _ -> None
        | Candle_event.Equipped _ | Candle_event.Purchased _ -> Alcotest.fail "a purchase has no verification request")
     (ledger_events config)
 ;;
@@ -563,7 +565,7 @@ let test_a_confirmed_goal_pays_its_keeper_once_across_reopen_and_restart () =
       | Candle_event.Paid payment -> Some payment
       | Candle_event.Snapshot _ | Candle_event.Payout_owed _ | Candle_event.Candidates _
       | Candle_event.Unattributed _ | Candle_event.Payout_failed _
-      | Candle_event.Purchased _ | Candle_event.Equipped _ -> None) (ledger_events config)
+      | Candle_event.Half_life_set _ | Candle_event.Purchased _ | Candle_event.Equipped _ -> None) (ledger_events config)
     with
     | [payment] -> payment
     | _ -> fail "expected exactly one Paid fact"
@@ -578,7 +580,8 @@ let test_a_confirmed_goal_pays_its_keeper_once_across_reopen_and_restart () =
       [keeper,2000]
       (List.map (fun (allocation : Candle_payment.allocation) ->
         allocation.keeper, allocation.amount_milli) paid.allocations);
-    let balance = match Candle_balance.of_events (ledger_events config) with
+    let balance = match Candle_balance.of_events ~at:(match Candle_stamp.at ~now:Time_compat.now with
+      | Ok at -> at | Error detail -> fail detail) (ledger_events config) with
       | Ok balance -> balance
       | Error error -> fail (Candle_balance.error_to_string error)
     in
@@ -653,7 +656,12 @@ let test_a_confirmed_goal_pays_its_keeper_once_across_reopen_and_restart () =
       ; "payout_owed",goal_id,first_verdict.request_id
       ; "candidates",goal_id,first_verdict.request_id
       ; "paid",goal_id,first_verdict.request_id ] (rows config);
-    (match ledger_events config with
+    let payout_events = List.filter (fun (event : Candle_event.t) -> match event.body with
+      | Candle_event.Half_life_set _ -> false
+      | Candle_event.Snapshot _ | Candle_event.Payout_owed _ | Candle_event.Candidates _
+      | Candle_event.Paid _ | Candle_event.Unattributed _ | Candle_event.Payout_failed _
+      | Candle_event.Purchased _ | Candle_event.Equipped _ -> true) (ledger_events config) in
+    (match payout_events with
      | [ {Candle_event.body=Candle_event.Snapshot snapshot;_}
        ; {Candle_event.body=Candle_event.Payout_owed owed;_}
        ; {Candle_event.body=Candle_event.Candidates candidates;_}

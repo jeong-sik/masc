@@ -21,26 +21,52 @@ type task = {
           projected field. *)
 }
 
-type keeper_origin = Persisted_keeper | Declared_keeper of Keeper_declared_roster.requirement list
+type keeper_origin =
+  | Persisted_keeper
+  | Declared_keeper of Keeper_declared_roster.requirement list
+  | Remote_keeper
 
-type keeper = {
-  k_origin : keeper_origin;
-  k_name : string;
+type keeper_identity = {
   k_trace_id : string;
-  k_paused : bool;
+  k_created_at : string;
+  k_updated_at : string;
+}
+
+type keeper_activity = {
   k_current_task_id : string option;
   k_total_turns : int;
   k_total_tokens : int;
   k_total_cost_usd : float;
   k_last_turn_ts : string;
   k_last_proactive_outcome : Keeper_meta_contract.proactive_cycle_outcome option;
-      (** What the last proactive cycle came to, as the contract types it;
-          [None] for a declared keeper that has no runtime yet. Kept typed so
+      (** What the last proactive cycle came to, as the contract types it.
+          Kept typed so
           the screen names it in words: as a string it was the wire token
           ("never_started"), the one spelling no surface uses. *)
-  k_created_at : string;
-  k_updated_at : string;
 }
+
+type keeper = {
+  k_origin : keeper_origin;
+  k_name : string;
+  k_paused : bool;
+  k_identity : (keeper_identity, string) result;
+      (** A metadata failure withdraws trace attribution and timestamps, not
+          the independently observed Keeper name or lifecycle controls. *)
+  k_activity : keeper_activity option;
+      (** The public roster does not publish lifetime usage or current task.
+          Absence is an unavailable observation, never a zero measurement. *)
+}
+
+val keeper_trace_id : keeper -> (string, string) result
+(** Trace identity or the original metadata failure. *)
+
+type keeper_trace_projection = {
+  bindings : (string * string) list;
+  unavailable : (string * string) list;
+}
+(** Independently readable identities and named failures, in roster order.
+    Failed identities never supply a correlation binding. *)
+val keeper_trace_projection : keeper list -> keeper_trace_projection
 
 (** Where a goal stands with the completion judge.
 
@@ -357,6 +383,7 @@ type runtime_resolved_lane = {
 }
 
 type runtime_resolved_snapshot = {
+  rrs_usage : (Tui_decode_usage.provider_usage_windows, string) result;
   rrs_generated_at_iso : string;
   rrs_config_path : string option;
   rrs_default_runtime_id : string option;
@@ -600,8 +627,14 @@ type keeper_portrait = Keeper_portrait_equipment.reading =
 
 type keeper_runtime = {
   kr_name : string;
+  kr_identity : (keeper_identity, string) result;
+      (** The server's brief metadata, decoded separately so a missing trace
+          or timestamp does not hide independently valid lifecycle controls.
+          The metadata name must agree with [kr_name]. *)
   kr_portrait : keeper_portrait;
   kr_candle_balance_milli : string option;
+  kr_candle_account_revision : (string option, string) result;
+  (** [Ok None] is observed Candle-off; [Error] cannot authorize an Item account. *)
   kr_health : keeper_health;
   kr_paused : bool;
   kr_next_action : Keeper_status_runtime.keeper_next_action_path option;
@@ -623,6 +656,10 @@ type keeper_runtime = {
 
     [kr_next_action] is [None] when the runtime named no action, which is not
     the same as naming one that means "nothing to do". *)
+
+val keeper_of_runtime : keeper_runtime -> keeper
+(** Project the public row into a remote Keeper. No local metadata, task or
+    usage measurements are inferred from the runtime state. *)
 
 val decode_keeper_runtime_list :
   Yojson.Safe.t -> (keeper_runtime list * (string * string) list * bool * int * (Candle_observation.t, string) result, string) result

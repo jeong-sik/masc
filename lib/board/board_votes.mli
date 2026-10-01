@@ -229,10 +229,10 @@ val reset_global_for_test : unit -> unit
     from test setup before concurrent fibers exist. *)
 
 val flush_dirty : store -> unit
-(** Flushes dirty post/comment snapshots to the JSONL files
-    with a short in-memory snapshot lock and append-only disk
-    writes.  When dirty vote targets exist, compacts the vote
-    log from the same timestamp-preserving in-memory snapshot.
+(** Atomically replaces each dirty post/comment snapshot independently.
+    Captures data under the state lock and serializes snapshot writers with
+    the persistence lock. If either table is dirty, also compacts readable
+    vote/reaction ledgers. Failed writes remain scheduled for a later flush.
     Stamps [last_flush] with the wall clock. *)
 
 (** {1 Karma} *)

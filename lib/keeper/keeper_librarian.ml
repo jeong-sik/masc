@@ -342,6 +342,8 @@ let prompt_variables (inp : input) : (string * string) list =
 
 let continuity_prompt_variables (inp : input) ~continuity =
   [ keeper_id_variable inp
+  ; "historical_task_contexts", Yojson.Safe.to_string
+      (Keeper_librarian_task_context.to_json inp.historical_task_contexts)
   ; ( "keeper_instructions"
     , format_keeper_instructions_for_prompt inp.keeper_instructions )
   ; "goal_context", Yojson.Safe.to_string (goal_context_to_json inp.goal_context)

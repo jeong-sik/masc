@@ -1,0 +1,3 @@
+### Fixed
+
+- Carry each completed turn's historical Task and Goal evidence into continuity Memory and context-only prompts, preserving exact message and tool-observation ranges during narrowing and receipt recovery. Unknown earlier atoms remain unattributed. Completes the continuity consumer wiring for #40643 without reading the current Task or changing durable storage.

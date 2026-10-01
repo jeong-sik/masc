@@ -15325,13 +15325,13 @@ let render_about (state : state) =
           | Masc_tui_emblem_screen.Keepers_read _ ->
               List.map (fun (keeper : Tui_decode.keeper) ->
                 let portrait =
-                  match Keeper_control.liveness_of_roster state.keeper_roster keeper.k_name with
+                  match (keeper_reading state keeper).Keeper_control.liveness with
                   | Keeper_control.Present runtime -> runtime.kr_portrait
                   | Keeper_control.Unobserved | Keeper_control.Absent
                   | Keeper_control.Invalid _ ->
                       Keeper_portrait_equipment.Unavailable "Keeper equipment not observed"
                 in
-                Terminal_text.single_line keeper.k_name, portrait) state.keepers
+                keeper.k_name, portrait) state.keepers
           | Masc_tui_emblem_screen.Keepers_unreadable
           | Masc_tui_emblem_screen.Keepers_unread -> [])
         ~caption:

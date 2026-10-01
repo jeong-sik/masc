@@ -169,7 +169,7 @@ let workspace_health_label = function
   | Workspace_health_ok -> "ok"
   | Workspace_health_unknown -> "unknown"
 
-let task_line (task : task) =
+let task_line ~cols (task : task) =
   let status = Masc_domain.task_status_to_string task.status in
   (* The icon and the status word share one color so the row's state reads at
      a glance: in-flight rows in cyan, waiting rows dimmed. Terminal states
@@ -195,20 +195,40 @@ let task_line (task : task) =
           (Terminal_text.single_line goal)
           Ansi.reset
   in
-  Printf.sprintf "%s%s%s %s[%s]%s %s %s(%s%s)%s %s%s"
-    status_color
-    (task_status_icon task.status)
-    Ansi.reset
-    Ansi.dim
-    (Terminal_text.single_line task.id)
-    Ansi.reset
-    (Terminal_text.single_line task.title)
-    status_color
-    status
-    assignee
-    Ansi.reset
-    (priority_indicator task.priority)
-    goal_tag
+  let prefix id =
+    Printf.sprintf "%s%s%s %s[%s]%s " status_color
+      (task_status_icon task.status) Ansi.reset Ansi.dim id Ansi.reset
+  in
+  let suffix owner =
+    Printf.sprintf " %s(%s%s)%s %s" status_color status owner Ansi.reset
+      (priority_indicator task.priority)
+  in
+  (* State and priority are never shortened. The remaining cells are shared
+     by the identifier, owner and title; each identifier gets at most a third
+     before the title takes the remainder. This bounds long owner names too.
+     Goal links appear only when the full title leaves room; detail keeps all
+     identifiers. The frame and leading space consume five cells. *)
+  let available = max 0 (cols - 5) in
+  let fixed_chrome = Message_layout.display_width (prefix "")
+    + Message_layout.display_width (suffix "") in
+  let share = max 0 (available - fixed_chrome) / 3 in
+  let id = Terminal_text.single_line task.id in
+  let id = fit_width id (min share (Message_layout.display_width id)) in
+  let assignee =
+    fit_width assignee (min share (Message_layout.display_width assignee))
+  in
+  let prefix = prefix id in
+  let suffix = suffix assignee in
+  let fixed = Message_layout.display_width prefix + Message_layout.display_width suffix in
+  let title = Terminal_text.single_line task.title in
+  let goal_tag =
+    if fixed + Message_layout.display_width title
+       + Message_layout.display_width goal_tag <= available
+    then goal_tag else ""
+  in
+  prefix ^ fit_width title
+    (max 0 (available - fixed - Message_layout.display_width goal_tag))
+  ^ suffix ^ goal_tag
 
 (* Dashboard rows summarize sources without changing their meaning. The full
    task list lives in Work, Keeper rows in Keepers, and account windows in
@@ -669,7 +689,7 @@ let render_work_tasks (state : state) =
       List.iteri
         (fun index (task : Tui_decode.task) ->
            if index >= first && index < first + room then
-             let line = " " ^ task_line task in
+             let line = " " ^ task_line ~cols task in
              if Some index = selected then
                c.push_selected (Masc_tui_theme.strip_sgr line)
              else c.push line)

@@ -19,16 +19,8 @@ jobs:
       - name: Validate concrete source and configuration syntax
         run: |
           git diff --check origin/main...HEAD
-          python3 - <<'PYCODE'
-          from pathlib import Path
-          import tomllib
-          import xml.etree.ElementTree as ET
-          import yaml
-          ET.parse('docs/constitution.xml')
-          for path in Path('config').rglob('*.toml'):
-              tomllib.loads(path.read_text())
-          for path in Path('.github/workflows').glob('*.yml'):
-              yaml.safe_load(path.read_text())
-          PYCODE
+          python3 -c "import xml.etree.ElementTree as ET; ET.parse('docs/constitution.xml')"
+          bash scripts/lint/yaml-syntax.sh
+          bash scripts/check-toml-syntax.sh
       - name: Scan committed credentials
         run: python3 scripts/ci/check-committed-secrets.py

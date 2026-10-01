@@ -1,0 +1,7 @@
+[33mASSERT[0m before Eio installation: state construction, sanitizing and pretty-print bytes
+[33mASSERT[0m uninstalled Eio caller: state construction, sanitizing and pretty-print bytes
+[33mASSERT[0m installed codec: state construction, sanitizing and pretty-print bytes
+[33mASSERT[0m after switch release: state construction, sanitizing and pretty-print bytes
+[33mASSERT[0m subsequent installation: state construction, sanitizing and pretty-print bytes
+[33mASSERT[0m after subsequent release: state construction, sanitizing and pretty-print bytes
+[33mASSERT[0m after Eio shutdown: state construction, sanitizing and pretty-print bytes

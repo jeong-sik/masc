@@ -118,7 +118,7 @@ let unreachable_transport () =
 let install_queue ~base_path =
   match Queue.install_persistence ~base_path with
   | Ok _ -> ()
-  | Error error -> Alcotest.fail (Queue.install_error_to_string error)
+  | Error error -> Alcotest.fail (Masc.Keeper_approval_queue_result.install_error_to_string error)
 
 let project_token ~base_path =
   match
@@ -194,7 +194,7 @@ let pending_dump ~base_path =
   | Ok items -> (List.length items, Yojson.Safe.to_string (`List items))
   | Error error ->
       Alcotest.failf "the pending queue did not read: %s"
-        (Queue.storage_error_to_string error)
+        (Masc.Keeper_approval_queue_result.storage_error_to_string error)
 
 (* ── routing: the provider's word, and only that word ─────────────────── *)
 

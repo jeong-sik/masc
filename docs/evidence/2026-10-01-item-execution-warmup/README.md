@@ -1,5 +1,9 @@
 # Item execution warm-up withdrawal
 
+## Integrated parent check
+
+After merging the repaired #40461 parent, source `03917b4f192094d8c7b097552d4060fc1f853e78` passed both Chromium Item scenarios under local Vite. `integration-receipt.json` records the two commands, request observations, source and manifest hashes, and 12 screenshot hashes. Those new screenshots and manifests remain in its named local artifact directory; they are not committed here. The workflow was not executed.
+
 ## Current source check
 
 Source `04c7980d4d2b1473258d796001cda9bd00e68d4c` passed both focused suites: 23 tests in 1.59s; `tsc --noEmit` exited0. The current regression test, store, scenario and workflow hashes are recorded in receipt.json. Raw focused-test and typecheck logs are retained alongside it.

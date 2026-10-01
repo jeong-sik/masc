@@ -82,6 +82,7 @@ let test_keeper_scoped_store_list_is_ssot () =
     "keeper-scoped dated stores"
     [ "crash-events"
     ; "execution-receipts"
+    ; "memory-recall-artifacts"
     ; "metrics"
     ; "provider-inputs"
     ; "turn-records"

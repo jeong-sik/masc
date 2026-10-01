@@ -3,7 +3,7 @@ type mode = Preview | Retire
 type outcome = Would_retire | Retired | Failed of Masc_domain.masc_error
 type entry = { agent_name : string; reason : reason; outcome : outcome }
 
-let run ~base_path ~now ~mode =
+let run_admitted ~base_path ~now ~mode =
   Auth_credential_base.with_credential_transaction base_path (fun transaction ->
     let ( let* ) = Result.bind in
     let* snapshot = Auth_credential_base.credential_prune_snapshot_in_transaction transaction in
@@ -23,3 +23,16 @@ let run ~base_path ~now ~mode =
     in
     Ok (List.map retire (expired @ orphaned)))
   |> Result.join
+
+
+let run ~base_path ~now ~mode =
+  match mode with
+  | Retire -> run_admitted ~base_path ~now ~mode
+  | Preview ->
+      (* A nonexistent store has nothing to classify. Do not create either
+         its directories or its admission file just to report an empty plan. *)
+      (match Auth_credential_base.credential_path_exists
+               (Auth_credential_base.agents_dir base_path) with
+       | Error _ as error -> error
+       | Ok false -> Ok []
+       | Ok true -> run_admitted ~base_path ~now ~mode)

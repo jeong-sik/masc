@@ -1,14 +1,14 @@
 {
-  "lib/auth/auth.ml": "b72c242ad3bd2840bc53b4da0e1f3e10866537d48aa40a7bff1a04f786c4f9f7",
-  "lib/auth/auth.mli": "595b612272539631f38d849a2c24133aeadfcbdb7bbb3a955435e0b230ab2c2c",
-  "lib/auth/auth_credential_base.ml": "156da0ad9d5cbd7bc66ec929bb5b296e155c60493914ed29d7a61ab7cd148b8f",
-  "lib/auth/auth_credential_token.ml": "f91799c993237d0a80a524982047ded903f7e2551d64f5098bf99524fa01535b",
-  "lib/auth/auth_credential_token.mli": "e2c723bc8880cc56df8b58aeb3897ad0c5ffa357c46e16c2ec32d8a71f1991da",
+  "lib/auth/auth.ml": "5d90a1a2007d2e734f56bd282ee85677ce1685c5b139e5ee035fc5d6a5d428d6",
+  "lib/auth/auth.mli": "4bb65227187dea6cbb6a7dffbe1d659bbcd776f54b3c53ce2213181fa8baa9ac",
+  "lib/auth/auth_credential_base.ml": "430f44e0d4d3de77006dd5e0eae917f839e675e2df65a188e3aea9d5663c318e",
+  "lib/auth/auth_credential_token.ml": "07445f944f90d9e9744f364cb94d50497808f1996874708feaf2925ba851b2cb",
+  "lib/auth/auth_credential_token.mli": "f2a7e48febea60d9f4bee0cdb5094ddee81594e88acf46b94e20fc7e795e939d",
   "lib/auth/auth_login.ml": "9fcce0cc3b937941acbeedc50a4155c5e5b083d9793b7894385949842b3d530f",
   "lib/auth/auth_login.mli": "2be115568299e58b7b3c097d67f64a1475c8549d068990605b4dc1d3699ad7b8",
-  "test/test_auth_file_backed_transaction.ml": "72b0216770ae5783e1d938209dc9226d6c6b2d00d4264fb30b6a185d05df3a0b",
+  "test/test_auth_file_backed_transaction.ml": "ef6059d4e32f599fa3529561ccfeef811d552b7473eda9e4a32d7af929f48089",
   "test/stanzas/test_auth_file_backed_transaction.inc": "d7ce7e798ecb1ee61b344b4b066e1d5d173b39d0f660dd249d0ea1399d725b3c",
-  "test/dune": "d3d7d1c65020034e0513e66ef45525a2d849c3974c35275c20f5bc673cdc323a",
-  "docs/constitution.xml": "999dcb3cb0502239b41be1d1f10c7f8757b1467adfc817d2866d65064c5e212e",
-  "changelog.d/40214.md": "9218f9218af7259a75fe8c9a3fa5b215f99a983ef7269653cc34c93d2757cee8"
+  "test/dune": "24d17637066ee82b3069f6a8dab2dbe1220e87706bee179d7e619dc109dbb802",
+  "docs/constitution.xml": "2dc13f98c40dbafb9555f2761a9f096497cf9765def7af26f1c7374f4bea4923",
+  "changelog.d/40214.md": "c18abee171b378c8073fdf5e5b1c04eed7fc4e5fc59ae8546a133b95483fe5f4"
 }

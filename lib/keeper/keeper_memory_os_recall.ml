@@ -174,7 +174,7 @@ let render_with_source_revalidation ~memory_search_available ~artifact_reader_av
     let body = block [ordinary_text ordinary_state; source_text source_state] in
     let publication =
       try
-        let artifact = Tool_blob_store.put_durable
+        let artifact = Tool_blob_store.put_durable_reuse
           (Tool_blob_store.create ~base_path:config.Workspace.base_path)
           ~bytes:body ~mime:"text/plain" in
         Result.map (fun () -> artifact)

@@ -2226,7 +2226,12 @@ let fetch_board_hearths ~(host : string) ~(port : int) :
     stamps the author from the HTTP auth resolver, so the payload carries
     text only. The response is the tools envelope [{ok, message}]; interpreting
     it stays with the caller. *)
-let post_board_new ~(host : string) ~(port : int) ~(title : string)
+let board_workspace_field (identity : Tui_decode.server_identity) =
+  "expected_workspace", `Assoc
+    [ "base_path", `String (Masc_tui_types.canonical_path identity.sid_base_path)
+    ; "masc_root", `String (Masc_tui_types.canonical_path identity.sid_masc_root) ]
+
+let post_board_new ~expected_workspace ~(host : string) ~(port : int) ~(title : string)
     ~(body : string) ?hearth () : (Yojson.Safe.t, string) result =
   let hearth_field =
     match hearth with
@@ -2235,7 +2240,7 @@ let post_board_new ~(host : string) ~(port : int) ~(title : string)
   in
   let payload =
     `Assoc
-      ([ ("title", `String title); ("body", `String body) ]
+      ([ board_workspace_field expected_workspace; ("title", `String title); ("body", `String body) ]
       @ hearth_field)
   in
   post_json ~host ~port ~path:"/api/v1/tools/masc_board_post"
@@ -2273,11 +2278,12 @@ let post_goal_transition ~(host : string) ~(port : int) ~(goal_id : string)
 
 (** POST /api/v1/tools/masc_board_vote. [up] rides as a bool rather than a
     string so no direction word exists here to drift from the tool's. *)
-let post_board_vote ~(host : string) ~(port : int) ~(post_id : string)
+let post_board_vote ~expected_workspace ~(host : string) ~(port : int) ~(post_id : string)
     ~(up : bool) : (Yojson.Safe.t, string) result =
   let payload =
     `Assoc
-      [ ("post_id", `String post_id)
+      [ board_workspace_field expected_workspace
+      ; ("post_id", `String post_id)
       ; ("direction", `String (if up then "up" else "down"))
       ]
   in
@@ -2286,10 +2292,10 @@ let post_board_vote ~(host : string) ~(port : int) ~(post_id : string)
 
 (** POST /api/v1/tools/masc_board_comment. The route stamps the author from the
     HTTP auth resolver, exactly as for a new post. *)
-let post_board_comment ~(host : string) ~(port : int) ~(post_id : string)
+let post_board_comment ~expected_workspace ~(host : string) ~(port : int) ~(post_id : string)
     ~(content : string) : (Yojson.Safe.t, string) result =
   let payload =
-    `Assoc [ ("post_id", `String post_id); ("content", `String content) ]
+    `Assoc [ board_workspace_field expected_workspace; ("post_id", `String post_id); ("content", `String content) ]
   in
   post_json ~host ~port ~path:"/api/v1/tools/masc_board_comment"
     ~body:(Yojson.Safe.to_string payload)

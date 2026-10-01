@@ -12400,11 +12400,16 @@ let start_board_post state ~mailbox ~(title : string) ~(body : string) ?hearth (
   let sent_draft = Buffer.contents state.board_draft in
   let host = server_peer_host in
   let port = state.port in
+  let expected_workspace = state.server_identity in
   let run_post () =
     let result =
-      match Masc_tui_http.post_board_new ~host ~port ~title ~body ?hearth () with
-      | Error err -> Error err
-      | Ok json -> Masc.Tui_decode.tool_envelope_outcome json
+      let ( let* ) = Result.bind in
+      let* () = verify_workspace_identity state ~expected:expected_workspace ~host ~port () in
+      let* expected_workspace = match expected_workspace with
+        | Some identity -> Ok identity
+        | None -> Error "Board workspace identity is unavailable" in
+      let* json = Masc_tui_http.post_board_new ~expected_workspace ~host ~port ~title ~body ?hearth () in
+      Masc.Tui_decode.tool_envelope_outcome json
     in
     enqueue_async mailbox
       (Board_new_post_done { reply_to = None; sent_draft; result })
@@ -12546,11 +12551,16 @@ let start_board_comment state ~mailbox ~(post_id : string)
   let sent_draft = Buffer.contents state.board_draft in
   let host = server_peer_host in
   let port = state.port in
+  let expected_workspace = state.server_identity in
   let run_comment () =
     let result =
-      match Masc_tui_http.post_board_comment ~host ~port ~post_id ~content with
-      | Error err -> Error err
-      | Ok json -> Masc.Tui_decode.tool_envelope_outcome json
+      let ( let* ) = Result.bind in
+      let* () = verify_workspace_identity state ~expected:expected_workspace ~host ~port () in
+      let* expected_workspace = match expected_workspace with
+        | Some identity -> Ok identity
+        | None -> Error "Board workspace identity is unavailable" in
+      let* json = Masc_tui_http.post_board_comment ~expected_workspace ~host ~port ~post_id ~content in
+      Masc.Tui_decode.tool_envelope_outcome json
     in
     enqueue_async mailbox
       (Board_new_post_done { reply_to = Some post_id; sent_draft; result })
@@ -12572,11 +12582,16 @@ let start_board_vote state ~mailbox ~(post_id : string) ~(up : bool) =
     (Printf.sprintf "voting %s on %s" (if up then "up" else "down") post_id);
   let host = server_peer_host in
   let port = state.port in
+  let expected_workspace = state.server_identity in
   let run_vote () =
     let result =
-      match Masc_tui_http.post_board_vote ~host ~port ~post_id ~up with
-      | Error err -> Error err
-      | Ok json -> Masc.Tui_decode.tool_envelope_outcome json
+      let ( let* ) = Result.bind in
+      let* () = verify_workspace_identity state ~expected:expected_workspace ~host ~port () in
+      let* expected_workspace = match expected_workspace with
+        | Some identity -> Ok identity
+        | None -> Error "Board workspace identity is unavailable" in
+      let* json = Masc_tui_http.post_board_vote ~expected_workspace ~host ~port ~post_id ~up in
+      Masc.Tui_decode.tool_envelope_outcome json
     in
     enqueue_async mailbox (Board_vote_done result)
   in

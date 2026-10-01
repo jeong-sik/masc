@@ -166,7 +166,15 @@ def run(binary):
             # Retain an actionable region scene behind the picker. Tab must
             # use the existing Config-family surface cycle, not its hidden targets.
             h.send_and_wait(process, fd, output, b"v", b"Article body")
-            h.send_and_wait(process, fd, output, b"b", b"Choose a connected browser")
+            chooser_start = len(output)
+            h.send_and_wait(process, fd, output, b"b",
+                            b"Choose browser \xc2\xb7 separate sessions do not share login")
+            h.wait_for_output(process, fd, output, b"Zen", start=chooser_start, timeout=3.0)
+            h.wait_for_output(process, fd, output, h.FRAME_END,
+                              start=bytes(output).rfind(b"Zen", chooser_start))
+            picker = h.screen_text(bytes(output))
+            for option in (b"Zen", b"Stagehand Chromium", b"Independent Firefox/Zen"):
+                assert option in picker, (option, picker)
             requests_before_picker_tab = (len(scenes), len(actions))
             h.send_and_wait(process, fd, output, b"\t", b"MASC Dashboard")
             assert (len(scenes), len(actions)) == requests_before_picker_tab

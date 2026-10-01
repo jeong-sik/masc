@@ -118,6 +118,9 @@ val agenda_lines : Masc_tui_types.state -> Masc_tui_agenda.line list
     row the frame is not drawing. *)
 
 val agenda_viewport : Masc_tui_types.state -> int * int
+val task_detail_viewport : Masc_tui_types.state -> int * int
+(** Wrapped physical row count and visible body height for the current Task
+    reading, including its metadata and the actual split-pane width. *)
 val planning_detail_viewport : Masc_tui_types.state -> int * int
 (** Physical row count and reader height of the current Goal detail,
     including its pinned action rows and actual split-pane width. *)

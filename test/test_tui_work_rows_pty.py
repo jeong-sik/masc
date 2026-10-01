@@ -1,6 +1,7 @@
 """Long task titles leave their state and priority visible after resizing."""
 import json
 import os
+import re
 from pathlib import Path
 import sys
 import test_tui_keyboard_input as h
@@ -171,20 +172,25 @@ def run(executable):
             if min(positions) < 0 or positions[0] == positions[1]:
                 raise AssertionError(f"opaque Task rows are indistinguishable: {rows!r}")
             for index, task_id in enumerate(OPAQUE_IDS):
-                start = len(output)
                 h.send_and_wait(process, master_fd, output, b"\r", b"MASC Task")
-                h.drain_until_quiet(process, master_fd, output)
-                detail = h.screen_text(bytes(output[start:]))
-                # The ID is ASCII and unbroken: every body-width chunk must
-                # appear in order, including the middle that a header folds.
-                offset = 0
-                body_width = width - 8 - 11
-                for first in range(0, len(task_id), body_width):
-                    chunk = task_id[first:first + body_width].encode()
-                    found = detail.find(chunk, offset)
-                    if found < 0:
-                        raise AssertionError(f"opaque ID chunk missing from detail: {chunk!r}, {detail!r}")
-                    offset = found + len(chunk)
+                # Metadata is one scrolling document. A tall frame exposes
+                # the full ID after the long title at this same narrow width.
+                detail_frame = h.resize_and_wait(process, master_fd, output, rows=150, columns=width,
+                                                needle=b"id: ", final_cursor=b"\x1b[?25l")
+                detail_rows = h.screen_rows(detail_frame)
+                ordered = [detail_rows[key] for key in sorted(detail_rows)]
+                id_row = next((i for i, row in enumerate(ordered)
+                               if re.match(rb"^\s*id: ", row)), None)
+                if id_row is None:
+                    raise AssertionError(f"opaque ID metadata row missing: {ordered!r}")
+                column = ordered[id_row].index(b"id: ") + len(b"id: ")
+                parts = [ordered[id_row][column:].rstrip()]
+                for row in ordered[id_row + 1:]:
+                    if row[:column].strip() or not row[column:].strip():
+                        break
+                    parts.append(row[column:].rstrip())
+                if b"".join(parts) != task_id.encode():
+                    raise AssertionError(f"opaque ID reconstructed incorrectly: {parts!r}, {task_id!r}")
                 h.send_and_wait(process, master_fd, output, b"\x1b", b"MASC Work / Tasks")
                 if index == 0:
                     h.send_and_wait(process, master_fd, output, b"j", b"row 2]")

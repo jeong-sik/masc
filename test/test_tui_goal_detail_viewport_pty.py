@@ -7,7 +7,7 @@ from pathlib import Path
 import test_tui_keyboard_input as h
 
 SOURCE_MODULES = ("bin/masc_tui_render.ml", "bin/masc_tui.ml", "bin/masc_tui_planning_detail.ml")
-GOAL_ID = "goal-detail-viewport"
+GOAL_ID = "goal-detail-viewport-distinct-identity-tail"
 TITLE = "TITLEHEAD " + "한 " * 18 + "goal evidence " * 8 + "TITLEEND"
 METRIC = "metric-" + "0123456789abcdef" * 14 + "METRICEND"
 TARGET = "TARGETHEAD " + "measured target " * 12 + "TARGETEND"
@@ -112,13 +112,11 @@ def run(executable):
                 h.drain_until_quiet(process, fd, output)
                 start, end, count = window(output)
                 assert start > 1 and end == count, (start, end, count)
-                if width >= 80:
-                    # Only the pinned header names this Goal at the document's
-                    # end; lifecycle actions must retain that exact context.
-                    header = next(line for line in screen(output).splitlines()
-                                  if b"MASC Work" in line)
-                    assert GOAL_ID.encode() in header, (width, rows, header)
-                    assert b"executing" in header, (width, rows, header)
+                # At the document tail the metadata ID is off-screen. The
+                # pinned header must retain its full identity at every width.
+                pinned = screen(output).split(b"Actions:", 1)[0]
+                assert compact(GOAL_ID.encode()) in compact(pinned), (width, rows, pinned)
+                assert b"executing" in pinned, (width, rows, pinned)
                 print("GOAL_DETAIL_VIEWPORT " + json.dumps({"width": width, "rows": rows,
                        "window": [start, end, count], "screen": screen(output).decode("utf-8", "replace")}), flush=True)
                 h.send_and_wait(process, fd, output, b"\x1b[H", b"TITLEHEAD")

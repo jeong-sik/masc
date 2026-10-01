@@ -1,6 +1,6 @@
 open Masc_domain
 
-type auth_change =
+type auth_change = Auth.login_auth_change =
   | Auth_already_required
   | Auth_enabled
   | Require_token_enabled
@@ -34,43 +34,18 @@ let normalize_base_path path =
 let single_quote_shell value =
   "'" ^ String.concat "'\\''" (String.split_on_char '\'' value) ^ "'"
 
-let token_file_path ~base_path ~agent_name =
-  Filename.concat (Auth.auth_dir base_path) (agent_name ^ ".token")
-
-let persist_raw_token ~base_path ~agent_name raw_token =
-  let path = token_file_path ~base_path ~agent_name in
-  Fs_compat.mkdir_p (Filename.dirname path);
-  Auth.save_private_text_file path raw_token;
-  path
-
-(* The read side of [persist_raw_token]. A client that logged in already has
+(* A client that logged in already has
    its bearer in the workspace it opens; without this it can only be handed the
    value again through the environment, which is the one channel that does not
    survive opening a new shell. Both sides derive the path from
-   [token_file_path], so a rename cannot leave a reader looking in the old
+   [Auth.raw_token_file], so a rename cannot leave a reader looking in the old
    place. *)
 let read_persisted_token ~base_path ~agent_name =
-  let path = token_file_path ~base_path ~agent_name in
+  let path = Auth.raw_token_file base_path agent_name in
   match In_channel.with_open_bin path In_channel.input_all with
   | contents ->
-      (match String.trim contents with
-       | "" -> None
-       | token -> Some token)
+      if String.trim contents = "" then None else Some contents
   | exception Sys_error _ -> None
-
-let ensure_required_bearer_auth ~base_path ~bootstrap_agent_name =
-  let cfg = Auth.load_auth_config base_path in
-  if cfg.enabled && cfg.require_token then
-    Ok Auth_already_required
-  else if not cfg.enabled then
-    let _workspace_secret, _bootstrap_token =
-      Auth.enable_auth base_path ~require_token:true
-        ~agent_name:bootstrap_agent_name
-    in
-    Ok Auth_enabled
-  else (
-    Auth.save_auth_config base_path { cfg with require_token = true };
-    Ok Require_token_enabled)
 
 (* Two flags can name a lifetime, and they name different ones. Both at once is
    refused rather than resolved by precedence: whichever one lost would hand the
@@ -84,56 +59,19 @@ let lifetime_of_flags ~no_expiry ~expiry_hours =
   | false, Some hours -> Ok (Expires_in_hours hours)
   | false, None -> Ok With_expiry
 
-let create_token_for_lifetime = function
-  | With_expiry -> Auth.create_token
-  | Long_lived -> Auth.create_token_without_expiry
-  | Expires_in_hours hours ->
-      fun config ~agent_name ~role ->
-        Auth.create_token_expiring_in config ~agent_name ~role ~hours
+let file_backed_lifetime = function
+  | With_expiry -> Auth.Config_expiry
+  | Long_lived -> Auth.No_expiry
+  | Expires_in_hours hours -> Auth.Expires_in_hours hours
 
 let mint ~base_path ~host ~port ~agent_name ~role ~token_env_var
     ~token_lifetime () =
   let base_path = normalize_base_path base_path in
-  match
-    match role with
-  (* A Player credential is an invite to the shared machine: it is issued with
-     an expiry through the invite flow (RFC play-link-for-the-shared-machine
-     §2.4), never as a login. Refused before the auth config is touched.
-     Enabling auth names its bootstrap credential after an admin login only. *)
-  | Player ->
-      Error
-        (Auth
-           (Auth_error.Forbidden
-              { agent = agent_name; action = "log in as a player; a player is invited" }))
-  | Admin -> Ok agent_name
-  | Worker -> Ok ""
-  with
+  match Auth.create_file_backed_login_token base_path ~agent_name ~role
+      ~lifetime:(file_backed_lifetime token_lifetime) with
   | Error err -> Error err
-  | Ok bootstrap_agent_name ->
-  match ensure_required_bearer_auth ~base_path ~bootstrap_agent_name with
-  | Error err -> Error err
-  | Ok auth_change -> (
-      let create_token = create_token_for_lifetime token_lifetime in
-      match create_token base_path ~agent_name ~role with
-      | Error err -> Error err
-      | Ok (bearer_token, cred) -> (
-          (* The record is already written; a file that cannot be written is
-             reported rather than raised past the caller, which then says the
-             mint failed. The pair left behind reads as a mismatch, which a
-             client that mints for itself replaces on its next try. *)
-          match persist_raw_token ~base_path ~agent_name bearer_token with
-          | exception (Sys_error detail) ->
-              Error
-                (System
-                   (System_error.IoError
-                      ("could not write the bearer file: " ^ detail)))
-          | exception Unix.Unix_error (error, operation, argument) ->
-              Error
-                (System
-                   (System_error.IoError
-                      (Printf.sprintf "could not write the bearer file: %s(%s): %s"
-                         operation argument (Unix.error_message error))))
-          | raw_token_file ->
+  | Ok (bearer_token, cred, auth_change) -> (
+          let raw_token_file = Auth.raw_token_file base_path agent_name in
           (* [host] arrives from the --host flag, which is documented as the
              address to *bind* and offers 0.0.0.0 for it. These two URLs are
              what the operator opens and pastes, so they need an address that
@@ -164,7 +102,7 @@ let mint ~base_path ~host ~port ~agent_name ~role ~token_env_var
               dashboard_url;
               mcp_url;
               mcp_token_env_var = token_env_var;
-            }))
+            })
 
 let to_yojson report =
   Tool_args.ok_assoc

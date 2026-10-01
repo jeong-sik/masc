@@ -20,9 +20,9 @@ let keeper_credential_write_authority config ~credentials ~agent_name stored
        target on a case-insensitive store, including before either file exists. *)
     let* () = List.fold_left (fun checked (owner_stored, owner) ->
       let* () = checked in
-      let* _target = credential_owned_uuid_target config owner.agent_name owner_stored owner in
+      let* _target = credential_owned_uuid_target ~leaf_policy:Follow_regular_symlink config owner.agent_name owner_stored owner in
       Ok ()) (Ok ()) credentials in
-    let* _target = credential_owned_uuid_target config agent_name stored credential in
+    let* _target = credential_owned_uuid_target ~leaf_policy:Follow_regular_symlink config agent_name stored credential in
     match credential.id with
     | None -> Ok ()
     | Some id ->
@@ -40,19 +40,20 @@ let ensure_keeper_credential_in_transaction
     let ( let* ) = Result.bind in
     let* present = credential_path_exists (credential_file config agent_name) in
     let* existing = if not present then Ok None else
-      let* stored = read_stored_credential config agent_name (credential_file config agent_name) in
-      let* resolved = resolve_stored_credential config agent_name stored in
+      let* stored = read_stored_credential ~leaf_policy:Follow_regular_symlink config agent_name (credential_file config agent_name) in
+      let* resolved = resolve_stored_credential ~leaf_policy:Follow_regular_symlink config agent_name stored in
       (match resolved with
        | None -> Error (System (System_error.ValidationError
            (Printf.sprintf "Keeper credential storage authority for %s cannot be resolved" agent_name)))
        | Some credential ->
            let* () = keeper_credential_write_authority config ~credentials ~agent_name stored credential in
            Ok resolved) in
-    let* raw_present = credential_path_exists (raw_token_file config agent_name) in
-    let* raw = if not raw_present then Ok None else
-      credential_read_result (fun () ->
-        read_regular_credential_text (raw_token_file config agent_name)
-        |> String_util.trim_nonempty) in
+    let* raw = raw_token_in_transaction transaction agent_name in
+    let* () = match existing, raw with
+      | Some credential, Some raw_token
+        when constant_time_string_equal credential.token (sha256_hash raw_token) ->
+          validate_file_backed_bearer raw_token
+      | Some _, Some _ | Some _, None | None, Some _ | None, None -> Ok () in
     let* _internal = credential_read_result (fun () -> ensure_internal_keeper_token config) in
     let create_fresh_keeper_token () =
       let raw_token = generate_token () in
@@ -83,13 +84,15 @@ let ensure_keeper_credential_in_transaction
     in
     let result =
       try
-        match raw with
-        | Some raw_token ->
+        match existing, raw with
+        | Some credential, Some raw_token
+          when constant_time_string_equal credential.token (sha256_hash raw_token) ->
           (match find_token ~token:raw_token with
            | Ok cred when String.equal cred.agent_name agent_name -> Ok (raw_token, cred)
            | Ok _ | Error (Auth _) -> create_fresh_keeper_token ()
            | Error _ as error -> error)
-        | None -> create_fresh_keeper_token ()
+        | Some _, Some _ | Some _, None | None, Some _ | None, None ->
+          create_fresh_keeper_token ()
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn ->
@@ -105,17 +108,17 @@ let ensure_keeper_credential_in_transaction
 let ensure_keeper_credential config ~agent_name =
   with_credential_transaction config (fun transaction ->
     let ( let* ) = Result.bind in
-    let* snapshot = credential_store_snapshot_in_transaction transaction in
+    let* snapshot = credential_store_snapshot_in_transaction ~leaf_policy:Follow_regular_symlink transaction in
     ensure_keeper_credential_in_transaction transaction ~agent_name
       ~credentials:snapshot.current_credentials
-      ~find_token:(find_static_credential_in_transaction transaction))
+      ~find_token:(find_static_credential_in_transaction ~leaf_policy:Follow_regular_symlink transaction))
   |> Result.join
 ;;
 
 let ensure_keeper_credentials config ~agent_names =
   with_credential_transaction config (fun transaction ->
     let ( let* ) = Result.bind in
-    let* snapshot = credential_store_snapshot_in_transaction transaction in
+    let* snapshot = credential_store_snapshot_in_transaction ~leaf_policy:Follow_regular_symlink transaction in
     let credentials = List.map snd snapshot.current_credentials in
     let index = build_token_index credentials in
     let initially_shared = Hashtbl.fold (fun token owners hashes ->
@@ -160,7 +163,7 @@ let ensure_keeper_credentials config ~agent_names =
              (* Preflight failures leave other Keepers independent. After any
                 failure, re-read admitted authority before deciding whether
                 the remaining names can safely use a rebuilt index. *)
-             (match credential_store_snapshot_in_transaction transaction with
+             (match credential_store_snapshot_in_transaction ~leaf_policy:Follow_regular_symlink transaction with
               | Error error -> List.map (fun name -> name, Error error) rest
               | Ok snapshot ->
                   Hashtbl.clear index; Hashtbl.clear by_name;
@@ -379,18 +382,6 @@ let authorize_tool_v2 config ~agent_name ~token ~tool_name : (unit, masc_error) 
 (* ============================================ *)
 (* Workspace secret                                  *)
 (* ============================================ *)
-
-(** Initialize workspace secret *)
-let init_workspace_secret config : string =
-  ensure_auth_dirs config;
-  let secret = generate_token () in
-  let hash = sha256_hash secret in
-  save_private_text_file (workspace_secret_file config) hash;
-  (* Update auth config with hash *)
-  let cfg = load_auth_config config in
-  save_auth_config config { cfg with workspace_secret_hash = Some hash };
-  secret (* Return raw secret to show user once *)
-;;
 
 (* [verify_workspace_secret] now lives earlier in this file, above
    [check_permission], since the bootstrap/recovery grace branch there

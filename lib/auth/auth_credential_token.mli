@@ -59,6 +59,7 @@ val find_static_credential_in_index :
 (** Only for an index owned by the caller's admitted transaction. *)
 
 val find_static_credential_in_transaction :
+  ?leaf_policy:Auth_credential_base.credential_leaf_policy ->
   Auth_credential_base.credential_transaction -> token:string ->
   (agent_credential, masc_error) result
 (** Reads all current owners under the caller's transaction, without consulting
@@ -80,6 +81,18 @@ val save_raw_token_credential_without_expiry :
 val save_file_backed_raw_token_credential :
   string -> agent_name:string -> role:agent_role -> raw_token:string ->
   (agent_credential, masc_error) result
+
+type file_backed_token_lifetime = Config_expiry | No_expiry | Expires_in_hours of int
+
+type login_auth_change = Auth_already_required | Auth_enabled | Require_token_enabled
+
+val create_file_backed_login_token :
+  string -> agent_name:string -> role:agent_role -> lifetime:file_backed_token_lifetime ->
+  (string * agent_credential * login_auth_change, masc_error) result
+(** Admit current target ownership before login bootstrap config and credential
+    effects; enable required bearer auth and publish both files in one admitted
+    transaction. Player login is refused before effects. Errors describe partial
+    publication; bootstrap config changes may survive failure, without rollback. *)
 
 (** {1 Token lifecycle} *)
 

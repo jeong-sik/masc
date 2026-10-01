@@ -211,6 +211,16 @@ let save_auth_config config (auth_cfg : auth_config) =
   | Error reason -> raise_auth_config_error ~file reason
 ;;
 
+let init_workspace_secret config : string =
+  ensure_auth_dirs config;
+  let secret = generate_token () in
+  let hash = sha256_hash secret in
+  save_private_text_file (workspace_secret_file config) hash;
+  let cfg = load_auth_config config in
+  save_auth_config config { cfg with workspace_secret_hash = Some hash };
+  secret
+;;
+
 (* ============================================ *)
 (* Credential management                        *)
 (* ============================================ *)
@@ -537,7 +547,10 @@ let load_raw_token config ~agent_name =
   let file = raw_token_file config agent_name in
   if file_exists file
   then (
-    try read_text_file file |> String_util.trim_nonempty with
+    try
+      let raw = read_text_file file in
+      if String.trim raw = "" then None else Some raw
+    with
     | Sys_error _ -> None)
   else None
 ;;
@@ -826,9 +839,27 @@ type stored_credential =
   | Unresolved_credential
 
 
-let read_stored_credential config name path =
+(* File-backed bearers must survive HTTP header construction and extraction
+   without changing the bytes that were hashed. Direct token APIs retain
+   their separate opaque-token contract. *)
+let validate_file_backed_bearer raw_token =
+  if raw_token = "" || String.exists (fun c -> Char.code c <= 0x20 || Char.code c = 0x7f) raw_token
+  then Error (Auth (Auth_error.InvalidToken
+    "File-backed bearer must not contain whitespace or ASCII control bytes"))
+  else Ok ()
+;;
+
+let read_regular_credential_file path =
+  credential_read_result (fun () -> read_regular_credential_text path)
+;;
+
+type credential_leaf_policy = Owned_regular_only | Follow_regular_symlink
+
+let read_stored_credential ?(leaf_policy = Owned_regular_only) config name path =
   let ( let* ) = Result.bind in
-  let* content = read_owned_credential_text config path in
+  let* content = match leaf_policy with
+    | Owned_regular_only -> read_owned_credential_text config path
+    | Follow_regular_symlink -> read_regular_credential_file path in
   match Yojson.Safe.from_string content with
   | exception Yojson.Json_error _ -> Ok Unresolved_credential
   | json ->
@@ -846,7 +877,7 @@ let read_stored_credential config name path =
        | None -> Ok Unresolved_credential)
 ;;
 
-let resolve_stored_credential config name = function
+let resolve_stored_credential ?(leaf_policy = Owned_regular_only) config name = function
   | Stored_credential credential -> Ok (Some credential)
   | Unresolved_credential -> Ok None
   | Stored_redirect target ->
@@ -854,7 +885,7 @@ let resolve_stored_credential config name = function
     let* present = credential_path_exists target in
     if not present then Ok None
     else
-      let* stored = read_stored_credential config name target in
+      let* stored = read_stored_credential ~leaf_policy config name target in
       (match stored with
        | Stored_credential credential -> Ok (Some credential)
        | Stored_redirect _ | Unresolved_credential -> Ok None)
@@ -900,7 +931,7 @@ let credential_prune_authority config name stored (credential : agent_credential
 (* Existing UUID payloads must belong to the exact current credential; a
    redirect must name its embedded UUID. Missing direct UUID payloads are
    distinguishable from an owned existing target. *)
-let credential_owned_uuid_target config name stored (credential : agent_credential) =
+let credential_owned_uuid_target ?(leaf_policy = Owned_regular_only) config name stored (credential : agent_credential) =
   let ( let* ) = Result.bind in
   let refused detail = Error (System (System_error.ValidationError
       (Printf.sprintf "credential storage authority for %s: %s" name detail))) in
@@ -910,6 +941,8 @@ let credential_owned_uuid_target config name stored (credential : agent_credenti
         (function 'a' .. 'z' | '0' .. '9' | '-' -> true | _ -> false) spelling)
     then refused "credential UUID must use canonical lowercase ASCII letters, digits and hyphens"
     else match redirect_target_file config (spelling ^ ".json") with
+    | Some target when String.equal target (credential_file config name) ->
+      refused "UUID payload and named credential would share a path"
     | Some target -> Ok target
     | None -> refused "credential UUID is not a store filename" in
   match stored, credential.id with
@@ -924,7 +957,7 @@ let credential_owned_uuid_target config name stored (credential : agent_credenti
     let* present = credential_path_exists target in
     if not present then Ok None
     else
-      let* target_record = read_stored_credential config name target in
+      let* target_record = read_stored_credential ~leaf_policy config name target in
       (match target_record with
        | Stored_credential current
          when String.equal current.agent_name credential.agent_name
@@ -938,6 +971,56 @@ let credential_owned_uuid_target config name stored (credential : agent_credenti
          refused "embedded UUID resolves to another credential")
   | Stored_redirect _, None -> refused "redirected credential has no UUID binding"
   | Unresolved_credential, (Some _ | None) -> refused "credential cannot be resolved"
+;;
+
+(* A file-backed publisher must distinguish true absence from an unreadable
+   name or UUID binding before it authorizes replacement or recreation. *)
+let current_credential_in_transaction (Credential_transaction config) name =
+  let ( let* ) = Result.bind in
+  let refused detail = Error (System (System_error.ValidationError
+      (Printf.sprintf "credential storage authority for %s: %s" name detail))) in
+  let* present = credential_path_exists (credential_file config name) in
+  if not present then Ok None
+  else
+    let* stored = read_stored_credential ~leaf_policy:Follow_regular_symlink config name (credential_file config name) in
+    let* resolved = resolve_stored_credential ~leaf_policy:Follow_regular_symlink config name stored in
+    match resolved with
+    | None -> refused "current credential cannot be resolved"
+    | Some credential when not (String.equal credential.agent_name name) ->
+      refused "current credential belongs to another name"
+    | Some credential ->
+      let* _owned_uuid = credential_owned_uuid_target ~leaf_policy:Follow_regular_symlink config name stored credential in
+      Ok (Some credential)
+;;
+
+let raw_token_in_transaction (Credential_transaction config) name =
+  let ( let* ) = Result.bind in
+  let path = raw_token_file config name in
+  let* present = credential_path_exists path in
+  if not present then Ok None
+  else
+    let* raw = read_regular_credential_file path in
+    (* Empty readable material can be replaced. An opaque bearer that is not
+       blank retains its exact bytes, matching the supplied-token contract. *)
+    if String.trim raw = "" then Ok None else Ok (Some raw)
+;;
+
+let credential_auth_config_result config =
+  try credential_read_result (fun () -> load_auth_config config) with
+  | Auth_config_error { file; reason } ->
+    Error (System (System_error.ValidationError
+      (Printf.sprintf "auth configuration %s: %s" file reason)))
+;;
+
+let require_live_credential ~now (credential : agent_credential) =
+  match Credential_expiry.parse credential.expires_at with
+  | Error (Credential_expiry.Invalid_timestamp stamp) ->
+    Error (Auth (Auth_error.InvalidToken
+      (Printf.sprintf "Invalid credential expiry for %s: %S" credential.agent_name stamp)))
+  | Ok expiry ->
+    if Credential_expiry.is_expired ~now expiry
+    then Error (Auth (Auth_error.TokenExpired credential.agent_name))
+    else Ok credential
 ;;
 
 type credential_publication = Published | Not_published | Publication_unreadable of masc_error
@@ -967,15 +1050,15 @@ let observe_credential_publication config (expected : agent_credential) =
     let* present = credential_path_exists path in
     if not present then Ok false
     else
-      let* raw = credential_read_result (fun () -> read_regular_credential_text path) in
+      let* raw = read_regular_credential_file path in
       Ok (String.equal (sha256_hash raw) expected.token)) in
   let credential = observe (fun () ->
     let path = credential_file config expected.agent_name in
     let* present = credential_path_exists path in
     if not present then Ok false
     else
-      let* stored = read_stored_credential config expected.agent_name path in
-      let* current = resolve_stored_credential config expected.agent_name stored in
+      let* stored = read_stored_credential ~leaf_policy:Follow_regular_symlink config expected.agent_name path in
+      let* current = resolve_stored_credential ~leaf_policy:Follow_regular_symlink config expected.agent_name stored in
       Ok (current = Some expected)) in
   raw_token, credential
 ;;
@@ -985,7 +1068,7 @@ let publish_file_backed_credential_in_transaction
   let ( let* ) = Result.bind in
   let saved_bytes path =
     let* present = credential_path_exists path in
-    if present then credential_read_result (fun () -> read_regular_credential_text path) |> Result.map Option.some
+    if present then read_regular_credential_file path |> Result.map Option.some
     else Ok None in
   let raw_path = raw_token_file config credential.agent_name in
   let named_path = credential_file config credential.agent_name in
@@ -1032,7 +1115,7 @@ type credential_store_snapshot =
   ; orphaned_names : string list
   ; aliases : (string * string * agent_credential) list }
 
-let credential_store_snapshot_in_transaction (Credential_transaction config) =
+let credential_store_snapshot_in_transaction ?(leaf_policy = Owned_regular_only) (Credential_transaction config) =
   let ( let* ) = Result.bind in
   let* files = credential_read_result (fun () -> read_dir (agents_dir config)) in
   let files = Array.to_list files |> List.filter (fun file -> Filename.check_suffix file ".json")
@@ -1045,7 +1128,7 @@ let credential_store_snapshot_in_transaction (Credential_transaction config) =
       let* present = credential_path_exists path in
       if not present then discover names orphans aliases rest
       else
-        let* stored = read_stored_credential config name path in
+        let* stored = read_stored_credential ~leaf_policy config name path in
         (match stored with
          | Unresolved_credential -> discover names orphans aliases rest
          | Stored_credential credential -> discover (credential.agent_name :: names) orphans aliases rest
@@ -1053,7 +1136,7 @@ let credential_store_snapshot_in_transaction (Credential_transaction config) =
            let* present = credential_path_exists target in
            if not present then discover names (name :: orphans) aliases rest
            else
-             let* resolved = resolve_stored_credential config name stored in
+             let* resolved = resolve_stored_credential ~leaf_policy config name stored in
              (match resolved with
               | None -> discover names orphans aliases rest
               | Some credential -> discover (credential.agent_name :: names) orphans
@@ -1066,8 +1149,8 @@ let credential_store_snapshot_in_transaction (Credential_transaction config) =
       let* present = credential_path_exists (credential_file config name) in
       if not present then current_credentials acc rest
       else
-        let* stored = read_stored_credential config name (credential_file config name) in
-        let* resolved = resolve_stored_credential config name stored in
+        let* stored = read_stored_credential ~leaf_policy config name (credential_file config name) in
+        let* resolved = resolve_stored_credential ~leaf_policy config name stored in
         (match resolved with
          | Some credential when String.equal credential.agent_name name ->
            current_credentials ((stored, credential) :: acc) rest
@@ -1082,7 +1165,7 @@ let credential_store_snapshot_in_transaction (Credential_transaction config) =
       let* present = credential_path_exists (credential_file config name) in
       if not present then current_orphans acc rest
       else
-        let* stored = read_stored_credential config name (credential_file config name) in
+        let* stored = read_stored_credential ~leaf_policy config name (credential_file config name) in
         (match stored with
          | Stored_redirect target ->
            let* present = credential_path_exists target in

@@ -310,13 +310,31 @@ val save_file_backed_raw_token_credential :
   (agent_credential, masc_error) result
 (** [save_file_backed_raw_token_credential config ~agent_name ~role
     ~raw_token] persists both the hashed credential and its private raw token
-    file. Use only for local operator credentials whose bearer must remain
-    available to file-based clients after process restart. *)
+    file under one credential transaction. Refuses unreadable current ownership
+    before writes and reports observed partial publication on write failure.
+    Rejects whitespace and ASCII control bytes before effects; accepted bearer
+    bytes are not normalized. Direct raw-token APIs are unchanged.
+    Use only for local operator credentials whose bearer must remain available
+    to file-based clients after process restart. *)
+
+type file_backed_token_lifetime = Config_expiry | No_expiry | Expires_in_hours of int
+
+type login_auth_change = Auth_already_required | Auth_enabled | Require_token_enabled
+
+val create_file_backed_login_token :
+  string -> agent_name:string -> role:agent_role -> lifetime:file_backed_token_lifetime ->
+  (string * agent_credential * login_auth_change, masc_error) result
+(** Admit current target ownership before login bootstrap config and credential
+    effects; enable required bearer auth and publish both files under one
+    transaction, using the explicit lifetime. Player login is refused before
+    effects. Errors report partial publication; bootstrap config changes may
+    survive failure. This operation does not promise crash rollback. *)
 
 val load_raw_token : string -> agent_name:string -> string option
 (** [load_raw_token base_path ~agent_name] reads the raw bearer token from
     [<base_path>/.masc/auth/<agent_name>.token] if present. Returns [None] if
-    the file is missing, empty after trim, or unreadable. Runtime subprocesses
+    the file is missing, blank, or unreadable. A nonblank opaque token retains
+    its exact bytes, including surrounding whitespace. Runtime subprocesses
     use it when they do not inherit the parent's [MASC_TOKEN] environment. *)
 
 val verify_internal_keeper_token :
@@ -336,7 +354,13 @@ val ensure_keeper_credential :
   string -> agent_name:string ->
   (string * agent_credential, masc_error) result
 (** [ensure_keeper_credential config ~agent_name] returns a valid credential,
-    backed by a per-keeper raw bearer token file.  The internal
+    backed by a per-keeper raw bearer token file. Current ownership, raw-token
+    reads, reuse or recreation, and publication share one transaction. True
+    absence permits recreation; unreadable or foreign ownership does not.
+    Readable stale raw tokens are replaced using the existing Keeper policy.
+    A matching pair with whitespace or ASCII control bytes refuses reuse before
+    effects; it is not silently normalized or replaced.
+    Errors describe observed partial publication when a write fails. The internal
     keeper MCP token remains separate and is only used for the
     [x-masc-internal-token] trust path. Existing names must resolve to this
     exact canonical owner, and UUID ownership is validated before publication. *)

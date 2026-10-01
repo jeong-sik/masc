@@ -68,7 +68,7 @@ def queue_identity_journey(executable):
             # Home's identity clause proves the failed health reading was
             # applied, rather than merely requested by a background fiber.
             h.press_label_on_screen(process, fd, output, b"Dashboard", row=1,
-                                    needle=b"workspace identity not read; read history")
+                                    needle=b"workspace identity not read")
             # Identity is applied before admission is released, so awaiting
             # control cannot dispatch the queued request. Release promptly;
             # subsequent navigation does not consume the fixture's hold limit.

@@ -152,7 +152,7 @@ def scoped_identity_journey(executable, *, unread):
             state["changed"] = True
         start = len(output)
         h.press_label_on_screen(process, fd, output, b"Dashboard", row=1, needle=b"Enter:open")
-        identity = b"workspace identity not read; read history"
+        identity = b"workspace identity not read"
         h.wait_for_output(process, fd, output, identity, start=start, timeout=10)
         assert_scoped(baseline)
         frame = h.resize_and_wait(process, fd, output, rows=40, columns=120,
@@ -595,6 +595,87 @@ def goal_drop_arm_withdrawal_journey(executable):
     assert_no_drop()
 
 
+def held_identity_boundary_journey(executable, *, boundary):
+    """Probe each held read boundary and the separate decision admission."""
+    fixtures = cards.fixtures_with_held([])
+    requests = []
+    phase = {"armed": False, "foreign": False, "held_reads": 0}
+    probed_foreign = threading.Event()
+    initial_read = threading.Event()
+    call_id = "held-boundary-" + boundary
+    row = cards.held(call_id, "held identity boundary " + boundary)
+
+    def read_held():
+        phase["held_reads"] += 1
+        if not phase["armed"]:
+            initial_read.set()
+            rows = [row] if boundary == "decision" else []
+        else:
+            rows = [row]
+            if boundary == "after-read":
+                phase["foreign"] = True
+        return 200, {"pending": copy.deepcopy(rows)}
+
+    fixtures[cards.HELD_PATH] = read_held
+
+    def prepare(base):
+        home.seed_goals(base)
+        local = Path(base).resolve()
+        foreign = local / "held-foreign-B"
+        (foreign / ".masc").mkdir(parents=True)
+
+        def health():
+            root = foreign if phase["foreign"] else local
+            if phase["foreign"]:
+                probed_foreign.set()
+            return h.RawHttpResponse(200, json.dumps({
+                "status": "ok", "paths": {
+                    "cwd": str(root), "effective_base_path": str(root),
+                    "effective_masc_root": str(root / ".masc"),
+                    "effective_has_masc_dir": True,
+                },
+            }).encode(), content_type="application/json")
+
+        fixtures["/health"] = health
+        fixtures["/health?full=1"] = health
+
+    def interact(process, fd, _slave, output, _base):
+        h.wait_for_output(process, fd, output, b"MASC Dashboard", start=0, timeout=10)
+        assert h.wait_for_fixture_event(process, fd, output, initial_read, timeout=10)
+        h.drain_until_quiet(process, fd, output)
+        if boundary == "decision":
+            h.palette_go(process, fd, output, b"go approvals", call_id.encode())
+            h.send_and_wait(process, fd, output, b"\r", call_id.encode())
+            h.drain_until_quiet(process, fd, output)
+        before = phase["held_reads"]
+        phase["armed"] = True
+        phase["foreign"] = boundary != "after-read"
+        start = len(output)
+        if boundary == "decision":
+            os.write(fd, b"y")
+        else:
+            h.palette_go(process, fd, output, b"go approvals", b"MASC Approvals")
+        assert h.wait_for_fixture_event(process, fd, output, probed_foreign, timeout=10)
+        h.wait_for_output(process, fd, output,
+                          b"workspace changed before the action completed",
+                          start=start, timeout=10)
+        h.drain_until_quiet(process, fd, output)
+        if boundary == "before-read":
+            assert phase["held_reads"] == before, phase
+        elif boundary == "after-read":
+            assert phase["held_reads"] > before, phase
+            assert call_id.encode() not in h.screen_text(bytes(output)), output
+        home.assert_no_decision_posts(requests)
+        os.write(fd, b"q")
+
+    h.run_terminal_scenario(
+        executable, description="held-call identity " + boundary,
+        interact=interact, http_fixtures=fixtures, http_requests=requests,
+        prepare_workspace=prepare, refresh=60.0,
+    )
+    home.assert_no_decision_posts(requests)
+
+
 if __name__ == "__main__":
     executable = os.path.abspath(sys.argv[1])
     for unread in (False, True):
@@ -602,4 +683,6 @@ if __name__ == "__main__":
     superseded_scoped_match_journey(executable)
     gate_before_identity_refresh_journey(executable)
     goal_drop_arm_withdrawal_journey(executable)
-    print("Home scoped identity PTY: PASS (5 scenarios)")
+    for boundary in ("before-read", "after-read", "decision"):
+        held_identity_boundary_journey(executable, boundary=boundary)
+    print("Home scoped identity PTY: PASS (8 scenarios)")

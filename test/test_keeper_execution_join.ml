@@ -510,12 +510,24 @@ let bridged_turn_started bus ~session_turn =
 let test_a_turn_frame_names_its_keeper_turn () =
   Eio_main.run @@ fun _env ->
   let bus = Agent_core.Event_bus.create () in
-  let first = bridged_turn_started (Masc.Keeper_turn_scope.bus bus ~keeper_turn_id:41) ~session_turn:0 in
-  let second = bridged_turn_started (Masc.Keeper_turn_scope.bus bus ~keeper_turn_id:42) ~session_turn:0 in
+  let first = bridged_turn_started (Masc.Keeper_turn_scope.bus bus ~scope:(Masc.Keeper_turn_scope.create ~keeper_turn_id:41)) ~session_turn:0 in
+  let second = bridged_turn_started (Masc.Keeper_turn_scope.bus bus ~scope:(Masc.Keeper_turn_scope.create ~keeper_turn_id:42)) ~session_turn:0 in
   check (option int) "same ordinal, first keeper turn" (Some 41)
     (int_of_field (member "keeper_turn_id" first));
   check (option int) "same ordinal, next keeper turn" (Some 42)
     (int_of_field (member "keeper_turn_id" second))
+
+let test_keeper_scope_rejects_ambiguous_identity () =
+  List.iter (fun encoded ->
+    let caller_scope = match Agent_core.Caller_scope.of_string encoded with
+      | Ok value -> value | Error error -> fail error in
+    check bool "malformed scope is not a display-counter fallback" true
+      (Result.is_error (Masc.Keeper_turn_scope.keeper_turn_id caller_scope)))
+    [ "41"; "foreign";
+      {|{"execution_id":"","keeper_turn_id":41}|};
+      {|{"execution_id":"x","keeper_turn_id":41,"extra":0}|};
+      {|{"execution_id":"x","keeper_turn_id":41,"keeper_turn_id":42}|} ]
+;;
 
 let test_a_frame_off_a_turn_names_no_keeper_turn () =
   Eio_main.run @@ fun _env ->
@@ -725,6 +737,8 @@ let () =
             test_publish_to_bridge_preserves_one_producer_identity
         ; test_case "a turn frame names its keeper turn" `Quick
             test_a_turn_frame_names_its_keeper_turn
+        ; test_case "keeper scope rejects ambiguous identity" `Quick
+            test_keeper_scope_rejects_ambiguous_identity
         ; test_case "a frame off a turn names no keeper turn" `Quick
             test_a_frame_off_a_turn_names_no_keeper_turn
         ; test_case "a scope that is not a keeper turn writes null and no extra key" `Quick

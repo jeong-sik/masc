@@ -1,14 +1,7 @@
 let ( let* ) = Result.bind
 
 let reader ~base_path () =
-  match Candle_status.configured ~base_path with
-  | Candle_config.Off -> (fun ~keeper -> Ok (Keeper_portrait_look.equipment_of_name keeper))
-  | Candle_config.Disabled {reason} -> (fun ~keeper:_ -> Error ("Candle is disabled: " ^ reason))
-  | Candle_config.Enabled _ ->
-    let snapshot =
-      let* view = Candle_ledger.read ~base_path |> Result.map_error Candle_ledger.read_error_to_string in
-      Candle_balance.of_events (Candle_ledger.events view) |> Result.map_error Candle_balance.error_to_string in
-    (fun ~keeper -> Result.map (fun state -> Candle_balance.equipment state ~keeper) snapshot)
+  Candle_observe.equipment (Candle_observe.read ~base_path)
 
 let current ~base_path ~keeper = reader ~base_path () ~keeper
 

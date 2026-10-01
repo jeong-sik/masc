@@ -253,6 +253,11 @@ let render_overview (state : state) =
                | 0 -> ""
                | count -> Printf.sprintf " · %d Keeper states unreadable" count)
   in
+  let health =
+    match Masc_tui_candle.compact_status state.candle_observation with
+    | None -> health
+    | Some status -> health ^ " · " ^ status
+  in
   let work =
     match state.task_flow, state.tasks_error with
     | _, Some _ -> " Work: reading unavailable · open Work for the source"
@@ -302,6 +307,17 @@ let render_overview (state : state) =
               let notice = (None, " " ^ Terminal_text.single_line notice) in
               if spare < List.length readings + 1 then notice :: readings
               else readings @ [notice]
+        in
+        let candle =
+          Masc_tui_candle.summary_lines state.candle_observation
+          |> List.concat_map (fun line ->
+               Message_layout.wrap_words ~max_cells:(max 1 (cols - 4))
+                 (Terminal_text.single_line line))
+          |> List.map (fun line -> (None, " " ^ line))
+        in
+        let context =
+          if List.length context + List.length candle <= spare then context @ candle
+          else context
         in
         let shown_context = List.take (min spare (List.length context)) context in
         List.iter
@@ -6232,6 +6248,12 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
         @ row_lines ~width "Paused:"
             (if k.k_paused then (Theme.warn ()) ^ "yes" ^ Ansi.reset
              else Ansi.dim ^ "no" ^ Ansi.reset)
+        @ (let amount = match (keeper_reading state k).Keeper_control.liveness with
+            | Keeper_control.Present runtime -> runtime.kr_candle_balance_milli
+            | Keeper_control.Unobserved | Keeper_control.Absent | Keeper_control.Invalid _ -> None in
+           match Masc_tui_candle.balance_text state.candle_observation amount with
+           | None -> []
+           | Some value -> row_lines ~width "Candle balance:" (Terminal_text.single_line value))
       in
       List.iter add_line
         (match portrait with
@@ -6241,6 +6263,18 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
        | Tui_decode.Ready _ -> ()
        | Tui_decode.Unavailable reason -> add_row "Portrait:" ("unavailable: " ^ Terminal_text.single_line reason));
       add_empty ();
+      (* The short Overview names only the reading's state. Info retains
+         every diagnostic and exact supply amount, wrapped and scrollable. *)
+      let candle_lines = Masc_tui_candle.summary_lines state.candle_observation in
+      if candle_lines <> [] then (
+        add_section "Candle details";
+        List.iter
+          (fun line ->
+            Message_layout.wrap_words ~max_cells:(max 1 (inner - 2))
+              (Terminal_text.single_line line)
+            |> List.iter (fun line -> add_line ("  " ^ line)))
+          candle_lines;
+        add_empty ());
 
       (* The live roster owns this reading, including its absence after a
          successful turn. Neither historical last_error nor the last outcome

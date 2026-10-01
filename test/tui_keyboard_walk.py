@@ -902,13 +902,29 @@ def run_keyboard_regression(executable: str, *, group: int | None = None) -> Non
             executable,
             description="pressing a row chooses, then opens it",
             interact=pressing_a_row_chooses_then_opens_it,
-            http_fixtures=compact_input_gate_http_fixtures(),
+            # This pointer scenario waits for the error row before measuring
+            # click coordinates; the Overview's successful empty roster would
+            # remove that row and change the fixture's layout contract.
+            http_fixtures={
+                **compact_input_gate_http_fixtures(),
+                "/api/v1/gate/keepers?detailed=true": (
+                    503, {"error": "fixture endpoint unavailable"}
+                ),
+            },
         )
         run_terminal_scenario(
             executable,
             description="pressing a row of a scrolled list opens it",
             interact=pressing_a_row_of_a_scrolled_list_opens_it,
-            http_fixtures=compact_input_gate_http_fixtures(),
+            # This pointer scenario waits for the error row before measuring
+            # click coordinates; the Overview's successful empty roster would
+            # remove that row and change the fixture's layout contract.
+            http_fixtures={
+                **compact_input_gate_http_fixtures(),
+                "/api/v1/gate/keepers?detailed=true": (
+                    503, {"error": "fixture endpoint unavailable"}
+                ),
+            },
             prepare_workspace=seed_long_roster,
         )
         run_terminal_scenario(

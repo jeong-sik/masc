@@ -207,7 +207,12 @@ def fixtures() -> region.ServedFixtures:
     open turns or lanes -- the answer is the empty reading, so no row on a
     measured screen reports a read that failed."""
     served = _keyboard_harness.keeper_runtime_http_fixtures()
+    roster_path = "/api/v1/gate/keepers?detailed=true"
+    keeper_roster = served[roster_path]
     served.update(_keyboard_board.board_reference_http_fixtures())
+    # Keep Board's four posts while restoring the observed Keepers and their
+    # portraits over Board's empty Overview roster.
+    served[roster_path] = keeper_roster
     served["/api/v1/board/hearths"] = (200, {"hearths": []})
     served["/api/v1/dashboard/gate"] = _keyboard_harness.empty_gate_snapshot()
     served["/api/v1/dashboard/gate/keeper-settings"] = (200, {

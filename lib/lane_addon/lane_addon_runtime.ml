@@ -111,10 +111,137 @@ let can_read access = function
       | Keeper keeper -> String.equal owner keeper | Unauthenticated -> false)
 let require_read access visibility =
   if can_read access visibility then Ok () else Error "Lane instance is unavailable to this caller"
-let authorize_retained_read ~access json =
+(* v0.48.0 published this exact binding envelope before private Fusion sources.
+   Recognition proves the whole retained producer graph; missing authority on
+   any other shape remains an error. This reader never modifies stored bytes. *)
+let exact_fields expected fields =
+  if List.sort String.compare (List.map fst fields) = List.sort String.compare expected
+  then Ok () else Error "invalid released binding shape"
+let rec unique_json = function
+  | `Assoc fields ->
+      let* () = Json_util.reject_unknown_fields ~surface:"retained binding" ~allowed:(List.map fst fields) fields in
+      List.fold_left (fun result (_, value) -> let* () = result in unique_json value) (Ok ()) fields
+  | `List values -> List.fold_left (fun result value -> let* () = result in unique_json value) (Ok ()) values
+  | _ -> Ok ()
+let released_binding_fields = ["instance_id";"incarnation";"action_schema";"run_id";
+  "addon_id";"title";"revision";"phase";"observation_seq";"rows_count";
+  "observation_pending";"coalesced_wakes";"unchanged_source_refreshes";
+  "binding";"package";"configuration";"container_id"]
+let validate_released_binding fields =
+  let* () = unique_json (`Assoc fields) in
+  let* () = exact_fields released_binding_fields fields in
+  let* id = text fields "instance_id" in
+  let* incarnation = text fields "incarnation" in
+  let* () = if id = incarnation then Ok () else Error "retained incarnation mismatch" in
+  let* _ = text fields "run_id" in
+  let* () = List.fold_left (fun result key -> let* () = result in
+    match List.assoc key fields with `Int n when n >= 0 -> Ok () | _ -> Error "invalid retained counter")
+    (Ok ()) ["observation_seq";"rows_count";"coalesced_wakes";"unchanged_source_refreshes"] in
+  let* () = match List.assoc "observation_pending" fields with `Bool _ -> Ok () | _ -> Error "invalid retained pending state" in
+  let* _ = phase_of_json (List.assoc "phase" fields) in
+  let* _ = configuration_of_fields fields in
+  let* () = match List.assoc "configuration" fields with
+    | `Null -> Ok () | `Assoc owner -> exact_fields ["id";"source_path";"revision"] owner
+    | _ -> Error "invalid retained configuration" in
+  let* () = match List.assoc "container_id" fields with `Null -> Ok () | _ -> text fields "container_id" |> Result.map (fun _ -> ()) in
+  let* () = match List.assoc "action_schema" fields with `Null | `Assoc _ -> Ok () | _ -> Error "invalid retained action schema" in
+  let* package = object_ (List.assoc "package" fields) in
+  let* () = exact_fields ["id";"revision";"title";"contributions";"image";"command";
+    "directory";"action_tool";"outputs";"refresh_policy";"binding_schema";
+    "presentation";"skills_directory";"resources"] package in
+  let* () = List.fold_left (fun result key -> let* () = result in text package key |> Result.map (fun _ -> ()))
+    (Ok ()) ["id";"revision";"title";"image";"directory"] in
+  let* () = List.fold_left (fun result (outer,inner) -> let* () = result in
+    if List.assoc outer fields = List.assoc inner package then Ok () else Error "retained package identity mismatch")
+    (Ok ()) ["addon_id","id";"revision","revision";"title","title"] in
+  let strings = function `List values -> List.for_all (function `String s -> String.trim s <> "" | _ -> false) values | _ -> false in
+  let* () = match List.assoc "command" package with `List (_::_) as v when strings v -> Ok () | _ -> Error "invalid retained command" in
+  let* () = match List.assoc "contributions" package with
+    | `List (_::_ as values) when List.for_all (function `String ("observe"|"derive"|"act") -> true | _ -> false) values -> Ok ()
+    | _ -> Error "invalid retained contributions" in
+  let* () = List.fold_left (fun result key -> let* () = result in match List.assoc key package with
+    | `Null -> Ok () | _ -> text package key |> Result.map (fun _ -> ())) (Ok ()) ["action_tool";"skills_directory"] in
+  let* () = match List.assoc "refresh_policy" package with `String ("every_hint"|"source_changes") -> Ok () | _ -> Error "invalid retained refresh policy" in
+  let* outputs = object_ (List.assoc "outputs" package) in
+  let* () = if List.for_all (fun (name,selection) -> String.trim name <> "" && match selection with
+    | `Assoc ["all_lanes",`Bool true] -> true | `Assoc ["lanes",values] -> strings values | _ -> false) outputs
+    then Ok () else Error "invalid retained output ports" in
+  let* _ = Lane_addon_presentation.of_json (List.assoc "presentation" package) in
+  let* resources = object_ (List.assoc "resources" package) in
+  let* () = exact_fields ["cpus";"memory_bytes";"pids";"max_reply_bytes"] resources in
+  let* () = match List.assoc "cpus" resources with `Float f when Float.is_finite f && f > 0. -> Ok () | _ -> Error "invalid retained CPU bound" in
+  let* () = match List.assoc "memory_bytes" resources with
+    | `Intlit s -> (match Int64.of_string_opt s with Some n when n > 0L -> Ok () | _ -> Error "invalid retained memory bound")
+    | `Int n when n > 0 -> Ok () | _ -> Error "invalid retained memory bound" in
+  let* () = List.fold_left (fun result key -> let* () = result in match List.assoc key resources with
+    | `Int n when n > 0 -> Ok () | _ -> Error "invalid retained resource bound") (Ok ()) ["pids";"max_reply_bytes"] in
+  let binding = List.assoc "binding" fields in
+  let* () = match List.assoc "binding_schema" package with
+    | `Null -> Ok () | `Assoc _ as schema -> Lane_addon_action.validate_value ~schema ~name:"retained binding" binding |> Result.map (fun _ -> ())
+    | _ -> Error "invalid retained binding schema" in
+  let* binding_fields = object_ binding in
+  let* () = match List.assoc_opt "sources" binding_fields with
+    | Some (`List sources) -> List.fold_left (fun result source -> let* () = result in let* f = object_ source in
+        let* allowed = match List.assoc_opt "kind" f with
+          | Some (`String "snapshot_file") -> Ok ["source_id";"kind";"path"]
+          | Some (`String ("msx_capture"|"dos_capture")) -> Ok ["source_id";"kind"]
+          | Some (`String "lane_output") -> Ok ["source_id";"kind";"installation_id";"selection";"output_id"]
+          | Some (`String "browser_document") -> Ok ["source_id";"kind";"lane";"client_id";"tab_id";"target_id";"environment";"request_id"]
+          | _ -> Error "source not present in published binding schema" in
+        Json_util.reject_unknown_fields ~surface:"retained source" ~allowed f) (Ok ()) sources
+    | _ -> Error "invalid retained sources" in
+  Lane_addon_sources.parse binding
+let prove_released_shared ~bindings fields =
+  let rec prove visiting fields =
+    let* sources = validate_released_binding fields in
+    let* id = text fields "instance_id" in
+    let* run = text fields "run_id" in
+    let* () = if List.mem id visiting then Error "retained producer cycle" else Ok () in
+    let* () = if List.length (List.filter (function `Assoc f -> List.assoc_opt "instance_id" f = Some (`String id) | _ -> false) bindings) = 1
+      then Ok () else Error "ambiguous retained incarnation" in
+    List.fold_left (fun result source -> let* () = result in match source with
+      | Lane_addon_sources.Fusion_run _ -> Error "private source requires retained authority"
+      | Snapshot_file _ | Msx_capture _ | Dos_capture _ | Browser_document _ -> Ok ()
+      | Lane_output {installation_id;output_id;_} ->
+          let candidates = List.filter_map (function `Assoc f when List.assoc_opt "run_id" f = Some (`String run) ->
+            (match configuration_of_fields f with Ok (Some owner) when owner.id = installation_id -> Some f | _ -> None)
+            | _ -> None) bindings in
+          (match candidates with
+           | [producer] ->
+               let* () = match output_id with
+                 | None -> Ok ()
+                 | Some output ->
+                     let* package = match List.assoc_opt "package" producer with
+                       | Some json -> object_ json | None -> Error "missing retained producer package" in
+                     let* outputs = match List.assoc_opt "outputs" package with
+                       | Some json -> object_ json | None -> Error "missing retained producer outputs" in
+                     if List.mem_assoc output outputs then Ok () else Error "unknown retained producer output" in
+               if List.mem_assoc "visibility" producer || List.mem_assoc "source_access" producer
+               then let* visibility = visibility_of_fields producer in
+                 if visibility <> Shared then Error "private retained producer"
+                 else let* _ = match List.assoc_opt "source_access" producer with
+                   | Some json -> Lane_addon_sources.access_of_json json | None -> Error "missing retained source access" in
+                   prove (id::visiting) (List.remove_assoc "visibility" (List.remove_assoc "source_access" producer))
+               else prove (id::visiting) producer
+           | [] -> Error "missing retained producer" | _ -> Error "ambiguous retained producer")) (Ok ()) sources
+  in prove [] fields
+let normalized_retained_bindings bindings =
+  List.fold_right (fun value result -> let* values = result in let* fields = object_ value in
+    let* value = if List.mem_assoc "visibility" fields || List.mem_assoc "source_access" fields
+      then let* _ = visibility_of_fields fields in
+        let* _ = match List.assoc_opt "source_access" fields with
+          | Some json -> Lane_addon_sources.access_of_json json | None -> Error "missing retained source access" in Ok value
+      else let* () = prove_released_shared ~bindings fields in
+        Ok (`Assoc (("visibility",visibility_to_json Shared)::
+          ("source_access",Lane_addon_sources.access_to_json Lane_addon_sources.Unauthenticated)::fields)) in
+    Ok (value::values)) bindings (Ok [])
+let authorize_retained_read ~bindings ~access json =
+  let* normalized = normalized_retained_bindings bindings in
   let* fields = object_ json in
-  let* visibility = visibility_of_fields fields in
-  require_read access visibility
+  let* id = text fields "instance_id" in
+  match List.filter (function `Assoc f -> List.assoc_opt "instance_id" f = Some (`String id) | _ -> false) normalized with
+  | [`Assoc fields] -> let* visibility = visibility_of_fields fields in require_read access visibility
+  | _ -> Error "retained instance identity is ambiguous or absent"
 let entry_json e =
   `Assoc ["instance_id", `String e.instance_id; "incarnation", `String e.instance_id;
     "action_schema", (match e.connection with None -> `Null
@@ -547,14 +674,17 @@ let notify_fusion_run ~run_id = Eio_context.run_on_owner_domain (fun () ->
       then wake ~request:Refresh_sources e) m.entries) managers)
 let find m args = let* id = text args "instance_id" in
   match Hashtbl.find_opt m.entries id with Some e -> Ok e | None -> Error "unknown active instance"
-let historical m =
+let read_retained_bindings m =
   let* bindings = offload (fun () -> Lane_addon_store.bindings m.store) in
+  normalized_retained_bindings bindings
+let historical m =
+  let* bindings = read_retained_bindings m in
   Ok (List.filter (function
     | `Assoc fields -> (match List.assoc_opt "instance_id" fields with
         | Some (`String id) -> not (Hashtbl.mem m.entries id) | _ -> true)
     | _ -> true) bindings)
 let persisted_binding m id =
-  let* bindings = runtime_result (offload (fun () -> Lane_addon_store.bindings m.store)) in
+  let* bindings = runtime_result (read_retained_bindings m) in
   match List.find_opt (function
     | `Assoc fields -> (match text fields "instance_id" with
         | Ok found -> String.equal found id | Error _ -> false)
@@ -678,7 +808,7 @@ let slice m ~access args =
   let* run_id = request_result (optional_text "run_id") in let* lane_id = request_result (optional_text "lane_id") in
   let* since = request_result (optional_time "since") in let* until = request_result (optional_time "until") in
   let* () = match since, until with Some a, Some b when a > b -> Error (Request_rejected "since exceeds until") | _ -> Ok () in
-  let* bindings = runtime_result (offload (fun () -> Lane_addon_store.bindings m.store)) in
+  let* bindings = runtime_result (read_retained_bindings m) in
   let rec read acc statuses = function
     | [] -> Ok (List.rev acc, List.rev statuses)
     | `Assoc fields :: rest ->
@@ -804,10 +934,7 @@ let authorize_document m ~access (document : Lane_addon_declaration.document) =
       | Some owner ->
           (match access with
            | Keeper keeper when Lane_addon_document_owner.permits owner ~keeper
-               ~source_revision:document.source_revision ->
-               (* Exact admitted bytes retain repair authority after their live
-                  source is evicted. New bytes require separate admission. *)
-               Ok ()
+               ~source_revision:document.source_revision -> Ok ()
            | Keeper _ | Unauthenticated | Operator_configuration ->
                Error {Lane_addon_declaration.code=Invalid_request;
                  message="Lane declaration is unavailable to this caller";current=None})
@@ -847,7 +974,17 @@ let save_declaration ?caller ?access ~config json = Eio_context.run_on_owner_dom
   Eio.Mutex.use_ro m.configuration_mutex (fun () ->
     let* current = match offload (fun () -> Lane_addon_declaration.read ~directory
       ~source_path:(Filename.concat directory request.file_name)) with
-      | Ok current -> let* () = authorize_document m ~access current in Ok (Some current)
+      | Ok current ->
+          let* () = match access with
+            | Keeper keeper ->
+                let* ownership = offload (fun () -> Lane_addon_document_owner.read
+                  ~root:(Lane_addon_store.root m.store) ~source_path:current.source_path)
+                  |> Result.map_error (fun message -> {Lane_addon_declaration.code=Io_error;message;current=None}) in
+                (match ownership with
+                 | Some owner when Lane_addon_document_owner.repair_permits owner ~keeper -> Ok ()
+                 | Some _ | None -> authorize_document m ~access current)
+            | Operator_configuration | Unauthenticated -> authorize_document m ~access current in
+          Ok (Some current)
       | Error {Lane_addon_declaration.code=Not_found;_} -> Ok None
       | Error error -> Error error in
     let* candidate_owner = match access with

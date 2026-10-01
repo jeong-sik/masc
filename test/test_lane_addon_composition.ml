@@ -621,20 +621,45 @@ sources=%s
     check string "durable owner can read after source eviction" (source old_run)
       (read owner |> require_document |> text "source_text");
     check bool "foreign Keeper cannot read an owned document" true (Result.is_error (read "foreign"));
-    let admitted = read owner |> require_document in
+    let foreign_run = register_private_run (root ^ "/foreign") "foreign" in
+    write path (source foreign_run);
+    check bool "unadmitted foreign Fusion source cannot inherit the old owner's read" true
+      (Result.is_error (read owner));
+    check bool "repair cannot submit another Keeper's live source" true
+      (Result.is_error (save ~revision:(Store.digest (source foreign_run)) (source foreign_run)));
+    write path (source old_run);
+    let malformed_foreign = source foreign_run ^ "\n[unrelated]\nvalue = [" in
+    write path malformed_foreign;
+    check bool "malformed foreign replacement cannot reveal current bytes" true
+      (Result.is_error (read owner));
     let malformed = "id = \"unfinished" in
     write operator_path malformed;
-    check bool "unadmitted operator replacement is not disclosed to the former owner" true
+    check bool "operator-created malformed replacement is not disclosed to prior owner" true
       (Result.is_error (Lane_addon_runtime.read_declaration ~caller:owner
         ~access:(Lane_addon_sources.Keeper owner) ~config
         (`Assoc ["source_path",`String operator_path])));
     write path malformed;
-    check bool "unadmitted malformed replacement cannot inherit repair authority" true
+    check bool "unadmitted malformed source remains unreadable to prior owner" true
       (Result.is_error (read owner));
-    write path (source old_run);
     let next_run = register_private_run (root ^ "/replacement") owner in
-    ignore (save ~revision:(text "source_revision" admitted) (source next_run) |> require_document);
+    (match save ~revision:(Store.digest "stale") (source next_run) with
+     | Error error -> check bool "repair conflict does not return current bytes" true
+         (Option.is_none error.Lane_addon_declaration.current)
+     | Ok _ -> fail "stale repair replaced a changed document");
+    ignore (save ~revision:(Store.digest malformed) (source next_run) |> require_document);
     check string "repair can replace a pruned source" (source next_run)
+      (read owner |> require_document |> text "source_text");
+    write path (source foreign_run);
+    let final_run = register_private_run (root ^ "/after-stale") owner in
+    let final_source = source final_run in
+    (match save ~revision:(Store.digest "stale") final_source with
+     | Error error -> check bool "failed repair keeps current body private" true
+         (Option.is_none error.Lane_addon_declaration.current)
+     | Ok _ -> fail "stale repair replaced a changed document");
+    check bool "stale repair never admits foreign bytes as readable prior" true
+      (Result.is_error (read owner));
+    ignore (save ~revision:(Store.digest (source foreign_run)) final_source |> require_document);
+    check string "exact repair after stale refusal restores owned bytes" final_source
       (read owner |> require_document |> text "source_text"))
 
 let test_pending_document_owner_rejects_replaced_source () =

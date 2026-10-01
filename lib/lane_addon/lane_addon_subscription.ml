@@ -93,10 +93,10 @@ let producer ~access bindings s =
   (* Hidden and absent installations share one public result. Filter by
      durable read authority before counting possible producers. *)
   let readable = List.filter (fun value ->
-    Result.is_ok (Lane_addon_runtime.authorize_retained_read ~access value)) bindings in
+    Result.is_ok (Lane_addon_runtime.authorize_retained_read ~bindings ~access value)) bindings in
   match List.filter matches readable with
   | [value] ->
-      let* () = Lane_addon_runtime.authorize_retained_read ~access value in
+      let* () = Lane_addon_runtime.authorize_retained_read ~bindings ~access value in
       let* instance = get "instance_id" text value in
       let* sequence = get "observation_seq" integer value in
       let* package = field "package" value in

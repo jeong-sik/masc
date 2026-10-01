@@ -656,8 +656,9 @@ let delete_credential config agent_name =
 
 (** List all credentials.
 
-    De-duplicates by [agent_name] so that a UUID-backed credential
-    plus its redirect stub do not appear twice in the result. *)
+    Only the exact named owner publishes authentication authority. UUID
+    payloads and aliases may remain after failed cleanup or publication;
+    they cannot replace the current named record in this listing. *)
 let list_credentials config : agent_credential list =
   let dir = agents_dir config in
   if file_exists dir
@@ -667,7 +668,9 @@ let list_credentials config : agent_credential list =
     |> List.filter (fun f -> Filename.check_suffix f ".json")
     |> List.filter_map (fun f ->
       let name = Filename.chop_suffix f ".json" in
-      load_credential config name)
+      match load_credential config name with
+      | Some credential when String.equal name credential.agent_name -> Some credential
+      | Some _ | None -> None)
     |> List.fold_left
          (fun acc cred ->
             if List.exists (fun c -> c.agent_name = cred.agent_name) acc

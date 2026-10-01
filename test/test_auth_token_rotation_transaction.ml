@@ -301,6 +301,61 @@ let test_unique_owner_uuid_collision_refused () =
   check bool "UUID shared with a unique owner is not created" false
     (Sys.file_exists (Auth.credential_file base_path "absent-shared-uuid"))
 
+let test_unselected_case_variant_uuid_refused () =
+  with_workspace @@ fun base_path ->
+  let first, _ = seed_pair base_path in
+  let outsider = auth_ok (Auth.save_file_backed_raw_token_credential base_path
+      ~agent_name:"operator" ~role:Masc_domain.Admin ~raw_token:"unique-operator-token") in
+  List.iter (fun (name, current, id) -> Auth.save_private_text_file
+    (Auth.credential_file base_path name)
+    (Masc_domain.agent_credential_to_yojson
+      { current with Masc_domain.id = Some (Masc_domain.Credential_id.of_string id) }
+      |> Yojson.Safe.to_string))
+    ["aaa", first, "case-uuid"; "operator", outsider, "CASE-UUID"];
+  let before = snapshot base_path in
+  let before_operator = read (Auth.credential_file base_path "operator") in
+  (match Auth.rotate_shared_tokens_for_agents base_path ~agent_names:["aaa"] with
+   | Error _ -> () | Ok _ -> fail "unselected noncanonical UUID must refuse the entire plan");
+  check bool "selected files are unchanged" true (snapshot base_path = before);
+  check string "unselected owner is unchanged" before_operator
+    (read (Auth.credential_file base_path "operator"));
+  check bool "no case-variant payload is published" false
+    (Sys.file_exists (Auth.credential_file base_path "case-uuid"))
+
+let test_unpublished_uuid_has_no_bearer_authority () =
+  with_workspace @@ fun base_path ->
+  let raw = "named-current-token" in
+  let current = auth_ok (Auth.save_file_backed_raw_token_credential base_path
+      ~agent_name:"operator" ~role:Masc_domain.Admin ~raw_token:raw) in
+  let id = Some (Masc_domain.Credential_id.of_string "partial-uuid") in
+  let current = { current with id } in
+  Auth.save_private_text_file (Auth.credential_file base_path "operator")
+    (Masc_domain.agent_credential_to_yojson current |> Yojson.Safe.to_string);
+  let failed_raw = "unpublished-uuid-token" in
+  Auth.save_private_text_file (Auth.credential_file base_path "partial-uuid")
+    (Masc_domain.agent_credential_to_yojson { current with token = Auth.sha256_hash failed_raw }
+      |> Yojson.Safe.to_string);
+  check bool "failed UUID publication cannot authenticate" true
+    (Result.is_error (Auth.find_credential_by_token base_path ~token:failed_raw));
+  check string "direct named owner retains authority" "operator"
+    (auth_ok (Auth.find_credential_by_token base_path ~token:raw)).agent_name;
+  check bool "listing returns only the named record" true (Auth.list_credentials base_path = [current])
+
+let test_retired_uuid_has_no_bearer_authority () =
+  with_workspace @@ fun base_path ->
+  let old_raw, old = auth_ok (Auth.ensure_keeper_credential base_path ~agent_name:"keeper") in
+  let raw = "replacement-direct-token" in
+  let current = { old with id = None; token = Auth.sha256_hash raw } in
+  (* The named publication committed, but retiring the old UUID failed. *)
+  Auth.save_private_text_file (Auth.credential_file base_path "keeper")
+    (Masc_domain.agent_credential_to_yojson current |> Yojson.Safe.to_string);
+  Auth.save_private_text_file (Auth.raw_token_file base_path "keeper") raw;
+  check bool "retired UUID token cannot authenticate" true
+    (Result.is_error (Auth.find_credential_by_token base_path ~token:old_raw));
+  check string "new named token remains authoritative" "keeper"
+    (auth_ok (Auth.find_credential_by_token base_path ~token:raw)).agent_name;
+  check bool "listing ignores the retained old UUID" true (Auth.list_credentials base_path = [current])
+
 let test_one_selected_owner_rotates () =
   with_workspace @@ fun base_path ->
   let _pair = seed_pair base_path in
@@ -468,7 +523,10 @@ let test_keeper_batch_updates_its_admitted_index () =
 let () =
   run "auth_token_rotation_transaction"
     [ "rotation",
-      [ test_case "publication snapshots refuse FIFO without blocking" `Quick test_publication_fifo_snapshots_refuse_without_blocking
+      [ test_case "unselected case-variant UUID refuses before writes" `Quick test_unselected_case_variant_uuid_refused
+      ; test_case "unpublished UUID cannot grant bearer authority" `Quick test_unpublished_uuid_has_no_bearer_authority
+      ; test_case "retired UUID cannot retain bearer authority" `Quick test_retired_uuid_has_no_bearer_authority
+      ; test_case "publication snapshots refuse FIFO without blocking" `Quick test_publication_fifo_snapshots_refuse_without_blocking
       ; test_case "extended redirects remain current owners" `Quick test_extended_redirect_remains_a_current_owner
       ; test_case "diagnostic listing refuses FIFO without blocking" `Quick test_fifo_diagnostic_listing_refuses_without_blocking
       ; test_case "same-owner partial UUID publication can retry" `Quick test_same_owner_partial_uuid_can_retry

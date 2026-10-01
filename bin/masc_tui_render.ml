@@ -11914,14 +11914,6 @@ let config_metadata_style = function
 let config_heading_rows (state : state) =
   1 + List.length (config_metadata_summary state) + 1
 
-(* The source rows the frame shows, and the height the cursor keeps itself
-   inside. One number for both: the frame is [surface_chrome]'s, so what it
-   spends is [surface_chrome_rows] and the heading above, not a literal. *)
-let code_pane_content_height = Masc_tui_render_code.code_pane_content_height
-let code_notes_viewport = Masc_tui_render_code.code_notes_viewport
-let code_history_viewport = Masc_tui_render_code.code_history_viewport
-let code_history_selected = Masc_tui_render_code.code_history_selected
-
 let config_content_height (state : state) =
   let terminal_rows, _ = get_terminal_size () in
   max 1

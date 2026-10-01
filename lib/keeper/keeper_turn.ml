@@ -424,6 +424,7 @@ let run_direct_turn_with_fsm ~(keeper_name : string) ~(turn_id : int) f =
    and typed-delegate entrypoints construct a valid invocation request before
    reaching this function. *)
 let run_keeper_invocation_turn_admitted_inner
+      ~observation_token
       ~operation_id
       ~(input_speaker : Keeper_input_speaker.t)
       ?on_text_delta
@@ -794,6 +795,7 @@ let run_keeper_invocation_turn_admitted_inner
                     ~turn_id:keeper_turn_id
                     (fun () ->
                       Keeper_agent_run.run_turn
+                                      ~observation_token
                                       ?direct_resume
                                       ?official_task_reference
                                       ?hitl_resolution:(Option.map Keeper_direct_gate_continuation.resolution gate_resume)
@@ -1172,6 +1174,7 @@ let run_keeper_invocation_turn_admitted
   in
   match
     run_keeper_invocation_turn_admitted_inner
+      ~observation_token
       ~operation_id
       ~input_speaker
       ?on_text_delta

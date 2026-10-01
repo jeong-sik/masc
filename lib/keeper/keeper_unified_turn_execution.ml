@@ -95,6 +95,7 @@ type ctx =
   }
 
 let run (ctx : ctx)
+      ~observation_token
       ~(yield_requested :
           unit -> (Keeper_agent_run.yield_request option, string) result)
       ~(initial_execution : runtime_execution)
@@ -210,6 +211,7 @@ let run (ctx : ctx)
              (fun () ->
             Ok (
             Keeper_registry.mark_turn_provider_attempt_started
+              ~observation_token:(Some observation_token)
               ~base_path:config.base_path
               meta.name;
             try
@@ -223,6 +225,7 @@ let run (ctx : ctx)
                  ~prev:Keeper_turn_fsm.Awaiting_provider
                  Keeper_turn_fsm.Streaming;
                Keeper_agent_run.run_turn
+                 ~observation_token
                  ~config
                  ~meta:run_meta
                  ~publication_recovery
@@ -320,6 +323,7 @@ let run (ctx : ctx)
       match EC.extract_input_required err with
       | Some ir ->
         Keeper_registry.mark_turn_runtime_done
+          ~observation_token:(Some observation_token)
           ~base_path:config.base_path
           meta.name;
         Log.Keeper.info
@@ -339,6 +343,7 @@ let run (ctx : ctx)
              Keeper_turn_fsm.Cancelled_input_required)
       | None ->
         Keeper_unified_turn_terminal_error.handle
+          ~observation_token
           ~config
           ~keeper_name:meta.name
           ~runtime_id:initial_execution.runtime_id
@@ -358,10 +363,12 @@ let run (ctx : ctx)
         | None -> None
       in
       Keeper_registry.set_turn_selected_model
+        ~observation_token:(Some observation_token)
         ~base_path:config.base_path
         meta.name
         selected_model;
       Keeper_registry.mark_turn_runtime_done
+        ~observation_token:(Some observation_token)
         ~base_path:config.base_path
         meta.name;
       Ok result, turn_state

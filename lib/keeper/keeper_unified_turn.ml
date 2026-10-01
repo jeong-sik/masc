@@ -972,12 +972,14 @@ let run_keeper_cycle
                  | Error _ -> meta
                in
                Keeper_registry.mark_turn_measurement
+                 ~observation_token:(Some observation_token)
                  ~base_path:config.base_path
                  meta.name;
                (match Keeper_registry.get ~base_path:config.base_path meta.name with
                 | Some { current_turn_observation = Some { measurement = Some _; _ }; _ }
                   ->
                   Keeper_registry.set_turn_decision_stage
+                    ~observation_token:(Some observation_token)
                     ~base_path:config.base_path
                     meta.name
                     Keeper_registry.Decision_active_guard_ok
@@ -1053,6 +1055,7 @@ let run_keeper_cycle
                        start_background_turn_event_bus_drain ~clock;
                        let run_result, turn_state =
                          Keeper_unified_turn_execution.run
+                           ~observation_token
                            { base_dir
                            ; build_turn_prompt
                            ; channel

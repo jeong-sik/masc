@@ -408,6 +408,7 @@ let skill_compositions_block ~compositions ~deferred ~on_the_wire =
 ;;
 
 let assemble_hooks
+      ?observation_token
       ~(ctx : ctx)
       ~(session : Keeper_types.session_context)
       ~(turn_system_prompt : string)
@@ -606,6 +607,7 @@ let assemble_hooks
     in
     let base_hooks =
       Keeper_hooks_agent_core.make_hooks
+        ?observation_token
         ~config
         ~meta_ref
         ~turn_ctx_cell
@@ -841,6 +843,7 @@ let assemble_hooks
                 (* Reset the in-turn FSM before this hook writes the next agent-core
                    turn's runtime, policy, and prompt phases. *)
                 Keeper_registry.mark_agent_core_turn_started
+                  ~observation_token
                   ~base_path:config.base_path
                   meta.name;
                 (* [enable_thinking] and [preserve_thinking] are not rewritten
@@ -1133,10 +1136,12 @@ let assemble_hooks
                   ();
                 (ignore hook_t0;
                  Keeper_registry.set_turn_decision_stage
+                   ~observation_token
                    ~base_path:config.base_path
                    meta.name
                    Keeper_registry.Decision_active_tool_policy_selected;
                  Keeper_registry.set_turn_phase
+                   ~observation_token
                    ~base_path:config.base_path
                    meta.name
                    (Keeper_registry.Packed Keeper_registry.Turn_routing);
@@ -1157,6 +1162,7 @@ let assemble_hooks
                    trying] which is admitted by
                    [validate_runtime_transition]. *)
                  Keeper_registry.mark_turn_provider_attempt_started
+                   ~observation_token
                    ~base_path:config.base_path
                    meta.name);
                 (* RFC-0233 PR-3 + #20936: snapshot this agent-core turn's

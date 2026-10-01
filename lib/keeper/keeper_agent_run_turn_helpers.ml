@@ -395,13 +395,14 @@ let restart_line_owed_at_finalize ~notice_pending ~saved_checkpoint_present =
   notice_pending && saved_checkpoint_present
 ;;
 
-let turn_progress_callbacks ~config ~keeper_name ~downstream ~turn_id =
+let turn_progress_callbacks ~observation_token ~config ~keeper_name ~downstream ~turn_id =
   Keeper_turn_preview.reset ~keeper_name ~now:(Time_compat.now ())
     ~redaction:
       (Keeper_secret_redaction.snapshot ~base_path:config.Workspace.base_path
          ~keeper_name);
   let record_turn_progress event_kind =
     Keeper_registry.record_turn_progress
+      ~observation_token
       ~base_path:config.Workspace.base_path
       keeper_name
       ~event_kind

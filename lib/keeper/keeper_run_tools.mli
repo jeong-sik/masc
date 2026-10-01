@@ -102,8 +102,11 @@ type agent_setup =
   ; receipt_response_text_present_ref : bool ref
   }
 
+(** [observation_token] is captured for registry callbacks. Omission disables
+    registry turn observation; it never adopts a currently active turn. *)
 val prepare_agent_setup
-  :  config:Workspace.config
+  :  ?observation_token:Keeper_turn_observation_token.t
+  -> config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
   -> profile_defaults:Keeper_types_profile.keeper_profile_defaults
   -> publication_recovery:

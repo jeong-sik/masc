@@ -239,6 +239,7 @@ type tool_stream_observation =
   | Turn_closed_without_sources of { turn : int }
 
 let make_hooks
+    ?observation_token
     ~(config : Workspace.config)
     ~(meta_ref : Keeper_meta_contract.keeper_meta ref)
     ~(turn_ctx_cell : Keeper_tool_call_log.turn_ctx_cell)
@@ -277,6 +278,7 @@ let make_hooks
   in
   let record_progress event_kind =
     Keeper_registry.record_turn_progress
+      ~observation_token
       ~base_path:config.base_path
       (!meta_ref).name
       ~event_kind

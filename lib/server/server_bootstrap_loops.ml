@@ -1692,8 +1692,10 @@ let start_keeper_loops_owned
   (* Inject Event_bus into keeper keepalive runtime for telemetry publishing *)
   Keeper_keepalive.set_bus event_bus;
   Board_dispatch.set_board_signal_hook (fun signal ->
+    let config = Mcp_server.workspace_config state in
     Keeper_keepalive.wakeup_relevant_keeper_for_board_signal
-      ~config:(Mcp_server.workspace_config state)
+      ~dispatch_attention:(Keeper_board_attention_fanout.dispatch ~sw ~clock ~base_path:config.base_path)
+      ~config
       signal);
   Board_dispatch.set_board_sse_hook (fun event ->
     let params = board_sse_event_params event in

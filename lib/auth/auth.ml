@@ -80,6 +80,12 @@ let ensure_keeper_credentials config ~agent_names =
     let* snapshot = credential_store_snapshot_in_transaction transaction in
     let credentials = List.map snd snapshot.current_credentials in
     let index = build_token_index credentials in
+    let initially_shared = Hashtbl.fold (fun token owners hashes ->
+      if List.length owners > 1 then token :: hashes else hashes) index [] in
+    let find_token ~token =
+      if List.mem (sha256_hash token) initially_shared then
+        Error (Auth (Auth_error.InvalidToken "Credential bearer was shared at batch admission"))
+      else find_static_credential_in_index index ~token in
     let by_name = Hashtbl.create (List.length credentials) in
     List.iter (fun (credential : agent_credential) ->
       Hashtbl.replace by_name credential.agent_name credential) credentials;
@@ -100,11 +106,20 @@ let ensure_keeper_credentials config ~agent_names =
       | [] -> []
       | agent_name :: rest ->
         let result = ensure_keeper_credential_in_transaction transaction ~agent_name
-            ~find_token:(find_static_credential_in_index index) in
+            ~find_token in
         (agent_name, result) ::
         (match result with
          | Ok (_, credential) -> update credential; sync rest
-         | Error error -> List.map (fun name -> name, Error error) rest) in
+         | Error _ ->
+             (* Preflight failures leave other Keepers independent. After any
+                failure, re-read admitted authority before deciding whether
+                the remaining names can safely use a rebuilt index. *)
+             (match credential_store_snapshot_in_transaction transaction with
+              | Error error -> List.map (fun name -> name, Error error) rest
+              | Ok snapshot ->
+                  Hashtbl.clear index; Hashtbl.clear by_name;
+                  List.iter (fun (_, credential) -> update credential) snapshot.current_credentials;
+                  sync rest)) in
     Ok (sync agent_names))
   |> Result.join
 ;;

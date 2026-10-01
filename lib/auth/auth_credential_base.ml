@@ -669,7 +669,7 @@ let list_credentials config : agent_credential list =
     |> List.filter_map (fun f ->
       let name = Filename.chop_suffix f ".json" in
       match load_credential config name with
-      | Some credential when String.equal name credential.agent_name -> Some credential
+      | Some credential when String.equal name (Common.safe_filename credential.agent_name) -> Some credential
       | Some _ | None -> None)
     |> List.fold_left
          (fun acc cred ->

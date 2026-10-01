@@ -1625,9 +1625,9 @@ type async_msg =
      seconds would otherwise land on whoever happens to be selected when it
      arrives. *)
   (* The wizard's replies carry the save they answer, and
-     [Masc_tui_types.voice_wizard_after_save] and its two siblings drop one the
+     [Masc_tui_voice_wizard_session.voice_wizard_after_save] and its two siblings drop one the
      open session is not waiting on. *)
-  | Voice_wizard_saved of int * Masc_tui_types.voice_wizard_save_reply
+  | Voice_wizard_saved of int * Masc_tui_voice_wizard_session.voice_wizard_save_reply
   (* The keeper-voice screen: the voices its endpoint answers to, and what
      the setup route said about the one line it writes. *)
   | Voice_agent_voices_loaded of (Yojson.Safe.t, string) result
@@ -2702,12 +2702,12 @@ let voice_setup_section_kinds state (section : Voice_setup.section) =
 ;;
 
 let launch_voice_wizard_save state ~mailbox
-    (session : Masc_tui_types.voice_wizard_session) =
+    (session : Masc_tui_voice_wizard_session.voice_wizard_session) =
   let alongside =
     voice_setup_section_kinds state session.vws_draft.Voice_wizard.section
   in
   match
-    ( Masc_tui_types.voice_wizard_save_held session
+    ( Masc_tui_voice_wizard_session.voice_wizard_save_held session
     , Voice_wizard.save_request session.vws_draft ~revision:session.vws_revision
         ~alongside )
   with
@@ -2725,7 +2725,7 @@ let launch_voice_wizard_save state ~mailbox
   | None, Ok body ->
     state.voice_wizard_requests <- state.voice_wizard_requests + 1;
     let request = state.voice_wizard_requests in
-    state.voice_wizard <- Some (Masc_tui_types.voice_wizard_sending session ~request);
+    state.voice_wizard <- Some (Masc_tui_voice_wizard_session.voice_wizard_sending session ~request);
     let host = server_peer_host in
     let port = state.port in
     let payload = Yojson.Safe.to_string body in
@@ -2737,15 +2737,15 @@ let launch_voice_wizard_save state ~mailbox
         with
         | Masc_tui_http.Post_answered json ->
           (match voice_setup_revision json with
-           | Some revision -> Masc_tui_types.Save_written revision
+           | Some revision -> Masc_tui_voice_wizard_session.Save_written revision
            (* Written, by the status, but with no revision to keep editing
               against: what the session holds is now stale, and whether it is
               this write's is exactly what the reread decides. *)
            | None ->
-             Masc_tui_types.Save_unanswered_reply "the answer named no revision")
-        | Masc_tui_http.Post_refused message -> Masc_tui_types.Save_refused message
+             Masc_tui_voice_wizard_session.Save_unanswered_reply "the answer named no revision")
+        | Masc_tui_http.Post_refused message -> Masc_tui_voice_wizard_session.Save_refused message
         | Masc_tui_http.Post_unanswered detail ->
-          Masc_tui_types.Save_unanswered_reply detail
+          Masc_tui_voice_wizard_session.Save_unanswered_reply detail
       in
       enqueue_async mailbox (Voice_wizard_saved (request, reply))
     in
@@ -2754,7 +2754,7 @@ let launch_voice_wizard_save state ~mailbox
      | None ->
        enqueue_async mailbox
          (Voice_wizard_saved
-            (request, Masc_tui_types.Save_refused "Eio switch is unavailable"))
+            (request, Masc_tui_voice_wizard_session.Save_refused "Eio switch is unavailable"))
      | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon))
 ;;
 
@@ -13182,24 +13182,24 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       Option.iter
         (fun session ->
           Option.iter
-            (fun (updated : Masc_tui_types.voice_wizard_session) ->
+            (fun (updated : Masc_tui_voice_wizard_session.voice_wizard_session) ->
               state.voice_wizard <- Some updated;
               (match reply with
                (* The pane is one revision behind a write, and possibly behind
                   one that got no answer. *)
-               | Masc_tui_types.Save_written _ | Masc_tui_types.Save_unanswered_reply _ ->
+               | Masc_tui_voice_wizard_session.Save_written _ | Masc_tui_voice_wizard_session.Save_unanswered_reply _ ->
                    launch_voice_config_load state ~mailbox
-               | Masc_tui_types.Save_refused _ -> ());
+               | Masc_tui_voice_wizard_session.Save_refused _ -> ());
               match updated.vws_save with
-              | Masc_tui_types.Save_probing request ->
+              | Masc_tui_voice_wizard_session.Save_probing request ->
                   launch_voice_wizard_probe state ~mailbox ~request
                     voice_wizard_probe_sentence
-              | Masc_tui_types.Save_unanswered { request; _ } ->
+              | Masc_tui_voice_wizard_session.Save_unanswered { request; _ } ->
                   launch_voice_wizard_reread state ~mailbox ~request
-              | Masc_tui_types.Save_not_sent | Masc_tui_types.Save_sending _
-              | Masc_tui_types.Save_settled | Masc_tui_types.Save_needs_reopen _ ->
+              | Masc_tui_voice_wizard_session.Save_not_sent | Masc_tui_voice_wizard_session.Save_sending _
+              | Masc_tui_voice_wizard_session.Save_settled | Masc_tui_voice_wizard_session.Save_needs_reopen _ ->
                   ())
-            (Masc_tui_types.voice_wizard_after_save session ~request reply))
+            (Masc_tui_voice_wizard_session.voice_wizard_after_save session ~request reply))
         state.voice_wizard
   | Voice_agent_voices_loaded result ->
       (match state.voice_agent_voices, result with
@@ -13254,7 +13254,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         (fun session ->
           Option.iter
             (fun updated -> state.voice_wizard <- Some updated)
-            (Masc_tui_types.voice_wizard_after_probe session ~request
+            (Masc_tui_voice_wizard_session.voice_wizard_after_probe session ~request
                (Result.map voice_wizard_probe_lines result)))
         state.voice_wizard
   | Voice_wizard_reread (request, result) ->
@@ -13262,7 +13262,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         (fun session ->
           Option.iter
             (fun updated -> state.voice_wizard <- Some updated)
-            (Masc_tui_types.voice_wizard_after_reread session ~request result))
+            (Masc_tui_voice_wizard_session.voice_wizard_after_reread session ~request result))
         state.voice_wizard
   | Voice_config_loaded (result, setup, device) ->
       state.voice_input_device <- device;
@@ -19235,7 +19235,7 @@ and is loaded on demand through keeper_skill.
                 Option.iter
                   (fun session ->
                     state.voice_wizard <-
-                      Some (Masc_tui_types.voice_wizard_append session text))
+                      Some (Masc_tui_voice_wizard_session.voice_wizard_append session text))
                   state.voice_wizard
             | Some Text_palette ->
                 state.palette_query <- state.palette_query ^ text;
@@ -20084,7 +20084,7 @@ and is loaded on demand through keeper_skill.
               let set value = state.voice_wizard <- Some value in
               (* A save in flight ignores everything but the key that leaves:
                  the draft it is writing is already on its way. *)
-              if Masc_tui_types.voice_wizard_is_sending session && not (String.equal k "esc")
+              if Masc_tui_voice_wizard_session.voice_wizard_is_sending session && not (String.equal k "esc")
               then ()
               else (
                 match k with
@@ -20106,32 +20106,32 @@ and is loaded on demand through keeper_skill.
                   (match session.vws_step with
                    | Voice_wizard.Review ->
                      launch_voice_wizard_save state ~mailbox:async_messages
-                       (Masc_tui_types.voice_wizard_commit session)
+                       (Masc_tui_voice_wizard_session.voice_wizard_commit session)
                    | Voice_wizard.Section
                    | Voice_wizard.Provider
                    | Voice_wizard.Name
                    | Voice_wizard.Address
                    | Voice_wizard.Credential
                    | Voice_wizard.Model
-                   | Voice_wizard.Voice -> set (Masc_tui_types.voice_wizard_next session))
-                | "up" -> set (Masc_tui_types.voice_wizard_previous session)
-                | "down" -> set (Masc_tui_types.voice_wizard_next session)
+                   | Voice_wizard.Voice -> set (Masc_tui_voice_wizard_session.voice_wizard_next session))
+                | "up" -> set (Masc_tui_voice_wizard_session.voice_wizard_previous session)
+                | "down" -> set (Masc_tui_voice_wizard_session.voice_wizard_next session)
                 (* The provider is a closed set, so it walks under the same keys
                    a bool toggles under elsewhere in this pane. *)
                 | "left" | "right" | " "
                   when session.vws_step = Voice_wizard.Section ->
-                  set (Masc_tui_types.voice_wizard_cycle_section session)
+                  set (Masc_tui_voice_wizard_session.voice_wizard_cycle_section session)
                 | "left" | "right" | " "
                   when session.vws_step = Voice_wizard.Provider ->
-                  set (Masc_tui_types.voice_wizard_cycle_provider session)
+                  set (Masc_tui_voice_wizard_session.voice_wizard_cycle_provider session)
                 | "\127" | "\b" | "backspace" ->
-                  set (Masc_tui_types.voice_wizard_backspace session)
+                  set (Masc_tui_voice_wizard_session.voice_wizard_backspace session)
                 | s when String.length s = 1 && Char.code s.[0] = 21 ->
-                  set (Masc_tui_types.voice_wizard_clear session)
+                  set (Masc_tui_voice_wizard_session.voice_wizard_clear session)
                 | s
                   when (String.length s = 1 && Char.code s.[0] >= 32)
                        || (String.length s > 1 && Char.code s.[0] >= 0x80) ->
-                  set (Masc_tui_types.voice_wizard_append session s)
+                  set (Masc_tui_voice_wizard_session.voice_wizard_append session s)
                 | _ -> ()))
        (* The launch form owns every key while it is up, above the quit key
           the way the Lane Add-ons form is: a prompt with a q in it is a
@@ -26293,7 +26293,7 @@ and is loaded on demand through keeper_skill.
                          state.config_scroll <- 0;
                          state.voice_wizard
                            <- Some
-                                (Masc_tui_types.voice_wizard_open
+                                (Masc_tui_voice_wizard_session.voice_wizard_open
                                    ~section:Voice_setup.Tts
                                    ~provider:Voice_wizard.Elevenlabs ~revision)
                        | (Some _ | None), _ -> ())

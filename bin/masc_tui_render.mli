@@ -28,7 +28,6 @@ module Keeper_control = Masc_tui_keeper_control
 module Task_selection = Masc_tui_task_selection
 module Tool_tree = Masc_tui_tool_tree
 module Theme_choice = Masc_tui_theme_choice
-module Approval_detail = Masc_tui_approval_detail
 module Planning_detail = Masc_tui_planning_detail
 module Link = Masc_tui_link
 module Status = Masc.Keeper_status_runtime
@@ -119,6 +118,9 @@ val agenda_lines : Masc_tui_types.state -> Masc_tui_agenda.line list
     row the frame is not drawing. *)
 
 val agenda_viewport : Masc_tui_types.state -> int * int
+val planning_detail_viewport : Masc_tui_types.state -> int * int
+(** Physical row count and reader height of the current Goal detail,
+    including its pinned action rows and actual split-pane width. *)
 val agenda_scroll_position : Masc_tui_types.state -> int
 (** The scroll currently drawn, following a selected target only during
     target navigation. Page reading retains its own window. *)
@@ -146,7 +148,7 @@ val frame_choice :
 val render :
   Masc_tui_types.state ->
   Frame_presenter.frame * Masc_tui_types.clamped_scroll option *
-  Masc_tui_types.approval_row option *
+  Masc_tui_approvals_model.approval_row option *
   Masc_tui_press.press_target Masc_tui_hit.zones
 (** The frame without press marks, and where each marked text landed in it.
     Commit the zones only once the terminal accepts the frame. *)
@@ -160,8 +162,6 @@ val browser_lane_selection_scroll :
   Masc_tui_types.Browser_lane_view.t -> int
 (** Reveal the selected node's first wrapped row after explicit selection. *)
 
-val ask_question_scroll_limit : Masc_tui_types.state -> int
-val ask_question_page_size : Masc_tui_types.state -> int
 
 val runtime_config_status_scroll_limit :
   Masc_tui_types.state -> terminal_rows:int -> cols:int -> int

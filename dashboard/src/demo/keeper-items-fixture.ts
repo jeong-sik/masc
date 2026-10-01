@@ -6,9 +6,9 @@ import { html } from 'htm/preact'
 import { render } from 'preact'
 import { signal } from '@preact/signals'
 import type { Keeper } from '../types'
+import { hydrateExecutionSnapshot, refreshExecution } from '../store'
 import { KeeperItemsPanel } from '../components/keeper-items-panel'
 import { KeeperDetailSection, KeeperDetailSectionRail, activeKeeperDetailSection } from '../components/keeper-detail-shell'
-import { hydrateExecutionSnapshot } from '../store'
 
 const keeper = signal({
   name: 'rondo',
@@ -22,10 +22,12 @@ const keeper = signal({
 // Only this isolated fixture exposes a controlled roster observation.
 declare global {
   interface Window {
+    refreshKeeperItemsExecutionFixture: () => Promise<void>
     updateKeeperItemsFixture: (revision: string) => void
     updateKeeperItemsWorkspaceFixture: (workspaceRoot?: string | null) => Parameters<typeof hydrateExecutionSnapshot>[0]
   }
 }
+window.refreshKeeperItemsExecutionFixture = () => refreshExecution({ immediate: true })
 window.updateKeeperItemsFixture = revision => {
   keeper.value = { ...keeper.value, candle_account_revision: revision }
 }

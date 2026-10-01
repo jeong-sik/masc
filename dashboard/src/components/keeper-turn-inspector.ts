@@ -9,6 +9,8 @@
 // styled after keeper-v2 turn-inspector.
 
 import { html } from 'htm/preact'
+import { turnContextWindow } from '../lib/turn-context-window'
+import { ContextWindowFacts } from './common/context-window-facts'
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import {
   fetchKeeperProviderInput,
@@ -362,6 +364,7 @@ type TurnDetail = {
   // RFC-0233 §8: unknown when usage is not per-request or required facts are absent.
   ctxPct: number | null
   contextWindow: number | null
+  contextLabel: string
   cost: number | null
   measuredDurationMs: number | null
   maxMeasuredDurationMs: number
@@ -483,10 +486,8 @@ function buildTurnDetail(
   // RFC-0233 §8: only per-request usage can describe this request's context fill and cost.
   // Preserve cumulative/unknown-scope counts without reinterpreting them.
   const perRequest = record.usage_scope === 'per_request'
-  const ctxPct =
-    perRequest && tokIn != null && record.context_window != null && record.context_window > 0
-      ? (tokIn / record.context_window) * 100
-      : null
+  const context = turnContextWindow(record)
+  const ctxPct = context.percent
   const cost =
     perRequest &&
     tokIn != null &&
@@ -565,7 +566,8 @@ function buildTurnDetail(
     tokIn,
     tokOut,
     ctxPct,
-    contextWindow: record.context_window ?? null,
+    contextWindow: context.window,
+    contextLabel: context.label,
     cost,
     measuredDurationMs,
     maxMeasuredDurationMs,
@@ -803,7 +805,8 @@ function MetaTab({ record, t, source }: { record: TurnRecordEntry; t: TurnDetail
         <span class="k">output tokens</span><span class="v">${t.tokOut?.toLocaleString() ?? '미상'}</span>
         <span class="k">cache read tokens</span><span class="v">${record.cache_read_input_tokens?.toLocaleString() ?? '미상'}</span>
         <span class="k">cache write tokens</span><span class="v">${record.cache_creation_input_tokens?.toLocaleString() ?? '미상'}</span>
-        <span class="k">ctx window${record.context_window != null ? '' : ' · 미상'}</span><span class="v">${t.ctxPct != null ? `${t.ctxPct.toFixed(1)}%` : '미상'} / ${record.context_window?.toLocaleString() ?? '미상'}</span>
+        <span class="k">ctx window${t.contextWindow != null ? '' : ' · 미상'}</span><span class="v">${t.ctxPct != null ? `${t.ctxPct.toFixed(1)}%` : '미상'} / ${t.contextWindow?.toLocaleString() ?? '미상'}</span>
+        <span class="k">context evidence</span><span class="v"><${ContextWindowFacts} record=${record} /></span>
         <span class="k">keeper turn</span><span class="v">T${record.absolute_turn}</span>
         <span class="k">agent subturns</span><span class="v">${formatTurnList(uniqueNumbers(t.tools.map(tool => tool.agentSubturn)))}</span>
         <span class="k">thinking</span><span class="v">${thinkingStateLabel(record)}</span>
@@ -956,8 +959,9 @@ function TurnDetailDrawer({
         <div class="ti-tok" data-testid="turn-token-bar">
           <div class="ti-tok-top">
             <span class="lbl">토큰 사용량 · ${USAGE_SCOPE_LABELS[row.record.usage_scope]}</span>
-            <span class="ctxpct">컨텍스트 ${t.ctxPct != null ? `${t.ctxPct.toFixed(1)}%` : '미상'}${t.contextWindow != null ? ` / ${formatCtxWindowK(t.contextWindow)}` : ''}</span>
+            <span class="ctxpct">${t.contextLabel} ${t.ctxPct != null ? `${t.ctxPct.toFixed(1)}%` : '미상'}${t.contextWindow != null ? ` / ${formatCtxWindowK(t.contextWindow)}` : ''}</span>
           </div>
+          <div class="rt-note"><${ContextWindowFacts} record=${row.record} /></div>
           <div class="ti-tok-bar">
             ${tokenCounts != null && tokenCounts.total > 0
               ? html`

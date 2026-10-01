@@ -47,7 +47,8 @@ def task(status):
     row = {"id": TASK_ID, "title": TITLE, "description": "Task description remains readable.",
            "status": status, "assignee": ACTOR, "priority": 2, "cycle_count": 7,
            "created_at": STAMP, "created_by": CREATOR, "files": ["docs/evidence/task-metadata.md"],
-           "handoff_context": {"summary": "Retained handoff", "reclaim_policy": "block_reclaim",
+           "reclaim_policy": "block_reclaim",
+           "handoff_context": {"summary": "Retained handoff", "reclaim_policy": "allow_reclaim",
                                "updated_at": HANDOFF_STAMP, "updated_by": HANDOFF_UPDATER}}
     if status == "awaiting_verification":
         row.update(started_at=STAMP, submitted_at=STAMP, verification_id=VERIFICATION)
@@ -127,7 +128,11 @@ def run(executable):
                     h.wait_for_output(process, fd, output, b"HISTORYEND", start=0, timeout=10)
                     h.drain_until_quiet(process, fd, output)
                     all_text = compact(screen(output))
-                    for value in (TITLE, TASK_ID, ACTOR, CREATOR, STAMP, evidence, HISTORY, "block_reclaim", HANDOFF_STAMP, HANDOFF_UPDATER):
+                    for value in (TITLE, TASK_ID, ACTOR, CREATOR, STAMP, evidence, HISTORY,
+                                  "reclaim policy: block_reclaim",
+                                  ("handoff reclaim policy allow_reclaim" if width == 30
+                                   else "handoff reclaim policy: allow_reclaim"),
+                                  "handoff updated: " + HANDOFF_STAMP, "handoff updater: " + HANDOFF_UPDATER):
                         assert compact(value.encode()) in all_text, (status, width, value, all_text)
                     h.resize_and_wait(process, fd, output, rows=18, columns=width,
                                       needle=b"TITLEHEAD", final_cursor=b"\x1b[?25l")

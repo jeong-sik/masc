@@ -119,16 +119,24 @@ describe('FlowControlPanel', () => {
     expect(status!.textContent).toContain('1 active inference')
   })
 
-  it('keeps worker flow controls enabled but disables admin-only GC', async () => {
+  it('disables namespace actions and GC for a worker', async () => {
     render(html`<${FlowControlPanel} />`, container)
     await flushUi()
 
     const buttons = Array.from(container.querySelectorAll('button'))
     const pause = buttons.find((button) => button.textContent?.includes('Pause'))
     const gc = buttons.find((button) => button.textContent?.includes('Run GC'))
-    expect(pause?.disabled).toBe(false)
+    expect(pause?.disabled).toBe(true)
     expect(gc?.disabled).toBe(true)
     expect(dashboardAuthAccess).toHaveBeenCalledWith(null, 'admin')
+  })
+
+  it('enables namespace actions for an admin', async () => {
+    dashboardAuthAccess.mockReturnValue({ allowed: true, required_role: 'admin', effective_role: 'admin', reason: null })
+    render(html`<${FlowControlPanel} />`, container)
+    await flushUi()
+    const pause = Array.from(container.querySelectorAll('button')).find(button => button.textContent?.includes('Pause'))
+    expect(pause?.disabled).toBe(false)
   })
 
 })

@@ -46,6 +46,14 @@ jobs:
           sha256sum deployment_preflight_helper.exe main_eio.exe masc_browser_host.exe masc_tui.exe > SHA256SUMS
           sha256sum --check SHA256SUMS
 
+      - name: Upload Linux x64 probe
+        uses: actions/upload-artifact@v7
+        with:
+          name: linux-x64-probe-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/masc-linux-x64-probe/
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Set up Node for Item HTTP acceptance
         if: inputs.capture_item_http
         uses: actions/setup-node@v7
@@ -93,60 +101,6 @@ jobs:
             ${{ runner.temp }}/item-http-evidence/server.log
           if-no-files-found: error
           retention-days: 14
-
-      - name: Upload Linux x64 probe
-        uses: actions/upload-artifact@v7
-        with:
-          name: linux-x64-probe-${{ github.sha }}-attempt-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/masc-linux-x64-probe/
-          if-no-files-found: error
-          retention-days: 7
-
-      - name: Set up Node for Item HTTP acceptance
-        if: inputs.capture_item_http
-        uses: actions/setup-node@v7
-        with:
-          node-version: '22'
-
-      - name: Build exact-source production dashboard for Item HTTP acceptance
-        if: inputs.capture_item_http
-        working-directory: dashboard
-        run: |
-          corepack enable && corepack prepare pnpm@10.31.0 --activate
-          pnpm install --frozen-lockfile
-          pnpm build
-          pnpm exec playwright install --with-deps chromium
-
-      - name: Exercise isolated Item HTTP routes
-        if: inputs.capture_item_http
-        env:
-          SOURCE_SHA: ${{ github.sha }}
-        run: |
-          python3 scripts/item-http-acceptance.py \
-            --binary "$RUNNER_TEMP/masc-linux-x64-probe/main_eio.exe" \
-            --dashboard assets/dashboard --source-sha "$SOURCE_SHA" \
-            --output "$RUNNER_TEMP/item-http-evidence" --capture-browser
-
-      - name: Upload Item HTTP evidence without workspace credentials
-        if: always() && inputs.capture_item_http
-        uses: actions/upload-artifact@v7
-        with:
-          name: item-http-${{ github.sha }}-attempt-${{ github.run_attempt }}
-          path: |
-            ${{ runner.temp }}/item-http-evidence/browser-evidence.json
-            ${{ runner.temp }}/item-http-evidence/item-server-*.png
-            ${{ runner.temp }}/item-http-evidence/http-evidence.json
-            ${{ runner.temp }}/item-http-evidence/tool-calls.json
-            ${{ runner.temp }}/item-http-evidence/account.json
-            ${{ runner.temp }}/item-http-evidence/account-after.json
-            ${{ runner.temp }}/item-http-evidence/account-restarted.json
-            ${{ runner.temp }}/item-http-evidence/portrait.png
-            ${{ runner.temp }}/item-http-evidence/portrait-equipped.png
-            ${{ runner.temp }}/item-http-evidence/portrait-restarted.png
-            ${{ runner.temp }}/item-http-evidence/server.log
-          if-no-files-found: error
-          retention-days: 14
-
 
   stagehand-model-probe:
     if: inputs.target == 'stagehand-model-macos-arm64'

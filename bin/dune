@@ -1054,6 +1054,7 @@
   masc ; the health reading is a typed variant: the pane decides what a gone
        ; keeper's open turn may claim, as masc_tui_keeper_mark already
        ; reads the same variant for its glyph.
+  masc_tui_ansi
   masc_tui_acting
   masc_tui_observer
   masc_tui_message_layout
@@ -1454,10 +1455,29 @@
  (libraries masc_tui_composer masc_tui_types))
 
 (library
+ (name masc_tui_approvals_model)
+ (wrapped false)
+ (modules masc_tui_approvals_model)
+ (libraries masc_tui_types masc_tui_operator_projection masc_tui_ask_projection masc))
+
+(library
+ (name masc_tui_home)
+ (wrapped false)
+ (modules masc_tui_home)
+ (libraries masc_tui_types masc_tui_approvals_model masc_tui_ansi masc_tui_agenda
+  masc_tui_message_layout masc_tui_config masc.keeper_registry masc))
+
+(library
+ (name masc_tui_surface_navigation)
+ (wrapped false)
+ (modules masc_tui_surface_navigation)
+ (libraries masc_tui_types masc_tui_approvals_model))
+
+(library
  (name masc_tui_approval_authority)
  (wrapped false)
  (modules masc_tui_approval_authority)
- (libraries masc_tui_types))
+ (libraries masc_tui_approvals_model masc_tui_types))
 
 (library
  (name masc_tui_terminal_title)
@@ -1633,7 +1653,7 @@
  (name masc_tui_render_prim)
  (wrapped false)
  (modules masc_tui_render_prim)
- (libraries
+ (libraries masc_tui_approvals_model masc_tui_surface_navigation
   masc_tui_candle
   masc_tui_frame_timing
   masc_tui_next_request_band
@@ -1692,6 +1712,7 @@
  (wrapped false)
  (modules masc_tui_render_chat)
  (libraries
+  masc.keeper_portrait
   masc_tui_pick_list
   masc_tui_render_prim
   masc_tui_composer
@@ -1782,6 +1803,7 @@
  (modules
   masc_tui
   masc_tui_render
+  masc_tui_render_approvals
   masc_tui_render_code
   masc_tui_render_resources
   masc_tui_render_board
@@ -1789,7 +1811,7 @@
   masc_tui_http)
  (public_name masc-tui)
  (package masc)
- (libraries
+ (libraries masc_tui_home masc_tui_approvals_model masc_tui_surface_navigation
   masc_tui_candle
   masc.masc_candle
   masc_tui_voice_wizard_session
@@ -2136,6 +2158,7 @@
  (wrapped false)
  (modules masc_tui_emblem_screen)
  (libraries
+  masc
   masc.keeper_portrait
   masc_tui_keeper_portrait
   masc_tui_graphics

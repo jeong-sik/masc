@@ -1,6 +1,7 @@
 open Masc.Tui_decode_memory_facts
 open Masc_tui_types
 open Masc.Tui_decode
+open Masc.Tui_decode_memory_health
 open Masc_tui_ansi
 
 module Render_schedule = Masc_tui_render_schedule
@@ -20,24 +21,24 @@ let keeper_lane_idle_text seconds =
 (* What the operator reads for how the last Librarian pass ended. The wire
    words name code paths ("not_committed"); these say what happened. *)
 let librarian_pass_end_words = function
-  | Pass_off -> "switched off"
-  | Pass_lane_unconfigured -> "no model lane set up"
-  | Pass_drained -> "caught up"
-  | Pass_not_committed -> "last pass saved nothing"
-  | Pass_stopped _ -> "stopped on an error"
-  | Pass_raised _ -> "crashed"
+  | Masc.Tui_decode_memory_health.Pass_off -> "switched off"
+  | Masc.Tui_decode_memory_health.Pass_lane_unconfigured -> "no model lane set up"
+  | Masc.Tui_decode_memory_health.Pass_drained -> "caught up"
+  | Masc.Tui_decode_memory_health.Pass_not_committed -> "last pass saved nothing"
+  | Masc.Tui_decode_memory_health.Pass_stopped _ -> "stopped on an error"
+  | Masc.Tui_decode_memory_health.Pass_raised _ -> "crashed"
 
 let librarian_failure_words = function
-  | Failure_prompt_render -> "prompt could not be built"
-  | Failure_execution_clock_unavailable -> "no clock to run on"
-  | Failure_exact_setup -> "model call could not be set up"
-  | Failure_exact_execution -> "model call failed"
-  | Failure_domain_output_invalid -> "model answer was not usable"
-  | Failure_absorb_judgment -> "copy check failed; nothing saved"
-  | Failure_memory_snapshot_write -> "Memory could not be saved"
-  | Failure_runtime_context_unavailable -> "no runtime context"
-  | Failure_lane_cancelled -> "cancelled before saving"
-  | Failure_unhandled_exception -> "unexpected crash"
+  | Masc.Tui_decode_memory_health.Failure_prompt_render -> "prompt could not be built"
+  | Masc.Tui_decode_memory_health.Failure_execution_clock_unavailable -> "no clock to run on"
+  | Masc.Tui_decode_memory_health.Failure_exact_setup -> "model call could not be set up"
+  | Masc.Tui_decode_memory_health.Failure_exact_execution -> "model call failed"
+  | Masc.Tui_decode_memory_health.Failure_domain_output_invalid -> "model answer was not usable"
+  | Masc.Tui_decode_memory_health.Failure_absorb_judgment -> "copy check failed; nothing saved"
+  | Masc.Tui_decode_memory_health.Failure_memory_snapshot_write -> "Memory could not be saved"
+  | Masc.Tui_decode_memory_health.Failure_runtime_context_unavailable -> "no runtime context"
+  | Masc.Tui_decode_memory_health.Failure_lane_cancelled -> "cancelled before saving"
+  | Masc.Tui_decode_memory_health.Failure_unhandled_exception -> "unexpected crash"
 
 (* How the facts title reads its own keeper. "*" is how the fleet view is asked
    for, not how it should be read, so the title reads it as a phrase. The title
@@ -200,7 +201,7 @@ type memory_context_projection =
   ; stalled_row : (int * string) option
   }
 
-let memory_context_lines ~cols ~detail (k : memory_keeper_health) =
+let memory_context_lines ~cols ~detail (k : Masc.Tui_decode_memory_health.memory_keeper_health) =
   let current_line =
     Printf.sprintf "  %s · %s · snapshot r%d · stored %s tok · updated %s"
       k.mkh_keeper_id (memory_state_label (memory_state k)) k.mkh_revision
@@ -264,21 +265,21 @@ let memory_context_lines ~cols ~detail (k : memory_keeper_health) =
      which file: it is neither "no gap" nor a gap. *)
   let librarian_stalled_lines =
     match k.mkh_librarian.mlh_stalled with
-    | Some (Stalled_gap { mls_gap_start_atom; mls_gap_end_atom }) ->
+    | Some (Masc.Tui_decode_memory_health.Stalled_gap { mls_gap_start_atom; mls_gap_end_atom }) ->
       let atoms =
         if mls_gap_end_atom - mls_gap_start_atom = 1
         then Printf.sprintf "atom %d is" mls_gap_start_atom
         else Printf.sprintf "atoms %d-%d are" mls_gap_start_atom (mls_gap_end_atom - 1)
       in
       [ Printf.sprintf "  Librarian stalled · %s in neither the request nor memory" atoms ]
-    | Some (Stalled_unmeasured { mls_cause; mls_detail }) ->
+    | Some (Masc.Tui_decode_memory_health.Stalled_unmeasured { mls_cause; mls_detail }) ->
       let cause =
         match mls_cause with
-        | Stall_meta_unreadable -> "keeper meta unreadable"
-        | Stall_turn_records_unreadable -> "turn records unreadable"
-        | Stall_turn_boundary_refused -> "turn boundaries unreadable"
-        | Stall_snapshot_unreadable -> "continuity snapshot unreadable"
-        | Stall_read_position_unreadable -> "read position unreadable"
+        | Masc.Tui_decode_memory_health.Stall_meta_unreadable -> "keeper meta unreadable"
+        | Masc.Tui_decode_memory_health.Stall_turn_records_unreadable -> "turn records unreadable"
+        | Masc.Tui_decode_memory_health.Stall_turn_boundary_refused -> "turn boundaries unreadable"
+        | Masc.Tui_decode_memory_health.Stall_snapshot_unreadable -> "continuity snapshot unreadable"
+        | Masc.Tui_decode_memory_health.Stall_read_position_unreadable -> "read position unreadable"
       in
       [ Printf.sprintf "  Librarian stalled · not measured, %s · %s" cause
           (Terminal_text.preview_line mls_detail) ]
@@ -287,7 +288,7 @@ let memory_context_lines ~cols ~detail (k : memory_keeper_health) =
   let librarian_cause_lines =
     (* The cause is drawn on its own row because it is the part of the
        Librarian row an operator acts on. *)
-    match Option.bind k.mkh_librarian.mlh_state memory_librarian_pass_end_cause with
+    match Option.bind k.mkh_librarian.mlh_state Masc.Tui_decode_memory_health.memory_librarian_pass_end_cause with
     | Some cause -> [ "  Librarian cause · " ^ Terminal_text.preview_line cause ]
     | None -> []
   in
@@ -322,12 +323,12 @@ let memory_context_lines ~cols ~detail (k : memory_keeper_health) =
       | None -> "not observed since server start", "not observed"
       | Some value ->
         let input = match value.mcp_input with
-          | Context_summarized value -> "summary " ^ frontier value
-          | Context_absorbed value ->
+          | Masc.Tui_decode_memory_health.Context_summarized value -> "summary " ^ frontier value
+          | Masc.Tui_decode_memory_health.Context_absorbed value ->
             Printf.sprintf "absorbed to atom %d · trace %s · no summary"
               value.mcpo_end_atom (Terminal_text.single_line value.mcpo_trace_id)
-          | Context_without_snapshot -> "no snapshot: this turn only"
-          | Context_not_applied -> "saved context not applied" in
+          | Masc.Tui_decode_memory_health.Context_without_snapshot -> "no snapshot: this turn only"
+          | Masc.Tui_decode_memory_health.Context_not_applied -> "saved context not applied" in
         (* The size as a size. The row drew the digit count -- one live block
            read "446558 request bytes" -- while every other size on this TUI
            goes through the shared ladder and reads "436.1 KB". The heading a
@@ -376,9 +377,9 @@ let memory_context_lines ~cols ~detail (k : memory_keeper_health) =
   in
   let alert_lines =
     List.map
-      (fun (a : memory_alert) ->
+      (fun (a : Masc.Tui_decode_memory_health.memory_alert) ->
         Printf.sprintf "[%s] %s \xe2\x80\x94 %s"
-          (match Masc.Tui_decode.memory_alert_severity a.ma_code with
+          (match Masc.Tui_decode_memory_health.memory_alert_severity a.ma_code with
            | `Warn -> "warn"
            | `Error -> "error")
           a.ma_label
@@ -461,11 +462,11 @@ type memory_state = Masc_tui_types.memory_state =
    [?] sheet cannot spell the same state two ways. *)
 let memory_state_cell = Masc_tui_memory_mark.glyph
 
-let memory_deviation_style (k : memory_keeper_health) =
+let memory_deviation_style (k : Masc.Tui_decode_memory_health.memory_keeper_health) =
   let server_error =
     List.exists
       (fun alert ->
-        match Masc.Tui_decode.memory_alert_severity alert.ma_code with
+        match Masc.Tui_decode_memory_health.memory_alert_severity alert.ma_code with
         | `Error -> true
         | `Warn -> false)
       k.mkh_alerts
@@ -482,7 +483,7 @@ let memory_deviation_style (k : memory_keeper_health) =
         Some (Theme.warn ())
     | Memory_ordinary -> None
 
-let memory_row_line columns (k : memory_keeper_health) =
+let memory_row_line columns (k : Masc.Tui_decode_memory_health.memory_keeper_health) =
   let no_value = Masc_tui_theme.Glyph.no_value in
   let ordinary_reading value = if k.mkh_snapshot_present then value () else no_value in
   let source =

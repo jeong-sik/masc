@@ -1,0 +1,27 @@
+{
+  "base_commit": "68db59f7d7ea05fe4f8128c84eebda69788c47f2",
+  "working_tree_delta": "scroll normalization before capture",
+  "source_sha256": {
+    "dashboard/e2e/keeper-items.mjs": "f35689102eb34661e53267eb7a01f4cac231fc59770d46a5d291428e01ad3565",
+    "dashboard/src/components/keeper-items-panel.ts": "bc6fce45474fc2deb5992caecc424611cfbe3949fe666b6087abd7ab2553a6d1",
+    "dashboard/src/components/keeper-portrait.ts": "443c04d6ecd27fa9f64f4dfc6d0d3092f9d9b334ef407498bf56a4699f3285c8"
+  },
+  "command": "node e2e/keeper-items.mjs",
+  "exit_code": 0,
+  "scope": "actual Chromium against local Vite production components with synthetic account HTTP and portrait PNG503; no native, installed, CI or build proof",
+  "artifacts": {
+    "keeper-items-recovered.png": "9484e31829ca4f02cf4bafc0eb6a8acf8a1916beabde947338e0246bf94107c9",
+    "browser.log": "922f27ed1984b8ccb88410bdfded7af59fc13022e55039e387f89ba7c5f0809e",
+    "keeper-items-unavailable.png": "d6ec71175cbbf2af2b84b8840d10c9adf63f7998397ac7e635d5febb4ac87872",
+    "keeper-items-price-change.png": "b7e635786f0ab05b95330db86aeb2a975aa5ff17060a722af0e1933b662acc41",
+    "keeper-items-loading.png": "845ae6a495cd3ad421c479ad8d8695d6736c2aa11f9cc643af05ab23224b3567",
+    "keeper-items-mobile.png": "76ade8fb9c4b644bf2b8d3b068ccb601fe1ebdf4203d4c74164524a1d000b55d",
+    "keeper-items-free-purchase.png": "841edccc23ee33b059d0b46600bb250ac910f48751cd64ef472f27667d5f13c9",
+    "initial-server-not-ready.log": "5e7e4ab1840788d673b371af8ca2b530c355b14e689ebcf71781398f1db8ab88",
+    "initial-server-not-ready-receipt.json": "6b32b8e6af1dfb38ff8a26f87cd578226ffe2ea1d0b633ad6159159e7483d2a7",
+    "keeper-items-preview-restored.png": "5d8edb9ea420577260846231c32ca69ab3dc996c13f00a6820865d26bfe16a0c",
+    "keeper-items-desktop.png": "5d8edb9ea420577260846231c32ca69ab3dc996c13f00a6820865d26bfe16a0c",
+    "manifest.json": "34692655152d5060fbeb728c24d59b97c3393174d2f9261cb37803b80c063007",
+    "keeper-items-preview-unavailable.png": "50347a68b0a3ca22ca8ee5fcab74d9cd040a9cc406b323668a00bea9278bfdb0"
+  }
+}

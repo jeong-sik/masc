@@ -14,7 +14,8 @@ val context_fields :
 (** Context occupancy projected from the keeper's newest TurnRecord
     (RFC-0233), the measurement SSOT: [context_tokens] is the
     provider-reported prompt total of the last completed turn,
-    [context_max] the context window resolved for that same request, and
+    [context_max] its provider-reported usable window (or the configured
+    request window if the provider did not report one), and
     the nested ["context"] object carries provenance ([turn_ref],
     [observed_at], [request_body_bytes]).
 

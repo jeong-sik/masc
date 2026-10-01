@@ -52,7 +52,7 @@ let test_an_escape_byte_is_still_escaped () =
 let test_a_dropped_reason_says_so () =
   check int "the surface says the reason did not fit" 1
     (Ast_grep.count_exact_string_literals_in_value_binding
-       ~module_path:"bin/masc_tui_render.ml" ~binding_name:"draw_ask_questions"
+       ~module_path:"bin/masc_tui_render_approvals.ml" ~binding_name:"draw_ask_questions"
        ~needle:"    %sthe reason did not fit -- a opens it%s")
 
 let () =

@@ -653,6 +653,26 @@ class SkillActivationEventsTest(unittest.TestCase):
                         log_fixture.header_row(WORKSPACE, session)]))
                 self.assertIs(caught.exception.fault, Fault.MALFORMED_HEADER)
 
+    def test_projection_shape_faults_have_no_event_log_row(self):
+        fixture = json.loads((REPO_ROOT / "test/fixtures/skill-ledger-revision.json").read_text())
+        for name in ("activations", "transition_rejections"):
+            changed = copy.deepcopy(fixture)
+            changed[name][0]["extra"] = 1
+            with self.subTest(projection=name):
+                with self.assertRaises(events.SkillLedgerError) as caught:
+                    events.ledger_revision(changed)
+                self.assertIs(caught.exception.fault, Fault.MALFORMED_LEDGER)
+                self.assertIsNone(caught.exception.row)
+                self.assertFalse(str(caught.exception).startswith("row "))
+
+    def test_projection_preserves_specific_invariant_fault_without_a_row(self):
+        value = ledger()
+        value["activations"][0]["delivery"]["boundary"]["agent_core_turn"] = 1
+        with self.assertRaises(events.SkillLedgerError) as caught:
+            events.ledger_revision(value)
+        self.assertIs(caught.exception.fault, Fault.INVALID_DELIVERY_AGENT_CORE_TURN)
+        self.assertIsNone(caught.exception.row)
+
     def test_revision_of_a_ledger_without_its_identity_is_refused(self):
         value = ledger()
         del value["workspace_key"]

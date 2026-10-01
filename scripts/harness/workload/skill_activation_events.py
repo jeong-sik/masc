@@ -84,6 +84,7 @@ class SkillLedgerError(RuntimeError):
         location = "" if row is None else f"row {row}: "
         super().__init__(f"{location}{fault.value}: {detail}")
         self.fault = fault
+        self.detail = detail
         self.row = row
 
 
@@ -718,10 +719,17 @@ def _revision(
     # order. Validate and canonicalize copies just like the event reader.
     activations = copy.deepcopy(activations)
     transition_rejections = copy.deepcopy(transition_rejections)
-    for activation in activations:
-        _parse_activation({"activation": activation}, 0, session_id)
-    for rejection in transition_rejections:
-        _parse_rejection({"rejection": rejection}, 0, session_id)
+    try:
+        for activation in activations:
+            _parse_activation({"activation": activation}, 0, session_id)
+        for rejection in transition_rejections:
+            _parse_rejection({"rejection": rejection}, 0, session_id)
+    except SkillLedgerError as error:
+        # These values come from a projection, with no event-log row.
+        # Shape refusals are ledger faults; specific invariant codes remain.
+        fault = (SkillLedgerFault.MALFORMED_LEDGER
+                 if error.fault is SkillLedgerFault.MALFORMED_EVENT else error.fault)
+        raise SkillLedgerError(fault, error.detail) from error
     canonical: JsonObject = {
         "workspace_key": workspace_key,
         "session_id": session_id,

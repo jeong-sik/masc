@@ -516,6 +516,7 @@ type log_read =
    other unreadable row fails closed, as an unreadable snapshot does. *)
 let read_pending_log_unlocked
       ~base_path
+      ~snapshot_format
       ~snapshot_generation
       ~pending_map
       ~delivery_map
@@ -571,27 +572,22 @@ let read_pending_log_unlocked
                match Yojson.Safe.from_string line with
                | exception Yojson.Json_error detail -> Error ("invalid JSON: " ^ detail)
                | json ->
-                 (match log_row_of_yojson ~base_path json with
+                 (match log_row_generation_of_yojson json with
                   | Error _ as error -> error
-                  | Ok decoded ->
-                    if decoded.row_generation < snapshot_generation
-                    then Ok (pending_map, delivery_map, next_sequence, rows)
-                    else if decoded.row_generation > snapshot_generation
-                    then
-                      Error
-                        (Printf.sprintf
-                           "row generation %d is ahead of snapshot generation %d"
-                           decoded.row_generation
-                           snapshot_generation)
-                    else (
-                      let pending_map, delivery_map =
-                        apply_log_row (pending_map, delivery_map) decoded.row
-                      in
-                      Ok
-                        ( pending_map
-                        , delivery_map
-                        , max next_sequence decoded.row_next_sequence
-                        , rows + 1 )))))
+                  | Ok row_generation when row_generation < snapshot_generation ->
+                    Ok (pending_map, delivery_map, next_sequence, rows)
+                  | Ok row_generation when row_generation > snapshot_generation ->
+                    Error (Printf.sprintf
+                      "row generation %d is ahead of snapshot generation %d"
+                      row_generation snapshot_generation)
+                  | Ok _ ->
+                    (match log_row_of_yojson ~snapshot_format ~base_path json with
+                     | Error _ as error -> error
+                     | Ok decoded ->
+                       let pending_map, delivery_map =
+                         apply_log_row (pending_map, delivery_map) decoded.row in
+                       Ok (pending_map, delivery_map,
+                         max next_sequence decoded.row_next_sequence, rows + 1)))))
         (Ok (pending_map, delivery_map, next_sequence, 0))
         lines
     in
@@ -618,12 +614,14 @@ let read_durable_unlocked ~base_path =
     match Safe_ops.read_json_file_safe path with
     | Error reason -> Error { path; reason }
     | Ok json ->
-      (match snapshot_of_yojson ~base_path json with
+      (match Result.bind (pending_snapshot_format_of_yojson json) (fun format ->
+        Result.map (fun decoded -> format, decoded) (snapshot_of_yojson ~base_path json)) with
        | Error reason -> Error { path; reason }
-       | Ok (pending_map, delivery_map, next_sequence, generation, entry_errors) ->
+       | Ok (snapshot_format, (pending_map, delivery_map, next_sequence, generation, entry_errors)) ->
          (match
             read_pending_log_unlocked
               ~base_path
+              ~snapshot_format
               ~snapshot_generation:generation
               ~pending_map
               ~delivery_map
@@ -665,6 +663,7 @@ let load_snapshot_unlocked ~base_path :
         Error { path; reason }
       | Ok json ->
         (match
+           Result.bind (pending_snapshot_format_of_yojson json) (fun snapshot_format ->
            Result.bind (snapshot_of_yojson ~base_path json) (fun decoded ->
              let ( pending_map
                  , delivery_map
@@ -677,13 +676,14 @@ let load_snapshot_unlocked ~base_path :
              match
                read_pending_log_unlocked
                  ~base_path
+                 ~snapshot_format
                  ~snapshot_generation:generation
                  ~pending_map
                  ~delivery_map
                  ~next_sequence
              with
              | Error error -> Error (storage_error_to_string error)
-             | Ok log -> Ok (log, generation, pending_entry_errors))
+             | Ok log -> Ok (log, generation, pending_entry_errors)))
          with
          | Ok (log, loaded_generation, pending_entry_errors) ->
            let loaded_pending = log.log_pending in

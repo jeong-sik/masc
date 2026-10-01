@@ -48,9 +48,12 @@ captured rule intent is restored as **one-shot only**: its decision, source,
 exact request, expiry and grant-consumption state remain, but its old
 `remember_rule` flag cannot create or renew a remembered rule. Rules already
 written to the old rule file remain available independently. The released
-versionless append log uses the same delivery shape and follows the same
-one-shot rule. New snapshot writes use version12 and require the current
-rule-intent contract.
+versionless append log uses the same delivery shape only beside its
+authoritative v11 snapshot and in that snapshot’s generation. Older
+generations were already included in the snapshot and are skipped before
+delivery decoding. Current-generation rows beside a v12 snapshot require
+the current rule-intent contract; missing intent is a storage refusal, not
+a downgrade to one-shot state. New snapshot writes use version12.
 
 No file conversion or runtime-state reset is needed for these released
 formats. Unsupported versions and malformed files remain untouched and

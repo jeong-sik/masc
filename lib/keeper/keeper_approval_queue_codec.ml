@@ -806,30 +806,31 @@ let validate_snapshot_sequences ~next_sequence pending_entries delivery_entries 
   check None sequences
 ;;
 
+type pending_snapshot_format = Released_v11 | Current_v12
+
+let pending_snapshot_format_of_yojson = function
+  | `Assoc fields ->
+    let ( let* ) = Result.bind in
+    let surface = "gate_pending" in
+    let* () = reject_unknown_fields ~surface
+      ~allowed:["version"; "generation"; "next_sequence"; "pending"; "deliveries"] fields in
+    (match List.assoc_opt "version" fields with
+     | Some (`Int 11) -> Ok Released_v11
+     | Some (`Int version) when version = pending_store_version -> Ok Current_v12
+     | Some (`Int version) -> Error (Printf.sprintf
+         "%s.version %d is unsupported (current %d); preserve the store and use a reader supporting its version"
+         surface version pending_store_version)
+     | Some _ -> Error (surface ^ ".version must be an integer")
+     | None -> Error (surface ^ ".version is required"))
+  | _ -> Error "gate_pending snapshot must be a JSON object"
+;;
+
 let snapshot_of_yojson ~base_path json =
   match json with
   | `Assoc fields ->
     let ( let* ) = Result.bind in
     let surface = "gate_pending" in
-    let* () =
-      reject_unknown_fields
-        ~surface
-        ~allowed:[ "version"; "generation"; "next_sequence"; "pending"; "deliveries" ]
-        fields
-    in
-    let* version =
-        match List.assoc_opt "version" fields with
-        | Some (`Int version) when version = pending_store_version || version = 11 -> Ok version
-        | Some (`Int version) ->
-          Error
-            (Printf.sprintf
-               "%s.version %d is unsupported (current %d); preserve the store and use a reader supporting its version"
-               surface
-               version
-               pending_store_version)
-      | Some _ -> Error (surface ^ ".version must be an integer")
-      | None -> Error (surface ^ ".version is required")
-    in
+    let* format = pending_snapshot_format_of_yojson json in
     let* generation = required_positive_int ~surface "generation" fields in
     let* next_sequence = required_positive_int ~surface "next_sequence" fields in
     let* pending_json = required_member ~surface "pending" fields in
@@ -844,8 +845,8 @@ let snapshot_of_yojson ~base_path json =
     let* delivery_entries =
       parse_list
           ~surface:"gate_pending.deliveries"
-          ((if version = 11 then persisted_delivery_v11_of_yojson
-            else persisted_delivery_of_yojson) ~base_path)
+          ((match format with Released_v11 -> persisted_delivery_v11_of_yojson
+            | Current_v12 -> persisted_delivery_of_yojson) ~base_path)
           delivery_json
     in
     let* pending_map =
@@ -888,7 +889,17 @@ type decoded_log_row =
   ; row_next_sequence : int
   }
 
-let log_row_of_yojson ~base_path json =
+let log_row_generation_of_yojson = function
+  | `Assoc fields ->
+    let ( let* ) = Result.bind in
+    let surface = "gate_pending.log" in
+    let* () = reject_unknown_fields ~surface
+      ~allowed:["kind"; "generation"; "next_sequence"; "entry"; "delivery"; "id"] fields in
+    required_positive_int ~surface "generation" fields
+  | _ -> Error "gate_pending.log row must be a JSON object"
+;;
+
+let log_row_of_yojson ?(snapshot_format = Current_v12) ~base_path json =
   let ( let* ) = Result.bind in
   let surface = "gate_pending.log" in
   match json with
@@ -923,7 +934,9 @@ let log_row_of_yojson ~base_path json =
         let* json = required_member ~surface "delivery" fields in
         Result.map
           (fun delivery -> Delivery_upsert delivery)
-          (persisted_log_delivery_of_yojson ~base_path json)
+          ((match snapshot_format with
+            | Released_v11 -> persisted_log_delivery_of_yojson
+            | Current_v12 -> persisted_delivery_of_yojson) ~base_path json)
       | "delivery_remove" -> Result.map (fun id -> Delivery_remove id) (id ())
       | other -> Error (Printf.sprintf "%s.kind %S is unknown" surface other)
     in

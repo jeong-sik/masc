@@ -5213,7 +5213,7 @@ let test_released_v11_preserves_pending_and_one_shot_delivery () =
             "pending", `List []; "deliveries", `List [delivery]] ];
       write_pending_snapshot ~base_path snapshot;
       if via_log then (
-        let row = `Assoc ["kind", `String "delivery_upsert"; "generation", `Int 2;
+        let row = `Assoc ["kind", `String "delivery_upsert"; "generation", `Int 1;
           "next_sequence", `Int 3; "delivery", delivery] in
         Out_channel.with_open_bin (AQ.For_testing.pending_log_path ~base_path)
           (fun out -> output_string out (Yojson.Safe.to_string row ^ "\n")));
@@ -5234,6 +5234,60 @@ let test_released_v11_preserves_pending_and_one_shot_delivery () =
       let current = read_pending_snapshot ~base_path in
       Alcotest.(check int) "new durable projection writes current version" 12
         (current |> member "version" |> to_int))) [false; true]
+;;
+
+let test_v12_log_requires_intent_and_skips_old_generation () =
+  List.iter (fun stale ->
+    let base_path = temp_dir () in
+    let keeper_name = "queue-v12-intent-boundary" in
+    Fun.protect ~finally:(fun () -> AQ.For_testing.reset_runtime_state (); cleanup_dir base_path) (fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      ignore (install_exn ~base_path);
+      let id = submit ~base_path ~keeper_name ~input:(`Assoc ["target", `String "current"]) in
+      let delivery_id = submit ~base_path ~keeper_name
+        ~input:(`Assoc ["target", `String "separate-delivery"]) in
+      let open Yojson.Safe.Util in
+      let snapshot = read_pending_snapshot ~base_path in
+      let entries = snapshot |> member "pending" |> to_list in
+      let entry = List.find (fun json -> json |> member "id" |> to_string = delivery_id) entries in
+      let current_pending = List.filter (fun json -> json |> member "id" |> to_string = id) entries in
+      Alcotest.(check bool) "malformed delivery has a separate authority identity" true
+        (id <> delivery_id);
+      let old_delivery = match delivery_json ~base_path ~entry ~remember_rule:false with
+        | `Assoc fields -> `Assoc (("remember_rule", `Bool true) ::
+            List.remove_assoc "remember_rule" (List.remove_assoc "rule_intent" fields))
+        | _ -> Alcotest.fail "delivery must be object" in
+      let generation = snapshot |> member "generation" |> to_int in
+      let next_sequence = snapshot |> member "next_sequence" |> to_int in
+      let snapshot = match snapshot with `Assoc fields ->
+        `Assoc (("generation", `Int (generation + 1)) :: ("pending", `List current_pending)
+          :: List.remove_assoc "pending" (List.remove_assoc "generation" fields))
+        | _ -> Alcotest.fail "snapshot must be object" in
+      write_pending_snapshot ~base_path snapshot;
+      let row = `Assoc ["kind", `String "delivery_upsert";
+        "generation", `Int (if stale then generation else generation + 1);
+        "next_sequence", `Int next_sequence; "delivery", old_delivery] in
+      let log_path = AQ.For_testing.pending_log_path ~base_path in
+      Out_channel.with_open_bin log_path (fun out -> output_string out (Yojson.Safe.to_string row ^ "\n"));
+      let before_snapshot = read_pending_snapshot_bytes ~base_path in
+      let before_log = In_channel.with_open_bin log_path In_channel.input_all in
+      AQ.For_testing.reset_runtime_state ();
+      if stale then (
+        let report = install_exn ~base_path in
+        Alcotest.(check int) "stale old delivery body is not decoded or replayed" 0 report.replayed_deliveries;
+        Alcotest.(check int) "current unresolved pending survives" 1 report.loaded_pending;
+        match AQ.For_testing.get_pending_entry_unchecked ~id with
+        | Some _ -> () | None -> Alcotest.fail "stale row replaced current pending")
+      else (
+        (match AQ.install_persistence ~base_path with
+         | Error (Masc.Keeper_approval_queue_result.Install_storage_failed { reason; _ }) ->
+           Alcotest.(check bool) "v12 refusal is specifically the missing intent" true
+             (String_util.contains_substring reason "rule_intent is required")
+         | Ok _ -> Alcotest.fail "current v12 log without rule intent must fail install");
+        Alcotest.(check string) "v12 refusal preserves snapshot" before_snapshot
+          (read_pending_snapshot_bytes ~base_path);
+        Alcotest.(check string) "v12 refusal preserves log" before_log
+          (In_channel.with_open_bin log_path In_channel.input_all)))) [false; true]
 ;;
 
 let test_persisted_delivery_replays_before_origin_wake () =
@@ -6903,6 +6957,8 @@ let () =
             test_persisted_delivery_replays_before_origin_wake
         ; test_case "released v11 snapshot and append delivery continuity" `Quick
             test_released_v11_preserves_pending_and_one_shot_delivery
+        ; test_case "v12 log intent and stale-generation boundary" `Quick
+            test_v12_log_requires_intent_and_skips_old_generation
         ; Alcotest.test_case
             "a boot replay does not record the decision again"
             `Quick

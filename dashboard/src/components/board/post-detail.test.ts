@@ -80,6 +80,7 @@ vi.mock('./board-state', () => ({
   detailLoading: { value: false },
   detailLoadingOlder: { value: false },
   detailPostId: { value: null },
+  detailFocusedCommentId: { value: null },
   loadOlderPostComments: vi.fn(),
   commentText: { value: '' },
   commentSubmitting: { value: false },
@@ -122,7 +123,7 @@ import {
   countCommentDescendants,
   filterCommentTree,
 } from './post-detail'
-import { detailCommentPage, detailComments, detailPostId, loadPostDetail } from './board-state'
+import { detailCommentPage, detailComments, detailPostId, detailFocusedCommentId, loadPostDetail } from './board-state'
 import { requestBoardContextInference, toggleReaction, voteComment, votePost } from '../../api/board'
 import type { BoardComment } from '../../types/core'
 
@@ -132,6 +133,7 @@ afterEach(() => {
   routerMock.route.value = { params: {} }
   detailComments.value = []
   detailPostId.value = null
+  detailFocusedCommentId.value = null
   detailCommentPage.value = { offset: 0, total: 0 }
 })
 
@@ -354,6 +356,16 @@ describe('CommentThread', () => {
     })
   })
 
+  it('keeps a recently active reply thread inside the initial root window', () => {
+    const root = { id: 'old-parent', post_id: 'post-1', parent_id: null, author: 'agent', content: 'Older thread', created_at: '2026-04-02T00:00:00Z' }
+    const comments = [root, ...Array.from({ length: 6 }, (_, index) => ({ ...root, id: `root-${index}`, content: `Other root ${index}` })),
+      { ...root, id: 'newest-reply', parent_id: root.id, content: 'Newest page reply' }]
+    render(h(CommentThread, { comments, postId: 'post-1' }))
+    expect(screen.getByText('Older thread')).toBeInTheDocument()
+    expect(screen.getByText('Newest page reply')).toBeInTheDocument()
+    expect(screen.queryByText('Other root 0')).not.toBeInTheDocument()
+  })
+
   it('surfaces an older root comment when it is route-focused', () => {
     const comments = Array.from({ length: 7 }, (_, index) => ({
       id: `c${index + 1}`,
@@ -502,6 +514,16 @@ describe('filterCommentTree', () => {
 })
 
 describe('PostDetail', () => {
+  it('clears retained route focus when the same full detail is reopened ordinarily', async () => {
+    const post = { id: 'post-1', author: 'agent', title: 'Reopened', body: 'Body', content: 'Body', tags: [], votes: 0, comment_count: 0,
+      created_at: '2026-04-02T00:00:00Z', updated_at: '2026-04-02T00:00:00Z', post_kind: 'direct' } as any
+    detailPostId.value = post.id
+    detailFocusedCommentId.value = 'old-focus'
+    render(h(PostDetail, { post }))
+    await waitFor(() => expect(loadPostDetail).toHaveBeenCalledExactlyOnceWith(post.id, null))
+  })
+
+
   it('renders the classification reason when present', () => {
     const post = {
       id: 'post-1',
@@ -809,6 +831,7 @@ describe('PostDetail', () => {
     const post = { id: 'clear-post', author: 'keeper', title: 'Post', body: 'Body', tags: [],
       votes: 0, comment_count: 1, created_at: '', updated_at: '' } as any
     detailPostId.value = post.id
+    detailFocusedCommentId.value = 'reply'
     detailComments.value = [{ id: 'reply', post_id: post.id, parent_id: null,
       author: 'keeper', content: 'Focused reply', created_at: '' }] as any
     routerMock.route.value = { params: { post: post.id, comment: 'reply' } }

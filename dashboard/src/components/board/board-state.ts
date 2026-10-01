@@ -66,7 +66,7 @@ export const detailLoading = signal(false)
 export const detailLoadingOlder = signal(false)
 export const detailPostId = signal<string | null>(null)
 let detailRequestId = 0
-let detailFocusedCommentId: string | null = null
+export const detailFocusedCommentId = signal<string | null>(null)
 
 // ── Signals: hearth filters ───────────────────────────────────────
 export const boardHearths = signal<BoardHearth[]>([])
@@ -341,10 +341,10 @@ function sameCommentSnapshot(left: BoardCommentPage, right: BoardCommentPage): b
 export async function loadPostDetail(postId: string, focusedCommentId?: string | null, oldestOffset?: number) {
   const samePost = detailPostId.value === postId
   const hasLoadedRange = samePost && !detailLoading.value && detailPost.value !== null
-  const clearingFocus = focusedCommentId === null && detailFocusedCommentId !== null
+  const clearingFocus = focusedCommentId === null && detailFocusedCommentId.value !== null
   const retainedOffset = oldestOffset ?? (hasLoadedRange && !clearingFocus ? detailCommentPage.value.offset : undefined)
-  const focus = focusedCommentId === undefined && samePost ? detailFocusedCommentId : focusedCommentId ?? null
-  detailFocusedCommentId = focus
+  const focus = focusedCommentId === undefined && samePost ? detailFocusedCommentId.value : focusedCommentId ?? null
+  detailFocusedCommentId.value = focus
   const requestId = ++detailRequestId
   detailPostId.value = postId
   detailPost.value = null

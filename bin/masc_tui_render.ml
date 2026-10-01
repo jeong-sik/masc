@@ -12586,8 +12586,18 @@ let usage_lines ~cols (state : state) =
           ^ Masc.Transport_metrics.queue_pressure_kind_to_string
               reading.th_queue_pressure ]
   in
-  scopes @ [ "" ] @ provider_history_lines state
-  @ [ "" ] @ keepers @ [ "" ] @ transport
+  let lines = scopes @ [ "" ] @ provider_history_lines state
+    @ [ "" ] @ keepers @ [ "" ] @ transport in
+  (* Wrap before the scroll window is counted. Coverage and missing samples
+     are evidence, so a narrow terminal must keep them as reachable rows. *)
+  List.concat_map
+    (fun line ->
+      if String.equal line "" then [ "" ]
+      else
+        Message_layout.wrap_words ~max_cells:(max 1 (cols - 7)) line
+        |> List.mapi (fun index text ->
+             if index = 0 then text else "   " ^ text))
+    lines
 
 let render_metrics (state : state) =
   let terminal_rows, cols = get_terminal_size () in

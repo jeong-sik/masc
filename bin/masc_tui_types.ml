@@ -12160,7 +12160,7 @@ let keeper_message_inflight_rows (state : state) ~chat_cols ~now =
 
 let keeper_message_status_rows (state : state) ~terminal_cols =
   let chat_cols = Masc_tui_roster_pane.content_cols
-      ~hidden:state.roster_pane_hidden ~cols:terminal_cols in
+      ~hidden:(roster_pane_hidden state) ~cols:terminal_cols in
   let unavailable_target =
     match state.msg_target_keeper_name with
     | Some keeper_name when keeper_available_for_new_message state keeper_name

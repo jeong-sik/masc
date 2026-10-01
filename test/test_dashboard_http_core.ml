@@ -3118,6 +3118,7 @@ let test_execution_default_response_reuses_prepared_bytes () =
   with_cached_surface_success
     Server_dashboard_http_execution_surfaces.execution_cache
     (`Assoc [ "default_marker", `String "last-success";
+              "candle", Candle_observation.to_json Candle_observation.Off;
               "data", `String (String.make 4000 'x') ]) @@ fun () ->
   let module Surface = Server_dashboard_http_execution_surfaces in
   let context = Surface.execution_http_request ~state
@@ -3213,11 +3214,24 @@ medium = 1000
 large = 1000
 epic = 1000
 [shop.prices_milli]
-crown = 0
-beanie = 0
+crown = 200
+beanie = 200
 |};
   Candle_status.install_appraiser_check (fun () -> Ok ());
   let owner = ok Fun.id (Keeper_id.Keeper_name.of_string keeper) in
+  (* A real ledger payment funds the purchase. The cached metadata below is
+     synthetic; the payment/purchase/equipment facts and their replay are real
+     isolated-store operations. This does not exercise the model appraisal. *)
+  let at = ok Fun.id (Candle_time.of_rfc3339 "2026-09-29T00:00:00Z") in
+  let payment = ok Fun.id (Candle_payment.make
+    ~identity:{goal_id="warm-cache-goal";request_id="warm-cache-request";verification_run_id="warm-cache-run"}
+    ~grade:Candle_grade.Trivial ~total_milli:1000
+    ~grade_trace:{run_id="grade";slot_id="fixture"}
+    ~relations:[{task_id="task";relation=Candle_appraisal.Related;trace={run_id="relation";slot_id="fixture"}}]
+    ~weights_trace:{run_id="weights";slot_id="fixture"}
+    ~weight_max:1 ~deduction_rate:0 ~deduction_floor:1000 ~overdue_hours:0 ~weights:[keeper,1]) in
+  ok (Candle_ledger.update_error_to_string Fun.id)
+    (Candle_ledger.update ~base_path (fun _ -> Ok ([{Candle_event.at;body=Candle_event.Paid payment}], ())));
   let starting = Keeper_portrait_look.equipment_of_name keeper in
   let item_id = match starting.head with
     | Keeper_portrait_look.Crown -> "beanie"
@@ -3226,13 +3240,22 @@ beanie = 0
   let item = match Keeper_portrait_item.of_id item_id with
     | Some item -> item | None -> fail "portrait catalog item missing" in
   let expected = Keeper_portrait_item.preview item starting in
+  let account_revision = Candle_observe.account_revision
+    (Candle_observe.read ~base_path) ~keeper in
   (* Preserve the real builder's name-before-portrait order: an unchanged
      authority must not defeat the prepared-byte path by reordering fields. *)
   let row = `Assoc ["name", `String keeper;
-    "portrait", Portrait.reading_to_json (Portrait.Ready starting)] in
+    "portrait", Portrait.reading_to_json (Portrait.Ready starting);
+    "candle_balance_milli", `String "1000";
+    "candle_account_revision", Json_util.option_to_yojson (fun value -> `String value) account_revision] in
+  let ready_candle = Candle_observation.Ready
+    {issued_milli="1000";burned_milli="0";circulating_milli="1000"} in
+  let candle_json = Candle_observation.to_json ready_candle in
   let execution_seed = `Assoc ["cache_marker", `String "retained-metadata";
+    "candle", candle_json;
     "keepers", `List [row]; "continuity_briefs", `List [row]] in
   let mission_seed = `Assoc ["cache_marker", `String "retained-metadata";
+    "candle", candle_json;
     "keeper_briefs", `List [row];
     "operator_targets", `Assoc ["keepers", `List [row]]] in
   Surface.invalidate_execution_cache ();
@@ -3247,30 +3270,46 @@ beanie = 0
   let read_execution () = Surface.dashboard_execution_http_json ~state ~sw ~clock req in
   let read_mission () = Server_dashboard_http_core.dashboard_briefing_http_json
       ~state ~sw ~clock (request "/api/v1/dashboard/briefing") in
-  let portraits path json =
+  let observations path json =
     let rows = List.fold_left (fun json key -> Yojson.Safe.Util.member key json) json path
       |> Yojson.Safe.Util.to_list in
-    List.map (fun row -> ok Fun.id (Portrait.reading_of_json
-      Yojson.Safe.Util.(member "portrait" row))) rows in
-  let assert_surfaces label expected =
+    List.map (fun row ->
+      ok Fun.id (Portrait.reading_of_json Yojson.Safe.Util.(member "portrait" row)),
+      ok Fun.id (Candle_observation.balance_of_json
+        Yojson.Safe.Util.(member "candle_balance_milli" row))) rows in
+  let assert_surfaces label ~expected_portrait ~expected_candle ~expected_balance =
     let execution = read_execution () in
     let mission = read_mission () in
-    List.iter (fun (json, paths) ->
+    (* The production proactive on_result uses this exact preparation function
+       before broadcasting. Assert its payload, not a replacement test-only
+       projection; no SSE socket delivery is claimed by this scenario. *)
+    let broadcast = Surface.For_testing.prepare_execution_snapshot_broadcast ~config () in
+    List.iter (fun (surface, json, paths) ->
+      let label = label ^ " " ^ surface in
       check string (label ^ " preserves metadata") "retained-metadata"
         Yojson.Safe.Util.(json |> member "cache_marker" |> to_string);
+      let candle = ok Fun.id (Candle_observation.of_json
+        Yojson.Safe.Util.(member "candle" json)) in
+      check bool (label ^ " Candle supply") true (expected_candle candle);
       List.iter (fun path ->
-        match portraits path json with
-        | [reading] -> check bool (label ^ " " ^ String.concat "." path) true (expected reading)
+        match observations path json with
+        | [reading, balance] ->
+          check bool (label ^ " " ^ String.concat "." path) true (expected_portrait reading);
+          check (option string) (label ^ " balance " ^ String.concat "." path)
+            expected_balance balance
         | _ -> fail "cached surface lost or duplicated its Keeper") paths)
-      [execution, [["keepers"]; ["continuity_briefs"]];
-       mission, [["keeper_briefs"]; ["operator_targets"; "keepers"]]] in
+      ["HTTP execution", execution, [["keepers"]; ["continuity_briefs"]];
+       "HTTP briefing", mission, [["keeper_briefs"]; ["operator_targets"; "keepers"]];
+       "SSE payload preparation", broadcast, [["keepers"]; ["continuity_briefs"]]] in
   let first = execution_payload ~state ~sw ~clock req in
   (match Surface.dashboard_execution_cached_http_representation (context ()) with
    | Some (body, etag, _) ->
      check bool "unchanged portrait retains prepared identity bytes" true (body == first.raw_json);
      check string "unchanged portrait retains its ETag" first.etag etag
    | None -> fail "unchanged authority discarded prepared execution bytes");
-  assert_surfaces "starting" (fun reading -> reading = Portrait.Ready starting);
+  assert_surfaces "starting"
+    ~expected_portrait:(fun reading -> reading = Portrait.Ready starting)
+    ~expected_candle:(fun candle -> candle = ready_candle) ~expected_balance:(Some "1000");
   ignore (ok Candle_shop.error_to_string
     (Candle_shop.purchase ~now:(fun () -> 1790640000.) ~base_path ~keeper:owner ~item));
   (match Lib.Keeper_candle_tools.handle ~operation:Lib.Keeper_candle_tools.Equip
@@ -3281,7 +3320,11 @@ beanie = 0
    | result -> fail (Tool_result.message result));
   check bool "equipped authority refuses old prepared HTTP bytes" true
     (Option.is_none (Surface.dashboard_execution_cached_http_representation (context ())));
-  assert_surfaces "equipped" (fun reading -> reading = Portrait.Ready expected);
+  assert_surfaces "equipped"
+    ~expected_portrait:(fun reading -> reading = Portrait.Ready expected)
+    ~expected_candle:(fun candle -> candle = Candle_observation.Ready
+      {issued_milli="1000";burned_milli="200";circulating_milli="800"})
+    ~expected_balance:(Some "800");
   check bool "equipment refresh does not rebuild cached execution metadata" true
     ((Server_dashboard_http_cache.snapshot Surface.execution_cache).json = execution_seed);
   check bool "equipment refresh does not rebuild cached mission metadata" true
@@ -3291,8 +3334,78 @@ beanie = 0
   let corrupt = Fs_compat.load_file ledger in
   check bool "unreadable authority refuses prepared HTTP bytes" true
     (Option.is_none (Surface.dashboard_execution_cached_http_representation (context ())));
-  assert_surfaces "unreadable" (function Portrait.Unavailable _ -> true | Portrait.Ready _ -> false);
-  check string "warm HTTP reads never repair the damaged ledger" corrupt (Fs_compat.load_file ledger)
+  assert_surfaces "unreadable"
+    ~expected_portrait:(function Portrait.Unavailable _ -> true | Portrait.Ready _ -> false)
+    ~expected_candle:(function
+      | Candle_observation.Disabled {reason} -> String.trim reason <> ""
+      | Candle_observation.Off | Candle_observation.Ready _ -> false)
+    ~expected_balance:None;
+  check string "warm HTTP and SSE preparation never repair the damaged ledger" corrupt (Fs_compat.load_file ledger)
+
+let test_candle_account_revision_tracks_free_purchase_and_price_edit () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let base_path = config.Workspace.base_path in
+  let keeper = "free-item-keeper" in
+  let policy_path = Config_dir_resolver.candle_toml_path_for_base_path ~base_path in
+  let write_policy price =
+    mkdir_p (Filename.dirname policy_path);
+    write_file policy_path (Printf.sprintf {|[payout]
+weight_max = 1
+deduction_rate = 0
+deduction_floor = 1000
+[payout.grades_milli]
+trivial = 1000
+small = 1000
+medium = 1000
+large = 1000
+epic = 1000
+[shop.prices_milli]
+crown = %d
+|} price)
+  in
+  write_policy 0;
+  Candle_status.install_appraiser_check (fun () -> Ok ());
+  let row () =
+    let snapshot = `Assoc ["keepers", `List [`Assoc ["name", `String keeper]]] in
+    let projected = Dashboard_projection_cache.with_current_keeper_observations ~config snapshot in
+    match Yojson.Safe.Util.(projected |> member "keepers" |> to_list) with
+    | [row] -> row
+    | _ -> fail "Item revision projection lost the Keeper"
+  in
+  let revision row = Yojson.Safe.Util.(row |> member "candle_account_revision" |> to_string) in
+  let first = row () in
+  let owner = match Keeper_id.Keeper_name.of_string keeper with
+    | Ok owner -> owner | Error reason -> fail reason in
+  let item = match Keeper_portrait_item.of_id "crown" with
+    | Some item -> item | None -> fail "crown absent from catalog" in
+  (match Candle_shop.purchase ~now:(fun () -> 1790640000.) ~base_path ~keeper:owner ~item with
+   | Ok _ -> ()
+   | Error error -> fail (Candle_shop.error_to_string error));
+  let purchased = row () in
+  check bool "free purchase changes Item account revision" false
+    (String.equal (revision first) (revision purchased));
+  check bool "free purchase preserves observed balance" true
+    (Yojson.Safe.Util.member "candle_balance_milli" first
+     = Yojson.Safe.Util.member "candle_balance_milli" purchased);
+  check bool "free purchase preserves observed outfit" true
+    (Yojson.Safe.Util.member "portrait" first
+     = Yojson.Safe.Util.member "portrait" purchased);
+  write_policy 1;
+  let repriced = row () in
+  check bool "price-only edit changes Item account revision" false
+    (String.equal (revision purchased) (revision repriced));
+  check bool "price-only edit preserves observed balance" true
+    (Yojson.Safe.Util.member "candle_balance_milli" purchased
+     = Yojson.Safe.Util.member "candle_balance_milli" repriced);
+  write_file policy_path "not = [\n";
+  let disabled = row () in
+  write_file policy_path "[shop]\n";
+  let differently_disabled = row () in
+  check bool "changed disabled reason changes Item account revision" false
+    (String.equal (revision disabled) (revision differently_disabled));
+  check bool "disabled readings withdraw the balance" true
+    (Yojson.Safe.Util.member "candle_balance_milli" disabled = `Null
+     && Yojson.Safe.Util.member "candle_balance_milli" differently_disabled = `Null)
 
 let test_execution_parameterized_payload_reuses_decorated_bytes () =
   with_execution_payload_env @@ fun ~env ~sw ~state ->
@@ -7225,6 +7338,8 @@ let () =
             test_execution_first_compute_reuses_prepared_bytes;
           test_case "warm execution and briefing follow equipped or unreadable authority" `Quick
             test_warm_dashboard_responses_follow_equipment_authority;
+          test_case "Item account revision follows free purchase and price edit" `Quick
+            test_candle_account_revision_tracks_free_purchase_and_price_edit;
           test_case "execution parameterized response reuses decorated bytes" `Quick
             test_execution_parameterized_payload_reuses_decorated_bytes;
           test_case "execution parameterized responses separate queries" `Quick

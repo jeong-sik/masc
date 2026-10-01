@@ -1,9 +1,9 @@
+import { storedTokenRevision } from '../api/token-revision'
 import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
 import { fetchKeeperItems, type KeeperItemsReading } from '../api/keeper-items'
 import { ApiRequestError, currentStoredTokenRevision } from '../api/core'
-import { storedTokenRevision } from '../api/token-revision'
-import { keeperEquipmentKey, type KeeperEquipment } from '../api/schemas/keeper-portrait'
+import { keeperEquipmentKey, type KeeperEquipment } from '../lib/keeper-portrait'
 import { KeeperPortrait } from './keeper-portrait'
 import { KeeperBadge } from './keeper-badge'
 import type { Keeper } from '../types'
@@ -31,7 +31,7 @@ export function KeeperItemsPanel({ keeper }: { keeper: Keeper }) {
   const [revision, setRevision] = useState(0)
   const equipmentKey = keeper.portrait?.state === 'ready'
     ? keeperEquipmentKey(keeper.portrait.equipment) : null
-  const identity = JSON.stringify([keeper.name, equipmentKey, revision, authRevision])
+  const identity = JSON.stringify([keeper.name, equipmentKey, keeper.candle_balance_milli, keeper.candle_account_revision, revision, authRevision])
   const [reading, setReading] = useState<Reading>({ kind: 'loading', identity })
 
   useEffect(() => {

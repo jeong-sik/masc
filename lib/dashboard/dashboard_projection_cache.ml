@@ -37,10 +37,16 @@ let with_snapshot_publication_generation f =
     f (Atomic.get snapshot_invalidation_generation_ref))
 ;;
 
-let with_current_keeper_portraits ~(config : Workspace_utils.config) snapshot =
+let with_current_keeper_observations ~(config : Workspace_utils.config) snapshot =
   (* Execution and briefing read operator rows, not the Keeper HTTP roster.
-     Equipment must also bypass this cache and use one ledger view per response. *)
-  let equipment = Candle_equipment.reader ~base_path:config.base_path () in
+     Equipment, balances and supply share one fresh ledger view per response. *)
+  let candle = Candle_observe.read ~base_path:config.base_path in
+  let equipment = Candle_observe.equipment candle in
+  let summary = Candle_observation.to_json (Candle_observe.summary candle) in
+  let set key value fields =
+    if List.mem_assoc key fields then
+      List.map (fun (name, previous) -> name, if name = key then value else previous) fields
+    else (key, value) :: fields in
   let row = function
     | `Assoc fields as json ->
       let portrait = match Json_util.assoc_string_opt "name" json with
@@ -49,22 +55,32 @@ let with_current_keeper_portraits ~(config : Workspace_utils.config) snapshot =
             | Error reason -> Keeper_portrait_equipment.Unavailable reason)
         | None -> Keeper_portrait_equipment.Unavailable "Keeper name unavailable" in
       let value = Keeper_portrait_equipment.reading_to_json portrait in
-      `Assoc (if List.mem_assoc "portrait" fields then
-        List.map (function "portrait", _ -> "portrait", value | field -> field) fields
-        else ("portrait", value) :: fields)
+      let balance = match Json_util.assoc_string_opt "name" json with
+        | Some keeper -> Candle_observe.balance candle ~keeper
+        | None -> None in
+      let account_revision = match Json_util.assoc_string_opt "name" json with
+        | Some keeper -> Candle_observe.account_revision candle ~keeper
+        | None -> None in
+      `Assoc (fields |> set "portrait" value
+        |> set "candle_balance_milli" (Json_util.option_to_yojson (fun value -> `String value) balance)
+        |> set "candle_account_revision" (Json_util.option_to_yojson (fun value -> `String value) account_revision))
     | json -> json in
   let section fields = List.map (function
     | "items", `List rows -> "items", `List (List.map row rows)
-    | field -> field) fields in
+    | field -> field) fields |> set "candle" summary in
   match snapshot with
-  | `Assoc fields -> `Assoc (List.map (function
+  | `Assoc fields ->
+    let projected = List.map (function
       | "keepers", `Assoc fields -> "keepers", `Assoc (section fields)
       | ("keepers" | "keeper_briefs" | "continuity_briefs") as key, `List rows -> key, `List (List.map row rows)
       | "operator_targets", `Assoc fields ->
         "operator_targets", `Assoc (List.map (function
           | "keepers", `List rows -> "keepers", `List (List.map row rows)
           | field -> field) fields)
-      | field -> field) fields)
+      | field -> field) fields in
+    (match List.assoc_opt "keepers" fields with
+     | Some (`Assoc _) -> `Assoc projected
+     | _ -> `Assoc (set "candle" summary projected))
   | json -> json
 
 let get_or_compute_snapshot_json ~config ~actor compute =
@@ -72,7 +88,7 @@ let get_or_compute_snapshot_json ~config ~actor compute =
   Dashboard_cache.get_or_compute
     (actor_cache_key config "snapshot" actor_name)
     ~ttl:snapshot_cache_ttl_s (fun () -> compute actor_name)
-  |> with_current_keeper_portraits ~config
+  |> with_current_keeper_observations ~config
 
 let invalidate_snapshot_json ~config =
   let generation =

@@ -28,3 +28,8 @@ Scenario source `05044d48a75b1e3036e14210990fe4ec04362edf` adds Chromium clicks 
 `scroll-corrected/receipt.json` records the base commit and exact modified scenario hash. Actual Chromium passed the updated scenario: nine captures and five account reads. Before every capture the scenario returns the document to x=0/y=0 and waits two animation frames; the preview-failure capture was visually inspected with the navigation rail at the top. The portrait route records the selected beanie request and holds the restored current-portrait response until the scenario verifies loading, then verifies its settled badge fallback. HTTP account data and portrait503 responses remain synthetic.
 
 The first follow-up attempt reached an unavailable local Vite server because its required proxy configuration had not been set. Its exact failure log and receipt are retained separately as `scroll-corrected/initial-server-not-ready.*`; it is not a pass. This new captured failure does not reconstruct the missing historical cold-run log.
+
+## Preserved historical source and capture limits
+
+
+[source-snapshot.json](source-snapshot.json) maps the relevant historical scenario, component and style files to content-addressed copies, independent of transient branch references. This is not a complete build snapshot. The old preview-unavailable screenshot was captured after Playwright scrolled to its button; its displaced sticky rail makes it unsuitable as a complete layout proof. The scroll-corrected follow-up below records the separate new browser run.
